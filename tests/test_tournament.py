@@ -21,7 +21,7 @@ def test_tournament():
     NUM_POLICIES = 3
 
     env_creator = lambda: aec_to_parallel(knights_archers_zombies_v10.env(max_zombies=0))
-    pufferlib.rllib.register_env(env_creator, 'kaz')
+    pufferlib.rllib.register_env('kaz', env_creator)
 
     trainer = RLTrainer(
         scaling_config=ScalingConfig(num_workers=2, use_gpu=False),
@@ -67,7 +67,7 @@ def test_tournament():
         key = key.split('_')[0]
         return hash(key) % NUM_POLICIES
 
-    tournament = pufferlib.evaluation.Tournament(NUM_POLICIES, env_creator, policy_mapping_fn)
+    tournament = pufferlib.evaluation.LocalTournament(NUM_POLICIES, env_creator, policy_mapping_fn)
 
     for i in range(NUM_POLICIES + 1):
         tournament.add(f'policy_{i}', checkpoint, anchor=i==0)

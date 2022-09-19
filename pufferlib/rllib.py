@@ -1,16 +1,26 @@
 from pdb import set_trace as T
 import numpy as np
 
-import os
-
 from ray.train.rl.rl_predictor import RLPredictor as RLlibPredictor
 from ray.tune.registry import register_env as tune_register_env
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
+from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.env import ParallelPettingZooEnv
 
-
-def register_env(env_creator, name):
+def register_env(name, env_creator):
+    assert type(name) == str, 'Name must be a str'
     tune_register_env(name, lambda config: ParallelPettingZooEnv(env_creator())) 
+
+def create_policies(n):
+    return {f'policy_{i}': 
+        PolicySpec(
+            policy_class=None,
+            observation_space=None,
+            action_space=None,
+            config={"gamma": -1.85},
+        )
+        for i in range(n)
+    }
 
 class RLPredictor(RLlibPredictor):
     def predict(self, data, **kwargs):
@@ -18,6 +28,8 @@ class RLPredictor(RLlibPredictor):
         #data = data.reshape(batch, -1)
         data = data.squeeze()
         result = super().predict(data, **kwargs)
+        if type(result) == dict:
+            result = np.stack(list(result.values()), axis=-1)
         return result
         result = np.concatenate(list(result.values())).reshape(1, -1)
         return result
@@ -25,31 +37,6 @@ class RLPredictor(RLlibPredictor):
 class Callbacks(DefaultCallbacks):
     def on_train_result(self, *, algorithm, result, trainer, **kwargs) -> None:
         '''Run after 1 epoch at the trainer level'''
-        '''
-        if not os.path.exists('checkpoints'):
-            os.mkdir('checkpoints')
-
-        if not hasattr(self, 'tournament'):
-            print('Making Tournament')
-            self.tournament = utils.RemoteTournament()
-            self.tournament.async_from_path(
-                'checkpoints', num_policies,
-                env_creator, policy_mapping_fn)
-        '''
-
-        '''
-        if not os.path.exists('checkpoints'):
-            os.mkdir('checkpoints')
-
-        idx = 1
-        paths = os.listdir('checkpoints') 
-        if paths:
-            idx = 1 + max(int(e.split('-')[1]) for e in paths)
-
-        os.mkdir(f'checkpoints/checkpoint-{idx}')
-        trainer.save_checkpoint(f'checkpoints/checkpoint-{idx}')
-        '''
-
         return super().on_train_result(
             algorithm=algorithm,
             result=result,
@@ -57,7 +44,6 @@ class Callbacks(DefaultCallbacks):
             **kwargs
         )
 
-    '''
     def on_episode_end(self, *, worker, base_env, policies, episode, **kwargs):
         self._on_episode_end(worker, policies, episode, **kwargs)
         return super().on_episode_end(
@@ -67,4 +53,3 @@ class Callbacks(DefaultCallbacks):
             episode=episode,
             **kwargs
         )
-    '''

@@ -1,7 +1,7 @@
 from pdb import set_trace as T
 import numpy as np
 
-import gym
+import abc
 import requests
 import random
 import time
@@ -15,7 +15,6 @@ from ray.air.checkpoint import Checkpoint
 from ray.train.rl import RLCheckpoint
 from ray.serve import PredictorDeployment
 from ray import serve
-from ray.rllib.policy.policy import PolicySpec
 
 from pufferlib.rating import OpenSkillRating
 from pufferlib.rllib import RLPredictor
@@ -38,17 +37,6 @@ def ungroup(groups):
             ungrouped[k] = v
     return ungrouped
 
-def create_policies(n):
-    return {f'policy_{i}': 
-        PolicySpec(
-            policy_class=None,
-            observation_space=None,
-            action_space=None,
-            config={"gamma": 0.85},
-        )
-        for i in range(n)
-    }
-
 def serve_rl_model(checkpoint: Checkpoint, name="RLModel") -> str:
     """Serve a RL model and return deployment URI.
     This function will start Ray Serve and deploy a model wrapper
@@ -58,6 +46,21 @@ def serve_rl_model(checkpoint: Checkpoint, name="RLModel") -> str:
     deployment = PredictorDeployment.options(name=name)
     deployment.deploy(RLPredictor, checkpoint)
     return deployment.url
+
+def query_action(endpoint, obs: np.ndarray):
+    """Perform inference on a served RL model.
+    This will send a HTTP request to the Ray Serve endpoint of the served
+    RL policy model and return the result.
+    """
+    vals = [v.tolist() for v in obs.values()]
+    if type(endpoint) is RLPredictor:
+        action_vals = endpoint.predict(np.array(vals))
+    else:
+        action_vals = requests.post(endpoint, json={"array": vals}).json()
+
+    action_vals = np.array(action_vals)
+    # TODO: Figure out data format for different envs
+    return {key: action_vals[i] for i, key in enumerate(obs)}
 
 def run_game(env_creator, policy_mapping_fn, endpoints, episode=0, horizon=1024, render=False):
     """Evaluate a served RL policy on a local environment.
@@ -94,61 +97,41 @@ def run_game(env_creator, policy_mapping_fn, endpoints, episode=0, horizon=1024,
 
     return policy_rewards
 
-
-def run_tournament(policy_mapping_fn, env_creator, endpoint_uri_list, num_games=5, horizon=16):
-    agents = [i for i in range(len(endpoint_uri_list))]
-    ratings = OpenSkillRating(agents, 0)
-
-    for episode in range(num_games):
-        rewards = run_game(episode, policy_mapping_fn, env_creator, endpoint_uri_list)
-
-        ratings.update(
-                policy_ids=list(rewards),
-                scores=list(rewards.values())
-        )
-
-        print(ratings)
-
-    return ratings
-
-def query_action(endpoint, obs: np.ndarray):
-    """Perform inference on a served RL model.
-    This will send a HTTP request to the Ray Serve endpoint of the served
-    RL policy model and return the result.
-    """
-    #action_dict = requests.post(endpoint_uri, json={"array": obs.tolist()}).json()
-    #obs = {k: v.ravel().tolist() for k, v in obs.items()}
-    #action_dict = requests.post(endpoint_uri, json=obs).json()
-    vals = [v.tolist() for v in obs.values()]
-    if type(endpoint) is RLPredictor:
-        action_vals = endpoint.predict(np.array(vals))
-    else:
-        action_vals = requests.post(endpoint, json={"array": vals}).json()
-    #action_vals = np.array(action_vals).reshape(8, -1)
-    #action_dict = {key: action_vals[:, i] for i, key in enumerate(obs)}
-    action_vals = np.array(action_vals)
-    action_dict = {key: action_vals[i] for i, key in enumerate(obs)}
-    #action_dict = {key: val for key, val in zip(list(obs.keys()), action_vals)}
-
-    #action_dict = requests.post(endpoint_uri, json={"array": [[1]]}).json()
-    return action_dict
-
-class Tournament:
+class Tournament(abc.ABC):
     def __init__(self, num_policies, env_creator,
             policy_mapping_fn, policy_sampling_fn=random.sample,
-            mu=1000, anchor_mu=1500, sigma=100/3, deploy=False):
+            mu=1000, anchor_mu=1500, sigma=100/3):
         '''Runs matches for a pool of served policies'''
         self.num_policies = num_policies
         self.env_creator = env_creator
         self.policy_mapping_fn = policy_mapping_fn
         self.policy_sampling_fn = policy_sampling_fn
-        self.deploy = deploy
 
         self.rating = OpenSkillRating(mu, anchor_mu, sigma)
         self.policies = {}
 
-        if deploy:
-            serve.start(detached=True)
+        self.init()
+
+    def init(self):
+        pass
+
+    def add(self, name, endpoint, anchor):
+        '''Add policy to pool of served models'''
+        assert name not in self.policies
+        self.policies[name] = endpoint
+
+        if anchor:
+            self.rating.set_anchor(name)
+        else:
+            self.rating.add_policy(name)
+
+    def remove(self, name):
+        '''Remove policy from pool of served models'''
+        assert name in self.policies
+        policy = self.policies[name]
+        del self.policies[name]
+        self.rating.remove_policy(name)
+        return policy
 
     def server(self, checkpoint_path, out_file=sys.stdout, sleep_seconds=10):
         episode = 0
@@ -181,35 +164,6 @@ class Tournament:
             else:
                 time.sleep(sleep_seconds)
 
-    def add(self, name, policy_checkpoint, anchor=False):
-        '''Add policy to pool of served models'''
-        assert name not in self.policies
-
-        if self.deploy:
-            deployment = PredictorDeployment.options(name=name)
-            deployment.deploy(RLPredictor, policy_checkpoint)
-            endpoint = deployment
-        else:
-            endpoint = RLPredictor.from_checkpoint(policy_checkpoint)
-
-        self.policies[name] = endpoint
-
-        if anchor:
-            self.rating.set_anchor(name)
-        else:
-            self.rating.add_policy(name)
-
-    def remove(self, name):
-        '''Remove policy from pool of served models'''
-        assert name in self.policies
-        endpoint = self.policies[name]
-
-        if self.deploy:
-            endpoint.delete()
-
-        del self.policies[name]
-        self.rating.remove_policy(name)
-
     def run_match(self, episode):
         '''Select participants and run a single game to update ratings
         
@@ -236,6 +190,24 @@ class Tournament:
 
         return self.rating
 
-@ray.remote
-class RemoteTournament(Tournament):
-    pass
+
+class LocalTournament(Tournament):
+    def add(self, name, policy_checkpoint, anchor=False):
+        '''Add policy to pool of served models'''
+        endpoint = RLPredictor.from_checkpoint(policy_checkpoint)
+        super().add(name, endpoint, anchor)
+
+
+class ServedTournament(Tournament):
+    def init(self):
+        serve.start(detached=True)
+
+    def add(self, name, policy_checkpoint, anchor=False):
+        '''Add policy to pool of served models'''
+        deployment = PredictorDeployment.options(name=name)
+        deployment.deploy(RLPredictor, policy_checkpoint)
+        super().add(name, deployment, anchor)
+
+    def remove(self, name):
+        endpoint = super().remove(name)
+        endpoint.delete()
