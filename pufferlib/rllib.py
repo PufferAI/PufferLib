@@ -67,7 +67,7 @@ class Callbacks(DefaultCallbacks):
         )
 
     def on_episode_end(self, *, worker, base_env, policies, episode, **kwargs):
-        self._on_episode_end(worker, policies, episode, **kwargs)
+        self._on_episode_end(worker, base_env, policies, episode, **kwargs)
         return super().on_episode_end(
             worker=worker,
             base_env=base_env,
