@@ -1,5 +1,7 @@
 from pdb import set_trace as T
 
+import os
+
 import ray
 from ray.air import CheckpointConfig
 from ray.air.config import RunConfig
@@ -43,21 +45,21 @@ def test_tournament():
         }
     )
 
+    results_dir = 'results'
+    tune_dir= 'Tune-'+pufferlib.utils.current_datetime()
     tuner = Tuner(
         trainer,
         _tuner_kwargs={"checkpoint_at_end": True},
         run_config=RunConfig(
-            local_dir='results',
+            local_dir=results_dir,
+            name=tune_dir,
             verbose=0,
-            stop={"training_iteration": 15},
+            stop={"training_iteration": 10},
             checkpoint_config=CheckpointConfig(
-                num_to_keep=5,
+                num_to_keep=None,
                 checkpoint_frequency=1,
             ),
         ),
-        param_space={
-            'callbacks': pufferlib.rllib.Callbacks,
-        },
     )
 
     result = tuner.fit()[0]
@@ -68,17 +70,17 @@ def test_tournament():
         return hash(key) % NUM_POLICIES
 
     tournament = pufferlib.evaluation.LocalTournament(NUM_POLICIES, env_creator, policy_mapping_fn)
+    tournament.server(os.path.join(results_dir, tune_dir))
 
     for i in range(NUM_POLICIES + 1):
         tournament.add(f'policy_{i}', checkpoint, anchor=i==0)
 
     tournament.remove(f'policy_{i}')
 
-    for episode in range(3):
+    for episode in range(20):
         ratings = tournament.run_match(episode)
         print(ratings)
 
-    #tournament.server('results/AIRPPO_2022-09-17_22-11-25/AIRPPO_32dc0_00000_0_2022-09-17_22-11-25/')
 
 if __name__ == '__main__':
     test_tournament()

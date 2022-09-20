@@ -1,6 +1,9 @@
 from pdb import set_trace as T
 import numpy as np
 
+import os
+
+from ray.train.rl import RLCheckpoint
 from ray.train.rl.rl_predictor import RLPredictor as RLlibPredictor
 from ray.tune.registry import register_env as tune_register_env
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
@@ -10,6 +13,25 @@ from ray.rllib.env import ParallelPettingZooEnv
 def register_env(name, env_creator):
     assert type(name) == str, 'Name must be a str'
     tune_register_env(name, lambda config: ParallelPettingZooEnv(env_creator())) 
+
+def read_checkpoints(tune_path):
+     folders = sorted([f.path for f in os.scandir(tune_path) if f.is_dir()])
+     assert len(folders) <= 1, 'Tune folder contains multiple trials'
+
+     if len(folders) == 0:
+        return []
+
+     all_checkpoints = []
+     trial_path = folders[0]
+
+     for f in os.listdir(trial_path):
+        if not f.startswith('checkpoint'):
+            continue
+
+        checkpoint_path = os.path.join(trial_path, f)
+        all_checkpoints.append([f, RLCheckpoint(checkpoint_path)])
+
+     return all_checkpoints
 
 def create_policies(n):
     return {f'policy_{i}': 

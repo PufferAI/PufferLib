@@ -12,12 +12,12 @@ from collections import defaultdict
 
 import ray
 from ray.air.checkpoint import Checkpoint
-from ray.train.rl import RLCheckpoint
+
 from ray.serve import PredictorDeployment
 from ray import serve
 
 from pufferlib.rating import OpenSkillRating
-from pufferlib.rllib import RLPredictor
+from pufferlib.rllib import RLPredictor, read_checkpoints
 
 
 def group(obs, policy_mapping_fn, episode):
@@ -133,33 +133,16 @@ class Tournament(abc.ABC):
         self.rating.remove_policy(name)
         return policy
 
-    def server(self, checkpoint_path, out_file=sys.stdout, sleep_seconds=10):
+    def server(self, tune_path, out_file=sys.stdout, sleep_seconds=10):
         episode = 0
-        anchored = False
         while True:
-            files = os.listdir(checkpoint_path) 
-            files = [e for e in files if e.startswith('checkpoint')]
-
-            for f in files:
-                if f in self.policies:
-                    continue
-
-                path = os.path.join(checkpoint_path, f)
-                checkpoint = RLCheckpoint(path)
-                if anchored:
-                    self.add(f, checkpoint)
-                else:
-                    self.add(f, checkpoint, anchor=True)
-                    anchored = True
+            for name, checkpoint in read_checkpoints(tune_path):
+                if name not in self.policies:
+                    self.add(name, checkpoint, anchor=len(self.policies)==0)
 
             if len(self.policies) >= self.num_policies:
                 ratings = self.run_match(episode)
-
-                if out_file == sys.stdout:
-                    #Avoids stdout glitches by writing directly
-                    print(ratings)
-                else:
-                    out_file.write(str(ratings))
+                out_file.write(str(ratings) + '\n')
                 episode += 1
             else:
                 time.sleep(sleep_seconds)

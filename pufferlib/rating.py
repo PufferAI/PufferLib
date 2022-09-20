@@ -62,6 +62,7 @@ class OpenSkillRating:
                 rating.sigma = self.sigma
 
     def set_anchor(self, name):
+        '''TODO: multiple anchors'''
         if self.anchor is not None:
             self.remove_policy(self.anchor)
         self.add_policy(name)
