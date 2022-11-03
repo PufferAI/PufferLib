@@ -47,8 +47,24 @@ def test_unpack_batched_obs():
         obs_space = env.observation_space(0)
         unpacked = pufferlib.emulation.unpack_batched_obs(obs_space, packed)
 
+def test_unflatten_atn():
+    for env in setup():
+        atn = env.action_space(1).sample()
+        atn = pufferlib.emulation.flatten(atn)
+        atn = [e for e in atn.values()]
+        #atn = {1: atn}
+        recovered = pufferlib.emulation.unflatten(atn, env.action_space(1))
+        T()
+        obs = env.reset()
+        for k, orig in obs.items():
+            flat = pufferlib.emulation.flatten(orig)
+            recovered = pufferlib.emulation.unflatten(flat, env.observation_space(k))
+
+            T()
+            assert flat == recovered
 
 if __name__ == '__main__':
+    test_unflatten_atn()
     test_unpack_batched_obs()
     test_pack_and_batch_obs()
     test_pack_obs_space()

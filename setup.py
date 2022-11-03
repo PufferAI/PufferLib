@@ -17,7 +17,7 @@ setup(
         'openskill==2.4.0',
         'magent==0.2.4',
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.7",
     license="MIT",
     author="Joseph Suarez",
     author_email="jsuarez@mit.edu",
