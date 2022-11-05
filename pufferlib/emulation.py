@@ -161,10 +161,25 @@ def EnvWrapper(Env, *args):
             if self.reward_shaper:
                 rewards = self.reward_shaper(rewards, self._step)
 
+            all_done = True
+            for agent in dones:
+                if agent == '__all__':
+                    continue
+                if not dones[agent]:
+                    all_done = False
+
+            # TODO: Figure out termination bounds
             if self.emulate_const_horizon:
                 assert self._step <= self.emulate_const_horizon
-                if self._step == self.emulate_const_horizon:
+                if self._step == self.emulate_const_horizon or all_done:
                     const_horizon(dones)
+                else:
+                    for agent in dones:
+                        dones[agent] = False
+
+            # Should __all__ only be here if true?
+            if '__all__' in dones:
+                dones['__all__'] = all_done
 
             # No agents alive
             if not obs:
