@@ -10,9 +10,18 @@ from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.env import ParallelPettingZooEnv
 
-def register_env(name, env_creator):
+import pufferlib
+
+
+def register_multiagent_env(name, env_creator):
     assert type(name) == str, 'Name must be a str'
     tune_register_env(name, lambda config: ParallelPettingZooEnv(env_creator())) 
+    return env_creator
+
+def register_single_agent_env(name, env_creator):
+    env = pufferlib.emulation.SingleToMultiAgent(env_creator)
+    register_multiagent_env(name, env_creator)
+    return env
 
 def read_checkpoints(tune_path):
      folders = sorted([f.path for f in os.scandir(tune_path) if f.is_dir()])

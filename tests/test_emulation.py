@@ -1,8 +1,8 @@
 from pdb import set_trace as T
 import numpy as np
 
-from pettingzoo.butterfly import knights_archers_zombies_v10
-from pettingzoo.utils.conversions import aec_to_parallel
+#from pettingzoo.butterfly import knights_archers_zombies_v10
+#from pettingzoo.utils.conversions import aec_to_parallel
 
 import nmmo
 
@@ -63,7 +63,30 @@ def test_unflatten_atn():
             T()
             assert flat == recovered
 
+def test_flatten():
+    inputs = [
+        {
+            'foo': {
+                'bar': 0
+            },
+            'baz': 1
+        },
+        0
+    ]
+    outputs = [
+        {
+            ('foo', 'bar'): 0,
+            ('baz',): 1
+        },
+        0
+    ]
+    for inp, out in zip(inputs, outputs):
+        test_out = pufferlib.emulation.flatten(inp)
+        assert out == test_out, f'\n\tOutput: {test_out}\n\tExpected: {out}'
+
 if __name__ == '__main__':
+    test_flatten()
+    exit()
     test_unflatten_atn()
     test_unpack_batched_obs()
     test_pack_and_batch_obs()
