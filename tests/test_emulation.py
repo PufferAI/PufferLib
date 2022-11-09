@@ -10,7 +10,7 @@ import pufferlib
 
 
 def setup():
-    kaz = aec_to_parallel(knights_archers_zombies_v10.env(max_zombies=0))
+    #kaz = aec_to_parallel(knights_archers_zombies_v10.env(max_zombies=0))
     mmo = nmmo.Env()
 
     return [mmo]
@@ -50,7 +50,7 @@ def test_unpack_batched_obs():
 def test_unflatten_atn():
     for env in setup():
         atn = env.action_space(1).sample()
-        atn = pufferlib.emulation.flatten(atn)
+        atn = pufferlib.emulation.pack_atn_space(atn)
         atn = [e for e in atn.values()]
         #atn = {1: atn}
         recovered = pufferlib.emulation.unflatten(atn, env.action_space(1))
@@ -81,12 +81,51 @@ def test_flatten():
         0
     ]
     for inp, out in zip(inputs, outputs):
-        test_out = pufferlib.emulation.flatten(inp)
+        test_out = pufferlib.emulation._flatten(inp)
+        assert out == test_out, f'\n\tOutput: {test_out}\n\tExpected: {out}'
+
+def test_unflatten():
+    input = [1, 2, 3]
+
+    structures = [
+        {
+            'foo': None,
+            'bar': None,
+            'baz': None,
+        },
+        {
+            'foo': {
+                'bar': None,
+                'baz': None,
+            },
+            'qux': None,
+        }
+    ]
+
+    outputs = [
+        {
+            'foo': 1,
+            'bar': 2,
+            'baz': 3,
+        },
+        {
+            'foo': {
+                'bar': 1,
+                'baz': 2,
+            },
+            'qux': 3,
+        }
+    ]
+
+
+    for struct, out in zip(structures, outputs):
+        test_out = pufferlib.emulation._unflatten(input, struct)
         assert out == test_out, f'\n\tOutput: {test_out}\n\tExpected: {out}'
 
 if __name__ == '__main__':
     test_flatten()
-    exit()
+    test_unflatten()
+    T()
     test_unflatten_atn()
     test_unpack_batched_obs()
     test_pack_and_batch_obs()
