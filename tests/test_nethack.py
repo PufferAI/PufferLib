@@ -417,8 +417,8 @@ def env_creator():
     #return gym.make('NetHackScore-v0')
     env = nle.env.NLE
     env = pufferlib.emulation.SingleToMultiAgent(env)
-    env = pufferlib.emulation.EnvWrapper(env)
-    return env(Config())
+    env = pufferlib.emulation.Simplify(env)
+    return env(Config(), emulate_flat_atn=False)
 
 # Dashboard fails on WSL
 ray.init(include_dashboard=False, num_gpus=1)
