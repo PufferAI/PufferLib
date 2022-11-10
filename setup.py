@@ -13,9 +13,11 @@ setup(
     install_requires=[
         'ray[all]==2.0.0',
         'opencv-python==3.4.17.63',
-        'nmmo==1.6.0.2',
+        'nmmo==1.6.0.7',
         'openskill==2.4.0',
         'magent==0.2.4',
+        'nle==0.8.1'
+        #'pettingzoo[butterfly]==1.22.1'
     ],
     python_requires=">=3.7",
     license="MIT",

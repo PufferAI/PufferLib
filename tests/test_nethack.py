@@ -31,6 +31,7 @@ import pufferlib
 import nle
 from nle import nethack
 
+
 def _step_to_range(delta, num_steps):
     """Range of `num_steps` integers with distance `delta` centered around zero."""
     return delta * torch.arange(-num_steps // 2, num_steps // 2)
@@ -412,21 +413,16 @@ class NMMOLogger(DefaultCallbacks):
 class Config:
     HIDDEN = 32
 
-def env_creator():
-    import nle
-    #return gym.make('NetHackScore-v0')
-    env = nle.env.NLE
-    env = pufferlib.emulation.SingleToMultiAgent(env)
-    env = pufferlib.emulation.Simplify(env)
-    return env(Config(), emulate_flat_atn=False)
 
 # Dashboard fails on WSL
 ray.init(include_dashboard=False, num_gpus=1)
 
-#register_env('nethack', env_creator)
-import nle
-pufferlib.rllib.register_multiagent_env('nethack', env_creator)
-#pufferlib.emulation.EnvWrapper(pufferlib.emulation.SingleToMultiAgent(nle.env.NLE)))
+env_cls = pufferlib.emulation.wrap(nle.env.NLE,
+        emulate_flat_atn=False)
+ 
+env_creator = lambda: env_cls(Config())
+
+pufferlib.rllib.register_env('nethack', env_cls)
 
 config = Config()
 test_env = env_creator()
@@ -435,7 +431,7 @@ obs = test_env.reset()
 orig_env = nle.env.NLE()
 obs_space = orig_env.observation_space
 num_actions = orig_env.action_space.n
- 
+
 ModelCatalog.register_custom_model('custom', 
         make_policy(config, obs_space, num_actions, use_lstm=True)) 
 

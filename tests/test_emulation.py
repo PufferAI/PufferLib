@@ -54,13 +54,10 @@ def test_unflatten_atn():
         atn = [e for e in atn.values()]
         #atn = {1: atn}
         recovered = pufferlib.emulation.unflatten(atn, env.action_space(1))
-        T()
         obs = env.reset()
         for k, orig in obs.items():
             flat = pufferlib.emulation.flatten(orig)
             recovered = pufferlib.emulation.unflatten(flat, env.observation_space(k))
-
-            T()
             assert flat == recovered
 
 def test_flatten():
@@ -125,7 +122,6 @@ def test_unflatten():
 if __name__ == '__main__':
     test_flatten()
     test_unflatten()
-    T()
     test_unflatten_atn()
     test_unpack_batched_obs()
     test_pack_and_batch_obs()

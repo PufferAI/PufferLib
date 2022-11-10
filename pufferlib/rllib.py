@@ -2,6 +2,7 @@ from pdb import set_trace as T
 import numpy as np
 
 import os
+import inspect
 
 from ray.train.rl import RLCheckpoint
 from ray.train.rl.rl_predictor import RLPredictor as RLlibPredictor
@@ -13,15 +14,10 @@ from ray.rllib.env import ParallelPettingZooEnv
 import pufferlib
 
 
-def register_multiagent_env(name, env_creator):
+def register_env(name, env_cls):
     assert type(name) == str, 'Name must be a str'
-    tune_register_env(name, lambda config: ParallelPettingZooEnv(env_creator())) 
-    return env_creator
-
-def register_single_agent_env(name, env_creator):
-    env = pufferlib.emulation.SingleToMultiAgent(env_creator)
-    register_multiagent_env(name, env_creator)
-    return env
+    tune_register_env(name, lambda config: ParallelPettingZooEnv(env_cls())) 
+    return env_cls
 
 def read_checkpoints(tune_path):
      folders = sorted([f.path for f in os.scandir(tune_path) if f.is_dir()])

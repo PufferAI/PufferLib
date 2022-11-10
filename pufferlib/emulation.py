@@ -3,9 +3,26 @@ import numpy as np
 
 from collections.abc import MutableMapping
 import functools
+import inspect
 
 import gym
 import pettingzoo
+
+import pufferlib
+
+
+def wrap(env_cls, **kwargs):
+    '''
+    from gym.utils.env_checker import check_env
+    try:
+        import gym
+        if issubclass(env_cls, gym):
+            Convert somehow
+    '''
+    assert inspect.isclass(env_cls), 'env_cls must be a class'
+    if not pufferlib.utils.is_multiagent(env_cls):
+        env_cls = SingleToMultiAgent(env_cls)
+    return Simplify(env_cls, **kwargs)
 
 def SingleToMultiAgent(Env):
     class MultiAgentWrapper(Env):
@@ -15,11 +32,13 @@ def SingleToMultiAgent(Env):
             self.agents = [1]
 
             # Single agent envs use obs/atn properties
-            self._observation_space = self.observation_space
-            self._action_space = self.action_space
+            if not inspect.ismethod(self.observation_space):
+                self._observation_space = self.observation_space
+                del self.observation_space
 
-            del self.observation_space
-            del self.action_space
+            if not inspect.ismethod(self.action_space):
+                self._action_space = self.action_space
+                del self.action_space
  
         def observation_space(self, agent: int):
             return self._observation_space
@@ -44,18 +63,17 @@ def SingleToMultiAgent(Env):
 
     return MultiAgentWrapper
 
-def Simplify(Env, *args):
+def Simplify(Env, 
+        feature_parser=None,
+        reward_shaper=None,
+        rllib_dones=True,
+        emulate_flat_obs=True,
+        emulate_flat_atn=True,
+        emulate_const_horizon=1024,
+        emulate_const_num_agents=128):
+
     class SimplifyWrapper(Env):
-        def __init__(self,
-                *args,
-                feature_parser=None,
-                reward_shaper=None,
-                rllib_dones=True,
-                emulate_flat_obs=True,
-                emulate_flat_atn=True,
-                emulate_const_horizon=1024,
-                emulate_const_num_agents=128,
-                **kwargs):
+        def __init__(self, *args, **kwargs):
 
             # Infer obs space from first agent
             # Assumes all agents have the same obs space
