@@ -106,8 +106,11 @@ def Simplify(Env,
             atn_space = super().action_space(agent)
 
             if self.emulate_flat_atn:
-                assert type(atn_space) == gym.spaces.Dict, "Action space is already flat, no need to emulate"
-                return pack_atn_space(atn_space)
+                assert type(atn_space) in (gym.spaces.Dict, gym.spaces.Discrete, gym.spaces.MultiDiscrete)
+                if type(atn_space) == gym.spaces.Dict:
+                    return pack_atn_space(atn_space)
+                elif type(atn_space) == gym.spaces.Discrete:
+                    return gym.spaces.MultiDiscrete([atn_space.n])
 
             return atn_space
 
@@ -176,7 +179,11 @@ def Simplify(Env,
             # Unpack actions
             if self.emulate_flat_atn:
                 for k, v in actions.items():
-                    actions[k] = _unflatten(v, super().action_space(k))
+                    orig_atn_space = super().action_space(k)
+                    if type(orig_atn_space) == gym.spaces.Discrete:
+                        actions[k] = v[0]
+                    else:
+                        actions[k] = _unflatten(v, super().action_space(k))
 
             obs, rewards, dones, infos = super().step(actions)
             assert '__all__' not in dones, 'Base env should not return __all__'
@@ -238,7 +245,9 @@ def _flatten(nested_dict, parent_key=None):
     return {tuple(k): v for k, v in items}
 
 def _unflatten(ary, space, nested_dict=None, idx=0):
+    outer_call = False
     if nested_dict is None:
+        outer_call = True
         nested_dict = {}
 
     for k, v in space.items():
@@ -249,7 +258,7 @@ def _unflatten(ary, space, nested_dict=None, idx=0):
             nested_dict[k] = ary[idx]
             idx += 1
 
-    if idx  == len(ary):
+    if outer_call:
         return nested_dict
 
     return nested_dict, idx
