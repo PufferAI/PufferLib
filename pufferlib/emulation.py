@@ -1,6 +1,7 @@
 from pdb import set_trace as T
 import numpy as np
 
+from collections import OrderedDict
 from collections.abc import MutableMapping
 import functools
 import inspect
@@ -30,6 +31,7 @@ def SingleToMultiAgent(Env):
             super().__init__(*args, **kwargs)
 
             self.agents = [1]
+            self.possible_agents = [1]
 
             # Single agent envs use obs/atn properties
             if not inspect.ismethod(self.observation_space):
@@ -89,7 +91,7 @@ def Simplify(Env,
             self.emulate_const_horizon = emulate_const_horizon
             self.emulate_const_num_agents = emulate_const_num_agents
 
-            super().__init__(**kwargs)
+            super().__init__(*args, **kwargs)
 
         def action_space(self, agent):
             '''Neural MMO Action Space
@@ -125,7 +127,7 @@ def Simplify(Env,
             if agent not in self.dummy_obs:
                 # TODO: Zero this obs
                 dummy = obs_space.sample()
-                self.dummy_obs[agent] = zero(dummy)
+                self.dummy_obs[agent] = _zero(dummy)
 
             dummy = self.dummy_obs[agent]
 
@@ -220,13 +222,16 @@ def Simplify(Env,
 
     return SimplifyWrapper
 
-def zero(nested_dict):
-    for k, v in nested_dict.items():
-        if type(v) == np.ndarray:
-            nested_dict[k] *= 0
-        else:
-            zero(nested_dict[k])
-    return nested_dict
+def _zero(ob):
+    if type(ob) == np.ndarray:
+        ob *= 0
+    elif type(ob) in (dict, OrderedDict):
+        for k, v in ob.items():
+            _zero(ob[k])
+    else:
+        for v in ob:
+            _zero(v)
+    return ob
 
 def _flatten(nested_dict, parent_key=None):
     if parent_key is None:
@@ -296,6 +301,10 @@ def pack_atn_space(atn_space):
 
 def flatten_ob(ob):
     flat = _flatten(ob)
+
+    if type(ob) == np.ndarray:
+        flat = {'': flat}
+
     vals = [e.ravel() for e in flat.values()]
     return np.concatenate(vals)
 

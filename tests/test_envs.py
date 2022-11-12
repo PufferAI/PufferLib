@@ -1,4 +1,4 @@
-from pdb import set_trace as trace
+from pdb import set_trace as T
 
 from collections import defaultdict
 
@@ -30,11 +30,11 @@ import pufferlib
 
 
 class Policy(pufferlib.rllib.RecurrentNetwork):
-    def __init__(self, *args, observation_dim, action_dims,
+    def __init__(self, *args, observation_space, action_space,
             input_size, hidden_size, num_lstm_layers, **kwargs):
         super().__init__(input_size, hidden_size, num_lstm_layers, *args, **kwargs)
-        self.encoder = nn.Linear(observation_dim, hidden_size)
-        self.decoders = nn.ModuleList([nn.Linear(hidden_size, n) for n in action_dims])
+        self.encoder = nn.Linear(observation_space.shape[0], hidden_size)
+        self.decoders = nn.ModuleList([nn.Linear(hidden_size, n) for n in action_space.nvec])
 
     def encode_observations(self, env_outputs):
         return self.encoder(env_outputs), None
@@ -49,19 +49,23 @@ ray.init(include_dashboard=False, num_gpus=1)
 ModelCatalog.register_custom_model('custom', Policy)
 
 import nle, nmmo
+from pettingzoo.butterfly import knights_archers_zombies_v8 as kaz
+from pettingzoo.utils.conversions import aec_to_parallel_wrapper
 env_classes = {
-    'nethack': pufferlib.emulation.wrap(nle.env.NLE),
-    'nmmo': pufferlib.emulation.wrap(nmmo.Env),
+    'nethack': (pufferlib.emulation.wrap(nle.env.NLE), []),
+    'nmmo': (pufferlib.emulation.wrap(nmmo.Env), []),
+    'kaz': (pufferlib.emulation.wrap(aec_to_parallel_wrapper), [kaz.raw_env()])
 }
 
-for name, env_cls in env_classes.items():
-    pufferlib.rllib.register_env(name, env_cls)
-
-    env_creator = lambda: env_cls()
+for name, (env_cls, env_args) in env_classes.items():
+    env_creator = lambda: env_cls(*env_args)
     test_env = env_creator()
 
-    observation_dim = test_env.observation_space(1).shape[0]
-    action_dims = test_env.action_space(1).nvec.tolist()
+    pufferlib.utils.check_env(test_env)
+    pufferlib.rllib.register_env(name, env_creator)
+
+    observation_space = test_env.observation_space(test_env.possible_agents[0])
+    action_space = test_env.action_space(test_env.possible_agents[0])
 
     trainer = RLTrainer(
         scaling_config=ScalingConfig(num_workers=2, use_gpu=True),
@@ -79,8 +83,8 @@ for name, env_cls in env_classes.items():
             "model": {
                 "custom_model": "custom",
                 'custom_model_config': {
-                    'observation_dim': observation_dim,
-                    'action_dims': action_dims,
+                    'observation_space': observation_space,
+                    'action_space': action_space,
                     'input_size': 32,
                     'hidden_size': 32,
                     'num_lstm_layers': 1,

@@ -12,15 +12,16 @@ from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.env import ParallelPettingZooEnv
 
+import pettingzoo
+
 import torch
 
 import pufferlib
 
 
-def register_env(name, env_cls):
+def register_env(name, env_creator):
     assert type(name) == str, 'Name must be a str'
-    tune_register_env(name, lambda config: ParallelPettingZooEnv(env_cls())) 
-    return env_cls
+    tune_register_env(name, lambda config: ParallelPettingZooEnv(env_creator())) 
 
 def read_checkpoints(tune_path):
      folders = sorted([f.path for f in os.scandir(tune_path) if f.is_dir()])
