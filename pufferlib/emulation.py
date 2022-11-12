@@ -1,6 +1,7 @@
 from pdb import set_trace as T
 import numpy as np
 
+from collections import OrderedDict
 from collections.abc import MutableMapping
 import functools
 import inspect
@@ -30,6 +31,7 @@ def SingleToMultiAgent(Env):
             super().__init__(*args, **kwargs)
 
             self.agents = [1]
+            self.possible_agents = [1]
 
             # Single agent envs use obs/atn properties
             if not inspect.ismethod(self.observation_space):
@@ -72,6 +74,9 @@ def Simplify(Env,
         emulate_const_horizon=1024,
         emulate_const_num_agents=128):
 
+    # Consider integrating these?
+    #env = wrappers.AssertOutOfBoundsWrapper(env)
+    #env = wrappers.OrderEnforcingWrapper(env)
     class SimplifyWrapper(Env):
         def __init__(self, *args, **kwargs):
 
@@ -89,7 +94,7 @@ def Simplify(Env,
             self.emulate_const_horizon = emulate_const_horizon
             self.emulate_const_num_agents = emulate_const_num_agents
 
-            super().__init__(**kwargs)
+            super().__init__(*args, **kwargs)
 
         def action_space(self, agent):
             '''Neural MMO Action Space
@@ -106,8 +111,11 @@ def Simplify(Env,
             atn_space = super().action_space(agent)
 
             if self.emulate_flat_atn:
-                assert type(atn_space) == gym.spaces.Dict, "Action space is already flat, no need to emulate"
-                return pack_atn_space(atn_space)
+                assert type(atn_space) in (gym.spaces.Dict, gym.spaces.Discrete, gym.spaces.MultiDiscrete)
+                if type(atn_space) == gym.spaces.Dict:
+                    return pack_atn_space(atn_space)
+                elif type(atn_space) == gym.spaces.Discrete:
+                    return gym.spaces.MultiDiscrete([atn_space.n])
 
             return atn_space
 
@@ -122,7 +130,7 @@ def Simplify(Env,
             if agent not in self.dummy_obs:
                 # TODO: Zero this obs
                 dummy = obs_space.sample()
-                self.dummy_obs[agent] = zero(dummy)
+                self.dummy_obs[agent] = _zero(dummy)
 
             dummy = self.dummy_obs[agent]
 
@@ -154,9 +162,6 @@ def Simplify(Env,
             if self.emulate_flat_obs:
                 obs = pack_obs(obs)
 
-                # Requires constant integer agent keys
-                self.possible_agents = [i for i in range(1, self.emulate_const_num_agents + 1)]
- 
             return obs
 
         def reset(self):
@@ -176,7 +181,11 @@ def Simplify(Env,
             # Unpack actions
             if self.emulate_flat_atn:
                 for k, v in actions.items():
-                    actions[k] = _unflatten(v, super().action_space(k))
+                    orig_atn_space = super().action_space(k)
+                    if type(orig_atn_space) == gym.spaces.Discrete:
+                        actions[k] = v[0]
+                    else:
+                        actions[k] = _unflatten(v, super().action_space(k))
 
             obs, rewards, dones, infos = super().step(actions)
             assert '__all__' not in dones, 'Base env should not return __all__'
@@ -213,13 +222,16 @@ def Simplify(Env,
 
     return SimplifyWrapper
 
-def zero(nested_dict):
-    for k, v in nested_dict.items():
-        if type(v) == np.ndarray:
-            nested_dict[k] *= 0
-        else:
-            zero(nested_dict[k])
-    return nested_dict
+def _zero(ob):
+    if type(ob) == np.ndarray:
+        ob *= 0
+    elif type(ob) in (dict, OrderedDict):
+        for k, v in ob.items():
+            _zero(ob[k])
+    else:
+        for v in ob:
+            _zero(v)
+    return ob
 
 def _flatten(nested_dict, parent_key=None):
     if parent_key is None:
@@ -238,7 +250,9 @@ def _flatten(nested_dict, parent_key=None):
     return {tuple(k): v for k, v in items}
 
 def _unflatten(ary, space, nested_dict=None, idx=0):
+    outer_call = False
     if nested_dict is None:
+        outer_call = True
         nested_dict = {}
 
     for k, v in space.items():
@@ -249,7 +263,7 @@ def _unflatten(ary, space, nested_dict=None, idx=0):
             nested_dict[k] = ary[idx]
             idx += 1
 
-    if idx  == len(ary):
+    if outer_call:
         return nested_dict
 
     return nested_dict, idx
@@ -287,6 +301,10 @@ def pack_atn_space(atn_space):
 
 def flatten_ob(ob):
     flat = _flatten(ob)
+
+    if type(ob) == np.ndarray:
+        flat = {'': flat}
+
     vals = [e.ravel() for e in flat.values()]
     return np.concatenate(vals)
 

@@ -7,17 +7,23 @@ import inspect
 from ray.train.rl import RLCheckpoint
 from ray.train.rl.rl_predictor import RLPredictor as RLlibPredictor
 from ray.tune.registry import register_env as tune_register_env
+from ray.rllib.models.torch.recurrent_net import RecurrentNetwork as RLLibRecurrentNetwork
+from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.env import ParallelPettingZooEnv
 
+import pettingzoo
+
+import torch
+
 import pufferlib
 
 
-def register_env(name, env_cls):
+def register_env(name, env_creator):
     assert type(name) == str, 'Name must be a str'
-    tune_register_env(name, lambda config: ParallelPettingZooEnv(env_cls())) 
-    return env_cls
+    tune_register_env(name, lambda config: ParallelPettingZooEnv(env_creator())) 
 
 def read_checkpoints(tune_path):
      folders = sorted([f.path for f in os.scandir(tune_path) if f.is_dir()])
@@ -48,6 +54,73 @@ def create_policies(n):
         )
         for i in range(n)
     }
+
+class FCNetwork(TorchModelV2, torch.nn.Module):
+    def __init__(self, hidden_size, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        torch.nn.Module.__init__(self)
+
+        self.hidden_size = hidden_size
+        self.value_head = torch.nn.Linear(hidden_size, 1)
+
+    def value_function(self):
+        return self.value.view(-1)
+
+    def encode_observations(self, flat_observations):
+        return hidden, lookup
+
+    def decode_actions(self, flat_hidden, lookup):
+        return logits
+
+    def forward(self, x, state, seq_lens):
+        hidden, lookup = self.encode_observations(x['obs'])
+        self.value = self.value_head(hidden)
+        logits = self.decode_actions(hidden, lookup)
+
+        return logits, state
+
+
+class RecurrentNetwork(RLLibRecurrentNetwork, torch.nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        torch.nn.Module.__init__(self)
+
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+
+        self.value_head = torch.nn.Linear(hidden_size, 1)
+        self.lstm = pufferlib.torch.BatchFirstLSTM(input_size, hidden_size, num_layers)
+
+    def get_initial_state(self, batch_size=1):
+        return tuple(
+            torch.zeros(self.lstm.num_layers, self.lstm.hidden_size)
+            for _ in range(2)
+        )
+
+    def value_function(self):
+        return self.value.view(-1)
+
+    def encode_observations(self, flat_observations):
+        return hidden, lookup
+
+    def decode_actions(self, flat_hidden, lookup):
+        return logits
+
+    def forward_rnn(self, x, state, seq_lens):
+        B, TT, _ = x.shape
+        x = x.reshape(B*TT, -1)
+
+        hidden, lookup = self.encode_observations(x)
+        assert hidden.shape == (B*TT, self.hidden_size)
+
+        hidden = hidden.view(B, TT, self.hidden_size)
+        hidden, state = self.lstm(hidden, state)
+        hidden = hidden.reshape(B*TT, self.hidden_size)
+
+        self.value = self.value_head(hidden)
+        logits = self.decode_actions(hidden, lookup)
+
+        return logits, state
 
 class RLPredictor(RLlibPredictor):
     def predict(self, data, **kwargs):

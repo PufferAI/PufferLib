@@ -6,8 +6,16 @@ import pettingzoo
 import gym
 
 
-def check_env(env_cls):
-    assert issubclass(env_cls, gym.Env), "Not a gymnasium env (are you on old gym?)"
+def check_env(env):
+    #assert issubclass(env_cls, gym.Env), "Not a gymnasium env (are you on old gym?)"
+    assert hasattr(env, 'possible_agents')
+    assert len(env.possible_agents)
+    obs_space = env.observation_space(env.possible_agents[0])
+    atn_space = env.action_space(env.possible_agents[0])
+    for e in env.possible_agents:
+        assert env.observation_space(e) == obs_space, 'All agents must have same obs space'
+        assert env.action_space(e) == atn_space, 'All agents must have same atn space'
+
 
 def is_dict_space(space):
     # Compatible with gym/gymnasium
