@@ -8,6 +8,8 @@ from ray.train.rl import RLCheckpoint
 from ray.train.rl.rl_predictor import RLPredictor as RLlibPredictor
 from ray.tune.registry import register_env as tune_register_env
 from ray.rllib.models.torch.recurrent_net import RecurrentNetwork as RLLibRecurrentNetwork
+from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.env import ParallelPettingZooEnv
@@ -52,6 +54,31 @@ def create_policies(n):
         )
         for i in range(n)
     }
+
+class FCNetwork(TorchModelV2, torch.nn.Module):
+    def __init__(self, hidden_size, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        torch.nn.Module.__init__(self)
+
+        self.hidden_size = hidden_size
+        self.value_head = torch.nn.Linear(hidden_size, 1)
+
+    def value_function(self):
+        return self.value.view(-1)
+
+    def encode_observations(self, flat_observations):
+        return hidden, lookup
+
+    def decode_actions(self, flat_hidden, lookup):
+        return logits
+
+    def forward(self, x, state, seq_lens):
+        hidden, lookup = self.encode_observations(x['obs'])
+        self.value = self.value_head(hidden)
+        logits = self.decode_actions(hidden, lookup)
+
+        return logits, state
+
 
 class RecurrentNetwork(RLLibRecurrentNetwork, torch.nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, *args, **kwargs):
