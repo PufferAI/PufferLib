@@ -49,12 +49,17 @@ ray.init(include_dashboard=False, num_gpus=1)
 ModelCatalog.register_custom_model('custom', Policy)
 
 import nle, nmmo
+from pettingzoo.magent import battle_v3
 from pettingzoo.butterfly import knights_archers_zombies_v8 as kaz
 from pettingzoo.utils.conversions import aec_to_parallel_wrapper
+from smac.env.pettingzoo.StarCraft2PZEnv import _parallel_env as smac_env
+
 env_classes = {
     'nethack': (pufferlib.emulation.wrap(nle.env.NLE), []),
     'nmmo': (pufferlib.emulation.wrap(nmmo.Env), []),
-    'kaz': (pufferlib.emulation.wrap(aec_to_parallel_wrapper), [kaz.raw_env()])
+    'kaz': (pufferlib.emulation.wrap(aec_to_parallel_wrapper), [kaz.raw_env()]),
+    'magent': (pufferlib.emulation.wrap(aec_to_parallel_wrapper), [battle_v3.env()]),
+    #'smac': (pufferlib.emulation.wrap(smac_env), [1000]),
 }
 
 for name, (env_cls, env_args) in env_classes.items():

@@ -74,6 +74,9 @@ def Simplify(Env,
         emulate_const_horizon=1024,
         emulate_const_num_agents=128):
 
+    # Consider integrating these?
+    #env = wrappers.AssertOutOfBoundsWrapper(env)
+    #env = wrappers.OrderEnforcingWrapper(env)
     class SimplifyWrapper(Env):
         def __init__(self, *args, **kwargs):
 
@@ -159,9 +162,6 @@ def Simplify(Env,
             if self.emulate_flat_obs:
                 obs = pack_obs(obs)
 
-                # Requires constant integer agent keys
-                self.possible_agents = [i for i in range(1, self.emulate_const_num_agents + 1)]
- 
             return obs
 
         def reset(self):

@@ -17,6 +17,7 @@ setup(
         'openskill==2.4.0',
         'magent==0.2.4',
         'nle==0.8.1'
+        'git+https://github.com/oxwhirl/smac.git',
         #'pettingzoo[butterfly]==1.22.1'
     ],
     python_requires=">=3.7",
@@ -34,3 +35,7 @@ setup(
     ],
 )
 
+#curl -L -o smac.zip https://blzdistsc2-a.akamaihd.net/Linux/SC2.4.10.zip
+#unzip -P iagreetotheeula smac.zip 
+#curl -L -o maps.zip https://github.com/oxwhirl/smac/releases/download/v0.1-beta1/SMAC_Maps.zip
+#unzip maps.zip && mv SMAC_Maps/ StarCraftII/Maps/
