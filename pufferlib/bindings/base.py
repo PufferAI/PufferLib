@@ -61,7 +61,7 @@ class Base:
             'action_space': self.action_space,
             'input_size': 32,
             'hidden_size': 32,
-            'lstm_layers': 1,
+            'lstm_layers': 0,
         }
 
     @property
@@ -73,28 +73,13 @@ class Base:
         return self.test_env.action_space(self.test_env.possible_agents[0])
 
 
-class Policy(RecurrentNetwork):
-    def __init__(self, *args, observation_space, action_space,
-            input_size, hidden_size, lstm_layers, **kwargs):
-        super().__init__(input_size, hidden_size, lstm_layers, *args, **kwargs)
-        self.encoder = nn.Linear(observation_space.shape[0], hidden_size)
-        self.decoders = nn.ModuleList([nn.Linear(hidden_size, n) for n in action_space.nvec])
-
-    def encode_observations(self, env_outputs):
-        return self.encoder(env_outputs), None
-
-    def decode_actions(self, hidden, lookup):
-        actions = [dec(hidden) for dec in self.decoders]
-        return torch.cat(actions, dim=-1)
-
-
-from pufferlib.rllib import BasePolicy
 class Policy(BasePolicy):
     def __init__(self, observation_space, action_space,
             input_size, hidden_size, lstm_layers):
         super().__init__(input_size, hidden_size, lstm_layers)
         self.encoder = nn.Linear(observation_space.shape[0], hidden_size)
-        self.decoders = nn.ModuleList([nn.Linear(hidden_size, n) for n in action_space.nvec])
+        self.decoders = nn.ModuleList([nn.Linear(hidden_size, n)
+                for n in action_space.nvec])
         self.value_head = nn.Linear(hidden_size, 1)
 
     def critic(self, hidden):

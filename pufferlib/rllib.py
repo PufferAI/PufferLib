@@ -54,8 +54,8 @@ def make_rllib_tuner(binding, *,
     env_args = binding.env_args
     name = binding.env_name
 
-    policy = make_rllib_policy(binding.policy)
-    #policy = binding.policy
+    policy = make_rllib_policy(binding.policy,
+            lstm_layers=binding.custom_model_config['lstm_layers'])
     ModelCatalog.register_custom_model(name, policy)
     env_creator = lambda: env_cls(*env_args)
     test_env = env_creator()
@@ -187,7 +187,7 @@ def _make_recurrent_policy(Policy):
     return Recurrent
 
 
-def make_rllib_policy(policy_cls, lstm_layers=1):
+def make_rllib_policy(policy_cls, lstm_layers):
     assert issubclass(policy_cls, BasePolicy)
 
     if lstm_layers > 0:
@@ -217,18 +217,15 @@ def make_rllib_policy(policy_cls, lstm_layers=1):
     else:
         class RLlibPolicy(TorchModelV2, policy_cls):
             def __init__(self, *args, **kwargs):
-                try:
-                    TorchModelV2.__init__(*args)
-                except:
-                    T()
-                policy_cls.__init__(**kwargs)
+                policy_cls.__init__(self, **kwargs)
+                TorchModelV2.__init__(self, *args)
 
             def value_function(self):
                 return self.value.view(-1)
 
             def forward(self, x, state, seq_lens):
-                hidden, lookup = self.encode_observations(x['obs'])
-                self.value = self.value_head(hidden)
+                hidden, lookup = self.encode_observations(x['obs'].float())
+                self.value = self.critic(hidden)
                 logits = self.decode_actions(hidden, lookup)
                 return logits, state
 
