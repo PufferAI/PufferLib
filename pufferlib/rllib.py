@@ -27,6 +27,7 @@ from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.env import ParallelPettingZooEnv
 
 import pufferlib
+from pufferlib.frameworks import BasePolicy, make_recurrent_policy
 
 
 def make_rllib_tuner(binding, *,
@@ -143,55 +144,11 @@ def create_policies(n):
         for i in range(n)
     }
 
-class BasePolicy(torch.nn.Module): #, ABC
-    def __init__(self, input_size, hidden_size, lstm_layers=0):
-        super().__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.lstm_layers = lstm_layers
-
-    #@abstractmethod
-    def critic(self, hidden):
-        #raise NotImplementedError
-        return hidden
-
-    def encode_observations(self, flat_observations):
-        return hidden, lookup
-
-    def decode_actions(self, flat_hidden, lookup):
-        return logits
-
-def _make_recurrent_policy(Policy):
-    class Recurrent(Policy):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            assert self.lstm_layers > 0
-            self.lstm = pufferlib.torch.BatchFirstLSTM(
-                self.input_size,
-                self.hidden_size,
-                self.lstm_layers,
-            )
-
-        def encode_observations(self, x, state, seq_lens):
-            B, TT, _ = x.shape
-            x = x.reshape(B*TT, -1)
-
-            hidden, lookup = super().encode_observations(x)
-            assert hidden.shape == (B*TT, self.hidden_size)
-
-            hidden = hidden.view(B, TT, self.hidden_size)
-            hidden, state = self.lstm(hidden, state)
-            hidden = hidden.reshape(B*TT, self.hidden_size)
-
-            return hidden, state, lookup
-    return Recurrent
-
-
 def make_rllib_policy(policy_cls, lstm_layers):
     assert issubclass(policy_cls, BasePolicy)
 
     if lstm_layers > 0:
-        policy_cls = _make_recurrent_policy(policy_cls)
+        policy_cls = make_recurrent_policy(policy_cls)
 
         class RLLibPolicy(RLLibRecurrentNetwork, policy_cls):
             def __init__(self, *args, **kwargs):
@@ -230,110 +187,6 @@ def make_rllib_policy(policy_cls, lstm_layers):
                 return logits, state
 
         return RLlibPolicy
-
-def make_cleanrl_policy(policy_cls, lstm_layers=0):
-    assert issubclass(policy_cls, Base)
-    if lstm_layers > 0:
-        policy_cls = _make_recurrent_policy(policy_cls, lstm_layers)
-
-    class CleanRLPolicy(Policy):
-        def __init__(self, hidden_size, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-
-        # TODO: Compute seq_lens from done
-        def get_value(self, x, lstm_state=None, done=None):
-            logits, _ = self.forward(x, lstm_state, done)
-            return self.value_head(logits)
-
-        # TODO: Compute seq_lens from done
-        def get_action_and_value(self, x, lstm_state=None, done=None, action=None):
-            logits, lstm_state = self.forward_rnn(x, lstm_state, done)
-            value = self.value_head(x)
-
-            mulit_categorical = [Categorical(logits=l) for l in flat_logits]
-
-            if action is None:
-                action = torch.stack([c.sample() for c in mulit_categorical])
-            else:
-                action = action.view(-1, action.shape[-1]).T
-
-            logprob = torch.stack([c.log_prob(a) for c, a in zip(mulit_categorical, action)]).T.sum(1)
-            entropy = torch.stack([c.entropy() for c in mulit_categorical]).T.sum(1)
-
-            if lstm_layers > 0:
-                return action.T, logprob, entropy, value, lstm_state
-            return action.T, logprob.sum, entropy, value
-   
-    return CleanRLPolicy
-
-
-class FCNetwork(TorchModelV2, torch.nn.Module):
-    def __init__(self, hidden_size, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        torch.nn.Module.__init__(self)
-
-        self.hidden_size = hidden_size
-        self.value_head = torch.nn.Linear(hidden_size, 1)
-
-    def value_function(self):
-        return self.value.view(-1)
-
-    def encode_observations(self, flat_observations):
-        return hidden, lookup
-
-    def decode_actions(self, flat_hidden, lookup):
-        return logits
-
-    def forward(self, x, state, seq_lens):
-        hidden, lookup = self.encode_observations(x['obs'])
-        self.value = self.value_head(hidden)
-        logits = self.decode_actions(hidden, lookup)
-
-        return logits, state
-
-
-class RecurrentNetwork(RLLibRecurrentNetwork, torch.nn.Module):
-    def __init__(self, input_size, hidden_size, lstm_layers, *args, **kwargs):
-        T()
-        super().__init__(*args, **kwargs)
-        torch.nn.Module.__init__(self)
-
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-
-        self.value_head = torch.nn.Linear(hidden_size, 1)
-        self.lstm = pufferlib.torch.BatchFirstLSTM(input_size, hidden_size, lstm_layers)
-
-    def get_initial_state(self, batch_size=1):
-        return tuple(
-            torch.zeros(self.lstm.num_layers, self.lstm.hidden_size)
-            for _ in range(2)
-        )
-
-    def value_function(self):
-        return self.value.view(-1)
-
-    def encode_observations(self, flat_observations):
-        return hidden, lookup
-
-    def decode_actions(self, flat_hidden, lookup):
-        return logits
-
-    def forward_rnn(self, x, state, seq_lens):
-        B, TT, _ = x.shape
-        x = x.reshape(B*TT, -1)
-
-        hidden, lookup = self.encode_observations(x)
-        assert hidden.shape == (B*TT, self.hidden_size)
-
-        hidden = hidden.view(B, TT, self.hidden_size)
-        hidden, state = self.lstm(hidden, state)
-        hidden = hidden.reshape(B*TT, self.hidden_size)
-
-        self.value = self.value_head(hidden)
-        logits = self.decode_actions(hidden, lookup)
-
-        return logits, state
 
 class RLPredictor(RLlibPredictor):
     def predict(self, data, **kwargs):

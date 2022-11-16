@@ -28,7 +28,7 @@ from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
 from pufferlib.emulation import wrap, unpack_batched_obs
 from pufferlib.bindings import Base
-from pufferlib.rllib import RecurrentNetwork
+from pufferlib.frameworks import BasePolicy
 from pufferlib.torch import BatchFirstLSTM
 
 
@@ -66,7 +66,7 @@ class NetHack(Base):
         }
 
 
-class Policy(RecurrentNetwork):
+class Policy(BasePolicy):
     def __init__(self, *args,
             observation_shape, num_actions, use_lstm,
             embedding_dim, crop_dim, num_layers,

@@ -27,7 +27,7 @@ from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
 from pufferlib.emulation import wrap
-from pufferlib.rllib import RecurrentNetwork
+from pufferlib.frameworks import BasePolicy
 
 
 def auto(env_cls, env_args=[], env_name=None):
@@ -42,7 +42,8 @@ def auto(env_cls, env_args=[], env_name=None):
             if env_name is None:
                 self.env_name = env_cls.__name__
 
-            self.test_env = self.env_cls(*env_args)
+            self.env_creator = lambda: self.env_cls(*self.env_args)
+            self.test_env = self.env_creator()
 
     return AutoBound()
 

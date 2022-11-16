@@ -8,6 +8,7 @@ import inspect
 
 import gym
 import pettingzoo
+from pettingzoo.utils.env import ParallelEnv
 
 import pufferlib
 
@@ -77,7 +78,7 @@ def Simplify(Env,
     # Consider integrating these?
     #env = wrappers.AssertOutOfBoundsWrapper(env)
     #env = wrappers.OrderEnforcingWrapper(env)
-    class SimplifyWrapper(Env):
+    class SimplifyWrapper(Env, ParallelEnv):
         def __init__(self, *args, **kwargs):
 
             # Infer obs space from first agent
