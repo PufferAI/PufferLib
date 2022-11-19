@@ -1,4 +1,4 @@
-from pdb import set_trace as trace
+from pdb import set_trace as T
 
 from collections import defaultdict
 
@@ -37,7 +37,6 @@ class NetHack(Base):
         import nle
         from nle import nethack
 
-        super().__init__()
         self.env_name = 'nethack'
         self.orig_env = nle.env.NLE()
 
@@ -45,7 +44,7 @@ class NetHack(Base):
         self.env_args = []
         self.policy = Policy
 
-        self.test_env = self.env_cls()
+        self.test_env = self.env_creator()
 
     @property
     def observation_space(self):
@@ -70,9 +69,9 @@ class Policy(BasePolicy):
     def __init__(self, *args,
             observation_shape, num_actions, use_lstm,
             embedding_dim, crop_dim, num_layers,
-            input_size, hidden_size, num_lstm_layers,
+            input_size, hidden_size, lstm_layers,
             **kwargs):
-        super().__init__(input_size, hidden_size, num_lstm_layers, *args, **kwargs)
+        super().__init__(input_size, hidden_size, lstm_layers, *args, **kwargs)
 
         self.observation_shape = observation_shape
         self.glyph_shape = observation_shape["glyphs"].shape
@@ -166,6 +165,10 @@ class Policy(BasePolicy):
             self.core = BatchFirstLSTM(self.h_dim, self.h_dim, num_layers=1)
 
         self.policy = nn.Linear(self.h_dim, self.num_actions)
+        self.baseline = nn.Linear(self.h_dim, 1)
+
+    def critic(self, hidden):
+        return self.baseline(hidden)
 
     def _select(self, embed, x):
         # Work around slow backward pass of nn.Embedding, see

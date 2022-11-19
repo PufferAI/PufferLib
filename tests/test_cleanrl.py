@@ -15,15 +15,8 @@ import torch.optim as optim
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-from stable_baselines3.common.atari_wrappers import (  # isort:skip
-    ClipRewardEnv,
-    EpisodicLifeEnv,
-    FireResetEnv,
-    MaxAndSkipEnv,
-    NoopResetEnv,
-)
+import nle
 
-import supersuit as ss
 import nmmo
 import pufferlib
 
@@ -54,7 +47,7 @@ def parse_args():
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=2.5e-4,
         help="the learning rate of the optimizer")
-    parser.add_argument("--num-envs", type=int, default=8,
+    parser.add_argument("--num-envs", type=int, default=64,
         help="the number of parallel game environments")
     parser.add_argument("--num-steps", type=int, default=128,
         help="the number of steps to run in each environment per policy rollout")
@@ -90,10 +83,6 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    binding = pufferlib.bindings.auto(env_cls=nmmo.Env)
-    Agent = pufferlib.cleanrl.make_cleanrl_policy(binding.policy)
-    make_env = binding.env_creator
-
     args = parse_args()
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
@@ -122,23 +111,27 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    # env setup
-    #envs = gym.vector.SyncVectorEnv(
-    #    [make_env for i in range(args.num_envs)]
-    #)
-    env = make_env()
-    env = ss.pettingzoo_env_to_vec_env_v1(env)
-    args.num_envs *= 128
-    envs = ss.concat_vec_envs_v1(env, args.num_envs // 128, num_cpus=0, base_class="gym")
-    envs.single_observation_space = envs.observation_space
-    envs.single_action_space = envs.action_space
-    envs.is_vector_env=True
+    binding = pufferlib.bindings.auto(
+        env_cls=nle.env.NLE,
+        rllib_dones=False,
+    )
 
-    #assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
+    # Note: Must recompute num_envs for multiagent envs
+    cores = os.cpu_count()
+    assert args.num_envs / cores == args.num_envs // cores
+    envs = pufferlib.cleanrl.VecEnvs(
+        binding,
+        num_workers=cores,
+        envs_per_worker=args.num_envs // os.cpu_count(),
+    )
 
-    agent = Agent(
-        envs.single_observation_space,
-        envs.single_action_space,
+    policy = pufferlib.cleanrl.make_cleanrl_policy(
+        binding.policy,
+        lstm_layers=1
+    )
+    agent = policy(
+        binding.observation_space,
+        binding.action_space,
         32,
         32,
         1,
@@ -162,6 +155,7 @@ if __name__ == "__main__":
         torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device),
         torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device),
     )  # hidden and cell states (see https://youtu.be/8HyCNIVRbSU)
+ 
     num_updates = args.total_timesteps // args.batch_size
 
     for update in range(1, num_updates + 1):

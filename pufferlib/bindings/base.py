@@ -30,19 +30,17 @@ from pufferlib.emulation import wrap
 from pufferlib.frameworks import BasePolicy
 
 
-def auto(env_cls, env_args=[], env_name=None):
+def auto(env_cls, env_args=[], env_name=None, **kwargs):
     class AutoBound(Base):
         def __init__(self):
-            super().__init__()
-
-            self.env_cls = wrap(env_cls)
+            self.env_cls = wrap(env_cls, **kwargs)
             self.env_args = env_args
 
             self.env_name = env_name
             if env_name is None:
                 self.env_name = env_cls.__name__
 
-            self.env_creator = lambda: self.env_cls(*self.env_args)
+            self.policy = Policy
             self.test_env = self.env_creator()
 
     return AutoBound()
@@ -52,8 +50,12 @@ class Base:
         self.env_name = 'base'
         self.env_cls = None
         self.env_args = []
-        self.config = {}
+
         self.policy = Policy
+        self.test_env = self.env_creator()
+
+    def env_creator(self):
+        return self.env_cls(*self.env_args)
 
     @property
     def custom_model_config(self):
@@ -78,6 +80,8 @@ class Policy(BasePolicy):
     def __init__(self, observation_space, action_space,
             input_size, hidden_size, lstm_layers):
         super().__init__(input_size, hidden_size, lstm_layers)
+        self.observation_space = observation_space
+        self.action_space = action_space
         self.encoder = nn.Linear(observation_space.shape[0], hidden_size)
         self.decoders = nn.ModuleList([nn.Linear(hidden_size, n)
                 for n in action_space.nvec])
@@ -89,6 +93,8 @@ class Policy(BasePolicy):
     def encode_observations(self, env_outputs):
         return self.encoder(env_outputs), None
 
-    def decode_actions(self, hidden, lookup):
+    def decode_actions(self, hidden, lookup, concat=True):
         actions = [dec(hidden) for dec in self.decoders]
-        return torch.cat(actions, dim=-1)
+        if concat:
+            return torch.cat(actions, dim=-1)
+        return actions
