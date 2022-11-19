@@ -8,6 +8,7 @@ import inspect
 
 import gym
 import pettingzoo
+from pettingzoo.utils.env import ParallelEnv
 
 import pufferlib
 
@@ -77,13 +78,14 @@ def Simplify(Env,
     # Consider integrating these?
     #env = wrappers.AssertOutOfBoundsWrapper(env)
     #env = wrappers.OrderEnforcingWrapper(env)
-    class SimplifyWrapper(Env):
+    class SimplifyWrapper(Env, ParallelEnv):
         def __init__(self, *args, **kwargs):
 
             # Infer obs space from first agent
             # Assumes all agents have the same obs space
             self.dummy_obs = {}
             self._step = 0
+            self.done = False
 
             self.feature_parser = feature_parser
             self.reward_shaper = reward_shaper
@@ -167,6 +169,7 @@ def Simplify(Env,
         def reset(self):
             self.reset_calls_step = False
             obs = super().reset()
+            self.done = False
 
             # Some envs implement reset by calling step
             if not self.reset_calls_step:
@@ -176,6 +179,7 @@ def Simplify(Env,
             return obs
 
         def step(self, actions, **kwargs):
+            assert not self.done, 'step after done'
             self.reset_calls_step = True
 
             # Unpack actions
@@ -198,6 +202,7 @@ def Simplify(Env,
 
             # Computed before padding dones. False if no agents
             all_done = len(dones) and all(dones.values())
+            self.done = all_done
 
             # Pad rewards/dones/infos
             if self.emulate_const_num_agents:
@@ -210,12 +215,14 @@ def Simplify(Env,
             # Terminate episode at horizon or if all agents are done
             if self.emulate_const_horizon:
                 assert self._step <= self.emulate_const_horizon
-                terminate_episode = (self._step == self.emulate_const_horizon) or all_done
+                if self._step == self.emulate_const_horizon:
+                    self.done = True
+
                 for agent in dones:
-                    dones[agent] = terminate_episode
+                    dones[agent] = (self._step == self.emulate_const_horizon) or all_done
 
             # RLlib done compatibility
-            if self.rllib_dones and all_done:
+            if self.rllib_dones and self.done:
                 dones['__all__'] = True
 
             return obs, rewards, dones, infos
@@ -327,6 +334,7 @@ def unpack_batched_obs(obs_space, packed_obs):
         obs_ptr = obs
         for key in key_list[:-1]:
             if key not in obs_ptr:
+                obs_ptr[key] = {}
                 obs_ptr = obs_ptr[key]
 
         key = key_list[-1]

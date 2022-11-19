@@ -34,6 +34,8 @@ setup(
         "Programming Language :: Python :: 3.9",
     ],
 )
+#stable_baselines3
+#supersuit==3.3.5
 
 #curl -L -o smac.zip https://blzdistsc2-a.akamaihd.net/Linux/SC2.4.10.zip
 #unzip -P iagreetotheeula smac.zip 
