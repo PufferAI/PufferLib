@@ -16,9 +16,9 @@ setup(
         'nmmo==1.6.0.7',
         'openskill==2.4.0',
         'magent==0.2.4',
-        'nle==0.8.1'
-        'git+https://github.com/oxwhirl/smac.git',
-        #'pettingzoo[butterfly]==1.22.1'
+        'nle==0.9.0',
+        #'git+https://github.com/oxwhirl/smac.git',
+        #'pettingzoo[butterfly]==1.22.1',
     ],
     python_requires=">=3.7",
     license="MIT",
