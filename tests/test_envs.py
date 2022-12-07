@@ -4,7 +4,7 @@ import nle, nmmo
 from pettingzoo.magent import battle_v3
 from pettingzoo.butterfly import knights_archers_zombies_v8 as kaz
 from pettingzoo.utils.conversions import aec_to_parallel_wrapper
-from smac.env.pettingzoo.StarCraft2PZEnv import _parallel_env as smac_env
+#from smac.env.pettingzoo.StarCraft2PZEnv import _parallel_env as smac_env
 
 import pufferlib
 

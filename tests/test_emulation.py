@@ -47,6 +47,8 @@ def test_unpack_batched_obs():
         obs_space = env.observation_space(0)
         unpacked = pufferlib.emulation.unpack_batched_obs(obs_space, packed)
 
+        assert obs[1].keys() == unpacked.keys()
+
 def test_unflatten_atn():
     for env in setup():
         atn = env.action_space(1).sample()

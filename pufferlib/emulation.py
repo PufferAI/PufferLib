@@ -318,9 +318,12 @@ def flatten_ob(ob):
 def pack_obs(obs):
     return {k: flatten_ob(v) for k, v in obs.items()}
 
+def batch_obs(obs):
+    return np.stack(list(obs.values()), axis=0)
+
 def pack_and_batch_obs(obs):
-    obs = list(pack_obs(obs).values())
-    return np.stack(obs, axis=0)
+    obs = pack_obs(obs)
+    return batch_obs(obs)
 
 def unpack_batched_obs(obs_space, packed_obs):
     assert(isinstance(obs_space, gym.Space)), 'First arg must be a gym space'
@@ -335,7 +338,7 @@ def unpack_batched_obs(obs_space, packed_obs):
         for key in key_list[:-1]:
             if key not in obs_ptr:
                 obs_ptr[key] = {}
-                obs_ptr = obs_ptr[key]
+            obs_ptr = obs_ptr[key]
 
         key = key_list[-1]
         inc = np.prod(val.shape)
