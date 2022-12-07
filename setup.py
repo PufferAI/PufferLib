@@ -16,8 +16,7 @@ setup(
         'nmmo==1.6.0.7',
         'openskill==2.4.0',
         'magent==0.2.4',
-        'nle==0.8.1'
-        'git+https://github.com/oxwhirl/smac.git',
+        'nle==0.8.1',
         #'pettingzoo[butterfly]==1.22.1'
     ],
     python_requires=">=3.7",
@@ -36,6 +35,7 @@ setup(
 )
 #stable_baselines3
 #supersuit==3.3.5
+#'git+https://github.com/oxwhirl/smac.git',
 
 #curl -L -o smac.zip https://blzdistsc2-a.akamaihd.net/Linux/SC2.4.10.zip
 #unzip -P iagreetotheeula smac.zip 
