@@ -26,29 +26,26 @@ from ray.rllib.models.torch.recurrent_net import RecurrentNetwork
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
-from pufferlib.emulation import wrap, unpack_batched_obs
+from pufferlib.emulation import PufferEnv, unpack_batched_obs
 from pufferlib.bindings import Base
 from pufferlib.frameworks import BasePolicy
 from pufferlib.torch import BatchFirstLSTM
 
 
 class NetHack(Base):
-    def __init__(self):
+    def __init__(self, rllib_dones=True):
         import nle
         from nle import nethack
 
-        self.env_name = 'nethack'
-        self.orig_env = nle.env.NLE()
+        self.observation_shape = nle.env.NLE().observation_space
+        env_cls = PufferEnv(
+                nle.env.NLE,
+                emulate_flat_atn=True,
+                rllib_dones=rllib_dones
+            )
+        super().__init__('nethack', env_cls)
 
-        self.env_cls = wrap(nle.env.NLE, emulate_flat_atn=True)
-        self.env_args = []
         self.policy = Policy
-
-        self.test_env = self.env_creator()
-
-    @property
-    def observation_space(self):
-        return self.orig_env.observation_space
 
     @property
     def custom_model_config(self):
@@ -59,8 +56,8 @@ class NetHack(Base):
             'input_size': 512,
             'hidden_size': 512,
             'lstm_layers': 1,
-            'observation_shape': self.observation_space,
-            'num_actions': self.action_space.nvec[0],
+            'observation_shape': self.observation_shape,
+            'num_actions': self.single_action_space.nvec[0],
             'use_lstm': True,
         }
 

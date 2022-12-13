@@ -1,89 +1,52 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_atari_lstmpy
 from pdb import set_trace as T
 
-import argparse
 import os
 import random
 import time
-from distutils.util import strtobool
 
-import gym
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-import nle
-
-import nmmo
 import pufferlib
+from pufferlib.vecenvs import VecEnvs
 
-def parse_args():
-    # fmt: off
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
-        help="the name of this experiment")
-    parser.add_argument("--seed", type=int, default=1,
-        help="seed of the experiment")
-    parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, `torch.backends.cudnn.deterministic=False`")
-    parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--wandb-project-name", type=str, default="cleanRL",
-        help="the wandb's project name")
-    parser.add_argument("--wandb-entity", type=str, default=None,
-        help="the entity (team) of wandb's project")
-    parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="whether to capture videos of the agent performances (check out `videos` folder)")
+def train(
+        binding,
+        exp_name=os.path.basename(__file__),
+        seed=1,
+        torch_deterministic=True,
+        cuda=True,
+        track=False,
+        wandb_project_name='cleanRL',
+        wandb_entity=None,
+        capture_video=True,
+        total_timesteps=10000000,
+        learning_rate=2.5e-4,
+        num_envs=8,
+        num_steps=128,
+        anneal_lr=True,
+        gamma=0.99,
+        gae_lambda=0.95,
+        num_minibatches=4,
+        update_epochs=4,
+        norm_adv=True,
+        clip_coef=0.1,
+        clip_vloss=True,
+        ent_coef=0.01,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
+        target_kl=None,
+    ):
 
-    # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="BreakoutNoFrameskip-v4",
-        help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=10000000,
-        help="total timesteps of the experiments")
-    parser.add_argument("--learning-rate", type=float, default=2.5e-4,
-        help="the learning rate of the optimizer")
-    parser.add_argument("--num-envs", type=int, default=64,
-        help="the number of parallel game environments")
-    parser.add_argument("--num-steps", type=int, default=128,
-        help="the number of steps to run in each environment per policy rollout")
-    parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggle learning rate annealing for policy and value networks")
-    parser.add_argument("--gamma", type=float, default=0.99,
-        help="the discount factor gamma")
-    parser.add_argument("--gae-lambda", type=float, default=0.95,
-        help="the lambda for the general advantage estimation")
-    parser.add_argument("--num-minibatches", type=int, default=4,
-        help="the number of mini-batches")
-    parser.add_argument("--update-epochs", type=int, default=4,
-        help="the K epochs to update the policy")
-    parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggles advantages normalization")
-    parser.add_argument("--clip-coef", type=float, default=0.1,
-        help="the surrogate clipping coefficient")
-    parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
-    parser.add_argument("--ent-coef", type=float, default=0.01,
-        help="coefficient of the entropy")
-    parser.add_argument("--vf-coef", type=float, default=0.5,
-        help="coefficient of the value function")
-    parser.add_argument("--max-grad-norm", type=float, default=0.5,
-        help="the maximum norm for the gradient clipping")
-    parser.add_argument("--target-kl", type=float, default=None,
-        help="the target KL divergence threshold")
-    args = parser.parse_args()
+    args = pufferlib.utils.dotdict(locals())
+    args.env_id = binding.env_name
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
-    # fmt: on
-    return args
 
-
-if __name__ == "__main__":
-    args = parse_args()
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
         import wandb
@@ -111,15 +74,10 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    binding = pufferlib.bindings.auto(
-        env_cls=nle.env.NLE,
-        rllib_dones=False,
-    )
-
     # Note: Must recompute num_envs for multiagent envs
     cores = os.cpu_count()
     assert args.num_envs / cores == args.num_envs // cores
-    envs = pufferlib.cleanrl.VecEnvs(
+    envs = VecEnvs(
         binding,
         num_workers=cores,
         envs_per_worker=args.num_envs // os.cpu_count(),
@@ -129,13 +87,7 @@ if __name__ == "__main__":
         binding.policy,
         lstm_layers=1
     )
-    agent = policy(
-        binding.observation_space,
-        binding.action_space,
-        32,
-        32,
-        1,
-    ).to(device)
+    agent = policy(**binding.custom_model_config).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -301,3 +253,9 @@ if __name__ == "__main__":
 
     envs.close()
     writer.close()
+
+if __name__ == '__main__':
+    import env_defs
+    for binding in env_defs.bindings:
+        print(f'Training {binding.env_name}')
+        train(binding, total_timesteps=1000)

@@ -1,6 +1,7 @@
 from pdb import set_trace as T
 
 import time
+import inspect
 
 import pettingzoo
 import gym
@@ -21,7 +22,12 @@ def is_dict_space(space):
     # Compatible with gym/gymnasium
     return type(atn_space).__name__ == 'Dict'
 
-def is_multiagent(env_cls):
+def is_multiagent(env):
+    if inspect.isclass(env):
+        env_cls = env
+    else:
+        env_cls = type(env)
+
     if not issubclass(env_cls, pettingzoo.AECEnv) and not issubclass(env_cls, pettingzoo.ParallelEnv):
         assert issubclass(env_cls, gym.Env), 'Environment must subclass pettingzoo.AECEnv/ParallelEnv or gym.Env'
         return False
@@ -38,3 +44,9 @@ def myprint(d):
             stack.extend(v.iteritems())
         else:
             print("%s: %s" % (k, v))
+
+class dotdict(dict):
+    """dot.notation access to dictionary attributes"""
+    __getattr__ = dict.get
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__

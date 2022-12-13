@@ -4,6 +4,7 @@ from collections import defaultdict
 
 from typing import Dict, Tuple
 
+import inspect
 import numpy as np
 from numpy import ndarray
 import gym
@@ -26,54 +27,74 @@ from ray.rllib.models.torch.recurrent_net import RecurrentNetwork
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
-from pufferlib.emulation import wrap
+from pufferlib.emulation import PufferEnv
 from pufferlib.frameworks import BasePolicy
+from pufferlib.utils import is_multiagent
 
 
-def auto(env_cls, env_args=[], env_name=None, **kwargs):
+def auto(env_name=None, env=None, env_cls=None, env_args=[], env_kwargs={}, **kwargs):
     class AutoBound(Base):
         def __init__(self):
-            self.env_cls = wrap(env_cls, **kwargs)
-            self.env_args = env_args
-
-            self.env_name = env_name
-            if env_name is None:
+            if env_cls is not None:
+                assert inspect.isclass(env_cls)
+                self.env_cls = PufferEnv(env_cls, **kwargs)
                 self.env_name = env_cls.__name__
+            elif env is not None:
+                assert not inspect.isclass(env)
+                self.env_cls = PufferEnv(env, **kwargs)
+                self.env_name = env.__class__.__name__
+            else:
+                raise Exception('Specify env or env_cls')
+
+            if env_name is not None:
+                self.env_name = env_name
+
+            super().__init__(self.env_name, self.env_cls, env_args, env_kwargs)
 
             self.policy = Policy
-            self.test_env = self.env_creator()
 
     return AutoBound()
 
 class Base:
-    def __init__(self):
-        self.env_name = 'base'
-        self.env_cls = None
-        self.env_args = []
+    def __init__(self, env_name, env_cls, env_args=[], env_kwargs={}):
+        self.env_name = env_name
+        self.env_cls = env_cls
 
-        self.policy = Policy
-        self.test_env = self.env_creator()
+        self.env_args = env_args
+        self.env_kwargs = env_kwargs
 
-    def env_creator(self):
-        return self.env_cls(*self.env_args)
+        self.env_creator = lambda: self.env_cls(*self.env_args, **self.env_kwargs)
+
+        local_env = self.env_creator()
+        self.default_agent = local_env.possible_agents[0]
+        self.single_observation_space = local_env.observation_space(self.default_agent)
+        self.single_action_space = local_env.action_space(self.default_agent)
+
+
+    '''
+    @property
+    def single_observation_space(self):
+        return self.local_env.observation_space(
+                self.local_env.possible_agents[0])
+
+    @property
+    def single_action_space(self):
+        return self.local_env.action_space(
+                self.local_env.possible_agents[0])
+
+    '''
+    #def env_creator(self):
+    #    return self.env_cls(*self.env_args, **self.env_kwargs)
 
     @property
     def custom_model_config(self):
         return {
-            'observation_space': self.observation_space,
-            'action_space': self.action_space,
+            'observation_space': self.single_observation_space,
+            'action_space': self.single_action_space,
             'input_size': 32,
             'hidden_size': 32,
             'lstm_layers': 0,
         }
-
-    @property
-    def observation_space(self):
-        return self.test_env.observation_space(self.test_env.possible_agents[0])
-
-    @property
-    def action_space(self):
-        return self.test_env.action_space(self.test_env.possible_agents[0])
 
 
 class Policy(BasePolicy):

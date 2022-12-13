@@ -1,4 +1,5 @@
 from pdb import set_trace as T
+
 import numpy as np
 
 from collections import OrderedDict
@@ -10,82 +11,30 @@ import gym
 import pettingzoo
 from pettingzoo.utils.env import ParallelEnv
 
-import pufferlib
+from pufferlib import utils
 
 
-def wrap(env_cls, **kwargs):
-    '''
-    from gym.utils.env_checker import check_env
-    try:
-        import gym
-        if issubclass(env_cls, gym):
-            Convert somehow
-    '''
-    assert inspect.isclass(env_cls), 'env_cls must be a class'
-    if not pufferlib.utils.is_multiagent(env_cls):
-        env_cls = SingleToMultiAgent(env_cls)
-    return Simplify(env_cls, **kwargs)
-
-def SingleToMultiAgent(Env):
-    class MultiAgentWrapper(Env):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-
-            self.agents = [1]
-            self.possible_agents = [1]
-
-            # Single agent envs use obs/atn properties
-            if not inspect.ismethod(self.observation_space):
-                self._observation_space = self.observation_space
-                del self.observation_space
-
-            if not inspect.ismethod(self.action_space):
-                self._action_space = self.action_space
-                del self.action_space
- 
-        def observation_space(self, agent: int):
-            return self._observation_space
-
-        def action_space(self, agent: int):
-            return self._action_space
-
-        def reset(self):
-            ob = super().reset()
-            return {1: ob}
-
-        def step(self, action):
-            action = action[1]
-            ob, reward, done, info = super().step(action)
-
-            obs = {1: ob}
-            rewards = {1: reward}
-            dones = {1: done}
-            infos = {1: info}
-
-            return obs, rewards, dones, infos
-
-    return MultiAgentWrapper
-
-def Simplify(Env, 
+def PufferEnv(Env, 
         feature_parser=None,
         reward_shaper=None,
-        rllib_dones=True,
+        rllib_dones=False,
         emulate_flat_obs=True,
         emulate_flat_atn=True,
         emulate_const_horizon=1024,
-        emulate_const_num_agents=128):
+        emulate_const_num_agents=128,
+        obs_dtype=np.float32):
 
     # Consider integrating these?
     #env = wrappers.AssertOutOfBoundsWrapper(env)
     #env = wrappers.OrderEnforcingWrapper(env)
-    class SimplifyWrapper(Env, ParallelEnv):
+    class PufferWrapper(ParallelEnv):
         def __init__(self, *args, **kwargs):
-
             # Infer obs space from first agent
             # Assumes all agents have the same obs space
             self.dummy_obs = {}
             self._step = 0
             self.done = False
+            self.obs_dtype = obs_dtype
 
             self.feature_parser = feature_parser
             self.reward_shaper = reward_shaper
@@ -95,8 +44,19 @@ def Simplify(Env,
             self.emulate_flat_atn = emulate_flat_atn
             self.emulate_const_horizon = emulate_const_horizon
             self.emulate_const_num_agents = emulate_const_num_agents
+            self.emulate_multiagent = not utils.is_multiagent(Env)
 
-            super().__init__(*args, **kwargs)
+            if inspect.isclass(Env):
+                self.env = Env(*args, **kwargs)
+            else:
+                self.env = Env
+
+            # Standardize property vs method obs/atn space interface
+            if self.emulate_multiagent:
+                self.agents = [1]
+                self.possible_agents = [1]
+            else:
+                self.possible_agents = self.env.possible_agents
 
         def action_space(self, agent):
             '''Neural MMO Action Space
@@ -110,7 +70,11 @@ def Simplify(Env,
                 of discrete-valued arguments. These consist of both fixed, k-way
                 choices (such as movement direction) and selections from the
                 observation space (such as targeting)'''
-            atn_space = super().action_space(agent)
+            # Get single/multiagent action space
+            if self.emulate_multiagent:
+                atn_space = self.env.action_space
+            else:
+                atn_space = self.env.action_space(agent)
 
             if self.emulate_flat_atn:
                 assert type(atn_space) in (gym.spaces.Dict, gym.spaces.Discrete, gym.spaces.MultiDiscrete)
@@ -121,18 +85,20 @@ def Simplify(Env,
 
             return atn_space
 
-        def structured_observation_space(self, agent: int, dtype=np.float32):
+        def structured_observation_space(self, agent: int):
             if self.feature_parser:
                 return self.feature_parser.spec
             return self.observation_space(agent)
 
-        def observation_space(self, agent: int, dtype=np.float32):
-            obs_space = super().observation_space(agent)
+        def observation_space(self, agent: int):
+            # Get single/multiagent observation space
+            if self.emulate_multiagent:
+                obs_space = self.env.observation_space
+            else:
+                obs_space = self.env.observation_space(agent)
 
             if agent not in self.dummy_obs:
-                # TODO: Zero this obs
-                dummy = obs_space.sample()
-                self.dummy_obs[agent] = _zero(dummy)
+                self.dummy_obs[agent] = _zero(obs_space.sample())
 
             dummy = self.dummy_obs[agent]
 
@@ -140,13 +106,13 @@ def Simplify(Env,
                 dummy = self.feature_parser({agent: dummy}, self._step)[agent]
 
             if self.emulate_flat_obs:
-                dummy = flatten_ob(dummy)
+                dummy = flatten_ob(dummy, self.obs_dtype)
 
             shape = dummy.shape
 
             return gym.spaces.Box(
                 low=-2**20, high=2**20,
-                shape=shape, dtype=dtype
+                shape=shape, dtype=self.obs_dtype
             )
 
         def _process_obs(self, obs):
@@ -162,13 +128,19 @@ def Simplify(Env,
                 obs = self.feature_parser(obs, self._step)
 
             if self.emulate_flat_obs:
-                obs = pack_obs(obs)
+                obs = pack_obs(obs, self.obs_dtype)
 
             return obs
 
         def reset(self):
             self.reset_calls_step = False
-            obs = super().reset()
+            obs = self.env.reset()
+
+            if self.emulate_multiagent:
+                obs = {1: obs}
+            else:
+                self.agents = self.env.agents
+
             self.done = False
 
             # Some envs implement reset by calling step
@@ -182,16 +154,35 @@ def Simplify(Env,
             assert not self.done, 'step after done'
             self.reset_calls_step = True
 
+            # Action shape test
+            if __debug__:
+                for agent, atns in actions.items():
+                    assert self.action_space(agent).contains(atns)
+
             # Unpack actions
             if self.emulate_flat_atn:
                 for k, v in actions.items():
-                    orig_atn_space = super().action_space(k)
+                    if self.emulate_multiagent:
+                        orig_atn_space = self.env.action_space
+                    else:
+                        orig_atn_space = self.env.action_space(k)
+
                     if type(orig_atn_space) == gym.spaces.Discrete:
                         actions[k] = v[0]
                     else:
-                        actions[k] = _unflatten(v, super().action_space(k))
+                        actions[k] = _unflatten(v, orig_atn_space)
 
-            obs, rewards, dones, infos = super().step(actions)
+            if self.emulate_multiagent:
+                action = actions[1]
+                ob, reward, done, info = self.env.step(action)
+                obs = {1: ob}
+                rewards = {1: reward}
+                dones = {1: done}
+                infos = {1: info}
+            else:
+                obs, rewards, dones, infos = self.env.step(actions)
+                self.agents = self.env.agents
+
             assert '__all__' not in dones, 'Base env should not return __all__'
             self._step += 1
           
@@ -225,9 +216,14 @@ def Simplify(Env,
             if self.rllib_dones and self.done:
                 dones['__all__'] = True
 
+            # Observation shape test
+            if __debug__:
+                for agent, ob in obs.items():
+                    assert self.observation_space(agent).contains(ob)
+
             return obs, rewards, dones, infos
 
-    return SimplifyWrapper
+    return PufferWrapper
 
 def _zero(ob):
     if type(ob) == np.ndarray:
@@ -306,17 +302,22 @@ def pack_atn_space(atn_space):
 
     return gym.spaces.MultiDiscrete(lens) 
 
-def flatten_ob(ob):
+def flatten_ob(ob, dtype=None):
     flat = _flatten(ob)
 
     if type(ob) == np.ndarray:
         flat = {'': flat}
 
     vals = [e.ravel() for e in flat.values()]
-    return np.concatenate(vals)
+    vals = np.concatenate(vals)
 
-def pack_obs(obs):
-    return {k: flatten_ob(v) for k, v in obs.items()}
+    if dtype is not None:
+        vals = vals.astype(dtype)
+
+    return vals
+
+def pack_obs(obs, dtype=None):
+    return {k: flatten_ob(v, dtype) for k, v in obs.items()}
 
 def batch_obs(obs):
     return np.stack(list(obs.values()), axis=0)
