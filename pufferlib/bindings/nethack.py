@@ -26,7 +26,7 @@ from ray.rllib.models.torch.recurrent_net import RecurrentNetwork
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
-from pufferlib.emulation import PufferEnv, unpack_batched_obs
+from pufferlib.emulation import PufferWrapper, unpack_batched_obs
 from pufferlib.bindings import Base
 from pufferlib.frameworks import BasePolicy
 from pufferlib.torch import BatchFirstLSTM
@@ -38,7 +38,7 @@ class NetHack(Base):
         from nle import nethack
 
         self.observation_shape = nle.env.NLE().observation_space
-        env_cls = PufferEnv(
+        env_cls = PufferWrapper(
                 nle.env.NLE,
                 emulate_flat_atn=True,
                 rllib_dones=rllib_dones

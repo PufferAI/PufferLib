@@ -14,7 +14,7 @@ from pettingzoo.utils.env import ParallelEnv
 from pufferlib import utils
 
 
-def PufferEnv(Env, 
+def PufferWrapper(Env, 
         feature_parser=None,
         reward_shaper=None,
         rllib_dones=False,
@@ -27,10 +27,15 @@ def PufferEnv(Env,
     # Consider integrating these?
     #env = wrappers.AssertOutOfBoundsWrapper(env)
     #env = wrappers.OrderEnforcingWrapper(env)
-    class PufferWrapper(ParallelEnv):
+    class PufferEnv(ParallelEnv):
         def __init__(self, *args, **kwargs):
             # Infer obs space from first agent
             # Assumes all agents have the same obs space
+            if inspect.isclass(Env) or inspect.isfunction(Env):
+                self.env = Env(*args, **kwargs)
+            else:
+                self.env = Env
+
             self.dummy_obs = {}
             self._step = 0
             self.done = False
@@ -44,12 +49,8 @@ def PufferEnv(Env,
             self.emulate_flat_atn = emulate_flat_atn
             self.emulate_const_horizon = emulate_const_horizon
             self.emulate_const_num_agents = emulate_const_num_agents
-            self.emulate_multiagent = not utils.is_multiagent(Env)
+            self.emulate_multiagent = not utils.is_multiagent(self.env)
 
-            if inspect.isclass(Env):
-                self.env = Env(*args, **kwargs)
-            else:
-                self.env = Env
 
             # Standardize property vs method obs/atn space interface
             if self.emulate_multiagent:
@@ -88,7 +89,11 @@ def PufferEnv(Env,
         def structured_observation_space(self, agent: int):
             if self.feature_parser:
                 return self.feature_parser.spec
-            return self.observation_space(agent)
+
+            if self.emulate_multiagent:
+                return self.env.observation_space
+            else:
+                return self.env.observation_space(agent)
 
         def observation_space(self, agent: int):
             # Get single/multiagent observation space
@@ -223,7 +228,7 @@ def PufferEnv(Env,
 
             return obs, rewards, dones, infos
 
-    return PufferWrapper
+    return PufferEnv
 
 def _zero(ob):
     if type(ob) == np.ndarray:

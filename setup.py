@@ -14,6 +14,7 @@ extra = {
         'swig==4.1.1', #unspecified box2d dep
         'gym[box2d]',
         'gym[atari,accept-rom-license]',
+        'griddly==1.4.2',
         #'git+https://github.com/oxwhirl/smac.git',
         #'pettingzoo[butterfly]==1.22.1',
         ],

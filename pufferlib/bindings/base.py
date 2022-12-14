@@ -27,7 +27,7 @@ from ray.rllib.models.torch.recurrent_net import RecurrentNetwork
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
-from pufferlib.emulation import PufferEnv
+from pufferlib.emulation import PufferWrapper
 from pufferlib.frameworks import BasePolicy
 from pufferlib.utils import is_multiagent
 
@@ -36,12 +36,12 @@ def auto(env_name=None, env=None, env_cls=None, env_args=[], env_kwargs={}, **kw
     class AutoBound(Base):
         def __init__(self):
             if env_cls is not None:
-                assert inspect.isclass(env_cls)
-                self.env_cls = PufferEnv(env_cls, **kwargs)
+                #assert inspect.isclass(env_cls)
+                self.env_cls = PufferWrapper(env_cls, **kwargs)
                 self.env_name = env_cls.__name__
             elif env is not None:
                 assert not inspect.isclass(env)
-                self.env_cls = PufferEnv(env, **kwargs)
+                self.env_cls = PufferWrapper(env, **kwargs)
                 self.env_name = env.__class__.__name__
             else:
                 raise Exception('Specify env or env_cls')
@@ -50,7 +50,6 @@ def auto(env_name=None, env=None, env_cls=None, env_args=[], env_kwargs={}, **kw
                 self.env_name = env_name
 
             super().__init__(self.env_name, self.env_cls, env_args, env_kwargs)
-
             self.policy = Policy
 
     return AutoBound()

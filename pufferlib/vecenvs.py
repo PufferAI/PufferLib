@@ -38,6 +38,8 @@ def make_remote_envs(env_creator, n):
 
 class VecEnvs:
     def __init__(self, binding, num_workers, envs_per_worker=1):
+        assert envs_per_worker > 0, 'Each worker must have at least 1 env'
+
         ray.init(
             include_dashboard=False, # WSL Compatibility
             ignore_reinit_error=True,
@@ -48,8 +50,13 @@ class VecEnvs:
         self.envs_per_worker = envs_per_worker
         self.has_reset = False
 
+        import gym, griddly
+        from pufferlib.emulation import PufferWrapper
+        #wrapper = PufferWrapper(gym.make('GDY-Spiders-v0'))
+        #creator = lambda: wrapper()
         self.remote_envs_lists = [
             make_remote_envs(
+                #creator,
                 binding.env_creator,
                 envs_per_worker,
             ) for _ in range(num_workers)
@@ -116,4 +123,3 @@ class VecEnvs:
         _, infos = self._flatten(infos, concat=False)
 
         return obs, rewards, dones, infos
-
