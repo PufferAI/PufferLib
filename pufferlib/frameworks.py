@@ -9,6 +9,11 @@ from pufferlib.torch import BatchFirstLSTM
 
 class BasePolicy(torch.nn.Module, ABC):
     def __init__(self, input_size, hidden_size, lstm_layers=0):
+        '''Pure PyTorch base policy
+        
+        This spec allows PufferLib to repackage your policy
+        for compatibility with RL frameworks
+        '''
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -16,20 +21,30 @@ class BasePolicy(torch.nn.Module, ABC):
 
     @abstractmethod
     def critic(self, hidden):
+        '''Computes the value function from the hidden state'''
         raise NotImplementedError
         return hidden
 
     @abstractmethod
     def encode_observations(self, flat_observations):
+        '''Encodes observations into a flat vector.
+        
+        Call pufferlib.emulation.unpack_batched_obs to unflatten obs
+        '''
         raise NotImplementedError
         return hidden, lookup
 
     @abstractmethod
     def decode_actions(self, flat_hidden, lookup):
+        '''Decodes hidden state into a multidiscrete action space'''
         raise NotImplementedError
         return logits
 
 def make_recurrent_policy(Policy, batch_state_first=True):
+    '''Wraps the given policy with an LSTM
+    
+    Called for you by framework-specific bindings
+    '''
     class Recurrent(Policy):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
@@ -64,4 +79,3 @@ def make_recurrent_policy(Policy, batch_state_first=True):
 
             return hidden, state, lookup
     return Recurrent
-

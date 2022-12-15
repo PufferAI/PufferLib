@@ -102,10 +102,7 @@ class OpenSkillRating:
         if ranks is None:
             ranks = rank(policy_ids, scores)
 
-        try:
-            teams = [[self.ratings[e]] for e in policy_ids]
-        except:
-            T()
+        teams = [[self.ratings[e]] for e in policy_ids]
         ratings = openskill.rate(teams, rank=ranks)
         #ratings = [openskill.create_rating(team[0]) for team in ratings]
         for agent, rating in zip(policy_ids, ratings):

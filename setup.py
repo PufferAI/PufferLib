@@ -2,25 +2,40 @@ from setuptools import find_packages, setup
 
 REPO_URL = "https://github.com/PufferAI/PufferLib"
 
+extra = {
+    'docs': [
+        'sphinx-rtd-theme==0.5.1',
+        'sphinxcontrib-youtube==1.0.1',
+        ],
+    'tests': [
+        'nmmo==1.6.0.7',
+        'nle==0.9.0',
+        'magent==0.2.4',
+        'swig==4.1.1', #unspecified box2d dep
+        'gym[box2d]',
+        'gym[atari,accept-rom-license]',
+        'griddly==1.4.2',
+        #'git+https://github.com/oxwhirl/smac.git',
+        #'pettingzoo[butterfly]==1.22.1',
+        ],
+    }
+
+
 setup(
     name="pufferlib",
     description="PufferAI Library"
     "PufferAI's library of RL tools and utilities",
     long_description_content_type="text/markdown",
-    version='0.1.1',
+    version=open('pufferlib/version.py').read().split()[-1].strip("'"),
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
         'ray[all]==2.0.0',
         'opencv-python==3.4.17.63',
-        'nmmo==1.6.0.7',
         'openskill==2.4.0',
-        'magent==0.2.4',
-        'nle==0.9.0',
-        #'git+https://github.com/oxwhirl/smac.git',
-        #'pettingzoo[butterfly]==1.22.1',
     ],
-    python_requires=">=3.7",
+    extras_require=extra,
+    python_requires=">=3.8",
     license="MIT",
     author="Joseph Suarez",
     author_email="jsuarez@mit.edu",
