@@ -43,7 +43,7 @@ def make_rllib_tuner(binding, *,
         training_steps=3,
         checkpoints_to_keep=5,
         checkpoint_frequency=1,):
-    '''Provides sane defaults for RLlib'''
+    '''Creates an RLlib tuner with sane defaults'''
 
     ray.init(
         include_dashboard=False, # WSL Compatibility

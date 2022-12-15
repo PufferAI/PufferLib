@@ -26,7 +26,7 @@ setup(
     description="PufferAI Library"
     "PufferAI's library of RL tools and utilities",
     long_description_content_type="text/markdown",
-    version='0.1.1',
+    version=open('pufferlib/version.py').read().split()[-1].strip("'"),
     packages=find_packages(),
     include_package_data=True,
     install_requires=[

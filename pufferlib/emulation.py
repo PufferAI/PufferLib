@@ -23,6 +23,29 @@ def PufferWrapper(Env,
         emulate_const_horizon=1024,
         emulate_const_num_agents=128,
         obs_dtype=np.float32):
+    '''Wrap the provided env 
+
+    Args:
+        Env: An environment instance, class, or creator function
+        feature_parser: A function that transforms an observation
+        reward_shaper: A function that transforms the reward
+        rllib_dones: Boolean specifying whether to include __all__ in env dones
+        emulate_flat_obs: Boolean specifying whether to flatten observations
+        emulate_flat_atn: Boolean specifying whether to flatten actions
+        emulate_const_horizon: Int specifying max simulation steps before manual reset
+        emulate_const_num_agents: Int specifying max number of agents to pad
+        obs_dtype: Specify observation datatype if not float 32.
+
+    Returns:
+        A pettingzoo compliant PufferEnv class
+
+        If you specified an env class or creator function, this class
+        takes the same args/kwargs as the original
+
+        This environment defines an additional method that returns observation
+        space before any flattening but after feature parsing:
+            structured_observation_space(agent: int)
+    '''
 
     # Consider integrating these?
     #env = wrappers.AssertOutOfBoundsWrapper(env)
@@ -80,7 +103,7 @@ def PufferWrapper(Env,
             if self.emulate_flat_atn:
                 assert type(atn_space) in (gym.spaces.Dict, gym.spaces.Discrete, gym.spaces.MultiDiscrete)
                 if type(atn_space) == gym.spaces.Dict:
-                    return pack_atn_space(atn_space)
+                    return _pack_atn_space(atn_space)
                 elif type(atn_space) == gym.spaces.Discrete:
                     return gym.spaces.MultiDiscrete([atn_space.n])
 
@@ -111,7 +134,7 @@ def PufferWrapper(Env,
                 dummy = self.feature_parser({agent: dummy}, self._step)[agent]
 
             if self.emulate_flat_obs:
-                dummy = flatten_ob(dummy, self.obs_dtype)
+                dummy = _flatten_ob(dummy, self.obs_dtype)
 
             shape = dummy.shape
 
@@ -133,7 +156,7 @@ def PufferWrapper(Env,
                 obs = self.feature_parser(obs, self._step)
 
             if self.emulate_flat_obs:
-                obs = pack_obs(obs, self.obs_dtype)
+                obs = _pack_obs(obs, self.obs_dtype)
 
             return obs
 
@@ -230,6 +253,33 @@ def PufferWrapper(Env,
 
     return PufferEnv
 
+def unpack_batched_obs(obs_space, packed_obs):
+    '''Unpack a batch of observations into the original observation space
+    
+    Call this funtion in the forward pass of your network
+    '''
+
+    assert(isinstance(obs_space, gym.Space)), 'First arg must be a gym space'
+
+    batch = packed_obs.shape[0]
+    obs = {}
+    idx = 0
+
+    flat_obs_space = _flatten(obs_space)
+    for key_list, val in flat_obs_space.items():
+        obs_ptr = obs
+        for key in key_list[:-1]:
+            if key not in obs_ptr:
+                obs_ptr[key] = {}
+            obs_ptr = obs_ptr[key]
+
+        key = key_list[-1]
+        inc = np.prod(val.shape)
+        obs_ptr[key] = packed_obs[:, idx:idx + inc].reshape(batch, *val.shape)
+        idx = idx + inc
+
+    return obs
+
 def _zero(ob):
     if type(ob) == np.ndarray:
         ob *= 0
@@ -276,7 +326,7 @@ def _unflatten(ary, space, nested_dict=None, idx=0):
 
     return nested_dict, idx
 
-def pack_obs_space(obs_space, dtype=np.float32):
+def _pack_obs_space(obs_space, dtype=np.float32):
     assert(isinstance(obs_space, gym.Space)), 'Arg must be a gym space'
 
     if isinstance(obs_space, gym.spaces.Box):
@@ -293,7 +343,7 @@ def pack_obs_space(obs_space, dtype=np.float32):
         shape=(int(n),), dtype=dtype
     )
 
-def pack_atn_space(atn_space):
+def _pack_atn_space(atn_space):
     assert(isinstance(atn_space, gym.Space)), 'Arg must be a gym space'
 
     if isinstance(atn_space, gym.spaces.Discrete):
@@ -307,7 +357,7 @@ def pack_atn_space(atn_space):
 
     return gym.spaces.MultiDiscrete(lens) 
 
-def flatten_ob(ob, dtype=None):
+def _flatten_ob(ob, dtype=None):
     flat = _flatten(ob)
 
     if type(ob) == np.ndarray:
@@ -321,34 +371,12 @@ def flatten_ob(ob, dtype=None):
 
     return vals
 
-def pack_obs(obs, dtype=None):
-    return {k: flatten_ob(v, dtype) for k, v in obs.items()}
+def _pack_obs(obs, dtype=None):
+    return {k: _flatten_ob(v, dtype) for k, v in obs.items()}
 
-def batch_obs(obs):
+def _batch_obs(obs):
     return np.stack(list(obs.values()), axis=0)
 
-def pack_and_batch_obs(obs):
-    obs = pack_obs(obs)
-    return batch_obs(obs)
-
-def unpack_batched_obs(obs_space, packed_obs):
-    assert(isinstance(obs_space, gym.Space)), 'First arg must be a gym space'
-
-    batch = packed_obs.shape[0]
-    obs = {}
-    idx = 0
-
-    flat_obs_space = _flatten(obs_space)
-    for key_list, val in flat_obs_space.items():
-        obs_ptr = obs
-        for key in key_list[:-1]:
-            if key not in obs_ptr:
-                obs_ptr[key] = {}
-            obs_ptr = obs_ptr[key]
-
-        key = key_list[-1]
-        inc = np.prod(val.shape)
-        obs_ptr[key] = packed_obs[:, idx:idx + inc].reshape(batch, *val.shape)
-        idx = idx + inc
-
-    return obs
+def _pack_and_batch_obs(obs):
+    obs = _pack_obs(obs)
+    return _batch_obs(obs)

@@ -9,7 +9,7 @@ def test_pack_and_batch_obs():
     for binding in env_defs.bindings:
         env = binding.env_creator()
         obs = env.reset()
-        packed = pufferlib.emulation.pack_and_batch_obs(obs)
+        packed = pufferlib.emulation._pack_and_batch_obs(obs)
         assert type(packed) == np.ndarray
         assert len(packed) == len(obs)
 

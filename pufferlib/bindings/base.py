@@ -33,6 +33,22 @@ from pufferlib.utils import is_multiagent
 
 
 def auto(env_name=None, env=None, env_cls=None, env_args=[], env_kwargs={}, **kwargs):
+    '''Create binding for the specified environment
+    
+    Args:
+        env_name: Name of the environment. Inferred from the class if not specified.
+        env: Environment object to wrap. Alternatively, specify env_cls
+        env_cls: Environment class to wrap. Alternatively, specify env
+        env_args: Arguments for env_cls
+        env_kwargs: Keyword arguments for env_cls
+        **kwargs: Allows you to specify PufferWrapper arguments directly
+
+    Returns:
+        A PufferLib binding with the following properties:
+            env_creator: Function that creates a wrapped environment
+            single_observation_space: Observation space of a single agent
+            single_action_space: Action space of a single agent
+    '''
     class AutoBound(Base):
         def __init__(self):
             if env_cls is not None:
@@ -56,6 +72,14 @@ def auto(env_name=None, env=None, env_cls=None, env_args=[], env_kwargs={}, **kw
 
 class Base:
     def __init__(self, env_name, env_cls, env_args=[], env_kwargs={}):
+        '''Base class for PufferLib bindings
+
+        Args: 
+            env_name: Name of the environment
+            env_cls: Environment class to wrap
+            env_args: Arguments for env_cls
+            env_kwargs: Keyword arguments for env_cls
+        '''
         self.env_name = env_name
         self.env_cls = env_cls
 
@@ -69,24 +93,9 @@ class Base:
         self.single_observation_space = local_env.observation_space(self.default_agent)
         self.single_action_space = local_env.action_space(self.default_agent)
 
-
-    '''
-    @property
-    def single_observation_space(self):
-        return self.local_env.observation_space(
-                self.local_env.possible_agents[0])
-
-    @property
-    def single_action_space(self):
-        return self.local_env.action_space(
-                self.local_env.possible_agents[0])
-
-    '''
-    #def env_creator(self):
-    #    return self.env_cls(*self.env_args, **self.env_kwargs)
-
     @property
     def custom_model_config(self):
+        '''Custom Policy arguments for this environment'''
         return {
             'observation_space': self.single_observation_space,
             'action_space': self.single_action_space,
@@ -95,10 +104,17 @@ class Base:
             'lstm_layers': 0,
         }
 
-
 class Policy(BasePolicy):
     def __init__(self, observation_space, action_space,
             input_size, hidden_size, lstm_layers):
+        '''Default PyTorch policy
+        
+        It's just a linear layer over the flattened obs with
+        linear action decoders. This is for debugging only.
+        It is not a good policy for almost any env.
+        
+        Instantiated for you by the auto wrapper
+        '''
         super().__init__(input_size, hidden_size, lstm_layers)
         self.observation_space = observation_space
         self.action_space = action_space

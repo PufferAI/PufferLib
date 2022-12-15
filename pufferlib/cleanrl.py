@@ -7,6 +7,10 @@ from pufferlib.frameworks import make_recurrent_policy, BasePolicy
 
 
 def make_cleanrl_policy(policy_cls, lstm_layers=0):
+    '''Wrap a PyTorch network for compatibility with CleanRL
+    
+    policy_cls must subclass the PufferLib base PyTorch class
+    '''
     assert issubclass(policy_cls, BasePolicy)
 
     class CleanRLPolicy(policy_cls):
