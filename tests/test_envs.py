@@ -1,11 +1,10 @@
 from pdb import set_trace as T
 
 import pufferlib
-import env_defs
-
+from environments import bindings
 
 def test_envs():
-    for binding in env_defs.bindings:
+    for binding in bindings:
         env = binding.env_creator()
         obs = env.reset()
 

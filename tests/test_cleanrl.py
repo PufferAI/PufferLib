@@ -255,7 +255,8 @@ def train(
     writer.close()
 
 if __name__ == '__main__':
-    import env_defs
-    for binding in env_defs.bindings:
+    from environments import bindings
+
+    for binding in bindings:
         print(f'Training {binding.env_name}')
         train(binding, total_timesteps=1000)

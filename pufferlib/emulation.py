@@ -22,6 +22,7 @@ def PufferWrapper(Env,
         emulate_flat_atn=True,
         emulate_const_horizon=1024,
         emulate_const_num_agents=128,
+        suppress_env_prints=True,
         obs_dtype=np.float32):
     '''Wrap the provided env 
 
@@ -55,7 +56,11 @@ def PufferWrapper(Env,
             # Infer obs space from first agent
             # Assumes all agents have the same obs space
             if inspect.isclass(Env) or inspect.isfunction(Env):
-                self.env = Env(*args, **kwargs)
+                if suppress_env_prints:
+                    with utils.Suppress():
+                        self.env = Env(*args, **kwargs)
+                else:
+                    self.env = Env(*args, **kwargs)
             else:
                 self.env = Env
 
@@ -73,6 +78,7 @@ def PufferWrapper(Env,
             self.emulate_const_horizon = emulate_const_horizon
             self.emulate_const_num_agents = emulate_const_num_agents
             self.emulate_multiagent = not utils.is_multiagent(self.env)
+            self.suppress_env_prints = suppress_env_prints
 
 
             # Standardize property vs method obs/atn space interface
@@ -282,7 +288,7 @@ def unpack_batched_obs(obs_space, packed_obs):
 
 def _zero(ob):
     if type(ob) == np.ndarray:
-        ob *= 0
+        ob.fill(0)
     elif type(ob) in (dict, OrderedDict):
         for k, v in ob.items():
             _zero(ob[k])

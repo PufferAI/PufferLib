@@ -4,7 +4,7 @@ import gym
 import time
 
 from pufferlib.vecenvs import VecEnvs
-import env_defs
+from environments import bindings
 
 
 class MockEnv:
@@ -77,9 +77,8 @@ def test_mock_speed(steps=100, num_workers=8, envs_per_worker=32, delay=0):
     print(f'MockEnv SPS Raw/Vec/Speedup): {int(raw_sps)}/{int(vec_sps)}/{vec_sps/raw_sps}')
 
 def test_env_speedup(steps=100, num_workers=8):
-    bindings = [env_defs.bindings[2]]
-    #for binding in env_defs.bindings:
-    for binding in bindings:
+    #for binding in bindings:
+    for binding in [bindings[2]]:
         # Test Env SPS
         env = binding.env_creator()
         obs = env.reset() 

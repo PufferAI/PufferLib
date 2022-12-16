@@ -1,9 +1,10 @@
 from pdb import set_trace as T
 
 import pufferlib
-import env_defs
+from environments import bindings
 
-for binding in env_defs.bindings:
+
+for binding in bindings:
     tuner = pufferlib.rllib.make_rllib_tuner(binding)
     result = tuner.fit()[0]
     print('Saved ', result.checkpoint)
