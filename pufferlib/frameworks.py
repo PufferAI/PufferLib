@@ -40,7 +40,7 @@ class BasePolicy(torch.nn.Module, ABC):
         raise NotImplementedError
         return logits
 
-def make_recurrent_policy(Policy, batch_state_first=True):
+def make_recurrent_policy(Policy, batch_first=True):
     '''Wraps the given policy with an LSTM
     
     Called for you by framework-specific bindings
@@ -49,7 +49,7 @@ def make_recurrent_policy(Policy, batch_state_first=True):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             assert self.lstm_layers > 0
-            if batch_state_first:
+            if batch_first:
                 self.lstm = BatchFirstLSTM(
                     self.input_size,
                     self.hidden_size,
@@ -60,12 +60,14 @@ def make_recurrent_policy(Policy, batch_state_first=True):
                     self.input_size,
                     self.hidden_size,
                     self.lstm_layers,
-                    batch_first=True
                 )
  
-        def encode_observations(self, x, state, seq_lens):
+        def encode_observations(self, x, state):
             # TODO: Check shapes
             assert state is not None
+
+            assert len(state) == 2
+            assert len(x.shape) == 3
 
             B, TT, _ = x.shape
             x = x.reshape(B*TT, -1)

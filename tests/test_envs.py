@@ -4,7 +4,7 @@ import pufferlib
 from environments import bindings
 
 def test_envs():
-    for binding in bindings:
+    for binding in bindings.values():
         env = binding.env_creator()
         obs = env.reset()
 

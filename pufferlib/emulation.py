@@ -17,11 +17,10 @@ from pufferlib import utils
 def PufferWrapper(Env, 
         feature_parser=None,
         reward_shaper=None,
-        rllib_dones=False,
         emulate_flat_obs=True,
         emulate_flat_atn=True,
         emulate_const_horizon=1024,
-        emulate_const_num_agents=128,
+        emulate_const_num_agents=True,
         suppress_env_prints=True,
         obs_dtype=np.float32):
     '''Wrap the provided env 
@@ -30,7 +29,6 @@ def PufferWrapper(Env,
         Env: An environment instance, class, or creator function
         feature_parser: A function that transforms an observation
         reward_shaper: A function that transforms the reward
-        rllib_dones: Boolean specifying whether to include __all__ in env dones
         emulate_flat_obs: Boolean specifying whether to flatten observations
         emulate_flat_atn: Boolean specifying whether to flatten actions
         emulate_const_horizon: Int specifying max simulation steps before manual reset
@@ -71,7 +69,6 @@ def PufferWrapper(Env,
 
             self.feature_parser = feature_parser
             self.reward_shaper = reward_shaper
-            self.rllib_dones = rllib_dones
 
             self.emulate_flat_obs = emulate_flat_obs
             self.emulate_flat_atn = emulate_flat_atn
@@ -177,6 +174,11 @@ def PufferWrapper(Env,
 
             self.done = False
 
+            # Populate dummy ob
+            if self.emulate_const_num_agents:
+                for agent in self.possible_agents:
+                    self.observation_space(agent)
+
             # Some envs implement reset by calling step
             if not self.reset_calls_step:
                 obs = self._process_obs(obs)
@@ -245,10 +247,7 @@ def PufferWrapper(Env,
 
                 for agent in dones:
                     dones[agent] = (self._step == self.emulate_const_horizon) or all_done
-
-            # RLlib done compatibility
-            if self.rllib_dones and self.done:
-                dones['__all__'] = True
+                    self.agents = []
 
             # Observation shape test
             if __debug__:

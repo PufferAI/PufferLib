@@ -22,8 +22,9 @@ def make_all_atari_bindings():
         return [
             pufferlib.bindings.auto(
                 env=e,
+                env_name=env_id,
             )
-            for e in envs
+            for env_id, e in zip(env_ids, envs)
         ]
   
 def make_atari_bindings():
@@ -39,8 +40,9 @@ def make_atari_bindings():
         return [
             pufferlib.bindings.auto(
                 env=e,
+                env_name=env_id,
             )
-            for e in envs
+            for env_id, e in zip(env_ids, envs)
         ]
 
 def make_butterfly_bindings():
@@ -72,6 +74,7 @@ def make_classic_control_bindings():
     else:
         return pufferlib.bindings.auto(
             env_cls=classic_control.CartPoleEnv,
+            env_name='CartPole',
         )
  
 def make_griddly_bindings():
@@ -98,7 +101,7 @@ def make_magent_bindings():
         return pufferlib.bindings.auto(
             env_cls=aec_to_parallel_wrapper,
             env_args=[battle_v3.env()],
-            env_name='magent',
+            env_name='MAgent',
         )
 
 def make_nethack_bindings():
@@ -117,6 +120,7 @@ def make_neuralmmo_bindings():
     else:
         return pufferlib.bindings.auto(
             env_cls=nmmo.Env,
+            env_name='Neural MMO',
         )
 
 def make_smac_bindings():
@@ -128,7 +132,7 @@ def make_smac_bindings():
         return pufferlib.bindings.auto(
             env_cls=smac_env,
             env_args=[1000],
-            env_name='smac',
+            env_name='SMAC',
         )
 
 def make_all_bindings():
@@ -153,6 +157,7 @@ def make_all_bindings():
 
         for b in bind:
             assert b.env_name is not None
+            assert b.env_name not in bindings, 'Duplicate env name'
             bindings[b.env_name] = b
 
     return utils.dotdict(bindings)

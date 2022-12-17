@@ -27,6 +27,8 @@ def train(
         total_timesteps=10000000,
         learning_rate=2.5e-4,
         num_envs=8,
+        num_agents=1,
+        num_cores=os.cpu_count(),
         num_steps=128,
         anneal_lr=True,
         gamma=0.99,
@@ -75,17 +77,19 @@ def train(
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # Note: Must recompute num_envs for multiagent envs
-    cores = os.cpu_count()
-    assert args.num_envs / cores == args.num_envs // cores
+    envs_per_worker = args.num_envs / args.num_agents / args.num_cores
+    assert envs_per_worker == int(envs_per_worker)
+    assert envs_per_worker >= 1
+
     envs = VecEnvs(
         binding,
-        num_workers=cores,
-        envs_per_worker=args.num_envs // os.cpu_count(),
+        num_workers=args.num_cores,
+        envs_per_worker=int(envs_per_worker),
     )
 
     policy = pufferlib.cleanrl.make_cleanrl_policy(
         binding.policy,
-        lstm_layers=1
+        lstm_layers=binding.custom_model_config['lstm_layers']
     )
     agent = policy(**binding.custom_model_config).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
@@ -104,8 +108,8 @@ def train(
     next_obs = torch.Tensor(envs.reset()).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     next_lstm_state = (
-        torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device),
-        torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device),
+        torch.zeros(agent.lstm_layers, args.num_envs, agent.hidden_size).to(device),
+        torch.zeros(agent.lstm_layers, args.num_envs, agent.hidden_size).to(device),
     )  # hidden and cell states (see https://youtu.be/8HyCNIVRbSU)
  
     num_updates = args.total_timesteps // args.batch_size
@@ -256,7 +260,24 @@ def train(
 
 if __name__ == '__main__':
     from environments import bindings
+    #bindings = {'nmmo': pufferlib.bindings.registry.make_neuralmmo_bindings()}
+    for name, binding in bindings.items():
+        cores = 2
 
-    for binding in bindings:
-        print(f'Training {binding.env_name}')
-        train(binding, total_timesteps=1000)
+        local_env = binding.env_creator()
+        num_agents = len(local_env.possible_agents)
+        envs = int(cores * num_agents)
+
+        try:
+            train(
+                binding,
+                total_timesteps=128*envs,
+                num_envs=envs,
+                num_agents=num_agents,
+                num_cores=cores,
+                num_minibatches=cores,
+            )
+        except:
+            print(f'Failed {name}')
+        else:
+            print(f'Success {name}')

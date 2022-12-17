@@ -33,7 +33,7 @@ from pufferlib.torch import BatchFirstLSTM
 
 
 class NetHack(Base):
-    def __init__(self, rllib_dones=True):
+    def __init__(self):
         import nle
         from nle import nethack
 
@@ -41,7 +41,6 @@ class NetHack(Base):
         env_cls = PufferWrapper(
                 nle.env.NLE,
                 emulate_flat_atn=True,
-                rllib_dones=rllib_dones
             )
         super().__init__('nethack', env_cls)
 
@@ -58,13 +57,12 @@ class NetHack(Base):
             'lstm_layers': 1,
             'observation_shape': self.observation_shape,
             'num_actions': self.single_action_space.nvec[0],
-            'use_lstm': True,
         }
 
 
 class Policy(BasePolicy):
     def __init__(self, *args,
-            observation_shape, num_actions, use_lstm,
+            observation_shape, num_actions,
             embedding_dim, crop_dim, num_layers,
             input_size, hidden_size, lstm_layers,
             **kwargs):
@@ -75,7 +73,6 @@ class Policy(BasePolicy):
         self.blstats_size = observation_shape["blstats"].shape[0]
 
         self.num_actions = num_actions
-        self.use_lstm = use_lstm
 
         self.H = self.glyph_shape[0]
         self.W = self.glyph_shape[1]
@@ -158,9 +155,6 @@ class Policy(BasePolicy):
             nn.ReLU(),
         )
 
-        if self.use_lstm:
-            self.core = BatchFirstLSTM(self.h_dim, self.h_dim, num_layers=1)
-
         self.policy = nn.Linear(self.h_dim, self.num_actions)
         self.baseline = nn.Linear(self.h_dim, 1)
 
@@ -201,8 +195,11 @@ class Policy(BasePolicy):
 
         return st, None
 
-    def decode_actions(self, hidden, lookup):
-        return self.policy(hidden)
+    def decode_actions(self, hidden, lookup, concat=None):
+        action = self.policy(hidden)
+        if concat:
+            return action
+        return [action]
 
 class Crop(nn.Module):
     """Helper class for NetHackNet below."""

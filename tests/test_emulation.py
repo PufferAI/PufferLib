@@ -5,7 +5,7 @@ import pufferlib
 from environments import bindings
 
 def test_pack_and_batch_obs():
-    for binding in bindings:
+    for binding in bindings.values():
         env = binding.env_creator()
         obs = env.reset()
         packed = pufferlib.emulation._pack_and_batch_obs(obs)

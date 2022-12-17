@@ -39,6 +39,7 @@ def make_remote_envs(env_creator, n):
 class VecEnvs:
     def __init__(self, binding, num_workers, envs_per_worker=1):
         assert envs_per_worker > 0, 'Each worker must have at least 1 env'
+        assert type(envs_per_worker) == int
 
         ray.init(
             include_dashboard=False, # WSL Compatibility

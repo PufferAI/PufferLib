@@ -78,7 +78,7 @@ def test_mock_speed(steps=100, num_workers=8, envs_per_worker=32, delay=0):
 
 def test_env_speedup(steps=100, num_workers=8):
     #for binding in bindings:
-    for binding in [bindings[2]]:
+    for binding in [bindings.values()[2]]:
         # Test Env SPS
         env = binding.env_creator()
         obs = env.reset() 

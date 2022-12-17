@@ -49,7 +49,10 @@ def myprint(d):
             print("%s: %s" % (k, v))
 
 class dotdict(dict):
-    """dot.notation access to dictionary attributes"""
+    """dot.notation access to dictionary attributes
+    
+    TODO: Err on access bad key
+    """
     __getattr__ = dict.get
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
