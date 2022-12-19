@@ -211,6 +211,7 @@ def PufferWrapper(Env,
             if self.emulate_multiagent:
                 action = actions[1]
                 ob, reward, done, info = self.env.step(action)
+
                 obs = {1: ob}
                 rewards = {1: reward}
                 dones = {1: done}
@@ -317,6 +318,11 @@ def _unflatten(ary, space, nested_dict=None, idx=0):
     if nested_dict is None:
         outer_call = True
         nested_dict = {}
+
+    #TODO: Find a way to flip the check and the loop
+    # (Added for Gym microrts)
+    if isinstance(space, gym.spaces.MultiDiscrete):
+        return ary
 
     for k, v in space.items():
         if isinstance(v, MutableMapping) or isinstance(v, gym.spaces.Dict):

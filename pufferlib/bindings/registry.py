@@ -104,6 +104,18 @@ def make_magent_bindings():
             env_name='MAgent',
         )
 
+def make_microrts_bindings():
+    try:
+        from gym_microrts.envs import GlobalAgentCombinedRewardEnv
+    except:
+        print_setup_error('Gym Microrts')
+    else:
+        return pufferlib.bindings.auto(
+            env_cls=GlobalAgentCombinedRewardEnv,
+            env_name='Gym Microrts',
+        )
+
+
 def make_nethack_bindings():
     try:
         import nle

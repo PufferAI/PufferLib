@@ -13,6 +13,10 @@ tests = {
     'atari': [
         'gym[atari,accept-rom-license]',
     ],
+    # Not ready: Requires Gym 0.25+
+    #'avalon': [
+    #    'avalon-rl==1.0.0',
+    #],
     'box2d': [
         'swig==4.1.1', #unspecified box2d dep
         'gym[box2d]',
@@ -25,6 +29,10 @@ tests = {
     ],
     'magent': [
         'magent==0.2.4',
+    ],
+    'microrts': [
+        'ffmpeg==1.4',
+        'gym_microrts==0.3.2',
     ],
     'nethack': [
         'nle==0.9.0',
@@ -46,6 +54,7 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
+        'gym==0.23',
         'opencv-python==3.4.17.63',
         'openskill==2.4.0',
         'pettingzoo==1.15.0',
@@ -70,6 +79,8 @@ setup(
         "Programming Language :: Python :: 3.9",
     ],
 )
+
+
 #stable_baselines3
 #supersuit==3.3.5
 #'git+https://github.com/oxwhirl/smac.git',
