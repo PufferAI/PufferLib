@@ -1,7 +1,6 @@
 from pdb import set_trace as T
 
 import pufferlib
-from environments import bindings
 
 import ray
 import pufferlib
@@ -94,6 +93,7 @@ def make_rllib_tuner(binding, *,
     return tuner
 
 if __name__ == '__main__':
+    from environments import bindings
     for binding in bindings.values():
         tuner = make_rllib_tuner(binding)
         result = tuner.fit()[0]

@@ -51,13 +51,8 @@ class VecEnvs:
         self.envs_per_worker = envs_per_worker
         self.has_reset = False
 
-        import gym, griddly
-        from pufferlib.emulation import PufferWrapper
-        #wrapper = PufferWrapper(gym.make('GDY-Spiders-v0'))
-        #creator = lambda: wrapper()
         self.remote_envs_lists = [
             make_remote_envs(
-                #creator,
                 binding.env_creator,
                 envs_per_worker,
             ) for _ in range(num_workers)
