@@ -4,9 +4,11 @@ import torch
 import nmmo
 
 import pufferlib
+import pufferlib.binding
+import pufferlib.emulation
 
 
-class NeuralMMOBinding(pufferlib.bindings.Base):
+class NeuralMMOBinding(pufferlib.binding.Base):
     def __init__(self):
         env_cls = pufferlib.emulation.PufferWrapper(nmmo.Env)
         self.original_observation_space =  nmmo.Env().observation_space(1)
@@ -29,7 +31,7 @@ class NeuralMMOBinding(pufferlib.bindings.Base):
             'action_space': self.single_action_space,
         }
 
-class Policy(pufferlib.frameworks.BasePolicy):
+class Policy(pufferlib.binding.Policy):
     def __init__(self, original_observation_space, observation_space, action_space,
             input_size, hidden_size, lstm_layers):
         '''Simple custom PyTorch policy subclassing the pufferlib BasePolicy

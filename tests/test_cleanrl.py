@@ -12,6 +12,7 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 import pufferlib
+import pufferlib.frameworks.cleanrl
 from pufferlib.vecenvs import VecEnvs
 
 def train(
@@ -87,7 +88,7 @@ def train(
         envs_per_worker=int(envs_per_worker),
     )
 
-    policy = pufferlib.cleanrl.make_cleanrl_policy(
+    policy = pufferlib.frameworks.cleanrl.make_cleanrl_policy(
         binding.policy,
         lstm_layers=binding.custom_model_config['lstm_layers']
     )

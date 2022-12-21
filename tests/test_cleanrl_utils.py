@@ -3,19 +3,22 @@ from pdb import set_trace as T
 import torch
 
 import pufferlib
+import pufferlib.frameworks.cleanrl
+import pufferlib.registry
+from pufferlib.vecenvs import VecEnvs
 
 
 # TODO: Integrate this test and others into a single cleanrl test file
 # and add support for LSTM testing (i.e. default state)
 def test_cleanrl_utils():
-    binding = pufferlib.bindings.registry.make_classic_control_bindings()
+    binding = pufferlib.registry.make_classic_control_bindings()
 
-    envs = pufferlib.vecenvs.VecEnvs(binding, num_workers=2, envs_per_worker=2)
+    envs = VecEnvs(binding, num_workers=2, envs_per_worker=2)
  
     obs = envs.reset()
 
     policy = binding.policy
-    policy = pufferlib.cleanrl.make_cleanrl_policy(policy, lstm_layers=0)
+    policy = pufferlib.frameworks.cleanrl.make_cleanrl_policy(policy, lstm_layers=0)
     policy = policy(
         envs.single_observation_space,
         envs.single_action_space,

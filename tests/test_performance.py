@@ -4,6 +4,7 @@ import gym
 import time
 
 from pufferlib.vecenvs import VecEnvs
+
 from environments import bindings
 
 

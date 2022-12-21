@@ -3,7 +3,8 @@ from pdb import set_trace as T
 import torch
 from torch.distributions import Categorical
 
-from pufferlib.frameworks import make_recurrent_policy, BasePolicy
+import pufferlib
+import pufferlib.binding
 
 
 def make_cleanrl_policy(policy_cls, lstm_layers=0):
@@ -11,9 +12,10 @@ def make_cleanrl_policy(policy_cls, lstm_layers=0):
     
     policy_cls must subclass the PufferLib base PyTorch class
     '''
-    assert issubclass(policy_cls, BasePolicy)
+    assert issubclass(policy_cls, pufferlib.binding.Policy)
     if lstm_layers > 0:
-        policy_cls = make_recurrent_policy(policy_cls, batch_first=False)
+        policy_cls = pufferlib.binding.make_recurrent_policy(
+            policy_cls, batch_first=False)
 
     class CleanRLPolicy(policy_cls):
         '''Temporary hack to get framework running with CleanRL

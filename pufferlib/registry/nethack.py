@@ -1,43 +1,20 @@
 from pdb import set_trace as T
 
-from collections import defaultdict
-
-from typing import Dict, Tuple
-
-import numpy as np
-from numpy import ndarray
-import gym
-from gym import spaces
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import ray
-from ray.air import CheckpointConfig
-from ray.air.config import RunConfig
-from ray.air.config import ScalingConfig  
-from ray.tune.registry import register_env
-from ray.tune.tuner import Tuner
-from ray.tune.integration.wandb import WandbLoggerCallback
-from ray.train.rl.rl_trainer import RLTrainer
-from ray.rllib.models import ModelCatalog
-from ray.rllib.models.torch.recurrent_net import RecurrentNetwork
-from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
-from ray.rllib.algorithms.callbacks import DefaultCallbacks
+import pufferlib
+import pufferlib.binding
+import pufferlib.emulation
 
-from pufferlib.emulation import PufferWrapper, unpack_batched_obs
-from pufferlib.bindings import Base
-from pufferlib.frameworks import BasePolicy
-
-
-class NetHack(Base):
+class NetHack(pufferlib.binding.Base):
     def __init__(self):
         import nle
         from nle import nethack
 
         self.observation_shape = nle.env.NLE().observation_space
-        env_cls = PufferWrapper(
+        env_cls = pufferlib.emulation.PufferWrapper(
                 nle.env.NLE,
                 emulate_flat_atn=True,
             )
@@ -59,7 +36,7 @@ class NetHack(Base):
         }
 
 
-class Policy(BasePolicy):
+class Policy(pufferlib.binding.Policy):
     def __init__(self, *args,
             observation_shape, num_actions,
             embedding_dim, crop_dim, num_layers,
@@ -168,7 +145,8 @@ class Policy(BasePolicy):
 
     def encode_observations(self, env_outputs):
         TB, _ = env_outputs.shape
-        env_outputs = unpack_batched_obs(self.observation_shape, env_outputs)
+        env_outputs = pufferlib.emulation.unpack_batched_obs(
+            self.observation_shape, env_outputs)
 
         glyphs = env_outputs["glyphs"].long()
         blstats = env_outputs["blstats"]

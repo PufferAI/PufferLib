@@ -1,4 +1,5 @@
 import pufferlib
+import pufferlib.registry
 
 # Populate registry once instead of per-test
-bindings = pufferlib.bindings.registry.make_all_bindings()
+bindings = pufferlib.registry.make_all_bindings()

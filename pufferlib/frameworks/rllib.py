@@ -1,10 +1,8 @@
 from pdb import set_trace as T
 import numpy as np
+import torch
 
 import os
-from copy import deepcopy
-
-import torch
 
 from ray.train.rl.rl_predictor import RLPredictor as RLlibPredictor
 from ray.train.rl import RLCheckpoint
@@ -15,7 +13,8 @@ from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.env import ParallelPettingZooEnv
 
-from pufferlib.frameworks import BasePolicy, make_recurrent_policy
+import pufferlib
+import pufferlib.binding
 
 
 def register_env(name, env_creator):
@@ -53,10 +52,10 @@ def create_policies(n):
     }
 
 def make_rllib_policy(policy_cls, lstm_layers):
-    assert issubclass(policy_cls, BasePolicy)
+    assert issubclass(policy_cls, pufferlib.binding.Policy)
 
     if lstm_layers > 0:
-        policy_cls = make_recurrent_policy(policy_cls)
+        policy_cls = pufferlib.binding.make_recurrent_policy(policy_cls)
 
         class RLLibPolicy(RLLibRecurrentNetwork, policy_cls):
             def __init__(self, *args, **kwargs):

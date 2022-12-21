@@ -1,15 +1,15 @@
 from pdb import set_trace as T
 
-import pufferlib
-
 import ray
-import pufferlib
 from ray.air import CheckpointConfig
 from ray.air.config import RunConfig, ScalingConfig
 from ray.tune.tuner import Tuner
 from ray.tune.integration.wandb import WandbLoggerCallback
 from ray.train.rl.rl_trainer import RLTrainer
 from ray.rllib.models import ModelCatalog
+
+import pufferlib
+import pufferlib.frameworks.rllib
 
 
 def make_rllib_tuner(binding, *,
@@ -37,14 +37,14 @@ def make_rllib_tuner(binding, *,
     env_args = binding.env_args
     name = binding.env_name
 
-    policy = pufferlib.rllib.make_rllib_policy(binding.policy,
+    policy = pufferlib.frameworks.rllib.make_rllib_policy(binding.policy,
             lstm_layers=binding.custom_model_config['lstm_layers'])
     ModelCatalog.register_custom_model(name, policy)
     env_creator = lambda: env_cls(*env_args)
     test_env = env_creator()
 
     pufferlib.utils.check_env(test_env)
-    pufferlib.rllib.register_env(name, env_creator)
+    pufferlib.frameworks.rllib.register_env(name, env_creator)
 
     trainer = RLTrainer(
         algorithm=algorithm,

@@ -2,6 +2,7 @@ import sys
 import gym
 
 import pufferlib
+import pufferlib.utils
 
 def test_suppress():
     with pufferlib.utils.Suppress():

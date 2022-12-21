@@ -4,7 +4,8 @@ import gym
 import numpy as np
 
 import pufferlib
-from pufferlib import utils
+import pufferlib.binding
+import pufferlib.utils
 
 
 def print_setup_error(env: str):
@@ -14,13 +15,13 @@ def make_all_atari_bindings():
     '''Make every single Atari binding. Not used for standard tests'''
     try:
         env_ids = [e.id for e in gym.envs.registry.all()]
-        with utils.Suppress():
+        with pufferlib.utils.Suppress():
             envs = [gym.make(e) for e in env_ids]
     except:
         print_setup_error('Atari (ale)')
     else:
         return [
-            pufferlib.bindings.auto(
+            pufferlib.binding.auto(
                 env=e,
                 env_name=env_id,
             )
@@ -31,14 +32,14 @@ def make_atari_bindings():
     '''Make DQN paper Atari games'''
     try:
         env_ids = 'BeamRider-v4 Breakout-v4 Enduro-v4 Pong-v4 Qbert-v4 Seaquest-v4 SpaceInvaders-v4'.split()
-        with utils.Suppress():
+        with pufferlib.utils.Suppress():
             envs = [gym.make(e) for e in env_ids]
 
     except:
         print_setup_error('Atari (ale)')
     else:
         return [
-            pufferlib.bindings.auto(
+            pufferlib.binding.auto(
                 env=e,
                 env_name=env_id,
             )
@@ -54,12 +55,12 @@ def make_butterfly_bindings():
         print_setup_error('Bufferfly (pettingzoo)')
     else:
         return [
-            pufferlib.bindings.auto(
+            pufferlib.binding.auto(
                 env_cls=aec_to_parallel_wrapper,
                 env_args=[kaz.raw_env()],
                 env_name='kaz',
             ),
-            pufferlib.bindings.auto(
+            pufferlib.binding.auto(
                 env_cls=aec_to_parallel_wrapper,
                 env_args=[pong.raw_env()],
                 env_name='cooperative-pong',
@@ -72,7 +73,7 @@ def make_classic_control_bindings():
     except:
         print_setup_error('Classic Control (gym)')
     else:
-        return pufferlib.bindings.auto(
+        return pufferlib.binding.auto(
             env_cls=classic_control.CartPoleEnv,
             env_name='CartPole',
         )
@@ -82,11 +83,10 @@ def make_griddly_bindings():
         import griddly
         env_cls = lambda: gym.make('GDY-Spiders-v0')
         env_cls()
-        raise #Not ready yet
     except:
         print_setup_error('Spiders-v0 (griddly)')
     else:
-        return pufferlib.bindings.auto(
+        return pufferlib.binding.auto(
             env_cls=env_cls,
             obs_dtype=np.uint8,
         )
@@ -98,7 +98,7 @@ def make_magent_bindings():
     except:
         print_setup_error('MAgent (pettingzoo)')
     else:
-        return pufferlib.bindings.auto(
+        return pufferlib.binding.auto(
             env_cls=aec_to_parallel_wrapper,
             env_args=[battle_v3.env()],
             env_name='MAgent',
@@ -110,7 +110,7 @@ def make_microrts_bindings():
     except:
         print_setup_error('Gym Microrts')
     else:
-        return pufferlib.bindings.auto(
+        return pufferlib.binding.auto(
             env_cls=GlobalAgentCombinedRewardEnv,
             env_name='Gym Microrts',
         )
@@ -122,7 +122,7 @@ def make_nethack_bindings():
     except:
         print_setup_error('NetHack (nle)')
     else:
-        return pufferlib.bindings.NetHack()
+        return pufferlib.registry.NetHack()
 
 def make_neuralmmo_bindings():
     try:
@@ -130,7 +130,7 @@ def make_neuralmmo_bindings():
     except:
         print_setup_error('Neural MMO (nmmo)')
     else:
-        return pufferlib.bindings.auto(
+        return pufferlib.binding.auto(
             env_cls=nmmo.Env,
             env_name='Neural MMO',
         )
@@ -141,7 +141,7 @@ def make_smac_bindings():
     except:
         print_setup_error('SMAC')
     else:
-        return pufferlib.bindings.auto(
+        return pufferlib.binding.auto(
             env_cls=smac_env,
             env_args=[1000],
             env_name='SMAC',
@@ -152,7 +152,6 @@ def make_all_bindings():
         make_atari_bindings, # Well, almost all
         make_butterfly_bindings,
         make_classic_control_bindings,
-        make_griddly_bindings,
         make_magent_bindings,
         make_nethack_bindings,
         make_neuralmmo_bindings,
@@ -172,4 +171,4 @@ def make_all_bindings():
             assert b.env_name not in bindings, 'Duplicate env name'
             bindings[b.env_name] = b
 
-    return utils.dotdict(bindings)
+    return pufferlib.utils.dotdict(bindings)

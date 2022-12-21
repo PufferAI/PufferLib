@@ -4,11 +4,9 @@ import numpy as np
 
 from collections import OrderedDict
 from collections.abc import MutableMapping
-import functools
 import inspect
 
 import gym
-import pettingzoo
 from pettingzoo.utils.env import ParallelEnv
 
 from pufferlib import utils
