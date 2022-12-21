@@ -24,9 +24,10 @@ tests = {
     'butterfly': [
         'pettingzoo[butterfly]',
     ],
-    'griddly': [
-        'griddly==1.4.2',
-    ],
+    #'griddly': [
+    #    'imageio==2.23.0',
+    #    'griddly==1.4.2',
+    #],
     'magent': [
         'magent==0.2.4',
     ],
@@ -45,6 +46,15 @@ tests = {
     #],
 }
 
+rllib = [
+    'ray[all]==2.0.0',
+]
+
+
+flat_tests = list(set(chain.from_iterable(tests.values())))
+
+extra_all = docs + flat_tests + rllib
+
 setup(
     name="pufferlib",
     description="PufferAI Library"
@@ -58,11 +68,12 @@ setup(
         'opencv-python==3.4.17.63',
         'openskill==2.4.0',
         'pettingzoo==1.15.0',
-        'ray[all]==2.0.0',
     ],
     extras_require={
         'docs': docs,
-        'tests': list(set(chain.from_iterable(tests.values()))),
+        'rllib': rllib,
+        'tests': flat_tests,
+        'all': extra_all,
         **tests,
     },
     python_requires=">=3.8",
