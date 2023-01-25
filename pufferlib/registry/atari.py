@@ -1,36 +1,112 @@
+from pdb import set_trace as T
+import numpy as np
+
+import torch
+from torch import nn
+from torch.distributions.categorical import Categorical
+
+import gym
+
+from stable_baselines3.common.atari_wrappers import (  # isort:skip
+    ClipRewardEnv,
+    EpisodicLifeEnv,
+    FireResetEnv,
+    MaxAndSkipEnv,
+    #NoopResetEnv,
+)
+
+import pufferlib
+import pufferlib.binding
+
+
+# Broken in SB3
+class NoopResetEnv(gym.Wrapper):
+    """
+    Sample initial states by taking random number of no-ops on reset.
+    No-op is assumed to be action 0.
+
+    :param env: the environment to wrap
+    :param noop_max: the maximum value of no-ops to run
+    """
+
+    def __init__(self, env: gym.Env, noop_max: int = 30) -> None:
+        super().__init__(env)
+        self.noop_max = noop_max
+        self.override_num_noops = None
+        self.noop_action = 0
+        assert env.unwrapped.get_action_meanings()[0] == "NOOP"
+
+    def reset(self, **kwargs) -> np.ndarray:
+        self.env.reset(**kwargs)
+        if self.override_num_noops is not None:
+            noops = self.override_num_noops
+        else:
+            noops = self.unwrapped.np_random.integers(1, self.noop_max + 1)
+        assert noops > 0
+        obs = np.zeros(0)
+        for _ in range(noops):
+            obs, _, done, _ = self.env.step(self.noop_action)
+            if done:
+                obs = self.env.reset(**kwargs)
+        return obs
+
 
 class Atari(pufferlib.binding.Base):
-    def __init__(self):
-        import nle
-        from nle import nethack
+    def __init__(self, env_name):
+        try:
+            with pufferlib.utils.Suppress():
+                env = gym.make(env_name)
+        except ImportError as e:
+            raise e('Cannot gym.make ALE environment (pip install pufferlib[gym])')
 
-        self.observation_shape = nle.env.NLE().observation_space
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = NoopResetEnv(env, noop_max=30)
+        env = MaxAndSkipEnv(env, skip=4)
+        env = EpisodicLifeEnv(env)
+        if "FIRE" in env.unwrapped.get_action_meanings():
+            env = FireResetEnv(env)
+        env = ClipRewardEnv(env)
+        env = gym.wrappers.ResizeObservation(env, (84, 84))
+        env = gym.wrappers.GrayScaleObservation(env)
+        env = gym.wrappers.FrameStack(env, 1)
+
+        #env.seed(seed)
+        #env.action_space.seed(seed)
+        #env.observation_space.seed(seed)
+
         env_cls = pufferlib.emulation.PufferWrapper(
-                nle.env.NLE,
+                env,
                 emulate_flat_atn=True,
             )
-        super().__init__('nethack', env_cls)
+        super().__init__(env_name, env_cls)
 
+        self.observation_shape = env.observation_space
+        self.num_actions = env.action_space.n
         self.policy = Policy
 
     @property
     def custom_model_config(self):
         return {
-            'embedding_dim': 32,
-            'crop_dim': 9,
-            'num_layers': 5,
             'input_size': 512,
-            'hidden_size': 512,
+            'hidden_size': 128,
             'lstm_layers': 1,
             'observation_shape': self.observation_shape,
-            'num_actions': self.single_action_space.nvec[0],
+            'num_actions': self.num_actions,
         }
 
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
 
+class Policy(pufferlib.binding.Policy):
+    def __init__(self, *args, observation_shape, num_actions,
+            input_size, hidden_size, lstm_layers, **kwargs):
+        super().__init__(input_size, hidden_size, lstm_layers, *args, **kwargs)
 
-class Agent(nn.Module):
-    def __init__(self, envs):
-        super().__init__()
+        self.observation_shape = observation_shape
+        self.num_actions = num_actions
+
         self.network = nn.Sequential(
             layer_init(nn.Conv2d(1, 32, 8, stride=4)),
             nn.ReLU(),
@@ -48,37 +124,21 @@ class Agent(nn.Module):
                 nn.init.constant_(param, 0)
             elif "weight" in name:
                 nn.init.orthogonal_(param, 1.0)
-        self.actor = layer_init(nn.Linear(128, envs.single_action_space.n), std=0.01)
-        self.critic = layer_init(nn.Linear(128, 1), std=1)
+        self.actor = layer_init(nn.Linear(128, self.num_actions), std=0.01)
+        self.value_function = layer_init(nn.Linear(128, 1), std=1)
 
-    def get_states(self, x, lstm_state, done):
-        hidden = self.network(x / 255.0)
+    def critic(self, hidden):
+        return self.value_function(hidden)
 
-        # LSTM logic
-        batch_size = lstm_state[0].shape[1]
-        hidden = hidden.reshape((-1, batch_size, self.lstm.input_size))
-        done = done.reshape((-1, batch_size))
-        new_hidden = []
-        for h, d in zip(hidden, done):
-            h, lstm_state = self.lstm(
-                h.unsqueeze(0),
-                (
-                    (1.0 - d).view(1, -1, 1) * lstm_state[0],
-                    (1.0 - d).view(1, -1, 1) * lstm_state[1],
-                ),
-            )
-            new_hidden += [h]
-        new_hidden = torch.flatten(torch.cat(new_hidden), 0, 1)
-        return new_hidden, lstm_state
+    def encode_observations(self, flat_observations):
+        # TODO: Add flat obs support to emulation
+        batch = flat_observations.shape[0]
+        observations = flat_observations.reshape((batch,) + self.observation_shape.shape)
+        return self.network(observations / 255.0), None
 
-    def get_value(self, x, lstm_state, done):
-        hidden, _ = self.get_states(x, lstm_state, done)
-        return self.critic(hidden)
+    def decode_actions(self, flat_hidden, lookup, concat=None):
+        action = self.actor(flat_hidden)
+        if concat:
+            return action
+        return [action]
 
-    def get_action_and_value(self, x, lstm_state, done, action=None):
-        hidden, lstm_state = self.get_states(x, lstm_state, done)
-        logits = self.actor(hidden)
-        probs = Categorical(logits=logits)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state

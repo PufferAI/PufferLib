@@ -12,6 +12,7 @@ docs = [
 tests = {
     'atari': [
         'gym[atari,accept-rom-license]',
+        'stable_baselines3==1.2.0',
     ],
     # Not ready: Requires Gym 0.25+
     #'avalon': [

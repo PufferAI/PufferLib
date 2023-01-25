@@ -270,6 +270,7 @@ def unpack_batched_obs(obs_space, packed_obs):
     idx = 0
 
     flat_obs_space = _flatten(obs_space)
+
     for key_list, val in flat_obs_space.items():
         obs_ptr = obs
         for key in key_list[:-1]:
@@ -367,6 +368,10 @@ def _pack_atn_space(atn_space):
     return gym.spaces.MultiDiscrete(lens) 
 
 def _flatten_ob(ob, dtype=None):
+    # TODO: Find a better way to handle Atari
+    if type(ob) == gym.wrappers.frame_stack.LazyFrames:
+       ob = np.array(ob)
+
     flat = _flatten(ob)
 
     if type(ob) == np.ndarray:

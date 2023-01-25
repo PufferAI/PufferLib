@@ -32,19 +32,11 @@ def make_atari_bindings():
     '''Make DQN paper Atari games'''
     try:
         env_ids = 'BeamRider-v4 Breakout-v4 Enduro-v4 Pong-v4 Qbert-v4 Seaquest-v4 SpaceInvaders-v4'.split()
-        with pufferlib.utils.Suppress():
-            envs = [gym.make(e) for e in env_ids]
-
-    except:
+        envs = [pufferlib.registry.Atari(e) for e in env_ids]
+    except ImportError:
         print_setup_error('Atari (ale)')
     else:
-        return [
-            pufferlib.binding.auto(
-                env=e,
-                env_name=env_id,
-            )
-            for env_id, e in zip(env_ids, envs)
-        ]
+        return envs
 
 def make_butterfly_bindings():
     try:

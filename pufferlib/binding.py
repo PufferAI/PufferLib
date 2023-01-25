@@ -182,9 +182,9 @@ def make_recurrent_policy(Policy, batch_first=True):
             x = x.reshape(B*TT, -1)
 
             hidden, lookup = super().encode_observations(x)
-            assert hidden.shape == (B*TT, self.hidden_size)
+            assert hidden.shape == (B*TT, self.input_size)
 
-            hidden = hidden.view(B, TT, self.hidden_size)
+            hidden = hidden.view(B, TT, self.input_size)
             hidden, state = self.lstm(hidden, state)
             hidden = hidden.reshape(B*TT, self.hidden_size)
 
