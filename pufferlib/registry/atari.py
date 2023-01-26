@@ -118,12 +118,7 @@ class Policy(pufferlib.binding.Policy):
             layer_init(nn.Linear(64 * 7 * 7, 512)),
             nn.ReLU(),
         )
-        self.lstm = nn.LSTM(512, 128)
-        for name, param in self.lstm.named_parameters():
-            if "bias" in name:
-                nn.init.constant_(param, 0)
-            elif "weight" in name:
-                nn.init.orthogonal_(param, 1.0)
+
         self.actor = layer_init(nn.Linear(128, self.num_actions), std=0.01)
         self.value_function = layer_init(nn.Linear(128, 1), std=1)
 

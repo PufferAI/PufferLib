@@ -170,6 +170,13 @@ def make_recurrent_policy(Policy, batch_first=True):
                     self.hidden_size,
                     self.lstm_layers,
                 )
+
+            # TODO: More general init options
+            for name, param in self.lstm.named_parameters():
+                if "bias" in name:
+                    nn.init.constant_(param, 0)
+                elif "weight" in name:
+                    nn.init.orthogonal_(param, 1.0)
  
         def encode_observations(self, x, state):
             # TODO: Check shapes

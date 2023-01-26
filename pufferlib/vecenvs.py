@@ -3,12 +3,27 @@ from pdb import set_trace as T
 import ray
 import numpy as np
 import itertools
+import random
 
 
-def make_remote_envs(env_creator, n):
+def make_remote_envs(env_creator, n, seed):
     @ray.remote
     class RemoteEnvs:
         def __init__(self):
+            envs = []
+            for i in range(n):
+                # TODO: Port this to emulation
+                random.seed(seed)
+                agent_seed = random.randint(0, 2**32)
+
+                env = env_creator()
+                env.seed(seed + i)
+
+                # TODO: Check if different seed across obs/action spaces is correct
+                for agent_idx, agent in enumerate(env.possible_agents):
+                    env.action_space(agent).seed(agent_seed + agent_idx)
+                    env.observation_space(agent).seed(agent_seed + agent_idx)
+
             self.envs = [env_creator() for _ in range(n)]
         
         def reset_all(self):
@@ -37,7 +52,7 @@ def make_remote_envs(env_creator, n):
 
 
 class VecEnvs:
-    def __init__(self, binding, num_workers, envs_per_worker=1):
+    def __init__(self, binding, num_workers, envs_per_worker=1, seed=1):
         assert envs_per_worker > 0, 'Each worker must have at least 1 env'
         assert type(envs_per_worker) == int
 
@@ -55,7 +70,8 @@ class VecEnvs:
             make_remote_envs(
                 binding.env_creator,
                 envs_per_worker,
-            ) for _ in range(num_workers)
+                seed + idx*envs_per_worker,
+            ) for idx in range(num_workers)
         ]
 
         self.local_env = binding.env_creator()

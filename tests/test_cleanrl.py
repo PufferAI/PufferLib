@@ -86,6 +86,7 @@ def train(
         binding,
         num_workers=args.num_cores,
         envs_per_worker=int(envs_per_worker),
+        seed=seed,
     )
 
     policy = pufferlib.frameworks.cleanrl.make_cleanrl_policy(
