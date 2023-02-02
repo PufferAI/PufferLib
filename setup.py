@@ -57,8 +57,8 @@ extra_all = docs + flat_tests + rllib
 
 setup(
     name="pufferlib",
-    description="PufferAI Library"
-    "PufferAI's library of RL tools and utilities",
+    description="PufferAI Library",
+    long_description="PufferAI's library of reinforcement learning tools and utilities",
     long_description_content_type="text/markdown",
     version=open('pufferlib/version.py').read().split()[-1].strip("'"),
     packages=find_packages(),
