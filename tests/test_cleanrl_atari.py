@@ -15,8 +15,10 @@ if __name__ == '__main__':
     for name, binding in bindings.items():
         test_cleanrl.train(
             binding,
+            num_cores=8, 
+            cuda=False,
             total_timesteps=10_000_000,
-            track=True,
+            track=False,
             wandb_project_name='pufferlib',
             wandb_entity='jsuarez',
         )

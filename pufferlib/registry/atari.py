@@ -88,8 +88,8 @@ class Atari(pufferlib.binding.Base):
     def custom_model_config(self):
         return {
             'input_size': 512,
-            'hidden_size': 128,
-            'lstm_layers': 1,
+            'hidden_size': 512, #128
+            'lstm_layers': 0, #1
             'observation_shape': self.observation_shape,
             'num_actions': self.num_actions,
         }
@@ -115,12 +115,12 @@ class Policy(pufferlib.binding.Policy):
             layer_init(nn.Conv2d(64, 64, 3, stride=1)),
             nn.ReLU(),
             nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, 512)),
+            layer_init(nn.Linear(64 * 7 * 7, self.hidden_size)),
             nn.ReLU(),
         )
 
-        self.actor = layer_init(nn.Linear(128, self.num_actions), std=0.01)
-        self.value_function = layer_init(nn.Linear(128, 1), std=1)
+        self.actor = layer_init(nn.Linear(self.hidden_size, self.num_actions), std=0.01)
+        self.value_function = layer_init(nn.Linear(self.hidden_size, 1), std=1)
 
     def critic(self, hidden):
         return self.value_function(hidden)
