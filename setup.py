@@ -11,7 +11,7 @@ docs = [
 
 tests = {
     'atari': [
-        'gym[atari,accept-rom-license]',
+        'gym[atari,accept-rom-license]==0.23.0',
         'stable_baselines3==1.2.0',
     ],
     # Not ready: Requires Gym 0.25+
@@ -51,6 +51,10 @@ rllib = [
     'ray[all]==2.0.0',
 ]
 
+cleanrl = [
+    'ray==2.0.0',
+    'tensorboard==2.11.2',
+]
 
 flat_tests = list(set(chain.from_iterable(tests.values())))
 
@@ -66,6 +70,7 @@ setup(
     include_package_data=True,
     install_requires=[
         'gym==0.23',
+        'numpy==1.23.3',
         'opencv-python==3.4.17.63',
         'openskill==2.4.0',
         'pettingzoo==1.15.0',
