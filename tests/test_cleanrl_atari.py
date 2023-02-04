@@ -16,7 +16,7 @@ if __name__ == '__main__':
         test_cleanrl.train(
             binding,
             num_cores=8, 
-            cuda=False,
+            cuda=True,
             total_timesteps=10_000_000,
             track=False,
             wandb_project_name='pufferlib',

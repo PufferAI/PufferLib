@@ -372,6 +372,8 @@ def _flatten_ob(ob, dtype=None):
     if type(ob) == gym.wrappers.frame_stack.LazyFrames:
        ob = np.array(ob)
 
+    #assert type(ob) == np.array
+
     flat = _flatten(ob)
 
     if type(ob) == np.ndarray:
