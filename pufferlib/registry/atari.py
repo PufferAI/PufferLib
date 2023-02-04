@@ -53,6 +53,8 @@ class NoopResetEnv(gym.Wrapper):
 
 class Atari(pufferlib.binding.Base):
     def __init__(self, env_name):
+        self.lstm_layers = 0
+
         try:
             with pufferlib.utils.Suppress():
                 env = gym.make(env_name)
@@ -68,7 +70,8 @@ class Atari(pufferlib.binding.Base):
         env = ClipRewardEnv(env)
         env = gym.wrappers.ResizeObservation(env, (84, 84))
         env = gym.wrappers.GrayScaleObservation(env)
-        env = gym.wrappers.FrameStack(env, 1)
+        env = gym.wrappers.FrameStack(env,
+            1 if self.lstm_layers > 0 else 4)
 
         #env.seed(seed)
         #env.action_space.seed(seed)
@@ -89,7 +92,7 @@ class Atari(pufferlib.binding.Base):
         return {
             'input_size': 512,
             'hidden_size': 512, #128
-            'lstm_layers': 0, #1
+            'lstm_layers': self.lstm_layers, #1
             'observation_shape': self.observation_shape,
             'num_actions': self.num_actions,
         }
@@ -108,7 +111,7 @@ class Policy(pufferlib.binding.Policy):
         self.num_actions = num_actions
 
         self.network = nn.Sequential(
-            layer_init(nn.Conv2d(4, 32, 8, stride=4)),
+            layer_init(nn.Conv2d(1 if lstm_layers>0 else 4, 32, 8, stride=4)),
             nn.ReLU(),
             layer_init(nn.Conv2d(32, 64, 4, stride=2)),
             nn.ReLU(),
