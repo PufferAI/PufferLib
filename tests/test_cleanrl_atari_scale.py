@@ -16,7 +16,7 @@ if __name__ == '__main__':
         test_cleanrl.train(
             binding,
             num_cores=8, 
-            envs_per_core=64,
+            num_envs=512,
             cuda=True,
             total_timesteps=10_000_000,
             track=True,

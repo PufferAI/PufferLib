@@ -5,6 +5,8 @@ import os
 import random
 import time
 
+import gym
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -24,7 +26,7 @@ def train(
         track=False,
         wandb_project_name='cleanRL',
         wandb_entity=None,
-        capture_video=True,
+        capture_video=False,
         total_timesteps=10000000,
         learning_rate=2.5e-4,
         num_envs=8,
@@ -106,7 +108,6 @@ def train(
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
-    start_time = time.time()
     next_obs = torch.Tensor(envs.reset()).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     next_lstm_state = (
@@ -118,6 +119,7 @@ def train(
 
     for update in range(1, num_updates + 1):
         epoch_time = time.time()
+        epoch_step = 0
 
         initial_lstm_state = (next_lstm_state[0].clone(), next_lstm_state[1].clone())
         # Annealing the rate if instructed to do so.
@@ -130,6 +132,7 @@ def train(
         inference_time = 0
         for step in range(0, args.num_steps):
             global_step += 1 * args.num_envs
+            epoch_step += 1 * args.num_envs
             obs[step] = next_obs
             dones[step] = next_done
 
@@ -255,17 +258,28 @@ def train(
 
         train_time = time.time() - train_time
         epoch_time = time.time() - epoch_time
+        extra_time = epoch_time - train_time - env_step_time
 
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
 
+        env_sps = int(epoch_step / env_step_time)
+        inference_sps = int(epoch_step / inference_time)
+        train_sps = int(epoch_step / train_time)
+        epoch_sps = int(epoch_step / epoch_time)
+
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         writer.add_scalar("performance/env_time", env_step_time, global_step)
         writer.add_scalar("performance/inference_time", inference_time, global_step)
         writer.add_scalar("performance/train_time", train_time, global_step)
         writer.add_scalar("performance/epoch_time", epoch_time, global_step)
+        writer.add_scalar("performance/extra_time", extra_time, global_step)
+        writer.add_scalar("charts/SPS", epoch_sps)
+        writer.add_scalar("charts/env_sps", env_sps, global_step)
+        writer.add_scalar("charts/inference_sps", inference_sps, global_step)
+        writer.add_scalar("charts/train_sps", train_sps, global_step)
         writer.add_scalar("charts/reward", rewards.cpu().mean(), global_step)
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
@@ -275,8 +289,6 @@ def train(
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        print("SPS:", int(global_step / (time.time() - start_time)))
-        writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     envs.close()
     writer.close()
