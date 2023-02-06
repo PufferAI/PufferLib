@@ -31,7 +31,7 @@ def make_all_atari_bindings():
 def make_atari_bindings():
     '''Make DQN paper Atari games'''
     try:
-        env_ids = 'BeamRider-v4 BreakoutNoFrameskip-v4 Enduro-v4 Pong-v4 Qbert-v4 Seaquest-v4 SpaceInvaders-v4'.split()
+        env_ids = 'BeamRiderNoFrameskip-v4 BreakoutNoFrameskip-v4 EnduroNoFrameskip-v4 PongNoFrameskip-v4 QbertNoFrameskip-v4 SeaquestNoFrameskip-v4 SpaceInvadersNoFrameskip-v4'.split()
         envs = [pufferlib.registry.Atari(e) for e in env_ids]
     except ImportError:
         print_setup_error('Atari (ale)')
