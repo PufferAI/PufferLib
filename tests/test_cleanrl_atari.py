@@ -18,7 +18,7 @@ if __name__ == '__main__':
             num_cores=8, 
             cuda=True,
             total_timesteps=10_000_000,
-            track=False,
+            track=True,
             wandb_project_name='pufferlib',
             wandb_entity='jsuarez',
         )

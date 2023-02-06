@@ -9,7 +9,6 @@ import inspect
 import pettingzoo
 import gym
 
-
 def check_env(env):
     #assert issubclass(env_cls, gym.Env), "Not a gymnasium env (are you on old gym?)"
     assert hasattr(env, 'possible_agents')

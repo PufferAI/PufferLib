@@ -117,6 +117,8 @@ def train(
     num_updates = args.total_timesteps // args.batch_size
 
     for update in range(1, num_updates + 1):
+        epoch_time = time.time()
+
         initial_lstm_state = (next_lstm_state[0].clone(), next_lstm_state[1].clone())
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
@@ -124,6 +126,8 @@ def train(
             lrnow = frac * args.learning_rate
             optimizer.param_groups[0]["lr"] = lrnow
 
+        env_step_time = 0
+        inference_time = 0
         for step in range(0, args.num_steps):
             global_step += 1 * args.num_envs
             obs[step] = next_obs
@@ -131,13 +135,19 @@ def train(
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
+                start = time.time()
                 action, logprob, _, value, next_lstm_state = agent.get_action_and_value(next_obs, next_lstm_state, next_done)
+                inference_time += time.time() - start
                 values[step] = value.flatten()
+
             actions[step] = action
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
+            start = time.time()
             next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            env_step_time += time.time() - start
+
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
@@ -183,6 +193,8 @@ def train(
         envinds = np.arange(args.num_envs)
         flatinds = np.arange(args.batch_size).reshape(args.num_steps, args.num_envs)
         clipfracs = []
+
+        train_time = time.time()
         for epoch in range(args.update_epochs):
             np.random.shuffle(envinds)
             for start in range(0, args.num_envs, envsperbatch):
@@ -241,11 +253,19 @@ def train(
                 if approx_kl > args.target_kl:
                     break
 
+        train_time = time.time() - train_time
+        epoch_time = time.time() - epoch_time
+
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
+
         # TRY NOT TO MODIFY: record rewards for plotting purposes
+        writer.add_scalar("performance/env_time", env_step_time, global_step)
+        writer.add_scalar("performance/inference_time", inference_time, global_step)
+        writer.add_scalar("performance/train_time", train_time, global_step)
+        writer.add_scalar("performance/epoch_time", epoch_time, global_step)
         writer.add_scalar("charts/reward", rewards.cpu().mean(), global_step)
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
