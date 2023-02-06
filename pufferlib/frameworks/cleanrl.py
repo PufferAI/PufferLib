@@ -37,7 +37,10 @@ def make_cleanrl_policy(policy_cls, lstm_layers=0):
 
         # TODO: Cache value
         def get_value(self, x, lstm_state=None, done=None):
-            hidden = self._compute_hidden(x, lstm_state)
+            if lstm_layers > 0:
+                hidden, lstm_state = self._compute_hidden(x, lstm_state)
+            else:
+                hidden = self._compute_hidden(x, lstm_state)
             return self.critic(hidden)
 
         # TODO: Compute seq_lens from done
