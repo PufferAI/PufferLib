@@ -53,7 +53,7 @@ class NoopResetEnv(gym.Wrapper):
 
 class Atari(pufferlib.binding.Base):
     def __init__(self, env_name):
-        self.lstm_layers = 0
+        self.lstm_layers = 1
 
         try:
             with pufferlib.utils.Suppress():

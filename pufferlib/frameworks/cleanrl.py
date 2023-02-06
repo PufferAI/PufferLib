@@ -29,6 +29,7 @@ def make_cleanrl_policy(policy_cls, lstm_layers=0):
                 batch_size = lstm_state[0].shape[1]
                 x = x.reshape((-1, batch_size, x.shape[-1]))
                 hidden, state, lookup = self.encode_observations(x, lstm_state)
+                return hidden, state
             else:
                 hidden, _ = self.encode_observations(x)
 
@@ -41,9 +42,12 @@ def make_cleanrl_policy(policy_cls, lstm_layers=0):
 
         # TODO: Compute seq_lens from done
         def get_action_and_value(self, x, lstm_state=None, done=None, action=None):
-            hidden = self._compute_hidden(x, lstm_state)
-            value = self.critic(hidden)
+            if lstm_layers > 0:
+                hidden, lstm_state = self._compute_hidden(x, lstm_state)
+            else:
+                hidden = self._compute_hidden(x, lstm_state)
 
+            value = self.critic(hidden)
             flat_logits = self.decode_actions(hidden, None, concat=False)
 
             multi_categorical = [Categorical(logits=l) for l in flat_logits]
