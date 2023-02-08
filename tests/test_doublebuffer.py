@@ -44,9 +44,9 @@ def parse_args(): # fmt: off
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=2.5e-4,
         help="the learning rate of the optimizer")
-    parser.add_argument("--envpool_mul", type=int, default=2,
+    parser.add_argument("--num-buffers", type=int, default=1,
         help="the number of parallel game environments")
-    parser.add_argument("--num-envs", type=int, default=4,
+    parser.add_argument("--num-envs", type=int, default=8,
         help="the number of parallel game environments")
     parser.add_argument("--num-steps", type=int, default=128,
         help="the number of steps to run in each environment per policy rollout")
@@ -77,7 +77,6 @@ def parse_args(): # fmt: off
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
-    args.envpool_size = int(args.num_envs * args.envpool_mul)
     # fmt: on
     return args
 
@@ -181,48 +180,51 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    envs = envpool.make(
-        args.env_id,
-        env_type="gym",
-        batch_size=args.num_envs,
-        num_envs=args.envpool_size,
-        episodic_life=True,
-        reward_clip=True,
-        seed=args.seed,
-    )
-    envs.num_envs = args.num_envs
-    envs.single_action_space = envs.action_space
-    envs.single_observation_space = envs.observation_space
-    envs = RecordEpisodeStatistics(envs)
-    assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
+    buffers = []
+    for i in range(args.num_buffers):
+        envs = envpool.make(
+            args.env_id,
+            env_type="gym",
+            num_envs=args.num_envs,
+            episodic_life=True,
+            reward_clip=True,
+            seed=args.seed + i,
+        )
+        buffers.append(envs)
+        envs.num_envs = args.num_envs
+        envs.single_action_space = envs.action_space
+        envs.single_observation_space = envs.observation_space
+        envs = RecordEpisodeStatistics(envs)
+        assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = Agent(envs).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
-    obs = torch.zeros((args.num_steps, args.envpool_size) + envs.single_observation_space.shape).to(device)
-    actions = torch.zeros((args.num_steps, args.envpool_size) + envs.single_action_space.shape, dtype=int).to(device)
-    logprobs = torch.zeros((args.num_steps, args.envpool_size)).to(device)
-    rewards = torch.zeros((args.num_steps, args.envpool_size)).to(device)
-    dones = torch.zeros((args.num_steps, args.envpool_size)).to(device)
-    values = torch.zeros((args.num_steps, args.envpool_size)).to(device)
+    obs = torch.zeros((args.num_steps, args.num_buffers, args.num_envs) + envs.single_observation_space.shape).to(device)
+    actions = torch.zeros((args.num_steps, args.num_buffers, args.num_envs) + envs.single_action_space.shape, dtype=int).to(device)
+    logprobs = torch.zeros((args.num_steps, args.num_buffers, args.num_envs)).to(device)
+    rewards = torch.zeros((args.num_steps, args.num_buffers, args.num_envs)).to(device)
+    dones = torch.zeros((args.num_steps, args.num_buffers, args.num_envs)).to(device)
+    values = torch.zeros((args.num_steps, args.num_buffers, args.num_envs)).to(device)
     avg_returns = deque(maxlen=20)
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    envs.async_reset()
-    next_obs, _, _, info = envs.recv()
 
-    next_obs = torch.Tensor(next_obs).to(device)
-    next_done = torch.zeros(args.num_envs).to(device)
+    next_obs = []
+    next_done = []
+    env_ids = []
+    for pool in buffers:
+        pool.async_reset()
+        n_obs, _, _, info = pool.recv()
+        env_ids.append(info['env_id'])
+
+        next_obs.append(torch.Tensor(n_obs).to(device))
+        next_done.append(torch.zeros((args.num_envs,)).to(device))
+
     num_updates = args.total_timesteps // args.batch_size
-
-    pool_obs = torch.zeros((args.envpool_size,) + envs.single_observation_space.shape).to(device)
-    pool_dones = torch.zeros((args.envpool_size,)).to(device)
-
-    env_id = info['env_id']
-    pool_obs[env_id] = next_obs
 
     for update in range(1, num_updates + 1):
         # Annealing the rate if instructed to do so.
@@ -232,28 +234,34 @@ if __name__ == "__main__":
             optimizer.param_groups[0]["lr"] = lrnow
 
         for step in range(0, args.num_steps):
-            for _ in range(args.envpool_mul):
+            buf = 0
+            for _ in range(args.num_buffers):
                 global_step += 1 * args.num_envs
-                obs[step][env_id] = next_obs
-                dones[step][env_id] = next_done
+
+                env_id = env_ids[buf]
+                obs[step, buf][env_id] = next_obs[buf]
+                dones[step, buf][env_id] = next_done[buf]
 
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
-                    action, logprob, _, value = agent.get_action_and_value(next_obs)
-                    values[step][env_id] = value.flatten()
+                    action, logprob, _, value = agent.get_action_and_value(next_obs[buf])
+                    values[step, buf][env_id] = value.flatten()
 
-                actions[step][env_id] = action
-                logprobs[step][env_id] = logprob
+                actions[step, buf][env_id] = action
+                logprobs[step, buf][env_id] = logprob
 
                 # TRY NOT TO MODIFY: execute the game and log data.
                 envs.send(action.cpu().numpy(), env_id)
-                next_obs, reward, done, info = envs.recv()
-                env_id = info['env_id']
 
-                rewards[step][env_id] = torch.tensor(reward).to(device).view(-1)
-                next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
-                pool_obs[env_id] = next_obs
-                pool_dones[env_id] = next_done
+                # IMPORTANT: Roll over buffer for async sampling
+                buf = (buf + 1) % args.num_buffers
+
+                next_obs[buf], reward, done, info = envs.recv()
+                env_ids[buf] = info['env_id']
+
+                rewards[step, buf][env_id] = torch.tensor(reward).to(device).view(-1)
+                next_obs[buf] = torch.Tensor(next_obs[buf]).to(device)
+                next_done[buf] = torch.Tensor(done).to(device)
 
                 for idx, d in enumerate(done):
                     # Will have to fix logging for the new envpool API
@@ -267,19 +275,20 @@ if __name__ == "__main__":
 
         # bootstrap value if not done
         with torch.no_grad():
-            next_value = agent.get_value(pool_obs).reshape(1, -1)
-            advantages = torch.zeros_like(rewards).to(device)
-            lastgaelam = 0
-            for t in reversed(range(args.num_steps)):
-                if t == args.num_steps - 1:
-                    nextnonterminal = 1.0 - pool_dones
-                    nextvalues = next_value
-                else:
-                    nextnonterminal = 1.0 - dones[t + 1]
-                    nextvalues = values[t + 1]
-                delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
-                advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
-            returns = advantages + values
+            for buf in range(args.num_buffers):
+                next_value = agent.get_value(next_obs[buf]).reshape(1, -1)
+                advantages = torch.zeros_like(rewards).to(device)
+                lastgaelam = 0
+                for t in reversed(range(args.num_steps)):
+                    if t == args.num_steps - 1:
+                        nextnonterminal = 1.0 - next_done[buf]
+                        nextvalues = next_value
+                    else:
+                        nextnonterminal = 1.0 - dones[t + 1]
+                        nextvalues = values[t + 1]
+                    delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
+                    advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
+                returns = advantages + values
 
         # flatten the batch
         b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
