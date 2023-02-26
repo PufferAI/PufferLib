@@ -1,4 +1,3 @@
-from pdb import set_trace as T
 import torch
 
 import nmmo
@@ -68,23 +67,3 @@ class Policy(pufferlib.binding.Policy):
             return torch.cat(actions, dim=-1)
         return actions
 
-if __name__ == '__main__':
-    binding = NeuralMMOBinding()
-
-    # See tests/test_cleanrl for source
-    # (Listed below on github.io)
-    import test_cleanrl
-    test_cleanrl.train(
-        binding,
-        total_timesteps=2**15,
-        num_envs=256,
-        num_agents=128,
-        num_cores=2,
-        num_minibatches=2,
-    )
-
-    # See tests/test_rllib for source
-    # (Listed below on github.io)
-    import test_rllib
-    tuner = test_rllib.make_rllib_tuner(binding)
-    tuner.fit()

@@ -73,12 +73,9 @@ class Atari(pufferlib.binding.Base):
         env = gym.wrappers.FrameStack(env,
             1 if self.lstm_layers > 0 else 4)
 
-        #env.seed(seed)
-        #env.action_space.seed(seed)
-        #env.observation_space.seed(seed)
-
         env_cls = pufferlib.emulation.PufferWrapper(
                 env,
+                env_includes_reset=True,
                 emulate_flat_atn=True,
             )
         super().__init__(env_name, env_cls)

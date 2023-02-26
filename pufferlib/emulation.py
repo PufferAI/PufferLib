@@ -1,6 +1,8 @@
 from pdb import set_trace as T
 
 import numpy as np
+import time
+import functools
 
 from collections import OrderedDict
 from collections.abc import MutableMapping
@@ -11,15 +13,17 @@ from pettingzoo.utils.env import ParallelEnv
 
 from pufferlib import utils
 
+import time
 
 def PufferWrapper(Env, 
         feature_parser=None,
         reward_shaper=None,
+        env_includes_reset=False,
         emulate_flat_obs=True,
         emulate_flat_atn=True,
         emulate_const_horizon=1024,
         emulate_const_num_agents=True,
-        suppress_env_prints=True,
+        suppress_env_prints=False,
         obs_dtype=np.float32):
     '''Wrap the provided env 
 
@@ -48,15 +52,35 @@ def PufferWrapper(Env,
     #env = wrappers.AssertOutOfBoundsWrapper(env)
     #env = wrappers.OrderEnforcingWrapper(env)
     class PufferEnv(ParallelEnv):
+        @utils.profile
+        def _create_env(self, *args, **kwargs):
+            return Env(*args, **kwargs)
+
+        @utils.profile
+        def _reset_env(self):
+            return self.env.reset()
+
+        @utils.profile
+        def _step_env(self, actions):
+            return self.env.step(actions)
+
+        @utils.profile
         def __init__(self, *args, **kwargs):
+            # Populated by utils.profile decorator
+            self.timers = {}
+            self.prestep_timer = utils.Profiler()
+            self.poststep_timer = utils.Profiler()
+            self.timers['prestep_timer'] = self.prestep_timer
+            self.timers['poststep_timer'] = self.poststep_timer
+
             # Infer obs space from first agent
             # Assumes all agents have the same obs space
             if inspect.isclass(Env) or inspect.isfunction(Env):
                 if suppress_env_prints:
                     with utils.Suppress():
-                        self.env = Env(*args, **kwargs)
+                        self.env = self._create_env(*args, **kwargs)
                 else:
-                    self.env = Env(*args, **kwargs)
+                    self.env = self._create_env(*args, **kwargs)
             else:
                 self.env = Env
 
@@ -67,6 +91,7 @@ def PufferWrapper(Env,
 
             self.feature_parser = feature_parser
             self.reward_shaper = reward_shaper
+            self.env_includes_reset = env_includes_reset
 
             self.emulate_flat_obs = emulate_flat_obs
             self.emulate_flat_atn = emulate_flat_atn
@@ -75,14 +100,26 @@ def PufferWrapper(Env,
             self.emulate_multiagent = not utils.is_multiagent(self.env)
             self.suppress_env_prints = suppress_env_prints
 
+            # Manual LRU since functools.lru_cache is not pickleable
+            self.observation_space_cache = {}
+            self.action_space_cache = {}
 
             # Standardize property vs method obs/atn space interface
             if self.emulate_multiagent:
-                self.agents = [1]
                 self.possible_agents = [1]
             else:
                 self.possible_agents = self.env.possible_agents
 
+            # Set env metadata
+            if hasattr(self.env, 'metadata'):
+                self.metadata = self.env.metadata
+            else:
+                self.metadata = {}
+
+        def num_agents(self):
+            return len(self.possible_agents)
+
+        @utils.profile
         def action_space(self, agent):
             '''Neural MMO Action Space
 
@@ -95,6 +132,10 @@ def PufferWrapper(Env,
                 of discrete-valued arguments. These consist of both fixed, k-way
                 choices (such as movement direction) and selections from the
                 observation space (such as targeting)'''
+
+            if agent in self.action_space_cache:
+                return self.action_space_cache[agent]
+
             # Get single/multiagent action space
             if self.emulate_multiagent:
                 atn_space = self.env.action_space
@@ -104,9 +145,11 @@ def PufferWrapper(Env,
             if self.emulate_flat_atn:
                 assert type(atn_space) in (gym.spaces.Dict, gym.spaces.Discrete, gym.spaces.MultiDiscrete)
                 if type(atn_space) == gym.spaces.Dict:
-                    return _pack_atn_space(atn_space)
+                    atn_space = _pack_atn_space(atn_space)
                 elif type(atn_space) == gym.spaces.Discrete:
-                    return gym.spaces.MultiDiscrete([atn_space.n])
+                    atn_space = gym.spaces.MultiDiscrete([atn_space.n])
+                
+            self.action_space_cache[agent] = atn_space
 
             return atn_space
 
@@ -119,7 +162,11 @@ def PufferWrapper(Env,
             else:
                 return self.env.observation_space(agent)
 
+        @utils.profile
         def observation_space(self, agent: int):
+            if agent in self.observation_space_cache:
+                return self.observation_space_cache[agent]
+
             # Get single/multiagent observation space
             if self.emulate_multiagent:
                 obs_space = self.env.observation_space
@@ -137,13 +184,15 @@ def PufferWrapper(Env,
             if self.emulate_flat_obs:
                 dummy = _flatten_ob(dummy, self.obs_dtype)
 
-            shape = dummy.shape
-
-            return gym.spaces.Box(
+            obs_space = gym.spaces.Box(
                 low=-2**20, high=2**20,
-                shape=shape, dtype=self.obs_dtype
+                shape=dummy.shape, dtype=self.obs_dtype
             )
 
+            self.observation_space_cache[agent] = obs_space
+            return obs_space
+
+        @utils.profile
         def _process_obs(self, obs):
             # Faster to have feature parser on env but then 
             # you have to somehow mod the space to pack unpack the modded feat
@@ -161,12 +210,19 @@ def PufferWrapper(Env,
 
             return obs
 
+        # Deprecated Pettingzoo API
+        def seed(self, seed):
+            self.env.seed(seed)
+
+        @utils.profile
         def reset(self):
             self.reset_calls_step = False
-            obs = self.env.reset()
+
+            obs = self._reset_env()
 
             if self.emulate_multiagent:
                 obs = {1: obs}
+                self.agents = [1]
             else:
                 self.agents = self.env.agents
 
@@ -184,6 +240,7 @@ def PufferWrapper(Env,
             self._step = 0
             return obs
 
+        @utils.profile
         def step(self, actions, **kwargs):
             assert not self.done, 'step after done'
             self.reset_calls_step = True
@@ -194,64 +251,90 @@ def PufferWrapper(Env,
                     assert self.action_space(agent).contains(atns)
 
             # Unpack actions
-            if self.emulate_flat_atn:
-                for k, v in actions.items():
-                    if self.emulate_multiagent:
-                        orig_atn_space = self.env.action_space
-                    else:
-                        orig_atn_space = self.env.action_space(k)
+            with self.prestep_timer:
+                if self.emulate_flat_atn:
+                    for k in list(actions):
+                        if k not in self.agents:
+                            del(actions[k])
+                            continue
 
-                    if type(orig_atn_space) == gym.spaces.Discrete:
-                        actions[k] = v[0]
-                    else:
-                        actions[k] = _unflatten(v, orig_atn_space)
+                        v = actions[k]
+                        if self.emulate_multiagent:
+                            orig_atn_space = self.env.action_space
+                        else:
+                            orig_atn_space = self.env.action_space(k)
+
+                        if type(orig_atn_space) == gym.spaces.Discrete:
+                            actions[k] = v[0]
+                        else:
+                            actions[k] = _unflatten(v, orig_atn_space)
 
             if self.emulate_multiagent:
                 action = actions[1]
-                ob, reward, done, info = self.env.step(action)
+
+                ob, reward, done, info = self._step_env(action)
 
                 obs = {1: ob}
                 rewards = {1: reward}
                 dones = {1: done}
                 infos = {1: info}
-            else:
-                obs, rewards, dones, infos = self.env.step(actions)
-                self.agents = self.env.agents
 
-            assert '__all__' not in dones, 'Base env should not return __all__'
-            self._step += 1
-          
-            obs = self._process_obs(obs)
-
-            if self.reward_shaper:
-                rewards = self.reward_shaper(rewards, self._step)
-
-            # Computed before padding dones. False if no agents
-            all_done = len(dones) and all(dones.values())
-            self.done = all_done
-
-            # Pad rewards/dones/infos
-            if self.emulate_const_num_agents:
-                for k in self.dummy_obs:
-                    if k not in rewards:                                                  
-                        rewards[k] = 0                                                 
-                        infos[k] = {}
-                        dones[k] = False
-
-            # Terminate episode at horizon or if all agents are done
-            if self.emulate_const_horizon:
-                assert self._step <= self.emulate_const_horizon
-                if self._step == self.emulate_const_horizon:
+                if done:
                     self.done = True
-
-                for agent in dones:
-                    dones[agent] = (self._step == self.emulate_const_horizon) or all_done
                     self.agents = []
 
-            # Observation shape test
-            if __debug__:
-                for agent, ob in obs.items():
-                    assert self.observation_space(agent).contains(ob)
+            else:
+                obs, rewards, dones, infos = self._step_env(actions)
+                self.agents = self.env.agents
+                self.done = len(self.agents) == 0
+
+            # RLlib compat 
+            assert '__all__' not in dones, 'Base env should not return __all__'
+
+            self._step += 1
+        
+            obs = self._process_obs(obs)
+
+            with self.poststep_timer:
+                if self.reward_shaper:
+                    rewards = self.reward_shaper(rewards, self._step)
+
+                # Terminate episode at horizon or if all agents are done
+                if self.emulate_const_horizon:
+                    assert self._step <= self.emulate_const_horizon
+                    if self._step == self.emulate_const_horizon:
+                        self.done = True
+
+                # Computed before padding dones. False if no agents
+                # Pad rewards/dones/infos
+                if self.emulate_const_num_agents:
+                    for k in self.dummy_obs:
+                        # TODO: Check that all keys are present
+                        if k not in rewards:
+                            rewards[k] = 0
+                        if k not in infos:
+                            infos[k] = {}
+                        if k not in dones:
+                            dones[k] = self.done
+
+                # Env wrapper already resets itself
+                #if self.env_includes_reset:
+                #    self.done = False
+
+                # Sort by possible_agents ordering
+                sorted_obs, sorted_rewards, sorted_dones, sorted_infos = {}, {}, {}, {}
+                for agent in self.possible_agents:
+                    sorted_obs[agent] = obs[agent]
+                    sorted_rewards[agent] = rewards[agent]
+                    sorted_dones[agent] = dones[agent]
+                    sorted_infos[agent] = infos[agent]
+
+                obs, rewards, dones, infos = sorted_obs, sorted_rewards, sorted_dones, sorted_infos
+
+                # Observation shape test
+                if __debug__:
+                    for agent, ob in obs.items():
+                        assert self.observation_space(agent).contains(ob)
 
             return obs, rewards, dones, infos
 
@@ -297,20 +380,23 @@ def _zero(ob):
     return ob
 
 def _flatten(nested_dict, parent_key=None):
-    if parent_key is None:
-        parent_key = []
+    types = (gym.spaces.Dict, OrderedDict, list, dict, tuple)
 
-    items = []
-    if isinstance(nested_dict, MutableMapping) or isinstance(nested_dict, gym.spaces.Dict):
-        for k, v in nested_dict.items():
-            new_key = parent_key + [k]
-            items.extend(_flatten(v, new_key).items())
-    elif parent_key:
-        items.append((parent_key, nested_dict))
-    else:
+    if type(nested_dict) not in types:
         return nested_dict
- 
-    return {tuple(k): v for k, v in items}
+
+    stack = [((), nested_dict)]
+    flat_dict = {}
+    while stack:
+        path, current = stack.pop()
+        for k, v in current.items():
+            new_key = path + (k,)
+            if type(v) in types:
+                stack.append((new_key, v))
+            else:
+                flat_dict[new_key] = v
+
+    return flat_dict
 
 def _unflatten(ary, space, nested_dict=None, idx=0):
     outer_call = False
@@ -320,11 +406,12 @@ def _unflatten(ary, space, nested_dict=None, idx=0):
 
     #TODO: Find a way to flip the check and the loop
     # (Added for Gym microrts)
-    if isinstance(space, gym.spaces.MultiDiscrete):
+    if type(space)  == gym.spaces.MultiDiscrete:
         return ary
 
+    types = (gym.spaces.Dict, OrderedDict, list, dict, tuple)
     for k, v in space.items():
-        if isinstance(v, MutableMapping) or isinstance(v, gym.spaces.Dict):
+        if type(v) in types:
             nested_dict[k] = {}
             _, idx = _unflatten(ary, v, nested_dict[k], idx)
         else:
@@ -379,13 +466,24 @@ def _flatten_ob(ob, dtype=None):
     if type(ob) == np.ndarray:
         flat = {'': flat}
 
-    vals = [e.ravel() for e in flat.values()]
-    vals = np.concatenate(vals)
+    # Preallocate the memory for the concatenated tensor
+    tensors = flat.values()
 
-    if dtype is not None:
-        vals = vals.astype(dtype)
+    if dtype is None:
+        tensors = list(tensors)
+        dtype = tensors[0].dtype
 
-    return vals
+    tensor_sizes = [tensor.size for tensor in tensors] 
+    prealloc = np.empty(sum(tensor_sizes), dtype=dtype)
+
+    # Fill the concatenated tensor with the flattened tensors
+    start = 0
+    for tensor, size in zip(tensors, tensor_sizes):
+        end = start + size
+        prealloc[start:end] = tensor.ravel()
+        start = end
+
+    return prealloc
 
 def _pack_obs(obs, dtype=None):
     return {k: _flatten_ob(v, dtype) for k, v in obs.items()}

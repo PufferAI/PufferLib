@@ -47,6 +47,42 @@ def myprint(d):
         else:
             print("%s: %s" % (k, v))
 
+class Profiler:    
+    def __init__(self):
+        self.elapsed = 0
+        self.calls = 0
+
+    def tik(self):
+        self.start = time.time()
+
+    def tok(self):
+        self.elapsed += time.time() - self.start
+        self.calls += 1
+
+    def __enter__(self):
+        self.start = time.time()
+        return self
+
+    def __exit__(self, *args):
+        self.end = time.time()
+        self.elapsed += self.end - self.start
+        self.calls += 1
+
+def profile(func):
+    timer = Profiler()
+    name = func.__name__ + '_timer'
+
+    def wrapper(*args, **kwargs):
+        with timer:
+            result = func(*args, **kwargs)
+
+        self = args[0]
+        assert hasattr(self, 'timers'), 'Must have timers dict'
+        self.timers[name] = timer
+        return result
+
+    return wrapper
+
 class dotdict(dict):
     """dot.notation access to dictionary attributes
     

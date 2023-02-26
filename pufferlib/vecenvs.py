@@ -5,33 +5,46 @@ import numpy as np
 import itertools
 import random
 
+RESET = 0
+SEND = 1
+RECV = 2
 
 def make_remote_envs(env_creator, n, seed):
     @ray.remote
     class RemoteEnvs:
         def __init__(self):
-            envs = []
+            self.envs = []
+            agent_seed = seed
+
             for i in range(n):
                 # TODO: Port this to emulation
-                random.seed(seed)
-                agent_seed = random.randint(0, 2**32)
-
                 env = env_creator()
-                env.seed(seed + i)
+                env.seed(agent_seed)
 
                 # TODO: Check if different seed across obs/action spaces is correct
-                for agent_idx, agent in enumerate(env.possible_agents):
-                    env.action_space(agent).seed(agent_seed + agent_idx)
-                    env.observation_space(agent).seed(agent_seed + agent_idx)
+                for agent in env.possible_agents:
+                    env.action_space(agent).seed(agent_seed)
+                    env.observation_space(agent).seed(agent_seed)
+                    agent_seed += 1
 
-            self.envs = [env_creator() for _ in range(n)]
+                self.envs.append(env)
+
+        def profile_all(self):
+            return [e.timers for e in self.envs]
+
+        def put_all(self, *args, **kwargs):
+            for e in self.envs:
+                e.put(*args, **kwargs)
+            
+        def get_all(self, *args, **kwargs):
+            return [e.get(*args, **kwargs) for e in self.envs]
         
         def reset_all(self):
-            return [e.reset() for e in self.envs]
+            return [(e.reset(), {}, {}, {}) for e in self.envs]
 
         def step(self, actions_lists):
-            all_obs, all_rewards, all_dones, all_infos = [], [], [], []
-
+            returns = []
+            assert len(self.envs) == len(actions_lists)
             for env, actions in zip(self.envs, actions_lists):
                 if env.done:
                     obs = env.reset()
@@ -41,12 +54,9 @@ def make_remote_envs(env_creator, n, seed):
                 else:
                     obs, rewards, dones, infos = env.step(actions)
 
-                all_obs.append(obs)
-                all_rewards.append(rewards)
-                all_dones.append(dones)
-                all_infos.append(infos)
+                returns.append((obs, rewards, dones, infos))
 
-            return all_obs, all_rewards, all_dones, all_infos
+            return returns
 
     return RemoteEnvs.remote()
 
@@ -55,6 +65,7 @@ class VecEnvs:
     def __init__(self, binding, num_workers, envs_per_worker=1, seed=1):
         assert envs_per_worker > 0, 'Each worker must have at least 1 env'
         assert type(envs_per_worker) == int
+        assert type(seed) == int
 
         ray.init(
             include_dashboard=False, # WSL Compatibility
@@ -64,17 +75,16 @@ class VecEnvs:
         self.binding = binding
         self.num_workers = num_workers
         self.envs_per_worker = envs_per_worker
-        self.has_reset = False
+
+        self.state = RESET
 
         self.remote_envs_lists = [
             make_remote_envs(
                 binding.env_creator,
                 envs_per_worker,
-                seed + idx*envs_per_worker,
+                seed + int(idx*envs_per_worker),#*binding.num_agents),
             ) for idx in range(num_workers)
         ]
-
-        self.local_env = binding.env_creator()
 
     @property
     def single_observation_space(self):
@@ -84,36 +94,46 @@ class VecEnvs:
     def single_action_space(self):
         return self.binding.single_action_space
 
-    def _flatten(self, remote_envs_data, concat=True):
-        all_keys, values = [], []
-        for remote_envs in remote_envs_data:
-            envs_keys = []
-            for env_data in remote_envs:
-                envs_keys.append(list(env_data.keys()))
-                values.append(list(env_data.values()))
-
-            all_keys.append(envs_keys)
-
-        values = list(itertools.chain.from_iterable(values))
-
-        if concat:
-            values = np.stack(values)
-
-        return all_keys, values
-
-    def reset(self):
-        assert not self.has_reset, 'Call reset only once on initialization'
-        self.has_reset = True
-        obs = ray.get([e.reset_all.remote() for e in self.remote_envs_lists])
-        self.agent_keys, obs = self._flatten(obs)
-        return obs
-
     def close(self):
         #TODO: Implement close
         pass
 
-    def step(self, actions):
-        assert self.has_reset, 'Call reset before stepping'
+    def profile(self):
+        return list(itertools.chain.from_iterable(ray.get([e.profile_all.remote() for e in self.remote_envs_lists])))
+
+    def async_reset(self):
+        assert self.state == RESET, 'Call reset only once on initialization'
+        self.state = RECV
+
+        self.async_handles = [e.reset_all.remote() for e in self.remote_envs_lists]
+
+    def recv(self):
+        assert self.state == RECV, 'Call reset before stepping'
+        self.state = SEND
+
+        self.agent_keys = []
+        obs, rewards, dones, infos = [], [], [], []
+        for envs in ray.get(self.async_handles):
+            a_keys = []
+            for o, r, d, i in envs:
+                a_keys.append(list(o.keys()))
+                obs += list(o.values())
+                rewards += list(r.values())
+                dones += list(d.values())
+                infos += list(i.values())
+
+            self.agent_keys.append(a_keys)
+
+        obs = np.stack(obs)
+
+        # TODO: Support multiagent
+        #infos['env_id'] = list(np.arange(len(obs)))
+
+        return obs, rewards, dones, infos
+
+    def send(self, actions, env_id=None):
+        assert self.state == SEND, 'Call reset + recv before send'
+        self.state = RECV
 
         #TODO: Assert size = num agents x obs
         if type(actions) == list:
@@ -121,17 +141,16 @@ class VecEnvs:
 
         actions = np.split(actions, self.num_workers)
 
-        rets = []
+        self.async_handles = []
         for envs_list, keys_list, atns_list in zip(self.remote_envs_lists, self.agent_keys, actions):
             atns_list = np.split(atns_list, self.envs_per_worker)
             atns_list = [dict(zip(keys, atns)) for keys, atns in zip(keys_list, atns_list)]
-            rets.append(envs_list.step.remote(atns_list))
-        
-        obs, rewards, dones, infos = list(zip(*ray.get(rets)))
+            self.async_handles.append(envs_list.step.remote(atns_list))
 
-        self.agent_keys, obs = self._flatten(obs)
-        _, rewards = self._flatten(rewards)
-        _, dones = self._flatten(dones)
-        _, infos = self._flatten(infos, concat=False)
+    def reset(self):
+        self.async_reset()
+        return self.recv()[0]
 
-        return obs, rewards, dones, infos
+    def step(self, actions):
+        self.send(actions)
+        return self.recv()
