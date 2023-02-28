@@ -112,7 +112,7 @@ class Base:
             'action_space': self.single_action_space,
             'input_size': 32,
             'hidden_size': 32,
-            'lstm_layers': 0,
+            'lstm_layers': 1,
         }
 
 
