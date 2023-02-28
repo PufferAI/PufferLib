@@ -1,11 +1,13 @@
+from pdb import set_trace as T
 import numpy as np
 
-import random
 import functools
 
 import gym
 
 from pettingzoo.utils.env import ParallelEnv
+
+import pufferlib
 
 
 class TestEnv(ParallelEnv):
@@ -26,17 +28,18 @@ class TestEnv(ParallelEnv):
         self.spawn_attempts_per_tick = spawn_attempts_per_tick
         self.death_per_tick = death_per_tick
 
+    def seed(self, seed):
+        self.rng = pufferlib.utils.RandomState(seed)
+
     def reset(self):
         self.tick = 0
-        self.agents = random.sample(self.possible_agents, self.initial_agents)
+        self.agents = self.rng.sample(self.possible_agents, self.initial_agents)
         return {a: self.observation_space(a).sample() for a in self.agents}
 
     def step(self, action):
-        random.seed(self.tick)
-
         obs, rewards, dones, infos = {}, {}, {}, {}
 
-        dead  = random.sample(self.agents, self.death_per_tick)
+        dead  = self.rng.sample(self.agents, self.death_per_tick)
         for kill in dead:
             self.agents.remove(kill)
             obs[kill] = self._fill(self.observation_space(kill).sample(), kill)
@@ -45,11 +48,11 @@ class TestEnv(ParallelEnv):
             infos[kill] = {'dead': True}
 
         for spawn in range(self.spawn_attempts_per_tick):
-            spawn = random.choice(self.possible_agents)
+            spawn = self.rng.choice(self.possible_agents)
             if spawn not in self.agents + dead:
                 self.agents.append(spawn)
                 obs[spawn] = self._fill(self.observation_space(spawn).sample(), spawn)
-                rewards[spawn] = 0.1 * random.random()
+                rewards[spawn] = 0.1 * self.rng.random()
                 dones[spawn] = False
                 infos[spawn] = {'dead': False}
 

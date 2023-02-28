@@ -51,13 +51,29 @@ class NoopResetEnv(gym.Wrapper):
         return obs
 
 
+
 class Atari(pufferlib.binding.Base):
     def __init__(self, env_name):
         self.lstm_layers = 1
 
+        self.env_name = env_name
+        env = self.raw_env_creator()
+        env_cls = pufferlib.emulation.PufferWrapper(
+                env,
+                env_includes_reset=True,
+                emulate_flat_atn=True,
+            )
+
+        super().__init__(env_name, env_cls)
+
+        self.observation_shape = env.observation_space
+        self.num_actions = env.action_space.n
+        self.policy = Policy
+
+    def raw_env_creator(self):
         try:
             with pufferlib.utils.Suppress():
-                env = gym.make(env_name)
+                env = gym.make(self.env_name)
         except ImportError as e:
             raise e('Cannot gym.make ALE environment (pip install pufferlib[gym])')
 
@@ -70,19 +86,9 @@ class Atari(pufferlib.binding.Base):
         env = ClipRewardEnv(env)
         env = gym.wrappers.ResizeObservation(env, (84, 84))
         env = gym.wrappers.GrayScaleObservation(env)
-        env = gym.wrappers.FrameStack(env,
-            1 if self.lstm_layers > 0 else 4)
+        env = gym.wrappers.FrameStack(env, 1 if self.lstm_layers > 0 else 4)
 
-        env_cls = pufferlib.emulation.PufferWrapper(
-                env,
-                env_includes_reset=True,
-                emulate_flat_atn=True,
-            )
-        super().__init__(env_name, env_cls)
-
-        self.observation_shape = env.observation_space
-        self.num_actions = env.action_space.n
-        self.policy = Policy
+        return env
 
     @property
     def custom_model_config(self):

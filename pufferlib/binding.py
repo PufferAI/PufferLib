@@ -79,6 +79,9 @@ def auto(env_name=None, env=None, env_cls=None, env_args=[], env_kwargs={}, **kw
             super().__init__(self.env_name, self.env_cls, env_args, env_kwargs)
             self.policy = FlatNetwork
 
+        def raw_env_creator(self):
+            return env_cls()
+
     return AutoBound()
 
 class Base:
@@ -100,6 +103,7 @@ class Base:
         self.env_creator = lambda: self.env_cls(*self.env_args, **self.env_kwargs)
 
         local_env = self.env_creator()
+        self.emulate_multiagent = local_env.emulate_multiagent
         self.default_agent = local_env.possible_agents[0]
         self.single_observation_space = local_env.observation_space(self.default_agent)
         self.single_action_space = local_env.action_space(self.default_agent)

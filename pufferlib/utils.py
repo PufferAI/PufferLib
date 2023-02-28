@@ -1,5 +1,7 @@
 from pdb import set_trace as T
 
+import numpy as np
+
 import time
 import os
 import sys
@@ -46,6 +48,20 @@ def myprint(d):
             stack.extend(v.iteritems())
         else:
             print("%s: %s" % (k, v))
+
+class RandomState:
+    def __init__(self, seed):
+        self.rng = np.random.RandomState(seed)
+
+    def random(self):
+        return self.rng.random()
+
+    def sample(self, ary, n):
+        return self.rng.choice(ary, n, replace=False).tolist()
+
+    def choice(self, ary):
+        return self.sample(ary, 1)[0]
+
 
 class Profiler:    
     def __init__(self):
