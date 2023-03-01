@@ -23,6 +23,7 @@ from pufferlib.vecenvs import VecEnvs
 
 def train(
         binding,
+        agent,
         exp_name=os.path.basename(__file__),
         seed=1,
         torch_deterministic=True,
@@ -97,12 +98,7 @@ def train(
         ) for i in range(num_buffers)
     ]
 
-    policy = pufferlib.frameworks.cleanrl.make_cleanrl_policy(
-        binding.policy,
-        lstm_layers=binding.custom_model_config['lstm_layers']
-    )
-    agent = policy(**binding.custom_model_config).to(device)
-
+    agent = agent.to(device)
     optimizer = optim.Adam(agent.parameters(), lr=learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -370,9 +366,16 @@ if __name__ == '__main__':
     # Run pip install -e .[atari] or .[nethack] to install the dependencies for a specific demo 
     # This will be resolved in a future update
 
-    binding = pufferlib.registry.Atari('BreakoutNoFrameskip-v4')
+    import pufferlib.registry.atari
+    binding = pufferlib.registry.atari.create_binding('BreakoutNoFrameskip-v4', framestack=1)
+    agent = pufferlib.frameworks.cleanrl.make_cleanrl_policy(
+        pufferlib.registry.atari.Policy,
+        lstm_layers=1
+    )(binding, framestack=1)
+
     train(
         binding,
+        agent,
         cuda=True,
         total_timesteps=10_000_000,
         track=True,
@@ -383,13 +386,19 @@ if __name__ == '__main__':
         wandb_project_name='pufferlib',
         wandb_entity='jsuarez',
     )
-
-
     '''
+
     # Neural MMO requires the CarperAI fork of the nmmo-environment repo
-    binding = pufferlib.registry.make_neuralmmo_bindings()
+    import pufferlib.registry.nmmo
+    binding = pufferlib.registry.nmmo.create_binding()
+    agent = pufferlib.frameworks.cleanrl.make_cleanrl_policy(
+        pufferlib.registry.nmmo.Policy,
+        lstm_layers=1
+    )(binding)
+
     train(
         binding,
+        agent,
         cuda=True,
         total_timesteps=10_000_000,
         track=False,

@@ -8,7 +8,7 @@ import inspect
 import torch
 import torch.nn as nn
 
-from pufferlib.emulation import PufferWrapper
+from pufferlib.emulation import Binding
 from pufferlib.torch import BatchFirstLSTM
 
 
@@ -64,11 +64,11 @@ def auto(env_name=None, env=None, env_cls=None, env_args=[], env_kwargs={}, **kw
         def __init__(self):
             if env_cls is not None:
                 #assert inspect.isclass(env_cls)
-                self.env_cls = PufferWrapper(env_cls, **kwargs)
+                self.env_cls = Binding(env_cls, **kwargs)
                 self.env_name = env_cls.__name__
             elif env is not None:
                 assert not inspect.isclass(env)
-                self.env_cls = PufferWrapper(env, **kwargs)
+                self.env_cls = Binding(env, **kwargs)
                 self.env_name = env.__class__.__name__
             else:
                 raise Exception('Specify env or env_cls')
@@ -121,7 +121,7 @@ class Base:
 
 
 class Policy(torch.nn.Module, ABC):
-    def __init__(self, input_size, hidden_size, lstm_layers=0):
+    def __init__(self, input_size, hidden_size):
         '''Pure PyTorch base policy
         
         This spec allows PufferLib to repackage your policy
@@ -130,7 +130,6 @@ class Policy(torch.nn.Module, ABC):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.lstm_layers = lstm_layers
 
     @abstractmethod
     def critic(self, hidden):
@@ -153,7 +152,7 @@ class Policy(torch.nn.Module, ABC):
         raise NotImplementedError
         return logits
 
-def make_recurrent_policy(Policy, batch_first=True):
+def make_recurrent_policy(Policy, lstm_layers=1, batch_first=True):
     '''Wraps the given policy with an LSTM
     
     Called for you by framework-specific bindings
@@ -161,18 +160,17 @@ def make_recurrent_policy(Policy, batch_first=True):
     class Recurrent(Policy):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            assert self.lstm_layers > 0
             if batch_first:
                 self.lstm = BatchFirstLSTM(
                     self.input_size,
                     self.hidden_size,
-                    self.lstm_layers,
+                    lstm_layers,
                 )
             else:
                 self.lstm = torch.nn.LSTM(
                     self.input_size,
                     self.hidden_size,
-                    self.lstm_layers,
+                    lstm_layers,
                 )
 
             # TODO: More general init options

@@ -50,55 +50,34 @@ class NoopResetEnv(gym.Wrapper):
                 obs = self.env.reset(**kwargs)
         return obs
 
+def env_creator(env_name, framestack):
+    try:
+        with pufferlib.utils.Suppress():
+            env = gym.make(env_name)
+    except ImportError as e:
+        raise e('Cannot gym.make ALE environment (pip install pufferlib[gym])')
 
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env = NoopResetEnv(env, noop_max=30)
+    env = MaxAndSkipEnv(env, skip=4)
+    env = EpisodicLifeEnv(env)
+    if "FIRE" in env.unwrapped.get_action_meanings():
+        env = FireResetEnv(env)
+    env = ClipRewardEnv(env)
+    env = gym.wrappers.ResizeObservation(env, (84, 84))
+    env = gym.wrappers.GrayScaleObservation(env)
+    env = gym.wrappers.FrameStack(env, framestack)
 
-class Atari(pufferlib.binding.Base):
-    def __init__(self, env_name):
-        self.lstm_layers = 1
+    return env
 
-        self.env_name = env_name
-        env = self.raw_env_creator()
-        env_cls = pufferlib.emulation.PufferWrapper(
-                env,
-                env_includes_reset=True,
-                emulate_flat_atn=True,
-            )
-
-        super().__init__(env_name, env_cls)
-
-        self.observation_shape = env.observation_space
-        self.num_actions = env.action_space.n
-        self.policy = Policy
-
-    def raw_env_creator(self):
-        try:
-            with pufferlib.utils.Suppress():
-                env = gym.make(self.env_name)
-        except ImportError as e:
-            raise e('Cannot gym.make ALE environment (pip install pufferlib[gym])')
-
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = NoopResetEnv(env, noop_max=30)
-        env = MaxAndSkipEnv(env, skip=4)
-        env = EpisodicLifeEnv(env)
-        if "FIRE" in env.unwrapped.get_action_meanings():
-            env = FireResetEnv(env)
-        env = ClipRewardEnv(env)
-        env = gym.wrappers.ResizeObservation(env, (84, 84))
-        env = gym.wrappers.GrayScaleObservation(env)
-        env = gym.wrappers.FrameStack(env, 1 if self.lstm_layers > 0 else 4)
-
-        return env
-
-    @property
-    def custom_model_config(self):
-        return {
-            'input_size': 512,
-            'hidden_size': 512, #128
-            'lstm_layers': self.lstm_layers, #1
-            'observation_shape': self.observation_shape,
-            'num_actions': self.num_actions,
-        }
+def create_binding(env_name, framestack):
+    return pufferlib.emulation.Binding(
+        env_creator=env_creator,
+        default_args=[env_name, framestack],
+        env_name=env_name,
+        env_includes_reset=True,
+        emulate_flat_atn=True,
+    )
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -106,15 +85,13 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 class Policy(pufferlib.binding.Policy):
-    def __init__(self, *args, observation_shape, num_actions,
-            input_size, hidden_size, lstm_layers, **kwargs):
-        super().__init__(input_size, hidden_size, lstm_layers, *args, **kwargs)
-
-        self.observation_shape = observation_shape
-        self.num_actions = num_actions
+    def __init__(self, binding, *args, framestack, input_size=512, hidden_size=512, **kwargs):
+        super().__init__(input_size, hidden_size, *args, **kwargs)
+        self.observation_space = binding.raw_single_observation_space
+        self.num_actions = binding.raw_single_action_space.n
 
         self.network = nn.Sequential(
-            layer_init(nn.Conv2d(1 if lstm_layers>0 else 4, 32, 8, stride=4)),
+            layer_init(nn.Conv2d(framestack, 32, 8, stride=4)),
             nn.ReLU(),
             layer_init(nn.Conv2d(32, 64, 4, stride=2)),
             nn.ReLU(),
@@ -134,7 +111,7 @@ class Policy(pufferlib.binding.Policy):
     def encode_observations(self, flat_observations):
         # TODO: Add flat obs support to emulation
         batch = flat_observations.shape[0]
-        observations = flat_observations.reshape((batch,) + self.observation_shape.shape)
+        observations = flat_observations.reshape((batch,) + self.observation_space.shape)
         return self.network(observations / 255.0), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
