@@ -8,6 +8,7 @@ import pufferlib
 import pufferlib.binding
 import pufferlib.emulation
 
+
 def create_binding():
     return pufferlib.emulation.Binding(
         env_cls=nmmo.Env,

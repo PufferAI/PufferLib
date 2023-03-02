@@ -4,23 +4,21 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import nle
+from nle import nethack
+
 import pufferlib
 import pufferlib.binding
 import pufferlib.emulation
 
-class NetHack(pufferlib.binding.Base):
-    def __init__(self):
-        import nle
-        from nle import nethack
 
-        self.observation_shape = nle.env.NLE().observation_space
-        env_cls = pufferlib.emulation.PufferWrapper(
-                nle.env.NLE,
-                emulate_flat_atn=True,
-            )
-        super().__init__('nethack', env_cls)
+def create_binding():
+    return pufferlib.emulation.Binding(
+        env_cls=nle.env.NLE,
+        env_name='Neural MMO',
+        emulate_flat_atn=True,
+    )
 
-        self.policy = Policy
 
     @property
     def custom_model_config(self):
@@ -37,18 +35,17 @@ class NetHack(pufferlib.binding.Base):
 
 
 class Policy(pufferlib.binding.Policy):
-    def __init__(self, *args,
-            observation_shape, num_actions,
+    def __init__(self, *args, binding,
             embedding_dim, crop_dim, num_layers,
-            input_size, hidden_size, lstm_layers,
+            input_size, hidden_size,
             **kwargs):
-        super().__init__(input_size, hidden_size, lstm_layers, *args, **kwargs)
+        super().__init__(input_size, hidden_size, *args, **kwargs)
 
-        self.observation_shape = observation_shape
-        self.glyph_shape = observation_shape["glyphs"].shape
-        self.blstats_size = observation_shape["blstats"].shape[0]
+        self.observation_shape = binding.raw_single_observation_space
+        self.glyph_shape = self.observation_shape["glyphs"].shape
+        self.blstats_size = self.observation_shape["blstats"].shape[0]
 
-        self.num_actions = num_actions
+        self.num_actions = binding.raw_single_action_space.n
 
         self.H = self.glyph_shape[0]
         self.W = self.glyph_shape[1]
@@ -59,9 +56,6 @@ class Policy(pufferlib.binding.Policy):
         self.crop_dim = crop_dim
 
         self.crop = Crop(self.H, self.W, self.crop_dim, self.crop_dim)
-
-        import nle
-        from nle import nethack
 
         self.embed = nn.Embedding(nethack.MAX_GLYPH, self.k_dim)
 
