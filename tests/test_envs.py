@@ -5,6 +5,7 @@ import gym
 
 import pufferlib
 import pufferlib.registry
+from pufferlib.vecenvs import VecEnvs
 
 
 def test_singleagent_env(env_creator, seed=42, steps=32):
@@ -18,9 +19,11 @@ def test_singleagent_env(env_creator, seed=42, steps=32):
     env_1.action_space.seed(seed)
     env_2.action_space.seed(seed)
 
-    env_1.reset()
-    env_2.reset()
+    ob_1 = env_1.reset()
+    ob_2 = env_2.reset()
 
+    assert np.array_equal(ob_1, ob_2)
+ 
     done_1 = False
     done_2 = False
 
@@ -60,8 +63,61 @@ def test_multiagent_env(env_creator, seed=42, steps=32):
         env_1.action_space(a).seed(seed)
         env_2.action_space(a).seed(seed)
 
-    env_1.reset()
-    env_2.reset()
+    ob_1 = env_1.reset()
+    ob_2 = env_2.reset()
+
+    for agent in env_1.agents:
+        assert np.array_equal(ob_1[agent], ob_2[agent])
+ 
+    done_1 = False
+    done_2 = False
+
+    for i in range(steps):
+        atn_1 = {a: env_1.action_space(a).sample() for a in env_1.possible_agents}
+        atn_2 = {a: env_2.action_space(a).sample() for a in env_2.possible_agents}
+
+        if done_1:
+            assert done_2
+
+            ob_1 = env_1.reset()
+            ob_2 = env_2.reset()
+
+            done_1 = False
+            done_2 = False
+
+            for agent in env_1.agents:
+                assert np.array_equal(ob_1[agent], ob_2[agent])
+        else:
+            ob_1, reward_1, done_1, info_1 = env_1.step(atn_1)
+            ob_2, reward_2, done_2, info_2 = env_2.step(atn_2)
+
+            for agent in env_1.agents:
+                assert np.array_equal(ob_1[agent], ob_2[agent])
+                assert reward_1[agent] == reward_2[agent]
+                assert done_1[agent] == done_2[agent]
+                assert info_1[agent] == info_2[agent]
+
+def test_multiagent_env(binding, seed=42, steps=32):
+    import ray
+    ray.shutdown()
+    ray.init(include_dashboard=False, ignore_reinit_error=True)
+
+    multidiscrete_atns = [[0] for _ in range(4)]
+
+    env_1 = VecEnvs(binding, num_workers=4, envs_per_worker=1)
+    env_2 = VecEnvs(binding, num_workers=4, envs_per_worker=1)
+
+    env_1.seed(seed)
+    env_2.seed(seed)
+
+    #for a in env_1.possible_agents:
+    #    env_1.action_space(a).seed(seed)
+    #    env_2.action_space(a).seed(seed)
+
+    ob_1 = env_1.reset()
+    ob_2 = env_2.reset()
+
+    assert np.array_equal(ob_1, ob_2)
 
     done_1 = False
     done_2 = False
@@ -90,6 +146,20 @@ def test_multiagent_env(env_creator, seed=42, steps=32):
                 assert reward_1[agent] == reward_2[agent]
                 assert done_1[agent] == done_2[agent]
                 assert info_1[agent] == info_2[agent]
+
+
+    ob_1 = env_1.reset()
+    ob_2 = env_2.reset()
+
+
+    print(single_ob)
+    print(single_ob.sum(1))
+
+    multi_puffer_envs = VecEnvs(binding, num_workers=2, envs_per_worker=2)
+    multi_ob = multi_puffer_envs.reset()
+
+    print(multi_ob)
+    print(multi_ob.sum(1))
 
 
 if __name__ == '__main__':
