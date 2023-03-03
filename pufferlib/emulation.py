@@ -58,6 +58,10 @@ class Binding:
         return self._default_agent
 
     @property
+    def max_agents(self):
+        return self._max_agents
+
+    @property
     def env_name(self):
         return self._env_name
 
@@ -164,7 +168,8 @@ class Binding:
                 else:
                     self.metadata = {}
 
-            def num_agents(self):
+            @property
+            def max_agents(self):
                 return len(self.possible_agents)
 
             @utils.profile
@@ -390,9 +395,11 @@ class Binding:
         local_env = PufferEnv(env=raw_local_env)
 
         self._default_agent = local_env.possible_agents[0]
+        self._max_agents = local_env.max_agents
+        self._emulate_multiagent = local_env.emulate_multiagent
+
         self._single_observation_space = local_env.observation_space(self._default_agent)
         self._single_action_space = local_env.action_space(self._default_agent)
-        self._emulate_multiagent = local_env.emulate_multiagent
 
         if self._emulate_multiagent:
             self._raw_single_observation_space = raw_local_env.observation_space

@@ -9,25 +9,21 @@ RESET = 0
 SEND = 1
 RECV = 2
 
-def make_remote_envs(env_creator, n, seed):
+def make_remote_envs(env_creator, n):
     @ray.remote
     class RemoteEnvs:
         def __init__(self):
-            self.envs = []
-            agent_seed = seed
+            self.envs = [env_creator() for _ in range(n)]
 
-            for i in range(n):
-                # TODO: Port this to emulation
-                env = env_creator()
-                env.seed(agent_seed)
+        def seed(self, seed):
+            for env in self.envs:
+                env.seed(seed)
 
                 # TODO: Check if different seed across obs/action spaces is correct
                 for agent in env.possible_agents:
-                    env.action_space(agent).seed(agent_seed)
-                    env.observation_space(agent).seed(agent_seed)
-                    agent_seed += 1
-
-                self.envs.append(env)
+                    env.action_space(agent).seed(seed)
+                    env.observation_space(agent).seed(seed)
+                    seed += 1
 
         def profile_all(self):
             return [e.timers for e in self.envs]
@@ -62,10 +58,9 @@ def make_remote_envs(env_creator, n, seed):
 
 
 class VecEnvs:
-    def __init__(self, binding, num_workers, envs_per_worker=1, seed=1):
+    def __init__(self, binding, num_workers, envs_per_worker=1):
         assert envs_per_worker > 0, 'Each worker must have at least 1 env'
         assert type(envs_per_worker) == int
-        assert type(seed) == int
 
         ray.init(
             include_dashboard=False, # WSL Compatibility
@@ -82,7 +77,6 @@ class VecEnvs:
             make_remote_envs(
                 binding.env_creator,
                 envs_per_worker,
-                seed + int(idx*envs_per_worker),#*binding.num_agents),
             ) for idx in range(num_workers)
         ]
 
@@ -100,6 +94,12 @@ class VecEnvs:
 
     def profile(self):
         return list(itertools.chain.from_iterable(ray.get([e.profile_all.remote() for e in self.remote_envs_lists])))
+
+    def seed(self, seed):
+        assert type(seed) == int
+        for env_list in self.remote_envs_lists:
+            env_list.seed.remote(seed)
+            seed += self.envs_per_worker * self.binding.max_agents
 
     def async_reset(self):
         assert self.state == RESET, 'Call reset only once on initialization'

@@ -54,7 +54,7 @@ def train(
     program_start = time.time()
     env_id = binding.env_name
     args = pufferlib.utils.dotdict(locals())
-    batch_size = int(num_envs * num_agents * num_steps)
+    batch_size = int(num_envs * num_agents * num_buffers * num_steps)
 
     run_name = f"{env_id}__{exp_name}__{seed}__{int(time.time())}"
     if track:
@@ -88,15 +88,15 @@ def train(
     assert envs_per_worker == int(envs_per_worker)
     assert envs_per_worker >= 1
 
-    buffers = [
-        # TODO: Fix seeding
-        VecEnvs(
+    buffers = []
+    for i in range(num_buffers):
+        vec = VecEnvs(
             binding,
             num_workers=num_cores,
             envs_per_worker=int(envs_per_worker),
-            seed=seed + int(i*num_buffers*envs_per_worker*num_agents),
-        ) for i in range(num_buffers)
-    ]
+        )
+        vec.seed(seed + int(i*num_cores*envs_per_worker*num_agents))
+        buffers.append(vec)
 
     agent = agent.to(device)
     optimizer = optim.Adam(agent.parameters(), lr=learning_rate, eps=1e-5)
@@ -207,16 +207,9 @@ def train(
                 envs.send(action.cpu().numpy(), None)
                 env_step_time += time.time() - start
 
-
         # bootstrap value if not done
         with torch.no_grad():
             for buf in range(num_buffers):
-                #next_value = agent.get_value(
-                #    next_obs[buf],
-                #    None,
-                #    next_done[buf],
-                #).reshape(1, -1)
-
                 next_value = agent.get_value(
                     next_obs[buf],
                     next_lstm_state[buf],
@@ -247,14 +240,14 @@ def train(
 
         # Optimizing the policy and value network
         train_time = time.time()
-        assert num_envs % num_minibatches == 0
-        agentsperbatch = num_envs * num_agents // num_minibatches
-        agentinds = np.arange(num_envs * num_agents)
-        flatinds = np.arange(batch_size).reshape(num_steps, num_envs * num_agents)
+        assert num_envs * num_buffers % num_minibatches == 0
+        agentsperbatch = num_envs * num_agents * num_buffers // num_minibatches
+        agentinds = np.arange(num_envs * num_agents * num_buffers)
+        flatinds = np.arange(batch_size).reshape(num_steps, num_envs * num_agents * num_buffers)
         clipfracs = []
         for epoch in range(update_epochs):
             np.random.shuffle(agentinds)
-            for start in range(0, num_envs, agentsperbatch):
+            for start in range(0, num_envs * num_agents * num_buffers, agentsperbatch):
                 end = start + agentsperbatch
                 mbagentinds = agentinds[start:end]
                 mb_inds = flatinds[:, mbagentinds].ravel()  # be really careful about the index
@@ -331,6 +324,10 @@ def train(
         uptime = timedelta(seconds=int(time.time() - program_start))
         completion_percentage = 100 * global_step / total_timesteps
 
+        if len(epoch_lengths) == 0:
+            epoch_lengths = [0]
+            epoch_returns = [0]
+
         print(
             f'Epoch: {update} - Mean Return: {np.mean(epoch_returns):<5.4}, Episode Length: {int(np.mean(epoch_lengths))}\n'
             f'\t{completion_percentage:.3}% / {global_step // 1000}K steps - {uptime} Elapsed, ~{remaining} Remaining\n'
@@ -379,8 +376,9 @@ if __name__ == '__main__':
         cuda=True,
         total_timesteps=10_000_000,
         track=True,
-        num_envs=8,
-        num_cores=8,
+        num_envs=2,
+        num_cores=2,
+        num_buffers=4,
         num_minibatches=4,
         num_agents=1,
         wandb_project_name='pufferlib',
