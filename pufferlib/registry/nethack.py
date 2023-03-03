@@ -15,29 +15,15 @@ import pufferlib.emulation
 def create_binding():
     return pufferlib.emulation.Binding(
         env_cls=nle.env.NLE,
-        env_name='Neural MMO',
+        env_name='NetHack',
         emulate_flat_atn=True,
     )
 
 
-    @property
-    def custom_model_config(self):
-        return {
-            'embedding_dim': 32,
-            'crop_dim': 9,
-            'num_layers': 5,
-            'input_size': 512,
-            'hidden_size': 512,
-            'lstm_layers': 1,
-            'observation_shape': self.observation_shape,
-            'num_actions': self.single_action_space.nvec[0],
-        }
-
-
 class Policy(pufferlib.binding.Policy):
-    def __init__(self, *args, binding,
-            embedding_dim, crop_dim, num_layers,
-            input_size, hidden_size,
+    def __init__(self, binding, *args,
+            embedding_dim=32, crop_dim=9, num_layers=5,
+            input_size=512, hidden_size=512,
             **kwargs):
         super().__init__(input_size, hidden_size, *args, **kwargs)
 

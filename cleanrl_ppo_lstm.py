@@ -384,8 +384,8 @@ if __name__ == '__main__':
         wandb_project_name='pufferlib',
         wandb_entity='jsuarez',
     )
-    '''
 
+    '''
     # Neural MMO requires the CarperAI fork of the nmmo-environment repo
     import pufferlib.registry.nmmo
     binding = pufferlib.registry.nmmo.create_binding()
@@ -399,7 +399,7 @@ if __name__ == '__main__':
         agent,
         cuda=True,
         total_timesteps=10_000_000,
-        track=False,
+        track=True,
         num_envs=2,
         num_cores=2,
         num_minibatches=1,
@@ -408,12 +408,18 @@ if __name__ == '__main__':
         wandb_entity='jsuarez',
     )
 
-    binding = pufferlib.registry.make_nethack_bindings()
+    import pufferlib.registry.nethack
+    binding = pufferlib.registry.nethack.create_binding()
+    agent = pufferlib.frameworks.cleanrl.make_cleanrl_policy(
+        pufferlib.registry.nethack.Policy,
+        lstm_layers=1
+    )(binding)
     train(
         binding,
+        agent, 
         cuda=True,
         total_timesteps=10_000_000,
-        track=False,
+        track=True,
         num_envs=12,
         num_cores=4,
         num_minibatches=1,
@@ -421,6 +427,7 @@ if __name__ == '__main__':
         wandb_project_name='pufferlib',
         wandb_entity='jsuarez',
     )
+
 
     bindings = pufferlib.registry.make_atari_bindings()
     bindings = {e.env_name: e for e in bindings}
