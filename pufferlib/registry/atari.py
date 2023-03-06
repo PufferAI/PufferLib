@@ -77,6 +77,7 @@ def create_binding(env_name, framestack):
         env_name=env_name,
         env_includes_reset=True,
         emulate_flat_atn=True,
+        record_episode_statistics=False,
     )
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):

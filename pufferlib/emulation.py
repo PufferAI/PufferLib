@@ -4,6 +4,7 @@ import numpy as np
 import time
 import functools
 from contextlib import nullcontext
+from collections import defaultdict
 
 from collections import OrderedDict
 from collections.abc import MutableMapping
@@ -79,6 +80,7 @@ class Binding:
             emulate_const_horizon=1024,
             emulate_const_num_agents=True,
             suppress_env_prints=False,
+            record_episode_statistics=True,
             obs_dtype=np.float32):
         '''Base class for PufferLib bindings
 
@@ -151,6 +153,7 @@ class Binding:
                 self.emulate_const_num_agents = emulate_const_num_agents
                 self.emulate_multiagent = not utils.is_multiagent(self.env)
                 self.suppress_env_prints = suppress_env_prints
+                self.record_episode_statistics = record_episode_statistics
 
                 # Manual LRU since functools.lru_cache is not pickleable
                 self.observation_space_cache = {}
@@ -269,8 +272,10 @@ class Binding:
 
             @utils.profile
             def reset(self):
+                self._epoch_returns = defaultdict(float)
+                self._epoch_lengths = defaultdict(int)
+ 
                 self.reset_calls_step = False
-
                 obs = self._reset_env()
 
                 if self.emulate_multiagent:
@@ -377,6 +382,19 @@ class Binding:
                     # Sort by possible_agents ordering
                     sorted_obs, sorted_rewards, sorted_dones, sorted_infos = {}, {}, {}, {}
                     for agent in self.possible_agents:
+                        self._epoch_lengths[agent] += 1
+                        self._epoch_returns[agent] += rewards[agent]
+
+                        if self.record_episode_statistics and dones[agent]:
+                            if 'episode' not in infos[agent]:
+                                infos[agent]['episode'] = {}
+
+                            infos[agent]['episode']['r'] = self._epoch_returns[agent]
+                            infos[agent]['episode']['l'] = self._epoch_lengths[agent]
+
+                            self._epoch_lengths[agent] = 0
+                            self._epoch_returns[agent] = 0
+ 
                         sorted_obs[agent] = obs[agent]
                         sorted_rewards[agent] = rewards[agent]
                         sorted_dones[agent] = dones[agent]

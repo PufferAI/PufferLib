@@ -108,7 +108,6 @@ def train(
     rewards = torch.zeros((num_steps, num_buffers, num_envs * num_agents)).to(device)
     dones = torch.zeros((num_steps, num_buffers, num_envs * num_agents)).to(device)
     values = torch.zeros((num_steps, num_buffers, num_envs * num_agents)).to(device)
-    reward_list = [[] for _ in range(num_envs * num_agents)]
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -127,8 +126,8 @@ def train(
     num_updates = total_timesteps // batch_size
 
     for update in range(1, num_updates + 1):
-        epoch_returns = []
         epoch_lengths = []
+        epoch_returns = []
         epoch_time = time.time()
         epoch_step = 0
 
@@ -168,25 +167,12 @@ def train(
 
                     rewards[step - 1, buf] = torch.tensor(r).float().to(device).view(-1)
 
-                    for idx, (rr, dd, ii) in enumerate(zip(r, d, i)):
-                        reward_list[idx].append(rr)
-                        if dd:
-                            # print(f"Episode {ii} finished after {len(reward_list[ii])} timesteps with reward {np.sum(reward_list[ii])}")
-                            traj_return = np.sum(reward_list[idx])
-                            traj_length = len(reward_list[idx])
-                            epoch_returns.append(traj_return)
-                            epoch_lengths.append(traj_length)
-                            writer.add_scalar("charts/new_episodic_return", traj_return, global_step)
-                            writer.add_scalar("charts/new_episodic_length", traj_length, global_step)
-                            reward_list[idx] = []
-
                     for item in i:
                         if "episode" in item.keys():
-                            print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
+                            epoch_lengths.append(item["episode"]["l"])
+                            epoch_returns.append(item["episode"]["r"])
                             writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
                             writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
-                            break
-
 
                 if step == num_steps:
                     continue
@@ -324,12 +310,15 @@ def train(
         uptime = timedelta(seconds=int(time.time() - program_start))
         completion_percentage = 100 * global_step / total_timesteps
 
-        if len(epoch_lengths) == 0:
-            epoch_lengths = [0]
-            epoch_returns = [0]
+        if len(epoch_returns) > 0:
+            epoch_return = np.mean(epoch_returns)
+            epoch_length = int(np.mean(epoch_lengths))
+        else:
+            epoch_return = 0
+            epoch_length = 0
 
         print(
-            f'Epoch: {update} - Mean Return: {np.mean(epoch_returns):<5.4}, Episode Length: {int(np.mean(epoch_lengths))}\n'
+            f'Epoch: {update} - Mean Return: {epoch_return:<5.4}, Episode Length: {epoch_length}\n'
             f'\t{completion_percentage:.3}% / {global_step // 1000}K steps - {uptime} Elapsed, ~{remaining} Remaining\n'
             f'\tSteps Per Second: Overall={epoch_sps}, Env={env_sps}, Inference={inference_sps}, Train={train_sps}\n'
         )
