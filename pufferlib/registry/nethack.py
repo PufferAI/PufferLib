@@ -13,7 +13,6 @@ import pufferlib.utils
 def make_binding():
     try:
         import nle
-        from nle import nethack
     except:
         raise pufferlib.utils.SetupError('NetHack (nle)')
     else:
@@ -29,7 +28,7 @@ class Policy(pufferlib.models.Policy):
             embedding_dim=32, crop_dim=9, num_layers=5,
             input_size=512, hidden_size=512,
             **kwargs):
-        super().__init__(input_size, hidden_size, *args, **kwargs)
+        super().__init__(binding, input_size, hidden_size, *args, **kwargs)
 
         self.observation_shape = binding.raw_single_observation_space
         self.glyph_shape = self.observation_shape["glyphs"].shape
@@ -47,6 +46,7 @@ class Policy(pufferlib.models.Policy):
 
         self.crop = Crop(self.H, self.W, self.crop_dim, self.crop_dim)
 
+        from nle import nethack
         self.embed = nn.Embedding(nethack.MAX_GLYPH, self.k_dim)
 
         K = embedding_dim  # number of input filters
