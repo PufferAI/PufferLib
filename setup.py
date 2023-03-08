@@ -73,7 +73,7 @@ setup(
         'numpy==1.23.3',
         'opencv-python==3.4.17.63',
         'openskill==2.4.0',
-        'pettingzoo==1.15.0',
+        'pettingzoo==1.19.0',
     ],
     extras_require={
         'docs': docs,
