@@ -1,21 +1,14 @@
 from pdb import set_trace as T
 
 import numpy as np
-import time
-import functools
 from contextlib import nullcontext
 from collections import defaultdict
-
 from collections import OrderedDict
-from collections.abc import MutableMapping
-import inspect
 
 import gym
 from pettingzoo.utils.env import ParallelEnv
 
 from pufferlib import utils
-
-import time
 
 
 class Binding:
@@ -26,10 +19,11 @@ class Binding:
         return self._raw_env_cls
 
     def raw_env_creator(self):
-        if self._raw_env_cls is None:
-            return self._raw_env_creator(*self._default_args, **self._default_kwargs)
-        else:
-            return self._raw_env_cls(*self._default_args, **self._default_kwargs)
+        with utils.Suppress() if self._suppress_env_prints else nullcontext():
+            if self._raw_env_cls is None:
+                return self._raw_env_creator(*self._default_args, **self._default_kwargs)
+            else:
+                return self._raw_env_cls(*self._default_args, **self._default_kwargs)
 
     @property
     def env_cls(self):
@@ -79,7 +73,7 @@ class Binding:
             emulate_flat_atn=True,
             emulate_const_horizon=1024,
             emulate_const_num_agents=True,
-            suppress_env_prints=False,
+            suppress_env_prints=True,
             record_episode_statistics=True,
             obs_dtype=np.float32):
         '''Base class for PufferLib bindings
@@ -99,6 +93,7 @@ class Binding:
 
         self._raw_env_cls = env_cls
         self._raw_env_creator = env_creator
+        self._suppress_env_prints = suppress_env_prints
 
         raw_local_env = self.raw_env_creator()
 
@@ -108,18 +103,21 @@ class Binding:
         class PufferEnv(ParallelEnv):
             @utils.profile
             def _create_env(self, *args, **kwargs):
-                if env_cls is None:
-                    return env_creator(*args, **kwargs)
-                else:
-                    return env_cls(*args, **kwargs) 
+                with utils.Suppress() if suppress_env_prints else nullcontext():
+                    if env_cls is None:
+                        return env_creator(*args, **kwargs)
+                    else:
+                        return env_cls(*args, **kwargs) 
 
             @utils.profile
             def _reset_env(self):
-                return self.env.reset()
+                with utils.Suppress() if suppress_env_prints else nullcontext():
+                    return self.env.reset()
 
             @utils.profile
             def _step_env(self, actions):
-                return self.env.step(actions)
+                with utils.Suppress() if suppress_env_prints else nullcontext():
+                    return self.env.step(actions)
 
             @utils.profile
             def __init__(self, *args, env=None, **kwargs):
@@ -132,11 +130,10 @@ class Binding:
 
                 # Infer obs space from first agent
                 # Assumes all agents have the same obs space
-                with utils.Suppress() if suppress_env_prints else nullcontext():
-                    if env is None:
-                        self.env = self._create_env(*args, **kwargs)
-                    else:
-                        self.env = env
+                if env is None:
+                    self.env = self._create_env(*args, **kwargs)
+                else:
+                    self.env = env
 
                 self.dummy_obs = {}
                 self._step = 0
@@ -155,15 +152,21 @@ class Binding:
                 self.suppress_env_prints = suppress_env_prints
                 self.record_episode_statistics = record_episode_statistics
 
-                # Manual LRU since functools.lru_cache is not pickleable
-                self.observation_space_cache = {}
-                self.action_space_cache = {}
-
                 # Standardize property vs method obs/atn space interface
                 if self.emulate_multiagent:
                     self.possible_agents = [1]
                 else:
                     self.possible_agents = self.env.possible_agents
+
+                # Manual LRU since functools.lru_cache is not pickleable
+                self.observation_space_cache = {}
+                self.action_space_cache = {}
+
+                # Cache observation and action spaces
+                if self.emulate_const_num_agents:
+                    for agent in self.possible_agents:
+                        self.observation_space(agent)
+                        self.action_space(agent)
 
                 # Set env metadata
                 if hasattr(self.env, 'metadata'):
@@ -244,6 +247,7 @@ class Binding:
                     low=-2**20, high=2**20,
                     shape=dummy.shape, dtype=self.obs_dtype
                 )
+                obs_space.seed(42)
 
                 self.observation_space_cache[agent] = obs_space
                 return obs_space
@@ -274,7 +278,15 @@ class Binding:
             def reset(self):
                 self._epoch_returns = defaultdict(float)
                 self._epoch_lengths = defaultdict(int)
- 
+
+                #for agent in self.possible_agents:
+                #    self.env.observation_space(agent).seed(42)
+                #    self.env.action_space(agent).seed(42)
+                #for agent in self.possible_agents:
+                #    self.observation_space_cache[agent].seed(42)
+                #    self.action_space_cache[agent].seed(42)
+
+
                 self.reset_calls_step = False
                 obs = self._reset_env()
 
@@ -286,10 +298,6 @@ class Binding:
 
                 self.done = False
 
-                # Populate dummy ob
-                if self.emulate_const_num_agents:
-                    for agent in self.possible_agents:
-                        self.observation_space(agent)
 
                 # Some envs implement reset by calling step
                 if not self.reset_calls_step:
@@ -425,7 +433,6 @@ class Binding:
         else:
             self._raw_single_observation_space = raw_local_env.observation_space(self._default_agent)
             self._raw_single_action_space = raw_local_env.action_space(self._default_agent)
-
 
 
 def unpack_batched_obs(obs_space, packed_obs):

@@ -4,17 +4,18 @@ import torch
 from torch.distributions import Categorical
 
 import pufferlib
-import pufferlib.binding
+import pufferlib.models
+import pufferlib.frameworks.base
 
 
-def make_cleanrl_policy(policy_cls, lstm_layers=0):
+def make_policy(policy_cls, lstm_layers=0):
     '''Wrap a PyTorch network for compatibility with CleanRL
     
     policy_cls must subclass the PufferLib base PyTorch class
     '''
-    assert issubclass(policy_cls, pufferlib.binding.Policy)
+    assert issubclass(policy_cls, pufferlib.models.Policy)
     if lstm_layers > 0:
-        policy_cls = pufferlib.binding.make_recurrent_policy(
+        policy_cls = pufferlib.frameworks.base.make_recurrent_policy(
             policy_cls, batch_first=False)
 
     class CleanRLPolicy(policy_cls):

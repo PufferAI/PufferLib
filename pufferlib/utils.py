@@ -11,6 +11,12 @@ import inspect
 import pettingzoo
 import gym
 
+# Define a SetupError exception class below
+class SetupError(Exception):
+    def __init__(self, env):
+        self.message = f'{env}: Binding setup failed. Please ensure that the environment is installed correctly.'
+        super().__init__(self.message)
+
 def check_env(env):
     #assert issubclass(env_cls, gym.Env), "Not a gymnasium env (are you on old gym?)"
     assert hasattr(env, 'possible_agents')
@@ -21,10 +27,9 @@ def check_env(env):
         assert env.observation_space(e) == obs_space, 'All agents must have same obs space'
         assert env.action_space(e) == atn_space, 'All agents must have same atn space'
 
-
 def is_dict_space(space):
     # Compatible with gym/gymnasium
-    return type(atn_space).__name__ == 'Dict'
+    return type(space).__name__ == 'Dict'
 
 def is_multiagent(env):
     if inspect.isclass(env):

@@ -8,7 +8,6 @@ import ray
 from ray.air import CheckpointConfig
 from ray.air.config import RunConfig
 from ray.air.config import ScalingConfig  
-from ray.tune.registry import register_env
 from ray.tune.tuner import Tuner
 from ray.train.rl import RLCheckpoint
 from ray.train.rl.rl_trainer import RLTrainer
@@ -17,6 +16,10 @@ from pettingzoo.butterfly import knights_archers_zombies_v10
 from pettingzoo.utils.conversions import aec_to_parallel
 
 import pufferlib
+import pufferlib.evaluation
+import pufferlib.frameworks
+import pufferlib.frameworks.rllib
+import pufferlib.utils
 
 
 def test_tournament():
@@ -25,7 +28,7 @@ def test_tournament():
     NUM_POLICIES = 3
 
     env_creator = lambda: aec_to_parallel(knights_archers_zombies_v10.env(max_zombies=0))
-    pufferlib.rllib.register_env('kaz', env_creator)
+    pufferlib.frameworks.rllib.register_env('kaz', env_creator)
 
     trainer = RLTrainer(
         scaling_config=ScalingConfig(num_workers=2, use_gpu=False),

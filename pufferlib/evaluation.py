@@ -17,7 +17,7 @@ from ray.serve import PredictorDeployment
 from ray import serve
 
 from pufferlib.rating import OpenSkillRating
-from pufferlib.rllib import RLPredictor, read_checkpoints
+from pufferlib.frameworks.rllib import RLPredictor, read_checkpoints
 
 
 def group(obs, policy_mapping_fn, episode):

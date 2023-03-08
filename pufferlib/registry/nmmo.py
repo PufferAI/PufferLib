@@ -2,20 +2,23 @@ from pdb import set_trace as T
 
 import torch
 
-import nmmo
-
 import pufferlib
-import pufferlib.binding
 import pufferlib.emulation
 
 
-def create_binding():
-    return pufferlib.emulation.Binding(
-        env_cls=nmmo.Env,
-        env_name='Neural MMO',
-    )
+def make_binding():
+    try:
+        import nmmo
+    except:
+        raise pufferlib.utils.SetupError('Neural MMO (nmmo)')
+    else:
+        return pufferlib.emulation.Binding(
+            env_cls=nmmo.Env,
+            env_name='Neural MMO',
+        )
 
-class Policy(pufferlib.binding.Policy):
+
+class Policy(pufferlib.models.Policy):
     def __init__(self, binding, input_size=512, hidden_size=512):
         '''Simple custom PyTorch policy subclassing the pufferlib BasePolicy
         
@@ -23,7 +26,7 @@ class Policy(pufferlib.binding.Policy):
         an action decoder, and a critic function. If you use our LSTM support, it will
         be added between the encoder and the decoder.
         '''
-        super().__init__(input_size, hidden_size)
+        super().__init__(binding, input_size, hidden_size)
         self.raw_single_observation_space = binding.raw_single_observation_space
 
         # A dumb example encoder that applies a linear layer to agent self features

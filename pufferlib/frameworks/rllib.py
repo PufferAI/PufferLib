@@ -14,7 +14,7 @@ from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.env import ParallelPettingZooEnv
 
 import pufferlib
-import pufferlib.binding
+import pufferlib.frameworks.base
 
 
 def register_env(name, env_creator):
@@ -51,11 +51,11 @@ def create_policies(n):
         for i in range(n)
     }
 
-def make_rllib_policy(policy_cls, lstm_layers):
+def make_policy(policy_cls, lstm_layers):
     assert issubclass(policy_cls, pufferlib.binding.Policy)
 
     if lstm_layers > 0:
-        policy_cls = pufferlib.binding.make_recurrent_policy(policy_cls)
+        policy_cls = pufferlib.frameworks.base.make_recurrent_policy(policy_cls)
 
         class RLLibPolicy(RLLibRecurrentNetwork, policy_cls):
             def __init__(self, *args, **kwargs):

@@ -4,23 +4,27 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import nle
-from nle import nethack
-
 import pufferlib
-import pufferlib.binding
 import pufferlib.emulation
+import pufferlib.models
+import pufferlib.utils
 
 
-def create_binding():
-    return pufferlib.emulation.Binding(
-        env_cls=nle.env.NLE,
-        env_name='NetHack',
-        emulate_flat_atn=True,
-    )
+def make_binding():
+    try:
+        import nle
+        from nle import nethack
+    except:
+        raise pufferlib.utils.SetupError('NetHack (nle)')
+    else:
+        return pufferlib.emulation.Binding(
+            env_cls=nle.env.NLE,
+            env_name='NetHack',
+            emulate_flat_atn=True,
+        )
 
 
-class Policy(pufferlib.binding.Policy):
+class Policy(pufferlib.models.Policy):
     def __init__(self, binding, *args,
             embedding_dim=32, crop_dim=9, num_layers=5,
             input_size=512, hidden_size=512,

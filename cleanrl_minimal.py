@@ -25,10 +25,10 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
 )
 
 import pufferlib
-import pufferlib.binding
+import pufferlib.models
 import pufferlib.registry.nmmo
 import pufferlib.frameworks.cleanrl
-from pufferlib.vecenvs import VecEnvs
+import pufferlib.vectorization
 
 
 def parse_args():
@@ -122,7 +122,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
-class Agent(pufferlib.binding.Policy):
+class Agent(pufferlib.models.Policy):
     def __init__(self, binding, input_size=512, hidden_size=512):
         '''Simple custom PyTorch policy subclassing the pufferlib BasePolicy
         
@@ -187,16 +187,15 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    binding = pufferlib.registry.nmmo.create_binding()
-
-    envs = VecEnvs(
+    binding = pufferlib.registry.nmmo.make_binding()
+    envs = pufferlib.vectorization.RayVecEnv(
         binding,
         num_workers=args.num_envs // binding.max_agents,
         envs_per_worker=1,
     )
     envs.seed(args.seed)
 
-    agent = pufferlib.frameworks.cleanrl.make_cleanrl_policy(
+    agent = pufferlib.frameworks.cleanrl.make_policy(
         pufferlib.registry.nmmo.Policy,
         lstm_layers=1
     )(binding).to(device)

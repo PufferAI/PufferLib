@@ -1,24 +1,11 @@
-# TODO: Separate into mock and non mock tests once we have more mock envs
-
 from pdb import set_trace as T
 
-import random
 import numpy as np
 
 import pufferlib
-import pufferlib.binding
-from environments import bindings
+import pufferlib.emulation
+import pufferlib.registry
 
-import mock_environments
-
-
-def test_pack_and_batch_obs():
-    for binding in bindings.values():
-        env = binding.env_creator()
-        obs = env.reset()
-        packed = pufferlib.emulation._pack_and_batch_obs(obs)
-        assert type(packed) == np.ndarray
-        assert len(packed) == len(obs)
 
 def test_flatten():
     inputs = [
@@ -40,6 +27,7 @@ def test_flatten():
     for inp, out in zip(inputs, outputs):
         test_out = pufferlib.emulation._flatten(inp)
         assert out == test_out, f'\n\tOutput: {test_out}\n\tExpected: {out}'
+
 
 def test_unflatten():
     input = [1, 2, 3]
@@ -79,43 +67,143 @@ def test_unflatten():
         test_out = pufferlib.emulation._unflatten(input, struct)
         assert out == test_out, f'\n\tOutput: {test_out}\n\tExpected: {out}'
 
-def test_raw_vs_emulation(binding, seed=42, steps=32):
-    raw_env = binding.raw_env_creator()
-    raw_env.seed(seed)
-    raw_obs = raw_env.reset()
 
-    puf_env = binding.env_creator()
-    puf_env.seed(seed)
-    puf_obs = puf_env.reset()
+def test_pack_and_batch_obs(binding):
+    env = binding.env_creator()
+    env.seed(42)
+    obs = env.reset()
+    packed = pufferlib.emulation._pack_and_batch_obs(obs)
+    assert type(packed) == np.ndarray
+    assert len(packed) == len(obs)
 
-    for step in range(steps):
-        if binding.emulate_multiagent:
-            raw_actions = raw_env.action_space.sample()
+
+def test_singleagent_emulation(binding, seed=42, steps=1000):
+    with pufferlib.utils.Suppress():
+        env_1 = binding.raw_env_creator()
+        env_2 = binding.env_creator()
+
+    binding.raw_single_action_space.seed(seed)
+
+    env_1.seed(seed)
+    env_2.seed(seed)
+
+    ob_1 = env_1.reset()
+    ob_2 = env_2.reset()
+
+    flat = pufferlib.emulation._flatten_ob(ob_1)
+    assert np.array_equal(flat, ob_2[1])
+ 
+    done_1 = False
+    done_2 = False
+
+    for i in range(steps):
+        atn_1 = binding.raw_single_action_space.sample()
+        atn_2 = pufferlib.emulation._flatten(atn_1)
+
+        if type(atn_2) == int:
+            atn_2 = [atn_2]
+
+        if done_1:
+            assert done_2
+            assert env_2.done
+
+            ob_1 = env_1.reset()
+            ob_2 = env_2.reset()[1]
+
+            done_1 = False
+            done_2 = False
+
+            flat = pufferlib.emulation._flatten_ob(ob_1)
+            assert np.array_equal(flat, ob_2)
         else:
-            raw_actions = {a: raw_env.action_space(a).sample() for a in raw_env.agents}
+            assert not env_2.done
 
-        puf_actions = {a: puf_env.action_space(a).sample() for a in puf_env.possible_agents}
+            ob_1, reward_1, done_1, _ = env_1.step(atn_1)
+            ob_2, reward_2, done_2, _ = env_2.step({1: atn_2})
+            ob_2, reward_2, done_2 = ob_2[1], reward_2[1], done_2[1]
 
-        raw_obs, raw_reward, raw_done, raw_info = raw_env.step(raw_actions)
-        puf_obs, puf_reward, puf_done, puf_info = puf_env.step(puf_actions)
+            flat = pufferlib.emulation._flatten_ob(ob_1)
+            assert np.array_equal(flat, ob_2)
+            assert reward_1 == reward_2
+            assert done_1 == done_2
 
-        if binding.emulate_multiagent:
-            assert np.array_equal(pufferlib.emulation._flatten_ob(raw_obs), puf_obs[1])
-            assert raw_reward == puf_reward[1]
-            assert raw_done == puf_done[1]
-            assert raw_info == puf_info[1]
+
+def test_multiagent_emulation(binding, seed=42, steps=1000):
+    with pufferlib.utils.Suppress():
+        env_1 = binding.raw_env_creator()
+        env_2 = binding.env_creator()
+
+    assert env_1.possible_agents == env_2.possible_agents
+    binding.raw_single_action_space.seed(seed)
+
+    env_1.seed(seed)
+    env_2.seed(seed)
+
+    ob_1 = env_1.reset()
+    ob_2 = env_2.reset()
+
+    for agent in env_1.agents:
+        flat = pufferlib.emulation._flatten_ob(ob_1[agent])
+        assert np.array_equal(flat, ob_2[agent])
+ 
+    done_1 = False
+    done_2 = False
+
+    for i in range(steps):
+        assert env_1.agents == env_2.agents
+
+        atn_1 = {a: binding.raw_single_action_space.sample() for a in env_1.possible_agents}
+
+        atn_2 = {}
+        for k, v in atn_1.items():
+            a = list(pufferlib.emulation._flatten(v).values())
+            atn_2[k] = [a] if type(a) == int else a
+
+        # TODO: check on dones for pufferlib style
+        if done_1:
+            assert env_2.done
+            assert done_2
+
+            ob_1 = env_1.reset()
+            ob_2 = env_2.reset()
+
+            done_1 = False
+            done_2 = False
+
+            for agent in env_1.agents:
+                flat = pufferlib.emulation._flatten_ob(ob_1[agent])
+                assert np.array_equal(flat, ob_2[agent])
         else:
-            for a in raw_obs:
-                assert np.array_equal(pufferlib.emulation._flatten_ob(raw_obs[a]), puf_obs[a]), f'Agent {a} has different observations'
-                assert raw_reward[a] == puf_reward[a], f'Agent {a} has different rewards'
-                assert raw_done[a] == puf_done[a], f'Agent {a} has different dones'
-                assert raw_info[a] == puf_info[a], f'Agent {a} has different infos'
+            assert not env_2.done
+
+            ob_1, reward_1, done_1, _ = env_1.step(atn_1)
+            ob_2, reward_2, done_2, _ = env_2.step(atn_2)
+
+            for agent in env_1.agents:
+                flat = pufferlib.emulation._flatten_ob(ob_1[agent])
+                assert np.array_equal(flat, ob_2[agent])
+                assert reward_1[agent] == reward_2[agent]
+                assert done_1[agent] == done_2[agent]
+
+            done_1 = all(done_1.values())
+            done_2 = all(done_2.values())
+
 
 if __name__ == '__main__':
-    test_raw_vs_emulation(pufferlib.binding.auto(env_cls=mock_environments.TestEnv))
-    #test_raw_vs_emulation(pufferlib.registry.NetHack())
-    #test_raw_vs_emulation(pufferlib.registry.Atari('BreakoutNoFrameskip-v4'))
+    import mock_environments
+    binding = pufferlib.emulation.Binding(env_cls=mock_environments.TestEnv)
+    test_multiagent_emulation(binding)
+
+    # TODO: Fix this test
+    import pufferlib.registry.nethack
+    binding = pufferlib.registry.nethack.make_binding()
+    test_singleagent_emulation(binding)
+
+    # TODO: Fix this test
+    import pufferlib.registry.atari
+    binding = pufferlib.registry.atari.make_binding('BreakoutNoFrameskip-v4', framestack=1)
+    test_singleagent_emulation(binding)
 
     test_flatten()
     test_unflatten()
-    test_pack_and_batch_obs()
+    test_pack_and_batch_obs(binding)

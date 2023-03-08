@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import pufferlib
 import pufferlib.frameworks.cleanrl
-from pufferlib.vecenvs import VecEnvs
+import pufferlib.vectorization
 
 
 def train(
@@ -90,7 +90,7 @@ def train(
 
     buffers = []
     for i in range(num_buffers):
-        vec = VecEnvs(
+        vec = pufferlib.vectorization.RayVecEnv(
             binding,
             num_workers=num_cores,
             envs_per_worker=int(envs_per_worker),
@@ -353,8 +353,8 @@ if __name__ == '__main__':
     # This will be resolved in a future update
 
     import pufferlib.registry.atari
-    binding = pufferlib.registry.atari.create_binding('BreakoutNoFrameskip-v4', framestack=1)
-    agent = pufferlib.frameworks.cleanrl.make_cleanrl_policy(
+    binding = pufferlib.registry.atari.make_binding('BreakoutNoFrameskip-v4', framestack=1)
+    agent = pufferlib.frameworks.cleanrl.make_policy(
         pufferlib.registry.atari.Policy,
         lstm_layers=1
     )(binding, framestack=1)

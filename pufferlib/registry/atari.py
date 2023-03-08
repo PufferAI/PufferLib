@@ -16,7 +16,8 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
 )
 
 import pufferlib
-import pufferlib.binding
+import pufferlib.emulation
+import pufferlib.models
 
 
 # Broken in SB3
@@ -50,7 +51,7 @@ class NoopResetEnv(gym.Wrapper):
                 obs = self.env.reset(**kwargs)
         return obs
 
-def env_creator(env_name, framestack):
+def make_env(env_name, framestack):
     try:
         with pufferlib.utils.Suppress():
             env = gym.make(env_name)
@@ -70,24 +71,30 @@ def env_creator(env_name, framestack):
 
     return env
 
-def create_binding(env_name, framestack):
-    return pufferlib.emulation.Binding(
-        env_creator=env_creator,
-        default_args=[env_name, framestack],
-        env_name=env_name,
-        env_includes_reset=True,
-        emulate_flat_atn=True,
-        record_episode_statistics=False,
-    )
+
+def make_binding(env_name, framestack):
+    try:
+        make_env(env_name, framestack)
+    except:
+        raise pufferlib.utils.SetupError(f'{env_name} (ale)')
+    else:
+        return pufferlib.emulation.Binding(
+            env_creator=make_env,
+            default_args=[env_name, framestack],
+            env_name=env_name,
+            env_includes_reset=True,
+            emulate_flat_atn=True,
+            record_episode_statistics=False,
+        )
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
-class Policy(pufferlib.binding.Policy):
+class Policy(pufferlib.models.Policy):
     def __init__(self, binding, *args, framestack, input_size=512, hidden_size=512, **kwargs):
-        super().__init__(input_size, hidden_size, *args, **kwargs)
+        super().__init__(binding, input_size, hidden_size, *args, **kwargs)
         self.observation_space = binding.raw_single_observation_space
         self.num_actions = binding.raw_single_action_space.n
 

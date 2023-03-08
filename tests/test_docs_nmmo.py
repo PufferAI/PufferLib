@@ -4,7 +4,7 @@ import nmmo
 
 import pufferlib
 import pufferlib.emulation
-from pufferlib.vecenvs import VecEnvs
+import pufferlib.vectorization
 
 # Wrap Neural MMO with PufferLib
 binding = pufferlib.emulation.Binding(
@@ -13,7 +13,7 @@ binding = pufferlib.emulation.Binding(
     )
 
 # Vectorize 4 environments across 2 cores
-envs = VecEnvs(binding, num_workers=2, envs_per_worker=2)
+envs = pufferlib.vectorization.RayVecEnv(binding, num_workers=2, envs_per_worker=2)
 envs.seed(42)
 
 # Standard Gym API. See custom CleanRL demo for async API.

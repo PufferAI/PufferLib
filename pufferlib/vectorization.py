@@ -18,12 +18,13 @@ def make_remote_envs(env_creator, n):
         def seed(self, seed):
             for env in self.envs:
                 env.seed(seed)
+                seed += 1
 
                 # TODO: Check if different seed across obs/action spaces is correct
-                for agent in env.possible_agents:
-                    env.action_space(agent).seed(seed)
-                    env.observation_space(agent).seed(seed)
-                    seed += 1
+                #for agent in env.possible_agents:
+                #    env.action_space(agent).seed(seed)
+                #    env.observation_space(agent).seed(seed)
+                #    seed += 1
 
         def profile_all(self):
             return [e.timers for e in self.envs]
@@ -57,7 +58,7 @@ def make_remote_envs(env_creator, n):
     return RemoteEnvs.remote()
 
 
-class VecEnvs:
+class RayVecEnv:
     def __init__(self, binding, num_workers, envs_per_worker=1):
         assert envs_per_worker > 0, 'Each worker must have at least 1 env'
         assert type(envs_per_worker) == int
