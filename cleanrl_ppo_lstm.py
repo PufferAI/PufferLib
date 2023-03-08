@@ -314,8 +314,8 @@ def train(
             epoch_return = np.mean(epoch_returns)
             epoch_length = int(np.mean(epoch_lengths))
         else:
-            epoch_return = 0
-            epoch_length = 0
+            epoch_return = 0.0
+            epoch_length = 0.0
 
         print(
             f'Epoch: {update} - Mean Return: {epoch_return:<5.4}, Episode Length: {epoch_length}\n'
@@ -367,7 +367,7 @@ if __name__ == '__main__':
         track=True,
         num_envs=2,
         num_cores=2,
-        num_buffers=4,
+        num_buffers=2,
         num_minibatches=4,
         num_agents=1,
         wandb_project_name='pufferlib',
