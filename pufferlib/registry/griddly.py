@@ -7,6 +7,10 @@ import pufferlib.emulation
 
 
 def make_spider_v0_binding():
+    '''Griddly Spiders binding creation function
+
+    Support for Griddly is WIP because environments do not specify
+    their observation spaces until after they are created.'''
     try:
         import griddly
         env_cls = lambda: gym.make('GDY-Spiders-v0')

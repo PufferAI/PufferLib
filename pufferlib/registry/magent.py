@@ -5,6 +5,7 @@ import pufferlib.utils
 
 
 def make_battle_v4_binding():
+    '''MAgent Battle binding creation function'''
     try:
         from pettingzoo.magent import battle_v4 as battle
     except:

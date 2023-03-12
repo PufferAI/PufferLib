@@ -9,9 +9,14 @@ import pufferlib.frameworks.base
 
 
 def make_policy(policy_cls, lstm_layers=0):
-    '''Wrap a PyTorch network for compatibility with CleanRL
-    
-    policy_cls must subclass the PufferLib base PyTorch class
+    '''Wrap a PyTorch model for use with CleanRL
+
+    Args:
+        policy_cls: A pufferlib.models.Policy subclass that implements the PufferLib model API
+        lstm_layers: The number of LSTM layers to use. If 0, no LSTM is used
+
+    Returns:
+        A new PyTorch class wrapping your model that implements the CleanRL API
     '''
     assert issubclass(policy_cls, pufferlib.models.Policy)
     if lstm_layers > 0:

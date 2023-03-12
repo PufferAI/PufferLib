@@ -7,6 +7,7 @@ import pufferlib.emulation
 
 
 def make_binding():
+    '''Neural MMO binding creation function'''
     try:
         import nmmo
     except:
@@ -20,12 +21,10 @@ def make_binding():
 
 class Policy(pufferlib.models.Policy):
     def __init__(self, binding, input_size=512, hidden_size=512):
-        '''Simple custom PyTorch policy subclassing the pufferlib BasePolicy
+        '''Default Neural MMO policy
         
-        This requires only that you structure your network as an observation encoder,
-        an action decoder, and a critic function. If you use our LSTM support, it will
-        be added between the encoder and the decoder.
-        '''
+        This is a dummy placeholder used to speed up tests because of the size of the
+        Neural MMO observation space. It is not a good policy and will not learn anything.'''
         super().__init__(binding, input_size, hidden_size)
         self.raw_single_observation_space = binding.raw_single_observation_space
 

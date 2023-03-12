@@ -5,6 +5,7 @@ import pufferlib.utils
 
 
 def make_knights_archers_zombies_v10_binding():
+    '''Knights Archers Zombies binding creation function'''
     try:
         from pettingzoo.butterfly import knights_archers_zombies_v10 as kaz
     except:
@@ -17,6 +18,7 @@ def make_knights_archers_zombies_v10_binding():
         )
 
 def make_cooperative_pong_v5_binding():
+    '''Cooperative Pong binding creation function'''
     try:
         from pettingzoo.butterfly import cooperative_pong_v5 as pong
     except:

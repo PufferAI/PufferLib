@@ -51,7 +51,9 @@ class NoopResetEnv(gym.Wrapper):
                 obs = self.env.reset(**kwargs)
         return obs
 
+
 def make_env(env_name, framestack):
+    '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
     try:
         with pufferlib.utils.Suppress():
             env = gym.make(env_name)
@@ -73,6 +75,7 @@ def make_env(env_name, framestack):
 
 
 def make_binding(env_name, framestack):
+    '''Atari binding creation function'''
     try:
         make_env(env_name, framestack)
     except:
@@ -88,12 +91,17 @@ def make_binding(env_name, framestack):
         )
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    '''CleanRL's default layer initialization'''
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
 class Policy(pufferlib.models.Policy):
     def __init__(self, binding, *args, framestack, input_size=512, hidden_size=512, **kwargs):
+        '''The CleanRL default Atari policy: a stack of three convolutions followed by a linear layer
+        
+        Takes framestack as a mandatory keyword arguments. Suggested default is 1 frame
+        with LSTM or 4 frames without.'''
         super().__init__(binding, input_size, hidden_size, *args, **kwargs)
         self.observation_space = binding.raw_single_observation_space
         self.num_actions = binding.raw_single_action_space.n
@@ -127,4 +135,3 @@ class Policy(pufferlib.models.Policy):
         if concat:
             return action
         return [action]
-

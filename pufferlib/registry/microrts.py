@@ -4,6 +4,10 @@ import pufferlib.utils
 
 
 def make_binding():
+    '''Gym MicroRTS binding creation function
+    
+    Currently only provides a binding for the GlobalAgentCombinedRewardEnv
+    setting of the environment.'''
     try:
         from gym_microrts.envs import GlobalAgentCombinedRewardEnv
     except:

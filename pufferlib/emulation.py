@@ -14,11 +14,13 @@ from pufferlib import utils
 class Binding:
     @property
     def raw_env_cls(self):
+        '''Returns the original, unwrapped environment class used to create this binding, if available'''
         if self._raw_env_cls is None:
             raise ValueError('raw_env_cls not available when binding is not passed an env_cls')
         return self._raw_env_cls
 
     def raw_env_creator(self):
+        '''Returns the original, unwrapped env_creator function used to create this binding'''
         with utils.Suppress() if self._suppress_env_prints else nullcontext():
             if self._raw_env_cls is None:
                 return self._raw_env_creator(*self._default_args, **self._default_kwargs)
@@ -27,37 +29,49 @@ class Binding:
 
     @property
     def env_cls(self):
+        '''Returns wrapped PufferEnv class created by this binding'''
         return self._env_cls
 
     def env_creator(self):
+        '''Returns the wrapped PufferEnv env_creator function created by this binding'''
         return self._env_cls(*self._default_args, **self._default_kwargs)
 
     @property
     def single_observation_space(self):
+        '''Returns the wrapped, flat observation space of a single agent.
+        
+        PufferLib currently assumes that all agents share the same observation space'''
         return self._single_observation_space
 
     @property
     def single_action_space(self):
+        '''Returns the wrapped, flat action space of a single agent.
+        
+        PufferLib currently assumes that all agents share the same action space'''
         return self._single_action_space
 
     @property
     def raw_single_observation_space(self):
+        '''Returns the unwrapped, structured observation space of a single agent.
+        
+        PufferLib currently assumes that all agents share the same observation space'''
         return self._raw_single_observation_space
 
     @property
     def raw_single_action_space(self):
+        '''Returns the unwrapped, structured action space of a single agent.
+        
+        PufferLib currently assumes that all agents share the same action space'''
         return self._raw_single_action_space
 
     @property
-    def default_agent(self):
-        return self._default_agent
-
-    @property
     def max_agents(self):
+        '''Returns the maximum number of agents in the environment'''
         return self._max_agents
 
     @property
     def env_name(self):
+        '''Returns the environment name'''
         return self._env_name
 
     def __init__(self,
@@ -68,21 +82,45 @@ class Binding:
             env_name=None,
             feature_parser=None,
             reward_shaper=None,
-            env_includes_reset=False,
             emulate_flat_obs=True,
             emulate_flat_atn=True,
-            emulate_const_horizon=1024,
+            emulate_const_horizon=None,
             emulate_const_num_agents=True,
             suppress_env_prints=True,
             record_episode_statistics=True,
             obs_dtype=np.float32):
-        '''Base class for PufferLib bindings
+        '''PufferLib's core Binding class.
+        
+        Wraps the provided Gym or PettingZoo environment in a PufferEnv that
+        behaves like a normal PettingZoo environment with several simplifications:
+            - The observation space is flattened to a single vector
+            - The action space is flattened to a single vector
+            - The environment caches observation and action spaces for improved performance
+            - The environment is reset to a fixed horizon
+            - The environment is padded to a fixed number of agents in sorted order
+            - If originally single-agent, the environment is wrapped in a PettingZoo environment
+            - The environment records additional statistics
+            - The environment has suppressed stdout and stderr to avoid poluting the console
+            - The environment contains additional error checking
+
+        The Binding class additionally provides utility functions for interacting with complex
+        observation and action spaces.
 
         Args: 
+            env_cls: Environment class to wrap. Specify this or env_creator
+            env_creator: Environment creation function to wrap. Specify this or env_cls
+            default_args: Default arguments for binding.env_creator and binding.raw_env_creator
+            default_kwargs: Default keyword arguments for binding.env_creator and binding.raw_env_creator
             env_name: Name of the environment
-            env_cls: Environment class to wrap
-            env_args: Arguments for env_cls
-            env_kwargs: Keyword arguments for env_cls
+            feature_parser: Feature parser to use
+            reward_shaper: Reward shaper to use
+            emulate_flat_obs: Whether the observation space requires flattening
+            emulate_flat_atn: Whether the action space requires flattening
+            emulate_const_horizon: Fixed max horizon for resets, None if not applicable
+            emulate_const_num_agents: Whether to pad to len(env.possible_agents) observations
+            suppress_env_prints: Whether to consume all environment prints
+            record_episode_statistics: Whether to record additional episode statistics
+            obs_dtype: Observation data type
         '''
         assert (env_cls is None) != (env_creator is None), \
             'Specify only one of env_cls (preferred) or env_creator'
@@ -97,9 +135,10 @@ class Binding:
 
         raw_local_env = self.raw_env_creator()
 
-        # Consider integrating these?
-        #env = wrappers.AssertOutOfBoundsWrapper(env)
-        #env = wrappers.OrderEnforcingWrapper(env)
+        # TODO: Consider integrating these?
+        # env = wrappers.AssertOutOfBoundsWrapper(env)
+        # env = wrappers.OrderEnforcingWrapper(env)
+
         class PufferEnv(ParallelEnv):
             @utils.profile
             def _create_env(self, *args, **kwargs):
@@ -128,8 +167,6 @@ class Binding:
                 self.timers['prestep_timer'] = self.prestep_timer
                 self.timers['poststep_timer'] = self.poststep_timer
 
-                # Infer obs space from first agent
-                # Assumes all agents have the same obs space
                 if env is None:
                     self.env = self._create_env(*args, **kwargs)
                 else:
@@ -142,7 +179,6 @@ class Binding:
 
                 self.feature_parser = feature_parser
                 self.reward_shaper = reward_shaper
-                self.env_includes_reset = env_includes_reset
 
                 self.emulate_flat_obs = emulate_flat_obs
                 self.emulate_flat_atn = emulate_flat_atn
@@ -180,17 +216,7 @@ class Binding:
 
             @utils.profile
             def action_space(self, agent):
-                '''Neural MMO Action Space
-
-                Args:
-                    agent: Agent ID
-
-                Returns:
-                    actions: gym.spaces object contained the structured actions
-                    for the specified agent. Each action is parameterized by a list
-                    of discrete-valued arguments. These consist of both fixed, k-way
-                    choices (such as movement direction) and selections from the
-                    observation space (such as targeting)'''
+                '''Flattened (MultiDiscrete) and cached action space'''
 
                 if agent in self.action_space_cache:
                     return self.action_space_cache[agent]
@@ -212,17 +238,9 @@ class Binding:
 
                 return atn_space
 
-            def structured_observation_space(self, agent: int):
-                if self.feature_parser:
-                    return self.feature_parser.spec
-
-                if self.emulate_multiagent:
-                    return self.env.observation_space
-                else:
-                    return self.env.observation_space(agent)
-
             @utils.profile
             def observation_space(self, agent: int):
+                '''Flattened (Box) and cached observation space'''
                 if agent in self.observation_space_cache:
                     return self.observation_space_cache[agent]
 
@@ -254,9 +272,7 @@ class Binding:
 
             @utils.profile
             def _process_obs(self, obs):
-                # Faster to have feature parser on env but then 
-                # you have to somehow mod the space to pack unpack the modded feat
-                # space instead of just using the orig and featurizing in the net
+                '''Process observation. Shared by reset and step.'''
                 if self.emulate_const_num_agents:
                     for k in self.dummy_obs:
                         if k not in obs:                                                  
@@ -270,22 +286,15 @@ class Binding:
 
                 return obs
 
-            # Deprecated Pettingzoo API
             def seed(self, seed):
+                '''Seed the environment. Note that this is deprecated in new gym versions.'''
                 self.env.seed(seed)
 
             @utils.profile
             def reset(self):
+                '''Reset the environment and return observations'''
                 self._epoch_returns = defaultdict(float)
                 self._epoch_lengths = defaultdict(int)
-
-                #for agent in self.possible_agents:
-                #    self.env.observation_space(agent).seed(42)
-                #    self.env.action_space(agent).seed(42)
-                #for agent in self.possible_agents:
-                #    self.observation_space_cache[agent].seed(42)
-                #    self.action_space_cache[agent].seed(42)
-
 
                 self.reset_calls_step = False
                 obs = self._reset_env()
@@ -308,6 +317,7 @@ class Binding:
 
             @utils.profile
             def step(self, actions, **kwargs):
+                '''Step the environment and return (observations, rewards, dones, infos)'''
                 assert not self.done, 'step after done'
                 self.reset_calls_step = True
 
@@ -366,7 +376,7 @@ class Binding:
                         rewards = self.reward_shaper(rewards, self._step)
 
                     # Terminate episode at horizon or if all agents are done
-                    if self.emulate_const_horizon:
+                    if self.emulate_const_horizon is not None:
                         assert self._step <= self.emulate_const_horizon
                         if self._step == self.emulate_const_horizon:
                             self.done = True
@@ -382,10 +392,6 @@ class Binding:
                                 infos[k] = {}
                             if k not in dones:
                                 dones[k] = self.done
-
-                    # Env wrapper already resets itself
-                    #if self.env_includes_reset:
-                    #    self.done = False
 
                     # Sort by possible_agents ordering
                     sorted_obs, sorted_rewards, sorted_dones, sorted_infos = {}, {}, {}, {}
@@ -499,7 +505,7 @@ def _unflatten(ary, space, nested_dict=None, idx=0):
         outer_call = True
         nested_dict = {}
 
-    #TODO: Find a way to flip the check and the loop
+    # TODO: Find a way to flip the check and the loop
     # (Added for Gym microrts)
     if type(space)  == gym.spaces.MultiDiscrete:
         return ary

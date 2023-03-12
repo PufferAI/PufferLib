@@ -11,6 +11,7 @@ import pufferlib.utils
 
 
 def make_binding():
+    '''NetHack binding creation function'''
     try:
         import nle
     except:
@@ -24,6 +25,7 @@ def make_binding():
 
 
 class Policy(pufferlib.models.Policy):
+    '''Default NetHack Learning Environment policy ported from the nle release'''
     def __init__(self, binding, *args,
             embedding_dim=32, crop_dim=9, num_layers=5,
             input_size=512, hidden_size=512,

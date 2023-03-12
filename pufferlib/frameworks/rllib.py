@@ -1,3 +1,8 @@
+'''RLlib support under construction as we focus on stable CleanRL support for v0.2
+
+Still supported via Discord, but not officially stable
+'''
+
 from pdb import set_trace as T
 import numpy as np
 import torch
@@ -52,6 +57,15 @@ def create_policies(n):
     }
 
 def make_policy(policy_cls, lstm_layers):
+    '''Wrap a PyTorch model for use with RLLib 
+
+    Args:
+        policy_cls: A pufferlib.models.Policy subclass that implements the PufferLib model API
+        lstm_layers: The number of LSTM layers to use. If 0, no LSTM is used
+
+    Returns:
+        A new RLlib model class wrapping your model
+    '''
     assert issubclass(policy_cls, pufferlib.binding.Policy)
 
     if lstm_layers > 0:

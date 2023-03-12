@@ -3,13 +3,23 @@ from pdb import set_trace as T
 import ray
 import numpy as np
 import itertools
-import random
 
 RESET = 0
 SEND = 1
 RECV = 2
 
 def make_remote_envs(env_creator, n):
+    '''Creates n serial environments on a single remote process
+
+    Called for you by RayVecEnvs
+    
+    Args:
+        env_creator: A function that creates a single environment
+        n: The number of environments to create
+
+    Returns:
+        A Ray-backed RemoteEnvs object. Used internally by RayVecEnvs
+    '''
     @ray.remote
     class RemoteEnvs:
         def __init__(self):
@@ -19,12 +29,6 @@ def make_remote_envs(env_creator, n):
             for env in self.envs:
                 env.seed(seed)
                 seed += 1
-
-                # TODO: Check if different seed across obs/action spaces is correct
-                #for agent in env.possible_agents:
-                #    env.action_space(agent).seed(seed)
-                #    env.observation_space(agent).seed(seed)
-                #    seed += 1
 
         def profile_all(self):
             return [e.timers for e in self.envs]
@@ -60,6 +64,19 @@ def make_remote_envs(env_creator, n):
 
 class RayVecEnv:
     def __init__(self, binding, num_workers, envs_per_worker=1):
+        '''Creates env_per_worker serial environments on each of num_workers remote processes
+
+        Synchronous API: Use env.reset() and env.step(actions)
+
+        Asynchronous API: Use env.async_reset(), env.send(actions), and env.recv(actions)
+        This confers no advantage unless you are using multiple RayVecEnvs in a double-buffered
+        or multi-buffered configuration. See the PufferLib custom CleanRL demo for an example.
+
+        Args:
+            binding: A pufferlib.emulation.Binding object
+            num_workers: The number of remote processes to create
+            envs_per_worker: The number of serial environments to create on each remote process
+        '''
         assert envs_per_worker > 0, 'Each worker must have at least 1 env'
         assert type(envs_per_worker) == int
 
@@ -83,32 +100,39 @@ class RayVecEnv:
 
     @property
     def single_observation_space(self):
+        '''Convenience function; returns self.binding.single_observation_space'''
         return self.binding.single_observation_space
 
     @property
     def single_action_space(self):
+        '''Convenience function; returns self.binding.single_action_space'''
         return self.binding.single_action_space
 
     def close(self):
+        '''Not implemented yet'''
         #TODO: Implement close
         pass
 
     def profile(self):
+        '''Returns profiling timers from all remote environments'''
         return list(itertools.chain.from_iterable(ray.get([e.profile_all.remote() for e in self.remote_envs_lists])))
 
     def seed(self, seed):
+        '''Sets the seed for all remote environments'''
         assert type(seed) == int
         for env_list in self.remote_envs_lists:
             env_list.seed.remote(seed)
             seed += self.envs_per_worker * self.binding.max_agents
 
     def async_reset(self):
+        '''Asynchronously reset environments. Does not block.'''
         assert self.state == RESET, 'Call reset only once on initialization'
         self.state = RECV
 
         self.async_handles = [e.reset_all.remote() for e in self.remote_envs_lists]
 
     def recv(self):
+        '''Receive observations from remote async environments. Blocks.'''
         assert self.state == RECV, 'Call reset before stepping'
         self.state = SEND
 
@@ -127,12 +151,10 @@ class RayVecEnv:
 
         obs = np.stack(obs)
 
-        # TODO: Support multiagent
-        #infos['env_id'] = list(np.arange(len(obs)))
-
         return obs, rewards, dones, infos
 
     def send(self, actions, env_id=None):
+        '''Send observations to remote async environments. Does not block.'''
         assert self.state == SEND, 'Call reset + recv before send'
         self.state = RECV
 
@@ -149,9 +171,11 @@ class RayVecEnv:
             self.async_handles.append(envs_list.step.remote(atns_list))
 
     def reset(self):
+        '''Syncronously resets remote environments. Blocks.'''
         self.async_reset()
         return self.recv()[0]
 
     def step(self, actions):
+        '''Syncronously steps remote environments. Blocks.'''
         self.send(actions)
         return self.recv()
