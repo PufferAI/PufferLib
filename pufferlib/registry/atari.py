@@ -85,7 +85,6 @@ def make_binding(env_name, framestack):
             env_creator=make_env,
             default_args=[env_name, framestack],
             env_name=env_name,
-            env_includes_reset=True,
             emulate_flat_atn=True,
             record_episode_statistics=False,
         )
