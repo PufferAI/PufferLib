@@ -340,6 +340,9 @@ def train(
     envs.close()
     writer.close()
 
+    if track:
+        wandb.finish()
+
 if __name__ == '__main__':
     if __debug__:
         print('WARNING: Running in debug mode. This will be slower than normal due to extensive checks in PufferLib emulation. Run with -O to disable debug mode.')
@@ -422,7 +425,7 @@ if __name__ == '__main__':
                 num_envs=4,
                 num_buffers=2,
                 cuda=cuda,
-                total_timesteps=10_000_000,
+                total_timesteps=30_000,
                 track=track,
                 wandb_project_name='pufferlib',
                 wandb_entity='jsuarez',
