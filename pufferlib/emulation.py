@@ -265,7 +265,6 @@ class Binding:
                     low=-2**20, high=2**20,
                     shape=dummy.shape, dtype=self.obs_dtype
                 )
-                obs_space.seed(42)
 
                 self.observation_space_cache[agent] = obs_space
                 return obs_space

@@ -196,9 +196,7 @@ if __name__ == "__main__":
     envs.seed(args.seed)
 
     agent = pufferlib.frameworks.cleanrl.make_policy(
-        pufferlib.registry.nmmo.Policy,
-        lstm_layers=1
-    )(binding).to(device)
+            Agent, lstm_layers=1)(binding).to(device)
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
