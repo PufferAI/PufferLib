@@ -351,7 +351,7 @@ if __name__ == '__main__':
     assert sys.argv[1] in 'nmmo nethack breakout atari'.split()
 
     cuda = torch.cuda.is_available()
-    track = False # WandB tracking
+    track = True # WandB tracking
 
     # Note: the dependencies for these demos are not currently compatible
     # Run pip install -e .[atari] or .[nethack] to install the dependencies for a specific demo 
@@ -425,7 +425,7 @@ if __name__ == '__main__':
                 num_envs=4,
                 num_buffers=2,
                 cuda=cuda,
-                total_timesteps=30_000,
+                total_timesteps=10_000_000,
                 track=track,
                 wandb_project_name='pufferlib',
                 wandb_entity='jsuarez',
