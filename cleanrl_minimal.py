@@ -1,4 +1,5 @@
 # Minimally modified version of CleanRL ppo_lstm_atari.py to work with PufferLib.
+# Note that this demo requires the latest CarperAI version of nmmo-environment
 # We suggest our main cleanrl_ppo_lstm.py demo for most projects
 
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_atari_lstmpy
