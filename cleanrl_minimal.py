@@ -131,7 +131,7 @@ class Agent(pufferlib.models.Policy):
         an action decoder, and a critic function. If you use our LSTM support, it will
         be added between the encoder and the decoder.
         '''
-        super().__init__(input_size, hidden_size)
+        super().__init__(binding, input_size, hidden_size)
         self.raw_single_observation_space = binding.raw_single_observation_space
 
         # A dumb example encoder that applies a linear layer to agent self features
