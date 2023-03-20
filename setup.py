@@ -40,7 +40,7 @@ tests = {
         'nle==0.9.0',
     ],
     'nmmo': [
-        'nmmo==1.6.0.7',
+        'nmmo==1.7.0.1',
     ],
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',
