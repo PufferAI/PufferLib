@@ -33,6 +33,9 @@ tests = {
         'gym_dmc==0.2.5',
         'gym==0.21.0',
     ],
+    'dm_lab': [
+        'gym_deepmindlab==0.1.2',
+    ],
     #'griddly': [
     #    'imageio==2.23.0',
     #    'griddly==1.4.2',
