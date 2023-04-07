@@ -25,6 +25,9 @@ tests = {
     'butterfly': [
         'pettingzoo[butterfly]',
     ],
+    'crafter': [
+        'crafter==1.8.0',
+    ],
     #'griddly': [
     #    'imageio==2.23.0',
     #    'griddly==1.4.2',

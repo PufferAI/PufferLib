@@ -175,8 +175,16 @@ class Binding:
                 self.dummy_obs = {}
                 self._step = 0
                 self.done = False
-                self.obs_dtype = obs_dtype
 
+                assert obs_dtype in {np.float32, np.uint8}
+                self.obs_dtype = obs_dtype
+                if obs_dtype == np.uint8:
+                    self._obs_min = np.iinfo(obs_dtype).min
+                    self._obs_max = np.iinfo(obs_dtype).max
+                elif obs_dtype == np.float32:
+                    self._obs_min = np.finfo(obs_dtype).min
+                    self._obs_max = np.finfo(obs_dtype).max
+ 
                 self.feature_parser = feature_parser
                 self.reward_shaper = reward_shaper
 
@@ -262,10 +270,9 @@ class Binding:
                     dummy = _flatten_ob(dummy, self.obs_dtype)
 
                 obs_space = gym.spaces.Box(
-                    low=-2**20, high=2**20,
+                    low=self._obs_min, high=self._obs_max,
                     shape=dummy.shape, dtype=self.obs_dtype
                 )
-                obs_space.seed(42)
 
                 self.observation_space_cache[agent] = obs_space
                 return obs_space
