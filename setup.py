@@ -28,6 +28,11 @@ tests = {
     'crafter': [
         'crafter==1.8.0',
     ],
+    'dm_control': [
+        'dm_control==1.0.11',
+        'gym_dmc==0.2.5',
+        'gym==0.21.0',
+    ],
     #'griddly': [
     #    'imageio==2.23.0',
     #    'griddly==1.4.2',
