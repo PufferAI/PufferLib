@@ -14,6 +14,7 @@ def make_binding(name='DeepmindLabSeekavoidArena01-v0'):
         raise pufferlib.utils.SetupError('Deepmind Lab (dm-lab)')
     else:
         return pufferlib.emulation.Binding(
-            env_creator=lambda: gym.make(name),
+            env_creator=gym.make,
+            default_args=[name],
             env_name=name,
         )

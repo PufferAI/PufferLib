@@ -47,6 +47,10 @@ tests = {
         'ffmpeg==1.4',
         'gym_microrts==0.3.2',
     ],
+    'minerl': [
+        'gym==0.19.0',
+        'minerl==0.4.4',
+    ],
     'nethack': [
         'nle==0.9.0',
     ],
