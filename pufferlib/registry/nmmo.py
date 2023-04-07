@@ -4,6 +4,7 @@ import torch
 
 import pufferlib
 import pufferlib.emulation
+import pufferlib.models
 
 
 def make_binding():

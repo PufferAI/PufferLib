@@ -1,4 +1,5 @@
 from pdb import set_trace as T
+import itertools
 
 import numpy as np
 from contextlib import nullcontext
@@ -82,6 +83,7 @@ class Binding:
             env_name=None,
             feature_parser=None,
             reward_shaper=None,
+            teams=None,
             emulate_flat_obs=True,
             emulate_flat_atn=True,
             emulate_const_horizon=None,
@@ -177,9 +179,6 @@ class Binding:
                 self.done = False
                 self.obs_dtype = obs_dtype
 
-                self.feature_parser = feature_parser
-                self.reward_shaper = reward_shaper
-
                 self.emulate_flat_obs = emulate_flat_obs
                 self.emulate_flat_atn = emulate_flat_atn
                 self.emulate_const_horizon = emulate_const_horizon
@@ -188,11 +187,33 @@ class Binding:
                 self.suppress_env_prints = suppress_env_prints
                 self.record_episode_statistics = record_episode_statistics
 
+                if self.emulate_multiagent:
+                    assert teams is None, 'Single agent env cannot specify teams'
+                    self._teams = {1: [1]}
+
                 # Standardize property vs method obs/atn space interface
                 if self.emulate_multiagent:
                     self.possible_agents = [1]
                 else:
                     self.possible_agents = self.env.possible_agents
+
+                # Assign teams if not provided
+                if teams is None:
+                    self._teams = {a:[a] for a in self.possible_agents}
+                else:
+                    team_agents = set(itertools.chain.from_iterable(teams.values()))
+                    assert set(self.possible_agents) == set(team_agents)
+                    self._teams = teams
+
+                # Initialize feature parser and reward shaper
+                self.feature_parser = {
+                    team_id: feature_parser(team) for team_id, team in self._teams.items()
+                }
+                self.reward_shaper = reward_shaper
+
+                # Override possible agents if teams are provided
+                if teams is not None:
+                    self.possible_agents = list(teams.keys())
 
                 # Manual LRU since functools.lru_cache is not pickleable
                 self.observation_space_cache = {}
@@ -224,6 +245,8 @@ class Binding:
                 # Get single/multiagent action space
                 if self.emulate_multiagent:
                     atn_space = self.env.action_space
+                elif teams is not None:
+                    atn_space = {a: self.env.action_space(a) for a in teams[agent]}
                 else:
                     atn_space = self.env.action_space(agent)
 
@@ -233,7 +256,7 @@ class Binding:
                         atn_space = _pack_atn_space(atn_space)
                     elif type(atn_space) == gym.spaces.Discrete:
                         atn_space = gym.spaces.MultiDiscrete([atn_space.n])
-                    
+
                 self.action_space_cache[agent] = atn_space
 
                 return atn_space
@@ -247,6 +270,8 @@ class Binding:
                 # Get single/multiagent observation space
                 if self.emulate_multiagent:
                     obs_space = self.env.observation_space
+                elif teams is not None:
+                    obs_space = gym.spaces.Dict({a: self.env.observation_space(a) for a in teams[agent]})
                 else:
                     obs_space = self.env.observation_space(agent)
 
@@ -256,7 +281,7 @@ class Binding:
                 dummy = self.dummy_obs[agent]
 
                 if self.feature_parser:
-                    dummy = self.feature_parser({agent: dummy}, self._step)[agent]
+                    dummy = self.feature_parser[agent]({agent: dummy}, self._step)
 
                 if self.emulate_flat_obs:
                     dummy = _flatten_ob(dummy, self.obs_dtype)
@@ -271,16 +296,24 @@ class Binding:
                 return obs_space
 
             @utils.profile
-            def _process_obs(self, obs):
+            def _process_obs(self, obs, reset=False):
                 '''Process observation. Shared by reset and step.'''
                 if self.emulate_const_num_agents:
                     for k in self.dummy_obs:
                         if k not in obs:                                                  
                             obs[k] = self.dummy_obs[k]
 
-                if self.feature_parser:
-                    obs = self.feature_parser(obs, self._step)
+                team_obs = {}
+                for team_id, team in self._teams.items():
+                    team_obs[team_id] = {}
+                    for agent_id in team:
+                        team_obs[team_id][agent_id] = obs[agent_id]
 
+                    this_team_obs = team_obs[team_id]
+                    self.feature_parser[team_id].reset(this_team_obs)
+                    team_obs[team_id] = self.feature_parser[team_id](this_team_obs, self._step)
+                obs = team_obs
+            
                 if self.emulate_flat_obs:
                     obs = _pack_obs(obs, self.obs_dtype)
 
@@ -307,10 +340,14 @@ class Binding:
 
                 self.done = False
 
-
                 # Some envs implement reset by calling step
                 if not self.reset_calls_step:
-                    obs = self._process_obs(obs)
+                    obs = self._process_obs(obs, reset=True)
+
+                # Reset feature extractors
+                for k, v in obs.items():
+                    self.feature_parser[k].reset(v)
+
 
                 self._step = 0
                 return obs
