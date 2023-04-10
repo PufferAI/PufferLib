@@ -1,3 +1,4 @@
+from pdb import set_trace as T
 import nmmo
 
 import pufferlib.emulation
@@ -19,7 +20,8 @@ def test_nmmo():
     binding = pufferlib.emulation.Binding(
         env_cls=nmmo.Env,
         env_name='Neural MMO',
-        feature_parser=FeatureExtractor,
+        teams = {i+1: [i*8+j+1 for j in range(8)] for i in range(16)},
+        featurizer_cls=FeatureExtractor,
     )
 
     env = binding.env_creator()
