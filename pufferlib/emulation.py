@@ -1,4 +1,5 @@
 from pdb import set_trace as T
+import itertools
 
 import numpy as np
 from contextlib import nullcontext
@@ -9,6 +10,24 @@ import gym
 from pettingzoo.utils.env import ParallelEnv
 
 from pufferlib import utils
+
+
+class Featurizer:
+    def __init__(self, teams, team_id):
+        self.teams = teams
+        self.team_id = team_id
+
+        assert type(teams) == dict
+        assert team_id in teams
+
+        self.num_teams = len(teams)
+        self.team_size = len(teams[team_id])
+
+    def reset(self):
+        pass
+
+    def step(self, team_obs):
+        pass
 
 
 class Binding:
@@ -80,8 +99,11 @@ class Binding:
             default_args=[],
             default_kwargs={},
             env_name=None,
-            feature_parser=None,
+            featurizer_cls=None,
+            featurizer_args=[],
+            featurizer_kwargs={},
             reward_shaper=None,
+            teams=None,
             emulate_flat_obs=True,
             emulate_flat_atn=True,
             emulate_const_horizon=None,
@@ -112,7 +134,7 @@ class Binding:
             default_args: Default arguments for binding.env_creator and binding.raw_env_creator
             default_kwargs: Default keyword arguments for binding.env_creator and binding.raw_env_creator
             env_name: Name of the environment
-            feature_parser: Feature parser to use
+            featurizer_cls: Featureizer class to use
             reward_shaper: Reward shaper to use
             emulate_flat_obs: Whether the observation space requires flattening
             emulate_flat_atn: Whether the action space requires flattening
@@ -185,9 +207,6 @@ class Binding:
                     self._obs_min = np.finfo(obs_dtype).min
                     self._obs_max = np.finfo(obs_dtype).max
  
-                self.feature_parser = feature_parser
-                self.reward_shaper = reward_shaper
-
                 self.emulate_flat_obs = emulate_flat_obs
                 self.emulate_flat_atn = emulate_flat_atn
                 self.emulate_const_horizon = emulate_const_horizon
@@ -196,11 +215,35 @@ class Binding:
                 self.suppress_env_prints = suppress_env_prints
                 self.record_episode_statistics = record_episode_statistics
 
+                if self.emulate_multiagent:
+                    assert teams is None, 'Single agent env cannot specify teams'
+                    self._teams = {1: [1]}
+
                 # Standardize property vs method obs/atn space interface
                 if self.emulate_multiagent:
                     self.possible_agents = [1]
                 else:
                     self.possible_agents = self.env.possible_agents
+
+                # Assign teams if not provided
+                if teams is None:
+                    self._teams = {a:[a] for a in self.possible_agents}
+                else:
+                    team_agents = set(itertools.chain.from_iterable(teams.values()))
+                    assert set(self.possible_agents) == set(team_agents)
+                    self._teams = teams
+
+                # Initialize feature parser and reward shaper
+                self.featurizers = {
+                    team_id: featurizer_cls(
+                        self._teams, team_id, *featurizer_args, **featurizer_kwargs)
+                    for team_id, team in self._teams.items()
+                }
+                self.reward_shaper = reward_shaper
+
+                # Override possible agents if teams are provided
+                if teams is not None:
+                    self.possible_agents = list(teams.keys())
 
                 # Manual LRU since functools.lru_cache is not pickleable
                 self.observation_space_cache = {}
@@ -232,6 +275,10 @@ class Binding:
                 # Get single/multiagent action space
                 if self.emulate_multiagent:
                     atn_space = self.env.action_space
+                elif teams is not None:
+                    atn_space = gym.spaces.Dict(
+                        {a: self.env.action_space(a) for a in teams[agent]}
+                    )
                 else:
                     atn_space = self.env.action_space(agent)
 
@@ -241,30 +288,39 @@ class Binding:
                         atn_space = _pack_atn_space(atn_space)
                     elif type(atn_space) == gym.spaces.Discrete:
                         atn_space = gym.spaces.MultiDiscrete([atn_space.n])
-                    
+
                 self.action_space_cache[agent] = atn_space
 
                 return atn_space
 
             @utils.profile
-            def observation_space(self, agent: int):
+            def observation_space(self, team_id: int):
                 '''Flattened (Box) and cached observation space'''
-                if agent in self.observation_space_cache:
-                    return self.observation_space_cache[agent]
+                if team_id in self.observation_space_cache:
+                    return self.observation_space_cache[team_id]
 
                 # Get single/multiagent observation space
                 if self.emulate_multiagent:
                     obs_space = self.env.observation_space
+                elif teams is not None:
+                    obs_space = gym.spaces.Dict({
+                        a: self.env.observation_space(a) for a in teams[team_id]}
+                    )
                 else:
-                    obs_space = self.env.observation_space(agent)
+                    obs_space = self.env.observation_space(team_id)
 
-                if agent not in self.dummy_obs:
-                    self.dummy_obs[agent] = _zero(obs_space.sample())
+                if team_id not in self.dummy_obs:
+                    self.dummy_obs[team_id] = _zero(obs_space.sample())
 
-                dummy = self.dummy_obs[agent]
+                dummy = self.dummy_obs[team_id]
 
-                if self.feature_parser:
-                    dummy = self.feature_parser({agent: dummy}, self._step)[agent]
+                # Initialize obs with dummy featurizer
+                if self.featurizers:
+                    dummy_featurizer = featurizer_cls(
+                        self._teams, team_id, *featurizer_args, **featurizer_kwargs
+                    )
+                    dummy_featurizer.reset(dummy)
+                    dummy = dummy_featurizer(dummy, self._step)
 
                 if self.emulate_flat_obs:
                     dummy = _flatten_ob(dummy, self.obs_dtype)
@@ -274,20 +330,32 @@ class Binding:
                     shape=dummy.shape, dtype=self.obs_dtype
                 )
 
-                self.observation_space_cache[agent] = obs_space
+                self.observation_space_cache[team_id] = obs_space
                 return obs_space
 
             @utils.profile
-            def _process_obs(self, obs):
+            def _process_obs(self, obs, reset=False):
                 '''Process observation. Shared by reset and step.'''
                 if self.emulate_const_num_agents:
                     for k in self.dummy_obs:
                         if k not in obs:                                                  
                             obs[k] = self.dummy_obs[k]
 
-                if self.feature_parser:
-                    obs = self.feature_parser(obs, self._step)
+                team_obs = {}
+                for team_id, team in self._teams.items():
+                    team_obs[team_id] = {}
+                    for agent_id in team:
+                        team_obs[team_id][agent_id] = obs[agent_id]
 
+                    this_team_obs = team_obs[team_id]
+
+                    # Feature parser is stateful
+                    if reset:
+                        self.featurizers[team_id].reset(this_team_obs)
+
+                    team_obs[team_id] = self.featurizers[team_id](this_team_obs, self._step)
+                obs = team_obs
+            
                 if self.emulate_flat_obs:
                     obs = _pack_obs(obs, self.obs_dtype)
 
@@ -314,10 +382,11 @@ class Binding:
 
                 self.done = False
 
-
                 # Some envs implement reset by calling step
                 if not self.reset_calls_step:
-                    obs = self._process_obs(obs)
+                    obs = self._process_obs(obs, reset=True)
+
+                # TODO: Figure out how to move featurizer to here
 
                 self._step = 0
                 return obs
