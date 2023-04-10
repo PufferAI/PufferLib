@@ -6,6 +6,8 @@ import pufferlib.registry
 import pufferlib.registry.atari
 import pufferlib.registry.butterfly
 import pufferlib.registry.classic_control
+import pufferlib.registry.crafter
+import pufferlib.registry.dm_lab
 import pufferlib.registry.griddly
 import pufferlib.registry.magent
 import pufferlib.registry.microrts
@@ -26,6 +28,8 @@ def make_all_bindings():
         pufferlib.registry.butterfly.make_cooperative_pong_v5_binding,
         pufferlib.registry.butterfly.make_knights_archers_zombies_v10_binding,
         pufferlib.registry.classic_control.make_cartpole_binding,
+        pufferlib.registry.crafter.make_binding,
+        pufferlib.registry.dm_lab.make_binding,
         #pufferlib.registry.griddly.make_spider_v0_binding(),
         pufferlib.registry.magent.make_battle_v4_binding,
         pufferlib.registry.microrts.make_binding,
@@ -33,7 +37,7 @@ def make_all_bindings():
         pufferlib.registry.nmmo.make_binding,
         pufferlib.registry.smac.make_binding,
     ]
- 
+
     names, bindings = set(), {}
     for fn in binding_creation_fns:
         try: 
