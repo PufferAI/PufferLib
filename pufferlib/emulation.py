@@ -56,20 +56,6 @@ class Binding:
         return self._env_cls(*self._default_args, **self._default_kwargs)
 
     @property
-    def single_observation_space(self):
-        '''Returns the wrapped, flat observation space of a single agent.
-        
-        PufferLib currently assumes that all agents share the same observation space'''
-        return self._single_observation_space
-
-    @property
-    def single_action_space(self):
-        '''Returns the wrapped, flat action space of a single agent.
-        
-        PufferLib currently assumes that all agents share the same action space'''
-        return self._single_action_space
-
-    @property
     def raw_single_observation_space(self):
         '''Returns the unwrapped, structured observation space of a single agent.
         
@@ -77,11 +63,32 @@ class Binding:
         return self._raw_single_observation_space
 
     @property
+    def featurized_single_observation_space(self):
+        '''Returns the wrapped, structured, featurized observation space of a single agent.
+        
+        PufferLib currently assumes that all agents share the same observation space'''
+        return self._featurized_single_observation_space
+
+    @property
+    def single_observation_space(self):
+        '''Returns the wrapped, flat observation space of a single agent.
+        
+        PufferLib currently assumes that all agents share the same observation space'''
+        return self._single_observation_space
+
+    @property
     def raw_single_action_space(self):
         '''Returns the unwrapped, structured action space of a single agent.
         
         PufferLib currently assumes that all agents share the same action space'''
         return self._raw_single_action_space
+
+    @property
+    def single_action_space(self):
+        '''Returns the wrapped, flat action space of a single agent.
+        
+        PufferLib currently assumes that all agents share the same action space'''
+        return self._single_action_space
 
     @property
     def max_agents(self):
@@ -309,10 +316,7 @@ class Binding:
                 else:
                     obs_space = self.env.observation_space(team_id)
 
-                if team_id not in self.dummy_obs:
-                    self.dummy_obs[team_id] = _zero(obs_space.sample())
-
-                dummy = self.dummy_obs[team_id]
+                dummy = _zero(obs_space.sample())
 
                 # Initialize obs with dummy featurizer
                 if self.featurizers:
@@ -321,9 +325,12 @@ class Binding:
                     )
                     dummy_featurizer.reset(dummy)
                     dummy = dummy_featurizer(dummy, self._step)
+                    self._featurized_single_observation_space = _make_space_like(dummy)
 
                 if self.emulate_flat_obs:
                     dummy = _flatten_ob(dummy, self.obs_dtype)
+
+                self.dummy_obs[team_id] = dummy
 
                 obs_space = gym.spaces.Box(
                     low=self._obs_min, high=self._obs_max,
@@ -336,16 +343,12 @@ class Binding:
             @utils.profile
             def _process_obs(self, obs, reset=False):
                 '''Process observation. Shared by reset and step.'''
-                if self.emulate_const_num_agents:
-                    for k in self.dummy_obs:
-                        if k not in obs:                                                  
-                            obs[k] = self.dummy_obs[k]
-
                 team_obs = {}
                 for team_id, team in self._teams.items():
                     team_obs[team_id] = {}
                     for agent_id in team:
-                        team_obs[team_id][agent_id] = obs[agent_id]
+                        if agent_id in obs:
+                            team_obs[team_id][agent_id] = obs[agent_id]
 
                     this_team_obs = team_obs[team_id]
 
@@ -353,13 +356,20 @@ class Binding:
                     if reset:
                         self.featurizers[team_id].reset(this_team_obs)
 
-                    team_obs[team_id] = self.featurizers[team_id](this_team_obs, self._step)
-                obs = team_obs
+                    if len(this_team_obs) > 0:
+                        team_obs[team_id] = self.featurizers[team_id](this_team_obs, self._step)
+                    else:
+                        del team_obs[team_id]
+
+                if self.emulate_const_num_agents:
+                    for k in self.dummy_obs:
+                        if k not in team_obs:                                                  
+                            team_obs[k] = self.dummy_obs[k]
             
                 if self.emulate_flat_obs:
-                    obs = _pack_obs(obs, self.obs_dtype)
+                    team_obs = _pack_obs(team_obs, self.obs_dtype)
 
-                return obs
+                return team_obs
 
             def seed(self, seed):
                 '''Seed the environment. Note that this is deprecated in new gym versions.'''
@@ -392,15 +402,22 @@ class Binding:
                 return obs
 
             @utils.profile
-            def step(self, actions, **kwargs):
+            def step(self, team_actions, **kwargs):
                 '''Step the environment and return (observations, rewards, dones, infos)'''
                 assert not self.done, 'step after done'
                 self.reset_calls_step = True
 
                 # Action shape test
                 if __debug__:
-                    for agent, atns in actions.items():
+                    for agent, atns in team_actions.items():
                         assert self.action_space(agent).contains(atns)
+
+                # Unpack actions from teams
+                actions = {}
+                for team_id, team in self._teams.items():
+                    team_atns = np.split(team_actions[team_id], len(team))
+                    for agent_id, atns in zip(team, team_atns):
+                        actions[agent_id] = atns
 
                 # Unpack actions
                 with self.prestep_timer:
@@ -495,6 +512,8 @@ class Binding:
                     # Observation shape test
                     if __debug__:
                         for agent, ob in obs.items():
+                            if not self.observation_space(agent).contains(ob):
+                                T()
                             assert self.observation_space(agent).contains(ob)
 
                 return obs, rewards, dones, infos
@@ -507,6 +526,7 @@ class Binding:
         self._emulate_multiagent = local_env.emulate_multiagent
 
         self._single_observation_space = local_env.observation_space(self._default_agent)
+        self._featurized_single_observation_space = local_env._featurized_single_observation_space
         self._single_action_space = local_env.action_space(self._default_agent)
 
         if self._emulate_multiagent:
@@ -556,7 +576,25 @@ def _zero(ob):
             _zero(v)
     return ob
 
-def _flatten(nested_dict, parent_key=None):
+def _make_space_like(nested_dict):
+    types = (OrderedDict, list, dict)
+
+    gym_space = {}
+    for k, v in nested_dict.items():
+        if type(v) in types:
+            gym_space[k] = _make_space_like(v)
+        elif type(v) == np.ndarray:
+            # TODO: Set min/max by dtype
+            gym_space[k] = gym.spaces.Box(
+                low=-2**20, high=2**20,
+                shape=v.shape, dtype=v.dtype
+            )
+        else:
+            assert False, f'Invalid type for featurized obs: {type(v)}'
+
+    return gym.spaces.Dict(gym_space)
+
+def _flatten(nested_dict):
     types = (gym.spaces.Dict, OrderedDict, list, dict, tuple)
 
     if type(nested_dict) not in types:
