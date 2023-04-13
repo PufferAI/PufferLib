@@ -27,6 +27,13 @@ def check_env(env):
         assert env.observation_space(e) == obs_space, 'All agents must have same obs space'
         assert env.action_space(e) == atn_space, 'All agents must have same atn space'
 
+def _get_dtype_bounds(dtype):
+    assert dtype in {np.float32, np.uint8}
+    if dtype == np.uint8:
+        return np.iinfo(dtype).min, np.iinfo(dtype).max
+    elif dtype == np.float32:
+        return np.finfo(dtype).min, np.finfo(dtype).max
+
 def is_dict_space(space):
     # Compatible with gym/gymnasium
     return type(space).__name__ == 'Dict'
@@ -112,6 +119,14 @@ class dotdict(dict):
     __getattr__ = dict.get
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
+
+    def __getstate__(self):
+        # Return the current state of the object (the underlying dictionary)
+        return self.copy()
+
+    def __setstate__(self, state):
+        # Restore the state of the object (the underlying dictionary)
+        self.update(state)
 
 class Suppress():
     def __init__(self):

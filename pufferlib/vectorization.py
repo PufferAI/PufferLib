@@ -40,8 +40,13 @@ def make_remote_envs(env_creator, n):
         def get_all(self, *args, **kwargs):
             return [e.get(*args, **kwargs) for e in self.envs]
         
-        def reset_all(self):
-            return [(e.reset(), {}, {}, {}) for e in self.envs]
+        def reset_all(self, seed=None):
+            async_handles = []
+            for e in self.envs:
+                async_handles.append((e.reset(seed=seed), {}, {}, {}))
+                if seed is not None:
+                    seed += 1
+            return async_handles
 
         def step(self, actions_lists):
             returns = []
@@ -117,19 +122,17 @@ class RayVecEnv:
         '''Returns profiling timers from all remote environments'''
         return list(itertools.chain.from_iterable(ray.get([e.profile_all.remote() for e in self.remote_envs_lists])))
 
-    def seed(self, seed):
-        '''Sets the seed for all remote environments'''
-        assert type(seed) == int
-        for env_list in self.remote_envs_lists:
-            env_list.seed.remote(seed)
-            seed += self.envs_per_worker * self.binding.max_agents
-
-    def async_reset(self):
+    def async_reset(self, seed=None):
         '''Asynchronously reset environments. Does not block.'''
         assert self.state == RESET, 'Call reset only once on initialization'
         self.state = RECV
 
-        self.async_handles = [e.reset_all.remote() for e in self.remote_envs_lists]
+        self.async_handles = []
+
+        for e in self.remote_envs_lists:
+            self.async_handles.append(e.reset_all.remote(seed=seed))
+            if seed is not None:
+                seed += self.envs_per_worker * self.binding.max_agents
 
     def recv(self):
         '''Receive observations from remote async environments. Blocks.'''
@@ -170,7 +173,7 @@ class RayVecEnv:
             atns_list = [dict(zip(keys, atns)) for keys, atns in zip(keys_list, atns_list)]
             self.async_handles.append(envs_list.step.remote(atns_list))
 
-    def reset(self):
+    def reset(self, seed=None):
         '''Syncronously resets remote environments. Blocks.'''
         self.async_reset()
         return self.recv()[0]

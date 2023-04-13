@@ -1,15 +1,19 @@
 from pdb import set_trace as T
 import nmmo
 
+import pufferlib.vectorization
 import pufferlib.emulation
 import pufferlib.registry.nmmo
 
+from mock_environments import TestEnv
+
+
 class FeatureExtractor:
-    def __init__(self, team):
+    def __init__(self, teams, team_id):
         pass
 
     def reset(self, obs):
-        pass
+        return
 
     def __call__(self, obs, step):
         key = list(obs.keys())[0]
