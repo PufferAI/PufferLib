@@ -68,8 +68,16 @@ class RandomState:
     def random(self):
         return self.rng.random()
 
+    def probabilistic_round(self, n):
+            frac, integer = np.modf(n)
+            if self.random() < frac:
+                return int(integer) + 1
+            else:
+                return int(integer)
+
     def sample(self, ary, n):
-        return self.rng.choice(ary, n, replace=False).tolist()
+        n_rounded = self.probabilistic_round(n)
+        return self.rng.choice(ary, n_rounded, replace=False).tolist()
 
     def choice(self, ary):
         return self.sample(ary, 1)[0]

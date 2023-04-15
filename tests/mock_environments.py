@@ -7,92 +7,162 @@ import gym
 from pettingzoo.utils.env import ParallelEnv
 
 import pufferlib
+import pufferlib.utils
 
 
-class TestEnv(ParallelEnv):
-    '''
-    A complex testing environment with:
-        - Multiple and variable agent population
-        - Hierarchical observation and action spaces
-    '''
-    def __init__(self, initial_agents=1, max_agents=100,
-                 spawn_attempts_per_tick=2, death_per_tick=1):
 
-        assert death_per_tick <= initial_agents
+def make_mock_env(
+        observation_space,
+        action_space,
+        initial_agents,
+        max_agents,
+        spawn_per_tick,
+        death_per_tick,
+        homogeneous_spaces=True):
+    class TestEnv(ParallelEnv):
+        def __init__(self):
+            self.possible_agents = [f'agent_{i+1}' for i in range(max_agents)]
 
-        self.possible_agents = [abs(hash(str(i))) % 2**16 for i in range(max_agents)]
+        def reset(self, seed=None):
+            self.tick = 0
+            self.rng = pufferlib.utils.RandomState(seed)
+            self.agents = self.rng.sample(self.possible_agents, initial_agents)
 
-        self.initial_agents = initial_agents
-        self.max_agents = max_agents
-        self.spawn_attempts_per_tick = spawn_attempts_per_tick
-        self.death_per_tick = death_per_tick
-        self.rng = None
+            return {a: self._sample_space(a, self.tick, observation_space)
+                for a in self.agents}
 
-    def seed(self, seed):
-        self.rng = pufferlib.utils.RandomState(seed)
+        def step(self, actions):
+            obs, rewards, dones, infos = {}, {}, {}, {}
 
-    def reset(self):
-        self.tick = 0
-        assert self.rng is not None, 'Must seed environment before reset'
-        self.agents = self.rng.sample(self.possible_agents, self.initial_agents)
-        return {a: self._observation(a) for a in self.agents}
+            dead  = self.rng.sample(self.agents, death_per_tick)
+            for kill in dead:
+                self.agents.remove(kill)
+                # TODO: Make pufferlib work without pad obs
+                # but still require rewards, dones, and optionally infos
+                obs[kill] = self._sample_space(kill, self.tick, observation_space)
+                rewards[kill] = -1
+                dones[kill] = True
+                infos[kill] = {'dead': True}
 
-    def step(self, action):
-        obs, rewards, dones, infos = {}, {}, {}, {}
+            for spawn in range(spawn_per_tick):
+                # TODO: Make pufferlib check if an agent respawns on the
+                # Same tick as it dies (is this good or bad?)
+                spawn = self.rng.choice(self.possible_agents)
+                if spawn not in self.agents + dead:
+                    self.agents.append(spawn)
 
-        dead  = self.rng.sample(self.agents, self.death_per_tick)
-        for kill in dead:
-            self.agents.remove(kill)
-            obs[kill] = self._observation(kill)
-            rewards[kill] = -1
-            dones[kill] = True
-            infos[kill] = {'dead': True}
+            for agent in self.agents:
+                obs[agent] = self._sample_space(agent, self.tick, observation_space)
+                rewards[agent] = 0.1 * self.rng.random()
+                dones[agent] = False
+                infos[agent] = {'dead': False}
 
-        for spawn in range(self.spawn_attempts_per_tick):
-            spawn = self.rng.choice(self.possible_agents)
-            if spawn not in self.agents + dead:
-                self.agents.append(spawn)
+            self.tick += 1
+            return obs, rewards, dones, infos
 
-        for agent in self.agents:
-            obs[agent] = self._observation(spawn)
-            rewards[agent] = 0.1 * self.rng.random()
-            dones[agent] = False
-            infos[agent] = {'dead': False}
+        def _sample_space(self, agent, tick, space):
+            if isinstance(space, gym.spaces.Discrete):
+                return hash(f'{agent}-{tick}') % space.n
+            elif isinstance(space, gym.spaces.Box):
+                return np.linspace(space.low, space.high, num=space.shape[0]) * (tick % 2)
+            elif isinstance(space, gym.spaces.Tuple):
+                return tuple(self._sample_space(agent, tick, s) for s in space.spaces)
+            elif isinstance(space, gym.spaces.Dict):
+                return {k: self._sample_space(agent, tick, v) for k, v in space.spaces.items()}
+            else:
+                raise ValueError(f"Invalid space type: {type(space)}")
 
-        self.tick += 1
-        return obs, rewards, dones, infos
+        def observation_space(self, agent) -> gym.Space:
+            return observation_space
 
-    def _observation(self, agent):
-        return {
-            'foo': np.arange(23, dtype=np.float32) + agent,
-            'bar': np.arange(45, dtype=np.float32) + agent,
-            'baz': {
-                'qux': np.arange(6, dtype=np.float32) + agent,
-                'quux': np.arange(7, dtype=np.float32) + agent,
-            }
-        }
+        def action_space(self, agent) -> gym.Space:
+            return action_space
 
-    @functools.lru_cache(maxsize=None)
-    def observation_space(self, agent):
-        return gym.spaces.Dict({
-            'foo': gym.spaces.Box(low=0, high=1, shape=(23,)),
-            'bar': gym.spaces.Box(low=0, high=1, shape=(45,)),
-            'baz': gym.spaces.Dict({
-                'qux': gym.spaces.Box(low=0, high=1, shape=(6,)),
-                'quux': gym.spaces.Box(low=0, high=1, shape=(7,)),
-            })
-        })
+        def render(self, mode='human'):
+            pass
 
-    @functools.lru_cache(maxsize=None)
-    def action_space(self, agent):
-        return gym.spaces.Dict({
-            'foo': gym.spaces.Discrete(2),
-            'bar': gym.spaces.Dict({
-                'baz': gym.spaces.Discrete(7),
-                'qux': gym.spaces.Discrete(8),
-            })
-        })
+        def close(self):
+            pass
 
-    def pack_ob(self, ob):
-        # Note: there's currently a weird sort order on obs
-        return np.concatenate([ob['bar'], ob['foo'],  ob['baz']['quux'], ob['baz']['qux']])
+    return TestEnv
+
+
+MOCK_OBSERVATION_SPACES = [
+    # Simple spaces
+    gym.spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32),
+    #gym.spaces.Discrete(5),
+
+    # Nested spaces
+    gym.spaces.Dict({
+        "foo": gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+        "bar": gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+    }),
+    #gym.spaces.Tuple((gym.spaces.Discrete(3), gym.spaces.Discrete(4))),
+    gym.spaces.Tuple((
+        gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+        #gym.spaces.Discrete(3),
+        gym.spaces.Dict({
+            "baz": gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32),
+            "qux": gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32),
+        }),
+    )),
+    gym.spaces.Dict({
+        "foo": gym.spaces.Tuple((
+            gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+            #gym.spaces.Discrete(3),
+        )),
+        #"bar": gym.spaces.Dict({
+        #    "baz": gym.spaces.Discrete(2),
+        #    "qux": gym.spaces.Discrete(4),
+        #}),
+    }),
+]
+
+
+MOCK_ACTION_SPACES = [
+    # Simple spaces
+    gym.spaces.Discrete(5),
+
+    # Nested spaces
+    gym.spaces.Tuple((gym.spaces.Discrete(2), gym.spaces.Discrete(3))),
+    gym.spaces.Dict({
+        "foo": gym.spaces.Discrete(4),
+        "bar": gym.spaces.Discrete(2),
+    }),
+    # gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+    gym.spaces.Tuple((
+        gym.spaces.Discrete(4),
+        gym.spaces.Dict({
+            "baz": gym.spaces.Discrete(2),
+            "qux": gym.spaces.Discrete(2),
+        }),
+    )),
+    # gym.spaces.Dict({
+    #     "foo": gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32),
+    #     "bar": gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
+    # }),
+    gym.spaces.Dict({
+        "foo": gym.spaces.Tuple((
+            gym.spaces.Discrete(2),
+            gym.spaces.Discrete(3),
+        )),
+        "bar": gym.spaces.Dict({
+            "baz": gym.spaces.Discrete(2),
+            "qux": gym.spaces.Discrete(4),
+        }),
+    }),
+]
+
+MOCK_ENVIRONMENTS = []
+for obs_space in MOCK_OBSERVATION_SPACES:
+    for act_space in MOCK_ACTION_SPACES:
+        MOCK_ENVIRONMENTS.append(
+            make_mock_env(
+                observation_space=obs_space,
+                action_space=act_space,
+                initial_agents=16,
+                max_agents=16,
+                spawn_per_tick=0,
+                death_per_tick=0.1,
+            )
+        )

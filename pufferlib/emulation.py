@@ -124,7 +124,12 @@ def make_puffer_env_cls(scope, raw_obs):
         @utils.profile
         def _reset_env(self, seed):
             with utils.Suppress() if scope.suppress_env_prints else nullcontext():
-                return self.env.reset(seed=seed)
+                # Handle seeding with different gym versions
+                try:
+                    return self.env.reset(seed=seed)
+                except:
+                    self.env.seed(seed)
+                    return self.env.reset()
 
         @utils.profile
         def _step_env(self, actions):
@@ -158,7 +163,8 @@ def make_puffer_env_cls(scope, raw_obs):
 
             if scope.emulate_flat_obs:
                 obs = _flatten_ob(obs, scope.obs_dtype)
-            self.pad_obs = obs
+
+            self.pad_obs = 0 * obs
 
             obs_space = gym.spaces.Box(
                 low=self._obs_min, high=self._obs_max,
@@ -249,9 +255,10 @@ def make_puffer_env_cls(scope, raw_obs):
             self._step += 1
 
             with self.featurizer_timer:
+                # Featurize observations for teams with at least 1 living agent
                 obs = {
                     team_id: self.featurizers[team_id](team_obs, self._step)
-                    for team_id, team_obs in group_team_obs(obs, self._teams).items()
+                    for team_id, team_obs in group_team_obs(obs, self._teams).items() if team_obs
                 }
 
             with self.poststep_timer:
@@ -380,8 +387,19 @@ class Binding:
         del scope['self']
 
         raw_local_env = self.raw_env_creator()
-        raw_local_env.seed(42)
-        self._env_cls = make_puffer_env_cls(scope, raw_obs=raw_local_env.reset())
+
+        try:
+            raw_local_env.seed(42)
+            old_seed=True
+        except:
+            old_seed=False
+
+        if old_seed:
+            raw_obs = raw_local_env.reset()
+        else:
+            raw_obs = raw_local_env.reset(seed=42)
+
+        self._env_cls = make_puffer_env_cls(scope, raw_obs=raw_obs)
 
         local_env = self._env_cls(scope, env=raw_local_env)
 
@@ -505,65 +523,62 @@ def _zero(ob):
     return ob
 
 def _make_space_like(ob):
-    assert type(ob) in (np.ndarray, OrderedDict, list, dict), \
-            f'Invalid type for featurized obs: {type(ob)}'
-
     if type(ob) == np.ndarray:
         # TODO: Set min/max by dtype
         return gym.spaces.Box(
             low=-2**20, high=2**20,
             shape=ob.shape, dtype=ob.dtype
         )
+
+    # TODO: Handle Discrete (how to get max?)
+    
+    if type(ob) in (tuple, list):
+        return gym.spaces.Tuple([_make_space_like(v) for v in ob])
  
-    gym_space = {}
-    for k, v in ob.items():
-        gym_space[k] = _make_space_like(v)
+    if type(ob) in (dict, OrderedDict):
+        return gym.spaces.Dict({k: _make_space_like(v) for k, v in ob.items()})
 
-    return gym.spaces.Dict(gym_space)
+    raise ValueError(f'Invalid type for featurized obs: {type(ob)}')
 
-def _flatten(nested_dict):
-    types = (gym.spaces.Dict, OrderedDict, list, dict, tuple)
+def _flatten(nested_obj):
+    def _recursion_helper(path, current):
+        if isinstance(current, (list, tuple, gym.spaces.Tuple)):
+            for idx, value in enumerate(current):
+                new_key = path + (idx,)
+                _recursion_helper(new_key, value)
+        elif isinstance(current, (dict, OrderedDict, gym.spaces.Dict)):
+            for key, value in current.items():
+                new_key = path + (key,)
+                _recursion_helper(new_key, value)
+        else:
+            flat_dict[path] = current
 
-    if type(nested_dict) not in types:
-        return nested_dict
-
-    stack = [((), nested_dict)]
     flat_dict = {}
-    while stack:
-        path, current = stack.pop()
-        for k, v in current.items():
-            new_key = path + (k,)
-            if type(v) in types:
-                stack.append((new_key, v))
-            else:
-                flat_dict[new_key] = v
-
+    _recursion_helper((), nested_obj)
     return flat_dict
 
-def _unflatten(ary, space, nested_dict=None, idx=0):
-    outer_call = False
-    if nested_dict is None:
-        outer_call = True
-        nested_dict = {}
-
-    # TODO: Find a way to flip the check and the loop
-    # (Added for Gym microrts)
-    if type(space)  == gym.spaces.MultiDiscrete:
-        return ary
-
-    types = (gym.spaces.Dict, OrderedDict, list, dict, tuple)
-    for k, v in space.items():
-        if type(v) in types:
-            nested_dict[k] = {}
-            _, idx = _unflatten(ary, v, nested_dict[k], idx)
+def _unflatten(ary, space, path=(), idx=0):
+    def _unflatten_helper(space):
+        nonlocal idx
+        if isinstance(space, (list, tuple, gym.spaces.Tuple)):
+            unflattened = []
+            for elem in space:
+                unflattened_elem = _unflatten_helper(elem)
+                unflattened.append(unflattened_elem)
+            return tuple(unflattened) if isinstance(space, (tuple, gym.spaces.Tuple)) else unflattened
+        elif isinstance(space, (dict, OrderedDict, gym.spaces.Dict)):
+            unflattened = {}
+            for key in space:
+                unflattened[key] = _unflatten_helper(space[key])
+            return unflattened
+        elif isinstance(space, gym.spaces.MultiDiscrete):
+            return ary
         else:
-            nested_dict[k] = ary[idx]
+            value = ary[path + (idx,)]
             idx += 1
+            return value
 
-    if outer_call:
-        return nested_dict
-
-    return nested_dict, idx
+    return _unflatten_helper(space)
 
 def _pack_obs_space(obs_space, dtype=np.float32):
     assert(isinstance(obs_space, gym.Space)), 'Arg must be a gym space'
@@ -601,12 +616,7 @@ def _flatten_ob(ob, dtype=None):
     if type(ob) == gym.wrappers.frame_stack.LazyFrames:
        ob = np.array(ob)
 
-    #assert type(ob) == np.array
-
     flat = _flatten(ob)
-
-    if type(ob) == np.ndarray:
-        flat = {'': flat}
 
     # Preallocate the memory for the concatenated tensor
     tensors = flat.values()
