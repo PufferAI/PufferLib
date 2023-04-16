@@ -105,8 +105,10 @@ def make_puffer_env_cls(scope, raw_obs):
 
             # Manual LRU since functools.lru_cache is not pickleable
             self._featurized_single_observation_space = None
-            self.obs_space_cache = {}
-            self.atn_space_cache = {}
+
+            self.obs_space_cache, self.atn_space_cache = {}, {}
+            self.obs_space_cache = {team_id: self.observation_space(team_id) for team_id in self.possible_agents}
+            self.atn_space_cache = {team_id: self.action_space(team_id) for team_id in self.possible_agents}
 
             # Set env metadata
             self.metadata = self.env.metadata if hasattr(self.env, 'metadata') else {}
@@ -159,10 +161,10 @@ def make_puffer_env_cls(scope, raw_obs):
             obs = featurizer(team_obs, self._step)
 
             if self._featurized_single_observation_space is None:
-                self._featurized_single_observation_space = _make_space_like(obs)
+                self._featurized_single_observation_space = _flatten_space(_make_space_like(obs))
 
             if scope.emulate_flat_obs:
-                obs = _flatten_ob(obs, scope.obs_dtype)
+                obs = _flatten_ob(obs, self._featurized_single_observation_space, scope.obs_dtype)
 
             self.pad_obs = 0 * obs
 
@@ -171,7 +173,6 @@ def make_puffer_env_cls(scope, raw_obs):
                 shape=obs.shape, dtype=scope.obs_dtype
             )
 
-            self.obs_space_cache[agent] = obs_space
             return obs_space
 
         @utils.profile
@@ -189,7 +190,6 @@ def make_puffer_env_cls(scope, raw_obs):
                 elif type(atn_space) == gym.spaces.Discrete:
                     atn_space = gym.spaces.MultiDiscrete([atn_space.n])
 
-            self.atn_space_cache[agent] = atn_space
             return atn_space
 
         @utils.profile
@@ -206,17 +206,22 @@ def make_puffer_env_cls(scope, raw_obs):
             self.agents = self.env.agents
             self.done = False
 
-            if scope.emulate_flat_obs:
-                obs = _pack_obs(obs, scope.obs_dtype)
+            # Sort observations according to possible_agents
+            # All keys must be present in possible_agents on reset
+            obs = {a: obs[a] for a in self.possible_agents}
 
-            sorted_obs = {}
-            for agent in self.possible_agents:
-                sorted_obs[agent] = obs[agent]
-            obs = sorted_obs
- 
+            orig_obs = obs
+            if scope.emulate_flat_obs:
+                obs = _pack_obs(obs, self._featurized_single_observation_space, scope.obs_dtype)
+
             if __debug__:
                 for agent, ob in obs.items():
                     assert self.observation_space(agent).contains(ob)
+
+                packed_obs = np.stack(obs.values())
+                unpacked = unpack_batched_obs(self._featurized_single_observation_space, packed_obs)
+                ret = _compare_observations(orig_obs, unpacked)
+                assert ret, 'Observation packing/unpacking mismatch'
 
             self._step = 0
             return obs
@@ -518,6 +523,54 @@ def unpack_batched_obs(obs_space, packed_obs):
 
     return obs
 
+def unpack_batched_obs(flat_space, packed_obs):
+    batch = packed_obs.shape[0]
+    batched_obs = {}
+
+    idx = 0
+    for key_list, space in flat_space.items():
+        current_dict = batched_obs
+        inc = np.prod(space.shape)
+
+        for key in key_list[:-1]:
+            if key not in current_dict:
+                current_dict[key] = {}
+            current_dict = current_dict[key]
+
+        last_key = key_list[-1]
+        current_dict[last_key] = packed_obs[:, idx:idx + inc].reshape(batch, *space.shape)
+        idx += inc
+
+    return batched_obs
+
+def _compare_observations(obs, batched_obs):
+    def _compare_arrays(array1, array2):
+        # TODO: Figure out where data is being changed
+        return np.allclose(array1, array2)
+
+    def _compare_helper(obs, batched_obs, agent_idx):
+        if isinstance(obs, (dict, OrderedDict)):
+            for key in obs:
+                if not _compare_helper(obs[key], batched_obs[key], agent_idx):
+                    return False
+            return True
+        elif isinstance(obs, (list, tuple)):
+            for idx, elem in enumerate(obs):
+                if not _compare_helper(elem, batched_obs[idx], agent_idx):
+                    return False
+            return True
+        elif isinstance(obs, np.ndarray):
+            return _compare_arrays(obs, batched_obs[agent_idx])
+        else:
+            raise ValueError(f"Unsupported type: {type(obs)}")
+
+    agent_indices = range(len(next(iter(batched_obs.values()))))
+    for agent_key, agent_idx in zip(sorted(obs.keys()), agent_indices):
+        if not _compare_helper(obs[agent_key], batched_obs, agent_idx):
+            return False
+
+    return True
+
 def _zero(ob):
     if type(ob) == np.ndarray:
         ob.fill(0)
@@ -590,13 +643,63 @@ def _unflatten(ary, space, path=(), idx=0):
 
     return _unflatten_helper(space)
 
+
+def _flatten_space(space):
+    flat_keys = {}
+
+    def _recursion_helper(current_space, key_list):
+        if isinstance(current_space, (list, tuple, gym.spaces.Tuple)):
+            for idx, elem in enumerate(current_space):
+                new_key_list = key_list + (idx,)
+                _recursion_helper(elem, new_key_list)
+        elif isinstance(current_space, (dict, OrderedDict, gym.spaces.Dict)):
+            for key, value in current_space.items():
+                new_key_list = key_list + (key,)
+                _recursion_helper(value, new_key_list)
+        else:
+            flat_keys[key_list] = current_space
+
+    _recursion_helper(space, ())
+    return flat_keys
+
+def _flatten(nested, flat_space):
+    flat_data = []
+
+    for key_list, space in flat_space.items():
+        value = nested
+        for key in key_list:
+            value = value[key]
+        flat_data.append(value.ravel())
+
+    return np.concatenate(flat_data)
+
+
+def _unflatten(flat, flat_space):
+    idx = 0
+    nested_data = {}
+
+    for key_list, space in flat_space.items():
+        current_dict = nested_data
+        inc = np.prod(space.shape)
+
+        for key in key_list[:-1]:
+            if key not in current_dict:
+                current_dict[key] = {}
+            current_dict = current_dict[key]
+
+        last_key = key_list[-1]
+        current_dict[last_key] = flat[idx:idx + inc].reshape(space.shape)
+        idx += inc
+
+    return nested_data
+
 def _pack_obs_space(obs_space, dtype=np.float32):
     assert(isinstance(obs_space, gym.Space)), 'Arg must be a gym space'
 
     if isinstance(obs_space, gym.spaces.Box):
         return obs_space
 
-    flat = _flatten(obs_space)
+    flat = _flatten_space(obs_space)
 
     n = 0
     for e in flat.values():
@@ -613,7 +716,7 @@ def _pack_atn_space(atn_space):
     if isinstance(atn_space, gym.spaces.Discrete):
         return atn_space
 
-    flat = _flatten(atn_space)
+    flat = _flatten_space(atn_space)
 
     lens = []
     for e in flat.values():
@@ -621,12 +724,12 @@ def _pack_atn_space(atn_space):
 
     return gym.spaces.MultiDiscrete(lens) 
 
-def _flatten_ob(ob, dtype=None):
+def _flatten_ob(ob, flat_space, dtype=None):
     # TODO: Find a better way to handle Atari
     if type(ob) == gym.wrappers.frame_stack.LazyFrames:
        ob = np.array(ob)
 
-    tensors = _flatten(ob)
+    tensors = _flatten(ob, flat_space)
 
     # Preallocate the memory for the concatenated tensor
     if type(tensors) == dict:
@@ -648,8 +751,8 @@ def _flatten_ob(ob, dtype=None):
 
     return prealloc
 
-def _pack_obs(obs, dtype=None):
-    return {k: _flatten_ob(v, dtype) for k, v in obs.items()}
+def _pack_obs(obs, flat_space, dtype=None):
+    return {k: _flatten_ob(v, flat_space, dtype) for k, v in obs.items()}
 
 def _batch_obs(obs):
     return np.stack(list(obs.values()), axis=0)
