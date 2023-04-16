@@ -209,6 +209,11 @@ def make_puffer_env_cls(scope, raw_obs):
             if scope.emulate_flat_obs:
                 obs = _pack_obs(obs, scope.obs_dtype)
 
+            sorted_obs = {}
+            for agent in self.possible_agents:
+                sorted_obs[agent] = obs[agent]
+            obs = sorted_obs
+ 
             if __debug__:
                 for agent, ob in obs.items():
                     assert self.observation_space(agent).contains(ob)
@@ -290,7 +295,16 @@ def make_puffer_env_cls(scope, raw_obs):
                 # Sort by possible_agents ordering
                 sorted_obs, sorted_rewards, sorted_dones, sorted_infos = {}, {}, {}, {}
                 for agent in self.possible_agents:
-                    self._epoch_lengths[agent] += 1
+                    sorted_obs[agent] = obs[agent]
+                    sorted_rewards[agent] = rewards[agent]
+                    sorted_dones[agent] = dones[agent]
+                    sorted_infos[agent] = infos[agent]
+
+                obs, rewards, dones, infos = sorted_obs, sorted_rewards, sorted_dones, sorted_infos
+
+                # Record episode statistics
+                for agent in self.possible_agents:
+                    self._epoch_lengths[agent] += 1 
                     self._epoch_returns[agent] += rewards[agent]
 
                     if scope.record_episode_statistics and dones[agent]:
@@ -302,13 +316,6 @@ def make_puffer_env_cls(scope, raw_obs):
 
                         self._epoch_lengths[agent] = 0
                         self._epoch_returns[agent] = 0
-
-                    sorted_obs[agent] = obs[agent]
-                    sorted_rewards[agent] = rewards[agent]
-                    sorted_dones[agent] = dones[agent]
-                    sorted_infos[agent] = infos[agent]
-
-                obs, rewards, dones, infos = sorted_obs, sorted_rewards, sorted_dones, sorted_infos
 
                 # Observation shape test
                 if __debug__:
@@ -541,6 +548,9 @@ def _make_space_like(ob):
     raise ValueError(f'Invalid type for featurized obs: {type(ob)}')
 
 def _flatten(nested_obj):
+    if not isinstance(nested_obj, (dict, OrderedDict, list, tuple, gym.spaces.Tuple, gym.spaces.Dict)):
+        return nested_obj
+
     def _recursion_helper(path, current):
         if isinstance(current, (list, tuple, gym.spaces.Tuple)):
             for idx, value in enumerate(current):
@@ -616,10 +626,11 @@ def _flatten_ob(ob, dtype=None):
     if type(ob) == gym.wrappers.frame_stack.LazyFrames:
        ob = np.array(ob)
 
-    flat = _flatten(ob)
+    tensors = _flatten(ob)
 
     # Preallocate the memory for the concatenated tensor
-    tensors = flat.values()
+    if type(tensors) == dict:
+        tensors = tensors.values()
 
     if dtype is None:
         tensors = list(tensors)

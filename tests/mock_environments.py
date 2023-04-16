@@ -9,9 +9,46 @@ from pettingzoo.utils.env import ParallelEnv
 import pufferlib
 import pufferlib.utils
 
+def _agent_str_to_int(agent):
+    return int(agent.split('_')[-1])
+
+def _sample_space(agent, tick, space):
+    if isinstance(space, gym.spaces.Discrete):
+        return hash(f'{agent}-{tick}') % space.n
+    elif isinstance(space, gym.spaces.Box):
+        return np.linspace(space.low, space.high, num=space.shape[0]) * (tick % 2)
+    elif isinstance(space, gym.spaces.Tuple):
+        return tuple(_sample_space(agent, tick, s) for s in space.spaces)
+    elif isinstance(space, gym.spaces.Dict):
+        return {k: _sample_space(agent, tick, v) for k, v in space.spaces.items()}
+    else:
+        raise ValueError(f"Invalid space type: {type(space)}")
+
+def make_mock_singleagent_env(observation_space, action_space):
+    class TestEnv(gym.Env):
+        def __init__(self):
+            self.observation_space = observation_space
+            self.action_space = action_space
+
+        def reset(self, seed=None):
+            self.tick = 0
+            self.rng = pufferlib.utils.RandomState(seed)
+
+            return _sample_space('agent_1', self.tick, observation_space)
+
+        def step(self, actions):
+            reward = 0.1 * self.rng.random()
+            done = reward < 0.01
+            self.tick += 1
+
+            return (
+                _sample_space('agent_1', self.tick, observation_space),
+                reward, done, {'dead': done})
+
+    return TestEnv
 
 
-def make_mock_env(
+def make_mock_multiagent_env(
         observation_space,
         action_space,
         initial_agents,
@@ -25,8 +62,7 @@ def make_mock_env(
 
         def reset(self, seed=None):
             self.tick = 0
-            self.rng = pufferlib.utils.RandomState(seed)
-            self.agents = self.rng.sample(self.possible_agents, initial_agents)
+            self.agents = self.possible_agents[:initial_agents]
 
             return {a: self._sample_space(a, self.tick, observation_space)
                 for a in self.agents}
@@ -34,7 +70,7 @@ def make_mock_env(
         def step(self, actions):
             obs, rewards, dones, infos = {}, {}, {}, {}
 
-            dead  = self.rng.sample(self.agents, death_per_tick)
+            dead  = self.agents[:death_per_tick]
             for kill in dead:
                 self.agents.remove(kill)
                 # TODO: Make pufferlib work without pad obs
@@ -44,6 +80,8 @@ def make_mock_env(
                 dones[kill] = True
                 infos[kill] = {'dead': True}
 
+            # TODO: Fix this
+            assert spawn_per_tick == 0
             for spawn in range(spawn_per_tick):
                 # TODO: Make pufferlib check if an agent respawns on the
                 # Same tick as it dies (is this good or bad?)
@@ -53,7 +91,7 @@ def make_mock_env(
 
             for agent in self.agents:
                 obs[agent] = self._sample_space(agent, self.tick, observation_space)
-                rewards[agent] = 0.1 * self.rng.random()
+                rewards[agent] = 0.1 * _agent_str_to_int(agent)
                 dones[agent] = False
                 infos[agent] = {'dead': False}
 
@@ -157,12 +195,12 @@ MOCK_ENVIRONMENTS = []
 for obs_space in MOCK_OBSERVATION_SPACES:
     for act_space in MOCK_ACTION_SPACES:
         MOCK_ENVIRONMENTS.append(
-            make_mock_env(
+            make_mock_multiagent_env(
                 observation_space=obs_space,
                 action_space=act_space,
                 initial_agents=16,
                 max_agents=16,
                 spawn_per_tick=0,
-                death_per_tick=0.1,
+                death_per_tick=1,
             )
         )
