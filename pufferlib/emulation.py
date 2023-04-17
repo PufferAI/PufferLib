@@ -105,6 +105,7 @@ def make_puffer_env_cls(scope, raw_obs):
 
             # Manual LRU since functools.lru_cache is not pickleable
             self._featurized_single_observation_space = None
+            self._single_action_space = None
 
             self.obs_space_cache, self.atn_space_cache = {}, {}
             self.obs_space_cache = {team_id: self.observation_space(team_id) for team_id in self.possible_agents}
@@ -180,6 +181,9 @@ def make_puffer_env_cls(scope, raw_obs):
             #Flattened (MultiDiscrete) and cached action space
             if agent in self.atn_space_cache:
                 return self.atn_space_cache[agent]
+                
+            if self._single_action_space is None:
+                self._single_action_space = _flatten_space(self.env.action_space(agent))
 
             atn_space = gym.spaces.Dict({a: self.env.action_space(a) for a in self._teams[agent]})
 
@@ -251,13 +255,7 @@ def make_puffer_env_cls(scope, raw_obs):
                             del(actions[k])
                             continue
 
-                        v = actions[k]
-                        orig_atn_space = self.env.action_space(k)
-
-                        if type(orig_atn_space) == gym.spaces.Discrete:
-                            actions[k] = v[0]
-                        else:
-                            actions[k] = _unflatten(v, orig_atn_space)
+                        actions[k] = _unflatten(actions[k], self._single_action_space)
 
             obs, rewards, dones, infos = self._step_env(actions)
             self.agents = self.env.agents
@@ -281,6 +279,9 @@ def make_puffer_env_cls(scope, raw_obs):
                     if self._step == scope.emulate_const_horizon:
                         self.done = True
 
+                if scope.emulate_flat_obs:
+                    obs = _pack_obs(obs, self._featurized_single_observation_space, scope.obs_dtype)
+
                 # Computed before padding dones. False if no agents
                 # Pad rewards/dones/infos
                 if scope.emulate_const_num_agents:
@@ -293,9 +294,6 @@ def make_puffer_env_cls(scope, raw_obs):
                             infos[team] = {}
                         if team not in dones:
                             dones[team] = self.done
-
-                if scope.emulate_flat_obs:
-                    obs = _pack_obs(obs, scope.obs_dtype)
 
                 # Sort by possible_agents ordering
                 sorted_obs, sorted_rewards, sorted_dones, sorted_infos = {}, {}, {}, {}
@@ -495,35 +493,15 @@ class Binding:
         return self._env_name
 
 
-def unpack_batched_obs(obs_space, packed_obs):
+def unpack_batched_obs(flat_space, packed_obs):
     '''Unpack a batch of observations into the original observation space
     
     Call this funtion in the forward pass of your network
     '''
 
-    assert(isinstance(obs_space, gym.Space)), 'First arg must be a gym space'
+    if not isinstance(flat_space, dict):
+        return packed_obs.reshape(packed_obs.shape[0], *flat_space.shape)
 
-    batch = packed_obs.shape[0]
-    obs = {}
-    idx = 0
-
-    flat_obs_space = _flatten(obs_space)
-
-    for key_list, val in flat_obs_space.items():
-        obs_ptr = obs
-        for key in key_list[:-1]:
-            if key not in obs_ptr:
-                obs_ptr[key] = {}
-            obs_ptr = obs_ptr[key]
-
-        key = key_list[-1]
-        inc = np.prod(val.shape)
-        obs_ptr[key] = packed_obs[:, idx:idx + inc].reshape(batch, *val.shape)
-        idx = idx + inc
-
-    return obs
-
-def unpack_batched_obs(flat_space, packed_obs):
     batch = packed_obs.shape[0]
     batched_obs = {}
 
@@ -545,11 +523,12 @@ def unpack_batched_obs(flat_space, packed_obs):
 
 def _compare_observations(obs, batched_obs):
     def _compare_arrays(array1, array2):
-        # TODO: Figure out where data is being changed
         return np.allclose(array1, array2)
 
     def _compare_helper(obs, batched_obs, agent_idx):
-        if isinstance(obs, (dict, OrderedDict)):
+        if isinstance(batched_obs, np.ndarray):
+            return _compare_arrays(obs, batched_obs[agent_idx])
+        elif isinstance(obs, (dict, OrderedDict)):
             for key in obs:
                 if not _compare_helper(obs[key], batched_obs[key], agent_idx):
                     return False
@@ -559,12 +538,14 @@ def _compare_observations(obs, batched_obs):
                 if not _compare_helper(elem, batched_obs[idx], agent_idx):
                     return False
             return True
-        elif isinstance(obs, np.ndarray):
-            return _compare_arrays(obs, batched_obs[agent_idx])
         else:
             raise ValueError(f"Unsupported type: {type(obs)}")
 
-    agent_indices = range(len(next(iter(batched_obs.values()))))
+    if isinstance(batched_obs, dict):
+        agent_indices = range(len(next(iter(batched_obs.values()))))
+    else:
+        agent_indices = range(batched_obs.shape[0])
+
     for agent_key, agent_idx in zip(sorted(obs.keys()), agent_indices):
         if not _compare_helper(obs[agent_key], batched_obs, agent_idx):
             return False
@@ -600,51 +581,10 @@ def _make_space_like(ob):
 
     raise ValueError(f'Invalid type for featurized obs: {type(ob)}')
 
-def _flatten(nested_obj):
-    if not isinstance(nested_obj, (dict, OrderedDict, list, tuple, gym.spaces.Tuple, gym.spaces.Dict)):
-        return nested_obj
-
-    def _recursion_helper(path, current):
-        if isinstance(current, (list, tuple, gym.spaces.Tuple)):
-            for idx, value in enumerate(current):
-                new_key = path + (idx,)
-                _recursion_helper(new_key, value)
-        elif isinstance(current, (dict, OrderedDict, gym.spaces.Dict)):
-            for key, value in current.items():
-                new_key = path + (key,)
-                _recursion_helper(new_key, value)
-        else:
-            flat_dict[path] = current
-
-    flat_dict = {}
-    _recursion_helper((), nested_obj)
-    return flat_dict
-
-def _unflatten(ary, space, path=(), idx=0):
-    def _unflatten_helper(space):
-        nonlocal idx
-        if isinstance(space, (list, tuple, gym.spaces.Tuple)):
-            unflattened = []
-            for elem in space:
-                unflattened_elem = _unflatten_helper(elem)
-                unflattened.append(unflattened_elem)
-            return tuple(unflattened) if isinstance(space, (tuple, gym.spaces.Tuple)) else unflattened
-        elif isinstance(space, (dict, OrderedDict, gym.spaces.Dict)):
-            unflattened = {}
-            for key in space:
-                unflattened[key] = _unflatten_helper(space[key])
-            return unflattened
-        elif isinstance(space, gym.spaces.MultiDiscrete):
-            return ary
-        else:
-            value = ary[path + (idx,)]
-            idx += 1
-            return value
-
-    return _unflatten_helper(space)
-
-
 def _flatten_space(space):
+    if isinstance(space, (gym.spaces.Box, gym.spaces.Discrete)):
+        return space
+
     flat_keys = {}
 
     def _recursion_helper(current_space, key_list):
@@ -663,6 +603,9 @@ def _flatten_space(space):
     return flat_keys
 
 def _flatten(nested, flat_space):
+    if not isinstance(flat_space, dict):
+        return nested.ravel()
+
     flat_data = []
 
     for key_list, space in flat_space.items():
@@ -673,14 +616,16 @@ def _flatten(nested, flat_space):
 
     return np.concatenate(flat_data)
 
-
 def _unflatten(flat, flat_space):
+    if not isinstance(flat_space, dict):
+        return flat.reshape(flat_space.shape)
+
     idx = 0
     nested_data = {}
 
     for key_list, space in flat_space.items():
         current_dict = nested_data
-        inc = np.prod(space.shape)
+        inc = int(np.prod(space.shape))
 
         for key in key_list[:-1]:
             if key not in current_dict:
@@ -688,7 +633,13 @@ def _unflatten(flat, flat_space):
             current_dict = current_dict[key]
 
         last_key = key_list[-1]
-        current_dict[last_key] = flat[idx:idx + inc].reshape(space.shape)
+
+        if space.shape:
+            current_dict[last_key] = flat[idx:idx + inc].reshape(space.shape)
+        else:
+            assert inc == 1
+            current_dict[last_key] = flat[idx]
+
         idx += inc
 
     return nested_data
