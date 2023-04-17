@@ -614,7 +614,7 @@ def _flatten(nested, flat_space):
             value = value[key]
         flat_data.append(value.ravel())
 
-    return np.concatenate(flat_data)
+    return flat_data
 
 def _unflatten(flat, flat_space):
     if not isinstance(flat_space, dict):
