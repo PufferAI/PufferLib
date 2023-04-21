@@ -33,7 +33,8 @@ class Featurizer:
         return
 
     def __call__(self, team_obs, step):
-        return team_obs
+        key = list(team_obs.keys())[0]
+        return team_obs[key]
 
 
 class GymToPettingZooParallelWrapper(ParallelEnv):
@@ -500,6 +501,7 @@ def unpack_batched_obs(flat_space, packed_obs):
     '''
 
     if not isinstance(flat_space, dict):
+        T()
         return packed_obs.reshape(packed_obs.shape[0], *flat_space.shape)
 
     batch = packed_obs.shape[0]
