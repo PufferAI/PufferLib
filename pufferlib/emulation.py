@@ -239,6 +239,9 @@ def make_puffer_env_cls(scope, raw_obs):
             # Action shape test
             if __debug__:
                 for agent, atns in team_actions.items():
+                    if not self.action_space(agent).contains(atns):
+                        print(agent, atns)
+                        T()
                     assert self.action_space(agent).contains(atns)
 
             # Unpack actions from teams
@@ -501,7 +504,6 @@ def unpack_batched_obs(flat_space, packed_obs):
     '''
 
     if not isinstance(flat_space, dict):
-        T()
         return packed_obs.reshape(packed_obs.shape[0], *flat_space.shape)
 
     batch = packed_obs.shape[0]
@@ -673,7 +675,12 @@ def _pack_atn_space(atn_space):
 
     lens = []
     for e in flat.values():
-        lens.append(e.n)
+        if isinstance(e, gym.spaces.Discrete):
+            lens.append(e.n)
+        elif isinstance(e, gym.spaces.MultiDiscrete):
+            lens += e.nvec.tolist()
+        else:
+            raise ValueError(f'Invalid action space: {e}')
 
     return gym.spaces.MultiDiscrete(lens) 
 

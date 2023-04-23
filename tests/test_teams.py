@@ -1,7 +1,7 @@
 from pdb import set_trace as T
 import nmmo
 
-import pufferlib.vectorization
+import vectorization.multiprocessing
 import pufferlib.emulation
 import pufferlib.registry.nmmo
 

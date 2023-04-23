@@ -4,7 +4,7 @@ import nmmo
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.vectorization
+import vectorization.multiprocessing
 
 # Wrap Neural MMO with PufferLib
 binding = pufferlib.emulation.Binding(

@@ -7,7 +7,7 @@ import pufferlib.frameworks.cleanrl
 import pufferlib.registry
 import pufferlib.registry.classic_control
 import pufferlib.models
-import pufferlib.vectorization
+import vectorization.multiprocessing
 
 
 # TODO: Integrate this test and others into a single cleanrl test file

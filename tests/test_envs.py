@@ -6,7 +6,7 @@ import gym
 import pufferlib
 import pufferlib.emulation
 import pufferlib.registry
-import pufferlib.vectorization
+import vectorization.multiprocessing
 
 
 def flat_equal(ob_1, ob_2):
