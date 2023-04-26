@@ -1,5 +1,7 @@
 from pdb import set_trace as T
 
+from collections import OrderedDict
+
 import numpy as np
 
 import time
@@ -26,6 +28,37 @@ def check_env(env):
     for e in env.possible_agents:
         assert env.observation_space(e) == obs_space, 'All agents must have same obs space'
         assert env.action_space(e) == atn_space, 'All agents must have same atn space'
+
+def _compare_observations(obs, batched_obs):
+    def _compare_arrays(array1, array2):
+        return np.allclose(array1, array2)
+
+    def _compare_helper(obs, batched_obs, agent_idx):
+        if isinstance(batched_obs, np.ndarray):
+            return _compare_arrays(obs, batched_obs[agent_idx])
+        elif isinstance(obs, (dict, OrderedDict)):
+            for key in obs:
+                if not _compare_helper(obs[key], batched_obs[key], agent_idx):
+                    return False
+            return True
+        elif isinstance(obs, (list, tuple)):
+            for idx, elem in enumerate(obs):
+                if not _compare_helper(elem, batched_obs[idx], agent_idx):
+                    return False
+            return True
+        else:
+            raise ValueError(f"Unsupported type: {type(obs)}")
+
+    if isinstance(batched_obs, dict):
+        agent_indices = range(len(next(iter(batched_obs.values()))))
+    else:
+        agent_indices = range(batched_obs.shape[0])
+
+    for agent_key, agent_idx in zip(sorted(obs.keys()), agent_indices):
+        if not _compare_helper(obs[agent_key], batched_obs, agent_idx):
+            return False
+
+    return True
 
 def _get_dtype_bounds(dtype):
     assert dtype in {np.float32, np.uint8}

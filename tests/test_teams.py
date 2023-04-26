@@ -1,7 +1,8 @@
 from pdb import set_trace as T
+import numpy as np
+
 import nmmo
 
-import vectorization.multiprocessing
 import pufferlib.emulation
 import pufferlib.registry.nmmo
 
@@ -16,7 +17,14 @@ class FeatureExtractor:
         return
 
     def __call__(self, obs, step):
-        return obs[list(obs)[0]]
+        assert len(obs) > 0
+        values = list(obs.values())
+
+        ob1 = values[0]
+        if len(obs) == 1:
+            return (ob1, ob1)
+        else:
+            return (ob1, values[1])
 
 def test_mock_envs():
     for env_cls in MOCK_ENVIRONMENTS:
