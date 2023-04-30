@@ -1,7 +1,7 @@
 from pdb import set_trace as T
 import numpy as np
 
-import functools
+import time
 
 import gym
 from pettingzoo.utils.env import ParallelEnv
@@ -9,6 +9,56 @@ from pettingzoo.utils.env import ParallelEnv
 import pufferlib
 import pufferlib.utils
 
+### Performance test environment
+class PerformanceEnv:
+    def __init__(self, delay=0, bandwith=1):
+        self.agents = [1]
+        self.possible_agents = [1]
+        self.done = False
+
+        self.delay = delay
+        self.bandwidth = bandwith
+
+    def reset(self, seed=None):
+        return {1: self.observation_space(1).sample()}
+
+    def step(self, actions):
+        obs = {1: 0}
+        rewards = {1: 1}
+        dones = {1: False}
+        infos = {1: {}}
+
+        time.sleep(self.delay)
+
+        return obs, rewards, dones, infos
+
+    def observation_space(self, agent):
+        return gym.spaces.Box(
+            low=-2**20, high=2**20,
+            shape=(self.bandwidth,), dtype=np.float32
+        )
+
+    def action_space(self, agent):
+        return gym.spaces.Discrete(2)
+
+class PerformanceBinding:
+    def __init__(self, delay, bandwith):
+        self.env_creator = lambda: PerformanceEnv(delay, bandwith)
+        self.bandwidth = bandwith
+
+    @property
+    def single_observation_space(self):
+        return gym.spaces.Box(
+            low=-2**20, high=2**20,
+            shape=(self.bandwidth,), dtype=np.float32
+        )
+
+    @property
+    def single_action_space(self):
+        return gym.spaces.Discrete(2)
+
+
+### Other Mock environments and utilities
 def _agent_str_to_int(agent):
     return int(agent.split('_')[-1])
 

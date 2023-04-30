@@ -37,7 +37,7 @@ class RemoteEnvs:
             env.seed(seed)
             seed += 1
 
-    def profile_all(self):
+    def profile_all(self, *args, **kwargs):
         return [e.timers for e in self.envs]
 
     def put_all(self, *args, **kwargs):
@@ -121,15 +121,21 @@ class VecEnv:
 
     def close(self):
         for request_queue, _, _ in self.remote_envs_lists:
-            request_queue.put(("terminate", None, None))
+            request_queue.put(("terminate", [], {}))
 
         for _, _, process in self.remote_envs_lists:
             process.join()
 
     def profile(self):
         '''Returns profiling timers from all remote environments'''
-        return list(itertools.chain.from_iterable([e.profile_all.remote() for e in self.remote_envs_lists]))
+        for request_queue, _, _ in self.remote_envs_lists:
+            request_queue.put(("profile_all", [], {}))
 
+        profile_results = []
+        for _, response_queue, _ in self.remote_envs_lists:
+            profile_results.extend(response_queue.get())
+
+        return profile_results
 
     def async_reset(self, seed=None):
         '''Asynchronously reset environments. Does not block.'''

@@ -138,19 +138,36 @@ class Profiler:
         self.calls += 1
 
 def profile(func):
-    timer = Profiler()
-    name = func.__name__ + '_timer'
+    name = func.__name__
 
     def wrapper(*args, **kwargs):
+        self = args[0]
+
+        if not hasattr(self, '_timers'):
+            self._timers = {}
+
+        if name not in self._timers:
+            self._timers[name] = Profiler()
+
+        timer = self._timers[name]
+
         with timer:
             result = func(*args, **kwargs)
 
-        self = args[0]
-        assert hasattr(self, 'timers'), 'Must have timers dict'
-        self.timers[name] = timer
         return result
 
     return wrapper
+
+def aggregate_profilers(profiler_dicts):
+    merged = {}
+
+    for key in list(profiler_dicts[0].keys()):
+        merged[key] = Profiler()
+        for prof_dict in profiler_dicts:
+            merged[key].elapsed += prof_dict[key].elapsed
+            merged[key].calls += prof_dict[key].calls
+
+    return merged
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes

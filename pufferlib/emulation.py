@@ -59,20 +59,8 @@ class GymToPettingZooParallelWrapper(ParallelEnv):
 # env = wrappers.OrderEnforcingWrapper(env)
 def make_puffer_env_cls(scope, raw_obs):
     class PufferEnv(ParallelEnv):
-        def _initialize_timers(self):
-            # Populated by utils.profile decorator
-            self.timers = {}
-            self.prestep_timer = utils.Profiler()
-            self.poststep_timer = utils.Profiler()
-            self.featurizer_timer = utils.Profiler()
-            self.timers['prestep_timer'] = self.prestep_timer
-            self.timers['poststep_timer'] = self.poststep_timer
-            self.timers['featurizer_timer'] = self.featurizer_timer
-
         @utils.profile
         def __init__(self, *args, env=None, **kwargs):
-            self._initialize_timers()
-
             self.raw_env = self._create_env(env, *args, **kwargs)
             self.env = self.raw_env if utils.is_multiagent(self.raw_env) else GymToPettingZooParallelWrapper(self.raw_env)
 
@@ -108,28 +96,6 @@ def make_puffer_env_cls(scope, raw_obs):
             # Set env metadata
             self.metadata = self.env.metadata if hasattr(self.env, 'metadata') else {}
 
-        @property
-        def raw_single_observation_space(self):
-            '''The observation space of a single agent after featurization but before flattening
-            
-            Used by _unpack_batched_obs at the start of the network forward pass
-            '''
-            return self._raw_single_observation_space
-
-        @property
-        def single_observation_space(self):
-            '''The observation space of a single agent after featurization and flattening'''
-            return self._single_observation_space
-        
-        @property
-        def single_action_space(self):
-            '''The action space of a single agent after flattening'''
-            return self._single_action_space
-
-        @property
-        def max_agents(self):
-            return len(self.possible_agents)
-
         def _group_team_obs(self, obs, teams):
             team_obs = {}
             for team_id, team in teams.items():
@@ -160,9 +126,161 @@ def make_puffer_env_cls(scope, raw_obs):
                     return self.env.reset()
 
         @utils.profile
+        def _prestep(self, team_actions):
+            # Action shape test
+            if __debug__:
+                for agent, atns in team_actions.items():
+                    assert self.action_space(agent).contains(atns)
+
+            # Unpack actions from teams
+            actions = {}
+            for team_id, team in self._teams.items():
+                team_atns = np.split(team_actions[team_id], len(team))
+                for agent_id, atns in zip(team, team_atns):
+                    actions[agent_id] = atns
+
+            # TODO: Do we want to support structured actions?
+            if not scope.emulate_flat_atn:
+                return actions
+
+            # Unpack actions
+            for k in list(actions):
+                if k not in self.agents:
+                    del(actions[k])
+                    continue
+
+                flat = actions[k]
+                flat_space = self._single_action_space
+
+                if not isinstance(flat_space, dict):
+                    actions[k] = flat.reshape(flat_space.shape)
+                elif () in flat_space:
+                    actions[k] = flat[0]
+                else:
+                    nested_data = {}
+
+                    for key_list, space in flat_space.items():
+                        current_dict = nested_data
+
+                        for key in key_list[:-1]:
+                            if key not in current_dict:
+                                current_dict[key] = {}
+                            current_dict = current_dict[key]
+
+                        last_key = key_list[-1]
+
+                        if space.shape:
+                            size = np.prod(space.shape)
+                            current_dict[last_key] = flat[:size].reshape(space.shape)
+                            flat = flat[size:]
+                        else:
+                            current_dict[last_key] = flat[0]
+                            flat = flat[1:]
+
+                    actions[k] = nested_data
+
+            return actions
+
+        @utils.profile
         def _step_env(self, actions):
             with utils.Suppress() if scope.suppress_env_prints else nullcontext():
                 return self.env.step(actions)
+
+        @utils.profile
+        def _featurize(self, obs):
+            # Featurize observations for teams with at least 1 living agent
+            featurized_obs = {}
+            for team_id, team_obs in self._group_team_obs(obs, self._teams).items():
+                if team_obs:
+                    featurized_obs[team_id] = self.featurizers[team_id](team_obs, self._step)
+                    assert self._raw_single_observation_space.contains(featurized_obs[team_id])
+
+            return featurized_obs
+
+        @utils.profile
+        def _poststep(self, obs, rewards, dones, infos):
+            if self.reward_shaper:
+                rewards = self.reward_shaper(rewards, self._step)
+
+            # Terminate episode at horizon or if all agents are done
+            if scope.emulate_const_horizon is not None:
+                assert self._step <= scope.emulate_const_horizon
+                if self._step == scope.emulate_const_horizon:
+                    self.done = True
+
+            if scope.emulate_flat_obs:
+                obs = {k: _flatten_to_array(v, self._single_observation_space, scope.obs_dtype) for k, v in obs.items()}
+
+            # Computed before padding dones. False if no agents
+            # Pad rewards/dones/infos
+            if scope.emulate_const_num_agents:
+                for team in self._teams:
+                    if team not in obs:                                                  
+                        obs[team] = self.pad_obs
+                    if team not in rewards:
+                        rewards[team] = 0
+                    if team not in infos:
+                        infos[team] = {}
+                    if team not in dones:
+                        dones[team] = self.done
+
+            # Sort by possible_agents ordering
+            sorted_obs, sorted_rewards, sorted_dones, sorted_infos = {}, {}, {}, {}
+            for agent in self.possible_agents:
+                sorted_obs[agent] = obs[agent]
+                sorted_rewards[agent] = rewards[agent]
+                sorted_dones[agent] = dones[agent]
+                sorted_infos[agent] = infos[agent]
+
+            obs, rewards, dones, infos = sorted_obs, sorted_rewards, sorted_dones, sorted_infos
+
+            # Record episode statistics
+            for agent in self.possible_agents:
+                self._epoch_lengths[agent] += 1 
+                self._epoch_returns[agent] += rewards[agent]
+
+                if scope.record_episode_statistics and dones[agent]:
+                    if 'episode' not in infos[agent]:
+                        infos[agent]['episode'] = {}
+
+                    infos[agent]['episode']['r'] = self._epoch_returns[agent]
+                    infos[agent]['episode']['l'] = self._epoch_lengths[agent]
+
+                    self._epoch_lengths[agent] = 0
+                    self._epoch_returns[agent] = 0
+
+            # Observation shape test
+            if __debug__:
+                for agent, ob in obs.items():
+                    assert self.observation_space(agent).contains(ob)
+
+            return obs, rewards, dones, infos
+
+        @property
+        def timers(self):
+            return self._timers
+
+        @property
+        def max_agents(self):
+            return len(self.possible_agents)
+
+        @property
+        def raw_single_observation_space(self):
+            '''The observation space of a single agent after featurization but before flattening
+            
+            Used by _unpack_batched_obs at the start of the network forward pass
+            '''
+            return self._raw_single_observation_space
+
+        @property
+        def single_observation_space(self):
+            '''The observation space of a single agent after featurization and flattening'''
+            return self._single_observation_space
+        
+        @property
+        def single_action_space(self):
+            '''The action space of a single agent after flattening'''
+            return self._single_action_space
 
         @utils.profile
         def observation_space(self, agent):
@@ -238,12 +356,10 @@ def make_puffer_env_cls(scope, raw_obs):
             self._epoch_returns = defaultdict(float)
             self._epoch_lengths = defaultdict(int)
 
-            obs = self._group_team_obs(self._reset_env(seed), self._teams)
-            for team_id, team_obs in obs.items():
-                self.featurizers[team_id].reset(team_obs)
-                obs[team_id] = self.featurizers[team_id](team_obs, self._step)
+            obs = self._reset_env(seed)
 
-                assert self._raw_single_observation_space.contains(obs[team_id])
+            # TODO: Check if all agents present
+            obs = self._featurize(obs)
 
             self.agents = self.env.agents
             self.done = False
@@ -273,127 +389,21 @@ def make_puffer_env_cls(scope, raw_obs):
             #Step the environment and return (observations, rewards, dones, infos)
             assert not self.done, 'step after done'
 
-            # Action shape test
-            if __debug__:
-                for agent, atns in team_actions.items():
-                    assert self.action_space(agent).contains(atns)
-
-            # Unpack actions from teams
-            actions = {}
-            for team_id, team in self._teams.items():
-                team_atns = np.split(team_actions[team_id], len(team))
-                for agent_id, atns in zip(team, team_atns):
-                    actions[agent_id] = atns
-
-            # Unpack actions
-            with self.prestep_timer:
-                if scope.emulate_flat_atn:
-                    for k in list(actions):
-                        if k not in self.agents:
-                            del(actions[k])
-                            continue
-
-                        flat = actions[k]
-                        flat_space = self._single_action_space
-
-                        if not isinstance(flat_space, dict):
-                            actions[k] = flat.reshape(flat_space.shape)
-                        elif () in flat_space:
-                            actions[k] = flat[0]
-                        else:
-                            nested_data = {}
-
-                            for key_list, space in flat_space.items():
-                                current_dict = nested_data
-
-                                for key in key_list[:-1]:
-                                    if key not in current_dict:
-                                        current_dict[key] = {}
-                                    current_dict = current_dict[key]
-
-                                last_key = key_list[-1]
-
-                                if space.shape:
-                                    size = np.prod(space.shape)
-                                    current_dict[last_key] = flat[:size].reshape(space.shape)
-                                    flat = flat[size:]
-                                else:
-                                    current_dict[last_key] = flat[0]
-                                    flat = flat[1:]
-
-                            actions[k] = nested_data
-
+            actions = self._prestep(team_actions)
             obs, rewards, dones, infos = self._step_env(actions)
+
             self.agents = self.env.agents
-            self.done = len(self.agents) == 0
+            num_agents = len(self.agents)
+            self.done = num_agents == 0
             self._step += 1
 
-            with self.featurizer_timer:
-                # Featurize observations for teams with at least 1 living agent
-                featurized_obs = {}
-                for team_id, team_obs in self._group_team_obs(obs, self._teams).items():
-                    if team_obs:
-                        featurized_obs[team_id] = self.featurizers[team_id](team_obs, self._step)
-                        assert self._raw_single_observation_space.contains(featurized_obs[team_id])
+            # Inject number of agent steps into timer logs
+            if not hasattr(self._timers['step'], 'total_agent_steps'):
+                self._timers['step'].total_agent_steps = 0
+            self._timers['step'].total_agent_steps += num_agents
 
-                obs = featurized_obs
-
-            with self.poststep_timer:
-                if self.reward_shaper:
-                    rewards = self.reward_shaper(rewards, self._step)
-
-                # Terminate episode at horizon or if all agents are done
-                if scope.emulate_const_horizon is not None:
-                    assert self._step <= scope.emulate_const_horizon
-                    if self._step == scope.emulate_const_horizon:
-                        self.done = True
-
-                if scope.emulate_flat_obs:
-                    obs = {k: _flatten_to_array(v, self._single_observation_space, scope.obs_dtype) for k, v in obs.items()}
-
-                # Computed before padding dones. False if no agents
-                # Pad rewards/dones/infos
-                if scope.emulate_const_num_agents:
-                    for team in self._teams:
-                        if team not in obs:                                                  
-                            obs[team] = self.pad_obs
-                        if team not in rewards:
-                            rewards[team] = 0
-                        if team not in infos:
-                            infos[team] = {}
-                        if team not in dones:
-                            dones[team] = self.done
-
-                # Sort by possible_agents ordering
-                sorted_obs, sorted_rewards, sorted_dones, sorted_infos = {}, {}, {}, {}
-                for agent in self.possible_agents:
-                    sorted_obs[agent] = obs[agent]
-                    sorted_rewards[agent] = rewards[agent]
-                    sorted_dones[agent] = dones[agent]
-                    sorted_infos[agent] = infos[agent]
-
-                obs, rewards, dones, infos = sorted_obs, sorted_rewards, sorted_dones, sorted_infos
-
-                # Record episode statistics
-                for agent in self.possible_agents:
-                    self._epoch_lengths[agent] += 1 
-                    self._epoch_returns[agent] += rewards[agent]
-
-                    if scope.record_episode_statistics and dones[agent]:
-                        if 'episode' not in infos[agent]:
-                            infos[agent]['episode'] = {}
-
-                        infos[agent]['episode']['r'] = self._epoch_returns[agent]
-                        infos[agent]['episode']['l'] = self._epoch_lengths[agent]
-
-                        self._epoch_lengths[agent] = 0
-                        self._epoch_returns[agent] = 0
-
-                # Observation shape test
-                if __debug__:
-                    for agent, ob in obs.items():
-                        assert self.observation_space(agent).contains(ob)
-
+            obs = self._featurize(obs)
+            obs, rewards, dones, infos = self._poststep(obs, rewards, dones, infos)
             return obs, rewards, dones, infos
 
     return PufferEnv
@@ -415,7 +425,7 @@ class Binding:
             emulate_flat_atn=True,
             emulate_const_horizon=None,
             emulate_const_num_agents=True,
-            suppress_env_prints=True,
+            suppress_env_prints=False,
             record_episode_statistics=True,
             obs_dtype=np.float32):
         '''PufferLib's core Binding class.
