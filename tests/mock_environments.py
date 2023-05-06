@@ -9,6 +9,9 @@ from pettingzoo.utils.env import ParallelEnv
 import pufferlib
 import pufferlib.utils
 
+HIGH = 2**20
+LOW = 0
+
 ### Performance test environment
 class PerformanceEnv:
     def __init__(self, delay=0, bandwith=1):
@@ -66,7 +69,8 @@ def _sample_space(agent, tick, space):
     if isinstance(space, gym.spaces.Discrete):
         return hash(f'{agent}-{tick}') % space.n
     elif isinstance(space, gym.spaces.Box):
-        return np.linspace(space.low, space.high, num=space.shape[0]) * (tick % 2)
+        nonce = (hash(agent) % HIGH + tick/10) % (HIGH - 1)
+        return np.linspace(nonce, nonce + 0.01, num=space.shape[0]).astype(np.float32)
     elif isinstance(space, gym.spaces.Tuple):
         return tuple(_sample_space(agent, tick, s) for s in space.spaces)
     elif isinstance(space, gym.spaces.Dict):
@@ -114,7 +118,7 @@ def make_mock_multiagent_env(
             self.tick = 0
             self.agents = self.possible_agents[:initial_agents]
 
-            return {a: self._sample_space(a, self.tick, observation_space)
+            return {a: _sample_space(a, self.tick, observation_space)
                 for a in self.agents}
 
         def step(self, actions):
@@ -125,7 +129,7 @@ def make_mock_multiagent_env(
                 self.agents.remove(kill)
                 # TODO: Make pufferlib work without pad obs
                 # but still require rewards, dones, and optionally infos
-                obs[kill] = self._sample_space(kill, self.tick, observation_space)
+                obs[kill] = _sample_space(kill, self.tick, observation_space)
                 rewards[kill] = -1
                 dones[kill] = True
                 infos[kill] = {'dead': True}
@@ -140,25 +144,13 @@ def make_mock_multiagent_env(
                     self.agents.append(spawn)
 
             for agent in self.agents:
-                obs[agent] = self._sample_space(agent, self.tick, observation_space)
+                obs[agent] = _sample_space(agent, self.tick, observation_space)
                 rewards[agent] = 0.1 * _agent_str_to_int(agent)
                 dones[agent] = False
                 infos[agent] = {'dead': False}
 
             self.tick += 1
             return obs, rewards, dones, infos
-
-        def _sample_space(self, agent, tick, space):
-            if isinstance(space, gym.spaces.Discrete):
-                return hash(f'{agent}-{tick}') % space.n
-            elif isinstance(space, gym.spaces.Box):
-                return np.linspace(space.low, space.high, num=space.shape[0]) * (tick % 2)
-            elif isinstance(space, gym.spaces.Tuple):
-                return tuple(self._sample_space(agent, tick, s) for s in space.spaces)
-            elif isinstance(space, gym.spaces.Dict):
-                return {k: self._sample_space(agent, tick, v) for k, v in space.spaces.items()}
-            else:
-                raise ValueError(f"Invalid space type: {type(space)}")
 
         def observation_space(self, agent) -> gym.Space:
             return observation_space
@@ -177,26 +169,26 @@ def make_mock_multiagent_env(
 
 MOCK_OBSERVATION_SPACES = [
     # Simple spaces
-    gym.spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32),
+    gym.spaces.Box(low=LOW, high=HIGH, shape=(4,), dtype=np.float32),
     #gym.spaces.Discrete(5),
 
     # Nested spaces
     gym.spaces.Dict({
-        "foo": gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
-        "bar": gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+        "foo": gym.spaces.Box(low=LOW, high=HIGH, shape=(2,), dtype=np.float32),
+        "bar": gym.spaces.Box(low=LOW, high=HIGH, shape=(2,), dtype=np.float32),
     }),
     #gym.spaces.Tuple((gym.spaces.Discrete(3), gym.spaces.Discrete(4))),
     gym.spaces.Tuple((
-        gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+        gym.spaces.Box(low=LOW, high=HIGH, shape=(2,), dtype=np.float32),
         #gym.spaces.Discrete(3),
         gym.spaces.Dict({
-            "baz": gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32),
-            "qux": gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32),
+            "baz": gym.spaces.Box(low=LOW, high=HIGH, shape=(1,), dtype=np.float32),
+            "qux": gym.spaces.Box(low=LOW, high=HIGH, shape=(1,), dtype=np.float32),
         }),
     )),
     gym.spaces.Dict({
         "foo": gym.spaces.Tuple((
-            gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+            gym.spaces.Box(low=LOW, high=HIGH, shape=(2,), dtype=np.float32),
             #gym.spaces.Discrete(3),
         )),
         #"bar": gym.spaces.Dict({
@@ -239,6 +231,35 @@ MOCK_ACTION_SPACES = [
             "qux": gym.spaces.Discrete(4),
         }),
     }),
+]
+
+MOCK_TEAMS = [
+    None,
+    {
+        'team_1': ['agent_1'],
+        'team_2': ['agent_2'],
+        'team_3': ['agent_3'],
+        'team_4': ['agent_4'],
+        'team_5': ['agent_5'],
+        'team_6': ['agent_6'],
+        'team_7': ['agent_7'],
+        'team_8': ['agent_8'],
+        'team_9': ['agent_9'],
+        'team_10': ['agent_10'],
+        'team_11': ['agent_11'],
+        'team_12': ['agent_12'],
+        'team_13': ['agent_13'],
+        'team_14': ['agent_14'],
+        'team_15': ['agent_15'],
+        'team_16': ['agent_16'],
+    },
+    {
+        'team_1': ['agent_1', 'agent_2'],
+        'team_2': ['agent_3', 'agent_4', 'agent_5', 'agent_6'],
+        'team_3': ['agent_7', 'agent_8', 'agent_9'],
+        'team_4': ['agent_10', 'agent_11', 'agent_12', 'agent_13', 'agent_14'],
+        'team_5': ['agent_15', 'agent_16'],
+    },
 ]
 
 MOCK_ENVIRONMENTS = []

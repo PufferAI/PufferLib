@@ -65,7 +65,7 @@ def make_puffer_env_cls(scope, raw_obs):
             self.env = self.raw_env if utils.is_multiagent(self.raw_env) else GymToPettingZooParallelWrapper(self.raw_env)
 
             self._step = 0
-            self.done = False
+            self.done = True
 
             self._obs_min, self._obs_max = utils._get_dtype_bounds(scope.obs_dtype)
 
@@ -519,6 +519,15 @@ class Binding:
                 return self._raw_env_creator(*self._default_args, **self._default_kwargs)
             else:
                 return self._raw_env_cls(*self._default_args, **self._default_kwargs)
+            
+    def pz_env_creator(self):
+        '''Returns the partially wrapped PettingZoo env_creator function created by this binding'''
+        raw_env = self.raw_env_creator()
+
+        if utils.is_multiagent(raw_env):
+            return raw_env
+
+        return GymToPettingZooParallelWrapper(raw_env) 
 
     @property
     def env_cls(self):

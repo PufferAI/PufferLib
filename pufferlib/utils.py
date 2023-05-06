@@ -29,9 +29,12 @@ def check_env(env):
         assert env.observation_space(e) == obs_space, 'All agents must have same obs space'
         assert env.action_space(e) == atn_space, 'All agents must have same atn space'
 
-def _compare_observations(obs, batched_obs):
+def _compare_observations(obs, batched_obs, idx=None):
     def _compare_arrays(array1, array2):
-        return np.allclose(array1, array2)
+        try:
+            return np.allclose(array1, array2)
+        except TypeError as e:
+            raise TypeError(f'Error comparing {array1} and {array2}. Did you unpack the batched obs?') from e
 
     def _compare_helper(obs, batched_obs, agent_idx):
         if isinstance(batched_obs, np.ndarray):
@@ -49,12 +52,15 @@ def _compare_observations(obs, batched_obs):
         else:
             raise ValueError(f"Unsupported type: {type(obs)}")
 
+    if idx is not None:
+        return _compare_helper(obs, batched_obs, idx)
+
     if isinstance(batched_obs, dict):
         agent_indices = range(len(next(iter(batched_obs.values()))))
     else:
         agent_indices = range(batched_obs.shape[0])
 
-    for agent_key, agent_idx in zip(sorted(obs.keys()), agent_indices):
+    for agent_key, agent_idx in zip(obs.keys(), agent_indices):
         if not _compare_helper(obs[agent_key], batched_obs, agent_idx):
             return False
 
