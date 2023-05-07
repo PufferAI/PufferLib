@@ -29,6 +29,16 @@ def check_env(env):
         assert env.observation_space(e) == obs_space, 'All agents must have same obs space'
         assert env.action_space(e) == atn_space, 'All agents must have same atn space'
 
+def make_zeros_like(data):
+    if isinstance(data, dict):
+        return {k: make_zeros_like(v) for k, v in data.items()}
+    elif isinstance(data, (list, tuple)):
+        return [make_zeros_like(v) for v in data]
+    elif isinstance(data, np.ndarray):
+        return np.zeros_like(data)
+    else:
+        raise ValueError(f'Unsupported type: {type(data)}')
+
 def _compare_observations(obs, batched_obs, idx=None):
     def _compare_arrays(array1, array2):
         try:

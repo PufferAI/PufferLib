@@ -9,7 +9,7 @@ from pettingzoo.utils.env import ParallelEnv
 from pufferlib import utils
 
 
-class Featurizer:
+class Postprocessor:
     def __init__(self, teams, team_id):
         self.teams = teams
         self.team_id = team_id
@@ -23,9 +23,19 @@ class Featurizer:
     def reset(self, team_obs):
         return
 
+    def __call__(self, team_data, step):
+        raise NotImplementedError
+
+
+class Featurizer(Postprocessor):
     def __call__(self, team_obs, step):
         key = list(team_obs.keys())[0]
         return team_obs[key]
+
+
+class RewardShaper(Postprocessor):
+    def __call__(self, team_rewards, step):
+        return sum(team_rewards.values())
 
 
 class GymToPettingZooParallelWrapper(ParallelEnv):
@@ -73,37 +83,42 @@ def make_puffer_env_cls(scope, raw_obs):
             self._teams = {a:[a] for a in self.env.possible_agents} if scope.teams is None else scope.teams
             assert set(self.env.possible_agents) == {item for team in self._teams.values() for item in team}
             self.possible_agents = list(self._teams.keys())
+            self.default_team = self.possible_agents[0]
 
-            # Initialize feature parser and reward shaper
+            # Initialize feature parsers and reward shapers
             self.featurizers = {
                 team_id: scope.featurizer_cls(
                     self._teams, team_id, *scope.featurizer_args, **scope.featurizer_kwargs)
                 for team_id in self._teams
             }
- 
-            # TODO v0.4: Implement reward shaper API
-            self.reward_shaper = scope.reward_shaper
+
+            self.reward_shapers = {
+                team_id: scope.reward_shaper_cls(
+                    self._teams, team_id, *scope.reward_shaper_args, **scope.reward_shaper_kwargs)
+                for team_id in self._teams
+            }
 
             # Manual LRU since functools.lru_cache is not pickleable
-            self._raw_single_observation_space = None
-            self._single_observation_space = None
-            self._single_action_space = None
+            self._raw_observation_space = {}
+            self._flat_observation_space = {}
+            self._flat_action_space = {}
+            self._agent_action_space = {}
 
             self.obs_space_cache, self.atn_space_cache = {}, {}
-            self.obs_space_cache = {team_id: self.observation_space(team_id) for team_id in self.possible_agents}
-            self.atn_space_cache = {team_id: self.action_space(team_id) for team_id in self.possible_agents}
+            self.obs_space_cache = {team_id: self.observation_space(team_id) for team_id in self._teams}
+            self.atn_space_cache = {team_id: self.action_space(team_id) for team_id in self._teams}
 
             # Set env metadata
             self.metadata = self.env.metadata if hasattr(self.env, 'metadata') else {}
 
-        def _group_team_obs(self, obs, teams):
-            team_obs = {}
-            for team_id, team in teams.items():
-                team_obs[team_id] = {}
+        def _group_by_team(self, agent_data):
+            team_data = {}
+            for team_id, team in self._teams.items():
+                team_data[team_id] = {}
                 for agent_id in team:
-                    if agent_id in obs:
-                        team_obs[team_id][agent_id] = obs[agent_id]
-            return team_obs
+                    if agent_id in agent_data:
+                        team_data[team_id][agent_id] = agent_data[agent_id]
+            return team_data
 
         @utils.profile
         def _create_env(self, env, *args, **kwargs):
@@ -150,7 +165,7 @@ def make_puffer_env_cls(scope, raw_obs):
                     continue
 
                 flat = actions[k]
-                flat_space = self._single_action_space
+                flat_space = self._agent_action_space[k]
 
                 if not isinstance(flat_space, dict):
                     actions[k] = flat.reshape(flat_space.shape)
@@ -187,55 +202,72 @@ def make_puffer_env_cls(scope, raw_obs):
                 return self.env.step(actions)
 
         @utils.profile
-        def _featurize(self, obs):
-            # Featurize observations for teams with at least 1 living agent
-            featurized_obs = {}
-            for team_id, team_obs in self._group_team_obs(obs, self._teams).items():
-                if team_obs:
-                    featurized_obs[team_id] = self.featurizers[team_id](team_obs, self._step)
-                    assert self._raw_single_observation_space.contains(featurized_obs[team_id])
+        def _featurize(self, team_ob, team_id):
+            team_ob = self.featurizers[team_id](team_ob, self._step)
+            assert self._raw_observation_space[team_id].contains(team_ob)
+            return team_ob
 
-            return featurized_obs
+            # Featurize observations for teams with at least 1 living agent
+            for team_id, t_obs in team_obs.items():
+                if t_obs:
+                    team_obs[team_id] = self.featurizers[team_id](t_obs, self._step)
+                    assert self._raw_single_observation_space.contains(team_obs[team_id])
+
+        @utils.profile
+        def _shape_rewards(self, team_reward, team_id):
+            team_reward = self.reward_shapers[team_id](team_reward, self._step)
+            assert isinstance(team_reward, (float, int))
+            return team_reward
+
+            # Shape rewards for teams with at least 1 living agent
+            for team_id, t_rewards in team_rewards.items():
+                if t_rewards:
+                    team_rewards[team_id] = self.reward_shapers[team_id](t_rewards, self._step)
+                    assert isinstance(team_rewards[team_id], (float, int))
 
         @utils.profile
         def _poststep(self, obs, rewards, dones, infos):
-            if self.reward_shaper:
-                rewards = self.reward_shaper(rewards, self._step)
-
             # Terminate episode at horizon or if all agents are done
             if scope.emulate_const_horizon is not None:
                 assert self._step <= scope.emulate_const_horizon
                 if self._step == scope.emulate_const_horizon:
                     self.done = True
 
-            if scope.emulate_flat_obs:
-                obs = {k: _flatten_to_array(v, self._single_observation_space, scope.obs_dtype) for k, v in obs.items()}
+            # Group by teams
+            obs = self._group_by_team(obs)
+            rewards = self._group_by_team(rewards)
+            dones = self._group_by_team(dones)
+            infos = self._group_by_team(infos)
 
-            # Computed before padding dones. False if no agents
-            # Pad rewards/dones/infos
-            if scope.emulate_const_num_agents:
-                for team in self._teams:
-                    if team not in obs:                                                  
-                        obs[team] = self.pad_obs
-                    if team not in rewards:
-                        rewards[team] = 0
-                    if team not in infos:
-                        infos[team] = {}
-                    if team not in dones:
-                        dones[team] = self.done
+            # Featurize and shape rewards; pad data
+            for team in self._teams:
+                if obs[team]:
+                    obs[team] = self._featurize(obs[team], team)
+                    obs[team] = _flatten_to_array(obs[team], self._flat_observation_space[team], scope.obs_dtype)
+                elif scope.emulate_flat_obs:
+                    obs[team] = self.pad_obs
+                else:
+                    del obs[team]
 
-            # Sort by possible_agents ordering
-            sorted_obs, sorted_rewards, sorted_dones, sorted_infos = {}, {}, {}, {}
-            for agent in self.possible_agents:
-                sorted_obs[agent] = obs[agent]
-                sorted_rewards[agent] = rewards[agent]
-                sorted_dones[agent] = dones[agent]
-                sorted_infos[agent] = infos[agent]
+                if rewards[team]:
+                    rewards[team] = self._shape_rewards(rewards[team], team)
+                elif scope.emulate_const_num_agents:
+                    rewards[team] = 0
+                else:
+                    del rewards[team]
+                
+                if dones[team]:
+                    dones[team] = self.done or any(dones[team].values())
+                elif scope.emulate_const_num_agents:
+                    dones[team] = self.done
+                else:
+                    del dones[team]
 
-            obs, rewards, dones, infos = sorted_obs, sorted_rewards, sorted_dones, sorted_infos
+                if team not in infos and scope.emulate_const_num_agents:
+                    infos[team] = {} 
 
             # Record episode statistics
-            for agent in self.possible_agents:
+            for agent in self._teams:
                 self._epoch_lengths[agent] += 1 
                 self._epoch_returns[agent] += rewards[agent]
 
@@ -262,7 +294,7 @@ def make_puffer_env_cls(scope, raw_obs):
 
         @property
         def max_agents(self):
-            return len(self.possible_agents)
+            return len(self._teams)
 
         @property
         def raw_single_observation_space(self):
@@ -270,45 +302,42 @@ def make_puffer_env_cls(scope, raw_obs):
             
             Used by _unpack_batched_obs at the start of the network forward pass
             '''
-            return self._raw_single_observation_space
+            return self._raw_observation_space[self.default_team]
 
         @property
         def single_observation_space(self):
             '''The observation space of a single agent after featurization and flattening'''
-            return self._single_observation_space
+            return self._flat_observation_space[self.default_team]
         
         @property
         def single_action_space(self):
             '''The action space of a single agent after flattening'''
-            return self._single_action_space
+            return self._flat_action_space[self.default_team]
 
         @utils.profile
-        def observation_space(self, agent):
+        def observation_space(self, team):
             #Flattened (Box) and cached observation space
-            if agent in self.obs_space_cache:
-                return self.obs_space_cache[agent]
+            if team in self.obs_space_cache:
+                return self.obs_space_cache[team]
+
+            team_obs = self._group_by_team(raw_obs)[team]
 
             # Initialize obs with dummy featurizer
             featurizer = scope.featurizer_cls(
-                self._teams, agent, *scope.featurizer_args, **scope.featurizer_kwargs
+                self._teams, team, *scope.featurizer_args, **scope.featurizer_kwargs
             )
-
-            # Group observations into teams and featurize
-            team_obs = self._group_team_obs(raw_obs, self._teams)[agent]
             featurizer.reset(team_obs)
             obs = featurizer(team_obs, self._step)
 
             # Flatten and cache observation space
-            if self._single_observation_space is None:
-                self._raw_single_observation_space = _make_space_like(obs)
-                self._single_observation_space = _flatten_space(self._raw_single_observation_space)
+            self._raw_observation_space[team] = _make_space_like(obs)
+            self._flat_observation_space[team] = _flatten_space(self._raw_observation_space[team])
 
-            if __debug__:
-                assert self._raw_single_observation_space.contains(obs)
+            assert self._raw_observation_space[team].contains(obs)
 
             # Flatten obs to arrays
             if scope.emulate_flat_obs:
-                obs = _flatten_to_array(obs, self._single_observation_space, scope.obs_dtype)
+                obs = _flatten_to_array(obs, self._flat_observation_space[team], scope.obs_dtype)
 
             self.pad_obs = 0 * obs
             obs_space = gym.spaces.Box(
@@ -319,15 +348,16 @@ def make_puffer_env_cls(scope, raw_obs):
             return obs_space
 
         @utils.profile
-        def action_space(self, agent):
+        def action_space(self, team):
             #Flattened (MultiDiscrete) and cached action space
-            if agent in self.atn_space_cache:
-                return self.atn_space_cache[agent]
+            if team in self.atn_space_cache:
+                return self.atn_space_cache[team]
                 
-            atn_space = gym.spaces.Dict({a: self.env.action_space(a) for a in self._teams[agent]})
+            atn_space = gym.spaces.Dict({a: self.env.action_space(a) for a in self._teams[team]})
 
-            if self._single_action_space is None:
-                self._single_action_space = _flatten_space(self.env.action_space(agent))
+            self._flat_action_space[team] = _flatten_space(atn_space)
+            for agent in self._teams[team]:
+                self._agent_action_space[agent] = _flatten_space(atn_space[agent])
 
             if scope.emulate_flat_atn:
                 assert(isinstance(atn_space, gym.Space)), 'Arg must be a gym space'
@@ -357,9 +387,8 @@ def make_puffer_env_cls(scope, raw_obs):
             self._epoch_lengths = defaultdict(int)
 
             obs = self._reset_env(seed)
-
-            # TODO: Check if all agents present
-            obs = self._featurize(obs)
+            obs = self._group_by_team(obs)
+            obs = {k: self._featurize(v, k) for k, v in obs.items()}
 
             self.agents = self.env.agents
             self.done = False
@@ -370,14 +399,16 @@ def make_puffer_env_cls(scope, raw_obs):
 
             orig_obs = obs
             if scope.emulate_flat_obs:
-                obs = {k: _flatten_to_array(v, self._single_observation_space, scope.obs_dtype) for k, v in obs.items()}
+                obs = {team_id: _flatten_to_array(
+                    team_ob, self._flat_observation_space[team_id], scope.obs_dtype)
+                    for team_id, team_ob in obs.items()}
 
             if __debug__:
                 for agent, ob in obs.items():
                     assert self.observation_space(agent).contains(ob)
 
                 packed_obs = np.stack(obs.values())
-                unpacked = unpack_batched_obs(self._single_observation_space, packed_obs)
+                unpacked = unpack_batched_obs(self._flat_observation_space[self.default_team], packed_obs)
                 ret = utils._compare_observations(orig_obs, unpacked)
                 assert ret, 'Observation packing/unpacking mismatch'
 
@@ -402,7 +433,6 @@ def make_puffer_env_cls(scope, raw_obs):
                 self._timers['step'].total_agent_steps = 0
             self._timers['step'].total_agent_steps += num_agents
 
-            obs = self._featurize(obs)
             obs, rewards, dones, infos = self._poststep(obs, rewards, dones, infos)
             return obs, rewards, dones, infos
 
@@ -419,7 +449,9 @@ class Binding:
             featurizer_cls=Featurizer,
             featurizer_args=[],
             featurizer_kwargs={},
-            reward_shaper=None,
+            reward_shaper_cls=RewardShaper,
+            reward_shaper_args=[],
+            reward_shaper_kwargs={},
             teams=None,
             emulate_flat_obs=True,
             emulate_flat_atn=True,
@@ -665,13 +697,19 @@ def _flatten_to_array(space_sample, flat_space, dtype=None):
        space_sample = np.array(space_sample)
 
     if () in flat_space:
-        return space_sample.reshape(*flat_space[()].shape)
+        if isinstance(space_sample, np.ndarray):
+            return space_sample.reshape(*flat_space[()].shape)
+        return np.array([space_sample])
 
     tensors = []
     for key_list in flat_space:
         value = space_sample
         for key in key_list:
             value = value[key]
+
+        if not isinstance(value, np.ndarray):
+            value = np.array([value])
+
         tensors.append(value.ravel())
 
     # Preallocate the memory for the concatenated tensor
