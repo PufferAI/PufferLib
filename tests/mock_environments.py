@@ -233,9 +233,9 @@ MOCK_ACTION_SPACES = [
     }),
 ]
 
-MOCK_TEAMS = [
-    None,
-    {
+MOCK_TEAMS = {
+    'None': None,
+    'single': {
         'team_1': ['agent_1'],
         'team_2': ['agent_2'],
         'team_3': ['agent_3'],
@@ -253,7 +253,7 @@ MOCK_TEAMS = [
         'team_15': ['agent_15'],
         'team_16': ['agent_16'],
     },
-    {
+    'pairs': {
         'team_1': ['agent_1', 'agent_2'],
         'team_2': ['agent_3', 'agent_4'],
         'team_3': ['agent_5', 'agent_6'],
@@ -263,14 +263,14 @@ MOCK_TEAMS = [
         'team_7': ['agent_13', 'agent_14'],
         'team_8': ['agent_15', 'agent_16'],
     },
-    {
+    'mixed': {
         'team_1': ['agent_1', 'agent_2'],
         'team_2': ['agent_3', 'agent_4', 'agent_5', 'agent_6'],
         'team_3': ['agent_7', 'agent_8', 'agent_9'],
         'team_4': ['agent_10', 'agent_11', 'agent_12', 'agent_13', 'agent_14'],
         'team_5': ['agent_15', 'agent_16'],
     },
-]
+}
 
 MOCK_ENVIRONMENTS = []
 for obs_space in MOCK_OBSERVATION_SPACES:

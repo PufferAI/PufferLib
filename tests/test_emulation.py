@@ -44,7 +44,7 @@ class MockVecEnv:
         return obs, rewards, dones, infos
 
 
-def test_emulation(binding, teams, steps=1000, num_workers=1, envs_per_worker=1):
+def test_emulation(binding, teams, steps=100, num_workers=1, envs_per_worker=2):
     raw_env = MockVecEnv(binding, num_workers, envs_per_worker)
     puf_env = pufferlib.vectorization.serial.VecEnv(binding, num_workers, envs_per_worker)
 
@@ -115,37 +115,10 @@ def test_emulation(binding, teams, steps=1000, num_workers=1, envs_per_worker=1)
 
                 idx += 1
 
-class FeatureExtractor(pufferlib.emulation.Featurizer):
-    def __init__(self, teams, team_id):
-        super().__init__(teams, team_id)
-        self.max_team_size = max([len(v) for v in self.teams.values()])
-        self.dummy = None
-
-    def __call__(self, obs, step):
-        assert len(obs) > 0
-
-        if self.dummy is None:
-            self.dummy = pufferlib.utils.make_zeros_like(list(obs.values())[0])
-
-        team_id = [k for k, v in self.teams.items() if list(obs.keys())[0] in v][0]
-
-        ret = []
-        for agent in self.teams[team_id]:
-            if agent in obs:
-                ret.append(obs[agent])
-            else:
-                ret.append(self.dummy)
-
-        return ret
-        return list(obs.values())
-        return list(obs.values())[0]
 
 if __name__ == '__main__':
     import mock_environments
-    for teams in mock_environments.MOCK_TEAMS[2:3]:
-        for env in mock_environments.MOCK_ENVIRONMENTS:
-
-            binding = pufferlib.emulation.Binding(
-                    env_cls=env, teams=teams, featurizer_cls=FeatureExtractor)
-
-            test_emulation(binding, teams)
+    teams = mock_environments.MOCK_TEAMS['pairs']
+    for env in mock_environments.MOCK_ENVIRONMENTS:
+        binding = pufferlib.emulation.Binding(env_cls=env, teams=teams)
+        test_emulation(binding, teams)

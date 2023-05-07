@@ -2,20 +2,25 @@ from pdb import set_trace as T
 import itertools
 import numpy as np
 from contextlib import nullcontext
-from collections import defaultdict, OrderedDict
+from collections import defaultdict, OrderedDict, Mapping
 
 import gym
 from pettingzoo.utils.env import ParallelEnv
+
 from pufferlib import utils
+from pufferlib import exceptions
 
 
 class Postprocessor:
     def __init__(self, teams, team_id):
+        if not isinstance(teams, Mapping):
+            raise ValueError(f'Teams is not a valid dict or mapping: {teams}')
+
+        if team_id not in teams:
+            raise ValueError(f'Team {team_id} not in teams {teams}')
+
         self.teams = teams
         self.team_id = team_id
-
-        assert isinstance(teams, dict)
-        assert team_id in teams
 
         self.num_teams = len(teams)
         self.team_size = len(teams[team_id])
@@ -28,10 +33,29 @@ class Postprocessor:
 
 
 class Featurizer(Postprocessor):
-    def __call__(self, team_obs, step):
-        key = list(team_obs.keys())[0]
-        return team_obs[key]
+    def __init__(self, teams, team_id):
+        super().__init__(teams, team_id)
+        self.max_team_size = max([len(v) for v in self.teams.values()])
+        self.dummy = None
 
+    def __call__(self, obs, step):
+        '''Default featurizer pads observations to max team size'''
+        if len(obs) == 0:
+            raise ValueError('Observation is empty')
+
+        if self.dummy is None:
+            self.dummy = utils.make_zeros_like(list(obs.values())[0])
+
+        team_id = [k for k, v in self.teams.items() if list(obs.keys())[0] in v][0]
+
+        ret = []
+        for agent in self.teams[team_id]:
+            if agent in obs:
+                ret.append(obs[agent])
+            else:
+                ret.append(self.dummy)
+
+        return ret
 
 class RewardShaper(Postprocessor):
     def __call__(self, team_rewards, step):
@@ -64,9 +88,6 @@ class GymToPettingZooParallelWrapper(ParallelEnv):
     def seed(self, seed=None):
         return self.env.seed(seed)
 
-# TODO: Consider integrating these?
-# env = wrappers.AssertOutOfBoundsWrapper(env)
-# env = wrappers.OrderEnforcingWrapper(env)
 def make_puffer_env_cls(scope, raw_obs):
     class PufferEnv(ParallelEnv):
         @utils.profile
@@ -74,14 +95,17 @@ def make_puffer_env_cls(scope, raw_obs):
             self.raw_env = self._create_env(env, *args, **kwargs)
             self.env = self.raw_env if utils.is_multiagent(self.raw_env) else GymToPettingZooParallelWrapper(self.raw_env)
 
+            self.initialized = False
             self._step = 0
-            self.done = True
 
             self._obs_min, self._obs_max = utils._get_dtype_bounds(scope.obs_dtype)
 
             # Assign valid teams. Autogen 1 team per agent if not provided
             self._teams = {a:[a] for a in self.env.possible_agents} if scope.teams is None else scope.teams
-            assert set(self.env.possible_agents) == {item for team in self._teams.values() for item in team}
+
+            if set(self.env.possible_agents) != {item for team in self._teams.values() for item in team}:
+                raise ValueError(f'Invalid teams: {self._teams} for possible_agents: {self.env.possible_agents}')
+
             self.possible_agents = list(self._teams.keys())
             self.default_team = self.possible_agents[0]
 
@@ -144,12 +168,19 @@ def make_puffer_env_cls(scope, raw_obs):
         def _prestep(self, team_actions):
             # Action shape test
             if __debug__:
-                for agent, atns in team_actions.items():
-                    assert self.action_space(agent).contains(atns)
+                for team, atns in team_actions.items():
+                    if team not in self._teams:
+                        raise exceptions.InvalidAgentError(team, self._teams)
+
+                    if not self.action_space(team).contains(atns):
+                        raise ValueError(
+                            f'action:\n{atns}\n for agent/team {team} not in '
+                            f'action space:\n{self.action_space(team)}'
+                        )
 
             # Unpack actions from teams
             actions = {}
-            for team_id, team in self._teams.items():
+            for team_id, team in team_actions.items():
                 team_atns = np.split(team_actions[team_id], len(team))
                 for agent_id, atns in zip(team, team_atns):
                     actions[agent_id] = atns
@@ -203,27 +234,31 @@ def make_puffer_env_cls(scope, raw_obs):
 
         @utils.profile
         def _featurize(self, team_ob, team_id):
-            team_ob = self.featurizers[team_id](team_ob, self._step)
-            assert self._raw_observation_space[team_id].contains(team_ob)
-            return team_ob
-
             # Featurize observations for teams with at least 1 living agent
-            for team_id, t_obs in team_obs.items():
-                if t_obs:
-                    team_obs[team_id] = self.featurizers[team_id](t_obs, self._step)
-                    assert self._raw_single_observation_space.contains(team_obs[team_id])
+            team_ob = self.featurizers[team_id](team_ob, self._step)
+
+            if __debug__:
+                space = self._raw_observation_space[team_id]
+                if not space.contains(team_ob):
+                    raise ValueError(
+                        f'Featurized observation:\n{team_ob}\n not in observation space:\n'
+                        f'{space}\n for agent/team {team_id}'
+                    )
+
+            return team_ob
 
         @utils.profile
         def _shape_rewards(self, team_reward, team_id):
-            team_reward = self.reward_shapers[team_id](team_reward, self._step)
-            assert isinstance(team_reward, (float, int))
-            return team_reward
-
             # Shape rewards for teams with at least 1 living agent
-            for team_id, t_rewards in team_rewards.items():
-                if t_rewards:
-                    team_rewards[team_id] = self.reward_shapers[team_id](t_rewards, self._step)
-                    assert isinstance(team_rewards[team_id], (float, int))
+            team_reward = self.reward_shapers[team_id](team_reward, self._step)
+
+            if not isinstance(team_reward, (float, int)):
+                raise ValueError(
+                    f'Shaped reward {team_reward} of type '
+                    f'{type(team_reward)} is not a float or int'
+                )
+
+            return team_reward
 
         @utils.profile
         def _poststep(self, obs, rewards, dones, infos):
@@ -283,8 +318,12 @@ def make_puffer_env_cls(scope, raw_obs):
 
             # Observation shape test
             if __debug__:
-                for agent, ob in obs.items():
-                    assert self.observation_space(agent).contains(ob)
+                for team, ob in obs.items():
+                    if not self.observation_space(agent).contains(ob):
+                        raise ValueError(
+                            f'observation:\n{ob}\n for agent/team {team} not in '
+                            f'observation space:\n{self.observation_space(team)}'
+                        )
 
             return obs, rewards, dones, infos
 
@@ -314,8 +353,17 @@ def make_puffer_env_cls(scope, raw_obs):
             '''The action space of a single agent after flattening'''
             return self._flat_action_space[self.default_team]
 
+        def close(self):
+            if not self.initialized:
+                raise exceptions.APIUsageError('close() called before reset()')
+
+            self.env.close()
+
         @utils.profile
         def observation_space(self, team):
+            if team not in self._teams:
+                raise exceptions.InvalidAgentError(team, self._teams)
+
             #Flattened (Box) and cached observation space
             if team in self.obs_space_cache:
                 return self.obs_space_cache[team]
@@ -332,7 +380,7 @@ def make_puffer_env_cls(scope, raw_obs):
             # Flatten and cache observation space
             self._raw_observation_space[team] = _make_space_like(obs)
             self._flat_observation_space[team] = _flatten_space(self._raw_observation_space[team])
-
+            
             assert self._raw_observation_space[team].contains(obs)
 
             # Flatten obs to arrays
@@ -349,6 +397,9 @@ def make_puffer_env_cls(scope, raw_obs):
 
         @utils.profile
         def action_space(self, team):
+            if team not in self._teams:
+                raise exceptions.InvalidAgentError(team, self._teams)
+
             #Flattened (MultiDiscrete) and cached action space
             if team in self.atn_space_cache:
                 return self.atn_space_cache[team]
@@ -391,6 +442,7 @@ def make_puffer_env_cls(scope, raw_obs):
             obs = {k: self._featurize(v, k) for k, v in obs.items()}
 
             self.agents = self.env.agents
+            self.initialized = True
             self.done = False
 
             # Sort observations according to possible_agents
@@ -407,7 +459,7 @@ def make_puffer_env_cls(scope, raw_obs):
                 for agent, ob in obs.items():
                     assert self.observation_space(agent).contains(ob)
 
-                packed_obs = np.stack(obs.values())
+                packed_obs = np.stack(list(obs.values()))
                 unpacked = unpack_batched_obs(self._flat_observation_space[self.default_team], packed_obs)
                 ret = utils._compare_observations(orig_obs, unpacked)
                 assert ret, 'Observation packing/unpacking mismatch'
@@ -418,7 +470,11 @@ def make_puffer_env_cls(scope, raw_obs):
         @utils.profile
         def step(self, team_actions, **kwargs):
             #Step the environment and return (observations, rewards, dones, infos)
-            assert not self.done, 'step after done'
+            if not self.initialized:
+                raise exceptions.APIUsageError('step() called before reset()')
+
+            if self.done:
+                raise exceptions.APIUsageError('step() called after environment is done')
 
             actions = self._prestep(team_actions)
             obs, rewards, dones, infos = self._step_env(actions)
@@ -493,8 +549,11 @@ class Binding:
             record_episode_statistics: Whether to record additional episode statistics
             obs_dtype: Observation data type
         '''
-        assert (env_cls is None) != (env_creator is None), \
-            'Specify only one of env_cls (preferred) or env_creator'
+        if (env_cls is None) == (env_creator is None):
+            raise ValueError(
+                f'Invalid combination of env_cls={env_cls} and env_creator={env_creator}.'
+                ' Specify exactly one one of env_cls (preferred) or env_creator'
+            )
 
         self._env_name = env_name
         self._default_args = default_args
