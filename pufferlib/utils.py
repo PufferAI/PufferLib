@@ -77,11 +77,14 @@ def _compare_observations(obs, batched_obs, idx=None):
     return True
 
 def _get_dtype_bounds(dtype):
-    assert dtype in {np.float32, np.uint8}
-    if dtype == np.uint8:
+    if np.issubdtype(dtype, np.integer):
         return np.iinfo(dtype).min, np.iinfo(dtype).max
-    elif dtype == np.float32:
+    elif np.issubdtype(dtype, np.unsignedinteger):
+        return np.iinfo(dtype).min, np.iinfo(dtype).max
+    elif np.issubdtype(dtype, np.floating):
         return np.finfo(dtype).min, np.finfo(dtype).max
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
 
 def is_dict_space(space):
     # Compatible with gym/gymnasium

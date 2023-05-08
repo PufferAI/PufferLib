@@ -383,7 +383,6 @@ if __name__ == '__main__':
         binding = pufferlib.registry.nethack.make_binding()
         agent = pufferlib.frameworks.cleanrl.make_policy(
             pufferlib.registry.nethack.Policy,
-            lstm_layers=1
         )(binding)
 
         train(
@@ -415,7 +414,6 @@ if __name__ == '__main__':
         for binding in bindings:
             agent = pufferlib.frameworks.cleanrl.make_policy(
                 pufferlib.registry.atari.Policy,
-                lstm_layers=1
             )(binding, framestack=1)
 
             train(
@@ -425,7 +423,7 @@ if __name__ == '__main__':
                 num_envs=4,
                 num_buffers=2,
                 cuda=cuda,
-                total_timesteps=30_000,
+                total_timesteps=10_000_000,
                 track=track,
                 wandb_project_name='pufferlib',
                 wandb_entity='jsuarez',

@@ -9,7 +9,7 @@ import pufferlib.frameworks.base
 
 
 def make_policy(policy_cls, recurrent_cls=torch.nn.LSTM,
-        recurrent_args=[128, 128], recurrent_kwargs={'num_layers': 1}):
+        recurrent_args=[512, 128], recurrent_kwargs={'num_layers': 1}):
     '''Wrap a PyTorch model for use with CleanRL
 
     Args:
@@ -35,6 +35,7 @@ def make_policy(policy_cls, recurrent_cls=torch.nn.LSTM,
         def _compute_hidden(self, x, lstm_state=None):
             if lstm_layers > 0:
                 batch_size = lstm_state[0].shape[1]
+                # Note: This does not handle native tensor obs. Flatten in featurizer
                 x = x.reshape((-1, batch_size, x.shape[-1]))
                 hidden, state, lookup = self.encode_observations(x, lstm_state)
                 return hidden, state

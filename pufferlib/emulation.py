@@ -79,6 +79,12 @@ class GymToPettingZooParallelWrapper(ParallelEnv):
 
         return {1: ob}, {1: reward}, {1: done}, {1: info}
 
+    def observation_space(self, agent):
+        return self.env.observation_space
+
+    def action_space(self, agent):
+        return self.env.action_space
+
     def render(self, mode="human"):
         return self.env.render(mode)
 
@@ -161,7 +167,8 @@ def make_puffer_env_cls(scope, raw_obs):
                 try:
                     return self.env.reset(seed=seed)
                 except:
-                    self.env.seed(seed)
+                    if seed is not None:
+                        self.env.seed(seed)
                     return self.env.reset()
 
         @utils.profile
@@ -180,10 +187,10 @@ def make_puffer_env_cls(scope, raw_obs):
 
             # Unpack actions from teams
             actions = {}
-            for team_id, team in team_actions.items():
+            for team_id, team in self._teams.items():
                 team_atns = np.split(team_actions[team_id], len(team))
                 for agent_id, atns in zip(team, team_atns):
-                    actions[agent_id] = atns
+                    actions[agent_id] = atns.tolist()
 
             # TODO: Do we want to support structured actions?
             if not scope.emulate_flat_atn:
@@ -381,6 +388,9 @@ def make_puffer_env_cls(scope, raw_obs):
             self._raw_observation_space[team] = _make_space_like(obs)
             self._flat_observation_space[team] = _flatten_space(self._raw_observation_space[team])
             
+            # TODO: Add checks on return dtype etc... this should not trigger
+            if not self._raw_observation_space[team].contains(obs):
+                print({e: self._raw_observation_space[team][0][e].contains(obs[0][e]) for e in obs[0].keys()})
             assert self._raw_observation_space[team].contains(obs)
 
             # Flatten obs to arrays
@@ -513,7 +523,7 @@ class Binding:
             emulate_flat_atn=True,
             emulate_const_horizon=None,
             emulate_const_num_agents=True,
-            suppress_env_prints=False,
+            suppress_env_prints=__debug__,
             record_episode_statistics=True,
             obs_dtype=np.float32):
         '''PufferLib's core Binding class.
@@ -567,7 +577,7 @@ class Binding:
         scope = utils.dotdict(locals())
         del scope['self']
 
-        raw_local_env = self.raw_env_creator()
+        raw_local_env = self.pz_env_creator()
 
         try:
             raw_local_env.seed(42)
@@ -713,11 +723,7 @@ def unpack_batched_obs(flat_space, packed_obs):
 
 def _make_space_like(ob):
     if type(ob) == np.ndarray:
-        # TODO: handle all dtypes
-        mmin, mmax = -2**20, 2**20
-        if ob.dtype == bool:
-            mmin, mmax = 0, 1
-
+        mmin, mmax = utils._get_dtype_bounds(ob.dtype)
         return gym.spaces.Box(
             low=mmin, high=mmax,
             shape=ob.shape, dtype=ob.dtype
