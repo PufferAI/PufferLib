@@ -77,7 +77,7 @@ class GymToPettingZooParallelWrapper(ParallelEnv):
         if done:
             self.agents = []
 
-        return {1: ob}, {1: reward}, {1: done}, {1: info}
+        return {1: ob}, {1: reward}, {1: done}, info
 
     def observation_space(self, agent):
         return self.env.observation_space
@@ -279,7 +279,6 @@ def make_puffer_env_cls(scope, raw_obs):
             obs = self._group_by_team(obs)
             rewards = self._group_by_team(rewards)
             dones = self._group_by_team(dones)
-            infos = self._group_by_team(infos)
 
             # Featurize and shape rewards; pad data
             for team in self._teams:
@@ -305,15 +304,13 @@ def make_puffer_env_cls(scope, raw_obs):
                 else:
                     del dones[team]
 
-                if team not in infos and scope.emulate_const_num_agents:
-                    infos[team] = {} 
-
             # Record episode statistics
             for agent in self._teams:
                 self._epoch_lengths[agent] += 1 
                 self._epoch_returns[agent] += rewards[agent]
 
                 if scope.record_episode_statistics and dones[agent]:
+                    #TODO: Resolve this with global infos
                     if 'episode' not in infos[agent]:
                         infos[agent]['episode'] = {}
 

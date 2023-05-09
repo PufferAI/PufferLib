@@ -63,7 +63,7 @@ class RemoteEnvs:
                 obs = env.reset()
                 rewards = {k: 0 for k in obs}
                 dones = {k: False for k in obs}
-                infos = {k: {} for k in obs}
+                infos = {}
             else:
                 obs, rewards, dones, infos = env.step(actions)
 
@@ -165,7 +165,7 @@ class VecEnv:
                 obs += list(o.values())
                 rewards += list(r.values())
                 dones += list(d.values())
-                infos += list(i.values())
+                infos.append(i)
 
             self.agent_keys.append(a_keys)
 
