@@ -1,2 +1,2 @@
 from .version import __version__
-from . import frameworks, registry
+from . import frameworks, registry, vectorization

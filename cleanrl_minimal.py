@@ -28,7 +28,7 @@ import pufferlib
 import pufferlib.models
 import pufferlib.registry.nmmo
 import pufferlib.frameworks.cleanrl
-import pufferlib.vectorization
+import vectorization.multiprocessing
 
 
 def parse_args():

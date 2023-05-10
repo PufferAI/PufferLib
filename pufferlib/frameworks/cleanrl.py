@@ -8,7 +8,8 @@ import pufferlib.models
 import pufferlib.frameworks.base
 
 
-def make_policy(policy_cls, lstm_layers=0):
+def make_policy(policy_cls, recurrent_cls=torch.nn.LSTM,
+        recurrent_args=[512, 128], recurrent_kwargs={'num_layers': 1}):
     '''Wrap a PyTorch model for use with CleanRL
 
     Args:
@@ -19,9 +20,10 @@ def make_policy(policy_cls, lstm_layers=0):
         A new PyTorch class wrapping your model that implements the CleanRL API
     '''
     assert issubclass(policy_cls, pufferlib.models.Policy)
+    lstm_layers = recurrent_kwargs['num_layers']
     if lstm_layers > 0:
         policy_cls = pufferlib.frameworks.base.make_recurrent_policy(
-            policy_cls, batch_first=False)
+            policy_cls, recurrent_cls, recurrent_args, recurrent_kwargs)
 
     class CleanRLPolicy(policy_cls):
         '''Temporary hack to get framework running with CleanRL
@@ -33,6 +35,7 @@ def make_policy(policy_cls, lstm_layers=0):
         def _compute_hidden(self, x, lstm_state=None):
             if lstm_layers > 0:
                 batch_size = lstm_state[0].shape[1]
+                # Note: This does not handle native tensor obs. Flatten in featurizer
                 x = x.reshape((-1, batch_size, x.shape[-1]))
                 hidden, state, lookup = self.encode_observations(x, lstm_state)
                 return hidden, state
@@ -40,6 +43,10 @@ def make_policy(policy_cls, lstm_layers=0):
                 hidden, _ = self.encode_observations(x)
 
             return hidden
+        
+        @property
+        def lstm(self):
+            return self.recurrent_policy
 
         # TODO: Cache value
         def get_value(self, x, lstm_state=None, done=None):

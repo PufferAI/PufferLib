@@ -18,7 +18,7 @@ import pufferlib.registry.smac
 
 def make_all_bindings():
     binding_creation_fns = [
-        lambda: pufferlib.registry.atari.make_binding('BeamRider-v4', framestack=1),
+        #lambda: pufferlib.registry.atari.make_binding('BeamRider-v4', framestack=1),
         lambda: pufferlib.registry.atari.make_binding('Breakout-v4', framestack=1),
         lambda: pufferlib.registry.atari.make_binding('Enduro-v4', framestack=1),
         lambda: pufferlib.registry.atari.make_binding('Pong-v4', framestack=1),
@@ -32,7 +32,7 @@ def make_all_bindings():
         pufferlib.registry.dm_lab.make_binding,
         #pufferlib.registry.griddly.make_spider_v0_binding(),
         pufferlib.registry.magent.make_battle_v4_binding,
-        pufferlib.registry.microrts.make_binding,
+        #pufferlib.registry.microrts.make_binding,
         pufferlib.registry.nethack.make_binding,
         pufferlib.registry.nmmo.make_binding,
         pufferlib.registry.smac.make_binding,
@@ -86,7 +86,7 @@ def test_bindings_performance(steps=1000):
         puf_done = False
 
         for step in range(steps):
-            if binding._emulate_multiagent:
+            if not pufferlib.utils.is_multiagent(raw_env):
                 raw_atns = binding.raw_single_action_space.sample()
             else:
                 for agent in raw_obs.keys():
@@ -102,7 +102,7 @@ def test_bindings_performance(steps=1000):
                 else:
                     raw_obs, raw_rewards, raw_done, raw_infos = raw_env.step(raw_atns)
                 
-                    if not binding._emulate_multiagent:
+                    if pufferlib.utils.is_multiagent(raw_env):
                         raw_done = all(raw_done.values())
 
             with puf_profiler:
@@ -115,7 +115,11 @@ def test_bindings_performance(steps=1000):
 
         print(
             f'{binding.env_name} - Performance Factor: {raw_profiler.elapsed / puf_profiler.elapsed:<4.3}\n' 
-            f'\tRaw SPS: {steps // raw_profiler.elapsed}, Puffer SPS: {steps // puf_profiler.elapsed}')
+            f'Raw SPS: {steps // raw_profiler.elapsed}, Puffer SPS: {steps // puf_profiler.elapsed}')
+
+        for name, timer in puf_env._timers.items():
+            print(f'\t{name}: {timer.elapsed:.2f} in {timer.calls} calls')
+
 
 if __name__ == '__main__':
     test_bindings()
