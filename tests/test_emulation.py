@@ -88,13 +88,15 @@ def test_emulation(binding, teams, steps=100, num_workers=1, envs_per_worker=2):
         # Flatten actions of each team
         idx = 0
         team_actions = []
-        for team in teams.values():
-            t_actions = []
-            for agent in team:
-                t_actions.append(actions[idx])
-                idx += 1
-            team_actions.append(np.concatenate(t_actions))
+        for env in range(num_workers * envs_per_worker):
+            for team in teams.values():
+                t_actions = []
+                for agent in team:
+                    t_actions.append(actions[idx])
+                    idx += 1
+                team_actions.append(np.concatenate(t_actions))
 
+        # TODO: Add shape asserts to vec envs
         puf_ob, puf_reward, puf_done, _ = puf_env.step(team_actions)
 
         idx = 0 

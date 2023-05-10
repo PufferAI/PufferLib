@@ -77,7 +77,9 @@ def _compare_observations(obs, batched_obs, idx=None):
     return True
 
 def _get_dtype_bounds(dtype):
-    if np.issubdtype(dtype, np.integer):
+    if dtype == bool:
+        return 0, 1
+    elif np.issubdtype(dtype, np.integer):
         return np.iinfo(dtype).min, np.iinfo(dtype).max
     elif np.issubdtype(dtype, np.unsignedinteger):
         return np.iinfo(dtype).min, np.iinfo(dtype).max
