@@ -1,4 +1,5 @@
 # Minimally modified version of CleanRL ppo_lstm_atari.py to work with PufferLib.
+# Note that this demo requires the latest CarperAI version of nmmo-environment
 # We suggest our main cleanrl_ppo_lstm.py demo for most projects
 
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_atari_lstmpy
@@ -196,9 +197,7 @@ if __name__ == "__main__":
     envs.seed(args.seed)
 
     agent = pufferlib.frameworks.cleanrl.make_policy(
-        pufferlib.registry.nmmo.Policy,
-        lstm_layers=1
-    )(binding).to(device)
+            Agent, lstm_layers=1)(binding).to(device)
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
