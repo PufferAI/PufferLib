@@ -25,9 +25,6 @@ class Postprocessor:
         self.num_teams = len(teams)
         self.team_size = len(teams[team_id])
 
-    def reset(self, team_obs):
-        return
-
     def __call__(self, team_data, step):
         raise NotImplementedError
 
@@ -37,6 +34,9 @@ class Featurizer(Postprocessor):
         super().__init__(teams, team_id)
         self.max_team_size = max([len(v) for v in self.teams.values()])
         self.dummy = None
+
+    def reset(self, team_obs):
+        return
 
     def __call__(self, obs, step):
         '''Default featurizer pads observations to max team size'''
@@ -188,6 +188,7 @@ def make_puffer_env_cls(scope, raw_obs):
             # Unpack actions from teams
             actions = {}
             for team_id, team in self._teams.items():
+                # TODO: Assert all keys present since actions are padded
                 team_atns = np.split(team_actions[team_id], len(team))
                 for agent_id, atns in zip(team, team_atns):
                     actions[agent_id] = atns.tolist()
@@ -240,7 +241,10 @@ def make_puffer_env_cls(scope, raw_obs):
                 return self.env.step(actions)
 
         @utils.profile
-        def _featurize(self, team_ob, team_id):
+        def _featurize(self, team_ob, team_id, reset=False):
+            if reset:
+                self.featurizers[team_id].reset(team_ob)
+
             # Featurize observations for teams with at least 1 living agent
             team_ob = self.featurizers[team_id](team_ob, self._step)
 
@@ -311,11 +315,13 @@ def make_puffer_env_cls(scope, raw_obs):
 
                 if scope.record_episode_statistics and dones[agent]:
                     #TODO: Resolve this with global infos
-                    if 'episode' not in infos[agent]:
-                        infos[agent]['episode'] = {}
+                    if 'episode' not in infos:
+                        infos['episode'] = {}
+                        infos['episode']['r'] = []
+                        infos['episode']['l'] = []
 
-                    infos[agent]['episode']['r'] = self._epoch_returns[agent]
-                    infos[agent]['episode']['l'] = self._epoch_lengths[agent]
+                    infos['episode']['r'].append(self._epoch_returns[agent])
+                    infos['episode']['l'].append(self._epoch_lengths[agent])
 
                     self._epoch_lengths[agent] = 0
                     self._epoch_returns[agent] = 0
@@ -446,7 +452,7 @@ def make_puffer_env_cls(scope, raw_obs):
 
             obs = self._reset_env(seed)
             obs = self._group_by_team(obs)
-            obs = {k: self._featurize(v, k) for k, v in obs.items()}
+            obs = {k: self._featurize(v, k, reset=True) for k, v in obs.items()}
 
             self.agents = self.env.agents
             self.initialized = True

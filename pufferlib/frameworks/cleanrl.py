@@ -35,15 +35,14 @@ def make_policy(policy_cls, recurrent_cls=torch.nn.LSTM,
         def _compute_hidden(self, x, lstm_state=None):
             if lstm_layers > 0:
                 batch_size = lstm_state[0].shape[1]
-                # Note: This does not handle native tensor obs. Flatten in featurizer
                 x = x.reshape((-1, batch_size, x.shape[-1]))
                 hidden, state, lookup = self.encode_observations(x, lstm_state)
-                return hidden, state
+                return hidden, state, lookup
             else:
-                hidden, _ = self.encode_observations(x)
+                hidden, lookup = self.encode_observations(x)
 
-            return hidden
-        
+            return hidden, lookup
+
         @property
         def lstm(self):
             return self.recurrent_policy
@@ -51,21 +50,21 @@ def make_policy(policy_cls, recurrent_cls=torch.nn.LSTM,
         # TODO: Cache value
         def get_value(self, x, lstm_state=None, done=None):
             if lstm_layers > 0:
-                hidden, lstm_state = self._compute_hidden(x, lstm_state)
+                hidden, lstm_state, lookup = self._compute_hidden(x, lstm_state)
             else:
-                hidden = self._compute_hidden(x, lstm_state)
+                hidden, lookup = self._compute_hidden(x, lstm_state)
             return self.critic(hidden)
 
         # TODO: Compute seq_lens from done
         def get_action_and_value(self, x, lstm_state=None, done=None, action=None):
             if lstm_layers > 0:
-                hidden, lstm_state = self._compute_hidden(x, lstm_state)
+                hidden, lstm_state, lookup = self._compute_hidden(x, lstm_state)
             else:
-                hidden = self._compute_hidden(x, lstm_state)
+                hidden, lookup = self._compute_hidden(x, lstm_state)
 
             value = self.critic(hidden)
-            flat_logits = self.decode_actions(hidden, None, concat=False)
-
+            flat_logits = self.decode_actions(hidden, lookup, concat=False)
+            # flat_logits[action,body] = [batch, action_dim]
             multi_categorical = [Categorical(logits=l) for l in flat_logits]
 
             if action is None:
@@ -77,5 +76,5 @@ def make_policy(policy_cls, recurrent_cls=torch.nn.LSTM,
             entropy = torch.stack([c.entropy() for c in multi_categorical]).T.sum(1)
 
             return action.T, logprob, entropy, value, lstm_state
-   
+
     return CleanRLPolicy
