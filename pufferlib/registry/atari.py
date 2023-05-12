@@ -51,6 +51,9 @@ class NoopResetEnv(gym.Wrapper):
                 obs = self.env.reset(**kwargs)
         return obs
 
+class AtariFeaturizer(pufferlib.emulation.Featurizer):
+    def __call__(self, obs, step):
+        return np.array(obs[1], dtype=np.float32).ravel()
 
 def make_env(env_name, framestack):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
@@ -85,6 +88,7 @@ def make_binding(env_name, framestack):
             env_creator=make_env,
             default_args=[env_name, framestack],
             env_name=env_name,
+            featurizer_cls=AtariFeaturizer,
             emulate_flat_atn=True,
             record_episode_statistics=False,
         )
@@ -96,7 +100,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 class Policy(pufferlib.models.Policy):
-    def __init__(self, binding, *args, framestack, input_size=512, hidden_size=512, **kwargs):
+    def __init__(self, binding, *args, framestack, input_size=512, hidden_size=128, **kwargs):
         '''The CleanRL default Atari policy: a stack of three convolutions followed by a linear layer
         
         Takes framestack as a mandatory keyword arguments. Suggested default is 1 frame
@@ -113,7 +117,7 @@ class Policy(pufferlib.models.Policy):
             layer_init(nn.Conv2d(64, 64, 3, stride=1)),
             nn.ReLU(),
             nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, self.hidden_size)),
+            layer_init(nn.Linear(64 * 7 * 7, self.input_size)),
             nn.ReLU(),
         )
 

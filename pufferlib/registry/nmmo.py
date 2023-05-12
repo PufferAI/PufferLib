@@ -4,6 +4,7 @@ import torch
 
 import pufferlib
 import pufferlib.emulation
+import pufferlib.models
 
 
 def make_binding():
@@ -20,13 +21,13 @@ def make_binding():
 
 
 class Policy(pufferlib.models.Policy):
-    def __init__(self, binding, input_size=512, hidden_size=512):
+    def __init__(self, binding, input_size=128, hidden_size=128):
         '''Default Neural MMO policy
         
         This is a dummy placeholder used to speed up tests because of the size of the
         Neural MMO observation space. It is not a good policy and will not learn anything.'''
         super().__init__(binding, input_size, hidden_size)
-        self.raw_single_observation_space = binding.raw_single_observation_space
+        self.featurized_single_observation_space = binding.featurized_single_observation_space
 
         # A dumb example encoder that applies a linear layer to agent self features
         observation_size = binding.raw_single_observation_space['Entity'].shape[1]
@@ -41,7 +42,7 @@ class Policy(pufferlib.models.Policy):
 
     def encode_observations(self, env_outputs):
         env_outputs = pufferlib.emulation.unpack_batched_obs(
-            self.raw_single_observation_space, env_outputs)
+            self.featurized_single_observation_space, env_outputs)
         env_outputs = env_outputs['Entity'][:, 0, :]
         return self.encoder(env_outputs), None
 

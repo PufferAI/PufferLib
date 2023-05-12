@@ -25,6 +25,17 @@ tests = {
     'butterfly': [
         'pettingzoo[butterfly]',
     ],
+    'crafter': [
+        'crafter==1.8.0',
+    ],
+    'dm_control': [
+        'dm_control==1.0.11',
+        'gym_dmc==0.2.5',
+        'gym==0.21.0',
+    ],
+    'dm_lab': [
+        'gym_deepmindlab==0.1.2',
+    ],
     #'griddly': [
     #    'imageio==2.23.0',
     #    'griddly==1.4.2',
@@ -36,11 +47,15 @@ tests = {
         'ffmpeg==1.4',
         'gym_microrts==0.3.2',
     ],
+    'minerl': [
+        'gym==0.19.0',
+        'minerl==0.4.4',
+    ],
     'nethack': [
         'nle==0.9.0',
     ],
     'nmmo': [
-        'nmmo==1.6.0.7',
+        'nmmo==1.7.0.1',
     ],
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',

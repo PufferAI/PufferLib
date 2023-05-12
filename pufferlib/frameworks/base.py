@@ -6,7 +6,8 @@ import torch.nn as nn
 from pufferlib.torch import BatchFirstLSTM
 
 
-def make_recurrent_policy(Policy, lstm_layers=1, batch_first=True):
+def make_recurrent_policy(Policy, recurrent_cls=BatchFirstLSTM,
+        recurrent_args=[], recurrent_kwargs={}):
     '''Wraps the given policy with an LSTM
     
     Called for you by framework-specific bindings
@@ -14,21 +15,10 @@ def make_recurrent_policy(Policy, lstm_layers=1, batch_first=True):
     class Recurrent(Policy):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            if batch_first:
-                self.lstm = BatchFirstLSTM(
-                    self.input_size,
-                    self.hidden_size,
-                    lstm_layers,
-                )
-            else:
-                self.lstm = torch.nn.LSTM(
-                    self.input_size,
-                    self.hidden_size,
-                    lstm_layers,
-                )
+            self.recurrent_policy = recurrent_cls(*recurrent_args, **recurrent_kwargs)
 
             # TODO: More general init options
-            for name, param in self.lstm.named_parameters():
+            for name, param in self.recurrent_policy.named_parameters():
                 if "bias" in name:
                     nn.init.constant_(param, 0)
                 elif "weight" in name:
@@ -48,7 +38,7 @@ def make_recurrent_policy(Policy, lstm_layers=1, batch_first=True):
             assert hidden.shape == (B*TT, self.input_size)
 
             hidden = hidden.view(B, TT, self.input_size)
-            hidden, state = self.lstm(hidden, state)
+            hidden, state = self.recurrent_policy(hidden, state)
             hidden = hidden.reshape(B*TT, self.hidden_size)
 
             return hidden, state, lookup

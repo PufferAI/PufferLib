@@ -5,205 +5,122 @@ import numpy as np
 import pufferlib
 import pufferlib.emulation
 import pufferlib.registry
+import pufferlib.vectorization.serial
 
 
-def test_flatten():
-    inputs = [
-        {
-            'foo': {
-                'bar': 0
-            },
-            'baz': 1
-        },
-        0
-    ]
-    outputs = [
-        {
-            ('foo', 'bar'): 0,
-            ('baz',): 1
-        },
-        0
-    ]
-    for inp, out in zip(inputs, outputs):
-        test_out = pufferlib.emulation._flatten(inp)
-        assert out == test_out, f'\n\tOutput: {test_out}\n\tExpected: {out}'
+class MockVecEnv:
+    def __init__(self, binding, num_workers, envs_per_worker=1):
+        self.binding = binding
+
+        self.num_envs = num_workers * envs_per_worker
+        self.envs = [binding.pz_env_creator()
+            for _ in range(self.num_envs)]
+        self.possible_agents = self.envs[0].possible_agents
+
+    @property
+    def agents(self):
+        return [e.agents for e in self.envs]
+
+    def reset(self, seed=42):
+        return [e.reset() for e in self.envs]
+
+    def step(self, actions):
+        obs, rewards, dones, infos = [], [], [], []
+        for env, atns in zip(self.envs, actions):
+            if not env.agents:
+                o = env.reset()
+                r = {k: 0 for k in env.possible_agents}
+                d = {k: False for k in env.possible_agents}
+                i = {}
+            else:
+                atns = {k: v for k, v in zip(env.agents, atns)}
+                o, r, d, i = env.step(atns)
+
+            obs.append(o)
+            rewards.append(r)
+            dones.append(d)
+            infos.append(i)
+
+        return obs, rewards, dones, infos
 
 
-def test_unflatten():
-    input = [1, 2, 3]
+def test_emulation(binding, teams, steps=100, num_workers=1, envs_per_worker=2):
+    raw_env = MockVecEnv(binding, num_workers, envs_per_worker)
+    puf_env = pufferlib.vectorization.serial.VecEnv(binding, num_workers, envs_per_worker)
 
-    structures = [
-        {
-            'foo': None,
-            'bar': None,
-            'baz': None,
-        },
-        {
-            'foo': {
-                'bar': None,
-                'baz': None,
-            },
-            'qux': None,
-        },
-    ]
+    puf_ob = puf_env.reset()
+    raw_ob = raw_env.reset()
 
-    outputs = [
-        {
-            'foo': 1,
-            'bar': 2,
-            'baz': 3,
-        },
-        {
-            'foo': {
-                'bar': 1,
-                'baz': 2,
-            },
-            'qux': 3,
-        }
-    ]
-
-
-    for struct, out in zip(structures, outputs):
-        test_out = pufferlib.emulation._unflatten(input, struct)
-        assert out == test_out, f'\n\tOutput: {test_out}\n\tExpected: {out}'
-
-
-def test_pack_and_batch_obs(binding):
-    env = binding.env_creator()
-    env.seed(42)
-    obs = env.reset()
-    packed = pufferlib.emulation._pack_and_batch_obs(obs)
-    assert type(packed) == np.ndarray
-    assert len(packed) == len(obs)
-
-
-def test_singleagent_emulation(binding, seed=42, steps=1000):
-    with pufferlib.utils.Suppress():
-        env_1 = binding.raw_env_creator()
-        env_2 = binding.env_creator()
-
-    binding.raw_single_action_space.seed(seed)
-
-    env_1.seed(seed)
-    env_2.seed(seed)
-
-    ob_1 = env_1.reset()
-    ob_2 = env_2.reset()
-
-    flat = pufferlib.emulation._flatten_ob(ob_1)
-    assert np.array_equal(flat, ob_2[1])
- 
-    done_1 = False
-    done_2 = False
+    flat_atn_space = pufferlib.emulation._flatten_space(
+        binding.raw_single_action_space)
 
     for i in range(steps):
-        atn_1 = binding.raw_single_action_space.sample()
-        atn_2 = pufferlib.emulation._flatten(atn_1)
+        # Reconstruct original obs format from puffer env and compare to raw
+        orig_puf_ob = puf_ob
+        puf_ob = binding.unpack_batched_obs(puf_ob)
+        idx = 0
+        for r_ob in raw_ob:
+            for team in teams.values():
+                orig_team_ob = np.split(orig_puf_ob[idx], len(team))
+                for i, k in enumerate(team):
+                    if k not in r_ob:
+                        assert not np.count_nonzero(orig_team_ob[i])
+                    else:
+                        assert pufferlib.utils._compare_observations(
+                            r_ob[k], puf_ob[i], idx=idx)
+                idx += 1
 
-        if type(atn_2) == int:
-            atn_2 = [atn_2]
+        atn = [{a: binding.raw_single_action_space.sample() for a in agents}
+               for agents in raw_env.agents]
+        raw_ob, raw_reward, raw_done, _ = raw_env.step(atn)
 
-        if done_1:
-            assert done_2
-            assert env_2.done
+        # Convert actions to puffer format
+        actions = []
+        dummy = binding.raw_single_action_space.sample()
+        dummy = pufferlib.emulation._flatten_to_array(dummy, flat_atn_space)
+        for a in atn:
+            for agent in raw_env.possible_agents:
+                if agent in a:
+                    actions.append(pufferlib.emulation._flatten_to_array(a[agent], flat_atn_space))
+                else:
+                    actions.append(dummy)
 
-            ob_1 = env_1.reset()
-            ob_2 = env_2.reset()[1]
+        # Flatten actions of each team
+        idx = 0
+        team_actions = []
+        for env in range(num_workers * envs_per_worker):
+            for team in teams.values():
+                t_actions = []
+                for agent in team:
+                    t_actions.append(actions[idx])
+                    idx += 1
+                team_actions.append(np.concatenate(t_actions))
 
-            done_1 = False
-            done_2 = False
+        # TODO: Add shape asserts to vec envs
+        puf_ob, puf_reward, puf_done, _ = puf_env.step(team_actions)
 
-            flat = pufferlib.emulation._flatten_ob(ob_1)
-            assert np.array_equal(flat, ob_2)
-        else:
-            assert not env_2.done
+        idx = 0 
+        for r_env, r_reward, r_done in zip(raw_env.envs, raw_reward, raw_done):
+            for team in teams.values():
+                team_done = [r_done[a] for a in team if a in r_done]
+                team_reward = [r_reward[a] for a in team if a in r_reward]
 
-            ob_1, reward_1, done_1, _ = env_1.step(atn_1)
-            ob_2, reward_2, done_2, _ = env_2.step({1: atn_2})
-            ob_2, reward_2, done_2 = ob_2[1], reward_2[1], done_2[1]
+                if len(team_reward) > 0:
+                    assert puf_reward[idx] == sum(team_reward)
+                else:
+                    assert puf_reward[idx] == 0
 
-            flat = pufferlib.emulation._flatten_ob(ob_1)
-            assert np.array_equal(flat, ob_2)
-            assert reward_1 == reward_2
-            assert done_1 == done_2
+                if len(team_done) > 0:
+                    assert puf_done[idx] == any(team_done)
+                else:
+                    assert puf_done[idx] != bool(r_env.agents)
 
-
-def test_multiagent_emulation(binding, seed=42, steps=1000):
-    with pufferlib.utils.Suppress():
-        env_1 = binding.raw_env_creator()
-        env_2 = binding.env_creator()
-
-    assert env_1.possible_agents == env_2.possible_agents
-    binding.raw_single_action_space.seed(seed)
-
-    env_1.seed(seed)
-    env_2.seed(seed)
-
-    ob_1 = env_1.reset()
-    ob_2 = env_2.reset()
-
-    for agent in env_1.agents:
-        flat = pufferlib.emulation._flatten_ob(ob_1[agent])
-        assert np.array_equal(flat, ob_2[agent])
- 
-    done_1 = False
-    done_2 = False
-
-    for i in range(steps):
-        assert env_1.agents == env_2.agents
-
-        atn_1 = {a: binding.raw_single_action_space.sample() for a in env_1.possible_agents}
-
-        atn_2 = {}
-        for k, v in atn_1.items():
-            a = list(pufferlib.emulation._flatten(v).values())
-            atn_2[k] = [a] if type(a) == int else a
-
-        # TODO: check on dones for pufferlib style
-        if done_1:
-            assert env_2.done
-            assert done_2
-
-            ob_1 = env_1.reset()
-            ob_2 = env_2.reset()
-
-            done_1 = False
-            done_2 = False
-
-            for agent in env_1.agents:
-                flat = pufferlib.emulation._flatten_ob(ob_1[agent])
-                assert np.array_equal(flat, ob_2[agent])
-        else:
-            assert not env_2.done
-
-            ob_1, reward_1, done_1, _ = env_1.step(atn_1)
-            ob_2, reward_2, done_2, _ = env_2.step(atn_2)
-
-            for agent in env_1.agents:
-                flat = pufferlib.emulation._flatten_ob(ob_1[agent])
-                assert np.array_equal(flat, ob_2[agent])
-                assert reward_1[agent] == reward_2[agent]
-                assert done_1[agent] == done_2[agent]
-
-            done_1 = all(done_1.values())
-            done_2 = all(done_2.values())
+                idx += 1
 
 
 if __name__ == '__main__':
     import mock_environments
-    binding = pufferlib.emulation.Binding(env_cls=mock_environments.TestEnv)
-    test_multiagent_emulation(binding)
-
-    # TODO: Fix this test
-    import pufferlib.registry.nethack
-    binding = pufferlib.registry.nethack.make_binding()
-    test_singleagent_emulation(binding)
-
-    # TODO: Fix this test
-    import pufferlib.registry.atari
-    binding = pufferlib.registry.atari.make_binding('BreakoutNoFrameskip-v4', framestack=1)
-    test_singleagent_emulation(binding)
-
-    test_flatten()
-    test_unflatten()
-    test_pack_and_batch_obs(binding)
+    teams = mock_environments.MOCK_TEAMS['pairs']
+    for env in mock_environments.MOCK_ENVIRONMENTS:
+        binding = pufferlib.emulation.Binding(env_cls=env, teams=teams)
+        test_emulation(binding, teams)

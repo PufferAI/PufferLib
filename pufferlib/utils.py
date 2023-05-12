@@ -1,5 +1,7 @@
 from pdb import set_trace as T
 
+from collections import OrderedDict
+
 import numpy as np
 
 import time
@@ -26,6 +28,65 @@ def check_env(env):
     for e in env.possible_agents:
         assert env.observation_space(e) == obs_space, 'All agents must have same obs space'
         assert env.action_space(e) == atn_space, 'All agents must have same atn space'
+
+def make_zeros_like(data):
+    if isinstance(data, dict):
+        return {k: make_zeros_like(v) for k, v in data.items()}
+    elif isinstance(data, (list, tuple)):
+        return [make_zeros_like(v) for v in data]
+    elif isinstance(data, np.ndarray):
+        return np.zeros_like(data)
+    else:
+        raise ValueError(f'Unsupported type: {type(data)}')
+
+def _compare_observations(obs, batched_obs, idx=None):
+    def _compare_arrays(array1, array2):
+        try:
+            return np.allclose(array1, array2)
+        except TypeError as e:
+            raise TypeError(f'Error comparing {array1} and {array2}. Did you unpack the batched obs?') from e
+
+    def _compare_helper(obs, batched_obs, agent_idx):
+        if isinstance(batched_obs, np.ndarray):
+            return _compare_arrays(obs, batched_obs[agent_idx])
+        elif isinstance(obs, (dict, OrderedDict)):
+            for key in obs:
+                if not _compare_helper(obs[key], batched_obs[key], agent_idx):
+                    return False
+            return True
+        elif isinstance(obs, (list, tuple)):
+            for idx, elem in enumerate(obs):
+                if not _compare_helper(elem, batched_obs[idx], agent_idx):
+                    return False
+            return True
+        else:
+            raise ValueError(f"Unsupported type: {type(obs)}")
+
+    if idx is not None:
+        return _compare_helper(obs, batched_obs, idx)
+
+    if isinstance(batched_obs, dict):
+        agent_indices = range(len(next(iter(batched_obs.values()))))
+    else:
+        agent_indices = range(batched_obs.shape[0])
+
+    for agent_key, agent_idx in zip(obs.keys(), agent_indices):
+        if not _compare_helper(obs[agent_key], batched_obs, agent_idx):
+            return False
+
+    return True
+
+def _get_dtype_bounds(dtype):
+    if dtype == bool:
+        return 0, 1
+    elif np.issubdtype(dtype, np.integer):
+        return np.iinfo(dtype).min, np.iinfo(dtype).max
+    elif np.issubdtype(dtype, np.unsignedinteger):
+        return np.iinfo(dtype).min, np.iinfo(dtype).max
+    elif np.issubdtype(dtype, np.floating):
+        return np.finfo(dtype).min, np.finfo(dtype).max
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
 
 def is_dict_space(space):
     # Compatible with gym/gymnasium
@@ -61,8 +122,16 @@ class RandomState:
     def random(self):
         return self.rng.random()
 
+    def probabilistic_round(self, n):
+            frac, integer = np.modf(n)
+            if self.random() < frac:
+                return int(integer) + 1
+            else:
+                return int(integer)
+
     def sample(self, ary, n):
-        return self.rng.choice(ary, n, replace=False).tolist()
+        n_rounded = self.probabilistic_round(n)
+        return self.rng.choice(ary, n_rounded, replace=False).tolist()
 
     def choice(self, ary):
         return self.sample(ary, 1)[0]
@@ -90,19 +159,36 @@ class Profiler:
         self.calls += 1
 
 def profile(func):
-    timer = Profiler()
-    name = func.__name__ + '_timer'
+    name = func.__name__
 
     def wrapper(*args, **kwargs):
+        self = args[0]
+
+        if not hasattr(self, '_timers'):
+            self._timers = {}
+
+        if name not in self._timers:
+            self._timers[name] = Profiler()
+
+        timer = self._timers[name]
+
         with timer:
             result = func(*args, **kwargs)
 
-        self = args[0]
-        assert hasattr(self, 'timers'), 'Must have timers dict'
-        self.timers[name] = timer
         return result
 
     return wrapper
+
+def aggregate_profilers(profiler_dicts):
+    merged = {}
+
+    for key in list(profiler_dicts[0].keys()):
+        merged[key] = Profiler()
+        for prof_dict in profiler_dicts:
+            merged[key].elapsed += prof_dict[key].elapsed
+            merged[key].calls += prof_dict[key].calls
+
+    return merged
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes
@@ -112,6 +198,14 @@ class dotdict(dict):
     __getattr__ = dict.get
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
+
+    def __getstate__(self):
+        # Return the current state of the object (the underlying dictionary)
+        return self.copy()
+
+    def __setstate__(self, state):
+        # Restore the state of the object (the underlying dictionary)
+        self.update(state)
 
 class Suppress():
     def __init__(self):
