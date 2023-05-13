@@ -54,9 +54,6 @@ tests = {
     'nethack': [
         'nle==0.9.0',
     ],
-    'nmmo': [
-        'nmmo==1.7.0.1',
-    ],
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',
     #],
@@ -87,7 +84,7 @@ setup(
         'gym==0.23',
         'numpy==1.23.3',
         'opencv-python==3.4.17.63',
-        'openskill==2.4.0',
+        'openskill==4.0.0',
         'pettingzoo==1.19.0',
     ],
     extras_require={
