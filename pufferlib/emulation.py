@@ -302,7 +302,7 @@ def make_puffer_env_cls(scope, raw_obs):
                     del rewards[team]
 
                 if dones[team]:
-                    dones[team] = self.done or any(dones[team].values())
+                    dones[team] = self.done or all(dones[team].values())
                 elif scope.emulate_const_num_agents:
                     dones[team] = self.done
                 else:
@@ -315,6 +315,7 @@ def make_puffer_env_cls(scope, raw_obs):
 
                 if scope.record_episode_statistics and dones[agent]:
                     #TODO: Resolve this with global infos
+                    print("xcxc emulation. agent done", agent, infos)
                     if 'episode' not in infos:
                         infos['episode'] = {}
                         infos['episode']['r'] = []
