@@ -315,7 +315,6 @@ def make_puffer_env_cls(scope, raw_obs):
 
                 if scope.record_episode_statistics and dones[agent]:
                     #TODO: Resolve this with global infos
-                    print("xcxc emulation. agent done", agent, infos)
                     if 'episode' not in infos:
                         infos['episode'] = {}
                         infos['episode']['r'] = []
