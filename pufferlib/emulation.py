@@ -302,7 +302,7 @@ def make_puffer_env_cls(scope, raw_obs):
                     del rewards[team]
 
                 if dones[team]:
-                    dones[team] = self.done or any(dones[team].values())
+                    dones[team] = self.done or all(dones[team].values())
                 elif scope.emulate_const_num_agents:
                     dones[team] = self.done
                 else:
