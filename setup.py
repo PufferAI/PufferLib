@@ -92,6 +92,7 @@ setup(
     extras_require={
         'docs': docs,
         'rllib': rllib,
+        'cleanrl': cleanrl,
         'tests': flat_tests,
         'all': extra_all,
         **tests,
