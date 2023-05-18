@@ -54,9 +54,6 @@ tests = {
     'nethack': [
         'nle==0.9.0',
     ],
-    'nmmo': [
-        'nmmo==1.7.0.1',
-    ],
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',
     #],
@@ -72,6 +69,8 @@ cleanrl = [
     'tensorboard==2.11.2',
     'wandb==0.12.9',
     'torch',
+    'wandb==0.13.7',
+    'psutil==5.9.5',
 ]
 
 flat_tests = list(set(chain.from_iterable(tests.values())))

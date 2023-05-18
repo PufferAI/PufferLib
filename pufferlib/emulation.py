@@ -159,7 +159,7 @@ def make_puffer_env_cls(scope, raw_obs):
                 if scope.env_cls:
                     return scope.env_cls(*args, **kwargs)
                 return scope.env_creator(*args, **kwargs)
-        
+
         @utils.profile
         def _reset_env(self, seed):
             with utils.Suppress() if scope.suppress_env_prints else nullcontext():
@@ -191,7 +191,7 @@ def make_puffer_env_cls(scope, raw_obs):
                 # TODO: Assert all keys present since actions are padded
                 team_atns = np.split(team_actions[team_id], len(team))
                 for agent_id, atns in zip(team, team_atns):
-                    actions[agent_id] = atns.tolist()
+                    actions[agent_id] = atns
 
             # TODO: Do we want to support structured actions?
             if not scope.emulate_flat_atn:
@@ -300,9 +300,9 @@ def make_puffer_env_cls(scope, raw_obs):
                     rewards[team] = 0
                 else:
                     del rewards[team]
-                
+
                 if dones[team]:
-                    dones[team] = self.done or any(dones[team].values())
+                    dones[team] = self.done or all(dones[team].values())
                 elif scope.emulate_const_num_agents:
                     dones[team] = self.done
                 else:
@@ -310,7 +310,7 @@ def make_puffer_env_cls(scope, raw_obs):
 
             # Record episode statistics
             for agent in self._teams:
-                self._epoch_lengths[agent] += 1 
+                self._epoch_lengths[agent] += 1
                 self._epoch_returns[agent] += rewards[agent]
 
                 if scope.record_episode_statistics and dones[agent]:
@@ -348,7 +348,7 @@ def make_puffer_env_cls(scope, raw_obs):
         @property
         def raw_single_observation_space(self):
             '''The observation space of a single agent after featurization but before flattening
-            
+
             Used by _unpack_batched_obs at the start of the network forward pass
             '''
             return self._raw_observation_space[self.default_team]
@@ -357,7 +357,7 @@ def make_puffer_env_cls(scope, raw_obs):
         def single_observation_space(self):
             '''The observation space of a single agent after featurization and flattening'''
             return self._flat_observation_space[self.default_team]
-        
+
         @property
         def single_action_space(self):
             '''The action space of a single agent after flattening'''
@@ -390,7 +390,7 @@ def make_puffer_env_cls(scope, raw_obs):
             # Flatten and cache observation space
             self._raw_observation_space[team] = _make_space_like(obs)
             self._flat_observation_space[team] = _flatten_space(self._raw_observation_space[team])
-            
+
             # TODO: Add checks on return dtype etc... this should not trigger
             if not self._raw_observation_space[team].contains(obs):
                 print({e: self._raw_observation_space[team][0][e].contains(obs[0][e]) for e in obs[0].keys()})
@@ -416,7 +416,7 @@ def make_puffer_env_cls(scope, raw_obs):
             #Flattened (MultiDiscrete) and cached action space
             if team in self.atn_space_cache:
                 return self.atn_space_cache[team]
-                
+
             atn_space = gym.spaces.Dict({a: self.env.action_space(a) for a in self._teams[team]})
 
             self._flat_action_space[team] = _flatten_space(atn_space)
@@ -440,7 +440,7 @@ def make_puffer_env_cls(scope, raw_obs):
                     else:
                         raise ValueError(f'Invalid action space: {e}')
 
-                atn_space = gym.spaces.MultiDiscrete(lens) 
+                atn_space = gym.spaces.MultiDiscrete(lens)
 
             return atn_space
 
@@ -510,7 +510,7 @@ def make_puffer_env_cls(scope, raw_obs):
 
 class Binding:
     def __init__(self,
-            env_cls=None, 
+            env_cls=None,
             env_creator=None,
             default_args=[],
             default_kwargs={},
@@ -530,7 +530,7 @@ class Binding:
             record_episode_statistics=True,
             obs_dtype=np.float32):
         '''PufferLib's core Binding class.
-        
+
         Wraps the provided Gym or PettingZoo environment in a PufferEnv that
         behaves like a normal PettingZoo environment with several simplifications:
             - The observation space is flattened to a single vector
@@ -546,7 +546,7 @@ class Binding:
         The Binding class additionally provides utility functions for interacting with complex
         observation and action spaces.
 
-        Args: 
+        Args:
             env_cls: Environment class to wrap. Specify this or env_creator
             env_creator: Environment creation function to wrap. Specify this or env_cls
             default_args: Default arguments for binding.env_creator and binding.raw_env_creator
@@ -623,7 +623,7 @@ class Binding:
                 return self._raw_env_creator(*self._default_args, **self._default_kwargs)
             else:
                 return self._raw_env_cls(*self._default_args, **self._default_kwargs)
-            
+
     def pz_env_creator(self):
         '''Returns the partially wrapped PettingZoo env_creator function created by this binding'''
         raw_env = self.raw_env_creator()
@@ -631,7 +631,7 @@ class Binding:
         if utils.is_multiagent(raw_env):
             return raw_env
 
-        return GymToPettingZooParallelWrapper(raw_env) 
+        return GymToPettingZooParallelWrapper(raw_env)
 
     @property
     def env_cls(self):
@@ -645,35 +645,35 @@ class Binding:
     @property
     def raw_single_observation_space(self):
         '''Returns the unwrapped, structured observation space of a single agent.
-        
+
         PufferLib currently assumes that all agents share the same observation space'''
         return self._raw_single_observation_space
 
     @property
     def featurized_single_observation_space(self):
         '''Returns the wrapped, structured, featurized observation space of a single agent.
-        
+
         PufferLib currently assumes that all agents share the same observation space'''
         return self._featurized_single_observation_space
 
     @property
     def single_observation_space(self):
         '''Returns the wrapped, flat observation space of a single agent.
-        
+
         PufferLib currently assumes that all agents share the same observation space'''
         return self._single_observation_space
 
     @property
     def raw_single_action_space(self):
         '''Returns the unwrapped, structured action space of a single agent.
-        
+
         PufferLib currently assumes that all agents share the same action space'''
         return self._raw_single_action_space
 
     @property
     def single_action_space(self):
         '''Returns the wrapped, flat action space of a single agent.
-        
+
         PufferLib currently assumes that all agents share the same action space'''
         return self._single_action_space
 
@@ -689,7 +689,7 @@ class Binding:
 
     def unpack_batched_obs(self, packed_obs):
         '''Unpack a batch of observations into the original observation space
-        
+
         Call this funtion in the forward pass of your network
         '''
         return unpack_batched_obs(self._featurized_single_observation_space, packed_obs)
@@ -731,7 +731,7 @@ def _make_space_like(ob):
             low=mmin, high=mmax,
             shape=ob.shape, dtype=ob.dtype
         )
- 
+
     # TODO: Handle Discrete (how to get max?)
     if type(ob) in (tuple, list):
         return gym.spaces.Tuple([_make_space_like(v) for v in ob])
@@ -788,7 +788,7 @@ def _flatten_to_array(space_sample, flat_space, dtype=None):
         tensors = list(tensors)
         dtype = tensors[0].dtype
 
-    tensor_sizes = [tensor.size for tensor in tensors] 
+    tensor_sizes = [tensor.size for tensor in tensors]
     prealloc = np.empty(sum(tensor_sizes), dtype=dtype)
 
     # Fill the concatenated tensor with the flattened tensors
