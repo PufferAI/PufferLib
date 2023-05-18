@@ -64,11 +64,14 @@ tests = {
 
 rllib = [
     'ray[all]==2.0.0',
+    'setproctitle==1.1.10',
+    'service-identity==21.1.0',
 ]
 
 cleanrl = [
-    'ray==2.0.0',
     'tensorboard==2.11.2',
+    'wandb==0.12.9',
+    'torch',
 ]
 
 flat_tests = list(set(chain.from_iterable(tests.values())))
@@ -87,12 +90,13 @@ setup(
         'gym==0.23',
         'numpy==1.23.3',
         'opencv-python==3.4.17.63',
-        'openskill==2.4.0',
+        'openskill==4.0.0',
         'pettingzoo==1.19.0',
     ],
     extras_require={
         'docs': docs,
         'rllib': rllib,
+        'cleanrl': cleanrl,
         'tests': flat_tests,
         'all': extra_all,
         **tests,
