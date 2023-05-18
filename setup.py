@@ -61,11 +61,14 @@ tests = {
 
 rllib = [
     'ray[all]==2.0.0',
+    'setproctitle==1.1.10',
+    'service-identity==21.1.0',
 ]
 
 cleanrl = [
-    'ray==2.0.0',
     'tensorboard==2.11.2',
+    'wandb==0.12.9',
+    'torch',
     'wandb==0.13.7',
     'psutil==5.9.5',
 ]
