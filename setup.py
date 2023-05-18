@@ -66,6 +66,8 @@ rllib = [
 cleanrl = [
     'ray==2.0.0',
     'tensorboard==2.11.2',
+    'wandb==0.13.7',
+    'psutil==5.9.5',
 ]
 
 flat_tests = list(set(chain.from_iterable(tests.values())))
@@ -90,6 +92,7 @@ setup(
     extras_require={
         'docs': docs,
         'rllib': rllib,
+        'cleanrl': cleanrl,
         'tests': flat_tests,
         'all': extra_all,
         **tests,
