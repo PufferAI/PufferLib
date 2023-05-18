@@ -67,7 +67,6 @@ rllib = [
 
 cleanrl = [
     'tensorboard==2.11.2',
-    'wandb==0.12.9',
     'torch',
     'wandb==0.13.7',
     'psutil==5.9.5',
