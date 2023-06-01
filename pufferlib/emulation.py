@@ -163,6 +163,10 @@ def make_puffer_env_cls(scope, raw_obs):
 
         @utils.profile
         def _prestep(self, team_actions):
+            for team_id in self._teams:
+                team_actions[team_id] = self._handle_actions(
+                    team_actions[team_id], team_id)
+
             # Action shape test
             if __debug__:
                 for team, atns in team_actions.items():
@@ -244,6 +248,9 @@ def make_puffer_env_cls(scope, raw_obs):
                     )
 
             return team_ob
+
+        def _handle_actions(self, team_atns, team_id):
+            return self.postprocessors[team_id].actions(team_atns, self._step)
 
         @utils.profile
         def _shape_rewards(self, team_reward, team_id):
