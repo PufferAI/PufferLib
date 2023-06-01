@@ -24,27 +24,20 @@ class Postprocessor:
 
         self.num_teams = len(teams)
         self.team_size = len(teams[team_id])
-
-    def __call__(self, team_data, step):
-        raise NotImplementedError
-
-
-class Featurizer(Postprocessor):
-    def __init__(self, teams, team_id):
-        super().__init__(teams, team_id)
         self.max_team_size = max([len(v) for v in self.teams.values()])
-        self.dummy = None
+
+        self.dummy_ob = None
 
     def reset(self, team_obs):
         return
 
-    def __call__(self, obs, step):
+    def features(self, obs, step):
         '''Default featurizer pads observations to max team size'''
         if len(obs) == 0:
             raise ValueError('Observation is empty')
 
-        if self.dummy is None:
-            self.dummy = utils.make_zeros_like(list(obs.values())[0])
+        if self.dummy_ob is None:
+            self.dummy_ob = utils.make_zeros_like(list(obs.values())[0])
 
         team_id = [k for k, v in self.teams.items() if list(obs.keys())[0] in v][0]
 
@@ -53,12 +46,15 @@ class Featurizer(Postprocessor):
             if agent in obs:
                 ret.append(obs[agent])
             else:
-                ret.append(self.dummy)
+                ret.append(self.dummy_ob)
 
         return ret
 
-class RewardShaper(Postprocessor):
-    def __call__(self, team_rewards, step):
+    def actions(self, actions, step):
+        return actions
+
+    def rewards(self, team_rewards, step):
+        '''Default reward shaper sums team rewards'''
         return sum(team_rewards.values())
 
 
@@ -115,16 +111,10 @@ def make_puffer_env_cls(scope, raw_obs):
             self.possible_agents = list(self._teams.keys())
             self.default_team = self.possible_agents[0]
 
-            # Initialize feature parsers and reward shapers
-            self.featurizers = {
-                team_id: scope.featurizer_cls(
-                    self._teams, team_id, *scope.featurizer_args, **scope.featurizer_kwargs)
-                for team_id in self._teams
-            }
-
-            self.reward_shapers = {
-                team_id: scope.reward_shaper_cls(
-                    self._teams, team_id, *scope.reward_shaper_args, **scope.reward_shaper_kwargs)
+            # Initialize postprocessors
+            self.postprocessors = {
+                team_id: scope.postprocessor_cls(
+                    self._teams, team_id, *scope.postprocessor_args, **scope.postprocessor_kwargs)
                 for team_id in self._teams
             }
 
@@ -241,12 +231,9 @@ def make_puffer_env_cls(scope, raw_obs):
                 return self.env.step(actions)
 
         @utils.profile
-        def _featurize(self, team_ob, team_id, reset=False):
-            if reset:
-                self.featurizers[team_id].reset(team_ob)
-
+        def _featurize(self, team_ob, team_id):
             # Featurize observations for teams with at least 1 living agent
-            team_ob = self.featurizers[team_id](team_ob, self._step)
+            team_ob = self.postprocessors[team_id].features(team_ob, self._step)
 
             if __debug__:
                 space = self._raw_observation_space[team_id]
@@ -261,7 +248,7 @@ def make_puffer_env_cls(scope, raw_obs):
         @utils.profile
         def _shape_rewards(self, team_reward, team_id):
             # Shape rewards for teams with at least 1 living agent
-            team_reward = self.reward_shapers[team_id](team_reward, self._step)
+            team_reward = self.postprocessors[team_id].rewards(team_reward, self._step)
 
             if not isinstance(team_reward, (float, int)):
                 raise ValueError(
@@ -380,12 +367,12 @@ def make_puffer_env_cls(scope, raw_obs):
 
             team_obs = self._group_by_team(raw_obs)[team]
 
-            # Initialize obs with dummy featurizer
-            featurizer = scope.featurizer_cls(
-                self._teams, team, *scope.featurizer_args, **scope.featurizer_kwargs
+            # Initialize obs with dummy postprocessor
+            postprocessor = scope.postprocessor_cls(
+                self._teams, team, *scope.postprocessor_args, **scope.postprocessor_kwargs
             )
-            featurizer.reset(team_obs)
-            obs = featurizer(team_obs, self._step)
+            postprocessor.reset(team_obs)
+            obs = postprocessor.features(team_obs, self._step)
 
             # Flatten and cache observation space
             self._raw_observation_space[team] = _make_space_like(obs)
@@ -452,7 +439,9 @@ def make_puffer_env_cls(scope, raw_obs):
 
             obs = self._reset_env(seed)
             obs = self._group_by_team(obs)
-            obs = {k: self._featurize(v, k, reset=True) for k, v in obs.items()}
+            for team_id, team_ob in obs.items():
+                self.postprocessors[team_id].reset(team_ob)
+                obs[team_id] = self._featurize(team_ob, team_id)
 
             self.agents = self.env.agents
             self.initialized = True
@@ -515,12 +504,9 @@ class Binding:
             default_args=[],
             default_kwargs={},
             env_name=None,
-            featurizer_cls=Featurizer,
-            featurizer_args=[],
-            featurizer_kwargs={},
-            reward_shaper_cls=RewardShaper,
-            reward_shaper_args=[],
-            reward_shaper_kwargs={},
+            postprocessor_cls=Postprocessor,
+            postprocessor_args=[],
+            postprocessor_kwargs={},
             teams=None,
             emulate_flat_obs=True,
             emulate_flat_atn=True,
@@ -552,8 +538,7 @@ class Binding:
             default_args: Default arguments for binding.env_creator and binding.raw_env_creator
             default_kwargs: Default keyword arguments for binding.env_creator and binding.raw_env_creator
             env_name: Name of the environment
-            featurizer_cls: Featureizer class to use
-            reward_shaper: Reward shaper to use
+            postprocessor_cls: Postprocessor subclass to use
             emulate_flat_obs: Whether the observation space requires flattening
             emulate_flat_atn: Whether the action space requires flattening
             emulate_const_horizon: Fixed max horizon for resets, None if not applicable

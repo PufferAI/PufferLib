@@ -111,7 +111,7 @@ def test_emulation(binding, teams, steps=100, num_workers=1, envs_per_worker=2):
                     assert puf_reward[idx] == 0
 
                 if len(team_done) > 0:
-                    assert puf_done[idx] == any(team_done)
+                    assert puf_done[idx] == all(team_done)
                 else:
                     assert puf_done[idx] != bool(r_env.agents)
 
