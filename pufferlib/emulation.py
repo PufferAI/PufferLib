@@ -306,8 +306,11 @@ def make_puffer_env_cls(scope, raw_obs):
                     del rewards[team]
 
                 if dones[team]:
-                    self.num_live_players[team] -= sum(dones[team].values())
-                    dones[team] = self.done or (self.num_live_players[team] == 0)
+                    # TODO: Should dones per team be true on the first tick
+                    # or all subsequent ticks as well?
+                    dones[team] = self.done or \
+                        not any([e in self.agents for e in self._teams[team]])
+
                 elif scope.emulate_const_num_agents:
                     dones[team] = self.done
                 else:
@@ -464,7 +467,6 @@ def make_puffer_env_cls(scope, raw_obs):
             self.agents = self.env.agents
             self.initialized = True
             self.done = False
-            self.num_live_players = {tid: len(team) for tid, team in self._teams.items()}
 
             # Sort observations according to possible_agents
             # All keys must be present in possible_agents on reset
