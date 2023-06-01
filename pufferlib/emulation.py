@@ -12,13 +12,14 @@ from pufferlib import exceptions
 
 
 class Postprocessor:
-    def __init__(self, teams, team_id):
+    def __init__(self, env, teams, team_id):
         if not isinstance(teams, Mapping):
             raise ValueError(f'Teams is not a valid dict or mapping: {teams}')
 
         if team_id not in teams:
             raise ValueError(f'Team {team_id} not in teams {teams}')
 
+        self.env = env
         self.teams = teams
         self.team_id = team_id
 
@@ -53,9 +54,9 @@ class Postprocessor:
     def actions(self, actions, step):
         return actions
 
-    def rewards(self, team_rewards, step):
+    def rewards(self, team_rewards, team_dones, team_infos, step):
         '''Default reward shaper sums team rewards'''
-        return sum(team_rewards.values())
+        return sum(team_rewards.values()), team_infos
 
 
 class GymToPettingZooParallelWrapper(ParallelEnv):
@@ -114,8 +115,10 @@ def make_puffer_env_cls(scope, raw_obs):
             # Initialize postprocessors
             self.postprocessors = {
                 team_id: scope.postprocessor_cls(
-                    self._teams, team_id, *scope.postprocessor_args, **scope.postprocessor_kwargs)
-                for team_id in self._teams
+                    self.env, self._teams, team_id,
+                    *scope.postprocessor_args,
+                    **scope.postprocessor_kwargs
+                ) for team_id in self._teams
             }
 
             # Manual LRU since functools.lru_cache is not pickleable
@@ -253,9 +256,10 @@ def make_puffer_env_cls(scope, raw_obs):
             return self.postprocessors[team_id].actions(team_atns, self._step)
 
         @utils.profile
-        def _shape_rewards(self, team_reward, team_id):
+        def _shape_rewards(self, team_reward, team_dones, team_infos, team_id):
             # Shape rewards for teams with at least 1 living agent
-            team_reward = self.postprocessors[team_id].rewards(team_reward, self._step)
+            team_reward, team_infos = self.postprocessors[team_id].rewards(
+                team_reward, team_dones, team_infos, self._step)
 
             if not isinstance(team_reward, (float, int)):
                 raise ValueError(
@@ -263,7 +267,7 @@ def make_puffer_env_cls(scope, raw_obs):
                     f'{type(team_reward)} is not a float or int'
                 )
 
-            return team_reward
+            return team_reward, team_infos
 
         @utils.profile
         def _poststep(self, obs, rewards, dones, infos):
@@ -289,7 +293,13 @@ def make_puffer_env_cls(scope, raw_obs):
                     del obs[team]
 
                 if rewards[team]:
-                    rewards[team] = self._shape_rewards(rewards[team], team)
+                    team_infos = {}
+                    if team in infos:
+                        team_infos = infos[team]
+
+                    # TODO: Handle team infos better
+                    rewards[team], infos[team] = self._shape_rewards(
+                        rewards[team], dones[team], team_infos, team)
                 elif scope.emulate_const_num_agents:
                     rewards[team] = 0
                 else:
@@ -376,7 +386,7 @@ def make_puffer_env_cls(scope, raw_obs):
 
             # Initialize obs with dummy postprocessor
             postprocessor = scope.postprocessor_cls(
-                self._teams, team, *scope.postprocessor_args, **scope.postprocessor_kwargs
+                self.env, self._teams, team, *scope.postprocessor_args, **scope.postprocessor_kwargs
             )
             postprocessor.reset(team_obs)
             obs = postprocessor.features(team_obs, self._step)
