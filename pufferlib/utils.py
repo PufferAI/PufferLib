@@ -141,6 +141,13 @@ class Profiler:
     def __init__(self):
         self.elapsed = 0
         self.calls = 0
+        self.prev = 0
+
+    @property
+    def delta(self):
+        ret = self.elapsed - self.prev
+        self.prev = self.elapsed
+        return ret
 
     def tik(self):
         self.start = time.time()
