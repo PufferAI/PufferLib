@@ -17,6 +17,9 @@ def make_recurrent_policy(Policy, recurrent_cls=BatchFirstLSTM,
             super().__init__(*args, **kwargs)
             self.recurrent_policy = recurrent_cls(*recurrent_args, **recurrent_kwargs)
 
+            # TODO: Generalize this
+            self.input_size, self.hidden_size = recurrent_args
+
             # TODO: More general init options
             for name, param in self.recurrent_policy.named_parameters():
                 if "bias" in name:
