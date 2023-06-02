@@ -7,7 +7,7 @@ import torch.nn as nn
 
 
 class Policy(torch.nn.Module, ABC):
-    def __init__(self, binding, input_size, hidden_size):
+    def __init__(self, binding):
         '''Pure PyTorch base policy
         
         This spec allows PufferLib to repackage your policy
@@ -31,13 +31,9 @@ class Policy(torch.nn.Module, ABC):
 
         Args:
             binding: A pufferlib.emulation.Binding object
-            input_size: The size of the input to the recurrent cell 
-            hidden_size: The size of the output of the recurrent cell
         '''
         super().__init__()
         self.binding = binding
-        self.input_size = input_size
-        self.hidden_size = hidden_size
 
     @abstractmethod
     def critic(self, hidden):

@@ -7,7 +7,7 @@ from pufferlib.torch import BatchFirstLSTM
 
 
 def make_recurrent_policy(Policy, recurrent_cls=BatchFirstLSTM,
-        recurrent_args=[], recurrent_kwargs={}):
+        *recurrent_args, **recurrent_kwargs):
     '''Wraps the given policy with an LSTM
     
     Called for you by framework-specific bindings
