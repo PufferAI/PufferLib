@@ -2,7 +2,12 @@ from pdb import set_trace as T
 import itertools
 import numpy as np
 from contextlib import nullcontext
-from collections import defaultdict, OrderedDict, Mapping
+try:
+    from collections import defaultdict, OrderedDict, Mapping
+except ImportError:
+    # API changed in python 3.10
+    from collections import defaultdict, OrderedDict
+    from collections.abc import Mapping
 
 import gym
 from pettingzoo.utils.env import ParallelEnv
