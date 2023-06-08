@@ -84,7 +84,7 @@ class Default(Policy):
         Uses a single linear layer to encode observations and a list of
         linear layers to decode actions. The value function is a single linear layer.
         '''
-        super().__init__(binding, input_size, hidden_size)
+        super().__init__(binding)
         self.encoder = nn.Linear(self.binding.single_observation_space.shape[0], hidden_size)
         self.decoders = nn.ModuleList([nn.Linear(hidden_size, n)
                 for n in self.binding.single_action_space.nvec])

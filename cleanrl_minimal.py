@@ -29,7 +29,7 @@ import pufferlib
 import pufferlib.models
 import pufferlib.registry.nmmo
 import pufferlib.frameworks.cleanrl
-import vectorization.multiprocessing
+import pufferlib.vectorization.multiprocessing
 
 
 def parse_args():
@@ -110,7 +110,6 @@ def make_env(env_id, seed, idx, capture_video, run_name):
         env = gym.wrappers.ResizeObservation(env, (84, 84))
         env = gym.wrappers.GrayScaleObservation(env)
         env = gym.wrappers.FrameStack(env, 1)
-        env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -124,19 +123,19 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 class Agent(pufferlib.models.Policy):
-    def __init__(self, binding, input_size=512, hidden_size=512):
+    def __init__(self, binding, input_size=512, hidden_size=128):
         '''Simple custom PyTorch policy subclassing the pufferlib BasePolicy
         
         This requires only that you structure your network as an observation encoder,
         an action decoder, and a critic function. If you use our LSTM support, it will
         be added between the encoder and the decoder.
         '''
-        super().__init__(input_size, hidden_size)
+        super().__init__(binding)
         self.raw_single_observation_space = binding.raw_single_observation_space
 
         # A dumb example encoder that applies a linear layer to agent self features
         observation_size = binding.raw_single_observation_space['Entity'].shape[1]
-        self.encoder = torch.nn.Linear(observation_size, hidden_size)
+        self.encoder = torch.nn.Linear(observation_size, input_size)
 
         self.decoders = torch.nn.ModuleList([torch.nn.Linear(hidden_size, n)
                 for n in binding.single_action_space.nvec])
@@ -146,9 +145,8 @@ class Agent(pufferlib.models.Policy):
         return self.value_head(hidden)
 
     def encode_observations(self, env_outputs):
-        env_outputs = pufferlib.emulation.unpack_batched_obs(
-            self.raw_single_observation_space, env_outputs)
-        env_outputs = env_outputs['Entity'][:, 0, :]
+        env_outputs = self.binding.unpack_batched_obs(env_outputs)
+        env_outputs = env_outputs[0]['Entity'][:, 0, :]
         return self.encoder(env_outputs), None
 
     def decode_actions(self, hidden, lookup, concat=True):
@@ -189,15 +187,14 @@ if __name__ == "__main__":
 
     # env setup
     binding = pufferlib.registry.nmmo.make_binding()
-    envs = pufferlib.vectorization.RayVecEnv(
+    envs = pufferlib.vectorization.multiprocessing.VecEnv(
         binding,
         num_workers=args.num_envs // binding.max_agents,
         envs_per_worker=1,
     )
-    envs.seed(args.seed)
 
     agent = pufferlib.frameworks.cleanrl.make_policy(
-            Agent, lstm_layers=1)(binding).to(device)
+            Agent)(binding).to(device)
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
@@ -212,7 +209,7 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs = torch.Tensor(envs.reset()).to(device)
+    next_obs = torch.Tensor(envs.reset(seed=args.seed)).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     next_lstm_state = (
         torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device),
@@ -248,8 +245,8 @@ if __name__ == "__main__":
             for item in info:
                 if "episode" in item.keys():
                     print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
+                    writer.add_scalar("charts/episodic_return", np.mean(item["episode"]["r"]), global_step)
+                    writer.add_scalar("charts/episodic_length", np.mean(item["episode"]["l"]), global_step)
                     break
 
         # bootstrap value if not done

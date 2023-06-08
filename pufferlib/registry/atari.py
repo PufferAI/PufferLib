@@ -51,8 +51,8 @@ class NoopResetEnv(gym.Wrapper):
                 obs = self.env.reset(**kwargs)
         return obs
 
-class AtariFeaturizer(pufferlib.emulation.Featurizer):
-    def __call__(self, obs, step):
+class AtariFeaturizer(pufferlib.emulation.Postprocessor):
+    def features(self, obs, step):
         return np.array(obs[1], dtype=np.float32).ravel()
 
 def make_env(env_name, framestack):
@@ -88,7 +88,7 @@ def make_binding(env_name, framestack):
             env_creator=make_env,
             default_args=[env_name, framestack],
             env_name=env_name,
-            featurizer_cls=AtariFeaturizer,
+            postprocessor_cls=AtariFeaturizer,
             emulate_flat_atn=True,
             record_episode_statistics=False,
         )
@@ -105,7 +105,7 @@ class Policy(pufferlib.models.Policy):
         
         Takes framestack as a mandatory keyword arguments. Suggested default is 1 frame
         with LSTM or 4 frames without.'''
-        super().__init__(binding, input_size, hidden_size, *args, **kwargs)
+        super().__init__(binding)
         self.observation_space = binding.raw_single_observation_space
         self.num_actions = binding.raw_single_action_space.n
 
@@ -117,12 +117,12 @@ class Policy(pufferlib.models.Policy):
             layer_init(nn.Conv2d(64, 64, 3, stride=1)),
             nn.ReLU(),
             nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, self.input_size)),
+            layer_init(nn.Linear(64 * 7 * 7, input_size)),
             nn.ReLU(),
         )
 
-        self.actor = layer_init(nn.Linear(self.hidden_size, self.num_actions), std=0.01)
-        self.value_function = layer_init(nn.Linear(self.hidden_size, 1), std=1)
+        self.actor = layer_init(nn.Linear(hidden_size, self.num_actions), std=0.01)
+        self.value_function = layer_init(nn.Linear(hidden_size, 1), std=1)
 
     def critic(self, hidden):
         return self.value_function(hidden)

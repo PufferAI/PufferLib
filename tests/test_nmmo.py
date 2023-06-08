@@ -10,9 +10,6 @@ import pufferlib.registry.nmmo
 import pufferlib.utils
 
 import pufferlib.vectorization.multiprocessing
-import pufferlib.vectorization.multiprocessing_shared
-import pufferlib.vectorization.ray
-import pufferlib.vectorization.ray_shared
 import pufferlib.vectorization.serial
 
 import nmmo
@@ -51,11 +48,8 @@ def _test_vectorization_performance(binding, vec_backend, steps, num_workers, en
 if __name__ == '__main__':
     steps = [1, 10, 100]
     backends = [
-        #pufferlib.vectorization.serial.VecEnv,
+        pufferlib.vectorization.serial.VecEnv,
         pufferlib.vectorization.multiprocessing.VecEnv,
-        #pufferlib.vectorization.multiprocessing_shared.VecEnv,
-        #pufferlib.vectorization.ray.VecEnv,
-        #pufferlib.vectorization.ray_shared.VecEnv,
     ]
 
     binding = pufferlib.registry.nmmo.make_binding()

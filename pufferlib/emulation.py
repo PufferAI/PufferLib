@@ -166,6 +166,12 @@ def make_puffer_env_cls(scope, raw_obs):
 
         @utils.profile
         def _prestep(self, team_actions):
+            # Agent key check
+            if __debug__:
+                for team, atns in team_actions.items():
+                    if team not in self._teams:
+                        raise exceptions.InvalidAgentError(team, self._teams)
+
             for team_id in self._teams:
                 team_actions[team_id] = self._handle_actions(
                     team_actions[team_id], team_id)
@@ -173,14 +179,10 @@ def make_puffer_env_cls(scope, raw_obs):
             # Action shape test
             if __debug__:
                 for team, atns in team_actions.items():
-                    if team not in self._teams:
-                        raise exceptions.InvalidAgentError(team, self._teams)
-
                     if not self.action_space(team).contains(atns):
                         raise ValueError(
                             f'action:\n{atns}\n for agent/team {team} not in '
-                            f'action space:\n{self.action_space(team)}'
-                        )
+                            f'action space:\n{self.action_space(team)}')
 
             # Unpack actions from teams
             actions = {}

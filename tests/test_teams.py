@@ -9,14 +9,8 @@ import pufferlib.registry.nmmo
 from mock_environments import MOCK_ENVIRONMENTS
 
 
-class FeatureExtractor:
-    def __init__(self, teams, team_id):
-        pass
-
-    def reset(self, obs):
-        return
-
-    def __call__(self, obs, step):
+class FeatureExtractor(pufferlib.emulation.Postprocessor):
+    def features(self, obs, step):
         assert len(obs) > 0
         values = list(obs.values())
 
@@ -38,7 +32,7 @@ def test_mock_envs():
                 'team_4': ['agent_10', 'agent_11', 'agent_12', 'agent_13', 'agent_14'],
                 'team_5': ['agent_15', 'agent_16'],
             },
-            featurizer_cls=FeatureExtractor,
+            postprocessor_cls=FeatureExtractor,
         )
 
         env = binding.env_creator()

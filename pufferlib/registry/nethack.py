@@ -28,9 +28,8 @@ class Policy(pufferlib.models.Policy):
     '''Default NetHack Learning Environment policy ported from the nle release'''
     def __init__(self, binding, *args,
             embedding_dim=32, crop_dim=9, num_layers=5,
-            input_size=512, hidden_size=512,
             **kwargs):
-        super().__init__(binding, input_size, hidden_size, *args, **kwargs)
+        super().__init__(binding, *args, **kwargs)
 
         self.observation_shape = binding.raw_single_observation_space
         self.glyph_shape = self.observation_shape["glyphs"].shape

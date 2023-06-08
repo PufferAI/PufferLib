@@ -19,12 +19,12 @@ import pufferlib.registry.smac
 def make_all_bindings():
     binding_creation_fns = [
         #lambda: pufferlib.registry.atari.make_binding('BeamRider-v4', framestack=1),
-        lambda: pufferlib.registry.atari.make_binding('Breakout-v4', framestack=1),
-        lambda: pufferlib.registry.atari.make_binding('Enduro-v4', framestack=1),
-        lambda: pufferlib.registry.atari.make_binding('Pong-v4', framestack=1),
-        lambda: pufferlib.registry.atari.make_binding('Qbert-v4', framestack=1),
-        lambda: pufferlib.registry.atari.make_binding('Seaquest-v4', framestack=1),
-        lambda: pufferlib.registry.atari.make_binding('SpaceInvaders-v4', framestack=1),
+        #lambda: pufferlib.registry.atari.make_binding('Breakout-v4', framestack=1),
+        #lambda: pufferlib.registry.atari.make_binding('Enduro-v4', framestack=1),
+        #lambda: pufferlib.registry.atari.make_binding('Pong-v4', framestack=1),
+        #lambda: pufferlib.registry.atari.make_binding('Qbert-v4', framestack=1),
+        #lambda: pufferlib.registry.atari.make_binding('Seaquest-v4', framestack=1),
+        #lambda: pufferlib.registry.atari.make_binding('SpaceInvaders-v4', framestack=1),
         pufferlib.registry.butterfly.make_cooperative_pong_v5_binding,
         pufferlib.registry.butterfly.make_knights_archers_zombies_v10_binding,
         pufferlib.registry.classic_control.make_cartpole_binding,
@@ -34,7 +34,7 @@ def make_all_bindings():
         pufferlib.registry.magent.make_battle_v4_binding,
         #pufferlib.registry.microrts.make_binding,
         pufferlib.registry.nethack.make_binding,
-        pufferlib.registry.nmmo.make_binding,
+        #pufferlib.registry.nmmo.make_binding,
         pufferlib.registry.smac.make_binding,
     ]
 
