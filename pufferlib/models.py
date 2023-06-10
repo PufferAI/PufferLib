@@ -77,7 +77,7 @@ class Policy(torch.nn.Module, ABC):
         raise NotImplementedError
 
 class Default(Policy):
-    def __init__(self, binding, input_size=256, hidden_size=256):
+    def __init__(self, binding, input_size=128, hidden_size=128):
         '''Default PyTorch policy, meant for debugging.
         This should run with any environment but is unlikely to learn anything.
         

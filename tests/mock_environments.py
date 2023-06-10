@@ -9,7 +9,7 @@ from pettingzoo.utils.env import ParallelEnv
 import pufferlib
 import pufferlib.utils
 
-HIGH = 2**20
+HIGH = 100
 LOW = 0
 
 ### Performance test environment
@@ -65,12 +65,16 @@ class PerformanceBinding:
 def _agent_str_to_int(agent):
     return int(agent.split('_')[-1])
 
-def _sample_space(agent, tick, space):
+def _sample_space(agent, tick, space, zero=True):
     if isinstance(space, gym.spaces.Discrete):
+        if zero:
+            return 0
         return hash(f'{agent}-{tick}') % space.n
     elif isinstance(space, gym.spaces.Box):
+        if zero:
+            return np.zeros(space.shape)
         nonce = (hash(agent) % HIGH + tick/10) % (HIGH - 1)
-        return np.linspace(nonce, nonce + 0.01, num=space.shape[0]).astype(np.float32)
+        return np.array([nonce+0.01*t for t in range(space.shape[0])], dtype=np.float32)
     elif isinstance(space, gym.spaces.Tuple):
         return tuple(_sample_space(agent, tick, s) for s in space.spaces)
     elif isinstance(space, gym.spaces.Dict):
@@ -129,7 +133,7 @@ def make_mock_multiagent_env(
                 self.agents.remove(kill)
                 # TODO: Make pufferlib work without pad obs
                 # but still require rewards, dones, and optionally infos
-                obs[kill] = _sample_space(kill, self.tick, observation_space)
+                obs[kill] = _sample_space(kill, self.tick, observation_space, zero=True)
                 rewards[kill] = -1
                 dones[kill] = True
                 infos[kill] = {'dead': True}

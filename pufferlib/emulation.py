@@ -273,12 +273,6 @@ def make_puffer_env_cls(scope, raw_obs):
 
         @utils.profile
         def _poststep(self, obs, rewards, dones, infos):
-            # Terminate episode at horizon or if all agents are done
-            if scope.emulate_const_horizon is not None:
-                assert self._step <= scope.emulate_const_horizon
-                if self._step == scope.emulate_const_horizon:
-                    self.done = True
-
             # Group by teams
             obs = self._group_by_team(obs)
             rewards = self._group_by_team(rewards)
@@ -319,22 +313,22 @@ def make_puffer_env_cls(scope, raw_obs):
                     del dones[team]
 
             # Record episode statistics
-            for agent in self._teams:
-                self._epoch_lengths[agent] += 1
-                self._epoch_returns[agent] += rewards[agent]
+            if scope.record_episode_statistics:
+                for agent in self._teams:
+                    if dones[agent]:
+                        continue
 
-                if scope.record_episode_statistics and dones[agent]:
-                    #TODO: Resolve this with global infos
+                    self._epoch_lengths[agent] += 1
+                    self._epoch_returns[agent] += rewards[agent]
+
+                if self.done:
                     if 'episode' not in infos:
                         infos['episode'] = {}
                         infos['episode']['r'] = []
                         infos['episode']['l'] = []
 
-                    infos['episode']['r'].append(self._epoch_returns[agent])
-                    infos['episode']['l'].append(self._epoch_lengths[agent])
-
-                    self._epoch_lengths[agent] = 0
-                    self._epoch_returns[agent] = 0
+                    infos['episode']['r'] = self._epoch_returns[agent]
+                    infos['episode']['l'] = self._epoch_lengths[agent]
 
             # Observation shape test
             if __debug__:
@@ -348,12 +342,22 @@ def make_puffer_env_cls(scope, raw_obs):
             return obs, rewards, dones, infos
 
         @property
-        def timers(self):
-            return self._timers
+        def done(self):
+            if len(self.agents) == 0:
+                return True
+ 
+            if scope.emulate_const_horizon is None:
+                return False
+            
+            return self._step >= scope.emulate_const_horizon
 
         @property
         def max_agents(self):
             return len(self._teams)
+
+        @property
+        def timers(self):
+            return self._timers
 
         @property
         def raw_single_observation_space(self):
@@ -427,6 +431,7 @@ def make_puffer_env_cls(scope, raw_obs):
             if team in self.atn_space_cache:
                 return self.atn_space_cache[team]
 
+            # TODO: Handle variable length teams
             atn_space = gym.spaces.Dict({a: self.env.action_space(a) for a in self._teams[team]})
 
             self._flat_action_space[team] = _flatten_space(atn_space)
@@ -457,8 +462,9 @@ def make_puffer_env_cls(scope, raw_obs):
         @utils.profile
         def reset(self, seed=None):
             #Reset the environment and return observations
-            self._epoch_returns = defaultdict(float)
-            self._epoch_lengths = defaultdict(int)
+            if scope.record_episode_statistics:
+                self._epoch_returns = defaultdict(float)
+                self._epoch_lengths = defaultdict(int)
 
             obs = self._reset_env(seed)
             obs = self._group_by_team(obs)
@@ -468,7 +474,6 @@ def make_puffer_env_cls(scope, raw_obs):
 
             self.agents = self.env.agents
             self.initialized = True
-            self.done = False
 
             # Sort observations according to possible_agents
             # All keys must be present in possible_agents on reset
@@ -505,14 +510,12 @@ def make_puffer_env_cls(scope, raw_obs):
             obs, rewards, dones, infos = self._step_env(actions)
 
             self.agents = self.env.agents
-            num_agents = len(self.agents)
-            self.done = num_agents == 0
             self._step += 1
 
             # Inject number of agent steps into timer logs
             if not hasattr(self._timers['step'], 'total_agent_steps'):
                 self._timers['step'].total_agent_steps = 0
-            self._timers['step'].total_agent_steps += num_agents
+            self._timers['step'].total_agent_steps += len(self.agents)
 
             obs, rewards, dones, infos = self._poststep(obs, rewards, dones, infos)
             return obs, rewards, dones, infos
