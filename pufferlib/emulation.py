@@ -324,8 +324,6 @@ def make_puffer_env_cls(scope, raw_obs):
                 if self.done:
                     if 'episode' not in infos:
                         infos['episode'] = {}
-                        infos['episode']['r'] = []
-                        infos['episode']['l'] = []
 
                     infos['episode']['r'] = self._epoch_returns[agent]
                     infos['episode']['l'] = self._epoch_lengths[agent]
@@ -602,7 +600,11 @@ class Binding:
         if old_seed:
             raw_obs = raw_local_env.reset()
         else:
-            raw_obs = raw_local_env.reset(seed=42)
+            try:
+                raw_obs = raw_local_env.reset(seed=42)
+            except:
+                raw_obs = raw_local_env.reset()
+                print('WARNING: Environment does not support seeding.')
 
         self._env_cls = make_puffer_env_cls(scope, raw_obs=raw_obs)
 
