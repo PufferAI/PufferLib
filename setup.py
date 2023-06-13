@@ -9,7 +9,7 @@ docs = [
     'sphinxcontrib-youtube==1.0.1',
 ]
 
-tests = {
+all_environments = {
     'atari': [
         'gym[atari,accept-rom-license]==0.23.0',
         'stable_baselines3==1.2.0',
@@ -35,11 +35,12 @@ tests = {
     ],
     'dm_lab': [
         'gym_deepmindlab==0.1.2',
+        'dm_env==1.6',
     ],
-    #'griddly': [
-    #    'imageio==2.23.0',
-    #    'griddly==1.4.2',
-    #],
+    'griddly': [
+        'imageio==2.23.0',
+        'griddly==1.4.2',
+    ],
     'magent': [
         'magent==0.2.4',
     ],
@@ -59,17 +60,15 @@ tests = {
     #],
 }
 
-compatible = [
-    *list(tests['atari'].values()),
-    *list(tests['box2d'].values()),
-    *list(tests['butterfly'].values()),
-    *list(tests['crafter'].values()),
-    *list(tests['dm_control'].values()),
-    *list(tests['dm_lab'].values()),
-    *list(tests['magent'].values()),
-    *list(tests['microrts'].values()),
-    *list(tests['minerl'].values()),
-    *list(tests['nethack'].values()),
+compatible_environments = [
+    *all_environments['atari'],
+    *all_environments['box2d'],
+    *all_environments['butterfly'],
+    *all_environments['crafter'],
+    *all_environments['dm_lab'],
+    *all_environments['magent'],
+    *all_environments['microrts'],
+    *all_environments['nethack'],
 ]
 
 rllib = [
@@ -85,9 +84,9 @@ cleanrl = [
     'psutil==5.9.5',
 ]
 
-flat_tests = list(set(chain.from_iterable(tests.values())))
+flat_environments = list(set(chain.from_iterable(all_environments.values())))
 
-extra_all = docs + flat_tests + rllib
+extra_all = docs + compatible_environments + rllib
 
 setup(
     name="pufferlib",
@@ -108,9 +107,9 @@ setup(
         'docs': docs,
         'rllib': rllib,
         'cleanrl': cleanrl,
-        'tests': flat_tests,
-        'all': extra_all,
-        **tests,
+        'environments': compatible_environments,
+        'all_compatible': docs + cleanrl + rllib + compatible_environments,
+        **all_environments,
     },
     python_requires=">=3.8",
     license="MIT",
@@ -126,7 +125,6 @@ setup(
         "Programming Language :: Python :: 3.9",
     ],
 )
-
 
 #stable_baselines3
 #supersuit==3.3.5
