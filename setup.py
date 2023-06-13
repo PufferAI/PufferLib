@@ -59,6 +59,19 @@ tests = {
     #],
 }
 
+compatible = [
+    *list(tests['atari'].values()),
+    *list(tests['box2d'].values()),
+    *list(tests['butterfly'].values()),
+    *list(tests['crafter'].values()),
+    *list(tests['dm_control'].values()),
+    *list(tests['dm_lab'].values()),
+    *list(tests['magent'].values()),
+    *list(tests['microrts'].values()),
+    *list(tests['minerl'].values()),
+    *list(tests['nethack'].values()),
+]
+
 rllib = [
     'ray[all]==2.0.0',
     'setproctitle==1.1.10',

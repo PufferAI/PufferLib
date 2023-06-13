@@ -41,8 +41,11 @@ class CleanPuffeRL:
         num_cores=psutil.cpu_count(logical=False),
         num_steps=128,
         run_name=None,
+        cpu_offload=True,
+        verbose=True
     ):
         self.start_time = time.time()
+        self.verbose = verbose
 
         # Note: Must recompute num_envs for multiagent envs
         envs_per_worker = num_envs / num_cores
@@ -50,7 +53,23 @@ class CleanPuffeRL:
         assert envs_per_worker >= 1
         envs_per_worker = int(envs_per_worker)
 
+        # Create environments
+        process = psutil.Process()
+        allocated = process.memory_info().rss
+        self.buffers = [
+            vec_backend(
+                binding,
+                num_workers=num_cores,
+                envs_per_worker=envs_per_worker,
+            )
+            for _ in range(num_buffers)
+        ]
+
+        if verbose:
+            print('Allocated %.2f MB to environments. Only accurate for Serial backend.' % ((process.memory_info().rss - allocated) / 1e6))
+
         self.binding = binding
+        self.cpu_offload = cpu_offload
         self.config = config
         self.num_buffers = num_buffers
         self.num_envs = num_envs
@@ -79,16 +98,6 @@ class CleanPuffeRL:
         self.agent = agent.to(self.device)
         self.agent.is_recurrent = hasattr(self.agent, "lstm")
 
-        # Create environments
-        self.buffers = [
-            vec_backend(
-                self.binding,
-                num_workers=self.num_cores,
-                envs_per_worker=self.envs_per_worker,
-            )
-            for _ in range(self.num_buffers)
-        ]
-
         # Setup optimizer
         self.learning_rate = learning_rate
         self.optimizer = optim.Adam(agent.parameters(), lr=learning_rate, eps=1e-5)
@@ -98,11 +107,6 @@ class CleanPuffeRL:
 
         self.wandb_run_id = None
         self.wandb_initialized = False
-        self.writer = None
-
-    def init_writer(self):
-        if self.writer is not None:
-            return
 
         self.writer = SummaryWriter(f"runs/{self.run_name}")
         self.writer.add_text(
@@ -141,13 +145,14 @@ class CleanPuffeRL:
         self.global_step = resume_state.get('global_step', 0)
         self.agent_step = resume_state.get('agent_step', 0)
         self.update = resume_state['update']
-        lib.agent.util.load_matching_state_dict(self.agent, resume_state['agent_state_dict'])
 
-        print(f'Resuming from {path} with wandb_run_id={self.wandb_run_id}')
+        if self.verbose:
+            print(f'Resuming from {path} with wandb_run_id={self.wandb_run_id}')
+
+        self.agent.load_state_dict(resume_state['agent_state_dict'])
         self.optimizer.load_state_dict(resume_state['optimizer_state_dict'])
 
     def save_model(self, save_path, **kwargs):
-      temp_path = os.path.join(f'{save_path}.tmp')
       state = {
         "agent_state_dict": self.agent.state_dict(),
         "optimizer_state_dict": self.optimizer.state_dict(),
@@ -157,7 +162,11 @@ class CleanPuffeRL:
         "update": self.update,
         **kwargs
       }
-      print(f'Saving checkpoint to {save_path}')
+
+      if self.verbose:
+          print(f'Saving checkpoint to {save_path}')
+
+      temp_path = os.path.join(f'{save_path}.tmp')
       torch.save(state, temp_path)
       os.rename(temp_path, save_path)
 
@@ -179,9 +188,11 @@ class CleanPuffeRL:
                 next_lstm_state.append(None)
 
         common_shape = (self.num_steps, self.num_buffers, self.num_envs * self.num_agents)
-        return SimpleNamespace(
+
+        allocated = torch.cuda.memory_allocated(self.device)
+        data = SimpleNamespace(
             next_obs=next_obs, next_done=next_done, next_lstm_state=next_lstm_state,
-            obs=torch.zeros(common_shape + self.binding.single_observation_space.shape).to(self.device),
+            obs=torch.zeros(common_shape + self.binding.single_observation_space.shape).to('cpu' if self.cpu_offload else self.device),
             actions=torch.zeros(common_shape + self.binding.single_action_space.shape, dtype=int).to(self.device),
             logprobs=torch.zeros(common_shape).to(self.device),
             rewards=torch.zeros(common_shape).to(self.device),
@@ -189,11 +200,15 @@ class CleanPuffeRL:
             values=torch.zeros(common_shape).to(self.device),
         )
 
+        if self.verbose:
+            print('Allocated %.2f GB to storage' % ((torch.cuda.memory_allocated(self.device) - allocated) / 1e9))
+
+        return data
+
     @pufferlib.utils.profile
     def evaluate(self, agent, data, max_episodes=None):
-        num_episodes = 0
+        allocated = torch.cuda.memory_allocated(self.device)
 
-        self.init_writer()
         data.initial_lstm_state = None
         if self.agent.is_recurrent:
             data.initial_lstm_state = [
@@ -201,11 +216,9 @@ class CleanPuffeRL:
                 torch.cat([e[1].clone() for e in data.next_lstm_state], dim=1)
             ]
 
-        epoch_lengths = []
-        epoch_returns = []
         env_step_time = 0
         inference_time = 0
-
+        num_episodes = 0
         for step in range(0, self.num_steps + 1):
             if max_episodes and num_episodes >= max_episodes:
                 break
@@ -215,7 +228,7 @@ class CleanPuffeRL:
 
                 # TRY NOT TO MODIFY: Receive from game and log data
                 if step == 0:
-                    data.obs[step, buf] = data.next_obs[buf]
+                    data.obs[step, buf] = data.next_obs[buf].to('cpu' if self.cpu_offload else self.device)
                     data.dones[step, buf] = data.next_done[buf]
                 else:
                     start = time.time()
@@ -226,7 +239,7 @@ class CleanPuffeRL:
                     data.next_done[buf] = torch.Tensor(d).to(self.device)
 
                     if step != self.num_steps:
-                        data.obs[step, buf] = data.next_obs[buf]
+                        data.obs[step, buf] = data.next_obs[buf].to('cpu' if self.cpu_offload else self.device)
                         data.dones[step, buf] = data.next_done[buf]
 
                     data.rewards[step - 1, buf] = torch.tensor(r).float().to(self.device).view(-1)
@@ -235,13 +248,8 @@ class CleanPuffeRL:
                     num_stats = 0
                     for item in i:
                         if "episode" in item.keys():
-                            er = item["episode"]["r"]
-                            el = item["episode"]["l"]
-                            epoch_returns.append(er)
-                            epoch_lengths.append(el)
                             self.writer.add_scalar("charts/episodic_return", item["episode"]["r"], self.global_step)
                             self.writer.add_scalar("charts/episodic_length", item["episode"]["l"], self.global_step)
-
 
                         for agent_info in item.values():
                             if "episode_stats" in agent_info.keys():
@@ -259,6 +267,7 @@ class CleanPuffeRL:
 
                 if step == self.num_steps:
                     continue
+
                 if max_episodes and num_episodes >= max_episodes:
                     continue
 
@@ -266,9 +275,9 @@ class CleanPuffeRL:
                 with torch.no_grad():
                     start = time.time()
                     if self.agent.is_recurrent:
-                        action, logprob, _, value, data.next_lstm_state[buf] = agent.get_action_and_value(data.next_obs[buf], data.next_lstm_state[buf], data.next_done[buf])
+                        action, logprob, _, value, data.next_lstm_state[buf] = agent.get_action_and_value(data.next_obs[buf].to(self.device), data.next_lstm_state[buf], data.next_done[buf])
                     else:
-                        action, logprob, _, value = agent.get_action_and_value(data.next_obs[buf])
+                        action, logprob, _, value = agent.get_action_and_value(data.next_obs[buf].to(self.device))
                     inference_time += time.time() - start
                     data.values[step, buf] = value.flatten()
 
@@ -279,6 +288,7 @@ class CleanPuffeRL:
                 start = time.time()
                 envs.send(action.cpu().numpy(), None)
                 env_step_time += time.time() - start
+
         epoch_step = self.num_envs * self.num_agents * self.num_buffers * self.num_steps
         env_sps = int(epoch_step / env_step_time)
         inference_sps = int(epoch_step / inference_time)
@@ -297,18 +307,14 @@ class CleanPuffeRL:
                 # TODO: Test that this matches the original implementation.
                 self.writer.add_scalar(f'performance/env/{k}', np.mean(v.delta), self.global_step)
 
-        if len(epoch_returns) > 0:
-            epoch_return = np.mean(epoch_returns)
-            epoch_length = int(np.mean(epoch_lengths))
-        else:
-            epoch_return = 0.0
-            epoch_length = 0.0
-
         uptime = timedelta(seconds=int(time.time() - self.start_time))
 
+        if self.verbose:
+            print('%.2f GB Allocated at the start of evaluation' % (allocated / 1e9))
+            print('Allocated %.2f GB during evaluation\n' % ((torch.cuda.memory_allocated(self.device) - allocated) / 1e9))
+
         print(
-            f'Epoch: {self.update} - Mean Return: {epoch_return:<5.4}, Episode Length: {epoch_length}\n'
-            f'\t{self.global_step // 1000}K steps - {uptime} Elapsed\n'
+            f'Epoch: {self.update} - {self.global_step // 1000}K steps - {uptime} Elapsed\n'
             f'\tSteps Per Second: Env={env_sps}, Inference={inference_sps}'
         )
 
@@ -332,7 +338,7 @@ class CleanPuffeRL:
             target_kl=None,
         ):
         assert self.num_steps % bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
-        self.init_writer()
+        allocated = torch.cuda.memory_allocated(self.device)
 
         # Annealing the rate if instructed to do so.
         if anneal_lr:
@@ -381,11 +387,11 @@ class CleanPuffeRL:
                 if self.agent.is_recurrent:
                     initial_lstm_state = initial_initial_lstm_state
                     _, newlogprob, entropy, newvalue, initial_lstm_state = agent.get_action_and_value(
-                        b_obs[minibatch], initial_lstm_state, b_dones[minibatch], b_actions[minibatch])
+                        b_obs[minibatch].to(self.device), initial_lstm_state, b_dones[minibatch], b_actions[minibatch])
                     initial_lstm_state = (initial_lstm_state[0].detach(), initial_lstm_state[1].detach())
                 else:
                     _, newlogprob, entropy, newvalue = agent.get_action_and_value(
-                        b_obs[minibatch].reshape(-1, *self.binding.single_observation_space.shape), action=b_actions[minibatch])
+                        b_obs[minibatch].reshape(-1, *self.binding.single_observation_space.shape).to(self.device), action=b_actions[minibatch])
 
                 logratio = newlogprob - b_logprobs[minibatch].reshape(-1)
                 ratio = logratio.exp()
@@ -439,11 +445,14 @@ class CleanPuffeRL:
         # TIMING: performance metrics to evaluate cpu/gpu usage
         train_time = time.time() - train_time
         train_sps = int(self.batch_size / train_time)
+        self.update += 1
 
         print(
             f'\tTrain={train_sps}\n'
         )
-        self.update += 1
+
+        if self.verbose:
+            print('Allocated %.2f MB during training' % ((torch.cuda.memory_allocated(self.device) - allocated) / 1e6))
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         self.writer.add_scalar("performance/train_sps", train_sps, self.global_step)
@@ -464,111 +473,3 @@ class CleanPuffeRL:
         if self.wandb_initialized:
             import wandb
             wandb.finish()
-
-
-from nmmo.entity.entity import EntityState
-EntityId = EntityState.State.attr_name_to_col["id"]
-
-class Agent(pufferlib.models.Policy):
-    def __init__(self, binding, input_size=128, hidden_size=256):
-        '''Simple custom PyTorch policy subclassing the pufferlib BasePolicy
-
-        This requires only that you structure your network as an observation encoder,
-        an action decoder, and a critic function. If you use our LSTM support, it will
-        be added between the encoder and the decoder.
-        '''
-        super().__init__(binding)
-        self.raw_single_observation_space = binding.raw_single_observation_space
-
-        # A dumb example encoder that applies a linear layer to agent self features
-        observation_size = binding.raw_single_observation_space['Entity'].shape[1]
-
-        self.tile_conv_1 = torch.nn.Conv2d(3, 32, 3)
-        self.tile_conv_2 = torch.nn.Conv2d(32, 8, 3)
-        self.tile_fc = torch.nn.Linear(8*11*11, input_size)
-
-        self.entity_fc = torch.nn.Linear(23, input_size)
-
-        self.proj_fc = torch.nn.Linear(256, input_size)
-
-        self.decoders = torch.nn.ModuleList([torch.nn.Linear(hidden_size, n)
-                for n in binding.single_action_space.nvec])
-        self.value_head = torch.nn.Linear(hidden_size, 1)
-
-    def critic(self, hidden):
-        return self.value_head(hidden)
-
-    def encode_observations(self, env_outputs):
-        # TODO: Change 0 for teams when teams are added
-        env_outputs = self.binding.unpack_batched_obs(env_outputs)[0]
-
-        tile = env_outputs['Tile']
-        agents, tiles, features = tile.shape
-        tile = tile.transpose(1, 2).view(agents, features, 15, 15)
-
-        tile = self.tile_conv_1(tile)
-        tile = F.relu(tile)
-        tile = self.tile_conv_2(tile)
-        tile = F.relu(tile)
-        tile = tile.contiguous().view(agents, -1)
-        tile = self.tile_fc(tile)
-        tile = F.relu(tile)
-
-        # Pull out rows corresponding to the agent
-        agentEmb = env_outputs["Entity"]
-        my_id = env_outputs["AgentId"][:,0]
-        entity_ids = agentEmb[:,:,EntityId]
-        mask = (entity_ids == my_id.unsqueeze(1)) & (entity_ids != 0)
-        mask = mask.int()
-        row_indices = torch.where(mask.any(dim=1), mask.argmax(dim=1), torch.zeros_like(mask.sum(dim=1)))
-        entity = agentEmb[torch.arange(agentEmb.shape[0]), row_indices]
-
-        #entity = env_outputs['Entity'][:, 0, :]
-        entity = self.entity_fc(entity)
-        entity = F.relu(entity)
-
-        obs = torch.cat([tile, entity], dim=-1)
-        return self.proj_fc(obs), None
-
-    def decode_actions(self, hidden, lookup, concat=True):
-        actions = [dec(hidden) for dec in self.decoders]
-        if concat:
-            return torch.cat(actions, dim=-1)
-        return actions
-
-if __name__ == '__main__':
-    from pufferlib.registry import nmmo
-    device = 'cuda'
-
-    import nmmo
-    binding = pufferlib.emulation.Binding(
-            env_cls=nmmo.Env,
-            env_name='Neural MMO',
-            emulate_const_horizon=128,
-            #teams={f'team_{i+1}': [i*8+j+1 for j in range(8)] for i in range(16)},
-        )
-
-    envs = pufferlib.vectorization.serial.VecEnv(
-        binding,
-        num_workers=1,
-        envs_per_worker=1,
-    )
-
-    agent = pufferlib.frameworks.cleanrl.make_policy(
-            Agent, recurrent_args=[128, 128],
-            recurrent_kwargs={'num_layers': 1}
-        )(binding, 128, 128).to(device)
-
-    trainer = CleanPuffeRL(binding, agent, num_envs=1, num_steps=128, num_cores=1)
-    #trainer.load_model(path)
-
-    data = trainer.allocate_storage()
-
-    num_updates = 10000
-    for update in range(trainer.update+1, num_updates + 1):
-        trainer.evaluate(agent, data)
-        trainer.train(agent, data)
-
-    trainer.close()
-
-    # TODO: Figure out why this does not exit cleanly
