@@ -202,7 +202,7 @@ class CleanPuffeRL:
 
         if self.verbose:
             print('Allocated %.2f GB to storage' % ((torch.cuda.memory_allocated(self.device) - allocated) / 1e9))
-
+#
         return data
 
     @pufferlib.utils.profile
@@ -228,6 +228,9 @@ class CleanPuffeRL:
 
                 # TRY NOT TO MODIFY: Receive from game and log data
                 if step == 0:
+                    is_done = data.next_done[buf] 
+                    the_obs = data.next_obs[buf]
+                    
                     data.obs[step, buf] = data.next_obs[buf].to('cpu' if self.cpu_offload else self.device)
                     data.dones[step, buf] = data.next_done[buf]
                 else:
@@ -348,6 +351,8 @@ class CleanPuffeRL:
 
         # bootstrap value if not done
         with torch.no_grad():
+            advantages = torch.zeros_like(data.rewards).to(self.device)
+
             for buf in range(self.num_buffers):
                 next_value = agent.get_value(
                     data.next_obs[buf],
@@ -355,18 +360,18 @@ class CleanPuffeRL:
                     data.next_done[buf],
                 ).reshape(1, -1)
 
-                advantages = torch.zeros_like(data.rewards).to(self.device)
                 lastgaelam = 0
                 for t in reversed(range(self.num_steps)):
                     if t == self.num_steps - 1:
                         nextnonterminal = 1.0 - data.next_done[buf]
                         nextvalues = next_value
                     else:
-                        nextnonterminal = 1.0 - data.dones[t + 1]
-                        nextvalues = data.values[t + 1]
-                    delta = data.rewards[t] + gamma * nextvalues * nextnonterminal - data.values[t]
-                    advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
-                returns = advantages + data.values
+                        nextnonterminal = 1.0 - data.dones[t + 1, buf]
+                        nextvalues = data.values[t + 1, buf]
+                    delta = data.rewards[t, buf] + gamma * nextvalues * nextnonterminal - data.values[t, buf]
+                    advantages[t, buf] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+
+            returns = advantages + data.values
 
         #### This is the update logic
         # flatten the batch
