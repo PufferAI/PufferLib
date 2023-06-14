@@ -36,4 +36,6 @@ def test_openskillrating():
             break
     assert passed, 'OpenSkillRating failed'
 
-test_openskillrating()
+
+if __name__ == '__main__':
+    test_openskillrating()
