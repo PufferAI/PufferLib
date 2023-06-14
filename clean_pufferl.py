@@ -40,9 +40,12 @@ class CleanPuffeRL:
         num_envs=8,
         num_cores=psutil.cpu_count(logical=False),
         num_steps=128,
+        bptt_horizon=16,
         run_name=None,
         cpu_offload=True,
-        verbose=True
+        verbose=True,
+        batch_size=2**10,
+        batch_horizon=128,
     ):
         self.start_time = time.time()
         self.verbose = verbose
@@ -79,7 +82,10 @@ class CleanPuffeRL:
         self.envs_per_worker = envs_per_worker
         self.seed = seed
 
-        self.batch_size = int(num_envs * self.num_agents * num_buffers * num_steps)
+        self.batch_size = batch_size
+        self.batch_horizon = batch_horizon
+        self.bptt_horizon = bptt_horizon
+        #self.batch_size = int(num_envs * self.num_agents * num_buffers * num_steps)
         self.num_updates = total_timesteps // self.batch_size
 
         self.global_step = 0
@@ -189,6 +195,8 @@ class CleanPuffeRL:
 
         common_shape = (self.num_steps, self.num_buffers, self.num_envs * self.num_agents)
 
+        batch_rows = self.batch_size // self.batch_horizon
+
         allocated = torch.cuda.memory_allocated(self.device)
         data = SimpleNamespace(
             next_obs=next_obs, next_done=next_done, next_lstm_state=next_lstm_state,
@@ -198,6 +206,13 @@ class CleanPuffeRL:
             rewards=torch.zeros(common_shape).to(self.device),
             dones=torch.zeros(common_shape).to(self.device),
             values=torch.zeros(common_shape).to(self.device),
+            b_obs=torch.zeros(batch_rows, self.batch_horizon, *self.binding.single_observation_space.shape).to('cpu' if self.cpu_offload else self.device),
+            b_logprobs=torch.zeros(batch_rows, self.batch_horizon).to(self.device),
+            b_actions=torch.zeros(batch_rows, self.batch_horizon, *self.binding.single_action_space.shape).to(self.device),
+            b_dones=torch.zeros(batch_rows, self.batch_horizon).to(self.device),
+            b_values=torch.zeros(batch_rows, self.batch_horizon).to(self.device),
+            b_advantages=torch.zeros(batch_rows, self.batch_horizon).to(self.device),
+            b_returns=torch.zeros(batch_rows, self.batch_horizon).to(self.device),
         )
 
         if self.verbose:
@@ -206,20 +221,18 @@ class CleanPuffeRL:
         return data
 
     @pufferlib.utils.profile
-    def evaluate(self, agent, data, max_episodes=None):
+    def evaluate(self, agent, data, max_episodes=None, gamma=0.99, gae_lambda=0.95):
         allocated = torch.cuda.memory_allocated(self.device)
 
-        data.initial_lstm_state = None
-        if self.agent.is_recurrent:
-            data.initial_lstm_state = [
-                torch.cat([e[0].clone() for e in data.next_lstm_state], dim=1),
-                torch.cat([e[1].clone() for e in data.next_lstm_state], dim=1)
-            ]
-
+        steps_collected = 0
         env_step_time = 0
         inference_time = 0
         num_episodes = 0
         for step in range(0, self.num_steps + 1):
+            # How do we break?
+            #if steps_collected >= self.batch_size:
+            #    break
+
             if max_episodes and num_episodes >= max_episodes:
                 break
 
@@ -228,11 +241,9 @@ class CleanPuffeRL:
 
                 # TRY NOT TO MODIFY: Receive from game and log data
                 if step == 0:
-                    is_done = data.next_done[buf] 
-                    the_obs = data.next_obs[buf]
-                    
                     data.obs[step, buf] = data.next_obs[buf].to('cpu' if self.cpu_offload else self.device)
                     data.dones[step, buf] = data.next_done[buf]
+                    steps_collected += data.next_done[buf].nelement()
                 else:
                     start = time.time()
                     o, r, d, i = envs.recv()
@@ -240,6 +251,7 @@ class CleanPuffeRL:
 
                     data.next_obs[buf] = torch.Tensor(o).to(self.device)
                     data.next_done[buf] = torch.Tensor(d).to(self.device)
+                    steps_collected += (data.dones[step-1:step+1].sum(0) != 2).sum()
 
                     if step != self.num_steps:
                         data.obs[step, buf] = data.next_obs[buf].to('cpu' if self.cpu_offload else self.device)
@@ -292,6 +304,34 @@ class CleanPuffeRL:
                 envs.send(action.cpu().numpy(), None)
                 env_step_time += time.time() - start
 
+        # bootstrap value if not done
+        with torch.no_grad():
+            advantages = torch.zeros_like(data.rewards).to(self.device)
+
+            for buf in range(self.num_buffers):
+                next_value = agent.get_value(
+                    data.next_obs[buf],
+                    data.next_lstm_state[buf],
+                    data.next_done[buf],
+                ).reshape(1, -1)
+
+                lastgaelam = 0
+                for t in reversed(range(self.num_steps)):
+                    #TODO: Is this correct now that num_steps isn't always the stop?
+                    if t == self.num_steps - 1:
+                        nextnonterminal = 1.0 - data.next_done[buf]
+                        nextvalues = next_value
+                    else:
+                        nextnonterminal = 1.0 - data.dones[t + 1, buf]
+                        nextvalues = data.values[t + 1, buf]
+                    delta = data.rewards[t, buf] + gamma * nextvalues * nextnonterminal - data.values[t, buf]
+                    advantages[t, buf] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+
+            returns = advantages + data.values
+
+        data.returns = returns
+        data.advantages = advantages
+
         epoch_step = self.num_envs * self.num_agents * self.num_buffers * self.num_steps
         env_sps = int(epoch_step / env_step_time)
         inference_sps = int(epoch_step / inference_time)
@@ -327,11 +367,8 @@ class CleanPuffeRL:
     def train(
             self, agent, data,
             anneal_lr=True,
-            gamma=0.99,
-            gae_lambda=0.95,
             num_minibatches=4,
             update_epochs=4,
-            bptt_horizon=16,
             norm_adv=True,
             clip_coef=0.1,
             clip_vloss=True,
@@ -340,8 +377,27 @@ class CleanPuffeRL:
             max_grad_norm=0.5,
             target_kl=None,
         ):
-        assert self.num_steps % bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
+        assert self.num_steps % self.bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
         allocated = torch.cuda.memory_allocated(self.device)
+        
+        # Flatten the batch
+        r, c = 0, 0
+        for buf in range(self.num_buffers):
+            for a in range(self.num_envs * self.num_agents):
+                for step in range(self.num_steps):
+                    if step == 0 or data.dones[step, buf, a] != 0 or data.dones[step-1, buf, a] != 0:
+                        data.b_obs[r, c] = data.obs[step, buf, a]
+                        data.b_logprobs[r, c] = data.logprobs[step, buf, a]
+                        data.b_actions[r, c] = data.actions[step, buf, a]
+                        data.b_dones[r, c] = data.dones[step, buf, a]
+                        data.b_values[r, c] = data.values[step, buf, a]
+                        data.b_advantages[r, c] = data.advantages[step, buf, a]
+                        data.b_returns[r, c] = data.returns[step, buf, a]
+
+                        c += 1
+                        if c == self.batch_horizon:
+                            r += 1
+                            c = 0
 
         # Annealing the rate if instructed to do so.
         if anneal_lr:
@@ -349,56 +405,40 @@ class CleanPuffeRL:
             lrnow = frac * self.learning_rate
             self.optimizer.param_groups[0]["lr"] = lrnow
 
-        # bootstrap value if not done
-        with torch.no_grad():
-            advantages = torch.zeros_like(data.rewards).to(self.device)
 
-            for buf in range(self.num_buffers):
-                next_value = agent.get_value(
-                    data.next_obs[buf],
-                    data.next_lstm_state[buf],
-                    data.next_done[buf],
-                ).reshape(1, -1)
-
-                lastgaelam = 0
-                for t in reversed(range(self.num_steps)):
-                    if t == self.num_steps - 1:
-                        nextnonterminal = 1.0 - data.next_done[buf]
-                        nextvalues = next_value
-                    else:
-                        nextnonterminal = 1.0 - data.dones[t + 1, buf]
-                        nextvalues = data.values[t + 1, buf]
-                    delta = data.rewards[t, buf] + gamma * nextvalues * nextnonterminal - data.values[t, buf]
-                    advantages[t, buf] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
-
-            returns = advantages + data.values
-
-        #### This is the update logic
-        # flatten the batch
+        '''
         b_obs = data.obs.reshape((num_minibatches, bptt_horizon, -1) + self.binding.single_observation_space.shape)
         b_logprobs = data.logprobs.reshape(num_minibatches, bptt_horizon, -1)
         b_actions = data.actions.reshape((num_minibatches, bptt_horizon, -1) + self.binding.single_action_space.shape)
         b_dones = data.dones.reshape(num_minibatches, bptt_horizon, -1)
         b_values = data.values.reshape(num_minibatches, -1)
-        b_advantages = advantages.reshape(num_minibatches, bptt_horizon, -1)
-        b_returns = returns.reshape(num_minibatches, -1)
+        b_advantages = data.advantages.reshape(num_minibatches, bptt_horizon, -1)
+        b_returns = data.returns.reshape(num_minibatches, -1)
+        '''
 
         # Optimizing the policy and value network
+
         train_time = time.time()
         clipfracs = []
         for epoch in range(update_epochs):
-            initial_initial_lstm_state = data.initial_lstm_state
-            for minibatch in range(num_minibatches):
+            lstm_state = None
+            for t in range(0, self.batch_horizon, self.bptt_horizon):
+                mb_obs = data.b_obs[:, t:t+self.bptt_horizon].to(self.device)
+                mb_logprobs = data.b_logprobs[:, t:t+self.bptt_horizon]
+                mb_actions = data.b_actions[:, t:t+self.bptt_horizon].contiguous()
+                mb_dones = data.b_dones[:, t:t+self.bptt_horizon]
+                mb_values = data.b_values[:, t:t+self.bptt_horizon].reshape(-1)
+                mb_advantages = data.b_advantages[:, t:t+self.bptt_horizon].reshape(-1)
+                mb_returns = data.b_returns[:, t:t+self.bptt_horizon].reshape(-1)
+
                 if self.agent.is_recurrent:
-                    initial_lstm_state = initial_initial_lstm_state
-                    _, newlogprob, entropy, newvalue, initial_lstm_state = agent.get_action_and_value(
-                        b_obs[minibatch].to(self.device), initial_lstm_state, b_dones[minibatch], b_actions[minibatch])
-                    initial_lstm_state = (initial_lstm_state[0].detach(), initial_lstm_state[1].detach())
+                    _, newlogprob, entropy, newvalue, lstm_state = agent.get_action_and_value(mb_obs, lstm_state, mb_dones, mb_actions)
+                    lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
                 else:
                     _, newlogprob, entropy, newvalue = agent.get_action_and_value(
-                        b_obs[minibatch].reshape(-1, *self.binding.single_observation_space.shape).to(self.device), action=b_actions[minibatch])
+                        mb_obs.reshape(-1, *self.binding.single_observation_space.shape), action=mb_actions)
 
-                logratio = newlogprob - b_logprobs[minibatch].reshape(-1)
+                logratio = newlogprob - mb_logprobs.reshape(-1)
                 ratio = logratio.exp()
 
                 with torch.no_grad():
@@ -407,7 +447,7 @@ class CleanPuffeRL:
                     approx_kl = ((ratio - 1) - logratio).mean()
                     clipfracs += [((ratio - 1.0).abs() > clip_coef).float().mean().item()]
 
-                mb_advantages = b_advantages[minibatch].reshape(-1)
+                mb_advantages = mb_advantages.reshape(-1)
                 if norm_adv:
                     mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
 
@@ -419,17 +459,17 @@ class CleanPuffeRL:
                 # Value loss
                 newvalue = newvalue.view(-1)
                 if clip_vloss:
-                    v_loss_unclipped = (newvalue - b_returns[minibatch]) ** 2
-                    v_clipped = b_values[minibatch] + torch.clamp(
-                        newvalue - b_values[minibatch],
+                    v_loss_unclipped = (newvalue - mb_returns) ** 2
+                    v_clipped = mb_values + torch.clamp(
+                        newvalue - mb_values,
                         -clip_coef,
                         clip_coef,
                     )
-                    v_loss_clipped = (v_clipped - b_returns[minibatch]) ** 2
+                    v_loss_clipped = (v_clipped - mb_returns) ** 2
                     v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
                     v_loss = 0.5 * v_loss_max.mean()
                 else:
-                    v_loss = 0.5 * ((newvalue - b_returns[minibatch]) ** 2).mean()
+                    v_loss = 0.5 * ((newvalue - mb_returns) ** 2).mean()
 
                 entropy_loss = entropy.mean()
                 loss = pg_loss - ent_coef * entropy_loss + v_loss * vf_coef
@@ -443,7 +483,7 @@ class CleanPuffeRL:
                 if approx_kl > target_kl:
                     break
 
-        y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
+        y_pred, y_true = data.b_values.cpu().numpy(), data.b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
