@@ -1,6 +1,4 @@
-import numpy as np
 from scipy.stats import norm
-from collections import defaultdict
 
 from pufferlib.rating import OpenSkillRating
 
