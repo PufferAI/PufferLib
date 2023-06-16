@@ -301,37 +301,34 @@ def make_puffer_env_cls(scope, raw_obs):
                 else:
                     del rewards[team]
 
-                if dones[team]:
+                if scope.emulate_const_num_agents or dones[team]:
                     # TODO: Should dones per team be true on the first tick
                     # or all subsequent ticks as well?
                     dones[team] = self.done or \
                         not any([e in self.agents for e in self._teams[team]])
-
-                elif scope.emulate_const_num_agents:
-                    dones[team] = self.done
                 else:
                     del dones[team]
 
             # Record episode statistics
             if scope.record_episode_statistics:
-                for agent in self._teams:
-                    if dones[agent]:
+                for team in self._teams:
+                    if dones[team]:
                         continue
 
-                    self._epoch_lengths[agent] += 1
-                    self._epoch_returns[agent] += rewards[agent]
+                    self._epoch_lengths[team] += 1
+                    self._epoch_returns[team] += rewards[team]
 
-                if self.done:
-                    if 'episode' not in infos:
-                        infos['episode'] = {}
+                    if self.done:
+                        if 'episode' not in infos:
+                            infos['episode'] = {}
 
-                    infos['episode']['r'] = self._epoch_returns[agent]
-                    infos['episode']['l'] = self._epoch_lengths[agent]
+                        infos['episode']['r'] = self._epoch_returns[team]
+                        infos['episode']['l'] = self._epoch_lengths[team]
 
             # Observation shape test
             if __debug__:
                 for team, ob in obs.items():
-                    if not self.observation_space(agent).contains(ob):
+                    if not self.observation_space(team).contains(ob):
                         raise ValueError(
                             f'observation:\n{ob}\n for agent/team {team} not in '
                             f'observation space:\n{self.observation_space(team)}'

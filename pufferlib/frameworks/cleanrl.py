@@ -38,7 +38,7 @@ def make_policy(policy_cls, recurrent_cls=torch.nn.LSTM,
     class CleanRLPolicy(policy_cls):
         def _compute_hidden(self, x, lstm_state=None):
             if is_recurrent:
-                batch_size = lstm_state[0].shape[1]
+                batch_size = x.shape[0]
                 x = x.reshape((-1, batch_size, x.shape[-1]))
                 hidden, state, lookup = self.encode_observations(x, lstm_state)
                 return hidden, state, lookup

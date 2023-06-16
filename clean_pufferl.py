@@ -1,5 +1,5 @@
 # PufferLib's customized CleanRL PPO + LSTM implementation
-# Adapted from https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_atari_envpoolpy
+# TODO: Testing, cleaned up metric/perf/mem logging
 
 from collections import defaultdict
 from pdb import run, set_trace as T
@@ -10,6 +10,8 @@ import time
 from datetime import timedelta
 from types import SimpleNamespace
 
+from dataclasses import dataclass
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -18,132 +20,99 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 import pufferlib
+import pufferlib.emulation
 import pufferlib.utils
 import pufferlib.frameworks.cleanrl
 import pufferlib.vectorization.multiprocessing
 import pufferlib.vectorization.serial
 
+@dataclass
 class CleanPuffeRL:
-    def __init__(
-        self,
-        binding,
-        agent,
-        config={},
-        exp_name=os.path.basename(__file__),
-        seed=1,
-        torch_deterministic=True,
-        cuda=True,
-        vec_backend=pufferlib.vectorization.multiprocessing.VecEnv,
-        total_timesteps=10000000,
-        learning_rate=2.5e-4,
-        num_buffers=1,
-        num_envs=8,
-        num_cores=psutil.cpu_count(logical=False),
-        num_steps=128,
-        bptt_horizon=16,
-        run_name=None,
-        cpu_offload=True,
-        verbose=True,
-        batch_size=2**10,
-        batch_horizon=128,
-    ):
-        self.start_time = time.time()
-        self.verbose = verbose
+    binding: pufferlib.emulation.Binding
+    agent: nn.Module
+    exp_name: str = os.path.basename(__file__)
+    seed: int = 1
+    torch_deterministic: bool = True
+    cuda: bool = True
+    vec_backend: ... = pufferlib.vectorization.multiprocessing.VecEnv
+    total_timesteps: int = 10_000_000
+    learning_rate: float = 2.5e-4
+    num_buffers: int = 1
+    num_envs: int = 8
+    num_cores: int = psutil.cpu_count(logical=False)
+    run_name: str = None
+    cpu_offload: bool = True
+    verbose: bool = True
+    batch_size: int = 2**14
+    use_wandb: bool = False
+    wandb_project_name: str = "pufferlib"
+    wandb_entity: str = None
+    wandb_run_id: str = None
 
-        # Note: Must recompute num_envs for multiagent envs
-        envs_per_worker = num_envs / num_cores
-        assert envs_per_worker == int(envs_per_worker)
-        assert envs_per_worker >= 1
-        envs_per_worker = int(envs_per_worker)
+    def __post_init__(self, *args, **kwargs):
+        self.start_time = time.time()
+
+        self.global_step = self.agent_step = self.start_epoch = self.update = 0
+        self.num_updates = self.total_timesteps // self.batch_size
+        self.num_agents = self.binding.max_agents
+        self.envs_per_worker = self.num_envs // self.num_cores
+        assert self.num_cores * self.envs_per_worker == self.num_envs
+
+        # Seed everything
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+        torch.manual_seed(self.seed)
+        torch.backends.cudnn.deterministic = self.torch_deterministic
 
         # Create environments
         process = psutil.Process()
         allocated = process.memory_info().rss
         self.buffers = [
-            vec_backend(
-                binding,
-                num_workers=num_cores,
-                envs_per_worker=envs_per_worker,
+            self.vec_backend(
+                self.binding,
+                num_workers=self.num_cores,
+                envs_per_worker=self.envs_per_worker,
             )
-            for _ in range(num_buffers)
+            for _ in range(self.num_buffers)
         ]
 
-        if verbose:
+        if self.verbose:
             print('Allocated %.2f MB to environments. Only accurate for Serial backend.' % ((process.memory_info().rss - allocated) / 1e6))
 
-        self.binding = binding
-        self.cpu_offload = cpu_offload
-        self.config = config
-        self.num_buffers = num_buffers
-        self.num_envs = num_envs
-        self.num_agents = binding.max_agents
-        self.num_cores = num_cores
-        self.num_steps = num_steps
-        self.envs_per_worker = envs_per_worker
-        self.seed = seed
-
-        self.batch_size = batch_size
-        self.batch_horizon = batch_horizon
-        self.bptt_horizon = bptt_horizon
-        #self.batch_size = int(num_envs * self.num_agents * num_buffers * num_steps)
-        self.num_updates = total_timesteps // self.batch_size
-
-        self.global_step = 0
-        self.agent_step = 0
-        self.start_epoch = 0
-        self.update = 0
-
-        # Seed everything
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        torch.backends.cudnn.deterministic = torch_deterministic
-
         # Setup agent
-        self.device = torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
-        self.agent = agent.to(self.device)
+        self.device = torch.device("cuda" if torch.cuda.is_available() and self.cuda else "cpu")
+        self.agent = self.agent.to(self.device)
         self.agent.is_recurrent = hasattr(self.agent, "lstm")
 
         # Setup optimizer
-        self.learning_rate = learning_rate
-        self.optimizer = optim.Adam(agent.parameters(), lr=learning_rate, eps=1e-5)
+        self.optimizer = optim.Adam(
+            self.agent.parameters(), lr=self.learning_rate, eps=1e-5)
 
         # Setup logging
-        self.run_name = run_name or f"{binding.env_name}__{seed}__{int(time.time())}"
-
-        self.wandb_run_id = None
-        self.wandb_initialized = False
+        self.run_name = self.run_name or f"{self.binding.env_name}__{self.seed}__{int(time.time())}"
 
         self.writer = SummaryWriter(f"runs/{self.run_name}")
-        self.writer.add_text(
-            "hyperparameters",
-            "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in self.config.items()])),
-        )
 
-    def init_wandb(self, wandb_project_name, wandb_entity, wandb_run_id = None):
-        if self.wandb_initialized:
-            return
+        # TODO: Come up with a better way to log the run
+        #self.writer.add_text(
+        #    "hyperparameters",
+        #    "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in self.config.items()])),
+        #)
 
-        import wandb
-        self.wandb_run_id = self.wandb_run_id or wandb_run_id or wandb.util.generate_id()
+        if self.use_wandb:
+            import wandb
+            self.wandb_run_id = self.wandb_run_id or self.wandb_run_id or wandb.util.generate_id()
 
-        wandb.init(
-            id=self.wandb_run_id,
-            project=wandb_project_name,
-            entity=wandb_entity,
-            config=self.config,
-            sync_tensorboard=True,
-            name=self.run_name,
-            monitor_gym=True,
-            save_code=True,
-            resume="allow",
-        )
-        self.wandb_initialized = True
-        self.writer = SummaryWriter(f"runs/{self.run_name}")
-        self.writer.add_text(
-            "hyperparameters",
-            "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in self.config.items()])),
-        )
+            wandb.init(
+                id=self.wandb_run_id,
+                project=self.wandb_project_name,
+                entity=self.wandb_entity,
+                sync_tensorboard=True,
+                name=self.run_name,
+                monitor_gym=True,
+                save_code=True,
+                resume="allow",
+            )
 
     def resume_model(self, path):
         resume_state = torch.load(path)
@@ -180,9 +149,8 @@ class CleanPuffeRL:
         next_obs, next_done, next_lstm_state = [], [], []
         for i, envs in enumerate(self.buffers):
             envs.async_reset(self.seed + i*self.num_envs)
-            o, _, _, _ = envs.recv()
-            next_obs.append(torch.Tensor(o).to(self.device))
             next_done.append(torch.zeros((self.num_envs * self.num_agents,)).to(self.device))
+            next_obs.append([])
 
             if self.agent.is_recurrent:
                 shape = (self.agent.lstm.num_layers, self.num_envs * self.num_agents, self.agent.lstm.hidden_size)
@@ -193,26 +161,16 @@ class CleanPuffeRL:
             else:
                 next_lstm_state.append(None)
 
-        common_shape = (self.num_steps, self.num_buffers, self.num_envs * self.num_agents)
-
-        batch_rows = self.batch_size // self.batch_horizon
-
         allocated = torch.cuda.memory_allocated(self.device)
         data = SimpleNamespace(
+            buf = 0, sort_keys = [],
             next_obs=next_obs, next_done=next_done, next_lstm_state=next_lstm_state,
-            obs=torch.zeros(common_shape + self.binding.single_observation_space.shape).to('cpu' if self.cpu_offload else self.device),
-            actions=torch.zeros(common_shape + self.binding.single_action_space.shape, dtype=int).to(self.device),
-            logprobs=torch.zeros(common_shape).to(self.device),
-            rewards=torch.zeros(common_shape).to(self.device),
-            dones=torch.zeros(common_shape).to(self.device),
-            values=torch.zeros(common_shape).to(self.device),
-            b_obs=torch.zeros(batch_rows, self.batch_horizon, *self.binding.single_observation_space.shape).to('cpu' if self.cpu_offload else self.device),
-            b_logprobs=torch.zeros(batch_rows, self.batch_horizon).to(self.device),
-            b_actions=torch.zeros(batch_rows, self.batch_horizon, *self.binding.single_action_space.shape).to(self.device),
-            b_dones=torch.zeros(batch_rows, self.batch_horizon).to(self.device),
-            b_values=torch.zeros(batch_rows, self.batch_horizon).to(self.device),
-            b_advantages=torch.zeros(batch_rows, self.batch_horizon).to(self.device),
-            b_returns=torch.zeros(batch_rows, self.batch_horizon).to(self.device),
+            obs = torch.zeros(self.batch_size+1, *self.binding.single_observation_space.shape).to('cpu' if self.cpu_offload else self.device),
+            actions=torch.zeros(self.batch_size+1, *self.binding.single_action_space.shape, dtype=int).to(self.device),
+            logprobs=torch.zeros(self.batch_size+1).to(self.device),
+            rewards=torch.zeros(self.batch_size+1).to(self.device),
+            dones=torch.zeros(self.batch_size+1).to(self.device),
+            values=torch.zeros(self.batch_size+1).to(self.device),
         )
 
         if self.verbose:
@@ -221,118 +179,92 @@ class CleanPuffeRL:
         return data
 
     @pufferlib.utils.profile
-    def evaluate(self, agent, data, max_episodes=None, gamma=0.99, gae_lambda=0.95):
+    def evaluate(self, agent, data, max_episodes=None):
         allocated = torch.cuda.memory_allocated(self.device)
+        ptr = num_episodes = env_step_time = inference_time = 0
 
-        steps_collected = 0
-        env_step_time = 0
-        inference_time = 0
-        num_episodes = 0
-        for step in range(0, self.num_steps + 1):
-            # How do we break?
-            #if steps_collected >= self.batch_size:
-            #    break
-
-            if max_episodes and num_episodes >= max_episodes:
+        dd = []
+        step = -1
+        while True:
+            step += 1
+            if ptr == self.batch_size+1:
                 break
 
-            for buf, envs in enumerate(self.buffers):
-                self.global_step += self.num_envs * self.num_agents
+            buf = data.buf
 
-                # TRY NOT TO MODIFY: Receive from game and log data
-                if step == 0:
-                    data.obs[step, buf] = data.next_obs[buf].to('cpu' if self.cpu_offload else self.device)
-                    data.dones[step, buf] = data.next_done[buf]
-                    steps_collected += data.next_done[buf].nelement()
+            start = time.time()
+            o, r, d, i = self.buffers[buf].recv()
+            env_step_time += time.time() - start
+
+            o = torch.Tensor(o)
+            if not self.cpu_offload:
+                o = o.to(self.device)
+
+            r = torch.Tensor(r).float().to(self.device).view(-1)
+
+            if len(d) != 0 and len(data.next_done[buf]) != 0: 
+                alive_mask = (data.next_done[buf].cpu() + torch.Tensor(d)) != 2
+                data.next_done[buf] = torch.Tensor(d).to(self.device)
+            else:
+                alive_mask = [1 for _ in range(len(o))]
+
+            # ALGO LOGIC: action logic
+            start = time.time()
+            with torch.no_grad():
+                if self.agent.is_recurrent:
+                    action, logprob, _, value, data.next_lstm_state[buf] = agent.get_action_and_value(o.to(self.device), data.next_lstm_state[buf], data.next_done[buf])
                 else:
-                    start = time.time()
-                    o, r, d, i = envs.recv()
-                    env_step_time += time.time() - start
+                    action, logprob, _, value = agent.get_action_and_value(data.next_obs[buf].to(self.device))
+                value = value.flatten()
+            inference_time += time.time() - start
 
-                    data.next_obs[buf] = torch.Tensor(o).to(self.device)
-                    data.next_done[buf] = torch.Tensor(d).to(self.device)
-                    steps_collected += (data.dones[step-1:step+1].sum(0) != 2).sum()
+            # TRY NOT TO MODIFY: execute the game
+            start = time.time()
+            self.buffers[buf].send(action.cpu().numpy(), None)
+            env_step_time += time.time() - start
+            data.buf = (data.buf + 1) % self.num_buffers
 
-                    if step != self.num_steps:
-                        data.obs[step, buf] = data.next_obs[buf].to('cpu' if self.cpu_offload else self.device)
-                        data.dones[step, buf] = data.next_done[buf]
+            for idx in np.where(alive_mask)[0]:
+                if ptr == self.batch_size+1:
+                    break
 
-                    data.rewards[step - 1, buf] = torch.tensor(r).float().to(self.device).view(-1)
+                data.obs[ptr] = o[idx]
+                data.values[ptr] = value[idx]
+                data.actions[ptr] = action[idx]
+                data.logprobs[ptr] = logprob[idx]
+                data.sort_keys.append((idx, step))
 
-                    episode_stats = defaultdict(float)
-                    num_stats = 0
-                    for item in i:
-                        if "episode" in item.keys():
-                            self.writer.add_scalar("charts/episodic_return", item["episode"]["r"], self.global_step)
-                            self.writer.add_scalar("charts/episodic_length", item["episode"]["l"], self.global_step)
+                if len(d) != 0:
+                    data.rewards[ptr] = r[idx]
+                    data.dones[ptr] = d[idx]
 
-                        for agent_info in item.values():
-                            if "episode_stats" in agent_info.keys():
-                                num_stats += 1
-                                for name, stat in agent_info["episode_stats"].items():
-                                    self.writer.add_histogram(f"charts/episode_stats/{name}/hist", stat, self.global_step)
-                                    episode_stats[name] += stat
+                ptr += 1
 
-                    if num_stats > 0:
-                        print("End of episode:", step)
-                        for name, stat in episode_stats.items():
-                            self.writer.add_scalar(f"charts/episode_stats/{name}", stat / num_stats, self.global_step)
-                            print("Episode stats:", name, stat / num_stats)
-                        num_episodes += 1
+            episode_stats = defaultdict(float)
+            num_stats = 0
+            for item in i:
+                if "episode" in item.keys():
+                    self.writer.add_scalar("charts/episodic_return", item["episode"]["r"], self.global_step)
+                    self.writer.add_scalar("charts/episodic_length", item["episode"]["l"], self.global_step)
 
-                if step == self.num_steps:
-                    continue
+                for agent_info in item.values():
+                    if "episode_stats" in agent_info.keys():
+                        num_stats += 1
+                        for name, stat in agent_info["episode_stats"].items():
+                            self.writer.add_histogram(f"charts/episode_stats/{name}/hist", stat, self.global_step)
+                            episode_stats[name] += stat
+
+            if num_stats > 0:
+                #print("End of episode:", step)
+                for name, stat in episode_stats.items():
+                    self.writer.add_scalar(f"charts/episode_stats/{name}", stat / num_stats, self.global_step)
+                    print("Episode stats:", name, stat / num_stats)
+                num_episodes += 1
 
                 if max_episodes and num_episodes >= max_episodes:
-                    continue
+                    return
 
-                # ALGO LOGIC: action logic
-                with torch.no_grad():
-                    start = time.time()
-                    if self.agent.is_recurrent:
-                        action, logprob, _, value, data.next_lstm_state[buf] = agent.get_action_and_value(data.next_obs[buf].to(self.device), data.next_lstm_state[buf], data.next_done[buf])
-                    else:
-                        action, logprob, _, value = agent.get_action_and_value(data.next_obs[buf].to(self.device))
-                    inference_time += time.time() - start
-                    data.values[step, buf] = value.flatten()
-
-                data.actions[step, buf] = action
-                data.logprobs[step, buf] = logprob
-
-                # TRY NOT TO MODIFY: execute the game
-                start = time.time()
-                envs.send(action.cpu().numpy(), None)
-                env_step_time += time.time() - start
-
-        # bootstrap value if not done
-        with torch.no_grad():
-            advantages = torch.zeros_like(data.rewards).to(self.device)
-
-            for buf in range(self.num_buffers):
-                next_value = agent.get_value(
-                    data.next_obs[buf],
-                    data.next_lstm_state[buf],
-                    data.next_done[buf],
-                ).reshape(1, -1)
-
-                lastgaelam = 0
-                for t in reversed(range(self.num_steps)):
-                    #TODO: Is this correct now that num_steps isn't always the stop?
-                    if t == self.num_steps - 1:
-                        nextnonterminal = 1.0 - data.next_done[buf]
-                        nextvalues = next_value
-                    else:
-                        nextnonterminal = 1.0 - data.dones[t + 1, buf]
-                        nextvalues = data.values[t + 1, buf]
-                    delta = data.rewards[t, buf] + gamma * nextvalues * nextnonterminal - data.values[t, buf]
-                    advantages[t, buf] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
-
-            returns = advantages + data.values
-
-        data.returns = returns
-        data.advantages = advantages
-
-        epoch_step = self.num_envs * self.num_agents * self.num_buffers * self.num_steps
+        epoch_step = self.num_envs * self.num_agents * self.num_buffers
         env_sps = int(epoch_step / env_step_time)
         inference_sps = int(epoch_step / inference_time)
 
@@ -344,7 +276,7 @@ class CleanPuffeRL:
         mean_reward = float(torch.mean(data.rewards))
         self.writer.add_scalar("charts/reward", mean_reward, self.global_step)
 
-        for profile in envs.profile():
+        for profile in self.buffers[buf].profile():
             for k, v in profile.items():
                 # Added deltas to pufferlib.
                 # TODO: Test that this matches the original implementation.
@@ -364,40 +296,13 @@ class CleanPuffeRL:
         return data
 
     @pufferlib.utils.profile
-    def train(
-            self, agent, data,
-            anneal_lr=True,
-            num_minibatches=4,
-            update_epochs=4,
-            norm_adv=True,
-            clip_coef=0.1,
-            clip_vloss=True,
-            ent_coef=0.01,
-            vf_coef=0.5,
-            max_grad_norm=0.5,
-            target_kl=None,
-        ):
-        assert self.num_steps % self.bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
-        allocated = torch.cuda.memory_allocated(self.device)
-        
-        # Flatten the batch
-        r, c = 0, 0
-        for buf in range(self.num_buffers):
-            for a in range(self.num_envs * self.num_agents):
-                for step in range(self.num_steps):
-                    if step == 0 or data.dones[step, buf, a] != 0 or data.dones[step-1, buf, a] != 0:
-                        data.b_obs[r, c] = data.obs[step, buf, a]
-                        data.b_logprobs[r, c] = data.logprobs[step, buf, a]
-                        data.b_actions[r, c] = data.actions[step, buf, a]
-                        data.b_dones[r, c] = data.dones[step, buf, a]
-                        data.b_values[r, c] = data.values[step, buf, a]
-                        data.b_advantages[r, c] = data.advantages[step, buf, a]
-                        data.b_returns[r, c] = data.returns[step, buf, a]
+    def train(self, agent, data, batch_rows=32, update_epochs=4,
+            bptt_horizon=16, gamma=0.99, gae_lambda=0.95, anneal_lr=True,
+            norm_adv=True,clip_coef=0.1, clip_vloss=True, ent_coef=0.01,
+            vf_coef=0.5, max_grad_norm=0.5, target_kl=None):
 
-                        c += 1
-                        if c == self.batch_horizon:
-                            r += 1
-                            c = 0
+        #assert self.num_steps % bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
+        allocated = torch.cuda.memory_allocated(self.device)
 
         # Annealing the rate if instructed to do so.
         if anneal_lr:
@@ -405,40 +310,53 @@ class CleanPuffeRL:
             lrnow = frac * self.learning_rate
             self.optimizer.param_groups[0]["lr"] = lrnow
 
+        # Sort here
+        idxs = sorted(range(len(data.sort_keys)), key=data.sort_keys.__getitem__)
+        data.sort_keys = []
 
-        '''
-        b_obs = data.obs.reshape((num_minibatches, bptt_horizon, -1) + self.binding.single_observation_space.shape)
-        b_logprobs = data.logprobs.reshape(num_minibatches, bptt_horizon, -1)
-        b_actions = data.actions.reshape((num_minibatches, bptt_horizon, -1) + self.binding.single_action_space.shape)
-        b_dones = data.dones.reshape(num_minibatches, bptt_horizon, -1)
-        b_values = data.values.reshape(num_minibatches, -1)
-        b_advantages = data.advantages.reshape(num_minibatches, bptt_horizon, -1)
-        b_returns = data.returns.reshape(num_minibatches, -1)
-        '''
+        num_minibatches = self.batch_size // bptt_horizon // batch_rows
+        b_idxs = torch.Tensor(idxs).long()[:-1].reshape(batch_rows, num_minibatches, bptt_horizon).transpose(0, 1)
+
+        # bootstrap value if not done
+        with torch.no_grad():
+            advantages = torch.zeros(self.batch_size, device=self.device)
+            lastgaelam = 0
+            for t in reversed(range(self.batch_size)):
+                i, i_nxt = idxs[t], idxs[t + 1]
+                nextnonterminal = 1.0 - data.dones[i_nxt]
+                nextvalues = data.values[i_nxt]
+                delta = data.rewards[i] + gamma * nextvalues * nextnonterminal - data.values[i]
+                advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+
+        # Flatten the batch
+        b_obs = data.obs[b_idxs]
+        b_actions=data.actions[b_idxs]
+        b_logprobs=data.logprobs[b_idxs]
+        b_dones = data.dones[b_idxs]
+        b_values = data.values[b_idxs]
+        b_advantages = advantages.reshape(batch_rows, num_minibatches, bptt_horizon).transpose(0, 1)
+        b_returns = b_advantages + b_values
 
         # Optimizing the policy and value network
-
         train_time = time.time()
         clipfracs = []
         for epoch in range(update_epochs):
             lstm_state = None
-            for t in range(0, self.batch_horizon, self.bptt_horizon):
-                mb_obs = data.b_obs[:, t:t+self.bptt_horizon].to(self.device)
-                mb_logprobs = data.b_logprobs[:, t:t+self.bptt_horizon]
-                mb_actions = data.b_actions[:, t:t+self.bptt_horizon].contiguous()
-                mb_dones = data.b_dones[:, t:t+self.bptt_horizon]
-                mb_values = data.b_values[:, t:t+self.bptt_horizon].reshape(-1)
-                mb_advantages = data.b_advantages[:, t:t+self.bptt_horizon].reshape(-1)
-                mb_returns = data.b_returns[:, t:t+self.bptt_horizon].reshape(-1)
+            for mb in range(num_minibatches):
+                mb_obs = b_obs[mb].to(self.device)
+                mb_actions = b_actions[mb].contiguous()
+                mb_values = b_values[mb].reshape(-1)
+                mb_advantages = b_advantages[mb].reshape(-1)
+                mb_returns = b_returns[mb].reshape(-1)
 
                 if self.agent.is_recurrent:
-                    _, newlogprob, entropy, newvalue, lstm_state = agent.get_action_and_value(mb_obs, lstm_state, mb_dones, mb_actions)
+                    _, newlogprob, entropy, newvalue, lstm_state = agent.get_action_and_value(mb_obs, lstm_state, b_dones[mb], mb_actions)
                     lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
                 else:
                     _, newlogprob, entropy, newvalue = agent.get_action_and_value(
                         mb_obs.reshape(-1, *self.binding.single_observation_space.shape), action=mb_actions)
 
-                logratio = newlogprob - mb_logprobs.reshape(-1)
+                logratio = newlogprob - b_logprobs[mb].reshape(-1)
                 ratio = logratio.exp()
 
                 with torch.no_grad():
@@ -483,7 +401,7 @@ class CleanPuffeRL:
                 if approx_kl > target_kl:
                     break
 
-        y_pred, y_true = data.b_values.cpu().numpy(), data.b_returns.cpu().numpy()
+        y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 

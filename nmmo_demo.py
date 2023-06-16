@@ -83,7 +83,7 @@ import nmmo
 binding = pufferlib.emulation.Binding(
         env_cls=nmmo.Env,
         env_name='Neural MMO',
-        emulate_const_horizon=128,
+        emulate_const_horizon=1024,
         #teams={f'team_{i+1}': [i*8+j+1 for j in range(8)] for i in range(16)},
     )
 
@@ -92,8 +92,8 @@ agent = pufferlib.frameworks.cleanrl.make_policy(
         recurrent_kwargs={'num_layers': 1}
     )(binding, 128, 128).to(device)
 
-trainer = CleanPuffeRL(binding, agent,
-        num_envs=1, num_steps=128, num_cores=1,
+trainer = CleanPuffeRL(binding, agent, num_buffers=2,
+        num_envs=1, num_cores=1,
         vec_backend=pufferlib.vectorization.serial.VecEnv)
 #trainer.load_model(path)
 

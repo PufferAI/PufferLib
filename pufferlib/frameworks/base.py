@@ -29,9 +29,10 @@ def make_recurrent_policy(Policy, recurrent_cls=BatchFirstLSTM,
  
         def encode_observations(self, x, state):
             # TODO: Check shapes
-            assert state is not None
+            #assert state is not None
+            if state is not None:
+                assert len(state) == 2
 
-            assert len(state) == 2
             assert len(x.shape) == 3
 
             B, TT, _ = x.shape
