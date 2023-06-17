@@ -191,7 +191,7 @@ class CleanPuffeRL:
 
     @pufferlib.utils.profile
     def evaluate(self, agent, data, max_episodes=None):
-        self.init_writer()
+        self.init_writer({})
         allocated = torch.cuda.memory_allocated(self.device)
         ptr = num_episodes = env_step_time = inference_time = 0
 
@@ -312,7 +312,7 @@ class CleanPuffeRL:
             bptt_horizon=16, gamma=0.99, gae_lambda=0.95, anneal_lr=True,
             norm_adv=True,clip_coef=0.1, clip_vloss=True, ent_coef=0.01,
             vf_coef=0.5, max_grad_norm=0.5, target_kl=None):
-        self.init_writer()
+        self.init_writer({})
 
         #assert self.num_steps % bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
         allocated = torch.cuda.memory_allocated(self.device)
