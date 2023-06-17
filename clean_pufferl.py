@@ -276,9 +276,9 @@ class CleanPuffeRL:
                 if max_episodes and num_episodes >= max_episodes:
                     return
 
-        epoch_step = self.num_envs * self.num_agents * self.num_buffers
-        env_sps = int(epoch_step / env_step_time)
-        inference_sps = int(epoch_step / inference_time)
+        self.global_step += self.batch_size
+        env_sps = int(self.batch_size / env_step_time)
+        inference_sps = int(self.batch_size / inference_time)
 
         self.writer.add_scalar("performance/env_time", env_step_time, self.global_step)
         self.writer.add_scalar("performance/env_sps", env_sps, self.global_step)
