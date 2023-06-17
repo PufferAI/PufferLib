@@ -2,6 +2,7 @@
 # TODO: Testing, cleaned up metric/perf/mem logging
 
 from collections import defaultdict
+from logging import config
 from pdb import run, set_trace as T
 import os
 import psutil
@@ -44,10 +45,6 @@ class CleanPuffeRL:
     cpu_offload: bool = True
     verbose: bool = True
     batch_size: int = 2**14
-    use_wandb: bool = False
-    wandb_project_name: str = "pufferlib"
-    wandb_entity: str = None
-    wandb_run_id: str = None
 
     def __post_init__(self, *args, **kwargs):
         self.start_time = time.time()
@@ -90,29 +87,43 @@ class CleanPuffeRL:
 
         # Setup logging
         self.run_name = self.run_name or f"{self.binding.env_name}__{self.seed}__{int(time.time())}"
+        self.wandb_run_id = None
+        self.wandb_initialized = False
+        self.writer = None
+
+    def init_writer(self, extra_data):
+        if self.writer is not None:
+            return
 
         self.writer = SummaryWriter(f"runs/{self.run_name}")
+        self.writer.add_text(
+            "hyperparameters",
+            "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in extra_data.items()])),
+        )
 
-        # TODO: Come up with a better way to log the run
-        #self.writer.add_text(
-        #    "hyperparameters",
-        #    "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in self.config.items()])),
-        #)
+    def init_wandb(self, wandb_project_name, wandb_entity, wandb_run_id = None,
+                   extra_data = None):
 
-        if self.use_wandb:
-            import wandb
-            self.wandb_run_id = self.wandb_run_id or self.wandb_run_id or wandb.util.generate_id()
+        if self.wandb_initialized:
+            return
 
-            wandb.init(
-                id=self.wandb_run_id,
-                project=self.wandb_project_name,
-                entity=self.wandb_entity,
-                sync_tensorboard=True,
-                name=self.run_name,
-                monitor_gym=True,
-                save_code=True,
-                resume="allow",
-            )
+        import wandb
+        self.wandb_run_id = self.wandb_run_id or wandb_run_id or wandb.util.generate_id()
+        extra_data = extra_data or {}
+
+        wandb.init(
+            id=self.wandb_run_id,
+            project=wandb_project_name,
+            entity=wandb_entity,
+            config=extra_data,
+            sync_tensorboard=True,
+            name=self.run_name,
+            monitor_gym=True,
+            save_code=True,
+            resume="allow",
+        )
+        self.wandb_initialized = True
+        self.init_writer(extra_data)
 
     def resume_model(self, path):
         resume_state = torch.load(path)
@@ -180,6 +191,7 @@ class CleanPuffeRL:
 
     @pufferlib.utils.profile
     def evaluate(self, agent, data, max_episodes=None):
+        self.init_writer({})
         allocated = torch.cuda.memory_allocated(self.device)
         ptr = num_episodes = env_step_time = inference_time = 0
 
@@ -202,7 +214,7 @@ class CleanPuffeRL:
 
             r = torch.Tensor(r).float().to(self.device).view(-1)
 
-            if len(d) != 0 and len(data.next_done[buf]) != 0: 
+            if len(d) != 0 and len(data.next_done[buf]) != 0:
                 alive_mask = (data.next_done[buf].cpu() + torch.Tensor(d)) != 2
                 data.next_done[buf] = torch.Tensor(d).to(self.device)
             else:
@@ -300,6 +312,7 @@ class CleanPuffeRL:
             bptt_horizon=16, gamma=0.99, gae_lambda=0.95, anneal_lr=True,
             norm_adv=True,clip_coef=0.1, clip_vloss=True, ent_coef=0.01,
             vf_coef=0.5, max_grad_norm=0.5, target_kl=None):
+        self.init_writer({})
 
         #assert self.num_steps % bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
         allocated = torch.cuda.memory_allocated(self.device)
