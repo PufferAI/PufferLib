@@ -91,14 +91,14 @@ class CleanPuffeRL:
         self.wandb_initialized = False
         self.writer = None
 
-    def init_writer(self):
+    def init_writer(self, extra_data):
         if self.writer is not None:
             return
 
         self.writer = SummaryWriter(f"runs/{self.run_name}")
         self.writer.add_text(
             "hyperparameters",
-            "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in self.config.items()])),
+            "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in extra_data.items()])),
         )
 
     def init_wandb(self, wandb_project_name, wandb_entity, wandb_run_id = None,
@@ -123,11 +123,7 @@ class CleanPuffeRL:
             resume="allow",
         )
         self.wandb_initialized = True
-        self.writer = SummaryWriter(f"runs/{self.run_name}")
-        self.writer.add_text(
-            "hyperparameters",
-            "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in self.config.items()])),
-        )
+        self.init_writer(extra_data)
 
     def resume_model(self, path):
         resume_state = torch.load(path)
