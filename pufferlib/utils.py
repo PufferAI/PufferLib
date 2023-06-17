@@ -144,6 +144,14 @@ class Profiler:
         self.prev = 0
 
     @property
+    def serial(self):
+        return {
+            'elapsed': self.elapsed,
+            'calls': self.calls,
+            'delta': self.delta,
+        }
+
+    @property
     def delta(self):
         ret = self.elapsed - self.prev
         self.prev = self.elapsed

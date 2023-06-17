@@ -357,7 +357,7 @@ def make_puffer_env_cls(scope, raw_obs):
 
         @property
         def timers(self):
-            return self._timers
+            return {k: v.serial for k, v in self._timers.items()}
 
         @property
         def raw_single_observation_space(self):

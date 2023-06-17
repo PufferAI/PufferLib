@@ -226,7 +226,7 @@ class CleanPuffeRL:
                 if self.agent.is_recurrent:
                     action, logprob, _, value, data.next_lstm_state[buf] = agent.get_action_and_value(o.to(self.device), data.next_lstm_state[buf], data.next_done[buf])
                 else:
-                    action, logprob, _, value = agent.get_action_and_value(data.next_obs[buf].to(self.device))
+                    action, logprob, _, value = agent.get_action_and_value(o.to(self.device))
                 value = value.flatten()
             inference_time += time.time() - start
 
@@ -270,7 +270,7 @@ class CleanPuffeRL:
                 #print("End of episode:", step)
                 for name, stat in episode_stats.items():
                     self.writer.add_scalar(f"charts/episode_stats/{name}", stat / num_stats, self.global_step)
-                    print("Episode stats:", name, stat / num_stats)
+                    #print("Episode stats:", name, stat / num_stats)
                 num_episodes += 1
 
                 if max_episodes and num_episodes >= max_episodes:
@@ -292,7 +292,7 @@ class CleanPuffeRL:
             for k, v in profile.items():
                 # Added deltas to pufferlib.
                 # TODO: Test that this matches the original implementation.
-                self.writer.add_scalar(f'performance/env/{k}', np.mean(v.delta), self.global_step)
+                self.writer.add_scalar(f'performance/env/{k}', np.mean(v['delta']), self.global_step)
 
         uptime = timedelta(seconds=int(time.time() - self.start_time))
 
