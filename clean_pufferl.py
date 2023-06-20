@@ -26,6 +26,7 @@ import pufferlib.utils
 import pufferlib.frameworks.cleanrl
 import pufferlib.vectorization.multiprocessing
 import pufferlib.vectorization.serial
+import wandb
 
 @dataclass
 class CleanPuffeRL:
@@ -89,25 +90,14 @@ class CleanPuffeRL:
         self.run_name = self.run_name or f"{self.binding.env_name}__{self.seed}__{int(time.time())}"
         self.wandb_run_id = None
         self.wandb_initialized = False
-        self.writer = None
 
-    def init_writer(self, extra_data):
-        if self.writer is not None:
-            return
-
-        self.writer = SummaryWriter(f"runs/{self.run_name}")
-        self.writer.add_text(
-            "hyperparameters",
-            "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in extra_data.items()])),
-        )
-
-    def init_wandb(self, wandb_project_name='pufferlib', wandb_entity=None,
-            wandb_run_id = None,extra_data = None):
+    def init_wandb(
+            self, wandb_project_name='pufferlib', wandb_entity=None,
+            wandb_run_id = None, extra_data = None):
 
         if self.wandb_initialized:
             return
 
-        import wandb
         self.wandb_run_id = self.wandb_run_id or wandb_run_id or wandb.util.generate_id()
         extra_data = extra_data or {}
 
@@ -123,7 +113,6 @@ class CleanPuffeRL:
             resume="allow",
         )
         self.wandb_initialized = True
-        self.init_writer(extra_data)
 
     def resume_model(self, path):
         resume_state = torch.load(path)
@@ -191,7 +180,6 @@ class CleanPuffeRL:
 
     @pufferlib.utils.profile
     def evaluate(self, agent, data, max_episodes=None):
-        self.init_writer({})
         allocated = torch.cuda.memory_allocated(self.device)
         ptr = num_episodes = env_step_time = inference_time = 0
 
@@ -209,8 +197,9 @@ class CleanPuffeRL:
             env_step_time += time.time() - start
 
             for profile in self.buffers[buf].profile():
-                for k, v in profile.items():
-                    self.writer.add_scalar(f'performance/env/{k}', np.mean(v['delta']), self.global_step)
+                self.log_stats({
+                    f'performance/env/{k}': np.mean(v['delta']) for k, v in profile.items()
+                }, step=self.global_step)
 
             o = torch.Tensor(o)
             if not self.cpu_offload:
@@ -260,41 +249,46 @@ class CleanPuffeRL:
             num_stats = 0
             for item in i:
                 if "episode" in item.keys():
-                    self.writer.add_scalar("charts/episodic_return", item["episode"]["r"], self.global_step)
-                    self.writer.add_scalar("charts/episodic_length", item["episode"]["l"], self.global_step)
+                    self.log_stats({
+                        "charts/episodic_return": item["episode"]["r"],
+                        "charts/episodic_length": item["episode"]["l"]},
+                        step=self.global_step
+                    )
 
-                '''
                 for agent_info in item.values():
                     if "episode_stats" in agent_info.keys():
                         num_stats += 1
                         for name, stat in agent_info["episode_stats"].items():
-                            self.writer.add_histogram(f"charts/episode_stats/{name}/hist", stat, self.global_step)
                             episode_stats[name] += stat
-                '''
 
-            '''
             if num_stats > 0:
-                #print("End of episode:", step)
-                for name, stat in episode_stats.items():
-                    self.writer.add_scalar(f"charts/episode_stats/{name}", stat / num_stats, self.global_step)
-                    #print("Episode stats:", name, stat / num_stats)
+                self.log_stats({
+                        f"charts/episode_stats/{name}": stat / num_stats
+                        for name, stat in episode_stats.items()
+                    }, step=self.global_step)
+
+                print(f"Episode stats: ", {
+                        f"charts/episode_stats/{name}": stat / num_stats
+                        for name, stat in episode_stats.items()
+                    })
+                # this is probably wrong
                 num_episodes += 1
 
                 if max_episodes and num_episodes >= max_episodes:
                     return
-            '''
 
         self.global_step += self.batch_size
         env_sps = int(self.batch_size / env_step_time)
         inference_sps = int(self.batch_size / inference_time)
-
-        self.writer.add_scalar("performance/env_time", env_step_time, self.global_step)
-        self.writer.add_scalar("performance/env_sps", env_sps, self.global_step)
-        self.writer.add_scalar("performance/inference_time", inference_time, self.global_step)
-        self.writer.add_scalar("performance/inference_sps", inference_sps, self.global_step)
-
         mean_reward = float(torch.mean(data.rewards))
-        self.writer.add_scalar("charts/reward", mean_reward, self.global_step)
+
+        self.log_stats({
+            "performance/env_time": env_step_time,
+            "performance/env_sps": env_sps,
+            "performance/inference_time": inference_time,
+            "performance/inference_sps": inference_sps,
+            "charts/reward": mean_reward
+        }, step=self.global_step)
 
         uptime = timedelta(seconds=int(time.time() - self.start_time))
 
@@ -314,7 +308,6 @@ class CleanPuffeRL:
             bptt_horizon=16, gamma=0.99, gae_lambda=0.95, anneal_lr=True,
             norm_adv=True,clip_coef=0.1, clip_vloss=True, ent_coef=0.01,
             vf_coef=0.5, max_grad_norm=0.5, target_kl=None):
-        self.init_writer({})
 
         #assert self.num_steps % bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
         allocated = torch.cuda.memory_allocated(self.device)
@@ -433,21 +426,23 @@ class CleanPuffeRL:
             print('Allocated %.2f MB during training' % ((torch.cuda.memory_allocated(self.device) - allocated) / 1e6))
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        self.writer.add_scalar("performance/train_sps", train_sps, self.global_step)
-        self.writer.add_scalar("performance/train_time", train_time, self.global_step)
+            self.log_stats({
+                "performance/train_sps": train_sps,
+                "performance/train_time": train_time,
+                "charts/learning_rate": self.optimizer.param_groups[0]["lr"],
+                "losses/value_loss": v_loss.item(),
+                "losses/policy_loss": pg_loss.item(),
+                "losses/entropy": entropy_loss.item(),
+                "losses/old_approx_kl": old_approx_kl.item(),
+                "losses/approx_kl": approx_kl.item(),
+                "losses/clipfrac": np.mean(clipfracs),
+                "losses/explained_variance": explained_var,
+            }, step=self.global_step)
 
-        self.writer.add_scalar("charts/learning_rate", self.optimizer.param_groups[0]["lr"], self.global_step)
-        self.writer.add_scalar("losses/value_loss", v_loss.item(), self.global_step)
-        self.writer.add_scalar("losses/policy_loss", pg_loss.item(), self.global_step)
-        self.writer.add_scalar("losses/entropy", entropy_loss.item(), self.global_step)
-        self.writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), self.global_step)
-        self.writer.add_scalar("losses/approx_kl", approx_kl.item(), self.global_step)
-        self.writer.add_scalar("losses/clipfrac", np.mean(clipfracs), self.global_step)
-        self.writer.add_scalar("losses/explained_variance", explained_var, self.global_step)
+    def log_stats(self, *args, **kwargs):
+        if self.wandb_initialized:
+            wandb.log(*args, **kwargs)
 
     def close(self):
-        self.writer.close()
-
         if self.wandb_initialized:
-            import wandb
             wandb.finish()
