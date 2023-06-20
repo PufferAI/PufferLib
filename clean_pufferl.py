@@ -101,8 +101,8 @@ class CleanPuffeRL:
             "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in extra_data.items()])),
         )
 
-    def init_wandb(self, wandb_project_name, wandb_entity, wandb_run_id = None,
-                   extra_data = None):
+    def init_wandb(self, wandb_project_name='pufferlib', wandb_entity=None,
+            wandb_run_id = None,extra_data = None):
 
         if self.wandb_initialized:
             return
@@ -208,6 +208,10 @@ class CleanPuffeRL:
             o, r, d, i = self.buffers[buf].recv()
             env_step_time += time.time() - start
 
+            for profile in self.buffers[buf].profile():
+                for k, v in profile.items():
+                    self.writer.add_scalar(f'performance/env/{k}', np.mean(v['delta']), self.global_step)
+
             o = torch.Tensor(o)
             if not self.cpu_offload:
                 o = o.to(self.device)
@@ -244,7 +248,7 @@ class CleanPuffeRL:
                 data.values[ptr] = value[idx]
                 data.actions[ptr] = action[idx]
                 data.logprobs[ptr] = logprob[idx]
-                data.sort_keys.append((idx, step))
+                data.sort_keys.append((buf, idx, step))
 
                 if len(d) != 0:
                     data.rewards[ptr] = r[idx]
@@ -259,13 +263,16 @@ class CleanPuffeRL:
                     self.writer.add_scalar("charts/episodic_return", item["episode"]["r"], self.global_step)
                     self.writer.add_scalar("charts/episodic_length", item["episode"]["l"], self.global_step)
 
+                '''
                 for agent_info in item.values():
                     if "episode_stats" in agent_info.keys():
                         num_stats += 1
                         for name, stat in agent_info["episode_stats"].items():
                             self.writer.add_histogram(f"charts/episode_stats/{name}/hist", stat, self.global_step)
                             episode_stats[name] += stat
+                '''
 
+            '''
             if num_stats > 0:
                 #print("End of episode:", step)
                 for name, stat in episode_stats.items():
@@ -275,6 +282,7 @@ class CleanPuffeRL:
 
                 if max_episodes and num_episodes >= max_episodes:
                     return
+            '''
 
         self.global_step += self.batch_size
         env_sps = int(self.batch_size / env_step_time)
@@ -287,12 +295,6 @@ class CleanPuffeRL:
 
         mean_reward = float(torch.mean(data.rewards))
         self.writer.add_scalar("charts/reward", mean_reward, self.global_step)
-
-        for profile in self.buffers[buf].profile():
-            for k, v in profile.items():
-                # Added deltas to pufferlib.
-                # TODO: Test that this matches the original implementation.
-                self.writer.add_scalar(f'performance/env/{k}', np.mean(v['delta']), self.global_step)
 
         uptime = timedelta(seconds=int(time.time() - self.start_time))
 
@@ -342,7 +344,7 @@ class CleanPuffeRL:
                 advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
 
         # Flatten the batch
-        b_obs = data.obs[b_idxs]
+        data.b_obs = b_obs = data.obs[b_idxs]
         b_actions=data.actions[b_idxs]
         b_logprobs=data.logprobs[b_idxs]
         b_dones = data.dones[b_idxs]

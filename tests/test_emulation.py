@@ -113,6 +113,7 @@ def test_emulation(binding, teams, steps=100, num_workers=1, envs_per_worker=2):
                 if len(team_done) > 0:
                     assert puf_done[idx] == all(team_done)
                 else:
+                    # TODO: Check this vs. pufferlib dones
                     assert puf_done[idx] != bool(r_env.agents)
 
                 idx += 1

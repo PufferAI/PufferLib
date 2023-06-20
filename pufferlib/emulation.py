@@ -39,13 +39,17 @@ class Postprocessor:
 
     def features(self, obs, step):
         '''Default featurizer pads observations to max team size'''
+
         if len(obs) == 0:
-            raise ValueError('Observation is empty')
+            #TODO: Re-enable this once nmmo is fixed
+            team_id = self.team_id
+            #raise ValueError('Observation is empty')
+        else:
+            team_id = [k for k, v in self.teams.items()
+                if list(obs.keys())[0] in v][0]
 
         if self.dummy_ob is None:
             self.dummy_ob = utils.make_zeros_like(list(obs.values())[0])
-
-        team_id = [k for k, v in self.teams.items() if list(obs.keys())[0] in v][0]
 
         ret = []
         for agent in self.teams[team_id]:
@@ -128,6 +132,7 @@ def make_puffer_env_cls(scope, raw_obs):
 
             # Manual LRU since functools.lru_cache is not pickleable
             self._raw_observation_space = {}
+            self._original_observation_space = {}
             self._flat_observation_space = {}
             self._flat_action_space = {}
             self._agent_action_space = {}
@@ -254,7 +259,8 @@ def make_puffer_env_cls(scope, raw_obs):
                 if not space.contains(team_ob):
                     raise ValueError(
                         f'Featurized observation:\n{team_ob}\n not in observation space:\n'
-                        f'{space}\n for agent/team {team_id}'
+                        f'{space}\n for agent/team {team_id}. Common '
+                        'causes include incorrect type (i.e. f32 vs f64)'
                     )
 
             return team_ob
@@ -285,7 +291,7 @@ def make_puffer_env_cls(scope, raw_obs):
 
             # Featurize and shape rewards; pad data
             for team in self._teams:
-                if obs[team]:
+                if team in obs:
                     obs[team] = self._featurize(obs[team], team)
                     obs[team] = _flatten_to_array(obs[team], self._flat_observation_space[team], scope.obs_dtype)
                 elif scope.emulate_flat_obs:
@@ -293,7 +299,7 @@ def make_puffer_env_cls(scope, raw_obs):
                 else:
                     del obs[team]
 
-                if rewards[team]:
+                if team in rewards:
                     team_infos = {}
                     if team in infos:
                         team_infos = infos[team]
@@ -301,6 +307,11 @@ def make_puffer_env_cls(scope, raw_obs):
                     # TODO: Handle team infos better
                     rewards[team], infos[team] = self._shape_rewards(
                         rewards[team], dones[team], team_infos, team)
+
+                    # TODO: Improve this check
+                    assert type(rewards[team]) in (int, float) \
+                        or isinstance(rewards[team], np.number)
+
                 elif scope.emulate_const_num_agents:
                     rewards[team] = 0
                 else:
@@ -402,6 +413,8 @@ def make_puffer_env_cls(scope, raw_obs):
             obs = postprocessor.features(team_obs, self._step)
 
             # Flatten and cache observation space
+            # TODO: Rename obs
+            self._original_observation_space[team] = self.env.observation_space(team)
             self._raw_observation_space[team] = _make_space_like(obs)
             self._flat_observation_space[team] = _flatten_space(self._raw_observation_space[team])
 
@@ -508,6 +521,14 @@ def make_puffer_env_cls(scope, raw_obs):
 
             actions = self._prestep(team_actions)
             obs, rewards, dones, infos = self._step_env(actions)
+
+            # TODO: More env checks here
+            if __debug__:
+                pass
+                #for agent, ob in obs.items():
+                #    assert self._original_observation_space[agent].contains(ob), \
+                #    f'Agent {agent} observation:\n{ob}\n not in observation'
+                #    f'space:\n{self._original_observation_space}'
 
             self.agents = self.env.agents
             self._step += 1

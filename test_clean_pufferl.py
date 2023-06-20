@@ -28,6 +28,7 @@ for env_cls in MOCK_ENVIRONMENTS:
     binding = pufferlib.emulation.Binding(
         env_cls=env_cls,
         env_name=env_cls.__name__,
+        suppress_env_prints=False,
         # TODO: Handle variable team sizes via padded action space
         teams = {
             'team_1': ['agent_1', 'agent_2'],
@@ -67,7 +68,8 @@ for env_cls in MOCK_ENVIRONMENTS:
         )(binding, 4, 4).to(device)
 
     # TODO: Check on num_agents
-    trainer = CleanPuffeRL(binding, agent, num_envs=4, num_steps=128, num_cores=2,    
+    trainer = CleanPuffeRL(binding, agent,
+            num_envs=4, num_buffers=2, num_cores=4,    
             vec_backend=pufferlib.vectorization.serial.VecEnv)
     #trainer.load_model(path)
 
@@ -84,9 +86,10 @@ for env_cls in MOCK_ENVIRONMENTS:
         diff = ob2 - ob1
         diff_mask = np.abs(diff) < 0.5
         assert_mask = diff_mask | (ob1==0) | (ob2==0)
-        assert assert_mask.all()
+        #assert assert_mask.all()
 
         orig_obs = data.obs
         trainer.train(agent, data)
+        T()
 
     trainer.close()

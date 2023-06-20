@@ -91,6 +91,7 @@ def make_binding(env_name, framestack):
             postprocessor_cls=AtariFeaturizer,
             emulate_flat_atn=True,
             record_episode_statistics=False,
+            suppress_env_prints=False,
         )
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -100,7 +101,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 class Policy(pufferlib.models.Policy):
-    def __init__(self, binding, *args, framestack, input_size=512, hidden_size=128, **kwargs):
+    def __init__(self, binding, *args, framestack, input_size=512, hidden_size=512, **kwargs):
         '''The CleanRL default Atari policy: a stack of three convolutions followed by a linear layer
         
         Takes framestack as a mandatory keyword arguments. Suggested default is 1 frame

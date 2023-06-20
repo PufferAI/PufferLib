@@ -65,15 +65,18 @@ class PerformanceBinding:
 def _agent_str_to_int(agent):
     return int(agent.split('_')[-1])
 
-def _sample_space(agent, tick, space, zero=True):
+def _sample_space(agent, tick, space, zero=False):
+    if type(agent) is str:
+        agent = float(agent.split('_')[-1])
+
     if isinstance(space, gym.spaces.Discrete):
         if zero:
             return 0
         return hash(f'{agent}-{tick}') % space.n
     elif isinstance(space, gym.spaces.Box):
         if zero:
-            return np.zeros(space.shape)
-        nonce = (hash(agent) % HIGH + tick/10) % (HIGH - 1)
+            return np.zeros(space.shape, dtype=np.float32)
+        nonce = (agent % HIGH + tick/10) % (HIGH - 1)
         return np.array([nonce+0.01*t for t in range(space.shape[0])], dtype=np.float32)
     elif isinstance(space, gym.spaces.Tuple):
         return tuple(_sample_space(agent, tick, s) for s in space.spaces)
@@ -127,6 +130,7 @@ def make_mock_multiagent_env(
 
         def step(self, actions):
             obs, rewards, dones, infos = {}, {}, {}, {}
+            self.tick += 1
 
             dead  = self.agents[:death_per_tick]
             for kill in dead:
@@ -153,7 +157,6 @@ def make_mock_multiagent_env(
                 dones[agent] = False
                 infos[agent] = {'dead': False}
 
-            self.tick += 1
             return obs, rewards, dones, infos
 
         def observation_space(self, agent) -> gym.Space:
