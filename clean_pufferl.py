@@ -1,6 +1,7 @@
 # PufferLib's customized CleanRL PPO + LSTM implementation
 # TODO: Testing, cleaned up metric/perf/mem logging
 
+from collections import defaultdict
 from pdb import run, set_trace as T
 import os
 import psutil
@@ -182,6 +183,8 @@ class CleanPuffeRL:
         step = -1
         while True:
             buf = data.buf
+            stats = defaultdict(float)
+            counts = defaultdict(float)
 
             step += 1
             if ptr == self.batch_size+1:
@@ -245,11 +248,15 @@ class CleanPuffeRL:
                     for name, stat in agent_info.items():
                         try:
                             stat = float(stat)
+                            stats[name] += stat
+                            counts[name] += 1
                         except TypeError:
                             continue
 
-                        self.log_stats(
-                            {f'charts/{name}': stat}, self.global_step + step)
+            if len(stats) > 0:
+                self.log_stats({
+                    f'charts/{name}': stat / counts[name] for name, stat in stats.items()
+                }, self.global_step + step)
 
         self.global_step += self.batch_size
         env_sps = int(self.batch_size / env_step_time)
@@ -414,7 +421,6 @@ class CleanPuffeRL:
         }, step=self.global_step)
 
     def log_stats(self, *args, **kwargs):
-        print("wandb: ", *args, **kwargs)
         if self.wandb_initialized:
             wandb.log(*args, **kwargs)
 
