@@ -248,7 +248,8 @@ class CleanPuffeRL:
                         except TypeError:
                             continue
 
-                        self.log_stats({f'charts/{name}': stat}, self.global_step)
+                        self.log_stats(
+                            {f'charts/{name}': stat}, self.global_step + step)
 
         self.global_step += self.batch_size
         env_sps = int(self.batch_size / env_step_time)
