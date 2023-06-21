@@ -2,8 +2,6 @@ from pdb import set_trace as T
 import itertools
 import numpy as np
 from contextlib import nullcontext
-
-from requests import post
 try:
     from collections import defaultdict, OrderedDict, Mapping
 except ImportError:
@@ -371,10 +369,10 @@ def make_puffer_env_cls(scope, raw_obs):
         def done(self):
             if len(self.agents) == 0:
                 return True
-
+ 
             if scope.emulate_const_horizon is None:
                 return False
-
+            
             return self._step >= scope.emulate_const_horizon
 
         @property
