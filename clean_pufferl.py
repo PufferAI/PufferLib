@@ -179,18 +179,18 @@ class CleanPuffeRL:
         return data
 
     @pufferlib.utils.profile
-    def evaluate(self, agent, data, max_episodes=None):
+    def evaluate(self, agent, data):
+        self.init_writer({})
         allocated = torch.cuda.memory_allocated(self.device)
-        ptr = num_episodes = env_step_time = inference_time = 0
+        ptr = env_step_time = inference_time = 0
 
-        dd = []
         step = -1
         while True:
+            buf = data.buf
+
             step += 1
             if ptr == self.batch_size+1:
                 break
-
-            buf = data.buf
 
             start = time.time()
             o, r, d, i = self.buffers[buf].recv()
@@ -245,38 +245,16 @@ class CleanPuffeRL:
 
                 ptr += 1
 
-            episode_stats = defaultdict(float)
-            num_stats = 0
             for item in i:
-                if "episode" in item.keys():
-                    self.log_stats({
-                        "charts/episodic_return": item["episode"]["r"],
-                        "charts/episodic_length": item["episode"]["l"]},
-                        step=self.global_step
-                    )
-
                 for agent_info in item.values():
-                    if "episode_stats" in agent_info.keys():
-                        num_stats += 1
-                        for name, stat in agent_info["episode_stats"].items():
-                            episode_stats[name] += stat
+                    for name, stat in agent_info.items():
+                        try:
+                            stat = float(stat)
+                        except TypeError:
+                            continue
 
-            if num_stats > 0:
-                self.log_stats({
-                        f"charts/episode_stats/{name}": stat / num_stats
-                        for name, stat in episode_stats.items()
-                    }, step=self.global_step)
-
-                print(f"Episode stats: ", {
-                        f"charts/episode_stats/{name}": stat / num_stats
-                        for name, stat in episode_stats.items()
-                    })
-                # this is probably wrong
-                num_episodes += 1
-
-                if max_episodes and num_episodes >= max_episodes:
-                    return
-
+                        self.log_stats({f'charts/{name}': stat}, self.global_step)
+                        
         self.global_step += self.batch_size
         env_sps = int(self.batch_size / env_step_time)
         inference_sps = int(self.batch_size / inference_time)
@@ -426,18 +404,18 @@ class CleanPuffeRL:
             print('Allocated %.2f MB during training' % ((torch.cuda.memory_allocated(self.device) - allocated) / 1e6))
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-            self.log_stats({
-                "performance/train_sps": train_sps,
-                "performance/train_time": train_time,
-                "charts/learning_rate": self.optimizer.param_groups[0]["lr"],
-                "losses/value_loss": v_loss.item(),
-                "losses/policy_loss": pg_loss.item(),
-                "losses/entropy": entropy_loss.item(),
-                "losses/old_approx_kl": old_approx_kl.item(),
-                "losses/approx_kl": approx_kl.item(),
-                "losses/clipfrac": np.mean(clipfracs),
-                "losses/explained_variance": explained_var,
-            }, step=self.global_step)
+        self.log_stats({
+            "performance/train_sps": train_sps,
+            "performance/train_time": train_time,
+            "charts/learning_rate": self.optimizer.param_groups[0]["lr"],
+            "losses/value_loss": v_loss.item(),
+            "losses/policy_loss": pg_loss.item(),
+            "losses/entropy": entropy_loss.item(),
+            "losses/old_approx_kl": old_approx_kl.item(),
+            "losses/approx_kl": approx_kl.item(),
+            "losses/clipfrac": np.mean(clipfracs),
+            "losses/explained_variance": explained_var,
+        }, step=self.global_step)
 
     def log_stats(self, *args, **kwargs):
         if self.wandb_initialized:

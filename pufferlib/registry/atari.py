@@ -55,6 +55,32 @@ class AtariFeaturizer(pufferlib.emulation.Postprocessor):
     def features(self, obs, step):
         return np.array(obs[1], dtype=np.float32).ravel()
 
+    def infos(self, team_reward, team_done, team_infos, step):
+        if 'lives' in team_infos:
+            if team_infos['lives'] == 0 and team_done:
+                try:
+                    team_infos['return'] = team_infos['episode']['r']
+                    team_infos['length'] = team_infos['episode']['l']
+                    team_infos['time'] = team_infos['episode']['t']
+                except:
+                    T()
+                return team_infos
+            return {}
+
+        if self.done:
+            return
+
+        if team_done:
+            team_infos['return'] = self.epoch_return
+            team_infos['length'] = self.epoch_length
+            self.done = True
+        else:
+            self.epoch_length += 1
+            self.epoch_return += team_reward
+
+        return team_infos
+
+
 def make_env(env_name, framestack):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
     try:
@@ -90,7 +116,6 @@ def make_binding(env_name, framestack):
             env_name=env_name,
             postprocessor_cls=AtariFeaturizer,
             emulate_flat_atn=True,
-            record_episode_statistics=False,
             suppress_env_prints=False,
         )
 
