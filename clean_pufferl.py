@@ -103,7 +103,6 @@ class CleanPuffeRL:
             project=wandb_project_name,
             entity=wandb_entity,
             config=extra_data,
-            sync_tensorboard=True,
             name=self.run_name,
             monitor_gym=True,
             save_code=True,
@@ -192,10 +191,10 @@ class CleanPuffeRL:
             o, r, d, i = self.buffers[buf].recv()
             env_step_time += time.time() - start
 
-            for profile in self.buffers[buf].profile():
-                self.log_stats({
-                    f'performance/env/{k}': np.mean(v['delta']) for k, v in profile.items()
-                }, step=self.global_step)
+            # for profile in self.buffers[buf].profile():
+            #     self.log_stats({
+            #         f'performance/env/{k}': np.mean(v['delta']) for k, v in profile.items()
+            #     }, step=self.global_step)
 
             o = torch.Tensor(o)
             if not self.cpu_offload:
@@ -250,7 +249,7 @@ class CleanPuffeRL:
                             continue
 
                         self.log_stats({f'charts/{name}': stat}, self.global_step)
-                        
+
         self.global_step += self.batch_size
         env_sps = int(self.batch_size / env_step_time)
         inference_sps = int(self.batch_size / inference_time)
@@ -414,6 +413,7 @@ class CleanPuffeRL:
         }, step=self.global_step)
 
     def log_stats(self, *args, **kwargs):
+        print("wandb: ", *args, **kwargs)
         if self.wandb_initialized:
             wandb.log(*args, **kwargs)
 
