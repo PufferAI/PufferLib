@@ -190,19 +190,18 @@ class CleanPuffeRL:
         return data
 
     @pufferlib.utils.profile
-    def evaluate(self, agent, data, max_episodes=None):
+    def evaluate(self, agent, data):
         self.init_writer({})
         allocated = torch.cuda.memory_allocated(self.device)
-        ptr = num_episodes = env_step_time = inference_time = 0
+        ptr = env_step_time = inference_time = 0
 
-        dd = []
         step = -1
         while True:
+            buf = data.buf
+
             step += 1
             if ptr == self.batch_size+1:
                 break
-
-            buf = data.buf
 
             start = time.time()
             o, r, d, i = self.buffers[buf].recv()
@@ -256,33 +255,15 @@ class CleanPuffeRL:
 
                 ptr += 1
 
-            episode_stats = defaultdict(float)
-            num_stats = 0
             for item in i:
-                if "episode" in item.keys():
-                    self.writer.add_scalar("charts/episodic_return", item["episode"]["r"], self.global_step)
-                    self.writer.add_scalar("charts/episodic_length", item["episode"]["l"], self.global_step)
-
-                '''
                 for agent_info in item.values():
-                    if "episode_stats" in agent_info.keys():
-                        num_stats += 1
-                        for name, stat in agent_info["episode_stats"].items():
-                            self.writer.add_histogram(f"charts/episode_stats/{name}/hist", stat, self.global_step)
-                            episode_stats[name] += stat
-                '''
+                    for name, stat in agent_info.items():
+                        try:
+                            stat = float(stat)
+                        except TypeError:
+                            continue
 
-            '''
-            if num_stats > 0:
-                #print("End of episode:", step)
-                for name, stat in episode_stats.items():
-                    self.writer.add_scalar(f"charts/episode_stats/{name}", stat / num_stats, self.global_step)
-                    #print("Episode stats:", name, stat / num_stats)
-                num_episodes += 1
-
-                if max_episodes and num_episodes >= max_episodes:
-                    return
-            '''
+                        self.writer.add_scalar(f'charts/{name}', stat, self.global_step)
 
         self.global_step += self.batch_size
         env_sps = int(self.batch_size / env_step_time)

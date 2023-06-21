@@ -84,7 +84,6 @@ binding = pufferlib.emulation.Binding(
         env_cls=nmmo.Env,
         env_name='Neural MMO',
         emulate_const_horizon=1024,
-        #teams={f'team_{i+1}': [i*8+j+1 for j in range(8)] for i in range(16)},
     )
 
 agent = pufferlib.frameworks.cleanrl.make_policy(
@@ -92,18 +91,24 @@ agent = pufferlib.frameworks.cleanrl.make_policy(
         recurrent_kwargs={'num_layers': 1}
     )(binding, 128, 128).to(device)
 
-trainer = CleanPuffeRL(binding, agent, num_buffers=2,
-        num_envs=1, num_cores=1,
-        vec_backend=pufferlib.vectorization.serial.VecEnv)
+trainer = CleanPuffeRL(binding, agent,
+        num_buffers=2, num_envs=8, num_cores=4,
+        batch_size=2**14,
+        vec_backend=pufferlib.vectorization.multiprocessing.VecEnv)
+
+#trainer = CleanPuffeRL(binding, agent,
+#        num_buffers=1, num_envs=1, num_cores=1,
+#        batch_size=2**14,
+#        vec_backend=pufferlib.vectorization.serial.VecEnv)
+
 #trainer.load_model(path)
+trainer.init_wandb()
 
 data = trainer.allocate_storage()
 
 num_updates = 10000
 for update in range(trainer.update+1, num_updates + 1):
     trainer.evaluate(agent, data)
-    trainer.train(agent, data)
+    trainer.train(agent, data, batch_rows=1024)
 
 trainer.close()
-
-# TODO: Figure out why this does not exit cleanly

@@ -35,7 +35,9 @@ class Postprocessor:
         self.dummy_ob = None
 
     def reset(self, team_obs):
-        return
+        self.epoch_return = 0
+        self.epoch_length = 0
+        self.done = False
 
     def features(self, obs, step):
         '''Default featurizer pads observations to max team size'''
@@ -67,6 +69,18 @@ class Postprocessor:
         '''Default reward shaper sums team rewards'''
         return sum(team_rewards.values()), team_infos
 
+    def infos(self, team_reward, team_done, team_infos, step):
+        if self.done:
+            return {}
+        if team_done:
+            team_infos['return'] = self.epoch_return
+            team_infos['length'] = self.epoch_length
+            self.done = True
+        else:
+            self.epoch_length += 1
+            self.epoch_return += team_reward
+
+        return team_infos
 
 class GymToPettingZooParallelWrapper(ParallelEnv):
     def __init__(self, env: gym.Env):
@@ -83,7 +97,7 @@ class GymToPettingZooParallelWrapper(ParallelEnv):
         if done:
             self.agents = []
 
-        return {1: ob}, {1: reward}, {1: done}, info
+        return {1: ob}, {1: reward}, {1: done}, {1: info}
 
     def observation_space(self, agent):
         return self.env.observation_space
@@ -265,8 +279,15 @@ def make_puffer_env_cls(scope, raw_obs):
 
             return team_ob
 
+        @utils.profile
         def _handle_actions(self, team_atns, team_id):
             return self.postprocessors[team_id].actions(team_atns, self._step)
+
+        @utils.profile
+        def _handle_infos(self, team_reward, team_done, team_infos, team_id):
+            team_infos = self.postprocessors[team_id].infos(team_reward, team_done, team_infos, self._step)
+            assert team_infos is not None, f'Postprocessor {team_id} returned None for infos'
+            return team_infos
 
         @utils.profile
         def _shape_rewards(self, team_reward, team_dones, team_infos, team_id):
@@ -323,23 +344,15 @@ def make_puffer_env_cls(scope, raw_obs):
                     dones[team] = self.done or \
                         not any([e in self.agents for e in self._teams[team]])
                 else:
+                    # TODO: This seems wrong
                     del dones[team]
 
-            # Record episode statistics
-            if scope.record_episode_statistics:
-                for team in self._teams:
-                    if dones[team]:
-                        continue
+                # Env might not provide infos key
+                if team in dones:
+                    if team not in infos:
+                        infos[team] = {}
 
-                    self._epoch_lengths[team] += 1
-                    self._epoch_returns[team] += rewards[team]
-
-                    if self.done:
-                        if 'episode' not in infos:
-                            infos['episode'] = {}
-
-                        infos['episode']['r'] = self._epoch_returns[team]
-                        infos['episode']['l'] = self._epoch_lengths[team]
+                    infos[team ]= self._handle_infos(rewards[team], dones[team], infos[team], team)
 
             # Observation shape test
             if __debug__:
@@ -475,10 +488,6 @@ def make_puffer_env_cls(scope, raw_obs):
         @utils.profile
         def reset(self, seed=None):
             #Reset the environment and return observations
-            if scope.record_episode_statistics:
-                self._epoch_returns = defaultdict(float)
-                self._epoch_lengths = defaultdict(int)
-
             obs = self._reset_env(seed)
             obs = self._group_by_team(obs)
             for team_id, team_ob in obs.items():
@@ -560,7 +569,6 @@ class Binding:
             emulate_const_horizon=None,
             emulate_const_num_agents=True,
             suppress_env_prints=__debug__,
-            record_episode_statistics=True,
             obs_dtype=np.float32):
         '''PufferLib's core Binding class.
 
@@ -591,7 +599,6 @@ class Binding:
             emulate_const_horizon: Fixed max horizon for resets, None if not applicable
             emulate_const_num_agents: Whether to pad to len(env.possible_agents) observations
             suppress_env_prints: Whether to consume all environment prints
-            record_episode_statistics: Whether to record additional episode statistics
             obs_dtype: Observation data type
         '''
         if (env_cls is None) == (env_creator is None):
