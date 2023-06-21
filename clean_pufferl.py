@@ -179,12 +179,12 @@ class CleanPuffeRL:
     def evaluate(self, agent, data):
         allocated = torch.cuda.memory_allocated(self.device)
         ptr = env_step_time = inference_time = 0
+        stats = defaultdict(float)
+        counts = defaultdict(float)
 
         step = -1
         while True:
             buf = data.buf
-            stats = defaultdict(float)
-            counts = defaultdict(float)
 
             step += 1
             if ptr == self.batch_size+1:
@@ -256,7 +256,7 @@ class CleanPuffeRL:
             if len(stats) > 0:
                 self.log_stats({
                     f'charts/{name}': stat / counts[name] for name, stat in stats.items()
-                }, self.global_step + step)
+                }, self.global_step)
 
         self.global_step += self.batch_size
         env_sps = int(self.batch_size / env_step_time)
