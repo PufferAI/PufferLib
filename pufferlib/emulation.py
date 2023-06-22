@@ -352,7 +352,7 @@ def make_puffer_env_cls(scope, raw_obs):
                     if team not in infos:
                         infos[team] = {}
 
-                    infos[team ]= self._handle_infos(rewards[team], dones[team], infos[team], team)
+                    infos[team]= self._handle_infos(rewards[team], dones[team], infos[team], team)
 
             # Observation shape test
             if __debug__:

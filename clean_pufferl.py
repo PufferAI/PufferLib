@@ -26,6 +26,14 @@ import pufferlib.vectorization.multiprocessing
 import pufferlib.vectorization.serial
 import wandb
 
+def unroll_nested_dict(d):
+    for k, v in d.items():
+        if isinstance(v, dict):
+            for k2, v2 in unroll_nested_dict(v):
+                yield f'{k}/{k2}', v2
+        else:
+            yield k, v
+
 @dataclass
 class CleanPuffeRL:
     binding: pufferlib.emulation.Binding
@@ -245,7 +253,7 @@ class CleanPuffeRL:
 
             for item in i:
                 for agent_info in item.values():
-                    for name, stat in agent_info.items():
+                    for name, stat in unroll_nested_dict(agent_info):
                         try:
                             stat = float(stat)
                             stats[name].append(stat)
