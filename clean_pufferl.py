@@ -8,6 +8,7 @@ import random
 import time
 from datetime import timedelta
 from types import SimpleNamespace
+from collections import defaultdict
 
 from dataclasses import dataclass
 
@@ -125,22 +126,22 @@ class CleanPuffeRL:
         self.optimizer.load_state_dict(resume_state['optimizer_state_dict'])
 
     def save_model(self, save_path, **kwargs):
-      state = {
-        "agent_state_dict": self.agent.state_dict(),
-        "optimizer_state_dict": self.optimizer.state_dict(),
-        "wandb_run_id": self.wandb_run_id,
-        "global_step": self.global_step,
-        "agent_step": self.agent_step,
-        "update": self.update,
-        **kwargs
-      }
+        state = {
+            "agent_state_dict": self.agent.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "wandb_run_id": self.wandb_run_id,
+            "global_step": self.global_step,
+            "agent_step": self.agent_step,
+            "update": self.update,
+            **kwargs
+        }
 
-      if self.verbose:
-          print(f'Saving checkpoint to {save_path}')
+        if self.verbose:
+            print(f'Saving checkpoint to {save_path}')
 
-      temp_path = os.path.join(f'{save_path}.tmp')
-      torch.save(state, temp_path)
-      os.rename(temp_path, save_path)
+        temp_path = os.path.join(f'{save_path}.tmp')
+        torch.save(state, temp_path)
+        os.rename(temp_path, save_path)
 
     def allocate_storage(self):
         next_obs, next_done, next_lstm_state = [], [], []
@@ -180,7 +181,9 @@ class CleanPuffeRL:
         allocated = torch.cuda.memory_allocated(self.device)
         ptr = env_step_time = inference_time = 0
 
-        step = -1
+        step = 0
+        stats = defaultdict(list)
+        performance = defaultdict(list)
         while True:
             buf = data.buf
 
@@ -193,9 +196,8 @@ class CleanPuffeRL:
             env_step_time += time.time() - start
 
             for profile in self.buffers[buf].profile():
-                self.log_stats({
-                    f'performance/env/{k}': np.mean(v['delta']) for k, v in profile.items()
-                }, step=self.global_step)
+                for k, v in profile.items():
+                    performance[k].append(v['delta'])
 
             o = torch.Tensor(o)
             if not self.cpu_offload:
@@ -246,30 +248,32 @@ class CleanPuffeRL:
                     for name, stat in agent_info.items():
                         try:
                             stat = float(stat)
+                            stats[name].append(stat)
                         except TypeError:
                             continue
 
-                        self.log_stats({f'charts/{name}': stat}, self.global_step)
-                        
         self.global_step += self.batch_size
         env_sps = int(self.batch_size / env_step_time)
         inference_sps = int(self.batch_size / inference_time)
-        mean_reward = float(torch.mean(data.rewards))
 
-        self.log_stats({
-            "performance/env_time": env_step_time,
-            "performance/env_sps": env_sps,
-            "performance/inference_time": inference_time,
-            "performance/inference_sps": inference_sps,
-            "charts/reward": mean_reward
-        }, step=self.global_step)
-
-        uptime = timedelta(seconds=int(time.time() - self.start_time))
+        if self.wandb_initialized:
+            wandb.log({
+                "performance/env_time": env_step_time,
+                "performance/env_sps": env_sps,
+                "performance/inference_time": inference_time,
+                "performance/inference_sps": inference_sps,
+                **{f'performance/env/{k}': np.mean(v) for k, v in performance.items()},
+                **{f'charts/{k}': np.mean(v) for k, v in stats.items()},
+                "charts/reward": float(torch.mean(data.rewards)),
+                "agent_steps": self.global_step,
+                "global_step": self.global_step,
+            })
 
         if self.verbose:
             print('%.2f GB Allocated at the start of evaluation' % (allocated / 1e9))
             print('Allocated %.2f GB during evaluation\n' % ((torch.cuda.memory_allocated(self.device) - allocated) / 1e9))
 
+        uptime = timedelta(seconds=int(time.time() - self.start_time))
         print(
             f'Epoch: {self.update} - {self.global_step // 1000}K steps - {uptime} Elapsed\n'
             f'\tSteps Per Second: Env={env_sps}, Inference={inference_sps}'
@@ -400,22 +404,21 @@ class CleanPuffeRL:
             print('Allocated %.2f MB during training' % ((torch.cuda.memory_allocated(self.device) - allocated) / 1e6))
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        self.log_stats({
-            "performance/train_sps": train_sps,
-            "performance/train_time": train_time,
-            "charts/learning_rate": self.optimizer.param_groups[0]["lr"],
-            "losses/value_loss": v_loss.item(),
-            "losses/policy_loss": pg_loss.item(),
-            "losses/entropy": entropy_loss.item(),
-            "losses/old_approx_kl": old_approx_kl.item(),
-            "losses/approx_kl": approx_kl.item(),
-            "losses/clipfrac": np.mean(clipfracs),
-            "losses/explained_variance": explained_var,
-        }, step=self.global_step)
-
-    def log_stats(self, *args, **kwargs):
         if self.wandb_initialized:
-            wandb.log(*args, **kwargs)
+            wandb.log({
+                "performance/train_sps": train_sps,
+                "performance/train_time": train_time,
+                "charts/learning_rate": self.optimizer.param_groups[0]["lr"],
+                "losses/value_loss": v_loss.item(),
+                "losses/policy_loss": pg_loss.item(),
+                "losses/entropy": entropy_loss.item(),
+                "losses/old_approx_kl": old_approx_kl.item(),
+                "losses/approx_kl": approx_kl.item(),
+                "losses/clipfrac": np.mean(clipfracs),
+                "losses/explained_variance": explained_var,
+                "agent_steps": self.global_step,
+                "global_step": self.global_step,
+            })
 
     def close(self):
         if self.wandb_initialized:
