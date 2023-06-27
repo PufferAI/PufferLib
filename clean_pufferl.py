@@ -38,11 +38,12 @@ def unroll_nested_dict(d):
 class CleanPuffeRL:
     binding: pufferlib.emulation.Binding
     agent: nn.Module
+    policy_pool: pufferlib.policy_pool.PolicyPool = None
     exp_name: str = os.path.basename(__file__)
     seed: int = 1
     torch_deterministic: bool = True
-    cuda: bool = True
     vec_backend: ... = pufferlib.vectorization.multiprocessing.VecEnv
+    device: str = torch.device("cuda") if torch.cuda.is_available() else "cpu"
     total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
     num_buffers: int = 1
@@ -84,9 +85,13 @@ class CleanPuffeRL:
             print('Allocated %.2f MB to environments. Only accurate for Serial backend.' % ((process.memory_info().rss - allocated) / 1e6))
 
         # Setup agent
-        self.device = torch.device("cuda" if torch.cuda.is_available() and self.cuda else "cpu")
         self.agent = self.agent.to(self.device)
         self.agent.is_recurrent = hasattr(self.agent, "lstm")
+
+        # Setup policy pool
+        if self.policy_pool is None:
+            self.policy_pool = pufferlib.policy_pool.PolicyPool(
+                self.agent, self.num_agents * self.num_envs)
 
         # Setup optimizer
         self.optimizer = optim.Adam(
@@ -203,6 +208,9 @@ class CleanPuffeRL:
             o, r, d, i = self.buffers[buf].recv()
             env_step_time += time.time() - start
 
+            # TODO: Key for update
+            self.policy_pool.update_scores(i, 'return')
+
             for profile in self.buffers[buf].profile():
                 for k, v in profile.items():
                     performance[k].append(v['delta'])
@@ -222,19 +230,24 @@ class CleanPuffeRL:
             # ALGO LOGIC: action logic
             start = time.time()
             with torch.no_grad():
-                if self.agent.is_recurrent:
-                    action, logprob, _, value, data.next_lstm_state[buf] = agent.get_action_and_value(o.to(self.device), data.next_lstm_state[buf], data.next_done[buf])
-                else:
-                    action, logprob, _, value = agent.get_action_and_value(o.to(self.device))
+                all_actions, idxs, step_data = self.policy_pool.forwards(
+                    o.to(self.device),
+                    data.next_lstm_state[buf],
+                    data.next_done[buf],
+                )
+                action, logprob, value, data.next_lstm_state[buf] = step_data[0]
                 value = value.flatten()
             inference_time += time.time() - start
 
             # TRY NOT TO MODIFY: execute the game
             start = time.time()
-            self.buffers[buf].send(action.cpu().numpy(), None)
+            self.buffers[buf].send(all_actions.cpu().numpy(), None)
             env_step_time += time.time() - start
             data.buf = (data.buf + 1) % self.num_buffers
 
+            # Index alive mask with policy pool idxs...
+            # TODO: Find a way to avoid having to do this
+            alive_mask = np.array(alive_mask)[idxs[0]]
             for idx in np.where(alive_mask)[0]:
                 if ptr == self.batch_size+1:
                     break
@@ -404,9 +417,7 @@ class CleanPuffeRL:
         train_sps = int(self.batch_size / train_time)
         self.update += 1
 
-        print(
-            f'\tTrain={train_sps}\n'
-        )
+        print(f'\tTrain={train_sps}\n')
 
         if self.verbose:
             print('Allocated %.2f MB during training' % ((torch.cuda.memory_allocated(self.device) - allocated) / 1e6))

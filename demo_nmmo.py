@@ -6,6 +6,7 @@ EntityId = EntityState.State.attr_name_to_col["id"]
 
 import pufferlib
 import pufferlib.vectorization
+import pufferlib.policy_pool
 from clean_pufferl import CleanPuffeRL
 
 
@@ -77,7 +78,11 @@ class Agent(pufferlib.models.Policy):
         return actions
 
 from pufferlib.registry import nmmo
-device = 'cuda'
+
+# TODO: Support devices in clean pufferl
+device = 'cpu'
+num_envs = 1
+num_agents = 128
 
 import nmmo
 binding = pufferlib.emulation.Binding(
@@ -89,26 +94,46 @@ binding = pufferlib.emulation.Binding(
 agent = pufferlib.frameworks.cleanrl.make_policy(
         Agent, recurrent_args=[128, 128],
         recurrent_kwargs={'num_layers': 1}
-    )(binding, 128, 128).to(device)
+    )(binding, 128, 128)
 
-trainer = CleanPuffeRL(binding, agent,
-        num_buffers=2, num_envs=8, num_cores=4,
-        batch_size=2**14,
-        vec_backend=pufferlib.vectorization.multiprocessing.VecEnv)
+policy_pool = pufferlib.policy_pool.PolicyPool(
+    policies=[agent],
+    names=['baseline'],
+    tenured=[True],
+    sample_weights=[1, 1],
+    max_policies=8,
+    evaluation_batch_size=num_envs*num_agents,
+    path='pool'
+) 
+policy_pool.add_policy_copy('baseline', 'anchor', anchor=True)
+ 
+#trainer = CleanPuffeRL(binding, agent,
+#        num_buffers=2, num_envs=8, num_cores=4,
+#        batch_size=2**14,
+#        vec_backend=pufferlib.vectorization.multiprocessing.VecEnv)
 
 #trainer = CleanPuffeRL(binding, agent,
 #        num_buffers=1, num_envs=1, num_cores=1,
 #        batch_size=2**14,
 #        vec_backend=pufferlib.vectorization.serial.VecEnv)
 
+trainer = CleanPuffeRL(binding, agent, policy_pool=policy_pool,
+        num_buffers=1, num_envs=num_envs, num_cores=1,
+        batch_size=2**10, device=device,
+        vec_backend=pufferlib.vectorization.serial.VecEnv)
+
 #trainer.load_model(path)
-trainer.init_wandb()
+#trainer.init_wandb()
 
 data = trainer.allocate_storage()
 
 num_updates = 10000
 for update in range(trainer.update+1, num_updates + 1):
     trainer.evaluate(agent, data)
-    trainer.train(agent, data, batch_rows=1024)
+    if update % 1 == 0:
+        policy_pool.add_policy_copy('baseline', f'baseline{update}')
+
+    trainer.train(agent, data, batch_rows=32)
+    #trainer.train(agent, data, batch_rows=1024)
 
 trainer.close()

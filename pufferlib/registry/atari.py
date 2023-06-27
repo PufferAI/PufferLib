@@ -58,12 +58,9 @@ class AtariFeaturizer(pufferlib.emulation.Postprocessor):
     def infos(self, team_reward, team_done, team_infos, step):
         if 'lives' in team_infos:
             if team_infos['lives'] == 0 and team_done:
-                try:
-                    team_infos['return'] = team_infos['episode']['r']
-                    team_infos['length'] = team_infos['episode']['l']
-                    team_infos['time'] = team_infos['episode']['t']
-                except:
-                    T()
+                team_infos['return'] = team_infos['episode']['r']
+                team_infos['length'] = team_infos['episode']['l']
+                team_infos['time'] = team_infos['episode']['t']
                 return team_infos
             return {}
 
