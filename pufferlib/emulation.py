@@ -338,7 +338,7 @@ def make_puffer_env_cls(scope, raw_obs):
                 else:
                     del rewards[team]
 
-                if scope.emulate_const_num_agents or dones[team]:
+                if scope.emulate_const_num_agents or team in dones:
                     # TODO: Should dones per team be true on the first tick
                     # or all subsequent ticks as well?
                     dones[team] = self.done or \
@@ -348,11 +348,11 @@ def make_puffer_env_cls(scope, raw_obs):
                     del dones[team]
 
                 # Env might not provide infos key
-                if team in dones:
-                    if team not in infos:
-                        infos[team] = {}
+                #if team in dones:
+                if team not in infos:
+                    infos[team] = {}
 
-                    infos[team]= self._handle_infos(rewards[team], dones[team], infos[team], team)
+                infos[team]= self._handle_infos(rewards[team], dones[team], infos[team], team)
 
             # Observation shape test
             if __debug__:
@@ -754,7 +754,7 @@ def unpack_batched_obs(flat_space, packed_obs):
 
     for key_list, space in flat_space.items():
         current_dict = batched_obs
-        inc = np.prod(space.shape)
+        inc = int(np.prod(space.shape))
 
         for key in key_list[:-1]:
             if key not in current_dict:
@@ -762,7 +762,11 @@ def unpack_batched_obs(flat_space, packed_obs):
             current_dict = current_dict[key]
 
         last_key = key_list[-1]
-        current_dict[last_key] = packed_obs[:, idx:idx + inc].reshape(batch, *space.shape)
+        shape = space.shape
+        if len(shape) == 0:
+            shape = (1,)    
+
+        current_dict[last_key] = packed_obs[:, idx:idx + inc].reshape(batch, *shape)
         idx += inc
 
     return batched_obs
@@ -781,6 +785,10 @@ def _make_space_like(ob):
 
     if type(ob) in (dict, OrderedDict):
         return gym.spaces.Dict({k: _make_space_like(v) for k, v in ob.items()})
+
+    if type(ob) in (int, float):
+        # TODO: Tighten bounds
+        return gym.spaces.Box(low=-np.inf, high=np.inf, shape=())
 
     raise ValueError(f'Invalid type for featurized obs: {type(ob)}')
 

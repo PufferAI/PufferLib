@@ -36,6 +36,8 @@ def make_zeros_like(data):
         return [make_zeros_like(v) for v in data]
     elif isinstance(data, np.ndarray):
         return np.zeros_like(data)
+    elif isinstance(data, (int, float)):
+        return 0
     else:
         raise ValueError(f'Unsupported type: {type(data)}')
 
