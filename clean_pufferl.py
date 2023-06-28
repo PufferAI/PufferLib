@@ -69,8 +69,8 @@ class CleanPuffeRL:
         torch.backends.cudnn.deterministic = self.torch_deterministic
 
         # Create environments
-        process = psutil.Process()
-        allocated = process.memory_info().rss
+        self.process = psutil.Process()
+        allocated = self.process.memory_info().rss
         self.buffers = [
             self.vec_backend(
                 self.binding,
@@ -81,7 +81,7 @@ class CleanPuffeRL:
         ]
 
         if self.verbose:
-            print('Allocated %.2f MB to environments. Only accurate for Serial backend.' % ((process.memory_info().rss - allocated) / 1e6))
+            print('Allocated %.2f MB to environments. Only accurate for Serial backend.' % ((self.process.memory_info().rss - allocated) / 1e6))
 
         # Setup agent
         self.device = torch.device("cuda" if torch.cuda.is_available() and self.cuda else "cpu")
@@ -167,7 +167,8 @@ class CleanPuffeRL:
             else:
                 next_lstm_state.append(None)
 
-        allocated = torch.cuda.memory_allocated(self.device)
+        allocated_torch = torch.cuda.memory_allocated(self.device)
+        allocated_cpu = self.process.memory_info().rss
         data = SimpleNamespace(
             buf = 0, sort_keys = [],
             next_obs=next_obs, next_done=next_done, next_lstm_state=next_lstm_state,
@@ -179,19 +180,23 @@ class CleanPuffeRL:
             values=torch.zeros(self.batch_size+1).to(self.device),
         )
 
+        allocated_torch = torch.cuda.memory_allocated(self.device) - allocated_torch
+        allocated_cpu = self.process.memory_info().rss - allocated_cpu
         if self.verbose:
-            print('Allocated %.2f GB to storage' % ((torch.cuda.memory_allocated(self.device) - allocated) / 1e9))
-#
+            print('Allocated to storage - Pytorch: %.2f GB, System: %.2f GB' % (allocated_torch/1e9, allocated_cpu/1e9))
+
         return data
 
     @pufferlib.utils.profile
     def evaluate(self, agent, data):
-        allocated = torch.cuda.memory_allocated(self.device)
+        allocated_torch = torch.cuda.memory_allocated(self.device)
+        allocated_cpu = self.process.memory_info().rss
         ptr = env_step_time = inference_time = 0
 
         step = 0
         stats = defaultdict(list)
         performance = defaultdict(list)
+
         while True:
             buf = data.buf
 
@@ -227,6 +232,7 @@ class CleanPuffeRL:
                 else:
                     action, logprob, _, value = agent.get_action_and_value(o.to(self.device))
                 value = value.flatten()
+
             inference_time += time.time() - start
 
             # TRY NOT TO MODIFY: execute the game
@@ -277,9 +283,10 @@ class CleanPuffeRL:
                 "global_step": self.global_step,
             })
 
+        allocated_torch = torch.cuda.memory_allocated(self.device) - allocated_torch
+        allocated_cpu = self.process.memory_info().rss - allocated_cpu
         if self.verbose:
-            print('%.2f GB Allocated at the start of evaluation' % (allocated / 1e9))
-            print('Allocated %.2f GB during evaluation\n' % ((torch.cuda.memory_allocated(self.device) - allocated) / 1e9))
+            print('Allocated during evaluation - Pytorch: %.2f GB, System: %.2f GB' % (allocated_torch/1e9, allocated_cpu/1e9))
 
         uptime = timedelta(seconds=int(time.time() - self.start_time))
         print(
@@ -296,7 +303,8 @@ class CleanPuffeRL:
             vf_coef=0.5, max_grad_norm=0.5, target_kl=None):
 
         #assert self.num_steps % bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
-        allocated = torch.cuda.memory_allocated(self.device)
+        allocated_torch = torch.cuda.memory_allocated(self.device)
+        allocated_cpu = self.process.memory_info().rss
 
         # Annealing the rate if instructed to do so.
         if anneal_lr:
@@ -408,8 +416,10 @@ class CleanPuffeRL:
             f'\tTrain={train_sps}\n'
         )
 
+        allocated_torch = torch.cuda.memory_allocated(self.device) - allocated_torch
+        allocated_cpu = self.process.memory_info().rss - allocated_cpu
         if self.verbose:
-            print('Allocated %.2f MB during training' % ((torch.cuda.memory_allocated(self.device) - allocated) / 1e6))
+            print('Allocated during training - Pytorch: %.2f GB, System: %.2f GB' % (allocated_torch/1e9, allocated_cpu/1e9))
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if self.wandb_initialized:
