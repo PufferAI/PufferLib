@@ -27,6 +27,9 @@ import pufferlib.vectorization.serial
 import wandb
 
 def unroll_nested_dict(d):
+    if not isinstance(d, dict):
+        return d
+
     for k, v in d.items():
         if isinstance(v, dict):
             for k2, v2 in unroll_nested_dict(v):
@@ -209,7 +212,7 @@ class CleanPuffeRL:
             env_step_time += time.time() - start
 
             # TODO: Key for update
-            self.policy_pool.update_scores(i, 'return')
+            i = self.policy_pool.update_scores(i, 'return')
 
             for profile in self.buffers[buf].profile():
                 for k, v in profile.items():
@@ -264,12 +267,15 @@ class CleanPuffeRL:
 
                 ptr += 1
 
-            for item in i:
-                for agent_info in item.values():
+            for pol, item in enumerate(i):
+                for agent_info in item:
+                    if not agent_info:
+                        continue 
+
                     for name, stat in unroll_nested_dict(agent_info):
                         try:
                             stat = float(stat)
-                            stats[name].append(stat)
+                            stats[f'pol_{pol}-{name}'].append(stat)
                         except TypeError:
                             continue
 
