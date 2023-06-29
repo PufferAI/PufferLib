@@ -1,8 +1,10 @@
 from pettingzoo.utils.conversions import aec_to_parallel_wrapper
 
-import pufferlib
+import pufferlib.emulation
+import pufferlib.models
 import pufferlib.utils
 
+Policy = pufferlib.models.Default
 
 def make_battle_v4_binding():
     '''MAgent Battle binding creation function'''

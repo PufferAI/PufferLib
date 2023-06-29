@@ -114,7 +114,7 @@ class GymToPettingZooParallelWrapper(ParallelEnv):
     def seed(self, seed=None):
         return self.env.seed(seed)
 
-def make_puffer_env_cls(scope, raw_obs):
+def make_puffer_env_cls(scope, raw_local_env, raw_obs):
     class PufferEnv(ParallelEnv):
         @utils.profile
         def __init__(self, *args, env=None, **kwargs):
@@ -427,7 +427,7 @@ def make_puffer_env_cls(scope, raw_obs):
 
             # Flatten and cache observation space
             # TODO: Rename obs
-            self._original_observation_space[team] = self.env.observation_space(team)
+            self._original_observation_space[team] = raw_local_env.observation_space(team)
             self._raw_observation_space[team] = _make_space_like(obs)
             self._flat_observation_space[team] = _flatten_space(self._raw_observation_space[team])
 
@@ -458,7 +458,7 @@ def make_puffer_env_cls(scope, raw_obs):
                 return self.atn_space_cache[team]
 
             # TODO: Handle variable length teams
-            atn_space = gym.spaces.Dict({a: self.env.action_space(a) for a in self._teams[team]})
+            atn_space = gym.spaces.Dict({a: raw_local_env.action_space(a) for a in self._teams[team]})
 
             self._flat_action_space[team] = _flatten_space(atn_space)
             for agent in self._teams[team]:
@@ -636,7 +636,7 @@ class Binding:
                 raw_obs = raw_local_env.reset()
                 print('WARNING: Environment does not support seeding.')
 
-        self._env_cls = make_puffer_env_cls(scope, raw_obs=raw_obs)
+        self._env_cls = make_puffer_env_cls(scope, raw_local_env, raw_obs)
 
         local_env = self._env_cls(scope, env=raw_local_env)
 

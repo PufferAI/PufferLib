@@ -3,7 +3,7 @@ from pdb import set_trace as T
 import torch
 import torch.nn as nn
 
-from pufferlib.torch import BatchFirstLSTM
+from pufferlib.pytorch import BatchFirstLSTM
 
 
 def make_recurrent_policy(Policy, recurrent_cls=BatchFirstLSTM,

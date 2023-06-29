@@ -65,7 +65,8 @@ class CleanPuffeRL:
         # Seed everything
         random.seed(self.seed)
         np.random.seed(self.seed)
-        torch.manual_seed(self.seed)
+        if self.seed is not None:
+            torch.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = self.torch_deterministic
 
         # Create environments
