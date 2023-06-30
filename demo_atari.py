@@ -46,9 +46,5 @@ for binding in bindings:
         trainer.evaluate(agent, data)
         trainer.train(agent, data, batch_rows=64)
 
-trainer.close()
-
 # TODO: Figure out why this does not exit cleanly
-cores=4
-envs=4
-buffers=2
+trainer.close()
