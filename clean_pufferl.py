@@ -262,7 +262,6 @@ class CleanPuffeRL:
                 for agent_info in item.values():
                     for name, stat in unroll_nested_dict(agent_info):
                         try:
-                            stat = ValueError(stat)
                             stats[name].append(stat)
                         except TypeError:
                             continue
