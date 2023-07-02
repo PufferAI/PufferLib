@@ -267,12 +267,12 @@ class CleanPuffeRL:
 
                 ptr += 1
 
-            for pol, item in enumerate(i):
-                for agent_info in item:
-                    if not agent_info:
+            for pol, agent_infos in i.items():
+                for agent_inf in agent_infos:
+                    if not agent_inf:
                         continue 
 
-                    for name, stat in unroll_nested_dict(agent_info):
+                    for name, stat in unroll_nested_dict(agent_inf):
                         try:
                             stat = float(stat)
                             stats[f'pol_{pol}-{name}'].append(stat)

@@ -103,7 +103,7 @@ class PolicyPool():
                     [lstm_state[0][:, samp], lstm_state[1][:, samp]],
                     dones[samp])
             else:
-                atn, lgprob, _, val = policy(obs[samp])
+                atn, lgprob, _, val = policy.model.get_action_and_value(obs[samp])
             
             returns.append((atn, lgprob, val, lstm_state))
             all_actions.append(atn)
@@ -158,6 +158,7 @@ class PolicyPool():
         for info in infos:
             agent_infos += list(info.values())
 
+        policy_infos = defaultdict(list)
         policy_keys = list(self.active_policies.keys())
         for idx in range(self.num_active_policies):
             if idx >= len(self.active_policies):
@@ -167,7 +168,9 @@ class PolicyPool():
             update_ranks = False
             samp = self.sample_idxs[idx]
             policy = policy_keys[idx]
-            for i in np.array(agent_infos)[samp]:
+            pol_infos = np.array(agent_infos)[samp]
+            policy_infos[policy] += list(pol_infos)
+            for i in pol_infos:
                 if key not in i:
                     continue 
             
@@ -185,6 +188,8 @@ class PolicyPool():
 
         if update_policies:
             self.update_active_policies()
+
+        return policy_infos
 
     def update_ranks(self):
         self.tournament.update(
