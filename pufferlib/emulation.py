@@ -1,5 +1,5 @@
 from pdb import set_trace as T
-import itertools
+import warnings
 import numpy as np
 from contextlib import nullcontext
 try:
@@ -114,7 +114,7 @@ class GymToPettingZooParallelWrapper(ParallelEnv):
     def seed(self, seed=None):
         return self.env.seed(seed)
 
-def make_puffer_env_cls(scope, raw_obs):
+def make_puffer_env_cls(scope, raw_local_env, raw_obs):
     class PufferEnv(ParallelEnv):
         @utils.profile
         def __init__(self, *args, env=None, **kwargs):
@@ -180,13 +180,7 @@ def make_puffer_env_cls(scope, raw_obs):
         @utils.profile
         def _reset_env(self, seed):
             with utils.Suppress() if scope.suppress_env_prints else nullcontext():
-                # Handle seeding with different gym versions
-                try:
-                    return self.env.reset(seed=seed)
-                except:
-                    if seed is not None:
-                        self.env.seed(seed)
-                    return self.env.reset()
+                return _seed_and_reset(self.env, seed)
 
         @utils.profile
         def _prestep(self, team_actions):
@@ -312,7 +306,8 @@ def make_puffer_env_cls(scope, raw_obs):
 
             # Featurize and shape rewards; pad data
             for team in self._teams:
-                if team in obs:
+                # TODO: Check if group_by should be adding in empty teams
+                if obs[team]:
                     obs[team] = self._featurize(obs[team], team)
                     obs[team] = _flatten_to_array(obs[team], self._flat_observation_space[team], scope.obs_dtype)
                 elif scope.emulate_flat_obs:
@@ -427,7 +422,7 @@ def make_puffer_env_cls(scope, raw_obs):
 
             # Flatten and cache observation space
             # TODO: Rename obs
-            self._original_observation_space[team] = self.env.observation_space(team)
+            self._original_observation_space[team] = raw_local_env.observation_space(team)
             self._raw_observation_space[team] = _make_space_like(obs)
             self._flat_observation_space[team] = _flatten_space(self._raw_observation_space[team])
 
@@ -458,7 +453,7 @@ def make_puffer_env_cls(scope, raw_obs):
                 return self.atn_space_cache[team]
 
             # TODO: Handle variable length teams
-            atn_space = gym.spaces.Dict({a: self.env.action_space(a) for a in self._teams[team]})
+            atn_space = gym.spaces.Dict({a: raw_local_env.action_space(a) for a in self._teams[team]})
 
             self._flat_action_space[team] = _flatten_space(atn_space)
             for agent in self._teams[team]:
@@ -621,22 +616,8 @@ class Binding:
 
         raw_local_env = self.pz_env_creator()
 
-        try:
-            raw_local_env.seed(42)
-            old_seed=True
-        except:
-            old_seed=False
-
-        if old_seed:
-            raw_obs = raw_local_env.reset()
-        else:
-            try:
-                raw_obs = raw_local_env.reset(seed=42)
-            except:
-                raw_obs = raw_local_env.reset()
-                print('WARNING: Environment does not support seeding.')
-
-        self._env_cls = make_puffer_env_cls(scope, raw_obs=raw_obs)
+        raw_obs = _seed_and_reset(raw_local_env, 42)
+        self._env_cls = make_puffer_env_cls(scope, raw_local_env, raw_obs)
 
         local_env = self._env_cls(scope, env=raw_local_env)
 
@@ -850,3 +831,22 @@ def _flatten_to_array(space_sample, flat_space, dtype=None):
         start = end
 
     return prealloc
+
+def _seed_and_reset(env, seed):
+    try:
+        env.seed(seed)
+        old_seed=True
+    except:
+        old_seed=False
+
+    if old_seed:
+        obs = env.reset()
+    else:
+        try:
+            obs = env.reset(seed=seed)
+        except:
+            obs= env.reset()
+            warnings.warn('WARNING: Environment does not support seeding.', DeprecationWarning)
+
+    return obs
+

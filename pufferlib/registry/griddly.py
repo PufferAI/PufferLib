@@ -5,6 +5,7 @@ import gym
 import pufferlib
 import pufferlib.emulation
 
+Policy = pufferlib.models.Default
 
 def make_spider_v0_binding():
     '''Griddly Spiders binding creation function

@@ -5,6 +5,8 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 
+import pufferlib.pytorch
+
 
 class Policy(torch.nn.Module, ABC):
     def __init__(self, binding):
@@ -104,3 +106,43 @@ class Default(Policy):
         if concat:
             return torch.cat(actions, dim=-1)
         return actions
+
+class Convolutional(Policy):
+    def __init__(self, binding, *args, framestack, flat_size, input_size=512, hidden_size=512, output_size=512, **kwargs):
+        '''The CleanRL default Atari policy: a stack of three convolutions followed by a linear layer
+        
+        Takes framestack as a mandatory keyword arguments. Suggested default is 1 frame
+        with LSTM or 4 frames without.'''
+        super().__init__(binding)
+        self.observation_space = binding.single_observation_space
+        self.num_actions = binding.raw_single_action_space.n
+
+        self.network = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Conv2d(framestack, 32, 8, stride=4)),
+            nn.ReLU(),
+            pufferlib.pytorch.layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+            nn.ReLU(),
+            pufferlib.pytorch.layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            nn.ReLU(),
+            nn.Flatten(),
+            pufferlib.pytorch.layer_init(nn.Linear(flat_size, hidden_size)),
+            nn.ReLU(),
+        )
+
+        self.actor = pufferlib.pytorch.layer_init(nn.Linear(output_size, self.num_actions), std=0.01)
+        self.value_function = pufferlib.pytorch.layer_init(nn.Linear(output_size, 1), std=1)
+
+    def critic(self, hidden):
+        return self.value_function(hidden)
+
+    def encode_observations(self, flat_observations):
+        # TODO: Add flat obs support to emulation
+        batch = flat_observations.shape[0]
+        observations = flat_observations.reshape((batch,) + self.observation_space.shape)
+        return self.network(observations / 255.0), None
+
+    def decode_actions(self, flat_hidden, lookup, concat=None):
+        action = self.actor(flat_hidden)
+        if concat:
+            return action
+        return [action]

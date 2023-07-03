@@ -20,6 +20,8 @@ import pufferlib.emulation
 import pufferlib.models
 
 
+Policy = pufferlib.models.Convolutional
+
 # Broken in SB3
 class NoopResetEnv(gym.Wrapper):
     """
@@ -53,7 +55,7 @@ class NoopResetEnv(gym.Wrapper):
 
 class AtariFeaturizer(pufferlib.emulation.Postprocessor):
     def features(self, obs, step):
-        return np.array(obs[1], dtype=np.float32).ravel()
+        return np.array(obs[1], dtype=np.float32)
 
     def infos(self, team_reward, team_done, team_infos, step):
         if 'lives' in team_infos:
@@ -115,49 +117,3 @@ def make_binding(env_name, framestack):
             emulate_flat_atn=True,
             suppress_env_prints=False,
         )
-
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    '''CleanRL's default layer initialization'''
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
-
-class Policy(pufferlib.models.Policy):
-    def __init__(self, binding, *args, framestack, input_size=512, hidden_size=512, **kwargs):
-        '''The CleanRL default Atari policy: a stack of three convolutions followed by a linear layer
-        
-        Takes framestack as a mandatory keyword arguments. Suggested default is 1 frame
-        with LSTM or 4 frames without.'''
-        super().__init__(binding)
-        self.observation_space = binding.raw_single_observation_space
-        self.num_actions = binding.raw_single_action_space.n
-
-        self.network = nn.Sequential(
-            layer_init(nn.Conv2d(framestack, 32, 8, stride=4)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
-            nn.ReLU(),
-            nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, input_size)),
-            nn.ReLU(),
-        )
-
-        self.actor = layer_init(nn.Linear(hidden_size, self.num_actions), std=0.01)
-        self.value_function = layer_init(nn.Linear(hidden_size, 1), std=1)
-
-    def critic(self, hidden):
-        return self.value_function(hidden)
-
-    def encode_observations(self, flat_observations):
-        # TODO: Add flat obs support to emulation
-        batch = flat_observations.shape[0]
-        observations = flat_observations.reshape((batch,) + self.observation_space.shape)
-        return self.network(observations / 255.0), None
-
-    def decode_actions(self, flat_hidden, lookup, concat=None):
-        action = self.actor(flat_hidden)
-        if concat:
-            return action
-        return [action]
