@@ -20,15 +20,16 @@ for binding in all_bindings:
         )(binding, *config.policy_args, **config.policy_kwargs).to(config.device)
 
     policy_pool = pufferlib.policy_pool.PolicyPool(
-        policies=[agent],
-        names=['baseline'],
-        tenured=[True],
+        learner=agent,
+        name='learner',
         sample_weights=[1, 1],
+        active_policies=2,
         max_policies=8,
         evaluation_batch_size=config.num_envs*binding.max_agents,
         path='pool'
     ) 
-    policy_pool.add_policy_copy('baseline', 'anchor', anchor=True)
+    policy_pool.add_policy_copy('learner', 'anchor',
+            tenured=True, anchor=True)
     
     trainer = CleanPuffeRL(
             binding,
@@ -43,7 +44,7 @@ for binding in all_bindings:
     )
 
     #trainer.load_model(path)
-    trainer.init_wandb()
+    #trainer.init_wandb()
 
     data = trainer.allocate_storage()
 

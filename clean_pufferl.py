@@ -219,7 +219,7 @@ class CleanPuffeRL:
             env_step_time += time.time() - start
 
             # TODO: Key for update
-            i = self.policy_pool.update_scores(i, 'return')
+            i = self.policy_pool.update_scores(i, 'return', self.global_step)
 
             for profile in self.buffers[buf].profile():
                 for k, v in profile.items():
@@ -258,6 +258,7 @@ class CleanPuffeRL:
 
             # Index alive mask with policy pool idxs...
             # TODO: Find a way to avoid having to do this
+            T()
             alive_mask = np.array(alive_mask)[idxs[0]]
             for idx in np.where(alive_mask)[0]:
                 if ptr == self.batch_size+1:
