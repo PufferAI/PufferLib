@@ -22,6 +22,7 @@ import pufferlib
 import pufferlib.emulation
 import pufferlib.utils
 import pufferlib.frameworks.cleanrl
+import pufferlib.policy_pool
 import pufferlib.vectorization.multiprocessing
 import pufferlib.vectorization.serial
 import wandb
@@ -274,17 +275,17 @@ class CleanPuffeRL:
 
                 ptr += 1
 
-            for pol, agent_infos in i.items():
-                for agent_inf in agent_infos:
-                    if not agent_inf:
-                        continue 
+            # Log only for main learning policy
+            for agent_i in i[0]:
+                if not agent_i:
+                    continue 
 
-                    for name, stat in unroll_nested_dict(agent_inf):
-                        try:
-                            stat = float(stat)
-                            stats[f'pol_{pol}-{name}'].append(stat)
-                        except TypeError:
-                            continue
+                for name, stat in unroll_nested_dict(agent_i):
+                    try:
+                        stat = float(stat)
+                        stats[name].append(stat)
+                    except TypeError:
+                        continue
 
         self.global_step += self.batch_size
         env_sps = int(self.batch_size / env_step_time)
