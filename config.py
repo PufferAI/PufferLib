@@ -23,6 +23,10 @@ class Default:
     #recurrent_args = [128, 128]
     recurrent_kwargs = dict(num_layers=0)
 
+    pool_rank_interval=1
+    pool_update_policy_interval=1
+    pool_add_policy_interval=1
+
     @property
     def make_binding(self):
         return self.registry.make_binding

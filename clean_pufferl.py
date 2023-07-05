@@ -219,7 +219,7 @@ class CleanPuffeRL:
             env_step_time += time.time() - start
 
             # TODO: Key for update
-            i = self.policy_pool.update_scores(i, 'return', self.global_step)
+            i = self.policy_pool.update_scores(i, 'return')
 
             for profile in self.buffers[buf].profile():
                 for k, v in profile.items():
@@ -240,12 +240,12 @@ class CleanPuffeRL:
             # ALGO LOGIC: action logic
             start = time.time()
             with torch.no_grad():
-                all_actions, idxs, step_data = self.policy_pool.forwards(
+                all_actions, step_data = self.policy_pool.forwards(
                     o.to(self.device),
                     data.next_lstm_state[buf],
                     data.next_done[buf],
                 )
-                action, logprob, value, data.next_lstm_state[buf] = step_data[0]
+                action, logprob, value, data.next_lstm_state[buf], learner_idxs = step_data[0] # First element is the learner
                 value = value.flatten()
 
             inference_time += time.time() - start
@@ -258,8 +258,7 @@ class CleanPuffeRL:
 
             # Index alive mask with policy pool idxs...
             # TODO: Find a way to avoid having to do this
-            T()
-            alive_mask = np.array(alive_mask)[idxs[0]]
+            alive_mask = np.array(alive_mask)[learner_idxs]
             for idx in np.where(alive_mask)[0]:
                 if ptr == self.batch_size+1:
                     break

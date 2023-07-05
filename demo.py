@@ -24,7 +24,6 @@ for binding in all_bindings:
         name='learner',
         sample_weights=[1, 1],
         active_policies=2,
-        max_policies=8,
         evaluation_batch_size=config.num_envs*binding.max_agents,
         path='pool'
     ) 
@@ -51,9 +50,22 @@ for binding in all_bindings:
     num_updates = config.total_timesteps // config.batch_size
     for update in range(num_updates):
         trainer.evaluate(agent, data)
+
+        if update % config.pool_rank_interval == 0:
+            policy_pool.update_ranks()
+
+        if update % config.pool_update_policy_interval == 0:
+            policy_pool.update_active_policies()
+
+        if update % config.pool_update_policy_interval == 0:
+            policy_pool.add_policy_copy('learner', f'learner-{update}')
+
         trainer.train(agent, data, 
             batch_rows=config.batch_rows,
             bptt_horizon=config.bptt_horizon,
         )
+
+        print(policy_pool.tournament)
+        ratings = policy_pool.ratings
 
     trainer.close()

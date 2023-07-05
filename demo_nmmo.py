@@ -100,12 +100,12 @@ policy_pool = pufferlib.policy_pool.PolicyPool(
     policies=[agent],
     names=['baseline'],
     tenured=[True],
-    sample_weights=[1, 1],
+    sample_weights=[1],
     max_policies=8,
     evaluation_batch_size=num_envs*num_agents,
     path='pool'
 ) 
-policy_pool.add_policy_copy('baseline', 'anchor', anchor=True)
+#policy_pool.add_policy_copy('baseline', 'anchor', anchor=True)
  
 #trainer = CleanPuffeRL(binding, agent,
 #        num_buffers=2, num_envs=8, num_cores=4,

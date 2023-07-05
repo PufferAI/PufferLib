@@ -9,7 +9,7 @@ import pandas as pd
 
 from sqlalchemy import create_engine, Column, Integer, Boolean, String, Float, JSON, text, cast
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.orm import sessionmaker
 
 from pufferlib.rating import OpenSkillRating
 
@@ -43,40 +43,66 @@ class Policy(Base):
         self.model = model
 
 
+class PolicyDatabase:
+    def __init__(self, path='sqlite:///policy_pool.db'):
+        self.engine = create_engine(path, echo=False)
+        Base.metadata.create_all(self.engine)
+        Session = sessionmaker(bind=self.engine)
+        self.session = Session()
+        self.connection = self.engine.connect()
+        self.connection.execute(text("PRAGMA journal_mode=WAL;"))
+
+    def add_policy(self, policy):
+        self.session.add(policy)
+        self.session.commit()
+
+    def query_policy_by_name(self, name):
+        return self.session.query(Policy).filter_by(name=name).first()
+
+    def query_tenured_policies(self):
+        return self.session.query(Policy).filter(
+            cast(Policy.additional_data['tenured'], Boolean) == True
+        ).all()
+
+    def query_untenured_policies(self):
+        return self.session.query(Policy).filter(
+            cast(Policy.additional_data['tenured'], Boolean) != True
+        ).all()
+
+    def delete_policy(self, policy):
+        self.session.delete(policy)
+        self.session.commit()
+
+    def query_all_policies(self):
+        return self.session.query(Policy).all()
+
+    def update_policy(self, policy):
+        self.session.commit()
+
 class PolicyPool():
     def __init__(self, evaluation_batch_size, learner, name,
-            sample_weights=[], active_policies=4, max_policies=100,
-            path='pool', rank_update_episodes=10, policy_update_episodes=100, policy_add_episodes=100,
-            mu=1000, anchor_mu=1000, sigma=100/3):
+            sample_weights=[], active_policies=4,
+            path='pool', mu=1000, anchor_mu=1000, sigma=100/3):
+
+        assert len(sample_weights) == active_policies
 
         self.learner = learner
         self.learner_name = name
 
         # Set up skill rating tournament
         self.tournament = OpenSkillRating(mu, anchor_mu, sigma)
+        self.scores = defaultdict(list)
         self.mu = mu
         self.anchor_mu = anchor_mu
         self.sigma = sigma
 
-        # Set up scoring
-        self.scores = defaultdict(list)
-        self.rank_update_episodes = rank_update_episodes
-        self.policy_update_episodes = policy_update_episodes
-        self.policy_add_episodes = policy_add_episodes
-
         self.num_scores = 0
         self.num_active_policies = active_policies
-        self.max_policies = max_policies
-        self.active_policies = {}
+        self.active_policies = []
         self.path = path
        
         # Set up the SQLite database and session
-        engine = create_engine('sqlite:///policy_pool.db', echo=False)
-        Base.metadata.create_all(engine)
-        Session = sessionmaker(bind=engine)
-        self.session = Session()
-        self.connection = engine.connect()
-        self.connection.execute(text("PRAGMA journal_mode=WAL;"))
+        self.database = PolicyDatabase()
 
         # Assign policies used for evaluation
         self.add_policy(learner, name, tenured=True, mu=mu, sigma=sigma, anchor=False)
@@ -94,9 +120,14 @@ class PolicyPool():
             sublist_idx = pattern[idx % chunk_size]
             self.sample_idxs[sublist_idx].append(idx)
 
+    @property
+    def ratings(self):
+        return self.tournament.ratings
+
     def add_policy_copy(self, key, name, tenured=False, anchor=False):
         # Retrieve the policy from the database using the key
-        original_policy = self.session.query(Policy).filter_by(name=key).first()
+        original_policy = self.database.query_policy_by_name(key)
+        assert original_policy is not None, f"Policy with name '{key}' does not exist."
         
         # Use add_policy method to add the new policy
         self.add_policy(original_policy.model, name, tenured=tenured, mu=original_policy.mu, sigma=original_policy.sigma, anchor=anchor)
@@ -106,16 +137,14 @@ class PolicyPool():
         model_path = f"{self.path}/{name}"
         
         # Check if a policy with the same name already exists in the database
-        existing_policy = self.session.query(Policy).filter_by(name=name).first()
+        existing_policy = self.database.query_policy_by_name(name)
 
         if existing_policy is not None:
             if overwrite_existing:
-                self.session.delete(existing_policy)
-                self.session.commit()
+                self.database.delete_policy(existing_policy)
             else:
                 raise ValueError(f"A policy with the name '{name}' already exists.")
 
-        
         # Set default values for mu and sigma if they are not provided
         if mu is None:
             mu = self.mu
@@ -137,8 +166,7 @@ class PolicyPool():
         policy.save_model(model)
         
         # Add the new policy to the database
-        self.session.add(policy)
-        self.session.commit()
+        self.database.add_policy(policy)
 
         # Add the policy to the tournament system
         # TODO: Figure out anchoring
@@ -149,31 +177,10 @@ class PolicyPool():
             self.tournament.ratings[name].mu = mu
             self.tournament.ratings[name].sigma = sigma
 
-        # If the maximum number of policies is reached, remove the worst policy
-        num_policies = self.session.query(Policy).count()
-        if num_policies > self.max_policies:
-            # Query the worst policy that is not tenured
-            worst_policy = self.session.query(Policy).filter(
-                cast(Policy.additional_data['tenured'], Boolean) != 'true'
-            ).order_by(Policy.mu.asc()).first()
-            
-            if worst_policy:
-                # Remove the worst policy from the database
-                self.session.delete(worst_policy)
-                self.session.commit()
-
-
     def forwards(self, obs, lstm_state=None, dones=None):
-        returns = []
         all_actions = []
-        policy_keys = list(self.active_policies.keys())
-        for idx in range(self.num_active_policies):
-            key = policy_keys[0]
-            if idx < len(self.active_policies):
-                key = policy_keys[idx]
-
-            policy = self.active_policies[key]
-            samp = self.sample_idxs[idx]
+        returns = []
+        for samp, policy in zip(self.sample_idxs, self.active_policies):
             if lstm_state is not None:
                 atn, lgprob, _, val, (lstm_state[0][:, samp], lstm_state[1][:, samp]) = policy.model.get_action_and_value(
                     obs[samp],
@@ -182,10 +189,10 @@ class PolicyPool():
             else:
                 atn, lgprob, _, val = policy.model.get_action_and_value(obs[samp])
             
-            returns.append((atn, lgprob, val, lstm_state))
+            returns.append((atn, lgprob, val, lstm_state, samp))
             all_actions.append(atn)
         
-        return torch.cat(all_actions), self.sample_idxs, returns
+        return torch.cat(all_actions), returns
 
     def load(self, path):
         '''Load all models in path'''
@@ -199,54 +206,23 @@ class PolicyPool():
 
             self.policies[record.name] = policy
 
-    def update_scores(self, infos, info_key, step):
+    def update_scores(self, infos, info_key):
         # TODO: Check that infos is dense and sorted
         agent_infos = []
         for info in infos:
             agent_infos += list(info.values())
 
         policy_infos = defaultdict(list)
-        policy_keys = list(self.active_policies.keys())
-        for idx in range(self.num_active_policies):
-            if idx >= len(self.active_policies):
-                idx = 0
-
-            add_policy = False
-            update_policies = False
-            update_ranks = False
-            samp = self.sample_idxs[idx]
-            policy = policy_keys[idx]
+        for samp, policy in zip(self.sample_idxs, self.active_policies):
             pol_infos = np.array(agent_infos)[samp]
-            policy_infos[policy] += list(pol_infos)
+            policy_infos[policy.name] += list(pol_infos)
+
             for i in pol_infos:
                 if info_key not in i:
                     continue 
             
-                self.scores[policy].append(i[info_key])
+                self.scores[policy.name].append(i[info_key])
                 self.num_scores += 1
-
-                if self.num_scores % self.policy_update_episodes == 0:
-                    update_policies = True
-
-                if self.num_scores % self.rank_update_episodes == 0:
-                    update_ranks = True
-
-                if self.num_scores % self.policy_update_episodes == 0:
-                    add_policy = True
-
-        if update_ranks:
-            self.update_ranks()
-
-        if update_policies:
-            self.update_active_policies()
-
-        if add_policy:
-            self.add_policy_copy(
-                    self.learner_name,
-                    f'{self.learner_name}-{step}',
-                    tenured=False,
-                    anchor=False
-            )
 
         return policy_infos
 
@@ -259,62 +235,37 @@ class PolicyPool():
         
         # Update the mu and sigma values of each policy in the database
         for name, rating in self.tournament.ratings.items():
-            policy = self.session.query(Policy).filter_by(name=name).first()
+            policy = self.database.query_policy_by_name(name)
             if policy:
                 policy.mu = rating.mu
                 policy.sigma = rating.sigma
-                self.session.commit()
-
-        print(self.tournament)
+                self.database.update_policy(policy)
         
         # Reset the scores
         self.scores = defaultdict(list)
 
     def update_active_policies(self):
-        # Query the tenured policies
-        tenured_policies = self.session.query(Policy).filter(
-            cast(Policy.additional_data['tenured'], Boolean) == True
-        ).all()
+        learner_policy = self.database.query_policy_by_name(self.learner_name)
+        all_policies = self.database.query_all_policies()
 
-        # Extract names of the tenured policies
-        active_policy_names = [policy.name for policy in tenured_policies]
+        self.active_policies = [learner_policy] + np.random.choice(all_policies, self.num_active_policies - 1, replace=True).tolist()
 
-        # Query the untenured policies
-        untenured_policies = self.session.query(Policy).filter(
-            cast(Policy.additional_data['tenured'], Boolean) != True
-        ).all()
-
-        # Randomly sample from untenured policies if needed
-        if len(untenured_policies) > 0:
-            additional_policy_names = np.random.choice(
-                [policy.name for policy in untenured_policies],
-                self.num_active_policies - len(active_policy_names),
-                replace=True
-            ).tolist()
-            active_policy_names += additional_policy_names
-
-        # Store the active policies in self.active_policies
-        self.active_policies = {name: self.session.query(Policy).filter_by(name=name).first() for name in active_policy_names}
-        for policy in self.active_policies.values():
+        for policy in self.active_policies:
             policy.load_model(copy.deepcopy(self.learner))
 
     def to_table(self):
-        # Query all the policies
         policies = self.session.query(Policy).all()
 
-        # Extract data
         data = []
         for policy in policies:
             model_name = policy.model_path.split('/')[-1]
             experiment = policy.model_path.split('/')[-2]
             checkpoint = int(model_name.split('.')[0])
-            rank = self.tournament.ratings[policy.name].mu  # or however you are calculating rank
+            rank = self.tournament.ratings[policy.name].mu
             num_samples = policy.episodes
             data.append([model_name, rank, num_samples, experiment, checkpoint])
 
-        # Create DataFrame
-        table = pd.DataFrame(data, columns=["Model", "Rank", "Num Samples", "Experiment", "Checkpoint"])
+        table = pd.DataFrame(data, columns=["Model", "Rank", "Num Samples", "Experiment", "Checkpoint"]).sort_values(by='Rank', ascending=False)
 
-        table = table.sort_values(by='Rank', ascending=False)
         print(table[["Model", "Rank"]])
         
