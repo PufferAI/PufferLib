@@ -22,8 +22,8 @@ for binding in all_bindings:
     policy_pool = pufferlib.policy_pool.PolicyPool(
         learner=agent,
         name='learner',
-        sample_weights=[1, 1],
-        active_policies=2,
+        sample_weights=[1],
+        active_policies=1,
         evaluation_batch_size=config.num_envs*binding.max_agents,
         path='pool'
     ) 

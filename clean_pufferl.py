@@ -201,7 +201,7 @@ class CleanPuffeRL:
     def evaluate(self, agent, data):
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
-        ptr = env_step_time = inference_time = 0
+        ptr = env_step_time = inference_time = agent_steps_collected = 0
 
         step = 0
         stats = defaultdict(list)
@@ -218,7 +218,6 @@ class CleanPuffeRL:
             o, r, d, i = self.buffers[buf].recv()
             env_step_time += time.time() - start
 
-            # TODO: Key for update
             i = self.policy_pool.update_scores(i, 'return')
 
             for profile in self.buffers[buf].profile():
@@ -236,6 +235,8 @@ class CleanPuffeRL:
                 data.next_done[buf] = torch.Tensor(d).to(self.device)
             else:
                 alive_mask = [1 for _ in range(len(o))]
+
+            agent_steps_collected += sum(alive_mask)
 
             # ALGO LOGIC: action logic
             start = time.time()
@@ -288,7 +289,7 @@ class CleanPuffeRL:
                         continue
 
         self.global_step += self.batch_size
-        env_sps = int(self.batch_size / env_step_time)
+        env_sps = int(agent_steps_collected / env_step_time)
         inference_sps = int(self.batch_size / inference_time)
 
         if self.wandb_initialized:

@@ -1,11 +1,12 @@
 from pdb import set_trace as T
 
 import pufferlib.vectorization.serial
+import pufferlib.vectorization.multiprocessing
 
 class Default:
     emulate_const_horizon = 1024
 
-    vec_backend = pufferlib.vectorization.serial.VecEnv
+    vec_backend = pufferlib.vectorization.multiprocessing.VecEnv
     total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
     num_cores = 4

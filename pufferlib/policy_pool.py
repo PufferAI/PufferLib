@@ -35,7 +35,7 @@ class Policy(Base):
 
     def load_model(self, model):
         model.load_state_dict(torch.load(self.model_path))
-        self.model = model
+        self.model = model.cuda()
  
     def save_model(self, model):
         torch.save(model.state_dict(), self.model_path)
@@ -178,7 +178,7 @@ class PolicyPool():
             self.tournament.ratings[name].sigma = sigma
 
     def forwards(self, obs, lstm_state=None, dones=None):
-        all_actions = []
+        all_actions = None
         returns = []
         for samp, policy in zip(self.sample_idxs, self.active_policies):
             if lstm_state is not None:
@@ -189,10 +189,13 @@ class PolicyPool():
             else:
                 atn, lgprob, _, val = policy.model.get_action_and_value(obs[samp])
             
+            if all_actions is None:
+                all_actions = torch.zeros((len(obs), *atn.shape[1:]), dtype=atn.dtype).to(atn.device)
+
             returns.append((atn, lgprob, val, lstm_state, samp))
-            all_actions.append(atn)
+            all_actions[samp] = atn
         
-        return torch.cat(all_actions), returns
+        return all_actions, returns
 
     def load(self, path):
         '''Load all models in path'''
