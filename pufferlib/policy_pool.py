@@ -107,7 +107,7 @@ class PolicyPool():
         self.database = PolicyDatabase()
 
         # Assign policies used for evaluation
-        self.add_policy(learner, name, tenured=True, mu=mu, sigma=sigma, anchor=False)
+        self.add_policy(learner, name, tenured=True, mu=mu, sigma=sigma, anchor=True)
         self.update_active_policies()
 
         # Create indices for splitting data across policies
