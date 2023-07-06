@@ -34,9 +34,11 @@ class Policy(Base):
             self.model = model
 
     def load_model(self, model):
-        model.load_state_dict(torch.load(self.model_path))
-        self.model = model.cuda()
- 
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model.load_state_dict(
+            torch.load(self.model_path, map_location=device))
+        self.model = model.to(device)
+
     def save_model(self, model):
         torch.save(model.state_dict(), self.model_path)
         self.model_class = str(type(model))
@@ -100,7 +102,7 @@ class PolicyPool():
         self.num_active_policies = active_policies
         self.active_policies = []
         self.path = path
-       
+
         # Set up the SQLite database and session
         self.database = PolicyDatabase()
 
@@ -128,14 +130,14 @@ class PolicyPool():
         # Retrieve the policy from the database using the key
         original_policy = self.database.query_policy_by_name(key)
         assert original_policy is not None, f"Policy with name '{key}' does not exist."
-        
+
         # Use add_policy method to add the new policy
         self.add_policy(original_policy.model, name, tenured=tenured, mu=original_policy.mu, sigma=original_policy.sigma, anchor=anchor)
 
     def add_policy(self, model, name, tenured=False, mu=None, sigma=None, anchor=False, overwrite_existing=True):
         # Construct the model path by joining the model and name
         model_path = f"{self.path}/{name}"
-        
+
         # Check if a policy with the same name already exists in the database
         existing_policy = self.database.query_policy_by_name(name)
 
@@ -164,7 +166,7 @@ class PolicyPool():
             additional_data={'tenured': tenured}
         )
         policy.save_model(model)
-        
+
         # Add the new policy to the database
         self.database.add_policy(policy)
 
@@ -188,13 +190,13 @@ class PolicyPool():
                     dones[samp])
             else:
                 atn, lgprob, _, val = policy.model.get_action_and_value(obs[samp])
-            
+
             if all_actions is None:
                 all_actions = torch.zeros((len(obs), *atn.shape[1:]), dtype=atn.dtype).to(atn.device)
 
             returns.append((atn, lgprob, val, lstm_state, samp))
             all_actions[samp] = atn
-        
+
         return all_actions, returns
 
     def load(self, path):
@@ -203,7 +205,7 @@ class PolicyPool():
         for record in records:
             model = eval(record.model_class)
             model.load_state_dict(torch.load(record.model_path))
-            
+
             policy = Policy(model, record.name, record.model_path,
                                       record.mu, record.sigma, ...) # additional attributes
 
@@ -222,8 +224,8 @@ class PolicyPool():
 
             for i in pol_infos:
                 if info_key not in i:
-                    continue 
-            
+                    continue
+
                 self.scores[policy.name].append(i[info_key])
                 self.num_scores += 1
 
@@ -235,7 +237,7 @@ class PolicyPool():
             list(self.scores.keys()),
             list(self.scores.values())
         )
-        
+
         # Update the mu and sigma values of each policy in the database
         for name, rating in self.tournament.ratings.items():
             policy = self.database.query_policy_by_name(name)
@@ -243,7 +245,7 @@ class PolicyPool():
                 policy.mu = rating.mu
                 policy.sigma = rating.sigma
                 self.database.update_policy(policy)
-        
+
         # Reset the scores
         self.scores = defaultdict(list)
 
@@ -271,4 +273,3 @@ class PolicyPool():
         table = pd.DataFrame(data, columns=["Model", "Rank", "Num Samples", "Experiment", "Checkpoint"]).sort_values(by='Rank', ascending=False)
 
         print(table[["Model", "Rank"]])
-        

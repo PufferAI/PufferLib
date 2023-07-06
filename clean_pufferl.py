@@ -25,6 +25,7 @@ import pufferlib.frameworks.cleanrl
 import pufferlib.policy_pool
 import pufferlib.vectorization.multiprocessing
 import pufferlib.vectorization.serial
+from tqdm import tqdm
 import wandb
 
 def unroll_nested_dict(d):
@@ -198,7 +199,7 @@ class CleanPuffeRL:
         return data
 
     @pufferlib.utils.profile
-    def evaluate(self, agent, data):
+    def evaluate(self, agent, data, show_progress=False):
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
         ptr = env_step_time = inference_time = agent_steps_collected = 0
@@ -206,6 +207,8 @@ class CleanPuffeRL:
         step = 0
         stats = defaultdict(list)
         performance = defaultdict(list)
+        progress_bar = tqdm(
+            total=self.batch_size, disable=not show_progress)
 
         while True:
             buf = data.buf
@@ -275,11 +278,12 @@ class CleanPuffeRL:
                     data.dones[ptr] = d[idx]
 
                 ptr += 1
+                progress_bar.update(1)
 
             # Log only for main learning policy
-            for agent_i in i[0]:
+            for agent_i in i["learner"]:
                 if not agent_i:
-                    continue 
+                    continue
 
                 for name, stat in unroll_nested_dict(agent_i):
                     try:
@@ -288,9 +292,18 @@ class CleanPuffeRL:
                     except TypeError:
                         continue
 
+            env_sps = int(agent_steps_collected / env_step_time)
+            inference_sps = int(self.batch_size / inference_time)
+            progress_bar.set_description(
+                "Eval: " + ", ".join([
+                    f'Env SPS: {env_sps}',
+                    f'Inference SPS: {inference_sps}',
+                    f'Agent Steps: {agent_steps_collected}',
+                    *[f'{k}: {np.mean(v):.2f}' for k, v in stats.items()]
+
+                ]))
+
         self.global_step += self.batch_size
-        env_sps = int(agent_steps_collected / env_step_time)
-        inference_sps = int(self.batch_size / inference_time)
 
         if self.wandb_initialized:
             wandb.log({
@@ -316,6 +329,7 @@ class CleanPuffeRL:
             f'\tSteps Per Second: Env={env_sps}, Inference={inference_sps}'
         )
 
+        progress_bar.close()
         return data
 
     @pufferlib.utils.profile
