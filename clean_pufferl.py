@@ -259,7 +259,8 @@ class CleanPuffeRL:
 
             # Index alive mask with policy pool idxs...
             # TODO: Find a way to avoid having to do this
-            alive_mask = np.array(alive_mask)[learner_idxs]
+            alive_mask = np.array(alive_mask)
+            alive_mask[~np.isin(np.arange(alive_mask.size), learner_idxs)] = 0
             for idx in np.where(alive_mask)[0]:
                 if ptr == self.batch_size+1:
                     break
@@ -277,7 +278,7 @@ class CleanPuffeRL:
                 ptr += 1
 
             # Log only for main learning policy
-            for agent_i in i[0]:
+            for agent_i in i[self.policy_pool.learner_name]:
                 if not agent_i:
                     continue 
 
