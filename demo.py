@@ -13,23 +13,18 @@ config = demo_config.NMMO()
 
 all_bindings = [config.all_bindings[0]]
 
-for binding in all_bindings:
+def train_model(binding):
+    policy_store = MemoryPolicyStore()
+
     agent = pufferlib.frameworks.cleanrl.make_policy(
             config.Policy, recurrent_args=config.recurrent_args,
             recurrent_kwargs=config.recurrent_kwargs,
         )(binding, *config.policy_args, **config.policy_kwargs).to(config.device)
+    policy_store.add_policy('learner', agent)
 
-    policy_pool = pufferlib.policy_pool.PolicyPool(
-        learner=agent,
-        name='learner',
-        sample_weights=[128],
-        active_policies=1,
-        evaluation_batch_size=config.num_envs*binding.max_agents,
-        path='pool'
-    ) 
-    policy_pool.add_policy_copy('learner', 'anchor',
-            tenured=True, anchor=True)
-    
+    policy_pool = PolicyPool(num_policies=2, learner_weight=0.8)
+    ranker = OpenSkillRanker(policy_store, policy_pool)
+
     trainer = CleanPuffeRL(
             binding,
             agent,
@@ -42,9 +37,6 @@ for binding in all_bindings:
             seed=config.seed,
     )
 
-    #trainer.load_model(path)
-    #trainer.init_wandb()
-
     data = trainer.allocate_storage()
 
     num_updates = config.total_timesteps // config.batch_size
@@ -52,20 +44,22 @@ for binding in all_bindings:
         trainer.evaluate(agent, data)
 
         if update % config.pool_rank_interval == 0:
-            policy_pool.update_ranks()
+            ranker.update_ranks()
 
         if update % config.pool_update_policy_interval == 0:
-            policy_pool.update_active_policies()
+            ranker.update_pool()
 
         if update % config.pool_update_policy_interval == 0:
-            policy_pool.add_policy_copy('learner', f'learner-{update}')
+            policy_store.add_policy_copy(f"learner-{update}", "learner")
 
-        trainer.train(agent, data, 
+        trainer.train(agent, data,
             batch_rows=config.batch_rows,
             bptt_horizon=config.bptt_horizon,
         )
 
-        print(policy_pool.tournament)
-        ratings = policy_pool.ratings
+        print(ranker.ranks())
 
     trainer.close()
+
+for binding in all_bindings:
+    train_model(binding)

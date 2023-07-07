@@ -16,12 +16,12 @@ import numpy as np
 
 import pufferlib
 
-class PolicyRegistry():
-  def policy_class(self, name: str) -> Policy:
+class PolicyFactory():
+  def create_policy(self, name: str) -> Policy:
     raise NotImplementedError
 
 class FilePolicySerializer():
-  def __init__(self, policy_registry: PolicyRegistry):
+  def __init__(self, policy_registry: PolicyFactory):
     self._policy_registry = policy_registry
 
   def save_policy(self, policy: Policy, path: str, metadata = None):
@@ -88,7 +88,7 @@ class MemoryPolicyStore(PolicyStore):
         available_policy_names, num_needed, replace=True).tolist()
 
 class DirecroryPolicyStore(PolicyStore):
-  def __init__(self, path: str, policy_registry: PolicyRegistry):
+  def __init__(self, path: str, policy_registry: PolicyFactory):
     self._path = path
     self._serializer = FilePolicySerializer(policy_registry)
 
