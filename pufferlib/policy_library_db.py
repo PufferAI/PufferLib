@@ -29,41 +29,7 @@ class PolicyRecord(Base):
   episodes = Column(Integer)
   additional_data = Column(JSON)
 
-class PolicyLibraryDatabase:
-  def __init__(self, path='sqlite:///policy_pool.db'):
-      self.engine = create_engine(path, echo=False)
-      Base.metadata.create_all(self.engine)
-      Session = sessionmaker(bind=self.engine)
-      self.session = Session()
-      self.connection = self.engine.connect()
-      self.connection.execute(text("PRAGMA journal_mode=WAL;"))
 
-  def add_policy(self, policy: PolicyRecord):
-    self.session.add(policy)
-    self.session.commit()
-
-  def query_policy_by_name(self, name):
-    return self.session.query(PolicyRecord).filter_by(name=name).first()
-
-  def query_tenured_policies(self):
-    return self.session.query(PolicyRecord).filter(
-        cast(PolicyRecord.additional_data['tenured'], Boolean) == True
-    ).all()
-
-  def query_untenured_policies(self):
-    return self.session.query(PolicyRecord).filter(
-        cast(PolicyRecord.additional_data['tenured'], Boolean) != True
-    ).all()
-
-  def delete_policy(self, policy):
-    self.session.delete(policy)
-    self.session.commit()
-
-  def query_all_policies(self):
-    return self.session.query(PolicyRecord).all()
-
-  def update_policy(self, policy):
-    self.session.commit()
 
 class DBPolicyLoader(PolicyLoader):
     def __init__(self, database):

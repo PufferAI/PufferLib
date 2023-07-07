@@ -7,8 +7,6 @@ import copy
 import numpy as np
 import pandas as pd
 
-from pufferlib.rating import OpenSkillRating
-
 # Provides a pool of policies that collectively process a batch
 # of observations. The batch is split across policies according
 # to the sample weights provided at initialization.

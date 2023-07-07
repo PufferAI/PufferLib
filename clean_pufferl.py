@@ -54,7 +54,6 @@ class CleanPuffeRL:
     num_buffers: int = 1
     num_envs: int = 8
     num_cores: int = psutil.cpu_count(logical=False)
-    run_name: str = None
     cpu_offload: bool = True
     verbose: bool = True
     batch_size: int = 2**14
@@ -104,18 +103,19 @@ class CleanPuffeRL:
             self.agent.parameters(), lr=self.learning_rate, eps=1e-5)
 
         # Setup logging
-        self.run_name = self.run_name or f"{self.binding.env_name}__{self.seed}__{int(time.time())}"
         self.wandb_run_id = None
         self.wandb_initialized = False
 
     def init_wandb(
             self, wandb_project_name='pufferlib', wandb_entity=None,
-            wandb_run_id = None, extra_data = None):
+            wandb_run_id = None, extra_data = None, run_name = None):
 
         if self.wandb_initialized:
             return
 
         self.wandb_run_id = self.wandb_run_id or wandb_run_id or wandb.util.generate_id()
+        run_name = run_name or f"{self.binding.env_name}__{self.seed}__{int(time.time())}"
+
         extra_data = extra_data or {}
 
         wandb.init(
@@ -124,7 +124,7 @@ class CleanPuffeRL:
             entity=wandb_entity,
             config=extra_data,
             sync_tensorboard=True,
-            name=self.run_name,
+            name=run_name,
             monitor_gym=True,
             save_code=True,
             resume="allow",
@@ -133,7 +133,7 @@ class CleanPuffeRL:
 
     def resume_model(self, path):
         resume_state = torch.load(path)
-        self.wandb_run_id = resume_state.get('wandb_run_id')
+        self.wandb_run_id = resume_state.get('wandb_r`un_id')
         self.global_step = resume_state.get('global_step', 0)
         self.agent_step = resume_state.get('agent_step', 0)
         self.update = resume_state['update']
@@ -199,7 +199,7 @@ class CleanPuffeRL:
         return data
 
     @pufferlib.utils.profile
-    def evaluate(self, agent, data, show_progress=False):
+    def evaluate(self, data, show_progress=False):
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
         ptr = env_step_time = inference_time = agent_steps_collected = 0
@@ -338,6 +338,9 @@ class CleanPuffeRL:
             norm_adv=True,clip_coef=0.1, clip_vloss=True, ent_coef=0.01,
             vf_coef=0.5, max_grad_norm=0.5, target_kl=None):
 
+        if self.done_training:
+            raise RuntimeError(f"Trying to train for more than max_updates={self.num_updates} updates")
+
         #assert self.num_steps % bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
@@ -471,6 +474,9 @@ class CleanPuffeRL:
                 "agent_steps": self.global_step,
                 "global_step": self.global_step,
             })
+
+    def done_training(self):
+        return self.update >= self.total_updates
 
     def close(self):
         if self.wandb_initialized:
