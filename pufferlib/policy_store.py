@@ -1,54 +1,33 @@
-from abc import abstractmethod
-from ast import List
 from dataclasses import dataclass
-from email.policy import Policy
-from importlib import metadata
-import stat
-from typing import Dict, OrderedDict, Set
+from typing import Any, Dict, Set, List, Callable
 
-from click import File
-from pufferlib.policy_pool import PolicyPool
-from pufferlib.rating import OpenSkillRating
+import torch
+
+from pufferlib.models import Policy
 
 import copy
-
+import os
 import numpy as np
-
-import pufferlib
-
-class PolicyFactory():
-  def create_policy(self, name: str) -> Policy:
-    raise NotImplementedError
-
-class FilePolicySerializer():
-  def __init__(self, policy_registry: PolicyFactory):
-    self._policy_registry = policy_registry
-
-  def save_policy(self, policy: Policy, path: str, metadata = None):
-    temp_path = path + ".tmp"
-    torch.save({
-        "policy_state_dict": policy.state_dict(),
-        "policy_class": self._policy_registry.class_name(policy),
-        "metadata": metadata
-    })
-    os.rename(temp_path, path)
-
-  def load_policy(self, path: str) -> Policy:
-    if not os.path.exists(path):
-      raise ValueError(f"Policy with name {name} does not exist")
-    data = torch.load(path)
-    policy = self._policy_registry.new_policy(data["policy_class"])
-    policy.load_state_dict(data["policy_state_dict"])
-    return policy
 
 
 class PolicyRecord():
-  def __init__(self, name: str, metadata = None):
+  def __init__(self, name: str, policy: Policy, metadata = None):
     self.name = name
     self.metadata = metadata
+    self._policy = policy
 
   def policy(self) -> Policy:
-      raise NotImplementedError
+    return self._policy
+
+class PolicySelector():
+  def __init__(self, num: int, exclude_names: Set[str] = None):
+    self._num = num
+    self._exclude_names = exclude_names or set()
+
+  def select_policies(self, policies: Dict[str, PolicyRecord]) -> List[PolicyRecord]:
+    available_names = list(set(policies.keys()) - set(self._exclude_names))
+    selected_names = np.random.choice(available_names, self._num, replace=True).tolist()
+    return [policies[name] for name in selected_names]
 
 class PolicyStore():
   def add_policy(self, name: str, policy: Policy, metadata = None) -> PolicyRecord:
@@ -57,53 +36,84 @@ class PolicyStore():
   def add_policy_copy(self, name: str, src_name: str) -> PolicyRecord:
     raise NotImplementedError
 
-  def select_policies(self, num_policies) -> List[PolicyRecord]:
+  def _all_policies(self) -> Dict[str, PolicyRecord]:
     raise NotImplementedError
+
+  def select_policies(self, selector: PolicySelector) -> List[PolicyRecord]:
+    return selector.select_policies(self._all_policies())
 
 class MemoryPolicyStore(PolicyStore):
   def __init__(self):
     super().__init__()
-    self._policies = OrderedDict()
+    self._policies = dict()
 
   def add_policy(self, name: str, policy: Policy, metadata = None) -> PolicyRecord:
     if name in self._policies:
         raise ValueError(f"Policy with name {name} already exists")
 
-    pr = PolicyRecord(name, policy, metadata)
-    pr.policy = lambda: policy
-    self._policies[name] = pr
+    self._policies[name] = PolicyRecord(name, policy, metadata)
+    return self._policies[name]
 
   def add_policy_copy(self, name: str, src_name: str) -> PolicyRecord:
-    self.add_policy(
+    return self.add_policy(
       name,
       copy.deepcopy(self._policies[src_name].policy()),
       copy.deepcopy(self._policies[src_name].metadata))
 
-  def select_policies(self, num_policies, exclude=None) -> List[PolicyRecord]:
-    if exclude is None:
-        exclude = []
+  def _all_policies(self) -> List:
+    return self._policies
 
-    available_policy_names = set(self._library._model_paths.keys()) - set(exclude)
-    return np.random.choice(
-        available_policy_names, num_needed, replace=True).tolist()
-
-class DirecroryPolicyStore(PolicyStore):
-  def __init__(self, path: str, policy_registry: PolicyFactory):
+class FilePolicyRecord(PolicyRecord):
+  def __init__(self, name: str, path: str, policy: Policy = None, metadata = None):
+    super().__init__(name, policy, metadata)
     self._path = path
-    self._serializer = FilePolicySerializer(policy_registry)
+
+  def save(self):
+    assert self._policy is not None
+    if os.path.exists(self._path):
+      raise ValueError(f"Policy {self.path} already exists")
+    temp_path = self._path + ".tmp"
+    torch.save({
+        "policy_state_dict": self._policy.state_dict(),
+        "policy_class": self._policy.__class__.__name__,
+        "metadata": self.metadata
+    })
+    os.rename(temp_path, self._path)
+
+  def load(self, create_policy_func: Callable[[PolicyRecord], Policy]):
+    if not os.path.exists(self._path):
+      raise ValueError(f"Policy with name {self.name} does not exist")
+    data = torch.load(self._path)
+    policy = create_policy_func(self)
+    policy.load_state_dict(data["policy_state_dict"])
+    return policy
+
+  def policy(self, create_policy_func: Callable[[PolicyRecord], Policy] = None) -> Policy:
+    if self._policy is None:
+      self._policy = create_policy_func(self)
+    return self._policy
+
+class DirectoryPolicyStore(PolicyStore):
+  def __init__(self, path: str, create_policy_func: Callable[[PolicyRecord], Policy]):
+    self._path = path
+    self._create_policy_func = create_policy_func
 
   def add_policy(self, name: str, policy: Policy, metadata = None) -> PolicyRecord:
-    path = os.path.join(self._path, name, ".pt")
-    if os.path.exists(path):
-      raise ValueError(f"Policy {path} already exists")
-    self._serializer.save_policy(policy, path, metadata)
-    return PolicyRecord(name, policy, metadata)
+    path = os.path.join(self._path, name + ".pt")
+    pr = FilePolicyRecord(name, path, policy, metadata)
+    pr.save()
+    return pr
 
   def add_policy_copy(self, name: str, src_name: str) -> PolicyRecord:
     raise NotImplementedError
 
-  def _get_policy_paths(self):
-    return [file in os.listdir(self._path) if file.endswith(".pt")]
+  def _all_policies(self) -> List:
+    policies = dict()
+    for file in os.listdir(self._path):
+      if file.endswith(".pt"):
+        name = file[:-3]
+        policies[name] = FilePolicyRecord(name, os.path.join(self._path, file))
+    return policies
 
 # # Uses a sqlite database to store the metadata and paths of policies
 # class SqlitePolicyStore(DirecroryPolicyStore):
