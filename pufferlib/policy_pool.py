@@ -55,10 +55,13 @@ class PolicyPool():
         for info in infos:
             agent_infos += list(info.values())
 
-        policy_infos = defaultdict(list)
-        for samp, policy in zip(self._sample_idxs, self._active_policies):
+        policy_infos = {}
+        for samp, policy in zip(self.sample_idxs, self.active_policies):
             pol_infos = np.array(agent_infos)[samp]
-            policy_infos[policy.name] += list(pol_infos)
+            if policy.name not in policy_infos:
+                policy_infos[policy.name] = list(pol_infos)
+            else:
+                policy_infos[policy.name] += list(pol_infos)
 
             for i in pol_infos:
                 if info_key not in i:
