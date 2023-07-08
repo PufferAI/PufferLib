@@ -88,6 +88,7 @@ class PolicyPool():
 
         self.learner = learner
         self.learner_name = name
+        self.allocated = False
 
         # Set up skill rating tournament
         self.tournament = OpenSkillRating(mu, anchor_mu, sigma)
@@ -119,6 +120,10 @@ class PolicyPool():
         for idx in range(evaluation_batch_size):
             sublist_idx = pattern[idx % chunk_size]
             self.sample_idxs[sublist_idx].append(idx)
+
+        # Learner mask
+        self.learner_mask = np.zeros(evaluation_batch_size)
+        self.learner_mask[self.sample_idxs[0]] = 1
 
     @property
     def ratings(self):
@@ -178,8 +183,7 @@ class PolicyPool():
             self.tournament.ratings[name].sigma = sigma
 
     def forwards(self, obs, lstm_state=None, dones=None):
-        all_actions = None
-        returns = []
+        batch_size = len(obs)
         for samp, policy in zip(self.sample_idxs, self.active_policies):
             if lstm_state is not None:
                 atn, lgprob, _, val, (lstm_state[0][:, samp], lstm_state[1][:, samp]) = policy.model.get_action_and_value(
@@ -189,13 +193,28 @@ class PolicyPool():
             else:
                 atn, lgprob, _, val = policy.model.get_action_and_value(obs[samp])
             
-            if all_actions is None:
-                all_actions = torch.zeros((len(obs), *atn.shape[1:]), dtype=atn.dtype).to(atn.device)
+            if not self.allocated:
+                self.allocated = True
 
-            returns.append((atn, lgprob, val, lstm_state, samp))
-            all_actions[samp] = atn
-        
-        return all_actions, returns
+                self.actions = torch.zeros(batch_size, *atn.shape[1:], dtype=int).to(atn.device)
+                self.logprobs = torch.zeros(batch_size).to(lgprob.device)
+                self.values = torch.zeros(batch_size).to(val.device)
+
+                if lstm_state is not None:
+                    self.lstm_h = torch.zeros(batch_size, *lstm_state[0].shape[1:]).to(lstm_state[0].device)
+                    self.lstm_c = torch.zeros(batch_size, *lstm_state[1].shape[1:]).to(lstm_state[1].device)
+
+            self.actions[samp] = atn
+            self.logprobs[samp] = lgprob
+            self.values[samp] = val.flatten()
+
+            if lstm_state is not None:
+                self.lstm_h[samp] = lstm_state[0][:, samp]
+                self.lstm_c[samp] = lstm_state[1][:, samp]
+
+        if lstm_state is not None:
+            return self.actions, self.logprobs, self.values, (self.lstm_h, self.lstm_c)
+        return self.actions, self.logprobs, self.values, None
 
     def load(self, path):
         '''Load all models in path'''

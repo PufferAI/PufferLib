@@ -45,11 +45,9 @@ for binding in all_bindings:
     #trainer.load_model(path)
     #trainer.init_wandb()
 
-    data = trainer.allocate_storage()
-
     num_updates = config.total_timesteps // config.batch_size
     for update in range(num_updates):
-        trainer.evaluate(agent, data)
+        trainer.evaluate()
 
         if update % config.pool_rank_interval == 0:
             policy_pool.update_ranks()
@@ -60,7 +58,7 @@ for binding in all_bindings:
         if update % config.pool_update_policy_interval == 0:
             policy_pool.add_policy_copy('learner', f'learner-{update}')
 
-        trainer.train(agent, data, 
+        trainer.train( 
             batch_rows=config.batch_rows,
             bptt_horizon=config.bptt_horizon,
         )

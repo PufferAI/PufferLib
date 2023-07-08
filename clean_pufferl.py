@@ -107,6 +107,40 @@ class CleanPuffeRL:
         self.wandb_run_id = None
         self.wandb_initialized = False
 
+        ### Allocate Storage
+        next_obs, next_done, next_lstm_state = [], [], []
+        for i, envs in enumerate(self.buffers):
+            envs.async_reset(self.seed + i*self.num_envs)
+            next_done.append(torch.zeros((self.num_envs * self.num_agents,)).to(self.device))
+            next_obs.append([])
+
+            if self.agent.is_recurrent:
+                shape = (self.agent.lstm.num_layers, self.num_envs * self.num_agents, self.agent.lstm.hidden_size)
+                next_lstm_state.append((
+                    torch.zeros(shape).to(self.device),
+                    torch.zeros(shape).to(self.device)
+                ))
+            else:
+                next_lstm_state.append(None)
+
+        allocated_torch = torch.cuda.memory_allocated(self.device)
+        allocated_cpu = self.process.memory_info().rss
+        self.data = SimpleNamespace(
+            buf = 0, sort_keys = [],
+            next_obs=next_obs, next_done=next_done, next_lstm_state=next_lstm_state,
+            obs = torch.zeros(self.batch_size+1, *self.binding.single_observation_space.shape).to('cpu' if self.cpu_offload else self.device),
+            actions=torch.zeros(self.batch_size+1, *self.binding.single_action_space.shape, dtype=int).to(self.device),
+            logprobs=torch.zeros(self.batch_size+1).to(self.device),
+            rewards=torch.zeros(self.batch_size+1).to(self.device),
+            dones=torch.zeros(self.batch_size+1).to(self.device),
+            values=torch.zeros(self.batch_size+1).to(self.device),
+        )
+
+        allocated_torch = torch.cuda.memory_allocated(self.device) - allocated_torch
+        allocated_cpu = self.process.memory_info().rss - allocated_cpu
+        if self.verbose:
+            print('Allocated to storage - Pytorch: %.2f GB, System: %.2f GB' % (allocated_torch/1e9, allocated_cpu/1e9))
+
     def init_wandb(
             self, wandb_project_name='pufferlib', wandb_entity=None,
             wandb_run_id = None, extra_data = None):
@@ -161,44 +195,8 @@ class CleanPuffeRL:
         torch.save(state, temp_path)
         os.rename(temp_path, save_path)
 
-    def allocate_storage(self):
-        next_obs, next_done, next_lstm_state = [], [], []
-        for i, envs in enumerate(self.buffers):
-            envs.async_reset(self.seed + i*self.num_envs)
-            next_done.append(torch.zeros((self.num_envs * self.num_agents,)).to(self.device))
-            next_obs.append([])
-
-            if self.agent.is_recurrent:
-                shape = (self.agent.lstm.num_layers, self.num_envs * self.num_agents, self.agent.lstm.hidden_size)
-                next_lstm_state.append((
-                    torch.zeros(shape).to(self.device),
-                    torch.zeros(shape).to(self.device)
-                ))
-            else:
-                next_lstm_state.append(None)
-
-        allocated_torch = torch.cuda.memory_allocated(self.device)
-        allocated_cpu = self.process.memory_info().rss
-        data = SimpleNamespace(
-            buf = 0, sort_keys = [],
-            next_obs=next_obs, next_done=next_done, next_lstm_state=next_lstm_state,
-            obs = torch.zeros(self.batch_size+1, *self.binding.single_observation_space.shape).to('cpu' if self.cpu_offload else self.device),
-            actions=torch.zeros(self.batch_size+1, *self.binding.single_action_space.shape, dtype=int).to(self.device),
-            logprobs=torch.zeros(self.batch_size+1).to(self.device),
-            rewards=torch.zeros(self.batch_size+1).to(self.device),
-            dones=torch.zeros(self.batch_size+1).to(self.device),
-            values=torch.zeros(self.batch_size+1).to(self.device),
-        )
-
-        allocated_torch = torch.cuda.memory_allocated(self.device) - allocated_torch
-        allocated_cpu = self.process.memory_info().rss - allocated_cpu
-        if self.verbose:
-            print('Allocated to storage - Pytorch: %.2f GB, System: %.2f GB' % (allocated_torch/1e9, allocated_cpu/1e9))
-
-        return data
-
     @pufferlib.utils.profile
-    def evaluate(self, agent, data):
+    def evaluate(self):
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
         ptr = env_step_time = inference_time = agent_steps_collected = 0
@@ -207,6 +205,7 @@ class CleanPuffeRL:
         stats = defaultdict(list)
         performance = defaultdict(list)
 
+        data = self.data
         while True:
             buf = data.buf
 
@@ -241,33 +240,31 @@ class CleanPuffeRL:
             # ALGO LOGIC: action logic
             start = time.time()
             with torch.no_grad():
-                all_actions, step_data = self.policy_pool.forwards(
+                actions, logprob, value, data.next_lstm_state[buf] = self.policy_pool.forwards(
                     o.to(self.device),
                     data.next_lstm_state[buf],
                     data.next_done[buf],
                 )
-                action, logprob, value, data.next_lstm_state[buf], learner_idxs = step_data[0] # First element is the learner
                 value = value.flatten()
 
             inference_time += time.time() - start
 
             # TRY NOT TO MODIFY: execute the game
             start = time.time()
-            self.buffers[buf].send(all_actions.cpu().numpy(), None)
+            self.buffers[buf].send(actions.cpu().numpy(), None)
             env_step_time += time.time() - start
             data.buf = (data.buf + 1) % self.num_buffers
 
             # Index alive mask with policy pool idxs...
             # TODO: Find a way to avoid having to do this
-            alive_mask = np.array(alive_mask)
-            alive_mask[~np.isin(np.arange(alive_mask.size), learner_idxs)] = 0
+            alive_mask = np.array(alive_mask) * self.policy_pool.learner_mask
             for idx in np.where(alive_mask)[0]:
                 if ptr == self.batch_size+1:
                     break
 
                 data.obs[ptr] = o[idx]
                 data.values[ptr] = value[idx]
-                data.actions[ptr] = action[idx]
+                data.actions[ptr] = actions[idx]
                 data.logprobs[ptr] = logprob[idx]
                 data.sort_keys.append((buf, idx, step))
 
@@ -320,7 +317,7 @@ class CleanPuffeRL:
         return data
 
     @pufferlib.utils.profile
-    def train(self, agent, data, batch_rows=32, update_epochs=4,
+    def train(self, batch_rows=32, update_epochs=4,
             bptt_horizon=16, gamma=0.99, gae_lambda=0.95, anneal_lr=True,
             norm_adv=True,clip_coef=0.1, clip_vloss=True, ent_coef=0.01,
             vf_coef=0.5, max_grad_norm=0.5, target_kl=None):
@@ -336,6 +333,7 @@ class CleanPuffeRL:
             self.optimizer.param_groups[0]["lr"] = lrnow
 
         # Sort here
+        data = self.data
         idxs = sorted(range(len(data.sort_keys)), key=data.sort_keys.__getitem__)
         data.sort_keys = []
 
@@ -375,10 +373,10 @@ class CleanPuffeRL:
                 mb_returns = b_returns[mb].reshape(-1)
 
                 if self.agent.is_recurrent:
-                    _, newlogprob, entropy, newvalue, lstm_state = agent.get_action_and_value(mb_obs, lstm_state, b_dones[mb], mb_actions)
+                    _, newlogprob, entropy, newvalue, lstm_state = self.agent.get_action_and_value(mb_obs, lstm_state, b_dones[mb], mb_actions)
                     lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
                 else:
-                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(
+                    _, newlogprob, entropy, newvalue = self.agent.get_action_and_value(
                         mb_obs.reshape(-1, *self.binding.single_observation_space.shape), action=mb_actions)
 
                 logratio = newlogprob - b_logprobs[mb].reshape(-1)
@@ -419,7 +417,7 @@ class CleanPuffeRL:
 
                 self.optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(agent.parameters(), max_grad_norm)
+                nn.utils.clip_grad_norm_(self.agent.parameters(), max_grad_norm)
                 self.optimizer.step()
 
             if target_kl is not None:
