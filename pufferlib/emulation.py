@@ -69,14 +69,12 @@ class Postprocessor:
         '''Default reward shaper sums team rewards'''
         return sum(team_rewards.values()), team_infos
 
-    def infos(self, team_reward, team_done, team_infos, step):
-        if self.done:
-            return {}
-        if team_done:
+    def infos(self, team_reward, env_done, team_done, team_infos, step):
+        if env_done:
             team_infos['return'] = self.epoch_return
             team_infos['length'] = self.epoch_length
             self.done = True
-        else:
+        elif not team_done:
             self.epoch_length += 1
             self.epoch_return += team_reward
 
@@ -279,7 +277,7 @@ def make_puffer_env_cls(scope, raw_local_env, raw_obs):
 
         @utils.profile
         def _handle_infos(self, team_reward, team_done, team_infos, team_id):
-            team_infos = self.postprocessors[team_id].infos(team_reward, team_done, team_infos, self._step)
+            team_infos = self.postprocessors[team_id].infos(team_reward, self.done, team_done, team_infos, self._step)
             assert team_infos is not None, f'Postprocessor {team_id} returned None for infos'
             return team_infos
 

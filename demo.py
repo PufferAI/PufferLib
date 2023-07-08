@@ -40,11 +40,12 @@ def train_model(binding):
             seed=config.seed,
     )
 
-    data = trainer.allocate_storage()
+    #trainer.load_model(path)
+    trainer.init_wandb()
 
     num_updates = config.total_timesteps // config.batch_size
     for update in range(num_updates):
-        trainer.evaluate(agent, data)
+        trainer.evaluate()
 
         if update % config.pool_rank_interval == 0:
             ranker.update_ranks(policy_pool.scores())
