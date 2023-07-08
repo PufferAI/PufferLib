@@ -43,7 +43,7 @@ for binding in all_bindings:
     )
 
     #trainer.load_model(path)
-    #trainer.init_wandb()
+    trainer.init_wandb()
 
     num_updates = config.total_timesteps // config.batch_size
     for update in range(num_updates):
