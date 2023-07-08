@@ -71,3 +71,22 @@ class PolicyPool():
                 self.num_scores += 1
 
         return policy_infos
+
+    # Update the active policies to be used for the next batch. Always
+    # include the required policies, and then randomly sample the rest
+    # from the available policies.
+    def update_active_policies(self, policies):
+        if required_policy_names is None:
+            required_policy_names = []
+
+        num_needed = self._num_active_policies - len(required_policy_names)
+        new_policy_names = required_policy_names + \
+        self._policy_selector.select_policies(num_needed, exclude=required_policy_names)
+
+        new_policies = OrderedDict()
+        for policy_name in new_policy_names:
+        new_policies[policy_name] = self._loaded_policies.get(
+            policy_name,
+            self._policy_loader.load_policy(policy_name))
+        self._active_policies = list(new_policies.values())
+        self._loaded_policies = new_policies

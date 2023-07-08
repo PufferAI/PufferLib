@@ -1,5 +1,4 @@
-from dataclasses import dataclass
-from typing import Any, Dict, Set, List, Callable
+from typing import Dict, Set, List, Callable
 
 import torch
 
@@ -8,7 +7,6 @@ from pufferlib.models import Policy
 import copy
 import os
 import numpy as np
-
 
 class PolicyRecord():
   def __init__(self, name: str, policy: Policy, metadata = None):

@@ -3,6 +3,8 @@ import pufferlib
 # TODO: Fix circular import depending on import order
 from clean_pufferl import CleanPuffeRL
 import config as demo_config
+from pufferlib.policy_pool import PolicyPool
+from pufferlib.policy_ranker import OpenSkillRanker
 
 config = demo_config.NMMO()
 #config = demo_config.Atari(framestack=1)
@@ -10,6 +12,7 @@ config = demo_config.NMMO()
 #config = demo_config.Griddly()
 #config = demo_config.Crafter()
 #config = demo_config.NetHack()
+from pufferlib.policy_store import MemoryPolicyStore, FilePolicyRecord, MemoryPolicyStore, PolicyRecord, PolicySelector, PolicyStore
 
 all_bindings = [config.all_bindings[0]]
 
@@ -23,7 +26,7 @@ def train_model(binding):
     policy_store.add_policy('learner', agent)
 
     policy_pool = PolicyPool(num_policies=2, learner_weight=0.8)
-    ranker = OpenSkillRanker(policy_store, policy_pool)
+    ranker = OpenSkillRanker(anchor='learner')
 
     trainer = CleanPuffeRL(
             binding,
@@ -44,10 +47,15 @@ def train_model(binding):
         trainer.evaluate(agent, data)
 
         if update % config.pool_rank_interval == 0:
-            ranker.update_ranks()
+            ranker.update_ranks(policy_pool.scores())
 
         if update % config.pool_update_policy_interval == 0:
-            ranker.update_pool()
+            policy_pool.update(
+                policy_store.select_policies(
+                    ranker.selector(
+                        num_policies=config.num_policies - 1,
+                        exclude=['learner'])),
+            )
 
         if update % config.pool_update_policy_interval == 0:
             policy_store.add_policy_copy(f"learner-{update}", "learner")
