@@ -211,8 +211,6 @@ class CleanPuffeRL:
 
             start = time.time()
             o, r, d, i = self.buffers[buf].recv()
-            #print(np.mean(np.stack(np.split(np.max(o, axis=1), self.num_envs, axis=0), axis=1), axis=1))
-            #print(np.min(o, axis=1), np.median(o, axis=1), np.max(o, axis=1))
             env_step_time += time.time() - start
 
             for profile in self.buffers[buf].profile():
@@ -230,8 +228,6 @@ class CleanPuffeRL:
                 data.next_done[buf] = torch.Tensor(d).to(self.device)
             else:
                 alive_mask = [1 for _ in range(len(o))]
-
-            #print("living agents: ", sum(alive_mask))
 
             # ALGO LOGIC: action logic
             start = time.time()
