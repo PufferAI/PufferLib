@@ -98,6 +98,9 @@ class CleanPuffeRL:
         self.wandb_run_id = None
         self.wandb_initialized = False
 
+        # Extra logging values
+        self.dead_obs = np.zeros((self.num_agents, np.prod(self.binding.single_observation_space.shape)), dtype=bool)
+
     def init_wandb(
             self, wandb_project_name='pufferlib', wandb_entity=None,
             wandb_run_id = None, extra_data = None):
@@ -196,6 +199,7 @@ class CleanPuffeRL:
 
         step = 0
         stats = defaultdict(list)
+        agent_stats = defaultdict(list)
         performance = defaultdict(list)
 
         while True:
@@ -207,6 +211,8 @@ class CleanPuffeRL:
 
             start = time.time()
             o, r, d, i = self.buffers[buf].recv()
+            #print(np.mean(np.stack(np.split(np.max(o, axis=1), self.num_envs, axis=0), axis=1), axis=1))
+            #print(np.min(o, axis=1), np.median(o, axis=1), np.max(o, axis=1))
             env_step_time += time.time() - start
 
             for profile in self.buffers[buf].profile():
@@ -224,6 +230,8 @@ class CleanPuffeRL:
                 data.next_done[buf] = torch.Tensor(d).to(self.device)
             else:
                 alive_mask = [1 for _ in range(len(o))]
+
+            #print("living agents: ", sum(alive_mask))
 
             # ALGO LOGIC: action logic
             start = time.time()
@@ -259,11 +267,18 @@ class CleanPuffeRL:
                 ptr += 1
 
             for item in i:
-                for agent_info in item.values():
+                for agent_id, agent_info in item.items():
                     for name, stat in unroll_nested_dict(agent_info):
+                        # General stats
                         try:
                             stat = float(stat)
                             stats[name].append(stat)
+                        except ValueError:
+                            continue
+                        # Per-agent stats
+                        try:
+                            agent_stat = float(stat)
+                            agent_stats[f"{name}/agent_{agent_id}"].append(agent_stat)
                         except ValueError:
                             continue
 
@@ -279,6 +294,7 @@ class CleanPuffeRL:
                 "performance/inference_sps": inference_sps,
                 **{f'performance/env/{k}': np.mean(v) for k, v in performance.items()},
                 **{f'charts/{k}': np.mean(v) for k, v in stats.items()},
+                **{f'agents/{k}': np.mean(v) for k, v in agent_stats.items()},
                 "charts/reward": float(torch.mean(data.rewards)),
                 "agent_steps": self.global_step,
                 "global_step": self.global_step,
@@ -339,6 +355,13 @@ class CleanPuffeRL:
         b_values = data.values[b_idxs]
         b_advantages = advantages.reshape(batch_rows, num_minibatches, bptt_horizon).transpose(0, 1)
         b_returns = b_advantages + b_values
+
+        # Extra debug logging
+        start_dead_time = time.time()
+        # Calculate percent of observations that have never received a value other than 0
+        # Reduce along batch and bptt dims to get a single boolean for every observation feature for each agent
+        self.dead_obs = np.logical_or(self.dead_obs, np.logical_or.reduce(b_obs.cpu().numpy(), axis=(0, 1)))
+        check_dead_time = time.time() - start_dead_time
 
         # Optimizing the policy and value network
         train_time = time.time()
@@ -427,7 +450,9 @@ class CleanPuffeRL:
             wandb.log({
                 "performance/train_sps": train_sps,
                 "performance/train_time": train_time,
+                "performance/check_dead_time": check_dead_time,
                 "charts/learning_rate": self.optimizer.param_groups[0]["lr"],
+                "charts/dead_obs_percent": np.count_nonzero(self.dead_obs == 0) / np.prod(self.dead_obs.shape) * 100,
                 "losses/value_loss": v_loss.item(),
                 "losses/policy_loss": pg_loss.item(),
                 "losses/entropy": entropy_loss.item(),
