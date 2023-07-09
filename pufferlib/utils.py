@@ -139,7 +139,7 @@ class RandomState:
         return self.sample(ary, 1)[0]
 
 
-class Profiler:    
+class Profiler:
     def __init__(self):
         self.elapsed = 0
         self.calls = 0
@@ -209,7 +209,7 @@ def aggregate_profilers(profiler_dicts):
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes
-    
+
     TODO: Err on access bad key
     """
     __getattr__ = dict.get
@@ -231,7 +231,7 @@ class Suppress():
 
         self.null_1 = os.open(os.devnull, os.O_WRONLY|os.O_TRUNC|os.O_CREAT)
         self.null_2 = os.open(os.devnull, os.O_WRONLY|os.O_TRUNC|os.O_CREAT)
-   
+
     def __enter__(self):
         # Suppress C library outputs
         self.orig_stdout = os.dup(1)
@@ -249,7 +249,7 @@ class Suppress():
         sys.stdout = open(os.devnull, 'w')
         sys.stderr = open(os.devnull, 'w')
 
-       
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         # Enable C library outputs
         sys.stdout.flush()
@@ -259,7 +259,7 @@ class Suppress():
         os.dup2(self.orig_stderr, 2)
         os.close(self.orig_stdout)
         os.close(self.orig_stderr)
-        
+
         os.close(self.null_1)
         os.close(self.null_2)
 
