@@ -24,6 +24,8 @@ class PolicySelector():
 
   def select_policies(self, policies: Dict[str, PolicyRecord]) -> List[PolicyRecord]:
     available_names = list(set(policies.keys()) - set(self._exclude_names))
+    if len(available_names) < self._num:
+      return []
     selected_names = np.random.choice(available_names, self._num, replace=True).tolist()
     return [policies[name] for name in selected_names]
 

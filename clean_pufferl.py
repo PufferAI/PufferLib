@@ -62,7 +62,7 @@ class CleanPuffeRL:
         self.start_time = time.time()
 
         self.global_step = self.agent_step = self.start_epoch = self.update = 0
-        self.num_updates = self.total_timesteps // self.batch_size
+        self.total_updates = self.total_timesteps // self.batch_size
         self.num_agents = self.binding.max_agents
         self.envs_per_worker = self.num_envs // self.num_cores
         assert self.num_cores * self.envs_per_worker == self.num_envs
@@ -197,7 +197,7 @@ class CleanPuffeRL:
         os.rename(temp_path, save_path)
 
     @pufferlib.utils.profile
-    def evaluate(self):
+    def evaluate(self, show_progress = False):
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
         ptr = env_step_time = inference_time = agent_steps_collected = 0
@@ -279,7 +279,7 @@ class CleanPuffeRL:
                 progress_bar.update(1)
 
             # Log only for main learning policy
-            for agent_i in i[self.policy_pool.learner_name]:
+            for agent_i in i[0]:
                 if not agent_i:
                     continue
 
@@ -336,8 +336,8 @@ class CleanPuffeRL:
             norm_adv=True,clip_coef=0.1, clip_vloss=True, ent_coef=0.01,
             vf_coef=0.5, max_grad_norm=0.5, target_kl=None):
 
-        if self.done_training:
-            raise RuntimeError(f"Trying to train for more than max_updates={self.num_updates} updates")
+        if self.done_training():
+            raise RuntimeError(f"Trying to train for more than max_updates={self.total_updates} updates")
 
         #assert self.num_steps % bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
         allocated_torch = torch.cuda.memory_allocated(self.device)
@@ -345,7 +345,7 @@ class CleanPuffeRL:
 
         # Annealing the rate if instructed to do so.
         if anneal_lr:
-            frac = 1.0 - (self.update - 1.0) / self.num_updates
+            frac = 1.0 - (self.update - 1.0) / self.total_updates
             lrnow = frac * self.learning_rate
             self.optimizer.param_groups[0]["lr"] = lrnow
 

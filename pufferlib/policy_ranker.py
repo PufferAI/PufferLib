@@ -24,7 +24,8 @@ class OpenSkillRanker():
       if policy not in self._tournament.ratings:
           self.add_policy(policy, anchor=policy == self._anchor)
 
-    self._tournament.update(list(scores.keys()), list(scores.values()))
+    if len(scores) > 1:
+      self._tournament.update(list(scores.keys()), list(scores.values()))
 
   def add_policy(self, name: str, mu=None, sigma=None, anchor=False):
     if name in self._tournament.ratings:
