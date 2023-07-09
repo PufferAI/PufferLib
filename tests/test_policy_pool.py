@@ -12,7 +12,7 @@ class TestPolicyPool(unittest.TestCase):
         self.mock_policy.name = 'Policy1'
 
         self.policy_pool = PolicyPool(batch_size=10, sample_weights=[1, 2])
-        self.policy_pool._active_policies = [self.mock_policy]
+        self.policy_pool._policies = [self.mock_policy]
 
     def test_forwards(self):
         obs = torch.tensor([1, 2, 3])

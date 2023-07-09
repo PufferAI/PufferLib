@@ -197,11 +197,7 @@ class CleanPuffeRL:
         os.rename(temp_path, save_path)
 
     @pufferlib.utils.profile
-<<<<<<< HEAD
-    def evaluate(self, data, show_progress=False):
-=======
     def evaluate(self):
->>>>>>> upstream/pool-sqlite
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
         ptr = env_step_time = inference_time = agent_steps_collected = 0

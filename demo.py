@@ -25,7 +25,7 @@ def train_model(binding):
         )(binding, *config.policy_args, **config.policy_kwargs).to(config.device)
     policy_store.add_policy('learner', agent)
 
-    policy_pool = PolicyPool(num_policies=2, learner_weight=0.8)
+    policy_pool = PolicyPool(agent, learner_weight=0.8)
     ranker = OpenSkillRanker(anchor='learner')
 
     trainer = CleanPuffeRL(

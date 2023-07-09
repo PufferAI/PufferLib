@@ -1,5 +1,7 @@
 from pdb import set_trace as T
 
+import torch
+
 import pufferlib.vectorization.serial
 import pufferlib.vectorization.multiprocessing
 
@@ -16,8 +18,8 @@ class Default:
     batch_rows = 256
     bptt_horizon = 1
     seed = 1
- 
-    device = 'cuda'
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     policy_args = [128, 128]
     policy_kwargs = {}
     recurrent_args = []
@@ -39,7 +41,7 @@ class Default:
 class NMMO(Default):
     batch_size = 2**14
     batch_rows = 128
- 
+
     def __init__(self) -> None:
         import pufferlib.registry.nmmo
         self.registry = pufferlib.registry.nmmo
