@@ -7,6 +7,8 @@ import numpy as np
 import time
 import os
 import sys
+import pickle
+from filelock import FileLock
 
 import inspect
 
@@ -268,3 +270,33 @@ class Suppress():
         sys.stderr.close()
         sys.stdout = self._original_stdout
         sys.stderr = self._original_stdout
+
+
+class PersistentObject:
+    def __init__(self, wrapped_class, path, *args, **kwargs):
+        self.lock = FileLock(path + ".lock")
+        self.wrapped_class = wrapped_class
+        self.path = path
+
+        if not os.path.exists(path):
+            with self.lock:
+                with open(path, 'wb') as f:
+                    # Pass constructor arguments to the wrapped class
+                    pickle.dump(wrapped_class(*args, **kwargs), f)
+
+    def __getattr__(self, name):
+        def method(*args, **kwargs):
+            with self.lock:
+                # Load the object from disk.
+                with open(self.path, 'rb') as f:
+                    obj = pickle.load(f)
+
+                # Call the method and get the result.
+                result = getattr(obj, name)(*args, **kwargs)
+
+                # Save the object back to disk.
+                with open(self.path, 'wb') as f:
+                    pickle.dump(obj, f)
+
+                return result
+        return method

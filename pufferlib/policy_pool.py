@@ -1,4 +1,5 @@
 from pdb import set_trace as T
+from typing import OrderedDict
 
 import torch
 import copy
@@ -16,7 +17,7 @@ class PolicyPool():
         learner: Policy,
         learner_name: str,
         batch_size: int,
-        num_policies: int,
+        num_policies: int = 1,
         learner_weight: float = 1.0):
 
         self._learner = learner
@@ -24,7 +25,7 @@ class PolicyPool():
         self._learner_weight = learner_weight
 
         self._num_policies = num_policies
-        self._policies = {learner_name: learner}
+        self._policies = OrderedDict({learner_name: learner})
 
         self._batch_size = batch_size
         self._sample_idxs = self._compute_sample_idxs(batch_size)
@@ -43,7 +44,7 @@ class PolicyPool():
             other_batch = (batch_size - learner_batch) // (self._num_policies - 1)
 
         # Create indices for splitting data across policies
-        sample_weights = [learner_batch] + [other_batch for _ in self._policies]
+        sample_weights = [learner_batch] + [other_batch] * (self._num_policies - 1)
         print(f"PolicyPool sample_weights: {sample_weights}")
         chunk_size = sum(sample_weights)
         pattern = [i for i, weight in enumerate(sample_weights)
