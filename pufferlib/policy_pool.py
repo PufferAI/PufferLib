@@ -1,6 +1,4 @@
-from functools import lru_cache
 from pdb import set_trace as T
-from collections import defaultdict
 
 import torch
 import copy
@@ -14,25 +12,26 @@ from pufferlib.models import Policy
 # of observations. The batch is split across policies according
 # to the sample weights provided at initialization.
 class PolicyPool():
-    def __init__(
-        self, learner: Policy,
+    def __init__(self,
+        learner: Policy,
+        learner_name: str,
         batch_size: int,
         num_policies: int,
         learner_weight: float = 1.0):
 
         self._learner = learner
+        self._learner_name = learner_name
         self._learner_weight = learner_weight
 
-        self._num_scores = 0
         self._num_policies = num_policies
-        self._policies = [learner]
+        self._policies = {learner_name: learner}
 
         self._batch_size = batch_size
         self._sample_idxs = self._compute_sample_idxs(batch_size)
 
         self.learner_mask = np.zeros(batch_size)
         self.learner_mask[self._sample_idxs[0]] = 1
-        self.scores = defaultdict(list)
+        self.scores = {}
 
         self._allocated = False
 
@@ -59,7 +58,7 @@ class PolicyPool():
 
     def forwards(self, obs, lstm_state=None, dones=None):
         batch_size = len(obs)
-        for samp, policy in zip(self._sample_idxs, self._policies):
+        for samp, policy in zip(self._sample_idxs, self._policies.values()):
             if lstm_state is not None:
                 atn, lgprob, _, val, (lstm_state[0][:, samp], lstm_state[1][:, samp]) = policy.get_action_and_value(
                     obs[samp],
@@ -97,18 +96,19 @@ class PolicyPool():
         for info in infos:
             agent_infos += list(info.values())
 
-        policy_infos = []
-        for p in range(len(self._policies)):
-            samp = self._sample_idxs[p]
+        policy_infos = {}
+        for samp, (name, policy) in zip(self._sample_idxs, self._policies.items()):
             pol_infos = np.array(agent_infos)[samp]
-            policy_infos.append(pol_infos)
+            policy_infos[name] = pol_infos
 
             for i in pol_infos:
                 if info_key not in i:
                     continue
 
-                self.scores[p].append(i[info_key])
-                self.num_scores += 1
+                if name not in self.scores:
+                    self.scores[name] = []
+
+                self.scores[name].append(i[info_key])
 
         return policy_infos
 
@@ -116,4 +116,4 @@ class PolicyPool():
     # include the required policies, and then randomly sample the rest
     # from the available policies.
     def update_policies(self, policies):
-        self._policies = [self._learner] + policies
+        self._policies = {self._learner_name: self._learner, **policies}

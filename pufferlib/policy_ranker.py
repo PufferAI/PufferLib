@@ -1,6 +1,6 @@
 
 from typing import Dict
-from pufferlib.evaluation import OpenSkillRating
+from pufferlib.rating import OpenSkillRating
 
 import pickle
 

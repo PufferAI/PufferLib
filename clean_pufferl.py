@@ -278,17 +278,17 @@ class CleanPuffeRL:
                 ptr += 1
                 progress_bar.update(1)
 
-            # Log only for main learning policy
-            for agent_i in i[0]:
-                if not agent_i:
-                    continue
-
-                for name, stat in unroll_nested_dict(agent_i):
-                    try:
-                        stat = float(stat)
-                        stats[name].append(stat)
-                    except TypeError:
+            if 'learner' in i:
+                for agent_i in i['learner']:
+                    if not agent_i:
                         continue
+
+                    for name, stat in unroll_nested_dict(agent_i):
+                        try:
+                            stat = float(stat)
+                            stats[name].append(stat)
+                        except TypeError:
+                            continue
 
             env_sps = int(agent_steps_collected / env_step_time)
             inference_sps = int(self.batch_size / inference_time)
