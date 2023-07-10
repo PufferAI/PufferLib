@@ -10,11 +10,11 @@ import sys
 
 from collections import defaultdict
 
-import ray
-from ray.air.checkpoint import Checkpoint
+# import ray
+# from ray.air.checkpoint import Checkpoint
 
-from ray.serve import PredictorDeployment
-from ray import serve
+# from ray.serve import PredictorDeployment
+# from ray import serve
 
 from pufferlib.rating import OpenSkillRating
 from pufferlib.frameworks.rllib import RLPredictor, read_checkpoints
@@ -149,7 +149,7 @@ class Tournament(abc.ABC):
 
     def run_match(self, episode):
         '''Select participants and run a single game to update ratings
-        
+
         policy_mapping_fn: Maps agent name to policy id
         policy_sampling_fn: Selects a subset of policies to run for the match
         num_policies: number of policies to use in this match'''
