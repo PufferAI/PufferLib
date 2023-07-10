@@ -165,36 +165,24 @@ class CleanPuffeRL:
         )
         self.wandb_initialized = True
 
-    def resume_model(self, path):
-        resume_state = torch.load(path)
-        self.wandb_run_id = resume_state.get('wandb_r`un_id')
-        self.global_step = resume_state.get('global_step', 0)
-        self.agent_step = resume_state.get('agent_step', 0)
-        self.update = resume_state['update']
+    def load_trainer_state(self, state):
+        if state == None:
+            return
 
-        if self.verbose:
-            print(f'Resuming from {path} with wandb_run_id={self.wandb_run_id}')
+        self.optimizer.load_state_dict(state['optimizer_state_dict'])
+        self.global_step = state.get('global_step', 0)
+        self.agent_step = state.get('agent_step', 0)
+        self.update = state.get('update', 0)
+        self.learning_rate = state.get('learning_rate', self.learning_rate)
 
-        self.agent.load_state_dict(resume_state['agent_state_dict'])
-        self.optimizer.load_state_dict(resume_state['optimizer_state_dict'])
-
-    def save_model(self, save_path, **kwargs):
-        state = {
-            "agent_state_dict": self.agent.state_dict(),
+    def get_trainer_state(self):
+        return {
             "optimizer_state_dict": self.optimizer.state_dict(),
-            "wandb_run_id": self.wandb_run_id,
             "global_step": self.global_step,
             "agent_step": self.agent_step,
             "update": self.update,
-            **kwargs
+            "learning_rate": self.learning_rate
         }
-
-        if self.verbose:
-            print(f'Saving checkpoint to {save_path}')
-
-        temp_path = os.path.join(f'{save_path}.tmp')
-        torch.save(state, temp_path)
-        os.rename(temp_path, save_path)
 
     @pufferlib.utils.profile
     def evaluate(self, show_progress = False):

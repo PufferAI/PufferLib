@@ -12,11 +12,14 @@ import numpy as np
 class PolicyRecord():
   def __init__(self, name: str, policy: Policy, metadata = None):
     self.name = name
-    self.metadata = metadata
+    self._metadata = metadata
     self._policy = policy
 
   def policy(self) -> Policy:
     return self._policy
+
+  def metadata(self) -> Dict:
+    return self._metadata
 
 class PolicySelector():
   def __init__(self, num: int, exclude_names: Set[str] = None):
@@ -80,19 +83,27 @@ class FilePolicyRecord(PolicyRecord):
     temp_path = self._path + ".tmp"
     torch.save({
         "policy_state_dict": self._policy.state_dict(),
-        "policy_class": self._policy.__class__.__name__,
-        "metadata": self.metadata
+        "metadata": self._metadata
     }, temp_path)
     os.rename(temp_path, self._path)
 
-  def load(self, create_policy_func: Callable[[str], Policy]):
-    if not os.path.exists(self._path):
-      raise ValueError(f"Policy with name {self.name} does not exist")
-    logging.info(f"Loading policy from {self._path}")
-    data = torch.load(self._path)
+  def load(self, create_policy_func: Callable[[PolicyRecord], Policy]):
+    data = self._load_data()
     policy = create_policy_func(self)
     policy.load_state_dict(data["policy_state_dict"])
     return policy
+
+  def _load_data(self):
+    if not os.path.exists(self._path):
+      raise ValueError(f"Policy with name {self.name} does not exist")
+    data = torch.load(self._path)
+    self._metadata = data["metadata"]
+    return data
+
+  def metadata(self) -> Dict:
+    if self._metadata is None:
+      self._load_data()
+    return self._metadata
 
   def policy(self, create_policy_func: Callable[[str], Policy] = None) -> Policy:
     if self._policy is None:

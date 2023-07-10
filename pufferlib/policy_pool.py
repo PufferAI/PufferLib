@@ -1,10 +1,11 @@
 from pdb import set_trace as T
-from typing import OrderedDict
+from typing import OrderedDict, Dict
 
 import torch
 import copy
 
 import numpy as np
+import logging
 import pandas as pd
 
 from pufferlib.models import Policy
@@ -37,7 +38,7 @@ class PolicyPool():
         self._allocated = False
 
     def _compute_sample_idxs(self, batch_size):
-        learner_batch = int(batch_size * self._learner_weight)
+        learner_batch = int(max(1, batch_size * self._learner_weight))
 
         other_batch = 0
         if self._num_policies > 1:
@@ -116,5 +117,6 @@ class PolicyPool():
     # Update the active policies to be used for the next batch. Always
     # include the required policies, and then randomly sample the rest
     # from the available policies.
-    def update_policies(self, policies):
+    def update_policies(self, policies: Dict[str, Policy]):
         self._policies = {self._learner_name: self._learner, **policies}
+        logging.info(f"PolicyPool: Updated policies: {self._policies.keys()}")
