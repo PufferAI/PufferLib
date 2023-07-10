@@ -22,8 +22,7 @@ import pufferlib
 import pufferlib.emulation
 import pufferlib.utils
 import pufferlib.frameworks.cleanrl
-import pufferlib.vectorization.multiprocessing
-import pufferlib.vectorization.serial
+import pufferlib.vectorization
 import wandb
 
 def unroll_nested_dict(d):
@@ -42,7 +41,7 @@ class CleanPuffeRL:
     seed: int = 1
     torch_deterministic: bool = True
     cuda: bool = True
-    vec_backend: ... = pufferlib.vectorization.multiprocessing.VecEnv
+    vec_backend: ... = pufferlib.vectorization.Multiprocessing
     total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
     num_buffers: int = 1
@@ -73,12 +72,12 @@ class CleanPuffeRL:
         self.process = psutil.Process()
         allocated = self.process.memory_info().rss
         self.buffers = [
-            self.vec_backend(
+            pufferlib.vectorization.VecEnv(
                 self.binding,
+                self.vec_backend,
                 num_workers=self.num_cores,
-                envs_per_worker=self.envs_per_worker,
-            )
-            for _ in range(self.num_buffers)
+                envs_per_worker=self.envs_per_worker
+            ) for _ in range(self.num_buffers)
         ]
 
         if self.verbose:
