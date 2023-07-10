@@ -60,6 +60,8 @@ class PolicyPool():
     def forwards(self, obs, lstm_state=None, dones=None):
         batch_size = len(obs)
         for samp, policy in zip(self._sample_idxs, self._policies.values()):
+            if len(samp) == 0:
+                continue
             if lstm_state is not None:
                 atn, lgprob, _, val, (lstm_state[0][:, samp], lstm_state[1][:, samp]) = policy.get_action_and_value(
                     obs[samp],
