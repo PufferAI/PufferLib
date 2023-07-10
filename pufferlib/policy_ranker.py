@@ -10,7 +10,10 @@ class OpenSkillPolicySelector(PolicySelector):
   pass
 
 class OpenSkillRanker():
-  def __init__(self, anchor, mu=1000, anchor_mu=1000, sigma=100/3):
+  def __init__(
+    self, anchor: str, mu: int = 1000,
+    anchor_mu: int = 1000, sigma: float =100/3):
+
     super().__init__()
 
     self._tournament = OpenSkillRating(mu, anchor_mu, sigma)
@@ -38,6 +41,14 @@ class OpenSkillRanker():
         self._tournament.add_policy(name)
         self._tournament.ratings[name].mu = mu if mu is not None else self._default_mu
         self._tournament.ratings[name].sigma = sigma if sigma is not None else self._default_sigma
+
+  def add_policy_copy(self, name: str, src_name: str):
+    mu = self._default_mu
+    sigma = self._default_sigma
+    if src_name in self._tournament.ratings:
+        mu = self._tournament.ratings[src_name].mu
+        sigma = self._tournament.ratings[src_name].sigma
+    self.add_policy(name, mu, sigma)
 
   def ratings(self):
       return self._tournament.ratings

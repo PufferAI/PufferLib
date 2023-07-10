@@ -1,10 +1,11 @@
 from pdb import set_trace as T
+from typing import OrderedDict, Dict
 
 import torch
 import copy
 
 import numpy as np
-import pandas as pd
+import logging
 
 from pufferlib.models import Policy
 
@@ -16,7 +17,7 @@ class PolicyPool():
         learner: Policy,
         learner_name: str,
         batch_size: int,
-        num_policies: int,
+        num_policies: int = 1,
         learner_weight: float = 1.0):
 
         self._learner = learner
@@ -24,7 +25,7 @@ class PolicyPool():
         self._learner_weight = learner_weight
 
         self._num_policies = num_policies
-        self._policies = {learner_name: learner}
+        self._policies = OrderedDict({learner_name: learner})
 
         self._batch_size = batch_size
         self._sample_idxs = self._compute_sample_idxs(batch_size)
@@ -36,14 +37,14 @@ class PolicyPool():
         self._allocated = False
 
     def _compute_sample_idxs(self, batch_size):
-        learner_batch = int(batch_size * self._learner_weight)
+        learner_batch = int(max(1, batch_size * self._learner_weight))
 
         other_batch = 0
         if self._num_policies > 1:
             other_batch = (batch_size - learner_batch) // (self._num_policies - 1)
 
         # Create indices for splitting data across policies
-        sample_weights = [learner_batch] + [other_batch for _ in self._policies]
+        sample_weights = [learner_batch] + [other_batch] * (self._num_policies - 1)
         print(f"PolicyPool sample_weights: {sample_weights}")
         chunk_size = sum(sample_weights)
         pattern = [i for i, weight in enumerate(sample_weights)
@@ -115,5 +116,6 @@ class PolicyPool():
     # Update the active policies to be used for the next batch. Always
     # include the required policies, and then randomly sample the rest
     # from the available policies.
-    def update_policies(self, policies):
+    def update_policies(self, policies: Dict[str, Policy]):
         self._policies = {self._learner_name: self._learner, **policies}
+        logging.info(f"PolicyPool: Updated policies: {self._policies.keys()}")

@@ -3,6 +3,7 @@ from typing import Dict, Set, List, Callable
 import torch
 
 from pufferlib.models import Policy
+import logging
 
 import copy
 import os
@@ -11,11 +12,14 @@ import numpy as np
 class PolicyRecord():
   def __init__(self, name: str, policy: Policy, metadata = None):
     self.name = name
-    self.metadata = metadata
+    self._metadata = metadata
     self._policy = policy
 
   def policy(self) -> Policy:
     return self._policy
+
+  def metadata(self) -> Dict:
+    return self._metadata
 
 class PolicySelector():
   def __init__(self, num: int, exclude_names: Set[str] = None):
@@ -41,6 +45,9 @@ class PolicyStore():
 
   def select_policies(self, selector: PolicySelector) -> List[PolicyRecord]:
     return selector.select_policies(self._all_policies())
+
+  def get_policy(self, name: str) -> PolicyRecord:
+    return self._all_policies()[name]
 
 class MemoryPolicyStore(PolicyStore):
   def __init__(self):
@@ -71,32 +78,42 @@ class FilePolicyRecord(PolicyRecord):
   def save(self):
     assert self._policy is not None
     if os.path.exists(self._path):
-      raise ValueError(f"Policy {self.path} already exists")
+      raise ValueError(f"Policy {self._path} already exists")
+    logging.info(f"Saving policy to {self._path}")
     temp_path = self._path + ".tmp"
     torch.save({
         "policy_state_dict": self._policy.state_dict(),
-        "policy_class": self._policy.__class__.__name__,
-        "metadata": self.metadata
-    })
+        "metadata": self._metadata
+    }, temp_path)
     os.rename(temp_path, self._path)
 
   def load(self, create_policy_func: Callable[[PolicyRecord], Policy]):
-    if not os.path.exists(self._path):
-      raise ValueError(f"Policy with name {self.name} does not exist")
-    data = torch.load(self._path)
+    data = self._load_data()
     policy = create_policy_func(self)
     policy.load_state_dict(data["policy_state_dict"])
     return policy
 
-  def policy(self, create_policy_func: Callable[[PolicyRecord], Policy] = None) -> Policy:
+  def _load_data(self):
+    if not os.path.exists(self._path):
+      raise ValueError(f"Policy with name {self.name} does not exist")
+    data = torch.load(self._path)
+    self._metadata = data["metadata"]
+    return data
+
+  def metadata(self) -> Dict:
+    if self._metadata is None:
+      self._load_data()
+    return self._metadata
+
+  def policy(self, create_policy_func: Callable[[str], Policy] = None) -> Policy:
     if self._policy is None:
-      self._policy = create_policy_func(self)
+      self._policy = self.load(create_policy_func)
     return self._policy
 
 class DirectoryPolicyStore(PolicyStore):
-  def __init__(self, path: str, create_policy_func: Callable[[PolicyRecord], Policy]):
+  def __init__(self, path: str):
     self._path = path
-    self._create_policy_func = create_policy_func
+    os.makedirs(self._path, exist_ok=True)
 
   def add_policy(self, name: str, policy: Policy, metadata = None) -> PolicyRecord:
     path = os.path.join(self._path, name + ".pt")
