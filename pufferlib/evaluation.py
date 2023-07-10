@@ -10,14 +10,14 @@ import sys
 
 from collections import defaultdict
 
-# import ray
-# from ray.air.checkpoint import Checkpoint
+import ray
+from ray.air.checkpoint import Checkpoint
 
-# from ray.serve import PredictorDeployment
-# from ray import serve
+from ray.serve import PredictorDeployment
+from ray import serve
 
 from pufferlib.rating import OpenSkillRating
-# from pufferlib.frameworks.rllib import RLPredictor, read_checkpoints
+from pufferlib.frameworks.rllib import RLPredictor, read_checkpoints
 
 
 def group(obs, policy_mapping_fn, episode):
