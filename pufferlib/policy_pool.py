@@ -37,14 +37,8 @@ class PolicyPool():
         self._allocated = False
 
     def _compute_sample_idxs(self, batch_size):
-        learner_batch = int(max(1, batch_size * self._learner_weight))
-
-        other_batch = 0
-        if self._num_policies > 1:
-            other_batch = (batch_size - learner_batch) // (self._num_policies - 1)
-
         # Create indices for splitting data across policies
-        sample_weights = [learner_batch] + [other_batch] * (self._num_policies - 1)
+        sample_weights = [self._learner_weight] + [1] * (self._num_policies - 1)
         print(f"PolicyPool sample_weights: {sample_weights}")
         chunk_size = sum(sample_weights)
         pattern = [i for i, weight in enumerate(sample_weights)
@@ -55,6 +49,7 @@ class PolicyPool():
         for idx in range(batch_size):
             sublist_idx = pattern[idx % chunk_size]
             sample_idxs[sublist_idx].append(idx)
+
         return sample_idxs
 
     def forwards(self, obs, lstm_state=None, dones=None):
@@ -69,7 +64,7 @@ class PolicyPool():
                 atn, lgprob, _, val = policy.get_action_and_value(obs[samp])
 
             if not self._allocated:
-                self.allocated = True
+                self._allocated = True
 
                 self.actions = torch.zeros(batch_size, *atn.shape[1:], dtype=int).to(atn.device)
                 self.logprobs = torch.zeros(batch_size).to(lgprob.device)
