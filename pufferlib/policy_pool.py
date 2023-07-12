@@ -41,7 +41,10 @@ class PolicyPool():
 
     def _compute_sample_idxs(self):
         # Create indices for splitting data across policies
-        ow = int(self._num_agents * (1 - self._learner_weight) / (self._num_policies - 1))
+        ow = 0
+        if self._num_policies > 1:
+            ow = int(self._num_agents * (1 - self._learner_weight) / (self._num_policies - 1))
+
         lw = self._num_agents - ow * (self._num_policies - 1)
         assert lw > 0
 
