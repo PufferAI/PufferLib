@@ -38,7 +38,11 @@ class PolicyPool():
 
     def _compute_sample_idxs(self, batch_size):
         # Create indices for splitting data across policies
-        sample_weights = [self._learner_weight] + [1] * (self._num_policies - 1)
+        ow = int(batch_size * (1 - self._learner_weight) / (self._num_policies - 1))
+        lw = batch_size - ow * (self._num_policies - 1)
+        assert lw > 0
+
+        sample_weights = [lw] + [ow] * (self._num_policies - 1)
         print(f"PolicyPool sample_weights: {sample_weights}")
         chunk_size = sum(sample_weights)
         pattern = [i for i, weight in enumerate(sample_weights)
