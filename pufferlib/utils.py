@@ -7,6 +7,8 @@ import numpy as np
 import time
 import os
 import sys
+import pickle
+from filelock import FileLock
 
 import inspect
 
@@ -139,7 +141,7 @@ class RandomState:
         return self.sample(ary, 1)[0]
 
 
-class Profiler:    
+class Profiler:
     def __init__(self):
         self.elapsed = 0
         self.calls = 0
@@ -209,7 +211,7 @@ def aggregate_profilers(profiler_dicts):
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes
-    
+
     TODO: Err on access bad key
     """
     __getattr__ = dict.get
@@ -231,7 +233,7 @@ class Suppress():
 
         self.null_1 = os.open(os.devnull, os.O_WRONLY|os.O_TRUNC|os.O_CREAT)
         self.null_2 = os.open(os.devnull, os.O_WRONLY|os.O_TRUNC|os.O_CREAT)
-   
+
     def __enter__(self):
         # Suppress C library outputs
         self.orig_stdout = os.dup(1)
@@ -249,7 +251,7 @@ class Suppress():
         sys.stdout = open(os.devnull, 'w')
         sys.stderr = open(os.devnull, 'w')
 
-       
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         # Enable C library outputs
         sys.stdout.flush()
@@ -259,7 +261,7 @@ class Suppress():
         os.dup2(self.orig_stderr, 2)
         os.close(self.orig_stdout)
         os.close(self.orig_stderr)
-        
+
         os.close(self.null_1)
         os.close(self.null_2)
 
@@ -268,3 +270,33 @@ class Suppress():
         sys.stderr.close()
         sys.stdout = self._original_stdout
         sys.stderr = self._original_stdout
+
+
+class PersistentObject:
+    def __init__(self, wrapped_class, path, *args, **kwargs):
+        self.lock = FileLock(path + ".lock")
+        self.wrapped_class = wrapped_class
+        self.path = path
+
+        if not os.path.exists(path):
+            with self.lock:
+                with open(path, 'wb') as f:
+                    # Pass constructor arguments to the wrapped class
+                    pickle.dump(wrapped_class(*args, **kwargs), f)
+
+    def __getattr__(self, name):
+        def method(*args, **kwargs):
+            with self.lock:
+                # Load the object from disk.
+                with open(self.path, 'rb') as f:
+                    obj = pickle.load(f)
+
+                # Call the method and get the result.
+                result = getattr(obj, name)(*args, **kwargs)
+
+                # Save the object back to disk.
+                with open(self.path, 'wb') as f:
+                    pickle.dump(obj, f)
+
+                return result
+        return method

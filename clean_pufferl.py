@@ -22,11 +22,16 @@ import pufferlib
 import pufferlib.emulation
 import pufferlib.utils
 import pufferlib.frameworks.cleanrl
+import pufferlib.policy_pool
 import pufferlib.vectorization.multiprocessing
 import pufferlib.vectorization.serial
+from tqdm import tqdm
 import wandb
 
 def unroll_nested_dict(d):
+    if not isinstance(d, dict):
+        return d
+
     for k, v in d.items():
         if isinstance(v, dict):
             for k2, v2 in unroll_nested_dict(v):
@@ -38,17 +43,17 @@ def unroll_nested_dict(d):
 class CleanPuffeRL:
     binding: pufferlib.emulation.Binding
     agent: nn.Module
+    policy_pool: pufferlib.policy_pool.PolicyPool = None
     exp_name: str = os.path.basename(__file__)
     seed: int = 1
     torch_deterministic: bool = True
-    cuda: bool = True
     vec_backend: ... = pufferlib.vectorization.multiprocessing.VecEnv
+    device: str = torch.device("cuda") if torch.cuda.is_available() else "cpu"
     total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
     num_buffers: int = 1
     num_envs: int = 8
     num_cores: int = psutil.cpu_count(logical=False)
-    run_name: str = None
     cpu_offload: bool = True
     verbose: bool = True
     batch_size: int = 2**14
@@ -57,7 +62,7 @@ class CleanPuffeRL:
         self.start_time = time.time()
 
         self.global_step = self.agent_step = self.start_epoch = self.update = 0
-        self.num_updates = self.total_timesteps // self.batch_size
+        self.total_updates = self.total_timesteps // self.batch_size
         self.num_agents = self.binding.max_agents
         self.envs_per_worker = self.num_envs // self.num_cores
         assert self.num_cores * self.envs_per_worker == self.num_envs
@@ -85,74 +90,23 @@ class CleanPuffeRL:
             print('Allocated %.2f MB to environments. Only accurate for Serial backend.' % ((self.process.memory_info().rss - allocated) / 1e6))
 
         # Setup agent
-        self.device = torch.device("cuda" if torch.cuda.is_available() and self.cuda else "cpu")
         self.agent = self.agent.to(self.device)
         self.agent.is_recurrent = hasattr(self.agent, "lstm")
+
+        # Setup policy pool
+        if self.policy_pool is None:
+            self.policy_pool = pufferlib.policy_pool.PolicyPool(
+                self.agent, self.num_agents * self.num_envs)
 
         # Setup optimizer
         self.optimizer = optim.Adam(
             self.agent.parameters(), lr=self.learning_rate, eps=1e-5)
 
         # Setup logging
-        self.run_name = self.run_name or f"{self.binding.env_name}__{self.seed}__{int(time.time())}"
         self.wandb_run_id = None
         self.wandb_initialized = False
 
-    def init_wandb(
-            self, wandb_project_name='pufferlib', wandb_entity=None,
-            wandb_run_id = None, extra_data = None):
-
-        if self.wandb_initialized:
-            return
-
-        self.wandb_run_id = self.wandb_run_id or wandb_run_id or wandb.util.generate_id()
-        extra_data = extra_data or {}
-
-        wandb.init(
-            id=self.wandb_run_id,
-            project=wandb_project_name,
-            entity=wandb_entity,
-            config=extra_data,
-            sync_tensorboard=True,
-            name=self.run_name,
-            monitor_gym=True,
-            save_code=True,
-            resume="allow",
-        )
-        self.wandb_initialized = True
-
-    def resume_model(self, path):
-        resume_state = torch.load(path)
-        self.wandb_run_id = resume_state.get('wandb_run_id')
-        self.global_step = resume_state.get('global_step', 0)
-        self.agent_step = resume_state.get('agent_step', 0)
-        self.update = resume_state['update']
-
-        if self.verbose:
-            print(f'Resuming from {path} with wandb_run_id={self.wandb_run_id}')
-
-        self.agent.load_state_dict(resume_state['agent_state_dict'])
-        self.optimizer.load_state_dict(resume_state['optimizer_state_dict'])
-
-    def save_model(self, save_path, **kwargs):
-        state = {
-            "agent_state_dict": self.agent.state_dict(),
-            "optimizer_state_dict": self.optimizer.state_dict(),
-            "wandb_run_id": self.wandb_run_id,
-            "global_step": self.global_step,
-            "agent_step": self.agent_step,
-            "update": self.update,
-            **kwargs
-        }
-
-        if self.verbose:
-            print(f'Saving checkpoint to {save_path}')
-
-        temp_path = os.path.join(f'{save_path}.tmp')
-        torch.save(state, temp_path)
-        os.rename(temp_path, save_path)
-
-    def allocate_storage(self):
+        ### Allocate Storage
         next_obs, next_done, next_lstm_state = [], [], []
         for i, envs in enumerate(self.buffers):
             envs.async_reset(self.seed + i*self.num_envs)
@@ -170,7 +124,7 @@ class CleanPuffeRL:
 
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
-        data = SimpleNamespace(
+        self.data = SimpleNamespace(
             buf = 0, sort_keys = [],
             next_obs=next_obs, next_done=next_done, next_lstm_state=next_lstm_state,
             obs = torch.zeros(self.batch_size+1, *self.binding.single_observation_space.shape).to('cpu' if self.cpu_offload else self.device),
@@ -186,18 +140,63 @@ class CleanPuffeRL:
         if self.verbose:
             print('Allocated to storage - Pytorch: %.2f GB, System: %.2f GB' % (allocated_torch/1e9, allocated_cpu/1e9))
 
-        return data
+    def init_wandb(
+            self, wandb_project_name='pufferlib', wandb_entity=None,
+            wandb_run_id = None, extra_data = None, run_name = None):
+
+        if self.wandb_initialized:
+            return
+
+        self.wandb_run_id = self.wandb_run_id or wandb_run_id or wandb.util.generate_id()
+        run_name = run_name or f"{self.binding.env_name}__{self.seed}__{int(time.time())}"
+
+        extra_data = extra_data or {}
+
+        wandb.init(
+            id=self.wandb_run_id,
+            project=wandb_project_name,
+            entity=wandb_entity,
+            config=extra_data,
+            sync_tensorboard=True,
+            name=run_name,
+            monitor_gym=True,
+            save_code=True,
+            resume="allow",
+        )
+        self.wandb_initialized = True
+
+    def load_trainer_state(self, state):
+        if state == None:
+            return
+
+        self.optimizer.load_state_dict(state['optimizer_state_dict'])
+        self.global_step = state.get('global_step', 0)
+        self.agent_step = state.get('agent_step', 0)
+        self.update = state.get('update', 0)
+        self.learning_rate = state.get('learning_rate', self.learning_rate)
+
+    def get_trainer_state(self):
+        return {
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "global_step": self.global_step,
+            "agent_step": self.agent_step,
+            "update": self.update,
+            "learning_rate": self.learning_rate
+        }
 
     @pufferlib.utils.profile
-    def evaluate(self, agent, data):
+    def evaluate(self, show_progress = False):
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
-        ptr = env_step_time = inference_time = 0
+        ptr = env_step_time = inference_time = agent_steps_collected = 0
 
         step = 0
         stats = defaultdict(list)
         performance = defaultdict(list)
+        progress_bar = tqdm(
+            total=self.batch_size, disable=not show_progress)
 
+        data = self.data
         while True:
             buf = data.buf
 
@@ -208,6 +207,8 @@ class CleanPuffeRL:
             start = time.time()
             o, r, d, i = self.buffers[buf].recv()
             env_step_time += time.time() - start
+
+            i = self.policy_pool.update_scores(i, 'return')
 
             for profile in self.buffers[buf].profile():
                 for k, v in profile.items():
@@ -225,30 +226,36 @@ class CleanPuffeRL:
             else:
                 alive_mask = [1 for _ in range(len(o))]
 
+            agent_steps_collected += sum(alive_mask)
+
             # ALGO LOGIC: action logic
             start = time.time()
             with torch.no_grad():
-                if self.agent.is_recurrent:
-                    action, logprob, _, value, data.next_lstm_state[buf] = agent.get_action_and_value(o.to(self.device), data.next_lstm_state[buf], data.next_done[buf])
-                else:
-                    action, logprob, _, value = agent.get_action_and_value(o.to(self.device))
+                actions, logprob, value, data.next_lstm_state[buf] = self.policy_pool.forwards(
+                    o.to(self.device),
+                    data.next_lstm_state[buf],
+                    data.next_done[buf],
+                )
                 value = value.flatten()
 
             inference_time += time.time() - start
 
             # TRY NOT TO MODIFY: execute the game
             start = time.time()
-            self.buffers[buf].send(action.cpu().numpy(), None)
+            self.buffers[buf].send(actions.cpu().numpy(), None)
             env_step_time += time.time() - start
             data.buf = (data.buf + 1) % self.num_buffers
 
+            # Index alive mask with policy pool idxs...
+            # TODO: Find a way to avoid having to do this
+            alive_mask = np.array(alive_mask) * self.policy_pool.learner_mask
             for idx in np.where(alive_mask)[0]:
                 if ptr == self.batch_size+1:
                     break
 
                 data.obs[ptr] = o[idx]
                 data.values[ptr] = value[idx]
-                data.actions[ptr] = action[idx]
+                data.actions[ptr] = actions[idx]
                 data.logprobs[ptr] = logprob[idx]
                 data.sort_keys.append((buf, idx, step))
 
@@ -257,19 +264,32 @@ class CleanPuffeRL:
                     data.dones[ptr] = d[idx]
 
                 ptr += 1
+                progress_bar.update(1)
 
-            for item in i:
-                for agent_info in item.values():
-                    for name, stat in unroll_nested_dict(agent_info):
+            if 'learner' in i:
+                for agent_i in i['learner']:
+                    if not agent_i:
+                        continue
+
+                    for name, stat in unroll_nested_dict(agent_i):
                         try:
                             stat = float(stat)
                             stats[name].append(stat)
-                        except ValueError:
+                        except TypeError:
                             continue
 
+            env_sps = int(agent_steps_collected / env_step_time)
+            inference_sps = int(self.batch_size / inference_time)
+            progress_bar.set_description(
+                "Eval: " + ", ".join([
+                    f'Env SPS: {env_sps}',
+                    f'Inference SPS: {inference_sps}',
+                    f'Agent Steps: {agent_steps_collected}',
+                    *[f'{k}: {np.mean(v):.2f}' for k, v in stats.items()]
+
+                ]))
+
         self.global_step += self.batch_size
-        env_sps = int(self.batch_size / env_step_time)
-        inference_sps = int(self.batch_size / inference_time)
 
         if self.wandb_initialized:
             wandb.log({
@@ -295,13 +315,17 @@ class CleanPuffeRL:
             f'\tSteps Per Second: Env={env_sps}, Inference={inference_sps}'
         )
 
+        progress_bar.close()
         return data
 
     @pufferlib.utils.profile
-    def train(self, agent, data, batch_rows=32, update_epochs=4,
+    def train(self, batch_rows=32, update_epochs=4,
             bptt_horizon=16, gamma=0.99, gae_lambda=0.95, anneal_lr=True,
             norm_adv=True,clip_coef=0.1, clip_vloss=True, ent_coef=0.01,
             vf_coef=0.5, max_grad_norm=0.5, target_kl=None):
+
+        if self.done_training():
+            raise RuntimeError(f"Trying to train for more than max_updates={self.total_updates} updates")
 
         #assert self.num_steps % bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
         allocated_torch = torch.cuda.memory_allocated(self.device)
@@ -309,11 +333,12 @@ class CleanPuffeRL:
 
         # Annealing the rate if instructed to do so.
         if anneal_lr:
-            frac = 1.0 - (self.update - 1.0) / self.num_updates
+            frac = 1.0 - (self.update - 1.0) / self.total_updates
             lrnow = frac * self.learning_rate
             self.optimizer.param_groups[0]["lr"] = lrnow
 
         # Sort here
+        data = self.data
         idxs = sorted(range(len(data.sort_keys)), key=data.sort_keys.__getitem__)
         data.sort_keys = []
 
@@ -353,10 +378,10 @@ class CleanPuffeRL:
                 mb_returns = b_returns[mb].reshape(-1)
 
                 if self.agent.is_recurrent:
-                    _, newlogprob, entropy, newvalue, lstm_state = agent.get_action_and_value(mb_obs, lstm_state, b_dones[mb], mb_actions)
+                    _, newlogprob, entropy, newvalue, lstm_state = self.agent.get_action_and_value(mb_obs, lstm_state, b_dones[mb], mb_actions)
                     lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
                 else:
-                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(
+                    _, newlogprob, entropy, newvalue = self.agent.get_action_and_value(
                         mb_obs.reshape(-1, *self.binding.single_observation_space.shape), action=mb_actions)
 
                 logratio = newlogprob - b_logprobs[mb].reshape(-1)
@@ -397,7 +422,7 @@ class CleanPuffeRL:
 
                 self.optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(agent.parameters(), max_grad_norm)
+                nn.utils.clip_grad_norm_(self.agent.parameters(), max_grad_norm)
                 self.optimizer.step()
 
             if target_kl is not None:
@@ -413,9 +438,7 @@ class CleanPuffeRL:
         train_sps = int(self.batch_size / train_time)
         self.update += 1
 
-        print(
-            f'\tTrain={train_sps}\n'
-        )
+        print(f'\tTrain={train_sps}\n')
 
         allocated_torch = torch.cuda.memory_allocated(self.device) - allocated_torch
         allocated_cpu = self.process.memory_info().rss - allocated_cpu
@@ -438,6 +461,9 @@ class CleanPuffeRL:
                 "agent_steps": self.global_step,
                 "global_step": self.global_step,
             })
+
+    def done_training(self):
+        return self.update >= self.total_updates
 
     def close(self):
         if self.wandb_initialized:
