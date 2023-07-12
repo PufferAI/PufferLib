@@ -31,7 +31,10 @@ class PerformanceEnv:
         dones = {1: False}
         infos = {1: {}}
 
-        time.sleep(self.delay)
+        # Busy wait so process does not swap on sleep
+        end = time.perf_counter() + self.delay
+        while time.perf_counter() < end:
+            pass
 
         return obs, rewards, dones, infos
 
@@ -43,6 +46,9 @@ class PerformanceEnv:
 
     def action_space(self, agent):
         return gym.spaces.Discrete(2)
+
+    def close(self):
+        pass
 
 class PerformanceBinding:
     def __init__(self, delay, bandwith):

@@ -38,45 +38,71 @@ class MultiEnv:
     '''Runs multiple environments in serial'''
     def __init__(self, env_creator, n):
         self.envs = [env_creator() for _ in range(n)]
+        self.agent_keys = None
+        self.preallocated_obs = None
 
     def seed(self, seed):
         for env in self.envs:
             env.seed(seed)
             seed += 1
 
-    def profile_all(self):
+    def profile(self):
         return [e.timers for e in self.envs]
 
-    def put_all(self, *args, **kwargs):
+    def put(self, *args, **kwargs):
         for e in self.envs:
             e.put(*args, **kwargs)
         
-    def get_all(self, *args, **kwargs):
+    def get(self, *args, **kwargs):
         return [e.get(*args, **kwargs) for e in self.envs]
     
-    def reset_all(self, seed=None):
-        async_handles = []
+    def reset(self, seed=None):
+        self.agent_keys = []
         for e in self.envs:
-            async_handles.append((e.reset(seed=seed), {}, {}, {}))
+            obs = e.reset(seed=seed)
+            self.agent_keys.append(list(obs.keys()))
+
+            if self.preallocated_obs is None:
+                ob = obs[list(obs.keys())[0]]
+                self.preallocated_obs = np.empty((len(self.envs)*len(obs), *ob.shape), dtype=ob.dtype)
+
+            for i, o in enumerate(obs.values()):
+                self.preallocated_obs[i] = o
+
             if seed is not None:
                 seed += 1
-        return async_handles
 
-    def step(self, actions_lists):
-        returns = []
-        assert len(self.envs) == len(actions_lists)
-        for env, actions in zip(self.envs, actions_lists):
+        return self.preallocated_obs
+
+    def step(self, actions):
+        assert len(self.envs) == len(actions)
+        actions = np.array_split(actions, len(self.envs))
+        obs, rewards, dones, infos = [], [], [], []
+        
+        for idx, (a_keys, env, atns) in enumerate(zip(self.agent_keys, self.envs, actions)):
             if env.done:
                 obs = env.reset()
-                rewards = {k: 0 for k in obs}
-                dones = {k: False for k in obs}
+                rewards = [0 for _ in obs]
+                dones = [False for _ in obs]
                 infos = {}
             else:
-                obs, rewards, dones, infos = env.step(actions)
+                atns = dict(zip(a_keys, atns))
+                o, r, d, i= env.step(atns)
 
-            returns.append((obs, rewards, dones, infos))
+            self.agent_keys[idx] = list(o.keys())
 
-        return returns
+            for ii, oo in enumerate(o.values()):
+                self.preallocated_obs[ii] = oo
+
+            rewards.extend(r.values())
+            dones.extend(d.values())
+            infos.append(i)
+
+        return self.preallocated_obs, rewards, dones, infos
+
+    def close(self):
+        for env in self.envs:
+            env.close()
 
 
 class VecEnv:
@@ -115,7 +141,7 @@ class VecEnv:
         self.state = RECV
 
         for backend in self.backends:
-            backend.async_reset_all(seed=seed)
+            backend.async_reset(seed=seed)
             if seed is not None:
                 seed += self.envs_per_worker * self.binding.max_agents
 
@@ -123,21 +149,12 @@ class VecEnv:
         assert self.state == RECV, 'Call reset before stepping'
         self.state = SEND
 
-        self.agent_keys = []
-        obs, rewards, dones, infos = [], [], [], []
-        for backend in self.backends:
-            envs = backend.recv()
-            a_keys = []
-            for o, r, d, i in envs:
-                a_keys.append(list(o.keys()))
-                obs += list(o.values())
-                rewards += list(r.values())
-                dones += list(d.values())
-                infos.append(i)
-
-            self.agent_keys.append(a_keys)
-
-        obs = np.stack(obs)
+        backends_recv = [backend.recv() for backend in self.backends]
+        
+        obs = np.array([o.values() for o, _, _, _ in backends_recv])
+        rewards = [r.values() for _, r, _, _ in backends_recv]
+        dones = [d.values() for _, _, d, _ in backends_recv]
+        infos = [i for _, _, _, i in backends_recv]
 
         return obs, rewards, dones, infos
 
@@ -148,12 +165,12 @@ class VecEnv:
         if type(actions) == list:
             actions = np.array(actions)
 
-        actions = np.split(actions, self.num_workers)
+        actions_split = np.array_split(actions, self.num_workers)
 
-        for backend, keys_list, atns_list in zip(self.backends, self.agent_keys, actions):
-            atns_list = np.split(atns_list, self.envs_per_worker)
-            atns_list = [dict(zip(keys, atns)) for keys, atns in zip(keys_list, atns_list)]
-            backend.send(atns_list)
+        for backend, keys_list, atns_list in zip(self.backends, self.agent_keys, actions_split):
+            atns_list_split = np.array_split(atns_list, self.envs_per_worker)
+            atns_list_dicts = [dict(zip(keys, atns)) for keys, atns in zip(keys_list, atns_list_split)]
+            backend.send(atns_list_dicts)
 
     def reset(self, seed=None):
         self.async_reset()
@@ -169,9 +186,9 @@ class Serial(MultiEnv, Backend):
         super().__init__(env_creator, n)
         self.async_handles = None
 
-    def async_reset_all(self, seed=None):
+    def async_reset(self, seed=None):
         assert self.async_handles is None, 'reset called after send'
-        self.async_handles = super().reset_all(seed=seed)
+        self.async_handles = super().reset(seed=seed)
 
     def send(self, actions_lists):
         assert self.async_handles is None, 'send called before recv'
