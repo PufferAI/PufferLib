@@ -31,11 +31,20 @@ class RemoteEnvs:
                 self.response_queue.put(self.step(*args, **kwargs))
             elif request == "terminate":
                 break
+            else:
+                call_candidate = getattr(self.envs[0], request, None)
+                if call_candidate is not None and callable(call_candidate):
+                    self.response_queue.put(call_candidate(*args, **kwargs))
+                else:
+                    self.response_queue.put(None)
 
     def seed(self, seed):
         for env in self.envs:
             env.seed(seed)
             seed += 1
+    
+    def call(self, name, *args, **kwargs):
+        return [getattr(e, name)(*args, **kwargs) for e in self.envs]
 
     def profile_all(self, *args, **kwargs):
         return [e.timers for e in self.envs]
@@ -149,6 +158,14 @@ class VecEnv:
             if seed is not None:
                 seed += self.envs_per_worker * self.binding.max_agents
 
+    def async_call(self, name, *args, **kwargs):
+        '''Asynchronously calls function environments. Does not block.'''
+        self.state = RECV
+        self.async_handles = []
+
+        for request_queue, _, _ in self.remote_envs_lists:
+            request_queue.put((name, args, kwargs))
+
     def recv(self):
         assert self.state == RECV, 'Call reset before stepping'
         self.state = SEND
@@ -198,3 +215,12 @@ class VecEnv:
         '''Syncronously steps remote environments. Blocks.'''
         self.send(actions)
         return self.recv()
+    
+    def call(self, name):
+        '''Syncronously calls function remote environments. Blocks.'''
+        self.async_call(name)
+        all_responses = []
+        for envs_lists in self.remote_envs_lists:
+            _, response_queue, _ = envs_lists
+            all_responses.append(response_queue.get())  # This line is blocking
+        return all_responses
