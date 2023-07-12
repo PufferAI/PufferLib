@@ -35,7 +35,7 @@ def train_model(binding):
         'learner',
         batch_size = binding.max_agents * config.num_envs,
         num_policies = 2,
-        learner_weight=0.8
+        learner_weight = 3
     )
 
     trainer = CleanPuffeRL(
