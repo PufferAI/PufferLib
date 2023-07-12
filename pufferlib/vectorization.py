@@ -72,31 +72,34 @@ class MultiEnv:
             if seed is not None:
                 seed += 1
 
-        return self.preallocated_obs
+        rewards = [0] * len(self.preallocated_obs)
+        dones = [False] * len(self.preallocated_obs)
+        infos = {}
+ 
+        return self.preallocated_obs, rewards, dones, infos
 
     def step(self, actions):
-        assert len(self.envs) == len(actions)
         actions = np.array_split(actions, len(self.envs))
-        obs, rewards, dones, infos = [], [], [], []
+        rewards, dones, infos = [], [], []
         
         for idx, (a_keys, env, atns) in enumerate(zip(self.agent_keys, self.envs, actions)):
             if env.done:
-                obs = env.reset()
-                rewards = [0 for _ in obs]
-                dones = [False for _ in obs]
-                infos = {}
+                o  = env.reset()
+                rewards.extend([0] * len(self.preallocated_obs))
+                dones.extend([False] * len(self.preallocated_obs))
+                infos.append({})
             else:
+                assert len(a_keys) == len(atns)
                 atns = dict(zip(a_keys, atns))
                 o, r, d, i= env.step(atns)
+                rewards.extend(r.values())
+                dones.extend(d.values())
+                infos.append(i)
 
             self.agent_keys[idx] = list(o.keys())
 
             for ii, oo in enumerate(o.values()):
                 self.preallocated_obs[ii] = oo
-
-            rewards.extend(r.values())
-            dones.extend(d.values())
-            infos.append(i)
 
         return self.preallocated_obs, rewards, dones, infos
 
@@ -115,6 +118,8 @@ class VecEnv:
         self.envs_per_worker = envs_per_worker
 
         self.state = RESET
+        self.preallocated_obs = None
+        self.num_agents = None
 
         self.backends = [
             backend_cls(self.binding.env_creator, envs_per_worker)
@@ -134,7 +139,7 @@ class VecEnv:
             backend.close()
 
     def profile(self):
-        return list(itertools.chain.from_iterable([e.profile_all() for e in self.backends]))
+        return list(itertools.chain.from_iterable([e.profile() for e in self.backends]))
 
     def async_reset(self, seed=None):
         assert self.state == RESET, 'Call reset only once on initialization'
@@ -149,14 +154,22 @@ class VecEnv:
         assert self.state == RECV, 'Call reset before stepping'
         self.state = SEND
 
-        backends_recv = [backend.recv() for backend in self.backends]
-        
-        obs = np.array([o.values() for o, _, _, _ in backends_recv])
-        rewards = [r.values() for _, r, _, _ in backends_recv]
-        dones = [d.values() for _, _, d, _ in backends_recv]
-        infos = [i for _, _, _, i in backends_recv]
+        returns = [backend.recv() for backend in self.backends]
+        obs, rewards, dones, infos = list(zip(*returns))
 
-        return obs, rewards, dones, infos
+        if self.preallocated_obs is None:
+            ob = obs[0]
+            self.num_agents = len(ob)
+            self.preallocated_obs = np.empty((len(obs)*self.num_agents, *ob.shape[1:]), dtype=ob.dtype)
+
+        for i, o in enumerate(obs):
+            self.preallocated_obs[i*self.num_agents:(i+1)*self.num_agents] = o
+
+        rewards = list(itertools.chain.from_iterable(rewards))
+        dones = list(itertools.chain.from_iterable(dones))
+        infos = list(itertools.chain.from_iterable(infos))
+
+        return self.preallocated_obs, rewards, dones, infos
 
     def send(self, actions, env_id=None):
         assert self.state == SEND, 'Call reset + recv before send'
@@ -167,10 +180,8 @@ class VecEnv:
 
         actions_split = np.array_split(actions, self.num_workers)
 
-        for backend, keys_list, atns_list in zip(self.backends, self.agent_keys, actions_split):
-            atns_list_split = np.array_split(atns_list, self.envs_per_worker)
-            atns_list_dicts = [dict(zip(keys, atns)) for keys, atns in zip(keys_list, atns_list_split)]
-            backend.send(atns_list_dicts)
+        for backend, atns in zip(self.backends, actions_split):
+            backend.send(atns)
 
     def reset(self, seed=None):
         self.async_reset()
@@ -221,25 +232,25 @@ class Multiprocessing(Backend):
     def seed(self, seed):
         self.request_queue.put(("seed", [seed], {}))
 
-    def profile_all(self):
-        self.request_queue.put(("profile_all", [], {}))
+    def profile(self):
+        self.request_queue.put(("profile", [], {}))
         return self.response_queue.get()
 
-    def put_all(self, *args, **kwargs):
-        self.request_queue.put(("put_all", args, kwargs))
+    def put(self, *args, **kwargs):
+        self.request_queue.put(("put", args, kwargs))
 
-    def get_all(self, *args, **kwargs):
-        self.request_queue.put(("get_all", args, kwargs))
+    def get(self, *args, **kwargs):
+        self.request_queue.put(("get", args, kwargs))
         return self.response_queue.get()
 
     def close(self):
         self.request_queue.put(("close", [], {}))
 
-    def async_reset_all(self, seed=None):
-        self.request_queue.put(("reset_all", [seed], {}))
+    def async_reset(self, seed=None):
+        self.request_queue.put(("reset", [seed], {}))
 
-    def reset_all(self, seed=None):
-        self.request_queue.put(("reset_all", [seed], {}))
+    def reset(self, seed=None):
+        self.request_queue.put(("reset", [seed], {}))
         return self.response_queue.get()
 
     def step(self, actions_lists):
