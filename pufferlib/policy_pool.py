@@ -16,7 +16,8 @@ class PolicyPool():
     def __init__(self,
         learner: Policy,
         learner_name: str,
-        batch_size: int,
+        num_agents: int,
+        num_envs: int,
         num_policies: int = 1,
         learner_weight: float = 1.0):
 
@@ -27,19 +28,21 @@ class PolicyPool():
         self._num_policies = num_policies
         self._policies = OrderedDict({learner_name: learner})
 
-        self._batch_size = batch_size
-        self._sample_idxs = self._compute_sample_idxs(batch_size)
+        self._num_agents = num_agents
+        self._num_envs = num_envs
+        self._batch_size = num_agents * num_envs
+        self._sample_idxs = self._compute_sample_idxs()
 
-        self.learner_mask = np.zeros(batch_size)
+        self.learner_mask = np.zeros(self._batch_size)
         self.learner_mask[self._sample_idxs[0]] = 1
         self.scores = {}
 
         self._allocated = False
 
-    def _compute_sample_idxs(self, batch_size):
+    def _compute_sample_idxs(self):
         # Create indices for splitting data across policies
-        ow = int(batch_size * (1 - self._learner_weight) / (self._num_policies - 1))
-        lw = batch_size - ow * (self._num_policies - 1)
+        ow = int(self._num_agents * (1 - self._learner_weight) / (self._num_policies - 1))
+        lw = self._num_agents - ow * (self._num_policies - 1)
         assert lw > 0
 
         sample_weights = [lw] + [ow] * (self._num_policies - 1)
@@ -50,7 +53,7 @@ class PolicyPool():
 
         # Distribute indices among sublists
         sample_idxs = [[] for _ in range(self._num_policies)]
-        for idx in range(batch_size):
+        for idx in range(self._batch_size):
             sublist_idx = pattern[idx % chunk_size]
             sample_idxs[sublist_idx].append(idx)
 
