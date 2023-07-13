@@ -32,11 +32,7 @@ class RemoteEnvs:
             elif request == "terminate":
                 break
             else:
-                call_candidate = getattr(self.envs[0], request, None)
-                if call_candidate is not None and callable(call_candidate):
-                    self.response_queue.put(call_candidate(*args, **kwargs))
-                else:
-                    self.response_queue.put(None)
+                self.response_queue.put(self.call(request, *args, **kwargs))
 
     def seed(self, seed):
         for env in self.envs:
@@ -44,7 +40,7 @@ class RemoteEnvs:
             seed += 1
     
     def call(self, name, *args, **kwargs):
-        return [getattr(e, name)(*args, **kwargs) for e in self.envs]
+        return [getattr(e.env, name)(*args, **kwargs) for e in self.envs]
 
     def profile_all(self, *args, **kwargs):
         return [e.timers for e in self.envs]
@@ -160,8 +156,7 @@ class VecEnv:
 
     def async_call(self, name, *args, **kwargs):
         '''Asynchronously calls function environments. Does not block.'''
-        self.state = RECV
-        self.async_handles = []
+        #self.state = RECV
 
         for request_queue, _, _ in self.remote_envs_lists:
             request_queue.put((name, args, kwargs))
@@ -175,7 +170,6 @@ class VecEnv:
         for envs_lists in self.remote_envs_lists:
             _, response_queue, _ = envs_lists
             async_handle = response_queue.get()  # This line is blocking
-
             a_keys = []
             for o, r, d, i in async_handle:
                 a_keys.append(list(o.keys()))
@@ -216,9 +210,10 @@ class VecEnv:
         self.send(actions)
         return self.recv()
     
-    def call(self, name):
+    def call(self, name, *args, **kwargs):
         '''Syncronously calls function remote environments. Blocks.'''
-        self.async_call(name)
+        assert isinstance(name, str), "name argument must be a string"
+        self.async_call(name, *args, **kwargs)
         all_responses = []
         for envs_lists in self.remote_envs_lists:
             _, response_queue, _ = envs_lists

@@ -401,6 +401,9 @@ def make_puffer_env_cls(scope, raw_local_env, raw_obs):
                 raise exceptions.APIUsageError('close() called before reset()')
 
             self.env.close()
+        
+        def call(self, method, *args, **kwargs):
+            return getattr(self.env, method)(*args, **kwargs)
 
         @utils.profile
         def observation_space(self, team):
