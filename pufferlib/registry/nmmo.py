@@ -14,7 +14,7 @@ from nmmo.entity.entity import EntityState
 NUM_ATTRS = 26
 EntityId = EntityState.State.attr_name_to_col["id"]
 tile_offset = torch.tensor([i*256 for i in range(3)])
-entity_offset = torch.tensor([i*256 for i in range(3, 26)])
+agent_offset = torch.tensor([i*256 for i in range(3, 26)])
 
 def make_binding():
     '''Neural MMO binding creation function'''
@@ -49,12 +49,15 @@ class Policy(pufferlib.models.Policy):
       self.tile_conv_2 = torch.nn.Conv2d(32, 8, 3)
       self.tile_fc = torch.nn.Linear(8*11*11, input_size)
 
-      self.entity_fc = torch.nn.Linear(23*32, input_size)
+      self.agent_fc = torch.nn.Linear(23*32, hidden_size)
+      self.my_agent_fc = torch.nn.Linear(23*32, input_size)
 
       self.proj_fc = torch.nn.Linear(2*input_size, input_size)
+      self.attack_fc = torch.nn.Linear(hidden_size, hidden_size)
 
-      self.decoders = torch.nn.ModuleList([torch.nn.Linear(hidden_size, n)
-              for n in binding.single_action_space.nvec])
+      action_dims = binding.single_action_space.nvec
+      action_dims = [action_dims[0], *action_dims[2:]]
+      self.decoders = torch.nn.ModuleList([torch.nn.Linear(hidden_size, n) for n in action_dims])
       self.value_head = torch.nn.Linear(hidden_size, 1)
 
   def critic(self, hidden):
@@ -85,28 +88,36 @@ class Policy(pufferlib.models.Policy):
     tile = F.relu(tile)
 
     # Pull out rows corresponding to the agent
-    agentEmb = env_outputs["Entity"]
+    agents = env_outputs["Entity"]
     my_id = env_outputs["AgentId"][:,0]
-    entity_ids = agentEmb[:,:,EntityId]
-    mask = (entity_ids == my_id.unsqueeze(1)) & (entity_ids != 0)
+    agent_ids = agents[:,:,EntityId]
+    mask = (agent_ids == my_id.unsqueeze(1)) & (agent_ids != 0)
     mask = mask.int()
     row_indices = torch.where(mask.any(dim=1), mask.argmax(dim=1), torch.zeros_like(mask.sum(dim=1)))
-    entity = agentEmb[torch.arange(agentEmb.shape[0]), row_indices]
 
-    entity = self.embedding(
-        entity.long().clip(0, 255) + entity_offset.to(entity.device)
+    agent_embeddings = self.embedding(
+        agents.long().clip(0, 255) + agent_offset.to(agents.device)
     )
-    agents, attrs, embed = entity.shape
-    entity = entity.view(agents, attrs*embed)
+    batch, agent, attrs, embed = agent_embeddings.shape
 
-    entity = self.entity_fc(entity)
-    entity = F.relu(entity)
+    # Embed each feature separately
+    agent_embeddings = agent_embeddings.view(batch, agent, attrs*embed)
+    my_agent_embeddings = agent_embeddings[torch.arange(agents.shape[0]), row_indices]
 
-    obs = torch.cat([tile, entity], dim=-1)
-    return self.proj_fc(obs), None
+    # Project to input of recurrent size
+    agent_embeddings = self.agent_fc(agent_embeddings)
+    my_agent_embeddings = self.my_agent_fc(my_agent_embeddings)
+    my_agent_embeddings = F.relu(my_agent_embeddings)
+
+    obs = torch.cat([tile, my_agent_embeddings], dim=-1)
+    return self.proj_fc(obs), agent_embeddings
 
   def decode_actions(self, hidden, lookup, concat=True):
+      attack_key = self.attack_fc(hidden)
+      attack_logits = torch.matmul(lookup, attack_key.unsqueeze(-1)).squeeze(-1)
+
       actions = [dec(hidden) for dec in self.decoders]
+      actions.insert(1, attack_logits)
       if concat:
           return torch.cat(actions, dim=-1)
       return actions
