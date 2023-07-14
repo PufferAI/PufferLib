@@ -21,6 +21,7 @@ class OpenSkillRanker():
     self._default_mu = mu
     self._default_sigma = sigma
     self._anchor_mu = anchor_mu
+    self.add_policy(anchor, anchor=True)
 
   def update_ranks(self, scores: Dict[str, float]):
     for policy in scores.keys():
