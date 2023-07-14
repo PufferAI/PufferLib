@@ -273,7 +273,7 @@ class Suppress():
 
 
 class PersistentObject:
-    def __init__(self, wrapped_class, path, *args, **kwargs):
+    def __init__(self, path, wrapped_class, *args, **kwargs):
         self.lock = FileLock(path + ".lock")
         self.wrapped_class = wrapped_class
         self.path = path
@@ -295,8 +295,10 @@ class PersistentObject:
                 result = getattr(obj, name)(*args, **kwargs)
 
                 # Save the object back to disk.
-                with open(self.path, 'wb') as f:
+                tmp_path = self.path + ".tmp"
+                with open(tmp_path, 'wb') as f:
                     pickle.dump(obj, f)
+                os.rename(tmp_path, self.path)
 
                 return result
         return method
