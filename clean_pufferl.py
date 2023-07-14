@@ -189,6 +189,7 @@ class CleanPuffeRL:
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
         ptr = env_step_time = inference_time = agent_steps_collected = 0
+        padded_steps_collected = 0 
 
         step = 0
         stats = defaultdict(list)
@@ -227,6 +228,7 @@ class CleanPuffeRL:
                 alive_mask = [1 for _ in range(len(o))]
 
             agent_steps_collected += sum(alive_mask)
+            padded_steps_collected += len(alive_mask)
 
             # ALGO LOGIC: action logic
             start = time.time()
@@ -237,7 +239,6 @@ class CleanPuffeRL:
                     data.next_done[buf],
                 )
                 value = value.flatten()
-
             inference_time += time.time() - start
 
             # TRY NOT TO MODIFY: execute the game
@@ -279,7 +280,8 @@ class CleanPuffeRL:
                             continue
 
             env_sps = int(agent_steps_collected / env_step_time)
-            inference_sps = int(self.batch_size / inference_time)
+            inference_sps = int(padded_steps_collected / inference_time)
+
             progress_bar.set_description(
                 "Eval: " + ", ".join([
                     f'Env SPS: {env_sps}',
