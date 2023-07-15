@@ -8,6 +8,7 @@ import logging
 import copy
 import os
 import numpy as np
+from pufferlib.emulation import Binding
 
 class PolicyRecord():
   def __init__(self, name: str, policy: Policy, metadata = None):
@@ -87,9 +88,9 @@ class FilePolicyRecord(PolicyRecord):
     }, temp_path)
     os.rename(temp_path, self._path)
 
-  def load(self, create_policy_func: Callable[[PolicyRecord], Policy]):
+  def load(self, create_policy_func: Callable[[Dict, Binding], Policy], binding: None):
     data = self._load_data()
-    policy = create_policy_func(self)
+    policy = create_policy_func(self.metadata(), binding)
     policy.load_state_dict(data["policy_state_dict"])
     return policy
 
@@ -105,9 +106,9 @@ class FilePolicyRecord(PolicyRecord):
       self._load_data()
     return self._metadata
 
-  def policy(self, create_policy_func: Callable[[str], Policy] = None) -> Policy:
+  def policy(self, create_policy_func: Callable[[str], Policy] = None, binding = None) -> Policy:
     if self._policy is None:
-      self._policy = self.load(create_policy_func)
+      self._policy = self.load(create_policy_func, binding)
     return self._policy
 
 class DirectoryPolicyStore(PolicyStore):

@@ -48,6 +48,7 @@ def train_model(binding):
             batch_size=config.batch_size,
             vec_backend=config.vec_backend,
             seed=config.seed,
+            policy_ranker=ranker,
     )
 
     #trainer.load_model(path)
@@ -57,13 +58,6 @@ def train_model(binding):
     for update in range(num_updates):
         print("Evaluating...", update)
         trainer.evaluate()
-
-        if update % config.pool_rank_interval == 0:
-            print("Updating OpenSkill Ranks")
-            ranker.update_ranks({
-                name: score for name, score in policy_pool.scores.items()
-            })
-            print("Ranks", ranker.ratings())
 
         if update % config.pool_update_policy_interval == 0:
             print("Updating PolicyPool")
