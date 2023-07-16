@@ -216,7 +216,7 @@ class CleanPuffeRL:
                 id=self.wandb_run_id,
                 project=self.wandb_project,
                 entity=self.wandb_entity,
-                config=self.extra_data or {},
+                config=self.wandb_extra_data or {},
                 sync_tensorboard=True,
                 name=self.exp_name,
                 monitor_gym=True,
