@@ -596,20 +596,27 @@ class CleanPuffeRL:
         if not os.path.exists(path):
             return
 
+        print(f"Loaded checkpoint from {path}")
+
         state = torch.load(path)
 
-        self.optimizer.load_state_dict(state["optimizer_state_dict"])
         self.global_step = state.get("global_step", 0)
         self.agent_step = state.get("agent_step", 0)
         self.update = state.get("update", 0)
         self.learning_rate = state.get("learning_rate", self.learning_rate)
         self.wandb_run_id = state.get("wandb_run_id", None)
 
+        print(f"Resuming from update {self.update}")
         self.agent = self.policy_store.get_policy(
             state["policy_checkpoint_name"]
         ).policy(lambda md, b: self.agent.__class__(b, md), self.binding).to(self.device)
         self.agent.is_recurrent = hasattr(self.agent, "lstm")
         self.policy_pool._learner = self.agent
+
+        self.optimizer = optim.Adam(
+            self.agent.parameters(), lr=self.learning_rate, eps=1e-5
+        )
+        self.optimizer.load_state_dict(state["optimizer_state_dict"])
 
     def _save_checkpoint(self):
         if self.data_dir is None:
