@@ -1,4 +1,4 @@
-#pylint: disable=all
+# pylint: disable=all
 # PufferLib's customized CleanRL PPO + LSTM implementation
 # TODO: Testing, cleaned up metric/perf/mem logging
 
@@ -12,6 +12,12 @@ from types import SimpleNamespace
 
 import numpy as np
 import psutil
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import wandb
+from tqdm import tqdm
+
 import pufferlib
 import pufferlib.emulation
 import pufferlib.frameworks.cleanrl
@@ -20,12 +26,6 @@ import pufferlib.policy_ranker
 import pufferlib.utils
 import pufferlib.vectorization.multiprocessing
 import pufferlib.vectorization.serial
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from tqdm import tqdm
-
-import wandb
 
 
 def unroll_nested_dict(d):
@@ -47,7 +47,7 @@ class CleanPuffeRL:
 
     exp_name: str = os.path.basename(__file__)
 
-    data_dir: str = None,
+    data_dir: str = (None,)
     checkpoint_interval: int = None
     seed: int = 1
     torch_deterministic: bool = True
@@ -74,8 +74,8 @@ class CleanPuffeRL:
     wandb_run_id: str = None
 
     # Selfplay
-    selfplay_learner_weight: float = 1,
-    selfplay_num_policies: int = 1,
+    selfplay_learner_weight: float = (1,)
+    selfplay_num_policies: int = (1,)
 
     def __post_init__(self, *args, **kwargs):
         self.start_time = time.time()
@@ -124,7 +124,7 @@ class CleanPuffeRL:
                 self.policy_ranker = pufferlib.utils.PersistentObject(
                     os.path.join(self.data_dir, "openskill.pickle"),
                     pufferlib.policy_ranker.OpenSkillRanker,
-                    "anchor"
+                    "anchor",
                 )
             if "learner" not in self.policy_ranker.ratings():
                 self.policy_ranker.add_policy("learner")
@@ -210,7 +210,7 @@ class CleanPuffeRL:
         self._load_trainer_state()
 
         if self.wandb_entity is not None:
-            self.wandb_run_id = self.wandb_run_id or  wandb.util.generate_id()
+            self.wandb_run_id = self.wandb_run_id or wandb.util.generate_id()
 
             wandb.init(
                 id=self.wandb_run_id,
@@ -375,8 +375,10 @@ class CleanPuffeRL:
         if self.policy_pool.scores and self.policy_ranker is not None:
             self.policy_ranker.update_ranks(
                 self.policy_pool.scores,
-                wandb_policies=[self.policy_pool._learner_name] if self.wandb_run_id else [],
-                step=self.global_step
+                wandb_policies=[self.policy_pool._learner_name]
+                if self.wandb_run_id
+                else [],
+                step=self.global_step,
             )
         self.policy_pool.scores = {}
 
@@ -577,7 +579,7 @@ class CleanPuffeRL:
             )
 
         if self.update % self.checkpoint_interval == 1:
-          self._save_checkpoint()
+            self._save_checkpoint()
 
     def done_training(self):
         return self.update >= self.total_updates
@@ -587,33 +589,31 @@ class CleanPuffeRL:
             wandb.finish()
 
     def _load_trainer_state(self):
-      if self.data_dir is None:
-        return
+        if self.data_dir is None:
+            return
 
-      path = os.path.join(self.data_dir, f"trainer.pt")
-      if not os.path.exists(path):
-        return
+        path = os.path.join(self.data_dir, f"trainer.pt")
+        if not os.path.exists(path):
+            return
 
-      state = torch.load(path)
+        state = torch.load(path)
 
-      self.optimizer.load_state_dict(state["optimizer_state_dict"])
-      self.global_step = state.get("global_step", 0)
-      self.agent_step = state.get("agent_step", 0)
-      self.update = state.get("update", 0)
-      self.learning_rate = state.get("learning_rate", self.learning_rate)
-      self.wandb_run_id = state.get("wandb_run_id", None)
+        self.optimizer.load_state_dict(state["optimizer_state_dict"])
+        self.global_step = state.get("global_step", 0)
+        self.agent_step = state.get("agent_step", 0)
+        self.update = state.get("update", 0)
+        self.learning_rate = state.get("learning_rate", self.learning_rate)
+        self.wandb_run_id = state.get("wandb_run_id", None)
 
-      self.agent = self.policy_store.get_policy(
-        state["policy_checkpoint_name"]).policy(
-          lambda md, b: self.agent.__class__(b, md),
-          self.binding
-        )
-      self.agent.is_recurrent = hasattr(self.agent, "lstm")
-      self.policy_pool._learner = self.agent
+        self.agent = self.policy_store.get_policy(
+            state["policy_checkpoint_name"]
+        ).policy(lambda md, b: self.agent.__class__(b, md), self.binding)
+        self.agent.is_recurrent = hasattr(self.agent, "lstm")
+        self.policy_pool._learner = self.agent
 
     def _save_checkpoint(self):
         if self.data_dir is None:
-          return
+            return
 
         policy_name = f"{self.exp_name}.{self.update:06d}"
         state = {
@@ -630,9 +630,9 @@ class CleanPuffeRL:
         torch.save(state, tmp_path)
         os.rename(tmp_path, path)
         if self.policy_store is not None:
-            self.policy_store.add_policy(
-              policy_name, self.agent, self.agent.metadata())
+            self.policy_store.add_policy(policy_name, self.agent, self.agent.metadata())
 
         if self.policy_ranker:
-          self.policy_ranker.add_policy_copy(
-            policy_name, self.policy_pool._learner_name)
+            self.policy_ranker.add_policy_copy(
+                policy_name, self.policy_pool._learner_name
+            )
