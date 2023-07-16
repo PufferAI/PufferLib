@@ -148,7 +148,7 @@ class CleanPuffeRL:
         if "policy_checkpoint_name" in resume_state:
           self.agent = self.policy_store.get_policy(
             resume_state["policy_checkpoint_name"]
-          ).policy(lambda md, b: self.agent.__class__(b, md), self.binding)
+          ).policy(lambda pa, b: self.agent.__class__.create_policy(b, pa), self.binding)
 
         # TODO: this can be cleaned up
         self.agent.is_recurrent = hasattr(self.agent, "lstm")
@@ -250,7 +250,7 @@ class CleanPuffeRL:
         # Setup the self-play policy pool
         self.policy_pool.update_policies({
             p.name: p.policy(
-              lambda md, b: self.agent.__class__(b, md), self.binding).to(self.device)
+              lambda pa, b: self.agent.__class__.create_policy(b, pa), self.binding).to(self.device)
               for p in self.policy_store.select_policies(self.policy_selector)
             })
         allocated_torch = torch.cuda.memory_allocated(self.device)
@@ -634,7 +634,7 @@ class CleanPuffeRL:
         torch.save(state, tmp_path)
         os.rename(tmp_path, path)
         if self.policy_store is not None:
-            self.policy_store.add_policy(policy_name, self.agent, self.agent.metadata())
+            self.policy_store.add_policy(policy_name, self.agent, self.agent.policy_args())
 
         if self.policy_ranker:
             self.policy_ranker.add_policy_copy(
