@@ -106,7 +106,7 @@ class FilePolicyRecord(PolicyRecord):
       self._load_data()
     return self._metadata
 
-  def policy(self, create_policy_func: Callable[[str], Policy] = None, binding = None) -> Policy:
+  def policy(self, create_policy_func: Callable[[Dict, Binding], Policy] = None, binding = None) -> Policy:
     if self._policy is None:
       self._policy = self.load(create_policy_func, binding)
     return self._policy

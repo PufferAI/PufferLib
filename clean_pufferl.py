@@ -16,6 +16,7 @@ import pufferlib
 import pufferlib.emulation
 import pufferlib.frameworks.cleanrl
 import pufferlib.policy_pool
+import pufferlib.policy_ranker
 import pufferlib.utils
 import pufferlib.vectorization.multiprocessing
 import pufferlib.vectorization.serial
@@ -25,7 +26,7 @@ import torch.optim as optim
 from tqdm import tqdm
 
 import wandb
-from pufferlib.policy_ranker import PolicyRanker
+
 
 def unroll_nested_dict(d):
     if not isinstance(d, dict):
@@ -43,8 +44,11 @@ def unroll_nested_dict(d):
 class CleanPuffeRL:
     binding: pufferlib.emulation.Binding
     agent: nn.Module
-    policy_pool: pufferlib.policy_pool.PolicyPool = None
+
     exp_name: str = os.path.basename(__file__)
+
+    data_dir: str = None,
+    checkpoint_interval: int = None
     seed: int = 1
     torch_deterministic: bool = True
     vec_backend: ... = pufferlib.vectorization.multiprocessing.VecEnv
@@ -56,10 +60,22 @@ class CleanPuffeRL:
     num_cores: int = psutil.cpu_count(logical=False)
     cpu_offload: bool = True
     verbose: bool = True
-    batch_size: int = 2**14,
-    policy_ranker: PolicyRanker = None,
-    policy_store: pufferlib.policy_store.PolicyStore = None,
-    checkpoint_interval: int = None,
+    batch_size: int = 2**14
+    policy_store: pufferlib.policy_store.PolicyStore = None
+    policy_ranker: pufferlib.policy_ranker.PolicyRanker = None
+
+    policy_pool: pufferlib.policy_pool.PolicyPool = None
+    policy_selector: pufferlib.policy_ranker.PolicySelector = None
+
+    # Wandb
+    wandb_entity: str = None
+    wandb_project: str = None
+    wandb_extra_data: dict = None
+    wandb_run_id: str = None
+
+    # Selfplay
+    selfplay_learner_weight: float = 1,
+    selfplay_num_policies: int = 1,
 
     def __post_init__(self, *args, **kwargs):
         self.start_time = time.time()
@@ -95,6 +111,24 @@ class CleanPuffeRL:
                 % ((self.process.memory_info().rss - allocated) / 1e6)
             )
 
+        # Create policy store
+        if self.policy_store is None:
+            if self.data_dir is not None:
+                self.policy_store = pufferlib.policy_store.DirectoryPolicyStore(
+                    os.path.join(self.data_dir, "policies")
+                )
+
+        # Create policy ranker
+        if self.policy_ranker is None:
+            if self.data_dir is not None:
+                self.policy_ranker = pufferlib.utils.PersistentObject(
+                    os.path.join(self.data_dir, "openskill.pickle"),
+                    pufferlib.policy_ranker.OpenSkillRanker,
+                    "anchor"
+                )
+            if "learner" not in self.policy_ranker.ratings():
+                self.policy_ranker.add_policy("learner")
+
         # Setup agent
         self.agent = self.agent.to(self.device)
         self.agent.is_recurrent = hasattr(self.agent, "lstm")
@@ -102,17 +136,24 @@ class CleanPuffeRL:
         # Setup policy pool
         if self.policy_pool is None:
             self.policy_pool = pufferlib.policy_pool.PolicyPool(
-                self.agent, self.num_agents * self.num_envs
+                self.agent,
+                "learner",
+                num_envs=self.num_envs,
+                num_agents=self.num_agents,
+                learner_weight=self.selfplay_learner_weight,
+                num_policies=self.selfplay_num_policies,
+            )
+
+        # Setup policy selector
+        if self.policy_selector is None:
+            self.policy_selector = pufferlib.policy_ranker.PolicySelector(
+                self.selfplay_num_policies, exclude_names="learner"
             )
 
         # Setup optimizer
         self.optimizer = optim.Adam(
             self.agent.parameters(), lr=self.learning_rate, eps=1e-5
         )
-
-        # Setup logging
-        self.wandb_run_id = None
-        self.wandb_initialized = False
 
         ### Allocate Storage
         next_obs, next_done, next_lstm_state = [], [], []
@@ -166,57 +207,22 @@ class CleanPuffeRL:
                 % (allocated_torch / 1e9, allocated_cpu / 1e9)
             )
 
-    def init_wandb(
-        self,
-        wandb_project_name="pufferlib",
-        wandb_entity=None,
-        wandb_run_id=None,
-        extra_data=None,
-        run_name=None,
-    ):
-        if self.wandb_initialized:
-            return
+        self._load_trainer_state()
 
-        self.wandb_run_id = (
-            self.wandb_run_id or wandb_run_id or wandb.util.generate_id()
-        )
-        run_name = (
-            run_name or f"{self.binding.env_name}__{self.seed}__{int(time.time())}"
-        )
+        if self.wandb_entity is not None:
+            self.wandb_run_id = self.wandb_run_id or  wandb.util.generate_id()
 
-        extra_data = extra_data or {}
-
-        wandb.init(
-            id=self.wandb_run_id,
-            project=wandb_project_name,
-            entity=wandb_entity,
-            config=extra_data,
-            sync_tensorboard=True,
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
-            resume="allow",
-        )
-        self.wandb_initialized = True
-
-    def load_trainer_state(self, state):
-        if state == None:
-            return
-
-        self.optimizer.load_state_dict(state["optimizer_state_dict"])
-        self.global_step = state.get("global_step", 0)
-        self.agent_step = state.get("agent_step", 0)
-        self.update = state.get("update", 0)
-        self.learning_rate = state.get("learning_rate", self.learning_rate)
-
-    def get_trainer_state(self):
-        return {
-            "optimizer_state_dict": self.optimizer.state_dict(),
-            "global_step": self.global_step,
-            "agent_step": self.agent_step,
-            "update": self.update,
-            "learning_rate": self.learning_rate,
-        }
+            wandb.init(
+                id=self.wandb_run_id,
+                project=self.wandb_project,
+                entity=self.wandb_entity,
+                config=self.extra_data or {},
+                sync_tensorboard=True,
+                name=self.exp_name,
+                monitor_gym=True,
+                save_code=True,
+                resume="allow",
+            )
 
     @pufferlib.utils.profile
     def evaluate(self, show_progress=False):
@@ -334,7 +340,7 @@ class CleanPuffeRL:
 
         self.global_step += self.batch_size
 
-        if self.wandb_initialized:
+        if self.wandb_run_id:
             wandb.log(
                 {
                     "performance/env_time": env_step_time,
@@ -369,7 +375,7 @@ class CleanPuffeRL:
         if self.policy_pool.scores and self.policy_ranker is not None:
             self.policy_ranker.update_ranks(
                 self.policy_pool.scores,
-                wandb_policies=[self.policy_pool._learner_name] if self.wandb_initialized else [],
+                wandb_policies=[self.policy_pool._learner_name] if self.wandb_run_id else [],
                 step=self.global_step
             )
         self.policy_pool.scores = {}
@@ -552,7 +558,7 @@ class CleanPuffeRL:
             )
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        if self.wandb_initialized:
+        if self.wandb_run_id:
             wandb.log(
                 {
                     "performance/train_sps": train_sps,
@@ -571,19 +577,62 @@ class CleanPuffeRL:
             )
 
         if self.update % self.checkpoint_interval == 1:
-          policy_name = f"{self.exp_name}.{self.update:06d}"
-
-          if self.policy_store:
-            self.policy_store.add_policy(
-              policy_name, self.agent, self.agent.metadata())
-
-          if self.policy_ranker:
-            self.policy_ranker.add_policy_copy(policy_name, self.policy_pool._learner_name)
-
+          self._save_checkpoint()
 
     def done_training(self):
         return self.update >= self.total_updates
 
     def close(self):
-        if self.wandb_initialized:
+        if self.wandb_run_id:
             wandb.finish()
+
+    def _load_trainer_state(self):
+      if self.data_dir is None:
+        return
+
+      path = os.path.join(self.data_dir, f"trainer.pt")
+      if not os.path.exists(path):
+        return
+
+      state = torch.load(path)
+
+      self.optimizer.load_state_dict(state["optimizer_state_dict"])
+      self.global_step = state.get("global_step", 0)
+      self.agent_step = state.get("agent_step", 0)
+      self.update = state.get("update", 0)
+      self.learning_rate = state.get("learning_rate", self.learning_rate)
+      self.wandb_run_id = state.get("wandb_run_id", None)
+
+      self.agent = self.policy_store.get_policy(
+        state["policy_checkpoint_name"]).policy(
+          lambda md, b: self.agent.__class__(b, md),
+          self.binding
+        )
+      self.agent.is_recurrent = hasattr(self.agent, "lstm")
+      self.policy_pool._learner = self.agent
+
+    def _save_checkpoint(self):
+        if self.data_dir is None:
+          return
+
+        policy_name = f"{self.exp_name}.{self.update:06d}"
+        state = {
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "global_step": self.global_step,
+            "agent_step": self.agent_step,
+            "update": self.update,
+            "learning_rate": self.learning_rate,
+            "policy_checkpoint_name": policy_name,
+            "wandb_run_id": self.wandb_run_id,
+        }
+        path = os.path.join(self.data_dir, f"trainer.pt")
+        tmp_path = path + ".tmp"
+        torch.save(state, tmp_path)
+        os.rename(tmp_path, path)
+        if self.policy_store is not None:
+            self.policy_store.add_policy(
+              policy_name, self.agent, self.agent.metadata())
+
+        if self.policy_ranker:
+          self.policy_ranker.add_policy_copy(
+            policy_name, self.policy_pool._learner_name)
