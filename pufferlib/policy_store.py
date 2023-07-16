@@ -92,6 +92,7 @@ class FilePolicyRecord(PolicyRecord):
     data = self._load_data()
     policy = create_policy_func(self.metadata(), binding)
     policy.load_state_dict(data["policy_state_dict"])
+    policy.is_recurrent = hasattr(policy, "lstm")
     return policy
 
   def _load_data(self):

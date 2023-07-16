@@ -71,7 +71,6 @@ class CleanPuffeRL:
     wandb_entity: str = None
     wandb_project: str = None
     wandb_extra_data: dict = None
-    wandb_run_id: str = None
 
     # Selfplay
     selfplay_learner_weight: float = 1.0
@@ -80,7 +79,23 @@ class CleanPuffeRL:
     def __post_init__(self, *args, **kwargs):
         self.start_time = time.time()
 
-        self.global_step = self.agent_step = self.start_epoch = self.update = 0
+        # If data_dir is provided, load the resume state
+        resume_state = {}
+        if self.data_dir is not None:
+          path = os.path.join(self.data_dir, f"trainer.pt")
+          if os.path.exists(path):
+            print(f"Loaded checkpoint from {path}")
+            resume_state = torch.load(path)
+            print(f"Resuming from update {resume_state['update']} "
+                  f"with policy {resume_state['policy_checkpoint_name']}")
+
+        self.wandb_run_id = resume_state.get("wandb_run_id", None)
+        self.learning_rate = resume_state.get("learning_rate", self.learning_rate)
+
+        self.global_step = resume_state.get("global_step", 0)
+        self.agent_step = resume_state.get("agent_step", 0)
+        self.update = resume_state.get("update", 0)
+
         self.total_updates = self.total_timesteps // self.batch_size
         self.num_agents = self.binding.max_agents
         self.envs_per_worker = self.num_envs // self.num_cores
@@ -130,8 +145,14 @@ class CleanPuffeRL:
                 self.policy_ranker.add_policy("learner")
 
         # Setup agent
-        self.agent = self.agent.to(self.device)
+        if "policy_checkpoint_name" in resume_state:
+          self.agent = self.policy_store.get_policy(
+            resume_state["policy_checkpoint_name"]
+          ).policy(lambda md, b: self.agent.__class__(b, md), self.binding)
+
+        # TODO: this can be cleaned up
         self.agent.is_recurrent = hasattr(self.agent, "lstm")
+        self.agent = self.agent.to(self.device)
 
         # Setup policy pool
         if self.policy_pool is None:
@@ -154,6 +175,8 @@ class CleanPuffeRL:
         self.optimizer = optim.Adam(
             self.agent.parameters(), lr=self.learning_rate, eps=1e-5
         )
+        if "optimizer_state_dict" in resume_state:
+          self.optimizer.load_state_dict(resume_state["optimizer_state_dict"])
 
         ### Allocate Storage
         next_obs, next_done, next_lstm_state = [], [], []
@@ -206,8 +229,6 @@ class CleanPuffeRL:
                 "Allocated to storage - Pytorch: %.2f GB, System: %.2f GB"
                 % (allocated_torch / 1e9, allocated_cpu / 1e9)
             )
-
-        self._load_trainer_state()
 
         if self.wandb_entity is not None:
             self.wandb_run_id = self.wandb_run_id or wandb.util.generate_id()
@@ -346,7 +367,7 @@ class CleanPuffeRL:
 
         self.global_step += self.batch_size
 
-        if self.wandb_run_id:
+        if self.wandb_entity:
             wandb.log(
                 {
                     "performance/env_time": env_step_time,
@@ -382,7 +403,7 @@ class CleanPuffeRL:
             self.policy_ranker.update_ranks(
                 self.policy_pool.scores,
                 wandb_policies=[self.policy_pool._learner_name]
-                if self.wandb_run_id
+                if self.wandb_entity
                 else [],
                 step=self.global_step,
             )
@@ -566,7 +587,7 @@ class CleanPuffeRL:
             )
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        if self.wandb_run_id:
+        if self.wandb_entity:
             wandb.log(
                 {
                     "performance/train_sps": train_sps,
@@ -591,38 +612,8 @@ class CleanPuffeRL:
         return self.update >= self.total_updates
 
     def close(self):
-        if self.wandb_run_id:
+        if self.wandb_entity:
             wandb.finish()
-
-    def _load_trainer_state(self):
-        if self.data_dir is None:
-            return
-
-        path = os.path.join(self.data_dir, f"trainer.pt")
-        if not os.path.exists(path):
-            return
-
-        print(f"Loaded checkpoint from {path}")
-
-        state = torch.load(path)
-
-        self.global_step = state.get("global_step", 0)
-        self.agent_step = state.get("agent_step", 0)
-        self.update = state.get("update", 0)
-        self.learning_rate = state.get("learning_rate", self.learning_rate)
-        self.wandb_run_id = state.get("wandb_run_id", None)
-
-        print(f"Resuming from update {self.update} with policy {state['policy_checkpoint_name']}")
-        self.agent = self.policy_store.get_policy(
-            state["policy_checkpoint_name"]
-        ).policy(lambda md, b: self.agent.__class__(b, md), self.binding).to(self.device)
-        self.agent.is_recurrent = hasattr(self.agent, "lstm")
-        self.policy_pool._learner = self.agent
-
-        self.optimizer = optim.Adam(
-            self.agent.parameters(), lr=self.learning_rate, eps=1e-5
-        )
-        self.optimizer.load_state_dict(state["optimizer_state_dict"])
 
     def _save_checkpoint(self):
         if self.data_dir is None:
