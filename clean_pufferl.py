@@ -612,7 +612,7 @@ class CleanPuffeRL:
         self.learning_rate = state.get("learning_rate", self.learning_rate)
         self.wandb_run_id = state.get("wandb_run_id", None)
 
-        print(f"Resuming from update {self.update}")
+        print(f"Resuming from update {self.update} with policy {state['policy_checkpoint_name']}")
         self.agent = self.policy_store.get_policy(
             state["policy_checkpoint_name"]
         ).policy(lambda md, b: self.agent.__class__(b, md), self.binding).to(self.device)
