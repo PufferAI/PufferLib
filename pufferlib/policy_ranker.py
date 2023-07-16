@@ -59,9 +59,9 @@ class OpenSkillRanker(PolicyRanker):
       for wandb_policy in wandb_policies:
         wandb.log(
               {
-                  "skillrank/{wandb_policy}/mu": ratings[wandb_policy].mu,
-                  "skillrank/{wandb_policy}/sigma": ratings[wandb_policy].sigma,
-                  "skillrank/{wandb_policy}/score": np.mean(scores[wandb_policy]),
+                  f"skillrank/{wandb_policy}/mu": ratings[wandb_policy].mu,
+                  f"skillrank/{wandb_policy}/sigma": ratings[wandb_policy].sigma,
+                  f"skillrank/{wandb_policy}/score": np.mean(scores[wandb_policy]),
                   "agent_steps": step,
                   "global_step": step,
               }
