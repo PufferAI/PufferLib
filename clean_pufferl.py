@@ -74,8 +74,8 @@ class CleanPuffeRL:
     wandb_run_id: str = None
 
     # Selfplay
-    selfplay_learner_weight: float = (1,)
-    selfplay_num_policies: int = (1,)
+    selfplay_learner_weight: float = 1.0
+    selfplay_num_policies: int = 1
 
     def __post_init__(self, *args, **kwargs):
         self.start_time = time.time()
@@ -147,7 +147,7 @@ class CleanPuffeRL:
         # Setup policy selector
         if self.policy_selector is None:
             self.policy_selector = pufferlib.policy_ranker.PolicySelector(
-                self.selfplay_num_policies, exclude_names="learner"
+                self.selfplay_num_policies - 1, exclude_names="learner"
             )
 
         # Setup optimizer
@@ -226,6 +226,12 @@ class CleanPuffeRL:
 
     @pufferlib.utils.profile
     def evaluate(self, show_progress=False):
+        # Setup the self-play policy pool
+        self.policy_pool.update_policies({
+            p.name: p.policy(
+              lambda md, b: self.agent.__class__(b, md), self.binding).to(self.device)
+              for p in self.policy_store.select_policies(self.policy_selector)
+            })
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
         ptr = env_step_time = inference_time = agent_steps_collected = 0
