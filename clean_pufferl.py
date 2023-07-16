@@ -607,7 +607,7 @@ class CleanPuffeRL:
 
         self.agent = self.policy_store.get_policy(
             state["policy_checkpoint_name"]
-        ).policy(lambda md, b: self.agent.__class__(b, md), self.binding)
+        ).policy(lambda md, b: self.agent.__class__(b, md), self.binding).to(self.device)
         self.agent.is_recurrent = hasattr(self.agent, "lstm")
         self.policy_pool._learner = self.agent
 
