@@ -1,15 +1,20 @@
 
 from typing import Dict
 from pufferlib.rating import OpenSkillRating
-
+import logging
 import pickle
+import numpy as np
 
 from pufferlib.policy_store import PolicySelector
+
+class PolicyRanker():
+  def update_ranks(self, scores: Dict[str, float], wandb_policies=[], step: int = 0):
+    pass
 
 class OpenSkillPolicySelector(PolicySelector):
   pass
 
-class OpenSkillRanker():
+class OpenSkillRanker(PolicyRanker):
   def __init__(
     self, anchor: str, mu: int = 1000,
     anchor_mu: int = 1000, sigma: float =100/3):
@@ -23,13 +28,44 @@ class OpenSkillRanker():
     self._anchor_mu = anchor_mu
     self.add_policy(anchor, anchor=True)
 
-  def update_ranks(self, scores: Dict[str, float]):
+  def update_ranks(self, scores: Dict[str, float], wandb_policies=[], step: int = 0):
+    if len(scores) == 0:
+       return
+
+    ratings = self.ratings()
+    logging.info(
+        "Ranker Ratings (Pre-Update): %s",
+        {n: ratings.get(n) for n in scores},
+    )
+    logging.info(
+        "Policy Scores: %s", {n: np.mean(v)
+                              for n, v in scores.items()}
+    )
+
     for policy in scores.keys():
       if policy not in self._tournament.ratings:
           self.add_policy(policy, anchor=policy == self._anchor)
 
     if len(scores) > 1:
       self._tournament.update(list(scores.keys()), list(scores.values()))
+
+    logging.info(
+        "Ranker Ratings (Post Update): %s",
+        {n: ratings[n].mu for n in scores},
+    )
+
+    if len(wandb_policies) > 0:
+      import wandb
+      for wandb_policy in wandb_policies:
+        wandb.log(
+              {
+                  f"skillrank/{wandb_policy}/mu": ratings[wandb_policy].mu,
+                  f"skillrank/{wandb_policy}/sigma": ratings[wandb_policy].sigma,
+                  f"skillrank/{wandb_policy}/score": np.mean(scores[wandb_policy]),
+                  "agent_steps": step,
+                  "global_step": step,
+              }
+          )
 
   def add_policy(self, name: str, mu=None, sigma=None, anchor=False):
     if name in self._tournament.ratings:

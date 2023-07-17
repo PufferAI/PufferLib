@@ -8,7 +8,8 @@ import pufferlib.models
 import pufferlib.frameworks.base
 
 
-def make_policy(policy_cls, recurrent_cls=torch.nn.LSTM,
+def make_policy(policy_cls,
+                recurrent_cls=torch.nn.LSTM,
         recurrent_args=[512, 128], recurrent_kwargs={'num_layers': 1}):
     '''Wrap a PyTorch model for use with CleanRL
 

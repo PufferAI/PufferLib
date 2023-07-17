@@ -83,8 +83,8 @@ class PolicyPool():
                 self.values = torch.zeros(batch_size).to(val.device)
 
                 if lstm_state is not None:
-                    self.lstm_h = torch.zeros(self.batch_size, *lstm_state[0].shape[1:]).to(lstm_state[0].device)
-                    self.lstm_c = torch.zeros(self.batch_size, *lstm_state[1].shape[1:]).to(lstm_state[1].device)
+                    self.lstm_h = torch.zeros(self._batch_size, *lstm_state[0].shape[1:]).to(lstm_state[0].device)
+                    self.lstm_c = torch.zeros(self._batch_size, *lstm_state[1].shape[1:]).to(lstm_state[1].device)
 
             self.actions[samp] = atn
             self.logprobs[samp] = lgprob

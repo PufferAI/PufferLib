@@ -8,18 +8,19 @@ import logging
 import copy
 import os
 import numpy as np
+from pufferlib.emulation import Binding
 
 class PolicyRecord():
-  def __init__(self, name: str, policy: Policy, metadata = None):
+  def __init__(self, name: str, policy: Policy, policy_args = None):
     self.name = name
-    self._metadata = metadata
+    self._policy_args = policy_args
     self._policy = policy
 
   def policy(self) -> Policy:
     return self._policy
 
-  def metadata(self) -> Dict:
-    return self._metadata
+  def policy_args(self) -> Dict:
+    return self._policy_args
 
 class PolicySelector():
   def __init__(self, num: int, exclude_names: Set[str] = None):
@@ -34,7 +35,7 @@ class PolicySelector():
     return [policies[name] for name in selected_names]
 
 class PolicyStore():
-  def add_policy(self, name: str, policy: Policy, metadata = None) -> PolicyRecord:
+  def add_policy(self, name: str, policy: Policy, policy_args = None) -> PolicyRecord:
     raise NotImplementedError
 
   def add_policy_copy(self, name: str, src_name: str) -> PolicyRecord:
@@ -54,25 +55,25 @@ class MemoryPolicyStore(PolicyStore):
     super().__init__()
     self._policies = dict()
 
-  def add_policy(self, name: str, policy: Policy, metadata = None) -> PolicyRecord:
+  def add_policy(self, name: str, policy: Policy, policy_args = None) -> PolicyRecord:
     if name in self._policies:
         raise ValueError(f"Policy with name {name} already exists")
 
-    self._policies[name] = PolicyRecord(name, policy, metadata)
+    self._policies[name] = PolicyRecord(name, policy, policy_args)
     return self._policies[name]
 
   def add_policy_copy(self, name: str, src_name: str) -> PolicyRecord:
     return self.add_policy(
       name,
       copy.deepcopy(self._policies[src_name].policy()),
-      copy.deepcopy(self._policies[src_name].metadata))
+      copy.deepcopy(self._policies[src_name].policy_args))
 
   def _all_policies(self) -> List:
     return self._policies
 
 class FilePolicyRecord(PolicyRecord):
-  def __init__(self, name: str, path: str, policy: Policy = None, metadata = None):
-    super().__init__(name, policy, metadata)
+  def __init__(self, name: str, path: str, policy: Policy = None, policy_args = None):
+    super().__init__(name, policy, policy_args)
     self._path = path
 
   def save(self):
@@ -83,31 +84,32 @@ class FilePolicyRecord(PolicyRecord):
     temp_path = self._path + ".tmp"
     torch.save({
         "policy_state_dict": self._policy.state_dict(),
-        "metadata": self._metadata
+        "policy_args": self._policy_args
     }, temp_path)
     os.rename(temp_path, self._path)
 
-  def load(self, create_policy_func: Callable[[PolicyRecord], Policy]):
+  def load(self, create_policy_func: Callable[[Dict, Binding], Policy], binding: None):
     data = self._load_data()
-    policy = create_policy_func(self)
+    policy = create_policy_func(self.policy_args(), binding)
     policy.load_state_dict(data["policy_state_dict"])
+    policy.is_recurrent = hasattr(policy, "lstm")
     return policy
 
   def _load_data(self):
     if not os.path.exists(self._path):
       raise ValueError(f"Policy with name {self.name} does not exist")
     data = torch.load(self._path)
-    self._metadata = data["metadata"]
+    self._policy_args = data["policy_args"]
     return data
 
-  def metadata(self) -> Dict:
-    if self._metadata is None:
+  def policy_args(self) -> Dict:
+    if self._policy_args is None:
       self._load_data()
-    return self._metadata
+    return self._policy_args
 
-  def policy(self, create_policy_func: Callable[[str], Policy] = None) -> Policy:
+  def policy(self, create_policy_func: Callable[[Dict, Binding], Policy] = None, binding = None) -> Policy:
     if self._policy is None:
-      self._policy = self.load(create_policy_func)
+      self._policy = self.load(create_policy_func, binding)
     return self._policy
 
 class DirectoryPolicyStore(PolicyStore):
@@ -115,9 +117,9 @@ class DirectoryPolicyStore(PolicyStore):
     self._path = path
     os.makedirs(self._path, exist_ok=True)
 
-  def add_policy(self, name: str, policy: Policy, metadata = None) -> PolicyRecord:
+  def add_policy(self, name: str, policy: Policy, policy_args = None) -> PolicyRecord:
     path = os.path.join(self._path, name + ".pt")
-    pr = FilePolicyRecord(name, path, policy, metadata)
+    pr = FilePolicyRecord(name, path, policy, policy_args)
     pr.save()
     return pr
 
@@ -131,42 +133,3 @@ class DirectoryPolicyStore(PolicyStore):
         name = file[:-3]
         policies[name] = FilePolicyRecord(name, os.path.join(self._path, file))
     return policies
-
-# # Uses a sqlite database to store the metadata and paths of policies
-# class SqlitePolicyStore(DirecroryPolicyStore):
-#   def __init__(self, db_path: str, policy_files_path: str, policy_registry: PolicyRegistry):
-#     super().__init__(policy_files_path, policy_registry)
-
-#     self._db_engine = create_engine(path, echo=False)
-#     Base.metadata.create_all(self._db_engine)
-#     Session = sessionmaker(bind=self._db_engine)
-#     self._db_session = Session()
-#     self._db_connection = self._db_engine.connect()
-#     self._db_connection.execute(text("PRAGMA journal_mode=WAL;"))
-
-#   def add_policy(self, name: str, policy: Policy, metadata = None) -> PolicyRecord:
-#     self._db_session.add(policy)
-#     self._db_session.commit()
-
-#   def query_policy_by_name(self, name):
-#     return self._db_session.query(PolicyRecord).filter_by(name=name).first()
-
-#   def query_tenured_policies(self):
-#     return self._db_session.query(PolicyRecord).filter(
-#         cast(PolicyRecord.additional_data['tenured'], Boolean) == True
-#     ).all()
-
-#   def query_untenured_policies(self):
-#     return self._db_session.query(PolicyRecord).filter(
-#         cast(PolicyRecord.additional_data['tenured'], Boolean) != True
-#     ).all()
-
-#   def delete_policy(self, policy):
-#     self._db_session.delete(policy)
-#     self._db_session.commit()
-
-#   def query_all_policies(self):
-#     return self._db_session.query(PolicyRecord).all()
-
-#   def update_policy(self, policy):
-#     self._db_session.commit()
