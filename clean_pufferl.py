@@ -247,6 +247,7 @@ class CleanPuffeRL:
 
     @pufferlib.utils.profile
     def evaluate(self, show_progress=False):
+
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
         ptr = env_step_time = inference_time = agent_steps_collected = 0
@@ -403,6 +404,7 @@ class CleanPuffeRL:
             )
             self.policy_pool.scores = {}
             # Pick new policies for the policy pool
+            # TODO: find a way to not switch mid-stream
             self.policy_pool.update_policies({
                 p.name: p.policy(
                   lambda pa, b: self.agent.__class__.create_policy(b, pa), self.binding).to(self.device)
@@ -634,8 +636,9 @@ class CleanPuffeRL:
         tmp_path = path + ".tmp"
         torch.save(state, tmp_path)
         os.rename(tmp_path, path)
-        if self.policy_store is not None:
-            self.policy_store.add_policy(policy_name, self.agent, self.agent.policy_args())
+
+        # Save the policy to the policy store
+        self.policy_store.add_policy(policy_name, self.agent, self.agent.policy_args())
 
         if self.policy_ranker:
             self.policy_ranker.add_policy_copy(

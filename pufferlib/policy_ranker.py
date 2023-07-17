@@ -38,7 +38,7 @@ class OpenSkillRanker(PolicyRanker):
         {n: ratings.get(n) for n in scores},
     )
     logging.info(
-        "Policy Scores: %s", {n: np.mean(v)
+        "Policy Scores: %s", {n: (np.mean(v), np.std(v), len(v))
                               for n, v in scores.items()}
     )
 
@@ -47,7 +47,9 @@ class OpenSkillRanker(PolicyRanker):
           self.add_policy(policy, anchor=policy == self._anchor)
 
     if len(scores) > 1:
-      self._tournament.update(list(scores.keys()), scores=list(scores.values()))
+      self._tournament.update(
+         policy_ids=list(scores.keys()),
+         scores=list([np.mean(v) for v in scores.values()]))
 
     logging.info(
         "Ranker Ratings (Post Update): %s",

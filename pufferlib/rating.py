@@ -14,7 +14,7 @@ def rank(policy_ids, scores):
 
     # Double argsort returns ranks
     return np.argsort(np.argsort(
-        [-np.mean(vals) + 1e-8 * np.random.normal() for policy, vals in 
+        [-np.mean(vals) + 1e-8 * np.random.normal() for policy, vals in
         sorted(agents.items())])).tolist()
 
 
@@ -90,8 +90,6 @@ class OpenSkillRating:
 
         Returns:
             Dictionary of ratings keyed by agent names'''
-        for pol_id in policy_ids:
-            assert pol_id in policy_ids, f'policy_id {pol_id} not in policy_ids'
 
         if __debug__:
             err = 'Specify either ranks or scores'
@@ -103,6 +101,7 @@ class OpenSkillRating:
             ranks = rank(policy_ids, scores)
 
         teams = [[self.ratings[e]] for e in policy_ids]
+
         ratings = openskill.rate(teams, rank=ranks)
         #ratings = [openskill.create_rating(team[0]) for team in ratings]
         for agent, rating in zip(policy_ids, ratings):
