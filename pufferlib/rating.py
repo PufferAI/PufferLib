@@ -106,7 +106,7 @@ class OpenSkillRating:
         #ratings = [openskill.create_rating(team[0]) for team in ratings]
         for idx, policy in enumerate(policy_ids):
             print(f"{policy}: ({scores[idx]:.2f}) {self.ratings[policy].mu:.2f} -> {ratings[idx][0].mu:.2f}")
-             self.ratings[policy] = ratings[idx][0]
+            self.ratings[policy] = ratings[idx][0]
 
         self._anchor_baseline()
 
