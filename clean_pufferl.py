@@ -247,12 +247,6 @@ class CleanPuffeRL:
 
     @pufferlib.utils.profile
     def evaluate(self, show_progress=False):
-        # Setup the self-play policy pool
-        self.policy_pool.update_policies({
-            p.name: p.policy(
-              lambda pa, b: self.agent.__class__.create_policy(b, pa), self.binding).to(self.device)
-              for p in self.policy_store.select_policies(self.policy_selector)
-            })
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
         ptr = env_step_time = inference_time = agent_steps_collected = 0
@@ -407,7 +401,14 @@ class CleanPuffeRL:
                 else [],
                 step=self.global_step,
             )
-        self.policy_pool.scores = {}
+            self.policy_pool.scores = {}
+            # Pick new policies for the policy pool
+            self.policy_pool.update_policies({
+                p.name: p.policy(
+                  lambda pa, b: self.agent.__class__.create_policy(b, pa), self.binding).to(self.device)
+                  for p in self.policy_store.select_policies(self.policy_selector)
+                })
+
 
         progress_bar.close()
         return data
