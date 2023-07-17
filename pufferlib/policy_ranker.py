@@ -47,7 +47,7 @@ class OpenSkillRanker(PolicyRanker):
           self.add_policy(policy, anchor=policy == self._anchor)
 
     if len(scores) > 1:
-      self._tournament.update(list(scores.keys()), list(scores.values()))
+      self._tournament.update(list(scores.keys()), scores=qlist(scores.values()))
 
     logging.info(
         "Ranker Ratings (Post Update): %s",
