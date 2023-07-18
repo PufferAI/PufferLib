@@ -247,6 +247,13 @@ class CleanPuffeRL:
 
     @pufferlib.utils.profile
     def evaluate(self, show_progress=False):
+        # Pick new policies for the policy pool
+        # TODO: find a way to not switch mid-stream
+        self.policy_pool.update_policies({
+            p.name: p.policy(
+              lambda pa, b: self.agent.__class__.create_policy(b, pa), self.binding).to(self.device)
+              for p in self.policy_store.select_policies(self.policy_selector)
+            })
 
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
@@ -345,6 +352,16 @@ class CleanPuffeRL:
                         except TypeError:
                             continue
 
+            if self.policy_pool.scores and self.policy_ranker is not None:
+              self.policy_ranker.update_ranks(
+                  self.policy_pool.scores,
+                  wandb_policies=[self.policy_pool._learner_name]
+                  if self.wandb_entity
+                  else [],
+                  step=self.global_step,
+              )
+              self.policy_pool.scores = {}
+
             env_sps = int(agent_steps_collected / env_step_time)
             inference_sps = int(padded_steps_collected / inference_time)
 
@@ -393,24 +410,6 @@ class CleanPuffeRL:
             f"Epoch: {self.update} - {self.global_step // 1000}K steps - {uptime} Elapsed\n"
             f"\tSteps Per Second: Env={env_sps}, Inference={inference_sps}"
         )
-
-        if self.policy_pool.scores and self.policy_ranker is not None:
-            self.policy_ranker.update_ranks(
-                self.policy_pool.scores,
-                wandb_policies=[self.policy_pool._learner_name]
-                if self.wandb_entity
-                else [],
-                step=self.global_step,
-            )
-            self.policy_pool.scores = {}
-            # Pick new policies for the policy pool
-            # TODO: find a way to not switch mid-stream
-            self.policy_pool.update_policies({
-                p.name: p.policy(
-                  lambda pa, b: self.agent.__class__.create_policy(b, pa), self.binding).to(self.device)
-                  for p in self.policy_store.select_policies(self.policy_selector)
-                })
-
 
         progress_bar.close()
         return data
