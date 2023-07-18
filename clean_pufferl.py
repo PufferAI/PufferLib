@@ -352,6 +352,18 @@ class CleanPuffeRL:
                         except TypeError:
                             continue
 
+            if self.policy_pool.scores and self.policy_ranker is not None:
+              self.policy_ranker.update_ranks(
+                  self.policy_pool.scores,
+                  wandb_policies=[self.policy_pool._learner_name]
+                  if self.wandb_entity
+                  else [],
+                  step=self.global_step,
+              )
+              self.policy_pool.scores = {}
+
+            env_sps = int(agent_steps_collected / env_step_time)
+            inference_sps = int(padded_steps_collected / inference_time)
 
             progress_bar.set_description(
                 "Eval: "
@@ -366,19 +378,6 @@ class CleanPuffeRL:
             )
 
         self.global_step += self.batch_size
-
-        if self.policy_pool.scores and self.policy_ranker is not None:
-          self.policy_ranker.update_ranks(
-              self.policy_pool.scores,
-              wandb_policies=[self.policy_pool._learner_name]
-              if self.wandb_entity
-              else [],
-              step=self.global_step,
-          )
-          self.policy_pool.scores = {}
-
-        env_sps = int(agent_steps_collected / env_step_time)
-        inference_sps = int(padded_steps_collected / inference_time)
 
         if self.wandb_entity:
             wandb.log(
