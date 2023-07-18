@@ -4,6 +4,7 @@ from pufferlib.rating import OpenSkillRating
 import logging
 import pickle
 import numpy as np
+import pandas as pd
 
 from pufferlib.policy_store import PolicySelector
 
@@ -33,13 +34,10 @@ class OpenSkillRanker(PolicyRanker):
        return
 
     ratings = self.ratings()
-    logging.info(
-        "Ranker Ratings (Pre-Update): %s",
-        {n: ratings.get(n) for n in scores},
-    )
-    logging.info(
-        "Policy Scores: %s", {n: np.mean(v)
-                              for n, v in scores.items()}
+    dataframe = pd.DataFrame(
+      {
+          ('Old Rating', 'mu'): [ratings.get(n).mu for n in scores],
+      }
     )
 
     for policy in scores.keys():
@@ -47,12 +45,23 @@ class OpenSkillRanker(PolicyRanker):
           self.add_policy(policy, anchor=policy == self._anchor)
 
     if len(scores) > 1:
-      self._tournament.update(list(scores.keys()), list(scores.values()))
+      self._tournament.update(
+         policy_ids=list(scores.keys()),
+         scores=list([np.mean(v) for v in scores.values()]))
 
-    logging.info(
-        "Ranker Ratings (Post Update): %s",
-        {n: ratings[n].mu for n in scores},
-    )
+    dataframe = pd.concat(
+        [dataframe, pd.DataFrame(
+            {
+                ('New Rating', ''): [ratings.get(n).mu for n in scores],
+                ('Score', 'mean'): [np.mean(v) for v in scores.values()],
+                ('Score', 'sdev'): [np.std(v) for v in scores.values()],
+                ('Score', 'cnt'): [len(v) for v in scores.values()],
+                ('Policy', ''): [n for n in scores.keys()],
+            }
+        )],
+        axis=1,
+    )    dataframe[('Rating Delta', "")] = dataframe[('New Rating', '')] - dataframe[('Old Rating', 'mu')]
+    print("\n\n" + dataframe.round(2).to_string() + "\n\n")
 
     if len(wandb_policies) > 0:
       import wandb
