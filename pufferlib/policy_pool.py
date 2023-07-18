@@ -82,21 +82,11 @@ class PolicyPool():
                 self.logprobs = torch.zeros(batch_size).to(lgprob.device)
                 self.values = torch.zeros(batch_size).to(val.device)
 
-                if lstm_state is not None:
-                    self.lstm_h = torch.zeros(self._batch_size, *lstm_state[0].shape[1:]).to(lstm_state[0].device)
-                    self.lstm_c = torch.zeros(self._batch_size, *lstm_state[1].shape[1:]).to(lstm_state[1].device)
-
             self.actions[samp] = atn
             self.logprobs[samp] = lgprob
             self.values[samp] = val.flatten()
 
-            if lstm_state is not None:
-                self.lstm_h[samp] = lstm_state[0][:, samp]
-                self.lstm_c[samp] = lstm_state[1][:, samp]
-
-        if lstm_state is not None:
-            return self.actions, self.logprobs, self.values, (self.lstm_h, self.lstm_c)
-        return self.actions, self.logprobs, self.values, None
+        return self.actions, self.logprobs, self.values, lstm_state
 
     def update_scores(self, infos, info_key):
         # TODO: Check that infos is dense and sorted
