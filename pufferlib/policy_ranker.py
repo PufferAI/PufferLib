@@ -49,19 +49,20 @@ class OpenSkillRanker(PolicyRanker):
          policy_ids=list(scores.keys()),
          scores=list([np.mean(v) for v in scores.values()]))
 
-    dataframe = pd.concat(
-        [dataframe, pd.DataFrame(
-            {
-                ('New Rating', ''): [ratings.get(n).mu for n in scores],
-                ('Score', 'mean'): [np.mean(v) for v in scores.values()],
-                ('Score', 'sdev'): [np.std(v) for v in scores.values()],
-                ('Score', 'cnt'): [len(v) for v in scores.values()],
-                ('Policy', ''): [n for n in scores.keys()],
-            }
-        )],
-        axis=1,
-    )    dataframe[('Rating Delta', "")] = dataframe[('New Rating', '')] - dataframe[('Old Rating', 'mu')]
-    print("\n\n" + dataframe.round(2).to_string() + "\n\n")
+      dataframe = pd.concat(
+          [dataframe, pd.DataFrame(
+              {
+                  ('New Rating', ''): [ratings.get(n).mu for n in scores],
+                  ('Score', 'mean'): [np.mean(v) for v in scores.values()],
+                  ('Score', 'sdev'): [np.std(v) for v in scores.values()],
+                  ('Score', 'cnt'): [len(v) for v in scores.values()],
+                  ('Policy', ''): [n for n in scores.keys()],
+              }
+          )],
+          axis=1,
+      )
+      dataframe[('Rating Delta', "")] = dataframe[('New Rating', '')] - dataframe[('Old Rating', 'mu')]
+      print("\n\n" + dataframe.round(2).to_string() + "\n\n")
 
     if len(wandb_policies) > 0:
       import wandb
