@@ -278,15 +278,6 @@ class CleanPuffeRL:
             env_step_time += time.time() - start
 
             i = self.policy_pool.update_scores(i, "return")
-            if self.policy_pool.scores and self.policy_ranker is not None:
-              self.policy_ranker.update_ranks(
-                  self.policy_pool.scores,
-                  wandb_policies=[self.policy_pool._learner_name]
-                  if self.wandb_entity
-                  else [],
-                  step=self.global_step,
-              )
-              self.policy_pool.scores = {}
 
             for profile in self.buffers[buf].profile():
                 for k, v in profile.items():
@@ -361,6 +352,15 @@ class CleanPuffeRL:
                         except TypeError:
                             continue
 
+            if self.policy_pool.scores and self.policy_ranker is not None:
+              self.policy_ranker.update_ranks(
+                  self.policy_pool.scores,
+                  wandb_policies=[self.policy_pool._learner_name]
+                  if self.wandb_entity
+                  else [],
+                  step=self.global_step,
+              )
+              self.policy_pool.scores = {}
 
             env_sps = int(agent_steps_collected / env_step_time)
             inference_sps = int(padded_steps_collected / inference_time)
