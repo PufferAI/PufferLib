@@ -97,8 +97,8 @@ class OpenSkillRating:
 
         assert self.anchor is not None, 'Set the anchor policy before updating ratings'
 
-        # if ranks is None:
-        #     ranks = rank(policy_ids, scores)
+        if ranks is None:
+            ranks = rank(policy_ids, scores)
 
         teams = [[self.ratings[e]] for e in policy_ids]
         ratings = openskill.rate(teams, score=scores)
