@@ -11,9 +11,9 @@ class Default:
     vec_backend = pufferlib.vectorization.serial.VecEnv
     total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
-    num_cores = 4
-    num_buffers = 2
-    num_envs = 4
+    num_cores = 1
+    num_buffers = 1
+    num_envs = 1
     batch_size = 1024
     batch_rows = 256
     bptt_horizon = 1
@@ -23,8 +23,7 @@ class Default:
     policy_args = [128, 128]
     policy_kwargs = {}
     recurrent_args = []
-    #recurrent_args = [128, 128]
-    recurrent_kwargs = dict(num_layers=0)
+    recurrent_kwargs = dict(input_size=128, hidden_size=128, num_layers=1)
 
     pool_rank_interval=1
     pool_update_policy_interval=1
@@ -39,7 +38,7 @@ class Default:
         return self.registry.Policy
 
 class NMMO(Default):
-    batch_size = 2**14
+    batch_size = 2**12
     batch_rows = 128
 
     def __init__(self) -> None:

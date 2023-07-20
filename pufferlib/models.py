@@ -4,12 +4,16 @@ from abc import ABC, abstractmethod
 
 import torch
 import torch.nn as nn
+from torch.distributions import Categorical
 
 import pufferlib.pytorch
 
 
+#                 recurrent_cls=pufferlib.pytorch.BatchFirstLSTM,
+#                 recurrent_kwargs=dict(input_size=128, hidden_size=256)
+ 
 class Policy(torch.nn.Module, ABC):
-    def __init__(self, binding):
+    def __init__(self, binding, recurrent_cls=None, recurrent_kwargs={}):
         '''Pure PyTorch base policy
         
         This spec allows PufferLib to repackage your policy
@@ -36,7 +40,19 @@ class Policy(torch.nn.Module, ABC):
         '''
         super().__init__()
         self.binding = binding
+        self.recurrent_cls = recurrent_cls
+        if recurrent_cls is not None:
+            self.recurrent_policy = recurrent_cls(**recurrent_kwargs)
 
+            # TODO: Generalize this
+            self.input_size = recurrent_kwargs['input_size']
+            self.hidden_size = recurrent_kwargs['hidden_size']
+            for name, param in self.recurrent_policy.named_parameters():
+                if "bias" in name:
+                    nn.init.constant_(param, 0)
+                elif "weight" in name:
+                    nn.init.orthogonal_(param, 1.0)
+ 
     @abstractmethod
     def critic(self, hidden):
         '''Computes the value function from the hidden state
@@ -63,6 +79,24 @@ class Policy(torch.nn.Module, ABC):
         '''
         raise NotImplementedError
 
+    def forward(self, x, state):
+        if state is not None:
+            assert len(state) == 2
+
+        assert len(x.shape) == 3
+        B, TT, _ = x.shape
+
+        x = x.reshape(B*TT, -1)
+
+        hidden, lookup = self.encode_observations(x)
+        assert hidden.shape == (B*TT, self.input_size)
+
+        hidden = hidden.view(B, TT, self.input_size)
+        hidden, state = self.recurrent_policy(hidden, state)
+        hidden = hidden.reshape(B*TT, self.hidden_size)
+
+        return hidden, state, lookup
+ 
     @abstractmethod
     def decode_actions(self, flat_hidden, lookup):
         '''Decodes a batch of hidden states into multidiscrete actions
@@ -77,6 +111,33 @@ class Policy(torch.nn.Module, ABC):
         actions is a concatenated tensor of logits for each action space dimension.
         It should be of shape (batch, ..., sum(action_space.nvec))'''
         raise NotImplementedError
+
+    @property
+    def lstm(self):
+        return self.recurrent_policy
+
+    def get_value(self, x, state=None, done=None):
+        x = x.reshape((-1, x.shape[0], x.shape[-1]))
+        hidden, state, lookup = self.forward(x, state)
+        return self.critic(hidden)
+
+    # TODO: Compute seq_lens from done
+    def get_action_and_value(self, x, state=None, done=None, action=None):
+        x = x.reshape((-1, x.shape[0], x.shape[-1]))
+        hidden, state, lookup = self.forward(x, state)
+        value = self.critic(hidden)
+        flat_logits = self.decode_actions(hidden, lookup, concat=False)
+        multi_categorical = [Categorical(logits=l) for l in flat_logits]
+
+        if action is None:
+            action = torch.stack([c.sample() for c in multi_categorical])
+        else:
+            action = action.view(-1, action.shape[-1]).T
+
+        logprob = torch.stack([c.log_prob(a) for c, a in zip(multi_categorical, action)]).T.sum(1)
+        entropy = torch.stack([c.entropy() for c in multi_categorical]).T.sum(1)
+
+        return action.T, logprob, entropy, value, state
 
 class Default(Policy):
     def __init__(self, binding, input_size=128, hidden_size=128):

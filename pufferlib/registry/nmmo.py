@@ -30,14 +30,14 @@ def make_binding():
 
 
 class Policy(pufferlib.models.Policy):
-  def __init__(self, binding, input_size=256, hidden_size=256, output_size=256):
+  def __init__(self, binding, input_size=256, hidden_size=256, output_size=256, recurrent_cls=torch.nn.LSTM, recurrent_kwargs={'num_layers': 1}):
       '''Simple custom PyTorch policy subclassing the pufferlib BasePolicy
 
       This requires only that you structure your network as an observation encoder,
       an action decoder, and a critic function. If you use our LSTM support, it will
       be added between the encoder and the decoder.
       '''
-      super().__init__(binding)
+      super().__init__(binding, recurrent_cls, recurrent_kwargs)
       # :/
       self.raw_single_observation_space = binding.raw_single_observation_space
 
