@@ -314,29 +314,34 @@ class Ray(Backend):
             include_dashboard=False,  # WSL Compatibility
             ignore_reinit_error=True,
         )
-        self.remote_env = ray.remote(MultiEnv).remote(env_creator, n)
+        @ray.remote
+        class RemoteMultiEnv(MultiEnv):
+            pass
+
+        self.remote_env = RemoteMultiEnv.remote(env_creator, n)
+        #self.remote_env = ray.remote(MultiEnv).remote(env_creator, n)
         self.ray = ray
 
     def seed(self, seed):
         return self.ray.get(self.remote_env.seed.remote(seed))
 
-    def profile_all(self):
-        return self.ray.get(self.remote_env.profile_all.remote())
+    def profile(self):
+        return self.ray.get(self.remote_env.profile.remote())
 
-    def put_all(self, *args, **kwargs):
-        return self.ray.get(self.remote_env.put_all.remote(*args, **kwargs))
+    def put(self, *args, **kwargs):
+        return self.ray.get(self.remote_env.put.remote(*args, **kwargs))
 
-    def get_all(self, *args, **kwargs):
-        return self.ray.get(self.remote_env.get_all.remote(*args, **kwargs))
+    def get(self, *args, **kwargs):
+        return self.ray.get(self.remote_env.get.remote(*args, **kwargs))
 
     def close(self):
         return self.ray.get(self.remote_env.close.remote())
 
-    def async_reset_all(self, seed=None):
-        self.future = self.remote_env.reset_all.remote(seed)
+    def async_reset(self, seed=None):
+        self.future = self.remote_env.reset.remote(seed)
 
     def reset_all(self, seed=None):
-        return self.ray.get(self.remote_env.reset_all.remote(seed))
+        return self.ray.get(self.remote_env.reset.remote(seed))
 
     def step(self, actions_lists):
         return self.ray.get(self.remote_env.step.remote(actions_lists))
