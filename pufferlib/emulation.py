@@ -362,10 +362,10 @@ def make_puffer_env_cls(scope, raw_local_env, raw_obs):
         def done(self):
             if len(self.agents) == 0:
                 return True
- 
+
             if scope.emulate_const_horizon is None:
                 return False
-            
+
             return self._step >= scope.emulate_const_horizon
 
         @property
@@ -415,7 +415,7 @@ def make_puffer_env_cls(scope, raw_local_env, raw_obs):
             postprocessor = scope.postprocessor_cls(
                 self.env, self._teams, team, *scope.postprocessor_args, **scope.postprocessor_kwargs
             )
-            postprocessor.reset(team_obs)
+            postprocessor.reset(team_obs, dummy=True)
             obs = postprocessor.features(team_obs, self._step)
 
             # Flatten and cache observation space
@@ -743,7 +743,7 @@ def unpack_batched_obs(flat_space, packed_obs):
         last_key = key_list[-1]
         shape = space.shape
         if len(shape) == 0:
-            shape = (1,)    
+            shape = (1,)
 
         current_dict[last_key] = packed_obs[:, idx:idx + inc].reshape(batch, *shape)
         idx += inc

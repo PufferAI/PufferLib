@@ -96,9 +96,10 @@ class FilePolicyRecord(PolicyRecord):
     return policy
 
   def _load_data(self):
+    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
     if not os.path.exists(self._path):
       raise ValueError(f"Policy with name {self.name} does not exist")
-    data = torch.load(self._path)
+    data = torch.load(self._path, map_location=device)
     self._policy_args = data["policy_args"]
     return data
 
