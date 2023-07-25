@@ -60,7 +60,8 @@ class OpenSkillRanker(PolicyRanker):
             }
         )],
         axis=1,
-    )    dataframe[('Rating Delta', "")] = dataframe[('New Rating', '')] - dataframe[('Old Rating', 'mu')]
+    )
+    dataframe[('Rating Delta', "")] = dataframe[('New Rating', '')] - dataframe[('Old Rating', 'mu')]
     print("\n\n" + dataframe.round(2).to_string() + "\n\n")
 
     if len(wandb_policies) > 0:
