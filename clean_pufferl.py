@@ -261,6 +261,7 @@ class CleanPuffeRL:
         padded_steps_collected = 0
 
         step = 0
+        infos = defaultdict(list)
         stats = defaultdict(list)
         performance = defaultdict(list)
         progress_bar = tqdm(total=self.batch_size, disable=not show_progress)
@@ -346,6 +347,7 @@ class CleanPuffeRL:
                         continue
 
                     for name, stat in unroll_nested_dict(agent_i):
+                        infos[name].append(stat)
                         try:
                             stat = float(stat)
                             stats[name].append(stat)
@@ -412,7 +414,7 @@ class CleanPuffeRL:
         )
 
         progress_bar.close()
-        return data
+        return data, stats, infos
 
     @pufferlib.utils.profile
     def train(
