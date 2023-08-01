@@ -1,5 +1,6 @@
 from pdb import set_trace as T
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -27,6 +28,48 @@ def make_binding():
             env_cls=nmmo.Env,
             env_name='Neural MMO',
         )
+
+class PufferNMMO(pufferlib.new_emulation.PufferEnv):
+    def __init__(self, teams, postprocessor_cls, *args, **kwargs):
+        try:
+            import nmmo
+        except:
+            raise pufferlib.utils.SetupError('Neural MMO (nmmo)')
+ 
+        self.env = nmmo.Env(*args, **kwargs)
+        self.teams = teams
+
+        self.postprocessors = {team: postprocessor_cls(team) for team in teams}
+
+    def observation_space(self, team):
+        '''Returns the observation space for a single agent'''
+        raw_obs_space = {agent: self.env.observation_space(agent) for agent in team}
+        team_obs_space = self.postprocessors[team].observation_space(raw_obs_space)
+        self.flat_obs_space = pufferlib.new_emulation.flatten_space(team_obs_space)  
+        return self.flat_obs_space
+
+    def action_space(self, team):
+        raw_atn_space = {agent: self.env.action_space(agent) for agent in team}
+        team_atn_space = self.postprocessors[team].action_space(raw_atn_space)
+        flat_space = pufferlib.new_emulation.flatten_space(raw_atn_space)
+        return flat_space
+
+    def reset(self):
+        obs = self.env.reset()
+        obs = pufferlib.new_emulation.group_into_teams(obs, self.teams)
+        obs = pufferlib.new_emulation.flatten_space(obs)
+        return obs
+
+    def step(self, actions):
+        actions = pufferlib.new_emulation.ungroup_from_teams(actions)
+        actions = pufferlib.new_emulation.unpack_actions(actions)
+        obs, rewards, dones, infos = self.env.step(actions)
+        obs, rewards, dones = pufferlib.new_emulation.group_into_teams(
+                self.teams, obs, rewards, dones)
+
+        for team in obs:
+            obs[team] = pufferlib.new_emulation.flatten_to_array(obs[team], self._flat_observation_space[team], np.float32)
+ 
 
 
 class Policy(pufferlib.models.Policy):

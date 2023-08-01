@@ -55,6 +55,9 @@ all_environments = {
     'nethack': [
         'nle==0.9.0',
     ],
+    'procgen': [
+        'procgen==0.10.7',
+    ],
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',
     #],

@@ -64,5 +64,5 @@ if __name__ == '__main__':
         sys.exit(1)
 
     config = demo_config.all[env]()
-    binding = config.make_binding()
-    train_model(binding)
+    for binding in config.all_bindings:
+        train_model(binding)

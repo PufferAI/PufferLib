@@ -154,6 +154,16 @@ class NMMO(Default):
         self.registry = pufferlib.registry.nmmo
         self.all_bindings = [self.make_binding()]
 
+class Procgen(Default):
+    recurrent_kwargs = dict(num_layers=0)
+
+    def __init__(self):
+        import pufferlib.registry.procgen
+        self.registry = pufferlib.registry.procgen
+        self.all_bindings = [
+            self.make_binding('coinrun'),
+        ]
+
 class SMAC(Default):
     policy_args = []
     policy_kwargs = dict(embedding_dim=32, crop_dim=9, num_layers=5)
@@ -179,6 +189,7 @@ all = {
     'minerl': MineRL,
     'nethack': NetHack,
     'nmmo': NMMO,
+    'procgen': Procgen,
     'smac': SMAC,
 }
 
