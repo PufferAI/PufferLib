@@ -47,8 +47,8 @@ class CleanPuffeRL:
 
     exp_name: str = os.path.basename(__file__)
 
-    data_dir: str = (None,)
-    checkpoint_interval: int = None
+    data_dir: str = 'data'
+    checkpoint_interval: int = 1
     seed: int = 1
     torch_deterministic: bool = True
     vec_backend: ... = pufferlib.vectorization.multiprocessing.VecEnv

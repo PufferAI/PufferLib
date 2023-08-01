@@ -38,15 +38,6 @@ class Default:
     def Policy(self):
         return self.registry.Policy
 
-class NMMO(Default):
-    batch_size = 2**14
-    batch_rows = 128
-
-    def __init__(self) -> None:
-        import pufferlib.registry.nmmo
-        self.registry = pufferlib.registry.nmmo
-        self.all_bindings = [self.make_binding()]
-
 class Atari(Default):
     policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=1, flat_size=64*7*7)
     recurrent_args = [512, 128]
@@ -59,6 +50,35 @@ class Atari(Default):
             self.make_binding('PongNoFrameskip-v4', framestack=framestack),
         ]
 
+class Avalon(Default):
+    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=1, flat_size=64*7*7)
+    recurrent_args = [512, 128]
+
+    def __init__(self, framestack):
+        import pufferlib.registry.avalon
+        self.registry = pufferlib.registry.avalon
+        self.all_bindings = [self.make_binding()]
+
+class Box2d(Default):
+    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=1, flat_size=64*7*7)
+    recurrent_args = [512, 128]
+
+    def __init__(self):
+        import pufferlib.registry.box2d
+        self.registry = pufferlib.registry.box2d
+        self.all_bindings = [self.make_binding()]
+
+class Butterfly(Default):
+    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=1, flat_size=64*7*7)
+    recurrent_args = [512, 128]
+
+    def __init__(self, framestack):
+        import pufferlib.registry.butterfly
+        self.registry = pufferlib.registry.butterfly
+        self.all_bindings = [
+            self.registry.make_cooperative_pong_v5_binding(),
+        ]
+
 class Crafter(Default):
     # Framestack 3 is a hack for RGB
     policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=3, flat_size=64*4*4)
@@ -66,6 +86,22 @@ class Crafter(Default):
     def __init__(self):
         import pufferlib.registry.crafter
         self.registry = pufferlib.registry.crafter
+        self.all_bindings = [self.make_binding()]
+
+class DMControl(Default):
+    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=3, flat_size=64*4*4)
+
+    def __init__(self):
+        import pufferlib.registry.dmc
+        self.registry = pufferlib.registry.dmc
+        self.all_bindings = [self.make_binding()]
+
+class DMLab(Default):
+    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=3, flat_size=64*4*4)
+
+    def __init__(self):
+        import pufferlib.registry.dm_lab
+        self.registry = pufferlib.registry.dm_lab
         self.all_bindings = [self.make_binding()]
 
 class Griddly(Default):
@@ -83,6 +119,22 @@ class MAgent(Default):
         self.registry = pufferlib.registry.magent
         self.all_bindings = [self.registry.make_battle_v4_binding()]
 
+class MicroRTS(Default):
+    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=5, flat_size=64*4*4)
+
+    def __init__(self):
+        import pufferlib.registry.microrts
+        self.registry = pufferlib.registry.microrts
+        self.all_bindings = [self.registry.make_env()]
+
+class MineRL(Default):
+    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=5, flat_size=64*4*4)
+
+    def __init__(self):
+        import pufferlib.registry.minecraft
+        self.registry = pufferlib.registry.minecraft
+        self.all_bindings = [self.registry.make_env()]
+
 class NetHack(Default):
     policy_args = []
     policy_kwargs = dict(embedding_dim=32, crop_dim=9, num_layers=5)
@@ -92,3 +144,45 @@ class NetHack(Default):
         import pufferlib.registry.nethack
         self.registry = pufferlib.registry.nethack
         self.all_bindings = [self.make_binding()]
+
+class NMMO(Default):
+    batch_size = 2**14
+    batch_rows = 128
+
+    def __init__(self) -> None:
+        import pufferlib.registry.nmmo
+        self.registry = pufferlib.registry.nmmo
+        self.all_bindings = [self.make_binding()]
+
+class SMAC(Default):
+    policy_args = []
+    policy_kwargs = dict(embedding_dim=32, crop_dim=9, num_layers=5)
+    recurrent_args = [512, 512]
+
+    def __init__(self):
+        import pufferlib.registry.smac
+        self.registry = pufferlib.registry.smac
+        self.all_bindings = [self.make_binding()]
+
+
+all = {
+    'atari': Atari,
+    'avalon': Avalon,
+    'box2d': Box2d,
+    'butterfly': Butterfly,
+    'crafter': Crafter,
+    'dm_control': DMControl,
+    'dm_lab': DMLab,
+    'griddly': Griddly,
+    'magent': MAgent,
+    'microrts': MicroRTS,
+    'minerl': MineRL,
+    'nethack': NetHack,
+    'nmmo': NMMO,
+    'smac': SMAC,
+}
+
+# Possible stuff to add support:
+# Deep RTS
+# https://github.com/kimbring2/MOBA_RL
+# Serpent AI
