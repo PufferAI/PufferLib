@@ -11,40 +11,60 @@ from pufferlib import utils, exceptions
 
 
 class Postprocessor:
+    '''Base class for user-defined featurizers and postprocessors
+    
+    Instantiated per agent or team'''
     def __init__(self, env):
+        '''Provides full access to the underlying environment'''
         self.env = env
 
-    def reset(self, team_obs):
+    def reset(self, obs):
+        '''Called at the beginning of each episode'''
+        return
+
+    def features(self, obs):
+        '''Called on each observation after it is returned by the environment'''
+        return obs
+
+    def actions(self, actions):
+        '''Called on each action before it is passed to the environment'''
+        return actions
+
+    def rewards_dones_infos(self, rewards, dones, infos):
+        '''Called on each reward, done, and info after they are returned by the environment'''
+        return rewards, dones, infos
+
+
+class BasicPostprocessor(Postprocessor):
+    '''Basic postprocessor that injects returns and lengths information into infos and
+    provides an option to pad to a maximum episode length. Works for single-agent and
+    team-based multi-agent environments'''
+    def reset(self, obs):
         self.epoch_return = 0
         self.epoch_length = 0
         self.done = False
 
-    def features(self, obs):
-        '''Default featurizer pads observations to max team size'''
-        return obs
-
-    def actions(self, actions):
-        return actions
-
     def rewards_dones_infos(self, rewards, dones, infos):
-        return rewards, dones, infos
-        rewards = sum(rewards.values())
+        if isinstance(rewards, Mapping):
+            rewards = sum(rewards.values())
 
-        if env_done:
-            team_infos['return'] = self.epoch_return
-            team_infos['length'] = self.epoch_length
+        # Env is done
+        if len(self.env.agents) == 0:
+            infos['return'] = self.epoch_return
+            infos['length'] = self.epoch_length
             self.done = True
-        elif not team_done:
+        elif not dones:
             self.epoch_length += 1
-            self.epoch_return += team_reward
+            self.epoch_return += rewards
 
-        return team_infos
+        return infos
 
 
 class GymPufferEnv:
     def __init__(self, env=None, env_cls=None, env_args=[], env_kwargs={}, postprocessor_cls=Postprocessor):
         self.env = make_env(env, env_cls, env_args, env_kwargs)
         self.postprocessor = postprocessor_cls(self.env)
+
         self.initialized = False
         self.done = True
 
@@ -55,6 +75,7 @@ class GymPufferEnv:
     @property
     def observation_space(self):
         '''Returns a flattened, single-tensor observation space'''
+
         # Call user featurizer and create a corresponding gym space
         featurized_ob_space, featurized_ob = pufferlib.new_emulation.make_featurized_obs_and_space(self.env.observation_space, self.postprocessor)
 
@@ -66,24 +87,25 @@ class GymPufferEnv:
     @property
     def action_space(self):
         '''Returns a flattened, multi-discrete action space'''
+
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
         self.flat_action_space, multi_discrete_action_space = pufferlib.new_emulation.make_flat_and_multidiscrete_atn_space(self.env.action_space)
+
         return multi_discrete_action_space
 
     def reset(self):
-        ob = self.env.reset()
         self.initialized = True
         self.done = False
+
+        ob = self.env.reset()
+
         # Call user featurizer and flatten the observations
         return pufferlib.new_emulation.postprocess_and_flatten(
             ob, self.postprocessor, self.flat_ob_space, reset=True)
 
     def step(self, action):
         '''Execute an action and return (observation, reward, done, info)'''
-        if not self.initialized:
-            raise exceptions.APIUsageError('step() called before reset()')
-        if self.done:
-            raise exceptions.APIUsageError('step() called after environment is done')
+        api_usage_checks(self.initialized, self.done)
 
         processed_action = self.postprocessor.actions(action)
 
@@ -120,10 +142,9 @@ class PettingZooPufferEnv:
         self.postprocessors = {agent: postprocessor_cls(self.env)
             for agent in self.possible_agents}
 
-        # TODO: Handle caching
-        agent = self.possible_agents[0]
-        self.observation_space(agent)
-        self.action_space(agent)
+        # Cache the observation and action spaces
+        self.observation_space(self.possible_agents[0])
+        self.action_space(self.possible_agents[0])
 
     def observation_space(self, agent):
         '''Returns the observation space for a single agent'''
@@ -182,10 +203,8 @@ class PettingZooPufferEnv:
 
     def step(self, actions):
         '''Step the environment and return (observations, rewards, dones, infos)'''
-        if not self.initialized:
-            raise exceptions.APIUsageError('step() called before reset()')
-        if self.done:
-            raise exceptions.APIUsageError('step() called after environment is done')
+        api_usage_checks(self.initialized, self.done)
+
         if __debug__:
             for agent, atn in actions.items():
                 if agent not in self.agents:
@@ -198,18 +217,6 @@ class PettingZooPufferEnv:
         pufferlib.new_emulation.check_spaces(actions, self.action_space)
 
         # Unpack actions from multidiscrete into the original action space
-        '''
-        split_actions = {}
-        for team_id, team in agent_ids.items():
-            # TODO: Assert all keys present since actions are padded
-            team_atns = np.split(actions[team_id], len(team))
-            for agent_id, atns in zip(team, team_atns):
-                split_actions[agent_id] = atns
-
-        if k not in agent_ids:
-            del(actions[k])
-            continue
-        '''
         unpacked_actions = {}
         for agent, atn in actions.items():
             unpacked_actions[agent] = unpack_actions(atn, self.flat_action_space)
@@ -234,7 +241,14 @@ class PettingZooPufferEnv:
 
         pufferlib.new_emulation.check_spaces(postprocessed_obs, self.observation_space)
         return postprocessed_obs, rewards, dones, infos
- 
+
+
+def api_usage_checks(initialized, done):
+    if not initialized:
+        raise exceptions.APIUsageError('step() called before reset()')
+    if done:
+        raise exceptions.APIUsageError('step() called after environment is done')
+
 def make_env(env, env_cls, env_args=[], env_kwargs={}):
     # TODO: Check env is obs and env_cls is class
     assert bool(env) != bool(env_cls), 'Must provide either env or env_cls, but not both'
@@ -473,10 +487,7 @@ def flatten_to_array(space_sample, flat_space, dtype=None):
     for key_list in flat_space:
         value = space_sample
         for key in key_list:
-            try:
-                value = value[key]
-            except:
-                T()
+            value = value[key]
 
         if not isinstance(value, np.ndarray):
             value = np.array([value])
