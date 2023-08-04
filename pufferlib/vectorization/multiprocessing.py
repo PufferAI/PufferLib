@@ -170,7 +170,14 @@ class VecEnv:
 
             self.agent_keys.append(a_keys)
 
-        obs = np.stack(obs)
+        try:
+          obs = np.stack(obs)
+        except:
+          print("np stack error", [o.shape for o in obs])
+          print("reward", rewards)
+          print("done", dones)
+          print("info", infos)
+          raise
 
         return obs, rewards, dones, infos
 
