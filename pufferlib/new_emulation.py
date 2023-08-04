@@ -110,9 +110,9 @@ class GymPufferEnv:
 
         processed_action = self.postprocessor.actions(action)
 
-        if not self.action_space.contains(processed_action):
-            raise ValueError(
-                f'Action:\n{processed_action}\n not in space:\n{self.flat_action_space}')
+        if __debug__ and not self.action_space.contains(processed_action):
+            raise ValueError(f'Action:\n{processed_action}\n '
+                f'not in space:\n{self.flat_action_space}')
 
         # Unpack actions from multidiscrete into the original action space
         action = unpack_actions(action, self.flat_action_space)
@@ -124,9 +124,9 @@ class GymPufferEnv:
         processed_ob, single_reward, single_done, single_info = postprocess_and_flatten(
             ob, self.postprocessor, self.flat_ob_space, reward, done, info)
 
-        if not self.observation_space.contains(processed_ob):
-            raise ValueError(
-                f'Observation:\n{processed_ob}\n not in space:\n{self.observation_space}')
+        if __debug__ and not self.observation_space.contains(processed_ob):
+            raise ValueError(f'Observation:\n{processed_ob}\n '
+                f'not in space:\n{self.observation_space}')
 
         return processed_ob, single_reward, single_done, single_info
 
@@ -218,7 +218,8 @@ class PettingZooPufferEnv:
         for agent in actions:
             actions[agent] = self.postprocessors[agent].actions(actions[agent])
 
-        check_spaces(actions, self.action_space)
+        if __debug__:
+            check_spaces(actions, self.action_space)
 
         # Unpack actions from multidiscrete into the original action space
         unpacked_actions = {}
@@ -243,7 +244,9 @@ class PettingZooPufferEnv:
         postprocessed_obs, reward, done, info = pad_to_const_num_agents(
             self.possible_agents, featurized_obs, rewards, dones, infos, self.pad_obs)
 
-        check_spaces(postprocessed_obs, self.observation_space)
+        if __debug__:
+            check_spaces(postprocessed_obs, self.observation_space)
+
         return postprocessed_obs, rewards, dones, infos
 
 
