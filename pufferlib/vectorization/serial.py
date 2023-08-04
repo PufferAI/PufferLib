@@ -119,7 +119,8 @@ def make_serial_envs(env_creator, n):
         def reset_all(self, seed=None):
             async_handles = []
             for e in self.envs:
-                async_handles.append((e.reset(seed=seed), {}, {}, {}))
+                obs = e.reset(seed=seed) 
+                async_handles.append((obs, {}, {}, {k: {} for k in obs}))
                 if seed is not None:
                     seed += 1
             return async_handles
@@ -132,7 +133,7 @@ def make_serial_envs(env_creator, n):
                     obs = env.reset()
                     rewards = {k: 0 for k in obs}
                     dones = {k: False for k in obs}
-                    infos = {}
+                    infos = {k: {} for k in obs}
                 else:
                     obs, rewards, dones, infos = env.step(actions)
 
