@@ -61,7 +61,8 @@ class BasicPostprocessor(Postprocessor):
 
 
 class GymPufferEnv:
-    def __init__(self, env=None, env_cls=None, env_args=[], env_kwargs={}, postprocessor_cls=Postprocessor):
+    def __init__(self, env=None, env_cls=None, env_args=[], env_kwargs={},
+            postprocessor_cls=Postprocessor):
         self.env = make_env(env, env_cls, env_args, env_kwargs)
         self.postprocessor = postprocessor_cls(self.env)
 
@@ -77,10 +78,10 @@ class GymPufferEnv:
         '''Returns a flattened, single-tensor observation space'''
 
         # Call user featurizer and create a corresponding gym space
-        featurized_ob_space, featurized_ob = pufferlib.new_emulation.make_featurized_obs_and_space(self.env.observation_space, self.postprocessor)
+        featurized_ob_space, featurized_ob = make_featurized_obs_and_space(self.env.observation_space, self.postprocessor)
 
         # Flatten the featurized observation space and store it for use in step. Return a box space for the user
-        self.flat_ob_space, self.box_ob_space, self.pad_ob = pufferlib.new_emulation.make_flat_and_box_obs_space(featurized_ob_space, featurized_ob)
+        self.flat_ob_space, self.box_ob_space, self.pad_ob = make_flat_and_box_obs_space(featurized_ob_space, featurized_ob)
 
         return self.box_ob_space
 
@@ -89,7 +90,7 @@ class GymPufferEnv:
         '''Returns a flattened, multi-discrete action space'''
 
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
-        self.flat_action_space, multi_discrete_action_space = pufferlib.new_emulation.make_flat_and_multidiscrete_atn_space(self.env.action_space)
+        self.flat_action_space, multi_discrete_action_space = make_flat_and_multidiscrete_atn_space(self.env.action_space)
 
         return multi_discrete_action_space
 
@@ -100,7 +101,7 @@ class GymPufferEnv:
         ob = self.env.reset()
 
         # Call user featurizer and flatten the observations
-        return pufferlib.new_emulation.postprocess_and_flatten(
+        return postprocess_and_flatten(
             ob, self.postprocessor, self.flat_ob_space, reset=True)
 
     def step(self, action):
@@ -131,7 +132,8 @@ class GymPufferEnv:
 
 
 class PettingZooPufferEnv:
-    def __init__(self, env=None, env_cls=None, env_args=[], env_kwargs={}, postprocessor_cls=Postprocessor, teams=None, max_horizon=None):
+    def __init__(self, env=None, env_cls=None, env_args=[], env_kwargs={},
+                 postprocessor_cls=Postprocessor, teams=None):
         self.env = make_env(env, env_cls, env_args, env_kwargs)
         self.initialized = False
         self.done = True
@@ -153,16 +155,18 @@ class PettingZooPufferEnv:
 
         # Make a gym space defining observations for the whole team
         if self.teams is not None:
-            obs_space = pufferlib.new_emulation.make_team_space(
+            obs_space = make_team_space(
                 self.env.observation_space, self.teams[agent])
         else:
             obs_space = self.env.observation_space(agent)
 
         # Call user featurizer and create a corresponding gym space
-        featurized_obs_space, featurized_obs = make_featurized_obs_and_space(obs_space, self.postprocessors[agent])
+        featurized_obs_space, featurized_obs = make_featurized_obs_and_space(
+            obs_space, self.postprocessors[agent])
 
         # Flatten the featurized observation space and store it for use in step. Return a box space for the user
-        self.flat_obs_space, self.box_obs_space, self.pad_obs = make_flat_and_box_obs_space(featurized_obs_space, featurized_obs)
+        self.flat_obs_space, self.box_obs_space, self.pad_obs = make_flat_and_box_obs_space(
+            featurized_obs_space, featurized_obs)
 
         return self.box_obs_space
 
@@ -173,13 +177,13 @@ class PettingZooPufferEnv:
 
         # Make a gym space defining actions for the whole team
         if self.teams is not None:
-            atn_space = pufferlib.new_emulation.make_team_space(
+            atn_space = make_team_space(
                 self.env.action_space, self.teams[agent])
         else:
             atn_space = self.env.action_space(agent)
 
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
-        self.flat_action_space, multidiscrete_action_space = pufferlib.new_emulation.make_flat_and_multidiscrete_atn_space(atn_space)
+        self.flat_action_space, multidiscrete_action_space = make_flat_and_multidiscrete_atn_space(atn_space)
 
         return multidiscrete_action_space
 
@@ -190,7 +194,7 @@ class PettingZooPufferEnv:
 
         # Group observations into teams
         if self.teams is not None:
-            obs = pufferlib.new_emulation.group_into_teams(self.teams, obs)
+            obs = group_into_teams(self.teams, obs)
 
         # Call user featurizer and flatten the observations
         postprocessed_obs = {}
@@ -214,7 +218,7 @@ class PettingZooPufferEnv:
         for agent in actions:
             actions[agent] = self.postprocessors[agent].actions(actions[agent])
 
-        pufferlib.new_emulation.check_spaces(actions, self.action_space)
+        check_spaces(actions, self.action_space)
 
         # Unpack actions from multidiscrete into the original action space
         unpacked_actions = {}
@@ -236,10 +240,10 @@ class PettingZooPufferEnv:
                 rewards[agent], dones[agent], infos[agent])
 
         self.agents = list(featurized_obs)
-        postprocessed_obs, reward, done, info = pufferlib.new_emulation.pad_to_const_num_agents(
+        postprocessed_obs, reward, done, info = pad_to_const_num_agents(
             self.possible_agents, featurized_obs, rewards, dones, infos, self.pad_obs)
 
-        pufferlib.new_emulation.check_spaces(postprocessed_obs, self.observation_space)
+        check_spaces(postprocessed_obs, self.observation_space)
         return postprocessed_obs, rewards, dones, infos
 
 
@@ -257,9 +261,9 @@ def make_env(env, env_cls, env_args=[], env_kwargs={}):
     return env
 
 def team_ungroup_step_group(self, teams, env, actions):
-    actions = pufferlib.new_emulation.ungroup_from_teams(actions)
+    actions = ungroup_from_teams(actions)
     obs, rewards, dones, infos = env.step(actions)
-    team_obs, rewards, dones = pufferlib.new_emulation.group_into_teams(
+    team_obs, rewards, dones = group_into_teams(
             teams, obs, rewards, dones)
     return team_obs, rewards, dones, infos
 
@@ -282,20 +286,20 @@ def postprocess_and_flatten(ob, postprocessor, flat_obs_space,
             reward, done, info)
 
     postprocessed_ob = postprocessor.features(ob)
-    flat_ob = pufferlib.new_emulation.flatten_to_array(ob, flat_obs_space)
+    flat_ob = flatten_to_array(ob, flat_obs_space)
 
     return postprocessed_ob, reward, done, info
 
 
 def make_flat_and_multidiscrete_atn_space(atn_space):
-    flat_action_space = pufferlib.new_emulation.flatten_space(atn_space)
-    multidiscrete_space = pufferlib.new_emulation.convert_to_multidiscrete(flat_action_space)
+    flat_action_space = flatten_space(atn_space)
+    multidiscrete_space = convert_to_multidiscrete(flat_action_space)
     return flat_action_space, multidiscrete_space
 
 
 def make_flat_and_box_obs_space(obs_space, obs):
-    flat_obs_space = pufferlib.new_emulation.flatten_space(obs_space)  
-    flat_obs = pufferlib.new_emulation.flatten_to_array(obs, flat_obs_space)
+    flat_obs_space = flatten_space(obs_space)  
+    flat_obs = flatten_to_array(obs, flat_obs_space)
 
     mmin, mmax = pufferlib.utils._get_dtype_bounds(flat_obs.dtype)
     pad_obs = 0 * flat_obs
