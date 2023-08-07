@@ -1,197 +1,287 @@
 from pdb import set_trace as T
 
+import pufferlib.vectorization
+
 import torch
+from types import SimpleNamespace
 
-import pufferlib.vectorization.serial
-import pufferlib.vectorization.multiprocessing
+def default_config():
+    '''Returns a namespace of kwargs'''
+    framework = {
+        'emulate_const_horizon': 1024,
+        'vec_backend': pufferlib.vectorization.Serial,
+        'total_timesteps': 10_000_000,
+        'learning_rate': 2.5e-4,
+        'num_cores': 4,
+        'num_buffers': 2,
+        'num_envs': 4,
+        'batch_size': 1024,
+        'batch_rows': 256,
+        'bptt_horizon': 1,
+        'seed': 1,
+        'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+        'pool_rank_interval': 1,
+        'pool_update_policy_interval': 1,
+        'pool_add_policy_interval': 1,
+    }
 
-class Default:
-    emulate_const_horizon = 1024
+    policy = {
+        'input_size': 128,
+        'hidden_size': 128,
+    }
 
-    vec_backend = pufferlib.vectorization.serial.VecEnv
-    total_timesteps: int = 10_000_000
-    learning_rate: float = 2.5e-4
-    num_cores = 4
-    num_buffers = 2
-    num_envs = 4
-    batch_size = 1024
-    batch_rows = 256
-    bptt_horizon = 1
-    seed = 1
+    recurrent = {
+        'input_size': 128,
+        'hidden_size': 128,
+        'num_layers': 0,
+    }
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    policy_args = [128, 128]
-    policy_kwargs = {}
-    recurrent_args = []
-    #recurrent_args = [128, 128]
-    recurrent_kwargs = dict(num_layers=0)
+    return SimpleNamespace(
+        framework=framework,
+        policy=policy,
+        recurrent=recurrent,
+    )
 
-    pool_rank_interval=1
-    pool_update_policy_interval=1
-    pool_add_policy_interval=1
+def all():
+    '''All tested environments and platforms'''
+    return {
+        #'atari': atari,
+        #'avalon': avalon,
+        #'box2d': box2d,
+        #'butterfly': butterfly,
+        #'crafter': crafter,
+        #'dm_control': dm_control,
+        #'dm_lab': dm_lab,
+        #'griddly': griddly,
+        #'magent': magent,
+        #'microrts': microrts,
+        #'minerl': minerl,
+        'nethack': nethack,
+        'nmmo': nmmo,
+        #'procgen': procgen,
+        #'smac': smac,
+    }
 
-    @property
-    def make_binding(self):
-        return self.registry.make_binding
-
-    @property
-    def Policy(self):
-        return self.registry.Policy
-
-class Atari(Default):
-    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=1, flat_size=64*7*7)
-    recurrent_args = [512, 128]
-
-    def __init__(self, framestack):
-        import pufferlib.registry.atari
-        self.registry = pufferlib.registry.atari
-        self.all_bindings = [
-            self.make_binding('BreakoutNoFrameskip-v4', framestack=framestack),
-            self.make_binding('PongNoFrameskip-v4', framestack=framestack),
+def atari(framestack=1):
+    import pufferlib.registry.atari
+    pufferlib.utils.install_requirements('atari')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.atari.make_env: {
+            'name': name,
+            'framestack': framestack,
+        } for name in [
+            'BreakoutNoFrameskip-v4',
+            'PongNoFrameskip-v4',
         ]
+    }
+    config.policy_cls = pufferlib.registry.atari.Policy
+    config.policy.update({
+        'input_size': 512,
+        'hidden_size': 128,
+        'output_size': 128,
+        'framestack': 1,
+        'flat_size': 64*7*7,
+    })
+    config.recurrent.update({
+        'input_size': 128,
+        'hidden_size': 128,
+        'num_layers': 0,
+    })
+    return config
 
-class Avalon(Default):
-    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=1, flat_size=64*7*7)
-    recurrent_args = [512, 128]
+def avalon():
+    import pufferlib.registry.avalon
+    pufferlib.utils.install_requirements('avalon')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.avalon.make_env: {}
+    }
+    config.policy_cls = pufferlib.registry.avalon.Policy
+    config.policy.update({
+        'input_size': 512,
+        'hidden_size': 128,
+        'output_size': 128,
+        'framestack': 1,
+        'flat_size': 64*7*7,
+    })
+    config.recurrent.update({
+        'input_size': 128,
+        'hidden_size': 128,
+        'num_layers': 0,
+    })
+    return config
 
-    def __init__(self, framestack):
-        import pufferlib.registry.avalon
-        self.registry = pufferlib.registry.avalon
-        self.all_bindings = [self.make_binding()]
+def box2d():
+    import pufferlib.registry.box2d
+    pufferlib.utils.install_requirements('box2d')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.box2d.make_env: {}
+    }
+    config.policy_cls = pufferlib.registry.box2d.Policy
+    return config
 
-class Box2d(Default):
-    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=1, flat_size=64*7*7)
-    recurrent_args = [512, 128]
+def butterfly():
+    import pufferlib.registry.butterfly
+    pufferlib.utils.install_requirements('butterfly')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.butterfly.make_cooperative_pong_v5_binding: {}
+    }
+    config.policy_cls = pufferlib.registry.butterfly.Policy
+    return config
 
-    def __init__(self):
-        import pufferlib.registry.box2d
-        self.registry = pufferlib.registry.box2d
-        self.all_bindings = [self.make_binding()]
+def crafter():
+    import pufferlib.registry.crafter
+    pufferlib.utils.install_requirements('crafter')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.crafter.make_env: {}
+    }
+    config.policy_cls = pufferlib.registry.crafter.Policy
+    config.policy.update({
+        'input_size': 512,
+        'hidden_size': 128,
+        'framestack': 3, # Framestack 3 is a hack for RGB
+        'flat_size': 64*4*4,
+    })
+    return config
 
-class Butterfly(Default):
-    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=1, flat_size=64*7*7)
-    recurrent_args = [512, 128]
+def dm_control():
+    import pufferlib.registry.dmc
+    pufferlib.utils.install_requirements('dm-control')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.dmc.make_env: {}
+    }
+    config.policy_cls = pufferlib.registry.dmc.Policy
+    config.policy.update({
+        'input_size': 512,
+        'hidden_size': 128,
+        'framestack': 3, # Framestack 3 is a hack for RGB
+        'flat_size': 64*4*4,
+    })
+    return config
 
-    def __init__(self, framestack):
-        import pufferlib.registry.butterfly
-        self.registry = pufferlib.registry.butterfly
-        self.all_bindings = [
-            self.registry.make_cooperative_pong_v5_binding(),
-        ]
+def dm_lab():
+    import pufferlib.registry.dm_lab
+    pufferlib.utils.install_requirements('dm-lab')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.dm_lab.make_env: {}
+    }
+    config.policy_cls = pufferlib.registry.dm_lab.Policy
+    config.policy.update({
+        'input_size': 512,
+        'hidden_size': 128,
+        'framestack': 3, # Framestack 3 is a hack for RGB
+        'flat_size': 64*4*4,
+    })
+    return config
 
-class Crafter(Default):
-    # Framestack 3 is a hack for RGB
-    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=3, flat_size=64*4*4)
+def griddly():
+    import pufferlib.registry.griddly
+    pufferlib.utils.install_requirements('griddly')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.griddly.make_spider_v0_env: {}
+    }
+    config.policy_cls = pufferlib.registry.griddly.Policy
+    return config
 
-    def __init__(self):
-        import pufferlib.registry.crafter
-        self.registry = pufferlib.registry.crafter
-        self.all_bindings = [self.make_binding()]
+def magent():
+    import pufferlib.registry.magent
+    pufferlib.utils.install_requirements('magent')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.magent.make_battle_v4_env: {}
+    }
+    config.policy_cls = pufferlib.registry.magent.Policy
+    config.policy.update({
+        'input_size': 512,
+        'hidden_size': 128,
+        'output_size': 128,
+        'framestack': 5, # Framestack 5 is a hack for obs channels
+        'flat_size': 64*4*4,
+    })
+    return config
 
-class DMControl(Default):
-    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=3, flat_size=64*4*4)
+def microrts():
+    import pufferlib.registry.microrts
+    pufferlib.utils.install_requirements('gym-microrts')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.microrts.make_env: {}
+    }
+    config.policy_cls = pufferlib.registry.microrts.Policy
+    return config
 
-    def __init__(self):
-        import pufferlib.registry.dmc
-        self.registry = pufferlib.registry.dmc
-        self.all_bindings = [self.make_binding()]
+def minerl():
+    import pufferlib.registry.minecraft
+    pufferlib.utils.install_requirements('minerl')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.minecraft.make_env: {}
+    }
+    config.policy_cls = pufferlib.registry.minecraft.Policy
+    return config
 
-class DMLab(Default):
-    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=3, flat_size=64*4*4)
+def nethack():
+    import pufferlib.registry.nethack
+    pufferlib.utils.install_requirements('nethack')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.nethack.make_env: {}
+    }
+    config.policy_cls = pufferlib.registry.nethack.Policy
+    config.policy.update({
+        'embedding_dim': 32,
+        'crop_dim': 9,
+        'num_layers': 5,
+    })
+    return config
 
-    def __init__(self):
-        import pufferlib.registry.dm_lab
-        self.registry = pufferlib.registry.dm_lab
-        self.all_bindings = [self.make_binding()]
+def nmmo():
+    import pufferlib.registry.nmmo
+    pufferlib.utils.install_requirements('nmmo')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.nmmo.make_env: {}
+    }
+    config.policy_cls = pufferlib.registry.nmmo.Policy
+    config.policy.update({
+        'batch_size': 2**14,
+        'batch_rows': 128,
+    })
+    return config
 
-class Griddly(Default):
-    def __init__(self):
-        import pufferlib.registry.griddly
-        self.registry = pufferlib.registry.griddly
-        self.all_bindings = [self.registry.make_spider_v0_binding()]
+def procgen():
+    import pufferlib.registry.procgen
+    pufferlib.utils.install_requirements('procgen')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.procgen.make_env: {
+            'name': 'coinrun'
+        }
+    }
+    config.policy_cls = pufferlib.registry.procgen.Policy
+    return config
 
-class MAgent(Default):
-    # Framestack 5 is a hack for obs channels
-    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=5, flat_size=64*4*4)
-
-    def __init__(self):
-        import pufferlib.registry.magent
-        self.registry = pufferlib.registry.magent
-        self.all_bindings = [self.registry.make_battle_v4_binding()]
-
-class MicroRTS(Default):
-    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=5, flat_size=64*4*4)
-
-    def __init__(self):
-        import pufferlib.registry.microrts
-        self.registry = pufferlib.registry.microrts
-        self.all_bindings = [self.registry.make_env()]
-
-class MineRL(Default):
-    policy_kwargs = dict(input_size=512, hidden_size=128, output_size=128, framestack=5, flat_size=64*4*4)
-
-    def __init__(self):
-        import pufferlib.registry.minecraft
-        self.registry = pufferlib.registry.minecraft
-        self.all_bindings = [self.registry.make_env()]
-
-class NetHack(Default):
-    policy_args = []
-    policy_kwargs = dict(embedding_dim=32, crop_dim=9, num_layers=5)
-    recurrent_args = [512, 512]
-
-    def __init__(self):
-        import pufferlib.registry.nethack
-        self.registry = pufferlib.registry.nethack
-        self.all_bindings = [self.make_binding()]
-
-class NMMO(Default):
-    batch_size = 2**14
-    batch_rows = 128
-
-    def __init__(self) -> None:
-        import pufferlib.registry.nmmo
-        self.registry = pufferlib.registry.nmmo
-        self.all_bindings = [self.make_binding()]
-
-class Procgen(Default):
-    recurrent_kwargs = dict(num_layers=0)
-
-    def __init__(self):
-        import pufferlib.registry.procgen
-        self.registry = pufferlib.registry.procgen
-        self.all_bindings = [
-            self.make_binding('coinrun'),
-        ]
-
-class SMAC(Default):
-    policy_args = []
-    policy_kwargs = dict(embedding_dim=32, crop_dim=9, num_layers=5)
-    recurrent_args = [512, 512]
-
-    def __init__(self):
-        import pufferlib.registry.smac
-        self.registry = pufferlib.registry.smac
-        self.all_bindings = [self.make_binding()]
-
-
-all = {
-    'atari': Atari,
-    'avalon': Avalon,
-    'box2d': Box2d,
-    'butterfly': Butterfly,
-    'crafter': Crafter,
-    'dm_control': DMControl,
-    'dm_lab': DMLab,
-    'griddly': Griddly,
-    'magent': MAgent,
-    'microrts': MicroRTS,
-    'minerl': MineRL,
-    'nethack': NetHack,
-    'nmmo': NMMO,
-    'procgen': Procgen,
-    'smac': SMAC,
-}
+def smac():
+    import pufferlib.registry.smac
+    pufferlib.utils.install_requirements('smac')
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.smac.make_env: {}
+    }
+    config.policy_cls = pufferlib.registry.smac.Policy
+    config.policy.update({
+        'embedding_dim': 32,
+        'crop_dim': 9,
+        'num_layers': 5,
+    })
+    return config
 
 # Possible stuff to add support:
 # Deep RTS

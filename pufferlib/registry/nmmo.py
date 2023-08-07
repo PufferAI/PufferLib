@@ -20,104 +20,20 @@ EntityId = EntityState.State.attr_name_to_col["id"]
 tile_offset = torch.tensor([i*256 for i in range(3)])
 entity_offset = torch.tensor([i*256 for i in range(3, 26)])
 
-def make_binding():
-    '''Neural MMO binding creation function'''
+
+def make_env(*args, **kwargs):
+    '''Neural MMO creation function'''
     try:
         import nmmo
     except:
         raise pufferlib.utils.SetupError('Neural MMO (nmmo)')
     else:
-        return pufferlib.emulation.Binding(
-            env_cls=nmmo.Env,
-            env_name='Neural MMO',
+        return pufferlib.emulation.PettingZooPufferEnv(
+            env_creator=nmmo.Env,
+            env_args=args,
+            env_kwargs=kwargs,
         )
 
-class PufferNMMO(pufferlib.new_emulation.PufferEnv):
-    def __init__(self, teams, postprocessor_cls, *args, max_horizon=1024, **kwargs):
-        try:
-            import nmmo
-        except:
-            raise pufferlib.utils.SetupError('Neural MMO (nmmo)')
- 
-        self.env = nmmo.Env(*args, **kwargs)
-        self.teams = teams
-        self.max_horizon = max_horizon
-
-        pufferlib.new_emulation.check_teams(self.env, teams)
-        self.postprocessors = {
-            team: postprocessor_cls(self.env, self.teams, team)
-            for team in teams
-        }
-
-        self.possible_agents = self.env.possible_agents
-
-        team = list(teams.keys())[0]
-        self.observation_space(team)
-        self.action_space(team)
-
-        self._step = 0
-
-    def observation_space(self, team):
-        '''Returns the observation space for a single agent'''
-        if team not in self.teams:
-            raise pufferlib.exceptions.InvalidAgentError(team, self._teams)
-
-        # Make a gym space defining observations for the whole team
-        team_obs_space = pufferlib.new_emulation.make_team_space(self.env.observation_space, self.teams[team])
-
-        # Call user featurizer and create a corresponding gym space
-        featurized_obs_space, featurized_obs = pufferlib.new_emulation.make_featurized_obs_and_space(team_obs_space, self.postprocessors[team])
-
-        # Flatten the featurized observation space and store it for use in step. Return a box space for the user
-        self.flat_obs_space, self.box_obs_space, self.pad_obs = pufferlib.new_emulation.make_flat_obs_and_space(featurized_obs_space, featurized_obs)
-
-        return self.box_obs_space
-
-    def action_space(self, team):
-        '''Returns the action space for a single agent'''
-        if team not in self.teams:
-            raise pufferlib.exceptions.InvalidAgentError(team, self._teams)
-
-        # Make a gym space defining actions for the whole team
-        team_atn_space = pufferlib.new_emulation.make_team_space(self.env.action_space, self.teams[team])
-
-        # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
-        self.flat_action_space, multidiscrete_action_space = pufferlib.new_emulation.make_flat_and_multidiscrete_atn_space(team_atn_space):
-
-        return multidiscrete_action_space
-
-    def reset(self):
-        obs = self.env.reset()
-
-        # Group observations into teams
-        team_obs = pufferlib.new_emulation.group_into_teams(self.teams, obs)
-
-        # Call user featurizer and flatten the observations
-        return pufferlib.new_emulation.postprocess_and_flatten(
-            team_obs, self.teams, self.postprocessors, self.flat_obs_space, reset=True)
-
-    def step(self, actions):
-        for team in self.teams:
-            actions[team] = self.postprocessors[team].actions(actions[team], self._step)
-
-        pufferlib.new_emulation.check_spaces(actions, self.action_space)
-
-        # Unpack actions from multidiscrete into the original action space
-        actions = pufferlib.new_emulation.unpack_actions(actions, self.teams, self.flat_action_space)
-
-        # Ungroup actions from teams, step the env, and group the env outputs
-        team_obs, rewards, dones, infos = pufferlib.new_emulation.team_ungroup_step_group(
-            self, self.teams, self.env, actions)
-
-        # Call user postprocessors and flatten the observations
-        featurized_obs, rewards, dones, infos = pufferlib.new_emulation.postprocess_and_flatten(
-            self.teams, self.postprocessors, self.flat_obs_space,
-            team_obs, rewards, dones, infos,
-            pad_obs=self.pad_obs, max_horizon=self.max_horizon)
-
-        pufferlib.new_emulation.check_spaces(featurized_obs, self.observation_space)
-        return featurized_obs, rewards, dones, infos
- 
 
 class Policy(pufferlib.models.Policy):
   def __init__(self, binding, input_size=256, hidden_size=256, output_size=256):

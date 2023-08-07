@@ -7,7 +7,9 @@ import pufferlib
 
 # TODO: Fix circular import depending on import order
 from clean_pufferl import CleanPuffeRL
-import config as demo_config
+import config
+
+import pufferlib.utils
 
 
 def parse_arguments():
@@ -17,19 +19,11 @@ def parse_arguments():
     args = parser.parse_args()
     return args.env
 
-def install_requirements(env):
-    '''Pip install dependencies for specified environment'''
-    pip_install_cmd = [sys.executable, "-m", "pip", "install", "-e" f".[{env}]"]
-    proc = subprocess.run(pip_install_cmd, capture_output=True, text=True)
-
-    if proc.returncode != 0:
-        raise RuntimeError(f"Error installing requirements: {proc.stderr}")
-
-def train_model(binding):
+def train_model(args):
     agent = pufferlib.frameworks.cleanrl.make_policy(
-            config.Policy, recurrent_args=config.recurrent_args,
+            config.policy_cls,
             recurrent_kwargs=config.recurrent_kwargs,
-        )(binding, *config.policy_args, **config.policy_kwargs).to(config.device)
+        )(**config.policy_kwargs).to(config.policy_kwargs.device)
 
     trainer = CleanPuffeRL(
             binding,
@@ -57,12 +51,5 @@ def train_model(binding):
 if __name__ == '__main__':
     env = parse_arguments()
 
-    try:
-        install_requirements(env)
-    except RuntimeError as e:
-        print(e)
-        sys.exit(1)
-
-    config = demo_config.all[env]()
-    for binding in config.all_bindings:
-        train_model(binding)
+    args = getattr(config, env)
+    train_model(args)

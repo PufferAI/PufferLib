@@ -4,7 +4,7 @@ import pufferlib
 import pufferlib.emulation
 import pufferlib.utils
 
-def make(name='MineRLNavigateDense-v0'):
+def make_env(name='MineRLNavigateDense-v0'):
     '''Minecraft environment creation function
 
     No support for bindings yet because MineRL requires

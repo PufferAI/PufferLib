@@ -3,7 +3,7 @@ import pufferlib.emulation
 import pufferlib.utils
 
 
-def make_cartpole_binding():
+def make_cartpole_env():
     '''CartPole binding creation function
     
     This environment is a useful test because it works without
@@ -13,7 +13,6 @@ def make_cartpole_binding():
     except:
         raise pufferlib.utils.SetupError('Classic Control (gym)')
     else:
-        return pufferlib.emulation.Binding(
-            env_cls=classic_control.CartPoleEnv,
-            env_name='CartPole',
+        return pufferlib.emulation.GymPufferEnv(
+            env=classic_control.CartPoleEnv()
         )

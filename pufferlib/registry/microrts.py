@@ -3,7 +3,7 @@ import pufferlib.emulation
 import pufferlib.utils
 
 
-def make_binding():
+def make_env():
     '''Gym MicroRTS binding creation function
     
     Currently only provides a binding for the GlobalAgentCombinedRewardEnv
@@ -13,7 +13,7 @@ def make_binding():
     except:
         raise pufferlib.utils.SetupError('Gym MicroRTS')
     else:
-        return pufferlib.emulation.Binding(
-            env_cls=GlobalAgentCombinedRewardEnv,
-            env_name='Gym MicroRTS',
+        return pufferlib.emulation.PettingZooPufferEnv(
+            env_creator=GlobalAgentCombinedRewardEnv,
+            #env_name='Gym MicroRTS',
         )

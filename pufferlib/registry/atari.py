@@ -17,6 +17,7 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
 
 import pufferlib
 import pufferlib.emulation
+import pufferlib.emulation
 import pufferlib.models
 
 
@@ -80,11 +81,11 @@ class AtariFeaturizer(pufferlib.emulation.Postprocessor):
         return team_infos
 
 
-def make_env(env_name, framestack):
+def make_env(name, framestack):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
     try:
         with pufferlib.utils.Suppress():
-            env = gym.make(env_name)
+            env = gym.make(name)
     except ImportError as e:
         raise e('Cannot gym.make ALE environment (pip install pufferlib[gym])')
 
@@ -98,22 +99,5 @@ def make_env(env_name, framestack):
     env = gym.wrappers.ResizeObservation(env, (84, 84))
     env = gym.wrappers.GrayScaleObservation(env)
     env = gym.wrappers.FrameStack(env, framestack)
-
+    env = pufferlib.emulation.GymPufferEnv(env=env)
     return env
-
-
-def make_binding(env_name, framestack):
-    '''Atari binding creation function'''
-    try:
-        make_env(env_name, framestack)
-    except:
-        raise pufferlib.utils.SetupError(f'{env_name} (ale)')
-    else:
-        return pufferlib.emulation.Binding(
-            env_creator=make_env,
-            default_args=[env_name, framestack],
-            env_name=env_name,
-            postprocessor_cls=AtariFeaturizer,
-            emulate_flat_atn=True,
-            suppress_env_prints=False,
-        )

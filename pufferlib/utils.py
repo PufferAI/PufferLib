@@ -8,6 +8,7 @@ import time
 import os
 import sys
 import pickle
+import subprocess
 from filelock import FileLock
 
 import inspect
@@ -15,11 +16,20 @@ import inspect
 import pettingzoo
 import gym
 
+
 # Define a SetupError exception class below
 class SetupError(Exception):
     def __init__(self, env):
         self.message = f'{env}: Binding setup failed. Please ensure that the environment is installed correctly.'
         super().__init__(self.message)
+
+def install_requirements(env):
+    '''Pip install dependencies for specified environment'''
+    pip_install_cmd = [sys.executable, "-m", "pip", "install", "-e" f".[{env}]"]
+    proc = subprocess.run(pip_install_cmd, capture_output=True, text=True)
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"Error installing requirements: {proc.stderr}")
 
 def check_env(env):
     #assert issubclass(env_cls, gym.Env), "Not a gymnasium env (are you on old gym?)"

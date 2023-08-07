@@ -7,7 +7,21 @@ import pufferlib.emulation
 
 Policy = pufferlib.models.Default
 
-def make_spider_v0_binding():
+class GriddlyGymPufferEnv(pufferlib.emulation.GymPufferEnv):
+    def __init__(self, env_creator, env_args=[], env_kwargs={}):
+        '''Griddly envs need to be reset in order to define their obs space'''
+        def reset_env_creator(*args, **kwargs):
+            env = env_creator(*args, **kwargs)
+            env.reset()
+            return env
+
+        super().__init__(
+            env_creator=reset_env_creator,
+            env_args=env_args,
+            env_kwargs=env_kwargs,
+        )
+
+def make_spider_v0_env():
     '''Griddly Spiders binding creation function
 
     Support for Griddly is WIP because environments do not specify
@@ -19,7 +33,6 @@ def make_spider_v0_binding():
     except:
         raise pufferlib.utils.SetupError('Spiders-v0 (griddly)')
     else:
-        return pufferlib.emulation.Binding(
-            env_cls=env_cls,
-            obs_dtype=np.uint8,
+        return GriddlyGymPufferEnv(
+            env_creator=env_cls,
         )

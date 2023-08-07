@@ -11,6 +11,7 @@ from procgen import ProcgenEnv
 import pufferlib
 from pufferlib.pytorch import layer_init
 import pufferlib.emulation
+import pufferlib.emulation
 import pufferlib.models
 
 
@@ -89,21 +90,42 @@ class Policy(pufferlib.models.Policy):
         return [actions]
 
 
-class PufferWrapper(gym.Env):
-    def __init__(self, envs):
-        self.envs = envs
-        self.observation_space = envs.single_observation_space
-        self.action_space = envs.single_action_space
+class ProcgenVecEnv:
+    '''Vectorized Procgen environment wrapper
     
-    def step(self, actions):
-        obs, rewards, dones, infos = self.envs.step(np.array([actions]))
-        return obs, rewards[0], dones[0], infos[0]
+    Does not use normal PufferLib emulation'''
+    def __init__(self, env_name, num_envs=1,
+            num_levels=0, start_level=0,
+            distribution_mode="easy"):
 
-    def reset(self):
-        return self.envs.reset()
-    
-    def close(self):
-        return self.envs.close()
+        self.num_envs = num_envs
+        self.envs = ProcgenEnv(
+            env_name=env_name,
+            num_envs=num_envs,
+            num_levels=num_levels,
+            start_level=start_level,
+            distribution_mode=distribution_mode,
+        )
+
+    @property
+    def single_observation_space(self):
+        return self.envs.observation_space['rgb']
+
+    @property
+    def single_action_space(self):
+        return self.envs.action_space
+
+    def reset(self, seed=None):
+        obs = self.envs.reset()['rgb']
+        rewards = [0] * self.num_envs
+        dones = [False] * self.num_envs
+        infos = [{}] * self.num_envs
+        return obs, rewards, dones, infos
+
+    def step(self, actions):
+        actions = np.array(actions)
+        obs, rewards, dones, infos = self.envs.step(actions)
+        return obs['rgb'], rewards, dones, infos
 
 
 def make_env(env_name):
@@ -123,21 +145,4 @@ def make_env(env_name):
     envs = gym.wrappers.NormalizeReward(envs, gamma=0.999)
     envs = gym.wrappers.TransformReward(envs, lambda reward: np.clip(reward, -10, 10))
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
-    envs = PufferWrapper(envs)
     return envs
-
-
-def make_binding(env_name):
-    '''Procgen binding creation function'''
-    try:
-        make_env(env_name)
-    except:
-        raise pufferlib.utils.SetupError(f'{env_name} (procgen)')
-    else:
-        return pufferlib.emulation.Binding(
-            env_creator=make_env,
-            default_args=[env_name],
-            env_name=env_name,
-            emulate_flat_atn=True,
-            suppress_env_prints=False,
-        )

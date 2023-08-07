@@ -13,8 +13,8 @@ def make_binding():
     except:
         raise pufferlib.utils.SetupError('SMAC')
     else:
-        return pufferlib.emulation.Binding(
-            env_cls=smac_env,
-            default_args=[1000],
-            env_name='SMAC',
+        return pufferlib.emulation.PettingZooPufferEnv(
+            env_creator=smac_env,
+            env_args=[1000],
+            #env_name='SMAC',
         )

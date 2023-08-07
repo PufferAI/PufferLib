@@ -5,7 +5,7 @@ import pufferlib.emulation
 import pufferlib.utils
 
 
-def make_binding(name='DeepmindLabSeekavoidArena01-v0'):
+def make_env(name='DeepmindLabSeekavoidArena01-v0'):
     '''Deepmind Lab binding creation function
     dm-lab requires extensive setup. Use PufferTank.'''
     try:
@@ -13,8 +13,7 @@ def make_binding(name='DeepmindLabSeekavoidArena01-v0'):
     except:
         raise pufferlib.utils.SetupError('Deepmind Lab (dm-lab)')
     else:
-        return pufferlib.emulation.Binding(
+        return pufferlib.emulation.GymPufferEnv(
             env_creator=gym.make,
-            default_args=[name],
-            env_name=name,
+            env_args=[name],
         )

@@ -53,16 +53,18 @@ class Policy(pufferlib.models.Policy):
             return action
         return [action]
 
-def make_battle_v4_binding():
-    '''MAgent Battle binding creation function'''
+def make_battle_v4_env():
+    '''MAgent Battle creation function'''
     try:
         from pettingzoo.magent import battle_v4 as battle
     except:
         raise pufferlib.utils.SetupError('MAgent (pettingzoo)')
     else:
-        return pufferlib.emulation.Binding(
-            env_cls=aec_to_parallel_wrapper,
-            default_args=[battle.env()],
-            env_name='MAgent Battle v4',
-            postprocessor_cls=MAgentPostprocessor,
+        #env_name='MAgent Battle v4',
+        #postprocessor_cls=MAgentPostprocessor,
+        env = pufferlib.emulation.PettingZooPufferEnv(
+            env_creator=aec_to_parallel_wrapper,
+            env_args=[battle.env()]
         )
+        return env
+ 
