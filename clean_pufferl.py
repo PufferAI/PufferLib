@@ -619,3 +619,30 @@ class CleanPuffeRL:
     def close(self):
         if self.wandb_entity:
             wandb.finish()
+
+    def _save_checkpoint(self):
+        if self.data_dir is None:
+            return
+
+        policy_name = f"{self.exp_name}.{self.update:06d}"
+        state = {
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "global_step": self.global_step,
+            "agent_step": self.agent_step,
+            "update": self.update,
+            "learning_rate": self.learning_rate,
+            "policy_checkpoint_name": policy_name,
+            "wandb_run_id": self.wandb_run_id,
+        }
+        path = os.path.join(self.data_dir, f"trainer.pt")
+        tmp_path = path + ".tmp"
+        torch.save(state, tmp_path)
+        os.rename(tmp_path, path)
+
+        # Save the policy to the policy store
+        self.policy_store.add_policy(policy_name, self.agent, self.agent.policy_args())
+
+        if self.policy_ranker:
+            self.policy_ranker.add_policy_copy(
+                policy_name, self.policy_pool._learner_name
+            )
