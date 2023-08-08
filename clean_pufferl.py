@@ -204,23 +204,6 @@ class CleanPuffeRL:
 
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
-        self.data = SimpleNamespace(
-            buf=0,
-            sort_keys=[],
-            next_obs=next_obs,
-            next_done=next_done,
-            next_lstm_state=next_lstm_state,
-            obs=torch.zeros(
-                self.batch_size + 1, *self.binding.single_observation_space.shape
-            ).to("cpu" if self.cpu_offload else self.device),
-            actions=torch.zeros(
-                self.batch_size + 1, *self.binding.single_action_space.shape, dtype=int
-            ).to(self.device),
-            logprobs=torch.zeros(self.batch_size + 1).to(self.device),
-            rewards=torch.zeros(self.batch_size + 1).to(self.device),
-            dones=torch.zeros(self.batch_size + 1).to(self.device),
-            values=torch.zeros(self.batch_size + 1).to(self.device),
-        )
 
         allocated_torch = torch.cuda.memory_allocated(self.device) - allocated_torch
         allocated_cpu = self.process.memory_info().rss - allocated_cpu
@@ -266,7 +249,24 @@ class CleanPuffeRL:
         performance = defaultdict(list)
         progress_bar = tqdm(total=self.batch_size, disable=not show_progress)
 
-        data = self.data
+        self.data = SimpleNamespace(
+            buf=0,
+            sort_keys=[],
+            next_obs=next_obs,
+            next_done=next_done,
+            next_lstm_state=next_lstm_state,
+            obs=torch.zeros(
+                self.batch_size + 1, *self.binding.single_observation_space.shape
+            ).to("cpu" if self.cpu_offload else self.device),
+            actions=torch.zeros(
+                self.batch_size + 1, *self.binding.single_action_space.shape, dtype=int
+            ).to(self.device),
+            logprobs=torch.zeros(self.batch_size + 1).to(self.device),
+            rewards=torch.zeros(self.batch_size + 1).to(self.device),
+            dones=torch.zeros(self.batch_size + 1).to(self.device),
+            values=torch.zeros(self.batch_size + 1).to(self.device),
+        )
+
         while True:
             buf = data.buf
 
