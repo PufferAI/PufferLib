@@ -36,20 +36,12 @@ def make_env(*args, **kwargs):
 
 
 class Policy(pufferlib.models.Policy):
-  def __init__(self, binding, input_size=256, hidden_size=256, output_size=256):
-      '''Simple custom PyTorch policy subclassing the pufferlib BasePolicy
+  def __init__(self, envs, input_size=256, hidden_size=256, output_size=256):
+      super().__init__()
 
-      This requires only that you structure your network as an observation encoder,
-      an action decoder, and a critic function. If you use our LSTM support, it will
-      be added between the encoder and the decoder.
-      '''
-      super().__init__(binding)
-      # :/
-      self.raw_single_observation_space = binding.raw_single_observation_space
+      self.structured_observation_space = envs.single_observation_space
 
       # A dumb example encoder that applies a linear layer to agent self features
-      observation_size = binding.raw_single_observation_space['Entity'].shape[1]
-
       self.embedding = torch.nn.Embedding(NUM_ATTRS*256, 32)
       self.tile_conv_1 = torch.nn.Conv2d(96, 32, 3)
       self.tile_conv_2 = torch.nn.Conv2d(32, 8, 3)
@@ -60,15 +52,15 @@ class Policy(pufferlib.models.Policy):
       self.proj_fc = torch.nn.Linear(2*input_size, input_size)
 
       self.decoders = torch.nn.ModuleList([torch.nn.Linear(hidden_size, n)
-              for n in binding.single_action_space.nvec])
+              for n in envs.flat_action_space.nvec])
       self.value_head = torch.nn.Linear(hidden_size, 1)
 
   def critic(self, hidden):
       return self.value_head(hidden)
 
   def encode_observations(self, env_outputs):
-    # TODO: Change 0 for teams when teams are added
-    env_outputs = self.binding.unpack_batched_obs(env_outputs)[0]
+    env_outputs = pufferlib.emulation.unpack_batched_obs(
+        self.env.flat_observation_space, env_outputs)
 
     tile = env_outputs['Tile']
     # Center on player

@@ -7,7 +7,6 @@ import pufferlib
 
 # TODO: Fix circular import depending on import order
 from clean_pufferl import CleanPuffeRL
-import config
 
 import pufferlib.utils
 
@@ -19,31 +18,35 @@ def parse_arguments():
     args = parser.parse_args()
     return args.env
 
-def train_model(args):
-    agent = pufferlib.frameworks.cleanrl.make_policy(
-            config.policy_cls,
-            recurrent_kwargs=config.recurrent_kwargs,
-        )(**config.policy_kwargs).to(config.policy_kwargs.device)
+def make_policy(envs, config):
+    policy = config.policy_cls(envs, **config.policy)
+    if config.recurrent_cls is not None:
+        policy = pufferlib.frameworks.base.RecurrentWrapper(
+            policy, **config.recurrent)
+    policy = pufferlib.frameworks.cleanrl.Policy(policy)
+    policy = policy.to(config.cleanrl_init['device'])
+    return policy
 
+def train_model(config, env_creator):
+    env_creator_kwargs = config.env_creators[env_creator]
     trainer = CleanPuffeRL(
-            binding,
-            agent,
-            num_buffers=config.num_buffers,
-            num_envs=config.num_envs,
-            num_cores=config.num_cores,
-            batch_size=config.batch_size,
-            vec_backend=config.vec_backend,
-            seed=config.seed,
+        agent_creator=make_policy,
+        agent_kwargs={'config': config},
+        env_creator=env_creator,
+        env_creator_kwargs=env_creator_kwargs,
+        **config.cleanrl_init,
     )
 
     #trainer.load_model(path)
     #trainer.init_wandb()
 
-    num_updates = config.total_timesteps // config.batch_size
+    num_updates = (config.cleanrl_init['total_timesteps'] 
+        // config.cleanrl_init['batch_size'])
+
     for update in range(num_updates):
         print("Evaluating...", update)
         trainer.evaluate()
-        trainer.train(batch_rows=config.batch_rows, bptt_horizon=config.bptt_horizon)
+        trainer.train(**config.cleanrl_train)
 
     trainer.close()
 
@@ -51,5 +54,8 @@ def train_model(args):
 if __name__ == '__main__':
     env = parse_arguments()
 
-    args = getattr(config, env)
-    train_model(args)
+    import config as config_module
+    config = getattr(config_module, env)()
+
+    for env_creator in config.env_creators:
+        train_model(config, env_creator)

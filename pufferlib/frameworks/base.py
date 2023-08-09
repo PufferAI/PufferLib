@@ -1,50 +1,37 @@
 from pdb import set_trace as T
 
 import torch
-import torch.nn as nn
-
-from pufferlib.pytorch import BatchFirstLSTM
 
 
-def make_recurrent_policy(Policy, recurrent_cls=BatchFirstLSTM,
-        *recurrent_args, **recurrent_kwargs):
-    '''Wraps the given policy with an LSTM
-    
-    Called for you by framework-specific bindings
-    '''
-    class Recurrent(Policy):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.recurrent_policy = recurrent_cls(*recurrent_args, **recurrent_kwargs)
+class RecurrentWrapper(torch.nn.Module):
+    def __init__(self, policy, input_size, hidden_size, num_layers=1):
+        super().__init__()
+        self.policy = policy
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.recurrent = torch.nn.LSTM(
+            input_size, hidden_size, num_layers=num_layers)
 
-            # TODO: Generalize this
-            self.input_size, self.hidden_size = recurrent_args
+    def critic(self, hidden):
+        return self.policy.critic(hidden)
 
-            # TODO: More general init options
-            for name, param in self.recurrent_policy.named_parameters():
-                if "bias" in name:
-                    nn.init.constant_(param, 0)
-                elif "weight" in name:
-                    nn.init.orthogonal_(param, 1.0)
- 
-        def encode_observations(self, x, state):
-            # TODO: Check shapes
-            #assert state is not None
-            if state is not None:
-                assert len(state) == 2
+    def encode_observations(self, x, state):
+        # TODO: Generalize this
+        batch_size = x.shape[0]
+        x = x.reshape((-1, batch_size, x.shape[-1]))
 
-            assert len(x.shape) == 3
+        assert len(x.shape) == 3
+        B, TT, _ = x.shape
+        x = x.reshape(B*TT, -1)
+        
+        hidden, lookup = self.policy.encode_observations(x)
+        assert hidden.shape == (B*TT, self.input_size)
 
-            B, TT, _ = x.shape
-            x = x.reshape(B*TT, -1)
+        hidden = hidden.view(B, TT, self.input_size)
+        hidden, state = self.recurrent(hidden, state)
+        hidden = hidden.reshape(B*TT, self.hidden_size)
 
-            hidden, lookup = super().encode_observations(x)
-            assert hidden.shape == (B*TT, self.input_size)
+        return hidden, lookup, state
 
-            hidden = hidden.view(B, TT, self.input_size)
-            hidden, state = self.recurrent_policy(hidden, state)
-            hidden = hidden.reshape(B*TT, self.hidden_size)
-
-            return hidden, state, lookup
-    return Recurrent
-
+    def decode_actions(self, hidden, lookup, concat=None):
+        return self.policy.decode_actions(hidden, lookup, concat=concat)

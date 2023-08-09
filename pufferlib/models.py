@@ -9,33 +9,27 @@ import pufferlib.pytorch
 
 
 class Policy(torch.nn.Module, ABC):
-    def __init__(self, binding):
-        '''Pure PyTorch base policy
-        
-        This spec allows PufferLib to repackage your policy
-        for compatibility with RL frameworks
+    '''Pure PyTorch base policy
+    
+    This spec allows PufferLib to repackage your policy
+    for compatibility with RL frameworks
 
-        encode_observations -> decode_actions is PufferLib's equivalent of PyTorch forward
-        This structure provides additional flexibility for us to include an LSTM
-        between the encoder and decoder.
+    encode_observations -> decode_actions is PufferLib's equivalent of PyTorch forward
+    This structure provides additional flexibility for us to include an LSTM
+    between the encoder and decoder.
 
-        To port a policy to PufferLib, simply put everything from forward() before the
-        recurrent cell (or, if no recurrent cell, everything before the action head)
-        into encode_observations and put everything after into decode_actions.
+    To port a policy to PufferLib, simply put everything from forward() before the
+    recurrent cell (or, if no recurrent cell, everything before the action head)
+    into encode_observations and put everything after into decode_actions.
 
-        You can delete the recurrent cell from forward(). PufferLib handles this for you
-        with its framework-specific wrappers. Since each frameworks treats temporal data a bit
-        differently, this approach lets you write a single PyTorch network for multiple frameworks.
+    You can delete the recurrent cell from forward(). PufferLib handles this for you
+    with its framework-specific wrappers. Since each frameworks treats temporal data a bit
+    differently, this approach lets you write a single PyTorch network for multiple frameworks.
 
-        Specify the value function in critic(). This is a single value for each batch element.
-        It is called on the output of the recurrent cell (or, if no recurrent cell,
-        the output of encode_observations)
-
-        Args:
-            binding: A pufferlib.emulation.Binding object
-        '''
-        super().__init__()
-        self.binding = binding
+    Specify the value function in critic(). This is a single value for each batch element.
+    It is called on the output of the recurrent cell (or, if no recurrent cell,
+    the output of encode_observations)
+    '''
 
     @abstractmethod
     def critic(self, hidden):

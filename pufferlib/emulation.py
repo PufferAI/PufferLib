@@ -64,7 +64,7 @@ class BasicPostprocessor(Postprocessor):
 class GymPufferEnv:
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={},
             postprocessor_cls=Postprocessor):
-        self.env = make_env(env, env_creator, env_args, env_kwargs)
+        self.env = make_object(env, env_creator, env_args, env_kwargs)
         self.postprocessor = postprocessor_cls(self.env)
 
         self.initialized = False
@@ -79,12 +79,15 @@ class GymPufferEnv:
         '''Returns a flattened, single-tensor observation space'''
 
         # Call user featurizer and create a corresponding gym space
-        featurized_ob_space, featurized_ob = make_featurized_obs_and_space(self.env.observation_space, self.postprocessor)
+        self.structured_observation_space, structured_ob = make_featurized_obs_and_space(
+            self.env.observation_space, self.postprocessor)
 
-        # Flatten the featurized observation space and store it for use in step. Return a box space for the user
-        self.flat_ob_space, self.box_ob_space, self.pad_ob = make_flat_and_box_obs_space(featurized_ob_space, featurized_ob)
+        # Flatten the featurized observation space and store
+        # it for use in step. Return a box space for the user
+        self.flat_observation_space, self.box_observation_space, self.pad_observation = make_flat_and_box_obs_space(
+            self.structured_observation_space, structured_ob)
 
-        return self.box_ob_space
+        return self.box_observation_space
 
     @property
     def action_space(self):
@@ -103,7 +106,8 @@ class GymPufferEnv:
 
         # Call user featurizer and flatten the observations
         return postprocess_and_flatten(
-            ob, self.postprocessor, self.flat_ob_space, reset=True)
+            ob, self.postprocessor,
+            self.flat_observation_space, reset=True)
 
     def step(self, action):
         '''Execute an action and return (observation, reward, done, info)'''
@@ -123,7 +127,7 @@ class GymPufferEnv:
 
         # Call user postprocessors and flatten the observations
         processed_ob, single_reward, single_done, single_info = postprocess_and_flatten(
-            ob, self.postprocessor, self.flat_ob_space, reward, done, info)
+            ob, self.postprocessor, self.flat_observation_space, reward, done, info)
 
         if __debug__ and not self.observation_space.contains(processed_ob):
             raise ValueError(f'Observation:\n{processed_ob}\n '
@@ -135,7 +139,7 @@ class GymPufferEnv:
 class PettingZooPufferEnv:
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={},
                  postprocessor_cls=Postprocessor, teams=None):
-        self.env = make_env(env, env_creator, env_args, env_kwargs)
+        self.env = make_object(env, env_creator, env_args, env_kwargs)
         self.initialized = False
         self.done = True
 
@@ -162,12 +166,12 @@ class PettingZooPufferEnv:
             obs_space = self.env.observation_space(agent)
 
         # Call user featurizer and create a corresponding gym space
-        featurized_obs_space, featurized_obs = make_featurized_obs_and_space(
+        self.structured_observation_space, structured_obs = make_featurized_obs_and_space(
             obs_space, self.postprocessors[agent])
 
         # Flatten the featurized observation space and store it for use in step. Return a box space for the user
-        self.flat_obs_space, self.box_obs_space, self.pad_obs = make_flat_and_box_obs_space(
-            featurized_obs_space, featurized_obs)
+        self.flat_observation_space, self.box_observation_space, self.pad_observation = make_flat_and_box_obs_space(
+            self.structured_observation_space, structured_obs)
 
         return self.box_obs_space
 
@@ -257,20 +261,28 @@ def api_usage_checks(initialized, done):
     if done:
         raise exceptions.APIUsageError('step() called after environment is done')
 
-def make_env(env=None, env_creator=None, env_args=[], env_kwargs={}):
-    provided_args = [arg is not None for arg in (env, env_creator)]
-    if sum(provided_args) != 1:
-        raise ValueError('Exactly one of env or env_creator must be provided')
 
-    if env is not None:
-        if callable(env) or inspect.isclass(env):
-            raise TypeError('env must be an instance, not a function or class')
-        return env
+def make_object(object_instance=None, object_creator=None, creator_args=[], creator_kwargs={}):
+    if (object_instance is None) == (object_creator is None):
+        raise ValueError('Exactly one of object_instance or object_creator must be provided')
 
-    if env_creator is not None:
-        if not callable(env_creator):
-            raise TypeError('env_creator must be a callable')
-        return env_creator(*env_args, **env_kwargs)
+    if object_instance is not None:
+        if callable(object_instance) or inspect.isclass(object_instance):
+            raise TypeError('object_instance must be an instance, not a function or class')
+        return object_instance
+
+    if object_creator is not None:
+        if not callable(object_creator):
+            raise TypeError('object_creator must be a callable')
+        
+        if creator_args is None:
+            creator_args = []
+
+        if creator_kwargs is None:
+            creator_kwargs = {}
+
+        return object_creator(*creator_args, **creator_kwargs)
+
 
 def team_ungroup_step_group(self, teams, env, actions):
     actions = ungroup_from_teams(actions)

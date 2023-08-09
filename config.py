@@ -1,28 +1,28 @@
 from pdb import set_trace as T
 
 import pufferlib.vectorization
+import pufferlib.pytorch
 
 import torch
 from types import SimpleNamespace
 
 def default_config():
     '''Returns a namespace of kwargs'''
-    framework = {
-        'emulate_const_horizon': 1024,
+    cleanrl_init = {
         'vec_backend': pufferlib.vectorization.Serial,
         'total_timesteps': 10_000_000,
         'learning_rate': 2.5e-4,
-        'num_cores': 4,
+        'num_cores': 2,
         'num_buffers': 2,
-        'num_envs': 4,
+        'num_envs': 2,
         'batch_size': 1024,
-        'batch_rows': 256,
-        'bptt_horizon': 1,
         'seed': 1,
-        'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-        'pool_rank_interval': 1,
-        'pool_update_policy_interval': 1,
-        'pool_add_policy_interval': 1,
+        'device': 'cpu'#'cuda' if torch.cuda.is_available() else 'cpu',
+    }
+
+    cleanrl_train = {
+        'batch_rows': 32,
+        'bptt_horizon': 1,
     }
 
     policy = {
@@ -30,15 +30,19 @@ def default_config():
         'hidden_size': 128,
     }
 
+    recurrent_cls = pufferlib.pytorch.BatchFirstLSTM
+
     recurrent = {
         'input_size': 128,
         'hidden_size': 128,
-        'num_layers': 0,
+        'num_layers': 1,
     }
 
     return SimpleNamespace(
-        framework=framework,
+        cleanrl_init=cleanrl_init,
+        cleanrl_train=cleanrl_train,
         policy=policy,
+        recurrent_cls=recurrent_cls,
         recurrent=recurrent,
     )
 
@@ -239,6 +243,10 @@ def nethack():
         'embedding_dim': 32,
         'crop_dim': 9,
         'num_layers': 5,
+    })
+    config.recurrent.update({
+        'input_size': 512,
+        'hidden_size': 512,
     })
     return config
 

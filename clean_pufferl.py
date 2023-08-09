@@ -24,8 +24,7 @@ import pufferlib.frameworks.cleanrl
 import pufferlib.policy_pool
 import pufferlib.policy_ranker
 import pufferlib.utils
-import pufferlib.vectorization.multiprocessing
-import pufferlib.vectorization.serial
+import pufferlib.vectorization
 
 
 def unroll_nested_dict(d):
@@ -42,8 +41,11 @@ def unroll_nested_dict(d):
 
 @dataclass
 class CleanPuffeRL:
-    binding: pufferlib.emulation.Binding
-    agent: nn.Module
+    env_creator: callable = None
+    env_creator_kwargs: dict = None
+    agent: nn.Module = None
+    agent_creator: callable = None
+    agent_kwargs: dict = None
 
     exp_name: str = os.path.basename(__file__)
 
@@ -51,12 +53,13 @@ class CleanPuffeRL:
     checkpoint_interval: int = 1
     seed: int = 1
     torch_deterministic: bool = True
-    vec_backend: ... = pufferlib.vectorization.multiprocessing.VecEnv
+    vec_backend: ... = pufferlib.vectorization.Serial
     device: str = torch.device("cuda") if torch.cuda.is_available() else "cpu"
     total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
     num_buffers: int = 1
     num_envs: int = 8
+    num_agents: int = 1
     num_cores: int = psutil.cpu_count(logical=False)
     cpu_offload: bool = True
     verbose: bool = True
@@ -78,6 +81,8 @@ class CleanPuffeRL:
 
     def __post_init__(self, *args, **kwargs):
         self.start_time = time.time()
+        
+
 
         # If data_dir is provided, load the resume state
         resume_state = {}
@@ -97,7 +102,7 @@ class CleanPuffeRL:
         self.update = resume_state.get("update", 0)
 
         self.total_updates = self.total_timesteps // self.batch_size
-        self.num_agents = self.binding.max_agents
+        #self.num_agents = self.binding.max_agents
         self.envs_per_worker = self.num_envs // self.num_cores
         assert self.num_cores * self.envs_per_worker == self.num_envs
 
@@ -113,12 +118,18 @@ class CleanPuffeRL:
         allocated = self.process.memory_info().rss
         self.buffers = [
             self.vec_backend(
-                self.binding,
-                num_workers=self.num_cores,
-                envs_per_worker=self.envs_per_worker,
+                self.env_creator,
+                env_kwargs=self.env_creator_kwargs,
+                n=2,
+                #num_workers=self.num_cores,
+                #envs_per_worker=self.envs_per_worker,
             )
             for _ in range(self.num_buffers)
         ]
+
+        # If an agent_creator is provided, use envs to create the agent
+        self.agent = pufferlib.emulation.make_object(
+            self.agent, self.agent_creator, self.buffers[:1], self.agent_kwargs)
 
         if self.verbose:
             print(
@@ -148,7 +159,7 @@ class CleanPuffeRL:
         if "policy_checkpoint_name" in resume_state:
           self.agent = self.policy_store.get_policy(
             resume_state["policy_checkpoint_name"]
-          ).policy(lambda pa, b: self.agent.__class__.create_policy(b, pa), self.binding)
+          ).policy(lambda pa, b: self.agent.__class__.create_policy(b, pa), binding)
 
         # TODO: this can be cleaned up
         self.agent.is_recurrent = hasattr(self.agent, "lstm")
@@ -211,10 +222,10 @@ class CleanPuffeRL:
             next_done=next_done,
             next_lstm_state=next_lstm_state,
             obs=torch.zeros(
-                self.batch_size + 1, *self.binding.single_observation_space.shape
+                self.batch_size + 1, *self.buffers[0].single_observation_space.shape
             ).to("cpu" if self.cpu_offload else self.device),
             actions=torch.zeros(
-                self.batch_size + 1, *self.binding.single_action_space.shape, dtype=int
+                self.batch_size + 1, *self.buffers[0].single_action_space.shape, dtype=int
             ).to(self.device),
             logprobs=torch.zeros(self.batch_size + 1).to(self.device),
             rewards=torch.zeros(self.batch_size + 1).to(self.device),
@@ -278,11 +289,13 @@ class CleanPuffeRL:
             o, r, d, i = self.buffers[buf].recv()
             env_step_time += time.time() - start
 
-            i = self.policy_pool.update_scores(i, "return")
+            #i = self.policy_pool.update_scores(i, "return")
 
+            '''
             for profile in self.buffers[buf].profile():
                 for k, v in profile.items():
                     performance[k].append(v["delta"])
+            '''
 
             o = torch.Tensor(o)
             if not self.cpu_offload:
@@ -515,7 +528,7 @@ class CleanPuffeRL:
                 else:
                     _, newlogprob, entropy, newvalue = self.agent.get_action_and_value(
                         mb_obs.reshape(
-                            -1, *self.binding.single_observation_space.shape
+                            -1, *self.envs[0].single_observation_space.shape
                         ),
                         action=mb_actions,
                     )

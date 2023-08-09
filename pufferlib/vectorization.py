@@ -42,7 +42,23 @@ class SerialPufferEnvs:
     def __init__(self, env_creator, env_args=[], env_kwargs={}, n=1):
         self.envs = [env_creator(*env_args, **env_kwargs) for _ in range(n)]
         self.preallocated_obs = None
+
+    @property
+    def single_observation_space(self):
+        return self.envs[0].observation_space
  
+    @property
+    def single_action_space(self):
+        return self.envs[0].action_space
+
+    @property
+    def structured_observation_space(self):
+        return self.envs[0].structured_observation_space
+
+    @property
+    def flat_observation_space(self):
+        return self.envs[0].flat_observation_space
+
     def seed(self, seed):
         for env in self.envs:
             env.seed(seed)
@@ -65,14 +81,6 @@ class SerialPufferEnvs:
 
 class SerialGymPufferEnvs(SerialPufferEnvs):
     '''Runs multiple Puffer wrapped Gym environments in serial'''
-    @property
-    def single_observation_space(self):
-        return self.envs[0].observation_space
-
-    @property
-    def single_action_space(self):
-        return self.envs[0].action_space
-
     def reset(self, seed=None):
         for i, e in enumerate(self.envs):
             ob = e.reset(seed=seed)
@@ -277,7 +285,7 @@ class Serial(SerialGymPufferEnvs, Backend):
         assert self.async_handles is None, 'reset called after send'
         self.async_handles = super().reset(seed=seed)
 
-    def send(self, actions_lists):
+    def send(self, actions_lists, env_id=None):
         assert self.async_handles is None, 'send called before recv'
         self.async_handles = super().step(actions_lists)
 
