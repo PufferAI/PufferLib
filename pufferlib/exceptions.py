@@ -8,10 +8,9 @@ class APIUsageError(RuntimeError):
 class InvalidAgentError(ValueError):
     """Exception raised when an invalid agent key is used."""
 
-    def __init__(self, team_id, teams):
+    def __init__(self, agent_id, agents):
         message = (
-            f'Invalid agent/team ({team_id}) specified. '
-            f'Valid teams:\n{list(teams.values())}'
+            f'Invalid agent/team ({agent_id}) specified. '
+            f'Valid values:\n{agents}'
         )
         super().__init__(message)
-

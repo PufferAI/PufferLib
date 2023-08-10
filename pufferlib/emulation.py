@@ -153,6 +153,14 @@ class PettingZooPufferEnv:
         self.observation_space(self.possible_agents[0])
         self.action_space(self.possible_agents[0])
 
+    @property
+    def single_observation_space(self):
+        return self.box_observation_space
+
+    @property
+    def single_action_space(self):
+        return self.multidiscrete_action_space
+ 
     def observation_space(self, agent):
         '''Returns the observation space for a single agent'''
         if agent not in self.possible_agents:
@@ -188,9 +196,9 @@ class PettingZooPufferEnv:
             atn_space = self.env.action_space(agent)
 
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
-        self.flat_action_space, multidiscrete_action_space = make_flat_and_multidiscrete_atn_space(atn_space)
+        self.flat_action_space, self.multidiscrete_action_space = make_flat_and_multidiscrete_atn_space(atn_space)
 
-        return multidiscrete_action_space
+        return self.multidiscrete_action_space
 
     def reset(self, seed=None):
         obs = self.env.reset(seed=seed)
@@ -205,7 +213,7 @@ class PettingZooPufferEnv:
         postprocessed_obs = {}
         for agent in self.possible_agents:
             postprocessed_obs[agent] = postprocess_and_flatten(
-                obs[agent], self.postprocessors[agent], self.flat_obs_space, reset=True)
+                obs[agent], self.postprocessors[agent], self.flat_observation_space, reset=True)
             
         self.agents = list(postprocessed_obs)
         return postprocessed_obs
@@ -216,7 +224,7 @@ class PettingZooPufferEnv:
 
         if __debug__:
             for agent, atn in actions.items():
-                if agent not in self.agents:
+                if agent not in self.possible_agents:
                     raise exceptions.InvalidAgentError(agent, self.agents)
 
         # Postprocess actions and validate action spaces
@@ -229,7 +237,9 @@ class PettingZooPufferEnv:
         # Unpack actions from multidiscrete into the original action space
         unpacked_actions = {}
         for agent, atn in actions.items():
-            unpacked_actions[agent] = unpack_actions(atn, self.flat_action_space)
+            if agent in self.agents:
+                unpacked_actions[agent] = unpack_actions(
+                    atn, self.flat_action_space)
 
         # Ungroup actions from teams, step the env, and group the env outputs
         if self.teams is not None:
@@ -240,14 +250,14 @@ class PettingZooPufferEnv:
 
         # Call user postprocessors and flatten the observations
         featurized_obs = {}
-        for agent in self.possible_agents:
+        for agent in team_obs:
             featurized_obs[agent], rewards[agent], dones[agent], infos[agent] = postprocess_and_flatten(
-                team_obs[agent], self.postprocessors[agent], self.flat_obs_space,
+                team_obs[agent], self.postprocessors[agent], self.flat_observation_space,
                 rewards[agent], dones[agent], infos[agent])
 
         self.agents = list(featurized_obs)
-        postprocessed_obs, reward, done, info = pad_to_const_num_agents(
-            self.possible_agents, featurized_obs, rewards, dones, infos, self.pad_obs)
+        postprocessed_obs, rewards, dones, infos = pad_to_const_num_agents(
+            self.possible_agents, featurized_obs, rewards, dones, infos, self.pad_observation)
 
         if __debug__:
             check_spaces(postprocessed_obs, self.observation_space)
@@ -300,7 +310,7 @@ def pad_to_const_num_agents(teams, obs, rewards, dones, infos, pad_obs):
     return padded_obs, rewards, dones, infos
 
 
-def postprocess_and_flatten(ob, postprocessor, flat_obs_space,
+def postprocess_and_flatten(ob, postprocessor, flat_observation_space,
         reward=None, done=None, info=None,
         reset=False, max_horizon=None):
     if reset:
@@ -310,7 +320,7 @@ def postprocess_and_flatten(ob, postprocessor, flat_obs_space,
             reward, done, info)
 
     postprocessed_ob = postprocessor.features(ob)
-    flat_ob = flatten_to_array(ob, flat_obs_space)
+    flat_ob = flatten_to_array(ob, flat_observation_space)
 
     if reset:
         return flat_ob
@@ -324,17 +334,17 @@ def make_flat_and_multidiscrete_atn_space(atn_space):
 
 
 def make_flat_and_box_obs_space(obs_space, obs):
-    flat_obs_space = flatten_space(obs_space)  
-    flat_obs = flatten_to_array(obs, flat_obs_space)
+    flat_observation_space = flatten_space(obs_space)  
+    flat_observation = flatten_to_array(obs, flat_observation_space)
 
-    mmin, mmax = pufferlib.utils._get_dtype_bounds(flat_obs.dtype)
-    pad_obs = 0 * flat_obs
+    mmin, mmax = pufferlib.utils._get_dtype_bounds(flat_observation.dtype)
+    pad_obs = 0 * flat_observation
     box_obs_space = gym.spaces.Box(
         low=mmin, high=mmax,
-        shape=flat_obs.shape, dtype=flat_obs.dtype
+        shape=flat_observation.shape, dtype=flat_observation.dtype
     )
 
-    return flat_obs_space, box_obs_space, pad_obs
+    return flat_observation_space, box_obs_space, pad_obs
 
 
 def make_featurized_obs_and_space(obs_space, postprocessor):

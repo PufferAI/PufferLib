@@ -53,13 +53,12 @@ class CleanPuffeRL:
     checkpoint_interval: int = 1
     seed: int = 1
     torch_deterministic: bool = True
-    vec_backend: ... = pufferlib.vectorization.Serial
+    vectorization: ... = pufferlib.vectorization.Serial
     device: str = torch.device("cuda") if torch.cuda.is_available() else "cpu"
     total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
     num_buffers: int = 1
     num_envs: int = 8
-    num_agents: int = 1
     num_cores: int = psutil.cpu_count(logical=False)
     cpu_offload: bool = True
     verbose: bool = True
@@ -81,8 +80,6 @@ class CleanPuffeRL:
 
     def __post_init__(self, *args, **kwargs):
         self.start_time = time.time()
-        
-
 
         # If data_dir is provided, load the resume state
         resume_state = {}
@@ -102,7 +99,6 @@ class CleanPuffeRL:
         self.update = resume_state.get("update", 0)
 
         self.total_updates = self.total_timesteps // self.batch_size
-        #self.num_agents = self.binding.max_agents
         self.envs_per_worker = self.num_envs // self.num_cores
         assert self.num_cores * self.envs_per_worker == self.num_envs
 
@@ -117,15 +113,15 @@ class CleanPuffeRL:
         self.process = psutil.Process()
         allocated = self.process.memory_info().rss
         self.buffers = [
-            self.vec_backend(
+            self.vectorization(
                 self.env_creator,
                 env_kwargs=self.env_creator_kwargs,
-                n=2,
-                #num_workers=self.num_cores,
-                #envs_per_worker=self.envs_per_worker,
+                num_workers=self.num_cores,
+                envs_per_worker=self.envs_per_worker,
             )
             for _ in range(self.num_buffers)
         ]
+        self.num_agents = self.buffers[0].num_agents
 
         # If an agent_creator is provided, use envs to create the agent
         self.agent = pufferlib.emulation.make_object(
@@ -192,7 +188,7 @@ class CleanPuffeRL:
         ### Allocate Storage
         next_obs, next_done, next_lstm_state = [], [], []
         for i, envs in enumerate(self.buffers):
-            envs.async_reset(self.seed + i * self.num_envs)
+            envs.async_reset(self.seed + i)
             next_done.append(
                 torch.zeros((self.num_envs * self.num_agents,)).to(self.device)
             )

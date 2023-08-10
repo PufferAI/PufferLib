@@ -96,7 +96,7 @@ class RecurrentWrapper(torch.nn.Module):
         hidden, state = self.recurrent(hidden, state)
         hidden = hidden.reshape(B*TT, self.hidden_size)
 
-        hidden, critic = self.policy.decode_actions(hidden, lookup, concat=True)
+        hidden, critic = self.policy.decode_actions(hidden, lookup)
         return hidden, critic, state
 
 

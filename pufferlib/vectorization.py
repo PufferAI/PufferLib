@@ -3,6 +3,7 @@ from pdb import set_trace as T
 import numpy as np
 import itertools
 import inspect
+from abc import ABC
 
 import pufferlib.emulation
 from pufferlib.emulation import GymPufferEnv, PettingZooPufferEnv
@@ -12,33 +13,9 @@ RESET = 0
 SEND = 1
 RECV = 2
 
-class Backend:
-    def __init__(self, env_creator, n):
-        raise NotImplementedError
 
-    def send(self, actions):
-        raise NotImplementedError
-    
-    def recv(self):
-        raise NotImplementedError
-    
-    def async_reset(self, seed=None):
-        raise NotImplementedError
-
-    def profile_all(self):
-        raise NotImplementedError
-
-    def put(self, *args, **kwargs):
-        raise NotImplementedError
-    
-    def get(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def close(self):
-        raise NotImplementedError
-
-
-class SerialPufferEnvs:
+class MultiEnv(ABC):
+    '''Abstract base class for running multiple Puffer wrapped environments in serial'''
     def __init__(self, env_creator, env_args=[], env_kwargs={}, n=1):
         self.envs = [env_creator(*env_args, **env_kwargs) for _ in range(n)]
         self.preallocated_obs = None
@@ -79,7 +56,7 @@ class SerialPufferEnvs:
             env.close()
 
 
-class SerialGymPufferEnvs(SerialPufferEnvs):
+class GymMultiEnv(MultiEnv):
     '''Runs multiple Puffer wrapped Gym environments in serial'''
     def reset(self, seed=None):
         for i, e in enumerate(self.envs):
@@ -119,20 +96,12 @@ class SerialGymPufferEnvs(SerialPufferEnvs):
         return self.preallocated_obs, rewards, dones, infos
 
 
-class SerialPettingZooPufferEnvs(SerialPufferEnvs):
+class PettingZooMultiEnv(MultiEnv):
     '''Runs multiple Puffer wrapped Petting Zoo envs in serial'''
     def __init__(self, env_creator, env_args=[], env_kwargs={}, n=1):
         super().__init__(env_creator, env_args, env_kwargs, n)
         self.agent_keys = None
-
-    @property
-    def single_observation_space(self):
-        return self.envs[0].observation_space(self.envs[0].possible_agents[0])
-
-    @property
-    def single_action_space(self):
-        return self.envs[0].action_space(self.envs[0].possible_agents[0])
-  
+ 
     def reset(self, seed=None):
         self.agent_keys = []
         for e in self.envs:
@@ -181,70 +150,76 @@ class SerialPettingZooPufferEnvs(SerialPufferEnvs):
         return self.preallocated_obs, rewards, dones, infos
 
 
-class VecEnv:
-    def __init__(self, env_creator, env_args=[], env_kwargs={},
+class VecEnv(ABC):
+    '''Abstract base class for the vectorization API
+    
+    Contains shared code for splitting/aggregating data across multiple environments
+    '''
+    def __init__(self,
+            env_creator=None, env_args=[], env_kwargs={},
             num_workers=1, envs_per_worker=1):
-        # Figure out whether to use Gym or PettingZoo as a backend
-        if inspect.isclass(env_creator):
-            if issubclass(env_creator, GymPufferEnv):
-                self._backend = SerialGymPufferEnvs
-            elif issubclass(env_creator, PettingZooPufferEnv):
-                self._backend = SerialPettingZooPufferEnvs
-            else:
-                raise TypeError('env_creator must be a GymPufferEnv or PettingZooPufferEnv class')
-        elif callable(env_creator):
-            created_env = env_creator(*env_args, **env_kwargs)
-            if isinstance(created_env, GymPufferEnv):
-                self._backend = SerialGymPufferEnvs
-            elif isinstance(created_env, PettingZooPufferEnv):
-                self._backend = SerialPettingZooPufferEnvs
-            else:
-                raise TypeError('created env must be an instance of GymPufferEnv or PettingZooPufferEnv')
-        else:
-            raise TypeError('env_creator must be a callable or a class')
-       
-        assert envs_per_worker > 0, 'Each worker must have at least 1 env'
-        assert type(envs_per_worker) == int
 
+        self.async_handles = None
         self.num_workers = num_workers
-        self.envs_per_worker = envs_per_worker
-
         self.state = RESET
-        self.preallocated_obs = None
-        self.num_agents = None
 
-        self.backends = [
-            puffer_env_cls(envs_per_worker)
-            for _ in range(self.num_workers)
-        ]
+        # Determine if the env uses Gym or PettingZoo
+        self._driver_env = env_creator(*env_args, **env_kwargs)
+        if isinstance(self._driver_env, GymPufferEnv):
+            self._wrapper = GymMultiEnv
+            self._num_agents = 1
+        elif isinstance(self._driver_env, PettingZooPufferEnv):
+            self._wrapper = PettingZooMultiEnv
+            self._num_agents = len(self._driver_env.possible_agents)
+        else:
+            raise TypeError('env_creator must return an instance of GymPufferEnv or PettingZooPufferEnv')
 
-    def close(self):
-        for backend in self.backends:
-            backend.close()
+        # Preallocate storeage for observations
+        self.preallocated_obs = np.empty((
+            self.num_agents * num_workers * envs_per_worker,
+            *self.single_observation_space.shape,
+        ), dtype=self.single_observation_space.dtype)
 
-    def profile(self):
-        return list(itertools.chain.from_iterable([e.profile() for e in self.backends]))
+    @property
+    def num_agents(self):
+        return self._num_agents
 
-    def async_reset(self, seed=None):
-        assert self.state == RESET, 'Call reset only once on initialization'
+    @property
+    def single_observation_space(self):
+        if self._wrapper == GymMultiEnv:
+            return self._driver_env.observation_space
+        return self._driver_env.single_observation_space
+ 
+    @property
+    def single_action_space(self):
+        if self._wrapper == GymMultiEnv:
+            return self._driver_env.action_space
+        return self._driver_env.single_action_space
+
+    @property
+    def structured_observation_space(self):
+        return self._driver_env.structured_observation_space
+
+    @property
+    def flat_observation_space(self):
+        return self._driver_env.flat_observation_space
+
+    def send(self, actions, env_id=None):
+        assert self.state == SEND, 'Call reset + recv before send'
         self.state = RECV
 
-        for backend in self.backends:
-            backend.async_reset(seed=seed)
-            if seed is not None:
-                seed += self.envs_per_worker * self.binding.max_agents
+        if type(actions) == list:
+            actions = np.array(actions)
 
+        actions_split = np.array_split(actions, self.num_workers)
+        self._send(actions_split)
+  
     def recv(self):
         assert self.state == RECV, 'Call reset before stepping'
         self.state = SEND
 
-        returns = [backend.recv() for backend in self.backends]
+        returns = self._recv()
         obs, rewards, dones, infos = list(zip(*returns))
-
-        if self.preallocated_obs is None:
-            ob = obs[0]
-            self.num_agents = len(ob)
-            self.preallocated_obs = np.empty((len(obs)*self.num_agents, *ob.shape[1:]), dtype=ob.dtype)
 
         for i, o in enumerate(obs):
             self.preallocated_obs[i*self.num_agents:(i+1)*self.num_agents] = o
@@ -255,17 +230,14 @@ class VecEnv:
 
         return self.preallocated_obs, rewards, dones, infos
 
-    def send(self, actions, env_id=None):
-        assert self.state == SEND, 'Call reset + recv before send'
+    def async_reset(self, seed=None):
+        assert self.state == RESET, 'Call reset only once on initialization'
         self.state = RECV
 
-        if type(actions) == list:
-            actions = np.array(actions)
+        self._async_reset(seed=seed)
 
-        actions_split = np.array_split(actions, self.num_workers)
-
-        for backend, atns in zip(self.backends, actions_split):
-            backend.send(atns)
+    def profile(self):
+        return list(itertools.chain.from_iterable([self._profile()]))
 
     def reset(self, seed=None):
         self.async_reset()
@@ -275,163 +247,172 @@ class VecEnv:
         self.send(actions)
         return self.recv()
 
- 
-class Serial(SerialGymPufferEnvs, Backend):
-    def __init__(self, env_creator=None, env_args=[], env_kwargs={}, n=1):
-        super().__init__(env_creator, env_args, env_kwargs, n)
-        self.async_handles = None
+    def put(self, *args, **kwargs):
+        raise NotImplementedError
+    
+    def get(self, *args, **kwargs):
+        raise NotImplementedError
 
-    def async_reset(self, seed=None):
-        assert self.async_handles is None, 'reset called after send'
-        self.async_handles = super().reset(seed=seed)
-
-    def send(self, actions_lists, env_id=None):
-        assert self.async_handles is None, 'send called before recv'
-        self.async_handles = super().step(actions_lists)
-
-    def recv(self):
-        assert self.async_handles is not None, 'recv called before reset or send'
-        async_handles = self.async_handles
-        self.async_handles = None
-        return async_handles
+    def close(self):
+        raise NotImplementedError
 
 
-class Multiprocessing(Backend):
-    def __init__(self, env_creator, n):
+
+class Serial(VecEnv):
+    def __init__(self,
+            env_creator=None, env_args=[], env_kwargs={},
+            num_workers=1, envs_per_worker=1):
+        '''Runs environments in serial on the main process
+        
+        Use this vectorization module for debugging environments
+        '''
+        super().__init__(env_creator, env_args, env_kwargs,
+            num_workers, envs_per_worker)
+
+        self.envs = [
+            self._wrapper(env_creator, env_args, env_kwargs, envs_per_worker)
+            for _ in range(num_workers)
+        ]
+
+    def _send(self, actions):
+        self.data = [e.step(a) for e, a in zip(self.envs, actions)]
+    
+    def _recv(self):
+        return self.data
+    
+    def _async_reset(self, seed=None):
+        if seed is None:
+            self.data = [e.reset() for e in self.envs]
+        else:
+            self.data = [e.reset(seed=seed+idx) for idx, e in enumerate(self.envs)]
+
+    def _profile(self):
+        return [e.profile() for e in self.envs]
+
+    def put(self, *args, **kwargs):
+        for e in self.envs:
+            e.put(*args, **kwargs)
+    
+    def get(self, *args, **kwargs):
+        return [e.get(*args, **kwargs) for e in self.envs]
+
+    def close(self):
+        for e in self.envs:
+            e.close()
+
+
+class Multiprocessing(VecEnv):
+    '''Runs environments in parallel on multiple processes
+    
+    Use this module for most applications
+    '''
+    def __init__(self,
+            env_creator=None, env_args=[], env_kwargs={},
+            num_workers=1, envs_per_worker=1):
+        super().__init__(env_creator, env_args, env_kwargs,
+            num_workers, envs_per_worker)
+
         from multiprocessing import Process, Queue
-        self.request_queue = Queue()
-        self.response_queue = Queue()
-        self.process = Process(target=self._worker_process, args=(env_creator, n, self.request_queue, self.response_queue))
-        self.process.start()
+        self.request_queues = [Queue() for _ in range(num_workers * envs_per_worker)]
+        self.response_queues = [Queue() for _ in range(num_workers * envs_per_worker)]
 
-    def _worker_process(self, env_creator, n, request_queue, response_queue):
-        self.envs = MultiEnv(env_creator, n)
+        self.processes = [Process(
+            target=self._worker_process,
+            args=(self._wrapper, env_creator, env_args, env_kwargs,
+                  envs_per_worker, self.request_queues[i], self.response_queues[i])) 
+            for i in range(num_workers * envs_per_worker)]
+
+        for p in self.processes:
+            p.start()
+
+    def _worker_process(self, wrapper, env_creator, env_args, env_kwargs, n, request_queue, response_queue):
+        envs = wrapper(env_creator, env_args, env_kwargs, n=n)
 
         while True:
             request, args, kwargs = request_queue.get()
-            func = getattr(self.envs, request)
+            func = getattr(envs, request)
             response = func(*args, **kwargs)
             response_queue.put(response)
 
-    def seed(self, seed):
-        self.request_queue.put(("seed", [seed], {}))
+    def _send(self, actions_lists):
+        for queue, actions in zip(self.request_queues, actions_lists):
+            queue.put(("step", [actions], {}))
 
-    def profile(self):
-        self.request_queue.put(("profile", [], {}))
-        return self.response_queue.get()
+    def _recv(self):
+        return [queue.get() for queue in self.response_queues]
+
+    def _async_reset(self, seed=None):
+        for queue in self.request_queues:
+            queue.put(("reset", [seed], {}))
+
+    def _profile(self):
+        for queue in self.request_queues:
+            queue.put(("profile", [], {}))
+
+        return [queue.get() for queue in self.response_queues]
 
     def put(self, *args, **kwargs):
-        self.request_queue.put(("put", args, kwargs))
+        for queue in self.request_queues:
+            queue.put(("put", args, kwargs))
 
     def get(self, *args, **kwargs):
-        self.request_queue.put(("get", args, kwargs))
-        return self.response_queue.get()
+        for queue in self.request_queues:
+            queue.put(("get", args, kwargs))
+        
+        return [queue.get() for queue in self.response_queues]
 
     def close(self):
-        self.request_queue.put(("close", [], {}))
-
-    def async_reset(self, seed=None):
-        self.request_queue.put(("reset", [seed], {}))
-
-    def reset(self, seed=None):
-        self.request_queue.put(("reset", [seed], {}))
-        return self.response_queue.get()
-
-    def step(self, actions_lists):
-        self.send(actions_lists)
-        return self.recv()
-
-    def send(self, actions_lists):
-        self.request_queue.put(("step", [actions_lists], {}))
-
-    def recv(self):
-        return self.response_queue.get()
+        for queue in self.request_queues:
+            queue.put(("close", [], {}))
 
 
-class SharedMemoryMultiprocessing(Multiprocessing):
-    def __init__(self, env_creator, n, obs_shape):
-        from multiprocessing import shared_memory
-        super().__init__(env_creator, n)
-        self.obs_shape = (n,) + obs_shape
-        self.obs_shm = shared_memory.SharedMemory(create=True, size=np.prod(self.obs_shape) * np.dtype(np.float32).itemsize)
-        self.obs_np = np.ndarray(self.obs_shape, dtype=np.float32, buffer=self.obs_shm.buf)
+class Ray(VecEnv):
+    '''Runs environments in parallel on multiple processes using Ray
 
-    def _worker_process(self, env_creator, n, request_queue, response_queue):
-        self.envs = MultiEnv(env_creator, n)
+    Use this module for distributed simulation on a cluster. It can also be
+    faster than multiprocessing on a single machine for specific environments.
+    '''
+    def __init__(self,
+            env_creator=None, env_args=[], env_kwargs={},
+            num_workers=1, envs_per_worker=1):
+        super().__init__(env_creator, env_args, env_kwargs,
+            num_workers, envs_per_worker)
 
-        while True:
-            request, args, kwargs = request_queue.get()
-
-            if request == "terminate":
-                self.envs.close()
-                self.obs_shm.close()
-                break
-
-            elif request == "step":
-                actions_lists = args[0]
-                results = self.envs.step(actions_lists)
-
-                for i, (obs, _, _, _) in enumerate(results):
-                    self.obs_np[i] = obs
-
-                dones = [result[2] for result in results]
-                response_queue.put((len(results), dones))
-
-            else:
-                func = getattr(self.envs, request)
-                response = func(*args, **kwargs)
-                response_queue.put(response)
-
-    def step(self, actions_lists):
-        self.send(actions_lists)
-        return self.recv()
-
-    def recv(self):
-        num_new_obs, dones = self.response_queue.get()
-        return self.obs_np[:num_new_obs], dones
-
-
-class Ray(Backend):
-    def __init__(self, env_creator, n):
         import ray
+        self.ray = ray
         ray.init(
             include_dashboard=False,  # WSL Compatibility
             ignore_reinit_error=True,
         )
-        @ray.remote
-        class RemoteMultiEnv(MultiEnv):
-            pass
 
-        self.remote_env = RemoteMultiEnv.remote(env_creator, n)
-        #self.remote_env = ray.remote(MultiEnv).remote(env_creator, n)
-        self.ray = ray
+        self.envs = [
+            ray.remote(self._wrapper).remote(
+                env_creator, env_args, env_kwargs, envs_per_worker
+            ) for _ in range(num_workers)
+        ]
 
-    def seed(self, seed):
-        return self.ray.get(self.remote_env.seed.remote(seed))
+    def _send(self, actions):
+        self.async_handles = [e.step.remote(a) for e, a in zip(self.envs, actions)]
+    
+    def _recv(self):
+        return self.ray.get(self.async_handles)
+    
+    def _async_reset(self, seed=None):
+        if seed is None:
+            self.async_handles = [e.reset.remote() for e in self.envs]
+        else:
+            self.async_handles = [e.reset.remote(seed=seed+idx) for idx, e in enumerate(self.envs)]
 
-    def profile(self):
-        return self.ray.get(self.remote_env.profile.remote())
+    def _profile(self):
+        return self.ray.get([e.profile.remote() for e in self.envs])
 
     def put(self, *args, **kwargs):
-        return self.ray.get(self.remote_env.put.remote(*args, **kwargs))
-
+        for e in self.envs:
+            e.put.remote(*args, **kwargs)
+    
     def get(self, *args, **kwargs):
-        return self.ray.get(self.remote_env.get.remote(*args, **kwargs))
+        return self.ray.get([e.get.remote(*args, **kwargs) for e in self.envs])
 
     def close(self):
-        return self.ray.get(self.remote_env.close.remote())
-
-    def async_reset(self, seed=None):
-        self.future = self.remote_env.reset.remote(seed)
-
-    def reset_all(self, seed=None):
-        return self.ray.get(self.remote_env.reset.remote(seed))
-
-    def step(self, actions_lists):
-        return self.ray.get(self.remote_env.step.remote(actions_lists))
-
-    def send(self, actions_lists):
-        self.future = self.remote_env.step.remote(actions_lists)
-
-    def recv(self):
-        return self.ray.get(self.future)
+        for e in self.envs:
+            e.close.remote()

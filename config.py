@@ -9,7 +9,7 @@ from types import SimpleNamespace
 def default_config():
     '''Returns a namespace of kwargs'''
     cleanrl_init = {
-        'vec_backend': pufferlib.vectorization.Serial,
+        'vectorization': pufferlib.vectorization.Ray,
         'total_timesteps': 10_000_000,
         'learning_rate': 2.5e-4,
         'num_cores': 2,
@@ -254,14 +254,16 @@ def nmmo():
     import pufferlib.registry.nmmo
     pufferlib.utils.install_requirements('nmmo')
     config = default_config()
+    config.cleanrl_init.update({
+        'batch_size': 2**14,
+    })
+    config.cleanrl_train.update({
+        'batch_rows': 128,
+    })
     config.env_creators = {
         pufferlib.registry.nmmo.make_env: {}
     }
     config.policy_cls = pufferlib.registry.nmmo.Policy
-    config.policy.update({
-        'batch_size': 2**14,
-        'batch_rows': 128,
-    })
     return config
 
 def procgen():
