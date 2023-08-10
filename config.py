@@ -9,7 +9,7 @@ from types import SimpleNamespace
 def default_config():
     '''Returns a namespace of kwargs'''
     cleanrl_init = {
-        'vectorization': pufferlib.vectorization.Ray,
+        'vectorization': pufferlib.vectorization.Serial,
         'total_timesteps': 10_000_000,
         'learning_rate': 2.5e-4,
         'num_cores': 2,

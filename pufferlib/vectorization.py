@@ -36,11 +36,6 @@ class MultiEnv(ABC):
     def flat_observation_space(self):
         return self.envs[0].flat_observation_space
 
-    def seed(self, seed):
-        for env in self.envs:
-            env.seed(seed)
-            seed += 1
-
     def profile(self):
         return [e.timers for e in self.envs]
 
@@ -60,15 +55,15 @@ class GymMultiEnv(MultiEnv):
     '''Runs multiple Puffer wrapped Gym environments in serial'''
     def reset(self, seed=None):
         for i, e in enumerate(self.envs):
-            ob = e.reset(seed=seed)
+            if seed is None:
+                ob = e.reset()
+            else:
+                ob = e.reset(seed=hash(1000*seed + i))
 
             if self.preallocated_obs is None:
                 self.preallocated_obs = np.empty((len(self.envs), *ob.shape), dtype=ob.dtype)
 
             self.preallocated_obs[i] = ob
-
-            if seed is not None:
-                seed += 1
 
         rewards = [0] * len(self.preallocated_obs)
         dones = [False] * len(self.preallocated_obs)
@@ -105,7 +100,11 @@ class PettingZooMultiEnv(MultiEnv):
     def reset(self, seed=None):
         self.agent_keys = []
         for e in self.envs:
-            obs = e.reset(seed=seed)
+            if seed is None:
+                obs = e.reset()
+            else:
+                obs = e.reset(seed=hash(1000*seed + i))
+
             self.agent_keys.append(list(obs.keys()))
 
             if self.preallocated_obs is None:
@@ -114,9 +113,6 @@ class PettingZooMultiEnv(MultiEnv):
 
             for i, o in enumerate(obs.values()):
                 self.preallocated_obs[i] = o
-
-            if seed is not None:
-                seed += 1
 
         rewards = [0] * len(self.preallocated_obs)
         dones = [False] * len(self.preallocated_obs)
@@ -342,8 +338,12 @@ class Multiprocessing(VecEnv):
         return [queue.get() for queue in self.response_queues]
 
     def _async_reset(self, seed=None):
-        for queue in self.request_queues:
-            queue.put(("reset", [seed], {}))
+        if seed is None:
+            for queue in self.request_queues:
+                queue.put(("reset", [], {}))
+        else:
+            for idx, queue in enumerate(self.request_queues):
+                queue.put(("reset", [], {"seed": seed+idx}))
 
     def _profile(self):
         for queue in self.request_queues:
