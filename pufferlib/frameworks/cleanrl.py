@@ -3,9 +3,6 @@ from pdb import set_trace as T
 import torch
 from torch.distributions import Categorical
 
-import pufferlib
-import pufferlib.models
-import pufferlib.frameworks.base
 
 class Policy(torch.nn.Module):
     '''Wrap a PyTorch model for use with CleanRL
@@ -27,19 +24,18 @@ class Policy(torch.nn.Module):
     def lstm(self):
         return self.policy.recurrent
 
-    def _compute_hidden(self, x, state=None):
-        hidden, lookup, state = self.policy.encode_observations(x, state)
-        return hidden, lookup, state
-
     def get_value(self, x, state, done=None):
-        hidden, lookup, _ = self._compute_hidden(x, state)
-        return self.policy.critic(hidden)
+        _, value, _ = self.policy(x, state)
+        return value
 
     def get_action_and_value(self, x, state=None, done=None, action=None):
-        hidden, lookup, state = self._compute_hidden(x, state)
-        value = self.policy.critic(hidden)
-        flat_logits = self.policy.decode_actions(hidden, lookup, concat=False)
-        multi_categorical = [Categorical(logits=l) for l in flat_logits]
+        logits, value, state = self.policy(x, state)
+
+        # Check for single action space
+        if isinstance(logits, torch.Tensor):
+            logits = [logits]
+
+        multi_categorical = [Categorical(logits=l) for l in logits]
 
         if action is None:
             action = torch.stack([c.sample() for c in multi_categorical])

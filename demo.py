@@ -9,6 +9,7 @@ import pufferlib
 from clean_pufferl import CleanPuffeRL
 
 import pufferlib.utils
+import pufferlib.models
 
 
 def parse_arguments():
@@ -21,7 +22,7 @@ def parse_arguments():
 def make_policy(envs, config):
     policy = config.policy_cls(envs, **config.policy)
     if config.recurrent_cls is not None:
-        policy = pufferlib.frameworks.base.RecurrentWrapper(
+        policy = pufferlib.models.RecurrentWrapper(
             policy, **config.recurrent)
     policy = pufferlib.frameworks.cleanrl.Policy(policy)
     policy = policy.to(config.cleanrl_init['device'])

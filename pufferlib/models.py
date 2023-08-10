@@ -32,13 +32,6 @@ class Policy(torch.nn.Module, ABC):
     '''
 
     @abstractmethod
-    def critic(self, hidden):
-        '''Computes the value function from the hidden state
-        
-        Returns a single value for each batch element'''
-        raise NotImplementedError
-
-    @abstractmethod
     def encode_observations(self, flat_observations):
         '''Encodes a batch of observations into hidden states
 
@@ -67,10 +60,45 @@ class Policy(torch.nn.Module, ABC):
 
         Returns:
             actions: Tensor of (batch, ..., action_size)
+            value: Tensor of (batch, ...)
 
         actions is a concatenated tensor of logits for each action space dimension.
         It should be of shape (batch, ..., sum(action_space.nvec))'''
         raise NotImplementedError
+
+
+class RecurrentWrapper(torch.nn.Module):
+    def __init__(self, policy, input_size, hidden_size, num_layers=1):
+        super().__init__()
+
+        if not isinstance(policy, Policy):
+            raise ValueError('Subclass pufferlib.Policy to use RecurrentWrapper')
+
+        self.policy = policy
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+
+        self.recurrent = torch.nn.LSTM(
+            input_size, hidden_size, num_layers=num_layers)
+
+    def forward(self, x, state):
+        batch_size = x.shape[0]
+        x = x.reshape((-1, batch_size, x.shape[-1]))
+
+        assert len(x.shape) == 3
+        B, TT, _ = x.shape
+        x = x.reshape(B*TT, -1)
+        
+        hidden, lookup = self.policy.encode_observations(x)
+        assert hidden.shape == (B*TT, self.input_size)
+
+        hidden = hidden.view(B, TT, self.input_size)
+        hidden, state = self.recurrent(hidden, state)
+        hidden = hidden.reshape(B*TT, self.hidden_size)
+
+        hidden, critic = self.policy.decode_actions(hidden, lookup, concat=True)
+        return hidden, critic, state
+
 
 class Default(Policy):
     def __init__(self, binding, input_size=128, hidden_size=128):

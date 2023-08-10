@@ -173,7 +173,7 @@ class PettingZooPufferEnv:
         self.flat_observation_space, self.box_observation_space, self.pad_observation = make_flat_and_box_obs_space(
             self.structured_observation_space, structured_obs)
 
-        return self.box_obs_space
+        return self.box_observation_space
 
     def action_space(self, agent):
         '''Returns the action space for a single agent'''

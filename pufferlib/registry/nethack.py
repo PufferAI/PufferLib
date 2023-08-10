@@ -21,7 +21,7 @@ def make_env():
             env_creator=nle.env.NLE,
         )
 
-class Policy(torch.nn.Module):
+class Policy(pufferlib.models.Policy):
     '''Default NetHack Learning Environment policy ported from the nle release'''
     def __init__(self, envs, *args,
             embedding_dim=32, crop_dim=9, num_layers=5,
@@ -117,9 +117,6 @@ class Policy(torch.nn.Module):
         self.policy = nn.Linear(self.h_dim, self.num_actions)
         self.baseline = nn.Linear(self.h_dim, 1)
 
-    def critic(self, hidden):
-        return self.baseline(hidden)
-
     def _select(self, embed, x):
         # Work around slow backward pass of nn.Embedding, see
         # https://github.com/pytorch/pytorch/issues/24912
@@ -157,9 +154,8 @@ class Policy(torch.nn.Module):
 
     def decode_actions(self, hidden, lookup, concat=None):
         action = self.policy(hidden)
-        if concat:
-            return action
-        return [action]
+        baseline = self.baseline(hidden)
+        return action, baseline
 
 class Crop(nn.Module):
     """Helper class for NetHackNet below."""
