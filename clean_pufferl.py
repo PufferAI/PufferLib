@@ -267,6 +267,7 @@ class CleanPuffeRL:
         progress_bar = tqdm(total=self.batch_size, disable=not show_progress)
 
         data = self.data
+        data.sort_keys = []
         while True:
             buf = data.buf
 
