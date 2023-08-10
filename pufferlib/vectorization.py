@@ -99,11 +99,11 @@ class PettingZooMultiEnv(MultiEnv):
  
     def reset(self, seed=None):
         self.agent_keys = []
-        for e in self.envs:
+        for idx, e in enumerate(self.envs):
             if seed is None:
                 obs = e.reset()
             else:
-                obs = e.reset(seed=hash(1000*seed + i))
+                obs = e.reset(seed=hash(1000*seed + idx))
 
             self.agent_keys.append(list(obs.keys()))
 

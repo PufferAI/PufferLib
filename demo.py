@@ -23,7 +23,7 @@ def make_policy(envs, config):
     policy = config.policy_cls(envs, **config.policy)
     if config.recurrent_cls is not None:
         policy = pufferlib.models.RecurrentWrapper(
-            policy, **config.recurrent)
+            envs, policy, **config.recurrent)
     policy = pufferlib.frameworks.cleanrl.Policy(policy)
     policy = policy.to(config.cleanrl_init['device'])
     return policy

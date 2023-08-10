@@ -2,7 +2,7 @@ import gym
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.utils
+import pufferlib.exceptions
 
 def make(name, *args):
     '''Deepmind Control environment creation function
@@ -13,6 +13,6 @@ def make(name, *args):
         from dm_control import suite
         import gym_dmc
     except:
-        raise pufferlib.utils.SetupError('Deepmind Control (dmc)')
+        raise pufferlib.exceptions.SetupError('dmc', name)
     else:
         return gym.make(name, *args)

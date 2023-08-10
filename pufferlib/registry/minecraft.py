@@ -2,19 +2,24 @@ import gym
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.utils
+import pufferlib.exceptions
+import pufferlib.models
+
+
+Policy = pufferlib.models.Default
 
 def make_env(name='MineRLNavigateDense-v0'):
     '''Minecraft environment creation function
 
-    No support for bindings yet because MineRL requires
-    a very old version of Gym
-    
-    TODO: Add support for Gym 0.19
+    Currently broken: requires Gym 0.19, which
+    is a broken package 
     '''
     try:
         import minerl
     except:
-        raise pufferlib.utils.SetupError('Minecraft (MineRL)')
+        raise pufferlib.exceptions.SetupError('minerl', name)
     else:
-        return gym.make(name)
+        return pufferlib.emulation.GymPufferEnv(
+            env_creator=gym.make,
+            env_args=[name],
+        )

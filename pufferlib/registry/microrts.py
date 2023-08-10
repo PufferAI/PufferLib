@@ -1,19 +1,25 @@
+from pdb import set_trace as T
+
 import pufferlib
 import pufferlib.emulation
-import pufferlib.utils
+import pufferlib.exceptions
+import pufferlib.models
+
+
+Policy = pufferlib.models.Default
+
 
 
 def make_env():
-    '''Gym MicroRTS binding creation function
+    '''Gym MicroRTS creation function
     
-    Currently only provides a binding for the GlobalAgentCombinedRewardEnv
-    setting of the environment.'''
+    This library appears broken. Step crashes in Java.
+    '''
     try:
         from gym_microrts.envs import GlobalAgentCombinedRewardEnv
     except:
-        raise pufferlib.utils.SetupError('Gym MicroRTS')
+        raise pufferlib.exceptions.SetupError('microrts', 'GlobalAgentCombinedRewardEnv')
     else:
-        return pufferlib.emulation.PettingZooPufferEnv(
+        return pufferlib.emulation.GymPufferEnv(
             env_creator=GlobalAgentCombinedRewardEnv,
-            #env_name='Gym MicroRTS',
         )

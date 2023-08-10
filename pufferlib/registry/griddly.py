@@ -4,6 +4,7 @@ import gym
 
 import pufferlib
 import pufferlib.emulation
+import pufferlib.exceptions
 
 Policy = pufferlib.models.Default
 
@@ -29,9 +30,11 @@ def make_spider_v0_env():
     try:
         import griddly
         env_cls = lambda: gym.make('GDY-Spiders-v0')
-        env_cls()
+
+        with pufferlib.utils.Suppress():
+            env_cls()
     except:
-        raise pufferlib.utils.SetupError('Spiders-v0 (griddly)')
+        raise pufferlib.exceptions.SetupError('griddly', 'GDY-Spiders-v0')
     else:
         return GriddlyGymPufferEnv(
             env_creator=env_cls,

@@ -19,25 +19,18 @@ def default_config():
         'seed': 1,
         'device': 'cpu'#'cuda' if torch.cuda.is_available() else 'cpu',
     }
-
     cleanrl_train = {
         'batch_rows': 32,
         'bptt_horizon': 1,
     }
-
     policy = {
-        'input_size': 128,
-        'hidden_size': 128,
     }
-
     recurrent_cls = pufferlib.pytorch.BatchFirstLSTM
-
     recurrent = {
         'input_size': 128,
         'hidden_size': 128,
         'num_layers': 1,
     }
-
     return SimpleNamespace(
         cleanrl_init=cleanrl_init,
         cleanrl_train=cleanrl_train,
@@ -87,10 +80,10 @@ def atari(framestack=1):
         'framestack': 1,
         'flat_size': 64*7*7,
     })
+    config.recurrent_cls = None
     config.recurrent.update({
         'input_size': 128,
         'hidden_size': 128,
-        'num_layers': 0,
     })
     return config
 
@@ -131,9 +124,18 @@ def butterfly():
     pufferlib.utils.install_requirements('butterfly')
     config = default_config()
     config.env_creators = {
-        pufferlib.registry.butterfly.make_cooperative_pong_v5_binding: {}
+        pufferlib.registry.butterfly.make_cooperative_pong_v5: {}
     }
     config.policy_cls = pufferlib.registry.butterfly.Policy
+    return config
+
+def classic_control():
+    import pufferlib.registry.classic_control
+    config = default_config()
+    config.env_creators = {
+        pufferlib.registry.classic_control.make_cartpole_env: {}
+    }
+    config.policy_cls = pufferlib.registry.classic_control.Policy
     return config
 
 def crafter():
@@ -144,12 +146,6 @@ def crafter():
         pufferlib.registry.crafter.make_env: {}
     }
     config.policy_cls = pufferlib.registry.crafter.Policy
-    config.policy.update({
-        'input_size': 512,
-        'hidden_size': 128,
-        'framestack': 3, # Framestack 3 is a hack for RGB
-        'flat_size': 64*4*4,
-    })
     return config
 
 def dm_control():
@@ -176,12 +172,6 @@ def dm_lab():
         pufferlib.registry.dm_lab.make_env: {}
     }
     config.policy_cls = pufferlib.registry.dm_lab.Policy
-    config.policy.update({
-        'input_size': 512,
-        'hidden_size': 128,
-        'framestack': 3, # Framestack 3 is a hack for RGB
-        'flat_size': 64*4*4,
-    })
     return config
 
 def griddly():
@@ -264,6 +254,10 @@ def nmmo():
         pufferlib.registry.nmmo.make_env: {}
     }
     config.policy_cls = pufferlib.registry.nmmo.Policy
+    config.recurrent.update({
+        'input_size': 256,
+        'hidden_size': 256,
+    })
     return config
 
 def procgen():
@@ -276,6 +270,10 @@ def procgen():
         }
     }
     config.policy_cls = pufferlib.registry.procgen.Policy
+    config.recurrent.update({
+        'input_size': 256,
+        'hidden_size': 256,
+    })
     return config
 
 def smac():

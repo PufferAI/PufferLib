@@ -1,4 +1,5 @@
 from pdb import set_trace as T
+import numpy as np
 
 from abc import ABC, abstractmethod
 
@@ -39,7 +40,7 @@ class Policy(torch.nn.Module, ABC):
         function to unflatten observations to their original structured form:
 
         observations = pufferlib.emulation.unpack_batched_obs(
-            self.binding.raw_single_observation_space, env_outputs)
+            self.envs.structured_observation_space, env_outputs)
  
         Args:
             flat_observations: A tensor of shape (batch, ..., obs_size)
@@ -68,12 +69,13 @@ class Policy(torch.nn.Module, ABC):
 
 
 class RecurrentWrapper(torch.nn.Module):
-    def __init__(self, policy, input_size, hidden_size, num_layers=1):
+    def __init__(self, envs, policy, input_size, hidden_size, num_layers=1):
         super().__init__()
 
         if not isinstance(policy, Policy):
             raise ValueError('Subclass pufferlib.Policy to use RecurrentWrapper')
 
+        self.single_observation_shape = envs.single_observation_space.shape
         self.policy = policy
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -82,17 +84,21 @@ class RecurrentWrapper(torch.nn.Module):
             input_size, hidden_size, num_layers=num_layers)
 
     def forward(self, x, state):
-        batch_size = x.shape[0]
-        x = x.reshape((-1, batch_size, x.shape[-1]))
+        shape, tensor_shape = x.shape, self.single_observation_shape
+        x_dims, tensor_dims = len(shape), len(tensor_shape)
+        if x_dims == tensor_dims + 1:
+            TT = 1
+        elif x_dims == tensor_dims + 2:
+            TT = shape[1]
+        else:
+            raise ValueError('Invalid tensor shape', shape)
 
-        assert len(x.shape) == 3
-        B, TT, _ = x.shape
-        x = x.reshape(B*TT, -1)
-        
+        B = shape[0]
+        x = x.reshape(B*TT, *tensor_shape)
         hidden, lookup = self.policy.encode_observations(x)
         assert hidden.shape == (B*TT, self.input_size)
 
-        hidden = hidden.view(B, TT, self.input_size)
+        hidden = hidden.view(TT, B, self.input_size)
         hidden, state = self.recurrent(hidden, state)
         hidden = hidden.reshape(B*TT, self.hidden_size)
 
@@ -101,43 +107,49 @@ class RecurrentWrapper(torch.nn.Module):
 
 
 class Default(Policy):
-    def __init__(self, binding, input_size=128, hidden_size=128):
+    def __init__(self, envs, input_size=128, hidden_size=128):
         '''Default PyTorch policy, meant for debugging.
         This should run with any environment but is unlikely to learn anything.
         
         Uses a single linear layer to encode observations and a list of
         linear layers to decode actions. The value function is a single linear layer.
         '''
-        super().__init__(binding)
-        self.encoder = nn.Linear(self.binding.single_observation_space.shape[0], hidden_size)
+        super().__init__()
+        self.encoder = nn.Linear(np.prod(envs.single_observation_space.shape), hidden_size)
         self.decoders = nn.ModuleList([nn.Linear(hidden_size, n)
-                for n in self.binding.single_action_space.nvec])
+                for n in envs.single_action_space.nvec])
         self.value_head = nn.Linear(hidden_size, 1)
 
-    def critic(self, hidden):
-        '''Linear value function'''
-        return self.value_head(hidden)
+    def forward(self, env_outputs):
+        '''Forward pass for PufferLib compatibility'''
+        hidden = self.encode_observations(env_outputs)
+        actions, value = self.decode_actions(hidden)
+        return actions, value
 
     def encode_observations(self, env_outputs):
         '''Linear encoder function'''
+        env_outputs = env_outputs.reshape(env_outputs.shape[0], -1)
         return self.encoder(env_outputs), None
 
     def decode_actions(self, hidden, lookup, concat=True):
         '''Concatenated linear decoder function'''
         actions = [dec(hidden) for dec in self.decoders]
-        if concat:
-            return torch.cat(actions, dim=-1)
-        return actions
+        value = self.value_head(hidden)
+        return actions, value
 
 class Convolutional(Policy):
-    def __init__(self, binding, *args, framestack, flat_size, input_size=512, hidden_size=512, output_size=512, **kwargs):
+    def __init__(self, envs, *args, framestack, flat_size,
+            input_size=512, hidden_size=512, output_size=512,
+            channels_last=False, downsample=1, **kwargs):
         '''The CleanRL default Atari policy: a stack of three convolutions followed by a linear layer
         
         Takes framestack as a mandatory keyword arguments. Suggested default is 1 frame
         with LSTM or 4 frames without.'''
-        super().__init__(binding)
-        self.observation_space = binding.single_observation_space
-        self.num_actions = binding.raw_single_action_space.n
+        super().__init__()
+        self.observation_space = envs.single_observation_space
+        self.num_actions = envs.single_action_space.nvec[0]
+        self.channels_last = channels_last
+        self.downsample = downsample
 
         self.network = nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Conv2d(framestack, 32, 8, stride=4)),
@@ -154,17 +166,14 @@ class Convolutional(Policy):
         self.actor = pufferlib.pytorch.layer_init(nn.Linear(output_size, self.num_actions), std=0.01)
         self.value_function = pufferlib.pytorch.layer_init(nn.Linear(output_size, 1), std=1)
 
-    def critic(self, hidden):
-        return self.value_function(hidden)
-
-    def encode_observations(self, flat_observations):
-        # TODO: Add flat obs support to emulation
-        batch = flat_observations.shape[0]
-        observations = flat_observations.reshape((batch,) + self.observation_space.shape)
+    def encode_observations(self, observations):
+        if self.channels_last:
+            observations = observations.permute(0, 3, 1, 2)
+        if self.downsample > 1:
+            observations = observations[:, :, ::self.downsample, ::self.downsample]
         return self.network(observations / 255.0), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
         action = self.actor(flat_hidden)
-        if concat:
-            return action
-        return [action]
+        value = self.value_function(flat_hidden)
+        return action, value

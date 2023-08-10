@@ -49,7 +49,7 @@ all_environments = {
         'gym_microrts==0.3.2',
     ],
     'minerl': [
-        'gym==0.19.0',
+        'gym==0.17.0',
         'minerl==0.4.4',
     ],
     'nethack': [

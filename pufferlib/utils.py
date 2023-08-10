@@ -17,12 +17,6 @@ import pettingzoo
 import gym
 
 
-# Define a SetupError exception class below
-class SetupError(Exception):
-    def __init__(self, env):
-        self.message = f'{env}: Binding setup failed. Please ensure that the environment is installed correctly.'
-        super().__init__(self.message)
-
 def install_requirements(env):
     '''Pip install dependencies for specified environment'''
     pip_install_cmd = [sys.executable, "-m", "pip", "install", "-e" f".[{env}]"]

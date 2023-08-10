@@ -6,7 +6,6 @@ from torch import nn
 from torch.distributions.categorical import Categorical
 
 import gym
-from procgen import ProcgenEnv
 
 import pufferlib
 from pufferlib.pytorch import layer_init
@@ -54,9 +53,9 @@ class ConvSequence(nn.Module):
 
 
 class Policy(pufferlib.models.Policy):
-    def __init__(self, binding, input_size, output_size):
-        super().__init__(binding)
-        h, w, c = binding.raw_single_observation_space.shape
+    def __init__(self, envs):
+        super().__init__()
+        h, w, c = envs.single_observation_space.shape
         shape = (c, h, w)
         conv_seqs = []
         for out_channels in [16, 32, 32]:
@@ -70,28 +69,22 @@ class Policy(pufferlib.models.Policy):
             nn.ReLU(),
         ]
         self.network = nn.Sequential(*conv_seqs)
-        self.actor = layer_init(nn.Linear(256, binding.raw_single_action_space.n), std=0.01)
+        self.actor = layer_init(nn.Linear(256, envs.single_action_space.nvec[0]), std=0.01)
         self.value = layer_init(nn.Linear(256, 1), std=1)
 
-    def critic(self, x):
-        # TODO: Separate critic and actor
-        return self.value(x)
-
     def encode_observations(self, x):
-        x = self.binding.unpack_batched_obs(x)[0].squeeze(1)
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)  # "bhwc" -> "bchw"
         return hidden, None
  
-    def decode_actions(self, hidden, lookup, concat=True):
+    def decode_actions(self, hidden, lookup):
         '''linear decoder function'''
-        actions = self.actor(hidden)
-        if concat:
-            return actions
-        return [actions]
+        action = self.actor(hidden)
+        value = self.value(hidden)
+        return action, value
 
 
 class ProcgenVecEnv:
-    '''Vectorized Procgen environment wrapper
+    '''WIP Vectorized Procgen environment wrapper
     
     Does not use normal PufferLib emulation'''
     def __init__(self, env_name, num_envs=1,
@@ -128,21 +121,34 @@ class ProcgenVecEnv:
         return obs['rgb'], rewards, dones, infos
 
 
-def make_env(env_name):
+class ProcgenPostprocessor(pufferlib.emulation.Postprocessor):
+    def features(self, obs):
+        try:
+            return obs['rgb']
+        except:
+            return obs
+
+    def rewards_dones_infos(self, reward, done, info):
+        return float(reward), bool(done), info
+
+
+def make_env(name):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
     try:
         with pufferlib.utils.Suppress():
-            envs = ProcgenEnv(num_envs=1, env_name=env_name, num_levels=0, start_level=0, distribution_mode="easy")
+            import gym3
+            from procgen.env import ProcgenGym3Env
+            env = ProcgenGym3Env(num=1, env_name=name)
     except ImportError as e:
         raise e('Cannot gym.make ALE environment (pip install pufferlib[gym])')
 
-    envs = gym.wrappers.TransformObservation(envs, lambda obs: obs["rgb"])
-    envs.observation_space = envs.observation_space["rgb"]
-    envs.single_action_space = envs.action_space
-    envs.single_observation_space = envs.observation_space
-    envs.is_vector_env = True
-    envs = gym.wrappers.RecordEpisodeStatistics(envs)
-    envs = gym.wrappers.NormalizeReward(envs, gamma=0.999)
-    envs = gym.wrappers.TransformReward(envs, lambda reward: np.clip(reward, -10, 10))
-    assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
-    return envs
+    env = gym3.ToGymEnv(env)
+    env = gym.wrappers.TransformObservation(env, lambda obs: obs["rgb"])
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env = gym.wrappers.NormalizeReward(env, gamma=0.999)
+    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    env = pufferlib.emulation.GymPufferEnv(
+        env=env,
+        postprocessor_cls=ProcgenPostprocessor,
+    )
+    return env

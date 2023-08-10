@@ -17,7 +17,7 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.emulation
+import pufferlib.exceptions
 import pufferlib.models
 
 
@@ -86,8 +86,8 @@ def make_env(name, framestack):
     try:
         with pufferlib.utils.Suppress():
             env = gym.make(name)
-    except ImportError as e:
-        raise e('Cannot gym.make ALE environment (pip install pufferlib[gym])')
+    except:
+        raise pufferlib.exceptions.SetupError('atari', name)
 
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = NoopResetEnv(env, noop_max=30)
