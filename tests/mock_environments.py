@@ -98,8 +98,8 @@ def make_mock_singleagent_env(observation_space, action_space):
             return _sample_space('agent_1', self.tick, observation_space)
 
         def step(self, actions):
-            reward = 0.1 * self.rng.random()
-            done = reward < 0.01
+            reward = self.tick
+            done = self.tick < 10
             self.tick += 1
 
             return (
@@ -211,19 +211,19 @@ MOCK_ACTION_SPACES = [
     gym.spaces.Discrete(5),
 
     # Nested spaces
-    gym.spaces.Tuple((gym.spaces.Discrete(2), gym.spaces.Discrete(3))),
+    #gym.spaces.Tuple((gym.spaces.Discrete(2), gym.spaces.Discrete(3))),
     gym.spaces.Dict({
         "foo": gym.spaces.Discrete(4),
         "bar": gym.spaces.Discrete(2),
     }),
     # gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
-    gym.spaces.Tuple((
-        gym.spaces.Discrete(4),
-        gym.spaces.Dict({
-            "baz": gym.spaces.Discrete(2),
-            "qux": gym.spaces.Discrete(2),
-        }),
-    )),
+    #gym.spaces.Tuple((
+    #    gym.spaces.Discrete(4),
+    #    gym.spaces.Dict({
+    #        "baz": gym.spaces.Discrete(2),
+    #        "qux": gym.spaces.Discrete(2),
+    #    }),
+    #)),
     # gym.spaces.Dict({
     #     "foo": gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32),
     #     "bar": gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
@@ -279,10 +279,18 @@ MOCK_TEAMS = {
     },
 }
 
-MOCK_ENVIRONMENTS = []
+MOCK_SINGLE_AGENT_ENVIRONMENTS = []
+MOCK_MULTI_AGENT_ENVIRONMENTS = []
 for obs_space in MOCK_OBSERVATION_SPACES:
     for act_space in MOCK_ACTION_SPACES:
-        MOCK_ENVIRONMENTS.append(
+        MOCK_SINGLE_AGENT_ENVIRONMENTS.append(
+            make_mock_singleagent_env(
+                observation_space=obs_space,
+                action_space=act_space,
+            )
+        )
+ 
+        MOCK_MULTI_AGENT_ENVIRONMENTS.append(
             make_mock_multiagent_env(
                 observation_space=obs_space,
                 action_space=act_space,

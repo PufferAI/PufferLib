@@ -54,16 +54,16 @@ class MultiEnv(ABC):
 class GymMultiEnv(MultiEnv):
     '''Runs multiple Puffer wrapped Gym environments in serial'''
     def reset(self, seed=None):
-        for i, e in enumerate(self.envs):
+        for idx, e in enumerate(self.envs):
             if seed is None:
                 ob = e.reset()
             else:
-                ob = e.reset(seed=hash(1000*seed + i))
+                ob = e.reset(seed=hash(1000*seed + idx))
 
             if self.preallocated_obs is None:
                 self.preallocated_obs = np.empty((len(self.envs), *ob.shape), dtype=ob.dtype)
 
-            self.preallocated_obs[i] = ob
+            self.preallocated_obs[idx] = ob
 
         rewards = [0] * len(self.preallocated_obs)
         dones = [False] * len(self.preallocated_obs)
@@ -99,6 +99,8 @@ class PettingZooMultiEnv(MultiEnv):
  
     def reset(self, seed=None):
         self.agent_keys = []
+
+        ptr = 0
         for idx, e in enumerate(self.envs):
             if seed is None:
                 obs = e.reset()
@@ -111,8 +113,9 @@ class PettingZooMultiEnv(MultiEnv):
                 ob = obs[list(obs.keys())[0]]
                 self.preallocated_obs = np.empty((len(self.envs)*len(obs), *ob.shape), dtype=ob.dtype)
 
-            for i, o in enumerate(obs.values()):
-                self.preallocated_obs[i] = o
+            for o in obs.values():
+                self.preallocated_obs[ptr] = o
+                ptr += 1
 
         rewards = [0] * len(self.preallocated_obs)
         dones = [False] * len(self.preallocated_obs)
@@ -123,7 +126,8 @@ class PettingZooMultiEnv(MultiEnv):
     def step(self, actions):
         actions = np.array_split(actions, len(self.envs))
         rewards, dones, infos = [], [], []
-        
+
+        ptr = 0        
         for idx, (a_keys, env, atns) in enumerate(zip(self.agent_keys, self.envs, actions)):
             if env.done:
                 o  = env.reset()
@@ -140,8 +144,9 @@ class PettingZooMultiEnv(MultiEnv):
 
             self.agent_keys[idx] = list(o.keys())
 
-            for ii, oo in enumerate(o.values()):
-                self.preallocated_obs[ii] = oo
+            for oo in o.values():
+                self.preallocated_obs[ptr] = oo
+                ptr += 1
 
         return self.preallocated_obs, rewards, dones, infos
 
@@ -155,8 +160,10 @@ class VecEnv(ABC):
             env_creator=None, env_args=[], env_kwargs={},
             num_workers=1, envs_per_worker=1):
 
-        self.async_handles = None
         self.num_workers = num_workers
+        self.envs_per_worker = envs_per_worker
+
+        self.async_handles = None
         self.state = RESET
 
         # Determine if the env uses Gym or PettingZoo
@@ -218,7 +225,8 @@ class VecEnv(ABC):
         obs, rewards, dones, infos = list(zip(*returns))
 
         for i, o in enumerate(obs):
-            self.preallocated_obs[i*self.num_agents:(i+1)*self.num_agents] = o
+            total_agents = self.num_agents * self.envs_per_worker
+            self.preallocated_obs[i*total_agents:(i+1)*total_agents] = o
 
         rewards = list(itertools.chain.from_iterable(rewards))
         dones = list(itertools.chain.from_iterable(dones))

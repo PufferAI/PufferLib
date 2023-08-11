@@ -69,7 +69,7 @@ class Policy(torch.nn.Module, ABC):
 
 
 class RecurrentWrapper(torch.nn.Module):
-    def __init__(self, envs, policy, input_size, hidden_size, num_layers=1):
+    def __init__(self, envs, policy, input_size=128, hidden_size=128, num_layers=1):
         super().__init__()
 
         if not isinstance(policy, Policy):

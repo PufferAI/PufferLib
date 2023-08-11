@@ -3,6 +3,7 @@ from pdb import set_trace as T
 import torch
 from torch.distributions import Categorical
 
+import pufferlib.models
 
 class Policy(torch.nn.Module):
     '''Wrap a PyTorch model for use with CleanRL
@@ -19,6 +20,10 @@ class Policy(torch.nn.Module):
     def __init__(self, policy):
         super().__init__()
         self.policy = policy
+
+        # No good way to check for recurrent models
+        self.is_recurrent = (isinstance(policy, pufferlib.models.RecurrentWrapper)
+            or hasattr(policy, 'lstm'))
 
     @property
     def lstm(self):
