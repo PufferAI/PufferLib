@@ -214,6 +214,7 @@ class VecEnv(ABC):
         if type(actions) == list:
             actions = np.array(actions)
 
+        assert len(actions) == self.num_agents * self.num_workers * self.envs_per_worker
         actions_split = np.array_split(actions, self.num_workers)
         self._send(actions_split)
   

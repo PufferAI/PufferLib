@@ -10,8 +10,35 @@ def print_if(e, print_errors):
         print('#################')
         print()
 
-def test_env_api_usage(binding, print_errors=True):
-    env = binding.env_creator()
+def test_gym_api_usage(env_cls, print_errors=True):
+    env = pufferlib.emulation.GymPufferEnv(env_creator=env_cls)
+
+    try:
+        env.step({})
+    except pufferlib.exceptions.APIUsageError as e:
+        print_if(e, print_errors)
+
+    try:
+        env.close()
+    except pufferlib.exceptions.APIUsageError as e:
+        print_if(e, print_errors)
+
+    env.observation_space.sample()
+    env.action_space.sample()
+    ob = env.reset()
+
+    try:
+        bad_action = env.observation_space.sample()
+        env.step(bad_action)
+    except ValueError as e:
+        print_if(e, print_errors)
+
+    action = env.action_space.sample()
+    obs, rewards, dones, infos = env.step(action)
+
+
+def test_pettingzoo_api_usage(env_cls, print_errors=True):
+    env = pufferlib.emulation.PettingZooPufferEnv(env_creator=env_cls)
 
     try:
         env.step({})
@@ -55,7 +82,9 @@ def test_env_api_usage(binding, print_errors=True):
 if __name__ == '__main__':
     import mock_environments
     first = True
-    for env in mock_environments.MOCK_ENVIRONMENTS:
-        binding = pufferlib.emulation.Binding(env_cls=env)
-        test_env_api_usage(binding, print_errors=first)
-        first = False
+
+    for env_cls in mock_environments.MOCK_SINGLE_AGENT_ENVIRONMENTS:
+        test_gym_api_usage(env_cls)
+
+    for env_cls in mock_environments.MOCK_MULTI_AGENT_ENVIRONMENTS:
+        test_pettingzoo_api_usage(env_cls)

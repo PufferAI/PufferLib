@@ -7,12 +7,19 @@ import gym
 from pettingzoo.utils.env import ParallelEnv
 
 import pufferlib
+import pufferlib.emulation
 import pufferlib.utils
+
 
 HIGH = 100
 LOW = 0
 
-### Performance test environment
+def make_performance_env(delay=0, bandwidth=1):
+    return pufferlib.emulation.PettingZooPufferEnv(
+        env_creator=PerformanceEnv,
+        env_args=[delay, bandwidth],
+    )
+
 class PerformanceEnv:
     def __init__(self, delay=0, bandwith=1):
         self.agents = [1]
@@ -20,18 +27,22 @@ class PerformanceEnv:
         self.done = False
 
         self.delay = delay
+        assert bandwith > 0
         self.bandwidth = bandwith
 
     def reset(self, seed=None):
         return {1: self.observation_space(1).sample()}
 
     def step(self, actions):
-        obs = {1: 0}
+        obs = {1: np.array([0], dtype=np.float32)}
         rewards = {1: 1}
         dones = {1: False}
         infos = {1: {}}
 
-        time.sleep(self.delay)
+        # Busy wait so process does not swap on sleep
+        end = time.perf_counter() + self.delay
+        while time.perf_counter() < end:
+            pass
 
         return obs, rewards, dones, infos
 
@@ -43,23 +54,7 @@ class PerformanceEnv:
 
     def action_space(self, agent):
         return gym.spaces.Discrete(2)
-
-class PerformanceBinding:
-    def __init__(self, delay, bandwith):
-        self.env_creator = lambda: PerformanceEnv(delay, bandwith)
-        self.bandwidth = bandwith
-
-    @property
-    def single_observation_space(self):
-        return gym.spaces.Box(
-            low=-2**20, high=2**20,
-            shape=(self.bandwidth,), dtype=np.float32
-        )
-
-    @property
-    def single_action_space(self):
-        return gym.spaces.Discrete(2)
-
+    
 
 ### Other Mock environments and utilities
 def _agent_str_to_int(agent):

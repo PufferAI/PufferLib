@@ -111,8 +111,11 @@ class GymPufferEnv:
 
     def step(self, action):
         '''Execute an action and return (observation, reward, done, info)'''
-        api_usage_checks(self.initialized, self.done)
-
+        if not self.initialized:
+            raise exceptions.APIUsageError('step() called before reset()')
+        if self.done:
+            raise exceptions.APIUsageError('step() called after environment is done')
+ 
         action = self.postprocessor.actions(action)
 
         if __debug__ and not self.action_space.contains(action):
@@ -134,6 +137,9 @@ class GymPufferEnv:
                 f'not in space:\n{self.observation_space}')
 
         return processed_ob, single_reward, single_done, single_info
+
+    def close(self):
+        return self.env.close()
 
 
 class PettingZooPufferEnv:
@@ -225,8 +231,10 @@ class PettingZooPufferEnv:
 
     def step(self, actions):
         '''Step the environment and return (observations, rewards, dones, infos)'''
-        api_usage_checks(self.initialized, self.done)
-
+        if not self.initialized:
+            raise exceptions.APIUsageError('step() called before reset()')
+        if self.done:
+            raise exceptions.APIUsageError('step() called after environment is done')
         if __debug__:
             for agent, atn in actions.items():
                 if agent not in self.possible_agents:
@@ -268,12 +276,8 @@ class PettingZooPufferEnv:
 
         return obs, rewards, dones, infos
 
-
-def api_usage_checks(initialized, done):
-    if not initialized:
-        raise exceptions.APIUsageError('step() called before reset()')
-    if done:
-        raise exceptions.APIUsageError('step() called after environment is done')
+    def close(self):
+        return self.env.close()
 
 
 def make_object(object_instance=None, object_creator=None, creator_args=[], creator_kwargs={}):
@@ -357,11 +361,16 @@ def make_team_space(observation_space, agents):
 
 def check_spaces(data, spaces):
     for k, v in data.items():
-        if not spaces(k).contains(v):
+        try:
+            contains = spaces(k).contains(v)
+        except:
+            raise ValueError(
+                f'Error checking space {spaces} for agent/team {k} with data:\n{v}')
+
+        if not contains:
             raise ValueError(
                 f'Data:\n{v}\n for agent/team {k} not in '
                 f'space:\n{spaces(k)}')
-
 
 def check_teams(env, teams):
     if set(env.possible_agents) != {item for team in teams.values() for item in team}:

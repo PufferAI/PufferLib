@@ -7,51 +7,48 @@ import time
 import pufferlib.registry
 import pufferlib.utils
 
-import pufferlib.vectorization.multiprocessing
-import pufferlib.vectorization.multiprocessing_shared
-import pufferlib.vectorization.ray
-import pufferlib.vectorization.ray_shared
-import pufferlib.vectorization.serial
+import pufferlib.vectorization
 
-from mock_environments import PerformanceBinding
+from mock_environments import make_performance_env
 
 
-def _test_vectorization_performance(binding, vec_backend, steps, num_workers, envs_per_worker):
-    actions = [1] * num_workers * envs_per_worker
+def _test_vectorization_performance(vectorization, delay, steps, num_workers, envs_per_worker):
 
-    with pufferlib.utils.Suppress():
-        envs = vec_backend(
-            binding,
+    import warnings
+
+    # Convert the specific warning into an error
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        # Your code here that's triggering the warning
+
+        envs = vectorization(
+            env_creator=make_performance_env,
+            env_args=[delay, 1],
             num_workers=num_workers,
             envs_per_worker=envs_per_worker,
         )
+
         envs.reset()
+        actions = [[1]] * num_workers * envs_per_worker
 
-    start = time.time()
-    for i in range(steps):
-        envs.step(actions)
-    total_time = time.time() - start
+        start = time.time()
+        for i in range(steps):
+            envs.step(actions)
+        total_time = time.time() - start
 
-    envs.close()
-    return steps / total_time
+        return steps / total_time
 
 
 if __name__ == '__main__':
     steps = 1000
-    delays = [0, 0.0001, 0.001, 0.01]
-    backends = [
-        pufferlib.vectorization.serial.VecEnv,
-        pufferlib.vectorization.multiprocessing.VecEnv,
-        pufferlib.vectorization.multiprocessing_shared.VecEnv,
-        pufferlib.vectorization.ray.VecEnv,
-        pufferlib.vectorization.ray_shared.VecEnv,
+    delays = [0, 0.0001, 0.001]
+    vectorization = [
+        pufferlib.vectorization.Serial,
+        pufferlib.vectorization.Multiprocessing,
+        #pufferlib.vectorization.Ray,
     ]
 
-    for d in delays:
-        for b in backends:
-            binding = PerformanceBinding(delay=d, bandwith=100_000)
-            sps = _test_vectorization_performance(binding, b, steps, 2, 1)
-            print(f'{b.__module__.split(".")[-1]}: {steps} steps with {d} delay: {sps} steps per second')
-
-    #import pufferlib.registry.atari
-    #binding = pufferlib.registry.atari.make_binding('BreakoutNoFrameskip-v4', framestack=1)
+    for delay in delays:
+        for v in vectorization:
+            sps = _test_vectorization_performance(v, delay, steps, 2, 1)
+            print(f'{v.__name__}: {steps} steps with {delay} delay: {sps} steps per second')

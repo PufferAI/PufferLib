@@ -29,9 +29,8 @@ def make_spider_v0_env():
     their observation spaces until after they are created.'''
     try:
         import griddly
-        env_cls = lambda: gym.make('GDY-Spiders-v0')
-
         with pufferlib.utils.Suppress():
+            env_cls = lambda: gym.make('GDY-Spiders-v0')
             env_cls()
     except:
         raise pufferlib.exceptions.SetupError('griddly', 'GDY-Spiders-v0')
