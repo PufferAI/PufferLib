@@ -5,8 +5,12 @@ from itertools import chain
 
 
 docs = [
+    'sphinx==5.0.0',
     'sphinx-rtd-theme==0.5.1',
     'sphinxcontrib-youtube==1.0.1',
+    'sphinx-rtd-theme==0.5.1',
+    'sphinx-design==0.4.1',
+    'furo==2023.3.27',
 ]
 
 all_environments = {

@@ -10,7 +10,7 @@ import pufferlib.emulation
 import config
 
 
-def test_environments(steps=1_000_000, timeout=300):
+def test_environments(steps=1_000_000, timeout=30):
     config_fns = config.all()
     for name, config_fn in config_fns.items():
         try:
