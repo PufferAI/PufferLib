@@ -47,42 +47,40 @@ def make_zeros_like(data):
     else:
         raise ValueError(f'Unsupported type: {type(data)}')
 
-def _compare_observations(obs, batched_obs, idx=None):
+def _compare_space_samples(sample_1, sample_2, sample_2_batch_idx=None):
+    '''Compare two samples from the same space
+    
+    Optionally, sample_2 may be a batch of samples from the same space
+    concatenated along the first dimension of the leaves. In this case,
+    sample_2_batch_idx specifies which sample to compare.
+    '''
     def _compare_arrays(array1, array2):
         try:
             return np.allclose(array1, array2)
-        except TypeError as e:
-            raise TypeError(f'Error comparing {array1} and {array2}. Did you unpack the batched obs?') from e
+        except Exception as e:
+            raise TypeError(f'Error comparing {array1} and {array2}.') from e
 
-    def _compare_helper(obs, batched_obs, agent_idx):
-        if isinstance(batched_obs, np.ndarray):
-            return _compare_arrays(obs, batched_obs[agent_idx])
-        elif isinstance(obs, (dict, OrderedDict)):
-            for key in obs:
-                if not _compare_helper(obs[key], batched_obs[key], agent_idx):
-                    return False
-            return True
-        elif isinstance(obs, (list, tuple)):
-            for idx, elem in enumerate(obs):
-                if not _compare_helper(elem, batched_obs[idx], agent_idx):
-                    return False
-            return True
-        else:
-            raise ValueError(f"Unsupported type: {type(obs)}")
+    if type(sample_1) != type(sample_2):
+        raise ValueError(f"Types do not match: {type(sample_1)} vs {type(sample_2)}")
 
-    if idx is not None:
-        return _compare_helper(obs, batched_obs, idx)
-
-    if isinstance(batched_obs, dict):
-        agent_indices = range(len(next(iter(batched_obs.values()))))
+    if isinstance(sample_1, (dict, OrderedDict)):
+        if not all(k in sample_2 for k in sample_1):
+            raise ValueError("Keys do not match between dictionaries.")
+        return all(_compare_space_samples(v, sample_2[k], sample_2_batch_idx)
+                   for k, v in sample_1.items())
+    elif isinstance(sample_1, (list, tuple)):
+        if len(sample_1) != len(sample_2):
+            raise ValueError("Lengths do not match between lists/tuples.")
+        return all(_compare_space_samples(v, sample_2[i], sample_2_batch_idx)
+                   for i, v in enumerate(sample_1))
+    elif isinstance(sample_1, np.ndarray):
+        if sample_2_batch_idx is not None:
+            sample_2 = sample_2[sample_2_batch_idx]
+        return _compare_arrays(sample_1, sample_2)
+    elif isinstance(sample_1, (int, float)):
+        return sample_1 == sample_2
     else:
-        agent_indices = range(batched_obs.shape[0])
-
-    for agent_key, agent_idx in zip(obs.keys(), agent_indices):
-        if not _compare_helper(obs[agent_key], batched_obs, agent_idx):
-            return False
-
-    return True
+        raise ValueError(f"Unsupported type: {type(sample_1)}")
 
 def _get_dtype_bounds(dtype):
     if dtype == bool:

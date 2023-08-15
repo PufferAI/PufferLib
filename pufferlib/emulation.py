@@ -106,8 +106,7 @@ class GymPufferEnv:
 
         # Call user featurizer and flatten the observations
         return postprocess_and_flatten(
-            ob, self.postprocessor,
-            self.flat_observation_space, reset=True)
+            ob, self.postprocessor, reset=True)
 
     def step(self, action):
         '''Execute an action and return (observation, reward, done, info)'''
@@ -119,18 +118,19 @@ class GymPufferEnv:
         action = self.postprocessor.actions(action)
 
         if __debug__ and not self.action_space.contains(action):
+            T()
             raise ValueError(f'Action:\n{action}\n '
                 f'not in space:\n{self.flat_action_space}')
 
         # Unpack actions from multidiscrete into the original action space
-        action = unpack_actions(action, self.flat_action_space)
+        action = split(action, self.flat_action_space, batched=False)
 
         ob, reward, done, info = self.env.step(action)
         self.done = done
 
         # Call user postprocessors and flatten the observations
         processed_ob, single_reward, single_done, single_info = postprocess_and_flatten(
-            ob, self.postprocessor, self.flat_observation_space, reward, done, info)
+            ob, self.postprocessor, reward, done, info)
 
         if __debug__ and not self.observation_space.contains(processed_ob):
             raise ValueError(f'Observation:\n{processed_ob}\n '
@@ -225,7 +225,7 @@ class PettingZooPufferEnv:
         postprocessed_obs = {}
         for agent in self.possible_agents:
             postprocessed_obs[agent] = postprocess_and_flatten(
-                obs[agent], self.postprocessors[agent], self.flat_observation_space, reset=True)
+                obs[agent], self.postprocessors[agent], reset=True)
             
         return postprocessed_obs
 
@@ -251,8 +251,8 @@ class PettingZooPufferEnv:
         unpacked_actions = {}
         for agent, atn in actions.items():
             if agent in self.agents:
-                unpacked_actions[agent] = unpack_actions(
-                    atn, self.flat_action_space)
+                unpacked_actions[agent] = split(
+                    atn, self.flat_action_space, batched=False)
 
         if self.teams is not None:
             unpacked_actions = ungroup_from_teams(self.teams, unpacked_actions)
@@ -265,7 +265,7 @@ class PettingZooPufferEnv:
         # Call user postprocessors and flatten the observations
         for agent in obs:
             obs[agent], rewards[agent], dones[agent], infos[agent] = postprocess_and_flatten(
-                obs[agent], self.postprocessors[agent], self.flat_observation_space,
+                obs[agent], self.postprocessors[agent],
                 rewards[agent], dones[agent], infos[agent])
 
         obs, rewards, dones, infos = pad_to_const_num_agents(
@@ -313,7 +313,7 @@ def pad_to_const_num_agents(agents, obs, rewards, dones, infos, pad_obs):
     infos = pad_agent_data(infos, agents, {})
     return padded_obs, rewards, dones, infos
 
-def postprocess_and_flatten(ob, postprocessor, flat_observation_space,
+def postprocess_and_flatten(ob, postprocessor,
         reward=None, done=None, info=None,
         reset=False, max_horizon=None):
     if reset:
@@ -323,7 +323,7 @@ def postprocess_and_flatten(ob, postprocessor, flat_observation_space,
             reward, done, info)
 
     postprocessed_ob = postprocessor.features(ob)
-    flat_ob = flatten_to_array(ob, flat_observation_space)
+    flat_ob = concatenate(flatten(postprocessed_ob))
 
     if reset:
         return flat_ob
@@ -338,7 +338,7 @@ def make_flat_and_multidiscrete_atn_space(atn_space):
 
 def make_flat_and_box_obs_space(obs_space, obs):
     flat_observation_space = flatten_space(obs_space)  
-    flat_observation = flatten_to_array(obs, flat_observation_space)
+    flat_observation = concatenate(flatten(obs))
 
     mmin, mmax = pufferlib.utils._get_dtype_bounds(flat_observation.dtype)
     pad_obs = flat_observation * 0
@@ -404,70 +404,97 @@ def ungroup_from_teams(team_data):
             agent_data[agent_id] = data
     return agent_data
 
-def unpack_actions(action, flat_space):
-    if not isinstance(flat_space, dict):
-        action = action.reshape(flat_space.shape)
-    elif () in flat_space:
-        action = action[0]
-    else:
-        nested_data = {}
+def flatten_space(space):
+    def _recursion_helper(current):
+        if isinstance(current, gym.spaces.Tuple):
+            for elem in current:
+                _recursion_helper(elem)
+        elif isinstance(current, gym.spaces.Dict):
+            for value in current.values():
+                _recursion_helper(value)
+        else:
+            flat.append(current)
 
-        for key_list, space in flat_space.items():
-            current_dict = nested_data
+    flat = []
+    _recursion_helper(space)
+    return flat
 
-            for key in key_list[:-1]:
-                if key not in current_dict:
-                    current_dict[key] = {}
-                current_dict = current_dict[key]
+def flatten(sample):
+    def _recursion_helper(current):
+        if isinstance(current, tuple):
+            for elem in current:
+                _recursion_helper(elem)
+        elif isinstance(current, (dict, OrderedDict)):
+            for value in current.values():
+                _recursion_helper(value)
+        elif isinstance(current, np.ndarray):
+            flat.append(current)
+        else:
+            flat.append(np.array([current]))
 
-            last_key = key_list[-1]
+    flat = []
+    _recursion_helper(sample)
+    return flat
 
-            if space.shape:
-                size = np.prod(space.shape)
-                current_dict[last_key] = action[:size].reshape(space.shape)
-                action = action[size:]
-            else:
-                current_dict[last_key] = action[0]
-                action = action[1:]
+def unflatten(flat_sample, space):
+    idx = [0]  # Wrapping the index in a list to maintain the reference
+    def _recursion_helper(space):
+        if isinstance(space, gym.spaces.Tuple):
+            unflattened_tuple = tuple(_recursion_helper(subspace) for subspace in space)
+            return unflattened_tuple
+        if isinstance(space, gym.spaces.Dict):
+            unflattened_dict = OrderedDict((key, _recursion_helper(subspace)) for key, subspace in space.items())
+            return unflattened_dict
+        if isinstance(space, gym.spaces.Discrete):
+            idx[0] += 1
+            return int(flat_sample[idx[0] - 1])
 
-        action = nested_data
+        idx[0] += 1
+        return flat_sample[idx[0] - 1]
 
-    return action
+    return _recursion_helper(space)
 
-def unpack_batched_obs(flat_space, packed_obs):
-    if not isinstance(flat_space, dict):
-        return packed_obs.reshape(packed_obs.shape[0], *flat_space.shape)
+def concatenate(flat_sample):
+    if len(flat_sample) == 1:
+        return flat_sample[0]
+    return np.concatenate([e.ravel() for e in flat_sample])
 
-    batch = packed_obs.shape[0]
+def split(stacked_sample, flat_space, batched=True):
+    assert isinstance(stacked_sample, np.ndarray), "Input must be a numpy array."
 
-    if () in flat_space:
-        return packed_obs.reshape(batch, *flat_space[()].shape)
+    if batched:
+        batch = stacked_sample.shape[0]
 
-    batched_obs = {}
-    idx = 0
+    leaves = []
+    ptr = 0
+    for subspace in flat_space:
+        shape = subspace.shape
+        typ = subspace.dtype
+        sz = int(np.prod(shape))
 
-    for key_list, space in flat_space.items():
-        current_dict = batched_obs
-        inc = int(np.prod(space.shape))
+        if shape == ():
+            shape = (1,)
 
-        for key in key_list[:-1]:
-            if key not in current_dict:
-                current_dict[key] = {}
-            current_dict = current_dict[key]
+        if batched:
+            samp = stacked_sample[:, ptr:ptr+sz].reshape(batch, *shape).astype(typ)
+        else:
+            samp = stacked_sample[ptr:ptr+sz].reshape(*shape).astype(typ)
+            if isinstance(subspace, gym.spaces.Discrete):
+                samp = int(samp[0])
 
-        last_key = key_list[-1]
-        shape = space.shape
-        if len(shape) == 0:
-            shape = (1,)    
+        leaves.append(samp)
+        ptr += sz
 
-        current_dict[last_key] = packed_obs[:, idx:idx + inc].reshape(batch, *shape)
-        idx += inc
+    return leaves
 
-    return batched_obs
+def unpack_batched_obs(batched_obs, space, flat_space):
+    unpacked = split(batched_obs, flat_space, batched=True)
+    unflattened = unflatten(unpacked, space)
+    return unflattened
 
 def convert_to_multidiscrete(flat_space):
     lens = []
-    for e in flat_space.values():
+    for e in flat_space:
         if isinstance(e, gym.spaces.Discrete):
             lens.append(e.n)
         elif isinstance(e, gym.spaces.MultiDiscrete):
@@ -497,68 +524,7 @@ def make_space_like(ob):
         return gym.spaces.Box(low=-np.inf, high=np.inf, shape=())
 
     raise ValueError(f'Invalid type for featurized obs: {type(ob)}')
-
-def flatten_space(space):
-    flat_keys = {}
-
-    def _recursion_helper(current_space, key_list):
-        if isinstance(current_space, (list, tuple, gym.spaces.Tuple)):
-            for idx, elem in enumerate(current_space):
-                new_key_list = key_list + (idx,)
-                _recursion_helper(elem, new_key_list)
-        elif isinstance(current_space, (dict, OrderedDict, gym.spaces.Dict)):
-            for key, value in current_space.items():
-                new_key_list = key_list + (key,)
-                _recursion_helper(value, new_key_list)
-        else:
-            flat_keys[key_list] = current_space
-
-    _recursion_helper(space, ())
-    return flat_keys
-
-def flatten_to_array(space_sample, flat_space, dtype=None):
-    # TODO: Find a better way to handle Atari
-    if type(space_sample) == gym.wrappers.frame_stack.LazyFrames:
-       space_sample = np.array(space_sample)
-
-    if () in flat_space:
-        if isinstance(space_sample, np.ndarray):
-            if space_sample.size == 1:
-                return space_sample[0]
-            return space_sample.reshape(*flat_space[()].shape)
-        return np.array([space_sample])
-
-    tensors = []
-    for key_list in flat_space:
-        value = space_sample
-        for key in key_list:
-            value = value[key]
-
-        if not isinstance(value, np.ndarray):
-            value = np.array([value])
-
-        tensors.append(value.ravel())
-
-    # Preallocate the memory for the concatenated tensor
-    if type(tensors) == dict:
-        tensors = tensors.values()
-
-    if dtype is None:
-        tensors = list(tensors)
-        dtype = tensors[0].dtype
-
-    tensor_sizes = [tensor.size for tensor in tensors]
-    prealloc = np.empty(sum(tensor_sizes), dtype=dtype)
-
-    # Fill the concatenated tensor with the flattened tensors
-    start = 0
-    for tensor, size in zip(tensors, tensor_sizes):
-        end = start + size
-        prealloc[start:end] = tensor.ravel()
-        start = end
-
-    return prealloc
-
+    
 def _seed_and_reset(env, seed):
     try:
         env.seed(seed)

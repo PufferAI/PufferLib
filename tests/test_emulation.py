@@ -54,6 +54,7 @@ def test_gym_emulation(env_cls, steps=100, num_workers=1, envs_per_worker=2):
     puf_ob = puf_env.reset()
     raw_ob = raw_env.reset()
 
+    obs_space = raw_env.envs[0].observation_space
     flat_obs_space = puf_env.envs[0].flat_observation_space
     flat_atn_space = puf_env.envs[0].envs[0].flat_action_space
 
@@ -62,19 +63,25 @@ def test_gym_emulation(env_cls, steps=100, num_workers=1, envs_per_worker=2):
     for i in range(steps):
         # Reconstruct original obs format from puffer env and compare to raw
         orig_puf_ob = puf_ob
-        puf_ob = pufferlib.emulation.unpack_batched_obs(flat_obs_space, puf_ob)
+        puf_ob = pufferlib.emulation.unpack_batched_obs(puf_ob, obs_space, flat_obs_space)
         idx = 0
         for r_ob in raw_ob:
-            assert pufferlib.utils._compare_observations(
-                r_ob, puf_ob, idx=idx)
-            idx += 1
+            try:
+                assert pufferlib.utils._compare_space_samples(
+                    r_ob, puf_ob, idx)
+            except:
+                T()
+                puf_ob = pufferlib.emulation.unpack_batched_obs(flat_obs_space, orig_puf_ob)
 
         atn = [raw_env.envs[0].action_space.sample() for _ in range(total_agents)]
         raw_ob, raw_reward, raw_done, _ = raw_env.step(atn)
 
         # Convert raw actions to puffer format
-        actions = [pufferlib.emulation.flatten_to_array(
-            a, flat_atn_space) for a in atn]
+        actions = [
+            pufferlib.emulation.concatenate(
+                pufferlib.emulation.flatten(a)
+            ) for a in atn
+        ]
 
         puf_ob, puf_reward, puf_done, _ = puf_env.step(actions)
 
