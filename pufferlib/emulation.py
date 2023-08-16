@@ -92,6 +92,7 @@ class GymPufferEnv:
     @property
     def action_space(self):
         '''Returns a flattened, multi-discrete action space'''
+        self.structured_action_space = self.env.action_space
 
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
         self.flat_action_space, multi_discrete_action_space = make_flat_and_multidiscrete_atn_space(self.env.action_space)
@@ -118,12 +119,15 @@ class GymPufferEnv:
         action = self.postprocessor.actions(action)
 
         if __debug__ and not self.action_space.contains(action):
-            T()
             raise ValueError(f'Action:\n{action}\n '
                 f'not in space:\n{self.flat_action_space}')
 
         # Unpack actions from multidiscrete into the original action space
-        action = split(action, self.flat_action_space, batched=False)
+        action = unflatten(
+            split(
+                action, self.flat_action_space, batched=False
+            ), self.structured_action_space
+        )
 
         ob, reward, done, info = self.env.step(action)
         self.done = done
@@ -208,6 +212,8 @@ class PettingZooPufferEnv:
         else:
             atn_space = self.env.action_space(agent)
 
+        self.structured_action_space = atn_space
+
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
         self.flat_action_space, self.multidiscrete_action_space = make_flat_and_multidiscrete_atn_space(atn_space)
 
@@ -251,8 +257,11 @@ class PettingZooPufferEnv:
         unpacked_actions = {}
         for agent, atn in actions.items():
             if agent in self.agents:
-                unpacked_actions[agent] = split(
-                    atn, self.flat_action_space, batched=False)
+                unpacked_actions[agent] = unflatten(
+                    split(
+                        atn, self.flat_action_space, batched=False
+                    ), self.structured_action_space
+                )
 
         if self.teams is not None:
             unpacked_actions = ungroup_from_teams(self.teams, unpacked_actions)
@@ -460,8 +469,6 @@ def concatenate(flat_sample):
     return np.concatenate([e.ravel() for e in flat_sample])
 
 def split(stacked_sample, flat_space, batched=True):
-    assert isinstance(stacked_sample, np.ndarray), "Input must be a numpy array."
-
     if batched:
         batch = stacked_sample.shape[0]
 
@@ -476,7 +483,7 @@ def split(stacked_sample, flat_space, batched=True):
             shape = (1,)
 
         if batched:
-            samp = stacked_sample[:, ptr:ptr+sz].reshape(batch, *shape).astype(typ)
+            samp = stacked_sample[:, ptr:ptr+sz].reshape(batch, *shape)
         else:
             samp = stacked_sample[ptr:ptr+sz].reshape(*shape).astype(typ)
             if isinstance(subspace, gym.spaces.Discrete):

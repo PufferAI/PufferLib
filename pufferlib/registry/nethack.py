@@ -126,7 +126,10 @@ class Policy(pufferlib.models.Policy):
     def encode_observations(self, env_outputs):
         TB, _ = env_outputs.shape
         env_outputs = pufferlib.emulation.unpack_batched_obs(
-            self.envs.flat_observation_space, env_outputs)
+            env_outputs,
+            self.envs.structured_observation_space,
+            self.envs.flat_observation_space
+        )
 
         glyphs = env_outputs["glyphs"].long()
         blstats = env_outputs["blstats"]
