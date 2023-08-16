@@ -415,7 +415,7 @@ def make_puffer_env_cls(scope, raw_local_env, raw_obs):
             postprocessor = scope.postprocessor_cls(
                 self.env, self._teams, team, *scope.postprocessor_args, **scope.postprocessor_kwargs
             )
-            postprocessor.reset(team_obs)
+            postprocessor.reset(team_obs, dummy=True)
             obs = postprocessor.features(team_obs, self._step)
 
             # Flatten and cache observation space
