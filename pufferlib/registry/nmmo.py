@@ -57,10 +57,7 @@ class Policy(pufferlib.models.Policy):
 
   def encode_observations(self, env_outputs):
     env_outputs = pufferlib.emulation.unpack_batched_obs(
-        env_outputs,
-        self.envs.structured_observation_space,
-        self.envs.flat_observation_space
-    )
+        env_outputs, self.envs.flat_observation_space)
 
     tile = env_outputs['Tile']
     # Center on player

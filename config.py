@@ -54,7 +54,7 @@ def all():
         #'microrts': microrts,
         #'minerl': minerl,
         'nethack': nethack,
-        'nmmo': nmmo,
+        #'nmmo': nmmo,
         'procgen': procgen,
         #'smac': smac,
     }

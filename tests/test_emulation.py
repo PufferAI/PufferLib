@@ -63,7 +63,7 @@ def test_gym_emulation(env_cls, steps=100, num_workers=1, envs_per_worker=2):
     for i in range(steps):
         # Reconstruct original obs format from puffer env and compare to raw
         orig_puf_ob = puf_ob
-        puf_ob = pufferlib.emulation.unpack_batched_obs(puf_ob, obs_space, flat_obs_space)
+        puf_ob = pufferlib.emulation.unpack_batched_obs(puf_ob, flat_obs_space)
         idx = 0
         for r_ob in raw_ob:
             assert pufferlib.utils._compare_space_samples(
@@ -78,6 +78,7 @@ def test_gym_emulation(env_cls, steps=100, num_workers=1, envs_per_worker=2):
                 pufferlib.emulation.flatten(a)
             ) for a in atn
         ]
+        actions = [[atn] if type(atn) == int else atn for atn in actions]
 
         puf_ob, puf_reward, puf_done, _ = puf_env.step(actions)
 
@@ -142,7 +143,7 @@ def test_pettingzoo_emulation(env_cls, steps=100, num_workers=1, envs_per_worker
     for i in range(steps):
         # Reconstruct original obs format from puffer env and compare to raw
         orig_puf_ob = puf_ob
-        puf_ob = pufferlib.emulation.unpack_batched_obs(puf_ob, obs_space, flat_obs_space)
+        puf_ob = pufferlib.emulation.unpack_batched_obs(puf_ob, flat_obs_space)
         idx = 0
         for r_ob in raw_ob:
             for agent in raw_env.possible_agents:
@@ -162,14 +163,17 @@ def test_pettingzoo_emulation(env_cls, steps=100, num_workers=1, envs_per_worker
         actions = []
         dummy = raw_env.envs[0].action_space(0).sample()
         dummy = pufferlib.emulation.concatenate(pufferlib.emulation.flatten(dummy))
+        if type(dummy) == int:
+            dummy = [dummy]
         for a in atn:
             for agent in raw_env.possible_agents:
                 if agent in a:
-                    actions.append(
-                        pufferlib.emulation.concatenate(
-                            pufferlib.emulation.flatten(a[agent])
-                        )
-                   )
+                    aa = pufferlib.emulation.concatenate(
+                        pufferlib.emulation.flatten(a[agent])
+                    )
+                    if type(aa) == int:
+                        aa = [aa]
+                    actions.append(aa)
                 else:
                     actions.append(dummy)
 

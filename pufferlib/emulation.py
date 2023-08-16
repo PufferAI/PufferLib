@@ -10,6 +10,8 @@ from collections import OrderedDict, Mapping
 import pufferlib
 from pufferlib import utils, exceptions
 
+from .cext import flatten, unflatten
+
 
 class Postprocessor:
     '''Base class for user-defined featurizers and postprocessors
@@ -120,13 +122,13 @@ class GymPufferEnv:
 
         if __debug__ and not self.action_space.contains(action):
             raise ValueError(f'Action:\n{action}\n '
-                f'not in space:\n{self.flat_action_space}')
+                f'not in space:\n{self.action_space}')
 
         # Unpack actions from multidiscrete into the original action space
         action = unflatten(
             split(
                 action, self.flat_action_space, batched=False
-            ), self.structured_action_space
+            )
         )
 
         ob, reward, done, info = self.env.step(action)
@@ -258,9 +260,7 @@ class PettingZooPufferEnv:
         for agent, atn in actions.items():
             if agent in self.agents:
                 unpacked_actions[agent] = unflatten(
-                    split(
-                        atn, self.flat_action_space, batched=False
-                    ), self.structured_action_space
+                    split(atn, self.flat_action_space, batched=False)
                 )
 
         if self.teams is not None:
@@ -414,21 +414,21 @@ def ungroup_from_teams(team_data):
     return agent_data
 
 def flatten_space(space):
-    def _recursion_helper(current):
+    def _recursion_helper(current, key):
         if isinstance(current, gym.spaces.Tuple):
-            for elem in current:
-                _recursion_helper(elem)
+            for idx, elem in enumerate(current):
+                _recursion_helper(elem, f'{key}T{idx}.')
         elif isinstance(current, gym.spaces.Dict):
-            for value in current.values():
-                _recursion_helper(value)
+            for k, value in current.items():
+                _recursion_helper(value, f'{key}D{k}.')
         else:
-            flat.append(current)
+            flat[f'{key}V'] = current
 
-    flat = []
-    _recursion_helper(space)
+    flat = {}
+    _recursion_helper(space, '')
     return flat
 
-def flatten(sample):
+def python_flatten(sample):
     def _recursion_helper(current):
         if isinstance(current, tuple):
             for elem in current:
@@ -445,7 +445,7 @@ def flatten(sample):
     _recursion_helper(sample)
     return flat
 
-def unflatten(flat_sample, space):
+def python_unflatten(flat_sample, space):
     idx = [0]  # Wrapping the index in a list to maintain the reference
     def _recursion_helper(space):
         if isinstance(space, gym.spaces.Tuple):
@@ -465,16 +465,19 @@ def unflatten(flat_sample, space):
 
 def concatenate(flat_sample):
     if len(flat_sample) == 1:
-        return flat_sample[0]
-    return np.concatenate([e.ravel() for e in flat_sample])
+        return list(flat_sample.values())[0]
+    return np.concatenate([
+        e.ravel() if isinstance(e, np.ndarray) else np.array([e])
+        for e in flat_sample.values()]
+    )
 
 def split(stacked_sample, flat_space, batched=True):
     if batched:
         batch = stacked_sample.shape[0]
 
-    leaves = []
+    leaves = {}
     ptr = 0
-    for subspace in flat_space:
+    for key, subspace in flat_space.items():
         shape = subspace.shape
         typ = subspace.dtype
         sz = int(np.prod(shape))
@@ -489,19 +492,19 @@ def split(stacked_sample, flat_space, batched=True):
             if isinstance(subspace, gym.spaces.Discrete):
                 samp = int(samp[0])
 
-        leaves.append(samp)
+        leaves[key] = samp
         ptr += sz
 
     return leaves
 
-def unpack_batched_obs(batched_obs, space, flat_space):
+def unpack_batched_obs(batched_obs, flat_space):
     unpacked = split(batched_obs, flat_space, batched=True)
-    unflattened = unflatten(unpacked, space)
+    unflattened = unflatten(unpacked)
     return unflattened
 
 def convert_to_multidiscrete(flat_space):
     lens = []
-    for e in flat_space:
+    for e in flat_space.values():
         if isinstance(e, gym.spaces.Discrete):
             lens.append(e.n)
         elif isinstance(e, gym.spaces.MultiDiscrete):

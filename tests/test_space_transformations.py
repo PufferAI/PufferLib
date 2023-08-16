@@ -6,7 +6,7 @@ from collections import OrderedDict
 
 import gym
 
-from pufferlib.emulation import flatten_space, flatten, unflatten, concatenate, split
+from pufferlib.emulation import flatten_space, flatten, unflatten, concatenate, split, python_flatten, python_unflatten
 import pufferlib.emulation
 
 import mock_environments
@@ -51,13 +51,37 @@ nested_spaces = [
     gym.spaces.Discrete(100)
 ]
 
+def test_python_flatten_unflatten():
+    for space in nested_spaces:
+        sample = space.sample()
+        flat_sample = python_flatten(sample)
+        unflat_sample = python_unflatten(flat_sample, space)
+
+        assert pufferlib.utils._compare_space_samples(sample, unflat_sample), "Unflatten failed."
+
 def test_flatten_unflatten():
     for space in nested_spaces:
         sample = space.sample()
         flat_sample = flatten(sample)
-        unflat_sample = unflatten(flat_sample, space)
+        unflat_sample = unflatten(flat_sample)
 
         assert pufferlib.utils._compare_space_samples(sample, unflat_sample), "Unflatten failed."
+
+def test_python_flatten_implementation_speed():
+    for space in nested_spaces:
+        sample = space.sample()
+        flat_sample = python_flatten(sample)
+        flatten_time = timeit.timeit(lambda: python_flatten(sample), number=1000)
+        unflatten_time = timeit.timeit(lambda: python_unflatten(flat_sample, space), number=1000)
+        print(f"Space: {space}\n\tFlatten time: {flatten_time}, Unflatten time: {unflatten_time}")
+
+def test_flatten_implementation_speed():
+    for space in nested_spaces:
+        sample = space.sample()
+        flat_sample = flatten(sample)
+        flatten_time = timeit.timeit(lambda: flatten(sample), number=1000)
+        unflatten_time = timeit.timeit(lambda: unflatten(flat_sample), number=1000)
+        print(f"Space: {space}\n\tFlatten time: {flatten_time}, Unflatten time: {unflatten_time}")
 
 def test_pack_unpack():
     for space in nested_spaces:
@@ -80,5 +104,9 @@ if __name__ == '__main__':
         print(f"Space: {space}\n\tFlatten time: {flatten_time}, Unflatten time: {unflatten_time}")
     '''
 
+    test_python_flatten_unflatten()
     test_flatten_unflatten()
-    test_pack_unpack()
+
+    test_python_flatten_implementation_speed()
+    test_flatten_implementation_speed()
+    #test_pack_unpack()

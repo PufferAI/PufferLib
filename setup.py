@@ -1,6 +1,6 @@
 from pdb import set_trace as T
 
-from setuptools import find_packages, setup
+from setuptools import find_packages, setup, Extension
 from itertools import chain
 
 
@@ -118,6 +118,14 @@ setup(
         'all_compatible': docs + cleanrl + rllib + compatible_environments,
         **all_environments,
     },
+    ext_modules=[
+        Extension(
+            'pufferlib.cext',
+            ['flattery.c'],
+            extra_compile_args=['-fPIC'],
+            define_macros=[],
+        ),
+    ],
     python_requires=">=3.8",
     license="MIT",
     author="Joseph Suarez",
