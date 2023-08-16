@@ -1,0 +1,152 @@
+from pdb import set_trace as T
+
+import numpy as np
+
+import pufferlib
+import pufferlib.emulation
+import pufferlib.registry
+import pufferlib.vectorization
+
+
+def test_gym_vectorization(env_cls, steps=100, num_workers=1, envs_per_worker=1):
+    raw_envs = [env_cls() for _ in range(num_workers * envs_per_worker)]
+    puf_envs = pufferlib.vectorization.Serial(
+        env_creator=pufferlib.emulation.GymPufferEnv,
+        env_kwargs={'env_creator': env_cls},
+        num_workers=num_workers,
+        envs_per_worker=envs_per_worker,
+    )
+
+    raw_dones = [False for _ in range(num_workers * envs_per_worker)]
+
+    raw_obs = [raw_env.reset() for raw_env in raw_envs]
+    puf_obs = puf_envs.reset()
+
+    flat_obs_space = puf_envs.flat_observation_space
+
+    for i in range(steps):
+        puf_obs = pufferlib.emulation.unpack_batched_obs(puf_obs, flat_obs_space)
+ 
+        for idx, r_ob in enumerate(raw_obs):
+            assert pufferlib.utils._compare_space_samples(r_ob, puf_obs, idx)
+
+        raw_actions = [r_env.action_space.sample() for r_env in raw_envs]
+
+        # Copy reset behavior of VecEnv
+        raw_obs, raw_rewards, nxt_dones = [], [], []
+        for idx, r_env in enumerate(raw_envs):
+            if raw_dones[idx]:
+                raw_obs.append(r_env.reset())
+                raw_rewards.append(0)
+                nxt_dones.append(False)
+            else:
+                r_ob, r_rew, r_done, _ = r_env.step(raw_actions[idx])
+                raw_obs.append(r_ob)
+                raw_rewards.append(r_rew)
+                nxt_dones.append(r_done)
+        raw_dones = nxt_dones
+                
+        # Convert raw actions to puffer format
+        puf_actions = []
+        for idx, r_a in enumerate(raw_actions):
+            r_a = pufferlib.emulation.concatenate(pufferlib.emulation.flatten(r_a))
+            r_a = [r_a] if type(r_a) == int else r_a
+            r_a = np.array(r_a)
+            puf_actions.append(r_a)
+
+        puf_obs, puf_rewards, puf_dones, _ = puf_envs.step(puf_actions)
+
+        for idx in range(num_workers * envs_per_worker):
+            assert raw_rewards[idx] == puf_rewards[idx]
+            assert raw_dones[idx] == puf_dones[idx]
+
+def test_pettingzoo_vectorization(env_cls, steps=100, num_workers=1, envs_per_worker=1):
+    raw_envs = [env_cls() for _ in range(num_workers * envs_per_worker)]
+    puf_envs = pufferlib.vectorization.Serial(
+        env_creator=pufferlib.emulation.PettingZooPufferEnv,
+        env_kwargs={'env_creator': env_cls},
+        num_workers=num_workers,
+        envs_per_worker=envs_per_worker,
+    )
+
+    possible_agents = raw_envs[0].possible_agents
+    raw_terminated = [False for _ in range(num_workers * envs_per_worker)]
+
+    raw_obs = [raw_env.reset() for raw_env in raw_envs]
+    flat_puf_obs = puf_envs.reset()
+
+    flat_obs_space = puf_envs.flat_observation_space
+
+    for i in range(steps):
+        puf_obs = pufferlib.emulation.unpack_batched_obs(flat_puf_obs, flat_obs_space)
+ 
+        idx = 0
+        for r_obs in raw_obs:
+            for agent in possible_agents:
+                if agent in raw_obs:
+                    assert pufferlib.utils._compare_space_samples(r_obs[agent], puf_obs, idx)
+                # Currently, vectorization does not reset padding to 0
+                # This is for efficiency... need to do some timing
+                #else:
+                #    assert np.sum(flat_puf_obs[idx] != 0) == 0
+                idx += 1
+
+        raw_actions = [
+            {agent: r_env.action_space(agent).sample() for agent in possible_agents}
+            for r_env in raw_envs
+        ]
+
+        # Copy reset behavior of VecEnv
+        raw_obs, raw_rewards, nxt_dones = [], [], []
+        for idx, r_env in enumerate(raw_envs):
+            if raw_terminated[idx]:
+                raw_obs.append(r_env.reset())
+                raw_rewards.append({agent: 0 for agent in possible_agents})
+                nxt_dones.append({agent: False for agent in possible_agents})
+            else:
+                r_ob, r_rew, r_done, _ = r_env.step(raw_actions[idx])
+                raw_obs.append(r_ob)
+                raw_rewards.append(r_rew)
+                nxt_dones.append(r_done)
+            raw_terminated[idx] = len(r_env.agents) == 0
+        raw_dones = nxt_dones
+                
+        # Convert raw actions to puffer format
+        puf_actions = []
+        dummy_action = raw_envs[0].action_space(0).sample()
+        for r_atns in raw_actions:
+            for agent in possible_agents:
+                if agent in r_atns:
+                    action = r_atns[agent]
+                else:
+                    action = dummy_action
+
+                action = pufferlib.emulation.concatenate(pufferlib.emulation.flatten(action))
+                action = [action] if type(action) == int else action
+                action = np.array(action)
+                puf_actions.append(action)
+        puf_actions = np.array(puf_actions)
+
+ 
+        flat_puf_obs, puf_rewards, puf_dones, _ = puf_envs.step(puf_actions)
+
+        idx = 0
+        for r_rewards, r_dones in zip(raw_rewards, raw_dones):
+            for agent in possible_agents:
+                if agent in r_rewards:
+                    assert puf_rewards[idx] == r_rewards[agent]
+                    assert puf_dones[idx] == r_dones[agent]
+                else:
+                    assert puf_rewards[idx] == 0
+                    # No assert for dones, depends on emulation
+                
+                idx += 1
+
+
+if __name__ == '__main__':
+    import mock_environments
+    for env_cls in mock_environments.MOCK_SINGLE_AGENT_ENVIRONMENTS:
+        test_gym_vectorization(env_cls)
+
+    for env_cls in mock_environments.MOCK_MULTI_AGENT_ENVIRONMENTS:
+        test_pettingzoo_vectorization(env_cls)

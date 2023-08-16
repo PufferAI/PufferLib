@@ -115,6 +115,7 @@ def make_mock_multiagent_env(
     class TestEnv(ParallelEnv):
         def __init__(self):
             self.possible_agents = [f'agent_{i+1}' for i in range(max_agents)]
+            self.agents = []
 
         def reset(self, seed=None):
             self.tick = 0
