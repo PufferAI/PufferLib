@@ -60,24 +60,25 @@ def _compare_space_samples(sample_1, sample_2, sample_2_batch_idx=None):
         except Exception as e:
             raise TypeError(f'Error comparing {array1} and {array2}.') from e
 
-    if type(sample_1) != type(sample_2):
-        raise ValueError(f"Types do not match: {type(sample_1)} vs {type(sample_2)}")
-
     if isinstance(sample_1, (dict, OrderedDict)):
+        assert isinstance(sample_2, (dict, OrderedDict))
         if not all(k in sample_2 for k in sample_1):
             raise ValueError("Keys do not match between dictionaries.")
         return all(_compare_space_samples(v, sample_2[k], sample_2_batch_idx)
                    for k, v in sample_1.items())
     elif isinstance(sample_1, (list, tuple)):
+        assert isinstance(sample_2, (list, tuple))
         if len(sample_1) != len(sample_2):
             raise ValueError("Lengths do not match between lists/tuples.")
         return all(_compare_space_samples(v, sample_2[i], sample_2_batch_idx)
                    for i, v in enumerate(sample_1))
     elif isinstance(sample_1, np.ndarray):
+        assert isinstance(sample_2, np.ndarray)
         if sample_2_batch_idx is not None:
             sample_2 = sample_2[sample_2_batch_idx]
         return _compare_arrays(sample_1, sample_2)
     elif isinstance(sample_1, (int, float)):
+        assert isinstance(sample_2, (int, float))
         return sample_1 == sample_2
     else:
         raise ValueError(f"Unsupported type: {type(sample_1)}")

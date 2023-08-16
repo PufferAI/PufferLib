@@ -66,12 +66,8 @@ def test_gym_emulation(env_cls, steps=100, num_workers=1, envs_per_worker=2):
         puf_ob = pufferlib.emulation.unpack_batched_obs(puf_ob, obs_space, flat_obs_space)
         idx = 0
         for r_ob in raw_ob:
-            try:
-                assert pufferlib.utils._compare_space_samples(
-                    r_ob, puf_ob, idx)
-            except:
-                T()
-                puf_ob = pufferlib.emulation.unpack_batched_obs(flat_obs_space, orig_puf_ob)
+            assert pufferlib.utils._compare_space_samples(
+                r_ob, puf_ob, idx)
 
         atn = [raw_env.envs[0].action_space.sample() for _ in range(total_agents)]
         raw_ob, raw_reward, raw_done, _ = raw_env.step(atn)
@@ -139,23 +135,23 @@ def test_pettingzoo_emulation(env_cls, steps=100, num_workers=1, envs_per_worker
     puf_ob = puf_env.reset()
     raw_ob = raw_env.reset()
 
+    obs_space = raw_env.envs[0].observation_space(0)
     flat_obs_space = puf_env.envs[0].flat_observation_space
     flat_atn_space = puf_env.envs[0].envs[0].flat_action_space
 
     for i in range(steps):
         # Reconstruct original obs format from puffer env and compare to raw
         orig_puf_ob = puf_ob
-        puf_ob = pufferlib.emulation.unpack_batched_obs(flat_obs_space, puf_ob)
+        puf_ob = pufferlib.emulation.unpack_batched_obs(puf_ob, obs_space, flat_obs_space)
         idx = 0
         for r_ob in raw_ob:
             for agent in raw_env.possible_agents:
                 if agent not in r_ob:
                     idx += 1
                     continue
-                    # Does not work with tensor obs
                 else:
-                    assert pufferlib.utils._compare_observations(
-                        r_ob[agent], puf_ob, idx=idx)
+                    assert pufferlib.utils._compare_space_samples(
+                        r_ob[agent], puf_ob, idx)
                 idx += 1
 
         atn = [{a: raw_env.envs[0].action_space(a).sample() for a in agents}
@@ -165,11 +161,15 @@ def test_pettingzoo_emulation(env_cls, steps=100, num_workers=1, envs_per_worker
         # Convert actions to puffer format
         actions = []
         dummy = raw_env.envs[0].action_space(0).sample()
-        dummy = pufferlib.emulation.flatten_to_array(dummy, flat_atn_space)
+        dummy = pufferlib.emulation.concatenate(pufferlib.emulation.flatten(dummy))
         for a in atn:
             for agent in raw_env.possible_agents:
                 if agent in a:
-                    actions.append(pufferlib.emulation.flatten_to_array(a[agent], flat_atn_space))
+                    actions.append(
+                        pufferlib.emulation.concatenate(
+                            pufferlib.emulation.flatten(a[agent])
+                        )
+                   )
                 else:
                     actions.append(dummy)
 

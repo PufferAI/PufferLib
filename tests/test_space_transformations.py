@@ -6,6 +6,7 @@ from collections import OrderedDict
 
 import gym
 
+from pufferlib.emulation import flatten_space, flatten, unflatten, concatenate, split
 import pufferlib.emulation
 
 import mock_environments
@@ -49,89 +50,6 @@ nested_spaces = [
     gym.spaces.Box(low=0, high=1, shape=(10,)),
     gym.spaces.Discrete(100)
 ]
-
-def flatten_space(space):
-    def _recursion_helper(current):
-        if isinstance(current, gym.spaces.Tuple):
-            for elem in current:
-                _recursion_helper(elem)
-        elif isinstance(current, gym.spaces.Dict):
-            for value in current.values():
-                _recursion_helper(value)
-        else:
-            flat.append(current)
-
-    flat = []
-    _recursion_helper(space)
-    return flat
-
-def flatten(sample):
-    def _recursion_helper(current):
-        if isinstance(current, tuple):
-            for elem in current:
-                _recursion_helper(elem)
-        elif isinstance(current, OrderedDict):
-            for value in current.values():
-                _recursion_helper(value)
-        elif isinstance(current, np.ndarray):
-            flat.append(current)
-        else:
-            flat.append(np.array([current]))
-
-    flat = []
-    _recursion_helper(sample)
-    return flat
-
-def unflatten(flat_sample, space):
-    idx = [0]  # Wrapping the index in a list to maintain the reference
-    def _recursion_helper(space):
-        if isinstance(space, gym.spaces.Tuple):
-            unflattened_tuple = tuple(_recursion_helper(subspace) for subspace in space)
-            return unflattened_tuple
-        if isinstance(space, gym.spaces.Dict):
-            unflattened_dict = OrderedDict((key, _recursion_helper(subspace)) for key, subspace in space.items())
-            return unflattened_dict
-        if isinstance(space, gym.spaces.Discrete):
-            idx[0] += 1
-            return int(flat_sample[idx[0] - 1])
-
-        idx[0] += 1
-        return flat_sample[idx[0] - 1]
-
-    return _recursion_helper(space)
-
-def concatenate(flat_sample):
-    if len(flat_sample) == 1:
-        return flat_sample[0]
-    return np.concatenate([e.ravel() for e in flat_sample])
-
-def split(stacked_sample, flat_space, batched=True):
-    assert isinstance(stacked_sample, np.ndarray), "Input must be a numpy array."
-
-    if batched:
-        batch = stacked_sample.shape[0]
-
-    leaves = []
-    ptr = 0
-    for subspace in flat_space:
-        shape = subspace.shape
-        typ = subspace.dtype
-        sz = int(np.prod(shape))
-
-        if shape == ():
-            shape = (1,)
-
-        if batched:
-            samp = stacked_sample[:, ptr:ptr+sz].reshape(batch, *shape).astype(typ)
-        else:
-            samp = stacked_sample[ptr:ptr+sz].reshape(*shape).astype(typ)
-            if isinstance(subspace, gym.spaces.Discrete):
-                samp = int(samp[0])
-
-        leaves.append(samp)
-        ptr += sz
-
-    return leaves
 
 def test_flatten_unflatten():
     for space in nested_spaces:
