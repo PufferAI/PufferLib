@@ -38,6 +38,7 @@ def test_gym_emulation(env_cls, steps=100):
             )
         )
  
+        pufferlib.utils._compare_space_samples(raw_ob, puf_ob)
         assert pufferlib.utils._compare_space_samples(raw_ob, puf_ob)
 
         action = raw_env.action_space.sample()
@@ -83,7 +84,7 @@ def test_pettingzoo_emulation(env_cls, steps=100):
         # Reconstruct original obs format from puffer env and compare to raw
         for agent in puf_env.possible_agents:
             if agent not in raw_obs:
-                assert sum(puf_obs[agent] != 0) == 0
+                assert np.sum(puf_obs[agent] != 0) == 0
                 continue
             
             raw_ob = raw_obs[agent]

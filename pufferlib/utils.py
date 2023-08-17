@@ -78,7 +78,11 @@ def _compare_space_samples(sample_1, sample_2, sample_2_batch_idx=None):
             sample_2 = sample_2[sample_2_batch_idx]
         return _compare_arrays(sample_1, sample_2)
     elif isinstance(sample_1, (int, float)):
-        assert isinstance(sample_2, (int, float))
+        if sample_2_batch_idx is not None:
+            sample_2 = sample_2[sample_2_batch_idx]
+        if isinstance(sample_2, np.ndarray):
+            assert sample_2.size == 1, "Cannot compare scalar to non-scalar."
+            sample_2 = sample_2[0]
         return sample_1 == sample_2
     else:
         raise ValueError(f"Unsupported type: {type(sample_1)}")

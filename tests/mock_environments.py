@@ -4,6 +4,7 @@ import numpy as np
 import time
 
 import gym
+from gym.spaces import Box, Discrete, Dict, Tuple
 from pettingzoo.utils.env import ParallelEnv
 
 import pufferlib
@@ -47,13 +48,13 @@ class PerformanceEnv:
         return obs, rewards, dones, infos
 
     def observation_space(self, agent):
-        return gym.spaces.Box(
+        return Box(
             low=-2**20, high=2**20,
             shape=(self.bandwidth,), dtype=np.float32
         )
 
     def action_space(self, agent):
-        return gym.spaces.Discrete(2)
+        return Discrete(2)
     
 
 ### Other Mock environments and utilities
@@ -61,22 +62,31 @@ def _agent_str_to_int(agent):
     return int(agent.split('_')[-1])
 
 def _sample_space(agent, tick, space, zero=False):
-    if type(agent) is str:
+    if isinstance(agent, str):
         agent = float(agent.split('_')[-1])
 
-    if isinstance(space, gym.spaces.Discrete):
+    if isinstance(space, Discrete):
         if zero:
             return 0
         return hash(f'{agent}-{tick}') % space.n
-    elif isinstance(space, gym.spaces.Box):
+    elif isinstance(space, Box):
         if zero:
-            return np.zeros(space.shape, dtype=np.float32)
-        nonce = (agent % HIGH + tick/10) % (HIGH - 1)
-        return np.array([nonce+0.01*t for t in range(space.shape[0])], dtype=np.float32)
-    elif isinstance(space, gym.spaces.Tuple):
-        return tuple(_sample_space(agent, tick, s) for s in space.spaces)
-    elif isinstance(space, gym.spaces.Dict):
-        return {k: _sample_space(agent, tick, v) for k, v in space.spaces.items()}
+            return np.zeros(space.shape, dtype=space.dtype)
+
+        # Create a linear sample between low and high
+        low, high = space.low.flatten(), space.high.flatten()
+        shape = np.prod(space.shape)
+        nonce = (agent + tick / 10) % 1  # Ensures nonce is between 0 and 1
+        sample = (1 - nonce) * low + nonce * high
+
+        # Rescale to match the shape and data type
+        sample = sample.astype(space.dtype).reshape(space.shape)
+
+        return sample
+    elif isinstance(space, Tuple):
+        return tuple(_sample_space(agent, tick, s, zero) for s in space.spaces)
+    elif isinstance(space, Dict):
+        return {k: _sample_space(agent, tick, v, zero) for k, v in space.spaces.items()}
     else:
         raise ValueError(f"Invalid space type: {type(space)}")
 
@@ -171,67 +181,162 @@ def make_mock_multiagent_env(
 
 
 MOCK_OBSERVATION_SPACES = [
+    # Atari space
+    Box(low=0, high=255, shape=(4, 84, 84), dtype=np.uint8),
+
+    # NetHack space
+    Dict({
+        'blstats': Box(-2147483648, 2147483647, (27,), 'int64'),
+        'chars': Box(0, 255, (21, 79), 'uint8'),
+        'colors': Box(0, 15, (21, 79), 'uint8'),
+        'glyphs': Box(0, 5976, (21, 79), 'int16'),
+        'inv_glyphs': Box(0, 5976, (55,), 'int16'),
+        'inv_letters': Box(0, 127, (55,), 'uint8'),
+        'inv_oclasses': Box(0, 18, (55,), 'uint8'),
+        'inv_strs': Box(0, 255, (55, 80), 'uint8'),
+        'message': Box(0, 255, (256,), 'uint8'),
+        'screen_descriptions': Box(0, 127, (21, 79, 80), 'uint8'),
+        'specials': Box(0, 255, (21, 79), 'uint8'),
+        'tty_chars': Box(0, 255, (24, 80), 'uint8'),
+        'tty_colors': Box(0, 31, (24, 80), 'int8'),
+        'tty_cursor': Box(0, 255, (2,), 'uint8'),
+    }),
+    
+    # Neural MMO space
+    Dict({
+        'ActionTargets': Dict({
+            'Attack': Dict({
+                'Style': Box(0, 1, (3,), 'int8'),
+                'Target': Box(0, 1, (100,), 'int8'),
+            }),
+            'Buy': Dict({
+                'MarketItem': Box(0, 1, (1024,), 'int8'),
+            }),
+            'Comm': Dict({
+                'Token': Box(0, 1, (50,), 'int8'),
+            }),
+            'Destroy': Dict({
+                'InventoryItem': Box(0, 1, (12,), 'int8'),
+            }),
+            'Give': Dict({
+                'InventoryItem': Box(0, 1, (12,), 'int8'),
+                'Target': Box(0, 1, (100,), 'int8'),
+            }),
+            'GiveGold': Dict({
+                'Price': Box(0, 1, (99,), 'int8'),
+                'Target': Box(0, 1, (100,), 'int8'),
+            }),
+            'Move': Dict({
+                'Direction': Box(0, 1, (5,), 'int8'),
+            }),
+            'Sell': Dict({
+                'InventoryItem': Box(0, 1, (12,), 'int8'),
+                'Price': Box(0, 1, (99,), 'int8'),
+            }),
+            'Use': Dict({
+                'InventoryItem': Box(0, 1, (12,), 'int8'),
+            })
+        }),
+        'AgentId': Discrete(129),
+        'CurrentTick': Discrete(1025),
+        'Entity': Box(-32768, 32767, (100, 23), 'int16'),
+        'Inventory': Box(-32768, 32767, (12, 16), 'int16'),
+        'Market': Box(-32768, 32767, (1024, 16), 'int16'),
+        'Task': Box(-32770.0, 32770.0, (1024,), 'float16'),
+        'Tile': Box(-32768, 32767, (225, 3), 'int16'),
+    }),
+
     # Simple spaces
-    gym.spaces.Box(low=LOW, high=HIGH, shape=(4,), dtype=np.float32),
-    #gym.spaces.Discrete(5),
+    Discrete(5),
+    Box(low=LOW, high=HIGH, shape=(4,), dtype=np.float32),
 
     # Nested spaces
-    gym.spaces.Dict({
-        "foo": gym.spaces.Box(low=LOW, high=HIGH, shape=(2,), dtype=np.float32),
-        "bar": gym.spaces.Box(low=LOW, high=HIGH, shape=(2,), dtype=np.float32),
+    Dict({
+        "foo": Box(low=LOW, high=HIGH, shape=(2,), dtype=np.float32),
+        "bar": Box(low=LOW, high=HIGH, shape=(2,), dtype=np.float32),
     }),
-    #gym.spaces.Tuple((gym.spaces.Discrete(3), gym.spaces.Discrete(4))),
-    gym.spaces.Tuple((
-        gym.spaces.Box(low=LOW, high=HIGH, shape=(2,), dtype=np.float32),
-        #gym.spaces.Discrete(3),
-        gym.spaces.Dict({
-            "baz": gym.spaces.Box(low=LOW, high=HIGH, shape=(1,), dtype=np.float32),
-            "qux": gym.spaces.Box(low=LOW, high=HIGH, shape=(1,), dtype=np.float32),
+    Tuple((Discrete(3), Discrete(4))),
+    Tuple((
+        Box(low=LOW, high=HIGH, shape=(2,), dtype=np.float32),
+        Discrete(3),
+        Dict({
+            "baz": Box(low=LOW, high=HIGH, shape=(1,), dtype=np.float32),
+            "qux": Box(low=LOW, high=HIGH, shape=(1,), dtype=np.float32),
         }),
     )),
-    gym.spaces.Dict({
-        "foo": gym.spaces.Tuple((
-            gym.spaces.Box(low=LOW, high=HIGH, shape=(2,), dtype=np.float32),
-            #gym.spaces.Discrete(3),
+    Dict({
+        "foo": Tuple((
+            Box(low=LOW, high=HIGH, shape=(2,), dtype=np.float32),
+            Discrete(3),
         )),
-        #"bar": gym.spaces.Dict({
-        #    "baz": gym.spaces.Discrete(2),
-        #    "qux": gym.spaces.Discrete(4),
-        #}),
+        "bar": Dict({
+            "baz": Discrete(2),
+            "qux": Discrete(4),
+        }),
     }),
 ]
 
 
 MOCK_ACTION_SPACES = [
-    # Simple spaces
-    gym.spaces.Discrete(5),
+    # NetHack action space
+    Discrete(5),
+
+    # Neural MMO action space
+    Dict({
+        'Attack': Dict({
+            'Style': Discrete(3),
+            'Target': Discrete(100),
+        }),
+        'Buy': Dict({
+            'MarketItem': Discrete(1024),
+        }),
+        'Comm': Dict({
+            'Token': Discrete(50),
+        }),
+        'Destroy': Dict({
+            'InventoryItem': Discrete(12),
+        }),
+        'Give': Dict({
+            'InventoryItem': Discrete(12),
+            'Target': Discrete(100),
+        }),
+        'GiveGold': Dict({
+            'Price': Discrete(99),
+            'Target': Discrete(100),
+        }),
+        'Move': Dict({
+            'Direction': Discrete(5),
+        }),
+        'Sell': Dict({
+            'InventoryItem': Discrete(12),
+            'Price': Discrete(99),
+        }),
+        'Use': Dict({
+            'InventoryItem': Discrete(12),
+        })
+    }),
 
     # Nested spaces
-    #gym.spaces.Tuple((gym.spaces.Discrete(2), gym.spaces.Discrete(3))),
-    gym.spaces.Dict({
-        "foo": gym.spaces.Discrete(4),
-        "bar": gym.spaces.Discrete(2),
+    Tuple((gym.spaces.Discrete(2), gym.spaces.Discrete(3))),
+    Dict({
+        "foo": Discrete(4),
+        "bar": Discrete(2),
     }),
-    # gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
-    #gym.spaces.Tuple((
-    #    gym.spaces.Discrete(4),
-    #    gym.spaces.Dict({
-    #        "baz": gym.spaces.Discrete(2),
-    #        "qux": gym.spaces.Discrete(2),
-    #    }),
-    #)),
-    # gym.spaces.Dict({
-    #     "foo": gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32),
-    #     "bar": gym.spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
-    # }),
-    gym.spaces.Dict({
-        "foo": gym.spaces.Tuple((
-            gym.spaces.Discrete(2),
-            gym.spaces.Discrete(3),
+    Tuple((
+        Discrete(4),
+        Dict({
+            "baz": Discrete(2),
+            "qux": Discrete(2),
+        }),
+    )),
+    Dict({
+        "foo": Tuple((
+            Discrete(2),
+            Discrete(3),
         )),
-        "bar": gym.spaces.Dict({
-            "baz": gym.spaces.Discrete(2),
-            "qux": gym.spaces.Discrete(4),
+        "bar": Dict({
+            "baz": Discrete(2),
+            "qux": Discrete(4),
         }),
     }),
 ]

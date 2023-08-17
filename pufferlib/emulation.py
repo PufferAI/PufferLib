@@ -14,28 +14,55 @@ from .cext import flatten, unflatten
 
 
 class Postprocessor:
-    '''Base class for user-defined featurizers and postprocessors
-    
-    Instantiated per agent or team'''
-    def __init__(self, env):
-        '''Provides full access to the underlying environment'''
-        self.env = env
+    '''Modify data before it is returned from or passed to the environment
 
-    def reset(self, obs):
+    For multi-agent environments, each agent has its own stateful postprocessor.
+    '''
+    def __init__(self, env, is_multiagent):
+        '''Postprocessors provide full access to the environment
+        
+        This means you can use them to cheat. Don't blame us if you do.
+        '''
+        self.env = env
+        self.is_multiagent = is_multiagent
+
+    @property
+    def observation_space(self):
+        '''The space of observations output by the postprocessor
+        
+        You will have to implement this function if Postprocessor.observation
+        modifies the structure of observations. Defaults to the env's obs space.
+
+        PufferLib supports heterogeneous observation spaces for multi-agent environments,
+        provided that your postprocessor pads or otherwise cannonicalizes the observations.
+        '''
+        if self.is_multiagent:
+            return self.env.observation_space(self.env.possible_agents[0])
+        return self.env.observation_space
+
+    def reset(self, observation):
         '''Called at the beginning of each episode'''
         return
 
-    def features(self, obs):
-        '''Called on each observation after it is returned by the environment'''
-        return obs
+    def observation(self, observation):
+        '''Called on each observation after it is returned by the environment
+        
+        You must override Postprocessor.observation_space if this function
+        changes the structure of observations.
+        '''
+        return observation
 
-    def actions(self, actions):
-        '''Called on each action before it is passed to the environment'''
-        return actions
+    def action(self, action):
+        '''Called on each action before it is passed to the environment
+        
+        Actions output by your policy do not need to match the action space,
+        but they must be compatible after this function is called.
+        '''
+        return action
 
-    def rewards_dones_infos(self, rewards, dones, infos):
-        '''Called on each reward, done, and info after they are returned by the environment'''
-        return rewards, dones, infos
+    def reward_done_info(self, reward, done, info):
+        '''Called on the reward, done, and info after they are returned by the environment'''
+        return reward, done, info
 
 
 class BasicPostprocessor(Postprocessor):
@@ -67,7 +94,7 @@ class GymPufferEnv:
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={},
             postprocessor_cls=Postprocessor):
         self.env = make_object(env, env_creator, env_args, env_kwargs)
-        self.postprocessor = postprocessor_cls(self.env)
+        self.postprocessor = postprocessor_cls(self.env, is_multiagent=False)
 
         self.initialized = False
         self.done = True
@@ -79,15 +106,12 @@ class GymPufferEnv:
     @property
     def observation_space(self):
         '''Returns a flattened, single-tensor observation space'''
-
-        # Call user featurizer and create a corresponding gym space
-        self.structured_observation_space, structured_ob = make_featurized_obs_and_space(
-            self.env.observation_space, self.postprocessor)
+        self.structured_observation_space = self.postprocessor.observation_space
 
         # Flatten the featurized observation space and store
         # it for use in step. Return a box space for the user
-        self.flat_observation_space, self.box_observation_space, self.pad_observation = make_flat_and_box_obs_space(
-            self.structured_observation_space, structured_ob)
+        self.flat_observation_space, self.box_observation_space, self.pad_observation = (
+            make_flat_and_box_obs_space(self.structured_observation_space))
 
         return self.box_observation_space
 
@@ -97,7 +121,8 @@ class GymPufferEnv:
         self.structured_action_space = self.env.action_space
 
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
-        self.flat_action_space, multi_discrete_action_space = make_flat_and_multidiscrete_atn_space(self.env.action_space)
+        self.flat_action_space, multi_discrete_action_space = (
+            make_flat_and_multidiscrete_atn_space(self.env.action_space))
 
         return multi_discrete_action_space
 
@@ -118,7 +143,7 @@ class GymPufferEnv:
         if self.done:
             raise exceptions.APIUsageError('step() called after environment is done')
  
-        action = self.postprocessor.actions(action)
+        action = self.postprocessor.action(action)
 
         if __debug__ and not self.action_space.contains(action):
             raise ValueError(f'Action:\n{action}\n '
@@ -157,7 +182,7 @@ class PettingZooPufferEnv:
         self.possible_agents = self.env.possible_agents if teams is None else list(teams.keys())
         self.teams = teams
 
-        self.postprocessors = {agent: postprocessor_cls(self.env)
+        self.postprocessors = {agent: postprocessor_cls(self.env, is_multiagent=True)
             for agent in self.possible_agents}
 
         # Cache the observation and action spaces
@@ -193,12 +218,11 @@ class PettingZooPufferEnv:
             obs_space = self.env.observation_space(agent)
 
         # Call user featurizer and create a corresponding gym space
-        self.structured_observation_space, structured_obs = make_featurized_obs_and_space(
-            obs_space, self.postprocessors[agent])
+        self.structured_observation_space = self.postprocessors[agent].observation_space
 
         # Flatten the featurized observation space and store it for use in step. Return a box space for the user
-        self.flat_observation_space, self.box_observation_space, self.pad_observation = make_flat_and_box_obs_space(
-            self.structured_observation_space, structured_obs)
+        self.flat_observation_space, self.box_observation_space, self.pad_observation = (
+            make_flat_and_box_obs_space(self.structured_observation_space))
 
         return self.box_observation_space 
 
@@ -250,7 +274,7 @@ class PettingZooPufferEnv:
 
         # Postprocess actions and validate action spaces
         for agent in actions:
-            actions[agent] = self.postprocessors[agent].actions(actions[agent])
+            actions[agent] = self.postprocessors[agent].action(actions[agent])
 
         if __debug__:
             check_spaces(actions, self.action_space)
@@ -328,10 +352,10 @@ def postprocess_and_flatten(ob, postprocessor,
     if reset:
         postprocessor.reset(ob)
     else:
-        reward, done, info = postprocessor.rewards_dones_infos(
+        reward, done, info = postprocessor.reward_done_info(
             reward, done, info)
 
-    postprocessed_ob = postprocessor.features(ob)
+    postprocessed_ob = postprocessor.observation(ob)
     flat_ob = concatenate(flatten(postprocessed_ob))
 
     if reset:
@@ -345,8 +369,10 @@ def make_flat_and_multidiscrete_atn_space(atn_space):
     return flat_action_space, multidiscrete_space
 
 
-def make_flat_and_box_obs_space(obs_space, obs):
+def make_flat_and_box_obs_space(obs_space):
     flat_observation_space = flatten_space(obs_space)  
+
+    obs = obs_space.sample()
     flat_observation = concatenate(flatten(obs))
 
     mmin, mmax = pufferlib.utils._get_dtype_bounds(flat_observation.dtype)
@@ -361,7 +387,7 @@ def make_flat_and_box_obs_space(obs_space, obs):
 
 def make_featurized_obs_and_space(obs_space, postprocessor):
     obs_sample = obs_space.sample()
-    featurized_obs = postprocessor.features(obs_sample)
+    featurized_obs = postprocessor.observation(obs_sample)
     featurized_obs_space = make_space_like(featurized_obs)
     return featurized_obs_space, featurized_obs
 
@@ -465,7 +491,10 @@ def python_unflatten(flat_sample, space):
 
 def concatenate(flat_sample):
     if len(flat_sample) == 1:
-        return list(flat_sample.values())[0]
+        val = list(flat_sample.values())[0]
+        if isinstance(val, np.ndarray):
+            return val
+        return np.array([val])
     return np.concatenate([
         e.ravel() if isinstance(e, np.ndarray) else np.array([e])
         for e in flat_sample.values()]

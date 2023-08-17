@@ -167,7 +167,7 @@ if __name__ == '__main__':
 
     performance = []
     headers = "\t\t| Cores | Envs/Core |   Min   |   Max   |  Mean  "
-    vectorizations = [pufferlib.vectorization.Serial, pufferlib.vectorization.Multiprocessing, pufferlib.vectorization.Ray]
+    vectorizations = [pufferlib.vectorization.Serial, pufferlib.vectorization.Multiprocessing]#, pufferlib.vectorization.Ray]
     num_workers_list = [1, 2, 4]
     envs_per_worker_list = [1, 2, 4]
 
