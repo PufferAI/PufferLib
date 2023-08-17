@@ -19,7 +19,6 @@ def _test_vectorization_performance(vectorization, delay, steps, num_workers, en
     # Convert the specific warning into an error
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        # Your code here that's triggering the warning
 
         envs = vectorization(
             env_creator=make_performance_env,

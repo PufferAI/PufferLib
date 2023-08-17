@@ -318,14 +318,14 @@ class Multiprocessing(VecEnv):
             num_workers, envs_per_worker)
 
         from multiprocessing import Process, Queue
-        self.request_queues = [Queue() for _ in range(num_workers * envs_per_worker)]
-        self.response_queues = [Queue() for _ in range(num_workers * envs_per_worker)]
+        self.request_queues = [Queue() for _ in range(num_workers)]
+        self.response_queues = [Queue() for _ in range(num_workers)]
 
         self.processes = [Process(
             target=self._worker_process,
             args=(self._wrapper, env_creator, env_args, env_kwargs,
                   envs_per_worker, self.request_queues[i], self.response_queues[i])) 
-            for i in range(num_workers * envs_per_worker)]
+            for i in range(num_workers)]
 
         for p in self.processes:
             p.start()
@@ -389,10 +389,12 @@ class Ray(VecEnv):
 
         import ray
         self.ray = ray
-        ray.init(
-            include_dashboard=False,  # WSL Compatibility
-            ignore_reinit_error=True,
-        )
+        if not ray.is_initialized():
+            import logging
+            ray.init(
+                include_dashboard=False,  # WSL Compatibility
+                logging_level=logging.ERROR,
+            )
 
         self.envs = [
             ray.remote(self._wrapper).remote(

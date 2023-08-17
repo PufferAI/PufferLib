@@ -8,9 +8,13 @@ import pufferlib.registry
 import pufferlib.vectorization
 
 
-def test_gym_vectorization(env_cls, steps=100, num_workers=1, envs_per_worker=1):
+def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, envs_per_worker=1):
+    raw_profiler = pufferlib.utils.Profiler()
+    puf_profiler = pufferlib.utils.Profiler()
+
+    # Do not profile env creation or first reset
     raw_envs = [env_cls() for _ in range(num_workers * envs_per_worker)]
-    puf_envs = pufferlib.vectorization.Serial(
+    puf_envs = vectorization(
         env_creator=pufferlib.emulation.GymPufferEnv,
         env_kwargs={'env_creator': env_cls},
         num_workers=num_workers,
@@ -24,7 +28,7 @@ def test_gym_vectorization(env_cls, steps=100, num_workers=1, envs_per_worker=1)
 
     flat_obs_space = puf_envs.flat_observation_space
 
-    for i in range(steps):
+    for _ in range(steps):
         puf_obs = pufferlib.emulation.unpack_batched_obs(puf_obs, flat_obs_space)
  
         for idx, r_ob in enumerate(raw_obs):
@@ -36,11 +40,13 @@ def test_gym_vectorization(env_cls, steps=100, num_workers=1, envs_per_worker=1)
         raw_obs, raw_rewards, nxt_dones = [], [], []
         for idx, r_env in enumerate(raw_envs):
             if raw_dones[idx]:
-                raw_obs.append(r_env.reset())
+                with raw_profiler:
+                    raw_obs.append(r_env.reset())
                 raw_rewards.append(0)
                 nxt_dones.append(False)
             else:
-                r_ob, r_rew, r_done, _ = r_env.step(raw_actions[idx])
+                with raw_profiler:
+                    r_ob, r_rew, r_done, _ = r_env.step(raw_actions[idx])
                 raw_obs.append(r_ob)
                 raw_rewards.append(r_rew)
                 nxt_dones.append(r_done)
@@ -54,15 +60,23 @@ def test_gym_vectorization(env_cls, steps=100, num_workers=1, envs_per_worker=1)
             r_a = np.array(r_a)
             puf_actions.append(r_a)
 
-        puf_obs, puf_rewards, puf_dones, _ = puf_envs.step(puf_actions)
+        with puf_profiler:
+            puf_obs, puf_rewards, puf_dones, _ = puf_envs.step(puf_actions)
 
         for idx in range(num_workers * envs_per_worker):
             assert raw_rewards[idx] == puf_rewards[idx]
             assert raw_dones[idx] == puf_dones[idx]
 
-def test_pettingzoo_vectorization(env_cls, steps=100, num_workers=1, envs_per_worker=1):
+    return raw_profiler.elapsed/steps, puf_profiler.elapsed/steps
+
+
+def test_pettingzoo_vectorization(env_cls, vectorization, steps=100, num_workers=1, envs_per_worker=1):
+    raw_profiler = pufferlib.utils.Profiler()
+    puf_profiler = pufferlib.utils.Profiler()
+
+    # Do not profile env creation or first reset
     raw_envs = [env_cls() for _ in range(num_workers * envs_per_worker)]
-    puf_envs = pufferlib.vectorization.Serial(
+    puf_envs = vectorization(
         env_creator=pufferlib.emulation.PettingZooPufferEnv,
         env_kwargs={'env_creator': env_cls},
         num_workers=num_workers,
@@ -77,7 +91,7 @@ def test_pettingzoo_vectorization(env_cls, steps=100, num_workers=1, envs_per_wo
 
     flat_obs_space = puf_envs.flat_observation_space
 
-    for i in range(steps):
+    for _ in range(steps):
         puf_obs = pufferlib.emulation.unpack_batched_obs(flat_puf_obs, flat_obs_space)
  
         idx = 0
@@ -100,11 +114,13 @@ def test_pettingzoo_vectorization(env_cls, steps=100, num_workers=1, envs_per_wo
         raw_obs, raw_rewards, nxt_dones = [], [], []
         for idx, r_env in enumerate(raw_envs):
             if raw_terminated[idx]:
-                raw_obs.append(r_env.reset())
+                with raw_profiler:
+                    raw_obs.append(r_env.reset())
                 raw_rewards.append({agent: 0 for agent in possible_agents})
                 nxt_dones.append({agent: False for agent in possible_agents})
             else:
-                r_ob, r_rew, r_done, _ = r_env.step(raw_actions[idx])
+                with raw_profiler:
+                    r_ob, r_rew, r_done, _ = r_env.step(raw_actions[idx])
                 raw_obs.append(r_ob)
                 raw_rewards.append(r_rew)
                 nxt_dones.append(r_done)
@@ -127,8 +143,8 @@ def test_pettingzoo_vectorization(env_cls, steps=100, num_workers=1, envs_per_wo
                 puf_actions.append(action)
         puf_actions = np.array(puf_actions)
 
- 
-        flat_puf_obs, puf_rewards, puf_dones, _ = puf_envs.step(puf_actions)
+        with puf_profiler:
+            flat_puf_obs, puf_rewards, puf_dones, _ = puf_envs.step(puf_actions)
 
         idx = 0
         for r_rewards, r_dones in zip(raw_rewards, raw_dones):
@@ -142,11 +158,74 @@ def test_pettingzoo_vectorization(env_cls, steps=100, num_workers=1, envs_per_wo
                 
                 idx += 1
 
+    return raw_profiler.elapsed/steps, puf_profiler.elapsed/steps
+
 
 if __name__ == '__main__':
     import mock_environments
-    for env_cls in mock_environments.MOCK_SINGLE_AGENT_ENVIRONMENTS:
-        test_gym_vectorization(env_cls)
+    import numpy as np
 
-    for env_cls in mock_environments.MOCK_MULTI_AGENT_ENVIRONMENTS:
-        test_pettingzoo_vectorization(env_cls)
+    performance = []
+    headers = "\t\t| Cores | Envs/Core |   Min   |   Max   |  Mean  "
+    vectorizations = [pufferlib.vectorization.Serial, pufferlib.vectorization.Multiprocessing, pufferlib.vectorization.Ray]
+    num_workers_list = [1, 2, 4]
+    envs_per_worker_list = [1, 2, 4]
+
+    # Gym Results
+    title = 'Gym Vectorization Overhead (ms)'
+    performance.append(title)
+    print(title)
+    for vectorization in vectorizations:
+        vec_name = f'\t{vectorization.__name__}'
+        performance.append(vec_name)
+        performance.append(headers)
+        print(vec_name)
+        print(headers)
+        for num_workers in num_workers_list:
+            for envs_per_worker in envs_per_worker_list:
+                raw_gym = []
+                for env_cls in mock_environments.MOCK_SINGLE_AGENT_ENVIRONMENTS:
+                    raw_t, puf_t = test_gym_vectorization(
+                        env_cls, vectorization,
+                        num_workers=num_workers,
+                        envs_per_worker=envs_per_worker
+                    )
+                    raw_gym.append((np.array(puf_t) - np.array(raw_t)) * 1000)
+
+                result = f"\t\t| {num_workers:^5} | {envs_per_worker:^9} | {min(raw_gym):^7.2f} | {max(raw_gym):^7.2f} | {np.mean(raw_gym):^7.2f}"
+                performance.append(result)
+                print(result)
+
+    performance.append('\n')
+    print()
+
+    # PettingZoo Results
+    title = 'PettingZoo Vectorization Overhead (ms)'
+    performance.append(title)
+    print(title)
+    for vectorization in vectorizations:
+        vec_name = f'\t{vectorization.__name__}'
+        performance.append(vec_name)
+        performance.append(headers)
+        print(vec_name)
+        print(headers)
+        for num_workers in num_workers_list:
+            for envs_per_worker in envs_per_worker_list:
+                raw_pz = []
+                for env_cls in mock_environments.MOCK_MULTI_AGENT_ENVIRONMENTS:
+                    raw_t, puf_t = test_pettingzoo_vectorization(
+                        env_cls, vectorization,
+                        num_workers=num_workers,
+                        envs_per_worker=envs_per_worker
+                    )
+                    raw_pz.append((np.array(puf_t) - np.array(raw_t)) * 1000)
+
+                result = f"\t\t| {num_workers:^5} | {envs_per_worker:^9} | {min(raw_pz):^7.2f} | {max(raw_pz):^7.2f} | {np.mean(raw_pz):^7.2f}"
+                performance.append(result)
+                print(result)
+
+    with open ('performance.txt', 'a') as f:
+        f.write(performance)
+
+    # Otherwise ray will hang
+    exit(0)
