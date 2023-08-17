@@ -67,7 +67,7 @@ def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, env
             assert raw_rewards[idx] == puf_rewards[idx]
             assert raw_dones[idx] == puf_dones[idx]
 
-    return raw_profiler.elapsed/steps, puf_profiler.elapsed/steps
+    return raw_profiler.elapsed/steps/num_workers, puf_profiler.elapsed/steps
 
 
 def test_pettingzoo_vectorization(env_cls, vectorization, steps=100, num_workers=1, envs_per_worker=1):
@@ -158,7 +158,7 @@ def test_pettingzoo_vectorization(env_cls, vectorization, steps=100, num_workers
                 
                 idx += 1
 
-    return raw_profiler.elapsed/steps, puf_profiler.elapsed/steps
+    return raw_profiler.elapsed/steps/num_workers, puf_profiler.elapsed/steps
 
 
 if __name__ == '__main__':
@@ -225,7 +225,7 @@ if __name__ == '__main__':
                 print(result)
 
     with open ('performance.txt', 'a') as f:
-        f.write(performance)
+        f.write('\n'.join(performance))
 
     # Otherwise ray will hang
     exit(0)
