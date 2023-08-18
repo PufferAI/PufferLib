@@ -324,7 +324,9 @@ class CleanPuffeRL:
 
             # Index alive mask with policy pool idxs...
             # TODO: Find a way to avoid having to do this
-            alive_mask = np.array(alive_mask) * self.policy_pool.learner_mask
+            if self.selfplay_learner_weight > 0:
+                alive_mask = np.array(alive_mask) * self.policy_pool.learner_mask
+
             for idx in np.where(alive_mask)[0]:
                 if ptr == self.batch_size + 1:
                     break
