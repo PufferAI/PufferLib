@@ -33,16 +33,16 @@ class OpenSkillRanker(PolicyRanker):
     if len(scores) == 0:
        return
 
+    for policy in scores.keys():
+      if policy not in self._tournament.ratings:
+          self.add_policy(policy, anchor=policy == self._anchor)
+
     ratings = self.ratings()
     dataframe = pd.DataFrame(
       {
           ('Old Rating', 'mu'): [ratings.get(n).mu for n in scores],
       }
     )
-
-    for policy in scores.keys():
-      if policy not in self._tournament.ratings:
-          self.add_policy(policy, anchor=policy == self._anchor)
 
     if len(scores) > 1:
       self._tournament.update(
