@@ -47,36 +47,54 @@ def make_zeros_like(data):
     else:
         raise ValueError(f'Unsupported type: {type(data)}')
 
-def _compare_space_samples(sample_1, sample_2, sample_2_batch_idx=None):
+def compare_arrays(array_1, array_2):
+    assert isinstance(array_1, np.ndarray)
+    assert isinstance(array_2, np.ndarray)
+    assert array_1.shape == array_2.shape
+    return np.allclose(array_1, array_2)
+
+def compare_dicts(dict_1, dict_2, idx):
+    assert isinstance(dict_1, (dict, OrderedDict))
+    assert isinstance(dict_2, (dict, OrderedDict))
+
+    if not all(k in dict_2 for k in dict_1):
+        raise ValueError("Keys do not match between dictionaries.")
+
+    for k, v in dict_1.items():
+        if not compare_space_samples(v, dict_2[k], idx):
+            return False
+
+    return True
+
+def compare_lists(list_1, list_2, idx):
+    assert isinstance(list_1, (list, tuple))
+    assert isinstance(list_2, (list, tuple))
+
+    if len(list_1) != len(list_2):
+        raise ValueError("Lengths do not match between lists/tuples.")
+
+    for v1, v2 in zip(list_1, list_2):
+        if not compare_space_samples(v1, v2, idx):
+            return False
+        
+    return True
+    
+def compare_space_samples(sample_1, sample_2, sample_2_batch_idx=None):
     '''Compare two samples from the same space
     
     Optionally, sample_2 may be a batch of samples from the same space
     concatenated along the first dimension of the leaves. In this case,
     sample_2_batch_idx specifies which sample to compare.
     '''
-    def _compare_arrays(array1, array2):
-        try:
-            return np.allclose(array1, array2)
-        except Exception as e:
-            raise TypeError(f'Error comparing {array1} and {array2}.') from e
-
     if isinstance(sample_1, (dict, OrderedDict)):
-        assert isinstance(sample_2, (dict, OrderedDict))
-        if not all(k in sample_2 for k in sample_1):
-            raise ValueError("Keys do not match between dictionaries.")
-        return all(_compare_space_samples(v, sample_2[k], sample_2_batch_idx)
-                   for k, v in sample_1.items())
+        return compare_dicts(sample_1, sample_2, sample_2_batch_idx)
     elif isinstance(sample_1, (list, tuple)):
-        assert isinstance(sample_2, (list, tuple))
-        if len(sample_1) != len(sample_2):
-            raise ValueError("Lengths do not match between lists/tuples.")
-        return all(_compare_space_samples(v, sample_2[i], sample_2_batch_idx)
-                   for i, v in enumerate(sample_1))
+        return compare_lists(sample_1, sample_2, sample_2_batch_idx)
     elif isinstance(sample_1, np.ndarray):
         assert isinstance(sample_2, np.ndarray)
         if sample_2_batch_idx is not None:
             sample_2 = sample_2[sample_2_batch_idx]
-        return _compare_arrays(sample_1, sample_2)
+        return compare_arrays(sample_1, sample_2)
     elif isinstance(sample_1, (int, float)):
         if sample_2_batch_idx is not None:
             sample_2 = sample_2[sample_2_batch_idx]

@@ -214,6 +214,8 @@ class VecEnv(ABC):
         if type(actions) == list:
             actions = np.array(actions)
 
+        assert isinstance(actions, np.ndarray), 'Actions must be a numpy array'
+
         assert len(actions) == self.num_agents * self.num_workers * self.envs_per_worker
         actions_split = np.array_split(actions, self.num_workers)
         self._send(actions_split)
@@ -373,6 +375,12 @@ class Multiprocessing(VecEnv):
     def close(self):
         for queue in self.request_queues:
             queue.put(("close", [], {}))
+
+        for p in self.processes:
+            p.terminate()
+
+        for p in self.processes:
+            p.join()
 
 
 class Ray(VecEnv):

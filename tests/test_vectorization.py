@@ -32,7 +32,9 @@ def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, env
         puf_obs = pufferlib.emulation.unpack_batched_obs(puf_obs, flat_obs_space)
  
         for idx, r_ob in enumerate(raw_obs):
-            assert pufferlib.utils._compare_space_samples(r_ob, puf_obs, idx)
+            if not pufferlib.utils.compare_space_samples(r_ob, puf_obs, idx):
+                T()
+            assert pufferlib.utils.compare_space_samples(r_ob, puf_obs, idx)
 
         raw_actions = [r_env.action_space.sample() for r_env in raw_envs]
 
@@ -98,7 +100,7 @@ def test_pettingzoo_vectorization(env_cls, vectorization, steps=100, num_workers
         for r_obs in raw_obs:
             for agent in possible_agents:
                 if agent in raw_obs:
-                    assert pufferlib.utils._compare_space_samples(r_obs[agent], puf_obs, idx)
+                    pufferlib.utils.compare_space_samples(r_obs[agent], puf_obs, idx)
                 # Currently, vectorization does not reset padding to 0
                 # This is for efficiency... need to do some timing
                 #else:
@@ -167,7 +169,8 @@ if __name__ == '__main__':
 
     performance = []
     headers = "\t\t| Cores | Envs/Core |   Min   |   Max   |  Mean  "
-    vectorizations = [pufferlib.vectorization.Serial, pufferlib.vectorization.Multiprocessing]#, pufferlib.vectorization.Ray]
+    #vectorizations = [pufferlib.vectorization.Serial, pufferlib.vectorization.Multiprocessing]#, pufferlib.vectorization.Ray]
+    vectorizations = [pufferlib.vectorization.Ray]
     num_workers_list = [1, 2, 4]
     envs_per_worker_list = [1, 2, 4]
 

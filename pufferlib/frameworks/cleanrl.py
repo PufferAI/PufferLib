@@ -23,7 +23,7 @@ class Policy(torch.nn.Module):
 
         # No good way to check for recurrent models
         self.is_recurrent = (isinstance(policy, pufferlib.models.RecurrentWrapper)
-            or hasattr(policy, 'lstm'))
+            or hasattr(policy, 'lstm') or hasattr(policy, 'recurrent'))
 
     @property
     def lstm(self):
@@ -34,7 +34,10 @@ class Policy(torch.nn.Module):
         return value
 
     def get_action_and_value(self, x, state=None, done=None, action=None):
-        logits, value, state = self.policy(x, state)
+        if self.is_recurrent:
+            logits, value, state = self.policy(x, state)
+        else:
+            logits, value = self.policy(x)
 
         # Check for single action space
         if isinstance(logits, torch.Tensor):

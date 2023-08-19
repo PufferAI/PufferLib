@@ -57,7 +57,7 @@ def test_python_flatten_unflatten():
         flat_sample = python_flatten(sample)
         unflat_sample = python_unflatten(flat_sample, space)
 
-        assert pufferlib.utils._compare_space_samples(sample, unflat_sample), "Unflatten failed."
+        assert pufferlib.utils.compare_space_samples(sample, unflat_sample), "Unflatten failed."
 
 def test_flatten_unflatten():
     for space in nested_spaces:
@@ -65,7 +65,7 @@ def test_flatten_unflatten():
         flat_sample = flatten(sample)
         unflat_sample = unflatten(flat_sample)
 
-        assert pufferlib.utils._compare_space_samples(sample, unflat_sample), "Unflatten failed."
+        assert pufferlib.utils.compare_space_samples(sample, unflat_sample), "Unflatten failed."
 
 def test_python_flatten_implementation_speed():
     for space in nested_spaces:
@@ -91,7 +91,7 @@ def test_pack_unpack():
         pack_sample = concatenate(flat_sample)
         unpack_sample = split(pack_sample, flat_space, batched=False)
         unflat_sample = unflatten(unpack_sample, space)
-        assert pufferlib.utils._compare_space_samples(sample, unflat_sample), "Unflatten failed."
+        assert pufferlib.utils.compare_space_samples(sample, unflat_sample), "Unflatten failed."
  
 if __name__ == '__main__':
     # Benchmarking different spaces

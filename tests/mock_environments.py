@@ -2,6 +2,7 @@ from pdb import set_trace as T
 import numpy as np
 
 import time
+import hashlib
 
 import gym
 from gym.spaces import Box, Discrete, Dict, Tuple
@@ -61,6 +62,7 @@ class PerformanceEnv:
 def _agent_str_to_int(agent):
     return int(agent.split('_')[-1])
 
+
 def _sample_space(agent, tick, space, zero=False):
     if isinstance(agent, str):
         agent = float(agent.split('_')[-1])
@@ -68,20 +70,18 @@ def _sample_space(agent, tick, space, zero=False):
     if isinstance(space, Discrete):
         if zero:
             return 0
-        return hash(f'{agent}-{tick}') % space.n
+        return int((10*agent + tick) % space.n)
     elif isinstance(space, Box):
         if zero:
             return np.zeros(space.shape, dtype=space.dtype)
 
-        # Create a linear sample between low and high
-        low, high = space.low.flatten(), space.high.flatten()
-        shape = np.prod(space.shape)
-        nonce = (agent + tick / 10) % 1  # Ensures nonce is between 0 and 1
-        sample = (1 - nonce) * low + nonce * high
-
-        # Rescale to match the shape and data type
-        sample = sample.astype(space.dtype).reshape(space.shape)
-
+        # Try to make a relatively unique data pattern
+        # without using RNG
+        nonce = 10*agent + tick
+        low = space.low
+        high = space.high
+        sample = low + np.arange(low.size).reshape(space.shape) + nonce
+        sample = (sample % high).astype(space.dtype)
         return sample
     elif isinstance(space, Tuple):
         return tuple(_sample_space(agent, tick, s, zero) for s in space.spaces)

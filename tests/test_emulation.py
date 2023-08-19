@@ -38,8 +38,7 @@ def test_gym_emulation(env_cls, steps=100):
             )
         )
  
-        pufferlib.utils._compare_space_samples(raw_ob, puf_ob)
-        assert pufferlib.utils._compare_space_samples(raw_ob, puf_ob)
+        pufferlib.utils.compare_space_samples(raw_ob, puf_ob)
 
         action = raw_env.action_space.sample()
 
@@ -94,7 +93,7 @@ def test_pettingzoo_emulation(env_cls, steps=100):
                 )
             )
 
-            assert pufferlib.utils._compare_space_samples(raw_ob, puf_ob)
+            assert pufferlib.utils.compare_space_samples(raw_ob, puf_ob)
 
         raw_actions = {a: raw_env.action_space(a).sample()
             for a in raw_env.agents}

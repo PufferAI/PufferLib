@@ -67,6 +67,12 @@ class Policy(torch.nn.Module, ABC):
         It should be of shape (batch, ..., sum(action_space.nvec))'''
         raise NotImplementedError
 
+    def forward(self, env_outputs):
+        '''Forward pass for PufferLib compatibility'''
+        hidden, lookup = self.encode_observations(env_outputs)
+        actions, value = self.decode_actions(hidden, lookup)
+        return actions, value
+
 
 class RecurrentWrapper(torch.nn.Module):
     def __init__(self, envs, policy, input_size=128, hidden_size=128, num_layers=1):
@@ -122,8 +128,8 @@ class Default(Policy):
 
     def forward(self, env_outputs):
         '''Forward pass for PufferLib compatibility'''
-        hidden = self.encode_observations(env_outputs)
-        actions, value = self.decode_actions(hidden)
+        hidden, lookup = self.encode_observations(env_outputs)
+        actions, value = self.decode_actions(hidden, lookup)
         return actions, value
 
     def encode_observations(self, env_outputs):
