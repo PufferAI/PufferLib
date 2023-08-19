@@ -342,7 +342,7 @@ def pad_agent_data(data, agents, pad_value):
 def pad_to_const_num_agents(agents, obs, rewards, dones, infos, pad_obs):
     padded_obs = pad_agent_data(obs, agents, pad_obs)
     rewards = pad_agent_data(rewards, agents, 0)
-    dones = pad_agent_data(dones, agents, False)
+    dones = pad_agent_data(dones, agents, True)
     infos = pad_agent_data(infos, agents, {})
     return padded_obs, rewards, dones, infos
 
