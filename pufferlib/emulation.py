@@ -5,7 +5,7 @@ import warnings
 
 import gym
 import inspect
-from collections import OrderedDict, Mapping
+from collections import OrderedDict
 
 import pufferlib
 from pufferlib import utils, exceptions
@@ -79,7 +79,7 @@ class BasicPostprocessor(Postprocessor):
         self.done = False
 
     def rewards_dones_infos(self, rewards, dones, infos):
-        if isinstance(rewards, Mapping):
+        if isinstance(rewards, (list, np.ndarray)):
             rewards = sum(rewards.values())
 
         # Env is done
