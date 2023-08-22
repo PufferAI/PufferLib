@@ -207,6 +207,9 @@ class VecEnv(ABC):
     def flat_observation_space(self):
         return self._driver_env.flat_observation_space
 
+    def unpack_batched_obs(self, obs):
+        return self._driver_env.unpack_batched_obs(obs)
+
     def send(self, actions, env_id=None):
         assert self.state == SEND, 'Call reset + recv before send'
         self.state = RECV

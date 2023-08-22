@@ -54,7 +54,7 @@ def all():
         #'microrts': microrts,
         #'minerl': minerl,
         'nethack': nethack,
-        #'nmmo': nmmo,
+        'nmmo': nmmo,
         'procgen': procgen,
         #'smac': smac,
     }
@@ -245,7 +245,10 @@ def nmmo():
     pufferlib.utils.install_requirements('nmmo')
     config = default_config()
     config.cleanrl_init.update({
-        'batch_size': 2**14,
+        'batch_size': 2**12,
+        'num_cores': 1,
+        'num_buffers': 1,
+        'num_envs': 1,
     })
     config.cleanrl_train.update({
         'batch_rows': 128,

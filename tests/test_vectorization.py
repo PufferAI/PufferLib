@@ -26,10 +26,8 @@ def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, env
     raw_obs = [raw_env.reset() for raw_env in raw_envs]
     puf_obs = puf_envs.reset()
 
-    flat_obs_space = puf_envs.flat_observation_space
-
     for _ in range(steps):
-        puf_obs = pufferlib.emulation.unpack_batched_obs(puf_obs, flat_obs_space)
+        puf_obs = puf_envs.unpack_batched_obs(puf_obs)
  
         for idx, r_ob in enumerate(raw_obs):
             if not pufferlib.utils.compare_space_samples(r_ob, puf_obs, idx):
@@ -69,6 +67,7 @@ def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, env
             assert raw_rewards[idx] == puf_rewards[idx]
             assert raw_dones[idx] == puf_dones[idx]
 
+    puf_envs.close()
     return raw_profiler.elapsed/steps/num_workers, puf_profiler.elapsed/steps
 
 
@@ -91,10 +90,8 @@ def test_pettingzoo_vectorization(env_cls, vectorization, steps=100, num_workers
     raw_obs = [raw_env.reset() for raw_env in raw_envs]
     flat_puf_obs = puf_envs.reset()
 
-    flat_obs_space = puf_envs.flat_observation_space
-
     for _ in range(steps):
-        puf_obs = pufferlib.emulation.unpack_batched_obs(flat_puf_obs, flat_obs_space)
+        puf_obs = puf_envs.unpack_batched_obs(flat_puf_obs)
  
         idx = 0
         for r_obs in raw_obs:
@@ -160,6 +157,7 @@ def test_pettingzoo_vectorization(env_cls, vectorization, steps=100, num_workers
                 
                 idx += 1
 
+    puf_envs.close()
     return raw_profiler.elapsed/steps/num_workers, puf_profiler.elapsed/steps
 
 
@@ -169,8 +167,7 @@ if __name__ == '__main__':
 
     performance = []
     headers = "\t\t| Cores | Envs/Core |   Min   |   Max   |  Mean  "
-    #vectorizations = [pufferlib.vectorization.Serial, pufferlib.vectorization.Multiprocessing]#, pufferlib.vectorization.Ray]
-    vectorizations = [pufferlib.vectorization.Ray]
+    vectorizations = [pufferlib.vectorization.Serial, pufferlib.vectorization.Multiprocessing, pufferlib.vectorization.Ray]
     num_workers_list = [1, 2, 4]
     envs_per_worker_list = [1, 2, 4]
 

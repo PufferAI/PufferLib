@@ -53,6 +53,9 @@ def train_model(config, env_creator):
 
 
 if __name__ == '__main__':
+    if __debug__:
+        print('WARNING: Run without python -O will be much slower')
+
     env = parse_arguments()
 
     import config as config_module

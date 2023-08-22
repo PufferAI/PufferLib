@@ -9,8 +9,12 @@ from collections import OrderedDict, Mapping
 
 import pufferlib
 from pufferlib import utils, exceptions
+from pufferlib.extensions import flatten, unflatten
 
-from .cext import flatten, unflatten
+DICT = 0
+LIST = 1
+TUPLE = 2
+VALUE = 3
 
 
 class Postprocessor:
@@ -110,7 +114,7 @@ class GymPufferEnv:
 
         # Flatten the featurized observation space and store
         # it for use in step. Return a box space for the user
-        self.flat_observation_space, self.box_observation_space, self.pad_observation = (
+        self.flat_observation_space, self.flat_observation_structure, self.box_observation_space, self.pad_observation = (
             make_flat_and_box_obs_space(self.structured_observation_space))
 
         return self.box_observation_space
@@ -119,6 +123,7 @@ class GymPufferEnv:
     def action_space(self):
         '''Returns a flattened, multi-discrete action space'''
         self.structured_action_space = self.env.action_space
+        self.flat_action_structure = flatten_structure(self.structured_action_space.sample())
 
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
         self.flat_action_space, multi_discrete_action_space = (
@@ -153,7 +158,7 @@ class GymPufferEnv:
         action = unflatten(
             split(
                 action, self.flat_action_space, batched=False
-            )
+            ), self.flat_action_structure
         )
 
         ob, reward, done, info = self.env.step(action)
@@ -171,6 +176,9 @@ class GymPufferEnv:
 
     def close(self):
         return self.env.close()
+
+    def unpack_batched_obs(self, batched_obs):
+        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure)
 
 
 class PettingZooPufferEnv:
@@ -221,7 +229,7 @@ class PettingZooPufferEnv:
         self.structured_observation_space = self.postprocessors[agent].observation_space
 
         # Flatten the featurized observation space and store it for use in step. Return a box space for the user
-        self.flat_observation_space, self.box_observation_space, self.pad_observation = (
+        self.flat_observation_space, self.flat_observation_structure, self.box_observation_space, self.pad_observation = (
             make_flat_and_box_obs_space(self.structured_observation_space))
 
         return self.box_observation_space 
@@ -239,6 +247,7 @@ class PettingZooPufferEnv:
             atn_space = self.env.action_space(agent)
 
         self.structured_action_space = atn_space
+        self.flat_action_structure = flatten_structure(atn_space.sample())
 
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
         self.flat_action_space, self.multidiscrete_action_space = make_flat_and_multidiscrete_atn_space(atn_space)
@@ -284,7 +293,8 @@ class PettingZooPufferEnv:
         for agent, atn in actions.items():
             if agent in self.agents:
                 unpacked_actions[agent] = unflatten(
-                    split(atn, self.flat_action_space, batched=False)
+                    split(atn, self.flat_action_space, batched=False),
+                    self.flat_action_structure
                 )
 
         if self.teams is not None:
@@ -312,6 +322,14 @@ class PettingZooPufferEnv:
     def close(self):
         return self.env.close()
 
+    def unpack_batched_obs(self, batched_obs):
+        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure)
+
+
+def unpack_batched_obs(batched_obs, flat_observation_space, flat_observation_structure):
+    unpacked = split(batched_obs, flat_observation_space, batched=True)
+    unflattened = unflatten(unpacked, flat_observation_structure)
+    return unflattened
 
 def make_object(object_instance=None, object_creator=None, creator_args=[], creator_kwargs={}):
     if (object_instance is None) == (object_creator is None):
@@ -370,9 +388,12 @@ def make_flat_and_multidiscrete_atn_space(atn_space):
 
 
 def make_flat_and_box_obs_space(obs_space):
-    flat_observation_space = flatten_space(obs_space)  
-
     obs = obs_space.sample()
+    flat_observation_structure = flatten_structure(obs)
+
+    flat_observation_space = flatten_space(obs_space)  
+    obs = obs_space.sample()
+
     flat_observation = concatenate(flatten(obs))
 
     mmin, mmax = pufferlib.utils._get_dtype_bounds(flat_observation.dtype)
@@ -382,7 +403,7 @@ def make_flat_and_box_obs_space(obs_space):
         shape=flat_observation.shape, dtype=flat_observation.dtype
     )
 
-    return flat_observation_space, box_obs_space, pad_obs
+    return flat_observation_space, flat_observation_structure, box_obs_space, pad_obs
 
 
 def make_featurized_obs_and_space(obs_space, postprocessor):
@@ -439,6 +460,33 @@ def ungroup_from_teams(team_data):
             agent_data[agent_id] = data
     return agent_data
 
+
+def flatten_structure(data):
+    structure = []
+    
+    def helper(d):
+        if isinstance(d, dict):
+            structure.append(DICT)
+            structure.append(len(d))
+            for key, value in d.items():
+                structure.append(key)
+                helper(value)
+        elif isinstance(d, list):
+            structure.append(LIST)
+            structure.append(len(d))
+            for item in d:
+                helper(item)
+        elif isinstance(d, tuple):
+            structure.append(TUPLE)
+            structure.append(len(d))
+            for item in d:
+                helper(item)
+        else:
+            structure.append(VALUE)
+    
+    helper(data)
+    return structure
+
 def flatten_space(space):
     def _recursion_helper(current, key):
         if isinstance(current, gym.spaces.Tuple):
@@ -454,59 +502,24 @@ def flatten_space(space):
     _recursion_helper(space, '')
     return flat
 
-def python_flatten(sample):
-    def _recursion_helper(current):
-        if isinstance(current, tuple):
-            for elem in current:
-                _recursion_helper(elem)
-        elif isinstance(current, (dict, OrderedDict)):
-            for value in current.values():
-                _recursion_helper(value)
-        elif isinstance(current, np.ndarray):
-            flat.append(current)
-        else:
-            flat.append(np.array([current]))
-
-    flat = []
-    _recursion_helper(sample)
-    return flat
-
-def python_unflatten(flat_sample, space):
-    idx = [0]  # Wrapping the index in a list to maintain the reference
-    def _recursion_helper(space):
-        if isinstance(space, gym.spaces.Tuple):
-            unflattened_tuple = tuple(_recursion_helper(subspace) for subspace in space)
-            return unflattened_tuple
-        if isinstance(space, gym.spaces.Dict):
-            unflattened_dict = OrderedDict((key, _recursion_helper(subspace)) for key, subspace in space.items())
-            return unflattened_dict
-        if isinstance(space, gym.spaces.Discrete):
-            idx[0] += 1
-            return int(flat_sample[idx[0] - 1])
-
-        idx[0] += 1
-        return flat_sample[idx[0] - 1]
-
-    return _recursion_helper(space)
-
 def concatenate(flat_sample):
     if len(flat_sample) == 1:
-        val = list(flat_sample.values())[0]
-        if isinstance(val, np.ndarray):
-            return val
-        return np.array([val])
+        flat_sample = flat_sample[0]
+        if isinstance(flat_sample, np.ndarray):
+            return flat_sample
+        return np.array([flat_sample])
     return np.concatenate([
         e.ravel() if isinstance(e, np.ndarray) else np.array([e])
-        for e in flat_sample.values()]
+        for e in flat_sample]
     )
 
 def split(stacked_sample, flat_space, batched=True):
     if batched:
         batch = stacked_sample.shape[0]
 
-    leaves = {}
+    leaves = []
     ptr = 0
-    for key, subspace in flat_space.items():
+    for subspace in flat_space.values():
         shape = subspace.shape
         typ = subspace.dtype
         sz = int(np.prod(shape))
@@ -521,15 +534,10 @@ def split(stacked_sample, flat_space, batched=True):
             if isinstance(subspace, gym.spaces.Discrete):
                 samp = int(samp[0])
 
-        leaves[key] = samp
+        leaves.append(samp)
         ptr += sz
 
     return leaves
-
-def unpack_batched_obs(batched_obs, flat_space):
-    unpacked = split(batched_obs, flat_space, batched=True)
-    unflattened = unflatten(unpacked)
-    return unflattened
 
 def convert_to_multidiscrete(flat_space):
     lens = []

@@ -1,6 +1,5 @@
-from pdb import set_trace as T
-
-from setuptools import find_packages, setup, Extension
+from setuptools import find_packages, setup
+from Cython.Build import cythonize
 from itertools import chain
 
 
@@ -59,6 +58,9 @@ all_environments = {
     'nethack': [
         'nle==0.9.0',
     ],
+    'nmmo': [
+        'nmmo',
+    ],
     'procgen': [
         'procgen==0.10.7',
     ],
@@ -76,6 +78,7 @@ compatible_environments = [
     *all_environments['magent'],
     *all_environments['microrts'],
     *all_environments['nethack'],
+    *all_environments['nmmo'],
 ]
 
 rllib = [
@@ -118,14 +121,7 @@ setup(
         'all_compatible': docs + cleanrl + rllib + compatible_environments,
         **all_environments,
     },
-    ext_modules=[
-        Extension(
-            'pufferlib.cext',
-            ['flattery.c'],
-            extra_compile_args=['-fPIC'],
-            define_macros=[],
-        ),
-    ],
+    ext_modules = cythonize("pufferlib/extensions.pyx"),
     python_requires=">=3.8",
     license="MIT",
     author="Joseph Suarez",

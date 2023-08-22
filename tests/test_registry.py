@@ -20,8 +20,8 @@ def test_environments(steps=1_000_000, timeout=30):
             print(e.message)
             continue
 
-        conf = config_fn()
-        for creator, kwargs in conf.env_creators.items():
+        total_steps = 0
+        for creator, kwargs in config_fn().env_creators.items():
             raw_env = creator(**kwargs)
             raw_obs = raw_env.reset(seed=0)
             raw_profiler = pufferlib.utils.Profiler()
@@ -43,6 +43,7 @@ def test_environments(steps=1_000_000, timeout=30):
                     break
 
                 if multiagent:
+                    total_steps += len(raw_obs)
                     raw_actions = {}
                     for agent, ob in raw_obs.items():
                         raw_actions[agent] = raw_env.env.action_space(agent).sample()
@@ -61,6 +62,7 @@ def test_environments(steps=1_000_000, timeout=30):
                         else:
                             puf_obs, puf_rewards, puf_dones, puf_infos = puf_env.step(puf_actions)
                 else:
+                    total_steps += 1
                     raw_action = raw_env.env.action_space.sample()
                     with raw_profiler:
                         if raw_done:
@@ -78,8 +80,8 @@ def test_environments(steps=1_000_000, timeout=30):
             env_name = f'{name} - {creator.__name__}'
             print(
                 f'{env_name} - Performance Factor: {raw_profiler.elapsed / puf_profiler.elapsed:<4.3}\n' 
-                f'Raw SPS: {step // raw_profiler.elapsed}, Puffer SPS: {step // puf_profiler.elapsed}\n'
-                f'Total steps: {step}, Time Elapsed: {(time.time()-start):.2f}s\n'
+                f'Raw SPS: {total_steps // raw_profiler.elapsed}, Puffer SPS: {total_steps // puf_profiler.elapsed}\n'
+                f'Total steps: {total_steps}, Time Elapsed: {(time.time()-start):.2f}s\n'
             )
 
 if __name__ == '__main__':

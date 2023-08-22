@@ -56,8 +56,7 @@ class Policy(pufferlib.models.Policy):
       self.value_head = torch.nn.Linear(hidden_size, 1)
 
   def encode_observations(self, env_outputs):
-    env_outputs = pufferlib.emulation.unpack_batched_obs(
-        env_outputs, self.envs.flat_observation_space)
+    env_outputs = self.envs.unpack_batched_obs(env_outputs)
 
     tile = env_outputs['Tile']
     # Center on player

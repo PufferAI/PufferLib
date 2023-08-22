@@ -30,12 +30,13 @@ def test_gym_emulation(env_cls, steps=100):
                 puf_ob = puf_env.reset()
             with raw_profiler:
                 raw_ob = raw_env.reset()
+                structure = pufferlib.emulation.flatten_structure(raw_ob)
 
         # Reconstruct original obs format from puffer env and compare to raw
         puf_ob = pufferlib.emulation.unflatten(
             pufferlib.emulation.split(
                 puf_ob, flat_obs_space, batched=False
-            )
+            ), structure
         )
  
         pufferlib.utils.compare_space_samples(raw_ob, puf_ob)
@@ -90,7 +91,7 @@ def test_pettingzoo_emulation(env_cls, steps=100):
             puf_ob = pufferlib.emulation.unflatten(
                 pufferlib.emulation.split(
                     puf_obs[agent], flat_obs_space, batched=False
-                )
+                ), puf_env.flat_observation_structure
             )
 
             assert pufferlib.utils.compare_space_samples(raw_ob, puf_ob)
