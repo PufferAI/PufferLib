@@ -23,7 +23,7 @@ def test_environments(steps=1_000_000, timeout=30):
         total_steps = 0
         for creator, kwargs in config_fn().env_creators.items():
             raw_env = creator(**kwargs)
-            raw_obs = raw_env.reset(seed=0)
+            raw_obs = raw_env.reset(0)
             raw_profiler = pufferlib.utils.Profiler()
 
             puf_env = creator(**kwargs)
@@ -67,6 +67,7 @@ def test_environments(steps=1_000_000, timeout=30):
                     with raw_profiler:
                         if raw_done:
                             raw_ob = raw_env.env.reset()
+                            raw_done = False
                         else:
                             raw_ob, raw_reward, raw_done, raw_info = raw_env.env.step(raw_action)
 
@@ -74,6 +75,7 @@ def test_environments(steps=1_000_000, timeout=30):
                     with puf_profiler:
                         if puf_done:
                             puf_ob = puf_env.reset()
+                            puf_done = False
                         else:
                             puf_ob, puf_reward, puf_done, puf_info = puf_env.step(puf_action)
 
