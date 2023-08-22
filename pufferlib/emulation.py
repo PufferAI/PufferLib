@@ -103,6 +103,9 @@ class GymPufferEnv:
         self.initialized = False
         self.done = True
 
+        self.is_observation_checked = False
+        self.is_action_checked = False
+
         # Cache the observation and action spaces
         self.observation_space
         self.action_space
@@ -126,10 +129,10 @@ class GymPufferEnv:
         self.flat_action_structure = flatten_structure(self.structured_action_space.sample())
 
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
-        self.flat_action_space, multi_discrete_action_space = (
+        self.flat_action_space, self.multidiscrete_action_space = (
             make_flat_and_multidiscrete_atn_space(self.env.action_space))
 
-        return multi_discrete_action_space
+        return self.multidiscrete_action_space
 
     def reset(self, seed=None):
         self.initialized = True
@@ -150,9 +153,10 @@ class GymPufferEnv:
  
         action = self.postprocessor.action(action)
 
-        if __debug__ and not self.action_space.contains(action):
-            raise ValueError(f'Action:\n{action}\n '
-                f'not in space:\n{self.action_space}')
+        if __debug__:
+            if not self.is_action_checked:
+                self.is_action_checked = check_space(
+                    action, self.multidiscrete_action_space)
 
         # Unpack actions from multidiscrete into the original action space
         action = unflatten(
@@ -168,9 +172,10 @@ class GymPufferEnv:
         processed_ob, single_reward, single_done, single_info = postprocess_and_flatten(
             ob, self.postprocessor, reward, done, info)
 
-        if __debug__ and not self.observation_space.contains(processed_ob):
-            raise ValueError(f'Observation:\n{processed_ob}\n '
-                f'not in space:\n{self.observation_space}')
+        if __debug__:
+            if not self.is_observation_checked:
+                self.is_observation_checked = check_space(
+                    processed_ob, self.box_observation_space)
 
         return processed_ob, single_reward, single_done, single_info
 
@@ -186,6 +191,9 @@ class PettingZooPufferEnv:
                  postprocessor_cls=Postprocessor, teams=None):
         self.env = make_object(env, env_creator, env_args, env_kwargs)
         self.initialized = False
+
+        self.is_observation_checked = False
+        self.is_action_checked = False
 
         self.possible_agents = self.env.possible_agents if teams is None else list(teams.keys())
         self.teams = teams
@@ -276,17 +284,21 @@ class PettingZooPufferEnv:
             raise exceptions.APIUsageError('step() called before reset()')
         if self.done:
             raise exceptions.APIUsageError('step() called after environment is done')
-        if __debug__:
-            for agent, atn in actions.items():
-                if agent not in self.possible_agents:
-                    raise exceptions.InvalidAgentError(agent, self.agents)
 
         # Postprocess actions and validate action spaces
         for agent in actions:
+            if __debug__:
+                if agent not in self.possible_agents:
+                    raise exceptions.InvalidAgentError(agent, self.agents)
+
             actions[agent] = self.postprocessors[agent].action(actions[agent])
 
         if __debug__:
-            check_spaces(actions, self.action_space)
+            if not self.is_action_checked:
+                self.is_action_checked = check_space(
+                    next(iter(actions.values())),
+                    self.multidiscrete_action_space
+                )
 
         # Unpack actions from multidiscrete into the original action space
         unpacked_actions = {}
@@ -314,8 +326,11 @@ class PettingZooPufferEnv:
         obs, rewards, dones, infos = pad_to_const_num_agents(
             self.env.possible_agents, obs, rewards, dones, infos, self.pad_observation)
 
-        if __debug__:
-            check_spaces(obs, self.observation_space)
+        if not self.is_observation_checked:
+            self.is_observation_checked = check_space(
+                next(iter(obs.values())),
+                self.box_observation_space
+            )
 
         return obs, rewards, dones, infos
 
@@ -415,18 +430,18 @@ def make_featurized_obs_and_space(obs_space, postprocessor):
 def make_team_space(observation_space, agents):
     return gym.spaces.Dict({agent: observation_space(agent) for agent in agents})
 
-def check_spaces(data, spaces):
-    for k, v in data.items():
-        try:
-            contains = spaces(k).contains(v)
-        except:
-            raise ValueError(
-                f'Error checking space {spaces} for agent/team {k} with data:\n{v}')
+def check_space(data, space):
+    try:
+        contains = space.contains(data)
+    except:
+        raise ValueError(
+            f'Error checking space {space} with sample :\n{data}')
 
-        if not contains:
-            raise ValueError(
-                f'Data:\n{v}\n for agent/team {k} not in '
-                f'space:\n{spaces(k)}')
+    if not contains:
+        raise ValueError(
+            f'Data:\n{data}\n not in space:\n{space}')
+    
+    return True
 
 def check_teams(env, teams):
     if set(env.possible_agents) != {item for team in teams.values() for item in team}:
@@ -436,8 +451,9 @@ def group_into_teams(teams, *args):
     grouped_data = []
 
     for agent_data in args:
-        if __debug__ and set(agent_data) != {item for team in teams.values() for item in team}:
-            raise ValueError(f'Invalid teams: {teams} for agents: {set(agent_data)}')
+        if __debug__:
+            if set(agent_data) != {item for team in teams.values() for item in team}:
+                raise ValueError(f'Invalid teams: {teams} for agents: {set(agent_data)}')
 
         team_data = {}
         for team_id, team in teams.items():

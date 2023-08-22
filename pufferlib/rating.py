@@ -31,9 +31,7 @@ class OpenSkillRating:
             mu: Anchor point for the baseline policy (cannot be exactly 0)
             sigma: 68/95/99.7 win rate against 1/2/3 sigma lower SR'''
 
-        if __debug__:
-            err = 'Agents must be ordered (e.g. list, not set)'
-            assert type(agents) != set, err
+        assert type(agents) != set, 'Agents must be ordered (e.g. list, not set)'
 
         self.ratings = {}
         self.mu        = mu
@@ -91,10 +89,7 @@ class OpenSkillRating:
         Returns:
             Dictionary of ratings keyed by agent names'''
 
-        if __debug__:
-            err = 'Specify either ranks or scores'
-            assert (ranks is None) != (scores is None), err
-
+        assert (ranks is None) != (scores is None), 'Specify either ranks or scores'
         assert self.anchor is not None, 'Set the anchor policy before updating ratings'
 
         # if ranks is None:

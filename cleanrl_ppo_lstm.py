@@ -345,9 +345,6 @@ def train(
         wandb.finish()
 
 if __name__ == '__main__':
-    if __debug__:
-        print('WARNING: Running in debug mode. This will be slower than normal due to extensive checks in PufferLib emulation. Run with -O to disable debug mode.')
-
     import sys
     assert sys.argv[1] in 'nmmo nethack breakout atari'.split()
 
