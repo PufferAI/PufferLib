@@ -1,5 +1,7 @@
 from gym.envs import classic_control
 
+import torch
+
 import pufferlib
 import pufferlib.emulation
 import pufferlib.utils

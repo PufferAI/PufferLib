@@ -20,12 +20,12 @@ def parse_arguments():
     return args.env
 
 def make_policy(envs, config):
-    policy = config.policy_cls(envs, **config.policy)
+    policy = config.policy_cls(envs, **config.policy_kwargs)
     if config.recurrent_cls is not None:
         policy = pufferlib.models.RecurrentWrapper(
-            envs, policy, **config.recurrent)
+            envs, policy, **config.recurrent_kwargs)
     policy = pufferlib.frameworks.cleanrl.Policy(policy)
-    policy = policy.to(config.cleanrl_init['device'])
+    policy = policy.to(config.cleanrl_init.device)
     return policy
 
 def train_model(config, env_creator):
@@ -35,19 +35,19 @@ def train_model(config, env_creator):
         agent_kwargs={'config': config},
         env_creator=env_creator,
         env_creator_kwargs=env_creator_kwargs,
-        **config.cleanrl_init,
+        **config.cleanrl_init.dict(),
     )
 
     #trainer.load_model(path)
     #trainer.init_wandb()
 
-    num_updates = (config.cleanrl_init['total_timesteps'] 
-        // config.cleanrl_init['batch_size'])
+    num_updates = (config.cleanrl_init.total_timesteps 
+        // config.cleanrl_init.batch_size)
 
     for update in range(num_updates):
         print("Evaluating...", update)
         trainer.evaluate()
-        trainer.train(**config.cleanrl_train)
+        trainer.train(**config.cleanrl_train.dict())
 
     trainer.close()
 

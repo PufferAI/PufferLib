@@ -187,18 +187,18 @@ class Profiler:
         return ret
 
     def tik(self):
-        self.start = time.time()
+        self.start = time.perf_counter()
 
     def tok(self):
-        self.elapsed += time.time() - self.start
+        self.elapsed += time.perf_counter() - self.start
         self.calls += 1
 
     def __enter__(self):
-        self.start = time.time()
+        self.start = time.perf_counter()
         return self
 
     def __exit__(self, *args):
-        self.end = time.time()
+        self.end = time.perf_counter()
         self.elapsed += self.end - self.start
         self.calls += 1
 

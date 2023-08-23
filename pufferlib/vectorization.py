@@ -77,8 +77,8 @@ class GymMultiEnv(MultiEnv):
         for idx, (env, atns) in enumerate(zip(self.envs, actions)):
             if env.done:
                 o  = env.reset()
-                rewards.extend([0] * len(self.preallocated_obs))
-                dones.extend([False] * len(self.preallocated_obs))
+                rewards.append(0)
+                dones.append(False)
                 infos.append({})
             else:
                 o, r, d, i = env.step(atns)
@@ -238,6 +238,7 @@ class VecEnv(ABC):
         dones = list(itertools.chain.from_iterable(dones))
         infos = list(itertools.chain.from_iterable(infos))
 
+        assert len(rewards) == len(dones) == total_agents * self.num_workers
         return self.preallocated_obs, rewards, dones, infos
 
     def async_reset(self, seed=None):

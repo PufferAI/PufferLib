@@ -524,7 +524,7 @@ class CleanPuffeRL:
                 else:
                     _, newlogprob, entropy, newvalue = self.agent.get_action_and_value(
                         mb_obs.reshape(
-                            -1, *self.envs[0].single_observation_space.shape
+                            -1, *self.buffers[0].single_observation_space.shape
                         ),
                         action=mb_actions,
                     )

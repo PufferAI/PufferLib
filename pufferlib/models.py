@@ -117,7 +117,7 @@ class Default(Policy):
         '''Default PyTorch policy, meant for debugging.
         This should run with any environment but is unlikely to learn anything.
         
-        Uses a single linear layer to encode observations and a list of
+        Uses a single linear layer + relu to encode observations and a list of
         linear layers to decode actions. The value function is a single linear layer.
         '''
         super().__init__()
@@ -132,10 +132,11 @@ class Default(Policy):
         actions, value = self.decode_actions(hidden, lookup)
         return actions, value
 
-    def encode_observations(self, env_outputs):
+    def encode_observations(self, observations):
         '''Linear encoder function'''
-        env_outputs = env_outputs.reshape(env_outputs.shape[0], -1)
-        return self.encoder(env_outputs), None
+        hidden = observations.reshape(observations.shape[0], -1)
+        hidden = torch.relu(self.encoder(hidden))
+        return hidden, None
 
     def decode_actions(self, hidden, lookup, concat=True):
         '''Concatenated linear decoder function'''
