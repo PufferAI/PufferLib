@@ -175,7 +175,7 @@ class GymPufferEnv:
             if not self.is_observation_checked:
                 self.is_observation_checked = check_space(
                     processed_ob, self.box_observation_space)
-
+                    
         self.done = single_done
         return processed_ob, single_reward, single_done, single_info
 
@@ -589,6 +589,11 @@ def make_space_like(ob):
     raise ValueError(f'Invalid type for featurized obs: {type(ob)}')
     
 def _seed_and_reset(env, seed):
+    if seed is None:
+        # Gym bug: does not reset env correctly
+        # when seed is passed as explicit None
+        return env.reset()
+
     try:
         env.seed(seed)
         old_seed=True
