@@ -78,20 +78,20 @@ class BasicPostprocessor(Postprocessor):
         self.epoch_length = 0
         self.done = False
 
-    def rewards_dones_infos(self, rewards, dones, infos):
+    def reward_done_info(self, reward, done, info):
         if isinstance(rewards, (list, np.ndarray)):
             rewards = sum(rewards.values())
 
         # Env is done
         if len(self.env.agents) == 0:
-            infos['return'] = self.epoch_return
-            infos['length'] = self.epoch_length
+            info['return'] = self.epoch_return
+            info['length'] = self.epoch_length
             self.done = True
-        elif not dones:
+        elif not done:
             self.epoch_length += 1
             self.epoch_return += rewards
 
-        return infos
+        return reward, done, info
 
 
 class GymPufferEnv:
@@ -166,7 +166,6 @@ class GymPufferEnv:
         )
 
         ob, reward, done, info = self.env.step(action)
-        self.done = done
 
         # Call user postprocessors and flatten the observations
         processed_ob, single_reward, single_done, single_info = postprocess_and_flatten(
@@ -177,6 +176,7 @@ class GymPufferEnv:
                 self.is_observation_checked = check_space(
                     processed_ob, self.box_observation_space)
 
+        self.done = single_done
         return processed_ob, single_reward, single_done, single_info
 
     def close(self):

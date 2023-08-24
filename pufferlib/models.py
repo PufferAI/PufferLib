@@ -93,13 +93,14 @@ class RecurrentWrapper(torch.nn.Module):
         shape, tensor_shape = x.shape, self.single_observation_shape
         x_dims, tensor_dims = len(shape), len(tensor_shape)
         if x_dims == tensor_dims + 1:
-            TT = 1
+            TT = shape[0] // state[0].shape[1]
+            B = shape[0] // TT
         elif x_dims == tensor_dims + 2:
             TT = shape[1]
+            B = shape[0]
         else:
             raise ValueError('Invalid tensor shape', shape)
 
-        B = shape[0]
         x = x.reshape(B*TT, *tensor_shape)
         hidden, lookup = self.policy.encode_observations(x)
         assert hidden.shape == (B*TT, self.input_size)

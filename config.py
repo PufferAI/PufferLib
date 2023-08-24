@@ -29,20 +29,22 @@ def struct(cls_or_kwargs=None, **kwargs):
 
 @struct()
 class CleanRLInit:
-    vectorization: ... = pufferlib.vectorization.Serial
+    vectorization: ... = pufferlib.vectorization.Multiprocessing
     total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
-    num_cores: int = 2
-    num_buffers: int = 2
-    num_envs: int = 2
+    num_cores: int = 4
+    num_buffers: int = 1
+    num_envs: int = 8
     batch_size: int = 1024
     seed: int = 1
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+    wandb_entity: str = 'jsuarez' 
+    wandb_project: str = 'pufferlib'
 
 @struct
 class CleanRLTrain:
     batch_rows: int = 32
-    bptt_horizon: int = 1
+    bptt_horizon: int = 8
 
 @struct
 class Policy:
@@ -84,7 +86,7 @@ def all():
         #'smac': smac,
     }
 
-def atari(framestack=1):
+def atari(framestack=4):
     import pufferlib.registry.atari
     pufferlib.utils.install_requirements('atari')
     return Config(
@@ -102,9 +104,15 @@ def atari(framestack=1):
             'input_size': 512,
             'hidden_size': 128,
             'output_size': 128,
-            'framestack': 1,
+            'framestack': framestack,
             'flat_size': 64*7*7,
-        }
+        },
+        recurrent_cls = pufferlib.pytorch.BatchFirstLSTM if framestack == 1 else None,
+        recurrent_kwargs = {
+            'input_size': 128,
+            'hidden_size': 128,
+            'num_layers': 1,
+        } if framestack == 1 else None,
     )
 
 def avalon():

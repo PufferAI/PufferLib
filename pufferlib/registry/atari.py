@@ -55,30 +55,40 @@ class NoopResetEnv(gym.Wrapper):
         return obs
 
 class AtariFeaturizer(pufferlib.emulation.Postprocessor):
-    def features(self, obs, step):
+    def reset(self, obs):
+        self.epoch_return = 0
+        self.epoch_length = 0
+        self.done = False
+
+    #@property
+    #def observation_space(self):
+    #    return gym.spaces.Box(0, 255, (1, 84, 84), dtype=np.uint8)
+
+    def observation(self, obs):
+        return np.array(obs)
         return np.array(obs[1], dtype=np.float32)
 
-    def infos(self, team_reward, team_done, team_infos, step):
-        if 'lives' in team_infos:
-            if team_infos['lives'] == 0 and team_done:
-                team_infos['return'] = team_infos['episode']['r']
-                team_infos['length'] = team_infos['episode']['l']
-                team_infos['time'] = team_infos['episode']['t']
-                return team_infos
-            return {}
+    def reward_done_info(self, reward, done, info):
+        if 'lives' in info:
+            if info['lives'] == 0 and done:
+                info['return'] = info['episode']['r']
+                info['length'] = info['episode']['l']
+                info['time'] = info['episode']['t']
+                return reward, True, info
+            return reward, False, info
 
         if self.done:
-            return
+            return reward, done, info
 
-        if team_done:
-            team_infos['return'] = self.epoch_return
-            team_infos['length'] = self.epoch_length
+        if done:
+            info['return'] = self.epoch_return
+            info['length'] = self.epoch_length
             self.done = True
         else:
             self.epoch_length += 1
-            self.epoch_return += team_reward
+            self.epoch_return += reward
 
-        return team_infos
+        return reward, done, info
 
 
 def make_env(name, framestack):
@@ -99,5 +109,6 @@ def make_env(name, framestack):
     env = gym.wrappers.ResizeObservation(env, (84, 84))
     env = gym.wrappers.GrayScaleObservation(env)
     env = gym.wrappers.FrameStack(env, framestack)
-    env = pufferlib.emulation.GymPufferEnv(env=env)
+    env = pufferlib.emulation.GymPufferEnv(
+        env=env, postprocessor_cls=AtariFeaturizer)
     return env

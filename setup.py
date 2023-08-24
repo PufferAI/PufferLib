@@ -112,6 +112,7 @@ setup(
         'opencv-python==3.4.17.63',
         'openskill==4.0.0',
         'pettingzoo==1.19.0',
+        'cython==3.0.0',
     ],
     extras_require={
         'docs': docs,

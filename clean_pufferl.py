@@ -350,6 +350,19 @@ class CleanPuffeRL:
                 ptr += 1
                 progress_bar.update(1)
 
+            for ii in i:
+                if not ii:
+                    continue
+
+                for name, stat in unroll_nested_dict(ii):
+                    infos[name].append(stat)
+                    try:
+                        stat = float(stat)
+                        stats[name].append(stat)
+                    except TypeError:
+                        continue
+
+            '''
             if "learner" in i:
                 for agent_i in i["learner"]:
                     if not agent_i:
@@ -362,6 +375,7 @@ class CleanPuffeRL:
                             stats[name].append(stat)
                         except TypeError:
                             continue
+            '''
 
             if self.policy_pool.scores and self.policy_ranker is not None:
               self.policy_ranker.update_ranks(
@@ -625,6 +639,9 @@ class CleanPuffeRL:
         return self.update >= self.total_updates
 
     def close(self):
+        for envs in self.buffers:
+            envs.close()
+
         if self.wandb_entity:
             wandb.finish()
 
