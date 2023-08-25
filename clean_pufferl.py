@@ -354,15 +354,16 @@ class CleanPuffeRL:
                 if not ii:
                     continue
 
-                for name, stat in unroll_nested_dict(ii):
-                    infos[name].append(stat)
-                    try:
-                        stat = float(stat)
-                        stats[name].append(stat)
-                    except TypeError:
-                        continue
-
+                for agent_i, values in ii.items():
+                    for name, stat in unroll_nested_dict(values):
+                        infos[name].append(stat)
+                        try:
+                            stat = float(stat)
+                            stats[name].append(stat)
+                        except:
+                            continue
             '''
+
             if "learner" in i:
                 for agent_i in i["learner"]:
                     if not agent_i:
@@ -632,8 +633,9 @@ class CleanPuffeRL:
                 }
             )
 
-        if self.update % self.checkpoint_interval == 1:
-            self._save_checkpoint()
+        #@kwych Saving breaks because self.agent has no policy_args (was not loaded when training from scratch)
+        #if self.update % self.checkpoint_interval == 1:
+        #    self._save_checkpoint()
 
     def done_training(self):
         return self.update >= self.total_updates
