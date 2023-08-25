@@ -26,7 +26,7 @@ def sample_logits(logits, action=None):
     if is_discrete:
         return action.squeeze(0), logprob.squeeze(0), entropy.squeeze(0)
 
-    return action, logprob, entropy
+    return action.T, logprob, entropy
 
 
 class Policy(torch.nn.Module):
@@ -42,7 +42,7 @@ class Policy(torch.nn.Module):
     def get_action_and_value(self, x, action=None, done=None):
          logits, value = self.policy(x)
          action, logprob, entropy = sample_logits(logits, action)
-         return action.T, logprob, entropy, value
+         return action, logprob, entropy, value
 
 
 class RecurrentPolicy(torch.nn.Module):
@@ -66,4 +66,4 @@ class RecurrentPolicy(torch.nn.Module):
     def get_action_and_value(self, x, state=None, action=None, done=None):
         logits, value, state = self.policy(x, state)
         action, logprob, entropy = sample_logits(logits, action)
-        return action.T, logprob, entropy, value, state
+        return action, logprob, entropy, value, state

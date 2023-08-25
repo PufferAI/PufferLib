@@ -22,12 +22,13 @@ class Postprocessor:
 
     For multi-agent environments, each agent has its own stateful postprocessor.
     '''
-    def __init__(self, env, is_multiagent):
+    def __init__(self, env, is_multiagent, agent_id=None):
         '''Postprocessors provide full access to the environment
         
         This means you can use them to cheat. Don't blame us if you do.
         '''
         self.env = env
+        self.agent_id = agent_id
         self.is_multiagent = is_multiagent
 
     @property
@@ -196,7 +197,7 @@ class GymPufferEnv:
 
 class PettingZooPufferEnv:
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={},
-                 postprocessor_cls=Postprocessor, teams=None):
+                 postprocessor_cls=Postprocessor, postprocessor_kwargs={}, teams=None):
         self.env = make_object(env, env_creator, env_args, env_kwargs)
         self.initialized = False
 
@@ -206,7 +207,8 @@ class PettingZooPufferEnv:
         self.possible_agents = self.env.possible_agents if teams is None else list(teams.keys())
         self.teams = teams
 
-        self.postprocessors = {agent: postprocessor_cls(self.env, is_multiagent=True)
+        self.postprocessors = {agent: postprocessor_cls(
+                self.env, is_multiagent=True, agent_id=agent, **postprocessor_kwargs)
             for agent in self.possible_agents}
 
         # Cache the observation and action spaces
