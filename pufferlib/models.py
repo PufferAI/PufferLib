@@ -3,6 +3,8 @@ import numpy as np
 
 from abc import ABC, abstractmethod
 
+import gym
+
 import torch
 import torch.nn as nn
 
@@ -123,8 +125,16 @@ class Default(Policy):
         '''
         super().__init__()
         self.encoder = nn.Linear(np.prod(envs.single_observation_space.shape), hidden_size)
-        self.decoders = nn.ModuleList([nn.Linear(hidden_size, n)
+
+        self.is_multidiscrete = isinstance(envs.single_action_space,
+                gym.spaces.MultiDiscrete)
+        if is_multidiscrete:
+            self.decoders = nn.ModuleList([nn.Linear(hidden_size, n)
                 for n in envs.single_action_space.nvec])
+        else:
+            assert isinstance(envs.single_action_space, gym.spaces.Discrete)
+            self.decoder = nn.Linear(hidden_size, envs.single_action_space.n)
+
         self.value_head = nn.Linear(hidden_size, 1)
 
     def forward(self, env_outputs):
@@ -141,9 +151,14 @@ class Default(Policy):
 
     def decode_actions(self, hidden, lookup, concat=True):
         '''Concatenated linear decoder function'''
-        actions = [dec(hidden) for dec in self.decoders]
         value = self.value_head(hidden)
-        return actions, value
+
+        if self.is_multidiscrete:
+            actions = [dec(hidden) for dec in self.decoders]
+            return actions, value
+
+        action = self.decoder(hidden)
+        return action, value
 
 class Convolutional(Policy):
     def __init__(self, envs, *args, framestack, flat_size,

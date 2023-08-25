@@ -18,7 +18,7 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
     EpisodicLifeEnv,
     FireResetEnv,
     MaxAndSkipEnv,
-    NoopResetEnv,
+    #NoopResetEnv,
 )
 
 
@@ -83,6 +83,35 @@ def parse_args():
     # fmt: on
     return args
 
+class NoopResetEnv(gym.Wrapper):
+    """
+    Sample initial states by taking random number of no-ops on reset.
+    No-op is assumed to be action 0.
+
+    :param env: the environment to wrap
+    :param noop_max: the maximum value of no-ops to run
+    """
+
+    def __init__(self, env: gym.Env, noop_max: int = 30) -> None:
+        super().__init__(env)
+        self.noop_max = noop_max
+        self.override_num_noops = None
+        self.noop_action = 0
+        assert env.unwrapped.get_action_meanings()[0] == "NOOP"
+
+    def reset(self, **kwargs) -> np.ndarray:
+        self.env.reset(**kwargs)
+        if self.override_num_noops is not None:
+            noops = self.override_num_noops
+        else:
+            noops = self.unwrapped.np_random.integers(1, self.noop_max + 1)
+        assert noops > 0
+        obs = np.zeros(0)
+        for _ in range(noops):
+            obs, _, done, _ = self.env.step(self.noop_action)
+            if done:
+                obs = self.env.reset(**kwargs)
+        return obs
 
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
@@ -128,6 +157,7 @@ class Agent(nn.Module):
             layer_init(nn.Linear(64 * 7 * 7, 512)),
             nn.ReLU(),
         )
+        #self.actor = layer_init(nn.Linear(512, envs.single_action_space.n), std=0.01)
         self.actor = layer_init(nn.Linear(512, envs.single_action_space.nvec[0]), std=0.01)
         self.critic = layer_init(nn.Linear(512, 1), std=1)
 
@@ -140,6 +170,7 @@ class Agent(nn.Module):
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
+        #return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
         return action.unsqueeze(-1), probs.log_prob(action), probs.entropy(), self.critic(hidden)
 
 
@@ -184,6 +215,21 @@ if __name__ == "__main__":
         envs_per_worker=1,
     )
 
+    def make_and_reset(i):
+        def thunk():
+            env = pufferlib.registry.atari.make_env('BreakoutNoFrameskip-v4', framestack=4)
+            #env.reset(seed=i)
+            env.metadata = None
+            return env
+        return thunk
+
+    #envs = gym.vector.SyncVectorEnv(
+    #    [make_and_reset(i) for i in range(args.num_envs)]
+    #)
+
+    #envs = gym.vector.SyncVectorEnv(
+    #        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
+    #    )
     '''
     policy = pufferlib.registry.atari.Policy(
         envs,

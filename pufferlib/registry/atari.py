@@ -69,6 +69,7 @@ class AtariFeaturizer(pufferlib.emulation.Postprocessor):
         return np.array(obs[1], dtype=np.float32)
 
     def reward_done_info(self, reward, done, info):
+        return reward, done, info
         if 'lives' in info:
             if info['lives'] == 0 and done:
                 info['return'] = info['episode']['r']

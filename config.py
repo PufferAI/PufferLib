@@ -38,7 +38,7 @@ class CleanRLInit:
     batch_size: int = 1024
     seed: int = 1
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
-    wandb_entity: str = 'jsuarez' 
+    wandb_entity: str = #'jsuarez' 
     wandb_project: str = 'pufferlib'
 
 @struct
