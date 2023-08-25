@@ -155,7 +155,8 @@ class Convolutional(Policy):
         with LSTM or 4 frames without.'''
         super().__init__()
         self.observation_space = envs.single_observation_space
-        self.num_actions = envs.single_action_space.nvec[0]
+        self.num_actions = envs.single_action_space.n
+
         self.channels_last = channels_last
         self.downsample = downsample
 

@@ -134,9 +134,14 @@ class GymPufferEnv:
 
         return self.multidiscrete_action_space
 
+    def seed(self, seed):
+        self.env.seed(seed)
+
     def reset(self, seed=None):
         self.initialized = True
         self.done = False
+
+        return self.env.reset()
 
         ob = _seed_and_reset(self.env, seed)
 
@@ -145,6 +150,9 @@ class GymPufferEnv:
             ob, self.postprocessor, reset=True)
 
     def step(self, action):
+        ob, reward, done, info = self.env.step(action)
+        self.done = done
+        return ob, reward, done, info
         '''Execute an action and return (observation, reward, done, info)'''
         if not self.initialized:
             raise exceptions.APIUsageError('step() called before reset()')
@@ -398,6 +406,8 @@ def postprocess_and_flatten(ob, postprocessor,
 
 def make_flat_and_multidiscrete_atn_space(atn_space):
     flat_action_space = flatten_space(atn_space)
+    if len(flat_action_space) == 1:
+        return flat_action_space, list(flat_action_space.values())[0]
     multidiscrete_space = convert_to_multidiscrete(flat_action_space)
     return flat_action_space, multidiscrete_space
 

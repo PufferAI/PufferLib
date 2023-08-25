@@ -29,11 +29,16 @@ class Policy(torch.nn.Module):
     def lstm(self):
         return self.policy.recurrent
 
-    def get_value(self, x, state, done=None):
-        _, value, _ = self.policy(x, state)
+    def get_value(self, x, state=None, done=None):
+        if self.is_recurrent:
+            _, value, _ = self.policy(x, state)
+        else:
+            _, value = self.policy(x)
         return value
 
-    def get_action_and_value(self, x, state=None, done=None, action=None):
+    # TODO: Arg ordering for CleanRL for conv/lstm/puffer
+    # TODO: Why does categorical need device here but not in cleanrl?
+    def get_action_and_value(self, x, action=None, state=None, done=None):
         if self.is_recurrent:
             logits, value, state = self.policy(x, state)
         else:
@@ -41,7 +46,17 @@ class Policy(torch.nn.Module):
 
         # Check for single action space
         if isinstance(logits, torch.Tensor):
-            logits = [logits]
+            categorical = Categorical(logits=logits)
+            if action is None:
+                action = categorical.sample()
+            else:
+                action = action.view(-1)
+
+            logprob = categorical.log_prob(action)
+            entropy = categorical.entropy()
+            if self.is_recurrent:
+                return action, logprob, entropy, value, state
+            return action, logprob, entropy, value
 
         multi_categorical = [Categorical(logits=l) for l in logits]
 

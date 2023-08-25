@@ -532,7 +532,7 @@ class CleanPuffeRL:
                         newvalue,
                         lstm_state,
                     ) = self.agent.get_action_and_value(
-                        mb_obs, lstm_state, b_dones[mb], mb_actions
+                        mb_obs, state=lstm_state, done=b_dones[mb], action=mb_actions
                     )
                     lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
                 else:

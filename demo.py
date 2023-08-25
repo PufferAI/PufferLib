@@ -55,9 +55,7 @@ if __name__ == '__main__':
     env = parse_arguments()
 
     import config as config_module
-    #config = getattr(config_module, env)()
+    config = getattr(config_module, env)()
 
-    config = getattr(config_module, env)
-    for conf in [config(framestack=4), config(framestack=1)]:
-        for env_creator in conf.env_creators:
-            train_model(conf, env_creator)
+    for env_creator in config.env_creators:
+        train_model(config, env_creator)

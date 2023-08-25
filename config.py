@@ -96,14 +96,14 @@ def atari(framestack=4):
                 'framestack': framestack,
             } for name in [
                 'BreakoutNoFrameskip-v4',
-                'PongNoFrameskip-v4',
+                #'PongNoFrameskip-v4',
             ]
         },
         policy_cls = pufferlib.registry.atari.Policy,
         policy_kwargs = {
             'input_size': 512,
-            'hidden_size': 128,
-            'output_size': 128,
+            'hidden_size': 512,
+            'output_size': 512,
             'framestack': framestack,
             'flat_size': 64*7*7,
         },
