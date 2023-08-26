@@ -285,7 +285,7 @@ class CleanPuffeRL:
             o, r, d, i = self.buffers[buf].recv()
             env_step_time += time.time() - start
 
-            #i = self.policy_pool.update_scores(i, "return")
+            i = self.policy_pool.update_scores(i, "return")
 
             '''
             for profile in self.buffers[buf].profile():
@@ -350,6 +350,7 @@ class CleanPuffeRL:
                 ptr += 1
                 progress_bar.update(1)
 
+            '''
             for ii in i:
                 if not ii:
                     continue
@@ -376,32 +377,31 @@ class CleanPuffeRL:
                             stats[name].append(stat)
                         except TypeError:
                             continue
-            '''
 
-            if self.policy_pool.scores and self.policy_ranker is not None:
-              self.policy_ranker.update_ranks(
-                  self.policy_pool.scores,
-                  wandb_policies=[self.policy_pool._learner_name]
-                  if self.wandb_entity
-                  else [],
-                  step=self.global_step,
-              )
-              self.policy_pool.scores = {}
+        if self.policy_pool.scores and self.policy_ranker is not None:
+          self.policy_ranker.update_ranks(
+              self.policy_pool.scores,
+              wandb_policies=[self.policy_pool._learner_name]
+              if self.wandb_entity
+              else [],
+              step=self.global_step,
+          )
+          self.policy_pool.scores = {}
 
-            env_sps = int(agent_steps_collected / env_step_time)
-            inference_sps = int(padded_steps_collected / inference_time)
+        env_sps = int(agent_steps_collected / env_step_time)
+        inference_sps = int(padded_steps_collected / inference_time)
 
-            progress_bar.set_description(
-                "Eval: "
-                + ", ".join(
-                    [
-                        f"Env SPS: {env_sps}",
-                        f"Inference SPS: {inference_sps}",
-                        f"Agent Steps: {agent_steps_collected}",
-                        *[f"{k}: {np.mean(v):.2f}" for k, v in stats.items()],
-                    ]
-                )
+        progress_bar.set_description(
+            "Eval: "
+            + ", ".join(
+                [
+                    f"Env SPS: {env_sps}",
+                    f"Inference SPS: {inference_sps}",
+                    f"Agent Steps: {agent_steps_collected}",
+                    *[f"{k}: {np.mean(v):.2f}" for k, v in stats.items()],
+                ]
             )
+        )
 
         self.global_step += self.batch_size
 
