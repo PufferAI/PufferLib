@@ -13,13 +13,8 @@ import torch.optim as optim
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-from stable_baselines3.common.atari_wrappers import (  # isort:skip
-    ClipRewardEnv,
-    EpisodicLifeEnv,
-    FireResetEnv,
-    MaxAndSkipEnv,
-    #NoopResetEnv,
-)
+import pufferlib.vectorization
+import pufferlib.registry.atari
 
 
 def parse_args():
@@ -83,59 +78,6 @@ def parse_args():
     # fmt: on
     return args
 
-class NoopResetEnv(gym.Wrapper):
-    """
-    Sample initial states by taking random number of no-ops on reset.
-    No-op is assumed to be action 0.
-
-    :param env: the environment to wrap
-    :param noop_max: the maximum value of no-ops to run
-    """
-
-    def __init__(self, env: gym.Env, noop_max: int = 30) -> None:
-        super().__init__(env)
-        self.noop_max = noop_max
-        self.override_num_noops = None
-        self.noop_action = 0
-        assert env.unwrapped.get_action_meanings()[0] == "NOOP"
-
-    def reset(self, **kwargs) -> np.ndarray:
-        self.env.reset(**kwargs)
-        if self.override_num_noops is not None:
-            noops = self.override_num_noops
-        else:
-            noops = self.unwrapped.np_random.integers(1, self.noop_max + 1)
-        assert noops > 0
-        obs = np.zeros(0)
-        for _ in range(noops):
-            obs, _, done, _ = self.env.step(self.noop_action)
-            if done:
-                obs = self.env.reset(**kwargs)
-        return obs
-
-def make_env(env_id, seed, idx, capture_video, run_name):
-    def thunk():
-        env = gym.make(env_id)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env = NoopResetEnv(env, noop_max=30)
-        env = MaxAndSkipEnv(env, skip=4)
-        env = EpisodicLifeEnv(env)
-        if "FIRE" in env.unwrapped.get_action_meanings():
-            env = FireResetEnv(env)
-        env = ClipRewardEnv(env)
-        env = gym.wrappers.ResizeObservation(env, (84, 84))
-        env = gym.wrappers.GrayScaleObservation(env)
-        env = gym.wrappers.FrameStack(env, 4)
-        env.seed(seed)
-        env.action_space.seed(seed)
-        env.observation_space.seed(seed)
-        return env
-
-    return thunk
-
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -157,8 +99,7 @@ class Agent(nn.Module):
             layer_init(nn.Linear(64 * 7 * 7, 512)),
             nn.ReLU(),
         )
-        #self.actor = layer_init(nn.Linear(512, envs.single_action_space.n), std=0.01)
-        self.actor = layer_init(nn.Linear(512, envs.single_action_space.nvec[0]), std=0.01)
+        self.actor = layer_init(nn.Linear(512, envs.single_action_space.n), std=0.01)
         self.critic = layer_init(nn.Linear(512, 1), std=1)
 
     def get_value(self, x):
@@ -170,8 +111,7 @@ class Agent(nn.Module):
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
-        #return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
-        return action.unsqueeze(-1), probs.log_prob(action), probs.entropy(), self.critic(hidden)
+        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
 
 
 if __name__ == "__main__":
@@ -203,46 +143,14 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    import pufferlib.vectorization
-    import pufferlib.registry.atari
-
-    # env setup
+    # PufferLib env setup
     envs = pufferlib.vectorization.Serial(
         env_creator = pufferlib.registry.atari.make_env,
-        env_args=['BreakoutNoFrameskip-v4'],
+        env_args=[args.env_id],
         env_kwargs={'framestack': 4},
         num_workers=args.num_envs,
         envs_per_worker=1,
     )
-
-    def make_and_reset(i):
-        def thunk():
-            env = pufferlib.registry.atari.make_env('BreakoutNoFrameskip-v4', framestack=4)
-            #env.reset(seed=i)
-            env.metadata = None
-            return env
-        return thunk
-
-    #envs = gym.vector.SyncVectorEnv(
-    #    [make_and_reset(i) for i in range(args.num_envs)]
-    #)
-
-    #envs = gym.vector.SyncVectorEnv(
-    #        [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
-    #    )
-    '''
-    policy = pufferlib.registry.atari.Policy(
-        envs,
-        input_size=512,
-        hidden_size=128,
-        output_size=128,
-        framestack=1,
-        flat_size=64*7*7,
-    )
-    policy = pufferlib.models.RecurrentWrapper(
-        envs, policy, input_size=128, hidden_size=128, num_layers=1)
-    agent = pufferlib.frameworks.cleanrl.Policy(policy).to(device)
-    '''
 
     agent = Agent(envs).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
