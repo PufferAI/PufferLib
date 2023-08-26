@@ -375,7 +375,7 @@ class CleanPuffeRL:
                         try:
                             stat = float(stat)
                             stats[name].append(stat)
-                        except TypeError:
+                        except:
                             continue
 
         if self.policy_pool.scores and self.policy_ranker is not None:

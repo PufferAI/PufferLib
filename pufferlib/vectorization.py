@@ -67,7 +67,7 @@ class GymMultiEnv(MultiEnv):
 
         rewards = [0] * len(self.preallocated_obs)
         dones = [False] * len(self.preallocated_obs)
-        infos = {}
+        infos = [{} for _ in self.envs]
  
         return self.preallocated_obs, rewards, dones, infos
 
@@ -243,8 +243,6 @@ class VecEnv(ABC):
         infos = [i for ii in infos for i in ii]
 
         assert len(rewards) == len(dones) == total_agents * self.num_workers
-        if not( len(infos) == self.num_workers * self.envs_per_worker):
-            T()
         assert len(infos) == self.num_workers * self.envs_per_worker
         return self.preallocated_obs, rewards, dones, infos
 

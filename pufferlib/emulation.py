@@ -6,6 +6,7 @@ import warnings
 import gym
 import inspect
 from collections import OrderedDict
+from collections.abc import Iterable
 
 import pufferlib
 from pufferlib import utils, exceptions
@@ -544,6 +545,9 @@ def concatenate(flat_sample):
     )
 
 def split(stacked_sample, flat_space, batched=True):
+    if not isinstance(stacked_sample, Iterable):
+        return [stacked_sample]
+
     if batched:
         batch = stacked_sample.shape[0]
 
