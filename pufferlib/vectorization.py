@@ -119,7 +119,10 @@ class PettingZooMultiEnv(MultiEnv):
 
         rewards = [0] * len(self.preallocated_obs)
         dones = [False] * len(self.preallocated_obs)
-        infos = {}
+        infos = [
+            {agent_id: {} for agent_id in self.envs[0].possible_agents}
+            for _ in self.envs
+        ]
  
         return self.preallocated_obs, rewards, dones, infos
 
@@ -133,7 +136,7 @@ class PettingZooMultiEnv(MultiEnv):
                 o  = env.reset()
                 rewards.extend([0] * len(self.preallocated_obs))
                 dones.extend([False] * len(self.preallocated_obs))
-                infos.append({})
+                infos.append({agent_id: {} for agent_id in self.envs[0].possible_agents})
             else:
                 assert len(a_keys) == len(atns)
                 atns = dict(zip(a_keys, atns))
@@ -236,9 +239,13 @@ class VecEnv(ABC):
 
         rewards = list(itertools.chain.from_iterable(rewards))
         dones = list(itertools.chain.from_iterable(dones))
-        infos = list(itertools.chain.from_iterable(infos))
+        orig = infos
+        infos = [i for ii in infos for i in ii]
 
         assert len(rewards) == len(dones) == total_agents * self.num_workers
+        if not( len(infos) == self.num_workers * self.envs_per_worker):
+            T()
+        assert len(infos) == self.num_workers * self.envs_per_worker
         return self.preallocated_obs, rewards, dones, infos
 
     def async_reset(self, seed=None):
