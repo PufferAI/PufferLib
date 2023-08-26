@@ -188,7 +188,7 @@ class Convolutional(Policy):
         )
 
         self.actor = pufferlib.pytorch.layer_init(nn.Linear(output_size, self.num_actions), std=0.01)
-        self.value_function = pufferlib.pytorch.layer_init(nn.Linear(output_size, 1), std=1)
+        self.value_fn = pufferlib.pytorch.layer_init(nn.Linear(output_size, 1), std=1)
 
     def encode_observations(self, observations):
         if self.channels_last:
@@ -199,5 +199,5 @@ class Convolutional(Policy):
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
         action = self.actor(flat_hidden)
-        value = self.value_function(flat_hidden)
+        value = self.value_fn(flat_hidden)
         return action, value

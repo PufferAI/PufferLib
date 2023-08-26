@@ -85,6 +85,7 @@ rllib = [
     'ray[all]==2.0.0',
     'setproctitle==1.1.10',
     'service-identity==21.1.0',
+    'pydantic==1.9',
 ]
 
 cleanrl = [

@@ -19,7 +19,6 @@ from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.env import ParallelPettingZooEnv
 
 import pufferlib
-import pufferlib.frameworks.base
 
 
 def register_env(name, env_creator):
