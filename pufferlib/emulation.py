@@ -151,9 +151,6 @@ class GymPufferEnv:
             ob, self.postprocessor, reset=True)
 
     def step(self, action):
-        ob, reward, done, info = self.env.step(action)
-        self.done = done
-        return ob, reward, done, info
         '''Execute an action and return (observation, reward, done, info)'''
         if not self.initialized:
             raise exceptions.APIUsageError('step() called before reset()')
@@ -200,6 +197,7 @@ class PettingZooPufferEnv:
                  postprocessor_cls=Postprocessor, postprocessor_kwargs={}, teams=None):
         self.env = make_object(env, env_creator, env_args, env_kwargs)
         self.initialized = False
+        self.all_done = True
 
         self.is_observation_checked = False
         self.is_action_checked = False
@@ -221,7 +219,7 @@ class PettingZooPufferEnv:
 
     @property
     def done(self):
-        return len(self.agents) == 0
+        return len(self.agents) == 0 or self.all_done
 
     @property
     def single_observation_space(self):
@@ -275,6 +273,7 @@ class PettingZooPufferEnv:
     def reset(self, seed=None):
         obs = self.env.reset(seed=seed)
         self.initialized = True
+        self.all_done = False
 
         # Group observations into teams
         if self.teams is not None:
@@ -323,6 +322,8 @@ class PettingZooPufferEnv:
             unpacked_actions = ungroup_from_teams(self.teams, unpacked_actions)
 
         obs, rewards, dones, infos = self.env.step(unpacked_actions)
+        # TODO: Can add this assert once NMMO Horizon is ported to puffer
+        # assert all(dones.values()) == (len(self.env.agents) == 0)
 
         if self.teams is not None:
             obs, rewards, dones = group_into_teams(self.teams, obs, rewards, dones)
@@ -332,6 +333,7 @@ class PettingZooPufferEnv:
             obs[agent], rewards[agent], dones[agent], infos[agent] = postprocess_and_flatten(
                 obs[agent], self.postprocessors[agent],
                 rewards[agent], dones[agent], infos[agent])
+        self.all_done = all(dones.values())
 
         obs, rewards, dones, infos = pad_to_const_num_agents(
             self.env.possible_agents, obs, rewards, dones, infos, self.pad_observation)
