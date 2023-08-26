@@ -372,6 +372,9 @@ class CleanPuffeRL:
 
                     for name, stat in unroll_nested_dict(agent_i):
                         infos[name].append(stat)
+                        if 'Task_eval_fn' in name:
+                            # Temporary hack for NMMO competition
+                            continue
                         try:
                             stat = float(stat)
                             stats[name].append(stat)
