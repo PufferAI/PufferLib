@@ -134,9 +134,10 @@ class PettingZooMultiEnv(MultiEnv):
         for idx, (a_keys, env, atns) in enumerate(zip(self.agent_keys, self.envs, actions)):
             if env.done:
                 o  = env.reset()
-                rewards.extend([0] * len(self.preallocated_obs))
-                dones.extend([False] * len(self.preallocated_obs))
-                infos.append({agent_id: {} for agent_id in self.envs[0].possible_agents})
+                num_agents = len(env.possible_agents)
+                rewards.extend([0] * num_agents)
+                dones.extend([False] * num_agents)
+                infos.append({agent_id: {} for agent_id in env.possible_agents})
             else:
                 assert len(a_keys) == len(atns)
                 atns = dict(zip(a_keys, atns))

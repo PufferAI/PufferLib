@@ -30,8 +30,6 @@ def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, env
         puf_obs = puf_envs.unpack_batched_obs(puf_obs)
  
         for idx, r_ob in enumerate(raw_obs):
-            if not pufferlib.utils.compare_space_samples(r_ob, puf_obs, idx):
-                T()
             assert pufferlib.utils.compare_space_samples(r_ob, puf_obs, idx)
 
         raw_actions = [r_env.action_space.sample() for r_env in raw_envs]
@@ -55,9 +53,10 @@ def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, env
         # Convert raw actions to puffer format
         puf_actions = []
         for idx, r_a in enumerate(raw_actions):
-            r_a = pufferlib.emulation.concatenate(pufferlib.emulation.flatten(r_a))
-            r_a = [r_a] if type(r_a) == int else r_a
-            r_a = np.array(r_a)
+            if not isinstance(r_a, int):
+                r_a = pufferlib.emulation.concatenate(pufferlib.emulation.flatten(r_a))
+                r_a = [r_a] if type(r_a) == int else r_a
+                r_a = np.array(r_a)
             puf_actions.append(r_a)
 
         with puf_profiler:
@@ -136,9 +135,10 @@ def test_pettingzoo_vectorization(env_cls, vectorization, steps=100, num_workers
                 else:
                     action = dummy_action
 
-                action = pufferlib.emulation.concatenate(pufferlib.emulation.flatten(action))
-                action = [action] if type(action) == int else action
-                action = np.array(action)
+                if not isinstance(action, int):
+                    action = pufferlib.emulation.concatenate(pufferlib.emulation.flatten(action))
+                    action = [action] if type(action) == int else action
+                    action = np.array(action)
                 puf_actions.append(action)
         puf_actions = np.array(puf_actions)
 
@@ -167,7 +167,7 @@ if __name__ == '__main__':
 
     performance = []
     headers = "\t\t| Cores | Envs/Core |   Min   |   Max   |  Mean  "
-    vectorizations = [pufferlib.vectorization.Serial, pufferlib.vectorization.Multiprocessing, pufferlib.vectorization.Ray]
+    vectorizations = [pufferlib.vectorization.Serial]#, pufferlib.vectorization.Multiprocessing, pufferlib.vectorization.Ray]
     num_workers_list = [1, 2, 4]
     envs_per_worker_list = [1, 2, 4]
 

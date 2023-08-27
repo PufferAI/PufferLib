@@ -143,8 +143,6 @@ class GymPufferEnv(gym.Env):
         self.initialized = True
         self.done = False
 
-        return self.env.reset()
-
         ob = _seed_and_reset(self.env, seed)
 
         # Call user featurizer and flatten the observations

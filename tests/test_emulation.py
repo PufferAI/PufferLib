@@ -47,9 +47,11 @@ def test_gym_emulation(env_cls, steps=100):
             raw_ob, raw_reward, raw_done, _ = raw_env.step(action)
 
         # Convert raw actions to puffer format
-        action = pufferlib.emulation.concatenate(pufferlib.emulation.flatten(action))
-        action = [action] if type(action) == int else action
-        action = np.array(action)
+
+        if not isinstance(action, int):
+            action = pufferlib.emulation.concatenate(pufferlib.emulation.flatten(action))
+            action = [action] if type(action) == int else action
+            action = np.array(action)
 
         with puf_profiler:
             puf_ob, puf_reward, puf_done, _ = puf_env.step(action)
@@ -111,9 +113,11 @@ def test_pettingzoo_emulation(env_cls, steps=100):
             else:
                 action = dummy_action
 
-            action = pufferlib.emulation.concatenate(pufferlib.emulation.flatten(action))
-            action = [action] if type(action) == int else action
-            action = np.array(action)
+            if not isinstance(action, int):
+                action = pufferlib.emulation.concatenate(pufferlib.emulation.flatten(action))
+                action = [action] if type(action) == int else action
+                action = np.array(action)
+
             puf_actions[agent] = action
 
         with puf_profiler:

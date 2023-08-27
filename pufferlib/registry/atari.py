@@ -7,14 +7,6 @@ from torch.distributions.categorical import Categorical
 
 import gym
 
-from stable_baselines3.common.atari_wrappers import (  # isort:skip
-    ClipRewardEnv,
-    EpisodicLifeEnv,
-    FireResetEnv,
-    MaxAndSkipEnv,
-    #NoopResetEnv,
-)
-
 import pufferlib
 import pufferlib.emulation
 import pufferlib.exceptions
@@ -95,6 +87,12 @@ class AtariFeaturizer(pufferlib.emulation.Postprocessor):
 def make_env(name, framestack):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
     try:
+        from stable_baselines3.common.atari_wrappers import (
+            ClipRewardEnv,
+            EpisodicLifeEnv,
+            FireResetEnv,
+            MaxAndSkipEnv,
+        )
         with pufferlib.utils.Suppress():
             env = gym.make(name)
     except:

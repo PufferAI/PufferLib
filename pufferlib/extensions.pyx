@@ -15,11 +15,11 @@ cdef void flatten_helper(object d, list flat_data):
 
     if isinstance(d, dict):
         d_dict = <dict> d
-        for key, value in d_dict.items():
+        for key, value in sorted(d_dict.items()):
             flatten_helper(value, flat_data)
     elif isinstance(d, list):
         d_list = <list> d
-        for item in d_list:
+        for item in d_list.items:
             flatten_helper(item, flat_data)
     elif isinstance(d, tuple):
         d_tuple = <tuple> d
