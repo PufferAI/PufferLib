@@ -46,7 +46,6 @@ class PolicyPool():
             ow = int(self._num_agents * (1 - self._learner_weight) / (self._num_policies - 1))
 
         lw = self._num_agents - ow * (self._num_policies - 1)
-        assert lw > 0
 
         sample_weights = [lw] + [ow] * (self._num_policies - 1)
         print(f"PolicyPool sample_weights: {sample_weights}")
