@@ -123,7 +123,7 @@ class CleanPuffeRL:
         ]
         self.num_agents = self.buffers[0].num_agents
 
-        # If an agent_creator is provided, use envs to create the agent
+        # If an agent_creator is provided, use envs (=self.buffers[0]) to create the agent
         self.agent = pufferlib.emulation.make_object(
             self.agent, self.agent_creator, self.buffers[:1], self.agent_kwargs)
 
@@ -155,7 +155,7 @@ class CleanPuffeRL:
         if "policy_checkpoint_name" in resume_state:
           self.agent = self.policy_store.get_policy(
             resume_state["policy_checkpoint_name"]
-          ).policy(lambda pa, b: self.agent.__class__.create_policy(b, pa), binding)
+          ).policy(self.agent_creator, envs=self.buffers[0])
 
         # TODO: this can be cleaned up
         self.agent.is_recurrent = hasattr(self.agent, "lstm")
@@ -257,10 +257,9 @@ class CleanPuffeRL:
         # Pick new policies for the policy pool
         # TODO: find a way to not switch mid-stream
         self.policy_pool.update_policies({
-            p.name: p.policy(
-              lambda pa, b: self.agent.__class__.create_policy(b, pa), self.binding).to(self.device)
-              for p in self.policy_store.select_policies(self.policy_selector)
-            })
+            p.name: p.policy(self.agent_creator, envs=self.buffers[0]).to(self.device)
+            for p in self.policy_store.select_policies(self.policy_selector)
+        })
 
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
@@ -332,7 +331,9 @@ class CleanPuffeRL:
 
             # Index alive mask with policy pool idxs...
             # TODO: Find a way to avoid having to do this
-            alive_mask = np.array(alive_mask) * self.policy_pool.learner_mask
+            if self.selfplay_learner_weight > 0:
+              alive_mask = np.array(alive_mask) * self.policy_pool.learner_mask
+
             for idx in np.where(alive_mask)[0]:
                 if ptr == self.batch_size + 1:
                     break
@@ -636,9 +637,8 @@ class CleanPuffeRL:
                 }
             )
 
-        #@kwych Saving breaks because self.agent has no policy_args (was not loaded when training from scratch)
-        #if self.update % self.checkpoint_interval == 1:
-        #    self._save_checkpoint()
+        if self.update % self.checkpoint_interval == 1:
+           self._save_checkpoint()
 
     def done_training(self):
         return self.update >= self.total_updates
@@ -669,8 +669,8 @@ class CleanPuffeRL:
         torch.save(state, tmp_path)
         os.rename(tmp_path, path)
 
-        # Save the policy to the policy store
-        self.policy_store.add_policy(policy_name, self.agent, self.agent.policy_args())
+        # NOTE: as the agent_creator has args internally, the policy args are not passed
+        self.policy_store.add_policy(policy_name, self.agent)
 
         if self.policy_ranker:
             self.policy_ranker.add_policy_copy(
