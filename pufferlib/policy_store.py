@@ -87,9 +87,9 @@ class FilePolicyRecord(PolicyRecord):
     }, temp_path)
     os.rename(temp_path, self._path)
 
-  def load(self, create_policy_func: Callable, binding: None):
+  def load(self, create_policy_func: Callable, envs: None):
     data = self._load_data()
-    policy = create_policy_func(self.policy_args(), binding)
+    policy = create_policy_func(envs)  # CHECK ME: do we need additional args to pass in?
     policy.load_state_dict(data["policy_state_dict"])
     policy.is_recurrent = hasattr(policy, "lstm")
     return policy
@@ -106,9 +106,9 @@ class FilePolicyRecord(PolicyRecord):
       self._load_data()
     return self._policy_args
 
-  def policy(self, create_policy_func: Callable = None, binding = None) -> Policy:
+  def policy(self, create_policy_func: Callable = None, envs = None) -> Policy:
     if self._policy is None:
-      self._policy = self.load(create_policy_func, binding)
+      self._policy = self.load(create_policy_func, envs)
     return self._policy
 
 class DirectoryPolicyStore(PolicyStore):
