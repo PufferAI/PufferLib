@@ -498,7 +498,7 @@ class CleanPuffeRL:
                 nextnonterminal = 1.0 - data.dones[i_nxt]
                 nextvalues = data.values[i_nxt]
                 delta = (
-                    data.rewards[i]
+                    data.rewards[i_nxt]
                     + gamma * nextvalues * nextnonterminal
                     - data.values[i]
                 )
@@ -590,6 +590,8 @@ class CleanPuffeRL:
                 entropy_loss = entropy.mean()
                 loss = pg_loss - ent_coef * entropy_loss + v_loss * vf_coef
 
+                print(f"mini batch -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, entropy:{entropy_loss.item():.4f}")
+
                 self.optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.agent.parameters(), max_grad_norm)
@@ -617,6 +619,9 @@ class CleanPuffeRL:
                 "Allocated during training - Pytorch: %.2f GB, System: %.2f GB"
                 % (allocated_torch / 1e9, allocated_cpu / 1e9)
             )
+
+        print(f"Epoch -- policy_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, ",
+              f"entropy:{entropy_loss.item():.4f}, approx_kl:{approx_kl.item():.4f}")
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if self.wandb_entity:
