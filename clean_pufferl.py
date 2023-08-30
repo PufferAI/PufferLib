@@ -50,6 +50,7 @@ class CleanPuffeRL:
     exp_name: str = os.path.basename(__file__)
 
     data_dir: str = 'data'
+    record_loss: bool = False
     checkpoint_interval: int = 1
     seed: int = 1
     torch_deterministic: bool = True
@@ -237,8 +238,10 @@ class CleanPuffeRL:
                 % (allocated_torch / 1e9, allocated_cpu / 1e9)
             )
 
-        with open("loss.txt", "a") as f:  # xcxc
-            pass
+        if self.record_loss and self.data_dir is not None:
+            self.loss_file = os.path.join(self.data_dir, "loss.txt")
+            with open(self.loss_file, "w") as f:
+                pass
 
         if self.wandb_entity is not None:
             self.wandb_run_id = self.wandb_run_id or wandb.util.generate_id()
@@ -593,9 +596,10 @@ class CleanPuffeRL:
                 entropy_loss = entropy.mean()
                 loss = pg_loss - ent_coef * entropy_loss + v_loss * vf_coef
 
-                with open("loss.txt", "a") as f:   # xcxc
-                  print(f"mini batch -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, entropy:{entropy_loss.item():.4f}",
-                        file=f)
+                if self.record_loss:
+                    with open(self.loss_file, "a") as f:
+                        print(f"mini batch -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, entropy:{entropy_loss.item():.4f}",
+                                file=f)
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -625,9 +629,10 @@ class CleanPuffeRL:
                 % (allocated_torch / 1e9, allocated_cpu / 1e9)
             )
 
-        with open("loss.txt", "a") as f:    # xcxc
-          print(f"Epoch -- policy_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, ",
-                f"entropy:{entropy_loss.item():.4f}, approx_kl:{approx_kl.item():.4f}", file=f)
+        if self.record_loss:
+            with open(self.loss_file, "a") as f:
+                print(f"Epoch -- policy_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, ",
+                        f"entropy:{entropy_loss.item():.4f}, approx_kl:{approx_kl.item():.4f}", file=f)
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if self.wandb_entity:
