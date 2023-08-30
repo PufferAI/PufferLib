@@ -237,6 +237,9 @@ class CleanPuffeRL:
                 % (allocated_torch / 1e9, allocated_cpu / 1e9)
             )
 
+        with open("loss.txt", "a") as f:  # xcxc
+            pass
+
         if self.wandb_entity is not None:
             self.wandb_run_id = self.wandb_run_id or wandb.util.generate_id()
 
@@ -590,7 +593,9 @@ class CleanPuffeRL:
                 entropy_loss = entropy.mean()
                 loss = pg_loss - ent_coef * entropy_loss + v_loss * vf_coef
 
-                print(f"mini batch -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, entropy:{entropy_loss.item():.4f}")
+                with open("loss.txt", "a") as f:   # xcxc
+                  print(f"mini batch -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, entropy:{entropy_loss.item():.4f}",
+                        file=f)
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -620,8 +625,9 @@ class CleanPuffeRL:
                 % (allocated_torch / 1e9, allocated_cpu / 1e9)
             )
 
-        print(f"Epoch -- policy_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, ",
-              f"entropy:{entropy_loss.item():.4f}, approx_kl:{approx_kl.item():.4f}")
+        with open("loss.txt", "a") as f:    # xcxc
+          print(f"Epoch -- policy_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, ",
+                f"entropy:{entropy_loss.item():.4f}, approx_kl:{approx_kl.item():.4f}", file=f)
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if self.wandb_entity:
