@@ -601,7 +601,8 @@ class CleanPuffeRL:
 
                 if self.record_loss:
                     with open(self.loss_file, "a") as f:
-                        print(f"mini batch -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, entropy:{entropy_loss.item():.4f}",
+                        print(f"mini batch ({epoch}, {mb}) -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, " + \
+                              f"entropy:{entropy_loss.item():.4f}, approx_kl: {approx_kl.item():.4f}",
                                 file=f)
                     with open(self.action_file, "a") as f:
                         print(f"mini batch -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, entropy:{entropy_loss.item():.4f}",
