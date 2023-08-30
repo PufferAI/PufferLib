@@ -242,6 +242,9 @@ class CleanPuffeRL:
             self.loss_file = os.path.join(self.data_dir, "loss.txt")
             with open(self.loss_file, "w") as f:
                 pass
+            self.action_file = os.path.join(self.data_dir, "actions.txt")
+            with open(self.action_file, "w") as f:
+                pass
 
         if self.wandb_entity is not None:
             self.wandb_run_id = self.wandb_run_id or wandb.util.generate_id()
@@ -601,6 +604,13 @@ class CleanPuffeRL:
                         print(f"mini batch ({epoch}, {mb}) -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, " + \
                               f"entropy:{entropy_loss.item():.4f}, approx_kl: {approx_kl.item():.4f}",
                                 file=f)
+                    with open(self.action_file, "a") as f:
+                        print(f"mini batch -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, entropy:{entropy_loss.item():.4f}",
+                                file=f)
+                        atn_list = mb_actions.cpu().numpy().tolist()
+                        for atns in atn_list:
+                            for atn in atns:
+                                print(f"{atn}", file=f)
 
                 self.optimizer.zero_grad()
                 loss.backward()
