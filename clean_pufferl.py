@@ -507,7 +507,7 @@ class CleanPuffeRL:
                 nextnonterminal = 1.0 - data.dones[i_nxt]
                 nextvalues = data.values[i_nxt]
                 delta = (
-                    data.rewards[i_nxt]
+                    data.rewards[i]
                     + gamma * nextvalues * nextnonterminal
                     - data.values[i]
                 )
