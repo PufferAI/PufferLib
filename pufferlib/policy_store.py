@@ -87,17 +87,17 @@ class FilePolicyRecord(PolicyRecord):
     }, temp_path)
     os.rename(temp_path, self._path)
 
-  def load(self, create_policy_func: Callable, envs: None):
-    data = self._load_data()
+  def load(self, create_policy_func: Callable, envs: None, device = None):
+    data = self._load_data(device)
     policy = create_policy_func(envs)  # CHECK ME: do we need additional args to pass in?
     policy.load_state_dict(data["policy_state_dict"])
     policy.is_recurrent = hasattr(policy, "lstm")
     return policy
 
-  def _load_data(self):
+  def _load_data(self, device = None):
     if not os.path.exists(self._path):
       raise ValueError(f"Policy with name {self.name} does not exist")
-    data = torch.load(self._path)
+    data = torch.load(self._path, map_location=device)
     self._policy_args = data["policy_args"]
     return data
 
@@ -106,9 +106,11 @@ class FilePolicyRecord(PolicyRecord):
       self._load_data()
     return self._policy_args
 
-  def policy(self, create_policy_func: Callable = None, envs = None) -> Policy:
+  def policy(self, create_policy_func: Callable = None, envs = None, device = None) -> Policy:
+    if device is None:
+      device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     if self._policy is None:
-      self._policy = self.load(create_policy_func, envs)
+      self._policy = self.load(create_policy_func, envs, device).to(device)
     return self._policy
 
 class DirectoryPolicyStore(PolicyStore):

@@ -266,7 +266,7 @@ class CleanPuffeRL:
         # Pick new policies for the policy pool
         # TODO: find a way to not switch mid-stream
         self.policy_pool.update_policies({
-            p.name: p.policy(self.agent_creator, envs=self.buffers[0]).to(self.device)
+            p.name: p.policy(self.agent_creator, envs=self.buffers[0], device=self.device)
             for p in self.policy_store.select_policies(self.policy_selector)
         })
 
@@ -601,11 +601,12 @@ class CleanPuffeRL:
 
                 if self.record_loss:
                     with open(self.loss_file, "a") as f:
-                        print(f"mini batch ({epoch}, {mb}) -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, " + \
+                        print(f"# mini batch ({epoch}, {mb}) -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, " + \
                               f"entropy:{entropy_loss.item():.4f}, approx_kl: {approx_kl.item():.4f}",
                                 file=f)
                     with open(self.action_file, "a") as f:
-                        print(f"mini batch -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, entropy:{entropy_loss.item():.4f}",
+                        print(f"# mini batch ({epoch}, {mb}) -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, " + \
+                              f"entropy:{entropy_loss.item():.4f}, approx_kl: {approx_kl.item():.4f}",
                                 file=f)
                         atn_list = mb_actions.cpu().numpy().tolist()
                         for atns in atn_list:
@@ -643,7 +644,9 @@ class CleanPuffeRL:
         if self.record_loss:
             with open(self.loss_file, "a") as f:
                 print(f"Epoch -- policy_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, ",
-                        f"entropy:{entropy_loss.item():.4f}, approx_kl:{approx_kl.item():.4f}", file=f)
+                      f"entropy:{entropy_loss.item():.4f}, approx_kl:{approx_kl.item():.4f}",
+                      f"clipfrac:{np.mean(clipfracs):.4f}, explained_var:{explained_var:.4f}",
+                      file=f)
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if self.wandb_entity:
