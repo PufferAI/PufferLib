@@ -50,6 +50,7 @@ class CleanPuffeRL:
     exp_name: str = os.path.basename(__file__)
 
     data_dir: str = 'data'
+    record_loss: bool = False
     checkpoint_interval: int = 1
     seed: int = 1
     torch_deterministic: bool = True
@@ -237,6 +238,14 @@ class CleanPuffeRL:
                 % (allocated_torch / 1e9, allocated_cpu / 1e9)
             )
 
+        if self.record_loss and self.data_dir is not None:
+            self.loss_file = os.path.join(self.data_dir, "loss.txt")
+            with open(self.loss_file, "w") as f:
+                pass
+            self.action_file = os.path.join(self.data_dir, "actions.txt")
+            with open(self.action_file, "w") as f:
+                pass
+
         if self.wandb_entity is not None:
             self.wandb_run_id = self.wandb_run_id or wandb.util.generate_id()
 
@@ -257,7 +266,7 @@ class CleanPuffeRL:
         # Pick new policies for the policy pool
         # TODO: find a way to not switch mid-stream
         self.policy_pool.update_policies({
-            p.name: p.policy(self.agent_creator, envs=self.buffers[0]).to(self.device)
+            p.name: p.policy(self.agent_creator, envs=self.buffers[0], device=self.device)
             for p in self.policy_store.select_policies(self.policy_selector)
         })
 
@@ -498,7 +507,7 @@ class CleanPuffeRL:
                 nextnonterminal = 1.0 - data.dones[i_nxt]
                 nextvalues = data.values[i_nxt]
                 delta = (
-                    data.rewards[i]
+                    data.rewards[i_nxt]
                     + gamma * nextvalues * nextnonterminal
                     - data.values[i]
                 )
@@ -590,6 +599,20 @@ class CleanPuffeRL:
                 entropy_loss = entropy.mean()
                 loss = pg_loss - ent_coef * entropy_loss + v_loss * vf_coef
 
+                if self.record_loss:
+                    with open(self.loss_file, "a") as f:
+                        print(f"# mini batch ({epoch}, {mb}) -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, " + \
+                              f"entropy:{entropy_loss.item():.4f}, approx_kl: {approx_kl.item():.4f}",
+                                file=f)
+                    with open(self.action_file, "a") as f:
+                        print(f"# mini batch ({epoch}, {mb}) -- pg_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, " + \
+                              f"entropy:{entropy_loss.item():.4f}, approx_kl: {approx_kl.item():.4f}",
+                                file=f)
+                        atn_list = mb_actions.cpu().numpy().tolist()
+                        for atns in atn_list:
+                            for atn in atns:
+                                print(f"{atn}", file=f)
+
                 self.optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.agent.parameters(), max_grad_norm)
@@ -618,6 +641,13 @@ class CleanPuffeRL:
                 % (allocated_torch / 1e9, allocated_cpu / 1e9)
             )
 
+        if self.record_loss:
+            with open(self.loss_file, "a") as f:
+                print(f"Epoch -- policy_loss:{pg_loss.item():.4f}, value_loss:{v_loss.item():.4f}, ",
+                      f"entropy:{entropy_loss.item():.4f}, approx_kl:{approx_kl.item():.4f}",
+                      f"clipfrac:{np.mean(clipfracs):.4f}, explained_var:{explained_var:.4f}",
+                      file=f)
+
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if self.wandb_entity:
             wandb.log(
@@ -637,7 +667,7 @@ class CleanPuffeRL:
                 }
             )
 
-        if self.update % self.checkpoint_interval == 1:
+        if self.update % self.checkpoint_interval == 1 or self.done_training():
            self._save_checkpoint()
 
     def done_training(self):
