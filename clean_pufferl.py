@@ -276,8 +276,8 @@ class CleanPuffeRL:
         padded_steps_collected = 0
 
         step = 0
-        infos = defaultdict(list)
-        stats = defaultdict(list)
+        infos = defaultdict(lambda: defaultdict(list))
+        stats = defaultdict(lambda: defaultdict(list))
         performance = defaultdict(list)
         progress_bar = tqdm(total=self.batch_size, disable=not show_progress)
 
@@ -375,19 +375,19 @@ class CleanPuffeRL:
                             continue
             '''
 
-            if "learner" in i:
-                for agent_i in i["learner"]:
+            for policy_name, policy_i in i.items():
+                for agent_i in policy_i:
                     if not agent_i:
                         continue
 
                     for name, stat in unroll_nested_dict(agent_i):
-                        infos[name].append(stat)
+                        infos[policy_name][name].append(stat)
                         if 'Task_eval_fn' in name:
                             # Temporary hack for NMMO competition
                             continue
                         try:
                             stat = float(stat)
-                            stats[name].append(stat)
+                            stats[policy_name][name].append(stat)
                         except:
                             continue
 
@@ -411,7 +411,7 @@ class CleanPuffeRL:
                     f"Env SPS: {env_sps}",
                     f"Inference SPS: {inference_sps}",
                     f"Agent Steps: {agent_steps_collected}",
-                    *[f"{k}: {np.mean(v):.2f}" for k, v in stats.items()],
+                    *[f"{k}: {np.mean(v):.2f}" for k, v in stats['learner'].items()],
                 ]
             )
         )
@@ -429,7 +429,7 @@ class CleanPuffeRL:
                         f"performance/env/{k}": np.mean(v)
                         for k, v in performance.items()
                     },
-                    **{f"charts/{k}": np.mean(v) for k, v in stats.items()},
+                    **{f"charts/{k}": np.mean(v) for k, v in stats['learner'].items()},
                     "charts/reward": float(torch.mean(data.rewards)),
                     "agent_steps": self.global_step,
                     "global_step": self.global_step,
