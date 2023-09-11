@@ -128,6 +128,9 @@ class CleanPuffeRL:
         self.agent = pufferlib.emulation.make_object(
             self.agent, self.agent_creator, self.buffers[:1], self.agent_kwargs)
 
+        from pufferlib import pytorch as pt
+        pt.save_model(self.agent, path='policies/untrained')
+
         if self.verbose:
             print(
                 "Allocated %.2f MB to environments. Only accurate for Serial backend."
@@ -266,8 +269,10 @@ class CleanPuffeRL:
         # Pick new policies for the policy pool
         # TODO: find a way to not switch mid-stream
         self.policy_pool.update_policies({
-            p.name: p.policy(self.agent_creator, envs=self.buffers[0], device=self.device)
-            for p in self.policy_store.select_policies(self.policy_selector)
+            p.name: p.policy(
+                policy_args=[self.buffers[0]],
+                device=self.device,
+            ) for p in self.policy_store.select_policies(self.policy_selector)
         })
 
         allocated_torch = torch.cuda.memory_allocated(self.device)

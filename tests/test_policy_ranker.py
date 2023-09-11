@@ -15,7 +15,7 @@ class TestOpenSkillRanker(unittest.TestCase):
         self.assertIn('test', self.ranker.ratings())
 
     def test_update_ranks(self):
-        scores = {'anchor': 10, 'policy2': 20}
+        scores = {'anchor': [10], 'policy2': [20]}
         self.ranker.update_ranks(scores)
         self.assertIn('anchor', self.ranker.ratings())
         self.assertIn('policy2', self.ranker.ratings())
