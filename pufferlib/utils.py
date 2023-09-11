@@ -1,6 +1,7 @@
 from pdb import set_trace as T
 
 from collections import OrderedDict
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -18,6 +19,15 @@ import inspect
 import pettingzoo
 import gym
 
+def namespace(self, **kwargs):
+    '''Make a struct with the provided keyword arguments
+
+    Pass self to allow classes to initialize instance
+    variables without copying. Pass self=None for procedural usage.
+    '''
+    if self is None:
+        return SimpleNamespace(**kwargs)
+    self.__dict__.update(kwargs)
 
 def install_requirements(env):
     '''Pip install dependencies for specified environment'''
