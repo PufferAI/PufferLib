@@ -79,8 +79,7 @@ class FilePolicyRecord(PolicyRecord):
     logging.info(f"Saving policy to {self._path}")
     temp_path = self._path + ".tmp"
     torch.save(self._policy, temp_path)
-    os.rename(temp_path + '.pt', self._path + '.pt')
-    os.rename(temp_path + '.pickle', self._path + '.pickle')
+    os.rename(temp_path, self._path + '.pt')
 
   def policy(self, policy_args=[], policy_kwargs={}, device=None) -> Policy:
     if self._policy is not None:
