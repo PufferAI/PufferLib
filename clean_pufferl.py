@@ -21,8 +21,7 @@ from tqdm import tqdm
 import pufferlib
 import pufferlib.emulation
 import pufferlib.frameworks.cleanrl
-import pufferlib.policy_pool
-import pufferlib.policy_ranker
+import pufferlib.policy_god
 import pufferlib.utils
 import pufferlib.vectorization
 
@@ -134,51 +133,13 @@ class CleanPuffeRL:
                 % ((self.process.memory_info().rss - allocated) / 1e6)
             )
 
-        # Create policy store
-        if self.policy_store is None:
-            if self.data_dir is not None:
-                self.policy_store = pufferlib.policy_store.DirectoryPolicyStore(
-                    os.path.join(self.data_dir, "policies")
-                )
+        self.policy_god = pufferlib.policy_god.PolicyGod(
+            self.buffers[0], self.agent, self.data_dir, resume_state, self.device,
+            self.num_envs, self.num_agents, self.selfplay_learner_weight,
+            self.selfplay_num_policies)
+        self.agent = self.policy_god.agent
 
-        # Create policy ranker
-        if self.policy_ranker is None:
-            if self.data_dir is not None:
-                self.policy_ranker = pufferlib.utils.PersistentObject(
-                    os.path.join(self.data_dir, "openskill.pickle"),
-                    pufferlib.policy_ranker.OpenSkillRanker,
-                    "anchor",
-                )
-            if "learner" not in self.policy_ranker.ratings():
-                self.policy_ranker.add_policy("learner")
-
-        # Setup agent
-        if "policy_checkpoint_name" in resume_state:
-          self.agent = self.policy_store.get_policy(
-            resume_state["policy_checkpoint_name"]
-          ).policy(policy_args=[self.buffers[0]])
-
-        # TODO: this can be cleaned up
-        self.agent.is_recurrent = hasattr(self.agent, "lstm")
-        self.agent = self.agent.to(self.device)
-
-        # Setup policy pool
-        if self.policy_pool is None:
-            self.policy_pool = pufferlib.policy_pool.PolicyPool(
-                self.agent,
-                "learner",
-                num_envs=self.num_envs,
-                num_agents=self.num_agents,
-                learner_weight=self.selfplay_learner_weight,
-                num_policies=self.selfplay_num_policies,
-            )
-
-        # Setup policy selector
-        if self.policy_selector is None:
-            self.policy_selector = pufferlib.policy_ranker.PolicySelector(
-                self.selfplay_num_policies - 1, exclude_names="learner"
-            )
-
+    
         # Setup optimizer
         self.optimizer = optim.Adam(
             self.agent.parameters(), lr=self.learning_rate, eps=1e-5
@@ -263,14 +224,7 @@ class CleanPuffeRL:
 
     @pufferlib.utils.profile
     def evaluate(self, show_progress=False):
-        # Pick new policies for the policy pool
-        # TODO: find a way to not switch mid-stream
-        self.policy_pool.update_policies({
-            p.name: p.policy(
-                policy_args=[self.buffers[0]],
-                device=self.device,
-            ) for p in self.policy_store.select_policies(self.policy_selector)
-        })
+        self.policy_god.update_policies()
 
         allocated_torch = torch.cuda.memory_allocated(self.device)
         allocated_cpu = self.process.memory_info().rss
@@ -295,7 +249,7 @@ class CleanPuffeRL:
             o, r, d, i = self.buffers[buf].recv()
             env_step_time += time.time() - start
 
-            i = self.policy_pool.update_scores(i, "return")
+            i = self.policy_god.update_scores(i, "return")
 
             '''
             for profile in self.buffers[buf].profile():
@@ -326,7 +280,7 @@ class CleanPuffeRL:
                     logprob,
                     value,
                     data.next_lstm_state[buf],
-                ) = self.policy_pool.forwards(
+                ) = self.policy_god.forwards(
                     o.to(self.device),
                     data.next_lstm_state[buf],
                     data.next_done[buf],
@@ -343,7 +297,7 @@ class CleanPuffeRL:
             # Index alive mask with policy pool idxs...
             # TODO: Find a way to avoid having to do this
             if self.selfplay_learner_weight > 0:
-              alive_mask = np.array(alive_mask) * self.policy_pool.learner_mask
+              alive_mask = np.array(alive_mask) * self.policy_god.policy_pool.learner_mask
 
             for idx in np.where(alive_mask)[0]:
                 if ptr == self.batch_size + 1:
@@ -393,15 +347,7 @@ class CleanPuffeRL:
                         except:
                             continue
 
-        if self.policy_pool.scores and self.policy_ranker is not None:
-          self.policy_ranker.update_ranks(
-              self.policy_pool.scores,
-              wandb_policies=[self.policy_pool._learner_name]
-              if self.wandb_entity
-              else [],
-              step=self.global_step,
-          )
-          self.policy_pool.scores = {}
+        self.policy_god.update_ranks(self.wandb_entity, self.global_step)
 
         env_sps = int(agent_steps_collected / env_step_time)
         inference_sps = int(padded_steps_collected / inference_time)
