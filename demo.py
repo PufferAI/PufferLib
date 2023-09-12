@@ -20,7 +20,7 @@ def parse_arguments():
     return args.env
 
 def make_policy(envs, config):
-    policy = config.policy_cls(envs, **config.policy_kwargs)
+    policy = config.policy_cls(envs._driver_env, **config.policy_kwargs)
     if config.recurrent_cls is not None:
         policy = pufferlib.models.RecurrentWrapper(
             envs, policy, **config.recurrent_kwargs)

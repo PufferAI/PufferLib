@@ -53,9 +53,9 @@ class ConvSequence(nn.Module):
 
 
 class Policy(pufferlib.models.Policy):
-    def __init__(self, envs):
+    def __init__(self, env):
         super().__init__()
-        h, w, c = envs.single_observation_space.shape
+        h, w, c = env.single_observation_space.shape
         shape = (c, h, w)
         conv_seqs = []
         for out_channels in [16, 32, 32]:
@@ -69,7 +69,7 @@ class Policy(pufferlib.models.Policy):
             nn.ReLU(),
         ]
         self.network = nn.Sequential(*conv_seqs)
-        self.actor = layer_init(nn.Linear(256, envs.single_action_space.nvec[0]), std=0.01)
+        self.actor = layer_init(nn.Linear(256, env.single_action_space.nvec[0]), std=0.01)
         self.value = layer_init(nn.Linear(256, 1), std=1)
 
     def encode_observations(self, x):

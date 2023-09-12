@@ -128,9 +128,6 @@ class CleanPuffeRL:
         self.agent = pufferlib.emulation.make_object(
             self.agent, self.agent_creator, self.buffers[:1], self.agent_kwargs)
 
-        from pufferlib import pytorch as pt
-        pt.save_model(self.agent, path='policies/untrained')
-
         if self.verbose:
             print(
                 "Allocated %.2f MB to environments. Only accurate for Serial backend."

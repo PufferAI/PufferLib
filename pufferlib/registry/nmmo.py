@@ -15,10 +15,10 @@ import pufferlib.exceptions
 from nmmo.entity.entity import EntityState
 
 
-NUM_ATTRS = 26
+NUM_ATTRS = 34
 EntityId = EntityState.State.attr_name_to_col["id"]
 tile_offset = torch.tensor([i*256 for i in range(3)])
-entity_offset = torch.tensor([i*256 for i in range(3, 26)])
+entity_offset = torch.tensor([i*256 for i in range(3, 34)])
 
 
 def make_env(*args, **kwargs):
@@ -36,10 +36,12 @@ def make_env(*args, **kwargs):
 
 
 class Policy(pufferlib.models.Policy):
-  def __init__(self, envs, input_size=256, hidden_size=256, output_size=256):
+  def __init__(self, env, input_size=256, hidden_size=256, output_size=256):
       super().__init__()
 
-      self.envs = envs
+      self.flat_observation_space = env.flat_observation_space
+      self.flat_observation_structure = env.flat_observation_structure
+
 
       # A dumb example encoder that applies a linear layer to agent self features
       self.embedding = torch.nn.Embedding(NUM_ATTRS*256, 32)
@@ -47,16 +49,17 @@ class Policy(pufferlib.models.Policy):
       self.tile_conv_2 = torch.nn.Conv2d(32, 8, 3)
       self.tile_fc = torch.nn.Linear(8*11*11, input_size)
 
-      self.entity_fc = torch.nn.Linear(23*32, input_size)
+      self.entity_fc = torch.nn.Linear(31*32, input_size)
 
       self.proj_fc = torch.nn.Linear(2*input_size, input_size)
 
       self.decoders = torch.nn.ModuleList([torch.nn.Linear(hidden_size, n)
-              for n in envs.single_action_space.nvec])
+              for n in env.single_action_space.nvec])
       self.value_head = torch.nn.Linear(hidden_size, 1)
 
   def encode_observations(self, env_outputs):
-    env_outputs = self.envs.unpack_batched_obs(env_outputs)
+    env_outputs = pufferlib.emulation.unpack_batched_obs(env_outputs,
+        self.flat_observation_space, self.flat_observation_structure)
 
     tile = env_outputs['Tile']
     # Center on player
