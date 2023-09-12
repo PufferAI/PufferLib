@@ -336,7 +336,7 @@ class CleanPuffeRL:
 
             # TRY NOT TO MODIFY: execute the game
             start = time.time()
-            self.buffers[buf].send(actions.cpu().numpy(), None)
+            self.buffers[buf].send(actions.cpu().numpy())
             env_step_time += time.time() - start
             data.buf = (data.buf + 1) % self.num_buffers
 
