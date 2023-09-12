@@ -128,9 +128,6 @@ class CleanPuffeRL:
         self.agent = pufferlib.emulation.make_object(
             self.agent, self.agent_creator, self.buffers[:1], self.agent_kwargs)
 
-        from pufferlib import pytorch as pt
-        pt.save_model(self.agent, path='policies/untrained')
-
         if self.verbose:
             print(
                 "Allocated %.2f MB to environments. Only accurate for Serial backend."
@@ -159,7 +156,7 @@ class CleanPuffeRL:
         if "policy_checkpoint_name" in resume_state:
           self.agent = self.policy_store.get_policy(
             resume_state["policy_checkpoint_name"]
-          ).policy(self.agent_creator, envs=self.buffers[0])
+          ).policy(policy_args=[self.buffers[0]])
 
         # TODO: this can be cleaned up
         self.agent.is_recurrent = hasattr(self.agent, "lstm")

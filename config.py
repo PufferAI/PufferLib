@@ -29,7 +29,8 @@ def struct(cls_or_kwargs=None, **kwargs):
 
 @struct()
 class CleanRLInit:
-    vectorization: ... = pufferlib.vectorization.Multiprocessing
+    vectorization: ... = pufferlib.vectorization.Serial
+    #vectorization: ... = pufferlib.vectorization.Multiprocessing
     total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
     num_cores: int = 4
@@ -38,7 +39,7 @@ class CleanRLInit:
     batch_size: int = 1024
     seed: int = 1
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
-    wandb_entity: str = #'jsuarez' 
+    wandb_entity: str = None#'jsuarez' 
     wandb_project: str = 'pufferlib'
 
 @struct
@@ -299,11 +300,11 @@ def nmmo():
         ),
         policy_cls = pufferlib.registry.nmmo.Policy,
         policy_kwargs = {},
-        recurrent_cls = pufferlib.pytorch.BatchFirstLSTM,
-        recurrent_kwargs = {
-            'input_size': 256,
-            'hidden_size': 256,
-        }
+        #recurrent_cls = pufferlib.pytorch.BatchFirstLSTM,
+        #recurrent_kwargs = {
+        #    'input_size': 256,
+        #    'hidden_size': 256,
+        #}
     )
 
 def procgen():

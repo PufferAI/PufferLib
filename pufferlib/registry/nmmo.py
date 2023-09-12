@@ -18,7 +18,7 @@ from nmmo.entity.entity import EntityState
 NUM_ATTRS = 26
 EntityId = EntityState.State.attr_name_to_col["id"]
 tile_offset = torch.tensor([i*256 for i in range(3)])
-entity_offset = torch.tensor([i*256 for i in range(3, 26)])
+entity_offset = torch.tensor([i*256 for i in range(3, 34)])
 
 
 def make_env(*args, **kwargs):
@@ -47,7 +47,7 @@ class Policy(pufferlib.models.Policy):
       self.tile_conv_2 = torch.nn.Conv2d(32, 8, 3)
       self.tile_fc = torch.nn.Linear(8*11*11, input_size)
 
-      self.entity_fc = torch.nn.Linear(23*32, input_size)
+      self.entity_fc = torch.nn.Linear(31*32, input_size)
 
       self.proj_fc = torch.nn.Linear(2*input_size, input_size)
 
