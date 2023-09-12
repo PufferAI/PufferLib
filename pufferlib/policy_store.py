@@ -10,7 +10,6 @@ import os
 import numpy as np
 
 from pufferlib.models import Policy
-from pufferlib.pytorch import save_model, load_model
 
 
 class PolicyRecord():
@@ -79,19 +78,16 @@ class FilePolicyRecord(PolicyRecord):
       raise ValueError(f"Policy {self._path} already exists")
     logging.info(f"Saving policy to {self._path}")
     temp_path = self._path + ".tmp"
-    save_model(self._policy, path=temp_path)
+    torch.save(self._policy, temp_path)
     os.rename(temp_path + '.pt', self._path + '.pt')
     os.rename(temp_path + '.pickle', self._path + '.pickle')
-
-  def load(self, policy_args=[], policy_kwargs={}, device=None):
-    return load_model(self._path, policy_args, policy_kwargs, map_location=device)[0]
 
   def policy(self, policy_args=[], policy_kwargs={}, device=None) -> Policy:
     if self._policy is not None:
       return self._policy
     if device is None:
       device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    return self.load(policy_args, policy_kwargs, device)
+    return torch.load(self._path, map_location=device)
 
 class DirectoryPolicyStore(PolicyStore):
   def __init__(self, path: str):

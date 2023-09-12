@@ -23,17 +23,19 @@ def make_env():
 
 class Policy(pufferlib.models.Policy):
     '''Default NetHack Learning Environment policy ported from the nle release'''
-    def __init__(self, envs, *args,
+    def __init__(self, env, *args,
             embedding_dim=32, crop_dim=9, num_layers=5,
             **kwargs):
         super().__init__()
 
-        self.envs = envs
-        self.observation_shape = envs.structured_observation_space
+        self.flat_observation_space = env.flat_observation_space
+        self.flat_observation_structure = env.flat_observation_structure
+
+        self.observation_shape = env.structured_observation_space
         self.glyph_shape = self.observation_shape["glyphs"].shape
         self.blstats_size = self.observation_shape["blstats"].shape[0]
 
-        self.num_actions = envs.single_action_space.nvec[0]
+        self.num_actions = env.action_space.n
 
         self.H = self.glyph_shape[0]
         self.W = self.glyph_shape[1]
@@ -125,7 +127,8 @@ class Policy(pufferlib.models.Policy):
 
     def encode_observations(self, env_outputs):
         TB, _ = env_outputs.shape
-        env_outputs = self.envs.unpack_batched_obs(env_outputs)
+        env_outputs = pufferlib.emulation.unpack_batched_obs(env_outputs,
+            self.flat_observation_space, self.flat_observation_structure)
 
         glyphs = env_outputs["glyphs"].long()
         blstats = env_outputs["blstats"]

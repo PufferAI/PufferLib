@@ -90,8 +90,11 @@ class PolicyPool():
     def update_scores(self, infos, info_key):
         # TODO: Check that infos is dense and sorted
         agent_infos = []
-        for info in infos:
-            agent_infos += list(info.values())
+        if self._num_agents > 1:
+            for info in infos:
+                agent_infos += list(info.values())
+        else:
+            agent_infos = infos
 
         policy_infos = {}
         for samp, (name, policy) in zip(self._sample_idxs, self._policies.items()):

@@ -10,14 +10,14 @@ import pufferlib.models
 
 class Policy(pufferlib.models.Policy):
     '''Based off of the DQN policy in MAgent'''
-    def __init__(self, envs, *args, input_size=256, hidden_size=256, output_size=256, **kwargs):
+    def __init__(self, env, *args, input_size=256, hidden_size=256, output_size=256, **kwargs):
         '''The CleanRL default Atari policy: a stack of three convolutions followed by a linear layer
         
         Takes framestack as a mandatory keyword arguments. Suggested default is 1 frame
         with LSTM or 4 frames without.'''
         super().__init__()
-        self.observation_space = envs.single_observation_space
-        self.num_actions = envs.single_action_space.nvec[0]
+        self.observation_space = env.single_observation_space
+        self.num_actions = env.single_action_space.nvec[0]
 
         self.network = nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Conv2d(5, 32, 3)),
