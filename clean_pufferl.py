@@ -159,7 +159,7 @@ class CleanPuffeRL:
         if "policy_checkpoint_name" in resume_state:
           self.agent = self.policy_store.get_policy(
             resume_state["policy_checkpoint_name"]
-          ).policy(self.agent_creator, envs=self.buffers[0])
+          ).policy(policy_args=[self.buffers[0]])
 
         # TODO: this can be cleaned up
         self.agent.is_recurrent = hasattr(self.agent, "lstm")
