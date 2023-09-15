@@ -38,7 +38,7 @@ class CleanRLInit:
     batch_size: int = 1024
     seed: int = 1
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
-    wandb_entity: str = #'jsuarez' 
+    wandb_entity: str = None #'jsuarez' 
     wandb_project: str = 'pufferlib'
 
 @struct
@@ -146,6 +146,7 @@ def box2d():
             pufferlib.registry.box2d.make_env: {}
         },
         policy_cls = pufferlib.registry.box2d.Policy,
+        policy_kwargs = {},
     )
 
 def butterfly():
@@ -156,6 +157,7 @@ def butterfly():
             pufferlib.registry.butterfly.make_cooperative_pong_v5: {}
         },
         policy_cls = pufferlib.registry.butterfly.Policy,
+        policy_kwargs = {},
     )
 
 def classic_control():
@@ -187,6 +189,7 @@ def crafter():
             pufferlib.registry.crafter.make_env: {}
         },
         policy_cls = pufferlib.registry.crafter.Policy,
+        policy_kwargs = {},
     )
 
 def dm_control():
@@ -213,6 +216,7 @@ def dm_lab():
             pufferlib.registry.dm_lab.make_env: {}
         },
         policy_cls = pufferlib.registry.dm_lab.Policy,
+        policy_kwargs = {},
     )
 
 def griddly():
@@ -223,6 +227,7 @@ def griddly():
             pufferlib.registry.griddly.make_spider_v0_env: {}
         },
         policy_cls = pufferlib.registry.griddly.Policy,
+        policy_kwargs = {},
     )
 
 def magent():
@@ -250,6 +255,7 @@ def microrts():
             pufferlib.registry.microrts.make_env: {}
         },
         policy_cls = pufferlib.registry.microrts.Policy,
+        policy_kwargs = {},
     )
 
 def minerl():
@@ -260,6 +266,7 @@ def minerl():
             pufferlib.registry.minecraft.make_env: {}
         },
         policy_cls = pufferlib.registry.minecraft.Policy,
+        policy_kwargs = {},
     )
 
 def nethack():
@@ -316,6 +323,7 @@ def procgen():
             }
         },
         policy_cls = pufferlib.registry.procgen.Policy,
+        policy_kwargs = {},
     )
 
 def smac():

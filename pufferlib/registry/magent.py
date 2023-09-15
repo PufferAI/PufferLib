@@ -15,9 +15,8 @@ class Policy(pufferlib.models.Policy):
         
         Takes framestack as a mandatory keyword arguments. Suggested default is 1 frame
         with LSTM or 4 frames without.'''
-        super().__init__()
-        self.observation_space = env.single_observation_space
-        self.num_actions = env.single_action_space.nvec[0]
+        super().__init__(env)
+        self.num_actions = self.action_space.n
 
         self.network = nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Conv2d(5, 32, 3)),

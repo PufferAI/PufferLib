@@ -171,13 +171,13 @@ class VecEnv(ABC):
         self.state = RESET
 
         # Determine if the env uses Gym or PettingZoo
-        self._driver_env = env_creator(*env_args, **env_kwargs)
-        if isinstance(self._driver_env, GymPufferEnv):
+        self.driver_env = env_creator(*env_args, **env_kwargs)
+        if isinstance(self.driver_env, GymPufferEnv):
             self._wrapper = GymMultiEnv
             self._num_agents = 1
-        elif isinstance(self._driver_env, PettingZooPufferEnv):
+        elif isinstance(self.driver_env, PettingZooPufferEnv):
             self._wrapper = PettingZooMultiEnv
-            self._num_agents = len(self._driver_env.possible_agents)
+            self._num_agents = len(self.driver_env.possible_agents)
         else:
             raise TypeError('env_creator must return an instance of GymPufferEnv or PettingZooPufferEnv')
 
@@ -194,25 +194,25 @@ class VecEnv(ABC):
     @property
     def single_observation_space(self):
         if self._wrapper == GymMultiEnv:
-            return self._driver_env.observation_space
-        return self._driver_env.single_observation_space
+            return self.driver_env.observation_space
+        return self.driver_env.single_observation_space
  
     @property
     def single_action_space(self):
         if self._wrapper == GymMultiEnv:
-            return self._driver_env.action_space
-        return self._driver_env.single_action_space
+            return self.driver_env.action_space
+        return self.driver_env.single_action_space
 
     @property
     def structured_observation_space(self):
-        return self._driver_env.structured_observation_space
+        return self.driver_env.structured_observation_space
 
     @property
     def flat_observation_space(self):
-        return self._driver_env.flat_observation_space
+        return self.driver_env.flat_observation_space
 
     def unpack_batched_obs(self, obs):
-        return self._driver_env.unpack_batched_obs(obs)
+        return self.driver_env.unpack_batched_obs(obs)
 
     def send(self, actions, env_id=None):
         assert self.state == SEND, 'Call reset + recv before send'
