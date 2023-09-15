@@ -146,9 +146,16 @@ class GymPufferEnv(gym.Env):
         ob = _seed_and_reset(self.env, seed)
 
         # Call user featurizer and flatten the observations
-        return postprocess_and_flatten(
+        processed_ob = postprocess_and_flatten(
             ob, self.postprocessor, reset=True)
 
+        if __debug__:
+            if not self.is_observation_checked:
+                self.is_observation_checked = check_space(
+                    processed_ob, self.box_observation_space)
+
+        return processed_ob
+ 
     def step(self, action):
         '''Execute an action and return (observation, reward, done, info)'''
         if not self.initialized:
@@ -175,14 +182,12 @@ class GymPufferEnv(gym.Env):
         # Call user postprocessors and flatten the observations
         processed_ob, single_reward, single_done, single_info = postprocess_and_flatten(
             ob, self.postprocessor, reward, done, info)
-
-        if __debug__:
-            if not self.is_observation_checked:
-                self.is_observation_checked = check_space(
-                    processed_ob, self.box_observation_space)
-                    
+                   
         self.done = single_done
         return processed_ob, single_reward, single_done, single_info
+
+    def render(self):
+        return self.env.render()
 
     def close(self):
         return self.env.close()
@@ -283,7 +288,14 @@ class PettingZooPufferEnv:
         for agent in self.possible_agents:
             postprocessed_obs[agent] = postprocess_and_flatten(
                 obs[agent], self.postprocessors[agent], reset=True)
-            
+
+        if __debug__:
+            if not self.is_observation_checked:
+                self.is_observation_checked = check_space(
+                    next(iter(postprocessed_obs.values())),
+                    self.box_observation_space
+                )
+               
         return postprocessed_obs
 
     def step(self, actions):
@@ -337,13 +349,10 @@ class PettingZooPufferEnv:
         obs, rewards, dones, infos = pad_to_const_num_agents(
             self.env.possible_agents, obs, rewards, dones, infos, self.pad_observation)
 
-        if not self.is_observation_checked:
-            self.is_observation_checked = check_space(
-                next(iter(obs.values())),
-                self.box_observation_space
-            )
-
         return obs, rewards, dones, infos
+
+    def render(self):
+        return self.env.render()
 
     def close(self):
         return self.env.close()
@@ -377,7 +386,6 @@ def make_object(object_instance=None, object_creator=None, creator_args=[], crea
             creator_kwargs = {}
 
         return object_creator(*creator_args, **creator_kwargs)
-
 
 def pad_agent_data(data, agents, pad_value):
     return {agent: data[agent] if agent in data else pad_value

@@ -1,6 +1,7 @@
 from pdb import set_trace as T
 import argparse
 import sys
+import time
 import subprocess
 
 import pufferlib
@@ -52,6 +53,30 @@ def train_model(config, env_creator):
 
     trainer.close()
 
+def evaluate_model(config, env_creator):
+    env_creator_kwargs = config.env_creators[env_creator]
+    env = env_creator(**env_creator_kwargs)
+
+    import torch
+    device = config.cleanrl_init.device
+    agent = torch.load('agent.pt').to(device)
+
+    ob = env.reset()
+    for i in range(100):
+        ob = torch.tensor(ob).view(1, -1).to(device)
+        with torch.no_grad():
+            action  = agent.get_action_and_value(ob)[0][0].item()
+
+        ob, reward, done, _ = env.step(action)
+        env.render()
+        time.sleep(1)
+
+        if done:
+            ob = env.reset()
+            print('---Reset---')
+            env.render()
+            time.sleep(1)
+
 
 if __name__ == '__main__':
     env = parse_arguments()
@@ -61,3 +86,4 @@ if __name__ == '__main__':
 
     for env_creator in config.env_creators:
         train_model(config, env_creator)
+        #evaluate_model(config, env_creator)

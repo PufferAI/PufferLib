@@ -8,6 +8,7 @@ import gym
 import torch
 import torch.nn as nn
 
+import pufferlib.emulation
 import pufferlib.pytorch
 
 
@@ -116,7 +117,7 @@ class RecurrentWrapper(torch.nn.Module):
 
 
 class Default(Policy):
-    def __init__(self, envs, input_size=128, hidden_size=128):
+    def __init__(self, env, input_size=128, hidden_size=128):
         '''Default PyTorch policy, meant for debugging.
         This should run with any environment but is unlikely to learn anything.
         
@@ -124,16 +125,23 @@ class Default(Policy):
         linear layers to decode actions. The value function is a single linear layer.
         '''
         super().__init__()
-        self.encoder = nn.Linear(np.prod(envs.single_observation_space.shape), hidden_size)
 
-        self.is_multidiscrete = isinstance(envs.single_action_space,
-                gym.spaces.MultiDiscrete)
-        if is_multidiscrete:
-            self.decoders = nn.ModuleList([nn.Linear(hidden_size, n)
-                for n in envs.single_action_space.nvec])
+        if isinstance(env, pufferlib.emulation.GymPufferEnv):
+            observation_space = env.observation_space
+            action_space = env.action_space
         else:
-            assert isinstance(envs.single_action_space, gym.spaces.Discrete)
-            self.decoder = nn.Linear(hidden_size, envs.single_action_space.n)
+            observation_space = env.single_observation_space
+            action_space = env.single_action_space
+
+        self.encoder = nn.Linear(np.prod(observation_space.shape), hidden_size)
+
+        self.is_multidiscrete = isinstance(action_space, gym.spaces.MultiDiscrete)
+        if self.is_multidiscrete:
+            self.decoders = nn.ModuleList([nn.Linear(hidden_size, n)
+                for n in action_space.nvec])
+        else:
+            assert isinstance(action_space, gym.spaces.Discrete)
+            self.decoder = nn.Linear(hidden_size, action_space.n)
 
         self.value_head = nn.Linear(hidden_size, 1)
 

@@ -39,7 +39,7 @@ class CleanRLInit:
     batch_size: int = 1024
     seed: int = 1
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
-    wandb_entity: str = None#'jsuarez' 
+    wandb_entity: str = 'jsuarez' 
     wandb_project: str = 'pufferlib'
 
 @struct
@@ -75,6 +75,7 @@ def all():
         #'box2d': box2d,
         'butterfly': butterfly,
         'crafter': crafter,
+        'squared': squared,
         #'dm_control': dm_control,
         #'dm_lab': dm_lab,
         'griddly': griddly,
@@ -188,6 +189,16 @@ def crafter():
             pufferlib.registry.crafter.make_env: {}
         },
         policy_cls = pufferlib.registry.crafter.Policy,
+    )
+
+def squared():
+    import pufferlib.registry.puffer_envs
+    return Config(
+        env_creators = {
+            pufferlib.registry.puffer_envs.make_squared: {}
+        },
+        policy_cls = pufferlib.registry.puffer_envs.Policy,
+        policy_kwargs = {}
     )
 
 def dm_control():

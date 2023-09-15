@@ -615,6 +615,7 @@ class CleanPuffeRL:
                 }
             )
 
+        torch.save(self.agent, "agent.pt")
         if self.update % self.checkpoint_interval == 1 or self.done_training():
            self._save_checkpoint()
 
