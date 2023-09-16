@@ -86,7 +86,7 @@ class FilePolicyRecord(PolicyRecord):
       return self._policy
     if device is None:
       device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    return torch.load(self._path, map_location=device)
+    return torch.load(self._path + '.pt', map_location=device)
 
 class DirectoryPolicyStore(PolicyStore):
   def __init__(self, path: str):
