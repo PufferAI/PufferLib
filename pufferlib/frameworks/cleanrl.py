@@ -60,10 +60,10 @@ class RecurrentPolicy(torch.nn.Module):
         else:
             raise ValueError('Policy must have a subnetwork named lstm or recurrent')
 
-    def get_value(self, x, state, done=None):
-        _, value, _ = self.policy(x, state)
+    def get_value(self, x, state=None, done=None):
+        _, value, _ = self.policy(x, state, done)
 
     def get_action_and_value(self, x, state=None, action=None, done=None):
-        logits, value, state = self.policy(x, state)
+        logits, value, state = self.policy(x, state, done)
         action, logprob, entropy = sample_logits(logits, action)
         return action, logprob, entropy, value, state

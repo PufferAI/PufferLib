@@ -125,7 +125,8 @@ def _get_dtype_bounds(dtype):
     elif np.issubdtype(dtype, np.unsignedinteger):
         return np.iinfo(dtype).min, np.iinfo(dtype).max
     elif np.issubdtype(dtype, np.floating):
-        return np.finfo(dtype).min, np.finfo(dtype).max
+        # Gym fails on float64
+        return np.finfo(np.float32).min, np.finfo(np.float32).max
     else:
         raise ValueError(f"Unsupported dtype: {dtype}")
 

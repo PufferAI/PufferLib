@@ -148,6 +148,7 @@ def box2d():
             pufferlib.registry.box2d.make_env: {}
         },
         policy_cls = pufferlib.registry.box2d.Policy,
+        policy_kwargs = {},
     )
 
 def butterfly():
@@ -158,6 +159,7 @@ def butterfly():
             pufferlib.registry.butterfly.make_cooperative_pong_v5: {}
         },
         policy_cls = pufferlib.registry.butterfly.Policy,
+        policy_kwargs = {},
     )
 
 def classic_control():
@@ -189,6 +191,7 @@ def crafter():
             pufferlib.registry.crafter.make_env: {}
         },
         policy_cls = pufferlib.registry.crafter.Policy,
+        policy_kwargs = {},
     )
 
 def squared():
@@ -197,8 +200,20 @@ def squared():
         env_creators = {
             pufferlib.registry.puffer_envs.make_squared: {}
         },
+        cleanrl_train = CleanRLTrain(
+            batch_rows=32,
+            bptt_horizon=4,
+        ),
         policy_cls = pufferlib.registry.puffer_envs.Policy,
-        policy_kwargs = {}
+        policy_kwargs = {},
+        # Class not getting respected, fix this and figure out
+        # how to ensure you don't mess up transposes
+        recurrent_cls = pufferlib.pytorch.BatchFirstLSTM,
+        recurrent_kwargs = {
+            'input_size': 128,
+            'hidden_size': 128,
+            'num_layers': 1,
+        },
     )
 
 def dm_control():
@@ -225,6 +240,7 @@ def dm_lab():
             pufferlib.registry.dm_lab.make_env: {}
         },
         policy_cls = pufferlib.registry.dm_lab.Policy,
+        policy_kwargs = {},
     )
 
 def griddly():
@@ -235,6 +251,7 @@ def griddly():
             pufferlib.registry.griddly.make_spider_v0_env: {}
         },
         policy_cls = pufferlib.registry.griddly.Policy,
+        policy_kwargs = {},
     )
 
 def magent():
@@ -262,6 +279,7 @@ def microrts():
             pufferlib.registry.microrts.make_env: {}
         },
         policy_cls = pufferlib.registry.microrts.Policy,
+        policy_kwargs = {},
     )
 
 def minerl():
@@ -272,6 +290,7 @@ def minerl():
             pufferlib.registry.minecraft.make_env: {}
         },
         policy_cls = pufferlib.registry.minecraft.Policy,
+        policy_kwargs = {},
     )
 
 def nethack():
@@ -328,6 +347,7 @@ def procgen():
             }
         },
         policy_cls = pufferlib.registry.procgen.Policy,
+        policy_kwargs = {},
     )
 
 def smac():

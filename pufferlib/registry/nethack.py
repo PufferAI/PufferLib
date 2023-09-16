@@ -26,7 +26,7 @@ class Policy(pufferlib.models.Policy):
     def __init__(self, env, *args,
             embedding_dim=32, crop_dim=9, num_layers=5,
             **kwargs):
-        super().__init__()
+        super().__init__(env)
 
         self.flat_observation_space = env.flat_observation_space
         self.flat_observation_structure = env.flat_observation_structure

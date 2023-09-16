@@ -33,7 +33,7 @@ import numpy as np
 import pufferlib.frameworks.cleanrl
 
 class Policy(nn.Module):
-    def __init__(self, envs):
+    def __init__(self, env):
         super().__init__()
         self.encoder = nn.Linear(np.prod(
             envs.single_observation_space.shape), 128)
@@ -49,7 +49,7 @@ class Policy(nn.Module):
         return actions, value
 
 obs = torch.Tensor(obs)
-policy = Policy(envs)
+policy = Policy(envs.driver_env)
 cleanrl_policy = pufferlib.frameworks.cleanrl.Policy(policy)
 actions = cleanrl_policy.get_action_and_value(obs)[0].numpy()
 obs, rewards, dones, infos = envs.step(actions)
@@ -67,9 +67,7 @@ envs = pufferlib.vectorization.Multiprocessing(
     env_creator=pufferlib.registry.nmmo.make_env,
     num_workers=2, envs_per_worker=2)
 
-policy = pufferlib.registry.nmmo.Policy(envs)
-policy = pufferlib.models.RecurrentWrapper(envs, policy,
-    input_size=256, hidden_size=256)
+policy = pufferlib.registry.nmmo.Policy(envs.driver_env)
 cleanrl_policy = pufferlib.frameworks.cleanrl.Policy(policy)
 
 obs = envs.reset()

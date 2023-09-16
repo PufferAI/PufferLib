@@ -272,6 +272,15 @@ class CleanPuffeRL:
             agent_steps_collected += sum(alive_mask)
             padded_steps_collected += len(alive_mask)
 
+            #d_mask = torch.Tensor(d).to(self.device).view(1, -1, 1)
+            #data.next_lstm_state[buf] = (
+            #    d_mask*torch.normal(mean=0., std=0.1, size=data.next_lstm_state[buf][0].shape) + (1 - d_mask)*data.next_lstm_state[buf][0],
+            #    d_mask*torch.normal(mean=0., std=0.1, size=data.next_lstm_state[buf][1].shape) + (1 - d_mask)*data.next_lstm_state[buf][1],
+            #)
+
+            #    (1 - d_mask) * data.next_lstm_state[buf][0],
+            #    (1 - d_mask) * data.next_lstm_state[buf][1],
+
             # ALGO LOGIC: action logic
             start = time.time()
             with torch.no_grad():
@@ -285,6 +294,7 @@ class CleanPuffeRL:
                     data.next_lstm_state[buf],
                     data.next_done[buf],
                 )
+
                 value = value.flatten()
             inference_time += time.time() - start
 
@@ -478,6 +488,7 @@ class CleanPuffeRL:
         train_time = time.time()
         clipfracs = []
         for epoch in range(update_epochs):
+            shape = (self.agent.lstm.num_layers, batch_rows, self.agent.lstm.hidden_size)
             lstm_state = None
             for mb in range(num_minibatches):
                 mb_obs = b_obs[mb].to(self.device)

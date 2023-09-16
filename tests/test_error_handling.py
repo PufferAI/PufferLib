@@ -36,7 +36,6 @@ def test_gym_api_usage(env_cls, print_errors=True):
     action = env.action_space.sample()
     obs, rewards, dones, infos = env.step(action)
 
-
 def test_pettingzoo_api_usage(env_cls, print_errors=True):
     env = pufferlib.emulation.PettingZooPufferEnv(env_creator=env_cls)
 

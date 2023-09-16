@@ -54,8 +54,8 @@ class ConvSequence(nn.Module):
 
 class Policy(pufferlib.models.Policy):
     def __init__(self, env):
-        super().__init__()
-        h, w, c = env.single_observation_space.shape
+        super().__init__(env)
+        h, w, c = env.observation_space.shape
         shape = (c, h, w)
         conv_seqs = []
         for out_channels in [16, 32, 32]:
@@ -69,7 +69,7 @@ class Policy(pufferlib.models.Policy):
             nn.ReLU(),
         ]
         self.network = nn.Sequential(*conv_seqs)
-        self.actor = layer_init(nn.Linear(256, env.single_action_space.nvec[0]), std=0.01)
+        self.actor = layer_init(nn.Linear(256, self.action_space.n), std=0.01)
         self.value = layer_init(nn.Linear(256, 1), std=1)
 
     def encode_observations(self, x):
@@ -128,7 +128,7 @@ class ProcgenPostprocessor(pufferlib.emulation.Postprocessor):
         except:
             return obs
 
-    def rewards_dones_infos(self, reward, done, info):
+    def reward_done_info(self, reward, done, info):
         return float(reward), bool(done), info
 
 

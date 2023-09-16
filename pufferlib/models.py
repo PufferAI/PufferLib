@@ -12,7 +12,7 @@ import pufferlib.emulation
 import pufferlib.pytorch
 
 
-class Policy(torch.nn.Module, ABC):
+class Policy(nn.Module):
     '''Pure PyTorch base policy
     
     This spec allows PufferLib to repackage your policy
@@ -34,6 +34,20 @@ class Policy(torch.nn.Module, ABC):
     It is called on the output of the recurrent cell (or, if no recurrent cell,
     the output of encode_observations)
     '''
+    def __init__(self, env):
+        super().__init__()
+        if isinstance(env, pufferlib.emulation.GymPufferEnv):
+            self.observation_space = env.observation_space
+            self.action_space = env.action_space
+        else:
+            self.observation_space = env.single_observation_space
+            self.action_space = env.single_action_space
+
+        self.is_multidiscrete = isinstance(self.action_space,
+                gym.spaces.MultiDiscrete)
+
+        if not self.is_multidiscrete:
+            assert isinstance(self.action_space, gym.spaces.Discrete)
 
     @abstractmethod
     def encode_observations(self, flat_observations):
@@ -77,14 +91,13 @@ class Policy(torch.nn.Module, ABC):
         return actions, value
 
 
-class RecurrentWrapper(torch.nn.Module):
-    def __init__(self, envs, policy, input_size=128, hidden_size=128, num_layers=1):
-        super().__init__()
+class RecurrentWrapper(Policy):
+    def __init__(self, env, policy, input_size=128, hidden_size=128, num_layers=1):
+        super().__init__(env)
 
         if not isinstance(policy, Policy):
             raise ValueError('Subclass pufferlib.Policy to use RecurrentWrapper')
 
-        self.single_observation_shape = envs.single_observation_space.shape
         self.policy = policy
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -92,8 +105,14 @@ class RecurrentWrapper(torch.nn.Module):
         self.recurrent = torch.nn.LSTM(
             input_size, hidden_size, num_layers=num_layers)
 
-    def forward(self, x, state):
-        shape, tensor_shape = x.shape, self.single_observation_shape
+        for name, param in self.recurrent.named_parameters():
+            if "bias" in name:
+                nn.init.constant_(param, 0)
+            elif "weight" in name:
+                nn.init.orthogonal_(param, 1.0)
+
+    def forward(self, x, state, done):
+        shape, tensor_shape = x.shape, self.observation_space.shape
         x_dims, tensor_dims = len(shape), len(tensor_shape)
         if x_dims == tensor_dims + 1:
             TT = shape[0] // state[0].shape[1]
@@ -105,11 +124,31 @@ class RecurrentWrapper(torch.nn.Module):
             raise ValueError('Invalid tensor shape', shape)
 
         x = x.reshape(B*TT, *tensor_shape)
+
         hidden, lookup = self.policy.encode_observations(x)
         assert hidden.shape == (B*TT, self.input_size)
 
-        hidden = hidden.view(TT, B, self.input_size)
+        hidden = hidden.reshape(B, TT, self.input_size)
+        hidden = hidden.transpose(0, 1)
+
+        # This block is the technically correct way to handle resets
+        # It also kills ~70% of the performance and is usually not worth it
+        '''
+        done = done.reshape(B, TT)
+        done = done.transpose(0, 1).unsqueeze(2)
+        new_hidden = []
+        for t in range(TT):
+            h = hidden[t:t+1]
+            d = done[t:t+1]
+            state = (state[0] * (1 - d), state[1] * (1 - d))
+            h, state = self.recurrent(h, state)
+            new_hidden.append(h)
+        hidden = torch.cat(new_hidden, dim=0)
+        '''
+
         hidden, state = self.recurrent(hidden, state)
+
+        hidden = hidden.transpose(0, 1)
         hidden = hidden.reshape(B*TT, self.hidden_size)
 
         hidden, critic = self.policy.decode_actions(hidden, lookup)
@@ -124,24 +163,14 @@ class Default(Policy):
         Uses a single linear layer + relu to encode observations and a list of
         linear layers to decode actions. The value function is a single linear layer.
         '''
-        super().__init__()
+        super().__init__(env)
+        self.encoder = nn.Linear(np.prod(self.observation_space.shape), hidden_size)
 
-        if isinstance(env, pufferlib.emulation.GymPufferEnv):
-            observation_space = env.observation_space
-            action_space = env.action_space
-        else:
-            observation_space = env.single_observation_space
-            action_space = env.single_action_space
-
-        self.encoder = nn.Linear(np.prod(observation_space.shape), hidden_size)
-
-        self.is_multidiscrete = isinstance(action_space, gym.spaces.MultiDiscrete)
         if self.is_multidiscrete:
             self.decoders = nn.ModuleList([nn.Linear(hidden_size, n)
-                for n in action_space.nvec])
+                for n in self.action_space.nvec])
         else:
-            assert isinstance(action_space, gym.spaces.Discrete)
-            self.decoder = nn.Linear(hidden_size, action_space.n)
+            self.decoder = nn.Linear(hidden_size, self.action_space.n)
 
         self.value_head = nn.Linear(hidden_size, 1)
 
@@ -169,17 +198,15 @@ class Default(Policy):
         return action, value
 
 class Convolutional(Policy):
-    def __init__(self, envs, *args, framestack, flat_size,
+    def __init__(self, env, *args, framestack, flat_size,
             input_size=512, hidden_size=512, output_size=512,
             channels_last=False, downsample=1, **kwargs):
         '''The CleanRL default Atari policy: a stack of three convolutions followed by a linear layer
         
         Takes framestack as a mandatory keyword arguments. Suggested default is 1 frame
         with LSTM or 4 frames without.'''
-        super().__init__()
-        self.observation_space = envs.single_observation_space
-        self.num_actions = envs.single_action_space.n
-
+        super().__init__(env)
+        self.num_actions = self.action_space.n
         self.channels_last = channels_last
         self.downsample = downsample
 

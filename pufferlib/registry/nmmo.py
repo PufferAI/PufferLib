@@ -37,7 +37,7 @@ def make_env(*args, **kwargs):
 
 class Policy(pufferlib.models.Policy):
   def __init__(self, env, input_size=256, hidden_size=256, output_size=256):
-      super().__init__()
+      super().__init__(env)
 
       self.flat_observation_space = env.flat_observation_space
       self.flat_observation_structure = env.flat_observation_structure
