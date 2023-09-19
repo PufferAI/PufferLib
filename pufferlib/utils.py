@@ -21,7 +21,7 @@ import pettingzoo
 import gym
 
 
-def namespace(self, **kwargs):
+def namespace(self=None, **kwargs):
     '''Make a struct with the provided keyword arguments
 
     Pass self to allow classes to initialize instance

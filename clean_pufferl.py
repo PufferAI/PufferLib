@@ -37,7 +37,7 @@ def init(self: object = None,
 
         # Experiment
         verbose: bool = True,
-        exp_name: str = os.path.basename(__file__),
+        exp_name: str = __name__,
         data_dir: str = 'experiments',
         checkpoint_interval: int = 1,
         total_timesteps: int = 10_000_000,
@@ -72,7 +72,7 @@ def init(self: object = None,
     obs_device = "cpu" if cpu_offload else device
     assert num_cores * envs_per_worker == num_envs
 
-    # Create environments
+    # Create environments, agent, and optimizer
     init_profiler = pufferlib.utils.Profiler(memory=True)
     with init_profiler:
         buffers = [
@@ -86,10 +86,6 @@ def init(self: object = None,
         ]
         num_agents = buffers[0].num_agents
         total_agents = num_agents * num_envs
-    init_env_time = init_profiler.elapsed
-    init_env_memory = pufferlib.utils.format_bytes(init_profiler.memory)
-
-    # Agent and Optimizer
     agent = pufferlib.emulation.make_object(
         agent, agent_creator, buffers[:1], agent_kwargs)
     optimizer = optim.Adam(agent.parameters(), lr=learning_rate, eps=1e-5)
@@ -112,6 +108,37 @@ def init(self: object = None,
     global_step = resume_state.get("global_step", 0)
     agent_step = resume_state.get("agent_step", 0)
     update = resume_state.get("update", 0)
+
+    run_config = pufferlib.utils.namespace(
+        #agent_kwargs = agent_kwargs,
+        env_kwargs = env_creator_kwargs,
+        vectorization = vectorization.__name__,
+        num_envs = num_envs,
+        num_cores = num_cores,
+        num_buffers = num_buffers,
+        batch_size = batch_size,
+        total_timesteps = total_timesteps,
+        learning_rate = learning_rate,
+        seed = seed,
+        extra_data = wandb_extra_data or {},
+    )
+
+    wandb = None
+    if wandb_entity is not None:
+        os.environ["WANDB_SILENT"] = "true"
+        import wandb
+        wandb_run_id = wandb_run_id or wandb.util.generate_id()
+        wandb.init(
+            id=wandb_run_id,
+            project=wandb_project,
+            entity=wandb_entity,
+            config=run_config.__dict__,
+            sync_tensorboard=True,
+            name=exp_name,
+            monitor_gym=True,
+            save_code=True,
+            resume="allow",
+        )
 
     # Create policy pool
     policy_god = pufferlib.policy_god.PolicyGod(
@@ -144,27 +171,61 @@ def init(self: object = None,
     dones=torch.zeros(batch_size + 1).to(device)
     values=torch.zeros(batch_size + 1).to(device)
     storage_profiler.stop()
-    tensor_memory = pufferlib.utils.format_bytes(storage_profiler.memory)
-    tensor_pytorch_memory = pufferlib.utils.format_bytes(storage_profiler.pytorch_memory)
 
-    wandb = None
-    if wandb_entity is not None:
-        os.environ["WANDB_SILENT"] = "true"
-        import wandb
-        wandb_run_id = wandb_run_id or wandb.util.generate_id()
-        wandb.init(
-            id=wandb_run_id,
-            project=wandb_project,
-            entity=wandb_entity,
-            config=wandb_extra_data or {},
-            sync_tensorboard=True,
-            name=exp_name,
-            monitor_gym=True,
-            save_code=True,
-            resume="allow",
-        )
+    # Original CleanRL charts for comparison
+    charts = pufferlib.utils.namespace(
+        global_step = global_step,
+        SPS = 0,
+        learning_rate = learning_rate,
+        episodic_length = 0,
+        episodic_return = 0
+    ) 
+
+    losses = pufferlib.utils.namespace(
+        policy_loss = 0,
+        value_loss = 0,
+        entropy = 0,
+        old_approx_kl = 0,
+        approx_kl = 0,
+        clipfrac = 0,
+        explained_variance = 0
+    )
+
+    #"charts/actions": wandb.Histogram(b_actions.cpu().numpy()),
+    init_performance = pufferlib.utils.namespace(None,
+        init_time = time.time() - start_time,
+        init_env_time = init_profiler.elapsed,
+        init_env_memory = init_profiler.memory,
+        tensor_memory = storage_profiler.memory,
+        tensor_pytorch_memory = storage_profiler.pytorch_memory,
+    )
+ 
+    performance = pufferlib.utils.namespace(None,
+        total_uptime = 0,
+        total_updates = 0,
+        total_agent_steps = 0,
+        epoch_time = 0,
+        epoch_sps = 0,
+        evaluation_time = 0,
+        evaluation_sps = 0,
+        evaluation_memory = 0,
+        evaluation_pytorch_memory = 0,
+        env_time = 0,
+        env_sps = 0,
+        inference_time = 0,
+        inference_sps = 0,
+        train_time = 0,
+        train_sps = 0,
+        train_memory = 0,
+        train_pytorch_memory = 0,
+    )
 
     return pufferlib.utils.namespace(self,
+        charts = charts,
+        losses = losses,
+        init_performance = init_performance,
+        performance = performance,
+
         # Agent, Optimizer, and Environment
         agent = agent,
         optimizer = optimizer,
@@ -206,35 +267,23 @@ def init(self: object = None,
         # Logging
         wandb = wandb,
         wandb_entity = wandb_entity,
+        wandb_run_id = wandb_run_id,
         start_time = start_time,
         update = update,
         vectorization = vectorization,
-
-        # Dashboard
-        uptime = 0,
-        init_time = time.time() - start_time,
-        init_env_time = init_env_time,
-        init_env_memory = init_env_memory,
-        tensor_memory = tensor_memory,
-        tensor_pytorch_memory = tensor_pytorch_memory,
-        env_time = 0,
-        env_sps = 0,
-        inference_time = 0,
-        inference_sps = 0,
-        eval_time = 0,
-        eval_sps = 0,
-        eval_memory = 0,
-        eval_pytorch_memory = 0,
-        train_time = 0,
-        train_sps = 0,
-        train_memory = 0,
-        train_pytorch_memory = 0,
-        epoch_time = 0,
-        epoch_sps = 0,
     )
 
 @pufferlib.utils.profile
 def evaluate(data):
+    # TODO: Handle update on resume
+    if data.wandb is not None and data.update > 0:
+        data.wandb.log({
+            **{f'charts/{k}': v for k, v in data.charts.__dict__.items()},
+            **{f'losses/{k}': v for k, v in data.losses.__dict__.items()},
+            **{f'performance/{k}': v for k, v in data.performance.__dict__.items()},
+            **{f'stats/{k}': v for k, v in data.stats.items()},
+        })
+
     data.policy_god.update_policies()
     performance = defaultdict(list)
     env_profiler = pufferlib.utils.Profiler()
@@ -316,32 +365,26 @@ def evaluate(data):
     data.global_step += data.batch_size
     eval_profiler.stop()
 
-    data.uptime = timedelta(seconds=int(time.time() - data.start_time))
-    data.env_time = env_profiler.elapsed
-    data.env_sps = int(agent_steps_collected / env_profiler.elapsed)
-    data.inference_time = inference_profiler.elapsed
-    data.inference_sps = int(padded_steps_collected / inference_profiler.elapsed)
-    data.eval_time = eval_profiler.elapsed
-    data.eval_sps = int(padded_steps_collected / eval_profiler.elapsed)
-    data.eval_memory = pufferlib.utils.format_bytes(eval_profiler.end_mem)
-    data.eval_pytorch_memory = pufferlib.utils.format_bytes(eval_profiler.end_torch_mem)
-    data.stats = [f"{k}: {np.mean(v):.2f}" for k, v in stats['learner'].items()]
+    charts = data.charts
+    charts.reward = float(torch.mean(data.rewards))
+    charts.agent_steps = data.global_step
+    charts.SPS = int(padded_steps_collected / eval_profiler.elapsed)
+    charts.global_step = data.global_step
+
+    perf = data.performance
+    perf.uptime = int(time.time() - data.start_time)
+    perf.env_time = env_profiler.elapsed
+    perf.env_sps = int(agent_steps_collected / env_profiler.elapsed)
+    perf.inference_time = inference_profiler.elapsed
+    perf.inference_sps = int(padded_steps_collected / inference_profiler.elapsed)
+    perf.eval_time = eval_profiler.elapsed
+    perf.eval_sps = int(padded_steps_collected / eval_profiler.elapsed)
+    perf.eval_memory = eval_profiler.end_mem
+    perf.eval_pytorch_memory = eval_profiler.end_torch_mem
+    data.stats = {k: np.mean(v) for k, v in stats['learner'].items()}
 
     if data.verbose:
-        print_dashboard(data)
-
-    if data.wandb is not None:
-        data.wandb.log({
-            "performance/env_time": env_profiler.elapsed,
-            "performance/env_sps": data.env_sps,
-            "performance/inference_time": inference_profiler.elapsed,
-            "performance/inference_sps": data.inference_sps,
-            **{f"performance/env/{k}": np.mean(v) for k, v in performance.items()},
-            **{f"charts/{k}": np.mean(v) for k, v in stats['learner'].items()},
-            "charts/reward": float(torch.mean(data.rewards)),
-            "agent_steps": data.global_step,
-            "global_step": data.global_step,
-        })
+        print_dashboard(data.init_performance, data.performance)
 
     return stats, infos
 
@@ -498,55 +541,57 @@ def train(
     explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
     data.update += 1
 
-    # TIMING: performance metrics to evaluate cpu/gpu usage
-    data.train_time = time.time() - train_time
-    data.train_sps = int(data.batch_size / data.train_time)
-    data.train_memory = pufferlib.utils.format_bytes(train_profiler.end_mem)
-    data.train_pytorch_memory = pufferlib.utils.format_bytes(train_profiler.end_torch_mem)
-    data.epoch_time = data.eval_time + data.train_time
-    data.epoch_sps = int(data.batch_size / data.epoch_time)
+    charts = data.charts
+    charts.learning_rate = data.optimizer.param_groups[0]["lr"]
+
+    losses = data.losses
+    losses.policy_loss = np.mean(pg_losses)
+    losses.value_loss = np.mean(v_losses)
+    losses.entropy = np.mean(entropy_losses)
+    losses.old_approx_kl = np.mean(old_kls)
+    losses.approx_kl = np.mean(kls)
+    losses.clipfrac = np.mean(clipfracs)
+    losses.explained_variance = explained_var
+
+    perf = data.performance
+    perf.train_time = time.time() - train_time
+    perf.train_sps = int(data.batch_size / perf.train_time)
+    perf.train_memory = train_profiler.end_mem
+    perf.train_pytorch_memory = train_profiler.end_torch_mem
+    perf.epoch_time = perf.eval_time + perf.train_time
+    perf.epoch_sps = int(data.batch_size / perf.epoch_time)
 
     if data.verbose:
-        print_dashboard(data)
+        print_dashboard(data.init_performance, data.performance)
 
-    # TRY NOT TO MODIFY: record rewards for plotting purposes
-    if data.wandb is not None:
-        data.wandb.log({
-            "performance/train_sps": data.train_sps,
-            "performance/train_time": data.train_time,
-            "charts/learning_rate": data.optimizer.param_groups[0]["lr"],
-            #"charts/actions": wandb.Histogram(b_actions.cpu().numpy()),
-            "losses/policy_loss": np.mean(pg_losses),
-            "losses/value_loss": np.mean(v_losses),
-            "losses/entropy": np.mean(entropy_losses),
-            "losses/old_approx_kl": np.mean(old_kls),
-            "losses/approx_kl": np.mean(kls),
-            "losses/clipfrac": np.mean(clipfracs),
-            "losses/explained_variance": explained_var,
-            "agent_steps": data.global_step,
-            "global_step": data.global_step,
-        })
-
-    torch.save(data.agent, "agent.pt")
-    if data.update % data.checkpoint_interval == 1 or done_training(data):
-       data._save_checkpoint()
+    if data.update % data.checkpoint_interval == 0 or done_training(data):
+       save_checkpoint(data)
 
 def close(data):
     for envs in data.buffers:
         envs.close()
 
-    if data.wandb_entity:
-        wandb.finish()
+    if data.wandb is not None:
+        policy_name = f"{data.exp_name}.{data.update:06d}"
+        artifact_name = f'{data.exp_name}-{data.wandb_run_id}'
+        artifact = data.wandb.Artifact(artifact_name, type="model")
+        model_path = os.path.join(data.data_dir, f"{policy_name}.pt")
+        artifact.add_file(model_path)
+        data.wandb.run.log_artifact(artifact)
+        data.wandb.finish()
 
 def done_training(data):
     return data.update >= data.total_updates
 
 def save_checkpoint(data):
     policy_name = f"{data.exp_name}.{data.update:06d}"
+    model_path = os.path.join(data.data_dir, f"{policy_name}.pt")
+    torch.save(data.agent, model_path)
+
     state = {
         "optimizer_state_dict": data.optimizer.state_dict(),
         "global_step": data.global_step,
-        "agent_step": data.agent_step,
+        "agent_step": data.global_step,
         "update": data.update,
         "learning_rate": data.learning_rate,
         "policy_checkpoint_name": policy_name,
@@ -557,13 +602,7 @@ def save_checkpoint(data):
     torch.save(state, tmp_path)
     os.rename(tmp_path, path)
 
-    # NOTE: as the agent_creator has args internally, the policy args are not passed
-    data.policy_store.add_policy(policy_name, data.agent)
-
-    if data.policy_ranker:
-        data.policy_ranker.add_policy_copy(
-            policy_name, data.policy_pool._learner_name
-        )
+    data.policy_god.add_policy(policy_name, data.agent)
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)
@@ -635,6 +674,22 @@ def print_dashboard(data):
     print(f"  Steps Per Second: {data.train_sps}")
     print(f"  Memory: {data.train_memory}")
     print(f"  PyTorch Memory: {data.train_pytorch_memory}")
+
+def print_dashboard(init_performance, performance):
+    print("\033c", end="")
+    data = {**init_performance.__dict__, **performance.__dict__}
+    for k, v in data.items():
+        if k == 'uptime':
+            v = timedelta(seconds=v)
+        if 'memory' in k:
+            v = pufferlib.utils.format_bytes(v)
+        elif 'time' in k:
+            try:
+                v = f"{v:.2f} s"
+            except:
+                pass
+        k = k.replace('_', ' ').title()
+        print(f"{k}: {v}")
 
 class CleanPuffeRL:
     __init__ = init

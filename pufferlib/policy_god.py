@@ -87,6 +87,11 @@ class PolicyGod:
           )
           self.policy_pool.scores = {}
 
+    def add_policy(self, name, policy):
+        self.policy_store.add_policy(name, policy)
+        if self.policy_ranker is not None:
+            self.policy_ranker.add_policy_copy(
+                name, self.policy_pool._learner_name)
 
     def update_policies(self):
         self.policy_pool.update_policies({
