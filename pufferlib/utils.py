@@ -11,13 +11,15 @@ import sys
 import pickle
 import subprocess
 from filelock import FileLock
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from io import StringIO
+import psutil
 
 import inspect
 
 import pettingzoo
 import gym
+
 
 def namespace(self, **kwargs):
     '''Make a struct with the provided keyword arguments
@@ -178,42 +180,91 @@ class RandomState:
     def choice(self, ary):
         return self.sample(ary, 1)[0]
 
+def format_bytes(size):
+    if size >= 1024 ** 4:
+        return f'{size / (1024 ** 4):.2f} TB'
+    elif size >= 1024 ** 3:
+        return f'{size / (1024 ** 3):.2f} GB'
+    elif size >= 1024 ** 2:
+        return f'{size / (1024 ** 2):.2f} MB'
+    elif size >= 1024:
+        return f'{size / 1024:.2f} KB'
+    else:
+        return f'{size} B'
 
 class Profiler:
-    def __init__(self):
-        self.elapsed = 0
-        self.calls = 0
+    def __init__(self, elapsed=True, calls=True, memory=False, pytorch_memory=False):
+        self.elapsed = 0 if elapsed else None
+        self.calls = 0 if calls else None
+        self.memory = None
+        self.pytorch_memory = None
         self.prev = 0
+        
+        self.track_elapsed = elapsed
+        self.track_calls = calls
+        self.track_memory = memory
+        self.track_pytorch_memory = pytorch_memory
+        
+        if memory:
+            self.process = psutil.Process()
+
+        if pytorch_memory:
+            import torch
+            self.torch = torch
 
     @property
     def serial(self):
         return {
             'elapsed': self.elapsed,
             'calls': self.calls,
-            'delta': self.delta,
+            'memory': self.memory,
+            'pytorch_memory': self.pytorch_memory,
+            'delta': self.delta
         }
 
     @property
     def delta(self):
-        ret = self.elapsed - self.prev
+        ret = self.elapsed - self.prev if self.elapsed is not None else None
         self.prev = self.elapsed
         return ret
 
-    def tik(self):
-        self.start = time.perf_counter()
-
-    def tok(self):
-        self.elapsed += time.perf_counter() - self.start
-        self.calls += 1
-
     def __enter__(self):
-        self.start = time.perf_counter()
+        if self.track_elapsed:
+            self.start_time = time.perf_counter()
+        if self.track_memory:
+            self.start_mem = self.process.memory_info().rss
+        if self.track_pytorch_memory:
+            self.start_torch_mem = self.torch.cuda.memory_allocated()
         return self
 
     def __exit__(self, *args):
-        self.end = time.perf_counter()
-        self.elapsed += self.end - self.start
-        self.calls += 1
+        if self.track_elapsed:
+            self.end_time = time.perf_counter()
+            self.elapsed += self.end_time - self.start_time
+        if self.track_calls:
+            self.calls += 1
+        if self.track_memory:
+            self.end_mem = self.process.memory_info().rss
+            self.memory = self.end_mem - self.start_mem
+        if self.track_pytorch_memory:
+            self.end_torch_mem = self.torch.cuda.memory_allocated()
+            self.pytorch_memory = self.end_torch_mem - self.start_torch_mem
+
+    def __repr__(self):
+        parts = []
+        if self.track_elapsed:
+            parts.append(f'Elapsed: {self.elapsed:.4f} s')
+        if self.track_calls:
+            parts.append(f'Calls: {self.calls}')
+        if self.track_memory:
+            parts.append(f'Memory: {format_bytes(self.memory)}')
+        if self.track_pytorch_memory:
+            parts.append(f'PyTorch Memory: {format_bytes(self.pytorch_memory)}')
+        return ", ".join(parts)
+
+    # Aliases for use without context manager
+    start = __enter__
+    stop = __exit__
 
 def profile(func):
     name = func.__name__

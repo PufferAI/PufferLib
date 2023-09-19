@@ -47,7 +47,6 @@ def train_model(config, env_creator):
         // config.cleanrl_init.batch_size)
 
     for update in range(num_updates):
-        print("Evaluating...", update)
         trainer.evaluate()
         trainer.train(**config.cleanrl_train.dict())
 
