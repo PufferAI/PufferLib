@@ -21,6 +21,7 @@ import pufferlib.frameworks.cleanrl
 import pufferlib.policy_god
 
 
+@pufferlib.namespace
 class Performance:
     total_uptime = 0
     total_updates = 0
@@ -40,6 +41,7 @@ class Performance:
     train_memory = 0
     train_pytorch_memory = 0
 
+@pufferlib.namespace
 class Losses:
     policy_loss = 0
     value_loss = 0
@@ -49,6 +51,7 @@ class Losses:
     clipfrac = 0
     explained_variance = 0
 
+@pufferlib.namespace
 class Charts:
     global_step = 0
     SPS = 0
