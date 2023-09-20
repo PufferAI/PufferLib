@@ -41,6 +41,7 @@ class CleanRLInit:
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     wandb_entity: str = 'jsuarez' 
     wandb_project: str = 'pufferlib'
+    wandb_group='debug'
 
 @struct
 class CleanRLTrain:

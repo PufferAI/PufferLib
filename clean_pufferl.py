@@ -21,6 +21,41 @@ import pufferlib.frameworks.cleanrl
 import pufferlib.policy_god
 
 
+class Performance:
+    total_uptime = 0
+    total_updates = 0
+    total_agent_steps = 0
+    epoch_time = 0
+    epoch_sps = 0
+    evaluation_time = 0
+    evaluation_sps = 0
+    evaluation_memory = 0
+    evaluation_pytorch_memory = 0
+    env_time = 0
+    env_sps = 0
+    inference_time = 0
+    inference_sps = 0
+    train_time = 0
+    train_sps = 0
+    train_memory = 0
+    train_pytorch_memory = 0
+
+class Losses:
+    policy_loss = 0
+    value_loss = 0
+    entropy = 0
+    old_approx_kl = 0
+    approx_kl = 0
+    clipfrac = 0
+    explained_variance = 0
+
+class Charts:
+    global_step = 0
+    SPS = 0
+    learning_rate = 0
+    episodic_length = 0
+    episodic_return = 0
+
 def init(self: object = None, 
         # Agent
         agent: nn.Module = None,
@@ -57,9 +92,11 @@ def init(self: object = None,
         policy_selector: pufferlib.policy_ranker.PolicySelector = None,
 
         # Wandb
+        wandb: object = None,
         wandb_entity: str = None,
         wandb_project: str = None,
         wandb_extra_data: dict = None,
+        wandb_group: str = 'debug',
 
         # Selfplay
         pool_learner_weight: float = 1.0,
@@ -122,23 +159,9 @@ def init(self: object = None,
         seed = seed,
         extra_data = wandb_extra_data or {},
     )
-
-    wandb = None
+    
     if wandb_entity is not None:
-        os.environ["WANDB_SILENT"] = "true"
         import wandb
-        wandb_run_id = wandb_run_id or wandb.util.generate_id()
-        wandb.init(
-            id=wandb_run_id,
-            project=wandb_project,
-            entity=wandb_entity,
-            config=run_config.__dict__,
-            sync_tensorboard=True,
-            name=exp_name,
-            monitor_gym=True,
-            save_code=True,
-            resume="allow",
-        )
 
     # Create policy pool
     policy_god = pufferlib.policy_god.PolicyGod(
@@ -149,11 +172,10 @@ def init(self: object = None,
 
     # Allocate Storage
     storage_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True).start()
-    next_obs, next_done, next_lstm_state = [], [], []
+    next_done, next_lstm_state = [], []
     for i, envs in enumerate(buffers):
         envs.async_reset(seed + i)
         next_done.append(torch.zeros(total_agents).to(device))
-        next_obs.append([])
         if not agent.is_recurrent:
             next_lstm_state.append(None)
         else:
@@ -173,26 +195,14 @@ def init(self: object = None,
     storage_profiler.stop()
 
     # Original CleanRL charts for comparison
-    charts = pufferlib.utils.namespace(
-        global_step = global_step,
-        SPS = 0,
-        learning_rate = learning_rate,
-        episodic_length = 0,
-        episodic_return = 0
-    ) 
+    charts = Charts()
+    charts.global_step = global_step
+    charts.learning_rate = learning_rate
 
-    losses = pufferlib.utils.namespace(
-        policy_loss = 0,
-        value_loss = 0,
-        entropy = 0,
-        old_approx_kl = 0,
-        approx_kl = 0,
-        clipfrac = 0,
-        explained_variance = 0
-    )
+    losses = Losses()
 
     #"charts/actions": wandb.Histogram(b_actions.cpu().numpy()),
-    init_performance = pufferlib.utils.namespace(None,
+    init_performance = pufferlib.utils.namespace(
         init_time = time.time() - start_time,
         init_env_time = init_profiler.elapsed,
         init_env_memory = init_profiler.memory,
@@ -200,25 +210,7 @@ def init(self: object = None,
         tensor_pytorch_memory = storage_profiler.pytorch_memory,
     )
  
-    performance = pufferlib.utils.namespace(None,
-        total_uptime = 0,
-        total_updates = 0,
-        total_agent_steps = 0,
-        epoch_time = 0,
-        epoch_sps = 0,
-        evaluation_time = 0,
-        evaluation_sps = 0,
-        evaluation_memory = 0,
-        evaluation_pytorch_memory = 0,
-        env_time = 0,
-        env_sps = 0,
-        inference_time = 0,
-        inference_sps = 0,
-        train_time = 0,
-        train_sps = 0,
-        train_memory = 0,
-        train_pytorch_memory = 0,
-    )
+    performance = Performance()
 
     return pufferlib.utils.namespace(self,
         charts = charts,
@@ -245,7 +237,6 @@ def init(self: object = None,
 
         # Storage
         sort_keys = [],
-        next_obs = next_obs,
         next_done = next_done,
         next_lstm_state = next_lstm_state,
         obs = obs,
@@ -276,7 +267,7 @@ def init(self: object = None,
 @pufferlib.utils.profile
 def evaluate(data):
     # TODO: Handle update on resume
-    if data.wandb is not None and data.update > 0:
+    if data.wandb is not None and data.performance.total_uptime > 0:
         data.wandb.log({
             **{f'charts/{k}': v for k, v in data.charts.__dict__.items()},
             **{f'losses/{k}': v for k, v in data.losses.__dict__.items()},
@@ -372,7 +363,7 @@ def evaluate(data):
     charts.global_step = data.global_step
 
     perf = data.performance
-    perf.uptime = int(time.time() - data.start_time)
+    perf.total_uptime = int(time.time() - data.start_time)
     perf.env_time = env_profiler.elapsed
     perf.env_sps = int(agent_steps_collected / env_profiler.elapsed)
     perf.inference_time = inference_profiler.elapsed
@@ -622,64 +613,14 @@ def unroll_nested_dict(d):
         else:
             yield k, v
 
-def print_dashboard(data):
-    # Clear the previous lines
-    print("\033c", end="")
-
-    print('Clean PufferRL Dashboard\n')
-
-    print(f"Initialization")
-    print(f'  Time: {data.init_time:.2f} s')
-    print("")
-    print('  Environments')
-    print(f'    Time: {data.init_env_time:.2f} s')
-    if data.vectorization == pufferlib.vectorization.Serial:
-        print(f'    Memory: {data.init_env_memory}')
-    print("")
-    print('  Tensor Storage')
-    print(f'    Memory: {data.tensor_memory}')
-    print(f'    PyTorch Memory: {data.tensor_pytorch_memory}')
-    print("")
-
-    print(f"Log Metrics")
-    for stat in data.stats:
-        print(f"  {stat}")
-    print("")
-
-    print(f"Summary")
-    print(f"  Uptime: {data.uptime}")
-    print(f"  Updates: {data.update}")
-    print(f"  Agent Steps: {data.global_step}")
-    print(f'  Epoch Time: {data.epoch_time:.2f} s')
-    print(f'  Epoch SPS: {data.epoch_sps}')
-    print("")
-
-    print(f"Evaluation")
-    print(f"  Time: {data.eval_time:.2f} s")
-    print(f"  Steps Per Second: {data.eval_sps}")
-    print(f"  Memory: {data.eval_memory}")
-    print(f"  PyTorch Memory: {data.eval_pytorch_memory}")
-    print("")
-    print(f"  Environment")
-    print(f"    Time: {data.env_time:.2f} s")
-    print(f"    Steps Per Second: {data.env_sps}")
-    print("")
-    print(f"  Inference")
-    print(f"    Time: {data.inference_time:.2f} s")
-    print(f"    Steps Per Second: {data.inference_sps}")
-    print("")
-
-    print(f"Training")
-    print(f"  Time: {data.train_time:.2f} s")
-    print(f"  Steps Per Second: {data.train_sps}")
-    print(f"  Memory: {data.train_memory}")
-    print(f"  PyTorch Memory: {data.train_pytorch_memory}")
-
 def print_dashboard(init_performance, performance):
-    print("\033c", end="")
+    output = []
     data = {**init_performance.__dict__, **performance.__dict__}
+    
+    grouped_data = defaultdict(dict)
+    
     for k, v in data.items():
-        if k == 'uptime':
+        if k == 'total_uptime':
             v = timedelta(seconds=v)
         if 'memory' in k:
             v = pufferlib.utils.format_bytes(v)
@@ -688,8 +629,19 @@ def print_dashboard(init_performance, performance):
                 v = f"{v:.2f} s"
             except:
                 pass
-        k = k.replace('_', ' ').title()
-        print(f"{k}: {v}")
+        
+        first_word, *rest_words = k.split('_')
+        rest_words = ' '.join(rest_words).title()
+        
+        grouped_data[first_word][rest_words] = v
+    
+    for main_key, sub_dict in grouped_data.items():
+        output.append(f"{main_key.title()}")
+        for sub_key, sub_value in sub_dict.items():
+            output.append(f"    {sub_key}: {sub_value}")
+    
+    print("\033c", end="")
+    print('\n'.join(output))
 
 class CleanPuffeRL:
     __init__ = init

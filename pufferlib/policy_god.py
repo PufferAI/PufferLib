@@ -37,9 +37,13 @@ class PolicyGod:
 
         # Setup agent
         if "policy_checkpoint_name" in resume_state:
-          agent = self.policy_store.get_policy(
-            resume_state["policy_checkpoint_name"]
-          ).policy(policy_args=[envs])
+          try:
+              agent = self.policy_store.get_policy(
+                resume_state["policy_checkpoint_name"]
+              ).policy(policy_args=[envs])
+          except:
+              print('Failed to load policy checkpoint: ',
+                resume_state["policy_checkpoint_name"])
 
         # TODO: this can be cleaned up
         agent.is_recurrent = hasattr(agent, "lstm")
