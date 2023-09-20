@@ -50,7 +50,7 @@ def train_model(config, env_creator):
         agent_kwargs={'config': config},
         env_creator=env_creator,
         env_creator_kwargs=env_creator_kwargs,
-        **config.cleanrl_init.dict(),
+        **config.cleanrl_init,
     )
 
     #trainer.load_model(path)
@@ -60,7 +60,7 @@ def train_model(config, env_creator):
 
     for update in range(num_updates):
         trainer.evaluate()
-        trainer.train(**config.cleanrl_train.dict())
+        trainer.train(**config.cleanrl_train)
 
     trainer.close()
 

@@ -7,27 +7,7 @@ import pufferlib.pytorch
 
 import torch
 
-def struct(frozen=True, **kwargs):
-    '''A default frozen dataclass with a .dict() method'''
-    def wrapper(cls):
-        cls = dataclass(cls, **kwargs)
-        cls.dict = lambda self: {field.name: getattr(self, field.name) for field in fields(cls)}
-        return cls
-    return wrapper
-
-def struct(cls_or_kwargs=None, **kwargs):
-    # If called with arguments, return a decorator function
-    if cls_or_kwargs is None or isinstance(cls_or_kwargs, dict):
-        kwargs.update(cls_or_kwargs or {})
-        return lambda cls: struct(cls, **kwargs)
-    
-    # If called without arguments, modify the class and return it
-    cls = cls_or_kwargs
-    cls = dataclass(cls, **kwargs)
-    cls.dict = lambda self: {field.name: getattr(self, field.name) for field in fields(cls)}
-    return cls
-
-@struct()
+@pufferlib.namespace
 class CleanRLInit:
     vectorization: ... = pufferlib.vectorization.Serial
     #vectorization: ... = pufferlib.vectorization.Multiprocessing
@@ -43,22 +23,22 @@ class CleanRLInit:
     wandb_project: str = 'pufferlib'
     wandb_group='debug'
 
-@struct
+@pufferlib.namespace
 class CleanRLTrain:
     batch_rows: int = 32
     bptt_horizon: int = 8
 
-@struct
+@pufferlib.namespace
 class Policy:
     pass
 
-@struct
+@pufferlib.namespace
 class Recurrent:
     input_size = 128
     hidden_size = 128
     num_layers = 1
 
-@struct
+@pufferlib.namespace
 class Config:
     cleanrl_init: ... = CleanRLInit()
     cleanrl_train: ... = CleanRLTrain()

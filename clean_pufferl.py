@@ -146,7 +146,7 @@ def init(self: object = None,
     agent_step = resume_state.get("agent_step", 0)
     update = resume_state.get("update", 0)
 
-    run_config = pufferlib.utils.namespace(
+    run_config = pufferlib.namespace(
         #agent_kwargs = agent_kwargs,
         env_kwargs = env_creator_kwargs,
         vectorization = vectorization.__name__,
@@ -202,7 +202,7 @@ def init(self: object = None,
     losses = Losses()
 
     #"charts/actions": wandb.Histogram(b_actions.cpu().numpy()),
-    init_performance = pufferlib.utils.namespace(
+    init_performance = pufferlib.namespace(
         init_time = time.time() - start_time,
         init_env_time = init_profiler.elapsed,
         init_env_memory = init_profiler.memory,
@@ -211,8 +211,7 @@ def init(self: object = None,
     )
  
     performance = Performance()
-
-    return pufferlib.utils.namespace(self,
+    return pufferlib.namespace(self,
         charts = charts,
         losses = losses,
         init_performance = init_performance,

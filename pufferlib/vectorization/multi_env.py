@@ -1,4 +1,4 @@
-from pufferlib.utils import namespace
+from pufferlib import namespace
 
 
 def create_precheck(env_creator, env_args, env_kwargs):

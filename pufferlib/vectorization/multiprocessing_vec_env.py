@@ -1,6 +1,6 @@
 from pdb import set_trace as T
 
-from pufferlib.utils import namespace
+from pufferlib import namespace
 from pufferlib.vectorization.vec_env import (
     RESET,
     setup,

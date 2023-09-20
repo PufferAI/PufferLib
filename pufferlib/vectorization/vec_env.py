@@ -3,7 +3,7 @@ from pdb import set_trace as T
 import numpy as np
 from itertools import chain
 
-from pufferlib.utils import namespace
+from pufferlib import namespace
 from pufferlib.emulation import GymPufferEnv, PettingZooPufferEnv
 from pufferlib.vectorization.multi_env import create_precheck
 from pufferlib.vectorization.gym_multi_env import GymMultiEnv
