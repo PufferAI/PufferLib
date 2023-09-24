@@ -1,0 +1,44 @@
+import pufferlib
+
+def try_import(package_name):
+    try:
+       package = __import__(package_name)
+    except ImportError as e:
+        e.args = (
+            f'{e.args[0]}\n\n'
+            'This is probably an installation error. Try: '
+            'pip install pufferlib[{package}]. '
+
+            'Note that some environments have non-python dependencies. '
+            'These are included in PufferTank. Or, you can install '
+            'manually by following the instructions provided by the '
+            'environment meaintainers. But some are finicky, so we '
+            'recommend using PufferTank.'
+        ,)
+        raise e
+    return package
+
+@pufferlib.dataclass
+class EnvArgs:
+    pass
+
+@pufferlib.dataclass
+class DefaultPolicyArgs:
+    input_size: int = 128
+    hidden_size: int = 128
+
+@pufferlib.dataclass
+class ConvolutionalPolicyArgs:
+    framestack: int = 1
+    flat_size: int = 7*7*64
+    input_size: int = 512
+    hidden_size: int = 512
+    output_size: int = 512
+    channels_last: bool = False
+    downsample: int = 1
+
+@pufferlib.dataclass
+class RecurrentArgs:
+    input_size: int = 128
+    hidden_size: int = 128
+    num_layers: int = 1

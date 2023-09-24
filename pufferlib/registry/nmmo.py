@@ -1,50 +1,56 @@
 from pdb import set_trace as T
+import numpy as np
 
 import gym
 
-import numpy as np
 import torch
 import torch.nn.functional as F
-
 
 import pufferlib
 import pufferlib.emulation
 import pufferlib.models
 import pufferlib.exceptions
+from pufferlib.registry import try_import, EnvArgs, EnvArgs
 
+
+nmmo = try_import('nmmo')
 from nmmo.entity.entity import EntityState
 
+RECURRENCE_RECOMMENDED = False
 
-NUM_ATTRS = 34
-EntityId = EntityState.State.attr_name_to_col["id"]
-tile_offset = torch.tensor([i*256 for i in range(3)])
-entity_offset = torch.tensor([i*256 for i in range(3, 34)])
-
+env_creator = nmmo.Env
 
 def make_env(*args, **kwargs):
     '''Neural MMO creation function'''
-    try:
-        import nmmo
-    except:
-        raise pufferlib.utils.SetupError('Neural MMO (nmmo)')
-    else:
-        return pufferlib.emulation.PettingZooPufferEnv(
-            env_creator=nmmo.Env,
-            env_args=args,
-            env_kwargs=kwargs,
-        )
+    env = env_creator(*args, **kwargs)
+    return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
+@pufferlib.dataclass
+class PolicyArgs:
+    input_size: int = 256
+    hidden_size: int = 256
+    output_size: int = 256
+
+@pufferlib.dataclass
+class RecurrentArgs:
+    input_size: int = 256
+    hidden_size: int = 256
+    num_layers: int = 1
 
 class Policy(pufferlib.models.Policy):
+  NUM_ATTRS = 34
+  EntityId = EntityState.State.attr_name_to_col["id"]
+  tile_offset = torch.tensor([i*256 for i in range(3)])
+  entity_offset = torch.tensor([i*256 for i in range(3, 34)])
+
   def __init__(self, env, input_size=256, hidden_size=256, output_size=256):
       super().__init__(env)
 
       self.flat_observation_space = env.flat_observation_space
       self.flat_observation_structure = env.flat_observation_structure
 
-
       # A dumb example encoder that applies a linear layer to agent self features
-      self.embedding = torch.nn.Embedding(NUM_ATTRS*256, 32)
+      self.embedding = torch.nn.Embedding(self.NUM_ATTRS*256, 32)
       self.tile_conv_1 = torch.nn.Conv2d(96, 32, 3)
       self.tile_conv_2 = torch.nn.Conv2d(32, 8, 3)
       self.tile_fc = torch.nn.Linear(8*11*11, input_size)
@@ -67,7 +73,7 @@ class Policy(pufferlib.models.Policy):
     tile[:, :, :2] -= tile[:, 112:113, :2].clone() 
     tile[:, :, :2] += 7
     tile = self.embedding(
-        tile.long().clip(0, 255) + tile_offset.to(tile.device)
+        tile.long().clip(0, 255) + self.tile_offset.to(tile.device)
     )
 
     agents, tiles, features, embed = tile.shape
@@ -84,14 +90,14 @@ class Policy(pufferlib.models.Policy):
     # Pull out rows corresponding to the agent
     agentEmb = env_outputs["Entity"]
     my_id = env_outputs["AgentId"][:,0]
-    entity_ids = agentEmb[:,:,EntityId]
+    entity_ids = agentEmb[:,:,self.EntityId]
     mask = (entity_ids == my_id.unsqueeze(1)) & (entity_ids != 0)
     mask = mask.int()
     row_indices = torch.where(mask.any(dim=1), mask.argmax(dim=1), torch.zeros_like(mask.sum(dim=1)))
     entity = agentEmb[torch.arange(agentEmb.shape[0]), row_indices]
 
     entity = self.embedding(
-        entity.long().clip(0, 255) + entity_offset.to(entity.device)
+        entity.long().clip(0, 255) + self.entity_offset.to(entity.device)
     )
     agents, attrs, embed = entity.shape
     entity = entity.view(agents, attrs*embed)

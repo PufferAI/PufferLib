@@ -11,9 +11,25 @@ import pufferlib
 import pufferlib.emulation
 import pufferlib.exceptions
 import pufferlib.models
+from pufferlib.registry import RecurrentArgs
 
+
+RECURRENCE_RECOMMENDED = False
+
+@pufferlib.dataclass
+class EnvArgs:
+    name: str = 'BreakoutNoFrameskip-v4'
+    framestack: int = 4
 
 Policy = pufferlib.models.Convolutional
+
+@pufferlib.dataclass
+class PolicyArgs:
+    input_size: int = 512
+    hidden_size: int = 512
+    output_size: int = 512
+    framestack: int = 4
+    flat_size: int = 64*7*7
 
 # Broken in SB3
 class NoopResetEnv(gym.Wrapper):
@@ -84,7 +100,7 @@ class AtariFeaturizer(pufferlib.emulation.Postprocessor):
         return reward, done, info
 
 
-def make_env(name, framestack):
+def env_creator(name, framestack):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
     try:
         from stable_baselines3.common.atari_wrappers import (
@@ -108,6 +124,9 @@ def make_env(name, framestack):
     env = gym.wrappers.ResizeObservation(env, (84, 84))
     env = gym.wrappers.GrayScaleObservation(env)
     env = gym.wrappers.FrameStack(env, framestack)
-    env = pufferlib.emulation.GymPufferEnv(
-        env=env, postprocessor_cls=AtariFeaturizer)
     return env
+ 
+def make_env(name, framestack):
+    env = env_creator(name, framestack)
+    return pufferlib.emulation.GymPufferEnv(
+        env=env, postprocessor_cls=AtariFeaturizer)

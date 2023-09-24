@@ -3,6 +3,10 @@ import argparse
 import sys
 import time
 import os
+import importlib
+from collections import defaultdict
+
+import torch
 
 import pufferlib
 
@@ -12,22 +16,67 @@ from clean_pufferl import CleanPuffeRL
 import pufferlib.utils
 import pufferlib.models
 
-def make_policy(envs, config):
-    policy = config.policy_cls(envs.driver_env, **config.policy_kwargs)
-    if config.recurrent_cls is not None:
+import config
+
+
+def make_config(env):
+    try:
+        env_module = importlib.import_module(f'pufferlib.registry.{env}')
+    except:
+        pufferlib.utils.install_requirements(env)
+        env_module = importlib.import_module(f'pufferlib.registry.{env}')
+
+    cleanrl_init, cleanrl_train = getattr(config, env)()
+
+    return env_module, pufferlib.namespace(
+        cleanrl_init = cleanrl_init,
+        cleanrl_train = cleanrl_train,
+        env_kwargs = env_module.EnvArgs(),
+        policy_kwargs = env_module.PolicyArgs(),
+        recurrent_kwargs = env_module.RecurrentArgs(),
+   )
+ 
+def make_policy(envs, env_module, args):
+    policy = env_module.Policy(envs.driver_env, **args.policy_kwargs)
+    recurrent = args.force_recurrence or env_module.RECURRENCE_RECOMMENDED
+
+    if args.force_recurrence or env_module.RECURRENCE_RECOMMENDED:
         policy = pufferlib.models.RecurrentWrapper(
-            envs, policy, **config.recurrent_kwargs)
+            envs, policy, **args.recurrent_kwargs)
         policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)
     else:
         policy = pufferlib.frameworks.cleanrl.Policy(policy)
-    policy = policy.to(config.cleanrl_init.device)
-    return policy
 
-def sweep_model(config, env_creator):
+    return policy.to(args.cleanrl_init['device'])
+
+
+def init_wandb(args, env_module):
+    os.environ["WANDB_SILENT"] = "true"
+    import wandb
+    wandb.init(
+        id=args.run_id or wandb.util.generate_id(),
+        project=args.wandb_project,
+        entity=args.wandb_entity,
+        group=args.wandb_group,
+        config={
+            'env': args.env_kwargs,
+            'policy': args.policy_kwargs,
+            'recurrent': args.recurrent_kwargs,
+            **args.cleanrl_init,
+            **args.cleanrl_train,
+        },
+        name=args.env,
+        monitor_gym=True,
+        save_code=True,
+        resume="allow",
+    )
+    return wandb.run.id
+
+def sweep(args, env_module):
     sweep_configuration = {
         "method": "random",
         "name": "sweep",
-        "metric": {"goal": "maximize", "name": "targets_hit"},
+        "metric": {"goal": "maximize", "name": "stats/targets_hit"},
         "parameters": {
             "learning_rate": {"max": 0.1, "min": 0.0001},
         },
@@ -37,39 +86,39 @@ def sweep_model(config, env_creator):
     sweep_id = wandb.sweep(sweep=sweep_configuration, project="pufferlib")
 
     def main():
-        config.cleanrl_init.learning_rate = wandb.config.learning_rate
-        train_model(config, env_creator)
+        args.run_id = init_wandb(args, env_module)
+        args.cleanrl_init['learning_rate'] = wandb.config.learning_rate
+        train(args, env_module)
 
-    wandb.agent(sweep_id, main)
+    wandb.agent(sweep_id, main, count=5)
 
-
-def train_model(config, env_creator):
-    env_creator_kwargs = config.env_creators[env_creator]
+def train(args, env_module):
     trainer = CleanPuffeRL(
         agent_creator=make_policy,
-        agent_kwargs={'config': config},
-        env_creator=env_creator,
-        env_creator_kwargs=env_creator_kwargs,
-        **config.cleanrl_init,
+        agent_kwargs={'env_module': env_module, 'args': args},
+        env_creator=env_module.make_env,
+        env_creator_kwargs=args.env_kwargs,
+        **args.cleanrl_init,
+        run_id=args.run_id,
+        track=args.track,
     )
 
-    #trainer.load_model(path)
-
-    num_updates = (config.cleanrl_init.total_timesteps 
-        // config.cleanrl_init.batch_size)
+    num_updates = (args.cleanrl_init['total_timesteps']
+        // args.cleanrl_init['batch_size'])
 
     for update in range(num_updates):
         trainer.evaluate()
-        trainer.train(**config.cleanrl_train)
+        trainer.train(**args.cleanrl_train)
 
     trainer.close()
 
-def evaluate_model(config, env_creator):
-    env_creator_kwargs = config.env_creators[env_creator]
+def evaluate(args, env_module):
+    env_creator = env_module.make_env
+    env_creator_kwargs = args.env_kwargs
     env = env_creator(**env_creator_kwargs)
 
     import torch
-    device = config.cleanrl_init.device
+    device = args.cleanrl_init['device']
     agent = torch.load('agent.pt').to(device)
 
     ob = env.reset()
@@ -88,38 +137,42 @@ def evaluate_model(config, env_creator):
             env.render()
             time.sleep(1)
 
-
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Parse environment argument")
+    parser = argparse.ArgumentParser(description="Parse environment argument", add_help=False)
     parser.add_argument("--env", type=str, default="nmmo", help="Environment name")
     parser.add_argument("--mode", type=str, default="train", help="train/eval/sweep")
-    parser.add_argument("--run-id", type=str, default="", help="Experiment name")
+    parser.add_argument("--run-id", type=str, default=None, help="Experiment name")
+    parser.add_argument('--wandb-entity', type=str, default='jsuarez', help='WandB entity')
+    parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
+    parser.add_argument('--wandb-group', type=str, default='debug', help='WandB group')
     parser.add_argument('--track', action='store_true', help='Track on WandB')
-    args = parser.parse_args()
-    assert args.mode in ('train', 'eval', 'sweep')
+    parser.add_argument('--force-recurrence', action='store_true', help='Force model to be recurrent, regardless of defaults')
 
-    import config as config_module
-    config = getattr(config_module, args.env)()
+    clean_parser = argparse.ArgumentParser(parents=[parser])
+    args = parser.parse_known_args()[0].__dict__
+    env = args['env']
 
-    if args.track:
-        os.environ["WANDB_SILENT"] = "true"
-        import wandb
-        wandb.init(
-            id=args.run_id or wandb.util.generate_id(),
-            project=config.cleanrl_init.wandb_project,
-            entity=config.cleanrl_init.wandb_entity,
-            group=config.cleanrl_init.wandb_group,
-            #config=run_config.__dict__,
-            name='clean pufferl',
-            monitor_gym=True,
-            save_code=True,
-            resume="allow",
-        )
+    env_module, cfg = make_config(env)
+    for name, sub_config in cfg.items():
+        args[name] = {}
+        for key, value in sub_config.items():
+            data_key = f'{name}.{key}'
+            cli_key = f'--{data_key}'.replace('_', '-')
+            parser.add_argument(cli_key, default=value)
+            clean_parser.add_argument(cli_key, default=value, metavar='', help=env)
+            args[name][key] = getattr(parser.parse_known_args()[0], data_key)
 
-    for env_creator in config.env_creators:
-        if args.mode == 'train':
-            train_model(config, env_creator)
-        elif args.mode == 'eval':
-            evaluate_model(config, env_creator)
-        elif args.mode == 'sweep':
-            sweep_model(config, env_creator)
+    clean_parser.parse_args(sys.argv[1:])
+    args = pufferlib.namespace(**args)
+
+    if args.mode == 'sweep':
+        args.track = True
+    elif args.track:
+        args.run_id = init_wandb(args, env_module)
+
+    if args.mode == 'train':
+        train(args, env_module)
+    elif args.mode == 'eval':
+        evaluate(args, env_module)
+    elif args.mode == 'sweep':
+        sweep(args, env_module)

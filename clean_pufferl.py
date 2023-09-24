@@ -5,6 +5,7 @@ import os
 import random
 import time
 import psutil
+import uuid
 
 from collections import defaultdict
 from datetime import timedelta
@@ -21,7 +22,7 @@ import pufferlib.frameworks.cleanrl
 import pufferlib.policy_god
 
 
-@pufferlib.namespace
+@pufferlib.dataclass
 class Performance:
     total_uptime = 0
     total_updates = 0
@@ -41,7 +42,7 @@ class Performance:
     train_memory = 0
     train_pytorch_memory = 0
 
-@pufferlib.namespace
+@pufferlib.dataclass
 class Losses:
     policy_loss = 0
     value_loss = 0
@@ -51,7 +52,7 @@ class Losses:
     clipfrac = 0
     explained_variance = 0
 
-@pufferlib.namespace
+@pufferlib.dataclass
 class Charts:
     global_step = 0
     SPS = 0
@@ -74,8 +75,9 @@ def init(self: object = None,
         num_envs: int = 8,
 
         # Experiment
+        run_id: str = None,
+        track: bool = False,
         verbose: bool = True,
-        exp_name: str = __name__,
         data_dir: str = 'experiments',
         checkpoint_interval: int = 1,
         total_timesteps: int = 10_000_000,
@@ -94,13 +96,6 @@ def init(self: object = None,
         policy_pool: pufferlib.policy_pool.PolicyPool = None,
         policy_selector: pufferlib.policy_ranker.PolicySelector = None,
 
-        # Wandb
-        wandb: object = None,
-        wandb_entity: str = None,
-        wandb_project: str = None,
-        wandb_extra_data: dict = None,
-        wandb_group: str = 'debug',
-
         # Selfplay
         pool_learner_weight: float = 1.0,
         pool_num_policies: int = 1,
@@ -111,6 +106,13 @@ def init(self: object = None,
     envs_per_worker = num_envs // num_cores
     obs_device = "cpu" if cpu_offload else device
     assert num_cores * envs_per_worker == num_envs
+
+    wandb = None
+    if track:
+        import wandb
+        assert run_id == wandb.run.id
+    elif run_id is None:
+        run_id = str(uuid.uuid4())[:8]
 
     # Create environments, agent, and optimizer
     init_profiler = pufferlib.utils.Profiler(memory=True)
@@ -132,45 +134,25 @@ def init(self: object = None,
 
     # If data_dir is provided, load the resume state
     resume_state = {}
-    path = os.path.join(data_dir, f"trainer.pt")
-    if os.path.exists(path):
-        resume_state = torch.load(path)
-        learning_rate = resume_state['learning_rate']
-        optimizer.param_groups[0]["lr"] = learning_rate
-        optimizer.load_state_dict(resume_state["optimizer_state_dict"])
-        for name in ("loss", "actions"):
-            path = os.path.join(data_dir, f"{name}.txt")
-            if os.path.exists(path):
-                os.remove(path)
-        print(f'Resumed from update {resume_state["update"]} '
-              f'with policy {resume_state["policy_checkpoint_name"]}')
-    wandb_run_id = resume_state.get("wandb_run_id", None)
+    if run_id is not None:
+        path = os.path.join(data_dir, run_id)
+        if os.path.exists(path):
+            trainer_path = os.path.join(path, 'trainer_state.pt')
+            resume_state = torch.load(trainer_path)
+            model_path = os.path.join(path, resume_state["model_name"])
+            optimizer.load_state_dict(resume_state["optimizer_state_dict"])
+            agent.load_state_dict(torch.load(model_path).state_dict())
+            print(f'Resumed from update {resume_state["update"]} '
+                  f'with policy {resume_state["policy_checkpoint_name"]}')
     global_step = resume_state.get("global_step", 0)
     agent_step = resume_state.get("agent_step", 0)
     update = resume_state.get("update", 0)
 
-    run_config = pufferlib.namespace(
-        #agent_kwargs = agent_kwargs,
-        env_kwargs = env_creator_kwargs,
-        vectorization = vectorization.__name__,
-        num_envs = num_envs,
-        num_cores = num_cores,
-        num_buffers = num_buffers,
-        batch_size = batch_size,
-        total_timesteps = total_timesteps,
-        learning_rate = learning_rate,
-        seed = seed,
-        extra_data = wandb_extra_data or {},
-    )
-    
-    if wandb_entity is not None:
-        import wandb
-
     # Create policy pool
     policy_god = pufferlib.policy_god.PolicyGod(
-        buffers[0], agent, data_dir, resume_state, device,
-        num_envs, num_agents, pool_learner_weight,
-        pool_num_policies)
+        buffers[0], agent, os.path.join(data_dir, run_id),
+        resume_state, device, num_envs, num_agents,
+        pool_learner_weight,pool_num_policies)
     agent = policy_god.agent
 
     # Allocate Storage
@@ -214,6 +196,7 @@ def init(self: object = None,
     )
  
     performance = Performance()
+
     return pufferlib.namespace(self,
         charts = charts,
         losses = losses,
@@ -228,8 +211,8 @@ def init(self: object = None,
         buf = 0,
 
         # Experiment
+        run_id = run_id,
         verbose = verbose,
-        exp_name = exp_name,
         data_dir = data_dir,
         checkpoint_interval = checkpoint_interval,
         total_updates = total_updates,
@@ -258,9 +241,8 @@ def init(self: object = None,
         obs_device = obs_device,
 
         # Logging
+        track = track,
         wandb = wandb,
-        wandb_entity = wandb_entity,
-        wandb_run_id = wandb_run_id,
         start_time = start_time,
         update = update,
         vectorization = vectorization,
@@ -269,7 +251,7 @@ def init(self: object = None,
 @pufferlib.utils.profile
 def evaluate(data):
     # TODO: Handle update on resume
-    if data.wandb is not None and data.performance.total_uptime > 0:
+    if data.track and data.performance.total_uptime > 0:
         data.wandb.log({
             **{f'charts/{k}': v for k, v in data.charts.__dict__.items()},
             **{f'losses/{k}': v for k, v in data.losses.__dict__.items()},
@@ -354,7 +336,7 @@ def evaluate(data):
             data.buffers[buf].send(actions.cpu().numpy())
         data.buf = (data.buf + 1) % data.num_buffers
 
-    data.policy_god.update_ranks(data.wandb_entity, data.global_step)
+    data.policy_god.update_ranks(data.global_step)
     data.global_step += data.batch_size
     eval_profiler.stop()
 
@@ -366,6 +348,7 @@ def evaluate(data):
 
     perf = data.performance
     perf.total_uptime = int(time.time() - data.start_time)
+    perf.total_agent_steps = data.global_step
     perf.env_time = env_profiler.elapsed
     perf.env_sps = int(agent_steps_collected / env_profiler.elapsed)
     perf.inference_time = inference_profiler.elapsed
@@ -377,7 +360,7 @@ def evaluate(data):
     data.stats = {k: np.mean(v) for k, v in stats['learner'].items()}
 
     if data.verbose:
-        print_dashboard(data.init_performance, data.performance)
+        print_dashboard(data.stats, data.init_performance, data.performance)
 
     return stats, infos
 
@@ -453,7 +436,7 @@ def train(
     train_time = time.time()
     pg_losses, entropy_losses, v_losses, clipfracs, old_kls, kls = [], [], [], [], [], []
     for epoch in range(update_epochs):
-        shape = (data.agent.lstm.num_layers, batch_rows, data.agent.lstm.hidden_size)
+        #shape = (data.agent.lstm.num_layers, batch_rows, data.agent.lstm.hidden_size)
         lstm_state = None
         for mb in range(num_minibatches):
             mb_obs = b_obs[mb].to(data.device)
@@ -547,6 +530,8 @@ def train(
     losses.explained_variance = explained_var
 
     perf = data.performance
+    perf.total_uptime = int(time.time() - data.start_time)
+    perf.total_updates = data.update
     perf.train_time = time.time() - train_time
     perf.train_sps = int(data.batch_size / perf.train_time)
     perf.train_memory = train_profiler.end_mem
@@ -555,7 +540,7 @@ def train(
     perf.epoch_sps = int(data.batch_size / perf.epoch_time)
 
     if data.verbose:
-        print_dashboard(data.init_performance, data.performance)
+        print_dashboard(data.stats, data.init_performance, data.performance)
 
     if data.update % data.checkpoint_interval == 0 or done_training(data):
        save_checkpoint(data)
@@ -564,11 +549,10 @@ def close(data):
     for envs in data.buffers:
         envs.close()
 
-    if data.wandb is not None:
-        policy_name = f"{data.exp_name}.{data.update:06d}"
-        artifact_name = f'{data.exp_name}-{data.wandb_run_id}'
+    if data.track:
+        artifact_name = f"{data.run_id}_model"
         artifact = data.wandb.Artifact(artifact_name, type="model")
-        model_path = os.path.join(data.data_dir, f"{policy_name}.pt")
+        model_path = save_checkpoint(data)
         artifact.add_file(model_path)
         data.wandb.run.log_artifact(artifact)
         data.wandb.finish()
@@ -577,8 +561,17 @@ def done_training(data):
     return data.update >= data.total_updates
 
 def save_checkpoint(data):
-    policy_name = f"{data.exp_name}.{data.update:06d}"
-    model_path = os.path.join(data.data_dir, f"{policy_name}.pt")
+    path = os.path.join(data.data_dir, data.run_id)
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    model_name = f'model_{data.update:06d}.pt'
+    model_path = os.path.join(path, model_name)
+
+    # Already saved
+    if os.path.exists(model_path):
+        return model_path
+
     torch.save(data.agent, model_path)
 
     state = {
@@ -586,16 +579,14 @@ def save_checkpoint(data):
         "global_step": data.global_step,
         "agent_step": data.global_step,
         "update": data.update,
-        "learning_rate": data.learning_rate,
-        "policy_checkpoint_name": policy_name,
-        "wandb_run_id": data.wandb_run_id,
+        "model_name": model_name,
     }
-    path = os.path.join(data.data_dir, f"trainer.pt")
-    tmp_path = path + ".tmp"
-    torch.save(state, tmp_path)
-    os.rename(tmp_path, path)
+    state_path = os.path.join(path, 'trainer_state.pt')
+    torch.save(state, state_path + '.tmp')
+    os.rename(state_path + '.tmp', state_path)
 
-    data.policy_god.add_policy(policy_name, data.agent)
+    data.policy_god.add_policy(model_name, data.agent)
+    return model_path
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)
@@ -615,9 +606,9 @@ def unroll_nested_dict(d):
         else:
             yield k, v
 
-def print_dashboard(init_performance, performance):
+def print_dashboard(stats, init_performance, performance):
     output = []
-    data = {**init_performance.__dict__, **performance.__dict__}
+    data = {**stats, **init_performance, **performance}
     
     grouped_data = defaultdict(dict)
     

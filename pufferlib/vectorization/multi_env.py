@@ -9,7 +9,7 @@ def create_precheck(env_creator, env_args, env_kwargs):
 
     assert callable(env_creator)
     assert isinstance(env_args, list)
-    assert isinstance(env_kwargs, dict)
+    #assert isinstance(env_kwargs, dict)
 
     return env_args, env_kwargs
 

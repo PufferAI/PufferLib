@@ -80,13 +80,11 @@ class PolicyGod:
     def update_scores(self, i, key):
          return self.policy_pool.update_scores(i, key)
 
-    def update_ranks(self, wandb_entity, global_step):
+    def update_ranks(self, global_step):
         if self.policy_pool.scores and self.policy_ranker is not None:
           self.policy_ranker.update_ranks(
               self.policy_pool.scores,
-              wandb_policies=[self.policy_pool._learner_name]
-              if wandb_entity
-              else [],
+              wandb_policies=[],
               step=global_step,
           )
           self.policy_pool.scores = {}

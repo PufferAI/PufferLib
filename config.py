@@ -7,11 +7,12 @@ import pufferlib.pytorch
 
 import torch
 
-@pufferlib.namespace
+
+@pufferlib.dataclass
 class CleanRLInit:
     vectorization: ... = pufferlib.vectorization.Serial
     #vectorization: ... = pufferlib.vectorization.Multiprocessing
-    total_timesteps: int = 10_000_000
+    total_timesteps: int = 30_000 # 10_000_000
     learning_rate: float = 2.5e-4
     num_cores: int = 4
     num_buffers: int = 1
@@ -19,34 +20,31 @@ class CleanRLInit:
     batch_size: int = 1024
     seed: int = 1
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
-    wandb_entity: str = 'jsuarez' 
-    wandb_project: str = 'pufferlib'
-    wandb_group='debug'
 
-@pufferlib.namespace
+@pufferlib.dataclass
 class CleanRLTrain:
     batch_rows: int = 32
     bptt_horizon: int = 8
 
-@pufferlib.namespace
+@pufferlib.dataclass
 class Policy:
     pass
 
-@pufferlib.namespace
+@pufferlib.dataclass
 class Recurrent:
     input_size = 128
     hidden_size = 128
     num_layers = 1
 
-@pufferlib.namespace
+@pufferlib.dataclass
 class Config:
     cleanrl_init: ... = CleanRLInit()
     cleanrl_train: ... = CleanRLTrain()
-    policy_cls: ... = pufferlib.models.Default
-    policy_kwargs: ... = None
-    recurrent_cls: ... = None
-    recurrent_kwargs: ... = None
-    env_creators: ... = None
+    policy_cls: ...
+    policy_kwargs: ...
+    recurrent_cls: ...
+    recurrent_kwargs: ...
+    env_creators: ...
 
 def all():
     '''All tested environments and platforms'''
@@ -69,34 +67,28 @@ def all():
         #'smac': smac,
     }
 
-def atari(framestack=4):
-    import pufferlib.registry.atari
+def atari():
+    return CleanRLInit(), CleanRLTrain()
+
+'''
+def atari(name='BreakoutNoFrameskip-v4', recurrent=False):
+    from pufferlib.registry import atari
     pufferlib.utils.install_requirements('atari')
-    return Config(
-        env_creators = {
-            pufferlib.registry.atari.make_env: {
-                'name': name,
-                'framestack': framestack,
-            } for name in [
-                'BreakoutNoFrameskip-v4',
-                #'PongNoFrameskip-v4',
-            ]
-        },
-        policy_cls = pufferlib.registry.atari.Policy,
-        policy_kwargs = {
-            'input_size': 512,
-            'hidden_size': 512,
-            'output_size': 512,
-            'framestack': framestack,
-            'flat_size': 64*7*7,
-        },
-        recurrent_cls = pufferlib.pytorch.BatchFirstLSTM if framestack == 1 else None,
-        recurrent_kwargs = {
-            'input_size': 128,
-            'hidden_size': 128,
-            'num_layers': 1,
-        } if framestack == 1 else None,
+    framstack = 1 if recurrent else 4
+    return pufferlib.namespace(
+        cleanrl_init = CleanRLInit(),
+        cleanrl_train = CleanRLTrain(),
+        make_env = atari.make_env,
+        env_kwargs = atari.EnvArgs(
+            name = name,
+            framestack = framstack,
+        ),
+        policy_cls = atari.Policy,
+        policy_kwargs = atari.PolicyArgs(),
+        recurrent_cls = torch.nn.LSTM if recurrent else None,
+        recurrent_kwargs = atari.RecurrentArgs() if recurrent else None,
     )
+'''
 
 def avalon():
     import pufferlib.registry.avalon
@@ -176,26 +168,13 @@ def crafter():
     )
 
 def squared():
-    import pufferlib.registry.puffer_envs
-    return Config(
-        env_creators = {
-            pufferlib.registry.puffer_envs.make_squared: {}
-        },
-        cleanrl_train = CleanRLTrain(
-            batch_rows=32,
-            bptt_horizon=4,
-        ),
-        policy_cls = pufferlib.registry.puffer_envs.Policy,
-        policy_kwargs = {},
-        # Class not getting respected, fix this and figure out
-        # how to ensure you don't mess up transposes
-        recurrent_cls = pufferlib.pytorch.BatchFirstLSTM,
-        recurrent_kwargs = {
-            'input_size': 128,
-            'hidden_size': 128,
-            'num_layers': 1,
-        },
+    from pufferlib.registry import squared
+    cleanrl_init = CleanRLInit()
+    cleanrl_train = CleanRLTrain(
+        batch_rows=32,
+        bptt_horizon=4,
     )
+    return cleanrl_init, cleanrl_train
 
 def dm_control():
     import pufferlib.registry.dmc
@@ -294,29 +273,16 @@ def nethack():
     )
 
 def nmmo():
-    import pufferlib.registry.nmmo
-    pufferlib.utils.install_requirements('nmmo')
-    return Config(
-        env_creators = {
-            pufferlib.registry.nmmo.make_env: {}
-        },
-        cleanrl_init = CleanRLInit(
-            batch_size=2**12,
-            num_cores=1,
-            num_buffers=1,
-            num_envs=1,
-        ),
-        cleanrl_train = CleanRLTrain(
-            batch_rows=128,
-        ),
-        policy_cls = pufferlib.registry.nmmo.Policy,
-        policy_kwargs = {},
-        #recurrent_cls = pufferlib.pytorch.BatchFirstLSTM,
-        #recurrent_kwargs = {
-        #    'input_size': 256,
-        #    'hidden_size': 256,
-        #}
+    cleanrl_init = CleanRLInit(
+        batch_size=2**12,
+        num_cores=1,
+        num_buffers=1,
+        num_envs=1,
     )
+    cleanrl_train = CleanRLTrain(
+        batch_rows=128,
+    )
+    return cleanrl_init, cleanrl_train
 
 def procgen():
     import pufferlib.registry.procgen
