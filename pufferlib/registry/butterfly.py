@@ -30,31 +30,23 @@ class Policy(pufferlib.models.Convolutional):
             **kwargs
         )
 
-
-def make_knights_archers_zombies_v10():
-    '''Knights Archers Zombies creation function
-    
-    Not yet supported: requires heterogeneous observations''
-    '''
-    try:
-        from pettingzoo.butterfly import knights_archers_zombies_v10 as kaz
-    except:
-        raise pufferlib.exceptions.SetupError('butterfly', 'Knights Archers Zombies v10')
+def env_creator(name):
+    if name == 'cooperative_pong_v5':
+        try:
+            from pettingzoo.butterfly import cooperative_pong_v5 as pong
+            return pong.raw_env
+        except:
+            raise pufferlib.exceptions.SetupError('butterfly', 'Cooperative Pong v5')
+    elif name == 'knights_archers_zombies_v10':
+        try:
+            from pettingzoo.butterfly import knights_archers_zombies_v10 as kaz
+            return kaz.raw_env
+        except:
+            raise pufferlib.exceptions.SetupError('butterfly', 'Knights Archers Zombies v10')
     else:
-        return pufferlib.emulation.PettingZooPufferEnv(
-            env_creator=aec_to_parallel_wrapper,
-            env_args=[kaz.raw_env()],
-        )
-
-
-def make_cooperative_pong_v5():
-    '''Cooperative Pong creation function'''
-    try:
-        from pettingzoo.butterfly import cooperative_pong_v5 as pong
-    except:
-        raise pufferlib.exceptions.SetupError('butterfly', 'Cooperative Pong v5')
-    else:
-        return pufferlib.emulation.PettingZooPufferEnv(
-            env_creator=aec_to_parallel_wrapper,
-            env_args=[pong.raw_env()],
-        )
+        raise ValueError(f'Unknown environment: {name}')
+     
+def make_env(name='cooperative_pong_v5'):
+    env = env_creator(name)()
+    env = aec_to_parallel_wrapper(env)
+    return pufferlib.emulation.PettingZooPufferEnv(env=env)

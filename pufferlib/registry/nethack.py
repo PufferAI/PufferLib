@@ -10,16 +10,18 @@ import pufferlib.models
 import pufferlib.utils
 
 
-def make_env():
-    '''NetHack binding creation function'''
+def env_creator():
     try:
         import nle
     except:
         raise pufferlib.utils.SetupError('NetHack (nle)')
     else:
-        return pufferlib.emulation.GymPufferEnv(
-            env_creator=nle.env.NLE,
-        )
+        return nle.env.NLE
+ 
+def make_env():
+    '''NetHack binding creation function'''
+    env = env_creator()()
+    return pufferlib.emulation.GymPufferEnv(env=env)
 
 class Policy(pufferlib.models.Policy):
     '''Default NetHack Learning Environment policy ported from the nle release'''

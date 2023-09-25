@@ -1,35 +1,51 @@
 from pdb import set_trace as T
 import numpy as np
 
-import torch
-from torch import nn
-from torch.distributions.categorical import Categorical
-
 import gym
 
 import pufferlib
 import pufferlib.emulation
 import pufferlib.exceptions
 import pufferlib.models
-from pufferlib.registry import RecurrentArgs
+
+from pufferlib.pytorch import LSTM as Recurrent
 
 
-RECURRENCE_RECOMMENDED = False
+class Policy(pufferlib.models.Convolutional):
+    def __init__(self, input_size=512, hidden_size=512, output_size=512,
+            framestack=4, flat_size=64*7*7):
+        super().__init__(input_size, hidden_size, output_size,
+                framestack, flat_size)
 
-@pufferlib.dataclass
-class EnvArgs:
-    name: str = 'BreakoutNoFrameskip-v4'
-    framestack: int = 4
+def env_creator():
+    return gym.make
 
-Policy = pufferlib.models.Convolutional
+def make_env(name='BreakoutNoFrameskip-v4', framestack=4):
+    '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
+    try:
+        from stable_baselines3.common.atari_wrappers import (
+            ClipRewardEnv,
+            EpisodicLifeEnv,
+            FireResetEnv,
+            MaxAndSkipEnv,
+        )
+        with pufferlib.utils.Suppress():
+            env = env_creator()(name)
+    except:
+        raise pufferlib.exceptions.EnvironmentSetupError('atari', name)
 
-@pufferlib.dataclass
-class PolicyArgs:
-    input_size: int = 512
-    hidden_size: int = 512
-    output_size: int = 512
-    framestack: int = 4
-    flat_size: int = 64*7*7
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env = NoopResetEnv(env, noop_max=30)
+    env = MaxAndSkipEnv(env, skip=4)
+    env = EpisodicLifeEnv(env)
+    if "FIRE" in env.unwrapped.get_action_meanings():
+        env = FireResetEnv(env)
+    env = ClipRewardEnv(env)
+    env = gym.wrappers.ResizeObservation(env, (84, 84))
+    env = gym.wrappers.GrayScaleObservation(env)
+    env = gym.wrappers.FrameStack(env, framestack)
+    return pufferlib.emulation.GymPufferEnv(
+        env=env, postprocessor_cls=AtariFeaturizer)
 
 # Broken in SB3
 class NoopResetEnv(gym.Wrapper):
@@ -98,35 +114,3 @@ class AtariFeaturizer(pufferlib.emulation.Postprocessor):
             self.epoch_return += reward
 
         return reward, done, info
-
-
-def env_creator(name, framestack):
-    '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
-    try:
-        from stable_baselines3.common.atari_wrappers import (
-            ClipRewardEnv,
-            EpisodicLifeEnv,
-            FireResetEnv,
-            MaxAndSkipEnv,
-        )
-        with pufferlib.utils.Suppress():
-            env = gym.make(name)
-    except:
-        raise pufferlib.exceptions.SetupError('atari', name)
-
-    env = gym.wrappers.RecordEpisodeStatistics(env)
-    env = NoopResetEnv(env, noop_max=30)
-    env = MaxAndSkipEnv(env, skip=4)
-    env = EpisodicLifeEnv(env)
-    if "FIRE" in env.unwrapped.get_action_meanings():
-        env = FireResetEnv(env)
-    env = ClipRewardEnv(env)
-    env = gym.wrappers.ResizeObservation(env, (84, 84))
-    env = gym.wrappers.GrayScaleObservation(env)
-    env = gym.wrappers.FrameStack(env, framestack)
-    return env
- 
-def make_env(name, framestack):
-    env = env_creator(name, framestack)
-    return pufferlib.emulation.GymPufferEnv(
-        env=env, postprocessor_cls=AtariFeaturizer)

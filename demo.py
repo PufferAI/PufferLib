@@ -18,6 +18,19 @@ import pufferlib.models
 
 import config
 
+import inspect
+
+def get_init_args(fn):
+    sig = inspect.signature(fn)
+    
+    # Extract the arguments and their default values
+    args = {}
+    for name, param in sig.parameters.items():
+        if name in ('self', 'env'):
+            continue
+        args[name] = param.default if param.default is not inspect.Parameter.empty else None
+
+    return args
 
 def make_config(env):
     try:
@@ -28,19 +41,24 @@ def make_config(env):
 
     cleanrl_init, cleanrl_train = getattr(config, env)()
 
+    env_kwargs = get_init_args(env_module.make_env)
+    policy_kwargs = get_init_args(env_module.Policy.__init__)
+
+    recurrent_kwargs = {}
+    if hasattr(env_module, 'Recurrent'):
+        recurrent_kwargs = get_init_args(env_module.Recurrent.__init__)
+
     return env_module, pufferlib.namespace(
         cleanrl_init = cleanrl_init,
         cleanrl_train = cleanrl_train,
-        env_kwargs = env_module.EnvArgs(),
-        policy_kwargs = env_module.PolicyArgs(),
-        recurrent_kwargs = env_module.RecurrentArgs(),
+        env_kwargs = env_kwargs,
+        policy_kwargs = policy_kwargs,
+        recurrent_kwargs = recurrent_kwargs,
    )
  
 def make_policy(envs, env_module, args):
     policy = env_module.Policy(envs.driver_env, **args.policy_kwargs)
-    recurrent = args.force_recurrence or env_module.RECURRENCE_RECOMMENDED
-
-    if args.force_recurrence or env_module.RECURRENCE_RECOMMENDED:
+    if args.force_recurrence or hasattr(env_module, 'Recurrent'):
         policy = pufferlib.models.RecurrentWrapper(
             envs, policy, **args.recurrent_kwargs)
         policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)

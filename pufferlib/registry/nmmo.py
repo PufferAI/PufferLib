@@ -12,17 +12,17 @@ import pufferlib.models
 import pufferlib.exceptions
 from pufferlib.registry import try_import, EnvArgs, EnvArgs
 
-
-nmmo = try_import('nmmo')
 from nmmo.entity.entity import EntityState
 
 RECURRENCE_RECOMMENDED = False
 
-env_creator = nmmo.Env
+def env_creator():
+    nmmo = try_import('nmmo')
+    return nmmo.Env
 
 def make_env(*args, **kwargs):
     '''Neural MMO creation function'''
-    env = env_creator(*args, **kwargs)
+    env = env_creator()(*args, **kwargs)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
 @pufferlib.dataclass

@@ -1,22 +1,8 @@
-from pufferlib import namespace
-from pufferlib.environments import Squared
-import pufferlib.models
-from pufferlib.registry import RecurrentArgs
-from pufferlib.registry import DefaultPolicyArgs as PolicyArgs
+import pufferlib.emulation
+from pufferlib.environments import Squared as env_creator
+from pufferlib.models import Default as Policy
 
-
-RECURRENCE_RECOMMENDED = False
-
-env_creator = Squared
-
-@pufferlib.dataclass
-class EnvArgs:
-    distance_to_target: int = 3
-    num_targets: int = 1
-
-Policy = pufferlib.models.Default
-
-def make_env(**kwargs):
+def make_env(distance_to_target=3, num_targets=1):
     '''Puffer Squared environment'''
-    env = Squared(**kwargs)
+    env = env_creator(distance_to_target=distance_to_target, num_targets=num_targets)
     return pufferlib.emulation.GymPufferEnv(env=env)

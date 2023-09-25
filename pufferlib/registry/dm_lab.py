@@ -30,8 +30,7 @@ class Policy(pufferlib.models.Convolutional):
             **kwargs
         )
 
-
-def make_env(name='DeepmindLabSeekavoidArena01-v0'):
+def env_creator():
     '''Deepmind Lab binding creation function
     dm-lab requires extensive setup. Use PufferTank.'''
     try:
@@ -39,7 +38,10 @@ def make_env(name='DeepmindLabSeekavoidArena01-v0'):
     except:
         raise pufferlib.utils.SetupError('Deepmind Lab (dm-lab)')
     else:
-        return pufferlib.emulation.GymPufferEnv(
-            env_creator=gym.make,
-            env_args=[name],
-        )
+        return gym.make
+
+def make_env(name='DeepmindLabSeekavoidArena01-v0'):
+    '''Deepmind Lab binding creation function
+    dm-lab requires extensive setup. Use PufferTank.'''
+    env = env_creator()(name)
+    return pufferlib.emulation.GymPufferEnv(env=env)

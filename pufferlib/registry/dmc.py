@@ -4,7 +4,7 @@ import pufferlib
 import pufferlib.emulation
 import pufferlib.exceptions
 
-def make(name, *args):
+def env_creator(name):
     '''Deepmind Control environment creation function
 
     No support for bindings yet because PufferLib does
@@ -15,4 +15,9 @@ def make(name, *args):
     except:
         raise pufferlib.exceptions.SetupError('dmc', name)
     else:
-        return gym.make(name, *args)
+        return gym.make
+
+def make_env(name *args):
+    '''No PufferLib support for Deepmind Control environments yet.'''
+    env = env_creator(name)(*args)
+    return env

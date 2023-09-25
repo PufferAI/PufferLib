@@ -1,5 +1,4 @@
 from pdb import set_trace as T
-import numpy as np
 
 import gym
 
@@ -33,19 +32,19 @@ class Policy(pufferlib.models.Convolutional):
             **kwargs
         )
 
-
 class CrafterPostprocessor(pufferlib.emulation.Postprocessor):
     def features(self, obs, step):
         return obs[1].transpose(2, 0, 1)
 
-
-def make_env():
-    '''Crafter creation function'''
+def env_creator():
     try:
         import crafter
     except:
-        raise pufferlib.exceptions.SetupError('crafter', 'CrafterReward-v1')
+        raise pufferlib.exceptions.SetupError('crafter')
     else:
-        env = gym.make('CrafterReward-v1')
-        env = pufferlib.emulation.GymPufferEnv(env=env)
-        return env
+        return gym.make
+
+def make_env(name='CrafterReward-v1'):
+    '''Crafter creation function'''
+    env = env_creator()(name)
+    return pufferlib.emulation.GymPufferEnv(env=env)

@@ -32,3 +32,8 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
+
+class LSTM(nn.LSTM):
+    def __init__(self, input_size=128, hidden_size=128, num_layers=1):
+        super().__init__(input_size, hidden_size, num_layers)
+        layer_init(self)

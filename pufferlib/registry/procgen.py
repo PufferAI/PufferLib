@@ -132,16 +132,19 @@ class ProcgenPostprocessor(pufferlib.emulation.Postprocessor):
         return float(reward), bool(done), info
 
 
-def make_env(name):
-    '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
+def env_creator():
     try:
         with pufferlib.utils.Suppress():
             import gym3
             from procgen.env import ProcgenGym3Env
-            env = ProcgenGym3Env(num=1, env_name=name)
-    except ImportError as e:
-        raise e('Cannot gym.make ALE environment (pip install pufferlib[gym])')
+            return ProcgenGym3Env
+    except:
+        raise pufferlib.utils.SetupError('procgen')
 
+def make_env(name='coinrun'):
+    '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
+    env = env_creator()(num=1, env_name=name)
+    import gym3
     env = gym3.ToGymEnv(env)
     env = gym.wrappers.TransformObservation(env, lambda obs: obs["rgb"])
     env = gym.wrappers.RecordEpisodeStatistics(env)

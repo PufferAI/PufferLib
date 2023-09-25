@@ -43,16 +43,18 @@ class Policy(pufferlib.models.Policy):
         value = self.value_function(hidden)
         return action, value
 
-def make_battle_v4_env():
-    '''MAgent Battle creation function'''
-    try:
-        from pettingzoo.magent import battle_v4 as battle
-    except:
-        raise pufferlib.exceptions.SetupError('magent', 'Battle V4')
+def env_creator(name):
+    if name == 'battle_v4':
+        try:
+            from pettingzoo.magent import battle_v4 as battle
+        except:
+            raise pufferlib.exceptions.SetupError('magent', 'Battle V4')
     else:
-        env = pufferlib.emulation.PettingZooPufferEnv(
-            env_creator=aec_to_parallel_wrapper,
-            env_args=[battle.env()],
-        )
-        return env
+        raise ValueError(f'Unknown environment name {name}')
+    return battle.env
  
+def make_env(name='battle_v4'):
+    '''MAgent Battle V4 creation function'''
+    env = env_creator(name)()
+    env = aec_to_parallel_wrapper(env)
+    return pufferlib.emulation.PettingZooPufferEnv(env=env)
