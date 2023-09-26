@@ -1,9 +1,4 @@
-from pdb import set_trace as T
-
-from dataclasses import dataclass, fields
-
 import pufferlib.vectorization
-import pufferlib.pytorch
 
 import torch
 
@@ -26,251 +21,38 @@ class CleanRLTrain:
     batch_rows: int = 32
     bptt_horizon: int = 8
 
-@pufferlib.dataclass
-class Policy:
-    pass
-
-@pufferlib.dataclass
-class Recurrent:
-    input_size = 128
-    hidden_size = 128
-    num_layers = 1
-
-@pufferlib.dataclass
-class Config:
-    cleanrl_init: ... = CleanRLInit()
-    cleanrl_train: ... = CleanRLTrain()
-    policy_cls: ...
-    policy_kwargs: ...
-    recurrent_cls: ...
-    recurrent_kwargs: ...
-    env_creators: ...
+def default():
+    return CleanRLInit(), CleanRLTrain()
 
 def all():
     '''All tested environments and platforms'''
     return {
-        #'atari': atari,
-        #'avalon': avalon,
-        #'box2d': box2d,
-        'butterfly': butterfly,
-        'crafter': crafter,
+        'atari': default,
+        #'box2d': default,
+        'butterfly': default,
+        'classic_control': classic_control,
+        'crafter': default,
         'squared': squared,
-        #'dm_control': dm_control,
-        #'dm_lab': dm_lab,
-        'griddly': griddly,
-        'magent': magent,
-        #'microrts': microrts,
-        #'minerl': minerl,
-        'nethack': nethack,
+        #'dm_control': default,
+        'dm_lab': default,
+        'griddly': default,
+        'magent': default,
+        #'microrts': default,
+        #'minerl': default,
+        'nethack': default,
         'nmmo': nmmo,
-        'procgen': procgen,
-        #'smac': smac,
+        'procgen': default,
+        #'smac': default,
     }
 
-def atari():
-    return CleanRLInit(), CleanRLTrain()
-
-'''
-def atari(name='BreakoutNoFrameskip-v4', recurrent=False):
-    from pufferlib.registry import atari
-    pufferlib.utils.install_requirements('atari')
-    framstack = 1 if recurrent else 4
-    return pufferlib.namespace(
-        cleanrl_init = CleanRLInit(),
-        cleanrl_train = CleanRLTrain(),
-        make_env = atari.make_env,
-        env_kwargs = atari.EnvArgs(
-            name = name,
-            framestack = framstack,
-        ),
-        policy_cls = atari.Policy,
-        policy_kwargs = atari.PolicyArgs(),
-        recurrent_cls = torch.nn.LSTM if recurrent else None,
-        recurrent_kwargs = atari.RecurrentArgs() if recurrent else None,
-    )
-'''
-
-def avalon():
-    import pufferlib.registry.avalon
-    pufferlib.utils.install_requirements('avalon')
-    return Config(
-        env_creators = {
-            pufferlib.registry.avalon.make_env: {}
-        },
-        policy_cls = pufferlib.registry.avalon.Policy,
-        policy_kwargs = {
-            'input_size': 512,
-            'hidden_size': 128,
-            'output_size': 128,
-            'framestack': 1,
-            'flat_size': 64*7*7,
-        },
-        recurrent_cls = pufferlib.pytorch.BatchFirstLSTM,
-        recurrent_kwargs = {
-            'input_size': 128,
-            'hidden_size': 128,
-            'num_layers': 0,
-        }
-    )
-
-def box2d():
-    import pufferlib.registry.box2d
-    pufferlib.utils.install_requirements('box2d')
-    return Config(
-        env_creators = {
-            pufferlib.registry.box2d.make_env: {}
-        },
-        policy_cls = pufferlib.registry.box2d.Policy,
-        policy_kwargs = {},
-    )
-
-def butterfly():
-    import pufferlib.registry.butterfly
-    pufferlib.utils.install_requirements('butterfly')
-    return Config(
-        env_creators = {
-            pufferlib.registry.butterfly.make_cooperative_pong_v5: {}
-        },
-        policy_cls = pufferlib.registry.butterfly.Policy,
-        policy_kwargs = {},
-    )
-
 def classic_control():
-    import pufferlib.registry.classic_control
-    return Config(
-        env_creators = {
-            pufferlib.registry.classic_control.make_cartpole_env: {}
-        },
-        cleanrl_init = CleanRLInit(
-            vectorization=pufferlib.vectorization.Serial,
-            total_timesteps=10_000_000,
-            num_cores=1,
-            num_buffers=1,
-            num_envs=16,
-            batch_size=1024,
-        ),
-        policy_cls = pufferlib.registry.classic_control.Policy,
-        policy_kwargs = {
-            'input_size': 64,
-            'hidden_size': 64,
-        },
+    cleanrl_init = CleanRLInit(
+        vectorization=pufferlib.vectorization.Serial,
+        num_cores=1,
+        num_buffers=1,
+        num_envs=16,
     )
-
-def crafter():
-    import pufferlib.registry.crafter
-    pufferlib.utils.install_requirements('crafter')
-    return Config(
-        env_creators = {
-            pufferlib.registry.crafter.make_env: {}
-        },
-        policy_cls = pufferlib.registry.crafter.Policy,
-        policy_kwargs = {},
-    )
-
-def squared():
-    from pufferlib.registry import squared
-    cleanrl_init = CleanRLInit()
-    cleanrl_train = CleanRLTrain(
-        batch_rows=32,
-        bptt_horizon=4,
-    )
-    return cleanrl_init, cleanrl_train
-
-def dm_control():
-    import pufferlib.registry.dmc
-    pufferlib.utils.install_requirements('dm-control')
-    return Config(
-        env_creators = {
-            pufferlib.registry.dmc.make_env: {}
-        },
-        policy_cls = pufferlib.registry.dmc.Policy,
-        policy_kwargs = {
-            'input_size': 512,
-            'hidden_size': 128,
-            'framestack': 3, # Framestack 3 is a hack for RGB
-            'flat_size': 64*4*4,
-        },
-    )
-
-def dm_lab():
-    import pufferlib.registry.dm_lab
-    pufferlib.utils.install_requirements('dm-lab')
-    return Config(
-        env_creators = {
-            pufferlib.registry.dm_lab.make_env: {}
-        },
-        policy_cls = pufferlib.registry.dm_lab.Policy,
-        policy_kwargs = {},
-    )
-
-def griddly():
-    import pufferlib.registry.griddly
-    pufferlib.utils.install_requirements('griddly')
-    return Config(
-        env_creators = {
-            pufferlib.registry.griddly.make_spider_v0_env: {}
-        },
-        policy_cls = pufferlib.registry.griddly.Policy,
-        policy_kwargs = {},
-    )
-
-def magent():
-    import pufferlib.registry.magent
-    pufferlib.utils.install_requirements('magent')
-    return Config(
-        env_creators = {
-            pufferlib.registry.magent.make_battle_v4_env: {}
-        },
-        policy_cls = pufferlib.registry.magent.Policy,
-        policy_kwargs = {
-            'input_size': 512,
-            'hidden_size': 128,
-            'output_size': 128,
-            'framestack': 5, # Framestack 5 is a hack for obs channels
-            'flat_size': 64*4*4,
-        },
-    )
-
-def microrts():
-    import pufferlib.registry.microrts
-    pufferlib.utils.install_requirements('gym-microrts')
-    return Config(
-        env_creators = {
-            pufferlib.registry.microrts.make_env: {}
-        },
-        policy_cls = pufferlib.registry.microrts.Policy,
-        policy_kwargs = {},
-    )
-
-def minerl():
-    import pufferlib.registry.minecraft
-    pufferlib.utils.install_requirements('minerl')
-    return Config(
-        env_creators = {
-            pufferlib.registry.minecraft.make_env: {}
-        },
-        policy_cls = pufferlib.registry.minecraft.Policy,
-        policy_kwargs = {},
-    )
-
-def nethack():
-    import pufferlib.registry.nethack
-    pufferlib.utils.install_requirements('nethack')
-    return Config(
-        env_creators = {
-            pufferlib.registry.nethack.make_env: {}
-        },
-        policy_cls = pufferlib.registry.nethack.Policy,
-        policy_kwargs = {
-            'embedding_dim': 32,
-            'crop_dim': 9,
-            'num_layers': 5,
-        },
-        recurrent_kwargs = {
-            'input_size': 512,
-            'hidden_size': 512,
-        },
-    )
+    return cleanrl_init, CleanRLTrain()
 
 def nmmo():
     cleanrl_init = CleanRLInit(
@@ -284,35 +66,12 @@ def nmmo():
     )
     return cleanrl_init, cleanrl_train
 
-def procgen():
-    import pufferlib.registry.procgen
-    pufferlib.utils.install_requirements('procgen')
-    return Config(
-        env_creators = {
-            pufferlib.registry.procgen.make_env: {
-                'name': 'coinrun'
-            }
-        },
-        policy_cls = pufferlib.registry.procgen.Policy,
-        policy_kwargs = {},
+def squared():
+    cleanrl_init = CleanRLInit(
+        learning_rate=2.5e-2,
     )
-
-def smac():
-    import pufferlib.registry.smac
-    pufferlib.utils.install_requirements('smac')
-    return Config(
-        env_creators = {
-            pufferlib.registry.smac.make_env: {}
-        },
-        policy_cls = pufferlib.registry.smac.Policy,
-        policy_kwargs = {
-            'embedding_dim': 32,
-            'crop_dim': 9,
-            'num_layers': 5,
-        },
+    cleanrl_train = CleanRLTrain(
+        batch_rows=32,
+        bptt_horizon=4,
     )
-
-# Possible stuff to add support:
-# Deep RTS
-# https://github.com/kimbring2/MOBA_RL
-# Serpent AI
+    return cleanrl_init, cleanrl_train

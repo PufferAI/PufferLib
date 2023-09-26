@@ -5,7 +5,7 @@ import pufferlib.models
 
 class Policy(pufferlib.models.Policy):
     '''Based off of the DQN policy in MAgent'''
-    def __init__(self, env, *args, input_size=256, hidden_size=256, output_size=256, **kwargs):
+    def __init__(self, env, *args, hidden_size=256, output_size=256, kernel_num=32):
         '''The CleanRL default Atari policy: a stack of three convolutions followed by a linear layer
         
         Takes framestack as a mandatory keyword arguments. Suggested default is 1 frame
@@ -14,12 +14,14 @@ class Policy(pufferlib.models.Policy):
         self.num_actions = self.action_space.n
 
         self.network = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Conv2d(5, 32, 3)),
+            pufferlib.pytorch.layer_init(nn.Conv2d(5, kernel_num, 3)),
             nn.ReLU(),
-            pufferlib.pytorch.layer_init(nn.Conv2d(32, 32, 3)),
+            pufferlib.pytorch.layer_init(nn.Conv2d(kernel_num, kernel_num, 3)),
             nn.ReLU(),
             nn.Flatten(),
-            pufferlib.pytorch.layer_init(nn.Linear(32*9*9, hidden_size)),
+            pufferlib.pytorch.layer_init(nn.Linear(kernel_num*9*9, hidden_size)),
+            nn.ReLU(),
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
             nn.ReLU(),
         )
 
