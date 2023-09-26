@@ -7,8 +7,6 @@ import pufferlib.emulation
 import pufferlib.exceptions
 
 
-Policy = pufferlib.models.Default
-
 def env_creator():
     return gym.make
 

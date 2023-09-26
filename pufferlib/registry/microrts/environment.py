@@ -3,9 +3,6 @@ from pdb import set_trace as T
 import pufferlib
 import pufferlib.emulation
 import pufferlib.exceptions
-import pufferlib.models
-
-Policy = pufferlib.models.Default
 
 
 def make_env():

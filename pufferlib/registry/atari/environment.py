@@ -8,14 +8,6 @@ import pufferlib.emulation
 import pufferlib.exceptions
 import pufferlib.models
 
-from pufferlib.pytorch import LSTM as Recurrent
-
-
-class Policy(pufferlib.models.Convolutional):
-    def __init__(self, input_size=512, hidden_size=512, output_size=512,
-            framestack=4, flat_size=64*7*7):
-        super().__init__(input_size, hidden_size, output_size,
-                framestack, flat_size)
 
 def env_creator():
     return gym.make

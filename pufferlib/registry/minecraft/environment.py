@@ -3,10 +3,7 @@ import gym
 import pufferlib
 import pufferlib.emulation
 import pufferlib.exceptions
-import pufferlib.models
 
-
-Policy = pufferlib.models.Default
 
 def make_env(name='MineRLNavigateDense-v0'):
     '''Minecraft environment creation function

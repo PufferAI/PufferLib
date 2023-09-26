@@ -1,10 +1,5 @@
-from pdb import set_trace as T
-from pettingzoo.utils.conversions import aec_to_parallel_wrapper
-
 from torch import nn
 
-import pufferlib.emulation
-import pufferlib.exceptions
 import pufferlib.models
 
 
@@ -42,19 +37,3 @@ class Policy(pufferlib.models.Policy):
         action = self.actor(hidden)
         value = self.value_function(hidden)
         return action, value
-
-def env_creator(name):
-    if name == 'battle_v4':
-        try:
-            from pettingzoo.magent import battle_v4 as battle
-        except:
-            raise pufferlib.exceptions.SetupError('magent', 'Battle V4')
-    else:
-        raise ValueError(f'Unknown environment name {name}')
-    return battle.env
- 
-def make_env(name='battle_v4'):
-    '''MAgent Battle V4 creation function'''
-    env = env_creator(name)()
-    env = aec_to_parallel_wrapper(env)
-    return pufferlib.emulation.PettingZooPufferEnv(env=env)

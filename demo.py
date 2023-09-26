@@ -45,7 +45,7 @@ def make_config(env):
     policy_kwargs = get_init_args(env_module.Policy.__init__)
 
     recurrent_kwargs = {}
-    if hasattr(env_module, 'Recurrent'):
+    if env_module.Recurrent is not None:
         recurrent_kwargs = get_init_args(env_module.Recurrent.__init__)
 
     return env_module, pufferlib.namespace(
@@ -58,7 +58,7 @@ def make_config(env):
  
 def make_policy(envs, env_module, args):
     policy = env_module.Policy(envs.driver_env, **args.policy_kwargs)
-    if args.force_recurrence or hasattr(env_module, 'Recurrent'):
+    if args.force_recurrence or env_module.Recurrent is not None:
         policy = pufferlib.models.RecurrentWrapper(
             envs, policy, **args.recurrent_kwargs)
         policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)

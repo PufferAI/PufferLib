@@ -1,7 +1,4 @@
 from pdb import set_trace as T
-import numpy as np
-
-import gym
 
 import torch
 import torch.nn.functional as F
@@ -9,33 +6,19 @@ import torch.nn.functional as F
 import pufferlib
 import pufferlib.emulation
 import pufferlib.models
-import pufferlib.exceptions
-from pufferlib.registry import try_import, EnvArgs, EnvArgs
+import pufferlib.pytorch
+from pufferlib.registry import try_import
 
+try_import("nmmo")
 from nmmo.entity.entity import EntityState
 
-RECURRENCE_RECOMMENDED = False
-
-def env_creator():
-    nmmo = try_import('nmmo')
-    return nmmo.Env
-
-def make_env(*args, **kwargs):
-    '''Neural MMO creation function'''
-    env = env_creator()(*args, **kwargs)
-    return pufferlib.emulation.PettingZooPufferEnv(env=env)
-
-@pufferlib.dataclass
-class PolicyArgs:
-    input_size: int = 256
-    hidden_size: int = 256
-    output_size: int = 256
-
-@pufferlib.dataclass
-class RecurrentArgs:
-    input_size: int = 256
-    hidden_size: int = 256
-    num_layers: int = 1
+class Recurrent(pufferlib.pytorch.LSTM):
+    def __init__(self, input_size=256, hidden_size=256, num_layers=1):
+        super().__init__(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+        )
 
 class Policy(pufferlib.models.Policy):
   NUM_ATTRS = 34
