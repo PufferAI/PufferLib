@@ -22,15 +22,15 @@ class Namespace(SimpleNamespace):
 def dataclass(cls):
     # Safely get annotations
     annotations = getattr(cls, '__annotations__', {})
-    
+
     # Combine both annotated and non-annotated fields
     all_fields = {**{k: None for k in annotations.keys()}, **cls.__dict__}
     all_fields = {k: v for k, v in all_fields.items() if not callable(v) and not k.startswith('__')}
-    
+
     def __init__(self, **kwargs):
         for field, default_value in all_fields.items():
             setattr(self, field, kwargs.get(field, default_value))
-           
+
     cls.__init__ = __init__
     setattr(cls, "__getitem__", __getitem__)
     setattr(cls, "keys", keys)

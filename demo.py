@@ -4,6 +4,7 @@ import sys
 import time
 import os
 import importlib
+import inspect
 from collections import defaultdict
 
 import torch
@@ -18,7 +19,6 @@ import pufferlib.models
 
 import config
 
-import inspect
 
 def get_init_args(fn):
     sig = inspect.signature(fn)
@@ -39,7 +39,7 @@ def make_config(env):
         pufferlib.utils.install_requirements(env)
         env_module = importlib.import_module(f'pufferlib.registry.{env}')
 
-    cleanrl_init, cleanrl_train = getattr(config, env)()
+    cleanrl_init, cleanrl_train, sweep_config = getattr(config, env)()
 
     env_kwargs = get_init_args(env_module.make_env)
     policy_kwargs = get_init_args(env_module.Policy.__init__)
@@ -48,7 +48,7 @@ def make_config(env):
     if env_module.Recurrent is not None:
         recurrent_kwargs = get_init_args(env_module.Recurrent.__init__)
 
-    return env_module, pufferlib.namespace(
+    return env_module, sweep_config, pufferlib.namespace(
         cleanrl_init = cleanrl_init,
         cleanrl_train = cleanrl_train,
         env_kwargs = env_kwargs,
@@ -90,25 +90,26 @@ def init_wandb(args, env_module):
     )
     return wandb.run.id
 
-def sweep(args, env_module):
-    sweep_configuration = {
-        "method": "random",
-        "name": "sweep",
-        "metric": {"goal": "maximize", "name": "stats/targets_hit"},
-        "parameters": {
-            "learning_rate": {"max": 0.1, "min": 0.0001},
-        },
-    }
-
+def sweep(args, env_module, sweep_config):
     import wandb
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project="pufferlib")
+    sweep_id = wandb.sweep(sweep=sweep_config, project="pufferlib")
 
     def main():
         args.run_id = init_wandb(args, env_module)
-        args.cleanrl_init['learning_rate'] = wandb.config.learning_rate
+        if hasattr(wandb.config, 'cleanrl_init'):
+            args.cleanrl_init.update(wandb.config.cleanrl_init)
+            wandb.config.update(wandb.config.cleanrl_init, allow_val_change=True)
+        if hasattr(wandb.config, 'cleanrl_train'):
+            args.cleanrl_train.update(wandb.config.cleanrl_train)
+            wandb.config.update(wandb.config.train, allow_val_change=True)
+        if hasattr(wandb.config, 'env'):
+            args.env_kwargs.update(wandb.config.env)
+        if hasattr(wandb.config, 'policy'):
+            args.policy_kwargs.update(wandb.config.policy)
+        #args.cleanrl_init['learning_rate'] = wandb.config.learning_rate
         train(args, env_module)
 
-    wandb.agent(sweep_id, main, count=5)
+    wandb.agent(sweep_id, main, count=20)
 
 def train(args, env_module):
     trainer = CleanPuffeRL(
@@ -170,7 +171,7 @@ if __name__ == '__main__':
     args = parser.parse_known_args()[0].__dict__
     env = args['env']
 
-    env_module, cfg = make_config(env)
+    env_module, sweep_config, cfg = make_config(env)
     for name, sub_config in cfg.items():
         args[name] = {}
         for key, value in sub_config.items():
@@ -193,4 +194,4 @@ if __name__ == '__main__':
     elif args.mode == 'eval':
         evaluate(args, env_module)
     elif args.mode == 'sweep':
-        sweep(args, env_module)
+        sweep(args, env_module, sweep_config)
