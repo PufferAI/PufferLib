@@ -114,7 +114,7 @@ setup(
         'openskill==4.0.0',
         'pettingzoo==1.19.0',
         'cython==3.0.0',
-        'filelock==3.12.4',
+        'filelock>=3.12.4',
     ],
     extras_require={
         'docs': docs,
