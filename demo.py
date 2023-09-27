@@ -77,11 +77,11 @@ def init_wandb(args, env_module):
         entity=args.wandb_entity,
         group=args.wandb_group,
         config={
+            'cleanrl_init': args.cleanrl_init,
+            'cleanrl_train': args.cleanrl_train,
             'env': args.env_kwargs,
             'policy': args.policy_kwargs,
             'recurrent': args.recurrent_kwargs,
-            **args.cleanrl_init,
-            **args.cleanrl_train,
         },
         name=args.env,
         monitor_gym=True,
@@ -98,10 +98,8 @@ def sweep(args, env_module, sweep_config):
         args.run_id = init_wandb(args, env_module)
         if hasattr(wandb.config, 'cleanrl_init'):
             args.cleanrl_init.update(wandb.config.cleanrl_init)
-            wandb.config.update(wandb.config.cleanrl_init, allow_val_change=True)
         if hasattr(wandb.config, 'cleanrl_train'):
             args.cleanrl_train.update(wandb.config.cleanrl_train)
-            wandb.config.update(wandb.config.train, allow_val_change=True)
         if hasattr(wandb.config, 'env'):
             args.env_kwargs.update(wandb.config.env)
         if hasattr(wandb.config, 'policy'):
