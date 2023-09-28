@@ -124,7 +124,7 @@ def nmmo():
 
 def squared():
     cleanrl_init = CleanRLInit(
-        learning_rate=2.5e-2,
+        learning_rate=0.017,
     )
     cleanrl_train = CleanRLTrain(
         batch_rows=32,
