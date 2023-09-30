@@ -6,9 +6,9 @@ import torch
 
 @pufferlib.dataclass
 class CleanRLInit:
-    vectorization: ... = pufferlib.vectorization.Serial
-    #vectorization: ... = pufferlib.vectorization.Multiprocessing
-    total_timesteps: int = 30_000 # 10_000_000
+    #vectorization: ... = pufferlib.vectorization.Serial
+    vectorization: ... = pufferlib.vectorization.Multiprocessing
+    total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
     num_cores: int = 4
     num_buffers: int = 1
@@ -20,7 +20,14 @@ class CleanRLInit:
 @pufferlib.dataclass
 class CleanRLTrain:
     batch_rows: int = 32
+    update_epochs: int = 4
     bptt_horizon: int = 8
+    gamma: float = 0.99
+    gae_lambda: float = 0.95
+    anneal_lr: bool = True
+    clip_coef: float = 0.1
+    vf_clip_coef: float = 0.1
+    ent_coef: float = 0.01
 
 @pufferlib.dataclass
 class SweepMetadata:
@@ -97,7 +104,7 @@ def all():
         #'minerl': default,
         'nethack': default,
         'nmmo': nmmo,
-        'procgen': default,
+        'procgen': procgen,
         #'smac': default,
     }
 
@@ -121,6 +128,50 @@ def nmmo():
         batch_rows=128,
     )
     return cleanrl_init, cleanrl_train, make_sweep_config()
+
+def procgen():
+    #return default()
+    # MSRL defaults. Don't forget to uncomment network layer sizes!
+    '''
+    cleanrl_init = CleanRLInit(
+        total_timesteps=8_000_000,
+        learning_rate=6e-4,
+        num_cores=4,
+        num_buffers=2,
+        num_envs=64,
+        batch_size=2048,
+    )
+    cleanrl_train = CleanRLTrain(
+        batch_rows=8,
+        bptt_horizon=256,
+        gamma=0.995,
+        gae_lambda=0.8,
+        clip_coef=0.1,
+        vf_clip_coef=1.0,
+        ent_coef=0.005,
+    )
+    '''
+
+    # 2020 Competition Defaults from RLlib
+    cleanrl_init = CleanRLInit(
+        total_timesteps=8_000_000,
+        learning_rate=5e-4,
+        num_cores=4,
+        num_buffers=2,
+        num_envs=32,#6,
+        batch_size=16384,
+    )
+    cleanrl_train = CleanRLTrain(
+        batch_rows=8,
+        bptt_horizon=256,
+        gamma=0.999,
+        update_epochs=3,
+        anneal_lr=False,
+        clip_coef=0.2,
+        vf_clip_coef=0.2,
+    )
+    sweep_config = make_sweep_config()
+    return cleanrl_init, cleanrl_train, sweep_config
 
 def squared():
     cleanrl_init = CleanRLInit(

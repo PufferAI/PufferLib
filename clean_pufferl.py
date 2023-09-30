@@ -376,6 +376,7 @@ def train(
     norm_adv=True,
     clip_coef=0.1,
     clip_vloss=True,
+    vf_clip_coef=0.1,
     ent_coef=0.01,
     vf_coef=0.5,
     max_grad_norm=0.5,
@@ -488,8 +489,8 @@ def train(
                 v_loss_unclipped = (newvalue - mb_returns) ** 2
                 v_clipped = mb_values + torch.clamp(
                     newvalue - mb_values,
-                    -clip_coef,
-                    clip_coef,
+                    -vf_clip_coef,
+                    vf_clip_coef,
                 )
                 v_loss_clipped = (v_clipped - mb_returns) ** 2
                 v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)

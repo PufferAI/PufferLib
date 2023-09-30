@@ -1,18 +1,15 @@
 from pdb import set_trace as T
-import numpy as np
 
 import torch
 from torch import nn
-from torch.distributions.categorical import Categorical
-
-import gym
 
 import pufferlib
-from pufferlib.pytorch import layer_init
+import pufferlib.pytorch
 import pufferlib.models
 
 
 # taken from https://github.com/AIcrowd/neurips2020-procgen-starter-kit/blob/142d09586d2272a17f44481a115c4bd817cf6a94/models/impala_cnn_torch.py
+# Updated with parameters from MSRL https://arxiv.org/pdf/2103.15332.pdf
 class ResidualBlock(nn.Module):
     def __init__(self, channels):
         super().__init__()
@@ -26,7 +23,6 @@ class ResidualBlock(nn.Module):
         x = nn.functional.relu(x)
         x = self.conv1(x)
         return x + inputs
-
 
 class ConvSequence(nn.Module):
     def __init__(self, input_shape, out_channels):
@@ -49,13 +45,14 @@ class ConvSequence(nn.Module):
         _c, h, w = self._input_shape
         return (self._out_channels, (h + 1) // 2, (w + 1) // 2)
 
-
 class Policy(pufferlib.models.Policy):
     def __init__(self, env):
         super().__init__(env)
         h, w, c = env.observation_space.shape
         shape = (c, h, w)
         conv_seqs = []
+        # MSRL uses larger network size
+        #for out_channels in [32, 64, 64, 128, 128]:
         for out_channels in [16, 32, 32]:
             conv_seq = ConvSequence(shape, out_channels)
             shape = conv_seq.get_output_shape()
@@ -67,8 +64,10 @@ class Policy(pufferlib.models.Policy):
             nn.ReLU(),
         ]
         self.network = nn.Sequential(*conv_seqs)
-        self.actor = layer_init(nn.Linear(256, self.action_space.n), std=0.01)
-        self.value = layer_init(nn.Linear(256, 1), std=1)
+        self.actor = pufferlib.pytorch.layer_init(
+                nn.Linear(256, self.action_space.n), std=0.01)
+        self.value = pufferlib.pytorch.layer_init(
+                nn.Linear(256, 1), std=1)
 
     def encode_observations(self, x):
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)  # "bhwc" -> "bchw"

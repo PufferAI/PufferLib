@@ -39,7 +39,8 @@ def make_config(env):
         pufferlib.utils.install_requirements(env)
         env_module = importlib.import_module(f'pufferlib.registry.{env}')
 
-    cleanrl_init, cleanrl_train, sweep_config = getattr(config, env)()
+    all_configs = config.all()
+    cleanrl_init, cleanrl_train, sweep_config = all_configs[env]()
 
     env_kwargs = get_init_args(env_module.make_env)
     policy_kwargs = get_init_args(env_module.Policy.__init__)
