@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import pufferlib.models
-import puflerlib.pytorch
+import pufferlib.pytorch
 
 
 class Recurrent(pufferlib.pytorch.LSTM):

@@ -2,6 +2,9 @@ from setuptools import find_packages, setup
 from Cython.Build import cythonize
 from itertools import chain
 
+GYMNASIUM_VERSION = '0.29.1'
+GYM_VERSION = '0.23.0'
+PETTINGZOO_VERSION = '1.24.1'
 
 docs = [
     'sphinx==5.0.0',
@@ -12,29 +15,27 @@ docs = [
     'furo==2023.3.27',
 ]
 
-all_environments = {
+
+# These are the environments that PufferLib has made
+# compatible with the latest version of Gym/Gymnasium/PettingZoo
+# They are included in PufferTank as a default heavy install
+# We force updated versions of Gym/Gymnasium/PettingZoo here to
+# ensure that users do not have issues with conflicting versions
+# when switching to incompatible environments
+compatible_environments = {
     'atari': [
-        'gym[atari,accept-rom-license]==0.23.0',
-        'stable_baselines3==1.2.0',
+        'gymnasium[atari,accept-rom-license]',
+        'stable_baselines3==2.1.0',
     ],
-    # Not ready: Requires Gym 0.25+
-    #'avalon': [
-    #    'avalon-rl==1.0.0',
-    #],
-    'box2d': [
-        'swig==4.1.1', #unspecified box2d dep
-        'gym[box2d]',
+   'box2d': [
+        'swig==4.1.1',
+        'gymnasium[box2d]',
     ],
     'butterfly': [
         'pettingzoo[butterfly]',
     ],
     'crafter': [
         'crafter==1.8.0',
-    ],
-    'dm_control': [
-        'dm_control==1.0.11',
-        'gym_dmc==0.2.5',
-        'gym==0.21.0',
     ],
     'dm_lab': [
         'gym_deepmindlab==0.1.2',
@@ -44,16 +45,15 @@ all_environments = {
         'imageio==2.23.0',
         'griddly==1.4.2',
     ],
-    'magent': [
-        'magent==0.2.4',
-    ],
     'microrts': [
         'ffmpeg==1.4',
         'gym_microrts==0.3.2',
     ],
-    'minerl': [
-        'gym==0.17.0',
-        'minerl==0.4.4',
+    'minigrid': [
+        'minigrid==2.3.1',
+    ],
+    'minihack': [
+        'minihack==0.1.5',
     ],
     'nethack': [
         'nle==0.9.0',
@@ -64,22 +64,44 @@ all_environments = {
     'procgen': [
         'procgen==0.10.7',
     ],
+}
+
+for env, packages in compatible_environments.items():
+    compatible_environments[env] = [
+        f'gymnasium=={GYMNASIUM_VERSION}',
+        f'gym=={GYM_VERSION}',
+        f'pettingzoo=={PETTINGZOO_VERSION}',
+        *packages,
+    ]
+
+# These environments require specific old versions of 
+# Gym/Gymnasium/PettingZoo to work.
+incompatible_environments = {
+    'avalon': [
+        'avalon-rl==1.0.0',
+    ],
+    'dm_control': [
+        'dm_control==1.0.11',
+        'gym_dmc==0.2.5',
+        'gym==0.21.0',
+    ],
+    'magent': [
+        'magent==0.2.4',
+        'pettingzoo==1.19.0',
+        # The Magent2 package is broken for now
+        #'magent2==0.3.2',
+    ],
+    'minerl': [
+        'gym==0.17.0',
+        'minerl==0.4.4',
+    ],
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',
     #],
+    #'stable-retro': [
+    #    'git+https://github.com/Farama-Foundation/stable-retro.git',
+    #]
 }
-
-compatible_environments = [
-    *all_environments['atari'],
-    *all_environments['box2d'],
-    *all_environments['butterfly'],
-    *all_environments['crafter'],
-    *all_environments['dm_lab'],
-    *all_environments['magent'],
-    *all_environments['microrts'],
-    *all_environments['nethack'],
-    *all_environments['nmmo'],
-]
 
 rllib = [
     'ray[all]==2.0.0',
@@ -94,10 +116,6 @@ cleanrl = [
     'wandb==0.13.7',
     'psutil==5.9.5',
 ]
-
-flat_environments = list(set(chain.from_iterable(all_environments.values())))
-
-extra_all = docs + compatible_environments + rllib
 
 setup(
     name="pufferlib",
@@ -119,9 +137,9 @@ setup(
         'docs': docs,
         'rllib': rllib,
         'cleanrl': cleanrl,
-        'environments': compatible_environments,
-        'all_compatible': docs + cleanrl + rllib + compatible_environments,
-        **all_environments,
+        'compatible-environments': compatible_environments,
+        **compatible_environments,
+        **incompatible_environments,
     },
     ext_modules = cythonize("pufferlib/extensions.pyx"),
     python_requires=">=3.8",

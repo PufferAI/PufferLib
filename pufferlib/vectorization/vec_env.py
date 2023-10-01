@@ -84,7 +84,7 @@ def reset_precheck(state):
     state.flag = RECV
  
 def aggregate_recvs(state, returns):
-    obs, rewards, dones, infos = list(zip(*returns))
+    obs, rewards, dones, truncateds, infos = list(zip(*returns))
 
     for i, o in enumerate(obs):
         total_agents = state.num_agents * state.envs_per_worker
@@ -92,12 +92,16 @@ def aggregate_recvs(state, returns):
 
     rewards = list(chain.from_iterable(rewards))
     dones = list(chain.from_iterable(dones))
+    truncateds = list(chain.from_iterable(truncateds))
     orig = infos
     infos = [i for ii in infos for i in ii]
 
-    assert len(rewards) == len(dones) == total_agents * state.num_workers
+    
+    if not(len(rewards) == len(dones) == len(truncateds) == total_agents * state.num_workers):
+        T()
+    assert len(rewards) == len(dones) == len(truncateds) == total_agents * state.num_workers
     assert len(infos) == state.num_workers * state.envs_per_worker
-    return state.preallocated_obs, rewards, dones, infos
+    return state.preallocated_obs, rewards, dones, truncateds, infos
 
 def split_actions(state, actions, env_id=None):
     if type(actions) == list:

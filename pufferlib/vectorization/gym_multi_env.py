@@ -11,12 +11,14 @@ from pufferlib.vectorization.multi_env import (
 
 
 def reset(state, seed=None):
+    infos = []
     for idx, e in enumerate(state.envs):
         if seed is None:
-            ob = e.reset()
+            ob, i = e.reset()
         else:
-            ob = e.reset(seed=hash(1000*seed + idx))
+            ob, i = e.reset(seed=hash(1000*seed + idx))
 
+        infos.append({})
         if state.preallocated_obs is None:
             state.preallocated_obs = np.empty(
                 (len(state.envs), *ob.shape), dtype=ob.dtype)
@@ -25,28 +27,30 @@ def reset(state, seed=None):
 
     rewards = [0] * len(state.preallocated_obs)
     dones = [False] * len(state.preallocated_obs)
-    infos = [{} for _ in state.envs]
+    truncateds = [False] * len(state.preallocated_obs)
 
-    return state.preallocated_obs, rewards, dones, infos
+    return state.preallocated_obs, rewards, dones, truncateds, infos
 
 def step(state, actions):
-    rewards, dones, infos = [], [], []
+    rewards, dones, truncateds, infos = [], [], [], []
 
     for idx, (env, atns) in enumerate(zip(state.envs, actions)):
         if env.done:
-            o  = env.reset()
+            o, i = env.reset()
             rewards.append(0)
             dones.append(False)
-            infos.append({})
+            truncateds.append(False)
+            infos.append(i)
         else:
-            o, r, d, i = env.step(atns)
+            o, r, d, t, i = env.step(atns)
             rewards.append(r)
             dones.append(d)
+            truncateds.append(t)
             infos.append(i)
 
         state.preallocated_obs[idx] = o
 
-    return state.preallocated_obs, rewards, dones, infos
+    return state.preallocated_obs, rewards, dones, truncateds, infos
 
 class GymMultiEnv:
     __init__ = init

@@ -2,15 +2,16 @@ from pdb import set_trace as T
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.exceptions
-from pufferlib.registry import try_import
+import pufferlib.registry
+import pufferlib.wrappers
 
 
 def env_creator():
-    nmmo = try_import('nmmo')
+    nmmo = pufferlib.registry.try_import('nmmo')
     return nmmo.Env
 
 def make_env(*args, **kwargs):
     '''Neural MMO creation function'''
     env = env_creator()(*args, **kwargs)
+    env = pufferlib.wrappers.PettingZooTruncatedWrapper(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)

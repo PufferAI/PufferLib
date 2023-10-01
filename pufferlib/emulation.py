@@ -66,9 +66,9 @@ class Postprocessor:
         '''
         return action
 
-    def reward_done_info(self, reward, done, info):
-        '''Called on the reward, done, and info after they are returned by the environment'''
-        return reward, done, info
+    def reward_done_truncated_info(self, reward, done, truncated, info):
+        '''Called on the reward, done, truncated, and info after they are returned by the environment'''
+        return reward, done, truncated, info
 
 
 class BasicPostprocessor(Postprocessor):
@@ -80,20 +80,20 @@ class BasicPostprocessor(Postprocessor):
         self.epoch_length = 0
         self.done = False
 
-    def reward_done_info(self, reward, done, info):
+    def reward_done_truncated_info(self, reward, done, truncated, info):
         if isinstance(rewards, (list, np.ndarray)):
             rewards = sum(rewards.values())
 
         # Env is done
-        if len(self.env.agents) == 0:
+        if done or truncated:
             info['return'] = self.epoch_return
             info['length'] = self.epoch_length
             self.done = True
-        elif not done:
+        else:
             self.epoch_length += 1
             self.epoch_return += rewards
 
-        return reward, done, info
+        return reward, done, truncated, info
 
 
 class GymPufferEnv(gym.Env):
@@ -143,7 +143,7 @@ class GymPufferEnv(gym.Env):
         self.initialized = True
         self.done = False
 
-        ob = _seed_and_reset(self.env, seed)
+        ob, info = _seed_and_reset(self.env, seed)
 
         # Call user featurizer and flatten the observations
         processed_ob = postprocess_and_flatten(
@@ -154,7 +154,7 @@ class GymPufferEnv(gym.Env):
                 self.is_observation_checked = check_space(
                     processed_ob, self.box_observation_space)
 
-        return processed_ob
+        return processed_ob, info
  
     def step(self, action):
         '''Execute an action and return (observation, reward, done, info)'''
@@ -177,14 +177,14 @@ class GymPufferEnv(gym.Env):
             ), self.flat_action_structure
         )
 
-        ob, reward, done, info = self.env.step(action)
+        ob, reward, done, truncated, info = self.env.step(action)
 
         # Call user postprocessors and flatten the observations
-        processed_ob, single_reward, single_done, single_info = postprocess_and_flatten(
-            ob, self.postprocessor, reward, done, info)
+        processed_ob, single_reward, single_done, single_truncated, single_info = postprocess_and_flatten(
+            ob, self.postprocessor, reward, done, truncated, info)
                    
         self.done = single_done
-        return processed_ob, single_reward, single_done, single_info
+        return processed_ob, single_reward, single_done, single_truncated, single_info
 
     def render(self):
         return self.env.render()
@@ -275,7 +275,7 @@ class PettingZooPufferEnv:
         return self.multidiscrete_action_space
 
     def reset(self, seed=None):
-        obs = self.env.reset(seed=seed)
+        obs, info = self.env.reset(seed=seed)
         self.initialized = True
         self.all_done = False
 
@@ -296,7 +296,7 @@ class PettingZooPufferEnv:
                     self.box_observation_space
                 )
                
-        return postprocessed_obs
+        return postprocessed_obs, info
 
     def step(self, actions):
         '''Step the environment and return (observations, rewards, dones, infos)'''
@@ -332,24 +332,24 @@ class PettingZooPufferEnv:
         if self.teams is not None:
             unpacked_actions = ungroup_from_teams(self.teams, unpacked_actions)
 
-        obs, rewards, dones, infos = self.env.step(unpacked_actions)
+        obs, rewards, dones, truncateds, infos = self.env.step(unpacked_actions)
         # TODO: Can add this assert once NMMO Horizon is ported to puffer
         # assert all(dones.values()) == (len(self.env.agents) == 0)
 
         if self.teams is not None:
-            obs, rewards, dones = group_into_teams(self.teams, obs, rewards, dones)
+            obs, rewards, truncateds, dones = group_into_teams(self.teams, obs, rewards, truncateds, dones)
 
         # Call user postprocessors and flatten the observations
         for agent in obs:
-            obs[agent], rewards[agent], dones[agent], infos[agent] = postprocess_and_flatten(
+            obs[agent], rewards[agent], dones[agent], truncateds[agent], infos[agent] = postprocess_and_flatten(
                 obs[agent], self.postprocessors[agent],
-                rewards[agent], dones[agent], infos[agent])
+                rewards[agent], dones[agent], truncateds[agent], infos[agent])
         self.all_done = all(dones.values())
 
-        obs, rewards, dones, infos = pad_to_const_num_agents(
-            self.env.possible_agents, obs, rewards, dones, infos, self.pad_observation)
+        obs, rewards, dones, truncateds, infos = pad_to_const_num_agents(
+            self.env.possible_agents, obs, rewards, dones, truncateds, infos, self.pad_observation)
 
-        return obs, rewards, dones, infos
+        return obs, rewards, dones, truncateds, infos
 
     def render(self):
         return self.env.render()
@@ -391,28 +391,29 @@ def pad_agent_data(data, agents, pad_value):
     return {agent: data[agent] if agent in data else pad_value
         for agent in agents}
     
-def pad_to_const_num_agents(agents, obs, rewards, dones, infos, pad_obs):
+def pad_to_const_num_agents(agents, obs, rewards, dones, truncateds, infos, pad_obs):
     padded_obs = pad_agent_data(obs, agents, pad_obs)
     rewards = pad_agent_data(rewards, agents, 0)
     dones = pad_agent_data(dones, agents, True)
+    truncateds = pad_agent_data(truncateds, agents, False)
     infos = pad_agent_data(infos, agents, {})
-    return padded_obs, rewards, dones, infos
+    return padded_obs, rewards, dones, truncateds, infos
 
 def postprocess_and_flatten(ob, postprocessor,
-        reward=None, done=None, info=None,
+        reward=None, done=None, truncated=None, info=None,
         reset=False, max_horizon=None):
     if reset:
         postprocessor.reset(ob)
     else:
-        reward, done, info = postprocessor.reward_done_info(
-            reward, done, info)
+        reward, done, truncated, info = postprocessor.reward_done_truncated_info(
+            reward, done, truncated, info)
 
     postprocessed_ob = postprocessor.observation(ob)
     flat_ob = concatenate(flatten(postprocessed_ob))
 
     if reset:
         return flat_ob
-    return flat_ob, reward, done, info
+    return flat_ob, reward, done, truncated, info
 
 
 def make_flat_and_multidiscrete_atn_space(atn_space):
@@ -625,12 +626,12 @@ def _seed_and_reset(env, seed):
         old_seed=False
 
     if old_seed:
-        obs = env.reset()
+        obs, info = env.reset()
     else:
         try:
-            obs = env.reset(seed=seed)
+            obs, info = env.reset(seed=seed)
         except:
-            obs= env.reset()
+            obs, info= env.reset()
             warnings.warn('WARNING: Environment does not support seeding.', DeprecationWarning)
 
-    return obs
+    return obs, info

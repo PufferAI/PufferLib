@@ -14,7 +14,7 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 import pufferlib.vectorization
-import pufferlib.registry.puffer_envs
+import pufferlib.registry.squared
 
 
 def parse_args():
@@ -145,7 +145,7 @@ if __name__ == "__main__":
 
     # PufferLib env setup
     envs = pufferlib.vectorization.Serial(
-        env_creator = pufferlib.registry.puffer_envs.make_squared,
+        env_creator = pufferlib.registry.squared.make_env,
         env_kwargs={
             'distance_to_target': args.distance_to_target,
             'num_targets': args.num_targets
@@ -193,7 +193,7 @@ if __name__ == "__main__":
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            next_obs, reward, done, truncated, info = envs.step(action.cpu().numpy())
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 

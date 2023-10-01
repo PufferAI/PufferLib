@@ -19,17 +19,18 @@ import pufferlib.models
 
 import config
 
-
 def get_init_args(fn):
     sig = inspect.signature(fn)
-    
-    # Extract the arguments and their default values
     args = {}
     for name, param in sig.parameters.items():
         if name in ('self', 'env'):
             continue
-        args[name] = param.default if param.default is not inspect.Parameter.empty else None
-
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            continue
+        elif param.kind == inspect.Parameter.VAR_KEYWORD:
+            continue
+        else:
+            args[name] = param.default if param.default is not inspect.Parameter.empty else None
     return args
 
 def make_config(env):

@@ -5,8 +5,53 @@ import gym
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.emulation
+import pufferlib.registry
+import pufferlib.wrappers
 
+
+def env_creator():
+    pufferlib.registry.try_import('procgen') 
+    return gym.make
+    #import gym3
+    #from procgen.env import ProcgenGym3Env
+    #return ProcgenGym3Env
+
+def make_env(name='bigfish'):
+    '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
+    env = env_creator()(
+        f'procgen-{name}-v0',
+        num_levels=0,
+        start_level=0,
+        paint_vel_info=False,
+        use_generated_assets=False,
+        center_agent=True,
+        use_sequential_levels=False,
+        distribution_mode="easy",
+    )
+ 
+    # Note: CleanRL normalizes and clips rewards
+    #import gym3
+    #env = gym3.ToGymEnv(env)
+    #env = gym.wrappers.TransformObservation(env, lambda obs: obs["rgb"])
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env = gym.wrappers.NormalizeReward(env, gamma=0.999)
+    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    env = pufferlib.wrappers.GymToGymnasium(env)
+    env = pufferlib.emulation.GymPufferEnv(
+        env=env,
+        postprocessor_cls=ProcgenPostprocessor,
+    )
+    return env
+
+class ProcgenPostprocessor(pufferlib.emulation.Postprocessor):
+    def features(self, obs):
+        try:
+            return obs['rgb']
+        except:
+            return obs
+
+    def reward_done_truncated_info(self, reward, done, truncated, info):
+        return float(reward), bool(done), truncated, info
 
 class ProcgenVecEnv:
     '''WIP Vectorized Procgen environment wrapper
@@ -44,52 +89,3 @@ class ProcgenVecEnv:
         actions = np.array(actions)
         obs, rewards, dones, infos = self.envs.step(actions)
         return obs['rgb'], rewards, dones, infos
-
-
-class ProcgenPostprocessor(pufferlib.emulation.Postprocessor):
-    def features(self, obs):
-        try:
-            return obs['rgb']
-        except:
-            return obs
-
-    def reward_done_info(self, reward, done, info):
-        return float(reward), bool(done), info
-
-
-def env_creator():
-    try:
-        with pufferlib.utils.Suppress():
-            import procgen
-            return gym.make
-            #import gym3
-            #from procgen.env import ProcgenGym3Env
-            #return ProcgenGym3Env
-    except:
-        raise pufferlib.utils.SetupError('procgen')
-
-def make_env(name='bigfish'):
-    '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
-    env = env_creator()(
-        f'procgen-{name}-v0',
-        num_levels=0,
-        start_level=0,
-        paint_vel_info=False,
-        use_generated_assets=False,
-        center_agent=True,
-        use_sequential_levels=False,
-        distribution_mode="easy",
-    )
- 
-    # Note: CleanRL normalizes and clips rewards
-    #import gym3
-    #env = gym3.ToGymEnv(env)
-    #env = gym.wrappers.TransformObservation(env, lambda obs: obs["rgb"])
-    env = gym.wrappers.RecordEpisodeStatistics(env)
-    env = gym.wrappers.NormalizeReward(env, gamma=0.999)
-    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-    env = pufferlib.emulation.GymPufferEnv(
-        env=env,
-        postprocessor_cls=ProcgenPostprocessor,
-    )
-    return env

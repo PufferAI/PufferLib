@@ -6,8 +6,8 @@ import torch
 
 @pufferlib.dataclass
 class CleanRLInit:
-    #vectorization: ... = pufferlib.vectorization.Serial
-    vectorization: ... = pufferlib.vectorization.Multiprocessing
+    vectorization: ... = pufferlib.vectorization.Serial
+    #vectorization: ... = pufferlib.vectorization.Multiprocessing
     total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
     num_cores: int = 4
@@ -100,12 +100,15 @@ def all():
         'dm_lab': default,
         'griddly': default,
         'magent': default,
-        #'microrts': default,
-        #'minerl': default,
+        'microrts': default,
+        'minerl': default,
+        'minigrid': default,
+        'minihack': default,
         'nethack': default,
         'nmmo': nmmo,
         'procgen': procgen,
         #'smac': default,
+        #'stable-retro': default,
     }
 
 def classic_control():
@@ -186,3 +189,12 @@ def squared():
         cleanrl_init=CleanRLInitSweep(),
     )
     return cleanrl_init, cleanrl_train, sweep_config
+
+def stable_retro():
+    # Retro cannot simulate multiple environments per core
+    cleanrl_init = CleanRLInit(
+        vectorization=pufferlib.vectorization.Multiprocessing,
+        num_cores=1,
+        num_envs=1,
+    )
+    return cleanrl_init, CleanRLTrain(), make_sweep_config()

@@ -1,4 +1,4 @@
-from gym.envs import classic_control
+from gymnasium.envs import classic_control
 
 import pufferlib
 import pufferlib.emulation

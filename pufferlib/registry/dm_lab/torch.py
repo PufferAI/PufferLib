@@ -4,7 +4,7 @@ import pufferlib.models
 class Policy(pufferlib.models.Convolutional):
     def __init__(
             self,
-            envs,
+            env,
             flat_size=3136,
             channels_last=True,
             downsample=1,
@@ -14,7 +14,7 @@ class Policy(pufferlib.models.Convolutional):
             **kwargs
         ):
         super().__init__(
-            envs,
+            env,
             framestack=3,
             flat_size=flat_size,
             channels_last=channels_last,

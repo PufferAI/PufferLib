@@ -4,10 +4,12 @@ import gym
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.exceptions
+import pufferlib.registry
+import pufferlib.wrappers
 
 
 def env_creator():
+    pufferlib.registry.try_import('griddly')
     return gym.make
 
 def make_env(name='GDY-Spiders-v0'):
@@ -15,12 +17,9 @@ def make_env(name='GDY-Spiders-v0'):
 
     Note that Griddly environments do not have observation spaces until
     they are created and reset'''
-    try:
-        import griddly
-        with pufferlib.utils.Suppress():
-            env = env_creator()(name)
-    except:
-        raise pufferlib.exceptions.SetupError('griddly', name)
+    with pufferlib.utils.Suppress():
+        env = env_creator()(name)
 
     env.reset() # Populate observation space
+    env = pufferlib.wrappers.GymToGymnasium(env)
     return pufferlib.emulation.GymPufferEnv(env)

@@ -3,13 +3,12 @@ import numpy as np
 
 from abc import ABC, abstractmethod
 
-import gym
-
 import torch
 import torch.nn as nn
 
 import pufferlib.emulation
 import pufferlib.pytorch
+import pufferlib.spaces
 
 
 class Policy(nn.Module):
@@ -44,10 +43,10 @@ class Policy(nn.Module):
             self.action_space = env.single_action_space
 
         self.is_multidiscrete = isinstance(self.action_space,
-                gym.spaces.MultiDiscrete)
+                pufferlib.spaces.MultiDiscrete)
 
         if not self.is_multidiscrete:
-            assert isinstance(self.action_space, gym.spaces.Discrete)
+            assert isinstance(self.action_space, pufferlib.spaces.Discrete)
 
     @abstractmethod
     def encode_observations(self, flat_observations):

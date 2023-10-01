@@ -11,15 +11,17 @@ from pufferlib.vectorization.multi_env import (
 
 def reset(state, seed=None):
     state.agent_keys = []
+    infos = []
 
     ptr = 0
     for idx, e in enumerate(state.envs):
         if seed is None:
-            obs = e.reset()
+            obs, i = e.reset()
         else:
-            obs = e.reset(seed=hash(1000*seed + idx))
+            obs, i = e.reset(seed=hash(1000*seed + idx))
 
         state.agent_keys.append(list(obs.keys()))
+        infos.append(i)
 
         if state.preallocated_obs is None:
             ob = obs[list(obs.keys())[0]]
@@ -31,31 +33,29 @@ def reset(state, seed=None):
 
     rewards = [0] * len(state.preallocated_obs)
     dones = [False] * len(state.preallocated_obs)
-    infos = [
-        {agent_id: {} for agent_id in state.envs[0].possible_agents}
-        for _ in state.envs
-    ]
-
-    return state.preallocated_obs, rewards, dones, infos
+    truncateds = [False] * len(state.preallocated_obs)
+    return state.preallocated_obs, rewards, dones, truncateds, infos
 
 def step(state, actions):
     actions = np.array_split(actions, len(state.envs))
-    rewards, dones, infos = [], [], []
+    rewards, dones, truncateds, infos = [], [], [], []
 
     ptr = 0
     for idx, (a_keys, env, atns) in enumerate(zip(state.agent_keys, state.envs, actions)):
         if env.done:
-            o  = env.reset()
+            o, i = env.reset()
             num_agents = len(env.possible_agents)
             rewards.extend([0] * num_agents)
             dones.extend([False] * num_agents)
-            infos.append({agent_id: {} for agent_id in env.possible_agents})
+            truncateds.extend([False] * num_agents)
+            infos.append(i)
         else:
             assert len(a_keys) == len(atns)
             atns = dict(zip(a_keys, atns))
-            o, r, d, i= env.step(atns)
+            o, r, d, t, i = env.step(atns)
             rewards.extend(r.values())
             dones.extend(d.values())
+            truncateds.extend(t.values())
             infos.append(i)
 
         state.agent_keys[idx] = list(o.keys())
@@ -64,7 +64,7 @@ def step(state, actions):
             state.preallocated_obs[ptr] = oo
             ptr += 1
 
-    return state.preallocated_obs, rewards, dones, infos
+    return state.preallocated_obs, rewards, dones, truncateds, infos
 
 class PettingZooMultiEnv:
     __init__ = init

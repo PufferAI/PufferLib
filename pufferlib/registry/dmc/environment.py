@@ -2,22 +2,19 @@ import gym
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.exceptions
+import pufferlib.registry
 
-def env_creator(name):
+
+def env_creator():
     '''Deepmind Control environment creation function
 
     No support for bindings yet because PufferLib does
     not support continuous action spaces.'''
-    try:
-        from dm_control import suite
-        import gym_dmc
-    except:
-        raise pufferlib.exceptions.SetupError('dmc', name)
-    else:
-        return gym.make
+    pufferlib.registry.try_import('dm_control', 'dmc')
+    pufferlib.registry.try_import('gym_dmc', 'dmc')
+    return gym.make
 
-def make_env(name *args):
+def make_env(name, *args):
     '''No PufferLib support for Deepmind Control environments yet.'''
-    env = env_creator(name)(*args)
+    env = env_creator()(name, *args)
     return env
