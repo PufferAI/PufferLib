@@ -2,9 +2,20 @@ from setuptools import find_packages, setup
 from Cython.Build import cythonize
 from itertools import chain
 
+# Default Gym/Gymnasium/PettingZoo versions
+# Gym:
+# - 0.26 still has deprecation warnings and is the last version of the package
+# - 0.25 adds a breaking API change to reset, step, and render_modes
+# - 0.24 is broken
+# - 0.22-0.23 triggers deprecation warnings by calling its own functions
+# - 0.21 is the most stable version
+# - <= 0.20 is missing dict methods for gym.spaces.Dict
+# - 0.18-0.21 require setuptools<=65.5.0
+
 GYMNASIUM_VERSION = '0.29.1'
-GYM_VERSION = '0.23.0'
+GYM_VERSION = '0.21'
 PETTINGZOO_VERSION = '1.24.1'
+SHIMMY = 'shimmy[gym-v21]'
 
 docs = [
     'sphinx==5.0.0',
@@ -27,15 +38,20 @@ compatible_environments = {
         'gymnasium[atari,accept-rom-license]',
         'stable_baselines3==2.1.0',
     ],
-   'box2d': [
+    'box2d': [
         'swig==4.1.1',
         'gymnasium[box2d]',
     ],
     'butterfly': [
         'pettingzoo[butterfly]',
     ],
+    'classic_control': [
+    ],
     'crafter': [
         'crafter==1.8.0',
+    ],
+    'dm_control': [
+        'dm_control==1.0.11',
     ],
     'dm_lab': [
         'gym_deepmindlab==0.1.2',
@@ -61,6 +77,9 @@ compatible_environments = {
     'nmmo': [
         'nmmo',
     ],
+    'openspiel': [
+        'openspiel==1.3',
+    ],
     'procgen': [
         'procgen==0.10.7',
     ],
@@ -71,6 +90,7 @@ for env, packages in compatible_environments.items():
         f'gymnasium=={GYMNASIUM_VERSION}',
         f'gym=={GYM_VERSION}',
         f'pettingzoo=={PETTINGZOO_VERSION}',
+        SHIMMY,
         *packages,
     ]
 
@@ -79,21 +99,24 @@ for env, packages in compatible_environments.items():
 incompatible_environments = {
     'avalon': [
         'avalon-rl==1.0.0',
-    ],
-    'dm_control': [
-        'dm_control==1.0.11',
-        'gym_dmc==0.2.5',
-        'gym==0.21.0',
+        f'gymnasium=={GYMNASIUM_VERSION}',
+        f'pettingzoo=={PETTINGZOO_VERSION}',
     ],
     'magent': [
         'magent==0.2.4',
         'pettingzoo==1.19.0',
+        f'gymnasium=={GYMNASIUM_VERSION}',
+        f'gym=={GYM_VERSION}',
         # The Magent2 package is broken for now
         #'magent2==0.3.2',
     ],
     'minerl': [
         'gym==0.17.0',
         'minerl==0.4.4',
+        # Compatiblity warning with urllib3 and chardet
+        'requests==2.31.0',
+        f'gymnasium=={GYMNASIUM_VERSION}',
+        f'pettingzoo=={PETTINGZOO_VERSION}',
     ],
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',
@@ -126,11 +149,9 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
-        'gym==0.23',
         'numpy==1.23.3',
         'opencv-python==3.4.17.63',
         'openskill==4.0.0',
-        'pettingzoo==1.19.0',
         'cython==3.0.0',
     ],
     extras_require={

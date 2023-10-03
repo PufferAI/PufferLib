@@ -620,18 +620,13 @@ def _seed_and_reset(env, seed):
         return env.reset()
 
     try:
-        env.seed(seed)
-        old_seed=True
+        obs, info = env.reset(seed=seed)
     except:
-        old_seed=False
-
-    if old_seed:
-        obs, info = env.reset()
-    else:
         try:
-            obs, info = env.reset(seed=seed)
+            env.seed(seed)
+            obs, info = env.reset()
         except:
-            obs, info= env.reset()
+            obs, info = env.reset()
             warnings.warn('WARNING: Environment does not support seeding.', DeprecationWarning)
 
     return obs, info

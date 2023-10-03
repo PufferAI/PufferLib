@@ -14,7 +14,11 @@ from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from io import StringIO
 import psutil
 
+import warnings
+from functools import wraps
+
 import inspect
+import importlib
 
 import pettingzoo
 import gym
@@ -24,9 +28,16 @@ def install_requirements(env):
     '''Pip install dependencies for specified environment'''
     pip_install_cmd = [sys.executable, "-m", "pip", "install", "-e" f".[{env}]"]
     proc = subprocess.run(pip_install_cmd, capture_output=True, text=True)
-
     if proc.returncode != 0:
         raise RuntimeError(f"Error installing requirements: {proc.stderr}")
+
+def silence_warnings(original_func, category=DeprecationWarning):
+    @wraps(original_func)
+    def wrapper(*args, **kwargs):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=category)
+            return original_func(*args, **kwargs)
+    return wrapper
 
 def check_env(env):
     #assert issubclass(env_cls, gym.Env), "Not a gymnasium env (are you on old gym?)"

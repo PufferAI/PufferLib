@@ -16,7 +16,7 @@ def env_creator(name):
     else:
         raise ValueError(f'Unknown environment: {name}')
      
-def make_env(name='cooperative_pong_v5'):
-    env = env_creator(name)()
+def make_env(name='cooperative_pong_v5', render_mode='not_human'):
+    env = env_creator(name)(render_mode=render_mode)
     env = aec_to_parallel_wrapper(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)

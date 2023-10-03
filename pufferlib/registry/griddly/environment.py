@@ -1,11 +1,11 @@
-import numpy as np
+from pdb import set_trace as T
 
 import gym
+import shimmy
 
 import pufferlib
 import pufferlib.emulation
 import pufferlib.registry
-import pufferlib.wrappers
 
 
 def env_creator():
@@ -19,7 +19,7 @@ def make_env(name='GDY-Spiders-v0'):
     they are created and reset'''
     with pufferlib.utils.Suppress():
         env = env_creator()(name)
+        env.reset() # Populate observation space
 
-    env.reset() # Populate observation space
-    env = pufferlib.wrappers.GymToGymnasium(env)
+    env = shimmy.GymV21CompatibilityV0(env=env)
     return pufferlib.emulation.GymPufferEnv(env)

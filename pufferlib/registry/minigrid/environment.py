@@ -25,8 +25,8 @@ class MiniGridWrapper:
         self.action_space = self.env.action_space
         self.close = self.env.close
 
-    def reset(self):
-        obs, info = self.env.reset()
+    def reset(self, seed=None):
+        obs, info = self.env.reset(seed=seed)
         del obs['mission']
         return obs, info
 

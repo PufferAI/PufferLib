@@ -1,9 +1,10 @@
 from pdb import set_trace as T
 
+import shimmy
+
 import pufferlib
 import pufferlib.emulation
 import pufferlib.registry
-import pufferlib.wrappers
 
 
 def env_creator():
@@ -13,5 +14,5 @@ def env_creator():
 def make_env():
     '''NetHack binding creation function'''
     env = env_creator()()
-    env = pufferlib.wrappers.GymToGymnasium(env)
+    env = shimmy.GymV21CompatibilityV0(env=env)
     return pufferlib.emulation.GymPufferEnv(env=env)

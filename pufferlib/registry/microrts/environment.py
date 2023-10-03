@@ -1,9 +1,12 @@
 from pdb import set_trace as T
 import numpy as np
 
+import warnings
+
+import shimmy
+
 import pufferlib.emulation
 import pufferlib.registry
-import pufferlib.wrappers
 
 
 def env_creator():
@@ -16,9 +19,14 @@ def make_env():
     
     This library appears broken. Step crashes in Java.
     '''
-    env = env_creator()()
+    with pufferlib.utils.Suppress():
+        env = env_creator()()
+
+    env.reset = pufferlib.utils.silence_warnings(env.reset)
+    env.step = pufferlib.utils.silence_warnings(env.step)
+
     env = MicroRTS(env)
-    env = pufferlib.wrappers.GymToGymnasium(env)
+    env = shimmy.GymV21CompatibilityV0(env=env)
     return pufferlib.emulation.GymPufferEnv(env=env)
 
 class MicroRTS:
@@ -28,6 +36,7 @@ class MicroRTS:
         self.action_space = self.env.action_space
         self.render = self.env.render
         self.close = self.env.close
+        self.seed = self.env.seed
 
     def reset(self):
         return self.env.reset().astype(np.int32)

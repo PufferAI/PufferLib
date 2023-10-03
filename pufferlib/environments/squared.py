@@ -40,7 +40,11 @@ def init(self,
         action_space=gym.spaces.Discrete(8),
     )
 
-def reset(state):
+def reset(state, seed=None):
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+
     # Allocating a new grid is faster than resetting an old one
     state.grid = np.zeros((state.grid_size, state.grid_size), dtype=np.float32)
     state.grid[state.distance_to_target, state.distance_to_target] = -1

@@ -2,41 +2,35 @@ from pdb import set_trace as T
 import numpy as np
 
 import gym
+import shimmy
 
 import pufferlib
 import pufferlib.emulation
 import pufferlib.registry
-import pufferlib.wrappers
 
 
 def env_creator():
     pufferlib.registry.try_import('procgen') 
-    return gym.make
-    #import gym3
-    #from procgen.env import ProcgenGym3Env
-    #return ProcgenGym3Env
+    #return gym.make
+    import gym3
+    from procgen.env import ProcgenGym3Env
+    return ProcgenGym3Env
 
-def make_env(name='bigfish'):
+def make_env(name='bigfish', distribution_mode='easy'):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
     env = env_creator()(
-        f'procgen-{name}-v0',
-        num_levels=0,
-        start_level=0,
-        paint_vel_info=False,
-        use_generated_assets=False,
-        center_agent=True,
-        use_sequential_levels=False,
-        distribution_mode="easy",
+        num=1,
+        env_name=name,
+        distribution_mode=distribution_mode,
     )
- 
+
     # Note: CleanRL normalizes and clips rewards
-    #import gym3
-    #env = gym3.ToGymEnv(env)
-    #env = gym.wrappers.TransformObservation(env, lambda obs: obs["rgb"])
+    import gym3
+    env = gym3.ToGymEnv(env)
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = gym.wrappers.NormalizeReward(env, gamma=0.999)
     env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-    env = pufferlib.wrappers.GymToGymnasium(env)
+    env = shimmy.GymV21CompatibilityV0(env=env)
     env = pufferlib.emulation.GymPufferEnv(
         env=env,
         postprocessor_cls=ProcgenPostprocessor,

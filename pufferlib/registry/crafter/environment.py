@@ -1,11 +1,12 @@
 from pdb import set_trace as T
 
 import gym
+import shimmy
 
 import pufferlib
 import pufferlib.emulation
 import pufferlib.registry
-import pufferlib.wrappers
+import pufferlib.utils
 
 
 class CrafterPostprocessor(pufferlib.emulation.Postprocessor):
@@ -18,6 +19,7 @@ def env_creator():
 
 def make_env(name='CrafterReward-v1'):
     '''Crafter creation function'''
-    env = env_creator()(name)
-    env = pufferlib.wrappers.GymToGymnasium(env)
+    env = pufferlib.utils.silence_warnings(env_creator())(name)
+    env.reset = pufferlib.utils.silence_warnings(env.reset)
+    env = shimmy.GymV21CompatibilityV0(env=env)
     return pufferlib.emulation.GymPufferEnv(env=env)

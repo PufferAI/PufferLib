@@ -1,9 +1,12 @@
+from pdb import set_trace as T
+
 import gym
+import shimmy
 
 import pufferlib
 import pufferlib.emulation
 import pufferlib.registry
-import pufferlib.wrappers
+import pufferlib.utils
 
 
 def env_creator():
@@ -15,7 +18,8 @@ def make_env(name='MineRLNavigateDense-v0'):
 
     # Monkey patch to add .itmes to old gym.spaces.Dict
     gym.spaces.Dict.items = lambda self: self.spaces.items()
+    with pufferlib.utils.Suppress():
+        env = env_creator()(name)
 
-    env = env_creator()(name)
-    env = pufferlib.wrappers.GymToGymnasium(env)
+    env = shimmy.GymV21CompatibilityV0(env=env)
     return pufferlib.emulation.GymPufferEnv(env)

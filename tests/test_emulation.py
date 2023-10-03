@@ -17,19 +17,20 @@ def test_gym_emulation(env_cls, steps=100):
     raw_env = env_cls()
     puf_env = pufferlib.emulation.GymPufferEnv(env_creator=env_cls)
 
-    raw_done = True
-    puf_done = True
+    raw_done = puf_done = True
+    raw_truncated = puf_truncated = False
 
     flat_obs_space = puf_env.flat_observation_space
 
     for i in range(steps):
         assert puf_done == raw_done
+        assert puf_truncated == raw_truncated
 
         if raw_done:
             with puf_profiler:
-                puf_ob = puf_env.reset()
+                puf_ob, _ = puf_env.reset()
             with raw_profiler:
-                raw_ob = raw_env.reset()
+                raw_ob, _ = raw_env.reset()
                 structure = pufferlib.emulation.flatten_structure(raw_ob)
 
         # Reconstruct original obs format from puffer env and compare to raw
@@ -44,7 +45,7 @@ def test_gym_emulation(env_cls, steps=100):
         action = raw_env.action_space.sample()
 
         with raw_profiler:
-            raw_ob, raw_reward, raw_done, _ = raw_env.step(action)
+            raw_ob, raw_reward, raw_done, raw_truncated, _ = raw_env.step(action)
 
         # Convert raw actions to puffer format
 
@@ -54,7 +55,7 @@ def test_gym_emulation(env_cls, steps=100):
             action = np.array(action)
 
         with puf_profiler:
-            puf_ob, puf_reward, puf_done, _ = puf_env.step(action)
+            puf_ob, puf_reward, puf_done, puf_truncated, _ = puf_env.step(action)
 
         assert puf_reward == raw_reward
 
@@ -79,9 +80,9 @@ def test_pettingzoo_emulation(env_cls, steps=100):
 
         if raw_done:
             with puf_profiler:
-                puf_obs = puf_env.reset()
+                puf_obs, _ = puf_env.reset()
             with raw_profiler:
-                raw_obs = raw_env.reset()
+                raw_obs, _ = raw_env.reset()
 
         # Reconstruct original obs format from puffer env and compare to raw
         for agent in puf_env.possible_agents:
@@ -102,7 +103,7 @@ def test_pettingzoo_emulation(env_cls, steps=100):
             for a in raw_env.agents}
 
         with raw_profiler:
-            raw_obs, raw_rewards, raw_dones, _ = raw_env.step(raw_actions)
+            raw_obs, raw_rewards, raw_dones, raw_truncateds, _ = raw_env.step(raw_actions)
 
         # Convert raw actions to puffer format
         puf_actions = {}
@@ -121,7 +122,7 @@ def test_pettingzoo_emulation(env_cls, steps=100):
             puf_actions[agent] = action
 
         with puf_profiler:
-            puf_obs, puf_rewards, puf_dones, _ = puf_env.step(puf_actions)
+            puf_obs, puf_rewards, puf_dones, puf_truncateds, _ = puf_env.step(puf_actions)
 
         for agent in raw_rewards:
             assert puf_rewards[agent] == raw_rewards[agent]

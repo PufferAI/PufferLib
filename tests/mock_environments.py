@@ -33,12 +33,13 @@ class PerformanceEnv:
         self.bandwidth = bandwith
 
     def reset(self, seed=None):
-        return {1: self.observation_space(1).sample()}
+        return {1: self.observation_space(1).sample()}, {1: {}}
 
     def step(self, actions):
         obs = {1: np.array([0], dtype=np.float32)}
         rewards = {1: 1}
         dones = {1: False}
+        truncateds = {1: False}
         infos = {1: {}}
 
         # Busy wait so process does not swap on sleep
@@ -46,7 +47,7 @@ class PerformanceEnv:
         while time.perf_counter() < end:
             pass
 
-        return obs, rewards, dones, infos
+        return obs, rewards, dones, truncateds, infos
 
     def observation_space(self, agent):
         return Box(
@@ -100,16 +101,16 @@ def make_mock_singleagent_env(observation_space, action_space):
             self.tick = 0
             self.rng = pufferlib.utils.RandomState(seed)
 
-            return _sample_space('agent_1', self.tick, observation_space)
+            ob = _sample_space('agent_1', self.tick, observation_space)
+            return ob, {}
 
         def step(self, actions):
             reward = self.tick
             done = self.tick < 10
             self.tick += 1
 
-            return (
-                _sample_space('agent_1', self.tick, observation_space),
-                reward, done, {'dead': done})
+            ob = _sample_space('agent_1', self.tick, observation_space)
+            return ob, reward, done, False, {'dead': done}
 
     return TestEnv
 
@@ -131,11 +132,13 @@ def make_mock_multiagent_env(
             self.tick = 0
             self.agents = self.possible_agents[:initial_agents]
 
-            return {a: _sample_space(a, self.tick, observation_space)
+            obs = {a: _sample_space(a, self.tick, observation_space)
                 for a in self.agents}
+            infos = {a: {} for a in self.agents}
+            return obs, infos
 
         def step(self, actions):
-            obs, rewards, dones, infos = {}, {}, {}, {}
+            obs, rewards, dones, truncateds, infos = {}, {}, {}, {}, {}
             self.tick += 1
 
             dead  = self.agents[:death_per_tick]
@@ -146,6 +149,7 @@ def make_mock_multiagent_env(
                 obs[kill] = _sample_space(kill, self.tick, observation_space, zero=True)
                 rewards[kill] = -1
                 dones[kill] = True
+                truncateds[kill] = False
                 infos[kill] = {'dead': True}
 
             # TODO: Fix this
@@ -161,9 +165,10 @@ def make_mock_multiagent_env(
                 obs[agent] = _sample_space(agent, self.tick, observation_space)
                 rewards[agent] = 0.1 * _agent_str_to_int(agent)
                 dones[agent] = False
+                truncateds[agent] = False
                 infos[agent] = {'dead': False}
 
-            return obs, rewards, dones, infos
+            return obs, rewards, dones, truncateds, infos
 
         def observation_space(self, agent) -> gym.Space:
             return observation_space
