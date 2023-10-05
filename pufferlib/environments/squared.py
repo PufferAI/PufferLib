@@ -55,7 +55,7 @@ def reset(state, seed=None):
     for x, y in state.targets:
         state.grid[x, y] = 1
 
-    return state.grid
+    return state.grid, {}
 
 def step(state, action):
     x, y = state.agent_pos
@@ -105,7 +105,7 @@ def step(state, action):
     done = state.tick >= state.max_ticks
     info = {'targets_hit': state.num_targets - len(state.targets)} if done else {}
 
-    return state.grid, reward, done, info
+    return state.grid, reward, done, False, info
 
 def render(state):
     for row in state.grid:

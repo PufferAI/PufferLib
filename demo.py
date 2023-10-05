@@ -14,6 +14,7 @@ import pufferlib
 # TODO: Fix circular import depending on import order
 from clean_pufferl import CleanPuffeRL
 
+import pufferlib.args
 import pufferlib.utils
 import pufferlib.models
 
@@ -34,6 +35,7 @@ def get_init_args(fn):
     return args
 
 def make_config(env):
+    # TODO: Improve install checking with pkg_resources
     try:
         env_module = importlib.import_module(f'pufferlib.registry.{env}')
     except:
@@ -41,7 +43,7 @@ def make_config(env):
         env_module = importlib.import_module(f'pufferlib.registry.{env}')
 
     all_configs = config.all()
-    cleanrl_init, cleanrl_train, sweep_config = all_configs[env]()
+    args, sweep_config = all_configs[env]()
 
     env_kwargs = get_init_args(env_module.make_env)
     policy_kwargs = get_init_args(env_module.Policy.__init__)
@@ -51,8 +53,7 @@ def make_config(env):
         recurrent_kwargs = get_init_args(env_module.Recurrent.__init__)
 
     return env_module, sweep_config, pufferlib.namespace(
-        cleanrl_init = cleanrl_init,
-        cleanrl_train = cleanrl_train,
+        args=args,
         env_kwargs = env_kwargs,
         policy_kwargs = policy_kwargs,
         recurrent_kwargs = recurrent_kwargs,
@@ -67,14 +68,16 @@ def make_policy(envs, env_module, args):
     else:
         policy = pufferlib.frameworks.cleanrl.Policy(policy)
 
-    return policy.to(args.cleanrl_init['device'])
+    if args.args.cuda:
+        return policy.cuda()
 
+    return policy
 
 def init_wandb(args, env_module):
     os.environ["WANDB_SILENT"] = "true"
     import wandb
     wandb.init(
-        id=args.run_id or wandb.util.generate_id(),
+        id=args.exp_name or wandb.util.generate_id(),
         project=args.wandb_project,
         entity=args.wandb_entity,
         group=args.wandb_group,
@@ -97,7 +100,7 @@ def sweep(args, env_module, sweep_config):
     sweep_id = wandb.sweep(sweep=sweep_config, project="pufferlib")
 
     def main():
-        args.run_id = init_wandb(args, env_module)
+        args.exp_name = init_wandb(args, env_module)
         if hasattr(wandb.config, 'cleanrl_init'):
             args.cleanrl_init.update(wandb.config.cleanrl_init)
         if hasattr(wandb.config, 'cleanrl_train'):
@@ -113,21 +116,18 @@ def sweep(args, env_module, sweep_config):
 
 def train(args, env_module):
     trainer = CleanPuffeRL(
+        config=args.args,
         agent_creator=make_policy,
         agent_kwargs={'env_module': env_module, 'args': args},
         env_creator=env_module.make_env,
         env_creator_kwargs=args.env_kwargs,
-        **args.cleanrl_init,
-        run_id=args.run_id,
+        exp_name=args.exp_name,
         track=args.track,
     )
 
-    num_updates = (args.cleanrl_init['total_timesteps']
-        // args.cleanrl_init['batch_size'])
-
-    for update in range(num_updates):
+    for update in range(trainer.total_updates):
         trainer.evaluate()
-        trainer.train(**args.cleanrl_train)
+        trainer.train()
 
     trainer.close()
 
@@ -160,7 +160,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Parse environment argument", add_help=False)
     parser.add_argument("--env", type=str, default="nmmo", help="Environment name")
     parser.add_argument("--mode", type=str, default="train", help="train/eval/sweep")
-    parser.add_argument("--run-id", type=str, default=None, help="Experiment name")
+    parser.add_argument("--exp-name", type=str, default=None, help="Experiment name")
     parser.add_argument('--wandb-entity', type=str, default='jsuarez', help='WandB entity')
     parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
     parser.add_argument('--wandb-group', type=str, default='debug', help='WandB group')
@@ -182,12 +182,13 @@ if __name__ == '__main__':
             args[name][key] = getattr(parser.parse_known_args()[0], data_key)
 
     clean_parser.parse_args(sys.argv[1:])
+    args['args'] = pufferlib.args.CleanPuffeRL(**args['args'])
     args = pufferlib.namespace(**args)
 
     if args.mode == 'sweep':
         args.track = True
     elif args.track:
-        args.run_id = init_wandb(args, env_module)
+        args.exp_name = init_wandb(args, env_module)
 
     if args.mode == 'train':
         train(args, env_module)
