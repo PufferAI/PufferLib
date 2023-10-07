@@ -96,6 +96,10 @@ class PolicyGod:
                 name, self.policy_pool._learner_name)
 
     def update_policies(self):
+
+        policies = self.policy_store.select_policies(self.policy_selector)
+        if len(policies) > 1:
+            T()
         self.policy_pool.update_policies({
             p.name: p.policy(
                 policy_args=[self.buffers[0]],

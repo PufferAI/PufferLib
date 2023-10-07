@@ -77,9 +77,6 @@ compatible_environments = {
     'nmmo': [
         'nmmo',
     ],
-    'openspiel': [
-        'openspiel==1.3',
-    ],
     'procgen': [
         'procgen==0.10.7',
     ],
@@ -117,6 +114,10 @@ incompatible_environments = {
         'requests==2.31.0',
         f'gymnasium=={GYMNASIUM_VERSION}',
         f'pettingzoo=={PETTINGZOO_VERSION}',
+    ],
+    'open_spiel': [
+        'open_spiel==1.3',
+        'pettingzoo==1.19.0',
     ],
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',

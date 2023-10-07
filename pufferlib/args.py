@@ -56,7 +56,7 @@ class CleanPuffeRL:
     target_kl: float = None
 
     vectorization: ... = pufferlib.vectorization.Serial
-    num_cores: int = psutil.cpu_count(logical=False)
+    num_cores: int = 4
     num_buffers: int = 1
     verbose: bool = True
     data_dir: str = 'experiments'

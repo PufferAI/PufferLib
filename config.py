@@ -75,7 +75,7 @@ def all():
         'minihack': default,
         'nethack': default,
         'nmmo': nmmo,
-        'openspiel': default,
+        'openspiel': openspiel,
         'procgen': procgen,
         #'smac': default,
         #'stable-retro': default,
@@ -97,6 +97,13 @@ def nmmo():
         num_cores=1,
         num_buffers=1,
         num_envs=1,
+    )
+    return args, make_sweep_config()
+
+def openspiel():
+    args = pufferlib.args.CleanPuffeRL(
+        pool_learner_weight = 0.5,    
+        pool_num_policies = 2,
     )
     return args, make_sweep_config()
 
@@ -124,9 +131,9 @@ def procgen():
     args = pufferlib.args.CleanPuffeRL(
         total_timesteps=8_000_000,
         learning_rate=5e-4,
-        num_cores=4,
-        num_buffers=2,
-        num_envs=32,#6,
+        num_cores=1, #4
+        num_buffers=1,#2,
+        num_envs=1,#32,#6,
         batch_size=16384,
         batch_rows=8,
         bptt_horizon=256,
