@@ -10,6 +10,8 @@ import pufferlib
 import pufferlib.emulation
 import pufferlib.registry
 
+from open_spiel.python.algorithms import mcts
+
 
 def env_creator():
     '''OpenSpiel creation function'''
@@ -34,7 +36,8 @@ class OpenSpielToPettingZoo:
     def __init__(self, env):
         self.env = env
         # Agent IDs are ints, starting from 0.
-        self.num_agents = self.env.num_players()
+        #self.num_agents = self.env.num_players()
+        self.num_agents = 1
         # Store the open-spiel game type.
         self.type = self.env.get_type()
         # Stores the current open-spiel game state.
@@ -43,12 +46,23 @@ class OpenSpielToPettingZoo:
 
     @property
     def possible_agents(self):
+        return [0]
         return list(range(self.num_agents))
 
     def reset(self, seed = None, options = None):
         self.state = self.env.new_initial_state()
         obs, infos = self._get_obs_and_infos()
         self.agents = self.possible_agents
+
+        rnd_state = np.random.RandomState(42)
+        evaluator = mcts.RandomRolloutEvaluator(n_rollouts=10, random_state=rnd_state)
+
+        self.bot = mcts.MCTSBot(
+            game=self.env, uct_c=2, max_simulations=10,
+            evaluator=evaluator, random_state=rnd_state, 
+            child_selection_fn=mcts.SearchNode.puct_value, solve=True,
+        )
+
         return obs, infos
 
     def step(self, action):
@@ -71,6 +85,11 @@ class OpenSpielToPettingZoo:
             # Apparently, this works, even if one or more actions are invalid.
             self.state.apply_actions([action[ag] for ag in range(self.num_agents)])
 
+        # Take other move with a bot
+        if not self.state.is_terminal():
+            bot_atn = self.bot.step(self.state)
+            self.state.apply_action(bot_atn)
+ 
         # Now that we have applied all actions, get the next obs.
         obs, infos = self._get_obs_and_infos()
 

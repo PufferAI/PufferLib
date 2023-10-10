@@ -2,7 +2,6 @@ import os
 import psutil
 
 import pufferlib
-import pufferlib.vectorization
 
 
 @pufferlib.dataclass
@@ -55,7 +54,6 @@ class CleanPuffeRL:
     max_grad_norm: float = 0.5
     target_kl: float = None
 
-    vectorization: ... = pufferlib.vectorization.Serial
     num_cores: int = 4
     num_buffers: int = 1
     verbose: bool = True

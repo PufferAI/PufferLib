@@ -70,6 +70,8 @@ class PolicyPool():
         policies = list(self._policies.values())
         for idx in range(self._num_policies):
             samp = self._sample_idxs[idx]
+            if len(samp) == 0:
+                T()
             assert len(samp) > 0
             if idx >= len(policies):
                 policy = self._learner

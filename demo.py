@@ -120,6 +120,7 @@ def train(args, env_module):
         agent_kwargs={'env_module': env_module, 'args': args},
         env_creator=env_module.make_env,
         env_creator_kwargs=args.env_kwargs,
+        vectorization=args.vectorization,
         exp_name=args.exp_name,
         track=args.track,
     )
@@ -158,9 +159,10 @@ def evaluate(args, env_module):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Parse environment argument", add_help=False)
-    parser.add_argument("--env", type=str, default="nmmo", help="Environment name")
-    parser.add_argument("--mode", type=str, default="train", help="train/eval/sweep")
-    parser.add_argument("--exp-name", type=str, default=None, help="Experiment name")
+    parser.add_argument('--env', type=str, default="nmmo", help="Environment name")
+    parser.add_argument('--mode', type=str, default="train", help="train/eval/sweep")
+    parser.add_argument('--exp-name', type=str, default=None, help="Experiment name")
+    parser.add_argument('--vectorization', type=str, default='serial', help='Vectorization method (serial, multiprocessing, ray)')
     parser.add_argument('--wandb-entity', type=str, default='jsuarez', help='WandB entity')
     parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
     parser.add_argument('--wandb-group', type=str, default='debug', help='WandB group')
@@ -184,6 +186,14 @@ if __name__ == '__main__':
     clean_parser.parse_args(sys.argv[1:])
     args['args'] = pufferlib.args.CleanPuffeRL(**args['args'])
     args = pufferlib.namespace(**args)
+    vec = args.vectorization
+    assert vec in 'serial multiprocessing ray'.split()
+    if vec == 'serial':
+        args.vectorization = pufferlib.vectorization.Serial
+    elif vec == 'multiprocessing':
+        args.vectorization = pufferlib.vectorization.Multiprocessing
+    elif vec == 'ray':
+        args.vectorization = pufferlib.vectorization.Ray
 
     if args.mode == 'sweep':
         args.track = True
