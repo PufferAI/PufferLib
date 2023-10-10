@@ -118,6 +118,9 @@ incompatible_environments = {
     'open_spiel': [
         'open_spiel==1.3',
         'pettingzoo==1.19.0',
+        f'gymnasium=={GYMNASIUM_VERSION}',
+        f'gym=={GYM_VERSION}',
+        SHIMMY,
     ],
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',
