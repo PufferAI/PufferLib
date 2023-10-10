@@ -61,10 +61,7 @@ class OpenSpielToPettingZoo:
         if str(self.type.dynamics) == "Dynamics.SEQUENTIAL":
             curr_player = self.state.current_player()
             assert curr_player in action
-            try:
-                self.state.apply_action(action[curr_player])
-            except:
-                T()
+            self.state.apply_action(action[curr_player])
 
             # Compile rewards dict.
             rewards = {ag: r for ag, r in enumerate(self.state.returns())}
@@ -84,7 +81,9 @@ class OpenSpielToPettingZoo:
         is_terminated = self.state.is_terminal()
         terminateds = dict({ag: is_terminated for ag in range(self.num_agents)})
         truncateds = dict({ag: False for ag in range(self.num_agents)})
-        self.agents = []
+
+        if is_terminated:
+            self.agents = []
 
         return obs, rewards, terminateds, truncateds, infos
 
