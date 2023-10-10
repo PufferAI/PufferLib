@@ -62,10 +62,20 @@ class PolicyPool():
         return sample_idxs
 
     def forwards(self, obs, lstm_state=None, dones=None):
+        #atn, lgprob, _, val = self._policies['learner'].get_action_and_value(obs)
+        #return atn, lgprob, val, lstm_state
+
         batch_size = len(obs)
-        for samp, policy in zip(self._sample_idxs, self._policies.values()):
-            if len(samp) == 0:
-                continue
+        idx = 0
+        policies = list(self._policies.values())
+        for idx in range(self._num_policies):
+            samp = self._sample_idxs[idx]
+            assert len(samp) > 0
+            if idx >= len(policies):
+                policy = self._learner
+            else:
+                policy = policies[idx]
+
             if lstm_state is not None:
                 atn, lgprob, _, val, (lstm_state[0][:, samp], lstm_state[1][:, samp]) = policy.get_action_and_value(
                     obs[samp],

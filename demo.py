@@ -1,24 +1,19 @@
 from pdb import set_trace as T
 import argparse
 import sys
-import time
 import os
+
 import importlib
 import inspect
-from collections import defaultdict
-
-import torch
 
 import pufferlib
-
-# TODO: Fix circular import depending on import order
-from clean_pufferl import CleanPuffeRL
-
 import pufferlib.args
 import pufferlib.utils
 import pufferlib.models
 
 import config
+from clean_pufferl import CleanPuffeRL
+
 
 def get_init_args(fn):
     sig = inspect.signature(fn)
@@ -144,6 +139,7 @@ def evaluate(args, env_module):
     device = args.cleanrl_init['device']
     agent = torch.load('agent.pt').to(device)
 
+    import time
     ob = env.reset()
     for i in range(100):
         ob = torch.tensor(ob).view(1, -1).to(device)

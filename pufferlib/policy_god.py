@@ -96,10 +96,7 @@ class PolicyGod:
                 name, self.policy_pool._learner_name)
 
     def update_policies(self):
-        self.policy_pool.update_policies({
-            p.name: p.policy(
-                policy_args=[self.buffers[0]],
-                device=self.device,
-            ) for p in self.policy_store.select_policies(self.policy_selector)
-        })
-
+        policies = self.policy_store.select_policies(
+            self.policy_selector)
+        self.policy_pool.update_policies(
+            {p.name: p.policy() for p in policies})

@@ -96,7 +96,6 @@ def aggregate_recvs(state, returns):
     orig = infos
     infos = [i for ii in infos for i in ii]
 
-    
     if not(len(rewards) == len(dones) == len(truncateds) == total_agents * state.num_workers):
         T()
     assert len(rewards) == len(dones) == len(truncateds) == total_agents * state.num_workers
