@@ -1,5 +1,9 @@
 import pufferlib.models
-from pufferlib.pytorch import LSTM as Recurrent
+from pufferlib.pytorch import LSTM
+
+class Recurrent(LSTM):
+    def __init__(input_size=512, hidden_size=512, num_layers=1):
+        super().__init__(input_size, hidden_size, num_layers)
 
 
 class Policy(pufferlib.models.Convolutional):

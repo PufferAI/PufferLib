@@ -75,6 +75,11 @@ def make_policy(envs, env_module, args):
 
 def init_wandb(args, env_module):
     os.environ["WANDB_SILENT"] = "true"
+
+    name = args.env
+    if 'name' in args.env_kwargs:
+        name = args.env_kwargs['name']
+
     import wandb
     wandb.init(
         id=args.exp_name or wandb.util.generate_id(),
@@ -82,13 +87,12 @@ def init_wandb(args, env_module):
         entity=args.wandb_entity,
         group=args.wandb_group,
         config={
-            'cleanrl_init': args.cleanrl_init,
-            'cleanrl_train': args.cleanrl_train,
+            'cleanrl': dict(args.args),
             'env': args.env_kwargs,
             'policy': args.policy_kwargs,
             'recurrent': args.recurrent_kwargs,
         },
-        name=args.env,
+        name=name,
         monitor_gym=True,
         save_code=True,
         resume="allow",

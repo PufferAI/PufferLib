@@ -56,15 +56,15 @@ class CleanPuffeRL:
     target_kl: float = None
 
     vectorization: ... = pufferlib.vectorization.Serial
-    num_cores: int = psutil.cpu_count(logical=False)
+    num_cores: int = 4
     num_buffers: int = 1
     verbose: bool = True
     data_dir: str = 'experiments'
-    checkpoint_interval: int = 1
+    checkpoint_interval: int = 200
     cpu_offload: bool = True
     pool_learner_weight: float = 1.0
     pool_num_policies: int = 1
     batch_size: int = 1024
     batch_rows: int = 32
-    bptt_horizon: int = 8 # 16
+    bptt_horizon: int = 16 #8
     vf_clip_coef: float = 0.1
