@@ -50,7 +50,6 @@ class OpenSkillRanker(PolicyRanker):
 
         # Updating ranks
         if len(scores) > 1:
-            T()
             self._tournament.update(
                 policy_ids=list(scores.keys()),
                 scores=np.array([v for v in scores.values()]),
