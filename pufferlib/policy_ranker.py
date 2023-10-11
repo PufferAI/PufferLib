@@ -119,10 +119,13 @@ class OpenSkillRanker(PolicyRanker):
 
     def save_to_file(self, file_path):
         tmp_path = file_path + ".tmp"
+        # NOTE: this is a hack to avoid pickling the sqlite3 connection
+        tmp_conn = self.conn
         self.conn = None
         with open(tmp_path, 'wb') as f:
             pickle.dump(self, f)
         os.rename(tmp_path, file_path)
+        self.conn = tmp_conn
 
     @classmethod
     def load_from_file(cls, file_path):
