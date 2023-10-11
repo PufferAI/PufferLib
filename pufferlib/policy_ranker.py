@@ -1,5 +1,6 @@
 from pdb import set_trace as T
 
+import os
 import numpy as np
 import sqlite3
 from typing import Dict
@@ -20,7 +21,8 @@ class OpenSkillPolicySelector(PolicySelector):
 class OpenSkillRanker(PolicyRanker):
     def __init__(self, db_path, anchor: str, mu: int = 1000, anchor_mu: int = 1000, sigma: float = 100/3):
         super().__init__()
-        self.conn = sqlite3.connect(db_path)
+        self.db_path = db_path
+        self.conn = sqlite3.connect(self.db_path)
         self._init_db()
         self._tournament = OpenSkillRating(mu, anchor_mu, sigma)
         self._anchor = anchor
@@ -52,11 +54,18 @@ class OpenSkillRanker(PolicyRanker):
         if len(scores) > 1:
             self._tournament.update(
                 policy_ids=list(scores.keys()),
-                scores=np.array([v for v in scores.values()]),
-            )
+                scores=list([np.mean(v) for v in scores.values()]))
 
         # Log updated data (replacing the DataFrame logging)
         with self.conn:
+            for name, rating in self._tournament.ratings.items():
+                self.conn.execute(f"""
+                    UPDATE ratings
+                    SET mu = {rating.mu},
+                        sigma = {rating.sigma}
+                    WHERE policy = '{name}';
+                """)
+            # Printing the table
             cursor = self.conn.execute("SELECT * FROM ratings;")
             for row in cursor.fetchall():
                 print(row)
@@ -109,11 +118,18 @@ class OpenSkillRanker(PolicyRanker):
         return OpenSkillPolicySelector(num_policies, exclude)
 
     def save_to_file(self, file_path):
-        with open(file_path, 'wb') as f:
+        tmp_path = file_path + ".tmp"
+        # NOTE: this is a hack to avoid pickling the sqlite3 connection
+        tmp_conn = self.conn
+        self.conn = None
+        with open(tmp_path, 'wb') as f:
             pickle.dump(self, f)
+        os.rename(tmp_path, file_path)
+        self.conn = tmp_conn
 
     @classmethod
     def load_from_file(cls, file_path):
         with open(file_path, 'rb') as f:
             instance = pickle.load(f)
+        instance.conn = sqlite3.connect(instance.db_path)
         return instance
