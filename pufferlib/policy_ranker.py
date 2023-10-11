@@ -57,6 +57,14 @@ class OpenSkillRanker(PolicyRanker):
 
         # Log updated data (replacing the DataFrame logging)
         with self.conn:
+            for name, rating in self._tournament.ratings.items():
+                self.conn.execute(f"""
+                    UPDATE ratings
+                    SET mu = {rating.mu},
+                        sigma = {rating.sigma}
+                    WHERE policy = '{name}';
+                """)
+            # Printing the table
             cursor = self.conn.execute("SELECT * FROM ratings;")
             for row in cursor.fetchall():
                 print(row)
