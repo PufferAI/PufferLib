@@ -21,6 +21,8 @@ def env_creator():
 def make_env(name='bigfish', num_envs=1, num_levels=0,
         start_level=0, distribution_mode='easy'):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
+    assert int(num_envs) == float(num_envs), "num_envs must be an integer"
+    num_envs = int(num_envs)
     envs = env_creator()(
         env_name=name,
         num_envs=num_envs,
@@ -36,7 +38,11 @@ def make_env(name='bigfish', num_envs=1, num_levels=0,
     envs = gym.wrappers.NormalizeReward(envs)
     envs = gym.wrappers.TransformReward(envs, lambda reward: np.clip(reward, -10, 10))
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
-    return ProcgenPettingZooEnv(env=envs)
+    envs = ProcgenPettingZooEnv(envs, num_envs)
+    return pufferlib.emulation.PettingZooPufferEnv(
+        env=envs,
+        postprocessor_cls=ProcgenPostprocessor,
+    )
 
     env = env_creator()(
         num=1,
@@ -57,11 +63,20 @@ def make_env(name='bigfish', num_envs=1, num_levels=0,
     )
     return env
 
-class ProcgenPettingZooEnv(pufferlib.emulation.PettingZooPufferEnv):
+class ProcgenPettingZooEnv:
     '''Fakes a multiagent interface to ProcGen where each env
     is an agent. Very low overhead.'''
-    def __init__(self, env):
-        super().__init__(env)
+    def __init__(self, env, num_envs):
+        self.env = env
+        self.num_envs = num_envs
+        self.possible_agents = list(range(num_envs))
+        self.agents = self.possible_agents
+
+    def observation_space(self, agent):
+        return self.env.observation_space
+
+    def action_space(self, agent):
+        return self.env.action_space
 
     def reset(self, seed=None):
         obs = self.env.reset()
@@ -69,7 +84,7 @@ class ProcgenPettingZooEnv(pufferlib.emulation.PettingZooPufferEnv):
         return obs, {}
 
     def step(self, actions):
-        actions = [actions[i] for i in range(len(actions))]
+        actions = np.array([actions[i] for i in range(self.num_envs)])
         obs, rewards, dones, infos = self.env.step(actions)
         obs = {i: o for i, o in enumerate(obs)}
         rewards = {i: r for i, r in enumerate(rewards)}
@@ -87,40 +102,3 @@ class ProcgenPostprocessor(pufferlib.emulation.Postprocessor):
 
     def reward_done_truncated_info(self, reward, done, truncated, info):
         return float(reward), bool(done), truncated, info
-
-class ProcgenVecEnv:
-    '''WIP Vectorized Procgen environment wrapper
-    
-    Does not use normal PufferLib emulation'''
-    def __init__(self, env_name, num_envs=1,
-            num_levels=0, start_level=0,
-            distribution_mode="easy"):
-
-        self.num_envs = num_envs
-        self.envs = ProcgenEnv(
-            env_name=env_name,
-            num_envs=num_envs,
-            num_levels=num_levels,
-            start_level=start_level,
-            distribution_mode=distribution_mode,
-        )
-
-    @property
-    def single_observation_space(self):
-        return self.envs.observation_space['rgb']
-
-    @property
-    def single_action_space(self):
-        return self.envs.action_space
-
-    def reset(self, seed=None):
-        obs = self.envs.reset()['rgb']
-        rewards = [0] * self.num_envs
-        dones = [False] * self.num_envs
-        infos = [{}] * self.num_envs
-        return obs, rewards, dones, infos
-
-    def step(self, actions):
-        actions = np.array(actions)
-        obs, rewards, dones, infos = self.envs.step(actions)
-        return obs['rgb'], rewards, dones, infos

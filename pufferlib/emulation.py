@@ -347,12 +347,9 @@ class PettingZooPufferEnv:
 
         # Call user postprocessors and flatten the observations
         for agent in obs:
-            try:
-                obs[agent], rewards[agent], dones[agent], truncateds[agent], infos[agent] = postprocess_and_flatten(
-                    obs[agent], self.postprocessors[agent],
-                    rewards[agent], dones[agent], truncateds[agent], infos[agent])
-            except:
-                T()
+            obs[agent], rewards[agent], dones[agent], truncateds[agent], infos[agent] = postprocess_and_flatten(
+                obs[agent], self.postprocessors[agent],
+                rewards[agent], dones[agent], truncateds[agent], infos[agent])
         self.all_done = all(dones.values())
 
         obs, rewards, dones, truncateds, infos = pad_to_const_num_agents(
@@ -418,10 +415,7 @@ def postprocess_and_flatten(ob, postprocessor,
             reward, done, truncated, info)
 
     postprocessed_ob = postprocessor.observation(ob)
-    try:
-        flat_ob = concatenate(flatten(postprocessed_ob))
-    except:
-        T()
+    flat_ob = concatenate(flatten(postprocessed_ob))
 
     if reset:
         return flat_ob
