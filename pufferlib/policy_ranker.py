@@ -42,7 +42,7 @@ class OpenSkillRanker(PolicyRanker):
             """)
 
     def update_ranks(self, scores: Dict[str, float], wandb_policies=[], step: int = 0):
-        if len(scores) == 0:
+        if len(scores) <=1:
             return
 
         # Ensuring policies exist
@@ -50,25 +50,36 @@ class OpenSkillRanker(PolicyRanker):
             if policy not in self._tournament.ratings:
                 self.add_policy(policy, anchor=(policy == self._anchor))
 
+        # Load mu and sigma from DB
+        with self.conn:
+            cursor = self.conn.execute("SELECT * FROM ratings;")
+
+        for row in cursor.fetchall():
+            policy = row[0]
+            self._tournament.ratings[policy].mu = row[1]
+            self._tournament.ratings[policy].sigma = row[2]
+
         # Updating ranks
-        if len(scores) > 1:
-            self._tournament.update(
-                policy_ids=list(scores.keys()),
-                scores=list([np.mean(v) for v in scores.values()]))
+        self._tournament.update(
+            policy_ids=list(scores.keys()),
+            scores=list([np.mean(v) for v in scores.values()])
+        )
 
         # Log updated data (replacing the DataFrame logging)
+        for name, rating in self._tournament.ratings.items():
+            self.conn.execute(f"""
+                UPDATE ratings
+                SET mu = {rating.mu},
+                    sigma = {rating.sigma}
+                WHERE policy = '{name}';
+            """)
+
+        # Printing the table
         with self.conn:
-            for name, rating in self._tournament.ratings.items():
-                self.conn.execute(f"""
-                    UPDATE ratings
-                    SET mu = {rating.mu},
-                        sigma = {rating.sigma}
-                    WHERE policy = '{name}';
-                """)
-            # Printing the table
             cursor = self.conn.execute("SELECT * FROM ratings;")
-            for row in cursor.fetchall():
-                print(row)
+
+        for row in cursor.fetchall():
+            print(row)
 
         # Logging to wandb
         if len(wandb_policies) > 0:
