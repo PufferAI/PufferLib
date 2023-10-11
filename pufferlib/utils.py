@@ -285,34 +285,3 @@ class Suppress():
         # Enable Python outputs
         self._stdout_redirector.__exit__(exc_type, exc_val, exc_tb)
         self._stderr_redirector.__exit__(exc_type, exc_val, exc_tb)
-
-class PersistentObject:
-    def __init__(self, path, wrapped_class, *args, **kwargs):
-        self.lock = FileLock(path + ".lock")
-        self.wrapped_class = wrapped_class
-        self.path = path
-
-        if not os.path.exists(path):
-            with self.lock:
-                with open(path, 'wb') as f:
-                    # Pass constructor arguments to the wrapped class
-                    pickle.dump(wrapped_class(*args, **kwargs), f)
-
-    def __getattr__(self, name):
-        def method(*args, **kwargs):
-            with self.lock:
-                # Load the object from disk.
-                with open(self.path, 'rb') as f:
-                    obj = pickle.load(f)
-
-                # Call the method and get the result.
-                result = getattr(obj, name)(*args, **kwargs)
-
-                # Save the object back to disk.
-                tmp_path = self.path + ".tmp"
-                with open(tmp_path, 'wb') as f:
-                    pickle.dump(obj, f)
-                os.rename(tmp_path, self.path)
-
-                return result
-        return method
