@@ -52,8 +52,7 @@ class OpenSkillRanker(PolicyRanker):
         if len(scores) > 1:
             self._tournament.update(
                 policy_ids=list(scores.keys()),
-                scores=np.array([v for v in scores.values()]),
-            )
+                scores=list([np.mean(v) for v in scores.values()]))
 
         # Log updated data (replacing the DataFrame logging)
         with self.conn:
