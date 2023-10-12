@@ -132,6 +132,9 @@ class OpenSpielToPettingZoo:
         return gymnasium.spaces.Discrete(
             self.env.num_distinct_actions())
 
+    def close(self):
+        pass
+
     def _get_obs_and_infos(self):
         # Before calculating an observation, there could be chance nodes
         # (that may have an effect on the actual observations).
