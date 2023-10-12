@@ -6,4 +6,7 @@ except ImportError:
     pass
 else:
     from .torch import Policy
-    Recurrent = getattr(Policy, 'Recurrent', None)
+    try:
+        from .torch import Recurrent
+    except:
+        Recurrent = None

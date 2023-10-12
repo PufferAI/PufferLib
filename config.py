@@ -102,8 +102,8 @@ def nmmo():
 
 def openspiel():
     args = pufferlib.args.CleanPuffeRL(
-        #pool_learner_weight = 0.5,    
-        #pool_num_policies = 2,
+        pool_learner_weight = 0.5,    
+        pool_num_policies = 2,
         num_envs = 32,
         batch_size = 4096,
     )

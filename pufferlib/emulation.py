@@ -418,10 +418,7 @@ def postprocess_and_flatten(ob, postprocessor,
             reward, done, truncated, info)
 
     postprocessed_ob = postprocessor.observation(ob)
-    try:
-        flat_ob = concatenate(flatten(postprocessed_ob))
-    except:
-        T()
+    flat_ob = concatenate(flatten(postprocessed_ob))
 
     if reset:
         return flat_ob
