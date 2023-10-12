@@ -83,17 +83,20 @@ class BasicPostprocessor(Postprocessor):
         self.done = False
 
     def reward_done_truncated_info(self, reward, done, truncated, info):
-        if isinstance(rewards, (list, np.ndarray)):
-            rewards = sum(rewards.values())
+        if isinstance(reward, (list, np.ndarray)):
+            reward = sum(reward.values())
 
         # Env is done
+        if self.done:
+            return reward, done, truncated, info
+
+        self.epoch_length += 1
+        self.epoch_return += reward
+
         if done or truncated:
             info['return'] = self.epoch_return
             info['length'] = self.epoch_length
             self.done = True
-        else:
-            self.epoch_length += 1
-            self.epoch_return += rewards
 
         return reward, done, truncated, info
 
@@ -347,12 +350,9 @@ class PettingZooPufferEnv:
 
         # Call user postprocessors and flatten the observations
         for agent in obs:
-            try:
-                obs[agent], rewards[agent], dones[agent], truncateds[agent], infos[agent] = postprocess_and_flatten(
-                    obs[agent], self.postprocessors[agent],
-                    rewards[agent], dones[agent], truncateds[agent], infos[agent])
-            except:
-                T()
+            obs[agent], rewards[agent], dones[agent], truncateds[agent], infos[agent] = postprocess_and_flatten(
+                obs[agent], self.postprocessors[agent],
+                rewards[agent], dones[agent], truncateds[agent], infos[agent])
         self.all_done = all(dones.values())
 
         obs, rewards, dones, truncateds, infos = pad_to_const_num_agents(

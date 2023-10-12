@@ -28,9 +28,10 @@ def make_env(name='connect_four'):
     # TODO: needs custom conversion to parallel
     #env = aec_to_parallel_wrapper(env)
     #env = OpenSpielToPettingZoo(env)
-    return pufferlib.emulation.PettingZooPufferEnv(env=env)
-
-import gymnasium
+    return pufferlib.emulation.PettingZooPufferEnv(
+        env=env,
+        postprocessor_cls=pufferlib.emulation.BasicPostprocessor,
+    )
 
 class OpenSpielToPettingZoo:
     def __init__(self, env):
@@ -44,6 +45,16 @@ class OpenSpielToPettingZoo:
         self.state = None
         self.agents = []
 
+        # You might need to put this in reset with seed...
+        rnd_state = np.random.RandomState(42)
+        evaluator = mcts.RandomRolloutEvaluator(n_rollouts=5, random_state=rnd_state)
+
+        self.bot = mcts.MCTSBot(
+            game=self.env, uct_c=2, max_simulations=10,
+            evaluator=evaluator, random_state=rnd_state, 
+            child_selection_fn=mcts.SearchNode.puct_value, solve=True,
+        )
+
     @property
     def possible_agents(self):
         return [0]
@@ -53,15 +64,6 @@ class OpenSpielToPettingZoo:
         self.state = self.env.new_initial_state()
         obs, infos = self._get_obs_and_infos()
         self.agents = self.possible_agents
-
-        rnd_state = np.random.RandomState(42)
-        evaluator = mcts.RandomRolloutEvaluator(n_rollouts=10, random_state=rnd_state)
-
-        self.bot = mcts.MCTSBot(
-            game=self.env, uct_c=2, max_simulations=10,
-            evaluator=evaluator, random_state=rnd_state, 
-            child_selection_fn=mcts.SearchNode.puct_value, solve=True,
-        )
 
         return obs, infos
 
