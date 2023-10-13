@@ -137,7 +137,7 @@ def init(
     policy_god = pufferlib.policy_god.PolicyGod(
         buffers[0], agent, os.path.join(config.data_dir, exp_name),
         resume_state, device, config.num_envs, num_agents,
-        config.pool_learner_weight, config.pool_num_policies)
+        config.selfplay_kernel)
     agent = policy_god.agent
 
     # Allocate Storage
@@ -270,8 +270,7 @@ def evaluate(data):
 
         # Index alive mask with policy pool idxs...
         # TODO: Find a way to avoid having to do this
-        if config.pool_learner_weight > 0:
-          alive_mask = np.array(alive_mask) * data.policy_god.policy_pool.learner_mask
+        alive_mask = np.array(alive_mask) * data.policy_god.policy_pool.learner_mask
 
         for idx in np.where(alive_mask)[0]:
             if ptr == config.batch_size + 1:
@@ -505,7 +504,7 @@ def close(data):
         envs.close()
 
     if data.wandb is not None:
-        artifact_name = f"{data.run_id}_model"
+        artifact_name = f"{data.exp_name}_model"
         artifact = data.wandb.Artifact(artifact_name, type="model")
         model_path = save_checkpoint(data)
         artifact.add_file(model_path)
