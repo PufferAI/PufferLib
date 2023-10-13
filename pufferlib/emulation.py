@@ -83,20 +83,22 @@ class BasicPostprocessor(Postprocessor):
         self.done = False
 
     def reward_done_truncated_info(self, reward, done, truncated, info):
-        if isinstance(rewards, (list, np.ndarray)):
-            rewards = sum(rewards.values())
+        if isinstance(reward, (list, np.ndarray)):
+            reward = sum(reward.values())
 
         # Env is done
+        if self.done:
+            return reward, done, truncated, info
+
+        self.epoch_length += 1
+        self.epoch_return += reward
+
         if done or truncated:
             info['return'] = self.epoch_return
             info['length'] = self.epoch_length
             self.done = True
-        else:
-            self.epoch_length += 1
-            self.epoch_return += rewards
 
         return reward, done, truncated, info
-
 
 class GymPufferEnv(gym.Env):
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={},

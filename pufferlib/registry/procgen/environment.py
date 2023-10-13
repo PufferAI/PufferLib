@@ -41,27 +41,10 @@ def make_env(name='bigfish', num_envs=1, num_levels=0,
     envs = ProcgenPettingZooEnv(envs, num_envs)
     return pufferlib.emulation.PettingZooPufferEnv(
         env=envs,
-        postprocessor_cls=ProcgenPostprocessor,
+        postprocessor_cls=BasicProcgenPostprocessor,
+        #postprocessor_cls=pufferlib.emulation.BasicPostprocessor,
+        #postprocessor_cls=ProcgenPostprocessor,
     )
-
-    env = env_creator()(
-        num=1,
-        env_name=name,
-        distribution_mode=distribution_mode,
-    )
-
-    # Note: CleanRL normalizes and clips rewards
-    import gym3
-    env = gym3.ToGymEnv(env)
-    env = gym.wrappers.RecordEpisodeStatistics(env)
-    env = gym.wrappers.NormalizeReward(env, gamma=0.999)
-    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-    env = shimmy.GymV21CompatibilityV0(env=env)
-    env = pufferlib.emulation.GymPufferEnv(
-        env=env,
-        postprocessor_cls=ProcgenPostprocessor,
-    )
-    return env
 
 class ProcgenPettingZooEnv:
     '''Fakes a multiagent interface to ProcGen where each env
@@ -88,10 +71,30 @@ class ProcgenPettingZooEnv:
         obs, rewards, dones, infos = self.env.step(actions)
         obs = {i: o for i, o in enumerate(obs)}
         rewards = {i: r for i, r in enumerate(rewards)}
-        dones = {i: d for i, d in enumerate(dones)}
+        dones = {i: bool(d) for i, d in enumerate(dones)}
         truncateds = {i: False for i in range(len(obs))}
         infos = {i: {} for i in range(len(obs))}
         return obs, rewards, dones, truncateds, infos
+
+class BasicProcgenPostprocessor(pufferlib.emulation.Postprocessor):
+    def reset(self, obs):
+        self.epoch_return = 0
+        self.epoch_length = 0
+
+    def reward_done_truncated_info(self, reward, done, truncated, info):
+        if isinstance(reward, (list, np.ndarray)):
+            reward = sum(reward.values())
+
+        self.epoch_length += 1
+        self.epoch_return += reward
+
+        if done or truncated:
+            info['return'] = self.epoch_return
+            info['length'] = self.epoch_length
+            self.epoch_return = 0
+            self.epoch_length = 0
+
+        return reward, done, truncated, info
 
 class ProcgenPostprocessor(pufferlib.emulation.Postprocessor):
     def features(self, obs):
