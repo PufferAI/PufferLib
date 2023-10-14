@@ -89,7 +89,6 @@ class Policy(nn.Module):
         actions, value = self.decode_actions(hidden, lookup)
         return actions, value
 
-
 class RecurrentWrapper(Policy):
     def __init__(self, env, policy, input_size=128, hidden_size=128, num_layers=1):
         super().__init__(env)
@@ -110,7 +109,7 @@ class RecurrentWrapper(Policy):
             elif "weight" in name:
                 nn.init.orthogonal_(param, 1.0)
 
-    def forward(self, x, state, done):
+    def forward(self, x, state):
         shape, tensor_shape = x.shape, self.observation_space.shape
         x_dims, tensor_dims = len(shape), len(tensor_shape)
         if x_dims == tensor_dims + 1:
@@ -129,22 +128,6 @@ class RecurrentWrapper(Policy):
 
         hidden = hidden.reshape(B, TT, self.input_size)
         hidden = hidden.transpose(0, 1)
-
-        # This block is the technically correct way to handle resets
-        # It also kills ~70% of the performance and is usually not worth it
-        '''
-        done = done.reshape(B, TT)
-        done = done.transpose(0, 1).unsqueeze(2)
-        new_hidden = []
-        for t in range(TT):
-            h = hidden[t:t+1]
-            d = done[t:t+1]
-            state = (state[0] * (1 - d), state[1] * (1 - d))
-            h, state = self.recurrent(h, state)
-            new_hidden.append(h)
-        hidden = torch.cat(new_hidden, dim=0)
-        '''
-
         hidden, state = self.recurrent(hidden, state)
 
         hidden = hidden.transpose(0, 1)
@@ -152,7 +135,6 @@ class RecurrentWrapper(Policy):
 
         hidden, critic = self.policy.decode_actions(hidden, lookup)
         return hidden, critic, state
-
 
 class Default(Policy):
     def __init__(self, env, input_size=128, hidden_size=128):

@@ -18,7 +18,8 @@ def reset(state, seed=None):
         else:
             ob, i = e.reset(seed=hash(1000*seed + idx))
 
-        infos.append({})
+        i['mask'] = True
+        infos.append(i)
         if state.preallocated_obs is None:
             state.preallocated_obs = np.empty(
                 (len(state.envs), *ob.shape), dtype=ob.dtype)
@@ -40,14 +41,14 @@ def step(state, actions):
             rewards.append(0)
             dones.append(False)
             truncateds.append(False)
-            infos.append(i)
         else:
             o, r, d, t, i = env.step(atns)
             rewards.append(r)
             dones.append(d)
             truncateds.append(t)
-            infos.append(i)
 
+        i['mask'] = True
+        infos.append(i)
         state.preallocated_obs[idx] = o
 
     return state.preallocated_obs, rewards, dones, truncateds, infos

@@ -95,7 +95,12 @@ def aggregate_recvs(state, returns):
     truncateds = list(chain.from_iterable(truncateds))
     orig = infos
     infos = [i for ii in infos for i in ii]
-    mask = [e['mask'] for ee in infos for e in ee.values()]
+
+    # TODO: Masking will break for 1-agent PZ envs
+    if state.num_agents == 1:
+        mask = [e['mask'] for e in infos]
+    else:
+        mask = [e['mask'] for ee in infos for e in ee.values()]
 
     assert len(rewards) == len(dones) == len(truncateds) == total_agents * state.num_workers
     assert len(infos) == state.num_workers * state.envs_per_worker

@@ -260,7 +260,7 @@ def evaluate(data):
         padded_steps_collected += len(mask)
         with inference_profiler, torch.no_grad():
             actions, logprob, value, data.next_lstm_state[buf] = data.policy_god.forwards(
-                    o.to(data.device), data.next_lstm_state[buf], None) #TODO: Remove dones from this api
+                    o.to(data.device), data.next_lstm_state[buf])
             value = value.flatten()
 
         # Index alive mask with policy pool idxs...

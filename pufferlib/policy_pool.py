@@ -59,13 +59,11 @@ class PolicyPool():
 
         self._allocated = False
 
-    def forwards(self, obs, lstm_state=None, dones=None):
-        #atn, lgprob, _, val = self._policies['learner'].get_action_and_value(obs)
-        #return atn, lgprob, val, lstm_state
-
+    def forwards(self, obs, lstm_state=None):
         batch_size = len(obs)
-        idx = 0
         policies = list(self._policies.values())
+        idx = 0
+
         for idx in range(self._num_policies):
             samp = self._sample_idxs[idx]
             assert len(samp) > 0
@@ -78,7 +76,7 @@ class PolicyPool():
                 atn, lgprob, _, val, (lstm_state[0][:, samp], lstm_state[1][:, samp]) = policy.get_action_and_value(
                     obs[samp],
                     state=[lstm_state[0][:, samp], lstm_state[1][:, samp]],
-                    done=dones[samp])
+                  )
             else:
                 atn, lgprob, _, val = policy.get_action_and_value(obs[samp])
 

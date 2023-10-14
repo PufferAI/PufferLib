@@ -110,7 +110,10 @@ def openspiel():
         num_envs = 32,
         batch_size = 4096,
     )
-    return args, make_sweep_config()
+    sweep_config = make_sweep_config(
+            cleanrl=CleanPuffeRLSweep(),
+    )
+    return args, sweep_config
 
 def procgen():
     # MSRL defaults. Don't forget to uncomment network layer sizes!
