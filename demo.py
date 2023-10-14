@@ -179,7 +179,7 @@ if __name__ == '__main__':
         for key, value in sub_config.items():
             data_key = f'{name}.{key}'
             cli_key = f'--{data_key}'.replace('_', '-')
-            parser.add_argument(cli_key, default=value)
+            parser.add_argument(cli_key, default=value, type=type(value))
             clean_parser.add_argument(cli_key, default=value, metavar='', help=env)
             args[name][key] = getattr(parser.parse_known_args()[0], data_key)
 
