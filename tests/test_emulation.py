@@ -15,7 +15,7 @@ def test_gym_emulation(env_cls, steps=100):
 
     # Do not profile env creation
     raw_env = env_cls()
-    puf_env = pufferlib.emulation.GymPufferEnv(env_creator=env_cls)
+    puf_env = pufferlib.emulation.GymnasiumPufferEnv(env_creator=env_cls)
 
     raw_done = puf_done = True
     raw_truncated = puf_truncated = False

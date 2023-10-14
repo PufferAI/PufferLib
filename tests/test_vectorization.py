@@ -15,7 +15,7 @@ def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, env
     # Do not profile env creation or first reset
     raw_envs = [env_cls() for _ in range(num_workers * envs_per_worker)]
     puf_envs = vectorization(
-        env_creator=pufferlib.emulation.GymPufferEnv,
+        env_creator=pufferlib.emulation.GymnasiumPufferEnv,
         env_kwargs={'env_creator': env_cls},
         num_workers=num_workers,
         envs_per_worker=envs_per_worker,

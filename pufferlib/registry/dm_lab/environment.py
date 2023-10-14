@@ -19,4 +19,4 @@ def make_env(name='seekavoid_arena_01'):
     dm-lab requires extensive setup. Use PufferTank.'''
     env = env_creator()(name, ['RGB_INTERLEAVED'])
     env = shimmy.DmLabCompatibilityV0(env=env)
-    return pufferlib.emulation.GymPufferEnv(env=env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)

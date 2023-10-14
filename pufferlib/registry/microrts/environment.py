@@ -27,7 +27,7 @@ def make_env():
 
     env = MicroRTS(env)
     env = shimmy.GymV21CompatibilityV0(env=env)
-    return pufferlib.emulation.GymPufferEnv(env=env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 class MicroRTS:
     def __init__(self, env):

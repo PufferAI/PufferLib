@@ -13,7 +13,7 @@ def env_creator():
 def make_env(name='MiniGrid-LavaGapS7-v0'):
     env = env_creator()(name)
     env = MiniGridWrapper(env)
-    return pufferlib.emulation.GymPufferEnv(env=env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 class MiniGridWrapper:
     def __init__(self, env):

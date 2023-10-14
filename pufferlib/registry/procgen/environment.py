@@ -31,7 +31,7 @@ def make_env(name='bigfish', distribution_mode='easy'):
     env = gym.wrappers.NormalizeReward(env, gamma=0.999)
     env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
     env = shimmy.GymV21CompatibilityV0(env=env)
-    env = pufferlib.emulation.GymPufferEnv(
+    env = pufferlib.emulation.GymnasiumPufferEnv(
         env=env,
         postprocessor_cls=ProcgenPostprocessor,
     )

@@ -45,7 +45,7 @@ def make_env(
         wrapper_cls = pufferlib.emulation.PettingZooPufferEnv
     else:
         env = OpenSpielGymnasiumEnvironment(**kwargs)
-        wrapper_cls = pufferlib.emulation.GymPufferEnv
+        wrapper_cls = pufferlib.emulation.GymnasiumPufferEnv
 
     return wrapper_cls(
         env=env,

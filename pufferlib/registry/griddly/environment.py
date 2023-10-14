@@ -22,4 +22,4 @@ def make_env(name='GDY-Spiders-v0'):
         env.reset() # Populate observation space
 
     env = shimmy.GymV21CompatibilityV0(env=env)
-    return pufferlib.emulation.GymPufferEnv(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env)

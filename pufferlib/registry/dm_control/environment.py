@@ -20,4 +20,4 @@ def make_env(domain_name='walker', task_name='walk'):
     '''No PufferLib support for continuous actions yet.'''
     env = env_creator()(domain_name, task_name)
     env = shimmy.DmControlCompatibilityV0(env=env)
-    return pufferlib.emulation.GymPufferEnv(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env)

@@ -32,7 +32,7 @@ def make_env(name='Airstriker-Genesis', framestack=4):
     env = gym.wrappers.ResizeObservation(env, (84, 84))
     env = gym.wrappers.GrayScaleObservation(env)
     env = gym.wrappers.FrameStack(env, framestack)
-    return pufferlib.emulation.GymPufferEnv(
+    return pufferlib.emulation.GymnasiumPufferEnv(
         env=env, postprocessor_cls=AtariFeaturizer)
 
 class AtariFeaturizer(pufferlib.emulation.Postprocessor):
