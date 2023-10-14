@@ -144,9 +144,8 @@ class CleanPuffeRL:
         # Create policy ranker
         if self.policy_ranker is None:
             if self.data_dir is not None:
-                self.policy_ranker = pufferlib.utils.PersistentObject(
+                self.policy_ranker = pufferlib.policy_ranker.OpenSkillRanker(
                     os.path.join(self.data_dir, "openskill.pickle"),
-                    pufferlib.policy_ranker.OpenSkillRanker,
                     "anchor",
                 )
             if "learner" not in self.policy_ranker.ratings():
