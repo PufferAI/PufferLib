@@ -22,4 +22,4 @@ def make_env(name='MineRLNavigateDense-v0'):
         env = env_creator()(name)
 
     env = shimmy.GymV21CompatibilityV0(env=env)
-    return pufferlib.emulation.GymPufferEnv(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env)

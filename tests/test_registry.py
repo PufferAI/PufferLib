@@ -29,7 +29,7 @@ def test_environment(name, steps=1, timeout=30):
     puf_obs, puf_infos = puf_env.reset(seed=0)
     puf_profiler = pufferlib.utils.Profiler()
 
-    if isinstance(puf_env, pufferlib.emulation.GymPufferEnv):
+    if isinstance(puf_env, pufferlib.emulation.GymnasiumPufferEnv):
         multiagent = raw_done = puf_done = False
     elif isinstance(puf_env, pufferlib.emulation.PettingZooPufferEnv):
         multiagent = True

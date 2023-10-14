@@ -15,4 +15,4 @@ def make_env():
     '''NetHack binding creation function'''
     env = env_creator()()
     env = shimmy.GymV21CompatibilityV0(env=env)
-    return pufferlib.emulation.GymPufferEnv(env=env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)

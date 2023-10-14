@@ -12,4 +12,4 @@ def env_creator(name):
 def make_env(name='cartpole'):
     '''Create an environment by name'''
     env = env_creator(name)()
-    return pufferlib.emulation.GymPufferEnv(env=env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)

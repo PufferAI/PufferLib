@@ -60,8 +60,7 @@ class CleanPuffeRL:
     data_dir: str = 'experiments'
     checkpoint_interval: int = 200
     cpu_offload: bool = True
-    pool_learner_weight: float = 1.0
-    pool_num_policies: int = 1
+    selfplay_kernel: list = None
     batch_size: int = 1024
     batch_rows: int = 32
     bptt_horizon: int = 16 #8

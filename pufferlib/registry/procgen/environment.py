@@ -42,8 +42,6 @@ def make_env(name='bigfish', num_envs=1, num_levels=0,
     return pufferlib.emulation.PettingZooPufferEnv(
         env=envs,
         postprocessor_cls=BasicProcgenPostprocessor,
-        #postprocessor_cls=pufferlib.emulation.BasicPostprocessor,
-        #postprocessor_cls=ProcgenPostprocessor,
     )
 
 class ProcgenPettingZooEnv:

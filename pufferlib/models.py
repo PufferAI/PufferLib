@@ -35,7 +35,7 @@ class Policy(nn.Module):
     '''
     def __init__(self, env):
         super().__init__()
-        if isinstance(env, pufferlib.emulation.GymPufferEnv):
+        if isinstance(env, pufferlib.emulation.GymnasiumPufferEnv):
             self.observation_space = env.observation_space
             self.action_space = env.action_space
         else:

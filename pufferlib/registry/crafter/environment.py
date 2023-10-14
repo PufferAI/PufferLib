@@ -22,4 +22,4 @@ def make_env(name='CrafterReward-v1'):
     env = pufferlib.utils.silence_warnings(env_creator())(name)
     env.reset = pufferlib.utils.silence_warnings(env.reset)
     env = shimmy.GymV21CompatibilityV0(env=env)
-    return pufferlib.emulation.GymPufferEnv(env=env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)

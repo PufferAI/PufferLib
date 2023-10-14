@@ -101,9 +101,12 @@ def nmmo():
     return args, make_sweep_config()
 
 def openspiel():
+    from itertools import chain
+    num_policies = 8
     args = pufferlib.args.CleanPuffeRL(
-        #pool_learner_weight = 0.5,    
-        #pool_num_policies = 2,
+        #selfplay_kernel = list(chain.from_iterable(
+        #    [[0, i, i, 0] for i in range(1, num_policies + 1)])),
+        #selfplay_kernel = [0, 1, 1, 0],
         num_envs = 32,
         batch_size = 4096,
     )
