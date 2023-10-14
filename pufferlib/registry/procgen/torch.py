@@ -48,7 +48,7 @@ class ConvSequence(nn.Module):
 class Policy(pufferlib.models.Policy):
     def __init__(self, env):
         super().__init__(env)
-        h, w, c = env.observation_space.shape
+        h, w, c = env.single_observation_space.shape
         shape = (c, h, w)
         conv_seqs = []
         # MSRL uses larger network size

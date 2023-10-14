@@ -100,7 +100,6 @@ class BasicPostprocessor(Postprocessor):
 
         return reward, done, truncated, info
 
-
 class GymnasiumPufferEnv(gym.Env):
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={},
             postprocessor_cls=Postprocessor):
