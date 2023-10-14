@@ -75,10 +75,8 @@ def get_obs_and_infos(state):
         'obs': np.reshape(state.state.observation_tensor(),
             [-1]).astype(np.float32),
         'action_mask': np_mask.astype(np.int8),
-    } for curr_player in range(state.env.num_players())}
-
-    state.last_infos = {curr_player: {} for
-        curr_player in range(state.env.num_players())}
+    }}
+    state.last_infos = {curr_player: {}}
 
     return state.last_obs, state.last_infos
 

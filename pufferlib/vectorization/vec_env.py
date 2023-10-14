@@ -95,12 +95,11 @@ def aggregate_recvs(state, returns):
     truncateds = list(chain.from_iterable(truncateds))
     orig = infos
     infos = [i for ii in infos for i in ii]
+    mask = [e['mask'] for ee in infos for e in ee.values()]
 
-    if not(len(rewards) == len(dones) == len(truncateds) == total_agents * state.num_workers):
-        T()
     assert len(rewards) == len(dones) == len(truncateds) == total_agents * state.num_workers
     assert len(infos) == state.num_workers * state.envs_per_worker
-    return state.preallocated_obs, rewards, dones, truncateds, infos
+    return state.preallocated_obs, rewards, dones, truncateds, infos, mask
 
 def split_actions(state, actions, env_id=None):
     if type(actions) == list:

@@ -47,8 +47,8 @@ def step(state, actions):
 
     # Are we done?
     is_terminated = state.state.is_terminal()
-    terminateds = dict({ag: is_terminated for ag in possible_agents(state)})
-    truncateds = dict({ag: False for ag in possible_agents(state)})
+    terminateds = {a: False for a in obs}
+    truncateds = {a: False for a in obs}
 
     if is_terminated:
         state.agents = []

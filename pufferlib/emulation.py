@@ -289,9 +289,10 @@ class PettingZooPufferEnv:
 
         # Call user featurizer and flatten the observations
         postprocessed_obs = {}
-        for agent in obs:
+        ob = list(obs.values())[0]
+        for agent in self.possible_agents:
             postprocessed_obs[agent] = postprocess_and_flatten(
-                obs[agent], self.postprocessors[agent], reset=True)
+                ob, self.postprocessors[agent], reset=True)
 
         if __debug__:
             if not self.is_observation_checked:
@@ -302,7 +303,15 @@ class PettingZooPufferEnv:
 
         padded_obs = pad_agent_data(postprocessed_obs,
             self.possible_agents, self.pad_observation)
-        padded_infos = pad_agent_data(info, self.possible_agents, {})
+
+        # Mask out missing agents
+        padded_infos = {}
+        for agent in self.possible_agents:
+            if agent not in info:
+                padded_infos[agent] = {}
+            else:
+                padded_infos[agent] = info[agent]
+            padded_infos[agent]['mask'] = agent in obs
 
         return padded_obs, padded_infos
 
@@ -354,8 +363,16 @@ class PettingZooPufferEnv:
                 rewards[agent], dones[agent], truncateds[agent], infos[agent])
         self.all_done = all(dones.values())
 
-        obs, rewards, dones, truncateds, infos = pad_to_const_num_agents(
-            self.env.possible_agents, obs, rewards, dones, truncateds, infos, self.pad_observation)
+        # Mask out missing agents
+        for agent in self.possible_agents:
+            if agent not in infos:
+                infos[agent] = {}
+            else:
+                infos[agent] = infos[agent]
+            infos[agent]['mask'] = agent in obs
+
+        obs, rewards, dones, truncateds = pad_to_const_num_agents(
+            self.env.possible_agents, obs, rewards, dones, truncateds, self.pad_observation)
 
         return obs, rewards, dones, truncateds, infos
 
@@ -399,13 +416,12 @@ def pad_agent_data(data, agents, pad_value):
     return {agent: data[agent] if agent in data else pad_value
         for agent in agents}
     
-def pad_to_const_num_agents(agents, obs, rewards, dones, truncateds, infos, pad_obs):
+def pad_to_const_num_agents(agents, obs, rewards, dones, truncateds, pad_obs):
     padded_obs = pad_agent_data(obs, agents, pad_obs)
     rewards = pad_agent_data(rewards, agents, 0)
-    dones = pad_agent_data(dones, agents, True)
+    dones = pad_agent_data(dones, agents, False)
     truncateds = pad_agent_data(truncateds, agents, False)
-    infos = pad_agent_data(infos, agents, {})
-    return padded_obs, rewards, dones, truncateds, infos
+    return padded_obs, rewards, dones, truncateds
 
 def postprocess_and_flatten(ob, postprocessor,
         reward=None, done=None, truncated=None, info=None,

@@ -142,10 +142,9 @@ def init(
 
     # Allocate Storage
     storage_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True).start()
-    next_done, next_lstm_state = [], []
+    next_lstm_state = []
     for i, envs in enumerate(buffers):
         envs.async_reset(config.seed + i)
-        next_done.append(torch.zeros(total_agents).to(device))
         if not agent.is_recurrent:
             next_lstm_state.append(None)
         else:
@@ -161,6 +160,7 @@ def init(
     logprobs=torch.zeros(config.batch_size + 1).to(device)
     rewards=torch.zeros(config.batch_size + 1).to(device)
     dones=torch.zeros(config.batch_size + 1).to(device)
+    truncateds=torch.zeros(config.batch_size + 1).to(device)
     values=torch.zeros(config.batch_size + 1).to(device)
     storage_profiler.stop()
 
@@ -197,7 +197,6 @@ def init(
 
         # Storage
         sort_keys = [],
-        next_done = next_done,
         next_lstm_state = next_lstm_state,
         obs = obs,
         actions = actions,
@@ -244,7 +243,7 @@ def evaluate(data):
             break
 
         with env_profiler:
-            o, r, d, t, i = data.buffers[buf].recv()
+            o, r, d, t, i, mask = data.buffers[buf].recv()
 
         '''
         for profile in data.buffers[buf].profile():
@@ -255,24 +254,20 @@ def evaluate(data):
         i = data.policy_god.update_scores(i, "return")
         o = torch.Tensor(o).to(data.obs_device)
         r = torch.Tensor(r).float().to(data.device).view(-1)
-        if len(d) != 0 and len(data.next_done[buf]) != 0:
-            alive_mask = (data.next_done[buf].cpu() + torch.Tensor(d)) != 2
-            data.next_done[buf] = torch.Tensor(d).to(data.device)
-        else:
-            alive_mask = [1 for _ in range(len(o))]
+        d = torch.Tensor(d).float().to(data.device).view(-1)
 
-        agent_steps_collected += sum(alive_mask)
-        padded_steps_collected += len(alive_mask)
+        agent_steps_collected += sum(mask)
+        padded_steps_collected += len(mask)
         with inference_profiler, torch.no_grad():
             actions, logprob, value, data.next_lstm_state[buf] = data.policy_god.forwards(
-                o.to(data.device), data.next_lstm_state[buf], data.next_done[buf])
+                    o.to(data.device), data.next_lstm_state[buf], None) #TODO: Remove dones from this api
             value = value.flatten()
 
         # Index alive mask with policy pool idxs...
         # TODO: Find a way to avoid having to do this
-        alive_mask = np.array(alive_mask) * data.policy_god.policy_pool.learner_mask
+        learner_mask = mask * data.policy_god.policy_pool.learner_mask
 
-        for idx in np.where(alive_mask)[0]:
+        for idx in np.where(learner_mask)[0]:
             if ptr == config.batch_size + 1:
                 break
             data.obs[ptr] = o[idx]
