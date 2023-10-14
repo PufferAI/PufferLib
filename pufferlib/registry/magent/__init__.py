@@ -1,7 +1,12 @@
 from .environment import env_creator, make_env
 
 try:
-    from .torch import Policy
-    Recurrent = getattr(Policy, 'Recurrent', None)
+    import torch
 except ImportError:
     pass
+else:
+    from .torch import Policy
+    try:
+        from .torch import Recurrent
+    except:
+        Recurrent = None

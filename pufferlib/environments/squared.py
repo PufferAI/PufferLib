@@ -40,7 +40,11 @@ def init(self,
         action_space=gym.spaces.Discrete(8),
     )
 
-def reset(state):
+def reset(state, seed=None):
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+
     # Allocating a new grid is faster than resetting an old one
     state.grid = np.zeros((state.grid_size, state.grid_size), dtype=np.float32)
     state.grid[state.distance_to_target, state.distance_to_target] = -1
@@ -51,7 +55,7 @@ def reset(state):
     for x, y in state.targets:
         state.grid[x, y] = 1
 
-    return state.grid
+    return state.grid, {}
 
 def step(state, action):
     x, y = state.agent_pos
@@ -101,7 +105,7 @@ def step(state, action):
     done = state.tick >= state.max_ticks
     info = {'targets_hit': state.num_targets - len(state.targets)} if done else {}
 
-    return state.grid, reward, done, info
+    return state.grid, reward, done, False, info
 
 def render(state):
     for row in state.grid:

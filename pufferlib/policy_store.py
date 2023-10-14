@@ -79,14 +79,14 @@ class FilePolicyRecord(PolicyRecord):
     logging.info(f"Saving policy to {self._path}")
     temp_path = self._path + ".tmp"
     torch.save(self._policy, temp_path)
-    os.rename(temp_path, self._path + '.pt')
+    os.rename(temp_path, self._path)
 
   def policy(self, policy_args=[], policy_kwargs={}, device=None) -> Policy:
     if self._policy is not None:
       return self._policy
     if device is None:
       device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    return torch.load(self._path, map_location=device)
+    return torch.load(self._path + '.pt', map_location=device)
 
 class DirectoryPolicyStore(PolicyStore):
   def __init__(self, path: str):

@@ -1,12 +1,12 @@
 from pdb import set_trace as T
 import numpy as np
 
-import gym
+import gymnasium as gym
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.exceptions
-import pufferlib.models
+import pufferlib.registry
+import pufferlib.utils
 
 
 def env_creator():
@@ -14,17 +14,15 @@ def env_creator():
 
 def make_env(name='BreakoutNoFrameskip-v4', framestack=4):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
-    try:
-        from stable_baselines3.common.atari_wrappers import (
-            ClipRewardEnv,
-            EpisodicLifeEnv,
-            FireResetEnv,
-            MaxAndSkipEnv,
-        )
-        with pufferlib.utils.Suppress():
-            env = env_creator()(name)
-    except:
-        raise pufferlib.exceptions.EnvironmentSetupError('atari', name)
+    pufferlib.registry.try_import('ale_py', 'atari')
+    from stable_baselines3.common.atari_wrappers import (
+        ClipRewardEnv,
+        EpisodicLifeEnv,
+        FireResetEnv,
+        MaxAndSkipEnv,
+    )
+    with pufferlib.utils.Suppress():
+        env = env_creator()(name)
 
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = NoopResetEnv(env, noop_max=30)
@@ -36,7 +34,7 @@ def make_env(name='BreakoutNoFrameskip-v4', framestack=4):
     env = gym.wrappers.ResizeObservation(env, (84, 84))
     env = gym.wrappers.GrayScaleObservation(env)
     env = gym.wrappers.FrameStack(env, framestack)
-    return pufferlib.emulation.GymPufferEnv(
+    return pufferlib.emulation.GymnasiumPufferEnv(
         env=env, postprocessor_cls=AtariFeaturizer)
 
 # Broken in SB3
@@ -65,10 +63,10 @@ class NoopResetEnv(gym.Wrapper):
         assert noops > 0
         obs = np.zeros(0)
         for _ in range(noops):
-            obs, _, done, _ = self.env.step(self.noop_action)
+            obs, _, done, _, _ = self.env.step(self.noop_action)
             if done:
                 obs = self.env.reset(**kwargs)
-        return obs
+        return obs, {}
 
 class AtariFeaturizer(pufferlib.emulation.Postprocessor):
     def reset(self, obs):
@@ -84,8 +82,8 @@ class AtariFeaturizer(pufferlib.emulation.Postprocessor):
         return np.array(obs)
         return np.array(obs[1], dtype=np.float32)
 
-    def reward_done_info(self, reward, done, info):
-        return reward, done, info
+    def reward_done_truncated_info(self, reward, done, truncated, info):
+        return reward, done, truncated, info
         if 'lives' in info:
             if info['lives'] == 0 and done:
                 info['return'] = info['episode']['r']

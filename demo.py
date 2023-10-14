@@ -1,38 +1,36 @@
 from pdb import set_trace as T
 import argparse
 import sys
-import time
 import os
+
 import importlib
 import inspect
-from collections import defaultdict
-
-import torch
 
 import pufferlib
-
-# TODO: Fix circular import depending on import order
-from clean_pufferl import CleanPuffeRL
-
+import pufferlib.args
 import pufferlib.utils
 import pufferlib.models
 
 import config
+from clean_pufferl import CleanPuffeRL
 
 
 def get_init_args(fn):
     sig = inspect.signature(fn)
-    
-    # Extract the arguments and their default values
     args = {}
     for name, param in sig.parameters.items():
         if name in ('self', 'env'):
             continue
-        args[name] = param.default if param.default is not inspect.Parameter.empty else None
-
+        if param.kind == inspect.Parameter.VAR_POSITIONAL:
+            continue
+        elif param.kind == inspect.Parameter.VAR_KEYWORD:
+            continue
+        else:
+            args[name] = param.default if param.default is not inspect.Parameter.empty else None
     return args
 
 def make_config(env):
+    # TODO: Improve install checking with pkg_resources
     try:
         env_module = importlib.import_module(f'pufferlib.registry.{env}')
     except:
@@ -40,7 +38,7 @@ def make_config(env):
         env_module = importlib.import_module(f'pufferlib.registry.{env}')
 
     all_configs = config.all()
-    cleanrl_init, cleanrl_train, sweep_config = all_configs[env]()
+    args, sweep_config = all_configs[env]()
 
     env_kwargs = get_init_args(env_module.make_env)
     policy_kwargs = get_init_args(env_module.Policy.__init__)
@@ -50,8 +48,7 @@ def make_config(env):
         recurrent_kwargs = get_init_args(env_module.Recurrent.__init__)
 
     return env_module, sweep_config, pufferlib.namespace(
-        cleanrl_init = cleanrl_init,
-        cleanrl_train = cleanrl_train,
+        args=args,
         env_kwargs = env_kwargs,
         policy_kwargs = policy_kwargs,
         recurrent_kwargs = recurrent_kwargs,
@@ -66,25 +63,31 @@ def make_policy(envs, env_module, args):
     else:
         policy = pufferlib.frameworks.cleanrl.Policy(policy)
 
-    return policy.to(args.cleanrl_init['device'])
+    if args.args.cuda:
+        return policy.cuda()
 
+    return policy
 
 def init_wandb(args, env_module):
     os.environ["WANDB_SILENT"] = "true"
+
+    name = args.env
+    if 'name' in args.env_kwargs:
+        name = args.env_kwargs['name']
+
     import wandb
     wandb.init(
-        id=args.run_id or wandb.util.generate_id(),
+        id=args.exp_name or wandb.util.generate_id(),
         project=args.wandb_project,
         entity=args.wandb_entity,
         group=args.wandb_group,
         config={
-            'cleanrl_init': args.cleanrl_init,
-            'cleanrl_train': args.cleanrl_train,
+            'cleanrl': dict(args.args),
             'env': args.env_kwargs,
             'policy': args.policy_kwargs,
             'recurrent': args.recurrent_kwargs,
         },
-        name=args.env,
+        name=name,
         monitor_gym=True,
         save_code=True,
         resume="allow",
@@ -96,7 +99,7 @@ def sweep(args, env_module, sweep_config):
     sweep_id = wandb.sweep(sweep=sweep_config, project="pufferlib")
 
     def main():
-        args.run_id = init_wandb(args, env_module)
+        args.exp_name = init_wandb(args, env_module)
         if hasattr(wandb.config, 'cleanrl_init'):
             args.cleanrl_init.update(wandb.config.cleanrl_init)
         if hasattr(wandb.config, 'cleanrl_train'):
@@ -112,21 +115,19 @@ def sweep(args, env_module, sweep_config):
 
 def train(args, env_module):
     trainer = CleanPuffeRL(
+        config=args.args,
         agent_creator=make_policy,
         agent_kwargs={'env_module': env_module, 'args': args},
         env_creator=env_module.make_env,
         env_creator_kwargs=args.env_kwargs,
-        **args.cleanrl_init,
-        run_id=args.run_id,
+        vectorization=args.vectorization,
+        exp_name=args.exp_name,
         track=args.track,
     )
 
-    num_updates = (args.cleanrl_init['total_timesteps']
-        // args.cleanrl_init['batch_size'])
-
-    for update in range(num_updates):
+    for update in range(trainer.total_updates):
         trainer.evaluate()
-        trainer.train(**args.cleanrl_train)
+        trainer.train()
 
     trainer.close()
 
@@ -139,6 +140,7 @@ def evaluate(args, env_module):
     device = args.cleanrl_init['device']
     agent = torch.load('agent.pt').to(device)
 
+    import time
     ob = env.reset()
     for i in range(100):
         ob = torch.tensor(ob).view(1, -1).to(device)
@@ -157,9 +159,10 @@ def evaluate(args, env_module):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Parse environment argument", add_help=False)
-    parser.add_argument("--env", type=str, default="nmmo", help="Environment name")
-    parser.add_argument("--mode", type=str, default="train", help="train/eval/sweep")
-    parser.add_argument("--run-id", type=str, default=None, help="Experiment name")
+    parser.add_argument('--env', type=str, default="nmmo", help="Environment name")
+    parser.add_argument('--mode', type=str, default="train", help="train/eval/sweep")
+    parser.add_argument('--exp-name', type=str, default=None, help="Experiment name")
+    parser.add_argument('--vectorization', type=str, default='serial', help='Vectorization method (serial, multiprocessing, ray)')
     parser.add_argument('--wandb-entity', type=str, default='jsuarez', help='WandB entity')
     parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
     parser.add_argument('--wandb-group', type=str, default='debug', help='WandB group')
@@ -176,17 +179,26 @@ if __name__ == '__main__':
         for key, value in sub_config.items():
             data_key = f'{name}.{key}'
             cli_key = f'--{data_key}'.replace('_', '-')
-            parser.add_argument(cli_key, default=value)
+            parser.add_argument(cli_key, default=value, type=type(value))
             clean_parser.add_argument(cli_key, default=value, metavar='', help=env)
             args[name][key] = getattr(parser.parse_known_args()[0], data_key)
 
     clean_parser.parse_args(sys.argv[1:])
+    args['args'] = pufferlib.args.CleanPuffeRL(**args['args'])
     args = pufferlib.namespace(**args)
+    vec = args.vectorization
+    assert vec in 'serial multiprocessing ray'.split()
+    if vec == 'serial':
+        args.vectorization = pufferlib.vectorization.Serial
+    elif vec == 'multiprocessing':
+        args.vectorization = pufferlib.vectorization.Multiprocessing
+    elif vec == 'ray':
+        args.vectorization = pufferlib.vectorization.Ray
 
     if args.mode == 'sweep':
         args.track = True
     elif args.track:
-        args.run_id = init_wandb(args, env_module)
+        args.exp_name = init_wandb(args, env_module)
 
     if args.mode == 'train':
         train(args, env_module)

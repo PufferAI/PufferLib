@@ -1,20 +1,20 @@
 import pufferlib
 import pufferlib.emulation
-import pufferlib.utils
+import pufferlib.registry
+import pufferlib.wrappers
 
 
-def make_binding():
-    '''Starcraft Multiagent Challenge binding creation function
+def env_creator():
+    pufferlib.registry.try_import('smac')
+    from smac.env.pettingzoo.StarCraft2PZEnv import _parallel_env as smac_env
+    return smac_env
+ 
+def make_env():
+    '''Starcraft Multiagent Challenge creation function
 
     Support for SMAC is WIP because environments do not function without
     an action-masked baseline policy.'''
-    try:
-        from smac.env.pettingzoo.StarCraft2PZEnv import _parallel_env as smac_env
-    except:
-        raise pufferlib.utils.SetupError('SMAC')
-    else:
-        return pufferlib.emulation.PettingZooPufferEnv(
-            env_creator=smac_env,
-            env_args=[1000],
-            #env_name='SMAC',
-        )
+    env = env_creator()(1000)
+    env = pufferlib.wrappers.PettingZooTruncatedWrapper(env)
+    env = pufferlib.emulation.PettingZooPufferEnv(env)
+    return env

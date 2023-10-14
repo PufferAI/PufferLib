@@ -11,7 +11,7 @@ def print_if(e, print_errors):
         print()
 
 def test_gym_api_usage(env_cls, print_errors=True):
-    env = pufferlib.emulation.GymPufferEnv(env_creator=env_cls)
+    env = pufferlib.emulation.GymnasiumPufferEnv(env_creator=env_cls)
 
     try:
         env.step({})

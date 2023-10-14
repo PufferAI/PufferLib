@@ -10,8 +10,8 @@ import pufferlib.utils
 
 class PolicyGod:
     def __init__(
-            self, envs, agent, data_dir, resume_state, device, num_envs, num_agents,
-            selfplay_learner_weight, selfplay_num_policies,
+            self, envs, agent, data_dir, resume_state, device,
+            num_envs, num_agents, selfplay_kernel,
             policy_store=None,
             policy_ranker=None,
             policy_pool=None,
@@ -50,21 +50,21 @@ class PolicyGod:
         agent = agent.to(device)
 
         # Setup policy pool
+        self.policy_pool = policy_pool
         if policy_pool is None:
             self.policy_pool = pufferlib.policy_pool.PolicyPool(
                 agent,
                 "learner",
                 num_envs=num_envs,
                 num_agents=num_agents,
-                learner_weight=selfplay_learner_weight,
-                num_policies=selfplay_num_policies,
+                kernel=selfplay_kernel,
             )
             self.forwards = self.policy_pool.forwards
 
         # Setup policy selector
         if policy_selector is None:
             self.policy_selector = pufferlib.policy_ranker.PolicySelector(
-                selfplay_num_policies - 1, exclude_names="learner"
+                self.policy_pool._num_policies - 1, exclude_names="learner"
             )
 
         self.agent = agent
@@ -96,10 +96,7 @@ class PolicyGod:
                 name, self.policy_pool._learner_name)
 
     def update_policies(self):
-        self.policy_pool.update_policies({
-            p.name: p.policy(
-                policy_args=[self.buffers[0]],
-                device=self.device,
-            ) for p in self.policy_store.select_policies(self.policy_selector)
-        })
-
+        policies = self.policy_store.select_policies(
+            self.policy_selector)
+        self.policy_pool.update_policies(
+            {p.name: p.policy() for p in policies})

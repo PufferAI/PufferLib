@@ -7,7 +7,7 @@ def nmmo_creator():
     return pufferlib.emulation.PettingZooPufferEnv(env_creator=nmmo.Env)
 
 def nethack_creator():
-    return pufferlib.emulation.GymPufferEnv(env_creator=nle.env.NLE)
+    return pufferlib.emulation.GymnasiumPufferEnv(env_creator=nle.env.NLE)
 
 # Section 2: Vectorization
 import pufferlib.vectorization

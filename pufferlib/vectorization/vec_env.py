@@ -4,7 +4,7 @@ import numpy as np
 from itertools import chain
 
 from pufferlib import namespace
-from pufferlib.emulation import GymPufferEnv, PettingZooPufferEnv
+from pufferlib.emulation import GymnasiumPufferEnv, PettingZooPufferEnv
 from pufferlib.vectorization.multi_env import create_precheck
 from pufferlib.vectorization.gym_multi_env import GymMultiEnv
 from pufferlib.vectorization.pettingzoo_multi_env import PettingZooMultiEnv
@@ -14,14 +14,14 @@ RESET = 0
 SEND = 1
 RECV = 2
 
-space_error_msg = 'env {env} must be an instance of GymPufferEnv or PettingZooPufferEnv'
+space_error_msg = 'env {env} must be an instance of GymnasiumPufferEnv or PettingZooPufferEnv'
 
 
 def setup(env_creator, env_args, env_kwargs, num_workers, envs_per_worker):
     env_args, env_kwargs = create_precheck(env_creator, env_args, env_kwargs)
 
     driver_env = env_creator(*env_args, **env_kwargs)
-    if isinstance(driver_env, GymPufferEnv):
+    if isinstance(driver_env, GymnasiumPufferEnv):
         multi_env_cls = GymMultiEnv
         num_agents = 1
     elif isinstance(driver_env, PettingZooPufferEnv):
@@ -30,7 +30,7 @@ def setup(env_creator, env_args, env_kwargs, num_workers, envs_per_worker):
     else:
         raise TypeError(
             'env_creator must return an instance '
-            'of GymPufferEnv or PettingZooPufferEnv'
+            'of GymnasiumPufferEnv or PettingZooPufferEnv'
         )
 
     obs_space = _single_observation_space(driver_env)
@@ -41,7 +41,7 @@ def setup(env_creator, env_args, env_kwargs, num_workers, envs_per_worker):
     return driver_env, multi_env_cls, num_agents, preallocated_obs
 
 def _single_observation_space(env):
-    if isinstance(env, GymPufferEnv):
+    if isinstance(env, GymnasiumPufferEnv):
         return env.observation_space
     elif isinstance(env, PettingZooPufferEnv):
         return env.single_observation_space
@@ -52,7 +52,7 @@ def single_observation_space(state):
     return _single_observation_space(state.driver_env)
 
 def _single_action_space(env):
-    if isinstance(env, GymPufferEnv):
+    if isinstance(env, GymnasiumPufferEnv):
         return env.action_space
     elif isinstance(env, PettingZooPufferEnv):
         return env.single_action_space
@@ -84,7 +84,7 @@ def reset_precheck(state):
     state.flag = RECV
  
 def aggregate_recvs(state, returns):
-    obs, rewards, dones, infos = list(zip(*returns))
+    obs, rewards, dones, truncateds, infos = list(zip(*returns))
 
     for i, o in enumerate(obs):
         total_agents = state.num_agents * state.envs_per_worker
@@ -92,12 +92,15 @@ def aggregate_recvs(state, returns):
 
     rewards = list(chain.from_iterable(rewards))
     dones = list(chain.from_iterable(dones))
+    truncateds = list(chain.from_iterable(truncateds))
     orig = infos
     infos = [i for ii in infos for i in ii]
 
-    assert len(rewards) == len(dones) == total_agents * state.num_workers
+    if not(len(rewards) == len(dones) == len(truncateds) == total_agents * state.num_workers):
+        T()
+    assert len(rewards) == len(dones) == len(truncateds) == total_agents * state.num_workers
     assert len(infos) == state.num_workers * state.envs_per_worker
-    return state.preallocated_obs, rewards, dones, infos
+    return state.preallocated_obs, rewards, dones, truncateds, infos
 
 def split_actions(state, actions, env_id=None):
     if type(actions) == list:

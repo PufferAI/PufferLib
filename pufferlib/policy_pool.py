@@ -1,37 +1,57 @@
 from pdb import set_trace as T
+import numpy as np
+
 from typing import OrderedDict, Dict
+from collections import defaultdict
 
 import torch
 import copy
 
-import numpy as np
 import logging
 
 from pufferlib.models import Policy
+
+import numpy as np
+
+
+def index_groups(inp):
+    index_map = defaultdict(list)
+    
+    for i, elem in enumerate(inp):
+        index_map[elem].append(i)
+    
+    unique_elements = np.unique(inp)
+    return [index_map[elem] for elem in unique_elements]
 
 # Provides a pool of policies that collectively process a batch
 # of observations. The batch is split across policies according
 # to the sample weights provided at initialization.
 class PolicyPool():
     def __init__(self,
-        learner: Policy,
-        learner_name: str,
-        num_agents: int,
-        num_envs: int,
-        num_policies: int = 1,
-        learner_weight: float = 1.0):
-
+            learner: Policy,
+            learner_name: str,
+            num_agents: int,
+            num_envs: int,
+            kernel: list = None,
+            ):
         self._learner = learner
         self._learner_name = learner_name
-        self._learner_weight = learner_weight
+        
+        if kernel is None:
+            kernel = [0]
 
-        self._num_policies = num_policies
+        self.kernel = kernel
+        self._num_policies = len(np.unique(kernel))
         self._policies = OrderedDict({learner_name: learner})
 
         self._num_agents = num_agents
         self._num_envs = num_envs
         self._batch_size = num_agents * num_envs
-        self._sample_idxs = self._compute_sample_idxs()
+
+        # Used to distribute the batch across policies
+        assert self._batch_size % len(self.kernel) == 0
+        self._sample_idxs = index_groups(
+            kernel * (self._batch_size // len(kernel)))
 
         self.learner_mask = np.zeros(self._batch_size)
         self.learner_mask[self._sample_idxs[0]] = 1
@@ -39,33 +59,21 @@ class PolicyPool():
 
         self._allocated = False
 
-    def _compute_sample_idxs(self):
-        # Create indices for splitting data across policies
-        ow = 0
-        if self._num_policies > 1:
-            ow = int(self._num_agents * (1 - self._learner_weight) / (self._num_policies - 1))
-
-        lw = self._num_agents - ow * (self._num_policies - 1)
-
-        sample_weights = [lw] + [ow] * (self._num_policies - 1)
-        print(f"PolicyPool sample_weights: {sample_weights}")
-        chunk_size = sum(sample_weights)
-        pattern = [i for i, weight in enumerate(sample_weights)
-                for _ in range(weight)]
-
-        # Distribute indices among sublists
-        sample_idxs = [[] for _ in range(self._num_policies)]
-        for idx in range(self._batch_size):
-            sublist_idx = pattern[idx % chunk_size]
-            sample_idxs[sublist_idx].append(idx)
-
-        return sample_idxs
-
     def forwards(self, obs, lstm_state=None, dones=None):
+        #atn, lgprob, _, val = self._policies['learner'].get_action_and_value(obs)
+        #return atn, lgprob, val, lstm_state
+
         batch_size = len(obs)
-        for samp, policy in zip(self._sample_idxs, self._policies.values()):
-            if len(samp) == 0:
-                continue
+        idx = 0
+        policies = list(self._policies.values())
+        for idx in range(self._num_policies):
+            samp = self._sample_idxs[idx]
+            assert len(samp) > 0
+            if idx >= len(policies):
+                policy = self._learner
+            else:
+                policy = policies[idx]
+
             if lstm_state is not None:
                 atn, lgprob, _, val, (lstm_state[0][:, samp], lstm_state[1][:, samp]) = policy.get_action_and_value(
                     obs[samp],

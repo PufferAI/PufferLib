@@ -15,7 +15,7 @@ def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, env
     # Do not profile env creation or first reset
     raw_envs = [env_cls() for _ in range(num_workers * envs_per_worker)]
     puf_envs = vectorization(
-        env_creator=pufferlib.emulation.GymPufferEnv,
+        env_creator=pufferlib.emulation.GymnasiumPufferEnv,
         env_kwargs={'env_creator': env_cls},
         num_workers=num_workers,
         envs_per_worker=envs_per_worker,
@@ -44,7 +44,7 @@ def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, env
                 nxt_dones.append(False)
             else:
                 with raw_profiler:
-                    r_ob, r_rew, r_done, _ = r_env.step(raw_actions[idx])
+                    r_ob, r_rew, r_done, _, _ = r_env.step(raw_actions[idx])
                 raw_obs.append(r_ob)
                 raw_rewards.append(r_rew)
                 nxt_dones.append(r_done)
@@ -60,7 +60,7 @@ def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, env
             puf_actions.append(r_a)
 
         with puf_profiler:
-            puf_obs, puf_rewards, puf_dones, _ = puf_envs.step(puf_actions)
+            puf_obs, puf_rewards, puf_dones, _, _ = puf_envs.step(puf_actions)
 
         for idx in range(num_workers * envs_per_worker):
             assert raw_rewards[idx] == puf_rewards[idx]
@@ -118,7 +118,7 @@ def test_pettingzoo_vectorization(env_cls, vectorization, steps=100, num_workers
                 nxt_dones.append({agent: False for agent in possible_agents})
             else:
                 with raw_profiler:
-                    r_ob, r_rew, r_done, _ = r_env.step(raw_actions[idx])
+                    r_ob, r_rew, r_done, _, _ = r_env.step(raw_actions[idx])
                 raw_obs.append(r_ob)
                 raw_rewards.append(r_rew)
                 nxt_dones.append(r_done)
@@ -143,7 +143,7 @@ def test_pettingzoo_vectorization(env_cls, vectorization, steps=100, num_workers
         puf_actions = np.array(puf_actions)
 
         with puf_profiler:
-            flat_puf_obs, puf_rewards, puf_dones, _ = puf_envs.step(puf_actions)
+            flat_puf_obs, puf_rewards, puf_dones, _, _ = puf_envs.step(puf_actions)
 
         idx = 0
         for r_rewards, r_dones in zip(raw_rewards, raw_dones):

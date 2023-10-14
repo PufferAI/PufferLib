@@ -4,11 +4,13 @@ import numpy as np
 import warnings
 
 import gym
+import gymnasium
 import inspect
 from collections import OrderedDict
 from collections.abc import Iterable
 
 import pufferlib
+import pufferlib.spaces
 from pufferlib import utils, exceptions
 from pufferlib.extensions import flatten, unflatten
 
@@ -66,9 +68,9 @@ class Postprocessor:
         '''
         return action
 
-    def reward_done_info(self, reward, done, info):
-        '''Called on the reward, done, and info after they are returned by the environment'''
-        return reward, done, info
+    def reward_done_truncated_info(self, reward, done, truncated, info):
+        '''Called on the reward, done, truncated, and info after they are returned by the environment'''
+        return reward, done, truncated, info
 
 
 class BasicPostprocessor(Postprocessor):
@@ -80,23 +82,26 @@ class BasicPostprocessor(Postprocessor):
         self.epoch_length = 0
         self.done = False
 
-    def reward_done_info(self, reward, done, info):
-        if isinstance(rewards, (list, np.ndarray)):
-            rewards = sum(rewards.values())
+    def reward_done_truncated_info(self, reward, done, truncated, info):
+        if isinstance(reward, (list, np.ndarray)):
+            reward = sum(reward.values())
 
         # Env is done
-        if len(self.env.agents) == 0:
+        if self.done:
+            return reward, done, truncated, info
+
+        self.epoch_length += 1
+        self.epoch_return += reward
+
+        if done or truncated:
             info['return'] = self.epoch_return
             info['length'] = self.epoch_length
             self.done = True
-        elif not done:
-            self.epoch_length += 1
-            self.epoch_return += rewards
 
-        return reward, done, info
+        return reward, done, truncated, info
 
 
-class GymPufferEnv(gym.Env):
+class GymnasiumPufferEnv(gym.Env):
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={},
             postprocessor_cls=Postprocessor):
         self.env = make_object(env, env_creator, env_args, env_kwargs)
@@ -143,7 +148,7 @@ class GymPufferEnv(gym.Env):
         self.initialized = True
         self.done = False
 
-        ob = _seed_and_reset(self.env, seed)
+        ob, info = _seed_and_reset(self.env, seed)
 
         # Call user featurizer and flatten the observations
         processed_ob = postprocess_and_flatten(
@@ -154,7 +159,7 @@ class GymPufferEnv(gym.Env):
                 self.is_observation_checked = check_space(
                     processed_ob, self.box_observation_space)
 
-        return processed_ob
+        return processed_ob, info
  
     def step(self, action):
         '''Execute an action and return (observation, reward, done, info)'''
@@ -177,14 +182,14 @@ class GymPufferEnv(gym.Env):
             ), self.flat_action_structure
         )
 
-        ob, reward, done, info = self.env.step(action)
+        ob, reward, done, truncated, info = self.env.step(action)
 
         # Call user postprocessors and flatten the observations
-        processed_ob, single_reward, single_done, single_info = postprocess_and_flatten(
-            ob, self.postprocessor, reward, done, info)
+        processed_ob, single_reward, single_done, single_truncated, single_info = postprocess_and_flatten(
+            ob, self.postprocessor, reward, done, truncated, info)
                    
         self.done = single_done
-        return processed_ob, single_reward, single_done, single_info
+        return processed_ob, single_reward, single_done, single_truncated, single_info
 
     def render(self):
         return self.env.render()
@@ -275,7 +280,7 @@ class PettingZooPufferEnv:
         return self.multidiscrete_action_space
 
     def reset(self, seed=None):
-        obs = self.env.reset(seed=seed)
+        obs, info = self.env.reset(seed=seed)
         self.initialized = True
         self.all_done = False
 
@@ -285,7 +290,7 @@ class PettingZooPufferEnv:
 
         # Call user featurizer and flatten the observations
         postprocessed_obs = {}
-        for agent in self.possible_agents:
+        for agent in obs:
             postprocessed_obs[agent] = postprocess_and_flatten(
                 obs[agent], self.postprocessors[agent], reset=True)
 
@@ -295,8 +300,12 @@ class PettingZooPufferEnv:
                     next(iter(postprocessed_obs.values())),
                     self.box_observation_space
                 )
-               
-        return postprocessed_obs
+
+        padded_obs = pad_agent_data(postprocessed_obs,
+            self.possible_agents, self.pad_observation)
+        padded_infos = pad_agent_data(info, self.possible_agents, {})
+
+        return padded_obs, padded_infos
 
     def step(self, actions):
         '''Step the environment and return (observations, rewards, dones, infos)'''
@@ -332,24 +341,24 @@ class PettingZooPufferEnv:
         if self.teams is not None:
             unpacked_actions = ungroup_from_teams(self.teams, unpacked_actions)
 
-        obs, rewards, dones, infos = self.env.step(unpacked_actions)
+        obs, rewards, dones, truncateds, infos = self.env.step(unpacked_actions)
         # TODO: Can add this assert once NMMO Horizon is ported to puffer
         # assert all(dones.values()) == (len(self.env.agents) == 0)
 
         if self.teams is not None:
-            obs, rewards, dones = group_into_teams(self.teams, obs, rewards, dones)
+            obs, rewards, truncateds, dones = group_into_teams(self.teams, obs, rewards, truncateds, dones)
 
         # Call user postprocessors and flatten the observations
         for agent in obs:
-            obs[agent], rewards[agent], dones[agent], infos[agent] = postprocess_and_flatten(
+            obs[agent], rewards[agent], dones[agent], truncateds[agent], infos[agent] = postprocess_and_flatten(
                 obs[agent], self.postprocessors[agent],
-                rewards[agent], dones[agent], infos[agent])
+                rewards[agent], dones[agent], truncateds[agent], infos[agent])
         self.all_done = all(dones.values())
 
-        obs, rewards, dones, infos = pad_to_const_num_agents(
-            self.env.possible_agents, obs, rewards, dones, infos, self.pad_observation)
+        obs, rewards, dones, truncateds, infos = pad_to_const_num_agents(
+            self.env.possible_agents, obs, rewards, dones, truncateds, infos, self.pad_observation)
 
-        return obs, rewards, dones, infos
+        return obs, rewards, dones, truncateds, infos
 
     def render(self):
         return self.env.render()
@@ -391,28 +400,29 @@ def pad_agent_data(data, agents, pad_value):
     return {agent: data[agent] if agent in data else pad_value
         for agent in agents}
     
-def pad_to_const_num_agents(agents, obs, rewards, dones, infos, pad_obs):
+def pad_to_const_num_agents(agents, obs, rewards, dones, truncateds, infos, pad_obs):
     padded_obs = pad_agent_data(obs, agents, pad_obs)
     rewards = pad_agent_data(rewards, agents, 0)
     dones = pad_agent_data(dones, agents, True)
+    truncateds = pad_agent_data(truncateds, agents, False)
     infos = pad_agent_data(infos, agents, {})
-    return padded_obs, rewards, dones, infos
+    return padded_obs, rewards, dones, truncateds, infos
 
 def postprocess_and_flatten(ob, postprocessor,
-        reward=None, done=None, info=None,
+        reward=None, done=None, truncated=None, info=None,
         reset=False, max_horizon=None):
     if reset:
         postprocessor.reset(ob)
     else:
-        reward, done, info = postprocessor.reward_done_info(
-            reward, done, info)
+        reward, done, truncated, info = postprocessor.reward_done_truncated_info(
+            reward, done, truncated, info)
 
     postprocessed_ob = postprocessor.observation(ob)
     flat_ob = concatenate(flatten(postprocessed_ob))
 
     if reset:
         return flat_ob
-    return flat_ob, reward, done, info
+    return flat_ob, reward, done, truncated, info
 
 
 def make_flat_and_multidiscrete_atn_space(atn_space):
@@ -434,7 +444,7 @@ def make_flat_and_box_obs_space(obs_space):
 
     mmin, mmax = pufferlib.utils._get_dtype_bounds(flat_observation.dtype)
     pad_obs = flat_observation * 0
-    box_obs_space = gym.spaces.Box(
+    box_obs_space = gymnasium.spaces.Box(
         low=mmin, high=mmax,
         shape=flat_observation.shape, dtype=flat_observation.dtype
     )
@@ -449,7 +459,7 @@ def make_featurized_obs_and_space(obs_space, postprocessor):
     return featurized_obs_space, featurized_obs
 
 def make_team_space(observation_space, agents):
-    return gym.spaces.Dict({agent: observation_space(agent) for agent in agents})
+    return gymnasium.spaces.Dict({agent: observation_space(agent) for agent in agents})
 
 def check_space(data, space):
     try:
@@ -526,10 +536,10 @@ def flatten_structure(data):
 
 def flatten_space(space):
     def _recursion_helper(current, key):
-        if isinstance(current, gym.spaces.Tuple):
+        if isinstance(current, pufferlib.spaces.Tuple):
             for idx, elem in enumerate(current):
                 _recursion_helper(elem, f'{key}T{idx}.')
-        elif isinstance(current, gym.spaces.Dict):
+        elif isinstance(current, pufferlib.spaces.Dict):
             for k, value in current.items():
                 _recursion_helper(value, f'{key}D{k}.')
         else:
@@ -571,7 +581,7 @@ def split(stacked_sample, flat_space, batched=True):
             samp = stacked_sample[:, ptr:ptr+sz].reshape(batch, *shape)
         else:
             samp = stacked_sample[ptr:ptr+sz].reshape(*shape).astype(typ)
-            if isinstance(subspace, gym.spaces.Discrete):
+            if isinstance(subspace, pufferlib.spaces.Discrete):
                 samp = int(samp[0])
 
         leaves.append(samp)
@@ -582,33 +592,33 @@ def split(stacked_sample, flat_space, batched=True):
 def convert_to_multidiscrete(flat_space):
     lens = []
     for e in flat_space.values():
-        if isinstance(e, gym.spaces.Discrete):
+        if isinstance(e, pufferlib.spaces.Discrete):
             lens.append(e.n)
-        elif isinstance(e, gym.spaces.MultiDiscrete):
+        elif isinstance(e, pufferlib.spaces.MultiDiscrete):
             lens += e.nvec.tolist()
         else:
             raise ValueError(f'Invalid action space: {e}')
 
-    return gym.spaces.MultiDiscrete(lens)
+    return pufferlib.spaces.MultiDiscrete(lens)
 
 def make_space_like(ob):
     if type(ob) == np.ndarray:
         mmin, mmax = utils._get_dtype_bounds(ob.dtype)
-        return gym.spaces.Box(
+        return gymnasium.spaces.Box(
             low=mmin, high=mmax,
             shape=ob.shape, dtype=ob.dtype
         )
 
     # TODO: Handle Discrete (how to get max?)
     if type(ob) in (tuple, list):
-        return gym.spaces.Tuple([make_space_like(v) for v in ob])
+        return gymnasium.spaces.Tuple([make_space_like(v) for v in ob])
 
     if type(ob) in (dict, OrderedDict):
-        return gym.spaces.Dict({k: make_space_like(v) for k, v in ob.items()})
+        return gymnasium.spaces.Dict({k: make_space_like(v) for k, v in ob.items()})
 
     if type(ob) in (int, float):
         # TODO: Tighten bounds
-        return gym.spaces.Box(low=-np.inf, high=np.inf, shape=())
+        return gymnasium.spaces.Box(low=-np.inf, high=np.inf, shape=())
 
     raise ValueError(f'Invalid type for featurized obs: {type(ob)}')
     
@@ -619,18 +629,13 @@ def _seed_and_reset(env, seed):
         return env.reset()
 
     try:
-        env.seed(seed)
-        old_seed=True
+        obs, info = env.reset(seed=seed)
     except:
-        old_seed=False
-
-    if old_seed:
-        obs = env.reset()
-    else:
         try:
-            obs = env.reset(seed=seed)
+            env.seed(seed)
+            obs, info = env.reset()
         except:
-            obs= env.reset()
+            obs, info = env.reset()
             warnings.warn('WARNING: Environment does not support seeding.', DeprecationWarning)
 
-    return obs
+    return obs, info
