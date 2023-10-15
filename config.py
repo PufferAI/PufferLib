@@ -106,7 +106,7 @@ def openspiel():
     args = pufferlib.args.CleanPuffeRL(
         #selfplay_kernel = list(chain.from_iterable(
         #    [[0, i, i, 0] for i in range(1, num_policies + 1)])),
-        #selfplay_kernel = [0, 1, 1, 0],
+        pool_kernel = [0, 1, 1, 0],
         num_envs = 32,
         batch_size = 4096,
     )

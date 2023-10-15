@@ -19,7 +19,7 @@ import pufferlib.utils
 import pufferlib.emulation
 import pufferlib.vectorization
 import pufferlib.frameworks.cleanrl
-import pufferlib.policy_god
+import pufferlib.policy_pool
 
 
 @pufferlib.dataclass
@@ -77,10 +77,7 @@ def init(
         vectorization: ... = pufferlib.vectorization.Serial,
 
         # Policy God
-        policy_store: pufferlib.policy_store.PolicyStore = None,
-        policy_ranker: pufferlib.policy_ranker.PolicyRanker = None,
-        policy_pool: pufferlib.policy_pool.PolicyPool = None,
-        policy_selector: pufferlib.policy_ranker.PolicySelector = None,
+        policy_selector: callable = pufferlib.policy_pool.random_selector,
     ):
     if config is None:
         config = pufferlib.args.CleanPuffeRL()
@@ -112,8 +109,12 @@ def init(
             )
             for _ in range(config.num_buffers)
         ]
-        num_agents = buffers[0].num_agents
-        total_agents = num_agents * config.num_envs
+
+    obs_shape = buffers[0].single_observation_space.shape
+    atn_shape = buffers[0].single_action_space.shape
+    num_agents = buffers[0].num_agents
+    total_agents = num_agents * config.num_envs
+
     agent = pufferlib.emulation.make_object(
         agent, agent_creator, buffers[:1], agent_kwargs)
     optimizer = optim.Adam(agent.parameters(), lr=config.learning_rate, eps=1e-5)
@@ -134,18 +135,17 @@ def init(
     update = resume_state.get("update", 0)
 
     # Create policy pool
-    policy_god = pufferlib.policy_god.PolicyGod(
-        buffers[0], agent, os.path.join(config.data_dir, exp_name),
-        resume_state, device, config.num_envs, num_agents,
-        config.selfplay_kernel)
-    agent = policy_god.agent
+    policy_pool = pufferlib.policy_pool.PolicyPool(
+        agent, total_agents, atn_shape, device, config.data_dir,
+        config.pool_kernel, policy_selector,
+    )
 
     # Allocate Storage
     storage_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True).start()
     next_lstm_state = []
     for i, envs in enumerate(buffers):
         envs.async_reset(config.seed + i)
-        if not agent.is_recurrent:
+        if not hasattr(agent, 'recurrent'):
             next_lstm_state.append(None)
         else:
             shape = (agent.lstm.num_layers, total_agents, agent.lstm.hidden_size)
@@ -153,8 +153,6 @@ def init(
                 torch.zeros(shape).to(device),
                 torch.zeros(shape).to(device),
             ))
-    obs_shape = buffers[0].single_observation_space.shape
-    atn_shape = buffers[0].single_action_space.shape
     obs=torch.zeros(config.batch_size + 1, *obs_shape).to(obs_device)
     actions=torch.zeros(config.batch_size + 1, *atn_shape, dtype=int).to(device)
     logprobs=torch.zeros(config.batch_size + 1).to(device)
@@ -185,7 +183,7 @@ def init(
         agent = agent,
         optimizer = optimizer,
         buffers = buffers,
-        policy_god = policy_god,
+        policy_pool = policy_pool,
 
         # Logging
         exp_name = exp_name,
@@ -227,7 +225,7 @@ def evaluate(data):
             **{f'stats/{k}': v for k, v in data.stats.items()},
         })
 
-    data.policy_god.update_policies()
+    data.policy_pool.update_policies()
     performance = defaultdict(list)
     env_profiler = pufferlib.utils.Profiler()
     inference_profiler = pufferlib.utils.Profiler()
@@ -251,7 +249,7 @@ def evaluate(data):
                 performance[k].append(v["delta"])
         '''
 
-        i = data.policy_god.update_scores(i, "return")
+        i = data.policy_pool.update_scores(i, "return")
         o = torch.Tensor(o).to(data.obs_device)
         r = torch.Tensor(r).float().to(data.device).view(-1)
         d = torch.Tensor(d).float().to(data.device).view(-1)
@@ -259,13 +257,13 @@ def evaluate(data):
         agent_steps_collected += sum(mask)
         padded_steps_collected += len(mask)
         with inference_profiler, torch.no_grad():
-            actions, logprob, value, data.next_lstm_state[buf] = data.policy_god.forwards(
+            actions, logprob, value, data.next_lstm_state[buf] = data.policy_pool.forwards(
                     o.to(data.device), data.next_lstm_state[buf])
             value = value.flatten()
 
         # Index alive mask with policy pool idxs...
         # TODO: Find a way to avoid having to do this
-        learner_mask = mask * data.policy_god.policy_pool.learner_mask
+        learner_mask = mask * data.policy_pool.mask
 
         for idx in np.where(learner_mask)[0]:
             if ptr == config.batch_size + 1:
@@ -299,7 +297,7 @@ def evaluate(data):
             data.buffers[buf].send(actions.cpu().numpy())
         data.buf = (data.buf + 1) % config.num_buffers
 
-    data.policy_god.update_ranks(data.global_step)
+    data.policy_pool.update_ranks()
     data.global_step += config.batch_size
     eval_profiler.stop()
 
@@ -394,7 +392,7 @@ def train(data):
             mb_advantages = b_advantages[mb].reshape(-1)
             mb_returns = b_returns[mb].reshape(-1)
 
-            if data.agent.is_recurrent:
+            if hasattr(data.agent, 'recurrent'):
                 _, newlogprob, entropy, newvalue, lstm_state = data.agent.get_action_and_value(
                     mb_obs, state=lstm_state, done=b_dones[mb], action=mb_actions)
                 lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
@@ -534,7 +532,6 @@ def save_checkpoint(data):
     torch.save(state, state_path + '.tmp')
     os.rename(state_path + '.tmp', state_path)
 
-    data.policy_god.add_policy(model_name, data.agent)
     return model_path
 
 def seed_everything(seed, torch_deterministic):

@@ -1,114 +1,98 @@
-
-from typing import Dict
-from pufferlib.rating import OpenSkillRating
-import logging
-import pickle
+from pdb import set_trace as T
 import numpy as np
-import pandas as pd
 
-from pufferlib.policy_store import PolicySelector
+import sqlite3
 
-class PolicyRanker():
-  def update_ranks(self, scores: Dict[str, float], wandb_policies=[], step: int = 0):
-    pass
 
-class OpenSkillPolicySelector(PolicySelector):
-  pass
+def win_prob(elo1, elo2):
+    '''Calculate win probability such that a difference of
+    50/100/150 elo corresponds to win probabilitit 68/95/99.7%'''
+    return 1 / (1 + 10 ** ((elo2 - elo1) / 77.6))
 
-class OpenSkillRanker(PolicyRanker):
-  def __init__(
-    self, anchor: str, mu: int = 1000,
-    anchor_mu: int = 1000, sigma: float =100/3):
+def update_elos(elos: np.ndarray, scores: np.ndarray, k: float = 4.0):
+    '''Update elos based on the result of a game
 
-    super().__init__()
+    The parameter k controls the magnitude of the update.
+    A higher k means that the elo will change more after a game.
+    This means that elos will converge faster but less precisely.
+    In particular, low k cannot distinguish between players of
+    similar skill, while a high k will just take longer to converge.
 
-    self._tournament = OpenSkillRating(mu, anchor_mu, sigma)
-    self._anchor = anchor
-    self._default_mu = mu
-    self._default_sigma = sigma
-    self._anchor_mu = anchor_mu
-    self.add_policy(anchor, anchor=True)
+    The default is tuned for normally distributed player skill
+    You should lower it if you have very similar players.
+    Raise it if you are evaluating a diverse skill pool.
+    '''
+    num_players = len(elos)
+    assert num_players == len(scores)
 
-  def update_ranks(self, scores: Dict[str, float], wandb_policies=[], step: int = 0):
-    if len(scores) == 0:
-       return
+    elo_update = [[] for _ in range(num_players)]
+    for i in range(num_players):
+        for j in range(i+1, num_players):
+            delta = scores[i] - scores[j]
 
-    for policy in scores.keys():
-      if policy not in self._tournament.ratings:
-          self.add_policy(policy, anchor=policy == self._anchor)
+            # Convert to elo scoring format
+            if delta > 0:
+                score_i = 1
+            elif delta == 0:
+                score_i = 0.5
+            else:
+                score_i = 0
 
-    ratings = self.ratings()
-    dataframe = pd.DataFrame(
-      {
-          ('Old Rating', 'mu'): [ratings.get(n).mu for n in scores],
-      }
-    )
+            # Calculate elo update for pairs
+            expected_i = win_prob(elos[i], elos[j])
+            expected_j = 1 - expected_i
+            score_j = 1 - score_i
 
-    if len(scores) > 1:
-      self._tournament.update(
-         policy_ids=list(scores.keys()),
-         scores=list([np.mean(v) for v in scores.values()]))
+            elo_update[i].append(k * (score_i - expected_i))
+            elo_update[j].append(k * (score_j - expected_j))
 
-    dataframe = pd.concat(
-        [dataframe, pd.DataFrame(
-            {
-                ('New Rating', ''): [ratings.get(n).mu for n in scores],
-                ('Score', 'mean'): [np.mean(v) for v in scores.values()],
-                ('Score', 'sdev'): [np.std(v) for v in scores.values()],
-                ('Score', 'cnt'): [len(v) for v in scores.values()],
-                ('Policy', ''): [n for n in scores.keys()],
-            }
-        )],
-        axis=1,
-    )
-    dataframe[('Rating Delta', "")] = dataframe[('New Rating', '')] - dataframe[('Old Rating', 'mu')]
-    print("\n\n" + dataframe.round(2).to_string() + "\n\n")
+    elo_update = [np.mean(e) for e in elo_update]
+    return [elo + update for elo, update in zip(elos, elo_update)]
 
-    if len(wandb_policies) > 0:
-      import wandb
-      for wandb_policy in wandb_policies:
-        wandb.log(
-              {
-                  f"skillrank/{wandb_policy}/mu": ratings[wandb_policy].mu,
-                  f"skillrank/{wandb_policy}/sigma": ratings[wandb_policy].sigma,
-                  f"skillrank/{wandb_policy}/score": np.mean(scores[wandb_policy]),
-                  "agent_steps": step,
-                  "global_step": step,
-              }
-          )
+class Ranker:
+    def __init__(self, db_path):
+        self.conn = sqlite3.connect(db_path)
+        with self.conn:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS ratings (
+                    policy TEXT PRIMARY KEY,
+                    elo REAL
+                );
+            """)
 
-  def add_policy(self, name: str, mu=None, sigma=None, anchor=False):
-    if name in self._tournament.ratings:
-        raise ValueError(f"Policy with name {name} already exists")
+    def __repr__(self):
+        with self.conn:
+            cursor = self.conn.execute("SELECT * FROM ratings;")
 
-    if anchor:
-        self._tournament.set_anchor(name)
-        self._tournament.ratings[name].mu = self._anchor_mu
-    else:
-        self._tournament.add_policy(name)
-        self._tournament.ratings[name].mu = mu if mu is not None else self._default_mu
-        self._tournament.ratings[name].sigma = sigma if sigma is not None else self._default_sigma
+        return '\n'.join([
+            f'Policy: {row[0]}, Elo: {row[1]}'
+            for row in cursor().fetchall()
+        ])
 
-  def add_policy_copy(self, name: str, src_name: str):
-    mu = self._default_mu
-    sigma = self._default_sigma
-    if src_name in self._tournament.ratings:
-        mu = self._tournament.ratings[src_name].mu
-        sigma = self._tournament.ratings[src_name].sigma
-    self.add_policy(name, mu, sigma)
+    def update(self, scores: dict):
+        if len(scores) <2:
+            return
 
-  def ratings(self):
-      return self._tournament.ratings
+        # Load all elos from DB
+        with self.conn:
+            cursor = self.conn.execute("SELECT * FROM ratings;")
 
-  def selector(self, num_policies, exclude=[]):
-    return OpenSkillPolicySelector(num_policies, exclude)
+        elos = {row[0]: row[1] for row in cursor.fetchall()}
 
-  def save_to_file(self, file_path):
-      with open(file_path, 'wb') as f:
-          pickle.dump(self, f)
+        flat_scores = []
+        flat_elos = []
 
-  @classmethod
-  def load_from_file(cls, file_path):
-      with open(file_path, 'rb') as f:
-          instance = pickle.load(f)
-      return instance
+        for policy in scores.keys():
+            flat_scores.append(scores[policy])
+            if policy in elos:
+                flat_elos.append(elos[policy])
+            else:
+                flat_elos.append(1000.0)
+
+        flat_elos = update_elos(flat_elos, flat_scores)
+        elos = zip(scores.keys(), flat_elos)
+        with self.conn:
+            self.conn.executemany("""
+                INSERT OR REPLACE INTO ratings (policy, elo)
+                VALUES (?, ?);
+            """, elos)

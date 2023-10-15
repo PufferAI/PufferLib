@@ -60,7 +60,7 @@ class CleanPuffeRL:
     data_dir: str = 'experiments'
     checkpoint_interval: int = 200
     cpu_offload: bool = True
-    selfplay_kernel: list = None
+    pool_kernel: list = [0]
     batch_size: int = 1024
     batch_rows: int = 32
     bptt_horizon: int = 16 #8
