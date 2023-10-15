@@ -136,7 +136,7 @@ def init(
 
     # Create policy pool
     policy_pool = pufferlib.policy_pool.PolicyPool(
-        agent, total_agents, atn_shape, device, config.data_dir,
+        agent, total_agents, atn_shape, device, path,
         config.pool_kernel, policy_selector,
     )
 
@@ -219,10 +219,15 @@ def evaluate(data):
     # TODO: Handle update on resume
     if data.wandb is not None and data.performance.total_uptime > 0:
         data.wandb.log({
-            **{f'charts/{k}': v for k, v in data.charts.__dict__.items()},
-            **{f'losses/{k}': v for k, v in data.losses.__dict__.items()},
-            **{f'performance/{k}': v for k, v in data.performance.__dict__.items()},
+            **{f'charts/{k}': v for k, v in data.charts.items()},
+            **{f'losses/{k}': v for k, v in data.losses.items()},
+            **{f'performance/{k}': v
+                for k, v in data.performance.items()},
             **{f'stats/{k}': v for k, v in data.stats.items()},
+            **{f'skillrank/{policy}': elo
+                for policy, elo in data.policy_pool.ranker.ratings.items()},
+            'global_step': data.charts.global_step,
+            'agent_steps': data.charts.agent_steps,
         })
 
     data.policy_pool.update_policies()
@@ -297,7 +302,6 @@ def evaluate(data):
             data.buffers[buf].send(actions.cpu().numpy())
         data.buf = (data.buf + 1) % config.num_buffers
 
-    data.policy_pool.update_ranks()
     data.global_step += config.batch_size
     eval_profiler.stop()
 
@@ -462,7 +466,6 @@ def train(data):
     y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
     var_y = np.var(y_true)
     explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
-    data.update += 1
 
     charts = data.charts
     charts.learning_rate = data.optimizer.param_groups[0]["lr"]
@@ -478,7 +481,7 @@ def train(data):
 
     perf = data.performance
     perf.total_uptime = int(time.time() - data.start_time)
-    perf.total_updates = data.update
+    perf.total_updates = data.update + 1
     perf.train_time = time.time() - train_time
     perf.train_sps = int(config.batch_size / perf.train_time)
     perf.train_memory = train_profiler.end_mem
@@ -491,6 +494,8 @@ def train(data):
 
     if data.update % config.checkpoint_interval == 0 or done_training(data):
        save_checkpoint(data)
+
+    data.update += 1
 
 def close(data):
     for envs in data.buffers:

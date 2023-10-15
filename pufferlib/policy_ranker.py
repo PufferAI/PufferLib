@@ -61,16 +61,20 @@ class Ranker:
             """)
 
     def __repr__(self):
+        return '\n'.join([
+            f'Policy: {name}, Elo: {elo}'
+            for name, elo in self.ratings
+        ])
+
+    @property
+    def ratings(self):
         with self.conn:
             cursor = self.conn.execute("SELECT * FROM ratings;")
 
-        return '\n'.join([
-            f'Policy: {row[0]}, Elo: {row[1]}'
-            for row in cursor().fetchall()
-        ])
+        return {row[0]: row[1] for row in cursor.fetchall()}
 
     def update(self, scores: dict):
-        if len(scores) <2:
+        if len(scores) < 2:
             return
 
         # Load all elos from DB

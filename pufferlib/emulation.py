@@ -150,8 +150,8 @@ class GymnasiumPufferEnv(gym.Env):
         ob, info = _seed_and_reset(self.env, seed)
 
         # Call user featurizer and flatten the observations
-        processed_ob = postprocess_and_flatten(
-            ob, self.postprocessor, reset=True)
+        self.postprocessor.reset(ob)
+        processed_ob = concatenate(flatten(self.postprocessor.observation(ob)))
 
         if __debug__:
             if not self.is_observation_checked:
@@ -184,11 +184,11 @@ class GymnasiumPufferEnv(gym.Env):
         ob, reward, done, truncated, info = self.env.step(action)
 
         # Call user postprocessors and flatten the observations
-        processed_ob, single_reward, single_done, single_truncated, single_info = postprocess_and_flatten(
-            ob, self.postprocessor, reward, done, truncated, info)
+        ob = concatenate(flatten(self.postprocessor.observation(ob)))
+        reward, done, truncated, info = self.postprocessor.reward_done_truncated_info(reward, done, truncated, info)
                    
-        self.done = single_done
-        return processed_ob, single_reward, single_done, single_truncated, single_info
+        self.done = done
+        return ob, reward, done, truncated, info
 
     def render(self):
         return self.env.render()
@@ -291,8 +291,11 @@ class PettingZooPufferEnv:
         postprocessed_obs = {}
         ob = list(obs.values())[0]
         for agent in self.possible_agents:
-            postprocessed_obs[agent] = postprocess_and_flatten(
-                ob, self.postprocessors[agent], reset=True)
+            post = self.postprocessors[agent]
+            post.reset(ob)
+            if agent in obs:
+                ob = obs[agent]
+                postprocessed_obs[agent] = concatenate(flatten(post.observation(ob)))
 
         if __debug__:
             if not self.is_observation_checked:
@@ -358,9 +361,10 @@ class PettingZooPufferEnv:
 
         # Call user postprocessors and flatten the observations
         for agent in obs:
-            obs[agent], rewards[agent], dones[agent], truncateds[agent], infos[agent] = postprocess_and_flatten(
-                obs[agent], self.postprocessors[agent],
+            obs[agent] = concatenate(flatten(self.postprocessors[agent].observation(obs[agent])))
+            rewards[agent], dones[agent], truncateds[agent], infos[agent] = self.postprocessors[agent].reward_done_truncated_info(
                 rewards[agent], dones[agent], truncateds[agent], infos[agent])
+     
         self.all_done = all(dones.values())
 
         # Mask out missing agents
@@ -422,23 +426,6 @@ def pad_to_const_num_agents(agents, obs, rewards, dones, truncateds, pad_obs):
     dones = pad_agent_data(dones, agents, False)
     truncateds = pad_agent_data(truncateds, agents, False)
     return padded_obs, rewards, dones, truncateds
-
-def postprocess_and_flatten(ob, postprocessor,
-        reward=None, done=None, truncated=None, info=None,
-        reset=False, max_horizon=None):
-    if reset:
-        postprocessor.reset(ob)
-    else:
-        reward, done, truncated, info = postprocessor.reward_done_truncated_info(
-            reward, done, truncated, info)
-
-    postprocessed_ob = postprocessor.observation(ob)
-    flat_ob = concatenate(flatten(postprocessed_ob))
-
-    if reset:
-        return flat_ob
-    return flat_ob, reward, done, truncated, info
-
 
 def make_flat_and_multidiscrete_atn_space(atn_space):
     flat_action_space = flatten_space(atn_space)

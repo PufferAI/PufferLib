@@ -50,7 +50,6 @@ class PolicyRecord:
 
 class PolicyStore:
     def __init__(self, path: str):
-        os.makedirs(path, exist_ok=True)
         self.path = path
 
     def add_policy(self, name: str, policy: Policy) -> PolicyRecord:
@@ -58,16 +57,16 @@ class PolicyStore:
         torch.save(policy, path + '.pt')
         pr = PolicyRecord(name, path, policy)
 
-    def policy_names(self) -> set:
-        names = set()
+    def policy_names(self) -> list:
+        names = []
         for file in os.listdir(self.path):
-            if file.endswith(".pt"):
-                names.add(file[:-3])
+            if file.endswith(".pt") and file != 'trainer_state.pt':
+                names.append(file[:-3])
 
         return names
 
-    def get_policy(self, name: str) -> PolicyRecord:
-        path = os.path.join(self.path, name)
+    def get_policy(self, name: str) -> torch.nn.Module:
+        path = os.path.join(self.path, name + '.pt')
         try:
             return torch.load(path)
         except:

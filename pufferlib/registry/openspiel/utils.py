@@ -63,7 +63,10 @@ def get_obs_and_infos(state):
     solve_chance_nodes(state)
 
     if state.state.is_terminal():
-        return state.last_obs, state.last_infos
+        return (
+            state.last_obs, 
+            {player: {} for player in range(state.env.num_players())},
+        )
 
     # Sequential game:
     curr_player = state.state.current_player()
@@ -71,14 +74,18 @@ def get_obs_and_infos(state):
     np_mask = np.zeros(action_space(state).n)
     np_mask[mask] = 1
 
-    state.last_obs = {curr_player: {
+    state.last_obs = {player: {
         'obs': np.reshape(state.state.observation_tensor(),
             [-1]).astype(np.float32),
         'action_mask': np_mask.astype(np.int8),
-    }}
-    state.last_infos = {curr_player: {}}
+    } for player in range(state.env.num_players())}
 
-    return state.last_obs, state.last_infos
+    state.last_info = {curr_player: {}}
+
+    return (
+        {curr_player: state.last_obs[curr_player]},
+        state.last_info,
+    )
 
 def solve_chance_nodes(state):
     # Before applying action(s), there could be chance nodes.

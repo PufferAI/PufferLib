@@ -17,7 +17,6 @@ import pufferlib.utils
 def random_selector(items: list, num: int):
     if len(items) == 0:
         return []
-
     return np.random.choice(items, num, replace=True).tolist()
 
 class PolicyPool:
@@ -28,6 +27,8 @@ class PolicyPool:
         of observations. The batch is split across policies according
         to the sample weights provided at initialization.'''
         assert data_dir is not None
+        os.makedirs(data_dir, exist_ok=True)
+
         self.policy = policy
         self.total_agents = total_agents
 
@@ -39,27 +40,25 @@ class PolicyPool:
 
         # Create policy sample indices and mask
         assert total_agents % len(kernel) == 0
-        kernel = kernel * (total_agents // len(kernel))
+        self.kernel = kernel * (total_agents // len(kernel))
         index_map = defaultdict(list)
-        for i, elem in enumerate(kernel):
+        for i, elem in enumerate(self.kernel):
             index_map[elem].append(i)
 
-        unique = np.unique(kernel)
+        unique = np.unique(self.kernel)
         self.num_policies = len(unique)
         self.sample_idxs = [index_map[elem] for elem in unique]
         self.mask = np.zeros(total_agents)
         self.mask[self.sample_idxs[0]] = 1
 
         # Create ranker and storage
-        self.ranker = pufferlib.policy_ranker.Ranker(
-            os.path.join(data_dir, "elo.db"))
-        self.scores = {}
-
-        self.store = pufferlib.policy_store.PolicyStore(
-            os.path.join(data_dir, "policies"))
+        self.store = pufferlib.policy_store.PolicyStore(data_dir)
         self.policy_selector = policy_selector
         self.update_policies()
 
+        self.ranker = pufferlib.policy_ranker.Ranker(
+            os.path.join(data_dir, "elo.db"))
+        self.scores = {}
 
     def forwards(self, obs, lstm_state=None):
         policies = list(self.policies.values())
@@ -69,8 +68,10 @@ class PolicyPool:
             samp = self.sample_idxs[idx]
             assert len(samp) > 0
 
-            missing = idx >= len(policies)
-            policy = self.policy if missing else policies[idx]
+            if idx == 0 or idx > len(policies):
+                policy = self.policy
+            else:
+                policy = policies[idx - 1] # Learner not included
 
             if lstm_state is not None:
                 h = lstm_state[0][:, samp]
@@ -91,36 +92,34 @@ class PolicyPool:
         return self.actions, self.logprobs, self.values, lstm_state
 
     def update_scores(self, infos, info_key):
-        # TODO: Check that infos is dense and sorted
-        if len(infos) != self.total_agents:
-            agent_infos = []
-            for info in infos:
-                agent_infos += list(info.values())
-        else:
-            agent_infos = infos
+        if len(infos) == self.total_agents:
+            return {'learner': infos}
 
-        policy_infos = {}
-        for samp, (name, policy) in zip(self.sample_idxs, self.policies.items()):
-            pol_infos = np.array(agent_infos)[samp]
-            policy_infos[name] = pol_infos
+        policies = list(self.policies)
+        policy_infos = defaultdict(list)
 
-            for i in pol_infos:
-                if info_key not in i:
-                    continue
+        idx = -1
+        for game in infos:
+            scores = {}
+            for agent, info in game.items():
+                assert isinstance(info, dict)
+                idx += 1
 
-                if name not in self.scores:
-                    self.scores[name] = []
+                policy_idx = self.kernel[idx]
+                if policy_idx == 0 or policy_idx > len(policies):
+                    policy_name = 'learner'
+                else:
+                    policy_name = policies[policy_idx - 1]
 
-                self.scores[name].append(i[info_key])
+                policy_infos[policy_name].append(info)
+
+                if info_key in info:
+                    scores[policy_name] = info[info_key]
+
+            if len(scores) > 1:
+                self.ranker.update(scores)
 
         return policy_infos
-
-    def update_ranks(self):
-        if self.scores:
-            self.policy_ranker.update(
-                self.policy_pool.scores,
-            )
-            self.scores = {}
 
     def update_policies(self):
         policy_names = self.store.policy_names()
@@ -128,6 +127,7 @@ class PolicyPool:
         self.policies = {
             name: self.store.get_policy(name) for name in selected_names
         }
+        assert len(self.policies) <= self.num_policies - 1
         logging.info(f"PolicyPool: Updated policies: {self.policies.keys()}")
 
 

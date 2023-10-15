@@ -51,6 +51,7 @@ def step(state, actions):
     truncateds = {a: False for a in obs}
 
     if is_terminated:
+        terminateds = {a: True for a in state.possible_agents}
         state.agents = []
 
     return obs, rewards, terminateds, truncateds, infos
