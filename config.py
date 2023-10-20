@@ -162,7 +162,7 @@ def squared():
     )
     sweep_config = make_sweep_config(
         metric=SweepMetric(name='stats/targets_hit'),
-        cleanrl=args,
+        cleanrl=CleanPuffeRLSweep(),
     )
     return args, sweep_config
 

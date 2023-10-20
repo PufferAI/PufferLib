@@ -100,15 +100,13 @@ def sweep(args, env_module, sweep_config):
 
     def main():
         args.exp_name = init_wandb(args, env_module)
-        if hasattr(wandb.config, 'cleanrl_init'):
-            args.cleanrl_init.update(wandb.config.cleanrl_init)
-        if hasattr(wandb.config, 'cleanrl_train'):
-            args.cleanrl_train.update(wandb.config.cleanrl_train)
+        if hasattr(wandb.config, 'cleanrl'):
+            # TODO: Add update method to namespace
+            args.args.__dict__.update(wandb.config.cleanrl)
         if hasattr(wandb.config, 'env'):
             args.env_kwargs.update(wandb.config.env)
         if hasattr(wandb.config, 'policy'):
             args.policy_kwargs.update(wandb.config.policy)
-        #args.cleanrl_init['learning_rate'] = wandb.config.learning_rate
         train(args, env_module)
 
     wandb.agent(sweep_id, main, count=20)
