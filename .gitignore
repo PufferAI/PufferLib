@@ -129,3 +129,6 @@ dmypy.json
 .pyre/
 .pylintrc
 .vscode/
+
+# ROMs
+*.gb
