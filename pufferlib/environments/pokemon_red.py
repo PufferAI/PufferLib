@@ -230,7 +230,6 @@ class PokemonRed(Env):
             frame_start:frame_start+self.output_shape[0], ...].flatten().astype(np.float32)
 
         self.update_frame_knn_index(obs_flat)
-        self.update_heal_reward()
         new_reward, new_prog = self.update_reward()
         self.state_params["last_health"] = self.read_hp_fraction()
 
@@ -305,6 +304,7 @@ class PokemonRed(Env):
 
     def update_reward(self):
         # compute reward
+        self.update_heal_reward()
         old_prog = self.group_rewards()
         self.progress_reward = self.get_game_state_reward()
         new_prog = self.group_rewards()
