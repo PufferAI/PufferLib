@@ -309,7 +309,9 @@ class PokemonRed(Env):
         }
 
     def update_frame_knn_index(self, frame_vec):
-        if self.get_levels_sum() >= 22 and not self.state_params["levels_satisfied"]:
+        curr_levels = [max(self.read_m(a) - 2, 0) for a in [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]]
+        curr_level_sum =  max(sum(curr_levels) - 4, 0) # subtract starting pokemon level
+        if curr_level_sum >= 22 and not self.state_params["levels_satisfied"]:
             self.state_params["levels_satisfied"] = True
             self.state_params["base_explore"] = self.knn_index.get_current_count()
             self.init_knn()
