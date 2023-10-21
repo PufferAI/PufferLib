@@ -76,6 +76,7 @@ def all():
         'nethack': default,
         'nmmo': nmmo,
         'openspiel': openspiel,
+        'pokemon_red': pokemon_red,
         'procgen': procgen,
         #'smac': default,
         #'stable-retro': default,
@@ -113,6 +114,15 @@ def openspiel():
             cleanrl=CleanPuffeRLSweep(),
     )
     return args, sweep_config
+
+def pokemon_red():
+    args = pufferlib.args.CleanPuffeRL(
+        vectorization=pufferlib.vectorization.Serial,
+        num_cores=1,
+        num_buffers=1,
+        num_envs=1,
+    )
+    return args, make_sweep_config()
 
 def procgen():
     # MSRL defaults. Don't forget to uncomment network layer sizes!
