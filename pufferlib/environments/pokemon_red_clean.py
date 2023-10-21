@@ -23,7 +23,7 @@ ENV_CFG = {
         "death_scale" : -0.1,
         "badge_scale" : 2,
         "knn_pre_scale" :  0.004,
-        "knn_pose_scale" : 0.01,
+        "knn_post_scale" : 0.01,
         "level_progress_scale" : 100,
         "exploration_progress_scale" : 160,
         "reward_step_scale" : 0.1,
