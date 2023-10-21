@@ -157,18 +157,27 @@ class PokemonRed(Env):
             self.model_frame_writer = media.VideoWriter(base_dir / model_name, self.output_full[:2], fps=60)
             self.model_frame_writer.__enter__()
        
-        self.levels_satisfied = False
-        self.base_explore = 0
-        self.max_opponent_level = 0
-        self.max_event_rew = 0
-        self.max_level_rew = 0
-        self.last_health = 1
-        self.total_healing_rew = 0
+        #temporary - trying to clean up all the class vars floating around
+        self.reward_params = {
+            "max_event_rew" : 0,
+            "max_level_rew" : 0,
+            "total_healing_rew" : 0,
+        }
+
+        self.state_params = {
+            "last_health" : 0,
+            "max_opponent_level" : 0,
+            "base_explore" : 0,
+            "levels_satisfied" : False,
+        }
+        
         self.died_count = 0
         self.step_count = 0
+        self.reset_count += 1
+
         self.progress_reward = self.get_game_state_reward()
         self.total_reward = sum([val for _, val in self.progress_reward.items()])
-        self.reset_count += 1
+
         return self.render(), {}
     
     def init_knn(self):
@@ -221,7 +230,7 @@ class PokemonRed(Env):
         self.update_frame_knn_index(obs_flat)
         self.update_heal_reward()
         new_reward, new_prog = self.update_reward()
-        self.last_health = self.read_hp_fraction()
+        self.state_params["last_health"] = self.read_hp_fraction()
 
         # shift over short term reward memory
         self.recent_memory = np.roll(self.recent_memory, 3)
@@ -233,7 +242,7 @@ class PokemonRed(Env):
         self.save_and_print_info(step_limit_reached, obs_memory)
         self.step_count += 1
 
-        info = self.progress_reward if step_limit_reached else {}
+        info = self.progress_reward | self.agent_stats[-1] if step_limit_reached else self.progress_reward
         return obs_memory, new_reward*0.1, False, step_limit_reached, info
 
     def run_action_on_emulator(self, action):
@@ -272,13 +281,13 @@ class PokemonRed(Env):
             'hp': self.read_hp_fraction(),
             'frames': self.knn_index.get_current_count(),
             'deaths': self.died_count, 'badge': self.get_badges(),
-            'event': self.progress_reward['event'], 'healr': self.total_healing_rew
+            'event': self.progress_reward['event'], 'healr': self.reward_params["total_healing_rew"]
         })
 
     def update_frame_knn_index(self, frame_vec):
-        if self.get_levels_sum() >= 22 and not self.levels_satisfied:
-            self.levels_satisfied = True
-            self.base_explore = self.knn_index.get_current_count()
+        if self.get_levels_sum() >= 22 and not self.state_params["levels_satisfied"]:
+            self.state_params["levels_satisfied"] = True
+            self.state_params["base_explore"] = self.knn_index.get_current_count()
             self.init_knn()
 
         if self.knn_index.get_current_count() == 0:
@@ -418,15 +427,15 @@ class PokemonRed(Env):
             scaled = level_sum
         else:
             scaled = (level_sum-explore_thresh) / scale_factor + explore_thresh
-        self.max_level_rew = max(self.max_level_rew, scaled)
-        return self.max_level_rew
+        self.reward_params["max_level_rew"] = max(self.reward_params["max_level_rew"], scaled)
+        return self.reward_params["max_level_rew"]
     
     def get_knn_reward(self):
         pre_rew = 0.004
         post_rew = 0.01
         cur_size = self.knn_index.get_current_count()
-        base = (self.base_explore if self.levels_satisfied else cur_size) * pre_rew
-        post = (cur_size if self.levels_satisfied else 0) * post_rew
+        base = (self.state_params["base_explore"] if self.state_params["levels_satisfied"] else cur_size) * pre_rew
+        post = (cur_size if self.state_params["levels_satisfied"] else 0) * post_rew
         return base + post
     
     def get_badges(self):
@@ -438,15 +447,15 @@ class PokemonRed(Env):
     def update_heal_reward(self):
         cur_health = self.read_hp_fraction()
 
-        if cur_health <= self.last_health:
+        if cur_health <= self.state_params["last_health"]:
             return
 
-        if self.last_health > 0:
-            heal_amount = cur_health - self.last_health
+        if self.state_params["last_health"] > 0:
+            heal_amount = cur_health - self.state_params["last_health"]
             if heal_amount > 0.5:
                 print(f'healed: {heal_amount}')
                 self.save_screenshot('healing')
-            self.total_healing_rew += heal_amount * 4
+            self.reward_params["total_healing_rew"] += heal_amount * 4
         else:
             self.died_count += 1
     
@@ -460,7 +469,7 @@ class PokemonRed(Env):
             'event': self.update_max_event_rew(),  
             #'party_xp': 0.1*sum(poke_xps),
             'level': self.get_levels_reward(), 
-            'heal': self.total_healing_rew,
+            'heal': self.reward_params["total_healing_rew"],
             'op_lvl': self.update_max_op_level(),
             'dead': -0.1*self.died_count,
             'badge': self.get_badges() * 2,
@@ -479,13 +488,13 @@ class PokemonRed(Env):
     
     def update_max_op_level(self):
         opponent_level = max([self.read_m(a) for a in [0xD8C5, 0xD8F1, 0xD91D, 0xD949, 0xD975, 0xD9A1]]) - 5
-        self.max_opponent_level = max(self.max_opponent_level, opponent_level)
-        return self.max_opponent_level * 0.2
+        self.state_params["max_opponent_level"] = max(self.state_params["max_opponent_level"], opponent_level)
+        return self.state_params["max_opponent_level"] * 0.2
     
     def update_max_event_rew(self):
         cur_rew = self.get_all_events_reward()
-        self.max_event_rew = max(cur_rew, self.max_event_rew)
-        return self.max_event_rew
+        self.reward_params["max_event_rew"] = max(cur_rew, self.reward_params["max_event_rew"])
+        return self.reward_params["max_event_rew"]
 
     def read_hp_fraction(self):
         hp_sum = sum([self.read_hp(add) for add in [0xD16C, 0xD198, 0xD1C4, 0xD1F0, 0xD21C, 0xD248]])
