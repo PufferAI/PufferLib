@@ -38,6 +38,7 @@ class PokemonRed(Env):
             early_stopping=False,
             save_video=False,
             fast_video=False,
+            save_screenshots=False,
             video_interval_mul=256,
             downsample_factor=2,
             frame_stacks=3,
@@ -58,6 +59,7 @@ class PokemonRed(Env):
         self.early_stopping = early_stopping
         self.save_video = save_video
         self.fast_video = fast_video
+        self.save_screenshots = save_screenshots
         self.video_interval = video_interval_mul * self.act_freq
         self.downsample_factor = downsample_factor
         self.frame_stacks = frame_stacks
@@ -308,7 +310,7 @@ class PokemonRed(Env):
         new_prog = self.group_rewards()
         new_total = sum([val for _, val in self.progress_reward.items()])
         new_step = new_total - self.total_reward
-        if new_step < 0 and self.read_hp_fraction() > 0:
+        if new_step < 0 and self.read_hp_fraction() > 0 and self.save_screenshots:
             #print(f'\n\nreward went down! {self.progress_reward}\n\n')
             self.save_screenshot('neg_reward')
     
@@ -452,8 +454,8 @@ class PokemonRed(Env):
 
         if self.state_params["last_health"] > 0:
             heal_amount = cur_health - self.state_params["last_health"]
-            if heal_amount > 0.5:
-                print(f'healed: {heal_amount}')
+            print(f'healed: {heal_amount}')
+            if heal_amount > 0.5 and self.save_screenshots:
                 self.save_screenshot('healing')
             self.reward_params["total_healing_rew"] += heal_amount * 4
         else:
