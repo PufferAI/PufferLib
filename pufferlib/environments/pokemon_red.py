@@ -21,6 +21,33 @@ from pyboy.utils import WindowEvent
 
 from pathlib import PosixPath
 
+ENV_CFG = {
+    "rewards" : {
+        "healing_scale" : 4,
+        "level_scale" : 4,
+        "explore_threshold" : 22,
+        "opponent_level_scale" : 0.2,
+        "death_scale" : -0.1,
+        "badge_scale" : 2,
+        "knn_pre_scale" :  0.004,
+        "knn_pose_scale" : 0.01,
+        "level_progress_scale" : 100,
+        "exploration_progress_scale" : 160,
+        "reward_step_scale" : 0.1,
+    },
+    "reward_params" : {
+            "max_event_rew" : 0,
+            "max_level_rew" : 0,
+            "total_healing_rew" : 0,
+    },
+    "state_params" : {
+            "health" : 0,
+            "max_opponent_level" : 0,
+            "base_explore" : 0,
+            "levels_satisfied" : False,
+    },
+}
+
 class PokemonRed(Env):
     def __init__(
             self,
@@ -45,6 +72,7 @@ class PokemonRed(Env):
             similar_frame_dist=2000000.0,
             reset_count=0,
             instance_id=None,
+            env_cfg=ENV_CFG,
         ):
         self.debug = debug
         self.s_path = s_path
@@ -65,6 +93,7 @@ class PokemonRed(Env):
         self.frame_stacks = frame_stacks
         self.similar_frame_dist = similar_frame_dist
         self.reset_count = reset_count
+        self.cfg = env_cfg
 
         self.instance_id = instance_id
         if instance_id is None:
@@ -146,8 +175,6 @@ class PokemonRed(Env):
             self.output_shape[1], self.output_shape[2]
             ), dtype=np.uint8,
         )
-
-        self.agent_stats = []
         
         if self.save_video:
             base_dir = self.s_path / Path('rollouts')
@@ -159,26 +186,23 @@ class PokemonRed(Env):
             self.model_frame_writer = media.VideoWriter(base_dir / model_name, self.output_full[:2], fps=60)
             self.model_frame_writer.__enter__()
        
-        #temporary - trying to clean up all the class vars floating around
-        self.reward_params = {
-            "max_event_rew" : 0,
-            "max_level_rew" : 0,
-            "total_healing_rew" : 0,
-        }
-
-        self.state_params = {
-            "last_health" : 0,
-            "max_opponent_level" : 0,
-            "base_explore" : 0,
-            "levels_satisfied" : False,
+        self.rewards = {
+            "healing" : 0,
+            "event" : 0,
+            "level" : 0,
+            "opponent_level" : 0,
+            #"opponent_level_raw" : 0,
+            "badges" : 0,
+            "exploration" : 0
         }
         
-        self.died_count = 0
+        self.death_count = 0
         self.step_count = 0
         self.reset_count += 1
 
-        self.progress_reward = self.get_game_state_reward()
-        self.total_reward = sum([val for _, val in self.progress_reward.items()])
+        self.compute_rewards()
+        self.total_reward = sum(self.rewards.values())
+
 
         return self.render(), {}
     
@@ -219,7 +243,6 @@ class PokemonRed(Env):
     
     def step(self, action):
         self.run_action_on_emulator(action)
-        self.append_agent_stats(action)
 
         self.recent_frames = np.roll(self.recent_frames, 1, axis=0)
         obs_memory = self.render()
@@ -230,8 +253,8 @@ class PokemonRed(Env):
             frame_start:frame_start+self.output_shape[0], ...].flatten().astype(np.float32)
 
         self.update_frame_knn_index(obs_flat)
-        new_reward, new_prog = self.update_reward()
-        self.state_params["last_health"] = self.read_hp_fraction()
+        new_reward, new_prog = self.compute_rewards()
+        self.cfg["state_params"]["health"] = self.read_hp_fraction()
 
         # shift over short term reward memory
         self.recent_memory = np.roll(self.recent_memory, 3)
@@ -243,8 +266,8 @@ class PokemonRed(Env):
         self.save_and_print_info(step_limit_reached, obs_memory)
         self.step_count += 1
 
-        info = self.progress_reward | self.agent_stats[-1] if step_limit_reached else self.progress_reward
-        return obs_memory, new_reward*0.1, False, step_limit_reached, info
+        info = self.rewards | self.get_agent_stats(action) if step_limit_reached else self.rewards
+        return obs_memory, self.cfg["rewards"]["reward_step_scale"] * new_reward, False, step_limit_reached, info
 
     def run_action_on_emulator(self, action):
         # press button then release after some steps
@@ -270,20 +293,20 @@ class PokemonRed(Env):
         self.full_frame_writer.add_image(self.render(reduce_res=False, update_mem=False))
         self.model_frame_writer.add_image(self.render(reduce_res=True, update_mem=False))
     
-    def append_agent_stats(self, action):
+    def get_agent_stats(self, action):
         x_pos = self.read_m(0xD362)
         y_pos = self.read_m(0xD361)
         map_n = self.read_m(0xD35E)
         levels = [self.read_m(a) for a in [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]]
-        self.agent_stats.append({
+        return {
             'step': self.step_count, 'x': x_pos, 'y': y_pos, 'map': map_n,
             'last_action': action,
             'pcount': self.read_m(0xD163), 'levels': levels, 'ptypes': self.read_party(),
             'hp': self.read_hp_fraction(),
             'frames': self.knn_index.get_current_count(),
-            'deaths': self.died_count, 'badge': self.get_badges(),
-            'event': self.progress_reward['event'], 'healr': self.reward_params["total_healing_rew"]
-        })
+            'deaths': self.death_count, 'badge': self.get_badges(),
+            'event': self.rewards["event"], 'healr': self.cfg["reward_params"]["total_healing_rew"]
+        }
 
     def update_frame_knn_index(self, frame_vec):
         if self.get_levels_sum() >= 22 and not self.state_params["levels_satisfied"]:
@@ -302,32 +325,53 @@ class PokemonRed(Env):
                 self.knn_index.add_items(
                     frame_vec, np.array([self.knn_index.get_current_count()]))
 
-    def update_reward(self):
-        # compute reward
-        self.update_heal_reward()
-        old_prog = self.group_rewards()
-        self.progress_reward = self.get_game_state_reward()
-        new_prog = self.group_rewards()
-        new_total = sum([val for _, val in self.progress_reward.items()])
-        new_step = new_total - self.total_reward
-        if new_step < 0 and self.read_hp_fraction() > 0 and self.save_screenshots:
-            #print(f'\n\nreward went down! {self.progress_reward}\n\n')
-            self.save_screenshot('neg_reward')
-    
-        self.total_reward = new_total
-        return (new_step, 
-                   (new_prog[0]-old_prog[0], 
-                    new_prog[1]-old_prog[1], 
-                    new_prog[2]-old_prog[2])
-               )
-    
-    def group_rewards(self):
-        prog = self.progress_reward
-        # these values are only used by memory
-        return (
-            prog['level'] * 100,
-            self.read_hp_fraction()*2000,
-            prog['explore'] * 160,
+    def compute_rewards(self):
+        # addresses from https://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Red/Blue:RAM_map
+        # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
+
+        self.rewards_old = self.rewards.copy()
+
+        # healing reward
+        curr_health = self.read_hp_fraction()
+        self.rewards["healing"] = self.cfg["rewards"]["healing_scale"] * max(0, curr_health - self.cfg["state_params"]["health"])
+        if self.cfg["state_params"]["health"] <= 0: self.death_count += 1
+        self.cfg["state_params"]["health"] = curr_health
+
+        # event reward
+        curr_event_rew = max(sum([self.bit_count(self.read_m(i)) for i in range(0xD747, 0xD886)]) - 13, 0)
+        self.rewards["event"] = max(curr_event_rew, self.rewards["event"])
+
+        # level reward
+        curr_levels = [max(self.read_m(a) - 2, 0) for a in [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]]
+        curr_level_sum =  max(sum(curr_levels) - 4, 0) # subtract starting pokemon level
+        scaled_levels = curr_level_sum if curr_level_sum < self.cfg["rewards"]["explore_threshold"] else (curr_level_sum - self.cfg["rewards"]["explore_threshold"]) / self.cfg["rewards"]["level_scale"] + self.cfg["rewards"]["explore_threshold"]
+        self.rewards["level"] = max(scaled_levels, self.rewards["level"])
+
+        # opponent level reward
+        opp_level = max([self.read_m(a) for a in [0xD8C5, 0xD8F1, 0xD91D, 0xD949, 0xD975, 0xD9A1]]) - 5
+        opp_level_scaled = opp_level * self.cfg["rewards"]["opponent_level_scale"]
+        self.rewards["opponent_level"] = max(opp_level_scaled, self.rewards["opponent_level"])
+        #self.rewards["opponent_level_raw"] = max(opp_level, self.rewards["opponent_level_raw"])
+
+        # death penalty
+        self.rewards["death"] = self.cfg["rewards"]["death_scale"] * self.death_count
+
+        # badge reward
+        self.rewards["badges"] = self.cfg["rewards"]["badge_scale"] * self.get_badges()
+
+        # exploration reward
+        curr_size = self.knn_index.get_current_count()
+        base = (self.cfg["state_params"]["base_explore"] if self.cfg["state_params"]["levels_satisfied"] else curr_size) *  self.cfg["rewards"]["knn_pre_scale"]
+        post = (curr_size if self.cfg["state_params"]["levels_satisfied"] else 0) * self.cfg["rewards"]["knn_post_scale"]
+        self.rewards["exploration"] = base + post
+
+        total_reward = sum(self.rewards.values())
+        step_reward = total_reward - sum(self.rewards_old.values())
+
+        return step_reward, (
+            self.cfg["rewards"]["level_progress_scale"] * (self.rewards["level"] - self.rewards_old["level"]),
+            0,
+            self.cfg["rewards"]["exploration_progress_scale"] * (self.rewards["exploration"] - self.rewards_old["exploration"]),
         )
 
     def create_exploration_memory(self):
@@ -374,7 +418,7 @@ class PokemonRed(Env):
     def save_and_print_info(self, done, obs_memory):
         if self.print_rewards:
             prog_string = f'step: {self.step_count:6d}'
-            for key, val in self.progress_reward.items():
+            for key, val in self.rewards.items():
                 prog_string += f' {key}: {val:5.2f}'
             prog_string += f' sum: {self.total_reward:5.2f}'
             print(f'\r{prog_string}', end='', flush=True)
@@ -404,7 +448,7 @@ class PokemonRed(Env):
             self.model_frame_writer.close()
 
         if done:
-            self.all_runs.append(self.progress_reward)
+            self.all_runs.append(self.rewards)
             with open(self.s_path / Path(f'all_runs_{self.instance_id}.json'), 'w') as f:
                 json.dump(self.all_runs, f)
             pd.DataFrame(self.agent_stats).to_csv(
@@ -417,69 +461,11 @@ class PokemonRed(Env):
         # add padding so zero will read '0b100000000' instead of '0b0'
         return bin(256 + self.read_m(addr))[-bit-1] == '1'
     
-    def get_levels_sum(self):
-        poke_levels = [max(self.read_m(a) - 2, 0) for a in [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]]
-        return max(sum(poke_levels) - 4, 0) # subtract starting pokemon level
-    
-    def get_levels_reward(self):
-        explore_thresh = 22
-        scale_factor = 4
-        level_sum = self.get_levels_sum()
-        if level_sum < explore_thresh:
-            scaled = level_sum
-        else:
-            scaled = (level_sum-explore_thresh) / scale_factor + explore_thresh
-        self.reward_params["max_level_rew"] = max(self.reward_params["max_level_rew"], scaled)
-        return self.reward_params["max_level_rew"]
-    
-    def get_knn_reward(self):
-        pre_rew = 0.004
-        post_rew = 0.01
-        cur_size = self.knn_index.get_current_count()
-        base = (self.state_params["base_explore"] if self.state_params["levels_satisfied"] else cur_size) * pre_rew
-        post = (cur_size if self.state_params["levels_satisfied"] else 0) * post_rew
-        return base + post
-    
     def get_badges(self):
         return self.bit_count(self.read_m(0xD356))
 
     def read_party(self):
         return [self.read_m(addr) for addr in [0xD164, 0xD165, 0xD166, 0xD167, 0xD168, 0xD169]]
-    
-    def update_heal_reward(self):
-        cur_health = self.read_hp_fraction()
-
-        if cur_health <= self.state_params["last_health"]:
-            return
-
-        if self.state_params["last_health"] > 0:
-            heal_amount = cur_health - self.state_params["last_health"]
-            print(f'healed: {heal_amount}')
-            if heal_amount > 0.5 and self.save_screenshots:
-                self.save_screenshot('healing')
-            self.reward_params["total_healing_rew"] += heal_amount * 4
-        else:
-            self.died_count += 1
-    
-    def get_all_events_reward(self):
-        return max(sum([self.bit_count(self.read_m(i)) for i in range(0xD747, 0xD886)]) - 13, 0)
-  
-    def get_game_state_reward(self, print_stats=False):
-        # addresses from https://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Red/Blue:RAM_map
-        # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
-        return {
-            'event': self.update_max_event_rew(),  
-            #'party_xp': 0.1*sum(poke_xps),
-            'level': self.get_levels_reward(), 
-            'heal': self.reward_params["total_healing_rew"],
-            'op_lvl': self.update_max_op_level(),
-            'dead': -0.1*self.died_count,
-            'badge': self.get_badges() * 2,
-            #'op_poke': self.max_opponent_poke * 800,
-            #'money': money * 3,
-            #'seen_poke': seen_poke_count * 400,
-            'explore': self.get_knn_reward()
-        }
     
     def save_screenshot(self, name):
         ss_dir = self.s_path / Path('screenshots')
@@ -487,16 +473,6 @@ class PokemonRed(Env):
         plt.imsave(
             ss_dir / Path(f'frame{self.instance_id}_r{self.total_reward:.4f}_{self.reset_count}_{name}.jpeg'), 
             self.render(reduce_res=False))
-    
-    def update_max_op_level(self):
-        opponent_level = max([self.read_m(a) for a in [0xD8C5, 0xD8F1, 0xD91D, 0xD949, 0xD975, 0xD9A1]]) - 5
-        self.state_params["max_opponent_level"] = max(self.state_params["max_opponent_level"], opponent_level)
-        return self.state_params["max_opponent_level"] * 0.2
-    
-    def update_max_event_rew(self):
-        cur_rew = self.get_all_events_reward()
-        self.reward_params["max_event_rew"] = max(cur_rew, self.reward_params["max_event_rew"])
-        return self.reward_params["max_event_rew"]
 
     def read_hp_fraction(self):
         hp_sum = sum([self.read_hp(add) for add in [0xD16C, 0xD198, 0xD1C4, 0xD1F0, 0xD21C, 0xD248]])
