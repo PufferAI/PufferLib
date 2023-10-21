@@ -117,10 +117,7 @@ def openspiel():
 
 def pokemon_red():
     args = pufferlib.args.CleanPuffeRL(
-        vectorization=pufferlib.vectorization.Serial,
-        num_cores=1,
-        num_buffers=1,
-        num_envs=1,
+        num_envs=4,
     )
     return args, make_sweep_config()
 
