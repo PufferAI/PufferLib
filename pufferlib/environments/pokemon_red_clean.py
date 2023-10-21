@@ -2,24 +2,17 @@ from pdb import set_trace as T
 
 import sys
 import uuid 
-import os
 from math import floor, sqrt
-import json
 from pathlib import Path
 
 import numpy as np
 from einops import rearrange
-import matplotlib.pyplot as plt
 from skimage.transform import resize
 from pyboy import PyBoy
 import hnswlib
-import mediapy as media
-import pandas as pd
 
 from gymnasium import Env, spaces
 from pyboy.utils import WindowEvent
-
-from pathlib import PosixPath
 
 ENV_CFG = {
     "rewards" : {
@@ -51,11 +44,7 @@ ENV_CFG = {
 class PokemonRed(Env):
     def __init__(
             self,
-            debug=False,
             gb_path=str(Path(__file__).parent / 'pokemon_red.gb'),
-            s_path=PosixPath('session_73ad768b'),
-            save_final_state=False,
-            print_rewards=False,
             vec_dim=4320,
             headless=True,
             num_elements=20000,
@@ -63,21 +52,12 @@ class PokemonRed(Env):
             act_freq=24,
             max_steps=16384,
             early_stopping=False,
-            save_video=False,
-            fast_video=False,
-            save_screenshots=False,
-            video_interval_mul=256,
             downsample_factor=2,
             frame_stacks=3,
             similar_frame_dist=2000000.0,
-            reset_count=0,
             instance_id=None,
             env_cfg=ENV_CFG,
         ):
-        self.debug = debug
-        self.s_path = s_path
-        self.save_final_state = save_final_state
-        self.print_rewards = print_rewards
         self.vec_dim = vec_dim
         self.headless = headless
         self.num_elements = num_elements
@@ -85,21 +65,16 @@ class PokemonRed(Env):
         self.act_freq = act_freq
         self.max_steps = max_steps
         self.early_stopping = early_stopping
-        self.save_video = save_video
-        self.fast_video = fast_video
-        self.save_screenshots = save_screenshots
-        self.video_interval = video_interval_mul * self.act_freq
         self.downsample_factor = downsample_factor
         self.frame_stacks = frame_stacks
         self.similar_frame_dist = similar_frame_dist
-        self.reset_count = reset_count
+        self.reset_count = 0 #previously passed as arg?
         self.cfg = env_cfg
 
         self.instance_id = instance_id
         if instance_id is None:
             self.instance_id = str(uuid.uuid4())[:8]
 
-        self.s_path.mkdir(exist_ok=True)
         self.all_runs = []
 
         # Set this in SOME subclasses
@@ -175,17 +150,7 @@ class PokemonRed(Env):
             self.output_shape[1], self.output_shape[2]
             ), dtype=np.uint8,
         )
-        
-        if self.save_video:
-            base_dir = self.s_path / Path('rollouts')
-            base_dir.mkdir(exist_ok=True)
-            full_name = Path(f'full_reset_{self.reset_count}_id{self.instance_id}').with_suffix('.mp4')
-            model_name = Path(f'model_reset_{self.reset_count}_id{self.instance_id}').with_suffix('.mp4')
-            self.full_frame_writer = media.VideoWriter(base_dir / full_name, (144, 160), fps=60)
-            self.full_frame_writer.__enter__()
-            self.model_frame_writer = media.VideoWriter(base_dir / model_name, self.output_full[:2], fps=60)
-            self.model_frame_writer.__enter__()
-       
+
         self.rewards = {
             "healing" : 0,
             "event" : 0,
@@ -202,7 +167,6 @@ class PokemonRed(Env):
 
         self.compute_rewards()
         self.total_reward = sum(self.rewards.values())
-
 
         return self.render(), {}
     
@@ -263,7 +227,6 @@ class PokemonRed(Env):
         self.recent_memory[0, 2] = min(new_prog[2] * 128, 255)
 
         step_limit_reached = self.check_if_done()
-        self.save_and_print_info(step_limit_reached, obs_memory)
         self.step_count += 1
 
         info = self.rewards | self.get_agent_stats(action) if step_limit_reached else self.rewards
@@ -283,15 +246,7 @@ class PokemonRed(Env):
                     self.pyboy.send_input(self.release_button[action - 4])
                 if action == WindowEvent.PRESS_BUTTON_START:
                     self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_START)
-            if self.save_video and not self.fast_video:
-                self.add_video_frame()
             self.pyboy.tick()
-        if self.save_video and self.fast_video:
-            self.add_video_frame()
-    
-    def add_video_frame(self):
-        self.full_frame_writer.add_image(self.render(reduce_res=False, update_mem=False))
-        self.model_frame_writer.add_image(self.render(reduce_res=True, update_mem=False))
     
     def get_agent_stats(self, action):
         x_pos = self.read_m(0xD362)
@@ -309,9 +264,9 @@ class PokemonRed(Env):
         }
 
     def update_frame_knn_index(self, frame_vec):
-        if self.get_levels_sum() >= 22 and not self.state_params["levels_satisfied"]:
-            self.state_params["levels_satisfied"] = True
-            self.state_params["base_explore"] = self.knn_index.get_current_count()
+        if self.get_levels_sum() >= 22 and not self.cfg["state_params"]["levels_satisfied"]:
+            self.cfg["state_params"]["levels_satisfied"] = True
+            self.cfg["state_params"]["base_explore"] = self.knn_index.get_current_count()
             self.init_knn()
 
         if self.knn_index.get_current_count() == 0:
@@ -414,46 +369,7 @@ class PokemonRed(Env):
         if self.early_stopping:
             return self.step_count > 128 and self.recent_memory.sum() < (255 * 1)
         return self.step_count >= self.max_steps
-
-    def save_and_print_info(self, done, obs_memory):
-        if self.print_rewards:
-            prog_string = f'step: {self.step_count:6d}'
-            for key, val in self.rewards.items():
-                prog_string += f' {key}: {val:5.2f}'
-            prog_string += f' sum: {self.total_reward:5.2f}'
-            print(f'\r{prog_string}', end='', flush=True)
-        
-        if self.step_count % 50 == 0:
-            plt.imsave(
-                self.s_path / Path(f'curframe_{self.instance_id}.jpeg'), 
-                self.render(reduce_res=False)
-            )
-
-        if self.print_rewards and done:
-            print('', flush=True)
-            if self.save_final_state:
-                fs_path = self.s_path / Path('final_states')
-                fs_path.mkdir(exist_ok=True)
-                plt.imsave(
-                    fs_path / Path(f'frame_r{self.total_reward:.4f}_{self.reset_count}_small.jpeg'), 
-                    obs_memory
-                )
-                plt.imsave(
-                    fs_path / Path(f'frame_r{self.total_reward:.4f}_{self.reset_count}_full.jpeg'), 
-                    self.render(reduce_res=False)
-                )
-
-        if self.save_video and done:
-            self.full_frame_writer.close()
-            self.model_frame_writer.close()
-
-        if done:
-            self.all_runs.append(self.rewards)
-            with open(self.s_path / Path(f'all_runs_{self.instance_id}.json'), 'w') as f:
-                json.dump(self.all_runs, f)
-            pd.DataFrame(self.agent_stats).to_csv(
-                self.s_path / Path(f'agent_stats_{self.instance_id}.csv.gz'), compression='gzip', mode='a')
-    
+            
     def read_m(self, addr):
         return self.pyboy.get_memory_value(addr)
 
@@ -466,13 +382,6 @@ class PokemonRed(Env):
 
     def read_party(self):
         return [self.read_m(addr) for addr in [0xD164, 0xD165, 0xD166, 0xD167, 0xD168, 0xD169]]
-    
-    def save_screenshot(self, name):
-        ss_dir = self.s_path / Path('screenshots')
-        ss_dir.mkdir(exist_ok=True)
-        plt.imsave(
-            ss_dir / Path(f'frame{self.instance_id}_r{self.total_reward:.4f}_{self.reset_count}_{name}.jpeg'), 
-            self.render(reduce_res=False))
 
     def read_hp_fraction(self):
         hp_sum = sum([self.read_hp(add) for add in [0xD16C, 0xD198, 0xD1C4, 0xD1F0, 0xD21C, 0xD248]])
