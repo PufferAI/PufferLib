@@ -77,6 +77,15 @@ compatible_environments = {
     'nmmo': [
         'nmmo',
     ],
+    'pokemon_red': [
+        'einops==0.6.1',
+        'matplotlib',
+        'scikit-image==0.21.0',
+        'pyboy==1.5.6',
+        'hnswlib==0.7.0',
+        'mediapy',
+        'pandas==2.0.2',
+    ],
     'procgen': [
         'procgen==0.10.7',
     ],
