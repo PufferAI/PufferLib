@@ -391,7 +391,11 @@ class PokemonRed(Env):
             memory[col, row] = last_pixel * (255 // col_steps)
             return memory
         
-        level, hp, explore = self.group_rewards()
+        level, hp, explore = (
+            self.cfg["rewards"]["level_progress_scale"] * self.rewards["level"],
+            0,
+            self.cfg["rewards"]["exploration_progress_scale"] * self.rewards["exploration"],
+        )
         full_memory = np.stack((
             make_reward_channel(level),
             make_reward_channel(hp),
