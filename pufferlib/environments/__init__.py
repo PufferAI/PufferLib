@@ -9,5 +9,5 @@ class Squared(gym.Env):
     render = render
 
 def PokemonRed(*args, **kwargs):
-    from .pokemon_red_clean import PokemonRed
+    from .pokemon_red_minimal import PokemonRed
     return PokemonRed(*args, **kwargs)
