@@ -30,10 +30,16 @@ VALID_ACTIONS = [
     WindowEvent.PRESS_ARROW_RIGHT,
     WindowEvent.PRESS_ARROW_UP,
     WindowEvent.PRESS_BUTTON_A,
-    WindowEvent.PRESS_BUTTON_B,
-    WindowEvent.PRESS_BUTTON_START,
-    WindowEvent.PASS
+    WindowEvent.PRESS_BUTTON_B
 ]
+
+
+if self.extra_buttons:
+    self.valid_actions.extend([
+        WindowEvent.PRESS_BUTTON_START,
+        WindowEvent.PASS
+    ])
+
 
 RELEASE_ARROW = [
     WindowEvent.RELEASE_ARROW_DOWN,
@@ -127,6 +133,18 @@ class PokemonRed(Env):
 
         self.reset()
 
+    def update_seen_coords(self):
+        x_pos = self.read_m(0xD362)
+        y_pos = self.read_m(0xD361)
+        map_n = self.read_m(0xD35E)
+        coord_string = f"x:{x_pos} y:{y_pos} m:{map_n}"
+        if self.get_levels_sum() >= 22 and not self.levels_satisfied:
+            self.levels_satisfied = True
+            self.base_explore = len(self.seen_coords)
+            self.seen_coords = {}
+
+        self.seen_coords[coord_string] = self.step_count
+
     def reset(self, seed=None):
         self.seed = seed
 
@@ -134,8 +152,11 @@ class PokemonRed(Env):
         #with open(self.init_state, "rb") as f:
         #    self.pyboy.load_state(f)
 
-        self.init_knn()
-
+        if self.use_screen_explore:
+            self.init_knn()
+        else:
+            self.init_map_mem
+            
         self.rewards = {
             "healing" : 0,
             "event" : 0,
@@ -166,11 +187,16 @@ class PokemonRed(Env):
     
     def step(self, action):
         self.run_action_on_emulator(action)
+        self.append_agent_stats(action)
         ob = self.render()
 
         # trim off memory from frame for knn index
-        self.update_frame_knn_index(ob)
+        if self.use_screen_explore:
+            self.update_frame_knn_index(obs_flat)
+        else:
+            self.update_seen_coords()
 
+        self.update_heal_reward()     
         reward, _ = self.compute_rewards()
         self.s_health = self.read_hp_fraction()
 
@@ -183,6 +209,9 @@ class PokemonRed(Env):
 
         self.step_count += 1
         return ob, reward, False, step_limit_reached, info
+
+    def init_map_mem(self):
+        self.seen_coords = {}
 
     def run_action_on_emulator(self, action):
         # press button then release after some steps
@@ -199,11 +228,33 @@ class PokemonRed(Env):
                 if action > 3 and action < 6:
                     # release button 
                     self.pyboy.send_input(RELEASE_BUTTON[action - 4])
-                if action == WindowEvent.PRESS_BUTTON_START:
+                if self.valid_actions[action] == WindowEvent.PRESS_BUTTON_START:
                     self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_START)
             if i == self.act_freq - 1:
                 self.pyboy._rendering(True)
             self.pyboy.tick()
+
+    def compute_rewards(self):
+        # addresses from https://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Red/Blue:RAM_map
+        # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
+
+        self.rewards_old = self.rewards.copy()
+
+        # adds up all event flags, exclude museum ticket
+        event_flags_start = 0xD747
+        event_flags_end = 0xD886
+        museum_ticket = (0xD754, 0)
+        base_event_flags = 13
+        return max(
+            sum(
+                [
+                    self.bit_count(self.read_m(i))
+                    for i in range(event_flags_start, event_flags_end)
+                ]
+            )
+            - base_event_flags
+            - int(self.read_bit(museum_ticket[0], museum_ticket[1])),
+        0,)
     
     def get_agent_stats(self, action):
         return {
@@ -263,6 +314,9 @@ class PokemonRed(Env):
         self.rewards["badges"] = self.r_badge * self.get_badges()
 
         # exploration reward
+        pre_rew = self.explore_weight * 0.005
+        post_rew = self.explore_weight * 0.01
+        cur_size = self.knn_index.get_current_count() if self.use_screen_explore else len(self.seen_coords)
         curr_size = self.knn_index.get_current_count()
         if self.s_levels_satisfied:
             base = self.s_base_explore
