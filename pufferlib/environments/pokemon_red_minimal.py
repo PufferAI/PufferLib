@@ -83,6 +83,11 @@ class PokemonRed(Env):
         self.downsample_factor = downsample_factor
         self.init_state = init_state
 
+        self.explore_weight = 1 if 'explore_weight' not in config else config['explore_weight']
+        self.use_screen_explore = True if 'use_screen_explore' not in config else config['use_screen_explore']
+        self.reward_scale = 1 if 'reward_scale' not in config else config['reward_scale']
+        self.extra_buttons = False if 'extra_buttons' not in config else config['extra_buttons']
+
         # Reward
         self.r_healing = reward_scale_healing
         self.r_level = reward_scale_level
