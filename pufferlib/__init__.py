@@ -24,4 +24,4 @@ sys.stdout = original_stdout
 
 from .version import __version__
 from .namespace import namespace, dataclass
-from . import frameworks, registry
+from . import frameworks, registry, environments

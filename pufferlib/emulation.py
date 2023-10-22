@@ -554,7 +554,8 @@ def flatten_space(space):
 def concatenate(flat_sample):
     if len(flat_sample) == 1:
         flat_sample = flat_sample[0]
-        if isinstance(flat_sample, np.ndarray):
+        if isinstance(flat_sample,(np.ndarray,
+                gymnasium.wrappers.frame_stack.LazyFrames)):
             return flat_sample
         return np.array([flat_sample])
     return np.concatenate([

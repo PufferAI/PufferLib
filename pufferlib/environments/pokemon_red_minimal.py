@@ -109,7 +109,7 @@ class PokemonRed(Env):
 
         self.action_space = spaces.Discrete(len(VALID_ACTIONS))
         self.observation_space = spaces.Box(low=0, high=255,
-            shape=(144//downsample_factor, 160//downsample_factor, 3),
+            shape=(144//downsample_factor, 160//downsample_factor),
             dtype=np.uint8
         )
 
@@ -152,7 +152,9 @@ class PokemonRed(Env):
         self.compute_rewards()
         self.total_reward = sum(self.rewards.values())
 
-        return self.render(), {}
+        ob = self.render()
+        ob = grayscale(ob)
+        return ob, {}
     
     def render(self, reduce_res=True):
         game_pixels_render = self.screen.screen_ndarray()
@@ -167,6 +169,7 @@ class PokemonRed(Env):
     def step(self, action):
         self.run_action_on_emulator(action)
         ob = self.render()
+        ob = grayscale(ob)
 
         # trim off memory from frame for knn index
         self.update_frame_knn_index(ob)
@@ -318,10 +321,10 @@ class PokemonRed(Env):
         if self.knn_index.get_current_count() == 0:
             # if index is empty add current frame
             self.knn_index.add_items(
-                grayscale(frame).ravel(), np.array([0]))
+                frame.ravel(), np.array([0]))
         else:
             # check for nearest frame and add if current 
-            frame = grayscale(frame).ravel()
+            frame = frame.ravel()
             labels, distances = self.knn_index.knn_query(frame, k = 1)
             if distances[0] > self.similar_frame_dist:
                 count = np.array([self.knn_index.get_current_count()])

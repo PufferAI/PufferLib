@@ -41,6 +41,29 @@ ENV_CFG = {
     },
 }
 
+VALID_ACTIONS = [
+    WindowEvent.PRESS_ARROW_DOWN,
+    WindowEvent.PRESS_ARROW_LEFT,
+    WindowEvent.PRESS_ARROW_RIGHT,
+    WindowEvent.PRESS_ARROW_UP,
+    WindowEvent.PRESS_BUTTON_A,
+    WindowEvent.PRESS_BUTTON_B,
+    WindowEvent.PRESS_BUTTON_START,
+    WindowEvent.PASS
+]
+
+RELEASE_ARROW = [
+    WindowEvent.RELEASE_ARROW_DOWN,
+    WindowEvent.RELEASE_ARROW_LEFT,
+    WindowEvent.RELEASE_ARROW_RIGHT,
+    WindowEvent.RELEASE_ARROW_UP
+]
+
+RELEASE_BUTTON = [
+    WindowEvent.RELEASE_BUTTON_A,
+    WindowEvent.RELEASE_BUTTON_B
+]
+
 class PokemonRed(Env):
     def __init__(
             self,
@@ -81,29 +104,6 @@ class PokemonRed(Env):
         self.metadata = {"render.modes": []}
         self.reward_range = (0, 15000)
 
-        self.valid_actions = [
-            WindowEvent.PRESS_ARROW_DOWN,
-            WindowEvent.PRESS_ARROW_LEFT,
-            WindowEvent.PRESS_ARROW_RIGHT,
-            WindowEvent.PRESS_ARROW_UP,
-            WindowEvent.PRESS_BUTTON_A,
-            WindowEvent.PRESS_BUTTON_B,
-            WindowEvent.PRESS_BUTTON_START,
-            WindowEvent.PASS
-        ]
-
-        self.release_arrow = [
-            WindowEvent.RELEASE_ARROW_DOWN,
-            WindowEvent.RELEASE_ARROW_LEFT,
-            WindowEvent.RELEASE_ARROW_RIGHT,
-            WindowEvent.RELEASE_ARROW_UP
-        ]
-
-        self.release_button = [
-            WindowEvent.RELEASE_BUTTON_A,
-            WindowEvent.RELEASE_BUTTON_B
-        ]
-
         self.output_shape = (36, 40, 3)
         self.mem_padding = 2
         self.memory_height = 8
@@ -115,7 +115,7 @@ class PokemonRed(Env):
         )
 
         # Set these in ALL subclasses
-        self.action_space = spaces.Discrete(len(self.valid_actions))
+        self.action_space = spaces.Discrete(len(VALID_ACTIONS))
         self.observation_space = spaces.Box(low=0, high=255, shape=self.output_full, dtype=np.uint8)
 
         head = 'headless' if headless else 'SDL2'
@@ -234,16 +234,16 @@ class PokemonRed(Env):
 
     def run_action_on_emulator(self, action):
         # press button then release after some steps
-        self.pyboy.send_input(self.valid_actions[action])
+        self.pyboy.send_input(VALID_ACTIONS[action])
         for i in range(self.act_freq):
             # release action, so they are stateless
             if i == 8:
                 if action < 4:
                     # release arrow
-                    self.pyboy.send_input(self.release_arrow[action])
+                    self.pyboy.send_input(RELEASE_ARROW[action])
                 if action > 3 and action < 6:
                     # release button 
-                    self.pyboy.send_input(self.release_button[action - 4])
+                    self.pyboy.send_input(RELEASE_BUTTON[action - 4])
                 if action == WindowEvent.PRESS_BUTTON_START:
                     self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_START)
             self.pyboy.tick()

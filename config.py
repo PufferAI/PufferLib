@@ -77,6 +77,7 @@ def all():
         'nmmo': nmmo,
         'openspiel': openspiel,
         'pokemon_red': pokemon_red,
+        'pokemon_red_minimal': pokemon_red_minimal,
         'procgen': procgen,
         #'smac': default,
         #'stable-retro': default,
@@ -118,6 +119,22 @@ def openspiel():
 def pokemon_red():
     args = pufferlib.args.CleanPuffeRL(
         num_envs=4,
+        update_epochs=3,
+        gamma=0.998,
+        batch_size=2**15,
+        batch_rows=128,
+    )
+    return args, make_sweep_config()
+
+def pokemon_red_minimal():
+    '''New variant, to be developed after we
+    reproduce performance on the original'''
+    args = pufferlib.args.CleanPuffeRL(
+        num_envs=4,
+        update_epochs=3,
+        gamma=0.998,
+        batch_size=2**15,
+        batch_rows=128,
     )
     return args, make_sweep_config()
 
@@ -142,6 +159,7 @@ def procgen():
     '''
 
     # 2020 Competition Defaults from RLlib
+    '''
     args = pufferlib.args.CleanPuffeRL(
         total_timesteps=8_000_000,
         learning_rate=5e-4,
@@ -156,6 +174,21 @@ def procgen():
         anneal_lr=False,
         clip_coef=0.2,
         vf_clip_coef=0.2,
+    )
+    '''
+
+    args = pufferlib.args.CleanPuffeRL(
+        total_timesteps=8_000_000,
+        learning_rate=0.0002691194621325188,
+        gamma=0.9961844515798506,
+        gae_lambda=0.8730081151095287,
+        ent_coef=0.0103205077441882,
+        vf_coef=1.9585588391335327,
+        clip_coef=0.3075580869152367,
+        batch_size=16384, #94208,
+        batch_rows=4096,
+        bptt_horizon=1,
+        update_epochs=2,
     )
     return args, make_sweep_config()
 
