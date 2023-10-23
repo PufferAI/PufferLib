@@ -293,6 +293,7 @@ class PokemonRed(Env):
             'step': self.step_count, 'x': x_pos, 'y': y_pos, 'map': map_n,
             'last_action': action,
             'pcount': self.read_m(0xD163), 'levels': levels, 'ptypes': self.read_party(),
+            'level': sum(levels),
             'hp': self.read_hp_fraction(),
             expl[0]: expl[1],
             'deaths': self.died_count, 'badge': self.get_badges(),
