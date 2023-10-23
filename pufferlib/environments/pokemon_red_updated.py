@@ -29,7 +29,7 @@ class PokemonRed(Env):
             init_state=str(Path(__file__).parent / 'has_pokedex_nballs.state')
             config = {
                 'headless': True,
-                'save_final_state': True,
+                'save_final_state': False,
                 'early_stop': False,
                 'action_freq': 24,
                 'init_state': init_state,
@@ -245,7 +245,7 @@ class PokemonRed(Env):
         if step_limit_reached:
             info = self.agent_stats[-1]
 
-        self.save_and_print_info(step_limit_reached, obs_memory)
+        #self.save_and_print_info(step_limit_reached, obs_memory)
 
         self.step_count += 1
 
@@ -558,6 +558,7 @@ class PokemonRed(Env):
         return state_scores
     
     def save_screenshot(self, name):
+        return # disable for now
         ss_dir = self.s_path / Path('screenshots')
         ss_dir.mkdir(exist_ok=True)
         plt.imsave(
