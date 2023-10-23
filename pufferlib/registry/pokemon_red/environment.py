@@ -10,4 +10,5 @@ def make_env():
     ob = env.reset()[0]
     # Save ob as rgb image
     #import cv2; cv2.imwrite('ob.png', ob.astype('uint8'))
-    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env,
+        postprocessor_cls=pufferlib.emulation.BasicPostprocessor)
