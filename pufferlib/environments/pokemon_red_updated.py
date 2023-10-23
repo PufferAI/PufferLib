@@ -241,12 +241,15 @@ class PokemonRed(Env):
         self.recent_memory[0, 2] = min(new_prog[2] * 128, 255)
 
         step_limit_reached = self.check_if_done()
+        info = {}
+        if step_limit_reached:
+            info = self.get_agent_stats()
 
         self.save_and_print_info(step_limit_reached, obs_memory)
 
         self.step_count += 1
 
-        return obs_memory, new_reward*0.1, False, step_limit_reached, {}
+        return obs_memory, new_reward*0.1, False, step_limit_reached, info
 
     def run_action_on_emulator(self, action):
         # press button then release after some steps
