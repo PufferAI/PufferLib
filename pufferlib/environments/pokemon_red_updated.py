@@ -14,6 +14,7 @@ from pyboy import PyBoy
 import hnswlib
 import mediapy as media
 import pandas as pd
+import portalocker
 
 from gymnasium import Env, spaces
 from pyboy.utils import WindowEvent
@@ -138,7 +139,7 @@ class PokemonRed(Env):
     def reset(self, seed=None):
         self.seed = seed
         # restart game, skipping credits
-        with open(self.init_state, "rb") as f:
+        with portalocker.Lock(self.init_state, 'rb') as f:
             self.pyboy.load_state(f)
         
         if self.use_screen_explore:
