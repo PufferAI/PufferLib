@@ -249,7 +249,7 @@ class PokemonRed(Env):
 
         self.step_count += 1
 
-        return obs_memory, new_reward*0.1, False, step_limit_reached, info
+        return obs_memory, new_reward*0.1, step_limit_reached, step_limit_reached, info
 
     def run_action_on_emulator(self, action):
         # press button then release after some steps
