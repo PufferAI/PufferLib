@@ -243,7 +243,7 @@ class PokemonRed(Env):
         step_limit_reached = self.check_if_done()
         info = {}
         if step_limit_reached:
-            info = self.get_agent_stats()
+            info = self.agent_stats[-1]
 
         self.save_and_print_info(step_limit_reached, obs_memory)
 
