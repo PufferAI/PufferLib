@@ -14,7 +14,7 @@ from pyboy import PyBoy
 import hnswlib
 import mediapy as media
 import pandas as pd
-import portalocker
+from io import BytesIO
 
 from gymnasium import Env, spaces
 from pyboy.utils import WindowEvent
@@ -133,14 +133,17 @@ class PokemonRed(Env):
 
         if not config['headless']:
             self.pyboy.set_emulation_speed(6)
+
+        with open(self.init_state, 'rb') as f:
+            self.initial_state = BytesIO(f.read())
             
         self.reset()
 
     def reset(self, seed=None):
         self.seed = seed
         # restart game, skipping credits
-        with portalocker.Lock(self.init_state, 'rb') as f:
-            self.pyboy.load_state(f)
+        self.initial_state.seek(0)
+        self.pyboy.load_state(self.initial_state)
         
         if self.use_screen_explore:
             self.init_knn()
