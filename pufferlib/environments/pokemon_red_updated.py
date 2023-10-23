@@ -290,14 +290,21 @@ class PokemonRed(Env):
         else:
             expl = ('coord_count', len(self.seen_coords))
         self.agent_stats.append({
-            'step': self.step_count, 'x': x_pos, 'y': y_pos, 'map': map_n,
+            'step': self.step_count,
+            'x': x_pos,
+            'y': y_pos,
+            'map': map_n,
             'last_action': action,
-            'pcount': self.read_m(0xD163), 'levels': levels, 'ptypes': self.read_party(),
+            'pcount': self.read_m(0xD163),
+            'levels': levels,
             'level': sum(levels),
+            'ptypes': self.read_party(),
             'hp': self.read_hp_fraction(),
             expl[0]: expl[1],
-            'deaths': self.died_count, 'badge': self.get_badges(),
-            'event': self.progress_reward['event'], 'healr': self.total_healing_rew
+            'deaths': self.died_count,
+            'badge': self.get_badges(),
+            'event': self.progress_reward['event'],
+            'healr': self.total_healing_rew
         })
 
     def update_frame_knn_index(self, frame_vec):
