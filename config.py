@@ -118,7 +118,9 @@ def openspiel():
 
 def pokemon_red():
     args = pufferlib.args.CleanPuffeRL(
-        num_envs=4,
+        total_timesteps=40_000_000,
+        num_cores=24, # Reduce this to 12/8/6/4 as needed
+        num_envs=24,
         update_epochs=3,
         gamma=0.998,
         batch_size=2**15,
@@ -130,7 +132,9 @@ def pokemon_red_minimal():
     '''New variant, to be developed after we
     reproduce performance on the original'''
     args = pufferlib.args.CleanPuffeRL(
-        num_envs=4,
+        total_timesteps=40_000_000,
+        num_cores=24, # Reduce this to 12/8/6/4 as needed
+        num_envs=24,
         update_epochs=3,
         gamma=0.998,
         batch_size=2**15,
