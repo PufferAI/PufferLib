@@ -135,25 +135,28 @@ def evaluate(args, env_module):
     env = env_creator(**env_creator_kwargs)
 
     import torch
-    device = args.cleanrl_init['device']
-    agent = torch.load('agent.pt').to(device)
+    device = 'cuda'
+    agent = torch.load('model_000610.pt').to(device)
 
     import time
-    ob = env.reset()
-    for i in range(100):
-        ob = torch.tensor(ob).view(1, -1).to(device)
+    ob, info = env.reset()
+    return_val = 0
+    for i in range(5000):
+        ob = torch.tensor(ob).unsqueeze(0).to(device)
         with torch.no_grad():
             action  = agent.get_action_and_value(ob)[0][0].item()
 
-        ob, reward, done, _ = env.step(action)
+        ob, reward, terminal, truncated, _ = env.step(action)
+        return_val += reward
         env.render()
-        time.sleep(1)
+        print(i)
 
-        if done:
-            ob = env.reset()
+        if terminal or truncated:
+            ob, info = env.reset()
             print('---Reset---')
             env.render()
-            time.sleep(1)
+
+    print('Return:', return_val)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Parse environment argument", add_help=False)

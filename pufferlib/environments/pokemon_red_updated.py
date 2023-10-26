@@ -19,58 +19,50 @@ from io import BytesIO
 from gymnasium import Env, spaces
 from pyboy.utils import WindowEvent
 
+
 class PokemonRed(Env):
-
-
     def __init__(
-        self, config=None):
-        if config is None:
-            sess_path = Path(f'session_{str(uuid.uuid4())[:8]}')
-            gb_path=str(Path(__file__).parent / 'pokemon_red.gb')
-            init_state=str(Path(__file__).parent / 'has_pokedex_nballs.state')
-            config = {
-                'headless': True,
-                'save_final_state': False,
-                'early_stop': False,
-                'action_freq': 24,
-                'init_state': init_state,
-                'max_steps': 2048*10, 
-                'print_rewards': False,
-                'save_video': False,
-                'fast_video': True,
-                'session_path': sess_path,
-                'gb_path': gb_path,
-                'debug': False,
-                'sim_frame_dist': 2_000_000.0, 
-                'use_screen_explore': True,
-                'reward_scale': 4,
-                'extra_buttons': False,
-                'explore_weight': 3 # 2.5
-            }
-         
-        self.config = config
-        self.debug = config['debug']
-        self.s_path = config['session_path']
-        self.save_final_state = config['save_final_state']
-        self.print_rewards = config['print_rewards']
+            self,
+            headless=True,
+            save_final_state=False,
+            early_stop=False,
+            action_freq=24,
+            max_steps=2048*10, 
+            print_rewards=False,
+            save_video=False,
+            fast_video=True,
+            debug=False,
+            sim_frame_dist=2_000_000.0, 
+            use_screen_explore=True,
+            reward_scale=4,
+            extra_buttons=False,
+            explore_weight=3 # 2.5
+            ):
+        self.s_path = Path(f'session_{str(uuid.uuid4())[:8]}')
+        self.gb_path=str(Path(__file__).parent / 'pokemon_red.gb')
+        self.init_state=str(Path(__file__).parent / 'has_pokedex_nballs.state')
+        
+        self.debug = debug
+        self.save_final_state = save_final_state
+        self.print_rewards = print_rewards
         self.vec_dim = 4320 #1000
-        self.headless = config['headless']
+        self.headless = headless
         self.num_elements = 20000 # max
-        self.init_state = config['init_state']
-        self.act_freq = config['action_freq']
-        self.max_steps = config['max_steps']
-        self.early_stopping = config['early_stop']
-        self.save_video = config['save_video']
-        self.fast_video = config['fast_video']
-        self.video_interval = 256 * self.act_freq
+        self.act_freq = action_freq
+        self.max_steps = max_steps
+        self.early_stopping = early_stop
+        self.save_video = save_video
+        self.fast_video = fast_video
+        self.video_interval = 256 * action_freq
         self.downsample_factor = 2
         self.frame_stacks = 3
-        self.explore_weight = 1 if 'explore_weight' not in config else config['explore_weight']
-        self.use_screen_explore = True if 'use_screen_explore' not in config else config['use_screen_explore']
-        self.similar_frame_dist = config['sim_frame_dist']
-        self.reward_scale = 1 if 'reward_scale' not in config else config['reward_scale']
-        self.extra_buttons = False if 'extra_buttons' not in config else config['extra_buttons']
-        self.instance_id = str(uuid.uuid4())[:8] if 'instance_id' not in config else config['instance_id']
+        self.explore_weight = explore_weight
+        self.use_screen_explore = use_screen_explore
+        self.similar_frame_dist = sim_frame_dist
+        self.reward_scale = reward_scale
+        self.extra_buttons = extra_buttons
+        self.instance_id = str(uuid.uuid4())[:8]
+
         self.s_path.mkdir(exist_ok=True)
         self.reset_count = 0
         self.all_runs = []
@@ -120,10 +112,10 @@ class PokemonRed(Env):
         self.action_space = spaces.Discrete(len(self.valid_actions))
         self.observation_space = spaces.Box(low=0, high=255, shape=self.output_full, dtype=np.uint8)
 
-        head = 'headless' if config['headless'] else 'SDL2'
+        head = 'headless' if headless else 'SDL2'
 
         self.pyboy = PyBoy(
-                config['gb_path'],
+                self.gb_path,
                 debugging=False,
                 disable_input=False,
                 window_type=head,
@@ -132,7 +124,7 @@ class PokemonRed(Env):
 
         self.screen = self.pyboy.botsupport_manager().screen()
 
-        if not config['headless']:
+        if not self.headless:
             self.pyboy.set_emulation_speed(6)
 
         with open(self.init_state, 'rb') as f:

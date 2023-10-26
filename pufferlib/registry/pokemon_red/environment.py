@@ -4,11 +4,11 @@ import pufferlib.emulation
 from pufferlib.environments import PokemonRed as env_creator
 
 
-def make_env():
+def make_env(
+        headless: bool = True,
+        save_video: bool = False
+    ):
     '''Pokemon Red'''
-    env = env_creator()
-    ob = env.reset()[0]
-    # Save ob as rgb image
-    #import cv2; cv2.imwrite('ob.png', ob.astype('uint8'))
+    env = env_creator(headless=headless, save_video=save_video)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env,
         postprocessor_cls=pufferlib.emulation.BasicPostprocessor)
