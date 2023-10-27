@@ -145,7 +145,7 @@ def init(
     next_lstm_state = []
     for i, envs in enumerate(buffers):
         envs.async_reset(config.seed + i)
-        if not hasattr(agent, 'recurrent'):
+        if not hasattr(agent, 'lstm'):
             next_lstm_state.append(None)
         else:
             shape = (agent.lstm.num_layers, total_agents, agent.lstm.hidden_size)
@@ -396,9 +396,9 @@ def train(data):
             mb_advantages = b_advantages[mb].reshape(-1)
             mb_returns = b_returns[mb].reshape(-1)
 
-            if hasattr(data.agent, 'recurrent'):
+            if hasattr(data.agent, 'lstm'):
                 _, newlogprob, entropy, newvalue, lstm_state = data.agent.get_action_and_value(
-                    mb_obs, state=lstm_state, done=b_dones[mb], action=mb_actions)
+                    mb_obs, state=lstm_state)
                 lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
             else:
                 _, newlogprob, entropy, newvalue = data.agent.get_action_and_value(
