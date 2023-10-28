@@ -1,8 +1,7 @@
 
 import sys
-import uuid 
-import os
-from math import floor, sqrt
+import uuid
+from math import floor
 import json
 from pathlib import Path
 
@@ -38,7 +37,7 @@ class PokemonRed(Env):
             extra_buttons=False,
             explore_weight=3 # 2.5
             ):
-        self.s_path = Path(f'session_{str(uuid.uuid4())[:8]}')
+        self.s_path = Path(f'runs/session_{str(uuid.uuid4())[:8]}')
         self.gb_path=str(Path(__file__).parent / 'pokemon_red.gb')
         self.init_state=str(Path(__file__).parent / 'has_pokedex_nballs.state')
         
@@ -63,7 +62,7 @@ class PokemonRed(Env):
         self.extra_buttons = extra_buttons
         self.instance_id = str(uuid.uuid4())[:8]
 
-        self.s_path.mkdir(exist_ok=True)
+        self.s_path.mkdir(parents=True, exist_ok=True)
         self.reset_count = 0
         self.all_runs = []
 
@@ -133,7 +132,10 @@ class PokemonRed(Env):
         self.reset()
 
     def reset(self, seed=None):
+        # Gym v26 favours `Env.reset(seed=seed)` this allows seeding to only be changed on environment reset.
+        # https://gymnasium.farama.org/content/migration-guide/#seed-and-random-number-generator
         self.seed = seed
+
         # restart game, skipping credits
         self.initial_state.seek(0)
         self.pyboy.load_state(self.initial_state)
