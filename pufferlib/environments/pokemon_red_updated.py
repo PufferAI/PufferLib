@@ -1,4 +1,4 @@
-
+from pdb import set_trace as T
 import sys
 import uuid 
 import os
@@ -20,6 +20,50 @@ from gymnasium import Env, spaces
 from pyboy.utils import WindowEvent
 
 
+# addresses from https://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Red/Blue:RAM_map
+# https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
+HP_ADDR =  [0xD16C, 0xD198, 0xD1C4, 0xD1F0, 0xD21C, 0xD248]
+MAX_HP_ADDR = [0xD18D, 0xD1B9, 0xD1E5, 0xD211, 0xD23D, 0xD269]
+PARTY_SIZE_ADDR = 0xD163
+PARTY_ADDR = [0xD164, 0xD165, 0xD166, 0xD167, 0xD168, 0xD169]
+PARTY_LEVEL_ADDR = [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]
+CAUGHT_POKE_ADDR = range(0xD2F7, 0xD309)
+SEEN_POKE_ADDR = range(0xD30A, 0xD31D)
+POKE_XP_ADDR = [0xD179, 0xD1A5, 0xD1D1, 0xD1FD, 0xD229, 0xD255]
+OPPONENT_LEVEL_ADDR = [0xD8C5, 0xD8F1, 0xD91D, 0xD949, 0xD975, 0xD9A1]
+X_POS_ADDR = 0xD362
+Y_POS_ADDR = 0xD361
+MAP_N_ADDR = 0xD35E
+BADGE_1_ADDR = 0xD356
+EVENT_FLAGS_START_ADDR = 0xD747
+EVENT_FLAGS_END_ADDR = 0xD886
+MUSEUM_TICKET_ADDR = 0xD754
+MONEY_ADDR_1 = 0xD347
+MONEY_ADDR_100 = 0xD348
+MONEY_ADDR_10000 = 0xD349
+
+VALID_ACTIONS = [
+    WindowEvent.PRESS_ARROW_DOWN,
+    WindowEvent.PRESS_ARROW_LEFT,
+    WindowEvent.PRESS_ARROW_RIGHT,
+    WindowEvent.PRESS_ARROW_UP,
+    WindowEvent.PRESS_BUTTON_A,
+    WindowEvent.PRESS_BUTTON_B,
+]
+
+RELEASE_ARROW = [
+    WindowEvent.RELEASE_ARROW_DOWN,
+    WindowEvent.RELEASE_ARROW_LEFT,
+    WindowEvent.RELEASE_ARROW_RIGHT,
+    WindowEvent.RELEASE_ARROW_UP
+]
+
+RELEASE_BUTTON = [
+    WindowEvent.RELEASE_BUTTON_A,
+    WindowEvent.RELEASE_BUTTON_B
+]
+
+
 class PokemonRed(Env):
     def __init__(
             self,
@@ -35,9 +79,9 @@ class PokemonRed(Env):
             sim_frame_dist=2_000_000.0, 
             use_screen_explore=True,
             reward_scale=4,
-            extra_buttons=False,
             explore_weight=3 # 2.5
             ):
+
         self.s_path = Path(f'session_{str(uuid.uuid4())[:8]}')
         self.gb_path=str(Path(__file__).parent / 'pokemon_red.gb')
         self.init_state=str(Path(__file__).parent / 'has_pokedex_nballs.state')
@@ -60,7 +104,6 @@ class PokemonRed(Env):
         self.use_screen_explore = use_screen_explore
         self.similar_frame_dist = sim_frame_dist
         self.reward_scale = reward_scale
-        self.extra_buttons = extra_buttons
         self.instance_id = str(uuid.uuid4())[:8]
 
         self.s_path.mkdir(exist_ok=True)
@@ -71,45 +114,18 @@ class PokemonRed(Env):
         self.metadata = {"render.modes": []}
         self.reward_range = (0, 15000)
 
-        self.valid_actions = [
-            WindowEvent.PRESS_ARROW_DOWN,
-            WindowEvent.PRESS_ARROW_LEFT,
-            WindowEvent.PRESS_ARROW_RIGHT,
-            WindowEvent.PRESS_ARROW_UP,
-            WindowEvent.PRESS_BUTTON_A,
-            WindowEvent.PRESS_BUTTON_B,
-        ]
-        
-        if self.extra_buttons:
-            self.valid_actions.extend([
-                WindowEvent.PRESS_BUTTON_START,
-                WindowEvent.PASS
-            ])
-
-        self.release_arrow = [
-            WindowEvent.RELEASE_ARROW_DOWN,
-            WindowEvent.RELEASE_ARROW_LEFT,
-            WindowEvent.RELEASE_ARROW_RIGHT,
-            WindowEvent.RELEASE_ARROW_UP
-        ]
-
-        self.release_button = [
-            WindowEvent.RELEASE_BUTTON_A,
-            WindowEvent.RELEASE_BUTTON_B
-        ]
-
         self.output_shape = (36, 40, 3)
         self.mem_padding = 2
         self.memory_height = 8
         self.col_steps = 16
         self.output_full = (
             self.output_shape[0] * self.frame_stacks + 2 * (self.mem_padding + self.memory_height),
-                            self.output_shape[1],
-                            self.output_shape[2]
+            self.output_shape[1],
+            self.output_shape[2]
         )
 
         # Set these in ALL subclasses
-        self.action_space = spaces.Discrete(len(self.valid_actions))
+        self.action_space = spaces.Discrete(len(VALID_ACTIONS))
         self.observation_space = spaces.Box(low=0, high=255, shape=self.output_full, dtype=np.uint8)
 
         head = 'headless' if headless else 'SDL2'
@@ -119,6 +135,7 @@ class PokemonRed(Env):
                 debugging=False,
                 disable_input=False,
                 window_type=head,
+                #color_palette=(0xFFFFFF,0xFF8484,0x943A3A,0x000000),
                 hide_window='--quiet' in sys.argv,
             )
 
@@ -227,7 +244,7 @@ class PokemonRed(Env):
             self.update_seen_coords()
             
         self.update_heal_reward()
-        self.party_size = self.read_m(0xD163)
+        self.party_size = self.read_m(PARTY_SIZE_ADDR)
 
         new_reward, new_prog = self.update_reward()
         
@@ -252,7 +269,7 @@ class PokemonRed(Env):
 
     def run_action_on_emulator(self, action):
         # press button then release after some steps
-        self.pyboy.send_input(self.valid_actions[action])
+        self.pyboy.send_input(VALID_ACTIONS[action])
         # disable rendering when we don't need it
         if not self.save_video and self.headless:
             self.pyboy._rendering(False)
@@ -261,11 +278,11 @@ class PokemonRed(Env):
             if i == 8:
                 if action < 4:
                     # release arrow
-                    self.pyboy.send_input(self.release_arrow[action])
+                    self.pyboy.send_input(RELEASE_ARROW[action])
                 if action > 3 and action < 6:
                     # release button 
-                    self.pyboy.send_input(self.release_button[action - 4])
-                if self.valid_actions[action] == WindowEvent.PRESS_BUTTON_START:
+                    self.pyboy.send_input(RELEASE_BUTTON[action - 4])
+                if VALID_ACTIONS[action] == WindowEvent.PRESS_BUTTON_START:
                     self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_START)
             if self.save_video and not self.fast_video:
                 self.add_video_frame()
@@ -280,21 +297,29 @@ class PokemonRed(Env):
         self.model_frame_writer.add_image(self.render(reduce_res=True, update_mem=False))
     
     def append_agent_stats(self, action):
-        x_pos = self.read_m(0xD362)
-        y_pos = self.read_m(0xD361)
-        map_n = self.read_m(0xD35E)
-        levels = [self.read_m(a) for a in [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]]
+        x_pos = self.read_m(X_POS_ADDR)
+        y_pos = self.read_m(Y_POS_ADDR)
+        map_n = self.read_m(MAP_N_ADDR)
+        levels = [self.read_m(a) for a in PARTY_LEVEL_ADDR]
         if self.use_screen_explore:
             expl = ('frames', self.knn_index.get_current_count())
         else:
             expl = ('coord_count', len(self.seen_coords))
+
+        caught_poke_count = sum([self.bit_count(self.read_m(i)) for i in CAUGHT_POKE_ADDR])
+        seen_poke_count = sum([self.bit_count(self.read_m(i)) for i in SEEN_POKE_ADDR])
+        poke_xps = [self.read_triple(a) for a in POKE_XP_ADDR]
+
         self.agent_stats.append({
+            'caught': caught_poke_count,
+            'seen': seen_poke_count,
+            'poke_xp': poke_xps,
             'step': self.step_count,
             'x': x_pos,
             'y': y_pos,
             'map': map_n,
             'last_action': action,
-            'pcount': self.read_m(0xD163),
+            'pcount': self.read_m(PARTY_SIZE_ADDR),
             'levels': levels,
             'level': sum(levels),
             'ptypes': self.read_party(),
@@ -328,9 +353,9 @@ class PokemonRed(Env):
                 )
     
     def update_seen_coords(self):
-        x_pos = self.read_m(0xD362)
-        y_pos = self.read_m(0xD361)
-        map_n = self.read_m(0xD35E)
+        x_pos = self.read_m(X_POS_ADDR)
+        y_pos = self.read_m(Y_POS_ADDR)
+        map_n = self.read_m(MAP_N_ADDR)
         coord_string = f"x:{x_pos} y:{y_pos} m:{map_n}"
         if self.get_levels_sum() >= 22 and not self.levels_satisfied:
             self.levels_satisfied = True
@@ -373,6 +398,10 @@ class PokemonRed(Env):
         
         def make_reward_channel(r_val):
             col_steps = self.col_steps
+            max_r_val = (w-1) * h * col_steps
+            # truncate progress bar. if hitting this
+            # you should scale down the reward in group_rewards!
+            r_val = min(r_val, max_r_val)
             row = floor(r_val / (h * col_steps))
             memory = np.zeros(shape=(h, w), dtype=np.uint8)
             memory[:, :row] = 255
@@ -456,7 +485,7 @@ class PokemonRed(Env):
         return bin(256 + self.read_m(addr))[-bit-1] == '1'
     
     def get_levels_sum(self):
-        poke_levels = [max(self.read_m(a) - 2, 0) for a in [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]]
+        poke_levels = [max(self.read_m(a) - 2, 0) for a in PARTY_LEVEL_ADDR]
         return max(sum(poke_levels) - 4, 0) # subtract starting pokemon level
     
     def get_levels_reward(self):
@@ -480,15 +509,15 @@ class PokemonRed(Env):
         return base + post
     
     def get_badges(self):
-        return self.bit_count(self.read_m(0xD356))
+        return self.bit_count(self.read_m(BADGE_1_ADDR))
 
     def read_party(self):
-        return [self.read_m(addr) for addr in [0xD164, 0xD165, 0xD166, 0xD167, 0xD168, 0xD169]]
+        return [self.read_m(addr) for addr in PARTY_ADDR]
     
     def update_heal_reward(self):
         cur_health = self.read_hp_fraction()
         if (cur_health > self.last_health and
-                self.read_m(0xD163) == self.party_size):
+                self.read_m(PARTY_SIZE_ADDR) == self.party_size):
             if self.last_health > 0:
                 heal_amount = cur_health - self.last_health
                 if heal_amount > 0.5:
@@ -500,47 +529,16 @@ class PokemonRed(Env):
                 
     def get_all_events_reward(self):
         # adds up all event flags, exclude museum ticket
-        event_flags_start = 0xD747
-        event_flags_end = 0xD886
-        museum_ticket = (0xD754, 0)
         base_event_flags = 13
-        return max(
-            sum(
-                [
-                    self.bit_count(self.read_m(i))
-                    for i in range(event_flags_start, event_flags_end)
-                ]
-            )
-            - base_event_flags
-            - int(self.read_bit(museum_ticket[0], museum_ticket[1])),
+        return max(sum([
+            self.bit_count(self.read_m(i))
+            for i in range(EVENT_FLAGS_START_ADDR, EVENT_FLAGS_END_ADDR)
+            ]) - base_event_flags
+            - int(self.read_bit(MUSEUM_TICKET_ADDR, 0)),
         0,
     )
 
     def get_game_state_reward(self, print_stats=False):
-        # addresses from https://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Red/Blue:RAM_map
-        # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
-        '''
-        num_poke = self.read_m(0xD163)
-        poke_xps = [self.read_triple(a) for a in [0xD179, 0xD1A5, 0xD1D1, 0xD1FD, 0xD229, 0xD255]]
-        #money = self.read_money() - 975 # subtract starting money
-        seen_poke_count = sum([self.bit_count(self.read_m(i)) for i in range(0xD30A, 0xD31D)])
-        all_events_score = sum([self.bit_count(self.read_m(i)) for i in range(0xD747, 0xD886)])
-        oak_parcel = self.read_bit(0xD74E, 1) 
-        oak_pokedex = self.read_bit(0xD74B, 5)
-        opponent_level = self.read_m(0xCFF3)
-        self.max_opponent_level = max(self.max_opponent_level, opponent_level)
-        enemy_poke_count = self.read_m(0xD89C)
-        self.max_opponent_poke = max(self.max_opponent_poke, enemy_poke_count)
-        
-        if print_stats:
-            print(f'num_poke : {num_poke}')
-            print(f'poke_levels : {poke_levels}')
-            print(f'poke_xps : {poke_xps}')
-            #print(f'money: {money}')
-            print(f'seen_poke_count : {seen_poke_count}')
-            print(f'oak_parcel: {oak_parcel} oak_pokedex: {oak_pokedex} all_events_score: {all_events_score}')
-        '''
-        
         state_scores = {
             'event': self.reward_scale*self.update_max_event_rew(),  
             #'party_xp': self.reward_scale*0.1*sum(poke_xps),
@@ -566,10 +564,7 @@ class PokemonRed(Env):
             self.render(reduce_res=False))
     
     def update_max_op_level(self):
-        #opponent_level = self.read_m(0xCFE8) - 5 # base level
-        opponent_level = max([self.read_m(a) for a in [0xD8C5, 0xD8F1, 0xD91D, 0xD949, 0xD975, 0xD9A1]]) - 5
-        #if opponent_level >= 7:
-        #    self.save_screenshot('highlevelop')
+        opponent_level = max([self.read_m(a) for a in OPPONENT_LEVEL_ADDR]) - 5
         self.max_opponent_level = max(self.max_opponent_level, opponent_level)
         return self.max_opponent_level * 0.2
     
@@ -579,8 +574,8 @@ class PokemonRed(Env):
         return self.max_event_rew
 
     def read_hp_fraction(self):
-        hp_sum = sum([self.read_hp(add) for add in [0xD16C, 0xD198, 0xD1C4, 0xD1F0, 0xD21C, 0xD248]])
-        max_hp_sum = sum([self.read_hp(add) for add in [0xD18D, 0xD1B9, 0xD1E5, 0xD211, 0xD23D, 0xD269]])
+        hp_sum = sum([self.read_hp(add) for add in HP_ADDR])
+        max_hp_sum = sum([self.read_hp(add) for add in MAX_HP_ADDR])
         return hp_sum / max_hp_sum
 
     def read_hp(self, start):
@@ -597,6 +592,6 @@ class PokemonRed(Env):
         return 10 * ((num >> 4) & 0x0f) + (num & 0x0f)
     
     def read_money(self):
-        return (100 * 100 * self.read_bcd(self.read_m(0xD347)) + 
-                100 * self.read_bcd(self.read_m(0xD348)) +
-                self.read_bcd(self.read_m(0xD349)))
+        return (100 * 100 * self.read_bcd(self.read_m(MONEY_ADDR_1)) + 
+                100 * self.read_bcd(self.read_m(MONEY_ADDR_100)) +
+                self.read_bcd(self.read_m(MONEY_ADDR_10000)))
