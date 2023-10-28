@@ -387,7 +387,6 @@ def train(data):
     train_time = time.time()
     pg_losses, entropy_losses, v_losses, clipfracs, old_kls, kls = [], [], [], [], [], []
     for epoch in range(config.update_epochs):
-        #shape = (data.agent.lstm.num_layers, batch_rows, data.agent.lstm.hidden_size)
         lstm_state = None
         for mb in range(num_minibatches):
             mb_obs = b_obs[mb].to(data.device)
@@ -398,7 +397,7 @@ def train(data):
 
             if hasattr(data.agent, 'lstm'):
                 _, newlogprob, entropy, newvalue, lstm_state = data.agent.get_action_and_value(
-                    mb_obs, state=lstm_state)
+                    mb_obs, state=lstm_state, action=mb_actions)
                 lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
             else:
                 _, newlogprob, entropy, newvalue = data.agent.get_action_and_value(
