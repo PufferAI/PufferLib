@@ -5,6 +5,7 @@ import os
 from math import floor, sqrt
 import json
 from pathlib import Path
+from collections import defaultdict
 
 import numpy as np
 from einops import rearrange
@@ -64,6 +65,24 @@ RELEASE_BUTTON = [
 ]
 
 
+def get_fixed_window(arr, y, x, window_size):
+    height, width = arr.shape
+    h_w, w_w = window_size[0] // 2, window_size[1] // 2
+    
+    y_min = max(0, y - h_w)
+    y_max = min(height, y + h_w + (window_size[0] % 2))
+    x_min = max(0, x - w_w)
+    x_max = min(width, x + w_w + (window_size[1] % 2))
+    
+    window = arr[y_min:y_max, x_min:x_max]
+    
+    pad_top = h_w - (y - y_min)
+    pad_bottom = h_w + (window_size[0] % 2) - 1 - (y_max - y - 1)
+    pad_left = w_w - (x - x_min)
+    pad_right = w_w + (window_size[1] % 2) - 1 - (x_max - x - 1)
+    
+    return np.pad(window, ((pad_top, pad_bottom), (pad_left, pad_right)), mode='constant')
+
 class PokemonRed(Env):
     def __init__(
             self,
@@ -79,8 +98,10 @@ class PokemonRed(Env):
             sim_frame_dist=2_000_000.0, 
             use_screen_explore=True,
             reward_scale=4,
-            explore_weight=3 # 2.5
+            explore_weight=3, # 2.5
+            explore_map=True,
             ):
+        self.explore_map = explore_map
 
         self.s_path = Path(f'session_{str(uuid.uuid4())[:8]}')
         self.gb_path=str(Path(__file__).parent / 'pokemon_red.gb')
@@ -115,6 +136,7 @@ class PokemonRed(Env):
         self.reward_range = (0, 15000)
 
         self.output_shape = (36, 40, 3)
+
         self.mem_padding = 2
         self.memory_height = 8
         self.col_steps = 16
@@ -126,7 +148,15 @@ class PokemonRed(Env):
 
         # Set these in ALL subclasses
         self.action_space = spaces.Discrete(len(VALID_ACTIONS))
-        self.observation_space = spaces.Box(low=0, high=255, shape=self.output_full, dtype=np.uint8)
+
+        shape = self.output_full
+        if self.explore_map:
+            shape = list(shape)
+            shape[-1] = 4
+            shape = tuple(shape)
+
+        self.observation_space = spaces.Box(
+            low=0, high=255, shape=shape, dtype=np.uint8)
 
         head = 'headless' if headless else 'SDL2'
 
@@ -155,6 +185,10 @@ class PokemonRed(Env):
         self.initial_state.seek(0)
         self.pyboy.load_state(self.initial_state)
         
+        if self.explore_map:
+            self.tile_map = defaultdict(
+                lambda: np.zeros((256, 256), dtype=np.uint8))
+
         if self.use_screen_explore:
             self.init_knn()
         else:
@@ -192,7 +226,12 @@ class PokemonRed(Env):
         self.progress_reward = self.get_game_state_reward()
         self.total_reward = sum([val for _, val in self.progress_reward.items()])
         self.reset_count += 1
-        return self.render(), {}
+
+        frame = self.render()
+        if self.explore_map:
+            frame = self.make_mem_ob(frame)
+
+        return frame, {}
     
     def init_knn(self):
         # Declaring index
@@ -201,6 +240,21 @@ class PokemonRed(Env):
         self.knn_index.init_index(
             max_elements=self.num_elements, ef_construction=100, M=16)
         
+    def make_mem_ob(self, frame):
+        x_pos = self.read_m(X_POS_ADDR)
+        y_pos = self.read_m(Y_POS_ADDR)
+        map_n = self.read_m(MAP_N_ADDR)
+        shape = frame.shape
+
+        # Update tile map
+        mmap = self.tile_map[map_n]
+        mmap[y_pos, x_pos] = 255
+
+        mem_crop = get_fixed_window(mmap, y_pos, x_pos, shape)
+        stacked = np.concatenate((
+            frame, mem_crop[:, :, None]), axis=-1)
+        return stacked
+
     def init_map_mem(self):
         self.seen_coords = {}
 
@@ -226,16 +280,18 @@ class PokemonRed(Env):
         return game_pixels_render
     
     def step(self, action):
-
         self.run_action_on_emulator(action)
         self.append_agent_stats(action)
 
         self.recent_frames = np.roll(self.recent_frames, 1, axis=0)
         obs_memory = self.render()
 
+        if self.explore_map:
+            obs_memory = self.make_mem_ob(obs_memory)
+
         # trim off memory from frame for knn index
         frame_start = 2 * (self.memory_height + self.mem_padding)
-        obs_flat = obs_memory[
+        obs_flat = obs_memory[:, :, :3][
             frame_start:frame_start+self.output_shape[0], ...].flatten().astype(np.float32)
 
         if self.use_screen_explore:
