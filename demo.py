@@ -132,31 +132,32 @@ def train(args, env_module):
 def evaluate(args, env_module):
     env_creator = env_module.make_env
     env_creator_kwargs = args.env_kwargs
+    env_creator_kwargs['headless'] = False
+    env_creator_kwargs['save_video'] = True
     env = env_creator(**env_creator_kwargs)
 
     import torch
     device = 'cuda'
-    agent = torch.load('model_000610.pt').to(device)
+    agent = torch.load('pokemon_red_50m/model_001525.pt').to(device)
 
-    import time
-    ob, info = env.reset()
-    return_val = 0
-    for i in range(5000):
-        ob = torch.tensor(ob).unsqueeze(0).to(device)
-        with torch.no_grad():
-            action  = agent.get_action_and_value(ob)[0][0].item()
+    while True:
+        ob, info = env.reset()
+        return_val = 0
+        for i in range(20480):
+            ob = torch.tensor(ob).unsqueeze(0).to(device)
+            with torch.no_grad():
+                action  = agent.get_action_and_value(ob)[0][0].item()
 
-        ob, reward, terminal, truncated, _ = env.step(action)
-        return_val += reward
-        env.render()
-        print(i)
-
-        if terminal or truncated:
-            ob, info = env.reset()
-            print('---Reset---')
+            ob, reward, terminal, truncated, _ = env.step(action)
+            return_val += reward
             env.render()
 
-    print('Return:', return_val)
+            if terminal or truncated:
+                ob, info = env.reset()
+                print('---Reset---')
+                env.render()
+
+        print('Return:', return_val)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Parse environment argument", add_help=False)
