@@ -138,7 +138,7 @@ def evaluate(args, env_module):
 
     import torch
     device = 'cuda'
-    agent = torch.load('pokemon_red_50m/model_001525.pt').to(device)
+    agent = torch.load('pokemon_red_50m/model_001525.pt', map_location=device)
 
     while True:
         ob, info = env.reset()

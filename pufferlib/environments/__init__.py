@@ -8,6 +8,7 @@ class Squared(gym.Env):
     step = step
     render = render
 
+
 def PokemonRed(*args, **kwargs):
     from .pokemon_red import PokemonRed
     return PokemonRed(*args, **kwargs)
