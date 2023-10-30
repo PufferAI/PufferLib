@@ -1,4 +1,4 @@
-
+from pdb import set_trace as T
 import sys
 import uuid 
 import os
@@ -103,9 +103,9 @@ class PokemonRed(Env):
         self.memory_height = 8
         self.col_steps = 16
         self.output_full = (
-            self.output_shape[0] * self.frame_stacks + 2 * (self.mem_padding + self.memory_height),
-                            self.output_shape[1],
-                            self.output_shape[2]
+            self.output_shape[0] * self.frame_stacks + self.mem_padding + self.memory_height,
+            self.output_shape[1],
+            self.output_shape[2]
         )
 
         # Set these in ALL subclasses
@@ -143,8 +143,6 @@ class PokemonRed(Env):
         else:
             self.init_map_mem()
 
-        self.recent_memory = np.zeros((self.output_shape[1]*self.memory_height, 3), dtype=np.uint8)
-        
         self.recent_frames = np.zeros(
             (self.frame_stacks, self.output_shape[0], 
              self.output_shape[1], self.output_shape[2]),
@@ -201,8 +199,6 @@ class PokemonRed(Env):
                     (
                         self.create_exploration_memory(), 
                         pad,
-                        self.create_recent_memory(),
-                        pad,
                         rearrange(self.recent_frames, 'f h w c -> (f h) w c')
                     ),
                     axis=0)
@@ -232,12 +228,6 @@ class PokemonRed(Env):
         new_reward, new_prog = self.update_reward()
         
         self.last_health = self.read_hp_fraction()
-
-        # shift over short term reward memory
-        self.recent_memory = np.roll(self.recent_memory, 3)
-        self.recent_memory[0, 0] = min(new_prog[0] * 64, 255)
-        self.recent_memory[0, 1] = min(new_prog[1] * 64, 255)
-        self.recent_memory[0, 2] = min(new_prog[2] * 128, 255)
 
         step_limit_reached = self.check_if_done()
         info = {}
@@ -400,17 +390,9 @@ class PokemonRed(Env):
 
         return full_memory
 
-    def create_recent_memory(self):
-        return rearrange(
-            self.recent_memory, 
-            '(w h) c -> h w c', 
-            h=self.memory_height)
-
     def check_if_done(self):
         if self.early_stopping:
-            done = False
-            if self.step_count > 128 and self.recent_memory.sum() < (255 * 1):
-                done = True
+            done = self.step_count > 128
         else:
             done = self.step_count >= self.max_steps
         #done = self.read_hp_fraction() == 0
