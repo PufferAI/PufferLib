@@ -202,6 +202,7 @@ class Convolutional(Policy):
             pufferlib.pytorch.layer_init(nn.Linear(flat_size, hidden_size)),
             nn.ReLU(),
         )
+        # TODO: Add shape mismatch warning
 
         self.actor = pufferlib.pytorch.layer_init(nn.Linear(output_size, self.num_actions), std=0.01)
         self.value_fn = pufferlib.pytorch.layer_init(nn.Linear(output_size, 1), std=1)

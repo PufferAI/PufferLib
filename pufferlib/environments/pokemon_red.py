@@ -33,7 +33,7 @@ class PokemonRed(Env):
             fast_video=True,
             debug=False,
             sim_frame_dist=2_000_000.0, 
-            use_screen_explore=True,
+            use_screen_explore=False,
             reward_scale=4,
             extra_buttons=False,
             explore_weight=3 # 2.5
@@ -98,15 +98,9 @@ class PokemonRed(Env):
             WindowEvent.RELEASE_BUTTON_B
         ]
 
-        self.output_shape = (36, 40, 3)
-        self.mem_padding = 2
-        self.memory_height = 8
+        self.output_shape = (72, 80)
+        self.output_full = self.output_shape
         self.col_steps = 16
-        self.output_full = (
-            self.output_shape[0] * self.frame_stacks + self.mem_padding + self.memory_height,
-            self.output_shape[1],
-            self.output_shape[2]
-        )
 
         # Set these in ALL subclasses
         self.action_space = spaces.Discrete(len(self.valid_actions))
@@ -142,11 +136,6 @@ class PokemonRed(Env):
             self.init_knn()
         else:
             self.init_map_mem()
-
-        self.recent_frames = np.zeros(
-            (self.frame_stacks, self.output_shape[0], 
-             self.output_shape[1], self.output_shape[2]),
-            dtype=np.uint8)
 
         self.agent_stats = []
         
@@ -185,37 +174,21 @@ class PokemonRed(Env):
     def init_map_mem(self):
         self.seen_coords = {}
 
-    def render(self, reduce_res=True, add_memory=True, update_mem=True):
+    def render(self, reduce_res=True):
         game_pixels_render = self.screen.screen_ndarray() # (144, 160, 3)
         if reduce_res:
             game_pixels_render = (255*resize(game_pixels_render, self.output_shape)).astype(np.uint8)
-            if update_mem:
-                self.recent_frames[0] = game_pixels_render
-            if add_memory:
-                pad = np.zeros(
-                    shape=(self.mem_padding, self.output_shape[1], 3), 
-                    dtype=np.uint8)
-                game_pixels_render = np.concatenate(
-                    (
-                        self.create_exploration_memory(), 
-                        pad,
-                        rearrange(self.recent_frames, 'f h w c -> (f h) w c')
-                    ),
-                    axis=0)
-        return game_pixels_render
+        return game_pixels_render.mean(axis=-1)
     
     def step(self, action):
 
         self.run_action_on_emulator(action)
         self.append_agent_stats(action)
 
-        self.recent_frames = np.roll(self.recent_frames, 1, axis=0)
         obs_memory = self.render()
 
         # trim off memory from frame for knn index
-        frame_start = 2 * (self.memory_height + self.mem_padding)
-        obs_flat = obs_memory[
-            frame_start:frame_start+self.output_shape[0], ...].flatten().astype(np.float32)
+        obs_flat = obs_memory.flatten().astype(np.float32)
 
         if self.use_screen_explore:
             self.update_frame_knn_index(obs_flat)
@@ -356,39 +329,6 @@ class PokemonRed(Env):
                #(prog['events'], 
                # prog['levels'] + prog['party_xp'], 
                # prog['explore'])
-
-    def create_exploration_memory(self):
-        w = self.output_shape[1]
-        h = self.memory_height
-        
-        def make_reward_channel(r_val):
-            col_steps = self.col_steps
-            max_r_val = (w-1) * h * col_steps
-            # truncate progress bar. if hitting this
-            # you should scale down the reward in group_rewards!
-            r_val = min(r_val, max_r_val)
-            row = floor(r_val / (h * col_steps))
-            memory = np.zeros(shape=(h, w), dtype=np.uint8)
-            memory[:, :row] = 255
-            row_covered = row * h * col_steps
-            col = floor((r_val - row_covered) / col_steps)
-            memory[:col, row] = 255
-            col_covered = col * col_steps
-            last_pixel = floor(r_val - row_covered - col_covered) 
-            memory[col, row] = last_pixel * (255 // col_steps)
-            return memory
-        
-        level, hp, explore = self.group_rewards()
-        full_memory = np.stack((
-            make_reward_channel(level),
-            make_reward_channel(hp),
-            make_reward_channel(explore)
-        ), axis=-1)
-        
-        if self.get_badges() > 0:
-            full_memory[:, -1, :] = 255
-
-        return full_memory
 
     def check_if_done(self):
         if self.early_stopping:
