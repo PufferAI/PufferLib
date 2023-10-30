@@ -137,7 +137,7 @@ def evaluate(args, env_module):
     env = env_creator(**env_creator_kwargs)
 
     import torch
-    device = 'cuda'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     agent = torch.load('pokemon_red_50m/model_001525.pt', map_location=device)
 
     while True:
