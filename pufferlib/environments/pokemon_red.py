@@ -1,4 +1,4 @@
-
+from pdb import set_trace as T
 import sys
 import uuid 
 import os
@@ -36,11 +36,13 @@ class PokemonRed(Env):
             use_screen_explore=True,
             reward_scale=4,
             extra_buttons=False,
-            explore_weight=3 # 2.5
+            explore_weight=3, # 2.5
+            colorize=True,
             ):
         self.s_path = Path(f'session_{str(uuid.uuid4())[:8]}')
-        self.gb_path=str(Path(__file__).parent / 'pokemon_red.gb')
-        self.init_state=str(Path(__file__).parent / 'has_pokedex_nballs.state')
+        self.gb_path=str(Path(__file__).parent / 'pokemon_red.gbc')
+        self.init_state=str(Path(__file__).parent / 'choice.state')
+        #self.init_state=str(Path(__file__).parent / 'has_pokedex_nballs.state')
         
         self.debug = debug
         self.save_final_state = save_final_state
@@ -114,12 +116,23 @@ class PokemonRed(Env):
 
         head = 'headless' if headless else 'SDL2'
 
+        
+        cgb_color_palette = None
+        if colorize:
+            cgb_color_palette = (
+                (0xFFFFFF, 0xFF8484, 0x943A3A, 0x000000),
+                (0xFFFFFF, 0x7BFF31, 0x008400, 0x000000),
+                (0xFFFFFF, 0xFF8484, 0x943A3A, 0x000000),
+            )
+
         self.pyboy = PyBoy(
                 self.gb_path,
                 debugging=False,
                 disable_input=False,
                 window_type=head,
                 hide_window='--quiet' in sys.argv,
+                cgb_color_palette=cgb_color_palette,
+                cgb=True,
             )
 
         self.screen = self.pyboy.botsupport_manager().screen()
@@ -585,6 +598,8 @@ class PokemonRed(Env):
     def read_hp_fraction(self):
         hp_sum = sum([self.read_hp(add) for add in [0xD16C, 0xD198, 0xD1C4, 0xD1F0, 0xD21C, 0xD248]])
         max_hp_sum = sum([self.read_hp(add) for add in [0xD18D, 0xD1B9, 0xD1E5, 0xD211, 0xD23D, 0xD269]])
+        if max_hp_sum == 0:
+            return 0
         return hp_sum / max_hp_sum
 
     def read_hp(self, start):
