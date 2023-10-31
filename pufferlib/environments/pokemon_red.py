@@ -213,7 +213,7 @@ class PokemonRed(Env):
         obs_memory = self.render()
 
         # trim off memory from frame for knn index
-        frame_start = 2 * (self.memory_height + self.mem_padding)
+        frame_start = self.memory_height + self.mem_padding
         obs_flat = obs_memory[
             frame_start:frame_start+self.output_shape[0], ...].flatten().astype(np.float32)
 
