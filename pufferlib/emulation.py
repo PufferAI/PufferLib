@@ -58,6 +58,8 @@ class Postprocessor:
         You must override Postprocessor.observation_space if this function
         changes the structure of observations.
         '''
+        if isinstance(observation, gymnasium.wrappers.frame_stack.LazyFrames):
+            observation = np.array(observation)
         return observation
 
     def action(self, action):

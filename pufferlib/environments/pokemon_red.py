@@ -1,3 +1,4 @@
+from pdb import set_trace as T
 
 import sys
 import uuid 
@@ -45,7 +46,7 @@ class PokemonRed(Env):
         self.debug = debug
         self.save_final_state = save_final_state
         self.print_rewards = print_rewards
-        self.vec_dim = 4320 #1000
+        self.vec_dim = 5760 #1000
         self.headless = headless
         self.num_elements = 20000 # max
         self.act_freq = action_freq
@@ -55,7 +56,6 @@ class PokemonRed(Env):
         self.fast_video = fast_video
         self.video_interval = 256 * action_freq
         self.downsample_factor = 2
-        self.frame_stacks = 3
         self.explore_weight = explore_weight
         self.use_screen_explore = use_screen_explore
         self.similar_frame_dist = sim_frame_dist
@@ -98,15 +98,11 @@ class PokemonRed(Env):
             WindowEvent.RELEASE_BUTTON_B
         ]
 
-        self.output_shape = (36, 40, 3)
+        self.output_shape = (72, 80)
+        self.output_full = (124, 80)
         self.mem_padding = 2
         self.memory_height = 8
         self.col_steps = 16
-        self.output_full = (
-            self.output_shape[0] * self.frame_stacks + 2 * (self.mem_padding + self.memory_height),
-                            self.output_shape[1],
-                            self.output_shape[2]
-        )
 
         # Set these in ALL subclasses
         self.action_space = spaces.Discrete(len(self.valid_actions))
@@ -145,11 +141,6 @@ class PokemonRed(Env):
 
         self.recent_memory = np.zeros((self.output_shape[1]*self.memory_height, 3), dtype=np.uint8)
         
-        self.recent_frames = np.zeros(
-            (self.frame_stacks, self.output_shape[0], 
-             self.output_shape[1], self.output_shape[2]),
-            dtype=np.uint8)
-
         self.agent_stats = []
         
         if self.save_video:
@@ -187,15 +178,15 @@ class PokemonRed(Env):
     def init_map_mem(self):
         self.seen_coords = {}
 
-    def render(self, reduce_res=True, add_memory=True, update_mem=True):
+    def render(self, reduce_res=True, add_memory=True):
         game_pixels_render = self.screen.screen_ndarray() # (144, 160, 3)
+        game_pixels_render = game_pixels_render.mean(-1)
+
         if reduce_res:
             game_pixels_render = (255*resize(game_pixels_render, self.output_shape)).astype(np.uint8)
-            if update_mem:
-                self.recent_frames[0] = game_pixels_render
             if add_memory:
                 pad = np.zeros(
-                    shape=(self.mem_padding, self.output_shape[1], 3), 
+                    shape=(self.mem_padding, self.output_shape[1]), 
                     dtype=np.uint8)
                 game_pixels_render = np.concatenate(
                     (
@@ -203,7 +194,7 @@ class PokemonRed(Env):
                         pad,
                         self.create_recent_memory(),
                         pad,
-                        rearrange(self.recent_frames, 'f h w c -> (f h) w c')
+                        game_pixels_render,
                     ),
                     axis=0)
         return game_pixels_render
@@ -213,7 +204,6 @@ class PokemonRed(Env):
         self.run_action_on_emulator(action)
         self.append_agent_stats(action)
 
-        self.recent_frames = np.roll(self.recent_frames, 1, axis=0)
         obs_memory = self.render()
 
         # trim off memory from frame for knn index
@@ -389,11 +379,11 @@ class PokemonRed(Env):
             return memory
         
         level, hp, explore = self.group_rewards()
-        full_memory = np.stack((
+        full_memory = np.concatenate((
             make_reward_channel(level),
             make_reward_channel(hp),
             make_reward_channel(explore)
-        ), axis=-1)
+        ), axis=0)
         
         if self.get_badges() > 0:
             full_memory[:, -1, :] = 255
@@ -401,9 +391,10 @@ class PokemonRed(Env):
         return full_memory
 
     def create_recent_memory(self):
+        #'(w h) c -> h w c', 
         return rearrange(
             self.recent_memory, 
-            '(w h) c -> h w c', 
+            '(w h) c -> (h c) w', 
             h=self.memory_height)
 
     def check_if_done(self):
