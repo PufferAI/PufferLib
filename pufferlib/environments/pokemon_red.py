@@ -33,7 +33,7 @@ class PokemonRed(Env):
             save_video=False,
             fast_video=True,
             debug=False,
-            sim_frame_dist=2_000_000.0, 
+            sim_frame_dist=8_000_000.0, 
             use_screen_explore=True,
             reward_scale=4,
             extra_buttons=False,
