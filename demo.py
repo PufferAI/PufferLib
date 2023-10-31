@@ -138,16 +138,22 @@ def evaluate(args, env_module):
 
     import torch
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    agent = torch.load('pokemon_red_50m/model_001525.pt', map_location=device)
+    agent = torch.load('pokemon_red_lstm_50m/model_001525.pt', map_location=device)
 
     while True:
         ob, info = env.reset()
         return_val = 0
+        shape = (1, 1, 512)
+        state = (
+            torch.zeros(shape).to(device),
+            torch.zeros(shape).to(device),
+        )
         for i in range(20480):
             ob = torch.tensor(ob).unsqueeze(0).to(device)
             with torch.no_grad():
-                action  = agent.get_action_and_value(ob)[0][0].item()
-
+                action, _, _, _, state = agent.get_action_and_value(ob, state)
+            
+            action = action[0].item()
             ob, reward, terminal, truncated, _ = env.step(action)
             return_val += reward
             env.render()
