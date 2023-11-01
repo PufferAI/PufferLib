@@ -40,7 +40,7 @@ class PokemonRed(Env):
             ):
         self.s_path = Path(f'session_{str(uuid.uuid4())[:8]}')
         self.gb_path=str(Path(__file__).parent / 'pokemon_red.gb')
-        self.init_state=str(Path(__file__).parent / 'has_pokedex_nballs.state')
+        self.init_state=str(Path(__file__).parent / 'bulbasaur.state')
         
         self.debug = debug
         self.save_final_state = save_final_state
