@@ -36,11 +36,12 @@ class PokemonRed(Env):
             use_screen_explore=True,
             reward_scale=4,
             extra_buttons=False,
-            explore_weight=3 # 2.5
-            ):
+            explore_weight=3, # 2.5
+            init_state='has_pokedex_nballs.state',
+        ):
         self.s_path = Path(f'session_{str(uuid.uuid4())[:8]}')
         self.gb_path=str(Path(__file__).parent / 'pokemon_red.gb')
-        self.init_state=str(Path(__file__).parent / 'has_pokedex_nballs.state')
+        self.init_state=str(Path(__file__).parent / init_state)
         
         self.debug = debug
         self.save_final_state = save_final_state
@@ -245,6 +246,9 @@ class PokemonRed(Env):
             info = self.agent_stats[-1]
 
         #self.save_and_print_info(step_limit_reached, obs_memory)
+        if self.save_video and step_limit_reached:
+            self.full_frame_writer.close()
+            self.model_frame_writer.close()
 
         self.step_count += 1
 
@@ -254,7 +258,7 @@ class PokemonRed(Env):
         # press button then release after some steps
         self.pyboy.send_input(self.valid_actions[action])
         # disable rendering when we don't need it
-        if not self.save_video and self.headless:
+        if self.headless:
             self.pyboy._rendering(False)
         for i in range(self.act_freq):
             # release action, so they are stateless

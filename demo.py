@@ -12,7 +12,7 @@ import pufferlib.utils
 import pufferlib.models
 
 import config
-from clean_pufferl import CleanPuffeRL
+from clean_pufferl import CleanPuffeRL, rollout
 
 
 def get_init_args(fn):
@@ -90,7 +90,7 @@ def init_wandb(args, env_module):
         name=name,
         monitor_gym=True,
         save_code=True,
-        resume="allow",
+        resume=True,
     )
     return wandb.run.id
 
@@ -132,43 +132,44 @@ def train(args, env_module):
 def evaluate(args, env_module):
     env_creator = env_module.make_env
     env_creator_kwargs = args.env_kwargs
-    env_creator_kwargs['headless'] = False
-    env_creator_kwargs['save_video'] = True
+    #env_creator_kwargs['headless'] = False
+    #env_creator_kwargs['save_video'] = True
     env = env_creator(**env_creator_kwargs)
 
     import torch
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    agent = torch.load('pokemon_red_lstm_50m/model_001525.pt', map_location=device)
+    device = args.args.cuda
+    agent = torch.load(args.evaluate, map_location=device)
+    terminal = truncated = True
 
     while True:
-        ob, info = env.reset()
-        return_val = 0
-        shape = (1, 1, 512)
-        state = (
-            torch.zeros(shape).to(device),
-            torch.zeros(shape).to(device),
-        )
-        for i in range(20480):
-            ob = torch.tensor(ob).unsqueeze(0).to(device)
-            with torch.no_grad():
+        if terminal or truncated:
+            print('---  Reset  ---')
+            ob, info = env.reset()
+            state = None
+            step = 0
+            return_val = 0
+
+        ob = torch.tensor(ob).unsqueeze(0).to(device)
+        with torch.no_grad():
+            if hasattr(agent, 'lstm'):
                 action, _, _, _, state = agent.get_action_and_value(ob, state)
-            
-            action = action[0].item()
-            ob, reward, terminal, truncated, _ = env.step(action)
-            return_val += reward
-            env.render()
+            else:
+                action, _, _, _ = agent.get_action_and_value(ob)
+        
+        ob, reward, terminal, truncated, _ = env.step(action[0].item())
+        return_val += reward
 
-            if terminal or truncated:
-                ob, info = env.reset()
-                print('---Reset---')
-                env.render()
-
-        print('Return:', return_val)
+        print(f'Step: {step} Reward: {reward:.4f} Return: {return_val:.2f}')
+        env.render()
+        step += 1
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Parse environment argument", add_help=False)
-    parser.add_argument('--env', type=str, default="nmmo", help="Environment name")
-    parser.add_argument('--mode', type=str, default="train", help="train/eval/sweep")
+    parser = argparse.ArgumentParser(description='Parse environment argument', add_help=False)
+    parser.add_argument('--env', type=str, default='pokemon_red', help='Environment name')
+    parser.add_argument('--train', action='store_true', help='Train')
+    parser.add_argument('--sweep', action='store_true', help='WandB Train Sweep')
+    parser.add_argument('--evaluate', type=str, default='pokemon_red_lstm_50m/model_001525.pt', help='Evaluate')
+    parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
     parser.add_argument('--exp-name', type=str, default=None, help="Experiment name")
     parser.add_argument('--vectorization', type=str, default='serial', help='Vectorization method (serial, multiprocessing, ray)')
     parser.add_argument('--wandb-entity', type=str, default='jsuarez', help='WandB entity')
@@ -187,8 +188,19 @@ if __name__ == '__main__':
         for key, value in sub_config.items():
             data_key = f'{name}.{key}'
             cli_key = f'--{data_key}'.replace('_', '-')
-            parser.add_argument(cli_key, default=value, type=type(value))
-            clean_parser.add_argument(cli_key, default=value, metavar='', help=env)
+            if isinstance(value, bool) and value is False:
+                action = 'store_false'
+                parser.add_argument(cli_key, default=value, action='store_true')
+                clean_parser.add_argument(cli_key, default=value, action='store_true')
+            elif isinstance(value, bool) and value is True:
+                data_key = f'{name}.no_{key}'
+                cli_key = f'--{data_key}'.replace('_', '-')
+                parser.add_argument(cli_key, default=value, action='store_false')
+                clean_parser.add_argument(cli_key, default=value, action='store_false')
+            else:
+                parser.add_argument(cli_key, default=value, type=type(value))
+                clean_parser.add_argument(cli_key, default=value, metavar='', type=type(value))
+
             args[name][key] = getattr(parser.parse_known_args()[0], data_key)
 
     clean_parser.parse_args(sys.argv[1:])
@@ -203,14 +215,16 @@ if __name__ == '__main__':
     elif vec == 'ray':
         args.vectorization = pufferlib.vectorization.Ray
 
-    if args.mode == 'sweep':
+    if args.sweep:
         args.track = True
     elif args.track:
         args.exp_name = init_wandb(args, env_module)
 
-    if args.mode == 'train':
+    if args.train:
         train(args, env_module)
-    elif args.mode == 'eval':
-        evaluate(args, env_module)
-    elif args.mode == 'sweep':
+    elif args.sweep:
         sweep(args, env_module, sweep_config)
+    else:
+        rollout(env_module.make_env, args.env_kwargs,
+            args.evaluate, device=args.args.cuda)
+
