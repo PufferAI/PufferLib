@@ -1,4 +1,4 @@
-
+from pdb import set_trace as T
 import sys
 import uuid 
 import os
@@ -6,6 +6,7 @@ from math import floor, sqrt
 import json
 from pathlib import Path
 
+from collections import defaultdict
 import numpy as np
 from einops import rearrange
 import matplotlib.pyplot as plt
@@ -19,6 +20,28 @@ from io import BytesIO
 from gymnasium import Env, spaces
 from pyboy.utils import WindowEvent
 
+
+X_POS_ADDR = 0xD362
+Y_POS_ADDR = 0xD361
+MAP_N_ADDR = 0xD35E
+
+def get_fixed_window(arr, y, x, window_size):
+    height, width, _ = arr.shape
+    h_w, w_w = window_size[0] // 2, window_size[1] // 2
+
+    y_min = max(0, y - h_w)
+    y_max = min(height, y + h_w + (window_size[0] % 2))
+    x_min = max(0, x - w_w)
+    x_max = min(width, x + w_w + (window_size[1] % 2))
+
+    window = arr[y_min:y_max, x_min:x_max]
+
+    pad_top = h_w - (y - y_min)
+    pad_bottom = h_w + (window_size[0] % 2) - 1 - (y_max - y - 1)
+    pad_left = w_w - (x - x_min)
+    pad_right = w_w + (window_size[1] % 2) - 1 - (x_max - x - 1)
+
+    return np.pad(window, ((pad_top, pad_bottom), (pad_left, pad_right), (0,0)), mode='constant')
 
 class PokemonRed(Env):
     def __init__(
@@ -34,6 +57,7 @@ class PokemonRed(Env):
             debug=False,
             sim_frame_dist=2_000_000.0, 
             use_screen_explore=True,
+            use_screen_memory=True,
             reward_scale=4,
             extra_buttons=False,
             explore_weight=3, # 2.5
@@ -42,7 +66,7 @@ class PokemonRed(Env):
         self.s_path = Path(f'session_{str(uuid.uuid4())[:8]}')
         self.gb_path=str(Path(__file__).parent / 'pokemon_red.gb')
         self.init_state=str(Path(__file__).parent / init_state)
-        
+
         self.debug = debug
         self.save_final_state = save_final_state
         self.print_rewards = print_rewards
@@ -59,6 +83,7 @@ class PokemonRed(Env):
         self.frame_stacks = 3
         self.explore_weight = explore_weight
         self.use_screen_explore = use_screen_explore
+        self.use_screen_memory = use_screen_memory
         self.similar_frame_dist = sim_frame_dist
         self.reward_scale = reward_scale
         self.extra_buttons = extra_buttons
@@ -103,10 +128,13 @@ class PokemonRed(Env):
         self.mem_padding = 2
         self.memory_height = 8
         self.col_steps = 16
+        self.memory_sz = 40 + self.mem_padding if use_screen_memory else 0
         self.output_full = (
-            self.output_shape[0] * self.frame_stacks + 2 * (self.mem_padding + self.memory_height),
-                            self.output_shape[1],
-                            self.output_shape[2]
+            self.output_shape[0] * self.frame_stacks 
+            + self.memory_sz
+            + 2 * (self.mem_padding + self.memory_height),
+            self.output_shape[1],
+            self.output_shape[2]
         )
 
         # Set these in ALL subclasses
@@ -144,6 +172,10 @@ class PokemonRed(Env):
         else:
             self.init_map_mem()
 
+        if self.use_screen_memory:
+            self.screen_memory = defaultdict(
+                lambda: np.zeros((256, 256, 3), dtype=np.uint8))
+
         self.recent_memory = np.zeros((self.output_shape[1]*self.memory_height, 3), dtype=np.uint8)
         
         self.recent_frames = np.zeros(
@@ -176,6 +208,7 @@ class PokemonRed(Env):
         self.progress_reward = self.get_game_state_reward()
         self.total_reward = sum([val for _, val in self.progress_reward.items()])
         self.reset_count += 1
+
         return self.render(), {}
     
     def init_knn(self):
@@ -198,19 +231,41 @@ class PokemonRed(Env):
                 pad = np.zeros(
                     shape=(self.mem_padding, self.output_shape[1], 3), 
                     dtype=np.uint8)
-                game_pixels_render = np.concatenate(
-                    (
+
+                if self.use_screen_memory:
+                    x_pos = self.read_m(X_POS_ADDR)
+                    y_pos = self.read_m(Y_POS_ADDR)
+                    map_n = self.read_m(MAP_N_ADDR)
+
+                    # Update tile map
+                    mmap = self.screen_memory[map_n]
+                    mmap[y_pos, x_pos] = 255
+
+                    #mem_crop = get_fixed_window(mmap, y_pos, x_pos, (40, 40))
+                    mem_crop = resize(mmap, (40, 40, 3)).astype(np.uint8)
+
+                    data = [
+                        self.create_exploration_memory(), 
+                        pad,
+                        self.create_recent_memory(),
+                        pad,
+                        mem_crop,
+                        pad,
+                        rearrange(self.recent_frames, 'f h w c -> (f h) w c')
+                    ]
+                else:
+                    data = [
                         self.create_exploration_memory(), 
                         pad,
                         self.create_recent_memory(),
                         pad,
                         rearrange(self.recent_frames, 'f h w c -> (f h) w c')
-                    ),
-                    axis=0)
+                    ]
+
+                game_pixels_render = np.concatenate(data, axis=0)
         return game_pixels_render
     
     def step(self, action):
-
         self.run_action_on_emulator(action)
         self.append_agent_stats(action)
 
@@ -218,7 +273,12 @@ class PokemonRed(Env):
         obs_memory = self.render()
 
         # trim off memory from frame for knn index
-        frame_start = 2 * (self.memory_height + self.mem_padding)
+        frame_start = self.memory_sz + 2 * (
+            self.memory_height + self.mem_padding)
+
+        if self.use_screen_memory:
+            frame_start += self.memory_sz # Includes padding
+
         obs_flat = obs_memory[
             frame_start:frame_start+self.output_shape[0], ...].flatten().astype(np.float32)
 
