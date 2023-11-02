@@ -514,7 +514,7 @@ def close(data):
         data.wandb.run.log_artifact(artifact)
         data.wandb.finish()
 
-def rollout(env_creator, env_kwargs, model_path, device='cuda', render=True, verbose=True):
+def rollout(env_creator, env_kwargs, model_path, device='cuda', verbose=True):
     env = env_creator(**env_kwargs)
     agent = torch.load(model_path, map_location=device)
     terminal = truncated = True
@@ -542,7 +542,7 @@ def rollout(env_creator, env_kwargs, model_path, device='cuda', render=True, ver
         if verbose:
             print(f'Step: {step} Reward: {reward:.4f} Return: {return_val:.2f}')
 
-        if render:
+        if not env_kwargs['headless']:
             env.render()
 
         step += 1

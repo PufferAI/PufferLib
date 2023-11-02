@@ -246,6 +246,9 @@ class PokemonRed(Env):
             info = self.agent_stats[-1]
 
         #self.save_and_print_info(step_limit_reached, obs_memory)
+        if self.save_video and step_limit_reached:
+            self.full_frame_writer.close()
+            self.model_frame_writer.close()
 
         self.step_count += 1
 
@@ -255,7 +258,7 @@ class PokemonRed(Env):
         # press button then release after some steps
         self.pyboy.send_input(self.valid_actions[action])
         # disable rendering when we don't need it
-        if not self.save_video and self.headless:
+        if self.headless:
             self.pyboy._rendering(False)
         for i in range(self.act_freq):
             # release action, so they are stateless

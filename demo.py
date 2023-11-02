@@ -226,5 +226,5 @@ if __name__ == '__main__':
         sweep(args, env_module, sweep_config)
     else:
         rollout(env_module.make_env, args.env_kwargs,
-            args.evaluate, device=args.args.cuda, render=not args.no_render)
+            args.evaluate, device=args.args.cuda)
 
