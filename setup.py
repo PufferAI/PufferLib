@@ -81,7 +81,7 @@ compatible_environments = {
         'einops==0.6.1',
         'matplotlib',
         'scikit-image==0.21.0',
-        'pyboy==1.5.6',
+        'pyboy<2.0.0',
         'hnswlib==0.7.0',
         'mediapy',
         'pandas==2.0.2',
