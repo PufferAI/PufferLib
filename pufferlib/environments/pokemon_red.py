@@ -36,11 +36,12 @@ class PokemonRed(Env):
             use_screen_explore=True,
             reward_scale=4,
             extra_buttons=False,
-            explore_weight=3 # 2.5
-            ):
+            explore_weight=3, # 2.5
+            init_state='has_pokedex_nballs.state',
+        ):
         self.s_path = Path(f'session_{str(uuid.uuid4())[:8]}')
         self.gb_path=str(Path(__file__).parent / 'pokemon_red.gb')
-        self.init_state=str(Path(__file__).parent / 'has_pokedex_nballs.state')
+        self.init_state=str(Path(__file__).parent / init_state)
         
         self.debug = debug
         self.save_final_state = save_final_state

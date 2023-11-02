@@ -110,19 +110,21 @@ class RecurrentWrapper(Policy):
                 nn.init.orthogonal_(param, 1.0)
 
     def forward(self, x, state):
-        shape, tensor_shape = x.shape, self.observation_space.shape
-        x_dims, tensor_dims = len(shape), len(tensor_shape)
-        if x_dims == tensor_dims + 1:
-            TT = shape[0] // state[0].shape[1]
-            B = shape[0] // TT
-        elif x_dims == tensor_dims + 2:
-            TT = shape[1]
-            B = shape[0]
+        x_shape, space_shape = x.shape, self.observation_space.shape
+        x_n, space_n = len(x_shape), len(space_shape)
+        assert x_shape[-space_n:] == space_shape
+
+        if x_n == space_n + 1:
+            B, TT = x_shape[0], 1
+        elif x_n == space_n + 2:
+            B, TT = x_shape[:2]
         else:
-            raise ValueError('Invalid tensor shape', shape)
+            raise ValueError('Invalid input tensor shape', x.shape)
 
-        x = x.reshape(B*TT, *tensor_shape)
+        if state is not None:
+            assert state[0].shape[1] == state[1].shape[1] == B
 
+        x = x.reshape(B*TT, *space_shape)
         hidden, lookup = self.policy.encode_observations(x)
         assert hidden.shape == (B*TT, self.input_size)
 

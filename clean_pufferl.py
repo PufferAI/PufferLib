@@ -76,7 +76,7 @@ def init(
         env_creator_kwargs: dict = None,
         vectorization: ... = pufferlib.vectorization.Serial,
 
-        # Policy God
+        # Policy Pool options
         policy_selector: callable = pufferlib.policy_pool.random_selector,
     ):
     if config is None:
@@ -115,10 +115,6 @@ def init(
     num_agents = buffers[0].num_agents
     total_agents = num_agents * config.num_envs
 
-    agent = pufferlib.emulation.make_object(
-        agent, agent_creator, buffers[:1], agent_kwargs)
-    optimizer = optim.Adam(agent.parameters(), lr=config.learning_rate, eps=1e-5)
-
     # If data_dir is provided, load the resume state
     resume_state = {}
     path = os.path.join(config.data_dir, exp_name)
@@ -126,13 +122,23 @@ def init(
         trainer_path = os.path.join(path, 'trainer_state.pt')
         resume_state = torch.load(trainer_path)
         model_path = os.path.join(path, resume_state["model_name"])
-        optimizer.load_state_dict(resume_state["optimizer_state_dict"])
-        agent.load_state_dict(torch.load(model_path).state_dict())
+        agent = torch.load(model_path, map_location=device)
         print(f'Resumed from update {resume_state["update"]} '
-              f'with policy {resume_state["policy_checkpoint_name"]}')
+              f'with policy {resume_state["model_name"]}')
+    else:
+        agent = pufferlib.emulation.make_object(
+            agent, agent_creator, buffers[:1], agent_kwargs)
+
     global_step = resume_state.get("global_step", 0)
     agent_step = resume_state.get("agent_step", 0)
     update = resume_state.get("update", 0)
+
+    optimizer = optim.Adam(agent.parameters(),
+        lr=config.learning_rate, eps=1e-5)
+    opt_state = resume_state.get("optimizer_state_dict", None)
+    if opt_state is not None:
+        optimizer.load_state_dict(resume_state["optimizer_state_dict"])
+
 
     # Create policy pool
     policy_pool = pufferlib.policy_pool.PolicyPool(
@@ -507,6 +513,39 @@ def close(data):
         artifact.add_file(model_path)
         data.wandb.run.log_artifact(artifact)
         data.wandb.finish()
+
+def rollout(env_creator, env_kwargs, model_path, device='cuda', render=True, verbose=True):
+    env = env_creator(**env_kwargs)
+    agent = torch.load(model_path, map_location=device)
+    terminal = truncated = True
+
+    while True:
+        if terminal or truncated:
+            if verbose:
+                print('---  Reset  ---')
+
+            ob, info = env.reset()
+            state = None
+            step = 0
+            return_val = 0
+
+        ob = torch.tensor(ob).unsqueeze(0).to(device)
+        with torch.no_grad():
+            if hasattr(agent, 'lstm'):
+                action, _, _, _, state = agent.get_action_and_value(ob, state)
+            else:
+                action, _, _, _ = agent.get_action_and_value(ob)
+
+        ob, reward, terminal, truncated, _ = env.step(action[0].item())
+        return_val += reward
+
+        if verbose:
+            print(f'Step: {step} Reward: {reward:.4f} Return: {return_val:.2f}')
+
+        if render:
+            env.render()
+
+        step += 1
 
 def done_training(data):
     return data.update >= data.total_updates
