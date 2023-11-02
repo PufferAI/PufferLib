@@ -273,7 +273,7 @@ class PokemonRed(Env):
         obs_memory = self.render()
 
         # trim off memory from frame for knn index
-        frame_start = self.memory_sz + 2 * (
+        frame_start = 2 * (
             self.memory_height + self.mem_padding)
 
         if self.use_screen_memory:

@@ -7,6 +7,7 @@ from pufferlib.environments import PokemonRed as env_creator
 def make_env(
         headless: bool = True,
         save_video: bool = False,
+        max_steps=2048*10, 
         use_screen_explore=True,
         sim_frame_dist=2_000_000.0,
         init_state='has_pokedex_nballs.state',
