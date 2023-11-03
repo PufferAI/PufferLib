@@ -11,6 +11,8 @@ import numpy as np
 from einops import rearrange
 import matplotlib.pyplot as plt
 from skimage.transform import resize
+from skimage import measure
+import cv2
 from pyboy import PyBoy
 import hnswlib
 import mediapy as media
@@ -241,15 +243,16 @@ class PokemonRed(Env):
                     mmap = self.screen_memory[map_n]
                     mmap[y_pos, x_pos] = 255
 
-                    #mem_crop = get_fixed_window(mmap, y_pos, x_pos, (40, 40))
-                    mem_crop = resize(mmap, (40, 40, 3)).astype(np.uint8)
+                    # Normal resize does not work on thin paths
+                    mem = measure.block_reduce(mmap, (4, 4, 1), np.max)
+                    mem = cv2.resize(mem, (40, 40))
 
                     data = [
                         self.create_exploration_memory(), 
                         pad,
                         self.create_recent_memory(),
                         pad,
-                        mem_crop,
+                        mem,
                         pad,
                         rearrange(self.recent_frames, 'f h w c -> (f h) w c')
                     ]
