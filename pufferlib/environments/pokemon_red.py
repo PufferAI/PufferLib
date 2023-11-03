@@ -151,6 +151,7 @@ class PokemonRed(Env):
              self.output_shape[1], self.output_shape[2]),
             dtype=np.uint8)
 
+        self.seen_maps = set()
         self.agent_stats = []
         
         if self.save_video:
@@ -287,6 +288,8 @@ class PokemonRed(Env):
         x_pos = self.read_m(0xD362)
         y_pos = self.read_m(0xD361)
         map_n = self.read_m(0xD35E)
+        self.seen_maps.add(map_n)
+
         levels = [self.read_m(a) for a in [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]]
         if self.use_screen_explore:
             expl = ('frames', self.knn_index.get_current_count())
@@ -297,6 +300,7 @@ class PokemonRed(Env):
             'x': x_pos,
             'y': y_pos,
             'map': map_n,
+            'map_n': len(self.seen_maps),
             'last_action': action,
             'pcount': self.read_m(0xD163),
             'levels': levels,
