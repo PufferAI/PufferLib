@@ -310,6 +310,7 @@ class PokemonRed(Env):
             expl[0]: expl[1],
             'deaths': self.died_count,
             'badge': self.get_badges(),
+            'badge_2': float(self.get_badges() > 1),
             'event': self.progress_reward['event'],
             'healr': self.total_healing_rew
         })
