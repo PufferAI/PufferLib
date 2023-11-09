@@ -514,7 +514,7 @@ class PokemonRed(Env):
     def get_all_events_reward(self):
         # adds up all event flags, exclude museum ticket
         event_flags_start = 0xD747
-        event_flags_end = 0xD886
+        event_flags_end = 0xD761
         museum_ticket = (0xD754, 0)
         base_event_flags = 13
         return max(
