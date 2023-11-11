@@ -139,7 +139,6 @@ def init(
     if opt_state is not None:
         optimizer.load_state_dict(resume_state["optimizer_state_dict"])
 
-
     # Create policy pool
     policy_pool = pufferlib.policy_pool.PolicyPool(
         agent, total_agents, atn_shape, device, path,
@@ -222,7 +221,6 @@ def init(
 @pufferlib.utils.profile
 def evaluate(data):
     config = data.config
-    # TODO: Handle update on resume
     if data.wandb is not None and data.performance.total_uptime > 0:
         data.wandb.log({
             **{f'charts/{k}': v for k, v in data.charts.items()},
@@ -244,7 +242,6 @@ def evaluate(data):
 
     ptr = step = padded_steps_collected = agent_steps_collected = 0
     infos = defaultdict(lambda: defaultdict(list))
-    stats = defaultdict(lambda: defaultdict(list))
     while True:
         buf = data.buf
         step += 1
@@ -291,18 +288,8 @@ def evaluate(data):
 
         for policy_name, policy_i in i.items():
             for agent_i in policy_i:
-                if not agent_i:
-                    continue
-                for name, stat in unroll_nested_dict(agent_i):
-                    infos[policy_name][name].append(stat)
-                    if 'Task_eval_fn' in name:
-                        # Temporary hack for NMMO competition
-                        continue
-                    try:
-                        stat = float(stat)
-                        stats[policy_name][name].append(stat)
-                    except:
-                        continue
+                for name, dat in unroll_nested_dict(agent_i):
+                    infos[policy_name][name].append(dat)
 
         with env_profiler:
             data.buffers[buf].send(actions.cpu().numpy())
@@ -328,12 +315,26 @@ def evaluate(data):
     perf.eval_sps = int(padded_steps_collected / eval_profiler.elapsed)
     perf.eval_memory = eval_profiler.end_mem
     perf.eval_pytorch_memory = eval_profiler.end_torch_mem
-    data.stats = {k: np.mean(v) for k, v in stats['learner'].items()}
+
+    data.stats = {}
+    for k, v in infos['learner'].items():
+        if 'Task_eval_fn' in k:
+            # Temporary hack for NMMO competition
+            continue
+        if 'exploration_map' in k:
+            import cv2
+            bg = cv2.imread('full_map_v2a.png')
+            overlay = make_pokemon_red_overlay(bg, sum(v))
+            data.stats['Media/exploration_map'] = data.wandb.Image(overlay)
+        try: # TODO: Better checks on log data types
+            data.stats[k] = np.mean(v)
+        except:
+            continue
 
     if config.verbose:
         print_dashboard(data.stats, data.init_performance, data.performance)
 
-    return stats, infos
+    return data.stats, infos
 
 @pufferlib.utils.profile
 def train(data):
@@ -521,6 +522,9 @@ def rollout(env_creator, env_kwargs, model_path, device='cuda', verbose=True):
 
     while True:
         if terminal or truncated:
+            import cv2
+            bg = cv2.imread('full_map_v2a.png')#[::16, ::16]
+
             if verbose:
                 print('---  Reset  ---')
 
@@ -536,9 +540,15 @@ def rollout(env_creator, env_kwargs, model_path, device='cuda', verbose=True):
             else:
                 action, _, _, _ = agent.get_action_and_value(ob)
 
-        ob, reward, terminal, truncated, _ = env.step(action[0].item())
+        ob, reward, terminal, truncated, info = env.step(action[0].item())
         return_val += reward
 
+        counts_map = env.env.counts_map
+        if np.sum(counts_map) > 0 and step % 1000 == 0:
+            overlay = make_pokemon_red_overlay(bg, counts_map)
+            cv2.imshow('Pokemon Red', overlay[1000:][::4, ::4])
+            cv2.waitKey(1)
+ 
         if verbose:
             print(f'Step: {step} Reward: {reward:.4f} Return: {return_val:.2f}')
 
@@ -625,6 +635,28 @@ def print_dashboard(stats, init_performance, performance):
     print("\033c", end="")
     print('\n'.join(output))
 
+def make_pokemon_red_overlay(bg, counts):
+    overlay = counts.copy()
+    overlay[overlay>0] = 128
+
+    # Upscale to 16x16
+    kernel = np.ones((16, 16), dtype=np.uint8)
+    overlay = np.kron(overlay, kernel).astype(np.uint8)
+
+    # Offset to align with map
+    x_pad, y_pad = 16*16, 16*13
+    overlay = np.pad(overlay, ((0, y_pad+8), (0, x_pad)))
+    overlay = overlay[y_pad+8:, x_pad:]
+    #counts[counts>0.1] = 50*(counts[counts>0]/mmax) + 50
+
+    # Combine with background
+    render = bg.copy().astype(np.int32)
+    render[:, :, 0] += overlay
+    render[:, :, 1] -= overlay
+    render[:, :, 2] -= overlay
+    render = np.clip(render, 0, 255).astype(np.uint8)
+    return render
+ 
 class CleanPuffeRL:
     __init__ = init
     evaluate = evaluate
