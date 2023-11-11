@@ -101,7 +101,7 @@ class PokemonRed(Env):
             save_final_state=False,
             early_stop=False,
             action_freq=24,
-            max_steps=2048, 
+            max_steps=2048*10, 
             print_rewards=False,
             save_video=False,
             fast_video=True,
