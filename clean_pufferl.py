@@ -544,7 +544,7 @@ def rollout(env_creator, env_kwargs, model_path, device='cuda', verbose=True):
         return_val += reward
 
         counts_map = env.env.counts_map
-        if np.sum(counts_map) > 0 and step % 1000 == 0:
+        if np.sum(counts_map) > 0 and step % 100 == 0:
             overlay = make_pokemon_red_overlay(bg, counts_map)
             cv2.imshow('Pokemon Red', overlay[1000:][::4, ::4])
             cv2.waitKey(1)
@@ -636,24 +636,34 @@ def print_dashboard(stats, init_performance, performance):
     print('\n'.join(output))
 
 def make_pokemon_red_overlay(bg, counts):
-    overlay = counts.copy()
-    overlay[overlay>0] = 128
+    nonzero = np.where(counts > 0, 1, 0)
+
+    # Convert counts to hue map
+    hsv = np.zeros((*counts.shape, 3))
+    hsv[..., 0] = (counts % 32) / 32
+    hsv[..., 1] = nonzero
+    hsv[..., 2] = nonzero
+
+    # Convert the HSV image to RGB
+    import matplotlib.colors as mcolors
+    overlay = 255*mcolors.hsv_to_rgb(hsv)
 
     # Upscale to 16x16
-    kernel = np.ones((16, 16), dtype=np.uint8)
+    kernel = np.ones((16, 16, 1), dtype=np.uint8)
     overlay = np.kron(overlay, kernel).astype(np.uint8)
+    mask = np.kron(nonzero, kernel[..., 0]).astype(np.uint8)
+    mask = np.stack([mask, mask, mask], axis=-1)
 
     # Offset to align with map
     x_pad, y_pad = 16*16, 16*13
-    overlay = np.pad(overlay, ((0, y_pad+8), (0, x_pad)))
+    overlay = np.pad(overlay, ((0, y_pad+8), (0, x_pad), (0, 0)))
     overlay = overlay[y_pad+8:, x_pad:]
-    #counts[counts>0.1] = 50*(counts[counts>0]/mmax) + 50
+    mask = np.pad(mask, ((0, y_pad+8), (0, x_pad), (0, 0)))
+    mask = mask[y_pad+8:, x_pad:].astype(bool)
 
     # Combine with background
     render = bg.copy().astype(np.int32)
-    render[:, :, 0] += overlay
-    render[:, :, 1] -= overlay
-    render[:, :, 2] -= overlay
+    render[mask] = 0.2*render[mask] + 0.8*overlay[mask]
     render = np.clip(render, 0, 255).astype(np.uint8)
     return render
  
