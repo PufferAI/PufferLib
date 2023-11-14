@@ -83,7 +83,7 @@ class PokemonRed(Env):
             save_final_state=False,
             early_stop=False,
             action_freq=24,
-            max_steps=512,#,2048*10, 
+            max_steps=2048*10, 
             print_rewards=False,
             save_video=False,
             fast_video=True,
@@ -187,6 +187,7 @@ class PokemonRed(Env):
         with open(self.init_state, 'rb') as f:
             self.initial_state = BytesIO(f.read())
             
+        self.counts_map = np.zeros((375, 500))
         self.reset()
 
     def reset(self, seed=None):
@@ -199,8 +200,6 @@ class PokemonRed(Env):
             self.init_knn()
         else:
             self.init_map_mem()
-
-        self.counts_map = np.zeros((375, 500))
 
         self.recent_memory = np.zeros((self.output_shape[1]*self.memory_height, 3), dtype=np.uint8)
         

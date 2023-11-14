@@ -642,7 +642,7 @@ def make_pokemon_red_overlay(bg, counts):
 
     # Convert counts to hue map
     hsv = np.zeros((*counts.shape, 3))
-    hsv[..., 0] = (counts % 32) / 32
+    hsv[..., 0] = (counts % 64) / 64
     hsv[..., 1] = nonzero
     hsv[..., 2] = nonzero
 
