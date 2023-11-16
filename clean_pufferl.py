@@ -328,7 +328,7 @@ def evaluate(data):
         if 'exploration_map' in k:
             import cv2
             bg = cv2.imread('full_map_v2a.png')
-            overlay = make_pokemon_red_overlay(bg, sum(v))
+            overlay = make_pokemon_red_overlay(bg, np.max(v, axis=0))
             if data.wandb is not None:
                 data.stats['Media/exploration_map'] = data.wandb.Image(overlay)
         try: # TODO: Better checks on log data types
@@ -525,6 +525,9 @@ def rollout(env_creator, env_kwargs, model_path, device='cuda', verbose=True):
     agent = torch.load(model_path, map_location=device)
     terminal = truncated = True
 
+    import cv2
+    bg = cv2.imread('full_map_v2a.png')
+ 
     while True:
         if terminal or truncated:
             if verbose:

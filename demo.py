@@ -170,7 +170,7 @@ if __name__ == '__main__':
     parser.add_argument('--sweep', action='store_true', help='WandB Train Sweep')
     parser.add_argument('--evaluate', type=str, default='pokemon_red_lstm_50m/model_001525.pt', help='Evaluate')
     parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
-    parser.add_argument('--exp-name', type=str, default=None, help="Experiment name")
+    parser.add_argument('--exp-name', type=str, default=None, help="Resume from experiment")
     parser.add_argument('--vectorization', type=str, default='serial', help='Vectorization method (serial, multiprocessing, ray)')
     parser.add_argument('--wandb-entity', type=str, default='jsuarez', help='WandB entity')
     parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
