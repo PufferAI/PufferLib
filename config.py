@@ -117,13 +117,13 @@ def openspiel():
 
 def pokemon_red():
     args = pufferlib.args.CleanPuffeRL(
-        total_timesteps=50_000_000,
-        num_cores=1, # Reduce this to 12/8/6/4 as needed
-        num_envs=1,
+        total_timesteps=100_000_000,
+        num_cores=24, # Reduce this to 12/8/6/4 as needed
+        num_envs=24,
         update_epochs=3,
         gamma=0.998,
-        batch_size=2**10,
-        batch_rows=16,
+        batch_size=2**15,
+        batch_rows=128,
     )
     return args, make_sweep_config()
 
