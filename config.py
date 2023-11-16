@@ -77,6 +77,7 @@ def all():
         'nmmo': nmmo,
         'openspiel': openspiel,
         'pokemon_red': pokemon_red,
+        'pokemon_red_pip': pokemon_red,
         'procgen': procgen,
         #'smac': default,
         #'stable-retro': default,
