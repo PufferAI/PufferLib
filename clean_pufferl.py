@@ -328,7 +328,7 @@ def evaluate(data):
         if 'exploration_map' in k:
             import cv2
             bg = cv2.imread('full_map_v2a.png')
-            overlay = make_pokemon_red_overlay(bg, np.max(v, axis=0))
+            overlay = make_pokemon_red_overlay(bg, sum(v))
             if data.wandb is not None:
                 data.stats['Media/exploration_map'] = data.wandb.Image(overlay)
         try: # TODO: Better checks on log data types
@@ -642,10 +642,11 @@ def print_dashboard(stats, init_performance, performance):
 
 def make_pokemon_red_overlay(bg, counts):
     nonzero = np.where(counts > 0, 1, 0)
+    scaled = np.clip(counts, 0, 1000) / 1000.0
 
     # Convert counts to hue map
     hsv = np.zeros((*counts.shape, 3))
-    hsv[..., 0] = (counts % 64) / 64
+    hsv[..., 0] = (240.0/360) - scaled*(240.0/360.0)
     hsv[..., 1] = nonzero
     hsv[..., 2] = nonzero
 
