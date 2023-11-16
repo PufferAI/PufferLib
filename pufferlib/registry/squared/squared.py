@@ -119,3 +119,11 @@ def render(state):
             print(f'\033[{color}m██\033[0m', end='') # Gray block
         print()
     print()
+
+class Squared(gym.Env):
+    __init__ = init
+    reset = reset
+    step = step
+    render = render
+
+
