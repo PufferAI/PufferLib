@@ -250,9 +250,11 @@ def evaluate(data):
             o, r, d, t, i, env_id, mask = data.pool.recv()
 
         i = data.policy_pool.update_scores(i, "return")
-        o = torch.Tensor(o).to(data.obs_device)
-        r = torch.Tensor(r).float().to(data.device).view(-1)
-        d = torch.Tensor(d).float().to(data.device).view(-1)
+
+        with inference_profiler, torch.no_grad():
+            o = torch.as_tensor(o)
+            r = torch.as_tensor(r).float().to(data.device).view(-1)
+            d = torch.as_tensor(d).float().to(data.device).view(-1)
 
         agent_steps_collected += sum(mask)
         padded_steps_collected += len(mask)
