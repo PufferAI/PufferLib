@@ -1,4 +1,8 @@
 from pdb import set_trace as T
+import time
+
+from multiprocessing import Process, Queue
+from queue import Empty
 
 from pufferlib import namespace
 from pufferlib.vectorization.vec_env import (
@@ -30,7 +34,6 @@ def init(self: object = None,
     driver_env, multi_env_cls, num_agents = setup(
         env_creator, env_args, env_kwargs, num_workers, envs_per_worker)
 
-    from multiprocessing import Process, Queue
     request_queues = [Queue() for _ in range(num_workers)]
     response_queues = [Queue() for _ in range(num_workers)]
 
@@ -76,10 +79,11 @@ def recv(state):
         env_id = (env_id + 1) % state.num_workers
         queue = state.response_queues[env_id]
 
-        if queue.empty():
+        try: # This is ~50% faster than queue.empty() or queue.get_nowait()
+            response = queue.get(1e-6)
+        except Empty:
             continue
 
-        response = queue.get_nowait()
         if response is not None:
             o, r, d, t, i = response
             recvs.append((o, r, d, t, i, env_id))
