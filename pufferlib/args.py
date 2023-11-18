@@ -37,7 +37,7 @@ class CleanRL:
 class CleanPuffeRL:
     seed: int = 1
     torch_deterministic: bool = True
-    cuda: bool = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
     num_envs: int = 8
@@ -56,7 +56,7 @@ class CleanPuffeRL:
     target_kl: float = None
 
     num_cores: int = 4
-    num_buffers: int = 1
+    envpool_batch_size: int = 4
     verbose: bool = True
     data_dir: str = 'experiments'
     checkpoint_interval: int = 200

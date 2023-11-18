@@ -24,9 +24,10 @@ def init(self: object = None,
         env_args: list = [],
         env_kwargs: dict = {},
         num_workers: int = 1,
-        envs_per_worker: int = 1
+        envs_per_worker: int = 1,
+        batch_size: int = None,
         ) -> None:
-    driver_env, multi_env_cls, num_agents, preallocated_obs = setup(
+    driver_env, multi_env_cls, num_agents = setup(
         env_creator, env_args, env_kwargs, num_workers, envs_per_worker)
 
     from multiprocessing import Process, Queue
@@ -43,7 +44,6 @@ def init(self: object = None,
         p.start()
 
     return namespace(self,
-        preallocated_obs = preallocated_obs,
         processes = processes,
         request_queues = request_queues,
         response_queues = response_queues,
@@ -53,6 +53,8 @@ def init(self: object = None,
         envs_per_worker = envs_per_worker,
         async_handles = None,
         flag = RESET,
+        batch_size = num_workers if batch_size is None else batch_size,
+        prev_env_id = [], # Passing explicitly is hard for multiagent and redundant
     )
 
 def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs, n, request_queue, response_queue):
@@ -66,13 +68,32 @@ def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs, n, request
 
 def recv(state):
     recv_precheck(state)
-    return aggregate_recvs(state, [queue.get() for queue in state.response_queues])
+
+    env_id = -1
+    recvs = []
+    next_env_id = []
+    while len(recvs) < state.batch_size:
+        env_id = (env_id + 1) % state.num_workers
+        queue = state.response_queues[env_id]
+
+        if queue.empty():
+            continue
+
+        response = queue.get_nowait()
+        if response is not None:
+            o, r, d, t, i = response
+            recvs.append((o, r, d, t, i, env_id))
+            next_env_id.append(env_id)
+
+    state.prev_env_id = next_env_id
+    return aggregate_recvs(state, recvs)
 
 def send(state, actions):
     send_precheck(state)
     actions = split_actions(state, actions)
-    for queue, actions in zip(state.request_queues, actions):
-        queue.put(("step", [actions], {}))
+    assert len(actions) == state.batch_size
+    for i, atns in zip(state.prev_env_id, actions):
+        state.request_queues[i].put(("step", [atns], {}))
 
 def async_reset(state, seed=None):
     reset_precheck(state)
@@ -102,10 +123,24 @@ def put(state, *args, **kwargs):
         queue.put(("put", args, kwargs))
 
 def get(state, *args, **kwargs):
+    '''TODO: fix get'''
     for queue in state.request_queues:
         queue.put(("get", args, kwargs))
-    
-    return [queue.get() for queue in state.response_queues]
+
+    idx = -1
+    recvs = []
+    while len(recvs) < state.batch_size:
+        idx = (idx + 1) % state.num_workers
+        queue = state.response_queues[idx]
+
+        if queue.empty():
+            continue
+
+        response = queue.get_nowait()
+        if response is not None:
+            recvs.append(response)
+
+    return recvs
 
 
 def close(state):
