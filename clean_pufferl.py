@@ -140,7 +140,7 @@ def init(
 
 
     # Create policy pool
-    pool_agents = num_agents * config.envpool_batch_size * envs_per_worker
+    pool_agents = num_agents * config.envpool_batch_size
     policy_pool = pufferlib.policy_pool.PolicyPool(
         agent, pool_agents, atn_shape, device, path,
         config.pool_kernel, policy_selector,

@@ -119,9 +119,10 @@ def openspiel():
 def pokemon_red():
     args = pufferlib.args.CleanPuffeRL(
         total_timesteps=100_000_000,
-        num_cores=24, # Reduce this to 12/8/6/4 as needed
-        num_envs=24,
+        num_cores=64, # Reduce this to 12/8/6/4 as needed
+        num_envs=128,
         update_epochs=3,
+        envpool_batch_size=48,
         gamma=0.998,
         batch_size=2**15,
         batch_rows=128,
