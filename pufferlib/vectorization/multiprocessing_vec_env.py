@@ -35,8 +35,6 @@ def init(self: object = None,
     driver_env, multi_env_cls, num_agents = setup(
         env_creator, env_args, env_kwargs, num_workers, envs_per_worker)
 
-    
-
     main_send_pipes, work_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
     work_send_pipes, main_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
     
@@ -65,7 +63,7 @@ def init(self: object = None,
         envs_per_worker = envs_per_worker,
         async_handles = None,
         flag = RESET,
-        batch_size = num_workers if batch_size is None else batch_size,
+        batch_size = num_workers if batch_size is None else batch_size // envs_per_worker,
         prev_env_id = [], # Passing explicitly is hard for multiagent and redundant
     )
 
@@ -83,20 +81,31 @@ def recv(state):
 
     recvs = []
     next_env_id = []
-    while len(recvs) < state.batch_size:
-        for key, _ in state.sel.select(timeout=None):
-            response_pipe = key.fileobj
-            env_id = state.recv_pipes.index(response_pipe)
+    sync = False
 
-            if response_pipe.poll():  # Check if data is available
-                response = response_pipe.recv()
+    if sync:
+        for env_id in range(state.batch_size):
+            response_pipe = state.recv_pipes[env_id]
+            response = response_pipe.recv()
 
-                o, r, d, t, i = response
-                recvs.append((o, r, d, t, i, env_id))
-                next_env_id.append(env_id)
+            o, r, d, t, i = response
+            recvs.append((o, r, d, t, i, env_id))
+            next_env_id.append(env_id)
+    else:
+        while len(recvs) < state.batch_size:
+            for key, _ in state.sel.select(timeout=None):
+                response_pipe = key.fileobj
+                env_id = state.recv_pipes.index(response_pipe)
 
-            if len(recvs) == state.batch_size:
-                break
+                if response_pipe.poll():  # Check if data is available
+                    response = response_pipe.recv()
+
+                    o, r, d, t, i = response
+                    recvs.append((o, r, d, t, i, env_id))
+                    next_env_id.append(env_id)
+
+                if len(recvs) == state.batch_size:
+                    break
 
     state.prev_env_id = next_env_id
     return aggregate_recvs(state, recvs)
@@ -151,7 +160,7 @@ def get(state, *args, **kwargs):
         if queue.empty():
             continue
 
-        response = queue.get_nowait()
+        response = queue.get()
         if response is not None:
             recvs.append(response)
 
