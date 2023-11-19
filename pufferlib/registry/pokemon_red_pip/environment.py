@@ -10,6 +10,5 @@ import pufferlib.emulation
 def make_env():
     '''Pokemon Red'''
     env = env_creator()
-    env = gymnasium.wrappers.ResizeObservation(env, shape=(72, 80))
     return pufferlib.emulation.GymnasiumPufferEnv(env=env,
         postprocessor_cls=pufferlib.emulation.BasicPostprocessor)
