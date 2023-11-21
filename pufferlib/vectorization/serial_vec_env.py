@@ -25,9 +25,11 @@ def init(self: object = None,
         env_args: list = [],
         env_kwargs: dict = {},
         num_workers: int = 1,
-        envs_per_worker: int = 1
+        envs_per_worker: int = 1,
+        batch_size: int = None,
+        synchronous: bool = False,
         ) -> None:
-    driver_env, multi_env_cls, num_agents, preallocated_obs = setup(
+    driver_env, multi_env_cls, num_agents = setup(
         env_creator, env_args, env_kwargs, num_workers, envs_per_worker)
 
     multi_envs = [
@@ -37,7 +39,6 @@ def init(self: object = None,
     ]
 
     return namespace(self,
-        preallocated_obs = preallocated_obs,
         multi_envs = multi_envs,
         driver_env = driver_env,
         num_agents = num_agents,
@@ -45,11 +46,14 @@ def init(self: object = None,
         envs_per_worker = envs_per_worker,
         async_handles = None,
         flag = RESET,
+        batch_size = num_workers if batch_size is None else batch_size // envs_per_worker,
     )
 
 def recv(state):
     recv_precheck(state)
-    return aggregate_recvs(state, state.data)
+    recvs = [(o, r, d, t, i, env_id) for (o, r, d, t, i), env_id
+        in zip(state.data, range(state.batch_size))]
+    return aggregate_recvs(state, recvs)
 
 def send(state, actions):
     send_precheck(state)

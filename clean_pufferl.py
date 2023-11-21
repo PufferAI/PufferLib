@@ -266,8 +266,15 @@ def evaluate(data):
                     next_lstm_state[0][:, env_id],
                     next_lstm_state[1][:, env_id],
                 )
+
             actions, logprob, value, next_lstm_state = data.policy_pool.forwards(
                     o.to(data.device), next_lstm_state)
+
+            if next_lstm_state is not None:
+                h, c = next_lstm_state
+                data.next_lstm_state[0][:, env_id] = h
+                data.next_lstm_state[1][:, env_id] = c
+
             value = value.flatten()
 
         # Index alive mask with policy pool idxs...
