@@ -17,7 +17,8 @@ RECV = 2
 space_error_msg = 'env {env} must be an instance of GymnasiumPufferEnv or PettingZooPufferEnv'
 
 
-def setup(env_creator, env_args, env_kwargs, num_workers, envs_per_worker):
+def setup(env_creator, env_args, env_kwargs, num_workers, envs_per_worker, batch_size):
+    assert batch_size <= num_workers * envs_per_worker
     env_args, env_kwargs = create_precheck(env_creator, env_args, env_kwargs)
 
     driver_env = env_creator(*env_args, **env_kwargs)

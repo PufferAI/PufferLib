@@ -34,7 +34,7 @@ def init(self: object = None,
         synchronous: bool = False,
         ) -> None:
     driver_env, multi_env_cls, num_agents = setup(
-        env_creator, env_args, env_kwargs, num_workers, envs_per_worker)
+        env_creator, env_args, env_kwargs, num_workers, envs_per_worker, batch_size)
 
     main_send_pipes, work_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
     work_send_pipes, main_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])

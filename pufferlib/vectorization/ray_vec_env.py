@@ -31,7 +31,7 @@ def init(self: object = None,
         synchronous: bool = False,
         ) -> None:
     driver_env, multi_env_cls, num_agents = setup(
-        env_creator, env_args, env_kwargs, num_workers, envs_per_worker)
+        env_creator, env_args, env_kwargs, num_workers, envs_per_worker, batch_size)
 
     import ray
     if not ray.is_initialized():
@@ -114,3 +114,4 @@ def get(state, *args, **kwargs):
 
 def close(state):
     state.ray.get([e.close.remote() for e in state.multi_envs])
+    state.ray.shutdown()

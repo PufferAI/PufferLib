@@ -30,7 +30,7 @@ def init(self: object = None,
         synchronous: bool = False,
         ) -> None:
     driver_env, multi_env_cls, num_agents = setup(
-        env_creator, env_args, env_kwargs, num_workers, envs_per_worker)
+        env_creator, env_args, env_kwargs, num_workers, envs_per_worker, batch_size)
 
     multi_envs = [
         multi_env_cls(
