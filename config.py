@@ -76,8 +76,9 @@ def all():
         'nethack': default,
         'nmmo': nmmo,
         'openspiel': openspiel,
-        'pokemon_red': pokemon_red,
-        'pokemon_red_pip': pokemon_red,
+        'pokemon_red': pokegym,
+        'pokemon_red_pip': pokegym,
+        'links_awaken_pip': pokegym,
         'procgen': procgen,
         #'smac': default,
         #'stable-retro': default,
@@ -116,7 +117,7 @@ def openspiel():
     )
     return args, sweep_config
 
-def pokemon_red():
+def pokegym():
     args = pufferlib.args.CleanPuffeRL(
         total_timesteps=100_000_000,
         num_cores=24, # Reduce this to 12/8/6/4 as needed
