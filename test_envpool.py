@@ -178,19 +178,26 @@ def plot_performance_tests():
 
     # Set up layout configuration
     layout = go.Layout(
-        title='Performance of Vectorization Backends Across Different Environments and Core Counts',
-        width=1500,
+        title=dict(
+            text='Performance of Vectorization Backends on Various Workloads (24 core machine)',
+            y=0.9
+        ),
+        width=2000,# 1000,
         height=500,
-        yaxis=dict(title='Steps Per Second (SPS)'),#, type='log'),
+        yaxis=dict(title='Speedup over Expected Serial Performance'),
         plot_bgcolor='rgba(6, 26, 26, 1)',  # Dark cyan background
         paper_bgcolor='rgba(6, 26, 26, 1)',
         font=dict(color='rgba(241, 241, 241, 1)'),  # Light text
         barmode='group',
         xaxis = dict(
-            title='Test Environments and Core Counts',
+            title='Test Environment Delays (mean/std) and Process Counts',
             tickmode='array',
             tickvals = tick_vals,
             ticktext = x_labels,
+        ),
+        legend=dict(
+            y=1.20,
+            x=0.9,#0.80
         ),
     )
 
@@ -222,6 +229,13 @@ def plot_performance_tests():
 
     # Create figure with the collected bar data and layout
     for idx, vec in enumerate(backends):
+        if vec == 'Serial':
+            vec = 'Puffer Serial'
+        elif vec == 'SyncMultiprocessing':
+            vec = 'Puffer Multiproc.'
+        elif vec == 'Multiprocessing':
+            vec = 'Puffer Pool'
+
         color = f'rgb{tuple(hue_colors[idx])}'  # Convert to RGB string
         fig.add_trace(go.Bar(
             x=[None],  # No x value
@@ -242,31 +256,8 @@ def plot_performance_tests():
         ))
 
     # Save the figure to a file
-    fig.write_image('../docker/envpool_sps.png', scale=3)  # Increase scale for higher resolution
+    fig.write_image('../docker/envpool_sps.png', scale=3)
 
-    '''
-    # Setting x-axis labels
-    ax.set_xticks(index + group_width / 2)
-    labels = [f'{mean}±{std}' for mean, std in data.keys()]
-    ax.set_xticklabels(labels)
-
-    # Labels, Title
-    ax.set_xlabel('Test Environments')
-    ax.set_ylabel('Steps Per Second (SPS)')
-    ax.set_title('Performance of Vectorization Backends Across Different Environments and Core Counts')
-
-    # Creating legends
-    backend_legend = plt.legend(title="Backends", bbox_to_anchor=(1.04, 1), loc="upper left")
-    plt.gca().add_artist(backend_legend)
-    plt.legend(
-        [plt.Rectangle((0,0),1,1, color=color) for color in hue_colors],
-        cores, title="Cores", bbox_to_anchor=(1.04, 0.5), loc="lower left"
-    )
-
-    # Show plot
-    plt.tight_layout()
-    plt.savefig('../docker/envpool_sps.png')
-    '''
 
 if __name__ == '__main__':
     #sweep_performance_tests()
