@@ -329,9 +329,9 @@ def evaluate(data):
         if 'Task_eval_fn' in k:
             # Temporary hack for NMMO competition
             continue
-        if 'exploration_map' in k:
+        if 'pokemon_exploration_map' in k:
             import cv2
-            bg = cv2.imread('full_map_v2a.png')
+            bg = cv2.imread('kanto_map_dsv.png')
             overlay = make_pokemon_red_overlay(bg, sum(v))
             if data.wandb is not None:
                 data.stats['Media/exploration_map'] = data.wandb.Image(overlay)
@@ -529,7 +529,7 @@ def rollout(env_creator, env_kwargs, model_path, device='cuda', verbose=True):
     terminal = truncated = True
 
     import cv2
-    bg = cv2.imread('full_map_v2a.png')
+    bg = cv2.imread('kanto_map_dsv.png')
  
     while True:
         if terminal or truncated:
@@ -552,7 +552,7 @@ def rollout(env_creator, env_kwargs, model_path, device='cuda', verbose=True):
         return_val += reward
 
         counts_map = env.env.counts_map
-        if np.sum(counts_map) > 0 and step % 100 == 0:
+        if env_kwargs['headless'] and np.sum(counts_map) > 0 and step % 100 == 0:
             overlay = make_pokemon_red_overlay(bg, counts_map)
             cv2.imshow('Pokemon Red', overlay[1000:][::4, ::4])
             cv2.waitKey(1)
@@ -649,7 +649,7 @@ def make_pokemon_red_overlay(bg, counts):
 
     # Convert counts to hue map
     hsv = np.zeros((*counts.shape, 3))
-    hsv[..., 0] = (240.0/360) - scaled*(240.0/360.0)
+    hsv[..., 0] = scaled*(240.0/360.0)
     hsv[..., 1] = nonzero
     hsv[..., 2] = nonzero
 
@@ -661,14 +661,7 @@ def make_pokemon_red_overlay(bg, counts):
     kernel = np.ones((16, 16, 1), dtype=np.uint8)
     overlay = np.kron(overlay, kernel).astype(np.uint8)
     mask = np.kron(nonzero, kernel[..., 0]).astype(np.uint8)
-    mask = np.stack([mask, mask, mask], axis=-1)
-
-    # Offset to align with map
-    x_pad, y_pad = 16*16, 16*13
-    overlay = np.pad(overlay, ((0, y_pad+8), (0, x_pad), (0, 0)))
-    overlay = overlay[y_pad+8:, x_pad:]
-    mask = np.pad(mask, ((0, y_pad+8), (0, x_pad), (0, 0)))
-    mask = mask[y_pad+8:, x_pad:].astype(bool)
+    mask = np.stack([mask, mask, mask], axis=-1).astype(bool)
 
     # Combine with background
     render = bg.copy().astype(np.int32)

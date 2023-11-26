@@ -387,7 +387,7 @@ class PokemonRed(Env):
             'y': y_pos,
             'map': map_n,
             'map_n': len(self.seen_maps),
-            'exploration_map': self.counts_map,
+            'pokemon_exploration_map': self.counts_map,
             'last_action': action,
             'pcount': self.read_m(PARTY_SIZE_ADDR),
             'levels': levels,
