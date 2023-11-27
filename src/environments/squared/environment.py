@@ -1,5 +1,5 @@
 import pufferlib.emulation
-from pufferlib.registry.squared.squared import Squared as env_creator
+from .squared import Squared as env_creator
 
 
 def make_env(distance_to_target=3, num_targets=1):

@@ -87,19 +87,15 @@ def all():
 def classic_control():
     args = pufferlib.args.CleanPuffeRL(
         vectorization=pufferlib.vectorization.Serial,
-        num_cores=1,
-        num_buffers=1,
         num_envs=16,
     )
     return args, make_sweep_config()
 
 def nmmo():
     args = pufferlib.args.CleanPuffeRL(
+        num_envs=1,
         batch_size=2**12,
         batch_rows=128,
-        num_cores=1,
-        num_buffers=1,
-        num_envs=1,
     )
     return args, make_sweep_config()
 
@@ -120,10 +116,13 @@ def openspiel():
 def pokegym():
     args = pufferlib.args.CleanPuffeRL(
         total_timesteps=100_000_000,
-        num_cores=64, # Reduce this to 12/8/6/4 as needed
-        num_envs=128,
+        num_envs=24,
+        envs_per_worker=1,
+        envpool_batch_size=24,
+        #num_envs=128,
+        #envs_per_worker=2,
+        #envpool_batch_size=48,
         update_epochs=3,
-        envpool_batch_size=48,
         gamma=0.998,
         batch_size=2**15,
         batch_rows=128,
@@ -137,7 +136,6 @@ def procgen():
         total_timesteps=8_000_000,
         learning_rate=6e-4,
         num_cores=4,
-        num_buffers=2,
         num_envs=64,
         batch_size=2048,
         batch_rows=8,
@@ -156,7 +154,6 @@ def procgen():
         total_timesteps=8_000_000,
         learning_rate=5e-4,
         num_cores=1, #4
-        num_buffers=1,#2,
         num_envs=1,#32,#6,
         batch_size=16384,
         batch_rows=8,
@@ -188,9 +185,9 @@ def squared():
     args = pufferlib.args.CleanPuffeRL(
         total_timesteps=30_000,
         learning_rate=0.017,
+        num_envs=8,
         batch_rows=32,
         bptt_horizon=4,
-        num_cores=4,
     )
     sweep_config = make_sweep_config(
         metric=SweepMetric(name='stats/targets_hit'),
@@ -202,7 +199,6 @@ def stable_retro():
     # Retro cannot simulate multiple environments per core
     args = pufferlib.args.CleanPuffeRL(
         vectorization=pufferlib.vectorization.Multiprocessing,
-        num_cores=1,
         num_envs=1,
     )
     return args, make_sweep_config()

@@ -32,10 +32,10 @@ def get_init_args(fn):
 def make_config(env):
     # TODO: Improve install checking with pkg_resources
     try:
-        env_module = importlib.import_module(f'pufferlib.registry.{env}')
+        env_module = importlib.import_module(f'pufferlib.environments.{env}')
     except:
         pufferlib.utils.install_requirements(env)
-        env_module = importlib.import_module(f'pufferlib.registry.{env}')
+        env_module = importlib.import_module(f'pufferlib.environments.{env}')
 
     all_configs = config.all()
     args, sweep_config = all_configs[env]()

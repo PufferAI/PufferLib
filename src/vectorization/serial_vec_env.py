@@ -24,40 +24,41 @@ def init(self: object = None,
         env_creator: callable = None,
         env_args: list = [],
         env_kwargs: dict = {},
-        num_workers: int = 1,
+        num_envs: int = 1,
         envs_per_worker: int = 1,
         batch_size: int = None,
         synchronous: bool = False,
         ) -> None:
-    driver_env, multi_env_cls, num_agents = setup(
-        env_creator, env_args, env_kwargs, num_workers, envs_per_worker, batch_size)
+    driver_env, multi_env_cls, num_agents, batch_size = setup(
+        env_creator, env_args, env_kwargs, num_envs, envs_per_worker, batch_size)
 
     multi_envs = [
         multi_env_cls(
             env_creator, env_args, env_kwargs, envs_per_worker,
-        ) for _ in range(num_workers)
+        ) for _ in range(num_envs // envs_per_worker)
     ]
 
     return namespace(self,
         multi_envs = multi_envs,
         driver_env = driver_env,
         num_agents = num_agents,
-        num_workers = num_workers,
+        num_envs = num_envs,
         envs_per_worker = envs_per_worker,
         async_handles = None,
         flag = RESET,
-        batch_size = num_workers if batch_size is None else batch_size // envs_per_worker,
+        batch_size = batch_size,
     )
 
 def recv(state):
     recv_precheck(state)
     recvs = [(o, r, d, t, i, env_id) for (o, r, d, t, i), env_id
-        in zip(state.data, range(state.batch_size))]
+        in zip(state.data, range(state.batch_size // state.envs_per_worker))]
     return aggregate_recvs(state, recvs)
 
 def send(state, actions):
     send_precheck(state)
     actions = split_actions(state, actions)
+    assert len(state.multi_envs) == len(actions)
     state.data = [e.step(a) for e, a in zip(state.multi_envs, actions)]
 
 def async_reset(state, seed=None):

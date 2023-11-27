@@ -5,7 +5,7 @@ import gymnasium as gym
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.registry
+import pufferlib.environments
 import pufferlib.utils
 
 
@@ -14,7 +14,7 @@ def env_creator():
 
 def make_env(name='BreakoutNoFrameskip-v4', framestack=4):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
-    pufferlib.registry.try_import('ale_py', 'atari')
+    pufferlib.environments.try_import('ale_py', 'atari')
     from stable_baselines3.common.atari_wrappers import (
         ClipRewardEnv,
         EpisodicLifeEnv,

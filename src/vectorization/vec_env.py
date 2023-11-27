@@ -17,11 +17,20 @@ RECV = 2
 space_error_msg = 'env {env} must be an instance of GymnasiumPufferEnv or PettingZooPufferEnv'
 
 
-def setup(env_creator, env_args, env_kwargs, num_workers, envs_per_worker, batch_size):
-    assert batch_size <= num_workers * envs_per_worker
-    env_args, env_kwargs = create_precheck(env_creator, env_args, env_kwargs)
+def setup(env_creator, env_args, env_kwargs, num_envs, envs_per_worker, batch_size):
+    assert num_envs % envs_per_worker == 0
+    num_workers = num_envs // envs_per_worker
 
+    if batch_size is None:
+        batch_size = num_envs
+
+    assert batch_size > 0
+    assert batch_size % envs_per_worker == 0
+    assert batch_size <= num_envs
+
+    env_args, env_kwargs = create_precheck(env_creator, env_args, env_kwargs)
     driver_env = env_creator(*env_args, **env_kwargs)
+
     if isinstance(driver_env, GymnasiumPufferEnv):
         multi_env_cls = GymMultiEnv
         num_agents = 1
@@ -35,7 +44,7 @@ def setup(env_creator, env_args, env_kwargs, num_workers, envs_per_worker, batch
         )
 
     obs_space = _single_observation_space(driver_env)
-    return driver_env, multi_env_cls, num_agents
+    return driver_env, multi_env_cls, num_agents, batch_size
 
 def _single_observation_space(env):
     if isinstance(env, GymnasiumPufferEnv):
@@ -69,6 +78,7 @@ def unpack_batched_obs(state, obs):
     return state.driver_env.unpack_batched_obs(obs)
 
 def recv_precheck(state):
+    assert len(state.data) == state.batch_size // state.envs_per_worker
     assert state.flag == RECV, 'Call reset before stepping'
     state.flag = SEND
 

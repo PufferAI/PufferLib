@@ -55,8 +55,9 @@ class CleanPuffeRL:
     max_grad_norm: float = 0.5
     target_kl: float = None
 
-    num_cores: int = 4
-    envpool_batch_size: int = 4
+    num_envs: int = 8
+    envs_per_worker: int = 1
+    envpool_batch_size: int = None
     verbose: bool = True
     data_dir: str = 'experiments'
     checkpoint_interval: int = 200

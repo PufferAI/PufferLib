@@ -1,3 +1,4 @@
+from pdb import set_trace as T
 import pufferlib
 
 def try_import(module_path, package_name=None):
@@ -6,7 +7,7 @@ def try_import(module_path, package_name=None):
     try:
        package = __import__(module_path)
     except ImportError as e:
-        e.args = (
+        raise ImportError(
             f'{e.args[0]}\n\n'
             'This is probably an installation error. Try: '
             'pip install pufferlib[{package_name}]. '
@@ -16,8 +17,7 @@ def try_import(module_path, package_name=None):
             'manually by following the instructions provided by the '
             'environment meaintainers. But some are finicky, so we '
             'recommend using PufferTank.'
-        ,)
-        raise e
+        ) from e
     return package
 
 @pufferlib.dataclass

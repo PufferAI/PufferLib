@@ -92,11 +92,9 @@ def init(
     start_time = time.time()
     seed_everything(config.seed, config.torch_deterministic)
     total_updates = config.total_timesteps // config.batch_size
-    envs_per_worker = config.num_envs // config.num_cores
 
     device = config.device
     obs_device = 'cpu' if config.cpu_offload else device
-    assert config.num_cores * envs_per_worker == config.num_envs
 
     # Create environments, agent, and optimizer
     init_profiler = pufferlib.utils.Profiler(memory=True)
@@ -104,15 +102,15 @@ def init(
         pool = vectorization(
             env_creator,
             env_kwargs=env_creator_kwargs,
-            num_workers=config.num_cores,
-            envs_per_worker=envs_per_worker,
+            num_envs=config.num_envs,
+            envs_per_worker=config.envs_per_worker,
             batch_size=config.envpool_batch_size,
         )
 
     obs_shape = pool.single_observation_space.shape
     atn_shape = pool.single_action_space.shape
     num_agents = pool.num_agents
-    total_agents = num_agents * config.num_cores * envs_per_worker
+    total_agents = num_agents * config.num_envs
 
     # If data_dir is provided, load the resume state
     resume_state = {}
@@ -140,7 +138,7 @@ def init(
 
 
     # Create policy pool
-    pool_agents = num_agents * config.envpool_batch_size
+    pool_agents = num_agents * pool.batch_size
     policy_pool = pufferlib.policy_pool.PolicyPool(
         agent, pool_agents, atn_shape, device, path,
         config.pool_kernel, policy_selector,
