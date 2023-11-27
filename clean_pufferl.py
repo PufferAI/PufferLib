@@ -94,27 +94,25 @@ def init(
     total_updates = config.total_timesteps // config.batch_size
     envs_per_worker = config.num_envs // config.num_cores
 
-    device = 'cuda' if config.cuda else 'cpu'
+    device = config.device
     obs_device = 'cpu' if config.cpu_offload else device
     assert config.num_cores * envs_per_worker == config.num_envs
 
     # Create environments, agent, and optimizer
     init_profiler = pufferlib.utils.Profiler(memory=True)
     with init_profiler:
-        buffers = [
-            vectorization(
-                env_creator,
-                env_kwargs=env_creator_kwargs,
-                num_workers=config.num_cores,
-                envs_per_worker=envs_per_worker,
-            )
-            for _ in range(config.num_buffers)
-        ]
+        pool = vectorization(
+            env_creator,
+            env_kwargs=env_creator_kwargs,
+            num_workers=config.num_cores,
+            envs_per_worker=envs_per_worker,
+            batch_size=config.envpool_batch_size,
+        )
 
-    obs_shape = buffers[0].single_observation_space.shape
-    atn_shape = buffers[0].single_action_space.shape
-    num_agents = buffers[0].num_agents
-    total_agents = num_agents * config.num_envs
+    obs_shape = pool.single_observation_space.shape
+    atn_shape = pool.single_action_space.shape
+    num_agents = pool.num_agents
+    total_agents = num_agents * config.num_cores * envs_per_worker
 
     # If data_dir is provided, load the resume state
     resume_state = {}
@@ -128,7 +126,7 @@ def init(
               f'with policy {resume_state["model_name"]}')
     else:
         agent = pufferlib.emulation.make_object(
-            agent, agent_creator, buffers[:1], agent_kwargs)
+            agent, agent_creator, [pool], agent_kwargs)
 
     global_step = resume_state.get("global_step", 0)
     agent_step = resume_state.get("agent_step", 0)
@@ -142,24 +140,23 @@ def init(
 
 
     # Create policy pool
+    pool_agents = num_agents * config.envpool_batch_size
     policy_pool = pufferlib.policy_pool.PolicyPool(
-        agent, total_agents, atn_shape, device, path,
+        agent, pool_agents, atn_shape, device, path,
         config.pool_kernel, policy_selector,
     )
 
     # Allocate Storage
     storage_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True).start()
     next_lstm_state = []
-    for i, envs in enumerate(buffers):
-        envs.async_reset(config.seed + i)
-        if not hasattr(agent, 'lstm'):
-            next_lstm_state.append(None)
-        else:
-            shape = (agent.lstm.num_layers, total_agents, agent.lstm.hidden_size)
-            next_lstm_state.append((
-                torch.zeros(shape).to(device),
-                torch.zeros(shape).to(device),
-            ))
+    pool.async_reset(config.seed)
+    next_lstm_state = None
+    if hasattr(agent, 'lstm'):
+        shape = (agent.lstm.num_layers, total_agents, agent.lstm.hidden_size)
+        next_lstm_state = (
+            torch.zeros(shape).to(device),
+            torch.zeros(shape).to(device),
+        )
     obs=torch.zeros(config.batch_size + 1, *obs_shape).to(obs_device)
     actions=torch.zeros(config.batch_size + 1, *atn_shape, dtype=int).to(device)
     logprobs=torch.zeros(config.batch_size + 1).to(device)
@@ -187,9 +184,9 @@ def init(
     return pufferlib.namespace(self,
         # Agent, Optimizer, and Environment
         config=config,
+        pool = pool,
         agent = agent,
         optimizer = optimizer,
-        buffers = buffers,
         policy_pool = policy_pool,
 
         # Logging
@@ -217,7 +214,6 @@ def init(
         device = device,
         obs_device = obs_device,
         start_time = start_time,
-        buf = 0,
     )
 
 @pufferlib.utils.profile
@@ -246,30 +242,39 @@ def evaluate(data):
     ptr = step = padded_steps_collected = agent_steps_collected = 0
     infos = defaultdict(lambda: defaultdict(list))
     while True:
-        buf = data.buf
         step += 1
         if ptr == config.batch_size + 1:
             break
 
         with env_profiler:
-            o, r, d, t, i, mask = data.buffers[buf].recv()
-
-        '''
-        for profile in data.buffers[buf].profile():
-            for k, v in profile.items():
-                performance[k].append(v["delta"])
-        '''
+            o, r, d, t, i, env_id, mask = data.pool.recv()
 
         i = data.policy_pool.update_scores(i, "return")
-        o = torch.Tensor(o).to(data.obs_device)
-        r = torch.Tensor(r).float().to(data.device).view(-1)
-        d = torch.Tensor(d).float().to(data.device).view(-1)
+
+        with inference_profiler, torch.no_grad():
+            o = torch.as_tensor(o)
+            r = torch.as_tensor(r).float().to(data.device).view(-1)
+            d = torch.as_tensor(d).float().to(data.device).view(-1)
 
         agent_steps_collected += sum(mask)
         padded_steps_collected += len(mask)
         with inference_profiler, torch.no_grad():
-            actions, logprob, value, data.next_lstm_state[buf] = data.policy_pool.forwards(
-                    o.to(data.device), data.next_lstm_state[buf])
+            # Multiple policies will not work with new envpool
+            next_lstm_state = data.next_lstm_state
+            if next_lstm_state is not None:
+                next_lstm_state = (
+                    next_lstm_state[0][:, env_id],
+                    next_lstm_state[1][:, env_id],
+                )
+
+            actions, logprob, value, next_lstm_state = data.policy_pool.forwards(
+                    o.to(data.device), next_lstm_state)
+
+            if next_lstm_state is not None:
+                h, c = next_lstm_state
+                data.next_lstm_state[0][:, env_id] = h
+                data.next_lstm_state[1][:, env_id] = c
+
             value = value.flatten()
 
         # Index alive mask with policy pool idxs...
@@ -283,7 +288,7 @@ def evaluate(data):
             data.values[ptr] = value[idx]
             data.actions[ptr] = actions[idx]
             data.logprobs[ptr] = logprob[idx]
-            data.sort_keys.append((buf, idx, step))
+            data.sort_keys.append((env_id[idx], step))
             if len(d) != 0:
                 data.rewards[ptr] = r[idx]
                 data.dones[ptr] = d[idx]
@@ -296,8 +301,7 @@ def evaluate(data):
                     infos[policy_name][name].append(dat)
 
         with env_profiler:
-            data.buffers[buf].send(actions.cpu().numpy())
-        data.buf = (data.buf + 1) % config.num_buffers
+            data.pool.send(actions.cpu().numpy())
 
     data.global_step += config.batch_size
     eval_profiler.stop()
@@ -413,7 +417,7 @@ def train(data):
                 lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
             else:
                 _, newlogprob, entropy, newvalue = data.agent.get_action_and_value(
-                    mb_obs.reshape(-1, *data.buffers[0].single_observation_space.shape),
+                    mb_obs.reshape(-1, *data.pool.single_observation_space.shape),
                     action=mb_actions,
                 )
 
@@ -509,8 +513,7 @@ def train(data):
     data.update += 1
 
 def close(data):
-    for envs in data.buffers:
-        envs.close()
+    data.pool.close()
 
     if data.wandb is not None:
         artifact_name = f"{data.exp_name}_model"

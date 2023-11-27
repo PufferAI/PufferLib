@@ -17,7 +17,8 @@ RECV = 2
 space_error_msg = 'env {env} must be an instance of GymnasiumPufferEnv or PettingZooPufferEnv'
 
 
-def setup(env_creator, env_args, env_kwargs, num_workers, envs_per_worker):
+def setup(env_creator, env_args, env_kwargs, num_workers, envs_per_worker, batch_size):
+    assert batch_size <= num_workers * envs_per_worker
     env_args, env_kwargs = create_precheck(env_creator, env_args, env_kwargs)
 
     driver_env = env_creator(*env_args, **env_kwargs)
@@ -34,11 +35,7 @@ def setup(env_creator, env_args, env_kwargs, num_workers, envs_per_worker):
         )
 
     obs_space = _single_observation_space(driver_env)
-    preallocated_obs = np.empty((
-        num_agents * num_workers * envs_per_worker, *obs_space.shape,
-    ), dtype=obs_space.dtype)
-
-    return driver_env, multi_env_cls, num_agents, preallocated_obs
+    return driver_env, multi_env_cls, num_agents
 
 def _single_observation_space(env):
     if isinstance(env, GymnasiumPufferEnv):
@@ -83,17 +80,15 @@ def reset_precheck(state):
     assert state.flag == RESET, 'Call reset only once on initialization'
     state.flag = RECV
  
-def aggregate_recvs(state, returns):
-    obs, rewards, dones, truncateds, infos = list(zip(*returns))
+def aggregate_recvs(state, recvs):
+    obs, rewards, dones, truncateds, infos, env_ids = list(zip(*recvs))
+    agents_per_worker = state.num_agents * state.envs_per_worker
+    batch_agents = state.batch_size * agents_per_worker
 
-    for i, o in enumerate(obs):
-        total_agents = state.num_agents * state.envs_per_worker
-        state.preallocated_obs[i*total_agents:(i+1)*total_agents] = o
-
+    obs = np.stack(list(chain.from_iterable(obs)), 0)
     rewards = list(chain.from_iterable(rewards))
     dones = list(chain.from_iterable(dones))
     truncateds = list(chain.from_iterable(truncateds))
-    orig = infos
     infos = [i for ii in infos for i in ii]
 
     # TODO: Masking will break for 1-agent PZ envs
@@ -102,18 +97,22 @@ def aggregate_recvs(state, returns):
     else:
         mask = [e['mask'] for ee in infos for e in ee.values()]
 
-    assert len(rewards) == len(dones) == len(truncateds) == total_agents * state.num_workers
-    assert len(infos) == state.num_workers * state.envs_per_worker
-    return state.preallocated_obs, rewards, dones, truncateds, infos, mask
+    env_ids = np.concatenate([np.arange( # Per-agent env indexing
+        i*agents_per_worker, (i+1)*agents_per_worker) for i in env_ids])
+
+    assert all(len(e) == batch_agents for e in
+        [obs, rewards, dones, truncateds, env_ids, mask])
+    assert len(infos) == state.batch_size * state.envs_per_worker
+    return obs, rewards, dones, truncateds, infos, env_ids, mask
 
 def split_actions(state, actions, env_id=None):
     if type(actions) == list:
         actions = np.array(actions)
 
     assert isinstance(actions, np.ndarray), 'Actions must be a numpy array'
-    assert len(actions) == state.num_agents * state.num_workers * state.envs_per_worker
+    assert len(actions) == state.batch_size * state.num_agents * state.envs_per_worker
 
-    return np.array_split(actions, state.num_workers)
+    return np.array_split(actions, state.batch_size)
 
 def aggregate_profiles(profiles):
     return list(chain.from_iterable([profiles]))

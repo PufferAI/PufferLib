@@ -63,10 +63,7 @@ def make_policy(envs, env_module, args):
     else:
         policy = pufferlib.frameworks.cleanrl.Policy(policy)
 
-    if args.args.cuda:
-        return policy.cuda()
-
-    return policy
+    return policy.to(args.args.device)
 
 def init_wandb(args, env_module):
     os.environ["WANDB_SILENT"] = "true"
@@ -137,7 +134,7 @@ def evaluate(args, env_module):
     env = env_creator(**env_creator_kwargs)
 
     import torch
-    device = args.args.cuda
+    device = args.args.device
     agent = torch.load(args.evaluate, map_location=device)
     terminal = truncated = True
 
@@ -226,5 +223,5 @@ if __name__ == '__main__':
         sweep(args, env_module, sweep_config)
     else:
         rollout(env_module.make_env, args.env_kwargs,
-            args.evaluate, device=args.args.cuda)
+            args.evaluate, device=args.args.device)
 
