@@ -60,10 +60,10 @@ def all():
     '''All tested environments and platforms'''
     return {
         'atari': default,
-        #'box2d': default,
+        #'box2d': default, #Continuous
         'butterfly': default,
         'classic_control': classic_control,
-        'crafter': default,
+        'crafter': default, #YAML error in ruamel, probably pin
         'squared': squared,
         'dm_control': default,
         'dm_lab': default,
@@ -76,6 +76,9 @@ def all():
         'nethack': default,
         'nmmo': nmmo,
         'openspiel': openspiel,
+        'pokemon_red': pokegym,
+        'pokemon_red_pip': pokegym,
+        'links_awaken_pip': pokegym,
         'procgen': procgen,
         #'smac': default,
         #'stable-retro': default,
@@ -84,31 +87,47 @@ def all():
 def classic_control():
     args = pufferlib.args.CleanPuffeRL(
         vectorization=pufferlib.vectorization.Serial,
-        num_cores=1,
-        num_buffers=1,
         num_envs=16,
     )
     return args, make_sweep_config()
 
 def nmmo():
     args = pufferlib.args.CleanPuffeRL(
+        num_envs=16,
+        envs_per_worker=1,
+        envpool_batch_size=6,
         batch_size=2**12,
         batch_rows=128,
-        num_cores=1,
-        num_buffers=1,
-        num_envs=1,
     )
     return args, make_sweep_config()
 
 def openspiel():
     from itertools import chain
-    num_policies = 8
+    num_opponents = 1
     args = pufferlib.args.CleanPuffeRL(
-        #selfplay_kernel = list(chain.from_iterable(
-        #    [[0, i, i, 0] for i in range(1, num_policies + 1)])),
-        #selfplay_kernel = [0, 1, 1, 0],
+        pool_kernel = list(chain.from_iterable(
+            [[0, i, i, 0] for i in range(1, num_opponents + 1)])),
         num_envs = 32,
         batch_size = 4096,
+    )
+    sweep_config = make_sweep_config(
+            cleanrl=CleanPuffeRLSweep(),
+    )
+    return args, sweep_config
+
+def pokegym():
+    args = pufferlib.args.CleanPuffeRL(
+        total_timesteps=100_000_000,
+        num_envs=24,
+        envs_per_worker=1,
+        envpool_batch_size=24,
+        #num_envs=128,
+        #envs_per_worker=2,
+        #envpool_batch_size=48,
+        update_epochs=3,
+        gamma=0.998,
+        batch_size=2**15,
+        batch_rows=128,
     )
     return args, make_sweep_config()
 
@@ -119,7 +138,6 @@ def procgen():
         total_timesteps=8_000_000,
         learning_rate=6e-4,
         num_cores=4,
-        num_buffers=2,
         num_envs=64,
         batch_size=2048,
         batch_rows=8,
@@ -133,11 +151,11 @@ def procgen():
     '''
 
     # 2020 Competition Defaults from RLlib
+    '''
     args = pufferlib.args.CleanPuffeRL(
         total_timesteps=8_000_000,
         learning_rate=5e-4,
         num_cores=1, #4
-        num_buffers=1,#2,
         num_envs=1,#32,#6,
         batch_size=16384,
         batch_rows=8,
@@ -148,19 +166,34 @@ def procgen():
         clip_coef=0.2,
         vf_clip_coef=0.2,
     )
+    '''
+
+    args = pufferlib.args.CleanPuffeRL(
+        total_timesteps=8_000_000,
+        learning_rate=0.0002691194621325188,
+        gamma=0.9961844515798506,
+        gae_lambda=0.8730081151095287,
+        ent_coef=0.0103205077441882,
+        vf_coef=1.9585588391335327,
+        clip_coef=0.3075580869152367,
+        batch_size=16384, #94208,
+        batch_rows=4096,
+        bptt_horizon=1,
+        update_epochs=2,
+    )
     return args, make_sweep_config()
 
 def squared():
     args = pufferlib.args.CleanPuffeRL(
         total_timesteps=30_000,
         learning_rate=0.017,
+        num_envs=8,
         batch_rows=32,
         bptt_horizon=4,
-        num_cores=4,
     )
     sweep_config = make_sweep_config(
         metric=SweepMetric(name='stats/targets_hit'),
-        cleanrl=args,
+        cleanrl=CleanPuffeRLSweep(),
     )
     return args, sweep_config
 
@@ -168,7 +201,6 @@ def stable_retro():
     # Retro cannot simulate multiple environments per core
     args = pufferlib.args.CleanPuffeRL(
         vectorization=pufferlib.vectorization.Multiprocessing,
-        num_cores=1,
         num_envs=1,
     )
     return args, make_sweep_config()

@@ -150,8 +150,8 @@ class GymnasiumPufferEnv(gym.Env):
         ob, info = _seed_and_reset(self.env, seed)
 
         # Call user featurizer and flatten the observations
-        processed_ob = postprocess_and_flatten(
-            ob, self.postprocessor, reset=True)
+        self.postprocessor.reset(ob)
+        processed_ob = concatenate(flatten(self.postprocessor.observation(ob)))
 
         if __debug__:
             if not self.is_observation_checked:
@@ -184,11 +184,11 @@ class GymnasiumPufferEnv(gym.Env):
         ob, reward, done, truncated, info = self.env.step(action)
 
         # Call user postprocessors and flatten the observations
-        processed_ob, single_reward, single_done, single_truncated, single_info = postprocess_and_flatten(
-            ob, self.postprocessor, reward, done, truncated, info)
+        ob = concatenate(flatten(self.postprocessor.observation(ob)))
+        reward, done, truncated, info = self.postprocessor.reward_done_truncated_info(reward, done, truncated, info)
                    
-        self.done = single_done
-        return processed_ob, single_reward, single_done, single_truncated, single_info
+        self.done = done
+        return ob, reward, done, truncated, info
 
     def render(self):
         return self.env.render()
@@ -289,9 +289,13 @@ class PettingZooPufferEnv:
 
         # Call user featurizer and flatten the observations
         postprocessed_obs = {}
-        for agent in obs:
-            postprocessed_obs[agent] = postprocess_and_flatten(
-                obs[agent], self.postprocessors[agent], reset=True)
+        ob = list(obs.values())[0]
+        for agent in self.possible_agents:
+            post = self.postprocessors[agent]
+            post.reset(ob)
+            if agent in obs:
+                ob = obs[agent]
+                postprocessed_obs[agent] = concatenate(flatten(post.observation(ob)))
 
         if __debug__:
             if not self.is_observation_checked:
@@ -302,7 +306,15 @@ class PettingZooPufferEnv:
 
         padded_obs = pad_agent_data(postprocessed_obs,
             self.possible_agents, self.pad_observation)
-        padded_infos = pad_agent_data(info, self.possible_agents, {})
+
+        # Mask out missing agents
+        padded_infos = {}
+        for agent in self.possible_agents:
+            if agent not in info:
+                padded_infos[agent] = {}
+            else:
+                padded_infos[agent] = info[agent]
+            padded_infos[agent]['mask'] = agent in obs
 
         return padded_obs, padded_infos
 
@@ -349,13 +361,22 @@ class PettingZooPufferEnv:
 
         # Call user postprocessors and flatten the observations
         for agent in obs:
-            obs[agent], rewards[agent], dones[agent], truncateds[agent], infos[agent] = postprocess_and_flatten(
-                obs[agent], self.postprocessors[agent],
+            obs[agent] = concatenate(flatten(self.postprocessors[agent].observation(obs[agent])))
+            rewards[agent], dones[agent], truncateds[agent], infos[agent] = self.postprocessors[agent].reward_done_truncated_info(
                 rewards[agent], dones[agent], truncateds[agent], infos[agent])
+     
         self.all_done = all(dones.values())
 
-        obs, rewards, dones, truncateds, infos = pad_to_const_num_agents(
-            self.env.possible_agents, obs, rewards, dones, truncateds, infos, self.pad_observation)
+        # Mask out missing agents
+        for agent in self.possible_agents:
+            if agent not in infos:
+                infos[agent] = {}
+            else:
+                infos[agent] = infos[agent]
+            infos[agent]['mask'] = agent in obs
+
+        obs, rewards, dones, truncateds = pad_to_const_num_agents(
+            self.env.possible_agents, obs, rewards, dones, truncateds, self.pad_observation)
 
         return obs, rewards, dones, truncateds, infos
 
@@ -399,30 +420,12 @@ def pad_agent_data(data, agents, pad_value):
     return {agent: data[agent] if agent in data else pad_value
         for agent in agents}
     
-def pad_to_const_num_agents(agents, obs, rewards, dones, truncateds, infos, pad_obs):
+def pad_to_const_num_agents(agents, obs, rewards, dones, truncateds, pad_obs):
     padded_obs = pad_agent_data(obs, agents, pad_obs)
     rewards = pad_agent_data(rewards, agents, 0)
-    dones = pad_agent_data(dones, agents, True)
+    dones = pad_agent_data(dones, agents, False)
     truncateds = pad_agent_data(truncateds, agents, False)
-    infos = pad_agent_data(infos, agents, {})
-    return padded_obs, rewards, dones, truncateds, infos
-
-def postprocess_and_flatten(ob, postprocessor,
-        reward=None, done=None, truncated=None, info=None,
-        reset=False, max_horizon=None):
-    if reset:
-        postprocessor.reset(ob)
-    else:
-        reward, done, truncated, info = postprocessor.reward_done_truncated_info(
-            reward, done, truncated, info)
-
-    postprocessed_ob = postprocessor.observation(ob)
-    flat_ob = concatenate(flatten(postprocessed_ob))
-
-    if reset:
-        return flat_ob
-    return flat_ob, reward, done, truncated, info
-
+    return padded_obs, rewards, dones, truncateds
 
 def make_flat_and_multidiscrete_atn_space(atn_space):
     flat_action_space = flatten_space(atn_space)
@@ -551,7 +554,8 @@ def flatten_space(space):
 def concatenate(flat_sample):
     if len(flat_sample) == 1:
         flat_sample = flat_sample[0]
-        if isinstance(flat_sample, np.ndarray):
+        if isinstance(flat_sample,(np.ndarray,
+                gymnasium.wrappers.frame_stack.LazyFrames)):
             return flat_sample
         return np.array([flat_sample])
     return np.concatenate([
@@ -598,7 +602,7 @@ def convert_to_multidiscrete(flat_space):
         else:
             raise ValueError(f'Invalid action space: {e}')
 
-    return pufferlib.spaces.MultiDiscrete(lens)
+    return gymnasium.spaces.MultiDiscrete(lens)
 
 def make_space_like(ob):
     if type(ob) == np.ndarray:

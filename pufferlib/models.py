@@ -89,7 +89,6 @@ class Policy(nn.Module):
         actions, value = self.decode_actions(hidden, lookup)
         return actions, value
 
-
 class RecurrentWrapper(Policy):
     def __init__(self, env, policy, input_size=128, hidden_size=128, num_layers=1):
         super().__init__(env)
@@ -110,41 +109,27 @@ class RecurrentWrapper(Policy):
             elif "weight" in name:
                 nn.init.orthogonal_(param, 1.0)
 
-    def forward(self, x, state, done):
-        shape, tensor_shape = x.shape, self.observation_space.shape
-        x_dims, tensor_dims = len(shape), len(tensor_shape)
-        if x_dims == tensor_dims + 1:
-            TT = shape[0] // state[0].shape[1]
-            B = shape[0] // TT
-        elif x_dims == tensor_dims + 2:
-            TT = shape[1]
-            B = shape[0]
+    def forward(self, x, state):
+        x_shape, space_shape = x.shape, self.observation_space.shape
+        x_n, space_n = len(x_shape), len(space_shape)
+        assert x_shape[-space_n:] == space_shape
+
+        if x_n == space_n + 1:
+            B, TT = x_shape[0], 1
+        elif x_n == space_n + 2:
+            B, TT = x_shape[:2]
         else:
-            raise ValueError('Invalid tensor shape', shape)
+            raise ValueError('Invalid input tensor shape', x.shape)
 
-        x = x.reshape(B*TT, *tensor_shape)
+        if state is not None:
+            assert state[0].shape[1] == state[1].shape[1] == B
 
+        x = x.reshape(B*TT, *space_shape)
         hidden, lookup = self.policy.encode_observations(x)
         assert hidden.shape == (B*TT, self.input_size)
 
         hidden = hidden.reshape(B, TT, self.input_size)
         hidden = hidden.transpose(0, 1)
-
-        # This block is the technically correct way to handle resets
-        # It also kills ~70% of the performance and is usually not worth it
-        '''
-        done = done.reshape(B, TT)
-        done = done.transpose(0, 1).unsqueeze(2)
-        new_hidden = []
-        for t in range(TT):
-            h = hidden[t:t+1]
-            d = done[t:t+1]
-            state = (state[0] * (1 - d), state[1] * (1 - d))
-            h, state = self.recurrent(h, state)
-            new_hidden.append(h)
-        hidden = torch.cat(new_hidden, dim=0)
-        '''
-
         hidden, state = self.recurrent(hidden, state)
 
         hidden = hidden.transpose(0, 1)
@@ -152,7 +137,6 @@ class RecurrentWrapper(Policy):
 
         hidden, critic = self.policy.decode_actions(hidden, lookup)
         return hidden, critic, state
-
 
 class Default(Policy):
     def __init__(self, env, input_size=128, hidden_size=128):
@@ -181,7 +165,7 @@ class Default(Policy):
 
     def encode_observations(self, observations):
         '''Linear encoder function'''
-        hidden = observations.reshape(observations.shape[0], -1)
+        hidden = observations.reshape(observations.shape[0], -1).float()
         hidden = torch.relu(self.encoder(hidden))
         return hidden, None
 
@@ -229,7 +213,7 @@ class Convolutional(Policy):
             observations = observations.permute(0, 3, 1, 2)
         if self.downsample > 1:
             observations = observations[:, :, ::self.downsample, ::self.downsample]
-        return self.network(observations / 255.0), None
+        return self.network(observations.float() / 255.0), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
         action = self.actor(flat_hidden)

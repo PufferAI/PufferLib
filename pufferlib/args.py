@@ -2,6 +2,7 @@ import os
 import psutil
 
 import pufferlib
+import torch
 
 
 @pufferlib.dataclass
@@ -36,7 +37,7 @@ class CleanRL:
 class CleanPuffeRL:
     seed: int = 1
     torch_deterministic: bool = True
-    cuda: bool = True
+    device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     total_timesteps: int = 10_000_000
     learning_rate: float = 2.5e-4
     num_envs: int = 8
@@ -54,13 +55,14 @@ class CleanPuffeRL:
     max_grad_norm: float = 0.5
     target_kl: float = None
 
-    num_cores: int = 4
-    num_buffers: int = 1
+    num_envs: int = 8
+    envs_per_worker: int = 1
+    envpool_batch_size: int = None
     verbose: bool = True
     data_dir: str = 'experiments'
     checkpoint_interval: int = 200
     cpu_offload: bool = True
-    selfplay_kernel: list = None
+    pool_kernel: list = [0]
     batch_size: int = 1024
     batch_rows: int = 32
     bptt_horizon: int = 16 #8

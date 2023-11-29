@@ -2,6 +2,8 @@ from setuptools import find_packages, setup
 from Cython.Build import cythonize
 from itertools import chain
 
+VERSION = '0.5.0'
+
 # Default Gym/Gymnasium/PettingZoo versions
 # Gym:
 # - 0.26 still has deprecation warnings and is the last version of the package
@@ -77,6 +79,15 @@ compatible_environments = {
     'nmmo': [
         'nmmo',
     ],
+    'pokemon_red': [
+        'einops==0.6.1',
+        'matplotlib',
+        'scikit-image==0.21.0',
+        'pyboy<2.0.0',
+        'hnswlib==0.7.0',
+        'mediapy',
+        'pandas==2.0.2',
+    ],
     'procgen': [
         'procgen==0.10.7',
     ],
@@ -149,7 +160,7 @@ setup(
     description="PufferAI Library"
     "PufferAI's library of RL tools and utilities",
     long_description_content_type="text/markdown",
-    version=open('pufferlib/version.py').read().split()[-1].strip("'"),
+    version=VERSION,
     packages=find_packages(),
     include_package_data=True,
     install_requires=[

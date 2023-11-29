@@ -50,7 +50,6 @@ def step(state, actions):
             rewards.extend([0] * num_agents)
             dones.extend([False] * num_agents)
             truncateds.extend([False] * num_agents)
-            infos.append(i)
         else:
             assert len(a_keys) == len(atns)
             atns = dict(zip(a_keys, atns))
@@ -58,8 +57,8 @@ def step(state, actions):
             rewards.extend(r.values())
             dones.extend(d.values())
             truncateds.extend(t.values())
-            infos.append(i)
 
+        infos.append(i)
         state.agent_keys[idx] = list(o.keys())
 
         for oo in o.values():

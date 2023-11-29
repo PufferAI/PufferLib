@@ -22,6 +22,5 @@ sys.stdout.close()
 sys.stdout = original_stdout
 
 
-from .version import __version__
-from .namespace import namespace, dataclass
-from . import frameworks, registry
+from pufferlib.namespace import namespace, dataclass
+from pufferlib import frameworks, environments

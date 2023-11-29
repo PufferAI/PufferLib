@@ -12,7 +12,7 @@ import pufferlib.utils
 import pufferlib.models
 
 import config
-from clean_pufferl import CleanPuffeRL
+from clean_pufferl import CleanPuffeRL, rollout
 
 
 def get_init_args(fn):
@@ -32,10 +32,10 @@ def get_init_args(fn):
 def make_config(env):
     # TODO: Improve install checking with pkg_resources
     try:
-        env_module = importlib.import_module(f'pufferlib.registry.{env}')
+        env_module = importlib.import_module(f'pufferlib.environments.{env}')
     except:
         pufferlib.utils.install_requirements(env)
-        env_module = importlib.import_module(f'pufferlib.registry.{env}')
+        env_module = importlib.import_module(f'pufferlib.environments.{env}')
 
     all_configs = config.all()
     args, sweep_config = all_configs[env]()
@@ -63,10 +63,7 @@ def make_policy(envs, env_module, args):
     else:
         policy = pufferlib.frameworks.cleanrl.Policy(policy)
 
-    if args.args.cuda:
-        return policy.cuda()
-
-    return policy
+    return policy.to(args.args.device)
 
 def init_wandb(args, env_module):
     os.environ["WANDB_SILENT"] = "true"
@@ -90,7 +87,7 @@ def init_wandb(args, env_module):
         name=name,
         monitor_gym=True,
         save_code=True,
-        resume="allow",
+        resume=True,
     )
     return wandb.run.id
 
@@ -100,15 +97,13 @@ def sweep(args, env_module, sweep_config):
 
     def main():
         args.exp_name = init_wandb(args, env_module)
-        if hasattr(wandb.config, 'cleanrl_init'):
-            args.cleanrl_init.update(wandb.config.cleanrl_init)
-        if hasattr(wandb.config, 'cleanrl_train'):
-            args.cleanrl_train.update(wandb.config.cleanrl_train)
+        if hasattr(wandb.config, 'cleanrl'):
+            # TODO: Add update method to namespace
+            args.args.__dict__.update(wandb.config.cleanrl)
         if hasattr(wandb.config, 'env'):
             args.env_kwargs.update(wandb.config.env)
         if hasattr(wandb.config, 'policy'):
             args.policy_kwargs.update(wandb.config.policy)
-        #args.cleanrl_init['learning_rate'] = wandb.config.learning_rate
         train(args, env_module)
 
     wandb.agent(sweep_id, main, count=20)
@@ -134,34 +129,45 @@ def train(args, env_module):
 def evaluate(args, env_module):
     env_creator = env_module.make_env
     env_creator_kwargs = args.env_kwargs
+    #env_creator_kwargs['headless'] = False
+    #env_creator_kwargs['save_video'] = True
     env = env_creator(**env_creator_kwargs)
 
     import torch
-    device = args.cleanrl_init['device']
-    agent = torch.load('agent.pt').to(device)
+    device = args.args.device
+    agent = torch.load(args.evaluate, map_location=device)
+    terminal = truncated = True
 
-    import time
-    ob = env.reset()
-    for i in range(100):
-        ob = torch.tensor(ob).view(1, -1).to(device)
+    while True:
+        if terminal or truncated:
+            print('---  Reset  ---')
+            ob, info = env.reset()
+            state = None
+            step = 0
+            return_val = 0
+
+        ob = torch.tensor(ob).unsqueeze(0).to(device)
         with torch.no_grad():
-            action  = agent.get_action_and_value(ob)[0][0].item()
+            if hasattr(agent, 'lstm'):
+                action, _, _, _, state = agent.get_action_and_value(ob, state)
+            else:
+                action, _, _, _ = agent.get_action_and_value(ob)
+        
+        ob, reward, terminal, truncated, _ = env.step(action[0].item())
+        return_val += reward
 
-        ob, reward, done, _ = env.step(action)
+        print(f'Step: {step} Reward: {reward:.4f} Return: {return_val:.2f}')
         env.render()
-        time.sleep(1)
-
-        if done:
-            ob = env.reset()
-            print('---Reset---')
-            env.render()
-            time.sleep(1)
+        step += 1
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Parse environment argument", add_help=False)
-    parser.add_argument('--env', type=str, default="nmmo", help="Environment name")
-    parser.add_argument('--mode', type=str, default="train", help="train/eval/sweep")
-    parser.add_argument('--exp-name', type=str, default=None, help="Experiment name")
+    parser = argparse.ArgumentParser(description='Parse environment argument', add_help=False)
+    parser.add_argument('--env', type=str, default='pokemon_red', help='Environment name')
+    parser.add_argument('--train', action='store_true', help='Train')
+    parser.add_argument('--sweep', action='store_true', help='WandB Train Sweep')
+    parser.add_argument('--evaluate', type=str, default='model_pip.pt', help='Evaluate')
+    parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
+    parser.add_argument('--exp-name', type=str, default=None, help="Resume from experiment")
     parser.add_argument('--vectorization', type=str, default='serial', help='Vectorization method (serial, multiprocessing, ray)')
     parser.add_argument('--wandb-entity', type=str, default='jsuarez', help='WandB entity')
     parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
@@ -179,8 +185,19 @@ if __name__ == '__main__':
         for key, value in sub_config.items():
             data_key = f'{name}.{key}'
             cli_key = f'--{data_key}'.replace('_', '-')
-            parser.add_argument(cli_key, default=value, type=type(value))
-            clean_parser.add_argument(cli_key, default=value, metavar='', help=env)
+            if isinstance(value, bool) and value is False:
+                action = 'store_false'
+                parser.add_argument(cli_key, default=value, action='store_true')
+                clean_parser.add_argument(cli_key, default=value, action='store_true')
+            elif isinstance(value, bool) and value is True:
+                data_key = f'{name}.no_{key}'
+                cli_key = f'--{data_key}'.replace('_', '-')
+                parser.add_argument(cli_key, default=value, action='store_false')
+                clean_parser.add_argument(cli_key, default=value, action='store_false')
+            else:
+                parser.add_argument(cli_key, default=value, type=type(value))
+                clean_parser.add_argument(cli_key, default=value, metavar='', type=type(value))
+
             args[name][key] = getattr(parser.parse_known_args()[0], data_key)
 
     clean_parser.parse_args(sys.argv[1:])
@@ -195,14 +212,16 @@ if __name__ == '__main__':
     elif vec == 'ray':
         args.vectorization = pufferlib.vectorization.Ray
 
-    if args.mode == 'sweep':
+    if args.sweep:
         args.track = True
     elif args.track:
         args.exp_name = init_wandb(args, env_module)
 
-    if args.mode == 'train':
+    if args.train:
         train(args, env_module)
-    elif args.mode == 'eval':
-        evaluate(args, env_module)
-    elif args.mode == 'sweep':
+    elif args.sweep:
         sweep(args, env_module, sweep_config)
+    else:
+        rollout(env_module.make_env, args.env_kwargs,
+            args.evaluate, device=args.args.device)
+

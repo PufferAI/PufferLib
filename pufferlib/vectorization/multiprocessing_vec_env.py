@@ -1,4 +1,9 @@
 from pdb import set_trace as T
+import time
+
+import selectors
+from multiprocessing import Process, Queue, Manager, Pipe
+from queue import Empty
 
 from pufferlib import namespace
 from pufferlib.vectorization.vec_env import (
@@ -23,65 +28,104 @@ def init(self: object = None,
         env_creator: callable = None,
         env_args: list = [],
         env_kwargs: dict = {},
-        num_workers: int = 1,
-        envs_per_worker: int = 1
+        num_envs: int = 1,
+        envs_per_worker: int = 1,
+        batch_size: int = None,
+        synchronous: bool = False,
         ) -> None:
-    driver_env, multi_env_cls, num_agents, preallocated_obs = setup(
-        env_creator, env_args, env_kwargs, num_workers, envs_per_worker)
+    driver_env, multi_env_cls, num_agents, batch_size = setup(
+        env_creator, env_args, env_kwargs, num_envs, envs_per_worker, batch_size)
 
-    from multiprocessing import Process, Queue
-    request_queues = [Queue() for _ in range(num_workers)]
-    response_queues = [Queue() for _ in range(num_workers)]
-
+    num_workers = num_envs // envs_per_worker
+    main_send_pipes, work_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
+    work_send_pipes, main_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
+    
     processes = [Process(
         target=_worker_process,
         args=(multi_env_cls, env_creator, env_args, env_kwargs,
-              envs_per_worker, request_queues[i], response_queues[i])) 
+              envs_per_worker, work_send_pipes[i], work_recv_pipes[i]))
         for i in range(num_workers)]
 
     for p in processes:
         p.start()
 
+    # Register all receive pipes with the selector
+    sel = selectors.DefaultSelector()
+    for pipe in main_recv_pipes:
+        sel.register(pipe, selectors.EVENT_READ)
+
     return namespace(self,
-        preallocated_obs = preallocated_obs,
         processes = processes,
-        request_queues = request_queues,
-        response_queues = response_queues,
+        sel = sel,
+        send_pipes = main_send_pipes,
+        recv_pipes = main_recv_pipes,
         driver_env = driver_env,
         num_agents = num_agents,
         num_workers = num_workers,
         envs_per_worker = envs_per_worker,
         async_handles = None,
         flag = RESET,
+        batch_size = batch_size,
+        prev_env_id = [],
+        synchronous = synchronous,
     )
 
-def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs, n, request_queue, response_queue):
+def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs, n, send_pipe, recv_pipe):
     envs = multi_env_cls(env_creator, env_args, env_kwargs, n=n)
 
     while True:
-        request, args, kwargs = request_queue.get()
+        request, args, kwargs = recv_pipe.recv()
         func = getattr(envs, request)
         response = func(*args, **kwargs)
-        response_queue.put(response)
+        send_pipe.send(response)
 
 def recv(state):
     recv_precheck(state)
-    return aggregate_recvs(state, [queue.get() for queue in state.response_queues])
+
+    recvs = []
+    next_env_id = []
+    if state.synchronous:
+        for env_id in range(state.batch_size):
+            response_pipe = state.recv_pipes[env_id]
+            response = response_pipe.recv()
+
+            o, r, d, t, i = response
+            recvs.append((o, r, d, t, i, env_id))
+            next_env_id.append(env_id)
+    else:
+        while len(recvs) < state.batch_size:
+            for key, _ in state.sel.select(timeout=None):
+                response_pipe = key.fileobj
+                env_id = state.recv_pipes.index(response_pipe)
+
+                if response_pipe.poll():  # Check if data is available
+                    response = response_pipe.recv()
+
+                    o, r, d, t, i = response
+                    recvs.append((o, r, d, t, i, env_id))
+                    next_env_id.append(env_id)
+
+                if len(recvs) == state.batch_size:
+                    break
+
+    state.prev_env_id = next_env_id
+    return aggregate_recvs(state, recvs)
 
 def send(state, actions):
     send_precheck(state)
     actions = split_actions(state, actions)
-    for queue, actions in zip(state.request_queues, actions):
-        queue.put(("step", [actions], {}))
+    assert len(actions) == state.batch_size
+    for i, atns in zip(state.prev_env_id, actions):
+        state.send_pipes[i].send(("step", [atns], {}))
 
 def async_reset(state, seed=None):
     reset_precheck(state)
     if seed is None:
-        for queue in state.request_queues:
-            queue.put(("reset", [], {}))
+        for pipe in state.send_pipes:
+            pipe.send(("reset", [], {}))
     else:
-        for idx, queue in enumerate(state.request_queues):
-            queue.put(("reset", [], {"seed": seed+idx}))
+        for idx, pipe in enumerate(state.send_pipes):
+            pipe.send(("reset", [], {"seed": seed+idx}))
 
 def reset(state, seed=None):
     async_reset(state)
@@ -92,25 +136,41 @@ def step(state, actions):
     return recv(state)
 
 def profile(state):
+    # TODO: Update this
     for queue in state.request_queues:
         queue.put(("profile", [], {}))
 
     return aggregate_profiles([queue.get() for queue in state.response_queues])
 
 def put(state, *args, **kwargs):
+    # TODO: Update this
     for queue in state.request_queues:
         queue.put(("put", args, kwargs))
 
 def get(state, *args, **kwargs):
+    # TODO: Update this
     for queue in state.request_queues:
         queue.put(("get", args, kwargs))
-    
-    return [queue.get() for queue in state.response_queues]
+
+    idx = -1
+    recvs = []
+    while len(recvs) < state.batch_size:
+        idx = (idx + 1) % state.num_workers
+        queue = state.response_queues[idx]
+
+        if queue.empty():
+            continue
+
+        response = queue.get()
+        if response is not None:
+            recvs.append(response)
+
+    return recvs
 
 
 def close(state):
-    for queue in state.request_queues:
-        queue.put(("close", [], {}))
+    for pipe in state.send_pipes:
+        pipe.send(("close", [], {}))
 
     for p in state.processes:
         p.terminate()
