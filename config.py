@@ -60,10 +60,10 @@ def all():
     '''All tested environments and platforms'''
     return {
         'atari': default,
-        #'box2d': default,
+        #'box2d': default, #Continuous
         'butterfly': default,
         'classic_control': classic_control,
-        'crafter': default,
+        'crafter': default, #YAML error in ruamel, probably pin
         'squared': squared,
         'dm_control': default,
         'dm_lab': default,
@@ -93,7 +93,9 @@ def classic_control():
 
 def nmmo():
     args = pufferlib.args.CleanPuffeRL(
-        num_envs=1,
+        num_envs=16,
+        envs_per_worker=1,
+        envpool_batch_size=6,
         batch_size=2**12,
         batch_rows=128,
     )
