@@ -50,7 +50,7 @@ compatible_environments = {
     'classic_control': [
     ],
     'crafter': [
-        'crafter==1.8.0',
+        'crafter==1.8.2',
     ],
     'dm_control': [
         'dm_control==1.0.11',

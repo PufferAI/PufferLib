@@ -4,6 +4,8 @@ import pufferlib.pytorch
 from pufferlib.environments.nethack import Policy
 
 
-class Recurrent(pufferlib.pytorch.LSTM):
-    def __init__(self, input_size=512, hidden_size=512, num_layers=1):
-        super().__init__(input_size, hidden_size, num_layers)
+class Recurrent:
+    input_size = 512
+    hidden_size = 512
+    num_layers = 1
+

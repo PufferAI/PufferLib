@@ -63,7 +63,7 @@ def all():
         #'box2d': default, #Continuous
         'butterfly': default,
         'classic_control': classic_control,
-        'crafter': default, #YAML error in ruamel, probably pin
+        'crafter': default,
         'squared': squared,
         'dm_control': default,
         'dm_lab': default,
@@ -75,7 +75,7 @@ def all():
         'minihack': default,
         'nethack': default,
         'nmmo': nmmo,
-        'openspiel': openspiel,
+        'open_spiel': open_spiel,
         'pokemon_red': pokegym,
         'pokemon_red_pip': pokegym,
         'links_awaken_pip': pokegym,
@@ -101,7 +101,7 @@ def nmmo():
     )
     return args, make_sweep_config()
 
-def openspiel():
+def open_spiel():
     from itertools import chain
     num_opponents = 1
     args = pufferlib.args.CleanPuffeRL(

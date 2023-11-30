@@ -12,13 +12,11 @@ from pufferlib.environments import try_import
 try_import("nmmo")
 from nmmo.entity.entity import EntityState
 
-class Recurrent(pufferlib.pytorch.LSTM):
-    def __init__(self, input_size=256, hidden_size=256, num_layers=1):
-        super().__init__(
-            input_size=input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-        )
+
+class Recurrent:
+    input_size = 256
+    hidden_size = 256
+    num_layers = 1
 
 class Policy(pufferlib.models.Policy):
   NUM_ATTRS = 34

@@ -44,8 +44,13 @@ def make_config(env):
     policy_kwargs = get_init_args(env_module.Policy.__init__)
 
     recurrent_kwargs = {}
-    if env_module.Recurrent is not None:
-        recurrent_kwargs = get_init_args(env_module.Recurrent.__init__)
+    recurrent = env_module.Recurrent
+    if recurrent is not None:
+        recurrent_kwargs = dict(
+            input_size=recurrent.input_size,
+            hidden_size=recurrent.hidden_size,
+            num_layers=recurrent.num_layers
+        )
 
     return env_module, sweep_config, pufferlib.namespace(
         args=args,

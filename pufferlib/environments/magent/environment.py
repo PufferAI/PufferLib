@@ -7,7 +7,7 @@ import pufferlib.wrappers
 
 
 def env_creator(name):
-    pufferlib.environments.try_import('pettingzoo.magent')
+    pufferlib.environments.try_import('pettingzoo.magent', 'magent')
     if name == 'battle_v4':
         from pettingzoo.magent import battle_v4
     else:

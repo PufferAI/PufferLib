@@ -73,6 +73,7 @@ class PolicyPool:
             else:
                 policy = policies[idx - 1] # Learner not included
 
+            # NOTE: This does not copy! Probably should.
             if lstm_state is not None:
                 h = lstm_state[0][:, samp]
                 c = lstm_state[1][:, samp]

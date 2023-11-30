@@ -4,7 +4,7 @@ import numpy as np
 import pufferlib
 from pufferlib import namespace
 
-from pufferlib.environments.openspiel.utils import (
+from pufferlib.environments.open_spiel.utils import (
     solve_chance_nodes,
     get_obs_and_infos,
     observation_space,

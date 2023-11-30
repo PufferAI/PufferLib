@@ -10,7 +10,7 @@ def try_import(module_path, package_name=None):
         raise ImportError(
             f'{e.args[0]}\n\n'
             'This is probably an installation error. Try: '
-            'pip install pufferlib[{package_name}]. '
+            f'pip install pufferlib[{package_name}]. '
 
             'Note that some environments have non-python dependencies. '
             'These are included in PufferTank. Or, you can install '

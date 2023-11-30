@@ -58,6 +58,7 @@ class CleanPuffeRL:
     num_envs: int = 8
     envs_per_worker: int = 1
     envpool_batch_size: int = None
+    synchroneous: bool = False
     verbose: bool = True
     data_dir: str = 'experiments'
     checkpoint_interval: int = 200

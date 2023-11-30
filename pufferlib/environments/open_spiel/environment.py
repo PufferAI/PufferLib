@@ -6,18 +6,9 @@ from pufferlib import namespace
 import pufferlib.emulation
 import pufferlib.environments
 
-from pufferlib.environments.openspiel.gymnasium_environment import (
-    OpenSpielGymnasiumEnvironment
-)
-
-from pufferlib.environments.openspiel.pettingzoo_environment import (
-    OpenSpielPettingZooEnvironment
-)
-
-
 def env_creator():
     '''OpenSpiel creation function'''
-    pyspiel = pufferlib.environment.try_import('pyspiel', 'openspiel')
+    pyspiel = pufferlib.environments.try_import('pyspiel', 'open_spiel')
     return pyspiel.load_game
 
 def make_env(
@@ -32,6 +23,13 @@ def make_env(
         min_simulations = max_simulations
 
     env = env_creator()(name)
+
+    from pufferlib.environments.open_spiel.gymnasium_environment import (
+        OpenSpielGymnasiumEnvironment
+    )
+    from pufferlib.environments.open_spiel.pettingzoo_environment import (
+        OpenSpielPettingZooEnvironment
+    )
 
     kwargs = dict(
         env=env,

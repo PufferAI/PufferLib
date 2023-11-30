@@ -13,9 +13,6 @@ import torch.optim as optim
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-import pufferlib.vectorization
-import pufferlib.registry.atari
-
 
 def parse_args():
     # fmt: off
@@ -144,12 +141,14 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # PufferLib env setup
-    envs = pufferlib.vectorization.Serial(
-        env_creator = pufferlib.registry.atari.make_env,
+    import pufferlib.vectorization
+    import pufferlib.environments.atari
+    envs = pufferlib.vectorization.Multiprocessing(
+        env_creator = pufferlib.environments.atari.make_env,
         env_args=[args.env_id],
         env_kwargs={'framestack': 4},
-        num_workers=args.num_envs,
-        envs_per_worker=1,
+        num_envs=args.num_envs,
+        synchronous=True,
     )
 
     agent = Agent(envs).to(device)
@@ -190,7 +189,7 @@ if __name__ == "__main__":
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            next_obs, reward, done, _, info, _, _ = envs.step(action.cpu().numpy())
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
