@@ -223,6 +223,8 @@ if __name__ == '__main__':
     elif args.track:
         args.exp_name = init_wandb(args, env_module)
 
+
+    assert sum((args.train, args.sweep, args.evaluate is not None)) == 1, 'Must specify exactly one of --train, --sweep, or --evaluate'
     if args.train:
         train(args, env_module)
     elif args.sweep:
