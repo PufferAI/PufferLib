@@ -78,7 +78,7 @@ def all():
         'open_spiel': open_spiel,
         'pokemon_red': pokegym,
         'pokemon_red_pip': pokegym,
-        #'links_awaken_pip': pokegym,
+        'links_awaken': pokegym,
         'procgen': procgen,
         #'smac': default,
         #'stable-retro': default,
