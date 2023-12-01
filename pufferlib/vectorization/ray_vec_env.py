@@ -5,6 +5,7 @@ import gym
 from pufferlib import namespace
 from pufferlib.vectorization.vec_env import (
     RESET,
+    calc_scale_params,
     setup,
     single_observation_space,
     single_action_space,
@@ -25,13 +26,15 @@ def init(self: object = None,
         env_creator: callable = None,
         env_args: list = [],
         env_kwargs: dict = {},
-        num_workers: int = 1,
+        num_envs: int = 1,
         envs_per_worker: int = 1,
-        batch_size: int = None,
+        envs_per_batch: int = None,
         synchronous: bool = False,
         ) -> None:
-    driver_env, multi_env_cls, num_agents = setup(
-        env_creator, env_args, env_kwargs, num_workers, envs_per_worker, batch_size)
+    driver_env, multi_env_cls, agents_per_env = setup(
+        env_creator, env_args, env_kwargs)
+    num_workers, workers_per_batch, envs_per_batch, agents_per_batch, agents_per_worker = calc_scale_params(
+        num_envs, envs_per_batch, envs_per_worker, agents_per_env)
 
     import ray
     if not ray.is_initialized():
@@ -50,14 +53,18 @@ def init(self: object = None,
     return namespace(self,
         multi_envs = multi_envs,
         driver_env = driver_env,
-        num_agents = num_agents,
+        num_envs = num_envs,
         num_workers = num_workers,
+        workers_per_batch = workers_per_batch,
+        envs_per_batch = envs_per_batch,
         envs_per_worker = envs_per_worker,
+        agents_per_batch = agents_per_batch,
+        agents_per_worker = agents_per_worker,
+        agents_per_env = agents_per_env,
         async_handles = None,
         flag = RESET,
         ray = ray, # Save a copy for internal use
         prev_env_id = [],
-        batch_size = num_workers if batch_size is None else batch_size // envs_per_worker,
         synchronous = synchronous,
     )
 
@@ -68,10 +75,10 @@ def recv(state):
     next_env_id = []
     if state.synchronous:
         recvs = state.ray.get(state.async_handles)
-        env_id = [_ for _ in range(state.batch_size)]
+        env_id = [_ for _ in range(state.workers_per_batch)]
     else:
         ready, busy = state.ray.wait(
-            state.async_handles, num_returns=state.batch_size)
+            state.async_handles, num_returns=state.workers_per_batch)
         env_id = [state.async_handles.index(e) for e in ready]
         recvs = state.ray.get(ready)
 
@@ -95,7 +102,8 @@ def async_reset(state, seed=None):
 
 def reset(state, seed=None):
     async_reset(state)
-    return recv(state)[0]
+    obs, _, _, _, info, env_id, mask = recv(state)
+    return obs, info, env_id, mask
 
 def step(state, actions):
     send(state, actions)

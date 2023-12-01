@@ -1,10 +1,13 @@
 # Section 1: Emulation
 import pufferlib.emulation
+import pufferlib.wrappers
 
 import nle, nmmo
 
 def nmmo_creator():
-    return pufferlib.emulation.PettingZooPufferEnv(env_creator=nmmo.Env)
+    env = nmmo.Env()
+    env = pufferlib.wrappers.PettingZooTruncatedWrapper(env)
+    return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
 def nethack_creator():
     return pufferlib.emulation.GymnasiumPufferEnv(env_creator=nle.env.NLE)
@@ -12,18 +15,18 @@ def nethack_creator():
 # Section 2: Vectorization
 import pufferlib.vectorization
 
-# vec = pufferlib.vectorization.Serial
-vec = pufferlib.vectorization.Multiprocessing
+vec = pufferlib.vectorization.Serial
+# vec = pufferlib.vectorization.Multiprocessing
 # vec = pufferlib.vectorization.Ray
 
-envs = vec(nmmo_creator, num_workers=2, envs_per_worker=2)
+envs = vec(nmmo_creator, num_envs=4, envs_per_worker=2)
 
-sync = True
-if sync:
-    obs = envs.reset()
-else:
-    envs.async_reset()
-    obs, _, _, _ = envs.recv()
+# Synchronous API - reset/step
+# obs = envs.reset()[0]
+
+# Asynchronous API - async_reset, send/recv
+envs.async_reset()
+obs = envs.recv()[0]
 
 # Section 3: Policy
 import torch
@@ -52,7 +55,7 @@ obs = torch.Tensor(obs)
 policy = Policy(envs.driver_env)
 cleanrl_policy = pufferlib.frameworks.cleanrl.Policy(policy)
 actions = cleanrl_policy.get_action_and_value(obs)[0].numpy()
-obs, rewards, dones, infos = envs.step(actions)
+obs, rewards, terminals, truncateds, infos, env_id, mask = envs.step(actions)
 envs.close()
 
 # Section 4: Registry Full Example
@@ -61,17 +64,17 @@ import torch
 import pufferlib.models
 import pufferlib.vectorization
 import pufferlib.frameworks.cleanrl
-import pufferlib.registry.nmmo
+import pufferlib.environments.nmmo
 
-envs = pufferlib.vectorization.Multiprocessing(
-    env_creator=pufferlib.registry.nmmo.make_env,
-    num_workers=2, envs_per_worker=2)
+envs = pufferlib.vectorization.Ray(
+    env_creator=pufferlib.environments.nmmo.make_env,
+    num_envs=4, envs_per_worker=2)
 
-policy = pufferlib.registry.nmmo.Policy(envs.driver_env)
+policy = pufferlib.environments.nmmo.Policy(envs.driver_env)
 cleanrl_policy = pufferlib.frameworks.cleanrl.Policy(policy)
 
-obs = envs.reset()
+obs = envs.reset()[0]
 obs = torch.Tensor(obs)
 actions = cleanrl_policy.get_action_and_value(obs)[0].numpy()
-obs, rewards, dones, infos = envs.step(actions)
+obs, rewards, terminals, truncateds, infos, env_id, mask = envs.step(actions)
 envs.close()

@@ -1,4 +1,4 @@
-import pufferlib.cext as c
+import pufferlib.extensions as c
 import timeit
 
 

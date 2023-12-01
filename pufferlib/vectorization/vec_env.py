@@ -17,27 +17,37 @@ RECV = 2
 space_error_msg = 'env {env} must be an instance of GymnasiumPufferEnv or PettingZooPufferEnv'
 
 
-def setup(env_creator, env_args, env_kwargs, num_envs, envs_per_worker, batch_size):
+def calc_scale_params(num_envs, envs_per_batch, envs_per_worker, agents_per_env):
+    '''These calcs are simple but easy to mess up and hard to catch downstream.
+    We do them all at once here to avoid that'''
+
     assert num_envs % envs_per_worker == 0
     num_workers = num_envs // envs_per_worker
 
-    if batch_size is None:
-        batch_size = num_envs
+    envs_per_batch = num_envs if envs_per_batch is None else envs_per_batch
+    assert envs_per_batch % envs_per_worker == 0
+    assert envs_per_batch <= num_envs
+    assert envs_per_batch > 0
 
-    assert batch_size > 0
-    assert batch_size % envs_per_worker == 0
-    assert batch_size <= num_envs
+    workers_per_batch = envs_per_batch // envs_per_worker
+    assert workers_per_batch <= num_workers
 
+    agents_per_batch = envs_per_batch * agents_per_env
+    agents_per_worker = envs_per_worker * agents_per_env
+ 
+    return num_workers, workers_per_batch, envs_per_batch, agents_per_batch, agents_per_worker
+
+def setup(env_creator, env_args, env_kwargs):
     env_args, env_kwargs = create_precheck(env_creator, env_args, env_kwargs)
     driver_env = env_creator(*env_args, **env_kwargs)
 
     if isinstance(driver_env, GymnasiumPufferEnv):
         multi_env_cls = GymMultiEnv
-        num_agents = 1
+        env_agents = 1
         is_multiagent = False
     elif isinstance(driver_env, PettingZooPufferEnv):
         multi_env_cls = PettingZooMultiEnv
-        num_agents = len(driver_env.possible_agents)
+        env_agents = len(driver_env.possible_agents)
         is_multiagent = True
     else:
         raise TypeError(
@@ -46,7 +56,7 @@ def setup(env_creator, env_args, env_kwargs, num_envs, envs_per_worker, batch_si
         )
 
     obs_space = _single_observation_space(driver_env)
-    return driver_env, multi_env_cls, num_agents, batch_size
+    return driver_env, multi_env_cls, env_agents
 
 def _single_observation_space(env):
     if isinstance(env, GymnasiumPufferEnv):
@@ -93,11 +103,8 @@ def reset_precheck(state):
  
 def aggregate_recvs(state, recvs):
     obs, rewards, dones, truncateds, infos, env_ids = list(zip(*recvs))
-    assert all(state.batch_size == len(e) for e in
+    assert all(state.workers_per_batch == len(e) for e in
         (obs, rewards, dones, truncateds, infos, env_ids))
-
-    agents_per_worker = state.envs_per_worker * state.num_agents
-    batch_agents = state.batch_size * state.num_agents
 
     obs = np.stack(list(chain.from_iterable(obs)), 0)
     rewards = list(chain.from_iterable(rewards))
@@ -107,17 +114,17 @@ def aggregate_recvs(state, recvs):
 
     # TODO: Masking will break for 1-agent PZ envs
     # Replace with check against is_multiagent (add it to state)
-    if state.num_agents > 1:
+    if state.agents_per_env > 1:
         mask = [e['mask'] for ee in infos for e in ee.values()]
     else:
         mask = [e['mask'] for e in infos]
 
     env_ids = np.concatenate([np.arange( # Per-agent env indexing
-        i*agents_per_worker, (i+1)*agents_per_worker) for i in env_ids])
+        i*state.agents_per_worker, (i+1)*state.agents_per_worker) for i in env_ids])
 
-    assert all(batch_agents == len(e) for e in
+    assert all(state.agents_per_batch == len(e) for e in
         (obs, rewards, dones, truncateds, env_ids, mask))
-    assert len(infos) == state.batch_size
+    assert len(infos) == state.envs_per_batch
     return obs, rewards, dones, truncateds, infos, env_ids, mask
 
 def split_actions(state, actions, env_id=None):
@@ -125,10 +132,8 @@ def split_actions(state, actions, env_id=None):
     if type(actions) == list:
         actions = np.array(actions)
 
-    assert len(actions) == state.batch_size * state.num_agents
-    split = np.array_split(actions, state.batch_size)
-    assert len(split) == state.batch_size
-    return split
+    assert len(actions) == state.agents_per_batch
+    return np.array_split(actions, state.workers_per_batch)
 
 def aggregate_profiles(profiles):
     return list(chain.from_iterable([profiles]))

@@ -16,6 +16,9 @@ class GymToGymnasium:
         observation, reward, done, info = self.env.step(action)
         return observation, reward, done, False, info
 
+    def close(self):
+        self.env.close()
+
 class PettingZooTruncatedWrapper:
     def __init__(self, env):
         self.env = env
@@ -43,3 +46,6 @@ class PettingZooTruncatedWrapper:
         observations, rewards, dones, infos = self.env.step(actions)
         truncated = {k: False for k in observations}
         return observations, rewards, dones, truncated, infos
+
+    def close(self):
+        self.env.close()

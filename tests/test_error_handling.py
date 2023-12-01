@@ -34,7 +34,7 @@ def test_gym_api_usage(env_cls, print_errors=True):
         print_if(e, print_errors)
 
     action = env.action_space.sample()
-    obs, rewards, dones, infos = env.step(action)
+    obs, rewards, terminals, truncateds, infos = env.step(action)
 
 def test_pettingzoo_api_usage(env_cls, print_errors=True):
     env = pufferlib.emulation.PettingZooPufferEnv(env_creator=env_cls)
@@ -76,14 +76,12 @@ def test_pettingzoo_api_usage(env_cls, print_errors=True):
 
 
     actions = {agent: env.action_space(agent).sample() for agent in env.agents}
-    obs, rewards, dones, infos = env.step(actions)
+    obs, rewards, terminals, truncateds, infos = env.step(actions)
 
 if __name__ == '__main__':
-    import mock_environments
+    from pufferlib.environments import test
     first = True
 
-    for env_cls in mock_environments.MOCK_SINGLE_AGENT_ENVIRONMENTS:
-        test_gym_api_usage(env_cls)
-
-    for env_cls in mock_environments.MOCK_MULTI_AGENT_ENVIRONMENTS:
-        test_pettingzoo_api_usage(env_cls)
+    
+    test_gym_api_usage(test.GymnasiumTestEnv)
+    test_pettingzoo_api_usage(test.PettingZooTestEnv)

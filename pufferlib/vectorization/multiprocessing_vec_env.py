@@ -8,6 +8,7 @@ from queue import Empty
 from pufferlib import namespace
 from pufferlib.vectorization.vec_env import (
     RESET,
+    calc_scale_params,
     setup,
     single_observation_space,
     single_action_space,
@@ -30,13 +31,14 @@ def init(self: object = None,
         env_kwargs: dict = {},
         num_envs: int = 1,
         envs_per_worker: int = 1,
-        batch_size: int = None,
+        envs_per_batch: int = None,
         synchronous: bool = False,
         ) -> None:
-    driver_env, multi_env_cls, num_agents, batch_size = setup(
-        env_creator, env_args, env_kwargs, num_envs, envs_per_worker, batch_size)
+    driver_env, multi_env_cls, agents_per_env = setup(
+        env_creator, env_args, env_kwargs)
+    num_workers, workers_per_batch, envs_per_batch, agents_per_batch, agents_per_worker = calc_scale_params(
+        num_envs, envs_per_batch, envs_per_worker, agents_per_env)
 
-    num_workers = num_envs // envs_per_worker
     main_send_pipes, work_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
     work_send_pipes, main_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
     
@@ -60,12 +62,16 @@ def init(self: object = None,
         send_pipes = main_send_pipes,
         recv_pipes = main_recv_pipes,
         driver_env = driver_env,
-        num_agents = num_agents,
+        num_envs = num_envs,
         num_workers = num_workers,
+        workers_per_batch = workers_per_batch,
+        envs_per_batch = envs_per_batch,
         envs_per_worker = envs_per_worker,
+        agents_per_batch = agents_per_batch,
+        agents_per_worker = agents_per_worker,
+        agents_per_env = agents_per_env,
         async_handles = None,
         flag = RESET,
-        batch_size = batch_size,
         prev_env_id = [],
         synchronous = synchronous,
     )
@@ -93,7 +99,7 @@ def recv(state):
             recvs.append((o, r, d, t, i, env_id))
             next_env_id.append(env_id)
     else:
-        while len(recvs) < state.batch_size:
+        while len(recvs) < state.workers_per_batch:
             for key, _ in state.sel.select(timeout=None):
                 response_pipe = key.fileobj
                 env_id = state.recv_pipes.index(response_pipe)
@@ -105,7 +111,7 @@ def recv(state):
                     recvs.append((o, r, d, t, i, env_id))
                     next_env_id.append(env_id)
 
-                if len(recvs) == state.batch_size:
+                if len(recvs) == state.workers_per_batch:
                     break
 
     state.prev_env_id = next_env_id
@@ -114,7 +120,7 @@ def recv(state):
 def send(state, actions):
     send_precheck(state)
     actions = split_actions(state, actions)
-    assert len(actions) == state.batch_size
+    assert len(actions) == state.workers_per_batch
     for i, atns in zip(state.prev_env_id, actions):
         state.send_pipes[i].send(("step", [atns], {}))
 
@@ -129,7 +135,8 @@ def async_reset(state, seed=None):
 
 def reset(state, seed=None):
     async_reset(state)
-    return recv(state)[0]
+    obs, _, _, _, info, env_id, mask = recv(state)
+    return obs, info, env_id, mask
 
 def step(state, actions):
     send(state, actions)
@@ -154,7 +161,7 @@ def get(state, *args, **kwargs):
 
     idx = -1
     recvs = []
-    while len(recvs) < state.batch_size:
+    while len(recvs) < state.batch_size // state.envs_per_worker:
         idx = (idx + 1) % state.num_workers
         queue = state.response_queues[idx]
 

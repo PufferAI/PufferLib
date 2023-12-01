@@ -1,9 +1,12 @@
+# TODO: Update this test for the new policy pool code
+
 import unittest
 from unittest.mock import Mock
 
 import torch
 
 from pufferlib.policy_pool import PolicyPool
+
 
 class MockPolicy:
     def get_action_and_value(self, obs, state, done):

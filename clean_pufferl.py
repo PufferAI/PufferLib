@@ -104,13 +104,13 @@ def init(
             env_kwargs=env_creator_kwargs,
             num_envs=config.num_envs,
             envs_per_worker=config.envs_per_worker,
-            batch_size=config.envpool_batch_size,
+            envs_per_batch=config.envs_per_batch,
             #synchronous=config.synchronous,
         )
 
     obs_shape = pool.single_observation_space.shape
     atn_shape = pool.single_action_space.shape
-    num_agents = pool.num_agents
+    num_agents = pool.agents_per_env
     total_agents = num_agents * config.num_envs
 
     # If data_dir is provided, load the resume state
@@ -139,7 +139,7 @@ def init(
 
 
     # Create policy pool
-    pool_agents = num_agents * pool.batch_size
+    pool_agents = num_agents * pool.envs_per_batch
     policy_pool = pufferlib.policy_pool.PolicyPool(
         agent, pool_agents, atn_shape, device, path,
         config.pool_kernel, policy_selector,

@@ -1,10 +1,13 @@
+# TODO: Figure out what I want to do with this for 0.5
+# This is a stupidly complicated test to maintain. Do we
+# lose anything by testing emulation, vectorization, and performance
+# fully separately?
 from pdb import set_trace as T
 
 import numpy as np
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.registry
 import pufferlib.vectorization
 
 
@@ -162,7 +165,7 @@ def test_pettingzoo_vectorization(env_cls, vectorization, steps=100, num_workers
 
 
 if __name__ == '__main__':
-    import mock_environments
+    from pufferlib.environments import test
     import numpy as np
 
     performance = []
@@ -184,7 +187,7 @@ if __name__ == '__main__':
         for num_workers in num_workers_list:
             for envs_per_worker in envs_per_worker_list:
                 raw_gym = []
-                for env_cls in mock_environments.MOCK_SINGLE_AGENT_ENVIRONMENTS:
+                for env_cls in test.MOCK_SINGLE_AGENT_ENVIRONMENTS:
                     raw_t, puf_t = test_gym_vectorization(
                         env_cls, vectorization,
                         num_workers=num_workers,
@@ -212,7 +215,7 @@ if __name__ == '__main__':
         for num_workers in num_workers_list:
             for envs_per_worker in envs_per_worker_list:
                 raw_pz = []
-                for env_cls in mock_environments.MOCK_MULTI_AGENT_ENVIRONMENTS:
+                for env_cls in test.MOCK_MULTI_AGENT_ENVIRONMENTS:
                     raw_t, puf_t = test_pettingzoo_vectorization(
                         env_cls, vectorization,
                         num_workers=num_workers,

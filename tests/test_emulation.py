@@ -4,18 +4,19 @@ import numpy as np
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.registry
+import pufferlib.environments
 import pufferlib.utils
 import pufferlib.vectorization
 
 
-def test_gym_emulation(env_cls, steps=100):
+def test_gym_emulation(env_cls, observation_space, action_space, steps=100):
     raw_profiler = pufferlib.utils.Profiler()
     puf_profiler = pufferlib.utils.Profiler()
 
     # Do not profile env creation
-    raw_env = env_cls()
-    puf_env = pufferlib.emulation.GymnasiumPufferEnv(env_creator=env_cls)
+    raw_env = env_cls(observation_space, action_space)
+    puf_env = pufferlib.emulation.GymnasiumPufferEnv(env_creator=env_cls,
+        env_args=(observation_space, action_space))
 
     raw_done = puf_done = True
     raw_truncated = puf_truncated = False
@@ -61,14 +62,14 @@ def test_gym_emulation(env_cls, steps=100):
 
     return raw_profiler.elapsed/steps, puf_profiler.elapsed/steps
 
-
-def test_pettingzoo_emulation(env_cls, steps=100):
+def test_pettingzoo_emulation(env_cls, observation_space, action_space, steps=100):
     raw_profiler = pufferlib.utils.Profiler()
     puf_profiler = pufferlib.utils.Profiler()
 
     # Do not profile env creation
-    raw_env = env_cls()
-    puf_env = pufferlib.emulation.PettingZooPufferEnv(env_creator=env_cls)
+    raw_env = env_cls(observation_space, action_space)
+    puf_env = pufferlib.emulation.PettingZooPufferEnv(env_creator=env_cls,
+        env_args=(observation_space, action_space))
 
     flat_obs_space = puf_env.flat_observation_space
 
@@ -134,13 +135,15 @@ def test_pettingzoo_emulation(env_cls, steps=100):
 
 
 if __name__ == '__main__':
-    import mock_environments
+    from pufferlib.environments import test
 
     raw_gym, puf_gym= [], []
-    for env_cls in mock_environments.MOCK_SINGLE_AGENT_ENVIRONMENTS:
-        raw_t, puf_t = test_gym_emulation(env_cls)
-        raw_gym.append(raw_t)
-        puf_gym.append(puf_t)
+    for obs_space in test.MOCK_OBSERVATION_SPACES:
+        for atn_space in test.MOCK_ACTION_SPACES:
+            raw_t, puf_t = test_gym_emulation(
+                test.GymnasiumTestEnv, obs_space, atn_space)
+            raw_gym.append(raw_t)
+            puf_gym.append(puf_t)
 
     gym_overhead = (np.array(puf_gym) - np.array(raw_gym))*1000
     gym_performance = (
@@ -152,10 +155,12 @@ if __name__ == '__main__':
     print(gym_performance)
 
     raw_pz, puf_pz = [], []
-    for env_cls in mock_environments.MOCK_MULTI_AGENT_ENVIRONMENTS:
-        raw_t, puf_t = test_pettingzoo_emulation(env_cls)
-        raw_pz.append(raw_t)
-        puf_pz.append(puf_t)
+    for obs_space in test.MOCK_OBSERVATION_SPACES:
+        for atn_space in test.MOCK_ACTION_SPACES:
+            raw_t, puf_t = test_pettingzoo_emulation(
+                test.PettingZooTestEnv, obs_space, atn_space)
+            raw_pz.append(raw_t)
+            puf_pz.append(puf_t)
 
     pz_overhead = (np.array(puf_pz) - np.array(raw_pz))*1000
     pz_performance = (

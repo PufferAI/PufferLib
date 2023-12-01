@@ -165,12 +165,13 @@ def evaluate(args, env_module):
         env.render()
         step += 1
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Parse environment argument', add_help=False)
     parser.add_argument('--env', type=str, default='pokemon_red', help='Environment name')
     parser.add_argument('--train', action='store_true', help='Train')
     parser.add_argument('--sweep', action='store_true', help='WandB Train Sweep')
-    parser.add_argument('--evaluate', type=str, default='model_pip.pt', help='Evaluate')
+    parser.add_argument('--evaluate', type=str, help='Path to your .pt file')
     parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
     parser.add_argument('--exp-name', type=str, default=None, help="Resume from experiment")
     parser.add_argument('--vectorization', type=str, default='serial', help='Vectorization method (serial, multiprocessing, ray)')

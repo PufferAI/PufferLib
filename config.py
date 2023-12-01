@@ -78,7 +78,7 @@ def all():
         'open_spiel': open_spiel,
         'pokemon_red': pokegym,
         'pokemon_red_pip': pokegym,
-        'links_awaken_pip': pokegym,
+        #'links_awaken_pip': pokegym,
         'procgen': procgen,
         #'smac': default,
         #'stable-retro': default,
@@ -93,10 +93,10 @@ def classic_control():
 
 def nmmo():
     args = pufferlib.args.CleanPuffeRL(
-        num_envs=16,
+        num_envs=64,
+        envs_per_batch=24,
         envs_per_worker=1,
-        envpool_batch_size=6,
-        batch_size=2**12,
+        batch_size=2**16,
         batch_rows=128,
     )
     return args, make_sweep_config()
@@ -118,12 +118,9 @@ def open_spiel():
 def pokegym():
     args = pufferlib.args.CleanPuffeRL(
         total_timesteps=100_000_000,
-        num_envs=24,
+        num_envs=64,
         envs_per_worker=1,
         envpool_batch_size=24,
-        #num_envs=128,
-        #envs_per_worker=2,
-        #envpool_batch_size=48,
         update_epochs=3,
         gamma=0.998,
         batch_size=2**15,
@@ -168,6 +165,7 @@ def procgen():
     )
     '''
 
+    # Experimental defaults from CARBS
     args = pufferlib.args.CleanPuffeRL(
         total_timesteps=8_000_000,
         learning_rate=0.0002691194621325188,

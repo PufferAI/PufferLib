@@ -1,4 +1,5 @@
 from pdb import set_trace as T
+import numpy as np
 
 import torch
 from torch.distributions import Categorical
@@ -8,21 +9,21 @@ import gym
 import pufferlib
 import pufferlib.models
 import pufferlib.frameworks.cleanrl
-import pufferlib.registry.classic_control
+import pufferlib.environments.classic_control
 import pufferlib.vectorization
 
 
 def test_cleanrl_utils():
     envs = pufferlib.vectorization.Serial(
-        env_creator=pufferlib.registry.classic_control.make_cartpole_env,
-        num_workers=2, envs_per_worker=2
+        env_creator=pufferlib.environments.classic_control.make_env,
+        num_envs=4, envs_per_worker=2
     )
  
     obs = envs.reset()
 
     policy = pufferlib.models.Default(envs)
     policy = pufferlib.models.RecurrentWrapper(envs, policy)
-    policy = pufferlib.frameworks.cleanrl.Policy(policy)
+    policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)
 
     obs = torch.tensor(obs).unsqueeze(1).float()
     actions = policy.get_action_and_value(obs)
@@ -42,7 +43,7 @@ def test_sample_logits():
     nvec = [3, 7, 4]
     md = gym.spaces.MultiDiscrete(nvec)
     md_logits = [torch.rand(batch, n) for n in nvec]
-    md_action = torch.tensor([md.sample() for _ in range(batch)])
+    md_action = torch.tensor(np.array([md.sample() for _ in range(batch)]))
 
     a1, l1, e1 = pufferlib.frameworks.cleanrl.sample_logits(d_logits)
     a2, l2, e2 = correct_sample_logits(d_logits)
@@ -82,5 +83,5 @@ def correct_sample_logits(logits, action=None):
 
  
 if __name__ == '__main__':
-    #test_cleanrl_utils()
-    test_sample_logits()
+    test_cleanrl_utils()
+    #test_sample_logits()

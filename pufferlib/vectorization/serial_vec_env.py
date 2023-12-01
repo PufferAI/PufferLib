@@ -5,6 +5,7 @@ import gym
 from pufferlib import namespace
 from pufferlib.vectorization.vec_env import (
     RESET,
+    calc_scale_params,
     setup,
     single_observation_space,
     single_action_space,
@@ -26,33 +27,39 @@ def init(self: object = None,
         env_kwargs: dict = {},
         num_envs: int = 1,
         envs_per_worker: int = 1,
-        batch_size: int = None,
+        envs_per_batch: int = None,
         synchronous: bool = False,
         ) -> None:
-    driver_env, multi_env_cls, num_agents, batch_size = setup(
-        env_creator, env_args, env_kwargs, num_envs, envs_per_worker, batch_size)
+    driver_env, multi_env_cls, agents_per_env = setup(
+        env_creator, env_args, env_kwargs)
+    num_workers, workers_per_batch, envs_per_batch, agents_per_batch, agents_per_worker = calc_scale_params(
+        num_envs, envs_per_batch, envs_per_worker, agents_per_env)
 
     multi_envs = [
         multi_env_cls(
             env_creator, env_args, env_kwargs, envs_per_worker,
-        ) for _ in range(num_envs // envs_per_worker)
+        ) for _ in range(num_workers)
     ]
 
     return namespace(self,
         multi_envs = multi_envs,
         driver_env = driver_env,
-        num_agents = num_agents,
         num_envs = num_envs,
+        num_workers = num_workers,
+        workers_per_batch = workers_per_batch,
+        envs_per_batch = envs_per_batch,
         envs_per_worker = envs_per_worker,
+        agents_per_batch = agents_per_batch,
+        agents_per_worker = agents_per_worker,
+        agents_per_env = agents_per_env,
         async_handles = None,
         flag = RESET,
-        batch_size = batch_size,
     )
 
 def recv(state):
     recv_precheck(state)
     recvs = [(o, r, d, t, i, env_id) for (o, r, d, t, i), env_id
-        in zip(state.data, range(state.batch_size // state.envs_per_worker))]
+        in zip(state.data, range(state.workers_per_batch))]
     return aggregate_recvs(state, recvs)
 
 def send(state, actions):
@@ -69,7 +76,8 @@ def async_reset(state, seed=None):
 
 def reset(state, seed=None):
     async_reset(state)
-    return recv(state)[0]
+    obs, _, _, _, info, env_id, mask = recv(state)
+    return obs, info, env_id, mask
 
 def step(state, actions):
     send(state, actions)

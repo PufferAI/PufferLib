@@ -8,14 +8,13 @@ import pufferlib
 import pufferlib.utils
 import pufferlib.exceptions
 import pufferlib.emulation
-import pufferlib.registry
+import pufferlib.environments
 
 import config
 
-#def test_environments(steps=1_000_000, timeout=30):
-def test_environment(name, steps=1, timeout=30):
+def test_environment(name, timeout=5):
     try:
-        module = importlib.import_module(f'pufferlib.registry.{name}')
+        module = importlib.import_module(f'pufferlib.environments.{name}')
     except pufferlib.exceptions.SetupError as e:
         raise
 
@@ -37,10 +36,9 @@ def test_environment(name, steps=1, timeout=30):
         raise TypeError(f'Unknown environment type: {type(puf_env)}')
 
     start = time.time()
-    for step in tqdm(range(steps)):
-        if time.time() - start > timeout:
-            break
-
+    step = 0
+    while time.time() - start < timeout:
+        step += 1
         if multiagent:
             total_steps += len(raw_obs)
             raw_actions = {}
