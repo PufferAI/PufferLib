@@ -112,6 +112,13 @@ class CustomPolicyFileRecord(PolicyRecord):
   def save(self):
     raise NotImplementedError
 
+  def policy(self, policy_args=[], policy_kwargs={}, device=None) -> Policy:
+    if device is None:
+      device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    if self._policy is not None:
+      return self._policy.to(device)
+    return None
+
 class DirectoryPolicyStore(PolicyStore):
   def __init__(self, path: str):
     self._path = path
