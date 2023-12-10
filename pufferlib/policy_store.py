@@ -1,6 +1,7 @@
 from pdb import set_trace as T
 from typing import Dict, Set, List, Callable
-
+import types
+import pickle
 import torch
 
 import logging
@@ -80,6 +81,8 @@ class FilePolicyRecord(PolicyRecord):
     temp_path = self._path + ".tmp"
     torch.save(self._policy, temp_path)
     os.rename(temp_path, self._path + '.pt')
+    # save only the state_dict
+    torch.save(self._policy.state_dict(), self._path + '_state.pth')
 
   def policy(self, policy_args=[], policy_kwargs={}, device=None) -> Policy:
     if self._policy is not None:
@@ -87,6 +90,27 @@ class FilePolicyRecord(PolicyRecord):
     if device is None:
       device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     return torch.load(self._path + '.pt', map_location=device)
+
+class CustomPolicyFileRecord(PolicyRecord):
+  def __init__(self, name: str, pkl_file_path: str):
+    self._pkl_file_path = pkl_file_path
+    # load the pickle file
+    with open(pkl_file_path, "rb") as f:
+      checkpoint = pickle.load(f)
+    policy = self.import_policy_from_src(checkpoint["policy_src"])
+    policy.load_state_dict(checkpoint["state_dict"])
+    super().__init__(name, policy)
+
+  @staticmethod
+  def import_policy_from_src(code: str):
+    # NOTE: this is a temporary hack. Should be removed ASAP
+    module = types.ModuleType("CustomPolicy")
+    exec(code, module.__dict__)
+    return module.make_policy()
+
+  # Read-only. Do NOT support save for now.
+  def save(self):
+    raise NotImplementedError
 
 class DirectoryPolicyStore(PolicyStore):
   def __init__(self, path: str):
@@ -108,4 +132,7 @@ class DirectoryPolicyStore(PolicyStore):
       if file.endswith(".pt"):
         name = file[:-3]
         policies[name] = FilePolicyRecord(name, os.path.join(self._path, name))
+      if file.endswith(".pkl"):
+        name = file[:-4]
+        policies[name] = CustomPolicyFileRecord(name, os.path.join(self._path, file))
     return policies
