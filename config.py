@@ -118,13 +118,13 @@ def open_spiel():
 def pokegym():
     args = pufferlib.args.CleanPuffeRL(
         total_timesteps=100_000_000,
-        num_envs=64,
+        num_envs=4,
         envs_per_worker=1,
-        envpool_batch_size=24,
+        envpool_batch_size=4,
         update_epochs=3,
         gamma=0.998,
-        batch_size=2**15,
-        batch_rows=128,
+        batch_size=2**10,
+        batch_rows=16,
     )
     return args, make_sweep_config()
 

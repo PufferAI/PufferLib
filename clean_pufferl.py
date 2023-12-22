@@ -551,7 +551,8 @@ def rollout(env_creator, env_kwargs, model_path, device='cuda', verbose=True):
         return_val += reward
 
         counts_map = env.env.counts_map
-        if env_kwargs['headless'] and np.sum(counts_map) > 0 and step % 100 == 0:
+        #if env_kwargs['headless'] and np.sum(counts_map) > 0 and step % 100 == 0:
+        if np.sum(counts_map) > 0 and step % 500 == 0:
             overlay = make_pokemon_red_overlay(bg, counts_map)
             cv2.imshow('Pokemon Red', overlay[1000:][::4, ::4])
             cv2.waitKey(1)
