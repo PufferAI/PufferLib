@@ -91,7 +91,7 @@ def recv(state):
     recvs = []
     next_env_id = []
     if state.synchronous:
-        for env_id in range(state.batch_size):
+        for env_id in range(state.workers_per_batch):
             response_pipe = state.recv_pipes[env_id]
             response = response_pipe.recv()
 
@@ -161,7 +161,7 @@ def get(state, *args, **kwargs):
 
     idx = -1
     recvs = []
-    while len(recvs) < state.batch_size // state.envs_per_worker:
+    while len(recvs) < state.workers_per_batch // state.envs_per_worker:
         idx = (idx + 1) % state.num_workers
         queue = state.response_queues[idx]
 
