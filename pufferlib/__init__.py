@@ -1,7 +1,8 @@
-import warnings
-
+import version
+__version__ = version.__version__
 
 # Shut deepmind_lab up
+import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)#, module="deepmind_lab")
 try:
     from deepmind_lab import dmenv_module  # Or whatever the actual module is

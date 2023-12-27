@@ -10,7 +10,6 @@ import pufferlib.exceptions
 import pufferlib.emulation
 import pufferlib.environments
 
-import config
 
 def test_environment(name, timeout=5):
     try:

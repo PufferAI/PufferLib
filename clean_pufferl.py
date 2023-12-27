@@ -58,8 +58,6 @@ class Charts:
     global_step = 0
     SPS = 0
     learning_rate = 0
-    episodic_length = 0
-    episodic_return = 0
 
 def init(
         self: object = None,
@@ -165,12 +163,6 @@ def init(
     values=torch.zeros(config.batch_size + 1).to(device)
     storage_profiler.stop()
 
-    # Original CleanRL charts for comparison
-    charts = Charts(
-        global_step=global_step,
-        learning_rate=config.learning_rate,
-    )
-
     #"charts/actions": wandb.Histogram(b_actions.cpu().numpy()),
     init_performance = pufferlib.namespace(
         init_time = time.time() - start_time,
@@ -191,7 +183,7 @@ def init(
         # Logging
         exp_name = exp_name,
         wandb = wandb,
-        charts = charts,
+        learning_rate=config.learning_rate,
         losses = Losses(),
         init_performance = init_performance,
         performance = Performance(),
@@ -221,15 +213,15 @@ def evaluate(data):
     # TODO: Handle update on resume
     if data.wandb is not None and data.performance.total_uptime > 0:
         data.wandb.log({
-            **{f'charts/{k}': v for k, v in data.charts.items()},
+            'SPS': data.SPS,
+            'global_step': data.global_step,
+            'learning_rate': data.learning_rate,
             **{f'losses/{k}': v for k, v in data.losses.items()},
             **{f'performance/{k}': v
                 for k, v in data.performance.items()},
             **{f'stats/{k}': v for k, v in data.stats.items()},
             **{f'skillrank/{policy}': elo
                 for policy, elo in data.policy_pool.ranker.ratings.items()},
-            'global_step': data.charts.global_step,
-            'agent_steps': data.charts.agent_steps,
         })
 
     data.policy_pool.update_policies()
@@ -302,14 +294,11 @@ def evaluate(data):
         with env_profiler:
             data.pool.send(actions.cpu().numpy())
 
-    data.global_step += config.batch_size
     eval_profiler.stop()
 
-    charts = data.charts
-    charts.reward = float(torch.mean(data.rewards))
-    charts.agent_steps = data.global_step
-    charts.SPS = int(padded_steps_collected / eval_profiler.elapsed)
-    charts.global_step = data.global_step
+    data.global_step += padded_steps_collected
+    data.reward = float(torch.mean(data.rewards))
+    data.SPS = int(padded_steps_collected / eval_profiler.elapsed)
 
     perf = data.performance
     perf.total_uptime = int(time.time() - data.start_time)
@@ -481,8 +470,7 @@ def train(data):
     var_y = np.var(y_true)
     explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
-    charts = data.charts
-    charts.learning_rate = data.optimizer.param_groups[0]["lr"]
+    data.learning_rate = data.optimizer.param_groups[0]["lr"]
 
     losses = data.losses
     losses.policy_loss = np.mean(pg_losses)
@@ -551,7 +539,6 @@ def rollout(env_creator, env_kwargs, model_path, device='cuda', verbose=True):
         return_val += reward
 
         counts_map = env.env.counts_map
-        #if env_kwargs['headless'] and np.sum(counts_map) > 0 and step % 100 == 0:
         if np.sum(counts_map) > 0 and step % 500 == 0:
             overlay = make_pokemon_red_overlay(bg, counts_map)
             cv2.imshow('Pokemon Red', overlay[1000:][::4, ::4])

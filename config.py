@@ -93,10 +93,10 @@ def classic_control():
 
 def nmmo():
     args = pufferlib.args.CleanPuffeRL(
-        num_envs=64,
-        envs_per_batch=24,
+        num_envs=1,#64,
+        envs_per_batch=1,#=24,
         envs_per_worker=1,
-        batch_size=2**16,
+        batch_size=2**12,#2**16,
         batch_rows=128,
     )
     return args, make_sweep_config()

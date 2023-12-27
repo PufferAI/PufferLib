@@ -77,7 +77,7 @@ compatible_environments = {
         'nle==0.9.0',
     ],
     'nmmo': [
-        'nmmo',
+        'nmmo>=2.0',
     ],
     'pokemon_red': [
         'einops==0.6.1',
@@ -166,7 +166,6 @@ setup(
     install_requires=[
         'numpy==1.23.3',
         'opencv-python==3.4.17.63',
-        'openskill==4.0.0',
         'cython==3.0.0',
     ],
     extras_require={

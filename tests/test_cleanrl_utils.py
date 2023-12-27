@@ -19,7 +19,7 @@ def test_cleanrl_utils():
         num_envs=4, envs_per_worker=2
     )
  
-    obs = envs.reset()
+    obs, info, _, _ = envs.reset()
 
     policy = pufferlib.models.Default(envs)
     policy = pufferlib.models.RecurrentWrapper(envs, policy)
