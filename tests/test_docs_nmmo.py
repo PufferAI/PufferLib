@@ -15,11 +15,13 @@ def nethack_creator():
 # Section 2: Vectorization
 import pufferlib.vectorization
 
-vec = pufferlib.vectorization.Serial
-# vec = pufferlib.vectorization.Multiprocessing
+# vec = pufferlib.vectorization.Serial
+vec = pufferlib.vectorization.Multiprocessing
 # vec = pufferlib.vectorization.Ray
 
-envs = vec(nmmo_creator, num_envs=4, envs_per_worker=2)
+# Vectorization API. Specify total number of environments and number per worker
+# Setting env_pool=True can be much faster but requires some tweaks to learning code
+envs = vec(nmmo_creator, num_envs=4, envs_per_worker=2, env_pool=False)
 
 # Synchronous API - reset/step
 # obs = envs.reset()[0]
@@ -66,15 +68,24 @@ import pufferlib.vectorization
 import pufferlib.frameworks.cleanrl
 import pufferlib.environments.nmmo
 
-envs = pufferlib.vectorization.Ray(
+envs = pufferlib.vectorization.Multiprocessing(
     env_creator=pufferlib.environments.nmmo.make_env,
     num_envs=4, envs_per_worker=2)
 
 policy = pufferlib.environments.nmmo.Policy(envs.driver_env)
 cleanrl_policy = pufferlib.frameworks.cleanrl.Policy(policy)
 
-obs = envs.reset()[0]
-obs = torch.Tensor(obs)
+env_outputs = envs.reset()[0]
+obs = torch.Tensor(env_outputs)
 actions = cleanrl_policy.get_action_and_value(obs)[0].numpy()
 obs, rewards, terminals, truncateds, infos, env_id, mask = envs.step(actions)
 envs.close()
+
+# Section 5: Unpacking Observations
+obs = pufferlib.emulation.unpack_batched_obs(
+    env_outputs,
+    envs.driver_env.flat_observation_space,
+    envs.driver_env.flat_observation_structure
+)
+print('Packed tensor:', env_outputs.shape)
+print('Unpacked:', obs.keys())

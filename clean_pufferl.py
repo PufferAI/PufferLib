@@ -103,7 +103,7 @@ def init(
             num_envs=config.num_envs,
             envs_per_worker=config.envs_per_worker,
             envs_per_batch=config.envs_per_batch,
-            #synchronous=config.synchronous,
+            env_pool=config.env_pool,
         )
 
     obs_shape = pool.single_observation_space.shape

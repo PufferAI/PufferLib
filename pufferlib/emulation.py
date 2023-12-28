@@ -102,7 +102,7 @@ class BasicPostprocessor(Postprocessor):
 
 class GymnasiumPufferEnv(gym.Env):
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={},
-            postprocessor_cls=Postprocessor):
+            postprocessor_cls=BasicPostprocessor):
         self.env = make_object(env, env_creator, env_args, env_kwargs)
         self.postprocessor = postprocessor_cls(self.env, is_multiagent=False)
 

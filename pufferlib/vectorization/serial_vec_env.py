@@ -28,7 +28,7 @@ def init(self: object = None,
         num_envs: int = 1,
         envs_per_worker: int = 1,
         envs_per_batch: int = None,
-        synchronous: bool = False,
+        env_pool: bool = False,
         ) -> None:
     driver_env, multi_env_cls, agents_per_env = setup(
         env_creator, env_args, env_kwargs)

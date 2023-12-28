@@ -29,7 +29,7 @@ def init(self: object = None,
         num_envs: int = 1,
         envs_per_worker: int = 1,
         envs_per_batch: int = None,
-        synchronous: bool = False,
+        env_pool: bool = False,
         ) -> None:
     driver_env, multi_env_cls, agents_per_env = setup(
         env_creator, env_args, env_kwargs)
@@ -65,7 +65,7 @@ def init(self: object = None,
         flag = RESET,
         ray = ray, # Save a copy for internal use
         prev_env_id = [],
-        synchronous = synchronous,
+        env_pool = env_pool,
     )
 
 def recv(state):
@@ -73,7 +73,7 @@ def recv(state):
 
     recvs = []
     next_env_id = []
-    if state.synchronous:
+    if state.env_pool:
         recvs = state.ray.get(state.async_handles)
         env_id = [_ for _ in range(state.workers_per_batch)]
     else:

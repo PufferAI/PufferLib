@@ -32,7 +32,7 @@ def init(self: object = None,
         num_envs: int = 1,
         envs_per_worker: int = 1,
         envs_per_batch: int = None,
-        synchronous: bool = False,
+        env_pool: bool = False,
         ) -> None:
     driver_env, multi_env_cls, agents_per_env = setup(
         env_creator, env_args, env_kwargs)
@@ -73,7 +73,7 @@ def init(self: object = None,
         async_handles = None,
         flag = RESET,
         prev_env_id = [],
-        synchronous = synchronous,
+        env_pool = env_pool,
     )
 
 def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs, n, send_pipe, recv_pipe):
@@ -90,7 +90,7 @@ def recv(state):
 
     recvs = []
     next_env_id = []
-    if state.synchronous:
+    if state.env_pool:
         for env_id in range(state.workers_per_batch):
             response_pipe = state.recv_pipes[env_id]
             response = response_pipe.recv()
