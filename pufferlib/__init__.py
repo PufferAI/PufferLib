@@ -1,4 +1,4 @@
-import version
+from pufferlib import version
 __version__ = version.__version__
 
 # Shut deepmind_lab up

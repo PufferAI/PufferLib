@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 from Cython.Build import cythonize
 from itertools import chain
 
-VERSION = '0.5.0'
+VERSION = '0.5.1'
 
 # Default Gym/Gymnasium/PettingZoo versions
 # Gym:
@@ -43,6 +43,9 @@ compatible_environments = {
     'box2d': [
         'swig==4.1.1',
         'gymnasium[box2d]',
+    ],
+    'bsuite': [
+        'bsuite==0.3.5',
     ],
     'butterfly': [
         'pettingzoo[butterfly]',

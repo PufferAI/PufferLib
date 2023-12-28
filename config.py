@@ -61,6 +61,7 @@ def all():
     return {
         'atari': default,
         #'box2d': default, #Continuous
+        'bsuite': bsuite,
         'butterfly': default,
         'classic_control': classic_control,
         'crafter': default,
@@ -83,6 +84,14 @@ def all():
         #'smac': default,
         #'stable-retro': default,
     }
+
+def bsuite():
+    args = pufferlib.args.CleanPuffeRL(
+        vectorization=pufferlib.vectorization.Serial,
+        total_timesteps=1_000_000, # Just for annealing, total handled by bsuite
+        num_envs=1,
+    )
+    return args, make_sweep_config()
 
 def classic_control():
     args = pufferlib.args.CleanPuffeRL(
