@@ -73,7 +73,7 @@ def make_config(env):
         )
 
     return env_module, sweep_defaults, pufferlib.namespace(
-        args=args,
+        args=train_args,
         env_kwargs = env_kwargs,
         policy_kwargs = policy_kwargs,
         recurrent_kwargs = recurrent_kwargs,

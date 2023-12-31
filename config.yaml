@@ -17,11 +17,11 @@ train:
   ent_coef: 0.01
   vf_coef: 0.5
   max_grad_norm: 0.5
-  target_kl: None
+  target_kl: ~
 
   num_envs: 8
   envs_per_worker: 1
-  envs_per_batch: None
+  envs_per_batch: ~
   env_pool: True
   verbose: True
   data_dir: experiments
@@ -102,7 +102,7 @@ bigfish:
     clip_coef: 0.4104603426698214
     num_cores: 1
     num_envs: 1
-    batch_size: 55104
+    batch_size: 53210
     batch_rows: 5321
     bptt_horizon: 1
     update_epochs: 3
@@ -126,7 +126,7 @@ bossfight:
     clip_coef: 0.5642914060539239
     num_cores: 1
     num_envs: 1
-    batch_size: 49476
+    batch_size: 48520
     batch_rows: 6065
     bptt_horizon: 1
     update_epochs: 2
@@ -150,7 +150,7 @@ caveflyer:
     clip_coef: 0.4508383484491862
     num_cores: 1
     num_envs: 96
-    batch_size: 31296
+    batch_size: 32308
     batch_rows: 8077
     bptt_horizon: 1
     update_epochs: 2
@@ -174,7 +174,7 @@ chaser:
     clip_coef: 0.0821348744853704
     num_cores: 1
     num_envs: 89
-    batch_size: 17355
+    batch_size: 17456
     batch_rows: 2182
     bptt_horizon: 1
     update_epochs: 1
@@ -198,7 +198,7 @@ climber:
     clip_coef: 0.3879433119086241
     num_cores: 1
     num_envs: 207
-    batch_size: 110952
+    batch_size: 113288
     batch_rows: 3332
     bptt_horizon: 256
     update_epochs: 2
@@ -222,7 +222,7 @@ coinrun:
     clip_coef: 0.271239381520248
     num_cores: 1
     num_envs: 246
-    batch_size: 184254
+    batch_size: 184170
     batch_rows: 6139
     bptt_horizon: 1
     update_epochs: 2
@@ -246,7 +246,7 @@ dodgeball:
     clip_coef: 0.1678680070658446
     num_cores: 1
     num_envs: 385
-    batch_size: 231385
+    batch_size: 233026
     batch_rows: 4958
     bptt_horizon: 1
     update_epochs: 2
@@ -270,7 +270,7 @@ fruitbot:
     clip_coef: 0.3909436413913963
     num_cores: 1
     num_envs: 184
-    batch_size: 23736
+    batch_size: 25344
     batch_rows: 4224
     bptt_horizon: 1
     update_epochs: 1
@@ -294,7 +294,7 @@ heist:
     clip_coef: 0.0341243664433126
     num_cores: 1
     num_envs: 999
-    batch_size: 160839
+    batch_size: 162233
     batch_rows: 3061
     bptt_horizon: 1
     update_epochs: 1
@@ -318,7 +318,7 @@ jumper:
     clip_coef: 0.0589308261206342
     num_cores: 1
     num_envs: 320
-    batch_size: 76160
+    batch_size: 76925
     batch_rows: 3077
     bptt_horizon: 1
     update_epochs: 3
@@ -342,7 +342,7 @@ leaper:
     clip_coef: 0.6941033332120052
     num_cores: 1
     num_envs: 252
-    batch_size: 19908
+    batch_size: 19380
     batch_rows: 6460
     bptt_horizon: 1
     update_epochs: 2
@@ -366,7 +366,7 @@ maze:
     clip_coef: 0.2335644352369076
     num_cores: 1
     num_envs: 820
-    batch_size: 118080
+    batch_size: 116008
     batch_rows: 6834
     bptt_horizon: 1
     update_epochs: 2
@@ -390,7 +390,7 @@ miner:
     clip_coef: 0.2293978935956241
     num_cores: 1
     num_envs: 343
-    batch_size: 153321
+    batch_size: 154512
     batch_rows: 2088
     bptt_horizon: 1
     update_epochs: 3
@@ -414,7 +414,7 @@ ninja:
     clip_coef: 0.5891635585927152
     num_cores: 1
     num_envs: 293
-    batch_size: 44892
+    batch_size: 45246
     batch_rows: 7541
     bptt_horizon: 1
     update_epochs: 2
@@ -438,7 +438,7 @@ plunder:
     clip_coef: 0.0914132500563203
     num_cores: 1
     num_envs: 127
-    batch_size: 25019
+    batch_size: 26304
     batch_rows: 4384
     bptt_horizon: 1
     update_epochs: 2
@@ -462,7 +462,7 @@ starpilot:
     clip_coef: 0.2645124138418521
     num_cores: 1
     num_envs: 320
-    batch_size: 107200
+    batch_size: 107440
     batch_rows: 6715
     bptt_horizon: 1
     update_epochs: 2
