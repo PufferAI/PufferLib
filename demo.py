@@ -11,7 +11,6 @@ import pufferlib.args
 import pufferlib.utils
 import pufferlib.models
 
-import config
 from clean_pufferl import CleanPuffeRL, rollout
 
 
