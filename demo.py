@@ -30,18 +30,39 @@ def get_init_args(fn):
     return args
 
 def make_config(env):
+    import yaml
+    with open('config.yaml') as f:
+        config = yaml.safe_load(f)
+
+    train_defaults = config['train']
+    sweep_defaults = config['sweep']
+
+    assert env in config
+    env_config = config[env]
+
+    # Some envs have a different package name than the env name
+    package = env_config['package']
+    if package is None:
+        package = env
+
     # TODO: Improve install checking with pkg_resources
     try:
-        env_module = importlib.import_module(f'pufferlib.environments.{env}')
+        env_module = importlib.import_module(f'pufferlib.environments.{package}')
     except:
-        pufferlib.utils.install_requirements(env)
-        env_module = importlib.import_module(f'pufferlib.environments.{env}')
+        pufferlib.utils.install_requirements(package)
+        env_module = importlib.import_module(f'pufferlib.environments.{package}')
 
-    all_configs = config.all()
-    args, sweep_config = all_configs[env]()
+    train_defaults.update(env_config['train'])
+    train_args = train_defaults
+
+    policy_args = env_config['policy']
+    env_args = env_config['env']
 
     env_kwargs = get_init_args(env_module.make_env)
+    env_kwargs.update(env_args)
+
     policy_kwargs = get_init_args(env_module.Policy.__init__)
+    policy_kwargs.update(policy_args)
 
     recurrent_kwargs = {}
     recurrent = env_module.Recurrent
@@ -52,12 +73,12 @@ def make_config(env):
             num_layers=recurrent.num_layers
         )
 
-    return env_module, sweep_config, pufferlib.namespace(
+    return env_module, sweep_defaults, pufferlib.namespace(
         args=args,
         env_kwargs = env_kwargs,
         policy_kwargs = policy_kwargs,
         recurrent_kwargs = recurrent_kwargs,
-   )
+    )
  
 def make_policy(envs, env_module, args):
     policy = env_module.Policy(envs.driver_env, **args.policy_kwargs)
@@ -134,8 +155,6 @@ def train(args, env_module):
 def evaluate(args, env_module):
     env_creator = env_module.make_env
     env_creator_kwargs = args.env_kwargs
-    #env_creator_kwargs['headless'] = False
-    #env_creator_kwargs['save_video'] = True
     env = env_creator(**env_creator_kwargs)
 
     import torch

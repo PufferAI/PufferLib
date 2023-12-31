@@ -46,28 +46,26 @@ class ConvSequence(nn.Module):
         return (self._out_channels, (h + 1) // 2, (w + 1) // 2)
 
 class Policy(pufferlib.models.Policy):
-    def __init__(self, env):
+    def __init__(self, env, cnn_width, mlp_width):
         super().__init__(env)
         h, w, c = env.single_observation_space.shape
         shape = (c, h, w)
         conv_seqs = []
-        # MSRL uses larger network size
-        #for out_channels in [32, 64, 64, 128, 128]:
-        for out_channels in [16, 32, 32]:
+        for out_channels in [cnn_width, 2*cnn_width, 2*cnn_width]:
             conv_seq = ConvSequence(shape, out_channels)
             shape = conv_seq.get_output_shape()
             conv_seqs.append(conv_seq)
         conv_seqs += [
             nn.Flatten(),
             nn.ReLU(),
-            nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=256),
+            nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=mlp_width),
             nn.ReLU(),
         ]
         self.network = nn.Sequential(*conv_seqs)
         self.actor = pufferlib.pytorch.layer_init(
-                nn.Linear(256, self.action_space.n), std=0.01)
+                nn.Linear(mlp_width, self.action_space.n), std=0.01)
         self.value = pufferlib.pytorch.layer_init(
-                nn.Linear(256, 1), std=1)
+                nn.Linear(mlp_width, 1), std=1)
 
     def encode_observations(self, x):
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)  # "bhwc" -> "bchw"
