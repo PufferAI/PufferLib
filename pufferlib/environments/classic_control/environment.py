@@ -9,7 +9,7 @@ def env_creator(name):
         return classic_control.CartPoleEnv
     raise ValueError(f'Unknown environment: {name}')
 
-def make_env(name='cartpole'):
+def make_env(name='cartpole', render_mode='rgb_array'):
     '''Create an environment by name'''
-    env = env_creator(name)()
+    env = env_creator(name)(render_mode=render_mode)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)

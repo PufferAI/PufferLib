@@ -109,6 +109,7 @@ def step(state, action):
     return state.grid, reward, done, False, info
 
 def render(state):
+    chars = []
     for row in state.grid:
         for val in row:
             if val == 1:
@@ -117,9 +118,9 @@ def render(state):
                 color = 91 # Red
             else:
                 color = 90 # Gray
-            print(f'\033[{color}m██\033[0m', end='') # Gray block
-        print()
-    print()
+            chars.append(f'\033[{color}m██\033[0m')
+        chars.append('\n')
+    return ''.join(chars)
 
 class Squared(gymnasium.Env):
     __init__ = init
