@@ -2,7 +2,7 @@ from pdb import set_trace as T
 
 import numpy as np
 import random
-import gym
+import gymnasium
 
 from pufferlib import namespace
 
@@ -120,7 +120,7 @@ def render(state):
         print()
     print()
 
-class Squared(gym.Env):
+class Squared(gymnasium.Env):
     __init__ = init
     reset = reset
     step = step
