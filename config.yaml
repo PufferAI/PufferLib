@@ -109,6 +109,7 @@ bigfish:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: bigfish
     num_envs: 24
   policy:
     cnn_width: 22
@@ -133,6 +134,7 @@ bossfight:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: bossfight
     num_envs: 186
   policy:
     cnn_width: 34
@@ -157,6 +159,7 @@ caveflyer:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: caveflyer
     num_envs: 96
   policy:
     cnn_width: 17
@@ -181,6 +184,7 @@ chaser:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: chaser
     num_envs: 89
   policy:
     cnn_width: 37
@@ -205,6 +209,7 @@ climber:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: climber
     num_envs: 207
   policy:
     cnn_width: 29
@@ -229,6 +234,7 @@ coinrun:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: coinrun
     num_envs: 246
   policy:
     cnn_width: 16
@@ -253,6 +259,7 @@ dodgeball:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: dodgeball
     num_envs: 385
   policy:
     cnn_width: 24
@@ -277,6 +284,7 @@ fruitbot:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: fruitbot
     num_envs: 184
   policy:
     cnn_width: 24
@@ -301,6 +309,7 @@ heist:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: heist
     num_envs: 999
   policy:
     cnn_width: 60
@@ -325,6 +334,7 @@ jumper:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: jumper
     num_envs: 320
   policy:
     cnn_width: 24
@@ -349,6 +359,7 @@ leaper:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: leaper
     num_envs: 252
   policy:
     cnn_width: 28
@@ -373,6 +384,7 @@ maze:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: maze
     num_envs: 820
   policy:
     cnn_width: 28
@@ -397,6 +409,7 @@ miner:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: miner
     num_envs: 343
   policy:
     cnn_width: 38
@@ -421,6 +434,7 @@ ninja:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: ninja
     num_envs: 293
   policy:
     cnn_width: 25
@@ -445,6 +459,7 @@ plunder:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: plunder
     num_envs: 127
   policy:
     cnn_width: 30
@@ -469,6 +484,7 @@ starpilot:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
+    name: starpilot
     num_envs: 320
   policy:
     cnn_width: 25
