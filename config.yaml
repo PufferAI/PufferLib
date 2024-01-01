@@ -149,7 +149,7 @@ caveflyer:
     gae_lambda: 0.9094175213807228
     clip_coef: 0.4508383484491862
     num_cores: 1
-    num_envs: 96
+    num_envs: 1
     batch_size: 32308
     batch_rows: 8077
     bptt_horizon: 1
@@ -173,7 +173,7 @@ chaser:
     gae_lambda: 0.8186838232115529
     clip_coef: 0.0821348744853704
     num_cores: 1
-    num_envs: 89
+    num_envs: 1
     batch_size: 17456
     batch_rows: 2182
     bptt_horizon: 1
@@ -197,7 +197,7 @@ climber:
     gae_lambda: 0.8758003745828604
     clip_coef: 0.3879433119086241
     num_cores: 1
-    num_envs: 207
+    num_envs: 1
     batch_size: 113288
     batch_rows: 3332
     bptt_horizon: 256
@@ -221,7 +221,7 @@ coinrun:
     gae_lambda: 0.9708900757395368
     clip_coef: 0.271239381520248
     num_cores: 1
-    num_envs: 246
+    num_envs: 1
     batch_size: 184170
     batch_rows: 6139
     bptt_horizon: 1
@@ -245,7 +245,7 @@ dodgeball:
     gae_lambda: 0.929215062387182
     clip_coef: 0.1678680070658446
     num_cores: 1
-    num_envs: 385
+    num_envs: 1
     batch_size: 233026
     batch_rows: 4958
     bptt_horizon: 1
@@ -269,7 +269,7 @@ fruitbot:
     gae_lambda: 0.7517437269156811
     clip_coef: 0.3909436413913963
     num_cores: 1
-    num_envs: 184
+    num_envs: 1
     batch_size: 25344
     batch_rows: 4224
     bptt_horizon: 1
@@ -293,7 +293,7 @@ heist:
     gae_lambda: 0.864713026766495
     clip_coef: 0.0341243664433126
     num_cores: 1
-    num_envs: 999
+    num_envs: 1
     batch_size: 162233
     batch_rows: 3061
     bptt_horizon: 1
@@ -317,7 +317,7 @@ jumper:
     gae_lambda: 0.9385007945498072
     clip_coef: 0.0589308261206342
     num_cores: 1
-    num_envs: 320
+    num_envs: 1
     batch_size: 76925
     batch_rows: 3077
     bptt_horizon: 1
@@ -341,7 +341,7 @@ leaper:
     gae_lambda: 0.8968331903476625
     clip_coef: 0.6941033332120052
     num_cores: 1
-    num_envs: 252
+    num_envs: 1
     batch_size: 19380
     batch_rows: 6460
     bptt_horizon: 1
@@ -365,7 +365,7 @@ maze:
     gae_lambda: 0.971943769322524
     clip_coef: 0.2335644352369076
     num_cores: 1
-    num_envs: 820
+    num_envs: 1
     batch_size: 116008
     batch_rows: 6834
     bptt_horizon: 1
@@ -389,7 +389,7 @@ miner:
     gae_lambda: 0.6494040942916905
     clip_coef: 0.2293978935956241
     num_cores: 1
-    num_envs: 343
+    num_envs: 1
     batch_size: 154512
     batch_rows: 2088
     bptt_horizon: 1
@@ -413,7 +413,7 @@ ninja:
     gae_lambda: 0.9664148604540898
     clip_coef: 0.5891635585927152
     num_cores: 1
-    num_envs: 293
+    num_envs: 1
     batch_size: 45246
     batch_rows: 7541
     bptt_horizon: 1
@@ -437,7 +437,7 @@ plunder:
     gae_lambda: 0.84500339385464
     clip_coef: 0.0914132500563203
     num_cores: 1
-    num_envs: 127
+    num_envs: 1
     batch_size: 26304
     batch_rows: 4384
     bptt_horizon: 1
@@ -461,7 +461,7 @@ starpilot:
     gae_lambda: 0.82792978724664
     clip_coef: 0.2645124138418521
     num_cores: 1
-    num_envs: 320
+    num_envs: 1
     batch_size: 107440
     batch_rows: 6715
     bptt_horizon: 1
