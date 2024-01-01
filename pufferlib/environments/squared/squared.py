@@ -36,8 +36,9 @@ def init(self,
         num_targets=num_targets,
         grid_size = grid_size,
         max_ticks = num_targets * distance_to_target,
-        observation_space=gym.spaces.Box(low=-1, high=1, shape=(grid_size, grid_size)),
-        action_space=gym.spaces.Discrete(8),
+        observation_space=gymnasium.spaces.Box(
+            low=-1, high=1, shape=(grid_size, grid_size)),
+        action_space=gymnasium.spaces.Discrete(8),
     )
 
 def reset(state, seed=None):

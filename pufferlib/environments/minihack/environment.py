@@ -12,8 +12,8 @@ def env_creator():
     pufferlib.environments.try_import('minihack')
     return gym.make
  
-def make_env(name='MiniHack-River-v0'):
+def make_env(name='MiniHack-River-v0', render_mode='rgb_array'):
     '''NetHack binding creation function'''
-    env = env_creator()(name)
+    env = env_creator()(name, render_mode=render_mode)
     env = shimmy.GymV21CompatibilityV0(env=env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)

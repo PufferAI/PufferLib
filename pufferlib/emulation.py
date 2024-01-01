@@ -100,7 +100,7 @@ class BasicPostprocessor(Postprocessor):
 
         return reward, done, truncated, info
 
-class GymnasiumPufferEnv(gym.Env):
+class GymnasiumPufferEnv(gymnasium.Env):
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={},
             postprocessor_cls=BasicPostprocessor):
         self.env = make_object(env, env_creator, env_args, env_kwargs)
@@ -115,6 +115,8 @@ class GymnasiumPufferEnv(gym.Env):
         # Cache the observation and action spaces
         self.observation_space
         self.action_space
+        self.render_modes = 'human rgb_array'.split()
+        self.render_mode = 'rgb_array'
 
     @property
     def observation_space(self):
