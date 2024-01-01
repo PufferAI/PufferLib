@@ -86,8 +86,11 @@ procgen:
     anneal_lr: False
     clip_coef: 0.2
     vf_clip_coef: 0.2
-  env: {}
-  policy: {}
+  env:
+    name: bigfish
+  policy:
+    cnn_width: 16
+    mlp_width: 32
 
 # Per-env hyperparams from CARBS
 bigfish:
