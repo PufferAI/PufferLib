@@ -83,6 +83,7 @@ def init(
 
     if exp_name is None:
         exp_name = str(uuid.uuid4())[:8]
+
     wandb = None
     if track:
         import wandb
@@ -134,7 +135,6 @@ def init(
     opt_state = resume_state.get("optimizer_state_dict", None)
     if opt_state is not None:
         optimizer.load_state_dict(resume_state["optimizer_state_dict"])
-
 
     # Create policy pool
     pool_agents = num_agents * pool.envs_per_batch
@@ -215,7 +215,7 @@ def evaluate(data):
         data.wandb.log({
             'SPS': data.SPS,
             'global_step': data.global_step,
-            'learning_rate': data.learning_rate,
+            'learning_rate': data.optimizer.param_groups[0]["lr"],
             **{f'losses/{k}': v for k, v in data.losses.items()},
             **{f'performance/{k}': v
                 for k, v in data.performance.items()},
@@ -344,6 +344,11 @@ def train(data):
     train_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True)
     train_profiler.start()
 
+    # Anneal learning rate
+    frac = 1.0 - (data.update - 1.0) / data.total_updates
+    lrnow = frac * config.learning_rate
+    data.optimizer.param_groups[0]["lr"] = lrnow
+
     if config.anneal_lr:
         frac = 1.0 - (data.update - 1.0) / data.total_updates
         lrnow = frac * config.learning_rate
@@ -470,8 +475,6 @@ def train(data):
     var_y = np.var(y_true)
     explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
-    data.learning_rate = data.optimizer.param_groups[0]["lr"]
-
     losses = data.losses
     losses.policy_loss = np.mean(pg_losses)
     losses.value_loss = np.mean(v_losses)
@@ -574,6 +577,10 @@ def save_checkpoint(data):
         "update": data.update,
         "model_name": model_name,
     }
+
+    if data.wandb:
+        state['exp_name'] = data.exp_name
+
     state_path = os.path.join(path, 'trainer_state.pt')
     torch.save(state, state_path + '.tmp')
     os.rename(state_path + '.tmp', state_path)

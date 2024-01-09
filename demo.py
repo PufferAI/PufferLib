@@ -12,7 +12,7 @@ import pufferlib.args
 import pufferlib.utils
 import pufferlib.models
 
-from clean_pufferl import CleanPuffeRL, rollout
+from clean_pufferl import CleanPuffeRL, rollout, done_training
 
 
 def get_init_args(fn):
@@ -56,9 +56,9 @@ def init_wandb(args, env_module):
         group=args.wandb_group,
         config={
             'cleanrl': dict(args.args),
-            'env': args.env_kwargs,
-            'policy': args.policy_kwargs,
-            'recurrent': args.recurrent_kwargs,
+            'env': args.env_args,
+            'policy': args.policy_args,
+            'recurrent': args.recurrent_args,
         },
         name=name,
         monitor_gym=True,
@@ -96,11 +96,13 @@ def train(args, env_module, make_env):
         track=args.track,
     )
 
-    for update in range(trainer.total_updates):
+    while not done_training(trainer):
         trainer.evaluate()
         trainer.train()
 
+    print('Done training. Saving data...')
     trainer.close()
+    print('Run complete')
 
 def evaluate(args, env_module, make_env):
     env_creator = make_env
@@ -142,7 +144,7 @@ if __name__ == '__main__':
     parser.add_argument('--train', action='store_true', help='Train')
     parser.add_argument('--sweep', action='store_true', help='WandB Train Sweep')
     parser.add_argument('--evaluate', action='store_true', help='Evaluate')
-    parser.add_argument('--model', type=str, help='Path to your model .pt')
+    parser.add_argument('--eval-model-path', type=str, default=None, help='Path to model to evaluate')
     parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
     parser.add_argument('--exp-name', type=str, default=None, help="Resume from experiment")
     parser.add_argument('--vectorization', type=str, default='serial', help='Vectorization method (serial, multiprocessing, ray)')
@@ -247,7 +249,7 @@ if __name__ == '__main__':
     elif args.track:
         args.exp_name = init_wandb(args, env_module)
 
-    assert sum((args.train, args.sweep, args.evaluate is not None)) == 1, 'Must specify exactly one of --train, --sweep, or --evaluate'
+    assert sum((args.train, args.sweep, args.evaluate)) == 1, 'Must specify exactly one of --train, --sweep, or --evaluate'
     if args.train:
         train(args, env_module, make_env)
         exit(0)
@@ -260,7 +262,6 @@ if __name__ == '__main__':
             args.env_args,
             agent_creator=make_policy,
             agent_kwargs={'env_module': env_module, 'args': args},
-            model_path=args.model,
             device=args.args.device
         )
         exit(0)
@@ -296,10 +297,10 @@ if __name__ == '__main__':
         return render
 
     env = make_env(**env_args)
-    if args.model is None:
+    if args.exp_name is None:
         agent = make_policy(env, **policy_args)
     else:
-        agent = torch.load(args.model, map_location=args.args.device)
+        agent = torch.load(args.eval_model_path, map_location=args.args.device)
 
     terminal = truncated = True
 
