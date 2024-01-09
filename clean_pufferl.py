@@ -123,7 +123,7 @@ def init(
               f'with policy {resume_state["model_name"]}')
     else:
         agent = pufferlib.emulation.make_object(
-            agent, agent_creator, [pool], agent_kwargs)
+            agent, agent_creator, [pool.driver_env], agent_kwargs)
 
     global_step = resume_state.get("global_step", 0)
     agent_step = resume_state.get("agent_step", 0)
@@ -510,13 +510,15 @@ def close(data):
         data.wandb.run.log_artifact(artifact)
         data.wandb.finish()
 
-def rollout(env_creator, env_kwargs, model_path, device='cuda', verbose=True):
+def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
+        model_path, device='cuda', verbose=True):
     env = env_creator(**env_kwargs)
-    agent = torch.load(model_path, map_location=device)
-    terminal = truncated = True
+    if model_path is None:
+        agent = agent_creator(env, **agent_kwargs)
+    else:
+        agent = torch.load(model_path, map_location=device)
 
-    import cv2
-    bg = cv2.imread('kanto_map_dsv.png')
+    terminal = truncated = True
  
     while True:
         if terminal or truncated:
@@ -538,18 +540,14 @@ def rollout(env_creator, env_kwargs, model_path, device='cuda', verbose=True):
         ob, reward, terminal, truncated, _ = env.step(action[0].item())
         return_val += reward
 
-        counts_map = env.env.counts_map
-        if np.sum(counts_map) > 0 and step % 500 == 0:
-            overlay = make_pokemon_red_overlay(bg, counts_map)
-            cv2.imshow('Pokemon Red', overlay[1000:][::4, ::4])
-            cv2.waitKey(1)
+        chars = env.render()
+        print("\033c", end="")
+        print(chars)
 
         if verbose:
             print(f'Step: {step} Reward: {reward:.4f} Return: {return_val:.2f}')
 
-        if not env_kwargs['headless']:
-            env.render()
-
+        time.sleep(0.5)
         step += 1
 
 def done_training(data):
@@ -629,32 +627,7 @@ def print_dashboard(stats, init_performance, performance):
     
     print("\033c", end="")
     print('\n'.join(output))
-
-def make_pokemon_red_overlay(bg, counts):
-    nonzero = np.where(counts > 0, 1, 0)
-    scaled = np.clip(counts, 0, 1000) / 1000.0
-
-    # Convert counts to hue map
-    hsv = np.zeros((*counts.shape, 3))
-    hsv[..., 0] = scaled*(240.0/360.0)
-    hsv[..., 1] = nonzero
-    hsv[..., 2] = nonzero
-
-    # Convert the HSV image to RGB
-    import matplotlib.colors as mcolors
-    overlay = 255*mcolors.hsv_to_rgb(hsv)
-
-    # Upscale to 16x16
-    kernel = np.ones((16, 16, 1), dtype=np.uint8)
-    overlay = np.kron(overlay, kernel).astype(np.uint8)
-    mask = np.kron(nonzero, kernel[..., 0]).astype(np.uint8)
-    mask = np.stack([mask, mask, mask], axis=-1).astype(bool)
-
-    # Combine with background
-    render = bg.copy().astype(np.int32)
-    render[mask] = 0.2*render[mask] + 0.8*overlay[mask]
-    render = np.clip(render, 0, 255).astype(np.uint8)
-    return render
+    time.sleep(1/20)
 
 class CleanPuffeRL:
     __init__ = init

@@ -2,29 +2,28 @@ from pdb import set_trace as T
 import numpy as np
 
 import gymnasium as gym
+import functools
 
 import pufferlib
 import pufferlib.emulation
 import pufferlib.environments
 
 
-def env_creator():
-    retro = pufferlib.environments.try_import('retro', 'stable-retro')
-    return retro.make
+def env_creator(name='Airstriker-Genesis'):
+    return functools.partial(make, name)
 
-def make_env(name='Airstriker-Genesis', framestack=4):
+def make(name='Airstriker-Genesis', framestack=4):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
-    try:
-        from stable_baselines3.common.atari_wrappers import (
-            ClipRewardEnv,
-            EpisodicLifeEnv,
-            FireResetEnv,
-            MaxAndSkipEnv,
-        )
-        with pufferlib.utils.Suppress():
-            env = env_creator()(name)
-    except Exception as e:
-        raise e
+    retro = pufferlib.environments.try_import('retro', 'stable-retro')
+
+    from stable_baselines3.common.atari_wrappers import (
+        ClipRewardEnv,
+        EpisodicLifeEnv,
+        FireResetEnv,
+        MaxAndSkipEnv,
+    )
+    with pufferlib.utils.Suppress():
+        env = retro.make(name)
 
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = MaxAndSkipEnv(env, skip=4)

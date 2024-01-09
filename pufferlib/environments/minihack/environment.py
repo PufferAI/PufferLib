@@ -2,6 +2,7 @@ from pdb import set_trace as T
 
 import gym
 import shimmy
+import functools
 
 import pufferlib
 import pufferlib.emulation
@@ -14,15 +15,15 @@ EXTRA_OBS_KEYS = [
     'tty_cursor',
 ]
 
-def env_creator():
-    pufferlib.environments.try_import('minihack')
-    return gym.make
- 
-def make_env(name='MiniHack-River-v0'):
+def env_creator(name='MiniHack-River-v0'):
+    return functools.partial(make, name)
+
+def make(name):
     '''NetHack binding creation function'''
     import minihack
+    pufferlib.environments.try_import('minihack')
     obs_key = minihack.base.MH_DEFAULT_OBS_KEYS + EXTRA_OBS_KEYS
-    env = env_creator()(name, observation_keys=obs_key)
+    env = gym.make(name, observation_keys=obs_key)
     env = shimmy.GymV21CompatibilityV0(env=env)
     env = MinihackWrapper(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)

@@ -1,5 +1,6 @@
 from pdb import set_trace as T
 import gym
+import functools
 
 import pufferlib.emulation
 import pufferlib.wrappers
@@ -7,15 +8,14 @@ import pufferlib.wrappers
 import bsuite
 from bsuite.utils import gym_wrapper
 
+def env_creator(name='bandit/0'):
+    return functools.partial(make, name)
 
-def env_creator():
+def make(name='bandit/0', results_dir='experiments/bsuite', overwrite=True):
+    '''BSuite environments'''
     bsuite = pufferlib.environments.try_import('bsuite')
-    return bsuite.load_and_record_to_csv
-
-def make_env(name='bandit/0', results_dir='experiments/bsuite', overwrite=True):
-    '''Puffer Squared environment'''
-    env = env_creator()(name, results_dir=results_dir, overwrite=True)
     from bsuite.utils import gym_wrapper
+    env = bsuite.load_and_record_to_csv(name, results_dir, overwrite=overwrite)
     env = gym_wrapper.GymFromDMEnv(env)
     env = BSuiteStopper(env)
     env = pufferlib.wrappers.GymToGymnasium(env)

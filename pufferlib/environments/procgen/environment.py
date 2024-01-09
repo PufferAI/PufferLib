@@ -3,27 +3,24 @@ import numpy as np
 
 import gym
 import shimmy
+import functools
 
 import pufferlib
 import pufferlib.emulation
 import pufferlib.environments
 
 
-def env_creator():
-    procgen = pufferlib.environments.try_import('procgen') 
-    return procgen.ProcgenEnv
+def env_creator(name='bigfish'):
+    return functools.partial(make, name)
 
-    #return gym.make
-    import gym3
-    from procgen.env import ProcgenGym3Env
-    return ProcgenGym3Env
-
-def make_env(name='bigfish', num_envs=24, num_levels=0,
+def make(name, num_envs=24, num_levels=0,
         start_level=0, distribution_mode='easy'):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
     assert int(num_envs) == float(num_envs), "num_envs must be an integer"
     num_envs = int(num_envs)
-    envs = env_creator()(
+
+    procgen = pufferlib.environments.try_import('procgen') 
+    envs = procgen.ProcgenEnv(
         env_name=name,
         num_envs=num_envs,
         num_levels=num_levels,

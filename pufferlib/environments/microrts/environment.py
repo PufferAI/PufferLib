@@ -2,25 +2,29 @@ from pdb import set_trace as T
 import numpy as np
 
 import warnings
-
 import shimmy
+import functools
 
 import pufferlib.emulation
 import pufferlib.environments
 
 
-def env_creator():
-    pufferlib.environments.try_import('gym_microrts')
-    from gym_microrts.envs import GlobalAgentCombinedRewardEnv
-    return GlobalAgentCombinedRewardEnv
+def env_creator(name='GlobalAgentCombinedRewardEnv'):
+    return functools.partial(make, name)
 
-def make_env():
+def make(name):
     '''Gym MicroRTS creation function
     
     This library appears broken. Step crashes in Java.
     '''
+    pufferlib.environments.try_import('gym_microrts')
+    if name == 'GlobalAgentCombinedRewardEnv':
+        from gym_microrts.envs import GlobalAgentCombinedRewardEnv
+    else:
+        raise ValueError(f'Unknown environment: {name}')
+
     with pufferlib.utils.Suppress():
-        env = env_creator()()
+        return GlobalAgentCombinedRewardEnv()
 
     env.reset = pufferlib.utils.silence_warnings(env.reset)
     env.step = pufferlib.utils.silence_warnings(env.step)

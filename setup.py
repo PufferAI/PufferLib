@@ -139,9 +139,9 @@ incompatible_environments = {
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',
     #],
-    #'stable-retro': [
-    #    'git+https://github.com/Farama-Foundation/stable-retro.git',
-    #]
+    'stable-retro': [
+        'git+https://github.com/Farama-Foundation/stable-retro.git',
+    ]
 }
 
 rllib = [

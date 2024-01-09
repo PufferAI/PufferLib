@@ -1,28 +1,30 @@
 from pdb import set_trace as T
 import numpy as np
+import functools
 
 import pufferlib
 from pufferlib import namespace
 import pufferlib.emulation
 import pufferlib.environments
 
-def env_creator():
-    '''OpenSpiel creation function'''
-    pyspiel = pufferlib.environments.try_import('pyspiel', 'open_spiel')
-    return pyspiel.load_game
 
-def make_env(
-        name='connect_four',
+def env_creator(name='connect_four'):
+    '''OpenSpiel creation function'''
+    return functools.partial(make, name)
+
+def make(
+        name,
         multiplayer=False,
         n_rollouts=5,
         max_simulations=10,
         min_simulations=None
     ):
     '''OpenSpiel creation function'''
+    pyspiel = pufferlib.environments.try_import('pyspiel', 'open_spiel')
+    env = pyspiel.load_game(name)
+
     if min_simulations is None:
         min_simulations = max_simulations
-
-    env = env_creator()(name)
 
     from pufferlib.environments.open_spiel.gymnasium_environment import (
         OpenSpielGymnasiumEnvironment

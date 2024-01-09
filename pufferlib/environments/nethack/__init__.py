@@ -1,4 +1,4 @@
-from .environment import env_creator, make_env
+from .environment import env_creator, make
 
 try:
     import torch

@@ -75,7 +75,7 @@ procgen:
   package: ~
   train:
     total_timesteps: 8_000_000
-    learning_rate: 5e-4
+    learning_rate: 0.0005
     num_cores: 1
     num_envs: 1
     batch_size: 16384
@@ -580,8 +580,42 @@ nmmo:
     num_envs: 1
     envs_per_batch: 1
     envs_per_worker: 1
-    batch_size: 2**12
+    batch_size: 4096
     batch_rows: 128
+  env: {}
+  policy: {}
+
+# Ocean: PufferAI's first party environment suite
+ocean:
+  package: ~
+  train:
+    total_timesteps: 30_000
+    learning_rate: 0.017
+    num_envs: 8
+    batch_rows: 32
+    bptt_horizon: 4
+  env: {}
+  policy: {}
+
+bandit:
+  package: ocean
+  train:
+    total_timesteps: 30_000
+    learning_rate: 0.017
+    num_envs: 8
+    batch_rows: 32
+    bptt_horizon: 4
+  env: {}
+  policy: {}
+
+squared:
+  package: ocean
+  train:
+    total_timesteps: 30_000
+    learning_rate: 0.017
+    num_envs: 8
+    batch_rows: 32
+    bptt_horizon: 4
   env: {}
   policy: {}
 
@@ -603,7 +637,7 @@ pokemon_red:
     envpool_batch_size: 4
     update_epochs: 3
     gamma: 0.998
-    batch_size: 2**10
+    batch_size: 1024
     batch_rows: 16
   env: {}
   policy: {}
@@ -620,18 +654,7 @@ smac:
   env: {}
   policy: {}
 
-squared:
-  package: ~
-  train:
-    total_timesteps: 30_000
-    learning_rate: 0.017
-    num_envs: 8
-    batch_rows: 32
-    bptt_horizon: 4
-  env: {}
-  policy: {}
-
-stable-retro:
+stable_retro:
   package: ~
   train: {}
   env: {}

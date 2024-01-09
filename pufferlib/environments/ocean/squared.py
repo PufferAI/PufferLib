@@ -122,10 +122,12 @@ def render(state):
         chars.append('\n')
     return ''.join(chars)
 
+def close(state):
+    pass
+
 class Squared(gymnasium.Env):
     __init__ = init
     reset = reset
     step = step
     render = render
-
-
+    close = close
