@@ -497,10 +497,9 @@ def train(data):
     if config.verbose:
         print_dashboard(data.stats, data.init_performance, data.performance)
 
+    data.update += 1
     if data.update % config.checkpoint_interval == 0 or done_training(data):
        save_checkpoint(data)
-
-    data.update += 1
 
 def close(data):
     data.pool.close()
@@ -514,7 +513,7 @@ def close(data):
         data.wandb.finish()
 
 def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
-        model_path, device='cuda', verbose=True):
+        model_path=None, device='cuda', verbose=True):
     env = env_creator(**env_kwargs)
     if model_path is None:
         agent = agent_creator(env, **agent_kwargs)

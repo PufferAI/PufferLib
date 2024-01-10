@@ -29,7 +29,6 @@ def get_init_args(fn):
             args[name] = param.default if param.default is not inspect.Parameter.empty else None
     return args
 
-
 def make_policy(env, env_module, args):
     policy = env_module.Policy(env, **args.policy_args)
     if args.force_recurrence or env_module.Recurrent is not None:
@@ -103,39 +102,6 @@ def train(args, env_module, make_env):
     print('Done training. Saving data...')
     trainer.close()
     print('Run complete')
-
-def evaluate(args, env_module, make_env):
-    env_creator = make_env
-    env_creator_kwargs = args.env_kwargs
-    env = env_creator(**env_creator_kwargs)
-
-    import torch
-    device = args.args.device
-    agent = torch.load(args.evaluate, map_location=device)
-    terminal = truncated = True
-
-    while True:
-        if terminal or truncated:
-            print('---  Reset  ---')
-            ob, info = env.reset()
-            state = None
-            step = 0
-            return_val = 0
-
-        ob = torch.tensor(ob).unsqueeze(0).to(device)
-        with torch.no_grad():
-            if hasattr(agent, 'lstm'):
-                action, _, _, _, state = agent.get_action_and_value(ob, state)
-            else:
-                action, _, _, _ = agent.get_action_and_value(ob)
-        
-        ob, reward, terminal, truncated, _ = env.step(action[0].item())
-        return_val += reward
-
-        print(f'Step: {step} Reward: {reward:.4f} Return: {return_val:.2f}')
-        env.render()
-        step += 1
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Parse environment argument', add_help=False)
@@ -262,6 +228,7 @@ if __name__ == '__main__':
             args.env_args,
             agent_creator=make_policy,
             agent_kwargs={'env_module': env_module, 'args': args},
+            model_path=args.eval_model_path,
             device=args.args.device
         )
         exit(0)
