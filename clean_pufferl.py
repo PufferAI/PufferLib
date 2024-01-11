@@ -15,7 +15,6 @@ import torch.nn as nn
 import torch.optim as optim
 
 import pufferlib
-import pufferlib.args
 import pufferlib.utils
 import pufferlib.emulation
 import pufferlib.vectorization
@@ -61,7 +60,7 @@ class Charts:
 
 def init(
         self: object = None,
-        config: pufferlib.args.CleanPuffeRL = None,
+        config: pufferlib.namespace = None,
         exp_name: str = None,
         track: bool = False,
 

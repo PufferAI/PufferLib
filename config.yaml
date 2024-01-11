@@ -33,46 +33,72 @@ train:
   bptt_horizon: 16 #8
   vf_clip_coef: 0.1
 
-sweep_metadata:
+sweep:
   method: random
   name: sweep
+  metric:
+    goal: maximize
+    name: episodic_return
+  # Nested parameters name required by WandB API
+  parameters:
+    train:
+      parameters:
+        learning_rate: {
+          'distribution': 'log_uniform_values',
+          'min': 1e-4,
+          'max': 1e-1,
+        }
+        batch_size: {
+          'values': [128, 256, 512, 1024, 2048],
+        }
+        batch_rows: {
+          'values': [16, 32, 64, 128, 256],
+        }
+        bptt_horizon: {
+          'values': [4, 8, 16, 32],
+        }
 
-sweep_metric:
-  goal: maximize
-  name: episodic_return
-
-sweep:
-  learning_rate: {
-    'distribution': 'log_uniform_values',
-    'min': 1e-4,
-    'max': 1e-1,
-  }
-  batch_size: {
-    'values': [128, 256, 512, 1024, 2048],
-  }
-  batch_rows: {
-    'values': [16, 32, 64, 128, 256],
-  }
-  bptt_horizon: {
-    'values': [4, 8, 16, 32],
-  }
-
+### Arcade Learning Environment suite
+# Convenience wrappers provided for common test environments
 atari:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: atari
+beamrider:
+  package: atari
+  env:
+    name: BeamRiderNoFrameskip-v4
+breakout:
+  package: atari
+  env:
+    name: BreakoutNoFrameskip-v4
+enduro:
+  package: atari
+  env:
+    name: EnduroNoFrameskip-v4
+pong:
+  package: atari
+  env:
+    name: PongNoFrameskip-v4
+qbert:
+  package: atari
+  env:
+    name: QbertNoFrameskip-v4
+seaquest:
+  package: atari
+  env:
+    name: SeaquestNoFrameskip-v4
+space_invaders:
+  package: atari
+  env:
+    name: SpaceInvadersNoFrameskip-v4
 
 box2d:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: box2d
 
 ### Procgen Suite
 # Shared hyperparams (best for all envs)
+# Per-env hyperparams from CARBS
 procgen:
-  package: ~
+  package: procgen
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0005
@@ -91,8 +117,6 @@ procgen:
   policy:
     cnn_width: 16
     mlp_width: 32
-
-# Per-env hyperparams from CARBS
 bigfish:
   package: procgen
   train:
@@ -117,7 +141,6 @@ bigfish:
   policy:
     cnn_width: 22
     mlp_width: 327
-
 bossfight:
   package: procgen
   train:
@@ -142,7 +165,6 @@ bossfight:
   policy:
     cnn_width: 34
     mlp_width: 83
-
 caveflyer:
   package: procgen
   train:
@@ -167,7 +189,6 @@ caveflyer:
   policy:
     cnn_width: 17
     mlp_width: 242
-
 chaser:
   package: procgen
   train:
@@ -192,7 +213,6 @@ chaser:
   policy:
     cnn_width: 37
     mlp_width: 198
-
 climber:
   package: procgen
   train:
@@ -217,7 +237,6 @@ climber:
   policy:
     cnn_width: 29
     mlp_width: 134
-
 coinrun:
   package: procgen
   train:
@@ -242,7 +261,6 @@ coinrun:
   policy:
     cnn_width: 16
     mlp_width: 384
-
 dodgeball:
   package: procgen
   train:
@@ -267,7 +285,6 @@ dodgeball:
   policy:
     cnn_width: 24
     mlp_width: 538
-
 fruitbot:
   package: procgen
   train:
@@ -292,7 +309,6 @@ fruitbot:
   policy:
     cnn_width: 24
     mlp_width: 600
-
 heist:
   package: procgen
   train:
@@ -317,7 +333,6 @@ heist:
   policy:
     cnn_width: 60
     mlp_width: 154
-
 jumper:
   package: procgen
   train:
@@ -342,7 +357,6 @@ jumper:
   policy:
     cnn_width: 24
     mlp_width: 190
-
 leaper:
   package: procgen
   train:
@@ -367,7 +381,6 @@ leaper:
   policy:
     cnn_width: 28
     mlp_width: 100
-
 maze:
   package: procgen
   train:
@@ -392,7 +405,6 @@ maze:
   policy:
     cnn_width: 28
     mlp_width: 526
-
 miner:
   package: procgen
   train:
@@ -417,7 +429,6 @@ miner:
   policy:
     cnn_width: 38
     mlp_width: 175
-
 ninja:
   package: procgen
   train:
@@ -442,7 +453,6 @@ ninja:
   policy:
     cnn_width: 25
     mlp_width: 317
-
 plunder:
   package: procgen
   train:
@@ -467,7 +477,6 @@ plunder:
   policy:
     cnn_width: 30
     mlp_width: 288
-
 starpilot:
   package: procgen
   train:
@@ -494,142 +503,106 @@ starpilot:
     mlp_width: 144
 
 bsuite:
-  package: ~
+  package: bsuite
   train:
     total_timesteps: 1_000_000
     num_envs: 1
-  env: {}
-  policy: {}
 
 butterfly:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: butterfly
 
 classic_control:
-  package: ~
+  package: classic_control
   train:
     num_envs: 16
-  env: {}
-  policy: {}
+classic-control:
+  package: classic_control
+classiccontrol:
+  package: classic_control
 
 crafter:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: crafter
 
 dm_control:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: dm_control
+dm-control:
+  package: dm_control
+dmcontrol:
+  package: dm_control
+dmc:
+  package: dm_control
 
 dm_lab:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: dm_lab
+dm-lab:
+  package: dm_lab
+dmlab:
+  package: dm_lab
+dml:
+  package: dm_lab
 
 griddly:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: griddly
 
 magent:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: magent
 
 microrts:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: microrts
 
 minerl:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: minerl
 
 minigrid:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: minigrid
 
 minihack:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: minihack
 
 nethack:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: nethack
 
 nmmo:
-  package: ~
+  package: nmmo
   train:
     num_envs: 1
     envs_per_batch: 1
     envs_per_worker: 1
     batch_size: 4096
     batch_rows: 128
-  env: {}
-  policy: {}
 
 # Ocean: PufferAI's first party environment suite
 ocean:
-  package: ~
+  package: ocean
   train:
     total_timesteps: 30_000
     learning_rate: 0.017
     num_envs: 8
     batch_rows: 32
     bptt_horizon: 4
-  env: {}
-  policy: {}
-
 bandit:
   package: ocean
-  train:
-    total_timesteps: 30_000
-    learning_rate: 0.017
-    num_envs: 8
-    batch_rows: 32
-    bptt_horizon: 4
-  env: {}
-  policy: {}
-
+memory:
+  package: ocean
+password:
+  package: ocean
 squared:
   package: ocean
-  train:
-    total_timesteps: 30_000
-    learning_rate: 0.017
-    num_envs: 8
-    batch_rows: 32
-    bptt_horizon: 4
-  env: {}
-  policy: {}
+stochastic:
+  package: ocean
 
 open_spiel:
-  package: ~
+  package: open_spiel
   train:
     pool_kernel: [0, 1, 1, 0]
     num_envs: 32
     batch_size: 4096
-  env: {}
-  policy: {}
-
+open-spiel:
+  package: open_spiel
+openspiel:
+ 
 pokemon_red:
-  package: ~
+  package: pokemon_red
   train:
     total_timesteps: 100_000_000
     num_envs: 4
@@ -639,23 +612,32 @@ pokemon_red:
     gamma: 0.998
     batch_size: 1024
     batch_rows: 16
-  env: {}
-  policy: {}
-
+pokemon-red:
+  package: pokemon_red
+pokemonred:
+  package: pokemon_red
+pokemon:
+  package: pokemon_red
+ 
 links_awaken:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: links_awaken
+links-awaken:
+  package: links_awaken
+linksawaken:
+  package: links_awaken
+zelda:
+  package: links_awaken
 
 smac:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: smac
+starcraft:
+  package: smac
 
 stable_retro:
-  package: ~
-  train: {}
-  env: {}
-  policy: {}
+  package: stable_retro
+stable-retro:
+  package: stable_retro
+stableretro:
+  package: stable_retro
+retro:
+  package: stable_retro

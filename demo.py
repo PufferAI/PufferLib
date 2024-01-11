@@ -8,18 +8,94 @@ import inspect
 import yaml
 
 import pufferlib
-import pufferlib.args
 import pufferlib.utils
-import pufferlib.models
 
 from clean_pufferl import CleanPuffeRL, rollout, done_training
 
 
+def load_from_config(env):
+    with open('config.yaml') as f:
+        config = yaml.safe_load(f)
+
+    assert env in config, f'"{env}" not found in config.yaml. Uncommon environments that are part of larger packages may not have their own config. Specify these manually using the parent package, e.g. --config atari --env MontezumasRevengeNoFrameskip-v4.'
+
+    default_keys = 'env train policy recurrent sweep_metadata sweep_metric sweep'.split()
+    defaults = {key: config.get(key, {}) for key in default_keys}
+
+    # Package and subpackage (environment) configs
+    env_config = config[env]
+    pkg = env_config['package']
+    pkg_config = config[pkg]
+
+    combined_config = {}
+    for key in default_keys:
+        env_subconfig = env_config.get(key, {})
+        pkg_subconfig = pkg_config.get(key, {})
+
+        # Override first with pkg then with env configs
+        combined_config[key] = {**defaults[key], **pkg_subconfig, **env_subconfig}
+
+    return pkg, pufferlib.namespace(**combined_config)
+   
+def make_policy(env, env_module, args):
+    policy = env_module.Policy(env, **args.policy)
+    if args.force_recurrence or env_module.Recurrent is not None:
+        policy = env_module.Recurrent(env, policy, **args.recurrent)
+        policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)
+    else:
+        policy = pufferlib.frameworks.cleanrl.Policy(policy)
+
+    return policy.to(args.train.device)
+
+def init_wandb(args, env_module):
+    #os.environ["WANDB_SILENT"] = "true"
+
+    import wandb
+    wandb.init(
+        id=args.exp_name or wandb.util.generate_id(),
+        project=args.wandb_project,
+        entity=args.wandb_entity,
+        group=args.wandb_group,
+        config={
+            'cleanrl': args.train,
+            'env': args.env,
+            'policy': args.policy,
+            'recurrent': args.recurrent,
+        },
+        name=args.config,
+        monitor_gym=True,
+        save_code=True,
+        resume=True,
+    )
+    return wandb.run.id
+
+def sweep(args, env_module, make_env):
+    import wandb
+    sweep_id = wandb.sweep(sweep=args.sweep, project="pufferlib")
+
+    def main():
+        try:
+            args.exp_name = init_wandb(args, env_module)
+            if hasattr(wandb.config, 'train'):
+                # TODO: Add update method to namespace
+                print(args.train.__dict__)
+                print(wandb.config.train)
+                args.train.__dict__.update(dict(wandb.config.train))
+            train(args, env_module, make_env)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+
+    wandb.agent(sweep_id, main, count=20)
+
 def get_init_args(fn):
+    if fn is None:
+        return {}
+
     sig = inspect.signature(fn)
     args = {}
     for name, param in sig.parameters.items():
-        if name in ('self', 'env'):
+        if name in ('self', 'env', 'policy'):
             continue
         if param.kind == inspect.Parameter.VAR_POSITIONAL:
             continue
@@ -29,87 +105,48 @@ def get_init_args(fn):
             args[name] = param.default if param.default is not inspect.Parameter.empty else None
     return args
 
-def make_policy(env, env_module, args):
-    policy = env_module.Policy(env, **args.policy_args)
-    if args.force_recurrence or env_module.Recurrent is not None:
-        policy = pufferlib.models.RecurrentWrapper(
-            env, policy, **args.recurrent_args)
-        policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)
-    else:
-        policy = pufferlib.frameworks.cleanrl.Policy(policy)
-
-    return policy.to(args.args.device)
-
-def init_wandb(args, env_module):
-    os.environ["WANDB_SILENT"] = "true"
-
-    name = args.env
-    if 'name' in args.env_args:
-        name = args.env_args['name']
-
-    import wandb
-    wandb.init(
-        id=args.exp_name or wandb.util.generate_id(),
-        project=args.wandb_project,
-        entity=args.wandb_entity,
-        group=args.wandb_group,
-        config={
-            'cleanrl': dict(args.args),
-            'env': args.env_args,
-            'policy': args.policy_args,
-            'recurrent': args.recurrent_args,
-        },
-        name=name,
-        monitor_gym=True,
-        save_code=True,
-        resume=True,
-    )
-    return wandb.run.id
-
-def sweep(args, env_module, sweep_config):
-    import wandb
-    sweep_id = wandb.sweep(sweep=sweep_config, project="pufferlib")
-
-    def main():
-        args.exp_name = init_wandb(args, env_module)
-        if hasattr(wandb.config, 'cleanrl'):
-            # TODO: Add update method to namespace
-            args.args.__dict__.update(wandb.config.cleanrl)
-        if hasattr(wandb.config, 'env'):
-            args.env_kwargs.update(wandb.config.env)
-        if hasattr(wandb.config, 'policy'):
-            args.policy_kwargs.update(wandb.config.policy)
-        train(args, env_module)
-
-    wandb.agent(sweep_id, main, count=20)
-
 def train(args, env_module, make_env):
-    trainer = CleanPuffeRL(
-        config=args.args,
-        agent_creator=make_policy,
-        agent_kwargs={'env_module': env_module, 'args': args},
-        env_creator=make_env,
-        env_creator_kwargs=args.env_args,
-        vectorization=args.vectorization,
-        exp_name=args.exp_name,
-        track=args.track,
-    )
+    if args.backend == 'clean_pufferl':
+        trainer = CleanPuffeRL(
+            config=args.train,
+            agent_creator=make_policy,
+            agent_kwargs={'env_module': env_module, 'args': args},
+            env_creator=make_env,
+            env_creator_kwargs=args.env,
+            vectorization=args.vectorization,
+            exp_name=args.exp_name,
+            track=args.track,
+        )
 
-    while not done_training(trainer):
-        trainer.evaluate()
-        trainer.train()
+        while not done_training(trainer):
+            trainer.evaluate()
+            trainer.train()
 
-    print('Done training. Saving data...')
-    trainer.close()
-    print('Run complete')
+        print('Done training. Saving data...')
+        trainer.close()
+        print('Run complete')
+    elif args.backend == 'sb3':
+        from stable_baselines3 import PPO
+        from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+        from stable_baselines3.common.env_util import make_vec_env
+
+        envs = make_vec_env(lambda: make_env(**args.env),
+            n_envs=args.train.num_envs, seed=args.train.seed, vec_env_cls=DummyVecEnv)
+
+        model = PPO("CnnPolicy", envs, verbose=1,
+            n_steps=args.train.batch_rows*args.train.bptt_horizon,
+            batch_size=args.train.batch_size, n_epochs=args.train.update_epochs,
+            gamma=args.train.gamma
+        )
+
+        model.learn(total_timesteps=args.train.total_timesteps)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Parse environment argument', add_help=False)
-    parser.add_argument('--env', type=str, default='pokemon_red', help='Environment package name')
-    parser.add_argument('--env-id', type=str, default=None, help='Name of specific environment within the environment pkg. Not applicable for packages with only one environment.')
-    parser.add_argument('--train', action='store_true', help='Train')
-    parser.add_argument('--sweep', action='store_true', help='WandB Train Sweep')
-    parser.add_argument('--evaluate', action='store_true', help='Evaluate')
+    parser.add_argument('--backend', type=str, default='clean_pufferl', help='Train backend (clean_pufferl, sb3)')
+    parser.add_argument('--config', type=str, default='pokemon_red', help='Configuration in config.yaml to use')
+    parser.add_argument('--env', type=str, default=None, help='Name of specific environment to run')
+    parser.add_argument('--mode', type=str, default='train', help='train/sweep/evaluate')
     parser.add_argument('--eval-model-path', type=str, default=None, help='Path to model to evaluate')
     parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
     parser.add_argument('--exp-name', type=str, default=None, help="Resume from experiment")
@@ -122,62 +159,24 @@ if __name__ == '__main__':
 
     clean_parser = argparse.ArgumentParser(parents=[parser])
     args = parser.parse_known_args()[0].__dict__
+    pkg, config = load_from_config(args['config'])
 
-    with open('config.yaml') as f:
-        config = yaml.safe_load(f)
-
-    env = args['env']
-    assert env in config, f'Environment {env} not found in config.yaml. Not all specific environments have their own config. For instance, to use a specific atari environment, specify --env atari --env-id BreakoutNoFrameskip-v4 or similar'
-    env_config = config[env]
-
-    env_id = args['env_id']
-    if env_id is not None:
-        if env_id in config:
-            env_config = config[env_id]
-        else:
-            print(f'WARNING: {env_id} not found in config.yaml. Using {env} config.') 
-
-    # TODO: Improve install checking with pkg_resources
     try:
-        env_module = importlib.import_module(f'pufferlib.environments.{env}')
+        env_module = importlib.import_module(f'pufferlib.environments.{pkg}')
     except:
-        pufferlib.utils.install_requirements(env)
-        env_module = importlib.import_module(f'pufferlib.environments.{env}')
+        pufferlib.utils.install_requirements(pkg)
+        env_module = importlib.import_module(f'pufferlib.environments.{pkg}')
 
-    train_args = config['train']
-    train_args.update(env_config['train'])
+    # Get the make function for the environment
+    env_creator_args = [args['env_id']] if 'env_id' in args else []
+    make_env = env_module.env_creator(*env_creator_args)
 
-    sweep_args = config['sweep']
-    # TODO: Custom sweep args
-    #sweep_args.update(env_config['sweep'])
+    # Update config with environment defaults
+    config.env = {**get_init_args(make_env), **config.env}
+    config.policy = {**get_init_args(env_module.Policy.__init__), **config.policy}
+    config.recurrent = {**get_init_args(env_module.Recurrent.__init__), **config.recurrent}
 
-    policy_args = get_init_args(env_module.Policy.__init__)
-    policy_args.update(env_config['policy'])
-
-    if env_id is not None:
-        make_env = env_module.env_creator(env_id)
-    else:
-        make_env = env_module.env_creator()
-
-    env_args = get_init_args(make_env)
-    env_args.update(env_args)
-
-    recurrent_args = {}
-    recurrent = env_module.Recurrent
-    if recurrent is not None:
-        recurrent_args = dict(
-            input_size=recurrent.input_size,
-            hidden_size=recurrent.hidden_size,
-            num_layers=recurrent.num_layers
-        )
-
-    config = pufferlib.namespace(
-        args=train_args,
-        env_args=env_args,
-        policy_args=policy_args,
-        recurrent_args=recurrent_args,
-    )
-
+    # Generate argparse menu from config
     for name, sub_config in config.items():
         args[name] = {}
         for key, value in sub_config.items():
@@ -197,113 +196,50 @@ if __name__ == '__main__':
                 clean_parser.add_argument(cli_key, default=value, metavar='', type=type(value))
 
             args[name][key] = getattr(parser.parse_known_args()[0], data_key)
+        args[name] = pufferlib.namespace(**args[name])
 
     clean_parser.parse_args(sys.argv[1:])
-    args['args'] = pufferlib.args.CleanPuffeRL(**args['args'])
     args = pufferlib.namespace(**args)
+
     vec = args.vectorization
-    assert vec in 'serial multiprocessing ray'.split()
     if vec == 'serial':
         args.vectorization = pufferlib.vectorization.Serial
     elif vec == 'multiprocessing':
         args.vectorization = pufferlib.vectorization.Multiprocessing
     elif vec == 'ray':
         args.vectorization = pufferlib.vectorization.Ray
+    else:
+        raise ValueError(f'Invalid --vectorization (serial/multiprocessing/ray).')
 
-    if args.sweep:
+    if args.mode == 'sweep':
         args.track = True
     elif args.track:
         args.exp_name = init_wandb(args, env_module)
 
-    assert sum((args.train, args.sweep, args.evaluate)) == 1, 'Must specify exactly one of --train, --sweep, or --evaluate'
-    if args.train:
+    if args.mode == 'train':
         train(args, env_module, make_env)
         exit(0)
-    elif args.sweep:
-        sweep(args, env_module, make_env, sweep_args)
+    elif args.mode == 'sweep':
+        sweep(args, env_module, make_env)
         exit(0)
-    elif args.evaluate and args.env != 'pokemon_red':
+    elif args.mode == 'evaluate' and pkg != 'pokemon_red':
         rollout(
             make_env,
-            args.env_args,
+            args.env,
             agent_creator=make_policy,
             agent_kwargs={'env_module': env_module, 'args': args},
             model_path=args.eval_model_path,
             device=args.args.device
         )
-        exit(0)
-
-    ### One-off demo for pokemon red
-    import numpy as np
-    import torch
-
-    def make_pokemon_red_overlay(bg, counts):
-        nonzero = np.where(counts > 0, 1, 0)
-        scaled = np.clip(counts, 0, 1000) / 1000.0
-
-        # Convert counts to hue map
-        hsv = np.zeros((*counts.shape, 3))
-        hsv[..., 0] = scaled*(240.0/360.0)
-        hsv[..., 1] = nonzero
-        hsv[..., 2] = nonzero
-
-        # Convert the HSV image to RGB
-        import matplotlib.colors as mcolors
-        overlay = 255*mcolors.hsv_to_rgb(hsv)
-
-        # Upscale to 16x16
-        kernel = np.ones((16, 16, 1), dtype=np.uint8)
-        overlay = np.kron(overlay, kernel).astype(np.uint8)
-        mask = np.kron(nonzero, kernel[..., 0]).astype(np.uint8)
-        mask = np.stack([mask, mask, mask], axis=-1).astype(bool)
-
-        # Combine with background
-        render = bg.copy().astype(np.int32)
-        render[mask] = 0.2*render[mask] + 0.8*overlay[mask]
-        render = np.clip(render, 0, 255).astype(np.uint8)
-        return render
-
-    env = make_env(**env_args)
-    if args.exp_name is None:
-        agent = make_policy(env, **policy_args)
-    else:
-        agent = torch.load(args.eval_model_path, map_location=args.args.device)
-
-    terminal = truncated = True
-
-    import cv2
-    bg = cv2.imread('kanto_map_dsv.png')
- 
-    while True:
-        if terminal or truncated:
-            if args.args.verbose:
-                print('---  Reset  ---')
-
-            ob, info = env.reset()
-            state = None
-            step = 0
-            return_val = 0
-
-        ob = torch.tensor(ob).unsqueeze(0).to(args.args.device)
-        with torch.no_grad():
-            if hasattr(agent, 'lstm'):
-                action, _, _, _, state = agent.get_action_and_value(ob, state)
-            else:
-                action, _, _, _ = agent.get_action_and_value(ob)
-
-        ob, reward, terminal, truncated, _ = env.step(action[0].item())
-        return_val += reward
-
-        counts_map = env.env.counts_map
-        if np.sum(counts_map) > 0 and step % 500 == 0:
-            overlay = make_pokemon_red_overlay(bg, counts_map)
-            cv2.imshow('Pokemon Red', overlay[1000:][::4, ::4])
-            cv2.waitKey(1)
-
-        if args.args.verbose:
-            print(f'Step: {step} Reward: {reward:.4f} Return: {return_val:.2f}')
-
-        if not env_args['headless']:
-            env.render()
-
-        step += 1
+    elif args.mode == 'evaluate' and pkg == 'pokemon_red':
+        import pokemon_red_eval
+        pokemon_red_eval.rollout(
+            make_env,
+            args.env,
+            agent_creator=make_policy,
+            agent_kwargs={'env_module': env_module, 'args': args},
+            model_path=args.eval_model_path,
+            device=args.train.device,
+        )
+    elif pkg != 'pokemon_red':
+        raise ValueError('Mode must be one of train, sweep, or evaluate')

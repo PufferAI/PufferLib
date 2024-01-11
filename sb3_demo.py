@@ -11,7 +11,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--env', type=str, default='BreakoutNoFrameskip-v4')
 args = parser.parse_args()
 
-envs = make_vec_env(lambda: atari.make_env(args.env),
+env_creator = atari.env_creator(args.env)
+envs = make_vec_env(lambda: env_creator(),
     n_envs=4, seed=0, vec_env_cls=DummyVecEnv)
 
 model = PPO("CnnPolicy", envs, verbose=1)
