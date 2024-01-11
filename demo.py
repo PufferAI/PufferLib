@@ -230,7 +230,7 @@ if __name__ == '__main__':
             agent_creator=make_policy,
             agent_kwargs={'env_module': env_module, 'args': args},
             model_path=args.eval_model_path,
-            device=args.args.device
+            device=args.train.device
         )
     elif args.mode == 'evaluate' and pkg == 'pokemon_red':
         import pokemon_red_eval

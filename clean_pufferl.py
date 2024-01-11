@@ -318,10 +318,12 @@ def evaluate(data):
             continue
         if 'pokemon_exploration_map' in k:
             import cv2
+            from pokemon_red_eval import make_pokemon_red_overlay
             bg = cv2.imread('kanto_map_dsv.png')
             overlay = make_pokemon_red_overlay(bg, sum(v))
             if data.wandb is not None:
                 data.stats['Media/exploration_map'] = data.wandb.Image(overlay)
+            # @Leanke: Add your infos['learner']['x'] etc
         try: # TODO: Better checks on log data types
             data.stats[k] = np.mean(v)
         except:
