@@ -129,11 +129,12 @@ def train(args, env_module, make_env):
         from stable_baselines3 import PPO
         from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
         from stable_baselines3.common.env_util import make_vec_env
+        from sb3_contrib import RecurrentPPO
 
         envs = make_vec_env(lambda: make_env(**args.env),
             n_envs=args.train.num_envs, seed=args.train.seed, vec_env_cls=DummyVecEnv)
 
-        model = PPO("CnnPolicy", envs, verbose=1,
+        model = RecurrentPPO("CnnLstmPolicy", envs, verbose=1,
             n_steps=args.train.batch_rows*args.train.bptt_horizon,
             batch_size=args.train.batch_size, n_epochs=args.train.update_epochs,
             gamma=args.train.gamma
