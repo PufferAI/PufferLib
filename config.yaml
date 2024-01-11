@@ -4,7 +4,6 @@ train:
   device: cuda
   total_timesteps: 10_000_000
   learning_rate: 2.5e-4
-  num_envs: 8
   num_steps: 128
   anneal_lr: True
   gamma: 0.99
@@ -62,6 +61,8 @@ sweep:
 # Convenience wrappers provided for common test environments
 atari:
   package: atari
+  env:
+    name: BreakoutNoFrameskip-v4
 beamrider:
   package: atari
   env:
@@ -507,21 +508,31 @@ bsuite:
   train:
     total_timesteps: 1_000_000
     num_envs: 1
+  env:
+    name: bandit/0
 
 butterfly:
   package: butterfly
+  env:
+    name: cooperative_pong_v5
 
 classic_control:
   package: classic_control
   train:
     num_envs: 16
+  env:
+    name: cartpole
 classic-control:
   package: classic_control
 classiccontrol:
   package: classic_control
+cartpole:
+  package: classic_control
 
 crafter:
   package: crafter
+  env:
+    name: CrafterReward-v1
 
 dm_control:
   package: dm_control
@@ -543,24 +554,38 @@ dml:
 
 griddly:
   package: griddly
+  env:
+    name: GDY-Spiders-v0
 
 magent:
   package: magent
+  env:
+    name: battle_v4
 
 microrts:
   package: microrts
+  env:
+    name: GlobalAgentCombinedRewardEnv
 
 minerl:
   package: minerl
+  env:
+    name: MineRLNavigateDense-v0
 
 minigrid:
   package: minigrid
+  env:
+    name: MiniGrid-LavaGapS7-v0
 
 minihack:
   package: minihack
+  env:
+    name: MiniHack-River-v0
 
 nethack:
   package: nethack
+  env:
+    name: NetHackScore-v0
 
 nmmo:
   package: nmmo
@@ -570,6 +595,8 @@ nmmo:
     envs_per_worker: 1
     batch_size: 4096
     batch_rows: 128
+  env:
+    name: nmmo
 
 # Ocean: PufferAI's first party environment suite
 ocean:
@@ -580,16 +607,28 @@ ocean:
     num_envs: 8
     batch_rows: 32
     bptt_horizon: 4
+  env:
+    name: squared
 bandit:
   package: ocean
+  env:
+    name: bandit
 memory:
   package: ocean
+  env:
+    name: memory
 password:
   package: ocean
+  env:
+    name: password
 squared:
   package: ocean
+  env:
+    name: squared
 stochastic:
   package: ocean
+  env:
+    name: stochastic
 
 open_spiel:
   package: open_spiel
@@ -597,10 +636,29 @@ open_spiel:
     pool_kernel: [0, 1, 1, 0]
     num_envs: 32
     batch_size: 4096
+  env:
+    name: connect_four
 open-spiel:
   package: open_spiel
 openspiel:
- 
+  package: open_spiel
+connect_four:
+  package: open_spiel
+  env:
+    name: connect_four
+connect-four:
+  package: open_spiel
+  env:
+    name: connect_four
+connectfour:
+  package: open_spiel
+  env:
+    name: connect_four
+connect4:
+  package: open_spiel
+  env:
+    name: connect_four
+
 pokemon_red:
   package: pokemon_red
   train:
@@ -612,11 +670,15 @@ pokemon_red:
     gamma: 0.998
     batch_size: 1024
     batch_rows: 16
+  env:
+    name: pokemon_red
 pokemon-red:
   package: pokemon_red
 pokemonred:
   package: pokemon_red
 pokemon:
+  package: pokemon_red
+pokegym:
   package: pokemon_red
  
 links_awaken:
@@ -630,11 +692,15 @@ zelda:
 
 smac:
   package: smac
+  env:
+    name: smac
 starcraft:
   package: smac
 
 stable_retro:
   package: stable_retro
+  env:
+    name: Airstriker-Genesis
 stable-retro:
   package: stable_retro
 stableretro:

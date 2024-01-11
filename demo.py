@@ -169,8 +169,8 @@ if __name__ == '__main__':
         env_module = importlib.import_module(f'pufferlib.environments.{pkg}')
 
     # Get the make function for the environment
-    env_creator_args = [args['env_id']] if 'env_id' in args else []
-    make_env = env_module.env_creator(*env_creator_args)
+    env_name = args['env'] or config.env.pop('name')
+    make_env = env_module.env_creator(env_name)
 
     # Update config with environment defaults
     config.env = {**get_init_args(make_env), **config.env}

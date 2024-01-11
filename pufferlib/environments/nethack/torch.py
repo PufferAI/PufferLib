@@ -8,10 +8,9 @@ import pufferlib.models
 import pufferlib.pytorch
 
 
-class Recurrent:
-    input_size = 512
-    hidden_size = 512
-    num_layers = 1
+class Recurrent(pufferlib.models.RecurrentWrapper):
+    def __init__(self, env, policy, input_size=512, hidden_size=512, num_layers=1):
+        super().__init__(env, policy, input_size, hidden_size, num_layers)
 
 class Policy(pufferlib.models.Policy):
     '''Default NetHack Learning Environment policy ported from the nle release'''
