@@ -8,7 +8,16 @@ from pufferlib import namespace
 def init(self, password_length=5, hard_fixed_seed=42):
     '''Pufferlib Password environment
 
-    Guess the password. This is a test for reward sparsity.
+    Guess the password, which is a static binary string. Your policy has to
+    not determinize before it happens to get the reward, and it also has to
+    latch onto the reward within a few instances of getting it. 
+
+    Observation space: Box(0, 1, (password_length,)). A binary vector containing your guesses so far, so that the environment will be solvable without memory.
+    Action space: Discrete(2). Your guess for the next digit.
+
+    Args:
+        password_length: The number of binary digits in the password.
+        hard_fixed_seed: A fixed seed for the environment. It should be the same for all instances. This environment does not make sense when randomly generated.
     '''
     return namespace(self,
         password_length=password_length,

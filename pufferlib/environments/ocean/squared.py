@@ -18,13 +18,21 @@ def init(self,
         distance_to_target=1,
         num_targets=-1,
         ):
-    '''Pufferlib Diamond environment
+    '''Pufferlib Squared environment
 
     Agent starts at the center of a square grid.
     Targets are placed on the perimeter of the grid.
     Reward is 1 minus the L-inf distance to the closest target.
     This means that reward varies from -1 to 1.
     Reward is not given for targets that have already been hit.
+
+    Observation space: Box(-1, 1, (grid_size, grid_size)). The map.
+    Action space: Discrete(8). Which direction to move.
+
+    Args:
+        distance_to_target: The distance from the center to the closest target.
+        num_targets: The number of targets to randomly generate.
+ 
     '''
     grid_size = 2 * distance_to_target + 1
     if num_targets == -1:

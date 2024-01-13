@@ -11,7 +11,16 @@ def init(self,
         ):
     '''Pufferlib Stochastic environment
 
-    Rewarded for playing action 0 < p % of the time and action 1 < (1 - p) %
+    The optimal policy is to play action 0 < p % of the time and action 1 < (1 - p) %
+    This is a test of whether your algorithm can learn a nontrivial stochastic policy.
+    Do not use a policy with memory, as that will trivialize the problem.
+
+    Observation space: Box(0, 1, (1,)). The observation is always 0.
+    Action space: Discrete(2). Select action 0 or action 1.
+
+    Args:
+        p: The optimal probability for action 0
+        horizon: How often the environment should reset
     '''
     return namespace(self,
         p=p,

@@ -13,7 +13,16 @@ def init(self,
         ):
     '''Pufferlib Bandit environment
 
-    Simulates a variety of classic bandit problems
+    Simulates a classic multiarmed bandit problem.
+
+    Observation space: Box(0, 1, (1,)). The observation is always 1.
+    Action space: Discrete(num_actions). Which arm to pull.
+
+    Args:
+        num_actions: The number of bandit arms
+        reward_scale: The scale of the reward
+        reward_noise: The standard deviation of the reward signal
+        hard_fixed_seed: All instances of the environment should share the same seed.
     '''
     return namespace(self,
         num_actions=num_actions,

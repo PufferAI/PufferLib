@@ -11,7 +11,16 @@ def init(self,
         ):
     '''Pufferlib Memory environment
 
-    Repeat the provided sequence back
+    Repeat the observed sequence after a delay. It is randomly generated upon every reset. This is a test of memory length and capacity. It starts requiring credit assignment if you make the sequence too long.
+
+    The sequence is presented one digit at a time, followed by a string of 0. The agent should output 0s for the first mem_length + mem_delay steps, then output the sequence.
+
+    Observation space: Box(0, 1, (1,)). The current digit.
+    Action space: Discrete(2). Your guess for the next digit.
+
+    Args:
+        mem_length: The length of the sequence
+        mem_delay: The number of 0s between the sequence and the agent's response
     '''
     return namespace(self,
         mem_length=mem_length,
