@@ -64,7 +64,7 @@ def step(state, action):
 
     info = {}
     if terminal:
-        info['correct'] = np.all(
+        info['score'] = np.all(
             state.solution[:state.mem_length] == state.submission[-state.mem_length:])
 
     return ob, reward, terminal, False, info

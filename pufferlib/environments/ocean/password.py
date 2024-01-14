@@ -55,7 +55,7 @@ def step(state, action):
 
     if terminal:
         reward = float(np.all(state.observation == state.solution))
-        info['correct'] = reward
+        info['score'] = reward
 
     return state.observation, reward, terminal, False, info
 

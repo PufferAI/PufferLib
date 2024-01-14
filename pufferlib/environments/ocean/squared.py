@@ -112,7 +112,8 @@ def step(state, action):
     state.tick += 1
 
     done = state.tick >= state.max_ticks
-    info = {'targets_hit': state.num_targets - len(state.targets)} if done else {}
+    score = (state.num_targets - len(state.targets)) / state.num_targets
+    info = {'score': score} if done else {}
 
     return state.grid, reward, done, False, info
 

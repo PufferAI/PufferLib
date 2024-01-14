@@ -64,7 +64,7 @@ def step(state, action):
     # Couples reward noise to scale
     reward = (reward + reward_noise) * state.reward_scale
 
-    return state.observation, reward, True, False, {'correct': correct}
+    return state.observation, reward, True, False, {'score': correct}
 
 def render(state):
     pass
