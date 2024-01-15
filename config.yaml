@@ -607,6 +607,7 @@ ocean:
     num_envs: 8
     batch_rows: 32
     bptt_horizon: 4
+    device: cpu
   env:
     name: squared
 bandit:
