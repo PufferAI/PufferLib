@@ -13,6 +13,6 @@ def env_creator(name='pokemon_red'):
 
 def make(name, headless: bool = True, state_path=None):
     '''Pokemon Red'''
-    env = Environment(headless=headless, state_path=state_path)
+    env = Environment()
     return pufferlib.emulation.GymnasiumPufferEnv(env=env,
         postprocessor_cls=pufferlib.emulation.BasicPostprocessor)
