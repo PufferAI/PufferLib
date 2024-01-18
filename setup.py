@@ -15,7 +15,7 @@ VERSION = '0.6.1'
 # - 0.18-0.21 require setuptools<=65.5.0
 
 GYMNASIUM_VERSION = '0.29.1'
-GYM_VERSION = '0.21'
+GYM_VERSION = '0.23'
 PETTINGZOO_VERSION = '1.24.1'
 SHIMMY = 'shimmy[gym-v21]'
 
