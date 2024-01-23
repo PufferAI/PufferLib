@@ -106,10 +106,15 @@ def aggregate_recvs(state, recvs):
     assert all(state.workers_per_batch == len(e) for e in
         (obs, rewards, dones, truncateds, infos, env_ids))
 
-    obs = np.stack(list(chain.from_iterable(obs)), 0)
-    rewards = list(chain.from_iterable(rewards))
-    dones = list(chain.from_iterable(dones))
-    truncateds = list(chain.from_iterable(truncateds))
+    
+    obs = np.concatenate(obs)
+    rewards = np.concatenate(rewards)
+    dones = np.concatenate(dones)
+    truncateds = np.concatenate(truncateds)
+    #obs = np.stack(list(chain.from_iterable(obs)), 0)
+    #rewards = list(chain.from_iterable(rewards))
+    #dones = list(chain.from_iterable(dones))
+    #truncateds = list(chain.from_iterable(truncateds))
     infos = [i for ii in infos for i in ii]
 
     # TODO: Masking will break for 1-agent PZ envs

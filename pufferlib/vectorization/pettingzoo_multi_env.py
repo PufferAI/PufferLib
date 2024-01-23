@@ -12,9 +12,21 @@ from pufferlib.vectorization.multi_env import (
 
 
 def reset(state, seed=None):
+    if state.preallocated_obs is None:
+        obs_space = state.envs[0].observation_space
+        obs_n = obs_space.shape[0]
+        n_agents = len(state.envs[0].possible_agents)
+        n_envs = len(state.envs)
+        n = n_envs * n_agents
+
+        state.preallocated_obs = np.empty(
+            (n, *obs_space.shape), dtype=obs_space.dtype)
+        state.preallocated_rewards = np.empty(n, dtype=np.float32)
+        state.preallocated_dones = np.empty(n, dtype=np.bool)
+        state.preallocated_truncateds = np.empty(n, dtype=np.bool)
+
     state.agent_keys = []
     infos = []
-
     ptr = 0
     for idx, e in enumerate(state.envs):
         if seed is None:
@@ -25,18 +37,16 @@ def reset(state, seed=None):
         state.agent_keys.append(list(obs.keys()))
         infos.append(i)
 
-        if state.preallocated_obs is None:
-            ob = obs[list(obs.keys())[0]]
-            state.preallocated_obs = np.empty((len(state.envs)*len(obs), *ob.shape), dtype=ob.dtype)
-
         for o in obs.values():
             state.preallocated_obs[ptr] = o
             ptr += 1
 
-    rewards = [0] * len(state.preallocated_obs)
-    dones = [False] * len(state.preallocated_obs)
-    truncateds = [False] * len(state.preallocated_obs)
-    return state.preallocated_obs, rewards, dones, truncateds, infos
+    state.preallocated_rewards[:] = 0
+    state.preallocated_dones[:] = False
+    state.preallocated_truncateds[:] = False
+
+    return (state.preallocated_obs, state.preallocated_rewards,
+        state.preallocated_dones, state.preallocated_truncateds, infos)
 
 def step(state, actions):
     actions = np.array_split(actions, len(state.envs))

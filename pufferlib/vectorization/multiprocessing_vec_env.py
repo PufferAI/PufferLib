@@ -1,8 +1,10 @@
 from pdb import set_trace as T
+import numpy as np
+import psutil
 import time
 
 import selectors
-from multiprocessing import Process, Queue, Manager, Pipe
+from multiprocessing import Process, Queue, Manager, Pipe, Array
 from queue import Empty
 
 from pufferlib import namespace
@@ -11,6 +13,7 @@ from pufferlib.vectorization.vec_env import (
     calc_scale_params,
     setup,
     single_observation_space,
+    _single_observation_space,
     single_action_space,
     single_action_space,
     structured_observation_space,
@@ -39,13 +42,23 @@ def init(self: object = None,
     num_workers, workers_per_batch, envs_per_batch, agents_per_batch, agents_per_worker = calc_scale_params(
         num_envs, envs_per_batch, envs_per_worker, agents_per_env)
 
+    observation_size = int(np.prod(_single_observation_space(driver_env).shape))
+    # Shared memory for obs, rewards, terminals, truncateds
+    shared_mem = [
+        Array('d', envs_per_worker*(3+observation_size))
+        for _ in range(num_workers)
+    ]
     main_send_pipes, work_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
     work_send_pipes, main_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
     
+    num_cores = psutil.cpu_count()
+    #curr_process = psutil.Process()
+    #curr_process.cpu_affinity([num_cores-1])
     processes = [Process(
         target=_worker_process,
-        args=(multi_env_cls, env_creator, env_args, env_kwargs,
-              envs_per_worker, work_send_pipes[i], work_recv_pipes[i]))
+        args=(multi_env_cls, env_creator, env_args, env_kwargs, envs_per_worker,
+              i%(num_cores-1), shared_mem[i], work_send_pipes[i], work_recv_pipes[i])
+        )
         for i in range(num_workers)]
 
     for p in processes:
@@ -59,6 +72,8 @@ def init(self: object = None,
     return namespace(self,
         processes = processes,
         sel = sel,
+        observation_size = observation_size,
+        shared_mem = shared_mem,
         send_pipes = main_send_pipes,
         recv_pipes = main_recv_pipes,
         driver_env = driver_env,
@@ -76,14 +91,41 @@ def init(self: object = None,
         env_pool = env_pool,
     )
 
-def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs, n, send_pipe, recv_pipe):
+def _unpack_shared_mem(shared_mem, n):
+    np_buf = np.frombuffer(shared_mem.get_obj(), dtype=float)
+    obs_arr = np_buf[:-3*n]
+    rewards_arr = np_buf[-3*n:-2*n]
+    terminals_arr = np_buf[-2*n:-n]
+    truncated_arr = np_buf[-n:]
+
+    return obs_arr, rewards_arr, terminals_arr, truncated_arr
+
+def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs, n,
+        worker_idx, shared_mem, send_pipe, recv_pipe):
+
+    # I don't know if this helps. Sometimes it does, sometimes not.
+    # Need to run more comprehensive tests
+    #curr_process = psutil.Process()
+    #curr_process.cpu_affinity([worker_idx])
+
     envs = multi_env_cls(env_creator, env_args, env_kwargs, n=n)
+    obs_arr, rewards_arr, terminals_arr, truncated_arr = _unpack_shared_mem(shared_mem, n)
 
     while True:
         request, args, kwargs = recv_pipe.recv()
         func = getattr(envs, request)
         response = func(*args, **kwargs)
-        send_pipe.send(response)
+
+        # TODO: Handle put/get
+        obs, reward, done, truncated, info = response
+
+        # TESTED: There is no overhead associated with 4 assignments to shared memory
+        # vs. 4 assigns to an intermediate numpy array and then 1 assign to shared memory
+        obs_arr[:] = obs.ravel()
+        rewards_arr[:] = reward.ravel()
+        terminals_arr[:] = done.ravel()
+        truncated_arr[:] = truncated.ravel()
+        send_pipe.send(info)
 
 def recv(state):
     recv_precheck(state)
@@ -91,29 +133,32 @@ def recv(state):
     recvs = []
     next_env_id = []
     if state.env_pool:
-        for env_id in range(state.workers_per_batch):
-            response_pipe = state.recv_pipes[env_id]
-            response = response_pipe.recv()
-
-            o, r, d, t, i = response
-            recvs.append((o, r, d, t, i, env_id))
-            next_env_id.append(env_id)
-    else:
         while len(recvs) < state.workers_per_batch:
             for key, _ in state.sel.select(timeout=None):
                 response_pipe = key.fileobj
                 env_id = state.recv_pipes.index(response_pipe)
 
                 if response_pipe.poll():  # Check if data is available
-                    response = response_pipe.recv()
+                    info = response_pipe.recv()
+                    o, r, d, t = _unpack_shared_mem(
+                        state.shared_mem[env_id], state.envs_per_worker)
+                    o = o.reshape(state.envs_per_worker, state.observation_size)
 
-                    o, r, d, t, i = response
-                    recvs.append((o, r, d, t, i, env_id))
+                    recvs.append((o, r, d, t, info, env_id))
                     next_env_id.append(env_id)
 
                 if len(recvs) == state.workers_per_batch:
                     break
-
+    else:
+        for env_id in range(state.workers_per_batch):
+            response_pipe = state.recv_pipes[env_id]
+            info = response_pipe.recv()
+            o, r, d, t = _unpack_shared_mem(
+                state.shared_mem[env_id], state.envs_per_worker)
+            o = o.reshape(state.envs_per_worker, state.observation_size)
+            recvs.append((o, r, d, t, info, env_id))
+            next_env_id.append(env_id)
+ 
     state.prev_env_id = next_env_id
     return aggregate_recvs(state, recvs)
 

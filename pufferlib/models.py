@@ -193,6 +193,9 @@ class Convolutional(Policy):
         self.channels_last = channels_last
         self.downsample = downsample
 
+        self.flat_observation_space = env.flat_observation_space
+        self.flat_observation_structure = env.flat_observation_structure
+
         self.network = nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Conv2d(framestack, 32, 8, stride=4)),
             nn.ReLU(),
@@ -209,6 +212,9 @@ class Convolutional(Policy):
         self.value_fn = pufferlib.pytorch.layer_init(nn.Linear(output_size, 1), std=1)
 
     def encode_observations(self, observations):
+        observations = pufferlib.emulation.unpack_batched_obs(observations,
+            self.flat_observation_space, self.flat_observation_structure)
+
         if self.channels_last:
             observations = observations.permute(0, 3, 1, 2)
         if self.downsample > 1:
