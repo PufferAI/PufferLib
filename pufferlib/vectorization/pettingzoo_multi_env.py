@@ -13,7 +13,7 @@ from pufferlib.vectorization.multi_env import (
 
 def reset(state, seed=None):
     if state.preallocated_obs is None:
-        obs_space = state.envs[0].observation_space
+        obs_space = state.envs[0].single_observation_space
         obs_n = obs_space.shape[0]
         n_agents = len(state.envs[0].possible_agents)
         n_envs = len(state.envs)

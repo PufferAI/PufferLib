@@ -664,9 +664,9 @@ pokemon_red:
   package: pokemon_red
   train:
     total_timesteps: 100_000_000
-    num_envs: 24 
+    num_envs: 48 
     envs_per_worker: 4
-    envpool_batch_size: 24 
+    envpool_batch_size: 24
     update_epochs: 3
     gamma: 0.998
     batch_size: 1024

@@ -131,6 +131,8 @@ def init(
 
     optimizer = optim.Adam(agent.parameters(),
         lr=config.learning_rate, eps=1e-5)
+    uncompiled_agent = agent # Needed to save the model
+    agent = torch.compile(agent, fullgraph=True, mode='max-autotune')
     opt_state = resume_state.get("optimizer_state_dict", None)
     if opt_state is not None:
         optimizer.load_state_dict(resume_state["optimizer_state_dict"])
@@ -568,7 +570,7 @@ def save_checkpoint(data):
     if os.path.exists(model_path):
         return model_path
 
-    torch.save(data.agent, model_path)
+    torch.save(data.uncompiled_agent, model_path)
 
     state = {
         "optimizer_state_dict": data.optimizer.state_dict(),
