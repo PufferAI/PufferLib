@@ -410,10 +410,13 @@ def train(data):
     # Optimizing the policy and value network
     train_time = time.time()
     pg_losses, entropy_losses, v_losses, clipfracs, old_kls, kls = [], [], [], [], [], []
+    mb_obs_buffer = torch.zeros_like(b_obs[0], pin_memory=True)
+    
     for epoch in range(config.update_epochs):
         lstm_state = None
         for mb in range(num_minibatches):
-            mb_obs = b_obs[mb].to(data.device)
+            mb_obs_buffer.copy_(b_obs[mb], non_blocking=True)
+            mb_obs = mb_obs_buffer.to(self.device, non_blocking=True)
             mb_actions = b_actions[mb].contiguous()
             mb_values = b_values[mb].reshape(-1)
             mb_advantages = b_advantages[mb].reshape(-1)
