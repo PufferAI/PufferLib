@@ -51,7 +51,7 @@ class ProcgenPettingZooEnv:
         self.agents = self.possible_agents
 
     def observation_space(self, agent):
-        return self.env.observation_space
+        return self.env.observation_space['rgb']
 
     def action_space(self, agent):
         return self.env.action_space

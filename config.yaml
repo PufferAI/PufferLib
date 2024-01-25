@@ -31,6 +31,8 @@ train:
   batch_rows: 32
   bptt_horizon: 16 #8
   vf_clip_coef: 0.1
+  compile: False
+  compile_mode: reduce-overhead
 
 sweep:
   method: random
@@ -117,7 +119,7 @@ procgen:
     name: bigfish
   policy:
     cnn_width: 16
-    mlp_width: 32
+    mlp_width: 256
 bigfish:
   package: procgen
   train:
@@ -618,6 +620,10 @@ memory:
   package: ocean
   env:
     name: memory
+multiagent:
+  package: ocean
+  env:
+    name: multiagent
 password:
   package: ocean
   env:
@@ -664,13 +670,14 @@ pokemon_red:
   package: pokemon_red
   train:
     total_timesteps: 100_000_000
-    num_envs: 48 
-    envs_per_worker: 4
-    envpool_batch_size: 24
+    num_envs: 96
+    envs_per_worker: 8
+    envs_per_batch: 48 
     update_epochs: 3
     gamma: 0.998
-    batch_size: 1024
-    batch_rows: 16
+    batch_size: 4096
+    batch_rows: 128 
+    cpu_offload: False
   env:
     name: pokemon_red
 pokemon-red:

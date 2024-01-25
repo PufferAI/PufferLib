@@ -41,6 +41,7 @@ class Performance:
     train_sps = 0
     train_memory = 0
     train_pytorch_memory = 0
+    misc_time = 0
 
 @pufferlib.dataclass
 class Losses:
@@ -131,8 +132,17 @@ def init(
 
     optimizer = optim.Adam(agent.parameters(),
         lr=config.learning_rate, eps=1e-5)
+
     uncompiled_agent = agent # Needed to save the model
-    agent = torch.compile(agent, fullgraph=True, mode='max-autotune')
+    if config.compile:
+        agent.get_action_and_value = torch.compile(
+            agent.get_action_and_value, mode=config.compile_mode)
+        agent = torch.compile(agent, mode=config.compile_mode)
+
+    if config.verbose:
+        n_params = sum(p.numel() for p in agent.parameters() if p.requires_grad)
+        print(f"Model Size: {n_params//1000} K parameters")
+
     opt_state = resume_state.get("optimizer_state_dict", None)
     if opt_state is not None:
         optimizer.load_state_dict(resume_state["optimizer_state_dict"])
@@ -178,6 +188,7 @@ def init(
         config=config,
         pool = pool,
         agent = agent,
+        uncompiled_agent = uncompiled_agent,
         optimizer = optimizer,
         policy_pool = policy_pool,
 
@@ -230,6 +241,7 @@ def evaluate(data):
     env_profiler = pufferlib.utils.Profiler()
     inference_profiler = pufferlib.utils.Profiler()
     eval_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True).start()
+    misc_profiler = pufferlib.utils.Profiler()
 
     ptr = step = padded_steps_collected = agent_steps_collected = 0
     infos = defaultdict(lambda: defaultdict(list))
@@ -241,16 +253,17 @@ def evaluate(data):
         with env_profiler:
             o, r, d, t, i, env_id, mask = data.pool.recv()
 
-        i = data.policy_pool.update_scores(i, "return")
+        with misc_profiler:
+            i = data.policy_pool.update_scores(i, "return")
 
         with inference_profiler, torch.no_grad():
             o = torch.as_tensor(o)
             r = torch.as_tensor(r).float().to(data.device).view(-1)
             d = torch.as_tensor(d).float().to(data.device).view(-1)
 
-        agent_steps_collected += sum(mask)
-        padded_steps_collected += len(mask)
-        with inference_profiler, torch.no_grad():
+            agent_steps_collected += sum(mask)
+            padded_steps_collected += len(mask)
+
             # Multiple policies will not work with new envpool
             next_lstm_state = data.next_lstm_state
             if next_lstm_state is not None:
@@ -269,28 +282,31 @@ def evaluate(data):
 
             value = value.flatten()
 
-        # Index alive mask with policy pool idxs...
-        # TODO: Find a way to avoid having to do this
-        learner_mask = mask * data.policy_pool.mask
+        with misc_profiler:
+            # Index alive mask with policy pool idxs...
+            # TODO: Find a way to avoid having to do this
+            learner_mask = torch.Tensor(mask * data.policy_pool.mask)
 
-        for idx in np.where(learner_mask)[0]:
-            if ptr == config.batch_size + 1:
-                break
-            data.obs[ptr] = o[idx]
-            data.values[ptr] = value[idx]
-            data.actions[ptr] = actions[idx]
-            data.logprobs[ptr] = logprob[idx]
-            data.sort_keys.append((env_id[idx], step))
-            if len(d) != 0:
-                data.rewards[ptr] = r[idx]
-                data.dones[ptr] = d[idx]
-            ptr += 1
+            # Ensure indices do not exceed batch size
+            indices = torch.where(learner_mask)[0][:config.batch_size - ptr + 1]
+            end = ptr + len(indices)
 
+            # Batch indexing
+            data.obs[ptr:end] = o[indices]
+            data.values[ptr:end] = value[indices]
+            data.actions[ptr:end] = actions[indices]
+            data.logprobs[ptr:end] = logprob[indices]
+            data.rewards[ptr:end] = r[indices]
+            data.dones[ptr:end] = d[indices]
+            data.sort_keys.extend([(env_id[i], step) for i in indices])
 
-        for policy_name, policy_i in i.items():
-            for agent_i in policy_i:
-                for name, dat in unroll_nested_dict(agent_i):
-                    infos[policy_name][name].append(dat)
+            # Update pointer
+            ptr += len(indices)
+
+            for policy_name, policy_i in i.items():
+                for agent_i in policy_i:
+                    for name, dat in unroll_nested_dict(agent_i):
+                        infos[policy_name][name].append(dat)
 
         with env_profiler:
             data.pool.send(actions.cpu().numpy())
@@ -312,6 +328,7 @@ def evaluate(data):
     perf.eval_sps = int(padded_steps_collected / eval_profiler.elapsed)
     perf.eval_memory = eval_profiler.end_mem
     perf.eval_pytorch_memory = eval_profiler.end_torch_mem
+    perf.misc_time = misc_profiler.elapsed
 
     data.stats = {}
     for k, v in infos['learner'].items():
@@ -346,11 +363,6 @@ def train(data):
     # assert data.num_steps % bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
     train_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True)
     train_profiler.start()
-
-    # Anneal learning rate
-    frac = 1.0 - (data.update - 1.0) / data.total_updates
-    lrnow = frac * config.learning_rate
-    data.optimizer.param_groups[0]["lr"] = lrnow
 
     if config.anneal_lr:
         frac = 1.0 - (data.update - 1.0) / data.total_updates

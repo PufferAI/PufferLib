@@ -42,10 +42,13 @@ def init(self: object = None,
     num_workers, workers_per_batch, envs_per_batch, agents_per_batch, agents_per_worker = calc_scale_params(
         num_envs, envs_per_batch, envs_per_worker, agents_per_env)
 
+    agents_per_worker = agents_per_env * envs_per_worker
     observation_size = int(np.prod(_single_observation_space(driver_env).shape))
+    observation_dtype = _single_observation_space(driver_env).dtype
+
     # Shared memory for obs, rewards, terminals, truncateds
     shared_mem = [
-        Array('d', envs_per_worker*(3+observation_size))
+        Array('d', agents_per_worker*(3+observation_size))
         for _ in range(num_workers)
     ]
     main_send_pipes, work_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
@@ -56,8 +59,10 @@ def init(self: object = None,
     #curr_process.cpu_affinity([num_cores-1])
     processes = [Process(
         target=_worker_process,
-        args=(multi_env_cls, env_creator, env_args, env_kwargs, envs_per_worker,
-              i%(num_cores-1), shared_mem[i], work_send_pipes[i], work_recv_pipes[i])
+        args=(multi_env_cls, env_creator, env_args, env_kwargs,
+              agents_per_env, envs_per_worker,
+              i%(num_cores-1), shared_mem[i],
+              work_send_pipes[i], work_recv_pipes[i])
         )
         for i in range(num_workers)]
 
@@ -73,6 +78,7 @@ def init(self: object = None,
         processes = processes,
         sel = sel,
         observation_size = observation_size,
+        observation_dtype = observation_dtype,
         shared_mem = shared_mem,
         send_pipes = main_send_pipes,
         recv_pipes = main_recv_pipes,
@@ -100,7 +106,8 @@ def _unpack_shared_mem(shared_mem, n):
 
     return obs_arr, rewards_arr, terminals_arr, truncated_arr
 
-def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs, n,
+def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
+        agents_per_env, envs_per_worker,
         worker_idx, shared_mem, send_pipe, recv_pipe):
 
     # I don't know if this helps. Sometimes it does, sometimes not.
@@ -108,23 +115,27 @@ def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs, n,
     #curr_process = psutil.Process()
     #curr_process.cpu_affinity([worker_idx])
 
-    envs = multi_env_cls(env_creator, env_args, env_kwargs, n=n)
-    obs_arr, rewards_arr, terminals_arr, truncated_arr = _unpack_shared_mem(shared_mem, n)
+    envs = multi_env_cls(env_creator, env_args, env_kwargs, n=envs_per_worker)
+    obs_arr, rewards_arr, terminals_arr, truncated_arr = _unpack_shared_mem(
+        shared_mem, agents_per_env * envs_per_worker)
 
     while True:
         request, args, kwargs = recv_pipe.recv()
         func = getattr(envs, request)
         response = func(*args, **kwargs)
+        info = {}
 
         # TODO: Handle put/get
-        obs, reward, done, truncated, info = response
+        if request in 'step reset'.split():
+            obs, reward, done, truncated, info = response
 
-        # TESTED: There is no overhead associated with 4 assignments to shared memory
-        # vs. 4 assigns to an intermediate numpy array and then 1 assign to shared memory
-        obs_arr[:] = obs.ravel()
-        rewards_arr[:] = reward.ravel()
-        terminals_arr[:] = done.ravel()
-        truncated_arr[:] = truncated.ravel()
+            # TESTED: There is no overhead associated with 4 assignments to shared memory
+            # vs. 4 assigns to an intermediate numpy array and then 1 assign to shared memory
+            obs_arr[:] = obs.ravel()
+            rewards_arr[:] = reward.ravel()
+            terminals_arr[:] = done.ravel()
+            truncated_arr[:] = truncated.ravel()
+
         send_pipe.send(info)
 
 def recv(state):
@@ -141,8 +152,10 @@ def recv(state):
                 if response_pipe.poll():  # Check if data is available
                     info = response_pipe.recv()
                     o, r, d, t = _unpack_shared_mem(
-                        state.shared_mem[env_id], state.envs_per_worker)
-                    o = o.reshape(state.envs_per_worker, state.observation_size)
+                        state.shared_mem[env_id], state.agents_per_env * state.envs_per_worker)
+                    o = o.reshape(
+                        state.agents_per_env*state.envs_per_worker,
+                        state.observation_size).astype(state.observation_dtype)
 
                     recvs.append((o, r, d, t, info, env_id))
                     next_env_id.append(env_id)
@@ -154,8 +167,11 @@ def recv(state):
             response_pipe = state.recv_pipes[env_id]
             info = response_pipe.recv()
             o, r, d, t = _unpack_shared_mem(
-                state.shared_mem[env_id], state.envs_per_worker)
-            o = o.reshape(state.envs_per_worker, state.observation_size)
+                state.shared_mem[env_id], state.agents_per_env * state.envs_per_worker)
+            o = o.reshape(
+                    state.agents_per_env*state.envs_per_worker,
+                    state.observation_size).astype(state.observation_dtype)
+
             recvs.append((o, r, d, t, info, env_id))
             next_env_id.append(env_id)
  

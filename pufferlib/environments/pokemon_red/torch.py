@@ -17,3 +17,13 @@ class Policy(pufferlib.models.Convolutional):
             flat_size=flat_size,
             channels_last=True,
         )
+
+'''
+class Policy(pufferlib.models.ProcgenResnet):
+    def __init__(self, env, cnn_width=16, mlp_width=256):
+        super().__init__(
+            env=env,
+            cnn_width=cnn_width,
+            mlp_width=mlp_width,
+        )
+'''

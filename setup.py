@@ -92,7 +92,9 @@ compatible_environments = {
         'pandas==2.0.2',
     ],
     'procgen': [
-        'procgen==0.10.7',
+        # Danijar mirrored for Python 3.11 and 3.12 support
+        'procgen-mirror==0.10.7',
+        #'procgen==0.10.7',
     ],
 }
 

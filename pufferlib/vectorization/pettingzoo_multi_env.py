@@ -53,20 +53,26 @@ def step(state, actions):
     rewards, dones, truncateds, infos = [], [], [], []
 
     ptr = 0
-    for idx, (a_keys, env, atns) in enumerate(zip(state.agent_keys, state.envs, actions)):
+    n_envs = len(state.envs)
+    n_agents = len(state.envs[0].possible_agents)
+    assert n_envs == len(state.agent_keys) == len(actions)
+
+    for idx in range(n_envs):
+        a_keys, env, atns = state.agent_keys[idx], state.envs[idx], actions[idx]
+        start = ptr * n_agents
+        end = start + n_agents
         if env.done:
             o, i = env.reset()
-            num_agents = len(env.possible_agents)
-            rewards.extend([0] * num_agents)
-            dones.extend([False] * num_agents)
-            truncateds.extend([False] * num_agents)
+            state.preallocated_rewards[start:end] = 0
+            state.preallocated_dones[start:end] = False
+            state.preallocated_truncateds[start:end] = False
         else:
             assert len(a_keys) == len(atns)
             atns = dict(zip(a_keys, atns))
             o, r, d, t, i = env.step(atns)
-            rewards.extend(r.values())
-            dones.extend(d.values())
-            truncateds.extend(t.values())
+            state.preallocated_rewards[start:end] = list(r.values())
+            state.preallocated_dones[start:end] = d.values()
+            state.preallocated_truncateds[start:end] = t.values()
 
         infos.append(i)
         state.agent_keys[idx] = list(o.keys())
@@ -75,7 +81,8 @@ def step(state, actions):
             state.preallocated_obs[ptr] = oo
             ptr += 1
 
-    return state.preallocated_obs, rewards, dones, truncateds, infos
+    return (state.preallocated_obs, state.preallocated_rewards,
+        state.preallocated_dones, state.preallocated_truncateds, infos)
 
 class PettingZooMultiEnv:
     __init__ = init

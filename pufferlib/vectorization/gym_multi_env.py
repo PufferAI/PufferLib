@@ -9,7 +9,6 @@ from pufferlib.vectorization.multi_env import (
     close,
 )
 
-
 def reset(state, seed=None):
     if state.preallocated_obs is None:
         obs_space = state.envs[0].observation_space
@@ -32,9 +31,10 @@ def reset(state, seed=None):
         i['mask'] = True
         infos.append(i)
         state.preallocated_obs[idx] = ob
-        state.preallocated_rewards[idx] = 0
-        state.preallocated_dones[idx] = False
-        state.preallocated_truncateds[idx] = False
+
+    state.preallocated_rewards[:] = 0
+    state.preallocated_dones[:] = False
+    state.preallocated_truncateds[:] = False
 
     return (state.preallocated_obs, state.preallocated_rewards,
         state.preallocated_dones, state.preallocated_truncateds, infos)
