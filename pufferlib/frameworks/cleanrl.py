@@ -9,19 +9,19 @@ import pufferlib.models
 def sample_logits(logits, action=None):
     is_discrete = isinstance(logits, torch.Tensor)
     if is_discrete:
-        logits = [logits]
+        logits = logits.unsqueeze(0) 
 
-    multi_categorical = [Categorical(logits=l) for l in logits]
+    multi_categorical = Categorical(logits=logits)
 
     batch = logits[0].shape[0]
     if action is None:
-        action = torch.stack([c.sample() for c in multi_categorical])
+        action = multi_categorical.sample()
     else:
         action = action.view(batch, -1).T
 
     assert len(multi_categorical) == len(action)
-    logprob = torch.stack([c.log_prob(a) for c, a in zip(multi_categorical, action)]).T.sum(1)
-    entropy = torch.stack([c.entropy() for c in multi_categorical]).T.sum(1)
+    logprob = multi_categorical.log_prob(action).T.sum(1)
+    entropy = multi_categorical.entropy().T.sum(1)
 
     if is_discrete:
         return action.squeeze(0), logprob.squeeze(0), entropy.squeeze(0)
