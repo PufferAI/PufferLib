@@ -44,6 +44,9 @@ class Policy(torch.nn.Module):
          action, logprob, entropy = sample_logits(logits, action)
          return action, logprob, entropy, value
 
+    def forward(self, x, action=None):
+        return self.get_action_and_value(x, action)
+
 
 class RecurrentPolicy(torch.nn.Module):
     '''Wrap a recurrent PyTorch model for use with CleanRL'''
@@ -67,3 +70,6 @@ class RecurrentPolicy(torch.nn.Module):
         logits, value, state = self.policy(x, state)
         action, logprob, entropy = sample_logits(logits, action)
         return action, logprob, entropy, value, state
+
+    def forward(self, x, state=None, action=None):
+        return self.get_action_and_value(x, state, action)

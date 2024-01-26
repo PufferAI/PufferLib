@@ -77,14 +77,11 @@ class PolicyPool:
             if lstm_state is not None:
                 h = lstm_state[0][:, samp]
                 c = lstm_state[1][:, samp]
-                atn, lgprob, _, val, (h, c) = policy.get_action_and_value(
-                    obs[samp],
-                    (h, c),
-                  )
+                atn, lgprob, _, val, (h, c) = policy(obs[samp], (h, c))
                 lstm_state[0][:, samp] = h
                 lstm_state[1][:, samp] = c
             else:
-                atn, lgprob, _, val = policy.get_action_and_value(obs[samp])
+                atn, lgprob, _, val = policy(obs[samp])
 
             self.actions[samp] = atn
             self.logprobs[samp] = lgprob

@@ -135,8 +135,6 @@ def init(
 
     uncompiled_agent = agent # Needed to save the model
     if config.compile:
-        agent.get_action_and_value = torch.compile(
-            agent.get_action_and_value, mode=config.compile_mode)
         agent = torch.compile(agent, mode=config.compile_mode)
 
     if config.verbose:
@@ -460,11 +458,11 @@ def train(data):
             mb_returns = b_returns[mb].reshape(-1)
 
             if hasattr(data.agent, 'lstm'):
-                _, newlogprob, entropy, newvalue, lstm_state = data.agent.get_action_and_value(
+                _, newlogprob, entropy, newvalue, lstm_state = data.agent(
                     mb_obs, state=lstm_state, action=mb_actions)
                 lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
             else:
-                _, newlogprob, entropy, newvalue = data.agent.get_action_and_value(
+                _, newlogprob, entropy, newvalue = data.agent(
                     mb_obs.reshape(-1, *data.pool.single_observation_space.shape),
                     action=mb_actions,
                 )
@@ -590,9 +588,9 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
         ob = torch.tensor(ob).unsqueeze(0).to(device)
         with torch.no_grad():
             if hasattr(agent, 'lstm'):
-                action, _, _, _, state = agent.get_action_and_value(ob, state)
+                action, _, _, _, state = agent(ob, state)
             else:
-                action, _, _, _ = agent.get_action_and_value(ob)
+                action, _, _, _ = agent(ob)
 
         ob, reward, terminal, truncated, _ = env.step(action[0].item())
         return_val += reward
