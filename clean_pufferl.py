@@ -93,7 +93,6 @@ def init(
     total_updates = config.total_timesteps // config.batch_size
 
     device = config.device
-    obs_device = 'cpu' if config.cpu_offload else device
 
     # Create environments, agent, and optimizer
     init_profiler = pufferlib.utils.Profiler(memory=True)
@@ -165,13 +164,13 @@ def init(
             torch.zeros(shape).to(device),
             torch.zeros(shape).to(device),
         )
-    obs=torch.zeros(config.batch_size + 1, *obs_shape)#.to(obs_device)
-    actions=torch.zeros(config.batch_size + 1, *atn_shape, dtype=int)#.to(device)
-    logprobs=torch.zeros(config.batch_size + 1)#.to(device)
-    rewards=torch.zeros(config.batch_size + 1)#.to(device)
-    dones=torch.zeros(config.batch_size + 1)#.to(device)
-    truncateds=torch.zeros(config.batch_size + 1)#.to(device)
-    values=torch.zeros(config.batch_size + 1)#.to(device)
+    obs=torch.zeros(config.batch_size + 1, *obs_shape)
+    actions=torch.zeros(config.batch_size + 1, *atn_shape, dtype=int)
+    logprobs=torch.zeros(config.batch_size + 1)
+    rewards=torch.zeros(config.batch_size + 1)
+    dones=torch.zeros(config.batch_size + 1)
+    truncateds=torch.zeros(config.batch_size + 1)
+    values=torch.zeros(config.batch_size + 1)
 
     obs_ary = np.asarray(obs)
     actions_ary = np.asarray(actions)
@@ -180,14 +179,6 @@ def init(
     dones_ary = np.asarray(dones)
     truncateds_ary = np.asarray(truncateds)
     values_ary = np.asarray(values)
-
-    obs_ary = np.zeros((config.batch_size + 1, *obs_shape), dtype=np.uint8)
-    actions_ary = np.zeros((config.batch_size + 1, *atn_shape), dtype=np.uint8)
-    logprobs_ary = np.zeros((config.batch_size + 1,), dtype=np.float32)
-    rewards_ary = np.zeros((config.batch_size + 1,), dtype=np.float32)
-    dones_ary = np.zeros((config.batch_size + 1,), dtype=np.float32)
-    truncateds_ary = np.zeros((config.batch_size + 1,), dtype=np.float32)
-    values_ary = np.zeros((config.batch_size + 1,), dtype=np.float32)
 
     storage_profiler.stop()
 
@@ -239,7 +230,6 @@ def init(
         update = update,
         global_step = global_step,
         device = device,
-        obs_device = obs_device,
         start_time = start_time,
     )
 
@@ -319,15 +309,6 @@ def evaluate(data):
             end = ptr + len(indices)
 
             # Batch indexing
-            '''
-            data.obs[ptr:end] = o.cpu()[indices]
-            data.actions[ptr:end] = actions[indices]
-            data.logprobs[ptr:end] = logprob.cpu()[indices]
-            data.rewards[ptr:end] = r.cpu()[indices]
-            data.dones[ptr:end] = d.cpu()[indices]
-            data.values[ptr:end] = value.cpu()[indices]
-            '''
-
             data.obs_ary[ptr:end] = o.cpu().numpy()[indices]
             data.values_ary[ptr:end] = value.cpu().numpy()[indices]
             data.actions_ary[ptr:end] = actions[indices]
@@ -450,10 +431,14 @@ def train(data):
     # Optimizing the policy and value network
     train_time = time.time()
     pg_losses, entropy_losses, v_losses, clipfracs, old_kls, kls = [], [], [], [], [], []
+    mb_obs_buffer = torch.zeros_like(b_obs[0], pin_memory=True)
+
     for epoch in range(config.update_epochs):
         lstm_state = None
         for mb in range(num_minibatches):
-            mb_obs = b_obs[mb].to(data.device, non_blocking=True)
+            mb_obs_buffer.copy_(b_obs[mb], non_blocking=True)
+            mb_obs = mb_obs_buffer.to(data.device, non_blocking=True)
+            #mb_obs = b_obs[mb].to(data.device, non_blocking=True)
             mb_actions = b_actions[mb].contiguous()
             mb_values = b_values[mb].reshape(-1)
             mb_advantages = b_advantages[mb].reshape(-1)

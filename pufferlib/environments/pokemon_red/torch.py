@@ -20,7 +20,7 @@ class Policy(pufferlib.models.Convolutional):
 
 '''
 class Policy(pufferlib.models.ProcgenResnet):
-    def __init__(self, env, cnn_width=16, mlp_width=256):
+    def __init__(self, env, cnn_width=16, mlp_width=512):
         super().__init__(
             env=env,
             cnn_width=cnn_width,
