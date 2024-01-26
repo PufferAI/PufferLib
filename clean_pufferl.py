@@ -165,13 +165,30 @@ def init(
             torch.zeros(shape).to(device),
             torch.zeros(shape).to(device),
         )
-    obs=torch.zeros(config.batch_size + 1, *obs_shape).to(obs_device)
-    actions=torch.zeros(config.batch_size + 1, *atn_shape, dtype=int).to(device)
-    logprobs=torch.zeros(config.batch_size + 1).to(device)
-    rewards=torch.zeros(config.batch_size + 1).to(device)
-    dones=torch.zeros(config.batch_size + 1).to(device)
-    truncateds=torch.zeros(config.batch_size + 1).to(device)
-    values=torch.zeros(config.batch_size + 1).to(device)
+    obs=torch.zeros(config.batch_size + 1, *obs_shape)#.to(obs_device)
+    actions=torch.zeros(config.batch_size + 1, *atn_shape, dtype=int)#.to(device)
+    logprobs=torch.zeros(config.batch_size + 1)#.to(device)
+    rewards=torch.zeros(config.batch_size + 1)#.to(device)
+    dones=torch.zeros(config.batch_size + 1)#.to(device)
+    truncateds=torch.zeros(config.batch_size + 1)#.to(device)
+    values=torch.zeros(config.batch_size + 1)#.to(device)
+
+    obs_ary = np.asarray(obs)
+    actions_ary = np.asarray(actions)
+    logprobs_ary = np.asarray(logprobs)
+    rewards_ary = np.asarray(rewards)
+    dones_ary = np.asarray(dones)
+    truncateds_ary = np.asarray(truncateds)
+    values_ary = np.asarray(values)
+
+    obs_ary = np.zeros((config.batch_size + 1, *obs_shape), dtype=np.uint8)
+    actions_ary = np.zeros((config.batch_size + 1, *atn_shape), dtype=np.uint8)
+    logprobs_ary = np.zeros((config.batch_size + 1,), dtype=np.float32)
+    rewards_ary = np.zeros((config.batch_size + 1,), dtype=np.float32)
+    dones_ary = np.zeros((config.batch_size + 1,), dtype=np.float32)
+    truncateds_ary = np.zeros((config.batch_size + 1,), dtype=np.float32)
+    values_ary = np.zeros((config.batch_size + 1,), dtype=np.float32)
+
     storage_profiler.stop()
 
     #"charts/actions": wandb.Histogram(b_actions.cpu().numpy()),
@@ -209,6 +226,13 @@ def init(
         rewards = rewards,
         dones = dones,
         values = values,
+        obs_ary = obs_ary,
+        actions_ary = actions_ary,
+        logprobs_ary = logprobs_ary,
+        rewards_ary = rewards_ary,
+        dones_ary = dones_ary,
+        truncateds_ary = truncateds_ary,
+        values_ary = values_ary,
 
         # Misc
         total_updates = total_updates,
@@ -282,22 +306,34 @@ def evaluate(data):
 
             value = value.flatten()
 
+       
         with misc_profiler:
+            actions = actions.cpu().numpy()
+     
             # Index alive mask with policy pool idxs...
             # TODO: Find a way to avoid having to do this
             learner_mask = torch.Tensor(mask * data.policy_pool.mask)
 
             # Ensure indices do not exceed batch size
-            indices = torch.where(learner_mask)[0][:config.batch_size - ptr + 1]
+            indices = torch.where(learner_mask)[0][:config.batch_size - ptr + 1].numpy()
             end = ptr + len(indices)
 
             # Batch indexing
-            data.obs[ptr:end] = o[indices]
-            data.values[ptr:end] = value[indices]
+            '''
+            data.obs[ptr:end] = o.cpu()[indices]
             data.actions[ptr:end] = actions[indices]
-            data.logprobs[ptr:end] = logprob[indices]
-            data.rewards[ptr:end] = r[indices]
-            data.dones[ptr:end] = d[indices]
+            data.logprobs[ptr:end] = logprob.cpu()[indices]
+            data.rewards[ptr:end] = r.cpu()[indices]
+            data.dones[ptr:end] = d.cpu()[indices]
+            data.values[ptr:end] = value.cpu()[indices]
+            '''
+
+            data.obs_ary[ptr:end] = o.cpu().numpy()[indices]
+            data.values_ary[ptr:end] = value.cpu().numpy()[indices]
+            data.actions_ary[ptr:end] = actions[indices]
+            data.logprobs_ary[ptr:end] = logprob.cpu().numpy()[indices]
+            data.rewards_ary[ptr:end] = r.cpu().numpy()[indices]
+            data.dones_ary[ptr:end] = d.cpu().numpy()[indices]
             data.sort_keys.extend([(env_id[i], step) for i in indices])
 
             # Update pointer
@@ -309,7 +345,7 @@ def evaluate(data):
                         infos[policy_name][name].append(dat)
 
         with env_profiler:
-            data.pool.send(actions.cpu().numpy())
+            data.pool.send(actions)
 
     eval_profiler.stop()
 
@@ -397,11 +433,15 @@ def train(data):
             )
 
     # Flatten the batch
-    data.b_obs = b_obs = data.obs[b_idxs]
-    b_actions = data.actions[b_idxs]
-    b_logprobs = data.logprobs[b_idxs]
-    b_dones = data.dones[b_idxs]
-    b_values = data.values[b_idxs]
+    data.b_obs = b_obs = torch.Tensor(data.obs_ary[b_idxs])
+    b_actions = torch.Tensor(data.actions_ary[b_idxs]
+        ).to(data.device, non_blocking=True)
+    b_logprobs = torch.Tensor(data.logprobs_ary[b_idxs]
+        ).to(data.device, non_blocking=True)
+    b_dones = torch.Tensor(data.dones_ary[b_idxs]
+        ).to(data.device, non_blocking=True)
+    b_values = torch.Tensor(data.values_ary[b_idxs]
+        ).to(data.device, non_blocking=True)
     b_advantages = advantages.reshape(
         config.batch_rows, num_minibatches, config.bptt_horizon
     ).transpose(0, 1)
@@ -413,7 +453,7 @@ def train(data):
     for epoch in range(config.update_epochs):
         lstm_state = None
         for mb in range(num_minibatches):
-            mb_obs = b_obs[mb].to(data.device)
+            mb_obs = b_obs[mb].to(data.device, non_blocking=True)
             mb_actions = b_actions[mb].contiguous()
             mb_values = b_values[mb].reshape(-1)
             mb_advantages = b_advantages[mb].reshape(-1)
