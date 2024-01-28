@@ -1,8 +1,15 @@
 # One-off demo for pokemon red because there isn't a clean way to put
 # the custom map overlay logic into the clean_pufferl file and I want
 # to keep that file as minimal as possible
+from pufferlib import namespace
 import numpy as np
 import torch
+from functools import partial
+
+def map_updater():
+    import cv2
+    bg = cv2.imread('kanto_map_dsv.png')
+    return partial(make_pokemon_red_overlay, bg)
 
 def make_pokemon_red_overlay(bg, counts):
     nonzero = np.where(counts > 0, 1, 0)

@@ -264,6 +264,8 @@ def evaluate(data):
 
         with env_profiler:
             o, r, d, t, i, env_id, mask = data.pool.recv()
+            for ii, ee  in zip(i, env_id):
+                ii['env_id'] = ee
 
         with misc_profiler:
             i = data.policy_pool.update_scores(i, "return")
@@ -346,18 +348,25 @@ def evaluate(data):
     perf.misc_time = misc_profiler.elapsed
 
     data.stats = {}
-    for k, v in infos['learner'].items():
+    infos = infos['learner']
+
+    if 'pokemon_exploration_map' in infos:
+        for idx, pmap in zip(infos['env_id'], infos['pokemon_exploration_map']):
+            if not hasattr(data, 'pokemon'):
+                import pokemon_red_eval
+                data.map_updater = pokemon_red_eval.map_updater()
+                data.map_buffer = np.zeros((data.config.num_envs, *pmap.shape))
+
+            data.map_buffer[idx] = pmap
+
+        pokemon_map = np.sum(data.map_buffer, axis=0)
+        rendered = data.map_updater(pokemon_map)
+        data.stats['Media/exploration_map'] = data.wandb.Image(rendered)
+
+    for k, v in infos.items():
         if 'Task_eval_fn' in k:
-            # Temporary hack for NMMO competition
+            # Temporary hack for NMMO competitio
             continue
-        if 'pokemon_exploration_map' in k:
-            import cv2
-            from pokemon_red_eval import make_pokemon_red_overlay
-            bg = cv2.imread('kanto_map_dsv.png')
-            overlay = make_pokemon_red_overlay(bg, sum(v))
-            if data.wandb is not None:
-                data.stats['Media/exploration_map'] = data.wandb.Image(overlay)
-            # @Leanke: Add your infos['learner']['x'] etc
         try: # TODO: Better checks on log data types
             data.stats[k] = np.mean(v)
         except:
