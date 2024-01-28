@@ -32,7 +32,7 @@ def sample_logits(logits: Union[torch.Tensor, List[torch.Tensor]], action=None):
 
 
     if action is None:
-        action = torch.stack([torch.multinomial(l, 1) for l in logits])
+        action = torch.stack([torch.multinomial(logits_to_probs(l), 1).squeeze() for l in logits])
     else:
         batch = logits[0].shape[0]
         action = action.view(batch, -1).T
