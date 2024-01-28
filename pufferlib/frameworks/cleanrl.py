@@ -38,12 +38,12 @@ def sample_logits(logits, action=None):
 
     assert len(logits) == len(action)
     logprob = torch.stack([log_prob(l, a) for l, a in zip(normalized_logits, action)]).T.sum(1)
-    entropy = torch.stack([entropy(l) for l in normalized_logits]).T.sum(1)
+    logits_entropy = torch.stack([entropy(l) for l in normalized_logits]).T.sum(1)
 
     if is_discrete:
-        return action.squeeze(0), logprob.squeeze(0), entropy.squeeze(0)
+        return action.squeeze(0), logprob.squeeze(0), logits_entropy.squeeze(0)
 
-    return action.T, logprob, entropy
+    return action.T, logprob, logits_entropy
 
 
 class Policy(torch.nn.Module):
