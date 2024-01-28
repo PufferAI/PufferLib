@@ -627,6 +627,10 @@ password:
   package: ocean
   env:
     name: password
+spaces:
+  package: ocean
+  env:
+    name: spaces
 squared:
   package: ocean
   env:

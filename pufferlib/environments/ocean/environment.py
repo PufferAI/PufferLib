@@ -6,10 +6,11 @@ from .memory import Memory
 from .password import Password
 from .stochastic import Stochastic
 from .multiagent import Multiagent
+from .spaces import Spaces
 
 
 def env_creator(name='squared'):
-    assert name in 'squared bandit memory password stochastic multiagent'.split(), 'Invalid environment name'
+    assert name in 'squared bandit memory password stochastic multiagent spaces'.split(), 'Invalid environment name'
     if name == 'squared':
         return make_squared
     elif name == 'bandit':
@@ -22,6 +23,8 @@ def env_creator(name='squared'):
         return make_stochastic
     elif name == 'multiagent':
         return make_multiagent
+    elif name == 'spaces':
+        return make_spaces
     else:
         raise ValueError('Invalid environment name')
 
@@ -45,6 +48,10 @@ def make_password(password_length=5):
 
 def make_stochastic(p=0.7, horizon=100):
     env = Stochastic(p=p, horizon=100)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+
+def make_spaces():
+    env = Spaces()
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_multiagent():
