@@ -130,10 +130,10 @@ def make_rllib_tuner(
     return tuner
 
 if __name__ == '__main__':
-    import pufferlib.registry.atari
+    import pufferlib.environments.atari
     env_name = 'BreakoutNoFrameskip-v4'
 
-    env_creator = pufferlib.registry.atari.make_env
+    env_creator = pufferlib.registry.atari.env_cratoe(env_name)
     policy_cls = pufferlib.models.Convolutional
 
     tuner = make_rllib_tuner(env_creator, policy_cls, env_name)

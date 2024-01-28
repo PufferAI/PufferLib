@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 from Cython.Build import cythonize
 from itertools import chain
 
-VERSION = '0.6.1'
+VERSION = '0.7.0'
 
 # Default Gym/Gymnasium/PettingZoo versions
 # Gym:
@@ -158,6 +158,7 @@ cleanrl = [
     'torch',
     'wandb==0.13.7',
     'psutil==5.9.5',
+    'tyro',
 ]
 
 setup(

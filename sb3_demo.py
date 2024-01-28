@@ -1,3 +1,5 @@
+# Minimal SB3 demo using PufferLib's environment wrappers
+
 import argparse
 
 from stable_baselines3 import PPO

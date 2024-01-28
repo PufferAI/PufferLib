@@ -213,9 +213,6 @@ class Convolutional(Policy):
         self.value_fn = pufferlib.pytorch.layer_init(nn.Linear(output_size, 1), std=1)
 
     def encode_observations(self, observations):
-        observations = pufferlib.emulation.unpack_batched_obs(observations,
-            self.flat_observation_space, self.flat_observation_structure)
-
         if self.channels_last:
             observations = observations.permute(0, 3, 1, 2)
         if self.downsample > 1:

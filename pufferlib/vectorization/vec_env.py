@@ -1,6 +1,7 @@
 from pdb import set_trace as T
 
 import numpy as np
+import gymnasium
 from itertools import chain
 
 from pufferlib import namespace
@@ -116,6 +117,11 @@ def aggregate_recvs(state, recvs):
     #dones = list(chain.from_iterable(dones))
     #truncateds = list(chain.from_iterable(truncateds))
     infos = [i for ii in infos for i in ii]
+
+    
+    obs_space = state.driver_env.structured_observation_space
+    if isinstance(obs_space, gymnasium.spaces.Box):
+        obs = obs.reshape(obs.shape[0], *obs_space.shape)
 
     # TODO: Masking will break for 1-agent PZ envs
     # Replace with check against is_multiagent (add it to state)

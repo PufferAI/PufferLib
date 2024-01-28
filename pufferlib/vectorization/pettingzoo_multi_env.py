@@ -22,8 +22,8 @@ def reset(state, seed=None):
         state.preallocated_obs = np.empty(
             (n, *obs_space.shape), dtype=obs_space.dtype)
         state.preallocated_rewards = np.empty(n, dtype=np.float32)
-        state.preallocated_dones = np.empty(n, dtype=np.bool)
-        state.preallocated_truncateds = np.empty(n, dtype=np.bool)
+        state.preallocated_dones = np.empty(n, dtype=bool)
+        state.preallocated_truncateds = np.empty(n, dtype=bool)
 
     state.agent_keys = []
     infos = []

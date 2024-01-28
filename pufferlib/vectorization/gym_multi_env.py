@@ -18,8 +18,8 @@ def reset(state, seed=None):
         state.preallocated_obs = np.empty(
             (n_envs, *obs_space.shape), dtype=obs_space.dtype)
         state.preallocated_rewards = np.empty(n_envs, dtype=np.float32)
-        state.preallocated_dones = np.empty(n_envs, dtype=np.bool)
-        state.preallocated_truncateds = np.empty(n_envs, dtype=np.bool)
+        state.preallocated_dones = np.empty(n_envs, dtype=bool)
+        state.preallocated_truncateds = np.empty(n_envs, dtype=bool)
 
     infos = []
     for idx, e in enumerate(state.envs):
