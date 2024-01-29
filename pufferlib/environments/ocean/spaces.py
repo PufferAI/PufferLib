@@ -9,6 +9,13 @@ def init(self):
     '''Pufferlib Spaces environment
 
     A simple environment with hierarchical observation and action spaces
+
+    The image action should be 1 if the sum of the image is positive, 0 otherwise
+    The flat action should be 1 if the sum of the flat obs is positive, 0 otherwise
+
+    0.5 reward is given for each correct action
+
+    Does not provide rendering
     '''
 
     observation_space = gymnasium.spaces.Dict({
