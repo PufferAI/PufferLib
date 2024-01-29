@@ -68,6 +68,14 @@ beamrider:
   package: atari
   env:
     name: BeamRiderNoFrameskip-v4
+beam_rider:
+  package: atari
+  env:
+    name: BeamRiderNoFrameskip-v4
+beam-rider:
+  package: atari
+  env:
+    name: BeamRiderNoFrameskip-v4
 breakout:
   package: atari
   env:
@@ -88,7 +96,15 @@ seaquest:
   package: atari
   env:
     name: SeaquestNoFrameskip-v4
+spaceinvaders:
+  package: atari
+  env:
+    name: SpaceInvadersNoFrameskip-v4
 space_invaders:
+  package: atari
+  env:
+    name: SpaceInvadersNoFrameskip-v4
+space-invaders:
   package: atari
   env:
     name: SpaceInvadersNoFrameskip-v4

@@ -264,11 +264,13 @@ def evaluate(data):
 
         with env_profiler:
             o, r, d, t, i, env_id, mask = data.pool.recv()
-            for ii, ee  in zip(i, env_id):
-                ii['env_id'] = ee
 
         with misc_profiler:
             i = data.policy_pool.update_scores(i, "return")
+            # TODO: Update this for policy pool
+            for ii, ee  in zip(i['learner'], env_id):
+                ii['env_id'] = ee
+
 
         with inference_profiler, torch.no_grad():
             o = torch.as_tensor(o)
