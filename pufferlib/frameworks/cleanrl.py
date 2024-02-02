@@ -1,32 +1,50 @@
 from pdb import set_trace as T
+from typing import List, Union
 
 import torch
 from torch.distributions import Categorical
+from torch.distributions.utils import logits_to_probs
 
 import pufferlib.models
 
 
-def sample_logits(logits, action=None):
+# taken from torch.distributions.Categorical
+def log_prob(logits, value):
+    value = value.long().unsqueeze(-1)
+    value, log_pmf = torch.broadcast_tensors(value, logits)
+    value = value[..., :1]
+    return log_pmf.gather(-1, value).squeeze(-1)
+
+# taken from torch.distributions.Categorical
+def entropy(logits):
+    min_real = torch.finfo(logits.dtype).min
+    logits = torch.clamp(logits, min=min_real)
+    p_log_p = logits * logits_to_probs(logits)
+    return -p_log_p.sum(-1)
+
+def sample_logits(logits: Union[torch.Tensor, List[torch.Tensor]], action=None):
     is_discrete = isinstance(logits, torch.Tensor)
     if is_discrete:
+        normalized_logits = [logits - logits.logsumexp(dim=-1, keepdim=True)]
         logits = [logits]
+    else: # not sure what else it could be
+        normalized_logits = [l - l.logsumexp(dim=-1, keepdim=True) for l in logits]
 
-    multi_categorical = [Categorical(logits=l) for l in logits]
 
-    batch = logits[0].shape[0]
     if action is None:
-        action = torch.stack([c.sample() for c in multi_categorical])
+        action = torch.stack([torch.multinomial(logits_to_probs(l), 1).squeeze() for l in logits])
     else:
+        batch = logits[0].shape[0]
         action = action.view(batch, -1).T
 
-    assert len(multi_categorical) == len(action)
-    logprob = torch.stack([c.log_prob(a) for c, a in zip(multi_categorical, action)]).T.sum(1)
-    entropy = torch.stack([c.entropy() for c in multi_categorical]).T.sum(1)
+    assert len(logits) == len(action)
+    logprob = torch.stack([log_prob(l, a) for l, a in zip(normalized_logits, action)]).T.sum(1)
+    logits_entropy = torch.stack([entropy(l) for l in normalized_logits]).T.sum(1)
 
     if is_discrete:
-        return action.squeeze(0), logprob.squeeze(0), entropy.squeeze(0)
+        return action.squeeze(0), logprob.squeeze(0), logits_entropy.squeeze(0)
 
-    return action.T, logprob, entropy
+    return action.T, logprob, logits_entropy
 
 
 class Policy(torch.nn.Module):
