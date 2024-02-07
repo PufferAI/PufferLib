@@ -13,7 +13,8 @@ def test_pack_unpack():
         flat_space = flatten_space(space)
         flat_sample = flatten(sample)
         pack_sample = concatenate(flat_sample)
-        unpack_sample = split(pack_sample, flat_space, batched=False)
+        sz = [int(np.prod(subspace.shape)) for subspace in flat_space.values()]
+        unpack_sample = split(pack_sample, flat_space, sz, batched=False)
         unflat_sample = unflatten(unpack_sample, space)
         assert pufferlib.utils.compare_space_samples(sample, unflat_sample), "Unflatten failed."
  
@@ -68,7 +69,8 @@ def test_flatten_unflatten(iterations=10_000):
         structure = flatten_structure(data)
         flat_space = flatten_space(space)
         merged = concatenate(flat)
-        unmerged = split(merged, flat_space, batched=False)
+        sz = [int(np.prod(subspace.shape)) for subspace in flat_space.values()]
+        unmerged = split(merged, flat_space, sz, batched=False)
         unflat = unflatten(unmerged, structure)
         assert pufferlib.utils.compare_space_samples(data, unflat), "Unflatten failed."
 
@@ -77,7 +79,7 @@ def test_flatten_unflatten(iterations=10_000):
         concatenate_times.append(timeit.timeit(
             lambda: concatenate(flat), number=iterations))
         split_times.append(timeit.timeit(
-            lambda: split(merged, flat_space, batched=False), number=iterations))
+            lambda: split(merged, flat_space, sz, batched=False), number=iterations))
         unflatten_times.append(timeit.timeit(
             lambda: unflatten(unmerged, structure), number=iterations))
 

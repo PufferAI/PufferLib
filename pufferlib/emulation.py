@@ -1,3 +1,4 @@
+from functools import cached_property
 from pdb import set_trace as T
 
 import numpy as np
@@ -118,7 +119,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
         self.render_modes = 'human rgb_array'.split()
         self.render_mode = 'rgb_array'
 
-    @property
+    @cached_property
     def observation_space(self):
         '''Returns a flattened, single-tensor observation space'''
         self.structured_observation_space = self.postprocessor.observation_space
@@ -130,7 +131,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
 
         return self.box_observation_space
 
-    @property
+    @cached_property
     def action_space(self):
         '''Returns a flattened, multi-discrete action space'''
         self.structured_action_space = self.env.action_space
@@ -139,6 +140,9 @@ class GymnasiumPufferEnv(gymnasium.Env):
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
         self.flat_action_space, self.multidiscrete_action_space = (
             make_flat_and_multidiscrete_atn_space(self.env.action_space))
+        self.sz = [
+            int(np.prod(subspace.shape)) for subspace in self.flat_action_space.values()
+        ]
 
         return self.multidiscrete_action_space
 
@@ -179,7 +183,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
         # Unpack actions from multidiscrete into the original action space
         action = unflatten(
             split(
-                action, self.flat_action_space, batched=False
+                action, self.flat_action_space, self.sz, batched=False
             ), self.flat_action_structure
         )
 
@@ -347,7 +351,7 @@ class PettingZooPufferEnv:
         for agent, atn in actions.items():
             if agent in self.agents:
                 unpacked_actions[agent] = unflatten(
-                    split(atn, self.flat_action_space, batched=False),
+                    split(atn, self.flat_action_space, self.sz, batched=False),
                     self.flat_action_structure
                 )
 
@@ -389,11 +393,11 @@ class PettingZooPufferEnv:
         return self.env.close()
 
     def unpack_batched_obs(self, batched_obs):
-        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure)
+        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.sz, self.flat_observation_structure)
 
 
-def unpack_batched_obs(batched_obs, flat_observation_space, flat_observation_structure):
-    unpacked = split(batched_obs, flat_observation_space, batched=True)
+def unpack_batched_obs(batched_obs, flat_observation_space, sz, flat_observation_structure):
+    unpacked = split(batched_obs, flat_observation_space, sz, batched=True)
     unflattened = unflatten(unpacked, flat_observation_structure)
     return unflattened
 
@@ -568,7 +572,7 @@ def concatenate(flat_sample):
         for e in flat_sample]
     )
 
-def split(stacked_sample, flat_space, batched=True):
+def split(stacked_sample, flat_space, sz, batched=True):
     if not isinstance(stacked_sample, Iterable):
         return [stacked_sample]
 
@@ -577,10 +581,9 @@ def split(stacked_sample, flat_space, batched=True):
 
     leaves = []
     ptr = 0
-    for subspace in flat_space.values():
+    for sz, subspace in zip(sz, flat_space.values()):
         shape = subspace.shape
         typ = subspace.dtype
-        sz = int(np.prod(shape))
 
         if shape == ():
             shape = (1,)
