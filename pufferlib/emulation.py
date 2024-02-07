@@ -519,7 +519,7 @@ def flatten_structure(data):
         if isinstance(d, dict):
             structure.append(DICT)
             structure.append(len(d))
-            for key, value in d.items():
+            for key, value in sorted(d.items()):
                 structure.append(key)
                 helper(value)
         elif isinstance(d, list):

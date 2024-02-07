@@ -8,6 +8,9 @@ from .environment import (
     MOCK_ACTION_SPACES,
 )
 
+from .mock_environments import MOCK_SINGLE_AGENT_ENVIRONMENTS
+from .mock_environments import MOCK_MULTI_AGENT_ENVIRONMENTS
+
 try:
     import torch
 except ImportError:

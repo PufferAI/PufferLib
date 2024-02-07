@@ -6,7 +6,7 @@ def test_atari_reset():
     '''Common way to bug the wrappers can be detected
     by checking that the environment properly resets
     after hitting 0 lives'''
-    env = atari.make_env('BreakoutNoFrameskip-v4', 4)
+    env = atari.env_creator('BreakoutNoFrameskip-v4')(4)
 
     obs, info = env.reset()
     prev_lives = 5

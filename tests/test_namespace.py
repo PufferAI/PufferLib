@@ -1,4 +1,4 @@
-from pufferlib import namespace
+from pufferlib import namespace, dataclass
 
 def test_namespace_as_function():
     ns = namespace(x=1, y=2, z=3)
@@ -10,7 +10,7 @@ def test_namespace_as_function():
     assert list(ns.values()) == [1, 2, 3]
     assert list(ns.items()) == [('x', 1), ('y', 2), ('z', 3)]
 
-@namespace
+@dataclass
 class TestClass:
     a: int
     b = 1

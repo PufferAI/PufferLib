@@ -643,6 +643,10 @@ password:
   package: ocean
   env:
     name: password
+performance:
+  package: ocean
+  env:
+    name: performance
 spaces:
   package: ocean
   env:

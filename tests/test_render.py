@@ -19,9 +19,9 @@ if __name__ == '__main__':
     env_module = importlib.import_module(f'pufferlib.environments.{args.env}')
 
     if args.render_mode == 'human':
-        env = env_module.make_env(render_mode='human')
+        env = env_module.env_creator()(render_mode='human')
     else:
-        env = env_module.make_env()
+        env = env_module.env_creator()()
 
     terminal = True
     while True:

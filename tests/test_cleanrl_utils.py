@@ -15,14 +15,14 @@ import pufferlib.vectorization
 
 def test_cleanrl_utils():
     envs = pufferlib.vectorization.Serial(
-        env_creator=pufferlib.environments.classic_control.make_env,
+        env_creator=pufferlib.environments.classic_control.env_creator('cartpole'),
         num_envs=4, envs_per_worker=2
     )
  
     obs, info, _, _ = envs.reset()
 
-    policy = pufferlib.models.Default(envs)
-    policy = pufferlib.models.RecurrentWrapper(envs, policy)
+    policy = pufferlib.models.Default(envs.driver_env)
+    policy = pufferlib.models.RecurrentWrapper(envs.driver_env, policy)
     policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)
 
     obs = torch.tensor(obs).unsqueeze(1).float()

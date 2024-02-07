@@ -15,11 +15,15 @@ cdef void flatten_helper(object d, list flat_data):
 
     if isinstance(d, dict):
         d_dict = <dict> d
+        # TODO: This sort is here to maintain canonical order
+        # for envs that return in variable order, but it is slow
+        # Are there any other options?
+        # NOTE: There is a corresponding sort in flatten_structure
         for key, value in sorted(d_dict.items()):
             flatten_helper(value, flat_data)
     elif isinstance(d, list):
         d_list = <list> d
-        for item in d_list.items:
+        for item in d_list:
             flatten_helper(item, flat_data)
     elif isinstance(d, tuple):
         d_tuple = <tuple> d
