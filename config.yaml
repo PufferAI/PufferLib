@@ -6,7 +6,7 @@ train:
   learning_rate: 2.5e-4
   num_steps: 128
   anneal_lr: True
-  gamma: 0.99
+  gamma: 0.999 # 0.998 # 0.99 #BET testing 2/6/24
   gae_lambda: 0.95
   num_minibatches: 4
   update_epochs: 4
@@ -24,7 +24,7 @@ train:
   env_pool: True
   verbose: True
   data_dir: experiments
-  checkpoint_interval: 200
+  checkpoint_interval: 100
   pool_kernel: [0]
   batch_size: 1024
   batch_rows: 32
@@ -668,15 +668,16 @@ connect4:
 pokemon_red:
   package: pokemon_red
   train:
-    total_timesteps: 100_000_000
-    num_envs: 128
-    envs_per_worker: 4
-    envs_per_batch: 48 
-    update_epochs: 3
-    gamma: 0.998
-    batch_size: 32768
-    batch_rows: 128
+    total_timesteps: 300_000_000
+    num_envs: 128 # 128 # 256 # 128
+    envs_per_worker: 8 # 4
+    envs_per_batch: 32 # envpool batch size
+    update_epochs: 3 # 3
+    gamma: 0.998 # 0.998
+    batch_size: 65536 # 32768
+    batch_rows: 128 # 128
     compile: True
+    cpu_offload: True
   env:
     name: pokemon_red
 pokemon-red:

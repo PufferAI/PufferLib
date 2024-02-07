@@ -1,5 +1,4 @@
 from .environment import env_creator, make
-
 try:
     import torch
 except ImportError:
