@@ -11,7 +11,7 @@ import pufferlib.emulation
 import pufferlib.vectorization
 
 
-def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, envs_per_worker=1):
+def test_gym_vectorization(env_cls, vectorization, steps=100, num_envs=1, envs_per_worker=1):
     raw_profiler = pufferlib.utils.Profiler()
     puf_profiler = pufferlib.utils.Profiler()
 
@@ -20,7 +20,7 @@ def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, env
     puf_envs = vectorization(
         env_creator=pufferlib.emulation.GymnasiumPufferEnv,
         env_kwargs={'env_creator': env_cls},
-        num_workers=num_workers,
+        num_envs=num_envs,
         envs_per_worker=envs_per_worker,
     )
 
@@ -73,7 +73,7 @@ def test_gym_vectorization(env_cls, vectorization, steps=100, num_workers=1, env
     return raw_profiler.elapsed/steps/num_workers, puf_profiler.elapsed/steps
 
 
-def test_pettingzoo_vectorization(env_cls, vectorization, steps=100, num_workers=1, envs_per_worker=1):
+def test_pettingzoo_vectorization(env_cls, vectorization, steps=100, num_envs=1, envs_per_worker=1):
     raw_profiler = pufferlib.utils.Profiler()
     puf_profiler = pufferlib.utils.Profiler()
 
@@ -190,7 +190,7 @@ if __name__ == '__main__':
                 for env_cls in test.MOCK_SINGLE_AGENT_ENVIRONMENTS:
                     raw_t, puf_t = test_gym_vectorization(
                         env_cls, vectorization,
-                        num_workers=num_workers,
+                        num_envs=envs_per_worker * num_workers,
                         envs_per_worker=envs_per_worker
                     )
                     raw_gym.append((np.array(puf_t) - np.array(raw_t)) * 1000)

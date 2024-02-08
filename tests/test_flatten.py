@@ -1,4 +1,5 @@
 import pufferlib.extensions as c
+from pufferlib.emulation import flatten_structure
 import timeit
 
 
@@ -24,22 +25,28 @@ samples = [
 ]
 
 
-def compare_data(data, flat_data):
-    if isinstance(data, (list, tuple)) and isinstance(flat_data, (list, tuple)):
-        if len(data) != len(flat_data):
+def compare_data(data, unflat):
+    if isinstance(data, (list, tuple)) and isinstance(unflat, (list, tuple)):
+        if len(data) != len(unflat):
             return False
-        return all(compare_data(d, f) for d, f in zip(data, flat_data))
-    elif isinstance(data, dict) and isinstance(flat_data, dict):
-        if len(data) != len(flat_data):
+        return all(compare_data(d, f) for d, f in zip(data, unflat))
+    elif isinstance(data, dict) and isinstance(unflat, dict):
+        if len(data) != len(unflat):
             return False
-        return all(compare_data(data[key], flat_data[key]) for key in data)
+        return all(compare_data(data[key], unflat[key]) for key in sorted(data))
     else:
-        return data == flat_data
+        return data == unflat
 
 def test_flatten_unflatten():
     for sample in samples:
+        structure = flatten_structure(sample)
         flat = c.flatten(sample)
-        unflat = c.unflatten(flat)
+        unflat = c.unflatten(flat, structure)
+        if not compare_data(sample, unflat):
+            print(f"Sample: {sample}")
+            print(f"Flattened: {flat}")
+            print(f"Unflattened: {unflat}")
+            breakpoint()
         assert compare_data(sample, unflat)
 
 def test_flatten_performance(n=100_000):
@@ -61,7 +68,8 @@ def test_unflatten_performance(n=100_000):
     num_samples = len(samples)
     for sample in samples:
         flat = c.flatten(sample)
-        wrapped = lambda: c.unflatten(flat)
+        structure = flatten_structure(sample)
+        wrapped = lambda: c.unflatten(flat, structure)
         time_per_call = timeit.timeit(wrapped, number=n) / n
         calls_per_second_in_k = int(1 / time_per_call / 1000)
         print(f"Sample {str(sample)[:10]}... - Average unflatten calls per second: {calls_per_second_in_k} K")
