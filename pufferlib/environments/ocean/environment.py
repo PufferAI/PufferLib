@@ -8,6 +8,7 @@ from .stochastic import Stochastic
 from .multiagent import Multiagent
 from .spaces import Spaces
 from .performance import Performance
+from .performance_empiric import PerformanceEmpiric
 
 
 def env_creator(name='squared'):
@@ -27,6 +28,8 @@ def env_creator(name='squared'):
         return make_spaces
     elif name == 'performance':
         return make_performance
+    elif name == 'performance_empiric':
+        return make_performance_empiric
     else:
         raise ValueError('Invalid environment name')
 
@@ -50,6 +53,10 @@ def make_password(password_length=5):
 
 def make_performance(delay_mean=0, delay_std=0, bandwidth=1):
     env = Performance(delay_mean=delay_mean, delay_std=delay_std, bandwidth=bandwidth)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+
+def make_performance_empiric(count_n=0, count_std=0, bandwidth=1):
+    env = PerformanceEmpiric(count_n=count_n, count_std=count_std, bandwidth=bandwidth)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_stochastic(p=0.7, horizon=100):

@@ -109,7 +109,7 @@ def _unpack_shared_mem(shared_mem, n):
 def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
         agents_per_env, envs_per_worker,
         worker_idx, shared_mem, send_pipe, recv_pipe):
-
+    
     # I don't know if this helps. Sometimes it does, sometimes not.
     # Need to run more comprehensive tests
     #curr_process = psutil.Process()

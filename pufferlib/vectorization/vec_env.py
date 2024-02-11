@@ -9,6 +9,8 @@ from pufferlib.emulation import GymnasiumPufferEnv, PettingZooPufferEnv
 from pufferlib.vectorization.multi_env import create_precheck
 from pufferlib.vectorization.gym_multi_env import GymMultiEnv
 from pufferlib.vectorization.pettingzoo_multi_env import PettingZooMultiEnv
+from pufferlib.exceptions import APIUsageError
+import pufferlib.spaces
 
 
 RESET = 0
@@ -22,13 +24,18 @@ def calc_scale_params(num_envs, envs_per_batch, envs_per_worker, agents_per_env)
     '''These calcs are simple but easy to mess up and hard to catch downstream.
     We do them all at once here to avoid that'''
 
-    assert num_envs % envs_per_worker == 0
+    if num_envs % envs_per_worker != 0:
+        raise APIUsageError('num_envs must be divisible by envs_per_worker')
+    
     num_workers = num_envs // envs_per_worker
-
     envs_per_batch = num_envs if envs_per_batch is None else envs_per_batch
-    assert envs_per_batch % envs_per_worker == 0
-    assert envs_per_batch <= num_envs
-    assert envs_per_batch > 0
+
+    if envs_per_batch > num_envs:
+        raise APIUsageError('envs_per_batch must be <= num_envs')
+    if envs_per_batch % envs_per_worker != 0:
+        raise APIUsageError('envs_per_batch must be divisible by envs_per_worker')
+    if envs_per_batch < 1:
+        raise APIUsageError('envs_per_batch must be > 0')
 
     workers_per_batch = envs_per_batch // envs_per_worker
     assert workers_per_batch <= num_workers
@@ -120,7 +127,7 @@ def aggregate_recvs(state, recvs):
 
     
     obs_space = state.driver_env.structured_observation_space
-    if isinstance(obs_space, gymnasium.spaces.Box):
+    if isinstance(obs_space, pufferlib.spaces.Box):
         obs = obs.reshape(obs.shape[0], *obs_space.shape)
 
     # TODO: Masking will break for 1-agent PZ envs

@@ -59,7 +59,7 @@ def step(state, actions):
 
     for idx in range(n_envs):
         a_keys, env, atns = state.agent_keys[idx], state.envs[idx], actions[idx]
-        start = ptr * n_agents
+        start = idx * n_agents
         end = start + n_agents
         if env.done:
             o, i = env.reset()
@@ -71,8 +71,8 @@ def step(state, actions):
             atns = dict(zip(a_keys, atns))
             o, r, d, t, i = env.step(atns)
             state.preallocated_rewards[start:end] = list(r.values())
-            state.preallocated_dones[start:end] = d.values()
-            state.preallocated_truncateds[start:end] = t.values()
+            state.preallocated_dones[start:end] = list(d.values())
+            state.preallocated_truncateds[start:end] = list(t.values())
 
         infos.append(i)
         state.agent_keys[idx] = list(o.keys())

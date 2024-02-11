@@ -93,7 +93,7 @@ environments = {
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
         'imageio==2.23.0',
-        'griddly==1.4.2',
+        'griddly==1.6.7',
     ],
     'magent': [
         f'gym=={GYM_VERSION}',
@@ -186,12 +186,12 @@ common = cleanrl + [environments[env] for env in [
     'crafter',
     'dm_control',
     'dm_lab',
-    #'griddly',
+    'griddly',
     'microrts',
     'minigrid',
     'minihack',
     'nethack',
-    #'nmmo',
+    'nmmo',
     'pokemon_red',
     'procgen',
 ]]
@@ -220,15 +220,17 @@ setup(
     python_requires=">=3.8",
     license="MIT",
     author="Joseph Suarez",
-    author_email="jsuarez@mit.edu",
+    author_email="jsuarez@puffer.ai",
     url="https://github.com/PufferAI/PufferLib",
-    keywords=["Puffer", "AI", "RL"],
+    keywords=["Puffer", "AI", "RL", "Reinforcement Learning"],
     classifiers=[
         "Intended Audience :: Science/Research",
         "Intended Audience :: Developers",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
     ],
 )
 

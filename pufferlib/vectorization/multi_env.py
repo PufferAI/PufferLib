@@ -1,4 +1,5 @@
 from pufferlib import namespace
+import pufferlib.exceptions
 
 
 def create_precheck(env_creator, env_args, env_kwargs):
@@ -7,9 +8,12 @@ def create_precheck(env_creator, env_args, env_kwargs):
     if env_kwargs is None:
         env_kwargs = {}
 
-    assert callable(env_creator)
-    assert isinstance(env_args, list)
-    #assert isinstance(env_kwargs, dict)
+    if not callable(env_creator):
+        raise pufferlib.exceptions.APIUsageError('env_creator must be callable')
+    if not isinstance(env_args, list):
+        raise pufferlib.exceptions.APIUsageError('env_args must be a list')
+    if not isinstance(env_kwargs, dict):
+        raise pufferlib.exceptions.APIUsageError('env_kwargs must be a dictionary')
 
     return env_args, env_kwargs
 
