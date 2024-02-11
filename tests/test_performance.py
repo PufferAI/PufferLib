@@ -191,12 +191,19 @@ if __name__ == '__main__':
 
     from pufferlib.environments import minigrid
     env_creators.minigrid = minigrid.env_creator()
-    '''
 
     from pufferlib.environments import pokemon_red
     env_creators.pokemon_red = pokemon_red.env_creator('pokemon_red')
+    '''
 
-    timeout = 5
+    
+    from functools import partial
+    env_creators.test = partial(
+        ocean.env_creator('performance_empiric'),
+        count_n=2_700_000, bandwidth=1
+    )
+
+    timeout = 10
     cores = psutil.cpu_count(logical=False)
     for key, creator in env_creators.items():
         prof = profile_emulation(creator, creator, timeout)
