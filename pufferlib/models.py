@@ -45,6 +45,7 @@ class Policy(nn.Module):
         # Cache spaces to unflatten observation in forward pass
         self.flat_observation_space = env.flat_observation_space
         self.flat_observation_structure = env.flat_observation_structure
+        self.obs_sz = env.obs_sz
 
         self.is_multidiscrete = isinstance(self.action_space,
                 pufferlib.spaces.MultiDiscrete)
@@ -285,7 +286,7 @@ class ProcgenResnet(Policy):
 
     def encode_observations(self, x):
         x = pufferlib.emulation.unpack_batched_obs(x,
-            self.flat_observation_space, self.flat_observation_structure)
+            self.flat_observation_space, self.flat_observation_structure, self.obs_sz)
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)
         return hidden, None
  

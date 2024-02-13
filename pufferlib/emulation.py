@@ -129,6 +129,11 @@ class GymnasiumPufferEnv(gymnasium.Env):
         self.flat_observation_space, self.flat_observation_structure, self.box_observation_space, self.pad_observation = (
             make_flat_and_box_obs_space(self.structured_observation_space))
 
+        self.obs_sz = [
+            int(np.prod(subspace.shape))
+            for subspace in self.flat_observation_space.values()
+        ]
+
         return self.box_observation_space
 
     @cached_property
@@ -141,7 +146,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
         self.flat_action_space, self.multidiscrete_action_space = (
             make_flat_and_multidiscrete_atn_space(self.env.action_space))
 
-        self.sz = [
+        self.atn_sz = [
             int(np.prod(subspace.shape))
             for subspace in self.flat_action_space.values()
         ]
@@ -185,7 +190,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
         # Unpack actions from multidiscrete into the original action space
         action = unflatten(
             split(
-                action, self.flat_action_space, self.sz, batched=False
+                action, self.flat_action_space, self.atn_sz, batched=False
             ), self.flat_action_structure
         )
 
@@ -205,7 +210,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
         return self.env.close()
 
     def unpack_batched_obs(self, batched_obs):
-        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure, self.sz)
+        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure, self.atn_sz)
 
 
 class PettingZooPufferEnv:
@@ -264,6 +269,11 @@ class PettingZooPufferEnv:
         self.flat_observation_space, self.flat_observation_structure, self.box_observation_space, self.pad_observation = (
             make_flat_and_box_obs_space(self.structured_observation_space))
 
+        self.obs_sz = [
+            int(np.prod(subspace.shape))
+            for subspace in self.flat_observation_space.values()
+        ]
+
         return self.box_observation_space 
 
     def action_space(self, agent):
@@ -284,7 +294,7 @@ class PettingZooPufferEnv:
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
         self.flat_action_space, self.multidiscrete_action_space = make_flat_and_multidiscrete_atn_space(atn_space)
 
-        self.sz = [
+        self.atn_sz = [
             int(np.prod(subspace.shape))
             for subspace in self.flat_action_space.values()
         ]
@@ -358,7 +368,7 @@ class PettingZooPufferEnv:
         for agent, atn in actions.items():
             if agent in self.agents:
                 unpacked_actions[agent] = unflatten(
-                    split(atn, self.flat_action_space, self.sz, batched=False),
+                    split(atn, self.flat_action_space, self.atn_sz, batched=False),
                     self.flat_action_structure
                 )
 
@@ -400,7 +410,7 @@ class PettingZooPufferEnv:
         return self.env.close()
 
     def unpack_batched_obs(self, batched_obs):
-        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure, self.sz)
+        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure, self.atn_sz)
 
 
 def unpack_batched_obs(batched_obs, flat_observation_space,
