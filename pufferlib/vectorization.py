@@ -115,13 +115,11 @@ def aggregate_recvs(state, recvs):
     assert all(state.workers_per_batch == len(e) for e in
         (obs, rewards, dones, truncateds, infos, env_ids))
 
-    
     obs = np.concatenate(obs)
     rewards = np.concatenate(rewards)
     dones = np.concatenate(dones)
     truncateds = np.concatenate(truncateds)
     infos = [i for ii in infos for i in ii]
-
     
     obs_space = state.driver_env.structured_observation_space
     if isinstance(obs_space, pufferlib.spaces.Box):

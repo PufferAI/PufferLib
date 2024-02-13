@@ -1,7 +1,7 @@
 from pdb import set_trace as T
+from collections.abc import Mapping
 import numpy as np
 
-from pufferlib.namespace import Namespace
 import pufferlib.exceptions
 
 
@@ -16,7 +16,7 @@ def create_precheck(env_creator, env_args, env_kwargs):
     if not isinstance(env_args, list):
         raise pufferlib.exceptions.APIUsageError('env_args must be a list')
     # TODO: port namespace to Mapping
-    if not isinstance(env_kwargs, (dict, Namespace)):
+    if not isinstance(env_kwargs, Mapping):
         raise pufferlib.exceptions.APIUsageError('env_kwargs must be a dictionary or None')
 
     return env_args, env_kwargs
