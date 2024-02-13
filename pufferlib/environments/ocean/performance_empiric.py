@@ -23,7 +23,7 @@ def reset(state, seed=None):
 
 def step(state, action):
     idx = 0
-    target = state.count_n * (1 +  state.count_std) * np.random.randn()
+    target = state.count_n  +  state.count_std * np.random.randn()
     while idx < target:
         idx += 1
 
