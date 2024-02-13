@@ -1,15 +1,6 @@
 import pufferlib.emulation
 
-from .squared import Squared
-from .bandit import Bandit
-from .memory import Memory
-from .password import Password
-from .stochastic import Stochastic
-from .multiagent import Multiagent
-from .spaces import Spaces
-from .performance import Performance
-from .performance_empiric import PerformanceEmpiric
-
+from . import ocean
 
 def env_creator(name='squared'):
     if name == 'squared':
@@ -34,39 +25,38 @@ def env_creator(name='squared'):
         raise ValueError('Invalid environment name')
 
 def make_squared(distance_to_target=3, num_targets=1):
-    '''Puffer Squared environment'''
-    env = Squared(distance_to_target=distance_to_target, num_targets=num_targets)
+    env = ocean.Squared(distance_to_target=distance_to_target, num_targets=num_targets)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_bandit(num_actions=10, reward_scale=1, reward_noise=1):
-    env = Bandit(num_actions=num_actions, reward_scale=reward_scale,
+    env = ocean.Bandit(num_actions=num_actions, reward_scale=reward_scale,
         reward_noise=reward_noise)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_memory(mem_length=2, mem_delay=2):
-    env = Memory(mem_length=mem_length, mem_delay=mem_delay)
+    env = ocean.Memory(mem_length=mem_length, mem_delay=mem_delay)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_password(password_length=5):
-    env = Password(password_length=password_length)
+    env = ocean.Password(password_length=password_length)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_performance(delay_mean=0, delay_std=0, bandwidth=1):
-    env = Performance(delay_mean=delay_mean, delay_std=delay_std, bandwidth=bandwidth)
+    env = ocean.Performance(delay_mean=delay_mean, delay_std=delay_std, bandwidth=bandwidth)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_performance_empiric(count_n=0, count_std=0, bandwidth=1):
-    env = PerformanceEmpiric(count_n=count_n, count_std=count_std, bandwidth=bandwidth)
+    env = ocean.PerformanceEmpiric(count_n=count_n, count_std=count_std, bandwidth=bandwidth)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_stochastic(p=0.7, horizon=100):
-    env = Stochastic(p=p, horizon=100)
+    env = ocean.Stochastic(p=p, horizon=100)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_spaces():
-    env = Spaces()
+    env = ocean.Spaces()
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_multiagent():
-    env = Multiagent()
+    env = ocean.Multiagent()
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
