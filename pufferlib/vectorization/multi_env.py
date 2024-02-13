@@ -1,4 +1,5 @@
 from pufferlib import namespace
+from pufferlib.namespace import Namespace
 import pufferlib.exceptions
 
 
@@ -12,8 +13,9 @@ def create_precheck(env_creator, env_args, env_kwargs):
         raise pufferlib.exceptions.APIUsageError('env_creator must be callable')
     if not isinstance(env_args, list):
         raise pufferlib.exceptions.APIUsageError('env_args must be a list')
-    if not isinstance(env_kwargs, dict):
-        raise pufferlib.exceptions.APIUsageError('env_kwargs must be a dictionary')
+    # TODO: port namespace to Mapping
+    if not isinstance(env_kwargs, (dict, Namespace)):
+        raise pufferlib.exceptions.APIUsageError('env_kwargs must be a dictionary or None')
 
     return env_args, env_kwargs
 
