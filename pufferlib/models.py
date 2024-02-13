@@ -42,10 +42,8 @@ class Policy(nn.Module):
             self.observation_space = env.single_observation_space
             self.action_space = env.single_action_space
 
-        # Cache spaces to unflatten observation in forward pass
-        self.flat_observation_space = env.flat_observation_space
-        self.flat_observation_structure = env.flat_observation_structure
-        self.obs_sz = env.obs_sz
+        # Used to unflatten observation in forward pass
+        self.unflatten_context = env.unflatten_context
 
         self.is_multidiscrete = isinstance(self.action_space,
                 pufferlib.spaces.MultiDiscrete)
@@ -61,7 +59,7 @@ class Policy(nn.Module):
         function to unflatten observations to their original structured form:
 
         observations = pufferlib.emulation.unpack_batched_obs(
-            self.envs.structured_observation_space, env_outputs)
+            env_outputs, self.unflatten_context)
  
         Args:
             flat_observations: A tensor of shape (batch, ..., obs_size)
@@ -285,8 +283,7 @@ class ProcgenResnet(Policy):
                 nn.Linear(mlp_width, 1), std=1)
 
     def encode_observations(self, x):
-        x = pufferlib.emulation.unpack_batched_obs(x,
-            self.flat_observation_space, self.flat_observation_structure, self.obs_sz)
+        x = pufferlib.emulation.unpack_batched_obs(x, self.unflatten_context)
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)
         return hidden, None
  

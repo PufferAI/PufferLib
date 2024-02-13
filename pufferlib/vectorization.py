@@ -109,7 +109,16 @@ def send_precheck(state):
 def reset_precheck(state):
     assert state.flag == RESET, 'Call reset only once on initialization'
     state.flag = RECV
- 
+
+def reset(self, seed=None):
+    self.async_reset(seed)
+    data = self.recv()
+    return data[0], data[4]
+
+def step(self, actions):
+    self.send(actions)
+    return self.recv()[:-1]
+
 def aggregate_recvs(state, recvs):
     obs, rewards, dones, truncateds, infos, env_ids = list(zip(*recvs))
     assert all(state.workers_per_batch == len(e) for e in
@@ -138,7 +147,11 @@ def aggregate_recvs(state, recvs):
     assert all(state.agents_per_batch == len(e) for e in
         (obs, rewards, dones, truncateds, env_ids, mask))
     assert len(infos) == state.envs_per_batch
-    return obs, rewards, dones, truncateds, infos, env_ids, mask
+
+    if state.mask_agents:
+        return obs, rewards, dones, truncateds, infos, env_ids, mask
+
+    return obs, rewards, dones, truncateds, infos, env_ids
 
 def split_actions(state, actions, env_id=None):
     assert isinstance(actions, (list, np.ndarray))
@@ -154,6 +167,8 @@ class Serial:
     
     Use this vectorization module for debugging environments
     '''
+    reset = reset
+    step = step
     single_observation_space = property(single_observation_space)
     single_action_space = property(single_action_space)
     structured_observation_space = property(structured_observation_space)
@@ -167,6 +182,7 @@ class Serial:
             envs_per_worker: int = 1,
             envs_per_batch: int = None,
             env_pool: bool = False,
+            mask_agents: bool = False,
             ) -> None:
         self.driver_env, self.multi_env_cls, self.agents_per_env = setup(
             env_creator, env_args, env_kwargs)
@@ -174,6 +190,8 @@ class Serial:
         self.num_envs = num_envs
         self.num_workers, self.workers_per_batch, self.envs_per_batch, self.agents_per_batch, self.agents_per_worker = calc_scale_params(
             num_envs, envs_per_batch, envs_per_worker, self.agents_per_env)
+        self.envs_per_worker = envs_per_worker
+        self.mask_agents = mask_agents
 
         self.multi_envs = [
             self.multi_env_cls(
@@ -200,15 +218,6 @@ class Serial:
             self.data = [e.reset() for e in self.multi_envs]
         else:
             self.data = [e.reset(seed=seed+idx) for idx, e in enumerate(self.multi_envs)]
-
-    def reset(self, seed=None):
-        self.async_reset(seed)
-        obs, _, _, _, info, env_id, mask = self.recv()
-        return obs, info, env_id, mask
-
-    def step(self, actions):
-        self.send(actions)
-        return self.recv()
 
     def put(self, *args, **kwargs):
         for e in self.multi_envs:
@@ -268,6 +277,8 @@ class Multiprocessing:
 
     Use this vectorization module for most applications
     '''
+    reset = reset
+    step = step
     single_observation_space = property(single_observation_space)
     single_action_space = property(single_action_space)
     structured_observation_space = property(structured_observation_space)
@@ -282,6 +293,7 @@ class Multiprocessing:
             envs_per_worker: int = 1,
             envs_per_batch: int = None,
             env_pool: bool = False,
+            mask_agents: bool = False,
             ) -> None:
         driver_env, multi_env_cls, agents_per_env = setup(
             env_creator, env_args, env_kwargs)
@@ -340,6 +352,7 @@ class Multiprocessing:
         self.flag = RESET
         self.prev_env_id = []
         self.env_pool = env_pool
+        self.mask_agents = mask_agents
 
     def recv(self):
         recv_precheck(self)
@@ -395,15 +408,6 @@ class Multiprocessing:
             for idx, pipe in enumerate(self.send_pipes):
                 pipe.send(("reset", [], {"seed": seed+idx}))
 
-    def reset(self, seed=None):
-        self.async_reset(seed)
-        obs, _, _, _, info, env_id, mask = self.recv()
-        return obs, info, env_id, mask
-
-    def step(self, actions):
-        self.send(actions)
-        return self.recv()
-
     def put(self, *args, **kwargs):
         # TODO: Update this
         for queue in self.request_queues:
@@ -445,6 +449,8 @@ class Ray():
     Use this module for distributed simulation on a cluster. It can also be
     faster than multiprocessing on a single machine for specific environments.
     '''
+    reset = reset
+    step = step
     single_observation_space = property(single_observation_space)
     single_action_space = property(single_action_space)
     structured_observation_space = property(structured_observation_space)
@@ -459,6 +465,7 @@ class Ray():
             envs_per_worker: int = 1,
             envs_per_batch: int = None,
             env_pool: bool = False,
+            mask_agents: bool = False,
             ) -> None:
         driver_env, multi_env_cls, agents_per_env = setup(
             env_creator, env_args, env_kwargs)
@@ -494,6 +501,7 @@ class Ray():
         self.ray = ray
         self.prev_env_id = []
         self.env_pool = env_pool
+        self.mask_agents = mask_agents
 
     def recv(self):
         recv_precheck(self)
@@ -525,15 +533,6 @@ class Ray():
         else:
             self.async_handles = [e.reset.remote(seed=seed+idx)
                 for idx, e in enumerate(self.multi_envs)]
-
-    def reset(self, seed=None):
-        self.async_reset(seed)
-        obs, _, _, _, info, env_id, mask = self.recv()
-        return obs, info, env_id, mask
-
-    def step(self, actions):
-        self.send(actions)
-        return self.recv()
 
     def put(self, *args, **kwargs):
         for e in self.multi_envs:

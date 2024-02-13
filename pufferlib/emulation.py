@@ -116,6 +116,11 @@ class GymnasiumPufferEnv(gymnasium.Env):
         # Cache the observation and action spaces
         self.observation_space
         self.action_space
+        self.unflatten_context = pufferlib.namespace(
+            flat_observation_space=self.flat_observation_space,
+            flat_observation_structure=self.flat_observation_structure,
+            obs_sz=self.obs_sz,
+        )
         self.render_modes = 'human rgb_array'.split()
         self.render_mode = 'rgb_array'
 
@@ -234,6 +239,12 @@ class PettingZooPufferEnv:
         self.observation_space(self.possible_agents[0])
         self.action_space(self.possible_agents[0])
 
+        self.unflatten_context = pufferlib.namespace(
+            flat_observation_space=self.flat_observation_space,
+            flat_observation_structure=self.flat_observation_structure,
+            obs_sz=self.obs_sz,
+        )
+ 
     @property
     def agents(self):
         return self.env.agents
@@ -410,13 +421,14 @@ class PettingZooPufferEnv:
         return self.env.close()
 
     def unpack_batched_obs(self, batched_obs):
-        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure, self.atn_sz)
+        return unpack_batched_obs(batched_obs,
+            self.flat_observation_space, self.flat_observation_structure, self.atn_sz)
 
 
-def unpack_batched_obs(batched_obs, flat_observation_space,
-        flat_observation_structure, sz):
-    unpacked = split(batched_obs, flat_observation_space, sz, batched=True)
-    unflattened = unflatten(unpacked, flat_observation_structure)
+def unpack_batched_obs(batched_obs, unflatten_context):
+    unpacked = split(batched_obs, unflatten_context.flat_observation_space,
+        unflatten_context.obs_sz, batched=True)
+    unflattened = unflatten(unpacked, unflatten_context.flat_observation_structure)
     return unflattened
 
 def make_object(object_instance=None, object_creator=None, creator_args=[], creator_kwargs={}):

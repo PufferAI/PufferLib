@@ -19,9 +19,6 @@ class Policy(pufferlib.models.Policy):
             **kwargs):
         super().__init__(env)
 
-        self.flat_observation_space = env.flat_observation_space
-        self.flat_observation_structure = env.flat_observation_structure
-
         self.observation_shape = env.structured_observation_space
         self.glyph_shape = self.observation_shape["glyphs"].shape
         self.blstats_size = self.observation_shape["blstats"].shape[0]
@@ -118,8 +115,8 @@ class Policy(pufferlib.models.Policy):
 
     def encode_observations(self, env_outputs):
         TB, _ = env_outputs.shape
-        env_outputs = pufferlib.emulation.unpack_batched_obs(env_outputs,
-            self.flat_observation_space, self.flat_observation_structure)
+        env_outputs = pufferlib.emulation.unpack_batched_obs(
+            env_outputs, self.unflatten_context)
 
         glyphs = env_outputs["glyphs"].long()
         blstats = env_outputs["blstats"].float()

@@ -26,8 +26,7 @@ class Policy(pufferlib.models.Policy):
   def __init__(self, env, input_size=256, hidden_size=256, output_size=256):
       super().__init__(env)
 
-      self.flat_observation_space = env.flat_observation_space
-      self.flat_observation_structure = env.flat_observation_structure
+      self.unflatten_context = env.unflatten_context
 
       # A dumb example encoder that applies a linear layer to agent self features
       self.embedding = torch.nn.Embedding(self.NUM_ATTRS*256, 32)
@@ -44,8 +43,8 @@ class Policy(pufferlib.models.Policy):
       self.value_head = torch.nn.Linear(hidden_size, 1)
 
   def encode_observations(self, env_outputs):
-    env_outputs = pufferlib.emulation.unpack_batched_obs(env_outputs,
-        self.flat_observation_space, self.flat_observation_structure)
+    env_outputs = pufferlib.emulation.unpack_batched_obs(
+        env_outputs, self.unflatten_context)
 
     tile = env_outputs['Tile']
     # Center on player
