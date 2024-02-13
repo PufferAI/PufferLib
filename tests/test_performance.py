@@ -68,11 +68,13 @@ def profile_environment(env_creator, timeout):
         step_std=step_std,
     )
 
-def profile_emulation(raw_creator, puf_creator, timeout):
+def profile_emulation(puf_creator, timeout):
+    raw_creator = lambda: puf_creator().env
+
     raw = profile_environment(raw_creator, timeout)
     puf = profile_environment(puf_creator, timeout)
 
-    overhead = 100 * (puf.sps - raw.sps) / raw.sps
+    overhead = 100 * (raw.sps - puf.sps) / raw.sps
     print(f'{key} - {puf.sps:.1f}/{raw.sps:.1f} SPS (puf/raw) | {overhead:.2g}% Overhead')
     print('  Emulation')
     print(f'    Raw Reset  : {raw.reset_mean:.3g} ({raw.percent_reset:.2g})%')
@@ -191,21 +193,26 @@ if __name__ == '__main__':
 
     from pufferlib.environments import minigrid
     env_creators.minigrid = minigrid.env_creator()
-
-    from pufferlib.environments import pokemon_red
-    env_creators.pokemon_red = pokemon_red.env_creator('pokemon_red')
     '''
 
-    
     from functools import partial
+    counts = [1e5, 1e6, 1e7, 1e8]
+    delays = [0, 0.1, 0.25, 0.5, 1]
+    bandwidth = [1, 1e4, 1e5, 1e6]
+
+    
+    synthetic_creators = {}
+    for count in counts:
+        name = f'test_delay_{count}'
+
     env_creators.test = partial(
         ocean.env_creator('performance_empiric'),
-        count_n=2_700_000, bandwidth=1
+        count_n=270_000, bandwidth=150_000
     )
 
-    timeout = 10
+    timeout = 60
     cores = psutil.cpu_count(logical=False)
     for key, creator in env_creators.items():
-        prof = profile_emulation(creator, creator, timeout)
-        profile_vec(creator, cores, timeout, prof.puf.sps)
+        prof = profile_emulation(creator, timeout)
+        #profile_vec(creator, cores, timeout, prof.puf.sps)
         print()
