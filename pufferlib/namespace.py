@@ -1,5 +1,6 @@
 from pdb import set_trace as T
 from types import SimpleNamespace
+from collections.abc import Mapping
 
 def __getitem__(self, key):
     return self.__dict__[key]
@@ -13,8 +14,16 @@ def values(self):
 def items(self):
     return self.__dict__.items()
 
-class Namespace(SimpleNamespace):
+def __iter__(self):
+    return iter(self.__dict__)
+
+def __len__(self):
+    return len(self.__dict__)
+
+class Namespace(SimpleNamespace, Mapping):
     __getitem__ = __getitem__
+    __iter__ = __iter__
+    __len__ = __len__
     keys = keys
     values = values
     items = items
@@ -33,6 +42,8 @@ def dataclass(cls):
 
     cls.__init__ = __init__
     setattr(cls, "__getitem__", __getitem__)
+    setattr(cls, "__iter__", __iter__)
+    setattr(cls, "__len__", __len__)
     setattr(cls, "keys", keys)
     setattr(cls, "values", values)
     setattr(cls, "items", items)

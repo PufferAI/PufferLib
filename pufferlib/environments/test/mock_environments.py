@@ -3,9 +3,10 @@ import numpy as np
 
 import time
 import hashlib
+from functools import partial
 
-import gym
-from gym.spaces import Box, Discrete, Dict, Tuple
+import gymnasium as gym
+from gymnasium.spaces import Box, Discrete, Dict, Tuple
 from pettingzoo.utils.env import ParallelEnv
 
 import pufferlib
@@ -91,29 +92,100 @@ def _sample_space(agent, tick, space, zero=False):
     else:
         raise ValueError(f"Invalid space type: {type(space)}")
 
+class GymnasiumTestEnv(gym.Env):
+    def __init__(self, observation_space, action_space):
+        self.observation_space = observation_space
+        self.action_space = action_space
+
+    def reset(self, seed=None):
+        self.tick = 0
+        self.rng = pufferlib.utils.RandomState(seed)
+
+        ob = _sample_space('agent_1', self.tick, self.observation_space)
+        return ob, {}
+
+    def step(self, actions):
+        reward = self.tick
+        done = self.tick < 10
+        self.tick += 1
+
+        ob = _sample_space('agent_1', self.tick, self.observation_space)
+        return ob, reward, done, False, {'dead': done}
+
+
 def make_mock_singleagent_env(observation_space, action_space):
-    class TestEnv(gym.Env):
-        def __init__(self):
-            self.observation_space = observation_space
-            self.action_space = action_space
+    return partial(
+        GymnasiumTestEnv,
+        observation_space=observation_space,
+        action_space=action_space,
+    )
 
-        def reset(self, seed=None):
-            self.tick = 0
-            self.rng = pufferlib.utils.RandomState(seed)
+class TestEnv(ParallelEnv):
+    def __init__(self, observation_space, action_space, initial_agents,
+            max_agents, spawn_per_tick, death_per_tick):
+        self.observation_space = observation_space
+        self.action_space = action_space
+        self.initial_agents = initial_agents
+        self.max_agents = max_agents
+        self.spawn_per_tick = spawn_per_tick
+        self.death_per_tick = death_per_tick
 
-            ob = _sample_space('agent_1', self.tick, observation_space)
-            return ob, {}
+        self.possible_agents = [f'agent_{i+1}' for i in range(max_agents)]
+        self.agents = []
 
-        def step(self, actions):
-            reward = self.tick
-            done = self.tick < 10
-            self.tick += 1
+    def reset(self, seed=None):
+        self.tick = 0
+        self.agents = self.possible_agents[:self.initial_agents]
 
-            ob = _sample_space('agent_1', self.tick, observation_space)
-            return ob, reward, done, False, {'dead': done}
+        obs = {a: _sample_space(a, self.tick, self.observation_space)
+            for a in self.agents}
+        infos = {a: {} for a in self.agents}
+        return obs, infos
 
-    return TestEnv
+    def step(self, actions):
+        obs, rewards, dones, truncateds, infos = {}, {}, {}, {}, {}
+        self.tick += 1
 
+        dead  = self.agents[:self.death_per_tick]
+        for kill in dead:
+            self.agents.remove(kill)
+            # TODO: Make pufferlib work without pad obs
+            # but still require rewards, dones, and optionally infos
+            obs[kill] = _sample_space(kill, self.tick, self.observation_space, zero=True)
+            rewards[kill] = -1
+            dones[kill] = True
+            truncateds[kill] = False
+            infos[kill] = {'dead': True}
+
+        # TODO: Fix this
+        assert self.spawn_per_tick == 0
+        for spawn in range(self.spawn_per_tick):
+            # TODO: Make pufferlib check if an agent respawns on the
+            # Same tick as it dies (is this good or bad?)
+            spawn = self.rng.choice(self.possible_agents)
+            if spawn not in self.agents + dead:
+                self.agents.append(spawn)
+
+        for agent in self.agents:
+            obs[agent] = _sample_space(agent, self.tick, self.observation_space)
+            rewards[agent] = 0.1 * _agent_str_to_int(agent)
+            dones[agent] = False
+            truncateds[agent] = False
+            infos[agent] = {'dead': False}
+
+        return obs, rewards, dones, truncateds, infos
+
+    def observation_space(self, agent) -> gym.Space:
+        return self.observation_space
+
+    def action_space(self, agent) -> gym.Space:
+        return self.action_space
+
+    def render(self, mode='human'):
+        pass
+
+    def close(self):
+        pass
 
 def make_mock_multiagent_env(
         observation_space,
@@ -123,66 +195,15 @@ def make_mock_multiagent_env(
         spawn_per_tick,
         death_per_tick,
         homogeneous_spaces=True):
-    class TestEnv(ParallelEnv):
-        def __init__(self):
-            self.possible_agents = [f'agent_{i+1}' for i in range(max_agents)]
-            self.agents = []
-
-        def reset(self, seed=None):
-            self.tick = 0
-            self.agents = self.possible_agents[:initial_agents]
-
-            obs = {a: _sample_space(a, self.tick, observation_space)
-                for a in self.agents}
-            infos = {a: {} for a in self.agents}
-            return obs, infos
-
-        def step(self, actions):
-            obs, rewards, dones, truncateds, infos = {}, {}, {}, {}, {}
-            self.tick += 1
-
-            dead  = self.agents[:death_per_tick]
-            for kill in dead:
-                self.agents.remove(kill)
-                # TODO: Make pufferlib work without pad obs
-                # but still require rewards, dones, and optionally infos
-                obs[kill] = _sample_space(kill, self.tick, observation_space, zero=True)
-                rewards[kill] = -1
-                dones[kill] = True
-                truncateds[kill] = False
-                infos[kill] = {'dead': True}
-
-            # TODO: Fix this
-            assert spawn_per_tick == 0
-            for spawn in range(spawn_per_tick):
-                # TODO: Make pufferlib check if an agent respawns on the
-                # Same tick as it dies (is this good or bad?)
-                spawn = self.rng.choice(self.possible_agents)
-                if spawn not in self.agents + dead:
-                    self.agents.append(spawn)
-
-            for agent in self.agents:
-                obs[agent] = _sample_space(agent, self.tick, observation_space)
-                rewards[agent] = 0.1 * _agent_str_to_int(agent)
-                dones[agent] = False
-                truncateds[agent] = False
-                infos[agent] = {'dead': False}
-
-            return obs, rewards, dones, truncateds, infos
-
-        def observation_space(self, agent) -> gym.Space:
-            return observation_space
-
-        def action_space(self, agent) -> gym.Space:
-            return action_space
-
-        def render(self, mode='human'):
-            pass
-
-        def close(self):
-            pass
-
-    return TestEnv
+    return partial(
+        TestEnv,
+        observation_space=observation_space,
+        action_space=action_space,
+        initial_agents=initial_agents,
+        max_agents=max_agents,
+        spawn_per_tick=spawn_per_tick,
+        death_per_tick=death_per_tick,
+    )
 
 
 MOCK_OBSERVATION_SPACES = [

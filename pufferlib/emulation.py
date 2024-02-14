@@ -116,6 +116,11 @@ class GymnasiumPufferEnv(gymnasium.Env):
         # Cache the observation and action spaces
         self.observation_space
         self.action_space
+        self.unflatten_context = pufferlib.namespace(
+            flat_observation_space=self.flat_observation_space,
+            flat_observation_structure=self.flat_observation_structure,
+            obs_sz=self.obs_sz,
+        )
         self.render_modes = 'human rgb_array'.split()
         self.render_mode = 'rgb_array'
 
@@ -129,6 +134,11 @@ class GymnasiumPufferEnv(gymnasium.Env):
         self.flat_observation_space, self.flat_observation_structure, self.box_observation_space, self.pad_observation = (
             make_flat_and_box_obs_space(self.structured_observation_space))
 
+        self.obs_sz = [
+            int(np.prod(subspace.shape))
+            for subspace in self.flat_observation_space.values()
+        ]
+
         return self.box_observation_space
 
     @cached_property
@@ -141,7 +151,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
         self.flat_action_space, self.multidiscrete_action_space = (
             make_flat_and_multidiscrete_atn_space(self.env.action_space))
 
-        self.sz = [
+        self.atn_sz = [
             int(np.prod(subspace.shape))
             for subspace in self.flat_action_space.values()
         ]
@@ -185,7 +195,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
         # Unpack actions from multidiscrete into the original action space
         action = unflatten(
             split(
-                action, self.flat_action_space, self.sz, batched=False
+                action, self.flat_action_space, self.atn_sz, batched=False
             ), self.flat_action_structure
         )
 
@@ -205,7 +215,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
         return self.env.close()
 
     def unpack_batched_obs(self, batched_obs):
-        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure)
+        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure, self.atn_sz)
 
 
 class PettingZooPufferEnv:
@@ -229,6 +239,12 @@ class PettingZooPufferEnv:
         self.observation_space(self.possible_agents[0])
         self.action_space(self.possible_agents[0])
 
+        self.unflatten_context = pufferlib.namespace(
+            flat_observation_space=self.flat_observation_space,
+            flat_observation_structure=self.flat_observation_structure,
+            obs_sz=self.obs_sz,
+        )
+ 
     @property
     def agents(self):
         return self.env.agents
@@ -264,6 +280,11 @@ class PettingZooPufferEnv:
         self.flat_observation_space, self.flat_observation_structure, self.box_observation_space, self.pad_observation = (
             make_flat_and_box_obs_space(self.structured_observation_space))
 
+        self.obs_sz = [
+            int(np.prod(subspace.shape))
+            for subspace in self.flat_observation_space.values()
+        ]
+
         return self.box_observation_space 
 
     def action_space(self, agent):
@@ -283,6 +304,11 @@ class PettingZooPufferEnv:
 
         # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
         self.flat_action_space, self.multidiscrete_action_space = make_flat_and_multidiscrete_atn_space(atn_space)
+
+        self.atn_sz = [
+            int(np.prod(subspace.shape))
+            for subspace in self.flat_action_space.values()
+        ]
 
         return self.multidiscrete_action_space
 
@@ -353,7 +379,7 @@ class PettingZooPufferEnv:
         for agent, atn in actions.items():
             if agent in self.agents:
                 unpacked_actions[agent] = unflatten(
-                    split(atn, self.flat_action_space, self.sz, batched=False),
+                    split(atn, self.flat_action_space, self.atn_sz, batched=False),
                     self.flat_action_structure
                 )
 
@@ -395,13 +421,14 @@ class PettingZooPufferEnv:
         return self.env.close()
 
     def unpack_batched_obs(self, batched_obs):
-        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure, self.sz)
+        return unpack_batched_obs(batched_obs,
+            self.flat_observation_space, self.flat_observation_structure, self.atn_sz)
 
 
-def unpack_batched_obs(batched_obs, flat_observation_space,
-        flat_observation_structure, sz):
-    unpacked = split(batched_obs, flat_observation_space, self.sz, batched=True)
-    unflattened = unflatten(unpacked, flat_observation_structure)
+def unpack_batched_obs(batched_obs, unflatten_context):
+    unpacked = split(batched_obs, unflatten_context.flat_observation_space,
+        unflatten_context.obs_sz, batched=True)
+    unflattened = unflatten(unpacked, unflatten_context.flat_observation_structure)
     return unflattened
 
 def make_object(object_instance=None, object_creator=None, creator_args=[], creator_kwargs={}):
@@ -476,18 +503,18 @@ def check_space(data, space):
     try:
         contains = space.contains(data)
     except:
-        raise ValueError(
+        raise exceptions.APIUsageError(
             f'Error checking space {space} with sample :\n{data}')
 
     if not contains:
-        raise ValueError(
+        raise exceptions.APIUsageError(
             f'Data:\n{data}\n not in space:\n{space}')
     
     return True
 
 def check_teams(env, teams):
     if set(env.possible_agents) != {item for team in teams.values() for item in team}:
-        raise ValueError(f'Invalid teams: {teams} for possible_agents: {env.possible_agents}')
+        raise exceptions.APIUsageError(f'Invalid teams: {teams} for possible_agents: {env.possible_agents}')
 
 def group_into_teams(teams, *args):
     grouped_data = []
@@ -495,7 +522,7 @@ def group_into_teams(teams, *args):
     for agent_data in args:
         if __debug__:
             if set(agent_data) != {item for team in teams.values() for item in team}:
-                raise ValueError(f'Invalid teams: {teams} for agents: {set(agent_data)}')
+                raise exceptions.APIUsageError(f'Invalid teams: {teams} for agents: {set(agent_data)}')
 
         team_data = {}
         for team_id, team in teams.items():
@@ -581,6 +608,9 @@ def split(stacked_sample, flat_space, sz, batched=True):
 
     if batched:
         batch = stacked_sample.shape[0]
+    elif len(sz) == 1:
+        # This probably breaks for dicts with 1 element etc
+        return [stacked_sample]
 
     leaves = []
     ptr = 0

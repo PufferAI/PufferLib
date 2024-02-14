@@ -11,7 +11,7 @@ import yaml
 import pufferlib
 import pufferlib.utils
 
-from clean_pufferl import CleanPuffeRL, rollout, done_training
+import clean_pufferl
 
 
 def load_from_config(env):
@@ -107,7 +107,7 @@ def get_init_args(fn):
 
 def train(args, env_module, make_env):
     if args.backend == 'clean_pufferl':
-        trainer = CleanPuffeRL(
+        data = clean_pufferl.create(
             config=args.train,
             agent_creator=make_policy,
             agent_kwargs={'env_module': env_module, 'args': args},
@@ -118,12 +118,12 @@ def train(args, env_module, make_env):
             track=args.track,
         )
 
-        while not done_training(trainer):
-            trainer.evaluate()
-            trainer.train()
+        while not clean_pufferl.done_training(data):
+            clean_pufferl.evaluate(data)
+            clean_pufferl.train(data)
 
         print('Done training. Saving data...')
-        trainer.close()
+        clean_pufferl.close(data)
         print('Run complete')
     elif args.backend == 'sb3':
         from stable_baselines3 import PPO

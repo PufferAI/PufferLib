@@ -59,7 +59,7 @@ class Charts:
     SPS = 0
     learning_rate = 0
 
-def init(
+def create(
         self: object = None,
         config: pufferlib.namespace = None,
         exp_name: str = None,
@@ -104,6 +104,7 @@ def init(
             envs_per_worker=config.envs_per_worker,
             envs_per_batch=config.envs_per_batch,
             env_pool=config.env_pool,
+            mask_agents=True,
         )
 
     obs_shape = pool.single_observation_space.shape
@@ -683,10 +684,3 @@ def print_dashboard(stats, init_performance, performance):
     print("\033c", end="")
     print('\n'.join(output))
     time.sleep(1/20)
-
-class CleanPuffeRL:
-    __init__ = init
-    evaluate = evaluate
-    train = train
-    close = close
-    done_training = done_training
