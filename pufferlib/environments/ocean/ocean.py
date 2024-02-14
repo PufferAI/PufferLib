@@ -332,6 +332,9 @@ class PerformanceEmpiric(gymnasium.Env):
         )
         self.action_space = gymnasium.spaces.Discrete(2)
         self.observation = self.observation_space.sample()
+        self.count_n = count_n
+        self.count_std = count_std
+        self.bandwidth = bandwidth
 
     def reset(self, seed=None):
         return self.observation, {}
