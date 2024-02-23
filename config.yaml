@@ -32,6 +32,8 @@ train:
   bptt_horizon: 16 #8
   vf_clip_coef: 0.1
 
+  debug: False
+
 sweep:
   method: random
   name: sweep
@@ -671,6 +673,8 @@ pokemon_red:
     gamma: 0.998
     batch_size: 32768
     batch_rows: 64
+    debug: False
+
   env:
     name: pokemon_red
 pokemon-red:

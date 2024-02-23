@@ -182,30 +182,57 @@ if __name__ == '__main__':
     config.policy = {**get_init_args(env_module.Policy.__init__), **config.policy}
     config.recurrent = {**get_init_args(env_module.Recurrent.__init__), **config.recurrent}
 
+
     # Generate argparse menu from config
+    # This is also a reason for Spock/Argbind/OmegaConf/pydantic-cli
     for name, sub_config in config.items():
         args[name] = {}
         for key, value in sub_config.items():
-            data_key = f'{name}.{key}'
-            cli_key = f'--{data_key}'.replace('_', '-')
+            data_key = f"{name}.{key}"
+            cli_key = f"--{data_key}".replace("_", "-")
             if isinstance(value, bool) and value is False:
-                action = 'store_false'
-                parser.add_argument(cli_key, default=value, action='store_true')
-                clean_parser.add_argument(cli_key, default=value, action='store_true')
+                action = "store_false"
+                parser.add_argument(cli_key, default=value, action="store_true")
+                clean_parser.add_argument(cli_key, default=value, action="store_true")
             elif isinstance(value, bool) and value is True:
-                data_key = f'{name}.no_{key}'
-                cli_key = f'--{data_key}'.replace('_', '-')
-                parser.add_argument(cli_key, default=value, action='store_false')
-                clean_parser.add_argument(cli_key, default=value, action='store_false')
+                data_key = f"{name}.no_{key}"
+                cli_key = f"--{data_key}".replace("_", "-")
+                parser.add_argument(cli_key, default=value, action="store_false")
+                clean_parser.add_argument(cli_key, default=value, action="store_false")
             else:
                 parser.add_argument(cli_key, default=value, type=type(value))
-                clean_parser.add_argument(cli_key, default=value, metavar='', type=type(value))
+                clean_parser.add_argument(cli_key, default=value, metavar="", type=type(value))
 
             args[name][key] = getattr(parser.parse_known_args()[0], data_key)
         args[name] = pufferlib.namespace(**args[name])
 
     clean_parser.parse_args(sys.argv[1:])
     args = pufferlib.namespace(**args)
+    
+    # # Generate argparse menu from config
+    # for name, sub_config in config.items():
+    #     args[name] = {}
+    #     for key, value in sub_config.items():
+    #         data_key = f'{name}.{key}'
+    #         cli_key = f'--{data_key}'.replace('_', '-')
+    #         if isinstance(value, bool) and value is False:
+    #             action = 'store_false'
+    #             parser.add_argument(cli_key, default=value, action='store_true')
+    #             clean_parser.add_argument(cli_key, default=value, action='store_true')
+    #         elif isinstance(value, bool) and value is True:
+    #             data_key = f'{name}.no_{key}'
+    #             cli_key = f'--{data_key}'.replace('_', '-')
+    #             parser.add_argument(cli_key, default=value, action='store_false')
+    #             clean_parser.add_argument(cli_key, default=value, action='store_false')
+    #         else:
+    #             parser.add_argument(cli_key, default=value, type=type(value))
+    #             clean_parser.add_argument(cli_key, default=value, metavar='', type=type(value))
+
+    #         args[name][key] = getattr(parser.parse_known_args()[0], data_key)
+    #     args[name] = pufferlib.namespace(**args[name])
+
+    # clean_parser.parse_args(sys.argv[1:])
+    # args = pufferlib.namespace(**args)
 
     vec = args.vectorization
     if vec == 'serial':
