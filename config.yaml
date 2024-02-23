@@ -664,10 +664,10 @@ pokemon_red:
   package: pokemon_red
   train:
     total_timesteps: 100_000_000
-    num_envs: 64
+    num_envs: 16
     envs_per_worker: 1
-    envpool_batch_size: 32
-    update_epochs: 10
+    envpool_batch_size: 16
+    update_epochs: 1
     gamma: 0.998
     batch_size: 32768
     batch_rows: 64
