@@ -6,7 +6,7 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, is_imag
 from gymnasium import spaces
 import torch as th
 from torch import nn
-
+import pufferlib.emulation
 
 class Recurrent(pufferlib.models.RecurrentWrapper):
     def __init__(self, env, policy, input_size=512, hidden_size=512, num_layers=1):
@@ -58,8 +58,8 @@ class Policy(pufferlib.models.Policy):
         # nature cnn (4, 36, 40), output_dim = 512 cnn_output_dim
         # if not isinstance(env.observation_space, spaces.Dict):
         #     raise TypeError("Expected env.observation_space to be a gym.spaces.Dict")
-        breakpoint()
-        # n_input_channels = env.observation_space.spaces['image'].shape[0]
+
+        n_input_channels = env.structured_observation_space['image'].shape[0]
         '''
         (Pdb) dir(env)
 ['__annotations__', '__class__', '__class_getitem__', '__delattr__', '__dict__', '__dir__', '__doc__', '__enter__', '__eq__', '__exit__', '__format__', '__ge__', '__getattribute__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__orig_bases__', '__parameters__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__slots__', '__str__', '__subclasshook__', '__weakref__', '_is_protocol', '_np_random', 'action_space', 'box_observation_space', 'close', 'done', 'env', 'flat_action_space', 'flat_action_structure', 'flat_observation_space', 'flat_observation_structure', 'get_wrapper_attr', 'initialized', 'is_action_checked', 'is_observation_checked', 'metadata', 'multidiscrete_action_space', 'np_random', 'observation_space', 'pad_observation', 'postprocessor', 'render', 'render_mode', 'render_modes', 'reset', 'reward_range', 'seed', 'spec', 'step', 'structured_action_space', 'structured_observation_space', 'unpack_batched_obs', 'unwrapped']
@@ -73,9 +73,7 @@ Box(-3.4028235e+38, 3.4028235e+38, (19591,), float32)
 Box(-3.4028235e+38, 3.4028235e+38, (19591,), float32)
 (Pdb) 
         '''
-        
-        
-        n_input_channels = env.observation_space
+
         self.cnn = nn.Sequential(
             nn.Conv2d(n_input_channels, 32*2, kernel_size=8, stride=4, padding=(2, 0)),
             nn.ReLU(),
@@ -89,7 +87,7 @@ Box(-3.4028235e+38, 3.4028235e+38, (19591,), float32)
 
         # Compute shape by doing one forward pass
         with th.no_grad():
-            n_flatten = self.cnn(th.as_tensor(env.observation_space['image'].sample()[None]).float()).shape[1]
+            n_flatten = self.cnn(th.as_tensor(env.structured_observation_space['image'].sample()[None]).float()).shape[1]
 
         self.cnn_linear = nn.Sequential(nn.Linear(n_flatten, cnn_output_dim), nn.ReLU())
 
@@ -106,7 +104,7 @@ Box(-3.4028235e+38, 3.4028235e+38, (19591,), float32)
         self.minimap_warp_embedding = nn.Embedding(830, warp_emb_dim, padding_idx=0)
 
         # minimap (14 + 8 + 8, 9, 10)
-        n_input_channels = env.observation_space['minimap'].shape[0] + sprite_emb_dim + warp_emb_dim
+        n_input_channels = env.structured_observation_space['minimap'].shape[0] + sprite_emb_dim + warp_emb_dim
         self.minimap_cnn = nn.Sequential(
             nn.Conv2d(n_input_channels, 32*2, kernel_size=4, stride=1, padding=0),
             nn.ReLU(),
@@ -210,95 +208,97 @@ Box(-3.4028235e+38, 3.4028235e+38, (19591,), float32)
         # self._features_dim = 410 + 256 + map_ids_emb_dim
         self._features_dim = 579 + 256 + map_ids_emb_dim + 512
 
+        # breakpoint()
 
-        # self.flat_observation_space = env.flat_observation_space
-        # self.flat_observation_structure = env.flat_observation_structure
-        # # observation_space.spaces.items()
+        self.flat_observation_space = env.flat_observation_space
+        self.flat_observation_structure = env.flat_observation_structure
+        # observation_space.spaces.items()
         
-        # # image (3, 36, 40)
-        # self.image_cnn = NatureCNN(env.structured_observation_space['image'], features_dim=cnn_output_dim, normalized_image=normalized_image)
+        # image (3, 36, 40)
+        self.image_cnn = NatureCNN(env.structured_observation_space['image'], features_dim=cnn_output_dim, normalized_image=normalized_image)
 
-        # # poke_move_ids (12, 4) -> (12, 4, 8)
-        # self.poke_move_ids_embedding = nn.Embedding(167, 8, padding_idx=0)
-        # # concat with poke_move_pps (12, 4, 2)
-        # # input (12, 4, 10) for fc relu
-        # self.move_fc_relu = nn.Sequential(
-        #     nn.Linear(10, 8),
-        #     nn.ReLU(),
-        #     nn.Linear(8, 8),
-        #     nn.ReLU(),
-        # )
-        # # max pool
-        # self.move_max_pool = nn.AdaptiveMaxPool2d(output_size=(1, 16))
-        # # output (12, 1, 16), sqeeze(-2) -> (12, 16)
+        # poke_move_ids (12, 4) -> (12, 4, 8)
+        self.poke_move_ids_embedding = nn.Embedding(167, 8, padding_idx=0)
+        # concat with poke_move_pps (12, 4, 2)
+        # input (12, 4, 10) for fc relu
+        self.move_fc_relu = nn.Sequential(
+            nn.Linear(10, 8),
+            nn.ReLU(),
+            nn.Linear(8, 8),
+            nn.ReLU(),
+        )
+        # max pool
+        self.move_max_pool = nn.AdaptiveMaxPool2d(output_size=(1, 16))
+        # output (12, 1, 16), sqeeze(-2) -> (12, 16)
 
-        # # poke_type_ids (12, 2) -> (12, 2, 8)
-        # self.poke_type_ids_embedding = nn.Embedding(17, 8, padding_idx=0)
-        # # (12, 2, 8) -> (12, 8) by sum(dim=-2)
+        # poke_type_ids (12, 2) -> (12, 2, 8)
+        self.poke_type_ids_embedding = nn.Embedding(17, 8, padding_idx=0)
+        # (12, 2, 8) -> (12, 8) by sum(dim=-2)
 
-        # # poke_ids (12, ) -> (12, 8)
-        # self.poke_ids_embedding = nn.Embedding(192, 16, padding_idx=0)
+        # poke_ids (12, ) -> (12, 8)
+        self.poke_ids_embedding = nn.Embedding(192, 16, padding_idx=0)
         
-        # # pokemon fc relu
-        # self.poke_fc_relu = nn.Sequential(
-        #     nn.Linear(63, 32),
-        #     nn.ReLU(),
-        #     nn.Linear(32, 32),
-        #     nn.ReLU(),
-        # )
+        # pokemon fc relu
+        self.poke_fc_relu = nn.Sequential(
+            nn.Linear(63, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+            nn.ReLU(),
+        )
 
-        # # pokemon party head
-        # self.poke_party_head = nn.Sequential(
-        #     nn.Linear(32, 32),
-        #     nn.ReLU(),
-        #     nn.Linear(32, 32),
-        # )
-        # # get the first 6 pokemon and do max pool
-        # self.poke_party_head_max_pool = nn.AdaptiveMaxPool2d(output_size=(1, 32))
+        # pokemon party head
+        self.poke_party_head = nn.Sequential(
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+        )
+        # get the first 6 pokemon and do max pool
+        self.poke_party_head_max_pool = nn.AdaptiveMaxPool2d(output_size=(1, 32))
 
-        # # pokemon opp head
-        # self.poke_opp_head = nn.Sequential(
-        #     nn.Linear(32, 32),
-        #     nn.ReLU(),
-        #     nn.Linear(32, 32),
-        # )
-        # # get the last 6 pokemon and do max pool
-        # self.poke_opp_head_max_pool = nn.AdaptiveMaxPool2d(output_size=(1, 32))
+        # pokemon opp head
+        self.poke_opp_head = nn.Sequential(
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+        )
+        # get the last 6 pokemon and do max pool
+        self.poke_opp_head_max_pool = nn.AdaptiveMaxPool2d(output_size=(1, 32))
 
-        # # item_ids embedding
-        # self.item_ids_embedding = nn.Embedding(256, 16, padding_idx=0)  # (20, 16)
-        # # item_ids fc relu
-        # self.item_ids_fc_relu = nn.Sequential(
-        #     nn.Linear(17, 16),
-        #     nn.ReLU(),
-        #     nn.Linear(16, 16),
-        #     nn.ReLU(),
-        # )
-        # # item_ids max pool
-        # self.item_ids_max_pool = nn.AdaptiveMaxPool2d(output_size=(1, 16))
+        # item_ids embedding
+        self.item_ids_embedding = nn.Embedding(256, 16, padding_idx=0)  # (20, 16)
+        # item_ids fc relu
+        self.item_ids_fc_relu = nn.Sequential(
+            nn.Linear(17, 16),
+            nn.ReLU(),
+            nn.Linear(16, 16),
+            nn.ReLU(),
+        )
+        # item_ids max pool
+        self.item_ids_max_pool = nn.AdaptiveMaxPool2d(output_size=(1, 16))
 
-        # # event_ids embedding
-        # self.event_ids_embedding = nn.Embedding(2570, 16, padding_idx=0)  # (20, )
-        # # event_ids fc relu
-        # self.event_ids_fc_relu = nn.Sequential(
-        #     nn.Linear(17, 16),
-        #     nn.ReLU(),
-        #     nn.Linear(16, 16),
-        #     nn.ReLU(),
-        # )
-        # # event_ids max pool
-        # self.event_ids_max_pool = nn.AdaptiveMaxPool2d(output_size=(1, 16))
+        # event_ids embedding
+        self.event_ids_embedding = nn.Embedding(2570, 16, padding_idx=0)  # (20, )
+        # event_ids fc relu
+        self.event_ids_fc_relu = nn.Sequential(
+            nn.Linear(17, 16),
+            nn.ReLU(),
+            nn.Linear(16, 16),
+            nn.ReLU(),
+        )
+        # event_ids max pool
+        self.event_ids_max_pool = nn.AdaptiveMaxPool2d(output_size=(1, 16))
 
-
+        self._features_dim = 1251
         # self._features_dim = 406
 
         # self.fc1 = nn.Linear(406,512)
-        # self.fc2 = nn.Linear(512,512)
-        # self.action = nn.Linear(512, self.action_space.n)
-        # self.value_head = nn.Linear(512,1)
+        self.fc1 = nn.Linear(1251,512)
+        self.fc2 = nn.Linear(512,512)
+        self.action = nn.Linear(512, self.action_space.n)
+        self.value_head = nn.Linear(512,1)
         
 
-
+    # breakpoint()
     def encode_observations(self, observations: TensorDict) -> th.Tensor:
         observations = pufferlib.emulation.unpack_batched_obs(observations,
         self.flat_observation_space, self.flat_observation_structure)

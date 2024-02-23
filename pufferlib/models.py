@@ -125,6 +125,7 @@ class RecurrentWrapper(Policy):
             assert state[0].shape[1] == state[1].shape[1] == B
 
         x = x.reshape(B*TT, *space_shape)
+        # breakpoint()
         hidden, lookup = self.policy.encode_observations(x)
         assert hidden.shape == (B*TT, self.input_size)
 

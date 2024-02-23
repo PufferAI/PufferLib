@@ -39,7 +39,6 @@ def load_from_config(env):
     return pkg, pufferlib.namespace(**combined_config)
    
 def make_policy(env, env_module, args):
-   
     policy = env_module.Policy(env, **args.policy)
   
     if args.force_recurrence or env_module.Recurrent is not None:
