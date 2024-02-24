@@ -615,6 +615,11 @@ nmmo:
   env:
     name: nmmo
 
+nmmo3:
+  package: nmmo3
+  env:
+    name: nmmo3
+
 # Ocean: PufferAI's first party environment suite
 ocean:
   package: ocean
