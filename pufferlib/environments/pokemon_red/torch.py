@@ -7,6 +7,7 @@ from gymnasium import spaces
 import torch as th
 from torch import nn
 import pufferlib.emulation
+import numpy as np
 
 class Recurrent(pufferlib.models.RecurrentWrapper):
     def __init__(self, env, policy, input_size=512, hidden_size=512, num_layers=1):
@@ -300,6 +301,10 @@ Box(-3.4028235e+38, 3.4028235e+38, (19591,), float32)
 
     # breakpoint()
     def encode_observations(self, observations: TensorDict) -> th.Tensor:
+        # sz = [
+        #     int(np.prod(subspace.shape))
+        #     for subspace in self.flat_observation_space.values()
+        # ]
         observations = pufferlib.emulation.unpack_batched_obs(observations,
         self.flat_observation_space, self.flat_observation_structure)
         

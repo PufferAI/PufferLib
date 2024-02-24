@@ -21,6 +21,9 @@ import pufferlib.vectorization
 import pufferlib.frameworks.cleanrl
 import pufferlib.policy_pool
 
+from collections import deque
+from pokegym.global_map import GLOBAL_MAP_SHAPE
+from pokegym.eval import make_pokemon_red_overlay
 
 @pufferlib.dataclass
 class Performance:
@@ -92,7 +95,7 @@ def init(
     total_updates = config.total_timesteps // config.batch_size
 
     device = config.device
-    obs_device = 'cpu' if config.cpu_offload else device
+    # obs_device = 'cpu' if config.cpu_offload else device ## BET ADDED 19
 
     # Create environments, agent, and optimizer
     init_profiler = pufferlib.utils.Profiler(memory=True)
@@ -128,38 +131,80 @@ def init(
     global_step = resume_state.get("global_step", 0)
     agent_step = resume_state.get("agent_step", 0)
     update = resume_state.get("update", 0)
+    lr_update = resume_state.get("lr_update", 0) # BET ADDED 20
 
-    optimizer = optim.Adam(agent.parameters(),
-        lr=config.learning_rate, eps=1e-5)
+    optimizer = optim.Adam(agent.parameters(), lr=config.learning_rate, eps=1e-5)
     opt_state = resume_state.get("optimizer_state_dict", None)
+    
+    # BET ADDED 21 (through line 144)
+    if config.compile:
+            agent = torch.compile(agent, mode=config.compile_mode)
+            # TODO: Figure out how to compile the optimizer!
+            # self.calculate_loss = torch.compile(self.calculate_loss, mode=config.compile_mode)
+
+    if config.verbose:
+        n_params = sum(p.numel() for p in agent.parameters() if p.requires_grad)
+        print(f"Model Size: {n_params//1000} K parameters")
+
     if opt_state is not None:
         optimizer.load_state_dict(resume_state["optimizer_state_dict"])
 
     # Create policy pool
     pool_agents = num_agents * pool.envs_per_batch
     policy_pool = pufferlib.policy_pool.PolicyPool(
-        agent, pool_agents, atn_shape, device, path,
-        config.pool_kernel, policy_selector,
+        agent, 
+        pool_agents, 
+        atn_shape, 
+        device, 
+        path,
+        config.pool_kernel, 
+        policy_selector,
     )
 
     # Allocate Storage
     storage_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True).start()
-    next_lstm_state = []
+    # next_lstm_state = [] ## BET ADDED 13
     pool.async_reset(config.seed)
     next_lstm_state = None
-    if hasattr(agent, 'lstm'):
+    
+    # BET ADDED 15 (through line 172)
+    if hasattr(agent, "lstm"):
         shape = (agent.lstm.num_layers, total_agents, agent.lstm.hidden_size)
         next_lstm_state = (
-            torch.zeros(shape).to(device),
-            torch.zeros(shape).to(device),
+            torch.zeros(shape, device=device),
+            torch.zeros(shape, device=device),
         )
-    obs=torch.zeros(config.batch_size + 1, *obs_shape).to(obs_device)
-    actions=torch.zeros(config.batch_size + 1, *atn_shape, dtype=int).to(device)
-    logprobs=torch.zeros(config.batch_size + 1).to(device)
-    rewards=torch.zeros(config.batch_size + 1).to(device)
-    dones=torch.zeros(config.batch_size + 1).to(device)
-    truncateds=torch.zeros(config.batch_size + 1).to(device)
-    values=torch.zeros(config.batch_size + 1).to(device)
+    obs = torch.zeros(config.batch_size + 1, *obs_shape)
+    actions = torch.zeros(config.batch_size + 1, *atn_shape, dtype=int)
+    logprobs = torch.zeros(config.batch_size + 1)
+    rewards = torch.zeros(config.batch_size + 1)
+    dones = torch.zeros(config.batch_size + 1)
+    truncateds = torch.zeros(config.batch_size + 1)
+    values = torch.zeros(config.batch_size + 1)
+
+    obs_ary = np.asarray(obs)
+    actions_ary = np.asarray(actions)
+    logprobs_ary = np.asarray(logprobs)
+    rewards_ary = np.asarray(rewards)
+    dones_ary = np.asarray(dones)
+    truncateds_ary = np.asarray(truncateds)
+    values_ary = np.asarray(values)
+
+    ## BET ADDED 14
+    # if hasattr(agent, 'lstm'):
+    #     shape = (agent.lstm.num_layers, total_agents, agent.lstm.hidden_size)
+    #     next_lstm_state = (
+    #         torch.zeros(shape).to(device),
+    #         torch.zeros(shape).to(device),
+    #     )
+    # obs=torch.zeros(config.batch_size + 1, *obs_shape).to(obs_device)
+    # actions=torch.zeros(config.batch_size + 1, *atn_shape, dtype=int).to(device)
+    # logprobs=torch.zeros(config.batch_size + 1).to(device)
+    # rewards=torch.zeros(config.batch_size + 1).to(device)
+    # dones=torch.zeros(config.batch_size + 1).to(device)
+    # truncateds=torch.zeros(config.batch_size + 1).to(device)
+    # values=torch.zeros(config.batch_size + 1).to(device)
+    
     storage_profiler.stop()
 
     #"charts/actions": wandb.Histogram(b_actions.cpu().numpy()),
@@ -172,6 +217,21 @@ def init(
     )
  
     return pufferlib.namespace(self,
+                               
+                               
+        # BET ADDED 22
+        reward_buffer = deque(maxlen=1_000),
+        exploration_map_agg = np.zeros((config.num_envs, *GLOBAL_MAP_SHAPE), dtype=np.float32),
+        taught_cut = False,
+        infos = {},
+        obs_ary = obs_ary,
+        actions_ary = actions_ary,
+        logprobs_ary = logprobs_ary,
+        rewards_ary = rewards_ary,
+        dones_ary = dones_ary,
+        truncateds_ary = truncateds_ary,
+        values_ary = values_ary,
+        
         # Agent, Optimizer, and Environment
         config=config,
         pool = pool,
@@ -181,8 +241,10 @@ def init(
 
         # Logging
         exp_name = exp_name,
+        track = track, # BET ADDED 17
         wandb = wandb,
         learning_rate=config.learning_rate,
+        lr_update = lr_update,
         losses = Losses(),
         init_performance = init_performance,
         performance = Performance(),
@@ -202,7 +264,7 @@ def init(
         update = update,
         global_step = global_step,
         device = device,
-        obs_device = obs_device,
+        # obs_device = obs_device, ## BET ADDED 24
         start_time = start_time,
     )
 
@@ -219,6 +281,7 @@ def evaluate(data):
             **{f'performance/{k}': v
                 for k, v in data.performance.items()},
             **{f'stats/{k}': v for k, v in data.stats.items()},
+            **{f"max_stats/{k}": v for k, v in data.max_stats.items()}, # BET ADDED 1
             **{f'skillrank/{policy}': elo
                 for policy, elo in data.policy_pool.ranker.ratings.items()},
         })
@@ -228,9 +291,10 @@ def evaluate(data):
     env_profiler = pufferlib.utils.Profiler()
     inference_profiler = pufferlib.utils.Profiler()
     eval_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True).start()
+    misc_profiler = pufferlib.utils.Profiler() # BET ADDED 2
 
     ptr = step = padded_steps_collected = agent_steps_collected = 0
-    infos = defaultdict(lambda: defaultdict(list))
+    # infos = defaultdict(lambda: defaultdict(list))
     while True:
         step += 1
         if ptr == config.batch_size + 1:
@@ -239,16 +303,29 @@ def evaluate(data):
         with env_profiler:
             o, r, d, t, i, env_id, mask = data.pool.recv()
 
-        i = data.policy_pool.update_scores(i, "return")
+        # i = data.policy_pool.update_scores(i, "return") ## BET ADDED 3
+        # BET ADDED 4
+        with misc_profiler:
+            i = data.policy_pool.update_scores(i, "return")
+            # TODO: Update this for policy pool
+            for ii, ee in zip(i["learner"], env_id):
+                ii["env_id"] = ee
 
+        ## BET ADDED 5
+        # with inference_profiler, torch.no_grad():
+        #     o = torch.as_tensor(o)
+        #     r = torch.as_tensor(r).float().to(data.device).view(-1)
+        #     d = torch.as_tensor(d).float().to(data.device).view(-1)
+        
+        ## BET ADDED 6
         with inference_profiler, torch.no_grad():
-            o = torch.as_tensor(o)
-            r = torch.as_tensor(r).float().to(data.device).view(-1)
-            d = torch.as_tensor(d).float().to(data.device).view(-1)
+            o = torch.as_tensor(o).to(device=data.device, non_blocking=True)
+            r = (torch.as_tensor(r, dtype=torch.float32).to(device=data.device, non_blocking=True).view(-1))
+            d = (torch.as_tensor(d, dtype=torch.float32).to(device=data.device, non_blocking=True).view(-1))
 
-        agent_steps_collected += sum(mask)
-        padded_steps_collected += len(mask)
-        with inference_profiler, torch.no_grad():
+            agent_steps_collected += sum(mask)
+            padded_steps_collected += len(mask)
+            # with inference_profiler, torch.no_grad(): ## BET ADDED 7
             # Multiple policies will not work with new envpool
             next_lstm_state = data.next_lstm_state
             if next_lstm_state is not None:
@@ -266,37 +343,98 @@ def evaluate(data):
                 data.next_lstm_state[1][:, env_id] = c
 
             value = value.flatten()
+        
+        # BET ADDED 8    
+        with misc_profiler:
+            actions = actions.cpu().numpy()
 
-        # Index alive mask with policy pool idxs...
-        # TODO: Find a way to avoid having to do this
-        learner_mask = mask * data.policy_pool.mask
+            # Index alive mask with policy pool idxs...
+            # TODO: Find a way to avoid having to do this
+            # learner_mask = mask * data.policy_pool.mask ## BET ADDED 9
+            learner_mask = torch.Tensor(mask * data.policy_pool.mask) # BET ADDED 10
 
-        for idx in np.where(learner_mask)[0]:
-            if ptr == config.batch_size + 1:
-                break
-            data.obs[ptr] = o[idx]
-            data.values[ptr] = value[idx]
-            data.actions[ptr] = actions[idx]
-            data.logprobs[ptr] = logprob[idx]
-            data.sort_keys.append((env_id[idx], step))
-            if len(d) != 0:
-                data.rewards[ptr] = r[idx]
-                data.dones[ptr] = d[idx]
-            ptr += 1
+            ## BET ADDED 12 (through 320)
+            # Ensure indices do not exceed batch size
+            indices = torch.where(learner_mask)[0][: config.batch_size - ptr + 1].numpy()
+            end = ptr + len(indices)
 
+            # Batch indexing
+            data.obs_ary[ptr:end] = o.cpu().numpy()[indices]
+            data.values_ary[ptr:end] = value.cpu().numpy()[indices]
+            data.actions_ary[ptr:end] = actions[indices]
+            data.logprobs_ary[ptr:end] = logprob.cpu().numpy()[indices]
+            data.rewards_ary[ptr:end] = r.cpu().numpy()[indices]
+            data.dones_ary[ptr:end] = d.cpu().numpy()[indices]
+            data.sort_keys.extend([(env_id[i], step) for i in indices])
 
-        for policy_name, policy_i in i.items():
-            for agent_i in policy_i:
-                for name, dat in unroll_nested_dict(agent_i):
-                    infos[policy_name][name].append(dat)
+            # Update pointer
+            ptr += len(indices)
 
+            for policy_name, policy_i in i.items():
+                for agent_i in policy_i:
+                    for name, dat in unroll_nested_dict(agent_i):
+                        if policy_name not in data.infos:
+                            data.infos[policy_name] = {}
+                        if name not in data.infos[policy_name]:
+                            data.infos[policy_name][name] = [
+                                np.zeros_like(dat)
+                            ] * data.config.num_envs
+                        data.infos[policy_name][name][agent_i["env_id"]] = dat
         with env_profiler:
-            data.pool.send(actions.cpu().numpy())
+            data.pool.send(actions) # BET ADDED 37
+            # data.pool.send(actions.cpu().numpy()) # BET ADDED 36
+            
+    # BET ADDED 35 (through line 403)
+    data.reward_buffer.append(r.cpu().sum().numpy())
+    # Probably should normalize the rewards before trying to take the variance...
+    reward_var = np.var(data.reward_buffer)
+    if data.wandb is not None:
+        data.wandb.log(
+            {
+                "reward/reward_var": reward_var,
+                "reward/reward_buffer_len": len(data.reward_buffer),
+            }
+        )
+    if (
+        data.taught_cut
+        and len(data.reward_buffer) == data.reward_buffer.maxlen
+        and reward_var < 2.5e-3
+    ):
+        data.reward_buffer.clear()
+        # reset lr update if the reward starts stalling
+        data.lr_update = 1.0    
+                      
+            ## BET ADDED 11
+            # for idx in np.where(learner_mask)[0]:
+            #     if ptr == config.batch_size + 1:
+            #         break
+            #     data.obs[ptr] = o[idx]
+            #     data.values[ptr] = value[idx]
+            #     data.actions[ptr] = actions[idx]
+            #     data.logprobs[ptr] = logprob[idx]
+            #     data.sort_keys.append((env_id[idx], step))
+            #     if len(d) != 0:
+            #         data.rewards[ptr] = r[idx]
+            #         data.dones[ptr] = d[idx]
+            #     ptr += 1
+
+
+            # for policy_name, policy_i in i.items():
+            #     for agent_i in policy_i:
+            #         for name, dat in unroll_nested_dict(agent_i):
+            #             infos[policy_name][name].append(dat)
+
 
     eval_profiler.stop()
 
-    data.global_step += padded_steps_collected
-    data.reward = float(torch.mean(data.rewards))
+    # BET ADDED 23
+    # data.global_step += padded_steps_collected
+    # data.reward = float(torch.mean(data.rewards))
+    
+    # BET ADDED 24
+    data.global_step = np.mean(data.infos["learner"]["stats/step"])
+    data.reward = torch.mean(data.rewards).float().item()
+    
     data.SPS = int(padded_steps_collected / eval_profiler.elapsed)
 
     perf = data.performance
@@ -310,29 +448,37 @@ def evaluate(data):
     perf.eval_sps = int(padded_steps_collected / eval_profiler.elapsed)
     perf.eval_memory = eval_profiler.end_mem
     perf.eval_pytorch_memory = eval_profiler.end_torch_mem
+    perf.misc_time = misc_profiler.elapsed # BET ADDED 25
 
     data.stats = {}
-    for k, v in infos['learner'].items():
+    data.max_stats = {} # BET ADDED 26
+    
+    # BET ADDED 27 (bunch changed)
+    for k, v in data.infos['learner'].items():
         if 'Task_eval_fn' in k:
             # Temporary hack for NMMO competition
             continue
         if 'pokemon_exploration_map' in k:
-            import cv2
-            from pokemon_red_eval import make_pokemon_red_overlay
-            bg = cv2.imread('kanto_map_dsv.png')
-            overlay = make_pokemon_red_overlay(bg, sum(v))
+            # import cv2
+            # from pokemon_red_eval import make_pokemon_red_overlay
+            # bg = cv2.imread('kanto_map_dsv.png')
+            # overlay = make_pokemon_red_overlay(bg, sum(v))
+            overlay = make_pokemon_red_overlay(np.stack(v, axis=0))
             if data.wandb is not None:
                 data.stats['Media/exploration_map'] = data.wandb.Image(overlay)
             # @Leanke: Add your infos['learner']['x'] etc
         try: # TODO: Better checks on log data types
             data.stats[k] = np.mean(v)
+            data.max_stats[k] = np.max(v)
+            if data.max_stats["got_hm01"] > 0:
+                data.taught_cut = True
         except:
             continue
 
     if config.verbose:
         print_dashboard(data.stats, data.init_performance, data.performance)
 
-    return data.stats, infos
+    return data.stats, data.infos # BET ADDED 28 data.stats, infos
 
 @pufferlib.utils.profile
 def train(data):
@@ -345,25 +491,30 @@ def train(data):
     train_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True)
     train_profiler.start()
 
-    # Anneal learning rate
-    frac = 1.0 - (data.update - 1.0) / data.total_updates
-    lrnow = frac * config.learning_rate
-    data.optimizer.param_groups[0]["lr"] = lrnow
+    # # Anneal learning rate
+    # frac = 1.0 - (data.update - 1.0) / data.total_updates
+    # lrnow = frac * config.learning_rate
+    # data.optimizer.param_groups[0]["lr"] = lrnow
 
     if config.anneal_lr:
-        frac = 1.0 - (data.update - 1.0) / data.total_updates
+        frac = 1.0 - (data.lr_update - 1.0) / data.total_updates
         lrnow = frac * config.learning_rate
         data.optimizer.param_groups[0]["lr"] = lrnow
 
     num_minibatches = config.batch_size // config.bptt_horizon // config.batch_rows
     idxs = sorted(range(len(data.sort_keys)), key=data.sort_keys.__getitem__)
     data.sort_keys = []
-    b_idxs = (
-        torch.Tensor(idxs)
-        .long()[:-1]
-        .reshape(config.batch_rows, num_minibatches, config.bptt_horizon)
-        .transpose(0, 1)
-    )
+    
+    # BET ADDED 28
+    b_idxs = (torch.tensor(idxs, dtype=torch.long)[:-1]
+              .reshape(config.batch_rows, num_minibatches, config.bptt_horizon).transpose(0, 1))
+            
+    # BET ADDED 27
+    # b_idxs = (
+    #     torch.Tensor(idxs).long()[:-1]
+    #     .reshape(config.batch_rows, num_minibatches, config.bptt_horizon)
+    #     .transpose(0, 1)
+    # )
 
     # bootstrap value if not done
     with torch.no_grad():
@@ -383,11 +534,20 @@ def train(data):
             )
 
     # Flatten the batch
-    data.b_obs = b_obs = data.obs[b_idxs]
-    b_actions = data.actions[b_idxs]
-    b_logprobs = data.logprobs[b_idxs]
-    b_dones = data.dones[b_idxs]
-    b_values = data.values[b_idxs]
+    # BET ADDED 29
+    # data.b_obs = b_obs = data.obs[b_idxs]
+    # b_actions = data.actions[b_idxs]
+    # b_logprobs = data.logprobs[b_idxs]
+    # b_dones = data.dones[b_idxs]
+    # b_values = data.values[b_idxs]
+    
+    # BET ADDED 30 (through line 520)
+    data.b_obs = b_obs = torch.Tensor(data.obs_ary[b_idxs])
+    b_actions = torch.Tensor(data.actions_ary[b_idxs]).to(data.device, non_blocking=True)
+    b_logprobs = torch.Tensor(data.logprobs_ary[b_idxs]).to(data.device, non_blocking=True)
+    b_dones = torch.Tensor(data.dones_ary[b_idxs]).to(data.device, non_blocking=True)
+    b_values = torch.Tensor(data.values_ary[b_idxs]).to(data.device, non_blocking=True)
+
     b_advantages = advantages.reshape(
         config.batch_rows, num_minibatches, config.bptt_horizon
     ).transpose(0, 1)
@@ -396,10 +556,19 @@ def train(data):
     # Optimizing the policy and value network
     train_time = time.time()
     pg_losses, entropy_losses, v_losses, clipfracs, old_kls, kls = [], [], [], [], [], []
+    
+    # BET ADDED 31
+    mb_obs_buffer = torch.zeros_like(b_obs[0], pin_memory=(data.device == "cuda"))
+    
     for epoch in range(config.update_epochs):
         lstm_state = None
         for mb in range(num_minibatches):
-            mb_obs = b_obs[mb].to(data.device)
+            # mb_obs = b_obs[mb].to(data.device) ## BET ADDED 32
+            
+            # BET ADDED 33
+            mb_obs_buffer.copy_(b_obs[mb], non_blocking=True)
+            mb_obs = mb_obs_buffer.to(data.device, non_blocking=True)
+            
             mb_actions = b_actions[mb].contiguous()
             mb_values = b_values[mb].reshape(-1)
             mb_advantages = b_advantages[mb].reshape(-1)
@@ -499,19 +668,22 @@ def train(data):
         print_dashboard(data.stats, data.init_performance, data.performance)
 
     data.update += 1
+    data.lr_update += 1 # BET ADDED 34
+    
     if data.update % config.checkpoint_interval == 0 or done_training(data):
        save_checkpoint(data)
 
 def close(data):
     data.pool.close()
 
-    if data.wandb is not None:
-        artifact_name = f"{data.exp_name}_model"
-        artifact = data.wandb.Artifact(artifact_name, type="model")
-        model_path = save_checkpoint(data)
-        artifact.add_file(model_path)
-        data.wandb.run.log_artifact(artifact)
-        data.wandb.finish()
+    ## BET ADDED 35
+    # if data.wandb is not None:
+    #     artifact_name = f"{data.exp_name}_model"
+    #     artifact = data.wandb.Artifact(artifact_name, type="model")
+    #     model_path = save_checkpoint(data)
+    #     artifact.add_file(model_path)
+    #     data.wandb.run.log_artifact(artifact)
+    #     data.wandb.finish()
 
 def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
         model_path=None, device='cuda', verbose=True):

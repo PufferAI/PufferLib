@@ -38,7 +38,9 @@ def init(self: object = None,
         env_creator, env_args, env_kwargs)
     num_workers, workers_per_batch, envs_per_batch, agents_per_batch, agents_per_worker = calc_scale_params(
         num_envs, envs_per_batch, envs_per_worker, agents_per_env)
+    
 
+    
     main_send_pipes, work_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
     work_send_pipes, main_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
     

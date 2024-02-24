@@ -22,7 +22,7 @@ train:
   envs_per_worker: 1
   envs_per_batch: ~
   env_pool: True
-  verbose: False
+  verbose: True
   data_dir: experiments
   checkpoint_interval: 200
   cpu_offload: True
@@ -666,14 +666,16 @@ pokemon_red:
   package: pokemon_red
   train:
     total_timesteps: 100_000_000
-    num_envs: 16
-    envs_per_worker: 1
-    envpool_batch_size: 16
+    num_envs: 128
+    envs_per_worker: 4
+    envpool_batch_size: 48
     update_epochs: 1
     gamma: 0.998
     batch_size: 32768
-    batch_rows: 64
+    batch_rows: 128
     debug: False
+    compile: True # BET ADDED 1
+    compile_mode: reduce-overhead # BET ADDED 2
 
   env:
     name: pokemon_red
