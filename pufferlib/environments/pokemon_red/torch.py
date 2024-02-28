@@ -10,7 +10,7 @@ import pufferlib.emulation
 import numpy as np
 
 class Recurrent(pufferlib.models.RecurrentWrapper):
-    def __init__(self, env, policy, input_size=512, hidden_size=512, num_layers=1):
+    def __init__(self, env, policy, input_size=512, hidden_size=512, num_layers=1): # input_size=512, hidden_size=512
         super().__init__(env, policy, input_size, hidden_size, num_layers)
 
 # class Policy(pufferlib.models.Convolutional):
@@ -293,24 +293,30 @@ Box(-3.4028235e+38, 3.4028235e+38, (19591,), float32)
         # self._features_dim = 406
 
         # self.fc1 = nn.Linear(406,512)
-        self.fc1 = nn.Linear(1251,512)
-        self.fc2 = nn.Linear(512,512)
+        self.fc1 = nn.Linear(1251,512) # self.fc1 = nn.Linear(1251,512)
+        # self.fc2 = nn.Linear(512,512)
+        self.fc2 = nn.Linear(512,512) # BET ADDED 2/27/24
         self.action = nn.Linear(512, self.action_space.n)
         self.value_head = nn.Linear(512,1)
         
 
     # breakpoint()
+    # BET ADDED (this is the forward fn in the CustomCombinedExtractorV2(BaseFeaturesExtractor) class)
     def encode_observations(self, observations: TensorDict) -> th.Tensor:
         # sz = [
         #     int(np.prod(subspace.shape))
         #     for subspace in self.flat_observation_space.values()
         # ]
-        observations = pufferlib.emulation.unpack_batched_obs(observations,
-        self.flat_observation_space, self.flat_observation_structure)
+
+        # BET ADDED 0.7
+        # Adjust the call to unpack_batched_obs to use the unflatten_context
+        observations = pufferlib.emulation.unpack_batched_obs(observations, self.unflatten_context)
+
+        # observations = pufferlib.emulation.unpack_batched_obs(observations,
+        # self.flat_observation_space, self.flat_observation_structure)
         
         # img = self.image_cnn(observations['image'])  # (256, )
         img = self.cnn_linear(self.cnn(observations['image']))  # (512, )
-        
         
         # minimap_sprite
         minimap_sprite = observations['minimap_sprite'].to(th.int)  # (9, 10)
@@ -325,8 +331,6 @@ Box(-3.4028235e+38, 3.4028235e+38, (19591,), float32)
         minimap = th.cat([minimap, embedded_minimap_sprite, embedded_minimap_warp], dim=1)  # (14 + 8 + 8, 9, 10)
         # minimap
         minimap = self.minimap_cnn_linear(self.minimap_cnn(minimap))  # (256, )
-
-        
         
         # Pokemon
         # Moves
@@ -366,14 +370,6 @@ Box(-3.4028235e+38, 3.4028235e+38, (19591,), float32)
         item_features = self.item_ids_fc_relu(item_concat)  # (20, 32)
         item_features = self.item_ids_max_pool(item_features).squeeze(-2)  # (20, 32) -> (32, )
 
-        # # Items
-        # embedded_item_ids = self.item_ids_embedding(observations['item_ids'].to(th.int))  # (20, 16)
-        # # item_quantity
-        # item_quantity = observations['item_quantity']  # (20, 1)
-        # item_concat = th.cat([embedded_item_ids, item_quantity], dim=-1)  # (20, 17)
-        # item_features = self.item_ids_fc_relu(item_concat)  # (20, 16)
-        # item_features = self.item_ids_max_pool(item_features).squeeze(-2)  # (20, 16) -> (16, )
-
         # Events
         embedded_event_ids = self.event_ids_embedding(observations['event_ids'].to(th.int))
         # event_step_since
@@ -395,8 +391,6 @@ Box(-3.4028235e+38, 3.4028235e+38, (19591,), float32)
 
         # # Raw vector
         # vector = observations['vector']  # (54, )
-
-        # Concat all features
 
         # Concat all features
         all_features = th.cat([img, minimap, poke_party_head, poke_opp_head, item_features, event_features, vector, map_features], dim=-1)  # (410 + 256, )

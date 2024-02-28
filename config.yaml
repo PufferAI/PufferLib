@@ -2,14 +2,14 @@ train:
   seed: 1
   torch_deterministic: True
   device: cuda
-  total_timesteps: 10_000_000
-  learning_rate: 0.0004
+  total_timesteps: 800_000_000
+  learning_rate: 0.0003
   num_steps: 128
   anneal_lr: True
-  gamma: 0.99
+  gamma: 0.999
   gae_lambda: 0.95
   num_minibatches: 4
-  update_epochs: 4
+  update_epochs: 2 # 3
   norm_adv: True
   clip_coef: 0.1
   clip_vloss: True
@@ -18,21 +18,20 @@ train:
   max_grad_norm: 0.5
   target_kl: ~
 
-  num_envs: 8
-  envs_per_worker: 1
-  envs_per_batch: ~
+  num_envs: 128 # 48
+  envs_per_worker: 4
+  envs_per_batch: 48 # must be <= num_envs
   env_pool: True
   verbose: True
   data_dir: experiments
-  checkpoint_interval: 200
-  cpu_offload: True
+  checkpoint_interval: 40960 # 2048 * 10 * 2
   pool_kernel: [0]
-  batch_size: 1024
-  batch_rows: 32
-  bptt_horizon: 16 #8
+  batch_size: 32768 # 128 (?)
+  batch_rows: 128
+  bptt_horizon: 16
   vf_clip_coef: 0.1
-
-  debug: False
+  compile: True
+  compile_mode: reduce-overhead
 
 sweep:
   method: random
@@ -59,624 +58,56 @@ sweep:
           'values': [4, 8, 16, 32],
         }
 
-### Arcade Learning Environment suite
-# Convenience wrappers provided for common test environments
-atari:
-  package: atari
-  env:
-    name: BreakoutNoFrameskip-v4
-beamrider:
-  package: atari
-  env:
-    name: BeamRiderNoFrameskip-v4
-breakout:
-  package: atari
-  env:
-    name: BreakoutNoFrameskip-v4
-enduro:
-  package: atari
-  env:
-    name: EnduroNoFrameskip-v4
-pong:
-  package: atari
-  env:
-    name: PongNoFrameskip-v4
-qbert:
-  package: atari
-  env:
-    name: QbertNoFrameskip-v4
-seaquest:
-  package: atari
-  env:
-    name: SeaquestNoFrameskip-v4
-space_invaders:
-  package: atari
-  env:
-    name: SpaceInvadersNoFrameskip-v4
-
-box2d:
-  package: box2d
-
-### Procgen Suite
-# Shared hyperparams (best for all envs)
-# Per-env hyperparams from CARBS
-procgen:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0005
-    num_cores: 1
-    num_envs: 1
-    batch_size: 16384
-    batch_rows: 8
-    bptt_horizon: 256
-    gamma: 0.999
-    update_epochs: 3
-    anneal_lr: False
-    clip_coef: 0.2
-    vf_clip_coef: 0.2
-  env:
-    name: bigfish
-  policy:
-    cnn_width: 16
-    mlp_width: 32
-bigfish:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0001901266338648
-    gamma: 0.9990684264891424
-    ent_coef: 0.0025487710400836
-    vf_coef: 1.1732211834792117
-    gae_lambda: 0.8620630095238284
-    clip_coef: 0.4104603426698214
-    num_cores: 1
-    num_envs: 1
-    batch_size: 53210
-    batch_rows: 5321
-    bptt_horizon: 1
-    update_epochs: 3
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: bigfish
-    num_envs: 24
-  policy:
-    cnn_width: 22
-    mlp_width: 327
-bossfight:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0001391202716783
-    gamma: 0.9989348776761554
-    ent_coef: 0.0141638234842547
-    vf_coef: 2.3544979860388664
-    gae_lambda: 0.8895733311775463
-    clip_coef: 0.5642914060539239
-    num_cores: 1
-    num_envs: 1
-    batch_size: 48520
-    batch_rows: 6065
-    bptt_horizon: 1
-    update_epochs: 2
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: bossfight
-    num_envs: 186
-  policy:
-    cnn_width: 34
-    mlp_width: 83
-caveflyer:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0003922570060721
-    gamma: 0.9974587177630908
-    ent_coef: 0.0225727962984408
-    vf_coef: 1.6255759569858712
-    gae_lambda: 0.9094175213807228
-    clip_coef: 0.4508383484491862
-    num_cores: 1
-    num_envs: 1
-    batch_size: 32308
-    batch_rows: 8077
-    bptt_horizon: 1
-    update_epochs: 2
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: caveflyer
-    num_envs: 96
-  policy:
-    cnn_width: 17
-    mlp_width: 242
-chaser:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0003508035442326
-    gamma: 0.9942435848334558
-    ent_coef: 0.0071001859366116
-    vf_coef: 2.1530812235373684
-    gae_lambda: 0.8186838232115529
-    clip_coef: 0.0821348744853704
-    num_cores: 1
-    num_envs: 1
-    batch_size: 17456
-    batch_rows: 2182
-    bptt_horizon: 1
-    update_epochs: 1
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: chaser
-    num_envs: 89
-  policy:
-    cnn_width: 37
-    mlp_width: 198
-climber:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0001217047694837
-    gamma: 0.998084323380632
-    ent_coef: 0.0171304566412224
-    vf_coef: 0.8123888927054865
-    gae_lambda: 0.8758003745828604
-    clip_coef: 0.3879433119086241
-    num_cores: 1
-    num_envs: 1
-    batch_size: 113288
-    batch_rows: 3332
-    bptt_horizon: 256
-    update_epochs: 2
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: climber
-    num_envs: 207
-  policy:
-    cnn_width: 29
-    mlp_width: 134
-coinrun:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0002171100540455
-    gamma: 0.9962953325196714
-    ent_coef: 0.0024830293961112
-    vf_coef: 0.4045225563446447
-    gae_lambda: 0.9708900757395368
-    clip_coef: 0.271239381520248
-    num_cores: 1
-    num_envs: 1
-    batch_size: 184170
-    batch_rows: 6139
-    bptt_horizon: 1
-    update_epochs: 2
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: coinrun
-    num_envs: 246
-  policy:
-    cnn_width: 16
-    mlp_width: 384
-dodgeball:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0002471773711262
-    gamma: 0.9892421826991458
-    ent_coef: 0.0061212242920176
-    vf_coef: 0.905405768115384
-    gae_lambda: 0.929215062387182
-    clip_coef: 0.1678680070658446
-    num_cores: 1
-    num_envs: 1
-    batch_size: 233026
-    batch_rows: 4958
-    bptt_horizon: 1
-    update_epochs: 2
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: dodgeball
-    num_envs: 385
-  policy:
-    cnn_width: 24
-    mlp_width: 538
-fruitbot:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0005426317191531
-    gamma: 0.9988953819963396
-    ent_coef: 0.0115430852027873
-    vf_coef: 0.5489566038515201
-    gae_lambda: 0.7517437269156811
-    clip_coef: 0.3909436413913963
-    num_cores: 1
-    num_envs: 1
-    batch_size: 25344
-    batch_rows: 4224
-    bptt_horizon: 1
-    update_epochs: 1
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: fruitbot
-    num_envs: 184
-  policy:
-    cnn_width: 24
-    mlp_width: 600
-heist:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0001460588554421
-    gamma: 0.9929899907866796
-    ent_coef: 0.0063411167117336
-    vf_coef: 1.3750495866441763
-    gae_lambda: 0.864713026766495
-    clip_coef: 0.0341243664433126
-    num_cores: 1
-    num_envs: 1
-    batch_size: 162233
-    batch_rows: 3061
-    bptt_horizon: 1
-    update_epochs: 1
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: heist
-    num_envs: 999
-  policy:
-    cnn_width: 60
-    mlp_width: 154
-jumper:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0002667825838749
-    gamma: 0.996178793124514
-    ent_coef: 0.0035712927399072
-    vf_coef: 0.2066134576246479
-    gae_lambda: 0.9385007945498072
-    clip_coef: 0.0589308261206342
-    num_cores: 1
-    num_envs: 1
-    batch_size: 76925
-    batch_rows: 3077
-    bptt_horizon: 1
-    update_epochs: 3
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: jumper
-    num_envs: 320
-  policy:
-    cnn_width: 24
-    mlp_width: 190
-leaper:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.000238551194954
-    gamma: 0.9984543257393016
-    ent_coef: 0.0264785452036158
-    vf_coef: 1.12387183485305
-    gae_lambda: 0.8968331903476625
-    clip_coef: 0.6941033332120052
-    num_cores: 1
-    num_envs: 1
-    batch_size: 19380
-    batch_rows: 6460
-    bptt_horizon: 1
-    update_epochs: 2
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: leaper
-    num_envs: 252
-  policy:
-    cnn_width: 28
-    mlp_width: 100
-maze:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0001711754945436
-    gamma: 0.9986484783565428
-    ent_coef: 0.0027020733255912
-    vf_coef: 0.1236421145384316
-    gae_lambda: 0.971943769322524
-    clip_coef: 0.2335644352369076
-    num_cores: 1
-    num_envs: 1
-    batch_size: 116008
-    batch_rows: 6834
-    bptt_horizon: 1
-    update_epochs: 2
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: maze
-    num_envs: 820
-  policy:
-    cnn_width: 28
-    mlp_width: 526
-miner:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.000328692228852
-    gamma: 0.990897931823388
-    ent_coef: 0.0045505824544649
-    vf_coef: 6.559292234163336
-    gae_lambda: 0.6494040942916905
-    clip_coef: 0.2293978935956241
-    num_cores: 1
-    num_envs: 1
-    batch_size: 154512
-    batch_rows: 2088
-    bptt_horizon: 1
-    update_epochs: 3
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: miner
-    num_envs: 343
-  policy:
-    cnn_width: 38
-    mlp_width: 175
-ninja:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0002649776171804
-    gamma: 0.998357586821043
-    ent_coef: 0.0077158486367147
-    vf_coef: 2.171674659769069
-    gae_lambda: 0.9664148604540898
-    clip_coef: 0.5891635585927152
-    num_cores: 1
-    num_envs: 1
-    batch_size: 45246
-    batch_rows: 7541
-    bptt_horizon: 1
-    update_epochs: 2
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: ninja
-    num_envs: 293
-  policy:
-    cnn_width: 25
-    mlp_width: 317
-plunder:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0002630139944456
-    gamma: 0.9981502407071172
-    ent_coef: 0.0222691283544936
-    vf_coef: 4.316832667738928
-    gae_lambda: 0.84500339385464
-    clip_coef: 0.0914132500563203
-    num_cores: 1
-    num_envs: 1
-    batch_size: 26304
-    batch_rows: 4384
-    bptt_horizon: 1
-    update_epochs: 2
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: plunder
-    num_envs: 127
-  policy:
-    cnn_width: 30
-    mlp_width: 288
-starpilot:
-  package: procgen
-  train:
-    total_timesteps: 8_000_000
-    learning_rate: 0.0004257280551714
-    gamma: 0.9930510505613882
-    ent_coef: 0.007836164188961
-    vf_coef: 5.482314699746532
-    gae_lambda: 0.82792978724664
-    clip_coef: 0.2645124138418521
-    num_cores: 1
-    num_envs: 1
-    batch_size: 107440
-    batch_rows: 6715
-    bptt_horizon: 1
-    update_epochs: 2
-    anneal_lr: False
-    vf_clip_coef: 0.2
-  env:
-    name: starpilot
-    num_envs: 320
-  policy:
-    cnn_width: 25
-    mlp_width: 144
-
-bsuite:
-  package: bsuite
-  train:
-    total_timesteps: 1_000_000
-    num_envs: 1
-  env:
-    name: bandit/0
-
-butterfly:
-  package: butterfly
-  env:
-    name: cooperative_pong_v5
-
-classic_control:
-  package: classic_control
-  train:
-    num_envs: 16
-  env:
-    name: cartpole
-classic-control:
-  package: classic_control
-classiccontrol:
-  package: classic_control
-cartpole:
-  package: classic_control
-
-crafter:
-  package: crafter
-  env:
-    name: CrafterReward-v1
-
-dm_control:
-  package: dm_control
-dm-control:
-  package: dm_control
-dmcontrol:
-  package: dm_control
-dmc:
-  package: dm_control
-
-dm_lab:
-  package: dm_lab
-dm-lab:
-  package: dm_lab
-dmlab:
-  package: dm_lab
-dml:
-  package: dm_lab
-
-griddly:
-  package: griddly
-  env:
-    name: GDY-Spiders-v0
-
-magent:
-  package: magent
-  env:
-    name: battle_v4
-
-microrts:
-  package: microrts
-  env:
-    name: GlobalAgentCombinedRewardEnv
-
-minerl:
-  package: minerl
-  env:
-    name: MineRLNavigateDense-v0
-
-minigrid:
-  package: minigrid
-  env:
-    name: MiniGrid-LavaGapS7-v0
-
-minihack:
-  package: minihack
-  env:
-    name: MiniHack-River-v0
-
-nethack:
-  package: nethack
-  env:
-    name: NetHackScore-v0
-
-nmmo:
-  package: nmmo
-  train:
-    num_envs: 1
-    envs_per_batch: 1
-    envs_per_worker: 1
-    batch_size: 4096
-    batch_rows: 128
-  env:
-    name: nmmo
-
-# Ocean: PufferAI's first party environment suite
-ocean:
-  package: ocean
-  train:
-    total_timesteps: 30_000
-    learning_rate: 0.017
-    num_envs: 8
-    batch_rows: 32
-    bptt_horizon: 4
-    device: cpu
-  env:
-    name: squared
-bandit:
-  package: ocean
-  env:
-    name: bandit
-memory:
-  package: ocean
-  env:
-    name: memory
-password:
-  package: ocean
-  env:
-    name: password
-squared:
-  package: ocean
-  env:
-    name: squared
-stochastic:
-  package: ocean
-  env:
-    name: stochastic
-
-open_spiel:
-  package: open_spiel
-  train:
-    pool_kernel: [0, 1, 1, 0]
-    num_envs: 32
-    batch_size: 4096
-  env:
-    name: connect_four
-open-spiel:
-  package: open_spiel
-openspiel:
-  package: open_spiel
-connect_four:
-  package: open_spiel
-  env:
-    name: connect_four
-connect-four:
-  package: open_spiel
-  env:
-    name: connect_four
-connectfour:
-  package: open_spiel
-  env:
-    name: connect_four
-connect4:
-  package: open_spiel
-  env:
-    name: connect_four
-
 pokemon_red:
   package: pokemon_red
   train:
-    total_timesteps: 100_000_000
+    total_timesteps: 800_000_000
     num_envs: 128
     envs_per_worker: 4
-    envpool_batch_size: 48
-    update_epochs: 1
+    envs_per_batch: 48 
+    update_epochs: 2 # 3
     gamma: 0.998
     batch_size: 32768
     batch_rows: 128
-    debug: False
-    compile: True # BET ADDED 1
-    compile_mode: reduce-overhead # BET ADDED 2
+    compile: True
 
+    # Boey-specific env parameters; loaded by environment.py
+    save_final_state: True
+    print_rewards: True
+    headless: True
+    init_state: /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir/start_from_state_dir/has_pokedex_nballs_noanim.state
+    action_freq: 24
+    max_steps: 30720000 # Updated to match ep_length
+    early_stop: True
+    early_stopping_min_reward: 2.0
+    save_video: False
+    fast_video: True
+    explore_weight: 1.5
+    use_screen_explore: False
+    sim_frame_dist: 1000000.0 # 2000000.0
+    reward_scale: 4
+    extra_buttons: False
+    noop_button: True
+    swap_button: True
+    restricted_start_menu: True # False
+    level_reward_badge_scale: 1.0
+    save_state_dir: /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir
+    special_exploration_scale: 1.0
+    enable_item_manager: True
+    enable_stage_manager: True
+    enable_item_purchaser: True
+    auto_skip_anim: True
+    auto_skip_anim_frames: 8
+    total_envs: 48 # Updated to match num_cpu
+    gb_path: PokemonRed.gb
+    debug: False
+    level_manager_eval_mode: False
+    sess_id: generate # Updated dynamically, placeholder for dynamic generation
+    use_wandb_logging: False
+    cpu_multiplier: 0.25
+    save_freq: 40960 # 2048 * 10 * 2
+    n_steps: 163840 # Calculated as int(5120 // cpu_multiplier) * 1
+    num_cpu: 8 # Calculated as int(32 * cpu_multiplier)
   env:
     name: pokemon_red
 pokemon-red:
@@ -688,29 +119,3 @@ pokemon:
 pokegym:
   package: pokemon_red
  
-links_awaken:
-  package: links_awaken
-links-awaken:
-  package: links_awaken
-linksawaken:
-  package: links_awaken
-zelda:
-  package: links_awaken
-
-smac:
-  package: smac
-  env:
-    name: smac
-starcraft:
-  package: smac
-
-stable_retro:
-  package: stable_retro
-  env:
-    name: Airstriker-Genesis
-stable-retro:
-  package: stable_retro
-stableretro:
-  package: stable_retro
-retro:
-  package: stable_retro

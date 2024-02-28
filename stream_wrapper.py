@@ -38,10 +38,11 @@ class StreamWrapper(gym.Wrapper):
         self.stream_metadata = stream_metadata
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        self.websocket = self.loop.run_until_complete(
-                self.establish_wc_connection()
+        self.websocket = None
+        self.loop.run_until_complete(
+            self.establish_wc_connection()
         )
-        self.upload_interval = 80
+        self.upload_interval = 250
         self.steam_step_counter = 0
         self.coord_list = []
         self.start_time = time.time()        
