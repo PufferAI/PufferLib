@@ -3,6 +3,8 @@ import numpy as np
 
 import sqlite3
 
+ANCHOR_ELO = 1000.0
+
 
 def win_prob(elo1, elo2):
     '''Calculate win probability such that a difference of
@@ -61,9 +63,13 @@ class Ranker:
             """)
 
     def __repr__(self):
+        if len(self.ratings) == 0:
+            return ''
+
+        sorted_dict = sorted(self.ratings.items(), key=lambda x: x[1], reverse=True)
         return '\n'.join([
-            f'Policy: {name}, Elo: {elo}'
-            for name, elo in self.ratings
+            f' - Policy: {name}, Elo: {elo:.3f}'
+            for name, elo in sorted_dict
         ])
 
     @property
@@ -78,20 +84,16 @@ class Ranker:
             return
 
         # Load all elos from DB
-        with self.conn:
-            cursor = self.conn.execute("SELECT * FROM ratings;")
-
-        elos = {row[0]: row[1] for row in cursor.fetchall()}
+        elos = self.ratings
 
         flat_scores = []
         flat_elos = []
-
         for policy in scores.keys():
             flat_scores.append(scores[policy])
             if policy in elos:
                 flat_elos.append(elos[policy])
             else:
-                flat_elos.append(1000.0)
+                flat_elos.append(ANCHOR_ELO)
 
         flat_elos = update_elos(flat_elos, flat_scores)
         elos = zip(scores.keys(), flat_elos)
