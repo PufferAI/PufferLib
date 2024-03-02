@@ -7,17 +7,44 @@ import numpy as np
 import torch
 
 import pufferlib.policy_store
+from pufferlib.policy_store import get_policy_names  # provide as a helper function
 import pufferlib.policy_ranker
 import pufferlib.utils
 
 LEARNER_POLICY_ID = 0
 
 
-def all_selector(items: list, num: int):
-    assert len(items) == num, 'all_selector: num must match len(items)'
-    return np.random.permutation(items).tolist()
+# Kernel helper
+def create_kernel(agents_per_env, num_policies, shuffle=False):
+    agents_per_agents = agents_per_env // num_policies
+    kernel = []
+    for i in range(num_policies):
+        kernel.extend([i+1] * agents_per_agents)  # policies are 1-indexed
+    kernel.extend([LEARNER_POLICY_ID] * (agents_per_env - len(kernel)))
+    if shuffle:
+        np.random.shuffle(kernel)
+    return kernel
+
+# Policy selectors
+class PolicySelector:
+    def __init__(self, seed):
+        self.rng = np.random.RandomState(seed)
+    
+    def __call__(self, items: list, num: int):
+        raise NotImplementedError
+
+class RandomPolicySelector(PolicySelector):
+    def __call__(self, items: list, num: int):
+        assert len(items) > 0, 'RandomPolicySelector: items must be non-empty'
+        return self.rng.choice(items, num, replace=len(items) < num).tolist()
+
+class AllPolicySelector(PolicySelector):
+    def __call__(self, items: list, num: int):
+        assert len(items) == num, 'AllPolicySelector: num must match len(items)'
+        return self.rng.permutation(items).tolist()
 
 def random_selector(items: list, num: int):
+    logging.warning('random_selector: This breaks determinism. Use RandomPolicySelector instead.')
     assert len(items) > 0, 'random_selector: items must be non-empty'
     # allow replacement if there are fewer items than requested
     return np.random.choice(items, num, replace=len(items) < num).tolist()
@@ -26,7 +53,7 @@ class PolicyPool:
     def __init__(self, policy, total_agents, atn_shape, device,
             data_dir=None,
             kernel=[LEARNER_POLICY_ID],
-            policy_selector: callable = random_selector,
+            policy_selector: callable = None,
             policy_store: pufferlib.policy_store.PolicyStore=None,
             skip_ranker=False,  # for testing
         ):
@@ -48,7 +75,8 @@ class PolicyPool:
 
         # Create learner mask
         self.mask = np.zeros(total_agents)
-        self.mask[self.sample_idxs[LEARNER_POLICY_ID]] = 1
+        if LEARNER_POLICY_ID in self.sample_idxs:
+            self.mask[self.sample_idxs[LEARNER_POLICY_ID]] = 1
 
         # Create policy store, selector, and initial current_policies
         if policy_store is None:
@@ -58,7 +86,8 @@ class PolicyPool:
         else:
             self.store = policy_store
             data_dir = self.store.path
-        self.policy_selector = policy_selector
+
+        self.policy_selector = policy_selector or RandomPolicySelector(seed=0)
         self.current_policies = {}  # Dict[policy_id] = (name, Policy)
 
         # Create ranker
@@ -173,9 +202,9 @@ class PolicyPool:
                         'policy': store.get_policy(name),
                     }
 
-            if self.ranker is not None:
+            if self.ranker is not None and self.scores is not None:
                 logging.info(f'PolicyPool: Score board\n{self.ranker}')
 
-            logging.info(f"""Next opponent policies: {[
+            logging.info(f"""Loaded policies: {[
                 p['name'] for p in self.current_policies.values()
             ]}\n""")

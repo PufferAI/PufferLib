@@ -87,7 +87,7 @@ class TestPolicyPool(unittest.TestCase):
         # Use all_selector
         policy_store = MockPolicyStore(5)
         policy_pool.update_policies(policy_ids=np.array([0, 1, 2, 3, 4, 5]), store=policy_store,
-                                    policy_selector=pp.all_selector)
+                                    policy_selector=pp.AllPolicySelector(seed=0))
         self.assertEqual(len(set(p['name'] for p in policy_pool.current_policies.values())), 5)
 
     def test_nonrecurrent_forward(self):
