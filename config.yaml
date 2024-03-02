@@ -2,14 +2,14 @@ train:
   seed: 1
   torch_deterministic: True
   device: cuda
-  total_timesteps: 800_000_000
+  total_timesteps: 800_000_000 # superceded by pokemon_red package
   learning_rate: 0.0003
   num_steps: 128
   anneal_lr: True
-  gamma: 0.999
+  gamma: 0.998 # superceded by pokemon_red package
   gae_lambda: 0.95
   num_minibatches: 4
-  update_epochs: 2 # 3
+  update_epochs: 2 # 3 # superceded by pokemon_red package
   norm_adv: True
   clip_coef: 0.1
   clip_vloss: True
@@ -18,19 +18,19 @@ train:
   max_grad_norm: 0.5
   target_kl: ~
 
-  num_envs: 128 # 48
-  envs_per_worker: 4
-  envs_per_batch: 48 # must be <= num_envs
-  env_pool: True
-  verbose: True
+  num_envs: 128 # 48  # superceded by pokemon_red package
+  envs_per_worker: 4  # superceded by pokemon_red package
+  envs_per_batch: 48 # must be <= num_envs  # superceded by pokemon_red package
+  env_pool: True  # superceded by pokemon_red package
+  verbose: True  # superceded by pokemon_red package
   data_dir: experiments
   checkpoint_interval: 40960 # 2048 * 10 * 2
   pool_kernel: [0]
-  batch_size: 32768 # 128 (?)
-  batch_rows: 128
+  batch_size: 32768 # 128 (?) # superceded by pokemon_red package
+  batch_rows: 128 # superceded by pokemon_red package
   bptt_horizon: 16
   vf_clip_coef: 0.1
-  compile: True
+  compile: True  # superceded by pokemon_red package
   compile_mode: reduce-overhead
 
 sweep:
@@ -62,20 +62,20 @@ pokemon_red:
   package: pokemon_red
   train:
     total_timesteps: 800_000_000
-    num_envs: 128
-    envs_per_worker: 4
+    num_envs: 256
+    envs_per_worker: 8
     envs_per_batch: 48 
-    update_epochs: 2 # 3
+    update_epochs: 10 # 3
     gamma: 0.998
-    batch_size: 32768
-    batch_rows: 128
+    batch_size: 32768 # 65280 # 32768
+    batch_rows: 256
     compile: True
 
     # Boey-specific env parameters; loaded by environment.py
     save_final_state: True
     print_rewards: True
     headless: True
-    init_state: /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir/start_from_state_dir/has_pokedex_nballs_noanim.state
+    init_state: /home/bet_adsorption_xinpw8/pokegym/pokegym/save_state_dir/has_pokedex_nballs_noanim.state # /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir/start_from_state_dir/has_pokedex_nballs_noanim.state
     action_freq: 24
     max_steps: 30720000 # Updated to match ep_length
     early_stop: True
@@ -91,7 +91,7 @@ pokemon_red:
     swap_button: True
     restricted_start_menu: True # False
     level_reward_badge_scale: 1.0
-    save_state_dir: /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir
+    save_state_dir: /home/bet_adsorption_xinpw8/pokegym/pokegym/save_state_dir # /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir
     special_exploration_scale: 1.0
     enable_item_manager: True
     enable_stage_manager: True

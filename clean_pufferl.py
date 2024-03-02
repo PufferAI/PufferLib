@@ -22,8 +22,12 @@ import pufferlib.frameworks.cleanrl
 import pufferlib.policy_pool
 
 from collections import deque
-from pokegym.global_map import GLOBAL_MAP_SHAPE
-from pokegym.eval import make_pokemon_red_overlay
+import sys
+sys.path.append('/home/bet_adsorption_xinpw8')
+
+from pokegym.pokegym.global_map import GLOBAL_MAP_SHAPE
+# from pokegym.pokegym.global_map import GLOBAL_MAP_SHAPE
+from pokegym.pokegym.eval import make_pokemon_red_overlay
 from pathlib import Path
 
 @pufferlib.dataclass
@@ -57,6 +61,7 @@ class Losses:
     clipfrac = 0
     explained_variance = 0
 
+
 @pufferlib.dataclass
 class Charts:
     global_step = 0
@@ -86,7 +91,7 @@ def create(
     if exp_name is None:
         exp_name = str(uuid.uuid4())[:8]   
     # Base directory path
-    required_resources_dir = Path('/home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym')
+    required_resources_dir = Path('/home/bet_adsorption_xinpw8/pokegym/pokegym') # Path('/home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym')
     # Path for the required_resources directory
     required_resources_path = required_resources_dir / "required_resources"
     required_resources_path.mkdir(parents=True, exist_ok=True)
@@ -292,7 +297,7 @@ def evaluate(data):
             **{f'performance/{k}': v
                 for k, v in data.performance.items()},
             **{f'stats/{k}': v for k, v in data.stats.items()},
-            # **{f"max_stats/{k}": v for k, v in data.max_stats.items()}, # BET ADDED 1
+            **{f"max_stats/{k}": v for k, v in data.max_stats.items()}, # BET ADDED 1
             **{f'skillrank/{policy}': elo
                 for policy, elo in data.policy_pool.ranker.ratings.items()},
         })
@@ -305,7 +310,7 @@ def evaluate(data):
     misc_profiler = pufferlib.utils.Profiler() # BET ADDED 2
 
     ptr = step = padded_steps_collected = agent_steps_collected = 0
-    infos = defaultdict(lambda: defaultdict(list))
+    # infos = defaultdict(lambda: defaultdict(list))
     while True:
         step += 1
         if ptr == config.batch_size + 1:
@@ -370,32 +375,50 @@ def evaluate(data):
             for policy_name, policy_i in i.items():
                 for agent_i in policy_i:
                     for name, dat in unroll_nested_dict(agent_i):
-                        infos[policy_name][name].append(dat)
+                        if policy_name not in data.infos:
+                            data.infos[policy_name] = {}
+                        if name not in data.infos[policy_name]:
+                            data.infos[policy_name][name] = [
+                                np.zeros_like(dat)
+                            ] * config.num_envs
+                        data.infos[policy_name][name][agent_i["env_id"]] = dat
+                        # infos[policy_name][name].append(dat)
         with env_profiler:
             data.pool.send(actions)
 
-    data.reward_buffer.append(r.cpu().sum().numpy())
+    # data.reward_buffer.append(r.cpu().sum().numpy())
     # Probably should normalize the rewards before trying to take the variance...
-    reward_var = np.var(data.reward_buffer)
-    if data.wandb is not None:
-        data.wandb.log(
-            {
-                "reward/reward_var": reward_var,
-                "reward/reward_buffer_len": len(data.reward_buffer),
-            }
-        )
-    if (
-        data.taught_cut
-        and len(data.reward_buffer) == data.reward_buffer.maxlen
-        and reward_var < 2.5e-3
-    ):
-        data.reward_buffer.clear()
+    # reward_var = np.var(data.reward_buffer)
+    # if data.wandb is not None:
+    #     data.wandb.log(
+    #         {
+                # "reward/reward_var": reward_var,
+                # "reward/reward_buffer_len": len(data.reward_buffer),
+    #         },
+    #         step=data.global_step
+            
+    #     )
+    # if (
+    #     data.taught_cut
+    #     and len(data.reward_buffer) == data.reward_buffer.maxlen
+        # and reward_var < 2.5e-3
+    # ):
+        # data.reward_buffer.clear()
         # reset lr update if the reward starts stalling
-        data.lr_update = 1.0    
+        # data.lr_update = 1.0    
 
     eval_profiler.stop()
 
-    data.global_step += padded_steps_collected
+    # data.global_step += padded_steps_collected
+    try:
+        new_step = np.mean(data.infos["learner"]["stats/step"])
+        if new_step > data.global_step:
+            data.global_step = new_step
+            data.log = True
+    except KeyError:
+        print(f'KeyError clean_pufferl data.infos["learner"]["stats/step"]')
+        pass
+
     data.reward = float(torch.mean(data.rewards))
     data.SPS = int(padded_steps_collected / eval_profiler.elapsed)
 
@@ -412,49 +435,49 @@ def evaluate(data):
     perf.eval_pytorch_memory = eval_profiler.end_torch_mem
     perf.misc_time = misc_profiler.elapsed # BET ADDED 25
 
+    
     data.stats = {}
-    # data.max_stats = {} # BET ADDED 26
+    data.max_stats = {} # BET ADDED 26
     # BET ADDED 0.7 Original logic:
-    infos = infos['learner']
+    # infos = infos['learner']
+    for k, v in data.infos["learner"].items():
+        
+        # try:
+        #     if 'pokemon_exploration_map' in infos:
+        #         for idx, pmap in zip(infos['learner']['env_id'], infos['pokemon_exploration_map']):
+        #             if not hasattr(data, 'pokemon'):
+        #                 import pokemon_red_eval
+        #                 data.map_updater = pokemon_red_eval.map_updater()
+        #                 data.map_buffer = np.zeros((data.config.num_envs, *pmap.shape))
+        #             data.map_buffer[idx] = pmap
+        #         pokemon_map = np.sum(data.map_buffer, axis=0)
+        #         rendered = data.map_updater(pokemon_map)
+        #         # import cv2
+        #         # cv2.imwrite('c_counts_map.png', rendered)
+        #         # cv2.wait(1)
+        #         data.stats['Media/exploration_map'] = data.wandb.Image(rendered)
+        # except:
+        #     pass
 
-    try:
-        if 'pokemon_exploration_map' in infos:
-            for idx, pmap in zip(infos['learner']['env_id'], infos['pokemon_exploration_map']):
-                if not hasattr(data, 'pokemon'):
-                    import pokemon_red_eval
-                    data.map_updater = pokemon_red_eval.map_updater()
-                    data.map_buffer = np.zeros((data.config.num_envs, *pmap.shape))
-                data.map_buffer[idx] = pmap
-            pokemon_map = np.sum(data.map_buffer, axis=0)
-            rendered = data.map_updater(pokemon_map)
-            import cv2
-            # cv2.imwrite('c_counts_map.png', rendered)
-            # cv2.wait(1)
-            data.stats['Media/exploration_map'] = data.wandb.Image(rendered)
-    except:
-        pass
 
-    try:
-        if "stats/step" in infos:
-            data.global_step = np.mean(infos["stats/step"])
-        if 'pokemon_exploration_map' in infos:
-            overlay = make_pokemon_red_overlay(np.stack(infos['pokemon_exploration_map'], axis=0))
+        if "stats/step" in data.infos:
+            data.global_step = np.mean(data["stats/step"])
+        if 'pokemon_exploration_map' in k:
+            overlay = make_pokemon_red_overlay(np.stack(v, axis=0))
+            # overlay = make_pokemon_red_overlay(np.stack(data['pokemon_exploration_map'], axis=0))
             if data.wandb is not None:
                 data.stats['Media/exploration_map'] = data.wandb.Image(overlay)
         try:
-            data.stats['stats'] = np.mean(infos)
-            # data.max_stats['stats'] = np.max(infos)
-            # if data.max_stats["got_hm01"] > 0:
-            #     data.taught_cut = True
+            data.stats[k] = np.mean(v)
+            data.max_stats[k] = np.max(v)
+            if data.max_stats["got_hm01"] > 0:
+                data.taught_cut = True
         except:
-            pass
-    except:
-        pass
-
+            continue
     if config.verbose:
         print_dashboard(data.stats, data.init_performance, data.performance)
 
-    return data.stats, infos
+    return data.stats, data.infos
 
 @pufferlib.utils.profile
 def train(data):

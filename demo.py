@@ -15,7 +15,7 @@ import clean_pufferl
 
 
 def load_from_config(env):
-    with open('config.yaml') as f:
+    with open('config_test.yaml') as f:
         config = yaml.safe_load(f)
 
     assert env in config, f'"{env}" not found in config.yaml. Uncommon environments that are part of larger packages may not have their own config. Specify these manually using the parent package, e.g. --config atari --env MontezumasRevengeNoFrameskip-v4.'
