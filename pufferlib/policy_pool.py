@@ -15,14 +15,12 @@ LEARNER_POLICY_ID = 0
 
 
 # Kernel helper
-def create_kernel(agents_per_env, num_policies, shuffle=False):
+def create_kernel(agents_per_env, num_policies):
     agents_per_agents = agents_per_env // num_policies
     kernel = []
     for i in range(num_policies):
         kernel.extend([i+1] * agents_per_agents)  # policies are 1-indexed
     kernel.extend([LEARNER_POLICY_ID] * (agents_per_env - len(kernel)))
-    if shuffle:
-        np.random.shuffle(kernel)
     return kernel
 
 # Policy selectors
