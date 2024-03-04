@@ -93,9 +93,9 @@ pokemon_red:
     level_reward_badge_scale: 1.0
     save_state_dir: /home/bet_adsorption_xinpw8/pokegym/pokegym/save_state_dir # /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir
     special_exploration_scale: 1.0
-    enable_item_manager: False # True
-    enable_stage_manager: True
-    enable_item_purchaser: False # True
+    enable_item_manager: True # True
+    enable_stage_manager: False # True
+    enable_item_purchaser: True # True
     auto_skip_anim: True
     auto_skip_anim_frames: 8
     total_envs: 512 # 48 # Updated to match num_cpu

@@ -74,6 +74,7 @@ class StreamWrapper(gym.Wrapper):
         map_n = self.emulator.get_memory_value(MAP_N_ADDRESS)
         self.coord_list.append([x_pos, y_pos, map_n])
         
+        
         self.stream_metadata["extra"] = f"uptime: {round(self.uptime(), 2)} min"
         self.stream_metadata["color"] = next(self.color_generator)
         

@@ -24,7 +24,7 @@ def env_creator(name="pokemon_red"):
 def make(name, **kwargs,):
     """Pokemon Red"""
     env = Environment(kwargs)
-    env = StreamWrapper(env, stream_metadata={"user": "       PUFFERBOX|BET|PUFFERBOX       \nPUFFERBOX|BET|PUFFERBOX \n====BOEY====\nPUFFERBOX|BET|PUFFERBOX "})
+    env = StreamWrapper(env, stream_metadata={"user": "       PUFFERBOX4|BET|PUFFERBOX4       \nPUFFERBOX4|BET|PUFFERBOX4 \n====BOEY====\nPUFFERBOX4|BET|PUFFERBOX4 "})
     # Looks like the following will optionally create the object for you
     # Or use the one you pass it. I'll just construct it here.
     return pufferlib.emulation.GymnasiumPufferEnv(
