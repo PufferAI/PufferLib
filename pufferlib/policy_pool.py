@@ -17,6 +17,13 @@ LEARNER_POLICY_ID = 0
 # Kernel helper
 def create_kernel(agents_per_env, num_policies,
                   shuffle_with_seed=None):
+    assert agents_per_env > 0 and num_policies >= 0, \
+        'create_kernel: agents_per_env and num_policies must be non-negative'
+    if num_policies == 0:
+        return [LEARNER_POLICY_ID]
+    if num_policies == 1:  # probably, the PvE case
+        return [1]  # will be tiled to all agents
+
     agents_per_agents = agents_per_env // num_policies
     kernel = []
     for i in range(num_policies):
