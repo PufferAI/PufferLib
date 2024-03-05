@@ -5,11 +5,11 @@ train:
   total_timesteps: 800_000_000 # superceded by pokemon_red package
   learning_rate: 0.0003
   num_steps: 128 # 128
-  anneal_lr: True
-  gamma: 0.998 # superceded by pokemon_red package
+  anneal_lr: False # True
+  gamma: 0.999 # gamma annealing: first 10m steps 0.999, then 0.9996; might have to screw with gamma and steps to make it work
   gae_lambda: 0.95
-  num_minibatches: 4 # 4
-  update_epochs: 10 # 2 # 3 # superceded by pokemon_red package
+  # num_minibatches: 4 # 4
+  update_epochs: 3 # 2 # 3 # superceded by pokemon_red package
   norm_adv: True
   clip_coef: 0.1
   clip_vloss: True
@@ -18,16 +18,16 @@ train:
   max_grad_norm: 0.5
   target_kl: ~
 
-  num_envs: 512 # 128 # 48  # superceded by pokemon_red package
-  envs_per_worker: 8 # 4  # superceded by pokemon_red package
+  num_envs: 48 # 128 # 48 # 512 num_envs, 12 envs/worker # superceded by pokemon_red package
+  envs_per_worker: 1 # or 2 - time it, see which is faster # 8 # 4  # superceded by pokemon_red package
   envs_per_batch: 48 # must be <= num_envs  # superceded by pokemon_red package
   env_pool: True  # superceded by pokemon_red package
   verbose: True  # superceded by pokemon_red package
   data_dir: experiments
   checkpoint_interval: 500 # 40960 # 2048 * 10 * 2
   pool_kernel: [0]
-  batch_size: 65280 # 32768 # 128 (?) # superceded by pokemon_red package
-  batch_rows: 1024 # 256 # 128 # superceded by pokemon_red package
+  batch_size: 32768 # 48 # no async to avoid messing with things # 32768 # 128 (?) # superceded by pokemon_red package
+  batch_rows: 128 # between 128 and 1024 - empricaly# 1024 # 256 # 128 # superceded by pokemon_red package
   bptt_horizon: 32 # 16
   vf_clip_coef: 0.1
   compile: True  # superceded by pokemon_red package
@@ -62,13 +62,13 @@ pokemon_red:
   package: pokemon_red
   train:
     total_timesteps: 800_000_000
-    num_envs: 512 # 256
-    envs_per_worker: 4
-    envs_per_batch: 120 # 48 # must be divisible by envs_per_worker
+    num_envs: 48 # 256
+    envs_per_worker: 1
+    envs_per_batch: 48 # 48 # must be divisible by envs_per_worker
     update_epochs: 3 # 10 # 3
-    gamma: 0.998
-    batch_size: 65536 # 65536 # 32768
-    batch_rows: 512 # 256
+    gamma: 0.9996
+    batch_size: 32768 # 65536 # 32768
+    batch_rows: 128 # 256
     compile: True
 
     # Boey-specific env parameters; loaded by environment.py
@@ -77,7 +77,7 @@ pokemon_red:
     headless: True
     init_state: /bet_adsorption_xinpw8/PufferLib/pokegym/pokegym/save_state_dir/has_pokedex_nballs_noanim.state # /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir/start_from_state_dir/has_pokedex_nballs_noanim.state
     action_freq: 24
-    max_steps: 3072000 # 30720000 # Updated to match ep_length
+    max_steps: 30720000 # 30720000 # Updated to match ep_length
     early_stop: True
     early_stopping_min_reward: 2.0
     save_video: False
@@ -98,7 +98,7 @@ pokemon_red:
     enable_item_purchaser: True # True
     auto_skip_anim: True
     auto_skip_anim_frames: 8
-    total_envs: 512 # 48 # Updated to match num_cpu
+    total_envs: 48 # 48 # Updated to match num_cpu
     gb_path: PokemonRed.gb
     debug: False
     level_manager_eval_mode: False
@@ -107,7 +107,7 @@ pokemon_red:
     cpu_multiplier: 0.25
     save_freq: 500 # 40960 # 2048 * 10 * 2
     n_steps: 163840 # Calculated as int(5120 // cpu_multiplier) * 1
-    num_cpu: 32 # 8 # Calculated as int(32 * cpu_multiplier)
+    num_cpu: 48 # number of processes, 1 env per process # 8 # Calculated as int(32 * cpu_multiplier)
   env:
     name: pokemon_red
 pokemon-red:

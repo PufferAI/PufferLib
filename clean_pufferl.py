@@ -91,7 +91,7 @@ def create(
     if exp_name is None:
         exp_name = str(uuid.uuid4())[:8]   
     # Base directory path
-    required_resources_dir = Path('/home/bet_adsorption_xinpw8/pokegym/pokegym') # Path('/home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym')
+    required_resources_dir = Path('/bet_adsorption_xinpw8/PufferLib/pokegym/pokegym') # Path('/home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym')
     # Path for the required_resources directory
     required_resources_path = required_resources_dir / "required_resources"
     required_resources_path.mkdir(parents=True, exist_ok=True)
@@ -209,7 +209,7 @@ def create(
             torch.zeros(shape, device=device),
             torch.zeros(shape, device=device),
         )
-    obs=torch.zeros(config.batch_size + 1, *obs_shape)
+    obs=torch.zeros(config.batch_size + 1, *obs_shape, pin_memory=True) # added , pin_memory=True)
     actions=torch.zeros(config.batch_size + 1, *atn_shape, dtype=int)
     logprobs=torch.zeros(config.batch_size + 1)
     rewards=torch.zeros(config.batch_size + 1)
@@ -522,7 +522,7 @@ def train(data):
                 delta + config.gamma * config.gae_lambda * nextnonterminal * lastgaelam
             )
 
-    data.b_obs = b_obs = torch.Tensor(data.obs_ary[b_idxs])
+    data.b_obs = b_obs = data.obs[b_idxs].to(data.device, non_blocking=True) # torch.Tensor(data.obs_ary[b_idxs])
     b_actions = torch.Tensor(data.actions_ary[b_idxs]).to(data.device, non_blocking=True)
     b_logprobs = torch.Tensor(data.logprobs_ary[b_idxs]).to(data.device, non_blocking=True)
     b_dones = torch.Tensor(data.dones_ary[b_idxs]).to(data.device, non_blocking=True)
@@ -537,13 +537,16 @@ def train(data):
     train_time = time.time()
     pg_losses, entropy_losses, v_losses, clipfracs, old_kls, kls = [], [], [], [], [], []
 
-    mb_obs_buffer = torch.zeros_like(b_obs[0], pin_memory=(data.device == "cuda"))
+    # COMMENTED OUT BET
+    # mb_obs_buffer = torch.zeros_like(b_obs[0], pin_memory=(data.device == "cuda"))
     
     for epoch in range(config.update_epochs):
         lstm_state = None
         for mb in range(num_minibatches):
-            mb_obs_buffer.copy_(b_obs[mb], non_blocking=True)
-            mb_obs = mb_obs_buffer.to(data.device, non_blocking=True)
+            mb_obs = b_obs[mb]
+            # COMMENTED OUT BET
+            # mb_obs_buffer.copy_(b_obs[mb], non_blocking=True)
+            # mb_obs = mb_obs_buffer.to(data.device, non_blocking=True)
             
             mb_actions = b_actions[mb].contiguous()
             mb_values = b_values[mb].reshape(-1)

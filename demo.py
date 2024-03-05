@@ -59,12 +59,12 @@ def make_policy(env, env_module, args):
         policy = pufferlib.frameworks.cleanrl.Policy(policy)
     
     # BET ADDED 1
-    mode = "default"
-    if args.train.device == "cuda":
-        mode = "reduce-overhead"
-        policy = policy.to(args.train.device, non_blocking=True)
-        policy.get_value = torch.compile(policy.get_value, mode=mode)
-        policy.get_action_and_value = torch.compile(policy.get_action_and_value, mode=mode)
+    # mode = "default"
+    # if args.train.device == "cuda":
+    #     mode = "reduce-overhead"
+    #     policy = policy.to(args.train.device, non_blocking=True)
+    #     policy.get_value = torch.compile(policy.get_value, mode=mode)
+    #     policy.get_action_and_value = torch.compile(policy.get_action_and_value, mode=mode)
 
     return policy.to(args.train.device)
 

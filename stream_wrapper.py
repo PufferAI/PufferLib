@@ -32,17 +32,18 @@ def colors_generator(step=1):
 class StreamWrapper(gym.Wrapper):
     def __init__(self, env, stream_metadata={}):
         super().__init__(env)
-        self.color_generator = color_generator(step=5) # step=1
+        self.color_generator = color_generator(step=2) # step=1
         # self.ws_address = "wss://poke-ws-test-ulsjzjzwpa-ue.a.run.app/broadcast"
         self.ws_address = "wss://transdimensional.xyz/broadcast"
         self.stream_metadata = stream_metadata
+        self.stream_metadata = {**stream_metadata, "env_id": env.env_id,} # env ids listed
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         self.websocket = None
         self.loop.run_until_complete(
             self.establish_wc_connection()
         )
-        self.upload_interval = 250
+        self.upload_interval = 125
         self.steam_step_counter = 0
         self.coord_list = []
         self.start_time = time.time()        
