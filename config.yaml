@@ -62,9 +62,9 @@ pokemon_red:
   package: pokemon_red
   train:
     total_timesteps: 800_000_000
-    num_envs: 512 # 256
-    envs_per_worker: 4
-    envs_per_batch: 120 # 48 # must be divisible by envs_per_worker
+    num_envs: 128 # 256
+    envs_per_worker: 1 # 4
+    envs_per_batch: 64 # 120 # 48 # must be divisible by envs_per_worker
     update_epochs: 3 # 10 # 3
     gamma: 0.998
     batch_size: 65536 # 65536 # 32768
@@ -84,7 +84,7 @@ pokemon_red:
     fast_video: True
     explore_weight: 1.5
     use_screen_explore: False
-    sim_frame_dist: 2000000.0 # 2000000.0
+    sim_frame_dist: 3000000.0 # 2000000.0 # 2000000.0
     reward_scale: 4
     extra_buttons: False
     noop_button: True
@@ -98,7 +98,7 @@ pokemon_red:
     enable_item_purchaser: True # True
     auto_skip_anim: True
     auto_skip_anim_frames: 8
-    total_envs: 512 # 48 # Updated to match num_cpu
+    total_envs: 128 # 512 # 48 # Updated to match num_cpu
     gb_path: PokemonRed.gb
     debug: False
     level_manager_eval_mode: False
