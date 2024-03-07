@@ -462,7 +462,8 @@ def evaluate(data):
 
         if "stats/step" in data.infos:
             data.global_step = np.mean(data["stats/step"])
-        if 'pokemon_exploration_map' in k:
+            
+        if 'pokemon_exploration_map' in k and data.update % 10 == 0:
             overlay = make_pokemon_red_overlay(np.stack(v, axis=0))
             # overlay = make_pokemon_red_overlay(np.stack(data['pokemon_exploration_map'], axis=0))
             if data.wandb is not None:

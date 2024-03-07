@@ -437,12 +437,12 @@ def unpack_batched_obs(batched_obs, unflatten_context):
     return unflattened
 
 def make_object(object_instance=None, object_creator=None, creator_args=[], creator_kwargs={}):
-    if (object_instance is None) == (object_creator is None):
-        raise ValueError('Exactly one of object_instance or object_creator must be provided')
+    # if (object_instance is None) == (object_creator is None):
+    #     raise ValueError('Exactly one of object_instance or object_creator must be provided')
 
     if object_instance is not None:
-        if callable(object_instance) or inspect.isclass(object_instance):
-            raise TypeError('object_instance must be an instance, not a function or class')
+        # if callable(object_instance) or inspect.isclass(object_instance):
+        #     raise TypeError('object_instance must be an instance, not a function or class')
         return object_instance
 
     if object_creator is not None:
