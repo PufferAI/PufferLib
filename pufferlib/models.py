@@ -92,6 +92,20 @@ class Policy(nn.Module):
         actions, value = self.decode_actions(hidden, lookup)
         return actions, value
 
+class DummyLSTM:
+    num_layers = 0
+    hidden_size = 0
+    _state = None
+
+    def get_state(self, x):
+        batch_size = x.shape[0]
+        if self._state is None or self._state[0].shape[1] != batch_size:
+            self._state = (
+                torch.zeros(0, batch_size, 0).to(x.device),
+                torch.zeros(0, batch_size, 0).to(x.device)
+            )
+        return self._state
+
 class RecurrentWrapper(Policy):
     def __init__(self, env, policy, input_size=128, hidden_size=128, num_layers=1):
         super().__init__(env)
@@ -103,14 +117,18 @@ class RecurrentWrapper(Policy):
         self.input_size = input_size
         self.hidden_size = hidden_size
 
-        self.recurrent = torch.nn.LSTM(
-            input_size, hidden_size, num_layers=num_layers)
+        # NOTE: To test both recurrent and non-recurrent policies with the same wrapper
+        self.num_layers = num_layers
+        self.recurrent = DummyLSTM()
+        if num_layers > 0:
+            self.recurrent = torch.nn.LSTM(
+                input_size, hidden_size, num_layers=num_layers)
 
-        for name, param in self.recurrent.named_parameters():
-            if "bias" in name:
-                nn.init.constant_(param, 0)
-            elif "weight" in name:
-                nn.init.orthogonal_(param, 1.0)
+            for name, param in self.recurrent.named_parameters():
+                if "bias" in name:
+                    nn.init.constant_(param, 0)
+                elif "weight" in name:
+                    nn.init.orthogonal_(param, 1.0)
 
     def forward(self, x, state):
         x_shape, space_shape = x.shape, self.observation_space.shape
@@ -124,19 +142,23 @@ class RecurrentWrapper(Policy):
         else:
             raise ValueError('Invalid input tensor shape', x.shape)
 
-        if state is not None:
+        if state is not None and self.num_layers > 0:
             assert state[0].shape[1] == state[1].shape[1] == B
 
         x = x.reshape(B*TT, *space_shape)
         hidden, lookup = self.policy.encode_observations(x)
         assert hidden.shape == (B*TT, self.input_size)
 
-        hidden = hidden.reshape(B, TT, self.input_size)
-        hidden = hidden.transpose(0, 1)
-        hidden, state = self.recurrent(hidden, state)
+        if self.num_layers > 0:
+            hidden = hidden.reshape(B, TT, self.input_size)
+            hidden = hidden.transpose(0, 1)
+            hidden, state = self.recurrent(hidden, state)
 
-        hidden = hidden.transpose(0, 1)
-        hidden = hidden.reshape(B*TT, self.hidden_size)
+            hidden = hidden.transpose(0, 1)
+            hidden = hidden.reshape(B*TT, self.hidden_size)
+
+        elif state is None:
+            state = self.recurrent.get_state(x)  # dummy LSTM & state
 
         hidden, critic = self.policy.decode_actions(hidden, lookup)
         return hidden, critic, state
