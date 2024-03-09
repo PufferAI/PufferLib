@@ -142,14 +142,14 @@ class RecurrentWrapper(Policy):
         else:
             raise ValueError('Invalid input tensor shape', x.shape)
 
-        if state is not None and self.num_layers > 0:
+        if state is not None and self.recurrent.num_layers > 0:
             assert state[0].shape[1] == state[1].shape[1] == B
 
         x = x.reshape(B*TT, *space_shape)
         hidden, lookup = self.policy.encode_observations(x)
         assert hidden.shape == (B*TT, self.input_size)
 
-        if self.num_layers > 0:
+        if self.recurrent.num_layers > 0:
             hidden = hidden.reshape(B, TT, self.input_size)
             hidden = hidden.transpose(0, 1)
             hidden, state = self.recurrent(hidden, state)
