@@ -1,0 +1,121 @@
+train:
+  seed: 1
+  torch_deterministic: True
+  device: cuda
+  total_timesteps: 800_000_000 # superceded by pokemon_red package
+  learning_rate: 0.0003
+  num_steps: 128 # 128
+  anneal_lr: False # True
+  gamma: 0.999 # gamma annealing: first 10m steps 0.999, then 0.9996; might have to screw with gamma and steps to make it work
+  gae_lambda: 0.95
+  # num_minibatches: 4 # 4
+  update_epochs: 3 # 2 # 3 # superceded by pokemon_red package
+  norm_adv: True
+  clip_coef: 0.1
+  clip_vloss: True
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  target_kl: ~
+
+  num_envs: 48 # 128 # 48 # 512 num_envs, 12 envs/worker # superceded by pokemon_red package
+  envs_per_worker: 1 # or 2 - time it, see which is faster # 8 # 4  # superceded by pokemon_red package
+  envs_per_batch: 48 # must be <= num_envs  # superceded by pokemon_red package
+  env_pool: True  # superceded by pokemon_red package
+  verbose: True  # superceded by pokemon_red package
+  data_dir: experiments
+  checkpoint_interval: 500 # 40960 # 2048 * 10 * 2
+  pool_kernel: [0]
+  batch_size: 32768 # 48 # no async to avoid messing with things # 32768 # 128 (?) # superceded by pokemon_red package
+  batch_rows: 128 # between 128 and 1024 - empricaly# 1024 # 256 # 128 # superceded by pokemon_red package
+  bptt_horizon: 32 # 16
+  vf_clip_coef: 0.1
+  compile: True  # superceded by pokemon_red package
+  compile_mode: reduce-overhead
+
+sweep:
+  method: random
+  name: sweep
+  metric:
+    goal: maximize
+    name: episodic_return
+  # Nested parameters name required by WandB API
+  parameters:
+    train:
+      parameters:
+        learning_rate: {
+          'distribution': 'log_uniform_values',
+          'min': 1e-4,
+          'max': 1e-1,
+        }
+        batch_size: {
+          'values': [128, 256, 512, 1024, 2048],
+        }
+        batch_rows: {
+          'values': [16, 32, 64, 128, 256],
+        }
+        bptt_horizon: {
+          'values': [4, 8, 16, 32],
+        }
+
+pokemon_red:
+  package: pokemon_red
+  train:
+    total_timesteps: 800_000_000
+    num_envs: 48 # 256
+    envs_per_worker: 1
+    envs_per_batch: 48 # 48 # must be divisible by envs_per_worker
+    update_epochs: 3 # 10 # 3
+    gamma: 0.9996
+    batch_size: 32768 # 65536 # 32768
+    batch_rows: 128 # 256
+    compile: True
+
+    # Boey-specific env parameters; loaded by environment.py
+    save_final_state: True
+    print_rewards: True
+    headless: True
+    init_state: /bet_adsorption_xinpw8/PufferLib/pokegym/pokegym/save_state_dir/has_pokedex_nballs_noanim.state # /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir/start_from_state_dir/has_pokedex_nballs_noanim.state
+    action_freq: 24
+    max_steps: 30720000 # 30720000 # Updated to match ep_length
+    early_stop: True
+    early_stopping_min_reward: 2.0
+    save_video: False
+    fast_video: True
+    explore_weight: 1.5
+    use_screen_explore: False
+    sim_frame_dist: 2000000.0 # 2000000.0
+    reward_scale: 4
+    extra_buttons: False
+    noop_button: True
+    swap_button: True
+    restricted_start_menu: True # False
+    level_reward_badge_scale: 1.0
+    save_state_dir: /bet_adsorption_xinpw8/PufferLib/pokegym/pokegym/save_state_dir # /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir
+    special_exploration_scale: 1.0
+    enable_item_manager: True # True
+    enable_stage_manager: True # True
+    enable_item_purchaser: True # True
+    auto_skip_anim: True
+    auto_skip_anim_frames: 8
+    total_envs: 48 # 48 # Updated to match num_cpu
+    gb_path: PokemonRed.gb
+    debug: False
+    level_manager_eval_mode: False
+    sess_id: generate # Updated dynamically, placeholder for dynamic generation
+    use_wandb_logging: False
+    cpu_multiplier: 0.25
+    save_freq: 500 # 40960 # 2048 * 10 * 2
+    n_steps: 163840 # Calculated as int(5120 // cpu_multiplier) * 1
+    num_cpu: 48 # number of processes, 1 env per process # 8 # Calculated as int(32 * cpu_multiplier)
+  env:
+    name: pokemon_red
+pokemon-red:
+  package: pokemon_red
+pokemonred:
+  package: pokemon_red
+pokemon:
+  package: pokemon_red
+pokegym:
+  package: pokemon_red
+ 
