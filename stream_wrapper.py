@@ -36,7 +36,6 @@ class StreamWrapper(gym.Wrapper):
         # self.ws_address = "wss://poke-ws-test-ulsjzjzwpa-ue.a.run.app/broadcast"
         self.ws_address = "wss://transdimensional.xyz/broadcast"
         self.stream_metadata = stream_metadata
-        self.stream_metadata = {**stream_metadata, "env_id": env.env_id,} # env ids listed
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         self.websocket = None
@@ -73,10 +72,12 @@ class StreamWrapper(gym.Wrapper):
         x_pos = self.emulator.get_memory_value(X_POS_ADDRESS)
         y_pos = self.emulator.get_memory_value(Y_POS_ADDRESS)
         map_n = self.emulator.get_memory_value(MAP_N_ADDRESS)
+        reset_count = self.env.reset_count
+        env_id = self.env.env_id
         self.coord_list.append([x_pos, y_pos, map_n])
         
         
-        self.stream_metadata["extra"] = f"uptime: {round(self.uptime(), 2)} min"
+        self.stream_metadata["extra"] = f"uptime: {round(self.uptime(), 2)} min, reset#: {reset_count}, {env_id}"
         self.stream_metadata["color"] = next(self.color_generator)
         
         if self.steam_step_counter >= self.upload_interval:

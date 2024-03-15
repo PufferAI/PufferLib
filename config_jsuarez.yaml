@@ -75,7 +75,7 @@ pokemon_red:
     save_final_state: True
     print_rewards: True
     headless: True
-    init_state: /bet_adsorption_xinpw8/PufferLib/pokegym/pokegym/save_state_dir/has_pokedex_nballs_noanim.state # /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir/start_from_state_dir/has_pokedex_nballs_noanim.state
+    init_state: /bet_adsorption_xinpw8/back2bulba/PufferLib/pokegym/pokegym/save_state_dir/has_pokedex_nballs_noanim.state # /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir/start_from_state_dir/has_pokedex_nballs_noanim.state
     action_freq: 24
     max_steps: 30720000 # 30720000 # Updated to match ep_length
     early_stop: True
@@ -91,7 +91,7 @@ pokemon_red:
     swap_button: True
     restricted_start_menu: True # False
     level_reward_badge_scale: 1.0
-    save_state_dir: /bet_adsorption_xinpw8/PufferLib/pokegym/pokegym/save_state_dir # /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir
+    save_state_dir: /bet_adsorption_xinpw8/back2bulba/PufferLib/pokegym/pokegym/save_state_dir # /home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym/save_state_dir
     special_exploration_scale: 1.0
     enable_item_manager: True # True
     enable_stage_manager: True # True

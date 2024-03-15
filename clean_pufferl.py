@@ -1,18 +1,14 @@
 from pdb import set_trace as T
 import numpy as np
-import mediapy as media
-import uuid
-import matplotlib.pyplot as plt
+import cv2
 
 import os
 import random
 import time
 import uuid
-from pathlib import Path
 
 from collections import defaultdict
 from datetime import timedelta
-import multiprocessing
 
 import torch
 import torch.nn as nn
@@ -27,12 +23,10 @@ import pufferlib.policy_pool
 
 from collections import deque
 import sys
-sys.path.append('/home/bet_adsorption_xinpw8')
-
-from pokegym.pokegym.global_map import GLOBAL_MAP_SHAPE
-# from pokegym.pokegym.global_map import GLOBAL_MAP_SHAPE
-from pokegym.pokegym.eval import make_pokemon_red_overlay
+sys.path.append('/bet_adsorption_xinpw8/back2bulba/Pufferlib')
 from pathlib import Path
+import json
+import pokemon_red_eval
 
 @pufferlib.dataclass
 class Performance:
@@ -65,7 +59,6 @@ class Losses:
     clipfrac = 0
     explained_variance = 0
 
-
 @pufferlib.dataclass
 class Charts:
     global_step = 0
@@ -95,7 +88,7 @@ def create(
     if exp_name is None:
         exp_name = str(uuid.uuid4())[:8]   
     # Base directory path
-    required_resources_dir = Path('/bet_adsorption_xinpw8/PufferLib/pokegym/pokegym') # Path('/home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym')
+    required_resources_dir = Path('/bet_adsorption_xinpw8/back2bulba/PufferLib/experiments') # Path('/home/daa/puffer0.5.2_iron/obs_space_experiments/pokegym/pokegym')
     # Path for the required_resources directory
     required_resources_path = required_resources_dir / "required_resources"
     required_resources_path.mkdir(parents=True, exist_ok=True)
@@ -117,13 +110,7 @@ def create(
     wandb = None
     if track:
         import wandb
-        #create process and queue
-        input_queue = multiprocessing.Queue()
-        output_queue = multiprocessing.Queue()
-        
-        worker = multiprocessing.Process(target=f, args=(input_queue, output_queue))
-        worker.start()
-        
+
     start_time = time.time()
     seed_everything(config.seed, config.torch_deterministic)
     total_updates = config.total_timesteps // config.batch_size
@@ -168,6 +155,7 @@ def create(
             agent = pufferlib.emulation.make_object(
                 agent, agent_creator, [pool.driver_env], agent_kwargs)
     except:
+        print(f'ERROR RESUMING STATE!!')
         pass
 
     # Some data to preserve run parameters when loading a saved model
@@ -244,6 +232,10 @@ def create(
         tensor_memory = storage_profiler.memory,
         tensor_pytorch_memory = storage_profiler.pytorch_memory,
     )
+    # Load map data
+    with open('/bet_adsorption_xinpw8/back2bulba/pokegym/pokegym/map_data.json', 'r') as file:
+        map_data = json.load(file)
+    total_envs = map_data
  
     return pufferlib.namespace(self,        
         # Agent, Optimizer, and Environment
@@ -263,8 +255,6 @@ def create(
         losses = Losses(),
         init_performance = init_performance,
         performance = Performance(),
-        output_queue = output_queue,
-        input_queue = input_queue,
 
         # Storage
         sort_keys = [],
@@ -277,9 +267,12 @@ def create(
         values = values,
         # BET ADDED 22
         reward_buffer = deque(maxlen=1_000),
-        exploration_map_agg = np.zeros((config.num_envs, *GLOBAL_MAP_SHAPE), dtype=np.float32),
         taught_cut = False,
+        total_envs = total_envs,
+        map_counts = defaultdict(int), # np.zeros(246),
+        env_reports = defaultdict(int), 
         infos = {},
+        stats = {},
         obs_ary = obs_ary,
         actions_ary = actions_ary,
         logprobs_ary = logprobs_ary,
@@ -299,22 +292,26 @@ def create(
 @pufferlib.utils.profile
 def evaluate(data):
     config = data.config
-    # TODO: Handle update on resume
-        
     if data.wandb is not None and data.performance.total_uptime > 0:
-        data.wandb
-        data.wandb.log({
+        # Prepare the dictionary you plan to log
+        log_dict = {
             'SPS': data.SPS,
             'global_step': data.global_step,
             'learning_rate': data.optimizer.param_groups[0]["lr"],
             **{f'losses/{k}': v for k, v in data.losses.items()},
-            **{f'performance/{k}': v
-                for k, v in data.performance.items()},
+            **{f'performance/{k}': v for k, v in data.performance.items()},
             **{f'stats/{k}': v for k, v in data.stats.items()},
-            **{f"max_stats/{k}": v for k, v in data.max_stats.items()}, # BET ADDED 1
-            **{f'skillrank/{policy}': elo
-                for policy, elo in data.policy_pool.ranker.ratings.items()},
-        })
+            **{f"max_stats/{k}": v for k, v in data.max_stats.items()},
+            **{f'skillrank/{policy}': elo for policy, elo in data.policy_pool.ranker.ratings.items()},
+        }
+        
+        # Log the data
+        data.wandb.log(log_dict)
+
+        # For diagnostic purposes, print the 'stats' part of the log_dict
+        # You can't unpack in a print statement directly, so we filter the keys that start with 'stats/'
+        # stats_unpacked = {k: v for k, v in log_dict.items()} # if k.startswith('stats/')}
+        # print(f'data.stats={data.stats}, unpacked stats={stats_unpacked}')    
     
     data.policy_pool.update_policies()
     performance = defaultdict(list)
@@ -324,12 +321,12 @@ def evaluate(data):
     misc_profiler = pufferlib.utils.Profiler() # BET ADDED 2
 
     ptr = step = padded_steps_collected = agent_steps_collected = 0
-    # infos = defaultdict(lambda: defaultdict(list))
+    infos = defaultdict(lambda: defaultdict(list))
     while True:
         step += 1
         if ptr == config.batch_size + 1:
             break
-        
+
         with env_profiler:
             o, r, d, t, i, env_id, mask = data.pool.recv()
 
@@ -385,18 +382,25 @@ def evaluate(data):
 
             # Update pointer
             ptr += len(indices)
+            
 
             for policy_name, policy_i in i.items():
                 for agent_i in policy_i:
                     for name, dat in unroll_nested_dict(agent_i):
-                        if policy_name not in data.infos:
-                            data.infos[policy_name] = {}
-                        if name not in data.infos[policy_name]:
-                            data.infos[policy_name][name] = [
-                                np.zeros_like(dat)
-                            ] * config.num_envs
-                        data.infos[policy_name][name][agent_i["env_id"]] = dat
-                        # infos[policy_name][name].append(dat)
+                        infos[policy_name][name].append(dat)
+
+
+            # for policy_name, policy_i in i.items():
+            #     for agent_i in policy_i:
+            #         for name, dat in unroll_nested_dict(agent_i):
+            #             if policy_name not in data.infos:
+            #                 data.infos[policy_name] = {}
+            #             if name not in data.infos[policy_name]:
+            #                 data.infos[policy_name][name] = [
+            #                     np.zeros_like(dat)
+            #                 ] * config.num_envs
+            #             data.infos[policy_name][name][agent_i["env_id"]] = dat
+            #             # infos[policy_name][name].append(dat)
         with env_profiler:
             data.pool.send(actions)
 
@@ -423,15 +427,17 @@ def evaluate(data):
 
     eval_profiler.stop()
 
-    # data.global_step += padded_steps_collected
-    try:
-        new_step = np.mean(data.infos["learner"]["stats/step"])
-        if new_step > data.global_step:
-            data.global_step = new_step
-            data.log = True
-    except KeyError:
-        print(f'KeyError clean_pufferl data.infos["learner"]["stats/step"]')
-        pass
+    data.global_step += padded_steps_collected
+    ## thatguy steps (cuz why not?)
+    # if "learner" in data.infos and "stats/step" in data.infos["learner"]:
+    #     try:
+    #         new_step = np.mean(data.infos["learner"]["stats/step"])
+    #         if new_step > data.global_step:
+    #             data.global_step = new_step
+    #             data.log = True
+    #     except KeyError:
+    #         print(f'KeyError clean_pufferl data.infos["learner"]["stats/step"]')
+    #         pass
 
     data.reward = float(torch.mean(data.rewards))
     data.SPS = int(padded_steps_collected / eval_profiler.elapsed)
@@ -452,54 +458,87 @@ def evaluate(data):
     
     data.stats = {}
     data.max_stats = {} # BET ADDED 26
-    # BET ADDED 0.7 Original logic:
-    # infos = infos['learner']
-    for k, v in data.infos["learner"].items():
-        
-        # try:
-        #     if 'pokemon_exploration_map' in infos:
-        #         for idx, pmap in zip(infos['learner']['env_id'], infos['pokemon_exploration_map']):
-        #             if not hasattr(data, 'pokemon'):
-        #                 import pokemon_red_eval
-        #                 data.map_updater = pokemon_red_eval.map_updater()
-        #                 data.map_buffer = np.zeros((data.config.num_envs, *pmap.shape))
-        #             data.map_buffer[idx] = pmap
-        #         pokemon_map = np.sum(data.map_buffer, axis=0)
-        #         rendered = data.map_updater(pokemon_map)
-        #         # import cv2
-        #         # cv2.imwrite('c_counts_map.png', rendered)
-        #         # cv2.wait(1)
-        #         data.stats['Media/exploration_map'] = data.wandb.Image(rendered)
-        # except:
-        #     pass
+    infos = infos['learner']
+    
+    if 'pokemon_exploration_map' in infos and data.update % 5 == 0:
+        # Create a mapping from map ID to name
+        map_id_to_name = {int(region["id"]): region["name"] for region in data.total_envs["regions"]}
+        # if data.update % 10 == 0:
+        if 'pokemon_exploration_map' in infos:
+            for idx, pmap in zip(infos['env_id'], infos['pokemon_exploration_map']):
+                if not hasattr(data, 'map_updater'):
+                    data.map_updater = pokemon_red_eval.map_updater()
+                    data.map_buffer = np.zeros((data.config.num_envs, *pmap.shape))
+                data.map_buffer[idx] = pmap
+            pokemon_map = np.sum(data.map_buffer, axis=0)
+            rendered = data.map_updater(pokemon_map)
+            data.stats['Media/exploration_map'] = data.wandb.Image(rendered)
+        # Process 'stats/map' and increment map_counts
+        if 'stats/map' in infos:
+            for item in infos['stats/map']:
+                if isinstance(item, int):
+                    data.map_counts[item] += 1
+        # Increment env_reports for each environment ID
+        for env_id in infos['env_id']:
+            data.env_reports[env_id] += 1
+        # Calculate mean for numeric data in infos and store in data.stats
+        for k, v in infos.items():
+            try:
+                if isinstance(v, list) and all(isinstance(x, (int, float)) for x in v):
+                    data.stats[k] = np.mean(v)
+            except Exception as e:
+                print(f"Error processing {k}: {e}")
+        # Prepare data for the bar chart
+        labels = [f"{map_id} - {map_id_to_name.get(map_id, 'Unknown')}" for map_id in data.map_counts.keys()]
+        values = list(data.map_counts.values())
+        # Create a table for logging to wandb
+        table = data.wandb.Table(data=list(zip(labels, values)), columns=["Map ID and Name", "Count"])
+        # Log the bar chart to wandb
+        data.wandb.log({
+            "map_distribution_bar_chart": data.wandb.plot.bar(table, "Map ID and Name", "Count",
+                                                            title="Map Distribution")
+        })
+        data.map_counts.clear()  # Reset map_counts for the next reporting period
+        data.env_reports.clear()  # Reset env_reports as well
 
 
-        if "stats/step" in data.infos:
-            data.global_step = np.mean(data["stats/step"])
-            
-        if 'pokemon_exploration_map' in k and data.update % 10 == 0:
-            overlay = make_pokemon_red_overlay(np.stack(v, axis=0))
-            # overlay = make_pokemon_red_overlay(np.stack(data['pokemon_exploration_map'], axis=0))
-            if data.wandb is not None:
-                data.stats['Media/exploration_map'] = data.wandb.Image(overlay)
-        try:
-            data.stats[k] = np.mean(v)
-            data.max_stats[k] = np.max(v)
-            if data.max_stats["got_hm01"] > 0:
-                data.taught_cut = True
-        except:
-            continue
-    if config.verbose:
-        print_dashboard(data.stats, data.init_performance, data.performance)
+    # data.stats = {}
+
+    # # logging = f'logging'
+    # # log_path = os.path.join(data.config.data_dir, data.exp_name, logging)
+    # # if not os.path.exists(log_path):
+    # #     os.makedirs(log_path)
+
+    # for k, v in infos['learner'].items():
+    #     if 'Task_eval_fn' in k:
+    #         # Temporary hack for NMMO competition
+    #         continue
+    #     if 'pokemon_exploration_map' in k:
+    #         import cv2
+    #         from pokemon_red_eval import make_pokemon_red_overlay
+    #         bg = cv2.imread('kanto_map_dsv.png')
+    #         overlay = make_pokemon_red_overlay(bg, sum(v))
+    #         if data.wandb is not None:
+    #             data.stats['Media/exploration_map'] = data.wandb.Image(overlay)
+    #         # @Leanke: Add your infos['learner']['x'] etc
+    #     # if 'logging' in k:
+    #     #     pre.logger(v, log_path)
+    #     try: # TODO: Better checks on log data types
+    #         data.stats[k] = np.mean(v)
+    #     except:
+    #         continue
+
+    # if config.verbose:
+    #     print_dashboard(data.stats, data.init_performance, data.performance)
+
+    # return data.stats, infos
 
     return data.stats, data.infos
 
-# @profile
+
 @pufferlib.utils.profile
 def train(data):
     if done_training(data):
-        assert data.output_queue.get() is None, "Expected termination signal from subprocess"
-        data.wandb_process.join()
         raise RuntimeError(
             f"Max training updates {data.total_updates} already reached")
 
@@ -559,12 +598,6 @@ def train(data):
     # mb_obs_buffer = torch.zeros_like(b_obs[0], pin_memory=(data.device == "cuda"))
     
     for epoch in range(config.update_epochs):
-        # with profile(
-        #     activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-        #     schedule=schedule(wait=1, warmup=0, active=2, repeat=1),
-        #     with_modules=True,
-        #     with_stack=True,
-        # ) as prof:
         lstm_state = None
         for mb in range(num_minibatches):
             mb_obs = b_obs[mb]
@@ -577,16 +610,9 @@ def train(data):
             mb_advantages = b_advantages[mb].reshape(-1)
             mb_returns = b_returns[mb].reshape(-1)
 
-            if hasattr(data.agent, "lstm"):
-                (
-                    _,
-                    newlogprob,
-                    entropy,
-                    newvalue,
-                    lstm_state,
-                ) = data.agent.get_action_and_value(
-                    mb_obs, state=lstm_state, action=mb_actions
-                )
+            if hasattr(data.agent, 'lstm'):
+                _, newlogprob, entropy, newvalue, lstm_state = data.agent.get_action_and_value(
+                    mb_obs, state=lstm_state, action=mb_actions)
                 lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
             else:
                 _, newlogprob, entropy, newvalue = data.agent.get_action_and_value(
@@ -646,9 +672,6 @@ def train(data):
             nn.utils.clip_grad_norm_(data.agent.parameters(), config.max_grad_norm)
             data.optimizer.step()
 
-        #     prof.step()
-        # prof.export_chrome_trace("train.json")
-        # raise
         if config.target_kl is not None:
             if approx_kl > config.target_kl:
                 break
@@ -685,35 +708,6 @@ def train(data):
     
     if data.update % config.checkpoint_interval == 0 or done_training(data):
        save_checkpoint(data)
-
-    # BET
-    infos = defaultdict(lambda: defaultdict(list))
-    data_image = None
-    if data.update % 10 == 0 or done_training:
-        # Jerry-rigged logging cuz lazy
-        exp_path = Path(f'run_stats').with_suffix('.txt')
-        with open(config.data_dir / exp_path, 'w') as file:
-            file.write(f"{perf.epoch_sps}")
-        
-                 # @Leanke: Add your infos['learner']['x'] etc
-        for k, v in infos['learner'].items():
-            if 'pokemon_exploration_map' in k:
-                # Send input data to worker for processing
-                data.input_queue.put(sum(v))
-                # Get output data_image from worker
-                data_image = data.output_queue.get()
-            else:
-                data_image = None
-            try: # TODO: Better checks on log data types
-                data.stats[k] = np.mean(v)
-            except:
-                continue
-
-        # Upload to wandb if available
-        if data.wandb is not None and data_image is not None:
-            data.stats['Media/exploration_map'] = data.wandb.Image(data_image)
-            data_image = None
-            plt.close('all')
 
 def close(data):
     data.pool.close()
