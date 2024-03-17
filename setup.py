@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 from Cython.Build import cythonize
 from itertools import chain
 
-VERSION = '0.7.2'
+VERSION = '0.7.3'
 
 # Default Gym/Gymnasium/PettingZoo versions
 # Gym:
@@ -207,7 +207,7 @@ setup(
     install_requires=[
         'numpy==1.23.3',
         'opencv-python==3.4.17.63',
-        'cython==3.0.0',
+        'cython>=3.0.0',
     ],
     extras_require={
         'docs': docs,
