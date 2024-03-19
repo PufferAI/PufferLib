@@ -3,9 +3,9 @@ train:
   torch_deterministic: True
   device: cuda
   # total_timesteps: 800_000_000 # superceded by pokemon_red package
-  learning_rate: 0.00025 # 0.00025
+  learning_rate: 0.00015 # 0.0002 # 0.00025 # decreased lr from 0.00025 to 0.0002; now again, decreased to 0.00015
   # num_steps: 128 # 128
-  anneal_lr: True
+  anneal_lr: False # True # changed from True to False 
   gamma: 0.998 # 0.998 # 0.99 #BET testing 2/6/24
   gae_lambda: 0.95
   num_minibatches: 4 # 4
@@ -63,13 +63,13 @@ pokemon_red:
   package: pokemon_red
   train:
     total_timesteps: 500_000_000
-    num_envs: 150 # 150
+    num_envs: 72 # 96 # reduced from 150 to 96; reduced again from 96 to 72   12 workers, 2 envs per worker. batch size 12: 2 observations each from 6 workers for a total of 12.  12 workers / 6 envs per worker = 2 workers     2  60   150 workers / 2 envs per worker = then you have 300 envs 75 workers       cpu with 1 core. run 2 envs on it. batch size=1  reset, and 2 obs waiting for you. only take 1 of them cuz batch size 1. compute action, give it back. env already has other obs for you, it gives you that obs, and while youre stepping that, it gives the action it computed for you back.
     envs_per_worker: 1 # 1 (next, try 6)
     # envpool_batch_size: 128
-    envs_per_batch: 12 # 32 # 60  # env_per_batch / envs_per_worker ~ (# thread -2)  and set num_envs ~ 2.5 * env_per_batch
+    envs_per_batch: 24 # 32 # reduced from 32 to 24 to match num_envs: 72 # changed from 6 to 12 # 12 # 32 # 60  # env_per_batch / envs_per_worker ~ (# thread -2)  and set num_envs ~ 2.5 * env_per_batch
     update_epochs: 3
     gamma: 0.998
-    batch_size: 65536 # 32768
+    batch_size: 49152 # 65536 / 32 = 2048. 2048 * 24 = 49152. Let's try it... :) # 131072 # 65536 # 32768  # 131072 doesn't work as well, but still just about as fast as 65536. so far 65536 is the best b/c agents get cut quickly and cut reliably and then explore afterwards.
     batch_rows: 128
   env:
     name: pokemon_red
