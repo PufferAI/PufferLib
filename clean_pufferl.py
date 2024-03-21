@@ -461,8 +461,8 @@ def evaluate(data):
     infos = infos['learner']
     
     if 'pokemon_exploration_map' in infos and data.update % 5 == 0:
-        # Create a mapping from map ID to name
-        map_id_to_name = {int(region["id"]): region["name"] for region in data.total_envs["regions"]}
+        # # Create a mapping from map ID to name
+        # map_id_to_name = {int(region["id"]): region["name"] for region in data.total_envs["regions"]}
         # if data.update % 10 == 0:
         if 'pokemon_exploration_map' in infos:
             for idx, pmap in zip(infos['env_id'], infos['pokemon_exploration_map']):
@@ -478,9 +478,9 @@ def evaluate(data):
             for item in infos['stats/map']:
                 if isinstance(item, int):
                     data.map_counts[item] += 1
-        # Increment env_reports for each environment ID
-        for env_id in infos['env_id']:
-            data.env_reports[env_id] += 1
+        # # Increment env_reports for each environment ID
+        # for env_id in infos['env_id']:
+        #     data.env_reports[env_id] += 1
         # Calculate mean for numeric data in infos and store in data.stats
         for k, v in infos.items():
             try:
@@ -488,18 +488,18 @@ def evaluate(data):
                     data.stats[k] = np.mean(v)
             except Exception as e:
                 print(f"Error processing {k}: {e}")
-        # Prepare data for the bar chart
-        labels = [f"{map_id} - {map_id_to_name.get(map_id, 'Unknown')}" for map_id in data.map_counts.keys()]
-        values = list(data.map_counts.values())
-        # Create a table for logging to wandb
-        table = data.wandb.Table(data=list(zip(labels, values)), columns=["Map ID and Name", "Count"])
-        # Log the bar chart to wandb
-        data.wandb.log({
-            "map_distribution_bar_chart": data.wandb.plot.bar(table, "Map ID and Name", "Count",
-                                                            title="Map Distribution")
-        })
-        data.map_counts.clear()  # Reset map_counts for the next reporting period
-        data.env_reports.clear()  # Reset env_reports as well
+        # # Prepare data for the bar chart
+        # labels = [f"{map_id} - {map_id_to_name.get(map_id, 'Unknown')}" for map_id in data.map_counts.keys()]
+        # values = list(data.map_counts.values())
+        # # Create a table for logging to wandb
+        # table = data.wandb.Table(data=list(zip(labels, values)), columns=["Map ID and Name", "Count"])
+        # # Log the bar chart to wandb
+        # data.wandb.log({
+        #     "map_distribution_bar_chart": data.wandb.plot.bar(table, "Map ID and Name", "Count",
+        #                                                     title="Map Distribution")
+        # })
+        # data.map_counts.clear()  # Reset map_counts for the next reporting period
+        # data.env_reports.clear()  # Reset env_reports as well
 
 
     # data.stats = {}
