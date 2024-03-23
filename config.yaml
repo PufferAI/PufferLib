@@ -617,8 +617,54 @@ nmmo:
 
 nmmo3:
   package: nmmo3
+  train:
+    total_timesteps: 100_000_000
+    num_envs: 6
+    envs_per_worker: 1
+    envs_per_batch: 6
+    update_epochs: 1
+    gamma: 0.998
+    batch_size: 131072
+    batch_rows: 256
+    compile: True
   env:
     name: nmmo3
+    num_envs: 4 # NMMO3 provides its own fast multienv
+
+  seed: 1
+  torch_deterministic: True
+  device: cuda
+  total_timesteps: 10_000_000
+  learning_rate: 2.5e-4
+  num_steps: 128
+  anneal_lr: True
+  gamma: 0.99
+  gae_lambda: 0.95
+  num_minibatches: 4
+  update_epochs: 4
+  norm_adv: True
+  clip_coef: 0.1
+  clip_vloss: True
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  target_kl: ~
+
+  num_envs: 8
+  envs_per_worker: 1
+  envs_per_batch: ~
+  env_pool: True
+  verbose: True
+  data_dir: experiments
+  checkpoint_interval: 200
+  pool_kernel: [0]
+  batch_size: 1024
+  batch_rows: 32
+  bptt_horizon: 16 #8
+  vf_clip_coef: 0.1
+  compile: False
+  compile_mode: reduce-overhead
+
 
 # Ocean: PufferAI's first party environment suite
 ocean:
