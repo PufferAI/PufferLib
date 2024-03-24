@@ -31,14 +31,14 @@ class Policy(pufferlib.models.Policy):
         output_size = 256
 
         self.network = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Conv2d(128, 32, 5, stride=1)),
+            pufferlib.pytorch.layer_init(nn.Conv2d(128, 32, 3, stride=2)),
             nn.ReLU(),
-            pufferlib.pytorch.layer_init(nn.Conv2d(32, 64, 5, stride=1)),
+            pufferlib.pytorch.layer_init(nn.Conv2d(32, 64, 3, stride=1)),
             nn.ReLU(),
             pufferlib.pytorch.layer_init(nn.Conv2d(64, 64, 3, stride=1)),
             nn.ReLU(),
             nn.Flatten(),
-            pufferlib.pytorch.layer_init(nn.Linear(320, hidden_size)),
+            pufferlib.pytorch.layer_init(nn.Linear(192, hidden_size)),
             nn.ReLU(),
         )
 
