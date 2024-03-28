@@ -619,17 +619,20 @@ nmmo3:
   package: nmmo3
   train:
     total_timesteps: 100_000_000
-    num_envs: 6
+    num_envs: 15
     envs_per_worker: 1
     envs_per_batch: 6
     update_epochs: 1
     gamma: 0.998
-    batch_size: 131072
-    batch_rows: 256
-    compile: True
+    #batch_size: 32768
+    batch_size: 196608
+    batch_rows: 1024
+    #batch_rows: 256
+    #compile: True
   env:
     name: nmmo3
-    num_envs: 4 # NMMO3 provides its own fast multienv
+    #num_envs: 1 # NMMO3 provides its own fast multienv
+    num_envs: 12 # NMMO3 provides its own fast multienv
 
   seed: 1
   torch_deterministic: True

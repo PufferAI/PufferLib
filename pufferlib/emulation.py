@@ -597,6 +597,16 @@ def concatenate(flat_sample):
             return flat_sample
         return np.array([flat_sample])
 
+    try:
+        x = np.concatenate([
+            e.ravel() if isinstance(e, np.ndarray) else np.array([e])
+            for e in flat_sample]
+        )
+    except:
+        T()
+
+
+
     return np.concatenate([
         e.ravel() if isinstance(e, np.ndarray) else np.array([e])
         for e in flat_sample]
