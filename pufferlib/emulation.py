@@ -101,6 +101,29 @@ class BasicPostprocessor(Postprocessor):
 
         return reward, done, truncated, info
 
+class NoResetPostprocessor(Postprocessor):
+    '''Provides latest stats for envs that do not reset'''
+    def reset(self, obs):
+        self.epoch_return = 0
+        self.epoch_length = 0
+        self.tick = 0
+
+    def reward_done_truncated_info(self, reward, done, truncated, info):
+        self.tick += 1
+
+        if isinstance(reward, (list, np.ndarray)):
+            reward = sum(reward.values())
+
+        self.epoch_length += 1
+        self.epoch_return += reward
+
+        if self.tick % 16 == 0:
+            info['return'] = self.epoch_return
+            info['length'] = self.epoch_length
+
+        return reward, done, truncated, info
+
+
 class GymnasiumPufferEnv(gymnasium.Env):
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={},
             postprocessor_cls=BasicPostprocessor):
