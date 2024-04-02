@@ -53,8 +53,11 @@ class Policy(pufferlib.models.Policy):
         self.value_fn = pufferlib.pytorch.layer_init(nn.Linear(output_size, 1), std=1)
 
 
-    def encode_observations(self, observations):
-        x = pufferlib.emulation.unpack_batched_obs(observations, self.unflatten_context)
+    def encode_observations(self, observations, unflatten=True):
+        if unflatten:
+            x = pufferlib.emulation.unpack_batched_obs(observations, self.unflatten_context)
+        else:
+            x = observations
 
         with torch.no_grad():
             ob_map = decode_map(x['map'])

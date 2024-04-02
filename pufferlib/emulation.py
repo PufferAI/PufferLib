@@ -238,7 +238,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
         return self.env.close()
 
     def unpack_batched_obs(self, batched_obs):
-        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure, self.atn_sz)
+        return unpack_batched_obs(batched_obs, self.unflatten_context)
 
 
 class PettingZooPufferEnv:
@@ -444,8 +444,7 @@ class PettingZooPufferEnv:
         return self.env.close()
 
     def unpack_batched_obs(self, batched_obs):
-        return unpack_batched_obs(batched_obs,
-            self.flat_observation_space, self.flat_observation_structure, self.atn_sz)
+        return unpack_batched_obs(batched_obs, self.unflatten_context)
 
 
 def unpack_batched_obs(batched_obs, unflatten_context):
