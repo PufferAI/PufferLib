@@ -631,8 +631,8 @@ nmmo3:
     #compile: True
   env:
     name: nmmo3
-    #num_envs: 1 # NMMO3 provides its own fast multienv
-    num_envs: 8 # NMMO3 provides its own fast multienv
+    num_envs: 1 # NMMO3 provides its own fast multienv
+    #num_envs: 8 # NMMO3 provides its own fast multienv
 
   seed: 1
   torch_deterministic: True

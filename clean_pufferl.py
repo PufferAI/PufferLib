@@ -353,6 +353,10 @@ def evaluate(data):
     data.stats = {}
     infos = infos['learner']
 
+    if 'nmmo3_map' in infos:
+        rendered = infos['nmmo3_map'][0]
+        data.stats['Media/map'] = data.wandb.Image(rendered)
+
     if 'pokemon_exploration_map' in infos:
         for idx, pmap in zip(infos['env_id'], infos['pokemon_exploration_map']):
             if not hasattr(data, 'pokemon'):

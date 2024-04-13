@@ -43,7 +43,7 @@ class Policy(pufferlib.models.Policy):
 
         self.embed = nn.Embedding(128, 32)
         self.player_1d = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(32*33, hidden_size//2)),
+            pufferlib.pytorch.layer_init(nn.Linear(32*44, hidden_size//2)),
             nn.ReLU(),
         )
 
