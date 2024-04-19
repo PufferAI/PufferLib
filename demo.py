@@ -238,7 +238,7 @@ if __name__ == '__main__':
         sweep(args, env_module, make_env)
         exit(0)
     elif args.mode == 'evaluate' and pkg != 'pokemon_red':
-        rollout(
+        clean_pufferl.rollout(
             make_env,
             args.env,
             agent_creator=make_policy,

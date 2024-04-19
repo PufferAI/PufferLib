@@ -582,6 +582,7 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
             step = 0
             return_val = 0
 
+        ob = np.stack(ob.values())
         ob = torch.tensor(ob).unsqueeze(0).to(device)
         with torch.no_grad():
             if hasattr(agent, 'lstm'):
@@ -589,12 +590,15 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
             else:
                 action, _, _, _ = agent(ob)
 
-        ob, reward, terminal, truncated, _ = env.step(action[0].item())
-        return_val += reward
+        action = action.cpu().numpy()
+        action = {i+1: e for i, e  in enumerate(action)}
+        ob, reward, terminal, truncated, _ = env.step(action)
+        # Hey why is reward a tensor
+        #return_val += np.mean(list(reward.values()))
 
         chars = env.render()
-        print("\033c", end="")
-        print(chars)
+        #print("\033c", end="")
+        #print(chars)
 
         if verbose:
             print(f'Step: {step} Reward: {reward:.4f} Return: {return_val:.2f}')
