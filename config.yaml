@@ -574,6 +574,23 @@ griddly:
   env:
     name: GDY-Spiders-v0
 
+madrona:
+  package: madrona
+  train:
+    total_timesteps: 100_000_000
+    num_envs: 32
+    envs_per_worker: 1
+    envs_per_batch: 8
+    update_epochs: 4
+    gamma: 0.998
+    #batch_size: 262144
+    batch_size: 32768
+    batch_rows: 256
+    bptt_horizon: 8
+    compile: True
+  env:
+    name: 'madrona'
+
 magent:
   package: magent
   env:

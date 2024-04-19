@@ -356,8 +356,8 @@ class PettingZooPufferEnv:
         '''Step the environment and return (observations, rewards, dones, infos)'''
         if not self.initialized:
             raise exceptions.APIUsageError('step() called before reset()')
-        if self.done:
-            raise exceptions.APIUsageError('step() called after environment is done')
+        # if self.done:
+        #     raise exceptions.APIUsageError('step() called after environment is done')
 
         # Postprocess actions and validate action spaces
         for agent in actions:
