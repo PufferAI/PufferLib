@@ -42,6 +42,9 @@ class MadronaPettingZooEnv:
         self.possible_agents = list(range(1, num_envs+1))
         self.agents = self.possible_agents
 
+    def close(self):
+        del self.env
+
     def observation_space(self, agent):
         return self.env.observation_space
 
@@ -329,7 +332,7 @@ class MadronaHideAndSeekWrapperSplitTaskGraph(MadronaHideAndSeekWrapper):
         obs = self.get_obs()
         
         # calculate the reward using state + action
-        reward = self.dynamic_reward_fn(**obs)
+        reward = self.dynamic_reward_fn(**obs).cpu().numpy()
         
         # update the environment if finished and collect next states
         self.sim.reset_and_update()
