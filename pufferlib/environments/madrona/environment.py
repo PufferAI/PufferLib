@@ -20,14 +20,14 @@ import gpu_hideseek
 def env_creator(name='hide_and_seek'):
     return functools.partial(make, name)
 
-def make(name='hide_and_seek', num_envs=100):
+def make(name='hide_and_seek', num_envs=2, render=False):
     '''Madrona wrapper. Tested with Hide and Seek'''
     assert int(num_envs) == float(num_envs), "num_envs must be an integer"
     num_envs = int(num_envs)
 
-    envs = make_madrona(mode='cpu', num_worlds=num_envs)
+    envs = make_madrona(mode='cpu', num_worlds=num_envs, batch_renderer=render)
 
-    envs = MadronaPettingZooEnv(envs, num_envs * 5)
+    envs = MadronaPettingZooEnv(envs, num_envs * 4)
     return pufferlib.emulation.PettingZooPufferEnv(
         env=envs,
         postprocessor_cls=MadronaPostprocessor,
@@ -41,6 +41,8 @@ class MadronaPettingZooEnv:
         self.num_envs = num_envs
         self.possible_agents = list(range(1, num_envs+1))
         self.agents = self.possible_agents
+        self.cumulative_rewards = np.zeros_like(env.sim.reward_tensor().to_torch().cpu().numpy())
+        self.c = 0
 
     def close(self):
         del self.env
@@ -59,8 +61,31 @@ class MadronaPettingZooEnv:
         for i in range(batch_size):
             obs[i+1] = {k: v[i] for k, v in _obs.items()}
         # obs = {i: o for i, o in enumerate(_obs)}
-        info = {i: {'mask': True} for i in obs}
+        info = {i: {'mask': True, 'hider reward': 0, 'seeker reward': 0} for i in obs}
         return obs, info
+
+    def remove_shaping(self, rewards, agent_type_mask):
+        # Create copies to avoid modifying the original
+        hider_rewards = rewards[agent_type_mask == 1].copy()
+        seeker_rewards = rewards[agent_type_mask == 0].copy()
+
+        # Masks for values that need adjusting (-9 and -11)
+        shaped_hider_mask = (hider_rewards == -9) | (hider_rewards == -11)
+        shaped_seeker_mask = (seeker_rewards == -9) | (seeker_rewards == -11)
+
+        # Adjust only the necessary values
+        hider_rewards[shaped_hider_mask] += 10
+        seeker_rewards[shaped_seeker_mask] += 10
+
+        # Apply sign function to adjusted values
+        hider_rewards[shaped_hider_mask] = np.sign(hider_rewards[shaped_hider_mask])
+        seeker_rewards[shaped_seeker_mask] = np.sign(seeker_rewards[shaped_seeker_mask])
+
+        # Create a new array to store the modified rewards
+        new_rewards = np.zeros_like(rewards)
+        new_rewards[agent_type_mask == 1] = hider_rewards
+        new_rewards[agent_type_mask == 0] = seeker_rewards
+        return new_rewards
 
     def step(self, actions):
         actions = np.array(actions)#[actions[i] for i in range(self.num_envs)])
@@ -71,17 +96,23 @@ class MadronaPettingZooEnv:
         dones = {}
         truncateds = {}
         infos = {}
+        r = self.remove_shaping(_rewards, _obs['agent_type_mask'])
+        hider_reward = r[_obs['agent_type_mask'] == 1].mean()
+        seeker_reward = r[_obs['agent_type_mask'] == 0].mean()
         for i in range(batch_size):
             obs[i+1] = {k: v[i] for k, v in _obs.items()}
             rewards[i+1] = _rewards[i]
             dones[i+1] = _dones[i]
             truncateds[i+1] = False
-            infos[i+1] = {'mask': True}
-        # obs = {i: o for i, o in enumerate(obs)}
-        # rewards = {i: r for i, r in enumerate(rewards)}
-        # dones = {i: bool(d) for i, d in enumerate(dones)}
-        # truncateds = {i: False for i in range(len(obs))}
-        # infos = {i: {'mask': True} for i in range(len(obs))}
+            infos[i+1] = {'mask': True, 'hider reward': hider_reward, 'seeker reward': seeker_reward}
+            
+            self.cumulative_rewards[i] += _rewards[i]
+            
+            if _dones[i]:
+                agent = 'hider' if _obs['agent_type_mask'][i] == 1 else 'seeker'
+                infos[i+1][f'{agent} cumulative reward'] = self.cumulative_rewards[i]
+                self.cumulative_rewards[i] = 0 
+
         return obs, rewards, dones, truncateds, infos
 
 class MadronaPostprocessor(pufferlib.emulation.Postprocessor):
@@ -113,7 +144,7 @@ class MadronaHideAndSeekWrapper: #gym.Wrapper):
         self.N = sim.agent_data_tensor().to_torch().shape[0] # = num_worlds * (seekers + hiders)
         self.nSeekers = nSeekers
         self.nHiders = nHiders
-        self.max_agents_minus_one = 5 # maxSeekers + maxHiders - 1
+        self.max_agents_minus_one = nSeekers + nHiders - 1
 
         # Define observation space components (using provided shapes)
         # [num_worlds * (seekers + hider), [?, ?, ?, ?, ?], [pos.x, pos.y, vel.x, vel.y]]
@@ -318,11 +349,10 @@ class MadronaHideAndSeekWrapperSplitTaskGraph(MadronaHideAndSeekWrapper):
         #  the logits are in [0, 10] so we need to center those properly
         action_mat =  np.stack(action_dict.item().values())
         action_mat = torch.from_numpy(action_mat).float()
-        action_tensor[..., 0:3] = action_mat[..., 0:3] - 5
-        action_tensor[..., 4:] = action_mat[..., 4:]
-        
-        # copy the action tensor to the simulator
-        # action_tensor.copy_(action_tensor)
+        action_mat[..., 0:3] = action_mat[..., 0:3] - 5
+        action_mat[..., 4:] = action_mat[..., 4:]
+        # send the actions to the sim's action tensor
+        action_tensor.copy_(action_mat) 
 
         # Apply the modified action tensor to the sim
         self.sim.simulate()
@@ -355,7 +385,7 @@ class MadronaHideAndSeekWrapperSplitTaskGraph(MadronaHideAndSeekWrapper):
 
 
 def make_madrona(mode='cpu', num_worlds=10, num_steps=2500, entities_per_world=2, 
-                 reset_chance=0., nSeekers=3, nHiders=2, split_task_graph=True):
+                 reset_chance=0., nSeekers=2, nHiders=2, split_task_graph=True, batch_renderer=False):
 
     sim_mode = gpu_hideseek.madrona.ExecMode.CPU if mode == 'cpu' else gpu_hideseek.madrona.ExecMode.GPU
     
@@ -370,6 +400,7 @@ def make_madrona(mode='cpu', num_worlds=10, num_steps=2500, entities_per_world=2
 			min_seekers = nSeekers,
 			max_seekers = nSeekers,
             num_pbt_policies = 0,
+            enable_batch_renderer = batch_renderer,
 	)
     sim.init()
 
@@ -401,6 +432,7 @@ if __name__ == '__main__':
 
     # print(env.observation_space)
     obs, _ = env.reset()
+    T()
     start = time.time()
     for _ in range(num_frames):
         action_matrix = [

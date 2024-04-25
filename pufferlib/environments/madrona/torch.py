@@ -125,7 +125,7 @@ def process_obs(prep_counter,
 
 
 class Recurrent(RecurrentWrapper):
-    def __init__(self, env, policy, input_size=128, hidden_size=128, num_layers=1):
+    def __init__(self, env, policy, input_size=256, hidden_size=256, num_layers=1):
         super().__init__(env, policy, input_size, hidden_size, num_layers)
         self._state = None
 
@@ -143,7 +143,7 @@ class Recurrent(RecurrentWrapper):
 class Policy(Base):
 
     # num_obs_features, num_entity_features, 128, num_channels, 4
-    def __init__(self, env, num_embed_channels=128, num_out_channels=128, num_heads=4):
+    def __init__(self, env, num_embed_channels=128, num_out_channels=256, num_heads=4):
         super().__init__(env)
 
         base_env = env.env.env
@@ -190,9 +190,15 @@ class Policy(Base):
 
         # Attention and feed-forward layers
         self.multihead_attn = nn.MultiheadAttention(embed_dim=num_embed_channels, num_heads=num_heads)
+        # self.attn_2 = nn.MultiheadAttention(embed_dim=num_embed_channels, num_heads=num_heads)
+        
         self.ff = nn.Sequential(
             nn.Linear(num_embed_channels, num_out_channels),
             nn.LayerNorm(num_out_channels),
+            nn.LeakyReLU(),
+            nn.Linear(num_out_channels, num_out_channels),
+            nn.LayerNorm(num_out_channels),
+            nn.LeakyReLU(),
         )
 
         self.decoders = torch.nn.ModuleList([torch.nn.Linear(num_out_channels, n)
@@ -251,12 +257,13 @@ class Policy(Base):
             common, 
             flatten(lidar_processed),
                             ], dim=1)
+
         x_self = x_self.unsqueeze(-2)
         embed_self = F.leaky_relu(self.self_embed(x_self))
         
-        other_agents_embedding = self.others_embed(agent_data.view(-1, F_agents)).view(B, NE_O, -1)
-        box_embedding = self.box_entity_embed(box_data.view(-1, F_box)).view(B, NE_B, -1)
-        ramp_embedding = self.ramp_entity_embed(ramp_data.view(-1, F_ramp)).view(B, NE_R, -1)
+        other_agents_embedding = F.leaky_relu(self.others_embed(agent_data.view(-1, F_agents)).view(B, NE_O, -1))
+        box_embedding = F.leaky_relu(self.box_entity_embed(box_data.view(-1, F_box)).view(B, NE_B, -1))
+        ramp_embedding = F.leaky_relu(self.ramp_entity_embed(ramp_data.view(-1, F_ramp)).view(B, NE_R, -1))
 
         masked_box_embedding = box_embedding * visible_boxes_mask
         masked_ramp_embedding = ramp_embedding * visible_ramps_mask
@@ -294,7 +301,7 @@ if __name__ == '__main__':
     import random
     random.seed(0)
 
-    from environment import MadronaHideAndSeekWrapper, MadronaHideAndSeekWrapperSplitTaskGraph
+    from environment import MadronaHideAndSeekWrapper, MadronaHideAndSeekWrapperSplitTaskGraph, make
     import numpy as np
 
     num_worlds = 25
@@ -305,36 +312,39 @@ if __name__ == '__main__':
     device = torch.device('cpu')
 
 
-    sim = gpu_hideseek.HideAndSeekSimulator(
-                        exec_mode = gpu_hideseek.madrona.ExecMode.CPU,
-                        gpu_id = 0,
-                        num_worlds = num_worlds,
-                        sim_flags = gpu_hideseek.SimFlags.Default,
-                        rand_seed = 10,
-                        min_hiders = 3,
-                        max_hiders = 3,
-                        min_seekers = 2,
-                        max_seekers = 2,
-                        num_pbt_policies = 0,
-        )
-    sim.init()
+    # sim = gpu_hideseek.HideAndSeekSimulator(
+    #                     exec_mode = gpu_hideseek.madrona.ExecMode.CPU,
+    #                     gpu_id = 0,
+    #                     num_worlds = num_worlds,
+    #                     sim_flags = gpu_hideseek.SimFlags.Default,
+    #                     rand_seed = 10,
+    #                     min_hiders = 3,
+    #                     max_hiders = 3,
+    #                     min_seekers = 2,
+    #                     max_seekers = 2,
+    #                     num_pbt_policies = 0,
+    #     )
+    # sim.init()
 
-    env = MadronaHideAndSeekWrapperSplitTaskGraph(sim)
-    env.single_action_space = env.action_space
-    env.single_observation_space = env.observation_space
+    # env = MadronaHideAndSeekWrapperSplitTaskGraph(sim)
+
+    env = make('hide_and_seek', 1)
+    # env.single_action_space = env.action_space
+    # env.single_observation_space = env.observation_space
     obs, _ = env.reset()
-    num_obs_features = env.num_obs_features
-    num_entity_features = env.num_ent_features
+    # num_obs_features = env.num_obs_features
+    # num_entity_features = env.num_ent_features
     # obs_tensors, num_obs_features, num_entity_features = setup_obs(sim)
 
-    base_network = EntitySelfAttentionPolicy(env).to(device)
+    T()
+    base_network = Policy(env).to(device)
     network = Recurrent(env, base_network).to(device)
 
-    x = process_obs(**obs)
-    state = network.get_state(x[0])
+    # x = process_obs(**obs)
+    # state = network.get_state(x[0])
     
     print(network)
-
+    T()
     logits, value, state = network.forward(x, state)
 
     multi_categorical = [torch.distributions.Categorical(logits=l) for l in logits]
