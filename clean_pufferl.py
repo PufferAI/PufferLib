@@ -305,7 +305,7 @@ def evaluate(data):
      
             # Index alive mask with policy pool idxs...
             # TODO: Find a way to avoid having to do this
-            learner_mask = torch.Tensor(mask * data.policy_pool.mask)
+            learner_mask = torch.as_tensor(mask * data.policy_pool.mask)
 
             # Ensure indices do not exceed batch size
             indices = torch.where(learner_mask)[0][:config.batch_size - ptr + 1].numpy()
@@ -424,14 +424,14 @@ def train(data):
             )
 
     # Flatten the batch
-    data.b_obs = b_obs = torch.Tensor(data.obs_ary[b_idxs])
-    b_actions = torch.Tensor(data.actions_ary[b_idxs]
+    data.b_obs = b_obs = torch.as_tensor(data.obs_ary[b_idxs])
+    b_actions = torch.as_tensor(data.actions_ary[b_idxs]
         ).to(data.device, non_blocking=True)
-    b_logprobs = torch.Tensor(data.logprobs_ary[b_idxs]
+    b_logprobs = torch.as_tensor(data.logprobs_ary[b_idxs]
         ).to(data.device, non_blocking=True)
-    b_dones = torch.Tensor(data.dones_ary[b_idxs]
+    b_dones = torch.as_tensor(data.dones_ary[b_idxs]
         ).to(data.device, non_blocking=True)
-    b_values = torch.Tensor(data.values_ary[b_idxs]
+    b_values = torch.as_tensor(data.values_ary[b_idxs]
         ).to(data.device, non_blocking=True)
     b_advantages = advantages.reshape(
         config.batch_rows, num_minibatches, config.bptt_horizon
