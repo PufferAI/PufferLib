@@ -43,7 +43,7 @@ class Policy(nn.Module):
             self.action_space = env.single_action_space
 
         # Used to unflatten observation in forward pass
-        self.unflatten_context = env.unflatten_context
+        self.obs_dtype = env.obs_dtype
 
         self.is_multidiscrete = isinstance(self.action_space,
                 pufferlib.spaces.MultiDiscrete)
@@ -172,14 +172,9 @@ class Default(Policy):
         linear layers to decode actions. The value function is a single linear layer.
         '''
         super().__init__(env)
-        self.encoder = nn.Linear(np.prod(self.observation_space.shape), hidden_size)
-
-        if self.is_multidiscrete:
-            self.decoders = nn.ModuleList([nn.Linear(hidden_size, n)
-                for n in self.action_space.nvec])
-        else:
-            self.decoder = nn.Linear(hidden_size, self.action_space.n)
-
+        self.encoder = nn.Linear(self.observation_space.shape[0], hidden_size)
+        self.decoders = nn.ModuleList([nn.Linear(hidden_size, n)
+            for n in self.action_space.nvec])
         self.value_head = nn.Linear(hidden_size, 1)
 
     def forward(self, env_outputs):
@@ -189,21 +184,13 @@ class Default(Policy):
         return actions, value
 
     def encode_observations(self, observations):
-        '''Linear encoder function'''
-        hidden = observations.reshape(observations.shape[0], -1).float()
-        hidden = torch.relu(self.encoder(hidden))
-        return hidden, None
+        return torch.relu(self.encoder(observations.float())), None
 
     def decode_actions(self, hidden, lookup, concat=True):
         '''Concatenated linear decoder function'''
         value = self.value_head(hidden)
-
-        if self.is_multidiscrete:
-            actions = [dec(hidden) for dec in self.decoders]
-            return actions, value
-
-        action = self.decoder(hidden)
-        return action, value
+        actions = [dec(hidden) for dec in self.decoders]
+        return actions, value
 
 class Convolutional(Policy):
     def __init__(self, env, *args, framestack, flat_size,
@@ -305,7 +292,9 @@ class ProcgenResnet(Policy):
                 nn.Linear(mlp_width, 1), std=1)
 
     def encode_observations(self, x):
-        x = pufferlib.emulation.unpack_batched_obs(x, self.unflatten_context)
+        x = x.view(self.obs_dtype)
+        T()
+        x = pufferlib.emulation.unpack_batched_obs(x, self.obs_dtype)
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)
         return hidden, None
  

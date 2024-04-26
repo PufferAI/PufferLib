@@ -130,9 +130,9 @@ def aggregate_recvs(state, recvs):
     truncateds = np.concatenate(truncateds)
     infos = [i for ii in infos for i in ii]
     
-    obs_space = state.driver_env.structured_observation_space
-    if isinstance(obs_space, pufferlib.spaces.Box):
-        obs = obs.reshape(obs.shape[0], *obs_space.shape)
+    #obs_space = state.driver_env.structured_observation_space
+    #if isinstance(obs_space, pufferlib.spaces.Box):
+    #    obs = obs.reshape(obs.shape[0], *obs_space.shape)
 
     # TODO: Masking will break for 1-agent PZ envs
     # Replace with check against is_multiagent (add it to state)

@@ -13,6 +13,7 @@ from datetime import timedelta
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from tensordict import TensorDict
 
 import pufferlib
 import pufferlib.utils
@@ -274,6 +275,7 @@ def evaluate(data):
 
 
         with inference_profiler, torch.no_grad():
+            #o_struct = TensorDict(data.pool.driver_env.unpack_batched_obs(o), batch_size=data.pool.agents_per_batch)
             o = torch.as_tensor(o)
             r = torch.as_tensor(r).float().to(data.device).view(-1)
             d = torch.as_tensor(d).float().to(data.device).view(-1)
@@ -424,7 +426,8 @@ def train(data):
             )
 
     # Flatten the batch
-    data.b_obs = b_obs = torch.as_tensor(data.obs_ary[b_idxs])
+    #b_obs = TensorDict(data.pool.driver_env.unpack_batched_obs(data.obs_ary[b_idxs]))
+    b_obs = torch.as_tensor(data.obs_ary[b_idxs])
     b_actions = torch.as_tensor(data.actions_ary[b_idxs]
         ).to(data.device, non_blocking=True)
     b_logprobs = torch.as_tensor(data.logprobs_ary[b_idxs]
