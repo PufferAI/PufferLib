@@ -101,6 +101,76 @@ class BasicPostprocessor(Postprocessor):
 
         return reward, done, truncated, info
 
+def dtype_from_space(space):
+    if isinstance(space, pufferlib.spaces.Tuple):
+        dtype = []
+        for i, elem in enumerate(space):
+            dtype.append((f'f{i}', dtype_from_space(elem)))
+    elif isinstance(space, pufferlib.spaces.Dict):
+        dtype = []
+        for k, value in space.items():
+            dtype.append((k, dtype_from_space(value)))
+    else:
+        dtype = (space.dtype, space.shape)
+
+    return dtype
+
+def flatten_space(space):
+    if isinstance(space, pufferlib.spaces.Tuple):
+        subspaces = []
+        for e in space:
+            subspaces.extend(flatten_space(e))
+        return subspaces
+    elif isinstance(space, pufferlib.spaces.Dict):
+        subspaces = []
+        for e in space.values():
+            subspaces.extend(flatten_space(e))
+        return subspaces
+    else:
+        return [space]
+
+def make_box(space):
+    leaves = flatten_space(space)
+    dtypes = [e.dtype for e in leaves]
+    if dtypes.count(dtypes[0]) == len(dtypes):
+        dtype = dtypes[0]
+    else:
+        dtype = np.uint8
+
+    num_bytes = sum([int(np.prod(e.shape) * e.dtype.itemsize) for e in leaves])
+    mmin, mmax = utils._get_dtype_bounds(dtype)
+    numel = num_bytes // dtype.itemsize
+    return gymnasium.spaces.Box(low=mmin, high=mmax, shape=(numel,), dtype=dtype)
+
+def make_multidiscrete(space):
+    leaves = flatten_space(space)
+    return gymnasium.spaces.MultiDiscrete([e.n for e in leaves])
+
+def fill_with_sample(arr, sample):
+    if isinstance(sample, dict):
+        for k, v in sample.items():
+            fill_with_sample(arr[k], v)
+    elif isinstance(sample, tuple):
+        for i, v in enumerate(sample):
+            fill_with_sample(arr[f'f{i}'], v)
+    else:
+        arr[()] = sample
+
+def fill_from_dtype(dtype, sample):
+    elem = np.zeros(1, dtype=dtype)
+    fill_with_sample(elem, sample)
+    return elem
+
+def unpack_filled_to_space(filled, space):
+    if isinstance(space, pufferlib.spaces.Tuple):
+        return tuple(unpack_filled_to_space(filled[f'f{i}'], elem)
+            for i, elem in enumerate(space))
+    elif isinstance(space, pufferlib.spaces.Dict):
+        return {k: unpack_filled_to_space(filled[k], value)
+            for k, value in space.items()}
+    else:
+        return filled.item()
+
 class GymnasiumPufferEnv(gymnasium.Env):
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={},
             postprocessor_cls=BasicPostprocessor):
@@ -113,50 +183,14 @@ class GymnasiumPufferEnv(gymnasium.Env):
         self.is_observation_checked = False
         self.is_action_checked = False
 
-        # Cache the observation and action spaces
-        self.observation_space
-        self.action_space
-        self.unflatten_context = pufferlib.namespace(
-            flat_observation_space=self.flat_observation_space,
-            flat_observation_structure=self.flat_observation_structure,
-            obs_sz=self.obs_sz,
-        )
+        # Compute the observation and action spaces
+        self.obs_dtype = dtype_from_space(self.env.observation_space)
+        self.atn_dtype = dtype_from_space(self.env.action_space)
+        self.observation_space = make_box(self.env.observation_space)
+        self.action_space = make_multidiscrete(self.env.action_space)
+
         self.render_modes = 'human rgb_array'.split()
         self.render_mode = 'rgb_array'
-
-    @cached_property
-    def observation_space(self):
-        '''Returns a flattened, single-tensor observation space'''
-        self.structured_observation_space = self.postprocessor.observation_space
-
-        # Flatten the featurized observation space and store
-        # it for use in step. Return a box space for the user
-        self.flat_observation_space, self.flat_observation_structure, self.box_observation_space, self.pad_observation = (
-            make_flat_and_box_obs_space(self.structured_observation_space))
-
-        self.obs_sz = [
-            int(np.prod(subspace.shape))
-            for subspace in self.flat_observation_space.values()
-        ]
-
-        return self.box_observation_space
-
-    @cached_property
-    def action_space(self):
-        '''Returns a flattened, multi-discrete action space'''
-        self.structured_action_space = self.env.action_space
-        self.flat_action_structure = flatten_structure(self.structured_action_space.sample())
-
-        # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
-        self.flat_action_space, self.multidiscrete_action_space = (
-            make_flat_and_multidiscrete_atn_space(self.env.action_space))
-
-        self.atn_sz = [
-            int(np.prod(subspace.shape))
-            for subspace in self.flat_action_space.values()
-        ]
-
-        return self.multidiscrete_action_space
 
     def seed(self, seed):
         self.env.seed(seed)
@@ -169,14 +203,15 @@ class GymnasiumPufferEnv(gymnasium.Env):
 
         # Call user featurizer and flatten the observations
         self.postprocessor.reset(ob)
-        processed_ob = concatenate(flatten(self.postprocessor.observation(ob)))
+        ob = self.postprocessor.observation(ob)
+        ob = fill_from_dtype(self.obs_dtype, ob).view(self.observation_space.dtype).ravel()
 
         if __debug__:
             if not self.is_observation_checked:
                 self.is_observation_checked = check_space(
-                    processed_ob, self.box_observation_space)
+                    ob, self.observation_space)
 
-        return processed_ob, info
+        return ob, info
  
     def step(self, action):
         '''Execute an action and return (observation, reward, done, info)'''
@@ -190,19 +225,16 @@ class GymnasiumPufferEnv(gymnasium.Env):
         if __debug__:
             if not self.is_action_checked:
                 self.is_action_checked = check_space(
-                    action, self.multidiscrete_action_space)
+                    action, self.action_space)
 
         # Unpack actions from multidiscrete into the original action space
-        action = unflatten(
-            split(
-                action, self.flat_action_space, self.atn_sz, batched=False
-            ), self.flat_action_structure
-        )
-
+        action = np.array(action).view(self.atn_dtype)
+        action = unpack_filled_to_space(action, self.env.action_space)
         ob, reward, done, truncated, info = self.env.step(action)
 
         # Call user postprocessors and flatten the observations
-        ob = concatenate(flatten(self.postprocessor.observation(ob)))
+        ob = self.postprocessor.observation(ob)
+        ob = fill_from_dtype(self.obs_dtype, ob).view(self.observation_space.dtype).ravel()
         reward, done, truncated, info = self.postprocessor.reward_done_truncated_info(reward, done, truncated, info)
                    
         self.done = done
@@ -214,13 +246,9 @@ class GymnasiumPufferEnv(gymnasium.Env):
     def close(self):
         return self.env.close()
 
-    def unpack_batched_obs(self, batched_obs):
-        return unpack_batched_obs(batched_obs, self.flat_observation_space, self.flat_observation_structure, self.atn_sz)
-
-
 class PettingZooPufferEnv:
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={},
-                 postprocessor_cls=Postprocessor, postprocessor_kwargs={}, teams=None):
+                 postprocessor_cls=Postprocessor, postprocessor_kwargs={}):
         self.env = make_object(env, env_creator, env_args, env_kwargs)
         self.initialized = False
         self.all_done = True
@@ -228,98 +256,51 @@ class PettingZooPufferEnv:
         self.is_observation_checked = False
         self.is_action_checked = False
 
-        self.possible_agents = self.env.possible_agents if teams is None else list(teams.keys())
-        self.teams = teams
-
         self.postprocessors = {agent: postprocessor_cls(
                 self.env, is_multiagent=True, agent_id=agent, **postprocessor_kwargs)
             for agent in self.possible_agents}
 
-        # Cache the observation and action spaces
-        self.observation_space(self.possible_agents[0])
-        self.action_space(self.possible_agents[0])
+        # Compute the observation and action spaces
+        single_agent = self.possible_agents[0]
+        single_observation_space = self.env.observation_space(single_agent)
+        single_action_space = self.env.action_space(single_agent)
+        self.obs_dtype = dtype_from_space(single_observation_space)
+        self.atn_dtype = dtype_from_space(single_action_space)
+        self.single_observation_space = make_box(single_observation_space)
+        self.single_action_space = make_multidiscrete(single_action_space)
 
-        self.unflatten_context = pufferlib.namespace(
-            flat_observation_space=self.flat_observation_space,
-            flat_observation_structure=self.flat_observation_structure,
-            obs_sz=self.obs_sz,
-        )
- 
+        self.pad_observation = 0 * self.single_observation_space.sample()
+
     @property
     def agents(self):
         return self.env.agents
 
     @property
+    def possible_agents(self):
+        return self.env.possible_agents
+
+    @property
     def done(self):
         return len(self.agents) == 0 or self.all_done
-
-    @property
-    def single_observation_space(self):
-        return self.box_observation_space
-
-    @property
-    def single_action_space(self):
-        return self.multidiscrete_action_space
 
     def observation_space(self, agent):
         '''Returns the observation space for a single agent'''
         if agent not in self.possible_agents:
             raise pufferlib.exceptions.InvalidAgentError(agent, self.possible_agents)
 
-        # Make a gym space defining observations for the whole team
-        if self.teams is not None:
-            obs_space = make_team_space(
-                self.env.observation_space, self.teams[agent])
-        else:
-            obs_space = self.env.observation_space(agent)
-
-        # Call user featurizer and create a corresponding gym space
-        self.structured_observation_space = self.postprocessors[agent].observation_space
-
-        # Flatten the featurized observation space and store it for use in step. Return a box space for the user
-        self.flat_observation_space, self.flat_observation_structure, self.box_observation_space, self.pad_observation = (
-            make_flat_and_box_obs_space(self.structured_observation_space))
-
-        self.obs_sz = [
-            int(np.prod(subspace.shape))
-            for subspace in self.flat_observation_space.values()
-        ]
-
-        return self.box_observation_space 
+        return self.single_observation_space
 
     def action_space(self, agent):
         '''Returns the action space for a single agent'''
         if agent not in self.possible_agents:
             raise pufferlib.exceptions.InvalidAgentError(agent, self.possible_agents)
 
-        # Make a gym space defining actions for the whole team
-        if self.teams is not None:
-            atn_space = make_team_space(
-                self.env.action_space, self.teams[agent])
-        else:
-            atn_space = self.env.action_space(agent)
-
-        self.structured_action_space = atn_space
-        self.flat_action_structure = flatten_structure(atn_space.sample())
-
-        # Store a flat version of the action space for use in step. Return a multidiscrete version for the user
-        self.flat_action_space, self.multidiscrete_action_space = make_flat_and_multidiscrete_atn_space(atn_space)
-
-        self.atn_sz = [
-            int(np.prod(subspace.shape))
-            for subspace in self.flat_action_space.values()
-        ]
-
-        return self.multidiscrete_action_space
+        return self.single_action_space
 
     def reset(self, seed=None):
         obs, info = self.env.reset(seed=seed)
         self.initialized = True
         self.all_done = False
-
-        # Group observations into teams
-        if self.teams is not None:
-            obs = group_into_teams(self.teams, obs)
 
         # Call user featurizer and flatten the observations
         postprocessed_obs = {}
@@ -329,13 +310,15 @@ class PettingZooPufferEnv:
             post.reset(ob)
             if agent in obs:
                 ob = obs[agent]
-                postprocessed_obs[agent] = concatenate(flatten(post.observation(ob)))
+                ob = post.observation(ob)
+                ob = fill_from_dtype(self.obs_dtype, ob).view(self.single_observation_space.dtype).ravel()
+                postprocessed_obs[agent] = ob
 
         if __debug__:
             if not self.is_observation_checked:
                 self.is_observation_checked = check_space(
                     next(iter(postprocessed_obs.values())),
-                    self.box_observation_space
+                    self.single_observation_space
                 )
 
         padded_obs = pad_agent_data(postprocessed_obs,
@@ -371,31 +354,29 @@ class PettingZooPufferEnv:
             if not self.is_action_checked:
                 self.is_action_checked = check_space(
                     next(iter(actions.values())),
-                    self.multidiscrete_action_space
+                    self.single_action_space
                 )
 
         # Unpack actions from multidiscrete into the original action space
         unpacked_actions = {}
         for agent, atn in actions.items():
             if agent in self.agents:
-                unpacked_actions[agent] = unflatten(
-                    split(atn, self.flat_action_space, self.atn_sz, batched=False),
-                    self.flat_action_structure
-                )
-
-        if self.teams is not None:
-            unpacked_actions = ungroup_from_teams(self.teams, unpacked_actions)
+                # Unpack actions from multidiscrete into the original action space
+                atn = np.array(atn).view(self.atn_dtype)
+                atn = unpack_filled_to_space(atn, self.single_action_space)
+                unpacked_actions[agent] = atn
 
         obs, rewards, dones, truncateds, infos = self.env.step(unpacked_actions)
         # TODO: Can add this assert once NMMO Horizon is ported to puffer
         # assert all(dones.values()) == (len(self.env.agents) == 0)
 
-        if self.teams is not None:
-            obs, rewards, truncateds, dones = group_into_teams(self.teams, obs, rewards, truncateds, dones)
-
         # Call user postprocessors and flatten the observations
         for agent in obs:
-            obs[agent] = concatenate(flatten(self.postprocessors[agent].observation(obs[agent])))
+            ob = obs[agent] 
+            ob = self.postprocessors[agent].observation(ob)
+            ob = fill_from_dtype(self.obs_dtype, ob).view(self.single_observation_space.dtype).ravel()
+            obs[agent] = ob
+
             rewards[agent], dones[agent], truncateds[agent], infos[agent] = self.postprocessors[agent].reward_done_truncated_info(
                 rewards[agent], dones[agent], truncateds[agent], infos[agent])
      
@@ -419,17 +400,6 @@ class PettingZooPufferEnv:
 
     def close(self):
         return self.env.close()
-
-    def unpack_batched_obs(self, batched_obs):
-        return unpack_batched_obs(batched_obs,
-            self.flat_observation_space, self.flat_observation_structure, self.atn_sz)
-
-
-def unpack_batched_obs(batched_obs, unflatten_context):
-    unpacked = split(batched_obs, unflatten_context.flat_observation_space,
-        unflatten_context.obs_sz, batched=True)
-    unflattened = unflatten(unpacked, unflatten_context.flat_observation_structure)
-    return unflattened
 
 def make_object(object_instance=None, object_creator=None, creator_args=[], creator_kwargs={}):
     if (object_instance is None) == (object_creator is None):
@@ -544,108 +514,6 @@ def ungroup_from_teams(team_data):
         for agent_id, data in team.items():
             agent_data[agent_id] = data
     return agent_data
-
-
-def flatten_structure(data):
-    structure = []
-    
-    def helper(d):
-        if isinstance(d, dict):
-            structure.append(DICT)
-            structure.append(len(d))
-            for key, value in sorted(d.items()):
-                structure.append(key)
-                helper(value)
-        elif isinstance(d, list):
-            structure.append(LIST)
-            structure.append(len(d))
-            for item in d:
-                helper(item)
-        elif isinstance(d, tuple):
-            structure.append(TUPLE)
-            structure.append(len(d))
-            for item in d:
-                helper(item)
-        else:
-            structure.append(VALUE)
-    
-    helper(data)
-    return structure
-
-def flatten_space(space):
-    def _recursion_helper(current, key):
-        if isinstance(current, pufferlib.spaces.Tuple):
-            for idx, elem in enumerate(current):
-                _recursion_helper(elem, f'{key}T{idx}.')
-        elif isinstance(current, pufferlib.spaces.Dict):
-            for k, value in current.items():
-                _recursion_helper(value, f'{key}D{k}.')
-        else:
-            flat[f'{key}V'] = current
-
-    flat = {}
-    _recursion_helper(space, '')
-    return flat
-
-def concatenate(flat_sample):
-    # TODO: This section controls whether to special-case
-    # pure tensor obs to retain shape. Consider whether this is good.
-    if len(flat_sample) == 1:
-        flat_sample = flat_sample[0]
-        if isinstance(flat_sample,(np.ndarray,
-                gymnasium.wrappers.frame_stack.LazyFrames)):
-            return flat_sample
-        return np.array([flat_sample])
-
-    return np.concatenate([
-        e.ravel() if isinstance(e, np.ndarray) else np.array([e])
-        for e in flat_sample]
-    )
-
-def split(stacked_sample, flat_space, sz, batched=True):
-    if not isinstance(stacked_sample, Iterable):
-        return [stacked_sample]
-
-    if batched:
-        batch = stacked_sample.shape[0]
-    elif len(sz) == 1:
-        # This probably breaks for dicts with 1 element etc
-        return [stacked_sample]
-
-    leaves = []
-    ptr = 0
-    for sz, subspace in zip(sz, flat_space.values()):
-        shape = subspace.shape
-        typ = subspace.dtype
-        # Patch cached this
-        #sz = int(np.prod(shape))
-
-        if shape == ():
-            shape = (1,)
-
-        if batched:
-            samp = stacked_sample[:, ptr:ptr+sz].reshape(batch, *shape)
-        else:
-            samp = stacked_sample[ptr:ptr+sz].reshape(*shape).astype(typ)
-            if isinstance(subspace, pufferlib.spaces.Discrete):
-                samp = int(samp[0])
-
-        leaves.append(samp)
-        ptr += sz
-
-    return leaves
-
-def convert_to_multidiscrete(flat_space):
-    lens = []
-    for e in flat_space.values():
-        if isinstance(e, pufferlib.spaces.Discrete):
-            lens.append(e.n)
-        elif isinstance(e, pufferlib.spaces.MultiDiscrete):
-            lens += e.nvec.tolist()
-        else:
-            raise ValueError(f'Invalid action space: {e}')
-
-    return gymnasium.spaces.MultiDiscrete(lens)
 
 def make_space_like(ob):
     if type(ob) == np.ndarray:
