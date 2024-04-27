@@ -39,7 +39,11 @@ def flatten_space(space):
     else:
         return [space]
 
-def make_box(space, num_bytes):
+def emulate_observation_space(space):
+    if isinstance(space, pufferlib.spaces.Box):
+        return space, space.dtype
+
+    emulated_dtype = dtype_from_space(space)
     leaves = flatten_space(space)
     dtypes = [e.dtype for e in leaves]
     if dtypes.count(dtypes[0]) == len(dtypes):
@@ -48,44 +52,8 @@ def make_box(space, num_bytes):
         dtype = np.dtype(np.uint8)
 
     mmin, mmax = utils._get_dtype_bounds(dtype)
-    numel = num_bytes // dtype.itemsize
-    return gymnasium.spaces.Box(low=mmin, high=mmax, shape=(numel,), dtype=dtype)
-
-def make_multidiscrete(space):
-    leaves = flatten_space(space)
-    return gymnasium.spaces.MultiDiscrete([e.n for e in leaves])
-
-def fill_with_sample(arr, sample):
-    if isinstance(sample, dict):
-        for k, v in sample.items():
-            fill_with_sample(arr[k], v)
-    elif isinstance(sample, tuple):
-        for i, v in enumerate(sample):
-            fill_with_sample(arr[f'f{i}'], v)
-    else:
-        arr[()] = sample
-
-def fill_from_dtype(dtype, sample):
-    elem = np.zeros(1, dtype=dtype)
-    fill_with_sample(elem, sample)
-    return elem
-
-def unpack_filled_to_space(filled, space):
-    if isinstance(space, pufferlib.spaces.Tuple):
-        return tuple(unpack_filled_to_space(filled[f'f{i}'], elem)
-            for i, elem in enumerate(space))
-    elif isinstance(space, pufferlib.spaces.Dict):
-        return {k: unpack_filled_to_space(filled[k], value)
-            for k, value in space.items()}
-    else:
-        return filled.item()
-
-def emulate_observation_space(space):
-    if isinstance(space, pufferlib.spaces.Box):
-        return space, space.dtype
-
-    emulated_dtype = dtype_from_space(space)
-    emulated_space = make_box(space, emulated_dtype.itemsize)
+    numel = emulated_dtype.itemsize // dtype.itemsize
+    emulated_space = gymnasium.spaces.Box(low=mmin, high=mmax, shape=(numel,), dtype=dtype)
     return emulated_space, emulated_dtype
 
 def emulate_action_space(space):
@@ -93,122 +61,39 @@ def emulate_action_space(space):
         return space, space.dtype
 
     emulated_dtype = dtype_from_space(space)
-    emulated_space = make_multidiscrete(space)
+    leaves = flatten_space(space)
+    emulated_space = gymnasium.spaces.MultiDiscrete([e.n for e in leaves])
     return emulated_space, emulated_dtype
 
 def emulate(sample, sample_dtype, emulated_dtype):
-    return fill_from_dtype(emulated_dtype, sample).view(sample_dtype).ravel()
+    emulated = np.zeros(1, dtype=emulated_dtype)
+    _emulate(emulated, sample)
+    return emulated.view(sample_dtype).ravel()
 
-def nativize_action(action, action_space, emulated_dtype):
-    action = np.array(action).view(emulated_dtype)
-    return unpack_filled_to_space(action, action_space)
-
-import torch
-numpy_to_torch_dtype_dict = {
-    np.dtype('float32') : torch.float32,
-    np.dtype('uint8') : torch.uint8,
-    np.dtype('int16') : torch.int16,
-    np.dtype('int32') : torch.int32,
-    np.dtype('int64') : torch.int64,
-    np.dtype('int8') : torch.int8,
-}
-
-def nativize_tensor(sample, sample_space_dtype, emulated_dtype):
-    '''Pytorch function that traverses obs_dtype and returns a structured
-    object (dicts, lists, etc) with subviews into the observation tensor'''
-    torch_dtype = numpy_to_torch_dtype_dict[sample_space_dtype]
-    sample = sample.to(torch_dtype, copy=False)
-    structured_view = _nativize_tensor(sample, sample_space_dtype, emulated_dtype)
-    return structured_view
-
-def _nativize_tensor(sample, sample_space_dtype, emulated_dtype, offset=0):
-    if emulated_dtype.fields is None:
-        dtype, shape = emulated_dtype.subdtype
-        delta = np.prod(shape) * dtype.itemsize // sample_space_dtype.itemsize
-        slice = sample.narrow(1, offset, delta)
-
-        torch_dtype = numpy_to_torch_dtype_dict[dtype]
-        # Inference should always be contiguous. Seems that LSTM dimenson reshape
-        # breaks this. This is a workaround.
-        slice = slice.view(torch_dtype).contiguous()
-        slice = slice.view(sample.shape[0], *shape).to(torch_dtype, copy=False)
-        return slice
+def _emulate(arr, sample):
+    if isinstance(sample, dict):
+        for k, v in sample.items():
+            _emulate(arr[k], v)
+    elif isinstance(sample, tuple):
+        for i, v in enumerate(sample):
+            _emulate(arr[f'f{i}'], v)
     else:
-        subviews = {}
-        for name, (dtype, offset) in emulated_dtype.fields.items():
-            subviews[name] = _nativize_tensor(sample, dtype, offset)
-        return subviews
+        arr[()] = sample
 
+def _nativize(sample, space):
+    if isinstance(space, pufferlib.spaces.Tuple):
+        return tuple(_nativize(sample[f'f{i}'], elem)
+            for i, elem in enumerate(space))
+    elif isinstance(space, pufferlib.spaces.Dict):
+        return {k: _nativize(sample[k], value)
+            for k, value in space.items()}
+    else:
+        return sample.item()
 
-class Emulator:
-    def __init__(self, observation_space, action_space):
-        self.original_action_space = action_space
+def nativize(sample, sample_space, emulated_dtype):
+    action = np.array(sample).view(emulated_dtype)
+    return _nativize(sample, sample_space)
 
-        obs_is_native = isinstance(observation_space, pufferlib.spaces.Box)
-        if not obs_is_native:
-            self.obs_dtype = dtype_from_space(observation_space)
-            observation_space = make_box(observation_space, self.obs_dtype.itemsize)
-
-        action_is_native = isinstance(action_space, (
-            pufferlib.spaces.Discrete, pufferlib.spaces.MultiDiscrete))
-        if not action_is_native:
-            self.atn_dtype = dtype_from_space(action_space)
-            action_space = make_multidiscrete(action_space)
-
-        self.obs_is_native = obs_is_native
-        self.action_is_native = action_is_native
-        self.observation_space = observation_space
-        self.action_space = action_space
-
-    def emulate(self, observation):
-        if self.obs_is_native:
-            return observation
-
-        return fill_from_dtype(self.obs_dtype, observation).view(
-            self.observation_space.dtype).ravel()
-
-    def nativize(self, observation):
-        if self.obs_is_native:
-            return observation
-
-        return observation.view(self.obs_dtype)
-
-    def _nativize_tensor(self, observation, obs_dtype, offset=0):
-        if obs_dtype.fields is None:
-            obs_space_dtype = self.observation_space.dtype
-            dtype, shape = obs_dtype.subdtype
-            delta = np.prod(shape) * dtype.itemsize // obs_space_dtype.itemsize
-            sliced = observation.narrow(1, offset, delta)
-
-
-            torch_dtype = numpy_to_torch_dtype_dict[dtype]
-            # Inference should always be contiguous. Seems that LSTM dimenson reshape
-            # breaks this. This is a workaround.
-            sliced = sliced.view(torch_dtype).contiguous()
-            sliced = sliced.view(observation.shape[0], *shape).to(torch_dtype, copy=False)
-            return sliced
-        else:
-            subviews = {}
-            for name, (dtype, offset) in obs_dtype.fields.items():
-                subviews[name] = self._nativize_tensor(observation, dtype, offset)
-            return subviews
-
-        pass
-
-    def nativize_tensor(self, observation):
-        '''Pytorch function that traverses obs_dtype and returns a structured
-        object (dicts, lists, etc) with subviews into the observation tensor'''
-        torch_dtype = numpy_to_torch_dtype_dict[self.observation_space.dtype]
-        observation = observation.to(torch_dtype, copy=False)
-        structured_view = self._nativize_tensor(observation, self.obs_dtype)
-        return structured_view
-
-    def nativize_action(self, action):
-        if self.action_is_native:
-            return action
-
-        action = np.array(action).view(self.atn_dtype)
-        return unpack_filled_to_space(action, self.original_action_space)
 
 class GymnasiumPufferEnv(gymnasium.Env):
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={}):
@@ -224,10 +109,6 @@ class GymnasiumPufferEnv(gymnasium.Env):
             self.env.observation_space)
         self.action_space, self.atn_dtype = emulate_action_space(
             self.env.action_space)
-
-        #self.emulator = Emulator(self.env.observation_space, self.env.action_space)
-        #self.observation_space = self.emulator.observation_space
-        #self.action_space = self.emulator.action_space
 
         self.render_modes = 'human rgb_array'.split()
         self.render_mode = 'rgb_array'
@@ -263,7 +144,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
                     action, self.action_space)
 
         # Unpack actions from multidiscrete into the original action space
-        action = nativize_action(action, self.env.action_space, self.atn_dtype)
+        action = nativize(action, self.env.action_space, self.atn_dtype)
         ob, reward, done, truncated, info = self.env.step(action)
         if self.env.observation_space is not self.observation_space:
             ob = emulate(ob, self.observation_space.dtype, self.obs_dtype)
