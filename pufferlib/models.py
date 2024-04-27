@@ -43,7 +43,7 @@ class Policy(nn.Module):
             self.action_space = env.single_action_space
 
         # Used to unflatten observation in forward pass
-        self.obs_dtype = env.obs_dtype
+        #self.obs_dtype = env.obs_dtype
 
         self.is_multidiscrete = isinstance(self.action_space,
                 pufferlib.spaces.MultiDiscrete)
@@ -173,9 +173,11 @@ class Default(Policy):
         '''
         super().__init__(env)
         self.encoder = nn.Linear(self.observation_space.shape[0], hidden_size)
-        self.decoders = nn.ModuleList([nn.Linear(hidden_size, n)
+        self.decoder = nn.ModuleList([nn.Linear(hidden_size, n)
             for n in self.action_space.nvec])
         self.value_head = nn.Linear(hidden_size, 1)
+
+        self.env = env
 
     def forward(self, env_outputs):
         '''Forward pass for PufferLib compatibility'''
@@ -189,7 +191,7 @@ class Default(Policy):
     def decode_actions(self, hidden, lookup, concat=True):
         '''Concatenated linear decoder function'''
         value = self.value_head(hidden)
-        actions = [dec(hidden) for dec in self.decoders]
+        actions = [dec(hidden) for dec in self.decoder]
         return actions, value
 
 class Convolutional(Policy):
@@ -201,11 +203,10 @@ class Convolutional(Policy):
         Takes framestack as a mandatory keyword arguments. Suggested default is 1 frame
         with LSTM or 4 frames without.'''
         super().__init__(env)
-        self.num_actions = self.action_space.n
         self.channels_last = channels_last
         self.downsample = downsample
 
-        self.network = nn.Sequential(
+        self.network= nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Conv2d(framestack, 32, 8, stride=4)),
             nn.ReLU(),
             pufferlib.pytorch.layer_init(nn.Conv2d(32, 64, 4, stride=2)),
@@ -216,8 +217,7 @@ class Convolutional(Policy):
             pufferlib.pytorch.layer_init(nn.Linear(flat_size, hidden_size)),
             nn.ReLU(),
         )
-
-        self.actor = pufferlib.pytorch.layer_init(nn.Linear(output_size, self.num_actions), std=0.01)
+        self.actor= pufferlib.pytorch.layer_init(nn.Linear(hidden_size, env.action_space.n), std=0.01)
         self.value_fn = pufferlib.pytorch.layer_init(nn.Linear(output_size, 1), std=1)
 
     def encode_observations(self, observations):
