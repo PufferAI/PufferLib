@@ -8,6 +8,40 @@ from torch import nn
 
 from pufferlib.frameworks import cleanrl
 
+numpy_to_torch_dtype_dict = {
+    np.dtype('float32') : torch.float32,
+    np.dtype('uint8') : torch.uint8,
+    np.dtype('int16') : torch.int16,
+    np.dtype('int32') : torch.int32,
+    np.dtype('int64') : torch.int64,
+    np.dtype('int8') : torch.int8,
+}
+
+def nativize_tensor(sample, sample_space_dtype, emulated_dtype):
+    '''Pytorch function that traverses obs_dtype and returns a structured
+    object (dicts, lists, etc) with subviews into the observation tensor'''
+    torch_dtype = numpy_to_torch_dtype_dict[sample_space_dtype]
+    sample = sample.to(torch_dtype, copy=False)
+    structured_view = _nativize_tensor(sample, sample_space_dtype, emulated_dtype)
+    return structured_view
+
+def _nativize_tensor(sample, sample_space_dtype, emulated_dtype, offset=0):
+    if emulated_dtype.fields is None:
+        dtype, shape = emulated_dtype.subdtype
+        delta = np.prod(shape) * dtype.itemsize // sample_space_dtype.itemsize
+        slice = sample.narrow(1, offset, delta)
+
+        torch_dtype = numpy_to_torch_dtype_dict[dtype]
+        # Inference should always be contiguous. Seems that LSTM dimenson reshape
+        # breaks this. This is a workaround.
+        slice = slice.view(torch_dtype).contiguous()
+        slice = slice.view(sample.shape[0], *shape).to(torch_dtype, copy=False)
+        return slice
+    else:
+        subviews = {}
+        for name, (dtype, offset) in emulated_dtype.fields.items():
+            subviews[name] = _nativize_tensor(sample, sample_space_dtype, dtype, offset)
+        return subviews
 
 class BatchFirstLSTM(nn.LSTM):
     def __init__(self, *args, **kwargs):
