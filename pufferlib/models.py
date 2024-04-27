@@ -173,11 +173,15 @@ class Default(Policy):
         '''
         super().__init__(env)
         self.encoder = nn.Linear(self.observation_space.shape[0], hidden_size)
-        self.decoder = nn.ModuleList([nn.Linear(hidden_size, n)
-            for n in self.action_space.nvec])
-        self.value_head = nn.Linear(hidden_size, 1)
+        if self.is_multidiscrete:
+            self.decoder = nn.ModuleList([
+                pufferlib.pytorch.layer_init(nn.Linear(hidden_size, n), std=0.01)
+                for n in self.action_space.nvec])
+        else:
+            self.decoder = pufferlib.pytorch.layer_init(
+                nn.Linear(hidden_size, self.action_space.n), std=0.01)
 
-        self.env = env
+        self.value_head = nn.Linear(hidden_size, 1)
 
     def forward(self, env_outputs):
         '''Forward pass for PufferLib compatibility'''
@@ -191,7 +195,11 @@ class Default(Policy):
     def decode_actions(self, hidden, lookup, concat=True):
         '''Concatenated linear decoder function'''
         value = self.value_head(hidden)
-        actions = [dec(hidden) for dec in self.decoder]
+        if self.is_multidiscrete:
+            actions = [dec(hidden) for dec in self.decoder]
+            return actions, value
+
+        actions = self.decoder(hidden)
         return actions, value
 
 class Convolutional(Policy):

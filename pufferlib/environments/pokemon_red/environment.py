@@ -6,6 +6,7 @@ import functools
 from pokegym import Environment
 
 import pufferlib.emulation
+import pufferlib.postprocess
 
 
 def env_creator(name='pokemon_red'):
@@ -14,5 +15,5 @@ def env_creator(name='pokemon_red'):
 def make(name, headless: bool = True, state_path=None):
     '''Pokemon Red'''
     env = Environment(headless=headless, state_path=state_path)
-    return pufferlib.emulation.GymnasiumPufferEnv(env=env,
-        postprocessor_cls=pufferlib.emulation.BasicPostprocessor)
+    env = pufferlib.postprocess.EpisodeStats(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)

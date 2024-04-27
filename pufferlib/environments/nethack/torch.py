@@ -18,10 +18,11 @@ class Policy(pufferlib.models.Policy):
             embedding_dim=32, crop_dim=9, num_layers=5,
             **kwargs):
         super().__init__(env)
+        self.emulated = env.emulated
 
-        self.observation_shape = env.structured_observation_space
-        self.glyph_shape = self.observation_shape["glyphs"].shape
-        self.blstats_size = self.observation_shape["blstats"].shape[0]
+        # TODO: Attr passthrough
+        self.glyph_shape = env.env.observation_space["glyphs"].shape
+        self.blstats_size = env.env.observation_space["blstats"].shape[0]
 
         self.num_actions = env.action_space.n
 
@@ -113,13 +114,13 @@ class Policy(pufferlib.models.Policy):
         out = embed.weight.index_select(0, x.reshape(-1))
         return out.reshape(x.shape + (-1,))
 
-    def encode_observations(self, env_outputs):
-        TB, _ = env_outputs.shape
-        env_outputs = pufferlib.emulation.unpack_batched_obs(
-            env_outputs, self.unflatten_context)
+    def encode_observations(self, observation):
+        TB, _ = observation.shape
+        observation = pufferlib.pytorch.nativize_observation(
+            observation, self.emulated)
 
-        glyphs = env_outputs["glyphs"].long()
-        blstats = env_outputs["blstats"].float()
+        glyphs = observation["glyphs"].long()
+        blstats = observation["blstats"].float()
 
         # BL Stats
         coordinates = blstats[:, :2]

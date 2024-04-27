@@ -3,6 +3,7 @@ import functools
 
 import pufferlib
 import pufferlib.emulation
+import pufferlib.postprocess
 
 
 def env_creator(name='cartpole'):
@@ -16,4 +17,5 @@ def make(name, render_mode='rgb_array'):
         raise ValueError(f'Unknown environment: {name}')
 
     env = env_cls(render_mode=render_mode)
+    env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)

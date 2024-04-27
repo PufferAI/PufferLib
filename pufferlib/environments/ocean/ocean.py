@@ -364,7 +364,7 @@ class Spaces(gymnasium.Env):
             'image': gymnasium.spaces.Box(
                 low=0, high=1, shape=(5, 5), dtype=np.float32),
             'flat': gymnasium.spaces.Box(
-                low=0, high=1, shape=(5,), dtype=np.float32),
+                low=0, high=1, shape=(5,), dtype=np.int8),
         })
         self.action_space = gymnasium.spaces.Dict({
             'image': gymnasium.spaces.Discrete(2),
@@ -374,7 +374,7 @@ class Spaces(gymnasium.Env):
     def reset(self, seed=None):
         self.observation = {
             'image': np.random.randn(5, 5).astype(np.float32),
-            'flat': np.random.randn(5).astype(np.float32),
+            'flat': np.random.randint(-1, 2, (5,), dtype=np.int8),
         }
         self.image_sign = np.sum(self.observation['image']) > 0
         self.flat_sign = np.sum(self.observation['flat']) > 0

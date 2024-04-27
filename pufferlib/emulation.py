@@ -91,9 +91,8 @@ def _nativize(sample, space):
         return sample.item()
 
 def nativize(sample, sample_space, emulated_dtype):
-    action = np.array(sample).view(emulated_dtype)
+    sample = np.array(sample).view(emulated_dtype)
     return _nativize(sample, sample_space)
-
 
 class GymnasiumPufferEnv(gymnasium.Env):
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={}):
@@ -109,6 +108,10 @@ class GymnasiumPufferEnv(gymnasium.Env):
             self.env.observation_space)
         self.action_space, self.atn_dtype = emulate_action_space(
             self.env.action_space)
+        self.emulated = pufferlib.namespace(
+            observation_dtype = self.observation_space.dtype,
+            emulated_observation_dtype = self.obs_dtype,
+        )
 
         self.render_modes = 'human rgb_array'.split()
         self.render_mode = 'rgb_array'
@@ -171,10 +174,14 @@ class PettingZooPufferEnv:
         single_agent = self.possible_agents[0]
         single_observation_space = self.env.observation_space(single_agent)
         single_action_space = self.env.action_space(single_agent)
-        self.obs_dtype = dtype_from_space(single_observation_space)
-        self.atn_dtype = dtype_from_space(single_action_space)
-        self.single_observation_space = make_box(single_observation_space)
-        self.single_action_space = make_multidiscrete(single_action_space)
+        self.single_observation_space, self.obs_dtype = (
+            emulate_observation_space(single_observation_space))
+        self.single_action_space, self.atn_dtype = (
+            emulate_action_space(single_action_space))
+        self.emulated = pufferlib.namespace(
+            observation_dtype = self.single_observation_space.dtype,
+            emulated_observation_dtype = self.obs_dtype,
+        )
 
         self.pad_observation = 0 * self.single_observation_space.sample()
 
@@ -212,10 +219,13 @@ class PettingZooPufferEnv:
         # Call user featurizer and flatten the observations
         ob = list(obs.values())[0]
         for agent in self.possible_agents:
-            if agent in obs:
-                ob = obs[agent]
-                ob = fill_from_dtype(self.obs_dtype, ob).view(self.single_observation_space.dtype).ravel()
-                obs[agent] = ob
+            if agent not in obs:
+                continue
+
+            ob = obs[agent]
+            if self.single_observation_space is not self.single_observation_space:
+                ob = emulate(ob, self.single_observation_space.dtype, self.obs_dtype)
+            obs[agent] = ob
 
         if __debug__:
             if not self.is_observation_checked:
@@ -261,18 +271,21 @@ class PettingZooPufferEnv:
         # Unpack actions from multidiscrete into the original action space
         unpacked_actions = {}
         for agent, atn in actions.items():
-            if agent in self.agents:
-                # Unpack actions from multidiscrete into the original action space
-                atn = np.array(atn).view(self.atn_dtype)
-                atn = unpack_filled_to_space(atn, self.single_action_space)
-                unpacked_actions[agent] = atn
+            if agent not in self.agents:
+                continue
+
+            if self.single_action_space is not self.single_action_space:
+                atn = nativize(atn, self.single_action_space, self.atn_dtype)
+
+            unpacked_actions[agent] = atn
 
         obs, rewards, dones, truncateds, infos = self.env.step(unpacked_actions)
         # TODO: Can add this assert once NMMO Horizon is ported to puffer
         # assert all(dones.values()) == (len(self.env.agents) == 0)
         for agent in obs:
             ob = obs[agent] 
-            ob = fill_from_dtype(self.obs_dtype, ob).view(self.single_observation_space.dtype).ravel()
+            if self.single_observation_space is not self.single_observation_space:
+                ob = emulate(ob, self.single_observation_space.dtype, self.obs_dtype)
             obs[agent] = ob
      
         self.all_done = all(dones.values())

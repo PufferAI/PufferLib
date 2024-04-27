@@ -17,6 +17,13 @@ numpy_to_torch_dtype_dict = {
     np.dtype('int8') : torch.int8,
 }
 
+def nativize_observation(observation, emulated):
+    return nativize_tensor(
+        observation,
+        emulated.observation_space_dtype,
+        emulated.emulated_observation_dtype,
+    )
+ 
 def nativize_tensor(sample, sample_space_dtype, emulated_dtype):
     '''Pytorch function that traverses obs_dtype and returns a structured
     object (dicts, lists, etc) with subviews into the observation tensor'''

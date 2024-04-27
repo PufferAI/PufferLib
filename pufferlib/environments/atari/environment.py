@@ -35,8 +35,7 @@ def make(name, framestack=4, render_mode='rgb_array'):
     env = gym.wrappers.ResizeObservation(env, (84, 84))
     env = gym.wrappers.GrayScaleObservation(env)
     env = gym.wrappers.FrameStack(env, framestack)
-    return pufferlib.emulation.GymnasiumPufferEnv(
-        env=env, postprocessor_cls=AtariFeaturizer)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 # Broken in SB3
 class NoopResetEnv(gym.Wrapper):
@@ -68,40 +67,3 @@ class NoopResetEnv(gym.Wrapper):
             if done:
                 obs = self.env.reset(**kwargs)
         return obs, {}
-
-class AtariFeaturizer(pufferlib.emulation.Postprocessor):
-    def reset(self, obs):
-        self.epoch_return = 0
-        self.epoch_length = 0
-        self.done = False
-
-    #@property
-    #def observation_space(self):
-    #    return gym.spaces.Box(0, 255, (1, 84, 84), dtype=np.uint8)
-
-    def observation(self, obs):
-        return np.array(obs)
-        return np.array(obs[1], dtype=np.float32)
-
-    def reward_done_truncated_info(self, reward, done, truncated, info):
-        return reward, done, truncated, info
-        if 'lives' in info:
-            if info['lives'] == 0 and done:
-                info['return'] = info['episode']['r']
-                info['length'] = info['episode']['l']
-                info['time'] = info['episode']['t']
-                return reward, True, info
-            return reward, False, info
-
-        if self.done:
-            return reward, done, info
-
-        if done:
-            info['return'] = self.epoch_return
-            info['length'] = self.epoch_length
-            self.done = True
-        else:
-            self.epoch_length += 1
-            self.epoch_return += reward
-
-        return reward, done, info
