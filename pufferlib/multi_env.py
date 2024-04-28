@@ -22,10 +22,11 @@ def create_precheck(env_creator, env_args, env_kwargs):
     return env_args, env_kwargs
 
 def __init__(self, env_creator: callable = None, env_args: list = [],
-        env_kwargs: dict = {}, n: int = 1):
+        env_kwargs: dict = {}, n: int = 1, mask_agents=False):
     env_args, env_kwargs = create_precheck(env_creator, env_args, env_kwargs)
     self.envs = [env_creator(*env_args, **env_kwargs) for _ in range(n)]
     self.preallocated_obs = None
+    self.mask_agents = mask_agents
 
 def put(state, *args, **kwargs):
     for e in state.envs:
@@ -114,6 +115,7 @@ class PettingZooMultiEnv:
             self.preallocated_rewards = np.empty(n, dtype=np.float32)
             self.preallocated_dones = np.empty(n, dtype=bool)
             self.preallocated_truncateds = np.empty(n, dtype=bool)
+            self.preallocated_masks = np.empty(n, dtype=bool)
 
         self.agent_keys = []
         infos = []
@@ -125,10 +127,17 @@ class PettingZooMultiEnv:
                 obs, i = e.reset(seed=hash(1000*seed + idx))
 
             self.agent_keys.append(list(obs.keys()))
+
+            # Delete empty keys
+            for k in list(i):
+                if not i[k]:
+                    del i[k]
+
             infos.append(i)
 
-            for o in obs.values():
+            for o, m in zip(obs.values(), e.mask.values()):
                 self.preallocated_obs[ptr] = o
+                self.preallocated_masks[ptr] = m
                 ptr += 1
 
         self.preallocated_rewards[:] = 0
@@ -163,6 +172,12 @@ class PettingZooMultiEnv:
                 self.preallocated_rewards[start:end] = list(r.values())
                 self.preallocated_dones[start:end] = list(d.values())
                 self.preallocated_truncateds[start:end] = list(t.values())
+                self.preallocated_masks[start:end] = list(env.mask.values())
+
+            # Delete empty keys
+            for k in list(i):
+                if not i[k]:
+                    del i[k]
 
             infos.append(i)
             self.agent_keys[idx] = list(o.keys())

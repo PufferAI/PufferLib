@@ -120,35 +120,37 @@ def step(self, actions):
     return self.recv()[:-1]
 
 def aggregate_recvs(state, recvs):
-    obs, rewards, dones, truncateds, infos, env_ids = list(zip(*recvs))
+    if state.mask_agents:
+        obs, rewards, dones, truncateds, infos, env_ids, mask = list(zip(*recvs))
+    else:
+        obs, rewards, dones, truncateds, infos, env_ids = list(zip(*recvs))
+
     assert all(state.workers_per_batch == len(e) for e in
         (obs, rewards, dones, truncateds, infos, env_ids))
+
+    if state.mask_agents:
+        assert state.workers_per_batch == len(mask)
 
     obs = np.concatenate(obs)
     rewards = np.concatenate(rewards)
     dones = np.concatenate(dones)
     truncateds = np.concatenate(truncateds)
     infos = [i for ii in infos for i in ii]
-    
-    #obs_space = state.driver_env.structured_observation_space
-    #if isinstance(obs_space, pufferlib.spaces.Box):
-    #    obs = obs.reshape(obs.shape[0], *obs_space.shape)
-
-    # TODO: Masking will break for 1-agent PZ envs
-    # Replace with check against is_multiagent (add it to state)
-    if state.agents_per_env > 1:
-        mask = [e['mask'] for ee in infos for e in ee.values()]
-    else:
-        mask = [e['mask'] for e in infos]
+   
+    obs_space = state.driver_env.env.observation_space
+    if isinstance(obs_space, pufferlib.spaces.Box):
+        obs = obs.reshape(obs.shape[0], *obs_space.shape)
 
     env_ids = np.concatenate([np.arange( # Per-agent env indexing
         i*state.agents_per_worker, (i+1)*state.agents_per_worker) for i in env_ids])
 
     assert all(state.agents_per_batch == len(e) for e in
-        (obs, rewards, dones, truncateds, env_ids, mask))
+        (obs, rewards, dones, truncateds, env_ids))
     assert len(infos) == state.envs_per_batch
 
     if state.mask_agents:
+        mask = np.concatenate(mask)
+        assert state.agents_per_batch == len(mask)
         return obs, rewards, dones, truncateds, infos, env_ids, mask
 
     return obs, rewards, dones, truncateds, infos, env_ids
@@ -160,7 +162,6 @@ def split_actions(state, actions, env_id=None):
 
     assert len(actions) == state.agents_per_batch
     return np.array_split(actions, state.workers_per_batch)
-
 
 class Serial:
     '''Runs environments in serial on the main process
@@ -230,18 +231,18 @@ class Serial:
         for e in self.multi_envs:
             e.close()
 
-def _unpack_shared_mem(shared_mem, n):
-    np_buf = np.frombuffer(shared_mem.get_obj(), dtype=float)
-    obs_arr = np_buf[:-3*n]
-    rewards_arr = np_buf[-3*n:-2*n]
-    terminals_arr = np_buf[-2*n:-n]
-    truncated_arr = np_buf[-n:]
-
-    return obs_arr, rewards_arr, terminals_arr, truncated_arr
+def _unpack_shared_mem(shared_mem, observation_dtype):
+    obs_mem, rewards_mem, terminals_mem, truncated_mem, mask_mem = shared_mem
+    obs_arr = np.frombuffer(obs_mem, dtype=observation_dtype)
+    rewards_arr = np.frombuffer(rewards_mem, dtype=np.float32)
+    terminals_arr = np.frombuffer(terminals_mem, dtype=bool)
+    truncated_arr = np.frombuffer(truncated_mem, dtype=bool)
+    mask_arr = np.frombuffer(mask_mem, dtype=bool)
+    return obs_arr, rewards_arr, terminals_arr, truncated_arr, mask_arr
 
 def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
         agents_per_env, envs_per_worker,
-        worker_idx, shared_mem, send_pipe, recv_pipe):
+        worker_idx, shared_mem, observation_dtype, send_pipe, recv_pipe):
     
     # I don't know if this helps. Sometimes it does, sometimes not.
     # Need to run more comprehensive tests
@@ -249,8 +250,9 @@ def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
     #curr_process.cpu_affinity([worker_idx])
 
     envs = multi_env_cls(env_creator, env_args, env_kwargs, n=envs_per_worker)
-    obs_arr, rewards_arr, terminals_arr, truncated_arr = _unpack_shared_mem(
-        shared_mem, agents_per_env * envs_per_worker)
+
+    obs_arr, rewards_arr, terminals_arr, truncated_arr, mask_arr = _unpack_shared_mem(
+        shared_mem, observation_dtype)
 
     while True:
         request, args, kwargs = recv_pipe.recv()
@@ -268,9 +270,9 @@ def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
             rewards_arr[:] = reward.ravel()
             terminals_arr[:] = done.ravel()
             truncated_arr[:] = truncated.ravel()
+            mask_arr[:] = envs.preallocated_masks
 
         send_pipe.send(info)
-
 
 class Multiprocessing:
     '''Runs environments in parallel using multiprocessing
@@ -306,9 +308,13 @@ class Multiprocessing:
 
         # Shared memory for obs, rewards, terminals, truncateds
         from multiprocessing import Process, Manager, Pipe, Array
-        shared_mem = [
-            Array('d', agents_per_worker*(3+observation_size))
-            for _ in range(num_workers)
+        shared_mem = [(
+            Array(np.ctypeslib.as_ctypes_type(observation_dtype), agents_per_worker*observation_size, lock=False),
+            Array('f', agents_per_worker, lock=False),
+            Array('b', agents_per_worker, lock=False),
+            Array('b', agents_per_worker, lock=False),
+            Array('b', agents_per_worker, lock=False)
+            ) for _ in range(num_workers)
         ]
         main_send_pipes, work_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
         work_send_pipes, main_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
@@ -318,7 +324,7 @@ class Multiprocessing:
             target=_worker_process,
             args=(multi_env_cls, env_creator, env_args, env_kwargs,
                   agents_per_env, envs_per_worker,
-                  i%(num_cores-1), shared_mem[i],
+                  i%(num_cores-1), shared_mem[i], observation_dtype,
                   work_send_pipes[i], work_recv_pipes[i])
             ) for i in range(num_workers)
         ]
@@ -366,13 +372,16 @@ class Multiprocessing:
 
                     if response_pipe.poll():
                         info = response_pipe.recv()
-                        o, r, d, t = _unpack_shared_mem(
-                            self.shared_mem[env_id], self.agents_per_env * self.envs_per_worker)
+                        o, r, d, t, m = _unpack_shared_mem(self.shared_mem[env_id], self.observation_dtype)
                         o = o.reshape(
                             self.agents_per_env*self.envs_per_worker,
                             self.observation_size).astype(self.observation_dtype)
 
-                        recvs.append((o, r, d, t, info, env_id))
+                        if self.mask_agents:
+                            recvs.append((o, r, d, t, info, env_id, m))
+                        else:
+                            recvs.append((o, r, d, t, info, env_id))
+
                         next_env_id.append(env_id)
 
                     if len(recvs) == self.workers_per_batch:                    

@@ -178,6 +178,8 @@ class PettingZooPufferEnv:
             emulate_observation_space(single_observation_space))
         self.single_action_space, self.atn_dtype = (
             emulate_action_space(single_action_space))
+        self.is_obs_emulated = self.single_observation_space is not single_observation_space
+        self.is_atn_emulated = self.single_action_space is not single_action_space
         self.emulated = pufferlib.namespace(
             observation_dtype = self.single_observation_space.dtype,
             emulated_observation_dtype = self.obs_dtype,
@@ -215,6 +217,7 @@ class PettingZooPufferEnv:
         obs, info = self.env.reset(seed=seed)
         self.initialized = True
         self.all_done = False
+        self.mask = {k: False for k in self.possible_agents}
 
         # Call user featurizer and flatten the observations
         ob = list(obs.values())[0]
@@ -223,9 +226,10 @@ class PettingZooPufferEnv:
                 continue
 
             ob = obs[agent]
-            if self.single_observation_space is not self.single_observation_space:
+            if self.is_obs_emulated:
                 ob = emulate(ob, self.single_observation_space.dtype, self.obs_dtype)
             obs[agent] = ob
+            self.mask[agent] = True
 
         if __debug__:
             if not self.is_observation_checked:
@@ -237,16 +241,7 @@ class PettingZooPufferEnv:
         padded_obs = pad_agent_data(obs,
             self.possible_agents, self.pad_observation)
 
-        # Mask out missing agents
-        padded_infos = {}
-        for agent in self.possible_agents:
-            if agent not in info:
-                padded_infos[agent] = {}
-            else:
-                padded_infos[agent] = info[agent]
-            padded_infos[agent]['mask'] = agent in obs
-
-        return padded_obs, padded_infos
+        return padded_obs, info
 
     def step(self, actions):
         '''Step the environment and return (observations, rewards, dones, infos)'''
@@ -274,7 +269,7 @@ class PettingZooPufferEnv:
             if agent not in self.agents:
                 continue
 
-            if self.single_action_space is not self.single_action_space:
+            if self.is_atn_emulated:
                 atn = nativize(atn, self.single_action_space, self.atn_dtype)
 
             unpacked_actions[agent] = atn
@@ -282,22 +277,15 @@ class PettingZooPufferEnv:
         obs, rewards, dones, truncateds, infos = self.env.step(unpacked_actions)
         # TODO: Can add this assert once NMMO Horizon is ported to puffer
         # assert all(dones.values()) == (len(self.env.agents) == 0)
+        self.mask = {k: False for k in self.possible_agents}
         for agent in obs:
             ob = obs[agent] 
-            if self.single_observation_space is not self.single_observation_space:
+            self.mask[agent] = True
+            if self.is_obs_emulated:
                 ob = emulate(ob, self.single_observation_space.dtype, self.obs_dtype)
             obs[agent] = ob
      
         self.all_done = all(dones.values())
-
-        # Mask out missing agents
-        for agent in self.possible_agents:
-            if agent not in infos:
-                infos[agent] = {}
-            else:
-                infos[agent] = infos[agent]
-            infos[agent]['mask'] = agent in obs
-
         obs = pad_agent_data(obs, self.possible_agents, self.pad_observation)
         rewards = pad_agent_data(rewards, self.possible_agents, 0)
         dones = pad_agent_data(dones, self.possible_agents, False)
