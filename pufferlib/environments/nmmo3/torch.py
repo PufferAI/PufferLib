@@ -4,11 +4,9 @@ from torch import nn
 import pufferlib.models
 import pufferlib.pytorch
 
-'''
 class Recurrent(pufferlib.models.RecurrentWrapper):
     def __init__(self, env, policy, input_size=256, hidden_size=256, num_layers=1):
         super().__init__(env, policy, input_size, hidden_size, num_layers)
-'''
 
 @torch.compiler.disable
 def decode_map(codes):
@@ -65,7 +63,6 @@ class Policy(pufferlib.models.Policy):
 
     def encode_observations(self, observations, unflatten=True):
         batch = observations.shape[0]
-        '''
         if unflatten:
             x = pufferlib.pytorch.nativize_observation(observations, self.emulated)
         else:
@@ -73,14 +70,13 @@ class Policy(pufferlib.models.Policy):
 
         with torch.no_grad():
             ob_map = decode_map(x['map']).float()
-        '''
 
-        #player = x['player']
+        player = x['player']
         #ob_map = self.ob_map[:batch]
-        player = self.players[:batch]
+        #player = self.players[:batch]
 
-        #ob_map = self.map_2d(ob_map)
-        ob_map = self.map_emb[:batch]
+        ob_map = self.map_2d(ob_map)
+        #ob_map = self.map_emb[:batch]
 
         ob_player = self.embed(player)
         #ob_player = self.embed(x['player'].int())

@@ -20,7 +20,7 @@ numpy_to_torch_dtype_dict = {
 def nativize_observation(observation, emulated):
     return nativize_tensor(
         observation,
-        emulated.observation_space_dtype,
+        emulated.observation_dtype,
         emulated.emulated_observation_dtype,
     )
  
@@ -29,7 +29,7 @@ def nativize_tensor(sample, sample_space_dtype, emulated_dtype):
     object (dicts, lists, etc) with subviews into the observation tensor'''
     torch_dtype = numpy_to_torch_dtype_dict[sample_space_dtype]
     sample = sample.to(torch_dtype, copy=False)
-    structured_view = _nativize_tensor(sample, sample_space_dtype, emulated_dtype)
+    structured_view, _ = _nativize_tensor(sample, sample_space_dtype, emulated_dtype)
     return structured_view
 
 def _nativize_tensor(sample, sample_space_dtype, emulated_dtype, offset=0):
@@ -43,12 +43,60 @@ def _nativize_tensor(sample, sample_space_dtype, emulated_dtype, offset=0):
         # breaks this. This is a workaround.
         slice = slice.view(torch_dtype).contiguous()
         slice = slice.view(sample.shape[0], *shape).to(torch_dtype, copy=False)
-        return slice
+        return slice, offset+delta
     else:
         subviews = {}
-        for name, (dtype, offset) in emulated_dtype.fields.items():
-            subviews[name] = _nativize_tensor(sample, sample_space_dtype, dtype, offset)
-        return subviews
+        for name, (dtype, _) in emulated_dtype.fields.items():
+            subviews[name], offset = _nativize_tensor(sample, sample_space_dtype, dtype, offset)
+        return subviews, offset
+
+# TODO: Double check this non-recursive version. The recursive one messes
+# up torch.compile for some reason.
+def nativize_tensor(sample, sample_space_dtype, emulated_dtype):
+    """Converts a flat observation tensor into a structured object based on
+    the provided dtype description without using recursion."""
+    torch_dtype = numpy_to_torch_dtype_dict[sample_space_dtype]
+    sample = sample.to(torch_dtype, copy=False)
+
+    stack = [(emulated_dtype, 0)]  # Start with the full dtype and an initial offset of 0
+    subviews = {}
+    offsets = {}
+
+    while stack:
+        current_dtype, offset = stack.pop()
+        
+        if current_dtype.fields is None:
+            # Handle simple data types (non-structured)
+            dtype, shape = current_dtype.subdtype
+            delta = np.prod(shape) * dtype.itemsize // sample_space_dtype.itemsize
+            slice = sample.narrow(1, offset, delta)
+            
+            # Ensure tensor is in the right dtype and shape
+            torch_dtype = numpy_to_torch_dtype_dict[dtype]
+            slice = slice.view(torch_dtype).contiguous()
+            slice = slice.view(sample.shape[0], *shape).to(torch_dtype, copy=False)
+
+            # Store the subview in the dictionary using a unique key based on dtype
+            offsets[dtype.name] = (slice, offset + delta)
+        else:
+            # Handle structured data types
+            for name, (dtype, _) in current_dtype.fields.items():
+                if dtype.fields:
+                    stack.append((dtype, offset))
+                else:
+                    # Calculate simple type within a structure
+                    dtype, shape = dtype.subdtype
+                    delta = np.prod(shape) * dtype.itemsize // sample_space_dtype.itemsize
+                    slice = sample.narrow(1, offset, delta)
+
+                    torch_dtype = numpy_to_torch_dtype_dict[dtype]
+                    slice = slice.view(torch_dtype).contiguous()
+                    slice = slice.view(sample.shape[0], *shape).to(torch_dtype, copy=False)
+                    
+                    subviews[name] = slice
+                    offset += delta
+
+    return subviews
 
 class BatchFirstLSTM(nn.LSTM):
     def __init__(self, *args, **kwargs):

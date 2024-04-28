@@ -56,6 +56,7 @@ class GymnasiumMultiEnv:
             self.preallocated_rewards = np.empty(n_envs, dtype=np.float32)
             self.preallocated_dones = np.empty(n_envs, dtype=bool)
             self.preallocated_truncateds = np.empty(n_envs, dtype=bool)
+            self.preallocated_masks = np.ones(n_envs, dtype=bool)
 
         infos = []
         for idx, e in enumerate(self.envs):

@@ -617,8 +617,35 @@ nmmo:
 
 nmmo3:
   package: nmmo3
+  train:
+    total_timesteps: 10_000_000_000
+    num_envs: 64
+    envs_per_worker: 1
+    envs_per_batch: 24
+    update_epochs: 1
+    gamma: 0.998
+    #batch_size: 32768
+    batch_size: 196608
+    batch_rows: 1024
+    #batch_rows: 256
+    compile: True
   env:
     name: nmmo3
+    num_envs: 1 # NMMO3 provides its own fast multienv
+    #num_envs: 8 # NMMO3 provides its own fast multienv
+
+nmmo3debug:
+  package: nmmo3
+  train:
+    total_timesteps: 10_000_000
+    num_envs: 1
+    envs_per_worker: 1
+    envs_per_batch: 1
+    update_epochs: 1
+    gamma: 0.998
+    batch_size: 4096
+    batch_rows: 128
+
 
 # Ocean: PufferAI's first party environment suite
 ocean:

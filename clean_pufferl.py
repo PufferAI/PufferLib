@@ -13,6 +13,7 @@ from datetime import timedelta
 import torch
 import torch.nn as nn
 import torch.optim as optim
+torch.set_float32_matmul_precision('high')
 
 import pufferlib
 import pufferlib.utils
