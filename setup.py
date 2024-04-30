@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 from Cython.Build import cythonize
 from itertools import chain
 
-VERSION = '0.7.3'
+VERSION = '1.0.0'
 
 # Default Gym/Gymnasium/PettingZoo versions
 # Gym:
