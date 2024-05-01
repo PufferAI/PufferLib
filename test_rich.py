@@ -26,6 +26,7 @@ ROUND_OPEN = rich.box.Box(
 
 c1 = '[bright_cyan]'
 c2 = '[white]'
+c3 = '[cyan]'
 b1 = '[bright_cyan]'
 b2 = '[bright_white]'
 
@@ -50,70 +51,69 @@ def duration(seconds):
 def print_dashboard(total_uptime, estimated_time, total_steps, steps_per_second, latency, performance_data, loss_data, user_data, min_interval=0.25, last_print=[0]):
     console = Console()
 
-    table = Table(box=ROUND_OPEN, expand=True, show_header=False, width=80)
-    util = Table(box=None, expand=True)
+    util = Table(box=None, expand=True, show_header=False)
     cpu_percent = psutil.cpu_percent()
     dram_percent = psutil.virtual_memory().percent
     gpus = GPUtil.getGPUs()
     gpu_percent = gpus[0].load * 100 if gpus else 0
     vram_percent = gpus[0].memoryUtil * 100 if gpus else 0
-
     util.add_column(justify="left")
     util.add_column(justify="center")
     util.add_column(justify="center")
     util.add_column(justify="center")
     util.add_column(justify="right")
     util.add_row(
-        f':blowfish: {c1}PufferLib {c2}1.0.0',
-        f'{c1}CPU: {c2}{cpu_percent:.1f}%',
-        f'{c1}GPU: {c2}{gpu_percent:.1f}%',
-        f'{c1}DRAM: {c2}{dram_percent:.1f}%',
-        f'{c1}VRAM: {c2}{vram_percent:.1f}%',
+        f':blowfish: {c1}PufferLib {b2}1.0.0',
+        f'{c1}CPU: {c3}{cpu_percent:.1f}%',
+        f'{c1}GPU: {c3}{gpu_percent:.1f}%',
+        f'{c1}DRAM: {c3}{dram_percent:.1f}%',
+        f'{c1}VRAM: {c3}{vram_percent:.1f}%',
     )
         
     summary= Table(box=None, expand=True)
-    summary.add_column(f"{c1}Summary", vertical='top')
-    summary.add_row(f'{c1}Uptime: {c2}{duration(total_uptime)}')
-    summary.add_row(f'{c1}Estim: {c2}{duration(estimated_time)}')
-    summary.add_row(f'{c1}Agent Steps: {c2}{abbreviate(total_steps)}')
-    summary.add_row(f'{c1}Steps/sec: {c2}{abbreviate(steps_per_second)}{c1}')
-    summary.add_row(f'{c1}sec/Batch: {c2}{latency}{c1}')
-    
+    summary.add_column(f"{c1}Summary", justify='left', vertical='top')
+    summary.add_column(f"{c1}Value", justify='right', vertical='top')
+    summary.add_row(f'{c2}Epoch', f'{b2}{102}')
+    summary.add_row(f'{c2}Uptime', f'{b2}{duration(total_uptime)}')
+    summary.add_row(f'{c2}Estim', f'{b2}{duration(estimated_time)}')
+    summary.add_row(f'{c2}Agent Steps', f'{b2}{abbreviate(total_steps)}')
+    summary.add_row(f'{c2}Steps/sec', f'{b2}{abbreviate(steps_per_second)}')
+    summary.add_row(f'{c2}sec/Batch', f'{b2}{latency}')
+   
     perf = Table(box=None, expand=True)
-    perf.add_column(f"{c1}Performance", justify="right", ratio=1.0)
-    perf.add_column(f"{c1}Time", justify="left", ratio=0.5)
+    perf.add_column(f"{c1}Performance", justify="left", ratio=1.0)
+    perf.add_column(f"{c1}Time", justify="right", ratio=0.5)
     for metric, value in performance_data.items():
         perf.add_row(f'{c2}{metric}', f'{b2}{value}')
 
     losses = Table(box=None, expand=True)
-    losses.add_column(f'{c1}Losses', justify="right", ratio=1.0)
-    losses.add_column(f'{c1}Value', justify="left", ratio=0.5)
+    losses.add_column(f'{c1}Losses', justify="left", ratio=1.0)
+    losses.add_column(f'{c1}Value', justify="right", ratio=0.5)
     for metric, value in loss_data.items():
         losses.add_row(f'{c2}{metric}', f'{b2}{value}')
 
     monitor = Table(box=None, expand=True, pad_edge=False)
     monitor.add_row(summary, perf, losses)
 
-    user = Table(box=None, expand=True)
+    user = Table(box=None, expand=True, pad_edge=False)
     user1 = Table(box=None, expand=True)
     user2 = Table(box=None, expand=True)
     user.add_row(user1, user2)
-    user1.add_column(f"{c1}User Stats", justify="right", ratio=1.0)
-    user1.add_column(f"{c1}Value", justify="left",ratio=1.0)
-    user2.add_column(f"{c1}User Stats", justify="right", ratio=1.0)
-    user2.add_column(f"{c1}Value", justify="left",ratio=1.0)
+    user1.add_column(f"{c1}User Stats", justify="left", ratio=1.0)
+    user1.add_column(f"{c1}Value", justify="right",ratio=1.0)
+    user2.add_column(f"{c1}User Stats", justify="left", ratio=1.0)
+    user2.add_column(f"{c1}Value", justify="right",ratio=1.0)
     i = 0
     for metric, value in user_data.items():
         u = user1 if i % 2 == 0 else user2
         u.add_row(f'{c2}{metric}', f'{b2}{value}')
         i += 1
 
+    table = Table(box=ROUND_OPEN, expand=True, show_header=False, width=80, border_style='bright_cyan')
     table.add_row(util)
     table.add_row(monitor)
     table.add_row(user)
-
     console.print(table)
-
 
 
 class Dashboard:
