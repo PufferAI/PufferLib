@@ -391,12 +391,16 @@ class Multiprocessing:
                 response_pipe = self.recv_pipes[env_id]
                 info = response_pipe.recv()
                 o, r, d, t = _unpack_shared_mem(
-                    self.shared_mem[env_id], self.agents_per_env * self.envs_per_worker)
+                    self.shared_mem[env_id], self.observation_dtype)
                 o = o.reshape(
                     self.agents_per_env*self.envs_per_worker,
                     self.observation_size).astype(self.observation_dtype)
 
-                recvs.append((o, r, d, t, info, env_id))
+                if self.mask_agents:
+                    recvs.append((o, r, d, t, info, env_id, m))
+                else:
+                    recvs.append((o, r, d, t, info, env_id))
+                    
                 next_env_id.append(env_id)
 
         self.prev_env_id = next_env_id
