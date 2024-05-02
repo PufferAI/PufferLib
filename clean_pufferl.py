@@ -25,6 +25,19 @@ import pufferlib.policy_pool
 
 @pufferlib.dataclass
 class Performance:
+    uptime = 0
+    epoch = 0
+    epoch_sps = 0
+    agent_steps = 0
+    train_time = 0
+    eval_time = 0
+    env_time = 0
+    forward_time = 0
+    misc_time = 0
+    alloc_time = 0
+    backward_time = 0
+
+    '''
     total_uptime = 0
     total_updates = 0
     total_agent_steps = 0
@@ -43,6 +56,7 @@ class Performance:
     train_memory = 0
     train_pytorch_memory = 0
     misc_time = 0
+    '''
 
 @pufferlib.dataclass
 class Losses:
@@ -53,12 +67,6 @@ class Losses:
     approx_kl = 0
     clipfrac = 0
     explained_variance = 0
-
-@pufferlib.dataclass
-class Charts:
-    global_step = 0
-    SPS = 0
-    learning_rate = 0
 
 def create(
         self: object = None,
@@ -332,24 +340,6 @@ def evaluate(data):
         with env_profiler:
             data.pool.send(actions)
 
-    eval_profiler.stop()
-
-    data.global_step += padded_steps_collected
-    data.reward = float(torch.mean(data.rewards))
-    data.SPS = int(padded_steps_collected / eval_profiler.elapsed)
-
-    perf = data.performance
-    perf.total_uptime = int(time.time() - data.start_time)
-    perf.total_agent_steps = data.global_step
-    perf.env_time = env_profiler.elapsed
-    perf.env_sps = int(agent_steps_collected / env_profiler.elapsed)
-    perf.inference_time = inference_profiler.elapsed
-    perf.inference_sps = int(padded_steps_collected / inference_profiler.elapsed)
-    perf.eval_time = eval_profiler.elapsed
-    perf.eval_sps = int(padded_steps_collected / eval_profiler.elapsed)
-    perf.eval_memory = eval_profiler.end_mem
-    perf.eval_pytorch_memory = eval_profiler.end_torch_mem
-    perf.misc_time = misc_profiler.elapsed
 
     data.stats = {}
     infos = infos['learner']
@@ -376,8 +366,16 @@ def evaluate(data):
         except:
             continue
 
-    if config.verbose:
-        print_dashboard(data.stats, data.init_performance, data.performance)
+    eval_profiler.stop()
+    data.global_step += padded_steps_collected
+    data.reward = float(torch.mean(data.rewards))
+    data.SPS = int(padded_steps_collected / eval_profiler.elapsed)
+
+    perf = data.performance
+    perf.eval_time = eval_profiler.elapsed
+    perf.inference_time = inference_profiler.elapsed
+    perf.env_time = env_profiler.elapsed
+    perf.misc_time = misc_profiler.elapsed
 
     return data.stats, infos
 
@@ -397,6 +395,7 @@ def train(data):
         lrnow = frac * config.learning_rate
         data.optimizer.param_groups[0]["lr"] = lrnow
 
+    start_time = time.time()
     num_minibatches = config.batch_size // config.bptt_horizon // config.batch_rows
     idxs = sorted(range(len(data.sort_keys)), key=data.sort_keys.__getitem__)
     data.sort_keys = []
@@ -406,23 +405,33 @@ def train(data):
         .reshape(config.batch_rows, num_minibatches, config.bptt_horizon)
         .transpose(0, 1)
     )
+    #print('Make idx time:', time.time() - start_time)
+    start_time = time.time()
 
     # bootstrap value if not done
+    dones_np = data.dones.numpy()
+    values_np = data.values.numpy()
+    rewards_np = data.rewards.numpy()
     with torch.no_grad():
-        advantages = torch.zeros(config.batch_size, device=data.device)
+        advantages = np.zeros(config.batch_size)
         lastgaelam = 0
         for t in reversed(range(config.batch_size)):
             i, i_nxt = idxs[t], idxs[t + 1]
-            nextnonterminal = 1.0 - data.dones[i_nxt]
-            nextvalues = data.values[i_nxt]
+
+            nextnonterminal = 1.0 - dones_np[i_nxt]
+            nextvalues = values_np[i_nxt]
             delta = (
-                data.rewards[i_nxt]
+                rewards_np[i_nxt]
                 + config.gamma * nextvalues * nextnonterminal
-                - data.values[i]
+                - values_np[i]
             )
             advantages[t] = lastgaelam = (
                 delta + config.gamma * config.gae_lambda * nextnonterminal * lastgaelam
             )
+
+    advantages = torch.from_numpy(advantages).to(data.device)
+    #print('Advantages time:', time.time() - start_time)   
+    start_time = time.time()
 
     # Flatten the batch
     b_obs = torch.as_tensor(data.obs_ary[b_idxs])
@@ -443,6 +452,7 @@ def train(data):
     train_time = time.time()
     pg_losses, entropy_losses, v_losses, clipfracs, old_kls, kls = [], [], [], [], [], []
     mb_obs_buffer = torch.zeros_like(b_obs[0], pin_memory=(data.device=="cuda"))
+    #print('Make batch time:', time.time() - start_time)
 
     for epoch in range(config.update_epochs):
         lstm_state = None
@@ -471,11 +481,11 @@ def train(data):
             with torch.no_grad():
                 # calculate approx_kl http://joschu.net/blog/kl-approx.html
                 old_approx_kl = (-logratio).mean()
-                old_kls.append(old_approx_kl.item())
+                old_kls.append(old_approx_kl)#.item())
                 approx_kl = ((ratio - 1) - logratio).mean()
-                kls.append(approx_kl.item())
+                kls.append(approx_kl)#.item())
                 clipfracs += [
-                    ((ratio - 1.0).abs() > config.clip_coef).float().mean().item()
+                    ((ratio - 1.0).abs() > config.clip_coef).float().mean()#.item()
                 ]
 
             mb_advantages = mb_advantages.reshape(-1)
@@ -490,7 +500,7 @@ def train(data):
                 ratio, 1 - config.clip_coef, 1 + config.clip_coef
             )
             pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-            pg_losses.append(pg_loss.item())
+            pg_losses.append(pg_loss)#.item())
 
             # Value loss
             newvalue = newvalue.view(-1)
@@ -506,10 +516,10 @@ def train(data):
                 v_loss = 0.5 * v_loss_max.mean()
             else:
                 v_loss = 0.5 * ((newvalue - mb_returns) ** 2).mean()
-            v_losses.append(v_loss.item())
+            v_losses.append(v_loss)#.item())
 
             entropy_loss = entropy.mean()
-            entropy_losses.append(entropy_loss.item())
+            entropy_losses.append(entropy_loss)#.item())
 
             loss = pg_loss - config.ent_coef * entropy_loss + v_loss * config.vf_coef
             data.optimizer.zero_grad()
@@ -525,30 +535,41 @@ def train(data):
     y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
     var_y = np.var(y_true)
     explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
-
-    losses = data.losses
-    losses.policy_loss = np.mean(pg_losses)
-    losses.value_loss = np.mean(v_losses)
-    losses.entropy = np.mean(entropy_losses)
-    losses.old_approx_kl = np.mean(old_kls)
-    losses.approx_kl = np.mean(kls)
-    losses.clipfrac = np.mean(clipfracs)
-    losses.explained_variance = explained_var
+    data.update += 1
 
     perf = data.performance
+    perf.epoch_time = perf.eval_time + train_profiler.elapsed
+    perf.train_time = train_profiler.elapsed
+
+    losses = data.losses
+    losses.policy_loss = torch.stack(pg_losses).cpu().mean().item()
+    losses.value_loss = torch.stack(v_losses).cpu().mean().item()
+    losses.entropy = torch.stack(entropy_losses).cpu().mean().item()
+    losses.old_approx_kl = torch.stack(old_kls).cpu().mean().item()
+    losses.approx_kl = torch.stack(kls).cpu().mean().item()
+    losses.clipfrac = torch.stack(clipfracs).cpu().mean().item()
+    losses.explained_variance = explained_var
+
     perf.total_uptime = int(time.time() - data.start_time)
     perf.total_updates = data.update + 1
-    perf.train_time = time.time() - train_time
+    perf.train_time = train_profiler.elapsed#time.time() - train_time
     perf.train_sps = int(config.batch_size / perf.train_time)
     perf.train_memory = train_profiler.end_mem
     perf.train_pytorch_memory = train_profiler.end_torch_mem
     perf.epoch_time = perf.eval_time + perf.train_time
     perf.epoch_sps = int(config.batch_size / perf.epoch_time)
 
-    if config.verbose:
-        print_dashboard(data.stats, data.init_performance, data.performance)
+    perf.uptime = int(time.time() - data.start_time)
+    perf.epoch = data.update
+    perf.epoch_sps = int(config.batch_size / perf.epoch_time)
 
-    data.update += 1
+
+    if config.verbose:
+        uptime = int(time.time() - data.start_time)
+        estimated_duration = int(config.total_timesteps / perf.epoch_sps)
+        print_dashboard(uptime, estimated_duration, data.update,
+            data.global_step, data.SPS, perf, losses, data.stats)
+
     if data.update % config.checkpoint_interval == 0 or done_training(data):
        save_checkpoint(data)
 
@@ -655,33 +676,126 @@ def unroll_nested_dict(d):
         else:
             yield k, v
 
-def print_dashboard(stats, init_performance, performance):
-    output = []
-    data = {**stats, **init_performance, **performance}
-    
-    grouped_data = defaultdict(dict)
-    
-    for k, v in data.items():
-        if k == 'total_uptime':
-            v = timedelta(seconds=v)
-        if 'memory' in k:
-            v = pufferlib.utils.format_bytes(v)
-        elif 'time' in k:
-            try:
-                v = f"{v:.2f} s"
-            except:
-                pass
+import psutil
+import GPUtil
+
+import rich
+from rich.console import Console
+from rich.table import Table
+
+ROUND_OPEN = rich.box.Box(
+    "╭──╮\n"
+    "│  │\n"
+    "│  │\n"
+    "│  │\n"
+    "│  │\n"
+    "│  │\n"
+    "│  │\n"
+    "╰──╯\n"
+)
+
+c1 = '[bright_cyan]'
+c2 = '[white]'
+c3 = '[cyan]'
+b1 = '[bright_cyan]'
+b2 = '[bright_white]'
+
+def abbreviate(num):
+    if num < 1e3:
+        return f"{num:.0f}"
+    elif num < 1e6:
+        return f"{num/1e3:.1f}k"
+    elif num < 1e9:
+        return f"{num/1e6:.1f}m"
+    elif num < 1e12:
+        return f"{num/1e9:.1f}b"
+    else:
+        return f"{num/1e12:.1f}t"
+
+def duration(seconds):
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return f"{h}h {m}m {s}s" if h else f"{m}m {s}s" if m else f"{s}s"
+
+
+def print_dashboard(uptime, estimated_duration, epoch,
+        global_step, sps, performance, losses, user):
+    dashboard = Table(box=ROUND_OPEN, expand=True,
+        show_header=False, border_style='bright_cyan')
+
+    table = Table(box=None, expand=True, show_header=False)
+    dashboard.add_row(table)
+    cpu_percent = psutil.cpu_percent()
+    dram_percent = psutil.virtual_memory().percent
+    gpus = GPUtil.getGPUs()
+    gpu_percent = gpus[0].load * 100 if gpus else 0
+    vram_percent = gpus[0].memoryUtil * 100 if gpus else 0
+    table.add_column(justify="left", width=30)
+    table.add_column(justify="center", width=12)
+    table.add_column(justify="center", width=12)
+    table.add_column(justify="center", width=12)
+    table.add_column(justify="right", width=12)
+    table.add_row(
+        f':blowfish: {c1}PufferLib {b2}1.0.0',
+        f'{c1}CPU: {c3}{cpu_percent:.1f}%',
+        f'{c1}GPU: {c3}{gpu_percent:.1f}%',
+        f'{c1}DRAM: {c3}{dram_percent:.1f}%',
+        f'{c1}VRAM: {c3}{vram_percent:.1f}%',
+    )
         
-        first_word, *rest_words = k.split('_')
-        rest_words = ' '.join(rest_words).title()
-        
-        grouped_data[first_word][rest_words] = v
-    
-    for main_key, sub_dict in grouped_data.items():
-        output.append(f"{main_key.title()}")
-        for sub_key, sub_value in sub_dict.items():
-            output.append(f"    {sub_key}: {sub_value}")
-    
-    print("\033c", end="")
-    print('\n'.join(output))
-    time.sleep(1/20)
+    s = Table(box=None, expand=True)
+    s.add_column(f"{c1}Summary", justify='left', vertical='top', width=16)
+    s.add_column(f"{c1}Value", justify='right', vertical='top', width=8)
+    s.add_row(f'{c2}Uptime', f'{b2}{duration(uptime)}')
+    s.add_row(f'{c2}Estim', f'{b2}{duration(estimated_duration)}')
+    s.add_row(f'{c2}Time', f'{b2}{performance.epoch_time:.2f}')
+    s.add_row(f'{c2}Epoch', f'{b2}{epoch}')
+    s.add_row(f'{c2}Steps/sec', f'{b2}{abbreviate(sps)}')
+    s.add_row(f'{c2}Agent Steps', f'{b2}{abbreviate(global_step)}')
+  
+    p = Table(box=None, expand=True)
+    p.add_column(f"{c1}Performance", justify="left", width=16)
+    p.add_column(f"{c1}Time", justify="right", width=8)
+    p.add_row(f'{c2}Training', f'{b2}{performance.train_time:.3f}')
+    p.add_row(f'{c2}Evaluation', f'{b2}{performance.eval_time:.3f}')
+    p.add_row(f'{c2}Environment', f'{b2}{performance.env_time:.3f}')
+    p.add_row(f'{c2}Forward', f'{b2}{performance.forward_time:.3f}')
+    p.add_row(f'{c2}Misc', f'{b2}{performance.misc_time:.3f}')
+    p.add_row(f'{c2}Allocation', f'{b2}{performance.alloc_time:.3f}')
+    p.add_row(f'{c2}Backward', f'{b2}{performance.backward_time:.3f}')
+
+    l = Table(box=None, expand=True)
+    l.add_column(f'{c1}Losses', justify="left", width=16)
+    l.add_column(f'{c1}Value', justify="right", width=8)
+    for metric, value in losses.items():
+        l.add_row(f'{c2}{metric}', f'{b2}{value:.3f}')
+
+    monitor = Table(box=None, expand=True, pad_edge=False)
+    monitor.add_row(s, p, l)
+    dashboard.add_row(monitor)
+
+    table = Table(box=None, expand=True, pad_edge=False)
+    dashboard.add_row(table)
+    left = Table(box=None, expand=True)
+    right = Table(box=None, expand=True)
+    table.add_row(left, right)
+    left.add_column(f"{c1}User Stats", justify="right", width=20)
+    left.add_column(f"{c1}Value", justify="right", width=10)
+    right.add_column(f"{c1}User Stats", justify="left", width=20)
+    right.add_column(f"{c1}Value", justify="right", width=10)
+    i = 0
+    for metric, value in user.items():
+        u = left if i % 2 == 0 else right
+        u.add_row(f'{c2}{metric}', f'{b2}{value:.3f}')
+        i += 1
+
+    console = Console()
+    with console.capture() as capture:
+        console.print(dashboard)
+
+    print('\033[0;0H' + capture.get())
+
+
+
+
