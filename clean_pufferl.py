@@ -1,6 +1,5 @@
 from pdb import set_trace as T
 import numpy as np
-import cv2
 
 import os
 import random
@@ -8,12 +7,10 @@ import time
 import uuid
 
 from collections import defaultdict
-from datetime import timedelta
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-torch.set_float32_matmul_precision('high')
 
 import pufferlib
 import pufferlib.utils
@@ -24,7 +21,7 @@ import pufferlib.policy_pool
 
 
 @pufferlib.dataclass
-class Performance:
+class Profile:
     uptime = 0
     epoch = 0
     epoch_sps = 0
@@ -32,31 +29,33 @@ class Performance:
     train_time = 0
     eval_time = 0
     env_time = 0
-    forward_time = 0
     misc_time = 0
     alloc_time = 0
     backward_time = 0
 
-    '''
-    total_uptime = 0
-    total_updates = 0
-    total_agent_steps = 0
-    epoch_time = 0
-    epoch_sps = 0
-    evaluation_time = 0
-    evaluation_sps = 0
-    evaluation_memory = 0
-    evaluation_pytorch_memory = 0
-    env_time = 0
-    env_sps = 0
-    inference_time = 0
-    inference_sps = 0
-    train_time = 0
-    train_sps = 0
-    train_memory = 0
-    train_pytorch_memory = 0
-    misc_time = 0
-    '''
+    def __init__(self, config):
+        self.start = time.time()
+        env = pufferlib.utils.Profiler()
+        inference = pufferlib.utils.Profiler()
+        misc = pufferlib.utils.Profiler()
+
+    @property
+    def epoch_time(self):
+        return self.train_time + self.eval_time
+
+    def update(self):
+        self.uptime = time.time() - self.start
+        self.eval_time = self.misc.elapsed
+        self.inference_time = self.inference.elapsed
+        self.env_time = self.env.elapsed
+        self.misc_time = self.misc.elapsed
+
+    def update_train_perf():
+        # Shorten or details
+        uptime = int(time.time() - data.start_time)
+        SPS = int(data.padded_steps_collected / perf.epoch_time)
+        estimated_duration = int(config.total_timesteps / profile.SPS)
+
 
 @pufferlib.dataclass
 class Losses:
@@ -68,186 +67,210 @@ class Losses:
     clipfrac = 0
     explained_variance = 0
 
-def create(
-        self: object = None,
-        config: pufferlib.namespace = None,
-        exp_name: str = None,
-        track: bool = False,
+    def update(self, policy, value, entropy, old_approx_kl,
+            approx_kl, clipfrac, explained_variance):
+        self.policy_loss = torch.stack(policy).cpu().mean().item()
+        self.value_loss = torch.stack(value).cpu().mean().item()
+        self.entropy = torch.stack(entropy).cpu().mean().item()
+        self.old_approx_kl = torch.stack(old_approx_kl).cpu().mean().item()
+        self.approx_kl = torch.stack(approx_kl).cpu().mean().item()
+        self.clipfrac = torch.stack(clipfrac).cpu().mean().item()
+        self.explained_variance = explained_variance
 
-        # Agent
-        agent: nn.Module = None,
-        agent_creator: callable = None,
-        agent_kwargs: dict = None,
+class Experience:
+    @pufferlib.utils.profile
+    def __init__(self, config, policy, obs_shape, atn_shape, total_agents):
+        # Storage buffers
+        obs=torch.zeros(config.batch_size + 1, *obs_shape)
+        actions=torch.zeros(config.batch_size + 1, *atn_shape, dtype=int)
+        logprobs=torch.zeros(config.batch_size + 1)
+        rewards=torch.zeros(config.batch_size + 1)
+        dones=torch.zeros(config.batch_size + 1)
+        truncateds=torch.zeros(config.batch_size + 1)
+        values=torch.zeros(config.batch_size + 1)
 
-        # Environment
-        env_creator: callable = None,
-        env_creator_kwargs: dict = None,
-        vectorization: ... = pufferlib.vectorization.Serial,
+        # Numpy views into storage for faster indexing
+        obs_ary = np.asarray(obs)
+        actions_ary = np.asarray(actions)
+        logprobs_ary = np.asarray(logprobs)
+        rewards_ary = np.asarray(rewards)
+        dones_ary = np.asarray(dones)
+        truncateds_ary = np.asarray(truncateds)
+        values_ary = np.asarray(values)
 
-        # Policy Pool options
-        policy_selector: callable = pufferlib.policy_pool.random_selector,
-    ):
-    if config is None:
-        config = pufferlib.args.CleanPuffeRL()
+        if hasattr(policy, 'lstm'):
+            shape = (policy.lstm.num_layers, total_agents, policy.lstm.hidden_size)
+            self.next_lstm_state = (
+                torch.zeros(shape).to(config.device),
+                torch.zeros(shape).to(config.device),
+            )
 
-    if exp_name is None:
-        exp_name = str(uuid.uuid4())[:8]
+        self.ptr = 0
+        self.step = 0
+        self.sort_keys = [],
+        self.batch_size = config.batch_size
+        self.bppt_horizon = config.bptt_horizon
+        self.num_minibatches = config.batch_size // config.bptt_horizon // config.batch_rows
 
-    wandb = None
-    if track:
-        import wandb
+        self.mb_obs_buffer = torch.zeros(config.batch_rows, config.bptt_horizon,
+            obs_shape, pin_memory=(config.device=="cuda"))
 
-    start_time = time.time()
-    seed_everything(config.seed, config.torch_deterministic)
-    total_updates = config.total_timesteps // config.batch_size
+    @property
+    def full(self):
+        return self.ptr >= self.config.batch_size
 
-    device = config.device
+    def store(self, obs, value, action, logprob, reward, done, env_id, mask):
+        # Mask learner and Ensure indices do not exceed batch size
+        indices = torch.where(mask)[0][:self.batch_size - self.ptr + 1].numpy()
 
-    # Create environments, agent, and optimizer
-    init_profiler = pufferlib.utils.Profiler(memory=True)
-    with init_profiler:
-        pool = vectorization(
-            env_creator,
-            env_kwargs=env_creator_kwargs,
-            num_envs=config.num_envs,
-            envs_per_worker=config.envs_per_worker,
-            envs_per_batch=config.envs_per_batch,
-            env_pool=config.env_pool,
-            mask_agents=True,
-        )
+        ptr = self.ptr
+        end = ptr + len(indices)
+        self.ptr = end
+ 
+        self.obs_ary[ptr:end] = obs.cpu().numpy()[indices]
+        self.values_ary[ptr:end] = value.cpu().numpy()[indices]
+        self.actions_ary[ptr:end] = action[indices]
+        self.logprobs_ary[ptr:end] = logprob.cpu().numpy()[indices]
+        self.rewards_ary[ptr:end] = reward.cpu().numpy()[indices]
+        self.dones_ary[ptr:end] = done.cpu().numpy()[indices]
+        self.sort_keys.extend([(env_id[i], self.step) for i in indices])
+        self.step += 1
 
-    obs_shape = pool.single_observation_space.shape
-    atn_shape = pool.single_action_space.shape
-    num_agents = pool.agents_per_env
-    total_agents = num_agents * config.num_envs
+    def sort_training_data(self):
+        start_time = time.time()
+        sort_keys = self.sort_keys
+        idxs = sorted(range(len(sort_keys)), key=sort_keys.__getitem__)
+        self.sort_keys = []
+        self.ptr = 0
+        self.step = 0
 
-    # If data_dir is provided, load the resume state
+        return torch.Tensor(idxs).long()[:-1].reshape(
+            self.batch_rows, self.num_minibatches, self.bptt_horizon).transpose(0, 1)
+
+    def flatten_batch(self, b_idxs, advantages):
+        self.b_obs = torch.as_tensor(self.obs_ary[b_idxs])
+        self.b_actions = torch.as_tensor(self.actions_ary[b_idxs]
+            ).to(self.device, non_blocking=True)
+        self.b_logprobs = torch.as_tensor(self.logprobs_ary[b_idxs]
+            ).to(self.device, non_blocking=True)
+        self.b_dones = torch.as_tensor(self.dones_ary[b_idxs]
+            ).to(self.device, non_blocking=True)
+        self.b_values = torch.as_tensor(self.values_ary[b_idxs]
+            ).to(self.device, non_blocking=True)
+        self.b_advantages = advantages.reshape(
+            self.batch_rows, self.num_minibatches, self.config.bptt_horizon
+        ).transpose(0, 1)
+        self.b_returns = self.b_advantages + self.b_values
+
+
+    def minibatches(self):
+        for mb in range(self.num_minibatches):
+            self.mb_obs_buffer.copy_(self.b_obs[mb], non_blocking=True)
+            mb_obs = self.mb_obs_buffer.to(self.device, non_blocking=True)
+            mb_actions = self.b_actions[mb].contiguous()
+            mb_values = self.b_values[mb].reshape(-1)
+            mb_advantages = self.b_advantages[mb].reshape(-1)
+            mb_returns = self.b_returns[mb].reshape(-1)
+            yield mb_obs, mb_actions, mb_values, mb_advantages, mb_returns
+
+def print_size(policy):
+    n_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
+    print(f'Model Size: {n_params//1000} K parameters')
+
+def save_checkpoint(data):
+    path = os.path.join(data.config.data_dir, data.exp_name)
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    model_name = f'model_{data.update:06d}.pt'
+    model_path = os.path.join(path, model_name)
+
+    # Already saved
+    if os.path.exists(model_path):
+        return model_path
+
+    torch.save(data.uncompiled_agent, model_path)
+
+    state = {
+        "optimizer_state_dict": data.optimizer.state_dict(),
+        "global_step": data.global_step,
+        "agent_step": data.global_step,
+        "update": data.update,
+        "model_name": model_name,
+    }
+
+    if data.wandb:
+        state['exp_name'] = data.exp_name
+
+    state_path = os.path.join(path, 'trainer_state.pt')
+    torch.save(state, state_path + '.tmp')
+    os.rename(state_path + '.tmp', state_path)
+
+    return model_path
+
+def try_load_checkpoint(data, epoch=None):
+    config = data.config
     resume_state = {}
-    path = os.path.join(config.data_dir, exp_name)
-    if os.path.exists(path):
-        trainer_path = os.path.join(path, 'trainer_state.pt')
-        resume_state = torch.load(trainer_path)
-        model_path = os.path.join(path, resume_state["model_name"])
-        agent = torch.load(model_path, map_location=device)
-        print(f'Resumed from update {resume_state["update"]} '
-              f'with policy {resume_state["model_name"]}')
-    else:
-        agent = pufferlib.emulation.make_object(
-            agent, agent_creator, [pool.driver_env], agent_kwargs)
+    path = os.path.join(config.data_dir, config.exp_name)
 
-    global_step = resume_state.get("global_step", 0)
-    agent_step = resume_state.get("agent_step", 0)
-    update = resume_state.get("update", 0)
+    if not os.path.exists(path):
+        print('No checkpoints found. Assuming new experiment')
+        return
 
-    optimizer = optim.Adam(agent.parameters(),
+    trainer_path = os.path.join(path, 'trainer_state.pt')
+    resume_state = torch.load(trainer_path)
+    model_path = os.path.join(path, resume_state["model_name"])
+    data.policy.uncompiled.load_state_dict(model_path, map_location=config.device)
+    data.optimizer.load_state_dict(resume_state["optimizer_state_dict"])
+    print(f'Resumed from update {resume_state["update"]} '
+          f'with policy {resume_state["model_name"]}')
+
+def create(config, policy, vecenv, optimizer=None, wandb=None,
+        policy_selector=pufferlib.policy_pool.random_selector):
+    seed_everything(config.seed, config.torch_deterministic)
+    vecenv.async_reset(config.seed)
+
+    obs_shape = vecenv.single_observation_space.shape
+    atn_shape = vecenv.single_action_space.shape,
+    total_agents = vecenv.num_envs * vecenv.agents_per_env
+
+    experience = Experience(config, policy, obs_shape, atn_shape, total_agents)
+    profile = Profile(config, vecenv, policy)
+    losses = Losses()
+
+    #self.total_updates = config.total_timesteps // config.batch_size
+
+    print_size(policy)
+
+    uncompiled_policy = policy
+    if config.compile:
+        policy = torch.compile(policy, mode=config.compile_mode)
+
+    optimizer = optim.Adam(policy.parameters(),
         lr=config.learning_rate, eps=1e-5)
 
-    uncompiled_agent = agent # Needed to save the model
-    if config.compile:
-        agent = torch.compile(agent, mode=config.compile_mode)
-
-    if config.verbose:
-        n_params = sum(p.numel() for p in agent.parameters() if p.requires_grad)
-        print(f"Model Size: {n_params//1000} K parameters")
-
-    opt_state = resume_state.get("optimizer_state_dict", None)
-    if opt_state is not None:
-        optimizer.load_state_dict(resume_state["optimizer_state_dict"])
-
-    # Create policy pool
-    pool_agents = num_agents * pool.envs_per_batch
-    policy_pool = pufferlib.policy_pool.PolicyPool(
-        agent, pool_agents, atn_shape, device, path,
-        config.pool_kernel, policy_selector,
+    # Wraps the policy for self-play. Disregard for single-agent
+    policy = pufferlib.policy_pool.PolicyPool(
+        policy=policy,
+        total_agents=vecenv.agents_per_batch,
+        atn_shape=vecenv.single_action_space.shape,
+        device=config.device,
+        data_dir=config.data_dir,
+        kernel=config.pool_kernel,
+        policy_selector=pufferlib.policy_pool.random_selector,
+        global_step=0,
     )
 
-    # Allocate Storage
-    storage_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True).start()
-    next_lstm_state = []
-    pool.async_reset(config.seed)
-    next_lstm_state = None
-    if hasattr(agent, 'lstm'):
-        shape = (agent.lstm.num_layers, total_agents, agent.lstm.hidden_size)
-        next_lstm_state = (
-            torch.zeros(shape).to(device),
-            torch.zeros(shape).to(device),
-        )
-    obs=torch.zeros(config.batch_size + 1, *obs_shape)
-    actions=torch.zeros(config.batch_size + 1, *atn_shape, dtype=int)
-    logprobs=torch.zeros(config.batch_size + 1)
-    rewards=torch.zeros(config.batch_size + 1)
-    dones=torch.zeros(config.batch_size + 1)
-    truncateds=torch.zeros(config.batch_size + 1)
-    values=torch.zeros(config.batch_size + 1)
-
-    obs_ary = np.asarray(obs)
-    actions_ary = np.asarray(actions)
-    logprobs_ary = np.asarray(logprobs)
-    rewards_ary = np.asarray(rewards)
-    dones_ary = np.asarray(dones)
-    truncateds_ary = np.asarray(truncateds)
-    values_ary = np.asarray(values)
-
-    storage_profiler.stop()
-
-    #"charts/actions": wandb.Histogram(b_actions.cpu().numpy()),
-    init_performance = pufferlib.namespace(
-        init_time = time.time() - start_time,
-        init_env_time = init_profiler.elapsed,
-        init_env_memory = init_profiler.memory,
-        tensor_memory = storage_profiler.memory,
-        tensor_pytorch_memory = storage_profiler.pytorch_memory,
-    )
- 
-    return pufferlib.namespace(self,
-        # Agent, Optimizer, and Environment
-        config=config,
-        pool = pool,
-        agent = agent,
-        uncompiled_agent = uncompiled_agent,
-        optimizer = optimizer,
-        policy_pool = policy_pool,
-
-        # Logging
-        exp_name = exp_name,
-        wandb = wandb,
-        learning_rate=config.learning_rate,
-        losses = Losses(),
-        init_performance = init_performance,
-        performance = Performance(),
-
-        # Storage
-        sort_keys = [],
-        next_lstm_state = next_lstm_state,
-        obs = obs,
-        actions = actions,
-        logprobs = logprobs,
-        rewards = rewards,
-        dones = dones,
-        values = values,
-        obs_ary = obs_ary,
-        actions_ary = actions_ary,
-        logprobs_ary = logprobs_ary,
-        rewards_ary = rewards_ary,
-        dones_ary = dones_ary,
-        truncateds_ary = truncateds_ary,
-        values_ary = values_ary,
-
-        # Misc
-        total_updates = total_updates,
-        update = update,
-        global_step = global_step,
-        device = device,
-        start_time = start_time,
-    )
+    return pufferlib.namespace(config=config, policy=policy,
+        optimizer=optimizer, vecenv=vecenv, wandb=wandb,)
 
 @pufferlib.utils.profile
 def evaluate(data):
-    config = data.config
-    # TODO: Handle update on resume
+    config, profile, experience = data.config, data.profile, data.experience
+
     if data.wandb is not None and data.performance.total_uptime > 0:
         data.wandb.log({
-            'SPS': data.SPS,
+            'SPS': profile.SPS,
             'global_step': data.global_step,
             'learning_rate': data.optimizer.param_groups[0]["lr"],
             **{f'losses/{k}': v for k, v in data.losses.items()},
@@ -258,37 +281,27 @@ def evaluate(data):
                 for policy, elo in data.policy_pool.ranker.ratings.items()},
         })
 
-    data.policy_pool.update_policies()
-    performance = defaultdict(list)
-    env_profiler = pufferlib.utils.Profiler()
-    inference_profiler = pufferlib.utils.Profiler()
-    eval_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True).start()
-    misc_profiler = pufferlib.utils.Profiler()
+    data.policy.update_policies()
 
-    ptr = step = padded_steps_collected = agent_steps_collected = 0
+    ptr = steps = agent_steps = 0
     infos = defaultdict(lambda: defaultdict(list))
-    while True:
-        step += 1
-        if ptr == config.batch_size + 1:
-            break
-
-        with env_profiler:
+    while not experience.full:
+        with profile.env:
             o, r, d, t, i, env_id, mask = data.pool.recv()
 
-        with misc_profiler:
+        with profile.misc:
             i = data.policy_pool.update_scores(i, "return")
             # TODO: Update this for policy pool
             for ii, ee  in zip(i['learner'], env_id):
                 ii['env_id'] = ee
 
+            steps += sum(mask) # May contain padding
+            agent_steps += len(mask)
 
-        with inference_profiler, torch.no_grad():
+        with profile.inference, torch.no_grad():
             o = torch.as_tensor(o)
-            r = torch.as_tensor(r).float().to(data.device).view(-1)
-            d = torch.as_tensor(d).float().to(data.device).view(-1)
-
-            agent_steps_collected += sum(mask)
-            padded_steps_collected += len(mask)
+            r = torch.as_tensor(r)
+            d = torch.as_tensor(d)
 
             # Multiple policies will not work with new envpool
             next_lstm_state = data.next_lstm_state
@@ -308,42 +321,23 @@ def evaluate(data):
 
             value = value.flatten()
 
-       
-        with misc_profiler:
+        with profile.misc:
             actions = actions.cpu().numpy()
-     
-            # Index alive mask with policy pool idxs...
-            # TODO: Find a way to avoid having to do this
-            learner_mask = torch.as_tensor(mask * data.policy_pool.mask)
-
-            # Ensure indices do not exceed batch size
-            indices = torch.where(learner_mask)[0][:config.batch_size - ptr + 1].numpy()
-            end = ptr + len(indices)
-
-            # Batch indexing
-            data.obs_ary[ptr:end] = o.cpu().numpy()[indices]
-            data.values_ary[ptr:end] = value.cpu().numpy()[indices]
-            data.actions_ary[ptr:end] = actions[indices]
-            data.logprobs_ary[ptr:end] = logprob.cpu().numpy()[indices]
-            data.rewards_ary[ptr:end] = r.cpu().numpy()[indices]
-            data.dones_ary[ptr:end] = d.cpu().numpy()[indices]
-            data.sort_keys.extend([(env_id[i], step) for i in indices])
-
-            # Update pointer
-            ptr += len(indices)
+            mask = torch.as_tensor(mask * data.policy_pool.mask)
+            experience.store(o, value, actions, logprob, r, d, env_id, mask)
 
             for policy_name, policy_i in i.items():
                 for agent_i in policy_i:
                     for name, dat in unroll_nested_dict(agent_i):
                         infos[policy_name][name].append(dat)
 
-        with env_profiler:
+        with profile.env:
             data.pool.send(actions)
-
 
     data.stats = {}
     infos = infos['learner']
 
+    # Moves into models... maybe. Definitely moves. You could also just return infos and have it in demo
     if 'pokemon_exploration_map' in infos:
         for idx, pmap in zip(infos['env_id'], infos['pokemon_exploration_map']):
             if not hasattr(data, 'pokemon'):
@@ -357,55 +351,33 @@ def evaluate(data):
         rendered = data.map_updater(pokemon_map)
         data.stats['Media/exploration_map'] = data.wandb.Image(rendered)
 
-    for k, v in infos.items():
-        if 'Task_eval_fn' in k:
-            # Temporary hack for NMMO competitio
-            continue
-        try: # TODO: Better checks on log data types
-            data.stats[k] = np.mean(v)
-        except:
-            continue
-
-    eval_profiler.stop()
-    data.global_step += padded_steps_collected
+    data.global_step += steps
+    data.padded_steps_collected = agent_steps
     data.reward = float(torch.mean(data.rewards))
-    data.SPS = int(padded_steps_collected / eval_profiler.elapsed)
 
-    perf = data.performance
-    perf.eval_time = eval_profiler.elapsed
-    perf.inference_time = inference_profiler.elapsed
-    perf.env_time = env_profiler.elapsed
-    perf.misc_time = misc_profiler.elapsed
+    profile.update_eval_perf()
 
     return data.stats, infos
 
 @pufferlib.utils.profile
 def train(data):
+    config, profile, experience = data.config, data.profile, data.experience
+    losses = data.losses
+
     if done_training(data):
         raise RuntimeError(
             f"Max training updates {data.total_updates} already reached")
 
     config = data.config
     # assert data.num_steps % bptt_horizon == 0, "num_steps must be divisible by bptt_horizon"
-    train_profiler = pufferlib.utils.Profiler(memory=True, pytorch_memory=True)
-    train_profiler.start()
 
     if config.anneal_lr:
         frac = 1.0 - (data.update - 1.0) / data.total_updates
         lrnow = frac * config.learning_rate
         data.optimizer.param_groups[0]["lr"] = lrnow
 
-    start_time = time.time()
-    num_minibatches = config.batch_size // config.bptt_horizon // config.batch_rows
-    idxs = sorted(range(len(data.sort_keys)), key=data.sort_keys.__getitem__)
-    data.sort_keys = []
-    b_idxs = (
-        torch.Tensor(idxs)
-        .long()[:-1]
-        .reshape(config.batch_rows, num_minibatches, config.bptt_horizon)
-        .transpose(0, 1)
-    )
-    #print('Make idx time:', time.time() - start_time)
+    # Details
+    idxs = experience.sort_training_data()
     start_time = time.time()
 
     # bootstrap value if not done
@@ -430,62 +402,35 @@ def train(data):
             )
 
     advantages = torch.from_numpy(advantages).to(data.device)
-    #print('Advantages time:', time.time() - start_time)   
-    start_time = time.time()
-
-    # Flatten the batch
-    b_obs = torch.as_tensor(data.obs_ary[b_idxs])
-    b_actions = torch.as_tensor(data.actions_ary[b_idxs]
-        ).to(data.device, non_blocking=True)
-    b_logprobs = torch.as_tensor(data.logprobs_ary[b_idxs]
-        ).to(data.device, non_blocking=True)
-    b_dones = torch.as_tensor(data.dones_ary[b_idxs]
-        ).to(data.device, non_blocking=True)
-    b_values = torch.as_tensor(data.values_ary[b_idxs]
-        ).to(data.device, non_blocking=True)
-    b_advantages = advantages.reshape(
-        config.batch_rows, num_minibatches, config.bptt_horizon
-    ).transpose(0, 1)
-    b_returns = b_advantages + b_values
+    experience.flatten_batch(idxs, advantages)
 
     # Optimizing the policy and value network
-    train_time = time.time()
     pg_losses, entropy_losses, v_losses, clipfracs, old_kls, kls = [], [], [], [], [], []
-    mb_obs_buffer = torch.zeros_like(b_obs[0], pin_memory=(data.device=="cuda"))
-    #print('Make batch time:', time.time() - start_time)
 
     for epoch in range(config.update_epochs):
         lstm_state = None
-        for mb in range(num_minibatches):
-            mb_obs_buffer.copy_(b_obs[mb], non_blocking=True)
-            mb_obs = mb_obs_buffer.to(data.device, non_blocking=True)
-            #mb_obs = b_obs[mb].to(data.device, non_blocking=True)
-            mb_actions = b_actions[mb].contiguous()
-            mb_values = b_values[mb].reshape(-1)
-            mb_advantages = b_advantages[mb].reshape(-1)
-            mb_returns = b_returns[mb].reshape(-1)
-
+        for obs, atn, val, adv, ret, log_probs in experience.minibatches():
             if hasattr(data.agent, 'lstm'):
                 _, newlogprob, entropy, newvalue, lstm_state = data.agent(
-                    mb_obs, state=lstm_state, action=mb_actions)
+                    obs, state=lstm_state, action=atn)
                 lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
             else:
                 _, newlogprob, entropy, newvalue = data.agent(
-                    mb_obs.reshape(-1, *data.pool.single_observation_space.shape),
-                    action=mb_actions,
+                    obs.reshape(-1, *data.pool.single_observation_space.shape),
+                    action=atn,
                 )
 
-            logratio = newlogprob - b_logprobs[mb].reshape(-1)
+            logratio = newlogprob - log_probs.reshape(-1)
             ratio = logratio.exp()
 
             with torch.no_grad():
                 # calculate approx_kl http://joschu.net/blog/kl-approx.html
                 old_approx_kl = (-logratio).mean()
-                old_kls.append(old_approx_kl)#.item())
+                old_kls.append(old_approx_kl)
                 approx_kl = ((ratio - 1) - logratio).mean()
-                kls.append(approx_kl)#.item())
+                kls.append(approx_kl)
                 clipfracs += [
-                    ((ratio - 1.0).abs() > config.clip_coef).float().mean()#.item()
+                    ((ratio - 1.0).abs() > config.clip_coef).float().mean()
                 ]
 
             mb_advantages = mb_advantages.reshape(-1)
@@ -505,19 +450,19 @@ def train(data):
             # Value loss
             newvalue = newvalue.view(-1)
             if config.clip_vloss:
-                v_loss_unclipped = (newvalue - mb_returns) ** 2
-                v_clipped = mb_values + torch.clamp(
-                    newvalue - mb_values,
+                v_loss_unclipped = (newvalue - ret) ** 2
+                v_clipped = val + torch.clamp(
+                    newvalue - val,
                     -config.vf_clip_coef,
                     config.vf_clip_coef,
                 )
-                v_loss_clipped = (v_clipped - mb_returns) ** 2
+                v_loss_clipped = (v_clipped - ret) ** 2
                 v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
                 v_loss = 0.5 * v_loss_max.mean()
             else:
-                v_loss = 0.5 * ((newvalue - mb_returns) ** 2).mean()
-            v_losses.append(v_loss)#.item())
+                v_loss = 0.5 * ((newvalue - ret) ** 2).mean()
 
+            v_losses.append(v_loss)
             entropy_loss = entropy.mean()
             entropy_losses.append(entropy_loss)#.item())
 
@@ -531,47 +476,17 @@ def train(data):
             if approx_kl > config.target_kl:
                 break
 
-    train_profiler.stop()
-    y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
+    y_pred, y_true = experience.values.cpu().numpy(), experience.returns.cpu().numpy()
     var_y = np.var(y_true)
     explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
-    data.update += 1
 
     perf = data.performance
-    perf.epoch_time = perf.eval_time + train_profiler.elapsed
-    perf.train_time = train_profiler.elapsed
+    losses.update()
+    data.update += 1
 
-    losses = data.losses
-    losses.policy_loss = torch.stack(pg_losses).cpu().mean().item()
-    losses.value_loss = torch.stack(v_losses).cpu().mean().item()
-    losses.entropy = torch.stack(entropy_losses).cpu().mean().item()
-    losses.old_approx_kl = torch.stack(old_kls).cpu().mean().item()
-    losses.approx_kl = torch.stack(kls).cpu().mean().item()
-    losses.clipfrac = torch.stack(clipfracs).cpu().mean().item()
-    losses.explained_variance = explained_var
-
-    perf.total_uptime = int(time.time() - data.start_time)
-    perf.total_updates = data.update + 1
-    perf.train_time = train_profiler.elapsed#time.time() - train_time
-    perf.train_sps = int(config.batch_size / perf.train_time)
-    perf.train_memory = train_profiler.end_mem
-    perf.train_pytorch_memory = train_profiler.end_torch_mem
-    perf.epoch_time = perf.eval_time + perf.train_time
-    perf.epoch_sps = int(config.batch_size / perf.epoch_time)
-
-    perf.uptime = int(time.time() - data.start_time)
-    perf.epoch = data.update
-    perf.epoch_sps = int(config.batch_size / perf.epoch_time)
-
-
-    if config.verbose:
-        uptime = int(time.time() - data.start_time)
-        estimated_duration = int(config.total_timesteps / perf.epoch_sps)
-        print_dashboard(uptime, estimated_duration, data.update,
-            data.global_step, data.SPS, perf, losses, data.stats)
-
+    profile.update_train()
     if data.update % config.checkpoint_interval == 0 or done_training(data):
-       save_checkpoint(data)
+        save_checkpoint(data)
 
 def close(data):
     data.pool.close()
@@ -625,38 +540,7 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
         step += 1
 
 def done_training(data):
-    return data.update >= data.total_updates
-
-def save_checkpoint(data):
-    path = os.path.join(data.config.data_dir, data.exp_name)
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-    model_name = f'model_{data.update:06d}.pt'
-    model_path = os.path.join(path, model_name)
-
-    # Already saved
-    if os.path.exists(model_path):
-        return model_path
-
-    torch.save(data.uncompiled_agent, model_path)
-
-    state = {
-        "optimizer_state_dict": data.optimizer.state_dict(),
-        "global_step": data.global_step,
-        "agent_step": data.global_step,
-        "update": data.update,
-        "model_name": model_name,
-    }
-
-    if data.wandb:
-        state['exp_name'] = data.exp_name
-
-    state_path = os.path.join(path, 'trainer_state.pt')
-    torch.save(state, state_path + '.tmp')
-    os.rename(state_path + '.tmp', state_path)
-
-    return model_path
+    return data.global_step >= data.config.total_timesteps
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)
@@ -760,7 +644,7 @@ def print_dashboard(uptime, estimated_duration, epoch,
     p.add_row(f'{c2}Training', f'{b2}{performance.train_time:.3f}')
     p.add_row(f'{c2}Evaluation', f'{b2}{performance.eval_time:.3f}')
     p.add_row(f'{c2}Environment', f'{b2}{performance.env_time:.3f}')
-    p.add_row(f'{c2}Forward', f'{b2}{performance.forward_time:.3f}')
+    p.add_row(f'{c2}Forward', f'{b2}{performance.inference_time:.3f}')
     p.add_row(f'{c2}Misc', f'{b2}{performance.misc_time:.3f}')
     p.add_row(f'{c2}Allocation', f'{b2}{performance.alloc_time:.3f}')
     p.add_row(f'{c2}Backward', f'{b2}{performance.backward_time:.3f}')
@@ -775,27 +659,24 @@ def print_dashboard(uptime, estimated_duration, epoch,
     monitor.add_row(s, p, l)
     dashboard.add_row(monitor)
 
-    table = Table(box=None, expand=True, pad_edge=False)
-    dashboard.add_row(table)
-    left = Table(box=None, expand=True)
-    right = Table(box=None, expand=True)
-    table.add_row(left, right)
-    left.add_column(f"{c1}User Stats", justify="right", width=20)
-    left.add_column(f"{c1}Value", justify="right", width=10)
-    right.add_column(f"{c1}User Stats", justify="left", width=20)
-    right.add_column(f"{c1}Value", justify="right", width=10)
-    i = 0
-    for metric, value in user.items():
-        u = left if i % 2 == 0 else right
-        u.add_row(f'{c2}{metric}', f'{b2}{value:.3f}')
-        i += 1
+    if user:
+        table = Table(box=None, expand=True, pad_edge=False)
+        dashboard.add_row(table)
+        left = Table(box=None, expand=True)
+        right = Table(box=None, expand=True)
+        table.add_row(left, right)
+        left.add_column(f"{c1}User Stats", justify="left", width=20)
+        left.add_column(f"{c1}Value", justify="right", width=10)
+        right.add_column(f"{c1}User Stats", justify="left", width=20)
+        right.add_column(f"{c1}Value", justify="right", width=10)
+        i = 0
+        for metric, value in user.items():
+            u = left if i % 2 == 0 else right
+            u.add_row(f'{c2}{metric}', f'{b2}{value:.3f}')
+            i += 1
 
     console = Console()
     with console.capture() as capture:
         console.print(dashboard)
 
     print('\033[0;0H' + capture.get())
-
-
-
-
