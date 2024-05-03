@@ -106,21 +106,45 @@ def get_init_args(fn):
     return args
 
 def train(args, env_module, make_env):
-    if args.backend == 'clean_pufferl':
-        data = clean_pufferl.create(
-            config=args.train,
-            agent_creator=make_policy,
-            agent_kwargs={'env_module': env_module, 'args': args},
-            env_creator=make_env,
-            env_creator_kwargs=args.env,
-            vectorization=args.vectorization,
-            exp_name=args.exp_name,
-            track=args.track,
-        )
+    vecenv = args.vectorization(
+        make_env,
+        env_kwargs=args.env,
+        num_envs=args.train.num_envs,
+        envs_per_worker=args.train.envs_per_worker,
+        envs_per_batch=args.train.envs_per_batch,
+        env_pool=args.train.env_pool,
+        mask_agents=True,
+    )
+    policy = make_policy(vecenv.driver_env, env_module, args)
 
+    train_config = args.train 
+    train_config.exp_name = args.exp_name
+    train_config.track = args.track
+    train_config.device = args.train.device
+
+    if args.backend == 'clean_pufferl':
+        data = clean_pufferl.create(train_config, vecenv, policy)
+
+        '''
+        import time
+        import torch
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ]
+        ) as p:
+        '''
         while not clean_pufferl.done_training(data):
+            #start = time.time()
             clean_pufferl.evaluate(data)
+            #print(f'Evaluation took {time.time() - start} seconds')
+            #start = time.time()
             clean_pufferl.train(data)
+            #print(f'Training took {time.time() - start} seconds')
+
+        #print(p.key_averages().table(
+        #    sort_by="self_cuda_time_total", row_limit=-1))
 
         print('Done training. Saving data...')
         clean_pufferl.close(data)
@@ -232,6 +256,16 @@ if __name__ == '__main__':
             args.eval_model_path = os.path.join(data_dir, model_file)
 
     if args.mode == 'train':
+        '''
+        import cProfile
+        cProfile.run('train(args, env_module, make_env)', 'stats.profile')
+        import pstats
+        from pstats import SortKey
+        p = pstats.Stats('stats.profile')
+        p.sort_stats(SortKey.TIME).print_stats(10)
+        T()
+        '''
+
         train(args, env_module, make_env)
         exit(0)
     elif args.mode == 'sweep':
