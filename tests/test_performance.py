@@ -93,7 +93,7 @@ def profile_puffer_vec(env_creator, num_envs, timeout, sps):
     env.reset()
     steps = 0
 
-    actions = [env.single_action_space.sample() for _ in range(num_envs)]
+    actions = [env.single_action_space.sample() for _ in range(num_envs*env.agents_per_env)]
     start = time.time()
     while time.time() - start < timeout:
         obs = env.step(actions)[0]
@@ -158,6 +158,8 @@ def profile_vec(env_creator, cores, timeout, sps):
     result = profile_puffer_vec(env_creator, cores, timeout, sps)
     print(f'    Pufferlib  : {(result/sps):.3f}')
 
+    return
+
     puf_async = profile_puffer_pool_vec(env_creator, cores, timeout, sps)
     print(f'    Puffer Pool: {(puf_async/sps):.3f}')
 
@@ -194,6 +196,23 @@ if __name__ == '__main__':
     from pufferlib.environments import minigrid
     env_creators.minigrid = minigrid.env_creator()
     '''
+
+    from pufferlib.environments import nmmo3
+    env_creators.nmmo3 = nmmo3.env_creator()
+
+    '''
+    import cProfile
+    cProfile.run('profile_vec(env_creators.nmmo3, 6, 3, 1)', 'profile')
+    import pstats
+    from pstats import SortKey
+    p = pstats.Stats('profile')
+    p.sort_stats(SortKey.TIME).print_stats(10)
+    T()
+    '''
+
+    profile_vec(env_creators.nmmo3, 6, 20, 1)
+
+    exit(0)
 
     from functools import partial
     counts = [1e5, 1e6, 1e7, 1e8]

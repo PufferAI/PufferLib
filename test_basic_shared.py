@@ -99,8 +99,8 @@ def test_speed(envs_per_worker=1, delay_mean=0.01, delay_std=0.001,
 
 
 if __name__ == '__main__':
-    test_speed(delay_mean=0.001, delay_std=0.0001, num_workers=64,
-        bandwidth=40000, batch_size=24, sync=False, timeout=5)
+    test_speed(delay_mean=0.000, delay_std=0.0000, num_workers=64,
+        bandwidth=40, batch_size=24, sync=False, timeout=5)
     exit(0)
     #timeout = 1
     #test_speed(timeout=1)

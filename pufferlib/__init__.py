@@ -4,6 +4,10 @@ __version__ = version.__version__
 import os
 import sys
 
+# Silence noisy dependencies
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 # Silence noisy packages
 original_stdout = sys.stdout
 original_stderr = sys.stderr

@@ -74,7 +74,8 @@ def evaluate(data):
         policy = data.policy
         policy.update_policies()
         agent_steps = 0
-        infos = defaultdict(lambda: defaultdict(list))
+        #infos = defaultdict(lambda: defaultdict(list))
+        infos = defaultdict(list)
         lstm_h, lstm_c = experience.lstm_h, experience.lstm_c
 
     while not experience.full:
@@ -88,11 +89,11 @@ def evaluate(data):
             o = torch.as_tensor(o)
             r = torch.as_tensor(r)
             d = torch.as_tensor(d)
-            i = data.policy.update_scores(i, "return")
+            #i = data.policy.update_scores(i, "return")
 
             # TODO: Update this for policy pool
-            for ii, ee  in zip(i['learner'], env_id):
-                ii['env_id'] = ee
+            #for ii, ee  in zip(i['learner'], env_id):
+            #    ii['env_id'] = ee
 
         with profile.eval_forward, torch.no_grad():
             # TODO: In place-update should be faster
@@ -110,17 +111,23 @@ def evaluate(data):
             experience.store(o, value, actions, logprob, r, d, env_id, mask)
 
             # Really neeed to look at policy pool soon
+            for agent_info in i:
+                for k, v in agent_info.items():
+                    infos[k].append(v)
+
+            '''
             for policy_name, policy_i in i.items():
                 for agent_i in policy_i:
                     for name, dat in unroll_nested_dict(agent_i):
                         infos[policy_name][name].append(dat)
+            '''
 
         with profile.env:
             data.vecenv.send(actions)
 
     with profile.eval_misc:
         data.stats = {}
-        infos = infos['learner']
+        #infos = infos['learner']
 
         # Moves into models... maybe. Definitely moves. You could also just return infos and have it in demo
         if 'pokemon_exploration_map' in infos:
