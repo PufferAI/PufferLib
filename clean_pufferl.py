@@ -46,7 +46,7 @@ class Profile:
     def epoch_time(self):
         return self.train_time + self.eval_time
 
-    def update(self, data, interval_s=3):
+    def update(self, data, interval_s=1):
         if data.global_step == 0:
             return True
 
@@ -186,9 +186,8 @@ class Experience:
             mb_returns = self.b_returns[mb].reshape(-1)
             yield mb_obs, mb_actions, mb_logprobs, mb_values, mb_advantages, mb_returns
 
-def print_size(policy):
-    n_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
-    print(f'Model Size: {n_params//1000} K parameters')
+def count_params(policy):
+    return sum(p.numel() for p in policy.parameters() if p.requires_grad)
 
 def save_checkpoint(data):
     config = data.config
@@ -242,18 +241,19 @@ def try_load_checkpoint(data, epoch=None):
 def create(config, vecenv, policy, optimizer=None, wandb=None,
         policy_selector=pufferlib.policy_pool.random_selector):
     seed_everything(config.seed, config.torch_deterministic)
+    profile = Profile()
+    losses = Losses()
 
     Console().clear()
+    msg = f'Model Size: {abbreviate(count_params(policy))} parameters'
+    print_dashboard(0, 0, profile, losses, {}, msg)
+
     vecenv.async_reset(config.seed)
     obs_shape = vecenv.single_observation_space.shape
     atn_shape = vecenv.single_action_space.shape
     total_agents = vecenv.num_envs * vecenv.agents_per_env
 
     experience = Experience(config, policy, obs_shape, atn_shape, total_agents)
-    profile = Profile()
-    losses = Losses()
-
-    print_size(policy)
     uncompiled_policy = policy
     if config.compile:
         policy = torch.compile(policy, mode=config.compile_mode)
@@ -285,6 +285,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None,
         global_step=0,
         epoch=0,
         stats={},
+        msg=msg,
     )
 
 @pufferlib.utils.profile
@@ -292,23 +293,6 @@ def evaluate(data):
     config, profile, experience = data.config, data.profile, data.experience
 
     with profile.eval_misc:
-        if profile.update(data):
-            print_dashboard(data.global_step, data.epoch,
-                profile, data.losses, data.stats)
-
-            if data.wandb is not None and data.global_step > 0:
-                data.wandb.log({
-                    'SPS': profile.SPS,
-                    'global_step': data.global_step,
-                    'learning_rate': data.optimizer.param_groups[0]["lr"],
-                    **{f'losses/{k}': v for k, v in data.losses.items()},
-                    **{f'performance/{k}': v
-                        for k, v in data.performance.items()},
-                    **{f'stats/{k}': v for k, v in data.stats.items()},
-                    **{f'skillrank/{policy}': elo
-                        for policy, elo in data.policy_pool.ranker.ratings.items()},
-                })
-
         data.policy.update_policies()
         agent_steps = 0
         infos = defaultdict(lambda: defaultdict(list))
@@ -379,6 +363,13 @@ def evaluate(data):
             rendered = data.map_updater(pokemon_map)
             data.stats['Media/exploration_map'] = data.wandb.Image(rendered)
 
+        for k, v in infos.items():
+            try: # TODO: Better checks on log data types
+                data.stats[k] = np.mean(v)
+            except:
+                continue
+
+
     return data.stats, infos
 
 @pufferlib.utils.profile
@@ -387,12 +378,6 @@ def train(data):
 
     with profile.train_misc:
         losses = data.losses
-
-        if config.anneal_lr:
-            assert not done_training(data), 'learning rate annealed to 0'
-            frac = 1.0 - data.global_step / config.total_timesteps
-            lrnow = frac * config.learning_rate
-            data.optimizer.param_groups[0]["lr"] = lrnow
 
         # TODO: Not a very good bootstrap implementation. Doesn't handle
         # bounds between segments
@@ -495,6 +480,11 @@ def train(data):
                 break
 
     with profile.train_misc:
+        if config.anneal_lr:
+            frac = 1.0 - data.global_step / config.total_timesteps
+            lrnow = frac * config.learning_rate
+            data.optimizer.param_groups[0]["lr"] = lrnow
+
         y_pred, y_true = experience.values.cpu().numpy(), experience.b_returns.cpu().reshape(-1).numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
@@ -502,11 +492,33 @@ def train(data):
         losses.update(pg_losses, v_losses, entropy_losses,
             old_kls, kls, clipfracs, explained_var)
         data.epoch += 1
+
         if data.epoch % config.checkpoint_interval == 0 or done_training(data):
             save_checkpoint(data)
+            data.msg = f'Checkpoint saved at update {data.epoch}'
+
+        if done_training(data):
+            close(data)
+
+        if profile.update(data) or done_training(data):
+            print_dashboard(data.global_step, data.epoch,
+                profile, data.losses, data.stats, data.msg)
+
+            if data.wandb is not None and data.global_step > 0:
+                data.wandb.log({
+                    'SPS': profile.SPS,
+                    'global_step': data.global_step,
+                    'learning_rate': data.optimizer.param_groups[0]["lr"],
+                    **{f'losses/{k}': v for k, v in data.losses.items()},
+                    **{f'performance/{k}': v
+                        for k, v in data.performance.items()},
+                    **{f'stats/{k}': v for k, v in data.stats.items()},
+                    **{f'skillrank/{policy}': elo
+                        for policy, elo in data.policy_pool.ranker.ratings.items()},
+                })
 
 def close(data):
-    data.pool.close()
+    data.vecenv.close()
 
     if data.wandb is not None:
         artifact_name = f"{data.exp_name}_model"
@@ -623,9 +635,9 @@ def duration(seconds):
 
 def fmt_perf(name, time, uptime):
     percent = 0 if uptime == 0 else int(100*time/uptime - 1e-5)
-    return f'{c1}{name}', duration(time), f'{b2}{percent:2d}{c2}%'
+    return f'{c1}{name}', duration(time), f'{b2}{percent:2d}%'
 
-def print_dashboard(global_step, epoch, profile, losses, stats):
+def print_dashboard(global_step, epoch, profile, losses, stats, msg):
     dashboard = Table(box=ROUND_OPEN, expand=True,
         show_header=False, border_style='bright_cyan')
 
@@ -657,10 +669,11 @@ def print_dashboard(global_step, epoch, profile, losses, stats):
     s.add_row(f'{c2}Epoch', abbreviate(epoch))
     s.add_row(f'{c2}Uptime', duration(profile.uptime))
     s.add_row(f'{c2}Remaining', duration(profile.remaining))
-  
+
     p = Table(box=None, expand=True, show_header=False)
-    #p.add_column(f"{c1}Performance", justify="left", width=16)
-    #p.add_column(f"{c1}Time", justify="right", width=8)
+    p.add_column(f"{c1}Performance", justify="left", width=10)
+    p.add_column(f"{c1}Time", justify="right", width=8)
+    p.add_column(f"{c1}%", justify="right", width=4)
     p.add_row(*fmt_perf('Evaluate', profile.eval_time, profile.uptime))
     p.add_row(*fmt_perf('  Forward', profile.eval_forward_time, profile.uptime))
     p.add_row(*fmt_perf('  Env', profile.env_time, profile.uptime))
@@ -670,7 +683,7 @@ def print_dashboard(global_step, epoch, profile, losses, stats):
     p.add_row(*fmt_perf('  Learn', profile.learn_time, profile.uptime))
     p.add_row(*fmt_perf('  Misc', profile.train_misc_time, profile.uptime))
 
-    l = Table(box=None, expand=True)
+    l = Table(box=None, expand=True, )
     l.add_column(f'{c1}Losses', justify="left", width=16)
     l.add_column(f'{c1}Value', justify="right", width=8)
     for metric, value in losses.items():
@@ -680,21 +693,25 @@ def print_dashboard(global_step, epoch, profile, losses, stats):
     monitor.add_row(s, p, l)
     dashboard.add_row(monitor)
 
-    if stats:
-        table = Table(box=None, expand=True, pad_edge=False)
-        dashboard.add_row(table)
-        left = Table(box=None, expand=True)
-        right = Table(box=None, expand=True)
-        table.add_row(left, right)
-        left.add_column(f"{c1}User Stats", justify="left", width=20)
-        left.add_column(f"{c1}Value", justify="right", width=10)
-        right.add_column(f"{c1}User Stats", justify="left", width=20)
-        right.add_column(f"{c1}Value", justify="right", width=10)
-        i = 0
-        for metric, value in stats.items():
-            u = left if i % 2 == 0 else right
-            u.add_row(f'{c2}{metric}', f'{b2}{value:.3f}')
-            i += 1
+    table = Table(box=None, expand=True, pad_edge=False)
+    dashboard.add_row(table)
+    left = Table(box=None, expand=True)
+    right = Table(box=None, expand=True)
+    table.add_row(left, right)
+    left.add_column(f"{c1}User Stats", justify="left", width=20)
+    left.add_column(f"{c1}Value", justify="right", width=10)
+    right.add_column(f"{c1}User Stats", justify="left", width=20)
+    right.add_column(f"{c1}Value", justify="right", width=10)
+    i = 0
+    for metric, value in stats.items():
+        u = left if i % 2 == 0 else right
+        u.add_row(f'{c2}{metric}', f'{b2}{value:.3f}')
+        i += 1
+
+
+    table = Table(box=None, expand=True, pad_edge=False)
+    dashboard.add_row(table)
+    table.add_row(f' {c1}Message: {c2}{msg}')
 
     console = Console()
     with console.capture() as capture:
