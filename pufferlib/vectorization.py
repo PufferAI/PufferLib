@@ -263,12 +263,12 @@ def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
     atn_size = int(np.prod(atn_shape))
     atn_n = num_agents * atn_size
 
-    s = worker_idx * agents_per_env
-    e = (worker_idx + 1) * agents_per_env
-    s_obs = worker_idx * agents_per_env * obs_size
-    e_obs = (worker_idx + 1) * agents_per_env * obs_size
-    s_atn = worker_idx * agents_per_env * atn_size
-    e_atn = (worker_idx + 1) * agents_per_env * atn_size
+    s = worker_idx * num_agents
+    e = (worker_idx + 1) * num_agents 
+    s_obs = worker_idx * num_agents * obs_size
+    e_obs = (worker_idx + 1) * num_agents * obs_size
+    s_atn = worker_idx * num_agents * atn_size
+    e_atn = (worker_idx + 1) * num_agents * atn_size
 
     obs_arr = np.frombuffer(obs_mem, dtype=observation_dtype)[s_obs:e_obs].reshape(num_agents, *obs_shape)
     atn_arr = np.frombuffer(atn_mem, dtype=action_dtype)[s_atn:e_atn]
