@@ -65,7 +65,6 @@ class GymnasiumMultiEnv:
             else:
                 ob, i = e.reset(seed=hash(1000*seed + idx))
 
-            i['mask'] = True
             infos.append(i)
             self.preallocated_obs[idx] = ob
 
@@ -90,7 +89,6 @@ class GymnasiumMultiEnv:
                 self.preallocated_dones[idx] = d
                 self.preallocated_truncateds[idx] = t
 
-            i['mask'] = True
             infos.append(i)
             self.preallocated_obs[idx] = o
 

@@ -172,7 +172,7 @@ class Default(Policy):
         linear layers to decode actions. The value function is a single linear layer.
         '''
         super().__init__(env)
-        self.encoder = nn.Linear(self.observation_space.shape[0], hidden_size)
+        self.encoder = nn.Linear(np.prod(self.observation_space.shape), hidden_size)
         if self.is_multidiscrete:
             self.decoder = nn.ModuleList([
                 pufferlib.pytorch.layer_init(nn.Linear(hidden_size, n), std=0.01)
@@ -183,13 +183,15 @@ class Default(Policy):
 
         self.value_head = nn.Linear(hidden_size, 1)
 
-    def forward(self, env_outputs):
+    def forward(self, observations):
         '''Forward pass for PufferLib compatibility'''
-        hidden, lookup = self.encode_observations(env_outputs)
+        hidden, lookup = self.encode_observations(observations)
         actions, value = self.decode_actions(hidden, lookup)
         return actions, value
 
     def encode_observations(self, observations):
+        batch_size = observations.shape[0]
+        observations = observations.view(batch_size, -1)
         return torch.relu(self.encoder(observations.float())), None
 
     def decode_actions(self, hidden, lookup, concat=True):

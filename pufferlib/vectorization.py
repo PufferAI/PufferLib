@@ -204,14 +204,15 @@ class Serial:
 
     def recv(self):
         recv_precheck(self)
-        recvs = [(o, r, d, t, i, env_id) for (o, r, d, t, i), env_id
-            in zip(self.data, range(self.workers_per_batch))]
+        recvs = [(o, r, d, t, i, env_id, m) for (o, r, d, t, i), env_id, m
+            in zip(self.data, range(self.workers_per_batch), self.mask)]
         return aggregate_recvs(self, recvs)
 
     def send(self, actions):
         send_precheck(self)
         actions = split_actions(self, actions)
         self.data = [e.step(a) for e, a in zip(self.multi_envs, actions)]
+        self.mask = [e.preallocated_masks for e in self.multi_envs]
 
     def async_reset(self, seed=None):
         reset_precheck(self)
@@ -219,6 +220,7 @@ class Serial:
             self.data = [e.reset() for e in self.multi_envs]
         else:
             self.data = [e.reset(seed=seed+idx) for idx, e in enumerate(self.multi_envs)]
+        self.mask = [e.preallocated_masks for e in self.multi_envs]
 
     def put(self, *args, **kwargs):
         for e in self.multi_envs:
@@ -372,16 +374,13 @@ class Multiprocessing:
 
                     if response_pipe.poll():
                         info = response_pipe.recv()
-                        o, r, d, t, m = _unpack_shared_mem(self.shared_mem[env_id], self.observation_dtype)
+                        o, r, d, t, m = _unpack_shared_mem(
+                            self.shared_mem[env_id], self.observation_dtype)
                         o = o.reshape(
                             self.agents_per_env*self.envs_per_worker,
                             self.observation_size).astype(self.observation_dtype)
 
-                        if self.mask_agents:
-                            recvs.append((o, r, d, t, info, env_id, m))
-                        else:
-                            recvs.append((o, r, d, t, info, env_id))
-
+                        recvs.append((o, r, d, t, info, env_id, m))
                         next_env_id.append(env_id)
 
                     if len(recvs) == self.workers_per_batch:                    
@@ -390,13 +389,13 @@ class Multiprocessing:
             for env_id in range(self.workers_per_batch):
                 response_pipe = self.recv_pipes[env_id]
                 info = response_pipe.recv()
-                o, r, d, t = _unpack_shared_mem(
-                    self.shared_mem[env_id], self.agents_per_env * self.envs_per_worker)
+                o, r, d, t, m = _unpack_shared_mem(
+                    self.shared_mem[env_id], self.observation_dtype)
                 o = o.reshape(
                     self.agents_per_env*self.envs_per_worker,
                     self.observation_size).astype(self.observation_dtype)
 
-                recvs.append((o, r, d, t, info, env_id))
+                recvs.append((o, r, d, t, info, env_id, m))
                 next_env_id.append(env_id)
 
         self.prev_env_id = next_env_id

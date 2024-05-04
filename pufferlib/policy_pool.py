@@ -124,7 +124,7 @@ class PolicyPool:
 
         return policy_ids, sample_idxs, kernel
 
-    def forwards(self, obs, lstm_state=None):
+    def forwards(self, obs, lstm_h=None, lstm_c=None):
         for policy_id in self.policy_ids:
             samp = self.sample_idxs[policy_id]
             assert len(samp) > 0
@@ -132,13 +132,13 @@ class PolicyPool:
             policy = self.learner_policy if policy_id == LEARNER_POLICY_ID \
                 else self.current_policies[policy_id]['policy']
 
-            # NOTE: This does not copy! Probably should.
-            if lstm_state is not None:
-                h = lstm_state[0][:, samp]
-                c = lstm_state[1][:, samp]
+            # NOTE: Modifies LSTM_State inplace
+            if lstm_h is not None:
+                h = lstm_h[:, samp]
+                c = lstm_c[:, samp]
                 atn, lgprob, _, val, (h, c) = policy(obs[samp], (h, c))
-                lstm_state[0][:, samp] = h
-                lstm_state[1][:, samp] = c
+                lstm_h[:, samp] = h
+                lstm_c[:, samp] = c
             else:
                 atn, lgprob, _, val = policy(obs[samp])
 
@@ -146,7 +146,7 @@ class PolicyPool:
             self.logprobs[samp] = lgprob
             self.values[samp] = val.flatten()
 
-        return self.actions, self.logprobs, self.values, lstm_state
+        return self.actions, self.logprobs, self.values, (lstm_h, lstm_c)
 
     def _get_policy_name(self, agent_id):
         assert agent_id > 0, 'Agent id must be > 0'

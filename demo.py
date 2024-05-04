@@ -10,6 +10,7 @@ import yaml
 
 import pufferlib
 import pufferlib.utils
+import pufferlib.vectorization
 
 import clean_pufferl
 
@@ -118,7 +119,7 @@ def train(args, env_module, make_env):
     policy = make_policy(vecenv.driver_env, env_module, args)
 
     train_config = args.train 
-    train_config.exp_name = args.exp_name
+    train_config.exp_name = 'test'#args.exp_name
     train_config.track = args.track
     train_config.device = args.train.device
 
@@ -135,20 +136,15 @@ def train(args, env_module, make_env):
             ]
         ) as p:
         '''
-        while not clean_pufferl.done_training(data):
-            #start = time.time()
-            clean_pufferl.evaluate(data)
-            #print(f'Evaluation took {time.time() - start} seconds')
-            #start = time.time()
-            clean_pufferl.train(data)
-            #print(f'Training took {time.time() - start} seconds')
 
-        #print(p.key_averages().table(
-        #    sort_by="self_cuda_time_total", row_limit=-1))
+        while data.global_step < args.train.total_timesteps:
+            try:
+                clean_pufferl.evaluate(data)
+                clean_pufferl.train(data)
+            except KeyboardInterrupt:
+                clean_pufferl.close(data)
+                exit(0)
 
-        print('Done training. Saving data...')
-        clean_pufferl.close(data)
-        print('Run complete')
     elif args.backend == 'sb3':
         from stable_baselines3 import PPO
         from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
