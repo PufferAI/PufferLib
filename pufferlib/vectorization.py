@@ -5,6 +5,7 @@ import gymnasium
 from itertools import chain
 import psutil
 import time
+import msgpack
 
 
 from pufferlib import namespace
@@ -239,9 +240,14 @@ def _unpack_shared_mem(shared_mem, observation_dtype):
     mask_arr = np.frombuffer(mask_mem, dtype=bool)
     return obs_arr, rewards_arr, terminals_arr, truncated_arr, mask_arr
 
+STEP = b"s"
+RESET = b"r"
+RESET_NONE = b"n"
+CLOSE = b"c"
+
 def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
-        num_envs, agents_per_env, worker_idx, obs_shape, obs_mem, rewards_mem,
-        terminals_mem, truncated_mem, mask_mem, observation_dtype, send_pipe, recv_pipe):
+        num_envs, agents_per_env, worker_idx, obs_shape, obs_mem, atn_shape, atn_mem, rewards_mem,
+        terminals_mem, truncated_mem, mask_mem, observation_dtype, action_dtype, send_pipe, recv_pipe):
     
     # I don't know if this helps. Sometimes it does, sometimes not.
     # Need to run more comprehensive tests
@@ -254,35 +260,39 @@ def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
     obs_size = int(np.prod(obs_shape))
     obs_n = num_agents * obs_size
 
+    atn_size = int(np.prod(atn_shape))
+    atn_n = num_agents * atn_size
+
     s = worker_idx * agents_per_env
     e = (worker_idx + 1) * agents_per_env
     s_obs = worker_idx * agents_per_env * obs_size
     e_obs = (worker_idx + 1) * agents_per_env * obs_size
+    s_atn = worker_idx * agents_per_env * atn_size
+    e_atn = (worker_idx + 1) * agents_per_env * atn_size
 
     obs_arr = np.frombuffer(obs_mem, dtype=observation_dtype)[s_obs:e_obs].reshape(num_agents, *obs_shape)
+    atn_arr = np.frombuffer(atn_mem, dtype=action_dtype)[s_atn:e_atn]
     rewards_arr = np.frombuffer(rewards_mem, dtype=np.float32)[s:e]
     terminals_arr = np.frombuffer(terminals_mem, dtype=bool)[s:e]
     truncated_arr = np.frombuffer(truncated_mem, dtype=bool)[s:e]
     mask_arr = np.frombuffer(mask_mem, dtype=bool)[s:e]
 
     while True:
-        request, args, kwargs = recv_pipe.recv()
-        func = getattr(envs, request)
-        response = func(*args, **kwargs)
-        info = {}
+        request = recv_pipe.recv_bytes()
+        if request == RESET:
+            response = envs.reset()
+        elif request == STEP:
+            response = envs.step(atn_arr)
 
-        # TODO: Handle put/get
-        if request in 'step reset'.split():
-            obs, reward, done, truncated, info = response
+        obs, reward, done, truncated, info = response
 
-            # TESTED: There is no overhead associated with 4 assignments to shared memory
-            # vs. 4 assigns to an intermediate numpy array and then 1 assign to shared memory
-            obs_arr[:] = obs
-            rewards_arr[:] = reward
-            terminals_arr[:] = done
-            truncated_arr[:] = truncated
-            mask_arr[:] = envs.preallocated_masks
-
+        # TESTED: There is no overhead associated with 4 assignments to shared memory
+        # vs. 4 assigns to an intermediate numpy array and then 1 assign to shared memory
+        obs_arr[:] = obs
+        rewards_arr[:] = reward
+        terminals_arr[:] = done
+        truncated_arr[:] = truncated
+        mask_arr[:] = envs.preallocated_masks
         send_pipe.send(info)
 
 class Multiprocessing:
@@ -317,25 +327,23 @@ class Multiprocessing:
         observation_shape = _single_observation_space(driver_env).shape
         observation_size = int(np.prod(observation_shape))
         observation_dtype = _single_observation_space(driver_env).dtype
+        action_shape = _single_action_space(driver_env).shape
+        action_size = int(np.prod(action_shape))
+        action_dtype = _single_action_space(driver_env).dtype
 
         # Shared memory for obs, rewards, terminals, truncateds
         from multiprocessing import Process, Manager, Pipe, Array
         obs_mem = Array(np.ctypeslib.as_ctypes_type(observation_dtype),
                 num_workers*agents_per_worker*observation_size, lock=False)
+        atn_mem = Array(np.ctypeslib.as_ctypes_type(action_dtype),
+                num_workers*agents_per_worker, lock=False)
         rewards_mem = Array('f', num_workers*agents_per_worker, lock=False)
         terminals_mem = Array('b', num_workers*agents_per_worker, lock=False)
         truncated_mem = Array('b', num_workers*agents_per_worker, lock=False)
         mask_mem = Array('b', num_workers*agents_per_worker, lock=False)
 
-        '''
-        obs_arr = np.frombuffer(obs_mem, dtype=observation_dtype).reshape(num_workers, agents_per_worker, observation_size)
-        rewards_arr = np.frombuffer(rewards_mem, dtype=np.float32).reshape(num_workers, agents_per_worker)
-        terminals_arr = np.frombuffer(terminals_mem, dtype=bool).reshape(num_workers, agents_per_worker)
-        truncated_arr = np.frombuffer(truncated_mem, dtype=bool).reshape(num_workers, agents_per_worker)
-        mask_arr = np.frombuffer(mask_mem, dtype=bool).reshape(num_workers, agents_per_worker)
-        '''
-
         obs_arr = np.frombuffer(obs_mem, dtype=observation_dtype).reshape(num_workers*agents_per_worker, *observation_shape)
+        atn_arr = np.frombuffer(atn_mem, dtype=action_dtype).reshape(num_workers*agents_per_worker, *action_shape)
         rewards_arr = np.frombuffer(rewards_mem, dtype=np.float32)
         terminals_arr = np.frombuffer(terminals_mem, dtype=bool)
         truncated_arr = np.frombuffer(truncated_mem, dtype=bool)
@@ -350,7 +358,8 @@ class Multiprocessing:
             p = Process(
                 target=_worker_process,
                 args=(multi_env_cls, env_creator, env_args, env_kwargs, envs_per_worker, agents_per_env, i,
-                    observation_shape, obs_mem, rewards_mem, terminals_mem, truncated_mem, mask_mem, observation_dtype,
+                    observation_shape, obs_mem, action_shape, atn_mem, rewards_mem, terminals_mem, truncated_mem,
+                    mask_mem, observation_dtype, action_dtype,
                     work_send_pipes[i], work_recv_pipes[i])
             )
             p.start()
@@ -362,11 +371,15 @@ class Multiprocessing:
         for pipe in main_recv_pipes:
             sel.register(pipe, selectors.EVENT_READ)
 
+        self.agent_ids = np.stack([np.arange(
+            i*agents_per_worker, (i+1)*agents_per_worker) for i in range(num_workers)])
+
         self.processes = processes
         self.sel = sel
         self.observation_shape = observation_shape
         self.observation_dtype = observation_dtype
         self.obs_arr = obs_arr
+        self.atn_arr = atn_arr
         self.rewards_arr = rewards_arr
         self.terminals_arr = terminals_arr
         self.truncated_arr = truncated_arr
@@ -413,8 +426,7 @@ class Multiprocessing:
                 next_env_id.append(env_id)
 
         infos = [i for ii in infos for i in ii]
-        agent_ids = np.concatenate([np.arange(
-            i*self.agents_per_worker, (i+1)*self.agents_per_worker) for i in next_env_id])
+        agent_ids = self.agent_ids[next_env_id].ravel()
 
         o = self.obs_arr[agent_ids].reshape(self.agents_per_batch, *self.observation_shape)
         r = self.rewards_arr[agent_ids]
@@ -422,25 +434,27 @@ class Multiprocessing:
         t = self.truncated_arr[agent_ids]
         m = self.mask_arr[agent_ids]
 
-        #obs_space = self.driver_env.env.observation_space
-        #if isinstance(obs_space, pufferlib.spaces.Box):
-        #    o = o.reshape(o.shape[0], *obs_space.shape)
-
         self.prev_env_id = next_env_id
         return o, r, d, t, infos, agent_ids, m
-        #return aggregate_recvs(self, recvs)
 
     def send(self, actions):
         send_precheck(self)
-        actions = split_actions(self, actions)
-        for i, atns in zip(self.prev_env_id, actions):
-            self.send_pipes[i].send(("step", [atns], {}))
+        agent_ids = self.agent_ids[self.prev_env_id].ravel()
+        self.atn_arr[agent_ids] = actions
+        for i in self.prev_env_id:
+            self.send_pipes[i].send_bytes(STEP)
 
     def async_reset(self, seed=None):
         reset_precheck(self)
+        for pipe in self.send_pipes:
+            pipe.send_bytes(RESET)
+
+        return
+        # TODO: Seed
+
         if seed is None:
             for pipe in self.send_pipes:
-                pipe.send(("reset", [], {}))
+                pipe.send(RESET)
         else:
             for idx, pipe in enumerate(self.send_pipes):
                 pipe.send(("reset", [], {"seed": seed+idx}))
