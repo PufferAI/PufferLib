@@ -14,15 +14,10 @@ import pufferlib.utils
 import pufferlib.policy_pool
 import pufferlib.pytorch
 
-# There is no fast way to implement GAE in Python.
-# This is a Cython implementation of the GAE algorithm.
+# Fast Cython GAE implementation
 import pyximport
 pyximport.install(setup_args={"include_dirs": np.get_include()})
 from c_gae import compute_gae
-
-# Synchronize may have a small perf impact. You can remove them, but it will mess up
-# relative timings for profiling.
-
 
 def create(config, vecenv, policy, optimizer=None, wandb=None,
         policy_selector=pufferlib.policy_pool.random_selector):
@@ -85,7 +80,6 @@ def evaluate(data):
         policy = data.policy
         policy.update_policies()
         agent_steps = 0
-        #infos = defaultdict(lambda: defaultdict(list))
         infos = defaultdict(list)
         lstm_h, lstm_c = experience.lstm_h, experience.lstm_c
 
@@ -99,11 +93,7 @@ def evaluate(data):
 
             o = torch.as_tensor(o)
             o_device = o.to(config.device)
-            #.pin_memory()
-            #o_cuda = o.to(config.device, non_blocking=True)
-            #obs_buffer = experience.obs_buffer
-            #obs_buffer.copy_(o, non_blocking=True)
-            #obs_buffer = obs_buffer.to(config.device, non_blocking=True)
+
             r = torch.as_tensor(r)
             d = torch.as_tensor(d)
             #i = data.policy.update_scores(i, "return")
@@ -199,13 +189,11 @@ def train(data):
     losses = data.losses
 
     with profile.train_misc:
-        # TODO: Not a very good bootstrap implementation. Doesn't handle
-        # bounds between segments
-        # bootstrap value if not done
         idxs = experience.sort_training_data()
         dones_np = experience.dones_np[idxs]
         values_np = experience.values_np[idxs]
         rewards_np = experience.rewards_np[idxs]
+        # TODO: bootstrap between segment bounds
         advantages_np = compute_gae(dones_np, values_np, rewards_np, config.gamma, config.gae_lambda)
         experience.flatten_batch(advantages_np)
 
@@ -306,11 +294,6 @@ def train(data):
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
         losses.explained_variance = explained_var
-
-        #losses.update(mean_pg_loss, mean_v_loss, mean_entropy_loss,
-        #    mean_old_kl, mean_kl, mean_clipfrac, explained_var)
-        #losses.update(pg_losses, v_losses, entropy_losses,
-        #    old_kls, kls, clipfracs, explained_var)
         data.epoch += 1
 
         done_training = data.global_step >= config.total_timesteps
@@ -409,34 +392,6 @@ def make_losses():
         explained_variance=0,
     )
 
-@pufferlib.dataclass
-class Losses:
-    policy_loss = 0
-    value_loss = 0
-    entropy = 0
-    old_approx_kl = 0
-    approx_kl = 0
-    clipfrac = 0
-    explained_variance = 0
-
-    def update(self, policy, value, entropy, old_approx_kl,
-            approx_kl, clipfrac, explained_variance):
-        self.policy_loss = policy.item()
-        self.value_loss = value.item()
-        self.entropy = entropy.item()
-        self.old_approx_kl = old_approx_kl.item()
-        self.approx_kl = approx_kl.item()
-        self.clipfrac = clipfrac.item()
-        self.explained_variance = explained_variance
-        return
-        self.policy_loss = torch.stack(policy).cpu().mean().item()
-        self.value_loss = torch.stack(value).cpu().mean().item()
-        self.entropy = torch.stack(entropy).cpu().mean().item()
-        self.old_approx_kl = torch.stack(old_approx_kl).cpu().mean().item()
-        self.approx_kl = torch.stack(approx_kl).cpu().mean().item()
-        self.clipfrac = torch.stack(clipfrac).cpu().mean().item()
-        self.explained_variance = explained_variance
-
 class Experience:
     '''Flat tensor storage and array views for faster indexing'''
     def __init__(self, batch_size, agents_per_batch, bptt_horizon, batch_rows, obs_shape, obs_dtype, atn_shape,
@@ -511,23 +466,6 @@ class Experience:
     def flatten_batch(self, advantages_np):
         advantages = torch.from_numpy(advantages_np).to(self.device)
         b_idxs, b_flat = self.b_idxs, self.b_idxs_flat
-        '''
-        self.b_obs = torch.as_tensor(self.obs_np[b_idxs])
-        self.b_actions = torch.as_tensor(self.actions_np[b_idxs]
-            ).contiguous().to(self.device, non_blocking=True)
-        self.b_logprobs = torch.as_tensor(self.logprobs_np[b_idxs]
-            ).to(self.device, non_blocking=True)
-        self.b_dones = torch.as_tensor(self.dones_np[b_idxs]
-            ).to(self.device, non_blocking=True)
-        self.b_values = torch.as_tensor(self.values_np[b_flat]
-            ).to(self.device, non_blocking=True)
-        self.b_advantages = advantages.reshape(self.batch_rows,
-            self.num_minibatches, self.bptt_horizon).transpose(0, 1).reshape(
-            self.num_minibatches, self.batch_rows*self.bptt_horizon)
-        self.b_returns = self.b_advantages + self.b_values
-        self.returns_np = advantages_np + self.values_np
-        '''
-        #self.b_obs = self.obs#.to(self.device, non_blocking=True)
         self.b_actions = self.actions.to(self.device, non_blocking=True)
         self.b_logprobs = self.logprobs.to(self.device, non_blocking=True)
         self.b_dones = self.dones.to(self.device, non_blocking=True)
@@ -536,43 +474,12 @@ class Experience:
             self.num_minibatches, self.bptt_horizon).transpose(0, 1).reshape(
             self.num_minibatches, self.batch_rows*self.bptt_horizon)
         self.returns_np = advantages_np + self.values_np
-
-        #self.b_obs = torch.as_tensor(self.obs_np[self.b_idxs_np])
         self.b_obs = self.obs[self.b_idxs_obs]
-        #self.b_obs = self.b_obs.to(self.device, non_blocking=True)
-        #self.b_obs[b_idxs]
         self.b_actions = self.b_actions[b_idxs].contiguous()
         self.b_logprobs = self.b_logprobs[b_idxs]
         self.b_dones = self.b_dones[b_idxs]
         self.b_values = self.b_values[b_flat]
         self.b_returns = self.b_advantages + self.b_values
-
-
-        '''
-        self.b_actions = self.actions[b_idxs].contiguous().to(self.device, non_blocking=True)
-        self.b_logprobs = self.logprobs[b_idxs].to(self.device, non_blocking=True)
-        self.b_dones = self.dones[b_idxs].to(self.device, non_blocking=True)
-        self.b_values = self.values[b_flat].to(self.device, non_blocking=True)
-        self.b_advantages = advantages.reshape(self.batch_rows,
-            self.num_minibatches, self.bptt_horizon).transpose(0, 1).reshape(
-            self.num_minibatches, self.batch_rows*self.bptt_horizon)
-        self.b_returns = self.b_advantages + self.b_values
-        self.returns_np = advantages_np + self.values_np
-
-
-        self.b_obs = self.obs[b_idxs]#.to(self.device, non_blocking=True)
-        self.b_actions = self.actions[b_idxs].contiguous().to(self.device, non_blocking=True)
-        self.b_logprobs = self.logprobs[b_idxs].to(self.device, non_blocking=True)
-        self.b_dones = self.dones[b_idxs].to(self.device, non_blocking=True)
-        self.b_values = self.values[b_flat].to(self.device, non_blocking=True)
-        self.b_advantages = advantages.reshape(self.batch_rows,
-            self.num_minibatches, self.bptt_horizon).transpose(0, 1).reshape(
-            self.num_minibatches, self.batch_rows*self.bptt_horizon)
-        self.b_returns = self.b_advantages + self.b_values
-        self.returns_np = advantages_np + self.values_np
-        '''
-
-
 
 def save_checkpoint(data):
     config = data.config
