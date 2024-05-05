@@ -40,8 +40,8 @@ def create(config, vecenv, policy, optimizer=None, wandb=None,
     total_agents = vecenv.num_envs * vecenv.agents_per_env
 
     lstm = policy.lstm if hasattr(policy, 'lstm') else None
-    experience = Experience(config.batch_size, config.bptt_horizon,
-        config.batch_rows, obs_shape, obs_dtype, atn_shape, config.device, lstm, total_agents)
+    experience = Experience(config.batch_size, vecenv.agents_per_batch, config.bptt_horizon,
+        config.batch_rows, obs_shape, obs_dtype, atn_shape, config.cpu_offload, config.device, lstm, total_agents)
 
     uncompiled_policy = policy
     if config.compile:
@@ -78,7 +78,6 @@ def create(config, vecenv, policy, optimizer=None, wandb=None,
     )
 
 @pufferlib.utils.profile
-@profile
 def evaluate(data):
     config, profile, experience = data.config, data.profile, data.experience
 
@@ -99,6 +98,12 @@ def evaluate(data):
             data.global_step += sum(mask)
 
             o = torch.as_tensor(o)
+            o_device = o.to(config.device)
+            #.pin_memory()
+            #o_cuda = o.to(config.device, non_blocking=True)
+            #obs_buffer = experience.obs_buffer
+            #obs_buffer.copy_(o, non_blocking=True)
+            #obs_buffer = obs_buffer.to(config.device, non_blocking=True)
             r = torch.as_tensor(r)
             d = torch.as_tensor(d)
             #i = data.policy.update_scores(i, "return")
@@ -108,10 +113,11 @@ def evaluate(data):
             #    ii['env_id'] = ee
 
         with profile.eval_forward, torch.no_grad():
-            # TODO: In place-update should be faster
+            # TODO: In place-update should be faster. Leaking 7% speed max
+            # Also should be using a cuda tensor to index
             h = lstm_h[:, env_id] if lstm_h is not None else None
             c = lstm_c[:, env_id] if lstm_c is not None else None
-            actions, logprob, value, (h, c) = policy.forwards(o.to(config.device), h, c)
+            actions, logprob, value, (h, c) = policy.forwards(o_device, h, c)
             if lstm_h is not None:
                 lstm_h[:, env_id] = h
                 lstm_c[:, env_id] = c
@@ -122,6 +128,7 @@ def evaluate(data):
             value = value.flatten()
             actions = actions.cpu().numpy()
             mask = torch.as_tensor(mask * policy.mask)
+            o = o if config.cpu_offload else o_device
             experience.store(o, value, actions, logprob, r, d, env_id, mask)
 
             # Really neeed to look at policy pool soon
@@ -186,7 +193,6 @@ def compute_advantages(batch_size, idxs, dones, values, rewards, gamma, gae_lamb
     return advantages
 
 @pufferlib.utils.profile
-@profile
 def train(data):
     config, profile, experience = data.config, data.profile, data.experience
     data.losses = make_losses()
@@ -210,7 +216,8 @@ def train(data):
         lstm_state = None
         for mb in range(experience.num_minibatches):
             with profile.train_misc:
-                obs = experience.b_obs[mb].to(config.device, non_blocking=True)
+                obs = experience.b_obs[mb]
+                obs = obs.to(config.device)
                 atn = experience.b_actions[mb]
                 log_probs = experience.b_logprobs[mb]
                 val = experience.b_values[mb]
@@ -432,11 +439,11 @@ class Losses:
 
 class Experience:
     '''Flat tensor storage and array views for faster indexing'''
-    def __init__(self, batch_size, bptt_horizon, batch_rows, obs_shape, obs_dtype, atn_shape,
-                 device='cuda', lstm=None, lstm_total_agents=0):
+    def __init__(self, batch_size, agents_per_batch, bptt_horizon, batch_rows, obs_shape, obs_dtype, atn_shape,
+                 cpu_offload=False, device='cuda', lstm=None, lstm_total_agents=0):
         obs_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_dtype]
-        pin = device == 'cuda'
-        self.obs=torch.zeros(batch_size, *obs_shape, dtype=obs_dtype, pin_memory=pin)
+        pin = device == 'cuda' and cpu_offload
+        self.obs=torch.zeros(batch_size, *obs_shape, dtype=obs_dtype, pin_memory=pin, device=device)
         self.actions=torch.zeros(batch_size, *atn_shape, dtype=int, pin_memory=pin)
         self.logprobs=torch.zeros(batch_size, pin_memory=pin)
         self.rewards=torch.zeros(batch_size, pin_memory=pin)
@@ -444,16 +451,13 @@ class Experience:
         self.truncateds=torch.zeros(batch_size, pin_memory=pin)
         self.values=torch.zeros(batch_size, pin_memory=pin)
 
-        self.obs_np = np.asarray(self.obs)
+        #self.obs_np = np.asarray(self.obs)
         self.actions_np = np.asarray(self.actions)
         self.logprobs_np = np.asarray(self.logprobs)
         self.rewards_np = np.asarray(self.rewards)
         self.dones_np = np.asarray(self.dones)
         self.truncateds_np = np.asarray(self.truncateds)
         self.values_np = np.asarray(self.values)
-
-        #self.mb_obs_buffer = torch.zeros(batch_rows, bptt_horizon, *obs_shape,
-        #    pin_memory=(device=="cuda"), dtype=obs_dtype, device=device)
 
         self.lstm_h = self.lstm_c = None
         if lstm is not None:
@@ -481,7 +485,7 @@ class Experience:
         indices = torch.where(mask)[0].numpy()[:self.batch_size - ptr]
         end = ptr + len(indices)
  
-        self.obs_np[ptr:end] = obs.cpu().numpy()[indices]
+        self.obs[ptr:end] = obs.to(self.obs.device)[indices]
         self.values_np[ptr:end] = value.cpu().numpy()[indices]
         self.actions_np[ptr:end] = action[indices]
         self.logprobs_np[ptr:end] = logprob.cpu().numpy()[indices]
@@ -494,9 +498,11 @@ class Experience:
     def sort_training_data(self):
         idxs = np.asarray(sorted(
             range(len(self.sort_keys)), key=self.sort_keys.__getitem__))
-        self.b_idxs = torch.as_tensor(idxs).reshape(
-            self.batch_rows, self.num_minibatches, self.bptt_horizon).transpose(0, 1).long()
-        self.b_idxs_flat = self.b_idxs.reshape(self.batch_rows, self.num_minibatches * self.bptt_horizon)
+        self.b_idxs_obs = torch.as_tensor(idxs.reshape(self.batch_rows,
+            self.num_minibatches, self.bptt_horizon).transpose(1,0,-1)).to(
+            self.obs.device).long()
+        self.b_idxs = self.b_idxs_obs.to(self.device)
+        self.b_idxs_flat = self.b_idxs.reshape(self.num_minibatches, self.batch_rows*self.bptt_horizon)
         self.sort_keys = []
         self.ptr = 0
         self.step = 0
@@ -505,6 +511,7 @@ class Experience:
     def flatten_batch(self, advantages_np):
         advantages = torch.from_numpy(advantages_np).to(self.device)
         b_idxs, b_flat = self.b_idxs, self.b_idxs_flat
+        '''
         self.b_obs = torch.as_tensor(self.obs_np[b_idxs])
         self.b_actions = torch.as_tensor(self.actions_np[b_idxs]
             ).contiguous().to(self.device, non_blocking=True)
@@ -515,9 +522,57 @@ class Experience:
         self.b_values = torch.as_tensor(self.values_np[b_flat]
             ).to(self.device, non_blocking=True)
         self.b_advantages = advantages.reshape(self.batch_rows,
-            self.num_minibatches, self.bptt_horizon).transpose(0, 1).reshape(self.batch_rows, -1)
+            self.num_minibatches, self.bptt_horizon).transpose(0, 1).reshape(
+            self.num_minibatches, self.batch_rows*self.bptt_horizon)
         self.b_returns = self.b_advantages + self.b_values
         self.returns_np = advantages_np + self.values_np
+        '''
+        #self.b_obs = self.obs#.to(self.device, non_blocking=True)
+        self.b_actions = self.actions.to(self.device, non_blocking=True)
+        self.b_logprobs = self.logprobs.to(self.device, non_blocking=True)
+        self.b_dones = self.dones.to(self.device, non_blocking=True)
+        self.b_values = self.values.to(self.device, non_blocking=True)
+        self.b_advantages = advantages.reshape(self.batch_rows,
+            self.num_minibatches, self.bptt_horizon).transpose(0, 1).reshape(
+            self.num_minibatches, self.batch_rows*self.bptt_horizon)
+        self.returns_np = advantages_np + self.values_np
+
+        #self.b_obs = torch.as_tensor(self.obs_np[self.b_idxs_np])
+        self.b_obs = self.obs[self.b_idxs_obs]
+        #self.b_obs = self.b_obs.to(self.device, non_blocking=True)
+        #self.b_obs[b_idxs]
+        self.b_actions = self.b_actions[b_idxs].contiguous()
+        self.b_logprobs = self.b_logprobs[b_idxs]
+        self.b_dones = self.b_dones[b_idxs]
+        self.b_values = self.b_values[b_flat]
+        self.b_returns = self.b_advantages + self.b_values
+
+
+        '''
+        self.b_actions = self.actions[b_idxs].contiguous().to(self.device, non_blocking=True)
+        self.b_logprobs = self.logprobs[b_idxs].to(self.device, non_blocking=True)
+        self.b_dones = self.dones[b_idxs].to(self.device, non_blocking=True)
+        self.b_values = self.values[b_flat].to(self.device, non_blocking=True)
+        self.b_advantages = advantages.reshape(self.batch_rows,
+            self.num_minibatches, self.bptt_horizon).transpose(0, 1).reshape(
+            self.num_minibatches, self.batch_rows*self.bptt_horizon)
+        self.b_returns = self.b_advantages + self.b_values
+        self.returns_np = advantages_np + self.values_np
+
+
+        self.b_obs = self.obs[b_idxs]#.to(self.device, non_blocking=True)
+        self.b_actions = self.actions[b_idxs].contiguous().to(self.device, non_blocking=True)
+        self.b_logprobs = self.logprobs[b_idxs].to(self.device, non_blocking=True)
+        self.b_dones = self.dones[b_idxs].to(self.device, non_blocking=True)
+        self.b_values = self.values[b_flat].to(self.device, non_blocking=True)
+        self.b_advantages = advantages.reshape(self.batch_rows,
+            self.num_minibatches, self.bptt_horizon).transpose(0, 1).reshape(
+            self.num_minibatches, self.batch_rows*self.bptt_horizon)
+        self.b_returns = self.b_advantages + self.b_values
+        self.returns_np = advantages_np + self.values_np
+        '''
+
+
 
 def save_checkpoint(data):
     config = data.config
