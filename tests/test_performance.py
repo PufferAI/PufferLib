@@ -14,7 +14,7 @@ import numpy as np
 
 import pufferlib
 from pufferlib.environments import ocean
-from pufferlib.vectorization import Multiprocessing
+from pufferlib.vectorization import Multiprocessing, Serial, Ray
 
 import time
 import psutil
@@ -84,6 +84,22 @@ def profile_emulation(puf_creator, timeout):
 
     return pufferlib.namespace(raw=raw, puf=puf)
 
+def profile_puffer_serial(env_creator, num_envs, timeout, sps):
+    envs_per_worker = max(int(sps/500), 1)
+    num_envs = int(num_envs * envs_per_worker)
+    env = Serial(env_creator, num_envs=num_envs, envs_per_worker=envs_per_worker)
+    env.reset()
+    steps = 0
+
+    actions = np.array([env.single_action_space.sample() for _ in range(num_envs*env.agents_per_env)])
+    start = time.time()
+    while time.time() - start < timeout:
+        obs = env.step(actions)[0]
+        steps += 1
+            
+    sps = steps * num_envs * env.agents_per_env / (time.time() - start)
+    env.close()
+    return sps
 
 def profile_puffer_vec(env_creator, num_envs, timeout, sps):
     envs_per_worker = max(int(sps/500), 1)
@@ -93,32 +109,39 @@ def profile_puffer_vec(env_creator, num_envs, timeout, sps):
     env.reset()
     steps = 0
 
-    actions = [env.single_action_space.sample() for _ in range(num_envs*env.agents_per_env)]
+    actions = np.array([env.single_action_space.sample() for _ in range(num_envs*env.agents_per_env)])
     start = time.time()
     while time.time() - start < timeout:
         obs = env.step(actions)[0]
-        steps += num_envs
+        steps += 1
 
-    sps = steps / (time.time() - start)
+    sps = steps * num_envs * env.agents_per_env / (time.time() - start)
     env.close()
     return sps
 
 def profile_puffer_pool_vec(env_creator, num_envs, timeout, sps):
     envs_per_worker = max(int(sps/1000), 1)
     num_envs = int(num_envs * envs_per_worker)
-    env = Multiprocessing(env_creator, num_envs=3*num_envs,
+    env = Ray(env_creator, num_envs=3*num_envs,
         envs_per_worker=envs_per_worker, envs_per_batch=num_envs, env_pool=True)
+    #env = Multiprocessing(env_creator, num_envs=3*num_envs,
+    #    envs_per_worker=envs_per_worker, envs_per_batch=num_envs, env_pool=True)
     env.async_reset()
+    env.recv()
+
     steps = 0
 
-    actions = [env.single_action_space.sample() for _ in range(num_envs)]
+    actions = {i: 
+        np.array([env.single_action_space.sample() for _ in range(num_envs*env.agents_per_env)])
+        for i in range(100)
+    }
     start = time.time()
     while time.time() - start < timeout:
+        env.send(actions[steps % 100])
         env.recv()
-        env.send(actions)
-        steps += num_envs
+        steps += 1
 
-    sps = steps / (time.time() - start)
+    sps = steps * num_envs * env.agents_per_env / (time.time() - start)
     env.close()
     return sps
 
@@ -155,20 +178,22 @@ def profile_sb3_vec(env_creator, num_envs, timeout):
 def profile_vec(env_creator, cores, timeout, sps):
     print(f'  Vectorization - {cores} core speed factor')
 
-    result = profile_puffer_vec(env_creator, cores, timeout, sps)
-    print(f'    Pufferlib  : {(result/sps):.3f}')
+    #result = profile_puffer_serial(env_creator, cores, timeout, sps)
+    #print(f'    Puffer Serial: {(result):.3f}')
 
-    return
+    #result = profile_puffer_vec(env_creator, cores, timeout, sps)
+    #print(f'    Pufferlib  : {(result):.3f}')
 
     puf_async = profile_puffer_pool_vec(env_creator, cores, timeout, sps)
-    print(f'    Puffer Pool: {(puf_async/sps):.3f}')
+    print(f'    Puffer Pool: {(puf_async):.3f}')
+    return
 
     with pufferlib.utils.Suppress():
         sb3 = profile_sb3_vec(env_creator, cores, timeout)
-    print(f'    SB3        : {(sb3/sps):.3f}')
+    print(f'    SB3        : {(sb3):.3f}')
 
     gym = profile_gymnasium_vec(env_creator, cores, timeout)
-    print(f'    Gymnasium  : {(gym/sps):.3f}')
+    print(f'    Gymnasium  : {(gym):.3f}')
 
 
 if __name__ == '__main__':
@@ -187,18 +212,46 @@ if __name__ == '__main__':
     from pufferlib.environments import atari
     env_creators.atari_breakout = atari.env_creator('BreakoutNoFrameskip-v4')
 
-    from pufferlib.environments import nethack
-    env_creators.nethack = nethack.env_creator()
-
     from pufferlib.environments import crafter
     env_creators.crafter = crafter.env_creator()
 
     from pufferlib.environments import minigrid
     env_creators.minigrid = minigrid.env_creator()
-    '''
+
+    from pufferlib.environments import nethack
+    env_creators.nethack = nethack.env_creator()
 
     from pufferlib.environments import nmmo3
     env_creators.nmmo3 = nmmo3.env_creator()
+ 
+    '''
+    from pufferlib.environments import nmmo3
+    env_creators.nmmo3 = nmmo3.env_creator()
+    #profile_vec(env_creators.nmmo3, 2, 10, 1000)
+    profile_vec(env_creators.nmmo3, 6, 20, 1000)
+
+    #from pufferlib.environments import pokemon_red
+    #env_creators.pokemon_red = pokemon_red.env_creator('pokemon_red')
+    #profile_vec(env_creators.pokemon_red, 6, 20, 1000)
+
+
+    # 20k on Nethack on laptop via 1 worker per batch
+    # not triggering a giant copy
+    #from pufferlib.environments import nethack
+    #env_creators.nethack = nethack.env_creator()
+    #profile_vec(env_creators.nethack, 1, 10, 20000)
+
+    '''
+    from functools import partial
+    env_creators.test = partial(
+        ocean.env_creator('performance_empiric'),
+        count_n=0, bandwidth=1
+    )
+
+    profile_vec(env_creators.test, 1, 10, 100000)
+    '''
+
+
 
     '''
     import cProfile
@@ -210,7 +263,10 @@ if __name__ == '__main__':
     T()
     '''
 
-    profile_vec(env_creators.nmmo3, 6, 20, 1)
+    #profile_environment(env_creators.nmmo3, 5)
+    #profile_vec(env_creators.nmmo3, 1, 10, 1)
+    #profile_vec(env_creators.nethack, 5, 10, 1)
+
 
     exit(0)
 

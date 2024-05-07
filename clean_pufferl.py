@@ -122,9 +122,11 @@ def evaluate(data):
             experience.store(o, value, actions, logprob, r, d, env_id, mask)
 
             # Really neeed to look at policy pool soon
+            '''
             for agent_info in i:
                 for k, v in agent_info.items():
                     infos[k].append(v)
+            '''
 
             '''
             for policy_name, policy_i in i.items():
