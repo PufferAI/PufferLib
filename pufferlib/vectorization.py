@@ -1,4 +1,5 @@
 from pdb import set_trace as T
+from collections.abc import Mapping
 
 import numpy as np
 import gymnasium
@@ -9,8 +10,9 @@ import msgpack
 
 
 from pufferlib import namespace
+from pufferlib.environment import PufferEnv
 from pufferlib.emulation import GymnasiumPufferEnv, PettingZooPufferEnv
-from pufferlib.multi_env import create_precheck, GymnasiumMultiEnv, PettingZooMultiEnv, PufferEnvWrapper
+from pufferlib.multi_env import PufferEnvWrapper
 from pufferlib.exceptions import APIUsageError
 import pufferlib.spaces
 
@@ -21,95 +23,31 @@ RECV = 2
 
 space_error_msg = 'env {env} must be an instance of GymnasiumPufferEnv or PettingZooPufferEnv'
 
-
-def calc_scale_params(num_envs, envs_per_batch, envs_per_worker, agents_per_env):
-    '''These calcs are simple but easy to mess up and hard to catch downstream.
-    We do them all at once here to avoid that'''
-
-    if num_envs % envs_per_worker != 0:
-        raise APIUsageError('num_envs must be divisible by envs_per_worker')
-    
-    num_workers = num_envs // envs_per_worker
-    envs_per_batch = num_envs if envs_per_batch is None else envs_per_batch
-
-    if envs_per_batch > num_envs:
-        raise APIUsageError('envs_per_batch must be <= num_envs')
-    if envs_per_batch % envs_per_worker != 0:
-        raise APIUsageError('envs_per_batch must be divisible by envs_per_worker')
-    if envs_per_batch < 1:
-        raise APIUsageError('envs_per_batch must be > 0')
-
-    workers_per_batch = envs_per_batch // envs_per_worker
-    assert workers_per_batch <= num_workers
-
-    agents_per_batch = envs_per_batch * agents_per_env
-    agents_per_worker = envs_per_worker * agents_per_env
- 
-    return num_workers, workers_per_batch, envs_per_batch, agents_per_batch, agents_per_worker
-
-def setup(env_creator, env_args, env_kwargs):
-    env_args, env_kwargs = create_precheck(env_creator, env_args, env_kwargs)
-    driver_env = env_creator(*env_args, **env_kwargs)
-
-    if isinstance(driver_env, GymnasiumPufferEnv):
-        multi_env_cls = GymnasiumMultiEnv 
-        env_agents = 1
-    elif isinstance(driver_env, PettingZooPufferEnv):
-        multi_env_cls = PettingZooMultiEnv
-        env_agents = len(driver_env.possible_agents)
-    else:# isinstance(driver_env, PufferEnv):
-        #multi_env_cls = PufferEnv
-        env_agents = driver_env.num_agents
-
-    '''
-    else:
-        raise TypeError(
-            'env_creator must return an instance '
-            'of GymnasiumPufferEnv or PettingZooPufferEnv'
-        )
-    '''
-    multi_env_cls = PufferEnvWrapper
-    obs_space = _single_observation_space(driver_env)
-    return driver_env, multi_env_cls, env_agents
-
 def _single_observation_space(env):
-    if isinstance(env, PettingZooPufferEnv):
-        return env.single_observation_space
-    return env.observation_space
- 
-    if isinstance(env, GymnasiumPufferEnv):
+    if isinstance(env, PufferEnv):
         return env.observation_space
     elif isinstance(env, PettingZooPufferEnv):
         return env.single_observation_space
+    elif isinstance(env, GymnasiumPufferEnv):
+        return env.observation_space
     else:
         raise TypeError(space_error_msg.format(env=env))
-
+ 
 def single_observation_space(state):
     return _single_observation_space(state.driver_env)
 
 def _single_action_space(env):
-    if isinstance(env, PettingZooPufferEnv):
-        return env.single_action_space
-    return env.action_space
- 
-    if isinstance(env, GymnasiumPufferEnv):
+    if isinstance(env, PufferEnv):
         return env.action_space
     elif isinstance(env, PettingZooPufferEnv):
         return env.single_action_space
+    elif isinstance(env, GymnasiumPufferEnv):
+        return env.action_space
     else:
         raise TypeError(space_error_msg.format(env=env))
 
 def single_action_space(state):
     return _single_action_space(state.driver_env)
-
-def structured_observation_space(state):
-    return state.driver_env.structured_observation_space
-
-def flat_observation_space(state):
-    return state.driver_env.flat_observation_space
-
-def unpack_batched_obs(state, obs):
-    return state.driver_env.unpack_batched_obs(obs)
 
 def recv_precheck(state):
     assert state.flag == RECV, 'Call reset before stepping'
@@ -133,6 +71,88 @@ def step(self, actions):
     self.send(actions)
     return self.recv()[:-1]
 
+def buffer_scale(env_creator, env_args, env_kwargs, num_envs, num_workers, envs_per_batch=None):
+    '''These calcs are simple but easy to mess up and hard to catch downstream.
+    We do them all at once here to avoid that'''
+    if num_envs % num_workers != 0:
+        raise APIUsageError('num_envs must be divisible by num_workers')
+    if num_envs < num_workers:
+        raise APIUsageError('num_envs must be >= num_workers')
+    if envs_per_batch is None:
+        envs_per_batch = num_envs
+    if envs_per_batch > num_envs:
+        raise APIUsageError('envs_per_batch must be <= num_envs')
+    if envs_per_batch % num_workers != 0:
+        raise APIUsageError('envs_per_batch must be divisible by num_workers')
+    if envs_per_batch < 1:
+        raise APIUsageError('envs_per_batch must be > 0')
+
+    if not callable(env_creator):
+        raise pufferlib.exceptions.APIUsageError('env_creator must be callable')
+    if not isinstance(env_args, (list, tuple)):
+        raise pufferlib.exceptions.APIUsageError('env_args must be a list or tuple')
+    # TODO: port namespace to Mapping
+    if not isinstance(env_kwargs, Mapping):
+        raise pufferlib.exceptions.APIUsageError('env_kwargs must be a dictionary or None')
+
+    driver_env = env_creator(*env_args, **env_kwargs)
+
+    if isinstance(driver_env, PufferEnv):
+        agents_per_env = driver_env.num_agents
+    elif isinstance(driver_env, PettingZooPufferEnv):
+        agents_per_env = len(driver_env.agents)
+    elif isinstance(driver_env, GymnasiumPufferEnv):
+        agents_per_env = 1
+    else:
+        raise TypeError(
+            'env_creator must return an instance '
+            'of PufferEnv, GymnasiumPufferEnv or PettingZooPufferEnv'
+        )
+
+    num_agents = num_envs * agents_per_env
+
+    envs_per_worker = num_envs // num_workers
+    agents_per_worker = envs_per_worker * agents_per_env
+
+    workers_per_batch = envs_per_batch // envs_per_worker
+    agents_per_batch = envs_per_batch * agents_per_env
+
+    observation_shape = _single_observation_space(driver_env).shape
+    observation_dtype = _single_observation_space(driver_env).dtype
+    action_shape = _single_action_space(driver_env).shape
+    action_dtype = _single_action_space(driver_env).dtype
+
+    observation_buffer_shape = (num_workers, agents_per_worker, *observation_shape)
+    observation_batch_shape = (agents_per_batch, *observation_shape)
+    action_buffer_shape = (num_workers, envs_per_worker, agents_per_env, *action_shape)
+    action_batch_shape = (workers_per_batch, envs_per_worker, agents_per_env, *action_shape)
+    batch_shape = (num_workers, agents_per_worker)
+
+    agent_ids = np.stack([np.arange(
+        i*agents_per_worker, (i+1)*agents_per_worker) for i in range(num_workers)])
+
+    return driver_env, pufferlib.namespace(
+        num_agents=num_agents,
+        num_envs=num_envs,
+        num_workers=num_workers,
+        envs_per_batch=envs_per_batch,
+        envs_per_worker=envs_per_worker,
+        workers_per_batch=workers_per_batch,
+        agents_per_batch=agents_per_batch,
+        agents_per_worker=agents_per_worker,
+        agents_per_env=agents_per_env,
+        observation_shape=observation_shape,
+        observation_dtype=observation_dtype,
+        action_shape=action_shape,
+        action_dtype=action_dtype,
+        observation_buffer_shape=observation_buffer_shape,
+        observation_batch_shape=observation_batch_shape,
+        action_buffer_shape=action_buffer_shape,
+        action_batch_shape=action_batch_shape,
+        batch_shape=batch_shape,
+        agent_ids=agent_ids,
+    )
+
 class Serial:
     '''Runs environments in serial on the main process
     
@@ -142,9 +162,6 @@ class Serial:
     step = step
     single_observation_space = property(single_observation_space)
     single_action_space = property(single_action_space)
-    structured_observation_space = property(structured_observation_space)
-    flat_observation_space = property(flat_observation_space)
-    unpack_batched_obs = unpack_batched_obs
     def __init__(self,
             env_creator: callable = None,
             env_args: list = [],
@@ -267,94 +284,8 @@ def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
         elif request == STEP:
             response = envs.step(atn_arr.reshape(num_envs, agents_per_env, *atn_shape))
 
-        #obs, reward, done, truncated, info = response
-
-        # TESTED: There is no overhead associated with 4 assignments to shared memory
-        # vs. 4 assigns to an intermediate numpy array and then 1 assign to shared memory
-        #obs_arr[:] = obs
-        #rewards_arr[:] = reward
-        #terminals_arr[:] = done
-        #truncated_arr[:] = truncated
-        #mask_arr[:] = envs.preallocated_masks
+        obs, reward, done, truncated, info = response
         send_pipe.send(info)
-
-def buffer_scale(env_creator, env_args, env_kwargs, num_envs, num_workers, envs_per_batch=None):
-    '''These calcs are simple but easy to mess up and hard to catch downstream.
-    We do them all at once here to avoid that'''
-    if num_envs % num_workers != 0:
-        raise APIUsageError('num_envs must be divisible by num_workers')
-    if num_envs < num_workers:
-        raise APIUsageError('num_envs must be >= num_workers')
-    if envs_per_batch is None:
-        envs_per_batch = num_envs
-    if envs_per_batch > num_envs:
-        raise APIUsageError('envs_per_batch must be <= num_envs')
-    if envs_per_batch % num_workers != 0:
-        raise APIUsageError('envs_per_batch must be divisible by num_workers')
-    if envs_per_batch < 1:
-        raise APIUsageError('envs_per_batch must be > 0')
-
-    env_args, env_kwargs = create_precheck(env_creator, env_args, env_kwargs)
-    driver_env = env_creator(*env_args, **env_kwargs)
-
-    if isinstance(driver_env, GymnasiumPufferEnv):
-        agents_per_env = 1
-    elif isinstance(driver_env, PettingZooPufferEnv):
-        agents_per_env = len(driver_env.possible_agents)
-    else:# isinstance(driver_env, PufferEnv):
-        agents_per_env = driver_env.num_agents
-
-    '''
-    else:
-        raise TypeError(
-            'env_creator must return an instance '
-            'of GymnasiumPufferEnv or PettingZooPufferEnv'
-        )
-    '''
-
-    num_agents = num_envs * agents_per_env
-
-    envs_per_worker = num_envs // num_workers
-    agents_per_worker = envs_per_worker * agents_per_env
-
-    workers_per_batch = envs_per_batch // envs_per_worker
-    agents_per_batch = envs_per_batch * agents_per_env
-
-    observation_shape = _single_observation_space(driver_env).shape
-    observation_dtype = _single_observation_space(driver_env).dtype
-    action_shape = _single_action_space(driver_env).shape
-    action_dtype = _single_action_space(driver_env).dtype
-
-    observation_buffer_shape = (num_workers, agents_per_worker, *observation_shape)
-    observation_batch_shape = (agents_per_batch, *observation_shape)
-    action_buffer_shape = (num_workers, envs_per_worker, agents_per_env, *action_shape)
-    action_batch_shape = (workers_per_batch, envs_per_worker, agents_per_env, *action_shape)
-    batch_shape = (num_workers, agents_per_worker)
-
-    agent_ids = np.stack([np.arange(
-        i*agents_per_worker, (i+1)*agents_per_worker) for i in range(num_workers)])
-
-    return driver_env, pufferlib.namespace(
-        num_agents=num_agents,
-        num_envs=num_envs,
-        num_workers=num_workers,
-        envs_per_batch=envs_per_batch,
-        envs_per_worker=envs_per_worker,
-        workers_per_batch=workers_per_batch,
-        agents_per_batch=agents_per_batch,
-        agents_per_worker=agents_per_worker,
-        agents_per_env=agents_per_env,
-        observation_shape=observation_shape,
-        observation_dtype=observation_dtype,
-        action_shape=action_shape,
-        action_dtype=action_dtype,
-        observation_buffer_shape=observation_buffer_shape,
-        observation_batch_shape=observation_batch_shape,
-        action_buffer_shape=action_buffer_shape,
-        action_batch_shape=action_batch_shape,
-        batch_shape=batch_shape,
-        agent_ids=agent_ids,
-    )
 
 class Multiprocessing:
     '''Runs environments in parallel using multiprocessing
@@ -365,9 +296,6 @@ class Multiprocessing:
     step = step
     single_observation_space = property(single_observation_space)
     single_action_space = property(single_action_space)
-    structured_observation_space = property(structured_observation_space)
-    flat_observation_space = property(flat_observation_space)
-    unpack_batched_obs = unpack_batched_obs
 
     def __init__(self,
             env_creator: callable = None,
@@ -411,19 +339,6 @@ class Multiprocessing:
         recv_pipe_dict = {p: i for i, p in enumerate(main_recv_pipes)}
 
         num_cores = psutil.cpu_count()
-        '''
-        from multiprocessing import Pool
-        from multiprocessing import get_context
-        pool = get_context('spawn').Pool(num_cores)
-        for i in range(num_workers):
-            pool.apply_async(_worker_process, args=(multi_env_cls, env_creator, env_args, env_kwargs, envs_per_worker, agents_per_env, i,
-                    observation_shape, obs_mem, action_shape, atn_mem, rewards_mem, terminals_mem, truncated_mem,
-                    mask_mem, observation_dtype, action_dtype,
-                    work_send_pipes[i], work_recv_pipes[i]))
- 
-
-        '''
-
         processes = []
         for i in range(num_workers):
             p = Process(
@@ -555,7 +470,6 @@ class Multiprocessing:
         for pipe in self.send_pipes:
             pipe.send(("close", [], {}))
 
-        #self.pool.terminate()
         for p in self.processes:
             p.terminate()
 
@@ -572,9 +486,6 @@ class Ray():
     step = step
     single_observation_space = property(single_observation_space)
     single_action_space = property(single_action_space)
-    structured_observation_space = property(structured_observation_space)
-    flat_observation_space = property(flat_observation_space)
-    unpack_batched_obs = unpack_batched_obs
 
     def __init__(self,
             env_creator: callable = None,
