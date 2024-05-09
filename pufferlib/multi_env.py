@@ -181,25 +181,25 @@ class PufferEnvWrapper(PufferEnv):
 
         if obs_mem is None:
             self.preallocated_obs = np.empty(
-                (n, self.num_agents, *self.observation_space.shape), dtype=self.observation_space.dtype)
+                (n, self.agents_per_env, *self.observation_space.shape), dtype=self.observation_space.dtype)
         else:
-            self.preallocated_obs = obs_mem.reshape(n, self.num_agents, *self.observation_space.shape)
+            self.preallocated_obs = obs_mem.reshape(n, self.agents_per_env, *self.observation_space.shape)
         if rew_mem is None:
-            self.preallocated_rewards = np.empty((n, self.num_agents), dtype=np.float32)
+            self.preallocated_rewards = np.empty((n, self.agents_per_env), dtype=np.float32)
         else:
-            self.preallocated_rewards = rew_mem.reshape(n, self.num_agents)
+            self.preallocated_rewards = rew_mem.reshape(n, self.agents_per_env)
         if done_mem is None:
-            self.preallocated_dones = np.empty((n, self.num_agents), dtype=bool)
+            self.preallocated_dones = np.empty((n, self.agents_per_env), dtype=bool)
         else:
-            self.preallocated_dones = done_mem.reshape(n, self.num_agents)
+            self.preallocated_dones = done_mem.reshape(n, self.agents_per_env)
         if trunc_mem is None:
-            self.preallocated_truncateds = np.empty((n, self.num_agents), dtype=bool)
+            self.preallocated_truncateds = np.empty((n, self.agents_per_env), dtype=bool)
         else:
-            self.preallocated_truncateds = trunc_mem.reshape(n, self.num_agents)
+            self.preallocated_truncateds = trunc_mem.reshape(n, self.agents_per_env)
         if mask_mem is None:
-            self.preallocated_masks = np.ones((n, self.num_agents), dtype=bool)
+            self.preallocated_masks = np.ones((n, self.agents_per_env), dtype=bool)
         else:
-            self.preallocated_masks = mask_mem.reshape(n, self.num_agents)
+            self.preallocated_masks = mask_mem.reshape(n, self.agents_per_env)
 
         #self.preallocated_rewards = np.empty(self.num_agents, dtype=np.float32)
         #self.preallocated_dones = np.empty(self.num_agents, dtype=bool)
