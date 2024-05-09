@@ -150,12 +150,16 @@ class Serial:
             env_args: list = [],
             env_kwargs: dict = {},
             num_envs: int = 1,
+            num_workers: int = 1,
             envs_per_worker: int = 1,
             envs_per_batch: int = None,
-            env_pool: bool = False,
             mask_agents: bool = False,
             ) -> None:
 
+        self.driver_env, scale = buffer_scale(env_creator, env_args, env_kwargs,
+            num_envs, num_workers, envs_per_batch=None)
+
+        '''
         driver_env, multi_env_cls, agents_per_env = setup(
             env_creator, env_args, env_kwargs)
         num_workers, workers_per_batch, envs_per_batch, agents_per_batch, agents_per_worker = calc_scale_params(
@@ -178,26 +182,28 @@ class Serial:
         self.agents_per_env = agents_per_env
         self.agent_ids = np.stack([np.arange(
             i*agents_per_worker, (i+1)*agents_per_worker) for i in range(num_workers)])
-        self.obs_arr = np.zeros((num_workers, agents_per_worker, *observation_shape), dtype=observation_dtype)
-        self.rewards_arr = np.zeros((num_workers, agents_per_worker), dtype=np.float32)
-        self.terminals_arr = np.zeros((num_workers, agents_per_worker), dtype=bool)
-        self.truncated_arr = np.zeros((num_workers, agents_per_worker), dtype=bool)
-        self.mask_arr = np.zeros((num_workers, agents_per_worker), dtype=bool)
+        '''
+
+        self.obs_arr = np.ndarray(scale.observation_buffer_shape, dtype=scale.observation_dtype)
+        self.rewards_arr = np.ndarray(scale.batch_shape, dtype=np.float32)
+        self.terminals_arr = np.ndarray(scale.batch_shape, dtype=bool)
+        self.truncated_arr = np.ndarray(scale.batch_shape, dtype=bool)
+        self.mask_arr = np.ndarray(scale.batch_shape, dtype=bool)
 
         self.multi_envs = [
-            multi_env_cls(env_creator, env_args, env_kwargs, envs_per_worker,
+            PufferEnvWrapper(env_creator, env_args, env_kwargs, envs_per_worker,
                 obs_mem=self.obs_arr[i], rew_mem=self.rewards_arr[i],
                 done_mem=self.terminals_arr[i], trunc_mem=self.truncated_arr[i], mask_mem=self.mask_arr[i])
             for i in range(num_workers)
         ]
-        self.driver_env = driver_env
 
         self.flag = RESET
+        self.scale = scale
 
     def recv(self):
         recv_precheck(self)
-        ids = self.workers_per_batch
-        o = self.obs_arr[:ids].reshape(self.agents_per_batch, *self.observation_shape)
+        ids = self.scale.workers_per_batch
+        o = self.obs_arr[:ids].reshape(*self.observation_batch_shape)
         r = self.rewards_arr[:ids].ravel()
         d = self.terminals_arr[:ids].ravel()
         t = self.truncated_arr[:ids].ravel()
@@ -275,7 +281,7 @@ def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
     mask_arr = np.frombuffer(mask_mem, dtype=bool)[s:e]
 
     envs = multi_env_cls(env_creator, env_args, env_kwargs, n=num_envs,
-        obs_mem=obs_arr, atn_mem=atn_arr, rew_mem=rewards_arr, done_mem=terminals_arr,
+        obs_mem=obs_arr, rew_mem=rewards_arr, done_mem=terminals_arr,
         trunc_mem=truncated_arr, mask_mem=mask_arr)
 
     while True:
@@ -296,6 +302,82 @@ def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
         #truncated_arr[:] = truncated
         #mask_arr[:] = envs.preallocated_masks
         send_pipe.send(info)
+
+def buffer_scale(env_creator, env_args, env_kwargs, num_envs, num_workers, envs_per_batch=None):
+    '''These calcs are simple but easy to mess up and hard to catch downstream.
+    We do them all at once here to avoid that'''
+    if num_envs % num_workers != 0:
+        raise APIUsageError('num_envs must be divisible by num_workers')
+    if num_envs < num_workers:
+        raise APIUsageError('num_envs must be >= num_workers')
+    if envs_per_batch is None:
+        envs_per_batch = num_envs
+    if envs_per_batch > num_envs:
+        raise APIUsageError('envs_per_batch must be <= num_envs')
+    if envs_per_batch % envs_per_worker != 0:
+        raise APIUsageError('envs_per_batch must be divisible by envs_per_worker')
+    if envs_per_batch % num_workers != 0:
+        raise APIUsageError('envs_per_batch must be divisible by num_workers')
+    if envs_per_batch < 1:
+        raise APIUsageError('envs_per_batch must be > 0')
+
+    env_args, env_kwargs = create_precheck(env_creator, env_args, env_kwargs)
+    driver_env = env_creator(*env_args, **env_kwargs)
+
+    if isinstance(driver_env, GymnasiumPufferEnv):
+        agents_per_env = 1
+    elif isinstance(driver_env, PettingZooPufferEnv):
+        agents_per_env = len(driver_env.possible_agents)
+    else:# isinstance(driver_env, PufferEnv):
+        agents_per_env = driver_env.num_agents
+
+    '''
+    else:
+        raise TypeError(
+            'env_creator must return an instance '
+            'of GymnasiumPufferEnv or PettingZooPufferEnv'
+        )
+    '''
+
+    workers_per_batch = envs_per_batch // num_workers
+    agents_per_batch = envs_per_batch * agents_per_env
+
+    envs_per_worker = num_envs // num_workers
+    agents_per_worker = envs_per_worker * agents_per_env
+
+    observation_shape = _single_observation_space(driver_env).shape
+    observation_dtype = _single_observation_space(driver_env).dtype
+    action_shape = _single_action_space(driver_env).shape
+    action_dtype = _single_action_space(driver_env).dtype
+
+    observation_buffer_shape = (num_workers, agents_per_worker, *observation_shape)
+    observation_batch_shape = (agents_per_batch, *observation_shape)
+    action_buffer_shape = (num_workers, agents_per_worker, *action_shape)
+    action_batch_shape = (workers_per_batch, *action_shape)
+    batch_shape = (num_workers, agents_per_worker)
+
+    agent_ids = np.stack([np.arange(
+        i*agents_per_worker, (i+1)*agents_per_worker) for i in range(num_workers)])
+
+    return driver_env, pufferlib.namespace(
+        num_envs=num_envs,
+        num_workers=num_workers,
+        envs_per_batch=envs_per_batch,
+        workers_per_batch=workers_per_batch,
+        agents_per_batch=agents_per_batch,
+        agents_per_worker=agents_per_worker,
+        agents_per_env=agents_per_env,
+        observation_shape=observation_shape,
+        observation_dtype=observation_dtype,
+        action_shape=action_shape,
+        action_dtype=action_dtype,
+        observation_buffer_shape=observation_buffer_shape,
+        observation_batch_shape=observation_batch_shape,
+        action_buffer_shape=action_buffer_shape,
+        action_batch_shape=action_batch_shape,
+        batch_shape=batch_shape,
+        agent_ids=agent_ids,
+    )
 
 class Multiprocessing:
     '''Runs environments in parallel using multiprocessing
@@ -327,30 +409,33 @@ class Multiprocessing:
 
         agents_per_worker = agents_per_env * envs_per_worker
         observation_shape = _single_observation_space(driver_env).shape
-        observation_size = int(np.prod(observation_shape))
         observation_dtype = _single_observation_space(driver_env).dtype
         action_shape = _single_action_space(driver_env).shape
-        action_size = int(np.prod(action_shape))
         action_dtype = _single_action_space(driver_env).dtype
 
         # Shared memory for obs, rewards, terminals, truncateds
         from multiprocessing import Process, Manager, Pipe, Array
         from multiprocessing.sharedctypes import RawArray
+
+        observation_size = int(np.prod(observation_shape))
         obs_mem = RawArray(np.ctypeslib.as_ctypes_type(observation_dtype),
                 num_workers*agents_per_worker*observation_size)
+
+        action_size = int(np.prod(action_shape))
         atn_mem = RawArray(np.ctypeslib.as_ctypes_type(action_dtype),
                 num_workers*agents_per_worker*action_size)
+
         rewards_mem = RawArray('f', num_workers*agents_per_worker)
         terminals_mem = RawArray('b', num_workers*agents_per_worker)
         truncated_mem = RawArray('b', num_workers*agents_per_worker)
         mask_mem = RawArray('b', num_workers*agents_per_worker)
 
-        obs_arr = np.frombuffer(obs_mem, dtype=observation_dtype).reshape(num_workers, agents_per_worker, *observation_shape)
-        atn_arr = np.frombuffer(atn_mem, dtype=action_dtype).reshape(num_workers, agents_per_worker, *action_shape)
-        rewards_arr = np.frombuffer(rewards_mem, dtype=np.float32).reshape(num_workers, agents_per_worker)
-        terminals_arr = np.frombuffer(terminals_mem, dtype=bool).reshape(num_workers, agents_per_worker)
-        truncated_arr = np.frombuffer(truncated_mem, dtype=bool).reshape(num_workers, agents_per_worker)
-        mask_arr = np.frombuffer(mask_mem, dtype=bool).reshape(num_workers, agents_per_worker)
+        obs_arr = np.ndarray((num_workers, agents_per_worker, *observation_shape), dtype=observation_dtype, buffer=obs_mem)
+        atn_arr = np.ndarray((num_workers, agents_per_worker, *action_shape), dtype=action_dtype, buffer=atn_mem)
+        rewards_arr = np.ndarray((num_workers, agents_per_worker), dtype=np.float32, buffer=rewards_mem)
+        terminals_arr = np.ndarray((num_workers, agents_per_worker), dtype=bool, buffer=terminals_mem)
+        truncated_arr = np.ndarray((num_workers, agents_per_worker), dtype=bool, buffer=truncated_mem)
+        mask_arr = np.ndarray((num_workers, agents_per_worker), dtype=bool, buffer=mask_mem)
 
         main_send_pipes, work_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
         work_send_pipes, main_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
