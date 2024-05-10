@@ -40,10 +40,11 @@ def flatten_space(space):
         return [space]
 
 def emulate_observation_space(space):
-    if isinstance(space, pufferlib.spaces.Box):
-        return space, space.dtype
-
     emulated_dtype = dtype_from_space(space)
+
+    if isinstance(space, pufferlib.spaces.Box):
+        return space, emulated_dtype
+
     leaves = flatten_space(space)
     dtypes = [e.dtype for e in leaves]
     if dtypes.count(dtypes[0]) == len(dtypes):
@@ -108,31 +109,52 @@ class GymnasiumPufferEnv(gymnasium.Env):
             self.env.observation_space)
         self.action_space, self.atn_dtype = emulate_action_space(
             self.env.action_space)
+        self.single_observation_space = self.observation_space
+        self.single_action_space = self.action_space
+        self.num_agents = 1
+
+        self.is_obs_emulated = self.single_observation_space is not self.env.observation_space
+        self.is_atn_emulated = self.single_action_space is not self.env.action_space
         self.emulated = pufferlib.namespace(
             observation_dtype = self.observation_space.dtype,
             emulated_observation_dtype = self.obs_dtype,
         )
 
+        self.mem = None
+        self.obs = np.zeros(self.observation_space.shape, dtype=self.observation_space.dtype)
         self.render_modes = 'human rgb_array'.split()
         self.render_mode = 'rgb_array'
+
+    def _emulate(self, ob):
+        if self.is_obs_emulated:
+            _emulate(self._obs, ob)
+        elif self.mem is not None:
+            self.obs[:] = ob
+        else:
+            self.obs = ob
 
     def seed(self, seed):
         self.env.seed(seed)
 
     def reset(self, seed=None):
+        if not self.initialized:
+            if self.mem is not None:
+                self.obs = self.mem.obs[0]
+
+            if self.is_obs_emulated:
+                self._obs = self.obs.view(self.obs_dtype)
+
         self.initialized = True
         self.done = False
 
         ob, info = _seed_and_reset(self.env, seed)
-        if self.env.observation_space is not self.observation_space:
-            ob = emulate(ob, self.observation_space.dtype, self.obs_dtype)
+        self._emulate(ob)
 
-        if __debug__:
-            if not self.is_observation_checked:
-                self.is_observation_checked = check_space(
-                    ob, self.observation_space)
+        if not self.is_observation_checked:
+            self.is_observation_checked = check_space(
+                self.obs, self.observation_space)
 
-        return ob, info
+        return self.obs, info
  
     def step(self, action):
         '''Execute an action and return (observation, reward, done, info)'''
@@ -141,19 +163,26 @@ class GymnasiumPufferEnv(gymnasium.Env):
         if self.done:
             raise exceptions.APIUsageError('step() called after environment is done')
 
-        if __debug__:
-            if not self.is_action_checked:
-                self.is_action_checked = check_space(
-                    action, self.action_space)
-
         # Unpack actions from multidiscrete into the original action space
         action = nativize(action, self.env.action_space, self.atn_dtype)
+
+        if not self.is_action_checked:
+            self.is_action_checked = check_space(
+                action, self.action_space)
+
         ob, reward, done, truncated, info = self.env.step(action)
-        if self.env.observation_space is not self.observation_space:
-            ob = emulate(ob, self.observation_space.dtype, self.obs_dtype)
+        self._emulate(ob)
+
+        mem = self.mem
+        if mem is not None:
+            mem.rew[0] = reward
+            mem.done[0] = done
+            mem.trunc[0] = truncated
+            mem.mask[0] = True
                    
         self.done = done
-        return ob, reward, done, truncated, info
+
+        return self.obs, reward, done, truncated, info
 
     def render(self):
         return self.env.render()
@@ -162,8 +191,9 @@ class GymnasiumPufferEnv(gymnasium.Env):
         return self.env.close()
 
 class PettingZooPufferEnv:
-    def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={}):
+    def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={}, to_puffer=False):
         self.env = make_object(env, env_creator, env_args, env_kwargs)
+        self.to_puffer = to_puffer
         self.initialized = False
         self.all_done = True
 
@@ -185,7 +215,14 @@ class PettingZooPufferEnv:
             emulated_observation_dtype = self.obs_dtype,
         )
 
-        self.pad_observation = 0 * self.single_observation_space.sample()
+        self.num_agents = len(self.possible_agents)
+
+        self.mem = None
+        self.obs = np.zeros(self.single_observation_space.shape,
+            dtype=self.single_observation_space.dtype)
+
+        #self.observations = np.zeros(self.num_agents, dtype=self.emulated.emulated_observation_dtype)
+        #obs = self.observations.view(self.single_observation_space.dtype).reshape(self.num_agents, -1)
 
     @property
     def agents(self):
@@ -198,6 +235,14 @@ class PettingZooPufferEnv:
     @property
     def done(self):
         return len(self.agents) == 0 or self.all_done
+
+    def _emulate(self, ob, i, agent):
+        if self.is_obs_emulated:
+            _emulate(self._obs[i], ob)
+        elif self.mem is not None:
+            self.obs[i] = ob
+        else:
+            self.dict_obs[agent] = ob
 
     def observation_space(self, agent):
         '''Returns the observation space for a single agent'''
@@ -214,34 +259,38 @@ class PettingZooPufferEnv:
         return self.single_action_space
 
     def reset(self, seed=None):
-        obs, info = self.env.reset(seed=seed)
+        if not self.initialized:
+            if self.mem is not None:
+                self.obs = self.mem.obs
+
+            if self.is_obs_emulated:
+                self._obs = self.obs.view(self.obs_dtype).reshape(self.num_agents, -1)
+
+            self.dict_obs = {agent: self.obs[i] for i, agent in enumerate(self.possible_agents)}
+
         self.initialized = True
         self.all_done = False
         self.mask = {k: False for k in self.possible_agents}
 
+        obs, info = self.env.reset(seed=seed)
+
         # Call user featurizer and flatten the observations
-        ob = list(obs.values())[0]
-        for agent in self.possible_agents:
+        for i, agent in enumerate(self.possible_agents):
             if agent not in obs:
+                self.observation[i] = 0
                 continue
 
             ob = obs[agent]
-            if self.is_obs_emulated:
-                ob = emulate(ob, self.single_observation_space.dtype, self.obs_dtype)
-            obs[agent] = ob
+            self._emulate(ob, i, agent)
             self.mask[agent] = True
 
-        if __debug__:
-            if not self.is_observation_checked:
-                self.is_observation_checked = check_space(
-                    next(iter(obs.values())),
-                    self.single_observation_space
-                )
+        if not self.is_observation_checked:
+            self.is_observation_checked = check_space(
+                self.dict_obs[self.possible_agents[0]],
+                self.single_observation_space
+            )
 
-        padded_obs = pad_agent_data(obs,
-            self.possible_agents, self.pad_observation)
-
-        return padded_obs, info
+        return self.dict_obs, info
 
     def step(self, actions):
         '''Step the environment and return (observations, rewards, dones, infos)'''
@@ -250,22 +299,22 @@ class PettingZooPufferEnv:
         if self.done:
             raise exceptions.APIUsageError('step() called after environment is done')
 
-        # Postprocess actions and validate action spaces
-        for agent in actions:
-            if __debug__:
-                if agent not in self.possible_agents:
-                    raise exceptions.InvalidAgentError(agent, self.agents)
+        if isinstance(actions, np.ndarray):
+            actions = {agent: actions[i] for i, agent in enumerate(self.possible_agents)}
 
-        if __debug__:
-            if not self.is_action_checked:
-                self.is_action_checked = check_space(
-                    next(iter(actions.values())),
-                    self.single_action_space
-                )
+        # Postprocess actions and validate action spaces
+        if not self.is_action_checked:
+            self.is_action_checked = check_space(
+                next(iter(actions.values())),
+                self.single_action_space
+            )
 
         # Unpack actions from multidiscrete into the original action space
         unpacked_actions = {}
         for agent, atn in actions.items():
+            if agent not in self.possible_agents:
+                raise exceptions.InvalidAgentError(agent, self.agents)
+
             if agent not in self.agents:
                 continue
 
@@ -278,19 +327,27 @@ class PettingZooPufferEnv:
         # TODO: Can add this assert once NMMO Horizon is ported to puffer
         # assert all(dones.values()) == (len(self.env.agents) == 0)
         self.mask = {k: False for k in self.possible_agents}
-        for agent in obs:
+        for i, agent in enumerate(self.possible_agents):
+            if agent not in obs:
+                self.obs[i] = 0
+                continue
+
             ob = obs[agent] 
             self.mask[agent] = True
-            if self.is_obs_emulated:
-                ob = emulate(ob, self.single_observation_space.dtype, self.obs_dtype)
-            obs[agent] = ob
+            self._emulate(ob, i, agent)
+
+            if self.mem is not None:
+                self.mem.rew[i] = rewards[agent]
+                self.mem.done[i] = dones[agent]
+                self.mem.trunc[i] = truncateds[agent]
+                self.mem.mask[i] = True
      
         self.all_done = all(dones.values())
-        obs = pad_agent_data(obs, self.possible_agents, self.pad_observation)
         rewards = pad_agent_data(rewards, self.possible_agents, 0)
         dones = pad_agent_data(dones, self.possible_agents, False)
         truncateds = pad_agent_data(truncateds, self.possible_agents, False)
-        return obs, rewards, dones, truncateds, infos
+
+        return self.dict_obs, rewards, dones, truncateds, infos
 
     def render(self):
         return self.env.render()

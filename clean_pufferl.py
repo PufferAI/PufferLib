@@ -32,7 +32,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None,
     obs_shape = vecenv.single_observation_space.shape
     obs_dtype = vecenv.single_observation_space.dtype
     atn_shape = vecenv.single_action_space.shape
-    total_agents = vecenv.num_envs * vecenv.agents_per_env
+    total_agents = vecenv.num_agents
 
     lstm = policy.lstm if hasattr(policy, 'lstm') else None
     experience = Experience(config.batch_size, vecenv.agents_per_batch, config.bptt_horizon,
@@ -122,11 +122,9 @@ def evaluate(data):
             experience.store(o, value, actions, logprob, r, d, env_id, mask)
 
             # Really neeed to look at policy pool soon
-            '''
             for agent_info in i:
                 for k, v in agent_info.items():
                     infos[k].append(v)
-            '''
 
             '''
             for policy_name, policy_i in i.items():

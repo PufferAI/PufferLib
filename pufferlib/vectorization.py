@@ -16,6 +16,10 @@ from pufferlib.multi_env import PufferEnvWrapper
 from pufferlib.exceptions import APIUsageError
 import pufferlib.spaces
 
+import pufferlib.exceptions
+import pufferlib.emulation
+
+
 
 RESET = 0
 SEND = 1
@@ -153,93 +157,157 @@ def buffer_scale(env_creator, env_args, env_kwargs, num_envs, num_workers, envs_
         agent_ids=agent_ids,
     )
 
+
 class Serial:
-    '''Runs environments in serial on the main process
-    
-    Use this vectorization module for debugging environments
-    '''
     reset = reset
     step = step
     single_observation_space = property(single_observation_space)
     single_action_space = property(single_action_space)
-    def __init__(self,
-            env_creator: callable = None,
-            env_args: list = [],
-            env_kwargs: dict = {},
-            num_envs: int = 1,
-            num_workers: int = 1,
-            envs_per_batch: int = None,
-            mask_agents: bool = False,
-            ) -> None:
+ 
+    def __init__(self, env_creator: callable = None, env_args: list = [], env_kwargs: dict = {},
+            num_envs: int = 1, num_workers: int = 1, envs_per_batch=None, mask_agents: bool = True, mem=None):
+        if num_envs < 1:
+            raise pufferlib.exceptions.APIUsageError('num_envs must be at least 1')
 
-        self.driver_env, scale = buffer_scale(env_creator, env_args, env_kwargs,
-            num_envs, num_workers, envs_per_batch=None)
+        self.driver_env = env_creator(*env_args, **env_kwargs)
 
-        self.obs_arr = np.ndarray(scale.observation_buffer_shape, dtype=scale.observation_dtype)
-        self.rewards_arr = np.ndarray(scale.batch_shape, dtype=np.float32)
-        self.terminals_arr = np.ndarray(scale.batch_shape, dtype=bool)
-        self.truncated_arr = np.ndarray(scale.batch_shape, dtype=bool)
-        self.mask_arr = np.ndarray(scale.batch_shape, dtype=bool)
+        # Check that all envs are either Gymnasium or PettingZoo
+        #is_gymnasium = all(isinstance(e, pufferlib.emulation.GymnasiumPufferEnv) for e in envs)
+        #is_pettingzoo = all(isinstance(e, pufferlib.emulation.PettingZooPufferEnv) for e in envs)
+        #is_puffer = all(isinstance(e, pufferlib.environment.PufferEnv) for e in envs)
 
-        self.multi_envs = [
-            PufferEnvWrapper(env_creator, env_args, env_kwargs, scale.envs_per_worker,
-                obs_mem=self.obs_arr[i], rew_mem=self.rewards_arr[i],
-                done_mem=self.terminals_arr[i], trunc_mem=self.truncated_arr[i], mask_mem=self.mask_arr[i])
-            for i in range(num_workers)
-        ]
+        is_gymnasium = isinstance(self.driver_env, pufferlib.emulation.GymnasiumPufferEnv)
+        is_pettingzoo = isinstance(self.driver_env, pufferlib.emulation.PettingZooPufferEnv)
+        is_puffer = isinstance(self.driver_env, pufferlib.environment.PufferEnv)
 
-        self.flag = RESET
-        self.scale = scale
+        assert is_gymnasium or is_pettingzoo or is_puffer
+        self.is_gymnasium = is_gymnasium
+        self.is_pettingzoo = is_pettingzoo
 
-    def recv(self):
-        recv_precheck(self)
-        ids = self.scale.workers_per_batch
-        o = self.obs_arr[:ids].reshape(*self.scale.observation_batch_shape)
-        r = self.rewards_arr[:ids].ravel()
-        d = self.terminals_arr[:ids].ravel()
-        t = self.truncated_arr[:ids].ravel()
-        m = self.mask_arr[:ids].ravel()
+        # Check that all envs have the same observation and action spaces
+        # TODO: additional check here
 
-        agent_ids = self.scale.agent_ids[:ids].ravel()
-        return o, r, d, t, self.infos, agent_ids, m
+        self.observation_space = self.driver_env.single_observation_space
+        self.action_space = self.driver_env.single_action_space
+        self.agents_per_env = self.driver_env.num_agents
+        self.num_agents = self.agents_per_env * num_envs
 
-    def send(self, actions):
-        send_precheck(self)
-        actions = actions.reshape(self.scale.action_batch_shape)
-        self.infos = []
-        for worker in range(self.scale.workers_per_batch):
-            atns = actions[worker]
-            envs = self.multi_envs[worker]
-            _, _, _, _, infos, _ = envs.step(atns)
-            self.infos.extend(infos)
+        self.agents_per_batch = self.agents_per_env * num_envs #envs_per_batch
+        self.agent_ids = np.arange(self.num_agents)
+
+        if mem is None:
+            #self.preallocated_obs = np.empty(
+            #    (num_envs, self.agents_per_env), dtype=self.driver_env.emulated.emulated_observation_dtype)
+            self.preallocated_obs = np.empty(
+                (num_envs, self.agents_per_env, *self.observation_space.shape), dtype=self.observation_space.dtype)
+
+            self.preallocated_rewards = np.empty((num_envs, self.agents_per_env), dtype=np.float32)
+            self.preallocated_dones = np.empty((num_envs, self.agents_per_env), dtype=bool)
+            self.preallocated_truncateds = np.empty((num_envs, self.agents_per_env), dtype=bool)
+            self.preallocated_masks = np.ones((num_envs, self.agents_per_env), dtype=bool)
+
+        else:
+            self.preallocated_obs = mem.obs.reshape(num_envs, self.agents_per_env, *self.observation_space.shape)
+            self.preallocated_rewards = mem.rew.reshape(num_envs, self.agents_per_env)
+            self.preallocated_dones = mem.done.reshape(num_envs, self.agents_per_env)
+            self.preallocated_truncateds = mem.trunc.reshape(num_envs, self.agents_per_env)
+            self.preallocated_masks = mem.mask.reshape(num_envs, self.agents_per_env)
+
+        self.return_obs = self.preallocated_obs.reshape(self.agents_per_batch, *self.observation_space.shape)
+        self.return_rewards = self.preallocated_rewards.ravel()
+        self.return_dones = self.preallocated_dones.ravel()
+        self.return_truncateds = self.preallocated_truncateds.ravel()
+        self.return_masks = self.preallocated_masks.ravel()
+
+        self.action_batch_shape = (num_envs, self.agents_per_env, *self.driver_env.single_action_space.shape)
+
+        envs = []
+        for i in range(num_envs):
+            mem = namespace(obs=self.preallocated_obs[i], rew=self.preallocated_rewards[i],
+                done=self.preallocated_dones[i], trunc=self.preallocated_truncateds[i], mask=self.preallocated_masks[i])
+            env = env_creator(*env_args, **env_kwargs)
+            env.mem = mem
+            envs.append(env)
+
+        self.envs = envs
+
+        #envs = [env_creator(*env_args, mem=mem, **env_kwargs) for _ in range(num_envs)]
+
+        '''
+        for idx, e in enumerate(envs):
+            e.injected = True
+            e.observations = self.preallocated_obs[idx].view(e.emulated.emulated_observation_dtype)
+            e.rewards = self.preallocated_rewards[idx]
+            e.dones = self.preallocated_dones[idx]
+            e.truncateds = self.preallocated_truncateds[idx]
+            e.masks = self.preallocated_masks[idx]
+        '''
+
 
     def async_reset(self, seed=None):
-        reset_precheck(self)
-        if seed is None:
-            kwargs = {}
-        else:
-            kwargs = {"seed": seed}
+        infos = []
+        for idx, env in enumerate(self.envs):
+            if seed is None:
+                ob, i = env.reset()
+            else:
+                ob, i = env.reset(seed=hash(1000*seed + idx))
+               
+            infos.append(i)
+            #self.preallocated_obs[idx] = ob
 
-        for i in range(self.scale.workers_per_batch):
-            _, _, _, _, self.infos, _ = self.multi_envs[i].reset(**kwargs)
+        self.preallocated_rewards[:] = 0
+        self.preallocated_dones[:] = False
+        self.preallocated_truncateds[:] = False
+        self.preallocated_masks[:] = 1
+        self.infos = infos
+
+    def send(self, actions):
+        rewards, dones, truncateds, self.infos = [], [], [], []
+
+        actions = np.asarray(actions).reshape(self.action_batch_shape)
+        for idx, env in enumerate(self.envs):
+            atns = actions[idx]
+            if env.done:
+                o, i = env.reset()
+                r = 0
+                d = False
+                t = False
+            else:
+                o, r, d, t, i = env.step(atns)
+
+            self.infos.append(i)
+            #self.preallocated_obs[idx] = o
+            #self.preallocated_rewards[idx] = r
+            #self.preallocated_dones[idx] = d
+            #self.preallocated_truncateds[idx] = t
+
+    def recv(self):
+        return (self.return_obs, self.return_rewards, self.return_dones,
+            self.return_truncateds, self.infos, self.agent_ids, self.return_masks)
+
+        returns = [self.preallocated_obs, self.preallocated_rewards,
+            self.preallocated_dones, self.preallocated_truncateds, self.infos]
+
+        if self.mask_agents:
+            returns.append(self.preallocated_masks)
 
     def put(self, *args, **kwargs):
-        for e in self.multi_envs:
+        for e in self.envs:
             e.put(*args, **kwargs)
-
+        
     def get(self, *args, **kwargs):
-        return [e.get(*args, **kwargs) for e in self.multi_envs]
+        return [e.get(*args, **kwargs) for e in self.envs]
 
     def close(self):
-        for e in self.multi_envs:
-            e.close()
+        for env in self.envs:
+            env.close()
 
 STEP = b"s"
 RESET = b"r"
 RESET_NONE = b"n"
 CLOSE = b"c"
 
-def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
+def _worker_process(env_creator, env_args, env_kwargs,
         num_envs, agents_per_env, worker_idx, obs_shape, obs_mem, atn_shape, atn_mem, rewards_mem,
         terminals_mem, truncated_mem, mask_mem, observation_dtype, action_dtype, send_pipe, recv_pipe):
     
@@ -272,7 +340,7 @@ def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
     truncated_arr = np.frombuffer(truncated_mem, dtype=bool)[s:e]
     mask_arr = np.frombuffer(mask_mem, dtype=bool)[s:e]
 
-    envs = multi_env_cls(env_creator, env_args, env_kwargs, n=num_envs,
+    envs = Serial(env_creator, env_args, env_kwargs, num_envs,
         obs_mem=obs_arr, rew_mem=rewards_arr, done_mem=terminals_arr,
         trunc_mem=truncated_arr, mask_mem=mask_arr)
 
@@ -284,8 +352,7 @@ def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
         elif request == STEP:
             response = envs.step(atn_arr.reshape(num_envs, agents_per_env, *atn_shape))
 
-        obs, reward, done, truncated, info = response
-        send_pipe.send(info)
+        send_pipe.send(envs.infos)
 
 class Multiprocessing:
     '''Runs environments in parallel using multiprocessing
@@ -309,6 +376,9 @@ class Multiprocessing:
 
         self.driver_env, scale = buffer_scale(env_creator, env_args, env_kwargs,
             num_envs, num_workers, envs_per_batch=None)
+
+        self.num_agents = scale.num_agents
+        self.agents_per_batch = scale.agents_per_batch
 
         # Shared memory for obs, rewards, terminals, truncateds
         from multiprocessing import Process, Manager, Pipe, Array
@@ -343,7 +413,7 @@ class Multiprocessing:
         for i in range(num_workers):
             p = Process(
                 target=_worker_process,
-                args=(PufferEnvWrapper, env_creator, env_args, env_kwargs, scale.envs_per_worker, scale.agents_per_env, i,
+                args=(env_creator, env_args, env_kwargs, scale.envs_per_worker, scale.agents_per_env, i,
                     scale.observation_shape, obs_mem, scale.action_shape, atn_mem, rewards_mem, terminals_mem, truncated_mem,
                     mask_mem, scale.observation_dtype, scale.action_dtype,
                     work_send_pipes[i], work_recv_pipes[i])

@@ -29,8 +29,8 @@ class Policy(pufferlib.models.Policy):
         super().__init__(env)
         self.emulated = env.emulated
 
-        #self.num_actions = self.action_space.n
-        self.num_actions = self.action_space.shape[0]
+        self.num_actions = self.action_space.n
+        #self.num_actions = self.action_space.shape[0]
         hidden_size = 256
         output_size = 256
 
@@ -88,6 +88,7 @@ class Policy(pufferlib.models.Policy):
         return self.proj(ob), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
-        action = [self.actor(flat_hidden)]
+        #action = [self.actor(flat_hidden)]
+        action = self.actor(flat_hidden)
         value = self.value_fn(flat_hidden)
         return action, value

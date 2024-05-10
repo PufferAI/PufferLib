@@ -654,6 +654,7 @@ nmmo3debug:
   train:
     total_timesteps: 10_000_000
     num_envs: 1
+    num_workers: 1
     envs_per_worker: 1
     envs_per_batch: 1
     update_epochs: 1
@@ -670,6 +671,7 @@ ocean:
     total_timesteps: 30_000
     learning_rate: 0.017
     num_envs: 8
+    num_workers: 2
     batch_rows: 32
     bptt_horizon: 4
     device: cpu
