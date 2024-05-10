@@ -112,8 +112,8 @@ def train(args, env_module, make_env):
         env_kwargs=args.env,
         num_envs=args.train.num_envs,
         num_workers=args.train.num_workers,
-        envs_per_batch=args.train.envs_per_batch,
-        mask_agents=True,
+        #envs_per_batch=args.train.envs_per_batch,
+        #mask_agents=True,
     )
     policy = make_policy(vecenv.driver_env, env_module, args)
 

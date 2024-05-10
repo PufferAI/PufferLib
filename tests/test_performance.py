@@ -122,10 +122,10 @@ def profile_puffer_vec(env_creator, num_envs, timeout, sps):
 def profile_puffer_pool_vec(env_creator, num_envs, timeout, sps):
     envs_per_worker = max(int(sps/1000), 1)
     num_envs = int(num_envs * envs_per_worker)
-    env = Ray(env_creator, num_envs=3*num_envs,
-        envs_per_worker=envs_per_worker, envs_per_batch=num_envs, env_pool=True)
-    #env = Multiprocessing(env_creator, num_envs=3*num_envs,
+    #env = Ray(env_creator, num_envs=3*num_envs,
     #    envs_per_worker=envs_per_worker, envs_per_batch=num_envs, env_pool=True)
+    env = Multiprocessing(env_creator, num_envs=3*num_envs,
+        envs_per_worker=envs_per_worker, envs_per_batch=num_envs, env_pool=True)
     env.async_reset()
     env.recv()
 
@@ -228,7 +228,7 @@ if __name__ == '__main__':
     from pufferlib.environments import nmmo3
     env_creators.nmmo3 = nmmo3.env_creator()
     #profile_vec(env_creators.nmmo3, 2, 10, 1000)
-    profile_vec(env_creators.nmmo3, 6, 20, 1000)
+    profile_vec(env_creators.nmmo3, 6, 10, 1000)
 
     #from pufferlib.environments import pokemon_red
     #env_creators.pokemon_red = pokemon_red.env_creator('pokemon_red')

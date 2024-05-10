@@ -655,8 +655,8 @@ nmmo3debug:
     total_timesteps: 10_000_000
     num_envs: 1
     num_workers: 1
-    envs_per_worker: 1
-    envs_per_batch: 1
+    #envs_per_worker: 1
+    #envs_per_batch: 1
     update_epochs: 1
     gamma: 0.998
     batch_size: 4096

@@ -120,7 +120,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
             emulated_observation_dtype = self.obs_dtype,
         )
 
-        self.mem = None
+        self.buf = None # Injected buffer for shared memory optimization
         self.obs = np.zeros(self.observation_space.shape, dtype=self.observation_space.dtype)
         self.render_modes = 'human rgb_array'.split()
         self.render_mode = 'rgb_array'
@@ -128,7 +128,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
     def _emulate(self, ob):
         if self.is_obs_emulated:
             _emulate(self._obs, ob)
-        elif self.mem is not None:
+        elif self.buf is not None:
             self.obs[:] = ob
         else:
             self.obs = ob
@@ -138,8 +138,8 @@ class GymnasiumPufferEnv(gymnasium.Env):
 
     def reset(self, seed=None):
         if not self.initialized:
-            if self.mem is not None:
-                self.obs = self.mem.obs[0]
+            if self.buf is not None:
+                self.obs = self.buf.observations[0]
 
             if self.is_obs_emulated:
                 self._obs = self.obs.view(self.obs_dtype)
@@ -173,12 +173,12 @@ class GymnasiumPufferEnv(gymnasium.Env):
         ob, reward, done, truncated, info = self.env.step(action)
         self._emulate(ob)
 
-        mem = self.mem
-        if mem is not None:
-            mem.rew[0] = reward
-            mem.done[0] = done
-            mem.trunc[0] = truncated
-            mem.mask[0] = True
+        buf = self.buf
+        if buf is not None:
+            buf.rewards[0] = reward
+            buf.terminals[0] = done
+            buf.truncations[0] = truncated
+            buf.masks[0] = True
                    
         self.done = done
 
@@ -217,7 +217,7 @@ class PettingZooPufferEnv:
 
         self.num_agents = len(self.possible_agents)
 
-        self.mem = None
+        self.buf = None
         self.obs = np.zeros(self.single_observation_space.shape,
             dtype=self.single_observation_space.dtype)
 
@@ -239,7 +239,7 @@ class PettingZooPufferEnv:
     def _emulate(self, ob, i, agent):
         if self.is_obs_emulated:
             _emulate(self._obs[i], ob)
-        elif self.mem is not None:
+        elif self.buf is not None:
             self.obs[i] = ob
         else:
             self.dict_obs[agent] = ob
@@ -260,8 +260,8 @@ class PettingZooPufferEnv:
 
     def reset(self, seed=None):
         if not self.initialized:
-            if self.mem is not None:
-                self.obs = self.mem.obs
+            if self.buf is not None:
+                self.obs = self.buf.observations
 
             if self.is_obs_emulated:
                 self._obs = self.obs.view(self.obs_dtype).reshape(self.num_agents, -1)
@@ -328,6 +328,7 @@ class PettingZooPufferEnv:
         # assert all(dones.values()) == (len(self.env.agents) == 0)
         self.mask = {k: False for k in self.possible_agents}
         for i, agent in enumerate(self.possible_agents):
+            # TODO: negative padding buf
             if agent not in obs:
                 self.obs[i] = 0
                 continue
@@ -336,11 +337,12 @@ class PettingZooPufferEnv:
             self.mask[agent] = True
             self._emulate(ob, i, agent)
 
-            if self.mem is not None:
-                self.mem.rew[i] = rewards[agent]
-                self.mem.done[i] = dones[agent]
-                self.mem.trunc[i] = truncateds[agent]
-                self.mem.mask[i] = True
+            buf = self.buf
+            if buf is not None:
+                buf.rewards[i] = rewards[agent]
+                buf.terminals[i] = dones[agent]
+                buf.truncations[i] = truncateds[agent]
+                buf.masks[i] = True
      
         self.all_done = all(dones.values())
         rewards = pad_agent_data(rewards, self.possible_agents, 0)
