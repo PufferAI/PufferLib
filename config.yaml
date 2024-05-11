@@ -20,9 +20,8 @@ train:
   target_kl: ~
 
   num_envs: 8
-  envs_per_worker: 1
-  envs_per_batch: ~
-  env_pool: True
+  num_workers: ~
+  envpool_batch_size: ~
   verbose: True
   data_dir: experiments
   checkpoint_interval: 200
@@ -609,8 +608,6 @@ nmmo:
   package: nmmo
   train:
     num_envs: 1
-    envs_per_batch: 1
-    envs_per_worker: 1
     batch_size: 4096
     batch_rows: 128
   env:
@@ -622,8 +619,7 @@ nmmo3:
     total_timesteps: 10_000_000
     #total_timesteps: 10_000_000_000
     num_envs: 64
-    envs_per_worker: 1
-    envs_per_batch: 24
+    envpool_batch_size: 24
     update_epochs: 1
     gamma: 0.998
     #batch_size: 32768
@@ -639,10 +635,9 @@ nmmo3:
 nmmo3laptop:
   package: nmmo3
   train:
-    total_timesteps: 2_000_000
+    total_timesteps: 500_000
     num_envs: 18
-    envs_per_worker: 1
-    envs_per_batch: 6
+    envpool_batch_size: 6
     update_epochs: 1
     gamma: 0.998
     batch_size: 32768
@@ -652,11 +647,8 @@ nmmo3laptop:
 nmmo3debug:
   package: nmmo3
   train:
-    total_timesteps: 10_000_000
+    total_timesteps: 100_000
     num_envs: 1
-    num_workers: 1
-    #envs_per_worker: 1
-    #envs_per_batch: 1
     update_epochs: 1
     gamma: 0.998
     batch_size: 4096

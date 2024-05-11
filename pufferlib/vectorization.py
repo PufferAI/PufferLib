@@ -225,22 +225,22 @@ class Multiprocessing:
         # with the resource tracker that spams warnings and does not work with
         # forked processes. So for now, RawArray is much more reliable.
         # You can't send a RawArray through a pipe.
-        driver = env_creator(*env_args, **env_kwargs)
-        self.emulated = driver.emulated
-        self.num_agents = num_agents = driver.num_agents * num_envs
-        self.agents_per_batch = driver.num_agents * batch_size
-        agents_per_worker = driver.num_agents * envs_per_worker
-        obs_space = driver.single_observation_space
+        driver_env = env_creator(*env_args, **env_kwargs)
+        self.emulated = driver_env.emulated
+        self.num_agents = num_agents = driver_env.num_agents * num_envs
+        self.agents_per_batch = driver_env.num_agents * batch_size
+        agents_per_worker = driver_env.num_agents * envs_per_worker
+        obs_space = driver_env.single_observation_space
         obs_shape = obs_space.shape
         obs_dtype = obs_space.dtype
         obs_ctype = np.ctypeslib.as_ctypes_type(obs_dtype)
-        atn_space = driver.single_action_space
+        atn_space = driver_env.single_action_space
         atn_shape = atn_space.shape
         atn_dtype = atn_space.dtype
         atn_ctype = np.ctypeslib.as_ctypes_type(atn_dtype)
 
-        self.single_observation_space = driver.single_observation_space
-        self.single_action_space = driver.single_action_space
+        self.single_observation_space = driver_env.single_observation_space
+        self.single_action_space = driver_env.single_action_space
         self.agent_ids = np.arange(num_agents).reshape(num_workers, agents_per_worker)
 
         from multiprocessing import RawArray
@@ -406,13 +406,37 @@ class Ray():
             env_args: list = [],
             env_kwargs: dict = {},
             num_envs: int = 1,
-            num_workers: int = 1,
-            envs_per_batch: int = None,
-            mask_agents: bool = False,
+            num_workers: int = None,
+            batch_size: int = None,
             ) -> None:
+        if batch_size is None:
+            batch_size = num_envs
+        if num_workers is None:
+            num_workers = num_envs
 
-        self.driver_env, scale = buffer_scale(env_creator, env_args, env_kwargs,
-            num_envs, num_workers, envs_per_batch=None)
+        vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size)
+        self.env_pool = num_envs != batch_size
+        envs_per_worker = num_envs // num_workers
+        self.workers_per_batch = batch_size // envs_per_worker
+        self.num_workers = num_workers
+
+        driver_env = env_creator(*env_args, **env_kwargs)
+        self.emulated = driver_env.emulated
+        self.num_agents = num_agents = driver_env.num_agents * num_envs
+        self.agents_per_batch = driver_env.num_agents * batch_size
+        agents_per_worker = driver_env.num_agents * envs_per_worker
+        obs_space = driver_env.single_observation_space
+        obs_shape = obs_space.shape
+        atn_space = driver_env.single_action_space
+        atn_shape = atn_space.shape
+
+        shape = (num_workers, agents_per_worker)
+        self.obs_batch_shape = (self.agents_per_batch, *obs_shape)
+        self.atn_batch_shape = (self.workers_per_batch, agents_per_worker, *atn_shape)
+
+        self.single_observation_space = driver_env.single_observation_space
+        self.single_action_space = driver_env.single_action_space
+        self.agent_ids = np.arange(num_agents).reshape(num_workers, agents_per_worker)
 
         import ray
         if not ray.is_initialized():
@@ -422,26 +446,22 @@ class Ray():
                 logging_level=logging.ERROR,
             )
 
-        multi_envs = [
-            ray.remote(PufferEnvWrapper).remote(
-                env_creator, env_args, env_kwargs, scale.envs_per_worker
+        self.envs = [
+            ray.remote(Serial).remote(
+                env_creator, env_args, env_kwargs, envs_per_worker
             ) for _ in range(num_workers)
         ]
 
-        self.multi_envs = multi_envs
         self.async_handles = None
         self.flag = RESET
         self.ray = ray
         self.prev_env_id = []
-        self.env_pool = num_envs != envs_per_batch
-        self.mask_agents = mask_agents
-        self.scale = scale
 
     def recv(self):
         recv_precheck(self)
         recvs = []
         next_env_id = []
-        workers_per_batch = self.scale.workers_per_batch
+        workers_per_batch = self.workers_per_batch
         if self.env_pool:
             recvs = self.ray.get(self.async_handles[:workers_per_batch])
             env_id = [_ for _ in range(workers_per_batch)]
@@ -451,27 +471,28 @@ class Ray():
             env_id = [self.async_handles.index(e) for e in ready]
             recvs = self.ray.get(ready)
 
-        
-        o, r, d, t, infos, m = zip(*recvs)
+        o, r, d, t, infos, ids, m = zip(*recvs)
         self.prev_env_id = env_id
 
         infos = [i for ii in infos for i in ii]
 
-        o = np.stack(o, axis=0).reshape(self.scale.observation_batch_shape)
+        o = np.stack(o, axis=0).reshape(self.obs_batch_shape)
         r = np.stack(r, axis=0).ravel()
         d = np.stack(d, axis=0).ravel()
         t = np.stack(t, axis=0).ravel()
         m = np.stack(m, axis=0).ravel()
-        agent_ids = self.scale.agent_ids[env_id].ravel()
+        agent_ids = self.agent_ids[env_id].ravel()
         return o, r, d, t, infos, agent_ids, m
 
     def send(self, actions):
         send_precheck(self)
-        actions = actions.reshape(self.scale.action_batch_shape)
+        actions = actions.reshape(self.atn_batch_shape)
         handles = []
         for i, e in enumerate(self.prev_env_id):
             atns = actions[i]
-            handles.append(self.multi_envs[e].step.remote(atns))
+            env = self.envs[e]
+            env.send.remote(atns)
+            handles.append(env.recv.remote())
 
         self.async_handles = handles
 
@@ -483,18 +504,19 @@ class Ray():
             kwargs = {"seed": seed}
 
         handles = []
-        for idx, e in enumerate(self.multi_envs):
-            handles.append(e.reset.remote(**kwargs))
+        for idx, e in enumerate(self.envs):
+            e.async_reset.remote(**kwargs)
+            handles.append(e.recv.remote())
 
         self.async_handles = handles
 
     def put(self, *args, **kwargs):
-        for e in self.multi_envs:
+        for e in self.envs:
             e.put.remote(*args, **kwargs)
 
     def get(self, *args, **kwargs):
-        return self.ray.get([e.get.remote(*args, **kwargs) for e in self.multi_envs])
+        return self.ray.get([e.get.remote(*args, **kwargs) for e in self.envs])
 
     def close(self):
-        self.ray.get([e.close.remote() for e in self.multi_envs])
+        self.ray.get([e.close.remote() for e in self.envs])
         self.ray.shutdown()
