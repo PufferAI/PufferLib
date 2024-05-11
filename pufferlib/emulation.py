@@ -218,8 +218,8 @@ class PettingZooPufferEnv:
         self.num_agents = len(self.possible_agents)
 
         self.buf = None
-        self.obs = np.zeros(self.single_observation_space.shape,
-            dtype=self.single_observation_space.dtype)
+        #self.obs = np.zeros(self.single_observation_space.shape,
+        #    dtype=self.single_observation_space.dtype)
 
         #self.observations = np.zeros(self.num_agents, dtype=self.emulated.emulated_observation_dtype)
         #obs = self.observations.view(self.single_observation_space.dtype).reshape(self.num_agents, -1)
