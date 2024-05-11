@@ -1,58 +1,21 @@
 from pdb import set_trace as T
-from collections.abc import Mapping
 
 import numpy as np
 from math import prod
 import gymnasium
-from itertools import chain
-import psutil
 import time
-import msgpack
-
 
 from pufferlib import namespace
 from pufferlib.environment import PufferEnv
 from pufferlib.emulation import GymnasiumPufferEnv, PettingZooPufferEnv
-from pufferlib.multi_env import PufferEnvWrapper
 from pufferlib.exceptions import APIUsageError
 import pufferlib.spaces
-
 import pufferlib.exceptions
 import pufferlib.emulation
-
-
 
 RESET = 0
 SEND = 1
 RECV = 2
-
-space_error_msg = 'env {env} must be an instance of GymnasiumPufferEnv or PettingZooPufferEnv'
-
-def _single_observation_space(env):
-    if isinstance(env, PufferEnv):
-        return env.observation_space
-    elif isinstance(env, PettingZooPufferEnv):
-        return env.single_observation_space
-    elif isinstance(env, GymnasiumPufferEnv):
-        return env.observation_space
-    else:
-        raise TypeError(space_error_msg.format(env=env))
- 
-def single_observation_space(state):
-    return _single_observation_space(state.driver_env)
-
-def _single_action_space(env):
-    if isinstance(env, PufferEnv):
-        return env.action_space
-    elif isinstance(env, PettingZooPufferEnv):
-        return env.single_action_space
-    elif isinstance(env, GymnasiumPufferEnv):
-        return env.action_space
-    else:
-        raise TypeError(space_error_msg.format(env=env))
-
-def single_action_space(state):
-    return _single_action_space(state.driver_env)
 
 def recv_precheck(state):
     assert state.flag == RECV, 'Call reset before stepping'
@@ -76,88 +39,24 @@ def step(self, actions):
     self.send(actions)
     return self.recv()[:-1]
 
-def buffer_scale(env_creator, env_args, env_kwargs, num_envs, num_workers, envs_per_batch=None):
-    '''These calcs are simple but easy to mess up and hard to catch downstream.
-    We do them all at once here to avoid that'''
+def vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size):
+    # TODO: merge into standard vec checks?
+    if num_envs < 1:
+        raise pufferlib.exceptions.APIUsageError('num_envs must be at least 1')
+    if batch_size % num_workers != 0:
+        raise pufferlib.exceptions.APIUsageError('batch_size must be divisible by num_workers')
+    if batch_size < 1:
+        raise pufferlib.exceptions.APIUsageError('batch_size must be > 0')
+    if batch_size > num_envs:
+        raise pufferlib.exceptions.APIUsageError('batch_size must be <= num_envs')
     if num_envs % num_workers != 0:
-        raise APIUsageError('num_envs must be divisible by num_workers')
+        raise pufferlib.exceptions.APIUsageError('num_envs must be divisible by num_workers')
     if num_envs < num_workers:
-        raise APIUsageError('num_envs must be >= num_workers')
-    if envs_per_batch is None:
-        envs_per_batch = num_envs
-    if envs_per_batch > num_envs:
-        raise APIUsageError('envs_per_batch must be <= num_envs')
-    if envs_per_batch % num_workers != 0:
-        raise APIUsageError('envs_per_batch must be divisible by num_workers')
-    if envs_per_batch < 1:
-        raise APIUsageError('envs_per_batch must be > 0')
+        raise pufferlib.exceptions.APIUsageError('num_envs must be >= num_workers')
 
-    if not callable(env_creator):
-        raise pufferlib.exceptions.APIUsageError('env_creator must be callable')
-    if not isinstance(env_args, (list, tuple)):
-        raise pufferlib.exceptions.APIUsageError('env_args must be a list or tuple')
-    # TODO: port namespace to Mapping
-    if not isinstance(env_kwargs, Mapping):
-        raise pufferlib.exceptions.APIUsageError('env_kwargs must be a dictionary or None')
-
-    driver_env = env_creator(*env_args, **env_kwargs)
-
-    if isinstance(driver_env, PufferEnv):
-        agents_per_env = driver_env.num_agents
-    elif isinstance(driver_env, PettingZooPufferEnv):
-        agents_per_env = len(driver_env.agents)
-    elif isinstance(driver_env, GymnasiumPufferEnv):
-        agents_per_env = 1
-    else:
-        raise TypeError(
-            'env_creator must return an instance '
-            'of PufferEnv, GymnasiumPufferEnv or PettingZooPufferEnv'
-        )
-
-    num_agents = num_envs * agents_per_env
-
-    envs_per_worker = num_envs // num_workers
-    agents_per_worker = envs_per_worker * agents_per_env
-
-    workers_per_batch = envs_per_batch // envs_per_worker
-    agents_per_batch = envs_per_batch * agents_per_env
-
-    observation_shape = _single_observation_space(driver_env).shape
-    observation_dtype = _single_observation_space(driver_env).dtype
-    action_shape = _single_action_space(driver_env).shape
-    action_dtype = _single_action_space(driver_env).dtype
-
-    observation_buffer_shape = (num_workers, agents_per_worker, *observation_shape)
-    observation_batch_shape = (agents_per_batch, *observation_shape)
-    action_buffer_shape = (num_workers, envs_per_worker, agents_per_env, *action_shape)
-    action_batch_shape = (workers_per_batch, envs_per_worker, agents_per_env, *action_shape)
-    batch_shape = (num_workers, agents_per_worker)
-
-    agent_ids = np.stack([np.arange(
-        i*agents_per_worker, (i+1)*agents_per_worker) for i in range(num_workers)])
-
-    return driver_env, pufferlib.namespace(
-        num_agents=num_agents,
-        num_envs=num_envs,
-        num_workers=num_workers,
-        envs_per_batch=envs_per_batch,
-        envs_per_worker=envs_per_worker,
-        workers_per_batch=workers_per_batch,
-        agents_per_batch=agents_per_batch,
-        agents_per_worker=agents_per_worker,
-        agents_per_env=agents_per_env,
-        observation_shape=observation_shape,
-        observation_dtype=observation_dtype,
-        action_shape=action_shape,
-        action_dtype=action_dtype,
-        observation_buffer_shape=observation_buffer_shape,
-        observation_batch_shape=observation_batch_shape,
-        action_buffer_shape=action_buffer_shape,
-        action_batch_shape=action_batch_shape,
-        batch_shape=batch_shape,
-        agent_ids=agent_ids,
-    )
-
+    if isinstance(env_creator, (list, tuple)) and (env_args or env_kwargs):
+        raise pufferlib.exceptions.APIUsageError(
+            'env_(kw)args must be empty if env_creator is a list')
 
 class Serial:
     reset = reset
@@ -262,25 +161,6 @@ class Serial:
         for env in self.envs:
             env.close()
 
-def vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size):
-    # TODO: merge into standard vec checks?
-    if num_envs < 1:
-        raise pufferlib.exceptions.APIUsageError('num_envs must be at least 1')
-    if batch_size % num_workers != 0:
-        raise pufferlib.exceptions.APIUsageError('batch_size must be divisible by num_workers')
-    if batch_size < 1:
-        raise pufferlib.exceptions.APIUsageError('batch_size must be > 0')
-    if batch_size > num_envs:
-        raise pufferlib.exceptions.APIUsageError('batch_size must be <= num_envs')
-    if num_envs % num_workers != 0:
-        raise pufferlib.exceptions.APIUsageError('num_envs must be divisible by num_workers')
-    if num_envs < num_workers:
-        raise pufferlib.exceptions.APIUsageError('num_envs must be >= num_workers')
-
-    if isinstance(env_creator, (list, tuple)) and (env_args or env_kwargs):
-        raise pufferlib.exceptions.APIUsageError(
-            'env_(kw)args must be empty if env_creator is a list')
-
 STEP = b"s"
 RESET = b"r"
 RESET_NONE = b"n"
@@ -300,24 +180,17 @@ def _worker_process(env_creator, env_args, env_kwargs, num_envs,
 
     # Return shape and dtype information and wait for confirmation
     send_pipe.send((num_agents, obs_space, atn_space, envs.envs[0].emulated))
-    recv_pipe.recv()
-
-    from multiprocessing.shared_memory import SharedMemory
-    obs_mem = SharedMemory(name='obs')
-    atn_mem = SharedMemory(name='atn')
-    rewards_mem = SharedMemory(name='rew')
-    terminals_mem = SharedMemory(name='term')
-    truncated_mem = SharedMemory(name='trun')
-    mask_mem = SharedMemory(name='mask')
+    shm = recv_pipe.recv()
 
     # Environments read and write directly to shared memory
-    atn_arr = np.ndarray((num_workers, num_agents, *atn_shape), dtype=atn_dtype, buffer=atn_mem.buf)[worker_idx]
+    shape = (num_workers, num_agents)
+    atn_arr = np.ndarray((*shape, *atn_shape), dtype=atn_dtype, buffer=shm.actions.buf)[worker_idx]
     buf = namespace(
-        observations=np.ndarray((num_workers, num_agents, *obs_shape), dtype=obs_dtype, buffer=obs_mem.buf)[worker_idx],
-        rewards=np.ndarray((num_workers, num_agents), dtype=np.float32, buffer=rewards_mem.buf)[worker_idx],
-        terminals=np.ndarray((num_workers, num_agents), dtype=bool, buffer=terminals_mem.buf)[worker_idx],
-        truncations=np.ndarray((num_workers, num_agents), dtype=bool, buffer=truncated_mem.buf)[worker_idx],
-        masks=np.ndarray((num_workers, num_agents), dtype=bool, buffer=mask_mem.buf)[worker_idx],
+        observations=np.ndarray((*shape, *obs_shape), dtype=obs_dtype, buffer=shm.observations.buf)[worker_idx],
+        rewards=np.ndarray(shape, dtype=np.float32, buffer=shm.rewards.buf)[worker_idx],
+        terminals=np.ndarray(shape, dtype=bool, buffer=shm.terminals.buf)[worker_idx],
+        truncations=np.ndarray(shape, dtype=bool, buffer=shm.truncateds.buf)[worker_idx],
+        masks=np.ndarray(shape, dtype=bool, buffer=shm.masks.buf)[worker_idx],
     )
     envs._assign_buffers(buf)
 
@@ -327,6 +200,11 @@ def _worker_process(env_creator, env_args, env_kwargs, num_envs,
             response = envs.reset()
         elif request == STEP:
             response = envs.step(atn_arr)
+        elif request == CLOSE:
+            for e in shm.values():
+                e.close()
+            send_pipe.send(None)
+            break
 
         send_pipe.send(envs.infos)
 
@@ -351,13 +229,18 @@ class Multiprocessing:
         self.workers_per_batch = batch_size // envs_per_worker
         self.num_workers = num_workers
 
-        from multiprocessing import Pipe, Process
+        import warnings
+        warnings.filterwarnings("ignore", category=ResourceWarning)
+
+        from multiprocessing import Pipe, Process, set_start_method
         self.send_pipes, w_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
         w_send_pipes, self.recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
         self.recv_pipe_dict = {p: i for i, p in enumerate(self.recv_pipes)}
 
 
         self.processes = []
+        # Change start method to spawn for Windows compatibility
+        #set_start_method('spawn', force=True)
         for i in range(num_workers):
             p = Process(
                 target=_worker_process,
@@ -393,29 +276,42 @@ class Multiprocessing:
         atn_dtype = atn_space.dtype
         self.single_action_space = atn_space
 
-        from multiprocessing.shared_memory import SharedMemory
-        self.obs_mem = SharedMemory(name='obs', create=True, size=obs_dtype.itemsize * num_agents * prod(obs_shape))
-        self.atn_mem = SharedMemory(name='atn', create=True, size=atn_dtype.itemsize * num_agents * prod(atn_shape))
-        self.rewards_mem = SharedMemory(name='rew', create=True, size=4 * num_agents)
-        self.terminals_mem = SharedMemory(name='term', create=True, size=1 * num_agents)
-        self.truncated_mem = SharedMemory(name='trun', create=True, size=1 * num_agents)
-        self.mask_mem = SharedMemory(name='mask', create=True, size=1 * num_agents)
+        '''
+        from multiprocessing.managers import SharedMemoryManager
+        self.smm = SharedMemoryManager()
+        self.smm.start()
+        self.obs_mem = self.smm.SharedMemory(obs_dtype.itemsize * num_agents * prod(obs_shape))
+        self.atn_mem = self.smm.SharedMemory(atn_dtype.itemsize * num_agents * prod(atn_shape))
+        self.rewards_mem = self.smm.SharedMemory(4 * num_agents)
+        self.terminals_mem = self.smm.SharedMemory(num_agents)
+        self.truncated_mem = self.smm.SharedMemory(num_agents)
+        self.mask_mem = self.smm.SharedMemory(num_agents)
+        '''
+        from pufferlib.shared_memory import SharedMemory
+        self.shm = namespace(
+            observations=SharedMemory(create=True, size=obs_dtype.itemsize * num_agents * prod(obs_shape)),
+            actions=SharedMemory(create=True, size=atn_dtype.itemsize * num_agents * prod(atn_shape)),
+            rewards=SharedMemory(create=True, size=4 * num_agents),
+            terminals=SharedMemory(create=True, size=num_agents),
+            truncateds=SharedMemory(create=True, size=num_agents),
+            masks=SharedMemory(create=True, size=num_agents),
+        )
 
         shape = (num_workers, agents_per_worker)
         self.obs_batch_shape = (self.workers_per_batch*agents_per_worker, *obs_shape)
         self.atn_batch_shape = (self.workers_per_batch, agents_per_worker, *atn_shape)
-        self.actions = np.ndarray((*shape, *atn_shape), dtype=atn_dtype, buffer=self.atn_mem.buf)
+        self.actions = np.ndarray((*shape, *atn_shape), dtype=atn_dtype, buffer=self.shm.actions.buf)
         self.buf = namespace(
-            observations=np.ndarray((*shape, *obs_shape), dtype=obs_dtype, buffer=self.obs_mem.buf),
-            rewards=np.ndarray(shape, dtype=np.float32, buffer=self.rewards_mem.buf),
-            terminals=np.ndarray(shape, dtype=bool, buffer=self.terminals_mem.buf),
-            truncations=np.ndarray(shape, dtype=bool, buffer=self.truncated_mem.buf),
-            masks=np.ndarray(shape, dtype=bool, buffer=self.mask_mem.buf),
+            observations=np.ndarray((*shape, *obs_shape), dtype=obs_dtype, buffer=self.shm.observations.buf),
+            rewards=np.ndarray(shape, dtype=np.float32, buffer=self.shm.rewards.buf),
+            terminals=np.ndarray(shape, dtype=bool, buffer=self.shm.terminals.buf),
+            truncations=np.ndarray(shape, dtype=bool, buffer=self.shm.truncateds.buf),
+            masks=np.ndarray(shape, dtype=bool, buffer=self.shm.masks.buf),
         )
 
         # Send confirmation to workers
         for pipe in self.send_pipes:
-            pipe.send(None)
+            pipe.send(self.shm)
 
         # Register all receive pipes with the selector
         import selectors
@@ -430,7 +326,7 @@ class Multiprocessing:
         worker_ids = []
         infos = []
         if self.env_pool:
-            while len(worker_ids) < self.scale.workers_per_batch:
+            while len(worker_ids) < self.workers_per_batch:
                 for key, _ in self.sel.select(timeout=None):
                     response_pipe = key.fileobj
                     info = response_pipe.recv()
@@ -438,10 +334,10 @@ class Multiprocessing:
                     env_id = self.recv_pipe_dict[response_pipe]
                     worker_ids.append(env_id)
 
-                    if len(worker_ids) == self.scale.workers_per_batch:                    
+                    if len(worker_ids) == self.workers_per_batch:                    
                         break
 
-            if self.scale.workers_per_batch == 1:
+            if self.workers_per_batch == 1:
                 idxs = worker_ids[0]
             else:
                 idxs = np.array(worker_ids)
@@ -470,7 +366,6 @@ class Multiprocessing:
     def send(self, actions):
         send_precheck(self)
         actions = actions.reshape(self.atn_batch_shape)
-
         
         if self.env_pool:
             self.actions[self.prev_env_id] = actions
@@ -525,13 +420,14 @@ class Multiprocessing:
 
     def close(self):
         for pipe in self.send_pipes:
-            pipe.send(("close", [], {}))
+            pipe.send_bytes(CLOSE)
 
-        for p in self.processes:
-            p.terminate()
+        for pipe in self.recv_pipes:
+            pipe.recv()
 
-        for p in self.processes:
-            p.join()
+        for e in self.shm.values():
+            e.close()
+            e.unlink()
 
 class Ray():
     '''Runs environments in parallel on multiple processes using Ray
@@ -541,8 +437,8 @@ class Ray():
     '''
     reset = reset
     step = step
-    single_observation_space = property(single_observation_space)
-    single_action_space = property(single_action_space)
+    #single_observation_space = property(single_observation_space)
+    #single_action_space = property(single_action_space)
 
     def __init__(self,
             env_creator: callable = None,
