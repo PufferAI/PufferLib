@@ -162,14 +162,15 @@ def buffer_scale(env_creator, env_args, env_kwargs, num_envs, num_workers, envs_
 class Serial:
     reset = reset
     step = step
-    single_observation_space = property(single_observation_space)
-    single_action_space = property(single_action_space)
  
     def __init__(self, env_creator: callable = None, env_args: list = [], env_kwargs: dict = {},
             num_envs: int = 1, batch_size: int = None, num_workers: int = None):
-        vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size)
-        batch_size = num_envs if batch_size is None else batch_size
+        if batch_size is None:
+            batch_size = num_envs
+        if num_workers is None:
+            num_workers = num_envs
 
+        vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size)
         self.envs = [env_creator(*env_args, **env_kwargs) for _ in range(num_envs)]
         self.driver_env = self.envs[0]
         for env in self.envs:
@@ -177,6 +178,8 @@ class Serial:
             assert env.single_observation_space == self.driver_env.single_observation_space
             assert env.single_action_space == self.driver_env.single_action_space
 
+        self.single_observation_space = self.driver_env.single_observation_space
+        self.single_action_space = self.driver_env.single_action_space
         self.agents_per_env = [env.num_agents for env in self.envs]
         self.agents_per_batch = sum(self.agents_per_env[:batch_size])
         self.num_agents = sum(self.agents_per_env)
@@ -259,6 +262,25 @@ class Serial:
         for env in self.envs:
             env.close()
 
+def vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size):
+    # TODO: merge into standard vec checks?
+    if num_envs < 1:
+        raise pufferlib.exceptions.APIUsageError('num_envs must be at least 1')
+    if batch_size % num_workers != 0:
+        raise pufferlib.exceptions.APIUsageError('batch_size must be divisible by num_workers')
+    if batch_size < 1:
+        raise pufferlib.exceptions.APIUsageError('batch_size must be > 0')
+    if batch_size > num_envs:
+        raise pufferlib.exceptions.APIUsageError('batch_size must be <= num_envs')
+    if num_envs % num_workers != 0:
+        raise pufferlib.exceptions.APIUsageError('num_envs must be divisible by num_workers')
+    if num_envs < num_workers:
+        raise pufferlib.exceptions.APIUsageError('num_envs must be >= num_workers')
+
+    if isinstance(env_creator, (list, tuple)) and (env_args or env_kwargs):
+        raise pufferlib.exceptions.APIUsageError(
+            'env_(kw)args must be empty if env_creator is a list')
+
 STEP = b"s"
 RESET = b"r"
 RESET_NONE = b"n"
@@ -308,20 +330,6 @@ def _worker_process(env_creator, env_args, env_kwargs, num_envs,
 
         send_pipe.send(envs.infos)
 
-def vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size):
-    # TODO: merge into standard vec checks?
-    if num_envs < 1:
-        raise pufferlib.exceptions.APIUsageError('num_envs must be at least 1')
-    if batch_size is not None:
-        if batch_size < 1:
-            raise pufferlib.exceptions.APIUsageError('batch_size must be > 0')
-        if batch_size > num_envs:
-            raise pufferlib.exceptions.APIUsageError('batch_size must be <= num_envs')
-
-    if isinstance(env_creator, (list, tuple)) and (env_args or env_kwargs):
-        raise pufferlib.exceptions.APIUsageError(
-            'env_(kw)args must be empty if env_creator is a list')
-
 class Multiprocessing:
     '''Runs environments in parallel using multiprocessing
 
@@ -329,62 +337,61 @@ class Multiprocessing:
     '''
     reset = reset
     step = step
-    def __init__(self,
-            env_creator: callable = None,
-            env_args: list = [],
-            env_kwargs: dict = {},
-            num_envs: int = 1,
-            num_workers: int = 1,
-            batch_size: int = None,
-            ) -> None:
-        vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size)
-        batch_size = num_envs if batch_size is None else batch_size
+    def __init__(self, env_creator: callable = None, env_args: list = [],
+            env_kwargs: dict = {}, num_envs: int = 1, num_workers: int = None,
+            batch_size: int = None) -> None:
+        if batch_size is None:
+            batch_size = num_envs
+        if num_workers is None:
+            num_workers = num_envs
 
-        assert num_envs % num_workers == 0
+        vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size)
+        self.env_pool = num_envs != batch_size
         envs_per_worker = num_envs // num_workers
+        self.workers_per_batch = batch_size // envs_per_worker
+        self.num_workers = num_workers
 
         from multiprocessing import Pipe, Process
-        main_send_pipes, work_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
-        work_send_pipes, main_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
-        recv_pipe_dict = {p: i for i, p in enumerate(main_recv_pipes)}
+        self.send_pipes, w_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
+        w_send_pipes, self.recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
+        self.recv_pipe_dict = {p: i for i, p in enumerate(self.recv_pipes)}
 
-        processes = []
+
+        self.processes = []
         for i in range(num_workers):
             p = Process(
                 target=_worker_process,
                 args=(env_creator, env_args, env_kwargs, envs_per_worker,
-                    num_workers, i, work_send_pipes[i], work_recv_pipes[i])
+                    num_workers, i, w_send_pipes[i], w_recv_pipes[i])
             )
             p.start()
-            processes.append(p)
+            self.processes.append(p)
 
-        n_agents, obs_space, atn_space, self.emulated = main_recv_pipes[0].recv()
+        # Check that all environments have the same observation and action spaces
+        # When using envpool (batch_size < num_envs), all workers must have the same number of agents
+        w_agents, w_obs_space, w_atn_space, w_emulated = zip(*[pipe.recv() for pipe in self.recv_pipes])
+        assert all(o == w_obs_space[0] for o in w_obs_space)
+        assert all(a == w_atn_space[0] for a in w_atn_space)
+        assert all(e == w_emulated[0] for e in w_emulated)
+        self.num_agents = num_agents = sum(w_agents)
+        agents_per_worker = w_agents[0]
+        self.agents_per_batch = self.workers_per_batch * agents_per_worker
+        self.emulated = w_emulated[0]
+        if batch_size < num_envs:
+            assert all(w == agents_per_worker for w in w_agents)
+
+        # TODO: Var agent envs
+        self.agent_ids = np.arange(num_agents).reshape(num_workers, w_agents[0])
+
+        obs_space = w_obs_space[0]
         obs_shape = obs_space.shape
         obs_dtype = obs_space.dtype
+        self.single_observation_space = obs_space
+
+        atn_space = w_atn_space[0]
         atn_shape = atn_space.shape
         atn_dtype = atn_space.dtype
-        self.single_observation_space = obs_space
         self.single_action_space = atn_space
-        num_agents = n_agents
-        agents_per_env = [n_agents]
-        agent_ids = [np.arange(n_agents)]
-
-        for pipe in main_recv_pipes[1:]:
-            w_num_agents, w_obs_shape, w_atn_shape, w_obs_dtype, w_atn_dtype = pipe.recv()
-            agent_ids.append(np.arange(num_agents, num_agents + w_num_agents))
-            num_agents += w_num_agents
-            agents_per_env.append(w_num_agents)
-            if batch_size < num_envs:
-                assert w_num_agents == num_agents
-            assert obs_shape == w_obs_shape
-            assert atn_shape == w_atn_shape
-            assert obs_dtype == w_obs_dtype
-            assert atn_dtype == w_atn_dtype
-
-        self.agent_ids = np.stack(agent_ids)
-
-        self.agents_per_batch = sum(agents_per_env)
-        self.num_agents = num_agents
 
         from multiprocessing.shared_memory import SharedMemory
         self.obs_mem = SharedMemory(name='obs', create=True, size=obs_dtype.itemsize * num_agents * prod(obs_shape))
@@ -393,40 +400,30 @@ class Multiprocessing:
         self.terminals_mem = SharedMemory(name='term', create=True, size=1 * num_agents)
         self.truncated_mem = SharedMemory(name='trun', create=True, size=1 * num_agents)
         self.mask_mem = SharedMemory(name='mask', create=True, size=1 * num_agents)
-        self.obs_arr = np.ndarray((num_workers, num_agents, *obs_shape), dtype=obs_dtype, buffer=self.obs_mem.buf)
-        self.atn_arr = np.ndarray((num_workers, num_agents, *atn_shape), dtype=atn_dtype, buffer=self.atn_mem.buf)
-        self.rewards_arr = np.ndarray((num_workers, num_agents), dtype=np.float32, buffer=self.rewards_mem.buf)
-        self.terminals_arr = np.ndarray((num_workers, num_agents), dtype=bool, buffer=self.terminals_mem.buf)
-        self.truncated_arr = np.ndarray((num_workers, num_agents), dtype=bool, buffer=self.truncated_mem.buf)
-        self.mask_arr = np.ndarray((num_workers, num_agents), dtype=bool, buffer=self.mask_mem.buf)
 
-        self.obs_batch_shape = (self.agents_per_batch, *obs_shape)
-        self.atn_batch_shape = (self.agents_per_batch, *atn_shape)
+        shape = (num_workers, agents_per_worker)
+        self.obs_batch_shape = (self.workers_per_batch*agents_per_worker, *obs_shape)
+        self.atn_batch_shape = (self.workers_per_batch, agents_per_worker, *atn_shape)
+        self.actions = np.ndarray((*shape, *atn_shape), dtype=atn_dtype, buffer=self.atn_mem.buf)
+        self.buf = namespace(
+            observations=np.ndarray((*shape, *obs_shape), dtype=obs_dtype, buffer=self.obs_mem.buf),
+            rewards=np.ndarray(shape, dtype=np.float32, buffer=self.rewards_mem.buf),
+            terminals=np.ndarray(shape, dtype=bool, buffer=self.terminals_mem.buf),
+            truncations=np.ndarray(shape, dtype=bool, buffer=self.truncated_mem.buf),
+            masks=np.ndarray(shape, dtype=bool, buffer=self.mask_mem.buf),
+        )
 
         # Send confirmation to workers
-        for pipe in main_send_pipes:
+        for pipe in self.send_pipes:
             pipe.send(None)
 
         # Register all receive pipes with the selector
         import selectors
-        sel = selectors.DefaultSelector()
-        for pipe in main_recv_pipes:
-            sel.register(pipe, selectors.EVENT_READ)
+        self.sel = selectors.DefaultSelector()
+        for pipe in self.recv_pipes:
+            self.sel.register(pipe, selectors.EVENT_READ)
 
-        self.num_agents = num_agents
-        self.agents_per_env = agents_per_env
-        self.processes = processes
-        self.sel = sel
-        self.send_pipes = main_send_pipes
-        self.recv_pipes = main_recv_pipes
-        self.recv_pipe_dict = recv_pipe_dict
-        self.num_envs = num_envs
-        self.num_workers = num_workers
         self.flag = RESET
-        self.prev_env_id = []
-        self.mask_agents = mask_agents
-        self.env_pool = num_envs != batch_size
-
 
     def recv(self):
         recv_precheck(self)
@@ -457,33 +454,36 @@ class Multiprocessing:
 
             idxs = ()
 
-        infos = [i for ii in infos for i in ii]
 
-        o = self.obs_arr[idxs].reshape(self.obs_batch_shape)
-        r = self.rewards_arr[idxs].ravel()
-        d = self.terminals_arr[idxs].ravel()
-        t = self.truncated_arr[idxs].ravel()
-        m = self.mask_arr[idxs].ravel()
+        buf = self.buf
+        o = buf.observations[idxs].reshape(self.obs_batch_shape)
+        r = buf.rewards[idxs].ravel()
+        d = buf.terminals[idxs].ravel()
+        t = buf.truncations[idxs].ravel()
+        infos = [i for ii in infos for i in ii]
+        agent_ids = self.agent_ids[idxs].ravel()
+        m = buf.masks[idxs].ravel()
 
         self.prev_env_id = idxs
-        agent_ids = self.agent_ids[idxs].ravel()
         return o, r, d, t, infos, agent_ids, m
 
     def send(self, actions):
         send_precheck(self)
         actions = actions.reshape(self.atn_batch_shape)
 
+        
         if self.env_pool:
-            self.atn_arr[self.prev_env_id] = actions
+            self.actions[self.prev_env_id] = actions
             idxs = self.prev_env_id
         else:
-            self.atn_arr[:] = actions
+            self.actions[:] = actions
             idxs = range(self.num_workers)
 
         for i in idxs:
             self.send_pipes[i].send_bytes(STEP)
 
     def async_reset(self, seed=None):
+        self.prev_env_id = []
         reset_precheck(self)
         for pipe in self.send_pipes:
             pipe.send_bytes(RESET)
