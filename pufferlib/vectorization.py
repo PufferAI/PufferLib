@@ -167,30 +167,22 @@ RESET_NONE = b"n"
 CLOSE = b"c"
 
 def _worker_process(env_creator, env_args, env_kwargs, num_envs,
-        num_workers, worker_idx, send_pipe, recv_pipe):
-    
+        num_workers, worker_idx, send_pipe, recv_pipe, shm):
     envs = Serial(env_creator, env_args, env_kwargs, num_envs)
-    num_agents = envs.num_agents
-    obs_space = envs.single_observation_space
     obs_shape = envs.single_observation_space.shape
     obs_dtype = envs.single_observation_space.dtype
-    atn_space = envs.single_action_space
     atn_shape = envs.single_action_space.shape
     atn_dtype = envs.single_action_space.dtype
 
-    # Return shape and dtype information and wait for confirmation
-    send_pipe.send((num_agents, obs_space, atn_space, envs.envs[0].emulated))
-    shm = recv_pipe.recv()
-
     # Environments read and write directly to shared memory
-    shape = (num_workers, num_agents)
-    atn_arr = np.ndarray((*shape, *atn_shape), dtype=atn_dtype, buffer=shm.actions.buf)[worker_idx]
+    shape = (num_workers, envs.num_agents)
+    atn_arr = np.ndarray((*shape, *atn_shape), dtype=atn_dtype, buffer=shm.actions)[worker_idx]
     buf = namespace(
-        observations=np.ndarray((*shape, *obs_shape), dtype=obs_dtype, buffer=shm.observations.buf)[worker_idx],
-        rewards=np.ndarray(shape, dtype=np.float32, buffer=shm.rewards.buf)[worker_idx],
-        terminals=np.ndarray(shape, dtype=bool, buffer=shm.terminals.buf)[worker_idx],
-        truncations=np.ndarray(shape, dtype=bool, buffer=shm.truncateds.buf)[worker_idx],
-        masks=np.ndarray(shape, dtype=bool, buffer=shm.masks.buf)[worker_idx],
+        observations=np.ndarray((*shape, *obs_shape), dtype=obs_dtype, buffer=shm.observations)[worker_idx],
+        rewards=np.ndarray(shape, dtype=np.float32, buffer=shm.rewards)[worker_idx],
+        terminals=np.ndarray(shape, dtype=bool, buffer=shm.terminals)[worker_idx],
+        truncations=np.ndarray(shape, dtype=bool, buffer=shm.truncateds)[worker_idx],
+        masks=np.ndarray(shape, dtype=bool, buffer=shm.masks)[worker_idx],
     )
     envs._assign_buffers(buf)
 
@@ -201,8 +193,6 @@ def _worker_process(env_creator, env_args, env_kwargs, num_envs,
         elif request == STEP:
             response = envs.step(atn_arr)
         elif request == CLOSE:
-            for e in shm.values():
-                e.close()
             send_pipe.send(None)
             break
 
@@ -229,91 +219,66 @@ class Multiprocessing:
         self.workers_per_batch = batch_size // envs_per_worker
         self.num_workers = num_workers
 
-        import warnings
-        warnings.filterwarnings("ignore", category=ResourceWarning)
+        # I really didn't want to need a driver process... with mp.shared_memory
+        # we can fetch this data from the worker processes and ever perform
+        # additional space checks. Unfortunately, SharedMemory has a janky integration
+        # with the resource tracker that spams warnings and does not work with
+        # forked processes. So for now, RawArray is much more reliable.
+        # You can't send a RawArray through a pipe.
+        driver = env_creator(*env_args, **env_kwargs)
+        self.emulated = driver.emulated
+        self.num_agents = num_agents = driver.num_agents * num_envs
+        self.agents_per_batch = driver.num_agents * batch_size
+        agents_per_worker = driver.num_agents * envs_per_worker
+        obs_space = driver.single_observation_space
+        obs_shape = obs_space.shape
+        obs_dtype = obs_space.dtype
+        obs_ctype = np.ctypeslib.as_ctypes_type(obs_dtype)
+        atn_space = driver.single_action_space
+        atn_shape = atn_space.shape
+        atn_dtype = atn_space.dtype
+        atn_ctype = np.ctypeslib.as_ctypes_type(atn_dtype)
+
+        self.single_observation_space = driver.single_observation_space
+        self.single_action_space = driver.single_action_space
+        self.agent_ids = np.arange(num_agents).reshape(num_workers, agents_per_worker)
+
+        from multiprocessing import RawArray
+        self.shm = namespace(
+            observations=RawArray(obs_ctype, num_agents * prod(obs_shape)),
+            actions=RawArray(atn_ctype, num_agents * prod(atn_shape)),
+            rewards=RawArray('f', num_agents),
+            terminals=RawArray('b', num_agents),
+            truncateds=RawArray('b', num_agents),
+            masks=RawArray('b', num_agents),
+        )
+        shape = (num_workers, agents_per_worker)
+        self.obs_batch_shape = (self.agents_per_batch, *obs_shape)
+        self.atn_batch_shape = (self.workers_per_batch, agents_per_worker, *atn_shape)
+        self.actions = np.ndarray((*shape, *atn_shape), dtype=atn_dtype, buffer=self.shm.actions)
+        self.buf = namespace(
+            observations=np.ndarray((*shape, *obs_shape), dtype=obs_dtype, buffer=self.shm.observations),
+            rewards=np.ndarray(shape, dtype=np.float32, buffer=self.shm.rewards),
+            terminals=np.ndarray(shape, dtype=bool, buffer=self.shm.terminals),
+            truncations=np.ndarray(shape, dtype=bool, buffer=self.shm.truncateds),
+            masks=np.ndarray(shape, dtype=bool, buffer=self.shm.masks),
+        )
 
         from multiprocessing import Pipe, Process, set_start_method
         self.send_pipes, w_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
         w_send_pipes, self.recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
         self.recv_pipe_dict = {p: i for i, p in enumerate(self.recv_pipes)}
 
-
         self.processes = []
-        # Change start method to spawn for Windows compatibility
-        #set_start_method('spawn', force=True)
         for i in range(num_workers):
             p = Process(
                 target=_worker_process,
                 args=(env_creator, env_args, env_kwargs, envs_per_worker,
-                    num_workers, i, w_send_pipes[i], w_recv_pipes[i])
+                    num_workers, i, w_send_pipes[i], w_recv_pipes[i], self.shm)
             )
             p.start()
             self.processes.append(p)
 
-        # Check that all environments have the same observation and action spaces
-        # When using envpool (batch_size < num_envs), all workers must have the same number of agents
-        w_agents, w_obs_space, w_atn_space, w_emulated = zip(*[pipe.recv() for pipe in self.recv_pipes])
-        assert all(o == w_obs_space[0] for o in w_obs_space)
-        assert all(a == w_atn_space[0] for a in w_atn_space)
-        assert all(e == w_emulated[0] for e in w_emulated)
-        self.num_agents = num_agents = sum(w_agents)
-        agents_per_worker = w_agents[0]
-        self.agents_per_batch = self.workers_per_batch * agents_per_worker
-        self.emulated = w_emulated[0]
-        if batch_size < num_envs:
-            assert all(w == agents_per_worker for w in w_agents)
-
-        # TODO: Var agent envs
-        self.agent_ids = np.arange(num_agents).reshape(num_workers, w_agents[0])
-
-        obs_space = w_obs_space[0]
-        obs_shape = obs_space.shape
-        obs_dtype = obs_space.dtype
-        self.single_observation_space = obs_space
-
-        atn_space = w_atn_space[0]
-        atn_shape = atn_space.shape
-        atn_dtype = atn_space.dtype
-        self.single_action_space = atn_space
-
-        '''
-        from multiprocessing.managers import SharedMemoryManager
-        self.smm = SharedMemoryManager()
-        self.smm.start()
-        self.obs_mem = self.smm.SharedMemory(obs_dtype.itemsize * num_agents * prod(obs_shape))
-        self.atn_mem = self.smm.SharedMemory(atn_dtype.itemsize * num_agents * prod(atn_shape))
-        self.rewards_mem = self.smm.SharedMemory(4 * num_agents)
-        self.terminals_mem = self.smm.SharedMemory(num_agents)
-        self.truncated_mem = self.smm.SharedMemory(num_agents)
-        self.mask_mem = self.smm.SharedMemory(num_agents)
-        '''
-        from pufferlib.shared_memory import SharedMemory
-        self.shm = namespace(
-            observations=SharedMemory(create=True, size=obs_dtype.itemsize * num_agents * prod(obs_shape)),
-            actions=SharedMemory(create=True, size=atn_dtype.itemsize * num_agents * prod(atn_shape)),
-            rewards=SharedMemory(create=True, size=4 * num_agents),
-            terminals=SharedMemory(create=True, size=num_agents),
-            truncateds=SharedMemory(create=True, size=num_agents),
-            masks=SharedMemory(create=True, size=num_agents),
-        )
-
-        shape = (num_workers, agents_per_worker)
-        self.obs_batch_shape = (self.workers_per_batch*agents_per_worker, *obs_shape)
-        self.atn_batch_shape = (self.workers_per_batch, agents_per_worker, *atn_shape)
-        self.actions = np.ndarray((*shape, *atn_shape), dtype=atn_dtype, buffer=self.shm.actions.buf)
-        self.buf = namespace(
-            observations=np.ndarray((*shape, *obs_shape), dtype=obs_dtype, buffer=self.shm.observations.buf),
-            rewards=np.ndarray(shape, dtype=np.float32, buffer=self.shm.rewards.buf),
-            terminals=np.ndarray(shape, dtype=bool, buffer=self.shm.terminals.buf),
-            truncations=np.ndarray(shape, dtype=bool, buffer=self.shm.truncateds.buf),
-            masks=np.ndarray(shape, dtype=bool, buffer=self.shm.masks.buf),
-        )
-
-        # Send confirmation to workers
-        for pipe in self.send_pipes:
-            pipe.send(self.shm)
-
-        # Register all receive pipes with the selector
         import selectors
         self.sel = selectors.DefaultSelector()
         for pipe in self.recv_pipes:
@@ -424,10 +389,6 @@ class Multiprocessing:
 
         for pipe in self.recv_pipes:
             pipe.recv()
-
-        for e in self.shm.values():
-            e.close()
-            e.unlink()
 
 class Ray():
     '''Runs environments in parallel on multiple processes using Ray
