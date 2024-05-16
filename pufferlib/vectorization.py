@@ -217,21 +217,24 @@ def _worker_process(env_creator, env_args, env_kwargs, num_envs,
     semaphores=np.ndarray(num_workers, dtype=np.uint8, buffer=shm.semaphores)
     while True:
         #request = recv_pipe.recv_bytes()
-        lock.acquire()
+        #lock.acquire()
         sem = semaphores[worker_idx]
-        assert sem != MAIN
+        if sem >= MAIN:
+            continue
         if sem == RESET:
             _, infos = envs.reset()
         elif sem == STEP:
             _, _, _, _, infos, _ = envs.step(atn_arr)
         elif sem == CLOSE:
             print("closing worker", worker_idx)
-            #send_pipe.send(None)
+            send_pipe.send(None)
             break
+
+        semaphores[worker_idx] = MAIN
 
         if infos:
             semaphores[worker_idx] = INFO
-            #send_pipe.send(infos)
+            send_pipe.send(infos)
         else:
             semaphores[worker_idx] = MAIN
 
@@ -323,8 +326,8 @@ class Multiprocessing:
             semaphores=RawArray('c', num_workers),
         )
         self.semaphores = [Lock() for _ in range(num_workers)]
-        for e in self.semaphores:
-            e.acquire()
+        #for e in self.semaphores:
+        #    e.acquire()
 
         shape = (num_workers, agents_per_worker)
         self.obs_batch_shape = (self.agents_per_batch, *obs_shape)
@@ -338,6 +341,7 @@ class Multiprocessing:
             masks=np.ndarray(shape, dtype=bool, buffer=self.shm.masks),
             semaphores=np.ndarray(num_workers, dtype=np.uint8, buffer=self.shm.semaphores),
         )
+        self.buf.semaphores[:] = MAIN
 
         from multiprocessing import Pipe, Process
         self.send_pipes, w_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
@@ -357,7 +361,7 @@ class Multiprocessing:
 
         self.flag = RESET
 
-    @profile
+    #@profile
     def recv(self):
         recv_precheck(self)
         start = contiguous_subset(self.ready_workers, self.workers_per_batch)
@@ -369,8 +373,8 @@ class Multiprocessing:
             else:
                 self.waiting_workers.append(worker)
 
-            #if sem == INFO:
-            #    self.infos[worker] = self.recv_pipes[worker].recv()
+            if sem == INFO:
+                self.infos[worker] = self.recv_pipes[worker].recv()
 
             start = contiguous_subset(self.ready_workers, self.workers_per_batch)
             self.start = start
@@ -394,7 +398,7 @@ class Multiprocessing:
 
         return o, r, d, t, infos, agent_ids, m
 
-    @profile
+    #@profile
     def send(self, actions):
         send_precheck(self)
         actions = actions.reshape(self.atn_batch_shape)
@@ -404,8 +408,8 @@ class Multiprocessing:
         self.actions[start:end] = actions
         self.buf.semaphores[start:end] = STEP
         self.waiting_workers.extend(range(start, end))
-        for i in range(start, end):
-            self.semaphores[i].release()
+        #for i in range(start, end):
+        #    self.semaphores[i].release()
         #for i in range(start, end):
         #    self.send_pipes[i].send_bytes(STEP)
 
@@ -417,8 +421,8 @@ class Multiprocessing:
         self.waiting_workers = list(range(self.num_workers))
         self.infos = [[] for _ in range(self.num_workers)]
 
-        for i in range(self.num_workers):
-            self.semaphores[i].release()
+        #for i in range(self.num_workers):
+        #    self.semaphores[i].release()
 
         return
         # TODO: Seed
