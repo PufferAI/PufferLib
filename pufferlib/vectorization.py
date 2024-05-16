@@ -13,65 +13,46 @@ import pufferlib.spaces
 import pufferlib.exceptions
 import pufferlib.emulation
 
+NEUTRAL = 0
 RESET = 0
-SEND = 1
-RECV = 2
+STEP = 1
+SEND = 2
+RECV = 3
+CLOSE = 4
+MAIN = 5
+INFO = 6
 
-def recv_precheck(state):
-    assert state.flag == RECV, 'Call reset before stepping'
-    state.flag = SEND
+def recv_precheck(vecenv):
+    if vecenv.flag != RECV:
+        raise APIUsageError('Call reset before stepping')
 
-def send_precheck(state):
-    assert state.flag == SEND, 'Call reset + recv before send'
-    state.flag = RECV
+    vecenv.flag = SEND
 
-def reset_precheck(state):
-    assert state.flag == RESET, 'Call reset only once on initialization'
-    state.flag = RECV
+def send_precheck(vecenv):
+    if vecenv.flag != SEND:
+        raise APIUsageError('Call (async) reset + recv before sending')
 
-def reset(self, seed=None):
-    self.async_reset(seed)
-    data = self.recv()
-    return data[0], data[4]
+    vecenv.flag = RECV
 
-def step(self, actions):
+def reset(vecenv, seed=None):
+    vecenv.async_reset(seed)
+    obs, rewards, terminals, truncations, infos, env_ids, masks = vecenv.recv()
+    return obs, infos
+
+def step(vecenv, actions):
     actions = np.asarray(actions)
-    self.send(actions)
-    return self.recv()[:-1]
-
-def vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size):
-    # TODO: merge into standard vec checks?
-    if num_envs < 1:
-        raise pufferlib.exceptions.APIUsageError('num_envs must be at least 1')
-    # TODO: test case with batch_size = 2, num_envs=6, num_workers=2
-    #if num_workers % batch_size != 0:
-    #    raise pufferlib.exceptions.APIUsageError('batch_size must be divisible by num_workers')
-    if batch_size < 1:
-        raise pufferlib.exceptions.APIUsageError('batch_size must be > 0')
-    if batch_size > num_envs:
-        raise pufferlib.exceptions.APIUsageError('batch_size must be <= num_envs')
-    if num_envs % num_workers != 0:
-        raise pufferlib.exceptions.APIUsageError('num_envs must be divisible by num_workers')
-    if num_envs < num_workers:
-        raise pufferlib.exceptions.APIUsageError('num_envs must be >= num_workers')
-
-    if isinstance(env_creator, (list, tuple)) and (env_args or env_kwargs):
-        raise pufferlib.exceptions.APIUsageError(
-            'env_(kw)args must be empty if env_creator is a list')
+    vecenv.send(actions)
+    obs, rewards, terminals, truncations, infos, env_ids, masks = vecenv.recv()
+    return obs, rewards, terminals, truncations, infos, env_ids
 
 class Serial:
     reset = reset
     step = step
  
-    def __init__(self, env_creator: callable = None, env_args: list = [], env_kwargs: dict = {},
-            num_envs: int = 1, batch_size: int = None, num_workers: int = None):
-        if batch_size is None:
-            batch_size = num_envs
-        if num_workers is None:
-            num_workers = num_envs
+    def __init__(self, env_creators, env_args, env_kwargs, num_envs, **kwargs):
+        self.envs = [creator(*args, **kwargs) for (creator, args, kwargs)
+            in zip(env_creators, env_args, env_kwargs)]
 
-        vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size)
-        self.envs = [env_creator(*env_args, **env_kwargs) for _ in range(num_envs)]
         self.driver_env = self.envs[0]
         for env in self.envs:
             assert isinstance(env, (PufferEnv, GymnasiumPufferEnv, PettingZooPufferEnv))
@@ -81,7 +62,7 @@ class Serial:
         self.single_observation_space = self.driver_env.single_observation_space
         self.single_action_space = self.driver_env.single_action_space
         self.agents_per_env = [env.num_agents for env in self.envs]
-        self.agents_per_batch = sum(self.agents_per_env[:batch_size])
+        self.agents_per_batch = sum(self.agents_per_env)
         self.num_agents = sum(self.agents_per_env)
         self.agent_ids = np.arange(self.num_agents)
         self.buf = None
@@ -100,7 +81,9 @@ class Serial:
             )
             ptr = end
 
-    def async_reset(self, seed=None):
+    def async_reset(self, seed=42):
+        seed = make_seeds(seed, len(self.envs))
+
         if self.buf is None:
             self.buf = namespace(
                 observations = np.empty(
@@ -114,11 +97,8 @@ class Serial:
             self._assign_buffers(self.buf)
 
         infos = []
-        for idx, env in enumerate(self.envs):
-            if seed is None:
-                ob, i = env.reset()
-            else:
-                ob, i = env.reset(seed=hash(1000*seed + idx))
+        for env, s in zip(self.envs, seed):
+            ob, i = env.reset(seed=s)
                
             if i:
                 infos.append(i)
@@ -131,6 +111,7 @@ class Serial:
         self.infos = infos
 
     def send(self, actions):
+        actions = np.asarray(actions)
         rewards, dones, truncateds, self.infos = [], [], [], []
         ptr = 0
         for idx, env in enumerate(self.envs):
@@ -154,46 +135,13 @@ class Serial:
         return (buf.observations, buf.rewards, buf.terminals, buf.truncations,
             self.infos, self.agent_ids, buf.masks)
 
-    def put(self, *args, **kwargs):
-        for e in self.envs:
-            e.put(*args, **kwargs)
-        
-    def get(self, *args, **kwargs):
-        return [e.get(*args, **kwargs) for e in self.envs]
-
     def close(self):
         for env in self.envs:
             env.close()
 
-STEP = b"s"
-RESET = b"r"
-RESET_NONE = b"n"
-CLOSE = b"c"
-MAIN = b"m"
-
-NEUTRAL = 0
-STEP = 1
-RESET = 2
-RESET_NONE = 3
-CLOSE = 4
-MAIN = 5
-INFO = 6
-
-def _worker_process(env_creator, env_args, env_kwargs, num_envs,
+def _worker_process(env_creators, env_args, env_kwargs, num_envs,
         num_workers, worker_idx, send_pipe, recv_pipe, shm, lock):
-
-    import os
-
-
-    #import psutil
-    #curr_process = psutil.Process()
-    #curr_process.cpu_affinity([2*(worker_idx+1)])
-
-    # nice min prioirty
-    #import os
-    #os.nice(19)
-
-    envs = Serial(env_creator, env_args, env_kwargs, num_envs)
+    envs = Serial(env_creators, env_args, env_kwargs, num_envs)
     obs_shape = envs.single_observation_space.shape
     obs_dtype = envs.single_observation_space.dtype
     atn_shape = envs.single_action_space.shape
@@ -211,18 +159,21 @@ def _worker_process(env_creator, env_args, env_kwargs, num_envs,
     )
     envs._assign_buffers(buf)
 
-    # TODO: Figure out why not getting called
-    envs.reset()
-
     semaphores=np.ndarray(num_workers, dtype=np.uint8, buffer=shm.semaphores)
+    start = time.time()
     while True:
-        #request = recv_pipe.recv_bytes()
         #lock.acquire()
+
         sem = semaphores[worker_idx]
         if sem >= MAIN:
+            if time.time() - start > 0.1:
+                time.sleep(0.01)
             continue
+
+        start = time.time()
         if sem == RESET:
-            _, infos = envs.reset()
+            seeds = recv_pipe.recv()
+            _, infos = envs.reset(seed=seeds)
         elif sem == STEP:
             _, _, _, _, infos, _ = envs.step(atn_arr)
         elif sem == CLOSE:
@@ -230,28 +181,13 @@ def _worker_process(env_creator, env_args, env_kwargs, num_envs,
             send_pipe.send(None)
             break
 
-        semaphores[worker_idx] = MAIN
-
         if infos:
             semaphores[worker_idx] = INFO
             send_pipe.send(infos)
         else:
             semaphores[worker_idx] = MAIN
 
-        #send_pipe.send(envs.infos)
-
 def contiguous_subset(lst, n):
-    """
-    Checks if the given list contains a contiguous subset of n integers.
-
-    Parameters:
-    lst (list of int): The list of integers to check.
-    n (int): The length of the contiguous subset to find.
-
-    Returns:
-    tuple: A tuple containing the lowest and highest elements of the contiguous subset.
-           Returns (None, None) if no such subset exists.
-    """
     if len(lst) < n:
         return None
 
@@ -272,15 +208,15 @@ class Multiprocessing:
     '''
     reset = reset
     step = step
-    def __init__(self, env_creator: callable = None, env_args: list = [],
-            env_kwargs: dict = {}, num_envs: int = 1, num_workers: int = None,
-            batch_size: int = None) -> None:
+    def __init__(self, env_creators, env_args, env_kwargs,
+            num_envs, num_workers=None, batch_size=None, **kwargs):
+        self.envs = [creator(*args, **kwargs) for (creator, args, kwargs)
+            in zip(env_creators, env_args, env_kwargs)]
         if batch_size is None:
             batch_size = num_envs
         if num_workers is None:
             num_workers = num_envs
 
-        vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size)
         envs_per_worker = num_envs // num_workers
         self.workers_per_batch = batch_size // envs_per_worker
         self.num_workers = num_workers
@@ -291,7 +227,7 @@ class Multiprocessing:
         # with the resource tracker that spams warnings and does not work with
         # forked processes. So for now, RawArray is much more reliable.
         # You can't send a RawArray through a pipe.
-        driver_env = env_creator(*env_args, **env_kwargs)
+        driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
         self.emulated = driver_env.emulated
         self.num_agents = num_agents = driver_env.num_agents * num_envs
         self.agents_per_batch = driver_env.num_agents * batch_size
@@ -308,12 +244,6 @@ class Multiprocessing:
         self.single_observation_space = driver_env.single_observation_space
         self.single_action_space = driver_env.single_action_space
         self.agent_ids = np.arange(num_agents).reshape(num_workers, agents_per_worker)
-
-        # Set process affinity
-        #import psutil
-        #curr_process = psutil.Process()
-        #curr_process.cpu_affinity([0])
-
 
         from multiprocessing import RawArray, Semaphore, Lock
         self.shm = namespace(
@@ -350,9 +280,12 @@ class Multiprocessing:
 
         self.processes = []
         for i in range(num_workers):
+            start = i * envs_per_worker
+            end = start + envs_per_worker
             p = Process(
                 target=_worker_process,
-                args=(env_creator, env_args, env_kwargs, envs_per_worker,
+                args=(env_creators[start:end], env_args[start:end],
+                    env_kwargs[start:end], envs_per_worker,
                     num_workers, i, w_send_pipes[i], w_recv_pipes[i],
                     self.shm, self.semaphores[i])
             )
@@ -389,8 +322,8 @@ class Multiprocessing:
         d = buf.terminals[start:end].ravel()
         t = buf.truncations[start:end].ravel()
 
-        #infos = [i for ii in self.infos[start:end] for i in ii]
-        #self.infos[start:end] = [[] for _ in range(self.workers_per_batch)]
+        infos = [i for ii in self.infos[start:end] for i in ii]
+        self.infos[start:end] = [[] for _ in range(self.workers_per_batch)]
         infos = []
 
         agent_ids = self.agent_ids[start:end].ravel()
@@ -401,7 +334,7 @@ class Multiprocessing:
     #@profile
     def send(self, actions):
         send_precheck(self)
-        actions = actions.reshape(self.atn_batch_shape)
+        actions = np.asarray(actions).reshape(self.atn_batch_shape)
         
         start = self.start
         end = start + self.workers_per_batch
@@ -410,66 +343,23 @@ class Multiprocessing:
         self.waiting_workers.extend(range(start, end))
         #for i in range(start, end):
         #    self.semaphores[i].release()
-        #for i in range(start, end):
-        #    self.send_pipes[i].send_bytes(STEP)
 
-    def async_reset(self, seed=None):
+    def async_reset(self, seed=42):
+        seed = make_seeds(seed, self.num_workers)
         self.prev_env_id = []
-        reset_precheck(self)
-        self.buf.semaphores[:] = RESET
+        self.flag = RECV
+
         self.ready_workers = []
         self.waiting_workers = list(range(self.num_workers))
         self.infos = [[] for _ in range(self.num_workers)]
 
-        #for i in range(self.num_workers):
-        #    self.semaphores[i].release()
-
-        return
-        # TODO: Seed
-
-        if seed is None:
-            for pipe in self.send_pipes:
-                pipe.send(RESET)
-        else:
-            for idx, pipe in enumerate(self.send_pipes):
-                pipe.send(("reset", [], {"seed": seed+idx}))
-
-    def put(self, *args, **kwargs):
-        # TODO: Update this
-        for queue in self.request_queues:
-            queue.put(("put", args, kwargs))
-
-    def get(self, *args, **kwargs):
-        # TODO: Update this
-        for queue in self.request_queues:
-            queue.put(("get", args, kwargs))
-
-        idx = -1
-        recvs = []
-        while len(recvs) < self.workers_per_batch // self.envs_per_worker:
-            idx = (idx + 1) % self.num_workers
-            queue = self.response_queues[idx]
-
-            if queue.empty():
-                continue
-
-            response = queue.get()
-            if response is not None:
-                recvs.append(response)
-
-        return recvs
+        self.buf.semaphores[:] = RESET
+        for i in range(self.num_workers):
+            self.send_pipes[i].send(seed[i])
 
     def close(self):
-        self.buf.semaphores[:] = CLOSE
         for p in self.processes:
             p.terminate()
-        '''
-        for pipe in self.send_pipes:
-            pipe.send_bytes(CLOSE)
-
-        for pipe in self.recv_pipes:
-            pipe.recv()
-        '''
 
 class Ray():
     '''Runs environments in parallel on multiple processes using Ray
@@ -479,29 +369,19 @@ class Ray():
     '''
     reset = reset
     step = step
-    #single_observation_space = property(single_observation_space)
-    #single_action_space = property(single_action_space)
-
-    def __init__(self,
-            env_creator: callable = None,
-            env_args: list = [],
-            env_kwargs: dict = {},
-            num_envs: int = 1,
-            num_workers: int = None,
-            batch_size: int = None,
-            ) -> None:
+    def __init__(self, env_creators, env_args, env_kwargs,
+            num_envs, num_workers=None, batch_size=None, **kwargs):
         if batch_size is None:
             batch_size = num_envs
         if num_workers is None:
             num_workers = num_envs
 
-        vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size)
         self.env_pool = num_envs != batch_size
         envs_per_worker = num_envs // num_workers
         self.workers_per_batch = batch_size // envs_per_worker
         self.num_workers = num_workers
 
-        driver_env = env_creator(*env_args, **env_kwargs)
+        driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
         self.emulated = driver_env.emulated
         self.num_agents = num_agents = driver_env.num_agents * num_envs
         self.agents_per_batch = driver_env.num_agents * batch_size
@@ -527,11 +407,18 @@ class Ray():
                 logging_level=logging.ERROR,
             )
 
-        self.envs = [
-            ray.remote(Serial).remote(
-                env_creator, env_args, env_kwargs, envs_per_worker
-            ) for _ in range(num_workers)
-        ]
+        self.envs = []
+        for i in range(num_workers):
+            start = i * envs_per_worker
+            end = start + envs_per_worker
+            self.envs.append(
+                ray.remote(Serial).remote(
+                    env_creators[start:end],
+                    env_args[start:end],
+                    env_kwargs[start:end],
+                    envs_per_worker
+                )
+            )
 
         self.async_handles = None
         self.flag = RESET
@@ -567,7 +454,7 @@ class Ray():
 
     def send(self, actions):
         send_precheck(self)
-        actions = actions.reshape(self.atn_batch_shape)
+        actions = np.asarray(actions).reshape(self.atn_batch_shape)
         handles = []
         for i, e in enumerate(self.prev_env_id):
             atns = actions[i]
@@ -577,8 +464,8 @@ class Ray():
 
         self.async_handles = handles
 
-    def async_reset(self, seed=None):
-        reset_precheck(self)
+    def async_reset(self, seed=42):
+        self.flag = RECV
         if seed is None:
             kwargs = {}
         else:
@@ -591,13 +478,64 @@ class Ray():
 
         self.async_handles = handles
 
-    def put(self, *args, **kwargs):
-        for e in self.envs:
-            e.put.remote(*args, **kwargs)
-
-    def get(self, *args, **kwargs):
-        return self.ray.get([e.get.remote(*args, **kwargs) for e in self.envs])
-
     def close(self):
         self.ray.get([e.close.remote() for e in self.envs])
         self.ray.shutdown()
+
+
+def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial, num_envs=1, **kwargs):
+    if num_envs < 1:
+        raise pufferlib.exceptions.APIUsageError('num_envs must be at least 1')
+    if num_envs != int(num_envs):
+        raise pufferlib.exceptions.APIUsageError('num_envs must be an integer')
+ 
+    if env_args is None:
+        env_args = []
+
+    if env_kwargs is None:
+        env_kwargs = {}
+
+    if not isinstance(env_creator_or_creators, (list, tuple)):
+        env_creators = [env_creator_or_creators] * num_envs
+        env_args = [env_args] * num_envs
+        env_kwargs = [env_kwargs] * num_envs
+
+    if len(env_creators) != num_envs:
+        raise pufferlib.exceptions.APIUsageError(
+            'env_creators must be a list of length num_envs')
+    if len(env_args) != num_envs:
+        raise pufferlib.exceptions.APIUsageError(
+            'env_args must be a list of length num_envs')
+    if len(env_kwargs) != num_envs:
+        raise pufferlib.exceptions.APIUsageError(
+            'env_kwargs must be a list of length num_envs')
+
+    for i in range(num_envs):
+        if not callable(env_creators[i]):
+            raise pufferlib.exceptions.APIUsageError(
+                'env_creators must be a list of callables')
+        if not isinstance(env_args[i], (list, tuple)):
+            raise pufferlib.exceptions.APIUsageError(
+                'env_args must be a list of lists or tuples')
+        if not isinstance(env_kwargs[i], dict):
+            raise pufferlib.exceptions.APIUsageError(
+                'env_kwargs must be a list of dictionaries')
+
+    # Keeps batch size consistent when debugging with Serial backend
+    if backend is Serial and 'batch_size' in kwargs:
+        num_envs = kwargs['batch_size']
+
+    # TODO: First step action space check
+    
+    return backend(env_creators, env_args, env_kwargs, num_envs, **kwargs)
+
+def make_seeds(seed, num_envs):
+    if isinstance(seed, int):
+        return [seed + i for i in range(num_envs)]
+
+    err = f'seed {seed} must be an integer or a list of integers'
+    if isinstance(seed, (list, tuple)):
+        if len(seed) != num_envs:
+            raise APIUsageError(err)
+
+    raise APIUsageError(err)
