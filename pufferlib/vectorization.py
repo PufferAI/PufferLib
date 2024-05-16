@@ -43,8 +43,9 @@ def vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batc
     # TODO: merge into standard vec checks?
     if num_envs < 1:
         raise pufferlib.exceptions.APIUsageError('num_envs must be at least 1')
-    if batch_size % num_workers != 0:
-        raise pufferlib.exceptions.APIUsageError('batch_size must be divisible by num_workers')
+    # TODO: test case with batch_size = 2, num_envs=6, num_workers=2
+    #if num_workers % batch_size != 0:
+    #    raise pufferlib.exceptions.APIUsageError('batch_size must be divisible by num_workers')
     if batch_size < 1:
         raise pufferlib.exceptions.APIUsageError('batch_size must be > 0')
     if batch_size > num_envs:
@@ -119,7 +120,8 @@ class Serial:
             else:
                 ob, i = env.reset(seed=hash(1000*seed + idx))
                
-            infos.append(i)
+            if i:
+                infos.append(i)
 
         buf = self.buf
         buf.rewards[:] = 0
@@ -142,7 +144,9 @@ class Serial:
             else:
                 o, r, d, t, i = env.step(atns)
 
-            self.infos.append(i)
+            if i:
+                self.infos.append(i)
+
             ptr = end
 
     def recv(self):
@@ -165,9 +169,30 @@ STEP = b"s"
 RESET = b"r"
 RESET_NONE = b"n"
 CLOSE = b"c"
+MAIN = b"m"
+
+NEUTRAL = 0
+STEP = 1
+RESET = 2
+RESET_NONE = 3
+CLOSE = 4
+MAIN = 5
+INFO = 6
 
 def _worker_process(env_creator, env_args, env_kwargs, num_envs,
-        num_workers, worker_idx, send_pipe, recv_pipe, shm):
+        num_workers, worker_idx, send_pipe, recv_pipe, shm, lock):
+
+    import os
+
+
+    #import psutil
+    #curr_process = psutil.Process()
+    #curr_process.cpu_affinity([2*(worker_idx+1)])
+
+    # nice min prioirty
+    #import os
+    #os.nice(19)
+
     envs = Serial(env_creator, env_args, env_kwargs, num_envs)
     obs_shape = envs.single_observation_space.shape
     obs_dtype = envs.single_observation_space.dtype
@@ -186,17 +211,56 @@ def _worker_process(env_creator, env_args, env_kwargs, num_envs,
     )
     envs._assign_buffers(buf)
 
+    # TODO: Figure out why not getting called
+    envs.reset()
+
+    semaphores=np.ndarray(num_workers, dtype=np.uint8, buffer=shm.semaphores)
     while True:
-        request = recv_pipe.recv_bytes()
-        if request == RESET:
-            response = envs.reset()
-        elif request == STEP:
-            response = envs.step(atn_arr)
-        elif request == CLOSE:
-            send_pipe.send(None)
+        #request = recv_pipe.recv_bytes()
+        lock.acquire()
+        sem = semaphores[worker_idx]
+        assert sem != MAIN
+        if sem == RESET:
+            _, infos = envs.reset()
+        elif sem == STEP:
+            _, _, _, _, infos, _ = envs.step(atn_arr)
+        elif sem == CLOSE:
+            print("closing worker", worker_idx)
+            #send_pipe.send(None)
             break
 
-        send_pipe.send(envs.infos)
+        if infos:
+            semaphores[worker_idx] = INFO
+            #send_pipe.send(infos)
+        else:
+            semaphores[worker_idx] = MAIN
+
+        #send_pipe.send(envs.infos)
+
+def contiguous_subset(lst, n):
+    """
+    Checks if the given list contains a contiguous subset of n integers.
+
+    Parameters:
+    lst (list of int): The list of integers to check.
+    n (int): The length of the contiguous subset to find.
+
+    Returns:
+    tuple: A tuple containing the lowest and highest elements of the contiguous subset.
+           Returns (None, None) if no such subset exists.
+    """
+    if len(lst) < n:
+        return None
+
+    # Sort the list and remove duplicates
+    sorted_lst = sorted(set(lst))
+
+    # Check for contiguous subset of length n
+    for i in range(len(sorted_lst) - n + 1):
+        if sorted_lst[i + n - 1] - sorted_lst[i] == n - 1:
+            return sorted_lst[i]
+
+    return None
 
 class Multiprocessing:
     '''Runs environments in parallel using multiprocessing
@@ -214,7 +278,6 @@ class Multiprocessing:
             num_workers = num_envs
 
         vec_prechecks(env_creator, env_args, env_kwargs, num_envs, num_workers, batch_size)
-        self.env_pool = num_envs != batch_size
         envs_per_worker = num_envs // num_workers
         self.workers_per_batch = batch_size // envs_per_worker
         self.num_workers = num_workers
@@ -243,7 +306,13 @@ class Multiprocessing:
         self.single_action_space = driver_env.single_action_space
         self.agent_ids = np.arange(num_agents).reshape(num_workers, agents_per_worker)
 
-        from multiprocessing import RawArray
+        # Set process affinity
+        #import psutil
+        #curr_process = psutil.Process()
+        #curr_process.cpu_affinity([0])
+
+
+        from multiprocessing import RawArray, Semaphore, Lock
         self.shm = namespace(
             observations=RawArray(obs_ctype, num_agents * prod(obs_shape)),
             actions=RawArray(atn_ctype, num_agents * prod(atn_shape)),
@@ -251,7 +320,12 @@ class Multiprocessing:
             terminals=RawArray('b', num_agents),
             truncateds=RawArray('b', num_agents),
             masks=RawArray('b', num_agents),
+            semaphores=RawArray('c', num_workers),
         )
+        self.semaphores = [Lock() for _ in range(num_workers)]
+        for e in self.semaphores:
+            e.acquire()
+
         shape = (num_workers, agents_per_worker)
         self.obs_batch_shape = (self.agents_per_batch, *obs_shape)
         self.atn_batch_shape = (self.workers_per_batch, agents_per_worker, *atn_shape)
@@ -262,9 +336,10 @@ class Multiprocessing:
             terminals=np.ndarray(shape, dtype=bool, buffer=self.shm.terminals),
             truncations=np.ndarray(shape, dtype=bool, buffer=self.shm.truncateds),
             masks=np.ndarray(shape, dtype=bool, buffer=self.shm.masks),
+            semaphores=np.ndarray(num_workers, dtype=np.uint8, buffer=self.shm.semaphores),
         )
 
-        from multiprocessing import Pipe, Process, set_start_method
+        from multiprocessing import Pipe, Process
         self.send_pipes, w_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
         w_send_pipes, self.recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
         self.recv_pipe_dict = {p: i for i, p in enumerate(self.recv_pipes)}
@@ -274,79 +349,76 @@ class Multiprocessing:
             p = Process(
                 target=_worker_process,
                 args=(env_creator, env_args, env_kwargs, envs_per_worker,
-                    num_workers, i, w_send_pipes[i], w_recv_pipes[i], self.shm)
+                    num_workers, i, w_send_pipes[i], w_recv_pipes[i],
+                    self.shm, self.semaphores[i])
             )
             p.start()
             self.processes.append(p)
 
-        import selectors
-        self.sel = selectors.DefaultSelector()
-        for pipe in self.recv_pipes:
-            self.sel.register(pipe, selectors.EVENT_READ)
-
         self.flag = RESET
 
+    @profile
     def recv(self):
         recv_precheck(self)
-        worker_ids = []
-        infos = []
-        if self.env_pool:
-            while len(worker_ids) < self.workers_per_batch:
-                for key, _ in self.sel.select(timeout=None):
-                    response_pipe = key.fileobj
-                    info = response_pipe.recv()
-                    infos.append(info)
-                    env_id = self.recv_pipe_dict[response_pipe]
-                    worker_ids.append(env_id)
-
-                    if len(worker_ids) == self.workers_per_batch:                    
-                        break
-
-            if self.workers_per_batch == 1:
-                idxs = worker_ids[0]
+        start = contiguous_subset(self.ready_workers, self.workers_per_batch)
+        while start is None:
+            worker = self.waiting_workers.pop(0)
+            sem = self.buf.semaphores[worker]
+            if sem >= MAIN:
+                self.ready_workers.append(worker)
             else:
-                idxs = np.array(worker_ids)
-     
-        else:
-            for env_id in range(self.num_workers):
-                response_pipe = self.recv_pipes[env_id]
-                info = response_pipe.recv()
-                infos.append(info)
+                self.waiting_workers.append(worker)
 
-            idxs = ()
+            #if sem == INFO:
+            #    self.infos[worker] = self.recv_pipes[worker].recv()
 
+            start = contiguous_subset(self.ready_workers, self.workers_per_batch)
+            self.start = start
 
         buf = self.buf
-        o = buf.observations[idxs].reshape(self.obs_batch_shape)
-        r = buf.rewards[idxs].ravel()
-        d = buf.terminals[idxs].ravel()
-        t = buf.truncations[idxs].ravel()
-        infos = [i for ii in infos for i in ii]
-        agent_ids = self.agent_ids[idxs].ravel()
-        m = buf.masks[idxs].ravel()
+        end = start + self.workers_per_batch
+        self.ready_workers = [e for e in self.ready_workers
+            if e not in range(start, end)]
 
-        self.prev_env_id = idxs
+        o = buf.observations[start:end].reshape(self.obs_batch_shape)
+        r = buf.rewards[start:end].ravel()
+        d = buf.terminals[start:end].ravel()
+        t = buf.truncations[start:end].ravel()
+
+        #infos = [i for ii in self.infos[start:end] for i in ii]
+        #self.infos[start:end] = [[] for _ in range(self.workers_per_batch)]
+        infos = []
+
+        agent_ids = self.agent_ids[start:end].ravel()
+        m = buf.masks[start:end].ravel()
+
         return o, r, d, t, infos, agent_ids, m
 
+    @profile
     def send(self, actions):
         send_precheck(self)
         actions = actions.reshape(self.atn_batch_shape)
         
-        if self.env_pool:
-            self.actions[self.prev_env_id] = actions
-            idxs = self.prev_env_id
-        else:
-            self.actions[:] = actions
-            idxs = range(self.num_workers)
-
-        for i in idxs:
-            self.send_pipes[i].send_bytes(STEP)
+        start = self.start
+        end = start + self.workers_per_batch
+        self.actions[start:end] = actions
+        self.buf.semaphores[start:end] = STEP
+        self.waiting_workers.extend(range(start, end))
+        for i in range(start, end):
+            self.semaphores[i].release()
+        #for i in range(start, end):
+        #    self.send_pipes[i].send_bytes(STEP)
 
     def async_reset(self, seed=None):
         self.prev_env_id = []
         reset_precheck(self)
-        for pipe in self.send_pipes:
-            pipe.send_bytes(RESET)
+        self.buf.semaphores[:] = RESET
+        self.ready_workers = []
+        self.waiting_workers = list(range(self.num_workers))
+        self.infos = [[] for _ in range(self.num_workers)]
+
+        for i in range(self.num_workers):
+            self.semaphores[i].release()
 
         return
         # TODO: Seed
@@ -384,11 +456,16 @@ class Multiprocessing:
         return recvs
 
     def close(self):
+        self.buf.semaphores[:] = CLOSE
+        for p in self.processes:
+            p.terminate()
+        '''
         for pipe in self.send_pipes:
             pipe.send_bytes(CLOSE)
 
         for pipe in self.recv_pipes:
             pipe.recv()
+        '''
 
 class Ray():
     '''Runs environments in parallel on multiple processes using Ray
