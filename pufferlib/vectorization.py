@@ -140,7 +140,7 @@ class Serial:
             env.close()
 
 def _worker_process(env_creators, env_args, env_kwargs, num_envs,
-        num_workers, worker_idx, send_pipe, recv_pipe, shm, lock):
+        num_workers, worker_idx, send_pipe, recv_pipe, shm):
     envs = Serial(env_creators, env_args, env_kwargs, num_envs)
     obs_shape = envs.single_observation_space.shape
     obs_dtype = envs.single_observation_space.dtype
@@ -162,8 +162,6 @@ def _worker_process(env_creators, env_args, env_kwargs, num_envs,
     semaphores=np.ndarray(num_workers, dtype=np.uint8, buffer=shm.semaphores)
     start = time.time()
     while True:
-        #lock.acquire()
-
         sem = semaphores[worker_idx]
         if sem >= MAIN:
             if time.time() - start > 0.1:
@@ -245,7 +243,7 @@ class Multiprocessing:
         self.single_action_space = driver_env.single_action_space
         self.agent_ids = np.arange(num_agents).reshape(num_workers, agents_per_worker)
 
-        from multiprocessing import RawArray, Semaphore, Lock
+        from multiprocessing import RawArray
         self.shm = namespace(
             observations=RawArray(obs_ctype, num_agents * prod(obs_shape)),
             actions=RawArray(atn_ctype, num_agents * prod(atn_shape)),
@@ -255,10 +253,6 @@ class Multiprocessing:
             masks=RawArray('b', num_agents),
             semaphores=RawArray('c', num_workers),
         )
-        self.semaphores = [Lock() for _ in range(num_workers)]
-        #for e in self.semaphores:
-        #    e.acquire()
-
         shape = (num_workers, agents_per_worker)
         self.obs_batch_shape = (self.agents_per_batch, *obs_shape)
         self.atn_batch_shape = (self.workers_per_batch, agents_per_worker, *atn_shape)
@@ -287,7 +281,7 @@ class Multiprocessing:
                 args=(env_creators[start:end], env_args[start:end],
                     env_kwargs[start:end], envs_per_worker,
                     num_workers, i, w_send_pipes[i], w_recv_pipes[i],
-                    self.shm, self.semaphores[i])
+                    self.shm)
             )
             p.start()
             self.processes.append(p)
@@ -341,8 +335,6 @@ class Multiprocessing:
         self.actions[start:end] = actions
         self.buf.semaphores[start:end] = STEP
         self.waiting_workers.extend(range(start, end))
-        #for i in range(start, end):
-        #    self.semaphores[i].release()
 
     def async_reset(self, seed=42):
         seed = make_seeds(seed, self.num_workers)
