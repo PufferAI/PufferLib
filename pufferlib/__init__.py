@@ -25,3 +25,4 @@ sys.stderr = original_stderr
 
 from pufferlib.namespace import namespace, dataclass
 from pufferlib import frameworks, environments
+from pufferlib.environment import PufferEnv

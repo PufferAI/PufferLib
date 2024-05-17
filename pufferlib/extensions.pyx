@@ -1,78 +1,49 @@
-#cython: boundscheck=False
-#cython: wraparound=False
-#cython: nonecheck=False
+# distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
+# cython: language_level=3
+# cython: boundscheck=False
+# cython: initializedcheck=False
+# cython: wraparound=False
+# cython: nonecheck=False
 
-DICT = 0
-LIST = 1
-TUPLE = 2
-VALUE = 4
+'''Cythonized implementations of PufferLib's emulation functions
+
+emulate is about 2x faster than Python. Nativize is only slightly faster.
+'''
+
+import numpy as np
+cimport numpy as cnp
+
+from pufferlib.spaces import Tuple, Dict, Discrete
 
 
-cdef void flatten_helper(object d, list flat_data):
-    cdef dict d_dict
-    cdef list d_list
-    cdef tuple d_tuple
+def emulate(cnp.ndarray arr, object sample):
+    cdef str k
+    cdef int i
 
-    if isinstance(d, dict):
-        d_dict = <dict> d
-        # TODO: This sort is here to maintain canonical order
-        # for envs that return in variable order, but it is slow
-        # Are there any other options?
-        # NOTE: There is a corresponding sort in flatten_structure
-        for key, value in sorted(d_dict.items()):
-            flatten_helper(value, flat_data)
-    elif isinstance(d, list):
-        d_list = <list> d
-        for item in d_list:
-            flatten_helper(item, flat_data)
-    elif isinstance(d, tuple):
-        d_tuple = <tuple> d
-        for item in d_tuple:
-            flatten_helper(item, flat_data)
+    if isinstance(sample, dict):
+        for k, v in sample.items():
+            emulate(arr[k], v)
+    elif isinstance(sample, tuple):
+        for i, v in enumerate(sample):
+            emulate(arr[f'f{i}'], v)
     else:
-        flat_data.append(d)
+        arr[()] = sample
 
-def flatten(data):
-    cdef list flat_data = []
-    flatten_helper(data, flat_data)
-    return flat_data
+cdef _nativize(cnp.ndarray sample, object space):
+    cdef str k
+    cdef int i
 
-cdef unflatten_helper(list flat_data, list structure, int struct_idx, int data_idx):
-    cdef int n, token
-    cdef object key, value
-    cdef dict result_dict
-    cdef list result_list
-
-    token = <int> structure[struct_idx]
-    struct_idx += 1
-
-    if token == DICT:
-        n = <int> structure[struct_idx]
-        struct_idx += 1
-        result_dict = {}
-        for _ in range(n):
-            key = structure[struct_idx]
-            result_dict[key], struct_idx, data_idx = unflatten_helper(
-                flat_data, structure, struct_idx + 1, data_idx)
-        return result_dict, struct_idx, data_idx
-    elif token == LIST:
-        n = <int> structure[struct_idx]
-        struct_idx += 1
-        result_list = [None] * n
-        for i in range(n):
-            result_list[i], struct_idx, data_idx = unflatten_helper(
-                flat_data, structure, struct_idx, data_idx)
-        return result_list, struct_idx, data_idx
-    elif token == TUPLE:
-        n = <int> structure[struct_idx]
-        struct_idx += 1
-        result_list = [None] * n
-        for i in range(n):
-            result_list[i], struct_idx, data_idx = unflatten_helper(
-                flat_data, structure, struct_idx, data_idx)
-        return tuple(result_list), struct_idx, data_idx
+    if isinstance(space, Discrete):
+        return sample.item()
+    elif isinstance(space, Tuple):
+        return tuple(_nativize(sample[f'f{i}'], elem)
+            for i, elem in enumerate(space))
+    elif isinstance(space, Dict):
+        return {k: _nativize(sample[k], value)
+            for k, value in space.items()}
     else:
-        return flat_data[data_idx], struct_idx, data_idx + 1
+        return sample.item()
 
-def unflatten(list flat_data, list structure):
-    return unflatten_helper(flat_data, structure, 0, 0)[0]
+def nativize(sample, object sample_space, cnp.dtype emulated_dtype):
+    sample = np.asarray(sample).view(emulated_dtype)
+    return _nativize(sample, sample_space)

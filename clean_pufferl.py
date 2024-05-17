@@ -32,7 +32,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None,
     obs_shape = vecenv.single_observation_space.shape
     obs_dtype = vecenv.single_observation_space.dtype
     atn_shape = vecenv.single_action_space.shape
-    total_agents = vecenv.num_envs * vecenv.agents_per_env
+    total_agents = vecenv.num_agents
 
     lstm = policy.lstm if hasattr(policy, 'lstm') else None
     experience = Experience(config.batch_size, vecenv.agents_per_batch, config.bptt_horizon,
@@ -127,6 +127,7 @@ def evaluate(data):
                     infos[k].append(v)
 
             '''
+            # pufferlib.utils.unroll...
             for policy_name, policy_i in i.items():
                 for agent_i in policy_i:
                     for name, dat in unroll_nested_dict(agent_i):
@@ -570,17 +571,6 @@ def seed_everything(seed, torch_deterministic):
     if seed is not None:
         torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = torch_deterministic
-
-def unroll_nested_dict(d):
-    if not isinstance(d, dict):
-        return d
-
-    for k, v in d.items():
-        if isinstance(v, dict):
-            for k2, v2 in unroll_nested_dict(v):
-                yield f"{k}/{k2}", v2
-        else:
-            yield k, v
 
 import psutil
 import GPUtil

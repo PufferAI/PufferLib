@@ -7,6 +7,7 @@ import functools
 import pufferlib
 import pufferlib.emulation
 import pufferlib.environments
+import pufferlib.postprocess
 
 
 def env_creator(name='NetHackScore-v0'):
@@ -18,6 +19,7 @@ def make(name):
     env = gym.make(name)
     env = shimmy.GymV21CompatibilityV0(env=env)
     env = NethackWrapper(env)
+    env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 class NethackWrapper:

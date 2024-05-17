@@ -1,299 +1,182 @@
 from pdb import set_trace as T
 
 import numpy as np
-import gymnasium
-from itertools import chain
-import psutil
 import time
-import msgpack
-
 
 from pufferlib import namespace
+from pufferlib.environment import PufferEnv
 from pufferlib.emulation import GymnasiumPufferEnv, PettingZooPufferEnv
-from pufferlib.multi_env import create_precheck, GymnasiumMultiEnv, PettingZooMultiEnv
 from pufferlib.exceptions import APIUsageError
-import pufferlib.spaces
 
-
+NEUTRAL = 0
 RESET = 0
-SEND = 1
-RECV = 2
+STEP = 1
+SEND = 2
+RECV = 3
+CLOSE = 4
+MAIN = 5
+INFO = 6
 
-space_error_msg = 'env {env} must be an instance of GymnasiumPufferEnv or PettingZooPufferEnv'
+def recv_precheck(vecenv):
+    if vecenv.flag != RECV:
+        raise APIUsageError('Call reset before stepping')
 
+    vecenv.flag = SEND
 
-def calc_scale_params(num_envs, envs_per_batch, envs_per_worker, agents_per_env):
-    '''These calcs are simple but easy to mess up and hard to catch downstream.
-    We do them all at once here to avoid that'''
+def send_precheck(vecenv):
+    if vecenv.flag != SEND:
+        raise APIUsageError('Call (async) reset + recv before sending')
 
-    if num_envs % envs_per_worker != 0:
-        raise APIUsageError('num_envs must be divisible by envs_per_worker')
-    
-    num_workers = num_envs // envs_per_worker
-    envs_per_batch = num_envs if envs_per_batch is None else envs_per_batch
+    vecenv.flag = RECV
 
-    if envs_per_batch > num_envs:
-        raise APIUsageError('envs_per_batch must be <= num_envs')
-    if envs_per_batch % envs_per_worker != 0:
-        raise APIUsageError('envs_per_batch must be divisible by envs_per_worker')
-    if envs_per_batch < 1:
-        raise APIUsageError('envs_per_batch must be > 0')
+def reset(vecenv, seed=42):
+    vecenv.async_reset(seed)
+    obs, rewards, terminals, truncations, infos, env_ids, masks = vecenv.recv()
+    return obs, infos
 
-    workers_per_batch = envs_per_batch // envs_per_worker
-    assert workers_per_batch <= num_workers
-
-    agents_per_batch = envs_per_batch * agents_per_env
-    agents_per_worker = envs_per_worker * agents_per_env
+def step(vecenv, actions):
+    actions = np.asarray(actions)
+    vecenv.send(actions)
+    obs, rewards, terminals, truncations, infos, env_ids, masks = vecenv.recv()
+    return obs, rewards, terminals, truncations, infos, env_ids
  
-    return num_workers, workers_per_batch, envs_per_batch, agents_per_batch, agents_per_worker
-
-def setup(env_creator, env_args, env_kwargs):
-    env_args, env_kwargs = create_precheck(env_creator, env_args, env_kwargs)
-    driver_env = env_creator(*env_args, **env_kwargs)
-
-    if isinstance(driver_env, GymnasiumPufferEnv):
-        multi_env_cls = GymnasiumMultiEnv 
-        env_agents = 1
-        is_multiagent = False
-    elif isinstance(driver_env, PettingZooPufferEnv):
-        multi_env_cls = PettingZooMultiEnv
-        env_agents = len(driver_env.possible_agents)
-        is_multiagent = True
-    else:
-        raise TypeError(
-            'env_creator must return an instance '
-            'of GymnasiumPufferEnv or PettingZooPufferEnv'
-        )
-
-    obs_space = _single_observation_space(driver_env)
-    return driver_env, multi_env_cls, env_agents
-
-def _single_observation_space(env):
-    if isinstance(env, GymnasiumPufferEnv):
-        return env.observation_space
-    elif isinstance(env, PettingZooPufferEnv):
-        return env.single_observation_space
-    else:
-        raise TypeError(space_error_msg.format(env=env))
-
-def single_observation_space(state):
-    return _single_observation_space(state.driver_env)
-
-def _single_action_space(env):
-    if isinstance(env, GymnasiumPufferEnv):
-        return env.action_space
-    elif isinstance(env, PettingZooPufferEnv):
-        return env.single_action_space
-    else:
-        raise TypeError(space_error_msg.format(env=env))
-
-def single_action_space(state):
-    return _single_action_space(state.driver_env)
-
-def structured_observation_space(state):
-    return state.driver_env.structured_observation_space
-
-def flat_observation_space(state):
-    return state.driver_env.flat_observation_space
-
-def unpack_batched_obs(state, obs):
-    return state.driver_env.unpack_batched_obs(obs)
-
-def recv_precheck(state):
-    assert state.flag == RECV, 'Call reset before stepping'
-    state.flag = SEND
-
-def send_precheck(state):
-    assert state.flag == SEND, 'Call reset + recv before send'
-    state.flag = RECV
-
-def reset_precheck(state):
-    assert state.flag == RESET, 'Call reset only once on initialization'
-    state.flag = RECV
-
-def reset(self, seed=None):
-    self.async_reset(seed)
-    data = self.recv()
-    return data[0], data[4]
-
-def step(self, actions):
-    self.send(actions)
-    return self.recv()[:-1]
-
-def aggregate_recvs(state, recvs):
-    obs, rewards, dones, truncateds, infos, env_ids, mask = list(zip(*recvs))
-
-    assert all(state.workers_per_batch == len(e) for e in
-        (obs, rewards, dones, truncateds, infos, env_ids))
-
-    if state.mask_agents:
-        assert state.workers_per_batch == len(mask)
-
-    obs = np.concatenate(obs)
-    rewards = np.concatenate(rewards)
-    dones = np.concatenate(dones)
-    truncateds = np.concatenate(truncateds)
-    infos = [i for ii in infos for i in ii]
-   
-    obs_space = state.driver_env.env.observation_space
-    if isinstance(obs_space, pufferlib.spaces.Box):
-        obs = obs.reshape(obs.shape[0], *obs_space.shape)
-
-    env_ids = np.concatenate([np.arange( # Per-agent env indexing
-        i*state.agents_per_worker, (i+1)*state.agents_per_worker) for i in env_ids])
-
-    assert all(state.agents_per_batch == len(e) for e in
-        (obs, rewards, dones, truncateds, env_ids))
-    assert len(infos) == state.envs_per_batch
-
-    if state.mask_agents:
-        mask = np.concatenate(mask)
-        assert state.agents_per_batch == len(mask)
-        return obs, rewards, dones, truncateds, infos, env_ids, mask
-
-    return obs, rewards, dones, truncateds, infos, env_ids
-
-def split_actions(state, actions, env_id=None):
-    assert isinstance(actions, (list, np.ndarray))
-    if type(actions) == list:
-        actions = np.array(actions)
-
-    assert len(actions) == state.agents_per_batch
-    return np.array_split(actions, state.workers_per_batch)
-
 class Serial:
-    '''Runs environments in serial on the main process
-    
-    Use this vectorization module for debugging environments
-    '''
     reset = reset
     step = step
-    single_observation_space = property(single_observation_space)
-    single_action_space = property(single_action_space)
-    structured_observation_space = property(structured_observation_space)
-    flat_observation_space = property(flat_observation_space)
-    unpack_batched_obs = unpack_batched_obs
-    def __init__(self,
-            env_creator: callable = None,
-            env_args: list = [],
-            env_kwargs: dict = {},
-            num_envs: int = 1,
-            envs_per_worker: int = 1,
-            envs_per_batch: int = None,
-            env_pool: bool = False,
-            mask_agents: bool = False,
-            ) -> None:
-        self.driver_env, self.multi_env_cls, self.agents_per_env = setup(
-            env_creator, env_args, env_kwargs)
+ 
+    def __init__(self, env_creators, env_args, env_kwargs, num_envs, **kwargs):
+        self.envs = [creator(*args, **kwargs) for (creator, args, kwargs)
+            in zip(env_creators, env_args, env_kwargs)]
 
-        self.num_envs = num_envs
-        self.num_workers, self.workers_per_batch, self.envs_per_batch, self.agents_per_batch, self.agents_per_worker = calc_scale_params(
-            num_envs, envs_per_batch, envs_per_worker, self.agents_per_env)
-        self.envs_per_worker = envs_per_worker
-        self.mask_agents = mask_agents
+        self.driver_env = driver = self.envs[0]
+        check_envs(self.envs, self.driver_env)
+        self.single_observation_space = driver.single_observation_space
+        self.single_action_space = driver.single_action_space
+        self.agents_per_env = [env.num_agents for env in self.envs]
+        self.agents_per_batch = sum(self.agents_per_env)
+        self.num_agents = sum(self.agents_per_env)
+        self.agent_ids = np.arange(self.num_agents)
+        self.buf = None
 
-        self.multi_envs = [
-            self.multi_env_cls(
-                env_creator, env_args, env_kwargs, envs_per_worker,
-            ) for _ in range(self.num_workers)
-        ]
+    def _assign_buffers(self, buf):
+        ptr = 0
+        self.buf = buf
+        for i, env in enumerate(self.envs):
+            end = ptr + self.agents_per_env[i]
+            env.buf = namespace(
+                observations=buf.observations[ptr:end],
+                rewards=buf.rewards[ptr:end],
+                terminals=buf.terminals[ptr:end],
+                truncations=buf.truncations[ptr:end],
+                masks=buf.masks[ptr:end]
+            )
+            ptr = end
 
-        self.flag = RESET
+    def async_reset(self, seed=42):
+        seed = make_seeds(seed, len(self.envs))
 
-    def recv(self):
-        recv_precheck(self)
-        recvs = [(o, r, d, t, i, env_id, m) for (o, r, d, t, i), env_id, m
-            in zip(self.data, range(self.workers_per_batch), self.mask)]
-        return aggregate_recvs(self, recvs)
+        if self.buf is None:
+            self.buf = namespace(
+                observations = np.empty(
+                    (self.agents_per_batch, *self.single_observation_space.shape),
+                    dtype=self.single_observation_space.dtype),
+                rewards = np.empty(self.agents_per_batch, dtype=np.float32),
+                terminals = np.empty(self.agents_per_batch, dtype=bool),
+                truncations = np.empty(self.agents_per_batch, dtype=bool),
+                masks = np.empty(self.agents_per_batch, dtype=bool),
+            )
+            self._assign_buffers(self.buf)
+
+        infos = []
+        for env, s in zip(self.envs, seed):
+            ob, i = env.reset(seed=s)
+               
+            if i:
+                infos.append(i)
+
+        buf = self.buf
+        buf.rewards[:] = 0
+        buf.terminals[:] = False
+        buf.truncations[:] = False
+        buf.masks[:] = 1
+        self.infos = infos
 
     def send(self, actions):
-        send_precheck(self)
-        actions = split_actions(self, actions)
-        self.data = [e.step(a) for e, a in zip(self.multi_envs, actions)]
-        self.mask = [e.preallocated_masks for e in self.multi_envs]
+        actions = np.asarray(actions)
+        rewards, dones, truncateds, self.infos = [], [], [], []
+        ptr = 0
+        for idx, env in enumerate(self.envs):
+            end = ptr + self.agents_per_env[idx]
+            atns = actions[ptr:end]
+            if env.done:
+                o, i = env.reset()
+                r = 0
+                d = False
+                t = False
+            else:
+                o, r, d, t, i = env.step(atns)
 
-    def async_reset(self, seed=None):
-        reset_precheck(self)
-        if seed is None:
-            self.data = [e.reset() for e in self.multi_envs]
-        else:
-            self.data = [e.reset(seed=seed+idx) for idx, e in enumerate(self.multi_envs)]
-        self.mask = [e.preallocated_masks for e in self.multi_envs]
+            if i:
+                self.infos.append(i)
 
-    def put(self, *args, **kwargs):
-        for e in self.multi_envs:
-            e.put(*args, **kwargs)
+            ptr = end
 
-    def get(self, *args, **kwargs):
-        return [e.get(*args, **kwargs) for e in self.multi_envs]
+    def recv(self):
+        buf = self.buf
+        return (buf.observations, buf.rewards, buf.terminals, buf.truncations,
+            self.infos, self.agent_ids, buf.masks)
 
     def close(self):
-        for e in self.multi_envs:
-            e.close()
+        for env in self.envs:
+            env.close()
 
-def _unpack_shared_mem(shared_mem, observation_dtype):
-    obs_mem, rewards_mem, terminals_mem, truncated_mem, mask_mem = shared_mem
-    obs_arr = np.frombuffer(obs_mem, dtype=observation_dtype)
-    rewards_arr = np.frombuffer(rewards_mem, dtype=np.float32)
-    terminals_arr = np.frombuffer(terminals_mem, dtype=bool)
-    truncated_arr = np.frombuffer(truncated_mem, dtype=bool)
-    mask_arr = np.frombuffer(mask_mem, dtype=bool)
-    return obs_arr, rewards_arr, terminals_arr, truncated_arr, mask_arr
+def _worker_process(env_creators, env_args, env_kwargs, num_envs,
+        num_workers, worker_idx, send_pipe, recv_pipe, shm):
+    envs = Serial(env_creators, env_args, env_kwargs, num_envs)
+    obs_shape = envs.single_observation_space.shape
+    obs_dtype = envs.single_observation_space.dtype
+    atn_shape = envs.single_action_space.shape
+    atn_dtype = envs.single_action_space.dtype
 
-STEP = b"s"
-RESET = b"r"
-RESET_NONE = b"n"
-CLOSE = b"c"
+    # Environments read and write directly to shared memory
+    shape = (num_workers, envs.num_agents)
+    atn_arr = np.ndarray((*shape, *atn_shape),
+        dtype=atn_dtype, buffer=shm.actions)[worker_idx]
+    buf = namespace(
+        observations=np.ndarray((*shape, *obs_shape),
+            dtype=obs_dtype, buffer=shm.observations)[worker_idx],
+        rewards=np.ndarray(shape, dtype=np.float32, buffer=shm.rewards)[worker_idx],
+        terminals=np.ndarray(shape, dtype=bool, buffer=shm.terminals)[worker_idx],
+        truncations=np.ndarray(shape, dtype=bool, buffer=shm.truncateds)[worker_idx],
+        masks=np.ndarray(shape, dtype=bool, buffer=shm.masks)[worker_idx],
+    )
+    envs._assign_buffers(buf)
 
-def _worker_process(multi_env_cls, env_creator, env_args, env_kwargs,
-        num_envs, agents_per_env, worker_idx, obs_shape, obs_mem, atn_shape, atn_mem, rewards_mem,
-        terminals_mem, truncated_mem, mask_mem, observation_dtype, action_dtype, send_pipe, recv_pipe):
-    
-    # I don't know if this helps. Sometimes it does, sometimes not.
-    # Need to run more comprehensive tests
-    #curr_process = psutil.Process()
-    #curr_process.cpu_affinity([worker_idx])
-
-    envs = multi_env_cls(env_creator, env_args, env_kwargs, n=num_envs)
-
-    num_agents = num_envs * agents_per_env
-    obs_size = int(np.prod(obs_shape))
-    obs_n = num_agents * obs_size
-
-    atn_size = int(np.prod(atn_shape))
-    atn_n = num_agents * atn_size
-
-    s = worker_idx * num_agents
-    e = (worker_idx + 1) * num_agents 
-    s_obs = worker_idx * num_agents * obs_size
-    e_obs = (worker_idx + 1) * num_agents * obs_size
-    s_atn = worker_idx * num_agents * atn_size
-    e_atn = (worker_idx + 1) * num_agents * atn_size
-
-    obs_arr = np.frombuffer(obs_mem, dtype=observation_dtype)[s_obs:e_obs].reshape(num_agents, *obs_shape)
-    atn_arr = np.frombuffer(atn_mem, dtype=action_dtype)[s_atn:e_atn]
-    rewards_arr = np.frombuffer(rewards_mem, dtype=np.float32)[s:e]
-    terminals_arr = np.frombuffer(terminals_mem, dtype=bool)[s:e]
-    truncated_arr = np.frombuffer(truncated_mem, dtype=bool)[s:e]
-    mask_arr = np.frombuffer(mask_mem, dtype=bool)[s:e]
-
+    semaphores=np.ndarray(num_workers, dtype=np.uint8, buffer=shm.semaphores)
+    start = time.time()
     while True:
-        request = recv_pipe.recv_bytes()
-        if request == RESET:
-            response = envs.reset()
-        elif request == STEP:
-            response = envs.step(atn_arr)
+        sem = semaphores[worker_idx]
+        if sem >= MAIN:
+            if time.time() - start > 0.1:
+                time.sleep(0.01)
+            continue
 
-        obs, reward, done, truncated, info = response
+        start = time.time()
+        if sem == RESET:
+            seeds = recv_pipe.recv()
+            _, infos = envs.reset(seed=seeds)
+        elif sem == STEP:
+            _, _, _, _, infos, _ = envs.step(atn_arr)
+        elif sem == CLOSE:
+            print("closing worker", worker_idx)
+            send_pipe.send(None)
+            break
 
-        # TESTED: There is no overhead associated with 4 assignments to shared memory
-        # vs. 4 assigns to an intermediate numpy array and then 1 assign to shared memory
-        obs_arr[:] = obs
-        rewards_arr[:] = reward
-        terminals_arr[:] = done
-        truncated_arr[:] = truncated
-        mask_arr[:] = envs.preallocated_masks
-        send_pipe.send(info)
+        if infos:
+            semaphores[worker_idx] = INFO
+            send_pipe.send(infos)
+        else:
+            semaphores[worker_idx] = MAIN
 
 class Multiprocessing:
     '''Runs environments in parallel using multiprocessing
@@ -302,197 +185,196 @@ class Multiprocessing:
     '''
     reset = reset
     step = step
-    single_observation_space = property(single_observation_space)
-    single_action_space = property(single_action_space)
-    structured_observation_space = property(structured_observation_space)
-    flat_observation_space = property(flat_observation_space)
-    unpack_batched_obs = unpack_batched_obs
+    def __init__(self, env_creators, env_args, env_kwargs,
+            num_envs, num_workers=None, batch_size=None, zero_copy=True, **kwargs):
+        self.envs = [creator(*args, **kwargs) for (creator, args, kwargs)
+            in zip(env_creators, env_args, env_kwargs)]
+        if batch_size is None:
+            batch_size = num_envs
+        if num_workers is None:
+            num_workers = num_envs
+        if zero_copy and num_envs % batch_size != 0:
+            raise APIUsageError(
+                'zero_copy: num_envs must be divisible by batch_size')
 
-    def __init__(self,
-            env_creator: callable = None,
-            env_args: list = [],
-            env_kwargs: dict = {},
-            num_envs: int = 1,
-            envs_per_worker: int = 1,
-            envs_per_batch: int = None,
-            env_pool: bool = False,
-            mask_agents: bool = False,
-            ) -> None:
-        driver_env, multi_env_cls, agents_per_env = setup(
-            env_creator, env_args, env_kwargs)
-        num_workers, workers_per_batch, envs_per_batch, agents_per_batch, agents_per_worker = calc_scale_params(
-            num_envs, envs_per_batch, envs_per_worker, agents_per_env)
+        self.num_envs = num_envs
+        envs_per_worker = num_envs // num_workers
+        self.envs_per_worker = envs_per_worker
+        self.workers_per_batch = batch_size // envs_per_worker
+        self.num_workers = num_workers
 
-        agents_per_worker = agents_per_env * envs_per_worker
-        observation_shape = _single_observation_space(driver_env).shape
-        observation_size = int(np.prod(observation_shape))
-        observation_dtype = _single_observation_space(driver_env).dtype
-        action_shape = _single_action_space(driver_env).shape
-        action_size = int(np.prod(action_shape))
-        action_dtype = _single_action_space(driver_env).dtype
+        # I really didn't want to need a driver process... with mp.shared_memory
+        # we can fetch this data from the worker processes and ever perform
+        # additional space checks. Unfortunately, SharedMemory has a janky integration
+        # with the resource tracker that spams warnings and does not work with
+        # forked processes. So for now, RawArray is much more reliable.
+        # You can't send a RawArray through a pipe.
+        driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
+        self.emulated = driver_env.emulated
+        self.num_agents = num_agents = driver_env.num_agents * num_envs
+        self.agents_per_batch = driver_env.num_agents * batch_size
+        agents_per_worker = driver_env.num_agents * envs_per_worker
+        obs_space = driver_env.single_observation_space
+        obs_shape = obs_space.shape
+        obs_dtype = obs_space.dtype
+        obs_ctype = np.ctypeslib.as_ctypes_type(obs_dtype)
+        atn_space = driver_env.single_action_space
+        atn_shape = atn_space.shape
+        atn_dtype = atn_space.dtype
+        atn_ctype = np.ctypeslib.as_ctypes_type(atn_dtype)
 
-        # Shared memory for obs, rewards, terminals, truncateds
-        from multiprocessing import Process, Manager, Pipe, Array
-        obs_mem = Array(np.ctypeslib.as_ctypes_type(observation_dtype),
-                num_workers*agents_per_worker*observation_size, lock=False)
-        atn_mem = Array(np.ctypeslib.as_ctypes_type(action_dtype),
-                num_workers*agents_per_worker, lock=False)
-        rewards_mem = Array('f', num_workers*agents_per_worker, lock=False)
-        terminals_mem = Array('b', num_workers*agents_per_worker, lock=False)
-        truncated_mem = Array('b', num_workers*agents_per_worker, lock=False)
-        mask_mem = Array('b', num_workers*agents_per_worker, lock=False)
+        self.single_observation_space = driver_env.single_observation_space
+        self.single_action_space = driver_env.single_action_space
+        self.agent_ids = np.arange(num_agents).reshape(num_workers, agents_per_worker)
 
-        obs_arr = np.frombuffer(obs_mem, dtype=observation_dtype).reshape(num_workers*agents_per_worker, *observation_shape)
-        atn_arr = np.frombuffer(atn_mem, dtype=action_dtype).reshape(num_workers*agents_per_worker, *action_shape)
-        rewards_arr = np.frombuffer(rewards_mem, dtype=np.float32)
-        terminals_arr = np.frombuffer(terminals_mem, dtype=bool)
-        truncated_arr = np.frombuffer(truncated_mem, dtype=bool)
-        mask_arr = np.frombuffer(mask_mem, dtype=bool)
+        from multiprocessing import RawArray
+        self.shm = namespace(
+            observations=RawArray(obs_ctype, num_agents * int(np.prod(obs_shape))),
+            actions=RawArray(atn_ctype, num_agents * int(np.prod(atn_shape))),
+            rewards=RawArray('f', num_agents),
+            terminals=RawArray('b', num_agents),
+            truncateds=RawArray('b', num_agents),
+            masks=RawArray('b', num_agents),
+            semaphores=RawArray('c', num_workers),
+        )
+        shape = (num_workers, agents_per_worker)
+        self.obs_batch_shape = (self.agents_per_batch, *obs_shape)
+        self.atn_batch_shape = (self.workers_per_batch, agents_per_worker, *atn_shape)
+        self.actions = np.ndarray((*shape, *atn_shape),
+            dtype=atn_dtype, buffer=self.shm.actions)
+        self.buf = namespace(
+            observations=np.ndarray((*shape, *obs_shape),
+                dtype=obs_dtype, buffer=self.shm.observations),
+            rewards=np.ndarray(shape, dtype=np.float32, buffer=self.shm.rewards),
+            terminals=np.ndarray(shape, dtype=bool, buffer=self.shm.terminals),
+            truncations=np.ndarray(shape, dtype=bool, buffer=self.shm.truncateds),
+            masks=np.ndarray(shape, dtype=bool, buffer=self.shm.masks),
+            semaphores=np.ndarray(num_workers, dtype=np.uint8, buffer=self.shm.semaphores),
+        )
+        self.buf.semaphores[:] = MAIN
 
-        main_send_pipes, work_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
-        work_send_pipes, main_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
+        from multiprocessing import Pipe, Process
+        self.send_pipes, w_recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
+        w_send_pipes, self.recv_pipes = zip(*[Pipe() for _ in range(num_workers)])
+        self.recv_pipe_dict = {p: i for i, p in enumerate(self.recv_pipes)}
 
-        num_cores = psutil.cpu_count()
-        processes = []
+        self.processes = []
         for i in range(num_workers):
+            start = i * envs_per_worker
+            end = start + envs_per_worker
             p = Process(
                 target=_worker_process,
-                args=(multi_env_cls, env_creator, env_args, env_kwargs, envs_per_worker, agents_per_env, i,
-                    observation_shape, obs_mem, action_shape, atn_mem, rewards_mem, terminals_mem, truncated_mem,
-                    mask_mem, observation_dtype, action_dtype,
-                    work_send_pipes[i], work_recv_pipes[i])
+                args=(env_creators[start:end], env_args[start:end],
+                    env_kwargs[start:end], envs_per_worker,
+                    num_workers, i, w_send_pipes[i], w_recv_pipes[i],
+                    self.shm)
             )
             p.start()
-            processes.append(p)
+            self.processes.append(p)
 
-        # Register all receive pipes with the selector
-        import selectors
-        sel = selectors.DefaultSelector()
-        for pipe in main_recv_pipes:
-            sel.register(pipe, selectors.EVENT_READ)
-
-        self.agent_ids = np.stack([np.arange(
-            i*agents_per_worker, (i+1)*agents_per_worker) for i in range(num_workers)])
-
-        self.processes = processes
-        self.sel = sel
-        self.observation_shape = observation_shape
-        self.observation_dtype = observation_dtype
-        self.obs_arr = obs_arr
-        self.atn_arr = atn_arr
-        self.rewards_arr = rewards_arr
-        self.terminals_arr = terminals_arr
-        self.truncated_arr = truncated_arr
-        self.mask_arr = mask_arr
-        self.send_pipes = main_send_pipes
-        self.recv_pipes = main_recv_pipes
-        self.driver_env = driver_env
-        self.num_envs = num_envs
-        self.num_workers = num_workers
-        self.workers_per_batch = workers_per_batch
-        self.envs_per_batch = envs_per_batch
-        self.envs_per_worker = envs_per_worker
-        self.agents_per_batch = agents_per_batch
-        self.agents_per_worker = agents_per_worker
-        self.agents_per_env = agents_per_env
-        self.async_handles = None
         self.flag = RESET
-        self.prev_env_id = []
-        self.env_pool = env_pool
-        self.mask_agents = mask_agents
+        self.zero_copy = zero_copy
 
+    #@profile
     def recv(self):
         recv_precheck(self)
-        next_env_id = []
-        infos = []
-        if self.env_pool:
-            while len(next_env_id) < self.workers_per_batch:
-                for key, _ in self.sel.select(timeout=None):
-                    response_pipe = key.fileobj
-                    env_id = self.recv_pipes.index(response_pipe)
+        while True:
+            worker = self.waiting_workers.pop(0)
+            sem = self.buf.semaphores[worker]
+            if sem >= MAIN:
+                self.ready_workers.append(worker)
+            else:
+                self.waiting_workers.append(worker)
 
-                    if response_pipe.poll():
-                        info = response_pipe.recv()
-                        infos.append(info)
-                        next_env_id.append(env_id)
+            if sem == INFO:
+                self.infos[worker] = self.recv_pipes[worker].recv()
 
-                    if len(next_env_id) == self.workers_per_batch:                    
-                        break
-        else:
-            for env_id in range(self.workers_per_batch):
-                response_pipe = self.recv_pipes[env_id]
-                info = response_pipe.recv()
-                infos.append(info)
-                next_env_id.append(env_id)
-
-        infos = [i for ii in infos for i in ii]
-        agent_ids = self.agent_ids[next_env_id].ravel()
-
-        o = self.obs_arr[agent_ids].reshape(self.agents_per_batch, *self.observation_shape)
-        r = self.rewards_arr[agent_ids]
-        d = self.terminals_arr[agent_ids]
-        t = self.truncated_arr[agent_ids]
-        m = self.mask_arr[agent_ids]
-
-        self.prev_env_id = next_env_id
-        return o, r, d, t, infos, agent_ids, m
-
-    def send(self, actions):
-        send_precheck(self)
-        agent_ids = self.agent_ids[self.prev_env_id].ravel()
-        self.atn_arr[agent_ids] = actions
-        for i in self.prev_env_id:
-            self.send_pipes[i].send_bytes(STEP)
-
-    def async_reset(self, seed=None):
-        reset_precheck(self)
-        for pipe in self.send_pipes:
-            pipe.send_bytes(RESET)
-
-        return
-        # TODO: Seed
-
-        if seed is None:
-            for pipe in self.send_pipes:
-                pipe.send(RESET)
-        else:
-            for idx, pipe in enumerate(self.send_pipes):
-                pipe.send(("reset", [], {"seed": seed+idx}))
-
-    def put(self, *args, **kwargs):
-        # TODO: Update this
-        for queue in self.request_queues:
-            queue.put(("put", args, kwargs))
-
-    def get(self, *args, **kwargs):
-        # TODO: Update this
-        for queue in self.request_queues:
-            queue.put(("get", args, kwargs))
-
-        idx = -1
-        recvs = []
-        while len(recvs) < self.workers_per_batch // self.envs_per_worker:
-            idx = (idx + 1) % self.num_workers
-            queue = self.response_queues[idx]
-
-            if queue.empty():
+            if not self.ready_workers:
                 continue
 
-            response = queue.get()
-            if response is not None:
-                recvs.append(response)
+            if self.workers_per_batch == 1:
+                # Fastest path. Zero-copy optimized for batch size 1
+                w_slice = self.ready_workers[0]
+                s_range = [w_slice]
+                self.waiting_workers.append(w_slice)
+                self.ready_workers.pop(0)
+                break
+            elif self.zero_copy:
+                # Zero-copy for batch size > 1. Has to wait for
+                # a contiguous block of workers and adds a few
+                # microseconds of extra index processing time
+                completed = np.zeros(self.num_workers, dtype=bool)
+                completed[self.ready_workers] = True
+                buffers = completed.reshape(
+                    -1, self.workers_per_batch).all(axis=1)
+                start = buffers.argmax()
+                if not buffers[start]:
+                    continue
 
-        return recvs
+                start *= self.workers_per_batch
+                end = start + self.workers_per_batch
+                w_slice = slice(start, end)
+                s_range = range(start, end)
+                self.waiting_workers.extend(s_range)
+                self.ready_workers = [e for e in self.ready_workers
+                    if e not in s_range]
+                break
+            elif len(self.ready_workers) >= self.workers_per_batch:
+                # Full async path for batch size > 1. Alawys copies
+                # data because of non-contiguous worker indices
+                # Can be faster for envs with small observations
+                w_slice = self.ready_workers[:self.workers_per_batch]
+                s_range = w_slice
+                self.waiting_workers.extend(s_range)
+                self.ready_workers = self.ready_workers[self.workers_per_batch:]
+                break
+
+        self.w_slice = w_slice
+        buf = self.buf
+
+        o = buf.observations[w_slice].reshape(self.obs_batch_shape)
+        r = buf.rewards[w_slice].ravel()
+        d = buf.terminals[w_slice].ravel()
+        t = buf.truncations[w_slice].ravel()
+
+        infos = []
+        for i in s_range:
+            if self.infos[i]:
+                infos.extend(self.infos[i])
+                self.infos[i] = []
+
+        agent_ids = self.agent_ids[w_slice].ravel()
+        m = buf.masks[w_slice].ravel()
+
+        return o, r, d, t, infos, agent_ids, m
+
+    #@profile
+    def send(self, actions):
+        send_precheck(self)
+        actions = np.asarray(actions).reshape(self.atn_batch_shape)
+        
+        idxs = self.w_slice
+        self.actions[idxs] = actions
+        self.buf.semaphores[idxs] = STEP
+
+    def async_reset(self, seed=42):
+        seed = make_seeds(seed, self.num_envs)
+        self.prev_env_id = []
+        self.flag = RECV
+
+        self.ready_workers = []
+        self.waiting_workers = list(range(self.num_workers))
+        self.infos = [[] for _ in range(self.num_workers)]
+
+        self.buf.semaphores[:] = RESET
+        for i in range(self.num_workers):
+            start = i*self.envs_per_worker
+            end = (i+1)*self.envs_per_worker
+            self.send_pipes[i].send(seed[start:end])
 
     def close(self):
-        for pipe in self.send_pipes:
-            pipe.send(("close", [], {}))
-
         for p in self.processes:
             p.terminate()
-
-        for p in self.processes:
-            p.join()
 
 class Ray():
     '''Runs environments in parallel on multiple processes using Ray
@@ -502,26 +384,35 @@ class Ray():
     '''
     reset = reset
     step = step
-    single_observation_space = property(single_observation_space)
-    single_action_space = property(single_action_space)
-    structured_observation_space = property(structured_observation_space)
-    flat_observation_space = property(flat_observation_space)
-    unpack_batched_obs = unpack_batched_obs
+    def __init__(self, env_creators, env_args, env_kwargs,
+            num_envs, num_workers=None, batch_size=None, **kwargs):
+        if batch_size is None:
+            batch_size = num_envs
+        if num_workers is None:
+            num_workers = num_envs
 
-    def __init__(self,
-            env_creator: callable = None,
-            env_args: list = [],
-            env_kwargs: dict = {},
-            num_envs: int = 1,
-            envs_per_worker: int = 1,
-            envs_per_batch: int = None,
-            env_pool: bool = False,
-            mask_agents: bool = False,
-            ) -> None:
-        driver_env, multi_env_cls, agents_per_env = setup(
-            env_creator, env_args, env_kwargs)
-        num_workers, workers_per_batch, envs_per_batch, agents_per_batch, agents_per_worker = calc_scale_params(
-            num_envs, envs_per_batch, envs_per_worker, agents_per_env)
+        self.env_pool = num_envs != batch_size
+        envs_per_worker = num_envs // num_workers
+        self.workers_per_batch = batch_size // envs_per_worker
+        self.num_workers = num_workers
+
+        driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
+        self.emulated = driver_env.emulated
+        self.num_agents = num_agents = driver_env.num_agents * num_envs
+        self.agents_per_batch = driver_env.num_agents * batch_size
+        agents_per_worker = driver_env.num_agents * envs_per_worker
+        obs_space = driver_env.single_observation_space
+        obs_shape = obs_space.shape
+        atn_space = driver_env.single_action_space
+        atn_shape = atn_space.shape
+
+        shape = (num_workers, agents_per_worker)
+        self.obs_batch_shape = (self.agents_per_batch, *obs_shape)
+        self.atn_batch_shape = (self.workers_per_batch, agents_per_worker, *atn_shape)
+
+        self.single_observation_space = driver_env.single_observation_space
+        self.single_action_space = driver_env.single_action_space
+        self.agent_ids = np.arange(num_agents).reshape(num_workers, agents_per_worker)
 
         import ray
         if not ray.is_initialized():
@@ -531,67 +422,145 @@ class Ray():
                 logging_level=logging.ERROR,
             )
 
-        multi_envs = [
-            ray.remote(multi_env_cls).remote(
-                env_creator, env_args, env_kwargs, envs_per_worker
-            ) for _ in range(num_workers)
-        ]
+        self.envs = []
+        for i in range(num_workers):
+            start = i * envs_per_worker
+            end = start + envs_per_worker
+            self.envs.append(
+                ray.remote(Serial).remote(
+                    env_creators[start:end],
+                    env_args[start:end],
+                    env_kwargs[start:end],
+                    envs_per_worker
+                )
+            )
 
-        self.multi_envs = multi_envs
-        self.driver_env = driver_env
-        self.num_envs = num_envs
-        self.num_workers = num_workers
-        self.workers_per_batch = workers_per_batch
-        self.envs_per_batch = envs_per_batch
-        self.envs_per_worker = envs_per_worker
-        self.agents_per_batch = agents_per_batch
-        self.agents_per_worker = agents_per_worker
-        self.agents_per_env = agents_per_env
         self.async_handles = None
         self.flag = RESET
         self.ray = ray
         self.prev_env_id = []
-        self.env_pool = env_pool
-        self.mask_agents = mask_agents
 
     def recv(self):
         recv_precheck(self)
         recvs = []
         next_env_id = []
+        workers_per_batch = self.workers_per_batch
         if self.env_pool:
-            recvs = self.ray.get(self.async_handles)
-            env_id = [_ for _ in range(self.workers_per_batch)]
+            recvs = self.ray.get(self.async_handles[:workers_per_batch])
+            env_id = [_ for _ in range(workers_per_batch)]
         else:
             ready, busy = self.ray.wait(
-                self.async_handles, num_returns=self.workers_per_batch)
+                self.async_handles, num_returns=workers_per_batch)
             env_id = [self.async_handles.index(e) for e in ready]
             recvs = self.ray.get(ready)
 
-        recvs = [(o, r, d, t, i, eid)
-            for (o, r, d, t, i), eid in zip(recvs, env_id)]
+        o, r, d, t, infos, ids, m = zip(*recvs)
         self.prev_env_id = env_id
-        return aggregate_recvs(self, recvs)
+
+        infos = [i for ii in infos for i in ii]
+
+        o = np.stack(o, axis=0).reshape(self.obs_batch_shape)
+        r = np.stack(r, axis=0).ravel()
+        d = np.stack(d, axis=0).ravel()
+        t = np.stack(t, axis=0).ravel()
+        m = np.stack(m, axis=0).ravel()
+        agent_ids = self.agent_ids[env_id].ravel()
+        return o, r, d, t, infos, agent_ids, m
 
     def send(self, actions):
         send_precheck(self)
-        actions = split_actions(self, actions)
-        self.async_handles = [e.step.remote(a) for e, a in zip(self.multi_envs, actions)]
+        actions = np.asarray(actions).reshape(self.atn_batch_shape)
+        handles = []
+        for i, e in enumerate(self.prev_env_id):
+            atns = actions[i]
+            env = self.envs[e]
+            env.send.remote(atns)
+            handles.append(env.recv.remote())
 
-    def async_reset(self, seed=None):
-        reset_precheck(self)
+        self.async_handles = handles
+
+    def async_reset(self, seed=42):
+        self.flag = RECV
         if seed is None:
-            self.async_handles = [e.reset.remote() for e in self.multi_envs]
+            kwargs = {}
         else:
-            self.async_handles = [e.reset.remote(seed=seed+idx)
-                for idx, e in enumerate(self.multi_envs)]
+            kwargs = {"seed": seed}
 
-    def put(self, *args, **kwargs):
-        for e in self.multi_envs:
-            e.put.remote(*args, **kwargs)
+        handles = []
+        for idx, e in enumerate(self.envs):
+            e.async_reset.remote(**kwargs)
+            handles.append(e.recv.remote())
 
-    def get(self, *args, **kwargs):
-        return self.ray.get([e.get.remote(*args, **kwargs) for e in self.multi_envs])
+        self.async_handles = handles
 
     def close(self):
-        self.ray.get([e.close.remote() for e in self.multi_envs])
+        self.ray.get([e.close.remote() for e in self.envs])
         self.ray.shutdown()
+
+
+def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial, num_envs=1, **kwargs):
+    if num_envs < 1:
+        raise APIUsageError('num_envs must be at least 1')
+    if num_envs != int(num_envs):
+        raise APIUsageError('num_envs must be an integer')
+ 
+    if env_args is None:
+        env_args = []
+
+    if env_kwargs is None:
+        env_kwargs = {}
+
+    if not isinstance(env_creator_or_creators, (list, tuple)):
+        env_creators = [env_creator_or_creators] * num_envs
+        env_args = [env_args] * num_envs
+        env_kwargs = [env_kwargs] * num_envs
+
+    if len(env_creators) != num_envs:
+        raise APIUsageError('env_creators must be a list of length num_envs')
+    if len(env_args) != num_envs:
+        raise APIUsageError('env_args must be a list of length num_envs')
+    if len(env_kwargs) != num_envs:
+        raise APIUsageError('env_kwargs must be a list of length num_envs')
+
+    for i in range(num_envs):
+        if not callable(env_creators[i]):
+            raise APIUsageError('env_creators must be a list of callables')
+        if not isinstance(env_args[i], (list, tuple)):
+            raise APIUsageError('env_args must be a list of lists or tuples')
+        if not isinstance(env_kwargs[i], dict):
+            raise APIUsageError('env_kwargs must be a list of dictionaries')
+
+    # Keeps batch size consistent when debugging with Serial backend
+    if backend is Serial and 'batch_size' in kwargs:
+        num_envs = kwargs['batch_size']
+
+    # TODO: First step action space check
+    
+    return backend(env_creators, env_args, env_kwargs, num_envs, **kwargs)
+
+def make_seeds(seed, num_envs):
+    if isinstance(seed, int):
+        return [seed + i for i in range(num_envs)]
+
+    err = f'seed {seed} must be an integer or a list of integers'
+    if isinstance(seed, (list, tuple)):
+        if len(seed) != num_envs:
+            raise APIUsageError(err)
+
+        return seed
+
+    raise APIUsageError(err)
+
+def check_envs(envs, driver):
+    valid = (PufferEnv, GymnasiumPufferEnv, PettingZooPufferEnv)
+    driver_obs = driver.single_observation_space
+    driver_atn = driver.single_action_space
+    for env in envs:
+        if not isinstance(env, valid):
+            raise APIUsageError(f'env_creators must be {valid}')
+        obs_space = env.single_observation_space
+        if obs_space != driver_obs:
+            raise APIUsageError(f'\n{obs_space}\n{driver_obs} obs space mismatch')
+        atn_space = env.single_action_space
+        if atn_space != driver_atn:
+            raise APIUsageError(f'\n{atn_space}\n{driver_atn} atn space mismatch')
