@@ -14,7 +14,7 @@ import numpy as np
 
 import pufferlib
 from pufferlib.environments import ocean
-from pufferlib.vectorization import Multiprocessing, Serial, Ray
+from pufferlib.vectorization import Multiprocessing, Serial, Ray, make
 
 import time
 import psutil
@@ -84,64 +84,51 @@ def profile_emulation(puf_creator, timeout):
 
     return pufferlib.namespace(raw=raw, puf=puf)
 
-def profile_puffer_serial(env_creator, num_envs, timeout, sps):
-    envs_per_worker = max(int(sps/500), 1)
-    num_envs = int(num_envs * envs_per_worker)
-    env = Serial(env_creator, num_envs=num_envs, envs_per_worker=envs_per_worker)
+def profile_puffer_serial(env_creator, num_envs, timeout):
+    env = make(env_creator, backend=Serial, num_envs=num_envs)
     env.reset()
     steps = 0
 
-    actions = np.array([env.single_action_space.sample() for _ in range(num_envs*env.agents_per_env)])
+    actions = {i: 
+        np.array([env.single_action_space.sample() for _ in range(env.agents_per_batch)])
+        for i in range(100)
+    }
+ 
     start = time.time()
     while time.time() - start < timeout:
-        obs = env.step(actions)[0]
+        env.step(actions[steps%100])
         steps += 1
             
-    sps = steps * num_envs * env.agents_per_env / (time.time() - start)
+    sps = steps * env.agents_per_batch / (time.time() - start)
     env.close()
     return sps
 
-def profile_puffer_vec(env_creator, num_envs, timeout, sps):
-    envs_per_worker = max(int(sps/500), 1)
-    num_envs = int(num_envs * envs_per_worker)
-    env = Multiprocessing(env_creator,
-        num_envs=num_envs, envs_per_worker=envs_per_worker)
+#@profile
+def profile_puffer_pool_vec(env_creator, num_envs, num_workers, batch_size, timeout):
+    env = make(env_creator, backend=Ray, num_envs=num_envs,
+        num_workers=num_workers, batch_size=batch_size)
+    #env = make(env_creator, backend=Multiprocessing, num_envs=num_envs,
+    #    num_workers=num_workers, batch_size=batch_size)
     env.reset()
-    steps = 0
-
-    actions = np.array([env.single_action_space.sample() for _ in range(num_envs*env.agents_per_env)])
-    start = time.time()
-    while time.time() - start < timeout:
-        obs = env.step(actions)[0]
-        steps += 1
-
-    sps = steps * num_envs * env.agents_per_env / (time.time() - start)
-    env.close()
-    return sps
-
-def profile_puffer_pool_vec(env_creator, num_envs, timeout, sps):
-    envs_per_worker = max(int(sps/1000), 1)
-    num_envs = int(num_envs * envs_per_worker)
-    #env = Ray(env_creator, num_envs=3*num_envs,
-    #    envs_per_worker=envs_per_worker, envs_per_batch=num_envs, env_pool=True)
-    env = Multiprocessing(env_creator, num_envs=3*num_envs,
-        envs_per_worker=envs_per_worker, envs_per_batch=num_envs, env_pool=True)
-    env.async_reset()
-    env.recv()
 
     steps = 0
 
     actions = {i: 
-        np.array([env.single_action_space.sample() for _ in range(num_envs*env.agents_per_env)])
+        np.array([env.single_action_space.sample() for _ in range(env.agents_per_batch)])
         for i in range(100)
     }
     start = time.time()
+    times = []
     while time.time() - start < timeout:
-        env.send(actions[steps % 100])
+        atn = actions[steps % 100]
+        env.send(atn)
+        s = time.time()
         env.recv()
+        times.append(time.time() - s)
         steps += 1
 
-    sps = steps * num_envs * env.agents_per_env / (time.time() - start)
+    sps = steps * env.agents_per_batch / (time.time() - start)
+    print('Average recv time: ', np.mean(times))
     env.close()
     return sps
 
@@ -175,16 +162,14 @@ def profile_sb3_vec(env_creator, num_envs, timeout):
     env.close()
     return sps
 
-def profile_vec(env_creator, cores, timeout, sps):
-    print(f'  Vectorization - {cores} core speed factor')
+def profile_vec(env_creator, num_envs, num_workers, batch_size, timeout):
+    print(f'  Vectorization - {num_workers} core speed factor')
 
-    #result = profile_puffer_serial(env_creator, cores, timeout, sps)
+    #result = profile_puffer_serial(env_creator, num_envs, timeout)
     #print(f'    Puffer Serial: {(result):.3f}')
 
-    #result = profile_puffer_vec(env_creator, cores, timeout, sps)
-    #print(f'    Pufferlib  : {(result):.3f}')
-
-    puf_async = profile_puffer_pool_vec(env_creator, cores, timeout, sps)
+    puf_async = profile_puffer_pool_vec(env_creator, num_envs,
+        num_workers, batch_size, timeout)
     print(f'    Puffer Pool: {(puf_async):.3f}')
     return
 
@@ -225,32 +210,48 @@ if __name__ == '__main__':
     env_creators.nmmo3 = nmmo3.env_creator()
  
     '''
+
     from pufferlib.environments import nmmo3
     env_creators.nmmo3 = nmmo3.env_creator()
+
+    result = profile_puffer_serial(env_creators.nmmo3, num_envs=1, timeout=10)
+    print(f'    Puffer Serial: {(result):.3f}')
+    profile_vec(env_creators.nmmo3, 
+        num_envs=18, num_workers=6, batch_size=6, timeout=10)
+    exit(0)
+ 
+    #profile_vec(env_creators.nmmo3, 
+    #    num_envs=1, num_workers=1, batch_size=1, timeout=10)
+    #exit(0)
     #profile_vec(env_creators.nmmo3, 2, 10, 1000)
-    profile_vec(env_creators.nmmo3, 6, 10, 1000)
 
     #from pufferlib.environments import pokemon_red
     #env_creators.pokemon_red = pokemon_red.env_creator('pokemon_red')
-    #profile_vec(env_creators.pokemon_red, 6, 20, 1000)
+    #profile_vec(env_creators.pokemon_red,
+    #    num_envs=1, num_workers=1, batch_size=1, timeout=10)
 
+    #exit(0)
 
     # 20k on Nethack on laptop via 1 worker per batch
     # not triggering a giant copy
-    #from pufferlib.environments import nethack
-    #env_creators.nethack = nethack.env_creator()
+    from pufferlib.environments import nethack
+    env_creators.nethack = nethack.env_creator()
+    profile_vec(env_creators.nethack, num_envs=6,
+        num_workers=6, batch_size=1, timeout=10)
+    #    num_workers=6, batch_size=1, timeout=10)
+    exit(0)
     #profile_vec(env_creators.nethack, 1, 10, 20000)
 
-    '''
+
     from functools import partial
     env_creators.test = partial(
         ocean.env_creator('performance_empiric'),
-        count_n=0, bandwidth=1
+        count_n=20_000, bandwidth=208_000,
     )
 
-    profile_vec(env_creators.test, 1, 10, 100000)
-    '''
 
+    profile_vec(env_creators.test,
+        num_envs=3, num_workers=3, batch_size=1, timeout=5)
 
 
     '''

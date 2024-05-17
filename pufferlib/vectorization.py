@@ -186,7 +186,8 @@ class Multiprocessing:
     reset = reset
     step = step
     def __init__(self, env_creators, env_args, env_kwargs,
-            num_envs, num_workers=None, batch_size=None, zero_copy=True, **kwargs):
+            num_envs, num_workers=None, batch_size=None,
+            zero_copy=True, **kwargs):
         self.envs = [creator(*args, **kwargs) for (creator, args, kwargs)
             in zip(env_creators, env_args, env_kwargs)]
         if batch_size is None:
@@ -384,8 +385,9 @@ class Ray():
     '''
     reset = reset
     step = step
-    def __init__(self, env_creators, env_args, env_kwargs,
-            num_envs, num_workers=None, batch_size=None, **kwargs):
+
+    def __init__(self, env_creators, env_args, env_kwargs, num_envs,
+            num_workers=None, batch_size=None, **kwargs):
         if batch_size is None:
             batch_size = num_envs
         if num_workers is None:
