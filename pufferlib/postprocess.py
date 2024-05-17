@@ -1,5 +1,7 @@
 import gymnasium
 
+import pufferlib.utils
+
 
 class EpisodeStats(gymnasium.Wrapper):
     '''Wrapper for Gymnasium environments that stores
@@ -12,18 +14,41 @@ class EpisodeStats(gymnasium.Wrapper):
 
     # TODO: Fix options. Maybe reimplement gymnasium.Wrapper with better compatibility
     def reset(self, seed=None):
-        self.episode_return = 0
-        self.episode_length = 0
+        self.info = dict(episode_return=[], episode_length=0)
         return self.env.reset(seed=seed)
 
     def step(self, action):
         observation, reward, terminated, truncated, info = super().step(action)
-        self.episode_return += reward
-        self.episode_length += 1
 
+        for k, v in pufferlib.utils.unroll_nested_dict(info):
+            if k not in self.info:
+                self.info[k] = []
+
+            self.info[k].append(v)
+
+        self.info['episode_return'].append(reward)
+        self.info['episode_length'] += 1
+
+        info = {}
         if terminated or truncated:
-            info['episode_return'] = self.episode_return
-            info['episode_length'] = self.episode_length
+            for k, v in self.info.items():
+                try:
+                    info[k] = sum(v)
+                    continue
+                except TypeError:
+                    pass
+
+                if isinstance(v, str):
+                    info[k] = v
+                    continue
+
+                try:
+                    x = int(v) # probably a value
+                    info[k] = v
+                    continue
+                except TypeError:
+                    pass
+
 
         return observation, reward, terminated, truncated, info
 

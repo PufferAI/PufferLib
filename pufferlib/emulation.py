@@ -9,6 +9,7 @@ import inspect
 import pufferlib
 import pufferlib.spaces
 from pufferlib import utils, exceptions
+from pufferlib.extensions import emulate, nativize
 
 
 def dtype_from_space(space):
@@ -66,34 +67,6 @@ def emulate_action_space(space):
     emulated_space = gymnasium.spaces.MultiDiscrete([e.n for e in leaves])
     return emulated_space, emulated_dtype
 
-def emulate(sample, sample_dtype, emulated_dtype):
-    emulated = np.zeros(1, dtype=emulated_dtype)
-    _emulate(emulated, sample)
-    return emulated.view(sample_dtype).ravel()
-
-def _emulate(arr, sample):
-    if isinstance(sample, dict):
-        for k, v in sample.items():
-            _emulate(arr[k], v)
-    elif isinstance(sample, tuple):
-        for i, v in enumerate(sample):
-            _emulate(arr[f'f{i}'], v)
-    else:
-        arr[()] = sample
-
-def _nativize(sample, space):
-    if isinstance(space, pufferlib.spaces.Tuple):
-        return tuple(_nativize(sample[f'f{i}'], elem)
-            for i, elem in enumerate(space))
-    elif isinstance(space, pufferlib.spaces.Dict):
-        return {k: _nativize(sample[k], value)
-            for k, value in space.items()}
-    else:
-        return sample.item()
-
-def nativize(sample, sample_space, emulated_dtype):
-    sample = np.array(sample).view(emulated_dtype)
-    return _nativize(sample, sample_space)
 
 class GymnasiumPufferEnv(gymnasium.Env):
     def __init__(self, env=None, env_creator=None, env_args=[], env_kwargs={}):
@@ -127,7 +100,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
 
     def _emulate(self, ob):
         if self.is_obs_emulated:
-            _emulate(self._obs, ob)
+            emulate(self._obs, ob)
         elif self.buf is not None:
             self.obs[:] = ob
         else:
@@ -168,7 +141,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
 
         if not self.is_action_checked:
             self.is_action_checked = check_space(
-                action, self.action_space)
+                action, self.env.action_space)
 
         ob, reward, done, truncated, info = self.env.step(action)
         self._emulate(ob)

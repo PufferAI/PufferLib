@@ -1,6 +1,7 @@
 from setuptools import find_packages, setup
 from Cython.Build import cythonize
 from itertools import chain
+import numpy
 
 VERSION = '1.0.0'
 
@@ -217,6 +218,7 @@ setup(
         **environments,
     },
     ext_modules = cythonize("pufferlib/extensions.pyx"),
+    include_dirs=[numpy.get_include()],
     python_requires=">=3.8",
     license="MIT",
     author="Joseph Suarez",

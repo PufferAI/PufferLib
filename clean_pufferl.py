@@ -127,6 +127,7 @@ def evaluate(data):
                     infos[k].append(v)
 
             '''
+            # pufferlib.utils.unroll...
             for policy_name, policy_i in i.items():
                 for agent_i in policy_i:
                     for name, dat in unroll_nested_dict(agent_i):
@@ -570,17 +571,6 @@ def seed_everything(seed, torch_deterministic):
     if seed is not None:
         torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = torch_deterministic
-
-def unroll_nested_dict(d):
-    if not isinstance(d, dict):
-        return d
-
-    for k, v in d.items():
-        if isinstance(v, dict):
-            for k2, v2 in unroll_nested_dict(v):
-                yield f"{k}/{k2}", v2
-        else:
-            yield k, v
 
 import psutil
 import GPUtil
