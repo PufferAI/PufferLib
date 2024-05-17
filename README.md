@@ -9,4 +9,12 @@ You have an environment, a PyTorch model, and a reinforcement learning framework
 All of our [Documentation](https://pufferai.github.io "PufferLib Documentation") is hosted by github.io. @jsuarez5341 on [Discord](https://discord.gg/spT4huaGYV) for support -- post here before opening issues. I am also looking for contributors interested in adding bindings for other environments and RL frameworks.
 
 Star to power up the next release!
-[![Star History Chart](https://api.star-history.com/svg?repos=pufferai/pufferlib&type=Date)](https://star-history.com/#pufferai/pufferlib&Date)
+## Star History
+
+<a href="https://star-history.com/#pufferai/pufferlib&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=pufferai/pufferlib&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=pufferai/pufferlib&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=pufferai/pufferlib&type=Date" />
+ </picture>
+</a>
