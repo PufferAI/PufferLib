@@ -2,7 +2,7 @@ from pdb import set_trace as T
 
 import pufferlib
 import pufferlib.emulation
-import pufferlib.vectorization
+import pufferlib.vector
 from pufferlib.exceptions import APIUsageError, InvalidAgentError
 from pufferlib.environments import test
 
@@ -89,47 +89,45 @@ def test_vectorization_api(print_errors=False):
         env_creator=test.PettingZooTestEnv)
 
     for backend in [
-        pufferlib.vectorization.Serial,
-        pufferlib.vectorization.Multiprocessing,
-        pufferlib.vectorization.Ray]:
+        pufferlib.vector.Serial,
+        pufferlib.vector.Multiprocessing,
+        pufferlib.vector.Ray]:
             
         for creator in [gymnasium_creator, pettingzoo_creator]:
+            vec = pufferlib.vector.make(creator, num_envs=6,
+                num_workers=3, backend=backend)
+
             # Sync API
-            vec = backend(env_creator=creator,
-                num_envs=6, envs_per_worker=2)
-            _, _, _, _ = vec.reset()
-            actions = [vec.single_action_space.sample()
-                for _ in range(vec.agents_per_batch)]
-            _, _, _, _, _, _, _ = vec.step(actions)
+            _, _ = vec.reset()
+            actions = vec.action_space.sample()
+            _, _, _, _, _ = vec.step(actions)
             vec.close()
 
             # Async API
-            vec = backend(env_creator=creator,
-                num_envs=6, envs_per_worker=2, envs_per_batch=4)
+            vec = pufferlib.vector.make(creator, num_envs=8,
+                num_workers=4, batch_size=4, backend=backend)
             vec.async_reset()
-            actions = [vec.single_action_space.sample()
-                for _ in range(vec.agents_per_batch)]
+            actions = vec.action_space.sample()
             _, _, _, _, _, _, _ = vec.recv()
             vec.send(actions)
             vec.close()
 
         try:
-            vec = backend(env_creator=test.GymnasiumTestEnv)
-        except TypeError as e:
-            print_if(e, print_errors)
-
-        try:
-            vec = backend(env_creator=gymnasium_creator,
-                num_envs=3, envs_per_worker=2)
+            vec = pufferlib.vector.make(test.GymnasiumTestEnv)
         except APIUsageError as e:
             print_if(e, print_errors)
 
         try:
-            vec = backend(env_creator=pettingzoo_creator,
-                num_envs=4, envs_per_worker=2, envs_per_batch=3)
+            vec = pufferlib.vector.make(gymnasium_creator,
+                num_envs=3, num_workers=2)
         except APIUsageError as e:
             print_if(e, print_errors)
 
+        try:
+            vec = pufferlib.vector.make(gymnasium_creator,
+                num_envs=4, num_workers=2, batch_size=3)
+        except APIUsageError as e:
+            print_if(e, print_errors)
 
 
 if __name__ == '__main__':

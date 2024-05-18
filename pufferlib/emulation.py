@@ -181,6 +181,9 @@ class GymnasiumPufferEnv(gymnasium.Env):
             action = nativize(action, self.env.action_space, self.atn_dtype)
         elif isinstance(action, np.ndarray):
             action = action.ravel()
+            # TODO: profile or speed up
+            if isinstance(self.action_space, pufferlib.spaces.Discrete):
+                action = action[0]
 
         if not self.is_action_checked:
             self.is_action_checked = check_space(
@@ -321,10 +324,18 @@ class PettingZooPufferEnv:
             raise exceptions.APIUsageError('step() called after environment is done')
 
         if isinstance(actions, np.ndarray):
+            if not self.is_action_checked and len(actions) != self.num_agents:
+                raise exceptions.APIUsageError(
+                    f'Actions specified as len {len(actions)} but environment has {self.num_agents} agents')
+
             actions = {agent: actions[i] for i, agent in enumerate(self.possible_agents)}
 
         # Postprocess actions and validate action spaces
         if not self.is_action_checked:
+            for agent in actions:
+                if agent not in self.possible_agents:
+                    raise exceptions.InvalidAgentError(agent, self.possible_agents)
+
             self.is_action_checked = check_space(
                 next(iter(actions.values())),
                 self.single_action_space

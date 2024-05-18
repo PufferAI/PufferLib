@@ -10,10 +10,10 @@ from pufferlib import namespace
 from pufferlib.environment import PufferEnv
 from pufferlib.emulation import GymnasiumPufferEnv, PettingZooPufferEnv
 from pufferlib.exceptions import APIUsageError
+from pufferlib.namespace import Namespace
 import pufferlib.spaces
 import gymnasium
 
-NEUTRAL = 0
 RESET = 0
 STEP = 1
 SEND = 2
@@ -28,11 +28,18 @@ def recv_precheck(vecenv):
 
     vecenv.flag = SEND
 
-def send_precheck(vecenv):
+def send_precheck(vecenv, actions):
     if vecenv.flag != SEND:
         raise APIUsageError('Call (async) reset + recv before sending')
 
+    actions = np.asarray(actions)
+    if not vecenv.initialized:
+        vecenv.initialized = True
+        if not vecenv.action_space.contains(actions):
+            raise APIUsageError('Actions do not match action space')
+
     vecenv.flag = RECV
+    return actions
 
 def reset(vecenv, seed=42):
     vecenv.async_reset(seed)
@@ -73,6 +80,7 @@ class Serial:
             in zip(env_creators, env_args, env_kwargs)]
 
         self.driver_env = driver = self.envs[0]
+        self.emulated = self.driver_env.emulated
         check_envs(self.envs, self.driver_env)
         self.agents_per_env = [env.num_agents for env in self.envs]
         self.agents_per_batch = sum(self.agents_per_env)
@@ -82,6 +90,8 @@ class Serial:
         self.action_space = joint_space(self.single_action_space, self.agents_per_batch)
         self.observation_space = joint_space(self.single_observation_space, self.agents_per_batch)
         self.agent_ids = np.arange(self.num_agents)
+        self.initialized = False
+        self.flag = RESET
         self.buf = None
 
     def _assign_buffers(self, buf):
@@ -100,6 +110,7 @@ class Serial:
             ptr = end
 
     def async_reset(self, seed=42):
+        self.flag = RECV
         seed = make_seeds(seed, len(self.envs))
 
         if self.buf is None:
@@ -124,7 +135,7 @@ class Serial:
         self.infos = infos
 
     def send(self, actions):
-        actions = np.asarray(actions)
+        actions = send_precheck(self, actions)
         rewards, dones, truncateds, self.infos = [], [], [], []
         ptr = 0
         for idx, env in enumerate(self.envs):
@@ -142,6 +153,7 @@ class Serial:
             ptr = end
 
     def recv(self):
+        recv_precheck(self)
         buf = self.buf
         return (buf.observations, buf.rewards, buf.terminals, buf.truncations,
             self.infos, self.agent_ids, buf.masks)
@@ -219,9 +231,10 @@ class Multiprocessing:
             batch_size = num_envs
         if num_workers is None:
             num_workers = num_envs
-        if zero_copy and num_envs % batch_size != 0:
+        if zero_copy and num_envs % num_workers != 0:
+            # This is so you can have n equal buffers
             raise APIUsageError(
-                'zero_copy: num_envs must be divisible by batch_size')
+                'zero_copy: num_envs must be divisible by num_workers')
 
         self.num_environments = num_envs
         envs_per_worker = num_envs // num_workers
@@ -235,7 +248,7 @@ class Multiprocessing:
         # with the resource tracker that spams warnings and does not work with
         # forked processes. So for now, RawArray is much more reliable.
         # You can't send a RawArray through a pipe.
-        driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
+        self.driver_env = driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
         self.emulated = driver_env.emulated
         self.num_agents = num_agents = driver_env.num_agents * num_envs
         self.agents_per_batch = driver_env.num_agents * batch_size
@@ -302,6 +315,7 @@ class Multiprocessing:
             self.processes.append(p)
 
         self.flag = RESET
+        self.initialized = False
         self.zero_copy = zero_copy
 
     #@profile
@@ -389,14 +403,15 @@ class Multiprocessing:
 
     #@profile
     def send(self, actions):
-        send_precheck(self)
-        actions = np.asarray(actions).reshape(self.atn_batch_shape)
+        actions = send_precheck(self, actions).reshape(self.atn_batch_shape)
+        # TODO: What shape?
         
         idxs = self.w_slice
         self.actions[idxs] = actions
         self.buf.semaphores[idxs] = STEP
 
     def async_reset(self, seed=42):
+        self.flag = RECV
         seed = make_seeds(seed, self.num_environments)
         self.prev_env_id = []
         self.flag = RECV
@@ -479,6 +494,7 @@ class Ray():
             )
 
         self.async_handles = None
+        self.initialized = False
         self.flag = RESET
         self.ray = ray
         self.prev_env_id = []
@@ -511,8 +527,9 @@ class Ray():
         return o, r, d, t, infos, agent_ids, m
 
     def send(self, actions):
-        send_precheck(self)
-        actions = np.asarray(actions).reshape(self.atn_batch_shape)
+        actions = send_precheck(self, actions).reshape(self.atn_batch_shape)
+        # TODO: What shape?
+
         handles = []
         for i, e in enumerate(self.prev_env_id):
             atns = actions[i]
@@ -570,7 +587,7 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
             raise APIUsageError('env_creators must be a list of callables')
         if not isinstance(env_args[i], (list, tuple)):
             raise APIUsageError('env_args must be a list of lists or tuples')
-        if not isinstance(env_kwargs[i], dict):
+        if not isinstance(env_kwargs[i], (dict, Namespace)):
             raise APIUsageError('env_kwargs must be a list of dictionaries')
 
     # Keeps batch size consistent when debugging with Serial backend
@@ -596,6 +613,9 @@ def make_seeds(seed, num_envs):
 
 def check_envs(envs, driver):
     valid = (PufferEnv, GymnasiumPufferEnv, PettingZooPufferEnv)
+    if not isinstance(driver, valid):
+        raise APIUsageError(f'env_creator must be {valid}')
+
     driver_obs = driver.single_observation_space
     driver_atn = driver.single_action_space
     for env in envs:
