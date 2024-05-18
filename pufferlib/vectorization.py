@@ -1,12 +1,17 @@
+# TODO: Check actions passed to envs are right shape? On first call at least
+
 from pdb import set_trace as T
 
 import numpy as np
 import time
+import psutil
 
 from pufferlib import namespace
 from pufferlib.environment import PufferEnv
 from pufferlib.emulation import GymnasiumPufferEnv, PettingZooPufferEnv
 from pufferlib.exceptions import APIUsageError
+import pufferlib.spaces
+import gymnasium
 
 NEUTRAL = 0
 RESET = 0
@@ -38,11 +43,30 @@ def step(vecenv, actions):
     actions = np.asarray(actions)
     vecenv.send(actions)
     obs, rewards, terminals, truncations, infos, env_ids, masks = vecenv.recv()
-    return obs, rewards, terminals, truncations, infos, env_ids
+    return obs, rewards, terminals, truncations, infos # include env_ids or no?
+
+def joint_space(space, n):
+    if isinstance(space, pufferlib.spaces.Discrete):
+        return gymnasium.spaces.MultiDiscrete([space.n] * n)
+    elif isinstance(space, pufferlib.spaces.MultiDiscrete):
+        return gymnasium.spaces.Box(low=0,
+            high=np.repeat(space.nvec[None] - 1, n, axis=0),
+            shape=(n, len(space)), dtype=space.dtype)
+    elif isinstance(space, pufferlib.spaces.Box):
+        return gymnasium.spaces.Box(
+            low=np.repeat(space.low[None], n, axis=0),
+            high=np.repeat(space.high[None], n, axis=0),
+            shape=(n, *space.shape), dtype=space.dtype)
+    else:
+        raise ValueError(f'Unsupported space: {space}')
  
 class Serial:
     reset = reset
     step = step
+
+    @property
+    def num_envs(self):
+        return self.agents_per_batch
  
     def __init__(self, env_creators, env_args, env_kwargs, num_envs, **kwargs):
         self.envs = [creator(*args, **kwargs) for (creator, args, kwargs)
@@ -50,15 +74,18 @@ class Serial:
 
         self.driver_env = driver = self.envs[0]
         check_envs(self.envs, self.driver_env)
-        self.single_observation_space = driver.single_observation_space
-        self.single_action_space = driver.single_action_space
         self.agents_per_env = [env.num_agents for env in self.envs]
         self.agents_per_batch = sum(self.agents_per_env)
         self.num_agents = sum(self.agents_per_env)
+        self.single_observation_space = driver.single_observation_space
+        self.single_action_space = driver.single_action_space
+        self.action_space = joint_space(self.single_action_space, self.agents_per_batch)
+        self.observation_space = joint_space(self.single_observation_space, self.agents_per_batch)
         self.agent_ids = np.arange(self.num_agents)
         self.buf = None
 
     def _assign_buffers(self, buf):
+        '''Envs handle their own data buffers'''
         ptr = 0
         self.buf = buf
         for i, env in enumerate(self.envs):
@@ -77,13 +104,13 @@ class Serial:
 
         if self.buf is None:
             self.buf = namespace(
-                observations = np.empty(
+                observations = np.zeros(
                     (self.agents_per_batch, *self.single_observation_space.shape),
                     dtype=self.single_observation_space.dtype),
-                rewards = np.empty(self.agents_per_batch, dtype=np.float32),
-                terminals = np.empty(self.agents_per_batch, dtype=bool),
-                truncations = np.empty(self.agents_per_batch, dtype=bool),
-                masks = np.empty(self.agents_per_batch, dtype=bool),
+                rewards = np.zeros(self.agents_per_batch, dtype=np.float32),
+                terminals = np.zeros(self.agents_per_batch, dtype=bool),
+                truncations = np.zeros(self.agents_per_batch, dtype=bool),
+                masks = np.zeros(self.agents_per_batch, dtype=bool),
             )
             self._assign_buffers(self.buf)
 
@@ -94,11 +121,6 @@ class Serial:
             if i:
                 infos.append(i)
 
-        buf = self.buf
-        buf.rewards[:] = 0
-        buf.terminals[:] = False
-        buf.truncations[:] = False
-        buf.masks[:] = 1
         self.infos = infos
 
     def send(self, actions):
@@ -110,9 +132,7 @@ class Serial:
             atns = actions[ptr:end]
             if env.done:
                 o, i = env.reset()
-                r = 0
-                d = False
-                t = False
+                buf = self.buf
             else:
                 o, r, d, t, i = env.step(atns)
 
@@ -166,7 +186,7 @@ def _worker_process(env_creators, env_args, env_kwargs, num_envs,
             seeds = recv_pipe.recv()
             _, infos = envs.reset(seed=seeds)
         elif sem == STEP:
-            _, _, _, _, infos, _ = envs.step(atn_arr)
+            _, _, _, _, infos = envs.step(atn_arr)
         elif sem == CLOSE:
             print("closing worker", worker_idx)
             send_pipe.send(None)
@@ -185,6 +205,11 @@ class Multiprocessing:
     '''
     reset = reset
     step = step
+
+    @property
+    def num_envs(self):
+        return self.agents_per_batch
+ 
     def __init__(self, env_creators, env_args, env_kwargs,
             num_envs, num_workers=None, batch_size=None,
             zero_copy=True, **kwargs):
@@ -198,7 +223,7 @@ class Multiprocessing:
             raise APIUsageError(
                 'zero_copy: num_envs must be divisible by batch_size')
 
-        self.num_envs = num_envs
+        self.num_environments = num_envs
         envs_per_worker = num_envs // num_workers
         self.envs_per_worker = envs_per_worker
         self.workers_per_batch = batch_size // envs_per_worker
@@ -226,6 +251,9 @@ class Multiprocessing:
 
         self.single_observation_space = driver_env.single_observation_space
         self.single_action_space = driver_env.single_action_space
+        self.action_space = joint_space(self.single_action_space, self.agents_per_batch)
+        self.observation_space = joint_space(self.single_observation_space, self.agents_per_batch)
+ 
         self.agent_ids = np.arange(num_agents).reshape(num_workers, agents_per_worker)
 
         from multiprocessing import RawArray
@@ -300,6 +328,16 @@ class Multiprocessing:
                 self.waiting_workers.append(w_slice)
                 self.ready_workers.pop(0)
                 break
+            elif self.workers_per_batch == self.num_workers:
+                # Slowest path. Zero-copy synchornized for all workers
+                if len(self.ready_workers) < self.num_workers:
+                    continue
+
+                w_slice = slice(0, self.num_workers)
+                s_range = range(0, self.num_workers)
+                self.waiting_workers.extend(s_range)
+                self.ready_workers = []
+                break
             elif self.zero_copy:
                 # Zero-copy for batch size > 1. Has to wait for
                 # a contiguous block of workers and adds a few
@@ -359,7 +397,7 @@ class Multiprocessing:
         self.buf.semaphores[idxs] = STEP
 
     def async_reset(self, seed=42):
-        seed = make_seeds(seed, self.num_envs)
+        seed = make_seeds(seed, self.num_environments)
         self.prev_env_id = []
         self.flag = RECV
 
@@ -414,6 +452,9 @@ class Ray():
 
         self.single_observation_space = driver_env.single_observation_space
         self.single_action_space = driver_env.single_action_space
+        self.action_space = joint_space(self.single_action_space, self.agents_per_batch)
+        self.observation_space = joint_space(self.single_observation_space, self.agents_per_batch)
+ 
         self.agent_ids = np.arange(num_agents).reshape(num_workers, agents_per_worker)
 
         import ray
@@ -566,3 +607,182 @@ def check_envs(envs, driver):
         atn_space = env.single_action_space
         if atn_space != driver_atn:
             raise APIUsageError(f'\n{atn_space}\n{driver_atn} atn space mismatch')
+
+def autotune(env_creator, batch_size, max_envs=1e9, model_forward_s=0.0,
+        max_env_ram_gb=4, max_batch_vram_gb=0.05, time_per_test=3): 
+    '''Determine the optimal vectorization parameters for your system'''
+    if max_envs < batch_size:
+        raise ValueError('max_envs < min_batch_size')
+
+    num_cores = psutil.cpu_count(logical=False)
+    idle_ram = psutil.Process().memory_info().rss
+    load_ram = idle_ram
+
+    # Initial profile to estimate single-core performance
+    print('Profiling single-core performance for ~', time_per_test, 'seconds')
+    env = env_creator()
+    env.reset()
+    obs_space = env.single_observation_space
+    actions = [env.action_space.sample() for _ in range(1000)]
+    num_agents = env.num_agents
+    steps = 0
+    step_times = []
+    reset_times = []
+    start = time.time()
+    while time.time() - start < time_per_test:
+        idle_ram = max(idle_ram, psutil.Process().memory_info().rss)
+        s = time.time()
+        if env.done:
+            env.reset()
+            reset_times.append(time.time() - s)
+        else:
+            env.step(actions[steps%1000])
+            step_times.append(time.time() - s)
+        steps += 1
+
+    env.close()
+    sum_time = sum(step_times) + sum(reset_times)
+    reset_percent = 100 * sum(reset_times) / sum_time
+    sps = steps * num_agents / sum_time
+    step_variance = 100 * np.std(step_times) / np.mean(step_times)
+    reset_mean = np.mean(reset_times)
+    ram_usage = max(1, (idle_ram - load_ram)) / 1e9
+
+    obs_size_gb = (
+        np.prod(obs_space.shape)
+        * np.dtype(obs_space.dtype).itemsize
+        * num_agents
+        / 1e9
+    )
+
+    # Max bandwidth
+    bandwidth = obs_size_gb * sps
+    throughput = bandwidth * num_cores
+
+    print('Profile complete')
+    print(f'    SPS: {sps:.3f}')
+    print(f'    STD: {step_variance:.3f}%')
+    print(f'    Reset: {reset_percent:.3f}%')
+    print(f'    RAM: {1000*ram_usage:.3f} MB/env')
+    print(f'    Bandwidth: {bandwidth:.3f} GB/s')
+    print(f'    Throughput: {throughput:.3f} GB/s ({num_cores} cores)')
+    print()
+
+    # Cap envs based on max allowed RAM
+    max_allowed_by_ram = max_env_ram_gb // ram_usage
+    if max_allowed_by_ram < max_envs:
+        max_envs = int(max_allowed_by_ram)
+        print('Reducing max envs to', max_envs, 'based on RAM')
+
+    # Cap envs based on estimated max speedup
+    #linear_speedup = (num_cores * steps / sum_time) // 500
+    #if linear_speedup < max_envs and linear_speedup > num_cores:
+    #    max_envs = int(linear_speedup)
+    #    print('Reducing max envs to', max_envs, 'based on single-core speed')
+
+    # Cap envs based on hardware
+    hardware_envs = max_envs - (max_envs % num_cores)
+    if hardware_envs > batch_size and hardware_envs != max_envs:
+        max_envs = int(hardware_envs)
+        print('Reducing max envs to', max_envs, 'based on core division')
+
+    max_allowed_by_vram = max_batch_vram_gb // obs_size_gb
+    if max_allowed_by_vram < batch_size:
+        raise ValueError('max_allowed_by_vram < batch_size')
+
+    print()
+    configs = []
+
+    # Strategy 1: one batch per core
+    strategy_cores = min(num_cores, max_envs // num_cores)
+    configs.append(dict(
+        num_envs=batch_size*strategy_cores,
+        num_workers=num_cores,
+        batch_size=batch_size,
+        backend=Multiprocessing,
+    ))
+
+    strategy_min_envs_per_worker = int(np.ceil((batch_size+1) / num_cores))
+    strategy_num_envs = []
+    for envs_per_worker in range(strategy_min_envs_per_worker, batch_size):
+        if envs_per_worker * num_cores > max_envs:
+            break
+        elif batch_size % envs_per_worker != 0:
+            continue
+
+        # Strategy 2: Full async. Only reasonable for low bandwidth
+        if throughput < 1.5:
+            configs.append(dict(
+                num_envs=envs_per_worker*num_cores,
+                num_workers=num_cores,
+                batch_size=batch_size,
+                zero_copy=False,
+                backend=Multiprocessing,
+            ))
+
+        # Strategy 3: Contiguous blocks. Only reasonable for high bandwidth
+        if throughput > 0.5:
+            configs.append(dict(
+                num_envs=envs_per_worker*num_cores,
+                num_workers=num_cores,
+                batch_size=batch_size,
+                backend=Multiprocessing,
+            ))
+        
+    # Strategy 4: Full sync - perhaps nichely useful
+    for strategy_cores in range(num_cores, 1, -1):
+        if batch_size % strategy_cores != 0:
+            continue
+
+        configs.append(dict(
+            num_envs=batch_size,
+            num_workers=strategy_cores,
+            batch_size=batch_size,
+            backend=Multiprocessing,
+        ))
+
+    # Strategy 5: Serial
+    configs.append(dict(
+        num_envs=batch_size,
+        backend=Serial,
+    ))
+
+    for config in configs:
+        envs = make(env_creator, **config)
+        envs.reset()
+        actions = [envs.action_space.sample() for _ in range(1000)]
+        step_time = 0
+        steps = 0
+        start = time.time()
+        while time.time() - start < time_per_test:
+            s = time.time()
+            envs.send(actions[steps%1000])
+            step_time += time.time() - s
+
+            if model_forward_s > 0:
+                time.sleep(model_forward_s)
+
+            s = time.time()
+            envs.recv()
+            step_time += time.time() - s
+
+            steps += 1
+
+        end = time.time()
+        envs.close()
+        sps = steps * envs.agents_per_batch / step_time
+        print(f'SPS: {sps:.3f}')
+        for k, v in config.items():
+            if k == 'backend':
+                v = v.__name__
+
+            print(f'    {k}: {v}')
+
+        print()
+
+
+
+
+
+
+

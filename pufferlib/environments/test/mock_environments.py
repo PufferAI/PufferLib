@@ -123,8 +123,8 @@ def make_mock_singleagent_env(observation_space, action_space):
 class TestEnv(ParallelEnv):
     def __init__(self, observation_space, action_space, initial_agents,
             max_agents, spawn_per_tick, death_per_tick):
-        self.observation_space = observation_space
-        self.action_space = action_space
+        self.single_observation_space = observation_space
+        self.single_action_space = action_space
         self.initial_agents = initial_agents
         self.max_agents = max_agents
         self.spawn_per_tick = spawn_per_tick
@@ -137,7 +137,7 @@ class TestEnv(ParallelEnv):
         self.tick = 0
         self.agents = self.possible_agents[:self.initial_agents]
 
-        obs = {a: _sample_space(a, self.tick, self.observation_space)
+        obs = {a: _sample_space(a, self.tick, self.single_observation_space)
             for a in self.agents}
         infos = {a: {} for a in self.agents}
         return obs, infos
@@ -151,7 +151,7 @@ class TestEnv(ParallelEnv):
             self.agents.remove(kill)
             # TODO: Make pufferlib work without pad obs
             # but still require rewards, dones, and optionally infos
-            obs[kill] = _sample_space(kill, self.tick, self.observation_space, zero=True)
+            obs[kill] = _sample_space(kill, self.tick, self.single_observation_space, zero=True)
             rewards[kill] = -1
             dones[kill] = True
             truncateds[kill] = False
@@ -167,7 +167,7 @@ class TestEnv(ParallelEnv):
                 self.agents.append(spawn)
 
         for agent in self.agents:
-            obs[agent] = _sample_space(agent, self.tick, self.observation_space)
+            obs[agent] = _sample_space(agent, self.tick, self.single_observation_space)
             rewards[agent] = 0.1 * _agent_str_to_int(agent)
             dones[agent] = False
             truncateds[agent] = False
@@ -176,10 +176,10 @@ class TestEnv(ParallelEnv):
         return obs, rewards, dones, truncateds, infos
 
     def observation_space(self, agent) -> gym.Space:
-        return self.observation_space
+        return self.single_observation_space
 
     def action_space(self, agent) -> gym.Space:
-        return self.action_space
+        return self.single_action_space
 
     def render(self, mode='human'):
         pass

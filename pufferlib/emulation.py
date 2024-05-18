@@ -11,6 +11,39 @@ import pufferlib.spaces
 from pufferlib import utils, exceptions
 from pufferlib.extensions import emulate, nativize
 
+from pufferlib.spaces import Discrete, Tuple, Dict
+
+
+def _emulate(arr, sample):
+    if isinstance(sample, dict):
+        for k, v in sample.items():
+            _emulate(arr[k], v)
+    elif isinstance(sample, tuple):
+        for i, v in enumerate(sample):
+            _emulate(arr[f'f{i}'], v)
+    else:
+        arr[()] = sample
+
+def emulate(sample, sample_dtype, emulated_dtype):
+    emulated = np.zeros(1, dtype=emulated_dtype)
+    _emulate(emulated, sample)
+    return emulated.view(sample_dtype).ravel()
+
+def _nativize(sample, space):
+    if isinstance(space, Discrete):
+        return sample.item()
+    elif isinstance(space, Tuple):
+        return tuple(_nativize(sample[f'f{i}'], elem)
+            for i, elem in enumerate(space))
+    elif isinstance(space, Dict):
+        return {k: _nativize(sample[k], value)
+            for k, value in space.items()}
+    else:
+        return sample
+
+def nativize(sample, sample_space, emulated_dtype):
+    structured = np.asarray(sample).view(emulated_dtype)[0]
+    return _nativize(structured, sample_space)
 
 def dtype_from_space(space):
     if isinstance(space, pufferlib.spaces.Tuple):
@@ -100,7 +133,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
 
     def _emulate(self, ob):
         if self.is_obs_emulated:
-            emulate(self._obs, ob)
+            _emulate(self._obs, ob)
         elif self.buf is not None:
             self.obs[:] = ob
         else:
@@ -127,6 +160,13 @@ class GymnasiumPufferEnv(gymnasium.Env):
             self.is_observation_checked = check_space(
                 self.obs, self.observation_space)
 
+        buf = self.buf
+        if buf is not None:
+            buf.rewards[0] = 0
+            buf.terminals[0] = False
+            buf.truncations[0] = False
+            buf.masks[0] = True
+ 
         return self.obs, info
  
     def step(self, action):
@@ -137,7 +177,14 @@ class GymnasiumPufferEnv(gymnasium.Env):
             raise exceptions.APIUsageError('step() called after environment is done')
 
         # Unpack actions from multidiscrete into the original action space
-        action = nativize(action, self.env.action_space, self.atn_dtype)
+        if self.is_atn_emulated:
+            action = nativize(action, self.env.action_space, self.atn_dtype)
+
+        # Hack for vec/nonvec api for now
+        try:
+            action = action[0]
+        except:
+            pass
 
         if not self.is_action_checked:
             self.is_action_checked = check_space(
@@ -191,11 +238,9 @@ class PettingZooPufferEnv:
         self.num_agents = len(self.possible_agents)
 
         self.buf = None
-        #self.obs = np.zeros(self.single_observation_space.shape,
-        #    dtype=self.single_observation_space.dtype)
 
-        #self.observations = np.zeros(self.num_agents, dtype=self.emulated.emulated_observation_dtype)
-        #obs = self.observations.view(self.single_observation_space.dtype).reshape(self.num_agents, -1)
+        self.obs = np.zeros((self.num_agents, *self.single_observation_space.shape),
+            dtype=self.single_observation_space.dtype)
 
     @property
     def agents(self):
@@ -263,6 +308,13 @@ class PettingZooPufferEnv:
                 self.single_observation_space
             )
 
+        buf = self.buf
+        if buf is not None:
+            buf.rewards[:] = 0
+            buf.terminals[:] = False
+            buf.truncations[:] = False
+            buf.masks[:] = True
+ 
         return self.dict_obs, info
 
     def step(self, actions):
@@ -304,6 +356,12 @@ class PettingZooPufferEnv:
             # TODO: negative padding buf
             if agent not in obs:
                 self.obs[i] = 0
+                buf = self.buf
+                if buf is not None:
+                    buf.rewards[i] = 0
+                    buf.terminals[i] = True
+                    buf.truncations[i] = False
+                    buf.masks[i] = False
                 continue
 
             ob = obs[agent] 
@@ -319,7 +377,7 @@ class PettingZooPufferEnv:
      
         self.all_done = all(dones.values())
         rewards = pad_agent_data(rewards, self.possible_agents, 0)
-        dones = pad_agent_data(dones, self.possible_agents, False)
+        dones = pad_agent_data(dones, self.possible_agents, True) # You changed this from false to match api test... is this correct?
         truncateds = pad_agent_data(truncateds, self.possible_agents, False)
 
         return self.dict_obs, rewards, dones, truncateds, infos
