@@ -19,14 +19,12 @@ class Policy(pufferlib.models.Policy):
             **kwargs):
         super().__init__(env)
         self.emulated = env.emulated
-        self.dtype = pufferlib.pytorch.nativize_dtype(
-            env.emulated.observation_dtype, env.emulated.emulated_observation_dtype
-        )
+        self.dtype = pufferlib.pytorch.nativize_dtype(self.emulated)
 
         # TODO: Attr passthrough
-        self.glyph_shape = env.driver_env.env.observation_space["glyphs"].shape
-        self.blstats_size = env.driver_env.env.observation_space["blstats"].shape[0]
-        self.num_actions = env.driver_env.action_space.n
+        self.glyph_shape = env.env.observation_space["glyphs"].shape
+        self.blstats_size = env.env.observation_space["blstats"].shape[0]
+        self.num_actions = env.action_space.n
 
         self.H = self.glyph_shape[0]
         self.W = self.glyph_shape[1]

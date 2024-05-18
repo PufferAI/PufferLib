@@ -10,7 +10,7 @@ import yaml
 
 import pufferlib
 import pufferlib.utils
-import pufferlib.vectorization
+import pufferlib.vector
 
 import clean_pufferl
 
@@ -107,7 +107,7 @@ def get_init_args(fn):
     return args
 
 def train(args, env_module, make_env):
-    vecenv = args.vectorization(
+    vecenv = pufferlib.vector.make(
         make_env,
         env_kwargs=args.env,
         num_envs=args.train.num_envs,
@@ -115,7 +115,7 @@ def train(args, env_module, make_env):
         #envs_per_batch=args.train.envs_per_batch,
         #mask_agents=True,
     )
-    policy = make_policy(vecenv, env_module, args)
+    policy = make_policy(vecenv.driver_env, env_module, args)
 
     train_config = args.train 
     train_config.exp_name = 'test'#args.exp_name
@@ -171,7 +171,7 @@ if __name__ == '__main__':
     parser.add_argument('--baseline', action='store_true', help='Baseline run')
     parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
     parser.add_argument('--exp-name', type=str, default=None, help="Resume from experiment")
-    parser.add_argument('--vectorization', type=str, default='serial', choices='serial multiprocessing ray'.split())
+    parser.add_argument('--vector', type=str, default='serial', choices='serial multiprocessing ray'.split())
     parser.add_argument('--wandb-entity', type=str, default='jsuarez', help='WandB entity')
     parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
     parser.add_argument('--wandb-group', type=str, default='debug', help='WandB group')
@@ -222,15 +222,15 @@ if __name__ == '__main__':
     clean_parser.parse_args(sys.argv[1:])
     args = pufferlib.namespace(**args)
 
-    vec = args.vectorization
+    vec = args.vector
     if vec == 'serial':
-        args.vectorization = pufferlib.vectorization.Serial
+        args.vector= pufferlib.vector.Serial
     elif vec == 'multiprocessing':
-        args.vectorization = pufferlib.vectorization.Multiprocessing
+        args.vector= pufferlib.vector.Multiprocessing
     elif vec == 'ray':
-        args.vectorization = pufferlib.vectorization.Ray
+        args.vector= pufferlib.vector.Ray
     else:
-        raise ValueError(f'Invalid --vectorization (serial/multiprocessing/ray).')
+        raise ValueError(f'Invalid --vector (serial/multiprocessing/ray).')
 
     if args.mode == 'sweep':
         args.track = True

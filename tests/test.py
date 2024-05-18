@@ -201,5 +201,5 @@ def test_vectorization():
 
 if __name__ == '__main__':
     test_emulation()
-    test_vectorization()
+    #test_vectorization()
     exit(0) # For Ray

@@ -85,7 +85,7 @@ def evaluate(data):
 
     while not experience.full:
         with profile.env:
-            o, r, d, t, i, env_id, mask = data.vecenv.recv()
+            o, r, d, t, info, env_id, mask = data.vecenv.recv()
             env_id = env_id.tolist()
 
         with profile.eval_misc:
@@ -123,17 +123,9 @@ def evaluate(data):
             experience.store(o, value, actions, logprob, r, d, env_id, mask)
 
             # Really neeed to look at policy pool soon
-            for agent_info in i:
-                for k, v in agent_info.items():
+            for i in info:
+                for k, v in pufferlib.utils.unroll_nested_dict(i):
                     infos[k].append(v)
-
-            '''
-            # pufferlib.utils.unroll...
-            for policy_name, policy_i in i.items():
-                for agent_i in policy_i:
-                    for name, dat in unroll_nested_dict(agent_i):
-                        infos[policy_name][name].append(dat)
-            '''
 
         with profile.env:
             data.vecenv.send(actions)

@@ -23,7 +23,9 @@ numpy_to_torch_dtype_dict = {
 
 LITTLE_BYTE_ORDER = sys.byteorder == "little"
 
-def nativize_dtype(sample_dtype: np.dtype, structured_dtype: np.dtype):
+def nativize_dtype(emulated):
+    sample_dtype: np.dtype = emulated.observation_dtype
+    structured_dtype: np.dtype = emulated.emulated_observation_dtype
     return _nativize_dtype(sample_dtype, structured_dtype)
 
 
