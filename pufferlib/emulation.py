@@ -179,12 +179,8 @@ class GymnasiumPufferEnv(gymnasium.Env):
         # Unpack actions from multidiscrete into the original action space
         if self.is_atn_emulated:
             action = nativize(action, self.env.action_space, self.atn_dtype)
-
-        # Hack for vec/nonvec api for now
-        try:
-            action = action[0]
-        except:
-            pass
+        elif isinstance(action, np.ndarray):
+            action = action.ravel()
 
         if not self.is_action_checked:
             self.is_action_checked = check_space(
