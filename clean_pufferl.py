@@ -112,7 +112,8 @@ def evaluate(data):
                 lstm_h[:, env_id] = h
                 lstm_c[:, env_id] = c
 
-            torch.cuda.synchronize()
+            if config.device == 'cuda':
+                torch.cuda.synchronize()
 
         with profile.eval_misc:
             value = value.flatten()
@@ -224,7 +225,8 @@ def train(data):
                         action=atn,
                     )
 
-                torch.cuda.synchronize()
+                if config.device == 'cuda':
+                    torch.cuda.synchronize()
 
             with profile.train_misc:
                 logratio = newlogprob - log_probs.reshape(-1)
@@ -270,7 +272,8 @@ def train(data):
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(data.policy.learner_policy.parameters(), config.max_grad_norm)
                 data.optimizer.step()
-                torch.cuda.synchronize()
+                if config.device == 'cuda':
+                    torch.cuda.synchronize()
 
             with profile.train_misc:
                 losses.policy_loss += pg_loss.item() / experience.num_minibatches
@@ -620,7 +623,7 @@ def fmt_perf(name, time, uptime):
     percent = 0 if uptime == 0 else int(100*time/uptime - 1e-5)
     return f'{c1}{name}', duration(time), f'{b2}{percent:2d}%'
 
-def print_dashboard(global_step, epoch, profile, losses, stats, msg, clear=False):
+def print_dashboard(global_step, epoch, profile, losses, stats, msg, clear=False, max_stats=[0]):
     console = Console()
     if clear:
         console.clear()
@@ -695,6 +698,11 @@ def print_dashboard(global_step, epoch, profile, losses, stats, msg, clear=False
         u.add_row(f'{c2}{metric}', f'{b2}{value:.3f}')
         i += 1
 
+    for i in range(max_stats[0] - i):
+        u = left if i % 2 == 0 else right
+        u.add_row('', '')
+
+    max_stats[0] = max(max_stats[0], i)
 
     table = Table(box=None, expand=True, pad_edge=False)
     dashboard.add_row(table)
