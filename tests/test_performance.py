@@ -14,7 +14,7 @@ import numpy as np
 
 import pufferlib
 from pufferlib.environments import ocean
-from pufferlib.vectorization import Multiprocessing, Serial, Ray, make, autotune
+from pufferlib.vector import Multiprocessing, Serial, Ray, make, autotune
 
 import time
 import psutil
@@ -121,7 +121,7 @@ def profile_sb3_vec(env_creator, num_envs, timeout=DEFAULT_TIMEOUT):
     print(f'    SB3        : {(sps):.3f}')
     return sps
 
-def sanity_check(env_creator, timeout=1):
+def sanity_check(env_creator, timeout=5):
     profile_emulation(env_creator, timeout)
     for backend in [Serial, Multiprocessing]:#, Ray]:
         profile_puffer(env_creator, backend=backend, timeout=timeout)
@@ -129,12 +129,13 @@ def sanity_check(env_creator, timeout=1):
     #profile_sb3_vec(env_creator, num_envs=1, timeout=timeout)
 
 if __name__ == '__main__':
+    '''
     from pufferlib.environments import pokemon_red
     env_creator = pokemon_red.env_creator('pokemon_red')
-    autotune(env_creator, batch_size=6)
-    exit(0)
     print('Sanity: Pokemon Red')
     sanity_check(env_creator)
+    autotune(env_creator, batch_size=32, max_envs=96)
+    exit(0)
 
     from pufferlib.environments import classic_control
     env_creator = classic_control.env_creator()
@@ -145,11 +146,14 @@ if __name__ == '__main__':
     env_creator = ocean.env_creator('spaces')
     print('Sanity: Ocean Spaces')
     sanity_check(env_creator)
+    '''
 
     from pufferlib.environments import atari
     env_creator = atari.env_creator('BreakoutNoFrameskip-v4')
     print('Sanity: Atari Breakout')
     sanity_check(env_creator)
+    autotune(env_creator, batch_size=32, max_envs=128)
+    exit(0)
 
     from pufferlib.environments import crafter
     env_creator = crafter.env_creator()
@@ -164,7 +168,9 @@ if __name__ == '__main__':
     from pufferlib.environments import nethack
     env_creator = nethack.env_creator()
     print('Sanity: NetHack')
+    autotune(env_creator, batch_size=96)
     sanity_check(env_creator)
+    exit(0)
 
     from pufferlib.environments import nmmo3
     env_creator = nmmo3.env_creator()

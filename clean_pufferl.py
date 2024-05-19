@@ -107,6 +107,7 @@ def evaluate(data):
             # Also should be using a cuda tensor to index
             h = lstm_h[:, env_id] if lstm_h is not None else None
             c = lstm_c[:, env_id] if lstm_c is not None else None
+
             actions, logprob, value, (h, c) = policy.forwards(o_device, h, c)
             if lstm_h is not None:
                 lstm_h[:, env_id] = h
@@ -394,7 +395,9 @@ class Experience:
                  cpu_offload=False, device='cuda', lstm=None, lstm_total_agents=0):
         obs_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_dtype]
         pin = device == 'cuda' and cpu_offload
-        self.obs=torch.zeros(batch_size, *obs_shape, dtype=obs_dtype, pin_memory=pin, device=device)
+        obs_device = device if not pin else 'cpu'
+        self.obs=torch.zeros(batch_size, *obs_shape, dtype=obs_dtype,
+            pin_memory=pin, device=device if not pin else 'cpu')
         self.actions=torch.zeros(batch_size, *atn_shape, dtype=int, pin_memory=pin)
         self.logprobs=torch.zeros(batch_size, pin_memory=pin)
         self.rewards=torch.zeros(batch_size, pin_memory=pin)

@@ -20,8 +20,9 @@ train:
   target_kl: ~
 
   num_envs: 8
-  num_workers: ~
-  envpool_batch_size: ~
+  num_workers: 8
+  env_batch_size: 8
+  zero_copy: True
   verbose: True
   data_dir: experiments
   checkpoint_interval: 200
@@ -109,6 +110,18 @@ space-invaders:
   env:
     name: SpaceInvadersNoFrameskip-v4
 
+breakout-max:
+  package: atari
+  env:
+    name: BreakoutNoFrameskip-v4
+  train:
+    num_envs: 96
+    num_workers: 24
+    env_batch_size: 32
+    zero_copy: False
+    batch_size: 65536
+    batch_rows: 128
+ 
 box2d:
   package: box2d
 
@@ -603,6 +616,13 @@ nethack:
   package: nethack
   env:
     name: NetHackScore-v0
+  train:
+    total_timesteps: 200_000
+    num_envs: 96
+    num_workers: 24
+    env_batch_size: 96
+    batch_size: 12288
+    compile: True
 
 nmmo:
   package: nmmo
@@ -618,8 +638,9 @@ nmmo3:
   train:
     total_timesteps: 10_000_000
     #total_timesteps: 10_000_000_000
-    num_envs: 64
-    envpool_batch_size: 24
+    num_envs: 72
+    num_workers: 24
+    env_batch_size: 24
     update_epochs: 1
     gamma: 0.998
     #batch_size: 32768
@@ -735,14 +756,17 @@ pokemon_red:
   package: pokemon_red
   train:
     total_timesteps: 1_000_000
-    num_envs: 128
-    envs_per_worker: 4
-    envs_per_batch: 48 
+    num_envs: 96 
+    num_workers: 24
+    env_batch_size: 32
+    zero_copy: False
     update_epochs: 3
     gamma: 0.998
-    batch_size: 32768
+    batch_size: 65536
     batch_rows: 128
     #compile: True
+    learning_rate: 2.0e-4
+    anneal_lr: False
   env:
     name: pokemon_red
 pokemon-red:

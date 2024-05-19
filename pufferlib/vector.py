@@ -189,7 +189,7 @@ def _worker_process(env_creators, env_args, env_kwargs, num_envs,
     while True:
         sem = semaphores[worker_idx]
         if sem >= MAIN:
-            if time.time() - start > 0.1:
+            if time.time() - start > 0.5:
                 time.sleep(0.01)
             continue
 
@@ -231,10 +231,12 @@ class Multiprocessing:
             batch_size = num_envs
         if num_workers is None:
             num_workers = num_envs
-        if zero_copy and num_envs % num_workers != 0:
+
+        num_batches = num_envs / batch_size
+        if zero_copy and num_batches != int(num_batches):
             # This is so you can have n equal buffers
             raise APIUsageError(
-                'zero_copy: num_envs must be divisible by num_workers')
+                'zero_copy: num_envs must be divisible by batch_size')
 
         self.num_environments = num_envs
         envs_per_worker = num_envs // num_workers
@@ -563,6 +565,20 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
         raise APIUsageError('num_envs must be at least 1')
     if num_envs != int(num_envs):
         raise APIUsageError('num_envs must be an integer')
+
+    if 'num_workers' in kwargs:
+        num_workers = kwargs['num_workers']
+        # TODO: None?
+        envs_per_worker = num_envs / num_workers
+        if envs_per_worker != int(envs_per_worker):
+            raise APIUsageError('num_envs must be divisible by num_workers')
+
+        if 'batch_size' in kwargs:
+            batch_size = kwargs['batch_size']
+            if batch_size % envs_per_worker != 0:
+                raise APIUsageError(
+                    'batch_size must be divisible by (num_envs / num_workers)')
+        
  
     if env_args is None:
         env_args = []
@@ -629,7 +645,7 @@ def check_envs(envs, driver):
             raise APIUsageError(f'\n{atn_space}\n{driver_atn} atn space mismatch')
 
 def autotune(env_creator, batch_size, max_envs=1e9, model_forward_s=0.0,
-        max_env_ram_gb=4, max_batch_vram_gb=0.05, time_per_test=3): 
+        max_env_ram_gb=16, max_batch_vram_gb=0.05, time_per_test=5): 
     '''Determine the optimal vectorization parameters for your system'''
     if max_envs < batch_size:
         raise ValueError('max_envs < min_batch_size')
@@ -714,10 +730,10 @@ def autotune(env_creator, batch_size, max_envs=1e9, model_forward_s=0.0,
     configs = []
 
     # Strategy 1: one batch per core
-    strategy_cores = min(num_cores, max_envs // num_cores)
+    strategy_cores = min(num_cores, max_envs // batch_size)
     configs.append(dict(
         num_envs=batch_size*strategy_cores,
-        num_workers=num_cores,
+        num_workers=strategy_cores,
         batch_size=batch_size,
         backend=Multiprocessing,
     ))
@@ -725,25 +741,29 @@ def autotune(env_creator, batch_size, max_envs=1e9, model_forward_s=0.0,
     strategy_min_envs_per_worker = int(np.ceil((batch_size+1) / num_cores))
     strategy_num_envs = []
     for envs_per_worker in range(strategy_min_envs_per_worker, batch_size):
-        if envs_per_worker * num_cores > max_envs:
+        num_envs = envs_per_worker * num_cores
+        if num_envs > max_envs:
             break
         elif batch_size % envs_per_worker != 0:
             continue
 
         # Strategy 2: Full async. Only reasonable for low bandwidth
-        if throughput < 1.5:
-            configs.append(dict(
-                num_envs=envs_per_worker*num_cores,
-                num_workers=num_cores,
-                batch_size=batch_size,
-                zero_copy=False,
-                backend=Multiprocessing,
-            ))
+        #if throughput < 1.5:
+        configs.append(dict(
+            num_envs=num_envs,
+            num_workers=num_cores,
+            batch_size=batch_size,
+            zero_copy=False,
+            backend=Multiprocessing,
+        ))
 
         # Strategy 3: Contiguous blocks. Only reasonable for high bandwidth
+        num_batchs = num_envs / batch_size
+        if num_batchs != int(num_batchs):
+            continue
         if throughput > 0.5:
             configs.append(dict(
-                num_envs=envs_per_worker*num_cores,
+                num_envs=num_envs,
                 num_workers=num_cores,
                 batch_size=batch_size,
                 backend=Multiprocessing,

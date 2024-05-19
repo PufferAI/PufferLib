@@ -65,7 +65,8 @@ class Policy(pufferlib.models.Policy):
         ]
 
         self.extract_representation = nn.Sequential(
-            *interleave(conv_extract, [nn.ELU()] * len(conv_extract))
+            *interleave(conv_extract, [nn.ELU()] * len(conv_extract)),
+            nn.MaxPool2d(2) # Added this to cut down on crazy linear layer
         )
 
         # CNN crop model.
@@ -81,12 +82,12 @@ class Policy(pufferlib.models.Policy):
         ]
 
         self.extract_crop_representation = nn.Sequential(
-            *interleave(conv_extract_crop, [nn.ELU()] * len(conv_extract))
+            *interleave(conv_extract_crop, [nn.ELU()] * len(conv_extract),),
         )
 
         out_dim = self.k_dim
         # CNN over full glyph map
-        out_dim += self.H * self.W * Y
+        out_dim += (self.H//2) * (self.W//2) * Y
 
         # CNN crop model.
         out_dim += self.crop_dim**2 * Y
