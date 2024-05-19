@@ -566,8 +566,10 @@ crafter:
   train:
     num_envs: 96
     num_workers: 24
-    env_batch_size: 96
-    batch_size: 12288
+    env_batch_size: 48 
+    zero_copy: False
+    batch_size: 6144
+    compile: True
  
 
 dm_control:
