@@ -146,13 +146,12 @@ if __name__ == '__main__':
     env_creator = ocean.env_creator('spaces')
     print('Sanity: Ocean Spaces')
     sanity_check(env_creator)
-    '''
 
     from pufferlib.environments import atari
     env_creator = atari.env_creator('BreakoutNoFrameskip-v4')
     print('Sanity: Atari Breakout')
     sanity_check(env_creator)
-    autotune(env_creator, batch_size=32, max_envs=128)
+    autotune(env_creator, batch_size=48, max_envs=192)
     exit(0)
 
     from pufferlib.environments import crafter
@@ -164,11 +163,12 @@ if __name__ == '__main__':
     env_creator = minigrid.env_creator()
     print('Sanity: MiniGrid')
     sanity_check(env_creator)
+    '''
 
     from pufferlib.environments import nethack
     env_creator = nethack.env_creator()
     print('Sanity: NetHack')
-    autotune(env_creator, batch_size=96)
+    autotune(env_creator, batch_size=48)
     sanity_check(env_creator)
     exit(0)
 
