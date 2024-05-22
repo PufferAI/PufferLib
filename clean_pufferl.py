@@ -350,14 +350,12 @@ def train(data):
 
             if data.wandb is not None and data.global_step > 0:
                 data.wandb.log({
-                    'SPS': profile.SPS,
-                    'global_step': data.global_step,
-                    'learning_rate': data.optimizer.param_groups[0]["lr"],
+                    '0verview/SPS': profile.SPS,
+                    '0verview/agent_steps': data.global_step,
+                    '0verview/learning_rate': data.optimizer.param_groups[0]["lr"],
+                    **{f'environment/{k}': v for k, v in data.stats.items()},
                     **{f'losses/{k}': v for k, v in data.losses.items()},
-                    # TODO: Add profile?
-                    #**{f'performance/{k}': v
-                    #    for k, v in data.performance.items()},
-                    **{f'stats/{k}': v for k, v in data.stats.items()},
+                    **{f'performance/{k}': v for k, v in data.profile},
                     #**{f'skillrank/{policy}': elo
                     #    for policy, elo in data.policy.ranker.ratings.items()},
                 })
@@ -393,6 +391,19 @@ class Profile:
         self.learn = pufferlib.utils.Profiler()
         self.train_misc = pufferlib.utils.Profiler()
         self.prev_steps = 0
+
+    def __iter__(self):
+        yield 'SPS', self.SPS
+        yield 'uptime', self.uptime
+        yield 'remaining', self.remaining
+        yield 'eval_time', self.eval_time
+        yield 'env_time', self.env_time
+        yield 'eval_forward_time', self.eval_forward_time
+        yield 'eval_misc_time', self.eval_misc_time
+        yield 'train_time', self.train_time
+        yield 'train_forward_time', self.train_forward_time
+        yield 'learn_time', self.learn_time
+        yield 'train_misc_time', self.train_misc_time
 
     @property
     def epoch_time(self):

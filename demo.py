@@ -8,6 +8,9 @@ import pufferlib
 import pufferlib.utils
 import pufferlib.vector
 
+from rich_argparse import RichHelpFormatter
+from rich.traceback import install
+
 import clean_pufferl
 
 
@@ -105,9 +108,9 @@ def init_wandb(args, env_module, name=None, resume=True):
         entity=args.wandb_entity,
         group=args.wandb_group,
         config={
-            'cleanrl': args.train,
-            'env': args.env,
-            'policy': args.policy,
+            'cleanrl': dict(args.train),
+            'env': dict(args.env),
+            'policy': dict(args.policy),
             #'recurrent': args.recurrent,
         },
         name=name,# or args.config,
@@ -192,7 +195,7 @@ def train(args, env_module, make_env):
         model.learn(total_timesteps=args.train.total_timesteps)
 
 if __name__ == '__main__':
-    from rich_argparse import RichHelpFormatter
+    install(show_locals=False) # Rich tracebacks
     parser = argparse.ArgumentParser(
             description=f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]'
         ' demo options. Shows valid args for your env and policy',
