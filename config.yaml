@@ -73,58 +73,44 @@ default:
 ### Arcade Learning Environment suite
 # Convenience wrappers provided for common test environments
 atari:
-  package: atari
-  env:
-    name: BreakoutNoFrameskip-v4
+  env_name: BreakoutNoFrameskip-v4
 beamrider:
   package: atari
-  env:
-    name: BeamRiderNoFrameskip-v4
+  env_name: BeamRiderNoFrameskip-v4
 beam_rider:
   package: atari
-  env:
-    name: BeamRiderNoFrameskip-v4
+  env_name: BeamRiderNoFrameskip-v4
 beam-rider:
   package: atari
-  env:
-    name: BeamRiderNoFrameskip-v4
+  env_name: BeamRiderNoFrameskip-v4
 breakout:
   package: atari
-  env:
-    name: BreakoutNoFrameskip-v4
+  env_name: BreakoutNoFrameskip-v4
 enduro:
   package: atari
-  env:
-    name: EnduroNoFrameskip-v4
+  env_name: EnduroNoFrameskip-v4
 pong:
   package: atari
-  env:
-    name: PongNoFrameskip-v4
+  env_name: PongNoFrameskip-v4
 qbert:
   package: atari
-  env:
-    name: QbertNoFrameskip-v4
+  env_name: QbertNoFrameskip-v4
 seaquest:
   package: atari
-  env:
-    name: SeaquestNoFrameskip-v4
+  env_name: SeaquestNoFrameskip-v4
 spaceinvaders:
   package: atari
-  env:
-    name: SpaceInvadersNoFrameskip-v4
+  env_name: SpaceInvadersNoFrameskip-v4
 space_invaders:
   package: atari
-  env:
-    name: SpaceInvadersNoFrameskip-v4
+  env_name: SpaceInvadersNoFrameskip-v4
 space-invaders:
   package: atari
-  env:
-    name: SpaceInvadersNoFrameskip-v4
+  env_name: SpaceInvadersNoFrameskip-v4
 
 breakout-max:
   package: atari
-  env:
-    name: BreakoutNoFrameskip-v4
+  env_name: BreakoutNoFrameskip-v4
   train:
     num_envs: 96
     num_workers: 24
@@ -140,7 +126,7 @@ box2d:
 # Shared hyperparams (best for all envs)
 # Per-env hyperparams from CARBS
 procgen:
-  package: procgen
+  env_name: bigfish
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0005
@@ -154,13 +140,12 @@ procgen:
     anneal_lr: False
     clip_coef: 0.2
     vf_clip_coef: 0.2
-  env:
-    name: bigfish
   policy:
     cnn_width: 16
     mlp_width: 256
 bigfish:
   package: procgen
+  env_name: bigfish
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0001901266338648
@@ -178,13 +163,13 @@ bigfish:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: bigfish
     num_envs: 24
   policy:
     cnn_width: 22
     mlp_width: 327
 bossfight:
   package: procgen
+  env_name: bossfight
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0001391202716783
@@ -202,13 +187,13 @@ bossfight:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: bossfight
     num_envs: 186
   policy:
     cnn_width: 34
     mlp_width: 83
 caveflyer:
   package: procgen
+  env_name: caveflyer
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0003922570060721
@@ -226,13 +211,13 @@ caveflyer:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: caveflyer
     num_envs: 96
   policy:
     cnn_width: 17
     mlp_width: 242
 chaser:
   package: procgen
+  env_name: chaser
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0003508035442326
@@ -250,13 +235,13 @@ chaser:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: chaser
     num_envs: 89
   policy:
     cnn_width: 37
     mlp_width: 198
 climber:
   package: procgen
+  env_name: climber
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0001217047694837
@@ -274,13 +259,13 @@ climber:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: climber
     num_envs: 207
   policy:
     cnn_width: 29
     mlp_width: 134
 coinrun:
   package: procgen
+  env_name: coinrun
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0002171100540455
@@ -298,13 +283,13 @@ coinrun:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: coinrun
     num_envs: 246
   policy:
     cnn_width: 16
     mlp_width: 384
 dodgeball:
   package: procgen
+  env_name: dodgeball
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0002471773711262
@@ -322,13 +307,13 @@ dodgeball:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: dodgeball
     num_envs: 385
   policy:
     cnn_width: 24
     mlp_width: 538
 fruitbot:
   package: procgen
+  env_name: fruitbot
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0005426317191531
@@ -346,13 +331,13 @@ fruitbot:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: fruitbot
     num_envs: 184
   policy:
     cnn_width: 24
     mlp_width: 600
 heist:
   package: procgen
+  env_name: heist
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0001460588554421
@@ -370,13 +355,13 @@ heist:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: heist
     num_envs: 999
   policy:
     cnn_width: 60
     mlp_width: 154
 jumper:
   package: procgen
+  env_name: jumper
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0002667825838749
@@ -394,13 +379,13 @@ jumper:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: jumper
     num_envs: 320
   policy:
     cnn_width: 24
     mlp_width: 190
 leaper:
   package: procgen
+  env_name: leaper
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.000238551194954
@@ -418,13 +403,13 @@ leaper:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: leaper
     num_envs: 252
   policy:
     cnn_width: 28
     mlp_width: 100
 maze:
   package: procgen
+  env_name: maze
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0001711754945436
@@ -442,13 +427,13 @@ maze:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: maze
     num_envs: 820
   policy:
     cnn_width: 28
     mlp_width: 526
 miner:
   package: procgen
+  env_name: miner
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.000328692228852
@@ -466,13 +451,13 @@ miner:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: miner
     num_envs: 343
   policy:
     cnn_width: 38
     mlp_width: 175
 ninja:
   package: procgen
+  env_name: ninja
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0002649776171804
@@ -490,13 +475,13 @@ ninja:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: ninja
     num_envs: 293
   policy:
     cnn_width: 25
     mlp_width: 317
 plunder:
   package: procgen
+  env_name: plunder
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0002630139944456
@@ -514,13 +499,13 @@ plunder:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: plunder
     num_envs: 127
   policy:
     cnn_width: 30
     mlp_width: 288
 starpilot:
   package: procgen
+  env_name: starpilot
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0004257280551714
@@ -538,7 +523,6 @@ starpilot:
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    name: starpilot
     num_envs: 320
   policy:
     cnn_width: 25
@@ -546,23 +530,19 @@ starpilot:
 
 bsuite:
   package: bsuite
+  env_name: bandit/0
   train:
     total_timesteps: 1_000_000
     num_envs: 1
-  env:
-    name: bandit/0
 
 butterfly:
   package: butterfly
-  env:
-    name: cooperative_pong_v5
+  env_name: cooperative_pong_v5
 
 classic_control:
-  package: classic_control
+  env_name: cartpole
   train:
     num_envs: 16
-  env:
-    name: cartpole
 classic-control:
   package: classic_control
 classiccontrol:
@@ -572,8 +552,7 @@ cartpole:
 
 crafter:
   package: crafter
-  env:
-    name: CrafterReward-v1
+  env_name: CrafterReward-v1
   train:
     num_envs: 96
     num_workers: 24
@@ -581,7 +560,6 @@ crafter:
     zero_copy: False
     batch_size: 6144
     compile: True
- 
 
 dm_control:
   package: dm_control
@@ -603,38 +581,26 @@ dml:
 
 griddly:
   package: griddly
-  env:
-    name: GDY-Spiders-v0
+  env_name: GDY-Spiders-v0
 
 magent:
   package: magent
-  env:
-    name: battle_v4
+  env_name: battle_v4
 
 microrts:
-  package: microrts
-  env:
-    name: GlobalAgentCombinedRewardEnv
+  env_name: GlobalAgentCombinedRewardEnv
 
 minerl:
-  package: minerl
-  env:
-    name: MineRLNavigateDense-v0
+  env_name: MineRLNavigateDense-v0
 
 minigrid:
-  package: minigrid
-  env:
-    name: MiniGrid-LavaGapS7-v0
+  env_name: MiniGrid-LavaGapS7-v0
 
 minihack:
-  package: minihack
-  env:
-    name: MiniHack-River-v0
+  env_name: MiniHack-River-v0
 
 nethack:
-  package: nethack
-  env:
-    name: NetHackScore-v0
+  env_name: NetHackScore-v0
   train:
     num_envs: 72
     num_workers: 24
@@ -645,16 +611,12 @@ nethack:
     compile: True
 
 nmmo:
-  package: nmmo
   train:
     num_envs: 1
     batch_size: 4096
     batch_rows: 128
-  env:
-    name: nmmo
 
 nmmo3:
-  package: nmmo3
   train:
     total_timesteps: 10_000_000
     #total_timesteps: 10_000_000_000
@@ -669,7 +631,6 @@ nmmo3:
     #batch_rows: 256
     #compile: True
   env:
-    name: nmmo3
     num_envs: 1 # NMMO3 provides its own fast multienv
     #num_envs: 8 # NMMO3 provides its own fast multienv
     #
@@ -699,7 +660,6 @@ nmmo3debug:
 
 # Ocean: PufferAI's first party environment suite
 ocean:
-  package: ocean
   env_name: squared
   use_rnn: True
   train:
@@ -712,68 +672,45 @@ ocean:
     device: cpu
 bandit:
   package: ocean
-  env:
-    name: bandit
 memory:
   package: ocean
-  env:
-    name: memory
 multiagent:
   package: ocean
-  env:
-    name: multiagent
 password:
   package: ocean
-  env:
-    name: password
 performance:
   package: ocean
-  env:
-    name: performance
 spaces:
   package: ocean
-  env:
-    name: spaces
 squared:
   package: ocean
-  env_name: squared
 stochastic:
   package: ocean
-  env:
-    name: stochastic
 
 open_spiel:
-  package: open_spiel
+  env_name: connect_four
   train:
     pool_kernel: [0, 1, 1, 0]
     num_envs: 32
     batch_size: 4096
-  env:
-    name: connect_four
 open-spiel:
   package: open_spiel
 openspiel:
   package: open_spiel
 connect_four:
   package: open_spiel
-  env:
-    name: connect_four
+  env_name: connect_four
 connect-four:
   package: open_spiel
-  env:
-    name: connect_four
+  env_name: connect_four
 connectfour:
   package: open_spiel
-  env:
-    name: connect_four
+  env_name: connect_four
 connect4:
   package: open_spiel
-  env:
-    name: connect_four
+  env_name: connect_four
 
 pokemon_red:
-  package: pokemon_red
-  env_name: pokemon_red
   use_rnn: True
   train:
     total_timesteps: 1_000_000
@@ -815,17 +752,12 @@ linksawaken:
 zelda:
   package: links_awaken
 
-smac:
-  package: smac
-  env:
-    name: smac
+smac: {}
 starcraft:
   package: smac
 
 stable_retro:
-  package: stable_retro
-  env:
-    name: Airstriker-Genesis
+  env_name: Airstriker-Genesis
 stable-retro:
   package: stable_retro
 stableretro:

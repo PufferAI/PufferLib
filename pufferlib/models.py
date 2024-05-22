@@ -61,8 +61,8 @@ class Default(nn.Module):
         actions = self.decoder(hidden)
         return actions, value
 
-class RecurrentWrapper(nn.Module):
-    def __init__(self, env, policy, rnn, input_size=128, hidden_size=128, num_layers=1):
+class LSTMWrapper(nn.Module):
+    def __init__(self, env, policy, input_size=128, hidden_size=128, num_layers=1):
         '''Wraps your policy with an LSTM without letting you shoot yourself in the
         foot with bad transpose and shape operations. This saves much pain.
         Requires that your policy define encode_observations and decode_actions.
@@ -73,7 +73,7 @@ class RecurrentWrapper(nn.Module):
         self.policy = policy
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.recurrent = rnn
+        self.recurrent = nn.LSTM(input_size, hidden_size, num_layers)
 
         for name, param in self.recurrent.named_parameters():
             if "bias" in name:

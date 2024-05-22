@@ -1,10 +1,8 @@
 from functools import partial
-import torch
-
 import pufferlib.models
 
-RNN = partial(
-    torch.nn.LSTM,
+Recurrent = partial(
+    pufferlib.models.LSTMWrapper,
     input_size=128,
     hidden_size=128,
     num_layers=1

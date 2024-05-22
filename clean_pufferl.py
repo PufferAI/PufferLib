@@ -129,13 +129,14 @@ def evaluate(data):
         with profile.eval_forward, torch.no_grad():
             # TODO: In place-update should be faster. Leaking 7% speed max
             # Also should be using a cuda tensor to index
-            h = lstm_h[:, env_id] if lstm_h is not None else None
-            c = lstm_c[:, env_id] if lstm_c is not None else None
-
-            actions, logprob, _, value, (h, c) = policy(o_device, (h, c))
             if lstm_h is not None:
+                h = lstm_h[:, env_id]
+                c = lstm_c[:, env_id]
+                actions, logprob, _, value, (h, c) = policy(o_device, (h, c))
                 lstm_h[:, env_id] = h
                 lstm_c[:, env_id] = c
+            else:
+                actions, logprob, _, value = policy(o_device)
 
             if config.device == 'cuda':
                 torch.cuda.synchronize()

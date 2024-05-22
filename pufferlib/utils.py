@@ -17,6 +17,7 @@ import psutil
 import warnings
 from functools import wraps
 
+import functools
 import inspect
 import importlib
 
@@ -37,9 +38,15 @@ def get_init_args(fn):
     if fn is None:
         return {}
 
+    if isinstance(fn, functools.partial):
+        return fn.keywords
+
     sig = inspect.signature(fn)
     kwargs = {}
     for name, param in sig.parameters.items():
+        if name in ['env', 'policy']:
+            # Hack to avoid duplicate kwargs
+            continue
         if param.kind == inspect.Parameter.VAR_POSITIONAL:
             continue
         elif param.kind == inspect.Parameter.VAR_KEYWORD:

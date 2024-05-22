@@ -4,7 +4,7 @@ from torch import nn
 import pufferlib.models
 import pufferlib.pytorch
 
-class Recurrent(pufferlib.models.RecurrentWrapper):
+class Recurrent(pufferlib.models.LSTMWrapper):
     def __init__(self, env, policy, input_size=256, hidden_size=256, num_layers=1):
         super().__init__(env, policy, input_size, hidden_size, num_layers)
 

@@ -37,24 +37,10 @@ def load_config(parser, config_path='config.yaml'):
     make_env_args = [make_name] if make_name else []
     make_env = env_module.env_creator(*make_env_args)
     make_env_args = pufferlib.utils.get_init_args(make_env)
-    #policy_args = pufferlib.utils.get_init_args(env_module.Policy)
-    policy_args = env_module.Policy.keywords
-    #policy_args.pop('env') # TODO: Any better way to pass env?
-    rnn_args = env_module.RNN.keywords
-    #rnn_args = pufferlib.utils.get_init_args(env_module.RNN)
+    policy_args = pufferlib.utils.get_init_args(env_module.Policy)
+    rnn_args = pufferlib.utils.get_init_args(env_module.Recurrent)
     fn_sig = dict(env=make_env_args, policy=policy_args, rnn=rnn_args)
     config = vars(parser.parse_known_args()[0])
-
-    if 'use_rnn' in env_config:
-        config['use_rnn'] = env_config['use_rnn']
-    elif 'use_rnn' in pkg_config:
-        config['use_rnn'] = pkg_config['use_rnn']
-    else:
-        config['use_rnn'] = default['use_rnn']
-
-    parser.add_argument('--use_rnn', default=False, action='store_true',
-        help='Wrap policy with an RNN')
-    config['use_rnn'] = config['use_rnn'] or parser.parse_known_args()[0].use_rnn
 
     valid_keys = 'env policy rnn train sweep'.split()
     for key in valid_keys:
@@ -84,6 +70,17 @@ def load_config(parser, config_path='config.yaml'):
 
     pufferlib.utils.validate_args(make_env, config['env'])
     pufferlib.utils.validate_args(env_module.Policy, config['policy'])
+
+    if 'use_rnn' in env_config:
+        config['use_rnn'] = env_config['use_rnn']
+    elif 'use_rnn' in pkg_config:
+        config['use_rnn'] = pkg_config['use_rnn']
+    else:
+        config['use_rnn'] = default['use_rnn']
+
+    parser.add_argument('--use_rnn', default=False, action='store_true',
+        help='Wrap policy with an RNN')
+    config['use_rnn'] = config['use_rnn'] or parser.parse_known_args()[0].use_rnn
     parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help='show this help message and exit')
     parser.parse_args()
     return pkg_name, pufferlib.namespace(**config), env_module, make_env, make_policy
@@ -91,8 +88,7 @@ def load_config(parser, config_path='config.yaml'):
 def make_policy(env, env_module, args):
     policy = env_module.Policy(env, **args.policy)
     if args.use_rnn:
-        rnn = env_module.RNN(**args.rnn)
-        policy = pufferlib.models.RecurrentWrapper(env, policy, rnn, **args.rnn)
+        policy = env_module.Recurrent(env, policy, **args.rnn)
         policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)
     else:
         policy = pufferlib.frameworks.cleanrl.Policy(policy)
@@ -226,6 +222,7 @@ if __name__ == '__main__':
     else:
         raise ValueError(f'Invalid --vector (serial/multiprocessing/ray).')
 
+    args.wandb = None
     if args.mode == 'sweep':
         args.track = True
     elif args.track:

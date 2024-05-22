@@ -22,7 +22,7 @@ def test_cleanrl_utils():
     obs, info, _, _ = envs.reset()
 
     policy = pufferlib.models.Default(envs.driver_env)
-    policy = pufferlib.models.RecurrentWrapper(envs.driver_env, policy)
+    policy = pufferlib.models.LSTMWrapper(envs.driver_env, policy)
     policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)
 
     obs = torch.tensor(obs).unsqueeze(1).float()
