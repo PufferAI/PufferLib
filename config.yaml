@@ -1,63 +1,74 @@
-train:
-  seed: 1
-  torch_deterministic: True
-  cpu_offload: False
-  device: cuda
-  total_timesteps: 10_000_000
-  learning_rate: 2.5e-4
-  num_steps: 128
-  anneal_lr: True
-  gamma: 0.99
-  gae_lambda: 0.95
-  num_minibatches: 4
-  update_epochs: 4
-  norm_adv: True
-  clip_coef: 0.1
-  clip_vloss: True
-  ent_coef: 0.01
-  vf_coef: 0.5
-  max_grad_norm: 0.5
-  target_kl: ~
+### PufferLib demo environments
+# Package parameters override defaults.
+# Parameters for specific envs override packages
+# You cannot specify any deeper than that.
+default:
+  package: ~
+  env_name: ~
+  env: {}
+  policy: {}
+  use_rnn: False
+  rnn: {}
+  train:
+    seed: 1
+    torch_deterministic: True
+    cpu_offload: False
+    device: cuda
+    total_timesteps: 10_000_000
+    learning_rate: 2.5e-4
+    num_steps: 128
+    anneal_lr: True
+    gamma: 0.99
+    gae_lambda: 0.95
+    num_minibatches: 4
+    update_epochs: 4
+    norm_adv: True
+    clip_coef: 0.1
+    clip_vloss: True
+    ent_coef: 0.01
+    vf_coef: 0.5
+    max_grad_norm: 0.5
+    target_kl: ~
 
-  num_envs: 8
-  num_workers: 8
-  env_batch_size: 8
-  zero_copy: True
-  verbose: True
-  data_dir: experiments
-  checkpoint_interval: 200
-  pool_kernel: [0]
-  batch_size: 1024
-  batch_rows: 32
-  bptt_horizon: 16 #8
-  vf_clip_coef: 0.1
-  compile: False
-  compile_mode: reduce-overhead
+    num_envs: 8
+    num_workers: 8
+    env_batch_size: 8
+    zero_copy: True
+    verbose: True
+    data_dir: experiments
+    checkpoint_interval: 200
+    pool_kernel: [0]
+    batch_size: 1024
+    batch_rows: 32
+    bptt_horizon: 16 #8
+    vf_clip_coef: 0.1
+    compile: False
+    compile_mode: reduce-overhead
 
-sweep:
-  method: random
-  name: sweep
-  metric:
-    goal: maximize
-    name: episodic_return
-  # Nested parameters name required by WandB API
-  parameters:
-    train:
-      parameters:
-        learning_rate: {
-          'distribution': 'log_uniform_values',
-          'min': 1e-4,
-          'max': 1e-1,
-        }
-        batch_size: {
-          'values': [128, 256, 512, 1024, 2048],
-        }
-        batch_rows: {
-          'values': [16, 32, 64, 128, 256],
-        }
-        bptt_horizon: {
-          'values': [4, 8, 16, 32],
-        }
+  sweep:
+    method: random
+    name: sweep
+    metric:
+      goal: maximize
+      name: episodic_return
+    # Nested parameters name required by WandB API
+    parameters:
+      train:
+        parameters:
+          learning_rate: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-4,
+            'max': 1e-1,
+          }
+          batch_size: {
+            'values': [128, 256, 512, 1024, 2048],
+          }
+          batch_rows: {
+            'values': [16, 32, 64, 128, 256],
+          }
+          bptt_horizon: {
+            'values': [4, 8, 16, 32],
+          }
 
 ### Arcade Learning Environment suite
 # Convenience wrappers provided for common test environments
@@ -689,6 +700,8 @@ nmmo3debug:
 # Ocean: PufferAI's first party environment suite
 ocean:
   package: ocean
+  env_name: squared
+  use_rnn: True
   train:
     total_timesteps: 30_000
     learning_rate: 0.017
@@ -697,8 +710,6 @@ ocean:
     batch_rows: 32
     bptt_horizon: 4
     device: cpu
-  env:
-    name: squared
 bandit:
   package: ocean
   env:
@@ -725,8 +736,7 @@ spaces:
     name: spaces
 squared:
   package: ocean
-  env:
-    name: squared
+  env_name: squared
 stochastic:
   package: ocean
   env:
@@ -763,6 +773,8 @@ connect4:
 
 pokemon_red:
   package: pokemon_red
+  env_name: pokemon_red
+  use_rnn: True
   train:
     total_timesteps: 1_000_000
     num_envs: 96 
@@ -776,8 +788,6 @@ pokemon_red:
     compile: True
     learning_rate: 2.0e-4
     anneal_lr: False
-  env:
-    name: pokemon_red
 pokemon-red:
   package: pokemon_red
 pokemonred:
@@ -786,6 +796,15 @@ pokemon:
   package: pokemon_red
 pokegym:
   package: pokemon_red
+pokedebug:
+  package: pokemon_red
+  train:
+    num_envs: 4
+    num_workers: 4
+    env_batch_size: 2
+    batch_size: 2048
+    batch_rows: 16
+    compile: False
  
 links_awaken:
   package: links_awaken

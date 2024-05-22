@@ -1,12 +1,8 @@
 from pdb import set_trace as T
 import argparse
 import shutil
-import sys
-import os
-
-import importlib
-import inspect
 import yaml
+import os
 
 import pufferlib
 import pufferlib.utils
@@ -15,34 +11,88 @@ import pufferlib.vector
 import clean_pufferl
 
 
-def load_from_config(env):
-    with open('config.yaml') as f:
+def load_config(parser, config_path='config.yaml'):
+    '''Just a fancy config loader. Populates argparse from
+    yaml + env/policy fn signatures to give you a nice
+    --help menu + some limited validation of the config'''
+    args, _ = parser.parse_known_args()
+    env_name, pkg_name = args.env, args.pkg
+
+    with open(config_path) as f:
         config = yaml.safe_load(f)
+    if 'default' not in config:
+        raise ValueError('Deleted default config section?')
+    if env_name not in config:
+        raise ValueError(f'{env_name} not in config'
+            'It might be available through a parent package, e.g.'
+            '--config atari --env MontezumasRevengeNoFrameskip-v4.')
 
-    assert env in config, f'"{env}" not found in config.yaml. Uncommon environments that are part of larger packages may not have their own config. Specify these manually using the parent package, e.g. --config atari --env MontezumasRevengeNoFrameskip-v4.'
+    default = config['default']
+    env_config = config[env_name or pkg_name]
+    pkg_name = pkg_name or env_config.get('package', env_name)
+    pkg_config = config[pkg_name]
+    env_module = pufferlib.utils.install_and_import(
+        f'pufferlib.environments.{pkg_name}')
+    make_name = env_config.get('env_name', None)
+    make_env_args = [make_name] if make_name else []
+    make_env = env_module.env_creator(*make_env_args)
+    make_env_args = pufferlib.utils.get_init_args(make_env)
+    #policy_args = pufferlib.utils.get_init_args(env_module.Policy)
+    policy_args = env_module.Policy.keywords
+    #policy_args.pop('env') # TODO: Any better way to pass env?
+    rnn_args = env_module.RNN.keywords
+    #rnn_args = pufferlib.utils.get_init_args(env_module.RNN)
+    fn_sig = dict(env=make_env_args, policy=policy_args, rnn=rnn_args)
+    config = vars(parser.parse_known_args()[0])
 
-    default_keys = 'env train policy recurrent sweep_metadata sweep_metric sweep'.split()
-    defaults = {key: config.get(key, {}) for key in default_keys}
+    if 'use_rnn' in env_config:
+        config['use_rnn'] = env_config['use_rnn']
+    elif 'use_rnn' in pkg_config:
+        config['use_rnn'] = pkg_config['use_rnn']
+    else:
+        config['use_rnn'] = default['use_rnn']
 
-    # Package and subpackage (environment) configs
-    env_config = config[env]
-    pkg = env_config['package']
-    pkg_config = config[pkg]
+    parser.add_argument('--use_rnn', default=False, action='store_true',
+        help='Wrap policy with an RNN')
+    config['use_rnn'] = config['use_rnn'] or parser.parse_known_args()[0].use_rnn
 
-    combined_config = {}
-    for key in default_keys:
+    valid_keys = 'env policy rnn train sweep'.split()
+    for key in valid_keys:
+        fn_subconfig = fn_sig.get(key, {})
         env_subconfig = env_config.get(key, {})
         pkg_subconfig = pkg_config.get(key, {})
+        # Priority env->pkg->default->fn config
+        config[key] = {**fn_subconfig, **default[key],
+            **pkg_subconfig, **env_subconfig}
 
-        # Override first with pkg then with env configs
-        combined_config[key] = {**defaults[key], **pkg_subconfig, **env_subconfig}
+    for name in valid_keys:
+        sub_config = config[name]
+        for key, value in sub_config.items():
+            data_key = f'{name}.{key}'
+            cli_key = f'--{data_key}'.replace('_', '-')
+            if isinstance(value, bool) and value is False:
+                parser.add_argument(cli_key, default=value, action='store_true')
+            elif isinstance(value, bool) and value is True:
+                data_key = f'{name}.no_{key}'
+                cli_key = f'--{data_key}'.replace('_', '-')
+                parser.add_argument(cli_key, default=value, action='store_false')
+            else:
+                parser.add_argument(cli_key, default=value, type=type(value))
 
-    return pkg, pufferlib.namespace(**combined_config)
+            config[name][key] = getattr(parser.parse_known_args()[0], data_key)
+        config[name] = pufferlib.namespace(**config[name])
+
+    pufferlib.utils.validate_args(make_env, config['env'])
+    pufferlib.utils.validate_args(env_module.Policy, config['policy'])
+    parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help='show this help message and exit')
+    parser.parse_args()
+    return pkg_name, pufferlib.namespace(**config), env_module, make_env, make_policy
    
 def make_policy(env, env_module, args):
     policy = env_module.Policy(env, **args.policy)
-    if args.force_recurrence or env_module.Recurrent is not None:
-        policy = env_module.Recurrent(env, policy, **args.recurrent)
+    if args.use_rnn:
+        rnn = env_module.RNN(**args.rnn)
+        policy = pufferlib.models.RecurrentWrapper(env, policy, rnn, **args.rnn)
         policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)
     else:
         policy = pufferlib.frameworks.cleanrl.Policy(policy)
@@ -88,23 +138,6 @@ def sweep(args, env_module, make_env):
             traceback.print_exc()
 
     wandb.agent(sweep_id, main, count=20)
-
-def get_init_args(fn):
-    if fn is None:
-        return {}
-
-    sig = inspect.signature(fn)
-    args = {}
-    for name, param in sig.parameters.items():
-        if name in ('self', 'env', 'policy'):
-            continue
-        if param.kind == inspect.Parameter.VAR_POSITIONAL:
-            continue
-        elif param.kind == inspect.Parameter.VAR_KEYWORD:
-            continue
-        else:
-            args[name] = param.default if param.default is not inspect.Parameter.empty else None
-    return args
 
 def train(args, env_module, make_env):
     vecenv = pufferlib.vector.make(
@@ -163,10 +196,14 @@ def train(args, env_module, make_env):
         model.learn(total_timesteps=args.train.total_timesteps)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Parse environment argument', add_help=False)
+    from rich_argparse import RichHelpFormatter
+    parser = argparse.ArgumentParser(
+            description=f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]'
+        ' demo options. Shows valid args for your env and policy',
+        formatter_class=RichHelpFormatter, add_help=False)
+    parser.add_argument('--env', type=str, default='pokemon_red', help='Name of specific environment to run')
+    parser.add_argument('--pkg', type=str, default=None, help='Configuration in config.yaml to use')
     parser.add_argument('--backend', type=str, default='clean_pufferl', help='Train backend (clean_pufferl, sb3)')
-    parser.add_argument('--config', type=str, default='pokemon_red', help='Configuration in config.yaml to use')
-    parser.add_argument('--env', type=str, default=None, help='Name of specific environment to run')
     parser.add_argument('--mode', type=str, default='train', choices='train sweep evaluate'.split())
     parser.add_argument('--eval-model-path', type=str, default=None, help='Path to model to evaluate')
     parser.add_argument('--baseline', action='store_true', help='Baseline run')
@@ -177,51 +214,7 @@ if __name__ == '__main__':
     parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
     parser.add_argument('--wandb-group', type=str, default='debug', help='WandB group')
     parser.add_argument('--track', action='store_true', help='Track on WandB')
-    parser.add_argument('--force-recurrence', action='store_true', help='Force model to be recurrent, regardless of defaults')
-
-    clean_parser = argparse.ArgumentParser(parents=[parser])
-    args = parser.parse_known_args()[0].__dict__
-    pkg, config = load_from_config(args['config'])
-
-    try:
-        env_module = importlib.import_module(f'pufferlib.environments.{pkg}')
-    except:
-        pufferlib.utils.install_requirements(pkg)
-        env_module = importlib.import_module(f'pufferlib.environments.{pkg}')
-
-    # Get the make function for the environment
-    env_name = args['env'] or config.env.pop('name')
-    make_env = env_module.env_creator(env_name)
-
-    # Update config with environment defaults
-    config.env = {**get_init_args(make_env), **config.env}
-    config.policy = {**get_init_args(env_module.Policy.__init__), **config.policy}
-    config.recurrent = {**get_init_args(env_module.Recurrent.__init__), **config.recurrent}
-
-    # Generate argparse menu from config
-    for name, sub_config in config.items():
-        args[name] = {}
-        for key, value in sub_config.items():
-            data_key = f'{name}.{key}'
-            cli_key = f'--{data_key}'.replace('_', '-')
-            if isinstance(value, bool) and value is False:
-                action = 'store_false'
-                parser.add_argument(cli_key, default=value, action='store_true')
-                clean_parser.add_argument(cli_key, default=value, action='store_true')
-            elif isinstance(value, bool) and value is True:
-                data_key = f'{name}.no_{key}'
-                cli_key = f'--{data_key}'.replace('_', '-')
-                parser.add_argument(cli_key, default=value, action='store_false')
-                clean_parser.add_argument(cli_key, default=value, action='store_false')
-            else:
-                parser.add_argument(cli_key, default=value, type=type(value))
-                clean_parser.add_argument(cli_key, default=value, metavar='', type=type(value))
-
-            args[name][key] = getattr(parser.parse_known_args()[0], data_key)
-        args[name] = pufferlib.namespace(**args[name])
-
-    clean_parser.parse_args(sys.argv[1:])
-    args = pufferlib.namespace(**args)
+    pkg, args, env_module, make_env, make_policy = load_config(parser)
 
     vec = args.vector
     if vec == 'serial':
@@ -236,7 +229,8 @@ if __name__ == '__main__':
     if args.mode == 'sweep':
         args.track = True
     elif args.track:
-        args.exp_name = init_wandb(args, env_module).id
+        args.wandb = init_wandb(args, env_module)
+        args.exp_name = args.wandb.id
     elif args.baseline:
         args.track = True
         version = '.'.join(pufferlib.__version__.split('.')[:2])

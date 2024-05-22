@@ -25,10 +25,10 @@ def env_creator(name='squared'):
     else:
         raise ValueError('Invalid environment name')
 
-def make_squared(distance_to_target=3, num_targets=1):
+def make_squared(distance_to_target=3, num_targets=1, **kwargs):
     env = ocean.Squared(distance_to_target=distance_to_target, num_targets=num_targets)
     env = pufferlib.postprocess.EpisodeStats(env)
-    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
 def make_bandit(num_actions=10, reward_scale=1, reward_noise=1):
     env = ocean.Bandit(num_actions=num_actions, reward_scale=reward_scale,
@@ -61,10 +61,10 @@ def make_stochastic(p=0.7, horizon=100):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
-def make_spaces():
+def make_spaces(**kwargs):
     env = ocean.Spaces()
     env = pufferlib.postprocess.EpisodeStats(env)
-    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
 def make_multiagent():
     env = ocean.Multiagent()

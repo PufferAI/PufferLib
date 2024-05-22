@@ -7,6 +7,6 @@ except ImportError:
 else:
     from .torch import Policy
     try:
-        from .torch import Recurrent
+        from .torch import RNN
     except:
-        Recurrent = None
+        RNN = None

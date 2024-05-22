@@ -26,13 +26,13 @@ from c_gae import compute_gae
 def optimize(data, config, loss):
     #data.optimizer.zero_grad()
     loss.backward()
-    torch.nn.utils.clip_grad_norm_(data.policy.learner_policy.parameters(), config.max_grad_norm)
+    torch.nn.utils.clip_grad_norm_(data.policy.parameters(), config.max_grad_norm)
     data.optimizer.step()
     if config.device == 'cuda':
         torch.cuda.synchronize()
 
 
-def create(config, vecenv, policy, optimizer=None, wandb=None,
+def create(config, vecenv, policy, optimizer=None, wandb=None, policy_pool=False,
         policy_selector=pufferlib.policy_pool.random_selector):
     seed_everything(config.seed, config.torch_deterministic)
     profile = Profile()
@@ -65,16 +65,17 @@ def create(config, vecenv, policy, optimizer=None, wandb=None,
     optimizer = torch.optim.Adam(policy.parameters(),
         lr=config.learning_rate, eps=1e-5)
 
-    # Wraps the policy for self-play. Disregard for single-agent
-    policy = pufferlib.policy_pool.PolicyPool(
-        policy=policy,
-        total_agents=vecenv.agents_per_batch,
-        atn_shape=vecenv.single_action_space.shape,
-        device=config.device,
-        data_dir=config.data_dir,
-        kernel=config.pool_kernel,
-        policy_selector=policy_selector,
-    )
+    # Wraps the policy for self-play
+    if policy_pool:
+        policy = pufferlib.policy_pool.PolicyPool(
+            policy=policy,
+            total_agents=vecenv.agents_per_batch,
+            atn_shape=vecenv.single_action_space.shape,
+            device=config.device,
+            data_dir=config.data_dir,
+            kernel=config.pool_kernel,
+            policy_selector=policy_selector,
+        )
 
     return pufferlib.namespace(
         config=config,
@@ -100,7 +101,7 @@ def evaluate(data):
 
     with profile.eval_misc:
         policy = data.policy
-        policy.update_policies()
+        #policy.update_policies()
         agent_steps = 0
         infos = defaultdict(list)
         lstm_h, lstm_c = experience.lstm_h, experience.lstm_c
@@ -131,7 +132,7 @@ def evaluate(data):
             h = lstm_h[:, env_id] if lstm_h is not None else None
             c = lstm_c[:, env_id] if lstm_c is not None else None
 
-            actions, logprob, value, (h, c) = policy.forwards(o_device, h, c)
+            actions, logprob, _, value, (h, c) = policy(o_device, (h, c))
             if lstm_h is not None:
                 lstm_h[:, env_id] = h
                 lstm_c[:, env_id] = c
@@ -142,7 +143,7 @@ def evaluate(data):
         with profile.eval_misc:
             value = value.flatten()
             actions = actions.cpu().numpy()
-            mask = torch.as_tensor(mask * policy.mask)
+            mask = torch.as_tensor(mask)# * policy.mask)
             o = o if config.cpu_offload else o_device
             experience.store(o, value, actions, logprob, r, d, env_id, mask)
 
@@ -246,11 +247,11 @@ def train(data):
 
                 with profile.train_forward:
                     if experience.lstm_h is not None:
-                        _, newlogprob, entropy, newvalue, lstm_state = data.policy.learner_policy(
+                        _, newlogprob, entropy, newvalue, lstm_state = data.policy(
                             obs, state=lstm_state, action=atn)
                         lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
                     else:
-                        _, newlogprob, entropy, newvalue = data.policy.learner_policy(
+                        _, newlogprob, entropy, newvalue = data.policy(
                             obs.reshape(-1, *data.vecenv.single_observation_space.shape),
                             action=atn,
                         )
@@ -300,7 +301,7 @@ def train(data):
                 with profile.learn:
                     data.optimizer.zero_grad()
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(data.policy.learner_policy.parameters(), config.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(data.policy.parameters(), config.max_grad_norm)
                     data.optimizer.step()
                     if config.device == 'cuda':
                         torch.cuda.synchronize()
@@ -347,6 +348,7 @@ def train(data):
                 profile, data.losses, data.stats, data.msg)
 
             if data.wandb is not None and data.global_step > 0:
+                T()
                 data.wandb.log({
                     'SPS': profile.SPS,
                     'global_step': data.global_step,
@@ -461,7 +463,11 @@ class Experience:
             self.lstm_h = torch.zeros(shape).to(device)
             self.lstm_c = torch.zeros(shape).to(device)
 
-        self.num_minibatches = batch_size // bptt_horizon // batch_rows
+        self.num_minibatches = batch_size / bptt_horizon / batch_rows
+        if self.num_minibatches != int(self.num_minibatches):
+            raise ValueError('batch_size must be divisible by (num_envs / bptt_horizon / batch_rows)')
+        self.num_minibatches = int(self.num_minibatches)
+
         self.batch_size = batch_size
         self.bptt_horizon = bptt_horizon
         self.batch_rows = batch_rows
