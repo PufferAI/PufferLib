@@ -44,6 +44,21 @@ rllib = [
     'pydantic==1.9',
 ]
 
+pokemon_red = [
+    f'gym=={GYM_VERSION}',
+    f'gymnasium=={GYMNASIUM_VERSION}',
+    'einops==0.6.1',
+    'matplotlib',
+    'scikit-image==0.21.0',
+    'pyboy<2.0.0',
+    'hnswlib==0.7.0',
+    'mediapy',
+    'pandas==2.0.2',
+    'pettingzoo',
+    'GPUtil',
+    'websockets',
+]
+
 environments = {
     'avalon': [
         f'gym=={GYM_VERSION}',
@@ -155,6 +170,9 @@ environments = {
         'hnswlib==0.7.0',
         'mediapy',
         'pandas==2.0.2',
+        'pettingzoo',
+        'GPUtils',
+        'websockets',
     ],
     'procgen': [
         f'gym=={GYM_VERSION}',
@@ -209,6 +227,8 @@ setup(
         'numpy==1.23.3',
         'opencv-python==3.4.17.63',
         'cython>=3.0.0',
+        # *cleanrl,
+        # *environments['pokemon_red'],
     ],
     extras_require={
         'docs': docs,
