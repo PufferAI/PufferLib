@@ -112,9 +112,9 @@ def init_wandb(args, env_module, name=None, resume=True):
             'cleanrl': args.train,
             'env': args.env,
             'policy': args.policy,
-            'recurrent': args.recurrent,
+            #'recurrent': args.recurrent,
         },
-        name=name or args.config,
+        name=name,# or args.config,
         monitor_gym=True,
         save_code=True,
         resume=resume,
@@ -157,7 +157,7 @@ def train(args, env_module, make_env):
     train_config.device = args.train.device
 
     if args.backend == 'clean_pufferl':
-        data = clean_pufferl.create(train_config, vecenv, policy)
+        data = clean_pufferl.create(train_config, vecenv, policy, wandb=args.wandb)
 
         '''
         import time

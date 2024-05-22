@@ -348,17 +348,17 @@ def train(data):
                 profile, data.losses, data.stats, data.msg)
 
             if data.wandb is not None and data.global_step > 0:
-                T()
                 data.wandb.log({
                     'SPS': profile.SPS,
                     'global_step': data.global_step,
                     'learning_rate': data.optimizer.param_groups[0]["lr"],
                     **{f'losses/{k}': v for k, v in data.losses.items()},
-                    **{f'performance/{k}': v
-                        for k, v in data.performance.items()},
+                    # TODO: Add profile?
+                    #**{f'performance/{k}': v
+                    #    for k, v in data.performance.items()},
                     **{f'stats/{k}': v for k, v in data.stats.items()},
-                    **{f'skillrank/{policy}': elo
-                        for policy, elo in data.policy_pool.ranker.ratings.items()},
+                    #**{f'skillrank/{policy}': elo
+                    #    for policy, elo in data.policy.ranker.ratings.items()},
                 })
 
 def close(data):
