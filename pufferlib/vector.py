@@ -644,7 +644,7 @@ def check_envs(envs, driver):
         if atn_space != driver_atn:
             raise APIUsageError(f'\n{atn_space}\n{driver_atn} atn space mismatch')
 
-def autotune(env_creator, batch_size, max_envs=1e9, model_forward_s=0.0,
+def autotune(env_creator, batch_size, max_envs=1024, model_forward_s=0.0,
         max_env_ram_gb=16, max_batch_vram_gb=0.05, time_per_test=5): 
     '''Determine the optimal vectorization parameters for your system'''
     if max_envs < batch_size:
@@ -819,10 +819,3 @@ def autotune(env_creator, batch_size, max_envs=1e9, model_forward_s=0.0,
             print(f'    {k}: {v}')
 
         print()
-
-
-
-
-
-
-

@@ -54,13 +54,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None, policy_pool=False
     uncompiled_policy = policy
 
     if config.compile:
-        print('Compiling policy')
-        time.sleep(1)
-        #policy.policy.policy.encode_observations = torch.compile(policy.policy.policy.encode_observations, mode=config.compile_mode)
-        #policy.policy.policy.decode_actions = torch.compile(policy.policy.policy.decode_actions, mode=config.compile_mode)
-        #policy.policy.recurrent = torch.compile(policy.policy.recurrent, mode=config.compile_mode)
         policy = torch.compile(policy, mode=config.compile_mode)
-        #optim= torch.compile(optimize, mode=config.compile_mode)
 
     optimizer = torch.optim.Adam(policy.parameters(),
         lr=config.learning_rate, eps=1e-5)
@@ -341,9 +335,6 @@ def train(data):
             save_checkpoint(data)
             data.msg = f'Checkpoint saved at update {data.epoch}'
 
-        if done_training:
-            close(data)
-
         if profile.update(data) or done_training:
             print_dashboard(data.global_step, data.epoch,
                 profile, data.losses, data.stats, data.msg)
@@ -360,10 +351,14 @@ def train(data):
                     #    for policy, elo in data.policy.ranker.ratings.items()},
                 })
 
+        if done_training:
+            close(data)
+
 def close(data):
     data.vecenv.close()
+    config = data.config
     if data.wandb is not None:
-        artifact_name = f"{data.exp_name}_model"
+        artifact_name = f"{config.exp_id}_model"
         artifact = data.wandb.Artifact(artifact_name, type="model")
         model_path = save_checkpoint(data)
         artifact.add_file(model_path)
@@ -541,7 +536,7 @@ class Experience:
 
 def save_checkpoint(data):
     config = data.config
-    path = os.path.join(config.data_dir, config.exp_name)
+    path = os.path.join(config.data_dir, config.exp_id)
     if not os.path.exists(path):
         os.makedirs(path)
 
@@ -558,7 +553,7 @@ def save_checkpoint(data):
         'agent_step': data.global_step,
         'update': data.epoch,
         'model_name': model_name,
-        'exp_name': config.exp_name,
+        'exp_id': config.exp_id,
     }
     state_path = os.path.join(path, 'trainer_state.pt')
     torch.save(state, state_path + '.tmp')
@@ -567,7 +562,7 @@ def save_checkpoint(data):
 
 def try_load_checkpoint(data):
     config = data.config
-    path = os.path.join(config.data_dir, config.exp_name)
+    path = os.path.join(config.data_dir, config.exp_id)
     if not os.path.exists(path):
         print('No checkpoints found. Assuming new experiment')
         return

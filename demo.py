@@ -20,7 +20,6 @@ def load_config(parser, config_path='config.yaml'):
     yaml + env/policy fn signatures to give you a nice
     --help menu + some limited validation of the config'''
     args, _ = parser.parse_known_args()
-    args.exp_id = args.exp_id or args.env + '-' + str(uuid.uuid4())[:8]
     env_name, pkg_name = args.env, args.pkg
 
     with open(config_path) as f:
@@ -89,6 +88,7 @@ def load_config(parser, config_path='config.yaml'):
     parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help='show this help message and exit')
     parser.parse_args()
     wandb_name = make_name or env_name
+    config['train'].exp_id = args.exp_id or args.env + '-' + str(uuid.uuid4())[:8]
     return wandb_name, pkg_name, pufferlib.namespace(**config), env_module, make_env, make_policy
    
 def make_policy(env, env_module, args):
@@ -104,7 +104,7 @@ def make_policy(env, env_module, args):
 def init_wandb(args, name, id=None, resume=True):
     #os.environ["WANDB_SILENT"] = "true"
     import wandb
-    return wandb.init(
+    wandb.init(
         id=id or wandb.util.generate_id(),
         project=args.wandb_project,
         entity=args.wandb_entity,
@@ -120,6 +120,7 @@ def init_wandb(args, name, id=None, resume=True):
         save_code=True,
         resume=resume,
     )
+    return wandb
 
 def sweep(args, wandb_name, env_module, make_env):
     import wandb
@@ -147,13 +148,13 @@ def train(args, env_module, make_env):
     if args.track:
         args.wandb = init_wandb(args, wandb_name, id=args.exp_id)
 
-    vec = args.vector
+    vec = args.vec
     if vec == 'serial':
-        args.vector= pufferlib.vector.Serial
+        args.vec= pufferlib.vector.Serial
     elif vec == 'multiprocessing':
-        args.vector= pufferlib.vector.Multiprocessing
+        args.vec= pufferlib.vector.Multiprocessing
     elif vec == 'ray':
-        args.vector= pufferlib.vector.Ray
+        args.vec= pufferlib.vector.Ray
     else:
         raise ValueError(f'Invalid --vector (serial/multiprocessing/ray).')
 
@@ -164,12 +165,11 @@ def train(args, env_module, make_env):
         num_workers=args.train.num_workers,
         batch_size=args.train.env_batch_size,
         zero_copy=args.train.zero_copy,
-        backend=args.vector,
+        backend=args.vec,
     )
     policy = make_policy(vecenv.driver_env, env_module, args)
 
     train_config = args.train 
-    train_config.exp_id = args.exp_id
     train_config.track = args.track
     train_config.device = args.train.device
 
@@ -221,11 +221,11 @@ if __name__ == '__main__':
     parser.add_argument('--env', type=str, default='pokemon_red', help='Name of specific environment to run')
     parser.add_argument('--pkg', type=str, default=None, help='Configuration in config.yaml to use')
     parser.add_argument('--backend', type=str, default='clean_pufferl', help='Train backend (clean_pufferl, sb3)')
-    parser.add_argument('--mode', type=str, default='train', choices='train sweep evaluate'.split())
+    parser.add_argument('--mode', type=str, default='train', choices='train evaluate sweep autotune baseline profile'.split())
     parser.add_argument('--eval-model-path', type=str, default=None, help='Path to model to evaluate')
     parser.add_argument('--baseline', action='store_true', help='Baseline run')
     parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
-    parser.add_argument('--vector', type=str, default='serial', choices='serial multiprocessing ray'.split())
+    parser.add_argument('--vec', type=str, default='serial', choices='serial multiprocessing ray'.split())
     parser.add_argument('--exp-id', type=str, default=None, help="Resume from experiment")
     parser.add_argument('--wandb-entity', type=str, default='jsuarez', help='WandB entity')
     parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
@@ -246,6 +246,8 @@ if __name__ == '__main__':
         )
     elif args.mode == 'sweep':
         sweep(args, wandb_name, env_module, make_env)
+    elif args.mode == 'autotune':
+        pufferlib.vector.autotune(make_env, batch_size=args.train.env_batch_size)
     elif args.baseline:
         args.track = True
         version = '.'.join(pufferlib.__version__.split('.')[:2])
@@ -276,5 +278,3 @@ if __name__ == '__main__':
             model_path=args.eval_model_path,
             device=args.train.device,
         )
-    else:
-        raise ValueError('Invalid mode: train/evaluate/sweep/baseline/profile')
