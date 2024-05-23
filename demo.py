@@ -1,4 +1,5 @@
 from pdb import set_trace as T
+import functools
 import argparse
 import shutil
 import yaml
@@ -72,7 +73,7 @@ def load_config(parser, config_path='config.yaml'):
             config[name][key] = getattr(parser.parse_known_args()[0], data_key)
         config[name] = pufferlib.namespace(**config[name])
 
-    pufferlib.utils.validate_args(make_env, config['env'])
+    pufferlib.utils.validate_args(make_env.func if isinstance(make_env, functools.partial) else make_env, config['env'])
     pufferlib.utils.validate_args(env_module.Policy, config['policy'])
 
     if 'use_rnn' in env_config:
@@ -150,11 +151,11 @@ def train(args, env_module, make_env):
 
     vec = args.vec
     if vec == 'serial':
-        args.vec= pufferlib.vector.Serial
+        vec = pufferlib.vector.Serial
     elif vec == 'multiprocessing':
-        args.vec= pufferlib.vector.Multiprocessing
+        vec = pufferlib.vector.Multiprocessing
     elif vec == 'ray':
-        args.vec= pufferlib.vector.Ray
+        vec = pufferlib.vector.Ray
     else:
         raise ValueError(f'Invalid --vector (serial/multiprocessing/ray).')
 
@@ -165,7 +166,7 @@ def train(args, env_module, make_env):
         num_workers=args.train.num_workers,
         batch_size=args.train.env_batch_size,
         zero_copy=args.train.zero_copy,
-        backend=args.vec,
+        backend=vec,
     )
     policy = make_policy(vecenv.driver_env, env_module, args)
 

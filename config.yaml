@@ -39,8 +39,8 @@ default:
     checkpoint_interval: 200
     pool_kernel: [0]
     batch_size: 1024
-    batch_rows: 32
-    bptt_horizon: 16 #8
+    minibatch_size: 512
+    bptt_horizon: 16
     vf_clip_coef: 0.1
     compile: False
     compile_mode: reduce-overhead
@@ -63,8 +63,8 @@ default:
           batch_size: {
             'values': [512, 1024, 2048],
           }
-          batch_rows: {
-            'values': [8, 16, 32],
+          minibatch_size: {
+            'values': [128, 256, 512],
           }
           bptt_horizon: {
             'values': [4, 8, 16],
@@ -117,7 +117,7 @@ pong-max:
     env_batch_size: 48
     zero_copy: False
     batch_size: 65536
-    batch_rows: 128
+    minibatch_size: 2048
  
 box2d:
   package: box2d
@@ -125,6 +125,8 @@ box2d:
 ### Procgen Suite
 # Shared hyperparams (best for all envs)
 # Per-env hyperparams from CARBS
+# Note: These need to be updated for 1.0
+# batch sizes likely wrong
 procgen:
   env_name: bigfish
   train:
@@ -133,8 +135,7 @@ procgen:
     num_cores: 1
     num_envs: 1
     batch_size: 16384
-    batch_rows: 8
-    bptt_horizon: 256
+    minibatch_size: 5321
     gamma: 0.999
     update_epochs: 3
     anneal_lr: False
@@ -157,7 +158,7 @@ bigfish:
     num_envs: 1
     num_workers: 1
     batch_size: 53210
-    batch_rows: 5321
+    minibatch_size: 5321
     bptt_horizon: 1
     update_epochs: 3
     anneal_lr: False
@@ -181,7 +182,7 @@ bossfight:
     num_cores: 1
     num_envs: 1
     batch_size: 48520
-    batch_rows: 6065
+    minibatch_size: 6065
     bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
@@ -205,7 +206,7 @@ caveflyer:
     num_cores: 1
     num_envs: 1
     batch_size: 32308
-    batch_rows: 8077
+    minibatch_size: 8077
     bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
@@ -229,7 +230,7 @@ chaser:
     num_cores: 1
     num_envs: 1
     batch_size: 17456
-    batch_rows: 2182
+    minibatch_size: 2182
     bptt_horizon: 1
     update_epochs: 1
     anneal_lr: False
@@ -253,7 +254,7 @@ climber:
     num_cores: 1
     num_envs: 1
     batch_size: 113288
-    batch_rows: 3332
+    batch_rows: 3332 # ?
     bptt_horizon: 256
     update_epochs: 2
     anneal_lr: False
@@ -277,7 +278,7 @@ coinrun:
     num_cores: 1
     num_envs: 1
     batch_size: 184170
-    batch_rows: 6139
+    minibatch_size: 6139
     bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
@@ -301,7 +302,7 @@ dodgeball:
     num_cores: 1
     num_envs: 1
     batch_size: 233026
-    batch_rows: 4958
+    minibatch_size: 4958
     bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
@@ -325,7 +326,7 @@ fruitbot:
     num_cores: 1
     num_envs: 1
     batch_size: 25344
-    batch_rows: 4224
+    minibatch_size: 4224
     bptt_horizon: 1
     update_epochs: 1
     anneal_lr: False
@@ -349,7 +350,7 @@ heist:
     num_cores: 1
     num_envs: 1
     batch_size: 162233
-    batch_rows: 3061
+    minibatch_size: 3061
     bptt_horizon: 1
     update_epochs: 1
     anneal_lr: False
@@ -373,7 +374,7 @@ jumper:
     num_cores: 1
     num_envs: 1
     batch_size: 76925
-    batch_rows: 3077
+    minibatch_size: 3077
     bptt_horizon: 1
     update_epochs: 3
     anneal_lr: False
@@ -397,8 +398,7 @@ leaper:
     num_cores: 1
     num_envs: 1
     batch_size: 19380
-    batch_rows: 6460
-    bptt_horizon: 1
+    minibatch_size: 6460
     update_epochs: 2
     anneal_lr: False
     vf_clip_coef: 0.2
@@ -421,7 +421,7 @@ maze:
     num_cores: 1
     num_envs: 1
     batch_size: 116008
-    batch_rows: 6834
+    minibatch_size: 6834
     bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
@@ -445,7 +445,7 @@ miner:
     num_cores: 1
     num_envs: 1
     batch_size: 154512
-    batch_rows: 2088
+    minibatch_size: 2088
     bptt_horizon: 1
     update_epochs: 3
     anneal_lr: False
@@ -469,7 +469,7 @@ ninja:
     num_cores: 1
     num_envs: 1
     batch_size: 45246
-    batch_rows: 7541
+    minibatch_size: 7541
     bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
@@ -493,7 +493,7 @@ plunder:
     num_cores: 1
     num_envs: 1
     batch_size: 26304
-    batch_rows: 4384
+    minibatch_size: 4384
     bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
@@ -517,7 +517,7 @@ starpilot:
     num_cores: 1
     num_envs: 1
     batch_size: 107440
-    batch_rows: 6715
+    minibatch_size: 6715
     bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
@@ -601,7 +601,7 @@ minigrid:
     num_workers: 6
     env_batch_size: 48
     batch_size: 6144
-    batch_rows: 48
+    minibatch_size: 768
     ent_coef: 0.05
     anneal_lr: False
 
@@ -623,7 +623,7 @@ nmmo:
   train:
     num_envs: 1
     batch_size: 4096
-    batch_rows: 128
+    minibatch_size: 2048
 
 nmmo3:
   train:
@@ -636,8 +636,7 @@ nmmo3:
     gamma: 0.998
     #batch_size: 32768
     batch_size: 196608
-    batch_rows: 1024
-    #batch_rows: 256
+    minibatch_size: 16384
     #compile: True
   env:
     num_envs: 1 # NMMO3 provides its own fast multienv
@@ -652,7 +651,7 @@ nmmo3laptop:
     update_epochs: 1
     gamma: 0.998
     batch_size: 32768
-    batch_rows: 256
+    minibatch_size: 4096
     compile: False
 
 nmmo3debug:
@@ -663,7 +662,7 @@ nmmo3debug:
     update_epochs: 1
     gamma: 0.998
     batch_size: 4096
-    batch_rows: 128
+    minibatch_size: 2048
     compile: False
 
 
@@ -676,7 +675,7 @@ ocean:
     learning_rate: 0.017
     num_envs: 8
     num_workers: 2
-    batch_rows: 32
+    minibatch_size: 128
     bptt_horizon: 4
     device: cpu
 bandit:
@@ -730,7 +729,7 @@ pokemon_red:
     update_epochs: 3
     gamma: 0.998
     batch_size: 65536
-    batch_rows: 128
+    minibatch_size: 2048
     compile: True
     learning_rate: 2.0e-4
     anneal_lr: False
@@ -749,7 +748,7 @@ pokedebug:
     num_workers: 4
     env_batch_size: 2
     batch_size: 2048
-    batch_rows: 16
+    minibatch_size: 256
     compile: False
  
 links_awaken:

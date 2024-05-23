@@ -38,7 +38,16 @@ class EpisodeStats(gymnasium.Wrapper):
                 except TypeError:
                     pass
 
-            info['episode_return'] = self.info['episode_return']
+                if isinstance(v, str):
+                    info[k] = v
+                    continue
+
+                try:
+                    x = int(v) # probably a value
+                    info[k] = v
+                    continue
+                except TypeError:
+                    pass
 
         return observation, reward, terminated, truncated, info
 
@@ -124,6 +133,15 @@ class MultiagentEpisodeStats(PettingZooWrapper):
                     except TypeError:
                         pass
 
-                agent_info['episode_return'] = self.infos[agent]['episode_return']
+                    if isinstance(v, str):
+                        agent_info[k] = v
+                        continue
+
+                    try:
+                        x = int(v) # probably a value
+                        agent_info[k] = v
+                        continue
+                    except TypeError:
+                        pass
 
         return observations, rewards, terminations, truncations, infos
