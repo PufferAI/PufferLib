@@ -4,23 +4,6 @@ import torch
 import pufferlib.models
 
 
-Recurrent = partial(
-    pufferlib.models.LSTMWrapper,
-    input_size=512,
-    hidden_size=512,
-    num_layers=1
-)
-
-Policy = partial(
-    pufferlib.models.Convolutional,
-    input_size=512,
-    hidden_size=512,
-    output_size=512,
-    framestack=4,
-    flat_size=64*5*6,
-    channels_last=True,
-)
-
 class Recurrent(pufferlib.models.LSTMWrapper):
     def __init__(self, env, policy,
             input_size=512, hidden_size=512, num_layers=1):
