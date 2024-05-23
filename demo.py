@@ -86,7 +86,8 @@ def load_config(parser, config_path='config.yaml'):
     config['use_rnn'] = config['use_rnn'] or parser.parse_known_args()[0].use_rnn
     parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help='show this help message and exit')
     parser.parse_args()
-    return pkg_name, pufferlib.namespace(**config), env_module, make_env, make_policy
+    wandb_name = make_name or env_name
+    return wandb_name, pkg_name, pufferlib.namespace(**config), env_module, make_env, make_policy
    
 def make_policy(env, env_module, args):
     policy = env_module.Policy(env, **args.policy)
@@ -98,12 +99,11 @@ def make_policy(env, env_module, args):
 
     return policy.to(args.train.device)
 
-def init_wandb(args, env_module, name=None, resume=True):
+def init_wandb(args, name, id=None, resume=True):
     #os.environ["WANDB_SILENT"] = "true"
-
     import wandb
     return wandb.init(
-        id=args.exp_name or wandb.util.generate_id(),
+        id=id or wandb.util.generate_id(),
         project=args.wandb_project,
         entity=args.wandb_entity,
         group=args.wandb_group,
@@ -113,24 +113,25 @@ def init_wandb(args, env_module, name=None, resume=True):
             'policy': dict(args.policy),
             #'recurrent': args.recurrent,
         },
-        name=name,# or args.config,
+        name=name,
         monitor_gym=True,
         save_code=True,
         resume=resume,
     )
 
-def sweep(args, env_module, make_env):
+def sweep(args, wandb_name, env_module, make_env):
     import wandb
-    sweep_id = wandb.sweep(sweep=args.sweep, project="pufferlib")
+    sweep_id = wandb.sweep(
+        sweep=dict(args.sweep),
+        project="pufferlib",
+    )
 
     def main():
         try:
-            args.exp_name = init_wandb(args, env_module)
-            if hasattr(wandb.config, 'train'):
-                # TODO: Add update method to namespace
-                print(args.train.__dict__)
-                print(wandb.config.train)
-                args.train.__dict__.update(dict(wandb.config.train))
+            args.exp_name = init_wandb(args, wandb_name, id=args.exp_id)
+            # TODO: Add update method to namespace
+            print(wandb.config.train)
+            args.train.__dict__.update(dict(wandb.config.train))
             train(args, env_module, make_env)
         except Exception as e:
             import traceback
@@ -139,6 +140,16 @@ def sweep(args, env_module, make_env):
     wandb.agent(sweep_id, main, count=20)
 
 def train(args, env_module, make_env):
+    vec = args.vector
+    if vec == 'serial':
+        args.vector= pufferlib.vector.Serial
+    elif vec == 'multiprocessing':
+        args.vector= pufferlib.vector.Multiprocessing
+    elif vec == 'ray':
+        args.vector= pufferlib.vector.Ray
+    else:
+        raise ValueError(f'Invalid --vector (serial/multiprocessing/ray).')
+
     vecenv = pufferlib.vector.make(
         make_env,
         env_kwargs=args.env,
@@ -151,7 +162,7 @@ def train(args, env_module, make_env):
     policy = make_policy(vecenv.driver_env, env_module, args)
 
     train_config = args.train 
-    train_config.exp_name = 'test'#args.exp_name
+    train_config.exp_id = args.exp_id
     train_config.track = args.track
     train_config.device = args.train.device
 
@@ -207,36 +218,26 @@ if __name__ == '__main__':
     parser.add_argument('--eval-model-path', type=str, default=None, help='Path to model to evaluate')
     parser.add_argument('--baseline', action='store_true', help='Baseline run')
     parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
-    parser.add_argument('--exp-name', type=str, default=None, help="Resume from experiment")
     parser.add_argument('--vector', type=str, default='serial', choices='serial multiprocessing ray'.split())
+    parser.add_argument('--exp-id', type=str, default=None, help="Resume from experiment")
     parser.add_argument('--wandb-entity', type=str, default='jsuarez', help='WandB entity')
     parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
     parser.add_argument('--wandb-group', type=str, default='debug', help='WandB group')
     parser.add_argument('--track', action='store_true', help='Track on WandB')
-    pkg, args, env_module, make_env, make_policy = load_config(parser)
+    wandb_name, pkg, args, env_module, make_env, make_policy = load_config(parser)
 
     vec = args.vector
-    if vec == 'serial':
-        args.vector= pufferlib.vector.Serial
-    elif vec == 'multiprocessing':
-        args.vector= pufferlib.vector.Multiprocessing
-    elif vec == 'ray':
-        args.vector= pufferlib.vector.Ray
-    else:
-        raise ValueError(f'Invalid --vector (serial/multiprocessing/ray).')
-
     args.wandb = None
     if args.mode == 'sweep':
         args.track = True
     elif args.track:
-        args.wandb = init_wandb(args, env_module)
-        args.exp_name = args.wandb.id
+        args.wandb = init_wandb(args, wandb_name, id=args.exp_id)
     elif args.baseline:
         args.track = True
         version = '.'.join(pufferlib.__version__.split('.')[:2])
-        args.exp_name = f'puf-{version}-{args.config}'
+        args.exp_name = f'puf-{version}-{args.env}'
         args.wandb_group = f'puf-{version}-baseline'
-        shutil.rmtree(f'experiments/{args.exp_name}', ignore_errors=True)
+        shutil.rmtree(f'experiments/{args.exp_id}', ignore_errors=True)
         run = init_wandb(args, env_module, name=args.exp_name, resume=False)
         if args.mode == 'evaluate':
             model_name = f'puf-{version}-{args.config}_model:latest'
@@ -259,7 +260,7 @@ if __name__ == '__main__':
         train(args, env_module, make_env)
         exit(0)
     elif args.mode == 'sweep':
-        sweep(args, env_module, make_env)
+        sweep(args, wandb_name, env_module, make_env)
         exit(0)
     elif args.mode == 'evaluate' and pkg != 'pokemon_red':
         rollout(

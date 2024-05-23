@@ -61,13 +61,13 @@ default:
             'max': 1e-1,
           }
           batch_size: {
-            'values': [128, 256, 512, 1024, 2048],
+            'values': [512, 1024, 2048],
           }
           batch_rows: {
-            'values': [16, 32, 64, 128, 256],
+            'values': [8, 16, 32],
           }
           bptt_horizon: {
-            'values': [4, 8, 16, 32],
+            'values': [4, 8, 16],
           }
 
 ### Arcade Learning Environment suite
