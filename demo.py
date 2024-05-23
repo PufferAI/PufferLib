@@ -2,6 +2,7 @@ from pdb import set_trace as T
 import argparse
 import shutil
 import yaml
+import uuid
 import os
 
 import pufferlib
@@ -19,6 +20,7 @@ def load_config(parser, config_path='config.yaml'):
     yaml + env/policy fn signatures to give you a nice
     --help menu + some limited validation of the config'''
     args, _ = parser.parse_known_args()
+    args.exp_id = args.exp_id or args.env + '-' + str(uuid.uuid4())[:8]
     env_name, pkg_name = args.env, args.pkg
 
     with open(config_path) as f:
@@ -132,6 +134,7 @@ def sweep(args, wandb_name, env_module, make_env):
             # TODO: Add update method to namespace
             print(wandb.config.train)
             args.train.__dict__.update(dict(wandb.config.train))
+            args.track = True
             train(args, env_module, make_env)
         except Exception as e:
             import traceback
@@ -140,6 +143,10 @@ def sweep(args, wandb_name, env_module, make_env):
     wandb.agent(sweep_id, main, count=20)
 
 def train(args, env_module, make_env):
+    args.wandb = None
+    if args.track:
+        args.wandb = init_wandb(args, wandb_name, id=args.exp_id)
+
     vec = args.vector
     if vec == 'serial':
         args.vector= pufferlib.vector.Serial
@@ -226,12 +233,19 @@ if __name__ == '__main__':
     parser.add_argument('--track', action='store_true', help='Track on WandB')
     wandb_name, pkg, args, env_module, make_env, make_policy = load_config(parser)
 
-    vec = args.vector
-    args.wandb = None
-    if args.mode == 'sweep':
-        args.track = True
-    elif args.track:
-        args.wandb = init_wandb(args, wandb_name, id=args.exp_id)
+    if args.mode == 'train':
+        train(args, env_module, make_env)
+    elif args.mode == 'evaluate':
+        rollout(
+            make_env,
+            args.env,
+            agent_creator=make_policy,
+            agent_kwargs={'env_module': env_module, 'args': args},
+            model_path=args.eval_model_path,
+            device=args.train.device
+        )
+    elif args.mode == 'sweep':
+        sweep(args, wandb_name, env_module, make_env)
     elif args.baseline:
         args.track = True
         version = '.'.join(pufferlib.__version__.split('.')[:2])
@@ -245,32 +259,13 @@ if __name__ == '__main__':
             data_dir = artifact.download()
             model_file = max(os.listdir(data_dir))
             args.eval_model_path = os.path.join(data_dir, model_file)
-
-    if args.mode == 'train':
-        '''
+    elif args.mode == 'profile':
         import cProfile
         cProfile.run('train(args, env_module, make_env)', 'stats.profile')
         import pstats
         from pstats import SortKey
         p = pstats.Stats('stats.profile')
         p.sort_stats(SortKey.TIME).print_stats(10)
-        T()
-        '''
-
-        train(args, env_module, make_env)
-        exit(0)
-    elif args.mode == 'sweep':
-        sweep(args, wandb_name, env_module, make_env)
-        exit(0)
-    elif args.mode == 'evaluate' and pkg != 'pokemon_red':
-        rollout(
-            make_env,
-            args.env,
-            agent_creator=make_policy,
-            agent_kwargs={'env_module': env_module, 'args': args},
-            model_path=args.eval_model_path,
-            device=args.train.device
-        )
     elif args.mode == 'evaluate' and pkg == 'pokemon_red':
         import pokemon_red_eval
         pokemon_red_eval.rollout(
@@ -281,5 +276,5 @@ if __name__ == '__main__':
             model_path=args.eval_model_path,
             device=args.train.device,
         )
-    elif pkg != 'pokemon_red':
-        raise ValueError('Mode must be one of train, sweep, or evaluate')
+    else:
+        raise ValueError('Invalid mode: train/evaluate/sweep/baseline/profile')
