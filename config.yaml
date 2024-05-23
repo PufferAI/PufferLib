@@ -595,6 +595,15 @@ minerl:
 
 minigrid:
   env_name: MiniGrid-LavaGapS7-v0
+  train:
+    total_timesteps: 1_000_000
+    num_envs: 48
+    num_workers: 6
+    env_batch_size: 48
+    batch_size: 6144
+    batch_rows: 48
+    ent_coef: 0.05
+    anneal_lr: False
 
 minihack:
   env_name: MiniHack-River-v0

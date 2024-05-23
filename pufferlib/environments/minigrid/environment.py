@@ -5,6 +5,7 @@ import functools
 
 import pufferlib.emulation
 import pufferlib.environments
+import pufferlib.postprocess
 
 
 def env_creator(name='MiniGrid-LavaGapS7-v0'):
@@ -14,6 +15,7 @@ def make(name, render_mode='rgb_array'):
     minigrid = pufferlib.environments.try_import('minigrid')
     env = gymnasium.make(name, render_mode=render_mode)
     env = MiniGridWrapper(env)
+    env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 class MiniGridWrapper:
