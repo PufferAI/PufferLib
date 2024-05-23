@@ -108,9 +108,9 @@ space-invaders:
   package: atari
   env_name: SpaceInvadersNoFrameskip-v4
 
-breakout-max:
+pong-max:
   package: atari
-  env_name: BreakoutNoFrameskip-v4
+  env_name: PongNoFrameskip-v4
   train:
     num_envs: 96
     num_workers: 24
