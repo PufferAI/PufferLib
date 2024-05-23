@@ -104,19 +104,46 @@ class MultiagentEpisodeStats(PettingZooWrapper):
     episodic returns and lengths in infos'''
     def reset(self, seed=None, options=None):
         observations, infos = super().reset(seed=seed, options=options)
-        self.episode_returns = {agent: 0 for agent in self.agents}
-        self.episode_lengths = {agent: 0 for agent in self.agents}
+        self.episode_returns = {agent: 0 for agent in self.possible_agents}
+        self.episode_lengths = {agent: 0 for agent in self.possible_agents}
+        self.infos = {
+            agent: dict(episode_return=[], episode_length=0)
+            for agent in self.possible_agents
+        }
         return observations, infos
 
     def step(self, actions):
         observations, rewards, terminations, truncations, infos = super().step(actions)
 
         for agent in self.agents:
+            agent_info = self.infos[agent]
+            for k, v in pufferlib.utils.unroll_nested_dict(infos[agent]):
+                if k not in self.info:
+                    agent_info[k] = []
+
+                agent_info[k].append(v)
+
             self.episode_returns[agent] += rewards[agent]
             self.episode_lengths[agent] += 1
 
             if terminations[agent] or truncations[agent]:
-                infos[agent]['episode_return'] = self.episode_returns[agent]
-                infos[agent]['episode_length'] = self.episode_lengths[agent]
+                for k, v in self.info.items():
+                    try:
+                        agent_info[k] = sum(v)
+                        continue
+                    except TypeError:
+                        pass
+
+                    if isinstance(v, str):
+                        agent_info[k] = v
+                        continue
+
+                    try:
+                        x = int(v) # probably a value
+                        agent_info[k] = v
+                        continue
+                    except TypeError:
+                        pass
+
 
         return observations, rewards, terminations, truncations, infos

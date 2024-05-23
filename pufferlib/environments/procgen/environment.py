@@ -8,6 +8,7 @@ import functools
 import pufferlib
 import pufferlib.emulation
 import pufferlib.environments
+import pufferlib.postprocess
 
 
 def env_creator(name='bigfish'):
