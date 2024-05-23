@@ -37,10 +37,8 @@ def make(name, num_envs=24, num_levels=0,
     envs = gym.wrappers.TransformReward(envs, lambda reward: np.clip(reward, -10, 10))
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
     envs = ProcgenPettingZooEnv(envs, num_envs)
-    return pufferlib.emulation.PettingZooPufferEnv(
-        env=envs,
-        postprocessor_cls=ProcgenPostprocessor,
-    )
+    envs = pufferlib.postprocess.MultiagentEpisodeStats(envs)
+    return pufferlib.emulation.PettingZooPufferEnv(env=envs)
 
 class ProcgenPettingZooEnv:
     '''Fakes a multiagent interface to ProcGen where each env
@@ -72,23 +70,3 @@ class ProcgenPettingZooEnv:
         truncateds = {i: False for i in range(len(obs))}
         infos = {i: {'mask': True} for i in range(len(obs))}
         return obs, rewards, dones, truncateds, infos
-
-class ProcgenPostprocessor(pufferlib.emulation.Postprocessor):
-    def reset(self, obs):
-        self.epoch_return = 0
-        self.epoch_length = 0
-
-    def reward_done_truncated_info(self, reward, done, truncated, info):
-        if isinstance(reward, (list, np.ndarray)):
-            reward = sum(reward.values())
-
-        self.epoch_length += 1
-        self.epoch_return += reward
-
-        if done or truncated:
-            info['return'] = self.epoch_return
-            info['length'] = self.epoch_length
-            self.epoch_return = 0
-            self.epoch_length = 0
-
-        return reward, done, truncated, info

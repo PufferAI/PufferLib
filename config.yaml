@@ -50,7 +50,7 @@ default:
     name: sweep
     metric:
       goal: maximize
-      name: episodic_return
+      name: environment/episode_return
     # Nested parameters name required by WandB API
     parameters:
       train:
@@ -154,8 +154,8 @@ bigfish:
     vf_coef: 1.1732211834792117
     gae_lambda: 0.8620630095238284
     clip_coef: 0.4104603426698214
-    num_cores: 1
     num_envs: 1
+    num_workers: 1
     batch_size: 53210
     batch_rows: 5321
     bptt_horizon: 1

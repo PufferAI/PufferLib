@@ -38,17 +38,7 @@ class EpisodeStats(gymnasium.Wrapper):
                 except TypeError:
                     pass
 
-                if isinstance(v, str):
-                    info[k] = v
-                    continue
-
-                try:
-                    x = int(v) # probably a value
-                    info[k] = v
-                    continue
-                except TypeError:
-                    pass
-
+            info['episode_return'] = self.info['episode_return']
 
         return observation, reward, terminated, truncated, info
 
@@ -104,8 +94,6 @@ class MultiagentEpisodeStats(PettingZooWrapper):
     episodic returns and lengths in infos'''
     def reset(self, seed=None, options=None):
         observations, infos = super().reset(seed=seed, options=options)
-        self.episode_returns = {agent: 0 for agent in self.possible_agents}
-        self.episode_lengths = {agent: 0 for agent in self.possible_agents}
         self.infos = {
             agent: dict(episode_return=[], episode_length=0)
             for agent in self.possible_agents
@@ -118,32 +106,24 @@ class MultiagentEpisodeStats(PettingZooWrapper):
         for agent in self.agents:
             agent_info = self.infos[agent]
             for k, v in pufferlib.utils.unroll_nested_dict(infos[agent]):
-                if k not in self.info:
+                if k not in agent_info:
                     agent_info[k] = []
 
                 agent_info[k].append(v)
 
-            self.episode_returns[agent] += rewards[agent]
-            self.episode_lengths[agent] += 1
+            # Saved to self. TODO: Clean up
+            agent_info['episode_return'] += rewards[agent]
+            agent_info['episode_length'] += 1
 
+            agent_info = {}
             if terminations[agent] or truncations[agent]:
-                for k, v in self.info.items():
+                for k, v in self.infos[agent].items():
                     try:
                         agent_info[k] = sum(v)
                         continue
                     except TypeError:
                         pass
 
-                    if isinstance(v, str):
-                        agent_info[k] = v
-                        continue
-
-                    try:
-                        x = int(v) # probably a value
-                        agent_info[k] = v
-                        continue
-                    except TypeError:
-                        pass
-
+                agent_info['episode_return'] = self.infos[agent]['episode_return']
 
         return observations, rewards, terminations, truncations, infos

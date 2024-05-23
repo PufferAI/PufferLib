@@ -160,8 +160,8 @@ class ProcgenResnet(nn.Module):
     '''Procgen baseline from the AICrowd NeurIPS 2020 competition
     Based on the ResNet architecture that was used in the Impala paper.'''
     def __init__(self, env, cnn_width=16, mlp_width=256):
-        super().__init__(env)
-        h, w, c = env.structured_observation_space.shape
+        super().__init__()
+        h, w, c = env.single_observation_space.shape
         shape = (c, h, w)
         conv_seqs = []
         for out_channels in [cnn_width, 2*cnn_width, 2*cnn_width]:
@@ -176,13 +176,16 @@ class ProcgenResnet(nn.Module):
         ]
         self.network = nn.Sequential(*conv_seqs)
         self.actor = pufferlib.pytorch.layer_init(
-                nn.Linear(mlp_width, self.action_space.n), std=0.01)
+                nn.Linear(mlp_width, env.single_action_space.n), std=0.01)
         self.value = pufferlib.pytorch.layer_init(
                 nn.Linear(mlp_width, 1), std=1)
 
+    def forward(self, observations):
+        hidden, lookup = self.encode_observations(observations)
+        actions, value = self.decode_actions(hidden, lookup)
+        return actions, value
+
     def encode_observations(self, x):
-        x = x.view(self.obs_dtype)
-        x = pufferlib.emulation.unpack_batched_obs(x, self.obs_dtype)
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)
         return hidden, None
  
