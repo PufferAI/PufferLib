@@ -21,7 +21,6 @@ import functools
 import inspect
 import importlib
 
-import pettingzoo
 import gym
 
 def validate_args(fn, kwargs):
@@ -190,6 +189,7 @@ def is_dict_space(space):
     return type(space).__name__ == 'Dict'
 
 def is_multiagent(env):
+    import pettingzoo
     if inspect.isclass(env):
         env_cls = env
     else:
