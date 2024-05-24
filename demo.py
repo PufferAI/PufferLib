@@ -36,6 +36,7 @@ def load_config(parser, config_path='config.yaml'):
     env_config = config[env_name or pkg_name]
     pkg_name = pkg_name or env_config.get('package', env_name)
     pkg_config = config[pkg_name]
+    # TODO: Check if actually installed
     env_module = pufferlib.utils.install_and_import(
         f'pufferlib.environments.{pkg_name}')
     make_name = env_config.get('env_name', None)
@@ -215,6 +216,7 @@ def train(args, env_module, make_env):
 
 if __name__ == '__main__':
     install(show_locals=False) # Rich tracebacks
+    # TODO: Add check against old args like --config to demo
     parser = argparse.ArgumentParser(
             description=f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]'
         ' demo options. Shows valid args for your env and policy',
@@ -234,7 +236,23 @@ if __name__ == '__main__':
     parser.add_argument('--track', action='store_true', help='Track on WandB')
     wandb_name, pkg, args, env_module, make_env, make_policy = load_config(parser)
 
-    if args.mode == 'train':
+    if args.baseline:
+        # TODO: fix train/eval split
+        args.track = True
+        version = '.'.join(pufferlib.__version__.split('.')[:2])
+        args.exp_id = f'puf-{version}-{args.env}'
+        args.wandb_group = f'puf-{version}-baseline'
+        shutil.rmtree(f'experiments/{args.exp_id}', ignore_errors=True)
+        run = init_wandb(args, args.exp_id, resume=False)
+        if args.mode == 'evaluate':
+            model_name = f'puf-{version}-{args.env}_model:latest'
+            artifact = run.use_artifact(model_name)
+            data_dir = artifact.download()
+            model_file = max(os.listdir(data_dir))
+            args.eval_model_path = os.path.join(data_dir, model_file)
+        else:
+            train(args, env_module, make_env)
+    elif args.mode == 'train':
         train(args, env_module, make_env)
     elif args.mode == 'evaluate':
         rollout(
@@ -249,19 +267,6 @@ if __name__ == '__main__':
         sweep(args, wandb_name, env_module, make_env)
     elif args.mode == 'autotune':
         pufferlib.vector.autotune(make_env, batch_size=args.train.env_batch_size)
-    elif args.baseline:
-        args.track = True
-        version = '.'.join(pufferlib.__version__.split('.')[:2])
-        args.exp_name = f'puf-{version}-{args.env}'
-        args.wandb_group = f'puf-{version}-baseline'
-        shutil.rmtree(f'experiments/{args.exp_id}', ignore_errors=True)
-        run = init_wandb(args, env_module, name=args.exp_name, resume=False)
-        if args.mode == 'evaluate':
-            model_name = f'puf-{version}-{args.config}_model:latest'
-            artifact = run.use_artifact(model_name)
-            data_dir = artifact.download()
-            model_file = max(os.listdir(data_dir))
-            args.eval_model_path = os.path.join(data_dir, model_file)
     elif args.mode == 'profile':
         import cProfile
         cProfile.run('train(args, env_module, make_env)', 'stats.profile')

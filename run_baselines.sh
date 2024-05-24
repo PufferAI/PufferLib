@@ -6,7 +6,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 GROUP=$1
-COMMON="python demo.py --mode baseline --env"
+COMMON="python demo.py --mode train --baseline --env"
 
 case $GROUP in
     ocean)
