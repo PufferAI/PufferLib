@@ -90,6 +90,7 @@ environments = {
         f'gymnasium=={GYMNASIUM_VERSION}',
     ],
     'crafter': [
+        SHIMMY,
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
         'crafter==1.8.3',
@@ -138,11 +139,13 @@ environments = {
         'minigrid==2.3.1',
     ],
     'minihack': [
+        SHIMMY,
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
         'minihack==0.1.5',
     ],
     'nethack': [
+        SHIMMY,
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
         'nle==0.9.0',
