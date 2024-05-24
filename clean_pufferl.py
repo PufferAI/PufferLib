@@ -39,6 +39,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None, policy_pool=False
     losses = make_losses()
 
     msg = f'Model Size: {abbreviate(count_params(policy))} parameters'
+    # TODO: Check starting point in term and draw from there with no clear
     print_dashboard(config.env, 0, 0, profile, losses, {}, msg, clear=True)
 
     vecenv.async_reset(config.seed)
@@ -158,12 +159,12 @@ def evaluate(data):
 
         # Moves into models... maybe. Definitely moves. You could also just return infos and have it in demo
         if 'pokemon_exploration_map' in infos:
-            for idx, pmap in zip(infos['env_id'], infos['pokemon_exploration_map']):
-                if not hasattr(data, 'pokemon'):
-                    import pokemon_red_eval
-                    data.map_updater = pokemon_red_eval.map_updater()
-                    data.map_buffer = np.zeros((data.config.num_envs, *pmap.shape))
+            if not hasattr(data, 'pokemon'):
+                import pokemon_red_eval
+                data.map_updater = pokemon_red_eval.map_updater()
+                data.map_buffer = np.zeros((data.config.num_envs, *pmap.shape))
 
+            for idx, pmap in zip(infos['env_id'], infos['pokemon_exploration_map']):
                 data.map_buffer[idx] = pmap
 
             pokemon_map = np.sum(data.map_buffer, axis=0)
