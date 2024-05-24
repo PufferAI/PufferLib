@@ -611,7 +611,7 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
             else:
                 action, _, _, _ = agent(ob)
 
-        ob, reward, terminal, truncated, _ = env.step(action[0].item())
+        ob, reward, terminal, truncated, _ = env.step(action.item())
         return_val += reward
 
         chars = env.render()

@@ -28,8 +28,8 @@ def load_config(parser, config_path='config.yaml'):
     if 'default' not in config:
         raise ValueError('Deleted default config section?')
     if env_name not in config:
-        raise ValueError(f'{env_name} not in config'
-            'It might be available through a parent package, e.g.'
+        raise ValueError(f'{env_name} not in config\n'
+            'It might be available through a parent package, e.g.\n'
             '--config atari --env MontezumasRevengeNoFrameskip-v4.')
 
     default = config['default']
@@ -257,7 +257,7 @@ if __name__ == '__main__':
     elif args.mode == 'train':
         train(args, env_module, make_env)
     elif args.mode == 'evaluate':
-        rollout(
+        clean_pufferl.rollout(
             make_env,
             args.env,
             agent_creator=make_policy,
