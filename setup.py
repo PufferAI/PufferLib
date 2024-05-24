@@ -227,6 +227,8 @@ setup(
         'numpy==1.23.3',
         'opencv-python==3.4.17.63',
         'cython>=3.0.0',
+        'rich',
+        'rich_argparse',
         # *cleanrl,
         # *environments['pokemon_red'],
     ],
