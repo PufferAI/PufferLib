@@ -242,12 +242,12 @@ if __name__ == '__main__':
         # TODO: fix train/eval split
         args.track = True
         version = '.'.join(pufferlib.__version__.split('.')[:2])
-        args.exp_id = f'puf-{version}-{args.env}'
+        args.exp_id = f'puf-{version}-{args.env_name}'
         args.wandb_group = f'puf-{version}-baseline'
         shutil.rmtree(f'experiments/{args.exp_id}', ignore_errors=True)
         run = init_wandb(args, args.exp_id, resume=False)
         if args.mode == 'evaluate':
-            model_name = f'puf-{version}-{args.env}_model:latest'
+            model_name = f'puf-{version}-{args.env_name}_model:latest'
             artifact = run.use_artifact(model_name)
             data_dir = artifact.download()
             model_file = max(os.listdir(data_dir))
