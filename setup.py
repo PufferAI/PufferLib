@@ -229,6 +229,8 @@ setup(
         'cython>=3.0.0',
         'rich',
         'rich_argparse',
+        'gym',
+        'gymnasium',
         # *cleanrl,
         # *environments['pokemon_red'],
     ],
