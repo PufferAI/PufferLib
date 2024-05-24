@@ -235,7 +235,7 @@ if __name__ == '__main__':
     parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
     parser.add_argument('--vec', '--vector', '--vectorization', type=str,
         default='serial', choices='serial multiprocessing ray'.split())
-    parser.add_argument('--exp-id', type=str, default=None, help="Resume from experiment")
+    parser.add_argument('--exp-id', '--exp-name', type=str, default=None, help="Resume from experiment")
     parser.add_argument('--wandb-entity', type=str, default='jsuarez', help='WandB entity')
     parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
     parser.add_argument('--wandb-group', type=str, default='debug', help='WandB group')
