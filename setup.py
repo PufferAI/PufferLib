@@ -34,7 +34,7 @@ cleanrl = [
     'torch',
     'wandb==0.13.7',
     'psutil==5.9.5',
-    'tyro',
+    'gputil',
 ]
 
 rllib = [
