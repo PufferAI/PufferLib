@@ -21,8 +21,6 @@ import functools
 import inspect
 import importlib
 
-import gym
-
 def validate_args(fn, kwargs):
     fn_kwargs = get_init_args(fn)
     for param, val in kwargs.items():
@@ -190,6 +188,7 @@ def is_dict_space(space):
 
 def is_multiagent(env):
     import pettingzoo
+    import gym
     if inspect.isclass(env):
         env_cls = env
     else:
