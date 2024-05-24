@@ -6,7 +6,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 GROUP=$1
-COMMON="python demo.py --mode train --baseline --config"
+COMMON="python demo.py --mode train --baseline --env"
 
 case $GROUP in
     ocean)
@@ -24,25 +24,25 @@ case $GROUP in
         $COMMON miner
         ;;
     atari)
-        $COMMON breakout --vectorization multiprocessing
-        $COMMON pong --vectorization multiprocessing
-        $COMMON beam-rider --vectorization multiprocessing
-        $COMMON enduro --vectorization multiprocessing
-        $COMMON qbert --vectorization multiprocessing
-        $COMMON space-invaders --vectorization multiprocessing
-        $COMMON seaquest --vectorization multiprocessing
+        $COMMON breakout --vec multiprocessing
+        $COMMON pong --vec multiprocessing
+        $COMMON beam-rider --vec multiprocessing
+        $COMMON enduro --vec multiprocessing
+        $COMMON qbert --vec multiprocessing
+        $COMMON space-invaders --vec multiprocessing
+        $COMMON seaquest --vec multiprocessing
         ;;
     pokemon)
-        $COMMON pokemon --vectorization multiprocessing
+        $COMMON pokemon --vec multiprocessing
         ;;
     crafter)
-        $COMMON crafter --vectorization multiprocessing
+        $COMMON crafter --vec multiprocessing
         ;;
     nethack)
-        $COMMON nethack --vectorization multiprocessing
+        $COMMON nethack --vec multiprocessing
         ;;
     nmmo)
-        $COMMON nmmo --vectorization multiprocessing
+        $COMMON nmmo --vec multiprocessing
         ;;
     *)
         echo "Invalid group. Please specify 'ocean' or 'procgen_small'."
