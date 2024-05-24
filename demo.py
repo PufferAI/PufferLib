@@ -4,6 +4,7 @@ import argparse
 import shutil
 import yaml
 import uuid
+import sys
 import os
 
 import pufferlib
@@ -223,14 +224,17 @@ if __name__ == '__main__':
             description=f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]'
         ' demo options. Shows valid args for your env and policy',
         formatter_class=RichHelpFormatter, add_help=False)
-    parser.add_argument('--env', type=str, default='pokemon_red', help='Name of specific environment to run')
-    parser.add_argument('--pkg', type=str, default=None, help='Configuration in config.yaml to use')
+    assert 'config' not in sys.argv, '--config deprecated. Use --env'
+    parser.add_argument('--env', '--environment', type=str,
+        default='pokemon_red', help='Name of specific environment to run')
+    parser.add_argument('--pkg', '--package', type=str, default=None, help='Configuration in config.yaml to use')
     parser.add_argument('--backend', type=str, default='clean_pufferl', help='Train backend (clean_pufferl, sb3)')
     parser.add_argument('--mode', type=str, default='train', choices='train evaluate sweep autotune baseline profile'.split())
     parser.add_argument('--eval-model-path', type=str, default=None, help='Path to model to evaluate')
     parser.add_argument('--baseline', action='store_true', help='Baseline run')
     parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
-    parser.add_argument('--vec', type=str, default='serial', choices='serial multiprocessing ray'.split())
+    parser.add_argument('--vec', '--vector', '--vectorization', type=str,
+        default='serial', choices='serial multiprocessing ray'.split())
     parser.add_argument('--exp-id', type=str, default=None, help="Resume from experiment")
     parser.add_argument('--wandb-entity', type=str, default='jsuarez', help='WandB entity')
     parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
