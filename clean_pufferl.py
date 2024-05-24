@@ -159,17 +159,18 @@ def evaluate(data):
 
         # Moves into models... maybe. Definitely moves. You could also just return infos and have it in demo
         if 'pokemon_exploration_map' in infos:
-            if not hasattr(data, 'pokemon'):
-                import pokemon_red_eval
-                data.map_updater = pokemon_red_eval.map_updater()
-                data.map_buffer = np.zeros((data.config.num_envs, *pmap.shape))
-
             for idx, pmap in zip(infos['env_id'], infos['pokemon_exploration_map']):
+                if not hasattr(data, 'pokemon'):
+                    import pokemon_red_eval
+                    data.map_updater = pokemon_red_eval.map_updater()
+                    data.map_buffer = np.zeros((data.config.num_envs, *pmap.shape))
+
                 data.map_buffer[idx] = pmap
 
-            pokemon_map = np.sum(data.map_buffer, axis=0)
-            rendered = data.map_updater(pokemon_map)
-            data.stats['Media/exploration_map'] = data.wandb.Image(rendered)
+            if len(infos['pokemon_exploration_map']) > 0:
+                pokemon_map = np.sum(data.map_buffer, axis=0)
+                rendered = data.map_updater(pokemon_map)
+                data.stats['Media/exploration_map'] = data.wandb.Image(rendered)
 
         for k, v in infos.items():
             try: # TODO: Better checks on log data types
