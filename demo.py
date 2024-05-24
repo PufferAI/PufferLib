@@ -90,6 +90,7 @@ def load_config(parser, config_path='config.yaml'):
     parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help='show this help message and exit')
     parser.parse_args()
     wandb_name = make_name or env_name
+    config['env_name'] = env_name
     config['train'].exp_id = args.exp_id or args.env + '-' + str(uuid.uuid4())[:8]
     return wandb_name, pkg_name, pufferlib.namespace(**config), env_module, make_env, make_policy
    
@@ -174,6 +175,7 @@ def train(args, env_module, make_env):
     train_config = args.train 
     train_config.track = args.track
     train_config.device = args.train.device
+    train_config.env = args.env_name
 
     if args.backend == 'clean_pufferl':
         data = clean_pufferl.create(train_config, vecenv, policy, wandb=args.wandb)

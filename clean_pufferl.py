@@ -39,7 +39,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None, policy_pool=False
     losses = make_losses()
 
     msg = f'Model Size: {abbreviate(count_params(policy))} parameters'
-    print_dashboard(0, 0, profile, losses, {}, msg, clear=True)
+    print_dashboard(config.env, 0, 0, profile, losses, {}, msg, clear=True)
 
     vecenv.async_reset(config.seed)
     obs_shape = vecenv.single_observation_space.shape
@@ -337,7 +337,7 @@ def train(data):
             data.msg = f'Checkpoint saved at update {data.epoch}'
 
         if profile.update(data) or done_training:
-            print_dashboard(data.global_step, data.epoch,
+            print_dashboard(config.env, data.global_step, data.epoch,
                 profile, data.losses, data.stats, data.msg)
 
             if data.wandb is not None and data.global_step > 0:
@@ -679,7 +679,8 @@ def fmt_perf(name, time, uptime):
     percent = 0 if uptime == 0 else int(100*time/uptime - 1e-5)
     return f'{c1}{name}', duration(time), f'{b2}{percent:2d}%'
 
-def print_dashboard(global_step, epoch, profile, losses, stats, msg, clear=False, max_stats=[0]):
+# TODO: Add env name to print_dashboard
+def print_dashboard(env_name, global_step, epoch, profile, losses, stats, msg, clear=False, max_stats=[0]):
     console = Console()
     if clear:
         console.clear()
@@ -700,7 +701,7 @@ def print_dashboard(global_step, epoch, profile, losses, stats, msg, clear=False
     table.add_column(justify="center", width=12)
     table.add_column(justify="right", width=12)
     table.add_row(
-        f':blowfish: {c1}PufferLib {b2}1.0.0',
+        f':blowfish: {c1}PufferLib {b2}1.0.0{c1}: {env_name}',
         f'{c1}CPU: {c3}{cpu_percent:.1f}%',
         f'{c1}GPU: {c3}{gpu_percent:.1f}%',
         f'{c1}DRAM: {c3}{dram_percent:.1f}%',
