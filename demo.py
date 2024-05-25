@@ -92,7 +92,7 @@ def load_config(parser, config_path='config.yaml'):
     parser.parse_args()
     wandb_name = make_name or env_name
     config['env_name'] = env_name
-    config['train'].exp_id = args.exp_id or args.env + '-' + str(uuid.uuid4())[:8]
+    config['exp_id'] = args.exp_id or args.env + '-' + str(uuid.uuid4())[:8]
     return wandb_name, pkg_name, pufferlib.namespace(**config), env_module, make_env, make_policy
    
 def make_policy(env, env_module, args):
@@ -149,6 +149,7 @@ def sweep(args, wandb_name, env_module, make_env):
 
 def train(args, env_module, make_env):
     args.wandb = None
+    args.train.exp_id = args.exp_id
     if args.track:
         args.wandb = init_wandb(args, wandb_name, id=args.exp_id)
 
@@ -229,7 +230,7 @@ if __name__ == '__main__':
         default='pokemon_red', help='Name of specific environment to run')
     parser.add_argument('--pkg', '--package', type=str, default=None, help='Configuration in config.yaml to use')
     parser.add_argument('--backend', type=str, default='clean_pufferl', help='Train backend (clean_pufferl, sb3)')
-    parser.add_argument('--mode', type=str, default='train', choices='train evaluate sweep autotune baseline profile'.split())
+    parser.add_argument('--mode', type=str, default='train', choices='train eval evaluate sweep autotune baseline profile'.split())
     parser.add_argument('--eval-model-path', type=str, default=None, help='Path to model to evaluate')
     parser.add_argument('--baseline', action='store_true', help='Baseline run')
     parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
@@ -243,32 +244,34 @@ if __name__ == '__main__':
     wandb_name, pkg, args, env_module, make_env, make_policy = load_config(parser)
 
     if args.baseline:
-        # TODO: fix train/eval split
+        assert args.mode in ('train', 'eval', 'evaluate')
         args.track = True
         version = '.'.join(pufferlib.__version__.split('.')[:2])
         args.exp_id = f'puf-{version}-{args.env_name}'
         args.wandb_group = f'puf-{version}-baseline'
         shutil.rmtree(f'experiments/{args.exp_id}', ignore_errors=True)
         run = init_wandb(args, args.exp_id, resume=False)
-        if args.mode == 'evaluate':
+        if args.mode in ('eval', 'evaluate'):
             model_name = f'puf-{version}-{args.env_name}_model:latest'
             artifact = run.use_artifact(model_name)
             data_dir = artifact.download()
             model_file = max(os.listdir(data_dir))
             args.eval_model_path = os.path.join(data_dir, model_file)
-        else:
-            train(args, env_module, make_env)
-    elif args.mode == 'train':
+
+    if args.mode == 'train':
         train(args, env_module, make_env)
-    elif args.mode == 'evaluate':
-        clean_pufferl.rollout(
-            make_env,
-            args.env,
-            agent_creator=make_policy,
-            agent_kwargs={'env_module': env_module, 'args': args},
-            model_path=args.eval_model_path,
-            device=args.train.device
-        )
+    elif args.mode in ('eval', 'evaluate'):
+        try:
+            clean_pufferl.rollout(
+                make_env,
+                args.env,
+                agent_creator=make_policy,
+                agent_kwargs={'env_module': env_module, 'args': args},
+                model_path=args.eval_model_path,
+                device=args.train.device
+            )
+        except KeyboardInterrupt:
+            exit(0)
     elif args.mode == 'sweep':
         sweep(args, wandb_name, env_module, make_env)
     elif args.mode == 'autotune':

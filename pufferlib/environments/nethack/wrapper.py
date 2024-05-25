@@ -188,6 +188,8 @@ class RenderCharImagesWithNumpyWrapper(gym.Wrapper):
         self.observation_space = gym.spaces.Dict(obs_spaces)
         '''
 
+        self.render_mode = 'rgb_array'
+
     def _render_text_to_image(self, obs):
         chars = obs["tty_chars"]
         colors = obs["tty_colors"]
@@ -223,13 +225,18 @@ class RenderCharImagesWithNumpyWrapper(gym.Wrapper):
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
+        self.obs = obs
         obs = self._render_text_to_image(obs)
         return obs, reward, done, info
 
     def reset(self):
         obs = self.env.reset()
+        self.obs = obs
         obs = self._render_text_to_image(obs)
         return obs
+
+    def render(self, mode='rgb_array'):
+        return self.obs
 
 
 class RenderCharImagesWithNumpyWrapperV2(gym.Wrapper):

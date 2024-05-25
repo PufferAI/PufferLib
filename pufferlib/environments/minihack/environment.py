@@ -35,6 +35,7 @@ class MinihackWrapper:
         self.action_space = self.env.action_space
         self.close = self.env.close
         self.close = self.env.close
+        self.render_mode = 'ansi'
 
     def reset(self, seed=None):
         obs, info = self.env.reset(seed=seed)

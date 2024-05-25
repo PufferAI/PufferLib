@@ -159,6 +159,7 @@ def evaluate(data):
 
         # Moves into models... maybe. Definitely moves. You could also just return infos and have it in demo
         if 'pokemon_exploration_map' in infos:
+            # TODO: Fix this logging
             for idx, pmap in zip(infos['env_id'], infos['pokemon_exploration_map']):
                 if not hasattr(data, 'pokemon'):
                     import pokemon_red_eval
@@ -167,7 +168,7 @@ def evaluate(data):
 
                 data.map_buffer[idx] = pmap
 
-            if len(infos['pokemon_exploration_map']) > 0:
+            if len(infos['pokemon_exploration_map']) > 0 and len(infos['env_id']) > 0:
                 pokemon_map = np.sum(data.map_buffer, axis=0)
                 rendered = data.map_updater(pokemon_map)
                 data.stats['Media/exploration_map'] = data.wandb.Image(rendered)
@@ -604,7 +605,12 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
             ob, info = env.reset()
             state = None
             step = 0
+            reward = 0
+            terminal = False
+            truncated = False
             return_val = 0
+        else:
+            ob, reward, terminal, truncated, _ = env.step(action.item())
 
         ob = torch.tensor(ob).unsqueeze(0).to(device)
         with torch.no_grad():
@@ -613,17 +619,25 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
             else:
                 action, _, _, _ = agent(ob)
 
-        ob, reward, terminal, truncated, _ = env.step(action.item())
         return_val += reward
 
-        chars = env.render()
-        print("\033c", end="")
-        print(chars)
+        render = env.render()
+        if env.render_mode == 'ansi':
+            print("\033c", end="")
+            print(render)
+            time.sleep(0.5)
+        elif env.render_mode == 'rgb_array':
+            import cv2
+            render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
+            cv2.imshow('frame', render)
+            cv2.waitKey(1)
+            time.sleep(1/24)
+        elif env.render_mode == 'human':
+            pass
 
         if verbose:
             print(f'Step: {step} Reward: {reward:.4f} Return: {return_val:.2f}')
 
-        time.sleep(0.5)
         step += 1
 
 def seed_everything(seed, torch_deterministic):

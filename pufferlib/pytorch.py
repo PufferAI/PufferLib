@@ -23,6 +23,8 @@ numpy_to_torch_dtype_dict = {
 
 LITTLE_BYTE_ORDER = sys.byteorder == "little"
 
+# TODO: handle discrete obs
+# Spend some time trying to break this fn with differnt obs
 def nativize_dtype(emulated):
     sample_dtype: np.dtype = emulated.observation_dtype
     structured_dtype: np.dtype = emulated.emulated_observation_dtype

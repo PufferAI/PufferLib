@@ -28,6 +28,7 @@ class Bandit(gymnasium.Env):
         self.observation_space=gymnasium.spaces.Box(
             low=-1, high=1, shape=(1,))
         self.action_space=gymnasium.spaces.Discrete(num_actions)
+        self.render_mode = 'ansi'
 
     def reset(self, seed=None):
         # Bandit problem requires a single fixed seed
@@ -81,6 +82,7 @@ class Memory(gymnasium.Env):
         self.observation_space=gymnasium.spaces.Box(
             low=-1, high=1, shape=(1,))
         self.action_space=gymnasium.spaces.Discrete(2)
+        self.render_mode = 'ansi'
 
     def reset(self, seed=None):
         if seed is not None:
@@ -167,6 +169,7 @@ class Multiagent(pettingzoo.ParallelEnv):
         }
         self.possible_agents=[1, 2]
         self.agents=[1, 2]
+        self.render_mode = 'ansi'
 
     def observation_space(self, agent):
         return gymnasium.spaces.Box(
@@ -243,6 +246,7 @@ class Password(gymnasium.Env):
         self.observation_space=gymnasium.spaces.Box(
             low=0, high=1, shape=(password_length,))
         self.action_space=gymnasium.spaces.Discrete(2)
+        self.render_mode = 'ansi'
 
     def reset(self, seed=None):
         # Bandit problem requires a single fixed seed
@@ -309,6 +313,7 @@ class Performance(gymnasium.Env):
         )
         self.action_space = gymnasium.spaces.Discrete(2)
         self.observation = self.observation_space.sample()
+        self.render_mode = 'ansi'
 
     def reset(self, seed=None):
         return self.observation, {}
@@ -335,6 +340,7 @@ class PerformanceEmpiric(gymnasium.Env):
         self.count_n = count_n
         self.count_std = count_std
         self.bandwidth = bandwidth
+        self.render_mode = 'ansi'
 
     def reset(self, seed=None):
         return self.observation, {}
@@ -370,6 +376,7 @@ class Spaces(gymnasium.Env):
             'image': gymnasium.spaces.Discrete(2),
             'flat': gymnasium.spaces.Discrete(2),
         })
+        self.render_mode = 'ansi'
 
     def reset(self, seed=None):
         self.observation = {
@@ -432,6 +439,7 @@ class Squared(gymnasium.Env):
         self.observation_space = gymnasium.spaces.Box(
             low=-1, high=1, shape=(grid_size, grid_size))
         self.action_space = gymnasium.spaces.Discrete(8)
+        self.render_mode = 'ansi'
 
     def _all_possible_targets(self, grid_size):
         return [(x, y) for x in range(grid_size) for y in range(grid_size)
@@ -538,6 +546,7 @@ class Stochastic(gymnasium.Env):
         self.observation_space = gymnasium.spaces.Box(
             low=0, high=1, shape=(1,))
         self.action_space = gymnasium.spaces.Discrete(2)
+        self.render_mode = 'ansi'
 
     def reset(self, seed=None):
         if seed is not None:

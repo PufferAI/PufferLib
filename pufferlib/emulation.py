@@ -129,7 +129,11 @@ class GymnasiumPufferEnv(gymnasium.Env):
         self.buf = None # Injected buffer for shared memory optimization
         self.obs = np.zeros(self.observation_space.shape, dtype=self.observation_space.dtype)
         self.render_modes = 'human rgb_array'.split()
-        self.render_mode = 'rgb_array'
+        #self.render_mode = 'rgb_array'
+
+    @property
+    def render_mode(self):
+        return self.env.render_mode
 
     def _emulate(self, ob):
         if self.is_obs_emulated:
