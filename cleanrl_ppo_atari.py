@@ -179,11 +179,12 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # PufferLib vectorization makes CleanRL ~65% faster!
-    import pufferlib.vectorization
+    import pufferlib.vector
     import pufferlib.environments.atari
-    envs = pufferlib.vectorization.Multiprocessing(
-        env_creator = pufferlib.environments.atari.env_creator(args.env_id),
-        env_kwargs={'framestack': 4},
+    envs = pufferlib.vector.make(
+        pufferlib.environments.atari.env_creator(args.env_id),
+        env_kwargs=dict(framestack=4),
+        backend=pufferlib.vector.Multiprocessing,
         num_envs=args.num_envs,
     )
 
@@ -201,7 +202,7 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs, _, _, _ = envs.reset(seed=args.seed)
+    next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
 
@@ -225,7 +226,7 @@ if __name__ == "__main__":
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, terminations, truncations, infos, _, _ = envs.step(action.cpu().numpy())
+            next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
