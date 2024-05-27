@@ -9,7 +9,6 @@ import inspect
 import pufferlib
 import pufferlib.spaces
 from pufferlib import utils, exceptions
-from pufferlib.extensions import emulate, nativize
 
 from pufferlib.spaces import Discrete, Tuple, Dict
 
@@ -44,6 +43,11 @@ def _nativize(sample, space):
 def nativize(sample, sample_space, emulated_dtype):
     structured = np.asarray(sample).view(emulated_dtype)[0]
     return _nativize(structured, sample_space)
+
+try:
+    from pufferlib.extensions import emulate, nativize
+except ImportError:
+    warnings.warn('PufferLib Cython extensions not installed. Using slow Python versions')
 
 def dtype_from_space(space):
     if isinstance(space, pufferlib.spaces.Tuple):
@@ -225,14 +229,14 @@ class PettingZooPufferEnv:
 
         # Compute the observation and action spaces
         single_agent = self.possible_agents[0]
-        single_observation_space = self.env.observation_space(single_agent)
-        single_action_space = self.env.action_space(single_agent)
+        self.env_single_observation_space = self.env.observation_space(single_agent)
+        self.env_single_action_space = self.env.action_space(single_agent)
         self.single_observation_space, self.obs_dtype = (
-            emulate_observation_space(single_observation_space))
+            emulate_observation_space(self.env_single_observation_space))
         self.single_action_space, self.atn_dtype = (
-            emulate_action_space(single_action_space))
-        self.is_obs_emulated = self.single_observation_space is not single_observation_space
-        self.is_atn_emulated = self.single_action_space is not single_action_space
+            emulate_action_space(self.env_single_action_space))
+        self.is_obs_emulated = self.single_observation_space is not self.env_single_observation_space
+        self.is_atn_emulated = self.single_action_space is not self.env_single_action_space
         self.emulated = pufferlib.namespace(
             observation_dtype = self.single_observation_space.dtype,
             emulated_observation_dtype = self.obs_dtype,
@@ -355,7 +359,7 @@ class PettingZooPufferEnv:
                 continue
 
             if self.is_atn_emulated:
-                atn = nativize(atn, self.single_action_space, self.atn_dtype)
+                atn = nativize(atn, self.env_single_action_space, self.atn_dtype)
 
             unpacked_actions[agent] = atn
 

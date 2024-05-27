@@ -135,7 +135,7 @@ class Serial:
         self.infos = infos
 
     def send(self, actions):
-        if not actions.data.contiguous:
+        if not actions.flags.contiguous:
             actions = np.ascontiguousarray(actions)
 
         actions = send_precheck(self, actions)

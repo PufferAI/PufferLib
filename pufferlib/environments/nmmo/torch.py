@@ -17,16 +17,15 @@ class Recurrent(pufferlib.models.LSTMWrapper):
     def __init__(self, env, policy, input_size=256, hidden_size=256, num_layers=1):
         super().__init__(env, policy, input_size, hidden_size, num_layers)
 
-class Policy(pufferlib.models.Policy):
+class Policy(torch.nn.Module):
   NUM_ATTRS = 34
   EntityId = EntityState.State.attr_name_to_col["id"]
   tile_offset = torch.tensor([i*256 for i in range(3)])
   entity_offset = torch.tensor([i*256 for i in range(3, 34)])
 
   def __init__(self, env, input_size=256, hidden_size=256, output_size=256):
-      super().__init__(env)
-
-      self.unflatten_context = env.unflatten_context
+      super().__init__()
+      self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
 
       # A dumb example encoder that applies a linear layer to agent self features
       self.embedding = torch.nn.Embedding(self.NUM_ATTRS*256, 32)
@@ -42,9 +41,13 @@ class Policy(pufferlib.models.Policy):
               for n in env.single_action_space.nvec])
       self.value_head = torch.nn.Linear(hidden_size, 1)
 
+  def forward(self, x):
+      hidden, lookup = self.encode_observations(x)
+      actions, value = self.decode_actions(hidden, lookup)
+      return actions, value
+
   def encode_observations(self, env_outputs):
-    env_outputs = pufferlib.emulation.unpack_batched_obs(
-        env_outputs, self.unflatten_context)
+    env_outputs = pufferlib.pytorch.nativize_tensor(env_outputs, self.dtype)
 
     tile = env_outputs['Tile']
     # Center on player
