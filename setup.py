@@ -30,6 +30,7 @@ docs = [
 ]
 
 cleanrl = [
+    'stable_baselines3==2.1.0',
     'tensorboard==2.11.2',
     'torch',
     'wandb==0.13.7',

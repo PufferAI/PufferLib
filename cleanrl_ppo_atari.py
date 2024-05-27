@@ -21,10 +21,9 @@ from stable_baselines3.common.atari_wrappers import (  # isort:skip
     NoopResetEnv,
 )
 
-
 @dataclass
 class Args:
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    exp_name: str = 'cleanrl_ppo_atari'
     """the name of this experiment"""
     seed: int = 1
     """seed of the experiment"""
@@ -147,7 +146,7 @@ class Agent(nn.Module):
 
 
 if __name__ == "__main__":
-    args = tyro.cli(Args)
+    args, _ = tyro.cli(Args, return_unknown_args=True)
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
