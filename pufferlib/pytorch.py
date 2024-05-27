@@ -71,6 +71,7 @@ def _nativize_dtype(
 
         return subviews, offset
 
+@torch.compile(fullgraph=True)
 def nativize_tensor(
     observation: torch.Tensor,
     native_dtype: tuple[torch.dtype, tuple[int], int, int]
@@ -107,8 +108,8 @@ def _nativize_tensor(
         # torch._check(observation.size(1) >= offset + delta)
         slice = observation.narrow(1, offset, delta)
         # slice = slice.contiguous()
-        slice = compilable_cast(slice, dtype)
-        #slice = slice.view(dtype)
+        #slice = compilable_cast(slice, dtype)
+        slice = slice.view(dtype)
         slice = slice.view(observation.shape[0], *shape)
         return slice
     else:

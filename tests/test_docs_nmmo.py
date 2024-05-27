@@ -18,13 +18,12 @@ backend = pufferlib.vector.Serial #or Multiprocessing, Ray
 envs = pufferlib.vector.make(nmmo_creator, backend=backend, num_envs=4)
 
 # Synchronous API - reset/step
-# obs = envs.reset()[0]
+obs, infos = envs.reset()
 
 # Asynchronous API - async_reset, send/recv
 envs.async_reset()
-obs = envs.recv()[0]
+obs, rewards, terminals, truncateds, infos, env_id, mask = envs.recv()
 
-from pdb import set_trace as T
 # Section 3: Policy
 import torch
 from torch import nn

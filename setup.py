@@ -35,6 +35,7 @@ cleanrl = [
     'wandb==0.13.7',
     'psutil==5.9.5',
     'gputil',
+    'tyro==0.5.10',
 ]
 
 rllib = [

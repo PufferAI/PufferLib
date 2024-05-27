@@ -19,28 +19,3 @@ def try_import(module_path, package_name=None):
             'recommend using PufferTank.'
         ) from e
     return package
-
-@pufferlib.dataclass
-class EnvArgs:
-    pass
-
-@pufferlib.dataclass
-class DefaultPolicyArgs:
-    input_size: int = 128
-    hidden_size: int = 128
-
-@pufferlib.dataclass
-class ConvolutionalPolicyArgs:
-    framestack: int = 1
-    flat_size: int = 7*7*64
-    input_size: int = 512
-    hidden_size: int = 512
-    output_size: int = 512
-    channels_last: bool = False
-    downsample: int = 1
-
-@pufferlib.dataclass
-class RecurrentArgs:
-    input_size: int = 128
-    hidden_size: int = 128
-    num_layers: int = 1
