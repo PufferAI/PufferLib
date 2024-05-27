@@ -79,3 +79,5 @@ dtype = pufferlib.pytorch.nativize_dtype(envs.driver_env.emulated)
 env_outputs = pufferlib.pytorch.nativize_tensor(obs, dtype)
 print('Packed tensor:', obs.shape)
 print('Unpacked:', env_outputs.keys())
+from pdb import set_trace as T; T()
+pass

@@ -48,7 +48,7 @@ def duration(seconds):
     s = seconds % 60
     return f"{h}h {m}m {s}s" if h else f"{m}m {s}s" if m else f"{s}s"
 
-def print_dashboard(total_uptime, estimated_time, total_steps, steps_per_second, latency, performance_data, loss_data, user_data, min_interval=0.25, last_print=[0]):
+def print_dashboard(performance_data, loss_data, user_data, min_interval=0.25, last_print=[0]):
     console = Console()
 
     util = Table(box=None, expand=True, show_header=False)
@@ -73,18 +73,24 @@ def print_dashboard(total_uptime, estimated_time, total_steps, steps_per_second,
     summary= Table(box=None, expand=True)
     summary.add_column(f"{c1}Summary", justify='left', vertical='top')
     summary.add_column(f"{c1}Value", justify='right', vertical='top')
-    summary.add_row(f'{c2}Epoch', f'{b2}{102}')
-    summary.add_row(f'{c2}Uptime', f'{b2}{duration(total_uptime)}')
+    summary.add_row(f'{c2}Epoch', f'{b2}{performance.epoch}')
+    summary.add_row(f'{c2}Uptime', f'{b2}{duration(performance.uptime)}')
+    estimated_time = performance.total_steps / performance.sps
     summary.add_row(f'{c2}Estim', f'{b2}{duration(estimated_time)}')
-    summary.add_row(f'{c2}Agent Steps', f'{b2}{abbreviate(total_steps)}')
-    summary.add_row(f'{c2}Steps/sec', f'{b2}{abbreviate(steps_per_second)}')
-    summary.add_row(f'{c2}sec/Batch', f'{b2}{latency}')
+    summary.add_row(f'{c2}Agent Steps', f'{b2}{abbreviate(performance.agent_steps)}')
+    summary.add_row(f'{c2}Steps/sec', f'{b2}{abbreviate(performance.sps)}')
+    summary.add_row(f'{c2}sec/Batch', f'{b2}{performance.epoch_time:.2f}')
    
     perf = Table(box=None, expand=True)
     perf.add_column(f"{c1}Performance", justify="left", ratio=1.0)
     perf.add_column(f"{c1}Time", justify="right", ratio=0.5)
-    for metric, value in performance_data.items():
-        perf.add_row(f'{c2}{metric}', f'{b2}{value}')
+    perf.add_row(f'{c2}Training', f'{b2}{performance.epoch_train_time:.2f}')
+    perf.add_row(f'{c2}Evaluation', f'{b2}{performance.epoch_eval_time:.2f}')
+    perf.add_row(f'{c2}Environment', f'{b2}{performance.epoch_env_time:.2f}')
+    perf.add_row(f'{c2}Forward', f'{b2}{performance.epoch_forward_time:.2f}')
+    perf.add_row(f'{c2}Misc', f'{b2}{performance.epoch_misc_time:.2f}')
+    perf.add_row(f'{c2}Allocation', f'{b2}{performance.epoch_alloc_time:.2f}')
+    perf.add_row(f'{c2}Backward', f'{b2}{performance.epoch_backward_time:.2f}')
 
     losses = Table(box=None, expand=True)
     losses.add_column(f'{c1}Losses', justify="left", ratio=1.0)
