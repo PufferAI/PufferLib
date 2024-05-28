@@ -29,7 +29,7 @@ def emulate(cnp.ndarray arr, object sample):
     else:
         arr[()] = sample
 
-cdef _nativize(cnp.ndarray sample, object space):
+cdef _nativize(object sample, object space):
     cdef str k
     cdef int i
 
@@ -42,8 +42,8 @@ cdef _nativize(cnp.ndarray sample, object space):
         return {k: _nativize(sample[k], value)
             for k, value in space.items()}
     else:
-        return sample.item()
+        return sample
 
 def nativize(sample, object sample_space, cnp.dtype emulated_dtype):
-    sample = np.asarray(sample).view(emulated_dtype)
+    sample = np.asarray(sample).view(emulated_dtype)[0]
     return _nativize(sample, sample_space)
