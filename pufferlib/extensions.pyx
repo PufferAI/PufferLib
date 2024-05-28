@@ -16,34 +16,34 @@ cimport numpy as cnp
 from pufferlib.spaces import Tuple, Dict, Discrete
 
 
-def emulate(cnp.ndarray arr, object sample):
+def emulate(cnp.ndarray np_struct, object sample):
     cdef str k
     cdef int i
 
     if isinstance(sample, dict):
         for k, v in sample.items():
-            emulate(arr[k], v)
+            emulate(np_struct[k], v)
     elif isinstance(sample, tuple):
         for i, v in enumerate(sample):
-            emulate(arr[f'f{i}'], v)
+            emulate(np_struct[f'f{i}'], v)
     else:
-        arr[()] = sample
+        np_struct[()] = sample
 
-cdef _nativize(object sample, object space):
+cdef object _nativize(np_struct, object space):
     cdef str k
     cdef int i
 
     if isinstance(space, Discrete):
-        return sample.item()
+        return np_struct.item()
     elif isinstance(space, Tuple):
-        return tuple(_nativize(sample[f'f{i}'], elem)
+        return tuple(_nativize(np_struct[f'f{i}'], elem)
             for i, elem in enumerate(space))
     elif isinstance(space, Dict):
-        return {k: _nativize(sample[k], value)
+        return {k: _nativize(np_struct[k], value)
             for k, value in space.items()}
     else:
-        return sample
+        return np_struct
 
-def nativize(sample, object sample_space, cnp.dtype emulated_dtype):
-    sample = np.asarray(sample).view(emulated_dtype)[0]
-    return _nativize(sample, sample_space)
+def nativize(arr, object space, cnp.dtype struct_dtype):
+    np_struct = np.asarray(arr).view(struct_dtype)[0]
+    return _nativize(np_struct, space)

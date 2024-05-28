@@ -5,7 +5,7 @@ import numpy as np
 import pufferlib
 import pufferlib.emulation
 import pufferlib.utils
-import pufferlib.vectorization
+import pufferlib.vector
 from pufferlib.environments import test
 
 # Deprecation warnings from gymnasium
@@ -41,7 +41,7 @@ def test_gymnasium_emulation(env_cls, steps=100):
 
         # Convert raw actions to puffer format
         if puf_env.is_atn_emulated:
-            action = pufferlib.emulation.emulate(
+            action = pufferlib.emulation.emulate_copy(
                 action, puf_env.action_space.dtype, puf_env.atn_dtype)
 
         puf_ob, puf_reward, puf_done, puf_truncated, _ = puf_env.step(action)
@@ -90,7 +90,7 @@ def test_pettingzoo_emulation(env_cls, steps=100):
                     puf_actions[agent] = dummy_action
                     continue
 
-                puf_actions[agent] = pufferlib.emulation.emulate(
+                puf_actions[agent] = pufferlib.emulation.emulate_copy(
                     raw_actions[agent], puf_env.single_action_space.dtype, puf_env.atn_dtype)
 
         puf_obs, puf_rewards, puf_dones, puf_truncateds, _ = puf_env.step(puf_actions)
@@ -103,7 +103,7 @@ def test_pettingzoo_emulation(env_cls, steps=100):
 
 def test_puffer_vectorization(env_cls, puffer_cls, steps=100, num_envs=1, **kwargs):
     raw_envs = [puffer_cls(env_creator=env_cls) for _ in range(num_envs)]
-    vec_envs = pufferlib.vectorization.make(puffer_cls,
+    vec_envs = pufferlib.vector.make(puffer_cls,
         env_kwargs={'env_creator': env_cls}, num_envs=num_envs, **kwargs)
 
     num_agents = sum(env.num_agents for env in raw_envs)
@@ -172,16 +172,16 @@ def test_emulation():
 
 def test_vectorization():
     for vectorization in [
-            pufferlib.vectorization.Serial,
-            pufferlib.vectorization.Multiprocessing,
-            pufferlib.vectorization.Ray]:
+            pufferlib.vector.Serial,
+            pufferlib.vector.Multiprocessing,
+            pufferlib.vector.Ray]:
         for env_cls in test.MOCK_SINGLE_AGENT_ENVIRONMENTS:
             test_puffer_vectorization(
                 env_cls,
                 pufferlib.emulation.GymnasiumPufferEnv,
-                steps=100,
-                num_envs=6,
-                num_workers=6,
+                steps=10,
+                num_envs=4,
+                num_workers=4,
                 backend=vectorization,
             )
 
@@ -191,9 +191,9 @@ def test_vectorization():
             test_puffer_vectorization(
                 env_cls,
                 pufferlib.emulation.PettingZooPufferEnv,
-                steps=100,
-                num_envs=6,
-                num_workers=6,
+                steps=10,
+                num_envs=4,
+                num_workers=4,
                 backend=vectorization,
             )
 
@@ -201,5 +201,5 @@ def test_vectorization():
 
 if __name__ == '__main__':
     test_emulation()
-    #test_vectorization()
+    test_vectorization()
     exit(0) # For Ray

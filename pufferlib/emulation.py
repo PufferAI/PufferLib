@@ -13,36 +13,52 @@ from pufferlib import utils, exceptions
 from pufferlib.spaces import Discrete, Tuple, Dict
 
 
-def _emulate(arr, sample):
+def emulate(struct, sample):
     if isinstance(sample, dict):
         for k, v in sample.items():
-            _emulate(arr[k], v)
+            emulate(struct[k], v)
     elif isinstance(sample, tuple):
         for i, v in enumerate(sample):
-            _emulate(arr[f'f{i}'], v)
+            emulate(struct[f'f{i}'], v)
     else:
-        arr[()] = sample
+        struct[()] = sample
 
-def emulate(sample, sample_dtype, emulated_dtype):
-    emulated = np.zeros(1, dtype=emulated_dtype)
-    _emulate(emulated, sample)
-    return emulated.view(sample_dtype).ravel()
+def make_buffer(arr_dtype, struct_dtype, n=None):
+    '''None instead of 1 makes it work for 1 agent PZ envs'''
+    if n is None:
+        struct = np.zeros(1, dtype=struct_dtype)
+    else:
+        struct = np.zeros(n, dtype=struct_dtype)
 
-def _nativize(sample, space):
+    arr = struct.view(arr_dtype)
+
+    if n is None:
+        arr = arr.ravel()
+    else:
+        arr = arr.reshape(n, -1)
+
+    return arr, struct
+
+def emulate_copy(sample, arr_dtype, struct_dtype):
+    arr, struct = make_buffer(arr_dtype, struct_dtype)
+    emulate(struct, sample)
+    return arr
+
+def _nativize(struct, space):
     if isinstance(space, Discrete):
-        return sample.item()
+        return struct.item()
     elif isinstance(space, Tuple):
-        return tuple(_nativize(sample[f'f{i}'], elem)
+        return tuple(_nativize(struct[f'f{i}'], elem)
             for i, elem in enumerate(space))
     elif isinstance(space, Dict):
-        return {k: _nativize(sample[k], value)
+        return {k: _nativize(struct[k], value)
             for k, value in space.items()}
     else:
-        return sample
+        return struct
 
-def nativize(sample, sample_space, emulated_dtype):
-    structured = np.asarray(sample).view(emulated_dtype)[0]
-    return _nativize(structured, sample_space)
+def nativize(arr, space, struct_dtype):
+    struct = np.asarray(arr).view(struct_dtype)[0]
+    return _nativize(struct, space)
 
 try:
     from pufferlib.extensions import emulate, nativize
@@ -131,9 +147,9 @@ class GymnasiumPufferEnv(gymnasium.Env):
         )
 
         self.buf = None # Injected buffer for shared memory optimization
-        self.obs = np.zeros(self.observation_space.shape, dtype=self.observation_space.dtype)
+        self.obs, self.obs_struct = make_buffer(
+            self.single_observation_space.dtype, self.obs_dtype)
         self.render_modes = 'human rgb_array'.split()
-        #self.render_mode = 'rgb_array'
 
     @property
     def render_mode(self):
@@ -141,7 +157,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
 
     def _emulate(self, ob):
         if self.is_obs_emulated:
-            _emulate(self._obs, ob)
+            emulate(self.obs_struct, ob)
         elif self.buf is not None:
             self.obs[:] = ob
         else:
@@ -156,7 +172,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
                 self.obs = self.buf.observations[0]
 
             if self.is_obs_emulated:
-                self._obs = self.obs.view(self.obs_dtype)
+                self.obs_struct = self.obs.view(self.obs_dtype)
 
         self.initialized = True
         self.done = False
@@ -246,9 +262,11 @@ class PettingZooPufferEnv:
 
         self.buf = None
 
-        self.obs = np.zeros((self.num_agents, *self.single_observation_space.shape),
-            dtype=self.single_observation_space.dtype)
-
+        #self.obs = np.zeros((self.num_agents, *self.single_observation_space.shape),
+        #    dtype=self.single_observation_space.dtype)
+        self.obs, self.obs_struct = make_buffer(
+            self.single_observation_space.dtype, self.obs_dtype, self.num_agents)
+ 
     @property
     def agents(self):
         return self.env.agents
@@ -263,7 +281,7 @@ class PettingZooPufferEnv:
 
     def _emulate(self, ob, i, agent):
         if self.is_obs_emulated:
-            _emulate(self._obs[i], ob)
+            emulate(self.obs_struct[i], ob)
         elif self.buf is not None:
             self.obs[i] = ob
         else:
@@ -289,7 +307,7 @@ class PettingZooPufferEnv:
                 self.obs = self.buf.observations
 
             if self.is_obs_emulated:
-                self._obs = self.obs.view(self.obs_dtype).reshape(self.num_agents, -1)
+                self.obs_struct = self.obs.view(self.obs_dtype).reshape(self.num_agents, -1)
 
             self.dict_obs = {agent: self.obs[i] for i, agent in enumerate(self.possible_agents)}
 
