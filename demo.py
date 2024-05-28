@@ -10,6 +10,7 @@ import os
 import pufferlib
 import pufferlib.utils
 import pufferlib.vector
+import pufferlib.frameworks.cleanrl
 
 from rich_argparse import RichHelpFormatter
 from rich.traceback import install
