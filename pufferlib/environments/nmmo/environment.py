@@ -14,5 +14,4 @@ def make(name, *args, **kwargs):
     '''Neural MMO creation function'''
     nmmo = pufferlib.environments.try_import('nmmo')
     env = nmmo.Env(*args, **kwargs)
-    env = pufferlib.wrappers.PettingZooTruncatedWrapper(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)

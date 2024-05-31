@@ -86,6 +86,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None, policy_pool=False
         epoch=0,
         stats={},
         msg=msg,
+        last_log_time=time.time(),
         #optimize=optimize,
         #optim=optim
     )
@@ -97,7 +98,6 @@ def evaluate(data):
     with profile.eval_misc:
         policy = data.policy
         #policy.update_policies()
-        agent_steps = 0
         infos = defaultdict(list)
         lstm_h, lstm_c = experience.lstm_h, experience.lstm_c
 
@@ -172,6 +172,10 @@ def evaluate(data):
                 data.stats['Media/exploration_map'] = data.wandb.Image(rendered)
 
         for k, v in infos.items():
+            if '_map' in k and data.wandb is not None:
+                data.stats[f'Media/{k}'] = data.wandb.Image(v[0])
+                continue
+
             try: # TODO: Better checks on log data types
                 data.stats[k] = np.mean(v)
             except:
@@ -333,15 +337,12 @@ def train(data):
         data.epoch += 1
 
         done_training = data.global_step >= config.total_timesteps
-        if data.epoch % config.checkpoint_interval == 0 or done_training:
-            save_checkpoint(data)
-            data.msg = f'Checkpoint saved at update {data.epoch}'
-
         if profile.update(data) or done_training:
             print_dashboard(config.env, data.global_step, data.epoch,
                 profile, data.losses, data.stats, data.msg)
 
-            if data.wandb is not None and data.global_step > 0:
+            if data.wandb is not None and data.global_step > 0 and time.time() - data.last_log_time > 5.0:
+                data.last_log_time = time.time()
                 data.wandb.log({
                     '0verview/SPS': profile.SPS,
                     '0verview/agent_steps': data.global_step,
@@ -352,6 +353,10 @@ def train(data):
                     #**{f'skillrank/{policy}': elo
                     #    for policy, elo in data.policy.ranker.ratings.items()},
                 })
+
+        if data.epoch % config.checkpoint_interval == 0 or done_training:
+            save_checkpoint(data)
+            data.msg = f'Checkpoint saved at update {data.epoch}'
 
         if done_training:
             close(data)

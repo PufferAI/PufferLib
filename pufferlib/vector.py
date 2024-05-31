@@ -121,7 +121,7 @@ class Serial:
                 rewards = np.zeros(self.agents_per_batch, dtype=np.float32),
                 terminals = np.zeros(self.agents_per_batch, dtype=bool),
                 truncations = np.zeros(self.agents_per_batch, dtype=bool),
-                masks = np.zeros(self.agents_per_batch, dtype=bool),
+                masks = np.ones(self.agents_per_batch, dtype=bool),
             )
             self._assign_buffers(self.buf)
 
@@ -185,6 +185,7 @@ def _worker_process(env_creators, env_args, env_kwargs, num_envs,
         truncations=np.ndarray(shape, dtype=bool, buffer=shm.truncateds)[worker_idx],
         masks=np.ndarray(shape, dtype=bool, buffer=shm.masks)[worker_idx],
     )
+    buf.masks[:] = True
     envs._assign_buffers(buf)
 
     semaphores=np.ndarray(num_workers, dtype=np.uint8, buffer=shm.semaphores)
@@ -650,6 +651,7 @@ def check_envs(envs, driver):
 def autotune(env_creator, batch_size, max_envs=1024, model_forward_s=0.0,
         max_env_ram_gb=16, max_batch_vram_gb=0.05, time_per_test=5): 
     '''Determine the optimal vectorization parameters for your system'''
+    # TODO: fix multiagent
     if max_envs < batch_size:
         raise ValueError('max_envs < min_batch_size')
 
@@ -662,7 +664,12 @@ def autotune(env_creator, batch_size, max_envs=1024, model_forward_s=0.0,
     env = env_creator()
     env.reset()
     obs_space = env.single_observation_space
-    actions = [env.action_space.sample() for _ in range(1000)]
+    actions = [
+        np.array([env.single_action_space.sample()
+            for _ in range(env.num_agents)])
+        for _ in range(1000)
+    ]
+
     num_agents = env.num_agents
     steps = 0
     step_times = []

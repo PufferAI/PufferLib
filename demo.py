@@ -146,7 +146,7 @@ def sweep(args, wandb_name, env_module, make_env):
             import traceback
             traceback.print_exc()
 
-    wandb.agent(sweep_id, main, count=20)
+    wandb.agent(sweep_id, main, count=100)
 
 def train(args, env_module, make_env):
     args.wandb = None
@@ -201,6 +201,8 @@ def train(args, env_module, make_env):
             except KeyboardInterrupt:
                 clean_pufferl.close(data)
                 exit(0)
+
+        #clean_pufferl.close(data)
 
     elif args.backend == 'sb3':
         from stable_baselines3 import PPO
