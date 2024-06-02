@@ -1,4 +1,5 @@
 import sys
+from pdb import set_trace as T
 from typing import Dict, List, Tuple, Union
 
 import numpy as np
@@ -72,8 +73,9 @@ def _nativize_dtype(
             subviews[name] = returns
             # this offset is to account for the number of bytes we need to move
             # the buffer forward due to alignment
+            # TODO: Is this dtype or structured_dtype?
             offset += int(
-                structured_dtype.alignment
+                dtype.alignment
                 * np.ceil(dtype.itemsize / structured_dtype.alignment).astype(np.int32)
                 // sample_dtype.base.itemsize
             )
