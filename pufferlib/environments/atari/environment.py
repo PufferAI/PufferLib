@@ -8,6 +8,7 @@ import pufferlib
 import pufferlib.emulation
 import pufferlib.environments
 import pufferlib.utils
+import pufferlib.postprocess
 
 
 def env_creator(name='BreakoutNoFrameskip-v4'):
@@ -21,6 +22,7 @@ def make(name, framestack=4, render_mode='rgb_array'):
         EpisodicLifeEnv,
         FireResetEnv,
         MaxAndSkipEnv,
+        NoopResetEnv,
     )
     with pufferlib.utils.Suppress():
         env = gym.make(name, render_mode=render_mode)
@@ -35,35 +37,24 @@ def make(name, framestack=4, render_mode='rgb_array'):
     env = gym.wrappers.ResizeObservation(env, (84, 84))
     env = gym.wrappers.GrayScaleObservation(env)
     env = gym.wrappers.FrameStack(env, framestack)
+    env = AtariPostprocessor(env) # Don't use standard postprocessor
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
-# Broken in SB3
-class NoopResetEnv(gym.Wrapper):
-    """
-    Sample initial states by taking random number of no-ops on reset.
-    No-op is assumed to be action 0.
-
-    :param env: the environment to wrap
-    :param noop_max: the maximum value of no-ops to run
-    """
-
-    def __init__(self, env: gym.Env, noop_max: int = 30) -> None:
+class AtariPostprocessor(gym.Wrapper):
+    '''Atari breaks the normal PufferLib postprocessor because
+    it sends terminal=True every live, not every episode'''
+    def __init__(self, env):
         super().__init__(env)
-        self.noop_max = noop_max
-        self.override_num_noops = None
-        self.noop_action = 0
-        assert env.unwrapped.get_action_meanings()[0] == "NOOP"
 
-    def reset(self, **kwargs) -> np.ndarray:
-        self.env.reset(**kwargs)
-        if self.override_num_noops is not None:
-            noops = self.override_num_noops
-        else:
-            noops = self.unwrapped.np_random.integers(1, self.noop_max + 1)
-        assert noops > 0
-        obs = np.zeros(0)
-        for _ in range(noops):
-            obs, _, done, _, _ = self.env.step(self.noop_action)
-            if done:
-                obs = self.env.reset(**kwargs)
+    def reset(self, seed=None):
+        obs, info = self.env.reset(seed=seed)
         return obs, {}
+
+    def step(self, action):
+        obs, reward, terminal, truncated, info = self.env.step(action)
+        if 'episode' not in info:
+            info = {}
+
+        return obs, reward, terminal, truncated, info
+
+
