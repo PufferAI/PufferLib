@@ -108,6 +108,28 @@ space-invaders:
   package: atari
   env_name: SpaceInvadersNoFrameskip-v4
 
+breakout-max-sync:
+  package: atari
+  env_name: BreakoutNoFrameskip-v4
+  train:
+    num_envs: 48
+    num_workers: 24
+    env_batch_size: 48
+    zero_copy: False
+    batch_size: 6144
+    minibatch_size: 1536
+
+breakout-max:
+  package: atari
+  env_name: BreakoutNoFrameskip-v4
+  train:
+    num_envs: 144 
+    num_workers: 24
+    env_batch_size: 48
+    zero_copy: False
+    batch_size: 18432
+    minibatch_size: 4608
+
 pong-max:
   package: atari
   env_name: PongNoFrameskip-v4
@@ -607,6 +629,13 @@ minigrid:
 
 minihack:
   env_name: MiniHack-River-v0
+  train:
+    num_envs: 48
+    num_workers: 24
+    env_batch_size: 48
+    zero_copy: False
+    batch_size: 6144
+    minibatch_size: 1536
 
 nethack:
   env_name: NetHackScore-v0
@@ -617,7 +646,7 @@ nethack:
     zero_copy: False
     batch_size: 6144
     update_epochs: 1
-    compile: True
+    compile: False
 
 nmmo:
   train:
