@@ -5,6 +5,7 @@ from pdb import set_trace as T
 import numpy as np
 import time
 import psutil
+from collections import deque
 
 from pufferlib import namespace
 from pufferlib.environment import PufferEnv
@@ -324,11 +325,12 @@ class Multiprocessing:
         self.initialized = False
         self.zero_copy = zero_copy
 
+    
     #@profile
     def recv(self):
         recv_precheck(self)
         while True:
-            worker = self.waiting_workers.pop(0)
+            worker = self.waiting_workers.popleft()
             sem = self.buf.semaphores[worker]
             if sem >= MAIN:
                 self.ready_workers.append(worker)
@@ -346,7 +348,7 @@ class Multiprocessing:
                 w_slice = self.ready_workers[0]
                 s_range = [w_slice]
                 self.waiting_workers.append(w_slice)
-                self.ready_workers.pop(0)
+                self.ready_workers.popleft()
                 break
             elif self.workers_per_batch == self.num_workers:
                 # Slowest path. Zero-copy synchornized for all workers
@@ -422,8 +424,8 @@ class Multiprocessing:
         self.prev_env_id = []
         self.flag = RECV
 
-        self.ready_workers = []
-        self.waiting_workers = list(range(self.num_workers))
+        self.ready_workers = deque()
+        self.waiting_workers = deque(list(range(self.num_workers)))
         self.infos = [[] for _ in range(self.num_workers)]
 
         self.buf.semaphores[:] = RESET
