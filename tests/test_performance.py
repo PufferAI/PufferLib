@@ -2,6 +2,7 @@ from pdb import set_trace as T
 import time
 from tqdm import tqdm
 import importlib
+import random
 import sys
 
 import pufferlib
@@ -22,8 +23,35 @@ import gymnasium
 
 DEFAULT_TIMEOUT = 10
 
+import time
+from functools import wraps
 
-def profile_environment(env_creator, timeout=DEFAULT_TIMEOUT):
+class TimedEnv:
+    def __init__(self, env):
+        self._env = env
+        self.reset_times = []
+        self.step_times = []
+
+    def __getattr__(self, name):
+        return getattr(self._env, name)
+
+    def step(self, *args, **kwargs):
+        start = time.time()
+        result = self._env.step(*args, **kwargs)
+        end = time.time()
+        elapsed = end - start
+        self.step_times.append(elapsed)
+        return result
+
+    def reset(self, *args, **kwargs):
+        start = time.time()
+        result = self._env.reset(*args, **kwargs)
+        end = time.time()
+        elapsed = end - start
+        self.reset_times.append(elapsed)
+        return result
+
+def profile_emulation(env_creator, timeout=DEFAULT_TIMEOUT, seed=42):
     reset_times = []
     step_times = []
     agent_step_count = 0
@@ -31,14 +59,18 @@ def profile_environment(env_creator, timeout=DEFAULT_TIMEOUT):
     truncated = False
     reset = True
 
+    random.seed(seed)
+    np.random.seed(seed)
+
     env = env_creator()
+    env.env = TimedEnv(env.env)
     multiagent = callable(env.action_space)
 
     start = time.time()
     while time.time() - start < timeout:
         if reset:
             s = time.time()
-            ob, info = env.reset()
+            ob, info = env.reset(seed=seed)
             reset_times.append(time.time() - s)
 
         if multiagent:
@@ -54,36 +86,27 @@ def profile_environment(env_creator, timeout=DEFAULT_TIMEOUT):
 
         reset = (multiagent and len(env.agents) == 0) or terminal or truncated
 
-    total_reset = sum(reset_times)
-    total_step = sum(step_times)
-    reset_mean = np.mean(reset_times)
-    step_mean = np.mean(step_times)
-    step_std = np.std(step_times)
+    puf_total_reset = sum(reset_times)
+    puf_total_step = sum(step_times)
+    puf_reset_mean = np.mean(reset_times)
+    puf_step_mean = np.mean(step_times)
+    puf_step_std = np.std(step_times)
 
-    return pufferlib.namespace(
-        sps=len(step_times) / (total_step + total_reset),
-        percent_reset=100 * total_reset / (total_reset + total_step),
-        reset_mean=reset_mean,
-        percent_step_std=100 * step_std / step_mean,
-        step_mean=step_mean,
-        step_std=step_std,
-    )
+    raw_total_reset = sum(env.env.reset_times)
+    raw_total_step = sum(env.env.step_times)
+    raw_reset_mean = np.mean(env.env.reset_times)
+    raw_step_mean = np.mean(env.env.step_times)
+    raw_step_std = np.std(env.env.step_times)
 
-def profile_emulation(puf_creator, timeout=DEFAULT_TIMEOUT):
-    raw_creator = lambda: puf_creator().env
+    env_sps = agent_step_count / (puf_total_step + puf_total_reset)
+    env_percent_reset = 100 * puf_total_reset / (puf_total_reset + puf_total_step)
+    env_percent_step_std = 100 * puf_step_std / puf_step_mean
+    env_overhead = 100 * (puf_total_step - raw_total_step + puf_total_reset - raw_total_reset) / (puf_total_step + puf_total_reset)
 
-    raw = profile_environment(raw_creator, timeout)
-    puf = profile_environment(puf_creator, timeout)
 
-    overhead = 100 * (raw.sps - puf.sps) / raw.sps
-    print(f'{puf.sps:.1f}/{raw.sps:.1f} SPS (puf/raw) | {overhead:.2g}% Overhead')
-    print('  Emulation')
-    print(f'    Raw Reset  : {raw.reset_mean:.3g} ({raw.percent_reset:.2g})%')
-    print(f'    Puf Reset  : {puf.reset_mean:.3g} ({puf.percent_reset:.2g})%')
-    print(f'    Raw Step   : {raw.step_mean:.3g} +/- {raw.step_std:.3g} ({raw.percent_step_std:.2f})%')
-    print(f'    Puf Step   : {puf.step_mean:.3g} +/- {puf.step_std:.3g} ({puf.percent_step_std:.2f})%')
-
-    return pufferlib.namespace(raw=raw, puf=puf)
+    print(f'{env_sps:.1f} SPS | {env_overhead:.2g}% Overhead')
+    print(f'    Reset: {env_percent_reset:.3g}%')
+    print(f'    Step STD: {env_percent_step_std:.3g}%')
 
 def profile_vec(vecenv, timeout=DEFAULT_TIMEOUT):
     actions = [vecenv.action_space.sample() for _ in range(1000)]
@@ -129,10 +152,12 @@ def sanity_check(env_creator, timeout=5):
     #profile_sb3_vec(env_creator, num_envs=1, timeout=timeout)
 
 if __name__ == '__main__':
-    '''
     from pufferlib.environments import pokemon_red
     env_creator = pokemon_red.env_creator('pokemon_red')
     print('Sanity: Pokemon Red')
+    profile_emulation(env_creator, timeout=30)
+    exit(0)
+    '''
     sanity_check(env_creator)
     autotune(env_creator, batch_size=32, max_envs=96)
     exit(0)
