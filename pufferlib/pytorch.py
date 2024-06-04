@@ -53,6 +53,8 @@ def nativize_dtype(emulated: pufferlib.namespace) -> NativeDType:
     structured_dtype: np.dtype = emulated.emulated_observation_dtype
     return _nativize_dtype(sample_dtype, structured_dtype)
 
+def round_to(x, base):
+    return int(base * np.ceil(x/base))
 
 def _nativize_dtype(
     sample_dtype: np.dtype, structured_dtype: np.dtype, offset: int = 0
@@ -65,6 +67,8 @@ def _nativize_dtype(
             shape = (1,)
 
         delta = int((np.prod(shape) * dtype.itemsize) // sample_dtype.base.itemsize)
+        offset = round_to(offset, dtype.alignment)
+
         return (numpy_to_torch_dtype_dict[dtype], shape, offset, delta)
     else:
         subviews = {}
@@ -76,7 +80,7 @@ def _nativize_dtype(
             # TODO: Is this dtype or structured_dtype?
             offset += int(
                 dtype.alignment
-                * np.ceil(dtype.itemsize / structured_dtype.alignment).astype(np.int32)
+                * np.ceil(dtype.itemsize / dtype.alignment).astype(np.int32)
                 // sample_dtype.base.itemsize
             )
 
