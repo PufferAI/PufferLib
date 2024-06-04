@@ -29,6 +29,7 @@ class MiniGridWrapper:
         self.close = self.env.close
         self.render = self.env.render
         self.close = self.env.close
+        self.render_mode = 'rgb_array'
 
     def reset(self, seed=None):
         obs, info = self.env.reset(seed=seed)

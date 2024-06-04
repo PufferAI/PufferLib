@@ -616,6 +616,11 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
     if backend is Serial and 'batch_size' in kwargs:
         num_envs = kwargs['batch_size']
 
+    # Sanity check args
+    for k in kwargs:
+        if k not in ['num_workers', 'batch_size', 'zero_copy','backend']:
+            raise APIUsageError(f'Invalid argument: {k}')
+
     # TODO: First step action space check
     
     return backend(env_creators, env_args, env_kwargs, num_envs, **kwargs)

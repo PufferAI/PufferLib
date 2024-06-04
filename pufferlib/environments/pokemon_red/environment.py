@@ -15,5 +15,6 @@ def env_creator(name='pokemon_red'):
 def make(name, headless: bool = True, state_path=None):
     '''Pokemon Red'''
     env = Environment(headless=headless, state_path=state_path)
+    env.render_mode = 'rgb_array'
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
