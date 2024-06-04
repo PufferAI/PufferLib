@@ -51,14 +51,18 @@ def nativize_dtype(emulated: pufferlib.namespace) -> NativeDType:
 
     # the observation represents (could be dict, tuple, box, etc.)
     structured_dtype: np.dtype = emulated.emulated_observation_dtype
-    return _nativize_dtype(sample_dtype, structured_dtype)
+    subviews, dtype, shape, offset, delta = _nativize_dtype(sample_dtype, structured_dtype)
+    if subviews is None:
+        return (dtype, shape, offset, delta)
+    else:
+        return subviews
 
 def round_to(x, base):
     return int(base * np.ceil(x/base))
 
-def _nativize_dtype(
-    sample_dtype: np.dtype, structured_dtype: np.dtype, offset: int = 0
-) -> NativeDType:
+def _nativize_dtype(sample_dtype: np.dtype,
+        structured_dtype: np.dtype,
+        offset: int = 0) -> NativeDType:
     if structured_dtype.fields is None:
         if structured_dtype.subdtype is not None:
             dtype, shape = structured_dtype.subdtype
@@ -66,25 +70,31 @@ def _nativize_dtype(
             dtype = structured_dtype
             shape = (1,)
 
-        delta = int((np.prod(shape) * dtype.itemsize) // sample_dtype.base.itemsize)
-        offset = round_to(offset, dtype.alignment)
+        delta = int(np.prod(shape))
+        if sample_dtype.base.itemsize == 1:
+            offset = round_to(offset, dtype.alignment)
+            delta *= dtype.itemsize
+        else:
+            assert dtype.itemsize == sample_dtype.base.itemsize
 
-        return (numpy_to_torch_dtype_dict[dtype], shape, offset, delta)
+        return None, numpy_to_torch_dtype_dict[dtype], shape, offset, delta
     else:
         subviews = {}
+        start_offset = offset
+        all_delta = 0
         for name, (dtype, _) in structured_dtype.fields.items():
-            returns = _nativize_dtype(sample_dtype, dtype, offset)
-            subviews[name] = returns
-            # this offset is to account for the number of bytes we need to move
-            # the buffer forward due to alignment
-            # TODO: Is this dtype or structured_dtype?
-            offset += int(
-                dtype.alignment
-                * np.ceil(dtype.itemsize / dtype.alignment).astype(np.int32)
-                // sample_dtype.base.itemsize
-            )
+            views, dtype, shape, offset, delta = _nativize_dtype(
+                sample_dtype, dtype, offset)
 
-        return subviews
+            if views is not None:
+                subviews[name] = views
+            else:
+                subviews[name] = (dtype, shape, offset, delta)
+
+            offset += delta
+            all_delta += delta
+
+        return subviews, dtype, shape, start_offset, all_delta
 
 
 def nativize_tensor(

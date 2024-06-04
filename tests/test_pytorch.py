@@ -79,7 +79,7 @@ from pufferlib.pytorch import NativeDType, nativize_dtype, nativize_tensor
             },
         ),
         (
-            np.dtype((np.uint8, (16,)), align=True),
+            np.dtype((np.int32, (4,)), align=True),
             np.dtype(
                 [
                     ("foo", np.int32, (1,)),
@@ -94,13 +94,13 @@ from pufferlib.pytorch import NativeDType, nativize_dtype, nativize_tensor
                 align=True,
             ),
             {
-                "foo": (torch.int32, (1,), 0, 4),
+                "foo": (torch.int32, (1,), 0, 1),
                 "bar": {
                     "a": {
-                        "y": (torch.int32, (1,), 4, 4),
-                        "z": (torch.int32, (1,), 8, 4),
+                        "y": (torch.int32, (1,), 1, 1),
+                        "z": (torch.int32, (1,), 2, 1),
                     },
-                    "b": (torch.int32, (1,), 12, 4),
+                    "b": (torch.int32, (1,), 3, 1),
                 },
             },
         ),
@@ -109,7 +109,7 @@ from pufferlib.pytorch import NativeDType, nativize_dtype, nativize_tensor
             np.dtype(
                 [
                     ("xx", np.float32, (1, 2)),
-                    ("yy", [("aa", np.uint8, (7, 7)), ("bb", np.int32, (2, 3))]),
+                    ("yy", [("aa", np.uint8, (7, 7)), ("bb", np.int32, (2, 3))],),
                 ],
                 align=True,
             ),
