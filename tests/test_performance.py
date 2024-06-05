@@ -21,7 +21,7 @@ import time
 import psutil
 import gymnasium
 
-DEFAULT_TIMEOUT = 5
+DEFAULT_TIMEOUT = 60
 
 import time
 from functools import wraps
@@ -129,16 +129,16 @@ def profile_puffer(env_creator, timeout=DEFAULT_TIMEOUT, **kwargs):
     sps = profile_vec(vecenv, actions, timeout)
     backend = kwargs.get('backend', Serial)
     if backend == Multiprocessing and 'batch_size' in kwargs:
-        print(f'    Puffer     : {(sps):.3f} - Pool')
+        print(f'    Puffer     : {(sps):.1f} - Pool')
     else:
-        print(f'    Puffer     : {(sps):.3f} - {backend.__name__}')
+        print(f'    Puffer     : {(sps):.1f} - {backend.__name__}')
     return sps
 
 def profile_gymnasium_vec(env_creator, num_envs, timeout=DEFAULT_TIMEOUT):
     vecenv = gymnasium.vector.AsyncVectorEnv([env_creator] * num_envs)
     actions = [vecenv.action_space.sample() for _ in range(1000)]
     sps = profile_vec(vecenv, actions, timeout)
-    print(f'    Gymnasium  : {(sps):.3f}')
+    print(f'    Gymnasium  : {(sps):.1f}')
     return sps
 
 def profile_sb3_vec(env_creator, num_envs, timeout=DEFAULT_TIMEOUT):
@@ -149,7 +149,7 @@ def profile_sb3_vec(env_creator, num_envs, timeout=DEFAULT_TIMEOUT):
             for _ in range(1000)]
         sps = profile_vec(vecenv, actions, timeout)
 
-    print(f'    SB3        : {(sps):.3f}')
+    print(f'    SB3        : {(sps):.1f}')
     return sps
 
 def profile_all(name, env_creator, num_envs, num_workers=24,
@@ -160,12 +160,14 @@ def profile_all(name, env_creator, num_envs, num_workers=24,
     print(name)
     profile_emulation(env_creator, timeout=timeout)
     profile_puffer(env_creator, num_envs=env_batch_size,
-        backend=Multiprocessing, timeout=timeout, num_workers=num_workers,
+        backend=Multiprocessing, timeout=timeout,
+        num_workers=min(num_workers, env_batch_size),
     )
-    profile_puffer(env_creator, num_envs=num_envs,
-        backend=Multiprocessing, timeout=timeout, num_workers=num_workers,
-        batch_size=env_batch_size, zero_copy=zero_copy
-    )
+    if env_batch_size is not None and env_batch_size != num_envs:
+        profile_puffer(env_creator, num_envs=num_envs,
+            backend=Multiprocessing, timeout=timeout, num_workers=num_workers,
+            batch_size=env_batch_size, zero_copy=zero_copy
+        )
     profile_gymnasium_vec(env_creator, num_envs=env_batch_size, timeout=timeout)
     profile_sb3_vec(env_creator, num_envs=env_batch_size, timeout=timeout)
     print()
@@ -173,10 +175,11 @@ def profile_all(name, env_creator, num_envs, num_workers=24,
 if __name__ == '__main__':
     from pufferlib.environments import nmmo
     print('Neural MMO')
-    profile_emulation(nmmo.env_creator())
-    profile_puffer(nmmo.env_creator(), num_envs=24, backend=Serial)
-    profile_puffer(nmmo.env_creator(), num_envs=48,
-        batch_size=24, backend=Multiprocessing)
+    env_creator = nmmo.env_creator()
+    profile_emulation(env_creator)
+    profile_puffer(env_creator, num_envs=8, backend=Multiprocessing)
+    profile_puffer(env_creator, num_envs=24,
+        batch_size=8, backend=Multiprocessing)
     print()
 
     from pufferlib.environments import nethack
@@ -203,7 +206,7 @@ if __name__ == '__main__':
 
     from pufferlib.environments import crafter
     profile_all('Crafter', crafter.env_creator(),
-        num_envs=144, env_batch_size=48, zero_copy=False)
+        num_envs=24, env_batch_size=8, zero_copy=False)
 
     from pufferlib.environments import minigrid
     profile_all('MiniGrid', minigrid.env_creator(),
