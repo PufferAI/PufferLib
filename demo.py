@@ -194,6 +194,9 @@ def train(args, env_module, make_env):
                 Console().print_exception()
                 os._exit(0)
 
+        clean_pufferl.evaluate(data)
+        clean_pufferl.close(data)
+
     elif args.backend == 'sb3':
         from stable_baselines3 import PPO
         from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv

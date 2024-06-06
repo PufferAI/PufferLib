@@ -292,9 +292,6 @@ def train(data):
             save_checkpoint(data)
             data.msg = f'Checkpoint saved at update {data.epoch}'
 
-        if done_training:
-            close(data)
-
 def close(data):
     data.vecenv.close()
     data.utilization.stop()
