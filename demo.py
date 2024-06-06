@@ -14,6 +14,7 @@ import pufferlib.frameworks.cleanrl
 
 from rich_argparse import RichHelpFormatter
 from rich.traceback import install
+from rich.console import Console
 
 import clean_pufferl
 
@@ -182,26 +183,16 @@ def train(args, env_module, make_env):
     if args.backend == 'clean_pufferl':
         data = clean_pufferl.create(train_config, vecenv, policy, wandb=args.wandb)
 
-        '''
-        import time
-        import torch
-        with torch.profiler.profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA,
-            ]
-        ) as p:
-        '''
-
         while data.global_step < args.train.total_timesteps:
             try:
                 clean_pufferl.evaluate(data)
                 clean_pufferl.train(data)
             except KeyboardInterrupt:
                 clean_pufferl.close(data)
-                exit(0)
-
-        #clean_pufferl.close(data)
+                os._exit(0)
+            except Exception:
+                Console().print_exception()
+                os._exit(0)
 
     elif args.backend == 'sb3':
         from stable_baselines3 import PPO
@@ -273,7 +264,7 @@ if __name__ == '__main__':
                 device=args.train.device
             )
         except KeyboardInterrupt:
-            exit(0)
+            os._exit(0)
     elif args.mode == 'sweep':
         sweep(args, wandb_name, env_module, make_env)
     elif args.mode == 'autotune':

@@ -27,15 +27,6 @@ pyximport.install(setup_args={"include_dirs": np.get_include()})
 from c_gae import compute_gae
 
 
-def optimize(data, config, loss):
-    #data.optimizer.zero_grad()
-    loss.backward()
-    torch.nn.utils.clip_grad_norm_(data.policy.parameters(), config.max_grad_norm)
-    data.optimizer.step()
-    if config.device == 'cuda':
-        torch.cuda.synchronize()
-
-
 def create(config, vecenv, policy, optimizer=None, wandb=None):
     seed_everything(config.seed, config.torch_deterministic)
     profile = Profile()
@@ -89,7 +80,6 @@ def evaluate(data):
         policy = data.policy
         infos = defaultdict(list)
         lstm_h, lstm_c = experience.lstm_h, experience.lstm_c
-
 
     while not experience.full:
         with profile.env:
@@ -163,25 +153,6 @@ def evaluate(data):
 
 
     return data.stats, infos
-
-def compute_advantages(batch_size, idxs, dones, values, rewards, gamma, gae_lambda):
-    advantages = np.zeros(batch_size)
-    lastgaelam = 0
-    for t in reversed(range(batch_size-1)):
-        i, i_nxt = idxs[t], idxs[t + 1]
-
-        nextnonterminal = 1.0 - dones[i_nxt]
-        nextvalues = values[i_nxt]
-        delta = (
-            rewards[i_nxt]
-            + gamma * nextvalues * nextnonterminal
-            - values[i]
-        )
-        advantages[t] = lastgaelam = (
-            delta + gamma * gae_lambda * nextnonterminal * lastgaelam
-        )
-
-    return advantages
 
 @pufferlib.utils.profile
 def train(data):
@@ -326,6 +297,7 @@ def train(data):
 
 def close(data):
     data.vecenv.close()
+    data.utilization.stop()
     config = data.config
     if data.wandb is not None:
         artifact_name = f"{config.exp_id}_model"
