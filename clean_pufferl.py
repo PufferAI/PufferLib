@@ -581,54 +581,48 @@ def count_params(policy):
 
 def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
         model_path=None, device='cuda', verbose=True):
-    os.system('clear')
+    # We are just using Serial vecenv to give a consistent
+    # single-agent/multi-agent API for evaluation
     try:
-        env = env_creator(render_mode='rgb_array', **env_kwargs)
+        env = pufferlib.vector.make(env_creator,
+            env_kwargs={'render_mode': 'rgb_array', **env_kwargs})
     except:
-        env = env_creator(**env_kwargs)
+        env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs)
 
     if model_path is None:
         agent = agent_creator(env, **agent_kwargs)
     else:
         agent = torch.load(model_path, map_location=device)
 
-    terminal = truncated = True
+    ob, info = env.reset()
+    driver = env.driver_env
+    os.system('clear')
+    state = None
+
     while True:
-        if terminal or truncated:
-            ob, info = env.reset()
-            state = None
-            step = 0
-            reward = 0
-            terminal = False
-            truncated = False
-            return_val = 0
-        else:
-            ob, reward, terminal, truncated, _ = env.step(action.item())
-
-        ob = torch.tensor(ob).unsqueeze(0).to(device)
-        with torch.no_grad():
-            if hasattr(agent, 'lstm'):
-                action, _, _, _, state = agent(ob, state)
-            else:
-                action, _, _, _ = agent(ob)
-
-        return_val += reward
-
-        render = env.render()
-        if env.render_mode == 'ansi':
+        render = driver.render()
+        if driver.render_mode == 'ansi':
             print('\033[0;0H' + render + '\n')
             time.sleep(0.6)
-        elif env.render_mode == 'rgb_array':
+        elif driver.render_mode == 'rgb_array':
             import cv2
             render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
             cv2.imshow('frame', render)
             cv2.waitKey(1)
             time.sleep(1/24)
 
-        if verbose:
-            print(f'Step: {step} Reward: {reward:.4f} Return: {return_val:.2f}')
+        with torch.no_grad():
+            ob = torch.from_numpy(ob).to(device)
+            if hasattr(agent, 'lstm'):
+                action, _, _, _, state = agent(ob, state)
+            else:
+                action, _, _, _ = agent(ob)
 
-        step += 1
+            action = action.cpu().numpy().reshape(env.action_space.shape)
+
+        ob, reward = env.step(action)[:2]
+        reward = reward.mean()
+        print(f'Reward: {reward:.4f}')
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)

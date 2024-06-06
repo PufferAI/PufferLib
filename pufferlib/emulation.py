@@ -266,7 +266,11 @@ class PettingZooPufferEnv:
         #    dtype=self.single_observation_space.dtype)
         self.obs, self.obs_struct = make_buffer(
             self.single_observation_space.dtype, self.obs_dtype, self.num_agents)
- 
+
+    @property
+    def render_mode(self):
+        return self.env.render_mode
+
     @property
     def agents(self):
         return self.env.agents

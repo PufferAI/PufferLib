@@ -29,6 +29,10 @@ class PettingZooTruncatedWrapper:
         self.render = env.render
 
     @property
+    def render_mode(self):
+        return self.env.render_mode
+
+    @property
     def possible_agents(self):
         return self.env.possible_agents
 

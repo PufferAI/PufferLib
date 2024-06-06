@@ -240,7 +240,6 @@ class Multiprocessing:
         num_batches = num_envs / batch_size
         if zero_copy and num_batches != int(num_batches):
             # This is so you can have n equal buffers
-            T()
             raise APIUsageError(
                 'zero_copy: num_envs must be divisible by batch_size')
 

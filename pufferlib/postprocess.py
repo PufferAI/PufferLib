@@ -1,4 +1,5 @@
 from pdb import set_trace as T
+import numpy as np
 import gymnasium
 
 import pufferlib.utils
@@ -99,6 +100,36 @@ class PettingZooWrapper:
         '''Returns a name which looks like: "max_observation<space_invaders_v1>".'''
         return f'{type(self).__name__}<{str(self.env)}>'
 
+class MeanOverAgents(PettingZooWrapper):
+    '''Averages over agent infos'''
+    def _mean(self, infos):
+        list_infos = {}
+        for agent, info in infos.items():
+            for k, v in info.items():
+                if k not in list_infos:
+                    list_infos[k] = []
+
+                list_infos[k].append(v)
+
+        mean_infos = {}
+        for k, v in list_infos.items():
+            try:
+                mean_infos[k] = np.mean(v)
+            except:
+                pass
+
+        return mean_infos
+
+    def reset(self, seed=None, options=None):
+        observations, infos = super().reset(seed, options)
+        infos = self._mean(infos)
+        return observations, infos
+
+    def step(self, actions):
+        observations, rewards, terminations, truncations, infos = super().step(actions)
+        infos = self._mean(infos)
+        return observations, rewards, terminations, truncations, infos
+
 class MultiagentEpisodeStats(PettingZooWrapper):
     '''Wrapper for PettingZoo environments that stores
     episodic returns and lengths in infos'''
@@ -122,7 +153,7 @@ class MultiagentEpisodeStats(PettingZooWrapper):
                 agent_info[k].append(v)
 
             # Saved to self. TODO: Clean up
-            agent_info['episode_return'] += rewards[agent]
+            agent_info['episode_return'].append(rewards[agent])
             agent_info['episode_length'] += 1
 
             agent_info = {}
