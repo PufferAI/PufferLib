@@ -153,8 +153,9 @@ procgen:
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0005
-    num_workers: 1
-    num_envs: 1
+    num_workers: 24
+    num_envs: 144
+    env_batch_size: 48
     batch_size: 16384
     minibatch_size: 5321
     gamma: 0.999
@@ -176,17 +177,12 @@ bigfish:
     vf_coef: 1.1732211834792117
     gae_lambda: 0.8620630095238284
     clip_coef: 0.4104603426698214
-    num_envs: 144 
-    env_batch_size: 48
-    num_workers: 24
-    batch_size: 6144
-    minibatch_size: 1536
+    batch_size: 53210
+    batch_rows: 5321
     bptt_horizon: 1
     update_epochs: 3
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 1
   policy:
     cnn_width: 22
     mlp_width: 327
@@ -205,12 +201,9 @@ bossfight:
     num_envs: 1
     batch_size: 48520
     minibatch_size: 6065
-    bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 186
   policy:
     cnn_width: 34
     mlp_width: 83
@@ -225,16 +218,11 @@ caveflyer:
     vf_coef: 1.6255759569858712
     gae_lambda: 0.9094175213807228
     clip_coef: 0.4508383484491862
-    num_cores: 1
-    num_envs: 1
     batch_size: 32308
     minibatch_size: 8077
-    bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 96
   policy:
     cnn_width: 17
     mlp_width: 242
@@ -249,16 +237,11 @@ chaser:
     vf_coef: 2.1530812235373684
     gae_lambda: 0.8186838232115529
     clip_coef: 0.0821348744853704
-    num_cores: 1
-    num_envs: 1
     batch_size: 17456
     minibatch_size: 2182
-    bptt_horizon: 1
     update_epochs: 1
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 89
   policy:
     cnn_width: 37
     mlp_width: 198
@@ -273,16 +256,12 @@ climber:
     vf_coef: 0.8123888927054865
     gae_lambda: 0.8758003745828604
     clip_coef: 0.3879433119086241
-    num_cores: 1
-    num_envs: 1
     batch_size: 113288
     batch_rows: 3332 # ?
     bptt_horizon: 256
     update_epochs: 2
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 207
   policy:
     cnn_width: 29
     mlp_width: 134
@@ -297,16 +276,11 @@ coinrun:
     vf_coef: 0.4045225563446447
     gae_lambda: 0.9708900757395368
     clip_coef: 0.271239381520248
-    num_cores: 1
-    num_envs: 1
     batch_size: 184170
     minibatch_size: 6139
-    bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 246
   policy:
     cnn_width: 16
     mlp_width: 384
@@ -321,16 +295,11 @@ dodgeball:
     vf_coef: 0.905405768115384
     gae_lambda: 0.929215062387182
     clip_coef: 0.1678680070658446
-    num_cores: 1
-    num_envs: 1
     batch_size: 233026
     minibatch_size: 4958
-    bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 385
   policy:
     cnn_width: 24
     mlp_width: 538
@@ -345,16 +314,11 @@ fruitbot:
     vf_coef: 0.5489566038515201
     gae_lambda: 0.7517437269156811
     clip_coef: 0.3909436413913963
-    num_cores: 1
-    num_envs: 1
     batch_size: 25344
     minibatch_size: 4224
-    bptt_horizon: 1
     update_epochs: 1
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 184
   policy:
     cnn_width: 24
     mlp_width: 600
@@ -369,16 +333,11 @@ heist:
     vf_coef: 1.3750495866441763
     gae_lambda: 0.864713026766495
     clip_coef: 0.0341243664433126
-    num_cores: 1
-    num_envs: 1
     batch_size: 162233
     minibatch_size: 3061
-    bptt_horizon: 1
     update_epochs: 1
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 999
   policy:
     cnn_width: 60
     mlp_width: 154
@@ -393,16 +352,11 @@ jumper:
     vf_coef: 0.2066134576246479
     gae_lambda: 0.9385007945498072
     clip_coef: 0.0589308261206342
-    num_cores: 1
-    num_envs: 1
     batch_size: 76925
     minibatch_size: 3077
-    bptt_horizon: 1
     update_epochs: 3
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 320
   policy:
     cnn_width: 24
     mlp_width: 190
@@ -417,15 +371,11 @@ leaper:
     vf_coef: 1.12387183485305
     gae_lambda: 0.8968331903476625
     clip_coef: 0.6941033332120052
-    num_cores: 1
-    num_envs: 1
     batch_size: 19380
     minibatch_size: 6460
     update_epochs: 2
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 252
   policy:
     cnn_width: 28
     mlp_width: 100
@@ -440,16 +390,11 @@ maze:
     vf_coef: 0.1236421145384316
     gae_lambda: 0.971943769322524
     clip_coef: 0.2335644352369076
-    num_cores: 1
-    num_envs: 1
     batch_size: 116008
     minibatch_size: 6834
-    bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 820
   policy:
     cnn_width: 28
     mlp_width: 526
@@ -464,16 +409,11 @@ miner:
     vf_coef: 6.559292234163336
     gae_lambda: 0.6494040942916905
     clip_coef: 0.2293978935956241
-    num_cores: 1
-    num_envs: 1
     batch_size: 154512
     minibatch_size: 2088
-    bptt_horizon: 1
     update_epochs: 3
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 343
   policy:
     cnn_width: 38
     mlp_width: 175
@@ -488,16 +428,11 @@ ninja:
     vf_coef: 2.171674659769069
     gae_lambda: 0.9664148604540898
     clip_coef: 0.5891635585927152
-    num_cores: 1
-    num_envs: 1
     batch_size: 45246
     minibatch_size: 7541
-    bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 293
   policy:
     cnn_width: 25
     mlp_width: 317
@@ -512,16 +447,11 @@ plunder:
     vf_coef: 4.316832667738928
     gae_lambda: 0.84500339385464
     clip_coef: 0.0914132500563203
-    num_cores: 1
-    num_envs: 1
     batch_size: 26304
     minibatch_size: 4384
-    bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 127
   policy:
     cnn_width: 30
     mlp_width: 288
@@ -536,16 +466,11 @@ starpilot:
     vf_coef: 5.482314699746532
     gae_lambda: 0.82792978724664
     clip_coef: 0.2645124138418521
-    num_cores: 1
-    num_envs: 1
     batch_size: 107440
     minibatch_size: 6715
-    bptt_horizon: 1
     update_epochs: 2
     anneal_lr: False
     vf_clip_coef: 0.2
-  env:
-    num_envs: 320
   policy:
     cnn_width: 25
     mlp_width: 144

@@ -61,7 +61,6 @@ class ProcgenGymnasiumEnv:
         return obs, {}
 
     def render(self):
-        return self.env.env.env.env.env.env.observe()[1]['rgb'][0]
         return self.env.env.env.env.env.env.get_info()[0]['rgb']
 
     def close(self):
