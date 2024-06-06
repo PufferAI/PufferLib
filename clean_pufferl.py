@@ -550,7 +550,11 @@ def count_params(policy):
 def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
         model_path=None, device='cuda', verbose=True):
     os.system('clear')
-    env = env_creator(**env_kwargs)
+    try:
+        env = env_creator(render_mode='rgb_array', **env_kwargs)
+    except:
+        env = env_creator(**env_kwargs)
+
     if model_path is None:
         agent = agent_creator(env, **agent_kwargs)
     else:

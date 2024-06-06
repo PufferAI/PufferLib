@@ -15,7 +15,7 @@ def env_creator(name='bigfish'):
     return functools.partial(make, name)
 
 def make(name, num_envs=1, num_levels=0,
-        start_level=0, distribution_mode='easy'):
+        start_level=0, distribution_mode='easy', render_mode=None):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
     assert int(num_envs) == float(num_envs), "num_envs must be an integer"
     num_envs = int(num_envs)
@@ -27,7 +27,7 @@ def make(name, num_envs=1, num_levels=0,
         num_levels=num_levels,
         start_level=start_level,
         distribution_mode=distribution_mode,
-        render_mode='rgb_array',
+        render_mode=render_mode,
     )
     envs = gym.wrappers.TransformObservation(envs, lambda obs: obs["rgb"])
     envs.single_action_space = envs.action_space
