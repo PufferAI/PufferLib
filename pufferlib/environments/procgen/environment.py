@@ -37,16 +37,12 @@ def make(name, num_envs=1, num_levels=0,
     envs = gym.wrappers.NormalizeReward(envs)
     envs = gym.wrappers.TransformReward(envs, lambda reward: np.clip(reward, -10, 10))
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
-    envs = ProcgenGymnasiumEnv(envs)
-    #envs = ProcgenPettingZooEnv(envs, num_envs)
-    #envs = pufferlib.postprocess.MultiagentEpisodeStats(envs)
+    envs = ProcgenWrapper(envs)
+    envs = shimmy.GymV21CompatibilityV0(env=envs)
     envs = pufferlib.postprocess.EpisodeStats(envs)
     return pufferlib.emulation.GymnasiumPufferEnv(env=envs)
-    #return pufferlib.emulation.PettingZooPufferEnv(env=envs)
 
-class ProcgenGymnasiumEnv:
-    '''Fakes a multiagent interface to ProcGen where each env
-    is an agent. Very low overhead.'''
+class ProcgenWrapper:
     def __init__(self, env):
         self.env = env
         self.observation_space = self.env.observation_space['rgb']
@@ -58,7 +54,7 @@ class ProcgenGymnasiumEnv:
 
     def reset(self, seed=None):
         obs = self.env.reset()[0]
-        return obs, {}
+        return obs
 
     def render(self):
         return self.env.env.env.env.env.env.get_info()[0]['rgb']
@@ -69,35 +65,4 @@ class ProcgenGymnasiumEnv:
     def step(self, actions):
         actions = np.asarray(actions).reshape(1)
         obs, rewards, dones, infos = self.env.step(actions)
-        return obs[0], rewards[0], dones[0], False, infos[0]
-
-class ProcgenPettingZooEnv:
-    '''Fakes a multiagent interface to ProcGen where each env
-    is an agent. Very low overhead.'''
-    def __init__(self, env, num_envs):
-        self.env = env
-        self.num_envs = num_envs
-        self.possible_agents = list(range(num_envs))
-        self.agents = self.possible_agents
-
-    def observation_space(self, agent):
-        return self.env.observation_space['rgb']
-
-    def action_space(self, agent):
-        return self.env.action_space
-
-    def reset(self, seed=None):
-        obs = self.env.reset()
-        obs = {i: o for i, o in enumerate(obs)}
-        info = {i: {'mask': True} for i in obs}
-        return obs, info
-
-    def step(self, actions):
-        actions = np.array([actions[i] for i in range(self.num_envs)])
-        obs, rewards, dones, infos = self.env.step(actions)
-        obs = {i: o for i, o in enumerate(obs)}
-        rewards = {i: r for i, r in enumerate(rewards)}
-        dones = {i: bool(d) for i, d in enumerate(dones)}
-        truncateds = {i: False for i in range(len(obs))}
-        infos = {i: {'mask': True} for i in range(len(obs))}
-        return obs, rewards, dones, truncateds, infos
+        return obs[0], rewards[0], dones[0], infos[0]
