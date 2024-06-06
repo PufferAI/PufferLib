@@ -195,18 +195,6 @@ if __name__ == '__main__':
     print('Neural MMO')
     env_creator = nmmo.env_creator()
     profile_emulation(env_creator)
-    profile_puffer(env_creator, num_envs=4, backend=Multiprocessing)
-    profile_puffer(env_creator, num_envs=12,
-        batch_size=4, backend=Multiprocessing)
-    print()
-
-    exit(0)
-
-    '''
-    from pufferlib.environments import nmmo
-    print('Neural MMO')
-    env_creator = nmmo.env_creator()
-    profile_emulation(env_creator)
     profile_puffer(env_creator, num_envs=8, backend=Multiprocessing)
     profile_puffer(env_creator, num_envs=24,
         batch_size=8, backend=Multiprocessing)
@@ -244,6 +232,7 @@ if __name__ == '__main__':
 
     exit(0)
 
+    '''
     # Small scale version for laptop
     from pufferlib.environments import nmmo
     print('Neural MMO')
@@ -264,7 +253,6 @@ if __name__ == '__main__':
     profile_all('Pokemon Red', pokemon_red.env_creator(),
         num_envs=36, num_workers=6, env_batch_size=12, zero_copy=False)
 
-    '''
     from pufferlib.environments import classic_control
     profile_all('Classic Control', classic_control.env_creator(),
         num_envs=36, num_workers=6, env_batch_size=12, zero_copy=False)
@@ -286,106 +274,26 @@ if __name__ == '__main__':
         num_envs=36, num_workers=6, env_batch_size=12, zero_copy=False)
 
     exit(0)
- 
     '''
 
-    from pufferlib.environments import nethack
-    env_creator = nethack.env_creator()
-    print('Sanity: NetHack')
-    autotune(env_creator, batch_size=48)
-    sanity_check(env_creator)
-    exit(0)
-
-    from pufferlib.environments import nmmo3
-    env_creator = nmmo3.env_creator()
-    print('Sanity: NMMO3')
-    sanity_check(env_creator)
- 
-    exit(0)
-
-    #from pufferlib.environments import nmmo3
-    #env_creators.nmmo3 = nmmo3.env_creator()
-
-    #result = profile_puffer(env_creators.nmmo3, num_envs=1, timeout=10)
-    #print(f'    Puffer Serial: {(result):.3f}')
-    #profile_vec(env_creators.nmmo3, 
-        #num_envs=18, num_workers=6, batch_size=6, timeout=10)
-    #exit(0)
- 
-    #profile_vec(env_creators.nmmo3, 
-    #    num_envs=1, num_workers=1, batch_size=1, timeout=10)
-    #exit(0)
-    #profile_vec(env_creators.nmmo3, 2, 10, 1000)
-
-    #from pufferlib.environments import pokemon_red
-    #env_creators.pokemon_red = pokemon_red.env_creator('pokemon_red')
-    #profile_vec(env_creators.pokemon_red,
-    #    num_envs=1, num_workers=1, batch_size=1, timeout=10)
-
-    #exit(0)
-
-    # 20k on Nethack on laptop via 1 worker per batch
-    # not triggering a giant copy
-    #from pufferlib.environments import nethack
-    #env_creators.nethack = nethack.env_creator()
-    #profile_vec(env_creators.nethack, num_envs=6,
-    #    num_workers=6, batch_size=1, timeout=10)
-    #    num_workers=6, batch_size=1, timeout=10)
-    #exit(0)
-    #profile_vec(env_creators.nethack, 1, 10, 20000)
-
-
-    from pufferlib.environments import ocean
-    env_creators.ocean_spaces = ocean.env_creator('spaces')
-    result = profile_puffer(env_creators.ocean_spaces, num_envs=1, timeout=10)
-    result = profile_gymnasium_vec(env_creators.ocean_spaces, num_envs=1, timeout=10)
-    exit(0)
-
-    from functools import partial
-    env_creators.test = partial(
-        ocean.env_creator('performance_empiric'),
-        count_n=20_000, bandwidth=208_000,
-    )
-
-
-    profile_vec(env_creators.test,
-        num_envs=3, num_workers=3, batch_size=1, timeout=5)
-
-
-    '''
-    import cProfile
-    cProfile.run('profile_vec(env_creators.nmmo3, 6, 3, 1)', 'profile')
-    import pstats
-    from pstats import SortKey
-    p = pstats.Stats('profile')
-    p.sort_stats(SortKey.TIME).print_stats(10)
-    T()
-
-    #profile_environment(env_creators.nmmo3, 5)
-    #profile_vec(env_creators.nmmo3, 1, 10, 1)
-    #profile_vec(env_creators.nethack, 5, 10, 1)
-
-
-    exit(0)
-
-    from functools import partial
-    counts = [1e5, 1e6, 1e7, 1e8]
-    delays = [0, 0.1, 0.25, 0.5, 1]
-    bandwidth = [1, 1e4, 1e5, 1e6]
+    #from functools import partial
+    #counts = [1e5, 1e6, 1e7, 1e8]
+    #delays = [0, 0.1, 0.25, 0.5, 1]
+    #bandwidth = [1, 1e4, 1e5, 1e6]
 
     
-    synthetic_creators = {}
-    for count in counts:
-        name = f'test_delay_{count}'
+    #synthetic_creators = {}
+    #for count in counts:
+    #    name = f'test_delay_{count}'
 
-    env_creators.test = partial(
-        ocean.env_creator('performance_empiric'),
-        count_n=270_000, bandwidth=150_000
-    )
+    #env_creators.test = partial(
+    #    ocean.env_creator('performance_empiric'),
+    #    count_n=270_000, bandwidth=150_000
+    #)
 
-    timeout = 60
-    cores = psutil.cpu_count(logical=False)
-    for key, creator in env_creators.items():
-        prof = profile_emulation(creator, timeout)
-        #profile_vec(creator, cores, timeout, prof.puf.sps)
-        print()
+    #timeout = 60
+    #cores = psutil.cpu_count(logical=False)
+    #for key, creator in env_creators.items():
+    #    prof = profile_emulation(creator, timeout)
+    #    profile_vec(creator, cores, timeout, prof.puf.sps)
+    #    print()
