@@ -73,8 +73,6 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
         stats={},
         msg=msg,
         last_log_time=time.time(),
-        #optimize=optimize,
-        #optim=optim
     )
 
 @pufferlib.utils.profile
@@ -128,13 +126,12 @@ def evaluate(data):
 
         with profile.env:
             data.vecenv.send(actions)
-        #prof.step()
-    #prof.export_chrome_trace('no-compile-profile.json')
 
     with profile.eval_misc:
         data.stats = {}
 
-        # Moves into models... maybe. Definitely moves. You could also just return infos and have it in demo
+        # Moves into models... maybe. Definitely moves.
+        # You could also just return infos and have it in demo
         if 'pokemon_exploration_map' in infos:
             for pmap in infos['pokemon_exploration_map']:
                 if not hasattr(data, 'pokemon_map'):
@@ -199,106 +196,91 @@ def train(data):
     # Optimizing the policy and value network
     mean_pg_loss, mean_v_loss, mean_entropy_loss = 0, 0, 0
     mean_old_kl, mean_kl, mean_clipfrac = 0, 0, 0
-    '''
-    with torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ],
-        with_stack=True,
-        with_modules=True,
-        schedule=torch.profiler.schedule(wait=1, warmup=1, active=5, repeat=1),
-    ) as prof:
-    '''
-    with contextlib.nullcontext():
-        for epoch in range(config.update_epochs):
-            lstm_state = None
-            for mb in range(experience.num_minibatches):
-                with profile.train_misc:
-                    obs = experience.b_obs[mb]
-                    obs = obs.to(config.device)
-                    atn = experience.b_actions[mb]
-                    log_probs = experience.b_logprobs[mb]
-                    val = experience.b_values[mb]
-                    adv = experience.b_advantages[mb]
-                    ret = experience.b_returns[mb]
+    for epoch in range(config.update_epochs):
+        lstm_state = None
+        for mb in range(experience.num_minibatches):
+            with profile.train_misc:
+                obs = experience.b_obs[mb]
+                obs = obs.to(config.device)
+                atn = experience.b_actions[mb]
+                log_probs = experience.b_logprobs[mb]
+                val = experience.b_values[mb]
+                adv = experience.b_advantages[mb]
+                ret = experience.b_returns[mb]
 
-                with profile.train_forward:
-                    if experience.lstm_h is not None:
-                        _, newlogprob, entropy, newvalue, lstm_state = data.policy(
-                            obs, state=lstm_state, action=atn)
-                        lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
-                    else:
-                        _, newlogprob, entropy, newvalue = data.policy(
-                            obs.reshape(-1, *data.vecenv.single_observation_space.shape),
-                            action=atn,
-                        )
-
-                    if config.device == 'cuda':
-                        torch.cuda.synchronize()
-
-                with profile.train_misc:
-                    logratio = newlogprob - log_probs.reshape(-1)
-                    ratio = logratio.exp()
-
-                    with torch.no_grad():
-                        # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                        old_approx_kl = (-logratio).mean()
-                        approx_kl = ((ratio - 1) - logratio).mean()
-                        clipfrac = ((ratio - 1.0).abs() > config.clip_coef).float().mean()
-
-                    adv = adv.reshape(-1)
-                    if config.norm_adv:
-                        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
-
-                    # Policy loss
-                    pg_loss1 = -adv * ratio
-                    pg_loss2 = -adv * torch.clamp(
-                        ratio, 1 - config.clip_coef, 1 + config.clip_coef
+            with profile.train_forward:
+                if experience.lstm_h is not None:
+                    _, newlogprob, entropy, newvalue, lstm_state = data.policy(
+                        obs, state=lstm_state, action=atn)
+                    lstm_state = (lstm_state[0].detach(), lstm_state[1].detach())
+                else:
+                    _, newlogprob, entropy, newvalue = data.policy(
+                        obs.reshape(-1, *data.vecenv.single_observation_space.shape),
+                        action=atn,
                     )
-                    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-                    # Value loss
-                    newvalue = newvalue.view(-1)
-                    if config.clip_vloss:
-                        v_loss_unclipped = (newvalue - ret) ** 2
-                        v_clipped = val + torch.clamp(
-                            newvalue - val,
-                            -config.vf_clip_coef,
-                            config.vf_clip_coef,
-                        )
-                        v_loss_clipped = (v_clipped - ret) ** 2
-                        v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                        v_loss = 0.5 * v_loss_max.mean()
-                    else:
-                        v_loss = 0.5 * ((newvalue - ret) ** 2).mean()
+                if config.device == 'cuda':
+                    torch.cuda.synchronize()
 
-                    entropy_loss = entropy.mean()
-                    loss = pg_loss - config.ent_coef * entropy_loss + v_loss * config.vf_coef
+            with profile.train_misc:
+                logratio = newlogprob - log_probs.reshape(-1)
+                ratio = logratio.exp()
 
-                with profile.learn:
-                    data.optimizer.zero_grad()
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(data.policy.parameters(), config.max_grad_norm)
-                    data.optimizer.step()
-                    if config.device == 'cuda':
-                        torch.cuda.synchronize()
-                    #data.optim(data, config, loss)
+                with torch.no_grad():
+                    # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                    old_approx_kl = (-logratio).mean()
+                    approx_kl = ((ratio - 1) - logratio).mean()
+                    clipfrac = ((ratio - 1.0).abs() > config.clip_coef).float().mean()
 
-                with profile.train_misc:
-                    losses.policy_loss += pg_loss.item() / experience.num_minibatches
-                    losses.value_loss += v_loss.item() / experience.num_minibatches
-                    losses.entropy += entropy_loss.item() / experience.num_minibatches
-                    losses.old_approx_kl += old_approx_kl.item() / experience.num_minibatches
-                    losses.approx_kl += approx_kl.item() / experience.num_minibatches
-                    losses.clipfrac += clipfrac.item() / experience.num_minibatches
+                adv = adv.reshape(-1)
+                if config.norm_adv:
+                    adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
-            if config.target_kl is not None:
-                if approx_kl > config.target_kl:
-                    break
-            #prof.step()
-    #prof.export_chrome_trace('no-compile-train-profile.json')
+                # Policy loss
+                pg_loss1 = -adv * ratio
+                pg_loss2 = -adv * torch.clamp(
+                    ratio, 1 - config.clip_coef, 1 + config.clip_coef
+                )
+                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
+                # Value loss
+                newvalue = newvalue.view(-1)
+                if config.clip_vloss:
+                    v_loss_unclipped = (newvalue - ret) ** 2
+                    v_clipped = val + torch.clamp(
+                        newvalue - val,
+                        -config.vf_clip_coef,
+                        config.vf_clip_coef,
+                    )
+                    v_loss_clipped = (v_clipped - ret) ** 2
+                    v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                    v_loss = 0.5 * v_loss_max.mean()
+                else:
+                    v_loss = 0.5 * ((newvalue - ret) ** 2).mean()
+
+                entropy_loss = entropy.mean()
+                loss = pg_loss - config.ent_coef * entropy_loss + v_loss * config.vf_coef
+
+            with profile.learn:
+                data.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(data.policy.parameters(), config.max_grad_norm)
+                data.optimizer.step()
+                if config.device == 'cuda':
+                    torch.cuda.synchronize()
+                #data.optim(data, config, loss)
+
+            with profile.train_misc:
+                losses.policy_loss += pg_loss.item() / experience.num_minibatches
+                losses.value_loss += v_loss.item() / experience.num_minibatches
+                losses.entropy += entropy_loss.item() / experience.num_minibatches
+                losses.old_approx_kl += old_approx_kl.item() / experience.num_minibatches
+                losses.approx_kl += approx_kl.item() / experience.num_minibatches
+                losses.clipfrac += clipfrac.item() / experience.num_minibatches
+
+        if config.target_kl is not None:
+            if approx_kl > config.target_kl:
+                break
 
     with profile.train_misc:
         if config.anneal_lr:
@@ -327,8 +309,6 @@ def train(data):
                     **{f'environment/{k}': v for k, v in data.stats.items()},
                     **{f'losses/{k}': v for k, v in data.losses.items()},
                     **{f'performance/{k}': v for k, v in data.profile},
-                    #**{f'skillrank/{policy}': elo
-                    #    for policy, elo in data.policy.ranker.ratings.items()},
                 })
 
         if data.epoch % config.checkpoint_interval == 0 or done_training:
