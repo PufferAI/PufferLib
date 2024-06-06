@@ -38,26 +38,8 @@ cleanrl = [
     'tyro==0.5.10',
 ]
 
-rllib = [
-    'ray[all]==2.0.0',
-    'setproctitle==1.1.10',
-    'service-identity==21.1.0',
-    'pydantic==1.9',
-]
-
-pokemon_red = [
-    f'gym=={GYM_VERSION}',
-    f'gymnasium=={GYMNASIUM_VERSION}',
-    'einops==0.6.1',
-    'matplotlib',
-    'scikit-image==0.21.0',
-    'pyboy<2.0.0',
-    'hnswlib==0.7.0',
-    'mediapy',
-    'pandas==2.0.2',
-    'pettingzoo',
-    'GPUtil',
-    'websockets',
+ray = [
+    'ray==2.23.0',
 ]
 
 environments = {
@@ -109,8 +91,8 @@ environments = {
     'griddly': [
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        'imageio==2.23.0',
         'griddly==1.6.7',
+        'imageio',
     ],
     'magent': [
         f'gym=={GYM_VERSION}',
@@ -152,7 +134,7 @@ environments = {
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
         f'pettingzoo=={PETTINGZOO_VERSION}',
-        'nmmo>=2.0',
+        'nmmo>=2.1',
     ],
     'open_spiel': [
         f'gym=={GYM_VERSION}',
@@ -165,13 +147,12 @@ environments = {
         f'gymnasium=={GYMNASIUM_VERSION}',
         'einops==0.6.1',
         'matplotlib',
-        'scikit-image==0.21.0',
+        'scikit-image',
         'pyboy<2.0.0',
         'hnswlib==0.7.0',
         'mediapy',
         'pandas==2.0.2',
         'pettingzoo',
-        'GPUtils',
         'websockets',
     ],
     'procgen': [
@@ -227,7 +208,6 @@ setup(
         'cython>=3.0.0',
         'rich',
         'rich_argparse',
-        # TODO: need better way to override gym version
         f'gym<={GYM_VERSION}',
         f'gymnasium<={GYMNASIUM_VERSION}',
         f'pettingzoo<={PETTINGZOO_VERSION}',
@@ -235,7 +215,7 @@ setup(
     ],
     extras_require={
         'docs': docs,
-        'rllib': rllib,
+        'ray': ray,
         'cleanrl': cleanrl,
         'common': common,
         **environments,
