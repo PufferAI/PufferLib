@@ -1,6 +1,5 @@
 from pdb import set_trace as T
 import numpy as np
-import contextlib
 
 import os
 import random
@@ -666,7 +665,6 @@ def duration(seconds):
     m = (seconds % 3600) // 60
     s = seconds % 60
     return f"{b2}{h}{c2}h {b2}{m}{c2}m {b2}{s}{c2}s" if h else f"{b2}{m}{c2}m {b2}{s}{c2}s" if m else f"{b2}{s}{c2}s"
-
 
 def fmt_perf(name, time, uptime):
     percent = 0 if uptime == 0 else int(100*time/uptime - 1e-5)
