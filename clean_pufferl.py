@@ -4,9 +4,15 @@ import contextlib
 
 import os
 import random
+import psutil
 import time
 
-from collections import defaultdict
+from threading import Thread
+from collections import defaultdict, deque
+
+import rich
+from rich.console import Console
+from rich.table import Table
 
 import torch
 
@@ -36,9 +42,9 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
     profile = Profile()
     losses = make_losses()
 
+    utilization = Utilization()
     msg = f'Model Size: {abbreviate(count_params(policy))} parameters'
-    # TODO: Check starting point in term and draw from there with no clear
-    print_dashboard(config.env, 0, 0, profile, losses, {}, msg, clear=True)
+    print_dashboard(config.env, utilization, 0, 0, profile, losses, {}, msg, clear=True)
 
     vecenv.async_reset(config.seed)
     obs_shape = vecenv.single_observation_space.shape
@@ -73,6 +79,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
         stats={},
         msg=msg,
         last_log_time=time.time(),
+        utilization=utilization,
     )
 
 @pufferlib.utils.profile
@@ -297,7 +304,7 @@ def train(data):
 
         done_training = data.global_step >= config.total_timesteps
         if profile.update(data) or done_training:
-            print_dashboard(config.env, data.global_step, data.epoch,
+            print_dashboard(config.env, data.utilization, data.global_step, data.epoch,
                 profile, data.losses, data.stats, data.msg)
 
             if data.wandb is not None and data.global_step > 0 and time.time() - data.last_log_time > 5.0:
@@ -504,6 +511,31 @@ class Experience:
         self.b_values = self.b_values[b_flat]
         self.b_returns = self.b_advantages + self.b_values
 
+class Utilization(Thread):
+    def __init__(self, delay=1, maxlen=20):
+        super().__init__()
+        self.cpu_mem = deque(maxlen=maxlen)
+        self.cpu_util = deque(maxlen=maxlen)
+        self.gpu_util = deque(maxlen=maxlen)
+        self.gpu_mem = deque(maxlen=maxlen)
+
+        self.delay = delay
+        self.stopped = False
+        self.start()
+
+    def run(self):
+        while not self.stopped:
+            self.cpu_util.append(psutil.cpu_percent())
+            mem = psutil.virtual_memory()
+            self.cpu_mem.append(mem.active / mem.total)
+            self.gpu_util.append(torch.cuda.utilization())
+            free, total = torch.cuda.mem_get_info()
+            self.gpu_mem.append(free / total)
+            time.sleep(self.delay)
+
+    def stop(self):
+        self.stopped = True
+
 def save_checkpoint(data):
     config = data.config
     path = os.path.join(config.data_dir, config.exp_id)
@@ -605,13 +637,6 @@ def seed_everything(seed, torch_deterministic):
         torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = torch_deterministic
 
-import psutil
-import GPUtil
-
-import rich
-from rich.console import Console
-from rich.table import Table
-
 ROUND_OPEN = rich.box.Box(
     "╭──╮\n"
     "│  │\n"
@@ -654,7 +679,8 @@ def fmt_perf(name, time, uptime):
     return f'{c1}{name}', duration(time), f'{b2}{percent:2d}%'
 
 # TODO: Add env name to print_dashboard
-def print_dashboard(env_name, global_step, epoch, profile, losses, stats, msg, clear=False, max_stats=[0]):
+def print_dashboard(env_name, utilization, global_step, epoch,
+        profile, losses, stats, msg, clear=False, max_stats=[0]):
     console = Console()
     if clear:
         console.clear()
@@ -664,16 +690,15 @@ def print_dashboard(env_name, global_step, epoch, profile, losses, stats, msg, c
 
     table = Table(box=None, expand=True, show_header=False)
     dashboard.add_row(table)
-    cpu_percent = psutil.cpu_percent()
-    dram_percent = psutil.virtual_memory().percent
-    gpus = GPUtil.getGPUs()
-    gpu_percent = gpus[0].load * 100 if gpus else 0
-    vram_percent = gpus[0].memoryUtil * 100 if gpus else 0
+    cpu_percent = np.mean(utilization.cpu_util)
+    dram_percent = np.mean(utilization.cpu_mem)
+    gpu_percent = np.mean(utilization.gpu_util)
+    vram_percent = np.mean(utilization.gpu_mem)
     table.add_column(justify="left", width=30)
     table.add_column(justify="center", width=12)
     table.add_column(justify="center", width=12)
-    table.add_column(justify="center", width=12)
-    table.add_column(justify="right", width=12)
+    table.add_column(justify="center", width=13)
+    table.add_column(justify="right", width=13)
     table.add_row(
         f':blowfish: {c1}PufferLib {b2}1.0.0{c1}: {env_name}',
         f'{c1}CPU: {c3}{cpu_percent:.1f}%',
