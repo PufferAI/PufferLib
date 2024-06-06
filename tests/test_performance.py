@@ -111,22 +111,21 @@ def profile_emulation(env_creator, timeout=DEFAULT_TIMEOUT, seed=42):
     print(f'    Reset      : {env_percent_reset:.3g}%')
     print(f'    Step STD   : {env_percent_step_std:.3g}%')
 
-def profile_vec(vecenv, actions, timeout=DEFAULT_TIMEOUT):
-    vecenv.reset()
-    steps = 0
-    start = time.time()
-    while time.time() - start < timeout:
-        vecenv.step(actions[steps%1000])
-        steps += 1
-
-    sps = steps * vecenv.num_envs / (time.time() - start)
-    vecenv.close()
-    return sps
-
 def profile_puffer(env_creator, timeout=DEFAULT_TIMEOUT, **kwargs):
     vecenv = make(env_creator, **kwargs)
     actions = [vecenv.action_space.sample() for _ in range(1000)]
-    sps = profile_vec(vecenv, actions, timeout)
+
+    agent_steps = 0
+    vecenv.reset()
+    start = time.time()
+    while time.time() - start < timeout:
+        vecenv.send(actions[agent_steps%1000])
+        o, r, d, t, i, env_id, mask = vecenv.recv()
+        agent_steps += sum(mask)
+
+    sps = agent_steps / (time.time() - start)
+    vecenv.close()
+
     backend = kwargs.get('backend', Serial)
     if backend == Multiprocessing and 'batch_size' in kwargs:
         print(f'    Puffer     : {(sps):.1f} - Pool')
@@ -137,7 +136,17 @@ def profile_puffer(env_creator, timeout=DEFAULT_TIMEOUT, **kwargs):
 def profile_gymnasium_vec(env_creator, num_envs, timeout=DEFAULT_TIMEOUT):
     vecenv = gymnasium.vector.AsyncVectorEnv([env_creator] * num_envs)
     actions = [vecenv.action_space.sample() for _ in range(1000)]
-    sps = profile_vec(vecenv, actions, timeout)
+
+    steps = 0
+    vecenv.reset()
+    start = time.time()
+    while time.time() - start < timeout:
+        vecenv.step(actions[steps%1000])
+        steps += 1
+
+    sps = steps * vecenv.num_envs / (time.time() - start)
+    vecenv.close()
+
     print(f'    Gymnasium  : {(sps):.1f}')
     return sps
 
@@ -147,7 +156,16 @@ def profile_sb3_vec(env_creator, num_envs, timeout=DEFAULT_TIMEOUT):
         vecenv = SubprocVecEnv([env_creator] * num_envs)
         actions = [[vecenv.action_space.sample() for _ in range(num_envs)]
             for _ in range(1000)]
-        sps = profile_vec(vecenv, actions, timeout)
+
+        steps = 0
+        vecenv.reset()
+        start = time.time()
+        while time.time() - start < timeout:
+            vecenv.step(actions[steps%1000])
+            steps += 1
+
+        sps = steps * vecenv.num_envs / (time.time() - start)
+        vecenv.close()
 
     print(f'    SB3        : {(sps):.1f}')
     return sps
@@ -173,6 +191,18 @@ def profile_all(name, env_creator, num_envs, num_workers=24,
     print()
 
 if __name__ == '__main__':
+    from pufferlib.environments import nmmo
+    print('Neural MMO')
+    env_creator = nmmo.env_creator()
+    profile_emulation(env_creator)
+    profile_puffer(env_creator, num_envs=4, backend=Multiprocessing)
+    profile_puffer(env_creator, num_envs=12,
+        batch_size=4, backend=Multiprocessing)
+    print()
+
+    exit(0)
+
+    '''
     from pufferlib.environments import nmmo
     print('Neural MMO')
     env_creator = nmmo.env_creator()
@@ -213,6 +243,50 @@ if __name__ == '__main__':
         num_envs=192, env_batch_size=48, zero_copy=False)
 
     exit(0)
+
+    # Small scale version for laptop
+    from pufferlib.environments import nmmo
+    print('Neural MMO')
+    env_creator = nmmo.env_creator()
+    profile_emulation(env_creator)
+    profile_puffer(env_creator, num_envs=4, num_workers=4, backend=Multiprocessing)
+    profile_puffer(env_creator, num_envs=12, num_workers=6,
+        batch_size=4, backend=Multiprocessing)
+    print()
+
+    from pufferlib.environments import nethack
+    profile_all('NetHack', nethack.env_creator(), num_envs=12, num_workers=6)
+
+    from pufferlib.environments import minihack
+    profile_all('MiniHack', minihack.env_creator(), num_envs=12, num_workers=6)
+
+    from pufferlib.environments import pokemon_red
+    profile_all('Pokemon Red', pokemon_red.env_creator(),
+        num_envs=36, num_workers=6, env_batch_size=12, zero_copy=False)
+
+    '''
+    from pufferlib.environments import classic_control
+    profile_all('Classic Control', classic_control.env_creator(),
+        num_envs=36, num_workers=6, env_batch_size=12, zero_copy=False)
+
+    from pufferlib.environments import ocean
+    profile_all('Ocean Squared', ocean.env_creator('squared'),
+        num_envs=36, num_workers=6, env_batch_size=12, zero_copy=False)
+
+    from pufferlib.environments import atari
+    profile_all('Atari Breakout', atari.env_creator('BreakoutNoFrameskip-v4'),
+        num_envs=36, num_workers=6, env_batch_size=12, zero_copy=False)
+
+    from pufferlib.environments import crafter
+    profile_all('Crafter', crafter.env_creator(),
+        num_envs=12, num_workers=6, env_batch_size=4, zero_copy=False)
+
+    from pufferlib.environments import minigrid
+    profile_all('MiniGrid', minigrid.env_creator(),
+        num_envs=36, num_workers=6, env_batch_size=12, zero_copy=False)
+
+    exit(0)
+ 
     '''
 
     from pufferlib.environments import nethack

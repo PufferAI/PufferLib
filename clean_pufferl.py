@@ -12,7 +12,6 @@ import torch
 
 import pufferlib
 import pufferlib.utils
-import pufferlib.policy_pool
 import pufferlib.pytorch
 
 torch.set_float32_matmul_precision('high')
@@ -32,8 +31,7 @@ def optimize(data, config, loss):
         torch.cuda.synchronize()
 
 
-def create(config, vecenv, policy, optimizer=None, wandb=None, policy_pool=False,
-        policy_selector=pufferlib.policy_pool.random_selector):
+def create(config, vecenv, policy, optimizer=None, wandb=None):
     seed_everything(config.seed, config.torch_deterministic)
     profile = Profile()
     losses = make_losses()
@@ -60,18 +58,6 @@ def create(config, vecenv, policy, optimizer=None, wandb=None, policy_pool=False
     optimizer = torch.optim.Adam(policy.parameters(),
         lr=config.learning_rate, eps=1e-5)
 
-    # Wraps the policy for self-play
-    if policy_pool:
-        policy = pufferlib.policy_pool.PolicyPool(
-            policy=policy,
-            total_agents=vecenv.agents_per_batch,
-            atn_shape=vecenv.single_action_space.shape,
-            device=config.device,
-            data_dir=config.data_dir,
-            kernel=config.pool_kernel,
-            policy_selector=policy_selector,
-        )
-
     return pufferlib.namespace(
         config=config,
         vecenv=vecenv,
@@ -97,7 +83,6 @@ def evaluate(data):
 
     with profile.eval_misc:
         policy = data.policy
-        #policy.update_policies()
         infos = defaultdict(list)
         lstm_h, lstm_c = experience.lstm_h, experience.lstm_c
 
@@ -112,14 +97,8 @@ def evaluate(data):
 
             o = torch.as_tensor(o)
             o_device = o.to(config.device)
-
             r = torch.as_tensor(r)
             d = torch.as_tensor(d)
-            #i = data.policy.update_scores(i, "return")
-
-            # TODO: Update this for policy pool
-            #for ii, ee  in zip(i['learner'], env_id):
-            #    ii['env_id'] = ee
 
         with profile.eval_forward, torch.no_grad():
             # TODO: In place-update should be faster. Leaking 7% speed max
@@ -143,7 +122,6 @@ def evaluate(data):
             o = o if config.cpu_offload else o_device
             experience.store(o, value, actions, logprob, r, d, env_id, mask)
 
-            # Really neeed to look at policy pool soon
             for i in info:
                 for k, v in pufferlib.utils.unroll_nested_dict(i):
                     infos[k].append(v)
@@ -155,7 +133,6 @@ def evaluate(data):
 
     with profile.eval_misc:
         data.stats = {}
-        #infos = infos['learner']
 
         # Moves into models... maybe. Definitely moves. You could also just return infos and have it in demo
         if 'pokemon_exploration_map' in infos:
@@ -592,6 +569,7 @@ def count_params(policy):
 
 def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
         model_path=None, device='cuda', verbose=True):
+    os.system('clear')
     env = env_creator(**env_kwargs)
     if model_path is None:
         agent = agent_creator(env, **agent_kwargs)
@@ -599,12 +577,8 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
         agent = torch.load(model_path, map_location=device)
 
     terminal = truncated = True
- 
     while True:
         if terminal or truncated:
-            if verbose:
-                print('---  Reset  ---')
-
             ob, info = env.reset()
             state = None
             step = 0
@@ -626,17 +600,14 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
 
         render = env.render()
         if env.render_mode == 'ansi':
-            print("\033c", end="")
-            print(render)
-            time.sleep(0.5)
+            print('\033[0;0H' + render + '\n')
+            time.sleep(0.6)
         elif env.render_mode == 'rgb_array':
             import cv2
             render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
             cv2.imshow('frame', render)
             cv2.waitKey(1)
             time.sleep(1/24)
-        elif env.render_mode == 'human':
-            pass
 
         if verbose:
             print(f'Step: {step} Reward: {reward:.4f} Return: {return_val:.2f}')

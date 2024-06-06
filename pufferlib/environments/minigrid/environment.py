@@ -32,6 +32,7 @@ class MiniGridWrapper:
         self.render_mode = 'rgb_array'
 
     def reset(self, seed=None):
+        self.tick = 0
         obs, info = self.env.reset(seed=seed)
         del obs['mission']
         return obs, info
@@ -39,4 +40,9 @@ class MiniGridWrapper:
     def step(self, action):
         obs, reward, done, truncated, info = self.env.step(action)
         del obs['mission']
+
+        self.tick += 1
+        if self.tick == 100:
+            done = True
+
         return obs, reward, done, truncated, info

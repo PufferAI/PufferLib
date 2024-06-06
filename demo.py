@@ -174,7 +174,6 @@ def train(args, env_module, make_env):
         backend=vec,
     )
     policy = make_policy(vecenv.driver_env, env_module, args)
-
     train_config = args.train 
     train_config.track = args.track
     train_config.device = args.train.device

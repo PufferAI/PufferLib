@@ -240,6 +240,7 @@ class Multiprocessing:
         num_batches = num_envs / batch_size
         if zero_copy and num_batches != int(num_batches):
             # This is so you can have n equal buffers
+            T()
             raise APIUsageError(
                 'zero_copy: num_envs must be divisible by batch_size')
 
@@ -325,8 +326,6 @@ class Multiprocessing:
         self.initialized = False
         self.zero_copy = zero_copy
 
-    
-    #@profile
     def recv(self):
         recv_precheck(self)
         while True:
@@ -406,10 +405,10 @@ class Multiprocessing:
 
         agent_ids = self.agent_ids[w_slice].ravel()
         m = buf.masks[w_slice].ravel()
+        self.batch_mask = m
 
         return o, r, d, t, infos, agent_ids, m
 
-    #@profile
     def send(self, actions):
         actions = send_precheck(self, actions).reshape(self.atn_batch_shape)
         # TODO: What shape?
@@ -581,6 +580,9 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
 
         if 'batch_size' in kwargs:
             batch_size = kwargs['batch_size']
+            if batch_size is None:
+                batch_size = num_envs
+
             if batch_size % envs_per_worker != 0:
                 raise APIUsageError(
                     'batch_size must be divisible by (num_envs / num_workers)')

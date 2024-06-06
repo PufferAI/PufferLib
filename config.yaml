@@ -32,12 +32,11 @@ default:
 
     num_envs: 8
     num_workers: 8
-    env_batch_size: 8
+    env_batch_size: ~
     zero_copy: True
     verbose: True
     data_dir: experiments
     checkpoint_interval: 200
-    pool_kernel: [0]
     batch_size: 1024
     minibatch_size: 512
     bptt_horizon: 16
@@ -564,7 +563,8 @@ butterfly:
 classic_control:
   env_name: cartpole
   train:
-    num_envs: 16
+    total_timesteps: 500_000
+    num_envs: 64
 classic-control:
   package: classic_control
 classiccontrol:
@@ -699,6 +699,7 @@ nmmo3debug:
     total_timesteps: 10_000_000
     num_envs: 1
     num_workers: 1
+    env_batch_size: 1
     update_epochs: 1
     gamma: 0.998
     #ent_coef: 0.05
@@ -741,6 +742,7 @@ ocean:
     learning_rate: 0.017
     num_envs: 8
     num_workers: 2
+    env_batch_size: 8
     minibatch_size: 128
     bptt_horizon: 4
     device: cpu
@@ -764,7 +766,6 @@ stochastic:
 open_spiel:
   env_name: connect_four
   train:
-    pool_kernel: [0, 1, 1, 0]
     num_envs: 32
     batch_size: 4096
 open-spiel:
