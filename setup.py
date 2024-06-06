@@ -177,9 +177,7 @@ environments = {
     'procgen': [
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        # Danijar mirrored for Python 3.11 and 3.12 support
-        'procgen-mirror==0.10.7',
-        #'procgen==0.10.7',
+        'procgen-mirror==0.10.7', # Procgen mirror for 3.11 and 3.12 support
     ],
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',
@@ -230,12 +228,10 @@ setup(
         'rich',
         'rich_argparse',
         # TODO: need better way to override gym version
-        f'gym<=0.23',
-        f'gymnasium<=0.29.1',
-        f'pettingzoo<=1.24.1',
+        f'gym<={GYM_VERSION}',
+        f'gymnasium<={GYMNASIUM_VERSION}',
+        f'pettingzoo<={PETTINGZOO_VERSION}',
         'shimmy[gym-v21]',
-        # *cleanrl,
-        # *environments['pokemon_red'],
     ],
     extras_require={
         'docs': docs,
