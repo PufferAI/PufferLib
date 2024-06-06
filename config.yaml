@@ -153,7 +153,7 @@ procgen:
   train:
     total_timesteps: 8_000_000
     learning_rate: 0.0005
-    num_cores: 1
+    num_workers: 1
     num_envs: 1
     batch_size: 16384
     minibatch_size: 5321
@@ -176,16 +176,16 @@ bigfish:
     vf_coef: 1.1732211834792117
     gae_lambda: 0.8620630095238284
     clip_coef: 0.4104603426698214
-    num_envs: 1
+    num_envs: 8
     num_workers: 1
-    batch_size: 53210
-    minibatch_size: 5321
+    batch_size: 1024
+    minibatch_size: 256
     bptt_horizon: 1
     update_epochs: 3
     anneal_lr: False
     vf_clip_coef: 0.2
   env:
-    num_envs: 24
+    num_envs: 1
   policy:
     cnn_width: 22
     mlp_width: 327
