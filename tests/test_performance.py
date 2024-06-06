@@ -210,6 +210,10 @@ if __name__ == '__main__':
     profile_all('Pokemon Red', pokemon_red.env_creator(),
         num_envs=144, env_batch_size=48, zero_copy=False)
 
+    from pufferlib.environments import procgen
+    profile_all('ProcGen', procgen.env_creator('bigfish'),
+        num_envs=144, env_batch_size=48, num_workers=24, zero_copy=False)
+
     from pufferlib.environments import classic_control
     profile_all('Classic Control', classic_control.env_creator(),
         num_envs=1152, env_batch_size=48)
