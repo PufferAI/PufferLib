@@ -45,7 +45,7 @@ case $GROUP in
         $COMMON nmmo --vec multiprocessing
         ;;
     *)
-        echo "Invalid group. Please specify 'ocean' or 'procgen_small'."
+        echo "Invalid group. Please check this script for valid groups."
         exit 1
         ;;
 esac
