@@ -244,7 +244,6 @@ def train(data):
                 data.optimizer.step()
                 if config.device == 'cuda':
                     torch.cuda.synchronize()
-                #data.optim(data, config, loss)
 
             with profile.train_misc:
                 losses.policy_loss += pg_loss.item() / experience.num_minibatches
