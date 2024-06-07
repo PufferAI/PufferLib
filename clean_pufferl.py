@@ -151,7 +151,6 @@ def evaluate(data):
             except:
                 continue
 
-
     return data.stats, infos
 
 @pufferlib.utils.profile

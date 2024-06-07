@@ -228,7 +228,7 @@ if __name__ == "__main__":
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
+            next_obs, next_done = torch.from_numpy(next_obs).to(device), torch.from_numpy(next_done).to(device).float()
 
             for item in infos:
                 if "episode" in item.keys():

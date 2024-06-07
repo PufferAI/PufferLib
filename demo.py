@@ -223,7 +223,7 @@ if __name__ == '__main__':
         formatter_class=RichHelpFormatter, add_help=False)
     assert 'config' not in sys.argv, '--config deprecated. Use --env'
     parser.add_argument('--env', '--environment', type=str,
-        default='pokemon_red', help='Name of specific environment to run')
+        default='squared', help='Name of specific environment to run')
     parser.add_argument('--pkg', '--package', type=str, default=None, help='Configuration in config.yaml to use')
     parser.add_argument('--backend', type=str, default='clean_pufferl', help='Train backend (clean_pufferl, sb3)')
     parser.add_argument('--mode', type=str, default='train', choices='train eval evaluate sweep autotune baseline profile'.split())
