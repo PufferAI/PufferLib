@@ -1,6 +1,5 @@
 from setuptools import find_packages, setup
 from Cython.Build import cythonize
-from itertools import chain
 import numpy
 
 VERSION = '1.0.0'
