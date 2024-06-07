@@ -144,6 +144,7 @@ environments = {
     'pokemon_red': [
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
+        'pokegym>=0.2.0',
         'einops==0.6.1',
         'matplotlib',
         'scikit-image',
