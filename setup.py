@@ -127,7 +127,7 @@ environments = {
     'nethack': [
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        'nle==0.9.0',
+        'nle>=0.9.1',
     ],
     'nmmo': [
         f'gym=={GYM_VERSION}',
@@ -158,7 +158,7 @@ environments = {
     'procgen': [
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        'procgen-mirror==0.10.7', # Procgen mirror for 3.11 and 3.12 support
+        'pufferai-procgen',
     ],
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',
