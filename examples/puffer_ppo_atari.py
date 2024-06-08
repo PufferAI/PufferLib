@@ -228,7 +228,7 @@ if __name__ == "__main__":
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs = torch.as_tensor(next_obs, dtype=torch.float32, device=device)
+            next_obs = torch.from_numpy(next_obs).to(device).float()
             next_done = torch.as_tensor(next_done, dtype=torch.float32, device=device)
 
             for info in infos:
