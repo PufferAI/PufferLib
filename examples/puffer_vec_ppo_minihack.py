@@ -13,13 +13,14 @@ import tyro
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-from stable_baselines3.common.atari_wrappers import (  # isort:skip
-    ClipRewardEnv,
-    EpisodicLifeEnv,
-    FireResetEnv,
-    MaxAndSkipEnv,
-    NoopResetEnv,
-)
+import minihack
+import gym as old_gym
+import shimmy
+
+import pufferlib.emulation
+import pufferlib.pytorch
+import pufferlib.vector
+import pufferlib.environments.minihack
 
 
 @dataclass
@@ -85,12 +86,13 @@ class Args:
     num_iterations: int = 0
     """the number of iterations (computed in runtime)"""
 
+
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
-import pufferlib.pytorch
+
 class Agent(nn.Module):
     def __init__(self, emulated):
         super().__init__()
@@ -175,9 +177,7 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    # env setup - PufferLib vectorization
-    import pufferlib.vector
-    import pufferlib.environments.minihack
+    # PufferLib vectorization
     envs = pufferlib.vector.make(
         pufferlib.environments.minihack.env_creator(args.env_id),
         backend=pufferlib.vector.Multiprocessing,
@@ -187,10 +187,6 @@ if __name__ == "__main__":
 
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    emulated = envs.driver_env.emulated
-    agent = Agent(emulated).to(device)
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
-
     # ALGO Logic: Storage setup
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
@@ -198,6 +194,10 @@ if __name__ == "__main__":
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+
+    # Annoyance: AsyncVectorEnv does not have a driver env
+    agent = Agent(envs.driver_env.emulated).to(device)
+    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -229,7 +229,8 @@ if __name__ == "__main__":
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.from_numpy(next_obs).to(device), torch.from_numpy(next_done).to(device).float()
+            next_obs = torch.as_tensor(next_obs, device=device)
+            next_done = torch.as_tensor(next_done, dtype=torch.float32, device=device)
 
             if "final_info" in infos:
                 for info in infos["final_info"]:

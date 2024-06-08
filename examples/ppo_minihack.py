@@ -13,13 +13,9 @@ import tyro
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-from stable_baselines3.common.atari_wrappers import (  # isort:skip
-    ClipRewardEnv,
-    EpisodicLifeEnv,
-    FireResetEnv,
-    MaxAndSkipEnv,
-    NoopResetEnv,
-)
+import minihack
+import gym as old_gym
+import shimmy
 
 
 @dataclass
@@ -48,7 +44,7 @@ class Args:
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 8
+    num_envs: int = 48
     """the number of parallel game environments"""
     num_steps: int = 128
     """the number of steps to run in each environment per policy rollout"""
@@ -86,9 +82,6 @@ class Args:
     """the number of iterations (computed in runtime)"""
 
 
-import shimmy
-import minihack
-import gym as old_gym
 def make_env(name):
     def thunk():
         import minihack
@@ -105,27 +98,50 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs):
+    def __init__(self, emulated):
         super().__init__()
-        self.network = nn.Sequential(
-            layer_init(nn.Conv2d(4, 32, 8, stride=4)),
+        self.dtype = pufferlib.pytorch.nativize_dtype(emulated)
+
+        self.blstats_net = nn.Sequential(
+            nn.Embedding(256, 32),
+            nn.Flatten(),
+        )
+
+        self.char_embed = nn.Embedding(256, 32)
+        self.chars_net = nn.Sequential(
+            layer_init(nn.Conv2d(32, 32, 5, stride=(2, 3))),
             nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+            layer_init(nn.Conv2d(32, 64, 5, stride=(1, 3))),
             nn.ReLU(),
             layer_init(nn.Conv2d(64, 64, 3, stride=1)),
             nn.ReLU(),
             nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, 512)),
-            nn.ReLU(),
         )
-        self.actor = layer_init(nn.Linear(512, envs.single_action_space.n), std=0.01)
-        self.critic = layer_init(nn.Linear(512, 1), std=1)
+
+        self.proj = nn.Linear(864+960, 256)
+        self.actor = layer_init(nn.Linear(256, 8), std=0.01)
+        self.critic = layer_init(nn.Linear(256, 1), std=1)
+
+    def hidden(self, x):
+        x = x.type(torch.uint8) # Undo bad cleanrl cast
+        x = pufferlib.pytorch.nativize_tensor(x, self.dtype)
+
+        blstats = torch.clip(x['blstats'] + 1, 0, 255).int()
+        blstats = self.blstats_net(blstats)
+
+        chars = self.char_embed(x['chars'].int())
+        chars = torch.permute(chars, (0, 3, 1, 2))
+        chars = self.chars_net(chars)
+
+        concat = torch.cat([blstats, chars], dim=1)
+        return self.proj(concat)
 
     def get_value(self, x):
-        return self.critic(self.network(x / 255.0))
+        hidden = self.hidden(x)
+        return self.critic(hidden)
 
     def get_action_and_value(self, x, action=None):
-        hidden = self.network(x / 255.0)
+        hidden = self.hidden(x)
         logits = self.actor(hidden)
         probs = Categorical(logits=logits)
         if action is None:
@@ -167,12 +183,9 @@ if __name__ == "__main__":
 
     # env setup - changed from SyncVectorEnv for fairness to cleanrl
     envs = gym.vector.AsyncVectorEnv(
-        [make_env(args.env_id) for Ai in range(args.num_envs)],
+        [make_env(args.env_id) for _ in range(args.num_envs)],
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
-
-    agent = Agent(envs).to(device)
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
@@ -181,6 +194,9 @@ if __name__ == "__main__":
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+
+    agent = Agent(envs).to(device)
+    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -212,7 +228,8 @@ if __name__ == "__main__":
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
+            next_obs = torch.as_tensor(next_obs, device=device)
+            next_done = torch.as_tensor(next_done, dtype=torch.float32, device=device)
 
             if "final_info" in infos:
                 for info in infos["final_info"]:

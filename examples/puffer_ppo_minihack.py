@@ -13,13 +13,12 @@ import tyro
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-from stable_baselines3.common.atari_wrappers import (  # isort:skip
-    ClipRewardEnv,
-    EpisodicLifeEnv,
-    FireResetEnv,
-    MaxAndSkipEnv,
-    NoopResetEnv,
-)
+import minihack
+import gym as old_gym
+import shimmy
+
+import pufferlib.emulation
+import pufferlib.pytorch
 
 
 @dataclass
@@ -86,11 +85,6 @@ class Args:
     """the number of iterations (computed in runtime)"""
 
 
-import shimmy
-import minihack
-import gym as old_gym
-import pufferlib
-import pufferlib.emulation
 def make_env(name):
     def thunk():
         import minihack
@@ -107,7 +101,6 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
-import pufferlib.pytorch
 class Agent(nn.Module):
     def __init__(self, emulated):
         super().__init__()
@@ -194,14 +187,9 @@ if __name__ == "__main__":
 
     # env setup - changed from SyncVectorEnv for fairness to cleanrl
     envs = gym.vector.AsyncVectorEnv(
-        [make_env(args.env_id) for Ai in range(args.num_envs)],
+        [make_env(args.env_id) for _ in range(args.num_envs)],
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
- 
-    # Annoyance: AsyncVectorEnv does not have a driver env
-    emulated = make_env(args.env_id)().emulated
-    agent = Agent(emulated).to(device)
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
@@ -210,6 +198,10 @@ if __name__ == "__main__":
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+
+    # Annoyance: AsyncVectorEnv does not have a driver env
+    agent = Agent(make_env(args.env_id)().emulated).to(device)
+    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -241,7 +233,8 @@ if __name__ == "__main__":
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.from_numpy(next_obs).to(device), torch.from_numpy(next_done).to(device).float()
+            next_obs = torch.as_tensor(next_obs, device=device)
+            next_done = torch.as_tensor(next_done, dtype=torch.float32, device=device)
 
             if "final_info" in infos:
                 for info in infos["final_info"]:
