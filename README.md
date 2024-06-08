@@ -8,6 +8,16 @@ You have an environment, a PyTorch model, and a reinforcement learning framework
 
 All of our [Documentation](https://pufferai.github.io "PufferLib Documentation") is hosted by github.io. @jsuarez5341 on [Discord](https://discord.gg/spT4huaGYV) for support -- post here before opening issues. I am also looking for contributors interested in adding bindings for other environments and RL frameworks.
 
+The current `demo.py` file has a powerful `--help` that generates options based on the specified environment and policy. A few examples:
+
+```
+python demo.py --env minigrid --mode train --vec multiprocessing
+python demo.py --env squared --mode eval --baseline
+python demo.py --env nmmo --mode eval
+```
+
+Hyperparams are in `config.yaml`.
+
 Star to power up the next release!
 ## Star History
 
