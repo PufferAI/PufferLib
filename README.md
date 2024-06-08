@@ -10,7 +10,7 @@ All of our [Documentation](https://pufferai.github.io "PufferLib Documentation")
 
 ## Demo
 
-The current `demo.py` is a souped-up version of CleanRL PPO with optimized LSTM support, detailed performance metrics, a local dashboard, async envpool sampling, checkpointing, wandb sweeps, and more. It has a powerful `--help` that generates options based on the specified environment and policy. A few examples:
+The current `demo.py` is a souped-up version of CleanRL PPO with optimized LSTM support, detailed performance metrics, a local dashboard, async envpool sampling, checkpointing, wandb sweeps, and more. It has a powerful `--help` that generates options based on the specified environment and policy. Hyperparams are in `config.yaml`. A few examples:
 
 ```
 # Train minigrid with multiprocessing. Save it as a baseline.
@@ -35,10 +35,7 @@ python demo.py --env nmmo --mode eval
 python demo.py --env breakout --mode autotune
 ```
 
-Hyperparams are in `config.yaml`.
-
-Star to power up the next release!
-## Star History
+## Star to puff up the project!
 
 <a href="https://star-history.com/#pufferai/pufferlib&Date">
  <picture>
