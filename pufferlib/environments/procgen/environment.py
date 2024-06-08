@@ -38,7 +38,7 @@ def make(name, num_envs=1, num_levels=0,
     envs = gym.wrappers.TransformReward(envs, lambda reward: np.clip(reward, -10, 10))
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
     envs = ProcgenWrapper(envs)
-    envs = shimmy.GymV21CompatibilityV0(env=envs)
+    envs = shimmy.GymV21CompatibilityV0(env=envs, render_mode=render_mode)
     envs = pufferlib.postprocess.EpisodeStats(envs)
     return pufferlib.emulation.GymnasiumPufferEnv(env=envs)
 
@@ -56,7 +56,7 @@ class ProcgenWrapper:
         obs = self.env.reset()[0]
         return obs
 
-    def render(self):
+    def render(self, mode=None):
         return self.env.env.env.env.env.env.get_info()[0]['rgb']
 
     def close(self):
