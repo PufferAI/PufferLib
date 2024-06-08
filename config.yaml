@@ -576,8 +576,8 @@ nethack:
 
 nmmo:
   train:
-    num_envs: 1
-    num_workers: 1
+    num_envs: 4
+    num_workers: 4
     batch_size: 4096
     minibatch_size: 2048
 
