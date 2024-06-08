@@ -439,8 +439,7 @@ class Multiprocessing:
 class Ray():
     '''Runs environments in parallel on multiple processes using Ray
 
-    Use this module for distributed simulation on a cluster. It can also be
-    faster than multiprocessing on a single machine for specific environments.
+    Use this module for distributed simulation on a cluster.
     '''
     reset = reset
     step = step
@@ -458,6 +457,7 @@ class Ray():
         self.num_workers = num_workers
 
         driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
+        self.driver_env = driver_env
         self.emulated = driver_env.emulated
         self.num_agents = num_agents = driver_env.num_agents * num_envs
         self.agents_per_batch = driver_env.num_agents * batch_size
