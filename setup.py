@@ -158,7 +158,8 @@ environments = {
     'procgen': [
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        'pufferai-procgen',
+        'procgen-mirror==0.10.7', # Procgen mirror for 3.11 and 3.12 support
+        # Note: You need glfw==2.7 after installing for some torch versions
     ],
     #'smac': [
     #    'git+https://github.com/oxwhirl/smac.git',
