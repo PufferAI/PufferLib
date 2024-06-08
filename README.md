@@ -17,7 +17,7 @@ The current `demo.py` is a souped-up version of CleanRL PPO with optimized LSTM 
 python demo.py --env minigrid --mode train --vec multiprocessing
 ```
 
-![figure](https://pufferai.github.io/source/resource/puffer-dash.png)
+![figure](https://raw.githubusercontent.com/PufferAI/pufferai.github.io/1.0/docs/source/resource/puffer-dash.png)
 
 ```
 # Load the current minigrid baseline and render it locally
