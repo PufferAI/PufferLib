@@ -32,7 +32,7 @@ default:
 
     num_envs: 8
     num_workers: 8
-    env_batch_size: ~
+    env_batch_size: 8
     zero_copy: True
     verbose: True
     data_dir: experiments
@@ -491,6 +491,7 @@ classic_control:
   train:
     total_timesteps: 500_000
     num_envs: 64
+    env_batch_size: 64
 classic-control:
   package: classic_control
 classiccontrol:
@@ -577,6 +578,7 @@ nethack:
 nmmo:
   train:
     num_envs: 4
+    env_batch_size: 4
     num_workers: 4
     batch_size: 4096
     minibatch_size: 2048

@@ -660,6 +660,10 @@ def autotune(env_creator, batch_size, max_envs=1024, model_forward_s=0.0,
         max_env_ram_gb=16, max_batch_vram_gb=0.05, time_per_test=5): 
     '''Determine the optimal vectorization parameters for your system'''
     # TODO: fix multiagent
+
+    if batch_size is None:
+        raise ValueError('batch_size must not be None')
+
     if max_envs < batch_size:
         raise ValueError('max_envs < min_batch_size')
 
