@@ -207,21 +207,18 @@ starpilot-exp:
 procgen:
   env_name: bigfish
   train:
-    total_timesteps: 8_000_000
-    #learning_rate: 0.0005
-    #num_workers: 24
-    #num_envs: 144
-    #env_batch_size: 48
-    #batch_size: 16384
-    #minibatch_size: 5321
-    #gamma: 0.999
-    #update_epochs: 3
-    #anneal_lr: False
-    #clip_coef: 0.2
-    #vf_clip_coef: 0.2
-  #policy:
-  #  cnn_width: 16
-  #  mlp_width: 256
+    total_timesteps: 25_000_000
+    learning_rate: 0.0005
+    num_workers: 16
+    num_envs: 64
+    batch_size: 16384
+    minibatch_size: 2048
+    gamma: 0.999
+    gae_lambda: 0.95
+    update_epochs: 3
+    anneal_lr: False
+    clip_coef: 0.2
+    vf_clip_coef: 0.2
 bigfish:
   package: procgen
   env_name: bigfish
