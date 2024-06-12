@@ -2,6 +2,7 @@ from pdb import set_trace as T
 import numpy as np
 
 import gym
+import gymnasium
 import shimmy
 import functools
 
@@ -9,6 +10,10 @@ import pufferlib
 import pufferlib.emulation
 import pufferlib.environments
 import pufferlib.postprocess
+
+from stable_baselines3.common.atari_wrappers import (
+    MaxAndSkipEnv,
+)
 
 
 def env_creator(name='bigfish'):
@@ -39,6 +44,9 @@ def make(name, num_envs=1, num_levels=0,
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
     envs = ProcgenWrapper(envs)
     envs = shimmy.GymV21CompatibilityV0(env=envs, render_mode=render_mode)
+    #envs = gymnasium.wrappers.GrayScaleObservation(envs)
+    #envs = gymnasium.wrappers.FrameStack(envs, 4)#, framestack)
+    #envs = MaxAndSkipEnv(envs, skip=2)
     envs = pufferlib.postprocess.EpisodeStats(envs)
     return pufferlib.emulation.GymnasiumPufferEnv(env=envs)
 

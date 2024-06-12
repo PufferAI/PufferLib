@@ -24,8 +24,8 @@ case $GROUP in
         $COMMON miner
         ;;
     atari)
-        $COMMON breakout --vec multiprocessing
         $COMMON pong --vec multiprocessing
+        $COMMON breakout --vec multiprocessing
         $COMMON beam-rider --vec multiprocessing
         $COMMON enduro --vec multiprocessing
         $COMMON qbert --vec multiprocessing

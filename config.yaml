@@ -32,7 +32,7 @@ default:
 
     num_envs: 8
     num_workers: 8
-    env_batch_size: 8
+    env_batch_size: ~
     zero_copy: True
     verbose: True
     data_dir: experiments
@@ -73,6 +73,9 @@ default:
 # Convenience wrappers provided for common test environments
 atari:
   env_name: BreakoutNoFrameskip-v4
+  train:
+    batch_size: 1024
+    minibatch_size: 256
 beamrider:
   package: atari
   env_name: BeamRiderNoFrameskip-v4
@@ -139,7 +142,8 @@ pong-max:
     zero_copy: False
     batch_size: 65536
     minibatch_size: 2048
- 
+
+
 box2d:
   package: box2d
 
@@ -148,24 +152,76 @@ box2d:
 # Per-env hyperparams from CARBS
 # Note: These need to be updated for 1.0
 # batch sizes likely wrong
+
+bigfish-exp:
+  package: procgen
+  env_name: bigfish
+  use_rnn: True
+  train:
+    total_timesteps: 8_000_000
+    num_envs: 480
+    num_workers: 24
+    env_batch_size: 240
+    zero_copy: True
+    batch_size: 18432
+    minibatch_size: 18432
+    update_epochs: 4
+    #ent_coef: 0.0025
+    #anneal_lr: False
+
+    learning_rate: 0.001
+    gamma: 0.9990684264891424
+    ent_coef: 0.0025487710400836
+    vf_coef: 1.1732211834792117
+    gae_lambda: 0.8620630095238284
+    clip_coef: 0.4104603426698214
+    #batch_size: 53210
+    #batch_rows: 5321
+    #bptt_horizon: 1
+    #update_epochs: 3
+    anneal_lr: False
+    vf_clip_coef: 0.2
+
+starpilot-exp:
+  package: procgen
+  env_name: starpilot
+  use_rnn: True
+  train:
+    total_timesteps: 8_000_000
+    num_envs: 480
+    num_workers: 24
+    env_batch_size: 240
+    zero_copy: True
+    batch_size: 18432
+    minibatch_size: 18432
+    update_epochs: 4
+    learning_rate: 0.0004257280551714
+    gamma: 0.9930510505613882
+    ent_coef: 0.007836164188961
+    vf_coef: 5.482314699746532
+    gae_lambda: 0.82792978724664
+    clip_coef: 0.2645124138418521
+    anneal_lr: False
+    vf_clip_coef: 0.2
+
 procgen:
   env_name: bigfish
   train:
     total_timesteps: 8_000_000
-    learning_rate: 0.0005
-    num_workers: 24
-    num_envs: 144
-    env_batch_size: 48
-    batch_size: 16384
-    minibatch_size: 5321
-    gamma: 0.999
-    update_epochs: 3
-    anneal_lr: False
-    clip_coef: 0.2
-    vf_clip_coef: 0.2
-  policy:
-    cnn_width: 16
-    mlp_width: 256
+    #learning_rate: 0.0005
+    #num_workers: 24
+    #num_envs: 144
+    #env_batch_size: 48
+    #batch_size: 16384
+    #minibatch_size: 5321
+    #gamma: 0.999
+    #update_epochs: 3
+    #anneal_lr: False
+    #clip_coef: 0.2
+    #vf_clip_coef: 0.2
+  #policy:
+  #  cnn_width: 16
+  #  mlp_width: 256
 bigfish:
   package: procgen
   env_name: bigfish
@@ -459,18 +515,20 @@ starpilot:
   package: procgen
   env_name: starpilot
   train:
-    total_timesteps: 8_000_000
+    total_timesteps: 200_000_000
     learning_rate: 0.0004257280551714
     gamma: 0.9930510505613882
     ent_coef: 0.007836164188961
     vf_coef: 5.482314699746532
     gae_lambda: 0.82792978724664
     clip_coef: 0.2645124138418521
-    batch_size: 107440
-    minibatch_size: 6715
+    batch_size: 101376
+    minibatch_size: 6336
     update_epochs: 2
     anneal_lr: False
     vf_clip_coef: 0.2
+    num_envs: 384
+    num_workers: 24
   policy:
     cnn_width: 25
     mlp_width: 144

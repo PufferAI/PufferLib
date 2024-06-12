@@ -657,7 +657,7 @@ def check_envs(envs, driver):
             raise APIUsageError(f'\n{atn_space}\n{driver_atn} atn space mismatch')
 
 def autotune(env_creator, batch_size, max_envs=1024, model_forward_s=0.0,
-        max_env_ram_gb=16, max_batch_vram_gb=0.05, time_per_test=5): 
+        max_env_ram_gb=32, max_batch_vram_gb=0.05, time_per_test=5): 
     '''Determine the optimal vectorization parameters for your system'''
     # TODO: fix multiagent
 
@@ -810,8 +810,9 @@ def autotune(env_creator, batch_size, max_envs=1024, model_forward_s=0.0,
     ))
 
     for config in configs:
-        envs = make(env_creator, **config)
-        envs.reset()
+        with pufferlib.utils.Suppress():
+            envs = make(env_creator, **config)
+            envs.reset()
         actions = [envs.action_space.sample() for _ in range(1000)]
         step_time = 0
         steps = 0
