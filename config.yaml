@@ -550,9 +550,47 @@ minigrid:
     num_workers: 6
     env_batch_size: 48
     batch_size: 6144
-    minibatch_size: 768
-    ent_coef: 0.05
+    #minibatch_size: 768
+    update_epochs: 4
+    minibatch_size: ~
+    #ent_coef: 0.05
     anneal_lr: False
+    gae_lambda: 0.95
+    gamma: 0.95
+    ent_coef: 0.025
+    learning_rate: 2.5e-4
+  sweep:
+    method: bayes
+    name: sweep
+    metric:
+      goal: maximize
+      name: environment/episode_return
+    # Nested parameters name required by WandB API
+    parameters:
+      train:
+        parameters:
+          learning_rate: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-4,
+            'max': 1e-1,
+          }
+          ent_coef: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-2,
+            'max': 5e-2,
+          }
+          gamma: {
+            'values': [0.90, 0.925, 0.95, 0.975],
+          }
+          gae_lambda: {
+            'values': [0.90, 0.925, 0.95, 0.975],
+          }
+          batch_size: {
+            'values': [384, 768, 1536, 3072, 6144, 12288],
+          }
+          #minibatch_size: {
+          #  'values': [384, 768, 1536],
+          #}
 
 minihack:
   env_name: MiniHack-River-v0

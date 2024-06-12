@@ -43,7 +43,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
     total_agents = vecenv.num_agents
 
     lstm = policy.lstm if hasattr(policy, 'lstm') else None
-    experience = Experience(config.batch_size, vecenv.agents_per_batch, config.bptt_horizon,
+    experience = Experience(config.batch_size, config.bptt_horizon,
         config.minibatch_size, obs_shape, obs_dtype, atn_shape, config.cpu_offload, config.device, lstm, total_agents)
 
     uncompiled_policy = policy
@@ -68,7 +68,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
         epoch=0,
         stats={},
         msg=msg,
-        last_log_time=time.time(),
+        last_log_time=0,
         utilization=utilization,
     )
 
@@ -275,11 +275,12 @@ def train(data):
             print_dashboard(config.env, data.utilization, data.global_step, data.epoch,
                 profile, data.losses, data.stats, data.msg)
 
-            if data.wandb is not None and data.global_step > 0 and time.time() - data.last_log_time > 5.0:
+            if data.wandb is not None and data.global_step > 0 and time.time() - data.last_log_time > 3.0:
                 data.last_log_time = time.time()
                 data.wandb.log({
                     '0verview/SPS': profile.SPS,
                     '0verview/agent_steps': data.global_step,
+                    '0verview/epoch': data.epoch,
                     '0verview/learning_rate': data.optimizer.param_groups[0]["lr"],
                     **{f'environment/{k}': v for k, v in data.stats.items()},
                     **{f'losses/{k}': v for k, v in data.losses.items()},
@@ -378,8 +379,11 @@ def make_losses():
 
 class Experience:
     '''Flat tensor storage and array views for faster indexing'''
-    def __init__(self, batch_size, agents_per_batch, bptt_horizon, minibatch_size, obs_shape, obs_dtype, atn_shape,
+    def __init__(self, batch_size, bptt_horizon, minibatch_size, obs_shape, obs_dtype, atn_shape,
                  cpu_offload=False, device='cuda', lstm=None, lstm_total_agents=0):
+        if minibatch_size is None:
+            minibatch_size = batch_size
+
         obs_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_dtype]
         pin = device == 'cuda' and cpu_offload
         obs_device = device if not pin else 'cpu'
