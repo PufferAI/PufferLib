@@ -7,25 +7,10 @@ import numpy as np
 import pufferlib.models
 import pufferlib.pytorch
 
+
 class Recurrent(pufferlib.models.LSTMWrapper):
     def __init__(self, env, policy, input_size=256, hidden_size=256, num_layers=1):
         super().__init__(env, policy, input_size, hidden_size, num_layers)
-
-@torch.compiler.disable
-def decode_map(codes):
-    codes = codes.unsqueeze(1).long()
-    factors = [4, 4, 16, 5, 3, 5, 5, 6, 7, 4]
-    n_channels = sum(factors)
-    obs = torch.zeros(codes.shape[0], n_channels, 11, 15, device='cuda')
-
-    add, div = 0, 1
-    # TODO: check item/tier order
-    for mod in factors:
-        obs.scatter_(1, add+(codes//div)%mod, 1)
-        add += mod
-        div *= mod
-
-    return obs
 
 class Decompressor(nn.Module):
     def __init__(self):
@@ -51,11 +36,32 @@ class Decompressor(nn.Module):
         obs.scatter_(1, dec, 1)
         return obs.view(batch, 59, 11, 15)
 
+class PlayerProjEncoder(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.player_embed = nn.Embedding(128, 32)
+        self.player_continuous = pufferlib.pytorch.layer_init(
+            nn.Linear(44, hidden_size//2))
+        self.discrete_proj = pufferlib.pytorch.layer_init(
+            nn.Linear(32*44, hidden_size//2))
+        self.player_proj = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, hidden_size//2))
+ 
+    def forward(self, player):
+        player_discrete = self.player_embed(player).view(player.shape[0], -1)
+        player_discrete = self.discrete_proj(player_discrete)
+        player_continuous = self.player_continuous(player.float() / 99)
+        player = torch.cat([player_discrete, player_continuous], dim=1)
+        player = F.relu(player)
+        player = self.player_proj(player)
+        player = F.relu(player)
+        return player
+
 
 class PlayerEncoder(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
-        self.player_embed = nn.Embedding(128, hidden_size//2)
+        self.player_embed = nn.Embedding(128, 128)
         self.player_continuous = pufferlib.pytorch.layer_init(
             nn.Linear(44, hidden_size//2))
         self.player_proj = pufferlib.pytorch.layer_init(
@@ -63,7 +69,7 @@ class PlayerEncoder(nn.Module):
  
     def forward(self, player):
         player_discrete = self.player_embed(player).max(dim=1)[0]
-        player_continuous = self.player_continuous(player.float())
+        player_continuous = self.player_continuous(player.float() / 99)
         player = torch.cat([player_discrete, player_continuous], dim=1)
         player = F.relu(player)
         player = self.player_proj(player)
@@ -71,18 +77,10 @@ class PlayerEncoder(nn.Module):
         return player
 
 class Policy(nn.Module):
-    def __init__(self, env):
+    def __init__(self, env, hidden_size=256, output_size=256):
         super().__init__()
-        self.emulated = env.emulated
-        self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
-        #self.env = env
-
+        #self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
         self.num_actions = env.single_action_space.n
-        #self.num_actions = self.action_space.n
-        #self.num_actions = self.action_space.shape[0]
-        hidden_size = 256
-        output_size = 256
-
         self.decompressor = Decompressor()
 
         self.map_2d = nn.Sequential(
@@ -97,6 +95,7 @@ class Policy(nn.Module):
 
         self.player_encoder = PlayerEncoder(hidden_size)
         self.proj = nn.Linear(hidden_size, output_size)
+        self.player_proj = nn.Linear(44, hidden_size//2)
 
         self.actor = pufferlib.pytorch.layer_init(
             nn.Linear(output_size, self.num_actions), std=0.01)
@@ -117,6 +116,8 @@ class Policy(nn.Module):
 
         player = observations[:, (11*15):]
         ob_player = self.player_encoder(player)
+        #ob_player = self.player_proj(player.float()/99)
+        #return ob_player, None
 
         ob_map = observations[:, :(11*15)].view(batch, 11, 15)
         ob_map = self.decompressor(ob_map).float()

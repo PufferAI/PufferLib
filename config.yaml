@@ -415,9 +415,9 @@ nmmo:
     minibatch_size: 2048
 
 nmmo3:
-  use_rnn: True
+  use_rnn: False
   train:
-    total_timesteps: 100_000_000
+    total_timesteps: 20_000_000
     checkpoint_interval: 1000
     num_envs: 24
     num_workers: 24
@@ -447,14 +447,19 @@ nmmo3laptop:
 
 nmmo3debug:
   package: nmmo3
+  use_rnn: False
   train:
-    total_timesteps: 20_000_000
+    total_timesteps: 100_000_000
+    learning_rate: 0.001
     num_envs: 1
     num_workers: 1
     env_batch_size: 1
     update_epochs: 1
     gamma: 0.99
+    gae_lambda: 0.95
     ent_coef: 0.05
+    #batch_size: 512
+    #minibatch_size: 512
     batch_size: 65536
     minibatch_size: 16384
     compile: False
