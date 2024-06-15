@@ -61,19 +61,19 @@ class PlayerProjEncoder(nn.Module):
 class PlayerEncoder(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
-        self.player_embed = nn.Embedding(128, 128)
+        self.player_embed = nn.Embedding(128, hidden_size//4)
         self.player_continuous = pufferlib.pytorch.layer_init(
-            nn.Linear(44, hidden_size//2))
+            nn.Linear(44, hidden_size//4))
         self.player_proj = pufferlib.pytorch.layer_init(
-            nn.Linear(hidden_size, hidden_size//2))
+            nn.Linear(hidden_size, hidden_size//4))
  
     def forward(self, player):
         player_discrete = self.player_embed(player).max(dim=1)[0]
         player_continuous = self.player_continuous(player.float() / 99)
         player = torch.cat([player_discrete, player_continuous], dim=1)
-        player = F.relu(player)
-        player = self.player_proj(player)
-        player = F.relu(player)
+        #player = F.relu(player)
+        #player = self.player_proj(player)
+        #player = F.relu(player)
         return player
 
 class Policy(nn.Module):
@@ -87,15 +87,17 @@ class Policy(nn.Module):
             pufferlib.pytorch.layer_init(nn.Conv2d(59, 64, 5, stride=3)),
             nn.ReLU(),
             pufferlib.pytorch.layer_init(nn.Conv2d(64, 64, 3, stride=1)),
-            nn.ReLU(),
             nn.Flatten(),
+            nn.ReLU(),
             pufferlib.pytorch.layer_init(nn.Linear(128, hidden_size//2)),
             nn.ReLU(),
         )
 
-        self.player_encoder = PlayerEncoder(hidden_size)
+        self.player_encoder = PlayerProjEncoder(hidden_size)
         self.proj = nn.Linear(hidden_size, output_size)
-        self.player_proj = nn.Linear(44, hidden_size//2)
+        self.player_proj = nn.Linear(44, hidden_size)
+
+        self.lstm = nn.LSTMCell(hidden_size, hidden_size)
 
         self.actor = pufferlib.pytorch.layer_init(
             nn.Linear(output_size, self.num_actions), std=0.01)
@@ -115,6 +117,10 @@ class Policy(nn.Module):
         #player = x['player']
 
         player = observations[:, (11*15):]
+        #player = self.player_proj(player.float() / 99)
+        #player, _ = self.lstm(player)
+        #return player, None
+
         ob_player = self.player_encoder(player)
         #ob_player = self.player_proj(player.float()/99)
         #return ob_player, None
@@ -124,6 +130,8 @@ class Policy(nn.Module):
         ob_map = self.map_2d(ob_map)
 
         ob = torch.cat([ob_map, ob_player], dim=1)
+        #ob = F.relu(ob)
+        return ob, None
         return self.proj(ob), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
