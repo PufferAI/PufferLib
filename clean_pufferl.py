@@ -569,17 +569,21 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
     os.system('clear')
     state = None
 
-    while True:
-        render = driver.render()
-        if driver.render_mode == 'ansi':
-            print('\033[0;0H' + render + '\n')
-            time.sleep(0.6)
-        elif driver.render_mode == 'rgb_array':
-            import cv2
-            render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
-            cv2.imshow('frame', render)
-            cv2.waitKey(1)
-            time.sleep(1/24)
+    frames = []
+    tick = 0
+    while tick <= 6000:
+        if tick % 100 == 0:
+            render = driver.render()
+            if driver.render_mode == 'ansi':
+                print('\033[0;0H' + render + '\n')
+                time.sleep(0.6)
+            elif driver.render_mode == 'rgb_array':
+                frames.append(render)
+                import cv2
+                render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
+                cv2.imshow('frame', render)
+                cv2.waitKey(1)
+                #time.sleep(1/24)
 
         with torch.no_grad():
             ob = torch.from_numpy(ob).to(device)
@@ -592,7 +596,13 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
 
         ob, reward = env.step(action)[:2]
         reward = reward.mean()
-        print(f'Reward: {reward:.4f}')
+        if tick % 100 == 0:
+            print(f'Reward: {reward:.4f}, Tick: {tick}')
+        tick += 1
+
+    # Save frames as gif
+    import imageio
+    imageio.mimsave('../docker/nmmo3-down.gif', frames, fps=15)
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)
