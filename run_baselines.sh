@@ -20,8 +20,21 @@ case $GROUP in
         ;;
     procgen)
         $COMMON bigfish
-        $COMMON ninja
+        $COMMON bossfight
+        $COMMON caveflyer
+        $COMMON chaser
+        $COMMON climber
+        $COMMON coinrun
+        $COMMON dodgeball
+        $COMMON fruitbot
+        $COMMON heist
+        $COMMON jumper
+        $COMMON leaper
+        $COMMON maze
         $COMMON miner
+        $COMMON ninja
+        $COMMON plunder
+        $COMMON starpilot
         ;;
     atari)
         $COMMON pong --vec multiprocessing
