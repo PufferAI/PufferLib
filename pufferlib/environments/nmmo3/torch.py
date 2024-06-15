@@ -1,6 +1,7 @@
 from pdb import set_trace as T
 import torch
 from torch import nn
+import torch.nn.functional as F
 import numpy as np
 
 import pufferlib.models
@@ -51,6 +52,24 @@ class Decompressor(nn.Module):
         return obs.view(batch, 59, 11, 15)
 
 
+class PlayerEncoder(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.player_embed = nn.Embedding(128, hidden_size//2)
+        self.player_continuous = pufferlib.pytorch.layer_init(
+            nn.Linear(44, hidden_size//2))
+        self.player_proj = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, hidden_size//2))
+ 
+    def forward(self, player):
+        player_discrete = self.player_embed(player).max(dim=1)[0]
+        player_continuous = self.player_continuous(player.float())
+        player = torch.cat([player_discrete, player_continuous], dim=1)
+        player = F.relu(player)
+        player = self.player_proj(player)
+        player = F.relu(player)
+        return player
+
 class Policy(nn.Module):
     def __init__(self, env):
         super().__init__()
@@ -76,15 +95,11 @@ class Policy(nn.Module):
             nn.ReLU(),
         )
 
-        self.embed = nn.Embedding(128, 32)
-        self.player_1d = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(32*44, hidden_size//2)),
-            nn.ReLU(),
-        )
-
+        self.player_encoder = PlayerEncoder(hidden_size)
         self.proj = nn.Linear(hidden_size, output_size)
 
-        self.actor = pufferlib.pytorch.layer_init(nn.Linear(output_size, self.num_actions), std=0.01)
+        self.actor = pufferlib.pytorch.layer_init(
+            nn.Linear(output_size, self.num_actions), std=0.01)
         self.value_fn = pufferlib.pytorch.layer_init(nn.Linear(output_size, 1), std=1)
 
     def forward(self, x):
@@ -100,14 +115,12 @@ class Policy(nn.Module):
         #    ob_map = self.decompressor(x['map']).float()
         #player = x['player']
 
+        player = observations[:, (11*15):]
+        ob_player = self.player_encoder(player)
+
         ob_map = observations[:, :(11*15)].view(batch, 11, 15)
         ob_map = self.decompressor(ob_map).float()
-        player = observations[:, (11*15):]
-
         ob_map = self.map_2d(ob_map)
-        ob_player = self.embed(player)
-        ob_player = ob_player.flatten(1)
-        ob_player = self.player_1d(ob_player)
 
         ob = torch.cat([ob_map, ob_player], dim=1)
         return self.proj(ob), None
