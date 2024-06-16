@@ -447,7 +447,7 @@ nmmo3laptop:
 
 nmmo3debug:
   package: nmmo3
-  use_rnn: False
+  use_rnn: True
   train:
     total_timesteps: 100_000_000
     learning_rate: 0.001
@@ -455,27 +455,29 @@ nmmo3debug:
     num_workers: 1
     env_batch_size: 1
     update_epochs: 1
-    gamma: 0.99
+    gamma: 0.9
     gae_lambda: 0.95
     ent_coef: 0.05
-    #batch_size: 512
-    #minibatch_size: 512
+    bptt_horizon: 2
     batch_size: 65536
-    minibatch_size: 16384
+    minibatch_size: 8192
     compile: False
-    #anneal_lr: False
+    anneal_lr: False
   sweep:
-    method: random
+    method: bayes 
     name: sweep
     metric:
       goal: maximize
-      name: environment/reward_dist
+      name: environment/equip_defense
     # Nested parameters name required by WandB API
     parameters:
       train:
         parameters:
           gamma: {
-            'values': [0.95, 0.975, 0.99, 0.995, 0.998],
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+          }
+          gae_lambda: {
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
           }
           learning_rate: {
             'distribution': 'log_uniform_values',
@@ -483,13 +485,14 @@ nmmo3debug:
             'max': 1e-1,
           }
           batch_size: {
-            'values': [8192, 16384, 32768],
+            'values': [8192, 16384, 32768, 65536],
+          }
+          minibatch_size: {
+            'values': [8192, 16384, 32768, 65536],
           }
           bptt_horizon: {
-            'values': [4, 8, 16],
+            'values': [1, 2, 4, 8, 16],
           }
-
-
 
 # Ocean: PufferAI's first party environment suite
 ocean:
