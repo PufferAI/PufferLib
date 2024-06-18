@@ -572,7 +572,7 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
 
     frames = []
     tick = 0
-    while tick <= 128:
+    while tick <= 256:
         if tick % 1== 0:
             render = driver.render()
             if driver.render_mode == 'ansi':

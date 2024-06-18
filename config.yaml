@@ -511,18 +511,18 @@ grid:
   package: ocean
   env_name: grid
   train:
-    total_timesteps: 10_000_000
-    learning_rate: 0.0024
+    total_timesteps: 50_000_000
+    learning_rate: 0.00175
     num_envs: 1
     num_workers: 1
     env_batch_size: 1
     update_epochs: 1
-    gamma: 0.95
-    gae_lambda: 0.975
-    ent_coef: 0.01
-    bptt_horizon: 4
+    gamma: 0.925
+    gae_lambda: 0.99
+    ent_coef: 0.0018
+    bptt_horizon: 8
     batch_size: 65536
-    minibatch_size: 8192
+    minibatch_size: 2048
     compile: False
     anneal_lr: False
     device: cuda
