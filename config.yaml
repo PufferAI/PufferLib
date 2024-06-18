@@ -507,22 +507,85 @@ ocean:
     minibatch_size: 128
     bptt_horizon: 4
     device: cpu
+grid:
+  package: ocean
+  env_name: grid
+  train:
+    total_timesteps: 10_000_000
+    learning_rate: 0.0024
+    num_envs: 1
+    num_workers: 1
+    env_batch_size: 1
+    update_epochs: 1
+    gamma: 0.95
+    gae_lambda: 0.975
+    ent_coef: 0.01
+    bptt_horizon: 4
+    batch_size: 65536
+    minibatch_size: 8192
+    compile: False
+    anneal_lr: False
+    device: cuda
+  sweep:
+    method: bayes 
+    name: sweep
+    metric:
+      goal: maximize
+      name: environment/episode_return
+    # Nested parameters name required by WandB API
+    parameters:
+      train:
+        parameters:
+          ent_coef: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-3,
+            'max': 5e-2,
+          }
+          gamma: {
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+          }
+          gae_lambda: {
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+          }
+          learning_rate: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-4,
+            'max': 1e-1,
+          }
+          batch_size: {
+            'values': [4096, 8192, 16384, 32768, 65536],
+          }
+          minibatch_size: {
+            'values': [1024, 2048, 4096, 8192, 16384],
+          }
+          bptt_horizon: {
+            'values': [1, 2, 4, 8, 16],
+          }
+
 bandit:
   package: ocean
+  env_name: bandit
 memory:
   package: ocean
+  env_name: memory
 multiagent:
   package: ocean
+  env_name: multiagent
 password:
   package: ocean
+  env_name: password
 performance:
   package: ocean
+  env_name: performance
 spaces:
   package: ocean
+  env_name: spaces
 squared:
   package: ocean
+  env_name: squared
 stochastic:
   package: ocean
+  env_name: stochastic
 
 open_spiel:
   env_name: connect_four

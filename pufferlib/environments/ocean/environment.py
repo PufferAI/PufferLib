@@ -2,8 +2,11 @@ import pufferlib.emulation
 import pufferlib.postprocess
 
 from . import ocean
+from . import grid
 
 def env_creator(name='squared'):
+    if name == 'grid':
+        return make_grid
     if name == 'squared':
         return make_squared
     elif name == 'bandit':
@@ -24,6 +27,13 @@ def env_creator(name='squared'):
         return make_performance_empiric
     else:
         raise ValueError('Invalid environment name')
+
+def make_grid(map_size=512, num_agents=1024, horizon=512):
+    env = grid.PufferGrid(map_size, num_agents, horizon)
+    return env
+    env = pufferlib.postprocess.MultiagentEpisodeStats(env)
+    env = pufferlib.postprocess.MeanOverAgents(env)
+    return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
 def make_squared(distance_to_target=3, num_targets=1, **kwargs):
     env = ocean.Squared(distance_to_target=distance_to_target, num_targets=num_targets)

@@ -271,7 +271,8 @@ def train(data):
         data.epoch += 1
 
         done_training = data.global_step >= config.total_timesteps
-        if profile.update(data) or done_training:
+        if profile.update(data) or (
+                'episode_return' in data.stats or done_training):
             print_dashboard(config.env, data.utilization, data.global_step, data.epoch,
                 profile, data.losses, data.stats, data.msg)
 
@@ -571,8 +572,8 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
 
     frames = []
     tick = 0
-    while tick <= 6000:
-        if tick % 100 == 0:
+    while tick <= 128:
+        if tick % 1== 0:
             render = driver.render()
             if driver.render_mode == 'ansi':
                 print('\033[0;0H' + render + '\n')
@@ -602,7 +603,7 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
 
     # Save frames as gif
     import imageio
-    imageio.mimsave('../docker/nmmo3-down.gif', frames, fps=15)
+    imageio.mimsave('../docker/grid.gif', frames, fps=30)
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)

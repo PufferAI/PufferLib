@@ -221,7 +221,13 @@ setup(
         'common': common,
         **environments,
     },
-    ext_modules = cythonize("pufferlib/extensions.pyx"),
+    ext_modules = cythonize([
+
+        "pufferlib/extensions.pyx",
+        "pufferlib/environments/ocean/c_grid.pyx",
+    ], nthreads=6,
+        #compiler_directives={'profile': True}, annotate=True
+    ),
     include_dirs=[numpy.get_include()],
     python_requires=">=3.8",
     license="MIT",
