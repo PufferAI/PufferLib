@@ -134,11 +134,22 @@ class GridRender:
                     c*ts, r*ts, ts, ts, self.colors.BLACK)
 
         rl.EndDrawing()
-        import time
-        time.sleep(0.25)
+
+        from cffi import FFI
+        ffi = FFI()
+        image = rl.LoadImageFromScreen()
+        data_pointer = image.data
+        width = image.width
+        height = image.height
+        channels = 4
+        data_size = width * height * channels
+        cdata = ffi.buffer(data_pointer, data_size)
+        numpy_array = np.frombuffer(cdata, dtype=np.uint8
+            ).reshape((height, width, channels))
+        return numpy_array[:, :, :3]
     
 class PufferGrid(pufferlib.PufferEnv):
-    def __init__(self, map_size=1024, num_agents=1024, horizon=1024, vision_range=10):
+    def __init__(self, map_size=1024, num_agents=1024, horizon=1024, vision_range=10, render_mode='rgb_array'):
         super().__init__()
         self.map_size = map_size 
         self.num_agents = num_agents
@@ -170,9 +181,9 @@ class PufferGrid(pufferlib.PufferEnv):
         self.dones = np.ones(num_agents, dtype=bool)
         self.not_done = np.zeros(num_agents, dtype=bool)
 
-        #self.render_mode = 'rgb_array'
-        self.render_mode = 'human'
-        self.renderer = GridRender(self)
+        self.render_mode = render_mode
+        if render_mode == 'human':
+            self.renderer = GridRender(self)
 
         self.observation_space = observation_space(self, 1)
         self.action_space = action_space(self, 1)
@@ -197,14 +208,19 @@ class PufferGrid(pufferlib.PufferEnv):
         self.buf.rewards[:] = rewards
 
     def render(self):
-        self.renderer.render()
-        return
-
-        rendered = np.zeros((self.map_size, self.map_size, 3), dtype=np.uint8)
-        rendered[self.grid==AGENT] = (255, 0, 0)
-        rendered[self.grid==EMPTY] = (255, 255, 255)
-        rendered[self.grid==WALL] = (0, 0, 0)
-        return rendered
+        if self.render_mode == 'human':
+            frame = self.renderer.render()
+            ts = self.renderer.tile_size
+            return frame[
+                self.vision_range*ts:-(self.vision_range+1)*ts,
+                self.vision_range*ts:-(self.vision_range+1)*ts,
+            ]
+        else:
+            rendered = np.zeros((self.map_size, self.map_size, 3), dtype=np.uint8)
+            rendered[self.grid==AGENT] = (255, 0, 0)
+            rendered[self.grid==EMPTY] = (255, 255, 255)
+            rendered[self.grid==WALL] = (0, 0, 0)
+            return rendered
 
     def reset(self, seed=0):
         self.agents = [i+1 for i in range(self.num_agents)]

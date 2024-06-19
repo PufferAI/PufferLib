@@ -551,14 +551,13 @@ def count_params(policy):
     return sum(p.numel() for p in policy.parameters() if p.requires_grad)
 
 def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
-        model_path=None, device='cuda', verbose=True):
+        model_path=None, render_mode='auto', device='cuda', verbose=True):
     # We are just using Serial vecenv to give a consistent
     # single-agent/multi-agent API for evaluation
-    try:
-        env = pufferlib.vector.make(env_creator,
-            env_kwargs={'render_mode': 'rgb_array', **env_kwargs})
-    except:
-        env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs)
+    if render_mode != 'auto':
+        env_kwargs.render_mode = render_mode
+
+    env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs)
 
     if model_path is None:
         agent = agent_creator(env, **agent_kwargs)
@@ -573,7 +572,7 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
     frames = []
     tick = 0
     while tick <= 256:
-        if tick % 1== 0:
+        if tick % 1 == 0:
             render = driver.render()
             if driver.render_mode == 'ansi':
                 print('\033[0;0H' + render + '\n')
@@ -585,6 +584,8 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
                 cv2.imshow('frame', render)
                 cv2.waitKey(1)
                 #time.sleep(1/24)
+            elif driver.render_mode == 'human' and render is not None:
+                frames.append(render)
 
         with torch.no_grad():
             ob = torch.from_numpy(ob).to(device)
@@ -603,7 +604,7 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
 
     # Save frames as gif
     import imageio
-    imageio.mimsave('../docker/grid.gif', frames, fps=30)
+    imageio.mimsave('../docker/grid-puffer.gif', frames, fps=30)
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)
