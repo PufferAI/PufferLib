@@ -532,6 +532,64 @@ griddly:
   package: griddly
   env_name: GDY-Spiders-v0
 
+madrona:
+  package: madrona
+  env_name: madrona
+  use_rnn: True
+  train:
+    total_timesteps: 10_000_000
+    num_envs: 24
+    num_workers: 24
+    env_batch_size: 8
+    update_epochs: 1
+    learning_rate: 0.0003
+    gamma: 0.998
+    #batch_size: 262144
+    batch_size: 16384
+    minibatch_size: 1024
+    bptt_horizon: 4
+    anneal_lr: False
+    compile: True
+  env:
+    num_envs: 25
+    seekers: 2
+    hiders: 2
+  sweep:
+    method: bayes
+    name: sweep
+    metric:
+      goal: maximize
+      name: 'environment/hider score'
+    # Nested parameters name required by WandB API
+    parameters:
+      train:
+        parameters:
+          learning_rate: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-4,
+            'max': 5e-2,
+          }
+          ent_coef: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-3,
+            'max': 5e-2,
+          }
+          gamma: {
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+          }
+          gae_lambda: {
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+          }
+          batch_size: {
+            'values': [2048, 4096, 8192, 16384, 32768, 65536],
+          }
+          bptt_horizon: {
+            'values': [2, 4, 8],
+          }
+          minibatch_size: {
+            'values': [512, 1024, 2048],
+          }
+          
 magent:
   package: magent
   env_name: battle_v4

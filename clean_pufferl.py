@@ -271,11 +271,11 @@ def train(data):
         data.epoch += 1
 
         done_training = data.global_step >= config.total_timesteps
-        if profile.update(data) or done_training:
+        if profile.update(data) or done_training or 'hider wr' in data.stats:
             print_dashboard(config.env, data.utilization, data.global_step, data.epoch,
                 profile, data.losses, data.stats, data.msg)
 
-            if data.wandb is not None and data.global_step > 0 and time.time() - data.last_log_time > 5.0:
+            if data.wandb is not None and data.global_step > 0 and (time.time() - data.last_log_time > 2.0 or 'hider wr' in data.stats):
                 data.last_log_time = time.time()
                 data.wandb.log({
                     '0verview/SPS': profile.SPS,
