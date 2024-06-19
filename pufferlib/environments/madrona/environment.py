@@ -365,6 +365,14 @@ class MadronaHideAndSeekWrapper: #gym.Wrapper):
         done = self.sim.done_tensor().to_torch().cpu().numpy()
         info = {}  # Add any additional info if needed
 
+        if done.all().item():
+            # try training on just a terminal win/loss w/o any shaping
+            result = self.sim.episode_result_tensor().to_torch().cpu().numpy()
+            hider_wins = result[:, 0] == 1
+            hider_win_rate = hider_wins.mean()
+            info['hider win rate'] = hider_win_rate
+            # reward = result
+
         return obs, reward, done, done, info
 
     def __del__(self):
