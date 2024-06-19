@@ -2,7 +2,7 @@ import pufferlib.emulation
 import pufferlib.postprocess
 
 from . import ocean
-from . import grid
+from .grid import grid
 
 def env_creator(name='squared'):
     if name == 'grid':
@@ -29,7 +29,8 @@ def env_creator(name='squared'):
         raise ValueError('Invalid environment name')
 
 def make_grid(map_size=512, num_agents=1024, horizon=512):
-    env = grid.PufferGrid(map_size, num_agents, horizon)
+    #env = grid.PufferGrid(map_size, num_agents, horizon)
+    env = grid.PufferGrid(64, 64, 64)
     return env
     env = pufferlib.postprocess.MultiagentEpisodeStats(env)
     env = pufferlib.postprocess.MeanOverAgents(env)

@@ -70,6 +70,72 @@ def observation_space(env, agent):
 
 def action_space(env, agent):
     return gymnasium.spaces.Discrete(5)
+
+class GridRender:
+    def __init__(self, env, tile_size=16):
+        from raylib import colors, rl
+        self.colors = colors
+        self.rl = rl
+
+        self.env = env
+        self.tile_size = tile_size
+        sz = env.map_size * tile_size
+        rl.InitWindow(sz, sz, "PufferLib Ray Grid".encode())
+        rl.SetTargetFPS(60)
+
+        import os
+        path = os.path.join(*self.__module__.split('.')[:-1], 'puffer-128-sprites.png')
+        self.puffer = rl.LoadTexture(path.encode())
+
+    def render(self):
+        env = self.env
+        ts = self.tile_size
+
+        rl = self.rl
+        rl.BeginDrawing()
+        rl.ClearBackground((6, 24, 24))
+
+        # Draw walls
+        for r in range(env.map_size):
+            for c in range(env.map_size):
+                if env.grid[r, c] == 2:
+                    self.rl.DrawRectangle(
+                        c*ts, r*ts, ts, ts, self.colors.BLACK)
+
+        # Draw vision range
+        for agent in range(env.num_agents):
+            r, c = env.agent_positions[agent]
+            xs = ts*(c - env.vision_range)
+            ys = ts*(r - env.vision_range)
+            xe = ts*(c + env.vision_range)
+            ye = ts*(r + env.vision_range)
+            rl.DrawRectangle(xs, ys, xe-xs, ye-ys, (255, 255, 255, 32))
+
+        for agent in range(env.num_agents):
+            r, c = env.agent_positions[agent]
+            if env.grid[r, c] == 1:
+                atn = env.actions[agent]
+
+                source_rect = (0, 0, 128, 128)
+                if atn == NORTH:
+                    source_rect = (0, 128, 128, 128)
+                elif atn == SOUTH:
+                    source_rect = (128, 128, 128, 128)
+                elif atn == WEST:
+                    source_rect = (128, 0, 128, 128)
+
+                dest_rect = (c*ts, r*ts, ts, ts)
+                #rl.DrawTexture(self.puffer, c*ts, r*ts, self.colors.WHITE)
+                #rl.DrawTextureRec(self.puffer, source_rect, (c*ts, r*ts), self.colors.RED)
+                rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
+                    (0, 0), 0, self.colors.WHITE)
+            elif env.grid[r, c] == 2:
+                self.rl.DrawRectangle(
+                    c*ts, r*ts, ts, ts, self.colors.BLACK)
+
+        rl.EndDrawing()
+        import time
+        time.sleep(0.25)
     
 class PufferGrid(pufferlib.PufferEnv):
     def __init__(self, map_size=1024, num_agents=1024, horizon=1024, vision_range=10):
@@ -93,6 +159,7 @@ class PufferGrid(pufferlib.PufferEnv):
             truncations = np.zeros(num_agents, dtype=bool),
             masks = np.ones(num_agents, dtype=bool),
         )
+        self.actions = np.zeros(num_agents, dtype=np.uint32)
         self.episode_rewards = np.zeros((horizon, num_agents), dtype=np.float32)
 
         if use_c:
@@ -103,7 +170,10 @@ class PufferGrid(pufferlib.PufferEnv):
         self.dones = np.ones(num_agents, dtype=bool)
         self.not_done = np.zeros(num_agents, dtype=bool)
 
-        self.render_mode = 'rgb_array'
+        #self.render_mode = 'rgb_array'
+        self.render_mode = 'human'
+        self.renderer = GridRender(self)
+
         self.observation_space = observation_space(self, 1)
         self.action_space = action_space(self, 1)
         self.single_observation_space = self.observation_space
@@ -127,6 +197,9 @@ class PufferGrid(pufferlib.PufferEnv):
         self.buf.rewards[:] = rewards
 
     def render(self):
+        self.renderer.render()
+        return
+
         rendered = np.zeros((self.map_size, self.map_size, 3), dtype=np.uint8)
         rendered[self.grid==AGENT] = (255, 0, 0)
         rendered[self.grid==EMPTY] = (255, 255, 255)
@@ -148,6 +221,7 @@ class PufferGrid(pufferlib.PufferEnv):
         return self.buf.observations, self.infos
 
     def step(self, actions):
+        self.actions = actions
         if use_c:
             self.cenv.step(actions.astype(np.uint32))
         else:
