@@ -10,13 +10,6 @@ EMPTY = 0
 AGENT = 1
 WALL = 2
 
-PASS = 0
-NORTH = 1
-SOUTH = 2
-EAST = 3
-WEST = 4
-
-
 use_c = True
 try:
     from pufferlib.environments.ocean.c_grid import Environment as CEnv
@@ -71,83 +64,6 @@ def observation_space(env, agent):
 def action_space(env, agent):
     return gymnasium.spaces.Discrete(5)
 
-class GridRender:
-    def __init__(self, env, tile_size=16):
-        from raylib import colors, rl
-        self.colors = colors
-        self.rl = rl
-
-        self.env = env
-        self.tile_size = tile_size
-        sz = env.map_size * tile_size
-        rl.InitWindow(sz, sz, "PufferLib Ray Grid".encode())
-        rl.SetTargetFPS(60)
-
-        import os
-        path = os.path.join(*self.__module__.split('.')[:-1], 'puffer-128-sprites.png')
-        self.puffer = rl.LoadTexture(path.encode())
-
-    def render(self):
-        env = self.env
-        ts = self.tile_size
-
-        rl = self.rl
-        rl.BeginDrawing()
-        rl.ClearBackground((6, 24, 24))
-
-        # Draw walls
-        for r in range(env.map_size):
-            for c in range(env.map_size):
-                if env.grid[r, c] == 2:
-                    self.rl.DrawRectangle(
-                        c*ts, r*ts, ts, ts, self.colors.BLACK)
-
-        # Draw vision range
-        for agent in range(env.num_agents):
-            r, c = env.agent_positions[agent]
-            xs = ts*(c - env.vision_range)
-            ys = ts*(r - env.vision_range)
-            xe = ts*(c + env.vision_range)
-            ye = ts*(r + env.vision_range)
-            rl.DrawRectangle(xs, ys, xe-xs, ye-ys, (255, 255, 255, 32))
-
-        for agent in range(env.num_agents):
-            r, c = env.agent_positions[agent]
-            if env.grid[r, c] == 1:
-                atn = env.actions[agent]
-
-                source_rect = (0, 0, 128, 128)
-                if atn == NORTH:
-                    source_rect = (0, 128, 128, 128)
-                elif atn == SOUTH:
-                    source_rect = (128, 128, 128, 128)
-                elif atn == WEST:
-                    source_rect = (128, 0, 128, 128)
-
-                dest_rect = (c*ts, r*ts, ts, ts)
-                #rl.DrawTexture(self.puffer, c*ts, r*ts, self.colors.WHITE)
-                #rl.DrawTextureRec(self.puffer, source_rect, (c*ts, r*ts), self.colors.RED)
-                rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
-                    (0, 0), 0, self.colors.WHITE)
-            elif env.grid[r, c] == 2:
-                self.rl.DrawRectangle(
-                    c*ts, r*ts, ts, ts, self.colors.BLACK)
-
-        rl.EndDrawing()
-
-        from cffi import FFI
-        ffi = FFI()
-        image = rl.LoadImageFromScreen()
-        data_pointer = image.data
-        width = image.width
-        height = image.height
-        channels = 4
-        data_size = width * height * channels
-        cdata = ffi.buffer(data_pointer, data_size)
-        numpy_array = np.frombuffer(cdata, dtype=np.uint8
-            ).reshape((height, width, channels))
-        return numpy_array[:, :, :3]
-    
 class PufferGrid(pufferlib.PufferEnv):
     def __init__(self, map_size=1024, num_agents=1024, horizon=1024, vision_range=10, render_mode='rgb_array'):
         super().__init__()
@@ -183,7 +99,9 @@ class PufferGrid(pufferlib.PufferEnv):
 
         self.render_mode = render_mode
         if render_mode == 'human':
-            self.renderer = GridRender(self)
+            from pufferlib.environments.ocean.grid import render
+            self.renderer = render.make_renderer(map_size, map_size,
+                render_mode=render_mode)
 
         self.observation_space = observation_space(self, 1)
         self.action_space = action_space(self, 1)
@@ -209,7 +127,8 @@ class PufferGrid(pufferlib.PufferEnv):
 
     def render(self):
         if self.render_mode == 'human':
-            frame = self.renderer.render()
+            frame = self.renderer.render(self.grid,
+                self.agent_positions, self.actions, self.vision_range)
             ts = self.renderer.tile_size
             return frame[
                 self.vision_range*ts:-(self.vision_range+1)*ts,
