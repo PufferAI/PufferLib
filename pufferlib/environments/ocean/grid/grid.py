@@ -5,6 +5,7 @@ import pettingzoo
 import gymnasium
 
 import pufferlib
+from pufferlib.environments.ocean.grid import render
 
 EMPTY = 0
 AGENT = 1
@@ -16,7 +17,6 @@ SOUTH = 2
 EAST = 3
 WEST = 4
 
-
 use_c = True
 try:
     from pufferlib.environments.ocean.c_grid import Environment as CEnv
@@ -25,54 +25,15 @@ except ImportError:
     import warnings
     warnings.warn('PufferLib Cython extensions not installed. Using slow Python versions')
 
-def test_pz_performance(timeout):
-    import time
-    env = PettingZooGrid()
-    actions = [{i+1: e for i, e in enumerate(np.random.randint(0, 5, env.num_agents))}
-        for i in range(1000)]
-    idx = 0
-    dones = {1: True}
-    start = time.time()
-    while time.time() - start < timeout:
-        if all(dones.values()):
-            env.reset()
-            dones = {1: False}
-        else:
-            _, _, dones, _, _ = env.step(actions[idx%1000])
-
-        idx += 1
-
-    sps = env.num_agents * idx // timeout
-    print(f'PZ SPS: {sps}')
-
-def test_puffer_performance(timeout):
-    import time
-    env = PufferGrid()
-    actions = np.random.randint(0, 5, (1000, env.num_agents))
-    idx = 0
-    dones = {1: True}
-    start = time.time()
-    while time.time() - start < timeout:
-        if env.done:
-            env.reset()
-            dones = {1: False}
-        else:
-            _, _, dones, _, _ = env.step(actions[idx%1000])
-
-        idx += 1
-
-    sps = env.num_agents * idx // timeout
-    print(f'Puffer SPS: {sps}')
-
 def observation_space(env, agent):
     return gymnasium.spaces.Box(
         low=0, high=255, shape=(env.obs_size, env.obs_size), dtype=np.uint8)
 
 def action_space(env, agent):
     return gymnasium.spaces.Discrete(5)
-    
+
 class PufferGrid(pufferlib.PufferEnv):
-    def __init__(self, map_size=1024, num_agents=1024, horizon=1024, vision_range=10):
+    def __init__(self, map_size=1024, num_agents=1024, horizon=1024, vision_range=10, render_mode='rgb_array'):
         super().__init__()
         self.map_size = map_size 
         self.num_agents = num_agents
@@ -93,6 +54,7 @@ class PufferGrid(pufferlib.PufferEnv):
             truncations = np.zeros(num_agents, dtype=bool),
             masks = np.ones(num_agents, dtype=bool),
         )
+        self.actions = np.zeros(num_agents, dtype=np.uint32)
         self.episode_rewards = np.zeros((horizon, num_agents), dtype=np.float32)
 
         if use_c:
@@ -103,7 +65,10 @@ class PufferGrid(pufferlib.PufferEnv):
         self.dones = np.ones(num_agents, dtype=bool)
         self.not_done = np.zeros(num_agents, dtype=bool)
 
-        self.render_mode = 'rgb_array'
+        self.render_mode = render_mode
+        self.renderer = render.make_renderer(map_size, map_size,
+            render_mode=render_mode)
+
         self.observation_space = observation_space(self, 1)
         self.action_space = action_space(self, 1)
         self.single_observation_space = self.observation_space
@@ -140,11 +105,8 @@ class PufferGrid(pufferlib.PufferEnv):
         self.buf.rewards[:] = rewards
 
     def render(self):
-        rendered = np.zeros((self.map_size, self.map_size, 3), dtype=np.uint8)
-        rendered[self.grid==AGENT] = (255, 0, 0)
-        rendered[self.grid==EMPTY] = (255, 255, 255)
-        rendered[self.grid==WALL] = (0, 0, 0)
-        return rendered
+        return self.renderer.render(self.grid,
+            self.agent_positions, self.actions, self.vision_range)
 
     def reset(self, seed=0):
         self.agents = [i+1 for i in range(self.num_agents)]
@@ -161,6 +123,7 @@ class PufferGrid(pufferlib.PufferEnv):
         return self.buf.observations, self.infos
 
     def step(self, actions):
+        self.actions = actions
         if use_c:
             self.cenv.step(actions.astype(np.uint32))
         else:
@@ -301,6 +264,45 @@ def gen_spawn_positions(map_size):
         cands
 
     return cands
+
+def test_pz_performance(timeout):
+    import time
+    env = PettingZooGrid()
+    actions = [{i+1: e for i, e in enumerate(np.random.randint(0, 5, env.num_agents))}
+        for i in range(1000)]
+    idx = 0
+    dones = {1: True}
+    start = time.time()
+    while time.time() - start < timeout:
+        if all(dones.values()):
+            env.reset()
+            dones = {1: False}
+        else:
+            _, _, dones, _, _ = env.step(actions[idx%1000])
+
+        idx += 1
+
+    sps = env.num_agents * idx // timeout
+    print(f'PZ SPS: {sps}')
+
+def test_puffer_performance(timeout):
+    import time
+    env = PufferGrid()
+    actions = np.random.randint(0, 5, (1000, env.num_agents))
+    idx = 0
+    dones = {1: True}
+    start = time.time()
+    while time.time() - start < timeout:
+        if env.done:
+            env.reset()
+            dones = {1: False}
+        else:
+            _, _, dones, _, _ = env.step(actions[idx%1000])
+
+        idx += 1
+
+    sps = env.num_agents * idx // timeout
+    print(f'Puffer SPS: {sps}')
 
 if __name__ == '__main__':
     test_puffer_performance(10)

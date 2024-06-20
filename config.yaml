@@ -468,16 +468,21 @@ nmmo3debug:
     name: sweep
     metric:
       goal: maximize
-      name: environment/equip_defense
+      name: environment/min_comb_prof
     # Nested parameters name required by WandB API
     parameters:
       train:
         parameters:
+          ent_coef: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-3,
+            'max': 5e-2,
+          }
           gamma: {
-            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+            'values': [0.80, 0.90, 0.925, 0.95, 0.975, 0.99],
           }
           gae_lambda: {
-            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+            'values': [0.80, 0.90, 0.925, 0.95, 0.975, 0.99],
           }
           learning_rate: {
             'distribution': 'log_uniform_values',
@@ -485,7 +490,7 @@ nmmo3debug:
             'max': 1e-1,
           }
           batch_size: {
-            'values': [8192, 16384, 32768, 65536],
+            'values': [8192, 16384, 32768, 65536, 131072, 262144],
           }
           minibatch_size: {
             'values': [8192, 16384, 32768, 65536],
