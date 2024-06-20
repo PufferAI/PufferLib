@@ -21,7 +21,7 @@ class GridRender:
                 2: (0, 0, 0),
             }
 
-    def render(self, grid):
+    def render(self, grid, *args):
         rendered = np.zeros((self.width, self.height, 3), dtype=np.uint8)
         for val in np.unique(grid):
             rendered[self.grid==val] = self.asset_map[val]
