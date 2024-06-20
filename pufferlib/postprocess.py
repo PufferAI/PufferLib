@@ -75,11 +75,11 @@ class PettingZooWrapper:
     def render(self):
         return self.env.render()
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None, **kwargs):
         try:
-            return self.env.reset(seed=seed, options=options)
+            return self.env.reset(seed=seed, options=options, **kwargs)
         except TypeError:
-            return self.env.reset(seed=seed)
+            return self.env.reset(seed=seed, **kwargs)
 
     def observe(self, agent):
         return self.env.observe(agent)
@@ -120,8 +120,8 @@ class MeanOverAgents(PettingZooWrapper):
 
         return mean_infos
 
-    def reset(self, seed=None, options=None):
-        observations, infos = super().reset(seed, options)
+    def reset(self, seed=None, options=None, **kwargs):
+        observations, infos = super().reset(seed, options, **kwargs)
         infos = self._mean(infos)
         return observations, infos
 

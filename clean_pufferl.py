@@ -36,7 +36,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
     msg = f'Model Size: {abbreviate(count_params(policy))} parameters'
     print_dashboard(config.env, utilization, 0, 0, profile, losses, {}, msg, clear=True)
 
-    vecenv.async_reset(config.seed)
+    vecenv.async_reset(config.seed, [{'foo': i} for i in range(24)])
     obs_shape = vecenv.single_observation_space.shape
     obs_dtype = vecenv.single_observation_space.dtype
     atn_shape = vecenv.single_action_space.shape
@@ -289,6 +289,9 @@ def train(data):
         if data.epoch % config.checkpoint_interval == 0 or done_training:
             save_checkpoint(data)
             data.msg = f'Checkpoint saved at update {data.epoch}'
+
+        if data.epoch % 4 == 0:
+           data.vecenv.async_reset(config.seed, [{'foo': data.epoch+i} for i in range(24)])
 
 def close(data):
     data.vecenv.close()

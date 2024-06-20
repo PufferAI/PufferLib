@@ -1,5 +1,7 @@
+
 from pdb import set_trace as T
 import numpy as np
+import os
 
 # import gym
 # import shimmy
@@ -36,7 +38,7 @@ def make(num_envs=32, render=False, seekers=2, hiders=2, pcg=True):
     return pufferlib.emulation.PettingZooPufferEnv(env=envs)
 
 def make_madrona(mode='cpu', num_worlds=10, num_steps=2500, entities_per_world=2,
-                 reset_chance=0., nSeekers=2, nHiders=2, split_task_graph=False, batch_renderer=False, pcg=True):
+                 reset_chance=0., nSeekers=2, nHiders=2, split_task_graph=True, batch_renderer=False, pcg=True):
 
     sim_mode = gpu_hideseek.madrona.ExecMode.CPU if mode == 'cpu' else gpu_hideseek.madrona.ExecMode.GPU
     pcg_worlds = gpu_hideseek.SimFlags.Default if pcg == True else gpu_hideseek.SimFlags.UseFixedWorld
@@ -86,8 +88,8 @@ class MadronaPettingZooEnv:
     def action_space(self, agent):
         return self.env.action_space
 
-    def reset(self, seed=None):
-        _obs, _ = self.env.reset()
+    def reset(self, seed=None, **kwargs):
+        _obs, _ = self.env.reset(**kwargs)
         obs = {}
         batch_size = _obs['self_agent_data'].shape[0]
         assert(batch_size == self.num_envs)
@@ -380,19 +382,28 @@ class MadronaHideAndSeekWrapper: #gym.Wrapper):
    
 class MadronaHideAndSeekWrapperSplitTaskGraph(MadronaHideAndSeekWrapper):
     def __init__(self, sim, nSeekers=3, nHiders=2):
+        # T()
         super().__init__(sim, nSeekers, nHiders)
-        
-        # intial reward function uses the c++ hide and seek calculated reward
-        def reward_fn(agent_data, relative_box_obs, relative_ramp_obs, visible_agents_mask, 
-                      visible_boxes_mask, visible_ramps_mask, lidar, prep_counter, agent_type_mask, id_tensor):
-                        
-            return self.sim.reward_tensor().to_torch()
-        
-        initial_rf = reward_fn
 
-        self.rfs = [initial_rf]
-        self.sampled_reward_fn_id = 0
-        self.dynamic_reward_fn = self.rfs[self.sampled_reward_fn_id]
+        self.known_rfs = []
+
+        class DefaultHideAndSeekRewardv0:
+            def __init__(self, sim):
+                self.sim = sim
+                self.description = 'returns the built-in hide and seek reward'
+
+            def __call__(self, self_agent_data, other_agent_data, relative_box_obs,
+                    relative_ramp_obs, visible_agents_mask, visible_boxes_mask,
+                    visible_ramps_mask, lidar, prep_counter, agent_type_mask,
+                    id_tensor, task_embedding):
+                return self.sim.reward_tensor().to_torch().cpu().numpy()
+
+        self.dynamic_reward_fn = DefaultHideAndSeekRewardv0(sim)
+
+    def reset(self, foo=0, **kwargs):
+        print(foo)
+        # get list of what's currently in the reward function folder
+        return self.get_obs(), {}
 
     def step(self, action_dict):
         # Extract actions from the dictionary
@@ -400,43 +411,43 @@ class MadronaHideAndSeekWrapperSplitTaskGraph(MadronaHideAndSeekWrapper):
         action_tensor = self.sim.action_tensor().to_torch()
 
         # Fill in the action tensor with the extracted actions
-        # move amount, angle and turn are all in [-5, 5] and 
-        #  the logits are in [0, 10] so we need to center those properly
+        # move amount, angle and turn are all in [0, 10]
         action_mat =  np.stack(action_dict.item().values())
         action_mat = torch.from_numpy(action_mat).float()
-        action_mat[..., 0:3] = action_mat[..., 0:3] - 5
-        action_mat[..., 4:] = action_mat[..., 4:]
-        # send the actions to the sim's action tensor
-        action_tensor.copy_(action_mat) 
+        action_tensor[..., 0:3] = action_mat[..., 0:3]
+        action_tensor[..., 4:] = action_mat[..., 4:]
+
+        # copy the action tensor to the simulator
+        # action_tensor.copy_(action_tensor)
 
         # Apply the modified action tensor to the sim
         self.sim.simulate()
-        
-        # get the state of the environment post action 
+
+        # get the state of the environment post action
         # (env is updated at the end of simulate, but envs are not reset yet)
         obs = self.get_obs()
-        
+
         # calculate the reward using state + action
-        reward = self.dynamic_reward_fn(**obs).cpu().numpy()
-        
+        reward = self.dynamic_reward_fn(**obs)
+
         # update the environment if finished and collect next states
         self.sim.reset_and_update()
 
         # Collect observations, rewards, dones, and info
         obs = self.get_obs()
-        done = self.sim.done_tensor().to_torch().cpu().numpy()
+        done = self.sim.done_tensor().to_torch().cpu().numpy().astype(bool)
         info = {}
-        
+
+        if done.all().item():
+            # try training on just a terminal win/loss w/o any shaping
+            result = self.sim.episode_result_tensor().to_torch().cpu().numpy()
+            hider_wins = result[:, 0] == 1
+            hider_win_rate = hider_wins.mean()
+            info['hider win rate'] = hider_win_rate
+            # reward = result
+
         return obs, reward, done, done, info
 
-    def set_reward_function(self, reward_fn_string, sample=False):
-        # parse the generated reward function into a callable 
-        # make sure that the function signature matches what we expect:
-        # def reward_fn(agent_data, relative_box_obs, relative_ramp_obs, visible_agents_mask, 
-        #               visible_boxes_mask, visible_ramps_mask, lidar, prep_counter, agent_type_mask, id_tensor): -> reward
-        self.rfs.append(reward_fn_string)
-        function = exec(reward_fn_string, globals(), locals())
-        self.dynamic_reward_fn = function
 
 if __name__ == '__main__':
     import torch

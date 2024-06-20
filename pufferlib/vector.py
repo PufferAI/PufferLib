@@ -41,8 +41,8 @@ def send_precheck(vecenv, actions):
     vecenv.flag = RECV
     return actions
 
-def reset(vecenv, seed=42):
-    vecenv.async_reset(seed)
+def reset(vecenv, seed=42, kwargs=None):
+    vecenv.async_reset(seed, kwargs)
     obs, rewards, terminals, truncations, infos, env_ids, masks = vecenv.recv()
     return obs, infos
 
@@ -109,9 +109,10 @@ class Serial:
             )
             ptr = end
 
-    def async_reset(self, seed=42):
+    def async_reset(self, seed=42, env_kwargs=None):
         self.flag = RECV
         seed = make_seeds(seed, len(self.envs))
+        env_kwargs = [{} for _ in range(self.num_envs)] if env_kwargs is None else env_kwargs
 
         if self.buf is None:
             self.buf = namespace(
@@ -126,8 +127,8 @@ class Serial:
             self._assign_buffers(self.buf)
 
         infos = []
-        for env, s in zip(self.envs, seed):
-            ob, i = env.reset(seed=s)
+        for env, s, kwargs in zip(self.envs, seed, env_kwargs):
+            ob, i = env.reset(seed=s, **kwargs)
                
             if i:
                 infos.append(i)
@@ -200,8 +201,8 @@ def _worker_process(env_creators, env_args, env_kwargs, num_envs,
 
         start = time.time()
         if sem == RESET:
-            seeds = recv_pipe.recv()
-            _, infos = envs.reset(seed=seeds)
+            seeds, env_kwargs = recv_pipe.recv()
+            _, infos = envs.reset(seed=seeds, env_kwargs=env_kwargs)
         elif sem == STEP:
             _, _, _, _, infos = envs.step(atn_arr)
         elif sem == CLOSE:
@@ -416,7 +417,13 @@ class Multiprocessing:
         self.actions[idxs] = actions
         self.buf.semaphores[idxs] = STEP
 
-    def async_reset(self, seed=42):
+    def async_reset(self, seed=42, env_kwargs=None):
+        if env_kwargs is None:
+            env_kwargs = [{} for _ in range(self.num_envs)]
+        else:
+            assert isinstance(env_kwargs, list)
+            assert len(env_kwargs) == self.num_envs
+
         self.flag = RECV
         seed = make_seeds(seed, self.num_environments)
         self.prev_env_id = []
@@ -430,7 +437,7 @@ class Multiprocessing:
         for i in range(self.num_workers):
             start = i*self.envs_per_worker
             end = (i+1)*self.envs_per_worker
-            self.send_pipes[i].send(seed[start:end])
+            self.send_pipes[i].send(seed[start:end], env_kwargs[start:end])
 
     def close(self):
         for p in self.processes:

@@ -305,7 +305,7 @@ class PettingZooPufferEnv:
 
         return self.single_action_space
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, **kwargs):
         if not self.initialized:
             if self.buf is not None:
                 self.obs = self.buf.observations
@@ -319,7 +319,7 @@ class PettingZooPufferEnv:
         self.all_done = False
         self.mask = {k: False for k in self.possible_agents}
 
-        obs, info = self.env.reset(seed=seed)
+        obs, info = self.env.reset(seed=seed, **kwargs)
 
         # Call user featurizer and flatten the observations
         for i, agent in enumerate(self.possible_agents):
