@@ -276,7 +276,7 @@ def train(data):
             print_dashboard(config.env, data.utilization, data.global_step, data.epoch,
                 profile, data.losses, data.stats, data.msg)
 
-            if data.wandb is not None and data.global_step > 0 and time.time() - data.last_log_time > 3.0:
+            if data.wandb is not None and data.global_step > 0 and (time.time() - data.last_log_time > 3.0 or 'episode_return' in data.stats):
                 data.last_log_time = time.time()
                 data.wandb.log({
                     '0verview/SPS': profile.SPS,

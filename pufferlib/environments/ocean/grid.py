@@ -122,8 +122,21 @@ class PufferGrid(pufferlib.PufferEnv):
 
     def _compute_rewards(self):
         '''-1 for each nearby agent'''
-        raw_rewards = 1 - (self.buf.observations==AGENT).sum(axis=(1,2))
-        rewards = np.clip(raw_rewards/10, -1, 0)
+
+        #left = self.vision_range - 1
+        #right = self.vision_range + 1
+        #center_crop = self.buf.observations[:, left:right, left:right]
+        #in_view = (center_crop==AGENT).sum(axis=(1,2))
+        #rewards = (in_view == 3).astype(np.float32)
+
+        # Centralized Euclidean distance
+        pos = self.agent_positions / self.map_size
+        sq_diff = (pos[None, :, :] - pos[:, None, :])**2
+        rewards = np.sqrt(sq_diff.sum(2)).sum(1) / self.map_size
+
+        # Decentralized agents in view
+        #raw_rewards = 1 - (self.buf.observations==AGENT).sum(axis=(1,2))
+        #rewards = np.clip(raw_rewards/10, -1, 0)
         self.buf.rewards[:] = rewards
 
     def render(self):

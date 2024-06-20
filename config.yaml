@@ -450,17 +450,17 @@ nmmo3debug:
   use_rnn: True
   train:
     total_timesteps: 100_000_000
-    learning_rate: 0.001
+    learning_rate: 0.0015
     num_envs: 1
     num_workers: 1
     env_batch_size: 1
     update_epochs: 1
-    gamma: 0.9
-    gae_lambda: 0.95
-    ent_coef: 0.05
-    bptt_horizon: 2
-    batch_size: 65536
-    minibatch_size: 8192
+    gamma: 0.99
+    gae_lambda: 0.9
+    ent_coef: 0.032
+    bptt_horizon: 16
+    batch_size: 262144
+    minibatch_size: 16384
     compile: False
     anneal_lr: False
   sweep:
@@ -511,18 +511,18 @@ grid:
   package: ocean
   env_name: grid
   train:
-    total_timesteps: 50_000_000
-    learning_rate: 0.00175
+    total_timesteps: 125_000_000
+    learning_rate: 0.003
     num_envs: 1
     num_workers: 1
     env_batch_size: 1
     update_epochs: 1
-    gamma: 0.925
-    gae_lambda: 0.99
-    ent_coef: 0.0018
+    gamma: 0.9
+    gae_lambda: 0.9
+    ent_coef: 0.04
     bptt_horizon: 8
     batch_size: 65536
-    minibatch_size: 2048
+    minibatch_size: 1024
     compile: False
     anneal_lr: False
     device: cuda
