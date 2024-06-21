@@ -16,31 +16,28 @@ default:
     device: cuda
     total_timesteps: 10_000_000
     learning_rate: 2.5e-4
-    num_steps: 128
     anneal_lr: True
     gamma: 0.99
     gae_lambda: 0.95
-    num_minibatches: 4
     update_epochs: 4
     norm_adv: True
     clip_coef: 0.1
     clip_vloss: True
-    ent_coef: 0.01
     vf_coef: 0.5
+    vf_clip_coef: 0.1
     max_grad_norm: 0.5
+    ent_coef: 0.01
     target_kl: ~
 
     num_envs: 8
     num_workers: 8
     env_batch_size: ~
     zero_copy: True
-    verbose: True
     data_dir: experiments
     checkpoint_interval: 200
     batch_size: 1024
     minibatch_size: 512
     bptt_horizon: 16
-    vf_clip_coef: 0.1
     compile: False
     compile_mode: reduce-overhead
 
