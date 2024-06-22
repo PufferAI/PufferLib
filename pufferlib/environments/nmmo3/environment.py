@@ -16,8 +16,9 @@ def make(name, width=1024, height=1024, num_envs=1):
     env = Environment(width=width, height=height, num_envs=num_envs)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
-def make(name, width=1024, height=1024, num_envs=1):
-    return PuffEnv(width=width, height=height, num_envs=num_envs)
-
+# 1024 params work here, but learning levels off
 #def make(name, width=2048, height=2048, num_envs=1):
 #    return PuffEnv(width=width, height=height, num_envs=num_envs)
+
+def make(name, width=1024, height=1024, num_envs=1):
+    return PuffEnv(width=width, height=height, num_envs=num_envs)
