@@ -450,17 +450,17 @@ nmmo3debug:
   use_rnn: True
   train:
     total_timesteps: 100_000_000
-    learning_rate: 0.001
+    learning_rate: 0.0007822667183404625
     num_envs: 1
     num_workers: 1
     env_batch_size: 1
     update_epochs: 1
-    gamma: 0.9
-    gae_lambda: 0.95
-    ent_coef: 0.05
-    bptt_horizon: 2
-    batch_size: 65536
-    minibatch_size: 8192
+    gamma: 0.975
+    gae_lambda: 0.975
+    ent_coef: 0.0017149656362185647 
+    bptt_horizon: 16
+    batch_size: 131072
+    minibatch_size: 16384
     compile: False
     anneal_lr: False
   sweep:
@@ -490,7 +490,7 @@ nmmo3debug:
             'max': 1e-1,
           }
           batch_size: {
-            'values': [8192, 16384, 32768, 65536, 131072, 262144],
+            'values': [32768, 65536, 131072, 262144],
           }
           minibatch_size: {
             'values': [8192, 16384, 32768, 65536],
