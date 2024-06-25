@@ -577,6 +577,19 @@ linksawaken:
 zelda:
   package: links_awaken
 
+slimevolley:
+  package: slimevolley
+  env_name: SlimeVolley-v0
+  use_rnn: True
+  train:
+    num_envs: 96
+    num_workers: 24
+    env_batch_size: 48
+    zero_copy: False
+    batch_size: 8192
+    minibatch_size: 2048
+
+
 smac: {}
 starcraft:
   package: smac

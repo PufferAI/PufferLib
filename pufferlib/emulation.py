@@ -112,7 +112,7 @@ def emulate_observation_space(space):
     return emulated_space, emulated_dtype
 
 def emulate_action_space(space):
-    if isinstance(space, pufferlib.spaces.Discrete):
+    if isinstance(space, (pufferlib.spaces.Discrete, pufferlib.spaces.MultiDiscrete)):
         return space, space.dtype
 
     emulated_dtype = dtype_from_space(space)

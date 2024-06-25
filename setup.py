@@ -167,6 +167,11 @@ environments = {
     #'stable-retro': [
     #    'git+https://github.com/Farama-Foundation/stable-retro.git',
     #]
+    'slimevolley': [
+        f'gym=={GYM_VERSION}',
+        f'gymnasium=={GYMNASIUM_VERSION}',
+        'slimevolley==0.1.0',
+    ],
     'vizdoom': [
         'vizdoom==1.2.3',
     ],
