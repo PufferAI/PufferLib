@@ -64,5 +64,3 @@ class DoomWrapper(gym.Wrapper):
     def step(self, action):
         obs, reward, terminal, truncated, info = self.env.step(action)
         return obs['screen'][::2, ::2], reward, terminal, truncated, info
-
-
