@@ -27,3 +27,10 @@ class SlimeVolleyMultiDiscrete(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
         self.action_space = gym.spaces.MultiDiscrete([2 for _ in range(env.action_space.n)])
+
+    def reset(self, seed=None):
+        return self.env.reset().astype(np.float32)
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        return obs.astype(np.float32), reward, done, info
