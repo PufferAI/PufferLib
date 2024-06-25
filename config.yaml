@@ -589,3 +589,7 @@ stableretro:
   package: stable_retro
 retro:
   package: stable_retro
+
+vizdoom:
+  package: vizdoom
+  env_name: VizdoomHealthGatheringSupreme-v0

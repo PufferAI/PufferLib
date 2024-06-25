@@ -167,6 +167,9 @@ environments = {
     #'stable-retro': [
     #    'git+https://github.com/Farama-Foundation/stable-retro.git',
     #]
+    'vizdoom': [
+        'vizdoom==1.2.3',
+    ],
 }
 
 
@@ -193,6 +196,7 @@ common = cleanrl + [environments[env] for env in [
     'nmmo',
     'pokemon_red',
     'procgen',
+    'vizdoom',
 ]]
 
 setup(
