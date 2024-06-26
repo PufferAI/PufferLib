@@ -22,3 +22,10 @@ def make(name, width=1024, height=1024, num_envs=1):
 
 def make(name, width=1024, height=1024, num_envs=1):
     return PuffEnv(width=width, height=height, num_envs=num_envs)
+
+def make(name, num_envs=1):
+    return PuffEnv(
+        width=[128, 128, 256, 512, 1024, 2048],
+        height=[128, 128, 256, 512, 1024, 2048],
+        num_envs=6,
+    )
