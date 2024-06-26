@@ -21,7 +21,7 @@ import time
 import psutil
 import gymnasium
 
-DEFAULT_TIMEOUT = 60
+DEFAULT_TIMEOUT = 10
 
 import time
 from functools import wraps
@@ -191,6 +191,11 @@ def profile_all(name, env_creator, num_envs, num_workers=24,
     print()
 
 if __name__ == '__main__':
+    from pufferlib.environments import vizdoom
+    env_creator = vizdoom.env_creator()
+    profile_emulation(env_creator)
+    exit(0)
+ 
     from pufferlib.environments import nmmo
     print('Neural MMO')
     env_creator = nmmo.env_creator()

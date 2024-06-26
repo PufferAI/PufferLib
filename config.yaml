@@ -482,7 +482,18 @@ nmmo3debug:
           }
 
 
-
+nocturne:
+  package: nocturne
+  env_name: nocturne
+  train:
+    num_envs: 72
+    env_batch_size: 24
+    num_workers: 24
+    zero_copy: False
+    batch_size: 16384
+    minibatch_size: 4096
+    update_epochs: 1
+ 
 # Ocean: PufferAI's first party environment suite
 ocean:
   env_name: squared
@@ -577,6 +588,51 @@ linksawaken:
 zelda:
   package: links_awaken
 
+slimevolley:
+  package: slimevolley
+  env_name: SlimeVolley-v0
+  #use_rnn: True
+  train:
+    num_envs: 3072
+    num_workers: 24
+    env_batch_size: 1024
+    zero_copy: False
+    batch_size: 16384
+    minibatch_size: 4096
+    update_epochs: 1
+  sweep:
+    method: bayes
+    name: sweep
+    metric:
+      goal: maximize
+      name: environment/episode_return
+    # Nested parameters name required by WandB API
+    parameters:
+      train:
+        parameters:
+          learning_rate: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-4,
+            'max': 1e-1,
+          }
+          ent_coef: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-4,
+            'max': 5e-2,
+          }
+          gamma: {
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+          }
+          gae_lambda: {
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+          }
+          batch_size: {
+            'values': [8192, 16384, 32768, 65536],
+          }
+          minibatch_size: {
+            'values': [2048, 4096, 8192],
+          }
+
 smac: {}
 starcraft:
   package: smac
@@ -589,3 +645,16 @@ stableretro:
   package: stable_retro
 retro:
   package: stable_retro
+
+vizdoom:
+  package: vizdoom
+  env_name: VizdoomHealthGatheringSupreme-v0
+  use_rnn: True
+  train:
+    num_envs: 144
+    num_workers: 24
+    env_batch_size: 48
+    zero_copy: False
+    batch_size: 8192
+    minibatch_size: 2048
+    update_epochs: 1

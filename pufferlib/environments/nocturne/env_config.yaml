@@ -1,0 +1,117 @@
+seed: 0
+device: cuda:0
+debug: false
+experiment: intersection
+env: my_custom_multi_env_v1 # name of the env, hardcoded for now
+
+# All goals are achievable within 90 steps
+episode_length: 90
+warmup_period: 10 # In the RL setting we use a warmup of 10 steps
+# How many files of the total dataset to use. -1 indicates to use all of them
+num_files: 10
+fix_file_order: true # If true, always select the SAME files (when creating the environent), if false, pick files at random
+sample_file_method: random   # ALTERNATIVES: "no_replacement"
+dt: 0.1
+sims_per_step: 10
+discretize_actions: true
+include_head_angle: false # Whether to include the head tilt/angle as part of a vehicle's action
+accel_discretization: 21 
+accel_lower_bound: -4.0 # decelerate
+accel_upper_bound: 4.0 # accelerate
+steering_lower_bound: -0.3 # steer right
+steering_upper_bound: 0.3 # steer left
+steering_discretization: 31
+max_num_vehicles: 200 # Maximum number of vehicles in the scene we control
+use_av_only: false # If true, only use the AV for the environment
+scenario:
+  # initial timestep of the scenario (which ranges from timesteps 0 to 90)
+  start_time: 0
+  # if set to True, non-vehicle objects (eg. cyclists, pedestrians...) will be spawned
+  allow_non_vehicles: false
+  # for an object to be included into moving_objects
+  moving_threshold: 0.2  # its goal must be at least this distance from its initial position
+  speed_threshold: 0.05  # its speed must be superior to this value at some point
+  # maximum number of each objects visible in the object state
+  # if there are more objects, the closest ones are prioritized
+  # if there are less objects, the features vector is padded with zeros
+  max_visible_objects: 16
+  max_visible_road_points: 500
+  max_visible_traffic_lights: 0 # NOT SUPPORTED
+  max_visible_stop_signs: 4
+  # from the set of road points that comprise each polyline, we take
+  # every n-th one of these
+  sample_every_n: 1
+  reducing_threshold: 1.0 # if the distance between three consecutive points is less than this value, we remove the middle point
+  # if true we add all the road-edges (the edges you can collide with)
+  # to the visible road points first and only add the other points
+  # (road lines, lane lines) etc. if we have remaining states after
+  road_edge_first: false
+  invalid_position: -10000.0
+  context_length: 10
+
+# these configs are mostly used for aligning displacement error computations
+# with the standard way of doing it in other libraries i.e. we keep
+# the agent for the whole rollout and compute its distance from the expert
+# at all the points that the expert is valid
+remove_at_goal: true # if true, remove the agent when it reaches its goal
+remove_at_collide: true # if true, remove the agent when it collides
+
+# # # Goal settings # # # #
+target_positions:
+  randomize_goals: false # Randomize the goals
+  time_steps_list: [20, 40, 60] # The time steps at which we sample intermediate goals
+
+# # # Reward settings # # # #
+rew_cfg:
+  shared_reward: false # agents get the collective reward instead of individual rewards
+  goal_tolerance: 0.5
+  reward_scaling: 10.0 # rescale all the rewards by this value. This can help w/ some learning algorithms
+  collision_penalty: 0
+  shaped_goal_distance_scaling: 0.0 # Default is 0.2, setting to 0.0 removes all dense rewards
+  shaped_goal_distance: true
+  goal_distance_penalty: false # if shaped_goal_distance is true, then when this is True the goal distance
+                               # is a penalty for being far from
+                               # goal instead of a reward for being close
+  goal_achieved_bonus: 10
+  position_target: true # If True, goal is only achieved if you're within this tolerance on distance from goal
+  position_target_tolerance: 2.0 # euclidean distance to target
+  speed_target: false # If True, goal is only achieved if you're within this tolerance on final agent speed at goal position
+  speed_target_tolerance: 1.0
+  heading_target: false # If True, goal is only achieved if you're within this tolerance on final agent heading at goal position
+  heading_target_tolerance: 0.3
+  # we assume that vehicles are never more than 400 meters from their goal which makes
+  # sense as the episodes are 9 seconds long, i.e. we'd have to go more than 40 m/s to get there
+  goal_speed_scaling: 40.0
+
+# # # # State normalization settings # # # #
+normalize_state: true
+# Ego feature names + max values in each category
+ego_state_feat_min: -30
+ego_state_feat_max:
+  veh_len: 25
+  veh_width: 5
+  speed: 100
+  target_dist: 350
+  target_azimuth: 3.14
+  target_heading: 3.14
+  rel_target_speed_dist: 40
+  curr_accel: 5 # Vehicle acceleration
+  curr_steering: 3
+  curr_head_angle: 0.00001 # Not used at the moment
+
+vis_obs_max: 110 # The maximum value across visible state elements
+vis_obs_min: -10 # The minimum value across visible state elements
+
+# # # # Agent settings # # # #
+subscriber:
+  view_angle: 3.14 # the distance which the cone extends before agents are not visible; set to pi rad to correct for missing head angle
+  view_dist: 80
+  use_ego_state: true # if True, add information about the ego state
+  use_observations: true # if True, add visible field
+  use_current_position: false # if True, add current (x, y)-position of the agent
+
+  # for values greater than 1, we will stack inputs together (i.e. memory and equivalent of n_stacked_states)
+  n_frames_stacked: 1 # Agent memory
+
+# Path to folder with traffic scene(s) from which to create an environment
+data_path: ../docker/data/train_no_tl
