@@ -128,6 +128,78 @@ def init_wandb(args, name, id=None, resume=True):
     )
     return wandb
 
+from math import log, ceil, floor
+def closest_power(x):
+    possible_results = floor(log(x, 2)), ceil(log(x, 2))
+    return 2**min(possible_results, key= lambda z: abs(x-2**z))
+
+def sweep_carbs(args, wandb_name, env_module, make_env):
+    from collections import OrderedDict
+
+    import numpy as np
+    from loguru import logger
+
+    from carbs import CARBS
+    from carbs import CARBSParams
+    from carbs import LogSpace
+    from carbs import LogitSpace
+    from carbs import ObservationInParam
+    from carbs import ParamDictType
+    from carbs import Param
+
+    logger.remove()
+    logger.add(sys.stdout, level="DEBUG", format="{message}")
+
+    # Must be hardcoded and match wandb sweep space for now
+    param_spaces = [
+        Param(name="learning_rate", space=LogSpace(min=1e-4, max=1e-1), search_center=1e-3),
+        Param(name="batch_size", space=LogSpace(is_integer=True, min=512, max=4096), search_center=1024),
+        Param(name="minibatch_size", space=LogSpace(is_integer=True, min=128, max=512), search_center=256),
+        Param(name="bptt_horizon", space=LogSpace(is_integer=True, min=4, max=16), search_center=8),
+    ]
+
+    carbs_params = CARBSParams(
+        better_direction_sign=-1,
+        is_wandb_logging_enabled=False,
+        resample_frequency=0,
+    )
+    carbs = CARBS(carbs_params, param_spaces)
+
+    import wandb
+    sweep_id = wandb.sweep(
+        sweep=dict(args.sweep),
+        project="carbs",
+    )
+    target_metric = args.sweep['metric']['name'].split('/')[-1]
+
+    def main():
+        try:
+            args.exp_name = init_wandb(args, wandb_name, id=args.exp_id)
+            suggestion = carbs.suggest().suggestion
+            print('Carbs suggestion', suggestion)
+            wandb.config.train.update(suggestion)
+            args.train.__dict__.update(dict(wandb.config.train))
+            print(wandb.config.train)
+            args.track = True
+            stats, profile = train(args, env_module, make_env)
+            observed_value = stats[target_metric]
+            uptime = profile.uptime
+
+            obs_out = carbs.observe(
+                ObservationInParam(
+                    input=suggestion,
+                    output=observed_value,
+                    cost=uptime
+                )
+            )
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+
+    wandb.agent(sweep_id, main, count=100)
+
+
 def sweep(args, wandb_name, env_module, make_env):
     import wandb
     sweep_id = wandb.sweep(
@@ -194,8 +266,10 @@ def train(args, env_module, make_env):
                 Console().print_exception()
                 os._exit(0)
 
-        clean_pufferl.evaluate(data)
+        stats, _ = clean_pufferl.evaluate(data)
+        profile = data.profile
         clean_pufferl.close(data)
+        return stats, profile
 
     elif args.backend == 'sb3':
         from stable_baselines3 import PPO
@@ -226,7 +300,7 @@ if __name__ == '__main__':
         default='squared', help='Name of specific environment to run')
     parser.add_argument('--pkg', '--package', type=str, default=None, help='Configuration in config.yaml to use')
     parser.add_argument('--backend', type=str, default='clean_pufferl', help='Train backend (clean_pufferl, sb3)')
-    parser.add_argument('--mode', type=str, default='train', choices='train eval evaluate sweep autotune baseline profile'.split())
+    parser.add_argument('--mode', type=str, default='train', choices='train eval evaluate sweep sweep-carbs autotune baseline profile'.split())
     parser.add_argument('--eval-model-path', type=str, default=None, help='Path to model to evaluate')
     parser.add_argument('--baseline', action='store_true', help='Baseline run')
     parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
@@ -270,6 +344,8 @@ if __name__ == '__main__':
             os._exit(0)
     elif args.mode == 'sweep':
         sweep(args, wandb_name, env_module, make_env)
+    elif args.mode == 'sweep-carbs':
+        sweep_carbs(args, wandb_name, env_module, make_env)
     elif args.mode == 'autotune':
         pufferlib.vector.autotune(make_env, batch_size=args.train.env_batch_size)
     elif args.mode == 'profile':
