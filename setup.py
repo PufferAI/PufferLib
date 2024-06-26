@@ -170,7 +170,7 @@ environments = {
     'slimevolley': [
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        'slimevolley==0.1.0',
+        'slimevolleygym==0.1.0',
     ],
     'vizdoom': [
         'vizdoom==1.2.3',

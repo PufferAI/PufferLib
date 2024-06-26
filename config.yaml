@@ -482,7 +482,18 @@ nmmo3debug:
           }
 
 
-
+nocturne:
+  package: nocturne
+  env_name: nocturne
+  train:
+    num_envs: 72
+    env_batch_size: 24
+    num_workers: 24
+    zero_copy: False
+    batch_size: 16384
+    minibatch_size: 4096
+    update_epochs: 1
+ 
 # Ocean: PufferAI's first party environment suite
 ocean:
   env_name: squared
@@ -580,12 +591,11 @@ zelda:
 slimevolley:
   package: slimevolley
   env_name: SlimeVolley-v0
-  use_rnn: True
+  #use_rnn: True
   train:
-    #num_envs: 3072
-    num_envs: 384
+    num_envs: 3072
     num_workers: 24
-    env_batch_size: 128
+    env_batch_size: 1024
     zero_copy: False
     batch_size: 16384
     minibatch_size: 4096
