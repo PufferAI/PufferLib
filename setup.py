@@ -213,6 +213,7 @@ setup(
         f'gymnasium<={GYMNASIUM_VERSION}',
         f'pettingzoo<={PETTINGZOO_VERSION}',
         'shimmy[gym-v21]',
+        'pygame==2.5.2', # Pin for now
     ],
     extras_require={
         'docs': docs,
