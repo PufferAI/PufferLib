@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 from Cython.Build import cythonize
 import numpy
 
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 
 # Default Gym/Gymnasium/PettingZoo versions
 # Gym:

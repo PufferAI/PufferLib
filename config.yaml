@@ -298,7 +298,7 @@ crafter:
     env_batch_size: 48 
     zero_copy: False
     batch_size: 6144
-    compile: True
+    compile: False
 
 dm_control:
   package: dm_control
