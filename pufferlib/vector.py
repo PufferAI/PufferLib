@@ -582,9 +582,9 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
             if batch_size is None:
                 batch_size = num_envs
 
-            if batch_size % envs_per_worker != 0:
-                raise APIUsageError(
-                    'batch_size must be divisible by (num_envs / num_workers)')
+            #if batch_size % envs_per_worker != 0:
+            #    raise APIUsageError(
+            #        'batch_size must be divisible by (num_envs / num_workers)')
         
  
     if env_args is None:

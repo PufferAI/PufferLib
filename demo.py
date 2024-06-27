@@ -158,7 +158,7 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
     logger.add(sys.stdout, level="DEBUG", format="{message}")
 
     def carbs_param(name, space, min=None, max=None,
-            search_center=None, rounding_factor=None):
+            search_center=None, is_integer=False, rounding_factor=1):
         wandb_param = wandb_params[name]
         if min is None:
             min = float(wandb_param['min'])
@@ -183,27 +183,32 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
 
         return Param(
             name=name,
-            space=Space(min=min, max=max),
+            space=Space(
+                min=min,
+                max=max,
+                is_integer=is_integer,
+                rounding_factor=rounding_factor
+            ),
             search_center=search_center,
-            rounding_factor=rounding_factor,
         )
 
     # Must be hardcoded and match wandb sweep space for now
     param_spaces = [
-        carbs_param('total_timesteps', 'log', search_center=1e6),
+        carbs_param('total_timesteps', 'log', search_center=1e6, is_integer=True),
         carbs_param('learning_rate', 'log', search_center=1e-3),
         carbs_param('gamma', 'logit', search_center=0.95),
         carbs_param('gae_lambda', 'logit', search_center=0.90),
-        carbs_param('update_epochs', 'linear', search_center=1, rounding_factor=1),
+        carbs_param('update_epochs', 'linear', search_center=1, is_integer=True),
         carbs_param('clip_coef', 'logit', search_center=0.1),
         carbs_param('vf_coef', 'logit', search_center=0.5),
         carbs_param('vf_clip_coef', 'logit', search_center=0.1),
         carbs_param('max_grad_norm', 'linear', search_center=0.5),
         carbs_param('ent_coef', 'log', search_center=1e-2),
-        carbs_param('env_batch_size', 'linear', search_center=384),
-        carbs_param('batch_size', 'log', search_center=16384),
-        carbs_param('minibatch_size', 'log', search_center=4096),
-        carbs_param('bptt_horizon', 'log', search_center=8),
+        carbs_param('env_batch_size', 'linear', search_center=384,
+            is_integer=True, rounding_factor=24),
+        carbs_param('batch_size', 'log', search_center=16384, is_integer=True),
+        carbs_param('minibatch_size', 'log', search_center=4096, is_integer=True),
+        carbs_param('bptt_horizon', 'log', search_center=8, is_integer=True),
     ]
 
     carbs_params = CARBSParams(
@@ -216,6 +221,7 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
     def main():
             args.exp_name = init_wandb(args, wandb_name, id=args.exp_id)
             suggestion = carbs.suggest().suggestion
+            print('Suggestion:', suggestion)
             wandb.config.train.update(suggestion)
             wandb.config.train['batch_size'] = closest_power(
                 suggestion['batch_size'])
@@ -227,10 +233,13 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
                 3*suggestion['env_batch_size'])
             args.train.__dict__.update(dict(wandb.config.train))
             args.track = True
+            print(wandb.config.train)
             try:
                 stats, profile = train(args, env_module, make_env)
             except Exception as e:
                 is_failure = True
+                import traceback
+                traceback.print_exc()
             else:
                 observed_value = stats[target_metric]
                 uptime = profile.uptime
@@ -244,7 +253,6 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
                 )
 
     wandb.agent(sweep_id, main, count=100)
-
 
 def sweep(args, wandb_name, env_module, make_env):
     import wandb
