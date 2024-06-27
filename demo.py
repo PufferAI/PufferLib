@@ -131,7 +131,7 @@ def init_wandb(args, name, id=None, resume=True):
 from math import log, ceil, floor
 def closest_power(x):
     possible_results = floor(log(x, 2)), ceil(log(x, 2))
-    return 2**min(possible_results, key= lambda z: abs(x-2**z))
+    return int(2**min(possible_results, key= lambda z: abs(x-2**z)))
 
 def sweep_carbs(args, wandb_name, env_module, make_env):
     from collections import OrderedDict
@@ -152,14 +152,22 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
 
     # Must be hardcoded and match wandb sweep space for now
     param_spaces = [
+        Param(name="total_timesteps", space=LogSpace(min=5e6, max=1e9), search_center=5e6),
+        #Param(name="num_envs", search_center=384, 
+        #     space=LogSpace(is_integer=True, rounding_factor=24, min=24, max=3072)),
+        #Param(name="env_batch_size", search_center=384,
+        #      space=LogSpace(is_integer=True, rounding_factor=24, min=24, max=1024)),
         Param(name="learning_rate", space=LogSpace(min=1e-4, max=1e-1), search_center=1e-3),
-        Param(name="batch_size", space=LogSpace(is_integer=True, min=512, max=4096), search_center=1024),
-        Param(name="minibatch_size", space=LogSpace(is_integer=True, min=128, max=512), search_center=256),
-        Param(name="bptt_horizon", space=LogSpace(is_integer=True, min=4, max=16), search_center=8),
+        Param(name="ent_coef", space=LogSpace(min=1e-4, max=5e-2), search_center=1e-3),
+        Param(name="gamma", space=LogitSpace(), search_center=0.95),
+        Param(name="gae_lambda", space=LogitSpace(), search_center=0.90),
+        #Param(name="batch_size", space=LogSpace(is_integer=True, min=8192, max=65563), search_center=8192),
+        #Param(name="minibatch_size", space=LogSpace(is_integer=True, min=1024, max=8192), search_center=2048),
+        #Param(name="bptt_horizon", space=LogSpace(is_integer=True, min=1, max=16), search_center=8),
     ]
 
     carbs_params = CARBSParams(
-        better_direction_sign=-1,
+        better_direction_sign=1,
         is_wandb_logging_enabled=False,
         resample_frequency=0,
     )
@@ -171,31 +179,35 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
         project="carbs",
     )
     target_metric = args.sweep['metric']['name'].split('/')[-1]
-
+ 
     def main():
-        try:
             args.exp_name = init_wandb(args, wandb_name, id=args.exp_id)
             suggestion = carbs.suggest().suggestion
-            print('Carbs suggestion', suggestion)
+            #suggestion['batch_size'] = closest_power(suggestion['batch_size'])
+            #suggestion['minibatch_size'] = closest_power(suggestion['minibatch_size'])
+            #suggestion['bptt_horizon'] = closest_power(suggestion['bptt_horizon'])
+            #suggestion['num_envs'] = int(3*suggestion['env_batch_size'])
             wandb.config.train.update(suggestion)
             args.train.__dict__.update(dict(wandb.config.train))
             print(wandb.config.train)
             args.track = True
-            stats, profile = train(args, env_module, make_env)
-            observed_value = stats[target_metric]
-            uptime = profile.uptime
+            is_failure = False
+            try:
+                stats, profile = train(args, env_module, make_env)
+            except Exception as e:
+                is_failure = True
+            else:
+                observed_value = stats[target_metric]
+                uptime = profile.uptime
 
-            obs_out = carbs.observe(
-                ObservationInParam(
-                    input=suggestion,
-                    output=observed_value,
-                    cost=uptime
+                obs_out = carbs.observe(
+                    ObservationInParam(
+                        input=suggestion,
+                        output=observed_value,
+                        cost=uptime,
+                        is_failure=is_failure,
+                    )
                 )
-            )
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
 
     wandb.agent(sweep_id, main, count=100)
 
@@ -264,7 +276,7 @@ def train(args, env_module, make_env):
                 os._exit(0)
             except Exception:
                 Console().print_exception()
-                os._exit(0)
+                #os._exit(0)
 
         stats, _ = clean_pufferl.evaluate(data)
         profile = data.profile
