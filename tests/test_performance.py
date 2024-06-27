@@ -191,18 +191,25 @@ def profile_all(name, env_creator, num_envs, num_workers=24,
     print()
 
 if __name__ == '__main__':
+    from pufferlib.environments import nocturne
+    env_creator = nocturne.env_creator()
+    profile_emulation(env_creator)
+    #profile_puffer(env_creator, num_envs=8, backend=Multiprocessing)
+    exit(0)
+
     from pufferlib.environments import vizdoom
     env_creator = vizdoom.env_creator()
-    profile_emulation(env_creator)
-    exit(0)
+    #profile_emulation(env_creator)
+    profile_puffer(env_creator, num_envs=24,
+        batch_size=8, backend=Multiprocessing, zero_copy=False)
  
     from pufferlib.environments import nmmo
     print('Neural MMO')
     env_creator = nmmo.env_creator()
     profile_emulation(env_creator)
-    profile_puffer(env_creator, num_envs=8, backend=Multiprocessing)
-    profile_puffer(env_creator, num_envs=24,
-        batch_size=8, backend=Multiprocessing)
+    #profile_puffer(env_creator, num_envs=8, backend=Multiprocessing)
+    profile_puffer(env_creator, num_envs=96,
+        batch_size=48, backend=Multiprocessing, zero_copy=False)
     print()
 
     from pufferlib.environments import nethack

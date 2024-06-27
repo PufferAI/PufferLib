@@ -110,9 +110,9 @@ environments = {
     'minerl': [
         'gym==0.17.0',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        'minerl==0.4.4',
+        #'git+https://github.com/minerllabs/minerl'
         # Compatiblity warning with urllib3 and chardet
-        'requests==2.31.0',
+        #'requests==2.31.0',
     ],
     'minigrid': [
         f'gym=={GYM_VERSION}',

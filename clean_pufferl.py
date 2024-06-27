@@ -570,17 +570,18 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
     state = None
 
     while True:
-        render = driver.render()
+        #render = driver.render()
         if driver.render_mode == 'ansi':
             print('\033[0;0H' + render + '\n')
             time.sleep(0.6)
         elif driver.render_mode == 'rgb_array':
+            '''
             import cv2
             render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
             cv2.imshow('frame', render)
             cv2.waitKey(1)
             time.sleep(1/24)
-
+            '''
         with torch.no_grad():
             ob = torch.from_numpy(ob).to(device)
             if hasattr(agent, 'lstm'):
