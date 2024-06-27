@@ -42,7 +42,7 @@ default:
     compile_mode: reduce-overhead
 
   sweep:
-    method: random
+    method: bayes
     name: sweep
     metric:
       goal: maximize
@@ -53,22 +53,73 @@ default:
         parameters:
           total_timesteps: {
             'distribution': 'log_uniform_values',
-            'min': 3e4,
-            'max': 2e5,
+            'min': 1e4,
+            'max': 1e9,
           }
           learning_rate: {
             'distribution': 'log_uniform_values',
-            'min': 1e-4,
+            'min': 1e-5,
             'max': 1e-1,
           }
+          gamma: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          gae_lambda: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          update_epochs: {
+            'distribution': 'uniform',
+            'min': 1,
+            'max': 16,
+          }
+          clip_coef: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          vf_coef: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          vf_clip_coef: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          max_grad_norm: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 10.0,
+          }
+          ent_coef: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-4
+            'max': 5e-2,
+          }
+          env_batch_size: {
+            'distribution': 'uniform',
+            'min': 24,
+            'max': 1024,
+          }
           batch_size: {
-            'values': [512, 1024, 2048],
+            'distribution': 'log_uniform_values',
+            'min': 8192,
+            'max': 131072,
           }
           minibatch_size: {
-            'values': [128, 256, 512],
+            'distribution': 'log_uniform_values',
+            'min': 1024,
+            'max': 8192,
           }
           bptt_horizon: {
-            'values': [4, 8, 16],
+            'distribution': 'uniform',
+            'min': 1,
+            'max': 16,
           }
 
 ### Arcade Learning Environment suite
