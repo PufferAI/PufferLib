@@ -51,6 +51,11 @@ default:
     parameters:
       train:
         parameters:
+          total_timesteps: {
+            'distribution': 'log_uniform_values',
+            'min': 3e4,
+            'max': 2e5,
+          }
           learning_rate: {
             'distribution': 'log_uniform_values',
             'min': 1e-4,
@@ -583,12 +588,12 @@ slimevolley:
   use_rnn: True
   train:
     #num_envs: 3072
-    num_envs: 384
+    num_envs: 1536
     num_workers: 24
-    env_batch_size: 128
+    env_batch_size: 512
     zero_copy: False
-    batch_size: 16384
-    minibatch_size: 4096
+    batch_size: 65536
+    minibatch_size: 8192
     update_epochs: 1
   sweep:
     method: bayes
@@ -600,6 +605,21 @@ slimevolley:
     parameters:
       train:
         parameters:
+          total_timesteps: {
+            'distribution': 'log_uniform_values',
+            'min': 1e6,
+            'max': 1e9,
+          }
+          #num_envs: {
+          #  'distribution': 'log_uniform_values',
+          #  'min': 24,
+          #  'max': 3072,
+          #}
+          #env_batch_size: {
+          #  'distribution': 'log_uniform_values',
+          #  'min': 24,
+          #  'max': 3072,
+          #}
           learning_rate: {
             'distribution': 'log_uniform_values',
             'min': 1e-4,
@@ -616,12 +636,15 @@ slimevolley:
           gae_lambda: {
             'values': [0.90, 0.925, 0.95, 0.975, 0.99],
           }
-          batch_size: {
-            'values': [8192, 16384, 32768, 65536],
-          }
-          minibatch_size: {
-            'values': [2048, 4096, 8192],
-          }
+          #batch_size: {
+          #  'values': [8192, 16384, 32768, 65536],
+          #}
+          #minibatch_size: {
+          #  'values': [2048, 4096, 8192],
+          #}
+          #bptt_horizon: {
+          #  'values': [4, 8, 16],
+          #}
 
 smac: {}
 starcraft:
