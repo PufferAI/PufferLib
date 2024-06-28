@@ -661,19 +661,18 @@ snake:
   env_name: snake
   train:
     total_timesteps: 1_000_000
-    num_envs: 48
+    num_envs: 1152
     num_workers: 6
-    env_batch_size: 48
-    batch_size: 6144
-    #minibatch_size: 768
-    update_epochs: 4
-    minibatch_size: ~
-    #ent_coef: 0.05
+    env_batch_size: 384
+    batch_size: 65536
+    update_epochs: 1
+    minibatch_size: 8192
     anneal_lr: False
     gae_lambda: 0.95
     gamma: 0.95
     ent_coef: 0.025
     learning_rate: 2.5e-4
+    device: cuda
   sweep:
     method: bayes
     name: sweep
