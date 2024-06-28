@@ -3,11 +3,14 @@ import pufferlib.postprocess
 
 from . import ocean
 from .grid import grid
+from .snake import snake
 
 def env_creator(name='squared'):
     if name == 'grid':
         return make_grid
-    if name == 'squared':
+    elif name == 'snake':
+        return make_snake
+    elif name == 'squared':
         return make_squared
     elif name == 'bandit':
         return make_bandit
@@ -35,6 +38,11 @@ def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array
     env = pufferlib.postprocess.MultiagentEpisodeStats(env)
     env = pufferlib.postprocess.MeanOverAgents(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
+
+def make_snake(width=40, height=40,):
+    env = snake.Snake(width=width, height=height)
+    env = pufferlib.postprocess.EpisodeStats(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_squared(distance_to_target=3, num_targets=1, **kwargs):
     env = ocean.Squared(distance_to_target=distance_to_target, num_targets=num_targets)
