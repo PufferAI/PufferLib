@@ -194,7 +194,7 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
 
     # Must be hardcoded and match wandb sweep space for now
     param_spaces = [
-        carbs_param('total_timesteps', 'log', search_center=1e6, is_integer=True),
+        carbs_param('total_timesteps', 'log', search_center=1e7, is_integer=True),
         carbs_param('learning_rate', 'log', search_center=1e-3),
         carbs_param('gamma', 'logit', search_center=0.95),
         carbs_param('gae_lambda', 'logit', search_center=0.90),
