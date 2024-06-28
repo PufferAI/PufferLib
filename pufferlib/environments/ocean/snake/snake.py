@@ -107,7 +107,8 @@ class Snake(gymnasium.Env):
             new_head[0] < 0 or new_head[0] >= self.width or 
             new_head[1] < 0 or new_head[1] >= self.height):
             self.done = True
-            return self.get_state(), -1, self.done, False, {}  # Massive negative reward for death
+            info = {'snake_length': len(self.snake)}
+            return self.get_state(), -1, self.done, False, info  # Massive negative reward for death
 
         self.snake.insert(0, new_head)
 
@@ -132,9 +133,12 @@ class Snake(gymnasium.Env):
         def _render(c):
             return f'\033[{c}m██\033[0m'
 
-        chars = self.height*[self.width*[90]]
+        chars = [self.width*[90] for _ in range(self.height)]
         r, c = self.food
-        chars[r][c] = 94
+        try:
+            chars[r][c] = 94
+        except:
+            breakpoint()
         for segment in self.snake:
             r, c = segment
             chars[r][c] = 91
