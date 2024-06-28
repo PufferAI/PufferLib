@@ -142,3 +142,27 @@ class Snake(gymnasium.Env):
         chars = [[_render(c) for c in row] for row in chars]
         chars = [''.join(row) for row in chars]
         return '\n'.join(chars)
+
+def perf_test():
+    env = Snake(40, 40)
+
+    import numpy as np
+    actions = np.random.randint(0, 4, size=1000)
+
+    import time
+    start = time.time()
+    done = True
+    tick = 0
+    while time.time() - start < 10:
+        if done:
+            env.reset()
+            done = False
+        else:
+            _, _, done, _, _ = env.step(tick % 1000)
+
+        tick += 1
+
+    print(f'SPS: %f', tick / (time.time() - start))
+
+if __name__ == '__main__':
+    perf_test()
