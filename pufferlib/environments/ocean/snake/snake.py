@@ -19,7 +19,7 @@ class Snake(gymnasium.Env):
         self.height = height
         self.render_mode = 'ansi'
         self.observation_space = gymnasium.spaces.Box(
-            low=0, high=255, shape=(7,), dtype=np.uint8)
+            low=-128, high=128, shape=(7,), dtype=np.float32)
         self.action_space = gymnasium.spaces.Discrete(4)
 
     def reset(self, seed=42):
@@ -69,7 +69,7 @@ class Snake(gymnasium.Env):
             if cell in self.snake[1:]:
                 tail_state |= (1 << (3 - i))
         
-        return (
+        return np.array([
             abslogint(distance_to_left),
             abslogint(distance_to_right),
             abslogint(distance_to_top),
@@ -77,7 +77,7 @@ class Snake(gymnasium.Env):
             abslogint(food_rel_x),
             abslogint(food_rel_y),
             tail_state
-        )
+            ], dtype=np.float32)
 
     def step(self, action):
         new_direction = self.direction
