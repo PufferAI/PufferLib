@@ -46,6 +46,7 @@ class Snake(pufferlib.PufferEnv):
             masks = np.ones(snakes, dtype=bool),
         )
         self.actions = np.zeros(snakes, dtype=np.uint32)
+        self.tick = 0
 
     def reset(self, seed=None):
         self.c_env = CSnake(self.grid, self.snake, self.buf.observations, self.snake_lengths,
@@ -56,7 +57,10 @@ class Snake(pufferlib.PufferEnv):
     def step(self, actions):
         self.actions[:] = actions
         self.c_env.step()
-        return self.grid, self.buf.rewards, self.buf.terminals, self.buf.truncations, {}
+        info = {}
+        if self.tick % 128 == 0:
+            info = {'snake_length': np.mean(self.snake_lengths)}
+        return self.grid, self.buf.rewards, self.buf.terminals, self.buf.truncations, info
 
     def render(self):
         def _render(val):
