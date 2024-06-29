@@ -40,9 +40,7 @@ def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
 def make_snake(width=40, height=40,):
-    env = snake.Snake(width=width, height=height)
-    env = pufferlib.postprocess.EpisodeStats(env)
-    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+    return snake.Snake(width=width, height=height)
 
 def make_squared(distance_to_target=3, num_targets=1, **kwargs):
     env = ocean.Squared(distance_to_target=distance_to_target, num_targets=num_targets)

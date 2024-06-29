@@ -5,7 +5,9 @@ from functools import partial
 import pufferlib.models
 
 Recurrent = pufferlib.models.LSTMWrapper
+Policy = pufferlib.models.Default
 
+'''
 class Policy(nn.Module):
     def __init__(self, env, flat_size=64,
             input_size=32, hidden_size=128, output_size=128,
@@ -41,5 +43,5 @@ class Policy(nn.Module):
         action = self.actor(flat_hidden)
         value = self.value_fn(flat_hidden)
         return action, value
-
+'''
 

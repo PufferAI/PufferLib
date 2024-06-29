@@ -15,70 +15,112 @@ cdef:
     int EMPTY = 0
     int SNAKE = 1
     int FOOD = 2
+    int WALL = 3
 
 cdef class CSnake:
     cdef:
         char[:, :] grid
-        int[:, :] snake
+        char[:, :, :] observations
+        int[:, :, :] snake
+        int[:] snake_ptr
+        int[:] snake_lengths
+        unsigned int[:] actions
+        float[:] rewards
+        int num_snakes
         int width
         int height
         int max_snake_length
-        int head_ptr
-        int head_r
-        int head_c
-        int food_r
-        int food_c
-        int snake_length
+        int food
+        int vision
 
-    def __init__(self, cnp.ndarray grid, cnp.ndarray snake):
+    def __init__(self, cnp.ndarray grid, cnp.ndarray snake, cnp.ndarray observations,
+            snake_lengths, snake_ptr, cnp.ndarray actions,
+            cnp.ndarray rewards, int food, int vision):
         self.grid = grid
         self.snake = snake
+        self.observations = observations
+        self.actions = actions
+        self.rewards = rewards
+
+        self.num_snakes = snake.shape[0]
+        self.snake_lengths = snake_lengths
+        self.snake_ptr = snake_ptr
 
         self.width = grid.shape[1]
         self.height = grid.shape[0]
         self.max_snake_length = self.width * self.height
-        self.snake_length = 0
+        self.food = food
+        self.vision = vision
 
-    cpdef void reset(self):
-        while self.snake_length > 0:
-            self.grid[self.head_r, self.head_c] = EMPTY
-            self.snake[self.head_ptr, 0] = -1
-            self.snake[self.head_ptr, 1] = -1
-            self.snake_length -= 1
-            if self.head_ptr == 0:
-                self.head_ptr = self.max_snake_length - 1
+    cdef compute_observations(self):
+        for i in range(self.num_snakes):
+            head_ptr = self.snake_ptr[i]
+            head_r = self.snake[i, head_ptr, 0]
+            head_c = self.snake[i, head_ptr, 1]
+            self.observations[i] = self.grid[
+                head_r - self.vision:head_r + self.vision + 1,
+                head_c - self.vision:head_c + self.vision + 1,
+            ]
+
+
+    cdef spawn_snake(self, int snake_id):
+        # Delete the snake from the grid
+        cdef int head_ptr, head_r, head_c
+        while self.snake_lengths[snake_id] > 0:
+            head_ptr = self.snake_ptr[snake_id]
+            head_r = self.snake[snake_id, head_ptr, 0]
+            head_c = self.snake[snake_id, head_ptr, 1]
+            self.grid[head_r, head_c] = EMPTY
+            self.snake[snake_id, head_ptr, 0] = -1
+            self.snake[snake_id, head_ptr, 1] = -1
+            self.snake_lengths[snake_id] -= 1
+
+            if head_ptr == 0:
+                self.snake_ptr[snake_id] = self.max_snake_length - 1
             else:
-                self.head_ptr -= 1
+                self.snake_ptr[snake_id] -= 1
 
-            self.head_r = self.snake[self.head_ptr, 0]
-            self.head_c = self.snake[self.head_ptr, 1]
-
-        self.grid[self.food_r, self.food_c] = EMPTY
-
-        self.head_r = int(self.height / 2)
-        self.head_c = int(self.width / 2)
-        self.head_ptr = 0
-        self.snake_length = 1
-        self.grid[self.head_r, self.head_c] = 1
-        self.snake[self.head_ptr, 0] = self.head_r
-        self.snake[self.head_ptr, 1] = self.head_c
-        self.place_food()
-
-    cdef void place_food(self):
-        cdef int x, y
+        # Spawn a new snake
         while True:
-            x = rand() % (self.width - 1)
-            y = rand() % (self.height - 1)
-            if self.grid[y, x] == EMPTY:
-                self.food_r = y
-                self.food_c = x
-                self.grid[y, x] = FOOD
+            head_r = rand() % (self.height - 1)
+            head_c = rand() % (self.width - 1)
+            if self.grid[head_r, head_c] == EMPTY:
+                break
+
+        self.grid[head_r, head_c] = SNAKE
+        self.snake[snake_id, 0, 0] = head_r
+        self.snake[snake_id, 0, 1] = head_c
+        self.snake_lengths[snake_id] = 1
+
+    cdef void spawn_food(self):
+        cdef int r, c
+        while True:
+            r = rand() % (self.height - 1)
+            c = rand() % (self.width - 1)
+            if self.grid[r, c] == EMPTY:
+                self.grid[r, c] = FOOD
                 return
 
-    cpdef float step(self, int action):
+    cpdef void reset(self):
+        self.grid[:self.vision, :] = WALL
+        self.grid[:, :self.vision] = WALL
+        self.grid[:, self.width-self.vision:] = WALL
+        self.grid[self.height-self.vision:, :] = WALL
+
+        for i in range(self.num_snakes):
+            self.spawn_snake(i)
+
+        for i in range(self.food):
+            self.spawn_food()
+
+    cpdef float step(self):
         cdef:
-            int dr = 0
-            int dc = 0
+            int atn
+            int dr
+            int dc
+            int head_ptr
+            int head_r
+            int head_c
             int next_r
             int next_c
             int hit_wall
@@ -90,54 +132,52 @@ cdef class CSnake:
             int next_dist_food
             float reward
 
-        if action == 0:  # up
-            dr = -1
-        elif action == 1:  # down
-            dr = 1
-        elif action == 2:  # left
-            dc = -1
-        elif action == 3:  # right
-            dc = 1
+        for i in range(self.num_snakes):
+            atn = self.actions[i]
+            dr = 0
+            dc = 0
+            if atn == 0:  # up
+                dr = -1
+            elif atn == 1:  # down
+                dr = 1
+            elif atn == 2:  # left
+                dc = -1
+            elif atn == 3:  # right
+                dc = 1
 
-        next_r = self.head_r + dr
-        next_c = self.head_c + dc
+            head_ptr = self.snake_ptr[i]
+            head_r = self.snake[i, head_ptr, 0]
+            head_c = self.snake[i, head_ptr, 1]
+            next_r = head_r + dr
+            next_c = head_c + dc
 
-        hit_wall = (next_r < 0 or next_r >= self.height
-            or next_c < 0 or next_c >= self.width)
-        hit_self = self.grid[next_r, next_c] == SNAKE
-        if hit_wall or hit_self:
-            return -1.0
+            hit = self.grid[next_r, next_c] != EMPTY
+            hit_food = self.grid[next_r, next_c] == FOOD
+            if hit and not hit_food:
+                return -1.0
 
-        self.head_ptr += 1
-        if self.head_ptr >= self.max_snake_length:
-            self.head_ptr = 0
+            head_ptr += 1
+            if head_ptr >= self.max_snake_length:
+                head_ptr = 0
+            
+            self.snake[i, head_ptr, 0] = next_r
+            self.snake[i, head_ptr, 1] = next_c
+            self.snake_ptr[i] = head_ptr
 
-        self.snake[self.head_ptr, 0] = next_r
-        self.snake[self.head_ptr, 1] = next_c
+            if hit_food:
+                self.rewards[i] = 0.1
+                self.snake_lengths[i] += 1
+                self.spawn_food()
+            else:
+                self.rewards[i] = 0.0
+                tail_ptr = head_ptr - self.snake_lengths[i]
+                if tail_ptr < 0:
+                    tail_ptr = self.max_snake_length + tail_ptr
 
-        if self.grid[next_r, next_c] == FOOD:
-            reward = 0.1
-            self.snake_length += 1
-            self.place_food()
-        else:
-            reward = 0.0
-            tail_ptr = self.head_ptr - self.snake_length
-            if tail_ptr < 0:
-                tail_ptr = self.max_snake_length + tail_ptr
+                tail_r = self.snake[i, tail_ptr, 0]
+                tail_c = self.snake[i, tail_ptr, 1]
+                self.snake[i, tail_ptr, 0] = -1
+                self.snake[i, tail_ptr, 1] = -1
+                self.grid[tail_r, tail_c] = EMPTY
 
-            tail_r = self.snake[tail_ptr, 0]
-            tail_c = self.snake[tail_ptr, 1]
-            self.snake[tail_ptr, 0] = -1
-            self.snake[tail_ptr, 1] = -1
-            self.grid[tail_r, tail_c] = EMPTY
-
-        self.grid[next_r, next_c] = SNAKE
-        self.head_r = next_r
-        self.head_c = next_c
-
-        dist_to_food = abs(self.food_r - self.head_r) + abs(self.food_c - self.head_c)
-        next_dist_food = abs(next_r - self.food_r) + abs(next_c - self.food_c)
-        if next_dist_food < dist_to_food:
-            reward += 0.01
-
-        return reward
+            self.grid[next_r, next_c] = SNAKE
