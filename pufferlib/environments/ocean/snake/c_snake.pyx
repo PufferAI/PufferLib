@@ -91,6 +91,7 @@ cdef class CSnake:
         self.snake[snake_id, 0, 0] = head_r
         self.snake[snake_id, 0, 1] = head_c
         self.snake_lengths[snake_id] = 1
+        self.snake_ptr[snake_id] = 0
 
     cdef void spawn_food(self):
         cdef int r, c
@@ -112,6 +113,8 @@ cdef class CSnake:
 
         for i in range(self.food):
             self.spawn_food()
+
+        self.compute_observations()
 
     cpdef float step(self):
         cdef:
@@ -154,7 +157,9 @@ cdef class CSnake:
             hit = self.grid[next_r, next_c] != EMPTY
             hit_food = self.grid[next_r, next_c] == FOOD
             if hit and not hit_food:
-                return -1.0
+                self.rewards[i] = -1.0
+                self.spawn_snake(i)
+                continue
 
             head_ptr += 1
             if head_ptr >= self.max_snake_length:
@@ -181,3 +186,5 @@ cdef class CSnake:
                 self.grid[tail_r, tail_c] = EMPTY
 
             self.grid[next_r, next_c] = SNAKE
+
+        self.compute_observations()
