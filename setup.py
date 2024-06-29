@@ -222,11 +222,11 @@ setup(
         **environments,
     },
     ext_modules = cythonize([
-
         "pufferlib/extensions.pyx",
         "pufferlib/environments/ocean/grid/c_grid.pyx",
-    ], nthreads=6,
-        #compiler_directives={'profile': True}, annotate=True
+        "pufferlib/environments/ocean/snake/c_snake.pyx",
+    ], #nthreads=6,
+       # compiler_directives={'profile': True}, annotate=True
     ),
     include_dirs=[numpy.get_include()],
     python_requires=">=3.8",
