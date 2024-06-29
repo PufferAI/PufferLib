@@ -42,6 +42,8 @@ cdef class CSnake:
     cpdef void reset(self):
         while self.snake_length > 0:
             self.grid[self.head_r, self.head_c] = EMPTY
+            self.snake[self.head_ptr, 0] = -1
+            self.snake[self.head_ptr, 1] = -1
             self.snake_length -= 1
             if self.head_ptr == 0:
                 self.head_ptr = self.max_snake_length - 1
@@ -58,6 +60,8 @@ cdef class CSnake:
         self.head_ptr = 0
         self.snake_length = 1
         self.grid[self.head_r, self.head_c] = 1
+        self.snake[self.head_ptr, 0] = self.head_r
+        self.snake[self.head_ptr, 1] = self.head_c
         self.place_food()
 
     cdef void place_food(self):
@@ -117,7 +121,7 @@ cdef class CSnake:
             self.place_food()
         else:
             reward = 0.0
-            tail_ptr = self.head_ptr - self.snake_length + 1
+            tail_ptr = self.head_ptr - self.snake_length
             if tail_ptr < 0:
                 tail_ptr = self.max_snake_length + tail_ptr
 
@@ -128,6 +132,8 @@ cdef class CSnake:
             self.grid[tail_r, tail_c] = EMPTY
 
         self.grid[next_r, next_c] = SNAKE
+        self.head_r = next_r
+        self.head_c = next_c
 
         dist_to_food = abs(self.food_r - self.head_r) + abs(self.food_c - self.head_c)
         next_dist_food = abs(next_r - self.food_r) + abs(next_c - self.food_c)
