@@ -2,150 +2,139 @@
 
 import numpy as np
 import random
-from math import copysign, log
 import gymnasium
 
-def abslogint(x):
-    if x == 0:
-        y = 0
-    else:
-        y = copysign(1, x)*abs(int(1+2*log(abs(x))))
-    return y
+from pufferlib.environments.ocean.snake.c_snake import CSnake
+
+
+EMPTY = 0
+SNAKE = 1
+FOOD = 2
+
+use_c = True
 
 class Snake(gymnasium.Env):
     def __init__(self, width, height):
         super().__init__()
+        self.grid = np.zeros((height, width), dtype=np.uint8)
+        self.max_snake_length = width * height
+        self.snake = np.zeros((self.max_snake_length, 2), dtype=np.int32)
+
+        if use_c:
+            self.c_env = CSnake(self.grid, self.snake)
+
         self.width = width
         self.height = height
         self.render_mode = 'ansi'
+
         self.observation_space = gymnasium.spaces.Box(
-            low=-128, high=128, shape=(7,), dtype=np.float32)
+            low=0, high=2, shape=(height, width), dtype=np.uint8)
         self.action_space = gymnasium.spaces.Discrete(4)
 
-    def reset(self, seed=42):
-        random.seed(seed)
-        self.snake = [(self.width // 2, self.height// 2)]
-        self.direction = random.choice([(0, -1), (0, 1), (-1, 0), (1, 0)])
-        self.food = self.place_food()
+    def reset(self, seed=None):
+        if use_c:
+            self.c_env.reset()
+            return self.grid, {}
+
+        self.grid.fill(0)
+        self.snake.fill(-1)
+
+        #random.seed(seed)
+        self.head_r = self.height // 2
+        self.head_c = self.width // 2
+        self.head_ptr = 0
+        self.snake_length = 1
+        self.grid[self.head_r, self.head_c] = 1
+
+        self.place_food()
         self.done = False
-        self.previous_distance = self.get_distance_to_food()
-        return self.get_state(), {}
+        return self.grid, {}
 
     def place_food(self):
         while True:
             x = random.randint(0, self.width - 1)
             y = random.randint(0, self.height - 1)
-            if (x, y) not in self.snake:
-                return (x, y)
-
-    def get_distance_to_food(self):
-        head = self.snake[0]
-        return abs(head[0] - self.food[0]) + abs(head[1] - self.food[1])
-
-    def get_state(self):
-        head = self.snake[0]
-        food = self.food
-        
-        # Distance to walls
-        distance_to_left = head[0]
-        distance_to_right = self.width - head[0]
-        distance_to_top = head[1]
-        distance_to_bottom = self.height - head[1]
-        
-        # Relative position of the food to the head
-        food_rel_x = food[0] - head[0]
-        food_rel_y = food[1] - head[1]
-        
-        # Check for tail in adjacent cells
-        adjacent_cells = [
-            (head[0], head[1] - 1),  # Up
-            (head[0], head[1] + 1),  # Down
-            (head[0] - 1, head[1]),  # Left
-            (head[0] + 1, head[1])   # Right
-        ]
-        
-        tail_state = 0
-        for i, cell in enumerate(adjacent_cells):
-            if cell in self.snake[1:]:
-                tail_state |= (1 << (3 - i))
-        
-        return np.array([
-            abslogint(distance_to_left),
-            abslogint(distance_to_right),
-            abslogint(distance_to_top),
-            abslogint(distance_to_bottom),
-            abslogint(food_rel_x),
-            abslogint(food_rel_y),
-            tail_state
-            ], dtype=np.float32)
+            if self.grid[y, x] == 0:
+                self.food_r = y
+                self.food_c = x
+                self.grid[y, x] = FOOD
+                return
 
     def step(self, action):
-        new_direction = self.direction
+        if use_c:
+            reward = self.c_env.step(action)
+            done = reward == -1
+            info = {}
+            #if done:
+            #    info['snake_length'] = self.c_env.snake_length
+            return self.grid, reward, done, False, info
+
+        dr = 0
+        dc = 0
         if action == 0:  # up
-            new_direction = (0, -1)
+            dr = -1
         elif action == 1:  # down
-            new_direction = (0, 1)
+            dr = 1
         elif action == 2:  # left
-            new_direction = (-1, 0)
+            dc = -1
         elif action == 3:  # right
-            new_direction = (1, 0)
+            dc = 1
 
-        # Check if the new direction would cause the snake to move backwards
-        if len(self.snake) > 1:
-            head = self.snake[0]
-            neck = self.snake[1]
-            if (head[0] + new_direction[0], head[1] + new_direction[1]) == neck:
-                # If moving backwards, keep the current direction
-                new_direction = self.direction
+        next_r = self.head_r + dr
+        next_c = self.head_c + dc
 
-        self.direction = new_direction
-        head = self.snake[0]
-        new_head = (head[0] + self.direction[0], head[1] + self.direction[1])
-
-        # Check for collision with walls or self
-        if (new_head in self.snake or 
-            new_head[0] < 0 or new_head[0] >= self.width or 
-            new_head[1] < 0 or new_head[1] >= self.height):
-            self.done = True
+        hit_wall = (next_r < 0 or next_r >= self.height
+            or next_c < 0 or next_c >= self.width)
+        hit_self = self.grid[next_r, next_c] == SNAKE
+        if hit_wall or hit_self:
             info = {'snake_length': len(self.snake)}
-            return self.get_state(), -1, self.done, False, info  # Massive negative reward for death
+            return self.grid, -1, True, False, info
 
-        self.snake.insert(0, new_head)
+        self.head_ptr += 1
+        if self.head_ptr >= self.max_snake_length:
+            self.head_ptr = 0
 
-        if new_head == self.food:
-            reward = 0.1  # Large positive reward for eating food
-            self.food = self.place_food()
-            self.previous_distance = self.get_distance_to_food()
+        self.snake[self.head_ptr, 0] = next_r
+        self.snake[self.head_ptr, 1] = next_c
+
+        if self.grid[next_r, next_c] == FOOD:
+            reward = 0.1
+            self.snake_length += 1
+            self.place_food()
         else:
-            self.snake.pop()
-            new_distance = self.get_distance_to_food()
-            if new_distance < self.previous_distance:
-                reward = 0.01  # Small positive reward for moving towards food
-            else:
-                reward = 0.0
-            #else:
-            #    reward = -0.02  # Small negative reward for moving away from food
-            self.previous_distance = new_distance
+            reward = 0.0
+            tail_ptr = (self.head_ptr - self.snake_length + 1) % self.max_snake_length
+            tail_r = self.snake[tail_ptr, 0]
+            tail_c = self.snake[tail_ptr, 1]
+            self.snake[tail_ptr, 0] = -1
+            self.snake[tail_ptr, 1] = -1
+            self.grid[tail_r, tail_c] = EMPTY
 
-        return self.get_state(), reward, self.done, False, {}
+        self.grid[next_r, next_c] = SNAKE
+
+        dist_to_food = abs(self.food_r - self.head_r) + abs(self.food_c - self.head_c)
+        next_dist_food = abs(next_r - self.food_r) + abs(next_c - self.food_c)
+        if next_dist_food < dist_to_food:
+            reward += 0.01
+
+        return self.grid, reward, self.done, False, {}
 
     def render(self):
-        def _render(c):
+        def _render(val):
+            if val == 0:
+                c = 90
+            elif val == SNAKE:
+                c = 91
+            elif val == FOOD:
+                c = 94
+
             return f'\033[{c}m██\033[0m'
 
-        chars = [self.width*[90] for _ in range(self.height)]
-        r, c = self.food
-        try:
-            chars[r][c] = 94
-        except:
-            breakpoint()
-        for segment in self.snake:
-            r, c = segment
-            chars[r][c] = 91
+        lines = []
+        for line in self.grid:
+            lines.append(''.join([_render(val) for val in line]))
 
-        chars = [[_render(c) for c in row] for row in chars]
-        chars = [''.join(row) for row in chars]
-        return '\n'.join(chars)
+        return '\n'.join(lines)
 
 def perf_test():
     env = Snake(40, 40)
