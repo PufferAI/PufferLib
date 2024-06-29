@@ -26,8 +26,9 @@ class Snake(pufferlib.PufferEnv):
         self.render_mode = 'ansi'
         self.food = food
 
+        box = 2 * vision + 1
         self.observation_space = gymnasium.spaces.Box(
-            low=0, high=2, shape=(height, width), dtype=np.uint8)
+            low=0, high=2, shape=(box, box), dtype=np.uint8)
         self.action_space = gymnasium.spaces.Discrete(4)
         self.single_observation_space = self.observation_space
         self.single_action_space = self.action_space
@@ -36,7 +37,6 @@ class Snake(pufferlib.PufferEnv):
         self.done = False
 
         self.vision = vision
-        box = 2 * vision + 1
         self.buf = pufferlib.namespace(
             observations = np.zeros(
                 (snakes, box, box), dtype=np.uint8),

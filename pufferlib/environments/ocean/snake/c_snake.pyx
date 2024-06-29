@@ -62,7 +62,6 @@ cdef class CSnake:
                 head_c - self.vision:head_c + self.vision + 1,
             ]
 
-
     cdef spawn_snake(self, int snake_id):
         # Delete the snake from the grid
         cdef int head_ptr, head_r, head_c
@@ -103,10 +102,10 @@ cdef class CSnake:
                 return
 
     cpdef void reset(self):
-        self.grid[:self.vision, :] = WALL
-        self.grid[:, :self.vision] = WALL
-        self.grid[:, self.width-self.vision:] = WALL
-        self.grid[self.height-self.vision:, :] = WALL
+        self.grid[:self.vision+1, :] = WALL
+        self.grid[:, :self.vision+1] = WALL
+        self.grid[:, self.width-self.vision-2:] = WALL
+        self.grid[self.height-self.vision-2:, :] = WALL
 
         for i in range(self.num_snakes):
             self.spawn_snake(i)
