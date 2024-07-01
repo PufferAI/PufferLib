@@ -5,7 +5,7 @@ import random
 import gymnasium
 
 import pufferlib
-from pufferlib.environments.ocean.snake.c_snake import CSnake
+from pufferlib.environments.ocean.snake.c_snake import CSnake, CMultiSnake
 
 EMPTY = 0
 SNAKE = 1
@@ -13,18 +13,26 @@ FOOD = 2
 WALL = 3
 
 class Snake(pufferlib.PufferEnv):
-    def __init__(self, width, height, snakes=4, food=4, vision=5, render_mode='ansi'):
+    def __init__(self, widths, heights, num_snakes, num_food, vision=5, render_mode='ansi'):
         super().__init__()
-        self.grid = np.zeros((height, width), dtype=np.uint8)
-        self.max_snake_length = width * height
-        self.snake = np.zeros((snakes, self.max_snake_length, 2), dtype=np.int32) - 1
-        self.snake_lengths = np.zeros(snakes, dtype=np.int32)
-        self.snake_ptr = np.zeros(snakes, dtype=np.int32)
+        self.grids = [np.zeros((h, w), dtype=np.uint8) for h, w in zip(heights, widths)]
 
-        self.width = width
-        self.height = height
+        assert len(widths) == len(heights)
+        for w, h in zip(widths, heights):
+            assert w >= 20 and h >= 20
+
+        total_snakes = sum(num_snakes)
+        max_snake_length = max([w*h for h, w in zip(heights, widths)])
+        self.snakes = np.zeros((total_snakes, max_snake_length, 2), dtype=np.int32) - 1
+
+        self.snake_lengths = np.zeros(total_snakes, dtype=np.int32)
+        self.snake_ptrs = np.zeros(total_snakes, dtype=np.int32)
+
+        self.num_snakes = num_snakes
+        self.num_food = num_food
+        self.vision = vision
+
         self.render_mode = render_mode
-        self.food = food
 
         box = 2 * vision + 1
         self.observation_space = gymnasium.spaces.Box(
@@ -32,42 +40,48 @@ class Snake(pufferlib.PufferEnv):
         self.action_space = gymnasium.spaces.Discrete(4)
         self.single_observation_space = self.observation_space
         self.single_action_space = self.action_space
+        self.num_agents = total_snakes
         self.emulated = None
-        self.num_agents = snakes
         self.done = False
-
-        self.vision = vision
-        self.buf = pufferlib.namespace(
-            observations = np.zeros(
-                (snakes, box, box), dtype=np.uint8),
-            rewards = np.zeros(snakes, dtype=np.float32),
-            terminals = np.zeros(snakes, dtype=bool),
-            truncations = np.zeros(snakes, dtype=bool),
-            masks = np.ones(snakes, dtype=bool),
-        )
-        self.actions = np.zeros(snakes, dtype=np.uint32)
         self.tick = 0
 
+        self.buf = pufferlib.namespace(
+            observations = np.zeros(
+                (total_snakes, box, box), dtype=np.uint8),
+            rewards = np.zeros(total_snakes, dtype=np.float32),
+            terminals = np.zeros(total_snakes, dtype=bool),
+            truncations = np.zeros(total_snakes, dtype=bool),
+            masks = np.ones(total_snakes, dtype=bool),
+        )
+        self.actions = np.zeros(total_snakes, dtype=np.uint32)
+
     def reset(self, seed=None):
-        self.c_env = CSnake(self.grid, self.snake, self.buf.observations, self.snake_lengths,
-            self.snake_ptr, self.actions, self.buf.rewards, self.food, self.vision)
+        self.c_env = CMultiSnake(self.grids, self.snakes, self.buf.observations,
+            self.snake_lengths, self.snake_ptrs, self.actions, self.buf.rewards,
+            self.num_snakes, self.num_food, self.vision)
+
         self.c_env.reset()
-        return self.grid, {}
+        return self.buf.observations, {}
 
     def step(self, actions):
         self.actions[:] = actions
         self.c_env.step()
+
         info = {}
         if self.tick % 128 == 0:
             info = {'snake_length': np.mean(self.snake_lengths)}
-        return self.grid, self.buf.rewards, self.buf.terminals, self.buf.truncations, info
+
+        return (self.buf.observations, self.buf.rewards,
+            self.buf.terminals, self.buf.truncations, info)
 
     def render(self):
+        grid = self.grids[0]
+        height, width = grid.shape
         if self.render_mode == 'rgb_array':
-            frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-            frame[self.grid==SNAKE] = np.array([255, 0, 0])
-            frame[self.grid==FOOD] = np.array([0, 255, 0])
-            frame[self.grid==WALL] = np.array([0, 0, 255])
+            frame = np.zeros((height, width, 3), dtype=np.uint8)
+            frame[grid==SNAKE] = np.array([255, 0, 0])
+            frame[grid==FOOD] = np.array([0, 255, 0])
+            frame[grid==WALL] = np.array([0, 0, 255])
             return frame
 
         def _render(val):
@@ -89,8 +103,14 @@ class Snake(pufferlib.PufferEnv):
         return '\n'.join(lines)
 
 def perf_test():
-    num_snakes = 4
-    env = Snake(40, 40)
+    num_snakes = 1024
+    #env = Snake([1024], [1024], [num_snakes], [1024])
+    env = Snake(
+        1024*[40],
+        1024*[40],
+        1024*[1],
+        1024*[1],
+    )
     env.reset()
 
     import numpy as np

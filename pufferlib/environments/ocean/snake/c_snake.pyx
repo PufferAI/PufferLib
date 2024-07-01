@@ -8,6 +8,8 @@
 # cython: profile=False
 '''Env originally by https://github.com/dnbt777'''
 
+
+import numpy as np
 cimport numpy as cnp
 from libc.stdlib cimport rand
 
@@ -16,6 +18,57 @@ cdef:
     int SNAKE = 1
     int FOOD = 2
     int WALL = 3
+
+cdef class CMultiSnake:
+    cdef:
+        char[:, :, :] grids
+        char[:, :, :] observations
+        char[:, :, :] snakes
+        char[:] snake_ptrs
+        int[:] snake_lengths
+        unsigned int[:] actions
+        float[:] rewards
+        int num_envs
+        list envs
+
+    def __init__(self, list grids, cnp.ndarray snakes, cnp.ndarray observations,
+            snake_lengths, snake_ptrs, cnp.ndarray actions, cnp.ndarray rewards,
+            list num_snakes, list num_food, int vision):
+
+        cdef int ptr = 0
+        cdef int end = 0
+        self.num_envs = len(grids)
+        self.envs = []
+        for i in range(self.num_envs):
+            end += num_snakes[i]
+            self.envs.append(CSnake(
+                grids[i],
+                snakes[ptr:end],
+                observations[ptr:end],
+                snake_lengths[ptr:end],
+                snake_ptrs[ptr:end],
+                actions[ptr:end],
+                rewards[ptr:end],
+                num_food[i],
+                vision
+            ))
+            ptr = end
+
+    cpdef void reset(self):
+        cdef:
+            CSnake env
+
+        for i in range(self.num_envs):
+            env = self.envs[i]
+            env.reset()
+
+    cpdef void step(self):
+        cdef:
+            CSnake env
+
+        for i in range(self.num_envs):
+            env = self.envs[i]
+            env.step()
 
 cdef class CSnake:
     cdef:
@@ -52,7 +105,13 @@ cdef class CSnake:
         self.food = food
         self.vision = vision
 
-    cdef compute_observations(self):
+    cdef void compute_observations(self):
+        cdef:
+            int i
+            int head_ptr
+            int head_r
+            int head_c
+
         for i in range(self.num_snakes):
             head_ptr = self.snake_ptr[i]
             head_r = self.snake[i, head_ptr, 0]
@@ -62,7 +121,7 @@ cdef class CSnake:
                 head_c - self.vision:head_c + self.vision + 1,
             ]
 
-    cdef spawn_snake(self, int snake_id):
+    cdef void spawn_snake(self, int snake_id):
         # Delete the snake from the grid
         cdef int head_ptr, head_r, head_c
         while self.snake_lengths[snake_id] > 0:
@@ -101,7 +160,7 @@ cdef class CSnake:
                 self.grid[r, c] = FOOD
                 return
 
-    cpdef void reset(self):
+    cdef void reset(self):
         self.grid[:self.vision+1, :] = WALL
         self.grid[:, :self.vision+1] = WALL
         self.grid[:, self.width-self.vision-2:] = WALL
@@ -115,7 +174,7 @@ cdef class CSnake:
 
         self.compute_observations()
 
-    cpdef float step(self):
+    cdef float step(self):
         cdef:
             int atn
             int dr
@@ -133,6 +192,8 @@ cdef class CSnake:
             int dist_to_food
             int next_dist_food
             float reward
+            bint hit
+            bint hit_food
 
         for i in range(self.num_snakes):
             atn = self.actions[i]

@@ -40,6 +40,21 @@ def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
 def make_snake(width=1024, height=1024, snakes=1024, food=1024, render_mode='rgb_array'):
+    return snake.Snake(
+        widths=1024*[26],
+        heights=1024*[26],
+        num_snakes=1024*[1],
+        num_food=1024*[1],
+        render_mode=render_mode
+    )
+ 
+    return snake.Snake(
+        widths=[1024],
+        heights=[1024],
+        num_snakes=[1024],
+        num_food=[1024],
+        render_mode=render_mode
+    )
     return snake.Snake(width=width, height=height, snakes=snakes,
         food=food, render_mode=render_mode)
 

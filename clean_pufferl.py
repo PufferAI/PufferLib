@@ -571,18 +571,18 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
 
     frames = []
     tick = 0
-    while tick <= 256:
+    while tick <= 1000:
         if tick % 1 == 0:
             render = driver.render()
             if driver.render_mode == 'ansi':
                 print('\033[0;0H' + render + '\n')
-                time.sleep(0.6)
+                time.sleep(0.05)
             elif driver.render_mode == 'rgb_array':
                 frames.append(render)
-                import cv2
-                render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
-                cv2.imshow('frame', render)
-                cv2.waitKey(1)
+                #import cv2
+                #render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
+                #cv2.imshow('frame', render)
+                #cv2.waitKey(1)
                 #time.sleep(1/24)
             elif driver.render_mode == 'human' and render is not None:
                 frames.append(render)
@@ -604,7 +604,7 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
 
     # Save frames as gif
     import imageio
-    imageio.mimsave('../docker/grid-puffer.gif', frames, fps=30)
+    imageio.mimsave('../docker/snake.gif', frames, fps=10)
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)
