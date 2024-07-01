@@ -660,7 +660,7 @@ snake:
   package: ocean
   env_name: snake
   train:
-    total_timesteps: 1_000_000_000
+    total_timesteps: 100_000_000
     num_envs: 1
     num_workers: 1
     env_batch_size: 1
@@ -671,7 +671,7 @@ snake:
     gae_lambda: 0.95
     gamma: 0.95
     ent_coef: 0.025
-    learning_rate: 2.5e-4
+    learning_rate: 0.0025
     device: cuda
   sweep:
     method: bayes

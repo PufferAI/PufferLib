@@ -42,6 +42,37 @@ def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array
 def make_snake(width=1024, height=1024, snakes=1024, food=1024, render_mode='ansi'):
     '''
     return snake.Snake(
+        widths=[1024],
+        heights=[1024],
+        num_snakes=[1024],
+        num_food=[1024],
+        leave_corpse_on_death=True,
+        render_mode=render_mode
+    )
+    '''
+ 
+    return snake.Snake(
+        widths=1024*[26],
+        heights=1024*[26],
+        num_snakes=1024*[1],
+        num_food=1024*[16],
+        leave_corpse_on_death=False,
+        render_mode=render_mode
+    )
+ 
+    curriculum = 1024*[16] + 512*[21] + 512*[26]
+    #curriculum = 512*[16] + 512*[4] + 1024*[1]
+    return snake.Snake(
+        widths=curriculum,
+        heights=curriculum,
+        num_snakes=2048*[1],
+        num_food=2048*[1],
+        leave_corpse_on_death=False,
+        render_mode=render_mode
+    )
+ 
+    '''
+    return snake.Snake(
         widths=[26],
         heights=[26],
         num_snakes=[1],

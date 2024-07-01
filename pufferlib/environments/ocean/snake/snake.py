@@ -21,7 +21,7 @@ class Snake(pufferlib.PufferEnv):
 
         assert len(widths) == len(heights)
         for w, h in zip(widths, heights):
-            assert w >= 20 and h >= 20
+            assert w >= 16 and h >= 16
 
         total_snakes = sum(num_snakes)
         max_snake_length = max([w*h for h, w in zip(heights, widths)])
@@ -72,7 +72,10 @@ class Snake(pufferlib.PufferEnv):
 
         info = {}
         if self.tick % 128 == 0:
-            info = {'snake_length': np.mean(self.snake_lengths)}
+            info = {
+                'snake_length': np.mean(self.snake_lengths),
+                'reward': self.buf.rewards.mean(),
+            }
 
         return (self.buf.observations, self.buf.rewards,
             self.buf.terminals, self.buf.truncations, info)
@@ -84,6 +87,7 @@ class Snake(pufferlib.PufferEnv):
             frame = np.zeros((height, width, 3), dtype=np.uint8)
             frame[grid==SNAKE] = np.array([255, 0, 0])
             frame[grid==FOOD] = np.array([0, 255, 0])
+            frame[grid==CORPSE] = np.array([255, 0, 255])
             frame[grid==WALL] = np.array([0, 0, 255])
             return frame
 
