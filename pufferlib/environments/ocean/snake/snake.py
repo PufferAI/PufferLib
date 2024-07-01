@@ -14,14 +14,14 @@ CORPSE = 3
 WALL = 4
 
 class Snake(pufferlib.PufferEnv):
-    def __init__(self, widths, heights, num_snakes, num_food, vision=5,
+    def __init__(self, widths, heights, num_snakes, num_food, vision=15,
             leave_corpse_on_death=True, render_mode='ansi'):
         super().__init__()
         self.grids = [np.zeros((h, w), dtype=np.uint8) for h, w in zip(heights, widths)]
 
         assert len(widths) == len(heights)
         for w, h in zip(widths, heights):
-            assert w >= 16 and h >= 16
+            assert w >= 48 and h >= 48
 
         total_snakes = sum(num_snakes)
         max_snake_length = max([w*h for h, w in zip(heights, widths)])

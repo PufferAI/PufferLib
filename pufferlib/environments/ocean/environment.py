@@ -52,8 +52,8 @@ def make_snake(width=1024, height=1024, snakes=1024, food=1024, render_mode='ans
     '''
  
     return snake.Snake(
-        widths=1024*[26],
-        heights=1024*[26],
+        widths=1024*[48],
+        heights=1024*[48],
         num_snakes=1024*[1],
         num_food=1024*[16],
         leave_corpse_on_death=False,
