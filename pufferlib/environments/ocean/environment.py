@@ -39,8 +39,9 @@ def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array
     env = pufferlib.postprocess.MeanOverAgents(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
-def make_snake(width=40, height=40,):
-    return snake.Snake(width=width, height=height)
+def make_snake(width=1024, height=1024, snakes=1024, food=1024, render_mode='rgb_array'):
+    return snake.Snake(width=width, height=height, snakes=snakes,
+        food=food, render_mode=render_mode)
 
 def make_squared(distance_to_target=3, num_targets=1, **kwargs):
     env = ocean.Squared(distance_to_target=distance_to_target, num_targets=num_targets)

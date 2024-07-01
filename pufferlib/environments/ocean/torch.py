@@ -5,21 +5,18 @@ from functools import partial
 import pufferlib.models
 
 Recurrent = pufferlib.models.LSTMWrapper
-Policy = pufferlib.models.Default
+#Policy = pufferlib.models.Default
 
-'''
 class Policy(nn.Module):
-    def __init__(self, env, flat_size=64,
+    def __init__(self, env, flat_size=32,
             input_size=32, hidden_size=128, output_size=128,
             downsample=1, **kwargs):
         super().__init__()
-        self.embed = nn.Embedding(3, input_size)
+        self.embed = nn.Embedding(4, input_size)
         self.network= nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Conv2d(input_size, 32, 8, stride=4)),
+            pufferlib.pytorch.layer_init(nn.Conv2d(input_size, 32, 5, stride=3)),
             nn.ReLU(),
-            pufferlib.pytorch.layer_init(nn.Conv2d(32, 64, 4, stride=2)),
-            nn.ReLU(),
-            pufferlib.pytorch.layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            pufferlib.pytorch.layer_init(nn.Conv2d(32, 32, 3, stride=1)),
             nn.ReLU(),
             nn.Flatten(),
             pufferlib.pytorch.layer_init(nn.Linear(flat_size, hidden_size)),
@@ -43,5 +40,4 @@ class Policy(nn.Module):
         action = self.actor(flat_hidden)
         value = self.value_fn(flat_hidden)
         return action, value
-'''
 

@@ -656,14 +656,22 @@ linksawaken:
 zelda:
   package: links_awaken
 
+snakedebug:
+  package: ocean
+  env_name: snake
+  train:
+    num_envs: 1
+    env_batch_size: 1
+    num_workers: 1
+
 snake:
   package: ocean
   env_name: snake
   train:
     total_timesteps: 1_000_000
-    num_envs: 1152
-    num_workers: 6
-    env_batch_size: 384
+    num_envs: 1
+    num_workers: 1
+    env_batch_size: 1
     batch_size: 65536
     update_epochs: 1
     minibatch_size: 8192

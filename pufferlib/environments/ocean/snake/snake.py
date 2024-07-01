@@ -13,7 +13,7 @@ FOOD = 2
 WALL = 3
 
 class Snake(pufferlib.PufferEnv):
-    def __init__(self, width, height, snakes=4, food=4, vision=5):
+    def __init__(self, width, height, snakes=4, food=4, vision=5, render_mode='ansi'):
         super().__init__()
         self.grid = np.zeros((height, width), dtype=np.uint8)
         self.max_snake_length = width * height
@@ -23,7 +23,7 @@ class Snake(pufferlib.PufferEnv):
 
         self.width = width
         self.height = height
-        self.render_mode = 'ansi'
+        self.render_mode = render_mode
         self.food = food
 
         box = 2 * vision + 1
@@ -63,6 +63,13 @@ class Snake(pufferlib.PufferEnv):
         return self.grid, self.buf.rewards, self.buf.terminals, self.buf.truncations, info
 
     def render(self):
+        if self.render_mode == 'rgb_array':
+            frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+            frame[self.grid==SNAKE] = np.array([255, 0, 0])
+            frame[self.grid==FOOD] = np.array([0, 255, 0])
+            frame[self.grid==WALL] = np.array([0, 0, 255])
+            return frame
+
         def _render(val):
             if val == 0:
                 c = 90
