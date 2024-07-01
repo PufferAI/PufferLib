@@ -656,14 +656,6 @@ linksawaken:
 zelda:
   package: links_awaken
 
-snakedebug:
-  package: ocean
-  env_name: snake
-  train:
-    num_envs: 1
-    env_batch_size: 1
-    num_workers: 1
-
 snake:
   package: ocean
   env_name: snake
@@ -698,21 +690,21 @@ snake:
           }
           ent_coef: {
             'distribution': 'log_uniform_values',
-            'min': 1e-2,
+            'min': 1e-3,
             'max': 5e-2,
           }
           gamma: {
-            'values': [0.90, 0.925, 0.95, 0.975],
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
           }
           gae_lambda: {
-            'values': [0.90, 0.925, 0.95, 0.975],
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
           }
           batch_size: {
-            'values': [384, 768, 1536, 3072, 6144, 12288],
+            'values': [8192, 16384, 32768, 65536, 131072],
           }
-          #minibatch_size: {
-          #  'values': [384, 768, 1536],
-          #}
+          minibatch_size: {
+            'values': [1024, 2048, 4096, 8192],
+          }
 
 
 smac: {}

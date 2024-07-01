@@ -97,7 +97,7 @@ class Snake(pufferlib.PufferEnv):
             return f'\033[{c}m██\033[0m'
 
         lines = []
-        for line in self.grid:
+        for line in grid:
             lines.append(''.join([_render(val) for val in line]))
 
         return '\n'.join(lines)
