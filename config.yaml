@@ -678,7 +678,7 @@ snake:
     name: sweep
     metric:
       goal: maximize
-      name: environment/episode_return
+      name: environment/snake_length
     # Nested parameters name required by WandB API
     parameters:
       train:
