@@ -10,10 +10,12 @@ from pufferlib.environments.ocean.snake.c_snake import CSnake, CMultiSnake
 EMPTY = 0
 SNAKE = 1
 FOOD = 2
-WALL = 3
+CORPSE = 3
+WALL = 4
 
 class Snake(pufferlib.PufferEnv):
-    def __init__(self, widths, heights, num_snakes, num_food, vision=5, render_mode='ansi'):
+    def __init__(self, widths, heights, num_snakes, num_food, vision=5,
+            leave_corpse_on_death=True, render_mode='ansi'):
         super().__init__()
         self.grids = [np.zeros((h, w), dtype=np.uint8) for h, w in zip(heights, widths)]
 
@@ -31,6 +33,7 @@ class Snake(pufferlib.PufferEnv):
         self.num_snakes = num_snakes
         self.num_food = num_food
         self.vision = vision
+        self.leave_corpse_on_death = len(widths)*[leave_corpse_on_death]
 
         self.render_mode = render_mode
 
@@ -58,7 +61,7 @@ class Snake(pufferlib.PufferEnv):
     def reset(self, seed=None):
         self.c_env = CMultiSnake(self.grids, self.snakes, self.buf.observations,
             self.snake_lengths, self.snake_ptrs, self.actions, self.buf.rewards,
-            self.num_snakes, self.num_food, self.vision)
+            self.num_snakes, self.num_food, self.vision, self.leave_corpse_on_death)
 
         self.c_env.reset()
         return self.buf.observations, {}
@@ -88,11 +91,13 @@ class Snake(pufferlib.PufferEnv):
             if val == 0:
                 c = 90
             elif val == SNAKE:
-                c = 91
+                c = 92
             elif val == FOOD:
                 c = 94
+            elif val == CORPSE:
+                c = 95
             elif val == WALL:
-                c = 93
+                c = 97
 
             return f'\033[{c}m██\033[0m'
 

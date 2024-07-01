@@ -17,7 +17,8 @@ cdef:
     int EMPTY = 0
     int SNAKE = 1
     int FOOD = 2
-    int WALL = 3
+    int CORPSE = 3
+    int WALL = 4
 
 cdef class CMultiSnake:
     cdef:
@@ -33,7 +34,7 @@ cdef class CMultiSnake:
 
     def __init__(self, list grids, cnp.ndarray snakes, cnp.ndarray observations,
             snake_lengths, snake_ptrs, cnp.ndarray actions, cnp.ndarray rewards,
-            list num_snakes, list num_food, int vision):
+            list num_snakes, list num_food, int vision, list leave_corpse_on_death):
 
         cdef int ptr = 0
         cdef int end = 0
@@ -50,7 +51,8 @@ cdef class CMultiSnake:
                 actions[ptr:end],
                 rewards[ptr:end],
                 num_food[i],
-                vision
+                vision,
+                leave_corpse_on_death[i],
             ))
             ptr = end
 
@@ -85,10 +87,11 @@ cdef class CSnake:
         int max_snake_length
         int food
         int vision
+        bint leave_corpse_on_death
 
     def __init__(self, cnp.ndarray grid, cnp.ndarray snake, cnp.ndarray observations,
-            snake_lengths, snake_ptr, cnp.ndarray actions,
-            cnp.ndarray rewards, int food, int vision):
+            snake_lengths, snake_ptr, cnp.ndarray actions, cnp.ndarray rewards,
+            int food, int vision, bint leave_corpse_on_death):
         self.grid = grid
         self.snake = snake
         self.observations = observations
@@ -104,6 +107,7 @@ cdef class CSnake:
         self.max_snake_length = self.width * self.height
         self.food = food
         self.vision = vision
+        self.leave_corpse_on_death = leave_corpse_on_death
 
     cdef void compute_observations(self):
         cdef:
@@ -128,7 +132,12 @@ cdef class CSnake:
             head_ptr = self.snake_ptr[snake_id]
             head_r = self.snake[snake_id, head_ptr, 0]
             head_c = self.snake[snake_id, head_ptr, 1]
-            self.grid[head_r, head_c] = EMPTY
+
+            if self.leave_corpse_on_death:
+                self.grid[head_r, head_c] = CORPSE
+            else:
+                self.grid[head_r, head_c] = EMPTY
+
             self.snake[snake_id, head_ptr, 0] = -1
             self.snake[snake_id, head_ptr, 1] = -1
             self.snake_lengths[snake_id] -= 1
@@ -139,10 +148,12 @@ cdef class CSnake:
                 self.snake_ptr[snake_id] -= 1
 
         # Spawn a new snake
+        cdef int tile
         while True:
             head_r = rand() % (self.height - 1)
             head_c = rand() % (self.width - 1)
-            if self.grid[head_r, head_c] == EMPTY:
+            tile = self.grid[head_r, head_c]
+            if tile == EMPTY or tile == CORPSE:
                 break
 
         self.grid[head_r, head_c] = SNAKE
@@ -152,11 +163,12 @@ cdef class CSnake:
         self.snake_ptr[snake_id] = 0
 
     cdef void spawn_food(self):
-        cdef int r, c
+        cdef int r, c, tile
         while True:
             r = rand() % (self.height - 1)
             c = rand() % (self.width - 1)
-            if self.grid[r, c] == EMPTY:
+            tile = self.grid[r, c]
+            if tile == EMPTY or tile == CORPSE:
                 self.grid[r, c] = FOOD
                 return
 
@@ -194,6 +206,7 @@ cdef class CSnake:
             float reward
             bint hit
             bint hit_food
+            bint hit_corpse
 
         for i in range(self.num_snakes):
             atn = self.actions[i]
@@ -216,7 +229,8 @@ cdef class CSnake:
 
             hit = self.grid[next_r, next_c] != EMPTY
             hit_food = self.grid[next_r, next_c] == FOOD
-            if hit and not hit_food:
+            hit_corpse = self.grid[next_r, next_c] == CORPSE
+            if hit and not hit_food and not hit_corpse:
                 self.rewards[i] = -1.0
                 self.spawn_snake(i)
                 continue
@@ -229,10 +243,11 @@ cdef class CSnake:
             self.snake[i, head_ptr, 1] = next_c
             self.snake_ptr[i] = head_ptr
 
-            if hit_food:
+            if hit_food or hit_corpse:
                 self.rewards[i] = 0.1
                 self.snake_lengths[i] += 1
-                self.spawn_food()
+                if hit_food:
+                    self.spawn_food()
             else:
                 self.rewards[i] = 0.0
                 tail_ptr = head_ptr - self.snake_lengths[i]

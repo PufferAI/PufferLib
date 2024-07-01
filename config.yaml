@@ -660,7 +660,7 @@ snake:
   package: ocean
   env_name: snake
   train:
-    total_timesteps: 1_000_000
+    total_timesteps: 1_000_000_000
     num_envs: 1
     num_workers: 1
     env_batch_size: 1
