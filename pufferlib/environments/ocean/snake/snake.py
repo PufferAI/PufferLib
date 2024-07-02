@@ -24,7 +24,9 @@ class Snake(pufferlib.PufferEnv):
             assert w >= 48 and h >= 48
 
         total_snakes = sum(num_snakes)
-        max_snake_length = max([w*h for h, w in zip(heights, widths)])
+
+        # TODO: 10k can fail but otherwise OOM
+        max_snake_length = min(10000, max([w*h for h, w in zip(heights, widths)]))
         self.snakes = np.zeros((total_snakes, max_snake_length, 2), dtype=np.int32) - 1
 
         self.snake_lengths = np.zeros(total_snakes, dtype=np.int32)

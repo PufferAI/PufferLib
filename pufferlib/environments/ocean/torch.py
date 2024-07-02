@@ -8,15 +8,15 @@ Recurrent = pufferlib.models.LSTMWrapper
 #Policy = pufferlib.models.Default
 
 class Policy(nn.Module):
-    def __init__(self, env, flat_size=32,
+    def __init__(self, env, flat_size=144,
             input_size=32, hidden_size=128, output_size=128,
             downsample=1, **kwargs):
         super().__init__()
         self.embed = nn.Embedding(5, input_size)
         self.network= nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Conv2d(input_size, 32, 7, stride=5)),
+            pufferlib.pytorch.layer_init(nn.Conv2d(5, 32, 8, stride=4, padding=(1, 1))),
             nn.ReLU(),
-            pufferlib.pytorch.layer_init(nn.Conv2d(32, 32, 5, stride=3)),
+            pufferlib.pytorch.layer_init(nn.Conv2d(32, 16, 3, stride=2)),
             nn.ReLU(),
             nn.Flatten(),
             pufferlib.pytorch.layer_init(nn.Linear(flat_size, hidden_size)),
@@ -33,9 +33,7 @@ class Policy(nn.Module):
         return actions, value
 
     def encode_observations(self, observations):
-        observations = self.embed(observations.int()).permute(0, 3, 1, 2)
-        #out = self.network(observations)
-        #breakpoint()
+        observations = F.one_hot(observations.long(), 5).permute(0, 3, 1, 2).float()
         return self.network(observations), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):

@@ -659,8 +659,9 @@ zelda:
 snake:
   package: ocean
   env_name: snake
+  use_rnn: True
   train:
-    total_timesteps: 100_000_000
+    total_timesteps: 250_000_000
     num_envs: 1
     num_workers: 1
     env_batch_size: 1
