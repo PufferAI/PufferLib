@@ -12,7 +12,6 @@ class Policy(nn.Module):
             input_size=32, hidden_size=128, output_size=128,
             downsample=1, **kwargs):
         super().__init__()
-        self.embed = nn.Embedding(5, input_size)
         self.network= nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Conv2d(5, 32, 8, stride=4, padding=(1, 1))),
             nn.ReLU(),
