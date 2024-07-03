@@ -8,14 +8,26 @@ Recurrent = pufferlib.models.LSTMWrapper
 #Policy = pufferlib.models.Default
 
 class Policy(nn.Module):
-    def __init__(self, env, flat_size=144,
+    #def __init__(self, env, flat_size=144,
+    def __init__(self, env, flat_size=32,
             input_size=32, hidden_size=128, output_size=128,
             downsample=1, **kwargs):
         super().__init__()
+        '''
         self.network= nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Conv2d(5, 32, 8, stride=4, padding=(1, 1))),
             nn.ReLU(),
             pufferlib.pytorch.layer_init(nn.Conv2d(32, 16, 3, stride=2)),
+            nn.ReLU(),
+            nn.Flatten(),
+            pufferlib.pytorch.layer_init(nn.Linear(flat_size, hidden_size)),
+            nn.ReLU(),
+        )
+        '''
+        self.network= nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Conv2d(5, 32, 5, stride=3)),
+            nn.ReLU(),
+            pufferlib.pytorch.layer_init(nn.Conv2d(32, 32, 3, stride=1)),
             nn.ReLU(),
             nn.Flatten(),
             pufferlib.pytorch.layer_init(nn.Linear(flat_size, hidden_size)),
