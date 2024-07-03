@@ -41,6 +41,7 @@ def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array
 
 def make_snake(width=1024, height=1024, snakes=1024, food=1024, render_mode='rgb_array'):
 
+    '''
     return snake.Snake(
         widths=[2560],
         heights=[1440],
@@ -50,6 +51,7 @@ def make_snake(width=1024, height=1024, snakes=1024, food=1024, render_mode='rgb
         teleport_at_edge=False,
         render_mode=render_mode,
     )
+    '''
 
     return snake.Snake(
         widths=[80],
@@ -58,7 +60,7 @@ def make_snake(width=1024, height=1024, snakes=1024, food=1024, render_mode='rgb
         num_food=[64],
         leave_corpse_on_death=True,
         teleport_at_edge=True,
-        render_mode='ansi',
+        render_mode='rgb_array',
     )
  
 
