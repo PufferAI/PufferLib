@@ -62,6 +62,7 @@ def make_snake(width=1024, height=1024, snakes=1024, food=1024, render_mode='rgb
         leave_corpse_on_death=True,
         teleport_at_edge=True,
         render_mode='rgb_array',
+        vision=5,
     )
  
 

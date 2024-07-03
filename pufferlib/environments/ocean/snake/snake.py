@@ -91,7 +91,7 @@ class Snake(pufferlib.PufferEnv):
         return (self.buf.observations, self.buf.rewards,
             self.buf.terminals, self.buf.truncations, info)
 
-    def render(self, upscale=1):
+    def render(self, upscale=4):
         grid = self.grids[0]
         height, width = grid.shape
         if self.render_mode == 'rgb_array':
