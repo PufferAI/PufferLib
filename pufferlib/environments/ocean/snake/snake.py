@@ -19,33 +19,38 @@ class Snake(pufferlib.PufferEnv):
         super().__init__()
         self.grids = [np.zeros((h, w), dtype=np.uint8) for h, w in zip(heights, widths)]
 
-        assert len(widths) == len(heights)
+        assert isinstance(vision, int)
+        assert len(widths) == len(heights) == len(num_snakes) == len(num_food)
+        if isinstance(leave_corpse_on_death, bool):
+            self.leave_corpse_on_death = len(widths)*[leave_corpse_on_death]
+        else:
+            assert len(leave_corpse_on_death) == len(widths)
+
         for w, h in zip(widths, heights):
-            assert w >= 48 and h >= 48
+            assert w >= 2*vision+6 and h >= 2*vision+6, \
+                'width and height must be at least 2*vision+6'
+
+        # Note: it is possible to have a snake longer than 10k, which will mess up
+        # the environment, but we must allocate this much memory for each snake
+        max_snake_length = min(10000, max([w*h for h, w in zip(heights, widths)]))
 
         total_snakes = sum(num_snakes)
-
-        # TODO: 10k can fail but otherwise OOM
-        max_snake_length = min(10000, max([w*h for h, w in zip(heights, widths)]))
         self.snakes = np.zeros((total_snakes, max_snake_length, 2), dtype=np.int32) - 1
-
         self.snake_lengths = np.zeros(total_snakes, dtype=np.int32)
         self.snake_ptrs = np.zeros(total_snakes, dtype=np.int32)
-
         self.num_snakes = num_snakes
         self.num_food = num_food
+
         self.vision = vision
-        self.leave_corpse_on_death = len(widths)*[leave_corpse_on_death]
-
-        self.render_mode = render_mode
-
         box = 2 * vision + 1
+
         self.observation_space = gymnasium.spaces.Box(
             low=0, high=2, shape=(box, box), dtype=np.uint8)
         self.action_space = gymnasium.spaces.Discrete(4)
         self.single_observation_space = self.observation_space
         self.single_action_space = self.action_space
         self.num_agents = total_snakes
+        self.render_mode = render_mode
         self.emulated = None
         self.done = False
         self.tick = 0
