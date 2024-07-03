@@ -8,7 +8,6 @@
 # cython: profile=False
 '''Env originally by https://github.com/dnbt777'''
 
-
 import numpy as np
 cimport numpy as cnp
 from libc.stdlib cimport rand
@@ -34,7 +33,8 @@ cdef class CMultiSnake:
 
     def __init__(self, list grids, cnp.ndarray snakes, cnp.ndarray observations,
             snake_lengths, snake_ptrs, cnp.ndarray actions, cnp.ndarray rewards,
-            list num_snakes, list num_food, int vision, list leave_corpse_on_death):
+            list num_snakes, list num_food, int vision, list leave_corpse_on_death,
+            list teleport_at_edge):
 
         cdef int ptr = 0
         cdef int end = 0
@@ -53,6 +53,7 @@ cdef class CMultiSnake:
                 num_food[i],
                 vision,
                 leave_corpse_on_death[i],
+                teleport_at_edge[i],
             ))
             ptr = end
 
@@ -88,10 +89,11 @@ cdef class CSnake:
         int food
         int vision
         bint leave_corpse_on_death
+        bint teleport_at_edge
 
     def __init__(self, cnp.ndarray grid, cnp.ndarray snake, cnp.ndarray observations,
             snake_lengths, snake_ptr, cnp.ndarray actions, cnp.ndarray rewards,
-            int food, int vision, bint leave_corpse_on_death):
+            int food, int vision, bint leave_corpse_on_death, bint teleport_at_edge):
         self.grid = grid
         self.snake = snake
         self.observations = observations
@@ -108,22 +110,61 @@ cdef class CSnake:
         self.food = food
         self.vision = vision
         self.leave_corpse_on_death = leave_corpse_on_death
+        self.teleport_at_edge = teleport_at_edge
 
     cdef void compute_observations(self):
         cdef:
             int i
+            int r
+            int c
             int head_ptr
             int head_r
             int head_c
 
-        for i in range(self.num_snakes):
-            head_ptr = self.snake_ptr[i]
-            head_r = self.snake[i, head_ptr, 0]
-            head_c = self.snake[i, head_ptr, 1]
-            self.observations[i] = self.grid[
-                head_r - self.vision:head_r + self.vision + 1,
-                head_c - self.vision:head_c + self.vision + 1,
-            ]
+            int map_r
+            int map_c
+
+        # We do two separate code paths here to save checks and bugs
+        if self.teleport_at_edge:
+            for i in range(self.num_snakes):
+                head_ptr = self.snake_ptr[i]
+                head_r = self.snake[i, head_ptr, 0]
+                head_c = self.snake[i, head_ptr, 1]
+                if (head_r >= self.vision
+                        and head_r < self.height - self.vision - 1
+                        and head_c >= self.vision
+                        and head_c < self.width - self.vision - 1):
+                    self.observations[i] = self.grid[
+                        head_r - self.vision:head_r + self.vision + 1,
+                        head_c - self.vision:head_c + self.vision + 1,
+                    ]
+                else:
+                    for r in range(-self.vision, self.vision+1):
+                        for c in range(-self.vision, self.vision+1):
+                            # compute wrapped indices
+                            map_r = head_r + r
+                            map_c = head_c + c
+
+                            if map_r < 0:
+                                map_r = self.height + map_r
+                            elif map_r >= self.height:
+                                map_r = map_r - self.height
+                            if map_c < 0:
+                                map_c = self.width + map_c
+                            elif map_c >= self.width:
+                                map_c = map_c - self.width
+
+                            self.observations[i, r+self.vision, c+self.vision] = self.grid[map_r, map_c]
+                    
+        else:
+            for i in range(self.num_snakes):
+                head_ptr = self.snake_ptr[i]
+                head_r = self.snake[i, head_ptr, 0]
+                head_c = self.snake[i, head_ptr, 1]
+                self.observations[i] = self.grid[
+                    head_r - self.vision:head_r + self.vision + 1,
+                    head_c - self.vision:head_c + self.vision + 1,
+                ]
 
     cdef void spawn_snake(self, int snake_id):
         # Delete the snake from the grid
@@ -133,7 +174,7 @@ cdef class CSnake:
             head_r = self.snake[snake_id, head_ptr, 0]
             head_c = self.snake[snake_id, head_ptr, 1]
 
-            if self.leave_corpse_on_death:
+            if self.leave_corpse_on_death and self.snake_lengths[snake_id] % 2 == 0:
                 self.grid[head_r, head_c] = CORPSE
             else:
                 self.grid[head_r, head_c] = EMPTY
@@ -173,10 +214,13 @@ cdef class CSnake:
                 return
 
     cdef void reset(self):
-        self.grid[:self.vision+1, :] = WALL
-        self.grid[:, :self.vision+1] = WALL
-        self.grid[:, self.width-self.vision-2:] = WALL
-        self.grid[self.height-self.vision-2:, :] = WALL
+        if not self.teleport_at_edge:
+            # You either teleport from one side to the other and
+            # pad vision or you have to border the map
+            self.grid[:self.vision, :] = WALL
+            self.grid[:, :self.vision] = WALL
+            self.grid[:, self.width-self.vision-1:] = WALL
+            self.grid[self.height-self.vision-1:, :] = WALL
 
         for i in range(self.num_snakes):
             self.spawn_snake(i)
@@ -196,17 +240,13 @@ cdef class CSnake:
             int head_c
             int next_r
             int next_c
-            int hit_wall
-            int hit_self
+            int tile
             int tail_ptr
             int tail_r
             int tail_c
             int dist_to_food
             int next_dist_food
             float reward
-            bint hit
-            bint hit_food
-            bint hit_corpse
 
         for i in range(self.num_snakes):
             atn = self.actions[i]
@@ -227,10 +267,19 @@ cdef class CSnake:
             next_r = head_r + dr
             next_c = head_c + dc
 
-            hit = self.grid[next_r, next_c] != EMPTY
-            hit_food = self.grid[next_r, next_c] == FOOD
-            hit_corpse = self.grid[next_r, next_c] == CORPSE
-            if hit and not hit_food and not hit_corpse:
+            if self.teleport_at_edge:
+                if next_r == -1:
+                    next_r = self.height - 1
+                elif next_r == self.height:
+                    next_r = 0
+                if next_c == -1:
+                    next_c = self.width - 1
+                elif next_c == self.width:
+                    next_c = 0
+
+            tile = self.grid[next_r, next_c]
+
+            if tile == SNAKE or tile == WALL:
                 self.rewards[i] = -1.0
                 self.spawn_snake(i)
                 continue
@@ -243,10 +292,10 @@ cdef class CSnake:
             self.snake[i, head_ptr, 1] = next_c
             self.snake_ptr[i] = head_ptr
 
-            if hit_food or hit_corpse:
+            if tile == FOOD or tile == CORPSE:
                 self.rewards[i] = 0.1
                 self.snake_lengths[i] += 1
-                if hit_food:
+                if tile == FOOD:
                     self.spawn_food()
             else:
                 self.rewards[i] = 0.0

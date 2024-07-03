@@ -15,7 +15,7 @@ WALL = 4
 
 class Snake(pufferlib.PufferEnv):
     def __init__(self, widths, heights, num_snakes, num_food, vision=15,
-            leave_corpse_on_death=True, render_mode='ansi'):
+            leave_corpse_on_death=True, teleport_at_edge=True, render_mode='ansi'):
         super().__init__()
         self.grids = [np.zeros((h, w), dtype=np.uint8) for h, w in zip(heights, widths)]
 
@@ -33,7 +33,6 @@ class Snake(pufferlib.PufferEnv):
         # Note: it is possible to have a snake longer than 10k, which will mess up
         # the environment, but we must allocate this much memory for each snake
         max_snake_length = min(10000, max([w*h for h, w in zip(heights, widths)]))
-
         total_snakes = sum(num_snakes)
         self.snakes = np.zeros((total_snakes, max_snake_length, 2), dtype=np.int32) - 1
         self.snake_lengths = np.zeros(total_snakes, dtype=np.int32)
@@ -42,6 +41,10 @@ class Snake(pufferlib.PufferEnv):
         self.num_food = num_food
 
         self.vision = vision
+
+        self.leave_corpse_on_death = len(widths)*[leave_corpse_on_death]
+        self.teleport_at_edge = len(widths)*[teleport_at_edge]
+
         box = 2 * vision + 1
 
         self.observation_space = gymnasium.spaces.Box(
@@ -68,7 +71,8 @@ class Snake(pufferlib.PufferEnv):
     def reset(self, seed=None):
         self.c_env = CMultiSnake(self.grids, self.snakes, self.buf.observations,
             self.snake_lengths, self.snake_ptrs, self.actions, self.buf.rewards,
-            self.num_snakes, self.num_food, self.vision, self.leave_corpse_on_death)
+            self.num_snakes, self.num_food, self.vision,
+            self.leave_corpse_on_death, self.teleport_at_edge)
 
         self.c_env.reset()
         return self.buf.observations, {}
@@ -87,7 +91,7 @@ class Snake(pufferlib.PufferEnv):
         return (self.buf.observations, self.buf.rewards,
             self.buf.terminals, self.buf.truncations, info)
 
-    def render(self):
+    def render(self, upscale=1):
         grid = self.grids[0]
         height, width = grid.shape
         if self.render_mode == 'rgb_array':
@@ -96,6 +100,11 @@ class Snake(pufferlib.PufferEnv):
             frame[grid==FOOD] = np.array([0, 255, 0])
             frame[grid==CORPSE] = np.array([255, 0, 255])
             frame[grid==WALL] = np.array([0, 0, 255])
+
+            if upscale > 1:
+                rescaler = np.ones((upscale, upscale, 1), dtype=np.uint8)
+                frame = np.kron(frame, rescaler)
+
             return frame
 
         def _render(val):
@@ -126,6 +135,7 @@ def perf_test():
         1024*[40],
         1024*[1],
         1024*[1],
+        teleport_at_edge=False,
     )
     env.reset()
 
