@@ -12,12 +12,12 @@ COLORS = np.array([
     [0, 128, 255, 255],   # Corpse
     [128, 128, 128, 255], # Wall
     [255, 0, 0, 255],     # Snake
-    [255, 0, 0, 255],     # Snake
     [255, 255, 255, 255], # Snake
+    [255, 0, 0, 255],     # Snake
     [255, 255, 255, 255], # Snake
 ], dtype=np.uint8)
 
-ANSI_COLORS = [90, 34, 36, 37, 91, 31, 97, 97]
+ANSI_COLORS = [30, 34, 36, 90, 31, 97, 91, 37]
 
 class Snake(pufferlib.PufferEnv):
     def __init__(self, widths, heights, num_snakes, num_food, vision=15,
@@ -43,7 +43,8 @@ class Snake(pufferlib.PufferEnv):
         self.snakes = np.zeros((total_snakes, self.max_snake_length, 2), dtype=np.int32) - 1
         self.snake_lengths = np.zeros(total_snakes, dtype=np.int32)
         self.snake_ptrs = np.zeros(total_snakes, dtype=np.int32)
-        self.snake_colors = np.random.randint(4, 8, total_snakes, dtype=np.int32)
+        self.snake_lifetimes = np.zeros(total_snakes, dtype=np.int32)
+        self.snake_colors = 4 + np.arange(total_snakes, dtype=np.int32) % 4
         self.num_snakes = num_snakes
         self.num_food = num_food
         self.vision = vision
@@ -71,6 +72,7 @@ class Snake(pufferlib.PufferEnv):
             masks = np.ones(total_snakes, dtype=bool),
         )
         self.actions = np.zeros(total_snakes, dtype=np.uint32)
+        self.reward_sum = 0
 
         self.atn = None
         if render_mode == 'human':
@@ -78,8 +80,8 @@ class Snake(pufferlib.PufferEnv):
  
     def reset(self, seed=None):
         self.c_env = CMultiSnake(self.grids, self.snakes, self.buf.observations,
-            self.snake_lengths, self.snake_ptrs, self.snake_colors, self.actions,
-            self.buf.rewards, self.num_snakes, self.num_food, self.vision,
+            self.snake_lengths, self.snake_ptrs, self.snake_lifetimes, self.snake_colors,
+            self.actions, self.buf.rewards, self.num_snakes, self.num_food, self.vision,
             self.max_snake_length, self.leave_corpse_on_death, self.teleport_at_edge)
 
         self.c_env.reset()
@@ -93,11 +95,18 @@ class Snake(pufferlib.PufferEnv):
         self.c_env.step()
 
         info = {}
+        self.reward_sum += self.buf.rewards.mean()
         if self.tick % 128 == 0:
             info = {
-                'snake_length': np.mean(self.snake_lengths),
-                'reward': self.buf.rewards.mean(),
+                'snake_length_min': np.min(self.snake_lengths),
+                'snake_lifetime_min': np.min(self.snake_lifetimes),
+                'snake_length_max': np.max(self.snake_lengths),
+                'snake_lifetime_max': np.max(self.snake_lifetimes),
+                'snake_length_mean': np.mean(self.snake_lengths),
+                'snake_lifetime_mean': np.mean(self.snake_lifetimes),
+                'reward': self.reward_sum / 128,
             }
+            self.reward_sum = 0
 
         return (self.buf.observations, self.buf.rewards,
             self.buf.terminals, self.buf.truncations, info)
@@ -118,6 +127,12 @@ class Snake(pufferlib.PufferEnv):
                 frame = np.kron(frame, rescaler)
         elif self.render_mode == 'ansi':
             lines = []
+            if not self.teleport_at_edge[0]:
+                grid = grid[
+                    self.vision-1:-self.vision,
+                    self.vision-1:-self.vision
+                ]
+
             for line in grid:
                 lines.append(''.join([
                     f'\033[{ANSI_COLORS[val]}m██\033[0m' for val in line]))
