@@ -239,9 +239,9 @@ cdef class CSnake:
             int tail_ptr
             int tail_r
             int tail_c
-            int dist_to_food
-            int next_dist_food
+            int snake_length
             float reward
+            bint grow
 
         for i in range(self.num_snakes):
             atn = self.actions[i]
@@ -256,6 +256,7 @@ cdef class CSnake:
             elif atn == 3:  # right
                 dc = 1
 
+            snake_length = self.snake_lengths[i]
             head_ptr = self.snake_ptr[i]
             head_r = self.snake[i, head_ptr, 0]
             head_c = self.snake[i, head_ptr, 1]
@@ -287,14 +288,21 @@ cdef class CSnake:
             self.snake[i, head_ptr, 1] = next_c
             self.snake_ptr[i] = head_ptr
 
-            if tile == FOOD or tile == CORPSE:
+            if tile == FOOD:
                 self.rewards[i] = 0.1
-                self.snake_lengths[i] += 1
-                if tile == FOOD:
-                    self.spawn_food()
+                self.spawn_food()
+                grow = True
+            elif tile == CORPSE:
+                self.rewards[i] = 0.1
+                grow = True
             else:
                 self.rewards[i] = 0.0
-                tail_ptr = head_ptr - self.snake_lengths[i]
+                grow = False
+
+            if grow and snake_length < self.max_snake_length:
+                self.snake_lengths[i] += 1
+            else:
+                tail_ptr = head_ptr - snake_length
                 if tail_ptr < 0:
                     tail_ptr = self.max_snake_length + tail_ptr
 

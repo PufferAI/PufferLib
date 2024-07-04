@@ -1,19 +1,23 @@
-'''Env originally by https://github.com/dnbt777'''
+'''High-perf many-agent snake. Inspired by snake env from https://github.com/dnbt777'''
 
 import numpy as np
-import random
 import gymnasium
 
 import pufferlib
 from pufferlib.environments.ocean.snake.c_snake import CSnake, CMultiSnake
-from pufferlib.environments.ocean.snake.render import GridRender, RaylibGlobal, RaylibLocal
 
-# TODO: Fix
-EMPTY = 0
-SNAKE = 1
-FOOD = 2
-CORPSE = 3
-WALL = 4
+COLORS = np.array([
+    [6, 24, 24, 255],     # Background
+    [0, 0, 255, 255],     # Food
+    [0, 128, 255, 255],   # Corpse
+    [128, 128, 128, 255], # Wall
+    [255, 0, 0, 255],     # Snake
+    [255, 0, 0, 255],     # Snake
+    [255, 255, 255, 255], # Snake
+    [255, 255, 255, 255], # Snake
+], dtype=np.uint8)
+
+ANSI_COLORS = [90, 34, 36, 37, 91, 31, 97, 97]
 
 class Snake(pufferlib.PufferEnv):
     def __init__(self, widths, heights, num_snakes, num_food, vision=15,
@@ -34,7 +38,7 @@ class Snake(pufferlib.PufferEnv):
 
         # Note: it is possible to have a snake longer than 10k, which will mess up
         # the environment, but we must allocate this much memory for each snake
-        max_snake_length = min(10000, max([w*h for h, w in zip(heights, widths)]))
+        max_snake_length = min(1024, max([w*h for h, w in zip(heights, widths)]))
         total_snakes = sum(num_snakes)
         self.snakes = np.zeros((total_snakes, max_snake_length, 2), dtype=np.int32) - 1
         self.snake_lengths = np.zeros(total_snakes, dtype=np.int32)
@@ -42,14 +46,11 @@ class Snake(pufferlib.PufferEnv):
         self.snake_colors = np.random.randint(4, 8, total_snakes, dtype=np.int32)
         self.num_snakes = num_snakes
         self.num_food = num_food
-
         self.vision = vision
-
         self.leave_corpse_on_death = len(widths)*[leave_corpse_on_death]
         self.teleport_at_edge = len(widths)*[teleport_at_edge]
 
         box = 2 * vision + 1
-
         self.observation_space = gymnasium.spaces.Box(
             low=0, high=2, shape=(box, box), dtype=np.uint8)
         self.action_space = gymnasium.spaces.Discrete(4)
@@ -71,29 +72,9 @@ class Snake(pufferlib.PufferEnv):
         )
         self.actions = np.zeros(total_snakes, dtype=np.uint32)
 
-        if render_mode == 'rgb_array':
-            asset_map = np.array([
-                [6, 24, 24],
-                [255, 0, 255],
-                [255, 0, 0],
-                [0, 255, 255],
-                [0, 255, 192],
-                [0, 255, 128],
-                [0, 255, 64],
-                [0, 255, 0],
-            ], dtype=np.uint8)
-            self.client = GridRender(widths[0], heights[0], asset_map)
-        elif render_mode == 'human':
-            asset_map = {
-                EMPTY: (0, 0, 0, 255),
-                SNAKE: (255, 0, 0, 255),
-                FOOD: (0, 255, 0, 255),
-                CORPSE: (255, 0, 255, 255),
-                WALL: (0, 0, 255, 255),
-            }
-
-            #self.client = RaylibLocal(160, 90, asset_map, tile_size=16)
-            self.client = RaylibGlobal(widths[0], heights[0], asset_map, tile_size=1)
+        self.atn = None
+        if render_mode == 'human':
+            self.client = RaylibClient(80, 45, COLORS.tolist(), tile_size=16)
  
     def reset(self, seed=None):
         self.c_env = CMultiSnake(self.grids, self.snakes, self.buf.observations,
@@ -105,10 +86,9 @@ class Snake(pufferlib.PufferEnv):
         return self.buf.observations, {}
 
     def step(self, actions):
-        if self.render_mode == 'human':
-            self.actions[1:] = actions[1:]
-        else:
-            self.actions[:] = actions
+        self.actions[:] = actions
+        if self.atn is not None: # Human player
+            self.actions[0] = self.atn
 
         self.c_env.step()
 
@@ -125,60 +105,100 @@ class Snake(pufferlib.PufferEnv):
     def render(self, upscale=1):
         grid = self.grids[0]
         height, width = grid.shape
-        if self.render_mode == 'rgb_array':
-            return self.client.render(grid, upscale=upscale)
-        elif self.render_mode == 'human':
+        if self.render_mode == 'human':
             snakes_in_first_env = self.num_snakes[0]
             snake_ptrs = self.snake_ptrs[:snakes_in_first_env]
             agent_positions = self.snakes[np.arange(snakes_in_first_env), snake_ptrs]
             actions = self.actions[:snakes_in_first_env]
-            return self.client.render(grid, agent_positions, actions, self.vision)
+            frame, self.atn = self.client.render(grid, agent_positions)
+        elif self.render_mode == 'rgb_array':
+            frame = COLORS[grid]
+            if upscale > 1:
+                rescaler = np.ones((upscale, upscale, 1), dtype=np.uint8)
+                frame = np.kron(frame, rescaler)
+        elif self.render_mode == 'ansi':
+            lines = []
+            for line in grid:
+                lines.append(''.join([
+                    f'\033[{ANSI_COLORS[val]}m██\033[0m' for val in line]))
 
-        def _render(val):
-            if val == 0:
-                c = 90
-            elif val == SNAKE:
-                c = 92
-            elif val == FOOD:
-                c = 94
-            elif val == CORPSE:
-                c = 95
-            elif val == WALL:
-                c = 97
+            frame = '\n'.join(lines)
+        else:
+            raise ValueError(f'Invalid render mode: {self.render_mode}')
 
-            return f'\033[{c}m██\033[0m'
+        return frame
 
-        lines = []
-        for line in grid:
-            lines.append(''.join([_render(val) for val in line]))
+class RaylibClient:
+    def __init__(self, width, height, asset_map, tile_size=16):
+        self.width = width
+        self.height = height
+        self.asset_map = asset_map
+        self.tile_size = tile_size
 
-        return '\n'.join(lines)
+        from raylib import rl
+        rl.InitWindow(width*tile_size, height*tile_size,
+            "PufferLib Ray Snake".encode())
+        rl.SetTargetFPS(15)
+        self.rl = rl
 
-def perf_test():
-    num_snakes = 1024
-    #env = Snake([1024], [1024], [num_snakes], [1024])
-    env = Snake(
-        1024*[40],
-        1024*[40],
-        1024*[1],
-        1024*[1],
-        teleport_at_edge=False,
-    )
+        from cffi import FFI
+        self.ffi = FFI()
+
+    def _cdata_to_numpy(self):
+
+        image = self.rl.LoadImageFromScreen()
+        width, height, channels = image.width, image.height, 4
+        cdata = self.ffi.buffer(image.data, width*height*channels)
+        return np.frombuffer(cdata, dtype=np.uint8
+            ).reshape((height, width, channels))
+
+    def render(self, grid, agent_positions):
+        rl = self.rl
+        action = None
+        if rl.IsKeyDown(rl.KEY_UP) or rl.IsKeyDown(rl.KEY_W):
+            action = 0
+        elif rl.IsKeyDown(rl.KEY_DOWN) or rl.IsKeyDown(rl.KEY_S):
+            action = 1
+        elif rl.IsKeyDown(rl.KEY_LEFT) or rl.IsKeyDown(rl.KEY_A):
+            action = 2
+        elif rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
+            action = 3
+
+        rl.BeginDrawing()
+        rl.ClearBackground(self.asset_map[0])
+
+        ts = self.tile_size
+        main_r, main_c = agent_positions[0]
+        for i, r in enumerate(range(main_r-self.height//2, main_r+self.height//2+1)):
+            for j, c in enumerate(range(main_c-self.width//2, main_c+self.width//2+1)):
+                if r < 0 or r >= grid.shape[0] or c < 0 or c >= grid.shape[1]:
+                    continue
+
+                tile = grid[r, c]
+                if tile == 0:
+                    continue
+
+                rl.DrawRectangle(j*ts, i*ts, ts, ts, self.asset_map[tile])
+
+        #rl.DrawRectangle(64, 64, 256, 256, (0, 0, 255, 255))
+
+        rl.EndDrawing()
+        return self._cdata_to_numpy()[:, :, :3], action
+
+def test_performance(timeout=10, atn_cache=1024):
+    actions = np.random.randint(0, 4, (atn_cache, env.num_snakes[0]))
+    env = Snake()
     env.reset()
-
-    import numpy as np
-    actions = np.random.randint(0, 4, (1000, num_snakes))
+    tick = 0
 
     import time
     start = time.time()
-    done = True
-    tick = 0
-    while time.time() - start < 10:
-        atns = actions[tick % 1000]
+    while time.time() - start < timeout:
+        atns = actions[tick % atn_cache]
         env.step(atns)
         tick += 1
 
-    print(f'SPS: %f', num_snakes * tick / (time.time() - start))
+    print(f'SPS: %f', env.num_snakes[0] * tick / (time.time() - start))
 
 if __name__ == '__main__':
-    perf_test()
+    test_performance()
