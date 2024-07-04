@@ -14,27 +14,19 @@ from libc.stdlib cimport rand
 
 cdef:
     int EMPTY = 0
-    int SNAKE = 1
-    int FOOD = 2
-    int CORPSE = 3
-    int WALL = 4
+    int FOOD = 1
+    int CORPSE = 2
+    int WALL = 3
 
 cdef class CMultiSnake:
     cdef:
-        char[:, :, :] grids
-        char[:, :, :] observations
-        char[:, :, :] snakes
-        char[:] snake_ptrs
-        int[:] snake_lengths
-        unsigned int[:] actions
-        float[:] rewards
         int num_envs
         list envs
 
     def __init__(self, list grids, cnp.ndarray snakes, cnp.ndarray observations,
-            snake_lengths, snake_ptrs, cnp.ndarray actions, cnp.ndarray rewards,
-            list num_snakes, list num_food, int vision, list leave_corpse_on_death,
-            list teleport_at_edge):
+            snake_lengths, snake_ptrs, snake_colors, cnp.ndarray actions,
+            cnp.ndarray rewards, list num_snakes, list num_food, int vision,
+            list leave_corpse_on_death, list teleport_at_edge):
 
         cdef int ptr = 0
         cdef int end = 0
@@ -48,6 +40,7 @@ cdef class CMultiSnake:
                 observations[ptr:end],
                 snake_lengths[ptr:end],
                 snake_ptrs[ptr:end],
+                snake_colors[ptr:end],
                 actions[ptr:end],
                 rewards[ptr:end],
                 num_food[i],
@@ -80,6 +73,7 @@ cdef class CSnake:
         int[:, :, :] snake
         int[:] snake_ptr
         int[:] snake_lengths
+        int[:] snake_colors
         unsigned int[:] actions
         float[:] rewards
         int num_snakes
@@ -92,7 +86,7 @@ cdef class CSnake:
         bint teleport_at_edge
 
     def __init__(self, cnp.ndarray grid, cnp.ndarray snake, cnp.ndarray observations,
-            snake_lengths, snake_ptr, cnp.ndarray actions, cnp.ndarray rewards,
+            snake_lengths, snake_ptr, snake_colors, cnp.ndarray actions, cnp.ndarray rewards,
             int food, int vision, bint leave_corpse_on_death, bint teleport_at_edge):
         self.grid = grid
         self.snake = snake
@@ -103,6 +97,7 @@ cdef class CSnake:
         self.num_snakes = snake.shape[0]
         self.snake_lengths = snake_lengths
         self.snake_ptr = snake_ptr
+        self.snake_colors = snake_colors
 
         self.width = grid.shape[1]
         self.height = grid.shape[0]
@@ -197,7 +192,7 @@ cdef class CSnake:
             if tile == EMPTY or tile == CORPSE:
                 break
 
-        self.grid[head_r, head_c] = SNAKE
+        self.grid[head_r, head_c] = self.snake_colors[snake_id]
         self.snake[snake_id, 0, 0] = head_r
         self.snake[snake_id, 0, 1] = head_c
         self.snake_lengths[snake_id] = 1
@@ -279,7 +274,7 @@ cdef class CSnake:
 
             tile = self.grid[next_r, next_c]
 
-            if tile == SNAKE or tile == WALL:
+            if tile >= WALL:
                 self.rewards[i] = -1.0
                 self.spawn_snake(i)
                 continue
@@ -309,6 +304,6 @@ cdef class CSnake:
                 self.snake[i, tail_ptr, 1] = -1
                 self.grid[tail_r, tail_c] = EMPTY
 
-            self.grid[next_r, next_c] = SNAKE
+            self.grid[next_r, next_c] = self.snake_colors[i]
 
         self.compute_observations()

@@ -48,18 +48,19 @@ def make_snake(width=1024, height=1024, snakes=1024, food=1024, render_mode='rgb
         num_food=[65536],
         leave_corpse_on_death=True,
         teleport_at_edge=False,
-        render_mode=render_mode,
+        render_mode='rgb_array',
         vision=5,
     )
 
     return snake.Snake(
-        widths=[80],
-        heights=[45],
+        widths=[160],
+        heights=[90],
         num_snakes=[8],
         num_food=[64],
         leave_corpse_on_death=True,
-        teleport_at_edge=True,
-        render_mode='ansi',
+        teleport_at_edge=False,
+        render_mode='human',
+        vision=5,
     )
  
 
