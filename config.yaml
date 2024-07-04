@@ -468,9 +468,9 @@ nmmo:
     minibatch_size: 2048
 
 nmmo3:
-  use_rnn: True
+  use_rnn: False
   train:
-    total_timesteps: 100_000_000
+    total_timesteps: 20_000_000
     checkpoint_interval: 1000
     num_envs: 24
     num_workers: 24
@@ -500,30 +500,42 @@ nmmo3laptop:
 
 nmmo3debug:
   package: nmmo3
+  use_rnn: True
   train:
-    total_timesteps: 20_000_000
+    total_timesteps: 100_000_000
+    learning_rate: 0.0007822667183404625
     num_envs: 1
     num_workers: 1
     env_batch_size: 1
     update_epochs: 1
-    gamma: 0.99
-    ent_coef: 0.05
-    batch_size: 65536
+    gamma: 0.975
+    gae_lambda: 0.975
+    ent_coef: 0.0017149656362185647 
+    bptt_horizon: 16
+    batch_size: 131072
     minibatch_size: 16384
     compile: False
-    #anneal_lr: False
+    anneal_lr: False
   sweep:
-    method: random
+    method: bayes 
     name: sweep
     metric:
       goal: maximize
-      name: environment/reward_dist
+      name: environment/min_comb_prof
     # Nested parameters name required by WandB API
     parameters:
       train:
         parameters:
+          ent_coef: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-3,
+            'max': 5e-2,
+          }
           gamma: {
-            'values': [0.95, 0.975, 0.99, 0.995, 0.998],
+            'values': [0.80, 0.90, 0.925, 0.95, 0.975, 0.99],
+          }
+          gae_lambda: {
+            'values': [0.80, 0.90, 0.925, 0.95, 0.975, 0.99],
           }
           learning_rate: {
             'distribution': 'log_uniform_values',
@@ -531,13 +543,14 @@ nmmo3debug:
             'max': 1e-1,
           }
           batch_size: {
-            'values': [8192, 16384, 32768],
+            'values': [32768, 65536, 131072, 262144],
+          }
+          minibatch_size: {
+            'values': [8192, 16384, 32768, 65536],
           }
           bptt_horizon: {
-            'values': [4, 8, 16],
+            'values': [1, 2, 4, 8, 16],
           }
-
-
 
 # Ocean: PufferAI's first party environment suite
 ocean:
@@ -552,22 +565,85 @@ ocean:
     minibatch_size: 128
     bptt_horizon: 4
     device: cpu
+grid:
+  package: ocean
+  env_name: grid
+  train:
+    total_timesteps: 50_000_000
+    learning_rate: 0.00175
+    num_envs: 1
+    num_workers: 1
+    env_batch_size: 1
+    update_epochs: 1
+    gamma: 0.925
+    gae_lambda: 0.99
+    ent_coef: 0.0018
+    bptt_horizon: 8
+    batch_size: 65536
+    minibatch_size: 2048
+    compile: False
+    anneal_lr: False
+    device: cuda
+  sweep:
+    method: bayes 
+    name: sweep
+    metric:
+      goal: maximize
+      name: environment/episode_return
+    # Nested parameters name required by WandB API
+    parameters:
+      train:
+        parameters:
+          ent_coef: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-3,
+            'max': 5e-2,
+          }
+          gamma: {
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+          }
+          gae_lambda: {
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+          }
+          learning_rate: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-4,
+            'max': 1e-1,
+          }
+          batch_size: {
+            'values': [4096, 8192, 16384, 32768, 65536],
+          }
+          minibatch_size: {
+            'values': [1024, 2048, 4096, 8192, 16384],
+          }
+          bptt_horizon: {
+            'values': [1, 2, 4, 8, 16],
+          }
+
 bandit:
   package: ocean
+  env_name: bandit
 memory:
   package: ocean
+  env_name: memory
 multiagent:
   package: ocean
+  env_name: multiagent
 password:
   package: ocean
+  env_name: password
 performance:
   package: ocean
+  env_name: performance
 spaces:
   package: ocean
+  env_name: spaces
 squared:
   package: ocean
+  env_name: squared
 stochastic:
   package: ocean
+  env_name: stochastic
 
 open_spiel:
   env_name: connect_four
@@ -646,6 +722,57 @@ slimevolley:
     batch_size: 65536
     minibatch_size: 8192
     update_epochs: 1
+
+snake:
+  package: ocean
+  env_name: snake
+  use_rnn: True
+  train:
+    total_timesteps: 250_000_000
+    num_envs: 2
+    num_workers: 2
+    env_batch_size: 1
+    batch_size: 262144
+    update_epochs: 1
+    minibatch_size: 4096
+    anneal_lr: False
+    gae_lambda: 0.9
+    gamma: 0.99
+    ent_coef: 0.0736
+    learning_rate: 0.000879
+    device: cuda
+  sweep:
+    method: bayes
+    name: sweep
+    metric:
+      goal: maximize
+      name: environment/snake_length
+    # Nested parameters name required by WandB API
+    parameters:
+      train:
+        parameters:
+          learning_rate: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-4,
+            'max': 1e-1,
+          }
+          ent_coef: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-3,
+            'max': 1e-1,
+          }
+          gamma: {
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+          }
+          gae_lambda: {
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+          }
+          batch_size: {
+            'values': [32768, 65536, 131072, 262144],
+          }
+          minibatch_size: {
+            'values': [4096, 8192, 16384, 32768],
+          }
 
 smac: {}
 starcraft:

@@ -271,7 +271,8 @@ def train(data):
         data.epoch += 1
 
         done_training = data.global_step >= config.total_timesteps
-        if profile.update(data) or done_training:
+        if profile.update(data) or (
+                'episode_return' in data.stats or done_training):
             print_dashboard(config.env, data.utilization, data.global_step, data.epoch,
                 profile, data.losses, data.stats, data.msg)
 
@@ -551,13 +552,13 @@ def count_params(policy):
 
 def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
         model_path=None, device='cuda'):
+
     # We are just using Serial vecenv to give a consistent
     # single-agent/multi-agent API for evaluation
-    try:
-        env = pufferlib.vector.make(env_creator,
-            env_kwargs={'render_mode': 'rgb_array', **env_kwargs})
-    except:
-        env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs)
+    if render_mode != 'auto':
+        env_kwargs.render_mode = render_mode
+
+    env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs)
 
     if model_path is None:
         agent = agent_creator(env, **agent_kwargs).to(device)
@@ -569,19 +570,24 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
     os.system('clear')
     state = None
 
-    while True:
-        #render = driver.render()
-        if driver.render_mode == 'ansi':
-            print('\033[0;0H' + render + '\n')
-            time.sleep(0.6)
-        elif driver.render_mode == 'rgb_array':
-            '''
-            import cv2
-            render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
-            cv2.imshow('frame', render)
-            cv2.waitKey(1)
-            time.sleep(1/24)
-            '''
+    frames = []
+    tick = 0
+    while tick <= 1000:
+        if tick % 1 == 0:
+            render = driver.render()
+            if driver.render_mode == 'ansi':
+                print('\033[0;0H' + render + '\n')
+                time.sleep(0.05)
+            elif driver.render_mode == 'rgb_array':
+                frames.append(render)
+                #import cv2
+                #render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
+                #cv2.imshow('frame', render)
+                #cv2.waitKey(1)
+                #time.sleep(1/24)
+            elif driver.render_mode == 'human' and render is not None:
+                frames.append(render)
+
         with torch.no_grad():
             ob = torch.from_numpy(ob).to(device)
             if hasattr(agent, 'lstm'):
@@ -593,7 +599,13 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
 
         ob, reward = env.step(action)[:2]
         reward = reward.mean()
-        print(f'Reward: {reward:.4f}')
+        if tick % 100 == 0:
+            print(f'Reward: {reward:.4f}, Tick: {tick}')
+        tick += 1
+
+    # Save frames as gif
+    import imageio
+    imageio.mimsave('../docker/snake.gif', frames, fps=10)
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)

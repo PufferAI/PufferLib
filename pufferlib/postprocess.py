@@ -144,7 +144,8 @@ class MultiagentEpisodeStats(PettingZooWrapper):
     def step(self, actions):
         observations, rewards, terminations, truncations, infos = super().step(actions)
 
-        for agent in self.agents:
+        all_infos = {}
+        for agent in infos:
             agent_info = self.infos[agent]
             for k, v in pufferlib.utils.unroll_nested_dict(infos[agent]):
                 if k not in agent_info:
@@ -157,6 +158,7 @@ class MultiagentEpisodeStats(PettingZooWrapper):
             agent_info['episode_length'] += 1
 
             agent_info = {}
+            all_infos[agent] = agent_info
             if terminations[agent] or truncations[agent]:
                 for k, v in self.infos[agent].items():
                     try:
@@ -176,4 +178,4 @@ class MultiagentEpisodeStats(PettingZooWrapper):
                     except TypeError:
                         pass
 
-        return observations, rewards, terminations, truncations, infos
+        return observations, rewards, terminations, truncations, all_infos

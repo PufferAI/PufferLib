@@ -357,7 +357,9 @@ if __name__ == '__main__':
     parser.add_argument('--mode', type=str, default='train', choices='train eval evaluate sweep sweep-carbs autotune baseline profile'.split())
     parser.add_argument('--eval-model-path', type=str, default=None, help='Path to model to evaluate')
     parser.add_argument('--baseline', action='store_true', help='Baseline run')
-    parser.add_argument('--no-render', action='store_true', help='Disable render during evaluate')
+    parser.add_argument('--render-mode', type=str, default='auto',
+        choices='auto human ansi rgb_array None'.split(),
+        help='Disable render during evaluate')
     parser.add_argument('--vec', '--vector', '--vectorization', type=str,
         default='serial', choices='serial multiprocessing ray'.split())
     parser.add_argument('--exp-id', '--exp-name', type=str, default=None, help="Resume from experiment")
@@ -392,6 +394,7 @@ if __name__ == '__main__':
                 agent_creator=make_policy,
                 agent_kwargs={'env_module': env_module, 'args': args},
                 model_path=args.eval_model_path,
+                render_mode=args.render_mode,
                 device=args.train.device
             )
         except KeyboardInterrupt:

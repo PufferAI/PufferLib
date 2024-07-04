@@ -202,7 +202,20 @@ if __name__ == '__main__':
     #profile_emulation(env_creator)
     profile_puffer(env_creator, num_envs=24,
         batch_size=8, backend=Multiprocessing, zero_copy=False)
- 
+
+    from pufferlib.environments import ocean
+    env_creator = ocean.env_creator('grid')
+    #profile_emulation(env_creator)
+
+    import cProfile
+    cProfile.run('profile_emulation(env_creator)', 'stats.profile')
+    import pstats
+    from pstats import SortKey
+    p = pstats.Stats('stats.profile')
+    p.sort_stats(SortKey.TIME).print_stats(10)
+
+    exit(0)
+
     from pufferlib.environments import nmmo
     print('Neural MMO')
     env_creator = nmmo.env_creator()
