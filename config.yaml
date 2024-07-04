@@ -53,8 +53,8 @@ default:
         parameters:
           total_timesteps: {
             'distribution': 'log_uniform_values',
-            'min': 1e4,
-            'max': 1e9,
+            'min': 250000000,
+            'max': 10000000000,
           }
           learning_rate: {
             'distribution': 'log_uniform_values',
@@ -101,20 +101,15 @@ default:
             'min': 1e-4,
             'max': 5e-2,
           }
-          env_batch_size: {
-            'distribution': 'uniform',
-            'min': 24,
-            'max': 1024,
-          }
           batch_size: {
             'distribution': 'log_uniform_values',
-            'min': 8192,
-            'max': 131072,
+            'min': 32768,
+            'max': 262144,
           }
           minibatch_size: {
             'distribution': 'log_uniform_values',
-            'min': 1024,
-            'max': 8192,
+            'min': 4096,
+            'max': 32768,
           }
           bptt_horizon: {
             'distribution': 'uniform',

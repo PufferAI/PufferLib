@@ -194,21 +194,21 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
 
     # Must be hardcoded and match wandb sweep space for now
     param_spaces = [
-        carbs_param('total_timesteps', 'log', search_center=1e7, is_integer=True),
-        carbs_param('learning_rate', 'log', search_center=1e-3),
-        carbs_param('gamma', 'logit', search_center=0.95),
+        carbs_param('total_timesteps', 'log', search_center=250_000_000, is_integer=True),
+        carbs_param('learning_rate', 'log', search_center=9e-4),
+        carbs_param('gamma', 'logit', search_center=0.99),
         carbs_param('gae_lambda', 'logit', search_center=0.90),
         carbs_param('update_epochs', 'linear', search_center=1, is_integer=True),
         carbs_param('clip_coef', 'logit', search_center=0.1),
         carbs_param('vf_coef', 'logit', search_center=0.5),
         carbs_param('vf_clip_coef', 'logit', search_center=0.1),
         carbs_param('max_grad_norm', 'linear', search_center=0.5),
-        carbs_param('ent_coef', 'log', search_center=1e-2),
-        carbs_param('env_batch_size', 'linear', search_center=384,
-            is_integer=True, rounding_factor=24),
-        carbs_param('batch_size', 'log', search_center=16384, is_integer=True),
+        carbs_param('ent_coef', 'log', search_center=0.07),
+        #carbs_param('env_batch_size', 'linear', search_center=384,
+        #    is_integer=True, rounding_factor=24),
+        carbs_param('batch_size', 'log', search_center=262144, is_integer=True),
         carbs_param('minibatch_size', 'log', search_center=4096, is_integer=True),
-        carbs_param('bptt_horizon', 'log', search_center=8, is_integer=True),
+        carbs_param('bptt_horizon', 'log', search_center=16, is_integer=True),
     ]
 
     carbs_params = CARBSParams(
@@ -229,8 +229,8 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
                 suggestion['minibatch_size'])
             wandb.config.train['bptt_horizon'] = closest_power(
                 suggestion['bptt_horizon'])
-            wandb.config.train['num_envs'] = int(
-                3*suggestion['env_batch_size'])
+            #wandb.config.train['num_envs'] = int(
+            #    3*suggestion['env_batch_size'])
             args.train.__dict__.update(dict(wandb.config.train))
             args.track = True
             print(wandb.config.train)
