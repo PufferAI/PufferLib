@@ -25,7 +25,7 @@ cdef class CMultiSnake:
 
     def __init__(self, list grids, cnp.ndarray snakes, cnp.ndarray observations,
             snake_lengths, snake_ptrs, snake_colors, cnp.ndarray actions,
-            cnp.ndarray rewards, list num_snakes, list num_food, int vision,
+            cnp.ndarray rewards, list num_snakes, list num_food, int vision, int max_snake_length,
             list leave_corpse_on_death, list teleport_at_edge):
 
         cdef int ptr = 0
@@ -45,6 +45,7 @@ cdef class CMultiSnake:
                 rewards[ptr:end],
                 num_food[i],
                 vision,
+                max_snake_length,
                 leave_corpse_on_death[i],
                 teleport_at_edge[i],
             ))
@@ -87,7 +88,7 @@ cdef class CSnake:
 
     def __init__(self, cnp.ndarray grid, cnp.ndarray snake, cnp.ndarray observations,
             snake_lengths, snake_ptr, snake_colors, cnp.ndarray actions, cnp.ndarray rewards,
-            int food, int vision, bint leave_corpse_on_death, bint teleport_at_edge):
+            int food, int vision, int max_snake_length, bint leave_corpse_on_death, bint teleport_at_edge):
         self.grid = grid
         self.snake = snake
         self.observations = observations
@@ -101,7 +102,7 @@ cdef class CSnake:
 
         self.width = grid.shape[1]
         self.height = grid.shape[0]
-        self.max_snake_length = self.width * self.height
+        self.max_snake_length = max_snake_length
         self.food = food
         self.vision = vision
         self.leave_corpse_on_death = leave_corpse_on_death
@@ -156,10 +157,14 @@ cdef class CSnake:
                 head_ptr = self.snake_ptr[i]
                 head_r = self.snake[i, head_ptr, 0]
                 head_c = self.snake[i, head_ptr, 1]
-                self.observations[i] = self.grid[
-                    head_r - self.vision:head_r + self.vision + 1,
-                    head_c - self.vision:head_c + self.vision + 1,
-                ]
+                try:
+                    self.observations[i] = self.grid[
+                        head_r - self.vision:head_r + self.vision + 1,
+                        head_c - self.vision:head_c + self.vision + 1,
+                    ]
+                except:
+                    print(f'head_r: {head_r}, head_c: {head_c}, head_ptr: {head_ptr}, snake_length: {self.snake_lengths[i]}')
+                    exit()
 
     cdef void spawn_snake(self, int snake_id):
         # Delete the snake from the grid

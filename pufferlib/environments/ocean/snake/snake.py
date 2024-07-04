@@ -38,9 +38,9 @@ class Snake(pufferlib.PufferEnv):
 
         # Note: it is possible to have a snake longer than 10k, which will mess up
         # the environment, but we must allocate this much memory for each snake
-        max_snake_length = min(1024, max([w*h for h, w in zip(heights, widths)]))
+        self.max_snake_length = min(1024, max([w*h for h, w in zip(heights, widths)]))
         total_snakes = sum(num_snakes)
-        self.snakes = np.zeros((total_snakes, max_snake_length, 2), dtype=np.int32) - 1
+        self.snakes = np.zeros((total_snakes, self.max_snake_length, 2), dtype=np.int32) - 1
         self.snake_lengths = np.zeros(total_snakes, dtype=np.int32)
         self.snake_ptrs = np.zeros(total_snakes, dtype=np.int32)
         self.snake_colors = np.random.randint(4, 8, total_snakes, dtype=np.int32)
@@ -78,9 +78,9 @@ class Snake(pufferlib.PufferEnv):
  
     def reset(self, seed=None):
         self.c_env = CMultiSnake(self.grids, self.snakes, self.buf.observations,
-            self.snake_lengths, self.snake_ptrs, self.snake_colors,
-            self.actions, self.buf.rewards, self.num_snakes, self.num_food,
-            self.vision, self.leave_corpse_on_death, self.teleport_at_edge)
+            self.snake_lengths, self.snake_ptrs, self.snake_colors, self.actions,
+            self.buf.rewards, self.num_snakes, self.num_food, self.vision,
+            self.max_snake_length, self.leave_corpse_on_death, self.teleport_at_edge)
 
         self.c_env.reset()
         return self.buf.observations, {}
