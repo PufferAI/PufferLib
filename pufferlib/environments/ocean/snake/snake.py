@@ -6,7 +6,9 @@ import gymnasium
 
 import pufferlib
 from pufferlib.environments.ocean.snake.c_snake import CSnake, CMultiSnake
+from pufferlib.environments.ocean.snake.render import GridRender, RaylibGlobal, RaylibLocal
 
+# TODO: Fix
 EMPTY = 0
 SNAKE = 1
 FOOD = 2
@@ -37,6 +39,7 @@ class Snake(pufferlib.PufferEnv):
         self.snakes = np.zeros((total_snakes, max_snake_length, 2), dtype=np.int32) - 1
         self.snake_lengths = np.zeros(total_snakes, dtype=np.int32)
         self.snake_ptrs = np.zeros(total_snakes, dtype=np.int32)
+        self.snake_colors = np.random.randint(4, 8, total_snakes, dtype=np.int32)
         self.num_snakes = num_snakes
         self.num_food = num_food
 
@@ -68,17 +71,45 @@ class Snake(pufferlib.PufferEnv):
         )
         self.actions = np.zeros(total_snakes, dtype=np.uint32)
 
+        if render_mode == 'rgb_array':
+            asset_map = np.array([
+                [6, 24, 24],
+                [255, 0, 255],
+                [255, 0, 0],
+                [0, 255, 255],
+                [0, 255, 192],
+                [0, 255, 128],
+                [0, 255, 64],
+                [0, 255, 0],
+            ], dtype=np.uint8)
+            self.client = GridRender(widths[0], heights[0], asset_map)
+        elif render_mode == 'human':
+            asset_map = {
+                EMPTY: (0, 0, 0, 255),
+                SNAKE: (255, 0, 0, 255),
+                FOOD: (0, 255, 0, 255),
+                CORPSE: (255, 0, 255, 255),
+                WALL: (0, 0, 255, 255),
+            }
+
+            #self.client = RaylibLocal(160, 90, asset_map, tile_size=16)
+            self.client = RaylibGlobal(widths[0], heights[0], asset_map, tile_size=1)
+ 
     def reset(self, seed=None):
         self.c_env = CMultiSnake(self.grids, self.snakes, self.buf.observations,
-            self.snake_lengths, self.snake_ptrs, self.actions, self.buf.rewards,
-            self.num_snakes, self.num_food, self.vision,
-            self.leave_corpse_on_death, self.teleport_at_edge)
+            self.snake_lengths, self.snake_ptrs, self.snake_colors,
+            self.actions, self.buf.rewards, self.num_snakes, self.num_food,
+            self.vision, self.leave_corpse_on_death, self.teleport_at_edge)
 
         self.c_env.reset()
         return self.buf.observations, {}
 
     def step(self, actions):
-        self.actions[:] = actions
+        if self.render_mode == 'human':
+            self.actions[1:] = actions[1:]
+        else:
+            self.actions[:] = actions
+
         self.c_env.step()
 
         info = {}
@@ -91,21 +122,17 @@ class Snake(pufferlib.PufferEnv):
         return (self.buf.observations, self.buf.rewards,
             self.buf.terminals, self.buf.truncations, info)
 
-    def render(self, upscale=4):
+    def render(self, upscale=1):
         grid = self.grids[0]
         height, width = grid.shape
         if self.render_mode == 'rgb_array':
-            frame = np.zeros((height, width, 3), dtype=np.uint8)
-            frame[grid==SNAKE] = np.array([255, 0, 0])
-            frame[grid==FOOD] = np.array([0, 255, 0])
-            frame[grid==CORPSE] = np.array([255, 0, 255])
-            frame[grid==WALL] = np.array([0, 0, 255])
-
-            if upscale > 1:
-                rescaler = np.ones((upscale, upscale, 1), dtype=np.uint8)
-                frame = np.kron(frame, rescaler)
-
-            return frame
+            return self.client.render(grid, upscale=upscale)
+        elif self.render_mode == 'human':
+            snakes_in_first_env = self.num_snakes[0]
+            snake_ptrs = self.snake_ptrs[:snakes_in_first_env]
+            agent_positions = self.snakes[np.arange(snakes_in_first_env), snake_ptrs]
+            actions = self.actions[:snakes_in_first_env]
+            return self.client.render(grid, agent_positions, actions, self.vision)
 
         def _render(val):
             if val == 0:

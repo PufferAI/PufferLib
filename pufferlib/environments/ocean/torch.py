@@ -25,7 +25,7 @@ class Policy(nn.Module):
         )
         '''
         self.network= nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Conv2d(5, 32, 5, stride=3)),
+            pufferlib.pytorch.layer_init(nn.Conv2d(8, 32, 5, stride=3)),
             nn.ReLU(),
             pufferlib.pytorch.layer_init(nn.Conv2d(32, 32, 3, stride=1)),
             nn.ReLU(),
@@ -44,7 +44,7 @@ class Policy(nn.Module):
         return actions, value
 
     def encode_observations(self, observations):
-        observations = F.one_hot(observations.long(), 5).permute(0, 3, 1, 2).float()
+        observations = F.one_hot(observations.long(), 8).permute(0, 3, 1, 2).float()
         return self.network(observations), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
