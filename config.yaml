@@ -662,17 +662,17 @@ snake:
   use_rnn: True
   train:
     total_timesteps: 250_000_000
-    num_envs: 1
-    num_workers: 1
+    num_envs: 2
+    num_workers: 2
     env_batch_size: 1
-    batch_size: 65536
+    batch_size: 262144
     update_epochs: 1
-    minibatch_size: 8192
+    minibatch_size: 4096
     anneal_lr: False
-    gae_lambda: 0.95
-    gamma: 0.95
-    ent_coef: 0.025
-    learning_rate: 0.0025
+    gae_lambda: 0.9
+    gamma: 0.99
+    ent_coef: 0.0736
+    learning_rate: 0.000879
     device: cuda
   sweep:
     method: bayes
@@ -692,7 +692,7 @@ snake:
           ent_coef: {
             'distribution': 'log_uniform_values',
             'min': 1e-3,
-            'max': 5e-2,
+            'max': 1e-1,
           }
           gamma: {
             'values': [0.90, 0.925, 0.95, 0.975, 0.99],
@@ -701,10 +701,10 @@ snake:
             'values': [0.90, 0.925, 0.95, 0.975, 0.99],
           }
           batch_size: {
-            'values': [8192, 16384, 32768, 65536, 131072],
+            'values': [32768, 65536, 131072, 262144],
           }
           minibatch_size: {
-            'values': [1024, 2048, 4096, 8192],
+            'values': [4096, 8192, 16384, 32768],
           }
 
 
