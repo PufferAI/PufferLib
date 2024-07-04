@@ -551,7 +551,8 @@ def count_params(policy):
     return sum(p.numel() for p in policy.parameters() if p.requires_grad)
 
 def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
-        model_path=None, render_mode='auto', device='cuda', verbose=True):
+        model_path=None, device='cuda'):
+
     # We are just using Serial vecenv to give a consistent
     # single-agent/multi-agent API for evaluation
     if render_mode != 'auto':
@@ -560,7 +561,7 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
     env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs)
 
     if model_path is None:
-        agent = agent_creator(env, **agent_kwargs)
+        agent = agent_creator(env, **agent_kwargs).to(device)
     else:
         agent = torch.load(model_path, map_location=device)
 

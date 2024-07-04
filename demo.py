@@ -128,6 +128,132 @@ def init_wandb(args, name, id=None, resume=True):
     )
     return wandb
 
+from math import log, ceil, floor
+def closest_power(x):
+    possible_results = floor(log(x, 2)), ceil(log(x, 2))
+    return int(2**min(possible_results, key= lambda z: abs(x-2**z)))
+
+def sweep_carbs(args, wandb_name, env_module, make_env):
+    import wandb
+    sweep_id = wandb.sweep(
+        sweep=dict(args.sweep),
+        project="carbs",
+    )
+    target_metric = args.sweep['metric']['name'].split('/')[-1]
+    wandb_params = args.sweep.parameters['train']['parameters']
+
+    import numpy as np
+    from loguru import logger
+
+    from carbs import CARBS
+    from carbs import CARBSParams
+    from carbs import LinearSpace
+    from carbs import LogSpace
+    from carbs import LogitSpace
+    from carbs import ObservationInParam
+    from carbs import ParamDictType
+    from carbs import Param
+
+    logger.remove()
+    logger.add(sys.stdout, level="DEBUG", format="{message}")
+
+    def carbs_param(name, space, min=None, max=None,
+            search_center=None, is_integer=False, rounding_factor=1):
+        wandb_param = wandb_params[name]
+        if min is None:
+            min = float(wandb_param['min'])
+        if max is None:
+            max = float(wandb_param['max'])
+
+        if space == 'log':
+            Space = LogSpace
+            if search_center is None:
+                search_center = 2**(np.log2(min) + np.log2(max)/2)
+        elif space == 'linear':
+            Space = LinearSpace
+            if search_center is None:
+                search_center = (min + max)/2
+        elif space == 'logit':
+            Space = LogitSpace
+            assert min == 0
+            assert max == 1
+            assert search_center is not None
+        else:
+            raise ValueError(f'Invalid CARBS space: {space} (log/linear)')
+
+        return Param(
+            name=name,
+            space=Space(
+                min=min,
+                max=max,
+                is_integer=is_integer,
+                rounding_factor=rounding_factor
+            ),
+            search_center=search_center,
+        )
+
+    # Must be hardcoded and match wandb sweep space for now
+    param_spaces = [
+        carbs_param('total_timesteps', 'log', search_center=1e7, is_integer=True),
+        carbs_param('learning_rate', 'log', search_center=1e-3),
+        carbs_param('gamma', 'logit', search_center=0.95),
+        carbs_param('gae_lambda', 'logit', search_center=0.90),
+        carbs_param('update_epochs', 'linear', search_center=1, is_integer=True),
+        carbs_param('clip_coef', 'logit', search_center=0.1),
+        carbs_param('vf_coef', 'logit', search_center=0.5),
+        carbs_param('vf_clip_coef', 'logit', search_center=0.1),
+        carbs_param('max_grad_norm', 'linear', search_center=0.5),
+        carbs_param('ent_coef', 'log', search_center=1e-2),
+        carbs_param('env_batch_size', 'linear', search_center=384,
+            is_integer=True, rounding_factor=24),
+        carbs_param('batch_size', 'log', search_center=16384, is_integer=True),
+        carbs_param('minibatch_size', 'log', search_center=4096, is_integer=True),
+        carbs_param('bptt_horizon', 'log', search_center=8, is_integer=True),
+    ]
+
+    carbs_params = CARBSParams(
+        better_direction_sign=1,
+        is_wandb_logging_enabled=False,
+        resample_frequency=0,
+    )
+    carbs = CARBS(carbs_params, param_spaces)
+
+    def main():
+            args.exp_name = init_wandb(args, wandb_name, id=args.exp_id)
+            suggestion = carbs.suggest().suggestion
+            print('Suggestion:', suggestion)
+            wandb.config.train.update(suggestion)
+            wandb.config.train['batch_size'] = closest_power(
+                suggestion['batch_size'])
+            wandb.config.train['minibatch_size'] = closest_power(
+                suggestion['minibatch_size'])
+            wandb.config.train['bptt_horizon'] = closest_power(
+                suggestion['bptt_horizon'])
+            wandb.config.train['num_envs'] = int(
+                3*suggestion['env_batch_size'])
+            args.train.__dict__.update(dict(wandb.config.train))
+            args.track = True
+            print(wandb.config.train)
+            try:
+                stats, profile = train(args, env_module, make_env)
+            except Exception as e:
+                is_failure = True
+                import traceback
+                traceback.print_exc()
+            else:
+                observed_value = stats[target_metric]
+                uptime = profile.uptime
+
+                obs_out = carbs.observe(
+                    ObservationInParam(
+                        input=suggestion,
+                        output=observed_value,
+                        cost=uptime,
+                    )
+                )
+
+    wandb.agent(sweep_id, main, count=100)
+
 def sweep(args, wandb_name, env_module, make_env):
     import wandb
     sweep_id = wandb.sweep(
@@ -192,10 +318,12 @@ def train(args, env_module, make_env):
                 os._exit(0)
             except Exception:
                 Console().print_exception()
-                os._exit(0)
+                #os._exit(0)
 
-        clean_pufferl.evaluate(data)
+        stats, _ = clean_pufferl.evaluate(data)
+        profile = data.profile
         clean_pufferl.close(data)
+        return stats, profile
 
     elif args.backend == 'sb3':
         from stable_baselines3 import PPO
@@ -226,7 +354,7 @@ if __name__ == '__main__':
         default='squared', help='Name of specific environment to run')
     parser.add_argument('--pkg', '--package', type=str, default=None, help='Configuration in config.yaml to use')
     parser.add_argument('--backend', type=str, default='clean_pufferl', help='Train backend (clean_pufferl, sb3)')
-    parser.add_argument('--mode', type=str, default='train', choices='train eval evaluate sweep autotune baseline profile'.split())
+    parser.add_argument('--mode', type=str, default='train', choices='train eval evaluate sweep sweep-carbs autotune baseline profile'.split())
     parser.add_argument('--eval-model-path', type=str, default=None, help='Path to model to evaluate')
     parser.add_argument('--baseline', action='store_true', help='Baseline run')
     parser.add_argument('--render-mode', type=str, default='auto',
@@ -273,6 +401,8 @@ if __name__ == '__main__':
             os._exit(0)
     elif args.mode == 'sweep':
         sweep(args, wandb_name, env_module, make_env)
+    elif args.mode == 'sweep-carbs':
+        sweep_carbs(args, wandb_name, env_module, make_env)
     elif args.mode == 'autotune':
         pufferlib.vector.autotune(make_env, batch_size=args.train.env_batch_size)
     elif args.mode == 'profile':

@@ -16,36 +16,33 @@ default:
     device: cuda
     total_timesteps: 10_000_000
     learning_rate: 2.5e-4
-    num_steps: 128
     anneal_lr: True
     gamma: 0.99
     gae_lambda: 0.95
-    num_minibatches: 4
     update_epochs: 4
     norm_adv: True
     clip_coef: 0.1
     clip_vloss: True
-    ent_coef: 0.01
     vf_coef: 0.5
+    vf_clip_coef: 0.1
     max_grad_norm: 0.5
+    ent_coef: 0.01
     target_kl: ~
 
     num_envs: 8
     num_workers: 8
     env_batch_size: ~
     zero_copy: True
-    verbose: True
     data_dir: experiments
     checkpoint_interval: 200
     batch_size: 1024
     minibatch_size: 512
     bptt_horizon: 16
-    vf_clip_coef: 0.1
     compile: False
     compile_mode: reduce-overhead
 
   sweep:
-    method: random
+    method: bayes
     name: sweep
     metric:
       goal: maximize
@@ -54,19 +51,75 @@ default:
     parameters:
       train:
         parameters:
+          total_timesteps: {
+            'distribution': 'log_uniform_values',
+            'min': 1e4,
+            'max': 1e9,
+          }
           learning_rate: {
             'distribution': 'log_uniform_values',
-            'min': 1e-4,
+            'min': 1e-5,
             'max': 1e-1,
           }
+          gamma: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          gae_lambda: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          update_epochs: {
+            'distribution': 'uniform',
+            'min': 1,
+            'max': 16,
+          }
+          clip_coef: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          vf_coef: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          vf_clip_coef: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          max_grad_norm: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 10.0,
+          }
+          ent_coef: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-4,
+            'max': 5e-2,
+          }
+          env_batch_size: {
+            'distribution': 'uniform',
+            'min': 24,
+            'max': 1024,
+          }
           batch_size: {
-            'values': [512, 1024, 2048],
+            'distribution': 'log_uniform_values',
+            'min': 8192,
+            'max': 131072,
           }
           minibatch_size: {
-            'values': [128, 256, 512],
+            'distribution': 'log_uniform_values',
+            'min': 1024,
+            'max': 8192,
           }
           bptt_horizon: {
-            'values': [4, 8, 16],
+            'distribution': 'uniform',
+            'min': 1,
+            'max': 16,
           }
 
 ### Arcade Learning Environment suite
@@ -656,6 +709,20 @@ linksawaken:
 zelda:
   package: links_awaken
 
+slimevolley:
+  package: slimevolley
+  env_name: SlimeVolley-v0
+  use_rnn: True
+  train:
+    #num_envs: 3072
+    num_envs: 1536
+    num_workers: 24
+    env_batch_size: 512
+    zero_copy: False
+    batch_size: 65536
+    minibatch_size: 8192
+    update_epochs: 1
+
 snake:
   package: ocean
   env_name: snake
@@ -707,7 +774,6 @@ snake:
             'values': [4096, 8192, 16384, 32768],
           }
 
-
 smac: {}
 starcraft:
   package: smac
@@ -720,3 +786,16 @@ stableretro:
   package: stable_retro
 retro:
   package: stable_retro
+
+vizdoom:
+  package: vizdoom
+  env_name: VizdoomHealthGatheringSupreme-v0
+  use_rnn: True
+  train:
+    num_envs: 144
+    num_workers: 24
+    env_batch_size: 48
+    zero_copy: False
+    batch_size: 8192
+    minibatch_size: 2048
+    update_epochs: 1

@@ -110,9 +110,9 @@ environments = {
     'minerl': [
         'gym==0.17.0',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        'minerl==0.4.4',
+        #'git+https://github.com/minerllabs/minerl'
         # Compatiblity warning with urllib3 and chardet
-        'requests==2.31.0',
+        #'requests==2.31.0',
     ],
     'minigrid': [
         f'gym=={GYM_VERSION}',
@@ -167,6 +167,14 @@ environments = {
     #'stable-retro': [
     #    'git+https://github.com/Farama-Foundation/stable-retro.git',
     #]
+    'slimevolley': [
+        f'gym=={GYM_VERSION}',
+        f'gymnasium=={GYMNASIUM_VERSION}',
+        'slimevolley==0.1.0',
+    ],
+    'vizdoom': [
+        'vizdoom==1.2.3',
+    ],
 }
 
 
@@ -193,6 +201,7 @@ common = cleanrl + [environments[env] for env in [
     'nmmo',
     'pokemon_red',
     'procgen',
+    'vizdoom',
 ]]
 
 setup(
