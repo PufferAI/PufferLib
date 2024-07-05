@@ -81,10 +81,8 @@ class Snake(pufferlib.PufferEnv):
         self.reward_sum = 0
         self.tick = 0
         self.atn = None
+        self.client = None
 
-        if render_mode == 'human':
-            self.client = RaylibClient(80, 45, COLORS.tolist(), tile_size=16)
- 
     def reset(self, seed=None):
         ptr = end = 0
         self.c_envs = []
@@ -131,6 +129,9 @@ class Snake(pufferlib.PufferEnv):
         height, width = grid.shape
         v = self.vision
         if self.render_mode == 'human':
+            if self.client is None:
+                self.client = RaylibClient(80, 45, COLORS.tolist(), tile_size=16)
+
             snakes_in_first_env = self.num_snakes[0]
             snake_ptrs = self.snake_ptrs[:snakes_in_first_env]
             agent_positions = self.snakes[np.arange(snakes_in_first_env), snake_ptrs]

@@ -140,7 +140,9 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
         project="carbs",
     )
     target_metric = args.sweep['metric']['name'].split('/')[-1]
-    wandb_params = args.sweep.parameters['train']['parameters']
+    wandb_train_params = args.sweep.parameters['train']['parameters']
+    wandb_env_params = args.sweep.parameters['env']['parameters']
+    wandb_policy_params = args.sweep.parameters['policy']['parameters']
 
     import numpy as np
     from loguru import logger
@@ -157,7 +159,7 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
     logger.remove()
     logger.add(sys.stdout, level="DEBUG", format="{message}")
 
-    def carbs_param(name, space, min=None, max=None,
+    def carbs_param(name, space, wandb_params, min=None, max=None,
             search_center=None, is_integer=False, rounding_factor=1):
         wandb_param = wandb_params[name]
         if min is None:
@@ -194,24 +196,24 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
 
     # Must be hardcoded and match wandb sweep space for now
     param_spaces = [
-        carbs_param('cnn_channels', 'linear', search_center=32, is_integer=True),
-        carbs_param('hidden_size', 'linear', search_center=128, is_integer=True),
-        carbs_param('vision', 'linear', search_center=5, is_integer=True),
-        carbs_param('total_timesteps', 'log', search_center=250_000_000, is_integer=True),
-        carbs_param('learning_rate', 'log', search_center=9e-4),
-        carbs_param('gamma', 'logit', search_center=0.99),
-        carbs_param('gae_lambda', 'logit', search_center=0.90),
-        carbs_param('update_epochs', 'linear', search_center=1, is_integer=True),
-        carbs_param('clip_coef', 'logit', search_center=0.1),
-        carbs_param('vf_coef', 'logit', search_center=0.5),
-        carbs_param('vf_clip_coef', 'logit', search_center=0.1),
-        carbs_param('max_grad_norm', 'linear', search_center=0.5),
-        carbs_param('ent_coef', 'log', search_center=0.07),
+        carbs_param('cnn_channels', 'linear', wandb_policy_params, search_center=32, is_integer=True),
+        carbs_param('hidden_size', 'linear', wandb_policy_params, search_center=128, is_integer=True),
+        #carbs_param('vision', 'linear', search_center=5, is_integer=True),
+        carbs_param('total_timesteps', 'log', wandb_train_params, search_center=250_000_000, is_integer=True),
+        carbs_param('learning_rate', 'log', wandb_train_params, search_center=9e-4),
+        carbs_param('gamma', 'logit', wandb_train_params, search_center=0.99),
+        carbs_param('gae_lambda', 'logit', wandb_train_params, search_center=0.90),
+        carbs_param('update_epochs', 'linear', wandb_train_params, search_center=1, is_integer=True),
+        carbs_param('clip_coef', 'logit', wandb_train_params, search_center=0.1),
+        carbs_param('vf_coef', 'logit', wandb_train_params, search_center=0.5),
+        carbs_param('vf_clip_coef', 'logit', wandb_train_params, search_center=0.1),
+        carbs_param('max_grad_norm', 'linear', wandb_train_params, search_center=0.5),
+        carbs_param('ent_coef', 'log', wandb_train_params, search_center=0.07),
         #carbs_param('env_batch_size', 'linear', search_center=384,
         #    is_integer=True, rounding_factor=24),
-        carbs_param('batch_size', 'log', search_center=262144, is_integer=True),
-        carbs_param('minibatch_size', 'log', search_center=4096, is_integer=True),
-        carbs_param('bptt_horizon', 'log', search_center=16, is_integer=True),
+        carbs_param('batch_size', 'log', wandb_train_params, search_center=262144, is_integer=True),
+        carbs_param('minibatch_size', 'log', wandb_train_params, search_center=4096, is_integer=True),
+        carbs_param('bptt_horizon', 'log', wandb_train_params, search_center=16, is_integer=True),
     ]
 
     carbs_params = CARBSParams(
@@ -227,8 +229,8 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
             print('Suggestion:', suggestion)
             cnn_channels = suggestion.pop('cnn_channels')
             hidden_size = suggestion.pop('hidden_size')
-            vision = suggestion.pop('vision')
-            wandb.config.env['vision'] = vision
+            #vision = suggestion.pop('vision')
+            #wandb.config.env['vision'] = vision
             wandb.config.policy['cnn_channels'] = cnn_channels
             wandb.config.policy['hidden_size'] = hidden_size
             wandb.config.train.update(suggestion)
@@ -241,9 +243,11 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
             #wandb.config.train['num_envs'] = int(
             #    3*suggestion['env_batch_size'])
             args.train.__dict__.update(dict(wandb.config.train))
-            args.env.__dict__['vision'] = vision
+            #args.env.__dict__['vision'] = vision
             args.policy.__dict__['cnn_channels'] = cnn_channels
             args.policy.__dict__['hidden_size'] = hidden_size
+            args.rnn.__dict__['input_size'] = hidden_size
+            args.rnn.__dict__['hidden_size'] = hidden_size
             args.track = True
             print(wandb.config.train)
             print(wandb.config.env)
@@ -266,6 +270,48 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
                     )
                 )
 
+    '''
+    def main():
+            args.exp_name = init_wandb(args, wandb_name, id=args.exp_id)
+            suggestion = carbs.suggest().suggestion
+            print('Suggestion:', suggestion)
+            cnn_channels = suggestion.pop('cnn_channels')
+            hidden_size = suggestion.pop('hidden_size')
+            #vision = suggestion.pop('vision')
+            #wandb.config.env['vision'] = vision
+            args.train.__dict__.update(suggestion)
+            args.train.__dict__['batch_size'] = closest_power(
+                args.train.batch_size)
+            args.train.__dict__['minibatch_size'] = closest_power(
+                args.train.minibatch_size)
+            args.train.__dict__['bptt_horizon'] = closest_power(
+                args.train.bptt_horizon)
+            args.policy.__dict__.update(suggestion)
+            args.policy.__dict__['cnn_channels'] = cnn_channels
+            args.policy.__dict__['hidden_size'] = hidden_size
+            args.rnn.__dict__['input_size'] = hidden_size
+            args.rnn.__dict__['hidden_size'] = hidden_size
+            args.track = True
+            try:
+                stats, profile = train(args, env_module, make_env)
+            except Exception as e:
+                is_failure = True
+                import traceback
+                traceback.print_exc()
+            else:
+                observed_value = stats[target_metric]
+                uptime = profile.uptime
+
+                obs_out = carbs.observe(
+                    ObservationInParam(
+                        input=suggestion,
+                        output=observed_value,
+                        cost=uptime,
+                    )
+                )
+    main()
+    exit(0)
+    '''
     wandb.agent(sweep_id, main, count=100)
 
 def sweep(args, wandb_name, env_module, make_env):

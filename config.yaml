@@ -758,7 +758,7 @@ snake:
             'min': 8,
             'max': 128,
           }
-          hidden_size:
+          hidden_size: {
             'distribution': 'uniform',
             'min': 32,
             'max': 1024,
