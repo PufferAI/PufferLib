@@ -210,10 +210,11 @@ cdef class CSnake:
                 self.rewards[i] = 0.0
                 grow = False
 
-            if grow and snake_length < self.max_snake_length:
+            # If the snake actually reaches max len, you can't move it
+            if grow and snake_length < self.max_snake_length - 1:
                 self.snake_lengths[i] += 1
             else:
-                tail_ptr = head_ptr - snake_length + 1
+                tail_ptr = head_ptr - snake_length
                 if tail_ptr < 0:
                     tail_ptr = self.max_snake_length + tail_ptr
 
