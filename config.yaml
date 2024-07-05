@@ -53,7 +53,7 @@ default:
         parameters:
           total_timesteps: {
             'distribution': 'log_uniform_values',
-            'min': 250000000,
+            'min': 150000000,
             'max': 10000000000,
           }
           learning_rate: {
@@ -741,32 +741,75 @@ snake:
     name: sweep
     metric:
       goal: maximize
-      name: environment/snake_length
+      name: environment/reward
     # Nested parameters name required by WandB API
     parameters:
       train:
         parameters:
+          total_timesteps: {
+            'distribution': 'log_uniform_values',
+            'min': 150000000,
+            'max': 10000000000,
+          }
           learning_rate: {
             'distribution': 'log_uniform_values',
-            'min': 1e-4,
-            'max': 1e-1,
-          }
-          ent_coef: {
-            'distribution': 'log_uniform_values',
-            'min': 1e-3,
+            'min': 1e-5,
             'max': 1e-1,
           }
           gamma: {
-            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
           }
           gae_lambda: {
-            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          update_epochs: {
+            'distribution': 'uniform',
+            'min': 1,
+            'max': 16,
+          }
+          clip_coef: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          vf_coef: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          vf_clip_coef: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          max_grad_norm: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 10.0,
+          }
+          ent_coef: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-4,
+            'max': 5e-2,
           }
           batch_size: {
-            'values': [32768, 65536, 131072, 262144],
+            'distribution': 'log_uniform_values',
+            'min': 32768,
+            'max': 262144,
           }
           minibatch_size: {
-            'values': [4096, 8192, 16384, 32768],
+            'distribution': 'log_uniform_values',
+            'min': 4096,
+            'max': 32768,
+          }
+          bptt_horizon: {
+            'distribution': 'uniform',
+            'min': 1,
+            'max': 16,
           }
 
 smac: {}
