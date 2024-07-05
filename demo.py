@@ -225,7 +225,8 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
 
     def main():
             args.exp_name = init_wandb(args, wandb_name, id=args.exp_id)
-            suggestion = carbs.suggest().suggestion
+            orig_suggestion = carbs.suggest().suggestion
+            suggestion = orig_suggestion.copy()
             print('Suggestion:', suggestion)
             cnn_channels = suggestion.pop('cnn_channels')
             hidden_size = suggestion.pop('hidden_size')
@@ -262,9 +263,17 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
                 observed_value = stats[target_metric]
                 uptime = profile.uptime
 
+                with open('hypers.txt', 'a') as f:
+                    f.write(f'Train: {args.train.__dict__}\n')
+                    f.write(f'Env: {args.env.__dict__}\n')
+                    f.write(f'Policy: {args.policy.__dict__}\n')
+                    f.write(f'RNN: {args.rnn.__dict__}\n')
+                    f.write(f'Uptime: {uptime}\n')
+                    f.write(f'Value: {observed_value}\n')
+
                 obs_out = carbs.observe(
                     ObservationInParam(
-                        input=suggestion,
+                        input=orig_suggestion,
                         output=observed_value,
                         cost=uptime,
                     )

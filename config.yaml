@@ -53,7 +53,7 @@ default:
         parameters:
           total_timesteps: {
             'distribution': 'log_uniform_values',
-            'min': 150000000,
+            'min': 1500000,
             'max': 10000000000,
           }
           learning_rate: {
