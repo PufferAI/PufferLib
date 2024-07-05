@@ -744,6 +744,25 @@ snake:
       name: environment/reward
     # Nested parameters name required by WandB API
     parameters:
+      env:
+        parameters:
+          vision: {
+            'distribution': 'uniform',
+            'min': 5,
+            'max': 15,
+          }
+      policy:
+        parameters:
+          cnn_channels: {
+            'distribution': 'uniform',
+            'min': 8,
+            'max': 128,
+          }
+          hidden_size:
+            'distribution': 'uniform',
+            'min': 32,
+            'max': 1024,
+          }
       train:
         parameters:
           total_timesteps: {
