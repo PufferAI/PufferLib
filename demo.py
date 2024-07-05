@@ -194,6 +194,9 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
 
     # Must be hardcoded and match wandb sweep space for now
     param_spaces = [
+        carbs_param('cnn_channels', 'linear', search_center=32, is_integer=True),
+        carbs_param('hidden_size', 'linear', search_center=128, is_integer=True),
+        carbs_param('vision', 'linear', search_center=5, is_integer=True),
         carbs_param('total_timesteps', 'log', search_center=250_000_000, is_integer=True),
         carbs_param('learning_rate', 'log', search_center=9e-4),
         carbs_param('gamma', 'logit', search_center=0.99),
@@ -222,6 +225,12 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
             args.exp_name = init_wandb(args, wandb_name, id=args.exp_id)
             suggestion = carbs.suggest().suggestion
             print('Suggestion:', suggestion)
+            cnn_channels = suggestion.pop('cnn_channels')
+            hidden_size = suggestion.pop('hidden_size')
+            vision = suggestion.pop('vision')
+            wandb.config.env['vision'] = vision
+            wandb.config.policy['cnn_channels'] = cnn_channels
+            wandb.config.policy['hidden_size'] = hidden_size
             wandb.config.train.update(suggestion)
             wandb.config.train['batch_size'] = closest_power(
                 suggestion['batch_size'])
@@ -232,8 +241,13 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
             #wandb.config.train['num_envs'] = int(
             #    3*suggestion['env_batch_size'])
             args.train.__dict__.update(dict(wandb.config.train))
+            args.env.__dict__['vision'] = vision
+            args.policy.__dict__['cnn_channels'] = cnn_channels
+            args.policy.__dict__['hidden_size'] = hidden_size
             args.track = True
             print(wandb.config.train)
+            print(wandb.config.env)
+            print(wandb.config.policy)
             try:
                 stats, profile = train(args, env_module, make_env)
             except Exception as e:
