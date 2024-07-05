@@ -117,7 +117,7 @@ class Snake(pufferlib.PufferEnv):
                 'snake_lifetime_max': np.max(self.snake_lifetimes),
                 'snake_length_mean': np.mean(self.snake_lengths),
                 'snake_lifetime_mean': np.mean(self.snake_lifetimes),
-                'reward': self.reward_sum / 128,
+                'reward': self.reward_sum / self.report_interval,
             }
             self.reward_sum = 0
 
