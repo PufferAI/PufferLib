@@ -213,7 +213,7 @@ cdef class CSnake:
             if grow and snake_length < self.max_snake_length:
                 self.snake_lengths[i] += 1
             else:
-                tail_ptr = head_ptr - snake_length
+                tail_ptr = head_ptr - snake_length + 1
                 if tail_ptr < 0:
                     tail_ptr = self.max_snake_length + tail_ptr
 
