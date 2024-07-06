@@ -498,17 +498,17 @@ nmmo3debug:
   use_rnn: True
   train:
     total_timesteps: 500_000_000
-    learning_rate: 0.0007822667183404625
+    learning_rate: 0.00024
     num_envs: 2
     num_workers: 2
     env_batch_size: 1
     update_epochs: 1
-    gamma: 0.975
+    gamma: 0.90
     gae_lambda: 0.975
-    ent_coef: 0.0017149656362185647
+    ent_coef: 0.0015
     bptt_horizon: 16
-    batch_size: 131072
-    minibatch_size: 16384
+    batch_size: 262144
+    minibatch_size: 65536
     compile: False
     anneal_lr: False
   sweep:
@@ -527,10 +527,10 @@ nmmo3debug:
             'max': 5e-2,
           }
           gamma: {
-            'values': [0.80, 0.90, 0.925, 0.95, 0.975, 0.99],
+            'values': [0.925, 0.95, 0.975, 0.99],
           }
           gae_lambda: {
-            'values': [0.80, 0.90, 0.925, 0.95, 0.975, 0.99],
+            'values': [0.90, 0.925, 0.95, 0.975, 0.99],
           }
           learning_rate: {
             'distribution': 'log_uniform_values',
@@ -541,10 +541,10 @@ nmmo3debug:
             'values': [32768, 65536, 131072, 262144],
           }
           minibatch_size: {
-            'values': [8192, 16384, 32768, 65536],
+            'values': [4096, 8192, 16384, 32768],
           }
           bptt_horizon: {
-            'values': [1, 2, 4, 8, 16],
+            'values': [4, 8, 16],
           }
 
 # Ocean: PufferAI's first party environment suite
