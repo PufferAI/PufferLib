@@ -4,6 +4,10 @@ import numpy
 
 VERSION = '1.0.0'
 
+import os
+os.environ['CFLAGS'] = '-O3 -march=native -Wall'
+
+
 # Default Gym/Gymnasium/PettingZoo versions
 # Gym:
 # - 0.26 still has deprecation warnings and is the last version of the package
@@ -110,9 +114,9 @@ environments = {
     'minerl': [
         'gym==0.17.0',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        'minerl==0.4.4',
+        #'git+https://github.com/minerllabs/minerl'
         # Compatiblity warning with urllib3 and chardet
-        'requests==2.31.0',
+        #'requests==2.31.0',
     ],
     'minigrid': [
         f'gym=={GYM_VERSION}',
@@ -167,6 +171,14 @@ environments = {
     #'stable-retro': [
     #    'git+https://github.com/Farama-Foundation/stable-retro.git',
     #]
+    'slimevolley': [
+        f'gym=={GYM_VERSION}',
+        f'gymnasium=={GYMNASIUM_VERSION}',
+        'slimevolley==0.1.0',
+    ],
+    'vizdoom': [
+        'vizdoom==1.2.3',
+    ],
 }
 
 
@@ -193,6 +205,7 @@ common = cleanrl + [environments[env] for env in [
     'nmmo',
     'pokemon_red',
     'procgen',
+    'vizdoom',
 ]]
 
 setup(
@@ -222,12 +235,15 @@ setup(
         **environments,
     },
     ext_modules = cythonize([
-
         "pufferlib/extensions.pyx",
         "pufferlib/environments/ocean/grid/c_grid.pyx",
-    ], nthreads=6,
-        #compiler_directives={'profile': True}, annotate=True
+        "pufferlib/environments/ocean/snake/c_snake.pyx",
+    ], 
+       #nthreads=6,
+       #annotate=True,
+       #compiler_directives={'profile': True}, annotate=True
     ),
+    extra_compile_args=['-O3', '-march=native'],
     include_dirs=[numpy.get_include()],
     python_requires=">=3.8",
     license="MIT",

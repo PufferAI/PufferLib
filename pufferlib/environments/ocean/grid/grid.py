@@ -237,34 +237,6 @@ def gen_spawn_positions(map_size):
     positions = sorted(positions, key=lambda p: max(abs(p-mid)))
     return np.array(positions, dtype=np.uint32)
 
-
-    left = map_size//2 - 1
-    right = left + 1
-    cands = np.zeros((map_size**2, 2), dtype=np.int32)
-    mid = map_size//2
-
-    idx = 0
-    for delta in range(map_size//2):
-        left = mid - delta - 1
-        right = mid + delta
-        for i in range(left+1, right-1):
-            cands[idx, 0] = left
-            cands[idx, 1] = left + i
-            idx += 1
-            cands[idx, 1] = left + i
-            cands[idx, 0] = left
-            idx += 1
-            cands[idx, 0] = right
-            cands[idx, 1] = left + i
-            idx += 1
-            cands[idx, 1] = left + i
-            cands[idx, 0] = right
-            idx += 1
-
-        cands
-
-    return cands
-
 def test_pz_performance(timeout):
     import time
     env = PettingZooGrid()

@@ -1,0 +1,235 @@
+'''High-perf many-agent snake. Inspired by snake env from https://github.com/dnbt777'''
+
+import numpy as np
+import gymnasium
+
+import pufferlib
+from pufferlib.environments.ocean.snake.c_snake import CSnake, step_all
+
+COLORS = np.array([
+    [6, 24, 24, 255],     # Background
+    [0, 0, 255, 255],     # Food
+    [0, 128, 255, 255],   # Corpse
+    [128, 128, 128, 255], # Wall
+    [255, 0, 0, 255],     # Snake
+    [255, 255, 255, 255], # Snake
+    [255, 85, 85, 255],     # Snake
+    [170, 170, 170, 255], # Snake
+], dtype=np.uint8)
+
+ANSI_COLORS = [30, 34, 36, 90, 31, 97, 91, 37]
+
+class Snake(pufferlib.PufferEnv):
+    def __init__(self, widths=[2560], heights=[1440], num_snakes=[4096],
+            num_food=[65536], vision=5, leave_corpse_on_death=True,
+            reward_food=0.1, reward_corpse=0.1, reward_death=-1.0,
+            report_interval=128,  max_snake_length=1024,
+            render_mode='rgb_array'):
+
+        assert isinstance(vision, int)
+        if isinstance(leave_corpse_on_death, bool):
+            leave_corpse_on_death = len(widths)*[leave_corpse_on_death]
+
+        assert (len(widths) == len(heights) == len(num_snakes)
+            == len(num_food) == len(leave_corpse_on_death))
+
+        for w, h in zip(widths, heights):
+            assert w >= 2*vision+2 and h >= 2*vision+2, \
+                'width and height must be at least 2*vision+2'
+
+        total_snakes = sum(num_snakes)
+        max_area = max([w*h for h, w in zip(heights, widths)])
+        self.max_snake_length = min(max_snake_length, max_area)
+        snake_shape = (total_snakes, self.max_snake_length, 2)
+
+        self.grids = [np.zeros((h, w), dtype=np.uint8) for h, w in zip(heights, widths)]
+        self.snakes = -1 + np.zeros(snake_shape, dtype=np.int32)
+        self.snake_lengths = np.zeros(total_snakes, dtype=np.int32)
+        self.snake_ptrs = np.zeros(total_snakes, dtype=np.int32)
+        self.snake_lifetimes = np.zeros(total_snakes, dtype=np.int32)
+        self.snake_colors = 4 + np.arange(total_snakes, dtype=np.int32) % 4
+        self.num_snakes = num_snakes
+        self.num_food = num_food
+        self.vision = vision
+        self.leave_corpse_on_death = leave_corpse_on_death
+        self.reward_food = reward_food
+        self.reward_corpse = reward_corpse
+        self.reward_death = reward_death
+        self.report_interval = report_interval
+
+        # This block required by advanced PufferLib env spec
+        box = 2 * vision + 1
+        self.observation_space = gymnasium.spaces.Box(
+            low=0, high=2, shape=(box, box), dtype=np.uint8)
+        self.action_space = gymnasium.spaces.Discrete(4)
+        self.single_observation_space = self.observation_space
+        self.single_action_space = self.action_space
+        self.num_agents = total_snakes
+        self.render_mode = render_mode
+        self.emulated = None
+        self.done = False
+        self.buf = pufferlib.namespace(
+            observations = np.zeros(
+                (total_snakes, box, box), dtype=np.uint8),
+            rewards = np.zeros(total_snakes, dtype=np.float32),
+            terminals = np.zeros(total_snakes, dtype=bool),
+            truncations = np.zeros(total_snakes, dtype=bool),
+            masks = np.ones(total_snakes, dtype=bool),
+        )
+        self.actions = np.zeros(total_snakes, dtype=np.uint32)
+
+        self.reward_sum = 0
+        self.tick = 0
+        self.atn = None
+        self.client = None
+
+    def reset(self, seed=None):
+        ptr = end = 0
+        self.c_envs = []
+        for i in range(len(self.grids)):
+            end += self.num_snakes[i]
+            self.c_envs.append(CSnake(self.grids[i], self.snakes[ptr:end],
+                self.buf.observations[ptr:end], self.snake_lengths[ptr:end],
+                self.snake_ptrs[ptr:end], self.snake_lifetimes[ptr:end],
+                self.snake_colors[ptr:end], self.actions[ptr:end],
+                self.buf.rewards[ptr:end], self.num_food[i], self.vision,
+                self.max_snake_length, self.leave_corpse_on_death[i],
+                self.reward_food, self.reward_corpse, self.reward_death))
+            self.c_envs[i].reset()
+            ptr = end
+
+        return self.buf.observations, {}
+
+    def step(self, actions):
+        self.actions[:] = actions
+        if self.atn is not None: # Human player
+            self.actions[0] = self.atn
+
+        step_all(self.c_envs)
+
+        info = {}
+        self.reward_sum += self.buf.rewards.mean()
+        if self.tick % self.report_interval == 0:
+            info = {
+                'snake_length_min': np.min(self.snake_lengths),
+                'snake_lifetime_min': np.min(self.snake_lifetimes),
+                'snake_length_max': np.max(self.snake_lengths),
+                'snake_lifetime_max': np.max(self.snake_lifetimes),
+                'snake_length_mean': np.mean(self.snake_lengths),
+                'snake_lifetime_mean': np.mean(self.snake_lifetimes),
+                'reward': self.reward_sum / self.report_interval,
+            }
+            self.reward_sum = 0
+
+        return (self.buf.observations, self.buf.rewards,
+            self.buf.terminals, self.buf.truncations, info)
+
+    def render(self, upscale=1):
+        grid = self.grids[0]
+        height, width = grid.shape
+        v = self.vision
+        if self.render_mode == 'human':
+            if self.client is None:
+                self.client = RaylibClient(80, 45, COLORS.tolist(), tile_size=16)
+
+            snakes_in_first_env = self.num_snakes[0]
+            snake_ptrs = self.snake_ptrs[:snakes_in_first_env]
+            agent_positions = self.snakes[np.arange(snakes_in_first_env), snake_ptrs]
+            actions = self.actions[:snakes_in_first_env]
+            frame, self.atn = self.client.render(grid, agent_positions)
+        elif self.render_mode == 'rgb_array':
+            frame = COLORS[grid[v:-v-1, v:-v-1]]
+            if upscale > 1:
+                rescaler = np.ones((upscale, upscale, 1), dtype=np.uint8)
+                frame = np.kron(frame, rescaler)
+        elif self.render_mode == 'ansi':
+            lines = []
+            for line in grid[v-1:-v, v-1:-v]:
+                lines.append(''.join([
+                    f'\033[{ANSI_COLORS[val]}m██\033[0m' for val in line]))
+
+            frame = '\n'.join(lines)
+        else:
+            raise ValueError(f'Invalid render mode: {self.render_mode}')
+
+        return frame
+
+class RaylibClient:
+    def __init__(self, width, height, asset_map, tile_size=16):
+        self.width = width
+        self.height = height
+        self.asset_map = asset_map
+        self.tile_size = tile_size
+
+        from raylib import rl
+        rl.InitWindow(width*tile_size, height*tile_size,
+            "PufferLib Ray Snake".encode())
+        rl.SetTargetFPS(15)
+        self.rl = rl
+
+        from cffi import FFI
+        self.ffi = FFI()
+
+    def _cdata_to_numpy(self):
+
+        image = self.rl.LoadImageFromScreen()
+        width, height, channels = image.width, image.height, 4
+        cdata = self.ffi.buffer(image.data, width*height*channels)
+        return np.frombuffer(cdata, dtype=np.uint8
+            ).reshape((height, width, channels))[:, :, :3]
+
+    def render(self, grid, agent_positions):
+        rl = self.rl
+        action = None
+        if rl.IsKeyDown(rl.KEY_UP) or rl.IsKeyDown(rl.KEY_W):
+            action = 0
+        elif rl.IsKeyDown(rl.KEY_DOWN) or rl.IsKeyDown(rl.KEY_S):
+            action = 1
+        elif rl.IsKeyDown(rl.KEY_LEFT) or rl.IsKeyDown(rl.KEY_A):
+            action = 2
+        elif rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
+            action = 3
+
+        rl.BeginDrawing()
+        rl.ClearBackground(self.asset_map[0])
+
+        ts = self.tile_size
+        main_r, main_c = agent_positions[0]
+        r_min = main_r - self.height//2
+        r_max = main_r + self.height//2
+        c_min = main_c - self.width//2
+        c_max = main_c + self.width//2
+
+        for i, r in enumerate(range(r_min, r_max+1)):
+            for j, c in enumerate(range(c_min, c_max+1)):
+                if (r < 0 or r >= grid.shape[0] or c < 0 or c >= grid.shape[1]):
+                    continue
+
+                tile = grid[r, c]
+                if tile == 0:
+                    continue
+
+                rl.DrawRectangle(j*ts, i*ts, ts, ts, self.asset_map[tile])
+
+        rl.EndDrawing()
+        return self._cdata_to_numpy(), action
+
+def test_performance(timeout=10, atn_cache=1024):
+    env = Snake()
+    env.reset()
+    tick = 0
+
+    total_snakes = sum(env.num_snakes)
+    actions = np.random.randint(0, 4, (atn_cache, total_snakes))
+
+    import time
+    start = time.time()
+    while time.time() - start < timeout:
+        atns = actions[tick % atn_cache]
+        env.step(atns)
+        tick += 1
+
+    print(f'SPS: %f', total_snakes * tick / (time.time() - start))
+
+if __name__ == '__main__':
+    test_performance()

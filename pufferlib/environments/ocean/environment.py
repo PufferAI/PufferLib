@@ -3,11 +3,14 @@ import pufferlib.postprocess
 
 from . import ocean
 from .grid import grid
+from .snake import snake
 
 def env_creator(name='squared'):
     if name == 'grid':
         return make_grid
-    if name == 'squared':
+    elif name == 'snake':
+        return make_snake
+    elif name == 'squared':
         return make_squared
     elif name == 'bandit':
         return make_bandit
@@ -29,12 +32,58 @@ def env_creator(name='squared'):
         raise ValueError('Invalid environment name')
 
 def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array'):
-    env = grid.PufferGrid(map_size, num_agents, horizon)
-    #env = grid.PufferGrid(64, 64, 64, render_mode=render_mode)
+    #env = grid.PufferGrid(map_size, num_agents, horizon, render_mode=render_mode)
+    env = grid.PufferGrid(64, 64, 64, render_mode=render_mode)
     return env
     env = pufferlib.postprocess.MultiagentEpisodeStats(env)
     env = pufferlib.postprocess.MeanOverAgents(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
+
+def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision=5,
+        leave_corpse_on_death=None, preset='1440p-4096', render_mode=None):
+    if preset is None:
+        render_mode = render_mode or 'rgb_array'
+    elif preset == '1440p-4096':
+        widths = widths or [2560]
+        heights = heights or [1440]
+        num_snakes = num_snakes or [4096]
+        num_food = num_food or [65536]
+        leave_corpse_on_death = leave_corpse_on_death or True
+        render_mode = render_mode or 'human'
+    elif preset == '720p-1024':
+        widths = widths or 4*[1280]
+        heights = heights or 4*[720]
+        num_snakes = num_snakes or 4*[1024]
+        num_food = num_food or 4*[16384]
+        leave_corpse_on_death = leave_corpse_on_death or True
+        render_mode = render_mode or 'rgb_array'
+    elif preset == '40p-4':
+        widths = widths or 1024*[40]
+        heights = heights or 1024*[40]
+        num_snakes = num_snakes or 1024*[4]
+        num_food = num_food or 1024*[16]
+        leave_corpse_on_death = leave_corpse_on_death or True
+        render_mode = render_mode or 'ansi'
+    elif preset == 'classic':
+        widths = widths or 4096*[26]
+        heights = heights or 4096*[26]
+        num_snakes = num_snakes or 4096*[1]
+        num_food = num_food or 4096*[1]
+        leave_corpse_on_death = leave_corpse_on_death or False
+        render_mode = render_mode or 'ansi'
+    else:
+        raise ValueError(
+            f'Preset: {preset} must be 1440p-4096, 720p-1024, 40p-4, or classic')
+    
+    return snake.Snake(
+        widths=widths,
+        heights=heights,
+        num_snakes=num_snakes,
+        num_food=num_food,
+        leave_corpse_on_death=leave_corpse_on_death,
+        render_mode=render_mode,
+        vision=vision,
+    )
 
 def make_squared(distance_to_target=3, num_targets=1, **kwargs):
     env = ocean.Squared(distance_to_target=distance_to_target, num_targets=num_targets)
