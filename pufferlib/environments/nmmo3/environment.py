@@ -29,3 +29,22 @@ def make(name, num_envs=1):
         height=[256, 512, 1024, 2048],
         num_envs=4,
     )
+
+# Testing with same env for now
+def make(name, num_envs=1):
+    return PuffEnv(
+        width=8*[2048],
+        height=8*[2048],
+        num_players=8*[512],
+        num_envs=8,
+    )
+
+# Testing with same env for now
+def make(name, num_envs=1):
+    return PuffEnv(
+        width=2*[2048],
+        height=2*[2048],
+        num_envs=2,
+    )
+
+
