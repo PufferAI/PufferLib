@@ -463,52 +463,22 @@ nmmo:
     minibatch_size: 2048
 
 nmmo3:
-  use_rnn: False
-  train:
-    total_timesteps: 20_000_000
-    checkpoint_interval: 1000
-    num_envs: 24
-    num_workers: 24
-    env_batch_size: 8
-    update_epochs: 1
-    gamma: 0.998
-    batch_size: 65536
-    minibatch_size: 16384
-    #compile: True
-  env:
-    num_envs: 1 # NMMO3 provides its own fast multienv
-    #num_envs: 8 # NMMO3 provides its own fast multienv
-    #
-nmmo3laptop:
-  package: nmmo3
-  train:
-    total_timesteps: 10_000_000
-    num_envs: 24
-    num_workers: 6
-    env_batch_size: 8
-    update_epochs: 1
-    gamma: 0.998
-    batch_size: 32768
-    minibatch_size: 16384
-    #compile: True
-    compile: False
-
-nmmo3debug:
   package: nmmo3
   use_rnn: True
   train:
     total_timesteps: 500_000_000
-    learning_rate: 0.00024
+    checkpoint_interval: 1000
+    learning_rate: 0.00012067586583919788
     num_envs: 2
     num_workers: 2
     env_batch_size: 1
     update_epochs: 1
-    gamma: 0.90
-    gae_lambda: 0.975
-    ent_coef: 0.0015
+    gamma: 0.95
+    gae_lambda: 0.90
+    ent_coef: 0.0014863388512709962
     bptt_horizon: 16
     batch_size: 262144
-    minibatch_size: 65536
+    minibatch_size: 4096
     compile: False
     anneal_lr: False
   sweep:
@@ -723,18 +693,24 @@ snake:
   env_name: snake
   use_rnn: True
   train:
-    total_timesteps: 1_000_000_000
+    total_timesteps: 10_000_000_000
     num_envs: 2
     num_workers: 2
     env_batch_size: 1
-    batch_size: 262144
+    batch_size: 131072
     update_epochs: 1
-    minibatch_size: 4096
+    minibatch_size: 32768
+    bptt_horizon: 16
     anneal_lr: False
-    gae_lambda: 0.9
-    gamma: 0.99
-    ent_coef: 0.0736
-    learning_rate: 0.000879
+    gae_lambda: 0.9776227170639571
+    gamma: 0.8567482546637853
+    clip_coef: 0.011102333784435113
+    vf_coef: 0.3403069830175013
+    vf_clip_coef: 0.26475190539131727
+    max_grad_norm: 0.8660179376602173
+    ent_coef: 0.01376980586465873
+    learning_rate: 0.002064722899262613
+    checkpoint_interval: 1000
     device: cuda
   sweep:
     method: bayes
