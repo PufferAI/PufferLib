@@ -387,6 +387,7 @@ def train(args, env_module, make_env):
                 os._exit(0)
             except Exception:
                 Console().print_exception()
+                # TODO: breaks sweeps? But needed for training to print cleanly
                 #os._exit(0)
 
         stats, _ = clean_pufferl.evaluate(data)
