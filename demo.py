@@ -199,7 +199,7 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
         carbs_param('cnn_channels', 'linear', wandb_policy_params, search_center=32, is_integer=True),
         carbs_param('hidden_size', 'linear', wandb_policy_params, search_center=128, is_integer=True),
         #carbs_param('vision', 'linear', search_center=5, is_integer=True),
-        carbs_param('total_timesteps', 'log', wandb_train_params, search_center=250_000_000, is_integer=True),
+        #carbs_param('total_timesteps', 'log', wandb_train_params, search_center=1_000_000_000, is_integer=True),
         carbs_param('learning_rate', 'log', wandb_train_params, search_center=9e-4),
         carbs_param('gamma', 'logit', wandb_train_params, search_center=0.99),
         carbs_param('gae_lambda', 'logit', wandb_train_params, search_center=0.90),
@@ -321,7 +321,7 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
     main()
     exit(0)
     '''
-    wandb.agent(sweep_id, main, count=100)
+    wandb.agent(sweep_id, main, count=500)
 
 def sweep(args, wandb_name, env_module, make_env):
     import wandb
