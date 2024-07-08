@@ -723,7 +723,7 @@ snake:
   env_name: snake
   use_rnn: True
   train:
-    total_timesteps: 150_000_000
+    total_timesteps: 1_000_000_000
     num_envs: 2
     num_workers: 2
     env_batch_size: 1
@@ -765,11 +765,6 @@ snake:
           }
       train:
         parameters:
-          total_timesteps: {
-            'distribution': 'log_uniform_values',
-            'min': 150000000,
-            'max': 10000000000,
-          }
           learning_rate: {
             'distribution': 'log_uniform_values',
             'min': 1e-5,
