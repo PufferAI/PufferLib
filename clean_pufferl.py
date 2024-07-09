@@ -551,7 +551,7 @@ def count_params(policy):
     return sum(p.numel() for p in policy.parameters() if p.requires_grad)
 
 def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
-        model_path=None, device='cuda'):
+        render_mode='auto', model_path=None, device='cuda'):
 
     # We are just using Serial vecenv to give a consistent
     # single-agent/multi-agent API for evaluation
