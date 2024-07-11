@@ -622,7 +622,7 @@ grid_continuous:
   policy_name: Grid
   rnn_name: Recurrent
   train:
-    total_timesteps: 20_000_000
+    total_timesteps: 300_000_000
     learning_rate: 0.003
     num_envs: 2
     num_workers: 2
@@ -630,10 +630,10 @@ grid_continuous:
     update_epochs: 1
     gamma: 0.9
     gae_lambda: 0.9
-    ent_coef: 0.04
+    ent_coef: 0.02
     bptt_horizon: 8
-    batch_size: 65536
-    minibatch_size: 4096
+    batch_size: 131072
+    minibatch_size: 32768
     compile: False
     anneal_lr: False
     device: cuda

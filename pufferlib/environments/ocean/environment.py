@@ -46,7 +46,7 @@ def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
 def make_grid_continuous(width=1080, height=720, num_agents=4096,
-        horizon=1024, render_mode='rgb_array'):
+        horizon=512, render_mode='rgb_array'):
     env = grid_continuous.PufferGrid(width, height, num_agents,
         horizon, discretize=True, render_mode=render_mode)
     return env

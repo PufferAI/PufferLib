@@ -89,7 +89,7 @@ class PufferGrid(pufferlib.PufferEnv):
     def __init__(self, width=1024, height=1024, num_agents=4096,
             horizon=1024, vision_range=5, agent_speed=1.0,
             discretize=False, food_reward=0.1,
-            init_fn=init_introverts, reward_fn=reward_introverts,
+            init_fn=init_foraging, reward_fn=reward_foraging,
             render_mode='rgb_array'):
         super().__init__()
         self.width = width 
@@ -218,7 +218,7 @@ def gen_spawn_positions(width, height):
     x = np.arange(width)
     mid_y = height//2 - 0.5
     mid_x = width//2 - 0.5
-    positions = np.stack(np.meshgrid(y, x), axis=-1).reshape(-1, 2)
+    positions = np.stack(np.meshgrid(y, x), axis=-1).reshape(-1, 2)[::4]
     positions = sorted(positions, key=lambda p: max(abs(p[0]-mid_y), abs(p[1]-mid_x)))
     return np.array(positions, dtype=np.float32)
 
