@@ -622,11 +622,11 @@ grid_continuous:
   policy_name: Grid
   rnn_name: Recurrent
   train:
-    total_timesteps: 125_000_000
+    total_timesteps: 20_000_000
     learning_rate: 0.003
-    num_envs: 8
+    num_envs: 2
     num_workers: 2
-    env_batch_size: 4
+    env_batch_size: 1
     update_epochs: 1
     gamma: 0.9
     gae_lambda: 0.9

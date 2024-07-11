@@ -8,8 +8,12 @@
 
 cdef:
     int EMPTY = 0
-    int AGENT = 1
+    int FOOD = 1
     int WALL = 2
+    int AGENT_1 = 3
+    int AGENT_2 = 4
+    int AGENT_3 = 5
+    int AGENT_4 = 6
 
     int PASS = 0
     int NORTH = 1
@@ -26,16 +30,19 @@ cdef class Environment:
         int vision_range
         float agent_speed
         bint discretize
+        float food_reward
         int obs_size
 
         unsigned char[:, :] grid
         unsigned char[:, :, :] observations
+        float[:] rewards
         float[:, :] agent_positions
         float[:, :] spawn_position_cands
+        int[:] agent_colors
 
-    def __init__(self, grid, agent_positions, spawn_position_cands,
-            observations, int width, int height, int num_agents, int horizon,
-            int vision_range, float agent_speed, bint discretize):
+    def __init__(self, grid, agent_positions, spawn_position_cands, agent_colors,
+            observations, rewards, int width, int height, int num_agents, int horizon,
+            int vision_range, float agent_speed, bint discretize, float food_reward):
         self.width = width 
         self.height = height
         self.num_agents = num_agents
@@ -43,12 +50,15 @@ cdef class Environment:
         self.vision_range = vision_range
         self.agent_speed = agent_speed
         self.discretize = discretize
+        self.food_reward = food_reward
         self.obs_size = 2*self.vision_range + 1
 
         self.grid = grid
         self.observations = observations
+        self.rewards = rewards
         self.agent_positions = agent_positions
         self.spawn_position_cands = spawn_position_cands
+        self.agent_colors = agent_colors
 
     cdef void _compute_observations(self):
         cdef:
@@ -93,8 +103,8 @@ cdef class Environment:
             disc_y = int(self.agent_speed * y)
             disc_x = int(self.agent_speed * x)
 
-            if self.grid[disc_y, disc_x] == 0:
-                self.grid[disc_y, disc_x] = AGENT
+            if self.grid[disc_y, disc_x] == EMPTY:
+                self.grid[disc_y, disc_x] = self.agent_colors[agent_idx]
                 self.agent_positions[agent_idx, 0] = y
                 self.agent_positions[agent_idx, 1] = x
                 agent_idx += 1
@@ -143,9 +153,13 @@ cdef class Environment:
             disc_dest_y = int(self.agent_speed * dest_y)
             disc_dest_x = int(self.agent_speed * dest_x)
 
+            if self.grid[disc_dest_y, disc_dest_x] == FOOD:
+                self.grid[disc_dest_y, disc_dest_x] = EMPTY
+                self.rewards[agent_idx] = self.food_reward
+
             if self.grid[disc_dest_y, disc_dest_x] == 0:
                 self.grid[disc_y, disc_x] = EMPTY
-                self.grid[disc_dest_y, disc_dest_x] = AGENT
+                self.grid[disc_dest_y, disc_dest_x] = self.agent_colors[agent_idx]
 
                 # Continuous position update
                 self.agent_positions[agent_idx, 0] = dest_y

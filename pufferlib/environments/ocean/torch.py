@@ -46,7 +46,7 @@ class Grid(nn.Module):
         super().__init__()
         self.network= nn.Sequential(
             pufferlib.pytorch.layer_init(
-                nn.Conv2d(3, cnn_channels, 5, stride=3)),
+                nn.Conv2d(7, cnn_channels, 5, stride=3)),
             nn.ReLU(),
             pufferlib.pytorch.layer_init(
                 nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1)),
@@ -66,7 +66,7 @@ class Grid(nn.Module):
         return actions, value
 
     def encode_observations(self, observations):
-        observations = F.one_hot(observations.long(), 3).permute(0, 3, 1, 2).float()
+        observations = F.one_hot(observations.long(), 7).permute(0, 3, 1, 2).float()
         return self.network(observations), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
