@@ -28,13 +28,20 @@ class Default(nn.Module):
 
         self.is_multidiscrete = isinstance(env.single_action_space,
                 pufferlib.spaces.MultiDiscrete)
+        self.is_continuous = isinstance(env.single_action_space,
+                pufferlib.spaces.Box)
         if self.is_multidiscrete:
             action_nvec = env.single_action_space.nvec
             self.decoder = nn.ModuleList([pufferlib.pytorch.layer_init(
                 nn.Linear(hidden_size, n), std=0.01) for n in action_nvec])
-        else:
+        elif not self.is_continuous:
             self.decoder = pufferlib.pytorch.layer_init(
                 nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
+        else:
+            self.decoder_mean = pufferlib.pytorch.layer_init(
+                nn.Linear(hidden_size, env.single_action_space.shape[0]), std=0.01)
+            self.decoder_logstd = nn.Parameter(torch.zeros(
+                1, env.single_action_space.shape[0]))
 
         self.value_head = nn.Linear(hidden_size, 1)
 
@@ -57,6 +64,13 @@ class Default(nn.Module):
         if self.is_multidiscrete:
             actions = [dec(hidden) for dec in self.decoder]
             return actions, value
+        elif self.is_continuous:
+            mean = self.decoder_mean(hidden)
+            logstd = self.decoder_logstd.expand_as(mean)
+            std = torch.exp(logstd)
+            probs = torch.distributions.Normal(mean, std)
+            batch = hidden.shape[0]
+            return probs, value
 
         actions = self.decoder(hidden)
         return actions, value

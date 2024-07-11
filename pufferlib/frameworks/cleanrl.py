@@ -22,9 +22,18 @@ def entropy(logits):
     p_log_p = logits * logits_to_probs(logits)
     return -p_log_p.sum(-1)
 
-def sample_logits(logits: Union[torch.Tensor, List[torch.Tensor]], action=None):
+def sample_logits(logits: Union[torch.Tensor, List[torch.Tensor]],
+        action=None, is_continuous=False):
     is_discrete = isinstance(logits, torch.Tensor)
-    if is_discrete:
+    if is_continuous:
+        batch = logits.loc.shape[0]
+        if action is None:
+            action = logits.sample().view(batch, -1)
+
+        log_probs = logits.log_prob(action.view(batch, -1)).sum(1)
+        logits_entropy = logits.entropy().view(batch, -1).sum(1)
+        return action, log_probs, logits_entropy
+    elif is_discrete:
         normalized_logits = [logits - logits.logsumexp(dim=-1, keepdim=True)]
         logits = [logits]
     else: # not sure what else it could be
@@ -52,6 +61,7 @@ class Policy(torch.nn.Module):
     def __init__(self, policy):
         super().__init__()
         self.policy = policy
+        self.is_continuous = hasattr(policy, 'is_continuous') and policy.is_continuous
 
     def get_value(self, x, state=None):
         _, value = self.policy(x)
@@ -59,7 +69,7 @@ class Policy(torch.nn.Module):
 
     def get_action_and_value(self, x, action=None):
          logits, value = self.policy(x)
-         action, logprob, entropy = sample_logits(logits, action)
+         action, logprob, entropy = sample_logits(logits, action, self.is_continuous)
          return action, logprob, entropy, value
 
     def forward(self, x, action=None):
@@ -71,6 +81,7 @@ class RecurrentPolicy(torch.nn.Module):
     def __init__(self, policy):
         super().__init__()
         self.policy = policy
+        self.is_continuous = hasattr(policy.policy, 'is_continuous') and policy.policy.is_continuous
 
     @property
     def lstm(self):
@@ -86,7 +97,7 @@ class RecurrentPolicy(torch.nn.Module):
 
     def get_action_and_value(self, x, state=None, action=None):
         logits, value, state = self.policy(x, state)
-        action, logprob, entropy = sample_logits(logits, action)
+        action, logprob, entropy = sample_logits(logits, action, self.is_continuous)
         return action, logprob, entropy, value, state
 
     def forward(self, x, state=None, action=None):

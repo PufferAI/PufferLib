@@ -170,6 +170,7 @@ def train(data):
         experience.flatten_batch(advantages_np)
 
     # Optimizing the policy and value network
+    total_minibatches = experience.num_minibatches * config.update_epochs
     mean_pg_loss, mean_v_loss, mean_entropy_loss = 0, 0, 0
     mean_old_kl, mean_kl, mean_clipfrac = 0, 0, 0
     for epoch in range(config.update_epochs):
@@ -246,12 +247,12 @@ def train(data):
                     torch.cuda.synchronize()
 
             with profile.train_misc:
-                losses.policy_loss += pg_loss.item() / experience.num_minibatches
-                losses.value_loss += v_loss.item() / experience.num_minibatches
-                losses.entropy += entropy_loss.item() / experience.num_minibatches
-                losses.old_approx_kl += old_approx_kl.item() / experience.num_minibatches
-                losses.approx_kl += approx_kl.item() / experience.num_minibatches
-                losses.clipfrac += clipfrac.item() / experience.num_minibatches
+                losses.policy_loss += pg_loss.item() / total_minibatches
+                losses.value_loss += v_loss.item() / total_minibatches
+                losses.entropy += entropy_loss.item() / total_minibatches
+                losses.old_approx_kl += old_approx_kl.item() / total_minibatches
+                losses.approx_kl += approx_kl.item() / total_minibatches
+                losses.clipfrac += clipfrac.item() / total_minibatches
 
         if config.target_kl is not None:
             if approx_kl > config.target_kl:
@@ -271,6 +272,7 @@ def train(data):
         data.epoch += 1
 
         done_training = data.global_step >= config.total_timesteps
+        # TODO: beter way to get episode return update without clogging dashboard
         if profile.update(data) or (
                 'episode_return' in data.stats or done_training):
             print_dashboard(config.env, data.utilization, data.global_step, data.epoch,
@@ -550,7 +552,7 @@ def try_load_checkpoint(data):
 def count_params(policy):
     return sum(p.numel() for p in policy.parameters() if p.requires_grad)
 
-def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
+def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_kwargs,
         render_mode='auto', model_path=None, device='cuda'):
 
     # We are just using Serial vecenv to give a consistent
@@ -561,7 +563,7 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
     env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs)
 
     if model_path is None:
-        agent = agent_creator(env, **agent_kwargs).to(device)
+        agent = agent_creator(env, policy_cls, rnn_cls, agent_kwargs).to(device)
     else:
         agent = torch.load(model_path, map_location=device)
 
@@ -572,7 +574,7 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
 
     frames = []
     tick = 0
-    while tick <= 1000:
+    while tick <= 10000:
         if tick % 1 == 0:
             render = driver.render()
             if driver.render_mode == 'ansi':
@@ -580,11 +582,11 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
                 time.sleep(0.05)
             elif driver.render_mode == 'rgb_array':
                 frames.append(render)
-                #import cv2
-                #render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
-                #cv2.imshow('frame', render)
-                #cv2.waitKey(1)
-                #time.sleep(1/24)
+                import cv2
+                render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
+                cv2.imshow('frame', render)
+                cv2.waitKey(1)
+                time.sleep(1/24)
             elif driver.render_mode == 'human' and render is not None:
                 frames.append(render)
 
@@ -599,13 +601,13 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
 
         ob, reward = env.step(action)[:2]
         reward = reward.mean()
-        if tick % 100 == 0:
+        if tick % 1 == 0:
             print(f'Reward: {reward:.4f}, Tick: {tick}')
         tick += 1
 
     # Save frames as gif
     import imageio
-    imageio.mimsave('../docker/snake.gif', frames, fps=10)
+    imageio.mimsave('../docker/continuous.gif', frames, fps=15, loop=0)
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)

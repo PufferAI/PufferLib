@@ -46,8 +46,29 @@ def load_config(parser, config_path='config.yaml'):
     make_env_args = [make_name] if make_name else []
     make_env = env_module.env_creator(*make_env_args)
     make_env_args = pufferlib.utils.get_init_args(make_env)
-    policy_args = pufferlib.utils.get_init_args(env_module.Policy)
-    rnn_args = pufferlib.utils.get_init_args(env_module.Recurrent)
+
+    if 'policy_name' in env_config:
+        config['policy_name'] = env_config['policy_name']
+    elif 'policy_name' in pkg_config:
+        config['policy_name'] = pkg_config['policy_name']
+    else:
+        config['policy_name'] = default['policy_name']
+
+    policy_name = config['policy_name']
+    policy_cls = getattr(env_module.torch, policy_name)
+    policy_args = pufferlib.utils.get_init_args(policy_cls)
+
+    if 'rnn_name' in env_config:
+        config['rnn_name'] = env_config['rnn_name']
+    elif 'rnn_name' in pkg_config:
+        config['rnn_name'] = pkg_config['rnn_name']
+    else:
+        config['rnn_name'] = default['rnn_name']
+
+    rnn_name = config['rnn_name']
+    rnn_cls = getattr(env_module, rnn_name)
+    rnn_args = pufferlib.utils.get_init_args(rnn_cls)
+
     fn_sig = dict(env=make_env_args, policy=policy_args, rnn=rnn_args)
     config = vars(parser.parse_known_args()[0])
 
@@ -78,29 +99,25 @@ def load_config(parser, config_path='config.yaml'):
         config[name] = pufferlib.namespace(**config[name])
 
     pufferlib.utils.validate_args(make_env.func if isinstance(make_env, functools.partial) else make_env, config['env'])
-    pufferlib.utils.validate_args(env_module.Policy, config['policy'])
+    pufferlib.utils.validate_args(policy_cls, config['policy'])
 
-    if 'use_rnn' in env_config:
-        config['use_rnn'] = env_config['use_rnn']
-    elif 'use_rnn' in pkg_config:
-        config['use_rnn'] = pkg_config['use_rnn']
-    else:
-        config['use_rnn'] = default['use_rnn']
+    parser.add_argument('--policy-name', type=str, default=None, help='Policy name to use')
+    config['policy_name'] = parser.parse_known_args()[0].policy_name
+    parser.add_argument('--rnn-name', type=str, default=None, help='RNN name to use')
+    config['rnn_name'] = parser.parse_known_args()[0].rnn_name
 
-    parser.add_argument('--use_rnn', default=False, action='store_true',
-        help='Wrap policy with an RNN')
-    config['use_rnn'] = config['use_rnn'] or parser.parse_known_args()[0].use_rnn
     parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help='show this help message and exit')
     parser.parse_args()
     wandb_name = make_name or env_name
     config['env_name'] = env_name
     config['exp_id'] = args.exp_id or args.env + '-' + str(uuid.uuid4())[:8]
-    return wandb_name, pkg_name, pufferlib.namespace(**config), env_module, make_env, make_policy
+    return (wandb_name, pkg_name, pufferlib.namespace(**config),
+        env_module, make_env, policy_cls, rnn_cls)
    
-def make_policy(env, env_module, args):
-    policy = env_module.Policy(env, **args.policy)
-    if args.use_rnn:
-        policy = env_module.Recurrent(env, policy, **args.rnn)
+def make_policy(env, policy_cls, rnn_cls, args):
+    policy = policy_cls(env, **args.policy)
+    if rnn_cls is not None:
+        policy = rnn_cls(env, policy, **args.rnn)
         policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)
     else:
         policy = pufferlib.frameworks.cleanrl.Policy(policy)
@@ -344,7 +361,7 @@ def sweep(args, wandb_name, env_module, make_env):
 
     wandb.agent(sweep_id, main, count=100)
 
-def train(args, env_module, make_env):
+def train(args, env_module, make_env, policy_cls, rnn_cls):
     args.wandb = None
     args.train.exp_id = args.exp_id
     if args.track:
@@ -369,7 +386,7 @@ def train(args, env_module, make_env):
         zero_copy=args.train.zero_copy,
         backend=vec,
     )
-    policy = make_policy(vecenv.driver_env, env_module, args)
+    policy = make_policy(vecenv.driver_env, policy_cls, rnn_cls, args)
     train_config = args.train 
     train_config.track = args.track
     train_config.device = args.train.device
@@ -388,7 +405,7 @@ def train(args, env_module, make_env):
             except Exception:
                 Console().print_exception()
                 # TODO: breaks sweeps? But needed for training to print cleanly
-                #os._exit(0)
+                os._exit(0)
 
         stats, _ = clean_pufferl.evaluate(data)
         profile = data.profile
@@ -437,7 +454,7 @@ if __name__ == '__main__':
     parser.add_argument('--wandb-project', type=str, default='pufferlib', help='WandB project')
     parser.add_argument('--wandb-group', type=str, default='debug', help='WandB group')
     parser.add_argument('--track', action='store_true', help='Track on WandB')
-    wandb_name, pkg, args, env_module, make_env, make_policy = load_config(parser)
+    wandb_name, pkg, args, env_module, make_env, policy_cls, rnn_cls = load_config(parser)
 
     if args.baseline:
         assert args.mode in ('train', 'eval', 'evaluate')
@@ -455,14 +472,16 @@ if __name__ == '__main__':
             args.eval_model_path = os.path.join(data_dir, model_file)
 
     if args.mode == 'train':
-        train(args, env_module, make_env)
+        train(args, env_module, make_env, policy_cls, rnn_cls)
     elif args.mode in ('eval', 'evaluate'):
         try:
             clean_pufferl.rollout(
                 make_env,
                 args.env,
+                policy_cls=policy_cls,
+                rnn_cls=rnn_cls,
                 agent_creator=make_policy,
-                agent_kwargs={'env_module': env_module, 'args': args},
+                agent_kwargs=args,
                 model_path=args.eval_model_path,
                 render_mode=args.render_mode,
                 device=args.train.device
@@ -482,13 +501,3 @@ if __name__ == '__main__':
         from pstats import SortKey
         p = pstats.Stats('stats.profile')
         p.sort_stats(SortKey.TIME).print_stats(10)
-    elif args.mode == 'evaluate' and pkg == 'pokemon_red':
-        import pokemon_red_eval
-        pokemon_red_eval.rollout(
-            make_env,
-            args.env,
-            agent_creator=make_policy,
-            agent_kwargs={'env_module': env_module, 'args': args},
-            model_path=args.eval_model_path,
-            device=args.train.device,
-        )

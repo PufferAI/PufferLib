@@ -5,6 +5,24 @@ import gymnasium
 import pufferlib.utils
 
 
+class ClipAction(gymnasium.Wrapper):
+    '''Wrapper for Gymnasium environments that clips actions'''
+    def __init__(self, env):
+        self.env = env
+        assert isinstance(env.action_space, gymnasium.spaces.Box)
+        dtype_info = np.finfo(env.action_space.dtype)
+        self.action_space = gymnasium.spaces.Box(
+            low=dtype_info.min,
+            high=dtype_info.max,
+            shape=env.action_space.shape,
+            dtype=env.action_space.dtype,
+        )
+
+    def step(self, action):
+        action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
+        return self.env.step(action)
+
+
 class EpisodeStats(gymnasium.Wrapper):
     '''Wrapper for Gymnasium environments that stores
     episodic returns and lengths in infos'''

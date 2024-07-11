@@ -3,13 +3,19 @@ import pufferlib.postprocess
 
 from . import ocean
 from .grid import grid
+from .grid_continuous import grid_continuous
 from .snake import snake
+from .continuous import continuous
 
 def env_creator(name='squared'):
     if name == 'grid':
         return make_grid
+    elif name == 'grid_continuous':
+        return make_grid_continuous
     elif name == 'snake':
         return make_snake
+    elif name == 'continuous':
+        return make_continuous
     elif name == 'squared':
         return make_squared
     elif name == 'bandit':
@@ -32,12 +38,18 @@ def env_creator(name='squared'):
         raise ValueError('Invalid environment name')
 
 def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array'):
-    #env = grid.PufferGrid(map_size, num_agents, horizon, render_mode=render_mode)
-    env = grid.PufferGrid(64, 64, 64, render_mode=render_mode)
+    env = grid.PufferGrid(map_size, num_agents, horizon, render_mode=render_mode)
+    #env = grid.PufferGrid(64, 64, 64, render_mode=render_mode)
     return env
     env = pufferlib.postprocess.MultiagentEpisodeStats(env)
     env = pufferlib.postprocess.MeanOverAgents(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
+
+def make_grid_continuous(map_size=512, render_size=512, num_agents=1024,
+        horizon=512, render_mode='rgb_array'):
+    env = grid_continuous.PufferGrid(map_size, render_size, num_agents,
+        horizon, discretize=True, render_mode=render_mode)
+    return env
 
 def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision=5,
         leave_corpse_on_death=None, preset='1440p-4096', render_mode=None):
@@ -84,6 +96,13 @@ def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision
         render_mode=render_mode,
         vision=vision,
     )
+
+def make_continuous(discretize=False):
+    env = continuous.Continuous(discretize=discretize)
+    if not discretize:
+        env = pufferlib.postprocess.ClipAction(env)
+    env = pufferlib.postprocess.EpisodeStats(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_squared(distance_to_target=3, num_targets=1, **kwargs):
     env = ocean.Squared(distance_to_target=distance_to_target, num_targets=num_targets)

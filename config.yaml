@@ -6,8 +6,9 @@ default:
   package: ~
   env_name: ~
   env: {}
+  policy_name: Policy
   policy: {}
-  use_rnn: False
+  rnn_name: ~
   rnn: {}
   train:
     seed: 1
@@ -194,6 +195,19 @@ pong-max:
 
 box2d:
   package: box2d
+  env_name: CarRacing-v2
+  train:
+    num_envs: 96
+    num_workers: 8
+    env_batch_size: 48
+    zero_copy: False
+    batch_size: 16384
+    minibatch_size: 2048
+
+
+car-racing:
+  package: box2d
+  env_name: CarRacing-v2
 
 ### Procgen Suite
 # Shared hyperparams (best for all envs)
@@ -333,12 +347,30 @@ classic_control:
     total_timesteps: 500_000
     num_envs: 64
     env_batch_size: 64
-classic-control:
-  package: classic_control
-classiccontrol:
-  package: classic_control
+
 cartpole:
   package: classic_control
+  env_name: CartPole-v0
+
+mountain_car:
+  package: classic_control
+  env_name: MountainCar-v0
+  train:
+    total_timesteps: 500_000
+    num_envs: 64
+    env_batch_size: 64
+
+classic_control_continuous:
+  package: classic_control_continuous
+  env_name: MountainCarContinuous-v0
+  train:
+    total_timesteps: 500_000
+    num_envs: 64
+    env_batch_size: 64
+
+mountain_car_continuous:
+  package: classic_control_continuous
+  env_name: MountainCarContinuous-v0
 
 crafter:
   package: crafter
@@ -584,6 +616,41 @@ grid:
           bptt_horizon: {
             'values': [1, 2, 4, 8, 16],
           }
+grid_continuous:
+  package: ocean
+  env_name: grid_continuous
+  policy_name: Grid
+  rnn_name: Recurrent
+  train:
+    total_timesteps: 125_000_000
+    learning_rate: 0.003
+    num_envs: 8
+    num_workers: 2
+    env_batch_size: 4
+    update_epochs: 1
+    gamma: 0.9
+    gae_lambda: 0.9
+    ent_coef: 0.04
+    bptt_horizon: 8
+    batch_size: 65536
+    minibatch_size: 4096
+    compile: False
+    anneal_lr: False
+    device: cuda
+
+continuous:
+  package: ocean
+  env_name: continuous
+  train:
+    total_timesteps: 1_000_000
+    anneal_lr: False
+    num_envs: 64
+    env_batch_size: 64
+    batch_size: 16384
+    minibatch_size: 4096
+    update_epochs: 1
+    gamma: 0.8
+    ent_coef: 0.05
 
 bandit:
   package: ocean
@@ -690,8 +757,9 @@ slimevolley:
 
 snake:
   package: ocean
+  policy_name: Snake
   env_name: snake
-  use_rnn: True
+  rnn_name: Recurrent
   train:
     total_timesteps: 10_000_000_000
     num_envs: 2
