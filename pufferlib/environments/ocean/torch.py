@@ -44,17 +44,17 @@ class Snake(nn.Module):
 class Grid(nn.Module):
     def __init__(self, env, cnn_channels=32, hidden_size=128, **kwargs):
         super().__init__()
-        self.network= nn.Sequential(
+        self.cnn = nn.Sequential(
             pufferlib.pytorch.layer_init(
                 nn.Conv2d(7, cnn_channels, 5, stride=3)),
             nn.ReLU(),
             pufferlib.pytorch.layer_init(
                 nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1)),
-            nn.ReLU(),
             nn.Flatten(),
-            pufferlib.pytorch.layer_init(nn.Linear(cnn_channels, hidden_size)),
-            nn.ReLU(),
         )
+        self.flat = pufferlib.pytorch.layer_init(nn.Linear(3, 32))
+        self.proj = pufferlib.pytorch.layer_init(nn.Linear(32+cnn_channels, hidden_size))
+
         self.actor = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, 6), std=0.01)
         self.value_fn = pufferlib.pytorch.layer_init(
@@ -66,8 +66,16 @@ class Grid(nn.Module):
         return actions, value
 
     def encode_observations(self, observations):
-        observations = F.one_hot(observations.long(), 7).permute(0, 3, 1, 2).float()
-        return self.network(observations), None
+        cnn_features = observations[:, :-3].view(-1, 11, 11).long()
+        cnn_features = F.one_hot(cnn_features, 7).permute(0, 3, 1, 2).float()
+        cnn_features = self.cnn(cnn_features)
+
+        flat_features = observations[:, -3:].float() / 255.0
+        flat_features = self.flat(flat_features)
+
+        features = torch.cat([cnn_features, flat_features], dim=1)
+        features = F.relu(self.proj(F.relu(features)))
+        return features, None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
         action = self.actor(flat_hidden).split(3, dim=1)

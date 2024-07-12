@@ -86,11 +86,31 @@ def reward_group(env):
     rewards = same_reward - diff_reward
     return np.clip(rewards/10, -1, 1)
 
+def init_puffer(env):
+    from PIL import Image
+    path = os.path.join(*env.__module__.split('.')[:-1], 'pufferlib.png')
+    env.puffer = np.array(Image.open(path))
+    env.filled = env.puffer[:, :, 3] != 0
+    env.red = (env.puffer[:, :, 0] == 255) * env.filled
+    env.blue = (env.puffer[:, :, 1] == 255) * env.filled
+    env.agent_red = (env.agent_colors == AGENT_1) + (env.agent_colors==AGENT_3)
+    env.agent_blue = (env.agent_colors == AGENT_2) + (env.agent_colors==AGENT_4)
+
+def reward_puffer(env):
+    agent_position = env.agent_positions.astype(np.int32)
+    red = env.red[agent_position[:, 0], agent_position[:, 1]]
+    blue = env.blue[agent_position[:, 0], agent_position[:, 1]]
+    filled_red = (red * env.agent_red).astype(bool)
+    filled_blue = (blue * env.agent_blue).astype(bool)
+    return filled_red + filled_blue
+
 class PufferGrid(pufferlib.PufferEnv):
     def __init__(self, width=1024, height=1024, num_agents=4096,
             horizon=1024, vision_range=5, agent_speed=1.0,
             discretize=False, food_reward=0.1,
-            init_fn=init_group, reward_fn=reward_group,
+            init_fn=init_puffer, reward_fn=reward_puffer,
+            #init_fn=init_predator_prey, reward_fn=reward_predator_prey,
+            #init_fn=init_group, reward_fn=reward_group,
             expected_lifespan=1000, render_mode='rgb_array'):
         super().__init__()
         self.width = width 
@@ -117,7 +137,7 @@ class PufferGrid(pufferlib.PufferEnv):
 
         self.buf = pufferlib.namespace(
             observations = np.zeros(
-                (num_agents, self.obs_size, self.obs_size), dtype=np.uint8),
+                num_agents*self.obs_size*self.obs_size + 3, dtype=np.uint8),
             rewards = np.zeros(num_agents, dtype=np.float32),
             terminals = np.zeros(num_agents, dtype=bool),
             truncations = np.zeros(num_agents, dtype=bool),
@@ -136,8 +156,8 @@ class PufferGrid(pufferlib.PufferEnv):
         self.renderer = make_renderer(width, height,
             render_mode=render_mode)
 
-        self.observation_space = gymnasium.spaces.Box(
-            low=0, high=255, shape=(self.obs_size, self.obs_size), dtype=np.uint8)
+        self.observation_space = gymnasium.spaces.Box(low=0, high=255,
+            shape=(self.obs_size*self.obs_size+3,), dtype=np.uint8)
 
         if discretize:
             self.action_space = gymnasium.spaces.MultiDiscrete([3, 3])
@@ -167,10 +187,19 @@ class PufferGrid(pufferlib.PufferEnv):
         return self.renderer.render(self.grid,
             self.agent_positions, self.actions, self.vision_range)
 
+    def _fill_observations(self):
+        self.buf.observations[:, -3] = (255*self.agent_positions[:,0]/self.height).astype(np.uint8)
+        self.buf.observations[:, -2] = (255*self.agent_positions[:,1]/self.width).astype(np.uint8)
+        self.buf.observations[:, -1] = (255*self.buf.rewards).astype(np.uint8)
+
     def reset(self, seed=0):
         if self.cenv is None:
+            obs_view = self.buf.observations[:, 
+                :self.obs_size*self.obs_size].reshape(
+                self.num_agents, self.obs_size, self.obs_size)
+            
             self.cenv = CEnv(self.grid, self.agent_positions,
-                self.spawn_position_cands, self.agent_colors, self.buf.observations,
+                self.spawn_position_cands, self.agent_colors, obs_view,
                 self.buf.rewards, self.width, self.height, self.num_agents,
                 self.horizon, self.vision_range, self.agent_speed,
                 self.discretize, self.food_reward, self.expected_lifespan)
@@ -184,6 +213,7 @@ class PufferGrid(pufferlib.PufferEnv):
         self.episode_rewards.fill(0)
         self.cenv.reset(seed)
 
+        self._fill_observations()
         return self.buf.observations, self.infos
 
     def step(self, actions):
@@ -215,6 +245,7 @@ class PufferGrid(pufferlib.PufferEnv):
         if self.tick % 32 == 0:
             infos['reward'] = self.buf.rewards.mean()
 
+        self._fill_observations()
         return (self.buf.observations, self.buf.rewards,
             self.buf.terminals, self.buf.truncations, infos)
 
