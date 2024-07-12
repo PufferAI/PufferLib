@@ -340,7 +340,7 @@ def sweep_carbs(args, wandb_name, env_module, make_env):
     '''
     wandb.agent(sweep_id, main, count=500)
 
-def sweep(args, wandb_name, env_module, make_env):
+def sweep(args, wandb_name, env_module, make_env, policy_cls, rnn_cls):
     import wandb
     sweep_id = wandb.sweep(
         sweep=dict(args.sweep),
@@ -354,7 +354,7 @@ def sweep(args, wandb_name, env_module, make_env):
             print(wandb.config.train)
             args.train.__dict__.update(dict(wandb.config.train))
             args.track = True
-            train(args, env_module, make_env)
+            train(args, env_module, make_env, policy_cls, rnn_cls)
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -489,7 +489,7 @@ if __name__ == '__main__':
         except KeyboardInterrupt:
             os._exit(0)
     elif args.mode == 'sweep':
-        sweep(args, wandb_name, env_module, make_env)
+        sweep(args, wandb_name, env_module, make_env, policy_cls, rnn_cls)
     elif args.mode == 'sweep-carbs':
         sweep_carbs(args, wandb_name, env_module, make_env)
     elif args.mode == 'autotune':

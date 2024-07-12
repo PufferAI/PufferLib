@@ -631,12 +631,48 @@ grid_continuous:
     gamma: 0.9
     gae_lambda: 0.9
     ent_coef: 0.02
-    bptt_horizon: 8
+    bptt_horizon: 16
     batch_size: 131072
     minibatch_size: 32768
     compile: False
     anneal_lr: False
     device: cuda
+  sweep:
+    method: bayes
+    name: sweep
+    metric:
+      goal: maximize
+      name: environment/reward
+    # Nested parameters name required by WandB API
+    parameters:
+      train:
+        parameters:
+          learning_rate: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-5,
+            'max': 1e-1,
+          }
+          gamma: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          gae_lambda: {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 1.0,
+          }
+          ent_coef: {
+            'distribution': 'log_uniform_values',
+            'min': 1e-4,
+            'max': 5e-2,
+          }
+          batch_size: {
+            'values': [65536, 131072, 262144, 524288],
+          }
+          minibatch_size: {
+            'values': [4096, 8192, 16384, 32768],
+          }
 
 continuous:
   package: ocean
