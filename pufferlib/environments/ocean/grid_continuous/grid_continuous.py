@@ -121,8 +121,8 @@ class PufferGrid(pufferlib.PufferEnv):
     def __init__(self, width=1024, height=1024, num_agents=4096,
             horizon=1024, vision_range=5, agent_speed=1.0,
             discretize=False, food_reward=0.1,
-            init_fn=init_center, reward_fn=reward_center,
-            #init_fn=init_puffer, reward_fn=reward_puffer,
+            #init_fn=init_center, reward_fn=reward_center,
+            init_fn=init_puffer, reward_fn=reward_puffer,
             #init_fn=init_predator_prey, reward_fn=reward_predator_prey,
             #init_fn=init_group, reward_fn=reward_group,
             expected_lifespan=1000, render_mode='rgb_array'):
