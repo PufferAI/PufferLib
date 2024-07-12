@@ -102,7 +102,12 @@ def reward_puffer(env):
     blue = env.blue[agent_position[:, 0], agent_position[:, 1]]
     filled_red = (red * env.agent_red).astype(bool)
     filled_blue = (blue * env.agent_blue).astype(bool)
-    return filled_red + filled_blue
+
+    r = env.agent_positions/env.height - 0.5
+    c = env.agent_positions/env.width - 0.5
+    dist = np.sqrt(r**2 + c**2)
+   
+    return filled_red + filled_blue - 0.001*dist
 
 class PufferGrid(pufferlib.PufferEnv):
     def __init__(self, width=1024, height=1024, num_agents=4096,
