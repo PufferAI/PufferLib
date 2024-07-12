@@ -90,7 +90,7 @@ class PufferGrid(pufferlib.PufferEnv):
             horizon=1024, vision_range=5, agent_speed=1.0,
             discretize=False, food_reward=0.1,
             init_fn=init_foraging, reward_fn=reward_foraging,
-            render_mode='rgb_array'):
+            agent_respawn_prob=0.001, render_mode='rgb_array'):
         super().__init__()
         self.width = width 
         self.height = height
@@ -102,11 +102,15 @@ class PufferGrid(pufferlib.PufferEnv):
         self.food_reward = food_reward
         self.init_fn = init_fn
         self.reward_fn = reward_fn
+        self.agent_respawn_prob = agent_respawn_prob
 
         self.obs_size = 2*self.vision_range + 1
         self.grid = np.zeros((height, width), dtype=np.uint8)
         self.agent_positions = np.zeros((num_agents, 2), dtype=np.float32)
-        self.spawn_position_cands = gen_spawn_positions(width, height)
+        #self.spawn_position_cands = gen_spawn_positions(width, height)
+        self.spawn_position_cands = np.random.randint(
+            vision_range, (height-vision_range, width-vision_range),
+            (10*num_agents, 2)).astype(np.float32)
         self.agent_colors = np.random.randint(3, 7, num_agents, dtype=np.int32)
         self.emulated = None
 
@@ -168,7 +172,7 @@ class PufferGrid(pufferlib.PufferEnv):
                 self.spawn_position_cands, self.agent_colors, self.buf.observations,
                 self.buf.rewards, self.width, self.height, self.num_agents,
                 self.horizon, self.vision_range, self.agent_speed,
-                self.discretize, self.food_reward)
+                self.discretize, self.food_reward, self.agent_respawn_prob)
 
         self.agents = [i+1 for i in range(self.num_agents)]
         self.done = False
@@ -192,19 +196,20 @@ class PufferGrid(pufferlib.PufferEnv):
         self.cenv.step(actions)
 
         self.buf.rewards[:] += self.reward_fn(self)
-        self.episode_rewards[self.tick] = self.buf.rewards
+        #self.episode_rewards[self.tick] = self.buf.rewards
         self.tick += 1
 
+        '''
         if self.tick >= self.horizon:
             self.done = True
             self.agents = []
             self.buf.terminals[:] = self.dones
             self.buf.truncations[:] = self.dones
             infos = {'episode_return': self.episode_rewards.sum(1).mean()}
-        else:
-            self.buf.terminals[:] = self.not_done
-            self.buf.truncations[:] = self.not_done
-            infos = self.infos
+        '''
+        self.buf.terminals[:] = self.not_done
+        self.buf.truncations[:] = self.not_done
+        infos = self.infos
 
         if self.tick % 32 == 0:
             infos['reward'] = self.buf.rewards.mean()
@@ -356,6 +361,4 @@ if __name__ == '__main__':
     #run('test_puffer_performance(10)', sort='tottime')
     #exit(0)
 
-    test_puffer_performance(10)
-    use_c = False
     test_puffer_performance(10)
