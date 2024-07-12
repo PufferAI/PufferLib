@@ -38,7 +38,7 @@ def init_introverts(env):
 
 def reward_introverts(env):
     '''-1 for each nearby agent'''
-    raw_rewards = 1 - (env.buf.observations>=AGENT_1).sum(axis=(1,2))
+    raw_rewards = 1 - (env.obs_view>=AGENT_1).sum(axis=(1,2))
     return np.clip(raw_rewards/10, -1, 0)
 
 def reward_centralized(env):
@@ -68,10 +68,10 @@ def reward_predator_prey(env):
     n = env.num_agents // 2
 
     # Predator wants to keep prey in sight
-    rewards[:n] = (env.buf.observations[:n] == AGENT_2).sum(axis=(1,2))
+    rewards[:n] = (env.obs_view[:n] == AGENT_2).sum(axis=(1,2))
 
     # Prey wants to keep predator out of sight
-    rewards[n:] = -(env.buf.observations[n:] == AGENT_1).sum(axis=(1,2))
+    rewards[n:] = -(env.obs_view[n:] == AGENT_1).sum(axis=(1,2))
 
     return np.clip(rewards/10, -1, 1)
 
@@ -79,9 +79,9 @@ def init_group(env):
     pass
 
 def reward_group(env):
-    same_group = env.buf.observations == env.agent_colors[:, None, None]
+    same_group = env.obs_view == env.agent_colors[:, None, None]
     same_reward = same_group.sum(axis=(1,2)) - 1
-    diff_group = (env.buf.observations>=AGENT_1) * (~same_group)
+    diff_group = (env.obs_view>=AGENT_1) * (~same_group)
     diff_reward = diff_group.sum(axis=(1,2))
     rewards = same_reward - diff_reward
     return np.clip(rewards/10, -1, 1)
@@ -121,10 +121,7 @@ class PufferGrid(pufferlib.PufferEnv):
     def __init__(self, width=1024, height=1024, num_agents=4096,
             horizon=1024, vision_range=5, agent_speed=1.0,
             discretize=False, food_reward=0.1,
-            #init_fn=init_center, reward_fn=reward_center,
             init_fn=init_puffer, reward_fn=reward_puffer,
-            #init_fn=init_predator_prey, reward_fn=reward_predator_prey,
-            #init_fn=init_group, reward_fn=reward_group,
             expected_lifespan=1000, render_mode='rgb_array'):
         super().__init__()
         self.width = width 
@@ -206,12 +203,12 @@ class PufferGrid(pufferlib.PufferEnv):
 
     def reset(self, seed=0):
         if self.cenv is None:
-            obs_view = self.buf.observations[:, 
+            self.obs_view = self.buf.observations[:, 
                 :self.obs_size*self.obs_size].reshape(
                 self.num_agents, self.obs_size, self.obs_size)
             
             self.cenv = CEnv(self.grid, self.agent_positions,
-                self.spawn_position_cands, self.agent_colors, obs_view,
+                self.spawn_position_cands, self.agent_colors, self.obs_view,
                 self.buf.rewards, self.width, self.height, self.num_agents,
                 self.horizon, self.vision_range, self.agent_speed,
                 self.discretize, self.food_reward, self.expected_lifespan)

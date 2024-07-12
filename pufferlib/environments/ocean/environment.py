@@ -66,7 +66,7 @@ def make_grid_continuous(width=1080, height=720, num_agents=4096, horizon=512,
         raise ValueError(f'Task {task} not in (foraging, predator_prey, group, puffer, center)')
 
     return grid_continuous.PufferGrid(width, height, num_agents,
-        horizon, discretize=False, food_reward=0.1,
+        horizon, discretize=discretize, food_reward=food_reward,
         init_fn=init_fn, reward_fn=reward_fn,
         render_mode=render_mode)
 
