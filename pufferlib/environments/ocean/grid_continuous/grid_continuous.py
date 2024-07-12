@@ -81,9 +81,10 @@ def init_group(env):
 def reward_group(env):
     same_group = env.buf.observations == env.agent_colors[:, None, None]
     same_reward = same_group.sum(axis=(1,2)) - 1
-    diff_reward = (~same_group).sum(axis=(1,2))
+    diff_group = (env.buf.observations>=AGENT_1) * (~same_group)
+    diff_reward = diff_group.sum(axis=(1,2))
     rewards = same_reward - diff_reward
-    return np.clip(rewards/100, -1, 1)
+    return np.clip(rewards/10, -1, 1)
 
 class PufferGrid(pufferlib.PufferEnv):
     def __init__(self, width=1024, height=1024, num_agents=4096,
