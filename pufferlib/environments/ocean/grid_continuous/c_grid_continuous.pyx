@@ -34,7 +34,7 @@ cdef class Environment:
         float agent_speed
         bint discretize
         float food_reward
-        float agent_respawn_prob
+        int expected_lifespan
         int obs_size
 
         unsigned char[:, :] grid
@@ -47,7 +47,7 @@ cdef class Environment:
     def __init__(self, grid, agent_positions, spawn_position_cands, agent_colors,
             observations, rewards, int width, int height, int num_agents, int horizon,
             int vision_range, float agent_speed, bint discretize, float food_reward,
-            float agent_respawn_prob):
+            int expected_lifespan):
         self.width = width 
         self.height = height
         self.num_agents = num_agents
@@ -56,7 +56,7 @@ cdef class Environment:
         self.agent_speed = agent_speed
         self.discretize = discretize
         self.food_reward = food_reward
-        self.agent_respawn_prob = agent_respawn_prob
+        self.expected_lifespan = expected_lifespan
         self.obs_size = 2*self.vision_range + 1
 
         self.grid = grid
@@ -84,15 +84,33 @@ cdef class Environment:
                 c-self.vision_range:c+self.vision_range+1
             ]
 
-    cdef void spawn(self, int spawn_me):
+    cdef void spawn_food(self):
         cdef int r, c, tile
         while True:
             r = rand() % (self.height - 1)
             c = rand() % (self.width - 1)
             tile = self.grid[r, c]
             if tile == EMPTY:
-                self.grid[r, c] = spawn_me
+                self.grid[r, c] = FOOD
                 return
+
+    cdef void spawn_agent(self, int agent_idx):
+        cdef int old_r, old_c, r, c, tile
+
+        # Delete agent from old position
+        old_r = int(self.agent_positions[agent_idx, 0])
+        old_c = int(self.agent_positions[agent_idx, 1])
+        self.grid[old_r, old_c] = EMPTY
+
+        r = rand() % (self.height - 1)
+        c = rand() % (self.width - 1)
+        tile = self.grid[r, c]
+        if tile == EMPTY:
+            # Spawn agent in new position
+            self.grid[r, c] = self.agent_colors[agent_idx]
+            self.agent_positions[agent_idx, 0] = r
+            self.agent_positions[agent_idx, 1] = c
+            return
 
     def reset(self, seed=0):
         # Add borders
@@ -129,7 +147,6 @@ cdef class Environment:
 
         self.compute_observations()
 
-
     def step(self, np_actions):
         cdef:
             float[:, :] actions_continuous
@@ -160,19 +177,19 @@ cdef class Environment:
 
             y = self.agent_positions[agent_idx, 0]
             x = self.agent_positions[agent_idx, 1]
-            dest_y = y + vel_y
-            dest_x = x + vel_x
+            dest_y = y + self.agent_speed * vel_y
+            dest_x = x + self.agent_speed * vel_x
 
             # Discretize
-            disc_y = int(self.agent_speed * y)
-            disc_x = int(self.agent_speed * x)
-            disc_dest_y = int(self.agent_speed * dest_y)
-            disc_dest_x = int(self.agent_speed * dest_x)
+            disc_y = int(y)
+            disc_x = int(x)
+            disc_dest_y = int(dest_y)
+            disc_dest_x = int(dest_x)
 
             if self.grid[disc_dest_y, disc_dest_x] == FOOD:
                 self.grid[disc_dest_y, disc_dest_x] = EMPTY
                 self.rewards[agent_idx] = self.food_reward
-                self.spawn(FOOD)
+                self.spawn_food()
 
             if self.grid[disc_dest_y, disc_dest_x] == 0:
                 self.grid[disc_y, disc_x] = EMPTY
@@ -183,7 +200,7 @@ cdef class Environment:
                 self.agent_positions[agent_idx, 1] = dest_x
 
             # Randomly respawn agents
-            if rand() < self.agent_respawn_prob:
-                self.spawn(self.agent_colors[agent_idx])
+            if rand() % self.expected_lifespan == 0:
+                self.spawn_agent(agent_idx)
 
         self.compute_observations()

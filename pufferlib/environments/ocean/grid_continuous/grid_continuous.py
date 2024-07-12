@@ -68,10 +68,10 @@ def reward_predator_prey(env):
     n = env.num_agents // 2
 
     # Predator wants to keep prey in sight
-    rewards[:n] = (env.buf.observations[:n] == AGENT_1).sum(axis=(1,2))
+    rewards[:n] = (env.buf.observations[:n] == AGENT_2).sum(axis=(1,2))
 
     # Prey wants to keep predator out of sight
-    rewards[n:] = -(env.buf.observations[n:] == AGENT_2).sum(axis=(1,2))
+    rewards[n:] = -(env.buf.observations[n:] == AGENT_1).sum(axis=(1,2))
 
     return np.clip(rewards/10, -1, 1)
 
@@ -91,7 +91,7 @@ class PufferGrid(pufferlib.PufferEnv):
             horizon=1024, vision_range=5, agent_speed=1.0,
             discretize=False, food_reward=0.1,
             init_fn=init_group, reward_fn=reward_group,
-            agent_respawn_prob=0.001, render_mode='rgb_array'):
+            expected_lifespan=1000, render_mode='rgb_array'):
         super().__init__()
         self.width = width 
         self.height = height
@@ -103,7 +103,7 @@ class PufferGrid(pufferlib.PufferEnv):
         self.food_reward = food_reward
         self.init_fn = init_fn
         self.reward_fn = reward_fn
-        self.agent_respawn_prob = agent_respawn_prob
+        self.expected_lifespan = expected_lifespan
 
         self.obs_size = 2*self.vision_range + 1
         self.grid = np.zeros((height, width), dtype=np.uint8)
@@ -173,7 +173,7 @@ class PufferGrid(pufferlib.PufferEnv):
                 self.spawn_position_cands, self.agent_colors, self.buf.observations,
                 self.buf.rewards, self.width, self.height, self.num_agents,
                 self.horizon, self.vision_range, self.agent_speed,
-                self.discretize, self.food_reward, self.agent_respawn_prob)
+                self.discretize, self.food_reward, self.expected_lifespan)
 
         self.agents = [i+1 for i in range(self.num_agents)]
         self.done = False
