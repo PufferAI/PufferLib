@@ -89,7 +89,7 @@ class PufferGrid(pufferlib.PufferEnv):
     def __init__(self, width=1024, height=1024, num_agents=4096,
             horizon=1024, vision_range=5, agent_speed=1.0,
             discretize=False, food_reward=0.1,
-            init_fn=init_foraging, reward_fn=reward_foraging,
+            init_fn=init_group, reward_fn=reward_group,
             agent_respawn_prob=0.001, render_mode='rgb_array'):
         super().__init__()
         self.width = width 
