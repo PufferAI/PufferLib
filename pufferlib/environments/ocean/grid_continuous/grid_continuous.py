@@ -109,11 +109,20 @@ def reward_puffer(env):
    
     return filled_red + filled_blue - 0.001*dist
 
+def init_center(env):
+    pass
+
+def reward_center(env):
+    r = env.agent_positions[:, 0]/env.height - 0.5
+    c = env.agent_positions[:, 1]/env.width - 0.5
+    return -0.01*np.sqrt(r**2 + c**2)
+ 
 class PufferGrid(pufferlib.PufferEnv):
     def __init__(self, width=1024, height=1024, num_agents=4096,
             horizon=1024, vision_range=5, agent_speed=1.0,
             discretize=False, food_reward=0.1,
-            init_fn=init_puffer, reward_fn=reward_puffer,
+            init_fn=init_center, reward_fn=reward_center,
+            #init_fn=init_puffer, reward_fn=reward_puffer,
             #init_fn=init_predator_prey, reward_fn=reward_predator_prey,
             #init_fn=init_group, reward_fn=reward_group,
             expected_lifespan=1000, render_mode='rgb_array'):
