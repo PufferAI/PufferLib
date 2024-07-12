@@ -60,7 +60,7 @@ cdef class Environment:
         self.spawn_position_cands = spawn_position_cands
         self.agent_colors = agent_colors
 
-    cdef void _compute_observations(self):
+    cdef void compute_observations(self):
         cdef:
             float y
             float x
@@ -77,6 +77,16 @@ cdef class Environment:
                 r-self.vision_range:r+self.vision_range+1,
                 c-self.vision_range:c+self.vision_range+1
             ]
+
+    cdef void spawn_food(self):
+        cdef int r, c, tile
+        while True:
+            r = rand() % (self.height - 1)
+            c = rand() % (self.width - 1)
+            tile = self.grid[r, c]
+            if tile == EMPTY:
+                self.grid[r, c] = FOOD
+                return
 
     def reset(self, seed=0):
         # Add borders
@@ -111,7 +121,7 @@ cdef class Environment:
                 if agent_idx == self.num_agents:
                     break
 
-        self._compute_observations()
+        self.compute_observations()
 
 
     def step(self, np_actions):
@@ -156,6 +166,7 @@ cdef class Environment:
             if self.grid[disc_dest_y, disc_dest_x] == FOOD:
                 self.grid[disc_dest_y, disc_dest_x] = EMPTY
                 self.rewards[agent_idx] = self.food_reward
+                self.spawn_food()
 
             if self.grid[disc_dest_y, disc_dest_x] == 0:
                 self.grid[disc_y, disc_x] = EMPTY
@@ -165,4 +176,4 @@ cdef class Environment:
                 self.agent_positions[agent_idx, 0] = dest_y
                 self.agent_positions[agent_idx, 1] = dest_x
 
-        self._compute_observations()
+        self.compute_observations()
