@@ -107,7 +107,7 @@ def reward_puffer(env):
     c = env.agent_positions[:, 1]/env.width - 0.5
     dist = np.sqrt(r**2 + c**2)
    
-    return filled_red + filled_blue - 0.001*dist
+    return filled_red + filled_blue - 0.01*dist
 
 def init_center(env):
     pass
