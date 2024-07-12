@@ -55,8 +55,16 @@ class Grid(nn.Module):
         self.flat = pufferlib.pytorch.layer_init(nn.Linear(3, 32))
         self.proj = pufferlib.pytorch.layer_init(nn.Linear(32+cnn_channels, hidden_size))
 
-        self.actor = pufferlib.pytorch.layer_init(
-            nn.Linear(hidden_size, 6), std=0.01)
+        self.is_continuous = isinstance(env.single_action_space, pufferlib.spaces.Box)
+        if self.is_continuous:
+            self.decoder_mean = pufferlib.pytorch.layer_init(
+                nn.Linear(hidden_size, env.single_action_space.shape[0]), std=0.01)
+            self.decoder_logstd = nn.Parameter(torch.zeros(
+                1, env.single_action_space.shape[0]))
+        else:
+            self.actor = pufferlib.pytorch.layer_init(
+                nn.Linear(hidden_size, 6), std=0.01)
+
         self.value_fn = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, 1), std=1)
 
@@ -78,8 +86,14 @@ class Grid(nn.Module):
         return features, None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
-        action = self.actor(flat_hidden).split(3, dim=1)
         value = self.value_fn(flat_hidden)
-        return action, value
-
-
+        if self.is_continuous:
+            mean = self.decoder_mean(flat_hidden)
+            logstd = self.decoder_logstd.expand_as(mean)
+            std = torch.exp(logstd)
+            probs = torch.distributions.Normal(mean, std)
+            batch = flat_hidden.shape[0]
+            return probs, value
+        else:
+            action = self.actor(flat_hidden).split(3, dim=1)
+            return action, value

@@ -45,11 +45,30 @@ def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array
     env = pufferlib.postprocess.MeanOverAgents(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
-def make_grid_continuous(width=1080, height=720, num_agents=4096,
-        horizon=512, render_mode='rgb_array'):
-    env = grid_continuous.PufferGrid(width, height, num_agents,
-        horizon, discretize=True, render_mode=render_mode)
-    return env
+def make_grid_continuous(width=1080, height=720, num_agents=4096, horizon=512,
+        discretize=True, food_reward=0.1, task='group', render_mode='rgb_array'):
+    if task == 'foraging':
+        init_fn = grid_continuous.init_foraging
+        reward_fn = grid_continuous.reward_foraging
+    elif task == 'predator_prey':
+        init_fn = grid_continuous.init_predator_prey
+        reward_fn = grid_continuous.reward_predator_prey
+    elif task == 'group':
+        init_fn = grid_continuous.init_group
+        reward_fn = grid_continuous.reward_group
+    elif task == 'puffer':
+        init_fn = grid_continuous.init_puffer
+        reward_fn = grid_continuous.reward_puffer
+    elif task == 'center':
+        init_fn = grid_continuous.init_center
+        reward_fn = grid_continuous.reward_center
+    else:
+        raise ValueError(f'Task {task} not in (foraging, predator_prey, group, puffer, center)')
+
+    return grid_continuous.PufferGrid(width, height, num_agents,
+        horizon, discretize=False, food_reward=0.1,
+        init_fn=init_fn, reward_fn=reward_fn,
+        render_mode=render_mode)
 
 def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision=5,
         leave_corpse_on_death=None, preset='1440p-4096', render_mode=None):

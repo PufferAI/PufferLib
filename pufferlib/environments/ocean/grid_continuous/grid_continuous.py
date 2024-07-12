@@ -142,7 +142,6 @@ class PufferGrid(pufferlib.PufferEnv):
         self.obs_size = 2*self.vision_range + 1
         self.grid = np.zeros((height, width), dtype=np.uint8)
         self.agent_positions = np.zeros((num_agents, 2), dtype=np.float32)
-        #self.spawn_position_cands = gen_spawn_positions(width, height)
         self.spawn_position_cands = np.random.randint(
             vision_range, (height-vision_range, width-vision_range),
             (10*num_agents, 2)).astype(np.float32)
@@ -189,7 +188,6 @@ class PufferGrid(pufferlib.PufferEnv):
         self.cenv = None
         self.done = True
         self.infos = {}
-
 
     def render(self):
         grid = self.grid
@@ -262,16 +260,6 @@ class PufferGrid(pufferlib.PufferEnv):
         self._fill_observations()
         return (self.buf.observations, self.buf.rewards,
             self.buf.terminals, self.buf.truncations, infos)
-
-def gen_spawn_positions(width, height):
-    '''Generate spawn positions moving outward from the center'''
-    y = np.arange(height)
-    x = np.arange(width)
-    mid_y = height//2 - 0.5
-    mid_x = width//2 - 0.5
-    positions = np.stack(np.meshgrid(y, x), axis=-1).reshape(-1, 2)[::4]
-    positions = sorted(positions, key=lambda p: max(abs(p[0]-mid_y), abs(p[1]-mid_x)))
-    return np.array(positions, dtype=np.float32)
 
 def make_renderer(width, height, asset_map=None,
         sprite_sheet_path=None, tile_size=16, render_mode='rgb_array'):
