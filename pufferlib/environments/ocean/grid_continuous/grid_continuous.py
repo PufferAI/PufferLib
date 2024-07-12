@@ -103,8 +103,8 @@ def reward_puffer(env):
     filled_red = (red * env.agent_red).astype(bool)
     filled_blue = (blue * env.agent_blue).astype(bool)
 
-    r = env.agent_positions/env.height - 0.5
-    c = env.agent_positions/env.width - 0.5
+    r = env.agent_positions[:, 0]/env.height - 0.5
+    c = env.agent_positions[:, 1]/env.width - 0.5
     dist = np.sqrt(r**2 + c**2)
    
     return filled_red + filled_blue - 0.001*dist
