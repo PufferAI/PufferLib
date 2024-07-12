@@ -122,7 +122,7 @@ class PufferGrid(pufferlib.PufferEnv):
             horizon=1024, vision_range=5, agent_speed=1.0,
             discretize=False, food_reward=0.1,
             init_fn=init_puffer, reward_fn=reward_puffer,
-            expected_lifespan=1000, render_mode='rgb_array'):
+            expected_lifespan=1000, report_interval=32, render_mode='rgb_array'):
         super().__init__()
         self.width = width 
         self.height = height
@@ -135,6 +135,7 @@ class PufferGrid(pufferlib.PufferEnv):
         self.init_fn = init_fn
         self.reward_fn = reward_fn
         self.expected_lifespan = expected_lifespan
+        self.report_interval = report_interval
 
         self.obs_size = 2*self.vision_range + 1
         self.grid = np.zeros((height, width), dtype=np.uint8)
@@ -161,11 +162,19 @@ class PufferGrid(pufferlib.PufferEnv):
 
         self.render_mode = render_mode
         if render_mode == 'human':
-            self.client = RaylibRender(width, height)
-     
-        self.renderer = make_renderer(width, height,
-            render_mode=render_mode)
+            COLORS = np.array([
+                [6, 24, 24, 255],     # Background
+                [0, 0, 255, 255],     # Food
+                [0, 128, 255, 255],   # Corpse
+                [128, 128, 128, 255], # Wall
+                [255, 0, 0, 255],     # Snake
+                [255, 255, 255, 255], # Snake
+                [255, 85, 85, 255],     # Snake
+                [170, 170, 170, 255], # Snake
+            ], dtype=np.uint8)
 
+            self.client = RaylibClient(80, 45, COLORS.tolist(), tile_size=16)
+     
         self.observation_space = gymnasium.spaces.Box(low=0, high=255,
             shape=(self.obs_size*self.obs_size+3,), dtype=np.uint8)
 
@@ -193,8 +202,9 @@ class PufferGrid(pufferlib.PufferEnv):
             frame = COLORS[grid[v:-v-1, v:-v-1]]
             return frame
 
-        return self.renderer.render(self.grid,
-            self.agent_positions, self.actions, self.vision_range)
+        frame, self.human_action = self.client.render(
+            self.grid, self.agent_positions, self.discretize)
+        return frame
 
     def _fill_observations(self):
         self.buf.observations[:, -3] = (255*self.agent_positions[:,0]/self.height).astype(np.uint8)
@@ -221,11 +231,16 @@ class PufferGrid(pufferlib.PufferEnv):
         self.init_fn(self)
         self.episode_rewards.fill(0)
         self.cenv.reset(seed)
+        self.sum_rewards = []
 
         self._fill_observations()
         return self.buf.observations, self.infos
 
     def step(self, actions):
+        if self.render_mode == 'human' and self.human_action is not None:
+            print(self.human_action)
+            actions[0] = self.human_action
+
         if self.discretize:
             actions = actions.astype(np.uint32)
         else:
@@ -236,61 +251,99 @@ class PufferGrid(pufferlib.PufferEnv):
         self.cenv.step(actions)
 
         self.buf.rewards[:] += self.reward_fn(self)
-        #self.episode_rewards[self.tick] = self.buf.rewards
-        self.tick += 1
-
-        '''
-        if self.tick >= self.horizon:
-            self.done = True
-            self.agents = []
-            self.buf.terminals[:] = self.dones
-            self.buf.truncations[:] = self.dones
-            infos = {'episode_return': self.episode_rewards.sum(1).mean()}
-        '''
         self.buf.terminals[:] = self.not_done
         self.buf.truncations[:] = self.not_done
-        infos = self.infos
 
-        if self.tick % 32 == 0:
-            infos['reward'] = self.buf.rewards.mean()
+        infos = self.infos
+        self.sum_rewards.append(self.buf.rewards.sum())
+
+        self.tick += 1
+        if self.tick % self.report_interval == 0:
+            infos['reward'] = np.mean(self.sum_rewards) / self.report_interval
+            self.sum_rewards = []
 
         self._fill_observations()
         return (self.buf.observations, self.buf.rewards,
             self.buf.terminals, self.buf.truncations, infos)
 
-def make_renderer(width, height, asset_map=None,
-        sprite_sheet_path=None, tile_size=16, render_mode='rgb_array'):
-    if render_mode == 'human':
-        return RaylibRender(width, height, asset_map,
-            sprite_sheet_path, tile_size)
-    else:
-        return GridRender(width, height, asset_map)
-
-class GridRender:
-    def __init__(self, width, height, asset_map=None):
+class RaylibClient:
+    def __init__(self, width, height, asset_map, tile_size=16):
         self.width = width
         self.height = height
-        if asset_map is None:
-            self.asset_map = {
-                0: (255, 255, 255),
-                1: (255, 0, 0),
-                2: (0, 0, 0),
-            }
+        self.asset_map = asset_map
+        self.tile_size = tile_size
 
-    def render(self, grid, *args):
-        rendered = np.zeros((self.width, self.height, 3), dtype=np.uint8)
-        for val in np.unique(grid):
-            rendered[grid==val] = self.asset_map[val]
+        from raylib import rl
+        rl.InitWindow(width*tile_size, height*tile_size,
+            "PufferLib Ray Grid".encode())
+        rl.SetTargetFPS(15)
+        self.rl = rl
 
-        return rendered
+        from cffi import FFI
+        self.ffi = FFI()
 
+    def _cdata_to_numpy(self):
+        image = self.rl.LoadImageFromScreen()
+        width, height, channels = image.width, image.height, 4
+        cdata = self.ffi.buffer(image.data, width*height*channels)
+        return np.frombuffer(cdata, dtype=np.uint8
+            ).reshape((height, width, channels))[:, :, :3]
+
+    def render(self, grid, agent_positions, discretize):
+        rl = self.rl
+        ay, ax = None, None
+        if rl.IsKeyDown(rl.KEY_UP) or rl.IsKeyDown(rl.KEY_W):
+            ay = 0 if discretize else -1
+        if rl.IsKeyDown(rl.KEY_DOWN) or rl.IsKeyDown(rl.KEY_S):
+            ay = 2 if discretize else 1
+        if rl.IsKeyDown(rl.KEY_LEFT) or rl.IsKeyDown(rl.KEY_A):
+            ax = 0 if discretize else -1
+        if rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
+            ax = 2 if discretize else 1
+
+        if ax is None and ay is None:
+            action = None
+        else:
+            if ax is None:
+                ax = 1 if discretize else 0
+            if ay is None:
+                ay = 1 if discretize else 0
+
+            action = (ay, ax)
+
+        rl.BeginDrawing()
+        rl.ClearBackground(self.asset_map[0])
+
+        ts = self.tile_size
+        main_r, main_c = agent_positions[0]
+        main_r = int(main_r)
+        main_c = int(main_c)
+        r_min = main_r - self.height//2
+        r_max = main_r + self.height//2
+        c_min = main_c - self.width//2
+        c_max = main_c + self.width//2
+
+        for i, r in enumerate(range(r_min, r_max+1)):
+            for j, c in enumerate(range(c_min, c_max+1)):
+                if (r < 0 or r >= grid.shape[0] or c < 0 or c >= grid.shape[1]):
+                    continue
+
+                tile = grid[r, c]
+                if tile == 0:
+                    continue
+
+                rl.DrawRectangle(j*ts, i*ts, ts, ts, self.asset_map[tile])
+
+        rl.EndDrawing()
+        return self._cdata_to_numpy(), action
+
+'''
 class RaylibRender:
     def __init__(self, width, height, asset_map=None,
             sprite_sheet_path=None, tile_size=16):
-        '''Simple grid renderer for PufferLib grid environments'''
         if sprite_sheet_path is None:
             sprite_sheet_path = os.path.join(
-                *self.__module__.split('.')[:-1], 'puffer-128-sprites.png')
+                *self.__module__.split('.')[:-1], 'puffer-chars.png')
 
         self.asset_map = None
         if asset_map is None:
@@ -365,6 +418,7 @@ class RaylibRender:
 
         rl.EndDrawing()
         return self._cdata_to_numpy()[:, :, :3]
+'''
 
 
 def test_puffer_performance(timeout):
