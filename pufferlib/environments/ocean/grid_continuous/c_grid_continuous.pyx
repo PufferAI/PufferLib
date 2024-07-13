@@ -114,9 +114,9 @@ cdef class Environment:
 
     def reset(self, seed=0):
         # Add borders
-        cdef int left = self.vision_range
-        cdef int right = self.width - self.vision_range - 1
-        cdef int bottom = self.height - self.vision_range - 1
+        cdef int left = int(self.agent_speed * self.vision_range)
+        cdef int right = self.width - int(self.agent_speed*self.vision_range) - 1
+        cdef int bottom = self.height - int(self.agent_speed*self.vision_range) - 1
         self.grid[:left, :] = WALL
         self.grid[:, :left] = WALL
         self.grid[bottom:, :] = WALL
@@ -134,8 +134,8 @@ cdef class Environment:
         for spawn_idx in range(self.width*self.height):
             y = self.spawn_position_cands[spawn_idx, 0]
             x = self.spawn_position_cands[spawn_idx, 1]
-            disc_y = int(self.agent_speed * y)
-            disc_x = int(self.agent_speed * x)
+            disc_y = int(y)
+            disc_x = int(x)
 
             if self.grid[disc_y, disc_x] == EMPTY:
                 self.grid[disc_y, disc_x] = self.agent_colors[agent_idx]

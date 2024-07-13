@@ -140,8 +140,8 @@ class PufferGrid(pufferlib.PufferEnv):
         self.obs_size = 2*self.vision_range + 1
         self.grid = np.zeros((height, width), dtype=np.uint8)
         self.agent_positions = np.zeros((num_agents, 2), dtype=np.float32)
-        self.spawn_position_cands = np.random.randint(
-            vision_range, (height-vision_range, width-vision_range),
+        self.spawn_position_cands = np.random.randint(agent_speed*vision_range,
+            (height-agent_speed*vision_range, width-agent_speed*vision_range),
             (10*num_agents, 2)).astype(np.float32)
         self.agent_colors = np.random.randint(3, 7, num_agents, dtype=np.int32)
         self.emulated = None
@@ -173,7 +173,7 @@ class PufferGrid(pufferlib.PufferEnv):
                 [170, 170, 170, 255], # Snake
             ], dtype=np.uint8)
 
-            self.client = RaylibClient(80, 45, COLORS.tolist(), tile_size=16)
+            self.client = RaylibClient(41, 23, COLORS.tolist())
      
         self.observation_space = gymnasium.spaces.Box(low=0, high=255,
             shape=(self.obs_size*self.obs_size+3,), dtype=np.uint8)
@@ -203,7 +203,7 @@ class PufferGrid(pufferlib.PufferEnv):
             return frame
 
         frame, self.human_action = self.client.render(
-            self.grid, self.agent_positions, self.discretize)
+            self.grid, self.agent_positions, self.actions, self.discretize)
         return frame
 
     def _fill_observations(self):
@@ -259,7 +259,7 @@ class PufferGrid(pufferlib.PufferEnv):
 
         self.tick += 1
         if self.tick % self.report_interval == 0:
-            infos['reward'] = np.mean(self.sum_rewards) / self.report_interval
+            infos['reward'] = np.mean(self.sum_rewards) / self.num_agents
             self.sum_rewards = []
 
         self._fill_observations()
@@ -267,17 +267,29 @@ class PufferGrid(pufferlib.PufferEnv):
             self.buf.terminals, self.buf.truncations, infos)
 
 class RaylibClient:
-    def __init__(self, width, height, asset_map, tile_size=16):
+    def __init__(self, width, height, asset_map, tile_size=32):
         self.width = width
         self.height = height
         self.asset_map = asset_map
         self.tile_size = tile_size
 
-        from raylib import rl
+        sprite_sheet_path = os.path.join(
+            *self.__module__.split('.')[:-1], 'puffer_chars.png')
+        self.asset_map = {
+            3: (0, 0, 128, 128),
+            4: (128, 0, 128, 128),
+            5: (256, 0, 128, 128),
+            6: (384, 0, 128, 128),
+            1: (512, 0, 128, 128),
+        }
+
+        from raylib import rl, colors
         rl.InitWindow(width*tile_size, height*tile_size,
             "PufferLib Ray Grid".encode())
-        rl.SetTargetFPS(15)
+        rl.SetTargetFPS(10)
+        self.puffer = rl.LoadTexture(sprite_sheet_path.encode())
         self.rl = rl
+        self.colors = colors
 
         from cffi import FFI
         self.ffi = FFI()
@@ -289,8 +301,9 @@ class RaylibClient:
         return np.frombuffer(cdata, dtype=np.uint8
             ).reshape((height, width, channels))[:, :, :3]
 
-    def render(self, grid, agent_positions, discretize):
+    def render(self, grid, agent_positions, actions, discretize):
         rl = self.rl
+        colors = self.colors
         ay, ax = None, None
         if rl.IsKeyDown(rl.KEY_UP) or rl.IsKeyDown(rl.KEY_W):
             ay = 0 if discretize else -1
@@ -312,7 +325,7 @@ class RaylibClient:
             action = (ay, ax)
 
         rl.BeginDrawing()
-        rl.ClearBackground(self.asset_map[0])
+        rl.ClearBackground([6, 24, 24, 255])
 
         ts = self.tile_size
         main_r, main_c = agent_positions[0]
@@ -331,8 +344,15 @@ class RaylibClient:
                 tile = grid[r, c]
                 if tile == 0:
                     continue
-
-                rl.DrawRectangle(j*ts, i*ts, ts, ts, self.asset_map[tile])
+                elif tile == 2:
+                    rl.DrawRectangle(j*ts, i*ts, ts, ts, [0, 0, 0, 255])
+                else:
+                    #atn = actions[idx]
+                    source_rect = self.asset_map[tile]
+                    dest_rect = (j*ts, i*ts, ts, ts)
+                    print(f'tile: {tile}, source_rect: {source_rect}, dest_rect: {dest_rect}')
+                    rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
+                        (0, 0), 0, colors.WHITE)
 
         rl.EndDrawing()
         return self._cdata_to_numpy(), action
