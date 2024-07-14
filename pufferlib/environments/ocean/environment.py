@@ -10,8 +10,14 @@ from .continuous import continuous
 def env_creator(name='squared'):
     if name == 'grid':
         return make_grid
-    elif name == 'grid_continuous':
-        return make_grid_continuous
+    elif name == 'foraging':
+        return make_foraging
+    elif name == 'predator_prey':
+        return make_predator_prey
+    elif name == 'group':
+        return make_group
+    elif name == 'puffer':
+        return make_puffer
     elif name == 'snake':
         return make_snake
     elif name == 'continuous':
@@ -45,26 +51,37 @@ def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array
     env = pufferlib.postprocess.MeanOverAgents(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
-def make_grid_continuous(width=1080, height=720, num_agents=4096, horizon=512,
-        discretize=True, food_reward=0.1, task='group', render_mode='rgb_array'):
-    if task == 'foraging':
-        init_fn = grid_continuous.init_foraging
-        reward_fn = grid_continuous.reward_foraging
-    elif task == 'predator_prey':
-        init_fn = grid_continuous.init_predator_prey
-        reward_fn = grid_continuous.reward_predator_prey
-    elif task == 'group':
-        init_fn = grid_continuous.init_group
-        reward_fn = grid_continuous.reward_group
-    elif task == 'puffer':
-        init_fn = grid_continuous.init_puffer
-        reward_fn = grid_continuous.reward_puffer
-    elif task == 'center':
-        init_fn = grid_continuous.init_center
-        reward_fn = grid_continuous.reward_center
-    else:
-        raise ValueError(f'Task {task} not in (foraging, predator_prey, group, puffer, center)')
+def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
+        discretize=True, food_reward=0.1, render_mode='rgb_array'):
+    init_fn = grid_continuous.init_foraging
+    reward_fn = grid_continuous.reward_foraging
+    return grid_continuous.PufferGrid(width, height, num_agents,
+        horizon, discretize=discretize, food_reward=food_reward,
+        init_fn=init_fn, reward_fn=reward_fn,
+        render_mode=render_mode)
 
+def make_predator_prey(width=1080, height=720, num_agents=4096, horizon=512,
+        discretize=True, food_reward=0.1, render_mode='rgb_array'):
+    init_fn = grid_continuous.init_predator_prey
+    reward_fn = grid_continuous.reward_predator_prey
+    return grid_continuous.PufferGrid(width, height, num_agents,
+        horizon, discretize=discretize, food_reward=food_reward,
+        init_fn=init_fn, reward_fn=reward_fn,
+        render_mode=render_mode)
+
+def make_group(width=1080, height=720, num_agents=4096, horizon=512,
+        discretize=True, food_reward=0.1, render_mode='rgb_array'):
+    init_fn = grid_continuous.init_group
+    reward_fn = grid_continuous.reward_group
+    return grid_continuous.PufferGrid(width, height, num_agents,
+        horizon, discretize=discretize, food_reward=food_reward,
+        init_fn=init_fn, reward_fn=reward_fn,
+        render_mode=render_mode)
+
+def make_puffer(width=1080, height=720, num_agents=4096, horizon=512,
+        discretize=True, food_reward=0.1, render_mode='rgb_array'):
+    init_fn = grid_continuous.init_puffer
+    reward_fn = grid_continuous.reward_puffer
     return grid_continuous.PufferGrid(width, height, num_agents,
         horizon, discretize=discretize, food_reward=food_reward,
         init_fn=init_fn, reward_fn=reward_fn,
