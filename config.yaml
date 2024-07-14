@@ -466,19 +466,19 @@ nmmo3:
   package: nmmo3
   use_rnn: True
   train:
-    total_timesteps: 500_000_000
+    total_timesteps: 10_000_000_000
     checkpoint_interval: 1000
-    learning_rate: 0.00012067586583919788
+    learning_rate: 0.0005101276140396862
     num_envs: 2
     num_workers: 2
     env_batch_size: 1
     update_epochs: 1
-    gamma: 0.95
+    gamma: 0.925
     gae_lambda: 0.90
-    ent_coef: 0.0014863388512709962
+    ent_coef: 0.0033752272576224266
     bptt_horizon: 16
     batch_size: 262144
-    minibatch_size: 4096
+    minibatch_size: 8192
     compile: False
     anneal_lr: False
   sweep:
@@ -508,7 +508,7 @@ nmmo3:
             'max': 1e-1,
           }
           batch_size: {
-            'values': [32768, 65536, 131072, 262144],
+            'values': [131072, 262144, 524288],
           }
           minibatch_size: {
             'values': [4096, 8192, 16384, 32768],
