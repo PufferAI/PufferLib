@@ -18,6 +18,13 @@ case $GROUP in
         $COMMON spaces
         $COMMON bandit
         ;;
+    grid_continuous)
+        $COMMON grid_continuous --env.task foraging --vec multiprocessing
+        $COMMON grid_continuous --env.task predator_prey --vec multiprocessing
+        $COMMON grid_continuous --env.task group --vec multiprocessing
+        $COMMON grid_continuous --env.task puffer --vec multiprocessing
+        $COMMON grid_continuous --env.task center --vec multiprocessing
+        ;;
     procgen)
         $COMMON bigfish
         $COMMON bossfight
