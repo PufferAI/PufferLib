@@ -38,10 +38,11 @@ def init_wandb(args, name, id=None, resume=True):
         project=args['wandb_project'],
         entity=args['wandb_entity'],
         group=args['wandb_group'],
-        name=name,
+        allow_val_change=True,
         save_code=True,
         resume=resume,
         config=args,
+        name=name,
     )
     return wandb
 
@@ -58,6 +59,172 @@ def sweep(args, env_name, make_env, policy_cls, rnn_cls):
             Console().print_exception()
 
     wandb.agent(sweep_id, main, count=10)
+
+### CARBS Sweeps
+def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
+    import numpy as np
+    import sys
+
+    from math import log, ceil, floor
+
+    from carbs import CARBS
+    from carbs import CARBSParams
+    from carbs import LinearSpace
+    from carbs import LogSpace
+    from carbs import LogitSpace
+    from carbs import ObservationInParam
+    from carbs import ParamDictType
+    from carbs import Param
+
+    def closest_power(x):
+        possible_results = floor(log(x, 2)), ceil(log(x, 2))
+        return int(2**min(possible_results, key= lambda z: abs(x-2**z)))
+
+    def carbs_param(name, space, wandb_params, mmin=None, mmax=None,
+            search_center=None, is_integer=False, rounding_factor=1):
+        wandb_param = wandb_params[name]
+        if 'values' in wandb_param:
+            values = wandb_param['values']
+            mmin = min(values)
+            mmax = max(values)
+
+        if mmin is None:
+            mmin = float(wandb_param['min'])
+        if mmax is None:
+            mmax = float(wandb_param['max'])
+
+        if space == 'log':
+            Space = LogSpace
+            if search_center is None:
+                search_center = 2**(np.log2(mmin) + np.log2(mmax)/2)
+        elif space == 'linear':
+            Space = LinearSpace
+            if search_center is None:
+                search_center = (mmin + mmax)/2
+        elif space == 'logit':
+            Space = LogitSpace
+            assert mmin == 0
+            assert mmax == 1
+            assert search_center is not None
+        else:
+            raise ValueError(f'Invalid CARBS space: {space} (log/linear)')
+
+        return Param(
+            name=name,
+            space=Space(
+                min=mmin,
+                max=mmax,
+                is_integer=is_integer,
+                rounding_factor=rounding_factor
+            ),
+            search_center=search_center,
+        )
+
+    if not os.path.exists('checkpoints'):
+        os.system('mkdir checkpoints')
+
+    if not os.path.exists('hypers.txt'):
+        os.system('touch hypers.txt')
+
+    import wandb
+    sweep_id = wandb.sweep(
+        sweep=args['sweep'],
+        project="carbs",
+    )
+    target_metric = args['sweep']['metric']['name'].split('/')[-1]
+    sweep_parameters = args['sweep']['parameters']
+    wandb_train_params = sweep_parameters['train']['parameters']
+    #wandb_env_params = sweep_parameters['env']['parameters']
+    #wandb_policy_params = sweep_parameters['policy']['parameters']
+
+    # Must be hardcoded and match wandb sweep space for now
+    param_spaces = [
+        #carbs_param('cnn_channels', 'linear', wandb_policy_params, search_center=32, is_integer=True),
+        #carbs_param('hidden_size', 'linear', wandb_policy_params, search_center=128, is_integer=True),
+        #carbs_param('vision', 'linear', search_center=5, is_integer=True),
+        carbs_param('total_timesteps', 'log', wandb_train_params,
+            search_center=500_000_000, is_integer=True, mmin=500_000_000, mmax=10_000_000_000),
+        carbs_param('learning_rate', 'log', wandb_train_params, search_center=9e-4),
+        carbs_param('gamma', 'logit', wandb_train_params, search_center=0.99),
+        carbs_param('gae_lambda', 'logit', wandb_train_params, search_center=0.90),
+        carbs_param('update_epochs', 'linear', wandb_train_params, search_center=1, is_integer=True),
+        carbs_param('clip_coef', 'logit', wandb_train_params, search_center=0.1),
+        carbs_param('vf_coef', 'logit', wandb_train_params, search_center=0.5),
+        carbs_param('vf_clip_coef', 'logit', wandb_train_params, search_center=0.1),
+        carbs_param('max_grad_norm', 'linear', wandb_train_params, search_center=0.5),
+        carbs_param('ent_coef', 'log', wandb_train_params, search_center=0.07),
+        #carbs_param('env_batch_size', 'linear', search_center=384,
+        #    is_integer=True, rounding_factor=24),
+        carbs_param('batch_size', 'log', wandb_train_params, search_center=262144, is_integer=True),
+        carbs_param('minibatch_size', 'log', wandb_train_params, search_center=4096, is_integer=True),
+        carbs_param('bptt_horizon', 'log', wandb_train_params, search_center=16, is_integer=True),
+    ]
+
+    carbs_params = CARBSParams(
+        better_direction_sign=1,
+        is_wandb_logging_enabled=False,
+        resample_frequency=0,
+    )
+    carbs = CARBS(carbs_params, param_spaces)
+
+    def main():
+        wandb = init_wandb(args, env_name, id=args['exp_id'])
+        wandb.config.__dict__['_locked'] = {}
+        orig_suggestion = carbs.suggest().suggestion
+        suggestion = orig_suggestion.copy()
+        print('Suggestion:', suggestion)
+        #cnn_channels = suggestion.pop('cnn_channels')
+        #hidden_size = suggestion.pop('hidden_size')
+        #vision = suggestion.pop('vision')
+        #wandb.config.env['vision'] = vision
+        #wandb.config.policy['cnn_channels'] = cnn_channels
+        #wandb.config.policy['hidden_size'] = hidden_size
+        args['train'].update(suggestion)
+        args['train']['batch_size'] = closest_power(
+            suggestion['batch_size'])
+        args['train']['minibatch_size'] = closest_power(
+            suggestion['minibatch_size'])
+        args['train']['bptt_horizon'] = closest_power(
+            suggestion['bptt_horizon'])
+        args['train']['foo'] = 'bar'
+        args['track'] = True
+        wandb.config.update({'train': args['train']}, allow_val_change=True)
+
+        #args.env.__dict__['vision'] = vision
+        #args['policy']['cnn_channels'] = cnn_channels
+        #args['policy']['hidden_size'] = hidden_size
+        #args['rnn']['input_size'] = hidden_size
+        #args['rnn']['hidden_size'] = hidden_size
+        print(wandb.config.train)
+        print(wandb.config.env)
+        print(wandb.config.policy)
+        try:
+            stats, profile = train(args, make_env, policy_cls, rnn_cls, wandb)
+        except Exception as e:
+            is_failure = True
+            import traceback
+            traceback.print_exc()
+        else:
+            observed_value = stats[target_metric]
+            uptime = profile.uptime
+
+            with open('hypers.txt', 'a') as f:
+                f.write(f'Train: {args["train"]}\n')
+                f.write(f'Env: {args["env"]}\n')
+                f.write(f'Policy: {args["policy"]}\n')
+                f.write(f'RNN: {args["rnn"]}\n')
+                f.write(f'Uptime: {uptime}\n')
+                f.write(f'Value: {observed_value}\n')
+
+            obs_out = carbs.observe(
+                ObservationInParam(
+                    input=orig_suggestion,
+                    output=observed_value,
+                    cost=uptime,
+                )
+            )
+
+    wandb.agent(sweep_id, main, count=500)
 
 def train(args, make_env, policy_cls, rnn_cls, wandb):
     if args['vec'] == 'serial':
@@ -188,10 +355,9 @@ if __name__ == '__main__':
         )
     elif args['mode'] == 'sweep':
         args['track'] = True
-        sweep(args, env_module, make_env, policy_cls, rnn_cls)
+        sweep(args, env_name, make_env, policy_cls, rnn_cls)
     elif args['mode'] == 'sweep-carbs':
-        from sweep_carbs import sweep_carbs
-        sweep_carbs(args, env_name, env_module, make_env)
+        sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls)
     elif args['mode'] == 'autotune':
         pufferlib.vector.autotune(make_env, batch_size=args.train.env_batch_size)
     elif args['mode'] == 'profile':
