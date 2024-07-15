@@ -2,6 +2,7 @@ import configparser
 import argparse
 import shutil
 import glob
+import uuid
 import ast
 import os
 
@@ -30,33 +31,33 @@ def make_policy(env, policy_cls, rnn_cls, args):
 
     return policy.to(args['train']['device'])
 
-def init_wandb(args, id=None, resume=True):
+def init_wandb(args, name, id=None, resume=True):
     import wandb
     wandb.init(
         id=id or wandb.util.generate_id(),
         project=args['wandb_project'],
         entity=args['wandb_entity'],
         group=args['wandb_group'],
-        name=args['env'],
+        name=name,
         save_code=True,
         resume=resume,
         config=args,
     )
     return wandb
 
-def sweep(args, make_env, policy_cls, rnn_cls):
+def sweep(args, env_name, make_env, policy_cls, rnn_cls):
     import wandb
     sweep_id = wandb.sweep(sweep=args['sweep'], project=args['wandb_project'])
 
     def main():
         try:
-            wandb = init_wandb(args, id=args.exp_id)
+            wandb = init_wandb(args, env_name, id=args['exp_id'])
             args['train'].update(wandb.config.train)
             train(args, make_env, policy_cls, rnn_cls, wandb)
         except Exception as e:
             Console().print_exception()
 
-    wandb.agent(sweep_id, main, count=100)
+    wandb.agent(sweep_id, main, count=10)
 
 def train(args, make_env, policy_cls, rnn_cls, wandb):
     if args['vec'] == 'serial':
@@ -70,7 +71,7 @@ def train(args, make_env, policy_cls, rnn_cls, wandb):
 
     vecenv = pufferlib.vector.make(
         make_env,
-        env_kwargs=None,#args.env,
+        env_kwargs=args['env'],
         num_envs=args['train']['num_envs'],
         num_workers=args['train']['num_workers'],
         batch_size=args['train']['env_batch_size'],
@@ -78,8 +79,8 @@ def train(args, make_env, policy_cls, rnn_cls, wandb):
         backend=vec,
     )
     policy = make_policy(vecenv.driver_env, policy_cls, rnn_cls, args)
-    train_config = pufferlib.namespace(**args['train'],
-        exp_id=args['exp_id'], env=args['env'])
+    train_config = pufferlib.namespace(**args['train'], env=env_name,
+        exp_id=args['exp_id'] or env_name + '-' + str(uuid.uuid4())[:8])
     data = clean_pufferl.create(train_config, vecenv, policy, wandb=wandb)
     while data.global_step < train_config.total_timesteps:
         clean_pufferl.evaluate(data)
@@ -132,8 +133,10 @@ if __name__ == '__main__':
             argparse_key = f'--{section}.{key}'.replace('_', '-')
             parser.add_argument(argparse_key, default=p[section][key])
 
-    args = {'policy': {}, 'rnn': {}}
-    for key, value in parser.parse_args().__dict__.items():
+    parsed = parser.parse_args().__dict__
+    args = {'env': {}, 'policy': {}, 'rnn': {}}
+    env_name = parsed.pop('env')
+    for key, value in parsed.items():
         next = args
         for subkey in key.split('.'):
             if subkey not in next:
@@ -148,7 +151,7 @@ if __name__ == '__main__':
     import importlib
     env_module = importlib.import_module(
         f'pufferlib.environments.{args["base"]["package"]}')
-    make_env = env_module.env_creator(args['env'])
+    make_env = env_module.env_creator(env_name)
     policy_cls = getattr(env_module.torch, args['base']['policy_name'])
     rnn_cls = getattr(env_module, args['base']['rnn_name'])
 
@@ -156,39 +159,39 @@ if __name__ == '__main__':
         assert args['mode'] in ('train', 'eval', 'evaluate')
         args['track'] = True
         version = '.'.join(pufferlib.__version__.split('.')[:2])
-        args.exp_id = f'puf-{version}-{args.env_name}'
-        args.wandb_group = f'puf-{version}-baseline'
-        shutil.rmtree(f'experiments/{args.exp_id}', ignore_errors=True)
-        run = init_wandb(args, args['exp_id'], resume=False)
-        if args.mode in ('eval', 'evaluate'):
-            model_name = f'puf-{version}-{args.env_name}_model:latest'
+        args['exp_id'] = f'puf-{version}-{env_name}'
+        args['wandb_group'] = f'puf-{version}-baseline'
+        shutil.rmtree(f'experiments/{args["exp_id"]}', ignore_errors=True)
+        run = init_wandb(args, env_name, args['exp_id'], resume=False)
+        if args['mode'] in ('eval', 'evaluate'):
+            model_name = f'puf-{version}-{env_name}_model:latest'
             artifact = run.use_artifact(model_name)
             data_dir = artifact.download()
             model_file = max(os.listdir(data_dir))
-            args.eval_model_path = os.path.join(data_dir, model_file)
+            args['eval_model_path'] = os.path.join(data_dir, model_file)
     if args['mode'] == 'train':
         wandb = None
         if args['track']:
-            wandb = init_wandb(args, id=args['exp_id'])
+            wandb = init_wandb(args, env_name, id=args['exp_id'])
         train(args, make_env, policy_cls, rnn_cls, wandb=wandb)
     elif args['mode'] in ('eval', 'evaluate'):
         clean_pufferl.rollout(
             make_env,
-            args.env,
+            args['env'],
             policy_cls=policy_cls,
             rnn_cls=rnn_cls,
             agent_creator=make_policy,
             agent_kwargs=args,
-            model_path=args.eval_model_path,
-            render_mode=args.render_mode,
-            device=args.train.device
+            model_path=args['eval_model_path'],
+            render_mode=args['render_mode'],
+            device=args['train']['device'],
         )
     elif args['mode'] == 'sweep':
         args['track'] = True
         sweep(args, env_module, make_env, policy_cls, rnn_cls)
     elif args['mode'] == 'sweep-carbs':
         from sweep_carbs import sweep_carbs
-        sweep_carbs(args, env_module, make_env)
+        sweep_carbs(args, env_name, env_module, make_env)
     elif args['mode'] == 'autotune':
         pufferlib.vector.autotune(make_env, batch_size=args.train.env_batch_size)
     elif args['mode'] == 'profile':
