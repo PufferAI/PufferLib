@@ -216,8 +216,6 @@ cdef class Environment:
             tower = self.get_tower(i)
             self.grid[int(tower.y), int(tower.x)] = TOWER
 
-            
-
     cdef Player* get_player(self, int pid):
         #if pid < self.num_agents:
         return &self.players[pid]
@@ -277,14 +275,19 @@ cdef class Environment:
     cdef move_to(self, int pid, float dest_y, float dest_x):
         cdef:
             Player* player = self.get_player(pid)
+            int disc_dest_y = int(dest_y)
+            int disc_dest_x = int(dest_x)
+
+        if self.grid[disc_dest_y, disc_dest_x] != EMPTY:
+            return
 
         self.grid[int(player.y), int(player.x)] = EMPTY
         if player.team == 0:
-            self.grid[int(dest_y), int(dest_x)] = AGENT_1
+            self.grid[disc_dest_y, disc_dest_x] = AGENT_1
         else:
-            self.grid[int(dest_y), int(dest_x)] = AGENT_2
+            self.grid[disc_dest_y, disc_dest_x] = AGENT_2
         self.pid_map[int(player.y), int(player.x)] = -1
-        self.pid_map[int(dest_y), int(dest_x)] = pid
+        self.pid_map[disc_dest_y, disc_dest_x] = pid
         player.y = dest_y
         player.x = dest_x
 
@@ -321,25 +324,34 @@ cdef class Environment:
         else:
             actions_continuous = np_actions
 
+        #self.move_to(9, 105, 66)
+
         for tower_idx in range(self.num_towers):
             tower = self.get_tower(tower_idx)
             damage = tower.damage
             y = tower.y
             x = tower.x
+            #print(f'Checking tower {tower_idx}, at {y}, {x}')
 
             for dy in range(-TOWER_VISION, TOWER_VISION+1):
+                disc_y = int(y) + dy
                 for dx in range(-TOWER_VISION, TOWER_VISION+1):
-                    disc_y = int(y + dy)
-                    disc_x = int(x + dx)
+                    disc_x = int(x) + dx
+
+                    #if disc_y == 105 and disc_x == 66:
+                    #    print(f'Tower is checking {disc_y}, {disc_x}')
 
                     pid = self.pid_map[disc_y, disc_x]
                     if pid != -1:
                         target = self.get_player(pid)
                         if target.team == tower.team:
+                            print(f'Detected {target.team} team {pid} at {disc_y}, {disc_x}')
                             continue
 
                         target.health -= damage
+                        print(f'Hit {target.team} team {pid} at {disc_y}, {disc_x}')
                         if target.health <= 0:
+                            print(f'Killed {target.team} team {pid} at {disc_y}, {disc_x}')
                             self.respawn(pid)
 
         for agent_idx in range(self.num_agents):
@@ -365,9 +377,12 @@ cdef class Environment:
             target_pid = self.pid_map[disc_dest_y, disc_dest_x]
             if target_pid != -1:
                 target = self.get_player(target_pid)
+                #print(f'Attacking {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
                 if target.team != player.team:
+                    #print(f'Hit {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
                     target.health -= 1
                     if target.health <= 0:
+                        #print(f'Killed {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
                         self.respawn(target_pid)
 
             if self.discretize:
@@ -382,20 +397,6 @@ cdef class Environment:
             dest_x = x + self.agent_speed * vel_x
 
             # Discretize
-            disc_y = int(y)
-            disc_x = int(x)
-            disc_dest_y = int(dest_y)
-            disc_dest_x = int(dest_x)
-
-            if self.grid[disc_dest_y, disc_dest_x] == 0:
-                self.grid[disc_y, disc_x] = EMPTY
-                if player.team == 0:
-                    self.grid[disc_dest_y, disc_dest_x] = AGENT_1
-                else:
-                    self.grid[disc_dest_y, disc_dest_x] = AGENT_2
-
-                # Continuous position update
-                player.y = dest_y
-                player.x = dest_x
+            self.move_to(agent_idx, dest_y, dest_x)
 
         self.compute_observations()
