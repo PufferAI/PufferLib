@@ -2,6 +2,7 @@ import pufferlib.emulation
 import pufferlib.postprocess
 
 from . import ocean
+from .moba import moba
 from .grid import grid
 from .grid_continuous import grid_continuous
 from .snake import snake
@@ -10,6 +11,8 @@ from .continuous import continuous
 def env_creator(name='squared'):
     if name == 'grid':
         return make_grid
+    elif name == 'moba':
+        return make_moba
     elif name == 'foraging':
         return make_foraging
     elif name == 'predator_prey':
@@ -50,6 +53,9 @@ def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array
     env = pufferlib.postprocess.MultiagentEpisodeStats(env)
     env = pufferlib.postprocess.MeanOverAgents(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
+
+def make_moba(render_mode='rgb_array'):
+    return moba.PufferMoba(render_mode=render_mode)
 
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
