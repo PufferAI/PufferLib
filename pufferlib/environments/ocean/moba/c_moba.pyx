@@ -29,6 +29,7 @@ cdef:
     int TOWER_VISION = 5
 
 cdef struct Player:
+    int pid
     int team
     float health
     float y
@@ -80,15 +81,18 @@ cdef class Environment:
 
         unsigned char[:, :] grid
         unsigned char[:, :, :] observations
+
         float[:] rewards
         int[:, :] pid_map
-        Player* players
-        Creep* creeps
-        Tower* towers
+        Player[:] players
+        Player[:, :] player_obs
+        Creep[:] creeps
+        Tower[:] towers
 
-    def __init__(self, grid, cnp.ndarray players, cnp.ndarray creeps,
+    def __init__(self, grid, pids, cnp.ndarray players, cnp.ndarray player_obs, cnp.ndarray creeps,
             cnp.ndarray towers, observations, rewards,
             int vision_range, float agent_speed, bint discretize):
+        print('Init')
         self.height = grid.shape[0]
         self.width = grid.shape[1]
         self.num_agents = players.shape[0]
@@ -103,16 +107,20 @@ cdef class Environment:
         self.observations = observations
         self.rewards = rewards
 
-        self.pid_map = np.zeros((self.height, self.width), dtype=np.int32) - 1
+        self.pid_map = pids
 
-        self.players = <Player*> players.data
-        self.creeps = <Creep*> creeps.data
-        self.towers = <Tower*> towers.data
+        print('Setting up arrays')
+        self.players = players
+        print('Set up players')
+        self.player_obs = player_obs
+        self.creeps = creeps
+        self.towers = towers
 
         cdef Player* player
         cdef int i, y, x
         for i in range(self.num_agents):
             player = self.get_player(i)
+            player.pid = i
             player.health = 3
             if i < self.num_agents//2:
                 player.team = 0
@@ -216,6 +224,9 @@ cdef class Environment:
             tower = self.get_tower(i)
             self.grid[int(tower.y), int(tower.x)] = TOWER
 
+    cdef Player* get_player_ob(self, int pid, int idx):
+        return &self.player_obs[pid, idx]
+
     cdef Player* get_player(self, int pid):
         #if pid < self.num_agents:
         return &self.players[pid]
@@ -231,10 +242,17 @@ cdef class Environment:
             float x
             int r
             int c
+            int dx
+            int dy
             int agent_idx
+            int idx
+            int pid
             Player* player
+            Player* target
+            Player* target_ob
 
         for agent_idx in range(self.num_agents):
+            #print('Getting player obs', agent_idx)
             player = self.get_player(agent_idx)
             y = player.y
             x = player.x
@@ -244,6 +262,37 @@ cdef class Environment:
                 r-self.vision_range:r+self.vision_range+1,
                 c-self.vision_range:c+self.vision_range+1
             ]
+
+            for idx in range(10):
+                # TODO: Set better buffer data
+                self.get_player_ob(agent_idx, idx).pid = -1
+            #print('Reset buffers')
+
+            idx = 0
+            for dy in range(-self.vision_range, self.vision_range+1):
+                r = int(player.y) + dy
+                if idx == 10:
+                    break
+
+                for dx in range(-self.vision_range, self.vision_range+1):
+                    if idx == 10:
+                        break
+
+                    c = int(player.x) + dx
+                    pid = self.pid_map[r, c]
+                    if pid == -1:
+                        continue
+
+                    target = self.get_player(pid)
+                    target_ob = self.get_player_ob(agent_idx, idx)
+                    target_ob.pid = pid
+                    target_ob.y = target.y
+                    target_ob.x = target.x
+                    target_ob.health = target.health
+                    target_ob.team = target.team
+                    idx += 1
+
+            #print('Computed observation')
 
     cdef void spawn_agent(self, int agent_idx):
         cdef int old_r, old_c, r, c, tile
@@ -326,6 +375,7 @@ cdef class Environment:
 
         #self.move_to(9, 105, 66)
 
+        #print('Tower attack')
         for tower_idx in range(self.num_towers):
             tower = self.get_tower(tower_idx)
             damage = tower.damage
@@ -345,39 +395,32 @@ cdef class Environment:
                     if pid != -1:
                         target = self.get_player(pid)
                         if target.team == tower.team:
-                            print(f'Detected {target.team} team {pid} at {disc_y}, {disc_x}')
+                            #print(f'Detected {target.team} team {pid} at {disc_y}, {disc_x}')
                             continue
 
                         target.health -= damage
-                        print(f'Hit {target.team} team {pid} at {disc_y}, {disc_x}')
+                        #print(f'Hit {target.team} team {pid} at {disc_y}, {disc_x}')
                         if target.health <= 0:
-                            print(f'Killed {target.team} team {pid} at {disc_y}, {disc_x}')
+                            #print(f'Killed {target.team} team {pid} at {disc_y}, {disc_x}')
                             self.respawn(pid)
 
+        print('Looping agents')
         for agent_idx in range(self.num_agents):
+            #print('Getting player', agent_idx)
             player = self.get_player(agent_idx)
+            #print('Got player', agent_idx)
             y = player.y
             x = player.x
 
             # Attacks
             attack = actions_discrete[agent_idx, 2]
-            dest_y = y
-            dest_x = x
-            if attack == 0:
-                dest_y = y + self.agent_speed
-            elif attack == 1:
-                dest_x = x + self.agent_speed
-            elif attack == 2:
-                dest_y = y - self.agent_speed
-            elif attack == 3:
-                dest_x = x - self.agent_speed
-
-            disc_dest_y = int(dest_y)
-            disc_dest_x = int(dest_x)
-            target_pid = self.pid_map[disc_dest_y, disc_dest_x]
+            #print('Getting target', agent_idx, attack)
+            target = self.get_player_ob(agent_idx, attack)
+            #print('Got target', agent_idx, attack)
+            target_pid = target.pid
             if target_pid != -1:
                 target = self.get_player(target_pid)
-                #print(f'Attacking {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
+                #print(f'Agent {agent_idx} attacking {target_pid}')
                 if target.team != player.team:
                     #print(f'Hit {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
                     target.health -= 1

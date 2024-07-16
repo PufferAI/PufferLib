@@ -59,15 +59,19 @@ class PufferMoba(pufferlib.PufferEnv):
         self.grid = np.zeros((self.height, self.width), dtype=np.uint8)
         self.grid[game_map != 0] = WALL
 
+        self.pids = np.zeros((self.height, self.width), dtype=np.int32) - 1
+
         dtype = player_dtype()
-        self.players_flat = np.zeros((self.num_agents, dtype.itemsize), np.uint8)
-        self.players = np.frombuffer(self.players_flat, dtype=dtype).view(np.recarray)
+        self.c_players = np.zeros(self.num_agents, dtype=dtype)
+        self.players = self.c_players.view(np.recarray)
+        self.c_obs_players = np.zeros((self.num_agents, 10), dtype=dtype)
+        self.obs_players = self.c_obs_players.view(np.recarray)
         dtype = creep_dtype()
-        self.creeps_flat = np.zeros((12*self.num_agents, dtype.itemsize), np.uint8)
-        self.creeps = np.frombuffer(self.creeps_flat, dtype=dtype).view(np.recarray)
+        self.c_creeps = np.zeros(12*self.num_agents, dtype=dtype)
+        self.creeps = self.c_creeps.view(np.recarray)
         dtype = tower_dtype()
-        self.towers_flat = np.zeros((18, dtype.itemsize), np.uint8)
-        self.towers = np.frombuffer(self.towers_flat, dtype=dtype).view(np.recarray)
+        self.c_towers = np.zeros(18, dtype=dtype)
+        self.towers = self.c_towers.view(np.recarray)
 
         self.emulated = None
 
@@ -79,7 +83,7 @@ class PufferMoba(pufferlib.PufferEnv):
             truncations = np.zeros(self.num_agents, dtype=bool),
             masks = np.ones(self.num_agents, dtype=bool),
         )
-        self.actions = np.zeros(self.num_agents, dtype=np.uint32)
+        self.actions = np.zeros((self.num_agents, 3), dtype=np.uint32)
 
         self.render_mode = render_mode
         if render_mode == 'human':
@@ -100,7 +104,7 @@ class PufferMoba(pufferlib.PufferEnv):
             shape=(self.obs_size*self.obs_size+3,), dtype=np.uint8)
 
         if discretize:
-            self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 4])
+            self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 10])
         else:
             finfo = np.finfo(np.float32)
             self.action_space = gymnasium.spaces.Box(
@@ -124,7 +128,8 @@ class PufferMoba(pufferlib.PufferEnv):
             return frame
 
         frame, self.human_action = self.client.render(
-            self.grid, self.agent_positions, self.actions, self.discretize)
+            self.grid, self.pids, self.players, self.obs_players,
+            self.actions, self.discretize)
         return frame
 
     def _fill_observations(self):
@@ -147,7 +152,8 @@ class PufferMoba(pufferlib.PufferEnv):
             self.players.x.astype(np.int32)
         ] = AGENT_1
 
-        self.cenv = CEnv(self.grid, self.players_flat, self.creeps_flat, self.towers_flat,
+        self.cenv = CEnv(self.grid, self.pids, self.c_players, self.c_obs_players,
+            self.c_creeps, self.c_towers,
             self.obs_view, self.buf.rewards, self.vision_range, self.agent_speed,
             self.discretize)
         self.cenv.reset()
@@ -217,7 +223,7 @@ class RaylibClient:
         return np.frombuffer(cdata, dtype=np.uint8
             ).reshape((height, width, channels))[:, :, :3]
 
-    def render(self, grid, agent_positions, actions, discretize):
+    def render(self, grid, pids, agents, obs_players, actions, discretize):
         rl = self.rl
         colors = self.colors
         ay, ax = None, None
@@ -230,6 +236,29 @@ class RaylibClient:
         if rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
             ax = 2 if discretize else 1
 
+        ts = self.tile_size
+        main_r = agents[0].y
+        main_c = agents[0].x
+        main_r = int(main_r)
+        main_c = int(main_c)
+        r_min = main_r - self.height//2
+        r_max = main_r + self.height//2
+        c_min = main_c - self.width//2
+        c_max = main_c + self.width//2
+
+        pos = rl.GetMousePosition()
+        mouse_x = int(c_min + pos.x // ts)
+        mouse_y = int(r_min + pos.y // ts)
+
+        target_pid = pids[mouse_y, mouse_x]
+        attack = 0
+        if target_pid != -1:
+            target = agents[target_pid]
+            for i in range(10):
+                if obs_players[0, i].pid == target_pid:
+                    attack = i
+                    break
+
         if ax is None and ay is None:
             action = None
         else:
@@ -238,19 +267,11 @@ class RaylibClient:
             if ay is None:
                 ay = 1 if discretize else 0
 
-            action = (ay, ax)
+            action = (ay, ax, attack)
+
 
         rl.BeginDrawing()
         rl.ClearBackground([6, 24, 24, 255])
-
-        ts = self.tile_size
-        main_r, main_c = agent_positions[0]
-        main_r = int(main_r)
-        main_c = int(main_c)
-        r_min = main_r - self.height//2
-        r_max = main_r + self.height//2
-        c_min = main_c - self.width//2
-        c_max = main_c + self.width//2
 
         for i, r in enumerate(range(r_min, r_max+1)):
             for j, c in enumerate(range(c_min, c_max+1)):
@@ -262,13 +283,26 @@ class RaylibClient:
                     continue
                 elif tile == 2:
                     rl.DrawRectangle(j*ts, i*ts, ts, ts, [0, 0, 0, 255])
-                else:
-                    #atn = actions[idx]
-                    source_rect = self.asset_map[tile]
-                    dest_rect = (j*ts, i*ts, ts, ts)
-                    print(f'tile: {tile}, source_rect: {source_rect}, dest_rect: {dest_rect}')
-                    rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
-                        (0, 0), 0, colors.WHITE)
+                    continue
+                elif tile == 3 or tile == 4:
+                    pid = pids[r, c]
+                    if pid == -1:
+                        raise ValueError('Invalid pid')
+
+                    player = agents[pid]
+                    health = player.health
+
+                    # Draw health bar
+                    health_bar = health / 3.0
+                    rl.DrawRectangle(j*ts, i*ts - 8, ts, 4, [255, 0, 0, 255])
+                    rl.DrawRectangle(j*ts, i*ts - 8, int(ts*health_bar), 4, [0, 255, 0, 255])
+
+                #atn = actions[idx]
+                source_rect = self.asset_map[tile]
+                dest_rect = (j*ts, i*ts, ts, ts)
+                #print(f'tile: {tile}, source_rect: {source_rect}, dest_rect: {dest_rect}')
+                rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
+                    (0, 0), 0, colors.WHITE)
 
         rl.EndDrawing()
         return self._cdata_to_numpy(), action
