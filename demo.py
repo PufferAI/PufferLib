@@ -143,7 +143,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         #carbs_param('hidden_size', 'linear', wandb_policy_params, search_center=128, is_integer=True),
         #carbs_param('vision', 'linear', search_center=5, is_integer=True),
         carbs_param('total_timesteps', 'log', wandb_train_params,
-            search_center=500_000_000, is_integer=True, mmin=500_000_000, mmax=10_000_000_000),
+            search_center=500_000_000, is_integer=True),
         carbs_param('learning_rate', 'log', wandb_train_params, search_center=9e-4),
         carbs_param('gamma', 'logit', wandb_train_params, search_center=0.99),
         carbs_param('gae_lambda', 'logit', wandb_train_params, search_center=0.90),
