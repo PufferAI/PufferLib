@@ -126,8 +126,8 @@ cdef class Environment:
         for i in range(self.num_agents):
             player = self.get_player(i)
             player.pid = i
-            player.health = 3
-            player.max_health = 3
+            player.health = 100
+            player.max_health = 100
             if i < self.num_agents//2:
                 player.team = 0
                 player.spawn_y = 64 + i
@@ -366,10 +366,68 @@ cdef class Environment:
         player.y = dest_y
         player.x = dest_x
 
-    cdef respawn(self, int pid):
+    cdef void respawn(self, int pid):
         cdef Player* player = self.get_player(pid)
         self.move_to(pid, player.spawn_y, player.spawn_x)
-        player.health = 3
+        player.health = player.max_health
+
+    cdef void attack(self, int pid, int target_pid, int damage):
+        cdef:
+            Player* player = self.get_player(pid)
+            Player* target
+            Tower* tower
+
+        #if pid == 0:
+        #    print(f'Attacking {target_pid}')
+
+        if target_pid == -1:
+            return
+
+        if target_pid < self.num_agents:
+            target = self.get_player(target_pid)
+            #print(f'Agent {agent_idx} attacking {target_pid}')
+            if target.team != player.team:
+                #print(f'Hit {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
+                target.health -= damage
+                if target.health <= 0:
+                    #print(f'Killed {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
+                    self.respawn(target_pid)
+        else:
+            tower = self.get_tower(target_pid)
+            if tower.team != player.team:
+                tower.health -= damage
+                if tower.health <= 0:
+                    self.grid[int(tower.y), int(tower.x)] = EMPTY
+                    self.pid_map[int(tower.y), int(tower.x)] = -1
+
+    cdef void skill_attack(self, int pid, int target_pid):
+        if target_pid == -1:
+            return
+
+        cdef:
+            Player* target_player
+            Tower* target_tower
+            int y, x, dy, dx
+        
+        if target_pid < self.num_agents:
+            target_player = self.get_player(target_pid)
+            y = int(target_player.y)
+            x = int(target_player.x)
+        else:
+            target_tower = self.get_tower(target_pid)
+            y = int(target_tower.y)
+            x = int(target_tower.x)
+
+        for dy in range(-3, 4):
+            for dx in range(-3, 4):
+                #if pid == 0:
+                #    print(f'Skill attacking {y + dy}, {x + dx}, target {target_pid}')
+                target_pid = self.pid_map[y + dy, x + dx]
+                self.attack(pid, target_pid, 30)
+
+    cdef void skill_heal(self, int pid):
+        cdef Player* player = self.get_player(pid)
+        player.health = player.max_health
 
     def step(self, np_actions):
         cdef:
@@ -393,6 +451,8 @@ cdef class Environment:
             float damage
             int dy
             int dx
+            bint use_skill_attack
+            bint use_skill_heal
 
         if self.discretize:
             actions_discrete = np_actions
@@ -431,7 +491,6 @@ cdef class Environment:
                             #print(f'Killed {target.team} team {pid} at {disc_y}, {disc_x}')
                             self.respawn(pid)
 
-        print('Looping agents')
         for agent_idx in range(self.num_agents):
             #print('Getting player', agent_idx)
             player = self.get_player(agent_idx)
@@ -442,30 +501,25 @@ cdef class Environment:
             # Attacks
             if self.discretize:
                 attack = actions_discrete[agent_idx, 2]
+                use_skill_attack = actions_discrete[agent_idx, 3]
+                use_skill_heal = actions_discrete[agent_idx, 4]
             else:
                 attack = int(actions_continuous[agent_idx, 2])
+                use_skill_attack = int(actions_continuous[agent_idx, 3]) > 0.5
+                use_skill_heal = int(actions_continuous[agent_idx, 4]) > 0.5
 
-            #print('Getting target', agent_idx, attack)
             target = self.get_player_ob(agent_idx, attack)
-            #print('Got target', agent_idx, attack)
             target_pid = target.pid
-            if target_pid != -1:
-                if target_pid < self.num_agents:
-                    target = self.get_player(target_pid)
-                    #print(f'Agent {agent_idx} attacking {target_pid}')
-                    if target.team != player.team:
-                        #print(f'Hit {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
-                        target.health -= 1
-                        if target.health <= 0:
-                            #print(f'Killed {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
-                            self.respawn(target_pid)
-                else:
-                    tower = self.get_tower(target_pid)
-                    if tower.team != player.team:
-                        tower.health -= 1
-                        if tower.health <= 0:
-                            self.grid[int(tower.y), int(tower.x)] = EMPTY
-                            self.pid_map[int(tower.y), int(tower.x)] = -1
+
+            #if agent_idx == 0:
+            #    print('Raw attack:', attack, 'Target:', target_pid, 'Skill:', skill)
+          
+            if use_skill_attack:
+                self.skill_attack(agent_idx, target_pid)
+            elif use_skill_heal:
+                self.skill_heal(agent_idx)
+            else:
+                self.attack(agent_idx, target_pid, 1)
 
             if self.discretize:
                 # Convert [0, 1, 2] to [-1, 0, 1]

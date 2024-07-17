@@ -104,13 +104,13 @@ class PufferMoba(pufferlib.PufferEnv):
             shape=(self.obs_size*self.obs_size+3,), dtype=np.uint8)
 
         if discretize:
-            self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 10])
+            self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 10, 2, 2])
         else:
             finfo = np.finfo(np.float32)
             self.action_space = gymnasium.spaces.Box(
                 low=finfo.min,
                 high=finfo.max,
-                shape=(3,),
+                shape=(5,),
                 dtype=np.float32
             )
 
@@ -164,15 +164,15 @@ class PufferMoba(pufferlib.PufferEnv):
 
     def step(self, actions):
         if self.render_mode == 'human' and self.human_action is not None:
-            print(self.human_action)
+            #print(self.human_action)
             actions[0] = self.human_action
 
         if self.discretize:
             actions = actions.astype(np.uint32)
         else:
             actions = np.clip(actions,
-                np.array([-1, -1, 0]),
-                np.array([1, 1, 10])
+                np.array([-1, -1, 0, 0, 0]),
+                np.array([1, 1, 10, 1, 1])
             ).astype(np.float32)
 
         self.buf.rewards.fill(0)
@@ -246,6 +246,13 @@ class RaylibClient:
         if rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
             ax = 2 if discretize else 1
 
+        skill_attack = 0
+        skill_heal = 0
+        if rl.IsKeyDown(rl.KEY_Q):
+            skill_attack = 1
+        if rl.IsKeyDown(rl.KEY_W):
+            skill_heal = 1
+
         ts = self.tile_size
         main_r = agents[0].y
         main_c = agents[0].x
@@ -271,7 +278,7 @@ class RaylibClient:
         #print(f'Mouse: {pos.x}, {pos.y}, Target: {ts*mouse_x}, {ts*mouse_y}, Action: {ay}, {ax}')
 
         target_pid = pids[mouse_y, mouse_x]
-        print(f'Mouse: {mouse_x}, {mouse_y}, Target: {target_pid}')
+        #print(f'Mouse: {mouse_x}, {mouse_y}, Target: {target_pid}')
         attack = 0
         if target_pid == -1:
             attack = 0
@@ -294,7 +301,7 @@ class RaylibClient:
             if ay is None:
                 ay = 1 if discretize else 0
 
-            action = (ay, ax, attack)
+            action = (ay, ax, attack, skill_attack, skill_heal)
 
         #print(f'Action: {action}')
 
