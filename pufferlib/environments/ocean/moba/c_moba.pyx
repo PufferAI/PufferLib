@@ -32,6 +32,7 @@ cdef struct Player:
     int pid
     int team
     float health
+    float max_health
     float y
     float x
     float spawn_y
@@ -40,14 +41,17 @@ cdef struct Player:
 cdef struct Creep:
     int team
     float health
+    float max_health
     float y
     float x
     float spawn_y
     float spawn_x
 
 cdef struct Tower:
+    int pid
     int team
     float health
+    float max_health
     float damage
     float y
     float x
@@ -89,7 +93,8 @@ cdef class Environment:
         Creep[:] creeps
         Tower[:] towers
 
-    def __init__(self, grid, pids, cnp.ndarray players, cnp.ndarray player_obs, cnp.ndarray creeps,
+    def __init__(self, grid, pids, cnp.ndarray players, cnp.ndarray player_obs,
+            cnp.ndarray creeps,
             cnp.ndarray towers, observations, rewards,
             int vision_range, float agent_speed, bint discretize):
         print('Init')
@@ -122,6 +127,7 @@ cdef class Environment:
             player = self.get_player(i)
             player.pid = i
             player.health = 3
+            player.max_health = 3
             if i < self.num_agents//2:
                 player.team = 0
                 player.spawn_y = 64 + i
@@ -152,21 +158,24 @@ cdef class Environment:
         cdef Tower* tower
         tower = self.get_tower(0)
         tower.team = 0
-        tower.health = 3
+        tower.health = 5
+        tower.max_health = 5
         tower.damage = 1
         tower.y = 43
         tower.x = 25
 
         tower = self.get_tower(1)
         tower.team = 0
-        tower.health = 3
+        tower.health = 5
+        tower.max_health = 5
         tower.damage = 1
         tower.y = 74
         tower.x = 55
 
         tower = self.get_tower(2)
         tower.team = 0
-        tower.health = 3
+        tower.health = 5
+        tower.max_health = 5
         tower.damage = 1
         tower.y = 104
         tower.x = 96
@@ -174,6 +183,7 @@ cdef class Environment:
         tower = self.get_tower(3)
         tower.team = 0
         tower.health = 15
+        tower.max_health = 15
         tower.damage = 3
         tower.y = 72
         tower.x = 25
@@ -181,6 +191,7 @@ cdef class Environment:
         tower = self.get_tower(4)
         tower.team = 0
         tower.health = 15
+        tower.max_health = 15
         tower.damage = 3
         tower.y = 85
         tower.x = 46
@@ -188,6 +199,7 @@ cdef class Environment:
         tower = self.get_tower(5)
         tower.team = 0
         tower.health = 15
+        tower.max_health = 15
         tower.damage = 3
         tower.y = 106
         tower.x = 66
@@ -195,6 +207,7 @@ cdef class Environment:
         tower = self.get_tower(6)
         tower.team = 0
         tower.health = 50
+        tower.max_health = 50
         tower.damage = 10
         tower.y = 97
         tower.x = 25
@@ -202,6 +215,7 @@ cdef class Environment:
         tower = self.get_tower(7)
         tower.team = 0
         tower.health = 50
+        tower.max_health = 50
         tower.damage = 10
         tower.y = 99
         tower.x = 29
@@ -209,6 +223,7 @@ cdef class Environment:
         tower = self.get_tower(8)
         tower.team = 0
         tower.health = 50
+        tower.max_health = 50
         tower.damage = 10
         tower.y = 104
         tower.x = 33
@@ -216,25 +231,25 @@ cdef class Environment:
         for i in range(self.num_towers//2):
             self.get_tower(self.num_towers//2 + i).team = 1
             self.get_tower(self.num_towers//2 + i).health = self.get_tower(i).health
+            self.get_tower(self.num_towers//2 + i).max_health = self.get_tower(i).max_health
             self.get_tower(self.num_towers//2 + i).damage = self.get_tower(i).damage
             self.get_tower(self.num_towers//2 + i).y = 128 - self.get_tower(i).y
             self.get_tower(self.num_towers//2 + i).x = 128 - self.get_tower(i).x
 
         for i in range(self.num_towers):
-            tower = self.get_tower(i)
+            tower = self.get_tower(i + self.num_agents)
             self.grid[int(tower.y), int(tower.x)] = TOWER
+            self.pid_map[int(tower.y), int(tower.x)] = i + self.num_agents
+            tower.pid = i + self.num_agents
 
     cdef Player* get_player_ob(self, int pid, int idx):
         return &self.player_obs[pid, idx]
 
     cdef Player* get_player(self, int pid):
-        #if pid < self.num_agents:
         return &self.players[pid]
-        #else:
-        #    return &self.creeps[pid - self.num_agents]
 
     cdef Tower* get_tower(self, int pid):
-        return &self.towers[pid]
+        return &self.towers[pid - self.num_agents]
 
     cdef void compute_observations(self):
         cdef:
@@ -282,15 +297,24 @@ cdef class Environment:
                     pid = self.pid_map[r, c]
                     if pid == -1:
                         continue
-
-                    target = self.get_player(pid)
-                    target_ob = self.get_player_ob(agent_idx, idx)
-                    target_ob.pid = pid
-                    target_ob.y = target.y
-                    target_ob.x = target.x
-                    target_ob.health = target.health
-                    target_ob.team = target.team
-                    idx += 1
+                    elif pid < self.num_agents:
+                        target = self.get_player(pid)
+                        target_ob = self.get_player_ob(agent_idx, idx)
+                        target_ob.pid = pid
+                        target_ob.y = target.y
+                        target_ob.x = target.x
+                        target_ob.health = target.health
+                        target_ob.team = target.team
+                        idx += 1
+                    else:
+                        tower = self.get_tower(pid - self.num_agents)
+                        target_ob = self.get_player_ob(agent_idx, idx)
+                        target_ob.pid = pid
+                        target_ob.y = tower.y
+                        target_ob.x = tower.x
+                        target_ob.health = tower.health
+                        target_ob.team = tower.team
+                        idx += 1
 
             #print('Computed observation')
 
@@ -327,7 +351,8 @@ cdef class Environment:
             int disc_dest_y = int(dest_y)
             int disc_dest_x = int(dest_x)
 
-        if self.grid[disc_dest_y, disc_dest_x] != EMPTY:
+        if (self.grid[disc_dest_y, disc_dest_x] != EMPTY and
+                self.pid_map[disc_dest_y, disc_dest_x] != pid):
             return
 
         self.grid[int(player.y), int(player.x)] = EMPTY
@@ -337,6 +362,7 @@ cdef class Environment:
             self.grid[disc_dest_y, disc_dest_x] = AGENT_2
         self.pid_map[int(player.y), int(player.x)] = -1
         self.pid_map[disc_dest_y, disc_dest_x] = pid
+
         player.y = dest_y
         player.x = dest_x
 
@@ -373,11 +399,12 @@ cdef class Environment:
         else:
             actions_continuous = np_actions
 
-        #self.move_to(9, 105, 66)
-
         #print('Tower attack')
         for tower_idx in range(self.num_towers):
             tower = self.get_tower(tower_idx)
+            if tower.health <= 0:
+                continue
+
             damage = tower.damage
             y = tower.y
             x = tower.x
@@ -392,7 +419,7 @@ cdef class Environment:
                     #    print(f'Tower is checking {disc_y}, {disc_x}')
 
                     pid = self.pid_map[disc_y, disc_x]
-                    if pid != -1:
+                    if pid >= 0 and pid < self.num_agents:
                         target = self.get_player(pid)
                         if target.team == tower.team:
                             #print(f'Detected {target.team} team {pid} at {disc_y}, {disc_x}')
@@ -413,20 +440,32 @@ cdef class Environment:
             x = player.x
 
             # Attacks
-            attack = actions_discrete[agent_idx, 2]
+            if self.discretize:
+                attack = actions_discrete[agent_idx, 2]
+            else:
+                attack = int(actions_continuous[agent_idx, 2])
+
             #print('Getting target', agent_idx, attack)
             target = self.get_player_ob(agent_idx, attack)
             #print('Got target', agent_idx, attack)
             target_pid = target.pid
             if target_pid != -1:
-                target = self.get_player(target_pid)
-                #print(f'Agent {agent_idx} attacking {target_pid}')
-                if target.team != player.team:
-                    #print(f'Hit {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
-                    target.health -= 1
-                    if target.health <= 0:
-                        #print(f'Killed {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
-                        self.respawn(target_pid)
+                if target_pid < self.num_agents:
+                    target = self.get_player(target_pid)
+                    #print(f'Agent {agent_idx} attacking {target_pid}')
+                    if target.team != player.team:
+                        #print(f'Hit {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
+                        target.health -= 1
+                        if target.health <= 0:
+                            #print(f'Killed {target.team} team {target_pid} at {disc_dest_y}, {disc_dest_x}')
+                            self.respawn(target_pid)
+                else:
+                    tower = self.get_tower(target_pid)
+                    if tower.team != player.team:
+                        tower.health -= 1
+                        if tower.health <= 0:
+                            self.grid[int(tower.y), int(tower.x)] = EMPTY
+                            self.pid_map[int(tower.y), int(tower.x)] = -1
 
             if self.discretize:
                 # Convert [0, 1, 2] to [-1, 0, 1]
@@ -438,6 +477,9 @@ cdef class Environment:
 
             dest_y = y + self.agent_speed * vel_y
             dest_x = x + self.agent_speed * vel_x
+
+            #if agent_idx == 0:
+            #    print(f'Agent {agent_idx} moving to {dest_y}, {dest_x} with vel {vel_y}, {vel_x}')
 
             # Discretize
             self.move_to(agent_idx, dest_y, dest_x)

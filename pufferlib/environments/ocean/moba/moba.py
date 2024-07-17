@@ -36,8 +36,8 @@ COLORS = np.array([
 
 
 class PufferMoba(pufferlib.PufferEnv):
-    def __init__(self, vision_range=5, agent_speed=1.0,
-            discretize=True, report_interval=32, render_mode='rgb_array'):
+    def __init__(self, vision_range=5, agent_speed=0.25,
+            discretize=False, report_interval=32, render_mode='rgb_array'):
         super().__init__()
 
         self.height = 128
@@ -110,7 +110,7 @@ class PufferMoba(pufferlib.PufferEnv):
             self.action_space = gymnasium.spaces.Box(
                 low=finfo.min,
                 high=finfo.max,
-                shape=(2,),
+                shape=(3,),
                 dtype=np.float32
             )
 
@@ -128,7 +128,7 @@ class PufferMoba(pufferlib.PufferEnv):
             return frame
 
         frame, self.human_action = self.client.render(
-            self.grid, self.pids, self.players, self.obs_players,
+            self.grid, self.pids, self.players, self.towers, self.obs_players,
             self.actions, self.discretize)
         return frame
 
@@ -170,7 +170,10 @@ class PufferMoba(pufferlib.PufferEnv):
         if self.discretize:
             actions = actions.astype(np.uint32)
         else:
-            actions = np.clip(actions, -1, 1).astype(np.float32)
+            actions = np.clip(actions,
+                np.array([-1, -1, 0]),
+                np.array([1, 1, 10])
+            ).astype(np.float32)
 
         self.buf.rewards.fill(0)
         self.actions = actions
@@ -208,10 +211,17 @@ class RaylibClient:
         from raylib import rl, colors
         rl.InitWindow(width*tile_size, height*tile_size,
             "PufferLib Ray Grid".encode())
-        rl.SetTargetFPS(10)
+        rl.SetTargetFPS(20)
         self.puffer = rl.LoadTexture(sprite_sheet_path.encode())
         self.rl = rl
         self.colors = colors
+
+        import pyray as ray
+        camera = ray.Camera2D()
+        camera.target = ray.Vector2(0.0, 0.0)
+        camera.rotation = 0.0 
+        camera.zoom = 1.0
+        self.camera = camera
 
         from cffi import FFI
         self.ffi = FFI()
@@ -223,7 +233,7 @@ class RaylibClient:
         return np.frombuffer(cdata, dtype=np.uint8
             ).reshape((height, width, channels))[:, :, :3]
 
-    def render(self, grid, pids, agents, obs_players, actions, discretize):
+    def render(self, grid, pids, agents, towers, obs_players, actions, discretize):
         rl = self.rl
         colors = self.colors
         ay, ax = None, None
@@ -239,21 +249,38 @@ class RaylibClient:
         ts = self.tile_size
         main_r = agents[0].y
         main_c = agents[0].x
+        self.camera.target.x = (main_c - self.width//2) * ts
+        self.camera.target.y = (main_r - self.height//2) * ts
         main_r = int(main_r)
         main_c = int(main_c)
-        r_min = main_r - self.height//2
-        r_max = main_r + self.height//2
-        c_min = main_c - self.width//2
-        c_max = main_c + self.width//2
+        r_min = main_r - self.height//2 - 1
+        r_max = main_r + self.height//2 + 1
+        c_min = main_c - self.width//2 - 1
+        c_max = main_c + self.width//2 + 1
 
         pos = rl.GetMousePosition()
-        mouse_x = int(c_min + pos.x // ts)
-        mouse_y = int(r_min + pos.y // ts)
+        raw_mouse_x = pos.x + self.camera.target.x
+        raw_mouse_y = pos.y + self.camera.target.y
+        mouse_x = int(raw_mouse_x // ts)
+        mouse_y = int(raw_mouse_y // ts)
+        #mouse_x = int(c_min + pos.x // ts + 1)
+        #mouse_y = int(r_min + pos.y // ts + 1)
+
+        ay = np.clip((pos.y - ts*self.height//2) / 200, -1, 1)
+        ax = np.clip((pos.x - ts*self.width//2) / 200, -1, 1)
+        #print(f'Mouse: {pos.x}, {pos.y}, Target: {ts*mouse_x}, {ts*mouse_y}, Action: {ay}, {ax}')
 
         target_pid = pids[mouse_y, mouse_x]
+        print(f'Mouse: {mouse_x}, {mouse_y}, Target: {target_pid}')
         attack = 0
-        if target_pid != -1:
-            target = agents[target_pid]
+        if target_pid == -1:
+            attack = 0
+        else:
+            if target_pid < agents.shape[0]:
+                target = agents[target_pid]
+            else:
+                target = towers[target_pid - agents.shape[0]]
+
             for i in range(10):
                 if obs_players[0, i].pid == target_pid:
                     attack = i
@@ -269,43 +296,57 @@ class RaylibClient:
 
             action = (ay, ax, attack)
 
+        #print(f'Action: {action}')
 
         rl.BeginDrawing()
+        rl.BeginMode2D(self.camera)
         rl.ClearBackground([6, 24, 24, 255])
 
-        for i, r in enumerate(range(r_min, r_max+1)):
-            for j, c in enumerate(range(c_min, c_max+1)):
-                if (r < 0 or r >= grid.shape[0] or c < 0 or c >= grid.shape[1]):
+        for y in range(r_min, r_max+1):
+            for x in range(c_min, c_max+1):
+                if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
                     continue
 
-                tile = grid[r, c]
+                tile = grid[y, x]
                 if tile == 0:
                     continue
                 elif tile == 2:
-                    rl.DrawRectangle(j*ts, i*ts, ts, ts, [0, 0, 0, 255])
+                    rl.DrawRectangle(x*ts, y*ts, ts, ts, [0, 0, 0, 255])
                     continue
+            
+                pid = pids[y, x]
+                if pid == -1:
+                   raise ValueError('Invalid pid')
+
                 elif tile == 3 or tile == 4:
-                    pid = pids[r, c]
-                    if pid == -1:
-                        raise ValueError('Invalid pid')
+                    entity = agents[pid]
+                else:
+                    entity = towers[pid - agents.shape[0]]
 
-                    player = agents[pid]
-                    health = player.health
+                tx = int(entity.x * ts)
+                ty = int(entity.y * ts)
 
-                    # Draw health bar
-                    health_bar = health / 3.0
-                    rl.DrawRectangle(j*ts, i*ts - 8, ts, 4, [255, 0, 0, 255])
-                    rl.DrawRectangle(j*ts, i*ts - 8, int(ts*health_bar), 4, [0, 255, 0, 255])
+                draw_healthbar(rl, entity, tx, ty, ts)
 
                 #atn = actions[idx]
                 source_rect = self.asset_map[tile]
-                dest_rect = (j*ts, i*ts, ts, ts)
+                #dest_rect = (j*ts, i*ts, ts, ts)
+                dest_rect = (tx, ty, ts, ts)
                 #print(f'tile: {tile}, source_rect: {source_rect}, dest_rect: {dest_rect}')
                 rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
                     (0, 0), 0, colors.WHITE)
 
+        # Draw circle at mouse x, y
+        rl.DrawCircle(ts*mouse_x + ts//2, ts*mouse_y + ts//2, ts//2, [255, 0, 0, 255])
+
+        rl.EndMode2D()
         rl.EndDrawing()
         return self._cdata_to_numpy(), action
+
+def draw_healthbar(rl, entity, x, y, ts):
+    health_bar = entity.health / entity.max_health
+    rl.DrawRectangle(x, y - 8, ts, 4, [255, 0, 0, 255])
+    rl.DrawRectangle(x, y - 8, int(ts*health_bar), 4, [0, 255, 0, 255])
 
 def test_puffer_performance(timeout):
     import time
