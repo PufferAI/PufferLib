@@ -7,7 +7,7 @@ import gymnasium
 
 import pufferlib
 from pufferlib.environments.ocean.moba.c_moba import Environment as CEnv
-from pufferlib.environments.ocean.moba.c_moba import player_dtype, creep_dtype, tower_dtype
+from pufferlib.environments.ocean.moba.c_moba import entity_dtype
 
 EMPTY = 0
 FOOD = 1
@@ -43,6 +43,8 @@ class PufferMoba(pufferlib.PufferEnv):
         self.height = 128
         self.width = 128
         self.num_agents = 10
+        self.num_towers = 18
+        self.num_creeps = 12
         self.vision_range = vision_range
         self.agent_speed = agent_speed
         self.discretize = discretize
@@ -61,17 +63,11 @@ class PufferMoba(pufferlib.PufferEnv):
 
         self.pids = np.zeros((self.height, self.width), dtype=np.int32) - 1
 
-        dtype = player_dtype()
-        self.c_players = np.zeros(self.num_agents, dtype=dtype)
-        self.players = self.c_players.view(np.recarray)
+        dtype = entity_dtype()
+        self.c_entities = np.zeros(self.num_agents + self.num_towers, dtype=dtype)
+        self.entities = self.c_entities.view(np.recarray)
         self.c_obs_players = np.zeros((self.num_agents, 10), dtype=dtype)
         self.obs_players = self.c_obs_players.view(np.recarray)
-        dtype = creep_dtype()
-        self.c_creeps = np.zeros(12*self.num_agents, dtype=dtype)
-        self.creeps = self.c_creeps.view(np.recarray)
-        dtype = tower_dtype()
-        self.c_towers = np.zeros(18, dtype=dtype)
-        self.towers = self.c_towers.view(np.recarray)
 
         self.emulated = None
 
@@ -128,13 +124,15 @@ class PufferMoba(pufferlib.PufferEnv):
             return frame
 
         frame, self.human_action = self.client.render(
-            self.grid, self.pids, self.players, self.towers, self.obs_players,
+            self.grid, self.pids, self.entities, self.obs_players,
             self.actions, self.discretize)
         return frame
 
     def _fill_observations(self):
-        self.buf.observations[:, -3] = (255*self.players.y/self.height).astype(np.uint8)
-        self.buf.observations[:, -2] = (255*self.players.x/self.width).astype(np.uint8)
+        self.buf.observations[:, -3] = (
+            255*self.entities[:self.num_agents].y/self.height).astype(np.uint8)
+        self.buf.observations[:, -2] = (
+            255*self.entities[:self.num_agents].x/self.width).astype(np.uint8)
         self.buf.observations[:, -1] = (255*self.buf.rewards).astype(np.uint8)
 
     def reset(self, seed=0):
@@ -148,14 +146,13 @@ class PufferMoba(pufferlib.PufferEnv):
         self.tick = 1
 
         self.grid[
-            self.players.y.astype(np.int32),
-            self.players.x.astype(np.int32)
+            self.entities.y.astype(np.int32),
+            self.entities.x.astype(np.int32)
         ] = AGENT_1
 
-        self.cenv = CEnv(self.grid, self.pids, self.c_players, self.c_obs_players,
-            self.c_creeps, self.c_towers,
-            self.obs_view, self.buf.rewards, self.vision_range, self.agent_speed,
-            self.discretize)
+        self.cenv = CEnv(self.grid, self.pids, self.c_entities, self.c_obs_players,
+            self.obs_view, self.buf.rewards, self.num_agents, self.num_creeps,
+            self.num_towers, self.vision_range, self.agent_speed, self.discretize)
         self.cenv.reset()
 
         self.sum_rewards = []
@@ -233,7 +230,7 @@ class RaylibClient:
         return np.frombuffer(cdata, dtype=np.uint8
             ).reshape((height, width, channels))[:, :, :3]
 
-    def render(self, grid, pids, agents, towers, obs_players, actions, discretize):
+    def render(self, grid, pids, entities, obs_players, actions, discretize):
         rl = self.rl
         colors = self.colors
         ay, ax = None, None
@@ -254,8 +251,8 @@ class RaylibClient:
             skill_heal = 1
 
         ts = self.tile_size
-        main_r = agents[0].y
-        main_c = agents[0].x
+        main_r = entities[0].y
+        main_c = entities[0].x
         self.camera.target.x = (main_c - self.width//2) * ts
         self.camera.target.y = (main_r - self.height//2) * ts
         main_r = int(main_r)
@@ -283,11 +280,7 @@ class RaylibClient:
         if target_pid == -1:
             attack = 0
         else:
-            if target_pid < agents.shape[0]:
-                target = agents[target_pid]
-            else:
-                target = towers[target_pid - agents.shape[0]]
-
+            target = entities[target_pid]
             for i in range(10):
                 if obs_players[0, i].pid == target_pid:
                     attack = i
@@ -314,6 +307,9 @@ class RaylibClient:
                 if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
                     continue
 
+                if pids[y, x] != -1:
+                    rl.DrawRectangle(x*ts, y*ts, ts, ts, [0, 0, 255, 128])
+ 
                 tile = grid[y, x]
                 if tile == 0:
                     continue
@@ -325,10 +321,7 @@ class RaylibClient:
                 if pid == -1:
                    raise ValueError('Invalid pid')
 
-                elif tile == 3 or tile == 4:
-                    entity = agents[pid]
-                else:
-                    entity = towers[pid - agents.shape[0]]
+                entity = entities[pid]
 
                 tx = int(entity.x * ts)
                 ty = int(entity.y * ts)
