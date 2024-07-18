@@ -48,6 +48,10 @@ cdef struct Entity:
     float damage
     int lane
     int waypoint
+    float move_speed
+    float move_modifier
+    int stun_timer
+    int move_timer
 
 cpdef entity_dtype():
     '''Make a dummy entity to get the dtype'''
@@ -88,7 +92,6 @@ cdef class Environment:
     def __init__(self, grid, pids, cnp.ndarray entities, cnp.ndarray player_obs,
             observations, rewards, int num_agents, int num_creeps, int num_towers,
             int vision_range, float agent_speed, bint discretize):
-        print('Init')
         self.height = grid.shape[0]
         self.width = grid.shape[1]
         self.num_agents = num_agents
@@ -146,6 +149,9 @@ cdef class Environment:
 
     cdef Entity* get_tower(self, int idx):
         return &self.entities[idx + self.num_agents]
+
+    cdef Entity* get_creep(self, int idx):
+        return &self.entities[idx + self.num_agents + self.num_towers]
 
     cdef void compute_observations(self):
         cdef:
@@ -227,7 +233,7 @@ cdef class Environment:
         else:
             raise ValueError('Invalid tier')
 
-        self.move_to(tower.pid, y, x)
+        self.move_to(tower, y, x)
 
     def reset(self, seed=0):
         cdef:
@@ -244,12 +250,17 @@ cdef class Environment:
             player.type = ENTITY_PLAYER
             player.max_health = 500
             player.max_mana = 100
+            player.move_speed = self.agent_speed
+            player.move_modifier = 0
+            player.move_timer = 0
+            player.stun_timer = 0
+
             if pid < self.num_agents//2:
                 player.team = 0
             else:
                 player.team = 1
 
-            self.respawn(pid)
+            self.respawn(player)
 
         self.spawn_tower(0, 0, 1, 43, 25)
         self.spawn_tower(1, 0, 1, 74, 55)
@@ -272,9 +283,8 @@ cdef class Environment:
         
         self.compute_observations()
 
-    cdef move_to(self, int pid, float dest_y, float dest_x):
+    cdef int move_to(self, Entity* player, float dest_y, float dest_x):
         cdef:
-            Entity* player = self.get_entity(pid)
             int disc_y = int(player.y)
             int disc_x = int(player.x)
             int disc_dest_y = int(dest_y)
@@ -282,8 +292,8 @@ cdef class Environment:
             int agent_type
 
         if (self.grid[disc_dest_y, disc_dest_x] != EMPTY and
-                self.pid_map[disc_dest_y, disc_dest_x] != pid):
-            return
+                self.pid_map[disc_dest_y, disc_dest_x] != player.pid):
+            return -1
 
         if player.type == ENTITY_TOWER:
             agent_type = TOWER
@@ -302,14 +312,34 @@ cdef class Environment:
         self.grid[disc_dest_y, disc_dest_x] = agent_type
 
         self.pid_map[disc_y, disc_x] = -1
-        self.pid_map[disc_dest_y, disc_dest_x] = pid
+        self.pid_map[disc_dest_y, disc_dest_x] = player.pid
 
         player.y = dest_y
         player.x = dest_x
+        return 1
 
-    cdef void kill(self, int pid):
+    cdef int move_near(self, Entity* entity, Entity* target):
+        if self.move_to(entity, target.y+1.0, target.x) == 1:
+            return 1
+        elif self.move_to(entity, target.y-1.0, target.x) == 1:
+            return 1
+        elif self.move_to(entity, target.y, target.x+1.0) == 1:
+            return 1
+        elif self.move_to(entity, target.y, target.x-1.0) == 1:
+            return 1
+        elif self.move_to(entity, target.y+1.0, target.x+1.0) == 1:
+            return 1
+        elif self.move_to(entity, target.y+1.0, target.x-1.0) == 1:
+            return 1
+        elif self.move_to(entity, target.y-1.0, target.x+1.0) == 1:
+            return 1
+        elif self.move_to(entity, target.y-1.0, target.x-1.0) == 1:
+            return 1
+        else:
+            return -1
+
+    cdef void kill(self, Entity* entity):
         cdef:
-            Entity* entity = self.get_entity(pid)
             int x = int(entity.x)
             int y = int(entity.y)
 
@@ -317,11 +347,10 @@ cdef class Environment:
         self.pid_map[y, x] = -1
         entity.pid = -1
 
-    cdef void creep_path(self, int pid, float dest_y, float dest_x):
+    cdef void creep_path(self, Entity* creep, float dest_y, float dest_x):
         cdef:
-            Entity* creep = self.get_entity(pid)
-            float dy = self.agent_speed * clip(dest_y - creep.y)
-            float dx = self.agent_speed * clip(dest_x - creep.x)
+            float dy = creep.move_modifier*self.agent_speed*clip(dest_y - creep.y)
+            float dx = creep.move_modifier*self.agent_speed*clip(dest_x - creep.x)
             float move_dest_y = creep.y + dy
             float move_dest_x = creep.x + dx
             int disc_y = int(move_dest_y)
@@ -334,11 +363,10 @@ cdef class Environment:
             move_dest_y = creep.y + dy
             move_dest_x = creep.x + dx
 
-        self.move_to(pid, move_dest_y, move_dest_x)
+        self.move_to(creep, move_dest_y, move_dest_x)
 
-    cdef int creep_target(self, int pid):
+    cdef int creep_target(self, Entity* creep):
         cdef:
-            Entity* creep = self.get_entity(pid)
             Entity* target
             int y = int(creep.y)
             int x = int(creep.x)
@@ -357,12 +385,7 @@ cdef class Environment:
 
         return -1
 
-    cdef void creep_ai(self, int pid):
-        cdef Entity* creep = self.get_entity(pid)
-
-        if creep.pid == -1:
-            return
-
+    cdef void creep_ai(self, Entity* creep):
         cdef:
             int waypoint = creep.waypoint
             int lane = creep.lane
@@ -372,7 +395,7 @@ cdef class Environment:
             Entity* target
 
         # Aggro check
-        target_pid = self.creep_target(pid)
+        target_pid = self.creep_target(creep)
             
         if target_pid != -1:
             target = self.get_entity(target_pid)
@@ -380,11 +403,11 @@ cdef class Environment:
             dest_x = target.x
 
             if l2_distance(creep.y, creep.x, dest_y, dest_x) < 2:
-                self.attack(pid, target_pid, 2)
+                self.attack(creep, target, 2)
 
-            self.creep_path(pid, dest_y, dest_x)
+            self.creep_path(creep, dest_y, dest_x)
         else:
-            self.creep_path(pid, dest_y, dest_x)
+            self.creep_path(creep, dest_y, dest_x)
 
             if l2_distance(creep.y, creep.x, dest_y, dest_x) < 2:
                 creep.waypoint += 1
@@ -411,17 +434,17 @@ cdef class Environment:
         creep.lane = lane
         creep.waypoint = 0
 
-        self.respawn(creep.pid)
+        self.respawn(creep)
 
     cdef void spawn_creep_wave(self):
+        cdef int lane, creep
         for lane in range(6):
             for creep in range(5):
                 self.spawn_creep(self.creep_idx, lane)
                 self.creep_idx = (self.creep_idx + 1) % self.num_creeps
 
-    cdef void respawn(self, int pid):
+    cdef void respawn(self, Entity* entity):
         cdef:
-            Entity* entity = self.get_entity(pid)
             bint valid_pos = False
             int spawn_y
             int spawn_x
@@ -448,18 +471,11 @@ cdef class Environment:
                 valid_pos = True
                 break
 
-        self.move_to(pid, spawn_y, spawn_x)
+        self.move_to(entity, spawn_y, spawn_x)
         entity.health = entity.max_health
         entity.mana = entity.max_mana
 
-    cdef void attack(self, int pid, int target_pid, float damage):
-        if target_pid == -1:
-            return
-
-        cdef:
-            Entity* player = self.get_entity(pid)
-            Entity* target = self.get_entity(target_pid)
-
+    cdef void attack(self, Entity* player, Entity* target, float damage):
         if target.team == player.team:
             return
 
@@ -468,44 +484,145 @@ cdef class Environment:
             return
 
         if target.type == ENTITY_PLAYER:
-            self.respawn(target_pid)
+            self.respawn(target)
         elif target.type == ENTITY_TOWER or target.type == ENTITY_CREEP:
-            self.kill(target_pid)
+            self.kill(target)
 
-    cdef void skill_attack(self, int pid, int target_pid):
-        if target_pid == -1:
+    cdef void heal(self, Entity* player, Entity* target, float amount):
+        if target.team != player.team:
             return
 
-        cdef:
-            Entity* player
-            Entity* target
-            int y
-            int x
-            int dy
-            int dx
+        target.health += amount
+        if target.health > target.max_health:
+            target.health = target.max_health
 
-        player = self.get_entity(pid)
+    cdef void aoe(self, Entity* player, Entity* target, int radius, float damage):
+        cdef int y, x, dy, dx, target_pid
 
-        if player.mana < player.max_mana:
-            return
-
-        player.mana = 0
-        target = self.get_entity(target_pid)
+        # Must be centered on player
         y = int(target.y)
         x = int(target.x)
 
-        for dy in range(-3, 4):
-            for dx in range(-3, 4):
+        for dy in range(-radius, radius+1):
+            for dx in range(-radius, radius+1):
                 target_pid = self.pid_map[y + dy, x + dx]
-                self.attack(pid, target_pid, 200)
+                if target_pid == -1:
+                    continue
 
-    cdef void skill_heal(self, int pid):
-        cdef Entity* player = self.get_entity(pid)
+                target = self.get_entity(target_pid)
+                if damage > 0:
+                    self.attack(player, target, damage)
+                else:
+                    self.heal(player, target, damage)
+
+    cdef void push(self, Entity* player, Entity* target, float amount):
+        cdef:
+            float dx = target.x - player.x
+            float dy = target.y - player.y
+            float dist = l2_distance(target.x, target.y, player.x, player.y)
+            int valid_move
+
+        # Norm to unit vector
+        dx /= dist
+        dy /= dist
+
+        while amount > 1.0:
+            valid_move = self.move_to(target, target.y + dy, target.x + dx)
+            amount -= 1.0
+
+            if valid_move == -1:
+                break
+
+        self.move_to(target, target.y + amount*dy, target.x + amount*dx)
+
+    cdef void pull(self, Entity* player, Entity* target, float amount):
+        self.push(target, player, -amount)
+
+    cdef void update_status(self, Entity* entity):
+        if entity.stun_timer > 0:
+            entity.stun_timer -= 1
+
+        if entity.move_timer > 0:
+            entity.move_timer -= 1
+
+        if entity.move_timer == 0:
+            entity.move_modifier = 1.0
+
+    cdef void skill_attack(self, Entity* player, Entity* target):
+        if player.mana < player.max_mana:
+            return
+
+        self.aoe(player, target, 2, 200)
+        player.mana = 0
+
+    cdef void skill_heal(self, Entity* player):
         if player.mana < player.max_mana:
             return
 
         player.health = player.max_health
         player.mana = 0
+
+    cdef void skill_support_hook(self, Entity* player, Entity* target):
+        self.pull(player, target, 6.0)
+
+    cdef void skill_support_aoe_heal(self, Entity* player, Entity* target):
+        self.aoe(player, player, 4, 200)
+
+    cdef void skill_support_stun(self, Entity* player, Entity* target):
+        self.attack(player, target, 50)
+        target.stun_timer = 10
+
+    cdef void skill_burst_nuke(self, Entity* player, Entity* target):
+        self.attack(player, target, 500)
+
+    cdef void skill_burst_aoe(self, Entity* player, Entity* target):
+        self.aoe(player, target, 2, 200)
+
+    cdef void skill_burst_aoe_stun(self, Entity* player, Entity* target):
+        # TODO: add stun to aoe
+        self.aoe(player, target, 2, 0)#, stun=10)
+
+    cdef void skill_tank_aoe_dot(self, Entity* player, Entity* target):
+        # TODO: add mana
+        self.aoe(player, player, 2, 10)
+
+    cdef void skill_tank_self_heal(self, Entity* player, Entity* target):
+        self.heal(player, player, 250)
+
+    cdef void skill_tank_engage_dot(self, Entity* player, Entity* target):
+        self.move_near(player, target)
+        self.attack(player, target, 50)
+
+    cdef void skill_carry_retreat_slow(self, Entity* player, Entity* target):
+        self.push(target, player, 4.0)
+        target.move_timer = 15
+        target.move_modifier = 0.6
+
+    cdef void skill_carry_slow_damage(self, Entity* player, Entity* target):
+        self.attack(player, target, 100)
+        target.move_timer = 10
+        target.move_modifier = 0.7
+
+    cdef void skill_carry_aoe(self, Entity* player, Entity* target):
+        self.aoe(player, target, 2, 200)
+
+    cdef void skill_assassin_aoe_minions(self, Entity* player, Entity* target):
+        if target.type != ENTITY_CREEP:
+            return
+
+        # Targeted on minions, splashes to players
+        self.aoe(player, target, 3, 300)
+
+    cdef void skill_assassin_tp_damage(self, Entity* player, Entity* target):
+        if self.move_near(player, target) == -1:
+            return
+
+        self.attack(player, target, 600)
+
+    cdef void skill_assassin_move_buff(self, Entity* player, Entity* target):
+        player.move_modifier = 1.5
+        player.move_timer = 10
+
 
     def step(self, np_actions):
         cdef:
@@ -524,6 +641,7 @@ cdef class Environment:
             Entity* player
             Entity* target
             Entity* tower
+            Entity* creep
             int pid
             int target_pid
             float damage
@@ -532,83 +650,73 @@ cdef class Environment:
             bint use_skill_attack
             bint use_skill_heal
 
-        if self.tick % 1200 == 0:
-            self.spawn_creep_wave()
-
-        for pid in range(self.num_agents + self.num_towers,
-                self.num_agents + self.num_towers + self.num_creeps):
-            self.creep_ai(pid)
-
         if self.discretize:
             actions_discrete = np_actions
         else:
             actions_continuous = np_actions
 
-        # Tower attacks
-        for tower_idx in range(self.num_towers):
-            tower = self.get_tower(tower_idx)
-            if tower.health <= 0:
+        # Creep AI
+        if self.tick % 1200 == 0:
+            self.spawn_creep_wave()
+
+        for idx in range(self.num_creeps):
+            creep = self.get_creep(idx)
+            if creep.pid == -1:
                 continue
 
-            damage = tower.damage
-            y = tower.y
-            x = tower.x
+            if creep.stun_timer > 0:
+                continue
 
-            for dy in range(-TOWER_VISION, TOWER_VISION+1):
-                disc_y = int(y) + dy
-                for dx in range(-TOWER_VISION, TOWER_VISION+1):
-                    disc_x = int(x) + dx
-                    pid = self.pid_map[disc_y, disc_x]
-                    if pid == -1:
-                        continue
+            self.update_status(creep)
+            self.creep_ai(creep)
 
-                    target = self.get_entity(pid)
-                    if target.type == ENTITY_TOWER:
-                        continue
+        # Tower AI
+        for tower_idx in range(self.num_towers):
+            tower = self.get_tower(tower_idx)
+            if tower.pid == -1:
+                continue
 
-                    self.attack(tower.pid, pid, damage)
+            self.aoe(tower, tower, TOWER_VISION, tower.damage)
 
-        # Players
+        # Player Logic
         for pid in range(self.num_agents):
             player = self.get_entity(pid)
-            y = player.y
-            x = player.x
 
             if player.mana < player.max_mana:
                 player.mana += 1
 
+            if player.stun_timer > 0:
+                continue
+
+            self.update_status(player)
+
             # Attacks
             if self.discretize:
+                # Convert [0, 1, 2] to [-1, 0, 1]
+                vel_y = float(actions_discrete[pid, 0]) - 1.0
+                vel_x = float(actions_discrete[pid, 1]) - 1.0
                 attack = actions_discrete[pid, 2]
                 use_skill_attack = actions_discrete[pid, 3]
                 use_skill_heal = actions_discrete[pid, 4]
             else:
+                vel_y = actions_continuous[pid, 0]
+                vel_x = actions_continuous[pid, 1]
                 attack = int(actions_continuous[pid, 2])
                 use_skill_attack = int(actions_continuous[pid, 3]) > 0.5
                 use_skill_heal = int(actions_continuous[pid, 4]) > 0.5
 
             target = self.get_player_ob(pid, attack)
-            target_pid = target.pid
 
             if use_skill_attack:
-                self.skill_attack(pid, target_pid)
+                self.skill_attack(player, target)
             elif use_skill_heal:
-                self.skill_heal(pid)
+                self.skill_heal(player)
             else:
-                self.attack(pid, target_pid, 5)
+                self.attack(player, target, 5)
 
-            if self.discretize:
-                # Convert [0, 1, 2] to [-1, 0, 1]
-                vel_y = float(actions_discrete[pid, 0]) - 1.0
-                vel_x = float(actions_discrete[pid, 1]) - 1.0
-            else:
-                vel_y = actions_continuous[pid, 0]
-                vel_x = actions_continuous[pid, 1]
-
-            dest_y = y + self.agent_speed * vel_y
-            dest_x = x + self.agent_speed * vel_x
-
-            self.move_to(pid, dest_y, dest_x)
+            dest_y = player.y + player.move_modifier*self.agent_speed*vel_y
+            dest_x = player.x + player.move_modifier*self.agent_speed*vel_x
+            self.move_to(player, dest_y, dest_x)
 
         self.tick += 1
         self.compute_observations()

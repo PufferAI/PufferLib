@@ -241,6 +241,9 @@ class RaylibClient:
         rl = self.rl
         colors = self.colors
         ay, ax = None, None
+
+        if rl.IsKeyDown(rl.KEY_ESCAPE):
+            exit(0)
         if rl.IsKeyDown(rl.KEY_UP) or rl.IsKeyDown(rl.KEY_W):
             ay = 0 if discretize else -1
         if rl.IsKeyDown(rl.KEY_DOWN) or rl.IsKeyDown(rl.KEY_S):
