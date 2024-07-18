@@ -314,8 +314,8 @@ class RaylibClient:
                 if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
                     continue
 
-                if pids[y, x] != -1:
-                    rl.DrawRectangle(x*ts, y*ts, ts, ts, [0, 0, 255, 128])
+                #if pids[y, x] != -1:
+                #    rl.DrawRectangle(x*ts, y*ts, ts, ts, [0, 0, 255, 128])
  
                 tile = grid[y, x]
                 if tile == 0:
@@ -333,7 +333,7 @@ class RaylibClient:
                 tx = int(entity.x * ts)
                 ty = int(entity.y * ts)
 
-                draw_healthbar(rl, entity, tx, ty, ts)
+                draw_bars(rl, entity, tx, ty, ts)
 
                 #atn = actions[idx]
                 source_rect = self.asset_map[tile]
@@ -344,16 +344,21 @@ class RaylibClient:
                     (0, 0), 0, colors.WHITE)
 
         # Draw circle at mouse x, y
-        rl.DrawCircle(ts*mouse_x + ts//2, ts*mouse_y + ts//2, ts//2, [255, 0, 0, 255])
+        rl.DrawCircle(ts*mouse_x + ts//2, ts*mouse_y + ts//4, ts//4, [255, 0, 0, 255])
 
         rl.EndMode2D()
         rl.EndDrawing()
         return self._cdata_to_numpy(), action
 
-def draw_healthbar(rl, entity, x, y, ts):
+def draw_bars(rl, entity, x, y, ts):
     health_bar = entity.health / entity.max_health
+    mana_bar = entity.mana / entity.max_mana
     rl.DrawRectangle(x, y - 8, ts, 4, [255, 0, 0, 255])
     rl.DrawRectangle(x, y - 8, int(ts*health_bar), 4, [0, 255, 0, 255])
+
+    if entity.type == 0:
+        rl.DrawRectangle(x, y - 14, ts, 4, [255, 0, 0, 255])
+        rl.DrawRectangle(x, y - 14, int(ts*mana_bar), 4, [0, 255, 255, 255])
 
 def test_puffer_performance(timeout):
     import time

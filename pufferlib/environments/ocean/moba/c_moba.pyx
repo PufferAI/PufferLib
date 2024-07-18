@@ -39,6 +39,8 @@ cdef struct Entity:
     int type
     float health
     float max_health
+    float mana
+    float max_mana
     float y
     float x
     float spawn_y
@@ -211,16 +213,16 @@ cdef class Environment:
         tower.team = team
 
         if tier == 1:
-            tower.health = 5
-            tower.max_health = 5
-            tower.damage = 1
-        elif tier == 2:
-            tower.health = 15
-            tower.max_health = 15
+            tower.health = 1800
+            tower.max_health = 1800
             tower.damage = 3
+        elif tier == 2:
+            tower.health = 2500
+            tower.max_health = 2500
+            tower.damage = 7
         elif tier == 3:
-            tower.health = 50
-            tower.max_health = 50
+            tower.health = 2500
+            tower.max_health = 2500
             tower.damage = 10
         else:
             raise ValueError('Invalid tier')
@@ -240,18 +242,14 @@ cdef class Environment:
             player = self.get_entity(pid)
             player.pid = pid
             player.type = ENTITY_PLAYER
-            player.health = 100
-            player.max_health = 100
+            player.max_health = 500
+            player.max_mana = 100
             if pid < self.num_agents//2:
                 player.team = 0
-                player.spawn_y = 62 + pid
-                player.spawn_x = 62
             else:
                 player.team = 1
-                player.spawn_y = 62 + pid
-                player.spawn_x = 66
 
-            self.move_to(pid, player.spawn_y, player.spawn_x)
+            self.respawn(pid)
 
         self.spawn_tower(0, 0, 1, 43, 25)
         self.spawn_tower(1, 0, 1, 74, 55)
@@ -382,7 +380,7 @@ cdef class Environment:
             dest_x = target.x
 
             if l2_distance(creep.y, creep.x, dest_y, dest_x) < 2:
-                self.attack(pid, target_pid, 5)
+                self.attack(pid, target_pid, 2)
 
             self.creep_path(pid, dest_y, dest_x)
         else:
@@ -398,13 +396,6 @@ cdef class Environment:
         cdef:
             int pid = idx + self.num_agents + self.num_towers
             Entity* creep = self.get_entity(pid)
-            bint valid_pos = False
-            int spawn_y
-            int spawn_x
-            int min_y
-            int max_y
-            int min_x
-            int max_x
             int team 
 
         if lane < 3:
@@ -414,13 +405,32 @@ cdef class Environment:
 
         creep.pid = pid
         creep.type = ENTITY_CREEP
-        creep.health = 100
-        creep.max_health = 100
+        creep.health = 200
+        creep.max_health = 200
         creep.team = team
         creep.lane = lane
         creep.waypoint = 0
 
-        if team == 0:
+        self.respawn(creep.pid)
+
+    cdef void spawn_creep_wave(self):
+        for lane in range(6):
+            for creep in range(5):
+                self.spawn_creep(self.creep_idx, lane)
+                self.creep_idx = (self.creep_idx + 1) % self.num_creeps
+
+    cdef void respawn(self, int pid):
+        cdef:
+            Entity* entity = self.get_entity(pid)
+            bint valid_pos = False
+            int spawn_y
+            int spawn_x
+            int min_y
+            int max_y
+            int min_x
+            int max_x
+
+        if entity.team == 0:
             min_y = 128-30
             max_y = 128-22
             min_x = 22
@@ -438,18 +448,9 @@ cdef class Environment:
                 valid_pos = True
                 break
 
-        self.move_to(creep.pid, spawn_y, spawn_x)
-
-    cdef void spawn_creep_wave(self):
-        for lane in range(6):
-            for creep in range(3):
-                self.spawn_creep(self.creep_idx, lane)
-                self.creep_idx = (self.creep_idx + 1) % self.num_creeps
-
-    cdef void respawn(self, int pid):
-        cdef Entity* player = self.get_entity(pid)
-        self.move_to(pid, player.spawn_y, player.spawn_x)
-        player.health = player.max_health
+        self.move_to(pid, spawn_y, spawn_x)
+        entity.health = entity.max_health
+        entity.mana = entity.max_mana
 
     cdef void attack(self, int pid, int target_pid, float damage):
         if target_pid == -1:
@@ -476,12 +477,19 @@ cdef class Environment:
             return
 
         cdef:
+            Entity* player
             Entity* target
             int y
             int x
             int dy
             int dx
-        
+
+        player = self.get_entity(pid)
+
+        if player.mana < player.max_mana:
+            return
+
+        player.mana = 0
         target = self.get_entity(target_pid)
         y = int(target.y)
         x = int(target.x)
@@ -489,11 +497,15 @@ cdef class Environment:
         for dy in range(-3, 4):
             for dx in range(-3, 4):
                 target_pid = self.pid_map[y + dy, x + dx]
-                self.attack(pid, target_pid, 30)
+                self.attack(pid, target_pid, 200)
 
     cdef void skill_heal(self, int pid):
         cdef Entity* player = self.get_entity(pid)
+        if player.mana < player.max_mana:
+            return
+
         player.health = player.max_health
+        player.mana = 0
 
     def step(self, np_actions):
         cdef:
@@ -562,6 +574,9 @@ cdef class Environment:
             y = player.y
             x = player.x
 
+            if player.mana < player.max_mana:
+                player.mana += 1
+
             # Attacks
             if self.discretize:
                 attack = actions_discrete[pid, 2]
@@ -580,7 +595,7 @@ cdef class Environment:
             elif use_skill_heal:
                 self.skill_heal(pid)
             else:
-                self.attack(pid, target_pid, 1)
+                self.attack(pid, target_pid, 5)
 
             if self.discretize:
                 # Convert [0, 1, 2] to [-1, 0, 1]
