@@ -44,7 +44,7 @@ class PufferMoba(pufferlib.PufferEnv):
         self.width = 128
         self.num_agents = 10
         self.num_towers = 18
-        self.num_creeps = 12
+        self.num_creeps = 100
         self.vision_range = vision_range
         self.agent_speed = agent_speed
         self.discretize = discretize
@@ -64,8 +64,10 @@ class PufferMoba(pufferlib.PufferEnv):
         self.pids = np.zeros((self.height, self.width), dtype=np.int32) - 1
 
         dtype = entity_dtype()
-        self.c_entities = np.zeros(self.num_agents + self.num_towers, dtype=dtype)
+        self.c_entities = np.zeros(
+            self.num_agents + self.num_towers + self.num_creeps, dtype=dtype)
         self.entities = self.c_entities.view(np.recarray)
+        self.entities.pid = -1
         self.c_obs_players = np.zeros((self.num_agents, 10), dtype=dtype)
         self.obs_players = self.c_obs_players.view(np.recarray)
 
@@ -116,11 +118,16 @@ class PufferMoba(pufferlib.PufferEnv):
         self.done = True
         self.infos = {}
 
-    def render(self):
+    def render(self, upscale=4):
         grid = self.grid
         if self.render_mode == 'rgb_array':
             v = self.vision_range
             frame = COLORS[grid[v:-v-1, v:-v-1]]
+
+            if upscale > 1:
+                rescaler = np.ones((upscale, upscale, 1), dtype=np.uint8)
+                frame = np.kron(frame, rescaler)
+
             return frame
 
         frame, self.human_action = self.client.render(
