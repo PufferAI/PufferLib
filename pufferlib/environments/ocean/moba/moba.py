@@ -382,8 +382,9 @@ class RaylibClient:
         rl.EndMode2D()
 
         # Draw HUD
+        player = entities[0]
         hud_y = self.height*ts - 2*ts
-        draw_bars(rl, entities[0], 2*ts, hud_y, 10*ts, 24, draw_text=True)
+        draw_bars(rl, player, 2*ts, hud_y, 10*ts, 24, draw_text=True)
 
         off_color = [255, 255, 255, 255]
         on_color = [0, 255, 0, 255]
@@ -392,13 +393,15 @@ class RaylibClient:
         w_color = on_color if skill_w else off_color
         e_color = on_color if skill_e else off_color
 
-        q_cd = entity.q_timer
-        w_cd = entity.w_timer
-        e_cd = entity.e_timer
+        q_cd = player.q_timer
+        w_cd = player.w_timer
+        e_cd = player.e_timer
 
         rl.DrawText(f'Q: {q_cd}'.encode(), 13*ts, hud_y - 20, 40, q_color)
         rl.DrawText(f'W: {w_cd}'.encode(), 17*ts, hud_y - 20, 40, w_color)
         rl.DrawText(f'E: {e_cd}'.encode(), 21*ts, hud_y - 20, 40, e_color)
+        rl.DrawText(f'Stun: {player.stun_timer}'.encode(), 25*ts, hud_y - 20, 20, e_color)
+        rl.DrawText(f'Move: {player.move_timer}'.encode(), 25*ts, hud_y, 20, e_color)
 
         rl.EndDrawing()
         return self._cdata_to_numpy(), action
