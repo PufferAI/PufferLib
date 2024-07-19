@@ -102,13 +102,13 @@ class PufferMoba(pufferlib.PufferEnv):
             shape=(self.obs_size*self.obs_size+3,), dtype=np.uint8)
 
         if discretize:
-            self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 10, 2, 2])
+            self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 10, 2, 2, 2])
         else:
             finfo = np.finfo(np.float32)
             self.action_space = gymnasium.spaces.Box(
                 low=finfo.min,
                 high=finfo.max,
-                shape=(5,),
+                shape=(6,),
                 dtype=np.float32
             )
 
@@ -175,8 +175,8 @@ class PufferMoba(pufferlib.PufferEnv):
             actions = actions.astype(np.uint32)
         else:
             actions = np.clip(actions,
-                np.array([-1, -1, 0, 0, 0]),
-                np.array([1, 1, 10, 1, 1])
+                np.array([-1, -1, 0, 0, 0, 0]),
+                np.array([1, 1, 10, 1, 1, 1])
             ).astype(np.float32)
 
         self.buf.rewards.fill(0)
@@ -253,12 +253,15 @@ class RaylibClient:
         if rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
             ax = 2 if discretize else 1
 
-        skill_attack = 0
-        skill_heal = 0
+        skill_q = 0
+        skill_w = 0
+        skill_e = 0
         if rl.IsKeyDown(rl.KEY_Q):
-            skill_attack = 1
+            skill_q = 1
         if rl.IsKeyDown(rl.KEY_W):
-            skill_heal = 1
+            skill_w = 1
+        if rl.IsKeyDown(rl.KEY_E):
+            skill_e = 1
 
         ts = self.tile_size
         main_r = entities[0].y
@@ -284,16 +287,40 @@ class RaylibClient:
         ax = np.clip((pos.x - ts*self.width//2) / 200, -1, 1)
         #print(f'Mouse: {pos.x}, {pos.y}, Target: {ts*mouse_x}, {ts*mouse_y}, Action: {ay}, {ax}')
 
-        target_pid = pids[mouse_y, mouse_x]
-        #print(f'Mouse: {mouse_x}, {mouse_y}, Target: {target_pid}')
+        best_target = None
+        for yy in range(mouse_y - 3, mouse_y + 4):
+            for xx in range(mouse_x - 3, mouse_x + 4):
+                target_pid = pids[yy, xx]
+                if target_pid == -1:
+                    continue
+
+                if target_pid == 0:
+                    continue
+                
+                target = entities[target_pid]
+                assert target.pid != -1
+
+                if best_target is None:
+                    best_target = target
+                    continue
+
+                dist_to_target = np.sqrt(
+                    (target.x - raw_mouse_x)**2 + (target.y - raw_mouse_y)**2)
+
+                dist_to_best_target = np.sqrt(
+                    (best_target.x - raw_mouse_x)**2 + (best_target.y - raw_mouse_y)**2)
+
+                if dist_to_target < dist_to_best_target:
+                    best_target = target
+                    
         attack = 0
-        if target_pid == -1:
-            attack = 0
+        if best_target is None:
+            target_pid = -1
         else:
-            target = entities[target_pid]
             for i in range(10):
-                if obs_players[0, i].pid == target_pid:
+                if obs_players[0, i].pid == best_target.pid:
                     attack = i
+                    #print(f'Setting attack to {i}, which is pid {best_target.pid}')
                     break
 
         if ax is None and ay is None:
@@ -304,7 +331,7 @@ class RaylibClient:
             if ay is None:
                 ay = 1 if discretize else 0
 
-            action = (ay, ax, attack, skill_attack, skill_heal)
+            action = (ay, ax, attack, skill_q, skill_w, skill_e)
 
         #print(f'Action: {action}')
 
@@ -317,9 +344,6 @@ class RaylibClient:
                 if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
                     continue
 
-                #if pids[y, x] != -1:
-                #    rl.DrawRectangle(x*ts, y*ts, ts, ts, [0, 0, 255, 128])
- 
                 tile = grid[y, x]
                 if tile == 0:
                     continue
@@ -328,15 +352,18 @@ class RaylibClient:
                     continue
             
                 pid = pids[y, x]
+
                 if pid == -1:
                    raise ValueError('Invalid pid')
 
                 entity = entities[pid]
-
+                if entity.is_hit:
+                    rl.DrawRectangle(x*ts, y*ts, ts, ts, [255, 0, 0, 128])
+ 
                 tx = int(entity.x * ts)
                 ty = int(entity.y * ts)
 
-                draw_bars(rl, entity, tx, ty, ts)
+                draw_bars(rl, entity, tx, ty-8, ts)
 
                 #atn = actions[idx]
                 source_rect = self.asset_map[tile]
@@ -346,22 +373,56 @@ class RaylibClient:
                 rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
                     (0, 0), 0, colors.WHITE)
 
+                if entity.pid == target_pid:
+                    rl.DrawCircle(x*ts + ts//2, y*ts + ts//2, ts//4, [0, 255, 0, 255])
+
         # Draw circle at mouse x, y
-        rl.DrawCircle(ts*mouse_x + ts//2, ts*mouse_y + ts//4, ts//4, [255, 0, 0, 255])
+        rl.DrawCircle(ts*mouse_x + ts//2, ts*mouse_y + ts//8, ts//8, [255, 0, 0, 255])
 
         rl.EndMode2D()
+
+        # Draw HUD
+        hud_y = self.height*ts - 2*ts
+        draw_bars(rl, entities[0], 2*ts, hud_y, 10*ts, 24, draw_text=True)
+
+        off_color = [255, 255, 255, 255]
+        on_color = [0, 255, 0, 255]
+
+        q_color = on_color if skill_q else off_color
+        w_color = on_color if skill_w else off_color
+        e_color = on_color if skill_e else off_color
+
+        q_cd = entity.q_timer
+        w_cd = entity.w_timer
+        e_cd = entity.e_timer
+
+        rl.DrawText(f'Q: {q_cd}'.encode(), 13*ts, hud_y - 20, 40, q_color)
+        rl.DrawText(f'W: {w_cd}'.encode(), 17*ts, hud_y - 20, 40, w_color)
+        rl.DrawText(f'E: {e_cd}'.encode(), 21*ts, hud_y - 20, 40, e_color)
+
         rl.EndDrawing()
         return self._cdata_to_numpy(), action
 
-def draw_bars(rl, entity, x, y, ts):
+def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
     health_bar = entity.health / entity.max_health
     mana_bar = entity.mana / entity.max_mana
-    rl.DrawRectangle(x, y - 8, ts, 4, [255, 0, 0, 255])
-    rl.DrawRectangle(x, y - 8, int(ts*health_bar), 4, [0, 255, 0, 255])
+    rl.DrawRectangle(x, y, width, height, [255, 0, 0, 255])
+    rl.DrawRectangle(x, y, int(width*health_bar), height, [0, 255, 0, 255])
 
     if entity.type == 0:
-        rl.DrawRectangle(x, y - 14, ts, 4, [255, 0, 0, 255])
-        rl.DrawRectangle(x, y - 14, int(ts*mana_bar), 4, [0, 255, 255, 255])
+        rl.DrawRectangle(x, y - height - 2, width, height, [255, 0, 0, 255])
+        rl.DrawRectangle(x, y - height - 2, int(width*mana_bar), height, [0, 255, 255, 255])
+
+    if draw_text:
+        health = int(entity.health)
+        mana = int(entity.mana)
+        max_health = int(entity.max_health)
+        max_mana = int(entity.max_mana)
+        rl.DrawText(f'Health: {health}/{max_health}'.encode(),
+            x+8, y+2, 20, [255, 255, 255, 255])
+        rl.DrawText(f'Mana: {mana}/{max_mana}'.encode(),
+            x+8, y+2 - height - 2, 20, [255, 255, 255, 255])
+
 
 def test_puffer_performance(timeout):
     import time

@@ -52,6 +52,10 @@ cdef struct Entity:
     float move_modifier
     int stun_timer
     int move_timer
+    int q_timer
+    int w_timer
+    int e_timer
+    bint is_hit
 
 cpdef entity_dtype():
     '''Make a dummy entity to get the dtype'''
@@ -476,9 +480,13 @@ cdef class Environment:
         entity.mana = entity.max_mana
 
     cdef void attack(self, Entity* player, Entity* target, float damage):
+        if target.pid == -1:
+            return
+
         if target.team == player.team:
             return
 
+        target.is_hit = True
         target.health -= damage
         if target.health > 0:
             return
@@ -489,6 +497,9 @@ cdef class Environment:
             self.kill(target)
 
     cdef void heal(self, Entity* player, Entity* target, float amount):
+        if target.pid == -1:
+            return
+
         if target.team != player.team:
             return
 
@@ -513,7 +524,7 @@ cdef class Environment:
                 if damage > 0:
                     self.attack(player, target, damage)
                 else:
-                    self.heal(player, target, damage)
+                    self.heal(player, target, -damage)
 
     cdef void push(self, Entity* player, Entity* target, float amount):
         cdef:
@@ -521,6 +532,9 @@ cdef class Environment:
             float dy = target.y - player.y
             float dist = l2_distance(target.x, target.y, player.x, player.y)
             int valid_move
+
+        if dist == 0.0:
+            return
 
         # Norm to unit vector
         dx /= dist
@@ -531,9 +545,10 @@ cdef class Environment:
             amount -= 1.0
 
             if valid_move == -1:
-                break
+                return
 
-        self.move_to(target, target.y + amount*dy, target.x + amount*dx)
+        if amount > 0.05:
+            self.move_to(target, target.y + amount*dy, target.x + amount*dx)
 
     cdef void pull(self, Entity* player, Entity* target, float amount):
         self.push(target, player, -amount)
@@ -548,81 +563,181 @@ cdef class Environment:
         if entity.move_timer == 0:
             entity.move_modifier = 1.0
 
-    cdef void skill_attack(self, Entity* player, Entity* target):
-        if player.mana < player.max_mana:
-            return
+    cdef void update_cooldowns(self, Entity* entity):
+        if entity.q_timer > 0:
+            entity.q_timer -= 1
 
-        self.aoe(player, target, 2, 200)
-        player.mana = 0
+        if entity.w_timer > 0:
+            entity.w_timer -= 1
 
-    cdef void skill_heal(self, Entity* player):
-        if player.mana < player.max_mana:
-            return
-
-        player.health = player.max_health
-        player.mana = 0
+        if entity.e_timer > 0:
+            entity.e_timer -= 1
 
     cdef void skill_support_hook(self, Entity* player, Entity* target):
-        self.pull(player, target, 6.0)
+        if player.mana < 15:
+            return
+
+        self.pull(player, target, 1.0)
+        player.mana -= 15
 
     cdef void skill_support_aoe_heal(self, Entity* player, Entity* target):
-        self.aoe(player, player, 4, 200)
+        self.aoe(player, player, 4, -200)
 
     cdef void skill_support_stun(self, Entity* player, Entity* target):
+        if target.pid == -1:
+            return
+
+        if player.mana < 60:
+            return
+
         self.attack(player, target, 50)
-        target.stun_timer = 10
+        target.stun_timer = 15
+
+        player.mana -= 60
+        player.e_timer = 50
 
     cdef void skill_burst_nuke(self, Entity* player, Entity* target):
+        if target.pid == -1:
+            return
+
+        if player.mana < 60:
+            return
+
         self.attack(player, target, 500)
 
+        player.mana -= 60
+        player.q_timer = 70
+
     cdef void skill_burst_aoe(self, Entity* player, Entity* target):
+        if target.pid == -1:
+            return
+
+        if player.mana < 40:
+            return
+
         self.aoe(player, target, 2, 200)
 
+        player.mana -= 40
+        player.w_timer = 40
+
     cdef void skill_burst_aoe_stun(self, Entity* player, Entity* target):
-        # TODO: add stun to aoe
-        self.aoe(player, target, 2, 0)#, stun=10)
+        if target.pid == -1:
+            return
+        
+        if player.mana < 60:
+            return
+
+        self.aoe(player, target, 2, 0)
+
+        player.mana -= 60
+        player.e_timer = 80
 
     cdef void skill_tank_aoe_dot(self, Entity* player, Entity* target):
-        # TODO: add mana
-        self.aoe(player, player, 2, 10)
+        if player.mana < 5:
+            return
+
+        self.aoe(player, player, 2, 20)
+        player.mana -= 5
 
     cdef void skill_tank_self_heal(self, Entity* player, Entity* target):
+        if player.mana < 30:
+            return
+
         self.heal(player, player, 250)
+        player.mana -= 30
+        player.w_timer = 60
 
     cdef void skill_tank_engage_dot(self, Entity* player, Entity* target):
-        self.move_near(player, target)
+        if target.pid == -1:
+            return
+
+        if player.mana < 60:
+            return
+
+        if self.move_near(player, target) == -1:
+            return
+
         self.attack(player, target, 50)
+        player.mana -= 60
+        player.e_timer = 70
 
     cdef void skill_carry_retreat_slow(self, Entity* player, Entity* target):
-        self.push(target, player, 4.0)
+        if target.pid == -1:
+            return
+
+        if player.mana < 5:
+            return
+
+        self.push(target, player, 1.0)
         target.move_timer = 15
         target.move_modifier = 0.6
 
+        player.mana -= 5
+
     cdef void skill_carry_slow_damage(self, Entity* player, Entity* target):
+        if target.pid == -1:
+            return
+        
+        if player.mana < 40:
+            return
+
         self.attack(player, target, 100)
         target.move_timer = 10
         target.move_modifier = 0.7
 
+        player.mana -= 40
+        player.w_timer = 40
+
     cdef void skill_carry_aoe(self, Entity* player, Entity* target):
+        if target.pid == -1:
+            return
+
+        if player.mana < 40:
+            return
+
         self.aoe(player, target, 2, 200)
+        
+        player.mana -= 40
+        player.e_timer = 40
 
     cdef void skill_assassin_aoe_minions(self, Entity* player, Entity* target):
+        if target.pid == -1:
+            return
+
         if target.type != ENTITY_CREEP:
+            return
+
+        if player.mana < 40:
             return
 
         # Targeted on minions, splashes to players
         self.aoe(player, target, 3, 300)
 
+        player.mana -= 40
+        player.q_timer = 40
+
     cdef void skill_assassin_tp_damage(self, Entity* player, Entity* target):
+        if target.pid == -1:
+            return
+
+        if player.mana < 60:
+            return
+
         if self.move_near(player, target) == -1:
             return
 
         self.attack(player, target, 600)
 
-    cdef void skill_assassin_move_buff(self, Entity* player, Entity* target):
-        player.move_modifier = 1.5
-        player.move_timer = 10
+        player.mana -= 60
+        player.w_timer = 60
 
+    cdef void skill_assassin_move_buff(self, Entity* player, Entity* target):
+        if player.mana < 5:
+            return
+
+        player.move_modifier = 2.0
+        player.move_timer = 2
+        player.mana -= 5
 
     def step(self, np_actions):
         cdef:
@@ -647,8 +762,13 @@ cdef class Environment:
             float damage
             int dy
             int dx
-            bint use_skill_attack
-            bint use_skill_heal
+            bint use_q
+            bint use_w
+            bint use_e
+
+        for pid in range(self.num_agents + self.num_towers + self.num_creeps):
+            player = self.get_entity(pid)
+            player.is_hit = False
 
         if self.discretize:
             actions_discrete = np_actions
@@ -689,6 +809,7 @@ cdef class Environment:
                 continue
 
             self.update_status(player)
+            self.update_cooldowns(player)
 
             # Attacks
             if self.discretize:
@@ -696,23 +817,69 @@ cdef class Environment:
                 vel_y = float(actions_discrete[pid, 0]) - 1.0
                 vel_x = float(actions_discrete[pid, 1]) - 1.0
                 attack = actions_discrete[pid, 2]
-                use_skill_attack = actions_discrete[pid, 3]
-                use_skill_heal = actions_discrete[pid, 4]
+                use_q = actions_discrete[pid, 3]
+                use_w = actions_discrete[pid, 4]
+                use_e = actions_discrete[pid, 5]
             else:
                 vel_y = actions_continuous[pid, 0]
                 vel_x = actions_continuous[pid, 1]
                 attack = int(actions_continuous[pid, 2])
-                use_skill_attack = int(actions_continuous[pid, 3]) > 0.5
-                use_skill_heal = int(actions_continuous[pid, 4]) > 0.5
+                use_q = int(actions_continuous[pid, 3]) > 0.5
+                use_w = int(actions_continuous[pid, 4]) > 0.5
+                use_e = int(actions_continuous[pid, 5]) > 0.5
 
+            # This is a copy. Have to get the real one
             target = self.get_player_ob(pid, attack)
+            target = self.get_entity(target.pid)
 
-            if use_skill_attack:
-                self.skill_attack(player, target)
-            elif use_skill_heal:
-                self.skill_heal(player)
-            else:
-                self.attack(player, target, 5)
+            if player.pid == 0 or player.pid == 5:
+                if use_q:
+                    #self.skill_carry_retreat_slow(player, target)
+                    #self.skill_support_hook(player, target)
+                    self.skill_assassin_tp_damage(player, target)
+                elif use_w:
+                    self.skill_support_aoe_heal(player, target)
+                elif use_e:
+                    #self.skill_support_stun(player, target)
+                    self.skill_assassin_move_buff(player, target)
+                else:
+                    self.attack(player, target, 5)
+            elif player.pid == 1 or player.pid == 6:
+                if use_q:
+                    self.skill_assassin_aoe_minions(player, target)
+                elif use_w:
+                    self.skill_assassin_tp_damage(player, target)
+                elif use_e:
+                    self.skill_assassin_move_buff(player, target)
+                else:
+                    self.attack(player, target, 5)
+            elif player.pid == 2 or player.pid == 7:
+                if use_q:
+                    self.skill_burst_nuke(player, target)
+                elif use_w:
+                    self.skill_burst_aoe(player, target)
+                elif use_e:
+                    self.skill_burst_aoe_stun(player, target)
+                else:
+                    self.attack(player, target, 5)
+            elif player.pid == 3 or player.pid == 8:
+                if use_q:
+                    self.skill_tank_aoe_dot(player, target)
+                elif use_w:
+                    self.skill_tank_self_heal(player, target)
+                elif use_e:
+                    self.skill_tank_engage_dot(player, target)
+                else:
+                    self.attack(player, target, 5)
+            elif player.pid == 4 or player.pid == 9:
+                if use_q:
+                    self.skill_carry_retreat_slow(player, target)
+                elif use_w:
+                    self.skill_carry_slow_damage(player, target)
+                elif use_e:
+                    self.skill_carry_aoe(player, target)
+                else:
+                    self.attack(player, target, 5)
 
             dest_y = player.y + player.move_modifier*self.agent_speed*vel_y
             dest_x = player.x + player.move_modifier*self.agent_speed*vel_x
