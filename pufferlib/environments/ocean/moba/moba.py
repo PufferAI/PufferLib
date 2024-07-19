@@ -24,14 +24,17 @@ EAST = 3
 WEST = 4
 
 COLORS = np.array([
-    [6, 24, 24, 255],     # Background
-    [0, 0, 255, 255],     # Food
-    [0, 128, 255, 255],   # Corpse
-    [128, 128, 128, 255], # Wall
-    [255, 0, 0, 255],     # Snake
-    [255, 255, 255, 255], # Snake
-    [255, 85, 85, 255],     # Snake
-    [170, 170, 170, 255], # Snake
+    [6, 24, 24, 255],     
+    [0, 0, 255, 255],     
+    [0, 128, 255, 255],   
+    [128, 128, 128, 255], 
+    [255, 0, 0, 255],     
+    [255, 255, 255, 255], 
+    [255, 85, 85, 255],     
+    [0, 255, 0, 255], 
+    [0, 255, 255, 255],
+    [170, 170, 170, 255], 
+    [255, 255, 255, 255], 
 ], dtype=np.uint8)
 
 
@@ -43,8 +46,9 @@ class PufferMoba(pufferlib.PufferEnv):
         self.height = 128
         self.width = 128
         self.num_agents = 10
-        self.num_towers = 18
         self.num_creeps = 100
+        self.num_neutrals = 72
+        self.num_towers = 22
         self.vision_range = vision_range
         self.agent_speed = agent_speed
         self.discretize = discretize
@@ -54,18 +58,29 @@ class PufferMoba(pufferlib.PufferEnv):
 
         # load game map from png
         game_map_path = os.path.join(
-            *self.__module__.split('.')[:-1], 'dota_bitmap.png')
+            *self.__module__.split('.')[:-1], 'dota_map.png')
         from PIL import Image
         game_map = np.array(Image.open(game_map_path))[:, :, -1]
+        game_map = game_map[::2, ::2][1:-1, 1:-1]
+
+        entity_data_path = os.path.join(
+            *self.__module__.split('.')[:-1], 'data.yaml')
+        import yaml
+        with open(entity_data_path, 'r') as f:
+            self.entity_data = yaml.safe_load(f)
 
         self.grid = np.zeros((self.height, self.width), dtype=np.uint8)
-        self.grid[game_map != 0] = WALL
+        self.grid[game_map == 0] = WALL
+        self.grid[:self.vision_range] = WALL
+        self.grid[-self.vision_range:] = WALL
+        self.grid[:, :self.vision_range] = WALL
+        self.grid[:, -self.vision_range:] = WALL
 
         self.pids = np.zeros((self.height, self.width), dtype=np.int32) - 1
 
         dtype = entity_dtype()
-        self.c_entities = np.zeros(
-            self.num_agents + self.num_towers + self.num_creeps, dtype=dtype)
+        self.c_entities = np.zeros(self.num_agents + self.num_creeps +
+            self.num_neutrals + self.num_towers, dtype=dtype)
         self.entities = self.c_entities.view(np.recarray)
         self.entities.pid = -1
         self.c_obs_players = np.zeros((self.num_agents, 10), dtype=dtype)
@@ -94,6 +109,8 @@ class PufferMoba(pufferlib.PufferEnv):
                 [255, 255, 255, 255], # Snake
                 [255, 85, 85, 255],     # Snake
                 [170, 170, 170, 255], # Snake
+                [0, 255, 0, 255],     # Neutral
+
             ], dtype=np.uint8)
 
             self.client = RaylibClient(41, 23, COLORS.tolist())
@@ -122,7 +139,7 @@ class PufferMoba(pufferlib.PufferEnv):
         grid = self.grid
         if self.render_mode == 'rgb_array':
             v = self.vision_range
-            frame = COLORS[grid[v:-v-1, v:-v-1]]
+            frame = COLORS[grid]
 
             if upscale > 1:
                 rescaler = np.ones((upscale, upscale, 1), dtype=np.uint8)
@@ -157,9 +174,11 @@ class PufferMoba(pufferlib.PufferEnv):
             self.entities.x.astype(np.int32)
         ] = AGENT_1
 
-        self.cenv = CEnv(self.grid, self.pids, self.c_entities, self.c_obs_players,
+        self.cenv = CEnv(self.grid, self.pids, self.c_entities, self.entity_data,
+            self.c_obs_players,
             self.obs_view, self.buf.rewards, self.num_agents, self.num_creeps,
-            self.num_towers, self.vision_range, self.agent_speed, self.discretize)
+            self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
+            self.discretize)
         self.cenv.reset()
 
         self.sum_rewards = []

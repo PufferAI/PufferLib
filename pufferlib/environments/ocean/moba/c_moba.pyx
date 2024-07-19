@@ -19,6 +19,8 @@ cdef:
     int AGENT_2 = 4
     int CREEP_1 = 5
     int CREEP_2 = 6
+    int NEUTRAL = 7
+    int DEBUG = 8
 
     int PASS = 0
     int NORTH = 1
@@ -28,10 +30,12 @@ cdef:
 
     int TOWER_VISION = 5
     int CREEP_VISION = 5
+    int NEUTRAL_VISION = 3
 
     int ENTITY_PLAYER = 0
     int ENTITY_CREEP = 1
-    int ENTITY_TOWER = 2
+    int ENTITY_NEUTRAL = 2
+    int ENTITY_TOWER = 3
 
 cdef struct Entity:
     int pid
@@ -75,6 +79,7 @@ cdef class Environment:
         int height
         int num_agents
         int num_creeps
+        int num_neutrals
         int num_towers
         int vision_range
         float agent_speed
@@ -92,14 +97,19 @@ cdef class Environment:
         Entity[:] entities
 
         float[:, :, :] waypoints 
+        dict entity_data
+        float[:, :] neutral_spawns
 
-    def __init__(self, grid, pids, cnp.ndarray entities, cnp.ndarray player_obs,
-            observations, rewards, int num_agents, int num_creeps, int num_towers,
-            int vision_range, float agent_speed, bint discretize):
+    def __init__(self, grid, pids, cnp.ndarray entities, dict entity_data,
+            cnp.ndarray player_obs,
+            observations, rewards, int num_agents, int num_creeps,
+            int num_neutrals, int num_towers, int vision_range,
+            float agent_speed, bint discretize):
         self.height = grid.shape[0]
         self.width = grid.shape[1]
         self.num_agents = num_agents
         self.num_creeps = num_creeps
+        self.num_neutrals = num_neutrals
         self.num_towers = num_towers
         self.vision_range = vision_range
         self.agent_speed = agent_speed
@@ -113,19 +123,69 @@ cdef class Environment:
 
         self.pid_map = pids
         self.entities = entities
+        self.entity_data = entity_data
         self.player_obs = player_obs
 
-        self.waypoints = np.array([
-            [[97, 25], [72, 25], [43, 25], [128-104, 128-96], [128-106, 128-66], [128-104, 128-33]],
-            [[99, 29], [85, 46], [74, 55], [128-74, 128-55], [128-85, 128-46], [128-99, 128-29]],
-            [[104, 33], [106, 66], [104, 96], [128-43, 128-25], [128-72, 128-25], [128-97, 128-25]],
+        self.waypoints = np.zeros((6, 20, 2), dtype=np.float32)
+        for team in range(2):
+            if team == 0:
+                prefix = 'npc_dota_spawner_good_'
+            else:
+
+                prefix = 'npc_dota_spawner_bad_'
+
+            for lane in range(3):
+                suffix = ['top', 'mid', 'bot'][lane]
+                key = f'{prefix}{suffix}'
+                y = entity_data[key]['spawn_y']
+                x = entity_data[key]['spawn_x']
+                self.waypoints[3*team + lane, 0, 0] = y
+                self.waypoints[3*team + lane, 0, 1] = x
+                #self.grid[int(y), int(x)] = DEBUG
+                waypoints = entity_data[key]['waypoints']
+                for i in range(len(waypoints)):
+                    y = waypoints[i]['y']
+                    x = waypoints[i]['x']
+                    self.waypoints[3*team + lane, i+1, 0] = y
+                    self.waypoints[3*team + lane, i+1, 1] = x
+                    #self.grid[int(y), int(x)] = DEBUG
 
 
-            [[128-97, 128-25], [128-72, 128-25], [128-43, 128-25], [104, 96], [106, 66], [104, 33]],
-            [[128-99, 128-29], [128-85, 128-46], [128-74, 128-55], [99, 29], [85, 46], [74, 55]],
-            [[128-104, 128-33], [128-106, 128-66], [128-104, 128-96], [97, 25], [72, 25], [43, 25]],
-        ], dtype=np.float32)
+        idx = 0
+        for team in range(2):
+            if team == 0:
+                prefix = 'dota_goodguys_tower'
+            else:
+                prefix = 'dota_badguys_tower'
 
+            for tier in range(1, 5):
+                for suffix in ['_top', '_mid', '_bot']:
+                    if tier == 4 and suffix == '_mid':
+                        continue # no mid tier 4 towers
+
+                    tower_name = f'{prefix}{tier}{suffix}'
+                    self.spawn_tower(idx, team, tier,
+                        entity_data[tower_name]['y'],
+                        entity_data[tower_name]['x'],
+                    )
+                    idx += 1
+
+        # Num camps
+        self.neutral_spawns = np.zeros((18, 2), dtype=np.float32)
+        idx = 0
+        for team in range(2):
+            if team == 0:
+                prefix = 'neutralcamp_good_'
+            else:
+                prefix = 'neutralcamp_evil_'
+
+            for i in range(1, 10):
+                neutral_name = f'{prefix}{i}'
+                self.neutral_spawns[idx, 0] = entity_data[neutral_name]['y']
+                self.neutral_spawns[idx, 1] = entity_data[neutral_name]['x']
+                idx += 1
+
+        '''
         self.spawn_tower(0, 0, 1, 43, 25)
         self.spawn_tower(1, 0, 1, 74, 55)
         self.spawn_tower(2, 0, 1, 104, 96)
@@ -144,6 +204,7 @@ cdef class Environment:
         self.spawn_tower(15, 1, 3, 128-97, 128-25)
         self.spawn_tower(16, 1, 3, 128-99, 128-29)
         self.spawn_tower(17, 1, 3, 128-104, 128-33)
+        '''
      
     cdef Entity* get_player_ob(self, int pid, int idx):
         return &self.player_obs[pid, idx]
@@ -151,11 +212,14 @@ cdef class Environment:
     cdef Entity* get_entity(self, int pid):
         return &self.entities[pid]
 
-    cdef Entity* get_tower(self, int idx):
+    cdef Entity* get_creep(self, int idx):
         return &self.entities[idx + self.num_agents]
 
-    cdef Entity* get_creep(self, int idx):
-        return &self.entities[idx + self.num_agents + self.num_towers]
+    cdef Entity* get_neutral(self, int idx):
+        return &self.entities[idx + self.num_agents + self.num_creeps]
+
+    cdef Entity* get_tower(self, int idx):
+        return &self.entities[idx + self.num_agents + self.num_creeps + self.num_neutrals]
 
     cdef void compute_observations(self):
         cdef:
@@ -234,6 +298,11 @@ cdef class Environment:
             tower.health = 2500
             tower.max_health = 2500
             tower.damage = 10
+        elif tier == 4:
+            # TODO: Look up damage
+            tower.health = 2500
+            tower.max_health = 2500
+            tower.damage = 15
         else:
             raise ValueError('Invalid tier')
 
@@ -264,8 +333,9 @@ cdef class Environment:
             else:
                 player.team = 1
 
-            self.respawn(player)
+            self.respawn_player(player)
 
+        '''
         self.spawn_tower(0, 0, 1, 43, 25)
         self.spawn_tower(1, 0, 1, 74, 55)
         self.spawn_tower(2, 0, 1, 104, 96)
@@ -284,6 +354,7 @@ cdef class Environment:
         self.spawn_tower(15, 1, 3, 128-97, 128-25)
         self.spawn_tower(16, 1, 3, 128-99, 128-29)
         self.spawn_tower(17, 1, 3, 128-104, 128-33)
+        '''
         
         self.compute_observations()
 
@@ -306,6 +377,8 @@ cdef class Environment:
                 agent_type = CREEP_1
             else:
                 agent_type = CREEP_2
+        elif player.type == ENTITY_NEUTRAL:
+            agent_type = NEUTRAL
         elif player.type == ENTITY_PLAYER:
             if player.team == 0:
                 agent_type = AGENT_1
@@ -362,6 +435,10 @@ cdef class Environment:
             int disc_y = int(move_dest_y)
             int disc_x = int(move_dest_x)
 
+        # End waypoint
+        if dest_y == 0 or dest_x == 0:
+            return
+
         if (self.grid[disc_y, disc_x] != EMPTY and
                 self.pid_map[disc_y, disc_x] != creep.pid):
             dx = 2 * self.agent_speed * (rand()/(RAND_MAX + 1.0) - 0.5)
@@ -386,10 +463,72 @@ cdef class Environment:
                     continue
 
                 target = self.get_entity(target_pid)
-                if target.team != creep.team:
+                if target.team != creep.team and target.type != ENTITY_NEUTRAL:
                     return target_pid
 
         return -1
+
+    cdef int neutral_target(self, Entity* neutral):
+        cdef:
+            Entity* target
+            int y = int(neutral.y)
+            int x = int(neutral.x)
+            int dy, dx, target_pid
+
+        for dy in range(-NEUTRAL_VISION, NEUTRAL_VISION+1):
+            for dx in range(-NEUTRAL_VISION, NEUTRAL_VISION+1):
+                target_pid = self.pid_map[y + dy, x + dx]
+
+                if target_pid == -1:
+                    continue
+
+                target = self.get_entity(target_pid)
+                if target.type == ENTITY_PLAYER:
+                    return target_pid
+
+        return -1
+
+    cdef void neutral_ai(self, Entity* neutral):
+        cdef:
+            Entity* target
+            int target_pid
+
+        target_pid = self.neutral_target(neutral)
+
+        # TODO: Duplicate code
+        if target_pid != -1:
+            target = self.get_entity(target_pid)
+            dest_y = target.y
+            dest_x = target.x
+
+            if l2_distance(neutral.y, neutral.x, dest_y, dest_x) < 2:
+                self.attack(neutral, target, 2)
+
+            self.creep_path(neutral, dest_y, dest_x)
+        else:
+            self.creep_path(neutral, neutral.spawn_y, neutral.spawn_x)
+
+    cdef void spawn_neutral(self, int idx, int camp):
+        cdef:
+            int pid = idx + self.num_agents + self.num_towers + self.num_creeps
+            Entity* neutral = self.get_entity(pid)
+            int dy, dx
+
+        neutral.pid = pid
+        neutral.type = ENTITY_NEUTRAL
+        neutral.health = 200
+        neutral.max_health = 200
+        neutral.mana = 0
+        neutral.max_mana = 0
+        neutral.team = 2
+        neutral.spawn_y = self.neutral_spawns[camp, 0]
+        neutral.spawn_x = self.neutral_spawns[camp, 1]
+
+        while True:
+            dy = rand() % 7 - 3
+            dx = rand() % 7 - 3
+            if self.move_to(neutral, neutral.spawn_y + dy, neutral.spawn_x + dx):
+                break
 
     cdef void creep_ai(self, Entity* creep):
         cdef:
@@ -418,9 +557,6 @@ cdef class Environment:
             if l2_distance(creep.y, creep.x, dest_y, dest_x) < 2:
                 creep.waypoint += 1
 
-            if creep.waypoint > 5:
-                creep.waypoint = 5
-
     cdef void spawn_creep(self, int idx, int lane):
         cdef:
             int pid = idx + self.num_agents + self.num_towers
@@ -440,7 +576,7 @@ cdef class Environment:
         creep.lane = lane
         creep.waypoint = 0
 
-        self.respawn(creep)
+        self.respawn_creep(creep, lane)
 
     cdef void spawn_creep_wave(self):
         cdef int lane, creep
@@ -449,30 +585,23 @@ cdef class Environment:
                 self.spawn_creep(self.creep_idx, lane)
                 self.creep_idx = (self.creep_idx + 1) % self.num_creeps
 
-    cdef void respawn(self, Entity* entity):
+    cdef void respawn_player(self, Entity* entity):
         cdef:
             bint valid_pos = False
             int spawn_y
             int spawn_x
-            int min_y
-            int max_y
-            int min_x
-            int max_x
+            int y, x
 
         if entity.team == 0:
-            min_y = 128-30
-            max_y = 128-22
-            min_x = 22
-            max_x = 30
+            y = 128 - 15
+            x = 12
         else:
-            min_y = 22
-            max_y = 30
-            min_x = 128-30
-            max_x = 128-22
+            y = 15
+            x = 128 - 12
 
         while not valid_pos:
-            spawn_y = rand() % (max_y - min_y) + min_y
-            spawn_x = rand() % (max_x - min_x) + min_x
+            spawn_y = y + rand() % 11 - 5
+            spawn_x = x + rand() % 11 - 5
             if self.grid[spawn_y, spawn_x] == EMPTY:
                 valid_pos = True
                 break
@@ -480,6 +609,27 @@ cdef class Environment:
         self.move_to(entity, spawn_y, spawn_x)
         entity.health = entity.max_health
         entity.mana = entity.max_mana
+
+    cdef bint respawn_creep(self, Entity* entity, int lane):
+        cdef:
+            bint valid_pos = False
+            int spawn_y = int(self.waypoints[lane, 0, 0])
+            int spawn_x = int(self.waypoints[lane, 0, 1])
+            int x, y
+
+        #self.grid[spawn_y, spawn_x] = DEBUG
+
+        while not valid_pos:
+            y = spawn_y + rand() % 7 - 3
+            x = spawn_x + rand() % 7 - 3
+            if self.grid[y, x] == EMPTY:
+                valid_pos = True
+                break
+
+        self.move_to(entity, y, x)
+        entity.health = entity.max_health
+        entity.waypoint = 1
+        return valid_pos
 
     cdef bint attack(self, Entity* player, Entity* target, float damage):
         if target.pid == -1:
@@ -494,7 +644,7 @@ cdef class Environment:
             return True
 
         if target.type == ENTITY_PLAYER:
-            self.respawn(target)
+            self.respawn_player(target)
         elif target.type == ENTITY_TOWER or target.type == ENTITY_CREEP:
             self.kill(target)
 
@@ -746,8 +896,9 @@ cdef class Environment:
             int disc_dest_x
             Entity* player
             Entity* target
-            Entity* tower
             Entity* creep
+            Entity* neutral
+            Entity* tower
             int pid
             int target_pid
             float damage
@@ -765,6 +916,24 @@ cdef class Environment:
             actions_discrete = np_actions
         else:
             actions_continuous = np_actions
+
+        # Neutral AI
+        cdef int camp, neut
+        if self.tick % 3600 == 0:
+            for camp in range(18):
+                for neut in range(4):
+                    self.spawn_neutral(4*camp + neut, camp)
+
+        for idx in range(self.num_neutrals):
+            neutral = self.get_neutral(idx)
+            if neutral.pid == -1:
+                continue
+
+            self.update_status(neutral)
+            if neutral.stun_timer > 0:
+                continue
+
+            self.neutral_ai(neutral)
 
         # Creep AI
         if self.tick % 1200 == 0:
@@ -823,7 +992,7 @@ cdef class Environment:
             target = self.get_player_ob(pid, attack)
             target = self.get_entity(target.pid)
 
-            if player.pid == 0 or player.pid == 5:
+            if player.pid == 1 or player.pid == 5:
                 if use_q:
                     self.skill_support_hook(player, target)
                 elif use_w:
@@ -832,7 +1001,7 @@ cdef class Environment:
                     self.skill_support_stun(player, target)
                 else:
                     self.attack(player, target, 5)
-            elif player.pid == 1 or player.pid == 6:
+            elif player.pid == 0 or player.pid == 6:
                 if use_q:
                     self.skill_assassin_aoe_minions(player, target)
                 elif use_w:
