@@ -6,6 +6,7 @@ import pettingzoo
 import gymnasium
 
 import pufferlib
+from pufferlib.environments.ocean import render
 from pufferlib.environments.ocean.moba.c_moba import Environment as CEnv
 from pufferlib.environments.ocean.moba.c_moba import entity_dtype
 
@@ -99,20 +100,12 @@ class PufferMoba(pufferlib.PufferEnv):
         self.actions = np.zeros((self.num_agents, 3), dtype=np.uint32)
 
         self.render_mode = render_mode
-        if render_mode == 'human':
-            COLORS = np.array([
-                [6, 24, 24, 255],     # Background
-                [0, 0, 255, 255],     # Food
-                [0, 128, 255, 255],   # Corpse
-                [128, 128, 128, 255], # Wall
-                [255, 0, 0, 255],     # Snake
-                [255, 255, 255, 255], # Snake
-                [255, 85, 85, 255],     # Snake
-                [170, 170, 170, 255], # Snake
-                [0, 255, 0, 255],     # Neutral
-
-            ], dtype=np.uint8)
-
+        if render_mode == 'rgb_array':
+            self.client = render.RGBArrayRender()
+        elif render_mode == 'raylib':
+            self.client = render.GridRender(128, 128,
+                screen_width=1024, screen_height=1024, colors=COLORS[:, :3])
+        elif render_mode == 'human':
             self.client = RaylibClient(41, 23, COLORS.tolist())
      
         self.observation_space = gymnasium.spaces.Box(low=0, high=255,
@@ -137,20 +130,15 @@ class PufferMoba(pufferlib.PufferEnv):
 
     def render(self, upscale=4):
         grid = self.grid
-        if self.render_mode == 'rgb_array':
-            v = self.vision_range
-            frame = COLORS[grid]
-
-            if upscale > 1:
-                rescaler = np.ones((upscale, upscale, 1), dtype=np.uint8)
-                frame = np.kron(frame, rescaler)
-
+        if self.render_mode in ('rgb_array', 'raylib'):
+            return self.client.render(grid)
+        elif self.render_mode == 'human':
+            frame, self.human_action = self.client.render(
+                self.grid, self.pids, self.entities, self.obs_players,
+                self.actions, self.discretize)
             return frame
-
-        frame, self.human_action = self.client.render(
-            self.grid, self.pids, self.entities, self.obs_players,
-            self.actions, self.discretize)
-        return frame
+        else:
+            raise ValueError(f'Invalid render mode: {self.render_mode}')
 
     def _fill_observations(self):
         self.buf.observations[:, -3] = (

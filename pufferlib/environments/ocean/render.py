@@ -116,6 +116,8 @@ class GridRender:
         self.screen_height = screen_height
 
     def render(self, grid, *args):
+        assert grid.shape[0] == self.height
+        assert grid.shape[1] == self.width
         rendered = self.colors[grid]
 
         if rl.IsKeyDown(rl.KEY_ESCAPE):
