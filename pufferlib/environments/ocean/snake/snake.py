@@ -3,21 +3,11 @@
 import numpy as np
 import gymnasium
 
+from raylib import rl
+
 import pufferlib
 from pufferlib.environments.ocean.snake.c_snake import CSnake, step_all
-
-COLORS = np.array([
-    [6, 24, 24, 255],     # Background
-    [0, 0, 255, 255],     # Food
-    [0, 128, 255, 255],   # Corpse
-    [128, 128, 128, 255], # Wall
-    [255, 0, 0, 255],     # Snake
-    [255, 255, 255, 255], # Snake
-    [255, 85, 85, 255],     # Snake
-    [170, 170, 170, 255], # Snake
-], dtype=np.uint8)
-
-ANSI_COLORS = [30, 34, 36, 90, 31, 97, 91, 37]
+from pufferlib.environments.ocean import render
 
 class Snake(pufferlib.PufferEnv):
     def __init__(self, widths=[2560], heights=[1440], num_snakes=[4096],
@@ -81,7 +71,18 @@ class Snake(pufferlib.PufferEnv):
         self.reward_sum = 0
         self.tick = 0
         self.atn = None
-        self.client = None
+
+        if render_mode == 'ansi':
+            self.client = render.AnsiRender()
+        elif render_mode == 'rgb_array':
+            self.client = render.RGBArrayRender()
+        elif render_mode == 'raylib':
+            self.client = render.GridRender(widths[0], heights[0])
+        elif render_mode == 'human':
+            colors = [(r, g, b, 255) for r, g, b in render.COLORS]
+            self.client = RaylibClient(80, 45, colors)
+        else:
+            raise ValueError(f'Invalid render mode: {render_mode}')
 
     def reset(self, seed=None):
         ptr = end = 0
@@ -124,74 +125,54 @@ class Snake(pufferlib.PufferEnv):
         return (self.buf.observations, self.buf.rewards,
             self.buf.terminals, self.buf.truncations, info)
 
-    def render(self, upscale=1):
+    def render(self):
         grid = self.grids[0]
         height, width = grid.shape
         v = self.vision
-        if self.render_mode == 'human':
-            if self.client is None:
-                self.client = RaylibClient(80, 45, COLORS.tolist(), tile_size=16)
-
+        crop = grid[v:-v-1, v:-v-1]
+        if self.render_mode == 'ansi':
+            return self.client.render(crop)
+        elif self.render_mode == 'rgb_array':
+            return self.client.render(crop)
+        elif self.render_mode == 'raylib':
+            return self.client.render(grid)
+        elif self.render_mode == 'human':
             snakes_in_first_env = self.num_snakes[0]
             snake_ptrs = self.snake_ptrs[:snakes_in_first_env]
             agent_positions = self.snakes[np.arange(snakes_in_first_env), snake_ptrs]
             actions = self.actions[:snakes_in_first_env]
-            frame, self.atn = self.client.render(grid, agent_positions)
-        elif self.render_mode == 'rgb_array':
-            frame = COLORS[grid[v:-v-1, v:-v-1]]
-            if upscale > 1:
-                rescaler = np.ones((upscale, upscale, 1), dtype=np.uint8)
-                frame = np.kron(frame, rescaler)
-        elif self.render_mode == 'ansi':
-            lines = []
-            for line in grid[v-1:-v, v-1:-v]:
-                lines.append(''.join([
-                    f'\033[{ANSI_COLORS[val]}m██\033[0m' for val in line]))
 
-            frame = '\n'.join(lines)
+            self.atn = None
+            if rl.IsKeyDown(rl.KEY_UP) or rl.IsKeyDown(rl.KEY_W):
+                self.atn = 0
+            elif rl.IsKeyDown(rl.KEY_DOWN) or rl.IsKeyDown(rl.KEY_S):
+                self.atn = 1
+            elif rl.IsKeyDown(rl.KEY_LEFT) or rl.IsKeyDown(rl.KEY_A):
+                self.atn = 2
+            elif rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
+                self.atn = 3
+
+            return self.client.render(grid, agent_positions)
         else:
             raise ValueError(f'Invalid render mode: {self.render_mode}')
 
-        return frame
-
 class RaylibClient:
-    def __init__(self, width, height, asset_map, tile_size=16):
+    def __init__(self, width, height, colors, tile_size=16):
         self.width = width
         self.height = height
-        self.asset_map = asset_map
+        self.colors = colors
         self.tile_size = tile_size
 
-        from raylib import rl
         rl.InitWindow(width*tile_size, height*tile_size,
             "PufferLib Ray Snake".encode())
         rl.SetTargetFPS(15)
-        self.rl = rl
-
-        from cffi import FFI
-        self.ffi = FFI()
-
-    def _cdata_to_numpy(self):
-
-        image = self.rl.LoadImageFromScreen()
-        width, height, channels = image.width, image.height, 4
-        cdata = self.ffi.buffer(image.data, width*height*channels)
-        return np.frombuffer(cdata, dtype=np.uint8
-            ).reshape((height, width, channels))[:, :, :3]
 
     def render(self, grid, agent_positions):
-        rl = self.rl
-        action = None
-        if rl.IsKeyDown(rl.KEY_UP) or rl.IsKeyDown(rl.KEY_W):
-            action = 0
-        elif rl.IsKeyDown(rl.KEY_DOWN) or rl.IsKeyDown(rl.KEY_S):
-            action = 1
-        elif rl.IsKeyDown(rl.KEY_LEFT) or rl.IsKeyDown(rl.KEY_A):
-            action = 2
-        elif rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
-            action = 3
+        if rl.IsKeyDown(rl.KEY_ESCAPE):
+            exit(0)
 
         rl.BeginDrawing()
-        rl.ClearBackground(self.asset_map[0])
+        rl.ClearBackground(render.PUFF_BACKGROUND)
 
         ts = self.tile_size
         main_r, main_c = agent_positions[0]
@@ -209,10 +190,10 @@ class RaylibClient:
                 if tile == 0:
                     continue
 
-                rl.DrawRectangle(j*ts, i*ts, ts, ts, self.asset_map[tile])
+                rl.DrawRectangle(j*ts, i*ts, ts, ts, self.colors[tile])
 
         rl.EndDrawing()
-        return self._cdata_to_numpy(), action
+        return render.cdata_to_numpy()
 
 def test_performance(timeout=10, atn_cache=1024):
     env = Snake()

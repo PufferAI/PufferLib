@@ -1,11 +1,12 @@
-from pdb import set_trace as T
 import numpy as np
 import os
 
-import pettingzoo
 import gymnasium
 
+from raylib import rl, colors
+
 import pufferlib
+from pufferlib.environments.ocean import render
 from pufferlib.environments.ocean.grid.c_grid import Environment as CEnv
 
 EMPTY = 0
@@ -21,17 +22,6 @@ NORTH = 1
 SOUTH = 2
 EAST = 3
 WEST = 4
-
-COLORS = np.array([
-    [6, 24, 24, 255],     # Background
-    [0, 0, 255, 255],     # Food
-    [0, 128, 255, 255],   # Corpse
-    [128, 128, 128, 255], # Wall
-    [255, 0, 0, 255],     # Snake
-    [255, 255, 255, 255], # Snake
-    [255, 85, 85, 255],     # Snake
-    [170, 170, 170, 255], # Snake
-], dtype=np.uint8)
 
 def init_introverts(env):
     pass
@@ -161,19 +151,15 @@ class PufferGrid(pufferlib.PufferEnv):
         self.not_done = np.zeros(num_agents, dtype=bool)
 
         self.render_mode = render_mode
-        if render_mode == 'human':
-            COLORS = np.array([
-                [6, 24, 24, 255],     # Background
-                [0, 0, 255, 255],     # Food
-                [0, 128, 255, 255],   # Corpse
-                [128, 128, 128, 255], # Wall
-                [255, 0, 0, 255],     # Snake
-                [255, 255, 255, 255], # Snake
-                [255, 85, 85, 255],     # Snake
-                [170, 170, 170, 255], # Snake
-            ], dtype=np.uint8)
-
-            self.client = RaylibClient(41, 23, COLORS.tolist())
+        if render_mode == 'ansi':
+            self.client = render.AnsiRender()
+        elif render_mode == 'rgb_array':
+            self.client = render.RGBArrayRender()
+        elif render_mode == 'raylib':
+            from pufferlib.environments.ocean.render import GridRender
+            self.client = GridRender(1080, 720)
+        elif render_mode == 'human':
+            self.client = RaylibClient(41, 23)
      
         self.observation_space = gymnasium.spaces.Box(low=0, high=255,
             shape=(self.obs_size*self.obs_size+3,), dtype=np.uint8)
@@ -193,18 +179,45 @@ class PufferGrid(pufferlib.PufferEnv):
         self.single_action_space = self.action_space
         self.cenv = None
         self.done = True
+        self.human_action = None
         self.infos = {}
 
     def render(self):
         grid = self.grid
-        if self.render_mode == 'rgb_array':
-            v = self.vision_range
-            frame = COLORS[grid[v:-v-1, v:-v-1]]
-            return frame
+        v = self.vision_range
+        crop = grid[v:-v-1, v:-v-1]
+        if self.render_mode == 'ansi':
+            return self.client.render(crop)
+        elif self.render_mode == 'rgb_array':
+            return self.client.render(crop)
+        elif self.render_mode == 'raylib':
+            return self.client.render(grid)
+        elif self.render_mode == 'human':
+            self.human_action = None
 
-        frame, self.human_action = self.client.render(
-            self.grid, self.agent_positions, self.actions, self.discretize)
-        return frame
+            ay, ax = None, None
+            if rl.IsKeyDown(rl.KEY_UP) or rl.IsKeyDown(rl.KEY_W):
+                ay = 0 if self.discretize else -1
+            if rl.IsKeyDown(rl.KEY_DOWN) or rl.IsKeyDown(rl.KEY_S):
+                ay = 2 if self.discretize else 1
+            if rl.IsKeyDown(rl.KEY_LEFT) or rl.IsKeyDown(rl.KEY_A):
+                ax = 0 if self.discretize else -1
+            if rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
+                ax = 2 if self.discretize else 1
+
+            if ax is None and ay is None:
+                self.human_action = None
+            else:
+                if ax is None:
+                    ax = 1 if self.discretize else 0
+                if ay is None:
+                    ay = 1 if self.discretize else 0
+
+                self.human_action = (ay, ax)
+
+            return self.client.render(self.grid, self.agent_positions)
+        else:
+            raise ValueError(f'Invalid render mode: {self.render_mode}')
 
     def _fill_observations(self):
         self.buf.observations[:, -3] = (255*self.agent_positions[:,0]/self.height).astype(np.uint8)
@@ -238,7 +251,6 @@ class PufferGrid(pufferlib.PufferEnv):
 
     def step(self, actions):
         if self.render_mode == 'human' and self.human_action is not None:
-            print(self.human_action)
             actions[0] = self.human_action
 
         if self.discretize:
@@ -267,15 +279,12 @@ class PufferGrid(pufferlib.PufferEnv):
             self.buf.terminals, self.buf.truncations, infos)
 
 class RaylibClient:
-    def __init__(self, width, height, asset_map, tile_size=32):
+    def __init__(self, width, height, tile_size=32):
         self.width = width
         self.height = height
-        self.asset_map = asset_map
         self.tile_size = tile_size
 
-        sprite_sheet_path = os.path.join(
-            *self.__module__.split('.')[:-1], 'puffer_chars.png')
-        self.asset_map = {
+        self.uv_coords = {
             3: (0, 0, 128, 128),
             4: (128, 0, 128, 128),
             5: (256, 0, 128, 128),
@@ -287,45 +296,17 @@ class RaylibClient:
         rl.InitWindow(width*tile_size, height*tile_size,
             "PufferLib Ray Grid".encode())
         rl.SetTargetFPS(10)
+
+        sprite_sheet_path = os.path.join(
+            *self.__module__.split('.')[:-1], 'puffer_chars.png')
         self.puffer = rl.LoadTexture(sprite_sheet_path.encode())
-        self.rl = rl
-        self.colors = colors
 
-        from cffi import FFI
-        self.ffi = FFI()
-
-    def _cdata_to_numpy(self):
-        image = self.rl.LoadImageFromScreen()
-        width, height, channels = image.width, image.height, 4
-        cdata = self.ffi.buffer(image.data, width*height*channels)
-        return np.frombuffer(cdata, dtype=np.uint8
-            ).reshape((height, width, channels))[:, :, :3]
-
-    def render(self, grid, agent_positions, actions, discretize):
-        rl = self.rl
-        colors = self.colors
-        ay, ax = None, None
-        if rl.IsKeyDown(rl.KEY_UP) or rl.IsKeyDown(rl.KEY_W):
-            ay = 0 if discretize else -1
-        if rl.IsKeyDown(rl.KEY_DOWN) or rl.IsKeyDown(rl.KEY_S):
-            ay = 2 if discretize else 1
-        if rl.IsKeyDown(rl.KEY_LEFT) or rl.IsKeyDown(rl.KEY_A):
-            ax = 0 if discretize else -1
-        if rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
-            ax = 2 if discretize else 1
-
-        if ax is None and ay is None:
-            action = None
-        else:
-            if ax is None:
-                ax = 1 if discretize else 0
-            if ay is None:
-                ay = 1 if discretize else 0
-
-            action = (ay, ax)
+    def render(self, grid, agent_positions):
+        if rl.IsKeyDown(rl.KEY_ESCAPE):
+            exit(0)
 
         rl.BeginDrawing()
-        rl.ClearBackground([6, 24, 24, 255])
+        rl.ClearBackground(render.PUFF_BACKGROUND)
 
         ts = self.tile_size
         main_r, main_c = agent_positions[0]
@@ -347,15 +328,13 @@ class RaylibClient:
                 elif tile == 2:
                     rl.DrawRectangle(j*ts, i*ts, ts, ts, [0, 0, 0, 255])
                 else:
-                    #atn = actions[idx]
-                    source_rect = self.asset_map[tile]
+                    source_rect = self.uv_coords[tile]
                     dest_rect = (j*ts, i*ts, ts, ts)
-                    print(f'tile: {tile}, source_rect: {source_rect}, dest_rect: {dest_rect}')
                     rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
                         (0, 0), 0, colors.WHITE)
 
         rl.EndDrawing()
-        return self._cdata_to_numpy(), action
+        return render.cdata_to_numpy()
 
 def test_puffer_performance(timeout):
     import time
