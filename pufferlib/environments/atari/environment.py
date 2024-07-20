@@ -10,8 +10,18 @@ import pufferlib.environments
 import pufferlib.utils
 import pufferlib.postprocess
 
+ALIASES = {
+    'beam-rider': 'BeamRiderNoFrameskip-v4',
+    'breakout': 'BreakoutNoFrameskip-v4',
+    'enduro': 'EnduroNoFrameskip-v4',
+    'pong': 'PongNoFrameskip-v4',
+    'qbert': 'QbertNoFrameskip-v4',
+    'seaquest': 'SeaquestNoFrameskip-v4',
+    'spaceinvaders': 'SpaceInvadersNoFrameskip-v4',
+}
 
-def env_creator(name='BreakoutNoFrameskip-v4'):
+
+def env_creator(name='breakout'):
     return functools.partial(make, name)
 
 def make(name, framestack=4, render_mode='rgb_array'):
@@ -24,6 +34,11 @@ def make(name, framestack=4, render_mode='rgb_array'):
         MaxAndSkipEnv,
         NoopResetEnv,
     )
+
+    # Convert aliases to full names
+    if name in ALIASES:
+        name = ALIASES[name]
+
     with pufferlib.utils.Suppress():
         env = gym.make(name, render_mode=render_mode)
 

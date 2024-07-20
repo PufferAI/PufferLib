@@ -320,7 +320,11 @@ if __name__ == '__main__':
         f'pufferlib.environments.{args["base"]["package"]}')
     make_env = env_module.env_creator(env_name)
     policy_cls = getattr(env_module.torch, args['base']['policy_name'])
-    rnn_cls = getattr(env_module, args['base']['rnn_name'])
+    
+    rnn_name = args['base']['rnn_name']
+    rnn_cls = None
+    if rnn_name is not None:
+        rnn_cls = getattr(env_module, args['base']['rnn_name'])
 
     if args['baseline']:
         assert args['mode'] in ('train', 'eval', 'evaluate')
