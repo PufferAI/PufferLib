@@ -93,65 +93,65 @@ def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision
     )
 
 def make_continuous(discretize=False):
-    from . import continuous
-    env = continuous.Continuous(discretize=discretize)
+    from . import sanity
+    env = sanity.Continuous(discretize=discretize)
     if not discretize:
         env = pufferlib.postprocess.ClipAction(env)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_squared(distance_to_target=3, num_targets=1, **kwargs):
-    from . import ocean
-    env = ocean.Squared(distance_to_target=distance_to_target, num_targets=num_targets)
+    from . import sanity
+    env = sanity.Squared(distance_to_target=distance_to_target, num_targets=num_targets)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
 def make_bandit(num_actions=10, reward_scale=1, reward_noise=1):
-    from . import ocean
-    env = ocean.Bandit(num_actions=num_actions, reward_scale=reward_scale,
+    from . import sanity
+    env = sanity.Bandit(num_actions=num_actions, reward_scale=reward_scale,
         reward_noise=reward_noise)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_memory(mem_length=2, mem_delay=2):
-    from . import ocean
-    env = ocean.Memory(mem_length=mem_length, mem_delay=mem_delay)
+    from . import sanity
+    env = sanity.Memory(mem_length=mem_length, mem_delay=mem_delay)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_password(password_length=5):
-    from . import ocean
-    env = ocean.Password(password_length=password_length)
+    from . import sanity
+    env = sanity.Password(password_length=password_length)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_performance(delay_mean=0, delay_std=0, bandwidth=1):
-    from . import ocean
-    env = ocean.Performance(delay_mean=delay_mean, delay_std=delay_std, bandwidth=bandwidth)
+    from . import sanity
+    env = sanity.Performance(delay_mean=delay_mean, delay_std=delay_std, bandwidth=bandwidth)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_performance_empiric(count_n=0, count_std=0, bandwidth=1):
-    from . import ocean
-    env = ocean.PerformanceEmpiric(count_n=count_n, count_std=count_std, bandwidth=bandwidth)
+    from . import sanity
+    env = sanity.PerformanceEmpiric(count_n=count_n, count_std=count_std, bandwidth=bandwidth)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_stochastic(p=0.7, horizon=100):
-    from . import ocean
-    env = ocean.Stochastic(p=p, horizon=100)
+    from . import sanity
+    env = sanity.Stochastic(p=p, horizon=100)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_spaces(**kwargs):
-    from . import ocean
-    env = ocean.Spaces()
+    from . import sanity
+    env = sanity.Spaces()
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
 def make_multiagent():
-    from . import ocean
-    env = ocean.Multiagent()
+    from . import sanity
+    env = sanity.Multiagent()
     env = pufferlib.postprocess.MultiagentEpisodeStats(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
