@@ -1,94 +1,46 @@
 import pufferlib.emulation
 import pufferlib.postprocess
 
-from . import ocean
-from .moba import moba
-from .grid import grid
-from .grid_continuous import grid_continuous
-from .snake import snake
-from .continuous import continuous
-
-def env_creator(name='squared'):
-    if name == 'grid':
-        return make_grid
-    elif name == 'moba':
-        return make_moba
-    elif name == 'foraging':
-        return make_foraging
-    elif name == 'predator_prey':
-        return make_predator_prey
-    elif name == 'group':
-        return make_group
-    elif name == 'puffer':
-        return make_puffer
-    elif name == 'snake':
-        return make_snake
-    elif name == 'continuous':
-        return make_continuous
-    elif name == 'squared':
-        return make_squared
-    elif name == 'bandit':
-        return make_bandit
-    elif name == 'memory':
-        return make_memory
-    elif name == 'password':
-        return make_password
-    elif name == 'stochastic':
-        return make_stochastic
-    elif name == 'multiagent':
-        return make_multiagent
-    elif name == 'spaces':
-        return make_spaces
-    elif name == 'performance':
-        return make_performance
-    elif name == 'performance_empiric':
-        return make_performance_empiric
-    else:
-        raise ValueError('Invalid environment name')
-
-def make_grid(map_size=512, num_agents=1024, horizon=512, render_mode='rgb_array'):
-    env = grid.PufferGrid(map_size, num_agents, horizon, render_mode=render_mode)
-    #env = grid.PufferGrid(64, 64, 64, render_mode=render_mode)
-    return env
-    env = pufferlib.postprocess.MultiagentEpisodeStats(env)
-    env = pufferlib.postprocess.MeanOverAgents(env)
-    return pufferlib.emulation.PettingZooPufferEnv(env=env)
-
 def make_moba(render_mode='rgb_array'):
+    from .moba import moba
     return moba.PufferMoba(render_mode=render_mode)
 
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
-    init_fn = grid_continuous.init_foraging
-    reward_fn = grid_continuous.reward_foraging
-    return grid_continuous.PufferGrid(width, height, num_agents,
+    from .grid import grid
+    init_fn = grid.init_foraging
+    reward_fn = grid.reward_foraging
+    return grid.PufferGrid(width, height, num_agents,
         horizon, discretize=discretize, food_reward=food_reward,
         init_fn=init_fn, reward_fn=reward_fn,
         render_mode=render_mode)
 
 def make_predator_prey(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
-    init_fn = grid_continuous.init_predator_prey
-    reward_fn = grid_continuous.reward_predator_prey
-    return grid_continuous.PufferGrid(width, height, num_agents,
+    from .grid import grid
+    init_fn = grid.init_predator_prey
+    reward_fn = grid.reward_predator_prey
+    return grid.PufferGrid(width, height, num_agents,
         horizon, discretize=discretize, food_reward=food_reward,
         init_fn=init_fn, reward_fn=reward_fn,
         render_mode=render_mode)
 
 def make_group(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
-    init_fn = grid_continuous.init_group
-    reward_fn = grid_continuous.reward_group
-    return grid_continuous.PufferGrid(width, height, num_agents,
+    from .grid import grid
+    init_fn = grid.init_group
+    reward_fn = grid.reward_group
+    return grid.PufferGrid(width, height, num_agents,
         horizon, discretize=discretize, food_reward=food_reward,
         init_fn=init_fn, reward_fn=reward_fn,
         render_mode=render_mode)
 
 def make_puffer(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
-    init_fn = grid_continuous.init_puffer
-    reward_fn = grid_continuous.reward_puffer
-    return grid_continuous.PufferGrid(width, height, num_agents,
+    from .grid import grid
+    init_fn = grid.init_puffer
+    reward_fn = grid.reward_puffer
+    return grid.PufferGrid(width, height, num_agents,
         horizon, discretize=discretize, food_reward=food_reward,
         init_fn=init_fn, reward_fn=reward_fn,
         render_mode=render_mode)
@@ -129,6 +81,7 @@ def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision
         raise ValueError(
             f'Preset: {preset} must be 1440p-4096, 720p-1024, 40p-4, or classic')
     
+    from .snake import snake
     return snake.Snake(
         widths=widths,
         heights=heights,
@@ -140,6 +93,7 @@ def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision
     )
 
 def make_continuous(discretize=False):
+    from . import continuous
     env = continuous.Continuous(discretize=discretize)
     if not discretize:
         env = pufferlib.postprocess.ClipAction(env)
@@ -147,47 +101,83 @@ def make_continuous(discretize=False):
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_squared(distance_to_target=3, num_targets=1, **kwargs):
+    from . import ocean
     env = ocean.Squared(distance_to_target=distance_to_target, num_targets=num_targets)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
 def make_bandit(num_actions=10, reward_scale=1, reward_noise=1):
+    from . import ocean
     env = ocean.Bandit(num_actions=num_actions, reward_scale=reward_scale,
         reward_noise=reward_noise)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_memory(mem_length=2, mem_delay=2):
+    from . import ocean
     env = ocean.Memory(mem_length=mem_length, mem_delay=mem_delay)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_password(password_length=5):
+    from . import ocean
     env = ocean.Password(password_length=password_length)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_performance(delay_mean=0, delay_std=0, bandwidth=1):
+    from . import ocean
     env = ocean.Performance(delay_mean=delay_mean, delay_std=delay_std, bandwidth=bandwidth)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_performance_empiric(count_n=0, count_std=0, bandwidth=1):
+    from . import ocean
     env = ocean.PerformanceEmpiric(count_n=count_n, count_std=count_std, bandwidth=bandwidth)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_stochastic(p=0.7, horizon=100):
+    from . import ocean
     env = ocean.Stochastic(p=p, horizon=100)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_spaces(**kwargs):
+    from . import ocean
     env = ocean.Spaces()
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
 def make_multiagent():
+    from . import ocean
     env = ocean.Multiagent()
     env = pufferlib.postprocess.MultiagentEpisodeStats(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
+
+MAKE_FNS = {
+    'moba': make_moba,
+    'foraging': make_foraging,
+    'predator_prey': make_predator_prey,
+    'group': make_group,
+    'puffer': make_puffer,
+    'snake': make_snake,
+    'continuous': make_continuous,
+    'squared': make_squared,
+    'bandit': make_bandit,
+    'memory': make_memory,
+    'password': make_password,
+    'stochastic': make_stochastic,
+    'multiagent': make_multiagent,
+    'spaces': make_spaces,
+    'performance': make_performance,
+    'performance_empiric': make_performance_empiric,
+}
+
+def env_creator(name='squared'):
+    if name in MAKE_FNS:
+        return MAKE_FNS[name]
+    else:
+        raise ValueError(f'Invalid environment name: {name}')
+
+

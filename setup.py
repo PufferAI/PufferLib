@@ -237,7 +237,6 @@ setup(
     ext_modules = cythonize([
         "pufferlib/extensions.pyx",
         "pufferlib/environments/ocean/grid/c_grid.pyx",
-        "pufferlib/environments/ocean/grid_continuous/c_grid_continuous.pyx",
         "pufferlib/environments/ocean/snake/c_snake.pyx",
         "pufferlib/environments/ocean/moba/c_moba.pyx",
     ], 

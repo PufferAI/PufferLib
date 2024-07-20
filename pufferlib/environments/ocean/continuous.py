@@ -121,5 +121,3 @@ class RaylibClient:
 
         rl.EndDrawing()
         return self._cdata_to_numpy(), action
-
-
