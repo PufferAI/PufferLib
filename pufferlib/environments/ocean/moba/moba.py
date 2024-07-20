@@ -39,7 +39,7 @@ COLORS = np.array([
 
 
 class PufferMoba(pufferlib.PufferEnv):
-    def __init__(self, vision_range=5, agent_speed=0.25,
+    def __init__(self, vision_range=5, agent_speed=0.5,
             discretize=False, report_interval=32, render_mode='rgb_array'):
         super().__init__()
 
@@ -228,13 +228,14 @@ class RaylibClient:
             4: (128, 0, 128, 128),
             5: (256, 0, 128, 128),
             6: (384, 0, 128, 128),
+            7: (384, 0, 128, 128),
             1: (512, 0, 128, 128),
         }
 
         from raylib import rl, colors
         rl.InitWindow(width*tile_size, height*tile_size,
             "PufferLib Ray Grid".encode())
-        rl.SetTargetFPS(20)
+        rl.SetTargetFPS(10)
         self.puffer = rl.LoadTexture(sprite_sheet_path.encode())
         self.rl = rl
         self.colors = colors
@@ -309,6 +310,9 @@ class RaylibClient:
         best_target = None
         for yy in range(mouse_y - 3, mouse_y + 4):
             for xx in range(mouse_x - 3, mouse_x + 4):
+                if xx < 0 or yy < 0 or xx > 128 or yy > 128:
+                    continue
+
                 target_pid = pids[yy, xx]
                 if target_pid == -1:
                     continue
@@ -428,6 +432,10 @@ class RaylibClient:
 def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
     health_bar = entity.health / entity.max_health
     mana_bar = entity.mana / entity.max_mana
+    if entity.max_health == 0:
+        health_bar = 2
+    if entity.max_mana == 0:
+        mana_bar = 2
     rl.DrawRectangle(x, y, width, height, [255, 0, 0, 255])
     rl.DrawRectangle(x, y, int(width*health_bar), height, [0, 255, 0, 255])
 
@@ -444,6 +452,14 @@ def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
             x+8, y+2, 20, [255, 255, 255, 255])
         rl.DrawText(f'Mana: {mana}/{max_mana}'.encode(),
             x+8, y+2 - height - 2, 20, [255, 255, 255, 255])
+
+        #rl.DrawRectangle(x, y - 2*height - 4, int(width*mana_bar), height, [255, 255, 0, 255])
+        rl.DrawText(f'Experience: {entity.xp}'.encode(),
+            x+8, y - 2*height - 4, 20, [255, 255, 255, 255])
+    elif entity.type == 0:
+        rl.DrawText(f'Level: {entity.level}'.encode(),
+            x+4, y -2*height - 12, 12, [255, 255, 255, 255])
+
 
 
 def test_puffer_performance(timeout):

@@ -59,13 +59,22 @@ cdef struct Entity:
     int q_timer
     int w_timer
     int e_timer
+    int basic_attack_timer
+    int basic_attack_cd
     int is_hit
+    int level
+    int xp
+    int xp_on_kill
 
+   
 cpdef entity_dtype():
     '''Make a dummy entity to get the dtype'''
     cdef Entity entity
     return np.asarray(<Entity[:1]>&entity).dtype
 
+cdef inline xp_for_player_kill(Entity* player):
+    return 100 + int(player.xp / 7.69)
+ 
 cdef inline float clip(float x):
     # Clip to [-1, 1]
     return max(-1, min(x, 1))
@@ -87,6 +96,7 @@ cdef class Environment:
         int obs_size
         int creep_idx
         int tick
+        int[:] xp_for_level
 
         unsigned char[:, :] grid
         unsigned char[:, :, :] observations
@@ -125,6 +135,11 @@ cdef class Environment:
         self.entities = entities
         self.entity_data = entity_data
         self.player_obs = player_obs
+
+        self.xp_for_level = np.array([
+            0, 240, 640, 1160, 1760, 2440, 3200, 4000, 4900, 4900, 7000, 8200,
+            9500, 10900, 12400, 14000, 15700, 17500, 19400, 21400, 23600, 26000,
+            28600, 31400, 34400, 38400, 43400, 49400, 56400, 63900], dtype=np.int32)
 
         self.waypoints = np.zeros((6, 20, 2), dtype=np.float32)
         for team in range(2):
@@ -185,26 +200,12 @@ cdef class Environment:
                 self.neutral_spawns[idx, 1] = entity_data[neutral_name]['x']
                 idx += 1
 
-        '''
-        self.spawn_tower(0, 0, 1, 43, 25)
-        self.spawn_tower(1, 0, 1, 74, 55)
-        self.spawn_tower(2, 0, 1, 104, 96)
-        self.spawn_tower(3, 0, 2, 72, 25)
-        self.spawn_tower(4, 0, 2, 85, 46)
-        self.spawn_tower(5, 0, 2, 106, 66)
-        self.spawn_tower(6, 0, 3, 97, 25)
-        self.spawn_tower(7, 0, 3, 99, 29)
-        self.spawn_tower(8, 0, 3, 104, 33)
-        self.spawn_tower(9, 1, 1, 128-43, 128-25)
-        self.spawn_tower(10, 1, 1, 128-74, 128-55)
-        self.spawn_tower(11, 1, 1, 128-104, 128-96)
-        self.spawn_tower(12, 1, 2, 128-72, 128-25)
-        self.spawn_tower(13, 1, 2, 128-85, 128-46)
-        self.spawn_tower(14, 1, 2, 128-106, 128-66)
-        self.spawn_tower(15, 1, 3, 128-97, 128-25)
-        self.spawn_tower(16, 1, 3, 128-99, 128-29)
-        self.spawn_tower(17, 1, 3, 128-104, 128-33)
-        '''
+    cdef int level(self, xp):
+        for i in range(len(self.xp_for_level)):
+            if xp < self.xp_for_level[i]:
+                return i + 1
+
+        raise ValueError('Invalid xp')
      
     cdef Entity* get_player_ob(self, int pid, int idx):
         return &self.player_obs[pid, idx]
@@ -283,26 +284,31 @@ cdef class Environment:
     cdef void spawn_tower(self, int idx, int team, int tier, int y, int x):
         cdef Entity* tower = self.get_tower(idx)
         tower.type = ENTITY_TOWER
-        tower.pid = idx + self.num_agents
+        tower.pid = idx + self.num_agents + self.num_creeps + self.num_neutrals
         tower.team = team
+        tower.basic_attack_cd = 5
 
         if tier == 1:
             tower.health = 1800
             tower.max_health = 1800
-            tower.damage = 3
+            tower.damage = 100
+            tower.xp_on_kill = 800
         elif tier == 2:
             tower.health = 2500
             tower.max_health = 2500
-            tower.damage = 7
+            tower.damage = 190
+            tower.xp_on_kill = 1600
         elif tier == 3:
             tower.health = 2500
             tower.max_health = 2500
-            tower.damage = 10
+            tower.damage = 190
+            tower.xp_on_kill = 2400
         elif tier == 4:
             # TODO: Look up damage
             tower.health = 2500
             tower.max_health = 2500
-            tower.damage = 15
+            tower.damage = 190
+            tower.xp_on_kill = 3200
         else:
             raise ValueError('Invalid tier')
 
@@ -327,6 +333,10 @@ cdef class Environment:
             player.move_modifier = 0
             player.move_timer = 0
             player.stun_timer = 0
+            player.level = 1
+            player.basic_attack_cd = 8
+            player.damage = 25
+            player.xp = 0
 
             if pid < self.num_agents//2:
                 player.team = 0
@@ -335,27 +345,6 @@ cdef class Environment:
 
             self.respawn_player(player)
 
-        '''
-        self.spawn_tower(0, 0, 1, 43, 25)
-        self.spawn_tower(1, 0, 1, 74, 55)
-        self.spawn_tower(2, 0, 1, 104, 96)
-        self.spawn_tower(3, 0, 2, 72, 25)
-        self.spawn_tower(4, 0, 2, 85, 46)
-        self.spawn_tower(5, 0, 2, 106, 66)
-        self.spawn_tower(6, 0, 3, 97, 25)
-        self.spawn_tower(7, 0, 3, 99, 29)
-        self.spawn_tower(8, 0, 3, 104, 33)
-        self.spawn_tower(9, 1, 1, 128-43, 128-25)
-        self.spawn_tower(10, 1, 1, 128-74, 128-55)
-        self.spawn_tower(11, 1, 1, 128-104, 128-96)
-        self.spawn_tower(12, 1, 2, 128-72, 128-25)
-        self.spawn_tower(13, 1, 2, 128-85, 128-46)
-        self.spawn_tower(14, 1, 2, 128-106, 128-66)
-        self.spawn_tower(15, 1, 3, 128-97, 128-25)
-        self.spawn_tower(16, 1, 3, 128-99, 128-29)
-        self.spawn_tower(17, 1, 3, 128-104, 128-33)
-        '''
-        
         self.compute_observations()
 
     cdef bint move_to(self, Entity* player, float dest_y, float dest_x):
@@ -492,6 +481,7 @@ cdef class Environment:
         cdef:
             Entity* target
             int target_pid
+            float dist
 
         target_pid = self.neutral_target(neutral)
 
@@ -501,28 +491,32 @@ cdef class Environment:
             dest_y = target.y
             dest_x = target.x
 
-            if l2_distance(neutral.y, neutral.x, dest_y, dest_x) < 2:
-                self.attack(neutral, target, 2)
-
-            self.creep_path(neutral, dest_y, dest_x)
+            dist = l2_distance(neutral.y, neutral.x, dest_y, dest_x)
+            if dist < 2:
+                self.basic_attack(neutral, target)
+            else:
+                self.creep_path(neutral, dest_y, dest_x)
         else:
             self.creep_path(neutral, neutral.spawn_y, neutral.spawn_x)
 
     cdef void spawn_neutral(self, int idx, int camp):
         cdef:
-            int pid = idx + self.num_agents + self.num_towers + self.num_creeps
+            int pid = idx + self.num_agents + self.num_creeps
             Entity* neutral = self.get_entity(pid)
             int dy, dx
 
         neutral.pid = pid
         neutral.type = ENTITY_NEUTRAL
-        neutral.health = 200
-        neutral.max_health = 200
+        neutral.health = 500
+        neutral.max_health = 500
         neutral.mana = 0
-        neutral.max_mana = 0
+        neutral.max_mana = 100
         neutral.team = 2
         neutral.spawn_y = self.neutral_spawns[camp, 0]
         neutral.spawn_x = self.neutral_spawns[camp, 1]
+        neutral.xp_on_kill = 35
+        neutral.basic_attack_cd = 5
+        neutral.damage = 22
 
         while True:
             dy = rand() % 7 - 3
@@ -537,6 +531,7 @@ cdef class Environment:
             float dest_y = self.waypoints[lane, waypoint, 0]
             float dest_x = self.waypoints[lane, waypoint, 1]
             int target_pid
+            float dist
             Entity* target
 
         # Aggro check
@@ -547,10 +542,11 @@ cdef class Environment:
             dest_y = target.y
             dest_x = target.x
 
-            if l2_distance(creep.y, creep.x, dest_y, dest_x) < 2:
-                self.attack(creep, target, 2)
-
-            self.creep_path(creep, dest_y, dest_x)
+            dist = l2_distance(creep.y, creep.x, dest_y, dest_x)
+            if dist < 2:
+                self.basic_attack(creep, target)
+            else:
+                self.creep_path(creep, dest_y, dest_x)
         else:
             self.creep_path(creep, dest_y, dest_x)
 
@@ -559,7 +555,7 @@ cdef class Environment:
 
     cdef void spawn_creep(self, int idx, int lane):
         cdef:
-            int pid = idx + self.num_agents + self.num_towers
+            int pid = idx + self.num_agents
             Entity* creep = self.get_entity(pid)
             int team 
 
@@ -570,11 +566,14 @@ cdef class Environment:
 
         creep.pid = pid
         creep.type = ENTITY_CREEP
-        creep.health = 200
-        creep.max_health = 200
+        creep.health = 450
+        creep.max_health = 450
         creep.team = team
         creep.lane = lane
         creep.waypoint = 0
+        creep.xp_on_kill = 60
+        creep.damage = 22
+        creep.basic_attack_cd = 5
 
         self.respawn_creep(creep, lane)
 
@@ -645,10 +644,26 @@ cdef class Environment:
 
         if target.type == ENTITY_PLAYER:
             self.respawn_player(target)
-        elif target.type == ENTITY_TOWER or target.type == ENTITY_CREEP:
+        elif (target.type == ENTITY_TOWER or target.type == ENTITY_CREEP
+                or target.type == ENTITY_NEUTRAL):
             self.kill(target)
 
+        if player.type == ENTITY_PLAYER:
+            if target.type == ENTITY_PLAYER:
+                player.xp += xp_for_player_kill(target)
+            else:
+                player.xp += target.xp_on_kill
+
+            player.level = self.level(player.xp)
+
         return True
+
+    cdef bint basic_attack(self, Entity* player, Entity* target):
+        if player.basic_attack_timer > 0:
+            return False
+
+        player.basic_attack_timer = player.basic_attack_cd
+        return self.attack(player, target, player.damage)
 
     cdef bint heal(self, Entity* player, Entity* target, float amount):
         if target.pid == -1:
@@ -686,6 +701,40 @@ cdef class Environment:
                 else:
                     if self.heal(player, target, -damage):
                         success = True
+
+        return success
+
+    cdef bint attack_nearest_target(self, Entity* player, int radius, float damage):
+        cdef int y, x, dy, dx, target_pid
+        cdef bint success = False
+        cdef float dist
+        cdef float shortest_dist = 99999
+        cdef Entity* target
+        cdef Entity* closest_target = NULL
+
+        # Must be centered on player
+        y = int(player.y)
+        x = int(player.x)
+
+        for dy in range(-radius, radius+1):
+            for dx in range(-radius, radius+1):
+                target_pid = self.pid_map[y + dy, x + dx]
+
+                if target_pid == -1:
+                    continue
+
+                target = self.get_entity(target_pid)
+                if target.team == player.team:
+                    continue
+
+                dist = l2_distance(player.y, player.x, target.y, target.x)
+                if dist < shortest_dist:
+                    shortest_dist = dist
+                    closest_target = target
+
+        if closest_target != NULL:
+            if self.basic_attack(player, closest_target):
+                success = True
 
         return success
 
@@ -750,6 +799,9 @@ cdef class Environment:
 
         if entity.e_timer > 0:
             entity.e_timer -= 1
+
+        if entity.basic_attack_timer > 0:
+            entity.basic_attack_timer -= 1
 
     cdef void skill_support_hook(self, Entity* player, Entity* target):
         if player.mana < 15:
@@ -857,7 +909,8 @@ cdef class Environment:
             return
 
         # Targeted on minions, splashes to players
-        if target.type == ENTITY_CREEP and self.aoe(player, target, 3, 300, 0):
+        if (target.type == ENTITY_CREEP or target.type == ENTITY_NEUTRAL
+                ) and self.aoe(player, target, 3, 300, 0):
             player.mana -= 40
             player.q_timer = 40
 
@@ -919,7 +972,7 @@ cdef class Environment:
 
         # Neutral AI
         cdef int camp, neut
-        if self.tick % 3600 == 0:
+        if self.tick % 600 == 0:
             for camp in range(18):
                 for neut in range(4):
                     self.spawn_neutral(4*camp + neut, camp)
@@ -930,13 +983,14 @@ cdef class Environment:
                 continue
 
             self.update_status(neutral)
+            self.update_cooldowns(neutral)
             if neutral.stun_timer > 0:
                 continue
 
             self.neutral_ai(neutral)
 
         # Creep AI
-        if self.tick % 1200 == 0:
+        if self.tick % 150 == 0:
             self.spawn_creep_wave()
 
         for idx in range(self.num_creeps):
@@ -945,6 +999,7 @@ cdef class Environment:
                 continue
 
             self.update_status(creep)
+            self.update_cooldowns(creep)
             if creep.stun_timer > 0:
                 continue
 
@@ -956,7 +1011,11 @@ cdef class Environment:
             if tower.pid == -1:
                 continue
 
-            self.aoe(tower, tower, TOWER_VISION, tower.damage, 0)
+            self.update_cooldowns(tower)
+            if tower.basic_attack_timer > 0:
+                continue
+
+            self.attack_nearest_target(tower, TOWER_VISION, tower.damage)
 
         # Player Logic
         for pid in range(self.num_agents):
@@ -1000,7 +1059,7 @@ cdef class Environment:
                 elif use_e:
                     self.skill_support_stun(player, target)
                 else:
-                    self.attack(player, target, 5)
+                    self.basic_attack(player, target)
             elif player.pid == 0 or player.pid == 6:
                 if use_q:
                     self.skill_assassin_aoe_minions(player, target)
@@ -1009,7 +1068,7 @@ cdef class Environment:
                 elif use_e:
                     self.skill_assassin_move_buff(player, target)
                 else:
-                    self.attack(player, target, 5)
+                    self.basic_attack(player, target)
             elif player.pid == 2 or player.pid == 7:
                 if use_q:
                     self.skill_burst_nuke(player, target)
@@ -1018,7 +1077,7 @@ cdef class Environment:
                 elif use_e:
                     self.skill_burst_aoe_stun(player, target)
                 else:
-                    self.attack(player, target, 5)
+                    self.basic_attack(player, target)
             elif player.pid == 3 or player.pid == 8:
                 if use_q:
                     self.skill_tank_aoe_dot(player, target)
@@ -1027,7 +1086,7 @@ cdef class Environment:
                 elif use_e:
                     self.skill_tank_engage_aoe(player, target)
                 else:
-                    self.attack(player, target, 5)
+                    self.basic_attack(player, target)
             elif player.pid == 4 or player.pid == 9:
                 if use_q:
                     self.skill_carry_retreat_slow(player, target)
@@ -1036,7 +1095,7 @@ cdef class Environment:
                 elif use_e:
                     self.skill_carry_aoe(player, target)
                 else:
-                    self.attack(player, target, 5)
+                    self.basic_attack(player, target)
 
             dest_y = player.y + player.move_modifier*self.agent_speed*vel_y
             dest_x = player.x + player.move_modifier*self.agent_speed*vel_x
