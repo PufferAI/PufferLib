@@ -19,11 +19,11 @@ case $GROUP in
         $COMMON bandit
         ;;
     grid)
-        $COMMON grid_continuous --env.task foraging --vec multiprocessing
-        $COMMON grid_continuous --env.task predator_prey --vec multiprocessing
-        $COMMON grid_continuous --env.task group --vec multiprocessing
-        $COMMON grid_continuous --env.task puffer --vec multiprocessing
-        $COMMON grid_continuous --env.task center --vec multiprocessing
+        $COMMON foraging --vec multiprocessing
+        $COMMON predator_prey --vec multiprocessing
+        $COMMON group --vec multiprocessing
+        $COMMON puffer --vec multiprocessing
+        $COMMON center --vec multiprocessing
         ;;
     procgen)
         $COMMON bigfish
