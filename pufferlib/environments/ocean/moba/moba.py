@@ -91,7 +91,7 @@ class PufferMoba(pufferlib.PufferEnv):
 
         self.buf = pufferlib.namespace(
             observations = np.zeros(
-                self.num_agents*self.obs_size*self.obs_size + 3, dtype=np.uint8),
+                (self.num_agents, self.obs_size*self.obs_size + 3), dtype=np.uint8),
             rewards = np.zeros(self.num_agents, dtype=np.float32),
             terminals = np.zeros(self.num_agents, dtype=bool),
             truncations = np.zeros(self.num_agents, dtype=bool),
@@ -449,25 +449,21 @@ def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
             x+4, y -2*height - 12, 12, [255, 255, 255, 255])
 
 
+def test_performance(timeout=20, atn_cache=1024):
+    env = PufferMoba()
+    env.reset()
+    tick = 0
 
-def test_puffer_performance(timeout):
+    actions = np.random.randint(0, 2, (atn_cache, 10, 6))
+
     import time
-    env = PufferGrid()
-    actions = np.random.randn(1000, env.num_agents, 2)
-    idx = 0
-    dones = {1: True}
     start = time.time()
     while time.time() - start < timeout:
-        if env.done:
-            env.reset()
-            dones = {1: False}
-        else:
-            _, _, dones, _, _ = env.step(actions[idx%1000])
+        atns = actions[tick % atn_cache]
+        env.step(atns)
+        tick += 1
 
-        idx += 1
-
-    sps = env.num_agents * idx // timeout
-    print(f'Puffer SPS: {sps}')
+    print(f'SPS: %f', 10 * tick / (time.time() - start))
 
 if __name__ == '__main__':
     # Run with c profile
@@ -475,4 +471,4 @@ if __name__ == '__main__':
     #run('test_puffer_performance(10)', sort='tottime')
     #exit(0)
 
-    test_puffer_performance(10)
+    test_performance(10)
