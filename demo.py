@@ -272,7 +272,7 @@ if __name__ == '__main__':
     parser.add_argument('--baseline', action='store_true',
         help='Pretrained baseline where available')
     parser.add_argument('--render-mode', type=str, default='auto',
-        choices=['auto', 'human', 'ansi', 'rgb_array', 'None'])
+        choices=['auto', 'human', 'ansi', 'rgb_array', 'raylib', 'None'])
     parser.add_argument('--vec', '--vector', '--vectorization', type=str,
         default='serial', choices=['serial', 'multiprocessing', 'ray'])
     parser.add_argument('--exp-id', '--exp-name', type=str,

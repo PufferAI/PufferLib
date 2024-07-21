@@ -558,7 +558,7 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
     # We are just using Serial vecenv to give a consistent
     # single-agent/multi-agent API for evaluation
     if render_mode != 'auto':
-        env_kwargs.render_mode = render_mode
+        env_kwargs['render_mode'] = render_mode
 
     env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs)
 
@@ -587,7 +587,7 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
                 cv2.imshow('frame', render)
                 cv2.waitKey(1)
                 time.sleep(1/24)
-            elif driver.render_mode == 'human' and render is not None:
+            elif driver.render_mode in ('human', 'raylib') and render is not None:
                 frames.append(render)
 
         with torch.no_grad():
