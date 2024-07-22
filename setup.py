@@ -239,9 +239,10 @@ setup(
         "pufferlib/environments/ocean/grid/c_grid.pyx",
         "pufferlib/environments/ocean/snake/c_snake.pyx",
         "pufferlib/environments/ocean/moba/c_moba.pyx",
+        "pufferlib/environments/ocean/moba/c_precompute_pathing.pyx",
     ], 
        #nthreads=6,
-       #annotate=True,
+       annotate=True,
        #compiler_directives={'profile': True}, annotate=True
     ),
     extra_compile_args=['-O3', '-march=native'],
