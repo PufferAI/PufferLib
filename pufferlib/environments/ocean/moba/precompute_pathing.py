@@ -157,16 +157,16 @@ def test_bfs(grid, r1, c1):
     renderer = RaylibVectorField(grid, paths)
 
     frames = []
-    for i in range(90):
+    for i in range(90000000):
         frame = renderer.render()
-        frames.append(frame)
+        #frames.append(frame)
         #import PIL
         #PIL.Image.fromarray(frame).save('pathing.png')
         #exit(0)
 
     # Save frames as gif
-    import imageio
-    imageio.mimsave('pathing.gif', frames, fps=15, loop=0)
+    #import imageio
+    #imageio.mimsave('pathing.gif', frames, fps=15, loop=0)
 
 
 def test_performance(grid, r1, c1, timeout=10):

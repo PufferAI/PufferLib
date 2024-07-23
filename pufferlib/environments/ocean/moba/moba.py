@@ -9,6 +9,7 @@ import pufferlib
 from pufferlib.environments.ocean import render
 from pufferlib.environments.ocean.moba.c_moba import Environment as CEnv
 from pufferlib.environments.ocean.moba.c_moba import entity_dtype
+from pufferlib.environments.ocean.moba.c_precompute_pathing import precompute_pathing
 
 EMPTY = 0
 FOOD = 1
@@ -41,7 +42,7 @@ COLORS = np.array([
 
 class PufferMoba(pufferlib.PufferEnv):
     def __init__(self, vision_range=5, agent_speed=0.5,
-            discretize=False, report_interval=32, render_mode='rgb_array'):
+            discretize=False, report_interval=1024, render_mode='rgb_array'):
         super().__init__()
 
         self.height = 128
@@ -49,7 +50,7 @@ class PufferMoba(pufferlib.PufferEnv):
         self.num_agents = 10
         self.num_creeps = 100
         self.num_neutrals = 72
-        self.num_towers = 22
+        self.num_towers = 24
         self.vision_range = vision_range
         self.agent_speed = agent_speed
         self.discretize = discretize
@@ -64,11 +65,33 @@ class PufferMoba(pufferlib.PufferEnv):
         game_map = np.array(Image.open(game_map_path))[:, :, -1]
         game_map = game_map[::2, ::2][1:-1, 1:-1]
 
+        ai_cache_path = os.path.join(
+            *self.__module__.split('.')[:-1], 'pathing_cache.npy')
+
         entity_data_path = os.path.join(
             *self.__module__.split('.')[:-1], 'data.yaml')
         import yaml
         with open(entity_data_path, 'r') as f:
             self.entity_data = yaml.safe_load(f)
+
+        try:
+            self.ai_paths = np.load(ai_cache_path)
+        except:
+            pathing_map = game_map.copy()
+            pathing_map[game_map == 0] = 1
+            pathing_map[game_map == 255] = 0
+            '''
+            for k in self.entity_data:
+                if 'tower' not in k:
+                    continue
+
+                y = int(self.entity_data[k]['y'])
+                x = int(self.entity_data[k]['x'])
+                pathing_map[y, x] = 1
+            '''
+
+            self.ai_paths = np.asarray(precompute_pathing(pathing_map))
+            np.save(ai_cache_path, self.ai_paths)
 
         self.grid = np.zeros((self.height, self.width), dtype=np.uint8)
         self.grid[game_map == 0] = WALL
@@ -126,6 +149,7 @@ class PufferMoba(pufferlib.PufferEnv):
         self.single_action_space = self.action_space
         self.cenv = None
         self.done = True
+        self.outcome = 0
         self.infos = {}
 
     def render(self, upscale=4):
@@ -162,7 +186,8 @@ class PufferMoba(pufferlib.PufferEnv):
             self.entities.x.astype(np.int32)
         ] = AGENT_1
 
-        self.cenv = CEnv(self.grid, self.pids, self.c_entities, self.entity_data,
+        self.cenv = CEnv(self.grid, self.ai_paths,
+            self.pids, self.c_entities, self.entity_data,
             self.c_obs_players,
             self.obs_view, self.buf.rewards, self.num_agents, self.num_creeps,
             self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
@@ -170,10 +195,15 @@ class PufferMoba(pufferlib.PufferEnv):
         self.cenv.reset()
 
         self.sum_rewards = []
-        self._fill_observations()
+        #self._fill_observations()
         return self.buf.observations, self.infos
 
     def step(self, actions):
+        actions = actions.astype(np.float32)
+        outcome = self.cenv.step(actions)
+        infos = {}
+
+        '''
         if self.render_mode == 'human' and self.human_action is not None:
             #print(self.human_action)
             actions[0] = self.human_action
@@ -188,7 +218,15 @@ class PufferMoba(pufferlib.PufferEnv):
 
         self.buf.rewards.fill(0)
         self.actions = actions
-        self.cenv.step(actions)
+
+        outcome = self.cenv.step(actions)
+        self.outcome = outcome
+        if outcome == 0:
+            pass
+        #elif outcome == 1:
+        #    print('Dire Victory')
+        #elif outcome == 2:
+        #    print('Radient Victory')
 
         infos = self.infos
         self.sum_rewards.append(self.buf.rewards.sum())
@@ -196,9 +234,20 @@ class PufferMoba(pufferlib.PufferEnv):
         self.tick += 1
         if self.tick % self.report_interval == 0:
             infos['reward'] = np.mean(self.sum_rewards) / self.num_agents
+            radient_levels = self.entities[:5].level
+            infos['radient_level_min'] = min(radient_levels)
+            infos['radient_level_max'] = max(radient_levels)
+            infos['radient_level_mean'] = np.mean(radient_levels)
+            dire_levels = self.entities[5:10].level
+            infos['dire_level_min'] = min(dire_levels)
+            infos['dire_level_max'] = max(dire_levels)
+            infos['dire_level_mean'] = np.mean(dire_levels)
             self.sum_rewards = []
+            #print('Radient Lv: ', infos['radient_level_mean'])
+            #print('Dire Lv: ', infos['dire_level_mean'])
+        '''
 
-        self._fill_observations()
+        #self._fill_observations()
         return (self.buf.observations, self.buf.rewards,
             self.buf.terminals, self.buf.truncations, infos)
 
@@ -296,6 +345,7 @@ class RaylibClient:
         #print(f'Mouse: {pos.x}, {pos.y}, Target: {ts*mouse_x}, {ts*mouse_y}, Action: {ay}, {ax}')
 
         best_target = None
+        '''
         for yy in range(mouse_y - 3, mouse_y + 4):
             for xx in range(mouse_x - 3, mouse_x + 4):
                 if xx < 0 or yy < 0 or xx > 128 or yy > 128:
@@ -323,6 +373,7 @@ class RaylibClient:
 
                 if dist_to_target < dist_to_best_target:
                     best_target = target
+        '''
                     
         attack = 0
         if best_target is None:
@@ -361,7 +412,16 @@ class RaylibClient:
                 elif tile == 2:
                     rl.DrawRectangle(x*ts, y*ts, ts, ts, [0, 0, 0, 255])
                     continue
-            
+
+        for y in range(r_min, r_max+1):
+            for x in range(c_min, c_max+1):
+                if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
+                    continue
+
+                tile = grid[y, x]
+                if tile == 0 or tile == 2:
+                    continue
+           
                 pid = pids[y, x]
 
                 if pid == -1:

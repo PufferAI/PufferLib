@@ -1,3 +1,6 @@
+dota_badguys_fort:
+  x: 107.52307692307693
+  y: 26.53846153846154
 dota_badguys_tower1_bot:
   x: 113.22307692307692
   y: 78.3
@@ -31,6 +34,9 @@ dota_badguys_tower4_bot:
 dota_badguys_tower4_top:
   x: 103.03076923076924
   y: 28.261538461538464
+dota_goodguys_fort:
+  x: 19.46153846153846
+  y: 106.16923076923078
 dota_goodguys_tower1_bot:
   x: 102.87692307692308
   y: 112.13846153846154

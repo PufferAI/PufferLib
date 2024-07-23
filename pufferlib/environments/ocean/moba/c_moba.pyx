@@ -1,13 +1,15 @@
 # distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
 # cython: language_level=3
-# cython: boundscheck=True
-# cython: initializedcheck=True
-# cython: wraparound=True
+# cython: boundscheck=False
+# cython: initializedcheck=False
+# cython: wraparound=False
 # cython: cdivision=True
-# cython: nonecheck=True
+# cython: nonecheck=False
 # cython: profile=False
 
 from libc.stdlib cimport rand, RAND_MAX
+from libc.math cimport sqrtf
+cimport cython
 cimport numpy as cnp
 import numpy as np
 
@@ -76,15 +78,28 @@ cpdef entity_dtype():
     cdef Entity entity
     return np.asarray(<Entity[:1]>&entity).dtype
 
-cdef inline xp_for_player_kill(Entity* player):
+@cython.profile(False)
+cdef int xp_for_player_kill(Entity* player):
     return 100 + int(player.xp / 7.69)
  
-cdef inline float clip(float x):
+@cython.profile(False)
+cdef float clip(float x):
     # Clip to [-1, 1]
     return max(-1, min(x, 1))
 
-cdef inline float l2_distance(float x1, float y1, float x2, float y2):
-    return ((x1 - x2)**2 + (y1 - y2)**2)**0.5
+@cython.profile(False)
+cdef float l2_distance(float x1, float y1, float x2, float y2):
+    '''Sqrt throws possible error which calls back to Python...
+    Maybe some way to avoid negative sqrt check? Or just use L1'''
+    cdef:
+        float dx = x1 - x2
+        float dy = y1 - y2
+
+    return sqrtf(dx*dx + dy*dy)
+
+@cython.profile(False)
+cdef inline float l1_distance(float x1, float y1, float x2, float y2):
+    return abs(x1 - x2) + abs(y1 - y2)
 
 cdef class Environment:
     cdef:
@@ -103,6 +118,7 @@ cdef class Environment:
         int[:] xp_for_level
 
         unsigned char[:, :] grid
+        unsigned char[:, :, :, :] ai_paths
         unsigned char[:, :, :] observations
 
         float[:] rewards
@@ -113,13 +129,19 @@ cdef class Environment:
         float[:, :, :] waypoints 
         dict entity_data
         float[:, :] neutral_spawns
-        Entity* scanned_targets[200]
 
-    def __init__(self, grid, pids, cnp.ndarray entities, dict entity_data,
-            cnp.ndarray player_obs,
-            observations, rewards, int num_agents, int num_creeps,
-            int num_neutrals, int num_towers, int vision_range,
-            float agent_speed, bint discretize):
+        # MAX_ENTITIES x MAX_SCANNED_TARGETS
+        Entity* scanned_targets[256][121]
+
+        int rng_n
+        int rng_idx
+        float[:] rng
+
+    def __init__(self, cnp.ndarray grid, cnp.ndarray ai_paths,
+            cnp.ndarray pids, cnp.ndarray entities, dict entity_data,
+            cnp.ndarray player_obs, cnp.ndarray observations, cnp.ndarray rewards,
+            int num_agents, int num_creeps, int num_neutrals, int num_towers,
+            int vision_range, float agent_speed, bint discretize):
         self.height = grid.shape[0]
         self.width = grid.shape[1]
         self.num_agents = num_agents
@@ -132,7 +154,12 @@ cdef class Environment:
         self.obs_size = 2*vision_range + 1
         self.creep_idx = 0
 
+        # Hey, change the scanned_targets size to match!
+        assert num_agents + num_creeps + num_neutrals + num_towers <= 256
+        assert self.obs_size * self.obs_size <= 121
+
         self.grid = grid
+        self.ai_paths = ai_paths
         self.observations = observations
         self.rewards = rewards
 
@@ -140,6 +167,11 @@ cdef class Environment:
         self.entities = entities
         self.entity_data = entity_data
         self.player_obs = player_obs
+
+        # Preallocate RNG -1 to 1
+        self.rng_n = 10000
+        self.rng_idx = 0
+        self.rng = 2*np.random.rand(self.rng_n).astype(np.float32) - 1
 
         self.xp_for_level = np.array([
             0, 240, 640, 1160, 1760, 2440, 3200, 4000, 4900, 4900, 7000, 8200,
@@ -190,6 +222,19 @@ cdef class Environment:
                     )
                     idx += 1
 
+        # Hardcode ancients
+        tower_name = 'dota_goodguys_fort'
+        self.spawn_tower(idx, 0, 5,
+            entity_data[tower_name]['y'],
+            entity_data[tower_name]['x'],
+        )
+        idx += 1
+        tower_name = 'dota_badguys_fort'
+        self.spawn_tower(idx, 1, 5,
+            entity_data[tower_name]['y'],
+            entity_data[tower_name]['x'],
+        )
+
         # Num camps
         self.neutral_spawns = np.zeros((18, 2), dtype=np.float32)
         idx = 0
@@ -205,37 +250,41 @@ cdef class Environment:
                 self.neutral_spawns[idx, 1] = entity_data[neutral_name]['x']
                 idx += 1
 
+    @cython.profile(False)
     cdef int level(self, xp):
+        cdef int i
         for i in range(len(self.xp_for_level)):
             if xp < self.xp_for_level[i]:
                 return i + 1
 
-        raise ValueError('Invalid xp')
+        return i+1
      
+    @cython.profile(False)
     cdef Entity* get_player_ob(self, int pid, int idx):
         return &self.player_obs[pid, idx]
 
+    @cython.profile(False)
     cdef Entity* get_entity(self, int pid):
         return &self.entities[pid]
 
+    @cython.profile(False)
     cdef Entity* get_creep(self, int idx):
         return &self.entities[idx + self.num_agents]
 
+    @cython.profile(False)
     cdef Entity* get_neutral(self, int idx):
         return &self.entities[idx + self.num_agents + self.num_creeps]
 
+    @cython.profile(False)
     cdef Entity* get_tower(self, int idx):
         return &self.entities[idx + self.num_agents + self.num_creeps + self.num_neutrals]
 
     cdef void compute_observations(self):
         cdef:
-            float y
-            float x
             int r
             int c
-            int dx
-            int dy
-            int agent_idx
+            int x
+            int y
             int idx
             int pid
             int target_pid
@@ -251,20 +300,17 @@ cdef class Environment:
                 self.get_player_ob(pid, idx).pid = -1
 
             player = self.get_entity(pid)
-            y = player.y
-            x = player.x
-            r = int(y)
-            c = int(x)
+            y = int(player.y)
+            x = int(player.x)
             self.observations[pid, :] = self.grid[
-                r-self.vision_range:r+self.vision_range+1,
-                c-self.vision_range:c+self.vision_range+1
+                y-self.vision_range:y+self.vision_range+1,
+                x-self.vision_range:x+self.vision_range+1
             ]
 
             idx = 0
-            for dy in range(-self.vision_range, self.vision_range+1):
-                r = int(player.y) + dy
-                for dx in range(-self.vision_range, self.vision_range+1):
-                    c = int(player.x) + dx
+            # TODO: sort by distance
+            for r in range(y-self.vision_range, y+self.vision_range+1):
+                for c in range(x-self.vision_range, x+self.vision_range+1):
                     target_pid = self.pid_map[r, c]
                     if target_pid == -1:
                         continue
@@ -314,6 +360,11 @@ cdef class Environment:
             tower.max_health = 2500
             tower.damage = 190
             tower.xp_on_kill = 3200
+        elif tier == 5:
+            tower.health = 4500
+            tower.max_health = 4500
+            tower.damage = 0
+            tower.xp_on_kill = 0
         else:
             raise ValueError('Invalid tier')
 
@@ -340,7 +391,7 @@ cdef class Environment:
             player.stun_timer = 0
             player.level = 1
             player.basic_attack_cd = 8
-            player.damage = 25
+            player.damage = 50
             player.xp = 0
 
             if pid < self.num_agents//2:
@@ -350,8 +401,22 @@ cdef class Environment:
 
             self.respawn_player(player)
 
+        # Hardcode lanes for now
+        self.get_entity(0).lane = 2
+        self.get_entity(1).lane = 2
+        self.get_entity(4).lane = 2
+        self.get_entity(2).lane = 1
+        self.get_entity(3).lane = 0
+
+        self.get_entity(5).lane = 3
+        self.get_entity(6).lane = 3
+        self.get_entity(9).lane = 3
+        self.get_entity(7).lane = 4
+        self.get_entity(8).lane = 5
+
         self.compute_observations()
 
+    @cython.profile(False)
     cdef bint move_to(self, Entity* player, float dest_y, float dest_x):
         cdef:
             int disc_y = int(player.y)
@@ -420,46 +485,86 @@ cdef class Environment:
         self.pid_map[y, x] = -1
         entity.pid = -1
 
-    cdef void creep_path(self, Entity* creep, float dest_y, float dest_x):
+    @cython.profile(False)
+    cdef bint move_towards(self, Entity* entity, float speed, int dest_y, int dest_x):
+        speed = entity.move_modifier * speed
+
         cdef:
-            float dy = creep.move_modifier*self.agent_speed*clip(dest_y - creep.y)
-            float dx = creep.move_modifier*self.agent_speed*clip(dest_x - creep.x)
-            float move_dest_y = creep.y + dy
-            float move_dest_x = creep.x + dx
-            int disc_y = int(move_dest_y)
-            int disc_x = int(move_dest_x)
+            int entity_y = int(entity.y)
+            int entity_x = int(entity.x)
+            int atn = self.ai_paths[dest_y, dest_x, entity_y, entity_x]
+            int dy = 0
+            int dx = 0
+            float jitter_x
+            float jitter_y
+            int move_to_y
+            int move_to_x
 
-        # End waypoint
-        if dest_y == 0 or dest_x == 0:
-            return
+        if atn == 0:
+            dy = 1
+        elif atn == 1:
+            dy = -1
+        elif atn == 2:
+            dx = 1
+        elif atn == 3:
+            dx = -1
+        elif atn == 4:
+            dy = 1
+            dx = -1
+        elif atn == 5:
+            dy = -1
+            dx = -1
+        elif atn == 6:
+            dy = -1
+            dx = 1
+        elif atn == 7:
+            dy = 1
+            dx = 1
+        #else:
+        #    dy = 1
+        #    dx = 0
+ 
+        move_to_y = int(entity.y + dy*speed)
+        move_to_x = int(entity.x + dx*speed)
+        if (self.grid[move_to_y, move_to_x] != EMPTY and
+                self.pid_map[move_to_y, move_to_x] != entity.pid):
+            jitter_x = self.rng[self.rng_idx]
+            jitter_y = self.rng[self.rng_idx + 1]
 
-        if (self.grid[disc_y, disc_x] != EMPTY and
-                self.pid_map[disc_y, disc_x] != creep.pid):
-            dx = 2 * self.agent_speed * (rand()/(RAND_MAX + 1.0) - 0.5)
-            dy = 2 * self.agent_speed * (rand()/(RAND_MAX + 1.0) - 0.5)
-            move_dest_y = creep.y + dy
-            move_dest_x = creep.x + dx
+            self.rng_idx += 2
+            if self.rng_idx >= self.rng_n - 1:
+                self.rng_idx = 0
 
-        self.move_to(creep, move_dest_y, move_dest_x)
+            #jitter_x = 2*(rand()/(RAND_MAX + 1.0) - 0.5)
+            #jitter_y = 2*(rand()/(RAND_MAX + 1.0) - 0.5)
+            return self.move_to(entity,
+                entity.y + jitter_y, entity.x + jitter_x)
+
+        return self.move_to(entity,
+            entity.y + dy*speed,
+            entity.x + dx*speed)
 
     cdef void neutral_ai(self, Entity* neutral):
         cdef:
             Entity* target
-            bint found_target
+            int pid = neutral.pid
 
-        found_target = self.scan_aoe(neutral, NEUTRAL_VISION,
-            exclude_friendly=True, exclude_hostile=False,
-            exclude_creeps=True, exclude_neutrals=True,
-            exclude_towers=True)
+        if self.tick % 5 == 0:
+            self.scan_aoe(neutral, NEUTRAL_VISION,
+                exclude_friendly=True, exclude_hostile=False,
+                exclude_creeps=True, exclude_neutrals=True,
+                exclude_towers=True)
 
-        if found_target:
+        if self.scanned_targets[pid][0] != NULL:
             target = self.nearest_scanned_target(neutral)
-            if l2_distance(neutral.y, neutral.x, target.y, target.x) < 2:
+            #if l2_distance(neutral.y, neutral.x, target.y, target.x) < 2:
+            if abs(neutral.y - target.y) + abs(neutral.x - target.x) < 2:
                 self.basic_attack(neutral, target)
             else:
-                self.creep_path(neutral, target.y, target.x)
-        else:
-            self.creep_path(neutral, neutral.spawn_y, neutral.spawn_x)
+                self.move_towards(neutral, self.agent_speed, int(target.y), int(target.x))
+        #elif l2_distance(neutral.y, neutral.x, neutral.spawn_y, neutral.spawn_x) > 2:
+        elif abs(neutral.y - neutral.spawn_y) + abs(neutral.x - neutral.spawn_x) > 2:
+            self.move_towards(neutral, self.agent_speed, int(neutral.spawn_y), int(neutral.spawn_x))
 
     cdef void spawn_neutral(self, int idx, int camp):
         cdef:
@@ -490,29 +595,33 @@ cdef class Environment:
         cdef:
             int waypoint = creep.waypoint
             int lane = creep.lane
+            int pid = creep.pid
             float dest_y, dest_x
             float dist
             Entity* target
 
-        found_target = self.scan_aoe(creep, CREEP_VISION, exclude_friendly=True,
-            exclude_hostile=False, exclude_creeps=False,
-            exclude_neutrals=True, exclude_towers=False)
+        if self.tick % 5 == 0:
+            self.scan_aoe(creep, CREEP_VISION, exclude_friendly=True,
+                exclude_hostile=False, exclude_creeps=False,
+                exclude_neutrals=True, exclude_towers=False)
 
-        if found_target:
+        if self.scanned_targets[pid][0] != NULL:
             target = self.nearest_scanned_target(creep)
             dest_y = target.y
             dest_x = target.x
 
-            dist = l2_distance(creep.y, creep.x, dest_y, dest_x)
+            #dist = l2_distance(creep.y, creep.x, dest_y, dest_x)
+            dist = abs(creep.y - dest_y) + abs(creep.x - dest_x)
             if dist < 2:
                 self.basic_attack(creep, target)
-            else:
-                self.creep_path(creep, dest_y, dest_x)
+            self.move_towards(creep, self.agent_speed, int(dest_y), int(dest_x))
         else:
             dest_y = self.waypoints[lane, waypoint, 0]
             dest_x = self.waypoints[lane, waypoint, 1]
-            self.creep_path(creep, dest_y, dest_x)
-            if l2_distance(creep.y, creep.x, dest_y, dest_x) < 2:
+            self.move_towards(creep, self.agent_speed, int(dest_y), int(dest_x))
+            # TODO: Last waypoint?
+            #if l2_distance(creep.y, creep.x, dest_y, dest_x) < 2 and self.waypoints[lane, waypoint+1, 0] != 0:
+            if abs(creep.y - dest_y) + abs(creep.x - dest_x) < 2 and self.waypoints[lane, waypoint+1, 0] != 0:
                 creep.waypoint += 1
 
     cdef void spawn_creep(self, int idx, int lane):
@@ -570,6 +679,7 @@ cdef class Environment:
         self.move_to(entity, spawn_y, spawn_x)
         entity.health = entity.max_health
         entity.mana = entity.max_mana
+        entity.waypoint = 0
 
     cdef bint respawn_creep(self, Entity* entity, int lane):
         cdef:
@@ -620,15 +730,19 @@ cdef class Environment:
             self.kill(target)
 
         if player.type == ENTITY_PLAYER:
-            if target.type == ENTITY_PLAYER:
-                player.xp += xp_for_player_kill(target)
-            else:
-                player.xp += target.xp_on_kill
+            if player.xp < 10000000:
+                if target.type == ENTITY_PLAYER:
+                    player.xp += xp_for_player_kill(target)
+                else:
+                    player.xp += target.xp_on_kill
 
             player.level = self.level(player.xp)
-
+            player.damage = 50 + 6*player.level
+            player.max_health = 500 + 50*player.level
+ 
         return True
 
+    @cython.profile(False)
     cdef bint basic_attack(self, Entity* player, Entity* target):
         if player.basic_attack_timer > 0:
             return False
@@ -652,27 +766,28 @@ cdef class Environment:
 
         return True
 
-    cdef bint scan_aoe(self, Entity* player, int radius,
+    @cython.profile(False)
+    cdef scan_aoe(self, Entity* player, int radius,
             bint exclude_friendly, bint exclude_hostile, bint exclude_creeps,
             bint exclude_neutrals, bint exclude_towers):
         cdef:
-            int y = int(player.y)
-            int x = int(player.x)
+            int player_y = int(player.y)
+            int player_x = int(player.x)
             int player_team = player.team
+            int pid = player.pid
             int idx = 0
             Entity* target
             int target_team, target_type
-            int dy, dx
+            int y, x
 
-        for dy in range(-radius, radius+1):
-            for dx in range(-radius, radius+1):
-                target_pid = self.pid_map[y + dy, x + dx]
+        for y in range(player_y-radius, player_y+radius+1):
+            for x in range(player_x-radius, player_x+radius+1):
+                target_pid = self.pid_map[y, x]
                 if target_pid == -1:
                     continue
 
                 target = self.get_entity(target_pid)
                 target_team = target.team
-                target_type = target.type
 
                 if exclude_friendly and target_team == player_team:
                     continue
@@ -680,31 +795,32 @@ cdef class Environment:
                 if exclude_hostile and target_team != player_team:
                     continue
 
-                if exclude_creeps and target_type == ENTITY_CREEP:
+                target_type = target.type
+                if exclude_neutrals and target_type == ENTITY_NEUTRAL:
                     continue
 
-                if exclude_neutrals and target_type == ENTITY_NEUTRAL:
+                if exclude_creeps and target_type == ENTITY_CREEP:
                     continue
 
                 if exclude_towers and target_type == ENTITY_TOWER:
                     continue
 
-                self.scanned_targets[idx] = target
+                self.scanned_targets[pid][idx] = target
                 idx += 1
 
-        self.scanned_targets[idx] = NULL
-        return idx > 0
+        self.scanned_targets[pid][idx] = NULL
 
     cdef void aoe_scanned(self, Entity* player,
             Entity* target, float damage, int stun):
         cdef:
+            int pid = player.pid
             int idx
 
         for idx in range(200):
-            if self.scanned_targets[idx] == NULL:
+            target = self.scanned_targets[pid][idx]
+            if target == NULL:
                 break
 
-            target = self.scanned_targets[idx]
             if damage < 0:
                 self.heal(player, target, -damage)
                 continue
@@ -726,24 +842,25 @@ cdef class Environment:
         self.aoe_scanned(player, target, damage, stun)
         return True
 
+    @cython.profile(False)
     cdef Entity* nearest_scanned_target(self, Entity* player):
         cdef:
             Entity* nearest_target = NULL
             Entity* target
-            float nearest_dist
+            float nearest_dist = 9999999
+            float player_y = player.y
+            float player_x = player.x
             float dist
             int idx = 0
+            int pid = player.pid
 
         for idx in range(200):
-            target = self.scanned_targets[idx]
+            target = self.scanned_targets[pid][idx]
             if target == NULL:
                 break
 
-            if nearest_target == NULL:
-                nearest_target = target
-                continue
-
-            dist = l2_distance(player.y, player.x, target.y, target.x)
+            #dist = l2_distance(player.y, player.x, target.y, target.x)
+            dist = abs(player_y - target.y) + abs(player_x - target.x)
             if dist < nearest_dist:
                 nearest_target = target
                 nearest_dist = dist
@@ -752,20 +869,19 @@ cdef class Environment:
 
     cdef bint aoe_push(self, Entity* player, radius, float amount):
         cdef:
-            Entity* nearest_target = NULL
-            float nearest_dist
-            float dist
+            Entity* target
             int idx = 0
+            int pid = player.pid
 
         self.scan_aoe(player, radius, exclude_friendly=True,
             exclude_hostile=False, exclude_creeps=False,
             exclude_neutrals=False, exclude_towers=True)
 
         for idx in range(200):
-            if self.scanned_targets[idx] == NULL:
+            target = self.scanned_targets[pid][idx]
+            if target == NULL:
                 break
 
-            target = self.scanned_targets[idx]
             self.push(player, target, amount)
             success = True
 
@@ -773,7 +889,8 @@ cdef class Environment:
 
     cdef bint push(self, Entity* player, Entity* target, float amount):
         cdef:
-            float dist = l2_distance(target.x, target.y, player.x, player.y)
+            #float dist = l2_distance(target.x, target.y, player.x, player.y)
+            float dist = abs(target.x - player.x) + abs(target.y - player.y)
             float dx = target.x - player.x
             float dy = target.y - player.y
 
@@ -789,6 +906,7 @@ cdef class Environment:
     cdef bint pull(self, Entity* player, Entity* target, float amount):
         return self.push(target, player, -amount)
 
+    @cython.profile(False)
     cdef void update_status(self, Entity* entity):
         if entity.stun_timer > 0:
             entity.stun_timer -= 1
@@ -799,6 +917,7 @@ cdef class Environment:
         if entity.move_timer == 0:
             entity.move_modifier = 1.0
 
+    @cython.profile(False)
     cdef void update_cooldowns(self, Entity* entity):
         if entity.q_timer > 0:
             entity.q_timer -= 1
@@ -942,7 +1061,7 @@ cdef class Environment:
         player.move_timer = 1
         player.mana -= 5
 
-    def step(self, np_actions):
+    cpdef int step(self, cnp.ndarray np_actions):
         cdef:
             float[:, :] actions_continuous
             unsigned int[:, :] actions_discrete
@@ -1024,9 +1143,11 @@ cdef class Environment:
             if tower.basic_attack_timer > 0:
                 continue
 
-            self.scan_aoe(tower, TOWER_VISION, exclude_friendly=True,
-                exclude_hostile=False, exclude_creeps=False,
-                exclude_neutrals=True, exclude_towers=True)
+            if self.tick % 3 == 0: # Is this fast enough?
+                self.scan_aoe(tower, TOWER_VISION, exclude_friendly=True,
+                    exclude_hostile=False, exclude_creeps=False,
+                    exclude_neutrals=True, exclude_towers=True)
+
             target = self.nearest_scanned_target(tower)
             if target != NULL:
                 self.basic_attack(tower, target)
@@ -1037,6 +1158,9 @@ cdef class Environment:
 
             if player.mana < player.max_mana:
                 player.mana += 1
+
+            if player.health < player.max_health:
+                player.health += 1
 
             self.update_status(player)
             self.update_cooldowns(player)
@@ -1057,15 +1181,17 @@ cdef class Environment:
                 vel_y = actions_continuous[pid, 0]
                 vel_x = actions_continuous[pid, 1]
                 attack = int(actions_continuous[pid, 2])
-                use_q = int(actions_continuous[pid, 3]) > 0.5
-                use_w = int(actions_continuous[pid, 4]) > 0.5
-                use_e = int(actions_continuous[pid, 5]) > 0.5
+                # TODO: Breaks to python
+                #use_q = int(actions_continuous[pid, 3]) > 0.5
+                #use_w = int(actions_continuous[pid, 4]) > 0.5
+                #use_e = int(actions_continuous[pid, 5]) > 0.5
 
             # This is a copy. Have to get the real one
             target = self.get_player_ob(pid, attack)
             target = self.get_entity(target.pid)
 
-            if player.pid == 1 or player.pid == 5:
+            '''
+            if player.pid == 0 or player.pid == 5:
                 if use_q:
                     self.skill_support_hook(player, target)
                 elif use_w:
@@ -1074,7 +1200,7 @@ cdef class Environment:
                     self.skill_support_stun(player, target)
                 else:
                     self.basic_attack(player, target)
-            elif player.pid == 0 or player.pid == 6:
+            elif player.pid == 1 or player.pid == 6:
                 if use_q:
                     self.skill_assassin_aoe_minions(player, target)
                 elif use_w:
@@ -1110,10 +1236,20 @@ cdef class Environment:
                     self.skill_carry_aoe(player, target)
                 else:
                     self.basic_attack(player, target)
+            '''
 
-            dest_y = player.y + player.move_modifier*self.agent_speed*vel_y
-            dest_x = player.x + player.move_modifier*self.agent_speed*vel_x
-            self.move_to(player, dest_y, dest_x)
+            #dest_y = player.y + player.move_modifier*self.agent_speed*vel_y
+            #dest_x = player.x + player.move_modifier*self.agent_speed*vel_x
+            #self.move_to(player, dest_y, dest_x)
+            self.creep_ai(player)
 
         self.tick += 1
         self.compute_observations()
+
+        if self.get_tower(22).health <= 0:
+            return 1 
+        if self.get_tower(23).health <= 0:
+            return 2
+
+        return 0
+
