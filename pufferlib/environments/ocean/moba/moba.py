@@ -8,7 +8,7 @@ import gymnasium
 import pufferlib
 from pufferlib.environments.ocean import render
 from pufferlib.environments.ocean.moba.c_moba import Environment as CEnv
-from pufferlib.environments.ocean.moba.c_moba import entity_dtype
+from pufferlib.environments.ocean.moba.c_moba import entity_dtype, step_all
 from pufferlib.environments.ocean.moba.c_precompute_pathing import precompute_pathing
 
 EMPTY = 0
@@ -41,13 +41,14 @@ COLORS = np.array([
 
 
 class PufferMoba(pufferlib.PufferEnv):
-    def __init__(self, vision_range=5, agent_speed=0.5,
+    def __init__(self, num_envs=4, vision_range=5, agent_speed=0.5,
             discretize=False, report_interval=1024, render_mode='rgb_array'):
         super().__init__()
 
         self.height = 128
         self.width = 128
-        self.num_agents = 10
+        self.num_envs = num_envs
+        self.num_agents = 10 * num_envs
         self.num_creeps = 100
         self.num_neutrals = 72
         self.num_towers = 24
@@ -100,14 +101,14 @@ class PufferMoba(pufferlib.PufferEnv):
         self.grid[:, :self.vision_range] = WALL
         self.grid[:, -self.vision_range:] = WALL
 
-        self.pids = np.zeros((self.height, self.width), dtype=np.int32) - 1
+        self.pids = np.zeros((self.num_envs, self.height, self.width), dtype=np.int32) - 1
 
         dtype = entity_dtype()
-        self.c_entities = np.zeros(self.num_agents + self.num_creeps +
-            self.num_neutrals + self.num_towers, dtype=dtype)
+        self.c_entities = np.zeros((self.num_envs, 10 + self.num_creeps +
+            self.num_neutrals + self.num_towers), dtype=dtype)
         self.entities = self.c_entities.view(np.recarray)
         self.entities.pid = -1
-        self.c_obs_players = np.zeros((self.num_agents, 10), dtype=dtype)
+        self.c_obs_players = np.zeros((self.num_envs, 10, 10), dtype=dtype)
         self.obs_players = self.c_obs_players.view(np.recarray)
 
         self.emulated = None
@@ -120,7 +121,7 @@ class PufferMoba(pufferlib.PufferEnv):
             truncations = np.zeros(self.num_agents, dtype=bool),
             masks = np.ones(self.num_agents, dtype=bool),
         )
-        self.actions = np.zeros((self.num_agents, 3), dtype=np.uint32)
+        self.actions = np.zeros((self.num_agents, 6), dtype=np.float32)
 
         self.render_mode = render_mode
         if render_mode == 'rgb_array':
@@ -158,8 +159,8 @@ class PufferMoba(pufferlib.PufferEnv):
             return self.client.render(grid)
         elif self.render_mode == 'human':
             frame, self.human_action = self.client.render(
-                self.grid, self.pids, self.entities, self.obs_players,
-                self.actions, self.discretize)
+                self.grid, self.pids[0], self.entities[0], self.obs_players[0],
+                self.actions[:10], self.discretize)
             return frame
         else:
             raise ValueError(f'Invalid render mode: {self.render_mode}')
@@ -172,10 +173,9 @@ class PufferMoba(pufferlib.PufferEnv):
         self.buf.observations[:, -1] = (255*self.buf.rewards).astype(np.uint8)
 
     def reset(self, seed=0):
-        if self.cenv is None:
-            self.obs_view = self.buf.observations[:, 
-                :self.obs_size*self.obs_size].reshape(
-                self.num_agents, self.obs_size, self.obs_size)
+        self.obs_view = self.buf.observations[
+            :, :self.obs_size*self.obs_size].reshape(
+            self.num_envs, 10, self.obs_size, self.obs_size)
             
         self.agents = [i+1 for i in range(self.num_agents)]
         self.done = False
@@ -186,21 +186,40 @@ class PufferMoba(pufferlib.PufferEnv):
             self.entities.x.astype(np.int32)
         ] = AGENT_1
 
-        self.cenv = CEnv(self.grid, self.ai_paths,
-            self.pids, self.c_entities, self.entity_data,
-            self.c_obs_players,
-            self.obs_view, self.buf.rewards, self.num_agents, self.num_creeps,
-            self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
-            self.discretize)
-        self.cenv.reset()
+        ptr = end = 0
+        self.c_envs = []
+        for i in range(self.num_envs):
+            end += 10
+
+            # Render env gets true grid
+            if i == 0:
+                grid = self.grid
+            else:
+                grid = self.grid.copy()
+
+            self.c_envs.append(CEnv(grid, self.ai_paths,
+                self.pids[i], self.c_entities[i], self.entity_data,
+                self.c_obs_players[i], self.obs_view[i], 
+                self.buf.rewards[ptr:end], self.actions[ptr: end], 10, self.num_creeps,
+                self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
+                self.discretize))
+            self.c_envs[i].reset()
 
         self.sum_rewards = []
         #self._fill_observations()
         return self.buf.observations, self.infos
 
     def step(self, actions):
-        actions = actions.astype(np.float32)
-        outcome = self.cenv.step(actions)
+        self.actions[:] = actions.astype(np.float32)
+        step_all(self.c_envs)
+
+        '''
+        ptr = end = 0
+        for i in range(self.num_envs):
+            end += 10
+            self.c_envs[i].step(actions[ptr:end])
+        '''
+
         infos = {}
 
         '''

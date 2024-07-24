@@ -1,9 +1,9 @@
 import pufferlib.emulation
 import pufferlib.postprocess
 
-def make_moba(render_mode='rgb_array'):
+def make_moba(num_envs=1, render_mode='rgb_array'):
     from .moba import moba
-    return moba.PufferMoba(render_mode=render_mode)
+    return moba.PufferMoba(num_envs=num_envs, render_mode=render_mode)
 
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):

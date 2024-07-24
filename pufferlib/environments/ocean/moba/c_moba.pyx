@@ -9,6 +9,7 @@
 
 from libc.stdlib cimport rand, RAND_MAX
 from libc.math cimport sqrtf
+from cpython.list cimport PyList_GET_ITEM
 cimport cython
 cimport numpy as cnp
 import numpy as np
@@ -72,7 +73,15 @@ cdef struct EntityList:
     Entity* entity
     EntityList* next
 
-   
+
+def step_all(list envs):
+    cdef:
+        int n = len(envs)
+        int i
+
+    for i in range(n):
+        (<Environment>PyList_GET_ITEM(envs, i)).step()
+  
 cpdef entity_dtype():
     '''Make a dummy entity to get the dtype'''
     cdef Entity entity
@@ -122,6 +131,7 @@ cdef class Environment:
         unsigned char[:, :, :] observations
 
         float[:] rewards
+        float[:, :] actions
         int[:, :] pid_map
         Entity[:, :] player_obs
         Entity[:] entities
@@ -140,8 +150,8 @@ cdef class Environment:
     def __init__(self, cnp.ndarray grid, cnp.ndarray ai_paths,
             cnp.ndarray pids, cnp.ndarray entities, dict entity_data,
             cnp.ndarray player_obs, cnp.ndarray observations, cnp.ndarray rewards,
-            int num_agents, int num_creeps, int num_neutrals, int num_towers,
-            int vision_range, float agent_speed, bint discretize):
+            cnp.ndarray actions, int num_agents, int num_creeps, int num_neutrals,
+            int num_towers, int vision_range, float agent_speed, bint discretize):
         self.height = grid.shape[0]
         self.width = grid.shape[1]
         self.num_agents = num_agents
@@ -162,6 +172,7 @@ cdef class Environment:
         self.ai_paths = ai_paths
         self.observations = observations
         self.rewards = rewards
+        self.actions = actions
 
         self.pid_map = pids
         self.entities = entities
@@ -1061,7 +1072,7 @@ cdef class Environment:
         player.move_timer = 1
         player.mana -= 5
 
-    cpdef int step(self, cnp.ndarray np_actions):
+    cdef int step(self):
         cdef:
             float[:, :] actions_continuous
             unsigned int[:, :] actions_discrete
@@ -1093,10 +1104,11 @@ cdef class Environment:
             player = self.get_entity(pid)
             player.is_hit = 0
 
-        if self.discretize:
-            actions_discrete = np_actions
-        else:
-            actions_continuous = np_actions
+        #if self.discretize:
+        #    actions_discrete = self.actions
+        #else:
+        #    actions_continuous = self.actions
+        actions_continuous = self.actions
 
         # Neutral AI
         cdef int camp, neut
