@@ -42,7 +42,7 @@ COLORS = np.array([
 
 class PufferMoba(pufferlib.PufferEnv):
     def __init__(self, num_envs=4, vision_range=5, agent_speed=0.5,
-            discretize=False, report_interval=1024, render_mode='rgb_array'):
+            discretize=True, report_interval=1024, render_mode='rgb_array'):
         super().__init__()
 
         self.height = 128
@@ -136,7 +136,9 @@ class PufferMoba(pufferlib.PufferEnv):
             shape=(self.obs_size*self.obs_size+3,), dtype=np.uint8)
 
         if discretize:
-            self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 10, 2, 2, 2])
+            #self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 10, 2, 2, 2])
+            #self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 3, 3, 3, 3])
+            self.action_space = gymnasium.spaces.Discrete(18)
         else:
             finfo = np.finfo(np.float32)
             self.action_space = gymnasium.spaces.Box(
@@ -205,7 +207,7 @@ class PufferMoba(pufferlib.PufferEnv):
                 self.c_obs_players[i], self.obs_view_map[i], self.obs_view_extra[i],
                 self.buf.rewards[ptr:end], self.actions[ptr: end], 10, self.num_creeps,
                 self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
-                self.discretize))
+                False))
             self.c_envs[i].reset()
 
         self.sum_rewards = []
@@ -213,13 +215,13 @@ class PufferMoba(pufferlib.PufferEnv):
         return self.buf.observations, self.infos
 
     def step(self, actions):
-        self.actions[:] = actions.astype(np.float32)
+        #self.actions[:] = actions.astype(np.float32)
         step_all(self.c_envs)
         infos = {}
 
-        if self.render_mode == 'human' and self.human_action is not None:
-            #print(self.human_action)
-            actions[0] = self.human_action
+        #if self.render_mode == 'human' and self.human_action is not None:
+        #    #print(self.human_action)
+        #    actions[0] = self.human_action
 
         '''
         if self.discretize:
@@ -239,7 +241,6 @@ class PufferMoba(pufferlib.PufferEnv):
         #elif outcome == 2:
         #    print('Radient Victory')
 
-        infos = self.infos
         self.sum_rewards.append(self.buf.rewards.sum())
 
         self.tick += 1

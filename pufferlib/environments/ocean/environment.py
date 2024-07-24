@@ -1,7 +1,7 @@
 import pufferlib.emulation
 import pufferlib.postprocess
 
-def make_moba(num_envs=1, render_mode='rgb_array'):
+def make_moba(num_envs=100, render_mode='rgb_array'):
     from .moba import moba
     return moba.PufferMoba(num_envs=num_envs, render_mode=render_mode)
 

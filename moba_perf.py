@@ -20,7 +20,7 @@ if __name__ == '__main__':
     #run('test_puffer_performance(10)', sort='tottime')
     #exit(0)
 
-    num_envs = 10
+    num_envs = 409
     make_env = ocean.env_creator('moba')
     env = make_env(num_envs=num_envs)
     env.reset()
@@ -29,7 +29,7 @@ if __name__ == '__main__':
 
     #test_performance(10)
     import cProfile
-    cProfile.run('test_performance(env, actions, num_envs, timeout=10)', 'stats.profile')
+    cProfile.run('test_performance(env, actions, num_envs, timeout=20)', 'stats.profile')
     import pstats
     from pstats import SortKey
     p = pstats.Stats('stats.profile')

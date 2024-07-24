@@ -120,7 +120,7 @@ class MOBA(nn.Module):
                 1, env.single_action_space.shape[0]))
         else:
             self.actor = pufferlib.pytorch.layer_init(
-                nn.Linear(hidden_size, 6), std=0.01)
+                nn.Linear(hidden_size, 18), std=0.01)
 
         self.value_fn = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, 1), std=1)
@@ -152,5 +152,6 @@ class MOBA(nn.Module):
             batch = flat_hidden.shape[0]
             return probs, value
         else:
-            action = self.actor(flat_hidden).split(3, dim=1)
+            action = self.actor(flat_hidden)#.split(3, dim=1)
+            #action = [action[:3], action[3:6], action[6:16], action[16:18], action[18:20], action[20:22]]
             return action, value
