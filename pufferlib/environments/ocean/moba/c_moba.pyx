@@ -68,6 +68,7 @@ ctypedef struct Entity:
     int level
     int xp
     int xp_on_kill
+    float reward
 
 cdef struct EntityList:
     Entity* entity
@@ -127,8 +128,10 @@ cdef class Environment:
         int[:] xp_for_level
 
         unsigned char[:, :] grid
+        unsigned char[:, :] orig_grid
         unsigned char[:, :, :, :] ai_paths
-        unsigned char[:, :, :] observations
+        unsigned char[:, :, :] observations_map
+        unsigned char[:, :] observations_extra
 
         float[:] rewards
         float[:, :] actions
@@ -139,6 +142,7 @@ cdef class Environment:
         float[:, :, :] waypoints 
         dict entity_data
         float[:, :] neutral_spawns
+        int[:, :] tower_spawns
 
         # MAX_ENTITIES x MAX_SCANNED_TARGETS
         Entity* scanned_targets[256][121]
@@ -149,8 +153,8 @@ cdef class Environment:
 
     def __init__(self, cnp.ndarray grid, cnp.ndarray ai_paths,
             cnp.ndarray pids, cnp.ndarray entities, dict entity_data,
-            cnp.ndarray player_obs, cnp.ndarray observations, cnp.ndarray rewards,
-            cnp.ndarray actions, int num_agents, int num_creeps, int num_neutrals,
+            cnp.ndarray player_obs, cnp.ndarray observations_map, cnp.ndarray observations_extra,
+            cnp.ndarray rewards, cnp.ndarray actions, int num_agents, int num_creeps, int num_neutrals,
             int num_towers, int vision_range, float agent_speed, bint discretize):
         self.height = grid.shape[0]
         self.width = grid.shape[1]
@@ -169,8 +173,10 @@ cdef class Environment:
         assert self.obs_size * self.obs_size <= 121
 
         self.grid = grid
+        self.orig_grid = grid.copy()
         self.ai_paths = ai_paths
-        self.observations = observations
+        self.observations_map = observations_map
+        self.observations_extra = observations_extra
         self.rewards = rewards
         self.actions = actions
 
@@ -214,6 +220,9 @@ cdef class Environment:
                     #self.grid[int(y), int(x)] = DEBUG
 
 
+        self.tower_spawns = np.zeros((num_towers, 4), dtype=np.int32)
+        # y, x, team, tier
+
         idx = 0
         for team in range(2):
             if team == 0:
@@ -227,24 +236,25 @@ cdef class Environment:
                         continue # no mid tier 4 towers
 
                     tower_name = f'{prefix}{tier}{suffix}'
-                    self.spawn_tower(idx, team, tier,
-                        entity_data[tower_name]['y'],
-                        entity_data[tower_name]['x'],
-                    )
+                    self.tower_spawns[idx, 0] = int(entity_data[tower_name]['y'])
+                    self.tower_spawns[idx, 1] = int(entity_data[tower_name]['x'])
+                    self.tower_spawns[idx, 2] = team
+                    self.tower_spawns[idx, 3] = tier
                     idx += 1
 
         # Hardcode ancients
         tower_name = 'dota_goodguys_fort'
-        self.spawn_tower(idx, 0, 5,
-            entity_data[tower_name]['y'],
-            entity_data[tower_name]['x'],
-        )
+        self.tower_spawns[idx, 0] = int(entity_data[tower_name]['y'])
+        self.tower_spawns[idx, 1] = int(entity_data[tower_name]['x'])
+        self.tower_spawns[idx, 2] = 0
+        self.tower_spawns[idx, 3] = 5
+
         idx += 1
         tower_name = 'dota_badguys_fort'
-        self.spawn_tower(idx, 1, 5,
-            entity_data[tower_name]['y'],
-            entity_data[tower_name]['x'],
-        )
+        self.tower_spawns[idx, 0] = entity_data[tower_name]['y']
+        self.tower_spawns[idx, 1] = entity_data[tower_name]['x']
+        self.tower_spawns[idx, 2] = 1
+        self.tower_spawns[idx, 3] = 5
 
         # Num camps
         self.neutral_spawns = np.zeros((18, 2), dtype=np.float32)
@@ -313,10 +323,13 @@ cdef class Environment:
             player = self.get_entity(pid)
             y = int(player.y)
             x = int(player.x)
-            self.observations[pid, :] = self.grid[
+            self.observations_map[pid, :] = self.grid[
                 y-self.vision_range:y+self.vision_range+1,
                 x-self.vision_range:x+self.vision_range+1
             ]
+            self.observations_extra[pid, 0] = <unsigned char> player.x
+            self.observations_extra[pid, 1] = <unsigned char> player.y
+            self.observations_extra[pid, 2] = <unsigned char> self.rewards[pid]
 
             idx = 0
             # TODO: sort by distance
@@ -342,6 +355,14 @@ cdef class Environment:
 
                 if idx == 10:
                     break
+
+    cdef void spawn_all_towers(self):
+        cdef:
+            int idx
+
+        for idx in range(self.num_towers):
+            self.spawn_tower(idx, self.tower_spawns[idx, 2], self.tower_spawns[idx, 3],
+                self.tower_spawns[idx, 0], self.tower_spawns[idx, 1])
 
     cdef void spawn_tower(self, int idx, int team, int tier, int y, int x):
         cdef Entity* tower = self.get_tower(idx)
@@ -388,6 +409,11 @@ cdef class Environment:
             int pid
             int y
             int x
+
+        self.grid[:] = self.orig_grid
+        self.pid_map[:] = -1
+
+        self.spawn_all_towers()
 
         self.tick = 0
         for pid in range(self.num_agents):
@@ -723,6 +749,9 @@ cdef class Environment:
         return True
 
     cdef bint attack(self, Entity* player, Entity* target, float damage):
+        cdef:
+            int xp = 0
+
         if target.pid == -1:
             return False
 
@@ -743,9 +772,12 @@ cdef class Environment:
         if player.type == ENTITY_PLAYER:
             if player.xp < 10000000:
                 if target.type == ENTITY_PLAYER:
-                    player.xp += xp_for_player_kill(target)
+                    xp = xp_for_player_kill(target)
                 else:
-                    player.xp += target.xp_on_kill
+                    xp = target.xp_on_kill
+
+                player.xp += xp
+                player.reward += int(xp/1000)
 
             player.level = self.level(player.xp)
             player.damage = 50 + 6*player.level
@@ -1099,6 +1131,7 @@ cdef class Environment:
             bint use_q
             bint use_w
             bint use_e
+            float dist_to_ancient
 
         for pid in range(self.num_agents + self.num_towers + self.num_creeps):
             player = self.get_entity(pid)
@@ -1167,6 +1200,7 @@ cdef class Environment:
         # Player Logic
         for pid in range(self.num_agents):
             player = self.get_entity(pid)
+            player.reward = 0
 
             if player.mana < player.max_mana:
                 player.mana += 1
@@ -1255,12 +1289,24 @@ cdef class Environment:
             #self.move_to(player, dest_y, dest_x)
             self.creep_ai(player)
 
+            # Reward based on distance to enemy ancient
+            if player.team == 0:
+                ancient = self.get_tower(23)
+            else:
+                ancient = self.get_tower(22)
+
+            dist_to_ancient = abs(player.y - ancient.y) + abs(player.x - ancient.x)
+            player.reward -= (dist_to_ancient / 2550.0)
+            self.rewards[pid] = player.reward
+
         self.tick += 1
         self.compute_observations()
 
         if self.get_tower(22).health <= 0:
+            self.reset(0)
             return 1 
         if self.get_tower(23).health <= 0:
+            self.reset(0)
             return 2
 
         return 0

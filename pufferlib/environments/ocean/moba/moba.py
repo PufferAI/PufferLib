@@ -173,9 +173,12 @@ class PufferMoba(pufferlib.PufferEnv):
         self.buf.observations[:, -1] = (255*self.buf.rewards).astype(np.uint8)
 
     def reset(self, seed=0):
-        self.obs_view = self.buf.observations[
+        self.obs_view_map = self.buf.observations[
             :, :self.obs_size*self.obs_size].reshape(
             self.num_envs, 10, self.obs_size, self.obs_size)
+        self.obs_view_extra = self.buf.observations[
+            :, self.obs_size*self.obs_size:].reshape(
+            self.num_envs, 10, 3)
             
         self.agents = [i+1 for i in range(self.num_agents)]
         self.done = False
@@ -199,7 +202,7 @@ class PufferMoba(pufferlib.PufferEnv):
 
             self.c_envs.append(CEnv(grid, self.ai_paths,
                 self.pids[i], self.c_entities[i], self.entity_data,
-                self.c_obs_players[i], self.obs_view[i], 
+                self.c_obs_players[i], self.obs_view_map[i], self.obs_view_extra[i],
                 self.buf.rewards[ptr:end], self.actions[ptr: end], 10, self.num_creeps,
                 self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
                 self.discretize))
@@ -212,21 +215,13 @@ class PufferMoba(pufferlib.PufferEnv):
     def step(self, actions):
         self.actions[:] = actions.astype(np.float32)
         step_all(self.c_envs)
-
-        '''
-        ptr = end = 0
-        for i in range(self.num_envs):
-            end += 10
-            self.c_envs[i].step(actions[ptr:end])
-        '''
-
         infos = {}
 
-        '''
         if self.render_mode == 'human' and self.human_action is not None:
             #print(self.human_action)
             actions[0] = self.human_action
 
+        '''
         if self.discretize:
             actions = actions.astype(np.uint32)
         else:
@@ -234,14 +229,11 @@ class PufferMoba(pufferlib.PufferEnv):
                 np.array([-1, -1, 0, 0, 0, 0]),
                 np.array([1, 1, 10, 1, 1, 1])
             ).astype(np.float32)
+        '''
 
-        self.buf.rewards.fill(0)
-        self.actions = actions
-
-        outcome = self.cenv.step(actions)
-        self.outcome = outcome
-        if outcome == 0:
-            pass
+        #self.outcome = outcome
+        #if outcome == 0:
+        #    pass
         #elif outcome == 1:
         #    print('Dire Victory')
         #elif outcome == 2:
@@ -253,18 +245,17 @@ class PufferMoba(pufferlib.PufferEnv):
         self.tick += 1
         if self.tick % self.report_interval == 0:
             infos['reward'] = np.mean(self.sum_rewards) / self.num_agents
-            radient_levels = self.entities[:5].level
+            radient_levels = self.entities[0][:5].level
             infos['radient_level_min'] = min(radient_levels)
             infos['radient_level_max'] = max(radient_levels)
             infos['radient_level_mean'] = np.mean(radient_levels)
-            dire_levels = self.entities[5:10].level
+            dire_levels = self.entities[0][5:10].level
             infos['dire_level_min'] = min(dire_levels)
             infos['dire_level_max'] = max(dire_levels)
             infos['dire_level_mean'] = np.mean(dire_levels)
             self.sum_rewards = []
             #print('Radient Lv: ', infos['radient_level_mean'])
             #print('Dire Lv: ', infos['dire_level_mean'])
-        '''
 
         #self._fill_observations()
         return (self.buf.observations, self.buf.rewards,
