@@ -1,10 +1,10 @@
 # distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
 # cython: language_level=3
-# cython: boundscheck=False
-# cython: initializedcheck=False
-# cython: wraparound=False
+# cython: boundscheck=True
+# cython: initializedcheck=True
+# cython: wraparound=True
 # cython: cdivision=True
-# cython: nonecheck=False
+# cython: nonecheck=True
 # cython: profile=False
 
 from libc.stdlib cimport rand, RAND_MAX
@@ -622,7 +622,7 @@ cdef class Environment:
         neutral.basic_attack_cd = 5
         neutral.damage = 22
 
-        while True:
+        for i in range(10):
             dy = rand() % 7 - 3
             dx = rand() % 7 - 3
             if self.move_to(neutral, neutral.spawn_y + dy, neutral.spawn_x + dx):
@@ -707,8 +707,8 @@ cdef class Environment:
             x = 128 - 12
 
         while not valid_pos:
-            spawn_y = y + rand() % 11 - 5
-            spawn_x = x + rand() % 11 - 5
+            spawn_y = y + rand() % 15 - 7
+            spawn_x = x + rand() % 15 - 7
             if self.grid[spawn_y, spawn_x] == EMPTY:
                 valid_pos = True
                 break
@@ -727,7 +727,7 @@ cdef class Environment:
 
         #self.grid[spawn_y, spawn_x] = DEBUG
 
-        while not valid_pos:
+        for i in range(10):
             y = spawn_y + rand() % 7 - 3
             x = spawn_x + rand() % 7 - 3
             if self.grid[y, x] == EMPTY:
@@ -859,7 +859,7 @@ cdef class Environment:
             int pid = player.pid
             int idx
 
-        for idx in range(200):
+        for idx in range(121):
             target = self.scanned_targets[pid][idx]
             if target == NULL:
                 break
@@ -897,7 +897,7 @@ cdef class Environment:
             int idx = 0
             int pid = player.pid
 
-        for idx in range(200):
+        for idx in range(121):
             target = self.scanned_targets[pid][idx]
             if target == NULL:
                 break
@@ -920,7 +920,7 @@ cdef class Environment:
             exclude_hostile=False, exclude_creeps=False,
             exclude_neutrals=False, exclude_towers=True)
 
-        for idx in range(200):
+        for idx in range(121):
             target = self.scanned_targets[pid][idx]
             if target == NULL:
                 break
@@ -1279,7 +1279,7 @@ cdef class Environment:
 
             target = NULL
             if self.scanned_targets[pid][0] != NULL:
-                target = self.nearest_scanned_target(creep)
+                target = self.nearest_scanned_target(player)
 
             # This is a copy. Have to get the real one
             #target = self.get_player_ob(pid, attack)
