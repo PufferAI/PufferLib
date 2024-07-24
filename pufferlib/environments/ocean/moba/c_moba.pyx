@@ -1133,6 +1133,7 @@ cdef class Environment:
             bint use_w
             bint use_e
             bint use_basic_attack
+            float prev_dist_to_ancient
             float dist_to_ancient
 
         for pid in range(self.num_agents + self.num_towers + self.num_creeps):
@@ -1203,16 +1204,7 @@ cdef class Environment:
         for pid in range(self.num_agents):
             player = self.get_entity(pid)
             player.reward = 0
-
-            # Reward based on distance to enemy ancient
-            if player.team == 0:
-                ancient = self.get_tower(23)
-            else:
-                ancient = self.get_tower(22)
-
-            dist_to_ancient = abs(player.y - ancient.y) + abs(player.x - ancient.x)
-            player.reward -= (dist_to_ancient / 2550.0)
-            self.rewards[pid] = player.reward
+            self.rewards[pid] = 0
 
             if player.mana < player.max_mana:
                 player.mana += 1
@@ -1342,11 +1334,19 @@ cdef class Environment:
                     else:
                         self.basic_attack(player, target)
 
+            # Reward based on distance to enemy ancient
+            if player.team == 0:
+                ancient = self.get_tower(23)
+            else:
+                ancient = self.get_tower(22)
+ 
             dest_y = player.y + player.move_modifier*self.agent_speed*vel_y
             dest_x = player.x + player.move_modifier*self.agent_speed*vel_x
-            self.move_to(player, dest_y, dest_x)
-            #self.creep_ai(player)
 
+            prev_dist_to_ancient = abs(player.y - ancient.y) + abs(player.x - ancient.x)
+            self.move_to(player, dest_y, dest_x)
+            dist_to_ancient = abs(player.y - ancient.y) + abs(player.x - ancient.x)
+            player.reward += 0.1*(prev_dist_to_ancient - dist_to_ancient)
             self.rewards[pid] = player.reward
 
         self.tick += 1
