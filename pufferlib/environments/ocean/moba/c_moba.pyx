@@ -329,7 +329,7 @@ cdef class Environment:
             ]
             self.observations_extra[pid, 0] = <unsigned char> player.x
             self.observations_extra[pid, 1] = <unsigned char> player.y
-            self.observations_extra[pid, 2] = <unsigned char> self.rewards[pid]
+            self.observations_extra[pid, 2] = <unsigned char> (200*self.rewards[pid] + 32)
 
             idx = 0
             # TODO: sort by distance
@@ -417,6 +417,7 @@ cdef class Environment:
 
         self.tick = 0
         for pid in range(self.num_agents):
+            self.rewards[pid] = 0
             player = self.get_entity(pid)
             player.pid = pid
             player.type = ENTITY_PLAYER
@@ -751,6 +752,7 @@ cdef class Environment:
     cdef bint attack(self, Entity* player, Entity* target, float damage):
         cdef:
             int xp = 0
+            int reward
 
         if target.pid == -1:
             return False
@@ -777,7 +779,10 @@ cdef class Environment:
                     xp = target.xp_on_kill
 
                 player.xp += xp
-                player.reward += int(xp/1000)
+                reward = int(xp / 250)
+                if reward > 1:
+                    reward = 1
+                player.reward += reward
 
             player.level = self.level(player.xp)
             player.damage = 50 + 6*player.level
