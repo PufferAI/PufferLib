@@ -121,7 +121,6 @@ class PufferMoba(pufferlib.PufferEnv):
             truncations = np.zeros(self.num_agents, dtype=bool),
             masks = np.ones(self.num_agents, dtype=bool),
         )
-        self.actions = np.zeros((self.num_agents, 6), dtype=np.float32)
 
         self.render_mode = render_mode
         if render_mode == 'rgb_array':
@@ -137,9 +136,10 @@ class PufferMoba(pufferlib.PufferEnv):
 
         if discretize:
             #self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 10, 2, 2, 2])
-            #self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 3, 3, 3, 3])
-            self.action_space = gymnasium.spaces.Discrete(18)
+            self.action_space = gymnasium.spaces.MultiDiscrete([9, 4])
+            self.actions = np.zeros((self.num_agents, 2), dtype=np.int32)
         else:
+            self.actions = np.zeros((self.num_agents, 6), dtype=np.float32)
             finfo = np.finfo(np.float32)
             self.action_space = gymnasium.spaces.Box(
                 low=finfo.min,
@@ -207,7 +207,7 @@ class PufferMoba(pufferlib.PufferEnv):
                 self.c_obs_players[i], self.obs_view_map[i], self.obs_view_extra[i],
                 self.buf.rewards[ptr:end], self.actions[ptr: end], 10, self.num_creeps,
                 self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
-                False))
+                True))
             self.c_envs[i].reset()
 
         self.sum_rewards = []
@@ -216,6 +216,7 @@ class PufferMoba(pufferlib.PufferEnv):
 
     def step(self, actions):
         #self.actions[:] = actions.astype(np.float32)
+        self.actions[:] = actions#.astype(np.float32)
         step_all(self.c_envs)
         infos = {}
 

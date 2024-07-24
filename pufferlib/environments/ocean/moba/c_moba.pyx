@@ -134,7 +134,7 @@ cdef class Environment:
         unsigned char[:, :] observations_extra
 
         float[:] rewards
-        float[:, :] actions
+        int[:, :] actions
         int[:, :] pid_map
         Entity[:, :] player_obs
         Entity[:] entities
@@ -1107,7 +1107,7 @@ cdef class Environment:
     cdef int step(self):
         cdef:
             float[:, :] actions_continuous
-            unsigned int[:, :] actions_discrete
+            int[:, :] actions_discrete
             int agent_idx
             float y
             float x
@@ -1126,11 +1126,13 @@ cdef class Environment:
             int pid
             int target_pid
             float damage
+            int atn
             int dy
             int dx
             bint use_q
             bint use_w
             bint use_e
+            bint use_basic_attack
             float dist_to_ancient
 
         for pid in range(self.num_agents + self.num_towers + self.num_creeps):
@@ -1141,7 +1143,7 @@ cdef class Environment:
         #    actions_discrete = self.actions
         #else:
         #    actions_continuous = self.actions
-        actions_continuous = self.actions
+        actions_discrete = self.actions
 
         # Neutral AI
         cdef int camp, neut
@@ -1216,13 +1218,52 @@ cdef class Environment:
 
             # Attacks
             if self.discretize:
-                # Convert [0, 1, 2] to [-1, 0, 1]
-                vel_y = float(actions_discrete[pid, 0]) - 1.0
-                vel_x = float(actions_discrete[pid, 1]) - 1.0
-                attack = actions_discrete[pid, 2]
-                use_q = actions_discrete[pid, 3]
-                use_w = actions_discrete[pid, 4]
-                use_e = actions_discrete[pid, 5]
+                atn = actions_discrete[pid, 0]
+                if atn == 0:
+                    vel_y = -1
+                    vel_x = -1
+                elif atn == 1:
+                    vel_y = 0
+                    vel_x = -1
+                elif atn == 2:
+                    vel_y = 1
+                    vel_x = -1
+                elif atn == 3:
+                    vel_y = -1
+                    vel_x = 0
+                elif atn == 4:
+                    vel_y = 0
+                    vel_x = 0
+                elif atn == 5:
+                    vel_y = 1
+                    vel_x = 0
+                elif atn == 6:
+                    vel_y = -1
+                    vel_x = 1
+                elif atn == 7:
+                    vel_y = 0
+                    vel_x = 1
+                elif atn == 8:
+                    vel_y = 1
+                    vel_x = 1
+                else:
+                    raise ValueError('Invalid action')
+
+                atn = actions_discrete[pid, 1]
+                use_q = False
+                use_w = False
+                use_e = False
+                use_basic_attack = False
+                if atn == 0:
+                    use_basic_attack = True
+                elif atn == 1:
+                    use_q = True
+                elif atn == 2:
+                    use_w = True
+                elif atn == 3:
+                    use_e = True
+                else:
+                    raise ValueError('Invalid action')
             else:
                 vel_y = actions_continuous[pid, 0]
                 vel_x = actions_continuous[pid, 1]
@@ -1232,62 +1273,69 @@ cdef class Environment:
                 #use_w = int(actions_continuous[pid, 4]) > 0.5
                 #use_e = int(actions_continuous[pid, 5]) > 0.5
 
+            self.scan_aoe(player, self.vision_range, exclude_friendly=True,
+                exclude_hostile=False, exclude_creeps=False,
+                exclude_neutrals=False, exclude_towers=False)
+
+            target = NULL
+            if self.scanned_targets[pid][0] != NULL:
+                target = self.nearest_scanned_target(creep)
+
             # This is a copy. Have to get the real one
-            target = self.get_player_ob(pid, attack)
-            target = self.get_entity(target.pid)
+            #target = self.get_player_ob(pid, attack)
+            #target = self.get_entity(target.pid)
 
-            '''
-            if player.pid == 0 or player.pid == 5:
-                if use_q:
-                    self.skill_support_hook(player, target)
-                elif use_w:
-                    self.skill_support_aoe_heal(player, target)
-                elif use_e:
-                    self.skill_support_stun(player, target)
-                else:
-                    self.basic_attack(player, target)
-            elif player.pid == 1 or player.pid == 6:
-                if use_q:
-                    self.skill_assassin_aoe_minions(player, target)
-                elif use_w:
-                    self.skill_assassin_tp_damage(player, target)
-                elif use_e:
-                    self.skill_assassin_move_buff(player, target)
-                else:
-                    self.basic_attack(player, target)
-            elif player.pid == 2 or player.pid == 7:
-                if use_q:
-                    self.skill_burst_nuke(player, target)
-                elif use_w:
-                    self.skill_burst_aoe(player, target)
-                elif use_e:
-                    self.skill_burst_aoe_stun(player, target)
-                else:
-                    self.basic_attack(player, target)
-            elif player.pid == 3 or player.pid == 8:
-                if use_q:
-                    self.skill_tank_aoe_dot(player, target)
-                elif use_w:
-                    self.skill_tank_self_heal(player, target)
-                elif use_e:
-                    self.skill_tank_engage_aoe(player, target)
-                else:
-                    self.basic_attack(player, target)
-            elif player.pid == 4 or player.pid == 9:
-                if use_q:
-                    self.skill_carry_retreat_slow(player, target)
-                elif use_w:
-                    self.skill_carry_slow_damage(player, target)
-                elif use_e:
-                    self.skill_carry_aoe(player, target)
-                else:
-                    self.basic_attack(player, target)
-            '''
+            if target != NULL:
+                if player.pid == 0 or player.pid == 5:
+                    if use_q:
+                        self.skill_support_hook(player, target)
+                    elif use_w:
+                        self.skill_support_aoe_heal(player, target)
+                    elif use_e:
+                        self.skill_support_stun(player, target)
+                    else:
+                        self.basic_attack(player, target)
+                elif player.pid == 1 or player.pid == 6:
+                    if use_q:
+                        self.skill_assassin_aoe_minions(player, target)
+                    elif use_w:
+                        self.skill_assassin_tp_damage(player, target)
+                    elif use_e:
+                        self.skill_assassin_move_buff(player, target)
+                    else:
+                        self.basic_attack(player, target)
+                elif player.pid == 2 or player.pid == 7:
+                    if use_q:
+                        self.skill_burst_nuke(player, target)
+                    elif use_w:
+                        self.skill_burst_aoe(player, target)
+                    elif use_e:
+                        self.skill_burst_aoe_stun(player, target)
+                    else:
+                        self.basic_attack(player, target)
+                elif player.pid == 3 or player.pid == 8:
+                    if use_q:
+                        self.skill_tank_aoe_dot(player, target)
+                    elif use_w:
+                        self.skill_tank_self_heal(player, target)
+                    elif use_e:
+                        self.skill_tank_engage_aoe(player, target)
+                    else:
+                        self.basic_attack(player, target)
+                elif player.pid == 4 or player.pid == 9:
+                    if use_q:
+                        self.skill_carry_retreat_slow(player, target)
+                    elif use_w:
+                        self.skill_carry_slow_damage(player, target)
+                    elif use_e:
+                        self.skill_carry_aoe(player, target)
+                    else:
+                        self.basic_attack(player, target)
 
-            #dest_y = player.y + player.move_modifier*self.agent_speed*vel_y
-            #dest_x = player.x + player.move_modifier*self.agent_speed*vel_x
-            #self.move_to(player, dest_y, dest_x)
-            self.creep_ai(player)
+            dest_y = player.y + player.move_modifier*self.agent_speed*vel_y
+            dest_x = player.x + player.move_modifier*self.agent_speed*vel_x
+            self.move_to(player, dest_y, dest_x)
+            #self.creep_ai(player)
 
             # Reward based on distance to enemy ancient
             if player.team == 0:
