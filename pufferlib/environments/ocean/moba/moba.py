@@ -205,10 +205,11 @@ class PufferMoba(pufferlib.PufferEnv):
             self.c_envs.append(CEnv(grid, self.ai_paths,
                 self.pids[i], self.c_entities[i], self.entity_data,
                 self.c_obs_players[i], self.obs_view_map[i], self.obs_view_extra[i],
-                self.buf.rewards[ptr:end], self.actions[ptr: end], 10, self.num_creeps,
+                self.buf.rewards[ptr:end], self.actions[ptr:end], 10, self.num_creeps,
                 self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
                 True))
             self.c_envs[i].reset()
+            ptr = end
 
         self.sum_rewards = []
         #self._fill_observations()
