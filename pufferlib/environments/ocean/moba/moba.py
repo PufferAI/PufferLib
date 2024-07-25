@@ -131,7 +131,7 @@ class PufferMoba(pufferlib.PufferEnv):
         elif render_mode == 'human':
             self.client = RaylibClient(41, 23, COLORS.tolist())
      
-        self.client = render.RGBArrayRender()
+        #self.client = render.RGBArrayRender()
         self.observation_space = gymnasium.spaces.Box(low=0, high=255,
             shape=(self.obs_size*self.obs_size+3,), dtype=np.uint8)
 
@@ -272,7 +272,7 @@ class PufferMoba(pufferlib.PufferEnv):
             self.sum_rewards = []
             #print('Radient Lv: ', infos['radient_level_mean'])
             #print('Dire Lv: ', infos['dire_level_mean'])
-            infos['moba_map'] = self.client.render(self.grid)
+            #infos['moba_map'] = self.client.render(self.grid)
 
 
         #self._fill_observations()
@@ -532,7 +532,7 @@ class RaylibClient:
         rl.DrawText(f'Move: {player.move_timer}'.encode(), 25*ts, hud_y, 20, e_color)
 
         rl.EndDrawing()
-        return self._cdata_to_numpy(), action
+        return self._cdata_to_numpy(), action[0]
 
 def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
     health_bar = entity.health / entity.max_health
