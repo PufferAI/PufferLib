@@ -131,6 +131,7 @@ class PufferMoba(pufferlib.PufferEnv):
         elif render_mode == 'human':
             self.client = RaylibClient(41, 23, COLORS.tolist())
      
+        self.client = render.RGBArrayRender()
         self.observation_space = gymnasium.spaces.Box(low=0, high=255,
             shape=(self.obs_size*self.obs_size+3,), dtype=np.uint8)
 
@@ -270,6 +271,10 @@ class PufferMoba(pufferlib.PufferEnv):
             self.sum_rewards = []
             #print('Radient Lv: ', infos['radient_level_mean'])
             #print('Dire Lv: ', infos['dire_level_mean'])
+
+        if self.tick % 12800 == 0:
+            infos['moba_map'] = self.client.render(self.grid)
+
 
         #self._fill_observations()
         return (self.buf.observations, self.buf.rewards,
