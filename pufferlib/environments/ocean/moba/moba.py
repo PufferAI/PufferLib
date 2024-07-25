@@ -272,7 +272,7 @@ class PufferMoba(pufferlib.PufferEnv):
             #print('Radient Lv: ', infos['radient_level_mean'])
             #print('Dire Lv: ', infos['dire_level_mean'])
 
-        if self.tick % 12800 == 0:
+        if self.tick % 1280 == 0:
             infos['moba_map'] = self.client.render(self.grid)
 
 
