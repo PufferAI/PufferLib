@@ -134,7 +134,8 @@ cdef class Environment:
         unsigned char[:, :] observations_extra
 
         float[:] rewards
-        int[:, :] actions
+        #int[:, :] actions
+        int[:] actions
         int[:, :] pid_map
         Entity[:, :] player_obs
         Entity[:] entities
@@ -1111,8 +1112,8 @@ cdef class Environment:
 
     cdef int step(self):
         cdef:
-            float[:, :] actions_continuous
-            int[:, :] actions_discrete
+            float[:] actions_continuous
+            int[:] actions_discrete
             int agent_idx
             float y
             float x
@@ -1225,7 +1226,7 @@ cdef class Environment:
 
             # Attacks
             if self.discretize:
-                atn = actions_discrete[pid, 0]
+                atn = actions_discrete[pid]
                 if atn == 0:
                     vel_y = -1
                     vel_x = -1
@@ -1256,7 +1257,7 @@ cdef class Environment:
                 else:
                     raise ValueError('Invalid action')
 
-                atn = actions_discrete[pid, 1]
+                atn = 0#actions_discrete[pid, 1]
                 use_q = False
                 use_w = False
                 use_e = False
@@ -1272,9 +1273,10 @@ cdef class Environment:
                 else:
                     raise ValueError('Invalid action')
             else:
-                vel_y = actions_continuous[pid, 0]
-                vel_x = actions_continuous[pid, 1]
-                attack = int(actions_continuous[pid, 2])
+                pass
+                #vel_y = actions_continuous[pid, 0]
+                #vel_x = actions_continuous[pid, 1]
+                #attack = int(actions_continuous[pid, 2])
                 # TODO: Breaks to python
                 #use_q = int(actions_continuous[pid, 3]) > 0.5
                 #use_w = int(actions_continuous[pid, 4]) > 0.5

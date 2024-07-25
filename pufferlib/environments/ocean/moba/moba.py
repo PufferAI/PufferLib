@@ -136,8 +136,10 @@ class PufferMoba(pufferlib.PufferEnv):
 
         if discretize:
             #self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 10, 2, 2, 2])
-            self.action_space = gymnasium.spaces.MultiDiscrete([9, 4])
-            self.actions = np.zeros((self.num_agents, 2), dtype=np.int32)
+            #self.action_space = gymnasium.spaces.MultiDiscrete([9, 4])
+            self.action_space = gymnasium.spaces.Discrete(9)
+            #self.actions = np.zeros((self.num_agents, 2), dtype=np.int32)
+            self.actions = np.zeros(self.num_agents, dtype=np.int32)
         else:
             self.actions = np.zeros((self.num_agents, 6), dtype=np.float32)
             finfo = np.finfo(np.float32)
@@ -250,13 +252,21 @@ class PufferMoba(pufferlib.PufferEnv):
         if self.tick % self.report_interval == 0:
             infos['reward'] = np.mean(self.sum_rewards) / self.num_agents
             radient_levels = self.entities[0][:5].level
+            radient_x = self.entities[0][:5].x
+            radient_y = self.entities[0][:5].y
             infos['radient_level_min'] = min(radient_levels)
             infos['radient_level_max'] = max(radient_levels)
             infos['radient_level_mean'] = np.mean(radient_levels)
+            infos['radient_x'] = np.mean(radient_x)
+            infos['radient_y'] = np.mean(radient_y)
             dire_levels = self.entities[0][5:10].level
+            dire_x = self.entities[0][5:10].x
+            dire_y = self.entities[0][5:10].y
             infos['dire_level_min'] = min(dire_levels)
             infos['dire_level_max'] = max(dire_levels)
             infos['dire_level_mean'] = np.mean(dire_levels)
+            infos['dire_x'] = np.mean(dire_x)
+            infos['dire_y'] = np.mean(dire_y)
             self.sum_rewards = []
             #print('Radient Lv: ', infos['radient_level_mean'])
             #print('Dire Lv: ', infos['dire_level_mean'])
