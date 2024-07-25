@@ -15,15 +15,23 @@ cimport numpy as cnp
 import numpy as np
 
 cdef:
+    # Grid IDs
     int EMPTY = 0
-    int TOWER = 1
-    int WALL = 2
-    int AGENT_1 = 3
-    int AGENT_2 = 4
-    int CREEP_1 = 5
-    int CREEP_2 = 6
-    int NEUTRAL = 7
-    int DEBUG = 8
+    int WALL = 1
+    int TOWER = 2
+    int RADIANT_CREEP = 3
+    int DIRE_CREEP = 4
+    int NEUTRAL = 5
+    int RADIANT_SUPPORT = 6
+    int RADIANT_ASSASSIN = 7
+    int RADIANT_BURST = 8
+    int RADIANT_TANK = 9
+    int RADIANT_CARRY = 10
+    int DIRE_SUPPORT = 11
+    int DIRE_ASSASSIN = 12
+    int DIRE_BURST = 13
+    int DIRE_TANK = 14
+    int DIRE_CARRY = 15
 
     int PASS = 0
     int NORTH = 1
@@ -35,15 +43,25 @@ cdef:
     int CREEP_VISION = 5
     int NEUTRAL_VISION = 3
 
+    # Entity Types
     int ENTITY_PLAYER = 0
     int ENTITY_CREEP = 1
     int ENTITY_NEUTRAL = 2
     int ENTITY_TOWER = 3
 
+    # Hero Types
+    int SUPPORT = 0
+    int ASSASSIN = 1
+    int BURST = 2
+    int TANK = 3
+    int CARRY = 4
+
 ctypedef struct Entity:
     int pid
+    int entity_type
+    int hero_type
+    int grid_id
     int team
-    int type
     float health
     float max_health
     float mana
@@ -130,7 +148,7 @@ cdef class Environment:
         unsigned char[:, :] grid
         unsigned char[:, :] orig_grid
         unsigned char[:, :, :, :] ai_paths
-        unsigned char[:, :, :] observations_map
+        unsigned char[:, :, :, :] observations_map
         unsigned char[:, :] observations_extra
 
         float[:] rewards
@@ -307,6 +325,8 @@ cdef class Environment:
             int c
             int x
             int y
+            int dx
+            int dy
             int idx
             int pid
             int target_pid
@@ -315,7 +335,8 @@ cdef class Environment:
             Entity* target_ob
 
         # TODO: Figure out how to zero data
-        #self.player_obs[:, :] = 0
+        self.observations_map[:] = 0
+        self.observations_extra[:] = 0
 
         for pid in range(self.num_agents):
             for idx in range(10):
@@ -324,38 +345,56 @@ cdef class Environment:
             player = self.get_entity(pid)
             y = int(player.y)
             x = int(player.x)
-            self.observations_map[pid, :] = self.grid[
+
+            self.observations_map[pid, :, :, 0] = self.grid[
                 y-self.vision_range:y+self.vision_range+1,
                 x-self.vision_range:x+self.vision_range+1
             ]
-            self.observations_extra[pid, 0] = <unsigned char> player.x
-            self.observations_extra[pid, 1] = <unsigned char> player.y
-            self.observations_extra[pid, 2] = <unsigned char> (200*self.rewards[pid] + 32)
 
-            idx = 0
-            # TODO: sort by distance
-            for r in range(y-self.vision_range, y+self.vision_range+1):
-                for c in range(x-self.vision_range, x+self.vision_range+1):
-                    target_pid = self.pid_map[r, c]
+            # TODO: Add bounds debug checks asserts
+            self.observations_extra[pid, 0] = <unsigned char> (2*player.x)
+            self.observations_extra[pid, 1] = <unsigned char> (2*player.y)
+            self.observations_extra[pid, 2] = <unsigned char> (255*player.level/30.0)
+            self.observations_extra[pid, 3] = <unsigned char> (255*player.health/player.max_health)
+            self.observations_extra[pid, 4] = <unsigned char> (255*player.mana/player.max_mana)
+            self.observations_extra[pid, 5] = <unsigned char> player.damage
+            self.observations_extra[pid, 6] = <unsigned char> (100*player.move_speed)
+            self.observations_extra[pid, 7] = <unsigned char> (player.move_modifier*100)
+            self.observations_extra[pid, 8] = <unsigned char> (2*player.stun_timer)
+            self.observations_extra[pid, 9] = <unsigned char> (2*player.move_timer)
+            self.observations_extra[pid, 10] = <unsigned char> (2*player.q_timer)
+            self.observations_extra[pid, 11] = <unsigned char> (2*player.w_timer)
+            self.observations_extra[pid, 12] = <unsigned char> (2*player.e_timer)
+            self.observations_extra[pid, 13] = <unsigned char> (50*player.basic_attack_timer)
+            self.observations_extra[pid, 14] = <unsigned char> (50*player.basic_attack_cd)
+            self.observations_extra[pid, 15] = <unsigned char> (255*player.is_hit)
+            self.observations_extra[pid, 16] = <unsigned char> (255*player.team)
+            if player.hero_type == SUPPORT:
+                self.observations_extra[pid, 17] = 255
+            elif player.hero_type == ASSASSIN:
+                self.observations_extra[pid, 18] = 128
+            elif player.hero_type == BURST:
+                self.observations_extra[pid, 19] = 255
+            elif player.hero_type == TANK:
+                self.observations_extra[pid, 20] = 255
+            elif player.hero_type == CARRY:
+                self.observations_extra[pid, 21] = 255
+
+            # Assumes scaled between -1 and 1, else overflows
+            self.observations_extra[pid, 22] = <unsigned char> (127*self.rewards[pid] + 128)
+
+            for dy in range(-self.vision_range, self.vision_range+1):
+                for dx in range(-self.vision_range, self.vision_range+1):
+                    target_pid = self.pid_map[y + dy, x + dx]
+                    target = self.get_entity(target_pid)
                     if target_pid == -1:
                         continue
 
-                    target = self.get_entity(target_pid)
-                    # TODO: figure out how to copy all
-                    target_ob = self.get_player_ob(pid, idx)
-                    target_ob.pid = target_pid
-                    target_ob.y = target.y
-                    target_ob.x = target.x
-                    target_ob.health = target.health
-                    target_ob.team = target.team
-                    target_ob.type = target.type
-
-                    idx += 1
-                    if idx == 10:
-                        break
-
-                if idx == 10:
-                    break
+                    r = dy + self.vision_range
+                    c = dx + self.vision_range
+                    self.observations_map[pid, r, c, 1] = <unsigned char> (255*target.health/target.max_health)
+                    self.observations_map[pid, r, c, 2] = <unsigned char> (255*target.mana/target.max_mana)
+                    self.observations_map[pid, r, c, 3] = <unsigned char> (target.level/30.0)
 
     cdef void spawn_all_towers(self):
         cdef:
@@ -367,8 +406,9 @@ cdef class Environment:
 
     cdef void spawn_tower(self, int idx, int team, int tier, int y, int x):
         cdef Entity* tower = self.get_tower(idx)
-        tower.type = ENTITY_TOWER
         tower.pid = idx + self.num_agents + self.num_creeps + self.num_neutrals
+        tower.entity_type = ENTITY_TOWER
+        tower.grid_id = TOWER
         tower.team = team
         tower.basic_attack_cd = 5
 
@@ -421,7 +461,57 @@ cdef class Environment:
             self.rewards[pid] = 0
             player = self.get_entity(pid)
             player.pid = pid
-            player.type = ENTITY_PLAYER
+            player.entity_type = ENTITY_PLAYER
+            if pid == 0:
+                player.grid_id = RADIANT_SUPPORT
+                player.hero_type = SUPPORT
+                player.team = 0
+                player.lane = 2
+            elif pid == 1:
+                player.grid_id = RADIANT_ASSASSIN
+                player.hero_type = ASSASSIN
+                player.team = 0
+                player.lane = 2
+            elif pid == 2:
+                player.grid_id = RADIANT_BURST
+                player.hero_type = BURST
+                player.team = 0
+                player.lane = 1
+            elif pid == 3:
+                player.grid_id = RADIANT_TANK
+                player.hero_type = TANK
+                player.team = 0
+            elif pid == 4:
+                player.grid_id = RADIANT_CARRY
+                player.hero_type = CARRY
+                player.team = 0
+                player.lane = 2
+            elif pid == 5:
+                player.grid_id = DIRE_SUPPORT
+                player.hero_type = SUPPORT
+                player.team = 1
+                player.lane = 3
+            elif pid == 6:
+                player.grid_id = DIRE_ASSASSIN
+                player.hero_type = ASSASSIN
+                player.team = 1
+                player.lane = 3
+            elif pid == 7:
+                player.grid_id = DIRE_BURST
+                player.hero_type = BURST
+                player.team = 1
+                player.lane = 4
+            elif pid == 8:
+                player.grid_id = DIRE_TANK
+                player.hero_type = TANK
+                player.team = 1
+                player.lane = 5
+            elif pid == 9:
+                player.grid_id = DIRE_CARRY
+                player.hero_type = CARRY
+                player.team = 1
+                player.lane = 3
+
             player.max_health = 500
             player.max_mana = 100
             player.move_speed = self.agent_speed
@@ -433,25 +523,7 @@ cdef class Environment:
             player.damage = 50
             player.xp = 0
 
-            if pid < self.num_agents//2:
-                player.team = 0
-            else:
-                player.team = 1
-
             self.respawn_player(player)
-
-        # Hardcode lanes for now
-        self.get_entity(0).lane = 2
-        self.get_entity(1).lane = 2
-        self.get_entity(4).lane = 2
-        self.get_entity(2).lane = 1
-        self.get_entity(3).lane = 0
-
-        self.get_entity(5).lane = 3
-        self.get_entity(6).lane = 3
-        self.get_entity(9).lane = 3
-        self.get_entity(7).lane = 4
-        self.get_entity(8).lane = 5
 
         self.compute_observations()
 
@@ -468,23 +540,8 @@ cdef class Environment:
                 self.pid_map[disc_dest_y, disc_dest_x] != player.pid):
             return False
 
-        if player.type == ENTITY_TOWER:
-            agent_type = TOWER
-        elif player.type == ENTITY_CREEP:
-            if player.team == 0:
-                agent_type = CREEP_1
-            else:
-                agent_type = CREEP_2
-        elif player.type == ENTITY_NEUTRAL:
-            agent_type = NEUTRAL
-        elif player.type == ENTITY_PLAYER:
-            if player.team == 0:
-                agent_type = AGENT_1
-            else:
-                agent_type = AGENT_2
-
         self.grid[disc_y, disc_x] = EMPTY
-        self.grid[disc_dest_y, disc_dest_x] = agent_type
+        self.grid[disc_dest_y, disc_dest_x] = player.grid_id
 
         self.pid_map[disc_y, disc_x] = -1
         self.pid_map[disc_dest_y, disc_dest_x] = player.pid
@@ -612,7 +669,8 @@ cdef class Environment:
             int dy, dx
 
         neutral.pid = pid
-        neutral.type = ENTITY_NEUTRAL
+        neutral.entity_type = ENTITY_NEUTRAL
+        neutral.grid_id = NEUTRAL
         neutral.health = 500
         neutral.max_health = 500
         neutral.mana = 0
@@ -670,15 +728,16 @@ cdef class Environment:
             int team 
 
         if lane < 3:
-            team = 0
+            creep.team = 0
+            creep.grid_id = RADIANT_CREEP
         else:
-            team = 1
+            creep.team = 1
+            creep.grid_id = DIRE_CREEP
 
         creep.pid = pid
-        creep.type = ENTITY_CREEP
+        creep.entity_type = ENTITY_CREEP
         creep.health = 450
         creep.max_health = 450
-        creep.team = team
         creep.lane = lane
         creep.waypoint = 0
         creep.xp_on_kill = 60
@@ -766,15 +825,15 @@ cdef class Environment:
         if target.health > 0:
             return True
 
-        if target.type == ENTITY_PLAYER:
+        if target.entity_type == ENTITY_PLAYER:
             self.respawn_player(target)
-        elif (target.type == ENTITY_TOWER or target.type == ENTITY_CREEP
-                or target.type == ENTITY_NEUTRAL):
+        elif (target.entity_type == ENTITY_TOWER or target.entity_type == ENTITY_CREEP
+                or target.entity_type == ENTITY_NEUTRAL):
             self.kill(target)
 
-        if player.type == ENTITY_PLAYER:
+        if player.entity_type == ENTITY_PLAYER:
             if player.xp < 10000000:
-                if target.type == ENTITY_PLAYER:
+                if target.entity_type == ENTITY_PLAYER:
                     xp = xp_for_player_kill(target)
                 else:
                     xp = target.xp_on_kill
@@ -806,7 +865,7 @@ cdef class Environment:
         if target.team != player.team:
             return False
 
-        if target.type != ENTITY_PLAYER:
+        if target.entity_type != ENTITY_PLAYER:
             return False
 
         target.health += amount
@@ -844,7 +903,7 @@ cdef class Environment:
                 if exclude_hostile and target_team != player_team:
                     continue
 
-                target_type = target.type
+                target_type = target.entity_type
                 if exclude_neutrals and target_type == ENTITY_NEUTRAL:
                     continue
 
@@ -1086,7 +1145,7 @@ cdef class Environment:
             return
 
         # Targeted on minions, splashes to players
-        if (target.type == ENTITY_CREEP or target.type == ENTITY_NEUTRAL
+        if (target.entity_type == ENTITY_CREEP or target.entity_type == ENTITY_NEUTRAL
                 ) and self.player_aoe_attack(player, target, 3, 300, 0):
             player.mana -= 40
             player.q_timer = 40
@@ -1209,6 +1268,9 @@ cdef class Environment:
         # Player Logic
         for pid in range(self.num_agents):
             player = self.get_entity(pid)
+            if rand() % 128 == 0:
+                self.respawn_player(player)
+
             player.reward = 0
             self.rewards[pid] = 0
 

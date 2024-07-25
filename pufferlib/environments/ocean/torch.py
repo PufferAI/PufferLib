@@ -103,13 +103,13 @@ class MOBA(nn.Module):
         super().__init__()
         self.cnn = nn.Sequential(
             pufferlib.pytorch.layer_init(
-                nn.Conv2d(8, cnn_channels, 5, stride=3)),
+                nn.Conv2d(16 + 3, cnn_channels, 5, stride=3)),
             nn.ReLU(),
             pufferlib.pytorch.layer_init(
                 nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1)),
             nn.Flatten(),
         )
-        self.flat = pufferlib.pytorch.layer_init(nn.Linear(3, 32))
+        self.flat = pufferlib.pytorch.layer_init(nn.Linear(23, 32))
         self.proj = pufferlib.pytorch.layer_init(nn.Linear(32+cnn_channels, hidden_size))
 
         self.is_continuous = isinstance(env.single_action_space, pufferlib.spaces.Box)
@@ -131,11 +131,13 @@ class MOBA(nn.Module):
         return actions, value
 
     def encode_observations(self, observations):
-        cnn_features = observations[:, :-3].view(-1, 11, 11).long()
-        cnn_features = F.one_hot(cnn_features, 8).permute(0, 3, 1, 2).float()
+        cnn_features = observations[:, :-23].view(-1, 11, 11, 4).long()
+        map_features = F.one_hot(cnn_features[:, :, :, 0], 16).permute(0, 3, 1, 2).float()
+        extra_map_features = (cnn_features[:, :, :, -3:].float() / 255).permute(0, 3, 1, 2)
+        cnn_features = torch.cat([map_features, extra_map_features], dim=1)
         cnn_features = self.cnn(cnn_features)
 
-        flat_features = observations[:, -3:].float() / 255.0
+        flat_features = observations[:, -23:].float() / 255.0
         flat_features = self.flat(flat_features)
 
         features = torch.cat([cnn_features, flat_features], dim=1)

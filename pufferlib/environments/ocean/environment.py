@@ -1,7 +1,7 @@
 import pufferlib.emulation
 import pufferlib.postprocess
 
-def make_moba(num_envs=1, render_mode='rgb_array'):
+def make_moba(num_envs=10, render_mode='rgb_array'):
     from .moba import moba
     return moba.PufferMoba(num_envs=num_envs, render_mode=render_mode)
 
@@ -47,6 +47,7 @@ def make_puffer(width=1080, height=720, num_agents=4096, horizon=512,
 
 def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision=5,
         leave_corpse_on_death=None, preset='1440p-4096', render_mode=None):
+    # TODO: Fix render_mode
     if preset is None:
         render_mode = render_mode or 'rgb_array'
     elif preset == '1440p-4096':

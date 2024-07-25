@@ -12,12 +12,7 @@ from pufferlib.environments.ocean.moba.c_moba import entity_dtype, step_all
 from pufferlib.environments.ocean.moba.c_precompute_pathing import precompute_pathing
 
 EMPTY = 0
-FOOD = 1
-WALL = 2
-AGENT_1 = 3
-AGENT_2 = 4
-AGENT_3 = 5
-AGENT_4 = 6
+WALL = 1
 
 PASS = 0
 NORTH = 1
@@ -26,19 +21,25 @@ EAST = 3
 WEST = 4
 
 COLORS = np.array([
-    [6, 24, 24, 255],     
-    [0, 0, 255, 255],     
-    [0, 128, 255, 255],   
-    [128, 128, 128, 255], 
-    [255, 0, 0, 255],     
-    [255, 255, 255, 255], 
-    [255, 85, 85, 255],     
-    [0, 255, 0, 255], 
-    [0, 255, 255, 255],
-    [170, 170, 170, 255], 
-    [255, 255, 255, 255], 
+    [6, 24, 24, 255],     # Empty
+    [0, 178, 178, 255],   # Wall
+    [255, 165, 0, 255],   # Tower
+    [0, 0, 128, 255],   # Radiant Creep
+    [128, 0, 0, 255],   # Dire Creep
+    [128, 128, 128, 255], # Neutral
+    [0, 0, 255, 255],     # Radiant Support
+    [0, 0, 255, 255],     # Radiant Assassin
+    [0, 0, 255, 255],     # Radiant Burst
+    [0, 0, 255, 255],     # Radiant Tank
+    [0, 0, 255, 255],     # Radiant Carry
+    [255, 0, 0, 255],     # Dire Support
+    [255, 0, 0, 255],     # Dire Assassin
+    [255, 0, 0, 255],     # Dire Burst
+    [255, 0, 0, 255],     # Dire Tank
+    [255, 0, 0, 255],     # Dire Carry
 ], dtype=np.uint8)
 
+PLAYER_OBS_N = 23
 
 class PufferMoba(pufferlib.PufferEnv):
     def __init__(self, num_envs=4, vision_range=5, agent_speed=0.5,
@@ -58,6 +59,7 @@ class PufferMoba(pufferlib.PufferEnv):
         self.report_interval = report_interval
 
         self.obs_size = 2*self.vision_range + 1
+        self.obs_map_bytes = self.obs_size*self.obs_size*4
 
         # load game map from png
         game_map_path = os.path.join(
@@ -115,7 +117,7 @@ class PufferMoba(pufferlib.PufferEnv):
 
         self.buf = pufferlib.namespace(
             observations = np.zeros(
-                (self.num_agents, self.obs_size*self.obs_size + 3), dtype=np.uint8),
+                (self.num_agents, self.obs_map_bytes + PLAYER_OBS_N), dtype=np.uint8),
             rewards = np.zeros(self.num_agents, dtype=np.float32),
             terminals = np.zeros(self.num_agents, dtype=bool),
             truncations = np.zeros(self.num_agents, dtype=bool),
@@ -124,7 +126,7 @@ class PufferMoba(pufferlib.PufferEnv):
 
         self.render_mode = render_mode
         if render_mode == 'rgb_array':
-            self.client = render.RGBArrayRender()
+            self.client = render.RGBArrayRender(colors=COLORS[:, :3])
         elif render_mode == 'raylib':
             self.client = render.GridRender(128, 128,
                 screen_width=1024, screen_height=1024, colors=COLORS[:, :3])
@@ -133,7 +135,7 @@ class PufferMoba(pufferlib.PufferEnv):
      
         #self.client = render.RGBArrayRender()
         self.observation_space = gymnasium.spaces.Box(low=0, high=255,
-            shape=(self.obs_size*self.obs_size+3,), dtype=np.uint8)
+            shape=(self.obs_map_bytes + PLAYER_OBS_N,), dtype=np.uint8)
 
         if discretize:
             #self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 10, 2, 2, 2])
@@ -170,29 +172,24 @@ class PufferMoba(pufferlib.PufferEnv):
         else:
             raise ValueError(f'Invalid render mode: {self.render_mode}')
 
-    def _fill_observations(self):
-        self.buf.observations[:, -3] = (
-            255*self.entities[:self.num_agents].y/self.height).astype(np.uint8)
-        self.buf.observations[:, -2] = (
-            255*self.entities[:self.num_agents].x/self.width).astype(np.uint8)
-        self.buf.observations[:, -1] = (255*self.buf.rewards).astype(np.uint8)
-
     def reset(self, seed=0):
         self.obs_view_map = self.buf.observations[
-            :, :self.obs_size*self.obs_size].reshape(
-            self.num_envs, 10, self.obs_size, self.obs_size)
+            :, :self.obs_map_bytes].reshape(
+            self.num_envs, 10, self.obs_size, self.obs_size, 4)
         self.obs_view_extra = self.buf.observations[
-            :, self.obs_size*self.obs_size:].reshape(
-            self.num_envs, 10, 3)
-            
+            :, self.obs_map_bytes:].reshape(
+            self.num_envs, 10, PLAYER_OBS_N)
+           
         self.agents = [i+1 for i in range(self.num_agents)]
         self.done = False
         self.tick = 1
 
+        '''
         self.grid[
             self.entities.y.astype(np.int32),
             self.entities.x.astype(np.int32)
         ] = AGENT_1
+        '''
 
         ptr = end = 0
         self.c_envs = []
@@ -215,7 +212,6 @@ class PufferMoba(pufferlib.PufferEnv):
             ptr = end
 
         self.sum_rewards = []
-        #self._fill_observations()
         return self.buf.observations, self.infos
 
     def step(self, actions):
@@ -228,6 +224,8 @@ class PufferMoba(pufferlib.PufferEnv):
 
         step_all(self.c_envs)
         infos = {}
+
+        #print('Reward: ', self.buf.rewards[0])
 
         '''
         if self.discretize:
@@ -275,7 +273,6 @@ class PufferMoba(pufferlib.PufferEnv):
             #infos['moba_map'] = self.client.render(self.grid)
 
 
-        #self._fill_observations()
         return (self.buf.observations, self.buf.rewards,
             self.buf.terminals, self.buf.truncations, infos)
 
