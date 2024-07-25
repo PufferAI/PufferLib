@@ -251,7 +251,8 @@ class PufferMoba(pufferlib.PufferEnv):
 
         self.tick += 1
         if self.tick % self.report_interval == 0:
-            infos['reward'] = np.mean(self.sum_rewards) / self.num_agents
+            #infos['reward'] = np.mean(self.sum_rewards) / self.num_agents
+            infos['reward'] = np.mean(self.buf.rewards)
             radient_levels = self.entities[0][:5].level
             radient_x = self.entities[0][:5].x
             radient_y = self.entities[0][:5].y

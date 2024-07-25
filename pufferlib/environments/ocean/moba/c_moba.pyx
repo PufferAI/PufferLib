@@ -783,7 +783,7 @@ cdef class Environment:
                 reward = xp / 100.0
                 if reward > 1:
                     reward = 1
-                player.reward += reward
+                #player.reward += reward
 
             player.level = self.level(player.xp)
             player.damage = 50 + 6*player.level
@@ -1353,7 +1353,7 @@ cdef class Environment:
             prev_dist_to_ancient = abs(player.y - ancient.y) + abs(player.x - ancient.x)
             self.move_to(player, dest_y, dest_x)
             dist_to_ancient = abs(player.y - ancient.y) + abs(player.x - ancient.x)
-            player.reward += 0.1*(prev_dist_to_ancient - dist_to_ancient)
+            player.reward += (prev_dist_to_ancient - dist_to_ancient)
             self.rewards[pid] = player.reward
 
         self.tick += 1
