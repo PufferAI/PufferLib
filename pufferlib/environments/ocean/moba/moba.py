@@ -226,7 +226,6 @@ class PufferMoba(pufferlib.PufferEnv):
         step_all(self.c_envs)
         infos = {}
 
-        print(self.buf.rewards[0])
         '''
         if self.discretize:
             actions = actions.astype(np.uint32)
