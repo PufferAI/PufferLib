@@ -218,13 +218,15 @@ class PufferMoba(pufferlib.PufferEnv):
     def step(self, actions):
         #self.actions[:] = actions.astype(np.float32)
         self.actions[:] = actions#.astype(np.float32)
+
+        if self.render_mode == 'human' and self.human_action is not None:
+            #print(self.human_action)
+            self.actions[0] = self.human_action
+
         step_all(self.c_envs)
         infos = {}
 
-        #if self.render_mode == 'human' and self.human_action is not None:
-        #    #print(self.human_action)
-        #    actions[0] = self.human_action
-
+        print(self.buf.rewards[0])
         '''
         if self.discretize:
             actions = actions.astype(np.uint32)
@@ -312,8 +314,30 @@ class RaylibClient:
         colors = self.colors
         ay, ax = None, None
 
+        atn = 4
+        if rl.IsKeyDown(rl.KEY_A):
+            if rl.IsKeyDown(rl.KEY_W):
+                atn = 0
+            elif rl.IsKeyDown(rl.KEY_S):
+                atn = 2
+            else:
+                atn = 1
+        elif rl.IsKeyDown(rl.KEY_D):
+            if rl.IsKeyDown(rl.KEY_W):
+                atn = 6
+            elif rl.IsKeyDown(rl.KEY_S):
+                atn = 8
+            else:
+                atn = 7
+        elif rl.IsKeyDown(rl.KEY_W):
+            atn = 3
+        elif rl.IsKeyDown(rl.KEY_S):
+            atn = 5
+
         if rl.IsKeyDown(rl.KEY_ESCAPE):
             exit(0)
+
+        '''
         if rl.IsKeyDown(rl.KEY_UP) or rl.IsKeyDown(rl.KEY_W):
             ay = 0 if discretize else -1
         if rl.IsKeyDown(rl.KEY_DOWN) or rl.IsKeyDown(rl.KEY_S):
@@ -322,16 +346,21 @@ class RaylibClient:
             ax = 0 if discretize else -1
         if rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
             ax = 2 if discretize else 1
+        '''
 
+        skill = 0
         skill_q = 0
         skill_w = 0
         skill_e = 0
         if rl.IsKeyDown(rl.KEY_Q):
             skill_q = 1
+            skill = 1
         if rl.IsKeyDown(rl.KEY_W):
             skill_w = 1
+            skill = 2
         if rl.IsKeyDown(rl.KEY_E):
             skill_e = 1
+            skill = 3
 
         ts = self.tile_size
         main_r = entities[0].y
@@ -386,7 +415,6 @@ class RaylibClient:
 
                 if dist_to_target < dist_to_best_target:
                     best_target = target
-        '''
                     
         attack = 0
         if best_target is None:
@@ -407,6 +435,9 @@ class RaylibClient:
                 ay = 1 if discretize else 0
 
             action = (ay, ax, attack, skill_q, skill_w, skill_e)
+        '''
+
+        action = (atn, skill)
 
         #print(f'Action: {action}')
 
@@ -457,8 +488,8 @@ class RaylibClient:
                 rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
                     (0, 0), 0, colors.WHITE)
 
-                if entity.pid == target_pid:
-                    rl.DrawCircle(x*ts + ts//2, y*ts + ts//2, ts//4, [0, 255, 0, 255])
+                #if entity.pid == target_pid:
+                #    rl.DrawCircle(x*ts + ts//2, y*ts + ts//2, ts//4, [0, 255, 0, 255])
 
         # Draw circle at mouse x, y
         rl.DrawCircle(ts*mouse_x + ts//2, ts*mouse_y + ts//8, ts//8, [255, 0, 0, 255])

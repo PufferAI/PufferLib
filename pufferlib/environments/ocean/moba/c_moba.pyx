@@ -752,7 +752,7 @@ cdef class Environment:
     cdef bint attack(self, Entity* player, Entity* target, float damage):
         cdef:
             int xp = 0
-            int reward
+            float reward
 
         if target.pid == -1:
             return False
@@ -779,7 +779,7 @@ cdef class Environment:
                     xp = target.xp_on_kill
 
                 player.xp += xp
-                reward = int(xp / 250)
+                reward = xp / 100.0
                 if reward > 1:
                     reward = 1
                 player.reward += reward
