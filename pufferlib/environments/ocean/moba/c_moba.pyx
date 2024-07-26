@@ -1275,8 +1275,8 @@ cdef class Environment:
 
         for pid in range(self.num_agents):
             player = self.get_entity(pid)
-            if rand() % 128 == 0:
-                self.respawn_player(player)
+            #if rand() % 128 == 0:
+            #    self.respawn_player(player)
 
             if player.mana < player.max_mana:
                 player.mana += 1
@@ -1419,9 +1419,11 @@ cdef class Environment:
             prev_dist_to_ancient = abs(player.y - ancient.y) + abs(player.x - ancient.x)
             self.move_to(player, dest_y, dest_x)
             dist_to_ancient = abs(player.y - ancient.y) + abs(player.x - ancient.x)
-            player.reward += (prev_dist_to_ancient - dist_to_ancient)
-            if player.reward < 0:
-                player.reward = 0
+            player.reward += 0.05 * (prev_dist_to_ancient - dist_to_ancient)
+            if player.reward > 5:
+                player.reward = 5
+            if player.reward < -5:
+                player.reward = -5
             self.rewards[pid] = player.reward
 
         self.tick += 1

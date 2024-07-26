@@ -43,7 +43,7 @@ PLAYER_OBS_N = 23
 
 class PufferMoba(pufferlib.PufferEnv):
     def __init__(self, num_envs=4, vision_range=5, agent_speed=0.5,
-            discretize=True, report_interval=128, render_mode='rgb_array'):
+            discretize=True, report_interval=32, render_mode='rgb_array'):
         super().__init__()
 
         self.height = 128
