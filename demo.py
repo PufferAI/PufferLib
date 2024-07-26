@@ -58,7 +58,7 @@ def sweep(args, env_name, make_env, policy_cls, rnn_cls):
         except Exception as e:
             Console().print_exception()
 
-    wandb.agent(sweep_id, main, count=10)
+    wandb.agent(sweep_id, main, count=100)
 
 ### CARBS Sweeps
 def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
@@ -143,7 +143,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         #carbs_param('hidden_size', 'linear', wandb_policy_params, search_center=128, is_integer=True),
         #carbs_param('vision', 'linear', search_center=5, is_integer=True),
         carbs_param('total_timesteps', 'log', wandb_train_params,
-            search_center=500_000_000, is_integer=True),
+            search_center=200_000_000, is_integer=True),
         carbs_param('learning_rate', 'log', wandb_train_params, search_center=9e-4),
         carbs_param('gamma', 'logit', wandb_train_params, search_center=0.99),
         carbs_param('gae_lambda', 'logit', wandb_train_params, search_center=0.90),
