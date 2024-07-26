@@ -381,7 +381,7 @@ cdef class Environment:
                 self.observations_extra[pid, 21] = 255
 
             # Assumes scaled between -1 and 1, else overflows
-            self.observations_extra[pid, 22] = <unsigned char> (127*self.rewards[pid] + 128)
+            self.observations_extra[pid, 22] = <unsigned char> (25*self.rewards[pid] + 128)
 
             for dy in range(-self.vision_range, self.vision_range+1):
                 for dx in range(-self.vision_range, self.vision_range+1):
@@ -826,6 +826,7 @@ cdef class Environment:
             return True
 
         if target.entity_type == ENTITY_PLAYER:
+            player.reward -= 1.0
             self.respawn_player(target)
         elif (target.entity_type == ENTITY_TOWER or target.entity_type == ENTITY_CREEP
                 or target.entity_type == ENTITY_NEUTRAL):
@@ -839,10 +840,11 @@ cdef class Environment:
                     xp = target.xp_on_kill
 
                 player.xp += xp
-                reward = xp / 100.0
-                if reward > 1:
-                    reward = 1
-                #player.reward += reward
+                reward = 0.006 * xp
+                player.reward += reward
+
+                if target.entity_type == ENTITY_TOWER:
+                    player.reward += 3
 
             player.level = self.level(player.xp)
             player.damage = 50 + 6*player.level
@@ -1201,6 +1203,12 @@ cdef class Environment:
             float prev_dist_to_ancient
             float dist_to_ancient
 
+        # Clear rewards
+        for pid in range(self.num_agents):
+            player = self.get_entity(pid)
+            player.reward = 0
+            self.rewards[pid] = 0
+
         for pid in range(self.num_agents + self.num_towers + self.num_creeps):
             player = self.get_entity(pid)
             player.is_hit = 0
@@ -1265,14 +1273,10 @@ cdef class Environment:
             if target != NULL:
                 self.basic_attack(tower, target)
 
-        # Player Logic
         for pid in range(self.num_agents):
             player = self.get_entity(pid)
             if rand() % 128 == 0:
                 self.respawn_player(player)
-
-            player.reward = 0
-            self.rewards[pid] = 0
 
             if player.mana < player.max_mana:
                 player.mana += 1
@@ -1416,6 +1420,8 @@ cdef class Environment:
             self.move_to(player, dest_y, dest_x)
             dist_to_ancient = abs(player.y - ancient.y) + abs(player.x - ancient.x)
             player.reward += (prev_dist_to_ancient - dist_to_ancient)
+            if player.reward < 0:
+                player.reward = 0
             self.rewards[pid] = player.reward
 
         self.tick += 1

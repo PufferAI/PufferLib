@@ -193,6 +193,7 @@ class PufferMoba(pufferlib.PufferEnv):
 
         ptr = end = 0
         self.c_envs = []
+        grid_copy = self.grid.copy()
         for i in range(self.num_envs):
             end += 10
 
@@ -200,7 +201,7 @@ class PufferMoba(pufferlib.PufferEnv):
             if i == 0:
                 grid = self.grid
             else:
-                grid = self.grid.copy()
+                grid = grid_copy.copy()
 
             self.c_envs.append(CEnv(grid, self.ai_paths,
                 self.pids[i], self.c_entities[i], self.entity_data,
@@ -286,12 +287,19 @@ class RaylibClient:
         sprite_sheet_path = os.path.join(
             *self.__module__.split('.')[:-1], 'puffer_chars.png')
         self.asset_map = {
-            3: (0, 0, 128, 128),
-            4: (128, 0, 128, 128),
-            5: (256, 0, 128, 128),
-            6: (384, 0, 128, 128),
-            7: (384, 0, 128, 128),
-            1: (512, 0, 128, 128),
+            2: (512, 0, 128, 128),
+            11: (0, 0, 128, 128),
+            12: (0, 0, 128, 128),
+            13: (0, 0, 128, 128),
+            14: (0, 0, 128, 128),
+            15: (0, 0, 128, 128),
+            6: (128, 0, 128, 128),
+            7: (128, 0, 128, 128),
+            8: (128, 0, 128, 128),
+            9: (128, 0, 128, 128),
+            10: (128, 0, 128, 128),
+            4: (256, 0, 128, 128),
+            3: (384, 0, 128, 128),
         }
 
         from raylib import rl, colors
@@ -463,7 +471,7 @@ class RaylibClient:
                 tile = grid[y, x]
                 if tile == 0:
                     continue
-                elif tile == 2:
+                elif tile == 1:
                     rl.DrawRectangle(x*ts, y*ts, ts, ts, [0, 0, 0, 255])
                     continue
 
@@ -473,7 +481,7 @@ class RaylibClient:
                     continue
 
                 tile = grid[y, x]
-                if tile == 0 or tile == 2:
+                if tile == EMPTY or tile == WALL:
                     continue
            
                 pid = pids[y, x]
@@ -541,7 +549,7 @@ def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
     rl.DrawRectangle(x, y, width, height, [255, 0, 0, 255])
     rl.DrawRectangle(x, y, int(width*health_bar), height, [0, 255, 0, 255])
 
-    if entity.type == 0:
+    if entity.entity_type == 0:
         rl.DrawRectangle(x, y - height - 2, width, height, [255, 0, 0, 255])
         rl.DrawRectangle(x, y - height - 2, int(width*mana_bar), height, [0, 255, 255, 255])
 
@@ -558,7 +566,8 @@ def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
         #rl.DrawRectangle(x, y - 2*height - 4, int(width*mana_bar), height, [255, 255, 0, 255])
         rl.DrawText(f'Experience: {entity.xp}'.encode(),
             x+8, y - 2*height - 4, 20, [255, 255, 255, 255])
-    elif entity.type == 0:
+
+    elif entity.entity_type == 0:
         rl.DrawText(f'Level: {entity.level}'.encode(),
             x+4, y -2*height - 12, 12, [255, 255, 255, 255])
 
