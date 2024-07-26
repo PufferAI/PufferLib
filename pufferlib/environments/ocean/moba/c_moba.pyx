@@ -1299,8 +1299,8 @@ cdef class Environment:
 
         for pid in range(self.num_agents):
             player = self.get_entity(pid)
-            #if rand() % 128 == 0:
-            #    self.respawn_player(player)
+            if rand() % 1024 == 0:
+                self.respawn_player(player)
 
             if player.mana < player.max_mana:
                 player.mana += 1
