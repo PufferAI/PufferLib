@@ -8,7 +8,7 @@ import gymnasium
 import pufferlib
 from pufferlib.environments.ocean import render
 from pufferlib.environments.ocean.moba.c_moba import Environment as CEnv
-from pufferlib.environments.ocean.moba.c_moba import entity_dtype, step_all
+from pufferlib.environments.ocean.moba.c_moba import entity_dtype, reward_dtype,step_all
 from pufferlib.environments.ocean.moba.c_precompute_pathing import precompute_pathing
 
 EMPTY = 0
@@ -39,7 +39,7 @@ COLORS = np.array([
     [255, 0, 0, 255],     # Dire Carry
 ], dtype=np.uint8)
 
-PLAYER_OBS_N = 23
+PLAYER_OBS_N = 26
 
 class PufferMoba(pufferlib.PufferEnv):
     def __init__(self, num_envs=4, vision_range=5, agent_speed=0.5,
@@ -112,6 +112,9 @@ class PufferMoba(pufferlib.PufferEnv):
         self.entities.pid = -1
         self.c_obs_players = np.zeros((self.num_envs, 10, 10), dtype=dtype)
         self.obs_players = self.c_obs_players.view(np.recarray)
+        dtype = reward_dtype()
+        self.c_rewards = np.zeros((self.num_agents), dtype=dtype)
+        self.rewards = self.c_rewards.view(np.recarray)
 
         self.emulated = None
 
@@ -206,7 +209,7 @@ class PufferMoba(pufferlib.PufferEnv):
             self.c_envs.append(CEnv(grid, self.ai_paths,
                 self.pids[i], self.c_entities[i], self.entity_data,
                 self.c_obs_players[i], self.obs_view_map[i], self.obs_view_extra[i],
-                self.buf.rewards[ptr:end], self.actions[ptr:end], 10, self.num_creeps,
+                self.rewards[ptr:end], self.actions[ptr:end], 10, self.num_creeps,
                 self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
                 True))
             self.c_envs[i].reset()
@@ -224,6 +227,12 @@ class PufferMoba(pufferlib.PufferEnv):
             self.actions[0] = self.human_action
 
         step_all(self.c_envs)
+        reward_death = self.rewards.death
+        reward_xp = self.rewards.xp
+        reward_distance = self.rewards.distance
+        reward_tower = self.rewards.tower
+
+        self.buf.rewards[:] = (reward_death + reward_xp + reward_distance + reward_tower)
         infos = {}
 
         #print('Reward: ', self.buf.rewards[0])
@@ -268,6 +277,10 @@ class PufferMoba(pufferlib.PufferEnv):
             infos['dire_level_mean'] = np.mean(dire_levels)
             infos['dire_x'] = np.mean(dire_x)
             infos['dire_y'] = np.mean(dire_y)
+            infos['reward_death'] = np.mean(reward_death)
+            infos['reward_xp'] = np.mean(reward_xp)
+            infos['reward_distance'] = np.mean(reward_distance)
+            infos['reward_tower'] = np.mean(reward_tower)
             self.sum_rewards = []
             #print('Radient Lv: ', infos['radient_level_mean'])
             #print('Dire Lv: ', infos['dire_level_mean'])
