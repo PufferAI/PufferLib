@@ -151,6 +151,9 @@ def evaluate(data):
             except:
                 continue
 
+    # TODO: Better way to enable multiple collects
+    data.experience.ptr = 0
+    data.experience.step = 0
     return data.stats, infos
 
 @pufferlib.utils.profile
@@ -462,8 +465,6 @@ class Experience:
         self.b_idxs_flat = self.b_idxs.reshape(
             self.num_minibatches, self.minibatch_size)
         self.sort_keys = []
-        self.ptr = 0
-        self.step = 0
         return idxs
 
     def flatten_batch(self, advantages_np):
