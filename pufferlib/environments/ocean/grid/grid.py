@@ -138,7 +138,7 @@ class PufferGrid(pufferlib.PufferEnv):
 
         self.buf = pufferlib.namespace(
             observations = np.zeros(
-                num_agents*self.obs_size*self.obs_size + 3, dtype=np.uint8),
+                (num_agents, self.obs_size*self.obs_size + 3), dtype=np.uint8),
             rewards = np.zeros(num_agents, dtype=np.float32),
             terminals = np.zeros(num_agents, dtype=bool),
             truncations = np.zeros(num_agents, dtype=bool),
@@ -336,10 +336,9 @@ class RaylibClient:
         rl.EndDrawing()
         return render.cdata_to_numpy()
 
-def test_puffer_performance(timeout):
+def test_puffer_performance(env, actions, timeout):
     import time
-    env = PufferGrid()
-    actions = np.random.randn(1000, env.num_agents, 2)
+    N = actions.shape[0]
     idx = 0
     dones = {1: True}
     start = time.time()
@@ -348,7 +347,7 @@ def test_puffer_performance(timeout):
             env.reset()
             dones = {1: False}
         else:
-            _, _, dones, _, _ = env.step(actions[idx%1000])
+            _, _, dones, _, _ = env.step(actions[idx%N])
 
         idx += 1
 
@@ -361,4 +360,12 @@ if __name__ == '__main__':
     #run('test_puffer_performance(10)', sort='tottime')
     #exit(0)
 
-    test_puffer_performance(10)
+    env = PufferGrid(discretize=False)
+    actions = np.random.randn(1000, env.num_agents, 2)
+    print('Continuous test')
+    test_puffer_performance(env, actions, 10)
+
+    env = PufferGrid(discretize=True)
+    print('Discrete test')
+    actions = np.random.randint(0, 3, (1000, env.num_agents, 2))
+    test_puffer_performance(env, actions, 10)
