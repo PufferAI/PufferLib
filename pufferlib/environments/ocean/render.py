@@ -115,7 +115,7 @@ class GridRender:
         self.screen_width = screen_width
         self.screen_height = screen_height
 
-    def render(self, grid, *args):
+    def render(self, grid, *args, end_drawing=True):
         assert grid.shape[0] == self.height
         assert grid.shape[1] == self.width
         rendered = self.colors[grid]
@@ -183,7 +183,9 @@ class GridRender:
             rl.DrawText('Help: Tab/~'.encode(), 10, 180, 20, PUFF_TEXT)
             rl.DrawText('Reset: Space'.encode(), 10, 200, 20, PUFF_TEXT)
 
-        rl.EndDrawing()
+        if end_drawing:
+            rl.EndDrawing()
+
         return cdata_to_numpy()
 
 class GameRender:

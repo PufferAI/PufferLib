@@ -615,6 +615,9 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
     if backend is Serial and 'batch_size' in kwargs:
         num_envs = kwargs['batch_size']
 
+    # TODO: Check num workers is not greater than num envs. This results in
+    # different Serial vs Multiprocessing behavior
+
     # Sanity check args
     for k in kwargs:
         if k not in ['num_workers', 'batch_size', 'zero_copy','backend']:
