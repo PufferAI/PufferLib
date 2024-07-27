@@ -313,6 +313,7 @@ class RaylibClient:
             10: (128, 0, 128, 128),
             4: (256, 0, 128, 128),
             3: (384, 0, 128, 128),
+            5: (384, 0, 128, 128),
         }
 
         from raylib import rl, colors
