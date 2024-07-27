@@ -59,7 +59,7 @@ class CARBSSearch:
                 cost=1,#uptime,
             )
         )
-        return reward
+        return params, reward
 
 class GeneticAlgorithm:
     def __init__(self, experiment, mutation_rate=0.1):
@@ -79,22 +79,15 @@ class GeneticAlgorithm:
         return params, reward
 
 class WandbSearch:
-    def __init__(self, experiment, method='bayes', strategy=None, cheat=False):
+    def __init__(self, experiment, method='bayes', strategy=None):
         self.experiment = experiment
         self.strategy = strategy
 
+        self.parameters = {f'param_{i}':
+            {'distribution': 'normal', 'mu': 0, 'sigma': 1}
+            for i in range(10)}
+
         name = strategy.__class__.__name__ if strategy is not None else method
-
-        if cheat: # Cheat by assuming the distribution
-            self.parameters = {f'param_{i}':
-                {'distribution': 'normal', 'mu': 0, 'sigma': 1}
-                for i in range(10)}
-            name += '-cheat'
-        else:
-            self.parameters = {f'param_{i}':
-                {'distribution': 'uniform', 'min': -10, 'max': 10}
-                for i in range(10)}
-
         self.sweep_id = wandb.sweep(
             sweep=dict(
                 method=method,
@@ -130,22 +123,16 @@ class WandbSearch:
 if __name__ == '__main__':
     experiment = SyntheticExperiment(10)
 
-    #strategy = GeneticAlgorithm(experiment)
-    #wandb_search = WandbSearch(experiment, strategy=strategy)
-    #wandb_search.run()
-
-    #strategy = CARBSSearch(experiment)
-    #wandb_search = WandbSearch(experiment, strategy=strategy)
-    #wandb_search.run()
-
-    #wandb_search = WandbSearch(experiment, method='bayes')
-    #wandb_search.run()
-
-    #wandb_search = WandbSearch(experiment, method='random')
-    #wandb_search.run()
-
-    wandb_search = WandbSearch(experiment, method='bayes', cheat=True)
+    strategy = CARBSSearch(experiment)
+    wandb_search = WandbSearch(experiment, strategy=strategy)
     wandb_search.run()
 
-    wandb_search = WandbSearch(experiment, method='random', cheat=True)
+    wandb_search = WandbSearch(experiment, method='random')
+    wandb_search.run()
+
+    wandb_search = WandbSearch(experiment, method='bayes')
+    wandb_search.run()
+
+    strategy = GeneticAlgorithm(experiment)
+    wandb_search = WandbSearch(experiment, strategy=strategy)
     wandb_search.run()
