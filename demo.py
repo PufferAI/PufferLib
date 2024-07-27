@@ -138,12 +138,23 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
     #wandb_policy_params = sweep_parameters['policy']['parameters']
 
     # Must be hardcoded and match wandb sweep space for now
-    param_spaces = [
+    param_spaces = []
+    if 'total_timesteps' in sweep_parameters['train']['parameters']:
+        time_param = sweep_parameters['train']['parameters']['total_timesteps']
+        min_timesteps = time_param['min']
+        param_spaces.append(carbs_param('total_timesteps', 'log', wandb_train_params,
+            search_center=min_timesteps, is_integer=True))
+
+    batch_param = sweep_parameters['train']['parameters']['batch_size']
+    default_batch = (batch_param['max'] - batch_param['min']) // 2
+
+    minibatch_param = sweep_parameters['train']['parameters']['minibatch_size']
+    default_minibatch = (minibatch_param['max'] - minibatch_param['min']) // 2
+
+    param_spaces += [
         #carbs_param('cnn_channels', 'linear', wandb_policy_params, search_center=32, is_integer=True),
         #carbs_param('hidden_size', 'linear', wandb_policy_params, search_center=128, is_integer=True),
         #carbs_param('vision', 'linear', search_center=5, is_integer=True),
-        carbs_param('total_timesteps', 'log', wandb_train_params,
-            search_center=200_000_000, is_integer=True),
         carbs_param('learning_rate', 'log', wandb_train_params, search_center=9e-4),
         carbs_param('gamma', 'logit', wandb_train_params, search_center=0.99),
         carbs_param('gae_lambda', 'logit', wandb_train_params, search_center=0.90),
@@ -155,9 +166,12 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         carbs_param('ent_coef', 'log', wandb_train_params, search_center=0.07),
         #carbs_param('env_batch_size', 'linear', search_center=384,
         #    is_integer=True, rounding_factor=24),
-        carbs_param('batch_size', 'log', wandb_train_params, search_center=262144, is_integer=True),
-        carbs_param('minibatch_size', 'log', wandb_train_params, search_center=4096, is_integer=True),
-        carbs_param('bptt_horizon', 'log', wandb_train_params, search_center=16, is_integer=True),
+        carbs_param('batch_size', 'log', wandb_train_params,
+            search_center=default_batch, is_integer=True),
+        carbs_param('minibatch_size', 'log', wandb_train_params,
+            search_center=default_minibatch, is_integer=True),
+        carbs_param('bptt_horizon', 'log', wandb_train_params,
+            search_center=16, is_integer=True),
     ]
 
     carbs_params = CARBSParams(
@@ -363,7 +377,7 @@ if __name__ == '__main__':
     elif args['mode'] == 'sweep-carbs':
         sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls)
     elif args['mode'] == 'autotune':
-        pufferlib.vector.autotune(make_env, batch_size=args.train.env_batch_size)
+        pufferlib.vector.autotune(make_env, batch_size=args['train']['env_batch_size'])
     elif args['mode'] == 'profile':
         import cProfile
         cProfile.run('train(args, env_module, make_env)', 'stats.profile')

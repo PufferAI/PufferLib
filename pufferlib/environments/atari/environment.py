@@ -22,6 +22,7 @@ def make(name, obs_type='grayscale', frameskip=4, render_mode='rgb_array'):
         frameskip=frameskip, render_mode=render_mode)
     env = pufferlib.postprocess.ResizeObservation(env, downscale=2)
     env = AtariPostprocessor(env) # Don't use standard postprocessor
+    env = pufferlib.postprocess.EpisodeStats(env)
     env = pufferlib.emulation.GymnasiumPufferEnv(env=env)
     return env
 
@@ -35,13 +36,10 @@ class AtariPostprocessor(gym.Wrapper):
             dtype=env.observation_space.dtype)
 
     def reset(self, seed=None):
-        obs, info = self.env.reset(seed=seed)
+        obs, _ = self.env.reset(seed=seed)
         return np.expand_dims(obs, 0), {}
 
     def step(self, action):
-        obs, reward, terminal, truncated, info = self.env.step(action)
-        if 'episode' not in info:
-            info = {}
-
-        return np.expand_dims(obs, 0), reward, terminal, truncated, info
+        obs, reward, terminal, truncated, _ = self.env.step(action)
+        return np.expand_dims(obs, 0), reward, terminal, truncated, {}
 

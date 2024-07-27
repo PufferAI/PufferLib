@@ -54,7 +54,7 @@ environments = {
     'atari': [
         f'gym=={GYM_VERSION}',
         f'gymnasium[atari,accept-rom-license]=={GYMNASIUM_VERSION}',
-        'stable_baselines3==2.1.0',
+        'ale_py==0.9.0',
     ],
     'box2d': [
         f'gym=={GYM_VERSION}',
