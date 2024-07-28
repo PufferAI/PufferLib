@@ -8,6 +8,24 @@ from stable_baselines3.common.env_util import make_vec_env
 
 from pufferlib.environments import atari
 
+'''
+    elif args.backend == 'sb3':
+        from stable_baselines3 import PPO
+        from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+        from stable_baselines3.common.env_util import make_vec_env
+        from sb3_contrib import RecurrentPPO
+
+        envs = make_vec_env(lambda: make_env(**args.env),
+            n_envs=args.train.num_envs, seed=args.train.seed, vec_env_cls=DummyVecEnv)
+
+        model = RecurrentPPO("CnnLstmPolicy", envs, verbose=1,
+            n_steps=args.train.batch_rows*args.train.bptt_horizon,
+            batch_size=args.train.batch_size, n_epochs=args.train.update_epochs,
+            gamma=args.train.gamma
+        )
+
+        model.learn(total_timesteps=args.train.total_timesteps)
+'''
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--env', type=str, default='BreakoutNoFrameskip-v4')

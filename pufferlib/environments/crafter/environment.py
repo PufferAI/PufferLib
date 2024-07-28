@@ -16,11 +16,14 @@ class TransposeObs(gym.Wrapper):
     def observation(self, observation):
         return observation.transpose(2, 0, 1)
 
-def env_creator(name='CrafterReward-v1'):
+def env_creator(name='crafter'):
     return functools.partial(make, name)
 
 def make(name):
     '''Crafter creation function'''
+    if name == 'crafter':
+        name = 'CrafterReward-v1'
+
     pufferlib.environments.try_import('crafter')
     env = gym.make(name)
     env.reset = pufferlib.utils.silence_warnings(env.reset)

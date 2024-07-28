@@ -4,6 +4,26 @@ import gymnasium
 
 import pufferlib.utils
 
+class ResizeObservation(gymnasium.Wrapper):
+    '''Fixed downscaling wrapper. Do NOT use gym.wrappers.ResizeObservation
+    It uses a laughably slow OpenCV resize. -50% on Atari just from that.'''
+    def __init__(self, env, downscale=2):
+        super().__init__(env)
+        self.downscale = downscale
+        y_size, x_size = env.observation_space.shape
+        assert y_size % downscale == 0 and x_size % downscale == 0
+        y_size = env.observation_space.shape[0] // downscale
+        x_size = env.observation_space.shape[1] // downscale
+        self.observation_space = gymnasium.spaces.Box(
+            low=0, high=255, shape=(y_size, x_size), dtype=np.uint8)
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        return obs[::self.downscale, ::self.downscale], info
+
+    def step(self, action):
+        obs, reward, terminal, truncated, info = self.env.step(action)
+        return obs[::self.downscale, ::self.downscale], reward, terminal, truncated, info
 
 class ClipAction(gymnasium.Wrapper):
     '''Wrapper for Gymnasium environments that clips actions'''

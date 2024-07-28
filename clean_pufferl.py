@@ -151,6 +151,9 @@ def evaluate(data):
             except:
                 continue
 
+    # TODO: Better way to enable multiple collects
+    data.experience.ptr = 0
+    data.experience.step = 0
     return data.stats, infos
 
 @pufferlib.utils.profile
@@ -462,8 +465,6 @@ class Experience:
         self.b_idxs_flat = self.b_idxs.reshape(
             self.num_minibatches, self.minibatch_size)
         self.sort_keys = []
-        self.ptr = 0
-        self.step = 0
         return idxs
 
     def flatten_batch(self, advantages_np):
@@ -558,7 +559,7 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
     # We are just using Serial vecenv to give a consistent
     # single-agent/multi-agent API for evaluation
     if render_mode != 'auto':
-        env_kwargs.render_mode = render_mode
+        env_kwargs['render_mode'] = render_mode
 
     env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs)
 
@@ -574,8 +575,8 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
 
     frames = []
     tick = 0
-    while tick <= 10000:
-        if tick % 1 == 0:
+    while tick <= 10000000:
+        if tick % 32 == 0:
             render = driver.render()
             if driver.render_mode == 'ansi':
                 print('\033[0;0H' + render + '\n')
@@ -587,8 +588,10 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
                 cv2.imshow('frame', render)
                 cv2.waitKey(1)
                 time.sleep(1/24)
-            elif driver.render_mode == 'human' and render is not None:
+            elif driver.render_mode in ('human', 'raylib') and render is not None:
                 frames.append(render)
+                if driver.outcome != 0:
+                    break
 
         with torch.no_grad():
             ob = torch.from_numpy(ob).to(device)
@@ -601,13 +604,13 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
 
         ob, reward = env.step(action)[:2]
         reward = reward.mean()
-        if tick % 1 == 0:
+        if tick % 128 == 0:
             print(f'Reward: {reward:.4f}, Tick: {tick}')
         tick += 1
 
     # Save frames as gif
     import imageio
-    imageio.mimsave('../docker/continuous.gif', frames, fps=15, loop=0)
+    imageio.mimsave('../docker/dire_victory.gif', frames, fps=15, loop=0)
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)

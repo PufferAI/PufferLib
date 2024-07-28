@@ -230,8 +230,6 @@ class Multiprocessing:
     def __init__(self, env_creators, env_args, env_kwargs,
             num_envs, num_workers=None, batch_size=None,
             zero_copy=True, **kwargs):
-        self.envs = [creator(*args, **kwargs) for (creator, args, kwargs)
-            in zip(env_creators, env_args, env_kwargs)]
         if batch_size is None:
             batch_size = num_envs
         if num_workers is None:
@@ -616,6 +614,9 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
     # Keeps batch size consistent when debugging with Serial backend
     if backend is Serial and 'batch_size' in kwargs:
         num_envs = kwargs['batch_size']
+
+    # TODO: Check num workers is not greater than num envs. This results in
+    # different Serial vs Multiprocessing behavior
 
     # Sanity check args
     for k in kwargs:

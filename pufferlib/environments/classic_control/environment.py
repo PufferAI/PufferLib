@@ -7,12 +7,20 @@ import pufferlib
 import pufferlib.emulation
 import pufferlib.postprocess
 
+ALIASES = {
+    'cartpole': 'CartPole-v0',
+    'mountaincar': 'MountainCar-v0',
+}
 
 def env_creator(name='cartpole'):
     return functools.partial(make, name)
 
 def make(name, render_mode='rgb_array'):
     '''Create an environment by name'''
+
+    if name in ALIASES:
+        name = ALIASES[name]
+
     env = gymnasium.make(name, render_mode=render_mode)
     if name == 'MountainCar-v0':
         env = MountainCarWrapper(env)

@@ -16,6 +16,9 @@ def env_creator(name='SlimeVolley-v0'):
     return functools.partial(make, name)
 
 def make(name, render_mode='rgb_array'):
+    if name == 'slimevolley':
+        name = 'SlimeVolley-v0'
+
     from slimevolleygym import SlimeVolleyEnv
     SlimeVolleyEnv.atari_mode = True
     env = SlimeVolleyEnv()

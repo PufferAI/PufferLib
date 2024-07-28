@@ -102,7 +102,7 @@ class Policy(nn.Module):
         #self.proj = nn.Linear(hidden_size, output_size)
         #self.player_proj = nn.Linear(47, hidden_size)
 
-        self.reward_proj = nn.Linear(8, hidden_size//2)
+        self.reward_proj = nn.Linear(10, hidden_size//2)
 
         #self.lstm = nn.LSTMCell(hidden_size, hidden_size)
 
@@ -123,7 +123,7 @@ class Policy(nn.Module):
         #    ob_map = self.decompressor(x['map']).float()
         #player = x['player']
 
-        player = observations[:, (11*15):-8]
+        player = observations[:, (11*15):-10]
         #player = self.player_proj(player.float() / 99)
         #player, _ = self.lstm(player)
         #return player, None
@@ -136,7 +136,7 @@ class Policy(nn.Module):
         ob_map = self.decompressor(ob_map).float()
         ob_map = self.map_2d(ob_map)
 
-        reward = observations[:, -8:].float() / 10000
+        reward = observations[:, -10:].float() / 10000
         ob_reward = self.reward_proj(reward)
 
         ob = torch.cat([ob_map, ob_player, ob_reward], dim=1)

@@ -11,11 +11,14 @@ import pufferlib.utils
 import pufferlib.postprocess
 
 
-def env_creator(name='VizdoomHealthGatheringSupreme-v0'):
+def env_creator(name='doom'):
     return functools.partial(make, name)
 
 def make(name, framestack=1, render_mode='rgb_array'):
     '''Atari creation function with default CleanRL preprocessing based on Stable Baselines3 wrappers'''
+    if name == 'doom':
+        name = 'VizdoomHealthGatheringSupreme-v0'
+
     #pufferlib.environments.try_import('vizdoom', 'gymnasium_wrapper')
     from stable_baselines3.common.atari_wrappers import (
         ClipRewardEnv,

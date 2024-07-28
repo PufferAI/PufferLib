@@ -15,7 +15,6 @@ from stable_baselines3.common.atari_wrappers import (
     MaxAndSkipEnv,
 )
 
-
 def env_creator(name='bigfish'):
     return functools.partial(make, name)
 

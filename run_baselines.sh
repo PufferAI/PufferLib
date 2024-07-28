@@ -18,6 +18,13 @@ case $GROUP in
         $COMMON spaces
         $COMMON bandit
         ;;
+    grid)
+        $COMMON foraging --vec multiprocessing
+        $COMMON predator_prey --vec multiprocessing
+        $COMMON group --vec multiprocessing
+        $COMMON puffer --vec multiprocessing
+        $COMMON center --vec multiprocessing
+        ;;
     procgen)
         $COMMON bigfish
         $COMMON bossfight
