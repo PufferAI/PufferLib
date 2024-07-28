@@ -155,15 +155,15 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         #carbs_param('cnn_channels', 'linear', wandb_policy_params, search_center=32, is_integer=True),
         #carbs_param('hidden_size', 'linear', wandb_policy_params, search_center=128, is_integer=True),
         #carbs_param('vision', 'linear', search_center=5, is_integer=True),
-        carbs_param('learning_rate', 'log', wandb_train_params, search_center=9e-4),
-        carbs_param('gamma', 'logit', wandb_train_params, search_center=0.99),
+        carbs_param('learning_rate', 'log', wandb_train_params, search_center=1e-3),
+        carbs_param('gamma', 'logit', wandb_train_params, search_center=0.95),
         carbs_param('gae_lambda', 'logit', wandb_train_params, search_center=0.90),
         carbs_param('update_epochs', 'linear', wandb_train_params, search_center=1, is_integer=True),
         carbs_param('clip_coef', 'logit', wandb_train_params, search_center=0.1),
         carbs_param('vf_coef', 'logit', wandb_train_params, search_center=0.5),
         carbs_param('vf_clip_coef', 'logit', wandb_train_params, search_center=0.1),
         carbs_param('max_grad_norm', 'linear', wandb_train_params, search_center=0.5),
-        carbs_param('ent_coef', 'log', wandb_train_params, search_center=0.07),
+        carbs_param('ent_coef', 'log', wandb_train_params, search_center=0.01),
         #carbs_param('env_batch_size', 'linear', search_center=384,
         #    is_integer=True, rounding_factor=24),
         carbs_param('batch_size', 'log', wandb_train_params,
@@ -213,14 +213,13 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         print(wandb.config.env)
         print(wandb.config.policy)
         try:
-            stats, profile = train(args, make_env, policy_cls, rnn_cls, wandb)
+            stats, uptime = train(args, make_env, policy_cls, rnn_cls, wandb)
         except Exception as e:
             is_failure = True
             import traceback
             traceback.print_exc()
         else:
-            observed_value = stats[target_metric]
-            uptime = profile.uptime
+            observed_value = np.mean(s[target_metric] for s in stats)
 
             with open('hypers.txt', 'a') as f:
                 f.write(f'Train: {args["train"]}\n')
@@ -267,9 +266,13 @@ def train(args, make_env, policy_cls, rnn_cls, wandb):
         clean_pufferl.evaluate(data)
         clean_pufferl.train(data)
 
-    stats, _ = clean_pufferl.evaluate(data)
+    uptime = data.profile.uptime
+    stats = []
+    for _ in range(10): # extra data for sweeps
+        stats.append(clean_pufferl.evaluate(data)[0])
+
     clean_pufferl.close(data)
-    return stats, data.profile
+    return stats, uptime
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
