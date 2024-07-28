@@ -123,9 +123,6 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
     if not os.path.exists('checkpoints'):
         os.system('mkdir checkpoints')
 
-    if not os.path.exists('hypers.txt'):
-        os.system('touch hypers.txt')
-
     import wandb
     sweep_id = wandb.sweep(
         sweep=args['sweep'],
@@ -219,16 +216,13 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
             import traceback
             traceback.print_exc()
         else:
-            observed_value = np.mean(s[target_metric] for s in stats)
+            observed_value = [s[target_metric] for s in stats if target_metric in s]
+            if len(observed_value) > 0:
+                observed_value = np.mean(observed_value)
+            else:
+                observed_value = 0
 
-            with open('hypers.txt', 'a') as f:
-                f.write(f'Train: {args["train"]}\n')
-                f.write(f'Env: {args["env"]}\n')
-                f.write(f'Policy: {args["policy"]}\n')
-                f.write(f'RNN: {args["rnn"]}\n')
-                f.write(f'Uptime: {uptime}\n')
-                f.write(f'Value: {observed_value}\n')
-
+            print(f'Observed value: {observed_value}')
             obs_out = carbs.observe(
                 ObservationInParam(
                     input=orig_suggestion,
