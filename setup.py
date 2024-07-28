@@ -53,7 +53,7 @@ environments = {
     ],
     'atari': [
         f'gym=={GYM_VERSION}',
-        f'gymnasium[atari,accept-rom-license]=={GYMNASIUM_VERSION}',
+        f'gymnasium[accept-rom-license]=={GYMNASIUM_VERSION}',
         'ale_py==0.9.0',
     ],
     'box2d': [
