@@ -80,9 +80,9 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         possible_results = floor(log(x, 2)), ceil(log(x, 2))
         return int(2**min(possible_results, key= lambda z: abs(x-2**z)))
 
-    def carbs_param(name, space, wandb_params, mmin=None, mmax=None,
+    def carbs_param(group, name, space, wandb_params, mmin=None, mmax=None,
             search_center=None, is_integer=False, rounding_factor=1):
-        wandb_param = wandb_params[name]
+        wandb_param = wandb_params[group]['parameters'][name]
         if 'values' in wandb_param:
             values = wandb_param['values']
             mmin = min(values)
@@ -110,7 +110,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
             raise ValueError(f'Invalid CARBS space: {space} (log/linear)')
 
         return Param(
-            name=name,
+            name=f'{group}-{name}',
             space=Space(
                 min=mmin,
                 max=mmax,
@@ -130,7 +130,6 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
     )
     target_metric = args['sweep']['metric']['name'].split('/')[-1]
     sweep_parameters = args['sweep']['parameters']
-    wandb_train_params = sweep_parameters['train']['parameters']
     #wandb_env_params = sweep_parameters['env']['parameters']
     #wandb_policy_params = sweep_parameters['policy']['parameters']
 
@@ -139,7 +138,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
     if 'total_timesteps' in sweep_parameters['train']['parameters']:
         time_param = sweep_parameters['train']['parameters']['total_timesteps']
         min_timesteps = time_param['min']
-        param_spaces.append(carbs_param('total_timesteps', 'log', wandb_train_params,
+        param_spaces.append(carbs_param('train', 'total_timesteps', 'log', sweep_parameters,
             search_center=min_timesteps, is_integer=True))
 
     batch_param = sweep_parameters['train']['parameters']['batch_size']
@@ -148,26 +147,39 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
     minibatch_param = sweep_parameters['train']['parameters']['minibatch_size']
     default_minibatch = (minibatch_param['max'] - minibatch_param['min']) // 2
 
+    if 'env' in sweep_parameters:
+        env_params = sweep_parameters['env']['parameters']
+        if 'reward_death' in env_params:
+            param_spaces.append(carbs_param('env', 'reward_death',
+                'linear', sweep_parameters, search_center=-1.0))
+        if 'reward_xp' in env_params:
+            param_spaces.append(carbs_param('env', 'reward_xp',
+                'linear', sweep_parameters, search_center=0.006))
+        if 'reward_distance' in env_params:
+            param_spaces.append(carbs_param('env', 'reward_distance',
+                'linear', sweep_parameters, search_center=0.05))
+        if 'reward_tower' in env_params:
+            param_spaces.append(carbs_param('env', 'reward_tower',
+                'linear', sweep_parameters, search_center=3.0))
+
     param_spaces += [
         #carbs_param('cnn_channels', 'linear', wandb_policy_params, search_center=32, is_integer=True),
         #carbs_param('hidden_size', 'linear', wandb_policy_params, search_center=128, is_integer=True),
         #carbs_param('vision', 'linear', search_center=5, is_integer=True),
-        carbs_param('learning_rate', 'log', wandb_train_params, search_center=1e-3),
-        carbs_param('gamma', 'logit', wandb_train_params, search_center=0.95),
-        carbs_param('gae_lambda', 'logit', wandb_train_params, search_center=0.90),
-        carbs_param('update_epochs', 'linear', wandb_train_params, search_center=1, is_integer=True),
-        carbs_param('clip_coef', 'logit', wandb_train_params, search_center=0.1),
-        carbs_param('vf_coef', 'logit', wandb_train_params, search_center=0.5),
-        carbs_param('vf_clip_coef', 'logit', wandb_train_params, search_center=0.1),
-        carbs_param('max_grad_norm', 'linear', wandb_train_params, search_center=0.5),
-        carbs_param('ent_coef', 'log', wandb_train_params, search_center=0.01),
-        #carbs_param('env_batch_size', 'linear', search_center=384,
-        #    is_integer=True, rounding_factor=24),
-        carbs_param('batch_size', 'log', wandb_train_params,
+        carbs_param('train', 'learning_rate', 'log', sweep_parameters, search_center=1e-3),
+        carbs_param('train', 'gamma', 'logit', sweep_parameters, search_center=0.95),
+        carbs_param('train', 'gae_lambda', 'logit', sweep_parameters, search_center=0.90),
+        carbs_param('train', 'update_epochs', 'linear', sweep_parameters, search_center=1, is_integer=True),
+        carbs_param('train', 'clip_coef', 'logit', sweep_parameters, search_center=0.1),
+        carbs_param('train', 'vf_coef', 'logit', sweep_parameters, search_center=0.5),
+        carbs_param('train', 'vf_clip_coef', 'logit', sweep_parameters, search_center=0.1),
+        carbs_param('train', 'max_grad_norm', 'linear', sweep_parameters, search_center=0.5),
+        carbs_param('train', 'ent_coef', 'log', sweep_parameters, search_center=0.01),
+        carbs_param('train', 'batch_size', 'log', sweep_parameters,
             search_center=default_batch, is_integer=True),
-        carbs_param('minibatch_size', 'log', wandb_train_params,
+        carbs_param('train', 'minibatch_size', 'log', sweep_parameters,
             search_center=default_minibatch, is_integer=True),
-        carbs_param('bptt_horizon', 'log', wandb_train_params,
+        carbs_param('train', 'bptt_horizon', 'log', sweep_parameters,
             search_center=16, is_integer=True),
     ]
 
@@ -190,14 +202,17 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         #wandb.config.env['vision'] = vision
         #wandb.config.policy['cnn_channels'] = cnn_channels
         #wandb.config.policy['hidden_size'] = hidden_size
-        args['train'].update(suggestion)
+        train_suggestion = {k.split('-')[1]: v for k, v in suggestion.items() if k.startswith('train-')}
+        env_suggestion = {k.split('-')[1]: v for k, v in suggestion.items() if k.startswith('env-')}
+        args['train'].update(train_suggestion)
         args['train']['batch_size'] = closest_power(
-            suggestion['batch_size'])
+            train_suggestion['batch_size'])
         args['train']['minibatch_size'] = closest_power(
-            suggestion['minibatch_size'])
+            train_suggestion['minibatch_size'])
         args['train']['bptt_horizon'] = closest_power(
-            suggestion['bptt_horizon'])
-        args['train']['foo'] = 'bar'
+            train_suggestion['bptt_horizon'])
+
+        args['env'].update(env_suggestion)
         args['track'] = True
         wandb.config.update({'train': args['train']}, allow_val_change=True)
 

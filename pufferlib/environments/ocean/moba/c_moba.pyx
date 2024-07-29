@@ -44,11 +44,6 @@ cdef:
     int ENTITY_NEUTRAL = 2
     int ENTITY_TOWER = 3
 
-    float REWARD_DEATH = -1.0
-    float REWARD_XP = 0.006
-    float REWARD_DISTANCE = 0.05
-    float REWARD_TOWER = 3
-
 cdef struct Entity:
     int pid
     int entity_type
@@ -146,6 +141,11 @@ cdef class Environment:
         Reward[:] rewards
         float[:, :, :] waypoints 
 
+        float reward_death
+        float reward_xp
+        float reward_distance
+        float reward_tower
+
         # MAX_ENTITIES x MAX_SCANNED_TARGETS
         Entity* scanned_targets[256][121]
         skill skills[10][3]
@@ -158,7 +158,9 @@ cdef class Environment:
             cnp.ndarray pids, cnp.ndarray entities, dict entity_data,
             cnp.ndarray player_obs, cnp.ndarray observations_map, cnp.ndarray observations_extra,
             cnp.ndarray rewards, cnp.ndarray actions, int num_agents, int num_creeps, int num_neutrals,
-            int num_towers, int vision_range, float agent_speed, bint discretize):
+            int num_towers, int vision_range, float agent_speed, bint discretize, float reward_death,
+            float reward_xp, float reward_distance, float reward_tower):
+
         self.num_agents = num_agents
         self.num_creeps = num_creeps
         self.num_neutrals = num_neutrals
@@ -168,6 +170,11 @@ cdef class Environment:
         self.discretize = discretize
         self.obs_size = 2*vision_range + 1
         self.creep_idx = 0
+
+        self.reward_death = reward_death
+        self.reward_xp = reward_xp
+        self.reward_distance = reward_distance
+        self.reward_tower = reward_tower
 
         # Hey, change the scanned_targets size to match!
         assert num_agents + num_creeps + num_neutrals + num_towers <= 256
@@ -520,7 +527,7 @@ cdef class Environment:
 
         if target.entity_type == ENTITY_PLAYER:
             reward = self.get_reward(target.pid)
-            reward.death = REWARD_DEATH
+            reward.death = self.reward_death
             self.respawn_player(target)
         elif (target.entity_type == ENTITY_TOWER or target.entity_type == ENTITY_CREEP
                 or target.entity_type == ENTITY_NEUTRAL):
@@ -538,9 +545,9 @@ cdef class Environment:
             player.xp += xp
 
         reward = self.get_reward(player.pid)
-        reward.xp = REWARD_XP * xp
+        reward.xp = self.reward_xp * xp
         if target.entity_type == ENTITY_TOWER:
-            reward.tower = REWARD_TOWER
+            reward.tower = self.reward_tower
 
         player.level = self.level(player.xp)
         player.damage = 50 + 6*player.level
@@ -1206,7 +1213,7 @@ cdef class Environment:
             self.move_to(player, dest_y, dest_x)
             dist_to_ancient = abs(player.y - ancient.y) + abs(player.x - ancient.x)
             reward = self.get_reward(pid)
-            reward.distance = REWARD_DISTANCE * (prev_dist_to_ancient - dist_to_ancient)
+            reward.distance = self.reward_distance * (prev_dist_to_ancient - dist_to_ancient)
 
         self.tick += 1
         self.compute_observations()

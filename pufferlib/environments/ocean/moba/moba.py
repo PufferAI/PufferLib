@@ -43,7 +43,9 @@ PLAYER_OBS_N = 26
 
 class PufferMoba(pufferlib.PufferEnv):
     def __init__(self, num_envs=4, vision_range=5, agent_speed=0.5,
-            discretize=True, report_interval=32, render_mode='rgb_array'):
+            discretize=True, reward_death=-1.0, reward_xp=0.006,
+            reward_distance=0.05, reward_tower=3.0,
+            report_interval=32, render_mode='rgb_array'):
         super().__init__()
 
         self.height = 128
@@ -57,6 +59,11 @@ class PufferMoba(pufferlib.PufferEnv):
         self.agent_speed = agent_speed
         self.discretize = discretize
         self.report_interval = report_interval
+
+        self.reward_death = reward_death
+        self.reward_xp = reward_xp
+        self.reward_distance = reward_distance
+        self.reward_tower = reward_tower
 
         self.obs_size = 2*self.vision_range + 1
         self.obs_map_bytes = self.obs_size*self.obs_size*4
@@ -211,7 +218,7 @@ class PufferMoba(pufferlib.PufferEnv):
                 self.c_obs_players[i], self.obs_view_map[i], self.obs_view_extra[i],
                 self.rewards[ptr:end], self.actions[ptr:end], 10, self.num_creeps,
                 self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
-                True))
+                True, self.reward_death, self.reward_xp, self.reward_distance, self.reward_tower))
             self.c_envs[i].reset()
             ptr = end
 
