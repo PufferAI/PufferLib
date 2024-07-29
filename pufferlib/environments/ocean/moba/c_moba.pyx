@@ -1,11 +1,12 @@
 # distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
 # cython: language_level=3
-# cython: boundscheck=True
-# cython: initializedcheck=True
-# cython: wraparound=True
+# cython: boundscheck=False
+# cython: initializedcheck=False
+# cython: wraparound=False
 # cython: cdivision=True
-# cython: nonecheck=True
+# cython: nonecheck=False
 # cython: profile=False
+
 
 from libc.stdlib cimport rand, RAND_MAX
 from libc.math cimport sqrtf
@@ -103,7 +104,7 @@ def step_all(list envs):
   
 @cython.profile(False)
 cdef int xp_for_player_kill(Entity* player):
-    return 100 + int(player.xp / 7.69)
+    return 100 + <int>(player.xp / 7.69)
  
 @cython.profile(False)
 cdef float clip(float x):
@@ -139,6 +140,8 @@ cdef class Environment:
         Entity[:, :] player_obs
         Entity[:] entities
         Reward[:] rewards
+        float[:] sum_rewards
+        float[:] norm_rewards
         float[:, :, :] waypoints 
 
         float reward_death
@@ -159,7 +162,8 @@ cdef class Environment:
     def __init__(self, cnp.ndarray grid, cnp.ndarray ai_paths,
             cnp.ndarray pids, cnp.ndarray entities, dict entity_data,
             cnp.ndarray player_obs, cnp.ndarray observations_map, cnp.ndarray observations_extra,
-            cnp.ndarray rewards, cnp.ndarray actions, int num_agents, int num_creeps, int num_neutrals,
+            cnp.ndarray rewards, cnp.ndarray sum_rewards, cnp.ndarray norm_rewards, cnp.ndarray actions,
+            int num_agents, int num_creeps, int num_neutrals,
             int num_towers, int vision_range, float agent_speed, bint discretize, float reward_death,
             float reward_xp, float reward_distance, float reward_tower):
 
@@ -177,6 +181,8 @@ cdef class Environment:
         self.reward_xp = reward_xp
         self.reward_distance = reward_distance
         self.reward_tower = reward_tower
+        self.sum_rewards = sum_rewards
+        self.norm_rewards = norm_rewards
         self.total_towers_taken = 0
 
         # Hey, change the scanned_targets size to match!
@@ -390,9 +396,9 @@ cdef class Environment:
                     self.observations_map[pid, r, c, 3] = <unsigned char> (target.level/30.0)
 
     @cython.profile(False)
-    cdef int level(self, xp):
+    cdef int level(self, int xp):
         cdef int i
-        for i in range(len(self.xp_for_level)):
+        for i in range(30):
             if xp < self.xp_for_level[i]:
                 return i + 1
 
@@ -605,8 +611,8 @@ cdef class Environment:
         entity.stun_timer = 0
 
         while not valid_pos:
-            y = int(entity.spawn_y) + rand() % 15 - 7
-            x = int(entity.spawn_x) + rand() % 15 - 7
+            y = <int>entity.spawn_y + rand()%15 - 7
+            x = <int>entity.spawn_x + rand()%15 - 7
             if self.grid[y, x] == EMPTY:
                 valid_pos = True
                 break
@@ -724,7 +730,7 @@ cdef class Environment:
             self.move_towards(neutral, self.agent_speed, int(neutral.spawn_y), int(neutral.spawn_x))
 
     @cython.profile(False)
-    cdef scan_aoe(self, Entity* player, int radius,
+    cdef bint scan_aoe(self, Entity* player, int radius,
             bint exclude_friendly, bint exclude_hostile, bint exclude_creeps,
             bint exclude_neutrals, bint exclude_towers):
         cdef:
@@ -764,6 +770,11 @@ cdef class Environment:
                 idx += 1
 
         self.scanned_targets[pid][idx] = NULL
+
+        if idx == 0:
+            return False
+
+        return True
 
     @cython.profile(False)
     cdef Entity* nearest_scanned_target(self, Entity* player):
@@ -821,7 +832,7 @@ cdef class Environment:
         self.aoe_scanned(player, target, damage, stun)
         return True
 
-    cdef bint aoe_push(self, Entity* player, radius, float amount):
+    cdef bint aoe_push(self, Entity* player, int radius, float amount):
         cdef:
             Entity* target
             int idx = 0
@@ -989,7 +1000,7 @@ cdef class Environment:
         player.move_timer = 1
         player.mana -= 5
 
-    def reset(self, seed=0):
+    cpdef reset(self, seed=0):
         cdef:
             Entity* player
             Entity* tower
@@ -1022,39 +1033,10 @@ cdef class Environment:
 
         self.compute_observations()
 
-    cdef int step(self):
-        cdef:
-            float[:] actions_continuous
-            int[:] actions_discrete
-            float y, x, dy, dx, vel_y, vel_x
-            int disc_y, disc_x, disc_dest_y, disc_dest_x
-            int agent_idx, attack, pid, target_pid, damage, atn, lane
-            float prev_dist_to_ancient, dist_to_ancient
-            bint use_q, use_w, use_e, use_basic_attack
-            Entity *player, *target, *creep, *neutral, *tower
-            Reward* reward
+    cdef void step_neutrals(self):
+        cdef int camp, neut, idx
+        cdef Entity* neutral
 
-        # Clear rewards
-        for pid in range(self.num_agents):
-            player = self.get_entity(pid)
-            reward = self.get_reward(pid)
-            reward.death = 0
-            reward.xp = 0
-            reward.distance = 0
-            reward.tower = 0
-
-        for pid in range(self.num_agents + self.num_towers + self.num_creeps):
-            player = self.get_entity(pid)
-            player.is_hit = 0
-
-        #if self.discretize:
-        #    actions_discrete = self.actions
-        #else:
-        #    actions_continuous = self.actions
-        actions_discrete = self.actions
-
-        # Neutral AI
-        cdef int camp, neut
         if self.tick % 600 == 0:
             for camp in range(18):
                 for neut in range(4):
@@ -1072,6 +1054,9 @@ cdef class Environment:
 
             self.neutral_ai(neutral)
 
+    cdef void step_creeps(self):
+        cdef int idx, lane
+        cdef Entity* creep
         # Spawn creep wave
         if self.tick % 150 == 0:
             for lane in range(6):
@@ -1092,7 +1077,10 @@ cdef class Environment:
 
             self.creep_ai(creep)
 
-        # Tower AI
+    cdef void step_towers(self):
+        cdef int tower_idx
+        cdef Entity* tower
+
         for tower_idx in range(self.num_towers):
             tower = self.get_tower(tower_idx)
             if tower.pid == -1:
@@ -1110,6 +1098,34 @@ cdef class Environment:
             target = self.nearest_scanned_target(tower)
             if target != NULL:
                 self.basic_attack(tower, target)
+
+    cdef void step_players(self):
+        cdef:
+            float[:] actions_continuous
+            int[:] actions_discrete
+            float y, x, dy, dx, vel_y, vel_x
+            int disc_y, disc_x, disc_dest_y, disc_dest_x
+            int agent_idx, attack, pid, target_pid, damage, atn, lane
+            float prev_dist_to_ancient, dist_to_ancient
+            bint use_q, use_w, use_e, use_basic_attack
+            Entity *player, *target, *creep, *neutral, *tower
+            Reward* reward
+
+        # Clear rewards
+        self.sum_rewards[:] = 0
+        for pid in range(self.num_agents):
+            player = self.get_entity(pid)
+            reward = self.get_reward(pid)
+            reward.death = 0
+            reward.xp = 0
+            reward.distance = 0
+            reward.tower = 0
+
+        #if self.discretize:
+        #    actions_discrete = self.actions
+        #else:
+        #    actions_continuous = self.actions
+        actions_discrete = self.actions
 
         for pid in range(self.num_agents):
             player = self.get_entity(pid)
@@ -1218,6 +1234,22 @@ cdef class Environment:
             dist_to_ancient = abs(player.y - ancient.y) + abs(player.x - ancient.x)
             reward = self.get_reward(pid)
             reward.distance = self.reward_distance * (prev_dist_to_ancient - dist_to_ancient)
+            self.sum_rewards[pid] = reward.death + reward.xp + reward.distance + reward.tower
+            self.norm_rewards[pid] = (reward.death/self.reward_death + reward.xp/self.reward_xp
+                + reward.distance/self.reward_distance + reward.tower/self.reward_tower)
+
+    cdef int step(self):
+        cdef int pid
+        cdef Entity* player
+
+        for pid in range(self.num_agents + self.num_towers + self.num_creeps):
+            player = self.get_entity(pid)
+            player.is_hit = 0
+
+        self.step_neutrals()
+        self.step_creeps()
+        self.step_towers()
+        self.step_players()
 
         self.tick += 1
         self.compute_observations()

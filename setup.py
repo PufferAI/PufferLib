@@ -243,7 +243,7 @@ setup(
     ], 
        #nthreads=6,
        #annotate=True,
-       #compiler_directives={'profile': True}, annotate=True
+       #compiler_directives={'profile': True},# annotate=True
     ),
     extra_compile_args=['-O3', '-march=native'],
     include_dirs=[numpy.get_include()],

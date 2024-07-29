@@ -122,6 +122,7 @@ class PufferMoba(pufferlib.PufferEnv):
         dtype = reward_dtype()
         self.c_rewards = np.zeros((self.num_agents), dtype=dtype)
         self.rewards = self.c_rewards.view(np.recarray)
+        self.norm_rewards = np.zeros((self.num_agents), dtype=np.float32)
 
         self.emulated = None
 
@@ -216,7 +217,8 @@ class PufferMoba(pufferlib.PufferEnv):
             self.c_envs.append(CEnv(grid, self.ai_paths,
                 self.pids[i], self.c_entities[i], self.entity_data,
                 self.c_obs_players[i], self.obs_view_map[i], self.obs_view_extra[i],
-                self.rewards[ptr:end], self.actions[ptr:end], 10, self.num_creeps,
+                self.rewards[ptr:end], self.buf.rewards[ptr:end], self.norm_rewards,
+                self.actions[ptr:end], 10, self.num_creeps,
                 self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
                 True, self.reward_death, self.reward_xp, self.reward_distance, self.reward_tower))
             self.c_envs[i].reset()
@@ -234,12 +236,6 @@ class PufferMoba(pufferlib.PufferEnv):
             self.actions[0] = self.human_action
 
         step_all(self.c_envs)
-        reward_death = self.rewards.death
-        reward_xp = self.rewards.xp
-        reward_distance = self.rewards.distance
-        reward_tower = self.rewards.tower
-
-        self.buf.rewards[:] = (reward_death + reward_xp + reward_distance + reward_tower)
         infos = {}
 
         #print('Reward: ', self.buf.rewards[0])
@@ -262,7 +258,7 @@ class PufferMoba(pufferlib.PufferEnv):
         #elif outcome == 2:
         #    print('Radient Victory')
 
-        self.sum_rewards.append(self.buf.rewards.sum())
+        #self.sum_rewards.append(self.buf.rewards.sum())
 
         self.tick += 1
         if self.tick % self.report_interval == 0:
@@ -284,12 +280,13 @@ class PufferMoba(pufferlib.PufferEnv):
             infos['dire_level_mean'] = np.mean(dire_levels)
             infos['dire_x'] = np.mean(dire_x)
             infos['dire_y'] = np.mean(dire_y)
-            infos['reward_death'] = np.mean(reward_death)
-            infos['reward_xp'] = np.mean(reward_xp)
-            infos['reward_distance'] = np.mean(reward_distance)
-            infos['reward_tower'] = np.mean(reward_tower)
-            infos['total_towers_taken'] = np.mean([env.total_towers_taken for env in self.c_envs])
-            self.sum_rewards = []
+            infos['reward_death'] = np.mean(self.rewards.death)
+            infos['reward_xp'] = np.mean(self.rewards.xp)
+            infos['reward_distance'] = np.mean(self.rewards.distance)
+            infos['reward_tower'] = np.mean(self.rewards.tower)
+            #infos['total_towers_taken'] = np.mean([env.total_towers_taken for env in self.c_envs])
+            infos['norm_reward'] = np.mean(self.norm_rewards)
+            #self.sum_rewards = []
             #print('Radient Lv: ', infos['radient_level_mean'])
             #print('Dire Lv: ', infos['dire_level_mean'])
             #infos['moba_map'] = self.client.render(self.grid)
@@ -594,12 +591,8 @@ def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
             x+4, y -2*height - 12, 12, [255, 255, 255, 255])
 
 
-def test_performance(timeout=20, atn_cache=1024, num_envs=1):
-    env = PufferMoba(num_envs=num_envs)
-    env.reset()
+def test_performance(timeout=20, atn_cache=1024, num_envs=400):
     tick = 0
-
-    actions = np.random.randint(0, 9, (atn_cache, 10*num_envs))
 
     import time
     start = time.time()
@@ -613,7 +606,13 @@ def test_performance(timeout=20, atn_cache=1024, num_envs=1):
 if __name__ == '__main__':
     # Run with c profile
     from cProfile import run
-    run('test_performance(10)', 'stats.profile')
+    num_envs = 20
+    env = PufferMoba(num_envs=num_envs)
+    env.reset()
+    actions = np.random.randint(0, 9, (1024, 10*num_envs))
+    #test_performance(20, 1024, num_envs)
+
+    run('test_performance(20)', 'stats.profile')
     import pstats
     from pstats import SortKey
     p = pstats.Stats('stats.profile')
