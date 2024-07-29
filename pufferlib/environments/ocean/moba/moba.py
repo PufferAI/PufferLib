@@ -288,7 +288,7 @@ class PufferMoba(pufferlib.PufferEnv):
             infos['reward_xp'] = np.mean(reward_xp)
             infos['reward_distance'] = np.mean(reward_distance)
             infos['reward_tower'] = np.mean(reward_tower)
-            infos['total_towers_taken'] = np.mean([env.total_towers_taken for env in self.envs])
+            infos['total_towers_taken'] = np.mean([env.total_towers_taken for env in self.c_envs])
             self.sum_rewards = []
             #print('Radient Lv: ', infos['radient_level_mean'])
             #print('Dire Lv: ', infos['dire_level_mean'])
@@ -594,12 +594,12 @@ def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
             x+4, y -2*height - 12, 12, [255, 255, 255, 255])
 
 
-def test_performance(timeout=20, atn_cache=1024):
-    env = PufferMoba()
+def test_performance(timeout=20, atn_cache=1024, num_envs=1):
+    env = PufferMoba(num_envs=num_envs)
     env.reset()
     tick = 0
 
-    actions = np.random.randint(0, 2, (atn_cache, 10, 6))
+    actions = np.random.randint(0, 9, (atn_cache, 10*num_envs))
 
     import time
     start = time.time()
@@ -608,12 +608,16 @@ def test_performance(timeout=20, atn_cache=1024):
         env.step(atns)
         tick += 1
 
-    print(f'SPS: %f', 10 * tick / (time.time() - start))
+    print(f'SPS: %f', 10*num_envs*tick / (time.time() - start))
 
 if __name__ == '__main__':
     # Run with c profile
-    #from cProfile import run
-    #run('test_puffer_performance(10)', sort='tottime')
-    #exit(0)
+    from cProfile import run
+    run('test_performance(10)', 'stats.profile')
+    import pstats
+    from pstats import SortKey
+    p = pstats.Stats('stats.profile')
+    p.sort_stats(SortKey.TIME).print_stats(25)
+    exit(0)
 
-    test_performance(10)
+    #test_performance(10)
