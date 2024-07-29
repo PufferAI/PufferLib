@@ -167,7 +167,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         # Atari
         if 'frameskip' in env_params:
             param_spaces.append(carbs_param('env', 'frameskip',
-                'linear', sweep_parameters, search_center=4))
+                'linear', sweep_parameters, search_center=4, is_integer=True))
         if 'repeat_action_probability' in env_params:
             param_spaces.append(carbs_param('env', 'repeat_action_probability',
                 'logit', sweep_parameters, search_center=0.25))
