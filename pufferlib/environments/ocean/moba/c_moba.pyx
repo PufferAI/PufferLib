@@ -145,6 +145,8 @@ cdef class Environment:
         float reward_xp
         float reward_distance
         float reward_tower
+        
+        public int total_towers_taken
 
         # MAX_ENTITIES x MAX_SCANNED_TARGETS
         Entity* scanned_targets[256][121]
@@ -175,6 +177,7 @@ cdef class Environment:
         self.reward_xp = reward_xp
         self.reward_distance = reward_distance
         self.reward_tower = reward_tower
+        self.total_towers_taken = 0
 
         # Hey, change the scanned_targets size to match!
         assert num_agents + num_creeps + num_neutrals + num_towers <= 256
@@ -547,6 +550,7 @@ cdef class Environment:
         reward = self.get_reward(player.pid)
         reward.xp = self.reward_xp * xp
         if target.entity_type == ENTITY_TOWER:
+            self.total_towers_taken += 1
             reward.tower = self.reward_tower
 
         player.level = self.level(player.xp)
