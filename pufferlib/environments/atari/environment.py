@@ -14,12 +14,15 @@ import pufferlib.postprocess
 def env_creator(name='breakout'):
     return functools.partial(make, name)
 
-def make(name, obs_type='grayscale', frameskip=4, render_mode='rgb_array'):
+def make(name, obs_type='grayscale', frameskip=4,
+        repeat_action_probability=0.25, render_mode='rgb_array'):
     '''Atari creation function'''
     pufferlib.environments.try_import('ale_py', 'AtariEnv')
     from ale_py import AtariEnv
-    env = AtariEnv(name, obs_type='grayscale',
-        frameskip=frameskip, render_mode=render_mode)
+    env = AtariEnv(name, obs_type='grayscale', frameskip=frameskip,
+        repeat_action_probability=repeat_action_probability,
+        render_mode=render_mode)
+                    
     env = pufferlib.postprocess.ResizeObservation(env, downscale=2)
     env = AtariPostprocessor(env) # Don't use standard postprocessor
     env = pufferlib.postprocess.EpisodeStats(env)

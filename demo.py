@@ -149,6 +149,8 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
 
     if 'env' in sweep_parameters:
         env_params = sweep_parameters['env']['parameters']
+
+        # MOBA
         if 'reward_death' in env_params:
             param_spaces.append(carbs_param('env', 'reward_death',
                 'linear', sweep_parameters, search_center=-1.0))
@@ -161,6 +163,14 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         if 'reward_tower' in env_params:
             param_spaces.append(carbs_param('env', 'reward_tower',
                 'linear', sweep_parameters, search_center=3.0))
+
+        # Atari
+        if 'frameskip' in env_params:
+            param_spaces.append(carbs_param('env', 'frameskip',
+                'linear', sweep_parameters, search_center=4))
+        if 'repeat_action_probability' in env_params:
+            param_spaces.append(carbs_param('env', 'repeat_action_probability',
+                'logit', sweep_parameters, search_center=0.25))
 
     param_spaces += [
         #carbs_param('cnn_channels', 'linear', wandb_policy_params, search_center=32, is_integer=True),
