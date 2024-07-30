@@ -258,7 +258,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
 
     wandb.agent(sweep_id, main, count=500)
 
-def train(args, make_env, policy_cls, rnn_cls, wandb):
+def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1):
     if args['vec'] == 'serial':
         vec = pufferlib.vector.Serial
     elif args['vec'] == 'multiprocessing':
@@ -287,7 +287,9 @@ def train(args, make_env, policy_cls, rnn_cls, wandb):
 
     uptime = data.profile.uptime
     stats = []
-    for _ in range(10): # extra data for sweeps
+    steps_evaluated = 0
+    steps_to_eval = int(args['train.total_timesteps'] * eval_frac)
+    while steps_evaluated < steps_to_eval:
         stats.append(clean_pufferl.evaluate(data)[0])
 
     clean_pufferl.close(data)
