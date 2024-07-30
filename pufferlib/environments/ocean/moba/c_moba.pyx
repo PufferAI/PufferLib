@@ -134,7 +134,8 @@ cdef class Environment:
         unsigned char[:, :, :, :] observations_map
         unsigned char[:, :] observations_extra
         int[:] xp_for_level
-        int[:] actions
+        int[:] actions_discrete
+        float[:, :] actions_continuous
         int[:, :] pid_map
         Entity[:, :] player_obs
         Entity[:] entities
@@ -194,7 +195,10 @@ cdef class Environment:
         self.observations_map = observations_map
         self.observations_extra = observations_extra
         self.rewards = rewards
-        self.actions = actions
+        if discretize:
+            self.actions_discrete = actions
+        else:
+            self.actions_continuous = actions
 
         self.pid_map = pids
         self.entities = entities
@@ -1136,8 +1140,6 @@ cdef class Environment:
 
     cdef void step_players(self):
         cdef:
-            float[:] actions_continuous
-            int[:] actions_discrete
             float y, x, dy, dx, vel_y, vel_x
             int disc_y, disc_x, disc_dest_y, disc_dest_x
             int agent_idx, attack, pid, target_pid, damage, atn, lane
@@ -1155,12 +1157,6 @@ cdef class Environment:
             reward.xp = 0
             reward.distance = 0
             reward.tower = 0
-
-        #if self.discretize:
-        #    actions_discrete = self.actions
-        #else:
-        #    actions_continuous = self.actions
-        actions_discrete = self.actions
 
         for pid in range(self.num_agents):
             player = self.get_entity(pid)
@@ -1181,7 +1177,7 @@ cdef class Environment:
 
             # Attacks
             if self.discretize:
-                atn = actions_discrete[pid]
+                atn = self.actions_discrete[pid]
                 if atn == 0:
                     vel_y = -1
                     vel_x = -1
