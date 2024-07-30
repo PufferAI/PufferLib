@@ -81,7 +81,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         return int(2**min(possible_results, key= lambda z: abs(x-2**z)))
 
     def carbs_param(group, name, space, wandb_params, mmin=None, mmax=None,
-            search_center=None, is_integer=False, rounding_factor=1):
+            search_center=None, is_integer=False, rounding_factor=1, scale=1):
         wandb_param = wandb_params[group]['parameters'][name]
         if 'values' in wandb_param:
             values = wandb_param['values']
@@ -110,12 +110,13 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
             raise ValueError(f'Invalid CARBS space: {space} (log/linear)')
 
         return Param(
-            name=f'{group}-{name}',
+            name=f'{group}/{name}',
             space=Space(
                 min=mmin,
                 max=mmax,
                 is_integer=is_integer,
-                rounding_factor=rounding_factor
+                rounding_factor=rounding_factor,
+                scale=scale,
             ),
             search_center=search_center,
         )
@@ -156,10 +157,10 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
                 'linear', sweep_parameters, search_center=-1.0))
         if 'reward_xp' in env_params:
             param_spaces.append(carbs_param('env', 'reward_xp',
-                'linear', sweep_parameters, search_center=0.006))
+                'linear', sweep_parameters, search_center=0.006, scale=0.05))
         if 'reward_distance' in env_params:
             param_spaces.append(carbs_param('env', 'reward_distance',
-                'linear', sweep_parameters, search_center=0.05))
+                'linear', sweep_parameters, search_center=0.05, scale=0.5))
         if 'reward_tower' in env_params:
             param_spaces.append(carbs_param('env', 'reward_tower',
                 'linear', sweep_parameters, search_center=3.0))
@@ -179,7 +180,8 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         carbs_param('train', 'learning_rate', 'log', sweep_parameters, search_center=1e-3),
         carbs_param('train', 'gamma', 'logit', sweep_parameters, search_center=0.95),
         carbs_param('train', 'gae_lambda', 'logit', sweep_parameters, search_center=0.90),
-        carbs_param('train', 'update_epochs', 'linear', sweep_parameters, search_center=1, is_integer=True),
+        carbs_param('train', 'update_epochs', 'linear', sweep_parameters,
+            search_center=1, scale=3, is_integer=True),
         carbs_param('train', 'clip_coef', 'logit', sweep_parameters, search_center=0.1),
         carbs_param('train', 'vf_coef', 'logit', sweep_parameters, search_center=0.5),
         carbs_param('train', 'vf_clip_coef', 'logit', sweep_parameters, search_center=0.1),
@@ -197,8 +199,10 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         better_direction_sign=1,
         is_wandb_logging_enabled=False,
         resample_frequency=0,
+        num_random_samples=1,
     )
     carbs = CARBS(carbs_params, param_spaces)
+    suggestion = carbs.suggest().suggestion
 
     def main():
         wandb = init_wandb(args, env_name, id=args['exp_id'])
@@ -212,8 +216,8 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         #wandb.config.env['vision'] = vision
         #wandb.config.policy['cnn_channels'] = cnn_channels
         #wandb.config.policy['hidden_size'] = hidden_size
-        train_suggestion = {k.split('-')[1]: v for k, v in suggestion.items() if k.startswith('train-')}
-        env_suggestion = {k.split('-')[1]: v for k, v in suggestion.items() if k.startswith('env-')}
+        train_suggestion = {k.split('/')[1]: v for k, v in suggestion.items() if k.startswith('train/')}
+        env_suggestion = {k.split('/')[1]: v for k, v in suggestion.items() if k.startswith('env/')}
         args['train'].update(train_suggestion)
         args['train']['batch_size'] = closest_power(
             train_suggestion['batch_size'])
@@ -225,6 +229,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         args['env'].update(env_suggestion)
         args['track'] = True
         wandb.config.update({'train': args['train']}, allow_val_change=True)
+        wandb.config.update({'env': args['env']}, allow_val_change=True)
 
         #args.env.__dict__['vision'] = vision
         #args['policy']['cnn_channels'] = cnn_channels
@@ -242,12 +247,14 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
             traceback.print_exc()
         else:
             observed_value = [s[target_metric] for s in stats if target_metric in s]
+            print('Observed value:', observed_value)
             if len(observed_value) > 0:
                 observed_value = np.mean(observed_value)
             else:
                 observed_value = 0
 
             print(f'Observed value: {observed_value}')
+            print('Uptime:', uptime)
             obs_out = carbs.observe(
                 ObservationInParam(
                     input=orig_suggestion,
@@ -256,7 +263,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
                 )
             )
 
-    wandb.agent(sweep_id, main, count=500)
+    wandb.agent(sweep_id, main, count=8)
 
 def train(args, make_env, policy_cls, rnn_cls, wandb):
     if args['vec'] == 'serial':
