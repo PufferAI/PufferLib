@@ -263,7 +263,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
                 )
             )
 
-    wandb.agent(sweep_id, main, count=8)
+    wandb.agent(sweep_id, main, count=500)
 
 def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1):
     if args['vec'] == 'serial':
