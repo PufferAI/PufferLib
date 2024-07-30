@@ -606,11 +606,12 @@ def test_performance(timeout=20, atn_cache=1024, num_envs=400):
 if __name__ == '__main__':
     # Run with c profile
     from cProfile import run
-    num_envs = 20
-    env = PufferMoba(num_envs=num_envs)
+    num_envs = 100
+    env = PufferMoba(num_envs=num_envs, report_interval=10000000)
     env.reset()
     actions = np.random.randint(0, 9, (1024, 10*num_envs))
-    #test_performance(20, 1024, num_envs)
+    test_performance(20, 1024, num_envs)
+    exit(0)
 
     run('test_performance(20)', 'stats.profile')
     import pstats

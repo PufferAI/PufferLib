@@ -7,7 +7,6 @@
 # cython: nonecheck=False
 # cython: profile=False
 
-
 from libc.stdlib cimport rand, RAND_MAX
 from libc.math cimport sqrtf
 from cpython.list cimport PyList_GET_ITEM
@@ -338,15 +337,19 @@ cdef class Environment:
 
     cdef void compute_observations(self):
         cdef:
-            int r, c, x, y, dx, dy, idx, pid, target_pid
-            Entity *player, *target, *target_ob
+            int x, y, r, c, dx, dy, xx, yy, idx, pid, target_pid
+            Entity *player, *target
             Reward *reward
 
         self.observations_map[:] = 0
+
+        # Probably safe to not clear this
         self.observations_extra[:] = 0
 
         for pid in range(self.num_agents):
             player = self.get_entity(pid)
+            reward = self.get_reward(pid)
+
             y = int(player.y)
             x = int(player.x)
 
@@ -376,7 +379,6 @@ cdef class Environment:
             self.observations_extra[pid, 17+player.hero_type] = 255
 
             # Assumes scaled between -1 and 1, else overflows
-            reward = self.get_reward(pid)
             self.observations_extra[pid, 22] = <unsigned char> (127*reward.death + 128)
             self.observations_extra[pid, 23] = <unsigned char> (25*reward.xp)
             self.observations_extra[pid, 24] = <unsigned char> (127*reward.distance + 128)
@@ -384,16 +386,19 @@ cdef class Environment:
 
             for dy in range(-self.vision_range, self.vision_range+1):
                 for dx in range(-self.vision_range, self.vision_range+1):
-                    target_pid = self.pid_map[y + dy, x + dx]
-                    target = self.get_entity(target_pid)
+                    xx = x + dx
+                    yy = y + dy
+                    target_pid = self.pid_map[yy, xx]
                     if target_pid == -1:
                         continue
 
-                    r = dy + self.vision_range
-                    c = dx + self.vision_range
-                    self.observations_map[pid, r, c, 1] = <unsigned char> (255*target.health/target.max_health)
-                    self.observations_map[pid, r, c, 2] = <unsigned char> (255*target.mana/target.max_mana)
-                    self.observations_map[pid, r, c, 3] = <unsigned char> (target.level/30.0)
+                    target = self.get_entity(target_pid)
+                    xx = dx + self.vision_range
+                    yy = dy + self.vision_range
+
+                    self.observations_map[pid, xx, yy, 1] = <unsigned char> (255*target.health/target.max_health)
+                    self.observations_map[pid, xx, yy, 2] = <unsigned char> (255*target.mana/target.max_mana)
+                    self.observations_map[pid, xx, yy, 3] = <unsigned char> (target.level/30.0)
 
     @cython.profile(False)
     cdef int level(self, int xp):
@@ -509,6 +514,7 @@ cdef class Environment:
             entity.y + dy*speed,
             entity.x + dx*speed)
 
+    @cython.profile(False)
     cdef bint move_near(self, Entity* entity, Entity* target):
         cdef int dy, dx
         for dy in range(-1, 2):
@@ -518,6 +524,7 @@ cdef class Environment:
 
         return False
 
+    @cython.profile(False)
     cdef bint attack(self, Entity* player, Entity* target, float damage):
         cdef:
             int xp = 0
@@ -573,6 +580,7 @@ cdef class Environment:
         player.basic_attack_timer = player.basic_attack_cd
         return self.attack(player, target, player.damage)
 
+    @cython.profile(False)
     cdef bint heal(self, Entity* player, Entity* target, float amount):
         if target.pid == -1:
             return False
@@ -589,6 +597,7 @@ cdef class Environment:
 
         return True
 
+    @cython.profile(False)
     cdef void kill(self, Entity* entity):
         cdef:
             int y = int(entity.y)
@@ -598,6 +607,7 @@ cdef class Environment:
         self.pid_map[y, x] = -1
         entity.pid = -1
 
+    @cython.profile(False)
     cdef void respawn_player(self, Entity* entity):
         cdef:
             bint valid_pos = False
@@ -619,6 +629,7 @@ cdef class Environment:
 
         self.move_to(entity, y, x)
 
+    @cython.profile(False)
     cdef void spawn_creep(self, int idx, int lane):
         cdef:
             int pid = idx + self.num_agents
@@ -644,6 +655,7 @@ cdef class Environment:
 
         self.respawn_creep(creep, lane)
 
+    @cython.profile(False)
     cdef bint respawn_creep(self, Entity* entity, int lane):
         cdef:
             bint valid_pos = False
@@ -663,7 +675,8 @@ cdef class Environment:
         entity.waypoint = 1
         return valid_pos
 
-    cdef void spawn_neutral(self, int idx, int camp):
+    @cython.profile(False)
+    cdef void respawn_neutral(self, int idx, int camp):
         cdef:
             Entity* neutral = self.get_neutral(idx)
             int dy, dx
@@ -678,6 +691,7 @@ cdef class Environment:
                 break
 
 
+    @cython.profile(False)
     cdef void creep_ai(self, Entity* creep):
         cdef:
             int waypoint = creep.waypoint
@@ -709,6 +723,7 @@ cdef class Environment:
             if abs(creep.y - dest_y) + abs(creep.x - dest_x) < 2 and self.waypoints[lane, waypoint+1, 0] != 0:
                 creep.waypoint += 1
 
+    @cython.profile(False)
     cdef void neutral_ai(self, Entity* neutral):
         cdef:
             Entity* target
@@ -800,6 +815,7 @@ cdef class Environment:
 
         return nearest_target
 
+    @cython.profile(False)
     cdef void aoe_scanned(self, Entity* player,
             Entity* target, float damage, int stun):
         cdef:
@@ -819,6 +835,7 @@ cdef class Environment:
             if stun > 0:
                 target.stun_timer = stun
 
+    @cython.profile(False)
     cdef bint player_aoe_attack(self, Entity* player,
             Entity* target, int radius, float damage, int stun):
         cdef bint success = self.scan_aoe(player, radius,
@@ -832,6 +849,7 @@ cdef class Environment:
         self.aoe_scanned(player, target, damage, stun)
         return True
 
+    @cython.profile(False)
     cdef bint aoe_push(self, Entity* player, int radius, float amount):
         cdef:
             Entity* target
@@ -852,6 +870,7 @@ cdef class Environment:
 
         return success
 
+    @cython.profile(False)
     cdef bint push(self, Entity* player, Entity* target, float amount):
         cdef:
             float dist = abs(target.x - player.x) + abs(target.y - player.y)
@@ -867,9 +886,11 @@ cdef class Environment:
 
         return self.move_to(target, target.y + dy, target.x + dx)
 
+    @cython.profile(False)
     cdef bint pull(self, Entity* player, Entity* target, float amount):
         return self.push(target, player, -amount)
 
+    @cython.profile(False)
     cdef void skill_support_hook(self, Entity* player, Entity* target):
         if player.mana < 15:
             return
@@ -877,6 +898,7 @@ cdef class Environment:
         self.pull(target, player, 1.0)
         player.mana -= 15
 
+    @cython.profile(False)
     cdef void skill_support_aoe_heal(self, Entity* player, Entity* target):
         if player.mana < 40:
             return
@@ -885,6 +907,7 @@ cdef class Environment:
             player.mana -= 40
             player.w_timer = 60
 
+    @cython.profile(False)
     cdef void skill_support_stun(self, Entity* player, Entity* target):
         if player.mana < 60:
             return
@@ -894,6 +917,7 @@ cdef class Environment:
             player.mana -= 60
             player.e_timer = 50
 
+    @cython.profile(False)
     cdef void skill_burst_nuke(self, Entity* player, Entity* target):
         if player.mana < 60:
             return
@@ -902,6 +926,7 @@ cdef class Environment:
             player.mana -= 60
             player.q_timer = 70
 
+    @cython.profile(False)
     cdef void skill_burst_aoe(self, Entity* player, Entity* target):
         if player.mana < 40:
             return
@@ -910,6 +935,7 @@ cdef class Environment:
             player.mana -= 40
             player.w_timer = 40
 
+    @cython.profile(False)
     cdef void skill_burst_aoe_stun(self, Entity* player, Entity* target):
         if player.mana < 60:
             return
@@ -918,6 +944,7 @@ cdef class Environment:
             player.mana -= 60
             player.e_timer = 80
 
+    @cython.profile(False)
     cdef void skill_tank_aoe_dot(self, Entity* player, Entity* target):
         if player.mana < 5:
             return
@@ -925,6 +952,7 @@ cdef class Environment:
         if self.player_aoe_attack(player, player, 2, 20, 0):
             player.mana -= 5
 
+    @cython.profile(False)
     cdef void skill_tank_self_heal(self, Entity* player, Entity* target):
         if player.mana < 30:
             return
@@ -933,6 +961,7 @@ cdef class Environment:
             player.mana -= 30
             player.w_timer = 60
 
+    @cython.profile(False)
     cdef void skill_tank_engage_aoe(self, Entity* player, Entity* target):
         if player.mana < 60:
             return
@@ -942,6 +971,7 @@ cdef class Environment:
             player.e_timer = 70
             self.aoe_push(player, 4, 3.0)
 
+    @cython.profile(False)
     cdef void skill_carry_retreat_slow(self, Entity* player, Entity* target):
         for i in range(3):
             if player.mana < 20:
@@ -953,6 +983,7 @@ cdef class Environment:
                 player.mana -= 20
                 player.w_timer = 40
 
+    @cython.profile(False)
     cdef void skill_carry_slow_damage(self, Entity* player, Entity* target):
         if player.mana < 40:
             return
@@ -963,6 +994,7 @@ cdef class Environment:
             player.mana -= 40
             player.w_timer = 40
 
+    @cython.profile(False)
     cdef void skill_carry_aoe(self, Entity* player, Entity* target):
         if player.mana < 40:
             return
@@ -971,6 +1003,7 @@ cdef class Environment:
             player.mana -= 40
             player.e_timer = 40
 
+    @cython.profile(False)
     cdef void skill_assassin_aoe_minions(self, Entity* player, Entity* target):
         if player.mana < 40:
             return
@@ -981,6 +1014,7 @@ cdef class Environment:
             player.mana -= 40
             player.q_timer = 40
 
+    @cython.profile(False)
     cdef void skill_assassin_tp_damage(self, Entity* player, Entity* target):
         if player.mana < 60:
             return
@@ -992,6 +1026,7 @@ cdef class Environment:
         if self.attack(player, target, 600):
             player.w_timer = 60
 
+    @cython.profile(False)
     cdef void skill_assassin_move_buff(self, Entity* player, Entity* target):
         if player.mana < 5:
             return
@@ -1040,7 +1075,7 @@ cdef class Environment:
         if self.tick % 600 == 0:
             for camp in range(18):
                 for neut in range(4):
-                    self.spawn_neutral(4*camp + neut, camp)
+                    self.respawn_neutral(4*camp + neut, camp)
 
         for idx in range(self.num_neutrals):
             neutral = self.get_neutral(idx)
