@@ -296,8 +296,10 @@ def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1):
     stats = []
     steps_evaluated = 0
     steps_to_eval = int(args['train']['total_timesteps'] * eval_frac)
+    batch_size = args['train']['batch_size']
     while steps_evaluated < steps_to_eval:
         stats.append(clean_pufferl.evaluate(data)[0])
+        steps_evaluated += batch_size
 
     clean_pufferl.close(data)
     return stats, uptime
