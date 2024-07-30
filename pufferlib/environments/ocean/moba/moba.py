@@ -264,22 +264,9 @@ class PufferMoba(pufferlib.PufferEnv):
         if self.tick % self.report_interval == 0:
             #infos['reward'] = np.mean(self.sum_rewards) / self.num_agents
             infos['reward'] = np.mean(self.buf.rewards)
-            radient_levels = self.entities[0][:5].level
-            radient_x = self.entities[0][:5].x
-            radient_y = self.entities[0][:5].y
-            infos['radient_level_min'] = min(radient_levels)
-            infos['radient_level_max'] = max(radient_levels)
-            infos['radient_level_mean'] = np.mean(radient_levels)
-            infos['radient_x'] = np.mean(radient_x)
-            infos['radient_y'] = np.mean(radient_y)
-            dire_levels = self.entities[0][5:10].level
-            dire_x = self.entities[0][5:10].x
-            dire_y = self.entities[0][5:10].y
-            infos['dire_level_min'] = min(dire_levels)
-            infos['dire_level_max'] = max(dire_levels)
-            infos['dire_level_mean'] = np.mean(dire_levels)
-            infos['dire_x'] = np.mean(dire_x)
-            infos['dire_y'] = np.mean(dire_y)
+            levels = self.entities.level
+            infos['radient_level_mean'] = np.mean(levels[:, :5])
+            infos['dire_level'] = np.mean(levels[:, 5:10])
             infos['reward_death'] = np.mean(self.rewards.death)
             infos['reward_xp'] = np.mean(self.rewards.xp)
             infos['reward_distance'] = np.mean(self.rewards.distance)
@@ -350,24 +337,70 @@ class RaylibClient:
         colors = self.colors
         ay, ax = None, None
 
+        ts = self.tile_size
+        main_r = entities[0].y
+        main_c = entities[0].x
+        self.camera.target.x = (main_c - self.width//2) * ts
+        self.camera.target.y = (main_r - self.height//2) * ts
+        main_r = int(main_r)
+        main_c = int(main_c)
+        r_min = main_r - self.height//2 - 1
+        r_max = main_r + self.height//2 + 1
+        c_min = main_c - self.width//2 - 1
+        c_max = main_c + self.width//2 + 1
+
+        pos = rl.GetMousePosition()
+        raw_mouse_x = pos.x + self.camera.target.x
+        raw_mouse_y = pos.y + self.camera.target.y
+        mouse_x = int(raw_mouse_x // ts)
+        mouse_y = int(raw_mouse_y // ts)
+        #mouse_x = int(c_min + pos.x // ts + 1)
+        #mouse_y = int(r_min + pos.y // ts + 1)
+
+        ay = np.clip((pos.y - ts*self.height//2) / 200, -1, 1)
+        ax = np.clip((pos.x - ts*self.width//2) / 200, -1, 1)
+
+        key_a = 0
+        key_d = 0
+        key_w = 0
+        key_s = 0
+
+        if ax < 0:
+            key_a = 1
+        else:
+            key_d = 1
+        if ay > 0:
+            key_s = 1
+        else:
+            key_w = 1
+        '''
+
+        key_a = rl.IsKeyDown(rl.KEY_A)
+        key_d = rl.IsKeyDown(rl.KEY_D)
+        key_w = rl.IsKeyDown(rl.KEY_W)
+        key_s = rl.IsKeyDown(rl.KEY_S)
+        '''
+
+        #print(f'Mouse: {pos.x}, {pos.y}, Target: {ts*mouse_x}, {ts*mouse_y}, Action: {ay}, {ax}')
+
         atn = 4
-        if rl.IsKeyDown(rl.KEY_A):
-            if rl.IsKeyDown(rl.KEY_W):
+        if key_a:
+            if key_w:
                 atn = 0
-            elif rl.IsKeyDown(rl.KEY_S):
+            elif key_s:
                 atn = 2
             else:
                 atn = 1
-        elif rl.IsKeyDown(rl.KEY_D):
-            if rl.IsKeyDown(rl.KEY_W):
+        elif key_d:
+            if key_w:
                 atn = 6
-            elif rl.IsKeyDown(rl.KEY_S):
+            elif key_s:
                 atn = 8
             else:
                 atn = 7
-        elif rl.IsKeyDown(rl.KEY_W):
+        elif key_w:
             atn = 3
-        elif rl.IsKeyDown(rl.KEY_S):
+        elif key_s:
             atn = 5
 
         if rl.IsKeyDown(rl.KEY_ESCAPE):
@@ -397,30 +430,6 @@ class RaylibClient:
         if rl.IsKeyDown(rl.KEY_E):
             skill_e = 1
             skill = 3
-
-        ts = self.tile_size
-        main_r = entities[0].y
-        main_c = entities[0].x
-        self.camera.target.x = (main_c - self.width//2) * ts
-        self.camera.target.y = (main_r - self.height//2) * ts
-        main_r = int(main_r)
-        main_c = int(main_c)
-        r_min = main_r - self.height//2 - 1
-        r_max = main_r + self.height//2 + 1
-        c_min = main_c - self.width//2 - 1
-        c_max = main_c + self.width//2 + 1
-
-        pos = rl.GetMousePosition()
-        raw_mouse_x = pos.x + self.camera.target.x
-        raw_mouse_y = pos.y + self.camera.target.y
-        mouse_x = int(raw_mouse_x // ts)
-        mouse_y = int(raw_mouse_y // ts)
-        #mouse_x = int(c_min + pos.x // ts + 1)
-        #mouse_y = int(r_min + pos.y // ts + 1)
-
-        ay = np.clip((pos.y - ts*self.height//2) / 200, -1, 1)
-        ax = np.clip((pos.x - ts*self.width//2) / 200, -1, 1)
-        #print(f'Mouse: {pos.x}, {pos.y}, Target: {ts*mouse_x}, {ts*mouse_y}, Action: {ay}, {ax}')
 
         best_target = None
         '''
