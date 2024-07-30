@@ -1257,9 +1257,9 @@ cdef class Environment:
 
             # Reward based on distance to enemy ancient
             if player.team == 0:
-                ancient = self.get_tower(23)
-            else:
                 ancient = self.get_tower(22)
+            else:
+                ancient = self.get_tower(23)
  
             dest_y = player.y + player.move_modifier*self.agent_speed*vel_y
             dest_x = player.x + player.move_modifier*self.agent_speed*vel_x

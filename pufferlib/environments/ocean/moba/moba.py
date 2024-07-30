@@ -291,7 +291,6 @@ class PufferMoba(pufferlib.PufferEnv):
             #print('Dire Lv: ', infos['dire_level_mean'])
             #infos['moba_map'] = self.client.render(self.grid)
 
-
         return (self.buf.observations, self.buf.rewards,
             self.buf.terminals, self.buf.truncations, infos)
 
