@@ -150,6 +150,7 @@ cdef class Environment:
         float reward_tower
         
         public int total_towers_taken
+        public int total_levels_gained
 
         # MAX_ENTITIES x MAX_SCANNED_TARGETS
         Entity* scanned_targets[256][121]
@@ -184,6 +185,7 @@ cdef class Environment:
         self.sum_rewards = sum_rewards
         self.norm_rewards = norm_rewards
         self.total_towers_taken = 0
+        self.total_levels_gained = 0
 
         # Hey, change the scanned_targets size to match!
         assert num_agents + num_creeps + num_neutrals + num_towers <= 256
@@ -532,6 +534,7 @@ cdef class Environment:
     cdef bint attack(self, Entity* player, Entity* target, float damage):
         cdef:
             int xp = 0
+            int level
             Reward* reward
 
         if target.pid == -1:
@@ -570,7 +573,11 @@ cdef class Environment:
             self.total_towers_taken += 1
             reward.tower = self.reward_tower
 
+        level = player.level
         player.level = self.level(player.xp)
+        if player.level > level:
+            self.total_levels_gained += 1
+
         player.damage = 50 + 6*player.level
         player.max_health = 500 + 50*player.level
  
