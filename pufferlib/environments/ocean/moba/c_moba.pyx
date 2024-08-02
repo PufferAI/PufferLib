@@ -1055,6 +1055,7 @@ cdef class Environment:
         # Respawn towers
         for idx in range(self.num_towers):
             tower = self.get_tower(idx)
+            tower.pid = idx + self.num_agents + self.num_creeps + self.num_neutrals
             tower.health = tower.max_health
             tower.basic_attack_timer = 0
             self.move_to(tower, tower.spawn_y, tower.spawn_x)

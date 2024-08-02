@@ -154,16 +154,16 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         # MOBA
         if 'reward_death' in env_params:
             param_spaces.append(carbs_param('env', 'reward_death',
-                'linear', sweep_parameters, search_center=-1.0))
+                'linear', sweep_parameters, search_center=-0.42))
         if 'reward_xp' in env_params:
             param_spaces.append(carbs_param('env', 'reward_xp',
-                'linear', sweep_parameters, search_center=0.006, scale=0.05))
+                'linear', sweep_parameters, search_center=0.015, scale=0.05))
         if 'reward_distance' in env_params:
             param_spaces.append(carbs_param('env', 'reward_distance',
-                'linear', sweep_parameters, search_center=0.05, scale=0.5))
+                'linear', sweep_parameters, search_center=0.15, scale=0.5))
         if 'reward_tower' in env_params:
             param_spaces.append(carbs_param('env', 'reward_tower',
-                'linear', sweep_parameters, search_center=3.0))
+                'linear', sweep_parameters, search_center=4.0))
 
         # Atari
         if 'frameskip' in env_params:
