@@ -198,8 +198,8 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
     carbs_params = CARBSParams(
         better_direction_sign=1,
         is_wandb_logging_enabled=False,
-        resample_frequency=0,
-        num_random_samples=1,
+        resample_frequency=5,
+        num_random_samples=len(param_spaces),
     )
     carbs = CARBS(carbs_params, param_spaces)
     suggestion = carbs.suggest().suggestion
