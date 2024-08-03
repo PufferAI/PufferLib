@@ -272,6 +272,7 @@ class PufferMoba(pufferlib.PufferEnv):
             infos['reward_distance'] = np.mean(self.rewards.distance)
             infos['reward_tower'] = np.mean(self.rewards.tower)
             infos['total_towers_taken'] = np.mean([env.total_towers_taken for env in self.c_envs])
+            infos['total_levels_gained'] = np.mean([env.total_levels_gained for env in self.c_envs])
             infos['norm_reward'] = np.mean(self.norm_rewards)
             #self.sum_rewards = []
             #print('Radient Lv: ', infos['radient_level_mean'])
