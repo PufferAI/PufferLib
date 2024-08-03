@@ -202,9 +202,12 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         num_random_samples=len(param_spaces),
     )
     carbs = CARBS(carbs_params, param_spaces)
-    suggestion = carbs.suggest().suggestion
 
+    import time, torch
     def main():
+        # set torch and pytorch seeds to current time
+        np.random.seed(int(time.time()))
+        torch.manual_seed(int(time.time()))
         wandb = init_wandb(args, env_name, id=args['exp_id'])
         wandb.config.__dict__['_locked'] = {}
         orig_suggestion = carbs.suggest().suggestion
