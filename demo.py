@@ -154,16 +154,16 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         # MOBA
         if 'reward_death' in env_params:
             param_spaces.append(carbs_param('env', 'reward_death',
-                'linear', sweep_parameters, search_center=-1.0))
+                'linear', sweep_parameters, search_center=-0.42))
         if 'reward_xp' in env_params:
             param_spaces.append(carbs_param('env', 'reward_xp',
-                'linear', sweep_parameters, search_center=0.006, scale=0.05))
+                'linear', sweep_parameters, search_center=0.015, scale=0.05))
         if 'reward_distance' in env_params:
             param_spaces.append(carbs_param('env', 'reward_distance',
-                'linear', sweep_parameters, search_center=0.05, scale=0.5))
+                'linear', sweep_parameters, search_center=0.15, scale=0.5))
         if 'reward_tower' in env_params:
             param_spaces.append(carbs_param('env', 'reward_tower',
-                'linear', sweep_parameters, search_center=3.0))
+                'linear', sweep_parameters, search_center=4.0))
 
         # Atari
         if 'frameskip' in env_params:
@@ -198,13 +198,16 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
     carbs_params = CARBSParams(
         better_direction_sign=1,
         is_wandb_logging_enabled=False,
-        resample_frequency=0,
-        num_random_samples=1,
+        resample_frequency=5,
+        num_random_samples=len(param_spaces),
     )
     carbs = CARBS(carbs_params, param_spaces)
-    suggestion = carbs.suggest().suggestion
 
+    import time, torch
     def main():
+        # set torch and pytorch seeds to current time
+        np.random.seed(int(time.time()))
+        torch.manual_seed(int(time.time()))
         wandb = init_wandb(args, env_name, id=args['exp_id'])
         wandb.config.__dict__['_locked'] = {}
         orig_suggestion = carbs.suggest().suggestion
@@ -263,7 +266,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
                 )
             )
 
-    wandb.agent(sweep_id, main, count=8)
+    wandb.agent(sweep_id, main, count=500)
 
 def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1):
     if args['vec'] == 'serial':
@@ -295,9 +298,11 @@ def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1):
     uptime = data.profile.uptime
     stats = []
     steps_evaluated = 0
-    steps_to_eval = int(args['train.total_timesteps'] * eval_frac)
+    steps_to_eval = int(args['train']['total_timesteps'] * eval_frac)
+    batch_size = args['train']['batch_size']
     while steps_evaluated < steps_to_eval:
         stats.append(clean_pufferl.evaluate(data)[0])
+        steps_evaluated += batch_size
 
     clean_pufferl.close(data)
     return stats, uptime
