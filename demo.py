@@ -303,7 +303,7 @@ def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1):
         stats, _ = clean_pufferl.evaluate(data)
         steps_evaluated += batch_size
 
-    clean_pufferl.log_and_clear(data)
+    clean_pufferl.mean_and_log(data)
     clean_pufferl.close(data)
     return stats, uptime
 

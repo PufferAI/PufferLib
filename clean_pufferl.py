@@ -278,18 +278,27 @@ def train(data):
 
         done_training = data.global_step >= config.total_timesteps
         # TODO: beter way to get episode return update without clogging dashboard
+        # TODO: make this appear faster
         if profile.update(data):
+            mean_and_log(data)
             print_dashboard(config.env, data.utilization, data.global_step, data.epoch,
                 profile, data.losses, data.stats, data.msg)
-            log_and_clear(data)
+            data.stats = defaultdict(list)
 
         if data.epoch % config.checkpoint_interval == 0 or done_training:
             save_checkpoint(data)
             data.msg = f'Checkpoint saved at update {data.epoch}'
 
-def log_and_clear(data):
-    stats = data.stats
-    data.stats = defaultdict(list)
+def mean_and_log(data):
+    for k in list(data.stats.keys()):
+        v = data.stats[k]
+        try:
+            v = np.mean(v)
+        except:
+            del data.stats[k]
+
+        data.stats[k] = v
+
     if data.wandb is None:
         return
 
@@ -299,7 +308,7 @@ def log_and_clear(data):
         '0verview/agent_steps': data.global_step,
         '0verview/epoch': data.epoch,
         '0verview/learning_rate': data.optimizer.param_groups[0]["lr"],
-        **{f'environment/{k}': v for k, v in stats.items()},
+        **{f'environment/{k}': v for k, v in data.stats.items()},
         **{f'losses/{k}': v for k, v in data.losses.items()},
         **{f'performance/{k}': v for k, v in data.profile},
     })
