@@ -1106,6 +1106,13 @@ cdef class Environment:
         player.mana -= 5
         return True
 
+    def randomize_tower_hp(self):
+        cdef int tower_idx
+        cdef Entity* tower
+        for tower_idx in range(self.num_towers):
+            tower = self.get_tower(tower_idx)
+            tower.health = rand() % tower.max_health + 1
+
     cpdef reset(self, seed=0):
         cdef:
             Entity* player

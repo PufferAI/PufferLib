@@ -221,6 +221,8 @@ class PufferMoba(pufferlib.PufferEnv):
                 self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
                 True, self.reward_death, self.reward_xp, self.reward_distance, self.reward_tower))
             self.c_envs[i].reset()
+            if i != 0:
+                self.c_envs[i].randomize_tower_hp()
             ptr = end
 
         self.sum_rewards = []
