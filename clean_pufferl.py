@@ -66,7 +66,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
         wandb=wandb,
         global_step=0,
         epoch=0,
-        stats={},
+        stats=defaultdict(list),
         msg=msg,
         last_log_time=0,
         utilization=utilization,
@@ -124,8 +124,6 @@ def evaluate(data):
             data.vecenv.send(actions)
 
     with profile.eval_misc:
-        data.stats = {}
-
         # Moves into models... maybe. Definitely moves.
         # You could also just return infos and have it in demo
         if 'pokemon_exploration_map' in infos:
@@ -146,10 +144,14 @@ def evaluate(data):
                 data.stats[f'Media/{k}'] = data.wandb.Image(v[0])
                 continue
 
-            try: # TODO: Better checks on log data types
-                data.stats[k] = np.mean(v)
-            except:
-                continue
+            if isinstance(v, np.ndarray):
+                v = v.tolist()
+            try:
+                iter(v)
+            except TypeError:
+                data.stats[k].append(v)
+            else:
+                data.stats[k] += v
 
     # TODO: Better way to enable multiple collects
     data.experience.ptr = 0
@@ -276,26 +278,31 @@ def train(data):
 
         done_training = data.global_step >= config.total_timesteps
         # TODO: beter way to get episode return update without clogging dashboard
-        if profile.update(data) or (
-                'episode_return' in data.stats or done_training):
+        if profile.update(data):
             print_dashboard(config.env, data.utilization, data.global_step, data.epoch,
                 profile, data.losses, data.stats, data.msg)
-
-            if data.wandb is not None and data.global_step > 0 and (time.time() - data.last_log_time > 3.0 or 'episode_return' in data.stats):
-                data.last_log_time = time.time()
-                data.wandb.log({
-                    '0verview/SPS': profile.SPS,
-                    '0verview/agent_steps': data.global_step,
-                    '0verview/epoch': data.epoch,
-                    '0verview/learning_rate': data.optimizer.param_groups[0]["lr"],
-                    **{f'environment/{k}': v for k, v in data.stats.items()},
-                    **{f'losses/{k}': v for k, v in data.losses.items()},
-                    **{f'performance/{k}': v for k, v in data.profile},
-                })
+            log_and_clear(data)
 
         if data.epoch % config.checkpoint_interval == 0 or done_training:
             save_checkpoint(data)
             data.msg = f'Checkpoint saved at update {data.epoch}'
+
+def log_and_clear(data):
+    stats = data.stats
+    data.stats = defaultdict(list)
+    if data.wandb is None:
+        return
+
+    data.last_log_time = time.time()
+    data.wandb.log({
+        '0verview/SPS': data.profile.SPS,
+        '0verview/agent_steps': data.global_step,
+        '0verview/epoch': data.epoch,
+        '0verview/learning_rate': data.optimizer.param_groups[0]["lr"],
+        **{f'environment/{k}': v for k, v in stats.items()},
+        **{f'losses/{k}': v for k, v in data.losses.items()},
+        **{f'performance/{k}': v for k, v in data.profile},
+    })
 
 def close(data):
     data.vecenv.close()
