@@ -249,14 +249,8 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
             import traceback
             traceback.print_exc()
         else:
-            observed_value = [s[target_metric] for s in stats if target_metric in s]
+            observed_value = stats[target_metric]
             print('Observed value:', observed_value)
-            if len(observed_value) > 0:
-                observed_value = np.mean(observed_value)
-            else:
-                observed_value = 0
-
-            print(f'Observed value: {observed_value}')
             print('Uptime:', uptime)
             obs_out = carbs.observe(
                 ObservationInParam(
