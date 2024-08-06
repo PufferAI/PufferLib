@@ -410,7 +410,7 @@ if __name__ == '__main__':
         pufferlib.vector.autotune(make_env, batch_size=args['train']['env_batch_size'])
     elif args['mode'] == 'profile':
         import cProfile
-        cProfile.run('train(args, env_module, make_env)', 'stats.profile')
+        cProfile.run('train(args, make_env, policy_cls, rnn_cls, wandb=None)', 'stats.profile')
         import pstats
         from pstats import SortKey
         p = pstats.Stats('stats.profile')
