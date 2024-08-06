@@ -157,6 +157,8 @@ cdef class Environment:
         
         public int total_towers_taken
         public int total_levels_gained
+        public int radiant_victories
+        public int dire_victories
 
         # MAX_ENTITIES x MAX_SCANNED_TARGETS
         Entity* scanned_targets[256][121]
@@ -192,6 +194,8 @@ cdef class Environment:
         self.norm_rewards = norm_rewards
         self.total_towers_taken = 0
         self.total_levels_gained = 0
+        self.radiant_victories = 0
+        self.dire_victories = 0
 
         # Hey, change the scanned_targets size to match!
         assert num_agents + num_creeps + num_neutrals + num_towers <= 256
@@ -1328,9 +1332,11 @@ cdef class Environment:
 
         if self.get_tower(22).health <= 0:
             self.reset(0)
+            self.radiant_victories += 1
             return 1 
         if self.get_tower(23).health <= 0:
             self.reset(0)
+            self.dire_victories += 1
             return 2
 
         return 0
