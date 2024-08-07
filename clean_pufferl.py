@@ -484,7 +484,7 @@ class Experience:
         return idxs
 
     def flatten_batch(self, advantages_np):
-        advantages = torch.from_numpy(advantages_np).to(self.device)
+        advantages = torch.as_tensor(advantages_np).to(self.device)
         b_idxs, b_flat = self.b_idxs, self.b_idxs_flat
         self.b_actions = self.actions.to(self.device, non_blocking=True)
         self.b_logprobs = self.logprobs.to(self.device, non_blocking=True)
@@ -612,7 +612,7 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
                 frames.append(render)
 
         with torch.no_grad():
-            ob = torch.from_numpy(ob).to(device)
+            ob = torch.as_tensor(ob).to(device)
             if hasattr(agent, 'lstm'):
                 action, _, _, _, state = agent(ob, state)
             else:
