@@ -574,14 +574,14 @@ def count_params(policy):
     return sum(p.numel() for p in policy.parameters() if p.requires_grad)
 
 def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_kwargs,
-        render_mode='auto', model_path=None, device='cuda'):
+        backend, render_mode='auto', model_path=None, device='cuda'):
 
     # We are just using Serial vecenv to give a consistent
     # single-agent/multi-agent API for evaluation
     if render_mode != 'auto':
         env_kwargs['render_mode'] = render_mode
 
-    env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs)
+    env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs, backend=backend)
 
     if model_path is None:
         agent = agent_creator(env, policy_cls, rnn_cls, agent_kwargs).to(device)

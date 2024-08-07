@@ -269,6 +269,8 @@ def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1):
         vec = pufferlib.vector.Multiprocessing
     elif args['vec'] == 'ray':
         vec = pufferlib.vector.Ray
+    elif args['vec'] == 'native':
+        vec = pufferlib.vector.Native
     else:
         raise ValueError(f'Invalid --vector (serial/multiprocessing/ray).')
 
@@ -318,7 +320,7 @@ if __name__ == '__main__':
     parser.add_argument('--render-mode', type=str, default='auto',
         choices=['auto', 'human', 'ansi', 'rgb_array', 'raylib', 'None'])
     parser.add_argument('--vec', '--vector', '--vectorization', type=str,
-        default='serial', choices=['serial', 'multiprocessing', 'ray'])
+        default='serial', choices=['serial', 'multiprocessing', 'ray', 'native'])
     parser.add_argument('--exp-id', '--exp-name', type=str,
         default=None, help="Resume from experiment")
     parser.add_argument('--wandb-entity', type=str, default='jsuarez')
@@ -390,6 +392,10 @@ if __name__ == '__main__':
             wandb = init_wandb(args, env_name, id=args['exp_id'])
         train(args, make_env, policy_cls, rnn_cls, wandb=wandb)
     elif args['mode'] in ('eval', 'evaluate'):
+        vec = pufferlib.vector.Serial
+        if args['vec'] == 'native':
+            vec = pufferlib.vector.Native
+
         clean_pufferl.rollout(
             make_env,
             args['env'],
@@ -397,6 +403,7 @@ if __name__ == '__main__':
             rnn_cls=rnn_cls,
             agent_creator=make_policy,
             agent_kwargs=args,
+            backend=vec,
             model_path=args['eval_model_path'],
             render_mode=args['render_mode'],
             device=args['train']['device'],

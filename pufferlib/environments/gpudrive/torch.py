@@ -12,9 +12,9 @@ EGO_STATE_DIM = 6
 PARTNER_DIM = 10
 ROAD_MAP_DIM = 13
 
-MAX_CONTROLLED_VEHICLES = 128
+MAX_CONTROLLED_VEHICLES = 32
 ROADMAP_AGENT_FEAT_DIM = MAX_CONTROLLED_VEHICLES - 1
-TOP_K_ROADPOINTS = 200 # Number of visible roadpoints from the road graph
+TOP_K_ROADPOINTS = 64 # Number of visible roadpoints from the road graph
 
 def unpack_obs(obs_flat):
     """
@@ -49,16 +49,8 @@ class Policy(nn.Module):
         self.ego_embed = nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Linear(EGO_STATE_DIM, input_size)),
             torch.nn.ReLU(),
-            pufferlib.pytorch.layer_init(nn.Linear(input_size, hidden_size)),
-        )
-
-        '''
-        self.ego_embed = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(EGO_STATE_DIM, input_size)),
-            torch.nn.ReLU(),
             pufferlib.pytorch.layer_init(nn.Linear(input_size, input_size)),
         )
-        '''
 
         self.partner_embed = nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Linear(PARTNER_DIM, input_size)),
@@ -87,11 +79,10 @@ class Policy(nn.Module):
     def encode_observations(self, observations):
         ego_state, road_objects, road_graph = unpack_obs(observations)
         ego_embed = self.ego_embed(ego_state)
-        #partner_embed, _ = self.partner_embed(road_objects).max(dim=1)
-        #road_map_embed, _ = self.road_map_embed(road_graph).max(dim=1)
-        #embed = torch.cat([ego_embed, partner_embed, road_map_embed], dim=1)
-        return ego_embed, None
-        #return self.proj(embed), None
+        partner_embed, _ = self.partner_embed(road_objects).max(dim=1)
+        road_map_embed, _ = self.road_map_embed(road_graph).max(dim=1)
+        embed = torch.cat([ego_embed, partner_embed, road_map_embed], dim=1)
+        return self.proj(embed), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
         action = self.actor(flat_hidden)

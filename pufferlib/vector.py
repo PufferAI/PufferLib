@@ -66,6 +66,42 @@ def joint_space(space, n):
             shape=(n, *space.shape), dtype=space.dtype)
     else:
         raise ValueError(f'Unsupported space: {space}')
+
+class Native:
+    reset = reset
+    step = step
+
+    @property
+    def num_envs(self):
+        return self.agents_per_batch
+
+    def __init__(self, env_creators, env_args, env_kwargs, num_envs, **kwargs):
+        assert len(env_creators) == 1
+        assert num_envs == 1
+        self.envs = env_creators[0](*env_args[0], **env_kwargs[0])
+        self.driver_env = self.envs
+        self.emulated = self.driver_env.emulated
+        self.num_agents = num_agents = self.envs.num_agents
+        self.agents_per_batch = self.num_agents
+        self.num_agents = num_agents
+        self.single_observation_space = self.envs.single_observation_space
+        self.single_action_space = self.envs.single_action_space
+        self.action_space = joint_space(self.single_action_space, self.agents_per_batch)
+        self.observation_space = joint_space(self.single_observation_space, self.agents_per_batch)
+        self.flag = RESET
+
+    def async_reset(self, seed=None):
+        self.flag = RECV
+        self.ready = self.envs.reset(seed)
+
+    def send(self, actions):
+        self.ready = self.envs.step(actions)
+
+    def recv(self):
+        return self.ready
+
+    def close(self):
+        self.envs.close()
  
 class Serial:
     reset = reset
