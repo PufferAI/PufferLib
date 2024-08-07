@@ -22,8 +22,8 @@ import pufferlib.pytorch
 torch.set_float32_matmul_precision('high')
 
 # Fast Cython GAE implementation
-import pyximport
-pyximport.install(setup_args={"include_dirs": np.get_include()})
+#import pyximport
+#pyximport.install(setup_args={"include_dirs": np.get_include()})
 from c_gae import compute_gae
 
 
