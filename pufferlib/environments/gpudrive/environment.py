@@ -23,7 +23,7 @@ class PufferCPUDrive:
         os.chdir(working_dir)
 
         scene_config = SceneConfig(
-            path='minidata/biggest_file/',
+            path='biggest_file/',
             num_scenes=num_worlds,
             discipline=SelectionDiscipline.K_UNIQUE_N,
             k_unique_scenes=k_unique_scenes,
