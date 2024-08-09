@@ -244,7 +244,7 @@ class Password(gymnasium.Env):
         self.password_length = password_length
         self.hard_fixed_seed = hard_fixed_seed
         self.observation_space=gymnasium.spaces.Box(
-            low=0, high=1, shape=(password_length,))
+            low=-1, high=1, shape=(password_length,))
         self.action_space=gymnasium.spaces.Discrete(2)
         self.render_mode = 'ansi'
 
