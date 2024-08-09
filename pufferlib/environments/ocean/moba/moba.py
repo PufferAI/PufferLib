@@ -259,7 +259,7 @@ class PufferMoba(pufferlib.PufferEnv):
         #elif outcome == 1:
         #    print('Dire Victory')
         #elif outcome == 2:
-        #    print('Radient Victory')
+        #    print('Radiant Victory')
 
         #self.sum_rewards.append(self.buf.rewards.sum())
 
@@ -268,7 +268,7 @@ class PufferMoba(pufferlib.PufferEnv):
             #infos['reward'] = np.mean(self.sum_rewards) / self.num_agents
             infos['reward'] = np.mean(self.buf.rewards)
             levels = self.entities.level
-            infos['radient_level_mean'] = np.mean(levels[:, :5])
+            infos['radiant_level_mean'] = np.mean(levels[:, :5])
             infos['dire_level'] = np.mean(levels[:, 5:10])
             infos['reward_death'] = np.mean(self.rewards.death)
             infos['reward_xp'] = np.mean(self.rewards.xp)
@@ -276,6 +276,8 @@ class PufferMoba(pufferlib.PufferEnv):
             infos['reward_tower'] = np.mean(self.rewards.tower)
             infos['total_towers_taken'] = np.mean([env.total_towers_taken for env in self.c_envs])
             infos['total_levels_gained'] = np.mean([env.total_levels_gained for env in self.c_envs])
+            infos['radiant_victories'] = np.mean([env.radiant_victories for env in self.c_envs])
+            infos['dire_victories'] = np.mean([env.dire_victories for env in self.c_envs])
             infos['norm_reward'] = np.mean(self.norm_rewards)
             infos['usage/support_q'] = np.mean(self.entities.q_uses[:, 0:10:5])
             infos['usage/assassin_q'] = np.mean(self.entities.q_uses[:, 1:10:5])
@@ -294,7 +296,7 @@ class PufferMoba(pufferlib.PufferEnv):
             infos['usage/carry_e'] = np.mean(self.entities.e_uses[:, 4:10:5])
 
             #self.sum_rewards = []
-            #print('Radient Lv: ', infos['radient_level_mean'])
+            #print('Radiant Lv: ', infos['radiant_level_mean'])
             #print('Dire Lv: ', infos['dire_level_mean'])
             #infos['moba_map'] = self.client.render(self.grid)
 
