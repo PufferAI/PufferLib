@@ -105,10 +105,10 @@ class PufferMoba(pufferlib.PufferEnv):
 
         self.grid = np.zeros((self.height, self.width), dtype=np.uint8)
         self.grid[game_map == 0] = WALL
-        self.grid[:self.vision_range] = WALL
-        self.grid[-self.vision_range:] = WALL
-        self.grid[:, :self.vision_range] = WALL
-        self.grid[:, -self.vision_range:] = WALL
+        self.grid[:self.vision_range + 1] = WALL
+        self.grid[-self.vision_range - 1:] = WALL
+        self.grid[:, :self.vision_range + 1] = WALL
+        self.grid[:, -self.vision_range - 1:] = WALL
 
         self.pids = np.zeros((self.num_envs, self.height, self.width), dtype=np.int32) - 1
 
@@ -149,11 +149,9 @@ class PufferMoba(pufferlib.PufferEnv):
             shape=(self.obs_map_bytes + PLAYER_OBS_N,), dtype=np.uint8)
 
         if discretize:
-            #self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 10, 2, 2, 2])
-            #self.action_space = gymnasium.spaces.MultiDiscrete([9, 4])
-            self.action_space = gymnasium.spaces.Discrete(9)
-            #self.actions = np.zeros((self.num_agents, 2), dtype=np.int32)
-            self.actions = np.zeros(self.num_agents, dtype=np.int32)
+            atn_vec = [7, 7, 3, 2, 2, 2]
+            self.action_space = gymnasium.spaces.MultiDiscrete(atn_vec)
+            self.actions = np.zeros((self.num_agents, len(atn_vec)), dtype=np.int32)
         else:
             self.actions = np.zeros((self.num_agents, 6), dtype=np.float32)
             finfo = np.finfo(np.float32)
@@ -174,6 +172,7 @@ class PufferMoba(pufferlib.PufferEnv):
     def render(self, upscale=4):
         grid = self.grid
         if self.render_mode in ('rgb_array', 'raylib'):
+            #debug_grid = ((grid != EMPTY) * (grid != WALL)).astype(np.uint8)
             return self.client.render(grid)
         elif self.render_mode == 'human':
             frame, self.human_action = self.client.render(
@@ -222,6 +221,8 @@ class PufferMoba(pufferlib.PufferEnv):
                 self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
                 True, self.reward_death, self.reward_xp, self.reward_distance, self.reward_tower))
             self.c_envs[i].reset()
+            if i != 0:
+                self.c_envs[i].randomize_tower_hp()
             ptr = end
 
         self.sum_rewards = []
@@ -234,9 +235,11 @@ class PufferMoba(pufferlib.PufferEnv):
         if self.render_mode == 'human' and self.human_action is not None:
             #print(self.human_action)
             self.actions[0] = self.human_action
+            print(self.actions[0])
 
         step_all(self.c_envs)
         infos = {}
+
 
         #print('Reward: ', self.buf.rewards[0])
 
@@ -256,7 +259,7 @@ class PufferMoba(pufferlib.PufferEnv):
         #elif outcome == 1:
         #    print('Dire Victory')
         #elif outcome == 2:
-        #    print('Radient Victory')
+        #    print('Radiant Victory')
 
         #self.sum_rewards.append(self.buf.rewards.sum())
 
@@ -265,7 +268,7 @@ class PufferMoba(pufferlib.PufferEnv):
             #infos['reward'] = np.mean(self.sum_rewards) / self.num_agents
             infos['reward'] = np.mean(self.buf.rewards)
             levels = self.entities.level
-            infos['radient_level_mean'] = np.mean(levels[:, :5])
+            infos['radiant_level_mean'] = np.mean(levels[:, :5])
             infos['dire_level'] = np.mean(levels[:, 5:10])
             infos['reward_death'] = np.mean(self.rewards.death)
             infos['reward_xp'] = np.mean(self.rewards.xp)
@@ -273,9 +276,27 @@ class PufferMoba(pufferlib.PufferEnv):
             infos['reward_tower'] = np.mean(self.rewards.tower)
             infos['total_towers_taken'] = np.mean([env.total_towers_taken for env in self.c_envs])
             infos['total_levels_gained'] = np.mean([env.total_levels_gained for env in self.c_envs])
+            infos['radiant_victories'] = np.mean([env.radiant_victories for env in self.c_envs])
+            infos['dire_victories'] = np.mean([env.dire_victories for env in self.c_envs])
             infos['norm_reward'] = np.mean(self.norm_rewards)
+            infos['usage/support_q'] = np.mean(self.entities.q_uses[:, 0:10:5])
+            infos['usage/assassin_q'] = np.mean(self.entities.q_uses[:, 1:10:5])
+            infos['usage/burst_q'] = np.mean(self.entities.q_uses[:, 2:10:5])
+            infos['usage/tank_q'] = np.mean(self.entities.q_uses[:, 3:10:5])
+            infos['usage/carry_q'] = np.mean(self.entities.q_uses[:, 4:10:5])
+            infos['usage/support_w'] = np.mean(self.entities.w_uses[:, 0:10:5])
+            infos['usage/assassin_w'] = np.mean(self.entities.w_uses[:, 1:10:5])
+            infos['usage/burst_w'] = np.mean(self.entities.w_uses[:, 2:10:5])
+            infos['usage/tank_w'] = np.mean(self.entities.w_uses[:, 3:10:5])
+            infos['usage/carry_w'] = np.mean(self.entities.w_uses[:, 4:10:5])
+            infos['usage/support_e'] = np.mean(self.entities.e_uses[:, 0:10:5])
+            infos['usage/assassin_e'] = np.mean(self.entities.e_uses[:, 1:10:5])
+            infos['usage/burst_e'] = np.mean(self.entities.e_uses[:, 2:10:5])
+            infos['usage/tank_e'] = np.mean(self.entities.e_uses[:, 3:10:5])
+            infos['usage/carry_e'] = np.mean(self.entities.e_uses[:, 4:10:5])
+
             #self.sum_rewards = []
-            #print('Radient Lv: ', infos['radient_level_mean'])
+            #print('Radiant Lv: ', infos['radiant_level_mean'])
             #print('Dire Lv: ', infos['dire_level_mean'])
             #infos['moba_map'] = self.client.render(self.grid)
 
@@ -355,137 +376,27 @@ class RaylibClient:
         raw_mouse_y = pos.y + self.camera.target.y
         mouse_x = int(raw_mouse_x // ts)
         mouse_y = int(raw_mouse_y // ts)
-        #mouse_x = int(c_min + pos.x // ts + 1)
-        #mouse_y = int(r_min + pos.y // ts + 1)
-
-        ay = np.clip((pos.y - ts*self.height//2) / 200, -1, 1)
-        ax = np.clip((pos.x - ts*self.width//2) / 200, -1, 1)
-
-        key_a = 0
-        key_d = 0
-        key_w = 0
-        key_s = 0
-
-        if ax < 0:
-            key_a = 1
-        else:
-            key_d = 1
-        if ay > 0:
-            key_s = 1
-        else:
-            key_w = 1
-        '''
-
-        key_a = rl.IsKeyDown(rl.KEY_A)
-        key_d = rl.IsKeyDown(rl.KEY_D)
-        key_w = rl.IsKeyDown(rl.KEY_W)
-        key_s = rl.IsKeyDown(rl.KEY_S)
-        '''
-
-        #print(f'Mouse: {pos.x}, {pos.y}, Target: {ts*mouse_x}, {ts*mouse_y}, Action: {ay}, {ax}')
-
-        atn = 4
-        if key_a:
-            if key_w:
-                atn = 0
-            elif key_s:
-                atn = 2
-            else:
-                atn = 1
-        elif key_d:
-            if key_w:
-                atn = 6
-            elif key_s:
-                atn = 8
-            else:
-                atn = 7
-        elif key_w:
-            atn = 3
-        elif key_s:
-            atn = 5
+        ay = int(np.clip((pos.y - ts*self.height//2) / 50, -3, 3)) + 3
+        ax = int(np.clip((pos.x - ts*self.width//2) / 50, -3, 3)) + 3
 
         if rl.IsKeyDown(rl.KEY_ESCAPE):
             exit(0)
-
-        '''
-        if rl.IsKeyDown(rl.KEY_UP) or rl.IsKeyDown(rl.KEY_W):
-            ay = 0 if discretize else -1
-        if rl.IsKeyDown(rl.KEY_DOWN) or rl.IsKeyDown(rl.KEY_S):
-            ay = 2 if discretize else 1
-        if rl.IsKeyDown(rl.KEY_LEFT) or rl.IsKeyDown(rl.KEY_A):
-            ax = 0 if discretize else -1
-        if rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
-            ax = 2 if discretize else 1
-        '''
 
         skill = 0
         skill_q = 0
         skill_w = 0
         skill_e = 0
+        target_heros = 1
         if rl.IsKeyDown(rl.KEY_Q):
             skill_q = 1
-            skill = 1
         if rl.IsKeyDown(rl.KEY_W):
             skill_w = 1
-            skill = 2
         if rl.IsKeyDown(rl.KEY_E):
             skill_e = 1
-            skill = 3
+        if rl.IsKeyDown(rl.KEY_LEFT_SHIFT):
+            target_heros = 2
 
-        best_target = None
-        '''
-        for yy in range(mouse_y - 3, mouse_y + 4):
-            for xx in range(mouse_x - 3, mouse_x + 4):
-                if xx < 0 or yy < 0 or xx > 128 or yy > 128:
-                    continue
-
-                target_pid = pids[yy, xx]
-                if target_pid == -1:
-                    continue
-
-                if target_pid == 0:
-                    continue
-                
-                target = entities[target_pid]
-                assert target.pid != -1
-
-                if best_target is None:
-                    best_target = target
-                    continue
-
-                dist_to_target = np.sqrt(
-                    (target.x - raw_mouse_x)**2 + (target.y - raw_mouse_y)**2)
-
-                dist_to_best_target = np.sqrt(
-                    (best_target.x - raw_mouse_x)**2 + (best_target.y - raw_mouse_y)**2)
-
-                if dist_to_target < dist_to_best_target:
-                    best_target = target
-                    
-        attack = 0
-        if best_target is None:
-            target_pid = -1
-        else:
-            for i in range(10):
-                if obs_players[0, i].pid == best_target.pid:
-                    attack = i
-                    #print(f'Setting attack to {i}, which is pid {best_target.pid}')
-                    break
-
-        if ax is None and ay is None:
-            action = None
-        else:
-            if ax is None:
-                ax = 1 if discretize else 0
-            if ay is None:
-                ay = 1 if discretize else 0
-
-            action = (ay, ax, attack, skill_q, skill_w, skill_e)
-        '''
-
-        action = (atn, skill)
-
-        #print(f'Action: {action}')
+        action = (ay, ax, target_heros, skill_q, skill_w, skill_e)
 
         rl.BeginDrawing()
         rl.BeginMode2D(self.camera)
@@ -515,7 +426,7 @@ class RaylibClient:
                 pid = pids[y, x]
 
                 if pid == -1:
-                   raise ValueError('Invalid pid')
+                    raise ValueError('Invalid pid. grid: ', grid[y, x])
 
                 entity = entities[pid]
                 if entity.is_hit:
@@ -565,7 +476,7 @@ class RaylibClient:
         rl.DrawText(f'Move: {player.move_timer}'.encode(), 25*ts, hud_y, 20, e_color)
 
         rl.EndDrawing()
-        return self._cdata_to_numpy(), action[0]
+        return self._cdata_to_numpy(), action
 
 def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
     health_bar = entity.health / entity.max_health
