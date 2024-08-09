@@ -105,10 +105,10 @@ class PufferMoba(pufferlib.PufferEnv):
 
         self.grid = np.zeros((self.height, self.width), dtype=np.uint8)
         self.grid[game_map == 0] = WALL
-        self.grid[:self.vision_range] = WALL
-        self.grid[-self.vision_range:] = WALL
-        self.grid[:, :self.vision_range] = WALL
-        self.grid[:, -self.vision_range:] = WALL
+        self.grid[:self.vision_range + 1] = WALL
+        self.grid[-self.vision_range - 1:] = WALL
+        self.grid[:, :self.vision_range + 1] = WALL
+        self.grid[:, -self.vision_range - 1:] = WALL
 
         self.pids = np.zeros((self.num_envs, self.height, self.width), dtype=np.int32) - 1
 
