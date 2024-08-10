@@ -201,9 +201,17 @@ class PufferMoba(pufferlib.PufferEnv):
         ] = AGENT_1
         '''
 
+        grid_copy = self.grid.copy()
+        self.sum_rewards = []
+
+        if hasattr(self, 'c_envs'):
+            for i in range(self.num_envs):
+                self.c_envs[i].reset()
+
+            return self.buf.observations, self.infos
+
         ptr = end = 0
         self.c_envs = []
-        grid_copy = self.grid.copy()
         for i in range(self.num_envs):
             end += 10
 
@@ -225,7 +233,6 @@ class PufferMoba(pufferlib.PufferEnv):
                 self.c_envs[i].randomize_tower_hp()
             ptr = end
 
-        self.sum_rewards = []
         return self.buf.observations, self.infos
 
     def step(self, actions):
@@ -235,7 +242,7 @@ class PufferMoba(pufferlib.PufferEnv):
         if self.render_mode == 'human' and self.human_action is not None:
             #print(self.human_action)
             self.actions[0] = self.human_action
-            print(self.actions[0])
+            #print(self.actions[0])
 
         step_all(self.c_envs)
         infos = {}
@@ -426,7 +433,7 @@ class RaylibClient:
                 pid = pids[y, x]
 
                 if pid == -1:
-                    raise ValueError('Invalid pid. grid: ', grid[y, x])
+                    raise ValueError(f'Invalid pid {pid} on tile {tile} at {y}, {x}')
 
                 entity = entities[pid]
                 if entity.is_hit:

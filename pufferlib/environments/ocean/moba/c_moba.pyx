@@ -373,6 +373,29 @@ cdef class Environment:
             y = int(player.y)
             x = int(player.x)
 
+            '''
+            if y < 0 or y >= 128 or x < 0 or x >= 128:
+                print(f'Invalid player position: {y}, {x}, pid: {pid}')
+                print(f'type: {player.entity_type}, team: {player.team}, hero type: {player.hero_type}')
+                print(f'health: {player.health}, max health: {player.max_health}')
+                print(f'mana: {player.mana}, max mana: {player.max_mana}')
+                print(f'level: {player.level}')
+                print(f'x: {player.x}, y: {player.y}')
+                print(f'spawn x: {player.spawn_x}, spawn y: {player.spawn_y}')
+                print(f'damage: {player.damage}')
+                print(f'lane: {player.lane}')
+                print(f'waypoint: {player.waypoint}')
+                print(f'move speed: {player.move_speed}')
+                print(f'move modifier: {player.move_modifier}')
+                print(f'stun timer: {player.stun_timer}')
+                print(f'move timer: {player.move_timer}')
+                print(f'q timer: {player.q_timer}')
+                print(f'w timer: {player.w_timer}')
+                print(f'e timer: {player.e_timer}')
+                print(f'basic attack timer: {player.basic_attack_timer}')
+                print(f'is hit: {player.is_hit}')
+                exit(0)
+            '''
             self.observations_map[pid, :, :, 0] = self.grid[
                 y-self.vision_range:y+self.vision_range+1,
                 x-self.vision_range:x+self.vision_range+1
@@ -475,6 +498,21 @@ cdef class Environment:
             entity.basic_attack_timer -= 1
 
     @cython.profile(False)
+    cdef bint spawn_at(self, Entity* entity, float y, float x):
+        cdef:
+            int disc_y = int(y)
+            int disc_x = int(x)
+
+        if self.grid[disc_y, disc_x] != EMPTY:
+            return False
+
+        self.grid[disc_y, disc_x] = entity.grid_id
+        self.pid_map[disc_y, disc_x] = entity.pid
+        entity.y = y
+        entity.x = x
+        return True
+
+    @cython.profile(False)
     cdef bint move_to(self, Entity* player, float dest_y, float dest_x):
         cdef:
             int disc_y = int(player.y)
@@ -486,6 +524,21 @@ cdef class Environment:
         if (self.grid[disc_dest_y, disc_dest_x] != EMPTY and
                 self.pid_map[disc_dest_y, disc_dest_x] != player.pid):
             return False
+
+        '''
+        if self.grid[disc_y, disc_x] == TOWER:
+            print(f'Player type {player.entity_type} at {disc_y}, {disc_x} is a tower?')
+            print(f'PID: {player.pid}, moving to {disc_dest_y}, {disc_dest_x}')
+            print(f'hero type: {player.hero_type}')
+            print(f'team: {player.team}')
+            print(f'Tick: {self.tick}')
+            exit(0)
+            return False
+
+        if self.grid[disc_dest_y, disc_dest_x] == TOWER:
+            print(f'Cannot move to tower at {disc_dest_y}, {disc_dest_x}')
+            return False
+        '''
 
         self.grid[disc_y, disc_x] = EMPTY
         self.grid[disc_dest_y, disc_dest_x] = player.grid_id
@@ -631,13 +684,18 @@ cdef class Environment:
         self.grid[y, x] = EMPTY
         self.pid_map[y, x] = -1
         entity.pid = -1
+        entity.x = 0
+        entity.y = 0
 
     @cython.profile(False)
     cdef void respawn_player(self, Entity* entity):
         cdef:
             bint valid_pos = False
+            int pid = entity.pid
             int y, x
 
+        self.kill(entity)
+        entity.pid = pid
         entity.health = entity.max_health
         entity.mana = entity.max_mana
         entity.basic_attack_timer = 0
@@ -677,6 +735,8 @@ cdef class Environment:
         creep.xp_on_kill = 60
         creep.damage = 22
         creep.basic_attack_cd = 5
+        #creep.x = 0
+        #creep.y = 0
 
         self.respawn_creep(creep, lane)
 
@@ -708,6 +768,9 @@ cdef class Environment:
 
         neutral.health = neutral.max_health
         neutral.basic_attack_timer = 0
+        # TODO: Can this leak over games somehow?
+        #neutral.x = 0
+        #neutral.y = 0
 
         for i in range(10):
             dy = rand() % 7 - 3
@@ -908,6 +971,7 @@ cdef class Environment:
             float dist = abs(target.x - player.x) + abs(target.y - player.y)
             float dx = target.x - player.x
             float dy = target.y - player.y
+        return False
 
         if dist == 0.0:
             return False
@@ -1087,6 +1151,8 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_assassin_tp_damage(self, Entity* player, Entity* target):
+        # TODO: Fix tp off map?
+        return False
         if target == NULL or player.mana < 60:
             return False
 
@@ -1121,6 +1187,8 @@ cdef class Environment:
         cdef:
             Entity* player
             Entity* tower
+            Entity* creep
+            Entity* neutral
             int pid
             int y
             int x
@@ -1136,7 +1204,17 @@ cdef class Environment:
             tower.pid = idx + self.num_agents + self.num_creeps + self.num_neutrals
             tower.health = tower.max_health
             tower.basic_attack_timer = 0
+            tower.x = 0
+            tower.y = 0
+
+            self.grid[int(tower.spawn_y), int(tower.spawn_x)] = EMPTY
             self.move_to(tower, tower.spawn_y, tower.spawn_x)
+            '''
+            if not self.move_to(tower, tower.spawn_y, tower.spawn_x):
+                print(f'Grid: {self.grid[int(tower.spawn_y), int(tower.spawn_x)]}')
+                print(f'PID: {self.pid_map[int(tower.spawn_y), int(tower.spawn_x)]}')
+                print(f'Failed to respawn tower {idx}')
+            '''
 
         # Respawn agents
         for i in range(self.num_agents):
@@ -1145,9 +1223,17 @@ cdef class Environment:
             player.level = 1
             self.respawn_player(player)
 
-        # TODO: Respawn creeps?
-        #for i in range(self.num_creeps):
-        #    self.spawn_creep(i, 0)
+        for i in range(self.num_creeps):
+            creep = self.get_creep(i)
+            creep.pid = -1
+            creep.x = 0
+            creep.y = 0
+
+        for i in range(self.num_neutrals):
+            neutral = self.get_neutral(i)
+            neutral.pid = -1
+            neutral.x = 0
+            neutral.y = 0
 
         self.compute_observations()
 
@@ -1328,16 +1414,34 @@ cdef class Environment:
         self.step_players()
 
         self.tick += 1
-        self.compute_observations()
+
+        #if self.tick % 1000 == 0:
+        #    print(f'22 health: {self.get_tower(22).health}')
+        #    print(f'23 health: {self.get_tower(23).health}')
+
+        '''
+        cdef Entity* ancient = self.get_tower(23)
+        if ancient.health > 0 and self.grid[int(ancient.y), int(ancient.spawn_x)] == EMPTY:
+            print('Ancient disappeared')
+            print(f'Ancient health: {ancient.health}')
+            print(f'Ancient spawn x: {ancient.spawn_x}')
+            print(f'Ancient spawn y: {ancient.spawn_y}')
+            print(f'Ancient y: {ancient.y}')
+            print(f'Ancient x: {ancient.x}')
+            exit(0)
+        '''
 
         if self.get_tower(22).health <= 0:
             self.reset(0)
             self.radiant_victories += 1
+            self.compute_observations()
             return 1 
         if self.get_tower(23).health <= 0:
             self.reset(0)
             self.dire_victories += 1
+            self.compute_observations()
             return 2
 
+        self.compute_observations()
         return 0
 
