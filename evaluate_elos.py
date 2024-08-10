@@ -6,7 +6,12 @@ import pufferlib
 import random
 import glob
 import os
+
 from pufferlib.policy_ranker import update_elos
+from pufferlib.environments.ocean.environment import env_creator
+from pufferlib.environments.ocean.torch import MOBA, Recurrent
+import pufferlib.frameworks.cleanrl
+
 
 def load_policies(checkpoint_dir, n, map_location='cuda'):
     paths = glob.glob(f'{checkpoint_dir}/model_*.pt', recursive=True)
@@ -21,7 +26,10 @@ def load_policies(checkpoint_dir, n, map_location='cuda'):
     return {name: torch.load(path, map_location=map_location)
         for name, path in zip(names, samples)}
 
-def rollout(envs, policy, opponents, num_games, timeout=300, render=False):
+def rollout(envs, policy, opponents, num_games, timeout=180, render=False):
+    obs, _ = envs.reset()
+
+    # Double reset clears randomizations
     obs, _ = envs.reset()
     #cenv = envs.c_envs[0]
 
@@ -43,7 +51,7 @@ def rollout(envs, policy, opponents, num_games, timeout=300, render=False):
     opp_idxs = slice_idxs[:, 5:].reshape(num_envs*5).split(5*envs_per_opponent)
 
     games_played = 0
-    while games_played < num_games:
+    while games_played < num_games and time.time() - start < timeout:
         #if render and step % 10 == 0:
         #    env.render()
 
@@ -82,52 +90,69 @@ def rollout(envs, policy, opponents, num_games, timeout=300, render=False):
 
         for i in range(num_envs):
             c = envs.c_envs[i]
+            opp_idx = i // envs_per_opponent
             if c.radiant_victories > prev_radiant_victories[i]:
                 prev_radiant_victories[i] = c.radiant_victories
-                scores.append((i, 1))
+                scores.append((opp_idx, 1))
                 games_played += 1
                 print('Radiant Victory')
             elif c.dire_victories > prev_dire_victories[i]:
                 prev_dire_victories[i] = c.dire_victories
-                scores.append((i, 0))
+                scores.append((opp_idx, 0))
                 games_played += 1
                 print('Dire Victory')
 
     return scores
 
-if __name__ == '__main__':
-    from pufferlib.environments.ocean.environment import env_creator
-    from pufferlib.environments.ocean.torch import MOBA, Recurrent
-    import pufferlib.frameworks.cleanrl
-
-    checkpoint_dir = 'moba_checkpoints'
-    n = 8
-
+def calc_elo(checkpoint, checkpoint_dir, elos, num_envs=128, num_games=128, num_opponents=8, k=24.0):
+    print(f'Calculating ELO for {checkpoint}')
     make_env = env_creator('moba')
-    envs = make_env(num_envs=64)#, render_mode='raylib')
+    envs = make_env(num_envs=num_envs)
 
-    #policy = MOBA(env)
-    #policy = Recurrent(env, policy)
-    #policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)
-    policy = torch.load(os.path.join(checkpoint_dir, 'model_000476.pt'), map_location='cuda')
-    opponents = load_policies(checkpoint_dir, n=8)
+    policy = torch.load(os.path.join(checkpoint_dir, checkpoint), map_location='cuda')
+    print(f'Loaded policy {checkpoint}')
 
     paths = glob.glob(f'{checkpoint_dir}/model_*.pt', recursive=True)
     names = [path.split('/')[-1] for path in paths]
-    elos = {name: 1000 for name in names}
-    elos['mine'] = 1000
+    print(f'Loaded {len(paths)} models')
+    paths.remove(f'{checkpoint_dir}/{checkpoint}')
+    print(f'Removed {checkpoint} from paths')
+    elos[checkpoint] = 1000
     
     # Sample with replacement if not enough models
+    print(f'Sampling {num_opponents} opponents')
     n_models = len(paths)
-    if n_models < n:
-        idxs = random.choices(range(n_models), k=n)
+    if n_models < num_opponents:
+        idxs = random.choices(range(n_models), k=num_opponents)
     else:
-        idxs = random.sample(range(n_models), n)
+        idxs = random.sample(range(n_models), num_opponents)
+    print(f'Sampled {num_opponents} opponents')
 
     opponent_names = [names[i] for i in idxs]
     opponents = [torch.load(paths[i], map_location='cuda') for i in idxs]
+    print(f'Loaded {num_opponents} opponents')
 
-    results = rollout(envs, policy, opponents, num_games=16, render=False)
+    results = rollout(envs, policy, opponents, num_games=num_games, render=False)
+    print(f'Finished {num_games} games')
+
+    for game in results:
+        opponent, win = game
+        if win:
+            score = np.array([1, 0])
+        else:
+            score = np.array([0, 1])
+
+        opp_name = opponent_names[opponent]
+        elo_pair = np.array([elos[checkpoint], elos[opp_name]])
+        elo_pair = update_elos(elo_pair, score, k=24.0)
+        elos[checkpoint] = elo_pair[0]
+        #elos[opp_name] = elo_pair[1]
+
+    print(f'Finished calculating ELO for {checkpoint}')
+    for k, v in elos.items():
+        print(f'{k}: {v}')
+
+    return elos
 
     '''
     for game in range(1000):
@@ -148,5 +173,9 @@ if __name__ == '__main__':
     '''
 
 
-
+if __name__ == '__main__':
+    checkpoint_dir = 'moba_elo'
+    checkpoint = 'model_0.pt'
+    elos = {'model_random.pt': 1000}
+    calc_elo(checkpoint, checkpoint_dir, elos, num_games=16)
 
