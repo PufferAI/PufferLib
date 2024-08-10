@@ -9,7 +9,7 @@ ANCHOR_ELO = 1000.0
 def win_prob(elo1, elo2):
     '''Calculate win probability such that a difference of
     50/100/150 elo corresponds to win probabilitit 68/95/99.7%'''
-    return 1 / (1 + 10 ** ((elo2 - elo1) / 77.6))
+    return 1 / (1 + 10 ** ((elo2 - elo1) / 400))
 
 def update_elos(elos: np.ndarray, scores: np.ndarray, k: float = 4.0):
     '''Update elos based on the result of a game

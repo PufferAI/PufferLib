@@ -373,8 +373,12 @@ cdef class Environment:
             y = int(player.y)
             x = int(player.x)
 
+            self.observations_map[pid, :, :, 0] = self.grid[
+                y-self.vision_range:y+self.vision_range+1,
+                x-self.vision_range:x+self.vision_range+1
+            ]
             '''
-            if y < 0 or y >= 128 or x < 0 or x >= 128:
+            except:
                 print(f'Invalid player position: {y}, {x}, pid: {pid}')
                 print(f'type: {player.entity_type}, team: {player.team}, hero type: {player.hero_type}')
                 print(f'health: {player.health}, max health: {player.max_health}')
@@ -394,12 +398,10 @@ cdef class Environment:
                 print(f'e timer: {player.e_timer}')
                 print(f'basic attack timer: {player.basic_attack_timer}')
                 print(f'is hit: {player.is_hit}')
+                print(f'game tick: {self.tick}')
                 exit(0)
             '''
-            self.observations_map[pid, :, :, 0] = self.grid[
-                y-self.vision_range:y+self.vision_range+1,
-                x-self.vision_range:x+self.vision_range+1
-            ]
+
 
             # TODO: Add bounds debug checks asserts
             self.observations_extra[pid, 0] = <unsigned char> (2*player.x)
@@ -589,6 +591,17 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint move_near(self, Entity* entity, Entity* target):
+        '''
+        if target.x == 0 and target.y == 0:
+            print(f'MOVE NEAR Invalid target at {target.y}, {target.x}')
+            print(f'entity x: {entity.x}, y: {entity.y}')
+            print(f'target x: {target.x}, y: {target.y}')
+            print(f'target pid: {target.pid}')
+            print(f'entity pid: {entity.pid}')
+            print(f'Tick: {self.tick}')
+            exit(0)
+        '''
+
         cdef int dy, dx
         for dy in range(-1, 2):
             for dx in range(-1, 2):
@@ -711,6 +724,30 @@ cdef class Environment:
                 break
 
         self.move_to(entity, y, x)
+        '''
+        if not self.move_to(entity, y, x):
+            print(f'Failed to move to {y}, {x}')
+            print(f'entity type: {entity.entity_type}, team: {entity.team}, hero type: {entity.hero_type}')
+            print(f'health: {entity.health}, max health: {entity.max_health}')
+            print(f'mana: {entity.mana}, max mana: {entity.max_mana}')
+            print(f'level: {entity.level}')
+            print(f'x: {entity.x}, y: {entity.y}')
+            print(f'spawn x: {entity.spawn_x}, spawn y: {entity.spawn_y}')
+            print(f'damage: {entity.damage}')
+            print(f'lane: {entity.lane}')
+            print(f'waypoint: {entity.waypoint}')
+            print(f'move speed: {entity.move_speed}')
+            print(f'move modifier: {entity.move_modifier}')
+            print(f'stun timer: {entity.stun_timer}')
+            print(f'move timer: {entity.move_timer}')
+            print(f'q timer: {entity.q_timer}')
+            print(f'w timer: {entity.w_timer}')
+            print(f'e timer: {entity.e_timer}')
+            print(f'basic attack timer: {entity.basic_attack_timer}')
+            print(f'is hit: {entity.is_hit}')
+            print(f'Tick: {self.tick}')
+            exit(0)
+        '''
 
     @cython.profile(False)
     cdef void spawn_creep(self, int idx, int lane):
@@ -852,6 +889,17 @@ cdef class Environment:
 
                 target = self.get_entity(target_pid)
                 target_team = target.team
+
+                '''
+                if (target.x == 0 and target.y == 0) or target.pid == -1:
+                    print(f'Invalid target at {y}, {x}')
+                    print(f'player x: {player.x}, y: {player.y}')
+                    print(f'target x: {target.x}, y: {target.y}')
+                    print(f'target pid: {target_pid}')
+                    print(f'player pid: {player.pid}')
+                    print(f'Tick: {self.tick}')
+                    exit(0)
+                '''
 
                 if exclude_friendly and target_team == player_team:
                     continue
@@ -1081,6 +1129,7 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_tank_engage_aoe(self, Entity* player, Entity* target):
+        #return False # TODO: Fix teleport
         if target == NULL or player.mana < 60:
             return False
 
@@ -1152,7 +1201,7 @@ cdef class Environment:
     @cython.profile(False)
     cdef bint skill_assassin_tp_damage(self, Entity* player, Entity* target):
         # TODO: Fix tp off map?
-        return False
+        #return False
         if target == NULL or player.mana < 60:
             return False
 
@@ -1221,6 +1270,8 @@ cdef class Environment:
             player = self.get_entity(i)
             player.xp = 0
             player.level = 1
+            player.x = 0
+            player.y = 0
             self.respawn_player(player)
 
         for i in range(self.num_creeps):
@@ -1358,9 +1409,11 @@ cdef class Environment:
                 #use_w = int(actions_continuous[pid, 4]) > 0.5
                 #use_e = int(actions_continuous[pid, 5]) > 0.5
 
-            if attack_target == 0:
-                pass
-            elif attack_target == 1: # Scan everything
+            #if attack_target == 0:
+            #    pass
+            # TODO: Restrict to 2 dimensions. Allowing no scan results
+            # in old buffers... can also just null the buffer
+            if attack_target == 1 or attack_target == 0: # Scan everything
                 self.scan_aoe(player, self.vision_range, exclude_friendly=True,
                     exclude_hostile=False, exclude_creeps=False,
                     exclude_neutrals=False, exclude_towers=False)
@@ -1434,12 +1487,10 @@ cdef class Environment:
         if self.get_tower(22).health <= 0:
             self.reset(0)
             self.radiant_victories += 1
-            self.compute_observations()
             return 1 
         if self.get_tower(23).health <= 0:
             self.reset(0)
             self.dire_victories += 1
-            self.compute_observations()
             return 2
 
         self.compute_observations()
