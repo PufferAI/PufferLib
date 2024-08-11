@@ -354,9 +354,15 @@ if __name__ == '__main__':
     if not os.path.exists(args.default_config):
         raise Exception(f'Default config {args.default_config} not found')
 
-    for path in glob.glob('config/**/*.ini', recursive=True):
+    file_paths = glob.glob('config/**/*.ini', recursive=True)
+    for path in file_paths:
         p = configparser.ConfigParser()
         p.read(args.default_config)
+
+        subconfig = os.path.join(*path.split('/')[:-1] + ['default.ini'])
+        if subconfig in file_paths:
+            p.read(subconfig)
+
         p.read(path)
         if args.env in p['base']['env_name'].split():
             break
