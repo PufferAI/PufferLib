@@ -407,7 +407,7 @@ if __name__ == '__main__':
         args['exp_id'] = f'puf-{version}-{env_name}'
         args['wandb_group'] = f'puf-{version}-baseline'
         shutil.rmtree(f'experiments/{args["exp_id"]}', ignore_errors=True)
-        run = init_wandb(args, env_name, args['exp_id'], resume=False)
+        run = init_wandb(args, args['exp_id'], resume=False)
         if args['mode'] in ('eval', 'evaluate'):
             model_name = f'puf-{version}-{env_name}_model:latest'
             artifact = run.use_artifact(model_name)

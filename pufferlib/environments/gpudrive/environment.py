@@ -114,10 +114,10 @@ class PufferCPUDrive:
             info_tensor = self.env.get_infos()[done_worlds]
             num_finished_agents = self.controlled_agent_mask[done_worlds].sum().item()
             info.append({
-                'off_road': info_tensor[:, 0].sum().item() / num_finished_agents,
-                'veh_collisions': info_tensor[:, 1].sum().item() / num_finished_agents,
-                'non_veh_collisions': info_tensor[:, 2].sum().item() / num_finished_agents,
-                'goal_achieved': info_tensor[:, 3].sum().item() / num_finished_agents,
+                'off_road': info_tensor[:, :, 0].sum().item() / num_finished_agents,
+                'veh_collisions': info_tensor[:, :, 1].sum().item() / num_finished_agents,
+                'non_veh_collisions': info_tensor[:, :, 2].sum().item() / num_finished_agents,
+                'goal_achieved': info_tensor[:, :, 3].sum().item() / num_finished_agents,
                 'num_finished_agents': num_finished_agents,
                 'mean_reward_per_episode': self.episode_returns[done_worlds].mean().item(),
                 'control_density': self.num_controlled / self.num_agents,
