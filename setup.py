@@ -34,7 +34,9 @@ docs = [
 cleanrl = [
     'stable_baselines3==2.1.0',
     'tensorboard==2.11.2',
+    'torch',
     'tyro==0.8.6',
+    'wandb==0.13.7',
 ]
 
 ray = [
@@ -224,8 +226,6 @@ setup(
         'shimmy[gym-v21]',
         'psutil==5.9.5',
         'pynvml',
-        'torch',
-        'wandb==0.13.7',
     ],
     extras_require={
         'docs': docs,
