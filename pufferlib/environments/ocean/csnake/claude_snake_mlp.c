@@ -9,12 +9,13 @@ void linear_layer(float* input, float* weights, float* bias, float* output,
         for (int o = 0; o < output_dim; o++) {
             float sum = 0.0f;
             for (int i = 0; i < input_dim; i++) {
-                sum += input[b * input_dim + i] * weights[o * input_dim + i];
+                sum += input[b*input_dim + i] * weights[o*input_dim + i];
             }
             output[b * output_dim + o] = sum + bias[o];
         }
     }
 }
+
 
 void relu(float* data, int size) {
     for (int i = 0; i < size; i++) {
@@ -54,43 +55,76 @@ float* load_weights(const char* filename, int* total_weights) {
     return weights;
 }
 
-// Example MLP forward pass
 void mlp_forward(float* input, float* hidden, float* output, unsigned int* actions, float* weights,
-		int batch_size, int input_dim, int hidden_dim, int output_dim) {
+                 int batch_size, int input_dim, int hidden_dim, int output_dim) {
     // First layer
-    linear_layer(input, weights, weights + input_dim * hidden_dim, hidden,
+    linear_layer(input, weights, weights + input_dim*hidden_dim, hidden,
                  batch_size, input_dim, hidden_dim);
     relu(hidden, batch_size * hidden_dim);
 
     // Second layer
-    linear_layer(hidden, weights + input_dim * hidden_dim + hidden_dim,
-                 weights + input_dim * hidden_dim + hidden_dim + hidden_dim * output_dim,
+    linear_layer(hidden, weights + input_dim*hidden_dim + hidden_dim,
+                 weights + input_dim*hidden_dim + hidden_dim + hidden_dim*output_dim,
                  output, batch_size, hidden_dim, output_dim);
 
-    // Print output (you may want to modify this based on your needs)
-	/*
-    for (int b = 0; b < batch_size; b++) {
-        printf("Sample %d output: ", b);
-        for (int o = 0; o < output_dim; o++) {
-            printf("%f ", output[b * output_dim + o]);
+    // Max over outputs
+    for (int i = 0; i < batch_size; i++) {
+        float max_logit = output[i * output_dim];
+        unsigned int atn = 0;
+        for (int j = 1; j < output_dim; j++) {
+            float out = output[i * output_dim + j];
+            if (out > max_logit) {
+                max_logit = out;
+                atn = j;
+            }
         }
-        printf("\n");
+        actions[i] = atn;
     }
-	*/
+}
 
-	// Max over outputs
-    int max_logit = -999;
-    unsigned int atn = 0;
-	for (int i=0; i<batch_size; i++) {
-		for (int j=0; i<output_dim; i++) {
-			float out = output[i*output_dim + j];
-			if (out > max_logit) {
-				max_logit = out;
-				atn = j;
-			}
-		}
-		actions[i] = atn;
-	}
+void test_mlp(float* hidden, float* output, unsigned int* actions, float* weights,
+        int batch_size, int input_dim, int hidden_dim, int output_dim) {
+	float* observations = (float*)malloc(batch_size * input_dim * sizeof(float));
+    for (int i=0; i<batch_size*input_dim; i++) {
+        observations[i] = (float)i / 1000.0f;
+    }
+    mlp_forward(observations, hidden, output, actions, weights,
+        batch_size, input_dim, hidden_dim, output_dim);
+
+    float weight_sum = 0;
+    //for (int i=0; i<input_dim*hidden_dim + hidden_dim + hidden_dim*output_dim + output_dim; i++) {
+    for (int i=0; i<input_dim*hidden_dim; i++) {
+        weight_sum += weights[i];
+    }
+
+    unsigned int observation_sum = 0;
+    for (int i=0; i<batch_size*input_dim; i++) {
+        observation_sum += observations[i];
+    }
+
+    float hidden_sum = 0;
+    for (int i=0; i<batch_size*hidden_dim; i++) {
+        if (i < 10) {
+            printf("Hidden %d: %f \n", i, hidden[i]);
+        }
+        hidden_sum += hidden[i];
+    }
+
+    float output_sum = 0;
+    for (int i=0; i<batch_size*output_dim; i++) {
+        output_sum += output[i];
+    }
+
+    float action_sum = 0;
+    for (int i=0; i<batch_size; i++) {
+        action_sum += actions[i];
+    }
+
+    printf("Weight sum: %f \n", weight_sum);
+    printf("Observation sum: %d \n", observation_sum);
+    printf("Hidden sum: %f \n", hidden_sum);
+    printf("Output sum: %f \n", output_sum);
+    printf("Action sum: %f \n", action_sum);
 }
 
 // Main function to demonstrate usage
@@ -104,11 +138,11 @@ int main() {
     }
 
     // Initialize CSnake environment
-    int num_snakes = 16;
-    int width = 80;
-    int height = 80;
-    int max_snake_length = 100;
-    int food = 1;
+    int num_snakes = 128;
+    int width = 160;
+    int height = 160;
+    int max_snake_length = 200;
+    int food = 128;
     int vision = 5;
     bool leave_corpse_on_death = true;
     float reward_food = 1.0f;
@@ -124,7 +158,7 @@ int main() {
     }
 
     // Initialize renderer (optional)
-    int cell_size = 10;
+    int cell_size = 5;
     Renderer* renderer = init_renderer(cell_size, width, height);
 
     // Example usage (adjust these values based on your model architecture)
@@ -134,32 +168,45 @@ int main() {
     int output_dim = 4;
 
     // Allocate memory for intermediate results
-	float* observations = (float*)malloc(batch_size * input_dim);
+	float* observations = (float*)malloc(batch_size * input_dim * sizeof(float));
     float* hidden = (float*)malloc(batch_size * hidden_dim * sizeof(float));
     float* output = (float*)malloc(batch_size * output_dim * sizeof(float));
+
+    //test_mlp(hidden, output, env->actions, weights,
+    //    batch_size, input_dim, hidden_dim, output_dim);
 
     // Game loop
     reset(env);
     while (!WindowShouldClose()) {
 		// Create a sample input (you should replace this with your actual input data)
-		for (int i = 0; i < batch_size * input_dim; i++) {
+        for (int i = 0; i < batch_size * input_dim; i++) {
 			observations[i] = (float)env->observations[i];
 		}
+        /*
+		for (int i = 0; i < batch_size; i++) {
+            for (int j=0; j<11; j++) {
+                for (int k=0; k<11; k++) {
+                    observations[121*i + 11*k + j] = (float)observations[121*i + 11*j + k];
+                }
+            }
+		}
+        */
 
 		// Perform forward pass
 		mlp_forward(observations, hidden, output, env->actions, weights,
 			batch_size, input_dim, hidden_dim, output_dim);
 
+        /*
         for (int i=1; i<num_snakes; i++){
-            env->actions[i] = output[i];
-            //env->actions[i] = rand() % 4;
+            env->actions[i] = rand() % 4;
         }
+        */
 
         // Handle input
-        if (IsKeyPressed(KEY_UP)) env->actions[0] = 0;
-        if (IsKeyPressed(KEY_DOWN)) env->actions[0] = 1;
-        if (IsKeyPressed(KEY_LEFT)) env->actions[0] = 2;
-        if (IsKeyPressed(KEY_RIGHT)) env->actions[0] = 3;
+        if (IsKeyDown(KEY_UP)) env->actions[0] = 0;
+        if (IsKeyDown(KEY_DOWN)) env->actions[0] = 1;
+        if (IsKeyDown(KEY_LEFT)) env->actions[0] = 2;
+        if (IsKeyDown(KEY_RIGHT)) env->actions[0] = 3;
 
         // Update game state
         step(env);
