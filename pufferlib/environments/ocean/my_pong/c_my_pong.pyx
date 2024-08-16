@@ -147,7 +147,7 @@ cdef class CMyPong:
             else:
                 # collision with wall
                 self.score_l_r[1] += 1
-                self.rewards[0] = 50.0
+                self.rewards[0] = 5.0
                 self.terminals[0] = 1
                 self.reset_round()
         
@@ -157,7 +157,7 @@ cdef class CMyPong:
                 self.ball_x_y[1] < self.paddle_yl_yr[1] + self.paddle_height:
                 # collision with paddle
                 self.ball_vx_vy[0] = -self.ball_vx_vy[0]
-                self.rewards[0] = 10.0
+                self.rewards[0] = 1.0
                 # ball speed change
                 self.ball_vx_vy[1] += self.ball_speed_y_increment * self.paddle_dir
                 self.ball_vx_vy[1] = fmin(fmax(self.ball_vx_vy[1], -self.ball_max_speed_y), self.ball_max_speed_y)
@@ -166,7 +166,7 @@ cdef class CMyPong:
             else:
                 # collision with wall
                 self.score_l_r[0] += 1
-                self.rewards[0] = -50.0
+                # self.rewards[0] = -5.0
                 if self.score_l_r[0] == self.max_score:
                     self.terminals[0] = 1
                     # it seems the training code doesn't reset automatically on done -> reset here
