@@ -66,10 +66,11 @@ class MyPong(pufferlib.PufferEnv):
         self.terminals_uint8 = np.zeros(self.num_agents, dtype=np.uint8)
 
         self.tick = 0
-        self.report_interval = 50
+        self.report_interval = 500
         self.reward_sum = 0
         self.num_wins = 0
         self.num_losses = 0
+        self.num_hits = 0
 
         if render_mode == 'human':
             self.client = RaylibClient(self.width, self.height,
@@ -108,18 +109,21 @@ class MyPong(pufferlib.PufferEnv):
 
         info = {}
         self.reward_sum += self.buf.rewards.mean()
-        self.num_wins += np.sum(self.buf.rewards > 40)
-        self.num_losses += np.sum(self.buf.rewards < -40)
+        self.num_wins += np.sum(self.buf.rewards > 4)
+        self.num_losses += np.sum(self.buf.rewards < -4)
+        self.num_hits += np.sum(np.logical_and(self.buf.rewards > 0.5, self.buf.rewards < 1.5))
         if self.tick % self.report_interval == 0:
             info.update({
                 'num_games': self.num_wins + self.num_losses,
                 'num_wins': self.num_wins,
                 'num_losses': self.num_losses,
+                'num_hits': self.num_hits,
                 'win_rate': self.num_wins / (self.num_wins + self.num_losses) if self.num_wins + self.num_losses > 0 else 0,
             })
             self.reward_sum = 0
             self.num_wins = 0
             self.num_losses = 0
+            self.num_hits = 0
 
         self.tick += 1
 
