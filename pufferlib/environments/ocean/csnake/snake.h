@@ -327,14 +327,14 @@ typedef struct {
     int input_dim;
     int hidden_dim;
     int output_dim;
-    int b1_offset;
-    int w2_offset;
-    int b2_offset;
-    int weights_bytes;
+    int total_weights;
+    float* w1;
+    float* b1;
+    float* w2;
+    float* b2;
     float* observations;
     float* hidden;
     float* output;
-    float* weights;
 } MLP;
 
 MLP* allocate_mlp(int batch_size, int input_dim, int hidden_dim, int output_dim) {
@@ -343,14 +343,14 @@ MLP* allocate_mlp(int batch_size, int input_dim, int hidden_dim, int output_dim)
     mlp->input_dim = input_dim;
     mlp->hidden_dim = hidden_dim;
     mlp->output_dim = output_dim;
+    mlp->total_weights = input_dim*(hidden_dim + 1) + hidden_dim*(output_dim + 1);
     mlp->observations = (float*)malloc(batch_size * input_dim * sizeof(float));
     mlp->hidden = (float*)malloc(batch_size * hidden_dim * sizeof(float));
     mlp->output = (float*)malloc(batch_size * output_dim * sizeof(float));
-    mlp->b1_offset = input_dim*hidden_dim;
-    mlp->w2_offset = mlp->b1_offset + hidden_dim;
-    mlp->b2_offset = mlp->w2_offset + hidden_dim*output_dim;
-    mlp->weights_bytes = (mlp->b2_offset + output_dim) * sizeof(float);
-    mlp->weights = (float*)malloc(mlp->weights_bytes);
+    mlp->w1 = (float*)malloc(mlp->total_weights * sizeof(float));
+    mlp->b1 = mlp->w1 + input_dim*hidden_dim;
+    mlp->w2 = mlp->b1 + hidden_dim;
+    mlp->b2 = mlp->w2 + hidden_dim*output_dim;
     return mlp;
 }
 
@@ -358,67 +358,43 @@ void free_mlp(MLP* mlp) {
     free(mlp->observations);
     free(mlp->hidden);
     free(mlp->output);
-    free(mlp->weights);
+    free(mlp->w1); // The other pointers are just offsets
     free(mlp);
 }
 
 void mlp_forward(MLP* mlp, unsigned int* actions) {
-    float* input = mlp->observations;
-    float* hidden = mlp->hidden;
-    float* output = mlp->output;
-    float* weights = mlp->weights;
-    int batch_size = mlp->batch_size;
-    int input_dim = mlp->input_dim;
-    int hidden_dim = mlp->hidden_dim;
-    int output_dim = mlp->output_dim;
-    linear_layer(input, weights, weights + input_dim*hidden_dim,
-        hidden, batch_size, input_dim, hidden_dim);
-    relu(hidden, batch_size * hidden_dim);
-    linear_layer(hidden, weights + input_dim*hidden_dim + hidden_dim,
-        weights + input_dim*hidden_dim + hidden_dim + hidden_dim*output_dim,
-        output, batch_size, hidden_dim, output_dim);
-    for (int i = 0; i < batch_size; i++) {
-        unsigned int atn = 0;
-        float max_logit = output[i * output_dim];
-        for (int j = 1; j < output_dim; j++) {
-            float out = output[i * output_dim + j];
+    linear_layer(mlp->observations, mlp->w1, mlp->b1, mlp->hidden,
+        mlp->batch_size, mlp->input_dim, mlp->hidden_dim);
+    relu(mlp->hidden, mlp->batch_size*mlp->hidden_dim);
+    linear_layer(mlp->hidden, mlp->w2, mlp->b2, mlp->output,
+        mlp->batch_size, mlp->hidden_dim, mlp->output_dim);
+    for (int i = 0; i < mlp->batch_size; i++) {
+        float max_logit = mlp->output[i*mlp->output_dim];
+        for (int j = 1; j < mlp->output_dim; j++) {
+            float out = mlp->output[i*mlp->output_dim + j];
             if (out > max_logit) {
                 max_logit = out;
-                atn = j;
+                actions[i] = j;
             }
         }
-        actions[i] = atn;
     }
 }
 
-// Load weights from binary file obtained by flattening all pytorch layers
+// File format is obained by flattening and concatenating all pytorch layers
 int load_weights(const char* filename, MLP* mlp) {
     FILE* file = fopen(filename, "rb");
     if (!file) {
         perror("Error opening file");
         return 1;
     }
-
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
     rewind(file);
-    float* weights = (float*)malloc(file_size);
-    if (!weights) {
-        perror("Error allocating memory");
-        fclose(file);
-        return 1;
-    }
-
-    int total_weights = file_size / sizeof(float);
-    size_t read_size = fread(weights, sizeof(float), total_weights, file);
-    if (read_size != total_weights) {
-        perror("Error reading file");
-        free(weights);
-        fclose(file);
-        return 1;
-    }
-
+    size_t read_size = fread(mlp->w1, sizeof(float), mlp->total_weights, file);
     fclose(file);
-    mlp->weights = weights;
+    if (read_size != mlp->total_weights) {
+        perror("Error reading file");
+        return 1;
+    }
     return 0;
 }
