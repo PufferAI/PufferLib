@@ -6,7 +6,7 @@ int main() {
 
     int num_snakes = 64;
     int max_snake_length = 200;
-    int food = 128;
+    int food = 256;
     int vision = 5;
     bool leave_corpse_on_death = true;
     float reward_food = 1.0f;
