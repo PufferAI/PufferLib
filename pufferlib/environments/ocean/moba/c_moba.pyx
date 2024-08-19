@@ -640,12 +640,16 @@ cdef class Environment:
         if target.team == player.team:
             return False
 
+        cdef float current_health = target.health
         target.is_hit = 1
         target.health -= damage
-        player.damage_dealt += damage
-        target.damage_received += damage
         if target.health > 0:
+            player.damage_dealt += damage
+            target.damage_received += damage
             return True
+
+        player.damage_dealt += current_health
+        target.damage_received += current_health
 
         if target.entity_type == ENTITY_PLAYER:
             reward = self.get_reward(target.pid)
@@ -732,12 +736,15 @@ cdef class Environment:
         if target.entity_type != ENTITY_PLAYER:
             return False
 
+        cdef float current_health = target.health
         target.health += amount
         if target.health > target.max_health:
             target.health = target.max_health
-
-        player.healing_dealt += amount
-        target.healing_received += amount
+            player.healing_dealt += target.max_health - current_health
+            target.healing_received += target.max_health - current_health
+        else:
+            player.healing_dealt += amount
+            target.healing_received += amount
 
         return True
 
