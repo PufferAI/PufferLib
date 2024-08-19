@@ -286,26 +286,62 @@ class PufferMoba(pufferlib.PufferEnv):
             infos['radiant_victories'] = np.mean([env.radiant_victories for env in self.c_envs])
             infos['dire_victories'] = np.mean([env.dire_victories for env in self.c_envs])
             infos['norm_reward'] = np.mean(self.norm_rewards)
-            infos['level/support'] = np.mean(self.entities.level[:, 0:10:5])
-            infos['level/assassin'] = np.mean(self.entities.level[:, 1:10:5])
-            infos['level/burst'] = np.mean(self.entities.level[:, 2:10:5])
-            infos['level/tank'] = np.mean(self.entities.level[:, 3:10:5])
-            infos['level/carry'] = np.mean(self.entities.level[:, 4:10:5])
-            infos['usage/support_q'] = np.mean(self.entities.q_uses[:, 0:10:5])
-            infos['usage/assassin_q'] = np.mean(self.entities.q_uses[:, 1:10:5])
-            infos['usage/burst_q'] = np.mean(self.entities.q_uses[:, 2:10:5])
-            infos['usage/tank_q'] = np.mean(self.entities.q_uses[:, 3:10:5])
-            infos['usage/carry_q'] = np.mean(self.entities.q_uses[:, 4:10:5])
-            infos['usage/support_w'] = np.mean(self.entities.w_uses[:, 0:10:5])
-            infos['usage/assassin_w'] = np.mean(self.entities.w_uses[:, 1:10:5])
-            infos['usage/burst_w'] = np.mean(self.entities.w_uses[:, 2:10:5])
-            infos['usage/tank_w'] = np.mean(self.entities.w_uses[:, 3:10:5])
-            infos['usage/carry_w'] = np.mean(self.entities.w_uses[:, 4:10:5])
-            infos['usage/support_e'] = np.mean(self.entities.e_uses[:, 0:10:5])
-            infos['usage/assassin_e'] = np.mean(self.entities.e_uses[:, 1:10:5])
-            infos['usage/burst_e'] = np.mean(self.entities.e_uses[:, 2:10:5])
-            infos['usage/tank_e'] = np.mean(self.entities.e_uses[:, 3:10:5])
-            infos['usage/carry_e'] = np.mean(self.entities.e_uses[:, 4:10:5])
+
+            support = self.entities[:, 0:10:5]
+            assassin = self.entities[:, 1:10:5]
+            burst = self.entities[:, 2:10:5]
+            tank = self.entities[:, 3:10:5]
+            carry = self.entities[:, 4:10:5]
+
+            infos['damage_dealt/support'] = np.mean(support.damage_dealt)
+            infos['damage_dealt/assassin'] = np.mean(assassin.damage_dealt)
+            infos['damage_dealt/burst'] = np.mean(burst.damage_dealt)
+            infos['damage_dealt/tank'] = np.mean(tank.damage_dealt)
+            infos['damage_dealt/carry'] = np.mean(carry.damage_dealt)
+
+            infos['damage_received/support'] = np.mean(support.damage_received)
+            infos['damage_received/assassin'] = np.mean(assassin.damage_received)
+            infos['damage_received/burst'] = np.mean(burst.damage_received)
+            infos['damage_received/tank'] = np.mean(tank.damage_received)
+            infos['damage_received/carry'] = np.mean(carry.damage_received)
+
+            infos['healing_dealt/support'] = np.mean(support.healing_dealt)
+            infos['healing_dealt/assassin'] = np.mean(assassin.healing_dealt)
+            infos['healing_dealt/burst'] = np.mean(burst.healing_dealt)
+            infos['healing_dealt/tank'] = np.mean(tank.healing_dealt)
+            infos['healing_dealt/carry'] = np.mean(carry.healing_dealt)
+
+            infos['healing_received/support'] = np.mean(support.healing_received)
+            infos['healing_received/assassin'] = np.mean(assassin.healing_received)
+            infos['healing_received/burst'] = np.mean(burst.healing_received)
+            infos['healing_received/tank'] = np.mean(tank.healing_received)
+            infos['healing_received/carry'] = np.mean(carry.healing_received)
+
+            infos['level/support'] = np.mean(support.level)
+            infos['level/assassin'] = np.mean(assassin.level)
+            infos['level/burst'] = np.mean(burst.level)
+            infos['level/tank'] = np.mean(tank.level)
+            infos['level/carry'] = np.mean(carry.level)
+
+            infos['usage/support_q'] = np.mean(support.q_uses)
+            infos['usage/support_w'] = np.mean(support.w_uses)
+            infos['usage/support_e'] = np.mean(support.e_uses)
+
+            infos['usage/assassin_q'] = np.mean(assassin.q_uses)
+            infos['usage/assassin_w'] = np.mean(assassin.w_uses)
+            infos['usage/assassin_e'] = np.mean(assassin.e_uses)
+
+            infos['usage/burst_q'] = np.mean(burst.q_uses)
+            infos['usage/burst_w'] = np.mean(burst.w_uses)
+            infos['usage/burst_e'] = np.mean(burst.e_uses)
+
+            infos['usage/tank_q'] = np.mean(tank.q_uses)
+            infos['usage/tank_w'] = np.mean(tank.w_uses)
+            infos['usage/tank_e'] = np.mean(tank.e_uses)
+
+            infos['usage/carry_q'] = np.mean(carry.q_uses)
+            infos['usage/carry_w'] = np.mean(carry.w_uses)
+            infos['usage/carry_e'] = np.mean(carry.e_uses)
 
             #self.sum_rewards = []
             #print('Radiant Lv: ', infos['radiant_level_mean'])
