@@ -1057,13 +1057,13 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_support_stun(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 60:
+        if target == NULL or player.mana < 30:
             return False
 
         if self.attack(player, target, 50):
             target.stun_timer = 60
-            player.mana -= 60
-            player.e_timer = 50
+            player.mana -= 30
+            player.e_timer = 60
             return True
 
         return False
@@ -1094,12 +1094,12 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_aoe_stun(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 60:
+        if target == NULL or player.mana < 30:
             return False
 
         if self.player_aoe_attack(player, target, 2, 0, 40):
-            player.mana -= 60
-            player.e_timer = 80
+            player.mana -= 30
+            player.e_timer = 40
             return True
 
         return False
@@ -1130,12 +1130,12 @@ cdef class Environment:
     @cython.profile(False)
     cdef bint skill_tank_engage_aoe(self, Entity* player, Entity* target):
         #return False # TODO: Fix teleport
-        if target == NULL or player.mana < 60:
+        if target == NULL or player.mana < 20:
             return False
 
         if self.move_near(player, target):
-            player.mana -= 60
-            player.e_timer = 70
+            player.mana -= 20
+            player.e_timer = 30
             self.aoe_push(player, 4, 3.0)
             return True
 
@@ -1146,13 +1146,13 @@ cdef class Environment:
         cdef int i
         cdef bint success = False
         for i in range(3):
-            if target == NULL or player.mana < 20:
+            if target == NULL or player.mana < 10:
                 return False
 
             if self.push(target, player, 1.5):
                 target.move_timer = 15
                 target.move_modifier = 0.5
-                player.mana -= 20
+                player.mana -= 10
                 player.w_timer = 40
                 success = True
 
@@ -1174,11 +1174,11 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_carry_aoe(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 40:
+        if target == NULL or player.mana < 20:
             return False
 
         if self.player_aoe_attack(player, target, 2, 200, 0):
-            player.mana -= 40
+            player.mana -= 20
             player.e_timer = 40
             return True
 
@@ -1186,13 +1186,13 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_assassin_aoe_minions(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 40:
+        if target == NULL or player.mana < 30:
             return False
 
         # Targeted on minions, splashes to players
         if (target.entity_type == ENTITY_CREEP or target.entity_type == ENTITY_NEUTRAL
-                ) and self.player_aoe_attack(player, target, 3, 300, 0):
-            player.mana -= 40
+                ) and self.player_aoe_attack(player, target, 3, 400, 0):
+            player.mana -= 30
             player.q_timer = 40
             return True
 
@@ -1202,13 +1202,13 @@ cdef class Environment:
     cdef bint skill_assassin_tp_damage(self, Entity* player, Entity* target):
         # TODO: Fix tp off map?
         #return False
-        if target == NULL or player.mana < 60:
+        if target == NULL or player.mana < 30:
             return False
 
         if self.move_near(player, target) == -1:
             return False
 
-        player.mana -= 60
+        player.mana -= 30
         if self.attack(player, target, 600):
             player.w_timer = 60
             return True
@@ -1217,12 +1217,12 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_assassin_move_buff(self, Entity* player, Entity* target):
-        if player.mana < 5:
+        if player.mana < 10:
             return False
 
         player.move_modifier = 2.0
         player.move_timer = 1
-        player.mana -= 5
+        player.mana -= 10
         return True
 
     def randomize_tower_hp(self):
