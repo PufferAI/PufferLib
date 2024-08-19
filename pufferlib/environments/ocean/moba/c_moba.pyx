@@ -44,6 +44,7 @@ cdef:
     int ENTITY_NEUTRAL = 2
     int ENTITY_TOWER = 3
 
+    int XP_RANGE = 5
     int MAX_USES = 2_000_000_000
 
 cdef struct Entity:
@@ -669,8 +670,30 @@ cdef class Environment:
         else:
             xp = target.xp_on_kill
 
-        if player.xp < 10000000:
-            player.xp += xp
+        # Share xp with allies in range
+        cdef int first_player_on_team = 0
+        if player.team == 1:
+            first_player_on_team = 5
+
+        cdef bint[5] in_range = [False, False, False, False, False]
+        cdef int num_in_range = 0
+        cdef Entity* ally;
+        for i in range(5):
+            ally = self.get_entity(first_player_on_team + i)
+            if abs(ally.y - player.y) + abs(ally.x - player.x) < XP_RANGE:
+                in_range[i] = True
+                num_in_range += 1
+
+        xp = xp / num_in_range
+        for i in range(5):
+            if not in_range[i]:
+                continue
+
+            ally = self.get_entity(first_player_on_team + i)
+            if ally.xp > 10000000:
+                continue
+
+            ally.xp += xp
 
         reward = self.get_reward(player.pid)
         reward.xp = self.reward_xp * xp
