@@ -286,6 +286,11 @@ class PufferMoba(pufferlib.PufferEnv):
             infos['radiant_victories'] = np.mean([env.radiant_victories for env in self.c_envs])
             infos['dire_victories'] = np.mean([env.dire_victories for env in self.c_envs])
             infos['norm_reward'] = np.mean(self.norm_rewards)
+            infos['level/support'] = np.mean(self.entities.level[:, 0:10:5])
+            infos['level/assassin'] = np.mean(self.entities.level[:, 1:10:5])
+            infos['level/burst'] = np.mean(self.entities.level[:, 2:10:5])
+            infos['level/tank'] = np.mean(self.entities.level[:, 3:10:5])
+            infos['level/carry'] = np.mean(self.entities.level[:, 4:10:5])
             infos['usage/support_q'] = np.mean(self.entities.q_uses[:, 0:10:5])
             infos['usage/assassin_q'] = np.mean(self.entities.q_uses[:, 1:10:5])
             infos['usage/burst_q'] = np.mean(self.entities.q_uses[:, 2:10:5])
@@ -433,7 +438,8 @@ class RaylibClient:
                 pid = pids[y, x]
 
                 if pid == -1:
-                    raise ValueError(f'Invalid pid {pid} on tile {tile} at {y}, {x}')
+                    rl.DrawRectangle(x*ts, y*ts, ts, ts, [255, 0, 0, 255])
+                    #raise ValueError(f'Invalid pid {pid} on tile {tile} at {y}, {x}')
 
                 entity = entities[pid]
                 if entity.is_hit:

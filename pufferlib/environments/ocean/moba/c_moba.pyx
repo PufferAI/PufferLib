@@ -82,6 +82,14 @@ cdef struct Entity:
     int xp_on_kill
     float reward
     int tier
+    float damage_dealt
+    float damage_received
+    float healing_dealt
+    float healing_received
+    int heros_killed
+    int creeps_killed
+    int neutrals_killed
+    int towers_killed
 
 cdef struct Reward:
     float death
@@ -255,6 +263,14 @@ cdef class Environment:
                 player.w_uses = 0
                 player.e_uses = 0
                 player.basic_attack_uses = 0
+                player.damage_dealt = 0
+                player.damage_received = 0
+                player.healing_dealt = 0
+                player.healing_received = 0
+                player.heros_killed = 0
+                player.creeps_killed = 0
+                player.neutrals_killed = 0
+                player.towers_killed = 0
 
             pid = 5*team
             player = self.get_entity(pid)
@@ -625,15 +641,24 @@ cdef class Environment:
 
         target.is_hit = 1
         target.health -= damage
+        player.damage_dealt += damage
+        target.damage_received += damage
         if target.health > 0:
             return True
 
         if target.entity_type == ENTITY_PLAYER:
             reward = self.get_reward(target.pid)
             reward.death = self.reward_death
+            player.heros_killed += 1
             self.respawn_player(target)
-        elif (target.entity_type == ENTITY_TOWER or target.entity_type == ENTITY_CREEP
-                or target.entity_type == ENTITY_NEUTRAL):
+        elif target.entity_type == ENTITY_CREEP:
+            player.creeps_killed += 1
+            self.kill(target)
+        elif target.entity_type == ENTITY_NEUTRAL:
+            player.neutrals_killed += 1
+            self.kill(target)
+        elif target.entity_type == ENTITY_TOWER:
+            player.towers_killed += 1
             self.kill(target)
 
         if player.entity_type != ENTITY_PLAYER:
@@ -685,6 +710,9 @@ cdef class Environment:
         target.health += amount
         if target.health > target.max_health:
             target.health = target.max_health
+
+        player.healing_dealt += amount
+        target.healing_received += amount
 
         return True
 
