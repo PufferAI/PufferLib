@@ -35,6 +35,11 @@ cdef class CMyPong:
         unsigned int max_score
         float min_paddle_y, max_paddle_y
         float paddle_dir
+        unsigned int[:] misc_logging
+        int tick
+        int n_bounces
+        int win
+        int frameskip
 
     def __init__(self, cnp.ndarray observations, cnp.ndarray actions,
             cnp.ndarray rewards, cnp.ndarray terminals,
@@ -43,7 +48,8 @@ cdef class CMyPong:
             cnp.ndarray score_l_r, float width, float height,
             float paddle_width, float paddle_height, float ball_width, float ball_height,
             float paddle_speed, float ball_initial_speed_x, float ball_initial_speed_y,
-            float ball_max_speed_y, float ball_speed_y_increment, unsigned int max_score
+            float ball_max_speed_y, float ball_speed_y_increment, unsigned int max_score,
+            cnp.ndarray misc_logging
             ):
         self.observations = observations
         self.actions = actions
@@ -65,6 +71,13 @@ cdef class CMyPong:
         self.ball_max_speed_y = ball_max_speed_y
         self.ball_speed_y_increment = ball_speed_y_increment
         self.max_score = max_score
+        self.misc_logging = misc_logging
+        self.frameskip = 4
+
+        # logging
+        self.tick = 0
+        self.n_bounces = 0
+        self.win = 0
 
         # precompute
         self.min_paddle_y = - self.paddle_height / 2
@@ -74,7 +87,7 @@ cdef class CMyPong:
 
     cdef void compute_observations(self):
         # normalize as floats between 0 and 1
-        # TODO: check how much faster it is to pass them as unsigned ints (as in moba)
+        # TODO: pass them as uint8, that'll be faster
         self.observations[0] = (self.paddle_yl_yr[0] - self.min_paddle_y) / (self.max_paddle_y - self.min_paddle_y)
         self.observations[1] = (self.paddle_yl_yr[1] - self.min_paddle_y) / (self.max_paddle_y - self.min_paddle_y)
         self.observations[2] = self.ball_x_y[0] / self.width
@@ -83,7 +96,7 @@ cdef class CMyPong:
         self.observations[5] = (self.ball_vx_vy[1] + self.ball_max_speed_y) / (2 * self.ball_max_speed_y)
         self.observations[6] = self.score_l_r[0] / self.max_score
         self.observations[7] = self.score_l_r[1] / self.max_score
-        
+
     cpdef void reset_round(self):
         self.paddle_yl_yr[0] = self.height / 2 - self.paddle_height / 2
         self.paddle_yl_yr[1] = self.height / 2 - self.paddle_height / 2
@@ -91,6 +104,13 @@ cdef class CMyPong:
         self.ball_x_y[1] = self.height / 2 - self.ball_height / 2
         self.ball_vx_vy[0] = self.ball_initial_speed_x
         self.ball_vx_vy[1] = (rand() % 2 - 1) * self.ball_initial_speed_y
+
+        self.misc_logging[0] = 1  # bool: round is over, log
+        self.misc_logging[1] = self.tick
+        self.misc_logging[2] = self.n_bounces
+        self.misc_logging[3] = self.win
+        self.tick = 0
+        self.n_bounces = 0
 
     cpdef void reset(self):
         self.reset_round()
@@ -104,7 +124,9 @@ cdef class CMyPong:
             unsigned int act
             float opp_paddle_delta
 
-        # TODO i'm not setting any dones here, so it will bootstrap into the next round but it shouldn't
+        self.misc_logging[0] = 0  # reset round is over bit
+        self.tick += 1
+
         self.rewards[0] = 0
         self.terminals[0] = 0
 
@@ -117,67 +139,79 @@ cdef class CMyPong:
             self.paddle_dir = 1
         elif act == 2:  # down
             self.paddle_dir = -1
-        self.paddle_yl_yr[1] += self.paddle_speed * self.paddle_dir
-        
-        # move opponent paddle
-        opp_paddle_delta = self.ball_x_y[1] - (self.paddle_yl_yr[0] + self.paddle_height / 2)
-        opp_paddle_delta = fmin(fmax(opp_paddle_delta, -self.paddle_speed), self.paddle_speed)
-        self.paddle_yl_yr[0] += opp_paddle_delta
 
-        # clip paddles
-        self.paddle_yl_yr[1] = fmin(fmax(
-            self.paddle_yl_yr[1], self.min_paddle_y), self.max_paddle_y)
-        self.paddle_yl_yr[0] = fmin(fmax(
-            self.paddle_yl_yr[0], self.min_paddle_y), self.max_paddle_y)
+        for _ in range(self.frameskip):
+            self.paddle_yl_yr[1] += self.paddle_speed * self.paddle_dir
+            
+            # move opponent paddle
+            opp_paddle_delta = self.ball_x_y[1] - (self.paddle_yl_yr[0] + self.paddle_height / 2)
+            opp_paddle_delta = fmin(fmax(opp_paddle_delta, -self.paddle_speed), self.paddle_speed)
+            self.paddle_yl_yr[0] += opp_paddle_delta
 
-        # move ball
-        self.ball_x_y[0] += self.ball_vx_vy[0]
-        self.ball_x_y[1] += self.ball_vx_vy[1]
+            # clip paddles
+            self.paddle_yl_yr[1] = fmin(fmax(
+                self.paddle_yl_yr[1], self.min_paddle_y), self.max_paddle_y)
+            self.paddle_yl_yr[0] = fmin(fmax(
+                self.paddle_yl_yr[0], self.min_paddle_y), self.max_paddle_y)
 
-        # handle collision with top & bottom walls
-        if self.ball_x_y[1] < 0 or self.ball_x_y[1] + self.ball_height > self.height:
-            self.ball_vx_vy[1] = -self.ball_vx_vy[1]
+            # move ball
+            self.ball_x_y[0] += self.ball_vx_vy[0]
+            self.ball_x_y[1] += self.ball_vx_vy[1]
 
-        # handle collision on left
-        if self.ball_x_y[0] < 0:
-            if self.ball_x_y[1] + self.ball_height > self.paddle_yl_yr[0] and \
-                self.ball_x_y[1] < self.paddle_yl_yr[0] + self.paddle_height:
-                # collision with paddle
-                self.ball_vx_vy[0] = -self.ball_vx_vy[0]
-            else:
-                # collision with wall
-                self.score_l_r[1] += 1
-                self.rewards[0] = 5.0
-                self.terminals[0] = 1
-                self.reset_round()
-        
-        # handle collision on right (TODO duplicated code)
-        if self.ball_x_y[0] + self.ball_width > self.width:
-            if self.ball_x_y[1] + self.ball_height > self.paddle_yl_yr[1] and \
-                self.ball_x_y[1] < self.paddle_yl_yr[1] + self.paddle_height:
-                # collision with paddle
-                self.ball_vx_vy[0] = -self.ball_vx_vy[0]
-                self.rewards[0] = 1.0
-                # ball speed change
-                self.ball_vx_vy[1] += self.ball_speed_y_increment * self.paddle_dir
-                self.ball_vx_vy[1] = fmin(fmax(self.ball_vx_vy[1], -self.ball_max_speed_y), self.ball_max_speed_y)
-                if abs(self.ball_vx_vy[1]) < 0.01:  # we dont want a horizontal ball
-                    self.ball_vx_vy[1] = self.ball_speed_y_increment
-            else:
-                # collision with wall
-                self.score_l_r[0] += 1
-                # self.rewards[0] = -5.0
-                if self.score_l_r[0] == self.max_score:
-                    self.terminals[0] = 1
-                    # it seems the training code doesn't reset automatically on done -> reset here
-                    # TODO could it be bootstrapping when it shouldn't be?
-                    self.reset()
+            # handle collision with top & bottom walls
+            if self.ball_x_y[1] < 0 or self.ball_x_y[1] + self.ball_height > self.height:
+                self.ball_vx_vy[1] = -self.ball_vx_vy[1]
+
+            # handle collision on left
+            if self.ball_x_y[0] < 0:
+                if self.ball_x_y[1] + self.ball_height > self.paddle_yl_yr[0] and \
+                    self.ball_x_y[1] < self.paddle_yl_yr[0] + self.paddle_height:
+                    # collision with paddle
+                    self.ball_vx_vy[0] = -self.ball_vx_vy[0]
+                    self.n_bounces += 1
                 else:
-                    self.reset_round()
+                    # collision with wall: WIN
+                    self.win = 1
+                    self.score_l_r[1] += 1
+                    self.rewards[0] = 10.0  # agent wins
 
-        # clip ball
-        self.ball_x_y[0] = fmin(fmax(self.ball_x_y[0], 0), self.width - self.ball_width)
-        self.ball_x_y[1] = fmin(fmax(self.ball_x_y[1], 0), self.height - self.ball_height)
+                    if self.score_l_r[1] == self.max_score:
+                        self.terminals[0] = 1  # TODO is bootstrapping working?
+                        self.reset()
+                        return
+                    else:
+                        self.reset_round()
+                        return
+            
+            # handle collision on right (TODO duplicated code)
+            if self.ball_x_y[0] + self.ball_width > self.width:
+                if self.ball_x_y[1] + self.ball_height > self.paddle_yl_yr[1] and \
+                    self.ball_x_y[1] < self.paddle_yl_yr[1] + self.paddle_height:
+                    # collision with paddle
+                    self.ball_vx_vy[0] = -self.ball_vx_vy[0]
+                    self.n_bounces += 1
+                    self.rewards[0] = 1.0  # agent bounced the ball
+                    # ball speed change
+                    self.ball_vx_vy[1] += self.ball_speed_y_increment * self.paddle_dir
+                    self.ball_vx_vy[1] = fmin(fmax(self.ball_vx_vy[1], -self.ball_max_speed_y), self.ball_max_speed_y)
+                    if abs(self.ball_vx_vy[1]) < 0.01:  # we dont want a horizontal ball
+                        self.ball_vx_vy[1] = self.ball_speed_y_increment
+                else:
+                    # collision with wall: LOSE
+                    self.win = 0
+                    self.score_l_r[0] += 1
+                    # self.rewards[0] = -5.0
+                    if self.score_l_r[0] == self.max_score:
+                        self.terminals[0] = 1
+                        self.reset()
+                        return
+                    else:
+                        self.reset_round()
+                        return
+
+            # clip ball
+            self.ball_x_y[0] = fmin(fmax(self.ball_x_y[0], 0), self.width - self.ball_width)
+            self.ball_x_y[1] = fmin(fmax(self.ball_x_y[1], 0), self.height - self.ball_height)
 
         self.compute_observations()
 
