@@ -695,20 +695,22 @@ cdef class Environment:
 
             ally.xp += xp
 
+            reward = self.get_reward(first_player_on_team + i)
+            reward.xp = self.reward_xp * xp
+
+            level = ally.level
+            ally.level = self.level(ally.xp)
+            if ally.level > level:
+                self.total_levels_gained += 1
+
+            ally.damage = 50 + 6*ally.level
+            ally.max_health = 500 + 50*ally.level
+
         reward = self.get_reward(player.pid)
-        reward.xp = self.reward_xp * xp
         if target.entity_type == ENTITY_TOWER:
             self.total_towers_taken += 1
             reward.tower = self.reward_tower
 
-        level = player.level
-        player.level = self.level(player.xp)
-        if player.level > level:
-            self.total_levels_gained += 1
-
-        player.damage = 50 + 6*player.level
-        player.max_health = 500 + 50*player.level
- 
         return True
 
     @cython.profile(False)
