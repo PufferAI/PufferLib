@@ -117,7 +117,7 @@ def make_bandit(num_actions=10, reward_scale=1, reward_noise=1):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
-def make_memory(mem_length=2, mem_delay=2):
+def make_memory(mem_length=2, mem_delay=2, **kwargs):
     from . import sanity
     env = sanity.Memory(mem_length=mem_length, mem_delay=mem_delay)
     env = pufferlib.postprocess.EpisodeStats(env)
