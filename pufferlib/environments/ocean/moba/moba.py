@@ -11,6 +11,8 @@ from pufferlib.environments.ocean.moba.c_moba import Environment as CEnv
 from pufferlib.environments.ocean.moba.c_moba import entity_dtype, reward_dtype,step_all
 from pufferlib.environments.ocean.moba.c_precompute_pathing import precompute_pathing
 
+HUMAN_PLAYER = 1
+
 EMPTY = 0
 WALL = 1
 
@@ -241,8 +243,8 @@ class PufferMoba(pufferlib.PufferEnv):
 
         if self.render_mode == 'human' and self.human_action is not None:
             #print(self.human_action)
-            self.actions[0] = self.human_action
-            #print(self.actions[0])
+            self.actions[HUMAN_PLAYER] = self.human_action
+            #print(self.actions[HUMAN_PLAYER])
 
         step_all(self.c_envs)
         infos = {}
@@ -415,8 +417,8 @@ class RaylibClient:
         ay, ax = None, None
 
         ts = self.tile_size
-        main_r = entities[0].y
-        main_c = entities[0].x
+        main_r = entities[HUMAN_PLAYER].y
+        main_c = entities[HUMAN_PLAYER].x
         self.camera.target.x = (main_c - self.width//2) * ts
         self.camera.target.y = (main_r - self.height//2) * ts
         main_r = int(main_r)
@@ -510,7 +512,7 @@ class RaylibClient:
         rl.EndMode2D()
 
         # Draw HUD
-        player = entities[0]
+        player = entities[HUMAN_PLAYER]
         hud_y = self.height*ts - 2*ts
         draw_bars(rl, player, 2*ts, hud_y, 10*ts, 24, draw_text=True)
 

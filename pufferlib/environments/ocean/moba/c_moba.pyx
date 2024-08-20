@@ -1165,7 +1165,6 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_nuke(self, Entity* player, Entity* target):
-        return False
         if target == NULL or player.mana < 200:
             return False
 
@@ -1178,7 +1177,6 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_aoe(self, Entity* player, Entity* target):
-        return False
         if target == NULL or player.mana < 200:
             return False
 
@@ -1191,7 +1189,6 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_aoe_stun(self, Entity* player, Entity* target):
-        return False
         if target == NULL or player.mana < 75:
             return False
 
@@ -1207,7 +1204,7 @@ cdef class Environment:
         if player.mana < 10:
             return False
 
-        if self.player_aoe_attack(player, player, 2, 15 + 0.5*player.level, 0):
+        if self.player_aoe_attack(player, player, 2, 20 + 0.5*player.level, 0):
             player.mana -= 10
             return True
 
@@ -1241,7 +1238,6 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_carry_retreat_slow(self, Entity* player, Entity* target):
-        return False
         cdef int i
         cdef bint success = False
         for i in range(3):
@@ -1259,7 +1255,6 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_carry_slow_damage(self, Entity* player, Entity* target):
-        return False
         if target == NULL or player.mana < 150:
             return False
 
@@ -1274,7 +1269,6 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_carry_aoe(self, Entity* player, Entity* target):
-        return False
         if target == NULL or player.mana < 100:
             return False
 
@@ -1528,11 +1522,11 @@ cdef class Environment:
             if self.scanned_targets[pid][0] != NULL:
                 target = self.nearest_scanned_target(player)
 
-            if use_q and self.skills[pid][0](self, player, target) and player.q_uses < MAX_USES:
+            if use_q and player.q_timer <= 0 and self.skills[pid][0](self, player, target) and player.q_uses < MAX_USES:
                 player.q_uses += 1
-            elif use_w and self.skills[pid][1](self, player, target) and player.w_uses < MAX_USES:
+            elif use_w and player.w_timer <= 0 and self.skills[pid][1](self, player, target) and player.w_uses < MAX_USES:
                 player.w_uses += 1
-            elif use_e and self.skills[pid][2](self, player, target) and player.e_uses < MAX_USES:
+            elif use_e and player.e_timer <= 0 and self.skills[pid][2](self, player, target) and player.e_uses < MAX_USES:
                 player.e_uses += 1
             elif target != NULL and self.basic_attack(player, target) and player.basic_attack_uses < MAX_USES:
                 player.basic_attack_uses += 1
