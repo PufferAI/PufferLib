@@ -226,6 +226,7 @@ setup(
         'shimmy[gym-v21]',
         'psutil==5.9.5',
         'pynvml',
+        'imageio',
     ],
     extras_require={
         'docs': docs,
