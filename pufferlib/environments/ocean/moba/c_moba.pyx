@@ -1143,7 +1143,7 @@ cdef class Environment:
         if player.mana < 150:
             return False
 
-        if self.player_aoe_attack(player, player, 4, -250 - 25*player.level, 0):
+        if self.player_aoe_attack(player, player, 5, -350 - 25*player.level, 0):
             player.mana -= 150 
             player.w_timer = 60
             return True
@@ -1152,12 +1152,12 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_support_stun(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 100:
+        if target == NULL or player.mana < 75:
             return False
 
-        if self.attack(player, target, 100 + 10*player.level):
+        if self.attack(player, target, 100 + 20*player.level):
             target.stun_timer = 15 + (int)(0.5*player.level)
-            player.mana -= 100
+            player.mana -= 75
             player.e_timer = 60
             return True
 
@@ -1204,7 +1204,7 @@ cdef class Environment:
         if player.mana < 20:
             return False
 
-        if self.player_aoe_attack(player, player, 2, 10 + 0.5*player.level, 0):
+        if self.player_aoe_attack(player, player, 2, 15 + 0.5*player.level, 0):
             player.mana -= 20
             return True
 
@@ -1215,7 +1215,7 @@ cdef class Environment:
         if player.mana < 100:
             return False
 
-        if self.heal(player, player, 250 + 40*player.level):
+        if self.heal(player, player, 350 + 40*player.level):
             player.mana -= 100
             player.w_timer = 70
             return True
