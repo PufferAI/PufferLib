@@ -319,7 +319,7 @@ cdef class Environment:
             self.skills[pid][0] = self.skill_burst_nuke
             self.skills[pid][1] = self.skill_burst_aoe
             self.skills[pid][2] = self.skill_burst_aoe_stun
-            player.base_health = 500
+            player.base_health = 400
             player.base_mana = 300
             player.hp_gain_per_level = 75
             player.mana_gain_per_level = 90
@@ -355,7 +355,7 @@ cdef class Environment:
             player.base_mana = 250
             player.hp_gain_per_level = 50
             player.mana_gain_per_level = 50
-            player.damage_gain_per_level = 25
+            player.damage_gain_per_level = 20
 
 
         # Load creep waypoints for each lane
@@ -1177,7 +1177,7 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_aoe(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 150:
+        if target == NULL or player.mana < 200:
             return False
 
         if self.player_aoe_attack(player, target, 2, 100 + 20*player.level, 0):
@@ -1258,7 +1258,7 @@ cdef class Environment:
         if target == NULL or player.mana < 100:
             return False
 
-        if self.attack(player, target, 50 + 15*player.level):
+        if self.attack(player, target, 50 + 10*player.level):
             target.move_timer = 20 + player.level
             target.move_modifier = 0.5
             player.mana -= 100
@@ -1272,7 +1272,7 @@ cdef class Environment:
         if target == NULL or player.mana < 100:
             return False
 
-        if self.player_aoe_attack(player, target, 2, 100+20*player.level, 0):
+        if self.player_aoe_attack(player, target, 2, 75 + 15*player.level, 0):
             player.mana -= 100
             player.e_timer = 40
             return True
