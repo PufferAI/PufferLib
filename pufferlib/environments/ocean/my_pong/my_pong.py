@@ -130,7 +130,7 @@ class MyPong(pufferlib.PufferEnv):
                 'reward': self.reward_sum / self.report_interval,
                 'num_games': self.num_finished_games,
                 'num_wins': self.wins_sum,
-                'win_rate': win_rate,
+                'winrate': win_rate,
                 'bounces_per_game': self.n_bounces_sum / self.num_finished_games if self.num_finished_games > 0 else 0,
                 'ticks_per_game': self.ticks_sum / self.num_finished_games if self.num_finished_games > 0 else 0,
             })
