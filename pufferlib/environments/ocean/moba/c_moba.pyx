@@ -1152,12 +1152,12 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_support_stun(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 150:
+        if target == NULL or player.mana < 100:
             return False
 
         if self.attack(player, target, 100 + 10*player.level):
             target.stun_timer = 15 + (int)(0.5*player.level)
-            player.mana -= 150
+            player.mana -= 100
             player.e_timer = 60
             return True
 
@@ -1168,7 +1168,7 @@ cdef class Environment:
         if target == NULL or player.mana < 200:
             return False
 
-        if self.attack(player, target, 200 + 40*player.level):
+        if self.attack(player, target, 150 + 40*player.level):
             player.mana -= 200
             player.q_timer = 70
             return True
@@ -1189,11 +1189,11 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_aoe_stun(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 150:
+        if target == NULL or player.mana < 75:
             return False
 
         if self.player_aoe_attack(player, target, 2, 0, 10 + (int)(0.5*player.level)):
-            player.mana -= 150
+            player.mana -= 75
             player.e_timer = 50
             return True
 
@@ -1225,11 +1225,11 @@ cdef class Environment:
     @cython.profile(False)
     cdef bint skill_tank_engage_aoe(self, Entity* player, Entity* target):
         #return False # TODO: Fix teleport
-        if target == NULL or player.mana < 100:
+        if target == NULL or player.mana < 50:
             return False
 
         if self.move_near(player, target):
-            player.mana -= 100
+            player.mana -= 50
             player.e_timer = 40
             self.aoe_push(player, 4, 2.0 + 0.1*player.level)
             return True
@@ -1258,7 +1258,7 @@ cdef class Environment:
         if target == NULL or player.mana < 100:
             return False
 
-        if self.attack(player, target, 100 + 20*player.level):
+        if self.attack(player, target, 50 + 15*player.level):
             target.move_timer = 20 + player.level
             target.move_modifier = 0.5
             player.mana -= 100
@@ -1312,12 +1312,13 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_assassin_move_buff(self, Entity* player, Entity* target):
-        if player.mana < 10:
+        if player.mana < 100:
             return False
 
         player.move_modifier = 2.0
-        player.move_timer = 1
-        player.mana -= 10
+        player.move_timer = 10
+        player.mana -= 100
+        player.e_timer = 40
         return True
 
     def randomize_tower_hp(self):

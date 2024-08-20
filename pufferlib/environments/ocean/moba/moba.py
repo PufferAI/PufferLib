@@ -293,6 +293,18 @@ class PufferMoba(pufferlib.PufferEnv):
             tank = self.entities[:, 3:10:5]
             carry = self.entities[:, 4:10:5]
 
+            infos['level/support'] = np.mean(support.level)
+            infos['level/assassin'] = np.mean(assassin.level)
+            infos['level/burst'] = np.mean(burst.level)
+            infos['level/tank'] = np.mean(tank.level)
+            infos['level/carry'] = np.mean(carry.level)
+
+            infos['hero_kills/support'] = np.mean(support.hero_kills)
+            infos['hero_kills/assassin'] = np.mean(assassin.hero_kills)
+            infos['hero_kills/burst'] = np.mean(burst.hero_kills)
+            infos['hero_kills/tank'] = np.mean(tank.hero_kills)
+            infos['hero_kills/carry'] = np.mean(carry.hero_kills)
+
             infos['damage_dealt/support'] = np.mean(support.damage_dealt)
             infos['damage_dealt/assassin'] = np.mean(assassin.damage_dealt)
             infos['damage_dealt/burst'] = np.mean(burst.damage_dealt)
@@ -316,12 +328,6 @@ class PufferMoba(pufferlib.PufferEnv):
             infos['healing_received/burst'] = np.mean(burst.healing_received)
             infos['healing_received/tank'] = np.mean(tank.healing_received)
             infos['healing_received/carry'] = np.mean(carry.healing_received)
-
-            infos['level/support'] = np.mean(support.level)
-            infos['level/assassin'] = np.mean(assassin.level)
-            infos['level/burst'] = np.mean(burst.level)
-            infos['level/tank'] = np.mean(tank.level)
-            infos['level/carry'] = np.mean(carry.level)
 
             infos['usage/support_q'] = np.mean(support.q_uses)
             infos['usage/support_w'] = np.mean(support.w_uses)
