@@ -83,6 +83,12 @@ cdef struct Entity:
     int xp_on_kill
     float reward
     int tier
+    float base_health
+    float base_mana
+    float base_damage
+    int hp_gain_per_level
+    int mana_gain_per_level
+    int damage_gain_per_level
     float damage_dealt
     float damage_received
     float healing_dealt
@@ -256,10 +262,8 @@ cdef class Environment:
                 player.spawn_y = spawn_y
                 player.spawn_x = spawn_x
                 player.move_speed = self.agent_speed
-                player.max_health = 500
-                player.max_mana = 100
                 player.basic_attack_cd = 8
-                player.damage = 50
+                player.base_damage = 50
                 player.q_uses = 0
                 player.w_uses = 0
                 player.e_uses = 0
@@ -283,6 +287,11 @@ cdef class Environment:
             self.skills[pid][0] = self.skill_support_hook
             self.skills[pid][1] = self.skill_support_aoe_heal
             self.skills[pid][2] = self.skill_support_stun
+            player.base_health = 500
+            player.base_mana = 250
+            player.hp_gain_per_level = 100
+            player.mana_gain_per_level = 50
+            player.damage_gain_per_level = 10
 
             pid = 5*team + 1
             player = self.get_entity(pid)
@@ -294,6 +303,11 @@ cdef class Environment:
             self.skills[pid][0] = self.skill_assassin_aoe_minions
             self.skills[pid][1] = self.skill_assassin_tp_damage
             self.skills[pid][2] = self.skill_assassin_move_buff
+            player.base_health = 400
+            player.base_mana = 300
+            player.hp_gain_per_level = 75
+            player.mana_gain_per_level = 65
+            player.damage_gain_per_level = 15
 
             pid = 5*team + 2
             player = self.get_entity(pid)
@@ -305,6 +319,11 @@ cdef class Environment:
             self.skills[pid][0] = self.skill_burst_nuke
             self.skills[pid][1] = self.skill_burst_aoe
             self.skills[pid][2] = self.skill_burst_aoe_stun
+            player.base_health = 500
+            player.base_mana = 300
+            player.hp_gain_per_level = 75
+            player.mana_gain_per_level = 90
+            player.damage_gain_per_level = 10
 
             pid = 5*team + 3
             player = self.get_entity(pid)
@@ -316,6 +335,11 @@ cdef class Environment:
             self.skills[pid][0] = self.skill_tank_aoe_dot
             self.skills[pid][1] = self.skill_tank_self_heal
             self.skills[pid][2] = self.skill_tank_engage_aoe
+            player.base_health = 700
+            player.base_mana = 200
+            player.hp_gain_per_level = 150
+            player.mana_gain_per_level = 20
+            player.damage_gain_per_level = 15
 
             pid = 5*team + 4
             player = self.get_entity(pid)
@@ -327,6 +351,12 @@ cdef class Environment:
             self.skills[pid][0] = self.skill_carry_retreat_slow
             self.skills[pid][1] = self.skill_carry_slow_damage
             self.skills[pid][2] = self.skill_carry_aoe
+            player.base_health = 300
+            player.base_mana = 250
+            player.hp_gain_per_level = 50
+            player.mana_gain_per_level = 50
+            player.damage_gain_per_level = 25
+
 
         # Load creep waypoints for each lane
         self.waypoints = np.zeros((6, 20, 2), dtype=np.float32)
@@ -707,8 +737,9 @@ cdef class Environment:
             if ally.level > level:
                 self.total_levels_gained += 1
 
-            ally.damage = 50 + 6*ally.level
-            ally.max_health = 500 + 50*ally.level
+            ally.max_health = ally.base_health + ally.level*ally.hp_gain_per_level
+            ally.max_mana = ally.base_mana + ally.level*ally.mana_gain_per_level
+            ally.damage = ally.base_damage + ally.level*ally.damage_gain_per_level
 
         reward = self.get_reward(player.pid)
         if target.entity_type == ENTITY_TOWER:
@@ -769,8 +800,11 @@ cdef class Environment:
 
         self.kill(entity)
         entity.pid = pid
+        entity.max_health = entity.base_health
+        entity.max_mana = entity.base_mana
         entity.health = entity.max_health
         entity.mana = entity.max_mana
+        entity.damage = entity.base_damage
         entity.basic_attack_timer = 0
         entity.move_modifier = 0
         entity.move_timer = 0
@@ -1096,20 +1130,21 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_support_hook(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 15:
+        if target == NULL or player.mana < 100:
             return False
 
-        self.pull(target, player, 1.5)
-        player.mana -= 15
+        self.pull(target, player, 1.5 + 0.1*player.level)
+        player.mana -= 100
+        player.q_timer = 15
         return True
 
     @cython.profile(False)
     cdef bint skill_support_aoe_heal(self, Entity* player, Entity* target):
-        if player.mana < 40:
+        if player.mana < 150:
             return False
 
-        if self.player_aoe_attack(player, player, 4, -200, 0):
-            player.mana -= 40
+        if self.player_aoe_attack(player, player, 4, -250 - 25*player.level, 0):
+            player.mana -= 150 
             player.w_timer = 60
             return True
 
@@ -1117,12 +1152,12 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_support_stun(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 30:
+        if target == NULL or player.mana < 150:
             return False
 
-        if self.attack(player, target, 50):
-            target.stun_timer = 60
-            player.mana -= 30
+        if self.attack(player, target, 100 + 10*player.level):
+            target.stun_timer = 15 + (int)(0.5*player.level)
+            player.mana -= 150
             player.e_timer = 60
             return True
 
@@ -1130,11 +1165,11 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_nuke(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 60:
+        if target == NULL or player.mana < 200:
             return False
 
-        if self.attack(player, target, 500):
-            player.mana -= 60
+        if self.attack(player, target, 200 + 40*player.level):
+            player.mana -= 200
             player.q_timer = 70
             return True
         
@@ -1142,11 +1177,11 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_aoe(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 40:
+        if target == NULL or player.mana < 150:
             return False
 
-        if self.player_aoe_attack(player, target, 2, 200, 0):
-            player.mana -= 40
+        if self.player_aoe_attack(player, target, 2, 100 + 20*player.level, 0):
+            player.mana -= 150
             player.w_timer = 40
             return True
 
@@ -1154,35 +1189,35 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_aoe_stun(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 30:
+        if target == NULL or player.mana < 150:
             return False
 
-        if self.player_aoe_attack(player, target, 2, 0, 40):
-            player.mana -= 30
-            player.e_timer = 40
+        if self.player_aoe_attack(player, target, 2, 0, 10 + (int)(0.5*player.level)):
+            player.mana -= 150
+            player.e_timer = 50
             return True
 
         return False
 
     @cython.profile(False)
     cdef bint skill_tank_aoe_dot(self, Entity* player, Entity* target):
-        if player.mana < 5:
+        if player.mana < 20:
             return False
 
-        if self.player_aoe_attack(player, player, 2, 20, 0):
-            player.mana -= 5
+        if self.player_aoe_attack(player, player, 2, 10 + 0.5*player.level, 0):
+            player.mana -= 20
             return True
 
         return False
 
     @cython.profile(False)
     cdef bint skill_tank_self_heal(self, Entity* player, Entity* target):
-        if player.mana < 30:
+        if player.mana < 100:
             return False
 
-        if self.heal(player, player, 250):
-            player.mana -= 30
-            player.w_timer = 60
+        if self.heal(player, player, 250 + 40*player.level):
+            player.mana -= 100
+            player.w_timer = 70
             return True
 
         return False
@@ -1190,13 +1225,13 @@ cdef class Environment:
     @cython.profile(False)
     cdef bint skill_tank_engage_aoe(self, Entity* player, Entity* target):
         #return False # TODO: Fix teleport
-        if target == NULL or player.mana < 20:
+        if target == NULL or player.mana < 100:
             return False
 
         if self.move_near(player, target):
-            player.mana -= 20
-            player.e_timer = 30
-            self.aoe_push(player, 4, 3.0)
+            player.mana -= 100
+            player.e_timer = 40
+            self.aoe_push(player, 4, 2.0 + 0.1*player.level)
             return True
 
         return False
@@ -1206,13 +1241,13 @@ cdef class Environment:
         cdef int i
         cdef bint success = False
         for i in range(3):
-            if target == NULL or player.mana < 10:
+            if target == NULL or player.mana < 25:
                 return False
 
-            if self.push(target, player, 1.5):
+            if self.push(target, player, 1.0 + 0.05*player.level):
                 target.move_timer = 15
                 target.move_modifier = 0.5
-                player.mana -= 10
+                player.mana -= 25
                 player.w_timer = 40
                 success = True
 
@@ -1220,13 +1255,13 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_carry_slow_damage(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 40:
+        if target == NULL or player.mana < 100:
             return False
 
-        if self.attack(player, target, 100):
-            target.move_timer = 60
+        if self.attack(player, target, 100 + 20*player.level):
+            target.move_timer = 20 + player.level
             target.move_modifier = 0.5
-            player.mana -= 40
+            player.mana -= 100
             player.w_timer = 40
             return True
 
@@ -1234,11 +1269,11 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_carry_aoe(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 20:
+        if target == NULL or player.mana < 100:
             return False
 
-        if self.player_aoe_attack(player, target, 2, 200, 0):
-            player.mana -= 20
+        if self.player_aoe_attack(player, target, 2, 100+20*player.level, 0):
+            player.mana -= 100
             player.e_timer = 40
             return True
 
@@ -1246,13 +1281,13 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_assassin_aoe_minions(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 30:
+        if target == NULL or player.mana < 100:
             return False
 
         # Targeted on minions, splashes to players
         if (target.entity_type == ENTITY_CREEP or target.entity_type == ENTITY_NEUTRAL
-                ) and self.player_aoe_attack(player, target, 3, 400, 0):
-            player.mana -= 30
+                ) and self.player_aoe_attack(player, target, 3, 100+20*player.level, 0):
+            player.mana -= 100
             player.q_timer = 40
             return True
 
@@ -1262,14 +1297,14 @@ cdef class Environment:
     cdef bint skill_assassin_tp_damage(self, Entity* player, Entity* target):
         # TODO: Fix tp off map?
         #return False
-        if target == NULL or player.mana < 30:
+        if target == NULL or player.mana < 150:
             return False
 
         if self.move_near(player, target) == -1:
             return False
 
-        player.mana -= 30
-        if self.attack(player, target, 600):
+        player.mana -= 150
+        if self.attack(player, target, 350+50*player.level):
             player.w_timer = 60
             return True
         
