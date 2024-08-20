@@ -1165,6 +1165,7 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_nuke(self, Entity* player, Entity* target):
+        return False
         if target == NULL or player.mana < 200:
             return False
 
@@ -1177,6 +1178,7 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_aoe(self, Entity* player, Entity* target):
+        return False
         if target == NULL or player.mana < 200:
             return False
 
@@ -1189,6 +1191,7 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_aoe_stun(self, Entity* player, Entity* target):
+        return False
         if target == NULL or player.mana < 75:
             return False
 
@@ -1238,6 +1241,7 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_carry_retreat_slow(self, Entity* player, Entity* target):
+        return False
         cdef int i
         cdef bint success = False
         for i in range(3):
@@ -1255,6 +1259,7 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_carry_slow_damage(self, Entity* player, Entity* target):
+        return False
         if target == NULL or player.mana < 150:
             return False
 
@@ -1269,6 +1274,7 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_carry_aoe(self, Entity* player, Entity* target):
+        return False
         if target == NULL or player.mana < 100:
             return False
 
