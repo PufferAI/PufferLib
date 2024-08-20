@@ -355,7 +355,7 @@ cdef class Environment:
             player.base_mana = 250
             player.hp_gain_per_level = 50
             player.mana_gain_per_level = 50
-            player.damage_gain_per_level = 15
+            player.damage_gain_per_level = 25
 
 
         # Load creep waypoints for each lane
