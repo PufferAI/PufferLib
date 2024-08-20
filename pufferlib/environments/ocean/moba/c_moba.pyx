@@ -355,7 +355,7 @@ cdef class Environment:
             player.base_mana = 250
             player.hp_gain_per_level = 50
             player.mana_gain_per_level = 50
-            player.damage_gain_per_level = 20
+            player.damage_gain_per_level = 15
 
 
         # Load creep waypoints for each lane
@@ -1168,7 +1168,7 @@ cdef class Environment:
         if target == NULL or player.mana < 200:
             return False
 
-        if self.attack(player, target, 150 + 40*player.level):
+        if self.attack(player, target, 150 + 20*player.level):
             player.mana -= 200
             player.q_timer = 70
             return True
@@ -1180,7 +1180,7 @@ cdef class Environment:
         if target == NULL or player.mana < 200:
             return False
 
-        if self.player_aoe_attack(player, target, 2, 100 + 20*player.level, 0):
+        if self.player_aoe_attack(player, target, 2, 100 + 10*player.level, 0):
             player.mana -= 150
             player.w_timer = 40
             return True
