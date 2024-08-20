@@ -305,7 +305,7 @@ cdef class Environment:
             self.skills[pid][2] = self.skill_assassin_move_buff
             player.base_health = 400
             player.base_mana = 300
-            player.hp_gain_per_level = 75
+            player.hp_gain_per_level = 100
             player.mana_gain_per_level = 65
             player.damage_gain_per_level = 15
 
@@ -338,7 +338,7 @@ cdef class Environment:
             player.base_health = 700
             player.base_mana = 200
             player.hp_gain_per_level = 150
-            player.mana_gain_per_level = 20
+            player.mana_gain_per_level = 50
             player.damage_gain_per_level = 15
 
             pid = 5*team + 4
@@ -1248,20 +1248,20 @@ cdef class Environment:
                 target.move_timer = 15
                 target.move_modifier = 0.5
                 player.mana -= 25
-                player.w_timer = 40
+                player.q_timer = 40
                 success = True
 
         return success
 
     @cython.profile(False)
     cdef bint skill_carry_slow_damage(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 100:
+        if target == NULL or player.mana < 150:
             return False
 
-        if self.attack(player, target, 50 + 10*player.level):
+        if self.attack(player, target, 50 + 5*player.level):
             target.move_timer = 20 + player.level
             target.move_modifier = 0.5
-            player.mana -= 100
+            player.mana -= 150
             player.w_timer = 40
             return True
 
