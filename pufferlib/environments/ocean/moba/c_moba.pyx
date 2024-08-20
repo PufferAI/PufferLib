@@ -1143,7 +1143,7 @@ cdef class Environment:
         if player.mana < 150:
             return False
 
-        if self.player_aoe_attack(player, player, 5, -350 - 25*player.level, 0):
+        if self.player_aoe_attack(player, player, 5, -250 - 50*player.level, 0):
             player.mana -= 150 
             player.w_timer = 60
             return True
@@ -1155,7 +1155,7 @@ cdef class Environment:
         if target == NULL or player.mana < 75:
             return False
 
-        if self.attack(player, target, 100 + 20*player.level):
+        if self.attack(player, target, 50 + 20*player.level):
             target.stun_timer = 15 + (int)(0.5*player.level)
             player.mana -= 75
             player.e_timer = 60
@@ -1297,14 +1297,14 @@ cdef class Environment:
     cdef bint skill_assassin_tp_damage(self, Entity* player, Entity* target):
         # TODO: Fix tp off map?
         #return False
-        if target == NULL or player.mana < 100:
+        if target == NULL or player.mana < 150:
             return False
 
         if self.move_near(player, target) == -1:
             return False
 
-        player.mana -= 100
-        if self.attack(player, target, 350+50*player.level):
+        player.mana -= 150
+        if self.attack(player, target, 250+50*player.level):
             player.w_timer = 60
             return True
         
@@ -1316,9 +1316,9 @@ cdef class Environment:
             return False
 
         player.move_modifier = 2.0
-        player.move_timer = 10
+        player.move_timer = 25
         player.mana -= 100
-        player.e_timer = 80
+        player.e_timer = 100
         return True
 
     def randomize_tower_hp(self):
