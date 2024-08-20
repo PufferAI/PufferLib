@@ -1204,11 +1204,11 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_tank_aoe_dot(self, Entity* player, Entity* target):
-        if player.mana < 20:
+        if player.mana < 10:
             return False
 
         if self.player_aoe_attack(player, player, 2, 15 + 0.5*player.level, 0):
-            player.mana -= 20
+            player.mana -= 10
             return True
 
         return False
@@ -1218,9 +1218,9 @@ cdef class Environment:
         if player.mana < 100:
             return False
 
-        if self.heal(player, player, 350 + 40*player.level):
+        if self.heal(player, player, 400 + 100*player.level):
             player.mana -= 100
-            player.w_timer = 70
+            player.w_timer = 80
             return True
 
         return False
@@ -1303,13 +1303,13 @@ cdef class Environment:
     cdef bint skill_assassin_tp_damage(self, Entity* player, Entity* target):
         # TODO: Fix tp off map?
         #return False
-        if target == NULL or player.mana < 150:
+        if target == NULL or player.mana < 100:
             return False
 
         if self.move_near(player, target) == -1:
             return False
 
-        player.mana -= 150
+        player.mana -= 100
         if self.attack(player, target, 350+50*player.level):
             player.w_timer = 60
             return True
@@ -1324,7 +1324,7 @@ cdef class Environment:
         player.move_modifier = 2.0
         player.move_timer = 10
         player.mana -= 100
-        player.e_timer = 40
+        player.e_timer = 80
         return True
 
     def randomize_tower_hp(self):
