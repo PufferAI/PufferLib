@@ -44,7 +44,7 @@ cdef:
     int ENTITY_NEUTRAL = 2
     int ENTITY_TOWER = 3
 
-    int XP_RANGE = 5
+    int XP_RANGE = 7
     int MAX_USES = 2_000_000_000
 
 cdef struct Entity:
@@ -93,6 +93,7 @@ cdef struct Entity:
     float damage_received
     float healing_dealt
     float healing_received
+    int deaths
     int heros_killed
     int creeps_killed
     int neutrals_killed
@@ -272,6 +273,7 @@ cdef class Environment:
                 player.damage_received = 0
                 player.healing_dealt = 0
                 player.healing_received = 0
+                player.deaths = 0
                 player.heros_killed = 0
                 player.creeps_killed = 0
                 player.neutrals_killed = 0
@@ -307,7 +309,7 @@ cdef class Environment:
             player.base_mana = 300
             player.hp_gain_per_level = 100
             player.mana_gain_per_level = 65
-            player.damage_gain_per_level = 15
+            player.damage_gain_per_level = 10
 
             pid = 5*team + 2
             player = self.get_entity(pid)
@@ -681,10 +683,14 @@ cdef class Environment:
         player.damage_dealt += current_health
         target.damage_received += current_health
 
+        cdef float target_x = target.x
+        cdef float target_y = target.y
+
         if target.entity_type == ENTITY_PLAYER:
             reward = self.get_reward(target.pid)
             reward.death = self.reward_death
             player.heros_killed += 1
+            target.deaths += 1
             self.respawn_player(target)
         elif target.entity_type == ENTITY_CREEP:
             player.creeps_killed += 1
@@ -714,10 +720,16 @@ cdef class Environment:
         cdef Entity* ally;
         for i in range(5):
             ally = self.get_entity(first_player_on_team + i)
-            if abs(ally.y - player.y) + abs(ally.x - player.x) < XP_RANGE:
+            #if abs(ally.y - player.y) + abs(ally.x - player.x) < XP_RANGE:
+            if max(abs(ally.y - target_y), abs(ally.x - target_x)) < XP_RANGE:
                 in_range[i] = True
                 num_in_range += 1
 
+        if num_in_range == 0:
+            print(f'Invalid XP range: {XP_RANGE}')
+            print(f'target x: {target_x}, y: {target_y}')
+            print(f'player x: {player.x}, y: {player.y}')
+            exit(0)
         xp = xp / num_in_range
         for i in range(5):
             if not in_range[i]:
@@ -1140,12 +1152,12 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_support_aoe_heal(self, Entity* player, Entity* target):
-        if player.mana < 150:
+        if player.mana < 100:
             return False
 
-        if self.player_aoe_attack(player, player, 5, -250 - 50*player.level, 0):
-            player.mana -= 150 
-            player.w_timer = 60
+        if self.player_aoe_attack(player, player, 5, -350 - 50*player.level, 0):
+            player.mana -= 100 
+            player.w_timer = 50
             return True
 
         return False
@@ -1168,7 +1180,7 @@ cdef class Environment:
         if target == NULL or player.mana < 200:
             return False
 
-        if self.attack(player, target, 150 + 20*player.level):
+        if self.attack(player, target, 250 + 40*player.level):
             player.mana -= 200
             player.q_timer = 70
             return True
@@ -1177,11 +1189,11 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_burst_aoe(self, Entity* player, Entity* target):
-        if target == NULL or player.mana < 200:
+        if target == NULL or player.mana < 100:
             return False
 
-        if self.player_aoe_attack(player, target, 2, 100 + 10*player.level, 0):
-            player.mana -= 150
+        if self.player_aoe_attack(player, target, 2, 100 + 40*player.level, 0):
+            player.mana -= 100
             player.w_timer = 40
             return True
 
@@ -1201,11 +1213,11 @@ cdef class Environment:
 
     @cython.profile(False)
     cdef bint skill_tank_aoe_dot(self, Entity* player, Entity* target):
-        if player.mana < 10:
+        if player.mana < 5:
             return False
 
-        if self.player_aoe_attack(player, player, 2, 20 + 0.5*player.level, 0):
-            player.mana -= 10
+        if self.player_aoe_attack(player, player, 2, 25 + 2.0*player.level, 0):
+            player.mana -= 5
             return True
 
         return False
@@ -1215,9 +1227,9 @@ cdef class Environment:
         if player.mana < 100:
             return False
 
-        if self.heal(player, player, 400 + 100*player.level):
+        if self.heal(player, player, 400 + 125*player.level):
             player.mana -= 100
-            player.w_timer = 80
+            player.w_timer = 70
             return True
 
         return False
@@ -1258,7 +1270,7 @@ cdef class Environment:
         if target == NULL or player.mana < 150:
             return False
 
-        if self.attack(player, target, 50 + 5*player.level):
+        if self.attack(player, target, 50 + 20*player.level):
             target.move_timer = 20 + player.level
             target.move_modifier = 0.5
             player.mana -= 150
@@ -1272,7 +1284,7 @@ cdef class Environment:
         if target == NULL or player.mana < 100:
             return False
 
-        if self.player_aoe_attack(player, target, 2, 75 + 15*player.level, 0):
+        if self.player_aoe_attack(player, target, 2, 100 + 20*player.level, 0):
             player.mana -= 100
             player.e_timer = 40
             return True

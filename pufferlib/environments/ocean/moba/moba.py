@@ -301,6 +301,12 @@ class PufferMoba(pufferlib.PufferEnv):
             infos['level/tank'] = np.mean(tank.level)
             infos['level/carry'] = np.mean(carry.level)
 
+            infos['deaths/support'] = np.mean(support.deaths)
+            infos['deaths/assassin'] = np.mean(assassin.deaths)
+            infos['deaths/burst'] = np.mean(burst.deaths)
+            infos['deaths/tank'] = np.mean(tank.deaths)
+            infos['deaths/carry'] = np.mean(carry.deaths)
+
             infos['heros_killed/support'] = np.mean(support.heros_killed)
             infos['heros_killed/assassin'] = np.mean(assassin.heros_killed)
             infos['heros_killed/burst'] = np.mean(burst.heros_killed)
