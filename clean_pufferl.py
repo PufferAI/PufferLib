@@ -581,9 +581,6 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
 
     # We are just using Serial vecenv to give a consistent
     # single-agent/multi-agent API for evaluation
-    if render_mode != 'auto':
-        env_kwargs['render_mode'] = render_mode
-
     env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs, backend=backend)
 
     if model_path is None:
@@ -595,6 +592,15 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
     driver = env.driver_env
     os.system('clear')
     state = None
+    
+    # Silently handle conflicts between runtime and agent render modes
+    if render_mode != 'auto':
+        if driver.render_mode is not None:
+            render_mode = driver.render_mode
+        else:
+            render_mode = agent_kwargs['render_mode']
+    else:
+        render_mode = driver.render_mode
 
     frames = []
     tick = 0
@@ -630,8 +636,9 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
         tick += 1
 
     # Save frames as gif
-    import imageio
-    imageio.mimsave('../docker/eval.gif', frames, fps=15, loop=0)
+    if frames:
+        import imageio
+        os.makedirs('../docker', exist_ok=True) or imageio.mimsave('../docker/eval.gif', frames, fps=15, loop=0)
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)

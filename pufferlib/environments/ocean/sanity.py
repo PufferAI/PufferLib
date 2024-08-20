@@ -590,9 +590,11 @@ class Stochastic(gymnasium.Env):
             else:
                 c = 90
             return f'\033[{c}m██\033[0m'
-
         chars = []
-        solution = 0 if self.count / self.tick < self.p else 1
+        if self.tick == 0:
+            solution = 0
+        else:
+            solution = 0 if self.count / self.tick < self.p else 1
         chars.append(_render(solution))
         chars.append(' Solution\n')
 
