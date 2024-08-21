@@ -1489,10 +1489,13 @@ cdef class Environment:
                 self.respawn_player(player)
 
             if player.mana < player.max_mana:
-                player.mana += 1
-
+                player.mana += 2
+            if player.mana > player.max_mana:
+                player.mana = player.max_mana
             if player.health < player.max_health:
-                player.health += 1
+                player.health += 2
+            if player.health > player.max_health:
+                player.health = player.max_health
 
             self.update_status(player)
             self.update_cooldowns(player)
