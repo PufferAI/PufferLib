@@ -98,6 +98,8 @@ cdef struct Entity:
     int creeps_killed
     int neutrals_killed
     int towers_killed
+    float last_x
+    float last_y
 
 cdef struct Reward:
     float death
@@ -156,8 +158,7 @@ cdef class Environment:
         unsigned char[:, :, :, :] observations_map
         unsigned char[:, :] observations_extra
         int[:] xp_for_level
-        int[:, :] actions_discrete
-        float[:, :] actions_continuous
+        int[:, :] actions
         int[:, :] pid_map
         Entity[:, :] player_obs
         Entity[:] entities
@@ -223,10 +224,7 @@ cdef class Environment:
         self.observations_map = observations_map
         self.observations_extra = observations_extra
         self.rewards = rewards
-        if discretize:
-            self.actions_discrete = actions
-        else:
-            self.actions_continuous = actions
+        self.actions = actions
 
         self.pid_map = pids
         self.entities = entities
@@ -278,6 +276,8 @@ cdef class Environment:
                 player.creeps_killed = 0
                 player.neutrals_killed = 0
                 player.towers_killed = 0
+                player.last_x = 0
+                player.last_y = 0
 
             pid = 5*team
             player = self.get_entity(pid)
@@ -392,7 +392,6 @@ cdef class Environment:
         for camp, camp_data in enumerate(entity_data['neutrals']):
             for i in range(4): # Neutrals per camp
                 neutral = self.get_neutral(idx)
-                neutral.pid = idx + self.num_agents + self.num_creeps
                 neutral.entity_type = ENTITY_NEUTRAL
                 neutral.grid_id = NEUTRAL
                 neutral.max_health = 500
@@ -909,6 +908,7 @@ cdef class Environment:
             Entity* neutral = self.get_neutral(idx)
             int dy, dx
 
+        neutral.pid = idx + self.num_agents + self.num_creeps
         neutral.health = neutral.max_health
         neutral.basic_attack_timer = 0
         # TODO: Can this leak over games somehow?
@@ -1363,9 +1363,10 @@ cdef class Environment:
             tower.basic_attack_timer = 0
             tower.x = 0
             tower.y = 0
-
             self.grid[int(tower.spawn_y), int(tower.spawn_x)] = EMPTY
             self.move_to(tower, tower.spawn_y, tower.spawn_x)
+            tower.last_x = tower.x
+            tower.last_y = tower.y
             '''
             if not self.move_to(tower, tower.spawn_y, tower.spawn_x):
                 print(f'Grid: {self.grid[int(tower.spawn_y), int(tower.spawn_x)]}')
@@ -1500,6 +1501,18 @@ cdef class Environment:
                 continue
 
             # Attacks
+            #vel_y = float(self.actions_discrete[pid, 0] - 3) / 3
+            #vel_x = float(self.actions_discrete[pid, 1] - 3) / 3
+
+            vel_y = float(self.actions[pid, 0]) / 100
+            vel_x = float(self.actions[pid, 1]) / 100
+
+            attack_target = int(self.actions[pid, 2])
+            use_q = self.actions[pid, 3]
+            use_w = self.actions[pid, 4]
+            use_e = self.actions[pid, 5]
+
+            '''
             if self.discretize:
                 vel_y = float(self.actions_discrete[pid, 0] - 3) / 3
                 vel_x = float(self.actions_discrete[pid, 1] - 3) / 3
@@ -1516,6 +1529,7 @@ cdef class Environment:
                 #use_q = int(actions_continuous[pid, 3]) > 0.5
                 #use_w = int(actions_continuous[pid, 4]) > 0.5
                 #use_e = int(actions_continuous[pid, 5]) > 0.5
+            '''
 
             #if attack_target == 0:
             #    pass
@@ -1565,8 +1579,10 @@ cdef class Environment:
         cdef int pid
         cdef Entity* player
 
-        for pid in range(self.num_agents + self.num_towers + self.num_creeps):
+        for pid in range(self.num_agents + self.num_towers + self.num_creeps + self.num_neutrals):
             player = self.get_entity(pid)
+            player.last_x = player.x
+            player.last_y = player.y
             player.is_hit = 0
 
         self.step_neutrals()

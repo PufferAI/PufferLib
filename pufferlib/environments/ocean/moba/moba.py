@@ -11,7 +11,7 @@ from pufferlib.environments.ocean.moba.c_moba import Environment as CEnv
 from pufferlib.environments.ocean.moba.c_moba import entity_dtype, reward_dtype,step_all
 from pufferlib.environments.ocean.moba.c_precompute_pathing import precompute_pathing
 
-HUMAN_PLAYER = 4
+HUMAN_PLAYER = 1
 
 EMPTY = 0
 WALL = 1
@@ -44,7 +44,7 @@ COLORS = np.array([
 PLAYER_OBS_N = 26
 
 class PufferMoba(pufferlib.PufferEnv):
-    def __init__(self, num_envs=4, vision_range=5, agent_speed=0.5,
+    def __init__(self, num_envs=4, vision_range=5, agent_speed=1.0,
             discretize=True, reward_death=-1.0, reward_xp=0.006,
             reward_distance=0.05, reward_tower=3.0,
             report_interval=32, render_mode='rgb_array'):
@@ -150,12 +150,12 @@ class PufferMoba(pufferlib.PufferEnv):
         self.observation_space = gymnasium.spaces.Box(low=0, high=255,
             shape=(self.obs_map_bytes + PLAYER_OBS_N,), dtype=np.uint8)
 
+        atn_vec = [7, 7, 3, 2, 2, 2]
+        self.actions = np.zeros((self.num_agents, len(atn_vec)), dtype=np.int32)
+
         if discretize:
-            atn_vec = [7, 7, 3, 2, 2, 2]
             self.action_space = gymnasium.spaces.MultiDiscrete(atn_vec)
-            self.actions = np.zeros((self.num_agents, len(atn_vec)), dtype=np.int32)
         else:
-            self.actions = np.zeros((self.num_agents, 6), dtype=np.float32)
             finfo = np.finfo(np.float32)
             self.action_space = gymnasium.spaces.Box(
                 low=finfo.min,
@@ -179,7 +179,7 @@ class PufferMoba(pufferlib.PufferEnv):
         elif self.render_mode == 'human':
             frame, self.human_action = self.client.render(
                 self.grid, self.pids[0], self.entities[0], self.obs_players[0],
-                self.actions[:10], self.discretize)
+                self.actions[:10], self.discretize, 12)
             return frame
         else:
             raise ValueError(f'Invalid render mode: {self.render_mode}')
@@ -240,6 +240,8 @@ class PufferMoba(pufferlib.PufferEnv):
     def step(self, actions):
         #self.actions[:] = actions.astype(np.float32)
         self.actions[:] = actions#.astype(np.float32)
+        self.actions[:, :2] -= 3
+        self.actions[:, :2] *= 33
 
         if self.render_mode == 'human' and self.human_action is not None:
             #print(self.human_action)
@@ -374,9 +376,9 @@ class RaylibClient:
         self.tile_size = tile_size
 
         sprite_sheet_path = os.path.join(
-            *self.__module__.split('.')[:-1], 'puffer_chars.png')
+            *self.__module__.split('.')[:-1], 'moba_assets.png')
         self.asset_map = {
-            2: (512, 0, 128, 128),
+            2: (0, 256, 128, 128),
             11: (0, 0, 128, 128),
             12: (0, 0, 128, 128),
             13: (0, 0, 128, 128),
@@ -389,13 +391,16 @@ class RaylibClient:
             10: (128, 0, 128, 128),
             4: (256, 0, 128, 128),
             3: (384, 0, 128, 128),
-            5: (384, 0, 128, 128),
+            5: (384, 128, 128, 128),
+            'stun': (0, 128, 128, 128),
+            'slow': (128, 128, 128, 128),
+            'speed': (256, 128, 128, 128),
         }
 
         from raylib import rl, colors
         rl.InitWindow(width*tile_size, height*tile_size,
             "PufferLib Ray Grid".encode())
-        rl.SetTargetFPS(10)
+        rl.SetTargetFPS(60)
         self.puffer = rl.LoadTexture(sprite_sheet_path.encode())
         self.rl = rl
         self.colors = colors
@@ -410,6 +415,8 @@ class RaylibClient:
         from cffi import FFI
         self.ffi = FFI()
 
+        self.last_click = None
+
     def _cdata_to_numpy(self):
         image = self.rl.LoadImageFromScreen()
         width, height, channels = image.width, image.height, 4
@@ -417,129 +424,181 @@ class RaylibClient:
         return np.frombuffer(cdata, dtype=np.uint8
             ).reshape((height, width, channels))[:, :, :3]
 
-    def render(self, grid, pids, entities, obs_players, actions, discretize):
+    def render(self, grid, pids, entities, obs_players, actions, discretize, frames):
         rl = self.rl
         colors = self.colors
-        ay, ax = None, None
 
+        my_player = entities[HUMAN_PLAYER]
         ts = self.tile_size
-        main_r = entities[HUMAN_PLAYER].y
-        main_c = entities[HUMAN_PLAYER].x
-        self.camera.target.x = (main_c - self.width//2) * ts
-        self.camera.target.y = (main_r - self.height//2) * ts
-        main_r = int(main_r)
-        main_c = int(main_c)
-        r_min = main_r - self.height//2 - 1
-        r_max = main_r + self.height//2 + 1
-        c_min = main_c - self.width//2 - 1
-        c_max = main_c + self.width//2 + 1
 
-        pos = rl.GetMousePosition()
-        raw_mouse_x = pos.x + self.camera.target.x
-        raw_mouse_y = pos.y + self.camera.target.y
-        mouse_x = int(raw_mouse_x // ts)
-        mouse_y = int(raw_mouse_y // ts)
-        ay = int(np.clip((pos.y - ts*self.height//2) / 50, -3, 3)) + 3
-        ax = int(np.clip((pos.x - ts*self.width//2) / 50, -3, 3)) + 3
-
-        if rl.IsKeyDown(rl.KEY_ESCAPE):
-            exit(0)
-
+        ay, ax = None, None
         skill = 0
         skill_q = 0
         skill_w = 0
         skill_e = 0
         target_heros = 1
-        if rl.IsKeyDown(rl.KEY_Q):
-            skill_q = 1
-        if rl.IsKeyDown(rl.KEY_W):
-            skill_w = 1
-        if rl.IsKeyDown(rl.KEY_E):
-            skill_e = 1
-        if rl.IsKeyDown(rl.KEY_LEFT_SHIFT):
-            target_heros = 2
 
-        action = (ay, ax, target_heros, skill_q, skill_w, skill_e)
+        for frame in range(1, frames+1):
+            tick_frac = frame / frames
 
-        rl.BeginDrawing()
-        rl.BeginMode2D(self.camera)
-        rl.ClearBackground([6, 24, 24, 255])
+            main_r = my_player.last_y + tick_frac*(my_player.y - my_player.last_y)
+            main_c = my_player.last_x + tick_frac*(my_player.x - my_player.last_x)
+            #main_r = my_player.y
+            #main_c = my_player.x
+            self.camera.target.x = int((main_c - self.width//2) * ts)
+            self.camera.target.y = int((main_r - self.height//2) * ts)
+            main_r = int(main_r)
+            main_c = int(main_c)
+            r_min = main_r - self.height//2 - 1
+            r_max = main_r + self.height//2 + 1
+            c_min = main_c - self.width//2 - 1
+            c_max = main_c + self.width//2 + 1
 
-        for y in range(r_min, r_max+1):
-            for x in range(c_min, c_max+1):
-                if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
-                    continue
+            pos = rl.GetMousePosition()
+            raw_mouse_x = pos.x + self.camera.target.x
+            raw_mouse_y = pos.y + self.camera.target.y
+            mouse_x = int(raw_mouse_x // ts)
+            mouse_y = int(raw_mouse_y // ts)
 
-                tile = grid[y, x]
-                if tile == 0:
-                    continue
-                elif tile == 1:
-                    rl.DrawRectangle(x*ts, y*ts, ts, ts, [0, 0, 0, 255])
-                    continue
+            if rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT) or rl.IsMouseButtonDown(rl.MOUSE_BUTTON_LEFT):
+                self.last_click = (raw_mouse_x / ts, raw_mouse_y / ts)
 
-        for y in range(r_min, r_max+1):
-            for x in range(c_min, c_max+1):
-                if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
-                    continue
+            if self.last_click is not None:
+                dest_x, dest_y = self.last_click
+                dy = dest_y - my_player.y
+                dx = dest_x - my_player.x
 
-                tile = grid[y, x]
-                if tile == EMPTY or tile == WALL:
-                    continue
-           
-                pid = pids[y, x]
+                # Rescale vector if norm > 1
+                mag = np.sqrt(dy**2 + dx**2)
+                if mag > 1:
+                    dy /= mag
+                    dx /= mag
 
-                if pid == -1:
-                    rl.DrawRectangle(x*ts, y*ts, ts, ts, [255, 0, 0, 255])
-                    #raise ValueError(f'Invalid pid {pid} on tile {tile} at {y}, {x}')
+                if mag < 0.05:
+                    self.last_click = None
 
-                entity = entities[pid]
-                if entity.is_hit:
-                    rl.DrawRectangle(x*ts, y*ts, ts, ts, [255, 0, 0, 128])
- 
-                tx = int(entity.x * ts)
-                ty = int(entity.y * ts)
+                ay = 100*dy
+                ax = 100*dx
 
-                draw_bars(rl, entity, tx, ty-8, ts)
+            else:
+                ay = 0
+                ax = 0
 
-                #atn = actions[idx]
-                source_rect = self.asset_map[tile]
-                #dest_rect = (j*ts, i*ts, ts, ts)
-                dest_rect = (tx, ty, ts, ts)
-                #print(f'tile: {tile}, source_rect: {source_rect}, dest_rect: {dest_rect}')
-                rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
-                    (0, 0), 0, colors.WHITE)
+            #ay = int(np.clip((pos.y - ts*self.height//2) / 50, -3, 3)) + 3
+            #ax = int(np.clip((pos.x - ts*self.width//2) / 50, -3, 3)) + 3
 
-                #if entity.pid == target_pid:
-                #    rl.DrawCircle(x*ts + ts//2, y*ts + ts//2, ts//4, [0, 255, 0, 255])
+            if rl.IsKeyDown(rl.KEY_ESCAPE):
+                exit(0)
 
-        # Draw circle at mouse x, y
-        rl.DrawCircle(ts*mouse_x + ts//2, ts*mouse_y + ts//8, ts//8, [255, 0, 0, 255])
+            if rl.IsKeyDown(rl.KEY_Q) or rl.IsKeyPressed(rl.KEY_Q):
+                skill_q = 1
+            if rl.IsKeyDown(rl.KEY_W) or rl.IsKeyPressed(rl.KEY_W):
+                skill_w = 1
+            if rl.IsKeyDown(rl.KEY_E) or rl.IsKeyPressed(rl.KEY_E):
+                skill_e = 1
+            if rl.IsKeyDown(rl.KEY_LEFT_SHIFT):
+                target_heros = 2
 
-        rl.EndMode2D()
+            action = (ay, ax, target_heros, skill_q, skill_w, skill_e)
 
-        # Draw HUD
-        player = entities[HUMAN_PLAYER]
-        hud_y = self.height*ts - 2*ts
-        draw_bars(rl, player, 2*ts, hud_y, 10*ts, 24, draw_text=True)
+            rl.BeginDrawing()
+            rl.BeginMode2D(self.camera)
+            rl.ClearBackground([6, 24, 24, 255])
 
-        off_color = [255, 255, 255, 255]
-        on_color = [0, 255, 0, 255]
+            for y in range(r_min, r_max+1):
+                for x in range(c_min, c_max+1):
+                    if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
+                        continue
 
-        q_color = on_color if skill_q else off_color
-        w_color = on_color if skill_w else off_color
-        e_color = on_color if skill_e else off_color
+                    tile = grid[y, x]
+                    if tile == 0:
+                        continue
+                    elif tile == 1:
+                        rl.DrawRectangle(x*ts, y*ts, ts, ts, [0, 0, 0, 255])
+                        continue
 
-        q_cd = player.q_timer
-        w_cd = player.w_timer
-        e_cd = player.e_timer
+            for y in range(r_min, r_max+1):
+                for x in range(c_min, c_max+1):
+                    if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
+                        continue
 
-        rl.DrawText(f'Q: {q_cd}'.encode(), 13*ts, hud_y - 20, 40, q_color)
-        rl.DrawText(f'W: {w_cd}'.encode(), 17*ts, hud_y - 20, 40, w_color)
-        rl.DrawText(f'E: {e_cd}'.encode(), 21*ts, hud_y - 20, 40, e_color)
-        rl.DrawText(f'Stun: {player.stun_timer}'.encode(), 25*ts, hud_y - 20, 20, e_color)
-        rl.DrawText(f'Move: {player.move_timer}'.encode(), 25*ts, hud_y, 20, e_color)
+                    tile = grid[y, x]
+                    if tile == EMPTY or tile == WALL:
+                        continue
+               
+                    pid = pids[y, x]
 
-        rl.EndDrawing()
+                    if pid == -1:
+                        rl.DrawRectangle(x*ts, y*ts, ts, ts, [255, 0, 0, 255])
+                        #raise ValueError(f'Invalid pid {pid} on tile {tile} at {y}, {x}')
+
+                    entity = entities[pid]
+                    tint = [255, 0, 0, 128] if entity.is_hit else [255, 255, 255, 255]
+                    #if entity.is_hit:
+                    #    rl.DrawRectangle(x*ts, y*ts, ts, ts, [255, 0, 0, 128])
+     
+                    entity_x = entity.last_x + tick_frac*(entity.x - entity.last_x)
+                    entity_y = entity.last_y + tick_frac*(entity.y - entity.last_y)
+                    tx = int(entity_x * ts)
+                    ty = int(entity_y * ts)
+
+                    draw_bars(rl, entity, tx, ty-8, ts)
+
+                    #atn = actions[idx]
+                    source_rect = self.asset_map[tile]
+                    #dest_rect = (j*ts, i*ts, ts, ts)
+                    dest_rect = (tx, ty, ts, ts)
+                    #print(f'tile: {tile}, source_rect: {source_rect}, dest_rect: {dest_rect}')
+                    rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
+                        (0, 0), 0, tint)#colors.WHITE)
+
+                    mods = []
+                    if entity.stun_timer > 0:
+                        mods.append('stun')
+
+                    buf_rect = (tx-ts//2, ty-ts//2, ts, ts)
+                    if entity.move_timer > 0:
+                        if entity.move_modifier < 0:
+                            mods.append('slow')
+                        if entity.move_modifier > 0:
+                            mods.append('speed')
+
+                    for mod in mods:
+                        rl.DrawTexturePro(self.puffer, self.asset_map[mod], buf_rect,
+                            (0, 0), 0, colors.WHITE)
+
+                    #if entity.pid == target_pid:
+                    #    rl.DrawCircle(x*ts + ts//2, y*ts + ts//2, ts//4, [0, 255, 0, 255])
+
+            # Draw circle at mouse x, y
+            rl.DrawCircle(ts*mouse_x + ts//2, ts*mouse_y + ts//8, ts//8, [255, 0, 0, 255])
+
+            rl.EndMode2D()
+
+            # Draw HUD
+            player = entities[HUMAN_PLAYER]
+            hud_y = self.height*ts - 2*ts
+            draw_bars(rl, player, 2*ts, hud_y, 10*ts, 24, draw_text=True)
+
+            off_color = [255, 255, 255, 255]
+            on_color = [0, 255, 0, 255]
+
+            q_color = on_color if skill_q else off_color
+            w_color = on_color if skill_w else off_color
+            e_color = on_color if skill_e else off_color
+
+            q_cd = player.q_timer
+            w_cd = player.w_timer
+            e_cd = player.e_timer
+
+            rl.DrawText(f'Q: {q_cd}'.encode(), 13*ts, hud_y - 20, 40, q_color)
+            rl.DrawText(f'W: {w_cd}'.encode(), 17*ts, hud_y - 20, 40, w_color)
+            rl.DrawText(f'E: {e_cd}'.encode(), 21*ts, hud_y - 20, 40, e_color)
+            rl.DrawText(f'Stun: {player.stun_timer}'.encode(), 25*ts, hud_y - 20, 20, e_color)
+            rl.DrawText(f'Move: {player.move_timer}'.encode(), 25*ts, hud_y, 20, e_color)
+
+            rl.EndDrawing()
+
         return self._cdata_to_numpy(), action
 
 def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
