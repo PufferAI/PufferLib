@@ -5,7 +5,7 @@
 # cython: wraparound=False
 # cython: cdivision=True
 # cython: nonecheck=False
-# cython: profile=False
+# cython: profile=True
 
 from libc.stdlib cimport rand, RAND_MAX
 from libc.math cimport sqrtf
@@ -716,20 +716,21 @@ cdef class Environment:
 
         cdef bint[5] in_range = [False, False, False, False, False]
         cdef int num_in_range = 0
-        cdef Entity* ally;
+        cdef Entity* ally
+        cdef int i
         for i in range(5):
             ally = self.get_entity(first_player_on_team + i)
-            #if abs(ally.y - player.y) + abs(ally.x - player.x) < XP_RANGE:
-            if max(abs(ally.y - target_y), abs(ally.x - target_x)) < XP_RANGE:
+            if ally.pid == player.pid:
+                in_range[i] = True
+                num_in_range += 1
+                continue
+
+            if max(abs(ally.y - target_y), abs(ally.x - target_x)) <= XP_RANGE:
                 in_range[i] = True
                 num_in_range += 1
 
-        if num_in_range == 0:
-            print(f'Invalid XP range: {XP_RANGE}')
-            print(f'target x: {target_x}, y: {target_y}')
-            print(f'player x: {player.x}, y: {player.y}')
-            exit(0)
         xp = xp / num_in_range
+
         for i in range(5):
             if not in_range[i]:
                 continue
@@ -888,7 +889,7 @@ cdef class Environment:
             bint valid_pos = False
             int spawn_y = int(self.waypoints[lane, 0, 0])
             int spawn_x = int(self.waypoints[lane, 0, 1])
-            int x, y
+            int x, y, i
 
         for i in range(10):
             y = spawn_y + rand() % 7 - 3
@@ -903,10 +904,12 @@ cdef class Environment:
         return valid_pos
 
     @cython.profile(False)
-    cdef void respawn_neutral(self, int idx, int camp):
+    cdef void respawn_neutral(self, int idx):
         cdef:
             Entity* neutral = self.get_neutral(idx)
-            int dy, dx
+            int spawn_y = int(neutral.spawn_y)
+            int spawn_x = int(neutral.spawn_x)
+            int y, x, i
 
         neutral.pid = idx + self.num_agents + self.num_creeps
         neutral.health = neutral.max_health
@@ -915,11 +918,17 @@ cdef class Environment:
         #neutral.x = 0
         #neutral.y = 0
 
-        for i in range(10):
-            dy = rand() % 7 - 3
-            dx = rand() % 7 - 3
-            if self.move_to(neutral, neutral.spawn_y + dy, neutral.spawn_x + dx):
+        # TODO: Clean up spawn regions. Some might be offset and are obscured.
+        # Maybe check all valid spawn spots?
+        for i in range(100):
+            y = spawn_y + rand() % 7 - 3
+            x = spawn_x + rand() % 7 - 3
+            if self.grid[y, x] == EMPTY:
                 break
+
+        if not self.move_to(neutral, y, x):
+            neutral.pid = -1
+            print(f'Failed to respawn neutral {idx} at spawn {spawn_y}, {spawn_x}. Grid: {self.grid[y, x]}')
 
 
     @cython.profile(False)
@@ -1404,7 +1413,7 @@ cdef class Environment:
         if self.tick % 600 == 0:
             for camp in range(18):
                 for neut in range(4):
-                    self.respawn_neutral(4*camp + neut, camp)
+                    self.respawn_neutral(4*camp + neut)
 
         for idx in range(self.num_neutrals):
             neutral = self.get_neutral(idx)
