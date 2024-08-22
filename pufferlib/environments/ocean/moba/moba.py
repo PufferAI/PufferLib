@@ -11,7 +11,7 @@ from pufferlib.environments.ocean.moba.c_moba import Environment as CEnv
 from pufferlib.environments.ocean.moba.c_moba import entity_dtype, reward_dtype,step_all
 from pufferlib.environments.ocean.moba.c_precompute_pathing import precompute_pathing
 
-HUMAN_PLAYER = 1
+HUMAN_PLAYER = 2
 
 EMPTY = 0
 WALL = 1
@@ -375,6 +375,10 @@ class RaylibClient:
         self.asset_map = asset_map
         self.tile_size = tile_size
 
+        game_map_path = os.path.join(
+            *self.__module__.split('.')[:-1], 'dota_map.png')
+        shader_path = os.path.join(
+            *self.__module__.split('.')[:-1], 'moba_shader.fs')
         sprite_sheet_path = os.path.join(
             *self.__module__.split('.')[:-1], 'moba_assets.png')
         self.asset_map = {
@@ -401,7 +405,15 @@ class RaylibClient:
         rl.InitWindow(width*tile_size, height*tile_size,
             "PufferLib Ray Grid".encode())
         rl.SetTargetFPS(60)
+        self.game_map = rl.LoadTexture(game_map_path.encode())
         self.puffer = rl.LoadTexture(sprite_sheet_path.encode())
+        self.shader = rl.LoadShader(''.encode(), shader_path.encode())
+        self.shader_camera_x = rl.GetShaderLocation(self.shader, 'camera_x'.encode())
+        self.shader_camera_y = rl.GetShaderLocation(self.shader, 'camera_y'.encode())
+        self.shader_time = rl.GetShaderLocation(self.shader, 'time'.encode())
+        self.shader_texture1 = rl.GetShaderLocation(self.shader, 'texture1'.encode())
+        self.shader_canvas = rl.LoadTextureFromImage(rl.GenImageColor(
+            self.width*self.tile_size, self.height*self.tile_size, [0, 0, 0, 255]))
         self.rl = rl
         self.colors = colors
 
@@ -443,6 +455,10 @@ class RaylibClient:
 
             main_r = my_player.last_y + tick_frac*(my_player.y - my_player.last_y)
             main_c = my_player.last_x + tick_frac*(my_player.x - my_player.last_x)
+
+            main_r_shader = (main_r - self.height/2) / 128
+            main_c_shader = (main_c - self.width/2) / 128
+
             #main_r = my_player.y
             #main_c = my_player.x
             self.camera.target.x = int((main_c - self.width//2) * ts)
@@ -502,9 +518,32 @@ class RaylibClient:
             action = (ay, ax, target_heros, skill_q, skill_w, skill_e)
 
             rl.BeginDrawing()
-            rl.BeginMode2D(self.camera)
             rl.ClearBackground([6, 24, 24, 255])
 
+            rl.BeginShaderMode(self.shader)
+            #print(self.camera.target.x, self.camera.target.y)
+            #print(self.camera.target.x/self.tile_size/self.width, self.camera.target.y/self.tile_size/self.height)
+            #camera_x_ptr = self.ffi.new('float *', self.camera.target.x/self.tile_size/self.width)
+            #camera_y_ptr = self.ffi.new('float *', self.camera.target.y/self.tile_size/self.height)
+            #rl.SetShaderValue(self.shader, self.shader_camera_x, camera_x_ptr, rl.SHADER_UNIFORM_FLOAT)
+            #rl.SetShaderValue(self.shader, self.shader_camera_y, camera_y_ptr, rl.SHADER_UNIFORM_FLOAT)
+            print(main_c_shader, main_r_shader)
+            camera_x_ptr = self.ffi.new('float *', main_c_shader)
+            camera_y_ptr = self.ffi.new('float *', main_r_shader)
+            import time
+            shader_time =  time.process_time()
+            shader_time_ptr = self.ffi.new('float *', shader_time)
+            rl.SetShaderValue(self.shader, self.shader_camera_x, camera_x_ptr, rl.SHADER_UNIFORM_FLOAT)
+            rl.SetShaderValue(self.shader, self.shader_camera_y, camera_y_ptr, rl.SHADER_UNIFORM_FLOAT)
+            rl.SetShaderValue(self.shader, self.shader_time, shader_time_ptr, rl.SHADER_UNIFORM_FLOAT)
+            rl.SetShaderValueTexture(self.shader, self.shader_texture1, self.game_map)
+            #rl.DrawRectangle(0, 0, self.width*ts, self.height*ts, [255, 255, 255, 255])
+            rl.DrawTexture(self.shader_canvas, 0, 0, colors.WHITE)
+            #rl.DrawTexture(self.game_map, 0, 0, colors.WHITE)
+            rl.EndShaderMode()
+
+            rl.BeginMode2D(self.camera)
+            '''
             for y in range(r_min, r_max+1):
                 for x in range(c_min, c_max+1):
                     if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
@@ -516,6 +555,7 @@ class RaylibClient:
                     elif tile == 1:
                         rl.DrawRectangle(x*ts, y*ts, ts, ts, [0, 0, 0, 255])
                         continue
+            '''
 
             for y in range(r_min, r_max+1):
                 for x in range(c_min, c_max+1):
