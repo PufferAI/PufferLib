@@ -579,6 +579,9 @@ def count_params(policy):
 def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_kwargs,
         backend, render_mode='auto', model_path=None, device='cuda'):
 
+    if render_mode != 'auto':
+        env_kwargs['render_mode'] = render_mode
+
     # We are just using Serial vecenv to give a consistent
     # single-agent/multi-agent API for evaluation
     env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs, backend=backend)
@@ -592,15 +595,6 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
     driver = env.driver_env
     os.system('clear')
     state = None
-    
-    # Silently handle conflicts between runtime and agent render modes
-    if render_mode != 'auto':
-        if driver.render_mode is not None:
-            render_mode = driver.render_mode
-        else:
-            render_mode = agent_kwargs['render_mode']
-    else:
-        render_mode = driver.render_mode
 
     frames = []
     tick = 0
