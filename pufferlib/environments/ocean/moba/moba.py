@@ -11,7 +11,7 @@ from pufferlib.environments.ocean.moba.c_moba import Environment as CEnv
 from pufferlib.environments.ocean.moba.c_moba import entity_dtype, reward_dtype,step_all
 from pufferlib.environments.ocean.moba.c_precompute_pathing import precompute_pathing
 
-HUMAN_PLAYER = 2
+HUMAN_PLAYER = 1
 
 EMPTY = 0
 WALL = 1
@@ -379,6 +379,8 @@ class RaylibClient:
             *self.__module__.split('.')[:-1], 'dota_map.png')
         shader_path = os.path.join(
             *self.__module__.split('.')[:-1], 'moba_shader.fs')
+        bloom_shader_path = os.path.join(
+            *self.__module__.split('.')[:-1], 'bloom_shader.fs')
         sprite_sheet_path = os.path.join(
             *self.__module__.split('.')[:-1], 'moba_assets.png')
         self.asset_map = {
@@ -412,8 +414,11 @@ class RaylibClient:
         self.shader_camera_y = rl.GetShaderLocation(self.shader, 'camera_y'.encode())
         self.shader_time = rl.GetShaderLocation(self.shader, 'time'.encode())
         self.shader_texture1 = rl.GetShaderLocation(self.shader, 'texture1'.encode())
-        self.shader_canvas = rl.LoadTextureFromImage(rl.GenImageColor(
-            self.width*self.tile_size, self.height*self.tile_size, [0, 0, 0, 255]))
+        #self.shader_canvas = rl.LoadTextureFromImage(rl.GenImageColor(
+        #    self.width*self.tile_size, self.height*self.tile_size, [0, 0, 0, 255]))
+        self.shader_canvas = rl.LoadTextureFromImage(rl.GenImageColor(2560, 1440, [0, 0, 0, 255]))
+
+        self.bloom_shader = rl.LoadShader(''.encode(), bloom_shader_path.encode())
         self.rl = rl
         self.colors = colors
 
@@ -451,6 +456,9 @@ class RaylibClient:
         target_heros = 1
 
         for frame in range(1, frames+1):
+            self.width = rl.GetScreenWidth() // ts
+            self.height = rl.GetScreenHeight() // ts
+
             tick_frac = frame / frames
 
             main_r = my_player.last_y + tick_frac*(my_player.y - my_player.last_y)
@@ -557,6 +565,7 @@ class RaylibClient:
                         continue
             '''
 
+            render_entities = []
             for y in range(r_min, r_max+1):
                 for x in range(c_min, c_max+1):
                     if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
@@ -572,43 +581,92 @@ class RaylibClient:
                         rl.DrawRectangle(x*ts, y*ts, ts, ts, [255, 0, 0, 255])
                         #raise ValueError(f'Invalid pid {pid} on tile {tile} at {y}, {x}')
 
-                    entity = entities[pid]
-                    tint = [255, 0, 0, 128] if entity.is_hit else [255, 255, 255, 255]
-                    #if entity.is_hit:
-                    #    rl.DrawRectangle(x*ts, y*ts, ts, ts, [255, 0, 0, 128])
-     
-                    entity_x = entity.last_x + tick_frac*(entity.x - entity.last_x)
-                    entity_y = entity.last_y + tick_frac*(entity.y - entity.last_y)
-                    tx = int(entity_x * ts)
-                    ty = int(entity_y * ts)
+                    render_entities.append((pid, y, x))
 
-                    draw_bars(rl, entity, tx, ty-8, ts)
+            # Targeting overlays
+            for pid, y, x in render_entities:
+                entity = entities[pid]
+                if entity.target_pid == -1:
+                    continue
 
-                    #atn = actions[idx]
-                    source_rect = self.asset_map[tile]
-                    #dest_rect = (j*ts, i*ts, ts, ts)
-                    dest_rect = (tx, ty, ts, ts)
-                    #print(f'tile: {tile}, source_rect: {source_rect}, dest_rect: {dest_rect}')
-                    rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
-                        (0, 0), 0, tint)#colors.WHITE)
+                entity_x = entity.last_x + tick_frac*(entity.x - entity.last_x)
+                entity_y = entity.last_y + tick_frac*(entity.y - entity.last_y)
 
-                    mods = []
-                    if entity.stun_timer > 0:
-                        mods.append('stun')
+                target = entities[entity.target_pid]
+                target_x = target.last_x + tick_frac*(target.x - target.last_x)
+                target_y = target.last_y + tick_frac*(target.y - target.last_y)
 
-                    buf_rect = (tx-ts//2, ty-ts//2, ts, ts)
-                    if entity.move_timer > 0:
-                        if entity.move_modifier < 0:
-                            mods.append('slow')
-                        if entity.move_modifier > 0:
-                            mods.append('speed')
+                if entity.team == 0:
+                    base = [0, 128, 128, 255]
+                    accent = [0, 255, 255, 255]
+                elif entity.team == 1:
+                    base = [128, 0, 0, 255]
+                    accent = [255, 0, 0, 255]
+                else:
+                    base = [128, 128, 128, 255]
+                    accent = [255, 255, 255, 255]
+ 
+                target_px = int(target_x*ts + ts//2)
+                target_py = int(target_y*ts + ts//2)
+                entity_px = int(entity_x*ts + ts//2)
+                entity_py = int(entity_y*ts + ts//2)
 
-                    for mod in mods:
-                        rl.DrawTexturePro(self.puffer, self.asset_map[mod], buf_rect,
-                            (0, 0), 0, colors.WHITE)
+                if entity.attack_aoe == 0:
+                    rl.DrawLineEx([entity_px, entity_py],
+                        [target_px, target_py], ts//16, accent)
+                else:
+                    radius = int(entity.attack_aoe*ts)
+                    rl.DrawRectangle(target_px - radius, target_py - radius,
+                        2*radius, 2*radius, base)
+                    rl.DrawRectangleLinesEx([target_px - radius, target_py - radius,
+                        2*radius, 2*radius], ts//8, accent)
 
-                    #if entity.pid == target_pid:
-                    #    rl.DrawCircle(x*ts + ts//2, y*ts + ts//2, ts//4, [0, 255, 0, 255])
+            # Entity renders
+            for pid, y, x in render_entities:
+                tint = [255, 255, 255, 255]
+                '''
+                if entity.is_hit:
+                    tint = [255, 255, 255, 255]
+                    if entity.team == 0:
+                        tint = [0, 255, 255, 128]
+                    else:
+                        tint = [255, 0, 0, 128]
+                '''
+
+                entity = entities[pid]
+                entity_x = entity.last_x + tick_frac*(entity.x - entity.last_x)
+                entity_y = entity.last_y + tick_frac*(entity.y - entity.last_y)
+                tx = int(entity_x * ts)
+                ty = int(entity_y * ts)
+                draw_bars(rl, entity, tx, ty-8, ts)
+
+                tile = grid[y, x]
+                source_rect = self.asset_map[tile]
+                dest_rect = (tx, ty, ts, ts)
+
+                if entity.is_hit:
+                    rl.BeginShaderMode(self.bloom_shader)
+
+                rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
+                    (0, 0), 0, tint)#colors.WHITE)
+
+                if entity.is_hit:
+                    rl.EndShaderMode()
+
+                mods = []
+                if entity.stun_timer > 0:
+                    mods.append('stun')
+
+                buf_rect = (tx-ts//2, ty-ts//2, ts, ts)
+                if entity.move_timer > 0:
+                    if entity.move_modifier < 0:
+                        mods.append('slow')
+                    if entity.move_modifier > 0:
+                        mods.append('speed')
+
+                for mod in mods:
+                    rl.DrawTexturePro(self.puffer, self.asset_map[mod], buf_rect,
+                        (0, 0), 0, colors.WHITE)
 
             # Draw circle at mouse x, y
             rl.DrawCircle(ts*mouse_x + ts//2, ts*mouse_y + ts//8, ts//8, [255, 0, 0, 255])
@@ -617,11 +675,15 @@ class RaylibClient:
 
             # Draw HUD
             player = entities[HUMAN_PLAYER]
-            hud_y = self.height*ts - 2*ts
-            draw_bars(rl, player, 2*ts, hud_y, 10*ts, 24, draw_text=True)
 
             off_color = [255, 255, 255, 255]
-            on_color = [0, 255, 0, 255]
+            if player.team == 0:
+                on_color = [0, 255, 255, 255]
+            else:
+                on_color = [255, 0, 0, 255]
+
+            hud_y = self.height*ts - 2*ts
+            draw_bars(rl, player, 2*ts, hud_y, 10*ts, 24, draw_text=True)
 
             q_color = on_color if skill_q else off_color
             w_color = on_color if skill_w else off_color
@@ -655,11 +717,17 @@ def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
         rl.DrawRectangle(x, y - height - 2, width, height, [255, 0, 0, 255])
         rl.DrawRectangle(x, y - height - 2, int(width*mana_bar), height, [0, 255, 255, 255])
 
+    if entity.team == 0:
+        color = [0, 255, 255, 255]
+    else:
+        color = [255, 0, 0, 255]
+
     if draw_text:
         health = int(entity.health)
         mana = int(entity.mana)
         max_health = int(entity.max_health)
         max_mana = int(entity.max_mana)
+
         rl.DrawText(f'Health: {health}/{max_health}'.encode(),
             x+8, y+2, 20, [255, 255, 255, 255])
         rl.DrawText(f'Mana: {mana}/{max_mana}'.encode(),
@@ -671,7 +739,7 @@ def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
 
     elif entity.entity_type == 0:
         rl.DrawText(f'Level: {entity.level}'.encode(),
-            x+4, y -2*height - 12, 12, [255, 255, 255, 255])
+            x+4, y -2*height - 12, 12, color)
 
 
 def test_performance(timeout=20, atn_cache=1024, num_envs=400):

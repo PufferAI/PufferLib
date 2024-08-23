@@ -100,6 +100,8 @@ cdef struct Entity:
     int towers_killed
     float last_x
     float last_y
+    int target_pid
+    int attack_aoe
 
 cdef struct Reward:
     float death
@@ -671,6 +673,7 @@ cdef class Environment:
         if target.team == player.team:
             return False
 
+        player.target_pid = target.pid
         cdef float current_health = target.health
         target.is_hit = 1
         target.health -= damage
@@ -1105,6 +1108,8 @@ cdef class Environment:
             return False
 
         self.aoe_scanned(player, target, damage, stun)
+        player.target_pid = target.pid
+        player.attack_aoe = radius
         return True
 
     @cython.profile(False)
@@ -1593,6 +1598,8 @@ cdef class Environment:
 
         for pid in range(self.num_agents + self.num_towers + self.num_creeps + self.num_neutrals):
             player = self.get_entity(pid)
+            player.target_pid = -1
+            player.attack_aoe = 0
             player.last_x = player.x
             player.last_y = player.y
             player.is_hit = 0
