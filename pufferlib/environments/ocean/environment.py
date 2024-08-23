@@ -96,7 +96,7 @@ def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision
         vision=vision,
     )
 
-def make_continuous(discretize=False):
+def make_continuous(discretize=False, **kwargs):
     from . import sanity
     env = sanity.Continuous(discretize=discretize)
     if not discretize:
@@ -106,7 +106,7 @@ def make_continuous(discretize=False):
 
 def make_squared(distance_to_target=3, num_targets=1, **kwargs):
     from . import sanity
-    env = sanity.Squared(distance_to_target=distance_to_target, num_targets=num_targets)
+    env = sanity.Squared(distance_to_target=distance_to_target, num_targets=num_targets, **kwargs)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
@@ -123,25 +123,25 @@ def make_memory(mem_length=2, mem_delay=2, **kwargs):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
-def make_password(password_length=5):
+def make_password(password_length=5, **kwargs):
     from . import sanity
     env = sanity.Password(password_length=password_length)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
-def make_performance(delay_mean=0, delay_std=0, bandwidth=1):
+def make_performance(delay_mean=0, delay_std=0, bandwidth=1, **kwargs):
     from . import sanity
     env = sanity.Performance(delay_mean=delay_mean, delay_std=delay_std, bandwidth=bandwidth)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
-def make_performance_empiric(count_n=0, count_std=0, bandwidth=1):
+def make_performance_empiric(count_n=0, count_std=0, bandwidth=1, **kwargs):
     from . import sanity
     env = sanity.PerformanceEmpiric(count_n=count_n, count_std=count_std, bandwidth=bandwidth)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
-def make_stochastic(p=0.7, horizon=100):
+def make_stochastic(p=0.7, horizon=100, **kwargs):
     from . import sanity
     env = sanity.Stochastic(p=p, horizon=100)
     env = pufferlib.postprocess.EpisodeStats(env)
@@ -153,7 +153,7 @@ def make_spaces(**kwargs):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
-def make_multiagent():
+def make_multiagent(**kwargs):
     from . import sanity
     env = sanity.Multiagent()
     env = pufferlib.postprocess.MultiagentEpisodeStats(env)
