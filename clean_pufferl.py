@@ -40,11 +40,13 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
     obs_shape = vecenv.single_observation_space.shape
     obs_dtype = vecenv.single_observation_space.dtype
     atn_shape = vecenv.single_action_space.shape
+    atn_dtype = vecenv.single_action_space.dtype
     total_agents = vecenv.num_agents
 
     lstm = policy.lstm if hasattr(policy, 'lstm') else None
     experience = Experience(config.batch_size, config.bptt_horizon,
-        config.minibatch_size, obs_shape, obs_dtype, atn_shape, config.cpu_offload, config.device, lstm, total_agents)
+        config.minibatch_size, obs_shape, obs_dtype, atn_shape, atn_dtype,
+        config.cpu_offload, config.device, lstm, total_agents)
 
     uncompiled_policy = policy
 
@@ -401,17 +403,18 @@ def make_losses():
 
 class Experience:
     '''Flat tensor storage and array views for faster indexing'''
-    def __init__(self, batch_size, bptt_horizon, minibatch_size, obs_shape, obs_dtype, atn_shape,
+    def __init__(self, batch_size, bptt_horizon, minibatch_size, obs_shape, obs_dtype, atn_shape, atn_dtype,
                  cpu_offload=False, device='cuda', lstm=None, lstm_total_agents=0):
         if minibatch_size is None:
             minibatch_size = batch_size
 
         obs_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_dtype]
+        atn_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_dtype]
         pin = device == 'cuda' and cpu_offload
         obs_device = device if not pin else 'cpu'
         self.obs=torch.zeros(batch_size, *obs_shape, dtype=obs_dtype,
             pin_memory=pin, device=device if not pin else 'cpu')
-        self.actions=torch.zeros(batch_size, *atn_shape, dtype=int, pin_memory=pin)
+        self.actions=torch.zeros(batch_size, *atn_shape, dtype=atn_dtype, pin_memory=pin)
         self.logprobs=torch.zeros(batch_size, pin_memory=pin)
         self.rewards=torch.zeros(batch_size, pin_memory=pin)
         self.dones=torch.zeros(batch_size, pin_memory=pin)
@@ -576,11 +579,11 @@ def count_params(policy):
 def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_kwargs,
         backend, render_mode='auto', model_path=None, device='cuda'):
 
-    # We are just using Serial vecenv to give a consistent
-    # single-agent/multi-agent API for evaluation
     if render_mode != 'auto':
         env_kwargs['render_mode'] = render_mode
 
+    # We are just using Serial vecenv to give a consistent
+    # single-agent/multi-agent API for evaluation
     env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs, backend=backend)
 
     if model_path is None:
@@ -627,8 +630,9 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
         tick += 1
 
     # Save frames as gif
-    import imageio
-    imageio.mimsave('../docker/eval.gif', frames, fps=15, loop=0)
+    if frames:
+        import imageio
+        os.makedirs('../docker', exist_ok=True) or imageio.mimsave('../docker/eval.gif', frames, fps=15, loop=0)
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)

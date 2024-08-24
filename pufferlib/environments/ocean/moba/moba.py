@@ -11,6 +11,8 @@ from pufferlib.environments.ocean.moba.c_moba import Environment as CEnv
 from pufferlib.environments.ocean.moba.c_moba import entity_dtype, reward_dtype,step_all
 from pufferlib.environments.ocean.moba.c_precompute_pathing import precompute_pathing
 
+HUMAN_PLAYER = 1
+
 EMPTY = 0
 WALL = 1
 
@@ -42,7 +44,7 @@ COLORS = np.array([
 PLAYER_OBS_N = 26
 
 class PufferMoba(pufferlib.PufferEnv):
-    def __init__(self, num_envs=4, vision_range=5, agent_speed=0.5,
+    def __init__(self, num_envs=4, vision_range=5, agent_speed=1.0,
             discretize=True, reward_death=-1.0, reward_xp=0.006,
             reward_distance=0.05, reward_tower=3.0,
             report_interval=32, render_mode='rgb_array'):
@@ -105,10 +107,10 @@ class PufferMoba(pufferlib.PufferEnv):
 
         self.grid = np.zeros((self.height, self.width), dtype=np.uint8)
         self.grid[game_map == 0] = WALL
-        self.grid[:self.vision_range] = WALL
-        self.grid[-self.vision_range:] = WALL
-        self.grid[:, :self.vision_range] = WALL
-        self.grid[:, -self.vision_range:] = WALL
+        self.grid[:self.vision_range + 1] = WALL
+        self.grid[-self.vision_range - 1:] = WALL
+        self.grid[:, :self.vision_range + 1] = WALL
+        self.grid[:, -self.vision_range - 1:] = WALL
 
         self.pids = np.zeros((self.num_envs, self.height, self.width), dtype=np.int32) - 1
 
@@ -148,14 +150,12 @@ class PufferMoba(pufferlib.PufferEnv):
         self.observation_space = gymnasium.spaces.Box(low=0, high=255,
             shape=(self.obs_map_bytes + PLAYER_OBS_N,), dtype=np.uint8)
 
+        atn_vec = [7, 7, 3, 2, 2, 2]
+        self.actions = np.zeros((self.num_agents, len(atn_vec)), dtype=np.int32)
+
         if discretize:
-            #self.action_space = gymnasium.spaces.MultiDiscrete([3, 3, 10, 2, 2, 2])
-            #self.action_space = gymnasium.spaces.MultiDiscrete([9, 4])
-            self.action_space = gymnasium.spaces.Discrete(9)
-            #self.actions = np.zeros((self.num_agents, 2), dtype=np.int32)
-            self.actions = np.zeros(self.num_agents, dtype=np.int32)
+            self.action_space = gymnasium.spaces.MultiDiscrete(atn_vec)
         else:
-            self.actions = np.zeros((self.num_agents, 6), dtype=np.float32)
             finfo = np.finfo(np.float32)
             self.action_space = gymnasium.spaces.Box(
                 low=finfo.min,
@@ -174,11 +174,12 @@ class PufferMoba(pufferlib.PufferEnv):
     def render(self, upscale=4):
         grid = self.grid
         if self.render_mode in ('rgb_array', 'raylib'):
+            #debug_grid = ((grid != EMPTY) * (grid != WALL)).astype(np.uint8)
             return self.client.render(grid)
         elif self.render_mode == 'human':
             frame, self.human_action = self.client.render(
                 self.grid, self.pids[0], self.entities[0], self.obs_players[0],
-                self.actions[:10], self.discretize)
+                self.actions[:10], self.discretize, 12)
             return frame
         else:
             raise ValueError(f'Invalid render mode: {self.render_mode}')
@@ -202,9 +203,17 @@ class PufferMoba(pufferlib.PufferEnv):
         ] = AGENT_1
         '''
 
+        grid_copy = self.grid.copy()
+        self.sum_rewards = []
+
+        if hasattr(self, 'c_envs'):
+            for i in range(self.num_envs):
+                self.c_envs[i].reset()
+
+            return self.buf.observations, self.infos
+
         ptr = end = 0
         self.c_envs = []
-        grid_copy = self.grid.copy()
         for i in range(self.num_envs):
             end += 10
 
@@ -222,21 +231,26 @@ class PufferMoba(pufferlib.PufferEnv):
                 self.num_neutrals, self.num_towers, self.vision_range, self.agent_speed,
                 True, self.reward_death, self.reward_xp, self.reward_distance, self.reward_tower))
             self.c_envs[i].reset()
+            if i != 0:
+                self.c_envs[i].randomize_tower_hp()
             ptr = end
 
-        self.sum_rewards = []
         return self.buf.observations, self.infos
 
     def step(self, actions):
         #self.actions[:] = actions.astype(np.float32)
         self.actions[:] = actions#.astype(np.float32)
+        self.actions[:, :2] -= 3
+        self.actions[:, :2] *= 33
 
         if self.render_mode == 'human' and self.human_action is not None:
             #print(self.human_action)
-            self.actions[0] = self.human_action
+            self.actions[HUMAN_PLAYER] = self.human_action
+            #print(self.actions[HUMAN_PLAYER])
 
         step_all(self.c_envs)
         infos = {}
+
 
         #print('Reward: ', self.buf.rewards[0])
 
@@ -256,7 +270,7 @@ class PufferMoba(pufferlib.PufferEnv):
         #elif outcome == 1:
         #    print('Dire Victory')
         #elif outcome == 2:
-        #    print('Radient Victory')
+        #    print('Radiant Victory')
 
         #self.sum_rewards.append(self.buf.rewards.sum())
 
@@ -265,7 +279,7 @@ class PufferMoba(pufferlib.PufferEnv):
             #infos['reward'] = np.mean(self.sum_rewards) / self.num_agents
             infos['reward'] = np.mean(self.buf.rewards)
             levels = self.entities.level
-            infos['radient_level_mean'] = np.mean(levels[:, :5])
+            infos['radiant_level_mean'] = np.mean(levels[:, :5])
             infos['dire_level'] = np.mean(levels[:, 5:10])
             infos['reward_death'] = np.mean(self.rewards.death)
             infos['reward_xp'] = np.mean(self.rewards.xp)
@@ -273,9 +287,81 @@ class PufferMoba(pufferlib.PufferEnv):
             infos['reward_tower'] = np.mean(self.rewards.tower)
             infos['total_towers_taken'] = np.mean([env.total_towers_taken for env in self.c_envs])
             infos['total_levels_gained'] = np.mean([env.total_levels_gained for env in self.c_envs])
+            infos['radiant_victories'] = np.mean([env.radiant_victories for env in self.c_envs])
+            infos['dire_victories'] = np.mean([env.dire_victories for env in self.c_envs])
             infos['norm_reward'] = np.mean(self.norm_rewards)
+
+            support = self.entities[:, 0:10:5]
+            assassin = self.entities[:, 1:10:5]
+            burst = self.entities[:, 2:10:5]
+            tank = self.entities[:, 3:10:5]
+            carry = self.entities[:, 4:10:5]
+
+            infos['level/support'] = np.mean(support.level)
+            infos['level/assassin'] = np.mean(assassin.level)
+            infos['level/burst'] = np.mean(burst.level)
+            infos['level/tank'] = np.mean(tank.level)
+            infos['level/carry'] = np.mean(carry.level)
+
+            infos['deaths/support'] = np.mean(support.deaths)
+            infos['deaths/assassin'] = np.mean(assassin.deaths)
+            infos['deaths/burst'] = np.mean(burst.deaths)
+            infos['deaths/tank'] = np.mean(tank.deaths)
+            infos['deaths/carry'] = np.mean(carry.deaths)
+
+            infos['heros_killed/support'] = np.mean(support.heros_killed)
+            infos['heros_killed/assassin'] = np.mean(assassin.heros_killed)
+            infos['heros_killed/burst'] = np.mean(burst.heros_killed)
+            infos['heros_killed/tank'] = np.mean(tank.heros_killed)
+            infos['heros_killed/carry'] = np.mean(carry.heros_killed)
+            infos['heros_killed/assassin'] = np.mean(assassin.heros_killed)
+
+            infos['damage_dealt/support'] = np.mean(support.damage_dealt)
+            infos['damage_dealt/assassin'] = np.mean(assassin.damage_dealt)
+            infos['damage_dealt/burst'] = np.mean(burst.damage_dealt)
+            infos['damage_dealt/tank'] = np.mean(tank.damage_dealt)
+            infos['damage_dealt/carry'] = np.mean(carry.damage_dealt)
+
+            infos['damage_received/support'] = np.mean(support.damage_received)
+            infos['damage_received/assassin'] = np.mean(assassin.damage_received)
+            infos['damage_received/burst'] = np.mean(burst.damage_received)
+            infos['damage_received/tank'] = np.mean(tank.damage_received)
+            infos['damage_received/carry'] = np.mean(carry.damage_received)
+
+            infos['healing_dealt/support'] = np.mean(support.healing_dealt)
+            infos['healing_dealt/assassin'] = np.mean(assassin.healing_dealt)
+            infos['healing_dealt/burst'] = np.mean(burst.healing_dealt)
+            infos['healing_dealt/tank'] = np.mean(tank.healing_dealt)
+            infos['healing_dealt/carry'] = np.mean(carry.healing_dealt)
+
+            infos['healing_received/support'] = np.mean(support.healing_received)
+            infos['healing_received/assassin'] = np.mean(assassin.healing_received)
+            infos['healing_received/burst'] = np.mean(burst.healing_received)
+            infos['healing_received/tank'] = np.mean(tank.healing_received)
+            infos['healing_received/carry'] = np.mean(carry.healing_received)
+
+            infos['usage/support_q'] = np.mean(support.q_uses)
+            infos['usage/support_w'] = np.mean(support.w_uses)
+            infos['usage/support_e'] = np.mean(support.e_uses)
+
+            infos['usage/assassin_q'] = np.mean(assassin.q_uses)
+            infos['usage/assassin_w'] = np.mean(assassin.w_uses)
+            infos['usage/assassin_e'] = np.mean(assassin.e_uses)
+
+            infos['usage/burst_q'] = np.mean(burst.q_uses)
+            infos['usage/burst_w'] = np.mean(burst.w_uses)
+            infos['usage/burst_e'] = np.mean(burst.e_uses)
+
+            infos['usage/tank_q'] = np.mean(tank.q_uses)
+            infos['usage/tank_w'] = np.mean(tank.w_uses)
+            infos['usage/tank_e'] = np.mean(tank.e_uses)
+
+            infos['usage/carry_q'] = np.mean(carry.q_uses)
+            infos['usage/carry_w'] = np.mean(carry.w_uses)
+            infos['usage/carry_e'] = np.mean(carry.e_uses)
+
             #self.sum_rewards = []
-            #print('Radient Lv: ', infos['radient_level_mean'])
+            #print('Radiant Lv: ', infos['radiant_level_mean'])
             #print('Dire Lv: ', infos['dire_level_mean'])
             #infos['moba_map'] = self.client.render(self.grid)
 
@@ -289,30 +375,50 @@ class RaylibClient:
         self.asset_map = asset_map
         self.tile_size = tile_size
 
+        game_map_path = os.path.join(
+            *self.__module__.split('.')[:-1], 'dota_map.png')
+        shader_path = os.path.join(
+            *self.__module__.split('.')[:-1], 'moba_shader.fs')
+        bloom_shader_path = os.path.join(
+            *self.__module__.split('.')[:-1], 'bloom_shader.fs')
         sprite_sheet_path = os.path.join(
-            *self.__module__.split('.')[:-1], 'puffer_chars.png')
+            *self.__module__.split('.')[:-1], 'moba_assets.png')
         self.asset_map = {
-            2: (512, 0, 128, 128),
-            11: (0, 0, 128, 128),
-            12: (0, 0, 128, 128),
-            13: (0, 0, 128, 128),
-            14: (0, 0, 128, 128),
-            15: (0, 0, 128, 128),
-            6: (128, 0, 128, 128),
-            7: (128, 0, 128, 128),
-            8: (128, 0, 128, 128),
-            9: (128, 0, 128, 128),
-            10: (128, 0, 128, 128),
+            2: (384, 384, 128, 128),
+            11: (256, 256, 128, 128),
+            12: (384, 256, 128, 128),
+            13: (128, 256, 128, 128),
+            14: (0, 256, 128, 128),
+            15: (0, 384, 128, 128),
+            6: (256, 256, 128, 128),
+            7: (384, 256, 128, 128),
+            8: (128, 256, 128, 128),
+            9: (0, 256, 128, 128),
+            10: (0, 384, 128, 128),
             4: (256, 0, 128, 128),
             3: (384, 0, 128, 128),
-            5: (384, 0, 128, 128),
+            5: (384, 128, 128, 128),
+            'stun': (0, 128, 128, 128),
+            'slow': (128, 128, 128, 128),
+            'speed': (256, 128, 128, 128),
         }
 
         from raylib import rl, colors
         rl.InitWindow(width*tile_size, height*tile_size,
             "PufferLib Ray Grid".encode())
-        rl.SetTargetFPS(10)
+        rl.SetTargetFPS(60)
+        self.game_map = rl.LoadTexture(game_map_path.encode())
         self.puffer = rl.LoadTexture(sprite_sheet_path.encode())
+        self.shader = rl.LoadShader(''.encode(), shader_path.encode())
+        self.shader_camera_x = rl.GetShaderLocation(self.shader, 'camera_x'.encode())
+        self.shader_camera_y = rl.GetShaderLocation(self.shader, 'camera_y'.encode())
+        self.shader_time = rl.GetShaderLocation(self.shader, 'time'.encode())
+        self.shader_texture1 = rl.GetShaderLocation(self.shader, 'texture1'.encode())
+        #self.shader_canvas = rl.LoadTextureFromImage(rl.GenImageColor(
+        #    self.width*self.tile_size, self.height*self.tile_size, [0, 0, 0, 255]))
+        self.shader_canvas = rl.LoadTextureFromImage(rl.GenImageColor(2560, 1440, [0, 0, 0, 255]))
+
+        self.bloom_shader = rl.LoadShader(''.encode(), bloom_shader_path.encode())
         self.rl = rl
         self.colors = colors
 
@@ -326,6 +432,8 @@ class RaylibClient:
         from cffi import FFI
         self.ffi = FFI()
 
+        self.last_click = None
+
     def _cdata_to_numpy(self):
         image = self.rl.LoadImageFromScreen()
         width, height, channels = image.width, image.height, 4
@@ -333,239 +441,267 @@ class RaylibClient:
         return np.frombuffer(cdata, dtype=np.uint8
             ).reshape((height, width, channels))[:, :, :3]
 
-    def render(self, grid, pids, entities, obs_players, actions, discretize):
+    def render(self, grid, pids, entities, obs_players, actions, discretize, frames):
         rl = self.rl
         colors = self.colors
-        ay, ax = None, None
 
+        my_player = entities[HUMAN_PLAYER]
         ts = self.tile_size
-        main_r = entities[0].y
-        main_c = entities[0].x
-        self.camera.target.x = (main_c - self.width//2) * ts
-        self.camera.target.y = (main_r - self.height//2) * ts
-        main_r = int(main_r)
-        main_c = int(main_c)
-        r_min = main_r - self.height//2 - 1
-        r_max = main_r + self.height//2 + 1
-        c_min = main_c - self.width//2 - 1
-        c_max = main_c + self.width//2 + 1
 
-        pos = rl.GetMousePosition()
-        raw_mouse_x = pos.x + self.camera.target.x
-        raw_mouse_y = pos.y + self.camera.target.y
-        mouse_x = int(raw_mouse_x // ts)
-        mouse_y = int(raw_mouse_y // ts)
-        #mouse_x = int(c_min + pos.x // ts + 1)
-        #mouse_y = int(r_min + pos.y // ts + 1)
-
-        ay = np.clip((pos.y - ts*self.height//2) / 200, -1, 1)
-        ax = np.clip((pos.x - ts*self.width//2) / 200, -1, 1)
-
-        key_a = 0
-        key_d = 0
-        key_w = 0
-        key_s = 0
-
-        if ax < 0:
-            key_a = 1
-        else:
-            key_d = 1
-        if ay > 0:
-            key_s = 1
-        else:
-            key_w = 1
-        '''
-
-        key_a = rl.IsKeyDown(rl.KEY_A)
-        key_d = rl.IsKeyDown(rl.KEY_D)
-        key_w = rl.IsKeyDown(rl.KEY_W)
-        key_s = rl.IsKeyDown(rl.KEY_S)
-        '''
-
-        #print(f'Mouse: {pos.x}, {pos.y}, Target: {ts*mouse_x}, {ts*mouse_y}, Action: {ay}, {ax}')
-
-        atn = 4
-        if key_a:
-            if key_w:
-                atn = 0
-            elif key_s:
-                atn = 2
-            else:
-                atn = 1
-        elif key_d:
-            if key_w:
-                atn = 6
-            elif key_s:
-                atn = 8
-            else:
-                atn = 7
-        elif key_w:
-            atn = 3
-        elif key_s:
-            atn = 5
-
-        if rl.IsKeyDown(rl.KEY_ESCAPE):
-            exit(0)
-
-        '''
-        if rl.IsKeyDown(rl.KEY_UP) or rl.IsKeyDown(rl.KEY_W):
-            ay = 0 if discretize else -1
-        if rl.IsKeyDown(rl.KEY_DOWN) or rl.IsKeyDown(rl.KEY_S):
-            ay = 2 if discretize else 1
-        if rl.IsKeyDown(rl.KEY_LEFT) or rl.IsKeyDown(rl.KEY_A):
-            ax = 0 if discretize else -1
-        if rl.IsKeyDown(rl.KEY_RIGHT) or rl.IsKeyDown(rl.KEY_D):
-            ax = 2 if discretize else 1
-        '''
-
+        ay, ax = None, None
         skill = 0
         skill_q = 0
         skill_w = 0
         skill_e = 0
-        if rl.IsKeyDown(rl.KEY_Q):
-            skill_q = 1
-            skill = 1
-        if rl.IsKeyDown(rl.KEY_W):
-            skill_w = 1
-            skill = 2
-        if rl.IsKeyDown(rl.KEY_E):
-            skill_e = 1
-            skill = 3
+        target_heros = 1
 
-        best_target = None
-        '''
-        for yy in range(mouse_y - 3, mouse_y + 4):
-            for xx in range(mouse_x - 3, mouse_x + 4):
-                if xx < 0 or yy < 0 or xx > 128 or yy > 128:
+        for frame in range(1, frames+1):
+            self.width = rl.GetScreenWidth() // ts
+            self.height = rl.GetScreenHeight() // ts
+
+            tick_frac = frame / frames
+
+            main_r = my_player.last_y + tick_frac*(my_player.y - my_player.last_y)
+            main_c = my_player.last_x + tick_frac*(my_player.x - my_player.last_x)
+
+            main_r_shader = (main_r - self.height/2) / 128
+            main_c_shader = (main_c - self.width/2) / 128
+
+            #main_r = my_player.y
+            #main_c = my_player.x
+            self.camera.target.x = int((main_c - self.width//2) * ts)
+            self.camera.target.y = int((main_r - self.height//2) * ts)
+            main_r = int(main_r)
+            main_c = int(main_c)
+            r_min = main_r - self.height//2 - 1
+            r_max = main_r + self.height//2 + 1
+            c_min = main_c - self.width//2 - 1
+            c_max = main_c + self.width//2 + 1
+
+            pos = rl.GetMousePosition()
+            raw_mouse_x = pos.x + self.camera.target.x
+            raw_mouse_y = pos.y + self.camera.target.y
+            mouse_x = int(raw_mouse_x // ts)
+            mouse_y = int(raw_mouse_y // ts)
+
+            if rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT) or rl.IsMouseButtonDown(rl.MOUSE_BUTTON_LEFT):
+                self.last_click = (raw_mouse_x / ts, raw_mouse_y / ts)
+
+            if self.last_click is not None:
+                dest_x, dest_y = self.last_click
+                dy = dest_y - my_player.y
+                dx = dest_x - my_player.x
+
+                # Rescale vector if norm > 1
+                mag = np.sqrt(dy**2 + dx**2)
+                if mag > 1:
+                    dy /= mag
+                    dx /= mag
+
+                if mag < 0.05:
+                    self.last_click = None
+
+                ay = 100*dy
+                ax = 100*dx
+
+            else:
+                ay = 0
+                ax = 0
+
+            #ay = int(np.clip((pos.y - ts*self.height//2) / 50, -3, 3)) + 3
+            #ax = int(np.clip((pos.x - ts*self.width//2) / 50, -3, 3)) + 3
+
+            if rl.IsKeyDown(rl.KEY_ESCAPE):
+                exit(0)
+
+            if rl.IsKeyDown(rl.KEY_Q) or rl.IsKeyPressed(rl.KEY_Q):
+                skill_q = 1
+            if rl.IsKeyDown(rl.KEY_W) or rl.IsKeyPressed(rl.KEY_W):
+                skill_w = 1
+            if rl.IsKeyDown(rl.KEY_E) or rl.IsKeyPressed(rl.KEY_E):
+                skill_e = 1
+            if rl.IsKeyDown(rl.KEY_LEFT_SHIFT):
+                target_heros = 2
+
+            action = (ay, ax, target_heros, skill_q, skill_w, skill_e)
+
+            rl.BeginDrawing()
+            rl.ClearBackground([6, 24, 24, 255])
+
+            rl.BeginShaderMode(self.shader)
+            #print(self.camera.target.x, self.camera.target.y)
+            #print(self.camera.target.x/self.tile_size/self.width, self.camera.target.y/self.tile_size/self.height)
+            #camera_x_ptr = self.ffi.new('float *', self.camera.target.x/self.tile_size/self.width)
+            #camera_y_ptr = self.ffi.new('float *', self.camera.target.y/self.tile_size/self.height)
+            #rl.SetShaderValue(self.shader, self.shader_camera_x, camera_x_ptr, rl.SHADER_UNIFORM_FLOAT)
+            #rl.SetShaderValue(self.shader, self.shader_camera_y, camera_y_ptr, rl.SHADER_UNIFORM_FLOAT)
+            print(main_c_shader, main_r_shader)
+            camera_x_ptr = self.ffi.new('float *', main_c_shader)
+            camera_y_ptr = self.ffi.new('float *', main_r_shader)
+            import time
+            shader_time =  time.process_time()
+            shader_time_ptr = self.ffi.new('float *', shader_time)
+            rl.SetShaderValue(self.shader, self.shader_camera_x, camera_x_ptr, rl.SHADER_UNIFORM_FLOAT)
+            rl.SetShaderValue(self.shader, self.shader_camera_y, camera_y_ptr, rl.SHADER_UNIFORM_FLOAT)
+            rl.SetShaderValue(self.shader, self.shader_time, shader_time_ptr, rl.SHADER_UNIFORM_FLOAT)
+            rl.SetShaderValueTexture(self.shader, self.shader_texture1, self.game_map)
+            #rl.DrawRectangle(0, 0, self.width*ts, self.height*ts, [255, 255, 255, 255])
+            rl.DrawTexture(self.shader_canvas, 0, 0, colors.WHITE)
+            #rl.DrawTexture(self.game_map, 0, 0, colors.WHITE)
+            rl.EndShaderMode()
+
+            rl.BeginMode2D(self.camera)
+            '''
+            for y in range(r_min, r_max+1):
+                for x in range(c_min, c_max+1):
+                    if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
+                        continue
+
+                    tile = grid[y, x]
+                    if tile == 0:
+                        continue
+                    elif tile == 1:
+                        rl.DrawRectangle(x*ts, y*ts, ts, ts, [0, 0, 0, 255])
+                        continue
+            '''
+
+            render_entities = []
+            for y in range(r_min, r_max+1):
+                for x in range(c_min, c_max+1):
+                    if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
+                        continue
+
+                    tile = grid[y, x]
+                    if tile == EMPTY or tile == WALL:
+                        continue
+               
+                    pid = pids[y, x]
+
+                    if pid == -1:
+                        rl.DrawRectangle(x*ts, y*ts, ts, ts, [255, 0, 0, 255])
+                        #raise ValueError(f'Invalid pid {pid} on tile {tile} at {y}, {x}')
+
+                    render_entities.append((pid, y, x))
+
+            # Targeting overlays
+            for pid, y, x in render_entities:
+                entity = entities[pid]
+                if entity.target_pid == -1:
                     continue
 
-                target_pid = pids[yy, xx]
-                if target_pid == -1:
-                    continue
+                entity_x = entity.last_x + tick_frac*(entity.x - entity.last_x)
+                entity_y = entity.last_y + tick_frac*(entity.y - entity.last_y)
 
-                if target_pid == 0:
-                    continue
-                
-                target = entities[target_pid]
-                assert target.pid != -1
+                target = entities[entity.target_pid]
+                target_x = target.last_x + tick_frac*(target.x - target.last_x)
+                target_y = target.last_y + tick_frac*(target.y - target.last_y)
 
-                if best_target is None:
-                    best_target = target
-                    continue
+                if entity.team == 0:
+                    base = [0, 128, 128, 255]
+                    accent = [0, 255, 255, 255]
+                elif entity.team == 1:
+                    base = [128, 0, 0, 255]
+                    accent = [255, 0, 0, 255]
+                else:
+                    base = [128, 128, 128, 255]
+                    accent = [255, 255, 255, 255]
+ 
+                target_px = int(target_x*ts + ts//2)
+                target_py = int(target_y*ts + ts//2)
+                entity_px = int(entity_x*ts + ts//2)
+                entity_py = int(entity_y*ts + ts//2)
 
-                dist_to_target = np.sqrt(
-                    (target.x - raw_mouse_x)**2 + (target.y - raw_mouse_y)**2)
+                if entity.attack_aoe == 0:
+                    rl.DrawLineEx([entity_px, entity_py],
+                        [target_px, target_py], ts//16, accent)
+                else:
+                    radius = int(entity.attack_aoe*ts)
+                    rl.DrawRectangle(target_px - radius, target_py - radius,
+                        2*radius, 2*radius, base)
+                    rl.DrawRectangleLinesEx([target_px - radius, target_py - radius,
+                        2*radius, 2*radius], ts//8, accent)
 
-                dist_to_best_target = np.sqrt(
-                    (best_target.x - raw_mouse_x)**2 + (best_target.y - raw_mouse_y)**2)
-
-                if dist_to_target < dist_to_best_target:
-                    best_target = target
-                    
-        attack = 0
-        if best_target is None:
-            target_pid = -1
-        else:
-            for i in range(10):
-                if obs_players[0, i].pid == best_target.pid:
-                    attack = i
-                    #print(f'Setting attack to {i}, which is pid {best_target.pid}')
-                    break
-
-        if ax is None and ay is None:
-            action = None
-        else:
-            if ax is None:
-                ax = 1 if discretize else 0
-            if ay is None:
-                ay = 1 if discretize else 0
-
-            action = (ay, ax, attack, skill_q, skill_w, skill_e)
-        '''
-
-        action = (atn, skill)
-
-        #print(f'Action: {action}')
-
-        rl.BeginDrawing()
-        rl.BeginMode2D(self.camera)
-        rl.ClearBackground([6, 24, 24, 255])
-
-        for y in range(r_min, r_max+1):
-            for x in range(c_min, c_max+1):
-                if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
-                    continue
-
-                tile = grid[y, x]
-                if tile == 0:
-                    continue
-                elif tile == 1:
-                    rl.DrawRectangle(x*ts, y*ts, ts, ts, [0, 0, 0, 255])
-                    continue
-
-        for y in range(r_min, r_max+1):
-            for x in range(c_min, c_max+1):
-                if (y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1]):
-                    continue
-
-                tile = grid[y, x]
-                if tile == EMPTY or tile == WALL:
-                    continue
-           
-                pid = pids[y, x]
-
-                if pid == -1:
-                   raise ValueError('Invalid pid')
+            # Entity renders
+            for pid, y, x in render_entities:
+                tint = [255, 255, 255, 255]
+                '''
+                if entity.is_hit:
+                    tint = [255, 255, 255, 255]
+                    if entity.team == 0:
+                        tint = [0, 255, 255, 128]
+                    else:
+                        tint = [255, 0, 0, 128]
+                '''
 
                 entity = entities[pid]
-                if entity.is_hit:
-                    rl.DrawRectangle(x*ts, y*ts, ts, ts, [255, 0, 0, 128])
- 
-                tx = int(entity.x * ts)
-                ty = int(entity.y * ts)
-
+                entity_x = entity.last_x + tick_frac*(entity.x - entity.last_x)
+                entity_y = entity.last_y + tick_frac*(entity.y - entity.last_y)
+                tx = int(entity_x * ts)
+                ty = int(entity_y * ts)
                 draw_bars(rl, entity, tx, ty-8, ts)
 
-                #atn = actions[idx]
+                tile = grid[y, x]
                 source_rect = self.asset_map[tile]
-                #dest_rect = (j*ts, i*ts, ts, ts)
                 dest_rect = (tx, ty, ts, ts)
-                #print(f'tile: {tile}, source_rect: {source_rect}, dest_rect: {dest_rect}')
+
+                if entity.is_hit:
+                    rl.BeginShaderMode(self.bloom_shader)
+
                 rl.DrawTexturePro(self.puffer, source_rect, dest_rect,
-                    (0, 0), 0, colors.WHITE)
+                    (0, 0), 0, tint)#colors.WHITE)
 
-                #if entity.pid == target_pid:
-                #    rl.DrawCircle(x*ts + ts//2, y*ts + ts//2, ts//4, [0, 255, 0, 255])
+                if entity.is_hit:
+                    rl.EndShaderMode()
 
-        # Draw circle at mouse x, y
-        rl.DrawCircle(ts*mouse_x + ts//2, ts*mouse_y + ts//8, ts//8, [255, 0, 0, 255])
+                mods = []
+                if entity.stun_timer > 0:
+                    mods.append('stun')
 
-        rl.EndMode2D()
+                buf_rect = (tx-ts//2, ty-ts//2, ts, ts)
+                if entity.move_timer > 0:
+                    if entity.move_modifier < 0:
+                        mods.append('slow')
+                    if entity.move_modifier > 0:
+                        mods.append('speed')
 
-        # Draw HUD
-        player = entities[0]
-        hud_y = self.height*ts - 2*ts
-        draw_bars(rl, player, 2*ts, hud_y, 10*ts, 24, draw_text=True)
+                for mod in mods:
+                    rl.DrawTexturePro(self.puffer, self.asset_map[mod], buf_rect,
+                        (0, 0), 0, colors.WHITE)
 
-        off_color = [255, 255, 255, 255]
-        on_color = [0, 255, 0, 255]
+            # Draw circle at mouse x, y
+            rl.DrawCircle(ts*mouse_x + ts//2, ts*mouse_y + ts//8, ts//8, [255, 0, 0, 255])
 
-        q_color = on_color if skill_q else off_color
-        w_color = on_color if skill_w else off_color
-        e_color = on_color if skill_e else off_color
+            rl.EndMode2D()
 
-        q_cd = player.q_timer
-        w_cd = player.w_timer
-        e_cd = player.e_timer
+            # Draw HUD
+            player = entities[HUMAN_PLAYER]
 
-        rl.DrawText(f'Q: {q_cd}'.encode(), 13*ts, hud_y - 20, 40, q_color)
-        rl.DrawText(f'W: {w_cd}'.encode(), 17*ts, hud_y - 20, 40, w_color)
-        rl.DrawText(f'E: {e_cd}'.encode(), 21*ts, hud_y - 20, 40, e_color)
-        rl.DrawText(f'Stun: {player.stun_timer}'.encode(), 25*ts, hud_y - 20, 20, e_color)
-        rl.DrawText(f'Move: {player.move_timer}'.encode(), 25*ts, hud_y, 20, e_color)
+            off_color = [255, 255, 255, 255]
+            if player.team == 0:
+                on_color = [0, 255, 255, 255]
+            else:
+                on_color = [255, 0, 0, 255]
 
-        rl.EndDrawing()
-        return self._cdata_to_numpy(), action[0]
+            hud_y = self.height*ts - 2*ts
+            draw_bars(rl, player, 2*ts, hud_y, 10*ts, 24, draw_text=True)
+
+            q_color = on_color if skill_q else off_color
+            w_color = on_color if skill_w else off_color
+            e_color = on_color if skill_e else off_color
+
+            q_cd = player.q_timer
+            w_cd = player.w_timer
+            e_cd = player.e_timer
+
+            rl.DrawText(f'Q: {q_cd}'.encode(), 13*ts, hud_y - 20, 40, q_color)
+            rl.DrawText(f'W: {w_cd}'.encode(), 17*ts, hud_y - 20, 40, w_color)
+            rl.DrawText(f'E: {e_cd}'.encode(), 21*ts, hud_y - 20, 40, e_color)
+            rl.DrawText(f'Stun: {player.stun_timer}'.encode(), 25*ts, hud_y - 20, 20, e_color)
+            rl.DrawText(f'Move: {player.move_timer}'.encode(), 25*ts, hud_y, 20, e_color)
+
+            rl.EndDrawing()
+
+        return self._cdata_to_numpy(), action
 
 def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
     health_bar = entity.health / entity.max_health
@@ -581,11 +717,17 @@ def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
         rl.DrawRectangle(x, y - height - 2, width, height, [255, 0, 0, 255])
         rl.DrawRectangle(x, y - height - 2, int(width*mana_bar), height, [0, 255, 255, 255])
 
+    if entity.team == 0:
+        color = [0, 255, 255, 255]
+    else:
+        color = [255, 0, 0, 255]
+
     if draw_text:
         health = int(entity.health)
         mana = int(entity.mana)
         max_health = int(entity.max_health)
         max_mana = int(entity.max_mana)
+
         rl.DrawText(f'Health: {health}/{max_health}'.encode(),
             x+8, y+2, 20, [255, 255, 255, 255])
         rl.DrawText(f'Mana: {mana}/{max_mana}'.encode(),
@@ -597,7 +739,7 @@ def draw_bars(rl, entity, x, y, width, height=4, draw_text=False):
 
     elif entity.entity_type == 0:
         rl.DrawText(f'Level: {entity.level}'.encode(),
-            x+4, y -2*height - 12, 12, [255, 255, 255, 255])
+            x+4, y -2*height - 12, 12, color)
 
 
 def test_performance(timeout=20, atn_cache=1024, num_envs=400):

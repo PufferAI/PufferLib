@@ -200,9 +200,13 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         is_wandb_logging_enabled=False,
         resample_frequency=5,
         num_random_samples=len(param_spaces),
+        max_suggestion_cost=args['base']['max_suggestion_cost'],
     )
     carbs = CARBS(carbs_params, param_spaces)
 
+    elos = {'model_random.pt': 1000}
+    shutil.rmtree('moba_elo', ignore_errors=True)
+    os.mkdir('moba_elo')
     import time, torch
     def main():
         # set torch and pytorch seeds to current time
@@ -243,7 +247,8 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         print(wandb.config.env)
         print(wandb.config.policy)
         try:
-            stats, uptime = train(args, make_env, policy_cls, rnn_cls, wandb)
+            stats, uptime, new_elos = train(args, make_env, policy_cls, rnn_cls, wandb, elos=elos)
+            elos.update(new_elos)
         except Exception as e:
             is_failure = True
             import traceback
@@ -252,6 +257,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
             observed_value = stats[target_metric]
             print('Observed value:', observed_value)
             print('Uptime:', uptime)
+
             obs_out = carbs.observe(
                 ObservationInParam(
                     input=orig_suggestion,
@@ -260,9 +266,9 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
                 )
             )
 
-    wandb.agent(sweep_id, main, count=100)
+    wandb.agent(sweep_id, main, count=500)
 
-def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1):
+def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1, elos={'model_random.pt': 1000}):
     if args['vec'] == 'serial':
         vec = pufferlib.vector.Serial
     elif args['vec'] == 'multiprocessing':
@@ -284,6 +290,12 @@ def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1):
         backend=vec,
     )
     policy = make_policy(vecenv.driver_env, policy_cls, rnn_cls, args)
+
+    if env_name == 'moba':
+        import torch
+        os.makedirs('moba_elo', exist_ok=True)
+        torch.save(policy, os.path.join('moba_elo', 'model_random.pt'))
+
     train_config = pufferlib.namespace(**args['train'], env=env_name,
         exp_id=args['exp_id'] or env_name + '-' + str(uuid.uuid4())[:8])
     data = clean_pufferl.create(train_config, vecenv, policy, wandb=wandb)
@@ -300,8 +312,19 @@ def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1):
         steps_evaluated += batch_size
 
     clean_pufferl.mean_and_log(data)
+
+    if env_name == 'moba':
+        exp_n = len(elos)
+        model_name = f'model_{exp_n}.pt'
+        torch.save(policy, os.path.join('moba_elo', model_name))
+        from evaluate_elos import calc_elo
+        elos = calc_elo(model_name, 'moba_elo', elos)
+        stats['elo'] = elos[model_name]
+        if wandb is not None:
+            wandb.log({'environment/elo': elos[model_name]})
+
     clean_pufferl.close(data)
-    return stats, uptime
+    return stats, uptime, elos
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -332,9 +355,15 @@ if __name__ == '__main__':
     if not os.path.exists(args.default_config):
         raise Exception(f'Default config {args.default_config} not found')
 
-    for path in glob.glob('config/**/*.ini', recursive=True):
+    file_paths = glob.glob('config/**/*.ini', recursive=True)
+    for path in file_paths:
         p = configparser.ConfigParser()
         p.read(args.default_config)
+
+        subconfig = os.path.join(*path.split('/')[:-1] + ['default.ini'])
+        if subconfig in file_paths:
+            p.read(subconfig)
+
         p.read(path)
         if args.env in p['base']['env_name'].split():
             break
@@ -379,7 +408,7 @@ if __name__ == '__main__':
         args['exp_id'] = f'puf-{version}-{env_name}'
         args['wandb_group'] = f'puf-{version}-baseline'
         shutil.rmtree(f'experiments/{args["exp_id"]}', ignore_errors=True)
-        run = init_wandb(args, env_name, args['exp_id'], resume=False)
+        run = init_wandb(args, args['exp_id'], resume=False)
         if args['mode'] in ('eval', 'evaluate'):
             model_name = f'puf-{version}-{env_name}_model:latest'
             artifact = run.use_artifact(model_name)

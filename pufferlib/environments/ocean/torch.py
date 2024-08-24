@@ -119,8 +119,9 @@ class MOBA(nn.Module):
             self.decoder_logstd = nn.Parameter(torch.zeros(
                 1, env.single_action_space.shape[0]))
         else:
+            self.atn_dim = env.single_action_space.nvec.tolist()
             self.actor = pufferlib.pytorch.layer_init(
-                nn.Linear(hidden_size, 9), std=0.01)
+                nn.Linear(hidden_size, sum(self.atn_dim)), std=0.01)
 
         self.value_fn = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, 1), std=1)
@@ -155,5 +156,5 @@ class MOBA(nn.Module):
             return probs, value
         else:
             action = self.actor(flat_hidden)
-            #action = [action[:, :9], action[:, 9:]]
+            action = torch.split(action, self.atn_dim, dim=1)
             return action, value

@@ -631,6 +631,8 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
         env_creators = [env_creator_or_creators] * num_envs
         env_args = [env_args] * num_envs
         env_kwargs = [env_kwargs] * num_envs
+    else:
+        env_creators = env_creator_or_creators
 
     if len(env_creators) != num_envs:
         raise APIUsageError('env_creators must be a list of length num_envs')

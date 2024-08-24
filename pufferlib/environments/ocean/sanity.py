@@ -244,7 +244,7 @@ class Password(gymnasium.Env):
         self.password_length = password_length
         self.hard_fixed_seed = hard_fixed_seed
         self.observation_space=gymnasium.spaces.Box(
-            low=0, high=1, shape=(password_length,))
+            low=-1, high=1, shape=(password_length,))
         self.action_space=gymnasium.spaces.Discrete(2)
         self.render_mode = 'ansi'
 
@@ -590,9 +590,11 @@ class Stochastic(gymnasium.Env):
             else:
                 c = 90
             return f'\033[{c}m██\033[0m'
-
         chars = []
-        solution = 0 if self.count / self.tick < self.p else 1
+        if self.tick == 0:
+            solution = 0
+        else:
+            solution = 0 if self.count / self.tick < self.p else 1
         chars.append(_render(solution))
         chars.append(' Solution\n')
 

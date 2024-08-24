@@ -9,7 +9,6 @@ import os
 import sys
 import pickle
 import subprocess
-from filelock import FileLock
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from io import StringIO
 import psutil
