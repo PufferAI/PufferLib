@@ -581,7 +581,7 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
 
     if render_mode != 'auto':
         env_kwargs['render_mode'] = render_mode
-        
+
     # We are just using Serial vecenv to give a consistent
     # single-agent/multi-agent API for evaluation
     env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs, backend=backend)

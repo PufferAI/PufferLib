@@ -1372,6 +1372,7 @@ cdef class Environment:
         # Respawn towers
         for idx in range(self.num_towers):
             tower = self.get_tower(idx)
+            tower.target_pid = -1
             tower.pid = idx + self.num_agents + self.num_creeps + self.num_neutrals
             tower.health = tower.max_health
             tower.basic_attack_timer = 0
@@ -1391,6 +1392,7 @@ cdef class Environment:
         # Respawn agents
         for i in range(self.num_agents):
             player = self.get_entity(i)
+            player.target_pid = -1
             player.xp = 0
             player.level = 1
             player.x = 0
@@ -1399,12 +1401,14 @@ cdef class Environment:
 
         for i in range(self.num_creeps):
             creep = self.get_creep(i)
+            creep.target_pid = -1
             creep.pid = -1
             creep.x = 0
             creep.y = 0
 
         for i in range(self.num_neutrals):
             neutral = self.get_neutral(i)
+            neutral.target_pid = -1
             neutral.pid = -1
             neutral.x = 0
             neutral.y = 0

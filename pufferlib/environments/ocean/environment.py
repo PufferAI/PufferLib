@@ -85,8 +85,8 @@ def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision
         raise ValueError(
             f'Preset: {preset} must be 1440p-4096, 720p-1024, 40p-4, or classic')
     
-    from .snake import snake
-    return snake.Snake(
+    from .snake import csnake
+    return csnake.Snake(
         widths=widths,
         heights=heights,
         num_snakes=num_snakes,
