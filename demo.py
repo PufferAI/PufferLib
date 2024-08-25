@@ -6,6 +6,7 @@ import uuid
 import ast
 import os
 
+import torch
 import pufferlib
 import pufferlib.utils
 import pufferlib.vector
@@ -22,14 +23,25 @@ signal.signal(signal.SIGINT, lambda sig, frame: os._exit(0))
 import clean_pufferl
    
 def make_policy(env, policy_cls, rnn_cls, args):
-    policy = policy_cls(env, **args['policy'])
+    # policy = policy_cls(env, **args['policy'])
+    device = torch.device(args['train']['device']) if 'device' in args['train'] else torch.device('cpu')
+    try:
+        policy = policy_cls(env, **args['policy'], device=device)    
+    except:
+        # Compatibility for custom policies
+        policy = policy_cls(env, **args['policy'])
+    
     if rnn_cls is not None:
-        policy = rnn_cls(env, policy, **args['rnn'])
+        try:
+            policy = rnn_cls(env, policy, **args['rnn'], device=device)
+        except:
+            # Compatibility for custom RNNs
+            policy = rnn_cls(env, policy, **args['rnn'])
         policy = pufferlib.frameworks.cleanrl.RecurrentPolicy(policy)
     else:
         policy = pufferlib.frameworks.cleanrl.Policy(policy)
 
-    return policy.to(args['train']['device'])
+    return policy.to(device) # policy.to(args['train']['device'])
 
 def init_wandb(args, name, id=None, resume=True):
     import wandb

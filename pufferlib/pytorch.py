@@ -393,34 +393,6 @@ def compilable_cast(u8, dtype):
     return u8.view(dtype)  # breaking cast
 
 
-# def _nativize_tensor(
-#     observation: torch.Tensor, native_dtype: NativeDType
-# ) -> torch.Tensor | dict[str, torch.Tensor]:
-#     if isinstance(native_dtype, tuple):
-#         dtype, shape, offset, delta = native_dtype
-#         torch._check_is_size(offset)
-#         torch._check_is_size(delta)
-#         # Important, we are assuming that obervations of shape
-#         # [N, D] where N is number of examples and D is number of
-#         # bytes per example is being passed in
-#         print(f'dtype, shape, offset, delta: {dtype}, {shape}, {offset}, {delta}')
-#         if not isinstance(observation, torch.Tensor):
-#             observation = torch.tensor(observation)
-#         slice = observation.narrow(1, offset, delta)
-#         # slice = slice.contiguous()
-#         # slice = compilable_cast(slice, dtype)
-#         slice = slice.view(dtype)
-        
-#         breakpoint()
-#         slice = slice.view(observation.shape[0], *shape)
-#         return slice
-#     else:
-#         subviews = {}
-#         for name, dtype in native_dtype.items():
-#             subviews[name] = _nativize_tensor(observation, dtype)
-#         return subviews
-
-
 def _nativize_tensor(
     observation: torch.Tensor, native_dtype: NativeDType
 ) -> torch.Tensor | dict[str, torch.Tensor]:
@@ -428,14 +400,16 @@ def _nativize_tensor(
         dtype, shape, offset, delta = native_dtype
         torch._check_is_size(offset)
         torch._check_is_size(delta)
+        # Important, we are assuming that obervations of shape
+        # [N, D] where N is number of examples and D is number of
+        # bytes per example is being passed in
+        # print(f'dtype, shape, offset, delta: {dtype}, {shape}, {offset}, {delta}')
         if not isinstance(observation, torch.Tensor):
             observation = torch.tensor(observation)
         slice = observation.narrow(1, offset, delta)
-
-        # This is where the conversion happens
-        # Adjust the view to match the specified dtype and shape
+        # slice = slice.contiguous()
+        # slice = compilable_cast(slice, dtype)
         slice = slice.view(dtype)
-        # Now reshape according to the provided shape
         slice = slice.view(observation.shape[0], *shape)
         return slice
     else:
@@ -443,6 +417,32 @@ def _nativize_tensor(
         for name, dtype in native_dtype.items():
             subviews[name] = _nativize_tensor(observation, dtype)
         return subviews
+
+
+# def _nativize_tensor(
+#     observation: torch.Tensor, native_dtype: NativeDType
+# ) -> torch.Tensor | dict[str, torch.Tensor]:
+#     if isinstance(native_dtype, tuple):
+#         dtype, shape, offset, delta = native_dtype
+#         torch._check_is_size(offset)
+#         torch._check_is_size(delta)
+#         if not isinstance(observation, torch.Tensor):
+#             observation = torch.tensor(observation)
+#         slice = observation.narrow(1, offset, delta)
+
+#         # This is where the conversion happens
+#         # Adjust the view to match the specified dtype and shape
+#         slice = slice.view(dtype)
+#         # Now reshape according to the provided shape
+#         slice = slice.view(observation.shape[0], *shape)
+#         return slice
+#     else:
+#         subviews = {}
+#         for name, dtype in native_dtype.items():
+#             subviews[name] = _nativize_tensor(observation, dtype)
+#         return subviews
+    
+    
 def nativize_observation(observation, emulated):
     # TODO: Any way to check that user has not accidentally cast data to float?
     # float is natively supported, but only if that is the actual correct type
