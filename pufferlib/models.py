@@ -9,7 +9,6 @@ import pufferlib.spaces
 class Default(nn.Module):
     def __init__(self, env, hidden_size=128, device=None): # 128
         super().__init__()
-        # breakpoint()
         self.hidden_size = hidden_size
         self.input_size = np.prod(env.single_observation_space.shape)
         self.encoder_initialized = False  # Flag to track initialization
@@ -124,7 +123,7 @@ class LSTMWrapper(nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
 
-        # # Ensure the LSTM is on the same device as the policy        
+        # Ensure the LSTM is on the same device as the policy        
         self.device = device if device else torch.device("cpu")
         self.to(self.device) 
 
@@ -137,7 +136,7 @@ class LSTMWrapper(nn.Module):
                 nn.init.orthogonal_(param, 1.0)
 
     def forward(self, x, state):
-        # Ensure the input tensor and hidden states are on the correct device
+        # Device consistency added throughout
         x = x.to(self.device)
         if state is not None:
             state = (state[0].to(self.device), state[1].to(self.device))
@@ -145,16 +144,15 @@ class LSTMWrapper(nn.Module):
         x_shape, space_shape = x.shape, self.obs_shape
         B, TT = x_shape[0], 1 if len(x_shape) == len(space_shape) + 1 else x_shape[1]
 
-        x = x.reshape(B * TT, *space_shape)
+        x = x.reshape(B * TT, *space_shape).to(self.device)
         hidden, lookup = self.policy.encode_observations(x)
         hidden = hidden.to(self.device)
         
         self.input_size = hidden.shape[-1]
 
         hidden = hidden.reshape(B, TT, self.input_size).transpose(0, 1).to(self.device)
+        hidden, state = self.recurrent(hidden, state)
         
-        hidden, state = self.recurrent(hidden, state)  # Both hidden and state should be on the correct device
-
         hidden = hidden.transpose(0, 1).reshape(B * TT, self.hidden_size).to(self.device)
         hidden, critic = self.policy.decode_actions(hidden.to(self.device), lookup)
         return hidden, critic, state
@@ -162,7 +160,7 @@ class LSTMWrapper(nn.Module):
 class Convolutional(nn.Module):
     def __init__(self, env, *args, framestack, flat_size,
             input_size=512, hidden_size=512, output_size=512,
-            channels_last=False, downsample=1, **kwargs):
+            channels_last=False, downsample=1, device=None, **kwargs):
         '''The CleanRL default NatureCNN policy used for Atari.
         It's just a stack of three convolutions followed by a linear layer
         
@@ -171,6 +169,10 @@ class Convolutional(nn.Module):
         super().__init__()
         self.channels_last = channels_last
         self.downsample = downsample
+        
+        # Ensure device consistency        
+        self.device = device if device else torch.device("cpu")
+        self.to(self.device) 
 
         self.network= nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Conv2d(framestack, 32, 8, stride=4)),
@@ -182,13 +184,14 @@ class Convolutional(nn.Module):
             nn.Flatten(),
             pufferlib.pytorch.layer_init(nn.Linear(flat_size, hidden_size)),
             nn.ReLU(),
-        )
+        ).to(self.device)
         self.actor = pufferlib.pytorch.layer_init(
-            nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
+            nn.Linear(hidden_size, env.single_action_space.n), std=0.01).to(self.device)
         self.value_fn = pufferlib.pytorch.layer_init(
-            nn.Linear(output_size, 1), std=1)
+            nn.Linear(output_size, 1), std=1).to(self.device)
 
     def forward(self, observations):
+        observations = observations.to(self.device)
         hidden, lookup = self.encode_observations(observations)
         actions, value = self.decode_actions(hidden, lookup)
         return actions, value
@@ -201,6 +204,7 @@ class Convolutional(nn.Module):
         return self.network(observations.float() / 255.0), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
+        flat_hidden = flat_hidden.to(self.device)
         action = self.actor(flat_hidden)
         value = self.value_fn(flat_hidden)
         return action, value

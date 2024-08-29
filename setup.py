@@ -20,7 +20,7 @@ os.environ['CFLAGS'] = '-O3 -march=native -Wall'
 
 GYMNASIUM_VERSION = '0.29.1'
 GYM_VERSION = '0.23'
-PETTINGZOO_VERSION = '1.24.1'
+PETTINGZOO_VERSION = '1.19.0' # '1.24.1'
 
 docs = [
     'sphinx==5.0.0',

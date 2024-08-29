@@ -23,12 +23,11 @@ signal.signal(signal.SIGINT, lambda sig, frame: os._exit(0))
 import clean_pufferl
    
 def make_policy(env, policy_cls, rnn_cls, args):
-    # policy = policy_cls(env, **args['policy'])
     device = torch.device(args['train']['device']) if 'device' in args['train'] else torch.device('cpu')
     try:
         policy = policy_cls(env, **args['policy'], device=device)    
     except:
-        # Compatibility for custom policies
+        # Compatibility for custom policies that don't specify device in network args
         policy = policy_cls(env, **args['policy'])
     
     if rnn_cls is not None:
@@ -41,7 +40,7 @@ def make_policy(env, policy_cls, rnn_cls, args):
     else:
         policy = pufferlib.frameworks.cleanrl.Policy(policy)
 
-    return policy.to(device) # policy.to(args['train']['device'])
+    return policy.to(device)
 
 def init_wandb(args, name, id=None, resume=True):
     import wandb
