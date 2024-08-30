@@ -11,7 +11,7 @@ def env_creator(name='gpudrive'):
     return PufferCPUDrive
 
 class PufferCPUDrive:
-    def __init__(self, device='cuda', max_cont_agents=64, num_worlds=64, k_unique_scenes=1):
+    def __init__(self, device='cpu', max_cont_agents=64, num_worlds=64, k_unique_scenes=1):
         self.device = device
         self.max_cont_agents = max_cont_agents
         self.num_worlds = num_worlds
@@ -110,7 +110,7 @@ class PufferCPUDrive:
         info = []
         self.num_live.append(self.mask.sum())
 
-        if done_worlds.any().item():
+        if len(done_worlds) > 0:
             info_tensor = self.env.get_infos()[done_worlds]
             num_finished_agents = self.controlled_agent_mask[done_worlds].sum().item()
             info.append({
