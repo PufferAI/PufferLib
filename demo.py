@@ -36,7 +36,6 @@ def init_wandb(args, name, id=None, resume=True):
     wandb.init(
         id=id or wandb.util.generate_id(),
         project=args['wandb_project'],
-        entity=args['wandb_entity'],
         group=args['wandb_group'],
         allow_val_change=True,
         save_code=True,
@@ -346,7 +345,6 @@ if __name__ == '__main__':
         default='serial', choices=['serial', 'multiprocessing', 'ray', 'native'])
     parser.add_argument('--exp-id', '--exp-name', type=str,
         default=None, help="Resume from experiment")
-    parser.add_argument('--wandb-entity', type=str, default='jsuarez')
     parser.add_argument('--wandb-project', type=str, default='pufferlib')
     parser.add_argument('--wandb-group', type=str, default='debug')
     parser.add_argument('--track', action='store_true', help='Track on WandB')
