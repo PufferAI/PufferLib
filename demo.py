@@ -36,7 +36,6 @@ def init_wandb(args, name, id=None, resume=True):
     wandb.init(
         id=id or wandb.util.generate_id(),
         project=args['wandb_project'],
-        entity=args['wandb_entity'],
         group=args['wandb_group'],
         allow_val_change=True,
         save_code=True,
@@ -201,14 +200,17 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         resample_frequency=5,
         num_random_samples=len(param_spaces),
         max_suggestion_cost=args['base']['max_suggestion_cost'],
+        is_saved_on_every_observation=False,
     )
     carbs = CARBS(carbs_params, param_spaces)
 
     elos = {'model_random.pt': 1000}
+    vecenv = {'vecenv': None} # can't reassign otherwise
     shutil.rmtree('moba_elo', ignore_errors=True)
     os.mkdir('moba_elo')
     import time, torch
     def main():
+        print('Vecenv:', vecenv)
         # set torch and pytorch seeds to current time
         np.random.seed(int(time.time()))
         torch.manual_seed(int(time.time()))
@@ -247,7 +249,8 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         print(wandb.config.env)
         print(wandb.config.policy)
         try:
-            stats, uptime, new_elos = train(args, make_env, policy_cls, rnn_cls, wandb, elos=elos)
+            stats, uptime, new_elos, vecenv['vecenv'] = train(args, make_env, policy_cls, rnn_cls,
+                wandb, elos=elos, vecenv=vecenv['vecenv'])
             elos.update(new_elos)
         except Exception as e:
             is_failure = True
@@ -268,7 +271,17 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
 
     wandb.agent(sweep_id, main, count=500)
 
-def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1, elos={'model_random.pt': 1000}):
+def train(args, make_env, policy_cls, rnn_cls, wandb,
+        eval_frac=0.1, elos={'model_random.pt': 1000}, vecenv=None, subprocess=False, queue=None):
+    if subprocess:
+        from multiprocessing import Process, Queue
+        queue = Queue()
+        p = Process(target=train, args=(args, make_env, policy_cls, rnn_cls, wandb,
+            eval_frac, elos, False, queue))
+        p.start()
+        p.join()
+        stats, uptime, elos = queue.get()
+
     if args['vec'] == 'serial':
         vec = pufferlib.vector.Serial
     elif args['vec'] == 'multiprocessing':
@@ -280,15 +293,17 @@ def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1, elos={'mode
     else:
         raise ValueError(f'Invalid --vector (serial/multiprocessing/ray).')
 
-    vecenv = pufferlib.vector.make(
-        make_env,
-        env_kwargs=args['env'],
-        num_envs=args['train']['num_envs'],
-        num_workers=args['train']['num_workers'],
-        batch_size=args['train']['env_batch_size'],
-        zero_copy=args['train']['zero_copy'],
-        backend=vec,
-    )
+    if vecenv is None:
+        vecenv = pufferlib.vector.make(
+            make_env,
+            env_kwargs=args['env'],
+            num_envs=args['train']['num_envs'],
+            num_workers=args['train']['num_workers'],
+            batch_size=args['train']['env_batch_size'],
+            zero_copy=args['train']['zero_copy'],
+            backend=vec,
+        )
+
     policy = make_policy(vecenv.driver_env, policy_cls, rnn_cls, args)
 
     if env_name == 'moba':
@@ -324,7 +339,10 @@ def train(args, make_env, policy_cls, rnn_cls, wandb, eval_frac=0.1, elos={'mode
             wandb.log({'environment/elo': elos[model_name]})
 
     clean_pufferl.close(data)
-    return stats, uptime, elos
+    if queue is not None:
+        queue.put((stats, uptime, elos))
+
+    return stats, uptime, elos, vecenv
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -346,7 +364,6 @@ if __name__ == '__main__':
         default='serial', choices=['serial', 'multiprocessing', 'ray', 'native'])
     parser.add_argument('--exp-id', '--exp-name', type=str,
         default=None, help="Resume from experiment")
-    parser.add_argument('--wandb-entity', type=str, default='jsuarez')
     parser.add_argument('--wandb-project', type=str, default='pufferlib')
     parser.add_argument('--wandb-group', type=str, default='debug')
     parser.add_argument('--track', action='store_true', help='Track on WandB')

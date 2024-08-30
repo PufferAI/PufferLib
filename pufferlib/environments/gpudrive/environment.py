@@ -80,8 +80,12 @@ class PufferCPUDrive:
         return obs.view(self.total_agents, self.obs_size)
 
     def close(self):
-        self.env.close()
-        del self.env.sim
+        '''There is no point in closing the env because
+        Madrona doesn't close correctly anyways. You will want
+        to cache this copy for later use. Cuda errors if you don't'''
+        pass 
+        #self.env.close()
+        #del self.env.sim
 
     def reset(self, seed=None, options=None):
         self.episode_returns = torch.zeros(self.num_agents, dtype=torch.float32).to(self.device)
