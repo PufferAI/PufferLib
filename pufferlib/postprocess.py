@@ -52,10 +52,9 @@ class EpisodeStats(gymnasium.Wrapper):
         self.action_space = env.action_space
         self.reset()
 
-    # TODO: Fix options. Maybe reimplement gymnasium.Wrapper with better compatibility
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         self.info = dict(episode_return=[], episode_length=0)
-        return self.env.reset(seed=seed)
+        return self.env.reset(seed=seed, options=options)
 
     def step(self, action):
         observation, reward, terminated, truncated, info = super().step(action)
