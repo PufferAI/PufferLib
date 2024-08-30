@@ -10,8 +10,8 @@ from pygpudrive.env.env_torch import GPUDriveTorchEnv
 def env_creator(name='gpudrive'):
     return PufferGPUDrive
 
-class PufferCPUDrive:
-    def __init__(self, device='cpu', max_cont_agents=64, num_worlds=64, k_unique_scenes=1):
+class PufferGPUDrive:
+    def __init__(self, device='cuda', max_cont_agents=64, num_worlds=64, k_unique_scenes=1):
         self.device = device
         self.max_cont_agents = max_cont_agents
         self.num_worlds = num_worlds
@@ -118,8 +118,9 @@ class PufferCPUDrive:
         self.num_live.append(self.mask.sum())
 
         if len(done_worlds) > 0:
-            info_tensor = self.env.get_infos()[done_worlds]
-            num_finished_agents = self.controlled_agent_mask[done_worlds].sum().item()
+            controlled_mask = self.controlled_agent_mask[done_worlds]
+            info_tensor = self.env.get_infos()[done_worlds][controlled_mask]
+            num_finished_agents = controlled_mask.sum().item()
             info.append({
                 'off_road': info_tensor[:, 0].sum().item() / num_finished_agents,
                 'veh_collisions': info_tensor[:, 1].sum().item() / num_finished_agents,
