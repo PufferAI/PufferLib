@@ -54,8 +54,7 @@ class EpisodeStats(gymnasium.Wrapper):
 
     def reset(self, seed=None, options=None):
         self.info = dict(episode_return=[], episode_length=0)
-        # TODO: options
-        return self.env.reset(seed=seed)#, options=options)
+        return self.env.reset(seed=seed, options=options)
 
     def step(self, action):
         observation, reward, terminated, truncated, info = super().step(action)
