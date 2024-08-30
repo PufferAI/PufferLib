@@ -19,8 +19,6 @@ from pufferlib.environments.mujoco.policy import CleanRLPolicy, Policy
 
 
 if __name__ == "__main__":
-    from demo import init_wandb
-
     # Simpler args parse just for this script. Configs are read from file ONLY.
     parser = argparse.ArgumentParser(description="Training arguments for cleanrl mujoco", add_help=False)
     parser.add_argument("-e", "--env-id", type=str, default="Hopper-v4")
@@ -30,7 +28,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb-project", type=str, default="cleanrl_mujoco")
     parser.add_argument("--wandb-group", type=str, default=None)
     parser.add_argument("--track", action="store_true", help="Track on WandB")
-    parser.add_argument("--capture-video", default=True)  # action="store_true", help="Capture videos")
+    parser.add_argument("--capture-video", action="store_true", help="Capture videos")
     args = parser.parse_known_args()[0]
 
     if not os.path.exists(args.config):
@@ -85,7 +83,15 @@ if __name__ == "__main__":
 
     wandb = None
     if args.track:
-        wandb = init_wandb(args_dict, run_name)
+        import wandb
+        wandb.init(
+            project=args.wandb_project,
+            group=args.wandb_group,
+            save_code=True,
+            name=run_name,
+            config=args,
+        )
+
     episode_stats = {
         "episode_return": [],
         "episode_length": [],
