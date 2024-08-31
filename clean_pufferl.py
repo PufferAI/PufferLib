@@ -108,7 +108,7 @@ def evaluate(data):
             else:
                 actions, logprob, _, value = policy(o_device)
 
-            if config.device == 'cuda':
+            if config.device.startswith('cuda'):
                 torch.cuda.synchronize()
 
         with profile.eval_misc:
@@ -203,7 +203,7 @@ def train(data):
                         action=atn,
                     )
 
-                if config.device == 'cuda':
+                if config.device.startswith('cuda'):
                     torch.cuda.synchronize()
 
             with profile.train_misc:
@@ -250,7 +250,7 @@ def train(data):
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(data.policy.parameters(), config.max_grad_norm)
                 data.optimizer.step()
-                if config.device == 'cuda':
+                if config.device.startswith('cuda'):
                     torch.cuda.synchronize()
 
             with profile.train_misc:
@@ -410,7 +410,7 @@ class Experience:
 
         obs_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_dtype]
         atn_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_dtype]
-        pin = device == 'cuda' and cpu_offload
+        pin = device.startswith('cuda') and cpu_offload
         obs_device = device if not pin else 'cpu'
         self.obs=torch.zeros(batch_size, *obs_shape, dtype=obs_dtype,
             pin_memory=pin, device=device if not pin else 'cpu')
