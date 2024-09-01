@@ -6,7 +6,8 @@ import gymnasium
 from raylib import rl
 
 import pufferlib
-from pufferlib.environments.ocean.snake.cy_snake import Snake as CSnake
+from cysnake import Snake as CSnake
+#from pufferlib.environments.ocean.snake.cysnake import Snake
 from pufferlib.environments.ocean import render
 
 class Snake(pufferlib.PufferEnv):
