@@ -1,6 +1,7 @@
 // Incremental port of Puffer Moba to C. Be careful to add semicolons and avoid leftover cython syntax
 #include <math.h>
 #include <stdbool.h>
+#include <time.h>
 
 #define EMPTY 0
 #define WALL 1
@@ -121,21 +122,15 @@ typedef struct {
     int creep_idx;
     int tick;
 
-    unsigned char[:, :] grid
-    unsigned char[:, :] orig_grid
-    unsigned char[:, :, :, :] ai_paths
-    int[:, :] atn_map
-    unsigned char[:, :, :, :] observations_map
-    unsigned char[:, :] observations_extra
-    int[:] xp_for_level
-    int[:, :] actions
-    int[:, :] pid_map
-    Entity[:, :] player_obs
-    Entity[:] entities
-    Reward[:] rewards
-    float[:] sum_rewards
-    float[:] norm_rewards
-    float[:, :, :] waypoints 
+    Map* map;
+    unsigned char* orig_grid;
+    unsigned char ai_paths[128][128][128][128];
+    int atn_map[2][8];
+    unsigned char observations_map[10][11][11][4];
+    unsigned char observations_extra[10][26];
+    int xp_for_level[30];
+    int actions[10][6];
+    Entity* entities;
 
     float reward_death;
     float reward_xp;
@@ -147,15 +142,101 @@ typedef struct {
     public int radiant_victories;
     public int dire_victories;
 
-    # MAX_ENTITIES x MAX_SCANNED_TARGETS
+    // MAX_ENTITIES x MAX_SCANNED_TARGETS
     Entity* scanned_targets[256][121]
     skill skills[10][3]
 
-    int rng_n;
-    int rng_idx;
-    float[:] rng;
+    Reward* rewards[10];
+    float sum_rewards[10];
+    float norm_rewards[10];
+    float waypoints[6][20][2];
+
+    CachedRNG *rng;
 } MOBA
+
+MOBA* init_moba() {
+    MOBA* env = (MOBA*)malloc(sizeof(MOBA));
+    env->map = (Map*)malloc(sizeof(Map));
+
+    env->rng = (CachedRNG*)malloc(sizeof(CachedRNG));
+    env->rng->rng_n = 10000;
+    env->rng->rng_idx = 0;
+    for (int i = 0; i < env->rng->rng_n; i++)
+        env->rng->rng[i] = srand(time(NULL));
+
+    return env;
+}
+
+void free_moba(MOBA* env) {
+    free(env->map);
+    free(env->rng);
+    free(env);
+}
  
+void compute_observations(MOBA* env) {
+    //self.observations_map[:] = 0
+
+    // Probably safe to not clear this
+    //self.observations_extra[:] = 0
+
+    int vis = env->vision_range;
+
+
+    for (int pid = 0; pid < env->num_agents; pid++) {
+        Player* player = &env->entities[pid];
+        Reward* reward = &env->rewards[pid];
+
+        int y = player.y;
+        int x = player.x;
+
+        // TODO: Add bounds debug checks asserts
+        env->observations_extra[pid, 0] = 2*player_x;
+        env->observations_extra[pid, 1] = 2*player_y;
+        env->observations_extra[pid, 2] = 255*player_level/30.0;
+        env->observations_extra[pid, 3] = 255*player_health/player_max_health;
+        env->observations_extra[pid, 4] = 255*player_mana/player_max_mana;
+        env->observations_extra[pid, 5] = player_damage;
+        env->observations_extra[pid, 6] = 100*player_move_speed;
+        env->observations_extra[pid, 7] = player_move_modifier*100;
+        env->observations_extra[pid, 8] = 2*player_stun_timer;
+        env->observations_extra[pid, 9] = 2*player_move_timer;
+        env->observations_extra[pid, 10] = 2*player_q_timer;
+        env->observations_extra[pid, 11] = 2*player_w_timer;
+        env->observations_extra[pid, 12] = 2*player_e_timer;
+        env->observations_extra[pid, 13] = 50*player_basic_attack_timer;
+        env->observations_extra[pid, 14] = 50*player_basic_attack_cd;
+        env->observations_extra[pid, 15] = 255*player_is_hit;
+        env->observations_extra[pid, 16] = 255*player_team;
+        env->observations_extra[pid, 17 + player_hero_type] = 255;
+
+        // Assumes scaled between -1 and 1, else overflows
+        env->observations_extra[pid, 22] = 127*reward_death + 128;
+        env->observations_extra[pid, 23] = 25*reward_xp;
+        env->observations_extra[pid, 24] = 127*reward_distance + 128;
+        env->observations_extra[pid, 25] = 70*reward_tower;
+
+        for (int dy = -vis; dy <= vis; dy++) {
+            for (int dx = -vis; dx <= vis; dx++) {
+                int xx = x + dx;
+                int yy = y + dy;
+
+                env->observations_map[pid, yy, xx, 0] = env->grid[yy, xx];
+                target_pid = env->map->pids[yy, xx];
+                if target_pid == -1:
+                    continue
+
+                Entity* target = &env->entities[target_pid];
+                xx = dx + vis;
+                yy = dy + vis;
+
+                env->observations_map[pid, yy, xx, 1] = 255*target->health/target->max_health;
+                env->observations_map[pid, yy, xx, 2] = 255*target->mana/target->max_mana;
+                env->observations_map[pid, yy, xx, 3] = target->level/30.0;
+            }
+        }
+    }
+}
+        
 inline int xp_for_player_kill(Entity* entity) {
     return 100 + (int)(entity->xp / 7.69);
 }
@@ -183,7 +264,9 @@ cdef Reward* get_reward(MOBA* env, int pid) {
 
 typedef struct {
     unsigned char* grid;
-    int* pid_map;
+    int* pids;
+    int width;
+    int height;
 } Map
 
 inline int map_offset(Map* map, int y, int x) {
@@ -206,14 +289,14 @@ int move_to(Map* map, Entity* player, float dest_y, float dest_x):
     int src = map_offset(map, (int)player->y, (int)player->x);
     int dst = map_offset(map, (int)dest_y, (int)dest_x);
 
-    if (map->grid[idx] != EMPTY and map->pid_map[idx] != player->pid)
+    if (map->grid[idx] != EMPTY and map->pids[idx] != player->pid)
         return 1;
 
     map->grid[src] = EMPTY;
     map->grid[dst] = player->grid_id;
 
-    map->pid_map[src] = -1;
-    map->pid_map[dst] = player->pid;
+    map->pids[src] = -1;
+    map->pids[dst] = player->pid;
 
     player->y = dest_y;
     player->x = dest_x;
@@ -477,7 +560,7 @@ int spawn_at(Map* map, Entity* entity, float y, float x):
         return 1;
 
     map->grid[adr] = entity->grid_id;
-    map->pid_map[adr] = entity->pid;
+    map->pids[adr] = entity->pid;
     entity->y = y;
     entity->x = x;
     return 0;
@@ -497,7 +580,7 @@ int scan_aoe(MOBA* env, Entity* player, int radius,
     for (int y = player_y-radius; y <= player_y+radius; y++) {
         for (int x = player_x-radius; x <= player_x+radius; x++) {
             int adr = map_offset(map, y, x);
-            int target_pid = env->pid_map[adr];
+            int target_pid = env->pids[adr];
             if (target_pid == -1)
                 continue;
 
@@ -1073,7 +1156,7 @@ void step_players(MOBA* env) {
 
 void reset(MOBA* env) {
     //self.grid[:] = self.orig_grid
-    //self.pid_map[:] = -1
+    //map->pids[:] = -1
     
     env->tick = 0
     Map* map = env->map;
