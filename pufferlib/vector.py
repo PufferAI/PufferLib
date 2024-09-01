@@ -413,7 +413,7 @@ class Multiprocessing:
                     if e not in s_range]
                 break
             elif len(self.ready_workers) >= self.workers_per_batch:
-                # Full async path for batch size > 1. Alawys copies
+                # Full async path for batch size > 1. Always copies
                 # data because of non-contiguous worker indices
                 # Can be faster for envs with small observations
                 w_slice = self.ready_workers[:self.workers_per_batch]

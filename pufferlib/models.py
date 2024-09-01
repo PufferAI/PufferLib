@@ -1,66 +1,101 @@
 from pdb import set_trace as T
 import numpy as np
-
 import torch
 import torch.nn as nn
-
 import pufferlib.emulation
 import pufferlib.pytorch
 import pufferlib.spaces
 
-
 class Default(nn.Module):
-    '''Default PyTorch policy. Flattens obs and applies a linear layer.
-
-    PufferLib is not a framework. It does not enforce a base class.
-    You can use any PyTorch policy that returns actions and values.
-    We structure our forward methods as encode_observations and decode_actions
-    to make it easier to wrap policies with LSTMs. You can do that and use
-    our LSTM wrapper or implement your own. To port an existing policy
-    for use with our LSTM wrapper, simply put everything from forward() before
-    the recurrent cell into encode_observations and put everything after
-    into decode_actions.
-    '''
-    def __init__(self, env, hidden_size=128):
+    def __init__(self, env, hidden_size=128, device=None): # 128
         super().__init__()
-        self.encoder = nn.Linear(np.prod(
-            env.single_observation_space.shape), hidden_size)
+        self.hidden_size = hidden_size
+        self.input_size = np.prod(env.single_observation_space.shape)
+        self.encoder_initialized = False  # Flag to track initialization
+        self.nativized = False  # Flag to track nativization
+        # self.device = 'cuda' # next(self.parameters()).device
+        self.device = device if device else torch.device("cpu")
+        self.to(self.device)
+        self.dtype = None
 
-        self.is_multidiscrete = isinstance(env.single_action_space,
-                pufferlib.spaces.MultiDiscrete)
-        self.is_continuous = isinstance(env.single_action_space,
-                pufferlib.spaces.Box)
+        if env.emulated:
+            self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
+            if isinstance(self.dtype, tuple) and isinstance(self.dtype[0], torch.dtype):
+                self.encoder = nn.Linear(self.input_size, hidden_size)
+            else:
+                self.encoder = None
+        else:
+            self.encoder = nn.Linear(self.input_size, hidden_size)
+
+        self.is_multidiscrete = isinstance(env.single_action_space, pufferlib.spaces.MultiDiscrete)
+        self.is_continuous = isinstance(env.single_action_space, pufferlib.spaces.Box)
+
         if self.is_multidiscrete:
             action_nvec = env.single_action_space.nvec
-            self.decoder = nn.ModuleList([pufferlib.pytorch.layer_init(
-                nn.Linear(hidden_size, n), std=0.01) for n in action_nvec])
+            self.decoder = nn.ModuleList([
+                pufferlib.pytorch.layer_init(nn.Linear(hidden_size, n), std=0.01) for n in action_nvec
+            ])
         elif not self.is_continuous:
             self.decoder = pufferlib.pytorch.layer_init(
-                nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
+                nn.Linear(hidden_size, env.single_action_space.n), std=0.01
+            )
         else:
             self.decoder_mean = pufferlib.pytorch.layer_init(
-                nn.Linear(hidden_size, env.single_action_space.shape[0]), std=0.01)
-            self.decoder_logstd = nn.Parameter(torch.zeros(
-                1, env.single_action_space.shape[0]))
+                nn.Linear(hidden_size, env.single_action_space.shape[0]), std=0.01
+            )
+            self.decoder_logstd = nn.Parameter(torch.zeros(1, env.single_action_space.shape[0]))
 
         self.value_head = nn.Linear(hidden_size, 1)
 
+        # logger.info(f'Default -> __init__(self, env, hidden_size=128) -> line 55 -> hidden_size: {hidden_size}')
+        
     def forward(self, observations):
+        # logging.info(f'Default -> forward(self, observations) -> line 55 -> observations.shape: {observations.shape}')        
         hidden, lookup = self.encode_observations(observations)
         actions, value = self.decode_actions(hidden, lookup)
         return actions, value
 
     def encode_observations(self, observations):
-        '''Encodes a batch of observations into hidden states. Assumes
-        no time dimension (handled by LSTM wrappers).'''
-        batch_size = observations.shape[0]
-        observations = observations.view(batch_size, -1)
-        return torch.relu(self.encoder(observations.float())), None
+        '''Encodes a batch of observations into hidden states.'''
+
+        concatenated_observations = None        
+        # Handle self.encoder initialization for emulated environments
+        if isinstance(self.dtype, dict) and len(self.dtype) > 1:
+            # Multiple observation spaces, check if dtypes are heterogeneous
+            if any(dtype[0] != next(iter(self.dtype.values()))[0] for dtype in self.dtype.values()):
+                observations = pufferlib.pytorch.nativize_tensor(observations, self.dtype)
+                concatenated_observations = torch.cat(
+                    [v.view(v.shape[0], -1).to(self.device) for v in observations.values()], dim=1
+                )
+                self.input_size = concatenated_observations.shape[-1]
+                if self.encoder == None:
+                    self.encoder = nn.Linear(self.input_size, self.hidden_size).to(self.device)
+                    self.encoder_initialized = True
+                self.nativized = True
+
+        # Handle non-emulated or homogenous dtypes environments
+        if concatenated_observations is None:
+            concatenated_observations = observations.view(observations.shape[0], -1).to(self.device)
+            self.encoder_initialized = True
+
+        return torch.relu(self.encoder(concatenated_observations.float())).to(self.device), None
+
+    def decode_actions(self, hidden, lookup):
+        if self.is_multidiscrete:
+            return [decoder(hidden) for decoder in self.decoder], self.value_head(hidden)
+        elif self.is_continuous:
+            return (self.decoder_mean(hidden), self.decoder_logstd.exp()), self.value_head(hidden)
+        else:
+            return self.decoder(hidden), self.value_head(hidden)
 
     def decode_actions(self, hidden, lookup, concat=True):
-        '''Decodes a batch of hidden states into (multi)discrete actions.
+        '''Decodes a batch of hidden states into (multi)discrete or continuous actions.
         Assumes no time dimension (handled by LSTM wrappers).'''
+
+        # Compute the value of the hidden state
         value = self.value_head(hidden)
+
+        # Decode actions based on the action space type
         if self.is_multidiscrete:
             actions = [dec(hidden) for dec in self.decoder]
             return actions, value
@@ -69,25 +104,30 @@ class Default(nn.Module):
             logstd = self.decoder_logstd.expand_as(mean)
             std = torch.exp(logstd)
             probs = torch.distributions.Normal(mean, std)
-            batch = hidden.shape[0]
             return probs, value
 
+        # For other action spaces, use a single decoder
         actions = self.decoder(hidden)
         return actions, value
-
+    
+        
 class LSTMWrapper(nn.Module):
-    def __init__(self, env, policy, input_size=128, hidden_size=128, num_layers=1):
+    def __init__(self, env, policy, input_size=128, hidden_size=128, num_layers=1, device=None):
         '''Wraps your policy with an LSTM without letting you shoot yourself in the
         foot with bad transpose and shape operations. This saves much pain.
         Requires that your policy define encode_observations and decode_actions.
         See the Default policy for an example.'''
         super().__init__()
         self.obs_shape = env.single_observation_space.shape
-
         self.policy = policy
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.recurrent = nn.LSTM(input_size, hidden_size, num_layers)
+
+        # Ensure the LSTM is on the same device as the policy        
+        self.device = device if device else torch.device("cpu")
+        self.to(self.device) 
+
+        self.recurrent = nn.LSTM(input_size, hidden_size, num_layers).to(self.device)
 
         for name, param in self.recurrent.named_parameters():
             if "bias" in name:
@@ -96,38 +136,31 @@ class LSTMWrapper(nn.Module):
                 nn.init.orthogonal_(param, 1.0)
 
     def forward(self, x, state):
-        x_shape, space_shape = x.shape, self.obs_shape
-        x_n, space_n = len(x_shape), len(space_shape)
-        if x_shape[-space_n:] != space_shape:
-            raise ValueError('Invalid input tensor shape', x.shape)
-
-        if x_n == space_n + 1:
-            B, TT = x_shape[0], 1
-        elif x_n == space_n + 2:
-            B, TT = x_shape[:2]
-        else:
-            raise ValueError('Invalid input tensor shape', x.shape)
-
+        # Device consistency added throughout
+        x = x.to(self.device)
         if state is not None:
-            assert state[0].shape[1] == state[1].shape[1] == B
+            state = (state[0].to(self.device), state[1].to(self.device))
 
-        x = x.reshape(B*TT, *space_shape)
+        x_shape, space_shape = x.shape, self.obs_shape
+        B, TT = x_shape[0], 1 if len(x_shape) == len(space_shape) + 1 else x_shape[1]
+
+        x = x.reshape(B * TT, *space_shape).to(self.device)
         hidden, lookup = self.policy.encode_observations(x)
-        assert hidden.shape == (B*TT, self.input_size)
-        hidden = hidden.reshape(B, TT, self.input_size)
+        hidden = hidden.to(self.device)
+        
+        self.input_size = hidden.shape[-1]
 
-        hidden = hidden.transpose(0, 1)
+        hidden = hidden.reshape(B, TT, self.input_size).transpose(0, 1).to(self.device)
         hidden, state = self.recurrent(hidden, state)
-        hidden = hidden.transpose(0, 1)
-
-        hidden = hidden.reshape(B*TT, self.hidden_size)
-        hidden, critic = self.policy.decode_actions(hidden, lookup)
+        
+        hidden = hidden.transpose(0, 1).reshape(B * TT, self.hidden_size).to(self.device)
+        hidden, critic = self.policy.decode_actions(hidden.to(self.device), lookup)
         return hidden, critic, state
 
 class Convolutional(nn.Module):
     def __init__(self, env, *args, framestack, flat_size,
             input_size=512, hidden_size=512, output_size=512,
-            channels_last=False, downsample=1, **kwargs):
+            channels_last=False, downsample=1, device=None, **kwargs):
         '''The CleanRL default NatureCNN policy used for Atari.
         It's just a stack of three convolutions followed by a linear layer
         
@@ -136,6 +169,10 @@ class Convolutional(nn.Module):
         super().__init__()
         self.channels_last = channels_last
         self.downsample = downsample
+        
+        # Ensure device consistency        
+        self.device = device if device else torch.device("cpu")
+        self.to(self.device) 
 
         self.network= nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Conv2d(framestack, 32, 8, stride=4)),
@@ -147,13 +184,14 @@ class Convolutional(nn.Module):
             nn.Flatten(),
             pufferlib.pytorch.layer_init(nn.Linear(flat_size, hidden_size)),
             nn.ReLU(),
-        )
+        ).to(self.device)
         self.actor = pufferlib.pytorch.layer_init(
-            nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
+            nn.Linear(hidden_size, env.single_action_space.n), std=0.01).to(self.device)
         self.value_fn = pufferlib.pytorch.layer_init(
-            nn.Linear(output_size, 1), std=1)
+            nn.Linear(output_size, 1), std=1).to(self.device)
 
     def forward(self, observations):
+        observations = observations.to(self.device)
         hidden, lookup = self.encode_observations(observations)
         actions, value = self.decode_actions(hidden, lookup)
         return actions, value
@@ -166,6 +204,7 @@ class Convolutional(nn.Module):
         return self.network(observations.float() / 255.0), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
+        flat_hidden = flat_hidden.to(self.device)
         action = self.actor(flat_hidden)
         value = self.value_fn(flat_hidden)
         return action, value
