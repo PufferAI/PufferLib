@@ -1,30 +1,16 @@
 from pdb import set_trace as T
 import torch
 from torch import nn
+import torch.nn.functional as F
 import numpy as np
 
 import pufferlib.models
 import pufferlib.pytorch
 
+
 class Recurrent(pufferlib.models.LSTMWrapper):
-    def __init__(self, env, policy, input_size=256, hidden_size=256, num_layers=1):
+    def __init__(self, env, policy, input_size=384, hidden_size=256, num_layers=1):
         super().__init__(env, policy, input_size, hidden_size, num_layers)
-
-@torch.compiler.disable
-def decode_map(codes):
-    codes = codes.unsqueeze(1).long()
-    factors = [4, 4, 16, 5, 3, 5, 5, 6, 7, 4]
-    n_channels = sum(factors)
-    obs = torch.zeros(codes.shape[0], n_channels, 11, 15, device='cuda')
-
-    add, div = 0, 1
-    # TODO: check item/tier order
-    for mod in factors:
-        obs.scatter_(1, add+(codes//div)%mod, 1)
-        add += mod
-        div *= mod
-
-    return obs
 
 class Decompressor(nn.Module):
     def __init__(self):
@@ -50,41 +36,78 @@ class Decompressor(nn.Module):
         obs.scatter_(1, dec, 1)
         return obs.view(batch, 59, 11, 15)
 
+class PlayerProjEncoder(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.player_embed = nn.Embedding(128, 32)
+        self.player_continuous = pufferlib.pytorch.layer_init(
+            nn.Linear(47, hidden_size//2))
+        self.discrete_proj = pufferlib.pytorch.layer_init(
+            nn.Linear(32*47, hidden_size//2))
+        self.player_proj = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, hidden_size//2))
+ 
+    def forward(self, player):
+        # TODO: slow
+        player = player.float()
+        player[:, -2:] /= 10
+        player = player.int()
+        player_discrete = self.player_embed(player).view(player.shape[0], -1)
+        player_discrete = self.discrete_proj(player_discrete)
+        player_continuous = self.player_continuous(player.float() / 99)
+        player = torch.cat([player_discrete, player_continuous], dim=1)
+        player = F.relu(player)
+        player = self.player_proj(player)
+        player = F.relu(player)
+        return player
+
+
+class PlayerEncoder(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.player_embed = nn.Embedding(128, hidden_size//4)
+        self.player_continuous = pufferlib.pytorch.layer_init(
+            nn.Linear(47, hidden_size//4))
+        self.player_proj = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, hidden_size//4))
+ 
+    def forward(self, player):
+        player[-2:] /= 10
+        player_discrete = self.player_embed(player).max(dim=1)[0]
+        player_continuous = self.player_continuous(player.float() / 99)
+        player = torch.cat([player_discrete, player_continuous], dim=1)
+        #player = F.relu(player)
+        #player = self.player_proj(player)
+        #player = F.relu(player)
+        return player
 
 class Policy(nn.Module):
-    def __init__(self, env):
+    def __init__(self, env, hidden_size=256, output_size=256):
         super().__init__()
-        self.emulated = env.emulated
-        self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
-        #self.env = env
-
+        #self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
         self.num_actions = env.single_action_space.n
-        #self.num_actions = self.action_space.n
-        #self.num_actions = self.action_space.shape[0]
-        hidden_size = 256
-        output_size = 256
-
         self.decompressor = Decompressor()
 
         self.map_2d = nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Conv2d(59, 64, 5, stride=3)),
             nn.ReLU(),
             pufferlib.pytorch.layer_init(nn.Conv2d(64, 64, 3, stride=1)),
-            nn.ReLU(),
             nn.Flatten(),
+            nn.ReLU(),
             pufferlib.pytorch.layer_init(nn.Linear(128, hidden_size//2)),
             nn.ReLU(),
         )
 
-        self.embed = nn.Embedding(128, 32)
-        self.player_1d = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(32*44, hidden_size//2)),
-            nn.ReLU(),
-        )
+        self.player_encoder = PlayerProjEncoder(hidden_size)
+        #self.proj = nn.Linear(hidden_size, output_size)
+        #self.player_proj = nn.Linear(47, hidden_size)
 
-        self.proj = nn.Linear(hidden_size, output_size)
+        self.reward_proj = nn.Linear(10, hidden_size//2)
 
-        self.actor = pufferlib.pytorch.layer_init(nn.Linear(output_size, self.num_actions), std=0.01)
+        #self.lstm = nn.LSTMCell(hidden_size, hidden_size)
+
+        self.actor = pufferlib.pytorch.layer_init(
+            nn.Linear(output_size, self.num_actions), std=0.01)
         self.value_fn = pufferlib.pytorch.layer_init(nn.Linear(output_size, 1), std=1)
 
     def forward(self, x):
@@ -100,16 +123,25 @@ class Policy(nn.Module):
         #    ob_map = self.decompressor(x['map']).float()
         #player = x['player']
 
+        player = observations[:, (11*15):-10]
+        #player = self.player_proj(player.float() / 99)
+        #player, _ = self.lstm(player)
+        #return player, None
+
+        ob_player = self.player_encoder(player)
+        #ob_player = self.player_proj(player.float()/99)
+        #return ob_player, None
+
         ob_map = observations[:, :(11*15)].view(batch, 11, 15)
         ob_map = self.decompressor(ob_map).float()
-        player = observations[:, (11*15):]
-
         ob_map = self.map_2d(ob_map)
-        ob_player = self.embed(player)
-        ob_player = ob_player.flatten(1)
-        ob_player = self.player_1d(ob_player)
 
-        ob = torch.cat([ob_map, ob_player], dim=1)
+        reward = observations[:, -10:].float() / 10000
+        ob_reward = self.reward_proj(reward)
+
+        ob = torch.cat([ob_map, ob_player, ob_reward], dim=1)
+        #ob = F.relu(ob)
+        return ob, None
         return self.proj(ob), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):

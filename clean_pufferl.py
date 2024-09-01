@@ -22,8 +22,8 @@ import pufferlib.pytorch
 torch.set_float32_matmul_precision('high')
 
 # Fast Cython GAE implementation
-import pyximport
-pyximport.install(setup_args={"include_dirs": np.get_include()})
+#import pyximport
+#pyximport.install(setup_args={"include_dirs": np.get_include()})
 from c_gae import compute_gae
 
 
@@ -40,11 +40,13 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
     obs_shape = vecenv.single_observation_space.shape
     obs_dtype = vecenv.single_observation_space.dtype
     atn_shape = vecenv.single_action_space.shape
+    atn_dtype = vecenv.single_action_space.dtype
     total_agents = vecenv.num_agents
 
     lstm = policy.lstm if hasattr(policy, 'lstm') else None
     experience = Experience(config.batch_size, config.bptt_horizon,
-        config.minibatch_size, obs_shape, obs_dtype, atn_shape, config.cpu_offload, config.device, lstm, total_agents)
+        config.minibatch_size, obs_shape, obs_dtype, atn_shape, atn_dtype,
+        config.cpu_offload, config.device, lstm, total_agents)
 
     uncompiled_policy = policy
 
@@ -66,7 +68,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
         wandb=wandb,
         global_step=0,
         epoch=0,
-        stats={},
+        stats=defaultdict(list),
         msg=msg,
         last_log_time=0,
         utilization=utilization,
@@ -124,8 +126,6 @@ def evaluate(data):
             data.vecenv.send(actions)
 
     with profile.eval_misc:
-        data.stats = {}
-
         # Moves into models... maybe. Definitely moves.
         # You could also just return infos and have it in demo
         if 'pokemon_exploration_map' in infos:
@@ -146,11 +146,18 @@ def evaluate(data):
                 data.stats[f'Media/{k}'] = data.wandb.Image(v[0])
                 continue
 
-            try: # TODO: Better checks on log data types
-                data.stats[k] = np.mean(v)
-            except:
-                continue
+            if isinstance(v, np.ndarray):
+                v = v.tolist()
+            try:
+                iter(v)
+            except TypeError:
+                data.stats[k].append(v)
+            else:
+                data.stats[k] += v
 
+    # TODO: Better way to enable multiple collects
+    data.experience.ptr = 0
+    data.experience.step = 0
     return data.stats, infos
 
 @pufferlib.utils.profile
@@ -170,6 +177,7 @@ def train(data):
         experience.flatten_batch(advantages_np)
 
     # Optimizing the policy and value network
+    total_minibatches = experience.num_minibatches * config.update_epochs
     mean_pg_loss, mean_v_loss, mean_entropy_loss = 0, 0, 0
     mean_old_kl, mean_kl, mean_clipfrac = 0, 0, 0
     for epoch in range(config.update_epochs):
@@ -246,12 +254,12 @@ def train(data):
                     torch.cuda.synchronize()
 
             with profile.train_misc:
-                losses.policy_loss += pg_loss.item() / experience.num_minibatches
-                losses.value_loss += v_loss.item() / experience.num_minibatches
-                losses.entropy += entropy_loss.item() / experience.num_minibatches
-                losses.old_approx_kl += old_approx_kl.item() / experience.num_minibatches
-                losses.approx_kl += approx_kl.item() / experience.num_minibatches
-                losses.clipfrac += clipfrac.item() / experience.num_minibatches
+                losses.policy_loss += pg_loss.item() / total_minibatches
+                losses.value_loss += v_loss.item() / total_minibatches
+                losses.entropy += entropy_loss.item() / total_minibatches
+                losses.old_approx_kl += old_approx_kl.item() / total_minibatches
+                losses.approx_kl += approx_kl.item() / total_minibatches
+                losses.clipfrac += clipfrac.item() / total_minibatches
 
         if config.target_kl is not None:
             if approx_kl > config.target_kl:
@@ -271,25 +279,41 @@ def train(data):
         data.epoch += 1
 
         done_training = data.global_step >= config.total_timesteps
-        if profile.update(data) or done_training:
+        # TODO: beter way to get episode return update without clogging dashboard
+        # TODO: make this appear faster
+        if profile.update(data):
+            mean_and_log(data)
             print_dashboard(config.env, data.utilization, data.global_step, data.epoch,
                 profile, data.losses, data.stats, data.msg)
-
-            if data.wandb is not None and data.global_step > 0 and time.time() - data.last_log_time > 3.0:
-                data.last_log_time = time.time()
-                data.wandb.log({
-                    '0verview/SPS': profile.SPS,
-                    '0verview/agent_steps': data.global_step,
-                    '0verview/epoch': data.epoch,
-                    '0verview/learning_rate': data.optimizer.param_groups[0]["lr"],
-                    **{f'environment/{k}': v for k, v in data.stats.items()},
-                    **{f'losses/{k}': v for k, v in data.losses.items()},
-                    **{f'performance/{k}': v for k, v in data.profile},
-                })
+            data.stats = defaultdict(list)
 
         if data.epoch % config.checkpoint_interval == 0 or done_training:
             save_checkpoint(data)
             data.msg = f'Checkpoint saved at update {data.epoch}'
+
+def mean_and_log(data):
+    for k in list(data.stats.keys()):
+        v = data.stats[k]
+        try:
+            v = np.mean(v)
+        except:
+            del data.stats[k]
+
+        data.stats[k] = v
+
+    if data.wandb is None:
+        return
+
+    data.last_log_time = time.time()
+    data.wandb.log({
+        '0verview/SPS': data.profile.SPS,
+        '0verview/agent_steps': data.global_step,
+        '0verview/epoch': data.epoch,
+        '0verview/learning_rate': data.optimizer.param_groups[0]["lr"],
+        **{f'environment/{k}': v for k, v in data.stats.items()},
+        **{f'losses/{k}': v for k, v in data.losses.items()},
+        **{f'performance/{k}': v for k, v in data.profile},
+    })
 
 def close(data):
     data.vecenv.close()
@@ -379,17 +403,18 @@ def make_losses():
 
 class Experience:
     '''Flat tensor storage and array views for faster indexing'''
-    def __init__(self, batch_size, bptt_horizon, minibatch_size, obs_shape, obs_dtype, atn_shape,
+    def __init__(self, batch_size, bptt_horizon, minibatch_size, obs_shape, obs_dtype, atn_shape, atn_dtype,
                  cpu_offload=False, device='cuda', lstm=None, lstm_total_agents=0):
         if minibatch_size is None:
             minibatch_size = batch_size
 
         obs_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_dtype]
+        atn_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_dtype]
         pin = device == 'cuda' and cpu_offload
         obs_device = device if not pin else 'cpu'
         self.obs=torch.zeros(batch_size, *obs_shape, dtype=obs_dtype,
             pin_memory=pin, device=device if not pin else 'cpu')
-        self.actions=torch.zeros(batch_size, *atn_shape, dtype=int, pin_memory=pin)
+        self.actions=torch.zeros(batch_size, *atn_shape, dtype=atn_dtype, pin_memory=pin)
         self.logprobs=torch.zeros(batch_size, pin_memory=pin)
         self.rewards=torch.zeros(batch_size, pin_memory=pin)
         self.dones=torch.zeros(batch_size, pin_memory=pin)
@@ -459,12 +484,10 @@ class Experience:
         self.b_idxs_flat = self.b_idxs.reshape(
             self.num_minibatches, self.minibatch_size)
         self.sort_keys = []
-        self.ptr = 0
-        self.step = 0
         return idxs
 
     def flatten_batch(self, advantages_np):
-        advantages = torch.from_numpy(advantages_np).to(self.device)
+        advantages = torch.as_tensor(advantages_np).to(self.device)
         b_idxs, b_flat = self.b_idxs, self.b_idxs_flat
         self.b_actions = self.actions.to(self.device, non_blocking=True)
         self.b_logprobs = self.logprobs.to(self.device, non_blocking=True)
@@ -498,9 +521,13 @@ class Utilization(Thread):
             self.cpu_util.append(psutil.cpu_percent())
             mem = psutil.virtual_memory()
             self.cpu_mem.append(mem.active / mem.total)
-            self.gpu_util.append(torch.cuda.utilization())
-            free, total = torch.cuda.mem_get_info()
-            self.gpu_mem.append(free / total)
+            if torch.cuda.is_available():
+                self.gpu_util.append(torch.cuda.utilization())
+                free, total = torch.cuda.mem_get_info()
+                self.gpu_mem.append(free / total)
+            else:
+                self.gpu_util.append(0)
+                self.gpu_mem.append(0)
             time.sleep(self.delay)
 
     def stop(self):
@@ -549,18 +576,18 @@ def try_load_checkpoint(data):
 def count_params(policy):
     return sum(p.numel() for p in policy.parameters() if p.requires_grad)
 
-def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
-        model_path=None, device='cuda'):
+def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_kwargs,
+        backend, render_mode='auto', model_path=None, device='cuda'):
+
+    if render_mode != 'auto':
+        env_kwargs['render_mode'] = render_mode
+
     # We are just using Serial vecenv to give a consistent
     # single-agent/multi-agent API for evaluation
-    try:
-        env = pufferlib.vector.make(env_creator,
-            env_kwargs={'render_mode': 'rgb_array', **env_kwargs})
-    except:
-        env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs)
+    env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs, backend=backend)
 
     if model_path is None:
-        agent = agent_creator(env, **agent_kwargs).to(device)
+        agent = agent_creator(env, policy_cls, rnn_cls, agent_kwargs).to(device)
     else:
         agent = torch.load(model_path, map_location=device)
 
@@ -569,20 +596,26 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
     os.system('clear')
     state = None
 
-    while True:
-        render = driver.render()
-        if driver.render_mode == 'ansi':
-            print('\033[0;0H' + render + '\n')
-            time.sleep(0.6)
-        elif driver.render_mode == 'rgb_array':
-            import cv2
-            render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
-            cv2.imshow('frame', render)
-            cv2.waitKey(1)
-            time.sleep(1/24)
+    frames = []
+    tick = 0
+    while tick <= 1000:
+        if tick % 1 == 0:
+            render = driver.render()
+            if driver.render_mode == 'ansi':
+                print('\033[0;0H' + render + '\n')
+                time.sleep(0.05)
+            elif driver.render_mode == 'rgb_array':
+                frames.append(render)
+                import cv2
+                render = cv2.cvtColor(render, cv2.COLOR_RGB2BGR)
+                cv2.imshow('frame', render)
+                cv2.waitKey(1)
+                time.sleep(1/24)
+            elif driver.render_mode in ('human', 'raylib') and render is not None:
+                frames.append(render)
 
         with torch.no_grad():
-            ob = torch.from_numpy(ob).to(device)
+            ob = torch.as_tensor(ob).to(device)
             if hasattr(agent, 'lstm'):
                 action, _, _, _, state = agent(ob, state)
             else:
@@ -592,7 +625,14 @@ def rollout(env_creator, env_kwargs, agent_creator, agent_kwargs,
 
         ob, reward = env.step(action)[:2]
         reward = reward.mean()
-        print(f'Reward: {reward:.4f}')
+        if tick % 128 == 0:
+            print(f'Reward: {reward:.4f}, Tick: {tick}')
+        tick += 1
+
+    # Save frames as gif
+    if frames:
+        import imageio
+        os.makedirs('../docker', exist_ok=True) or imageio.mimsave('../docker/eval.gif', frames, fps=15, loop=0)
 
 def seed_everything(seed, torch_deterministic):
     random.seed(seed)

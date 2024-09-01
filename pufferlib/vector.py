@@ -66,6 +66,42 @@ def joint_space(space, n):
             shape=(n, *space.shape), dtype=space.dtype)
     else:
         raise ValueError(f'Unsupported space: {space}')
+
+class Native:
+    reset = reset
+    step = step
+
+    @property
+    def num_envs(self):
+        return self.agents_per_batch
+
+    def __init__(self, env_creators, env_args, env_kwargs, num_envs, **kwargs):
+        assert len(env_creators) == 1
+        assert num_envs == 1
+        self.envs = env_creators[0](*env_args[0], **env_kwargs[0])
+        self.driver_env = self.envs
+        self.emulated = self.driver_env.emulated
+        self.num_agents = num_agents = self.envs.num_agents
+        self.agents_per_batch = self.num_agents
+        self.num_agents = num_agents
+        self.single_observation_space = self.envs.single_observation_space
+        self.single_action_space = self.envs.single_action_space
+        self.action_space = joint_space(self.single_action_space, self.agents_per_batch)
+        self.observation_space = joint_space(self.single_observation_space, self.agents_per_batch)
+        self.flag = RESET
+
+    def async_reset(self, seed=None):
+        self.flag = RECV
+        self.ready = self.envs.reset(seed)
+
+    def send(self, actions):
+        self.ready = self.envs.step(actions)
+
+    def recv(self):
+        return self.ready
+
+    def close(self):
+        self.envs.close()
  
 class Serial:
     reset = reset
@@ -580,9 +616,9 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
             if batch_size is None:
                 batch_size = num_envs
 
-            if batch_size % envs_per_worker != 0:
-                raise APIUsageError(
-                    'batch_size must be divisible by (num_envs / num_workers)')
+            #if batch_size % envs_per_worker != 0:
+            #    raise APIUsageError(
+            #        'batch_size must be divisible by (num_envs / num_workers)')
         
  
     if env_args is None:
@@ -595,6 +631,8 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
         env_creators = [env_creator_or_creators] * num_envs
         env_args = [env_args] * num_envs
         env_kwargs = [env_kwargs] * num_envs
+    else:
+        env_creators = env_creator_or_creators
 
     if len(env_creators) != num_envs:
         raise APIUsageError('env_creators must be a list of length num_envs')
@@ -614,6 +652,9 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
     # Keeps batch size consistent when debugging with Serial backend
     if backend is Serial and 'batch_size' in kwargs:
         num_envs = kwargs['batch_size']
+
+    # TODO: Check num workers is not greater than num envs. This results in
+    # different Serial vs Multiprocessing behavior
 
     # Sanity check args
     for k in kwargs:
@@ -654,7 +695,7 @@ def check_envs(envs, driver):
         if atn_space != driver_atn:
             raise APIUsageError(f'\n{atn_space}\n{driver_atn} atn space mismatch')
 
-def autotune(env_creator, batch_size, max_envs=1024, model_forward_s=0.0,
+def autotune(env_creator, batch_size, max_envs=384, model_forward_s=0.0,
         max_env_ram_gb=32, max_batch_vram_gb=0.05, time_per_test=5): 
     '''Determine the optimal vectorization parameters for your system'''
     # TODO: fix multiagent

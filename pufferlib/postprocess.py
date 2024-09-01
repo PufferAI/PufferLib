@@ -4,6 +4,44 @@ import gymnasium
 
 import pufferlib.utils
 
+class ResizeObservation(gymnasium.Wrapper):
+    '''Fixed downscaling wrapper. Do NOT use gym.wrappers.ResizeObservation
+    It uses a laughably slow OpenCV resize. -50% on Atari just from that.'''
+    def __init__(self, env, downscale=2):
+        super().__init__(env)
+        self.downscale = downscale
+        y_size, x_size = env.observation_space.shape
+        assert y_size % downscale == 0 and x_size % downscale == 0
+        y_size = env.observation_space.shape[0] // downscale
+        x_size = env.observation_space.shape[1] // downscale
+        self.observation_space = gymnasium.spaces.Box(
+            low=0, high=255, shape=(y_size, x_size), dtype=np.uint8)
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        return obs[::self.downscale, ::self.downscale], info
+
+    def step(self, action):
+        obs, reward, terminal, truncated, info = self.env.step(action)
+        return obs[::self.downscale, ::self.downscale], reward, terminal, truncated, info
+
+class ClipAction(gymnasium.Wrapper):
+    '''Wrapper for Gymnasium environments that clips actions'''
+    def __init__(self, env):
+        self.env = env
+        assert isinstance(env.action_space, gymnasium.spaces.Box)
+        dtype_info = np.finfo(env.action_space.dtype)
+        self.action_space = gymnasium.spaces.Box(
+            low=dtype_info.min,
+            high=dtype_info.max,
+            shape=env.action_space.shape,
+            dtype=env.action_space.dtype,
+        )
+
+    def step(self, action):
+        action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
+        return self.env.step(action)
+
 
 class EpisodeStats(gymnasium.Wrapper):
     '''Wrapper for Gymnasium environments that stores
@@ -14,10 +52,9 @@ class EpisodeStats(gymnasium.Wrapper):
         self.action_space = env.action_space
         self.reset()
 
-    # TODO: Fix options. Maybe reimplement gymnasium.Wrapper with better compatibility
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         self.info = dict(episode_return=[], episode_length=0)
-        return self.env.reset(seed=seed)
+        return self.env.reset(seed=seed, options=options)
 
     def step(self, action):
         observation, reward, terminated, truncated, info = super().step(action)
@@ -144,6 +181,7 @@ class MultiagentEpisodeStats(PettingZooWrapper):
     def step(self, actions):
         observations, rewards, terminations, truncations, infos = super().step(actions)
 
+        all_infos = {}
         for agent in infos:
             agent_info = self.infos[agent]
             for k, v in pufferlib.utils.unroll_nested_dict(infos[agent]):
@@ -157,6 +195,7 @@ class MultiagentEpisodeStats(PettingZooWrapper):
             agent_info['episode_length'] += 1
 
             agent_info = {}
+            all_infos[agent] = agent_info
             if terminations[agent] or truncations[agent]:
                 for k, v in self.infos[agent].items():
                     try:
@@ -176,4 +215,4 @@ class MultiagentEpisodeStats(PettingZooWrapper):
                     except TypeError:
                         pass
 
-        return observations, rewards, terminations, truncations, infos
+        return observations, rewards, terminations, truncations, all_infos

@@ -658,3 +658,4 @@ vizdoom:
     batch_size: 8192
     minibatch_size: 2048
     update_epochs: 1
+

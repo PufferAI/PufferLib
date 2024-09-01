@@ -6,7 +6,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 GROUP=$1
-COMMON="python demo.py --mode train --baseline --env"
+COMMON="python demo.py --mode train --baseline --track --env"
 
 case $GROUP in
     ocean)
@@ -17,6 +17,13 @@ case $GROUP in
         $COMMON multiagent
         $COMMON spaces
         $COMMON bandit
+        ;;
+    grid)
+        $COMMON foraging --vec multiprocessing
+        $COMMON predator_prey --vec multiprocessing
+        $COMMON group --vec multiprocessing
+        $COMMON puffer --vec multiprocessing
+        $COMMON center --vec multiprocessing
         ;;
     procgen)
         $COMMON bigfish
@@ -39,10 +46,10 @@ case $GROUP in
     atari)
         $COMMON pong --vec multiprocessing
         $COMMON breakout --vec multiprocessing
-        $COMMON beam-rider --vec multiprocessing
+        $COMMON beam_rider --vec multiprocessing
         $COMMON enduro --vec multiprocessing
         $COMMON qbert --vec multiprocessing
-        $COMMON space-invaders --vec multiprocessing
+        $COMMON space_invaders --vec multiprocessing
         $COMMON seaquest --vec multiprocessing
         ;;
     pokemon)

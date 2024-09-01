@@ -10,12 +10,14 @@ import pufferlib.environments
 import pufferlib.postprocess
 #from .wrapper import RenderCharImagesWithNumpyWrapper
 
-
-def env_creator(name='NetHackScore-v0'):
+def env_creator(name='nethack'):
     return functools.partial(make, name)
 
 def make(name):
     '''NetHack binding creation function'''
+    if name == 'nethack':
+        name = 'NetHackScore-v0'
+
     nle = pufferlib.environments.try_import('nle')
     env = gym.make(name)
     #env = RenderCharImagesWithNumpyWrapper(env)

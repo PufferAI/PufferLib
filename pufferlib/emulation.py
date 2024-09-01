@@ -112,7 +112,8 @@ def emulate_observation_space(space):
     return emulated_space, emulated_dtype
 
 def emulate_action_space(space):
-    if isinstance(space, (pufferlib.spaces.Discrete, pufferlib.spaces.MultiDiscrete)):
+    if isinstance(space, (pufferlib.spaces.Discrete,
+            pufferlib.spaces.MultiDiscrete, pufferlib.spaces.Box)):
         return space, space.dtype
 
     emulated_dtype = dtype_from_space(space)
@@ -223,8 +224,7 @@ class GymnasiumPufferEnv(gymnasium.Env):
             buf.truncations[0] = truncated
             buf.masks[0] = True
                    
-        self.done = done
-
+        self.done = done or truncated
         return self.obs, reward, done, truncated, info
 
     def render(self):
@@ -412,7 +412,7 @@ class PettingZooPufferEnv:
                 buf.truncations[i] = truncateds[agent]
                 buf.masks[i] = True
      
-        self.all_done = all(dones.values())
+        self.all_done = all(dones.values()) or all(truncateds.values())
         rewards = pad_agent_data(rewards, self.possible_agents, 0)
         dones = pad_agent_data(dones, self.possible_agents, True) # You changed this from false to match api test... is this correct?
         truncateds = pad_agent_data(truncateds, self.possible_agents, False)

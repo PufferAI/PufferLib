@@ -15,11 +15,18 @@ EXTRA_OBS_KEYS = [
     'tty_cursor',
 ]
 
-def env_creator(name='MiniHack-River-v0'):
+ALIASES = {
+    'minihack': 'MiniHack-River-v0',
+}
+
+def env_creator(name='minihack'):
     return functools.partial(make, name)
 
 def make(name):
     '''NetHack binding creation function'''
+    if name in ALIASES:
+        name = ALIASES[name]
+
     import minihack
     pufferlib.environments.try_import('minihack')
     obs_key = minihack.base.MH_DEFAULT_OBS_KEYS + EXTRA_OBS_KEYS

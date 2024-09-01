@@ -9,8 +9,11 @@ import pufferlib.emulation
 import pufferlib.environments
 import pufferlib.postprocess
 
+ALIASES = {
+    'spiders': 'GDY-Spiders-v0',
+}    
 
-def env_creator(name='GDY-Spiders-v0'):
+def env_creator(name='spiders'):
     return functools.partial(make, name)
 
 # TODO: fix griddly
@@ -19,6 +22,9 @@ def make(name):
 
     Note that Griddly environments do not have observation spaces until
     they are created and reset'''
+    if name in ALIASES:
+        name = ALIASES[name]
+
     pufferlib.environments.try_import('griddly')
     with pufferlib.utils.Suppress():
         env = gym.make(name)

@@ -4,6 +4,10 @@ import numpy
 
 VERSION = '1.0.1'
 
+import os
+os.environ['CFLAGS'] = '-O3 -march=native -Wall'
+
+
 # Default Gym/Gymnasium/PettingZoo versions
 # Gym:
 # - 0.26 still has deprecation warnings and is the last version of the package
@@ -31,10 +35,8 @@ cleanrl = [
     'stable_baselines3==2.1.0',
     'tensorboard==2.11.2',
     'torch',
+    'tyro==0.8.6',
     'wandb==0.13.7',
-    'psutil==5.9.5',
-    'tyro==0.5.10',
-    'pynvml'
 ]
 
 ray = [
@@ -49,8 +51,8 @@ environments = {
     ],
     'atari': [
         f'gym=={GYM_VERSION}',
-        f'gymnasium[atari,accept-rom-license]=={GYMNASIUM_VERSION}',
-        'stable_baselines3==2.1.0',
+        f'gymnasium[accept-rom-license]=={GYMNASIUM_VERSION}',
+        'ale_py==0.9.0',
     ],
     'box2d': [
         f'gym=={GYM_VERSION}',
@@ -110,9 +112,9 @@ environments = {
     'minerl': [
         'gym==0.17.0',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        'minerl==0.4.4',
+        #'git+https://github.com/minerllabs/minerl'
         # Compatiblity warning with urllib3 and chardet
-        'requests==2.31.0',
+        #'requests==2.31.0',
     ],
     'minigrid': [
         f'gym=={GYM_VERSION}',
@@ -123,6 +125,11 @@ environments = {
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
         'minihack==0.1.5',
+    ],
+    'mujoco': [
+        f'gymnasium[mujoco]=={GYMNASIUM_VERSION}',
+        'mujoco==2.3.7',  # mujuco > 3 is supported by gymnasium > 1.0
+        'moviepy',
     ],
     'nethack': [
         f'gym=={GYM_VERSION}',
@@ -222,7 +229,9 @@ setup(
         f'gymnasium<={GYMNASIUM_VERSION}',
         f'pettingzoo<={PETTINGZOO_VERSION}',
         'shimmy[gym-v21]',
-        'pygame==2.5.2', # Pin for now
+        'psutil==5.9.5',
+        'pynvml',
+        'imageio',
     ],
     extras_require={
         'docs': docs,
@@ -231,7 +240,19 @@ setup(
         'common': common,
         **environments,
     },
-    ext_modules = cythonize("pufferlib/extensions.pyx"),
+    ext_modules = cythonize([
+        "pufferlib/extensions.pyx",
+        "c_gae.pyx",
+        "pufferlib/environments/ocean/grid/c_grid.pyx",
+        "pufferlib/environments/ocean/snake/c_snake.pyx",
+        "pufferlib/environments/ocean/moba/c_moba.pyx",
+        "pufferlib/environments/ocean/moba/c_precompute_pathing.pyx",
+    ], 
+       #nthreads=6,
+       #annotate=True,
+       #compiler_directives={'profile': True},# annotate=True
+    ),
+    extra_compile_args=['-O3', '-march=native'],
     include_dirs=[numpy.get_include()],
     python_requires=">=3.8",
     license="MIT",
