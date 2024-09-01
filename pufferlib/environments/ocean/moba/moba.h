@@ -135,12 +135,12 @@ typedef struct {
 
     Map* map;
     unsigned char* orig_grid;
-    unsigned char ai_paths[128][128][128][128];
+    unsigned char* ai_paths;
     int atn_map[2][8];
-    unsigned char observations_map[10][11][11][4];
-    unsigned char observations_extra[10][26];
+    unsigned char* observations_map;
+    unsigned char* observations_extra;
     int xp_for_level[30];
-    int actions[10][6];
+    int* actions;
     Entity* entities;
 
     float reward_death;
@@ -157,9 +157,9 @@ typedef struct {
     Entity* scanned_targets[256][121];
     void* skills[10][3];
 
-    Reward rewards[10];
-    float sum_rewards[10];
-    float norm_rewards[10];
+    Reward* rewards;
+    float* sum_rewards;
+    float* norm_rewards;
     float waypoints[6][20][2];
 
     CachedRNG *rng;
@@ -178,6 +178,10 @@ MOBA* init_moba() {
     return env;
 }
 
+inline int ai_offset(int y_dst, int x_dst, int y_src, int x_src) {
+    return y_dst*128*128*128 + x_dst*128*128 + y_src*128 + x_src;
+}
+
 void free_moba(MOBA* env) {
     free(env->map);
     free(env->rng);
@@ -185,6 +189,11 @@ void free_moba(MOBA* env) {
 }
  
 void compute_observations(MOBA* env) {
+    // Does this copy?
+    unsigned char (*obs_map)[11][11][4] = (unsigned char(*)[11][11][4])env->observations_map;
+    unsigned char (*obs_extra)[26] = (unsigned char(*)[26])env->observations_extra;
+
+    // TODO: Zero out
     //self.observations_map[:] = 0
 
     // Probably safe to not clear this
@@ -201,30 +210,30 @@ void compute_observations(MOBA* env) {
         int x = player->x;
 
         // TODO: Add bounds debug checks asserts
-        env->observations_extra[pid][0] = 2*x;
-        env->observations_extra[pid][1] = 2*y;
-        env->observations_extra[pid][2] = 255*player->level/30.0;
-        env->observations_extra[pid][3] = 255*player->health/player->max_health;
-        env->observations_extra[pid][4] = 255*player->mana/player->max_mana;
-        env->observations_extra[pid][5] = player->damage;
-        env->observations_extra[pid][6] = 100*player->move_speed;
-        env->observations_extra[pid][7] = player->move_modifier*100;
-        env->observations_extra[pid][8] = 2*player->stun_timer;
-        env->observations_extra[pid][9] = 2*player->move_timer;
-        env->observations_extra[pid][10] = 2*player->q_timer;
-        env->observations_extra[pid][11] = 2*player->w_timer;
-        env->observations_extra[pid][12] = 2*player->e_timer;
-        env->observations_extra[pid][13] = 50*player->basic_attack_timer;
-        env->observations_extra[pid][14] = 50*player->basic_attack_cd;
-        env->observations_extra[pid][15] = 255*player->is_hit;
-        env->observations_extra[pid][16] = 255*player->team;
-        env->observations_extra[pid][17 + player->hero_type] = 255;
+        obs_extra[pid][0] = 2*x;
+        obs_extra[pid][1] = 2*y;
+        obs_extra[pid][2] = 255*player->level/30.0;
+        obs_extra[pid][3] = 255*player->health/player->max_health;
+        obs_extra[pid][4] = 255*player->mana/player->max_mana;
+        obs_extra[pid][5] = player->damage;
+        obs_extra[pid][6] = 100*player->move_speed;
+        obs_extra[pid][7] = player->move_modifier*100;
+        obs_extra[pid][8] = 2*player->stun_timer;
+        obs_extra[pid][9] = 2*player->move_timer;
+        obs_extra[pid][10] = 2*player->q_timer;
+        obs_extra[pid][11] = 2*player->w_timer;
+        obs_extra[pid][12] = 2*player->e_timer;
+        obs_extra[pid][13] = 50*player->basic_attack_timer;
+        obs_extra[pid][14] = 50*player->basic_attack_cd;
+        obs_extra[pid][15] = 255*player->is_hit;
+        obs_extra[pid][16] = 255*player->team;
+        obs_extra[pid][17 + player->hero_type] = 255;
 
         // Assumes scaled between -1 and 1, else overflows
-        env->observations_extra[pid][22] = 127*reward->death + 128;
-        env->observations_extra[pid][23] = 25*reward->xp;
-        env->observations_extra[pid][24] = 127*reward->distance + 128;
-        env->observations_extra[pid][25] = 70*reward->tower;
+        obs_extra[pid][22] = 127*reward->death + 128;
+        obs_extra[pid][23] = 25*reward->xp;
+        obs_extra[pid][24] = 127*reward->distance + 128;
+        obs_extra[pid][25] = 70*reward->tower;
 
         for (int dy = -vis; dy <= vis; dy++) {
             for (int dx = -vis; dx <= vis; dx++) {
@@ -232,7 +241,7 @@ void compute_observations(MOBA* env) {
                 int yy = y + dy;
 
                 int adr = map_offset(map, yy, xx);
-                env->observations_map[pid][yy][xx][0] = map->grid[adr];
+                obs_map[pid][yy][xx][0] = map->grid[adr];
                 int target_pid = env->map->pids[adr];
                 if (target_pid == -1)
                     continue;
@@ -241,9 +250,9 @@ void compute_observations(MOBA* env) {
                 xx = dx + vis;
                 yy = dy + vis;
 
-                env->observations_map[pid][yy][xx][1] = 255*target->health/target->max_health;
-                env->observations_map[pid][yy][xx][2] = 255*target->mana/target->max_mana;
-                env->observations_map[pid][yy][xx][3] = target->level/30.0;
+                obs_map[pid][yy][xx][1] = 255*target->health/target->max_health;
+                obs_map[pid][yy][xx][2] = 255*target->mana/target->max_mana;
+                obs_map[pid][yy][xx][3] = target->level/30.0;
             }
         }
     }
@@ -319,7 +328,8 @@ int move_towards(MOBA* env, Entity* entity, int y_dst, int x_dst, float speed) {
     int y_src = entity->y;
     int x_src = entity->x;
 
-    int atn = env->ai_paths[y_dst][x_dst][y_src][x_src];
+    int adr = ai_offset(y_dst, x_dst, y_src, x_src);
+    int atn = env->ai_paths[adr];
     if (atn >= 8)
         return 0;
 
@@ -335,7 +345,7 @@ int move_towards(MOBA* env, Entity* entity, int y_dst, int x_dst, float speed) {
     return move_to(env->map, entity, entity->y + jitter_y, entity->x + jitter_x);
 }
 
-void kill(Map* map, Entity* entity) {
+void kill_entity(Map* map, Entity* entity) {
     int adr = map_offset(map, (int)entity->y, (int)entity->x);
     map->grid[adr] = EMPTY;
     map->pids[adr] = -1;
@@ -346,7 +356,7 @@ void kill(Map* map, Entity* entity) {
 
 void respawn_player(Map* map, Entity* entity) {
     int pid = entity->pid;
-    kill(map, entity);
+    kill_entity(map, entity);
     entity->pid = pid;
 
     entity->max_health = entity->base_health;
@@ -397,13 +407,13 @@ int attack(MOBA* env, Entity* player, Entity* target, float damage) {
         respawn_player(env->map, target);
     } else if (target_type == ENTITY_CREEP) {
         player->creeps_killed += 1;
-        kill(env->map, target);
+        kill_entity(env->map, target);
     } else if (target_type == ENTITY_NEUTRAL) {
         player->neutrals_killed += 1;
-        kill(env->map, target);
+        kill_entity(env->map, target);
     } else if (target_type == ENTITY_TOWER) {
         player->towers_killed += 1;
-        kill(env->map, target);
+        kill_entity(env->map, target);
     }
 
     if (player->entity_type != ENTITY_PLAYER)
@@ -1109,12 +1119,13 @@ void step_players(MOBA* env) {
         if (player->stun_timer > 0)
             continue;
 
-        float vel_y = env->actions[pid][0] / 100.0f;
-        float vel_x = env->actions[pid][1] / 100.0f;
-        int attack_target = env->actions[pid][2];
-        bool use_q = env->actions[pid][3];
-        bool use_w = env->actions[pid][4];
-        bool use_e = env->actions[pid][5];
+        int (*actions)[6] = (int(*)[6])env->actions;
+        float vel_y = actions[pid][0] / 100.0f;
+        float vel_x = actions[pid][1] / 100.0f;
+        int attack_target = actions[pid][2];
+        bool use_q = actions[pid][3];
+        bool use_w = actions[pid][4];
+        bool use_e = actions[pid][5];
 
         if (attack_target == 1 || attack_target == 0) {
             // Scan everything
