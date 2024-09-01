@@ -1642,4 +1642,3 @@ cdef class Environment:
 
         self.compute_observations()
         return 0
-
