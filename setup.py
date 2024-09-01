@@ -232,6 +232,8 @@ setup(
         'psutil==5.9.5',
         'pynvml',
         'imageio',
+        'raylib',
+        'cffi',
     ],
     extras_require={
         'docs': docs,
