@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 from Cython.Build import cythonize
 import numpy
 
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 
 import os
 os.environ['CFLAGS'] = '-O3 -march=native -Wall'
@@ -232,6 +232,8 @@ setup(
         'psutil==5.9.5',
         'pynvml',
         'imageio',
+        'raylib',
+        'cffi',
     ],
     extras_require={
         'docs': docs,
