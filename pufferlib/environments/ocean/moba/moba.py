@@ -7,8 +7,10 @@ import gymnasium
 
 import pufferlib
 from pufferlib.environments.ocean import render
-from pufferlib.environments.ocean.moba.c_moba import Environment as CEnv
-from pufferlib.environments.ocean.moba.c_moba import entity_dtype, reward_dtype,step_all
+#from pufferlib.environments.ocean.moba.c_moba import Environment as CEnv
+#from pufferlib.environments.ocean.moba.c_moba import entity_dtype, reward_dtype,step_all
+from pufferlib.environments.ocean.moba.cy_moba import Environment as CEnv
+from pufferlib.environments.ocean.moba.cy_moba import entity_dtype, reward_dtype, step_all
 from pufferlib.environments.ocean.moba.c_precompute_pathing import precompute_pathing
 
 HUMAN_PLAYER = 1

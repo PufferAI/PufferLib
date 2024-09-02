@@ -44,16 +44,18 @@ cdef extern from "moba.h":
     int XP_RANGE
     int MAX_USES
 
+    ctypedef int (*skill)(MOBA*, Entity*, Entity*) noexcept
+
     ctypedef struct Map:
         unsigned char* grid;
-        int* pids;
-        int width;
-        int height;
+        int* pids
+        int width
+        int height
 
     ctypedef struct CachedRNG:
-        float* rng;
-        int rng_n;
-        int rng_idx;
+        float* rng
+        int rng_n
+        int rng_idx
 
     ctypedef struct Reward:
         float death;
@@ -95,7 +97,7 @@ cdef extern from "moba.h":
 
         # MAX_ENTITIES x MAX_SCANNED_TARGETS
         Entity* scanned_targets[256][121];
-        void* skills[10][3];
+        skill* skills[10][3];
 
         Reward* rewards;
         float* sum_rewards;
@@ -166,6 +168,9 @@ cdef extern from "moba.h":
     int neutral_offset(MOBA* moba)
     int tower_offset(MOBA* moba)
     int player_offset(MOBA* moba)
+
+    void reset(MOBA* env)
+    void step(MOBA* env)
 
 cpdef entity_dtype():
     '''Make a dummy entity to get the dtype'''
@@ -251,122 +256,6 @@ cdef class Environment:
             [1, -1, 0, 0, 1, -1, -1, 1],
             [0, 0, 1, -1, -1, -1, 1, 1]], dtype=np.int32)
 
-        # Initialize Players
-        cdef Entity *player
-        for team in range(2):
-            if team == 0:
-                spawn_y = 128 - 15
-                spawn_x = 12
-            else:
-                spawn_y = 15
-                spawn_x = 128 - 12
-
-            for pid in range(team*5, team*5 + 5):
-                player = &env.entities[pid]
-                player.pid = pid
-                player.entity_type = ENTITY_PLAYER
-                player.team = team
-                player.spawn_y = spawn_y
-                player.spawn_x = spawn_x
-                player.move_speed = agent_speed
-                player.basic_attack_cd = 8
-                player.base_damage = 50
-                player.q_uses = 0
-                player.w_uses = 0
-                player.e_uses = 0
-                player.basic_attack_uses = 0
-                player.damage_dealt = 0
-                player.damage_received = 0
-                player.healing_dealt = 0
-                player.healing_received = 0
-                player.deaths = 0
-                player.heros_killed = 0
-                player.creeps_killed = 0
-                player.neutrals_killed = 0
-                player.towers_killed = 0
-                player.last_x = 0
-                player.last_y = 0
-
-            pid = 5*team
-            player = &env.entities[pid]
-            player.pid = pid
-            player.entity_type = ENTITY_PLAYER
-            player.grid_id = RADIANT_SUPPORT + team*5
-            player.hero_type = 0
-            player.lane = 2 + 3*team
-            env.skills[pid][0] = env.skill_support_hook
-            env.skills[pid][1] = env.skill_support_aoe_heal
-            env.skills[pid][2] = env.skill_support_stun
-            player.base_health = 500
-            player.base_mana = 250
-            player.hp_gain_per_level = 100
-            player.mana_gain_per_level = 50
-            player.damage_gain_per_level = 10
-
-            pid = 5*team + 1
-            player = &env.entities[pid]
-            player.pid = pid
-            player.entity_type = ENTITY_PLAYER
-            player.grid_id = RADIANT_ASSASSIN + team*5
-            player.hero_type = 1
-            player.lane = 2 + 3*team
-            self.skills[pid][0] = self.skill_assassin_aoe_minions
-            self.skills[pid][1] = self.skill_assassin_tp_damage
-            self.skills[pid][2] = self.skill_assassin_move_buff
-            player.base_health = 400
-            player.base_mana = 300
-            player.hp_gain_per_level = 100
-            player.mana_gain_per_level = 65
-            player.damage_gain_per_level = 10
-
-            pid = 5*team + 2
-            player = &env.entities[pid]
-            player.pid = pid
-            player.entity_type = ENTITY_PLAYER
-            player.grid_id = RADIANT_BURST + team*5
-            player.hero_type = 2
-            player.lane = 1 + 3*team
-            self.skills[pid][0] = self.skill_burst_nuke
-            self.skills[pid][1] = self.skill_burst_aoe
-            self.skills[pid][2] = self.skill_burst_aoe_stun
-            player.base_health = 400
-            player.base_mana = 300
-            player.hp_gain_per_level = 75
-            player.mana_gain_per_level = 90
-            player.damage_gain_per_level = 10
-
-            pid = 5*team + 3
-            player = &env.entities[pid]
-            player.pid = pid
-            player.entity_type = ENTITY_PLAYER
-            player.grid_id = RADIANT_TANK + team*5
-            player.hero_type = 3
-            player.lane = 3*team
-            self.skills[pid][0] = self.skill_tank_aoe_dot
-            self.skills[pid][1] = self.skill_tank_self_heal
-            self.skills[pid][2] = self.skill_tank_engage_aoe
-            player.base_health = 700
-            player.base_mana = 200
-            player.hp_gain_per_level = 150
-            player.mana_gain_per_level = 50
-            player.damage_gain_per_level = 15
-
-            pid = 5*team + 4
-            player = &env.entities[pid]
-            player.pid = pid
-            player.entity_type = ENTITY_PLAYER
-            player.grid_id = RADIANT_CARRY + team*5
-            player.hero_type = 4
-            player.lane = 2 + 3*team
-            self.skills[pid][0] = self.skill_carry_retreat_slow
-            self.skills[pid][1] = self.skill_carry_slow_damage
-            self.skills[pid][2] = self.skill_carry_aoe
-            player.base_health = 300
-            player.base_mana = 250
-            player.hp_gain_per_level = 50
-            player.mana_gain_per_level = 50
-            player.damage_gain_per_level = 25
-
 
         # Load creep waypoints for each lane
         self.waypoints = np.zeros((6, 20, 2), dtype=np.float32)
@@ -413,4 +302,9 @@ cdef class Environment:
                 neutral.damage = 22
                 idx += 1
 
+    def reset(self):
+        reset(self.env)
+
+    def step(self):
+        step(self.env)
 
