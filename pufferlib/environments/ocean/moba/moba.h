@@ -32,7 +32,11 @@
 #define XP_RANGE 7
 #define MAX_USES 2000000000
 
-typedef struct {
+typedef struct MOBA MOBA;
+typedef struct Entity Entity;
+typedef int (*skill)(MOBA*, Entity*, Entity*);
+
+struct Entity {
     int pid;
     int entity_type;
     int hero_type;
@@ -87,7 +91,7 @@ typedef struct {
     float last_y;
     int target_pid;
     int attack_aoe;
-} Entity;
+};
 
 typedef struct {
     unsigned char* grid;
@@ -121,7 +125,7 @@ float fast_rng(CachedRNG* rng) {
     return val;
 }
 
-typedef struct {
+struct MOBA {
     int num_agents;
     int num_creeps;
     int num_neutrals;
@@ -155,7 +159,7 @@ typedef struct {
 
     // MAX_ENTITIES x MAX_SCANNED_TARGETS
     Entity* scanned_targets[256][121];
-    void* skills[10][3];
+    skill skills[10][3];
 
     Reward* rewards;
     float* sum_rewards;
@@ -163,20 +167,7 @@ typedef struct {
     float waypoints[6][20][2];
 
     CachedRNG *rng;
-} MOBA;
-
-MOBA* init_moba() {
-    MOBA* env = (MOBA*)malloc(sizeof(MOBA));
-    env->map = (Map*)malloc(sizeof(Map));
-
-    env->rng = (CachedRNG*)malloc(sizeof(CachedRNG));
-    env->rng->rng_n = 10000;
-    env->rng->rng_idx = 0;
-    for (int i = 0; i < env->rng->rng_n; i++)
-        env->rng->rng[i] = -1+2*((float)rand())/(float)RAND_MAX;
-
-    return env;
-}
+};
 
 inline int ai_offset(int y_dst, int x_dst, int y_src, int x_src) {
     return y_dst*128*128*128 + x_dst*128*128 + y_src*128 + x_src;
@@ -1169,6 +1160,141 @@ void step_players(MOBA* env) {
             reward->tower/env->reward_tower
         );
     }
+}
+
+MOBA* init_moba() {
+    MOBA* env = (MOBA*)malloc(sizeof(MOBA));
+    env->map = (Map*)malloc(sizeof(Map));
+
+    env->rng = (CachedRNG*)malloc(sizeof(CachedRNG));
+    env->rng->rng_n = 10000;
+    env->rng->rng_idx = 0;
+    for (int i = 0; i < env->rng->rng_n; i++)
+        env->rng->rng[i] = -1+2*((float)rand())/(float)RAND_MAX;
+
+    // TODO: Pass agent speed as arg
+    int agent_speed = 1.0;
+    
+    // Initialize Players
+    Entity *player;
+    for (int team = 0; team < 2; team++) {
+        int spawn_y, spawn_x;
+        if (team == 0) {
+            spawn_y = 128 - 15;
+            spawn_x = 12;
+        } else {
+            spawn_y = 15;
+            spawn_x = 128 - 12;
+        }
+
+        for (int pid = team*5; pid < team*5 + 5; pid++) {
+            player = &env->entities[pid];
+            player->pid = pid;
+            player->entity_type = ENTITY_PLAYER;
+            player->team = team;
+            player->spawn_y = spawn_y;
+            player->spawn_x = spawn_x;
+            player->move_speed = agent_speed;
+            player->basic_attack_cd = 8;
+            player->base_damage = 50;
+            player->q_uses = 0;
+            player->w_uses = 0;
+            player->e_uses = 0;
+            player->basic_attack_uses = 0;
+            player->damage_dealt = 0;
+            player->damage_received = 0;
+            player->healing_dealt = 0;
+            player->healing_received = 0;
+            player->deaths = 0;
+            player->heros_killed = 0;
+            player->creeps_killed = 0;
+            player->neutrals_killed = 0;
+            player->towers_killed = 0;
+            player->last_x = 0;
+            player->last_y = 0;
+        }
+
+        int pid = 5*team;
+        player = &env->entities[pid];
+        player->pid = pid;
+        player->entity_type = ENTITY_PLAYER;
+        player->grid_id = RADIANT_SUPPORT + team*5;
+        player->hero_type = 0;
+        player->lane = 2 + 3*team;
+        env->skills[pid][0] = skill_support_hook;
+        env->skills[pid][1] = skill_support_aoe_heal;
+        env->skills[pid][2] = skill_support_stun;
+        player->base_health = 500;
+        player->base_mana = 250;
+        player->hp_gain_per_level = 100;
+        player->mana_gain_per_level = 50;
+        player->damage_gain_per_level = 10;
+
+        pid = 5*team + 1;
+        player = &env->entities[pid];
+        player->pid = pid;
+        player->entity_type = ENTITY_PLAYER;
+        player->grid_id = RADIANT_ASSASSIN + team*5;
+        player->hero_type = 1;
+        player->lane = 2 + 3*team;
+        env->skills[pid][0] = skill_assassin_aoe_minions;
+        env->skills[pid][1] = skill_assassin_tp_damage;
+        env->skills[pid][2] = skill_assassin_move_buff;
+        player->base_health = 400;
+        player->base_mana = 300;
+        player->hp_gain_per_level = 100;
+        player->mana_gain_per_level = 65;
+        player->damage_gain_per_level = 10;
+
+        pid = 5*team + 2;
+        player = &env->entities[pid];
+        player->pid = pid;
+        player->entity_type = ENTITY_PLAYER;
+        player->grid_id = RADIANT_BURST + team*5;
+        player->hero_type = 2;
+        player->lane = 1 + 3*team;
+        env->skills[pid][0] = skill_burst_nuke;
+        env->skills[pid][1] = skill_burst_aoe;
+        env->skills[pid][2] = skill_burst_aoe_stun;
+        player->base_health = 400;
+        player->base_mana = 300;
+        player->hp_gain_per_level = 75;
+        player->mana_gain_per_level = 90;
+        player->damage_gain_per_level = 10;
+
+        pid = 5*team + 3;
+        player = &env->entities[pid];
+        player->pid = pid;
+        player->entity_type = ENTITY_PLAYER;
+        player->grid_id = RADIANT_TANK + team*5;
+        player->hero_type = 3;
+        player->lane = 3*team;
+        env->skills[pid][0] = skill_tank_aoe_dot;
+        env->skills[pid][1] = skill_tank_self_heal;
+        env->skills[pid][2] = skill_tank_engage_aoe;
+        player->base_health = 700;
+        player->base_mana = 200;
+        player->hp_gain_per_level = 150;
+        player->mana_gain_per_level = 50;
+        player->damage_gain_per_level = 15;
+
+        pid = 5*team + 4;
+        player = &env->entities[pid];
+        player->pid = pid;
+        player->entity_type = ENTITY_PLAYER;
+        player->grid_id = RADIANT_CARRY + team*5;
+        player->hero_type = 4;
+        player->lane = 2 + 3*team;
+        env->skills[pid][0] = skill_carry_retreat_slow;
+        env->skills[pid][1] = skill_carry_slow_damage;
+        env->skills[pid][2] = skill_carry_aoe;
+        player->base_health = 300;
+        player->base_mana = 250;
+        player->hp_gain_per_level = 50;
+        player->mana_gain_per_level = 50;
+        player->damage_gain_per_level = 25;
+    }
+    return env;
 }
 
 void reset(MOBA* env) {
