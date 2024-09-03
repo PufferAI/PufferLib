@@ -201,7 +201,9 @@ cdef class Environment:
             int num_towers, int vision_range, float agent_speed, bint discretize, float reward_death,
             float reward_xp, float reward_distance, float reward_tower):
 
-        cdef MOBA* env = init_moba();
+        cdef MOBA* env = init_moba(num_agents, num_creeps, num_neutrals,
+            num_towers, vision_range, agent_speed, discretize, reward_death,
+            reward_xp, reward_distance, reward_tower)
         self.env = env
 
         # TODO: COPY THE GRID!!!
@@ -209,8 +211,6 @@ cdef class Environment:
         env.orig_grid = <unsigned char*> grid_copy.data
         env.map.grid = <unsigned char*> grid.data
         env.map.pids = <int*> pids.data
-        env.map.width = 128
-        env.map.height = 128
 
         env.ai_paths = <unsigned char*> ai_paths.data
         env.entities = <Entity*> entities.data
@@ -221,86 +221,12 @@ cdef class Environment:
         env.norm_rewards = <float*> norm_rewards.data
         env.actions = <int*> actions.data
 
-        env.num_agents = num_agents
-        env.num_creeps = num_creeps
-        env.num_neutrals = num_neutrals
-        env.num_towers = num_towers
-        env.vision_range = vision_range
-        env.agent_speed = agent_speed
-        env.discretize = discretize
-        env.obs_size = 2*vision_range + 1
-        env.creep_idx = 0
-
-        env.reward_death = reward_death
-        env.reward_xp = reward_xp
-        env.reward_distance = reward_distance
-        env.reward_tower = reward_tower
-        env.total_towers_taken = 0
-        env.total_levels_gained = 0
-        env.radiant_victories = 0
-        env.dire_victories = 0
-
         # Hey, change the scanned_targets size to match!
         #assert num_agents + num_creeps + num_neutrals + num_towers <= 256
         #assert self.obs_size * self.obs_size <= 121
 
         env.tick = 0
 
-        # Preallocate RNG -1 to 1
-        env.xp_for_level = np.array([
-            0, 240, 640, 1160, 1760, 2440, 3200, 4000, 4900, 4900, 7000, 8200,
-            9500, 10900, 12400, 14000, 15700, 17500, 19400, 21400, 23600, 26000,
-            28600, 31400, 34400, 38400, 43400, 49400, 56400, 63900], dtype=np.int32)
-
-        env.atn_map = np.array([
-            [1, -1, 0, 0, 1, -1, -1, 1],
-            [0, 0, 1, -1, -1, -1, 1, 1]], dtype=np.int32)
-
-
-        # Load creep waypoints for each lane
-        self.waypoints = np.zeros((6, 20, 2), dtype=np.float32)
-        for lane in range(6):
-            lane_data = entity_data['waypoints'][lane]
-            self.waypoints[lane, 0, 0] = lane_data['spawn_y']
-            self.waypoints[lane, 0, 1] = lane_data['spawn_x']
-            waypoints = lane_data['waypoints']
-            for i, waypoint in enumerate(waypoints):
-                self.waypoints[lane, i+1, 0] = waypoint['y']
-                self.waypoints[lane, i+1, 1] = waypoint['x']
-
-        cdef Entity *tower
-        for idx, tower_data in enumerate(entity_data['towers']):
-            pid = tower_offset(env) + idx
-            tower = &env.entities[pid]
-            tower.pid = idx + self.num_agents + self.num_creeps + self.num_neutrals
-            tower.entity_type = ENTITY_TOWER
-            tower.grid_id = TOWER
-            tower.basic_attack_cd = 5
-            tower.team = tower_data['team']
-            tower.spawn_y = tower_data['y']
-            tower.spawn_x = tower_data['x']
-            tower.max_health = tower_data['health']
-            tower.damage = tower_data['damage']
-            tower.tier = tower_data['tier']
-            tower.xp_on_kill = 800 * tower.tier
-
-        # Load neutral data
-        idx = 0
-        cdef Entity* neutral
-        for camp, camp_data in enumerate(entity_data['neutrals']):
-            for i in range(4): # Neutrals per camp
-                pid = neutral_offset(env) + idx
-                neutral = &env.entities[pid]
-                neutral.entity_type = ENTITY_NEUTRAL
-                neutral.grid_id = NEUTRAL
-                neutral.max_health = 500
-                neutral.team = 2
-                neutral.spawn_y = camp_data['y']
-                neutral.spawn_x = camp_data['x']
-                neutral.xp_on_kill = 35
-                neutral.basic_attack_cd = 5
-                neutral.damage = 22
-                idx += 1
 
     def reset(self):
         reset(self.env)

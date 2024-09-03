@@ -1,7 +1,9 @@
 // Incremental port of Puffer Moba to C. Be careful to add semicolons and avoid leftover cython syntax
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <math.h>
+#include "raylib.h"
 
 #define EMPTY 0
 #define WALL 1
@@ -31,6 +33,23 @@
 
 #define XP_RANGE 7
 #define MAX_USES 2000000000
+
+const float XP_FOR_LEVEL[] = {0, 240, 640, 1160, 1760, 2440, 3200, 4000, 4900, 4900, 7000, 8200, 9500, 10900, 12400, 14000, 15700, 17500, 19400, 21400, 23600, 26000, 28600, 31400, 34400, 38400, 43400, 49400, 56400, 63900};
+
+const float ATN_MAP[][8] = {
+    {1, -1, 0, 0, 1, -1, -1, 1},
+    {0, 0, 1, -1, -1, -1, 1, 1}
+};
+
+const float NEUTRAL_CAMP_X[] = {44.753846153846155, 74.41538461538462, 101.67692307692307, 89.92307692307692, 73.95384615384616, 64.38461538461539, 31.657692307692308, 95.67692307692307, 81.1076923076923, 34.99230769230769, 50.784615384615385, 63.646153846153844, 59.49230769230769, 44.69230769230769, 98.67307692307692, 28.642307692307693, 64.87692307692308, 51.46153846153846};
+const float NEUTRAL_CAMP_Y[] = {71.99230769230769, 108.15384615384616, 102.16923076923078, 102.78461538461539, 40.753846153846155, 39.92307692307692, 39.96923076923077, 70.78461538461538, 69.18461538461538, 59.52307692307692, 99.95384615384614, 93.97692307692307, 49.86153846153846, 31.353846153846156, 61.06153846153846, 69.92307692307692, 83.83076923076923, 33.98461538461538};
+const float TOWER_DAMAGE[] = {175.0, 175.0, 175.0, 175.0, 110.0, 175.0, 175.0, 110.0, 175.0, 175.0, 175.0, 110.0, 175.0, 110.0, 175.0, 175.0, 175.0, 175.0, 175.0, 175.0, 110.0, 110.0, 0, 0};
+const float TOWER_HEALTH[] = {2000, 2000, 2000, 2000, 1800, 2000, 2000, 1800, 2100, 2100, 2000, 1800, 2000, 1800, 2000, 2000, 2000, 2000, 2100, 2100, 1800, 1800, 4500, 4500};
+const int TOWER_TEAM[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0};
+const int TOWER_TIER[] = {3, 3, 3, 2, 1, 2, 2, 1, 4, 4, 2, 1, 2, 1, 2, 3, 3, 3, 4, 4, 1, 1, 5, 5};
+const float TOWER_X[] = {34.6, 29.307692307692307, 14.292307692307695, 64.2, 102.87692307692308, 38.29230769230769, 17.615384615384613, 16.876923076923077, 21.06153846153846, 103.03076923076924, 65.0, 29.06153846153846, 84.2, 69.03076923076924, 112.75384615384615, 113.73846153846154, 92.32307692307693, 97.86153846153846, 105.61538461538461, 23.52307692307692, 53.12307692307692, 113.22307692307692, 107.52307692307693, 19.46153846153846};
+const float TOWER_Y[] = {112.01538461538462, 96.87692307692308, 91.21538461538461, 113.61538461538461, 112.13846153846154, 85.43076923076923, 71.70769230769231, 51.03076923076923, 102.41538461538462, 28.261538461538464, 18.723076923076924, 18.723076923076924, 48.753846153846155, 59.98461538461538, 62.04615384615384, 41.676923076923075, 20.56923076923077, 36.08461538461539, 30.907692307692308, 104.93846153846154, 75.83076923076923, 78.3, 26.53846153846154, 106.16923076923078};
+const float WAYPOINTS[][20][2] = {{{96.26153846153846, 14.04615384615385}, {14.292307692307695, 93.61538461538461}, {16.07692307692308, 58.23076923076923}, {16.01538461538462, 43.4}, {17.584615384615383, 32.10769230769231}, {19.123076923076923, 24.93846153846154}, {20.446153846153848, 22.96923076923077}, {25.307692307692307, 21.06153846153846}, {30.47692307692308, 20.200000000000003}, {35.892307692307696, 19.4}, {43.52307692307693, 18.47692307692308}, {50.723076923076924, 18.04615384615385}, {94.66153846153847, 20.50769230769231}, {105.94615384615385, 27.676923076923075}}, {{99.52307692307693, 26.47692307692308}, {27.646153846153844, 98.66153846153847}, {41.12307692307692, 86.04615384615384}, {57.49230769230769, 71.33846153846154}, {62.23076923076923, 66.96923076923076}, {66.35384615384615, 64.07692307692308}, {72.01538461538462, 60.2}, {84.87692307692308, 51.892307692307696}, {99.4, 34.66153846153846}, {105.94615384615385, 28.169230769230772}}, {{112.01538461538462, 36.93846153846154}, {32.50769230769231, 112.01538461538462}, {68.6923076923077, 116.2}, {80.75384615384615, 113.73846153846154}, {90.53846153846155, 113.55384615384615}, {95.98461538461538, 113.21538461538461}, {100.93846153846154, 111.49230769230769}, {108.07692307692308, 109.06153846153846}, {111.36923076923077, 107.18461538461538}, {114.66153846153847, 101.73846153846154}, {111.76923076923077, 90.53846153846155}, {113.73846153846154, 39.4}, {106.43846153846154, 28.169230769230772}}, {{20.446153846153848, 89.36923076923077}, {94.66153846153847, 20.630769230769232}, {50.6, 18.784615384615385}, {24.50769230769231, 22.292307692307695}, {18.815384615384616, 22.815384615384616}, {17.03076923076923, 27.52307692307692}, {15.95384615384615, 35.03076923076923}, {14.415384615384617, 93.61538461538461}, {21.99230769230769, 103.64615384615385}}, {{37.43076923076923, 96.50769230769231}, {99.27692307692308, 34.53846153846154}, {84.38461538461539, 51.707692307692305}, {71.64615384615385, 59.83076923076923}, {66.1076923076923, 63.83076923076923}, {61.98461538461538, 66.72307692307692}, {57.246153846153845, 70.84615384615384}, {27.52307692307692, 98.53846153846155}, {22.48461538461538, 103.64615384615385}}, {{36.93846153846154, 113.24615384615385}, {113.61538461538461, 39.4}, {114.6, 62.292307692307695}, {114.6, 83.64615384615385}, {109.8, 90.66153846153847}, {112.01538461538462, 94.87692307692308}, {112.2923076923077, 104.26153846153846}, {107.83076923076922, 109.3076923076923}, {105.86153846153846, 112.23076923076923}, {72.96923076923076, 114.44615384615385}, {32.50769230769231, 111.8923076923077}, {22.48461538461538, 104.13846153846154}}};
 
 typedef struct MOBA MOBA;
 typedef struct Entity Entity;
@@ -100,7 +119,7 @@ typedef struct {
     int height;
 } Map;
 
-inline int map_offset(Map* map, int y, int x) {
+static inline int map_offset(Map* map, int y, int x) {
     return y*map->width + x;
 }
 
@@ -130,6 +149,7 @@ struct MOBA {
     int num_creeps;
     int num_neutrals;
     int num_towers;
+    int num_entities;
     int vision_range;
     float agent_speed;
     bool discretize;
@@ -140,10 +160,8 @@ struct MOBA {
     Map* map;
     unsigned char* orig_grid;
     unsigned char* ai_paths;
-    int atn_map[2][8];
     unsigned char* observations_map;
     unsigned char* observations_extra;
-    int xp_for_level[30];
     int* actions;
     Entity* entities;
 
@@ -164,17 +182,28 @@ struct MOBA {
     Reward* rewards;
     float* sum_rewards;
     float* norm_rewards;
-    float waypoints[6][20][2];
 
     CachedRNG *rng;
 };
 
-inline int ai_offset(int y_dst, int x_dst, int y_src, int x_src) {
+static inline int ai_offset(int y_dst, int x_dst, int y_src, int x_src) {
     return y_dst*128*128*128 + x_dst*128*128 + y_src*128 + x_src;
 }
 
 void free_moba(MOBA* env) {
+    free(env->rewards);
+    free(env->sum_rewards);
+    free(env->norm_rewards);
+    free(env->ai_paths);
+    free(env->map->pids);
+    free(env->map->grid);
+    free(env->orig_grid);
     free(env->map);
+    free(env->observations_map);
+    free(env->observations_extra);
+    free(env->actions);
+    free(env->entities);
+    free(env->rng->rng);
     free(env->rng);
     free(env);
 }
@@ -230,34 +259,33 @@ void compute_observations(MOBA* env) {
             for (int dx = -vis; dx <= vis; dx++) {
                 int xx = x + dx;
                 int yy = y + dy;
+                int ob_x = dx + vis;
+                int ob_y = dy + vis;
 
                 int adr = map_offset(map, yy, xx);
-                obs_map[pid][yy][xx][0] = map->grid[adr];
+                obs_map[pid][ob_y][ob_x][0] = map->grid[adr];
                 int target_pid = env->map->pids[adr];
                 if (target_pid == -1)
                     continue;
 
                 Entity* target = &env->entities[target_pid];
-                xx = dx + vis;
-                yy = dy + vis;
-
-                obs_map[pid][yy][xx][1] = 255*target->health/target->max_health;
-                obs_map[pid][yy][xx][2] = 255*target->mana/target->max_mana;
-                obs_map[pid][yy][xx][3] = target->level/30.0;
+                obs_map[pid][ob_y][ob_x][1] = 255*target->health/target->max_health;
+                obs_map[pid][ob_y][ob_x][2] = 255*target->mana/target->max_mana;
+                obs_map[pid][ob_y][ob_x][3] = target->level/30.0;
             }
         }
     }
 }
         
-inline int xp_for_player_kill(Entity* entity) {
+static inline int xp_for_player_kill(Entity* entity) {
     return 100 + (int)(entity->xp / 7.69);
 }
  
-inline float clip(float x) {
+static inline float clip(float x) {
     return fmaxf(-1.0f, fminf(x, 1.0f));
 }
 
-inline float l1_distance(float x1, float y1, float x2, float y2) {
+static inline float l1_distance(float x1, float y1, float x2, float y2) {
     return fabs(x1 - x2) + fabs(y1 - y2);
 }
 
@@ -265,7 +293,7 @@ inline float l1_distance(float x1, float y1, float x2, float y2) {
 int calc_level(MOBA* env, int xp) {
     int i;
     for (i = 0; i < 30; i++) {
-        if (xp < env->xp_for_level[i])
+        if (xp < XP_FOR_LEVEL[i])
             return i + 1;
     }
     return i + 1;
@@ -275,15 +303,15 @@ Reward* get_reward(MOBA* env, int pid) {
     return &env->rewards[pid];
 }
 
-inline int creep_offset(MOBA* moba) {
+static inline int creep_offset(MOBA* moba) {
     return moba->num_agents;
 }
 
-inline int neutral_offset(MOBA* moba) {
+static inline int neutral_offset(MOBA* moba) {
     return moba->num_agents + moba->num_creeps;
 }
 
-inline int tower_offset(MOBA* moba) {
+static inline int tower_offset(MOBA* moba) {
     return moba->num_agents + moba->num_creeps + moba->num_neutrals;
 }
 
@@ -325,8 +353,8 @@ int move_towards(MOBA* env, Entity* entity, int y_dst, int x_dst, float speed) {
         return 0;
 
     float modifier = speed * entity->move_modifier;
-    y_dst = y_src + modifier*env->atn_map[0][atn];
-    x_dst = x_src + modifier*env->atn_map[1][atn];
+    y_dst = y_src + modifier*ATN_MAP[0][atn];
+    x_dst = x_src + modifier*ATN_MAP[1][atn];
 
     if (move_to(env->map, entity, y_dst, x_dst) == 0)
         return 0;
@@ -498,8 +526,8 @@ int heal(MOBA* env, Entity* player, Entity* target, float amount) {
 }
 
 int respawn_creep(MOBA* env, Entity* entity, int lane) {
-    int spawn_y = env->waypoints[lane][0][0];
-    int spawn_x = env->waypoints[lane][0][1];
+    int spawn_y = WAYPOINTS[lane][0][0];
+    int spawn_x = WAYPOINTS[lane][0][1];
 
     Map* map = env->map;
     int y, x;
@@ -735,13 +763,13 @@ void creep_ai(MOBA* env, Entity* creep) {
 
         move_towards(env, creep, env->agent_speed, dest_y, dest_x);
     } else {
-        float dest_y = env->waypoints[lane][waypoint][0];
-        float dest_x = env->waypoints[lane][waypoint][1];
+        float dest_y = WAYPOINTS[lane][waypoint][0];
+        float dest_x = WAYPOINTS[lane][waypoint][1];
         move_towards(env, creep, env->agent_speed, dest_y, dest_x);
 
         // TODO: Last waypoint?
         float dist = l1_distance(creep->y, creep->x, dest_y, dest_x);
-        if (dist < 2 && env->waypoints[lane][waypoint+1][0] != 0)
+        if (dist < 2 && WAYPOINTS[lane][waypoint+1][0] != 0)
             creep->waypoint += 1;
     }
 }
@@ -1014,8 +1042,7 @@ void step_creeps(MOBA* env) {
     if (env->tick % 150 == 0) {
         for (int lane = 0; lane < 6; lane++) {
             for (int i = 0; i < 5; i++) {
-                int pid = creep_offset(env) + env->creep_idx;
-                spawn_creep(env, pid, lane);
+                spawn_creep(env, env->creep_idx, lane);
                 env->creep_idx = (env->creep_idx + 1) % env->num_creeps;
             }
         }
@@ -1162,19 +1189,91 @@ void step_players(MOBA* env) {
     }
 }
 
-MOBA* init_moba() {
-    MOBA* env = (MOBA*)malloc(sizeof(MOBA));
-    env->map = (Map*)malloc(sizeof(Map));
+unsigned char* read_file(char* filename) {
+    FILE* file;
+    unsigned char* array;
+    file = fopen(filename, "rb");
+    if (file == NULL) {
+        perror("Error opening file");
+        return NULL;
+    }
+    fseek(file, 0, SEEK_END);
+    long file_bytes = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    array = calloc(file_bytes, sizeof(unsigned char));
+    if (array == NULL) {
+        perror("Memory allocation failed");
+        fclose(file);
+        return NULL;
+    }
+    size_t num_read = fread(array, 1, file_bytes, file);
+    if (num_read != file_bytes) {
+        perror("Error reading file");
+        free(array);
+        fclose(file);
+        return NULL;
+    }
+    return array;
+}
 
-    env->rng = (CachedRNG*)malloc(sizeof(CachedRNG));
+MOBA* init_moba(num_agents, num_creeps, num_neutrals, num_towers, vision_range,
+        agent_speed, discretize, reward_death, reward_xp, reward_distance, reward_tower) {
+    MOBA* env = (MOBA*)calloc(1, sizeof(MOBA));
+
+    env->num_agents = num_agents;
+    env->num_creeps = num_creeps;
+    env->num_neutrals = num_neutrals;
+    env->num_towers = num_towers;
+    env->num_entities = num_agents + num_creeps + num_neutrals + num_towers;
+    env->vision_range = vision_range;
+    env->agent_speed = agent_speed;
+    env->discretize = discretize;
+    env->obs_size = 2*vision_range + 1;
+    env->creep_idx = 0;
+
+    env->reward_death = reward_death;
+    env->reward_xp = reward_xp;
+    env->reward_distance = reward_distance;
+    env->reward_tower = reward_tower;
+    env->total_towers_taken = 0;
+    env->total_levels_gained = 0;
+    env->radiant_victories = 0;
+    env->dire_victories = 0;
+
+    env->rewards = calloc(env->num_agents, sizeof(Reward));
+    env->sum_rewards = calloc(env->num_agents, sizeof(float));
+    env->norm_rewards = calloc(env->num_agents, sizeof(float));
+
+    env->map = (Map*)calloc(1, sizeof(Map));
+    env->map->grid = read_file("game_map.npy");
+    env->orig_grid = read_file("game_map.npy"); // TODO: Remove
+    env->map->width = 128;
+    env->map->height = 128;
+    env->map->pids = calloc(env->map->width*env->map->height, sizeof(int));
+    for (int i = 0; i < env->map->width*env->map->height; i++)
+        env->map->pids[i] = -1;
+
+    env->ai_paths = read_file("ai_paths.npy");
+
+    // Zero out scanned targets
+    for (int i = 0; i < 256; i++) {
+        env->scanned_targets[i][0] = NULL;
+        env->scanned_targets[i][1] = NULL;
+    }
+
+    // TODO: Don't hardcode sizes
+    env->observations_map = calloc(env->num_agents*121*121*4, sizeof(unsigned char));
+    env->observations_extra = calloc(env->num_agents*26, sizeof(unsigned char));
+    env->actions = calloc(env->num_agents*6, sizeof(int));
+    env->entities = calloc(env->num_entities, sizeof(Entity));
+
+    env->rng = (CachedRNG*)calloc(1, sizeof(CachedRNG));
     env->rng->rng_n = 10000;
     env->rng->rng_idx = 0;
+    env->rng->rng = calloc(env->rng->rng_n, sizeof(float));
     for (int i = 0; i < env->rng->rng_n; i++)
         env->rng->rng[i] = -1+2*((float)rand())/(float)RAND_MAX;
 
-    // TODO: Pass agent speed as arg
-    int agent_speed = 1.0;
-    
     // Initialize Players
     Entity *player;
     for (int team = 0; team < 2; team++) {
@@ -1294,6 +1393,44 @@ MOBA* init_moba() {
         player->mana_gain_per_level = 50;
         player->damage_gain_per_level = 25;
     }
+
+    Entity *tower;
+    for (int idx = 0; idx < env->num_towers; idx++) {
+        int pid = tower_offset(env) + idx;
+        tower = &env->entities[pid];
+        tower->pid = pid;
+        tower->entity_type = ENTITY_TOWER;
+        tower->grid_id = TOWER;
+        tower->basic_attack_cd = 5;
+        tower->team = TOWER_TEAM[idx];
+        tower->spawn_y = TOWER_Y[idx];
+        tower->spawn_x = TOWER_X[idx];
+        tower->max_health = TOWER_HEALTH[idx];
+        tower->damage = TOWER_DAMAGE[idx];
+        tower->tier = TOWER_TIER[idx];
+        tower->xp_on_kill = 800 * tower->tier;
+    }
+
+    int idx = 0;
+    Entity* neutral;
+    for (int camp = 0; camp < env->num_neutrals/4; camp++) {
+        // 4 neutrals per camp
+        for (int i = 0; i < 4; i++) {
+            int pid = neutral_offset(env) + idx;
+            neutral = &env->entities[pid];
+            // TODO: Consider initializing pid for start of game
+            neutral->entity_type = ENTITY_NEUTRAL;
+            neutral->grid_id = NEUTRAL;
+            neutral->max_health = 500;
+            neutral->team = 2;
+            neutral->spawn_y = NEUTRAL_CAMP_Y[camp];
+            neutral->spawn_x = NEUTRAL_CAMP_X[camp];
+            neutral->xp_on_kill = 35;
+            neutral->basic_attack_cd = 5;
+            neutral->damage = 22;
+            idx++;
+        }
+    }
     return env;
 }
 
@@ -1391,3 +1528,63 @@ int step(MOBA* env) {
     compute_observations(env);
     return 0;
 }
+
+// Raylib client
+Color COLORS[] = {
+    (Color){6, 24, 24, 255},     // Empty
+    (Color){0, 178, 178, 255},   // Wall
+    (Color){255, 165, 0, 255},   // Tower
+    (Color){0, 0, 128, 255},     // Radiant Creep
+    (Color){128, 0, 0, 255},     // Dire Creep
+    (Color){128, 128, 128, 255}, // Neutral
+    (Color){0, 0, 255, 255},     // Radiant Support
+    (Color){0, 0, 255, 255},     // Radiant Assassin
+    (Color){0, 0, 255, 255},     // Radiant Burst
+    (Color){0, 0, 255, 255},     // Radiant Tank
+    (Color){0, 0, 255, 255},     // Radiant Carry
+    (Color){255, 0, 0, 255},     // Dire Support
+    (Color){255, 0, 0, 255},     // Dire Assassin
+    (Color){255, 0, 0, 255},     // Dire Burst
+    (Color){255, 0, 0, 255},     // Dire Tank
+    (Color){255, 0, 0, 255},     // Dire Carry
+};
+ 
+typedef struct {
+    int cell_size;
+    int width;
+    int height;
+} Renderer;
+
+Renderer* init_renderer(int cell_size, int width, int height) {
+    Renderer* renderer = (Renderer*)malloc(sizeof(Renderer));
+    renderer->cell_size = cell_size;
+    renderer->width = width;
+    renderer->height = height;
+    InitWindow(width*cell_size, height*cell_size, "Puffer MOBA");
+    SetTargetFPS(10);
+    return renderer;
+}
+
+void close_renderer(Renderer* renderer) {
+    CloseWindow();
+    free(renderer);
+}
+
+void render_global(Renderer* renderer, MOBA* env) {
+    BeginDrawing();
+    ClearBackground(COLORS[0]);
+    int sz = renderer->cell_size;
+    for (int y = 0; y < renderer->height; y++) {
+        for (int x = 0; x < renderer->width; x++){
+            int adr = map_offset(env->map, y, x);
+            int tile = env->map->grid[adr];
+            if (tile != EMPTY)
+                DrawRectangle(x*sz, y*sz, sz, sz, COLORS[tile]);
+        }
+    }
+    DrawText("Reinforcement learned MOBA agents running in your browswer!", 10, 10, 20, COLORS[8]);
+    DrawText("Written in pure C by @jsuarez5341. Star it on GitHub/pufferai/pufferlib to support my work!", 10, 40, 20, COLORS[8]);
+    EndDrawing();
+}
+
+
