@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
+#include <time.h>
 #include "raylib.h"
 
 #define EMPTY 0
@@ -1549,14 +1551,15 @@ Color COLORS[] = {
     (Color){255, 0, 0, 255},     // Dire Carry
 };
  
+// High-level map overview
 typedef struct {
     int cell_size;
     int width;
     int height;
-} Renderer;
+} MapRenderer;
 
-Renderer* init_renderer(int cell_size, int width, int height) {
-    Renderer* renderer = (Renderer*)malloc(sizeof(Renderer));
+MapRenderer* init_map_renderer(int cell_size, int width, int height) {
+    MapRenderer* renderer = (MapRenderer*)malloc(sizeof(MapRenderer));
     renderer->cell_size = cell_size;
     renderer->width = width;
     renderer->height = height;
@@ -1565,12 +1568,12 @@ Renderer* init_renderer(int cell_size, int width, int height) {
     return renderer;
 }
 
-void close_renderer(Renderer* renderer) {
+void close_map_renderer(MapRenderer* renderer) {
     CloseWindow();
     free(renderer);
 }
 
-void render_global(Renderer* renderer, MOBA* env) {
+void render_map(MapRenderer* renderer, MOBA* env) {
     BeginDrawing();
     ClearBackground(COLORS[0]);
     int sz = renderer->cell_size;
@@ -1585,6 +1588,404 @@ void render_global(Renderer* renderer, MOBA* env) {
     DrawText("Reinforcement learned MOBA agents running in your browswer!", 10, 10, 20, COLORS[8]);
     DrawText("Written in pure C by @jsuarez5341. Star it on GitHub/pufferai/pufferlib to support my work!", 10, 40, 20, COLORS[8]);
     EndDrawing();
+}
+
+// Player client view
+typedef struct {
+    int cell_size;
+    int width;
+    int height;
+    Camera2D camera;
+    Rectangle asset_map[16];
+    Rectangle stun_uv;
+    Rectangle slow_uv;
+    Rectangle speed_uv;
+    Texture2D game_map;
+    Texture2D puffer;
+    Texture2D shader_canvas;
+    Shader shader;
+    Shader bloom_shader;
+    float shader_camera_x;
+    float shader_camera_y;
+    float shader_time;
+    int shader_texture1;
+    float last_click_x;	
+    float last_click_y;
+    int render_entities[128*128];
+} GameRenderer;
+
+GameRenderer* init_game_renderer(int cell_size, int width, int height) {
+    GameRenderer* renderer = (GameRenderer*)calloc(1, sizeof(GameRenderer));
+    renderer->cell_size = cell_size;
+    renderer->width = width;
+    renderer->height = height;
+
+    Rectangle asset_map[] = {
+        (Rectangle){0, 0, 0, 0},
+        (Rectangle){0, 0, 0, 0},
+        (Rectangle){384, 384, 128, 128},
+        (Rectangle){384, 0, 128, 128},
+        (Rectangle){256, 0, 128, 128},
+        (Rectangle){384, 128, 128, 128},
+        (Rectangle){256, 256, 128, 128},
+        (Rectangle){384, 256, 128, 128},
+        (Rectangle){128, 256, 128, 128},
+        (Rectangle){0, 256, 128, 128},
+        (Rectangle){0, 384, 128, 128},
+        (Rectangle){256, 256, 128, 128},
+        (Rectangle){384, 256, 128, 128},
+        (Rectangle){128, 256, 128, 128},
+        (Rectangle){0, 256, 128, 128},
+        (Rectangle){0, 384, 128, 128},
+    };
+    memcpy(renderer->asset_map, asset_map, sizeof(asset_map));
+
+    renderer->stun_uv = (Rectangle){0, 128, 128, 128};
+    renderer->slow_uv = (Rectangle){128, 128, 128, 128};
+    renderer->speed_uv = (Rectangle){256, 128, 128, 128};
+
+    renderer->game_map = LoadTexture("dota_map.png");
+    renderer->puffer = LoadTexture("moba_assets.png");
+    renderer->shader_canvas = LoadTextureFromImage(GenImageColor(2560, 1440, (Color){0, 0, 0, 255}));
+    renderer->shader = LoadShader("", "moba_shader.fs");
+    renderer->bloom_shader = LoadShader("", "bloom_shader.fs");
+
+    renderer->shader_camera_x = GetShaderLocation(renderer->shader, "camera_x");
+    renderer->shader_camera_y = GetShaderLocation(renderer->shader, "camera_y");
+    renderer->shader_time = GetShaderLocation(renderer->shader, "time");
+    renderer->shader_texture1 = GetShaderLocation(renderer->shader, "texture1");
+
+    renderer->camera = (Camera2D){0};
+    renderer->camera.target = (Vector2){0.0, 0.0};
+    // TODO: Init this?
+    renderer->camera.offset = (Vector2){GetScreenWidth()/2.0f, GetScreenHeight()/2.0f};
+    renderer->camera.rotation = 0.0f;
+    renderer->camera.zoom = 1.0f;
+
+    // Init last clicks
+    renderer->last_click_x = -1;
+    renderer->last_click_y = -1;
+
+    InitWindow(width*cell_size, height*cell_size, "Puffer MOBA");
+    SetTargetFPS(60);
+    return renderer;
+}
+
+//def render(self, grid, pids, entities, obs_players, actions, discretize, frames):
+#define HUMAN_PLAYER 0
+#define FRAMES 12
+
+void draw_bars(Entity* entity, int x, int y, int width, int height, bool draw_text) {
+    float health_bar = entity->health / entity->max_health;
+    float mana_bar = entity->mana / entity->max_mana;
+    if (entity->max_health == 0) {
+        health_bar = 2;
+    }
+    if (entity->max_mana == 0) {
+        mana_bar = 2;
+    }
+    DrawRectangle(x, y, width, height, RED);
+    DrawRectangle(x, y, width*health_bar, height, GREEN);
+
+    if (entity->entity_type == 0) {
+        DrawRectangle(x, y - height - 2, width, height, RED);
+        DrawRectangle(x, y - height - 2, width*mana_bar, height, (Color){0, 255, 255, 255});
+    }
+    //Color color = (entity->team == 0) ? (Color){0, 255, 255, 255} : (Color){255, 0, 0, 255};
+
+    // TODO: String formatting
+    /*
+    if (draw_text) {
+        int health = entity->health;
+        int mana = entity->mana;
+        int max_health = entity->max_health;
+        int max_mana = entity->max_mana;
+        rl.DrawText(f'Health: {health}/{max_health}'.encode(),
+            x+8, y+2, 20, [255, 255, 255, 255])
+        rl.DrawText(f'Mana: {mana}/{max_mana}'.encode(),
+            x+8, y+2 - height - 2, 20, [255, 255, 255, 255])
+        rl.DrawText(f'Experience: {entity.xp}'.encode(),
+            x+8, y - 2*height - 4, 20, [255, 255, 255, 255])
+    } else if (entity->entity_type == 0) {
+        rl.DrawText(f'Level: {entity.level}'.encode(),
+            x+4, y -2*height - 12, 12, color)
+    }
+    */
+}
+
+int render_game(GameRenderer* renderer, MOBA* env) {
+    Map* map = env->map;
+    Entity* my_player = &env->entities[HUMAN_PLAYER];
+    int ts = renderer->cell_size;
+
+    float ay = 0;
+    float ax = 0;
+    int skill_q = 0;
+    int skill_w = 0;
+    int skill_e = 0;
+    int target_heros = 1;
+
+    for (int frame = 0; frame < FRAMES; frame++) {
+        renderer->width = GetScreenWidth() / ts;
+        renderer->height = GetScreenHeight() / ts;
+
+        float tick_frac = frame / FRAMES;
+
+        float fmain_r = my_player->last_y + tick_frac*(my_player->y - my_player->last_y);
+        float fmain_c = my_player->last_x + tick_frac*(my_player->x - my_player->last_x);
+
+        renderer->camera.target.x = (fmain_c - renderer->width/2) * ts;
+        renderer->camera.target.y = (fmain_r - renderer->height/2) * ts;
+
+        int main_r = fmain_r;
+        int main_c = fmain_c;
+
+        int r_min = main_r - renderer->height/2 - 1;
+        int r_max = main_r + renderer->height/2 + 1;
+        int c_min = main_c - renderer->width/2 - 1;
+        int c_max = main_c + renderer->width/2 + 1;
+
+        Vector2 pos = GetMousePosition();
+        float raw_mouse_x = pos.x + renderer->camera.target.x;
+        float raw_mouse_y = pos.y + renderer->camera.target.y;
+        int mouse_x = raw_mouse_x / ts;
+        int mouse_y = raw_mouse_y / ts;
+
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            renderer->last_click_x = raw_mouse_x / ts;
+            renderer->last_click_y = raw_mouse_y / ts;
+        }
+
+        // TODO: better way to null clicks?
+        if (renderer->last_click_x != -1 && renderer->last_click_y != -1) {
+            float dest_x = renderer->last_click_x;
+            float dest_y = renderer->last_click_y;
+            float dy = dest_y - my_player->y;
+            float dx = dest_x - my_player->x;
+
+            // Rescale vector if norm > 1
+            float mag = sqrtf(dy*dy + dx*dx);
+            if (mag > 1) {
+                dy /= mag;
+                dx /= mag;
+            }
+            if (mag < 0.05) {
+                renderer->last_click_x = -1;
+                renderer->last_click_y = -1;
+            }
+
+            ay = 100*dy;
+            ax = 100*dx;
+        } else {
+            ay = 0;
+            ax = 0;
+        }
+
+        if (IsKeyDown(KEY_ESCAPE)) {
+            return 1;
+        }
+
+        if (IsKeyDown(KEY_Q) || IsKeyPressed(KEY_Q)) {
+            skill_q = 1;
+        }
+        if (IsKeyDown(KEY_W) || IsKeyPressed(KEY_W)) {
+            skill_w = 1;
+        }
+        if (IsKeyDown(KEY_E) || IsKeyPressed(KEY_E)) {
+            skill_e = 1;
+        }
+        if (IsKeyDown(KEY_LEFT_SHIFT)) {
+            target_heros = 2;
+        }
+
+        // TODO: How to check for no movement?
+        int (*actions)[6] = (int(*)[6])env->actions;
+        actions[HUMAN_PLAYER][0] = ay;
+        actions[HUMAN_PLAYER][1] = ax;
+        actions[HUMAN_PLAYER][2] = target_heros;
+        actions[HUMAN_PLAYER][3] = skill_q;
+        actions[HUMAN_PLAYER][4] = skill_w;
+        actions[HUMAN_PLAYER][5] = skill_e;
+
+        BeginDrawing();
+        ClearBackground(COLORS[0]);
+
+        // Main environment shader
+        BeginShaderMode(renderer->shader);
+        float main_r_shader = (fmain_r - renderer->height/2) / 128;
+        float main_c_shader = (fmain_c - renderer->width/2) / 128;
+        // TODO: isn't this a local?
+        float* camera_x_ptr = &main_r_shader;
+        float* camera_y_ptr = &main_c_shader;
+        float shader_time =  time(NULL);
+        float* shader_time_ptr = &shader_time;
+        SetShaderValue(renderer->shader, renderer->shader_camera_x, camera_x_ptr, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(renderer->shader, renderer->shader_camera_y, camera_y_ptr, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(renderer->shader, renderer->shader_time, shader_time_ptr, SHADER_UNIFORM_FLOAT);
+        SetShaderValueTexture(renderer->shader, renderer->shader_texture1, renderer->game_map);
+        DrawTexture(renderer->shader_canvas, 0, 0, WHITE);
+        EndShaderMode();
+
+        BeginMode2D(renderer->camera);
+
+        int render_idx = 0;
+        for (int y = r_min; y < r_max+1; y++) {
+            for (int x = c_min; x < c_max+1; x++) {
+                if (y < 0 || y >= 128 || x < 0 || x >= 128) {
+                    continue;
+                }
+
+                int adr = map_offset(map, y, x);
+                unsigned char tile = map->grid[adr];
+                if (tile == EMPTY || tile == WALL) {
+                    continue;
+                }
+           
+                int pid = map->pids[adr];
+                if (pid == -1) {
+                    DrawRectangle(x*ts, y*ts, ts, ts, RED);
+                }
+
+                renderer->render_entities[render_idx] = pid;
+                render_idx++;
+            }
+        }
+
+        // Targeting overlays
+        for (int i = 0; i < render_idx; i++) {
+            int pid = renderer->render_entities[i];
+            if (pid == -1) {
+                continue;
+            }
+
+            Entity* entity = &env->entities[pid];
+            int target_pid = entity->target_pid;
+            if (target_pid == -1) {
+                continue;
+            }
+
+            Entity* target = &env->entities[target_pid];
+            float entity_x = entity->last_x + tick_frac*(entity->x - entity->last_x);
+            float entity_y = entity->last_y + tick_frac*(entity->y - entity->last_y);
+            float target_x = target->last_x + tick_frac*(target->x - target->last_x);
+            float target_y = target->last_x + tick_frac*(target->y - target->last_x);
+
+            Color base;
+            Color accent;
+            if (entity->team == 0) {
+                base = (Color){0, 128, 128, 255};
+                accent = (Color){0, 255, 255, 255};
+            } else if (entity->team == 1) {
+                base = (Color){128, 0, 0, 255};
+                accent = (Color){255, 0, 0, 255};
+            } else {
+                base = (Color){128, 128, 128, 255};
+                accent = (Color){255, 255, 255, 255};
+            }
+
+            int target_px = target_x*ts + ts/2;
+            int target_py = target_y*ts + ts/2;
+            int entity_px = entity_x*ts + ts/2;
+            int entity_py = entity_y*ts + ts/2;
+                                            
+            if (entity->attack_aoe == 0) {
+                Vector2 line_start = (Vector2){entity_px, entity_py};
+                Vector2 line_end = (Vector2){target_px, target_py};
+                DrawLineEx(line_start, line_end, ts/16, accent);
+            } else {
+                int radius = entity->attack_aoe*ts;
+                DrawRectangle(target_px - radius, target_py - radius,
+                    2*radius, 2*radius, base);
+                Rectangle rec = (Rectangle){target_px - radius,
+                    target_py - radius, 2*radius, 2*radius};
+                DrawRectangleLinesEx(rec, ts/8, accent);
+            }
+        }
+
+        // Entity renders
+        for (int i = 0; i < render_idx; i++) {
+            Color tint = (Color){255, 255, 255, 255};
+
+            int pid = renderer->render_entities[i];
+            if (pid == -1) {
+                continue;
+            }
+            Entity* entity = &env->entities[pid];
+            int y = entity->y;
+            int x = entity->x;
+
+            float entity_x = entity->last_x + tick_frac*(entity->x - entity->last_x);
+            float entity_y = entity->last_y + tick_frac*(entity->y - entity->last_y);
+            int tx = entity_x*ts;
+            int ty = entity_y*ts;
+            draw_bars(entity, tx, ty-8, ts, 4, false);
+
+            int adr = map_offset(map, y, x);
+            int tile = map->grid[adr];
+
+            // TODO: Might need a vector type
+            Rectangle source_rect = renderer->asset_map[tile];
+            Rectangle dest_rect = (Rectangle){tx, ty, ts, ts};
+
+            if (entity->is_hit) {
+                BeginShaderMode(renderer->bloom_shader);
+            }
+            Vector2 origin = (Vector2){0, 0};
+            DrawTexturePro(renderer->puffer, source_rect, dest_rect, origin, 0, tint);
+            if (entity->is_hit) {
+                EndShaderMode();
+            }
+
+            // Draw status icons
+            if (entity->stun_timer > 0) {
+                DrawTexturePro(renderer->puffer, renderer->stun_uv, dest_rect, origin, 0, tint);
+            }
+            if (entity->move_timer > 0) {
+                if (entity->move_modifier < 0) {
+                    DrawTexturePro(renderer->puffer, renderer->slow_uv, dest_rect, origin, 0, tint);
+                }
+                if (entity->move_modifier > 0) {
+                    DrawTexturePro(renderer->puffer, renderer->speed_uv, dest_rect, origin, 0, tint);
+                }
+            }
+        }
+
+        DrawCircle(ts*mouse_x + ts/2, ts*mouse_y + ts/8, ts/8, WHITE);
+        EndMode2D();
+
+        // Draw HUD
+        Entity* player = &env->entities[HUMAN_PLAYER];
+
+        float hud_y = renderer->height*ts - 2*ts;
+        draw_bars(player, 2*ts, hud_y, 10*ts, 24, true);
+
+        // TODO: String formatting
+        /*
+        Color off_color = {255, 255, 255, 255};
+        Color on_color = (player->team == 0) ? (Color){0, 255, 255, 255} : (Color){255, 0, 0, 255};
+
+        Color q_color = (skill_q) ? on_color : off_color;
+        Color w_color = (skill_w) ? on_color : off_color;
+        Color e_color = (skill_e) ? on_color : off_color;
+
+        int q_cd = player->q_timer;
+        int w_cd = player->w_timer;
+        int e_cd = player->e_timer;
+
+        rl.DrawText(f'Q: {q_cd}'.encode(), 13*ts, hud_y - 20, 40, q_color)
+        rl.DrawText(f'W: {w_cd}'.encode(), 17*ts, hud_y - 20, 40, w_color)
+        rl.DrawText(f'E: {e_cd}'.encode(), 21*ts, hud_y - 20, 40, e_color)
+        rl.DrawText(f'Stun: {player.stun_timer}'.encode(), 25*ts, hud_y - 20, 20, e_color)
+        rl.DrawText(f'Move: {player.move_timer}'.encode(), 25*ts, hud_y, 20, e_color)
+        */
+        EndDrawing();
+    }
+    return 0;
+}
+
+void close_game_renderer(GameRenderer* renderer) {
+    CloseWindow();
+    free(renderer);
 }
 
 
