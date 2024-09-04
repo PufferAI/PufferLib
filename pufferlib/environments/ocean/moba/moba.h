@@ -1161,11 +1161,11 @@ void step_players(MOBA* env) {
             target = nearest_scanned_target(env, player);
 
         // TODO: Clean this mess
-        if (use_q && player->q_timer <= 0 && skill_support_hook(env, player, target) && player->q_uses < MAX_USES) {
+        if (use_q && player->q_timer <= 0 && env->skills[pid][0](env, player, target) && player->q_uses < MAX_USES) {
             player->q_uses += 1;
-        } else if (use_w && player->w_timer <= 0 && skill_support_aoe_heal(env, player, target) && player->w_uses < MAX_USES) {
+        } else if (use_w && player->w_timer <= 0 && env->skills[pid][1](env, player, target) && player->w_uses < MAX_USES) {
             player->w_uses += 1;
-        } else if (use_e && player->e_timer <= 0 && skill_support_stun(env, player, target) && player->e_uses < MAX_USES) {
+        } else if (use_e && player->e_timer <= 0 && env->skills[pid][2](env, player, target) && player->e_uses < MAX_USES) {
             player->e_uses += 1;
         } else if (target != NULL && basic_attack(env, player, target) && player->basic_attack_uses < MAX_USES) {
             player->basic_attack_uses += 1;
@@ -1737,8 +1737,8 @@ int render_game(GameRenderer* renderer, MOBA* env) {
         float fmain_r = my_player->last_y + tick_frac*(my_player->y - my_player->last_y);
         float fmain_c = my_player->last_x + tick_frac*(my_player->x - my_player->last_x);
 
-        renderer->camera.target.x = (fmain_c - renderer->width/2) * ts;
-        renderer->camera.target.y = (fmain_r - renderer->height/2) * ts;
+        renderer->camera.target.x = (int)((fmain_c - renderer->width/2) * ts);
+        renderer->camera.target.y = (int)((fmain_r - renderer->height/2) * ts);
 
         int main_r = fmain_r;
         int main_c = fmain_c;
