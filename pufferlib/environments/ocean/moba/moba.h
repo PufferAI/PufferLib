@@ -1694,26 +1694,19 @@ void draw_bars(Entity* entity, int x, int y, int width, int height, bool draw_te
         DrawRectangle(x, y - height - 2, width, height, RED);
         DrawRectangle(x, y - height - 2, width*mana_bar, height, (Color){0, 255, 255, 255});
     }
-    //Color color = (entity->team == 0) ? (Color){0, 255, 255, 255} : (Color){255, 0, 0, 255};
 
-    // TODO: String formatting
-    /*
+    Color color = (entity->team == 0) ? (Color){0, 255, 255, 255} : (Color){255, 0, 0, 255};
     if (draw_text) {
         int health = entity->health;
         int mana = entity->mana;
         int max_health = entity->max_health;
         int max_mana = entity->max_mana;
-        rl.DrawText(f'Health: {health}/{max_health}'.encode(),
-            x+8, y+2, 20, [255, 255, 255, 255])
-        rl.DrawText(f'Mana: {mana}/{max_mana}'.encode(),
-            x+8, y+2 - height - 2, 20, [255, 255, 255, 255])
-        rl.DrawText(f'Experience: {entity.xp}'.encode(),
-            x+8, y - 2*height - 4, 20, [255, 255, 255, 255])
+        DrawText(TextFormat("Health: %i/%i", health, max_health), x+8, y+2, 20, (Color){255, 255, 255, 255});
+        DrawText(TextFormat("Mana: %i/%i", mana, max_mana), x+8, y+2 - height - 2, 20, (Color){255, 255, 255, 255});
+        DrawText(TextFormat("Experience: %i", entity->xp), x+8, y - 2*height - 4, 20, (Color){255, 255, 255, 255});
     } else if (entity->entity_type == 0) {
-        rl.DrawText(f'Level: {entity.level}'.encode(),
-            x+4, y -2*height - 12, 12, color)
+        DrawText(TextFormat("Level: %i", entity->level), x+4, y -2*height - 12, 12, color);
     }
-    */
 }
 
 int render_game(GameRenderer* renderer, MOBA* env) {
@@ -1891,8 +1884,6 @@ int render_game(GameRenderer* renderer, MOBA* env) {
             if (entity->attack_aoe == 0) {
                 Vector2 line_start = (Vector2){entity_px, entity_py};
                 Vector2 line_end = (Vector2){target_px, target_py};
-                printf("Line start: %f, %f\n", line_start.x, line_start.y);
-                printf("Line end: %f, %f\n", line_end.x, line_end.y);
                 DrawLineEx(line_start, line_end, ts/16, accent);
             } else {
                 int radius = entity->attack_aoe*ts;
@@ -1962,9 +1953,7 @@ int render_game(GameRenderer* renderer, MOBA* env) {
         float hud_y = renderer->height*ts - 2*ts;
         draw_bars(player, 2*ts, hud_y, 10*ts, 24, true);
 
-        // TODO: String formatting
-        /*
-        Color off_color = {255, 255, 255, 255};
+        Color off_color = (Color){255, 255, 255, 255};
         Color on_color = (player->team == 0) ? (Color){0, 255, 255, 255} : (Color){255, 0, 0, 255};
 
         Color q_color = (skill_q) ? on_color : off_color;
@@ -1975,12 +1964,12 @@ int render_game(GameRenderer* renderer, MOBA* env) {
         int w_cd = player->w_timer;
         int e_cd = player->e_timer;
 
-        rl.DrawText(f'Q: {q_cd}'.encode(), 13*ts, hud_y - 20, 40, q_color)
-        rl.DrawText(f'W: {w_cd}'.encode(), 17*ts, hud_y - 20, 40, w_color)
-        rl.DrawText(f'E: {e_cd}'.encode(), 21*ts, hud_y - 20, 40, e_color)
-        rl.DrawText(f'Stun: {player.stun_timer}'.encode(), 25*ts, hud_y - 20, 20, e_color)
-        rl.DrawText(f'Move: {player.move_timer}'.encode(), 25*ts, hud_y, 20, e_color)
-        */
+        DrawText(TextFormat("Q: %i", q_cd), 13*ts, hud_y - 20, 40, q_color);
+        DrawText(TextFormat("W: %i", w_cd), 17*ts, hud_y - 20, 40, w_color);
+        DrawText(TextFormat("E: %i", e_cd), 21*ts, hud_y - 20, 40, e_color);
+        DrawText(TextFormat("Stun: %i", player->stun_timer), 25*ts, hud_y - 20, 20, (player->stun_timer > 0) ? on_color : off_color);
+        DrawText(TextFormat("Move: %i", player->move_timer), 25*ts, hud_y, 20, (player->move_timer > 0) ? on_color : off_color);
+
         EndDrawing();
     }
     return 0;
