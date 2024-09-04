@@ -16,14 +16,14 @@ int main() {
     MOBA* env = init_moba(num_agents, num_creeps, num_neutrals, num_towers, vision_range,
         agent_speed, discretize, reward_death, reward_xp, reward_distance, reward_tower);
 
-    Renderer* renderer = init_renderer(8, 128, 128);
+    GameRenderer* renderer = init_game_renderer(8, 128, 128);
 
     reset(env);
     for (int tick = 0; tick < 1024; tick++) {
         step(env);
-        render_global(renderer, env);
+        render_game(renderer, env);
     }
     free_moba(env);
-    close_renderer(renderer);
+    close_game_renderer(renderer);
 }
 
