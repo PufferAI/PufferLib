@@ -23,13 +23,19 @@ class Default(nn.Module):
     '''
     def __init__(self, env, hidden_size=128):
         super().__init__()
-        self.encoder = nn.Linear(np.prod(
-            env.single_observation_space.shape), hidden_size)
 
         self.is_multidiscrete = isinstance(env.single_action_space,
                 pufferlib.spaces.MultiDiscrete)
         self.is_continuous = isinstance(env.single_action_space,
                 pufferlib.spaces.Box)
+        self.is_dict_obs = isinstance(env.env.observation_space, pufferlib.spaces.Dict) 
+
+        if self.is_dict_obs:
+            input_size = sum(np.prod(v.shape) for v in env.env.observation_space.values())
+            self.encoder = nn.Linear(input_size, self.hidden_size)
+        else:
+            self.encoder = nn.Linear(np.prod(env.single_observation_space.shape), hidden_size)
+            
         if self.is_multidiscrete:
             action_nvec = env.single_action_space.nvec
             self.decoder = nn.ModuleList([pufferlib.pytorch.layer_init(
@@ -51,10 +57,12 @@ class Default(nn.Module):
         return actions, value
 
     def encode_observations(self, observations):
-        '''Encodes a batch of observations into hidden states. Assumes
-        no time dimension (handled by LSTM wrappers).'''
         batch_size = observations.shape[0]
-        observations = observations.view(batch_size, -1)
+        if self.is_dict_obs:
+            observations = pufferlib.pytorch.nativize_tensor(observations, self.dtype)
+            observations = torch.cat([v.view(batch_size, -1) for v in observations.values()], dim=1)
+        else: 
+            observations = observations.view(batch_size, -1)
         return torch.relu(self.encoder(observations.float())), None
 
     def decode_actions(self, hidden, lookup, concat=True):
