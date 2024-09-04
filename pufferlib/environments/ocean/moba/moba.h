@@ -506,7 +506,7 @@ int basic_attack(MOBA* env, Entity* player, Entity* target) {
 }
 
 int heal(MOBA* env, Entity* player, Entity* target, float amount) {
-    if (target->pid == -1 || target->team == player->team)
+    if (target->pid == -1 || target->team != player->team)
         return 1;
 
     // Currently only allowed to heal players
@@ -711,12 +711,9 @@ int player_aoe_attack(MOBA* env, Entity* player,
 }
 
 int push(MOBA* env, Entity* player, Entity* target, float amount) {
-    float dist = l1_distance(target->y, target->x, player->y, player->x);
     float dx = target->x - player->x;
     float dy = target->y - player->y;
-
-    // TODO: Push enable? I think was pushing off map or something
-    return 1;
+    float dist = fabs(dx) + fabs(dy);
 
     if (dist == 0.0)
         return 1;
@@ -724,15 +721,14 @@ int push(MOBA* env, Entity* player, Entity* target, float amount) {
     // Norm to unit vector
     dx = amount * dx / dist;
     dy = amount * dy / dist;
-
-    return move_to(env->map, player, target->y + dy, target->x + dx);
+    return move_to(env->map, target, target->y + dy, target->x + dx);
 }
 
 int pull(MOBA* env, Entity* player, Entity* target, float amount) {
-    return push(env, target, player, -amount);
+    return push(env, player, target, -amount);
 }
 
-int aoe_push(MOBA* env, Entity* player, int radius, float amount) {
+int aoe_pull(MOBA* env, Entity* player, int radius, float amount) {
     scan_aoe(env, player, radius, true, false, false, false, true);
     int err = 1;
     int pid = player->pid;
@@ -741,7 +737,7 @@ int aoe_push(MOBA* env, Entity* player, int radius, float amount) {
         if (target == NULL)
             break;
 
-        push(env, player, target, amount);
+        pull(env, target, player, amount);
         err = 0;
     }
     return err;
@@ -828,6 +824,7 @@ void update_cooldowns(Entity* entity) {
         entity->basic_attack_timer -= 1;
 }
 
+// TODO: Fix
 int skill_support_hook(MOBA* env, Entity* player, Entity* target) {
     int mana_cost = 100;
     if (target == NULL || player->mana < mana_cost)
@@ -865,6 +862,53 @@ int skill_support_stun(MOBA* env, Entity* player, Entity* target) {
     }
     return 1;
 }
+
+int skill_assassin_aoe_minions(MOBA* env, Entity* player, Entity* target) {
+    int mana_cost = 100;
+    if (target == NULL || player->mana < mana_cost)
+        return 1;
+
+    int target_type = target->entity_type;
+    if (target_type != ENTITY_CREEP && target_type != ENTITY_NEUTRAL)
+        return 1;
+
+    if (player_aoe_attack(env, player, target, 3, 100 + 20*player->level, 0) == 0) {
+        player->mana -= mana_cost;
+        player->q_timer = 40;
+        return 0;
+    }
+    return 1;
+}
+
+int skill_assassin_tp_damage(MOBA* env, Entity* player, Entity* target) {
+    int mana_cost = 150;
+    if (target == NULL || player->mana < mana_cost)
+        return 1;
+
+    if (move_near(env->map, player, target) != 0) {
+        return 1;
+    }
+
+    player->mana -= mana_cost;
+    if (attack(env, player, target, 250+50*player->level) == 0) {
+        player->w_timer = 60;
+        return 0;
+    }
+    return 1;
+}
+
+int skill_assassin_move_buff(MOBA* env, Entity* player, Entity* target) {
+    int mana_cost = 100;
+    if (player->mana < mana_cost)
+        return 1;
+    
+    player->move_modifier = 2.0;
+    player->move_timer = 25;
+    player->mana -= mana_cost;
+    player->e_timer = 100;
+    return 0;
+}
+
 
 int skill_burst_nuke(MOBA* env, Entity* player, Entity* target) {
     int mana_cost = 200;
@@ -917,6 +961,7 @@ int skill_tank_aoe_dot(MOBA* env, Entity* player, Entity* target) {
     return 1;
 }
 
+// TODO: Fix
 int skill_tank_self_heal(MOBA* env, Entity* player, Entity* target) {
     int mana_cost = 100;
     if (player->mana < mana_cost)
@@ -930,6 +975,7 @@ int skill_tank_self_heal(MOBA* env, Entity* player, Entity* target) {
     return 1;
 }
 
+//Engages but doesnt push
 int skill_tank_engage_aoe(MOBA* env, Entity* player, Entity* target) {
     int mana_cost = 50;
     if (target == NULL || player->mana < mana_cost)
@@ -938,7 +984,7 @@ int skill_tank_engage_aoe(MOBA* env, Entity* player, Entity* target) {
     if (move_near(env->map, player, target) == 0) {
         player->mana -= mana_cost;
         player->e_timer = 40;
-        aoe_push(env, player, 4, 2.0 + 0.1*player->level);
+        aoe_pull(env, player, 4, 2.0 + 0.1*player->level);
         return 0;
     }
     return 1;
@@ -951,10 +997,11 @@ int skill_carry_retreat_slow(MOBA* env, Entity* player, Entity* target) {
 
     int err = 1;
     for (int i = 0; i < 3; i++) {
+        printf("target: %i\n", target->pid);
         if (target == NULL || player->mana < mana_cost)
             return err;
 
-        if (push(env, target, player, 1.0 + 0.05*player->level) == 0) {
+        if (push(env, target, player, 3 + 0.1*player->level) == 0) {
             target->move_timer = 15;
             target->move_modifier = 0.5;
             player->mana -= mana_cost;
@@ -991,52 +1038,6 @@ int skill_carry_aoe(MOBA* env, Entity* player, Entity* target) {
         return 0;
     }
     return 1;
-}
-
-int skill_assassin_aoe_minions(MOBA* env, Entity* player, Entity* target) {
-    int mana_cost = 100;
-    if (target == NULL || player->mana < mana_cost)
-        return 1;
-
-    int target_type = target->entity_type;
-    if (target_type != ENTITY_CREEP && target_type != ENTITY_NEUTRAL)
-        return 1;
-
-    if (player_aoe_attack(env, player, target, 3, 100 + 20*player->level, 0) == 0) {
-        player->mana -= mana_cost;
-        player->q_timer = 40;
-        return 0;
-    }
-    return 1;
-}
-
-int skill_assassin_tp_damage(MOBA* env, Entity* player, Entity* target) {
-    int mana_cost = 150;
-    if (target == NULL || player->mana < mana_cost)
-        return 1;
-
-    if (move_near(env->map, player, target) != 0) {
-        return 1;
-    }
-
-    player->mana -= mana_cost;
-    if (attack(env, player, target, 250+50*player->level) == 0) {
-        player->w_timer = 60;
-        return 0;
-    }
-    return 1;
-}
-
-int skill_assassin_move_buff(MOBA* env, Entity* player, Entity* target) {
-    int mana_cost = 100;
-    if (player->mana < mana_cost)
-        return 1;
-    
-    player->move_modifier = 2.0;
-    player->move_timer = 25;
-    player->mana -= mana_cost;
-    player->e_timer = 100;
-    return 0;
 }
 
 void step_creeps(MOBA* env) {
@@ -1606,6 +1607,7 @@ typedef struct {
     Shader shader;
     float shader_x;
     float shader_y;
+    double shader_start_seconds;
     float shader_seconds;
     Shader bloom_shader;
     float shader_camera_x;
@@ -1615,6 +1617,7 @@ typedef struct {
     float last_click_x;	
     float last_click_y;
     int render_entities[128*128];
+    int human_player;
 } GameRenderer;
 
 GameRenderer* init_game_renderer(int cell_size, int width, int height) {
@@ -1660,13 +1663,18 @@ GameRenderer* init_game_renderer(int cell_size, int width, int height) {
     renderer->shader_camera_y = GetShaderLocation(renderer->shader, "camera_y");
     renderer->shader_time = GetShaderLocation(renderer->shader, "time");
     renderer->shader_texture1 = GetShaderLocation(renderer->shader, "texture1");
-
+    struct timespec time_spec;
+    clock_gettime(CLOCK_REALTIME, &time_spec);
+    renderer->shader_start_seconds = time_spec.tv_sec;
+ 
     renderer->camera = (Camera2D){0};
     renderer->camera.target = (Vector2){0.0, 0.0};
     // TODO: Init this?
     //renderer->camera.offset = (Vector2){GetScreenWidth()/2.0f, GetScreenHeight()/2.0f};
     renderer->camera.rotation = 0.0f;
     renderer->camera.zoom = 1.0f;
+
+    renderer->human_player = 1;
 
     // Init last clicks
     renderer->last_click_x = -1;
@@ -1675,7 +1683,6 @@ GameRenderer* init_game_renderer(int cell_size, int width, int height) {
 }
 
 //def render(self, grid, pids, entities, obs_players, actions, discretize, frames):
-#define HUMAN_PLAYER 1
 #define FRAMES 12
 
 void draw_bars(Entity* entity, int x, int y, int width, int height, bool draw_text) {
@@ -1711,7 +1718,7 @@ void draw_bars(Entity* entity, int x, int y, int width, int height, bool draw_te
 
 int render_game(GameRenderer* renderer, MOBA* env) {
     Map* map = env->map;
-    Entity* my_player = &env->entities[HUMAN_PLAYER];
+    Entity* my_player = &env->entities[renderer->human_player];
     int ts = renderer->cell_size;
 
     float ay = 0;
@@ -1794,14 +1801,23 @@ int render_game(GameRenderer* renderer, MOBA* env) {
             target_heros = 2;
         }
 
+        // Num keys toggle selected player
+        int num_pressed = GetKeyPressed();
+        if (num_pressed > KEY_ZERO && num_pressed <= KEY_NINE) {
+            renderer->human_player = num_pressed - KEY_ZERO - 1;
+        } else if (num_pressed == KEY_ZERO) {
+            renderer->human_player = 9;
+        }
+
         // TODO: How to check for no movement?
+        int human = renderer->human_player;
         int (*actions)[6] = (int(*)[6])env->actions;
-        actions[HUMAN_PLAYER][0] = ay;
-        actions[HUMAN_PLAYER][1] = ax;
-        actions[HUMAN_PLAYER][2] = target_heros;
-        actions[HUMAN_PLAYER][3] = skill_q;
-        actions[HUMAN_PLAYER][4] = skill_w;
-        actions[HUMAN_PLAYER][5] = skill_e;
+        actions[human][0] = ay;
+        actions[human][1] = ax;
+        actions[human][2] = target_heros;
+        actions[human][3] = skill_q;
+        actions[human][4] = skill_w;
+        actions[human][5] = skill_e;
 
         BeginDrawing();
         ClearBackground(COLORS[0]);
@@ -1810,8 +1826,9 @@ int render_game(GameRenderer* renderer, MOBA* env) {
         BeginShaderMode(renderer->shader);
         renderer->shader_y = (fmain_r - renderer->height/2) / 128;
         renderer->shader_x = (fmain_c - renderer->width/2) / 128;
-        renderer->shader_seconds = time(NULL);
-        // TODO: isn't this a local?
+        struct timespec time_spec;
+        clock_gettime(CLOCK_REALTIME, &time_spec);
+        renderer->shader_seconds = time_spec.tv_sec - renderer->shader_start_seconds + time_spec.tv_nsec / 1e9;
         SetShaderValue(renderer->shader, renderer->shader_camera_x, &renderer->shader_x, SHADER_UNIFORM_FLOAT);
         SetShaderValue(renderer->shader, renderer->shader_camera_y, &renderer->shader_y, SHADER_UNIFORM_FLOAT);
         SetShaderValue(renderer->shader, renderer->shader_time, &renderer->shader_seconds, SHADER_UNIFORM_FLOAT);
@@ -1947,7 +1964,7 @@ int render_game(GameRenderer* renderer, MOBA* env) {
         EndMode2D();
 
         // Draw HUD
-        Entity* player = &env->entities[HUMAN_PLAYER];
+        Entity* player = &env->entities[human];
         DrawFPS(10, 10);
 
         float hud_y = renderer->height*ts - 2*ts;
