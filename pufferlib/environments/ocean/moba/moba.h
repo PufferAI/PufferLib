@@ -1604,6 +1604,9 @@ typedef struct {
     Texture2D puffer;
     Texture2D shader_canvas;
     Shader shader;
+    float shader_x;
+    float shader_y;
+    float shader_seconds;
     Shader bloom_shader;
     float shader_camera_x;
     float shader_camera_y;
@@ -1619,6 +1622,9 @@ GameRenderer* init_game_renderer(int cell_size, int width, int height) {
     renderer->cell_size = cell_size;
     renderer->width = width;
     renderer->height = height;
+
+    InitWindow(width*cell_size, height*cell_size, "Puffer MOBA");
+    SetTargetFPS(60);
 
     Rectangle asset_map[] = {
         (Rectangle){0, 0, 0, 0},
@@ -1658,21 +1664,18 @@ GameRenderer* init_game_renderer(int cell_size, int width, int height) {
     renderer->camera = (Camera2D){0};
     renderer->camera.target = (Vector2){0.0, 0.0};
     // TODO: Init this?
-    renderer->camera.offset = (Vector2){GetScreenWidth()/2.0f, GetScreenHeight()/2.0f};
+    //renderer->camera.offset = (Vector2){GetScreenWidth()/2.0f, GetScreenHeight()/2.0f};
     renderer->camera.rotation = 0.0f;
     renderer->camera.zoom = 1.0f;
 
     // Init last clicks
     renderer->last_click_x = -1;
     renderer->last_click_y = -1;
-
-    InitWindow(width*cell_size, height*cell_size, "Puffer MOBA");
-    SetTargetFPS(60);
     return renderer;
 }
 
 //def render(self, grid, pids, entities, obs_players, actions, discretize, frames):
-#define HUMAN_PLAYER 0
+#define HUMAN_PLAYER 1
 #define FRAMES 12
 
 void draw_bars(Entity* entity, int x, int y, int width, int height, bool draw_text) {
@@ -1729,7 +1732,7 @@ int render_game(GameRenderer* renderer, MOBA* env) {
         renderer->width = GetScreenWidth() / ts;
         renderer->height = GetScreenHeight() / ts;
 
-        float tick_frac = frame / FRAMES;
+        float tick_frac = (float)frame / (float)FRAMES;
 
         float fmain_r = my_player->last_y + tick_frac*(my_player->y - my_player->last_y);
         float fmain_c = my_player->last_x + tick_frac*(my_player->x - my_player->last_x);
@@ -1812,16 +1815,13 @@ int render_game(GameRenderer* renderer, MOBA* env) {
 
         // Main environment shader
         BeginShaderMode(renderer->shader);
-        float main_r_shader = (fmain_r - renderer->height/2) / 128;
-        float main_c_shader = (fmain_c - renderer->width/2) / 128;
+        renderer->shader_y = (fmain_r - renderer->height/2) / 128;
+        renderer->shader_x = (fmain_c - renderer->width/2) / 128;
+        renderer->shader_seconds = time(NULL);
         // TODO: isn't this a local?
-        float* camera_x_ptr = &main_r_shader;
-        float* camera_y_ptr = &main_c_shader;
-        float shader_time =  time(NULL);
-        float* shader_time_ptr = &shader_time;
-        SetShaderValue(renderer->shader, renderer->shader_camera_x, camera_x_ptr, SHADER_UNIFORM_FLOAT);
-        SetShaderValue(renderer->shader, renderer->shader_camera_y, camera_y_ptr, SHADER_UNIFORM_FLOAT);
-        SetShaderValue(renderer->shader, renderer->shader_time, shader_time_ptr, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(renderer->shader, renderer->shader_camera_x, &renderer->shader_x, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(renderer->shader, renderer->shader_camera_y, &renderer->shader_y, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(renderer->shader, renderer->shader_time, &renderer->shader_seconds, SHADER_UNIFORM_FLOAT);
         SetShaderValueTexture(renderer->shader, renderer->shader_texture1, renderer->game_map);
         DrawTexture(renderer->shader_canvas, 0, 0, WHITE);
         EndShaderMode();
@@ -1868,7 +1868,7 @@ int render_game(GameRenderer* renderer, MOBA* env) {
             float entity_x = entity->last_x + tick_frac*(entity->x - entity->last_x);
             float entity_y = entity->last_y + tick_frac*(entity->y - entity->last_y);
             float target_x = target->last_x + tick_frac*(target->x - target->last_x);
-            float target_y = target->last_x + tick_frac*(target->y - target->last_x);
+            float target_y = target->last_y + tick_frac*(target->y - target->last_y);
 
             Color base;
             Color accent;
@@ -1891,6 +1891,8 @@ int render_game(GameRenderer* renderer, MOBA* env) {
             if (entity->attack_aoe == 0) {
                 Vector2 line_start = (Vector2){entity_px, entity_py};
                 Vector2 line_end = (Vector2){target_px, target_py};
+                printf("Line start: %f, %f\n", line_start.x, line_start.y);
+                printf("Line end: %f, %f\n", line_end.x, line_end.y);
                 DrawLineEx(line_start, line_end, ts/16, accent);
             } else {
                 int radius = entity->attack_aoe*ts;
@@ -1955,6 +1957,7 @@ int render_game(GameRenderer* renderer, MOBA* env) {
 
         // Draw HUD
         Entity* player = &env->entities[HUMAN_PLAYER];
+        DrawFPS(10, 10);
 
         float hud_y = renderer->height*ts - 2*ts;
         draw_bars(player, 2*ts, hud_y, 10*ts, 24, true);
