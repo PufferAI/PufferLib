@@ -7,6 +7,12 @@
 #include <time.h>
 #include "raylib.h"
 
+#if defined(PLATFORM_DESKTOP)
+    #define GLSL_VERSION 330
+#else
+    #define GLSL_VERSION 100
+#endif
+
 #define EMPTY 0
 #define WALL 1
 #define TOWER 2
@@ -125,6 +131,10 @@ static inline int map_offset(Map* map, int y, int x) {
     return y*map->width + x;
 }
 
+static inline int ai_offset(int y_dst, int x_dst, int y_src, int x_src) {
+    return y_dst*128*128*128 + x_dst*128*128 + y_src*128 + x_src;
+}
+
 typedef struct {
     float death;
     float xp;
@@ -146,6 +156,105 @@ float fast_rng(CachedRNG* rng) {
     return val;
 }
 
+int bfs(Map *map, unsigned char *flat_paths, int* flat_buffer, int dest_r, int dest_c) {
+    int N = map->width;
+    unsigned char (*paths)[N] = (unsigned char(*)[N])flat_paths;
+    int (*buffer)[3] = (int(*)[3])flat_buffer;
+
+    int start = 0;
+    int end = 1;
+
+    int adr = map_offset(map, dest_r, dest_c);
+    if (map->grid[adr] == 1) {
+        return 1;
+    }
+
+    buffer[start][0] = 0;
+    buffer[start][1] = dest_r;
+    buffer[start][2] = dest_c;
+    while (start < end) {
+        int atn = buffer[start][0];
+        int start_r = buffer[start][1];
+        int start_c = buffer[start][2];
+        start++;
+
+        if (start_r < 0 || start_r >= N || start_c < 0 || start_c >= N) {
+            continue;
+        }
+        if (paths[start_r][start_c] != 255) {
+            continue;
+        }
+        int adr = map_offset(map, start_r, start_c);
+        if (map->grid[adr] == 1) {
+            paths[start_r][start_c] = 8;
+            continue;
+        }
+
+        paths[start_r][start_c] = atn;
+
+        buffer[end][0] = 0;
+        buffer[end][1] = start_r - 1;
+        buffer[end][2] = start_c;
+        end++;
+
+        buffer[end][0] = 1;
+        buffer[end][1] = start_r + 1;
+        buffer[end][2] = start_c;
+        end++;
+
+        buffer[end][0] = 2;
+        buffer[end][1] = start_r;
+        buffer[end][2] = start_c - 1;
+        end++;
+
+        buffer[end][0] = 3;
+        buffer[end][1] = start_r;
+        buffer[end][2] = start_c + 1;
+        end++;
+
+        buffer[end][0] = 4;
+        buffer[end][1] = start_r - 1;
+        buffer[end][2] = start_c + 1;
+        end++;
+
+        buffer[end][0] = 5;
+        buffer[end][1] = start_r + 1;
+        buffer[end][2] = start_c + 1;
+        end++;
+
+        buffer[end][0] = 6;
+        buffer[end][1] = start_r + 1;
+        buffer[end][2] = start_c - 1;
+        end++;
+
+        buffer[end][0] = 7;
+        buffer[end][1] = start_r - 1;
+        buffer[end][2] = start_c - 1;
+        end++;
+    }
+    paths[dest_r][dest_c] = 8;
+    return 0;
+}
+
+unsigned char* precompute_pathing(Map* map){
+    int N = map->width;
+    unsigned char* paths = calloc(N*N*N*N, 1);
+    int* buffer = calloc(3*8*N*N, sizeof(int));
+    for (int r = 0; r < N; r++) {
+        for (int c = 0; c < N; c++) {
+            for (int rr = 0; rr < N; rr++) {
+                for (int cc = 0; cc < N; cc++) {
+                    int adr = ai_offset(r, c, rr, cc);
+                    paths[adr] = 255;
+                }
+            }
+            int adr = ai_offset(r, c, 0, 0);
+            bfs(map, &paths[adr], buffer, r, c);
+        }
+    }
+    return paths;
+}
+
 struct MOBA {
     int num_agents;
     int num_creeps;
@@ -162,6 +271,7 @@ struct MOBA {
     Map* map;
     unsigned char* orig_grid;
     unsigned char* ai_paths;
+    int* ai_path_buffer;
     unsigned char* observations_map;
     unsigned char* observations_extra;
     int* actions;
@@ -188,19 +298,16 @@ struct MOBA {
     CachedRNG *rng;
 };
 
-static inline int ai_offset(int y_dst, int x_dst, int y_src, int x_src) {
-    return y_dst*128*128*128 + x_dst*128*128 + y_src*128 + x_src;
-}
-
 void free_moba(MOBA* env) {
     free(env->rewards);
     free(env->sum_rewards);
     free(env->norm_rewards);
-    free(env->ai_paths);
     free(env->map->pids);
     free(env->map->grid);
     free(env->orig_grid);
     free(env->map);
+    free(env->ai_path_buffer);
+    free(env->ai_paths);
     free(env->observations_map);
     free(env->observations_extra);
     free(env->actions);
@@ -351,6 +458,14 @@ int move_towards(MOBA* env, Entity* entity, int y_dst, int x_dst, float speed) {
 
     int adr = ai_offset(y_dst, x_dst, y_src, x_src);
     int atn = env->ai_paths[adr];
+
+    // Compute path if not cached
+    if (atn == 255) {
+        int bfs_adr = ai_offset(y_dst, x_dst, 0, 0);
+        bfs(env->map, &env->ai_paths[bfs_adr], env->ai_path_buffer, y_dst, x_dst);
+        atn = env->ai_paths[adr];
+    }
+
     if (atn >= 8)
         return 0;
 
@@ -1219,8 +1334,9 @@ unsigned char* read_file(char* filename) {
     return array;
 }
 
-MOBA* init_moba(num_agents, num_creeps, num_neutrals, num_towers, vision_range,
-        agent_speed, discretize, reward_death, reward_xp, reward_distance, reward_tower) {
+MOBA* init_moba(int num_agents, int num_creeps, int num_neutrals, int num_towers,
+        int vision_range, float agent_speed, bool discretize,
+        float reward_death, float reward_xp, float reward_distance, float reward_tower) {
     MOBA* env = (MOBA*)calloc(1, sizeof(MOBA));
 
     env->num_agents = num_agents;
@@ -1256,7 +1372,22 @@ MOBA* init_moba(num_agents, num_creeps, num_neutrals, num_towers, vision_range,
     for (int i = 0; i < env->map->width*env->map->height; i++)
         env->map->pids[i] = -1;
 
-    env->ai_paths = read_file("ai_paths.npy");
+    // TODO: repeated from precomputation
+    env->ai_paths = calloc(128*128*128*128, 1);
+    env->ai_path_buffer = calloc(3*8*128*128, sizeof(int));
+    int N = 128;
+    for (int r = 0; r < N; r++) {
+        for (int c = 0; c < N; c++) {
+            for (int rr = 0; rr < N; rr++) {
+                for (int cc = 0; cc < N; cc++) {
+                    int adr = ai_offset(r, c, rr, cc);
+                    env->ai_paths[adr] = 255;
+                }
+            }
+        }
+    }
+    //env->ai_paths = precompute_pathing(env->map);
+    //env->ai_paths = read_file("ai_paths.npy");
 
     // Zero out scanned targets
     for (int i = 0; i < 256; i++) {
@@ -1609,6 +1740,8 @@ typedef struct {
     float shader_y;
     double shader_start_seconds;
     float shader_seconds;
+    int shader_resolution_loc;
+    float shader_resolution[3];
     Shader bloom_shader;
     float shader_camera_x;
     float shader_camera_y;
@@ -1656,13 +1789,15 @@ GameRenderer* init_game_renderer(int cell_size, int width, int height) {
     renderer->game_map = LoadTexture("dota_map.png");
     renderer->puffer = LoadTexture("moba_assets.png");
     renderer->shader_canvas = LoadTextureFromImage(GenImageColor(2560, 1440, (Color){0, 0, 0, 255}));
-    renderer->shader = LoadShader("", "moba_shader.fs");
-    renderer->bloom_shader = LoadShader("", "bloom_shader.fs");
+    renderer->shader = LoadShader("", TextFormat("shaders/map_shader_%i.fs", GLSL_VERSION));
+    renderer->bloom_shader = LoadShader("", TextFormat("shaders/bloom_shader_%i.fs", GLSL_VERSION));
 
+    // TODO: These should be int locs?
     renderer->shader_camera_x = GetShaderLocation(renderer->shader, "camera_x");
     renderer->shader_camera_y = GetShaderLocation(renderer->shader, "camera_y");
     renderer->shader_time = GetShaderLocation(renderer->shader, "time");
     renderer->shader_texture1 = GetShaderLocation(renderer->shader, "texture1");
+    renderer->shader_resolution_loc = GetShaderLocation(renderer->shader, "resolution");
     struct timespec time_spec;
     clock_gettime(CLOCK_REALTIME, &time_spec);
     renderer->shader_start_seconds = time_spec.tv_sec;
@@ -1716,7 +1851,7 @@ void draw_bars(Entity* entity, int x, int y, int width, int height, bool draw_te
     }
 }
 
-int render_game(GameRenderer* renderer, MOBA* env) {
+int render_game(GameRenderer* renderer, MOBA* env, int frame) {
     Map* map = env->map;
     Entity* my_player = &env->entities[renderer->human_player];
     int ts = renderer->cell_size;
@@ -1728,267 +1863,271 @@ int render_game(GameRenderer* renderer, MOBA* env) {
     int skill_e = 0;
     int target_heros = 1;
 
-    for (int frame = 0; frame < FRAMES; frame++) {
-        renderer->width = GetScreenWidth() / ts;
-        renderer->height = GetScreenHeight() / ts;
+    //for (int frame = 0; frame < FRAMES; frame++) {
+    renderer->width = GetScreenWidth() / ts;
+    renderer->height = GetScreenHeight() / ts;
+    renderer->shader_resolution[0] = renderer->width;
+    renderer->shader_resolution[1] = renderer->height;
 
-        float tick_frac = (float)frame / (float)FRAMES;
+    float tick_frac = (float)frame / (float)FRAMES;
 
-        float fmain_r = my_player->last_y + tick_frac*(my_player->y - my_player->last_y);
-        float fmain_c = my_player->last_x + tick_frac*(my_player->x - my_player->last_x);
+    float fmain_r = my_player->last_y + tick_frac*(my_player->y - my_player->last_y);
+    float fmain_c = my_player->last_x + tick_frac*(my_player->x - my_player->last_x);
 
-        renderer->camera.target.x = (int)((fmain_c - renderer->width/2) * ts);
-        renderer->camera.target.y = (int)((fmain_r - renderer->height/2) * ts);
+    renderer->camera.target.x = (int)((fmain_c - renderer->width/2) * ts);
+    renderer->camera.target.y = (int)((fmain_r - renderer->height/2) * ts);
 
-        int main_r = fmain_r;
-        int main_c = fmain_c;
+    int main_r = fmain_r;
+    int main_c = fmain_c;
 
-        int r_min = main_r - renderer->height/2 - 1;
-        int r_max = main_r + renderer->height/2 + 1;
-        int c_min = main_c - renderer->width/2 - 1;
-        int c_max = main_c + renderer->width/2 + 1;
+    int r_min = main_r - renderer->height/2 - 1;
+    int r_max = main_r + renderer->height/2 + 1;
+    int c_min = main_c - renderer->width/2 - 1;
+    int c_max = main_c + renderer->width/2 + 1;
 
-        Vector2 pos = GetMousePosition();
-        float raw_mouse_x = pos.x + renderer->camera.target.x;
-        float raw_mouse_y = pos.y + renderer->camera.target.y;
-        int mouse_x = raw_mouse_x / ts;
-        int mouse_y = raw_mouse_y / ts;
+    Vector2 pos = GetMousePosition();
+    float raw_mouse_x = pos.x + renderer->camera.target.x;
+    float raw_mouse_y = pos.y + renderer->camera.target.y;
+    int mouse_x = raw_mouse_x / ts;
+    int mouse_y = raw_mouse_y / ts;
 
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-            renderer->last_click_x = raw_mouse_x / ts;
-            renderer->last_click_y = raw_mouse_y / ts;
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        renderer->last_click_x = raw_mouse_x / ts;
+        renderer->last_click_y = raw_mouse_y / ts;
+    }
+
+    // TODO: better way to null clicks?
+    if (renderer->last_click_x != -1 && renderer->last_click_y != -1) {
+        float dest_x = renderer->last_click_x;
+        float dest_y = renderer->last_click_y;
+        float dy = dest_y - my_player->y;
+        float dx = dest_x - my_player->x;
+
+        // Rescale vector if norm > 1
+        float mag = sqrtf(dy*dy + dx*dx);
+        if (mag > 1) {
+            dy /= mag;
+            dx /= mag;
+        }
+        if (mag < 0.05) {
+            renderer->last_click_x = -1;
+            renderer->last_click_y = -1;
         }
 
-        // TODO: better way to null clicks?
-        if (renderer->last_click_x != -1 && renderer->last_click_y != -1) {
-            float dest_x = renderer->last_click_x;
-            float dest_y = renderer->last_click_y;
-            float dy = dest_y - my_player->y;
-            float dx = dest_x - my_player->x;
+        ay = 100*dy;
+        ax = 100*dx;
+    } else {
+        ay = 0;
+        ax = 0;
+    }
 
-            // Rescale vector if norm > 1
-            float mag = sqrtf(dy*dy + dx*dx);
-            if (mag > 1) {
-                dy /= mag;
-                dx /= mag;
-            }
-            if (mag < 0.05) {
-                renderer->last_click_x = -1;
-                renderer->last_click_y = -1;
-            }
+    if (IsKeyDown(KEY_ESCAPE)) {
+        return 1;
+    }
 
-            ay = 100*dy;
-            ax = 100*dx;
-        } else {
-            ay = 0;
-            ax = 0;
-        }
+    // TODO: Cache these as well across frames on same tick
+    if (IsKeyDown(KEY_Q) || IsKeyPressed(KEY_Q)) {
+        skill_q = 1;
+    }
+    if (IsKeyDown(KEY_W) || IsKeyPressed(KEY_W)) {
+        skill_w = 1;
+    }
+    if (IsKeyDown(KEY_E) || IsKeyPressed(KEY_E)) {
+        skill_e = 1;
+    }
+    if (IsKeyDown(KEY_LEFT_SHIFT)) {
+        target_heros = 2;
+    }
 
-        if (IsKeyDown(KEY_ESCAPE)) {
-            return 1;
-        }
+    // Num keys toggle selected player
+    int num_pressed = GetKeyPressed();
+    if (num_pressed > KEY_ZERO && num_pressed <= KEY_NINE) {
+        renderer->human_player = num_pressed - KEY_ZERO - 1;
+    } else if (num_pressed == KEY_ZERO) {
+        renderer->human_player = 9;
+    }
 
-        if (IsKeyDown(KEY_Q) || IsKeyPressed(KEY_Q)) {
-            skill_q = 1;
-        }
-        if (IsKeyDown(KEY_W) || IsKeyPressed(KEY_W)) {
-            skill_w = 1;
-        }
-        if (IsKeyDown(KEY_E) || IsKeyPressed(KEY_E)) {
-            skill_e = 1;
-        }
-        if (IsKeyDown(KEY_LEFT_SHIFT)) {
-            target_heros = 2;
-        }
+    // TODO: How to check for no movement?
+    int human = renderer->human_player;
+    int (*actions)[6] = (int(*)[6])env->actions;
+    actions[human][0] = ay;
+    actions[human][1] = ax;
+    actions[human][2] = target_heros;
+    actions[human][3] = skill_q;
+    actions[human][4] = skill_w;
+    actions[human][5] = skill_e;
 
-        // Num keys toggle selected player
-        int num_pressed = GetKeyPressed();
-        if (num_pressed > KEY_ZERO && num_pressed <= KEY_NINE) {
-            renderer->human_player = num_pressed - KEY_ZERO - 1;
-        } else if (num_pressed == KEY_ZERO) {
-            renderer->human_player = 9;
-        }
+    BeginDrawing();
+    ClearBackground(COLORS[0]);
 
-        // TODO: How to check for no movement?
-        int human = renderer->human_player;
-        int (*actions)[6] = (int(*)[6])env->actions;
-        actions[human][0] = ay;
-        actions[human][1] = ax;
-        actions[human][2] = target_heros;
-        actions[human][3] = skill_q;
-        actions[human][4] = skill_w;
-        actions[human][5] = skill_e;
+    // Main environment shader
+    BeginShaderMode(renderer->shader);
+    renderer->shader_y = (fmain_r - renderer->height/2) / 128;
+    renderer->shader_x = (fmain_c - renderer->width/2) / 128;
+    struct timespec time_spec;
+    clock_gettime(CLOCK_REALTIME, &time_spec);
+    renderer->shader_seconds = time_spec.tv_sec - renderer->shader_start_seconds + time_spec.tv_nsec / 1e9;
+    SetShaderValue(renderer->shader, renderer->shader_camera_x, &renderer->shader_x, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(renderer->shader, renderer->shader_camera_y, &renderer->shader_y, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(renderer->shader, renderer->shader_time, &renderer->shader_seconds, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(renderer->shader, renderer->shader_resolution_loc, renderer->shader_resolution, SHADER_UNIFORM_VEC3);
+    SetShaderValueTexture(renderer->shader, renderer->shader_texture1, renderer->game_map);
+    DrawTexture(renderer->shader_canvas, 0, 0, WHITE);
+    EndShaderMode();
 
-        BeginDrawing();
-        ClearBackground(COLORS[0]);
+    BeginMode2D(renderer->camera);
 
-        // Main environment shader
-        BeginShaderMode(renderer->shader);
-        renderer->shader_y = (fmain_r - renderer->height/2) / 128;
-        renderer->shader_x = (fmain_c - renderer->width/2) / 128;
-        struct timespec time_spec;
-        clock_gettime(CLOCK_REALTIME, &time_spec);
-        renderer->shader_seconds = time_spec.tv_sec - renderer->shader_start_seconds + time_spec.tv_nsec / 1e9;
-        SetShaderValue(renderer->shader, renderer->shader_camera_x, &renderer->shader_x, SHADER_UNIFORM_FLOAT);
-        SetShaderValue(renderer->shader, renderer->shader_camera_y, &renderer->shader_y, SHADER_UNIFORM_FLOAT);
-        SetShaderValue(renderer->shader, renderer->shader_time, &renderer->shader_seconds, SHADER_UNIFORM_FLOAT);
-        SetShaderValueTexture(renderer->shader, renderer->shader_texture1, renderer->game_map);
-        DrawTexture(renderer->shader_canvas, 0, 0, WHITE);
-        EndShaderMode();
-
-        BeginMode2D(renderer->camera);
-
-        int render_idx = 0;
-        for (int y = r_min; y < r_max+1; y++) {
-            for (int x = c_min; x < c_max+1; x++) {
-                if (y < 0 || y >= 128 || x < 0 || x >= 128) {
-                    continue;
-                }
-
-                int adr = map_offset(map, y, x);
-                unsigned char tile = map->grid[adr];
-                if (tile == EMPTY || tile == WALL) {
-                    continue;
-                }
-           
-                int pid = map->pids[adr];
-                if (pid == -1) {
-                    DrawRectangle(x*ts, y*ts, ts, ts, RED);
-                }
-
-                renderer->render_entities[render_idx] = pid;
-                render_idx++;
-            }
-        }
-
-        // Targeting overlays
-        for (int i = 0; i < render_idx; i++) {
-            int pid = renderer->render_entities[i];
-            if (pid == -1) {
+    int render_idx = 0;
+    for (int y = r_min; y < r_max+1; y++) {
+        for (int x = c_min; x < c_max+1; x++) {
+            if (y < 0 || y >= 128 || x < 0 || x >= 128) {
                 continue;
             }
-
-            Entity* entity = &env->entities[pid];
-            int target_pid = entity->target_pid;
-            if (target_pid == -1) {
-                continue;
-            }
-
-            Entity* target = &env->entities[target_pid];
-            float entity_x = entity->last_x + tick_frac*(entity->x - entity->last_x);
-            float entity_y = entity->last_y + tick_frac*(entity->y - entity->last_y);
-            float target_x = target->last_x + tick_frac*(target->x - target->last_x);
-            float target_y = target->last_y + tick_frac*(target->y - target->last_y);
-
-            Color base;
-            Color accent;
-            if (entity->team == 0) {
-                base = (Color){0, 128, 128, 255};
-                accent = (Color){0, 255, 255, 255};
-            } else if (entity->team == 1) {
-                base = (Color){128, 0, 0, 255};
-                accent = (Color){255, 0, 0, 255};
-            } else {
-                base = (Color){128, 128, 128, 255};
-                accent = (Color){255, 255, 255, 255};
-            }
-
-            int target_px = target_x*ts + ts/2;
-            int target_py = target_y*ts + ts/2;
-            int entity_px = entity_x*ts + ts/2;
-            int entity_py = entity_y*ts + ts/2;
-                                            
-            if (entity->attack_aoe == 0) {
-                Vector2 line_start = (Vector2){entity_px, entity_py};
-                Vector2 line_end = (Vector2){target_px, target_py};
-                DrawLineEx(line_start, line_end, ts/16, accent);
-            } else {
-                int radius = entity->attack_aoe*ts;
-                DrawRectangle(target_px - radius, target_py - radius,
-                    2*radius, 2*radius, base);
-                Rectangle rec = (Rectangle){target_px - radius,
-                    target_py - radius, 2*radius, 2*radius};
-                DrawRectangleLinesEx(rec, ts/8, accent);
-            }
-        }
-
-        // Entity renders
-        for (int i = 0; i < render_idx; i++) {
-            Color tint = (Color){255, 255, 255, 255};
-
-            int pid = renderer->render_entities[i];
-            if (pid == -1) {
-                continue;
-            }
-            Entity* entity = &env->entities[pid];
-            int y = entity->y;
-            int x = entity->x;
-
-            float entity_x = entity->last_x + tick_frac*(entity->x - entity->last_x);
-            float entity_y = entity->last_y + tick_frac*(entity->y - entity->last_y);
-            int tx = entity_x*ts;
-            int ty = entity_y*ts;
-            draw_bars(entity, tx, ty-8, ts, 4, false);
 
             int adr = map_offset(map, y, x);
-            int tile = map->grid[adr];
-
-            // TODO: Might need a vector type
-            Rectangle source_rect = renderer->asset_map[tile];
-            Rectangle dest_rect = (Rectangle){tx, ty, ts, ts};
-
-            if (entity->is_hit) {
-                BeginShaderMode(renderer->bloom_shader);
+            unsigned char tile = map->grid[adr];
+            if (tile == EMPTY || tile == WALL) {
+                continue;
             }
-            Vector2 origin = (Vector2){0, 0};
-            DrawTexturePro(renderer->puffer, source_rect, dest_rect, origin, 0, tint);
-            if (entity->is_hit) {
-                EndShaderMode();
+       
+            int pid = map->pids[adr];
+            if (pid == -1) {
+                DrawRectangle(x*ts, y*ts, ts, ts, RED);
             }
 
-            // Draw status icons
-            if (entity->stun_timer > 0) {
-                DrawTexturePro(renderer->puffer, renderer->stun_uv, dest_rect, origin, 0, tint);
-            }
-            if (entity->move_timer > 0) {
-                if (entity->move_modifier < 0) {
-                    DrawTexturePro(renderer->puffer, renderer->slow_uv, dest_rect, origin, 0, tint);
-                }
-                if (entity->move_modifier > 0) {
-                    DrawTexturePro(renderer->puffer, renderer->speed_uv, dest_rect, origin, 0, tint);
-                }
-            }
+            renderer->render_entities[render_idx] = pid;
+            render_idx++;
+        }
+    }
+
+    // Targeting overlays
+    for (int i = 0; i < render_idx; i++) {
+        int pid = renderer->render_entities[i];
+        if (pid == -1) {
+            continue;
         }
 
-        DrawCircle(ts*mouse_x + ts/2, ts*mouse_y + ts/8, ts/8, WHITE);
-        EndMode2D();
+        Entity* entity = &env->entities[pid];
+        int target_pid = entity->target_pid;
+        if (target_pid == -1) {
+            continue;
+        }
 
-        // Draw HUD
-        Entity* player = &env->entities[human];
-        DrawFPS(10, 10);
+        Entity* target = &env->entities[target_pid];
+        float entity_x = entity->last_x + tick_frac*(entity->x - entity->last_x);
+        float entity_y = entity->last_y + tick_frac*(entity->y - entity->last_y);
+        float target_x = target->last_x + tick_frac*(target->x - target->last_x);
+        float target_y = target->last_y + tick_frac*(target->y - target->last_y);
 
-        float hud_y = renderer->height*ts - 2*ts;
-        draw_bars(player, 2*ts, hud_y, 10*ts, 24, true);
+        Color base;
+        Color accent;
+        if (entity->team == 0) {
+            base = (Color){0, 128, 128, 255};
+            accent = (Color){0, 255, 255, 255};
+        } else if (entity->team == 1) {
+            base = (Color){128, 0, 0, 255};
+            accent = (Color){255, 0, 0, 255};
+        } else {
+            base = (Color){128, 128, 128, 255};
+            accent = (Color){255, 255, 255, 255};
+        }
 
-        Color off_color = (Color){255, 255, 255, 255};
-        Color on_color = (player->team == 0) ? (Color){0, 255, 255, 255} : (Color){255, 0, 0, 255};
-
-        Color q_color = (skill_q) ? on_color : off_color;
-        Color w_color = (skill_w) ? on_color : off_color;
-        Color e_color = (skill_e) ? on_color : off_color;
-
-        int q_cd = player->q_timer;
-        int w_cd = player->w_timer;
-        int e_cd = player->e_timer;
-
-        DrawText(TextFormat("Q: %i", q_cd), 13*ts, hud_y - 20, 40, q_color);
-        DrawText(TextFormat("W: %i", w_cd), 17*ts, hud_y - 20, 40, w_color);
-        DrawText(TextFormat("E: %i", e_cd), 21*ts, hud_y - 20, 40, e_color);
-        DrawText(TextFormat("Stun: %i", player->stun_timer), 25*ts, hud_y - 20, 20, (player->stun_timer > 0) ? on_color : off_color);
-        DrawText(TextFormat("Move: %i", player->move_timer), 25*ts, hud_y, 20, (player->move_timer > 0) ? on_color : off_color);
-
-        EndDrawing();
+        int target_px = target_x*ts + ts/2;
+        int target_py = target_y*ts + ts/2;
+        int entity_px = entity_x*ts + ts/2;
+        int entity_py = entity_y*ts + ts/2;
+                                        
+        if (entity->attack_aoe == 0) {
+            Vector2 line_start = (Vector2){entity_px, entity_py};
+            Vector2 line_end = (Vector2){target_px, target_py};
+            DrawLineEx(line_start, line_end, ts/16, accent);
+        } else {
+            int radius = entity->attack_aoe*ts;
+            DrawRectangle(target_px - radius, target_py - radius,
+                2*radius, 2*radius, base);
+            Rectangle rec = (Rectangle){target_px - radius,
+                target_py - radius, 2*radius, 2*radius};
+            DrawRectangleLinesEx(rec, ts/8, accent);
+        }
     }
+
+    // Entity renders
+    for (int i = 0; i < render_idx; i++) {
+        Color tint = (Color){255, 255, 255, 255};
+
+        int pid = renderer->render_entities[i];
+        if (pid == -1) {
+            continue;
+        }
+        Entity* entity = &env->entities[pid];
+        int y = entity->y;
+        int x = entity->x;
+
+        float entity_x = entity->last_x + tick_frac*(entity->x - entity->last_x);
+        float entity_y = entity->last_y + tick_frac*(entity->y - entity->last_y);
+        int tx = entity_x*ts;
+        int ty = entity_y*ts;
+        draw_bars(entity, tx, ty-8, ts, 4, false);
+
+        int adr = map_offset(map, y, x);
+        int tile = map->grid[adr];
+
+        // TODO: Might need a vector type
+        Rectangle source_rect = renderer->asset_map[tile];
+        Rectangle dest_rect = (Rectangle){tx, ty, ts, ts};
+
+        if (entity->is_hit) {
+            BeginShaderMode(renderer->bloom_shader);
+        }
+        Vector2 origin = (Vector2){0, 0};
+        DrawTexturePro(renderer->puffer, source_rect, dest_rect, origin, 0, tint);
+        if (entity->is_hit) {
+            EndShaderMode();
+        }
+
+        // Draw status icons
+        if (entity->stun_timer > 0) {
+            DrawTexturePro(renderer->puffer, renderer->stun_uv, dest_rect, origin, 0, tint);
+        }
+        if (entity->move_timer > 0) {
+            if (entity->move_modifier < 0) {
+                DrawTexturePro(renderer->puffer, renderer->slow_uv, dest_rect, origin, 0, tint);
+            }
+            if (entity->move_modifier > 0) {
+                DrawTexturePro(renderer->puffer, renderer->speed_uv, dest_rect, origin, 0, tint);
+            }
+        }
+    }
+
+    DrawCircle(ts*mouse_x + ts/2, ts*mouse_y + ts/8, ts/8, WHITE);
+    EndMode2D();
+
+    // Draw HUD
+    Entity* player = &env->entities[human];
+    DrawFPS(10, 10);
+
+    float hud_y = renderer->height*ts - 2*ts;
+    draw_bars(player, 2*ts, hud_y, 10*ts, 24, true);
+
+    Color off_color = (Color){255, 255, 255, 255};
+    Color on_color = (player->team == 0) ? (Color){0, 255, 255, 255} : (Color){255, 0, 0, 255};
+
+    Color q_color = (skill_q) ? on_color : off_color;
+    Color w_color = (skill_w) ? on_color : off_color;
+    Color e_color = (skill_e) ? on_color : off_color;
+
+    int q_cd = player->q_timer;
+    int w_cd = player->w_timer;
+    int e_cd = player->e_timer;
+
+    DrawText(TextFormat("Q: %i", q_cd), 13*ts, hud_y - 20, 40, q_color);
+    DrawText(TextFormat("W: %i", w_cd), 17*ts, hud_y - 20, 40, w_color);
+    DrawText(TextFormat("E: %i", e_cd), 21*ts, hud_y - 20, 40, e_color);
+    DrawText(TextFormat("Stun: %i", player->stun_timer), 25*ts, hud_y - 20, 20, (player->stun_timer > 0) ? on_color : off_color);
+    DrawText(TextFormat("Move: %i", player->move_timer), 25*ts, hud_y, 20, (player->move_timer > 0) ? on_color : off_color);
+
+    EndDrawing();
+    //}
     return 0;
 }
 
