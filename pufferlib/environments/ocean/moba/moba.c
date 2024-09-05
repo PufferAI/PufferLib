@@ -19,11 +19,15 @@ int main() {
     GameRenderer* renderer = init_game_renderer(32, 41, 23);
 
     reset(env);
-    for (int tick = 0; tick < 1024; tick++) {
-        step(env);
-        render_game(renderer, env);
+    int frame = 0;
+    while (!WindowShouldClose()) {
+        if (frame % 12 == 0) {
+            step(env);
+        }
+        render_game(renderer, env, frame);
+        frame = (frame + 1) % 12;
     }
     free_moba(env);
     close_game_renderer(renderer);
+    return 0;
 }
-
