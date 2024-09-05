@@ -1856,14 +1856,6 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
     Entity* my_player = &env->entities[renderer->human_player];
     int ts = renderer->cell_size;
 
-    float ay = 0;
-    float ax = 0;
-    int skill_q = 0;
-    int skill_w = 0;
-    int skill_e = 0;
-    int target_heros = 1;
-
-    //for (int frame = 0; frame < FRAMES; frame++) {
     renderer->width = GetScreenWidth() / ts;
     renderer->height = GetScreenHeight() / ts;
     renderer->shader_resolution[0] = renderer->width;
@@ -1896,6 +1888,11 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
         renderer->last_click_y = raw_mouse_y / ts;
     }
 
+    int human = renderer->human_player;
+    int (*actions)[6] = (int(*)[6])env->actions;
+    actions[human][0] = 0;
+    actions[human][1] = 0;
+
     // TODO: better way to null clicks?
     if (renderer->last_click_x != -1 && renderer->last_click_y != -1) {
         float dest_x = renderer->last_click_x;
@@ -1914,31 +1911,24 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
             renderer->last_click_y = -1;
         }
 
-        ay = 100*dy;
-        ax = 100*dx;
-    } else {
-        ay = 0;
-        ax = 0;
+        actions[human][0] = 100*dy;
+        actions[human][1] = 100*dx;
     }
-
     if (IsKeyDown(KEY_ESCAPE)) {
         return 1;
     }
-
-    // TODO: Cache these as well across frames on same tick
     if (IsKeyDown(KEY_Q) || IsKeyPressed(KEY_Q)) {
-        skill_q = 1;
+        actions[human][3] = 1;
     }
     if (IsKeyDown(KEY_W) || IsKeyPressed(KEY_W)) {
-        skill_w = 1;
+        actions[human][4] = 1;
     }
     if (IsKeyDown(KEY_E) || IsKeyPressed(KEY_E)) {
-        skill_e = 1;
+        actions[human][5] = 1;
     }
     if (IsKeyDown(KEY_LEFT_SHIFT)) {
-        target_heros = 2;
+        actions[human][2] = 2; // Target heroes
     }
-
     // Num keys toggle selected player
     int num_pressed = GetKeyPressed();
     if (num_pressed > KEY_ZERO && num_pressed <= KEY_NINE) {
@@ -1946,16 +1936,6 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
     } else if (num_pressed == KEY_ZERO) {
         renderer->human_player = 9;
     }
-
-    // TODO: How to check for no movement?
-    int human = renderer->human_player;
-    int (*actions)[6] = (int(*)[6])env->actions;
-    actions[human][0] = ay;
-    actions[human][1] = ax;
-    actions[human][2] = target_heros;
-    actions[human][3] = skill_q;
-    actions[human][4] = skill_w;
-    actions[human][5] = skill_e;
 
     BeginDrawing();
     ClearBackground(COLORS[0]);
@@ -2112,9 +2092,9 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
     Color off_color = (Color){255, 255, 255, 255};
     Color on_color = (player->team == 0) ? (Color){0, 255, 255, 255} : (Color){255, 0, 0, 255};
 
-    Color q_color = (skill_q) ? on_color : off_color;
-    Color w_color = (skill_w) ? on_color : off_color;
-    Color e_color = (skill_e) ? on_color : off_color;
+    Color q_color = (actions[human][3]) ? on_color : off_color;
+    Color w_color = (actions[human][4]) ? on_color : off_color;
+    Color e_color = (actions[human][5]) ? on_color : off_color;
 
     int q_cd = player->q_timer;
     int w_cd = player->w_timer;
@@ -2127,7 +2107,6 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
     DrawText(TextFormat("Move: %i", player->move_timer), 25*ts, hud_y, 20, (player->move_timer > 0) ? on_color : off_color);
 
     EndDrawing();
-    //}
     return 0;
 }
 
