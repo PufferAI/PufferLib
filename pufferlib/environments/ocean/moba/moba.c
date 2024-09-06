@@ -188,24 +188,24 @@ int main() {
     float* bias_state = calloc(4*hidden_size, sizeof(float));
 
     for (int i = 0; i < num_input; i++) {
-        input[i] = i;
+        input[i] = i / 100000.0f;
     }
     for (int i = 0; i < num_buffer; i++) {
-        buffer[i] = i;
+        buffer[i] = i / 100000.0f;
     }
     for (int i = 0; i < num_output; i++) {
-        state_h[i] = i;
-        state_c[i] = i;
+        state_h[i] = i / 100000.0f;
+        state_c[i] = i / 100000.0f;
     }
-    for (int i = 0; i < hidden_size*input_size; i++) {
-        weights_input[i] = i;
+    for (int i = 0; i < 4*hidden_size*input_size; i++) {
+        weights_input[i] = i / 100000.0f;
     }
-    for (int i = 0; i < hidden_size*hidden_size; i++) {
-        weights_state[i] = i;
+    for (int i = 0; i < 4*hidden_size*hidden_size; i++) {
+        weights_state[i] = i / 100000.0f;
     }
-    for (int i = 0; i < hidden_size; i++) {
-        bias_input[i] = i;
-        bias_state[i] = i;
+    for (int i = 0; i < 4*hidden_size; i++) {
+        bias_input[i] = i / 100000.0f;
+        bias_state[i] = i / 100000.0f;
     }
 
     lstm(input, state_h, state_c, weights_input, weights_state, bias_input,
