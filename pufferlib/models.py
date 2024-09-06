@@ -23,7 +23,7 @@ class Default(nn.Module):
     '''
     def __init__(self, env, hidden_size=128):
         super().__init__()
-
+        self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
         self.is_multidiscrete = isinstance(env.single_action_space,
                 pufferlib.spaces.MultiDiscrete)
         self.is_continuous = isinstance(env.single_action_space,
