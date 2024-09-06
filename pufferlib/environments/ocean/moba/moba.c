@@ -18,6 +18,45 @@ int load_weights(const char* filename, float* weights, int num_weights) {
     return 0;
 }
 
+void linear_layer(float* input, float* weights, float* bias, float* output,
+        int batch_size, int input_dim, int output_dim) {
+    for (int b = 0; b < batch_size; b++) {
+        for (int o = 0; o < output_dim; o++) {
+            float sum = 0.0f;
+            for (int i = 0; i < input_dim; i++)
+                sum += input[b*input_dim + i] * weights[o*input_dim + i];
+            output[b*output_dim + o] = sum + bias[o];
+        }
+    }
+}
+
+void linear_layer_accumulate(float* input, float* weights, float* bias, float* output,
+        int batch_size, int input_dim, int output_dim) {
+    for (int b = 0; b < batch_size; b++) {
+        for (int o = 0; o < output_dim; o++) {
+            float sum = 0.0f;
+            for (int i = 0; i < input_dim; i++)
+                sum += input[b*input_dim + i] * weights[o*input_dim + i];
+            output[b*output_dim + o] += sum + bias[o];
+        }
+    }
+}
+
+void relu(float* data, int size) {
+    for (int i = 0; i < size; i++)
+        data[i] = fmaxf(0.0f, data[i]);
+}
+
+void tanh(float* data, int size) {
+    for (int i = 0; i < size; i++)
+        data[i] = tanhf(data[i]);
+}
+
+void sigmoid(float* data, int size) {
+    for (int i = 0; i < size; i++)
+        data[i] = 1.0f / (1.0f + expf(-data[i]));
+}
+
 void convolution_layer(float* input, float* weights, float* bias,
         float* output, int batch_size, int in_width, int in_height,
         int in_channels, int out_channels, int kernel_size, int stride) {
@@ -49,8 +88,6 @@ void convolution_layer(float* input, float* weights, float* bias,
                                     + kh*kernel_size
                                     + kw
                                 );
-                                //printf("%d %d %d %d %d %d\n", b, oc, h, w, ic, kh);
-                                //printf("%d %d\n", in_adr, weight_adr);
                                 output[out_adr] += input[in_adr]*weights[weight_adr];
                             }
                         }
@@ -59,6 +96,17 @@ void convolution_layer(float* input, float* weights, float* bias,
             }
         }
     }
+}
+
+void lstm(float* input, float* state, float* weights_input,
+        float* weights_state, float* bias_input, float*bias_state,
+        float* output_cell, float*output_state, float *output_buffer, 
+        int batch_size, int input_size, int hidden_size) {
+    linear_layer(input, weights_input, bias_input, output_buffer, batch_size, input_size, hidden_size);
+    linear_layer_accumulate(state, weights_state, bias_state, output_buffer, batch_size, hidden_size, hidden_size);
+    tanh(output_buffer, batch_size*hidden_size);
+
+ 
 }
 
 float get_out(float* output, int b, int oc, int h, int w) {
