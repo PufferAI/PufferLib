@@ -54,9 +54,54 @@ def test_model(model):
     breakpoint()
     exit(0)
 
+def test_lstm():
+    batch_size = 16
+    input_size = 128
+    hidden_size = 128
+
+    input = torch.arange(batch_size*input_size).reshape(1, batch_size, -1).float()
+    state = (
+        torch.arange(batch_size*hidden_size).reshape(1, batch_size, -1).float(),
+        torch.arange(batch_size*hidden_size).reshape(1, batch_size, -1).float()
+    )
+    weights_input = torch.arange(4*hidden_size*input_size).reshape(4*hidden_size, -1).float()
+    weights_state = torch.arange(4*hidden_size*hidden_size).reshape(4*hidden_size, -1).float()
+    bias_input = torch.arange(4*hidden_size).reshape(4*hidden_size).float()
+    bias_state = torch.arange(4*hidden_size).reshape(4*hidden_size).float()
+
+    lstm = torch.nn.LSTM(input_size=128, hidden_size=128, num_layers=1)
+    lstm.weight_ih_l0.data = weights_input
+    lstm.weight_hh_l0.data = weights_state
+    lstm.bias_ih_l0.data = bias_input
+    lstm.bias_hh_l0.data = bias_state
+
+    output, new_state = lstm(input, state)
+
+    input = input.squeeze(0)
+    h, c = state
+
+    buffer = (
+        torch.matmul(input, weights_input.T) + bias_input
+        + torch.matmul(h, weights_state.T) + bias_state
+    )[0]
+
+    i, f, g, o = torch.split(buffer, hidden_size, dim=1)
+
+    i = torch.sigmoid(i)
+    f = torch.sigmoid(f)
+    g = torch.tanh(g)
+    o = torch.sigmoid(o)
+
+    c = f*c + i*g
+    h = o*torch.tanh(c)
+
+    breakpoint()
+    print('Output:', output)
+
 	
 if __name__ == '__main__':
-    model = torch.load('moba.pt')
-    test_model(model)
+    test_lstm()
+    #model = torch.load('moba.pt')
+    #test_model(model)
 
     #save_model_weights(model, 'moba_weights.pt')

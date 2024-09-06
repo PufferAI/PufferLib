@@ -93,12 +93,11 @@ void convolution_layer(float* input, float* weights, float* bias,
     }
 }
 
-void lstm(float* input, float* state, float* weights_input,
+void lstm(float* input, float* state_h, float* state_c, float* weights_input,
         float* weights_state, float* bias_input, float*bias_state,
-        float* output_cell, float *buffer, 
-        int batch_size, int input_size, int hidden_size) {
+        float *buffer, int batch_size, int input_size, int hidden_size) {
     linear_layer(input, weights_input, bias_input, buffer, batch_size, input_size, 4*hidden_size);
-    linear_layer_accumulate(state, weights_state, bias_state, buffer, batch_size, hidden_size, 4*hidden_size);
+    linear_layer_accumulate(state_h, weights_state, bias_state, buffer, batch_size, hidden_size, 4*hidden_size);
 
     // Activation functions
     for (int b=0; b<batch_size; b++) {
@@ -122,12 +121,12 @@ void lstm(float* input, float* state, float* weights_input,
         int inp_offset = b*hidden_size;
         int b_offset = 4*b*hidden_size;
         for (int i=0; i<hidden_size; i++) {
-            output_cell[inp_offset + i] = (
+            state_c[inp_offset + i] = (
                 buffer[b_offset + hidden_size + i] * input[inp_offset + i]
                 + buffer[b_offset + i] * buffer[b_offset + 2*hidden_size + i]
             );
-            state[inp_offset + i] = (
-                buffer[b_offset + 3*hidden_size + i] * tanh(output_cell[inp_offset + i])
+            state_h[inp_offset + i] = (
+                buffer[b_offset + 3*hidden_size + i] * tanh(state_c[inp_offset + i])
             );
         }
     }
@@ -181,8 +180,8 @@ int main() {
 
     float* input = calloc(num_input, sizeof(float));
     float* buffer = calloc(num_buffer, sizeof(float));
-    float* output_cell = calloc(num_output, sizeof(float));
-    float* state = calloc(num_output, sizeof(float));
+    float* state_h = calloc(num_output, sizeof(float));
+    float* state_c = calloc(num_output, sizeof(float));
     float* weights_input = calloc(4*hidden_size*input_size, sizeof(float));
     float* weights_state = calloc(4*hidden_size*hidden_size, sizeof(float));
     float* bias_input = calloc(4*hidden_size, sizeof(float));
@@ -195,8 +194,8 @@ int main() {
         buffer[i] = i;
     }
     for (int i = 0; i < num_output; i++) {
-        output_cell[i] = i;
-        state[i] = i;
+        state_h[i] = i;
+        state_c[i] = i;
     }
     for (int i = 0; i < hidden_size*input_size; i++) {
         weights_input[i] = i;
@@ -209,8 +208,8 @@ int main() {
         bias_state[i] = i;
     }
 
-    lstm(input, state, weights_input, weights_state, bias_input, bias_state,
-        output_cell, buffer, batch_size, input_size, hidden_size);
+    lstm(input, state_h, state_c, weights_input, weights_state, bias_input,
+        bias_state, buffer, batch_size, input_size, hidden_size);
 
     MOBA* env = init_moba(num_agents, num_creeps, num_neutrals, num_towers, vision_range,
         agent_speed, discretize, reward_death, reward_xp, reward_distance, reward_tower);
