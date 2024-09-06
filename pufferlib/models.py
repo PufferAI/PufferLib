@@ -28,7 +28,10 @@ class Default(nn.Module):
                 pufferlib.spaces.MultiDiscrete)
         self.is_continuous = isinstance(env.single_action_space,
                 pufferlib.spaces.Box)
-        self.is_dict_obs = isinstance(env.env.observation_space, pufferlib.spaces.Dict) 
+        try:
+            self.is_dict_obs = isinstance(env.env.observation_space, pufferlib.spaces.Dict) 
+        except:
+            self.is_dict_obs = isinstance(env.observation_space, pufferlib.spaces.Dict) 
 
         if self.is_dict_obs:
             input_size = sum(np.prod(v.shape) for v in env.env.observation_space.values())
