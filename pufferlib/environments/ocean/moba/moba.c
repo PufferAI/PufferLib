@@ -47,14 +47,9 @@ void relu(float* data, int size) {
         data[i] = fmaxf(0.0f, data[i]);
 }
 
-void tanh(float* data, int size) {
-    for (int i = 0; i < size; i++)
-        data[i] = tanhf(data[i]);
-}
-
-void sigmoid(float* data, int size) {
-    for (int i = 0; i < size; i++)
-        data[i] = 1.0f / (1.0f + expf(-data[i]));
+float sigmoid(float x);
+inline float sigmoid(float x) {
+    return 1.0f / (1.0f + expf(-x));
 }
 
 void convolution_layer(float* input, float* weights, float* bias,
@@ -100,12 +95,42 @@ void convolution_layer(float* input, float* weights, float* bias,
 
 void lstm(float* input, float* state, float* weights_input,
         float* weights_state, float* bias_input, float*bias_state,
-        float* output_cell, float*output_state, float *output_buffer, 
+        float* output_cell, float *buffer, 
         int batch_size, int input_size, int hidden_size) {
-    linear_layer(input, weights_input, bias_input, output_buffer, batch_size, input_size, hidden_size);
-    linear_layer_accumulate(state, weights_state, bias_state, output_buffer, batch_size, hidden_size, hidden_size);
-    tanh(output_buffer, batch_size*hidden_size);
+    linear_layer(input, weights_input, bias_input, buffer, batch_size, input_size, 4*hidden_size);
+    linear_layer_accumulate(state, weights_state, bias_state, buffer, batch_size, hidden_size, 4*hidden_size);
 
+    // Activation functions
+    for (int b=0; b<batch_size; b++) {
+        int b_offset = 4*b*hidden_size;
+        for (int i=0; i<2*hidden_size; i++) {
+            int buf_adr = b_offset + i;
+            buffer[buf_adr] = sigmoid(buffer[buf_adr]);
+        }
+        for (int i=2*hidden_size; i<3*hidden_size; i++) {
+            int buf_adr = b_offset + i;
+            buffer[buf_adr] = tanh(buffer[buf_adr]);
+        }
+        for (int i=3*hidden_size; i<4*hidden_size; i++) {
+            int buf_adr = b_offset + i;
+            buffer[buf_adr] = sigmoid(buffer[buf_adr]);
+        }
+    }
+
+    // Gates
+    for (int b=0; b<batch_size; b++) {
+        int inp_offset = b*hidden_size;
+        int b_offset = 4*b*hidden_size;
+        for (int i=0; i<hidden_size; i++) {
+            output_cell[inp_offset + i] = (
+                buffer[b_offset + hidden_size + i] * input[inp_offset + i]
+                + buffer[b_offset + i] * buffer[b_offset + 2*hidden_size + i]
+            );
+            state[inp_offset + i] = (
+                buffer[b_offset + 3*hidden_size + i] * tanh(output_cell[inp_offset + i])
+            );
+        }
+    }
  
 }
 
@@ -126,6 +151,7 @@ int main() {
     float reward_distance = 0.05;
     float reward_tower = 3.0;
 
+    /*
     int num_weights = 32*19*5*5;
     int num_bias = 32;
     float* weights = calloc(num_weights + num_bias, sizeof(float));
@@ -143,7 +169,48 @@ int main() {
     float* output = calloc(num_output, sizeof(float));
 
     convolution_layer(input, weights, bias, output, batch_size, 11, 11, 19, 32, 5, 3);
- 
+    */
+
+    int batch_size = 16;
+    int input_size = 128;
+    int hidden_size = 128;
+
+    int num_input = batch_size*input_size;
+    int num_buffer = 4*batch_size*hidden_size;
+    int num_output = batch_size*hidden_size;
+
+    float* input = calloc(num_input, sizeof(float));
+    float* buffer = calloc(num_buffer, sizeof(float));
+    float* output_cell = calloc(num_output, sizeof(float));
+    float* state = calloc(num_output, sizeof(float));
+    float* weights_input = calloc(4*hidden_size*input_size, sizeof(float));
+    float* weights_state = calloc(4*hidden_size*hidden_size, sizeof(float));
+    float* bias_input = calloc(4*hidden_size, sizeof(float));
+    float* bias_state = calloc(4*hidden_size, sizeof(float));
+
+    for (int i = 0; i < num_input; i++) {
+        input[i] = i;
+    }
+    for (int i = 0; i < num_buffer; i++) {
+        buffer[i] = i;
+    }
+    for (int i = 0; i < num_output; i++) {
+        output_cell[i] = i;
+        state[i] = i;
+    }
+    for (int i = 0; i < hidden_size*input_size; i++) {
+        weights_input[i] = i;
+    }
+    for (int i = 0; i < hidden_size*hidden_size; i++) {
+        weights_state[i] = i;
+    }
+    for (int i = 0; i < hidden_size; i++) {
+        bias_input[i] = i;
+        bias_state[i] = i;
+    }
+
+    lstm(input, state, weights_input, weights_state, bias_input, bias_state,
+        output_cell, buffer, batch_size, input_size, hidden_size);
 
     MOBA* env = init_moba(num_agents, num_creeps, num_neutrals, num_towers, vision_range,
         agent_speed, discretize, reward_death, reward_xp, reward_distance, reward_tower);
