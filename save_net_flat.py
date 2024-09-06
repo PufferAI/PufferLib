@@ -108,9 +108,7 @@ def test_model_forward(model):
 
 	
 if __name__ == '__main__':
-    #test_lstm()
-    model = torch.load('moba.pt', map_location='cpu')
-    test_model_forward(model)
-    #test_model(model)
+    model = torch.load('moba.pt')
+    test_model(model)
 
-    #save_model_weights(model, 'moba_weights.bin')
+    #save_model_weights(model, 'moba_weights.pt')
