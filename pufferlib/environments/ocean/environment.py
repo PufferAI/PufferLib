@@ -12,6 +12,10 @@ def make_tactical(num_envs=200, render_mode='rgb_array'):
     from .tactical import tactical
     return tactical.PufferTactical(num_envs=num_envs, render_mode=render_mode)
 
+def make_highway(num_envs=200, render_mode='rgb_array'):
+    from .highway import highway
+    return highway.PufferHighway(num_envs=num_envs, render_mode=render_mode)
+
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
     from .grid import grid
