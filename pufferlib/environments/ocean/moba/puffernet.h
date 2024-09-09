@@ -2,6 +2,49 @@
 #include <stdbool.h>
 #include <string.h>
 #include <math.h>
+#include <assert.h>
+
+// File format is obained by flattening and concatenating all pytorch layers
+typedef struct Weights Weights;
+struct Weights {
+    float* data;
+    int size;
+    int idx;
+};
+
+float* _load_weights(const char* filename, int num_weights) {
+    FILE* file = fopen(filename, "rb");
+    if (!file) {
+        perror("Error opening file");
+        return NULL;
+    }
+    fseek(file, 0, SEEK_END);
+    rewind(file);
+    float* weights = calloc(num_weights, sizeof(float));
+    int read_size = fread(weights, sizeof(float), num_weights, file);
+    fclose(file);
+    if (read_size != num_weights) {
+        perror("Error reading file");
+        return NULL;
+    }
+    return weights;
+}
+
+Weights* load_weights(const char* filename, int num_weights) {
+    Weights* weights = calloc(1, sizeof(Weights));
+    weights->data = _load_weights(filename, num_weights);
+    weights->size = num_weights;
+    weights->idx = 0;
+    return weights;
+}
+
+float* get_weights(Weights* weights, int num_weights) {
+    printf("Got %i weights from index %i\n", num_weights, weights->idx);
+    float* data = &weights->data[weights->idx];
+    weights->idx += num_weights;
+    assert(weights->idx <= weights->size);
+    return data;
+}
 
 // PufferNet implementation of PyTorch functions
 // These are tested against the PyTorch implementation
@@ -178,11 +221,11 @@ struct Linear {
     int output_dim;
 };
 
-Linear* make_linear(int batch_size, int input_dim, int output_dim) {
+Linear* make_linear(Weights* weights, int batch_size, int input_dim, int output_dim) {
     Linear* layer = calloc(1, sizeof(Linear));
     layer->output = calloc(batch_size*output_dim, sizeof(float));
-    layer->weights = calloc(output_dim*input_dim, sizeof(float));
-    layer->bias = calloc(output_dim, sizeof(float));
+    layer->weights = get_weights(weights, output_dim*input_dim);
+    layer->bias = get_weights(weights, output_dim);
     layer->batch_size = batch_size;
     layer->input_dim = input_dim;
     layer->output_dim = output_dim;
@@ -244,12 +287,12 @@ struct Conv2D {
     int stride;
 };
 
-Conv2D* make_conv2d(int batch_size, int in_width, int in_height,
+Conv2D* make_conv2d(Weights* weights, int batch_size, int in_width, int in_height,
         int in_channels, int out_channels, int kernel_size, int stride) {
     Conv2D* layer = calloc(1, sizeof(Conv2D));
     layer->output = calloc(batch_size*out_channels*in_height*in_width, sizeof(float));
-    layer->weights = calloc(out_channels*in_channels*kernel_size*kernel_size, sizeof(float));
-    layer->bias = calloc(out_channels, sizeof(float));
+    layer->weights = get_weights(weights, out_channels*in_channels*kernel_size*kernel_size);
+    layer->bias = get_weights(weights, out_channels);
     layer->batch_size = batch_size;
     layer->in_width = in_width;
     layer->in_height = in_height;
@@ -288,15 +331,15 @@ struct LSTM {
     int hidden_size;
 };
 
-LSTM* make_lstm(int batch_size, int input_size, int hidden_size) {
+LSTM* make_lstm(Weights* weights, int batch_size, int input_size, int hidden_size) {
     LSTM* layer = calloc(1, sizeof(LSTM));
     layer->output = calloc(batch_size*hidden_size, sizeof(float));
     layer->state_h = calloc(batch_size*hidden_size, sizeof(float));
     layer->state_c = calloc(batch_size*hidden_size, sizeof(float));
-    layer->weights_input = calloc(4*hidden_size*input_size, sizeof(float));
-    layer->weights_state = calloc(4*hidden_size*hidden_size, sizeof(float));
-    layer->bias_input = calloc(4*hidden_size, sizeof(float));
-    layer->bias_state = calloc(4*hidden_size, sizeof(float));
+    layer->weights_input = get_weights(weights, 4*hidden_size*input_size);
+    layer->weights_state = get_weights(weights, 4*hidden_size*hidden_size);
+    layer->bias_input = get_weights(weights, 4*hidden_size);
+    layer->bias_state = get_weights(weights, 4*hidden_size);
     layer->buffer = calloc(4*batch_size*hidden_size, sizeof(float));
     layer->batch_size = batch_size;
     layer->input_size = input_size;
@@ -376,7 +419,7 @@ void cat_dim1(CatDim1* layer, float* x, float* y) {
 
 typedef struct ArgmaxMultidiscrete ArgmaxMultidiscrete;
 struct ArgmaxMultidiscrete {
-    int* output;
+    //int* output;
     int batch_size;
     int logit_sizes[32];
     int num_actions;
@@ -384,7 +427,7 @@ struct ArgmaxMultidiscrete {
 
 ArgmaxMultidiscrete* make_argmax_multidiscrete(int batch_size, int logit_sizes[], int num_actions) {
     ArgmaxMultidiscrete* layer = calloc(1, sizeof(ArgmaxMultidiscrete));
-    layer->output = calloc(batch_size*num_actions, sizeof(int));
+    //layer->output = calloc(batch_size*num_actions, sizeof(int));
     layer->batch_size = batch_size;
     layer->num_actions = num_actions;
     memcpy(layer->logit_sizes, logit_sizes, num_actions*sizeof(int));
@@ -392,28 +435,12 @@ ArgmaxMultidiscrete* make_argmax_multidiscrete(int batch_size, int logit_sizes[]
 }
 
 void free_argmax_multidiscrete(ArgmaxMultidiscrete* layer) {
-    free(layer->output);
+    //free(layer->output);
     free(layer);
 }
 
-void argmax_multidiscrete(ArgmaxMultidiscrete* layer, float* input) {
-    _argmax_multidiscrete(input, layer->output, layer->batch_size, layer->logit_sizes, layer->num_actions);
+void argmax_multidiscrete(ArgmaxMultidiscrete* layer, float* input, int* output) {
+    _argmax_multidiscrete(input, output, layer->batch_size, layer->logit_sizes, layer->num_actions);
 }
 
-// File format is obained by flattening and concatenating all pytorch layers
-int load_weights(const char* filename, float* weights, int num_weights) {
-    FILE* file = fopen(filename, "rb");
-    if (!file) {
-        perror("Error opening file");
-        return 1;
-    }
-    fseek(file, 0, SEEK_END);
-    rewind(file);
-    int read_size = fread(weights, sizeof(float), num_weights, file);
-    fclose(file);
-    if (read_size != num_weights) {
-        perror("Error reading file");
-        return 1;
-    }
-    return 0;
-}
+
