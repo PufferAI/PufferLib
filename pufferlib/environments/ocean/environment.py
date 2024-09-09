@@ -8,6 +8,10 @@ def make_moba(num_envs=200, reward_death=-1.0, reward_xp=0.006,
         reward_xp=reward_xp, reward_distance=reward_distance,
         reward_tower=reward_tower, render_mode=render_mode)
 
+def make_tactical(num_envs=200, render_mode='rgb_array'):
+    from .tactical import tactical
+    return tactical.PufferTactical(num_envs=num_envs, render_mode=render_mode)
+
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
     from .grid import grid
