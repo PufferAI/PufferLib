@@ -38,8 +38,12 @@ Weights* load_weights(const char* filename, int num_weights) {
     return weights;
 }
 
+void free_weights(Weights* weights) {
+    free(weights->data);
+    free(weights);
+}
+
 float* get_weights(Weights* weights, int num_weights) {
-    printf("Got %i weights from index %i\n", num_weights, weights->idx);
     float* data = &weights->data[weights->idx];
     weights->idx += num_weights;
     assert(weights->idx <= weights->size);
@@ -211,6 +215,33 @@ void _argmax_multidiscrete(float* input, int* output, int batch_size, int logit_
     }
 }
 
+void _softmax_multidiscrete(float* input, int* output, int batch_size, int logit_sizes[], int num_actions) {
+    int in_adr = 0;
+    for (int b = 0; b < batch_size; b++) {
+        for (int a = 0; a < num_actions; a++) {
+            int out_adr = b*num_actions + a;
+            float logit_exp_sum = 0;
+            int num_action_types = logit_sizes[a];
+            for (int i = 0; i < num_action_types; i++) {
+                logit_exp_sum += expf(input[in_adr + i]);
+            }
+            float prob = rand() / (float)RAND_MAX;
+            bool found = false;
+            float logit_prob = 0;
+            for (int i = 0; i < num_action_types; i++) {
+                logit_prob += expf(input[in_adr + i]) / logit_exp_sum;
+                if (prob < logit_prob) {
+                    output[out_adr] = i;
+                    found = true;
+                    break;
+                }
+            }
+            assert(found);
+            in_adr += num_action_types;
+        }
+    }
+}
+
 // User API. Provided to help organize layers
 typedef struct Linear Linear;
 struct Linear {
@@ -235,8 +266,6 @@ Linear* make_linear(Weights* weights, int batch_size, int input_dim, int output_
 
 void free_linear(Linear* layer) {
     free(layer->output);
-    free(layer->weights);
-    free(layer->bias);
     free(layer);
 }
 
@@ -306,8 +335,6 @@ Conv2D* make_conv2d(Weights* weights, int batch_size, int in_width, int in_heigh
 
 void free_conv2d(Conv2D* layer) {
     free(layer->output);
-    free(layer->weights);
-    free(layer->bias);
     free(layer);
 }
 
@@ -349,10 +376,6 @@ LSTM* make_lstm(Weights* weights, int batch_size, int input_size, int hidden_siz
 void free_lstm(LSTM* layer) {
     free(layer->state_h);
     free(layer->state_c);
-    free(layer->weights_input);
-    free(layer->weights_state);
-    free(layer->bias_input);
-    free(layer->bias_state);
     free(layer->buffer);
     free(layer);
 }
@@ -415,30 +438,30 @@ void cat_dim1(CatDim1* layer, float* x, float* y) {
     _cat_dim1(x, y, layer->output, layer->batch_size, layer->x_size, layer->y_size);
 }
 
-typedef struct ArgmaxMultidiscrete ArgmaxMultidiscrete;
-struct ArgmaxMultidiscrete {
-    //int* output;
+typedef struct Multidiscrete Multidiscrete;
+struct Multidiscrete {
     int batch_size;
     int logit_sizes[32];
     int num_actions;
 };
 
-ArgmaxMultidiscrete* make_argmax_multidiscrete(int batch_size, int logit_sizes[], int num_actions) {
-    ArgmaxMultidiscrete* layer = calloc(1, sizeof(ArgmaxMultidiscrete));
-    //layer->output = calloc(batch_size*num_actions, sizeof(int));
+Multidiscrete* make_multidiscrete(int batch_size, int logit_sizes[], int num_actions) {
+    Multidiscrete* layer = calloc(1, sizeof(Multidiscrete));
     layer->batch_size = batch_size;
     layer->num_actions = num_actions;
     memcpy(layer->logit_sizes, logit_sizes, num_actions*sizeof(int));
     return layer;
 }
 
-void free_argmax_multidiscrete(ArgmaxMultidiscrete* layer) {
-    //free(layer->output);
+void free_multidiscrete(Multidiscrete* layer) {
     free(layer);
 }
 
-void argmax_multidiscrete(ArgmaxMultidiscrete* layer, float* input, int* output) {
+void argmax_multidiscrete(Multidiscrete* layer, float* input, int* output) {
     _argmax_multidiscrete(input, output, layer->batch_size, layer->logit_sizes, layer->num_actions);
 }
 
+void softmax_multidiscrete(Multidiscrete* layer, float* input, int* output) {
+    _softmax_multidiscrete(input, output, layer->batch_size, layer->logit_sizes, layer->num_actions);
+}
 

@@ -489,20 +489,23 @@ void kill_entity(Map* map, Entity* entity) {
     map->pids[adr] = -1;
     entity->pid = -1;
     entity->target_pid = -1;
+    entity->last_x = 0;
+    entity->last_y = 0;
     entity->x = 0;
     entity->y = 0;
 }
 
-void respawn_player(Map* map, Entity* entity) {
+void spawn_player(Map* map, Entity* entity) {
     int pid = entity->pid;
     kill_entity(map, entity);
     entity->pid = pid;
 
-    entity->max_health = entity->base_health;
-    entity->max_mana = entity->base_mana;
+    entity->max_health = entity->base_health + entity->level*entity->hp_gain_per_level;
+    entity->max_mana = entity->base_mana + entity->level*entity->mana_gain_per_level;
+    entity->damage = entity->base_damage + entity->level*entity->damage_gain_per_level;
+ 
     entity->health = entity->max_health;
     entity->mana = entity->max_mana;
-    entity->damage = entity->base_damage;
     entity->basic_attack_timer = 0;
     entity->move_modifier = 0;
     entity->move_timer = 0;
@@ -521,6 +524,8 @@ void respawn_player(Map* map, Entity* entity) {
         x = entity->spawn_x + rand()%15 - 7;
         valid_pos = map->grid[map_offset(map, y, x)] == EMPTY;
     }
+    entity->last_x = x;
+    entity->last_y = y;
     move_to(map, entity, y, x);
 }
 
@@ -528,18 +533,18 @@ int attack(MOBA* env, Entity* player, Entity* target, float damage) {
     if (target->pid == -1 || target->team == player->team)
         return 1;
 
-    player->target_pid = target->pid;
-    target->is_hit = 1;
-
     float dist_to_target = l1_distance(player->y, player->x, target->y, target->x);
-    if (dist_to_target > 10) {
-        printf("Attacker %i at %f, %f, target %i at %f, %f, dist %f\n", player->pid, player->y, player->x, target->pid, target->y, target->x, dist_to_target);
+    if (dist_to_target > 12) {
+        return 1;
+        //printf("Attacker %i at %f, %f, target %i at %f, %f, dist %f\n", player->pid, player->y, player->x, target->pid, target->y, target->x, dist_to_target);
     }
 
     if (damage < target->health) {
         player->damage_dealt += damage;
         target->damage_received += damage;
         target->health -= damage;
+        player->target_pid = target->pid;
+        target->is_hit = 1;
         return 0;
     }
 
@@ -552,7 +557,7 @@ int attack(MOBA* env, Entity* player, Entity* target, float damage) {
         env->rewards[target->pid].death = env->reward_death;
         player->heros_killed += 1;
         target->deaths += 1;
-        respawn_player(env->map, target);
+        spawn_player(env->map, target);
     } else if (target_type == ENTITY_CREEP) {
         player->creeps_killed += 1;
         kill_entity(env->map, target);
@@ -654,28 +659,7 @@ int heal(MOBA* env, Entity* player, Entity* target, float amount) {
     return 0;
 }
 
-int respawn_creep(MOBA* env, Entity* entity, int lane) {
-    int spawn_y = WAYPOINTS[lane][0][0];
-    int spawn_x = WAYPOINTS[lane][0][1];
-
-    Map* map = env->map;
-    int y, x;
-    for (int i = 0; i < 10; i++) {
-        y = spawn_y + rand() % 7 - 3;
-        x = spawn_x + rand() % 7 - 3;
-        int adr = map_offset(map, y, x);
-        if (map->grid[adr] == EMPTY) {
-            break;
-        }
-    }
-    entity->health = entity->max_health;
-    entity->target_pid = -1;
-    entity->waypoint = 1;
-    return move_to(env->map, entity, y, x);
-}
-
-// TODO: Only 1 spawn needs to exist
-void spawn_creep(MOBA* env, int idx, int lane) {
+int spawn_creep(MOBA* env, int idx, int lane) {
     int pid = creep_offset(env) + idx;
     Entity* creep = &env->entities[pid];
 
@@ -696,10 +680,28 @@ void spawn_creep(MOBA* env, int idx, int lane) {
     creep->damage = 22;
     creep->basic_attack_cd = 5;
 
-    respawn_creep(env, creep, lane);
+    int spawn_y = WAYPOINTS[lane][0][0];
+    int spawn_x = WAYPOINTS[lane][0][1];
+
+    Map* map = env->map;
+    int y, x;
+    for (int i = 0; i < 10; i++) {
+        y = spawn_y + rand() % 7 - 3;
+        x = spawn_x + rand() % 7 - 3;
+        int adr = map_offset(map, y, x);
+        if (map->grid[adr] == EMPTY) {
+            break;
+        }
+    }
+    creep->health = creep->max_health;
+    creep->target_pid = -1;
+    creep->waypoint = 1;
+    creep->last_x = x;
+    creep->last_y = y;
+    return move_to(env->map, creep, y, x);
 }
 
-int respawn_neutral(MOBA* env, int idx) {
+int spawn_neutral(MOBA* env, int idx) {
     int pid = neutral_offset(env) + idx;
     Entity* neutral = &env->entities[pid];
     neutral->pid = pid;
@@ -721,9 +723,12 @@ int respawn_neutral(MOBA* env, int idx) {
             break;
         }
     }
+    neutral->last_x = x;
+    neutral->last_y = y;
     return move_to(env->map, neutral, y, x);
 }
 
+// TODO: Rework spawn system
 int spawn_at(Map* map, Entity* entity, float y, float x) {
     int adr = map_offset(map, (int)y, (int)x);
 
@@ -772,6 +777,14 @@ int scan_aoe(MOBA* env, Entity* player, int radius,
                 continue;
 
             env->scanned_targets[pid][idx] = target;
+            float dist_to_target = l1_distance(player->y, player->x, target->y, target->x);
+            if (dist_to_target > 15) {
+                printf("Invalid target at %f, %f\n", target->y, target->x);
+                printf("player x: %f, y: %f, target x: %f, y: %f, dist: %f\n", player->x, player->y, target->x, target->y, dist_to_target);
+                printf("player pid: %i, target pid: %i\n", player->pid, target->pid);
+                printf("Tick: %i\n", env->tick);
+                exit(0);
+            }
             idx += 1;
         }
     }
@@ -831,7 +844,6 @@ int player_aoe_attack(MOBA* env, Entity* player,
 
     if (err != 0)
         return 1;
-
 
     aoe_scanned(env, player, target, damage, stun);
     player->target_pid = target->pid;
@@ -1038,7 +1050,6 @@ int skill_assassin_move_buff(MOBA* env, Entity* player, Entity* target) {
     return 0;
 }
 
-
 int skill_burst_nuke(MOBA* env, Entity* player, Entity* target) {
     int mana_cost = 200;
     if (target == NULL || player->mana < mana_cost)
@@ -1083,7 +1094,7 @@ int skill_tank_aoe_dot(MOBA* env, Entity* player, Entity* target) {
     if (player->mana < mana_cost)
         return 1;
 
-    if (player_aoe_attack(env, player, player, 2, 250 + 2.0*player->level, 0) == 0) {
+    if (player_aoe_attack(env, player, player, 2, 25 + 2.0*player->level, 0) == 0) {
         player->mana -= mana_cost;
         return 0;
     }
@@ -1199,7 +1210,7 @@ void step_neutrals(MOBA* env) {
     if (env->tick % 600 == 0) {
         for (int camp = 0; camp < 18; camp++) {
             for (int neut = 0; neut < 4; neut++) {
-                respawn_neutral(env, 4*camp + neut);
+                spawn_neutral(env, 4*camp + neut);
             }
         }
     }
@@ -1262,7 +1273,7 @@ void step_players(MOBA* env) {
         Entity* player = &env->entities[pid];
         // TODO: Is this needed?
         //if (rand() % 1024 == 0)
-        //    respawn_player(env->map, player);
+        //    spawn_player(env->map, player);
 
         if (player->mana < player->max_mana)
             player->mana += 2;
@@ -1309,13 +1320,13 @@ void step_players(MOBA* env) {
             target = nearest_scanned_target(env, player);
 
         // TODO: Clean this mess
-        if (use_q && player->q_timer <= 0 && env->skills[pid][0](env, player, target) && player->q_uses < MAX_USES) {
+        if (use_q && player->q_timer <= 0 && env->skills[pid][0](env, player, target)==0 && player->q_uses < MAX_USES) {
             player->q_uses += 1;
-        } else if (use_w && player->w_timer <= 0 && env->skills[pid][1](env, player, target) && player->w_uses < MAX_USES) {
+        } else if (use_w && player->w_timer <= 0 && env->skills[pid][1](env, player, target)==0 && player->w_uses < MAX_USES) {
             player->w_uses += 1;
-        } else if (use_e && player->e_timer <= 0 && env->skills[pid][2](env, player, target) && player->e_uses < MAX_USES) {
+        } else if (use_e && player->e_timer <= 0 && env->skills[pid][2](env, player, target)==0 && player->e_uses < MAX_USES) {
             player->e_uses += 1;
-        } else if (target != NULL && basic_attack(env, player, target) && player->basic_attack_uses < MAX_USES) {
+        } else if (target != NULL && basic_attack(env, player, target)==0 && player->basic_attack_uses < MAX_USES) {
             player->basic_attack_uses += 1;
         }
 
@@ -1652,7 +1663,7 @@ void reset(MOBA* env) {
         player->level = 1;
         //player->x = 0;
         //player->y = 0;
-        respawn_player(env->map, player);
+        spawn_player(env->map, player);
     }
 
     // Despawn creeps
@@ -1781,6 +1792,7 @@ typedef struct {
     Rectangle speed_uv;
     Texture2D game_map;
     Texture2D puffer;
+    Image shader_background;
     Texture2D shader_canvas;
     Shader shader;
     float shader_x;
@@ -1835,7 +1847,8 @@ GameRenderer* init_game_renderer(int cell_size, int width, int height) {
 
     renderer->game_map = LoadTexture("dota_map.png");
     renderer->puffer = LoadTexture("moba_assets.png");
-    renderer->shader_canvas = LoadTextureFromImage(GenImageColor(2560, 1440, (Color){0, 0, 0, 255}));
+    renderer->shader_background = GenImageColor(2560, 1440, (Color){0, 0, 0, 255});
+    renderer->shader_canvas = LoadTextureFromImage(renderer->shader_background);
     renderer->shader = LoadShader("", TextFormat("shaders/map_shader_%i.fs", GLSL_VERSION));
     renderer->bloom_shader = LoadShader("", TextFormat("shaders/bloom_shader_%i.fs", GLSL_VERSION));
 
@@ -1927,8 +1940,6 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
     Vector2 pos = GetMousePosition();
     float raw_mouse_x = pos.x + renderer->camera.target.x;
     float raw_mouse_y = pos.y + renderer->camera.target.y;
-    int mouse_x = raw_mouse_x / ts;
-    int mouse_y = raw_mouse_y / ts;
 
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
         renderer->last_click_x = raw_mouse_x / ts;
@@ -1937,12 +1948,16 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
 
     int human = renderer->human_player;
     int (*actions)[6] = (int(*)[6])env->actions;
-    actions[human][0] = 0;
-    actions[human][1] = 0;
-    actions[human][2] = 0;
-    actions[human][3] = 0;
-    actions[human][4] = 0;
-    actions[human][5] = 0;
+
+    // Clears so as to not let the nn spam actions
+    if (frame % 12 == 0) {
+        actions[human][0] = 0;
+        actions[human][1] = 0;
+        actions[human][2] = 0;
+        actions[human][3] = 0;
+        actions[human][4] = 0;
+        actions[human][5] = 0;
+    }
 
     // TODO: better way to null clicks?
     if (renderer->last_click_x != -1 && renderer->last_click_y != -1) {
@@ -2012,9 +2027,9 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
 
             int adr = map_offset(map, y, x);
             int pid = map->pids[adr];
-            if (pid != -1) {
-                DrawRectangle(x*ts, y*ts, ts, ts, RED);
-            }
+            //if (pid != -1) {
+            //    DrawRectangle(x*ts, y*ts, ts, ts, RED);
+            //}
 
             unsigned char tile = map->grid[adr];
             if (tile == EMPTY || tile == WALL) {
@@ -2067,7 +2082,7 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
         int target_py = target_y*ts + ts/2;
         int entity_px = entity_x*ts + ts/2;
         int entity_py = entity_y*ts + ts/2;
-                                        
+
         if (entity->attack_aoe == 0) {
             Vector2 line_start = (Vector2){entity_px, entity_py};
             Vector2 line_end = (Vector2){target_px, target_py};
@@ -2130,8 +2145,12 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
         }
     }
 
-    DrawCircle(ts*mouse_x + ts/2, ts*mouse_y + ts/8, ts/8, WHITE);
+    //DrawCircle(ts*mouse_x + ts/2, ts*mouse_y + ts/8, ts/8, WHITE);
     EndMode2D();
+
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        DrawCircle(pos.x, pos.y, ts/8, RED);
+    }
 
     // Draw HUD
     Entity* player = &env->entities[human];
@@ -2163,6 +2182,9 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
 
 void close_game_renderer(GameRenderer* renderer) {
     CloseWindow();
+    UnloadImage(renderer->shader_background);
+    UnloadShader(renderer->shader);
+    UnloadShader(renderer->bloom_shader);
     free(renderer);
 }
 
