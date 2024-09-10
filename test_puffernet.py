@@ -6,8 +6,8 @@ from pufferlib.environments.ocean.moba import puffernet
 # TODO: Should probably add a safe mode that type checks input arrays
 # It's user error, but it is a big foot gun
 
-def make_dummy_data(*shape):
-    np.random.seed(42)
+def make_dummy_data(*shape, seed=42):
+    np.random.seed(seed)
     n = np.prod(shape)
     ary = np.random.rand(*shape).astype(np.float32) - 0.5
     return np.ascontiguousarray(ary)
@@ -45,9 +45,9 @@ def test_puffernet_sigmoid(n=1024, epsilon=1e-4):
         assert abs(out_puffer - out_torch) < epsilon
 
 def test_puffernet_linear_layer(batch_size=16, input_size=128, hidden_size=128):
-    input_np = make_dummy_data(batch_size, input_size)
-    weights_np = make_dummy_data(hidden_size, input_size)
-    bias_np = make_dummy_data(hidden_size)
+    input_np = make_dummy_data(batch_size, input_size, seed=42)
+    weights_np = make_dummy_data(hidden_size, input_size, seed=43)
+    bias_np = make_dummy_data(hidden_size, seed=44)
     output_puffer = np.zeros((batch_size, hidden_size), dtype=np.float32)
     puffernet.puf_linear_layer(input_np, weights_np, bias_np, output_puffer,
         batch_size, input_size, hidden_size)
@@ -84,14 +84,14 @@ def test_puffernet_convolution_layer(batch_size=16, in_width=11, in_height=11,
     assert_near(output_puffer, output_torch.numpy())
 
 def test_puffernet_lstm(batch_size=16, input_size=128, hidden_size=128):
-    input_np = make_dummy_data(batch_size, input_size)
-    state_h_np = make_dummy_data(batch_size, hidden_size)
-    state_c_np = make_dummy_data(batch_size, hidden_size)
-    weights_input_np = make_dummy_data(4*hidden_size, input_size)
-    weights_state_np = make_dummy_data(4*hidden_size, hidden_size)
-    bias_input_np = make_dummy_data(4*hidden_size)
-    bias_state_np = make_dummy_data(4*hidden_size)
-    buffer_np = make_dummy_data(4*batch_size*hidden_size)
+    input_np = make_dummy_data(batch_size, input_size, seed=42)
+    state_h_np = make_dummy_data(batch_size, hidden_size, seed=43)
+    state_c_np = make_dummy_data(batch_size, hidden_size, seed=44)
+    weights_input_np = make_dummy_data(4*hidden_size, input_size, seed=45)
+    weights_state_np = make_dummy_data(4*hidden_size, hidden_size, seed=46)
+    bias_input_np = make_dummy_data(4*hidden_size, seed=47)
+    bias_state_np = make_dummy_data(4*hidden_size, seed=48)
+    buffer_np = make_dummy_data(4*batch_size*hidden_size, seed=49)
 
     input_torch = torch.from_numpy(input_np).view(1, batch_size, input_size)
     state_h_torch = torch.from_numpy(state_h_np).view(1, batch_size, hidden_size)

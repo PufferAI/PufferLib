@@ -148,15 +148,15 @@ void _lstm(float* input, float* state_h, float* state_c, float* weights_input,
 
     // Gates
     for (int b=0; b<batch_size; b++) {
-        int inp_offset = b*hidden_size;
+        int hidden_offset = b*hidden_size;
         int b_offset = 4*b*hidden_size;
         for (int i=0; i<hidden_size; i++) {
-            state_c[inp_offset + i] = (
-                buffer[b_offset + hidden_size + i] * input[inp_offset + i]
+            state_c[hidden_offset + i] = (
+                buffer[b_offset + hidden_size + i] * state_c[hidden_offset + i]
                 + buffer[b_offset + i] * buffer[b_offset + 2*hidden_size + i]
             );
-            state_h[inp_offset + i] = (
-                buffer[b_offset + 3*hidden_size + i] * tanh(state_c[inp_offset + i])
+            state_h[hidden_offset + i] = (
+                buffer[b_offset + 3*hidden_size + i] * tanh(state_c[hidden_offset + i])
             );
         }
     }
@@ -197,6 +197,7 @@ void _argmax_multidiscrete(float* input, int* output, int batch_size, int logit_
         for (int a = 0; a < num_actions; a++) {
             int out_adr = b*num_actions + a;
             float max_logit = input[in_adr];
+            output[out_adr] = 0;
             int num_action_types = logit_sizes[a];
             for (int i = 1; i < num_action_types; i++) {
                 float out = input[in_adr + i];
@@ -318,7 +319,6 @@ void conv2d(Conv2D* layer, float* input) {
 
 typedef struct LSTM LSTM;
 struct LSTM {
-    float* output;
     float* state_h;
     float* state_c;
     float* weights_input;
@@ -333,7 +333,6 @@ struct LSTM {
 
 LSTM* make_lstm(Weights* weights, int batch_size, int input_size, int hidden_size) {
     LSTM* layer = calloc(1, sizeof(LSTM));
-    layer->output = calloc(batch_size*hidden_size, sizeof(float));
     layer->state_h = calloc(batch_size*hidden_size, sizeof(float));
     layer->state_c = calloc(batch_size*hidden_size, sizeof(float));
     layer->weights_input = get_weights(weights, 4*hidden_size*input_size);
@@ -348,7 +347,6 @@ LSTM* make_lstm(Weights* weights, int batch_size, int input_size, int hidden_siz
 }
 
 void free_lstm(LSTM* layer) {
-    free(layer->output);
     free(layer->state_h);
     free(layer->state_c);
     free(layer->weights_input);

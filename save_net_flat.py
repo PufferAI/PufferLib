@@ -59,15 +59,15 @@ def test_lstm():
     input_size = 128
     hidden_size = 128
 
-    input = torch.arange(batch_size*input_size).reshape(1, batch_size, -1).float()
+    input = torch.arange(batch_size*input_size).reshape(1, batch_size, -1).float()/ 100000
     state = (
-        torch.arange(batch_size*hidden_size).reshape(1, batch_size, -1).float(),
-        torch.arange(batch_size*hidden_size).reshape(1, batch_size, -1).float()
+        torch.arange(batch_size*hidden_size).reshape(1, batch_size, -1).float()/ 100000,
+        torch.arange(batch_size*hidden_size).reshape(1, batch_size, -1).float() / 100000
     )
-    weights_input = torch.arange(4*hidden_size*input_size).reshape(4*hidden_size, -1).float()
-    weights_state = torch.arange(4*hidden_size*hidden_size).reshape(4*hidden_size, -1).float()
-    bias_input = torch.arange(4*hidden_size).reshape(4*hidden_size).float()
-    bias_state = torch.arange(4*hidden_size).reshape(4*hidden_size).float()
+    weights_input = torch.arange(4*hidden_size*input_size).reshape(4*hidden_size, -1).float()/ 100000
+    weights_state = torch.arange(4*hidden_size*hidden_size).reshape(4*hidden_size, -1).float()/ 100000
+    bias_input = torch.arange(4*hidden_size).reshape(4*hidden_size).float() / 100000
+    bias_state = torch.arange(4*hidden_size).reshape(4*hidden_size).float() / 100000
 
     lstm = torch.nn.LSTM(input_size=128, hidden_size=128, num_layers=1)
     lstm.weight_ih_l0.data = weights_input
@@ -98,10 +98,19 @@ def test_lstm():
     breakpoint()
     print('Output:', output)
 
+def test_model_forward(model):
+    data = torch.arange(10*(11*11*4 + 26)) % 16
+    data[(11*11*4 + 26):] = 0
+    data = data.reshape(10, -1).float()
+    output = model(data)
+    breakpoint()
+    pass
+
 	
 if __name__ == '__main__':
-    test_lstm()
-    #model = torch.load('moba.pt')
+    #test_lstm()
+    model = torch.load('moba.pt', map_location='cpu')
+    test_model_forward(model)
     #test_model(model)
 
-    #save_model_weights(model, 'moba_weights.pt')
+    #save_model_weights(model, 'moba_weights.bin')
