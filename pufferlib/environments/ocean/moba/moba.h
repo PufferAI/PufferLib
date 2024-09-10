@@ -488,6 +488,7 @@ void kill_entity(Map* map, Entity* entity) {
     map->grid[adr] = EMPTY;
     map->pids[adr] = -1;
     entity->pid = -1;
+    entity->target_pid = -1;
     entity->x = 0;
     entity->y = 0;
 }
@@ -506,6 +507,10 @@ void respawn_player(Map* map, Entity* entity) {
     entity->move_modifier = 0;
     entity->move_timer = 0;
     entity->stun_timer = 0;
+    entity->q_timer = 0;
+    entity->w_timer = 0;
+    entity->e_timer = 0;
+    entity->target_pid = -1;
     
     // TODO: Cache noise?
     // Also.. technically can infinite loop?
@@ -525,6 +530,11 @@ int attack(MOBA* env, Entity* player, Entity* target, float damage) {
 
     player->target_pid = target->pid;
     target->is_hit = 1;
+
+    float dist_to_target = l1_distance(player->y, player->x, target->y, target->x);
+    if (dist_to_target > 10) {
+        printf("Attacker %i at %f, %f, target %i at %f, %f, dist %f\n", player->pid, player->y, player->x, target->pid, target->y, target->x, dist_to_target);
+    }
 
     if (damage < target->health) {
         player->damage_dealt += damage;
@@ -659,6 +669,7 @@ int respawn_creep(MOBA* env, Entity* entity, int lane) {
         }
     }
     entity->health = entity->max_health;
+    entity->target_pid = -1;
     entity->waypoint = 1;
     return move_to(env->map, entity, y, x);
 }
@@ -694,6 +705,7 @@ int respawn_neutral(MOBA* env, int idx) {
     neutral->pid = pid;
     neutral->health = neutral->max_health;
     neutral->basic_attack_timer = 0;
+    neutral->target_pid = -1;
 
     // TODO: Clean up spawn regions. Some might be offset and are obscured.
     // Maybe check all valid spawn spots?
@@ -1071,7 +1083,7 @@ int skill_tank_aoe_dot(MOBA* env, Entity* player, Entity* target) {
     if (player->mana < mana_cost)
         return 1;
 
-    if (player_aoe_attack(env, player, player, 2, 25 + 2.0*player->level, 0) == 0) {
+    if (player_aoe_attack(env, player, player, 2, 250 + 2.0*player->level, 0) == 0) {
         player->mana -= mana_cost;
         return 0;
     }
@@ -1161,6 +1173,8 @@ void step_creeps(MOBA* env) {
     if (env->tick % 150 == 0) {
         for (int lane = 0; lane < 6; lane++) {
             for (int i = 0; i < 5; i++) {
+                int creep_pid = creep_offset(env) + env->creep_idx;
+                kill_entity(env->map, &env->entities[creep_pid]);
                 spawn_creep(env, env->creep_idx, lane);
                 env->creep_idx = (env->creep_idx + 1) % env->num_creeps;
             }
@@ -1215,8 +1229,16 @@ void step_towers(MOBA* env) {
         if (tower->basic_attack_timer > 0)
             continue;
 
-        if (env->tick % 3 == 0) // Is this fast enough?
+        if (env->tick % 3 == 0) { // Is this fast enough?
             scan_aoe(env, tower, TOWER_VISION, true, false, false, true, true);
+            if (env->scanned_targets[tower->pid][0] != NULL) {
+                float distance_to_first_scanned = l1_distance(tower->y, tower->x, env->scanned_targets[tower->pid][0]->y, env->scanned_targets[tower->pid][0]->x);
+                if (distance_to_first_scanned > 12) {
+                    printf("Tower %i at %f, %f, target %i at %f, %f, dist %f\n", tower->pid, tower->y, tower->x, env->scanned_targets[tower->pid][0]->pid, env->scanned_targets[tower->pid][0]->y, env->scanned_targets[tower->pid][0]->x, distance_to_first_scanned);
+                }
+            }
+
+        }
 
         Entity* target = nearest_scanned_target(env, tower);
         if (target != NULL) 
@@ -1238,8 +1260,9 @@ void step_players(MOBA* env) {
 
     for (int pid = 0; pid < env->num_agents; pid++) {
         Entity* player = &env->entities[pid];
-        if (rand() % 1024 == 0)
-            respawn_player(env->map, player);
+        // TODO: Is this needed?
+        //if (rand() % 1024 == 0)
+        //    respawn_player(env->map, player);
 
         if (player->mana < player->max_mana)
             player->mana += 2;
@@ -1259,8 +1282,14 @@ void step_players(MOBA* env) {
         int (*actions)[6] = (int(*)[6])env->actions;
         //float vel_y = (actions[pid][0] > 0) ? 1 : -1;
         //float vel_x = (actions[pid][1] > 0) ? 1 : -1;
-        float vel_y = actions[pid][0] / 100.0f;
-        float vel_x = actions[pid][1] / 100.0f;
+        float vel_y = actions[pid][0] / 300.0f;
+        float vel_x = actions[pid][1] / 300.0f;
+        float mag = sqrtf(vel_y*vel_y + vel_x*vel_x);
+        if (mag > 1) {
+            vel_y /= mag;
+            vel_x /= mag;
+        }
+
         int attack_target = actions[pid][2];
         bool use_q = actions[pid][3];
         bool use_w = actions[pid][4];
@@ -1430,6 +1459,8 @@ MOBA* init_moba(int num_agents, int num_creeps, int num_neutrals, int num_towers
             player->team = team;
             player->spawn_y = spawn_y;
             player->spawn_x = spawn_x;
+            player->x = 0;
+            player->y = 0;
             player->move_speed = agent_speed;
             player->basic_attack_cd = 8;
             player->base_damage = 50;
@@ -1542,6 +1573,8 @@ MOBA* init_moba(int num_agents, int num_creeps, int num_neutrals, int num_towers
         tower->team = TOWER_TEAM[idx];
         tower->spawn_y = TOWER_Y[idx];
         tower->spawn_x = TOWER_X[idx];
+        tower->x = 0;
+        tower->y = 0;
         tower->max_health = TOWER_HEALTH[idx];
         tower->damage = TOWER_DAMAGE[idx];
         tower->tier = TOWER_TIER[idx];
@@ -1562,12 +1595,23 @@ MOBA* init_moba(int num_agents, int num_creeps, int num_neutrals, int num_towers
             neutral->team = 2;
             neutral->spawn_y = NEUTRAL_CAMP_Y[camp];
             neutral->spawn_x = NEUTRAL_CAMP_X[camp];
+            neutral->x = 0;
+            neutral->y = 0;
             neutral->xp_on_kill = 35;
             neutral->basic_attack_cd = 5;
             neutral->damage = 22;
             idx++;
         }
     }
+
+    Entity* creep;
+    for (int i = 0; i < env->num_creeps; i++) {
+        creep = &env->entities[creep_offset(env) + i];
+        creep->pid = -1;
+        creep->x = 0;
+        creep->y = 0;
+    }
+
     return env;
 }
 
@@ -1577,6 +1621,11 @@ void reset(MOBA* env) {
     
     env->tick = 0;
     Map* map = env->map;
+
+    // Reset scanned targets
+    for (int i = 0; i < env->num_agents+env->num_creeps+env->num_neutrals+env->num_towers; i++) {
+        env->scanned_targets[i][0] = NULL;
+    }
 
     // Respawn towers
     for (int idx = 0; idx < env->num_towers; idx++) {
@@ -1601,8 +1650,8 @@ void reset(MOBA* env) {
         player->target_pid = -1;
         player->xp = 0;
         player->level = 1;
-        player->x = 0;
-        player->y = 0;
+        //player->x = 0;
+        //player->y = 0;
         respawn_player(env->map, player);
     }
 
@@ -1610,21 +1659,16 @@ void reset(MOBA* env) {
     for (int i = 0; i < env->num_creeps; i++) {
         int pid = creep_offset(env) + i;
         Entity* creep = &env->entities[pid];
-        creep->target_pid = -1;
-        creep->pid = -1;
-        creep->x = 0;
-        creep->y = 0;
+        kill_entity(env->map, creep);
     }
 
     // Despawn neutrals
     for (int i = 0; i < env->num_neutrals; i++) {
         int pid = neutral_offset(env) + i;
         Entity* neutral = &env->entities[pid];
-        neutral->target_pid = -1;
-        neutral->pid = -1;
-        neutral->x = 0;
-        neutral->y = 0;
+        kill_entity(env->map, neutral);
     }
+
     compute_observations(env);
 }
 
@@ -1895,6 +1939,10 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
     int (*actions)[6] = (int(*)[6])env->actions;
     actions[human][0] = 0;
     actions[human][1] = 0;
+    actions[human][2] = 0;
+    actions[human][3] = 0;
+    actions[human][4] = 0;
+    actions[human][5] = 0;
 
     // TODO: better way to null clicks?
     if (renderer->last_click_x != -1 && renderer->last_click_y != -1) {
@@ -1903,19 +1951,14 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
         float dy = dest_y - my_player->y;
         float dx = dest_x - my_player->x;
 
-        // Rescale vector if norm > 1
         float mag = sqrtf(dy*dy + dx*dx);
-        if (mag > 1) {
-            dy /= mag;
-            dx /= mag;
-        }
-        if (mag < 0.05) {
+        if (mag < 1) {
             renderer->last_click_x = -1;
             renderer->last_click_y = -1;
         }
-
-        actions[human][0] = 100*dy;
-        actions[human][1] = 100*dx;
+       
+        actions[human][0] = 300*dy;
+        actions[human][1] = 300*dx;
     }
     if (IsKeyDown(KEY_ESCAPE)) {
         return 1;
@@ -1968,12 +2011,17 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
             }
 
             int adr = map_offset(map, y, x);
+            int pid = map->pids[adr];
+            if (pid != -1) {
+                DrawRectangle(x*ts, y*ts, ts, ts, RED);
+            }
+
             unsigned char tile = map->grid[adr];
             if (tile == EMPTY || tile == WALL) {
                 continue;
             }
        
-            int pid = map->pids[adr];
+            pid = map->pids[adr];
             if (pid == -1) {
                 DrawRectangle(x*ts, y*ts, ts, ts, RED);
             }
