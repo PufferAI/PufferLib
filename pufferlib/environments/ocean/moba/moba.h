@@ -322,11 +322,13 @@ void compute_observations(MOBA* env) {
     unsigned char (*obs_map)[11][11][4] = (unsigned char(*)[11][11][4])env->observations_map;
     unsigned char (*obs_extra)[26] = (unsigned char(*)[26])env->observations_extra;
 
-    // TODO: Zero out
-    //self.observations_map[:] = 0
+    // TODO: See if this is faster than memset
+    for (int i = 0; i < env->num_agents*11*11*4; i++)
+        env->observations_map[i] = 0;
 
     // Probably safe to not clear this
-    //self.observations_extra[:] = 0
+    for (int i = 0; i < env->num_agents*26; i++)
+        env->observations_extra[i] = 0;
 
     int vis = env->vision_range;
     Map* map = env->map;
@@ -1112,7 +1114,6 @@ int skill_carry_retreat_slow(MOBA* env, Entity* player, Entity* target) {
 
     int err = 1;
     for (int i = 0; i < 3; i++) {
-        printf("target: %i\n", target->pid);
         if (target == NULL || player->mana < mana_cost)
             return err;
 
@@ -1256,6 +1257,8 @@ void step_players(MOBA* env) {
             continue;
 
         int (*actions)[6] = (int(*)[6])env->actions;
+        //float vel_y = (actions[pid][0] > 0) ? 1 : -1;
+        //float vel_x = (actions[pid][1] > 0) ? 1 : -1;
         float vel_y = actions[pid][0] / 100.0f;
         float vel_x = actions[pid][1] / 100.0f;
         int attack_target = actions[pid][2];

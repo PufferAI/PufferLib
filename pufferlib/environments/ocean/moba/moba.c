@@ -81,9 +81,9 @@ void forward(MOBANet* net, unsigned char* env_obs_2d, unsigned char* env_obs_1d,
                 int elem_offset = 4*(i*11 + j);
                 int one_hot_idx = env_obs_2d[b_offset + elem_offset];
                 obs_2d[b][one_hot_idx][i][j] = 1;
-                obs_2d[b][16][i][j] = env_obs_2d[b_offset + 2*elem_offset] / 255.0f;
-                obs_2d[b][17][i][j] = env_obs_2d[b_offset + 3*elem_offset] / 255.0f;
-                obs_2d[b][18][i][j] = env_obs_2d[b_offset + 4*elem_offset] / 255.0f;
+                obs_2d[b][16][i][j] = env_obs_2d[b_offset + elem_offset+1] / 255.0f;
+                obs_2d[b][17][i][j] = env_obs_2d[b_offset + elem_offset+2] / 255.0f;
+                obs_2d[b][18][i][j] = env_obs_2d[b_offset + elem_offset+3] / 255.0f;
             }
         }
         for (int i = 0; i < 26; i++) {
@@ -91,23 +91,88 @@ void forward(MOBANet* net, unsigned char* env_obs_2d, unsigned char* env_obs_1d,
         }
     }
 
+    /*
+    printf("obs_2d: ");
+    for (int i = 0; i < 11*11*19; i++) {
+        printf("%f ", net->obs_2d[i]);
+    }
+    printf("\n");
+    */
+
+    //printf("obs_1d: %f\n", obs_1d[0][0]);
     conv2d(net->conv1, net->obs_2d);
+    //printf("conv1: %f\n", net->conv1->output[0]);
     relu(net->relu1, net->conv1->output);
+    //printf("relu1: %f\n", net->relu1->output[0]);
     conv2d(net->conv2, net->relu1->output);
+    //printf("conv2: %f\n", net->conv2->output[0]);
+    /*
+    printf("cnn: ");
+    for (int i = 0; i < 32; i++) {
+        printf("%f ", net->conv2->output[i]);
+    }
+    printf("\n");
+    */
 
     linear(net->flat, net->obs_1d);
+    /*
+    for (int i = 0; i < 32; i++) {
+        printf("%f ", net->flat->output[i]);
+    }
+    printf("\n");
+    */
 
     cat_dim1(net->cat, net->conv2->output, net->flat->output);
+    //printf("cat: %f\n", net->cat->output[0]);
     relu(net->relu2, net->cat->output);
+    //printf("relu2: %f\n", net->relu2->output[0]);
     linear(net->proj, net->relu2->output);
+    //printf("proj: %f\n", net->proj->output[0]);
     relu(net->relu3, net->proj->output);
-    
-    lstm(net->lstm, net->proj->output);
+    //printf("relu3: %f\n", net->relu3->output[0]);
 
-    linear(net->actor, net->lstm->output);
-    linear(net->value_fn, net->lstm->output);
+    /*
+    for (int i=0; i<128; i++) {
+        printf("%f ", net->relu3->output[i]);
+    }
+    */
+    
+    lstm(net->lstm, net->relu3->output);
+    //printf("lstm: %f\n", net->lstm->state_h[0]);
+    /*
+    for (int i=0; i<128; i++) {
+        printf("%f ", net->lstm->state_h[i]);
+    }
+    */
+
+    linear(net->actor, net->lstm->state_h);
+    //printf("actor: %f\n", net->actor->output[0]);
+    linear(net->value_fn, net->lstm->state_h);
+    //printf("value_fn: %f\n", net->value_fn->output[0]);
 
     argmax_multidiscrete(net->multidiscrete, net->actor->output, actions);
+    /*
+    for (int i = 0; i < net->num_agents; i++) {
+        printf("Actions for agent %i: ", i);
+        for (int j = 0; j < 6; j++) {
+            printf("%i ", actions[i*6 + j]);
+        }
+        printf("\n");
+    }
+    */
+
+    for (int i = 0; i < net->num_agents; i++) {
+        /*
+        printf("Setting actions for agent %i: ", i);
+        for (int j = 0; j < 6; j++) {
+            printf("%i ", actions[i*6 + j]);
+        }
+        printf("\n");
+        */
+
+        actions[i*6] = 100*(actions[i*6] - 3);
+        actions[i*6 + 1] = 100*(actions[i*6 + 1] - 3);
+    }
 }
 
 int main() {
@@ -136,6 +201,16 @@ int main() {
     while (!WindowShouldClose()) {
         if (frame % 12 == 0) {
             step(env);
+
+            /*
+            for (int i = 0; i < (11*11*4+26); i++) {
+                if (i < 11*11*4) {
+                    env->observations_map[i] = i%16;
+                } else {
+                    env->observations_extra[i-11*11*4] = i%16;
+                }
+            }
+            */
             forward(net, env->observations_map, env->observations_extra, env->actions);
         }
         render_game(renderer, env, frame);
