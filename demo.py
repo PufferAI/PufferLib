@@ -94,6 +94,7 @@ def load_config(parser, config_path='config.yaml'):
     parser.parse_args()
     wandb_name = make_name or env_name
     config['env_name'] = env_name
+    config['resume'] = args.exp_id is not None
     config['exp_id'] = args.exp_id or args.env + '-' + str(uuid.uuid4())[:8]
     return wandb_name, pkg_name, pufferlib.namespace(**config), env_module, make_env, make_policy
    
@@ -182,6 +183,8 @@ def train(args, env_module, make_env):
 
     if args.backend == 'clean_pufferl':
         data = clean_pufferl.create(train_config, vecenv, policy, wandb=args.wandb)
+        if args.resume:
+            clean_pufferl.try_load_checkpoint(data)
 
         while data.global_step < args.train.total_timesteps:
             try:
