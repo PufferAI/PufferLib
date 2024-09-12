@@ -5,6 +5,10 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+
+// xxd -i game_map.npy > game_map.h
+#include "game_map.h"
+
 #include "raylib.h"
 
 #if defined(PLATFORM_DESKTOP)
@@ -269,11 +273,9 @@ struct MOBA {
     int tick;
 
     Map* map;
-    unsigned char* orig_grid;
     unsigned char* ai_paths;
     int* ai_path_buffer;
-    unsigned char* observations_map;
-    unsigned char* observations_extra;
+    unsigned char* observations;
     int* actions;
     Entity* entities;
 
@@ -299,41 +301,40 @@ struct MOBA {
 };
 
 void free_moba(MOBA* env) {
-    free(env->rewards);
-    free(env->sum_rewards);
-    free(env->norm_rewards);
-    free(env->map->pids);
     free(env->map->grid);
-    free(env->orig_grid);
     free(env->map);
-    free(env->ai_path_buffer);
-    free(env->ai_paths);
-    free(env->observations_map);
-    free(env->observations_extra);
-    free(env->actions);
-    free(env->entities);
     free(env->rng->rng);
     free(env->rng);
     free(env);
 }
- 
+
+void free_allocated_moba(MOBA* env) {
+    free(env->rewards);
+    free(env->sum_rewards);
+    free(env->norm_rewards);
+    free(env->map->pids);
+    free(env->ai_path_buffer);
+    free(env->ai_paths);
+    free(env->observations);
+    free(env->actions);
+    free(env->entities);
+    free_moba(env);
+}
+
 void compute_observations(MOBA* env) {
-    // Does this copy?
-    unsigned char (*obs_map)[11][11][4] = (unsigned char(*)[11][11][4])env->observations_map;
-    unsigned char (*obs_extra)[26] = (unsigned char(*)[26])env->observations_extra;
-
     // TODO: See if this is faster than memset
-    for (int i = 0; i < env->num_agents*11*11*4; i++)
-        env->observations_map[i] = 0;
-
-    // Probably safe to not clear this
-    for (int i = 0; i < env->num_agents*26; i++)
-        env->observations_extra[i] = 0;
+    for (int i = 0; i < env->num_agents*(11*11*4 + 26); i++)
+        env->observations[i] = 0;
 
     int vis = env->vision_range;
     Map* map = env->map;
 
+    unsigned char (*observations)[11*11*4 + 26] = (unsigned char(*)[11*11*4 + 26])env->observations;
     for (int pid = 0; pid < env->num_agents; pid++) {
+        // Does this copy?
+        unsigned char (*obs_map)[11][4] = (unsigned char(*)[11][4])&observations[pid];
+        unsigned char* obs_extra = &observations[pid][11*11*4];
+
         Entity* player = &env->entities[pid];
         Reward* reward = &env->rewards[pid];
 
@@ -341,30 +342,30 @@ void compute_observations(MOBA* env) {
         int x = player->x;
 
         // TODO: Add bounds debug checks asserts
-        obs_extra[pid][0] = 2*x;
-        obs_extra[pid][1] = 2*y;
-        obs_extra[pid][2] = 255*player->level/30.0;
-        obs_extra[pid][3] = 255*player->health/player->max_health;
-        obs_extra[pid][4] = 255*player->mana/player->max_mana;
-        obs_extra[pid][5] = player->damage;
-        obs_extra[pid][6] = 100*player->move_speed;
-        obs_extra[pid][7] = player->move_modifier*100;
-        obs_extra[pid][8] = 2*player->stun_timer;
-        obs_extra[pid][9] = 2*player->move_timer;
-        obs_extra[pid][10] = 2*player->q_timer;
-        obs_extra[pid][11] = 2*player->w_timer;
-        obs_extra[pid][12] = 2*player->e_timer;
-        obs_extra[pid][13] = 50*player->basic_attack_timer;
-        obs_extra[pid][14] = 50*player->basic_attack_cd;
-        obs_extra[pid][15] = 255*player->is_hit;
-        obs_extra[pid][16] = 255*player->team;
-        obs_extra[pid][17 + player->hero_type] = 255;
+        obs_extra[0] = 2*x;
+        obs_extra[1] = 2*y;
+        obs_extra[2] = 255*player->level/30.0;
+        obs_extra[3] = 255*player->health/player->max_health;
+        obs_extra[4] = 255*player->mana/player->max_mana;
+        obs_extra[5] = player->damage;
+        obs_extra[6] = 100*player->move_speed;
+        obs_extra[7] = player->move_modifier*100;
+        obs_extra[8] = 2*player->stun_timer;
+        obs_extra[9] = 2*player->move_timer;
+        obs_extra[10] = 2*player->q_timer;
+        obs_extra[11] = 2*player->w_timer;
+        obs_extra[12] = 2*player->e_timer;
+        obs_extra[13] = 50*player->basic_attack_timer;
+        obs_extra[14] = 50*player->basic_attack_cd;
+        obs_extra[15] = 255*player->is_hit;
+        obs_extra[16] = 255*player->team;
+        obs_extra[17 + player->hero_type] = 255;
 
         // Assumes scaled between -1 and 1, else overflows
-        obs_extra[pid][22] = 127*reward->death + 128;
-        obs_extra[pid][23] = 25*reward->xp;
-        obs_extra[pid][24] = 127*reward->distance + 128;
-        obs_extra[pid][25] = 70*reward->tower;
+        obs_extra[22] = 127*reward->death + 128;
+        obs_extra[23] = 25*reward->xp;
+        obs_extra[24] = 127*reward->distance + 128;
+        obs_extra[25] = 70*reward->tower;
 
         for (int dy = -vis; dy <= vis; dy++) {
             for (int dx = -vis; dx <= vis; dx++) {
@@ -374,15 +375,19 @@ void compute_observations(MOBA* env) {
                 int ob_y = dy + vis;
 
                 int adr = map_offset(map, yy, xx);
-                obs_map[pid][ob_y][ob_x][0] = map->grid[adr];
+                obs_map[ob_y][ob_x][0] = map->grid[adr];
+                if (map->grid[adr] > 15) {
+                    printf("Invalid map value: %i at %i, %i\n", map->grid[adr], yy, xx);
+                    exit(1);
+                }
                 int target_pid = env->map->pids[adr];
                 if (target_pid == -1)
                     continue;
 
                 Entity* target = &env->entities[target_pid];
-                obs_map[pid][ob_y][ob_x][1] = 255*target->health/target->max_health;
-                obs_map[pid][ob_y][ob_x][2] = 255*target->mana/target->max_mana;
-                obs_map[pid][ob_y][ob_x][3] = target->level/30.0;
+                obs_map[ob_y][ob_x][1] = 255*target->health/target->max_health;
+                obs_map[ob_y][ob_x][2] = 255*target->mana/target->max_mana;
+                obs_map[ob_y][ob_x][3] = target->level/30.0;
             }
         }
     }
@@ -1377,8 +1382,10 @@ unsigned char* read_file(char* filename) {
     return array;
 }
 
-MOBA* init_moba(int num_agents, int num_creeps, int num_neutrals, int num_towers,
-        int vision_range, float agent_speed, bool discretize,
+MOBA* init_moba(Reward* rewards, float* sum_rewards, float* norm_rewards, int* pids,
+        unsigned char* ai_paths, int* ai_path_buffer, unsigned char* observations,
+        int* actions, Entity* entities, int num_agents, int num_creeps, int num_neutrals,
+        int num_towers, int vision_range, float agent_speed, bool discretize,
         float reward_death, float reward_xp, float reward_distance, float reward_tower) {
     MOBA* env = (MOBA*)calloc(1, sizeof(MOBA));
 
@@ -1402,33 +1409,25 @@ MOBA* init_moba(int num_agents, int num_creeps, int num_neutrals, int num_towers
     env->radiant_victories = 0;
     env->dire_victories = 0;
 
-    env->rewards = calloc(env->num_agents, sizeof(Reward));
-    env->sum_rewards = calloc(env->num_agents, sizeof(float));
-    env->norm_rewards = calloc(env->num_agents, sizeof(float));
+    env->rewards = rewards;
+    env->sum_rewards = sum_rewards;
+    env->norm_rewards = norm_rewards;
 
     env->map = (Map*)calloc(1, sizeof(Map));
-    env->map->grid = read_file("game_map.npy");
-    env->orig_grid = read_file("game_map.npy"); // TODO: Remove
+    env->map->grid = calloc(128*128, sizeof(unsigned char));
+    memcpy(env->map->grid, game_map_npy, 128*128);
+    //read_file("game_map.npy");
+    if (env->map->grid == NULL) {
+        printf("Failed to load game map\n");
+        exit(1);
+    }
     env->map->width = 128;
     env->map->height = 128;
-    env->map->pids = calloc(env->map->width*env->map->height, sizeof(int));
-    for (int i = 0; i < env->map->width*env->map->height; i++)
-        env->map->pids[i] = -1;
+    env->map->pids = pids;
 
     // TODO: repeated from precomputation
-    env->ai_paths = calloc(128*128*128*128, 1);
-    env->ai_path_buffer = calloc(3*8*128*128, sizeof(int));
-    int N = 128;
-    for (int r = 0; r < N; r++) {
-        for (int c = 0; c < N; c++) {
-            for (int rr = 0; rr < N; rr++) {
-                for (int cc = 0; cc < N; cc++) {
-                    int adr = ai_offset(r, c, rr, cc);
-                    env->ai_paths[adr] = 255;
-                }
-            }
-        }
-    }
+    env->ai_paths = ai_paths;
+    env->ai_path_buffer = ai_path_buffer;
     //env->ai_paths = precompute_pathing(env->map);
     //env->ai_paths = read_file("ai_paths.npy");
 
@@ -1439,10 +1438,9 @@ MOBA* init_moba(int num_agents, int num_creeps, int num_neutrals, int num_towers
     }
 
     // TODO: Don't hardcode sizes
-    env->observations_map = calloc(env->num_agents*121*121*4, sizeof(unsigned char));
-    env->observations_extra = calloc(env->num_agents*26, sizeof(unsigned char));
-    env->actions = calloc(env->num_agents*6, sizeof(int));
-    env->entities = calloc(env->num_entities, sizeof(Entity));
+    env->observations = observations;
+    env->actions = actions;
+    env->entities = entities;
 
     env->rng = (CachedRNG*)calloc(1, sizeof(CachedRNG));
     env->rng->rng_n = 10000;
@@ -1626,8 +1624,44 @@ MOBA* init_moba(int num_agents, int num_creeps, int num_neutrals, int num_towers
     return env;
 }
 
+MOBA* allocate_moba(int num_agents, int num_creeps, int num_neutrals, int num_towers,
+        int vision_range, float agent_speed, bool discretize,
+        float reward_death, float reward_xp, float reward_distance, float reward_tower) {
+
+    Reward* rewards = calloc(num_agents, sizeof(Reward));
+    float* sum_rewards = calloc(num_agents, sizeof(float));
+    float* norm_rewards = calloc(num_agents, sizeof(float));
+
+    int* pids = calloc(128*128, sizeof(int));
+    for (int i = 0; i < 128*128; i++)
+        pids[i] = -1;
+
+    // TODO: repeated from precomputation
+    unsigned char* ai_paths = calloc(128*128*128*128, 1);
+    int* ai_path_buffer = calloc(3*8*128*128, sizeof(int));
+    int N = 128;
+    for (int r = 0; r < N; r++) {
+        for (int c = 0; c < N; c++) {
+            for (int rr = 0; rr < N; rr++) {
+                for (int cc = 0; cc < N; cc++) {
+                    int adr = ai_offset(r, c, rr, cc);
+                    ai_paths[adr] = 255;
+                }
+            }
+        }
+    }
+
+    // TODO: Don't hardcode sizes
+    unsigned char* observations = calloc(num_agents*(11*11*4 + 26), sizeof(unsigned char));
+    int* actions = calloc(num_agents*6, sizeof(int));
+    Entity* entities = calloc(num_agents+num_creeps+num_neutrals+num_towers, sizeof(Entity));
+
+    return init_moba(rewards, sum_rewards, norm_rewards, pids, ai_paths, ai_path_buffer,
+        observations, actions, entities, num_agents, num_creeps, num_neutrals, num_towers,
+        vision_range, agent_speed, discretize, reward_death, reward_xp, reward_distance, reward_tower);
+}
+ 
 void reset(MOBA* env) {
-    //self.grid[:] = self.orig_grid
     //map->pids[:] = -1
     
     env->tick = 0;
