@@ -1,4 +1,4 @@
-from setuptools import find_packages, setup
+from setuptools import find_packages, setup, Extension
 from Cython.Build import cythonize
 import numpy
 
@@ -246,15 +246,23 @@ setup(
         "pufferlib/environments/ocean/grid/c_grid.pyx",
         "pufferlib/environments/ocean/snake/c_snake.pyx",
         "pufferlib/environments/ocean/moba/c_moba.pyx",
-        "pufferlib/environments/ocean/moba/cy_moba.pyx",
+        Extension("pufferlib.environments.ocean.moba.cy_moba",
+            ["pufferlib/environments/ocean/moba/cy_moba.pyx"],#, "pufferlib/environments/ocean/moba/game_data_npy."],
+            include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
+            library_dirs=['raylib-5.0_linux_amd64/lib'],
+            libraries=["raylib"],
+            runtime_library_dirs=["raylib-5.0_linux_amd64/lib"],
+            extra_compile_args=['-DPLATFORM_DESKTOP'],
+        ),
+        #"pufferlib/environments/ocean/moba/cy_moba.pyx",
+        "pufferlib/environments/ocean/moba/puffernet.pyx",
         "pufferlib/environments/ocean/moba/c_precompute_pathing.pyx",
     ], 
        #nthreads=6,
        #annotate=True,
        #compiler_directives={'profile': True},# annotate=True
     ),
-    extra_compile_args=['-O3', '-march=native'],
-    include_dirs=[numpy.get_include()],
+    include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
     python_requires=">=3.8",
     license="MIT",
     author="Joseph Suarez",
