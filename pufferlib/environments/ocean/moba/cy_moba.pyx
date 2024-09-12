@@ -162,8 +162,20 @@ cdef extern from "moba.h":
         int target_pid;
         int attack_aoe;
 
+    ctypedef struct GameRenderer
+
+    GameRenderer* init_game_renderer(int cell_size, int width, int height)
+    int render_game(GameRenderer* renderer, MOBA* env, int frame)
+    void close_game_renderer(GameRenderer* renderer)
+
     ctypedef struct Reward
-    MOBA* init_moba()
+    MOBA* init_moba(Reward* rewards, float* sum_rewards, float* norm_rewards, int* pids,
+        unsigned char* ai_paths, int* ai_path_buffer, unsigned char* observations,
+        int* actions, Entity* entities, int num_agents, int num_creeps, int num_neutrals,
+        int num_towers, int vision_range, float agent_speed, bint discretize,
+        float reward_death, float reward_xp, float reward_distance, float reward_tower)
+    void free_moba(MOBA* env)
+ 
     int creep_offset(MOBA* moba)
     int neutral_offset(MOBA* moba)
     int tower_offset(MOBA* moba)
@@ -171,6 +183,7 @@ cdef extern from "moba.h":
 
     void reset(MOBA* env)
     void step(MOBA* env)
+    void randomize_tower_hp(MOBA* env)
 
 cpdef entity_dtype():
     '''Make a dummy entity to get the dtype'''
@@ -192,41 +205,40 @@ def step_all(list envs):
   
 cdef class Environment:
     cdef MOBA* env
+    cdef GameRenderer* renderer
 
-    def __init__(self, cnp.ndarray grid, cnp.ndarray ai_paths,
-            cnp.ndarray pids, cnp.ndarray entities, dict entity_data,
-            cnp.ndarray player_obs, cnp.ndarray observations_map, cnp.ndarray observations_extra,
-            cnp.ndarray rewards, cnp.ndarray sum_rewards, cnp.ndarray norm_rewards, cnp.ndarray actions,
-            int num_agents, int num_creeps, int num_neutrals,
-            int num_towers, int vision_range, float agent_speed, bint discretize, float reward_death,
-            float reward_xp, float reward_distance, float reward_tower):
+    def __init__(self, cnp.ndarray grid, cnp.ndarray ai_paths, cnp.ndarray ai_path_buffer,
+            cnp.ndarray pids, cnp.ndarray entities, dict entity_data, cnp.ndarray player_obs,
+            cnp.ndarray observations, cnp.ndarray rewards, cnp.ndarray sum_rewards,
+            cnp.ndarray norm_rewards, cnp.ndarray actions, int num_agents, int num_creeps,
+            int num_neutrals, int num_towers, int vision_range, float agent_speed,
+            bint discretize, float reward_death, float reward_xp, float reward_distance,
+            float reward_tower):
 
-        cdef MOBA* env = init_moba(num_agents, num_creeps, num_neutrals,
-            num_towers, vision_range, agent_speed, discretize, reward_death,
-            reward_xp, reward_distance, reward_tower)
-        self.env = env
+        self.env = init_moba(
+            <Reward*> rewards.data, <float*> sum_rewards.data, <float*> norm_rewards.data,
+            <int*> pids.data, <unsigned char*> ai_paths.data, <int*> ai_path_buffer.data,
+            <unsigned char*> observations.data, <int*> actions.data, <Entity*> entities.data,
+            num_agents, num_creeps, num_neutrals, num_towers, vision_range, agent_speed,
+            discretize, reward_death, reward_xp, reward_distance, reward_tower)
 
-        # TODO: COPY THE GRID!!!
-        cdef cnp.ndarray grid_copy = grid.copy()
-        env.orig_grid = <unsigned char*> grid_copy.data
-        env.map.grid = <unsigned char*> grid.data
-        env.map.pids = <int*> pids.data
+        self.renderer = NULL
 
-        env.ai_paths = <unsigned char*> ai_paths.data
-        env.entities = <Entity*> entities.data
-        env.observations_map = <unsigned char*> observations_map.data
-        env.observations_extra = <unsigned char*> observations_extra.data
-        env.rewards = <Reward*> rewards.data
-        env.sum_rewards = <float*> sum_rewards.data
-        env.norm_rewards = <float*> norm_rewards.data
-        env.actions = <int*> actions.data
+    @property
+    def total_towers_taken(self):
+        return self.env.total_towers_taken
 
-        # Hey, change the scanned_targets size to match!
-        #assert num_agents + num_creeps + num_neutrals + num_towers <= 256
-        #assert self.obs_size * self.obs_size <= 121
+    @property
+    def total_levels_gained(self):
+        return self.env.total_levels_gained
 
-        env.tick = 0
+    @property
+    def radiant_victories(self):
+        return self.env.radiant_victories
 
+    @property
+    def dire_victories(self):
+        return self.env.dire_victories
 
     def reset(self):
         reset(self.env)
@@ -234,3 +246,25 @@ cdef class Environment:
     def step(self):
         step(self.env)
 
+    def randomize_tower_hp(self):
+        randomize_tower_hp(self.env)
+
+    def render(self, int tick):
+        if self.renderer == NULL:
+            import os
+            path = os.path.abspath(os.getcwd())
+            print(path)
+            c_path = os.path.join(os.sep, *__file__.split('/')[:-1])
+            print(c_path)
+            os.chdir(c_path)
+            self.renderer = init_game_renderer(32, 41, 23)
+            os.chdir(path)
+
+        render_game(self.renderer, self.env, tick)
+
+    def close(self):
+        if self.renderer != NULL:
+            close_game_renderer(self.renderer)
+            self.renderer = NULL
+
+        free_moba(self.env)

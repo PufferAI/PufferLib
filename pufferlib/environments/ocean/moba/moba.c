@@ -51,24 +51,24 @@ void free_mobanet(MOBANet* net) {
     free_linear(net->value_fn);
 }
 
-void forward(MOBANet* net, unsigned char* env_obs_2d, unsigned char* env_obs_1d, int* actions) {
+void forward(MOBANet* net, unsigned char* observations, int* actions) {
     memset(net->obs_2d, 0, net->num_agents*11*11*19*sizeof(float));
     float (*obs_2d)[19][11][11] = (float (*)[19][11][11])net->obs_2d;
     float (*obs_1d)[26] = (float (*)[26])net->obs_1d;
     for (int b = 0; b < net->num_agents; b++) {
-        int b_offset = b*(11*11*4);
+        int b_offset = b*(11*11*4 + 26);
         for (int i = 0; i < 11; i++) {
             for (int j = 0; j < 11; j++) {
                 int elem_offset = 4*(i*11 + j);
-                int one_hot_idx = env_obs_2d[b_offset + elem_offset];
+                int one_hot_idx = observations[b_offset + elem_offset];
                 obs_2d[b][one_hot_idx][i][j] = 1;
-                obs_2d[b][16][i][j] = env_obs_2d[b_offset + elem_offset+1] / 255.0f;
-                obs_2d[b][17][i][j] = env_obs_2d[b_offset + elem_offset+2] / 255.0f;
-                obs_2d[b][18][i][j] = env_obs_2d[b_offset + elem_offset+3] / 255.0f;
+                obs_2d[b][16][i][j] = observations[b_offset + elem_offset+1] / 255.0f;
+                obs_2d[b][17][i][j] = observations[b_offset + elem_offset+2] / 255.0f;
+                obs_2d[b][18][i][j] = observations[b_offset + elem_offset+3] / 255.0f;
             }
         }
         for (int i = 0; i < 26; i++) {
-            obs_1d[b][i] = env_obs_1d[b*26 + i] / 255.0f;
+            obs_1d[b][i] = observations[b_offset + 11*11*4 + i] / 255.0f;
         }
     }
 
@@ -111,7 +111,7 @@ int main() {
     Weights* weights = load_weights("moba_weights.bin", 168856);
     MOBANet* net = init_mobanet(weights, num_agents);
 
-    MOBA* env = init_moba(num_agents, num_creeps, num_neutrals, num_towers, vision_range,
+    MOBA* env = allocate_moba(num_agents, num_creeps, num_neutrals, num_towers, vision_range,
         agent_speed, discretize, reward_death, reward_xp, reward_distance, reward_tower);
 
     GameRenderer* renderer = init_game_renderer(32, 41, 23);
@@ -121,14 +121,14 @@ int main() {
     while (!WindowShouldClose()) {
         if (frame % 12 == 0) {
             step(env);
-            forward(net, env->observations_map, env->observations_extra, env->actions);
+            forward(net, env->observations, env->actions);
         }
         render_game(renderer, env, frame);
         frame = (frame + 1) % 12;
     }
     free_mobanet(net);
     free_weights(weights);
-    free_moba(env);
+    free_allocated_moba(env);
     close_game_renderer(renderer);
     return 0;
 }
