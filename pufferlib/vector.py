@@ -616,9 +616,9 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
             if batch_size is None:
                 batch_size = num_envs
 
-            #if batch_size % envs_per_worker != 0:
-            #    raise APIUsageError(
-            #        'batch_size must be divisible by (num_envs / num_workers)')
+            if batch_size % envs_per_worker != 0:
+                raise APIUsageError(
+                    'batch_size must be divisible by (num_envs / num_workers)')
         
  
     if env_args is None:
@@ -695,7 +695,7 @@ def check_envs(envs, driver):
         if atn_space != driver_atn:
             raise APIUsageError(f'\n{atn_space}\n{driver_atn} atn space mismatch')
 
-def autotune(env_creator, batch_size, max_envs=384, model_forward_s=0.0,
+def autotune(env_creator, batch_size, max_envs=194, model_forward_s=0.0,
         max_env_ram_gb=32, max_batch_vram_gb=0.05, time_per_test=5): 
     '''Determine the optimal vectorization parameters for your system'''
     # TODO: fix multiagent
