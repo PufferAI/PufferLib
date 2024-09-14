@@ -12,9 +12,9 @@ def make_tactical(num_envs=200, render_mode='rgb_array'):
     from .tactical import tactical
     return tactical.PufferTactical(num_envs=num_envs, render_mode=render_mode)
 
-def make_highway(num_envs=200, render_mode='rgb_array'):
-    from .highway import highway
-    return highway.PufferHighway(num_envs=num_envs, render_mode=render_mode)
+def make_pong(num_envs=1):
+    from .pong import pong
+    return pong.MyPong(num_envs=num_envs)
 
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
@@ -173,6 +173,7 @@ def make_multiagent(**kwargs):
 
 MAKE_FNS = {
     'moba': make_moba,
+    'my_pong': make_pong,
     'foraging': make_foraging,
     'predator_prey': make_predator_prey,
     'group': make_group,

@@ -133,19 +133,29 @@ class MOBA(nn.Module):
 
     def encode_observations(self, observations):
         cnn_features = observations[:, :-26].view(-1, 11, 11, 4).long()
+        if cnn_features[:, :, :, 0].max() > 15:
+            print('Invalid map value:', cnn_features[:, :, :, 0].max())
+            breakpoint()
+            exit(1)
         map_features = F.one_hot(cnn_features[:, :, :, 0], 16).permute(0, 3, 1, 2).float()
         extra_map_features = (cnn_features[:, :, :, -3:].float() / 255).permute(0, 3, 1, 2)
         cnn_features = torch.cat([map_features, extra_map_features], dim=1)
+        #print('observations 2d: ', map_features[0].cpu().numpy().tolist())
         cnn_features = self.cnn(cnn_features)
+        #print('cnn features: ', cnn_features[0].detach().cpu().numpy().tolist())
 
         flat_features = observations[:, -26:].float() / 255.0
+        #print('observations 1d: ', flat_features[0, 0])
         flat_features = self.flat(flat_features)
+        #print('flat features: ', flat_features[0].detach().cpu().numpy().tolist())
 
         features = torch.cat([cnn_features, flat_features], dim=1)
         features = F.relu(self.proj(F.relu(features)))
+        #print('features: ', features[0].detach().cpu().numpy().tolist())
         return features, None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
+        #print('lstm: ', flat_hidden[0].detach().cpu().numpy().tolist())
         value = self.value_fn(flat_hidden)
         if self.is_continuous:
             mean = self.decoder_mean(flat_hidden)
@@ -157,4 +167,8 @@ class MOBA(nn.Module):
         else:
             action = self.actor(flat_hidden)
             action = torch.split(action, self.atn_dim, dim=1)
+
+            #argmax_samples = [torch.argmax(a, dim=1).detach().cpu().numpy().tolist() for a in action]
+            #print('argmax samples: ', argmax_samples)
+
             return action, value
