@@ -39,16 +39,20 @@ def rollout(envs, policy, opponents, num_games, timeout=180, render=False):
     num_envs = len(envs.c_envs)
     num_opponents = len(opponents)
     envs_per_opponent = num_envs // num_opponents
-    my_state = None
+    my_states = [None for _ in range(num_opponents)]
     opp_states = [None for _ in range(num_opponents)]
     prev_radiant_victories = [c.radiant_victories for c in envs.c_envs]
     prev_dire_victories = [c.dire_victories for c in envs.c_envs]
-
     scores = []
 
-    slice_idxs = torch.arange(10*num_envs).reshape(num_envs, 10).cuda()
-    my_idxs = slice_idxs[:, :5].reshape(num_envs*5)
-    opp_idxs = slice_idxs[:, 5:].reshape(num_envs*5).split(5*envs_per_opponent)
+    atn_shape = (10*num_envs, len(envs.action_space.nvec))
+    actions = torch.zeros(atn_shape, dtype=torch.int64).cuda()
+    actions_struct = actions.view(num_opponents, envs_per_opponent, 2, 5, len(envs.action_space.nvec))
+
+    slice_idxs = torch.arange(10*num_envs).reshape(num_opponents, envs_per_opponent, 2, 5).cuda()
+    flat_teams = np.random.randint(0, 2, num_envs)
+    team_assignments = torch.from_numpy(flat_teams.reshape(num_opponents, envs_per_opponent)).cuda()
+    arange = torch.arange(envs_per_opponent).cuda()
 
     games_played = 0
     while games_played < num_games and time.time() - start < timeout:
@@ -56,35 +60,24 @@ def rollout(envs, policy, opponents, num_games, timeout=180, render=False):
         #    env.render()
 
         step += 1
-        opp_actions = []
         with torch.no_grad():
             obs = torch.as_tensor(obs).cuda()
-            my_obs = obs[my_idxs]
-
-            # Parallelize across opponents
-            if hasattr(policy, 'lstm'):
-                my_actions, _, _, _, my_state = policy(my_obs, my_state)
-            else:
-                my_actions, _, _, _ = policy(my_obs)
-
-            # Iterate opponent policies
             for i in range(num_opponents):
-                opp_obs = obs[opp_idxs[i]]
-                opp_state = opp_states[i]
+                idxs = slice_idxs[i]
+                teams = team_assignments[i]
 
-                opponent = opponents[i]
+                my_obs = obs[idxs[arange, teams]].view(5*envs_per_opponent, -1)
+                opp_obs = obs[idxs[arange, 1 - teams]].view(5*envs_per_opponent, -1)
+
                 if hasattr(policy, 'lstm'):
-                    opp_atn, _, _, _, opp_states[i] = opponent(opp_obs, opp_state)
+                    my_actions, _, _, _, my_states[i] = policy(my_obs, my_states[i])
+                    opp_atn, _, _, _, opp_states[i] = opponents[i](opp_obs, opp_states[i])
                 else:
-                    opp_atn, _, _, _ = opponent(opp_obs)
+                    my_actions, _, _, _ = policy(my_obs)
+                    opp_atn, _, _, _ = opponents[i](opp_obs)
 
-                opp_actions.append(opp_atn)
-
-        opp_actions = torch.cat(opp_actions)
-        actions = torch.cat([
-            my_actions.view(num_envs, 5, -1),
-            opp_actions.view(num_envs, 5, -1),
-        ], dim=1).view(num_envs*10, -1)
+                actions_struct[i, arange, teams] = my_actions.view(envs_per_opponent, 5, -1)
+                actions_struct[i, arange, 1 - teams] = opp_atn.view(envs_per_opponent, 5, -1)
 
         obs, reward, done, truncated, info = envs.step(actions.cpu().numpy())
 
@@ -93,12 +86,12 @@ def rollout(envs, policy, opponents, num_games, timeout=180, render=False):
             opp_idx = i // envs_per_opponent
             if c.radiant_victories > prev_radiant_victories[i]:
                 prev_radiant_victories[i] = c.radiant_victories
-                scores.append((opp_idx, 1))
+                scores.append((opp_idx, flat_teams[i] == 0))
                 games_played += 1
                 print('Radiant Victory')
             elif c.dire_victories > prev_dire_victories[i]:
                 prev_dire_victories[i] = c.dire_victories
-                scores.append((opp_idx, 0))
+                scores.append((opp_idx, flat_teams[i] == 1))
                 games_played += 1
                 print('Dire Victory')
 
