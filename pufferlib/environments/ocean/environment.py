@@ -8,6 +8,10 @@ def make_moba(num_envs=200, reward_death=-1.0, reward_xp=0.006,
         reward_xp=reward_xp, reward_distance=reward_distance,
         reward_tower=reward_tower, render_mode=render_mode)
 
+def make_pong(num_envs=1):
+    from .pong import pong
+    return pong.MyPong(num_envs=num_envs)
+
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
     from .grid import grid
@@ -161,6 +165,7 @@ def make_multiagent(**kwargs):
 
 MAKE_FNS = {
     'moba': make_moba,
+    'my_pong': make_pong,
     'foraging': make_foraging,
     'predator_prey': make_predator_prey,
     'group': make_group,
