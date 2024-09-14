@@ -8,25 +8,9 @@ def make_moba(num_envs=200, reward_death=-1.0, reward_xp=0.006,
         reward_xp=reward_xp, reward_distance=reward_distance,
         reward_tower=reward_tower, render_mode=render_mode)
 
-def make_tactical(num_envs=200, render_mode='rgb_array'):
-    from .tactical import tactical
-    return tactical.PufferTactical(num_envs=num_envs, render_mode=render_mode)
-
 def make_pong(num_envs=1):
     from .pong import pong
     return pong.MyPong(num_envs=num_envs)
-
-def make_breakout(num_envs=1):
-    from .breakout import breakout
-    return breakout.MyBreakout(num_envs=num_envs)
-
-def make_connect4(num_envs=1):
-    from .connect4 import connect4
-    return connect4.MyConnect4(num_envs=num_envs)
-
-def make_tripletriad(num_envs=1):
-    from .tripletriad import tripletriad
-    return tripletriad.MyTripleTriad(num_envs=num_envs)
 
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
@@ -190,7 +174,6 @@ def make_multiagent(**kwargs):
 MAKE_FNS = {
     'moba': make_moba,
     'my_pong': make_pong,
-    'my_breakout': make_breakout,
     'foraging': make_foraging,
     'predator_prey': make_predator_prey,
     'group': make_group,
