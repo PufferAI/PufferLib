@@ -6,8 +6,9 @@ class GymToGymnasium:
         self.observation_space = env.observation_space
         self.action_space = env.action_space
         self.render = env.render
+        self.metadata = env.metadata
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         if seed is not None:
             ob = self.env.reset(seed=seed)
         else:
