@@ -1,5 +1,4 @@
 #include <stdlib.h>
-#include <stdio.h>
 #include <math.h>
 #include "raylib.h"
 
@@ -10,142 +9,110 @@
 #define HALF_MAX_SCORE 432
 #define MAX_SCORE 864
 #define HALF_PADDLE_WIDTH 31
+#define Y_OFFSET 50
+#define TICK_RATE 1.0f/60.0f
 
 typedef struct CBreakout CBreakout;
 struct CBreakout {
     float* observations;
     unsigned char* actions;
-    unsigned char* dones;
     float* rewards;
-    int* scores;
-    float* episodic_returns;
-    float* paddle_positions;
-    float* ball_positions;
-    float* ball_velocities;
+    unsigned char* dones;
+    int score;
+    float episode_return;
+    float paddle_x;
+    float paddle_y;
+    float ball_x;
+    float ball_y;
+    float ball_vx;
+    float ball_vy;
     float* brick_x;
     float* brick_y;
     float* brick_states;
-    int* balls_fired;
-    float* wall_positions;
-    float* paddle_widths;
-    float* paddle_heights;
-    float* ball_speeds;
-    int* hit_counters;
+    int balls_fired;
+    float paddle_width;
+    float paddle_height;
+    float ball_speed;
+    int hits;
     int width;
     int height;
-    int obs_size;
     int num_bricks;
-    int num_brick_rows;
-    int num_brick_cols;
+    int brick_rows;
+    int brick_cols;
     int ball_width;
     int ball_height;
     int brick_width;
     int brick_height;
-    int num_agents;
-    int* num_balls;
-    float dt;
-    float substep_dt;
-    int num_substeps;
-    int* timesteps;
+    int num_balls;
     int frameskip;
 };
 
 void generate_brick_positions(CBreakout* env) {
-    int y_offset = 50;
-    for (int row = 0; row < env->num_brick_rows; row++) {
-        for (int col = 0; col < env->num_brick_cols; col++) {
-            int idx = row * env->num_brick_cols + col;
+    for (int row = 0; row < env->brick_rows; row++) {
+        for (int col = 0; col < env->brick_cols; col++) {
+            int idx = row * env->brick_cols + col;
             env->brick_x[idx] = col*env->brick_width;
-            env->brick_y[idx] = row*env->brick_height + y_offset;
+            env->brick_y[idx] = row*env->brick_height + Y_OFFSET;
         }
     }
 }
 
-CBreakout* init_cbreakout(float dt, int frameskip, unsigned char* actions, float* observations,
-        float* rewards, int* scores, float* episodic_returns, int* num_balls, float* paddle_positions,
-        float* ball_positions, float* ball_velocities, float* brick_x, float* brick_y, float* brick_states,
-        unsigned char* dones, int* balls_fired, float* wall_positions, float* paddle_widths,
-        float* paddle_heights, float* ball_speeds, int* hit_counters, int num_agents, int width,
-        int height, int ball_width, int ball_height, int brick_width, int brick_height, int obs_size,
-        int num_bricks, int num_brick_rows, int num_brick_cols) {
+CBreakout* init_cbreakout(int frameskip, unsigned char* actions,
+        float* observations, float* rewards, unsigned char* dones,
+        int width, int height, float paddle_width, float paddle_height,
+        int ball_width, int ball_height, int brick_width, int brick_height,
+        int brick_rows, int brick_cols) {
 
+    int num_bricks = brick_rows * brick_cols;
     CBreakout* env = (CBreakout*)calloc(1, sizeof(CBreakout));
-    env->dt = dt;
+    env->brick_x = (float*)calloc(num_bricks, sizeof(float));
+    env->brick_y = (float*)calloc(num_bricks, sizeof(float));
+    env->brick_states = (float*)calloc(num_bricks, sizeof(float));
+
     env->frameskip = frameskip;
     env->actions = actions;
     env->observations = observations;
     env->rewards = rewards;
-    env->scores = scores;
-    env->episodic_returns = episodic_returns;
-    env->num_balls = num_balls;
-    env->num_balls[0] = -1;
-    env->paddle_positions = paddle_positions;
-    env->ball_positions = ball_positions;
-    env->ball_velocities = ball_velocities;
-    env->brick_x = brick_x;
-    env->brick_y = brick_y;
-    env->brick_states = brick_states;
+    env->num_balls = -1;
     env->dones = dones;
-    env->balls_fired = balls_fired;
-    env->wall_positions = wall_positions;
-    env->wall_positions[4] = width;
-    env->paddle_widths = paddle_widths;
-    env->paddle_heights = paddle_heights;
-    env->ball_speeds = ball_speeds;
-    env->hit_counters = hit_counters;
-    env->num_agents = num_agents;
+    env->paddle_width = paddle_width;
+    env->paddle_height = paddle_height;
     env->width = width;
     env->height = height;
     env->ball_width = ball_width;
     env->ball_height = ball_height;
     env->brick_width = brick_width;
     env->brick_height = brick_height;
-    env->obs_size = obs_size;
     env->num_bricks = num_bricks;
-    env->num_brick_rows = num_brick_rows;
-    env->num_brick_cols = num_brick_cols;
-    env->ball_speeds = ball_speeds;
-    env->num_agents = num_agents;
-    env->num_substeps = 5;
-    env->substep_dt = env->dt / env->num_substeps;
+    env->brick_rows = brick_rows;
+    env->brick_cols = brick_cols;
     generate_brick_positions(env);
     return env;
 }
 
-CBreakout* allocate_cbreakout(float dt, int frameskip, int num_agents,
-        int width, int height, int ball_width, int ball_height,
-        int brick_width, int brick_height, int obs_size,
-        int num_brick_rows, int num_brick_cols) {
-    int num_bricks = num_brick_rows * num_brick_cols;
-    unsigned char* actions = (unsigned char*)calloc(num_agents, sizeof(unsigned char));
-    float* observations = (float*)calloc(num_agents*obs_size, sizeof(float));
-    unsigned char* dones = (unsigned char*)calloc(num_agents, sizeof(unsigned char));
-    float* rewards = (float*)calloc(num_agents, sizeof(float));
-    int* scores = (int*)calloc(num_agents, sizeof(int));
-    float* episodic_returns = (float*)calloc(num_agents, sizeof(float));
-    int* num_balls = (int*)calloc(num_agents, sizeof(int));
-    float* paddle_positions = (float*)calloc(2, sizeof(float));
-    float* ball_positions = (float*)calloc(2, sizeof(float));
-    float* ball_velocities = (float*)calloc(2, sizeof(float));
-    float* brick_x = (float*)calloc(num_bricks, sizeof(float));
-    float* brick_y = (float*)calloc(num_bricks, sizeof(float));
-    float* brick_states = (float*)calloc(num_bricks, sizeof(float));
-    int* balls_fired = (int*)calloc(num_agents, sizeof(int));
-    float* wall_positions = (float*)calloc(6, sizeof(float));
-    float* paddle_widths = (float*)calloc(num_agents, sizeof(float));
-    float* paddle_heights = (float*)calloc(num_agents, sizeof(float));
-    float* ball_speeds = (float*)calloc(num_agents, sizeof(float));
-    int* hit_counters = (int*)calloc(num_agents, sizeof(int));
+CBreakout* allocate_cbreakout(int frameskip, int width, int height,
+        float paddle_width, float paddle_height, int ball_width, int ball_height,
+        int brick_width, int brick_height, int brick_rows, int brick_cols) {
 
-    CBreakout* env = init_cbreakout(dt, frameskip, actions, observations,
-        rewards, scores, episodic_returns, num_balls, paddle_positions,
-        ball_positions, ball_velocities, brick_x, brick_y, brick_states,
-        dones, balls_fired, wall_positions, paddle_widths, paddle_heights,
-        ball_speeds, hit_counters, num_agents, width, height, ball_width,
-        ball_height, brick_width, brick_height, obs_size,
-        num_bricks, num_brick_rows, num_brick_cols);
+    int num_bricks = brick_rows * brick_cols;
+    unsigned char* actions = (unsigned char*)calloc(1, sizeof(unsigned char));
+    float* observations = (float*)calloc(11 + num_bricks, sizeof(float));
+    unsigned char* dones = (unsigned char*)calloc(1, sizeof(unsigned char));
+    float* rewards = (float*)calloc(1, sizeof(float));
+
+    CBreakout* env = init_cbreakout(frameskip, actions,
+        observations, rewards, dones, width, height,
+        paddle_width, paddle_height, ball_width, ball_height,
+        brick_width, brick_height, brick_rows, brick_cols);
 
     return env;
+}
+
+void free_cbreakout(CBreakout* env) {
+    free(env->brick_x);
+    free(env->brick_y);
+    free(env->brick_states);
+    free(env);
 }
 
 void free_allocated_cbreakout(CBreakout* env) {
@@ -153,38 +120,24 @@ void free_allocated_cbreakout(CBreakout* env) {
     free(env->observations);
     free(env->dones);
     free(env->rewards);
-    free(env->scores);
-    free(env->episodic_returns);
-    free(env->num_balls);
-    free(env->paddle_positions);
-    free(env->ball_positions);
-    free(env->ball_velocities);
-    free(env->brick_x);
-    free(env->brick_y);
-    free(env->brick_states);
-    free(env->balls_fired);
-    free(env->wall_positions);
-    free(env->paddle_widths);
-    free(env->paddle_heights);
-    free(env->ball_speeds);
-    free(env->hit_counters);
-    free(env);
+    free_cbreakout(env);
 }
 
 void compute_observations(CBreakout* env) {
-    env->observations[0] = env->paddle_positions[0];
-    env->observations[1] = env->paddle_positions[1];
-    env->observations[2] = env->ball_positions[0];
-    env->observations[3] = env->ball_positions[1];
-    env->observations[4] = env->ball_velocities[0];
-    env->observations[5] = env->ball_velocities[1];
-    env->observations[6] = env->balls_fired[0];
-    env->observations[8] = env->num_balls[0];
-    env->observations[10] = env->paddle_widths[0];
-    env->observations[11] = env->brick_states[0];
+    env->observations[0] = env->paddle_x;
+    env->observations[1] = env->paddle_y;
+    env->observations[2] = env->ball_x;
+    env->observations[3] = env->ball_y;
+    env->observations[4] = env->ball_vx;
+    env->observations[5] = env->ball_vy;
+    env->observations[6] = env->balls_fired;
+    env->observations[8] = env->num_balls;
+    env->observations[10] = env->paddle_width;
+    for (int i = 0; i < env->num_bricks; i++) {
+        env->observations[11 + i] = env->brick_states[i];
+    }
 }
 
-// TODO: Why can't I inline this?
 bool check_collision_discrete(float x, float y, int width, int height,
         float other_x, float other_y, int other_width, int other_height) {
     if (x + width <= other_x || other_x + other_width <= x) {
@@ -200,24 +153,24 @@ bool handle_paddle_ball_collisions(CBreakout* env) {
     float base_angle = M_PI / 4.0f;
 
     // Check if ball is above the paddle
-    if (env->ball_positions[1] + env->ball_height < env->paddle_positions[1]) {
+    if (env->ball_y + env->ball_height < env->paddle_y) {
         return false;
     }
 
     // Check for collision
-    if (check_collision_discrete(env->paddle_positions[0], env->paddle_positions[1],
-            env->paddle_widths[0], env->paddle_heights[0], env->ball_positions[0],
-            env->ball_positions[1], env->ball_width, env->ball_height)) {
-        float relative_intersection = ((env->ball_positions[0] +
-            env->ball_width / 2) - env->paddle_positions[0]) / env->paddle_widths[0];
+    if (check_collision_discrete(env->paddle_x, env->paddle_y,
+            env->paddle_width, env->paddle_height, env->ball_x,
+            env->ball_y, env->ball_width, env->ball_height)) {
+        float relative_intersection = ((env->ball_x +
+            env->ball_width / 2) - env->paddle_x) / env->paddle_width;
         float angle = -base_angle + relative_intersection * 2 * base_angle;
-        env->ball_velocities[0] = sin(angle) * env->ball_speeds[0] * env->substep_dt;
-        env->ball_velocities[1] = -cos(angle) * env->ball_speeds[0] * env->substep_dt;
-        env->hit_counters[0] += 1;
-        if (env->hit_counters[0] % 4 == 0 && env->hit_counters[0] <= 12) {
-            env->ball_speeds[0] += 64;
+        env->ball_vx = sin(angle) * env->ball_speed * TICK_RATE;
+        env->ball_vy = -cos(angle) * env->ball_speed * TICK_RATE;
+        env->hits += 1;
+        if (env->hits % 4 == 0 && env->hits <= 12) {
+            env->ball_speed += 64;
         }
-        if (env->scores[0] == HALF_MAX_SCORE) {
+        if (env->score == HALF_MAX_SCORE) {
             env->brick_states[0] = 0.0;
         }
         return true;
@@ -226,39 +179,33 @@ bool handle_paddle_ball_collisions(CBreakout* env) {
 }
 
 bool handle_wall_ball_collisions(CBreakout* env) {
-    if (env->ball_positions[0] > 0 && env->ball_positions[0]
-            + env->ball_width < env->width && env->ball_positions[1] > 0) {
+    if (env->ball_x > 0 && env->ball_x
+            + env->ball_width < env->width && env->ball_y > 0) {
         return false;
     }
 
     // Left Wall Collision
-    if (check_collision_discrete(
-            env->wall_positions[0] - 50, env->wall_positions[1],
-            50, env->height, env->ball_positions[0], env->ball_positions[1],
-            env->ball_width, env->ball_height)) {
-        env->ball_positions[0] = 0;
-        env->ball_velocities[0] *= -1;
+    if (check_collision_discrete(-Y_OFFSET, 0, Y_OFFSET, env->height,
+            env->ball_x, env->ball_y, env->ball_width, env->ball_height)) {
+        env->ball_x = 0;
+        env->ball_vx *= -1;
         return true;
     }
 
     // Top Wall Collision
-    if (check_collision_discrete(
-            env->wall_positions[2], env->wall_positions[3] - 50,
-            env->width, 50, env->ball_positions[0], env->ball_positions[1],
-            env->ball_width, env->ball_height)) {
-        env->ball_positions[1] = 0;
-        env->ball_velocities[1] *= -1;
-        env->paddle_widths[0] = HALF_PADDLE_WIDTH;
+    if (check_collision_discrete(0, -Y_OFFSET, env->width, Y_OFFSET,
+            env->ball_x, env->ball_y, env->ball_width, env->ball_height)) {
+        env->ball_y = 0;
+        env->ball_vy *= -1;
+        env->paddle_width = HALF_PADDLE_WIDTH;
         return true;
     }
 
     // Right Wall Collision
-    if (check_collision_discrete(
-            env->wall_positions[4], env->wall_positions[5],
-            50, env->height, env->ball_positions[0], env->ball_positions[1],
-            env->ball_width, env->ball_height)) {
-        env->ball_positions[0] = env->width - env->ball_width;
-        env->ball_velocities[0] *= -1;
+    if (check_collision_discrete(env->width, 0, Y_OFFSET, env->height,
+            env->ball_x, env->ball_y, env->ball_width, env->ball_height)) {
+        env->ball_x = env->width - env->ball_width;
+        env->ball_vx *= -1;
         return true;
     }
 
@@ -266,7 +213,7 @@ bool handle_wall_ball_collisions(CBreakout* env) {
 }
 
 bool handle_brick_ball_collisions(CBreakout* env) {
-    if (env->ball_positions[1] > env->brick_y[env->num_bricks-1] + env->brick_height) {
+    if (env->ball_y > env->brick_y[env->num_bricks-1] + env->brick_height) {
         return false;
     }
     
@@ -277,28 +224,28 @@ bool handle_brick_ball_collisions(CBreakout* env) {
         }
         if (check_collision_discrete(env->brick_x[brick_idx],
                 env->brick_y[brick_idx], env->brick_width, env->brick_height,
-                env->ball_positions[0], env->ball_positions[1], env->ball_width, env->ball_height)) {
+                env->ball_x, env->ball_y, env->ball_width, env->ball_height)) {
             env->brick_states[brick_idx] = 1.0;
-            float score = 7 - 3 * (brick_idx / env->num_brick_cols / 2);
+            float score = 7 - 3 * (brick_idx / env->brick_cols / 2);
             env->rewards[0] += score;
-            env->scores[0] += score;
+            env->score += score;
 
             // Determine collision direction
-            if (env->ball_positions[1] + env->ball_height <= env->brick_y[brick_idx] + (env->brick_height / 2)) {
+            if (env->ball_y + env->ball_height <= env->brick_y[brick_idx] + (env->brick_height / 2)) {
                 // Hit was from below the brick
-                env->ball_velocities[1] *= -1;
+                env->ball_vy *= -1;
                 return true;
-            } else if (env->ball_positions[1] >= env->brick_y[brick_idx] + (env->brick_height / 2)) {
+            } else if (env->ball_y >= env->brick_y[brick_idx] + (env->brick_height / 2)) {
                 // Hit was from above the brick
-                env->ball_velocities[1] *= -1;
+                env->ball_vy *= -1;
                 return true;
-            } else if (env->ball_positions[0] + env->ball_width <= env->brick_x[brick_idx] + (env->brick_width / 2)) {
+            } else if (env->ball_x + env->ball_width <= env->brick_x[brick_idx] + (env->brick_width / 2)) {
                 // Hit was from the left
-                env->ball_velocities[0] *= -1;
+                env->ball_vx *= -1;
                 return true;
-            } else if (env->ball_positions[0] >= env->brick_x[brick_idx] + (env->brick_width / 2)) {
+            } else if (env->ball_x >= env->brick_x[brick_idx] + (env->brick_width / 2)) {
                 // Hit was from the right
-                env->ball_velocities[0] *= -1;
+                env->ball_vx *= -1;
                 return true;
             }
         }
@@ -307,28 +254,28 @@ bool handle_brick_ball_collisions(CBreakout* env) {
 }
 
 void reset(CBreakout* env) {
-    if (env->num_balls[0] == -1 || env->scores[0] == MAX_SCORE) {
-        env->scores[0] = 0;
-        env->num_balls[0] = 5;
+    if (env->num_balls == -1 || env->score == MAX_SCORE) {
+        env->score = 0;
+        env->num_balls = 5;
         for (int i = 0; i < env->num_bricks; i++) {
             env->brick_states[i] = 0.0;
         }
-        env->hit_counters[0] = 0;
-        env->ball_speeds[0] = 256;
-        env->paddle_widths[0] = 2 * HALF_PADDLE_WIDTH;
+        env->hits = 0;
+        env->ball_speed = 256;
+        env->paddle_width = 2 * HALF_PADDLE_WIDTH;
     }
 
     env->dones[0] = 0;
-    env->balls_fired[0] = 0.0;
+    env->balls_fired = 0;
 
-    env->paddle_positions[0] = env->width / 2.0 - env->paddle_widths[0] / 2;
-    env->paddle_positions[1] = env->height - env->paddle_heights[0] - 10;
+    env->paddle_x = env->width / 2.0 - env->paddle_width / 2;
+    env->paddle_y = env->height - env->paddle_height - 10;
 
-    env->ball_positions[0] = env->paddle_positions[0] + (env->paddle_widths[0] / 2 - env->ball_width / 2);
-    env->ball_positions[1] = env->height / 2 - 30;
+    env->ball_x = env->paddle_x + (env->paddle_width / 2 - env->ball_width / 2);
+    env->ball_y = env->height / 2 - 30;
 
-    env->ball_velocities[0] = 0.0;
-    env->ball_velocities[1] = 0.0;
+    env->ball_vx = 0.0;
+    env->ball_vy = 0.0;
 }
 
 void step(CBreakout* env) {
@@ -336,43 +283,41 @@ void step(CBreakout* env) {
     int action = env->actions[0];
 
     for (int i = 0; i < env->frameskip; i++) {
-        for (int j = 0; j < env->num_substeps; j++) {
-            if (action == FIRE && env->balls_fired[0] == 0.0) {
-                env->balls_fired[0] = 1.0;
-                float direction = M_PI / 3.25f;
+        if (action == FIRE && env->balls_fired == 0) {
+            env->balls_fired = 1;
+            float direction = M_PI / 3.25f;
 
-                if (rand() % 2 == 0) {
-                    env->ball_velocities[0] = sin(direction) * env->ball_speeds[0] * env->substep_dt;
-                    env->ball_velocities[1] = cos(direction) * env->ball_speeds[0] * env->substep_dt;
-                } else {
-                    env->ball_velocities[0] = -sin(direction) * env->ball_speeds[0] * env->substep_dt;
-                    env->ball_velocities[1] = cos(direction) * env->ball_speeds[0] * env->substep_dt;
-                }
-            } else if (action == LEFT) {
-                env->paddle_positions[0] -= 620 * env->substep_dt;
-                env->paddle_positions[0] = fmaxf(0, env->paddle_positions[0]);
-            } else if (action == RIGHT) {
-                env->paddle_positions[0] += 620 * env->substep_dt;
-                env->paddle_positions[0] = fminf(env->width - env->paddle_widths[0], env->paddle_positions[0]);
+            if (rand() % 2 == 0) {
+                env->ball_vx = sin(direction) * env->ball_speed * TICK_RATE;
+                env->ball_vy = cos(direction) * env->ball_speed * TICK_RATE;
+            } else {
+                env->ball_vx = -sin(direction) * env->ball_speed * TICK_RATE;
+                env->ball_vy = cos(direction) * env->ball_speed * TICK_RATE;
             }
-
-            handle_brick_ball_collisions(env);
-            handle_paddle_ball_collisions(env);
-            handle_wall_ball_collisions(env);
-
-            env->ball_positions[0] += env->ball_velocities[0];
-            env->ball_positions[1] += env->ball_velocities[1];
+        } else if (action == LEFT) {
+            env->paddle_x -= 620 * TICK_RATE;
+            env->paddle_x = fmaxf(0, env->paddle_x);
+        } else if (action == RIGHT) {
+            env->paddle_x += 620 * TICK_RATE;
+            env->paddle_x = fminf(env->width - env->paddle_width, env->paddle_x);
         }
 
-        if (env->ball_positions[1] >= env->paddle_positions[1] + env->paddle_heights[0]) {
-            env->num_balls[0] -= 1;
+        handle_brick_ball_collisions(env);
+        handle_paddle_ball_collisions(env);
+        handle_wall_ball_collisions(env);
+
+        env->ball_x += env->ball_vx;
+        env->ball_y += env->ball_vy;
+
+        if (env->ball_y >= env->paddle_y + env->paddle_height) {
+            env->num_balls -= 1;
             env->dones[0] = 1;
         }
-        if (env->scores[0] == MAX_SCORE) {
+        if (env->score == MAX_SCORE) {
             env->dones[0] = 1;
         }
         if (env->dones[0] == 1) {
-            env->episodic_returns[0] = env->scores[0];
+            env->episode_return = env->score;
             reset(env);
         }
     }
@@ -388,8 +333,8 @@ struct Client {
     float height;
     int paddle_width;
     int paddle_height;
-    int num_brick_rows;
-    int num_brick_cols;
+    int brick_rows;
+    int brick_cols;
     float ball_width;
     float ball_height;
     float brick_width;
@@ -423,21 +368,14 @@ void render(Client* client, CBreakout* env) {
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});
 
-    int paddle_x = env->paddle_positions[0];
-    int paddle_y = env->paddle_positions[1];
-
-    // Draw the paddle
-    DrawRectangle(paddle_x, paddle_y, client->paddle_width,
-        client->paddle_height, DARKGRAY);
-
-    // Draw the ball
-    DrawRectangle(env->ball_positions[0], env->ball_positions[1],
+    DrawRectangle(env->paddle_x, env->paddle_y,
+        env->paddle_width, env->paddle_height, (Color){0, 255, 255, 255});
+    DrawRectangle(env->ball_x, env->ball_y,
         client->ball_width, client->ball_height, WHITE);
 
-    // Draw the bricks
-    for (int row = 0; row < env->num_brick_rows; row++) {
-        for (int col = 0; col < env->num_brick_cols; col++) {
-            int brick_idx = row * env->num_brick_cols + col;
+    for (int row = 0; row < env->brick_rows; row++) {
+        for (int col = 0; col < env->brick_cols; col++) {
+            int brick_idx = row * env->brick_cols + col;
             if (env->brick_states[brick_idx] == 1) {
                 continue;
             }
@@ -448,12 +386,8 @@ void render(Client* client, CBreakout* env) {
         }
     }
 
-    // Draw Score
-    DrawText(TextFormat("Score: %i", env->scores[0]), 10, 10, 20, WHITE);
-
-    // Draw Balls
-    DrawText(TextFormat("Balls: %i", env->num_balls[0]), client->width - 80, 10, 20, WHITE);
-
+    DrawText(TextFormat("Score: %i", env->score), 10, 10, 20, WHITE);
+    DrawText(TextFormat("Balls: %i", env->num_balls), client->width - 80, 10, 20, WHITE);
     EndDrawing();
 
     //PlaySound(client->sound);
