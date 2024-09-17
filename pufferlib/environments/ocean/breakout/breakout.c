@@ -17,11 +17,9 @@ int main() {
         width, height, paddle_width, paddle_height,
         ball_width, ball_height, brick_width, brick_height,
         num_bricks_rows, num_bricks_cols);
- 
-    Client* client = make_client(width, height, paddle_width,
-        paddle_height, ball_width, ball_height);
- 
     reset(env);
+ 
+    Client* client = make_client(width, height);
 
     while (!WindowShouldClose()) {
         // User can take control of the paddle
