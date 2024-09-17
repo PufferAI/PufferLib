@@ -204,6 +204,9 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
     )
     carbs = CARBS(carbs_params, param_spaces)
 
+    # GPUDrive doesn't let you reinit the vecenv, so we have to cache it
+    cache_vecenv = args['base']['env_name'] == 'gpudrive'
+
     elos = {'model_random.pt': 1000}
     vecenv = {'vecenv': None} # can't reassign otherwise
     shutil.rmtree('moba_elo', ignore_errors=True)
@@ -250,7 +253,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         print(wandb.config.policy)
         try:
             stats, uptime, new_elos, vecenv['vecenv'] = train(args, make_env, policy_cls, rnn_cls,
-                wandb, elos=elos, vecenv=vecenv['vecenv'])
+                wandb, elos=elos, vecenv=vecenv['vecenv'] if cache_vecenv else None)
             elos.update(new_elos)
         except Exception as e:
             is_failure = True
@@ -350,7 +353,7 @@ if __name__ == '__main__':
         ' demo options. Shows valid args for your env and policy',
         formatter_class=RichHelpFormatter, add_help=False)
     parser.add_argument('--default-config', default='config/default.ini')
-    parser.add_argument('--config', default='config/ocean/grid.ini')
+    #parser.add_argument('--config', default='config/ocean/grid.ini')
     parser.add_argument('--env', '--environment', type=str,
         default='squared', help='Name of specific environment to run')
     parser.add_argument('--mode', type=str, default='train',
