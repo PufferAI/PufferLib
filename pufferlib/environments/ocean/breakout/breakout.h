@@ -331,25 +331,12 @@ typedef struct Client Client;
 struct Client {
     float width;
     float height;
-    int paddle_width;
-    int paddle_height;
-    int brick_rows;
-    int brick_cols;
-    float ball_width;
-    float ball_height;
-    float brick_width;
-    float brick_height;
 };
 
-Client* make_client(int width, int height, int paddle_width,
-        int paddle_height, int ball_width, int ball_height) {
+Client* make_client(int width, int height) {
     Client* client = (Client*)calloc(1, sizeof(Client));
     client->width = width;
     client->height = height;
-    client->paddle_width = paddle_width;
-    client->paddle_height = paddle_height;
-    client->ball_width = ball_width;
-    client->ball_height = ball_height;
 
     InitWindow(width, height, "PufferLib Ray Breakout");
     SetTargetFPS(15);
@@ -371,7 +358,7 @@ void render(Client* client, CBreakout* env) {
     DrawRectangle(env->paddle_x, env->paddle_y,
         env->paddle_width, env->paddle_height, (Color){0, 255, 255, 255});
     DrawRectangle(env->ball_x, env->ball_y,
-        client->ball_width, client->ball_height, WHITE);
+        env->ball_width, env->ball_height, WHITE);
 
     for (int row = 0; row < env->brick_rows; row++) {
         for (int col = 0; col < env->brick_cols; col++) {
