@@ -253,7 +253,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         print(wandb.config.policy)
         try:
             stats, uptime, new_elos, vecenv['vecenv'] = train(args, make_env, policy_cls, rnn_cls,
-                wandb, elos=elos, vecenv=vecenv['vecenv'])
+                wandb, elos=elos, vecenv=vecenv['vecenv'] if cache_vecenv else None)
             elos.update(new_elos)
         except Exception as e:
             is_failure = True
