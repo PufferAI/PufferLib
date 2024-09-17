@@ -2,8 +2,6 @@
 
 int main() {
     int frameskip = 4;
-    float dt = 1.0/60.0;
-    int num_agents = 1;
     int width = 576;
     int height = 330;
     int ball_width = 6;
@@ -14,12 +12,11 @@ int main() {
     int brick_height = 12;
     int paddle_width = 62;
     int paddle_height = 8;
-    int obs_size = 2 + 2 + num_bricks_rows*num_bricks_cols + 1;
 
-    CBreakout* env = allocate_cbreakout(dt, frameskip, num_agents,
-        width, height, ball_width, ball_height, brick_width,
-        brick_height, obs_size, num_bricks_rows,
-        num_bricks_cols);
+    CBreakout* env = allocate_cbreakout(frameskip,
+        width, height, paddle_width, paddle_height,
+        ball_width, ball_height, brick_width, brick_height,
+        num_bricks_rows, num_bricks_cols);
  
     Client* client = make_client(width, height, paddle_width,
         paddle_height, ball_width, ball_height);
