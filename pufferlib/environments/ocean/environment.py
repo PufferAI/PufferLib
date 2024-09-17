@@ -67,7 +67,7 @@ def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision
         num_snakes = num_snakes or [4096]
         num_food = num_food or [65536]
         leave_corpse_on_death = leave_corpse_on_death or True
-        render_mode = render_mode or 'human'
+        render_mode = render_mode or 'rgb_array'
     elif preset == '720p-1024':
         widths = widths or 4*[1280]
         heights = heights or 4*[720]
