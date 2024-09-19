@@ -52,6 +52,10 @@ def make_puffer(width=1080, height=720, num_agents=4096, horizon=512,
         init_fn=init_fn, reward_fn=reward_fn,
         render_mode=render_mode)
 
+def make_puffergrid(render_mode='rgb_array', vision_range=3):
+    from .grid import grid
+    return grid.PufferGrid(render_mode, vision_range)
+
 def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision=5,
         leave_corpse_on_death=None, preset='1440p-4096', render_mode=None):
     # TODO: Fix render_mode
@@ -170,6 +174,7 @@ MAKE_FNS = {
     'predator_prey': make_predator_prey,
     'group': make_group,
     'puffer': make_puffer,
+    'puffergrid': make_puffergrid,
     'snake': make_snake,
     'continuous': make_continuous,
     'squared': make_squared,
