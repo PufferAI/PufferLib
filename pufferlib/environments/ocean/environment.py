@@ -1,6 +1,27 @@
 import pufferlib.emulation
 import pufferlib.postprocess
 
+# Cythonized Ocean environments
+def make_bandit_cy(num_actions=10, reward_scale=1, reward_noise=1):
+    from .bandit_cy import py_bandit as ba_py
+    env = ba_py.BanditCyEnv(num_actions=num_actions, reward_scale=reward_scale,
+        reward_noise=reward_noise)
+    env = pufferlib.postprocess.EpisodeStats(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+
+def make_spaces_cy(num_envs=1):
+    from .spaces_cy import py_spaces as oc_cy
+    env = oc_cy.SpacesCyEnv(num_envs=num_envs)
+    env = pufferlib.postprocess.EpisodeStats(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+
+def make_memory_cy(mem_length=2, mem_delay=2, render_mode='ansi'):
+    from .memory_cy import py_memory as me_py
+    env = me_py.MemoryCyEnv(mem_length=mem_length, mem_delay=mem_delay, render_mode=render_mode)
+    env = pufferlib.postprocess.EpisodeStats(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+
+
 def make_moba(num_envs=200, reward_death=-1.0, reward_xp=0.006,
         reward_distance=0.05, reward_tower=3, render_mode='rgb_array'):
     from .moba import moba
@@ -114,6 +135,7 @@ def make_squared(distance_to_target=3, num_targets=1, **kwargs):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
+# Cythonized
 def make_bandit(num_actions=10, reward_scale=1, reward_noise=1):
     from . import sanity
     env = sanity.Bandit(num_actions=num_actions, reward_scale=reward_scale,
@@ -121,6 +143,7 @@ def make_bandit(num_actions=10, reward_scale=1, reward_noise=1):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
+# Cythonized
 def make_memory(mem_length=2, mem_delay=2, **kwargs):
     from . import sanity
     env = sanity.Memory(mem_length=mem_length, mem_delay=mem_delay)
@@ -151,6 +174,7 @@ def make_stochastic(p=0.7, horizon=100, **kwargs):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
+# Cythonized
 def make_spaces(**kwargs):
     from . import sanity
     env = sanity.Spaces()
@@ -164,6 +188,10 @@ def make_multiagent(**kwargs):
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
 MAKE_FNS = {
+    'bandit_cy': make_bandit_cy,
+    'spaces_cy': make_spaces_cy,
+    'memory_cy': make_memory_cy,
+
     'moba': make_moba,
     'my_pong': make_pong,
     'foraging': make_foraging,
