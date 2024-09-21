@@ -42,6 +42,14 @@ extensions = [
         include_dirs=[np.get_include()],
         extra_compile_args=["-O3"],
     ),
+    
+    # squared_cy
+    Extension(
+        name="pufferlib.environments.ocean.squared_cy.cy_squared_cy",
+        sources=["pufferlib/environments/ocean/squared_cy/cy_squared_cy.pyx"],
+        include_dirs=[np.get_include()],
+        extra_compile_args=["-O3"],
+    ),
 ]
 
 setup(

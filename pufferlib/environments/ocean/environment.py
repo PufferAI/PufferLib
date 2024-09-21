@@ -33,7 +33,14 @@ def make_password_cy(password_length=5, **kwargs):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
+def make_squared_cy(distance_to_target=3, num_targets=1, **kwargs):
+    from .squared_cy import py_squared as sq_cy
+    env = sq_cy.SquaredCyEnv(distance_to_target=distance_to_target, num_targets=num_targets, **kwargs)
+    env = pufferlib.postprocess.EpisodeStats(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
+
+# Standard below
 def make_moba(num_envs=200, reward_death=-1.0, reward_xp=0.006,
         reward_distance=0.05, reward_tower=3, render_mode='rgb_array'):
     from .moba import moba
@@ -162,23 +169,24 @@ def make_memory(mem_length=2, mem_delay=2, **kwargs):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
+# Cythonized
 def make_password(password_length=5, **kwargs):
     from . import sanity
     env = sanity.Password(password_length=password_length)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
-def make_performance(delay_mean=0, delay_std=0, bandwidth=1, **kwargs):
-    from . import sanity
-    env = sanity.Performance(delay_mean=delay_mean, delay_std=delay_std, bandwidth=bandwidth)
-    env = pufferlib.postprocess.EpisodeStats(env)
-    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+# def make_performance(delay_mean=0, delay_std=0, bandwidth=1, **kwargs):
+#     from . import sanity
+#     env = sanity.Performance(delay_mean=delay_mean, delay_std=delay_std, bandwidth=bandwidth)
+#     env = pufferlib.postprocess.EpisodeStats(env)
+#     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
-def make_performance_empiric(count_n=0, count_std=0, bandwidth=1, **kwargs):
-    from . import sanity
-    env = sanity.PerformanceEmpiric(count_n=count_n, count_std=count_std, bandwidth=bandwidth)
-    env = pufferlib.postprocess.EpisodeStats(env)
-    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+# def make_performance_empiric(count_n=0, count_std=0, bandwidth=1, **kwargs):
+#     from . import sanity
+#     env = sanity.PerformanceEmpiric(count_n=count_n, count_std=count_std, bandwidth=bandwidth)
+#     env = pufferlib.postprocess.EpisodeStats(env)
+#     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 def make_stochastic(p=0.7, horizon=100, **kwargs):
     from . import sanity
@@ -206,6 +214,9 @@ MAKE_FNS = {
     'memory_cy': make_memory_cy,
     'multiagent_cy': make_multiagent_cy,
     'password_cy': make_password_cy,
+    'squared_cy': make_squared_cy,
+    # 'stochastic_cy': make_stochastic_cy,
+    # 'continuous_cy': make_continuous_cy,
 
     'moba': make_moba,
     'my_pong': make_pong,
@@ -222,8 +233,8 @@ MAKE_FNS = {
     'stochastic': make_stochastic,
     'multiagent': make_multiagent,
     'spaces': make_spaces,
-    'performance': make_performance,
-    'performance_empiric': make_performance_empiric,
+    # 'performance': make_performance,
+    # 'performance_empiric': make_performance_empiric,
 }
 
 def env_creator(name='squared'):
