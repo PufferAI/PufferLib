@@ -20,6 +20,10 @@ def make_breakout(num_envs=1):
     from .breakout import breakout
     return breakout.MyBreakout(num_envs=num_envs)
 
+def make_connect4(num_envs=1):
+    from .connect4 import connect4
+    return connect4.MyConnect4(num_envs=num_envs)
+
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
     from .grid import grid
@@ -201,6 +205,8 @@ MAKE_FNS = {
     'spaces': make_spaces,
     'performance': make_performance,
     'performance_empiric': make_performance_empiric,
+    'my_breakout': make_breakout,
+    'my_connect4': make_connect4,
 }
 
 def env_creator(name='squared'):
