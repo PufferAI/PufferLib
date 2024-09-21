@@ -39,38 +39,20 @@ class PasswordCyEnv(gymnasium.Env):
 
 def test_performance(password_length=5, timeout=10, action_cache_size=1024):
     import time
-    # Initialize the environment
     env = PasswordCyEnv(password_length=password_length)
-    
-    # Reset the environment
     env.reset()
-
     tick = 0
-    # Generate random actions to simulate agent behavior
     actions = np.random.randint(0, 2, size=(action_cache_size,))
-
-    # Start the timer
     start_time = time.time()
-
-    # Run until the timeout is reached
     while time.time() - start_time < timeout:
-        # Simulate environment steps
-        action = actions[tick % action_cache_size]  # Choose an action from the cache
+        action = actions[tick % action_cache_size]
         observation, reward, done, _, _ = env.step(action)
-        
-        # If the environment is done, reset it
         if done:
             env.reset()
-
         tick += 1
-
-    # Calculate elapsed time and steps per second (SPS)
     elapsed_time = time.time() - start_time
     steps_per_second = tick / elapsed_time
-
-    # Output the performance metric
     print(f"Steps per second (SPS): {steps_per_second:.2f}")
 
 if __name__ == "__main__":
-    # Run the test for the Password environment
     test_performance(password_length=5, timeout=10)
