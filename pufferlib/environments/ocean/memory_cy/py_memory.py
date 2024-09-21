@@ -34,7 +34,10 @@ class MemoryCyEnv(gymnasium.Env):
 
         current_tick = self.c_env.get_tick() - 1
         done = self.c_env.is_done()
-
+        
+        if current_tick >= self.horizon:
+            current_tick = self.horizon - 1
+            
         info = {'score': self.c_env.check_solution()} if done else {}
 
         return self.solution[0, current_tick], self.rewards[0, 0], done, False, info

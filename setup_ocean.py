@@ -26,6 +26,14 @@ extensions = [
         include_dirs=[np.get_include()],
         extra_compile_args=["-O3"],
     ),
+        
+    # multiagent_cy
+    Extension(
+        name="pufferlib.environments.ocean.multiagent_cy.cy_multiagent_cy",
+        sources=["pufferlib/environments/ocean/multiagent_cy/cy_multiagent_cy.pyx"],
+        include_dirs=[np.get_include()],
+        extra_compile_args=["-O3"],
+    ),
 ]
 
 setup(

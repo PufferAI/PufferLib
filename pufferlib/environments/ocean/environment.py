@@ -2,24 +2,30 @@ import pufferlib.emulation
 import pufferlib.postprocess
 
 # Cythonized Ocean environments
-def make_bandit_cy(num_actions=10, reward_scale=1, reward_noise=1):
-    from .bandit_cy import py_bandit as ba_py
-    env = ba_py.BanditCyEnv(num_actions=num_actions, reward_scale=reward_scale,
+def make_bandit_cy(num_actions=10, reward_scale=1, reward_noise=1, **kwargs):
+    from .bandit_cy import py_bandit as ba_cy
+    env = ba_cy.BanditCyEnv(num_actions=num_actions, reward_scale=reward_scale,
         reward_noise=reward_noise)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
-def make_spaces_cy(num_envs=1):
-    from .spaces_cy import py_spaces as oc_cy
-    env = oc_cy.SpacesCyEnv(num_envs=num_envs)
+def make_spaces_cy(num_envs=1, **kwargs):
+    from .spaces_cy import py_spaces as sp_cy
+    env = sp_cy.SpacesCyEnv(num_envs=num_envs)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
-def make_memory_cy(mem_length=2, mem_delay=2, render_mode='ansi'):
+def make_memory_cy(mem_length=2, mem_delay=2, render_mode='ansi', **kwargs):
     from .memory_cy import py_memory as me_py
     env = me_py.MemoryCyEnv(mem_length=mem_length, mem_delay=mem_delay, render_mode=render_mode)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+
+def make_multiagent_cy(**kwargs):
+    from .multiagent_cy import py_multiagent as mu_cy
+    env = mu_cy.MultiagentCyEnv()
+    env = pufferlib.postprocess.MultiagentEpisodeStats(env)
+    return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
 
 def make_moba(num_envs=200, reward_death=-1.0, reward_xp=0.006,
@@ -181,6 +187,7 @@ def make_spaces(**kwargs):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
+# Cythonized
 def make_multiagent(**kwargs):
     from . import sanity
     env = sanity.Multiagent()
@@ -191,6 +198,7 @@ MAKE_FNS = {
     'bandit_cy': make_bandit_cy,
     'spaces_cy': make_spaces_cy,
     'memory_cy': make_memory_cy,
+    'multiagent_cy': make_multiagent_cy,
 
     'moba': make_moba,
     'my_pong': make_pong,
