@@ -27,6 +27,12 @@ def make_multiagent_cy(**kwargs):
     env = pufferlib.postprocess.MultiagentEpisodeStats(env)
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
+def make_password_cy(password_length=5, **kwargs):
+    from .password_cy import py_password as pa_cy
+    env = pa_cy.PasswordCyEnv(password_length=password_length)
+    env = pufferlib.postprocess.EpisodeStats(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+
 
 def make_moba(num_envs=200, reward_death=-1.0, reward_xp=0.006,
         reward_distance=0.05, reward_tower=3, render_mode='rgb_array'):
@@ -199,6 +205,7 @@ MAKE_FNS = {
     'spaces_cy': make_spaces_cy,
     'memory_cy': make_memory_cy,
     'multiagent_cy': make_multiagent_cy,
+    'password_cy': make_password_cy,
 
     'moba': make_moba,
     'my_pong': make_pong,

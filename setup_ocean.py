@@ -34,6 +34,14 @@ extensions = [
         include_dirs=[np.get_include()],
         extra_compile_args=["-O3"],
     ),
+            
+    # password_cy
+    Extension(
+        name="pufferlib.environments.ocean.password_cy.cy_password_cy",
+        sources=["pufferlib/environments/ocean/password_cy/cy_password_cy.pyx"],
+        include_dirs=[np.get_include()],
+        extra_compile_args=["-O3"],
+    ),
 ]
 
 setup(
