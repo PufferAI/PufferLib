@@ -23,7 +23,6 @@ struct CConnect4 {
     unsigned char* actions;
     float* rewards;
     unsigned char* dones;
-    float episode_return;
     int piece_width;
     int piece_height;
     float* board_x;
@@ -116,7 +115,7 @@ void compute_observations(CConnect4* env) {
 
 
 void reset(CConnect4* env) {
-    if (env->longest_connected[0] == WIN_CONDITION || env->longest_connected[1] == WIN_CONDITION) {
+    if (env->longest_connected[0] >= WIN_CONDITION || env->longest_connected[1] >= WIN_CONDITION) {
         for(int i=0; i< 6; i++) {
             for(int j=0; j< 7; j++) {
                 env->board_states[i][j] = 0.0;
@@ -172,7 +171,6 @@ void check_win_condition(CConnect4* env, int player, int selected_row, int selec
         if (count > env->longest_connected[player_idx]) {
             env->longest_connected[player_idx] = count;
         }
-        
         if (count >= WIN_CONDITION) {
             env->dones[0] = 1;
             env->rewards[0] = player; // 1 for player win, -1 for opponent win
@@ -196,7 +194,6 @@ void step(CConnect4* env) {
         check_win_condition(env, -1, selected_row, random_action);
     }
     if (env->dones[0] == 1) {
-        env->episode_return = 1.0;
         reset(env);
     }
     compute_observations(env);
