@@ -39,6 +39,13 @@ def make_squared_cy(distance_to_target=3, num_targets=1, **kwargs):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
+def make_stochastic_cy(p=0.7, horizon=100, **kwargs):
+    from .stochastic_cy import py_stochastic as st_cy
+    env = st_cy.StochasticCyEnv(p=p, horizon=100)
+    env = pufferlib.postprocess.EpisodeStats(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+
+
 
 # Standard below
 def make_moba(num_envs=200, reward_death=-1.0, reward_xp=0.006,
@@ -140,6 +147,7 @@ def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision
         vision=vision,
     )
 
+# Sanity.py test environments
 def make_continuous(discretize=False, **kwargs):
     from . import sanity
     env = sanity.Continuous(discretize=discretize)
@@ -148,6 +156,7 @@ def make_continuous(discretize=False, **kwargs):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
+# Cythonized
 def make_squared(distance_to_target=3, num_targets=1, **kwargs):
     from . import sanity
     env = sanity.Squared(distance_to_target=distance_to_target, num_targets=num_targets, **kwargs)
@@ -188,6 +197,7 @@ def make_password(password_length=5, **kwargs):
 #     env = pufferlib.postprocess.EpisodeStats(env)
 #     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
+# Cythonized
 def make_stochastic(p=0.7, horizon=100, **kwargs):
     from . import sanity
     env = sanity.Stochastic(p=p, horizon=100)
@@ -215,7 +225,7 @@ MAKE_FNS = {
     'multiagent_cy': make_multiagent_cy,
     'password_cy': make_password_cy,
     'squared_cy': make_squared_cy,
-    # 'stochastic_cy': make_stochastic_cy,
+    'stochastic_cy': make_stochastic_cy,
     # 'continuous_cy': make_continuous_cy,
 
     'moba': make_moba,

@@ -50,6 +50,14 @@ extensions = [
         include_dirs=[np.get_include()],
         extra_compile_args=["-O3"],
     ),
+        
+    # stochastic_cy
+    Extension(
+        name="pufferlib.environments.ocean.stochastic_cy.cy_stochastic_cy",
+        sources=["pufferlib/environments/ocean/stochastic_cy/cy_stochastic_cy.pyx"],
+        include_dirs=[np.get_include()],
+        extra_compile_args=["-O3"],
+    ),
 ]
 
 setup(
