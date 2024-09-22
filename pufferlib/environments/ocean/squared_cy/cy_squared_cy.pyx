@@ -45,15 +45,14 @@ cdef void reset(CSquaredEnv* env):
     env.agent_pos[1] = distance_to_target
     env.grid[distance_to_target * grid_size + distance_to_target] = -1.0
 
-    # Set random targets along the grid perimeter
     possible_targets = [(x, y) for x in range(grid_size) for y in range(grid_size)
                         if x == 0 or y == 0 or x == grid_size - 1 or y == grid_size - 1]
     selected_targets = random.sample(possible_targets, env.num_targets)
     
     for i, (tx, ty) in enumerate(selected_targets):
-        env.targets[i * 2] = tx  # Store target x
-        env.targets[i * 2 + 1] = ty  # Store target y
-        env.grid[tx * grid_size + ty] = 1.0  # Mark target on grid
+        env.targets[i * 2] = tx
+        env.targets[i * 2 + 1] = ty
+        env.grid[tx * grid_size + ty] = 1.0
 
 cdef tuple step(CSquaredEnv* env, int action):
     cdef int x = env.agent_pos[0]
@@ -63,48 +62,40 @@ cdef tuple step(CSquaredEnv* env, int action):
     cdef int dx, dy
     cdef list moves = [(0, -1), (0, 1), (-1, 0), (1, 0), (1, -1), (-1, -1), (1, 1), (-1, 1)]
 
-    # Clear previous agent position on grid
     env.grid[x * grid_size + y] = 0.0
 
-    # Move agent
     dx, dy = moves[action]
     x += dx
     y += dy
 
-    # Calculate the minimum distance to any target
     cdef int i, tx, ty
-    cdef float min_dist = 1e9  # Large initial value
+    cdef float min_dist = 1e9
     for i in range(env.num_targets):
         tx = env.targets[i * 2]
         ty = env.targets[i * 2 + 1]
-        if tx >= 0 and ty >= 0:  # Only check valid targets
+        if tx >= 0 and ty >= 0:
             min_dist = min(min_dist, max(abs(x - tx), abs(y - ty)))
 
     reward = 1.0 - (min_dist / distance_to_target)
 
-    # Check if agent hits a target
     for i in range(env.num_targets):
         tx = env.targets[i * 2]
         ty = env.targets[i * 2 + 1]
         if x == tx and y == ty:
-            env.targets[i * 2] = -1  # Mark target as hit
+            env.targets[i * 2] = -1
             env.targets[i * 2 + 1] = -1
 
-    # Ensure agent doesn't move out of bounds
     dist_from_origin = max(abs(x - distance_to_target), abs(y - distance_to_target))
     if dist_from_origin >= distance_to_target:
         env.agent_pos[0], env.agent_pos[1] = distance_to_target, distance_to_target
     else:
         env.agent_pos[0], env.agent_pos[1] = x, y
 
-    # Mark agent's new position
     env.grid[env.agent_pos[0] * grid_size + env.agent_pos[1]] = -1.0
     env.tick += 1
 
-    # Check if episode is done
     done = env.tick >= env.max_ticks
 
-    # Calculate score (based on how many targets have been hit)
     hit_targets = 0
     for i in range(env.num_targets):
         if env.targets[i * 2] == -1:
@@ -115,7 +106,6 @@ cdef tuple step(CSquaredEnv* env, int action):
 
     return reward, done, info
 
-# Free the memory for the environment
 cdef void free_squared_env(CSquaredEnv* env):
     free(<void*> env.agent_pos)
     free(<void*> env.grid)
@@ -133,8 +123,6 @@ cdef class CSquaredCy:
         self.grid_size = 2 * distance_to_target + 1
         self.distance_to_target = distance_to_target
         self.num_targets = num_targets
-
-        # Initialize the environment
         self.env = init_squared_env(distance_to_target, num_targets)
 
     def reset(self):
@@ -144,7 +132,6 @@ cdef class CSquaredCy:
         return step(self.env, action)
 
     def get_grid(self):
-        # Convert the C array to a memoryview and then to a NumPy array
         cdef int grid_size = self.grid_size
         cdef float[:] grid_view = <float[:grid_size * grid_size]> self.env.grid
         return np.asarray(grid_view).reshape(grid_size, grid_size)
