@@ -31,6 +31,7 @@ struct CConnect4 {
     int* longest_connected;
     int width;
     int height;
+    int game_over;
     
 };
 
@@ -46,7 +47,7 @@ void generate_board_positions(CConnect4* env) {
 
 CConnect4* init_cconnect4( unsigned char* actions,
         float* observations, float* rewards, unsigned char* dones,
-        int width, int height, int piece_width, int piece_height, int longest_connected) {
+        int width, int height, int piece_width, int piece_height, int longest_connected, int game_over) {
 
     CConnect4* env = (CConnect4*)calloc(1, sizeof(CConnect4));
 
@@ -58,6 +59,7 @@ CConnect4* init_cconnect4( unsigned char* actions,
     env->height = height;
     env->piece_width = piece_width;
     env->piece_height = piece_height;
+    env->game_over = game_over;
     // Allocate memory for board_x, board_y, and board_states
     env->board_x = (float*)calloc(42, sizeof(float));
     env->board_y = (float*)calloc(42, sizeof(float));
@@ -73,7 +75,7 @@ CConnect4* init_cconnect4( unsigned char* actions,
 }
 
 CConnect4* allocate_cconnect4(int width, int height,
-        int piece_width, int piece_height, int longest_connected) {
+        int piece_width, int piece_height, int longest_connected, int game_over) {
 
     unsigned char* actions = (unsigned char*)calloc(1, sizeof(unsigned char));
     float* observations = (float*)calloc(width * height, sizeof(float));
@@ -82,7 +84,7 @@ CConnect4* allocate_cconnect4(int width, int height,
 
     CConnect4* env = init_cconnect4(actions,
         observations, rewards, dones, width, height,
-        piece_width, piece_height, longest_connected);
+        piece_width, piece_height, longest_connected, game_over);
 
     return env;
 }
@@ -182,6 +184,13 @@ void check_win_condition(CConnect4* env, int player, int selected_row, int selec
 void step(CConnect4* env) {
     env->rewards[0] = 0.0;
     int action = env->actions[0];
+
+    if (env->game_over == 1) {
+        reset(env);
+        env->game_over = 0;
+        return;
+    }
+
     if (action >= PLACE_PIECE_1 && action <= PLACE_PIECE_7) {
         int selected_row = place_piece(env, action - PLACE_PIECE_1, 1);
         check_win_condition(env, 1, selected_row, action - PLACE_PIECE_1);
@@ -194,7 +203,7 @@ void step(CConnect4* env) {
         check_win_condition(env, -1, selected_row, random_action);
     }
     if (env->dones[0] == 1) {
-        reset(env);
+        env->game_over=1;
     }
     compute_observations(env);
 }

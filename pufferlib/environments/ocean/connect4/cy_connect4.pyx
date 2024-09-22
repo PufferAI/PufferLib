@@ -7,7 +7,7 @@ cdef extern from "connect4.h":
         unsigned char* actions
         float* rewards
         unsigned char* dones
-        float episode_return
+        int game_over
         int piece_width;
         int piece_height;
         float* board_x;
@@ -22,7 +22,7 @@ cdef extern from "connect4.h":
 
     CConnect4* init_cconnect4(unsigned char* actions,
             float* observations, float* rewards, unsigned char* dones,
-            int width, int height, int piece_width, int piece_height, int longest_connected)
+            int width, int height, int piece_width, int piece_height, int longest_connected, int game_over)
     void free_cconnect4(CConnect4* env)
 
     Client* make_client(float width, float height)
@@ -38,10 +38,10 @@ cdef class CyConnect4:
 
     def __init__(self,cnp.ndarray actions,
             cnp.ndarray observations, cnp.ndarray rewards, cnp.ndarray dones,
-            int width, int height, int piece_width, int piece_height, int longest_connected):
+            int width, int height, int piece_width, int piece_height, int longest_connected, int game_over):
         self.env = init_cconnect4(<unsigned char*> actions.data,
             <float*> observations.data, <float*> rewards.data, <unsigned char*> dones.data,
-            width, height, piece_width, piece_height, longest_connected)
+            width, height, piece_width, piece_height, longest_connected, game_over)
         self.client = NULL
 
     def reset(self):
