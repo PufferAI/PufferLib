@@ -58,6 +58,14 @@ extensions = [
         include_dirs=[np.get_include()],
         extra_compile_args=["-O3"],
     ),
+            
+    # continuous_cy
+    Extension(
+        name="pufferlib.environments.ocean.continuous_cy.cy_continuous_cy",
+        sources=["pufferlib/environments/ocean/continuous_cy/cy_continuous_cy.pyx"],
+        include_dirs=[np.get_include()],
+        extra_compile_args=["-O3"],
+    ),
 ]
 
 setup(

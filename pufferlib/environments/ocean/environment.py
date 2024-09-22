@@ -45,6 +45,13 @@ def make_stochastic_cy(p=0.7, horizon=100, **kwargs):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
+def make_continuous_cy(discretize=False, **kwargs):
+    from .continuous_cy import py_continuous as co_cy
+    env = co_cy.ContinuousCyEnv(discretize=discretize)
+    if not discretize:
+        env = pufferlib.postprocess.ClipAction(env)
+    env = pufferlib.postprocess.EpisodeStats(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
 
 # Standard below
@@ -148,6 +155,7 @@ def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision
     )
 
 # Sanity.py test environments
+# Cythonized
 def make_continuous(discretize=False, **kwargs):
     from . import sanity
     env = sanity.Continuous(discretize=discretize)
@@ -226,7 +234,7 @@ MAKE_FNS = {
     'password_cy': make_password_cy,
     'squared_cy': make_squared_cy,
     'stochastic_cy': make_stochastic_cy,
-    # 'continuous_cy': make_continuous_cy,
+    'continuous_cy': make_continuous_cy,
 
     'moba': make_moba,
     'my_pong': make_pong,
