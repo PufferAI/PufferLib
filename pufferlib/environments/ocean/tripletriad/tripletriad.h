@@ -42,6 +42,7 @@ struct CTripleTriad {
     int** card_locations;
     int* action_masks;
     int*** board_card_values;
+    int* score;
 };
 
 void generate_board_positions(CTripleTriad* env) {
@@ -98,8 +99,11 @@ void generate_board_card_values(CTripleTriad* env) {
     }
 }
 
-
-
+void generate_scores(CTripleTriad* env) {
+    for(int i=0; i< 2; i++) {
+        env->score[i] = 5;
+    }
+}
 
 
 CTripleTriad* init_ctripletriad( unsigned char* actions,
@@ -126,6 +130,7 @@ CTripleTriad* init_ctripletriad( unsigned char* actions,
     env->action_masks = (int*)calloc(15, sizeof(int));
     env->board_states = (int**)calloc(3, sizeof(int*));
     env->board_card_values = (int***)calloc(3, sizeof(int**));
+    env->score = (int*)calloc(2, sizeof(int));
     for(int i=0; i< 2; i++) {
         env->cards_in_hand[i] = (int**)calloc(5, sizeof(int*));
         for(int j=0; j< 5; j++) {
@@ -152,6 +157,7 @@ CTripleTriad* init_ctripletriad( unsigned char* actions,
     generate_card_selections(env);
     generate_board_states(env);
     generate_board_card_values(env);
+    generate_scores(env);
     return env;
 }
 
@@ -195,6 +201,7 @@ void free_ctripletriad(CTripleTriad* env) {
         free(env->board_card_values[i]);
     }
     free(env->board_card_values);
+    free(env->score);
     free(env);
 }
 
@@ -250,6 +257,9 @@ void reset(CTripleTriad* env) {
             }
         }
     }
+    for(int i=0; i< 2; i++) {
+        env->score[i] = 5;
+    }
     env->dones[0] = 0;
 }
 
@@ -263,8 +273,12 @@ void place_card(CTripleTriad* env, int card_placement, int player) {
     int player_idx = (player == 1) ? 0 : 1;
 
     // Update the card's location on the board
+    printf("player idx: %d\n", player_idx);
+    printf("card selected: %d\n", env->card_selected[player_idx]);
     env->card_locations[player_idx][env->card_selected[player_idx]] = card_placement;
 
+    printf("card placement -1/3: %d\n", (card_placement-1)/3);
+    printf("card placement -1 %% 3: %d\n", (card_placement-1)%3);
     // Update the board state to reflect the player who placed the card
     env->board_states[(card_placement-1)/3][(card_placement-1)%3] = player;
 
@@ -299,15 +313,27 @@ void check_win_condition(CTripleTriad* env, int player) {
     int count = 0;
     for (int i=0; i< 3; i++) {
         for (int j=0; j< 3; j++) {
-            if (env->board_states[i][j] == player) {
+            if (env->board_states[i][j] !=0) {
                 count++;
             } 
         }
     }
-    if (count == 5) {
-        env->dones[0] = 1;
-        env->rewards[0] = player; // 1 for player win, -1 for opponent win
-        printf("Player %d wins!\n", player);
+    printf("count: %d\n", count);
+    printf("Player 1 score: %d\n", env->score[0]);
+    printf("Player 2 score: %d\n", env->score[1]);
+    if (count ==9) {
+        // add a draw condition and winner value is 0
+        if (env->score[0] == env->score[1]) {
+            env->dones[0] = 1;
+            env->rewards[0] = 0;
+            printf("Game is a draw!\n");
+        } else {
+            int winner = env->score[0] > env->score[1] ? 1 : -1;
+            int winner_idx = (winner == 1) ? 0 : 1;
+            env->dones[0] = 1;
+            env->rewards[0] = winner; // 1 for player win, -1 for opponent win
+            printf("Player %d wins!\n", winner_idx);
+        }
     }
     return;
     
@@ -334,6 +360,37 @@ int get_bot_card_placement(CTripleTriad* env) {
     return 0;
 }
 
+int get_bot_card_selection(CTripleTriad* env) {
+    int valid_selections[5];  // Maximum 5 possible selections
+    int num_valid_selections = 0;
+
+    // Find valid selections
+    for (int i = 0; i < 5; i++) {
+        if (env->card_locations[1][i] == 0) {  // Check if the card has not been placed
+            valid_selections[num_valid_selections++] = i + 1;
+        }
+    }
+
+    // Randomly select a valid card
+    if (num_valid_selections > 0) {
+        return valid_selections[rand() % num_valid_selections];
+    }
+
+    // If no valid selections, return 0 (this should not happen in a normal game)
+    return 0;
+}
+
+bool check_legal_placement(CTripleTriad* env, int card_placement, int player) {
+    int row = (card_placement - 1) / 3;
+    int col = (card_placement - 1) % 3;
+    printf("board state: %d\n", env->board_states[row][col]);
+    if (env->board_states[row][col] != 0) {
+        return 0;
+    } else {
+        return 1;
+    }
+}
+
 void check_card_conversions(CTripleTriad* env, int card_placement, int player) {
     // Given that card locations last 4 values of the most inner array are organized, NSEW. 
     // Check the cards in those directions and what their values are 
@@ -342,7 +399,8 @@ void check_card_conversions(CTripleTriad* env, int card_placement, int player) {
     int row = card_idx / 3;
     int col = card_idx % 3;
     int enemy_player = (player == 1) ? -1 : 1;
-
+    int player_idx = (player == 1) ? 0 : 1;
+    int enemy_player_idx = (player == 1) ? 1 : 0;
     int values[4] = {
         env->board_card_values[row][col][0],  // North
         env->board_card_values[row][col][1],  // South
@@ -368,6 +426,8 @@ void check_card_conversions(CTripleTriad* env, int card_placement, int player) {
             int adjacent_value = env->board_card_values[adj_row][adj_col][adjacent_value_indices[i]];
             if (adjacent_value < values[i] && adjacent_value != 0 && env->board_states[adj_row][adj_col] == enemy_player) {
                 env->board_states[adj_row][adj_col] = player;
+                env->score[player_idx]++;
+                env->score[enemy_player_idx]--;
             }
         }
     }
@@ -393,25 +453,32 @@ void step(CTripleTriad* env) {
     // place a card if the card is in the range of 1-9 and the card is selected
     else if (action >= PLACE_CARD_1 && action <= PLACE_CARD_9  ) {
         int card_placement = action -5;
+        bool card_placed = false;
         printf("Card selected: %d\n", env->card_selected[0]);
         if(env->card_selected[0] >= 0) {
-            place_card(env,card_placement, 1);
-            check_card_conversions(env, card_placement, 1);
-            check_win_condition(env, 1);
-            update_action_masks(env);
-            env->card_selected[0] = -1;
+            if(check_legal_placement(env, card_placement, 1)) {
+                place_card(env,card_placement, 1);
+                check_card_conversions(env, card_placement, 1);
+                check_win_condition(env, 1);
+                update_action_masks(env);
+                env->card_selected[0] = -1;
+                card_placed = true;
+            }
         }
 
         // opponent turn 
-        if (env->dones[0] == 0 && env->board_states[(card_placement-1)/3][(card_placement-1)%3] == 1 ) {
-            int bot_card_selected = rand() % 5 + 1;
-            select_card(env,bot_card_selected, -1);
-            int bot_card_placement = get_bot_card_placement(env);
-            place_card(env,bot_card_placement, -1);
-            // check_card_conversions(env, bot_card_placement, -1);
-            check_win_condition(env, -1);
-            update_action_masks(env);
-            env->card_selected[1] = -1;
+        if (env->dones[0] == 0 && card_placed == true ) {
+            int bot_card_selected = get_bot_card_selection(env);
+            if(bot_card_selected > 0) {
+                select_card(env,bot_card_selected, -1);
+                int bot_card_placement = get_bot_card_placement(env);
+                place_card(env,bot_card_placement, -1);
+                check_card_conversions(env, bot_card_placement, -1);
+                check_win_condition(env, -1);
+                update_action_masks(env);
+                env->card_selected[1] = -1;
+            }
+            
         }
     }
     if (env->dones[0] == 1) {
@@ -532,6 +599,17 @@ void render(Client* client, CTripleTriad* env) {
                 Color text_color = WHITE;
                 DrawText(str, x_offset, y_offset, 20, text_color);
             }
+            // add a little text on the top right that says Card 1, Card 2, Card 3, Card 4, Card 5
+            char card_text[10];
+            sprintf(card_text, "Card %d", j+1);
+            DrawText(card_text, card_x + env->card_width -50, card_y + 5, 10, WHITE);
+        }
+        char player_score[4];
+        sprintf(player_score, "%d", env->score[i]);
+        if (i == 0) {
+            DrawText(player_score, env->card_width *0.4, env->height - 200, 100, WHITE);
+        } else {
+            DrawText(player_score, env->width - env->card_width *.6, env->height - 200, 100, WHITE);
         }
     }
     DrawText("Triple Triad", 20, 10, 20, WHITE);
@@ -539,6 +617,9 @@ void render(Client* client, CTripleTriad* env) {
     // give instructions to player 1: 
     DrawText("Use 1-5 to select a card", 20, env->height - 70, 20, WHITE);
     DrawText("Click an empty space on the board to place a card", 20, env->height - 40, 20, WHITE);
+
+
+
     EndDrawing();
 
     //PlaySound(client->sound);

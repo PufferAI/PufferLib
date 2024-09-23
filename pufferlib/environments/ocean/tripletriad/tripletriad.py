@@ -11,11 +11,11 @@ import gymnasium
 from raylib import rl
 
 import pufferlib
-from pufferlib.environments.ocean.connect4.cy_connect4 import CyConnect4
+from pufferlib.environments.ocean.tripletriad.cy_tripletriad import CyTripleTriad
 
-class MyConnect4(pufferlib.PufferEnv):
+class MyTripleTriad(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=128,
-             width=672, height=576, piece_width=96, piece_height=96, longest_connected=0, game_over=0):
+             width=672, height=576, piece_width=96, piece_height=96, game_over=0):
         super().__init__()
 
         # env
@@ -29,7 +29,6 @@ class MyConnect4(pufferlib.PufferEnv):
         self.height = height
         self.piece_width = piece_width
         self.piece_height = piece_height
-        self.longest_connected = longest_connected
         self.game_over = game_over
 
         # spaces
