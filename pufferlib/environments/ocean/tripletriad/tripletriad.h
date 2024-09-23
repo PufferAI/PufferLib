@@ -18,8 +18,6 @@
 #define PLACE_CARD_7 12
 #define PLACE_CARD_8 13
 #define PLACE_CARD_9 14
-#define WIN_CONDITION 4
-#define Y_OFFSET 10
 #define TICK_RATE 1.0f/60.0f
 
 // how to start game compile - LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./tripletriadgame 
@@ -34,7 +32,7 @@ struct CTripleTriad {
     int card_height;
     float* board_x;
     float* board_y;
-    int board_states[3][3];
+    int** board_states;
     int width;
     int height;
     int game_over;
@@ -43,6 +41,7 @@ struct CTripleTriad {
     int* card_selected;
     int** card_locations;
     int* action_masks;
+    int*** board_card_values;
 };
 
 void generate_board_positions(CTripleTriad* env) {
@@ -59,7 +58,7 @@ void generate_cards_in_hand(CTripleTriad* env) {
     for(int i=0; i< 2; i++) {
         for(int j=0; j< 5; j++) {
             for(int k=0; k< 4; k++) {
-                env->cards_in_hand[i][j][k] = rand() % 7;
+                env->cards_in_hand[i][j][k] = (rand() % 7) + 1;
             }
         }
     }
@@ -80,6 +79,26 @@ void generate_card_selections(CTripleTriad* env) {
         env->card_selected[i] = -1;
     }
 }
+
+void generate_board_states(CTripleTriad* env) {
+    for(int i=0; i< 3; i++) {
+        for(int j=0; j< 3; j++) {
+            env->board_states[i][j] = 0;
+        }
+    }
+}
+
+void generate_board_card_values(CTripleTriad* env) {
+    for(int i=0; i< 3; i++) {
+        for(int j=0; j< 3; j++) {
+            for(int k=0; k< 4; k++) {
+                env->board_card_values[i][j][k] = 0;
+            }
+        }
+    }
+}
+
+
 
 
 
@@ -105,6 +124,8 @@ CTripleTriad* init_ctripletriad( unsigned char* actions,
     env->card_selected = (int*)calloc(2, sizeof(int));
     env->card_locations = (int**)calloc(2, sizeof(int*));
     env->action_masks = (int*)calloc(15, sizeof(int));
+    env->board_states = (int**)calloc(3, sizeof(int*));
+    env->board_card_values = (int***)calloc(3, sizeof(int**));
     for(int i=0; i< 2; i++) {
         env->cards_in_hand[i] = (int**)calloc(5, sizeof(int*));
         for(int j=0; j< 5; j++) {
@@ -112,12 +133,16 @@ CTripleTriad* init_ctripletriad( unsigned char* actions,
         }
     }
     for(int i=0; i< 3; i++) {
-        for(int j=0; j< 3; j++) {
-            env->board_states[i][j] = 0;
-        }
+        env->board_states[i] = (int*)calloc(3, sizeof(int));
     }
     for(int i=0; i< 2; i++) {
         env->card_locations[i] = (int*)calloc(5, sizeof(int));
+    }
+    for(int i=0; i< 3; i++) {
+        env->board_card_values[i] = (int**)calloc(3, sizeof(int*));
+        for(int j=0; j< 3; j++) {
+            env->board_card_values[i][j] = (int*)calloc(4, sizeof(int));
+        }
     }
     env->num_cards = num_cards;
 
@@ -125,6 +150,8 @@ CTripleTriad* init_ctripletriad( unsigned char* actions,
     generate_cards_in_hand(env);
     generate_card_locations(env);
     generate_card_selections(env);
+    generate_board_states(env);
+    generate_board_card_values(env);
     return env;
 }
 
@@ -146,10 +173,28 @@ CTripleTriad* allocate_ctripletriad(int width, int height,
 void free_ctripletriad(CTripleTriad* env) {
     free(env->board_x);
     free(env->board_y);
+    for(int i=0; i< 2; i++) {
+        for(int j=0; j< 5; j++) {
+            free(env->cards_in_hand[i][j]);
+        }
+        free(env->cards_in_hand[i]);
+        free(env->card_locations[i]);
+    }
     free(env->cards_in_hand);
     free(env->card_locations);
     free(env->card_selected);
     free(env->action_masks);
+    for(int i=0; i< 3; i++) {
+        free(env->board_states[i]);
+    }
+    free(env->board_states);
+    for(int i=0; i< 3; i++) {
+        for(int j=0; j< 3; j++) {
+            free(env->board_card_values[i][j]);
+        }
+        free(env->board_card_values[i]);
+    }
+    free(env->board_card_values);
     free(env);
 }
 
@@ -178,7 +223,7 @@ void reset(CTripleTriad* env) {
     for(int i=0; i< 2; i++) {
         for(int j=0; j< 5; j++) {
             for(int k=0; k< 4; k++) {
-                env->cards_in_hand[i][j][k] = rand() % 7;
+                env->cards_in_hand[i][j][k] = (rand() % 7) + 1;
             }
         }
     }
@@ -195,57 +240,58 @@ void reset(CTripleTriad* env) {
             env->board_states[i][j] = 0;
         }
     }
+    for (int i = 0; i < 15; i++) {
+        env->action_masks[i] = 0;
+    }
+    for (int i=0; i< 3; i++) {
+        for (int j=0; j< 3; j++) {
+            for (int k=0; k< 4; k++) {
+                env->board_card_values[i][j][k] = 0;
+            }
+        }
+    }
     env->dones[0] = 0;
 }
 
 void select_card(CTripleTriad* env, int card_selected, int player) {
     int player_idx = (player == 1) ? 0 : 1;
     env->card_selected[player_idx] = card_selected-1;
-
-    // print the selected card
-    // printf("Player: %d\n", player);
-    // printf("Card selected: %d\n", env->card_selected[player_idx]);
-    // printf("Card Values: %d %d %d %d\n", env->cards_in_hand[player_idx][env->card_selected[player_idx]][0],
-    //     env->cards_in_hand[player_idx][env->card_selected[player_idx]][1],
-    //     env->cards_in_hand[player_idx][env->card_selected[player_idx]][2],
-    //     env->cards_in_hand[player_idx][env->card_selected[player_idx]][3]);
-
 }
 
 void place_card(CTripleTriad* env, int card_placement, int player) {
+    // Determine the player index (0 for player 1, 1 for player 2)
     int player_idx = (player == 1) ? 0 : 1;
+
+    // Update the card's location on the board
     env->card_locations[player_idx][env->card_selected[player_idx]] = card_placement;
+
+    // Update the board state to reflect the player who placed the card
     env->board_states[(card_placement-1)/3][(card_placement-1)%3] = player;
 
-    // printf("Player: %d\n", player);
-    // printf("Board States: %d %d %d %d %d %d %d %d %d\n", env->board_states[0][0], env->board_states[0][1], env->board_states[0][2],
-    //     env->board_states[1][0], env->board_states[1][1], env->board_states[1][2],
-    //     env->board_states[2][0], env->board_states[2][1], env->board_states[2][2]);
-    // // print the card value
-    // printf("Team: %d\n", player);
-    // printf("Card selected: %d\n", env->card_selected[player_idx]);
-    // printf("Card placed at: %d\n", card_placement);
-    // printf("Card Values: %d %d %d %d\n", env->cards_in_hand[player_idx][env->card_selected[player_idx]][0],
-    //     env->cards_in_hand[player_idx][env->card_selected[player_idx]][1],
-    //     env->cards_in_hand[player_idx][env->card_selected[player_idx]][2],
-    //     env->cards_in_hand[player_idx][env->card_selected[player_idx]][3]);
+    // Copy the card values from the player's hand to the board
+    for (int i = 0; i < 4; i++) {
+        env->board_card_values[(card_placement-1)/3][(card_placement-1)%3][i] = env->cards_in_hand[player_idx][env->card_selected[player_idx]][i];
+    }
 }
 
 void update_action_masks(CTripleTriad* env) {
-    for (int i =0; i< 2; i++) {
-        for(int j=0; j< 5; j++) {
+    // First, reset all action masks to 0 (available)
+    for (int i = 0; i < 15; i++) {
+        env->action_masks[i] = 0;
+    }
+
+    // Update masks for card placement
+    for (int i = 0; i < 2; i++) {
+        for (int j = 0; j < 5; j++) {
             if (env->card_locations[i][j] != 0) {
                 int action_idx = env->card_locations[i][j] + 5;
-                env->action_masks[action_idx] = 1;
+                if (action_idx >= 6 && action_idx < 15) {
+                    env->action_masks[action_idx] = 1;  // Mark as unavailable
+                }
             }
         }
     }
-    printf("Action masks: %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n", env->action_masks[0], env->action_masks[1], env->action_masks[2],
-        env->action_masks[3], env->action_masks[4], env->action_masks[5], env->action_masks[6], env->action_masks[7],
-        env->action_masks[8], env->action_masks[9], env->action_masks[10], env->action_masks[11], env->action_masks[12], env->action_masks[13], env->action_masks[14]);
 }
-
-
 
 
 
@@ -267,6 +313,66 @@ void check_win_condition(CTripleTriad* env, int player) {
     
 }
 
+int get_bot_card_placement(CTripleTriad* env) {
+    int valid_placements[9];  // Maximum 9 possible placements
+    int num_valid_placements = 0;
+
+    // Find valid placements
+    for (int i = 6; i < 15; i++) {
+        if (env->action_masks[i] == 0) {
+            valid_placements[num_valid_placements++] = i - 5;
+            if (num_valid_placements == 9) break;  // Safety check
+        }
+    }
+    
+    // Randomly select a valid placement
+    if (num_valid_placements > 0) {
+        return valid_placements[rand() % num_valid_placements];
+    }
+
+    // If no valid placements, return 0 (this should not happen in a normal game)
+    return 0;
+}
+
+void check_card_conversions(CTripleTriad* env, int card_placement, int player) {
+    // Given that card locations last 4 values of the most inner array are organized, NSEW. 
+    // Check the cards in those directions and what their values are 
+    // If the card in the direction is greater than the card in the current location, then convert the game state of the lower value card to the player with the higher value card.
+    int card_idx = card_placement - 1;
+    int row = card_idx / 3;
+    int col = card_idx % 3;
+    int enemy_player = (player == 1) ? -1 : 1;
+
+    int values[4] = {
+        env->board_card_values[row][col][0],  // North
+        env->board_card_values[row][col][1],  // South
+        env->board_card_values[row][col][2],  // East
+        env->board_card_values[row][col][3]   // West
+    };
+
+    int adjacent_indices[4][2] = {
+        {row - 1, col},  // North
+        {row + 1, col},  // South
+        {row, col + 1},  // East
+        {row, col - 1}   // West
+    };
+
+    int adjacent_value_indices[4] = {1, 0, 3, 2};  // South, North, West, East
+
+    for (int i = 0; i < 4; i++) {
+        int adj_row = adjacent_indices[i][0];
+        int adj_col = adjacent_indices[i][1];
+
+        // Check if the adjacent cell is within the board
+        if (adj_row >= 0 && adj_row < 3 && adj_col >= 0 && adj_col < 3) {
+            int adjacent_value = env->board_card_values[adj_row][adj_col][adjacent_value_indices[i]];
+            if (adjacent_value < values[i] && adjacent_value != 0 && env->board_states[adj_row][adj_col] == enemy_player) {
+                env->board_states[adj_row][adj_col] = player;
+            }
+        }
+    }
+
+}
 void step(CTripleTriad* env) {
     env->rewards[0] = 0.0;
     int action = env->actions[0];
@@ -285,21 +391,24 @@ void step(CTripleTriad* env) {
 
     }
     // place a card if the card is in the range of 1-9 and the card is selected
-    else if (action >= PLACE_CARD_1 && action <= PLACE_CARD_9 ) {
+    else if (action >= PLACE_CARD_1 && action <= PLACE_CARD_9  ) {
         int card_placement = action -5;
+        printf("Card selected: %d\n", env->card_selected[0]);
         if(env->card_selected[0] >= 0) {
             place_card(env,card_placement, 1);
+            check_card_conversions(env, card_placement, 1);
             check_win_condition(env, 1);
             update_action_masks(env);
             env->card_selected[0] = -1;
         }
 
         // opponent turn 
-        if (env->dones[0] == 0) {
+        if (env->dones[0] == 0 && env->board_states[(card_placement-1)/3][(card_placement-1)%3] == 1 ) {
             int bot_card_selected = rand() % 5 + 1;
             select_card(env,bot_card_selected, -1);
-            int bot_card_placement = rand() % 8 + 1;
+            int bot_card_placement = get_bot_card_placement(env);
             place_card(env,bot_card_placement, -1);
+            // check_card_conversions(env, bot_card_placement, -1);
             check_win_condition(env, -1);
             update_action_masks(env);
             env->card_selected[1] = -1;
@@ -376,7 +485,18 @@ void render(Client* client, CTripleTriad* env) {
                 card_y = env->board_y[env->card_locations[i][j]-1] + 30;
             }
             // Draw card background
+            // adjusts card color based on board state 
             Color card_color = (i == 0) ? RED : BLUE;
+            // check if index is in bounds first    
+            if (env->card_locations[i][j] != 0) {
+                if (env->board_states[(env->card_locations[i][j]-1)/3][(env->card_locations[i][j]-1)%3] == -1) {
+                    card_color = BLUE;
+                } else if (env->board_states[(env->card_locations[i][j]-1)/3][(env->card_locations[i][j]-1)%3] == 1) {
+                    card_color = RED;
+                } else {
+                    card_color = (i == 0) ? RED : BLUE;
+                }
+            }
             DrawRectangle(card_x, card_y, env->card_width, env->card_height, card_color);
             // change background if card is selected, highlight it
             if (env->card_selected[i] == j) {
@@ -386,7 +506,7 @@ void render(Client* client, CTripleTriad* env) {
             }
         
             for(int k=0; k< 4; k++) {
-                char str[20];
+                char str[2];
                 sprintf(str, "%d", env->cards_in_hand[i][j][k]);
                 // calculate positiion of x and y offsets
                 int x_offset, y_offset;
@@ -409,7 +529,7 @@ void render(Client* client, CTripleTriad* env) {
                         break;
                 }
 
-                Color text_color = (i == 0) ? YELLOW : WHITE;
+                Color text_color = WHITE;
                 DrawText(str, x_offset, y_offset, 20, text_color);
             }
         }

@@ -7,11 +7,11 @@ int main() {
     int board_height = 672;
     int piece_width = board_width /3;
     int piece_height = board_height / 3;
-    int longest_connected = 0;
     int game_over = 0;
+    int num_cards = 10;
     CTripleTriad* env = allocate_ctripletriad(width, height, piece_width, piece_height,
-        longest_connected, game_over);
-    reset(env);
+        game_over,num_cards);
+    reset(env); 
  
     Client* client = make_client(width, height);
 
@@ -57,6 +57,7 @@ int main() {
     }
     close_client(client);
     free_allocated_ctripletriad(env);
+
     return 0;
 }
 
