@@ -15,7 +15,7 @@ from pufferlib.environments.ocean.connect4.cy_connect4 import CyConnect4
 
 class MyConnect4(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=128,
-             width=672, height=576, piece_width=96, piece_height=96, longest_connected=0, game_over=0):
+             width=672, height=576, piece_width=96, piece_height=96, longest_connected=0, game_over=0, pieces_placed=0):
         super().__init__()
 
         # env
@@ -31,7 +31,7 @@ class MyConnect4(pufferlib.PufferEnv):
         self.piece_height = piece_height
         self.longest_connected = longest_connected
         self.game_over = game_over
-
+        self.pieces_placed = pieces_placed
         # spaces
         self.num_obs = 42
         self.num_act = 7
@@ -64,7 +64,7 @@ class MyConnect4(pufferlib.PufferEnv):
             # TODO: since single agent, could we just pass values by reference instead of (1,) array?
             self.c_envs.append(CyConnect4(self.actions[i:i+1],
                 self.buf.observations[i], self.buf.rewards[i:i+1], self.buf.terminals[i:i+1],
-                self.width, self.height, self.piece_width, self.piece_height, self.longest_connected, self.game_over))
+                self.width, self.height, self.piece_width, self.piece_height, self.longest_connected, self.game_over, self.pieces_placed))
             self.c_envs[i].reset()
 
         return self.buf.observations, {}
