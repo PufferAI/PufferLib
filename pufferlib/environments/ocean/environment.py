@@ -9,12 +9,6 @@ def make_bandit_cy(num_actions=10, reward_scale=1, reward_noise=1, **kwargs):
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
-def make_spaces_cy(num_envs=1, **kwargs):
-    from .spaces_cy import py_spaces as sp_cy
-    env = sp_cy.SpacesCyEnv(num_envs=num_envs)
-    env = pufferlib.postprocess.EpisodeStats(env)
-    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
-
 def make_memory_cy(mem_length=2, mem_delay=2, render_mode='ansi', **kwargs):
     from .memory_cy import py_memory as me_py
     env = me_py.MemoryCyEnv(mem_length=mem_length, mem_delay=mem_delay, render_mode=render_mode)
@@ -30,6 +24,12 @@ def make_multiagent_cy(**kwargs):
 def make_password_cy(password_length=5, **kwargs):
     from .password_cy import py_password as pa_cy
     env = pa_cy.PasswordCyEnv(password_length=password_length)
+    env = pufferlib.postprocess.EpisodeStats(env)
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env)
+
+def make_spaces_cy(num_envs=1, **kwargs):
+    from .spaces_cy import py_spaces as sp_cy
+    env = sp_cy.SpacesCyEnv(num_envs=num_envs)
     env = pufferlib.postprocess.EpisodeStats(env)
     return pufferlib.emulation.GymnasiumPufferEnv(env=env)
 
@@ -227,6 +227,7 @@ def make_multiagent(**kwargs):
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
 MAKE_FNS = {
+    # Cythonized
     'bandit_cy': make_bandit_cy,
     'spaces_cy': make_spaces_cy,
     'memory_cy': make_memory_cy,
@@ -236,6 +237,7 @@ MAKE_FNS = {
     'stochastic_cy': make_stochastic_cy,
     'continuous_cy': make_continuous_cy,
 
+    # Added Ocean Cython envs
     'moba': make_moba,
     'my_pong': make_pong,
     'foraging': make_foraging,
@@ -243,6 +245,8 @@ MAKE_FNS = {
     'group': make_group,
     'puffer': make_puffer,
     'snake': make_snake,
+    
+    # Standard
     'continuous': make_continuous,
     'squared': make_squared,
     'bandit': make_bandit,
