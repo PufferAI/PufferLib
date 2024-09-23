@@ -31,7 +31,7 @@ int main() {
         render(client, env);
     }
     close_client(client);
-    free_allocated_cconnect4(env);
+    free_cconnect4(env);
     return 0;
 }
 
