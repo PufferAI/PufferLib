@@ -355,7 +355,7 @@ void check_win_condition(CTripleTriad* env, int player) {
         // add a draw condition and winner value is 0
         if (env->score[0] == env->score[1]) {
             env->dones[0] = 1;
-            env->rewards[0] = -0.25;
+            env->rewards[0] = -0.1;
             env->game_over = 1;
         } else {
             int winner = env->score[0] > env->score[1] ? 1 : -1;
