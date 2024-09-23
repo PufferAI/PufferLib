@@ -32,7 +32,7 @@ struct CConnect4 {
     int width;
     int height;
     int game_over;
-    
+    int pieces_placed;
 };
 
 void generate_board_positions(CConnect4* env) {
@@ -47,7 +47,7 @@ void generate_board_positions(CConnect4* env) {
 
 CConnect4* init_cconnect4( unsigned char* actions,
         float* observations, float* rewards, unsigned char* dones,
-        int width, int height, int piece_width, int piece_height, int longest_connected, int game_over) {
+        int width, int height, int piece_width, int piece_height, int longest_connected, int game_over, int pieces_placed) {
 
     CConnect4* env = (CConnect4*)calloc(1, sizeof(CConnect4));
 
@@ -60,6 +60,7 @@ CConnect4* init_cconnect4( unsigned char* actions,
     env->piece_width = piece_width;
     env->piece_height = piece_height;
     env->game_over = game_over;
+    env->pieces_placed = pieces_placed;
     // Allocate memory for board_x, board_y, and board_states
     env->board_x = (float*)calloc(42, sizeof(float));
     env->board_y = (float*)calloc(42, sizeof(float));
@@ -75,16 +76,16 @@ CConnect4* init_cconnect4( unsigned char* actions,
 }
 
 CConnect4* allocate_cconnect4(int width, int height,
-        int piece_width, int piece_height, int longest_connected, int game_over) {
+        int piece_width, int piece_height, int longest_connected, int game_over, int pieces_placed) {
 
     unsigned char* actions = (unsigned char*)calloc(1, sizeof(unsigned char));
-    float* observations = (float*)calloc(width * height, sizeof(float));
+    float* observations = (float*)calloc(42, sizeof(float));
     unsigned char* dones = (unsigned char*)calloc(1, sizeof(unsigned char));
     float* rewards = (float*)calloc(1, sizeof(float));
 
     CConnect4* env = init_cconnect4(actions,
         observations, rewards, dones, width, height,
-        piece_width, piece_height, longest_connected, game_over);
+        piece_width, piece_height, longest_connected, game_over, pieces_placed);
 
     return env;
 }
@@ -117,17 +118,14 @@ void compute_observations(CConnect4* env) {
 
 
 void reset(CConnect4* env) {
-    if (env->longest_connected[0] >= WIN_CONDITION || env->longest_connected[1] >= WIN_CONDITION) {
-        for(int i=0; i< 6; i++) {
-            for(int j=0; j< 7; j++) {
-                env->board_states[i][j] = 0.0;
-            }
+    for(int i=0; i< 6; i++) {
+        for(int j=0; j< 7; j++) {
+            env->board_states[i][j] = 0.0;
         }
-        env->longest_connected[0] = 0;
-        env->longest_connected[1] = 0;
-    
     }
-
+    env->longest_connected[0] = 0;
+    env->longest_connected[1] = 0;
+    env->pieces_placed = 0;
     env->dones[0] = 0;
 }
 // if place piece at bottom of column 0 if no pieces is there idx should be 35
@@ -136,10 +134,17 @@ int place_piece(CConnect4* env, int action_location, int player) {
     for (int row = 5; row >= 0; row--) {
         if (env->board_states[row][action_location] == 0.0) {
             env->board_states[row][action_location] = player;
+            env->pieces_placed++;
             return row;
         }
     }
     return -1;
+}
+
+void check_draw_condition(CConnect4* env) {
+    if (env->pieces_placed >= 42) {
+        env->dones[0] = 1;
+    }
 }
 
 void check_win_condition(CConnect4* env, int player, int selected_row, int selected_col) {
@@ -194,6 +199,7 @@ void step(CConnect4* env) {
     if (action >= PLACE_PIECE_1 && action <= PLACE_PIECE_7) {
         int selected_row = place_piece(env, action - PLACE_PIECE_1, 1);
         check_win_condition(env, 1, selected_row, action - PLACE_PIECE_1);
+        check_draw_condition(env);
     }
 
     // generate random action from 1- 6 must be int and set board state to -1
@@ -201,6 +207,7 @@ void step(CConnect4* env) {
         int random_action = rand() % 6 + 1;
         int selected_row = place_piece(env, random_action, -1);
         check_win_condition(env, -1, selected_row, random_action);
+        check_draw_condition(env);
     }
     if (env->dones[0] == 1) {
         env->game_over=1;
