@@ -8,8 +8,6 @@ Inspired from https://gist.github.com/Yttrmin/18ecc3d2d68b407b4be1
 import numpy as np
 import gymnasium
 
-# from raylib import rl
-
 import pufferlib
 from pufferlib.environments.ocean.tripletriad.cy_tripletriad import CyTripleTriad
 
