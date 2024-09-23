@@ -8,14 +8,14 @@ Inspired from https://gist.github.com/Yttrmin/18ecc3d2d68b407b4be1
 import numpy as np
 import gymnasium
 
-from raylib import rl
+# from raylib import rl
 
 import pufferlib
 from pufferlib.environments.ocean.tripletriad.cy_tripletriad import CyTripleTriad
 
 class MyTripleTriad(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=128,
-             width=672, height=576, piece_width=96, piece_height=96, game_over=0):
+             width=672, height=576, piece_width=96, piece_height=96, game_over=0, num_cards=0):
         super().__init__()
 
         # env
@@ -30,9 +30,10 @@ class MyTripleTriad(pufferlib.PufferEnv):
         self.piece_width = piece_width
         self.piece_height = piece_height
         self.game_over = game_over
+        self.num_cards = num_cards
 
         # spaces
-        self.num_obs = 49
+        self.num_obs = 114
         self.num_act = 15
         self.observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(self.num_obs,), dtype=np.float32)
@@ -53,6 +54,9 @@ class MyTripleTriad(pufferlib.PufferEnv):
         self.actions = np.zeros(self.num_agents, dtype=np.uint32)
         self.terminals_uint8 = np.zeros(self.num_agents, dtype=np.uint8)
         self.reward_sum = 0
+        self.num_finished_games = 0
+        self.score_sum = 0
+        self.misc_logging = np.zeros((self.num_envs, 2,), dtype=np.uint32)
 
 
     def reset(self, seed=None):
@@ -61,15 +65,16 @@ class MyTripleTriad(pufferlib.PufferEnv):
 
         for i in range(self.num_envs):
             # TODO: since single agent, could we just pass values by reference instead of (1,) array?
-            self.c_envs.append(CyConnect4(self.actions[i:i+1],
-                self.buf.observations[i], self.buf.rewards[i:i+1], self.buf.terminals[i:i+1],
-                self.width, self.height, self.piece_width, self.piece_height, self.longest_connected, self.game_over))
+            self.c_envs.append(CyTripleTriad(self.actions[i:i+1],
+                self.buf.observations[i], self.buf.rewards[i:i+1], self.buf.terminals[i:i+1], self.misc_logging[i],
+                self.width, self.height, self.piece_width, self.piece_height, self.game_over, self.num_cards))
             self.c_envs[i].reset()
 
         return self.buf.observations, {}
 
     def step(self, actions):
         self.actions[:] = actions
+
         for i in range(self.num_envs):
             self.c_envs[i].step()
 
@@ -78,10 +83,14 @@ class MyTripleTriad(pufferlib.PufferEnv):
         self.tick += 1
         info = {}
         self.reward_sum += self.buf.rewards.mean()
-
+        finished_rounds_mask = self.misc_logging[:,0] == 1
+        self.num_finished_games += np.sum(finished_rounds_mask)
+        self.score_sum += self.misc_logging[finished_rounds_mask, 1].sum()
         if self.tick % self.report_interval == 0:
             info.update({
                 'reward': self.reward_sum / self.report_interval,
+                'score': self.score_sum / self.num_finished_games,
+                'num_games': self.num_finished_games,
             })
 
         return (self.buf.observations, self.buf.rewards,
@@ -91,7 +100,7 @@ class MyTripleTriad(pufferlib.PufferEnv):
         self.c_envs[0].render()
 
 def test_performance(timeout=10, atn_cache=1024):
-    env = MyConnect4(num_envs=1000)
+    env = MyTripleTriad(num_envs=1000)
     env.reset()
     tick = 0
 
