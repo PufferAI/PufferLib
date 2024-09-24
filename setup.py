@@ -267,7 +267,6 @@ setup(
         "pufferlib/environments/ocean/grid/c_grid.pyx",
         "pufferlib/environments/ocean/snake/c_snake.pyx",
         "pufferlib/environments/ocean/moba/c_moba.pyx",
-<<<<<<< HEAD
         Extension("pufferlib.environments.ocean.moba.cy_moba",
             ["pufferlib/environments/ocean/moba/cy_moba.pyx"],#, "pufferlib/environments/ocean/moba/game_data_npy."],
             include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
@@ -300,6 +299,14 @@ setup(
             runtime_library_dirs=["raylib-5.0_linux_amd64/lib"],
             extra_compile_args=['-DPLATFORM_DESKTOP'],
         ),
+        Extension("pufferlib.environments.ocean.connect4.cy_connect4",
+            ["pufferlib/environments/ocean/connect4/cy_connect4.pyx"],
+            include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
+            library_dirs=['raylib-5.0_linux_amd64/lib'],
+            libraries=["raylib"],
+            runtime_library_dirs=["raylib-5.0_linux_amd64/lib"],
+            extra_compile_args=['-DPLATFORM_DESKTOP'],
+        ),
         Extension("pufferlib.environments.ocean.tripletriad.cy_tripletriad",
             ["pufferlib/environments/ocean/tripletriad/cy_tripletriad.pyx"],
             include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
@@ -309,8 +316,6 @@ setup(
             extra_compile_args=['-DPLATFORM_DESKTOP'],
         ),
         #"pufferlib/environments/ocean/moba/cy_moba.pyx",
-=======
->>>>>>> dev
         "pufferlib/environments/ocean/moba/puffernet.pyx",
         "pufferlib/environments/ocean/moba/c_precompute_pathing.pyx",
         *extensions,
