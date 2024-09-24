@@ -634,16 +634,23 @@ void render(Client* client, CTripleTriad* env) {
         char player_score[4];
         sprintf(player_score, "%d", env->score[i]);
         if (i == 0) {
-            DrawText(player_score, env->card_width *0.4, env->height - 200, 100, WHITE);
+            DrawText(player_score, env->card_width *0.4, env->height - 350, 100, WHITE);
         } else {
-            DrawText(player_score, env->width - env->card_width *.6, env->height - 200, 100, WHITE);
+            DrawText(player_score, env->width - env->card_width *.6, env->height - 350, 100, WHITE);
         }
     }
     DrawText("Triple Triad", 20, 10, 20, WHITE);
 
     // give instructions to player 1: 
-    DrawText("Use 1-5 to select a card", 20, env->height - 70, 20, WHITE);
-    DrawText("Click an empty space on the board to place a card", 20, env->height - 40, 20, WHITE);
+    DrawText("How to Play: Use 1-5 to select a card", 20, env->height - 200, 20, WHITE);
+    DrawText("Click an empty space on the board to place a card", 20, env->height - 170, 20, WHITE);
+
+    // Explain further rules 
+    DrawText("Goal: Place all your cards on the board. The player with the highest score wins.", 20, env->height - 140, 20, WHITE);
+    DrawText("Rules: Each card has 4 values, N, S, E, W.", 20, env->height - 110, 20, WHITE);
+    DrawText("You may not place a card on top of an opponent's card.", 20, env->height - 80, 20, WHITE);
+    DrawText("Scoring: Capture opponent's card if its value in any direction is lower than your placed card.", 20, env->height - 50, 20, WHITE);
+
 
 
 
