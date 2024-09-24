@@ -6,7 +6,7 @@ from pufferlib.environments.ocean.tripletriad.cy_tripletriad import CyTripleTria
 
 class MyTripleTriad(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=1,
-             width=990, height=1000, piece_width=192, piece_height=224, game_over=0, num_cards=0):
+             width=672, height=576, piece_width=96, piece_height=96, game_over=0, num_cards=0):
         super().__init__()
 
         # env
