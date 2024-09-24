@@ -1,6 +1,7 @@
 from setuptools import find_packages, setup, Extension
 from Cython.Build import cythonize
 import numpy
+#  python3 setup.py built_ext --inplace
 
 VERSION = '1.0.0'
 
@@ -264,6 +265,22 @@ setup(
         ),
         Extension("pufferlib.environments.ocean.pong.cy_pong",
             ["pufferlib/environments/ocean/pong/cy_pong.pyx"],
+            include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
+            library_dirs=['raylib-5.0_linux_amd64/lib'],
+            libraries=["raylib"],
+            runtime_library_dirs=["raylib-5.0_linux_amd64/lib"],
+            extra_compile_args=['-DPLATFORM_DESKTOP'],
+        ),
+        Extension("pufferlib.environments.ocean.breakout.cy_breakout",
+            ["pufferlib/environments/ocean/breakout/cy_breakout.pyx"],
+            include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
+            library_dirs=['raylib-5.0_linux_amd64/lib'],
+            libraries=["raylib"],
+            runtime_library_dirs=["raylib-5.0_linux_amd64/lib"],
+            extra_compile_args=['-DPLATFORM_DESKTOP'],
+        ),
+        Extension("pufferlib.environments.ocean.connect4.cy_connect4",
+            ["pufferlib/environments/ocean/connect4/cy_connect4.pyx"],
             include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
             library_dirs=['raylib-5.0_linux_amd64/lib'],
             libraries=["raylib"],
