@@ -2,7 +2,7 @@
 
 int main() {
     int width = 990;
-    int height = 950;
+    int height = 1000;
     int board_width = 576;
     int board_height = 672;
     int piece_width = board_width /3;
