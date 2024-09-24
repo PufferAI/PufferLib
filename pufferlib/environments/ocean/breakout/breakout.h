@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <math.h>
+#include <assert.h>
 #include "raylib.h"
 
 #define NOOP 0
@@ -57,70 +58,37 @@ void generate_brick_positions(CBreakout* env) {
     }
 }
 
-CBreakout* init_cbreakout(int frameskip, unsigned char* actions,
-        float* observations, float* rewards, unsigned char* dones,
-        int width, int height, float paddle_width, float paddle_height,
-        int ball_width, int ball_height, int brick_width, int brick_height,
-        int brick_rows, int brick_cols) {
+void init(CBreakout* env) {
+    env->num_bricks = env->brick_rows * env->brick_cols;
+    assert(env->num_bricks > 0);
 
-    int num_bricks = brick_rows * brick_cols;
-    CBreakout* env = (CBreakout*)calloc(1, sizeof(CBreakout));
-    env->brick_x = (float*)calloc(num_bricks, sizeof(float));
-    env->brick_y = (float*)calloc(num_bricks, sizeof(float));
-    env->brick_states = (float*)calloc(num_bricks, sizeof(float));
-
-    env->frameskip = frameskip;
-    env->actions = actions;
-    env->observations = observations;
-    env->rewards = rewards;
+    env->brick_x = (float*)calloc(env->num_bricks, sizeof(float));
+    env->brick_y = (float*)calloc(env->num_bricks, sizeof(float));
+    env->brick_states = (float*)calloc(env->num_bricks, sizeof(float));
     env->num_balls = -1;
-    env->dones = dones;
-    env->paddle_width = paddle_width;
-    env->paddle_height = paddle_height;
-    env->width = width;
-    env->height = height;
-    env->ball_width = ball_width;
-    env->ball_height = ball_height;
-    env->brick_width = brick_width;
-    env->brick_height = brick_height;
-    env->num_bricks = num_bricks;
-    env->brick_rows = brick_rows;
-    env->brick_cols = brick_cols;
     generate_brick_positions(env);
-    return env;
 }
 
-CBreakout* allocate_cbreakout(int frameskip, int width, int height,
-        float paddle_width, float paddle_height, int ball_width, int ball_height,
-        int brick_width, int brick_height, int brick_rows, int brick_cols) {
-
-    int num_bricks = brick_rows * brick_cols;
-    unsigned char* actions = (unsigned char*)calloc(1, sizeof(unsigned char));
-    float* observations = (float*)calloc(11 + num_bricks, sizeof(float));
-    unsigned char* dones = (unsigned char*)calloc(1, sizeof(unsigned char));
-    float* rewards = (float*)calloc(1, sizeof(float));
-
-    CBreakout* env = init_cbreakout(frameskip, actions,
-        observations, rewards, dones, width, height,
-        paddle_width, paddle_height, ball_width, ball_height,
-        brick_width, brick_height, brick_rows, brick_cols);
-
-    return env;
+void allocate(CBreakout* env) {
+    init(env);
+    env->observations = (float*)calloc(11 + env->num_bricks, sizeof(float));
+    env->actions = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->rewards = (float*)calloc(1, sizeof(float));
+    env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
 }
 
-void free_cbreakout(CBreakout* env) {
+void free_initialized(CBreakout* env) {
     free(env->brick_x);
     free(env->brick_y);
     free(env->brick_states);
-    free(env);
 }
 
-void free_allocated_cbreakout(CBreakout* env) {
+void free_allocated(CBreakout* env) {
     free(env->actions);
     free(env->observations);
     free(env->dones);
     free(env->rewards);
-    free_cbreakout(env);
+    free_initialized(env);
 }
 
 void compute_observations(CBreakout* env) {
@@ -324,7 +292,6 @@ void step(CBreakout* env) {
     compute_observations(env);
 }
 
-
 Color BRICK_COLORS[6] = {RED, ORANGE, YELLOW, GREEN, SKYBLUE, BLUE};
 
 typedef struct Client Client;
@@ -333,12 +300,12 @@ struct Client {
     float height;
 };
 
-Client* make_client(int width, int height) {
+Client* make_client(CBreakout* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
-    client->width = width;
-    client->height = height;
+    client->width = env->width;
+    client->height = env->height;
 
-    InitWindow(width, height, "PufferLib Ray Breakout");
+    InitWindow(env->width, env->height, "PufferLib Ray Breakout");
     SetTargetFPS(15);
 
     //sound_path = os.path.join(*self.__module__.split(".")[:-1], "hit.wav")

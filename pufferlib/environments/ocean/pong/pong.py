@@ -11,7 +11,7 @@ import gymnasium
 from raylib import rl
 
 import pufferlib
-from pufferlib.environments.ocean.pong.cy_pong import CPong
+from pufferlib.environments.ocean.pong.cy_pong import CyPong
 
 class MyPong(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
@@ -84,7 +84,7 @@ class MyPong(pufferlib.PufferEnv):
         self.c_envs = []
         for i in range(self.num_envs):
             # TODO: since single agent, could we just pass values by reference instead of (1,) array?
-            self.c_envs.append(CPong(
+            self.c_envs.append(CyPong(
                 self.buf.observations[i], self.actions[i:i+1],
                 self.buf.rewards[i:i+1], self.terminals_uint8[i:i+1],
                 self.paddle_yl_yr[i], self.ball_x_y[i], self.ball_vx_vy[i],
