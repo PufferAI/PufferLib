@@ -627,23 +627,24 @@ void render(Client* client, CTripleTriad* env) {
             DrawText(TextFormat("Card %d", j+1), card_x + env->card_width -50, card_y + 5, 10, WHITE);
         }
         if (i == 0) {
-            DrawText(TextFormat("%d", env->score[i]), env->card_width *0.4, env->height - 350, 100, WHITE);
+            DrawText(TextFormat("%d", env->score[i]), env->card_width *0.4, env->height - 400, 100, WHITE);
         } else {
-            DrawText(TextFormat("%d", env->score[i]), env->width - env->card_width *.6, env->height - 350, 100, WHITE);
+            DrawText(TextFormat("%d", env->score[i]), env->width - env->card_width *.6, env->height - 400, 100, WHITE);
         }
     }
     DrawText("Triple Triad", 20, 10, 20, WHITE);
 
     // give instructions to player 1: 
-    DrawText("How to Play: Use 1-5 to select a card", 20, env->height - 200, 20, WHITE);
-    DrawText("Click an empty space on the board to place a card", 20, env->height - 170, 20, WHITE);
+    DrawText("How to Play: Use 1-5 to select a card", 20, env->height - 280, 20, WHITE);
+    DrawText("Click an empty space on the board to place a card", 20, env->height - 250, 20, WHITE);
 
     // Explain further rules 
-    DrawText("Goal: Place all your cards on the board. The player with the highest score wins.", 20, env->height - 140, 20, WHITE);
-    DrawText("Rules: Each card has 4 values, N, S, E, W.", 20, env->height - 110, 20, WHITE);
-    DrawText("You may not place a card on top of an opponent's card.", 20, env->height - 80, 20, WHITE);
-    DrawText("Scoring: Capture opponent's card if its value in any direction is lower than your placed card.", 20, env->height - 50, 20, WHITE);
-
+    DrawText("Goal: Place all your cards on the board. The player with the highest score wins.", 20, env->height - 220, 20, WHITE);
+    DrawText("Rules: Each card has 4 values, N, S, E, W.", 20, env->height - 190, 20, WHITE);
+    DrawText("You may not place a card on top of an opponent's card.", 20, env->height - 160, 20, WHITE);
+    DrawText("Scoring Example: Player 1 places a card with a 2 in the North direction.", 20, env->height - 100, 20, WHITE);
+    DrawText("If Player 2 has a card above Player 1's card with a 1 in the South direction. ", 20, env->height - 70, 20, WHITE);
+    DrawText("Player 1 captures Player 2's card. Player 1 gains a point. Player 2 loses a point.", 20, env->height - 40, 20, WHITE);
 
 
 
