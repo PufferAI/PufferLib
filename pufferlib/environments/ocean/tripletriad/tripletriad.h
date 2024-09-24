@@ -600,9 +600,6 @@ void render(Client* client, CTripleTriad* env) {
             }
         
             for(int k=0; k< 4; k++) {
-                char str[2];
-                sprintf(str, "%d", env->cards_in_hand[i][j][k]);
-                // calculate positiion of x and y offsets
                 int x_offset, y_offset;
                 switch(k) {
                     case 0: // North (top)
@@ -624,19 +621,15 @@ void render(Client* client, CTripleTriad* env) {
                 }
 
                 Color text_color = WHITE;
-                DrawText(str, x_offset, y_offset, 20, text_color);
+                DrawText(TextFormat("%d", env->cards_in_hand[i][j][k]), x_offset, y_offset, 20, text_color);
             }
             // add a little text on the top right that says Card 1, Card 2, Card 3, Card 4, Card 5
-            char card_text[10];
-            sprintf(card_text, "Card %d", j+1);
-            DrawText(card_text, card_x + env->card_width -50, card_y + 5, 10, WHITE);
+            DrawText(TextFormat("Card %d", j+1), card_x + env->card_width -50, card_y + 5, 10, WHITE);
         }
-        char player_score[4];
-        sprintf(player_score, "%d", env->score[i]);
         if (i == 0) {
-            DrawText(player_score, env->card_width *0.4, env->height - 350, 100, WHITE);
+            DrawText(TextFormat("%d", env->score[i]), env->card_width *0.4, env->height - 350, 100, WHITE);
         } else {
-            DrawText(player_score, env->width - env->card_width *.6, env->height - 350, 100, WHITE);
+            DrawText(TextFormat("%d", env->score[i]), env->width - env->card_width *.6, env->height - 350, 100, WHITE);
         }
     }
     DrawText("Triple Triad", 20, 10, 20, WHITE);
