@@ -20,6 +20,10 @@ def make_connect4(num_envs=1):
     from .connect4 import connect4
     return connect4.MyConnect4(num_envs=num_envs)
 
+def make_tripletriad(num_envs=1):
+    from .tripletriad import tripletriad
+    return tripletriad.MyTripleTriad(num_envs=num_envs)
+
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
     from .grid import grid
@@ -197,6 +201,7 @@ MAKE_FNS = {
     'performance_empiric': make_performance_empiric,
     'my_breakout': make_breakout,
     'my_connect4': make_connect4,
+    'my_tripletriad': make_tripletriad,
 }
 
 def env_creator(name='squared'):
