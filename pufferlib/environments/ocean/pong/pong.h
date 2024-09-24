@@ -2,8 +2,8 @@
 #include <math.h>
 #include "raylib.h"
 
-typedef struct CMyPong CMyPong;
-struct CMyPong {
+typedef struct CPong CPong;
+struct CPong {
     float* observations;
     unsigned int* actions;
     float* rewards;
@@ -34,75 +34,33 @@ struct CMyPong {
     int frameskip;
 };
 
-CMyPong* init_cmy_pong(float* observations, unsigned int* actions,
-        float* rewards, unsigned char* terminals,
-        float* paddle_yl_yr,
-        float* ball_x_y, float* ball_vx_vy,
-        unsigned int* score_l_r, float width, float height,
-        float paddle_width, float paddle_height, float ball_width, float ball_height,
-        float paddle_speed, float ball_initial_speed_x, float ball_initial_speed_y,
-        float ball_max_speed_y, float ball_speed_y_increment, unsigned int max_score,
-        unsigned int* misc_logging
-        ) {
-    CMyPong* env = (CMyPong*)calloc(1, sizeof(CMyPong));
-    env->observations = observations;
-    env->actions = actions;
-    env->rewards = rewards;
-    env->terminals = terminals;
-    env->paddle_yl_yr = paddle_yl_yr;
-    env->ball_x_y = ball_x_y;
-    env->ball_vx_vy = ball_vx_vy;
-    env->score_l_r = score_l_r;
-    env->width = width;
-    env->height = height;
-    env->paddle_width = paddle_width;
-    env->paddle_height = paddle_height;        
-    env->ball_width = ball_width;
-    env->ball_height = ball_height;
-    env->paddle_speed = paddle_speed;
-    env->ball_initial_speed_x = ball_initial_speed_x;
-    env->ball_initial_speed_y = ball_initial_speed_y;
-    env->ball_max_speed_y = ball_max_speed_y;
-    env->ball_speed_y_increment = ball_speed_y_increment;
-    env->max_score = max_score;
-    env->misc_logging = misc_logging;
-    env->frameskip = 4;
-
+void init(CPong* env) {
     // logging
     env->tick = 0;
     env->n_bounces = 0;
     env->win = 0;
 
     // precompute
-    env->min_paddle_y = - env->paddle_height / 2;
-    env->max_paddle_y = env->height - env->paddle_height / 2;
+    env->min_paddle_y = -env->paddle_height / 2;
+    env->max_paddle_y = env->height - env->paddle_height/2;
     
     env->paddle_dir = 0;
-    return env;
 }
 
-CMyPong* allocate_cmy_pong(float width, float height,
-        float paddle_width, float paddle_height, float ball_width, float ball_height,
-        float paddle_speed, float ball_initial_speed_x, float ball_initial_speed_y,
-        float ball_max_speed_y, float ball_speed_y_increment, unsigned int max_score) {
-    float* observations = (float*)calloc(8, sizeof(float));
-    unsigned int* actions = (unsigned int*)calloc(2, sizeof(unsigned int));
-    float* rewards = (float*)calloc(1, sizeof(float));
-    unsigned char* terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
-    float* paddle_yl_yr = (float*)calloc(2, sizeof(float));
-    float* ball_x_y = (float*)calloc(2, sizeof(float));
-    float* ball_vx_vy = (float*)calloc(2, sizeof(float));
-    unsigned int* score_l_r = (unsigned int*)calloc(2, sizeof(unsigned int));
-    unsigned int* misc_logging = (unsigned int*)calloc(4, sizeof(unsigned int));
-
-    return init_cmy_pong(observations, actions, rewards, terminals,
-        paddle_yl_yr, ball_x_y, ball_vx_vy, score_l_r, width, height,
-        paddle_width, paddle_height, ball_width, ball_height, paddle_speed,
-        ball_initial_speed_x, ball_initial_speed_y, ball_max_speed_y,
-        ball_speed_y_increment, max_score, misc_logging);
+void allocate(CPong* env) {
+    init(env);
+    env->observations = (float*)calloc(8, sizeof(float));
+    env->actions = (unsigned int*)calloc(2, sizeof(unsigned int));
+    env->rewards = (float*)calloc(1, sizeof(float));
+    env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->paddle_yl_yr = (float*)calloc(2, sizeof(float));
+    env->ball_x_y = (float*)calloc(2, sizeof(float));
+    env->ball_vx_vy = (float*)calloc(2, sizeof(float));
+    env->score_l_r = (unsigned int*)calloc(2, sizeof(unsigned int));
+    env->misc_logging = (unsigned int*)calloc(4, sizeof(unsigned int));
 }
 
-void free_allocated_cmy_pong(CMyPong* env) {
+void free_allocated(CPong* env) {
     free(env->observations);
     free(env->actions);
     free(env->rewards);
@@ -112,10 +70,9 @@ void free_allocated_cmy_pong(CMyPong* env) {
     free(env->ball_vx_vy);
     free(env->score_l_r);
     free(env->misc_logging);
-    free(env);
 }
 
-void compute_observations(CMyPong* env) {
+void compute_observations(CPong* env) {
     env->observations[0] = (env->paddle_yl_yr[0] - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
     env->observations[1] = (env->paddle_yl_yr[1] - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
     env->observations[2] = env->ball_x_y[0] / env->width;
@@ -126,7 +83,7 @@ void compute_observations(CMyPong* env) {
     env->observations[7] = env->score_l_r[1] / env->max_score;
 }
 
-void reset_round(CMyPong* env) {
+void reset_round(CPong* env) {
     env->paddle_yl_yr[0] = env->height / 2 - env->paddle_height / 2;
     env->paddle_yl_yr[1] = env->height / 2 - env->paddle_height / 2;
     env->ball_x_y[0] = env->width / 5;
@@ -142,14 +99,14 @@ void reset_round(CMyPong* env) {
     env->n_bounces = 0;
 }
 
-void reset(CMyPong* env) {
+void reset(CPong* env) {
     reset_round(env);
     env->score_l_r[0] = 0;
     env->score_l_r[1] = 0;
     compute_observations(env);
 }
 
-void step(CMyPong* env) {
+void step(CPong* env) {
     env->misc_logging[0] = 0; // reset round is over bit
     env->tick += 1;
 
@@ -265,22 +222,20 @@ struct Client {
     Color ball_color;
 };
 
-Client* make_client(int width, int height, int paddle_width,
-        int paddle_height, int ball_width, int ball_height) {
+Client* make_client(CPong* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
-    client->width = width;
-    client->height = height;
-    client->paddle_width = paddle_width;
-    client->paddle_height = paddle_height;
-    client->ball_width = ball_width;
-    client->ball_height = ball_height;
-    client->x_pad = 3 * client->paddle_width;
-
+    client->width = env->width;
+    client->height = env->height;
+    client->paddle_width = env->paddle_width;
+    client->paddle_height = env->paddle_height;
+    client->ball_width = env->ball_width;
+    client->ball_height = env->ball_height;
+    client->x_pad = 3*client->paddle_width;
     client->paddle_left_color = (Color){0, 255, 0, 255};
     client->paddle_right_color = (Color){255, 0, 0, 255};
     client->ball_color = (Color){255, 255, 255, 255};
 
-    InitWindow(width + 2 * client->x_pad, height, "PufferLib MyPong");
+    InitWindow(env->width + 2*client->x_pad, env->height, "PufferLib Pong");
     SetTargetFPS(15);  // 60 / frame_skip
 
     return client;
@@ -291,7 +246,7 @@ void close_client(Client* client) {
     free(client);
 }
 
-void render(Client* client, CMyPong* env) {
+void render(Client* client, CPong* env) {
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
     }
