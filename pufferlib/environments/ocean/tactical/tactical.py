@@ -6,7 +6,7 @@ import heapq
 
 import pufferlib
 from pufferlib.environments.ocean.tactical.c_tactical import CTactical, step_all
-from pufferlib.environments.ocean import render
+# from pufferlib.environments.ocean import render
 
 EMPTY = 0
 GROUND = 1
@@ -47,13 +47,13 @@ class PufferTactical:
         self.actions = np.zeros(num_envs, dtype=np.uint32)
 
         # render
-        if render_mode == 'human':
-            self.client = RaylibClient()
+        # if render_mode == 'human':
+        #     self.client = RaylibClient()
 
-        map_path = 'pufferlib/environments/ocean/tactical/map.txt'
+        # map_path = 'pufferlib/environments/ocean/tactical/map.txt'
         # map_path = 'pufferlib/environments/ocean/tactical/map_test.txt'
-        print(map_path)
-        self.load_map(map_path)
+        # print(map_path)
+        # self.load_map(map_path)
     
     def load_map(self, filename):
         with open(filename, 'r') as f:
@@ -86,8 +86,9 @@ class PufferTactical:
             self.buf.terminals, self.buf.truncations, info)
 
     def render(self):
-        if self.render_mode == 'human':
-            return self.client.render(self.map)
+        return self.c_envs[0].render()
+        # if self.render_mode == 'human':
+        #     return self.client.render(self.map)
 
 def a_star_search(map, start, goal):
     frontier = []
@@ -473,8 +474,17 @@ class RaylibClient:
 
 
 if __name__ == '__main__':
+    PROFILE = False
     env = PufferTactical(num_envs=1, render_mode='human')
     env.reset()
-    while True:
+    import time
+    t0 = time.time()
+    steps = 0
+    while not PROFILE or time.time() - t0 < 10:
         env.step([0] * env.num_envs)
-        env.render()
+        if not PROFILE:
+            if env.render() == 1:  # exit code
+                break
+        steps += 1
+    print('SPS:', 1 * steps / (time.time() - t0))
+    

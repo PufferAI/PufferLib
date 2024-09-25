@@ -1,4 +1,4 @@
-from setuptools import find_packages, setup
+from setuptools import find_packages, setup, Extension
 from Cython.Build import cythonize
 import numpy
 
@@ -245,13 +245,21 @@ setup(
         "pufferlib/environments/ocean/moba/c_precompute_pathing.pyx",
         "pufferlib/environments/ocean/highway/c_highway.pyx",
         "pufferlib/environments/ocean/tactical/c_tactical.pyx",
+        Extension("pufferlib.environments.ocean.tactical.c_tactical",
+            ["pufferlib/environments/ocean/tactical/c_tactical.pyx"],
+            include_dirs=[numpy.get_include(), '/opt/homebrew/opt/raylib/include'],
+            library_dirs=['/opt/homebrew/opt/raylib/lib'],
+            libraries=["raylib"],
+            runtime_library_dirs=["/opt/homebrew/opt/raylib/lib"],
+            extra_compile_args=['-DPLATFORM_DESKTOP'],
+        ),
     ], 
        #nthreads=6,
        #annotate=True,
        #compiler_directives={'profile': True},# annotate=True
     ),
     extra_compile_args=['-O3', '-march=native'],
-    include_dirs=[numpy.get_include()],
+    include_dirs=[numpy.get_include(), '/opt/homebrew/opt/raylib/include'],
     python_requires=">=3.8",
     license="MIT",
     author="Joseph Suarez",
