@@ -10,7 +10,7 @@ def env_creator(name='nmmo3'):
  
 def make(name, num_envs=1):
     return PuffEnv(
-        width=1*[256],
-        height=1*[256],
-        num_envs=1,
+        width=16*[256],
+        height=16*[256],
+        num_envs=16,
     )
