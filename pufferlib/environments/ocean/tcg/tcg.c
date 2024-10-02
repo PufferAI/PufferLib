@@ -1,7 +1,7 @@
 #include "tcg.h"
 
 int main() {
-    TCG env;
+    TCG env = {0}; // MUST ZERO
     allocate_tcg(&env);
     reset(&env);
 
