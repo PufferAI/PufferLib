@@ -43,20 +43,18 @@ void generate_board_positions(CGo* env) {
     }
 }
 
-static inline int board_state_offset(CGo* env, int pos, int state) {
-    return state*(env->grid_size+1)*(env->grid_size+1) + pos;
-}
+
 
 void init(CGo* env) {
     env->board_x = (int*)calloc((env->grid_size)*(env->grid_size), sizeof(int));
     env->board_y = (int*)calloc((env->grid_size)*(env->grid_size), sizeof(int));
-    env->board_states = (int*)calloc((env->grid_size+1)*(env->grid_size+1)*3, sizeof(int));
+    env->board_states = (int*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(int));
     generate_board_positions(env);
 }
 
 void allocate(CGo* env) {
     init(env);
-    env->observations = (float*)calloc(11, sizeof(float));
+    env->observations = (float*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(float));
     env->actions = (unsigned short*)calloc(1, sizeof(unsigned short));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
@@ -81,10 +79,36 @@ void compute_observations(CGo* env) {
 }
 
 bool check_legal_placement(CGo* env, int tile_placement) {
-    if (env->board_states[board_state_offset(env,tile_placement,0)] != 0) {
+    if (env->board_states[tile_placement] != 0) {
         return 0;
     } else {
         return 1;
+    }
+}
+
+void check_capture_pieces(CGo* env, int tile_placement) {
+    // To capture pieces in Go:
+    // 1. Check all adjacent positions (up, down, left, right) of the placed stone
+    // 2. For each adjacent position, check if it's an opponent's stone
+    // 3. If it is, check if that stone or group is surrounded (no liberties)
+    // 4. If surrounded, remove those stones
+
+    int player = env->board_states[tile_placement];
+    int opponent = (player == 1) ? 2 : 1;
+    int directions[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}}; // up, down, left, right
+
+    for (int i = 0; i < 4; i++) {
+        int dx = directions[i][0];
+        int dy = directions[i][1];
+        int adjacent_x = tile_placement % (env->grid_size + 1) + dx;
+        int adjacent_y = tile_placement / (env->grid_size + 1) + dy;
+        printf("dx: %d\n", dx);
+        printf("dy: %d\n", dy);
+        printf("adjacent_x: %d\n", adjacent_x);
+        printf("adjacent_y: %d\n", adjacent_y);
+        int adjacent_pos = adjacent_y * (env->grid_size + 1) + adjacent_x;
+        printf("adjacent_pos: %d\n", adjacent_pos);
+        printf("env->board_states[adjacent_pos]: %d\n", env->board_states[adjacent_pos]);
     }
 }
 
@@ -92,7 +116,7 @@ bool check_legal_placement(CGo* env, int tile_placement) {
   
 void reset(CGo* env) {
     env->dones[0] = 0;
-    for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1)*3; i++) {
+    for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
         env->board_states[i] = 0;
     }
 }
@@ -101,28 +125,23 @@ void step(CGo* env) {
     env->rewards[0] = 0.0;
     int action = (int)env->actions[0];
     if (action >= MOVE_MIN) {
-        env->board_states[board_state_offset(env, action-1, 1)] = 1;
-        env->board_states[board_state_offset(env,action-1,0)]=1;
-
+        env->board_states[action-1] = 1;
+        check_capture_pieces(env, action-1);
         // opponent move
         // Opponent move (player 2)
         int legal_moves[361];  // Maximum possible moves on a 19x19 board
         int num_legal_moves = 0;
-        
         // Find all legal moves
         for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
             if (check_legal_placement(env, i)) {
                 legal_moves[num_legal_moves++] = i;
             }
         }
-        
         // Randomly select a legal move
         if (num_legal_moves > 0) {
             int random_index = rand() % num_legal_moves;
             int opponent_move = legal_moves[random_index];
-            env->board_states[board_state_offset(env, opponent_move, 2)] = 1;
-            env->board_states[board_state_offset(env,opponent_move,0)]=1;
-
+            env->board_states[opponent_move] = 2;
         }
     }
 
@@ -168,37 +187,29 @@ void render(Client* client, CGo* env) {
             int x = env->board_x[idx];
             int y = env->board_y[idx];
             Color tile_color = (Color){ 253, 208, 124, 255 };
-            
-
             DrawRectangle(x+100, y+100, env->grid_square_size, env->grid_square_size, tile_color);
             DrawRectangleLines(x+100, y+100, env->grid_square_size, env->grid_square_size, BLACK);
-            
-
         }
     }
 
     for (int i = 0; i < (env->grid_size + 1) * (env->grid_size + 1); i++) {
 
-        int player_state = env->board_states[board_state_offset(env, i, 1)];
-        int enemy_state = env->board_states[board_state_offset(env, i, 2)];
+        int position_state = env->board_states[i];
 
         int row = i / (env->grid_size + 1);
         int col = i % (env->grid_size + 1);
         int x = col * env->grid_square_size;
         int y = row * env->grid_square_size;
-
-
-
         // Calculate the circle position based on the grid
         int circle_x = x + 100;
         int circle_y = y + 100;
         // if player draw circle tile for black 
-        if (player_state == 1) {
-            DrawCircle(circle_x, circle_y, env->grid_square_size / 2, PINK);
-            DrawCircleLines(circle_x, circle_y, env->grid_square_size / 2, PINK);
+        if (position_state == 1) {
+            DrawCircle(circle_x, circle_y, env->grid_square_size / 2, BLACK);
+            DrawCircleLines(circle_x, circle_y, env->grid_square_size / 2, BLACK);
         }
         // if enemy draw circle tile for white
-        if (enemy_state == 1) {
+        if (position_state == 2) {
             DrawCircle(circle_x, circle_y, env->grid_square_size / 2, WHITE);
             DrawCircleLines(circle_x, circle_y, env->grid_square_size / 2, WHITE);
         }
