@@ -10,11 +10,42 @@
 #define STACK_SIZE 100
 
 #define ACTION_ENTER 10
+#define ACTION_NOOP 11
 
-#define PHASE_DRAW 0
-#define PHASE_PLAY 1
-#define PHASE_ATTACK 2
-#define PHASE_BLOCK 3
+#define TO_USER true;
+#define TO_STACK false;
+
+typedef struct TCG TCG;
+typedef bool (*call)(TCG*, unsigned char);
+bool phase_untap(TCG* env, unsigned char atn);
+bool phase_draw(TCG* env, unsigned char atn);
+bool phase_play(TCG* env, unsigned char atn);
+bool phase_attack(TCG* env, unsigned char atn);
+bool phase_block(TCG* env, unsigned char atn);
+void reset(TCG* env);
+
+typedef struct Stack Stack;
+struct Stack {
+    call data[STACK_SIZE];
+    int idx;
+};
+
+void push(Stack* stack, call fn) {
+    assert(stack->idx < STACK_SIZE);
+    stack->data[stack->idx] = fn;
+    stack->idx += 1;
+}
+
+call pop(Stack* stack) {
+    assert(stack->idx > 0);
+    stack->idx -= 1;
+    return stack->data[stack->idx];
+}
+
+call peek(Stack* stack) {
+    assert(stack->idx > 0);
+    return stack->data[stack->idx - 1];
+}
 
 typedef struct Card Card;
 struct Card {
@@ -24,6 +55,8 @@ struct Card {
     bool is_land;
     bool remove;
     bool tapped;
+    bool attacking;
+    int defending;
 };
 
 typedef struct CardArray CardArray;
@@ -33,37 +66,6 @@ struct CardArray {
     int max;
 };
 
-typedef void (*call)(TCG*);
-
-typedef struct TCG TCG;
-struct TCG {
-    int my_health;
-    int op_health;
-
-    int my_mana;
-    int op_mana;
-
-    bool my_land_played;
-    bool op_land_played;
-
-    bool attackers[BOARD_SIZE];
-    bool defenders[BOARD_SIZE][BOARD_SIZE];
-
-    int turn;
-    int phase;
-    int block_idx;
-
-    call stack[STACK_SIZE];
-    int stack_idx;
-
-    CardArray* my_hand;
-    CardArray* op_hand;
-    CardArray* my_board;
-    CardArray* op_board;
-    CardArray* my_deck;
-    CardArray* op_deck;
-};
-
 CardArray* allocate_card_array(int max) {
     CardArray* hand = (CardArray*)calloc(1, sizeof(CardArray));
     hand->cards = (Card*)calloc(max, sizeof(Card));
@@ -71,23 +73,46 @@ CardArray* allocate_card_array(int max) {
     return hand;
 }
 
-void free_card_array(CardArray* hand) {
-    free(hand->cards);
-    free(hand);
+void free_card_array(CardArray* ary) {
+    free(ary->cards);
+    free(ary);
 }
 
-void condense_card_array(CardArray* hand) {
+void condense_card_array(CardArray* ary) {
     int idx = 0;
-    for (int i = 0; i < hand->length; i++) {
-        if (!hand->cards[i].remove) {
-            hand->cards[idx] = hand->cards[i];
+    for (int i = 0; i < ary->length; i++) {
+        if (!ary->cards[i].remove) {
+            ary->cards[idx] = ary->cards[i];
             idx += 1;
         }
     }
-    hand->length = idx;
+    ary->length = idx;
 }
 
+struct TCG {
+    CardArray* my_hand;
+    CardArray* my_board;
+    CardArray* my_deck;
+    int my_health;
+    int my_mana;
+    bool my_land_played;
+
+    CardArray* op_hand;
+    CardArray* op_board;
+    CardArray* op_deck;
+    int op_health;
+    int op_mana;
+    bool op_land_played;
+
+    Stack* stack;
+    //bool attackers[BOARD_SIZE];
+    //bool defenders[BOARD_SIZE][BOARD_SIZE];
+    int block_idx;
+    int turn;
+};
+
 void allocate_tcg(TCG* env) {
+    env->stack = calloc(1, sizeof(Stack));
     env->my_hand = allocate_card_array(HAND_SIZE);
     env->op_hand = allocate_card_array(HAND_SIZE);
     env->my_board = allocate_card_array(BOARD_SIZE);
@@ -107,6 +132,7 @@ void free_tcg(TCG* env) {
 
 void randomize_deck(CardArray* deck) {
     for (int i = 0; i < deck->length; i++) {
+        deck->cards[i].defending = -1;
         if (rand() % 3 == 0) {
             deck->cards[i].is_land = true;
         } else {
@@ -118,8 +144,12 @@ void randomize_deck(CardArray* deck) {
     }
 }
 
-void draw_card(CardArray* deck, CardArray* hand) {
+void draw_card(TCG* env, CardArray* deck, CardArray* hand) {
     if (deck->length == 0) {
+        reset(env);
+        return;
+    }
+    if (hand->length == hand->max) {
         return;
     }
     Card card = deck->cards[deck->length - 1];
@@ -137,51 +167,8 @@ bool can_attack(CardArray* board) {
     return false;
 }
 
-void reset(TCG* env) {
-    env->my_deck->length = DECK_SIZE;
-    env->op_deck->length = DECK_SIZE;
-    env->my_hand->length = 0;
-    env->op_hand->length = 0;
-    env->my_board->length = 0;
-    env->op_board->length = 0;
-    env->my_health = 20;
-    env->op_health = 20;
-    randomize_deck(env->my_deck);
-    randomize_deck(env->op_deck);
-    env->turn = rand() % 2;
-    for (int i = 0; i < 5; i++) {
-        draw_card(env->my_deck, env->my_hand);
-        draw_card(env->op_deck, env->op_hand);
-    }
-    env->phase = PHASE_DRAW;
-    env->stack[env->stack_idx] = phase_play;
-    env->stack_idx += 1;
-    step(env, 0);
-}
-
-void phase_play(TCG* env) {
-    if (atn != ACTION_ENTER && atn >= hand->length) {
-        printf("\t Invalid action: %i\n. Hand length: %i\n", atn, hand->length);
-        return;
-    }
-
-    if (board->length == BOARD_SIZE) {
-        printf("\t Board full\n");
-        env->phase = PHASE_ATTACK;
-        return;
-    }
-
-    bool can_play = false;
-    int min_cost = 99;
-    for (int i = 0; i < hand->length; i++) {
-        if (hand->cards[i].is_land && !*land_played) {
-            can_play = true;
-            break;
-        } else if (hand->cards[i].cost < min_cost) {
-            min_cost = hand->cards[i].cost;
-        }
-    }
-
+int tappable_mana(TCG* env) {
+    CardArray* board = (env->turn == 0) ? env->my_board : env->op_board;
     int tappable = 0;
     for (int i = 0; i < board->length; i++) {
         Card card = board->cards[i];
@@ -189,37 +176,95 @@ void phase_play(TCG* env) {
             tappable += 1;
         }
     }
+    return tappable;
+}
 
-    // TODO: Clean up
-    if (atn == ACTION_ENTER || (!can_play && *mana + tappable < min_cost)) {
-        // Can't play anything. Untap lands
-        for (int i = 0; i < board->length; i++) {
-            Card card = board->cards[i];
-            *mana = 0;
-            if (card.is_land && card.tapped) {
-                board->cards[i].tapped = false;
-            }
+bool can_play(TCG* env) {
+    CardArray* hand = (env->turn == 0) ? env->my_hand : env->op_hand;
+    int* mana = (env->turn == 0) ? &env->my_mana : &env->op_mana;
+    bool* land_played = (env->turn == 0) ? &env->my_land_played : &env->op_land_played;
+
+    int min_cost = 99;
+    for (int i = 0; i < hand->length; i++) {
+        if (hand->cards[i].is_land && !*land_played) {
+            return true;
+        } else if (hand->cards[i].cost < min_cost) {
+            min_cost = hand->cards[i].cost;
         }
-        *land_played = false;
-        env->phase = PHASE_ATTACK;
-        if (atn == ACTION_ENTER) {
-            printf("\t Manual confirm. Phase end\n");
-        } else {
-            printf("\t No valid moves. Phase end\n");
+    }
+
+    int tappable = tappable_mana(env);
+    return *mana + tappable >= min_cost;
+}
+
+bool phase_untap(TCG* env, unsigned char atn) {
+    printf("PHASE_UNTAP\n");
+    bool* land_played = (env->turn == 0) ? &env->my_land_played : &env->op_land_played;
+    *land_played = false;
+
+    env->turn = 1 - env->turn;
+    CardArray* board = (env->turn == 0) ? env->my_board : env->op_board;
+
+    int* mana = (env->turn == 0) ? &env->my_mana : &env->op_mana;
+    *mana = 0;
+
+    for (int i = 0; i < board->length; i++) {
+        Card card = board->cards[i];
+        if (card.is_land && card.tapped) {
+            board->cards[i].tapped = false;
         }
-        if (!can_attack(board)) {
-            env->phase = PHASE_DRAW;
-            env->turn = 1 - env->turn;
-            printf("\t No valid attacks. Phase end\n");
-        }
-        return;
+    }
+    
+    push(env->stack, phase_draw);
+    return TO_STACK;
+}
+
+bool phase_draw(TCG* env, unsigned char atn) {
+    printf("PHASE_DRAW\n");
+    CardArray* deck = (env->turn == 0) ? env->my_deck : env->op_deck;
+    CardArray* hand = (env->turn == 0) ? env->my_hand : env->op_hand;
+    draw_card(env, deck, hand);
+    push(env->stack, phase_play);
+    return TO_STACK;
+}
+
+bool phase_play(TCG* env, unsigned char atn) {
+    printf("PHASE_PLAY\n");
+    CardArray* hand = (env->turn == 0) ? env->my_hand : env->op_hand;
+    CardArray* board = (env->turn == 0) ? env->my_board : env->op_board;
+    int* mana = (env->turn == 0) ? &env->my_mana : &env->op_mana;
+    bool* land_played = (env->turn == 0) ? &env->my_land_played : &env->op_land_played;
+
+    if (board->length == BOARD_SIZE) {
+        printf("\t Board full\n");
+        push(env->stack, phase_attack);
+        return TO_STACK;
+    }
+
+    if (!can_play(env)) {
+        printf("\t No valid moves\n");
+        push(env->stack, phase_attack);
+        return TO_STACK;
+    }
+
+    if (atn == ACTION_NOOP) {
+        push(env->stack, phase_play);
+        return TO_USER;
+    } else if (atn == ACTION_ENTER) {
+        push(env->stack, phase_attack);
+        return TO_STACK;
+    } else if (atn >= hand->length) {
+        printf("\t Invalid action: %i\n. Hand length: %i\n", atn, hand->length);
+        push(env->stack, phase_play);
+        return TO_USER;
     }
 
     Card card = hand->cards[atn];
     if (card.is_land) {
         if (*land_played) {
             printf("\t Already played land this turn\n");
-            return;
+            push(env->stack, phase_play);
+            return TO_USER;
         }
         board->cards[board->length] = card;
         board->length += 1;
@@ -227,12 +272,14 @@ void phase_play(TCG* env) {
         hand->cards[atn].remove = true;
         condense_card_array(hand);
         printf("\t Land played\n");
-        return;
+        push(env->stack, phase_play);
+        return TO_USER;
     }
 
-    if (card.cost > *mana + tappable) {
+    if (card.cost > *mana + tappable_mana(env)) {
         printf("\t Not enough mana\n");
-        return;
+        push(env->stack, phase_play);
+        return TO_USER;
     }
 
     // Auto tap lands?
@@ -248,178 +295,206 @@ void phase_play(TCG* env) {
     }
 
     assert(*mana >= card.cost);
+    *mana -= card.cost;
     board->cards[board->length] = card;
     board->length += 1;
     hand->cards[atn].remove = true;
     condense_card_array(hand);
     printf("\t Card played\n");
-    return;
+    push(env->stack, phase_play);
+    return TO_USER;
 }
 
-void step(TCG* env, unsigned char atn) {
-    CardArray* hand = (env->turn == 0) ? env->my_hand : env->op_hand;
+bool phase_attack(TCG* env, unsigned char atn) {
+    printf("PHASE_ATTACK\n");
     CardArray* board = (env->turn == 0) ? env->my_board : env->op_board;
-    int* health = (env->turn == 0) ? &env->my_health : &env->op_health;
-    int* mana = (env->turn == 0) ? &env->my_mana : &env->op_mana;
-    bool* land_played = (env->turn == 0) ? &env->my_land_played : &env->op_land_played;
 
-    while (true) {
-        printf("Turn: %i, Phase: %i, Action: %i\n", env->turn, env->phase, atn);
-        if (env->phase == PHASE_DRAW) {
-            draw_card(env->my_deck, env->my_hand);
-            env->phase = PHASE_PLAY;
-            return;
-        }
-        if (env->phase == PHASE_PLAY) {
-       }
+    if (!can_attack(board)) {
+        printf("\t No valid attacks. Phase end\n");
+        push(env->stack, phase_untap);
+        return TO_STACK;
+    }
 
-        if (env->phase == PHASE_ATTACK) {
-            if (!can_attack(board)) {
-                env->phase = PHASE_DRAW;
-                env->turn = 1 - env->turn;
-                printf("\t No valid attacks. Phase end\n");
-                continue;
-            }
-
-            if (atn == ACTION_ENTER) {
-                printf("\t Attacks confirmed. Phase end\n");
-                CardArray* defender_board = (env->turn == 0) ? env->op_board : env->my_board;
-                bool can_block = false;
-                for (int i = 0; i < defender_board->length; i++) {
-                    if (env->defenders[i][atn]) {
-                        can_block = true;
-                        break;
-                    }
-                }
-                if (!can_block) {
-                    env->turn = 1 - env->turn;
-                    hand = (env->turn == 0) ? env->my_hand : env->op_hand;
-                    board = (env->turn == 0) ? env->my_board : env->op_board;
-                    draw_card(env->my_deck, hand);
-                    env->phase = PHASE_BLOCK;
-                    printf("\t No valid blocks. Phase end\n");
-                    return;
-                } else {
-                    env->phase = PHASE_BLOCK;
-                    return;
-                }
-            } else if (atn >= board->length) {
-                printf("\t Invalid action %i\n", atn);
-                return;
-            } else if (board->cards[atn].is_land) {
-                printf("\t Cannot attack with land\n");
-                return;
-            } else {
-                printf("Setting attacker %i\n", atn);
-                env->attackers[atn] = !env->attackers[atn];
-                return;
-            }
-        }
-        if (env->phase == PHASE_BLOCK) {
-            CardArray* defender_board = (env->turn == 0) ? env->op_board : env->my_board;
-            printf("\t Attackers:\n");
-            printf("\t\t");
-            for (int i = 0; i < BOARD_SIZE; i++) {
-                printf("%i ", env->attackers[i]);
-            }
-            printf("\n");
-            printf("\t Defenders:\n");
-            for (int i = 0; i < BOARD_SIZE; i++) {
-                printf("\t\t");
-                for (int j = 0; j < BOARD_SIZE; j++) {
-                    printf("%i ", env->defenders[i][j]);
-                }
-                printf("\n");
-            }
-            printf("\n");
-
-            while (env->block_idx < board->length && !env->attackers[env->block_idx]) {
-                printf("\t Skipping block for %i (not attacking)\n", env->block_idx);
-                env->block_idx++;
-            }
-
-            if (env->block_idx == board->length) {
-                printf("\t Nothing left to block with. Phase end\n");
-                env->phase = PHASE_DRAW;
-                env->turn = 1 - env->turn;
-                return;
-            }
-
-            if (atn == ACTION_ENTER) {
-                printf("\t Manual block confirm %i\n", env->block_idx);
-                env->block_idx++;
-                return;
-            } else if (atn >= defender_board->length) {
-                printf("\t Invalid block action %i\n", atn);
-                return;
-            } else if (defender_board->cards[atn].is_land) {
-                printf("\t Cannot block with land\n");
-                return;
-            }
-
-            for (int i = 0; i < env->block_idx; i++) {
-                if (env->defenders[i][atn]) {
-                    printf("Already blocked\n");
-                    return;
-                }
-            }
-            printf("Blocking index %i with %i\n", env->block_idx, atn);
-            env->defenders[env->block_idx][atn] = !env->defenders[env->block_idx][atn];
-
-            if (env->block_idx == board->length) {
-                printf("Attacker board length: %i\n", board->length);
-                for (int atk = 0; atk < board->length; atk++) {
-                    printf("Resolving %i\n", atk);
-                    if (!env->attackers[atk]) {
-                        printf("Not attacking\n");
-                        continue;
-                    }
-                    Card* attacker = &board->cards[atk];
-                    int attacker_attack = attacker->attack;
-                    for (int def = 0; def < defender_board->length; def++) {
-                        printf("defense %i\n", def);
-                        Card* defender = &defender_board->cards[def];
-                        attacker->health -= defender->attack;
-                        if (defender->health <= attacker_attack) {
-                            printf("Attacker wins\n");
-                            attacker_attack -= defender->health;
-                            defender->health = 0;
-                            defender->remove = true;
-                        } else {
-                            printf("Defender wins\n");
-                            defender->health -= attacker_attack;
-                            break;
-                        }
-                    }
-                    printf("Reducing health by %i\n", attacker_attack);
-                    *health -= attacker_attack;
-                }
-                condense_card_array(env->my_board);
-                condense_card_array(env->op_board);
-                env->phase = PHASE_DRAW;
-                env->turn = 1 - env->turn;
-
-                CardArray* defender_deck = (env->turn == 0) ? env->my_deck : env->op_deck;
-                CardArray* defender_hand = (env->turn == 0) ? env->my_hand : env->op_hand;
-                draw_card(defender_deck, defender_hand);
-
-                for (int i = 0; i < BOARD_SIZE; i++) {
-                    env->attackers[i] = false;
-                    for (int j = 0; j < BOARD_SIZE; j++) {
-                        env->defenders[i][j] = false;
-                    }
-                }
-                env->block_idx = 0;
-                env->phase = PHASE_PLAY;
-                printf(" Set block idx to 0. Phase: %i\n", env->phase);
-            }
-
-        }
+    if (atn == ACTION_NOOP) {
+        push(env->stack, phase_attack);
+        return TO_USER;
+    } else if (atn == ACTION_ENTER) {
+        printf("\t Attacks confirmed. Phase end\n");
+        env->turn = 1 - env->turn;
+        push(env->stack, phase_block);
+        return TO_STACK;
+    } else if (atn >= board->length) {
+        printf("\t Invalid action %i\n", atn);
+        push(env->stack, phase_attack);
+        return TO_USER;
+    } else if (board->cards[atn].is_land) {
+        printf("\t Cannot attack with land\n");
+        push(env->stack, phase_attack);
+        return TO_USER;
+    } else {
+        printf("\t Setting attacker %i\n", atn);
+        board->cards[atn].attacking = !board->cards[atn].attacking;
+        push(env->stack, phase_attack);
+        return TO_USER;
     }
 }
 
+bool phase_block(TCG* env, unsigned char atn) {
+    printf("PHASE_BLOCK\n");
+    CardArray* defender_board = (env->turn == 0) ? env->my_board : env->op_board;
+    CardArray* board = (env->turn == 0) ? env->op_board : env->my_board;
+    int* health = (env->turn == 0) ? &env->op_health : &env->my_health;
+
+    while (env->block_idx < board->length && !board->cards[env->block_idx].attacking) {
+        printf("\t Skipping block for %i (not attacking)\n", env->block_idx);
+        env->block_idx++;
+    }
+    
+    bool can_block = false;
+    for (int i = 0; i < defender_board->length; i++) {
+        Card* card = &defender_board->cards[i];
+        if (card->is_land) {
+            continue;
+        }
+        if (card->defending == -1 || card->defending == env->block_idx) {
+            can_block = true;
+            printf("\t Can block with %i\n", i);
+            break;
+        }
+    }
+    if (!can_block) {
+        env->block_idx = board->length;
+    }
+ 
+    if (env->block_idx == board->length) {
+        printf("\t Attacker board length: %i\n", board->length);
+        for (int atk = 0; atk < board->length; atk++) {
+            printf("\t Resolving %i\n", atk);
+            Card* attacker = &board->cards[atk];
+            if (!attacker->attacking) {
+                printf("\t Not attacking\n");
+                continue;
+            }
+            int attacker_attack = attacker->attack;
+            int attacker_health = attacker->health;
+            for (int def = 0; def < defender_board->length; def++) {
+                Card* defender = &defender_board->cards[def];
+                if (defender->defending != atk) {
+                    continue;
+                }
+                if (attacker_attack >= defender->health) {
+                    attacker_attack -= defender->health;
+                    attacker_health -= defender->attack;
+                    defender->health = 0;
+                    defender->remove = true;
+                } else {
+                    attacker_health -= defender->attack;
+                    attacker_attack = 0;
+                }
+                if (attacker_health <= 0) {
+                    attacker->remove = true;
+                    break;
+                }
+            }
+            printf("\t Reducing health by %i\n", attacker_attack);
+            *health -= attacker_attack;
+        }
+
+        if (*health <= 0) {
+            printf("\t Game over\n");
+            reset(env);
+        }
+
+        condense_card_array(env->my_board);
+        condense_card_array(env->op_board);
+
+        CardArray* defender_deck = (env->turn == 0) ? env->my_deck : env->op_deck;
+        CardArray* defender_hand = (env->turn == 0) ? env->my_hand : env->op_hand;
+        draw_card(env, defender_deck, defender_hand);
+
+        for (int i = 0; i < board->length; i++) {
+            board->cards[i].attacking = false;
+        }
+        for (int i = 0; i < defender_board->length; i++) {
+            defender_board->cards[i].defending = -1;
+        }
+        printf("\t Set block idx to 0\n");
+        env->block_idx = 0;
+        env->turn = 1 - env->turn;
+        push(env->stack, phase_untap);
+        return TO_STACK;
+    }
+
+    if (atn == ACTION_NOOP) {
+        push(env->stack, phase_block);
+        return TO_USER;
+    } else if (atn == ACTION_ENTER) {
+        printf("\t Manual block confirm %i\n", env->block_idx);
+        env->block_idx++;
+        push(env->stack, phase_block);
+        return TO_STACK;
+    } else if (atn >= defender_board->length) {
+        printf("\t Invalid block action %i\n", atn);
+        push(env->stack, phase_block);
+        return TO_USER;
+    } else if (defender_board->cards[atn].is_land) {
+        printf("\t Cannot block with land\n");
+        push(env->stack, phase_block);
+        return TO_USER;
+    }
+
+    for (int i = 0; i < env->block_idx; i++) {
+        if (defender_board->cards[atn].defending == i) {
+            printf("\t Already blocked\n");
+            push(env->stack, phase_block);
+            return TO_USER;
+        }
+    }
+    printf("\t Blocking index %i with %i\n", env->block_idx, atn);
+    Card* card = &defender_board->cards[atn];
+    if (card->defending == env->block_idx) {
+        card->defending = -1;
+    } else {
+        card->defending = env->block_idx;
+    }
+    push(env->stack, phase_block);
+    return TO_USER;
+}
+
+void step(TCG* env, unsigned char atn) {
+    printf("Turn: %i, Action: %i\n", env->turn, atn);
+    while (true) {
+        call fn = pop(env->stack);
+        bool return_to_user = fn(env, atn);
+        if (return_to_user) {
+            return;
+        }
+        atn = ACTION_NOOP;
+    }
+}
+
+void reset(TCG* env) {
+    env->my_deck->length = DECK_SIZE;
+    env->op_deck->length = DECK_SIZE;
+    env->my_hand->length = 0;
+    env->op_hand->length = 0;
+    env->my_board->length = 0;
+    env->op_board->length = 0;
+    env->my_health = 20;
+    env->op_health = 20;
+    randomize_deck(env->my_deck);
+    randomize_deck(env->op_deck);
+    env->turn = rand() % 2;
+    for (int i = 0; i < 5; i++) {
+        draw_card(env, env->my_deck, env->my_hand);
+        draw_card(env, env->op_deck, env->op_hand);
+    }
+    push(env->stack, phase_draw);
+    step(env, ACTION_NOOP);
+}
+
 void init_client(TCG* env) {
-    InitWindow(1080, 720, "PufferLib Ray TCG");
+    InitWindow(1080, 720, "Puffer the Schooling TCG");
     SetTargetFPS(60);
 }
 
@@ -434,17 +509,17 @@ int card_x(int col, int n) {
 }
 
 int card_y(int row) {
-    return 32*(row+1) + 128*row;
+    return 64 + (128 + 20)*row;
 }
 
 void render_card(Card* card, int x, int y, Color color) {
     DrawRectangle(x, y, 64, 128, color);
     if (card->is_land) {
-        DrawText("Land", x, y, 20, WHITE);
+        DrawText("Land", x + 16, y + 40, 16, WHITE);
     } else {
-        DrawText(TextFormat("%i", card->cost), x, y, 20, WHITE);
-        DrawText(TextFormat("%i", card->attack), x, y + 32, 20, WHITE);
-        DrawText(TextFormat("%i", card->health), x, y + 64, 20, WHITE);
+        DrawText(TextFormat("%i", card->cost), x + 32, y+16, 20, WHITE);
+        DrawText(TextFormat("%i", card->attack), x + 32, y + 40, 20, WHITE);
+        DrawText(TextFormat("%i", card->health), x + 32, y + 64, 20, WHITE);
     }
 }
 
@@ -455,18 +530,13 @@ void render_label(int x, int y, int idx) {
 void render(TCG* env) {
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});
-    
-    //printf("My hand length: %i\n", env->my_hand->length);
-    //printf("Op hand length: %i\n", env->op_hand->length);
-    //printf("My board length: %i\n", env->my_board->length);
-    //printf("Op board length: %i\n", env->op_board->length);
-
+   
     for (int i = 0; i < env->my_hand->length; i++) {
         Card card = env->my_hand->cards[i];
         int x = card_x(i, env->my_hand->length);
         int y = card_y(3);
         render_card(&card, x, y, RED);
-        if (env->turn == 0 && env->phase == PHASE_PLAY) {
+        if (env->turn == 0) {
             render_label(x, y, i);
         }
     }
@@ -475,11 +545,12 @@ void render(TCG* env) {
         Card card = env->my_board->cards[i];
         int x = card_x(i, env->my_board->length);
         int y = card_y(2);
-        if (env->turn == 0 && env->attackers[i]) {
+        if (card.attacking) {
             y -= 16;
         }
-        render_card(&card, x, y, RED);
-        if (env->turn == 0 && env->phase == PHASE_ATTACK) {
+        Color color = (card.tapped) ? (Color){128, 0, 0, 255}: RED;
+        render_card(&card, x, y, color);
+        if (env->turn == 0) {
             render_label(x, y, i);
         }
     }
@@ -488,24 +559,24 @@ void render(TCG* env) {
         Card card = env->op_board->cards[i];
         int x = card_x(i, env->op_board->length);
         int y = card_y(1);
-        if (env->turn == 1 && env->attackers[i]) {
+        if (card.attacking) {
             y += 16;
         }
-        render_card(&card, x, y, BLUE);
+        Color color = (card.tapped) ? (Color){0, 0, 128, 255}: BLUE;
+        render_card(&card, x, y, color);
     }
 
-    for (int atk = 0; atk < env->my_board->length; atk++) {
-        for (int def = 0; def < env->op_board->length; def++) {
-            if (env->defenders[atk][def]) {
-                DrawLine(
-                    32+card_x(atk, env->my_board->length), 64+card_y(2),
-                    32+card_x(def, env->op_board->length), 64+card_y(1),
-                    WHITE
-                );
-            }
+    for (int i = 0; i < env->my_board->length; i++) {
+        Card card = env->my_board->cards[i];
+        if (card.defending == -1) {
+            continue;
         }
+        DrawLineEx(
+            (Vector2){32+card_x(i, env->my_board->length), 64+card_y(2)},
+            (Vector2){32+card_x(card.defending, env->op_board->length), 64+card_y(1)},
+            3.0f, WHITE
+        );
     }
-
 
     for (int i = 0; i < env->op_hand->length; i++) {
         Card card = env->op_hand->cards[i];
@@ -514,29 +585,22 @@ void render(TCG* env) {
         render_card(&card, x, y, BLUE);
     }
 
-    int phase = env->phase;
-    int x = GetScreenWidth() - 256;
+    int x = GetScreenWidth() - 128;
     int y = 32;
-    if (phase == PHASE_DRAW) {
+
+    call fn = peek(env->stack);
+    if (fn == phase_draw) {
         DrawText("Draw", x, y, 20, WHITE);
-    } else if (phase == PHASE_PLAY) {
+    } else if (fn == phase_play) {
         DrawText("Play", x, y, 20, WHITE);
-    } else if (phase == PHASE_ATTACK) {
+    } else if (fn == phase_attack) {
         DrawText("Attack", x, y, 20, WHITE);
-    } else if (phase == PHASE_BLOCK) {
+    } else if (fn == phase_block) {
         DrawText("Block", x, y, 20, WHITE);
-    }
+    } 
 
     DrawText(TextFormat("Health: %i", env->my_health), 32, 32, 20, WHITE);
     DrawText(TextFormat("Health: %i", env->op_health), 32, GetScreenHeight() - 64, 20, WHITE);
 
     EndDrawing();
 }
-
-
-
-
-
-
-
-
