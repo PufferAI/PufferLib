@@ -7,7 +7,8 @@ int main() {
         .grid_size = 18,
         .board_width = 1000,
         .board_height = 1000,
-        .grid_square_size = 1000/18
+        .grid_square_size = 1000/18,
+        .moves_made = 0
     };
     allocate(&env);
     reset(&env);
