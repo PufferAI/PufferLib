@@ -11,15 +11,16 @@ import gymnasium
 from raylib import rl
 
 import pufferlib
-from pufferlib.environments.ocean.breakout.cy_breakout import CyBreakout
+from pufferlib.environments.ocean.go.cy_go import CyGo
 
-class MyBreakout(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, report_interval=128,
-            frameskip=4, width=576, height=330,
-            paddle_width=62, paddle_height=8,
-            ball_width=6, ball_height=6,
-            brick_width=32, brick_height=12,
-            brick_rows=6, brick_cols=18):
+class MyGo(pufferlib.PufferEnv):
+    def __init__(self, num_envs=1, render_mode=None, report_interval=1,
+            width=1500, height=1200,
+            grid_size=18,
+            board_width=1000, board_height=1000,
+            grid_square_size=1000/18,
+            moves_made=0,
+            komi=7.5):
         super().__init__()
 
         # env
@@ -29,21 +30,21 @@ class MyBreakout(pufferlib.PufferEnv):
         self.report_interval = report_interval
 
         # sim hparams (px, px/tick)
-        self.frameskip = frameskip
+        self.grid_size = grid_size
+        self.board_width = board_width
+        self.board_height = board_height
+        self.grid_square_size = grid_square_size
+        self.moves_made = moves_made
         self.width = width
         self.height = height
-        self.paddle_width = paddle_width
-        self.paddle_height = paddle_height
-        self.ball_width = ball_width 
-        self.ball_height = ball_height
-        self.brick_width = brick_width
-        self.brick_height = brick_height
-        self.brick_rows = brick_rows
-        self.brick_cols = brick_cols
-
+        self.komi = komi
+        
+        # misc logging
+        self.reward_sum = 0.0
+        self.num_games = 0
         # spaces
-        self.num_obs = 11 + brick_rows*brick_cols
-        self.num_act = 4
+        self.num_obs = (self.grid_size+1) * (self.grid_size+1) + 1
+        self.num_act = (self.grid_size+1) * (self.grid_size+1) + 1
         self.observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(self.num_obs,), dtype=np.float32)
         self.single_observation_space = self.observation_space
@@ -69,11 +70,9 @@ class MyBreakout(pufferlib.PufferEnv):
 
         for i in range(self.num_envs):
             # TODO: since single agent, could we just pass values by reference instead of (1,) array?
-            self.c_envs.append(CyBreakout(self.frameskip, self.actions[i:i+1],
+            self.c_envs.append(CyGo(self.actions[i:i+1],
                 self.buf.observations[i], self.buf.rewards[i:i+1], self.buf.terminals[i:i+1],
-                self.width, self.height, self.paddle_width, self.paddle_height,
-                self.ball_width, self.ball_height, self.brick_width, self.brick_height,
-                self.brick_rows, self.brick_cols))
+                self.width, self.height, self.grid_size, self.board_width, self.board_height, self.grid_square_size, self.moves_made, self.komi))
             self.c_envs[i].reset()
 
         return self.buf.observations, {}
@@ -86,15 +85,25 @@ class MyBreakout(pufferlib.PufferEnv):
         # TODO: hacky way to convert uint8 to bool
         self.buf.terminals[:] = self.terminals_uint8.astype(bool)
         self.tick += 1
+        info = {}
+        self.reward_sum += self.buf.rewards.mean()
+        self.num_games += int(np.sum(self.buf.terminals))  # Convert to int
+        if self.tick % self.report_interval == 0:
+
+            info.update({
+                'reward': self.reward_sum / self.report_interval,
+                'num_games': self.num_games,
+            })
+            self.reward_sum = 0.0
 
         return (self.buf.observations, self.buf.rewards,
-            self.buf.terminals, self.buf.truncations, {})
+            self.buf.terminals, self.buf.truncations, info)
 
     def render(self):
         self.c_envs[0].render()
 
 def test_performance(timeout=10, atn_cache=1024):
-    env = MyPong(num_envs=1000)
+    env = MyGo(num_envs=1000)
     env.reset()
     tick = 0
 

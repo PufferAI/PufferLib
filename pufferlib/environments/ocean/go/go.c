@@ -2,18 +2,19 @@
 
 int main() {
     CGo env = {
-        .width = 1200,
+        .width = 1500,
         .height = 1200,
-        .grid_size = 18,
+        .grid_size = 9,
         .board_width = 1000,
         .board_height = 1000,
-        .grid_square_size = 1000/18,
-        .moves_made = 0
+        .grid_square_size = 1000/9,
+        .moves_made = 0,
+        .komi = 7.5
     };
     allocate(&env);
     reset(&env);
  
-    Client* client = make_client(&env);
+    init_client(&env);
 
     while (!WindowShouldClose()) {
         // User can take control of the paddle
@@ -38,15 +39,13 @@ int main() {
             if (cellX >= 0 && cellX <= env.grid_size && cellY >= 0 && cellY <= env.grid_size) {
                 // Calculate the point index (1-19) based on the click position
                 int pointIndex = cellY * (env.grid_size + 1) + cellX + 1; 
-
-                printf("pointIndex: %d\n", pointIndex);
                 env.actions[0] = (unsigned short)pointIndex;
             }
         }
         step(&env);
-        render(client, &env);
+        render(&env);
     }
-    close_client(client);
+    close_client(&env);
     free_allocated(&env);
     return 0;
 }
