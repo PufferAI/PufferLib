@@ -4,7 +4,7 @@ from libc.stdlib cimport free
 cdef extern from "go.h":
     ctypedef struct CGo:
         float* observations
-        unsigned char* actions
+        unsigned short* actions
         float* rewards
         unsigned char* dones
         float score
@@ -16,6 +16,7 @@ cdef extern from "go.h":
         int board_height
         int grid_square_size
         int moves_made
+        int client_initialized
         float komi
 
     void init(CGo* env)
@@ -35,7 +36,7 @@ cdef class CyGo:
             int width, int height, int grid_size, int board_width, int board_height, int grid_square_size, int moves_made, float komi):
         self.env = CGo(
             observations=<float*> observations.data,
-            actions=<unsigned char*> actions.data,
+            actions=<unsigned short*> actions.data,
             rewards=<float*> rewards.data,
             dones=<unsigned char*> dones.data,
             width=width,
@@ -45,7 +46,8 @@ cdef class CyGo:
             board_height=board_height,
             grid_square_size=grid_square_size,
             moves_made=moves_made,
-            komi=komi
+            komi=komi,
+            client_initialized=0
         )
         init(&self.env)
 
@@ -56,9 +58,13 @@ cdef class CyGo:
         step(&self.env)
 
     def render(self):
+        if not self.env.client_initialized:
+            init_client(&self.env)
+            self.env.client_initialized = 1
         render(&self.env)
 
     def close(self):
-        close_client(&self.env)
-
+        if self.env.client_initialized:
+            close_client(&self.env)
+            self.env.client_initialized = 0
         free_initialized(&self.env)

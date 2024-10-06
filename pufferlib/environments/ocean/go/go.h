@@ -38,6 +38,7 @@ struct CGo {
     int* capture_count;
     float komi;
     bool* visited;
+    bool client_initialized;
 };
 
 void generate_board_positions(CGo* env) {
@@ -61,6 +62,7 @@ void init(CGo* env) {
     env->temp_board_states = (int*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(int));
     env->capture_count = (int*)calloc(2, sizeof(int));
     env->last_capture_position = -1;
+    env->client_initialized = false;
     generate_board_positions(env);
 }
 

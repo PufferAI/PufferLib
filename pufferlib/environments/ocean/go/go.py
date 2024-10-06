@@ -16,9 +16,9 @@ from pufferlib.environments.ocean.go.cy_go import CyGo
 class MyGo(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=1,
             width=1500, height=1200,
-            grid_size=18,
+            grid_size=9,
             board_width=1000, board_height=1000,
-            grid_square_size=1000/18,
+            grid_square_size=1000/9,
             moves_made=0,
             komi=7.5):
         super().__init__()
