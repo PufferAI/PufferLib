@@ -1,7 +1,8 @@
 #include "breakout.h"
+#include <stdio.h>
 
 int main() {
-    CBreakout env = {
+    Breakout env = {
         .frameskip = 4,
         .width = 576,
         .height = 330,

@@ -17,12 +17,69 @@
 
 // how to start game compile - LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./connect4game 
 
+#define LOG_BUFFER_SIZE 1024
+
+typedef struct Log Log;
+struct Log {
+    float episode_return;
+    float episode_length;
+    float score;
+};
+
+typedef struct LogBuffer LogBuffer;
+struct LogBuffer {
+    Log* logs;
+    int length;
+    int idx;
+};
+
+LogBuffer* allocate_logbuffer(int size) {
+    LogBuffer* logs = (LogBuffer*)calloc(1, sizeof(LogBuffer));
+    logs->logs = (Log*)calloc(size, sizeof(Log));
+    logs->length = size;
+    logs->idx = 0;
+    return logs;
+}
+
+void free_logbuffer(LogBuffer* buffer) {
+    free(buffer->logs);
+    free(buffer);
+}
+
+void add_log(LogBuffer* logs, Log* log) {
+    if (logs->idx == logs->length) {
+        return;
+    }
+    logs->logs[logs->idx] = *log;
+    logs->idx += 1;
+    //printf("Log: %f, %f, %f\n", log->episode_return, log->episode_length, log->score);
+}
+
+Log aggregate_and_clear(LogBuffer* logs) {
+    Log log = {0};
+    if (logs->idx == 0) {
+        return log;
+    }
+    for (int i = 0; i < logs->idx; i++) {
+        log.episode_return += logs->logs[i].episode_return;
+        log.episode_length += logs->logs[i].episode_length;
+        log.score += logs->logs[i].score;
+    }
+    log.episode_return /= logs->idx;
+    log.episode_length /= logs->idx;
+    log.score /= logs->idx;
+    logs->idx = 0;
+    return log;
+}
+ 
 typedef struct CConnect4 CConnect4;
 struct CConnect4 {
     float* observations;
     unsigned char* actions;
     float* rewards;
     unsigned char* dones;
+    LogBuffer* log_buffer;
+    Log log;
     int piece_width;
     int piece_height;
     float* board_x;
@@ -45,22 +102,7 @@ void generate_board_positions(CConnect4* env) {
     }
 }
 
-CConnect4* init_cconnect4( unsigned char* actions,
-        float* observations, float* rewards, unsigned char* dones,
-        int width, int height, int piece_width, int piece_height, int longest_connected, int game_over, int pieces_placed) {
-
-    CConnect4* env = (CConnect4*)calloc(1, sizeof(CConnect4));
-
-    env->actions = actions;
-    env->observations = observations;
-    env->rewards = rewards;
-    env->dones = dones;
-    env->width = width;
-    env->height = height;
-    env->piece_width = piece_width;
-    env->piece_height = piece_height;
-    env->game_over = game_over;
-    env->pieces_placed = pieces_placed;
+void init_cconnect4(CConnect4* env) {
     // Allocate memory for board_x, board_y, and board_states
     env->board_x = (float*)calloc(42, sizeof(float));
     env->board_y = (float*)calloc(42, sizeof(float));
@@ -70,30 +112,23 @@ CConnect4* init_cconnect4( unsigned char* actions,
         }
     }
     env->longest_connected = (int*)calloc(2,sizeof(int));
-
     generate_board_positions(env);
-    return env;
 }
 
-CConnect4* allocate_cconnect4(int width, int height,
-        int piece_width, int piece_height, int longest_connected, int game_over, int pieces_placed) {
-
-    unsigned char* actions = (unsigned char*)calloc(1, sizeof(unsigned char));
-    float* observations = (float*)calloc(42, sizeof(float));
-    unsigned char* dones = (unsigned char*)calloc(1, sizeof(unsigned char));
-    float* rewards = (float*)calloc(1, sizeof(float));
-
-    CConnect4* env = init_cconnect4(actions,
-        observations, rewards, dones, width, height,
-        piece_width, piece_height, longest_connected, game_over, pieces_placed);
-
-    return env;
+void allocate_cconnect4(CConnect4* env) {
+    env->observations = (float*)calloc(42, sizeof(float));
+    env->actions = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->rewards = (float*)calloc(1, sizeof(float));
+    env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
+    init_cconnect4(env);
 }
 
 void free_cconnect4(CConnect4* env) {
     free(env->board_x);
     free(env->board_y);
     free(env->longest_connected);
+    free(env->log_buffer);
     free(env);
 }
 
@@ -115,9 +150,8 @@ void compute_observations(CConnect4* env) {
     }
 }
 
-
-
 void reset(CConnect4* env) {
+    env->log = (Log){0};
     for(int i=0; i< 6; i++) {
         for(int j=0; j< 7; j++) {
             env->board_states[i][j] = 0.0;
@@ -127,7 +161,9 @@ void reset(CConnect4* env) {
     env->longest_connected[1] = 0;
     env->pieces_placed = 0;
     env->dones[0] = 0;
+    compute_observations(env);
 }
+
 // if place piece at bottom of column 0 if no pieces is there idx should be 35
 // if there is a piece, it should be location 28
 int place_piece(CConnect4* env, int action_location, int player) {
@@ -181,16 +217,21 @@ void check_win_condition(CConnect4* env, int player, int selected_row, int selec
         if (count >= WIN_CONDITION) {
             env->dones[0] = 1;
             env->rewards[0] = player; // 1 for player win, -1 for opponent win
+            env->log.score = player;
+            env->log.episode_return = player;
+            add_log(env->log_buffer, &env->log);
             return;
         }
     }
 }
 
 void step(CConnect4* env) {
+    env->log.episode_length += 1;
     env->rewards[0] = 0.0;
     int action = env->actions[0];
 
     if (env->game_over == 1) {
+        add_log(env->log_buffer, &env->log);
         reset(env);
         env->game_over = 0;
         return;

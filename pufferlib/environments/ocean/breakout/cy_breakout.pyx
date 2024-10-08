@@ -1,12 +1,26 @@
 cimport numpy as cnp
-from libc.stdlib cimport free
+from libc.stdlib cimport calloc, free
 
 cdef extern from "breakout.h":
-    ctypedef struct CBreakout:
+    int LOG_BUFFER_SIZE
+
+    ctypedef struct Log:
+        float episode_return;
+        float episode_length;
+        float score;
+
+    ctypedef struct LogBuffer
+    LogBuffer* allocate_logbuffer(int)
+    void free_logbuffer(LogBuffer*)
+    Log aggregate_and_clear(LogBuffer*)
+
+    ctypedef struct Breakout:
         float* observations
         unsigned char* actions
         float* rewards
         unsigned char* dones
+        LogBuffer* log_buffer;
+        Log log;
         int score
         float episode_return
         float paddle_x
@@ -37,60 +51,90 @@ cdef extern from "breakout.h":
 
     ctypedef struct Client
 
-    void init(CBreakout* env)
-    void free_initialized(CBreakout* env)
+    void init(Breakout* env)
+    void free_initialized(Breakout* env)
 
-    Client* make_client(CBreakout* env)
+    Client* make_client(Breakout* env)
     void close_client(Client* client)
-    void render(Client* client, CBreakout* env)
-    void reset(CBreakout* env)
-    void step(CBreakout* env)
+    void render(Client* client, Breakout* env)
+    void reset(Breakout* env)
+    void step(Breakout* env)
 
 cdef class CyBreakout:
     cdef:
-        CBreakout env
+        Breakout* envs
         Client* client
+        LogBuffer* logs
+        int num_envs
 
-    def __init__(self, int frameskip, cnp.ndarray actions,
-            cnp.ndarray observations, cnp.ndarray rewards, cnp.ndarray dones,
+    def __init__(self, cnp.ndarray observations, cnp.ndarray actions,
+            cnp.ndarray rewards, cnp.ndarray terminals, int num_envs,  int frameskip,
             int width, int height, float paddle_width, float paddle_height,
             int ball_width, int ball_height, int brick_width, int brick_height,
             int brick_rows, int brick_cols):
-        self.env = CBreakout(
-            observations=<float*> observations.data,
-            actions=<unsigned char*> actions.data,
-            rewards=<float*> rewards.data,
-            dones=<unsigned char*> dones.data,
-            width=width,
-            height=height,
-            paddle_width=paddle_width,
-            paddle_height=paddle_height,
-            ball_width=ball_width,
-            ball_height=ball_height,
-            brick_width=brick_width,
-            brick_height=brick_height,
-            brick_rows=brick_rows,
-            brick_cols=brick_cols,
-            frameskip=frameskip,
-        )
-        init(&self.env)
+
         self.client = NULL
+        self.num_envs = num_envs
+        self.envs = <Breakout*> calloc(num_envs, sizeof(Breakout))
+        self.logs = allocate_logbuffer(LOG_BUFFER_SIZE)
+
+        cdef:
+            cnp.ndarray observations_i
+            cnp.ndarray actions_i
+            cnp.ndarray rewards_i
+            cnp.ndarray terminals_i
+
+        cdef int i
+        for i in range(num_envs):
+            observations_i = observations[i:i+1]
+            actions_i = actions[i:i+1]
+            rewards_i = rewards[i:i+1]
+            terminals_i = terminals[i:i+1]
+            self.envs[i] = Breakout(
+                observations=<float*> observations_i.data,
+                actions=<unsigned char*> actions_i.data,
+                rewards=<float*> rewards_i.data,
+                dones=<unsigned char*> terminals_i.data,
+                log_buffer=self.logs,
+                width=width,
+                height=height,
+                paddle_width=paddle_width,
+                paddle_height=paddle_height,
+                ball_width=ball_width,
+                ball_height=ball_height,
+                brick_width=brick_width,
+                brick_height=brick_height,
+                brick_rows=brick_rows,
+                brick_cols=brick_cols,
+                frameskip=frameskip,
+            )
+            init(&self.envs[i])
+            self.client = NULL
 
     def reset(self):
-        reset(&self.env)
+        cdef int i
+        for i in range(self.num_envs):
+            reset(&self.envs[i])
 
     def step(self):
-        step(&self.env)
+        cdef int i
+        for i in range(self.num_envs):
+            step(&self.envs[i])
 
     def render(self):
+        cdef Breakout* env = &self.envs[0]
         if self.client == NULL:
-            self.client = make_client(&self.env)
+            self.client = make_client(env)
 
-        render(self.client, &self.env)
+        render(self.client, env)
 
     def close(self):
         if self.client != NULL:
             close_client(self.client)
             self.client = NULL
 
-        free_initialized(&self.env)
+        free(self.envs)
+
+    def log(self):
+        cdef Log log = aggregate_and_clear(self.logs)
+        return log
