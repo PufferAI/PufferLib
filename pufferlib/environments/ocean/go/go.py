@@ -43,7 +43,7 @@ class MyGo(pufferlib.PufferEnv):
         self.reward_sum = 0.0
         self.num_games = 0
         # spaces
-        self.num_obs = (self.grid_size+1) * (self.grid_size+1) + 1
+        self.num_obs = (self.grid_size+1) * (self.grid_size+1)*2
         self.num_act = (self.grid_size+1) * (self.grid_size+1) + 1
         self.observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(self.num_obs,), dtype=np.float32)
@@ -84,15 +84,14 @@ class MyGo(pufferlib.PufferEnv):
 
         # TODO: hacky way to convert uint8 to bool
         self.buf.terminals[:] = self.terminals_uint8.astype(bool)
+
         self.tick += 1
         info = {}
         self.reward_sum += self.buf.rewards.mean()
-        self.num_games += int(np.sum(self.buf.terminals))  # Convert to int
-        if self.tick % self.report_interval == 0:
 
+        if self.tick % self.report_interval == 0:
             info.update({
                 'reward': self.reward_sum / self.report_interval,
-                'num_games': self.num_games,
             })
             self.reward_sum = 0.0
 

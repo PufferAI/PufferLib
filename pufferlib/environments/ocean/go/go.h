@@ -38,7 +38,8 @@ struct CGo {
     int* capture_count;
     float komi;
     bool* visited;
-    bool client_initialized;
+    int client_initialized;
+    int turn;
 };
 
 void generate_board_positions(CGo* env) {
@@ -62,13 +63,12 @@ void init(CGo* env) {
     env->temp_board_states = (int*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(int));
     env->capture_count = (int*)calloc(2, sizeof(int));
     env->last_capture_position = -1;
-    env->client_initialized = false;
     generate_board_positions(env);
 }
 
 void allocate(CGo* env) {
     init(env);
-    env->observations = (float*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(float));
+    env->observations = (float*)calloc((env->grid_size+1)*(env->grid_size+1)*2, sizeof(float));
     env->actions = (unsigned short*)calloc(1, sizeof(unsigned short));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
@@ -95,6 +95,9 @@ void free_allocated(CGo* env) {
 void compute_observations(CGo* env) {
     for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
         env->observations[i] = (float)env->board_states[i];
+    }
+    for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
+        env->observations[i + (env->grid_size+1)*(env->grid_size+1)] = (float)env->previous_board_state[i];
     }
 }
 
@@ -291,7 +294,6 @@ void reset(CGo* env) {
     env->capture_count[1] = 0;
     env->last_capture_position = -1;
     env->moves_made = 0;
-
 }
 
 void step(CGo* env) {
@@ -342,6 +344,7 @@ void step(CGo* env) {
             env->rewards[0] = 0.0;
         }
         reset(env);
+        return;
     }
     compute_observations(env);
 }
