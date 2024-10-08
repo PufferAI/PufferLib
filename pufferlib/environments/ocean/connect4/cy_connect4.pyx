@@ -1,12 +1,26 @@
 cimport numpy as cnp
-from libc.stdlib cimport free
+from libc.stdlib cimport calloc, free
 
 cdef extern from "connect4.h":
+    int LOG_BUFFER_SIZE
+
+    ctypedef struct Log:
+        float episode_return;
+        float episode_length;
+        float score;
+
+    ctypedef struct LogBuffer
+    LogBuffer* allocate_logbuffer(int)
+    void free_logbuffer(LogBuffer*)
+    Log aggregate_and_clear(LogBuffer*)
+
     ctypedef struct CConnect4:
         float* observations
         unsigned char* actions
         float* rewards
         unsigned char* dones
+        LogBuffer* log_buffer;
+        Log log;
         int game_over
         int piece_width;
         int piece_height;
@@ -18,12 +32,9 @@ cdef extern from "connect4.h":
         int height;
         int pieces_placed;
 
-
     ctypedef struct Client
 
-    CConnect4* init_cconnect4(unsigned char* actions,
-            float* observations, float* rewards, unsigned char* dones,
-            int width, int height, int piece_width, int piece_height, int longest_connected, int game_over, int pieces_placed)
+    CConnect4* init_cconnect4(CConnect4* env)
     void free_cconnect4(CConnect4* env)
 
     Client* make_client(float width, float height)
@@ -34,32 +45,70 @@ cdef extern from "connect4.h":
 
 cdef class CyConnect4:
     cdef:
-        CConnect4* env
+        CConnect4* envs
         Client* client
+        LogBuffer* logs
+        int num_envs
 
-    def __init__(self,cnp.ndarray actions,
-            cnp.ndarray observations, cnp.ndarray rewards, cnp.ndarray dones,
-            int width, int height, int piece_width, int piece_height, int longest_connected, int game_over, int pieces_placed):
-        self.env = init_cconnect4(<unsigned char*> actions.data,
-            <float*> observations.data, <float*> rewards.data, <unsigned char*> dones.data,
-            width, height, piece_width, piece_height, longest_connected, game_over, pieces_placed)
+    def __init__(self, cnp.ndarray observations, cnp.ndarray actions,
+            cnp.ndarray rewards, cnp.ndarray terminals, int num_envs,
+            int width, int height, int piece_width, int piece_height):
+
+        self.num_envs = num_envs
         self.client = NULL
+        self.envs = <CConnect4*> calloc(num_envs, sizeof(CConnect4))
+        self.logs = allocate_logbuffer(LOG_BUFFER_SIZE)
+
+        cdef:
+            cnp.ndarray observations_i
+            cnp.ndarray actions_i
+            cnp.ndarray rewards_i
+            cnp.ndarray terminals_i
+
+        cdef int i
+        for i in range(num_envs):
+            observations_i = observations[i:i+1]
+            actions_i = actions[i:i+1]
+            rewards_i = rewards[i:i+1]
+            terminals_i = terminals[i:i+1]
+            self.envs[i] = CConnect4(
+                observations = <float*> observations_i.data,
+                actions = <unsigned char*> actions_i.data,
+                rewards = <float*> rewards_i.data,
+                dones = <unsigned char*> terminals_i.data,
+                log_buffer=self.logs,
+                piece_width=piece_width,
+                piece_height=piece_height,
+                width=width,
+                height=height,
+            )
+            init_cconnect4(&self.envs[i])
 
     def reset(self):
-        reset(self.env)
+        cdef int i
+        for i in range(self.num_envs):
+            reset(&self.envs[i])
 
     def step(self):
-        step(self.env)
+        cdef int i
+        for i in range(self.num_envs):
+            step(&self.envs[i])
 
     def render(self):
+        cdef CConnect4* env = &self.envs[0]
         if self.client == NULL:
-            self.client = make_client(self.env.width, self.env.height)
+            self.client = make_client(env.width, env.height)
 
-        render(self.client, self.env)
+        render(self.client, env)
 
     def close(self):
         if self.client != NULL:
             close_client(self.client)
             self.client = NULL
 
-        free_cconnect4(self.env)
+        # TODO: free
+        free_cconnect4(self.envs)
+
+    def log(self):
+        cdef Log log = aggregate_and_clear(self.logs)
+        return log

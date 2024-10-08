@@ -1,7 +1,7 @@
 #include "pong.h"
 
 int main() {
-    CPong env = {
+    Pong env = {
         .width = 500,
         .height = 640,
         .paddle_width = 20,
