@@ -7,8 +7,8 @@ import time
 import psutil
 
 from pufferlib import namespace
-from pufferlib.environment import PufferEnv
 from pufferlib.emulation import GymnasiumPufferEnv, PettingZooPufferEnv
+from pufferlib.environment import PufferEnv
 from pufferlib.exceptions import APIUsageError
 from pufferlib.namespace import Namespace
 import pufferlib.spaces
@@ -52,56 +52,71 @@ def step(vecenv, actions):
     obs, rewards, terminals, truncations, infos, env_ids, masks = vecenv.recv()
     return obs, rewards, terminals, truncations, infos # include env_ids or no?
 
-def joint_space(space, n):
-    if isinstance(space, pufferlib.spaces.Discrete):
-        return gymnasium.spaces.MultiDiscrete([space.n] * n)
-    elif isinstance(space, pufferlib.spaces.MultiDiscrete):
-        return gymnasium.spaces.Box(low=0,
-            high=np.repeat(space.nvec[None] - 1, n, axis=0),
-            shape=(n, len(space)), dtype=space.dtype)
-    elif isinstance(space, pufferlib.spaces.Box):
-        return gymnasium.spaces.Box(
-            low=np.repeat(space.low[None], n, axis=0),
-            high=np.repeat(space.high[None], n, axis=0),
-            shape=(n, *space.shape), dtype=space.dtype)
-    else:
-        raise ValueError(f'Unsupported space: {space}')
-
 class Native:
     reset = reset
     step = step
 
     @property
-    def num_envs(self):
-        return self.agents_per_batch
+    def emulated(self):
+        '''Native envs do not use emulation'''
+        return False
 
-    def __init__(self, env_creators, env_args, env_kwargs, num_envs, **kwargs):
-        assert len(env_creators) == 1
-        assert num_envs == 1
-        self.envs = env_creators[0](*env_args[0], **env_kwargs[0])
-        self.driver_env = self.envs
-        self.emulated = self.driver_env.emulated
-        self.num_agents = num_agents = self.envs.num_agents
-        self.agents_per_batch = self.num_agents
-        self.num_agents = num_agents
-        self.single_observation_space = self.envs.single_observation_space
-        self.single_action_space = self.envs.single_action_space
-        self.action_space = joint_space(self.single_action_space, self.agents_per_batch)
-        self.observation_space = joint_space(self.single_observation_space, self.agents_per_batch)
+    @property
+    def done(self):
+        '''Native envs handle resets internally'''
+        return False
+
+    @property
+    def driver_env(self):
+        return self.env
+
+    @property
+    def num_agents(self):
+        return self.env.num_agents
+
+    @property
+    def num_envs(self):
+        return self.env.num_envs
+
+    @property
+    def single_observation_space(self):
+        return self.env.single_observation_space
+
+    @property
+    def single_action_space(self):
+        return self.env.single_action_space
+
+    def __init__(self, env_creator, env_args, env_kwargs, buf=None, **kwargs):
+        self.env = env_creator(*env_args, buf=buf, **env_kwargs)
+        assert isinstance(self.env, PufferEnv)
+
+        self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.num_agents)
+        self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.num_agents)
+        self.agent_ids = np.arange(self.num_agents)
         self.flag = RESET
+
+        if not isinstance(self.single_observation_space, pufferlib.spaces.Box):
+            raise APIUsageError('Native observation_space must be a Box')
+        if (not isinstance(self.single_action_space, pufferlib.spaces.Discrete)
+                and not isinstance(self.single_action_space, pufferlib.spaces.MultiDiscrete)
+                and not isinstance(self.single_action_space, pufferlib.spaces.Box)):
+            raise APIUsageError('Native action_space must be a Discrete, MultiDiscrete, or Box')
 
     def async_reset(self, seed=None):
         self.flag = RECV
-        self.ready = self.envs.reset(seed)
+        _, self.infos = self.env.reset(seed)
+        assert isinstance(self.infos, list), 'PufferEnvs must return info as a list of dicts'
 
     def send(self, actions):
-        self.ready = self.envs.step(actions)
+        _, _, _, _, self.infos = self.env.step(actions)
+        assert isinstance(self.infos, list), 'PufferEnvs must return info as a list of dicts'
 
     def recv(self):
-        return self.ready
+        return (self.env.observations, self.env.rewards, self.env.terminals,
+            self.env.truncations, self.infos, self.agent_ids, self.env.masks)
 
     def close(self):
-        self.envs.close()
+        self.env.close()
  
 class Serial:
     reset = reset
@@ -123,8 +138,8 @@ class Serial:
         self.num_agents = sum(self.agents_per_env)
         self.single_observation_space = driver.single_observation_space
         self.single_action_space = driver.single_action_space
-        self.action_space = joint_space(self.single_action_space, self.agents_per_batch)
-        self.observation_space = joint_space(self.single_observation_space, self.agents_per_batch)
+        self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.agents_per_batch)
+        self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.agents_per_batch)
         self.agent_ids = np.arange(self.num_agents)
         self.initialized = False
         self.flag = RESET
@@ -201,17 +216,11 @@ class Serial:
         for env in self.envs:
             env.close()
 
-def _worker_process(env_creators, env_args, env_kwargs, num_envs,
-        num_workers, worker_idx, send_pipe, recv_pipe, shm):
-
-    envs = Serial(env_creators, env_args, env_kwargs, num_envs)
-    obs_shape = envs.single_observation_space.shape
-    obs_dtype = envs.single_observation_space.dtype
-    atn_shape = envs.single_action_space.shape
-    atn_dtype = envs.single_action_space.dtype
+def _worker_process(env_creators, env_args, env_kwargs, obs_shape, obs_dtype, atn_shape, atn_dtype,
+        num_envs, num_agents, num_workers, worker_idx, send_pipe, recv_pipe, shm, is_native):
 
     # Environments read and write directly to shared memory
-    shape = (num_workers, envs.num_agents)
+    shape = (num_workers, num_agents)
     atn_arr = np.ndarray((*shape, *atn_shape),
         dtype=atn_dtype, buffer=shm.actions)[worker_idx]
     buf = namespace(
@@ -221,9 +230,15 @@ def _worker_process(env_creators, env_args, env_kwargs, num_envs,
         terminals=np.ndarray(shape, dtype=bool, buffer=shm.terminals)[worker_idx],
         truncations=np.ndarray(shape, dtype=bool, buffer=shm.truncateds)[worker_idx],
         masks=np.ndarray(shape, dtype=bool, buffer=shm.masks)[worker_idx],
+        actions=atn_arr,
     )
     buf.masks[:] = True
-    envs._assign_buffers(buf)
+
+    if is_native:
+        envs = Native(env_creators[0], env_args[0], env_kwargs[0], buf=buf)
+    else:
+        envs = Serial(env_creators, env_args, env_kwargs, num_envs)
+        envs._assign_buffers(buf)
 
     semaphores=np.ndarray(num_workers, dtype=np.uint8, buffer=shm.semaphores)
     start = time.time()
@@ -290,7 +305,10 @@ class Multiprocessing:
         # forked processes. So for now, RawArray is much more reliable.
         # You can't send a RawArray through a pipe.
         self.driver_env = driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
-        self.emulated = driver_env.emulated
+        is_native = isinstance(driver_env, PufferEnv)
+        if is_native and envs_per_worker != 1:
+            raise APIUsageError('Native PufferEnvs should run multiple envs internally, not in Multiprocessing')
+        self.emulated = False if is_native else driver_env.emulated
         self.num_agents = num_agents = driver_env.num_agents * num_envs
         self.agents_per_batch = driver_env.num_agents * batch_size
         agents_per_worker = driver_env.num_agents * envs_per_worker
@@ -305,9 +323,8 @@ class Multiprocessing:
 
         self.single_observation_space = driver_env.single_observation_space
         self.single_action_space = driver_env.single_action_space
-        self.action_space = joint_space(self.single_action_space, self.agents_per_batch)
-        self.observation_space = joint_space(self.single_observation_space, self.agents_per_batch)
- 
+        self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.agents_per_batch)
+        self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.agents_per_batch)
         self.agent_ids = np.arange(num_agents).reshape(num_workers, agents_per_worker)
 
         from multiprocessing import RawArray
@@ -348,9 +365,10 @@ class Multiprocessing:
             p = Process(
                 target=_worker_process,
                 args=(env_creators[start:end], env_args[start:end],
-                    env_kwargs[start:end], envs_per_worker,
+                    env_kwargs[start:end], obs_shape, obs_dtype,
+                    atn_shape, atn_dtype, envs_per_worker, driver_env.num_agents,
                     num_workers, i, w_send_pipes[i], w_recv_pipes[i],
-                    self.shm)
+                    self.shm, is_native)
             )
             p.start()
             self.processes.append(p)
@@ -507,8 +525,8 @@ class Ray():
 
         self.single_observation_space = driver_env.single_observation_space
         self.single_action_space = driver_env.single_action_space
-        self.action_space = joint_space(self.single_action_space, self.agents_per_batch)
-        self.observation_space = joint_space(self.single_observation_space, self.agents_per_batch)
+        self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.agents_per_batch)
+        self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.agents_per_batch)
  
         self.agent_ids = np.arange(num_agents).reshape(num_workers, agents_per_worker)
 
@@ -603,6 +621,12 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Serial
         raise APIUsageError('num_envs must be at least 1')
     if num_envs != int(num_envs):
         raise APIUsageError('num_envs must be an integer')
+
+    if backend is Native:
+        env_args = env_args or []
+        env_kwargs = env_kwargs or {}
+        return env_creator_or_creators(*env_args, **env_kwargs)
+        #return Native(env_creator_or_creators, env_args, env_kwargs, **kwargs)
 
     if 'num_workers' in kwargs:
         num_workers = kwargs['num_workers']
