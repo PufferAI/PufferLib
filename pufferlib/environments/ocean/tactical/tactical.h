@@ -13,6 +13,8 @@
 #define CELL_HOLE 2
 #define CELL_WALL 3
 
+#define MAX_TEXT_ANIMATIONS 100  // max number of text animations
+
 const Color COLOR_BACKGROUND = {6, 24, 24, 255}; // window background
 const Color COLOR_CELL_GRASS = {150, 200, 150, 255}; // top of WALL cells
 const Color COLOR_CELL_DIRT = {80, 50, 50, 255}; // side of WALL cells
@@ -43,6 +45,7 @@ const Color COLOR_ENTITY_NAME_HOVER = YELLOW;
 // forward declarations
 typedef struct Entity Entity;
 typedef struct Spell Spell;
+typedef struct GameRenderer GameRenderer;
 
 typedef struct Tactical {
     int num_agents;
@@ -95,6 +98,66 @@ struct Spell {
     bool modifiable_range; // whether spell range can be increased or decreased from other spells
     // TODO add a "zone of effect" shape that lists the deltas that the spell touches around the cell
     void (*effect)(Tactical*, Entity*, int); // pointer to a function that takes in the env, the caster and the target cell
+    bool (*render_animation)(Tactical*, GameRenderer*, int, int, float); // pointer to a function that takes in the env, the renderer, the caster cell, the target cell and the progress (in seconds), that renders the spell animation and returns true when the animation is finished
+};
+
+struct GameRenderer {
+    int width;
+    int height;
+
+    float cw; // cell width
+    float ch; // cell height
+    float offset_x; // offset for the whole map
+    float offset_y; // offset for the whole map
+    float dy; // vertical offset for wall cells
+
+    // current cell (if any) under the mouse cursor
+    int mx;
+    int my;
+    int mrow;
+    int mcol;
+    int mcell;
+    int mcell_type;
+
+    bool* movement_cells;
+    Spell* active_spell;
+    bool* spell_cells;
+
+    // for drawing
+    float *xa, *xb, *xc, *xd, *xe, *ya, *yb, *yc, *yd, *ye;
+
+    // animations (move)
+    Entity* move_anim_entity;
+    int* move_anim_path;
+    int move_anim_path_idx;
+    int move_anim_path_length;
+    float move_anim_progress;
+    float move_anim_dx; // delta in position with respect to the center of the cell
+    float move_anim_dy;
+    float move_anim_cells_per_second;
+
+    // animations (text)
+    char* text_anim_texts[MAX_TEXT_ANIMATIONS];
+    float text_anim_x0[MAX_TEXT_ANIMATIONS];
+    float text_anim_x1[MAX_TEXT_ANIMATIONS];
+    float text_anim_y0[MAX_TEXT_ANIMATIONS];
+    float text_anim_y1[MAX_TEXT_ANIMATIONS];
+    float text_anim_progress[MAX_TEXT_ANIMATIONS];
+    float text_anim_duration[MAX_TEXT_ANIMATIONS]; // in seconds
+    Color text_anim_color[MAX_TEXT_ANIMATIONS];
+    int text_anim_font_size[MAX_TEXT_ANIMATIONS];
+    int text_anim_count;
+
+    // animations (spells) -- only one at a time
+    Spell* spell_anim;
+    float spell_anim_progress;
+    int spell_anim_caster_cell;
+    int spell_anim_target_cell;
+
+    clock_t last_render_time;
+    double dt; // in seconds
+    float max_fps;
+
 };
 
 void free_tactical(Tactical* env) {
@@ -154,6 +217,31 @@ void spell_fire_arrow(Tactical* env, Entity* caster, int target_cell) {
         target->health_points_current -= 200;
     }
 }
+bool spell_fire_arrow_anim(Tactical* env, GameRenderer* renderer, int caster_cell, int target_cell, float t) {
+    float xe0 = renderer->xe[caster_cell];
+    float xe1 = renderer->xe[target_cell];
+    float ye0 = renderer->ye[caster_cell];
+    float ye1 = renderer->ye[target_cell];
+
+    float phase1_duration = 0.5;
+    float phase2_duration = 0.2;
+
+    Vector2 vec = GetSplinePointBezierQuad(
+        (Vector2){xe0, ye0 - 2 * renderer->ch},
+        (Vector2){(xe0 + xe1) / 2, (ye0 + ye1) / 2 - 200},
+        (Vector2){xe1, ye1},
+        fmin(t / phase1_duration, 1.0));
+
+    if (t <= phase1_duration) {
+        DrawCircle(vec.x, vec.y, 10, (Color){255, 0, 0, 255});
+    } else if (t <= phase1_duration + phase2_duration) {
+        DrawCircle(vec.x, vec.y, 10 + (t - phase1_duration) * 100,
+            (Color){255, 0, 0, 255 - (t - phase1_duration) * 1200});
+    } else {
+        return true;
+    }
+    return false;
+}
 Spell create_spell_fire_arrow() {
     Spell spell;
     spell.name = "Fire Arrow";
@@ -162,32 +250,33 @@ Spell create_spell_fire_arrow() {
     spell.remaining_cooldown = 0;
     spell.range = 12;
     spell.effect = spell_fire_arrow;
+    spell.render_animation = spell_fire_arrow_anim;
     return spell;
 }
 
-void spell_damage_target2(Tactical* env, Entity* caster, int target_cell) {
-    //TODO
-}
-Spell create_spell_damage_target2() {
-    Spell spell;
-    spell.name = "Fireball 2";
-    spell.ap_cost = 6;
-    spell.cooldown = 4;
-    spell.remaining_cooldown = 0;
-    spell.range = 20;
-    spell.effect = spell_damage_target2;
-    return spell;
-}
+// void spell_damage_target2(Tactical* env, Entity* caster, int target_cell) {
+//     //TODO
+// }
+// Spell create_spell_damage_target2() {
+//     Spell spell;
+//     spell.name = "Fireball 2";
+//     spell.ap_cost = 6;
+//     spell.cooldown = 4;
+//     spell.remaining_cooldown = 0;
+//     spell.range = 20;
+//     spell.effect = spell_damage_target2;
+//     return spell;
+// }
 
 void assign_spells(Entity* entity) {
     // TODO assign different spells based on class
     entity->spell_count = 5;
     entity->spells = malloc(entity->spell_count * sizeof(Spell));
     entity->spells[0] = create_spell_fire_arrow();
-    entity->spells[1] = create_spell_damage_target2();
-    entity->spells[2] = create_spell_damage_target2();
-    entity->spells[3] = create_spell_damage_target2();
-    entity->spells[4] = create_spell_damage_target2();
+    entity->spells[1] = create_spell_fire_arrow();
+    entity->spells[2] = create_spell_fire_arrow();
+    entity->spells[3] = create_spell_fire_arrow();
+    entity->spells[4] = create_spell_fire_arrow();
 }
 
 void compute_observations(Tactical* env) {
@@ -409,47 +498,6 @@ int step(Tactical* env) {
 ////////////////////////////////// RENDERING ///////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
 
-typedef struct {
-    int width;
-    int height;
-
-    float cw; // cell width
-    float ch; // cell height
-    float offset_x; // offset for the whole map
-    float offset_y; // offset for the whole map
-    float dy; // vertical offset for wall cells
-
-    // current cell (if any) under the mouse cursor
-    int mx;
-    int my;
-    int mrow;
-    int mcol;
-    int mcell;
-    int mcell_type;
-
-    bool* movement_cells;
-    Spell* active_spell;
-    bool* spell_cells;
-
-    // for drawing
-    float *xa, *xb, *xc, *xd, *xe, *ya, *yb, *yc, *yd, *ye;
-
-    // animations
-    Entity* move_anim_entity;
-    int* move_anim_path;
-    int move_anim_path_idx;
-    int move_anim_path_length;
-    float move_anim_progress;
-    float move_anim_dx; // delta in position with respect to the center of the cell
-    float move_anim_dy;
-    float move_anim_cells_per_second;
-
-    clock_t last_render_time;
-    double dt; // in seconds
-    float max_fps;
-
-} GameRenderer;
-
 
 GameRenderer* init_game_renderer(Tactical* env) {
     GameRenderer* renderer = (GameRenderer*)calloc(1, sizeof(GameRenderer));
@@ -472,6 +520,10 @@ GameRenderer* init_game_renderer(Tactical* env) {
 
     renderer->move_anim_path = calloc(env->map_size, sizeof(int));
     renderer->move_anim_cells_per_second = 6;
+
+    renderer->text_anim_count = 0;
+
+    renderer->spell_anim = NULL;
     
     renderer->xa = calloc(env->map_size, sizeof(float));
     renderer->xb = calloc(env->map_size, sizeof(float));
@@ -668,12 +720,135 @@ void draw_player_dashboard(GameRenderer* renderer, Entity* dashboard_entity, boo
     for (int i = 0; i < dashboard_entity->spell_count; ++i) {
         Spell* spell = &dashboard_entity->spells[i];
         if (spell->remaining_cooldown > 0) {
-            DrawText(TextFormat("[%i] %s (cooldown: %i)", 
-                    i+1, spell->name, spell->remaining_cooldown), 
+            DrawText(TextFormat("[%i] (%i AP) %s (cooldown: %i)", 
+                    i+1, spell->ap_cost, spell->name, spell->remaining_cooldown), 
                 300, renderer->height - 125 + i * 20, 20, COLOR_SPELL_COOLDOWN);
         } else {
-            DrawText(TextFormat("[%i] %s", i+1, spell->name),
+            DrawText(TextFormat("[%i] (%i AP) %s", i+1, spell->ap_cost, spell->name),
                 300, renderer->height - 125 + i * 20, 20, COLOR_SPELL);
+        }
+    }
+}
+
+void update_animation_move(Tactical* env, GameRenderer* renderer) {
+    renderer->move_anim_progress += renderer->dt * renderer->move_anim_cells_per_second;
+    if (renderer->move_anim_progress >= 1) {
+        renderer->move_anim_progress = fmod(renderer->move_anim_progress, 1);
+        renderer->move_anim_path_idx += 1;
+    }
+    if (renderer->move_anim_path_idx == renderer->move_anim_path_length) {
+        // reached last cell: stop animation
+        renderer->move_anim_entity = NULL;
+    } else {
+        int current_cell = renderer->move_anim_path[renderer->move_anim_path_idx];
+        int next_cell = renderer->move_anim_path[renderer->move_anim_path_idx + 1];
+        int current_row = get_row(env, current_cell);
+        int next_row = get_row(env, next_cell);
+        int current_col = get_col(env, current_cell);
+        int next_col = get_col(env, next_cell);
+        int move_dx, move_dy;
+        if (next_row == current_row + 1) {
+            move_dx = -1;
+            move_dy = 1;
+        } else if (next_row == current_row - 1) {
+            move_dx = 1;
+            move_dy = -1;
+        } else if (next_col == current_col + 1) {
+            move_dx = 1;
+            move_dy = 1;
+        } else if (next_col == current_col - 1) {
+            move_dx = -1;
+            move_dy = -1;
+        } else {
+            // should be an impossible case
+            move_dx = 0;
+            move_dy = 0;
+        }
+        renderer->move_anim_dx = renderer->move_anim_progress * move_dx * renderer->cw * 0.5;
+        renderer->move_anim_dy = renderer->move_anim_progress * move_dy * renderer->ch * 0.5;
+    }
+}
+
+void add_animation_text(Tactical* env, GameRenderer* renderer, const char* text, int cell, Color color, int font_size, float duration) {
+    int idx = renderer->text_anim_count;
+    if (idx < MAX_TEXT_ANIMATIONS) {
+        renderer->text_anim_texts[idx] = malloc(strlen(text) + 1);
+        strcpy(renderer->text_anim_texts[idx], text);
+
+        renderer->text_anim_x0[idx] = renderer->xe[cell] - MeasureText(text, font_size) / 2;
+        renderer->text_anim_y0[idx] = renderer->ye[cell] - 2.5 * renderer->ch;
+        renderer->text_anim_x1[idx] = renderer->text_anim_x0[idx];
+        renderer->text_anim_y1[idx] = renderer->text_anim_y0[idx] - 3 * renderer->ch;
+
+        renderer->text_anim_progress[idx] = 0;
+        renderer->text_anim_duration[idx] = duration;
+        renderer->text_anim_color[idx] = color;
+        renderer->text_anim_font_size[idx] = font_size;
+        renderer->text_anim_count++;
+    } else {
+        printf("renderer->text_anim_texts array is full, cannot add more strings");
+    }
+}
+
+void remove_animation_text(GameRenderer* renderer, int index) {
+    if (index < 0 || index >= renderer->text_anim_count) {
+        printf("Invalid index in remove_animation_text\n");
+        return;
+    }
+
+    free(renderer->text_anim_texts[index]);
+
+    // shift all strings after the removed index to the left
+    for (int i = index; i < renderer->text_anim_count - 1; i++) {
+        renderer->text_anim_texts[i] = renderer->text_anim_texts[i + 1];
+        renderer->text_anim_x0[i] = renderer->text_anim_x0[i + 1];
+        renderer->text_anim_x1[i] = renderer->text_anim_x1[i + 1];
+        renderer->text_anim_y0[i] = renderer->text_anim_y0[i + 1];
+        renderer->text_anim_y1[i] = renderer->text_anim_y1[i + 1];
+        renderer->text_anim_progress[i] = renderer->text_anim_progress[i + 1];
+        renderer->text_anim_duration[i] = renderer->text_anim_duration[i + 1];
+        renderer->text_anim_color[i] = renderer->text_anim_color[i + 1];
+        renderer->text_anim_font_size[i] = renderer->text_anim_font_size[i + 1];
+    }
+    renderer->text_anim_count--;
+}
+
+void update_animations_text(GameRenderer *renderer) {
+    for (int i = renderer->text_anim_count - 1; i >= 0; --i) {
+        // backward loop because of the way strings are shifted in remove_animation_text
+        renderer->text_anim_progress[i] += renderer->dt / renderer->text_anim_duration[i];
+        if (renderer->text_anim_progress[i] >= 1) {
+            remove_animation_text(renderer, i);
+        }
+    }
+}
+
+void draw_animations_text(GameRenderer *renderer) {
+    for (int i = 0; i < renderer->text_anim_count; ++i) {
+        float t = renderer->text_anim_progress[i];
+        float x = (1 - t) * renderer->text_anim_x0[i] + t * renderer->text_anim_x1[i];
+        float y = (1 - t) * renderer->text_anim_y0[i] + t * renderer->text_anim_y1[i];
+        Color color = renderer->text_anim_color[i];
+        color.a = (int)((1 - t) * 255);
+        DrawText(renderer->text_anim_texts[i], x, y, renderer->text_anim_font_size[i], color);
+    }
+}
+
+void update_animation_spell(GameRenderer* renderer) {
+    renderer->spell_anim_progress += renderer->dt;
+}
+
+void draw_animation_spell(Tactical* env, GameRenderer* renderer) {
+    if (renderer->spell_anim) {
+        bool finished = renderer->spell_anim->render_animation(
+            env,
+            renderer,
+            renderer->spell_anim_caster_cell,
+            renderer->spell_anim_target_cell,
+            renderer->spell_anim_progress
+        );
+        if (finished) {
+            renderer->spell_anim = NULL;
         }
     }
 }
@@ -704,11 +879,19 @@ int render_game(GameRenderer* renderer, Tactical* env) {
     const int mcell = renderer->mcell;
     // movement path display, if applicable ; and spells
     memset(renderer->movement_cells, 0, env->map_size * sizeof(bool));
-    if (renderer->active_spell) {
+    if (renderer->spell_anim) {
+        update_animation_spell(renderer);
+    } else if (renderer->active_spell) {
         if (mcell != -1 && renderer->spell_cells[mcell]) {
             cursor = MOUSE_CURSOR_POINTING_HAND;
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 cast_spell(env, env->current_player, renderer->active_spell, mcell);
+                add_animation_text(env, renderer, TextFormat("-%i AP", renderer->active_spell->ap_cost),
+                    env->current_player->cell, COLOR_ACTION_POINTS, 20, 1.2);
+                renderer->spell_anim = renderer->active_spell;
+                renderer->spell_anim_caster_cell = env->current_player->cell;
+                renderer->spell_anim_target_cell = mcell;
+                renderer->spell_anim_progress = 0.0f;
                 renderer->active_spell = NULL;
             }
         }
@@ -725,6 +908,9 @@ int render_game(GameRenderer* renderer, Tactical* env) {
             }
             cursor = MOUSE_CURSOR_POINTING_HAND;
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                add_animation_text(env, renderer, TextFormat("-%i MP", path_length),
+                    env->current_player->cell, COLOR_MOVEMENT_POINTS, 20, 1.2);
+
                 if (try_move_entity(env, env->current_player, mcell)) {
                     // start move animation
                     renderer->move_anim_entity = env->current_player;
@@ -739,64 +925,33 @@ int render_game(GameRenderer* renderer, Tactical* env) {
     }
 
     if (renderer->move_anim_entity) {
-        renderer->move_anim_progress += renderer->dt * renderer->move_anim_cells_per_second;
-        if (renderer->move_anim_progress >= 1) {
-            renderer->move_anim_progress = fmod(renderer->move_anim_progress, 1);
-            renderer->move_anim_path_idx += 1;
-        }
-        if (renderer->move_anim_path_idx == renderer->move_anim_path_length) {
-            // reached last cell: stop animation
-            renderer->move_anim_entity = NULL;
-        } else {
-            int current_cell = renderer->move_anim_path[renderer->move_anim_path_idx];
-            int next_cell = renderer->move_anim_path[renderer->move_anim_path_idx + 1];
-            int current_row = get_row(env, current_cell);
-            int next_row = get_row(env, next_cell);
-            int current_col = get_col(env, current_cell);
-            int next_col = get_col(env, next_cell);
-            int move_dx, move_dy;
-            if (next_row == current_row + 1) {
-                move_dx = -1;
-                move_dy = 1;
-            } else if (next_row == current_row - 1) {
-                move_dx = 1;
-                move_dy = -1;
-            } else if (next_col == current_col + 1) {
-                move_dx = 1;
-                move_dy = 1;
-            } else if (next_col == current_col - 1) {
-                move_dx = -1;
-                move_dy = -1;
-            } else {
-                // should be an impossible case
-                move_dx = 0;
-                move_dy = 0;
-            }
-            renderer->move_anim_dx = renderer->move_anim_progress * move_dx * renderer->cw * 0.5;
-            renderer->move_anim_dy = renderer->move_anim_progress * move_dy * renderer->ch * 0.5;
-        }
+        update_animation_move(env, renderer);
     }
+    update_animations_text(renderer);
 
     // KEYS
-    if (IsKeyPressed(KEY_SPACE)) {
-        renderer->active_spell = NULL;
-        next_player(env);
-    }
 
-    int tentative_spell_id = -1;
-    if (IsKeyPressed(KEY_ONE)) tentative_spell_id = 0;
-    else if (IsKeyPressed(KEY_TWO)) tentative_spell_id = 1;
+    if (!renderer->spell_anim) {
+        if (IsKeyPressed(KEY_SPACE)) {
+            renderer->active_spell = NULL;
+            next_player(env);
+        }
 
-    if (tentative_spell_id >= 0 && tentative_spell_id < env->current_player->spell_count) {
-        Spell* spell = &env->current_player->spells[tentative_spell_id];
-        if (spell->remaining_cooldown == 0 && env->current_player->action_points_current >= spell->ap_cost) {
-            renderer->active_spell = spell;
+        int tentative_spell_id = -1;
+        if (IsKeyPressed(KEY_ONE)) tentative_spell_id = 0;
+        else if (IsKeyPressed(KEY_TWO)) tentative_spell_id = 1;
 
-            memset(renderer->spell_cells, 0, env->map_size * sizeof(bool));
-            // TODO compute lines of sight (TODO this should be precomputed each time an entity moves)
-            for (int i = 0; i < env->map_size; ++i) {
-                if (env->map[i] == CELL_GROUND) {
-                    renderer->spell_cells[i] = true;
+        if (tentative_spell_id >= 0 && tentative_spell_id < env->current_player->spell_count) {
+            Spell* spell = &env->current_player->spells[tentative_spell_id];
+            if (spell->remaining_cooldown == 0 && env->current_player->action_points_current >= spell->ap_cost) {
+                renderer->active_spell = spell;
+
+                memset(renderer->spell_cells, 0, env->map_size * sizeof(bool));
+                // TODO compute lines of sight (TODO this should be precomputed each time an entity moves)
+                for (int i = 0; i < env->map_size; ++i) {
+                    if (env->map[i] == CELL_GROUND) {
+                        renderer->spell_cells[i] = true;
+                    }
                 }
             }
         }
@@ -807,6 +962,8 @@ int render_game(GameRenderer* renderer, Tactical* env) {
     }
 
     draw_cells_and_entities(renderer, env);
+    draw_animation_spell(env, renderer);
+    draw_animations_text(renderer);
 
     // Write info about keys
     DrawText("Press Q or Backspace to exit", 600, 10, 15, COLOR_TEXT_DEFAULT);
