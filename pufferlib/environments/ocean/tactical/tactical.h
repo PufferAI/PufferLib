@@ -211,13 +211,13 @@ void cast_spell(Tactical* env, Entity* caster, Spell* spell, int target_cell) {
     spell->remaining_cooldown = spell->cooldown;
 }
 
-void spell_fire_arrow(Tactical* env, Entity* caster, int target_cell) {
+void spell_fireball(Tactical* env, Entity* caster, int target_cell) {
     Entity* target = env->cell_to_entity[target_cell];
     if (target) {
         target->health_points_current -= 200;
     }
 }
-bool spell_fire_arrow_anim(Tactical* env, GameRenderer* renderer, int caster_cell, int target_cell, float t) {
+bool spell_fireball_anim(Tactical* env, GameRenderer* renderer, int caster_cell, int target_cell, float t) {
     float xe0 = renderer->xe[caster_cell];
     float xe1 = renderer->xe[target_cell];
     float ye0 = renderer->ye[caster_cell];
@@ -236,47 +236,93 @@ bool spell_fire_arrow_anim(Tactical* env, GameRenderer* renderer, int caster_cel
         DrawCircle(vec.x, vec.y, 10, (Color){255, 0, 0, 255});
     } else if (t <= phase1_duration + phase2_duration) {
         DrawCircle(vec.x, vec.y, 10 + (t - phase1_duration) * 100,
-            (Color){255, 0, 0, 255 - (t - phase1_duration) * 1200});
+            (Color){255, 0, 0, 255 * (phase2_duration - (t - phase1_duration))});
     } else {
         return true;
     }
     return false;
 }
-Spell create_spell_fire_arrow() {
+Spell create_spell_fireball() {
     Spell spell;
-    spell.name = "Fire Arrow";
+    spell.name = "Fireball";
     spell.ap_cost = 4;
     spell.cooldown = 0;
     spell.remaining_cooldown = 0;
     spell.range = 12;
-    spell.effect = spell_fire_arrow;
-    spell.render_animation = spell_fire_arrow_anim;
+    spell.effect = spell_fireball;
+    spell.render_animation = spell_fireball_anim;
     return spell;
 }
 
-// void spell_damage_target2(Tactical* env, Entity* caster, int target_cell) {
-//     //TODO
-// }
-// Spell create_spell_damage_target2() {
-//     Spell spell;
-//     spell.name = "Fireball 2";
-//     spell.ap_cost = 6;
-//     spell.cooldown = 4;
-//     spell.remaining_cooldown = 0;
-//     spell.range = 20;
-//     spell.effect = spell_damage_target2;
-//     return spell;
-// }
+void cast_spell(Tactical* env, Entity* caster, Spell* spell, int target_cell) {
+    // check if the spell can be cast
+    if (caster->action_points_current < spell->ap_cost) {
+        printf("Not enough action points to cast %s.\n", spell->name);
+        return;
+    }
+    if (spell->remaining_cooldown > 0) {
+        printf("Spell %s is on cooldown for %d more turns.\n", spell->name, spell->remaining_cooldown);
+        return;
+    }
+
+    // cast the spell
+    spell->effect(env, caster, target_cell);
+    caster->action_points_current -= spell->ap_cost;
+    spell->remaining_cooldown = spell->cooldown;
+}
+
+void spell_fireball(Tactical* env, Entity* caster, int target_cell) {
+    Entity* target = env->cell_to_entity[target_cell];
+    if (target) {
+        target->health_points_current -= 200;
+    }
+}
+bool spell_fireball_anim(Tactical* env, GameRenderer* renderer, int caster_cell, int target_cell, float t) {
+    float xe0 = renderer->xe[caster_cell];
+    float xe1 = renderer->xe[target_cell];
+    float ye0 = renderer->ye[caster_cell];
+    float ye1 = renderer->ye[target_cell];
+
+    float phase1_duration = 0.5;
+    float phase2_duration = 0.2;
+
+    Vector2 vec = GetSplinePointBezierQuad(
+        (Vector2){xe0, ye0 - 2 * renderer->ch},
+        (Vector2){(xe0 + xe1) / 2, (ye0 + ye1) / 2 - 200},
+        (Vector2){xe1, ye1},
+        fmin(t / phase1_duration, 1.0));
+
+    if (t <= phase1_duration) {
+        DrawCircle(vec.x, vec.y, 10, (Color){255, 0, 0, 255});
+    } else if (t <= phase1_duration + phase2_duration) {
+        DrawCircle(vec.x, vec.y, 10 + (t - phase1_duration) * 100,
+            (Color){255, 0, 0, 255 * (phase2_duration - (t - phase1_duration))});
+    } else {
+        return true;
+    }
+    return false;
+}
+Spell create_spell_fireball() {
+    Spell spell;
+    spell.name = "Fireball";
+    spell.ap_cost = 4;
+    spell.cooldown = 0;
+    spell.remaining_cooldown = 0;
+    spell.range = 12;
+    spell.effect = spell_fireball;
+    spell.render_animation = spell_fireball_anim;
+    return spell;
+}
 
 void assign_spells(Entity* entity) {
     // TODO assign different spells based on class
     entity->spell_count = 5;
     entity->spells = malloc(entity->spell_count * sizeof(Spell));
-    entity->spells[0] = create_spell_fire_arrow();
-    entity->spells[1] = create_spell_fire_arrow();
-    entity->spells[2] = create_spell_fire_arrow();
-    entity->spells[3] = create_spell_fire_arrow();
-    entity->spells[4] = create_spell_fire_arrow();
+    entity->spells[0] = create_spell_fireball();
+    entity->spells[1] = create_spell_fireball();
+    entity->spells[2] = create_spell_fireball();
+    entity->spells[3] = create_spell_fireball();
+    entity->spells[4] = create_spell_fireball();
 }
 
 void compute_observations(Tactical* env) {
@@ -423,7 +469,7 @@ Tactical* init_tactical() {
     env->player2 = &env->entities[1];
 
     env->player1->name = "Player 1";
-    env->player1->cell = get_cell(env, 8, 8);
+    env->player1->cell = get_cell(env, 17, 13);
     env->player1->color = COLOR_PLAYER1;
     env->player1->health_points_total = 2500;
     env->player1->action_points_total = 12;
@@ -433,7 +479,7 @@ Tactical* init_tactical() {
     env->player1->movement_points_current = 10;
 
     env->player2->name = "Player 2";
-    env->player2->cell = get_cell(env, 5, 10);
+    env->player2->cell = get_cell(env, 12, 13);
     env->player2->color = COLOR_PLAYER2;
     env->player2->health_points_total = 2500;
     env->player2->action_points_total = 12;
@@ -454,7 +500,6 @@ Tactical* init_tactical() {
     //     (Spell[]){push}, // List of spells
     //     1                // Spell count
     // };
-
 
     env->current_player_idx = 0;
     env->current_player = &env->entities[env->current_player_idx];
@@ -931,27 +976,28 @@ int render_game(GameRenderer* renderer, Tactical* env) {
 
     // KEYS
 
-    if (!renderer->spell_anim) {
-        if (IsKeyPressed(KEY_SPACE)) {
-            renderer->active_spell = NULL;
-            next_player(env);
-        }
+    if (IsKeyPressed(KEY_SPACE)) {
+        renderer->active_spell = NULL;
+        next_player(env);
+    }
 
-        int tentative_spell_id = -1;
-        if (IsKeyPressed(KEY_ONE)) tentative_spell_id = 0;
-        else if (IsKeyPressed(KEY_TWO)) tentative_spell_id = 1;
+    int tentative_spell_id = -1;
+    if (IsKeyPressed(KEY_ONE)) tentative_spell_id = 0;
+    else if (IsKeyPressed(KEY_TWO)) tentative_spell_id = 1;
+    else if (IsKeyPressed(KEY_THREE)) tentative_spell_id = 2;
+    else if (IsKeyPressed(KEY_FOUR)) tentative_spell_id = 3;
+    else if (IsKeyPressed(KEY_FIVE)) tentative_spell_id = 4;
 
-        if (tentative_spell_id >= 0 && tentative_spell_id < env->current_player->spell_count) {
-            Spell* spell = &env->current_player->spells[tentative_spell_id];
-            if (spell->remaining_cooldown == 0 && env->current_player->action_points_current >= spell->ap_cost) {
-                renderer->active_spell = spell;
+    if (tentative_spell_id >= 0 && tentative_spell_id < env->current_player->spell_count) {
+        Spell* spell = &env->current_player->spells[tentative_spell_id];
+        if (spell->remaining_cooldown == 0 && env->current_player->action_points_current >= spell->ap_cost) {
+            renderer->active_spell = spell;
 
-                memset(renderer->spell_cells, 0, env->map_size * sizeof(bool));
-                // TODO compute lines of sight (TODO this should be precomputed each time an entity moves)
-                for (int i = 0; i < env->map_size; ++i) {
-                    if (env->map[i] == CELL_GROUND) {
-                        renderer->spell_cells[i] = true;
-                    }
+            memset(renderer->spell_cells, 0, env->map_size * sizeof(bool));
+            // TODO compute lines of sight (TODO this should be precomputed each time an entity moves)
+            for (int i = 0; i < env->map_size; ++i) {
+                if (env->map[i] == CELL_GROUND) {
+                    renderer->spell_cells[i] = true;
                 }
             }
         }
