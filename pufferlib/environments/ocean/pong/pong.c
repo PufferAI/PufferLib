@@ -60,7 +60,7 @@ int main() {
         .ball_speed_y_increment = 3,
         .ball_max_speed_y = 13,
         .max_score = 21,
-        .frameskip = 4,
+        .frameskip = 1,
     };
     allocate(&env);
 
@@ -69,12 +69,15 @@ int main() {
     reset(&env);
     while (!WindowShouldClose()) {
         // User can take control of the paddle
-        //env.actions[0] = 0;
-        if (IsKeyDown(KEY_UP)    || IsKeyDown(KEY_W)) env.actions[0] = 1;
-        if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = 2;
+        if (IsKeyDown(KEY_LEFT_SHIFT)) {
+            env.actions[0] = 0;
+            if (IsKeyDown(KEY_UP)    || IsKeyDown(KEY_W)) env.actions[0] = 1;
+            if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = 2;
+        } else {
+            forward(net, env.observations, env.actions);
+        }
 
         step(&env);
-        forward(net, env.observations, env.actions);
         render(client, &env);
     }
     free_pongnet(net);

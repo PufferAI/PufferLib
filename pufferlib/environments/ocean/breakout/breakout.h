@@ -282,6 +282,9 @@ bool handle_brick_ball_collisions(Breakout* env) {
 
 void reset_round(Breakout* env) {
     env->balls_fired = 0;
+    env->hits = 0;
+    env->ball_speed = 256;
+    env->paddle_width = 2 * HALF_PADDLE_WIDTH;
 
     env->paddle_x = env->width / 2.0 - env->paddle_width / 2;
     env->paddle_y = env->height - env->paddle_height - 10;
@@ -294,15 +297,10 @@ void reset_round(Breakout* env) {
 }
 void reset(Breakout* env) {
     env->log = (Log){0};
-    if (env->num_balls == -1 || env->score == MAX_SCORE) {
-        env->score = 0;
-        env->num_balls = 5;
-        for (int i = 0; i < env->num_bricks; i++) {
-            env->brick_states[i] = 0.0;
-        }
-        env->hits = 0;
-        env->ball_speed = 256;
-        env->paddle_width = 2 * HALF_PADDLE_WIDTH;
+    env->score = 0;
+    env->num_balls = 5;
+    for (int i = 0; i < env->num_bricks; i++) {
+        env->brick_states[i] = 0.0;
     }
     reset_round(env);
     compute_observations(env);
@@ -369,7 +367,7 @@ Client* make_client(Breakout* env) {
     client->height = env->height;
 
     InitWindow(env->width, env->height, "PufferLib Ray Breakout");
-    SetTargetFPS(15);
+    SetTargetFPS(60);
 
     //sound_path = os.path.join(*self.__module__.split(".")[:-1], "hit.wav")
     //self.sound = rl.LoadSound(sound_path.encode())

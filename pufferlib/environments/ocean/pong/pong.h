@@ -289,7 +289,7 @@ Client* make_client(Pong* env) {
     client->ball_color = (Color){255, 255, 255, 255};
 
     InitWindow(env->width + 2*client->x_pad, env->height, "PufferLib Pong");
-    SetTargetFPS(15);  // 60 / frame_skip
+    SetTargetFPS(60 / env->frameskip);
 
     return client;
 }

@@ -17,7 +17,7 @@ class MyPong(pufferlib.PufferEnv):
             ball_width=10, ball_height=15, paddle_speed=8,
             ball_initial_speed_x=10, ball_initial_speed_y=1,
             ball_speed_y_increment=3, ball_max_speed_y=13,
-            max_score=21, report_interval=128, buf=None):
+            max_score=21, frameskip=1, report_interval=128, buf=None):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(8,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Discrete(3)
@@ -33,7 +33,7 @@ class MyPong(pufferlib.PufferEnv):
             self.terminals, num_envs, width, height,
             paddle_width, paddle_height, ball_width, ball_height,
             paddle_speed, ball_initial_speed_x, ball_initial_speed_y,
-            ball_max_speed_y, ball_speed_y_increment, max_score)
+            ball_max_speed_y, ball_speed_y_increment, max_score, frameskip)
  
     def reset(self, seed=None):
         self.tick = 0
