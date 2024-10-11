@@ -11,16 +11,74 @@
 #define CORPSE 2
 #define WALL 3
 
+#define LOG_BUFFER_SIZE 8192
+
+typedef struct Log Log;
+struct Log {
+    float episode_return;
+    float episode_length;
+    float score;
+};
+
+typedef struct LogBuffer LogBuffer;
+struct LogBuffer {
+    Log* logs;
+    int length;
+    int idx;
+};
+
+LogBuffer* allocate_logbuffer(int size) {
+    LogBuffer* logs = (LogBuffer*)calloc(1, sizeof(LogBuffer));
+    logs->logs = (Log*)calloc(size, sizeof(Log));
+    logs->length = size;
+    logs->idx = 0;
+    return logs;
+}
+
+void free_logbuffer(LogBuffer* buffer) {
+    free(buffer->logs);
+    free(buffer);
+}
+
+void add_log(LogBuffer* logs, Log* log) {
+    if (logs->idx == logs->length) {
+        return;
+    }
+    logs->logs[logs->idx] = *log;
+    logs->idx += 1;
+    //printf("Log: %f, %f, %f\n", log->episode_return, log->episode_length, log->score);
+}
+
+Log aggregate_and_clear(LogBuffer* logs) {
+    Log log = {0};
+    if (logs->idx == 0) {
+        return log;
+    }
+    for (int i = 0; i < logs->idx; i++) {
+        log.episode_return += logs->logs[i].episode_return;
+        log.episode_length += logs->logs[i].episode_length;
+        log.score += logs->logs[i].score;
+    }
+    log.episode_return /= logs->idx;
+    log.episode_length /= logs->idx;
+    log.score /= logs->idx;
+    logs->idx = 0;
+    return log;
+}
+ 
 typedef struct {
-    char* grid;
     char* observations;
+    unsigned int* actions;
+    float* rewards;
+    unsigned char* terminals;
+    LogBuffer* log_buffer;
+    Log* logs;
+    char* grid;
     int* snake;
     int* snake_lengths;
     int* snake_ptr;
     int* snake_lifetimes;
     int* snake_colors;
-    unsigned int* actions;
-    float* rewards;
     int num_snakes;
     int width;
     int height;
@@ -29,62 +87,32 @@ typedef struct {
     int vision;
     int window;
     int obs_size;
-    bool leave_corpse_on_death;
+    unsigned char leave_corpse_on_death;
     float reward_food;
     float reward_corpse;
     float reward_death;
 } CSnake;
 
-CSnake* init_csnake(char* grid, int* snake, char* observations, int* snake_lengths,
-        int* snake_ptr, int* snake_lifetimes, int* snake_colors, unsigned int* actions,
-        float* rewards, int num_snakes, int width, int height, int max_snake_length,
-        int food, int vision, bool leave_corpse_on_death, float reward_food,
-        float reward_corpse, float reward_death) {
-    CSnake* env = (CSnake*)malloc(sizeof(CSnake));
-    env->grid = grid;
-    env->observations = observations;
-    env->snake = snake;
-    env->snake_lengths = snake_lengths;
-    env->snake_ptr = snake_ptr;
-    env->snake_lifetimes = snake_lifetimes;
-    env->snake_colors = snake_colors;
-    env->actions = actions;
-    env->rewards = rewards;
-    env->num_snakes = num_snakes;
-    env->width = width;
-    env->height = height;
-    env->max_snake_length = max_snake_length;
-    env->food = food;
-    env->vision = vision;
-    env->window = 2*vision+1;
-    env->obs_size = env->window*env->window;
-    env->leave_corpse_on_death = leave_corpse_on_death;
-    env->reward_food = reward_food;
-    env->reward_corpse = reward_corpse;
-    env->reward_death = reward_death;
-    return env;
-}
-
-CSnake* allocate_csnake(int num_snakes, int width, int height,
-        int max_snake_length, int food, int vision, bool leave_corpse_on_death,
-        float reward_food, float reward_corpse, float reward_death) {
-    int obs_size = (2*vision+1) * (2*vision+1);
-    char* grid = (char*)calloc(width*height, sizeof(char));
-    char* observations = (char*)calloc(num_snakes*obs_size, sizeof(char));
-    int* snake = (int*)calloc(num_snakes*2*max_snake_length, sizeof(int));
-    int* snake_lengths = (int*)calloc(num_snakes, sizeof(int));
-    int* snake_ptr = (int*)calloc(num_snakes, sizeof(int));
-    int* snake_lifetimes = (int*)calloc(num_snakes, sizeof(int));
-    int* snake_colors = (int*)calloc(num_snakes, sizeof(int));
-    unsigned int* actions = (unsigned int*)calloc(num_snakes, sizeof(unsigned int));
-    float* rewards = (float*)calloc(num_snakes, sizeof(float));
-    CSnake* env = init_csnake(grid, snake, observations, snake_lengths, snake_ptr, snake_lifetimes,
-        snake_colors, actions, rewards, num_snakes, width, height, max_snake_length,
-        food, vision, leave_corpse_on_death, reward_food, reward_corpse, reward_death);
+void init_csnake(CSnake* env) {
+    env->grid = (char*)calloc(env->width*env->height, sizeof(char));
+    env->snake = (int*)calloc(env->num_snakes*2*env->max_snake_length, sizeof(int));
+    env->snake_lengths = (int*)calloc(env->num_snakes, sizeof(int));
+    env->snake_ptr = (int*)calloc(env->num_snakes, sizeof(int));
+    env->snake_lifetimes = (int*)calloc(env->num_snakes, sizeof(int));
+    env->snake_colors = (int*)calloc(env->num_snakes, sizeof(int));
+    env->logs = calloc(env->num_snakes, sizeof(Log));
     env->snake_colors[0] = 9;
-    for (int i = 1; i<num_snakes; i++)
+    for (int i = 1; i<env->num_snakes; i++)
         env->snake_colors[i] = i%4 + 4; // Randomize snake colors
-    return env;
+}
+ 
+void allocate_csnake(CSnake* env) {
+    int obs_size = (2*env->vision + 1) * (2*env->vision + 1);
+    env->observations = (char*)calloc(env->num_snakes*obs_size, sizeof(char));
+    env->actions = (unsigned int*)calloc(env->num_snakes, sizeof(unsigned int));
+    env->rewards = (float*)calloc(env->num_snakes, sizeof(float));
+    env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
+    init_csnake(env);
 }
 
 void free_csnake(CSnake* env) {
@@ -100,6 +128,8 @@ void free_csnake(CSnake* env) {
     free(env->snake_colors);
     free(env->actions);
     free(env->rewards);
+    free_logbuffer(env->log_buffer);
+    free(env->logs);
     free(env);
 }
 
@@ -139,6 +169,7 @@ void delete_snake(CSnake* env, int snake_id) {
 }
 
 void spawn_snake(CSnake* env, int snake_id) {
+    env->logs[snake_id] = (Log){0};
     int head_r, head_c, tile, grid_idx;
     delete_snake(env, snake_id);
     do {
@@ -168,6 +199,9 @@ void spawn_food(CSnake* env) {
 }
 
 void reset(CSnake* env) {
+    env->window = 2*env->vision+1;
+    env->obs_size = env->window*env->window;
+
     for (int r = 0; r < env->vision; r++) {
         for (int c = 0; c < env->width; c++)
             env->grid[r*env->width + c] = WALL;
@@ -191,6 +225,7 @@ void reset(CSnake* env) {
 }
 
 void step_snake(CSnake* env, int i) {
+    env->logs[i].episode_length += 1;
     int atn = env->actions[i];
     int dr = 0;
     int dc = 0;
@@ -221,6 +256,9 @@ void step_snake(CSnake* env, int i) {
     int tile = env->grid[next_r*env->width + next_c];
     if (tile >= WALL) {
         env->rewards[i] = env->reward_death;
+        env->logs[i].episode_return += env->reward_death;
+        env->logs[i].score = env->snake_lengths[i];
+        add_log(env->log_buffer, &env->logs[i]);
         spawn_snake(env, i);
         return;
     }
@@ -237,10 +275,12 @@ void step_snake(CSnake* env, int i) {
     bool grow;
     if (tile == FOOD) {
         env->rewards[i] = env->reward_food;
+        env->logs[i].episode_return += env->reward_food;
         spawn_food(env);
         grow = true;
     } else if (tile == CORPSE) {
         env->rewards[i] = env->reward_corpse;
+        env->logs[i].episode_return += env->reward_corpse;
         grow = true;
     } else {
         env->rewards[i] = 0.0;
@@ -289,27 +329,27 @@ typedef struct {
     int cell_size;
     int width;
     int height;
-} Renderer;
+} Client;
 
-Renderer* init_renderer(int cell_size, int width, int height) {
-    Renderer* renderer = (Renderer*)malloc(sizeof(Renderer));
-    renderer->cell_size = cell_size;
-    renderer->width = width;
-    renderer->height = height;
+Client* make_client(int cell_size, int width, int height) {
+    Client* client= (Client*)malloc(sizeof(Client));
+    client->cell_size = cell_size;
+    client->width = width;
+    client->height = height;
     InitWindow(width*cell_size, height*cell_size, "Snake Game");
     SetTargetFPS(10);
-    return renderer;
+    return client;
 }
 
-void close_renderer(Renderer* renderer) {
+void close_client(Client* client) {
     CloseWindow();
-    free(renderer);
+    free(client);
 }
 
-void render_global(Renderer* renderer, CSnake* env) {
+void render(Client* client, CSnake* env) {
     BeginDrawing();
     ClearBackground(COLORS[0]);
-    int sz = renderer->cell_size;
+    int sz = client->cell_size;
     for (int y = 0; y < env->height; y++) {
         for (int x = 0; x < env->width; x++){
             int tile = env->grid[y*env->width + x];

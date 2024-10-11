@@ -13,14 +13,70 @@
 #define Y_OFFSET 50
 #define TICK_RATE 1.0f/60.0f
 
-typedef struct CBreakout CBreakout;
-struct CBreakout {
+#define LOG_BUFFER_SIZE 1024
+
+typedef struct Log Log;
+struct Log {
+    float episode_return;
+    float episode_length;
+    float score;
+};
+
+typedef struct LogBuffer LogBuffer;
+struct LogBuffer {
+    Log* logs;
+    int length;
+    int idx;
+};
+
+LogBuffer* allocate_logbuffer(int size) {
+    LogBuffer* logs = (LogBuffer*)calloc(1, sizeof(LogBuffer));
+    logs->logs = (Log*)calloc(size, sizeof(Log));
+    logs->length = size;
+    logs->idx = 0;
+    return logs;
+}
+
+void free_logbuffer(LogBuffer* buffer) {
+    free(buffer->logs);
+    free(buffer);
+}
+
+void add_log(LogBuffer* logs, Log* log) {
+    if (logs->idx == logs->length) {
+        return;
+    }
+    logs->logs[logs->idx] = *log;
+    logs->idx += 1;
+    //printf("Log: %f, %f, %f\n", log->episode_return, log->episode_length, log->score);
+}
+
+Log aggregate_and_clear(LogBuffer* logs) {
+    Log log = {0};
+    if (logs->idx == 0) {
+        return log;
+    }
+    for (int i = 0; i < logs->idx; i++) {
+        log.episode_return += logs->logs[i].episode_return;
+        log.episode_length += logs->logs[i].episode_length;
+        log.score += logs->logs[i].score;
+    }
+    log.episode_return /= logs->idx;
+    log.episode_length /= logs->idx;
+    log.score /= logs->idx;
+    logs->idx = 0;
+    return log;
+}
+ 
+typedef struct Breakout Breakout;
+struct Breakout {
     float* observations;
     unsigned char* actions;
     float* rewards;
     unsigned char* dones;
+    LogBuffer* log_buffer;
+    Log log;
     int score;
-    float episode_return;
     float paddle_x;
     float paddle_y;
     float ball_x;
@@ -48,7 +104,7 @@ struct CBreakout {
     int frameskip;
 };
 
-void generate_brick_positions(CBreakout* env) {
+void generate_brick_positions(Breakout* env) {
     for (int row = 0; row < env->brick_rows; row++) {
         for (int col = 0; col < env->brick_cols; col++) {
             int idx = row * env->brick_cols + col;
@@ -58,7 +114,7 @@ void generate_brick_positions(CBreakout* env) {
     }
 }
 
-void init(CBreakout* env) {
+void init(Breakout* env) {
     env->num_bricks = env->brick_rows * env->brick_cols;
     assert(env->num_bricks > 0);
 
@@ -69,21 +125,23 @@ void init(CBreakout* env) {
     generate_brick_positions(env);
 }
 
-void allocate(CBreakout* env) {
+void allocate(Breakout* env) {
     init(env);
     env->observations = (float*)calloc(11 + env->num_bricks, sizeof(float));
     env->actions = (unsigned char*)calloc(1, sizeof(unsigned char));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
 }
 
-void free_initialized(CBreakout* env) {
+void free_initialized(Breakout* env) {
     free(env->brick_x);
     free(env->brick_y);
     free(env->brick_states);
+    free_logbuffer(env->log_buffer);
 }
 
-void free_allocated(CBreakout* env) {
+void free_allocated(Breakout* env) {
     free(env->actions);
     free(env->observations);
     free(env->dones);
@@ -91,16 +149,16 @@ void free_allocated(CBreakout* env) {
     free_initialized(env);
 }
 
-void compute_observations(CBreakout* env) {
-    env->observations[0] = env->paddle_x;
-    env->observations[1] = env->paddle_y;
-    env->observations[2] = env->ball_x;
-    env->observations[3] = env->ball_y;
-    env->observations[4] = env->ball_vx;
-    env->observations[5] = env->ball_vy;
-    env->observations[6] = env->balls_fired;
-    env->observations[8] = env->num_balls;
-    env->observations[10] = env->paddle_width;
+void compute_observations(Breakout* env) {
+    env->observations[0] = env->paddle_x / env->width;
+    env->observations[1] = env->paddle_y / env->height;
+    env->observations[2] = env->ball_x / env->width;
+    env->observations[3] = env->ball_y / env->height;
+    env->observations[4] = env->ball_vx / 512.0f;
+    env->observations[5] = env->ball_vy / 512.0f;
+    env->observations[6] = env->balls_fired / 5.0f;
+    env->observations[8] = env->num_balls / 5.0f;
+    env->observations[10] = env->paddle_width / (2.0f * HALF_PADDLE_WIDTH);
     for (int i = 0; i < env->num_bricks; i++) {
         env->observations[11 + i] = env->brick_states[i];
     }
@@ -117,7 +175,7 @@ bool check_collision_discrete(float x, float y, int width, int height,
     return true;
 }
 
-bool handle_paddle_ball_collisions(CBreakout* env) {
+bool handle_paddle_ball_collisions(Breakout* env) {
     float base_angle = M_PI / 4.0f;
 
     // Check if ball is above the paddle
@@ -146,7 +204,7 @@ bool handle_paddle_ball_collisions(CBreakout* env) {
     return false;
 }
 
-bool handle_wall_ball_collisions(CBreakout* env) {
+bool handle_wall_ball_collisions(Breakout* env) {
     if (env->ball_x > 0 && env->ball_x
             + env->ball_width < env->width && env->ball_y > 0) {
         return false;
@@ -180,7 +238,7 @@ bool handle_wall_ball_collisions(CBreakout* env) {
     return false;
 }
 
-bool handle_brick_ball_collisions(CBreakout* env) {
+bool handle_brick_ball_collisions(Breakout* env) {
     if (env->ball_y > env->brick_y[env->num_bricks-1] + env->brick_height) {
         return false;
     }
@@ -195,7 +253,8 @@ bool handle_brick_ball_collisions(CBreakout* env) {
                 env->ball_x, env->ball_y, env->ball_width, env->ball_height)) {
             env->brick_states[brick_idx] = 1.0;
             float score = 7 - 3 * (brick_idx / env->brick_cols / 2);
-            env->rewards[0] += score;
+            env->rewards[0] += 1.0;
+            env->log.episode_return += 1.0;
             env->score += score;
 
             // Determine collision direction
@@ -221,19 +280,7 @@ bool handle_brick_ball_collisions(CBreakout* env) {
     return false;
 }
 
-void reset(CBreakout* env) {
-    if (env->num_balls == -1 || env->score == MAX_SCORE) {
-        env->score = 0;
-        env->num_balls = 5;
-        for (int i = 0; i < env->num_bricks; i++) {
-            env->brick_states[i] = 0.0;
-        }
-        env->hits = 0;
-        env->ball_speed = 256;
-        env->paddle_width = 2 * HALF_PADDLE_WIDTH;
-    }
-
-    env->dones[0] = 0;
+void reset_round(Breakout* env) {
     env->balls_fired = 0;
 
     env->paddle_x = env->width / 2.0 - env->paddle_width / 2;
@@ -245,8 +292,25 @@ void reset(CBreakout* env) {
     env->ball_vx = 0.0;
     env->ball_vy = 0.0;
 }
+void reset(Breakout* env) {
+    env->log = (Log){0};
+    if (env->num_balls == -1 || env->score == MAX_SCORE) {
+        env->score = 0;
+        env->num_balls = 5;
+        for (int i = 0; i < env->num_bricks; i++) {
+            env->brick_states[i] = 0.0;
+        }
+        env->hits = 0;
+        env->ball_speed = 256;
+        env->paddle_width = 2 * HALF_PADDLE_WIDTH;
+    }
+    reset_round(env);
+    compute_observations(env);
+}
 
-void step(CBreakout* env) {
+void step(Breakout* env) {
+    env->dones[0] = 0;
+    env->log.episode_length += 1;
     env->rewards[0] = 0.0;
     int action = env->actions[0];
 
@@ -279,13 +343,12 @@ void step(CBreakout* env) {
 
         if (env->ball_y >= env->paddle_y + env->paddle_height) {
             env->num_balls -= 1;
-            env->dones[0] = 1;
+            reset_round(env);
         }
-        if (env->score == MAX_SCORE) {
+        if (env->num_balls < 0 || env->score == MAX_SCORE) {
             env->dones[0] = 1;
-        }
-        if (env->dones[0] == 1) {
-            env->episode_return = env->score;
+            env->log.score = env->score;
+            add_log(env->log_buffer, &env->log);
             reset(env);
         }
     }
@@ -300,7 +363,7 @@ struct Client {
     float height;
 };
 
-Client* make_client(CBreakout* env) {
+Client* make_client(Breakout* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
     client->width = env->width;
     client->height = env->height;
@@ -314,7 +377,7 @@ Client* make_client(CBreakout* env) {
     return client;
 }
 
-void render(Client* client, CBreakout* env) {
+void render(Client* client, Breakout* env) {
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
     }

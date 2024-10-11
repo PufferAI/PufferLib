@@ -1,28 +1,11 @@
 import pufferlib.emulation
 import pufferlib.postprocess
 
-def make_moba(num_envs=200, reward_death=-1.0, reward_xp=0.006,
-        reward_distance=0.05, reward_tower=3, render_mode='rgb_array'):
-    from .moba import moba
-    return moba.PufferMoba(num_envs=num_envs, reward_death=reward_death,
-        reward_xp=reward_xp, reward_distance=reward_distance,
-        reward_tower=reward_tower, render_mode=render_mode)
-
-def make_pong(num_envs=1):
-    from .pong import pong
-    return pong.MyPong(num_envs=num_envs)
-
-def make_breakout(num_envs=1):
-    from .breakout import breakout
-    return breakout.MyBreakout(num_envs=num_envs)
-
-def make_connect4(num_envs=1):
-    from .connect4 import connect4
-    return connect4.MyConnect4(num_envs=num_envs)
-
-def make_tripletriad(num_envs=1):
-    from .tripletriad import tripletriad
-    return tripletriad.MyTripleTriad(num_envs=num_envs)
+from .pong import pong
+from .breakout import breakout
+from .connect4 import connect4
+from .tripletriad import tripletriad
+from .moba import moba
 
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
@@ -180,9 +163,9 @@ def make_multiagent(**kwargs):
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
 MAKE_FNS = {
-    'moba': make_moba,
-    'my_pong': make_pong,
-    'my_breakout': make_breakout,
+    'moba': moba.PufferMoba,
+    'my_pong': pong.MyPong,
+    'my_breakout': breakout.MyBreakout,
     'foraging': make_foraging,
     'predator_prey': make_predator_prey,
     'group': make_group,
@@ -199,9 +182,8 @@ MAKE_FNS = {
     'spaces': make_spaces,
     'performance': make_performance,
     'performance_empiric': make_performance_empiric,
-    'my_breakout': make_breakout,
-    'my_connect4': make_connect4,
-    'my_tripletriad': make_tripletriad,
+    'my_connect4': connect4.MyConnect4,
+    'my_tripletriad': tripletriad.MyTripleTriad,
 }
 
 def env_creator(name='squared'):
