@@ -762,6 +762,8 @@ def print_dashboard(env_name, utilization, global_step, epoch,
         u = left if i % 2 == 0 else right
         u.add_row(f'{c2}{metric}', f'{b2}{value:.3f}')
         i += 1
+        if i == 30:
+            break
 
     for i in range(max_stats[0] - i):
         u = left if i % 2 == 0 else right

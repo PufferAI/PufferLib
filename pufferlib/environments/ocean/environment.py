@@ -5,13 +5,7 @@ from .pong import pong
 from .breakout import breakout
 from .connect4 import connect4
 from .tripletriad import tripletriad
-
-def make_moba(num_envs=200, reward_death=-1.0, reward_xp=0.006,
-        reward_distance=0.05, reward_tower=3, render_mode='rgb_array'):
-    from .moba import moba
-    return moba.PufferMoba(num_envs=num_envs, reward_death=reward_death,
-        reward_xp=reward_xp, reward_distance=reward_distance,
-        reward_tower=reward_tower, render_mode=render_mode)
+from .moba import moba
 
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
@@ -169,7 +163,7 @@ def make_multiagent(**kwargs):
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
 MAKE_FNS = {
-    'moba': make_moba,
+    'moba': moba.PufferMoba,
     'my_pong': pong.MyPong,
     'my_breakout': breakout.MyBreakout,
     'foraging': make_foraging,
