@@ -142,6 +142,7 @@ cdef class CyPong:
             self.client = NULL
 
         free(self.envs)
+        free(self.logs)
 
     def log(self):
         cdef Log log = aggregate_and_clear(self.logs)
