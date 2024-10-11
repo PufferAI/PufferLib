@@ -78,7 +78,7 @@ cdef class CyPong:
             float ball_width, float ball_height, float paddle_speed,
             float ball_initial_speed_x, float ball_initial_speed_y,
             float ball_max_speed_y, float ball_speed_y_increment,
-            unsigned int max_score):
+            unsigned int max_score, int frameskip):
 
         self.num_envs = num_envs
         self.client = NULL
@@ -115,7 +115,7 @@ cdef class CyPong:
                 ball_max_speed_y=ball_max_speed_y,
                 ball_speed_y_increment=ball_speed_y_increment,
                 max_score=max_score,
-                frameskip=4,
+                frameskip=frameskip,
             )
             init(&self.envs[i])
 

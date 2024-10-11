@@ -3,7 +3,7 @@
 
 int main() {
     Breakout env = {
-        .frameskip = 4,
+        .frameskip = 1,
         .width = 576,
         .height = 330,
         .paddle_width = 62,
