@@ -1,10 +1,22 @@
 from setuptools import find_packages, setup, Extension
 from Cython.Build import cythonize
 import numpy
+import os
+import urllib.request
+import zipfile
+	
 #  python3 setup.py built_ext --inplace
 
 VERSION = '1.0.0'
 
+RAYLIB_URL = "https://github.com/raysan5/raylib/archive/refs/tags/5.0.zip"
+if not os.path.exists('raylib'):
+    print("Raylib not found, downloading...")
+    urllib.request.urlretrieve(RAYLIB_URL, 'raylib.zip')
+    
+    with zipfile.ZipFile('raylib.zip', 'r') as zip_ref:
+        zip_ref.extractall()
+    
 #import os
 #os.environ['CFLAGS'] = '-O3 -march=native -Wall'
 

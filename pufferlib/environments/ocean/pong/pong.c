@@ -28,10 +28,10 @@ PongNet* init_pongnet(Weights* weights, int num_agents) {
 }
 
 void free_pongnet(PongNet* net) {
-    free_linear(net->encoder);
-    free_linear(net->actor);
-    free_linear(net->value_fn);
-    free_lstm(net->lstm);
+    free(net->encoder);
+    free(net->actor);
+    free(net->value_fn);
+    free(net->lstm);
 }
 
 void forward(PongNet* net, float* observations, unsigned int* actions) {
@@ -81,7 +81,7 @@ int main() {
         render(client, &env);
     }
     free_pongnet(net);
-    free_weights(weights);
+    free(weights);
     free_allocated(&env);
     close_client(client);
 }
