@@ -36,6 +36,7 @@ const Color COLOR_SPELL = GOLD;
 const Color COLOR_SPELL_COOLDOWN = BROWN;
 const Color COLOR_CELL_SPELL = BEIGE;
 const Color COLOR_CELL_ACTIVE_SPELL = ORANGE;
+const Color COLOR_CELL_INACTIVE_SPELL = {150, 150, 255, 255};
 const Color COLOR_ENTITY_NAME = PURPLE;
 const Color COLOR_ENTITY_NAME_HOVER = YELLOW;
 
@@ -43,9 +44,12 @@ const Color COLOR_ENTITY_NAME_HOVER = YELLOW;
 // TODO many leaks...
 
 // forward declarations
+typedef struct Tactical Tactical;
 typedef struct Entity Entity;
 typedef struct Spell Spell;
 typedef struct GameRenderer GameRenderer;
+
+void add_animation_text(Tactical* env, GameRenderer* renderer, const char* text, int cell, Color color, int font_size, float duration);
 
 typedef struct Tactical {
     int num_agents;
@@ -97,8 +101,11 @@ struct Spell {
     bool line_of_sight; // whether spell can be casted across walls
     bool modifiable_range; // whether spell range can be increased or decreased from other spells
     // TODO add a "zone of effect" shape that lists the deltas that the spell touches around the cell
-    void (*effect)(Tactical*, Entity*, int); // pointer to a function that takes in the env, the caster and the target cell
-    bool (*render_animation)(Tactical*, GameRenderer*, int, int, float); // pointer to a function that takes in the env, the renderer, the caster cell, the target cell and the progress (in seconds), that renders the spell animation and returns true when the animation is finished
+    void (*effect)(Tactical*, Entity*, int, Spell*); // pointer to a function that takes in the env, the caster and the target cell
+    bool (*render_animation)(Tactical*, GameRenderer*, int, int, float, Spell*); // pointer to a function that takes in the env, the renderer, the caster cell, the target cell and the progress (in seconds), that renders the spell animation and returns true when the animation is finished
+    int damage; // damage dealt by the spell
+    int animation_state;
+    int aoe_range; // 0: single-target; 1: 5 cells in total (1+4); 2: 13 cells total (1+4+8)
 };
 
 struct GameRenderer {
@@ -122,6 +129,7 @@ struct GameRenderer {
     bool* movement_cells;
     Spell* active_spell;
     bool* spell_cells;
+    bool* active_spell_cells;
 
     // for drawing
     float *xa, *xb, *xc, *xd, *xe, *ya, *yb, *yc, *yd, *ye;
@@ -172,15 +180,21 @@ void free_tactical(Tactical* env) {
     free(env); // do this last
 }
 
-unsigned int get_cell(Tactical* env, int row, int col) {
+int get_cell(Tactical* env, int row, int col) {
+    if (row < 0 || row >= env->map_height) return -1;
+    if (col < 0 || col >= env->map_width) return -1;
     return row * env->map_width + col;
 }
-unsigned int get_row(Tactical* env, int cell) {
+int get_row(Tactical* env, int cell) {
     return cell / env->map_width;
 }
-unsigned int get_col(Tactical* env, int cell) {
+int get_col(Tactical* env, int cell) {
     return cell % env->map_width;
 }
+int get_cell_with_delta(Tactical* env, int cell, int delta_row, int delta_col) {
+    return get_cell(env, get_row(env, cell) + delta_row, get_col(env, cell) + delta_col);
+}
+
 
 ////////////
 // SPELLS //
@@ -206,18 +220,25 @@ void cast_spell(Tactical* env, Entity* caster, Spell* spell, int target_cell) {
     }
 
     // cast the spell
-    spell->effect(env, caster, target_cell);
+    spell->effect(env, caster, target_cell, spell);
+    spell->animation_state = 0;
     caster->action_points_current -= spell->ap_cost;
     spell->remaining_cooldown = spell->cooldown;
 }
 
-void spell_fireball(Tactical* env, Entity* caster, int target_cell) {
-    Entity* target = env->cell_to_entity[target_cell];
-    if (target) {
-        target->health_points_current -= 200;
+void spell_explosive_arrow(Tactical* env, Entity* caster, int target_cell, Spell* spell) {
+    for (int delta_row = -spell->aoe_range; delta_row <= spell->aoe_range; ++delta_row) {
+        for (int delta_col = -(spell->aoe_range - abs(delta_row)); delta_col <= spell->aoe_range - abs(delta_row); ++delta_col) {
+            int cell = get_cell_with_delta(env, target_cell, delta_row, delta_col);
+            if (env->map[cell] != CELL_GROUND) continue;
+            Entity* target = env->cell_to_entity[cell];
+            if (target) {
+                target->health_points_current -= spell->damage;
+            }
+        }
     }
 }
-bool spell_fireball_anim(Tactical* env, GameRenderer* renderer, int caster_cell, int target_cell, float t) {
+bool spell_explosive_arrow_anim(Tactical* env, GameRenderer* renderer, int caster_cell, int target_cell, float t, Spell* spell) {
     float xe0 = renderer->xe[caster_cell];
     float xe1 = renderer->xe[target_cell];
     float ye0 = renderer->ye[caster_cell];
@@ -235,94 +256,52 @@ bool spell_fireball_anim(Tactical* env, GameRenderer* renderer, int caster_cell,
     if (t <= phase1_duration) {
         DrawCircle(vec.x, vec.y, 10, (Color){255, 0, 0, 255});
     } else if (t <= phase1_duration + phase2_duration) {
-        DrawCircle(vec.x, vec.y, 10 + (t - phase1_duration) * 100,
-            (Color){255, 0, 0, 255 * (phase2_duration - (t - phase1_duration))});
+        if (spell->animation_state == 0) {
+            spell->animation_state = 1;
+            // get all players hit
+            for (int delta_row = -spell->aoe_range; delta_row <= spell->aoe_range; ++delta_row) {
+                for (int delta_col = -(spell->aoe_range - abs(delta_row)); delta_col <= spell->aoe_range - abs(delta_row); ++delta_col) {
+                    int cell = get_cell_with_delta(env, target_cell, delta_row, delta_col);
+                    if (env->map[cell] != CELL_GROUND) continue;
+                    Entity* target = env->cell_to_entity[cell];
+                    if (target) {
+                        add_animation_text(env, renderer, TextFormat("-%i HP", spell->damage),
+                            cell, COLOR_HEALTH, 20, 1.2);
+                    }
+                }
+            }
+        }
+        DrawCircle(vec.x, vec.y, 10 + (t - phase1_duration) * 400,
+            (Color){255, 0, 0, 255 * (1 - (t - phase1_duration) / phase2_duration)});
     } else {
         return true;
     }
     return false;
 }
-Spell create_spell_fireball() {
+Spell create_spell_explosive_arrow() {
     Spell spell;
-    spell.name = "Fireball";
+    spell.name = "Explosive Arrow";
     spell.ap_cost = 4;
     spell.cooldown = 0;
     spell.remaining_cooldown = 0;
     spell.range = 12;
-    spell.effect = spell_fireball;
-    spell.render_animation = spell_fireball_anim;
+    spell.damage = 200;
+    spell.aoe_range = 2;
+    spell.effect = spell_explosive_arrow;
+    spell.render_animation = spell_explosive_arrow_anim;
     return spell;
 }
 
-void cast_spell(Tactical* env, Entity* caster, Spell* spell, int target_cell) {
-    // check if the spell can be cast
-    if (caster->action_points_current < spell->ap_cost) {
-        printf("Not enough action points to cast %s.\n", spell->name);
-        return;
-    }
-    if (spell->remaining_cooldown > 0) {
-        printf("Spell %s is on cooldown for %d more turns.\n", spell->name, spell->remaining_cooldown);
-        return;
-    }
-
-    // cast the spell
-    spell->effect(env, caster, target_cell);
-    caster->action_points_current -= spell->ap_cost;
-    spell->remaining_cooldown = spell->cooldown;
-}
-
-void spell_fireball(Tactical* env, Entity* caster, int target_cell) {
-    Entity* target = env->cell_to_entity[target_cell];
-    if (target) {
-        target->health_points_current -= 200;
-    }
-}
-bool spell_fireball_anim(Tactical* env, GameRenderer* renderer, int caster_cell, int target_cell, float t) {
-    float xe0 = renderer->xe[caster_cell];
-    float xe1 = renderer->xe[target_cell];
-    float ye0 = renderer->ye[caster_cell];
-    float ye1 = renderer->ye[target_cell];
-
-    float phase1_duration = 0.5;
-    float phase2_duration = 0.2;
-
-    Vector2 vec = GetSplinePointBezierQuad(
-        (Vector2){xe0, ye0 - 2 * renderer->ch},
-        (Vector2){(xe0 + xe1) / 2, (ye0 + ye1) / 2 - 200},
-        (Vector2){xe1, ye1},
-        fmin(t / phase1_duration, 1.0));
-
-    if (t <= phase1_duration) {
-        DrawCircle(vec.x, vec.y, 10, (Color){255, 0, 0, 255});
-    } else if (t <= phase1_duration + phase2_duration) {
-        DrawCircle(vec.x, vec.y, 10 + (t - phase1_duration) * 100,
-            (Color){255, 0, 0, 255 * (phase2_duration - (t - phase1_duration))});
-    } else {
-        return true;
-    }
-    return false;
-}
-Spell create_spell_fireball() {
-    Spell spell;
-    spell.name = "Fireball";
-    spell.ap_cost = 4;
-    spell.cooldown = 0;
-    spell.remaining_cooldown = 0;
-    spell.range = 12;
-    spell.effect = spell_fireball;
-    spell.render_animation = spell_fireball_anim;
-    return spell;
-}
 
 void assign_spells(Entity* entity) {
     // TODO assign different spells based on class
     entity->spell_count = 5;
     entity->spells = malloc(entity->spell_count * sizeof(Spell));
-    entity->spells[0] = create_spell_fireball();
-    entity->spells[1] = create_spell_fireball();
-    entity->spells[2] = create_spell_fireball();
-    entity->spells[3] = create_spell_fireball();
-    entity->spells[4] = create_spell_fireball();
+    entity->spells[0] = create_spell_explosive_arrow();
+    entity->spells[1] = create_spell_explosive_arrow();
+    entity->spells[2] = create_spell_explosive_arrow();
+    entity->spells[3] = create_spell_explosive_arrow();
+    entity->spells[4] = create_spell_explosive_arrow();
 }
 
 void compute_observations(Tactical* env) {
@@ -551,6 +530,7 @@ GameRenderer* init_game_renderer(Tactical* env) {
 
     renderer->movement_cells = malloc(env->map_size * sizeof(bool));
     renderer->spell_cells = malloc(env->map_size * sizeof(bool));
+    renderer->active_spell_cells = malloc(env->map_size * sizeof(bool));
     renderer->active_spell = NULL;
 
     // TODO fill the screen automatically (these are hardcoded for map 2)
@@ -664,8 +644,14 @@ void draw_cells_and_entities(GameRenderer* renderer, Tactical* env) {
             Color cell_color = COLOR_CELL_GROUND;
             if (renderer->movement_cells[cell]) {
                 cell_color = COLOR_CELL_MOVE;
-            } else if (renderer->active_spell && renderer->spell_cells[cell]) {
-                cell_color = cell == renderer->mcell ? COLOR_CELL_ACTIVE_SPELL : COLOR_CELL_SPELL;
+            } else if (renderer->active_spell) {
+                if (renderer->active_spell_cells[cell]) {
+                    cell_color = COLOR_CELL_ACTIVE_SPELL;
+                } else if (renderer->spell_cells[cell]) {
+                    cell_color = COLOR_CELL_SPELL;
+                } else {
+                    cell_color = COLOR_CELL_INACTIVE_SPELL;
+                }
             }
             // DrawTriangleStrip((Vector2[]){{xa, ya}, {xb, yb}, {xc, yc}, {xd, yd}}, 4, cell_color);
             DrawTriangleStrip((Vector2[]){
@@ -890,7 +876,8 @@ void draw_animation_spell(Tactical* env, GameRenderer* renderer) {
             renderer,
             renderer->spell_anim_caster_cell,
             renderer->spell_anim_target_cell,
-            renderer->spell_anim_progress
+            renderer->spell_anim_progress,
+            renderer->spell_anim
         );
         if (finished) {
             renderer->spell_anim = NULL;
@@ -937,6 +924,10 @@ int render_game(GameRenderer* renderer, Tactical* env) {
                 renderer->spell_anim_caster_cell = env->current_player->cell;
                 renderer->spell_anim_target_cell = mcell;
                 renderer->spell_anim_progress = 0.0f;
+                renderer->active_spell = NULL;
+            }
+        } else {
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 renderer->active_spell = NULL;
             }
         }
@@ -993,12 +984,70 @@ int render_game(GameRenderer* renderer, Tactical* env) {
         if (spell->remaining_cooldown == 0 && env->current_player->action_points_current >= spell->ap_cost) {
             renderer->active_spell = spell;
 
+            // COMPUTE LINES OF SIGHT (this should be in Env, not Renderer)
+            // set all ground cells to 1 by default (within castable range of the spell)
             memset(renderer->spell_cells, 0, env->map_size * sizeof(bool));
-            // TODO compute lines of sight (TODO this should be precomputed each time an entity moves)
-            for (int i = 0; i < env->map_size; ++i) {
-                if (env->map[i] == CELL_GROUND) {
-                    renderer->spell_cells[i] = true;
+            for (int delta_row = -spell->range; delta_row <= spell->range; ++delta_row) {
+                for (int delta_col = -(spell->range - abs(delta_row)); delta_col <= spell->range - abs(delta_row); ++delta_col) {
+                    int cell = get_cell_with_delta(env, env->current_player->cell, delta_row, delta_col);
+                    if (cell != -1 && env->map[cell] == CELL_GROUND) {
+                        renderer->spell_cells[cell] = true;
+                    }
                 }
+            }
+
+            // Bresenham line algorithm
+            for (int i = 0; i < env->map_size; ++i) {
+                if (!renderer->spell_cells[i]) continue;
+                int x0 = get_col(env, env->current_player->cell);
+                int y0 = get_row(env, env->current_player->cell);
+                int x1 = get_col(env, i);
+                int y1 = get_row(env, i);
+                int dx = x1 - x0;
+                int dy = y1 - y0;
+                int nx = abs(dx);
+                int ny = abs(dy);
+                int sign_x = dx > 0 ? 1 : -1;
+                int sign_y = dy > 0 ? 1 : -1;
+                int px = x0;
+                int py = y0;
+                int ix = 0;
+                int iy = 0;
+                while (ix < nx || iy < ny) {
+                    int new_cell = get_cell(env, py, px);
+                    if (new_cell != -1 && new_cell != env->current_player->cell && (env->map[new_cell] == CELL_WALL || env->cell_to_entity[new_cell] != NULL)) {
+                        renderer->spell_cells[i] = false;
+                        break;
+                    }
+                    int decision = (1 + 2 * ix) * ny - (1 + 2 * iy) * nx;
+                    if (decision == 0) {
+                        // next step is diagonal
+                        px += sign_x;
+                        py += sign_y;
+                        ix += 1;
+                        iy += 1;
+                    } else if (decision < 0) {
+                        // next step is horizontal
+                        px += sign_x;
+                        ix += 1;
+                    } else {
+                        // next step is vertical
+                        py += sign_y;
+                        iy += 1;
+                    }
+                }
+            }
+        }
+    }        
+    memset(renderer->active_spell_cells, 0, env->map_size * sizeof(bool));
+    if (renderer->active_spell && renderer->spell_cells[mcell]) {
+        Spell* spell = renderer->active_spell;
+        for (int delta_row = -spell->aoe_range; delta_row <= spell->aoe_range; ++delta_row) {
+            for (int delta_col = -(spell->aoe_range - abs(delta_row)); delta_col <= spell->aoe_range - abs(delta_row); ++delta_col) {
+                int cell = get_cell_with_delta(env, mcell, delta_row, delta_col);
+                if (env->map[cell] == CELL_GROUND) {
+                    renderer->active_spell_cells[cell] = true;
+                }                
             }
         }
     }
