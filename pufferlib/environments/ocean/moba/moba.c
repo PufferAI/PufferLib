@@ -42,13 +42,13 @@ MOBANet* init_mobanet(Weights* weights, int num_agents) {
 }
 
 void free_mobanet(MOBANet* net) {
-    free_conv2d(net->conv1);
-    free_relu(net->relu1);
-    free_conv2d(net->conv2);
-    free_linear(net->flat);
-    free_linear(net->proj);
-    free_linear(net->actor);
-    free_linear(net->value_fn);
+    free(net->conv1);
+    free(net->relu1);
+    free(net->conv2);
+    free(net->flat);
+    free(net->proj);
+    free(net->actor);
+    free(net->value_fn);
 }
 
 void forward(MOBANet* net, unsigned char* observations, int* actions) {
@@ -127,7 +127,7 @@ int main() {
         frame = (frame + 1) % 12;
     }
     free_mobanet(net);
-    free_weights(weights);
+    free(weights);
     free_allocated_moba(env);
     close_game_renderer(renderer);
     return 0;
