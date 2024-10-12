@@ -37,10 +37,11 @@ class PufferEnv:
             self.masks = np.ones(self.num_agents, dtype=bool)
 
             # TODO: Major kerfuffle on inferring action space dtype. This needs some asserts?
+            atn_space = self.single_action_space
             if isinstance(self.single_action_space, pufferlib.spaces.Box):
-                self.actions = np.zeros(self.num_agents, dtype=self.single_action_space.dtype)
+                self.actions = np.zeros((self.num_agents, *atn_space.shape), dtype=atn_space.dtype)
             else:
-                self.actions = np.zeros(self.num_agents, dtype=np.int32)
+                self.actions = np.zeros((self.num_agents, *atn_space.shape), dtype=np.int32)
         else:
             self.observations = buf.observations
             self.rewards = buf.rewards

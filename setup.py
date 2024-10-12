@@ -5,8 +5,8 @@ import numpy
 
 VERSION = '1.0.0'
 
-import os
-os.environ['CFLAGS'] = '-O3 -march=native -Wall'
+#import os
+#os.environ['CFLAGS'] = '-O3 -march=native -Wall'
 
 
 # Default Gym/Gymnasium/PettingZoo versions
@@ -229,7 +229,7 @@ extensions = [Extension(
     library_dirs=['raylib-5.0_linux_amd64/lib'],
     libraries=["raylib"],
     runtime_library_dirs=["raylib-5.0_linux_amd64/lib"],
-    extra_compile_args=['-DPLATFORM_DESKTOP'],
+    extra_compile_args=['-DPLATFORM_DESKTOP', '-O2'],#, '-g'],
 ) for path in extension_paths]
  
 setup(

@@ -130,6 +130,9 @@ class Serial:
         self.envs = [creator(*args, **kwargs) for (creator, args, kwargs)
             in zip(env_creators, env_args, env_kwargs)]
 
+        if isinstance(self.envs[0], pufferlib.PufferEnv):
+            raise APIUsageError('Native PufferEnvs are not currently compatible with Serial vectorization. Use Native or Multiprocessing')
+
         self.driver_env = driver = self.envs[0]
         self.emulated = self.driver_env.emulated
         check_envs(self.envs, self.driver_env)
