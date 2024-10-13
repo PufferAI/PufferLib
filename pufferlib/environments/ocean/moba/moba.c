@@ -96,7 +96,7 @@ void forward(MOBANet* net, unsigned char* observations, int* actions) {
 }
 
 void demo() {
-    Weights* weights = load_weights("moba_weights.bin", 168856);
+    Weights* weights = load_weights("resources/moba/moba_weights.bin", 168856);
     MOBANet* net = init_mobanet(weights, 10);
 
     MOBA env = {
@@ -160,7 +160,7 @@ void test_performance(float test_time) {
 }
 
 int main() {
-    //demo();
-    test_performance(30.0f);
+    demo();
+    //test_performance(30.0f);
     return 0;
 }

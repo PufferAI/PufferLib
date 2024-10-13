@@ -665,17 +665,14 @@ int attack(MOBA* env, Entity* player, Entity* target, float damage) {
 
     // Dummy logs for non-player entities
     // TODO: Improve this design
-    PlayerLog* player_log;
+    PlayerLog empty_log = {0};
+    PlayerLog* player_log = &empty_log;
     if (player->entity_type == ENTITY_PLAYER) {
         player_log = &env->log[player->pid];
-    } else {
-        player_log = &(PlayerLog){0};
     }
-    PlayerLog* target_log;
+    PlayerLog* target_log = &empty_log;
     if (target->entity_type == ENTITY_PLAYER) {
         target_log = &env->log[target->pid];
-    } else {
-        target_log = &(PlayerLog){0};
     }
 
     if (damage < target->health) {
@@ -1717,7 +1714,7 @@ MOBA* allocate_moba(MOBA* env) {
     env->truncations = calloc(NUM_AGENTS, sizeof(unsigned char));
     env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
 
-    unsigned char* game_map_npy = read_file("game_map.npy");
+    unsigned char* game_map_npy = read_file("resources/moba/game_map.npy");
     env->ai_path_buffer = calloc(3*8*128*128, sizeof(int));
     env->ai_paths = calloc(128*128*128*128, sizeof(unsigned char));
     for (int i = 0; i < 128*128*128*128; i++) {
@@ -1978,12 +1975,12 @@ GameRenderer* init_game_renderer(int cell_size, int width, int height) {
     renderer->slow_uv = (Rectangle){128, 128, 128, 128};
     renderer->speed_uv = (Rectangle){256, 128, 128, 128};
 
-    renderer->game_map = LoadTexture("dota_map.png");
-    renderer->puffer = LoadTexture("moba_assets.png");
+    renderer->game_map = LoadTexture("resources/moba/dota_map.png");
+    renderer->puffer = LoadTexture("resources/moba/moba_assets.png");
     renderer->shader_background = GenImageColor(2560, 1440, (Color){0, 0, 0, 255});
     renderer->shader_canvas = LoadTextureFromImage(renderer->shader_background);
-    renderer->shader = LoadShader("", TextFormat("shaders/map_shader_%i.fs", GLSL_VERSION));
-    renderer->bloom_shader = LoadShader("", TextFormat("shaders/bloom_shader_%i.fs", GLSL_VERSION));
+    renderer->shader = LoadShader("", TextFormat("resources/moba/map_shader_%i.fs", GLSL_VERSION));
+    renderer->bloom_shader = LoadShader("", TextFormat("resources/moba/bloom_shader_%i.fs", GLSL_VERSION));
 
     // TODO: These should be int locs?
     renderer->shader_camera_x = GetShaderLocation(renderer->shader, "camera_x");
