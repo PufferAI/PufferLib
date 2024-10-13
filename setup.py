@@ -4,18 +4,35 @@ import numpy
 import os
 import urllib.request
 import zipfile
+import tarfile
+import platform
 	
 #  python3 setup.py built_ext --inplace
 
 VERSION = '1.0.0'
 
-RAYLIB_URL = "https://github.com/raysan5/raylib/archive/refs/tags/5.0.zip"
+RAYLIB_BASE = 'https://github.com/raysan5/raylib/releases/download/5.0/'
+RAYLIB_NAME = 'raylib-5.0_macos' if platform.system() == "Darwin" else 'raylib-5.0_linux_amd64'
+RAYLIB_WASM_URL = RAYLIB_BASE + 'raylib-5.0_webassembly.zip'
+RAYLIB_URL = RAYLIB_BASE + RAYLIB_NAME + '.tar.gz'
+
 if not os.path.exists('raylib'):
     print("Raylib not found, downloading...")
-    urllib.request.urlretrieve(RAYLIB_URL, 'raylib.zip')
-    
+    urllib.request.urlretrieve(RAYLIB_URL, 'raylib.tar.zip')
+    with tarfile.open('raylib.tar.gz', 'r') as tar_ref:
+        tar_ref.extractall()
+        os.rename('raylib-5.0', 'raylib')
+
+    os.remove('raylib.tar.zip')
+
+if not os.path.exists('raylib_wasm'):
+    print("Raylib WASM not found, downloading...")
+    urllib.request.urlretrieve(RAYLIB_WASM_URL, 'raylib.zip')
     with zipfile.ZipFile('raylib.zip', 'r') as zip_ref:
         zip_ref.extractall()
+        os.rename('raylib-5.0_webassembly', 'raylib_wasm')
+
+    os.remove('raylib.zip')
     
 #import os
 #os.environ['CFLAGS'] = '-O3 -march=native -Wall'
@@ -237,10 +254,10 @@ extension_paths = [
 extensions = [Extension(
     path.replace('/', '.'),
     [path + '.pyx'],
-    include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
-    library_dirs=['raylib-5.0_linux_amd64/lib'],
+    include_dirs=[numpy.get_include(), 'raylib/include'],
+    library_dirs=['raylib/lib'],
     libraries=["raylib"],
-    runtime_library_dirs=["raylib-5.0_linux_amd64/lib"],
+    runtime_library_dirs=["raylib/lib"],
     extra_compile_args=['-DPLATFORM_DESKTOP', '-O2'],#, '-g'],
 ) for path in extension_paths]
  
