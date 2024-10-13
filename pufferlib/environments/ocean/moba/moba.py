@@ -52,8 +52,9 @@ class PufferMoba(pufferlib.PufferEnv):
         return (self.observations, self.rewards,
             self.terminals, self.truncations, infos)
 
-    def render(self, upscale=4):
-        self.c_envs.render()
+    def render(self):
+        for frame in range(12):
+            self.c_envs.render(frame)
 
     def close(self):
         self.c_envs.close()
