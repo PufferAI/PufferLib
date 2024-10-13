@@ -99,6 +99,9 @@ void compute_observations(CGo* env) {
     for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
         env->observations[i + (env->grid_size+1)*(env->grid_size+1)] = (float)env->previous_board_state[i];
     }
+    env->observations[2*(env->grid_size+1)*(env->grid_size+1)] = (float)env->capture_count[0];
+    env->observations[2*(env->grid_size+1)*(env->grid_size+1)+1] = (float)env->capture_count[1];
+
 }
 
 // Add this helper function before check_capture_pieces
@@ -145,27 +148,37 @@ void check_capture_pieces(CGo* env, int* board, int tile_placement, int simulate
         int adjacent_y = tile_placement / (env->grid_size + 1) + DIRECTIONS[i][1];
         int adjacent_pos = adjacent_y * (env->grid_size + 1) + adjacent_x;
 
-        if (adjacent_x >= 0 && adjacent_x < env->grid_size+1 && adjacent_y >= 0 && adjacent_y < env->grid_size+1) {
-            if (board[adjacent_pos] == opponent) {
-                // Reset visited array for each group check
-                reset_visited(env);
-                bool has_liberty = has_liberties(env, board, adjacent_x, adjacent_y, opponent);
-                if (!has_liberty) {
-                    // Capture the group
-                    for (int y = 0; y < env->grid_size+1; y++) {
-                        for (int x = 0; x < env->grid_size+1; x++) {
-                            int pos = y * (env->grid_size + 1) + x;
-                            if (env->visited[pos] && board[pos] == opponent) {
-                                board[pos] = 0;  // Remove captured stones
-                                if (simulate == 0) {
-                                    env->capture_count[board[tile_placement]-1]+=1;
-                                }
-                                captured = true;
-                                env->last_capture_position = pos;
-                            }
-                        }
+        if (adjacent_x < 0 || adjacent_x >= env->grid_size+1 || adjacent_y < 0 || adjacent_y >= env->grid_size+1) {
+            continue;
+        }
+        if (board[adjacent_pos] != opponent) {
+            continue;
+        }
+
+        reset_visited(env);
+        if (has_liberties(env, board, adjacent_x, adjacent_y, opponent)) {
+            continue;
+        }
+
+        // Capture the group
+        for (int y = 0; y < env->grid_size+1; y++) {
+            for (int x = 0; x < env->grid_size+1; x++) {
+                int pos = y * (env->grid_size + 1) + x;
+                if (!env->visited[pos] || board[pos] != opponent) {
+                    continue;
+                }
+                board[pos] = 0;  // Remove captured stones
+                if (simulate == 0) {
+                    env->capture_count[board[tile_placement]-1]++;
+                    if (board[tile_placement] == 1) {
+                        env->rewards[0] += .1;
+                    }
+                    else {
+                        env->rewards[0] -= .1;
                     }
                 }
+                captured = true;
+                env->last_capture_position = pos;
             }
         }
     }
@@ -204,12 +217,10 @@ bool check_legal_placement(CGo* env, int tile_placement, int player) {
                 break;
             }
         }
-
         if (is_ko) {
             return false;  // Ko rule violation
         }
     }
-    
     return true;
 }
 
@@ -223,10 +234,8 @@ void flood_fill(CGo* env, int x, int y, int* territory, int player) {
     if (env->visited[pos] || env->board_states[pos] != 0) {
         return;
     }
-
     env->visited[pos] = true;
     territory[player]++;
-
     // Check adjacent positions
     for (int i = 0; i < 4; i++) {
         flood_fill(env, x + DIRECTIONS[i][0], y + DIRECTIONS[i][1], territory, player);
@@ -252,26 +261,29 @@ void compute_score_tromp_taylor(CGo* env) {
     for (int y = 0; y < env->grid_size + 1; y++) {
         for (int x = 0; x < env->grid_size + 1; x++) {
             int pos = y * (env->grid_size + 1) + x;
-            if (!env->visited[pos]) {
-                int player = 0; // Start as neutral
-                // Check adjacent positions to determine territory owner
-                for (int i = 0; i < 4; i++) {
-                    int nx = x + DIRECTIONS[i][0];
-                    int ny = y + DIRECTIONS[i][1];
-                    if (nx >= 0 && nx < env->grid_size + 1 && ny >= 0 && ny < env->grid_size + 1) {
-                        int npos = ny * (env->grid_size + 1) + nx;
-                        if (env->board_states[npos] != 0) {
-                            if (player == 0) {
-                                player = env->board_states[npos];
-                            } else if (player != env->board_states[npos]) {
-                                player = 0; // Neutral if bordered by both players
-                                break;
-                            }
-                        }
-                    }
-                }
-                flood_fill(env, x, y, territory, player);
+            if (env->visited[pos]) {
+                continue;
             }
+            int player = 0; // Start as neutral
+            // Check adjacent positions to determine territory owner
+            for (int i = 0; i < 4; i++) {
+                int nx = x + DIRECTIONS[i][0];
+                int ny = y + DIRECTIONS[i][1];
+                if (nx < 0 || nx >= env->grid_size + 1 || ny < 0 || ny >= env->grid_size + 1) {
+                    continue;
+                }
+                int npos = ny * (env->grid_size + 1) + nx;
+                if (env->board_states[npos] == 0) {
+                    continue;
+                }
+                if (player == 0) {
+                    player = env->board_states[npos];
+                } else if (player != env->board_states[npos]) {
+                    player = 0; // Neutral if bordered by both players
+                    break;
+                }
+            }
+            flood_fill(env, x, y, territory, player);
         }
     }
     // Calculate final scores
@@ -280,7 +292,6 @@ void compute_score_tromp_taylor(CGo* env) {
     env->score = (float)player_score - (float)opponent_score - env->komi;
 }
   
-
 void reset(CGo* env) {
     env->dones[0] = 0;
     env->score = 0;
@@ -294,6 +305,7 @@ void reset(CGo* env) {
     env->capture_count[1] = 0;
     env->last_capture_position = -1;
     env->moves_made = 0;
+    compute_observations(env);
 }
 
 void step(CGo* env) {
@@ -306,26 +318,40 @@ void step(CGo* env) {
             check_capture_pieces(env, env->board_states, action-1,0);
             env->moves_made++;
         }
-        // Opponent move (player 2)
-        int legal_moves[(env->grid_size+1)*(env->grid_size+1)];  // Maximum possible moves
-        int num_legal_moves = 0;
-        // Find all legal moves
-        for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
-            if (check_legal_placement(env, i, 2)) {
-                legal_moves[num_legal_moves++] = i;
+        else {
+            env->rewards[0] -= 0.1;
+            compute_observations(env);
+            return;
+        }
+        // in place shuffle
+        int shuffle_positions[(env->grid_size+1)*(env->grid_size+1)];
+        int num_positions = (env->grid_size+1)*(env->grid_size+1);
+        // Initialize the array with all possible positions
+        for (int i = 0; i < num_positions; i++) {
+            shuffle_positions[i] = i;
+        }
+        // Fisher-Yates shuffle
+        for (int i = num_positions - 1; i > 0; i--) {
+            int j = rand() % (i + 1);
+            int temp = shuffle_positions[i];
+            shuffle_positions[i] = shuffle_positions[j];
+            shuffle_positions[j] = temp;
+        }
+        // Find the first legal move in the shuffled array
+        int opponent_move = -1;
+        for (int i = 0; i < num_positions; i++) {
+            if (check_legal_placement(env, shuffle_positions[i], 2)) {
+                opponent_move = shuffle_positions[i];
+                break;
             }
         }
-        // Randomly select a legal move
-        if (num_legal_moves > 0) {
-            int random_index = rand() % num_legal_moves;
-            int opponent_move = legal_moves[random_index];
+        if (opponent_move != -1) {
             env->board_states[opponent_move] = 2;
             env->moves_made++;
-            check_capture_pieces(env, env->board_states, opponent_move,0);
-        }
-        else {
+            check_capture_pieces(env, env->board_states, opponent_move, 0);
+        } else {
             env->dones[0] = 1;
-        }       
+        }
     }
 
     if (env->moves_made >= 722) {        
@@ -335,10 +361,10 @@ void step(CGo* env) {
     if (env->dones[0] == 1) {
         compute_score_tromp_taylor(env);
         if (env->score > 0) {
-            env->rewards[0] = 1.0;
+            env->rewards[0] = 1.0 + (env->score / (env->grid_size * env->grid_size));
         }
         else if (env->score < 0) {
-            env->rewards[0] = -1.0;
+            env->rewards[0] = -1.0 - (env->score / (env->grid_size * env->grid_size));
         }
         else {
             env->rewards[0] = 0.0;
