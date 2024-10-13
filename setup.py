@@ -18,12 +18,12 @@ RAYLIB_URL = RAYLIB_BASE + RAYLIB_NAME + '.tar.gz'
 
 if not os.path.exists('raylib'):
     print("Raylib not found, downloading...")
-    urllib.request.urlretrieve(RAYLIB_URL, 'raylib.tar.zip')
+    urllib.request.urlretrieve(RAYLIB_URL, 'raylib.tar.gz')
     with tarfile.open('raylib.tar.gz', 'r') as tar_ref:
         tar_ref.extractall()
-        os.rename('raylib-5.0', 'raylib')
+        os.rename(RAYLIB_NAME, 'raylib')
 
-    os.remove('raylib.tar.zip')
+    os.remove('raylib.tar.gz')
 
 if not os.path.exists('raylib_wasm'):
     print("Raylib WASM not found, downloading...")
@@ -293,10 +293,10 @@ setup(
     ext_modules = cythonize([
         "pufferlib/extensions.pyx",
         "c_gae.pyx",
+        "pufferlib/puffernet.pyx",
         "pufferlib/environments/ocean/grid/c_grid.pyx",
         "pufferlib/environments/ocean/snake/c_snake.pyx",
         "pufferlib/environments/ocean/moba/c_moba.pyx",
-        "pufferlib/environments/ocean/moba/puffernet.pyx",
         "pufferlib/environments/ocean/moba/c_precompute_pathing.pyx",
         *extensions,
     ], 
