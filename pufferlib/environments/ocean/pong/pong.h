@@ -273,6 +273,7 @@ struct Client {
     Color paddle_left_color;
     Color paddle_right_color;
     Color ball_color;
+    Texture2D ball;
 };
 
 Client* make_client(Pong* env) {
@@ -284,13 +285,14 @@ Client* make_client(Pong* env) {
     client->ball_width = env->ball_width;
     client->ball_height = env->ball_height;
     client->x_pad = 3*client->paddle_width;
-    client->paddle_left_color = (Color){0, 255, 0, 255};
-    client->paddle_right_color = (Color){255, 0, 0, 255};
+    client->paddle_left_color = (Color){255, 0, 0, 255};
+    client->paddle_right_color = (Color){0, 255, 255, 255};
     client->ball_color = (Color){255, 255, 255, 255};
 
     InitWindow(env->width + 2*client->x_pad, env->height, "PufferLib Pong");
     SetTargetFPS(60 / env->frameskip);
 
+    client->ball = LoadTexture("resources/puffers_128.png");
     return client;
 }
 
@@ -326,15 +328,24 @@ void render(Client* client, Pong* env) {
     );
 
     // Draw ball
-    DrawRectangle(
-        client->x_pad + env->ball_x,
-        client->height - env->ball_y - client->ball_height,
-        client->ball_width,
-        client->ball_height,
-        client->ball_color
+    DrawTexturePro(
+        client->ball,
+        (Rectangle){
+            (env->ball_vx > 0) ? 0 : 128,
+            0, 128, 128,
+        },
+        (Rectangle){
+            client->x_pad + env->ball_x,
+            client->height - env->ball_y - client->ball_height,
+            client->ball_width,
+            client->ball_height
+        },
+        (Vector2){0, 0},
+        0,
+        WHITE
     );
 
-    DrawFPS(10, 10);
+    //DrawFPS(10, 10);
 
     // Draw scores
     DrawText(

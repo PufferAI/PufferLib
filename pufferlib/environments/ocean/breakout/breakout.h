@@ -71,7 +71,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
 typedef struct Breakout Breakout;
 struct Breakout {
     float* observations;
-    unsigned char* actions;
+    unsigned int* actions;
     float* rewards;
     unsigned char* dones;
     LogBuffer* log_buffer;
@@ -128,7 +128,7 @@ void init(Breakout* env) {
 void allocate(Breakout* env) {
     init(env);
     env->observations = (float*)calloc(11 + env->num_bricks, sizeof(float));
-    env->actions = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->actions = (unsigned int*)calloc(1, sizeof(unsigned int));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
     env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
@@ -359,6 +359,7 @@ typedef struct Client Client;
 struct Client {
     float width;
     float height;
+    Texture2D ball;
 };
 
 Client* make_client(Breakout* env) {
@@ -372,6 +373,7 @@ Client* make_client(Breakout* env) {
     //sound_path = os.path.join(*self.__module__.split(".")[:-1], "hit.wav")
     //self.sound = rl.LoadSound(sound_path.encode())
 
+    client->ball = LoadTexture("resources/puffers_128.png");
     return client;
 }
 
@@ -385,8 +387,27 @@ void render(Client* client, Breakout* env) {
 
     DrawRectangle(env->paddle_x, env->paddle_y,
         env->paddle_width, env->paddle_height, (Color){0, 255, 255, 255});
-    DrawRectangle(env->ball_x, env->ball_y,
-        env->ball_width, env->ball_height, WHITE);
+
+    // Draw ball
+    DrawTexturePro(
+        client->ball,
+        (Rectangle){
+            (env->ball_vx > 0) ? 0 : 128,
+            0, 128, 128,
+        },
+        (Rectangle){
+            env->ball_x,
+            env->ball_y,
+            env->ball_width,
+            env->ball_height
+        },
+        (Vector2){0, 0},
+        0,
+        WHITE
+    );
+
+    //DrawRectangle(env->ball_x, env->ball_y,
+    //    env->ball_width, env->ball_height, WHITE);
 
     for (int row = 0; row < env->brick_rows; row++) {
         for (int col = 0; col < env->brick_cols; col++) {
