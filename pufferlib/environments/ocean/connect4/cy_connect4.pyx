@@ -1,5 +1,6 @@
 cimport numpy as cnp
 from libc.stdlib cimport calloc, free
+import os
 
 cdef extern from "connect4.h":
     int LOG_BUFFER_SIZE

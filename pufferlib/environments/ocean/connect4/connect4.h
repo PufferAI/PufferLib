@@ -15,6 +15,11 @@
 #define Y_OFFSET 10
 #define TICK_RATE 1.0f/60.0f
 
+const Color PUFF_RED = (Color){187, 0, 0, 255};
+const Color PUFF_CYAN = (Color){0, 187, 187, 255};
+const Color PUFF_WHITE = (Color){241, 241, 241, 241};
+const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
+
 // how to start game compile - LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./connect4game 
 
 #define LOG_BUFFER_SIZE 1024
@@ -261,6 +266,7 @@ typedef struct Client Client;
 struct Client {
     float width;
     float height;
+    Texture2D puffers;
 };
 
 Client* make_client(int width, int height) {
@@ -274,6 +280,7 @@ Client* make_client(int width, int height) {
     //sound_path = os.path.join(*self.__module__.split(".")[:-1], "hit.wav")
     //self.sound = rl.LoadSound(sound_path.encode())
 
+    client->puffers = LoadTexture("resources/puffers_128.png");
     return client;
 }
 
@@ -283,32 +290,45 @@ void render(Client* client, CConnect4* env) {
     }
 
     BeginDrawing();
-    ClearBackground((Color){6, 24, 24, 255});
-
+    ClearBackground(PUFF_BACKGROUND);
 
     // create a connect 4 board. there should be a hollow outline of tthe board where its a grid of 7x6 and then a circle in each of the 42 slots.
     for (int row = 0; row < 6; row++) {
         for (int col = 0; col < 7; col++) {
             int board_idx = row * 7 + col;
             Color piece_color=PURPLE;
-
+            int color_idx = 0;
             if (env->board_states[row][col] == 0.0) {
                 piece_color = BLACK;
             } else if (env->board_states[row][col] == 1.0) {
-                piece_color = RED;
+                piece_color = PUFF_CYAN;
+                color_idx = 1;
             } else if (env->board_states[row][col] == -1.0) {
-                piece_color = BLUE;
+                piece_color = PUFF_RED;
+                color_idx = 2;
             }
             int x = env->board_x[board_idx];
             int y = env->board_y[board_idx];
-            Color board_color = DARKBLUE;
+            Color board_color = (Color){0, 80, 80, 255};
             DrawRectangle(x , y , env->piece_width, env->piece_width, board_color);
             DrawCircle(x + env->piece_width/2, y + env->piece_width/2, env->piece_width/2, piece_color);
+            if (color_idx == 0) {
+                continue;
+            }
+            DrawTexturePro(
+                client->puffers,
+                (Rectangle){
+                    (color_idx == 1) ? 0 : 128,
+                    0, 128, 128,
+                },
+                (Rectangle){x+16, y+16, env->piece_width-32, env->piece_width-32},
+                (Vector2){0, 0},
+                0,
+                WHITE
+            );
         }
     }
-
     EndDrawing();
-
     //PlaySound(client->sound);
 }
 

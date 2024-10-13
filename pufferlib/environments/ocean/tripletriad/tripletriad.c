@@ -50,7 +50,7 @@ int main() {
         }
 
         step(&env);
-        printf("Reward: %f, Tick: %f\n", env.rewards[0], env.log.episode_length);
+        //printf("Reward: %f, Tick: %f\n", env.rewards[0], env.log.episode_length);
         render(client, &env);
     }
     close_client(client);
