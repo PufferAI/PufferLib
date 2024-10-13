@@ -18,12 +18,12 @@ RAYLIB_URL = RAYLIB_BASE + RAYLIB_NAME + '.tar.gz'
 
 if not os.path.exists('raylib'):
     print("Raylib not found, downloading...")
-    urllib.request.urlretrieve(RAYLIB_URL, 'raylib.tar.zip')
+    urllib.request.urlretrieve(RAYLIB_URL, 'raylib.tar.gz')
     with tarfile.open('raylib.tar.gz', 'r') as tar_ref:
         tar_ref.extractall()
-        os.rename('raylib-5.0', 'raylib')
+        os.rename(RAYLIB_NAME, 'raylib')
 
-    os.remove('raylib.tar.zip')
+    os.remove('raylib.tar.gz')
 
 if not os.path.exists('raylib_wasm'):
     print("Raylib WASM not found, downloading...")
@@ -292,52 +292,11 @@ setup(
     ext_modules = cythonize([
         "pufferlib/extensions.pyx",
         "c_gae.pyx",
+        "pufferlib/puffernet.pyx",
         "pufferlib/environments/ocean/grid/c_grid.pyx",
         "pufferlib/environments/ocean/snake/c_snake.pyx",
         "pufferlib/environments/ocean/my_pong/c_my_pong.pyx",
         "pufferlib/environments/ocean/moba/c_moba.pyx",
-        Extension("pufferlib.environments.ocean.moba.cy_moba",
-            ["pufferlib/environments/ocean/moba/cy_moba.pyx"],#, "pufferlib/environments/ocean/moba/game_data_npy."],
-            include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
-            library_dirs=['raylib-5.0_linux_amd64/lib'],
-            libraries=["raylib"],
-            runtime_library_dirs=["raylib-5.0_linux_amd64/lib"],
-            extra_compile_args=['-DPLATFORM_DESKTOP'],
-        ),
-        Extension("pufferlib.environments.ocean.snake.cy_snake",
-            ["pufferlib/environments/ocean/snake/cy_snake.pyx"],
-            include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
-            library_dirs=['raylib-5.0_linux_amd64/lib'],
-            libraries=["raylib"],
-            runtime_library_dirs=["raylib-5.0_linux_amd64/lib"],
-            extra_compile_args=['-DPLATFORM_DESKTOP'],
-        ),
-        Extension("pufferlib.environments.ocean.pong.cy_pong",
-            ["pufferlib/environments/ocean/pong/cy_pong.pyx"],
-            include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
-            library_dirs=['raylib-5.0_linux_amd64/lib'],
-            libraries=["raylib"],
-            runtime_library_dirs=["raylib-5.0_linux_amd64/lib"],
-            extra_compile_args=['-DPLATFORM_DESKTOP'],
-        ),
-        Extension("pufferlib.environments.ocean.breakout.cy_breakout",
-            ["pufferlib/environments/ocean/breakout/cy_breakout.pyx"],
-            include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
-            library_dirs=['raylib-5.0_linux_amd64/lib'],
-            libraries=["raylib"],
-            runtime_library_dirs=["raylib-5.0_linux_amd64/lib"],
-            extra_compile_args=['-DPLATFORM_DESKTOP'],
-        ),
-        Extension("pufferlib.environments.ocean.connect4.cy_connect4",
-            ["pufferlib/environments/ocean/connect4/cy_connect4.pyx"],
-            include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
-            library_dirs=['raylib-5.0_linux_amd64/lib'],
-            libraries=["raylib"],
-            runtime_library_dirs=["raylib-5.0_linux_amd64/lib"],
-            extra_compile_args=['-DPLATFORM_DESKTOP'],
-        ),
-        #"pufferlib/environments/ocean/moba/cy_moba.pyx",
-        "pufferlib/environments/ocean/moba/puffernet.pyx",
         "pufferlib/environments/ocean/moba/c_precompute_pathing.pyx",
         *extensions,
     ], 
