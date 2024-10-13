@@ -87,6 +87,7 @@ class Policy(nn.Module):
         #self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
         self.num_actions = env.single_action_space.n
         self.decompressor = Decompressor()
+        self.factors = np.array([4, 4, 17, 5, 3, 5, 5, 5, 7, 4])
 
         self.map_2d = nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Conv2d(59, 64, 5, stride=3)),
@@ -117,24 +118,29 @@ class Policy(nn.Module):
 
     def encode_observations(self, observations, unflatten=False):
         batch = observations.shape[0]
+        ob_map = observations[:, :11*15*10].view(batch, 11, 15, 10)
+        ob_player = observations[:, 11*15*10:-10]
+        ob_reward = observations[:, -10:]
+        #print([torch.max(ob_map[:, :, :, i]) for i in range(10)])
+        ob_map = torch.cat([torch.nn.functional.one_hot(
+            ob_map[:, :, :, i].long(), self.factors[i]) for i in range(10)], dim=-1)
 
         #x = pufferlib.pytorch.nativize_tensor(observations, self.dtype)
         #with torch.no_grad():
         #    ob_map = self.decompressor(x['map']).float()
         #player = x['player']
 
-        player = observations[:, (11*15):-10]
         #player = self.player_proj(player.float() / 99)
         #player, _ = self.lstm(player)
         #return player, None
 
-        ob_player = self.player_encoder(player)
+        ob_player = self.player_encoder(ob_player.float() / 99)
         #ob_player = self.player_proj(player.float()/99)
         #return ob_player, None
 
-        ob_map = observations[:, :(11*15)].view(batch, 11, 15)
-        ob_map = self.decompressor(ob_map).float()
-        ob_map = self.map_2d(ob_map)
+        #ob_map = observations[:, :(11*15)].view(batch, 11, 15)
+        #ob_map = self.decompressor(ob_map).float()
+        ob_map = self.map_2d(ob_map.permute(0, 3, 1, 2).float())
 
         reward = observations[:, -10:].float() / 10000
         ob_reward = self.reward_proj(reward)

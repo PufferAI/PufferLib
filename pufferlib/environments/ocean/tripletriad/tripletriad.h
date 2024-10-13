@@ -20,15 +20,76 @@
 #define PLACE_CARD_9 14
 #define TICK_RATE 1.0f/60.0f
 
+const Color PUFF_RED = (Color){187, 0, 0, 255};
+const Color PUFF_CYAN = (Color){0, 187, 187, 255};
+const Color PUFF_WHITE = (Color){241, 241, 241, 241};
+const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
+
 // how to start game compile - LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./tripletriadgame 
 
+#define LOG_BUFFER_SIZE 1024
+
+typedef struct Log Log;
+struct Log {
+    float episode_return;
+    float episode_length;
+    float score;
+};
+
+typedef struct LogBuffer LogBuffer;
+struct LogBuffer {
+    Log* logs;
+    int length;
+    int idx;
+};
+
+LogBuffer* allocate_logbuffer(int size) {
+    LogBuffer* logs = (LogBuffer*)calloc(1, sizeof(LogBuffer));
+    logs->logs = (Log*)calloc(size, sizeof(Log));
+    logs->length = size;
+    logs->idx = 0;
+    return logs;
+}
+
+void free_logbuffer(LogBuffer* buffer) {
+    free(buffer->logs);
+    free(buffer);
+}
+
+void add_log(LogBuffer* logs, Log* log) {
+    if (logs->idx == logs->length) {
+        return;
+    }
+    logs->logs[logs->idx] = *log;
+    logs->idx += 1;
+    //printf("Log: %f, %f, %f\n", log->episode_return, log->episode_length, log->score);
+}
+
+Log aggregate_and_clear(LogBuffer* logs) {
+    Log log = {0};
+    if (logs->idx == 0) {
+        return log;
+    }
+    for (int i = 0; i < logs->idx; i++) {
+        log.episode_return += logs->logs[i].episode_return;
+        log.episode_length += logs->logs[i].episode_length;
+        log.score += logs->logs[i].score;
+    }
+    log.episode_return /= logs->idx;
+    log.episode_length /= logs->idx;
+    log.score /= logs->idx;
+    logs->idx = 0;
+    return log;
+}
+ 
 typedef struct CTripleTriad CTripleTriad;
 struct CTripleTriad {
     float* observations;
     unsigned char* actions;
     float* rewards;
     unsigned char* dones;
-    unsigned int* misc_logging;
+    LogBuffer* log_buffer;
+    Log log;
     int card_width;
     int card_height;
     float* board_x;
@@ -65,8 +126,6 @@ void generate_cards_in_hand(CTripleTriad* env) {
         }
     }
 }
-
-
 
 void generate_card_locations(CTripleTriad* env) {
     for(int i=0; i< 2; i++) {
@@ -106,24 +165,7 @@ void generate_scores(CTripleTriad* env) {
     }
 }
 
-
-CTripleTriad* init_ctripletriad( unsigned char* actions,
-        float* observations, float* rewards, unsigned char* dones, unsigned int* misc_logging,
-        int width, int height, int card_width, int card_height, int game_over, int num_cards) {
-
-    CTripleTriad* env = (CTripleTriad*)calloc(1, sizeof(CTripleTriad));
-
-    env->actions = actions;
-    env->observations = observations;
-    env->rewards = rewards;
-    env->dones = dones;
-    env->width = width;
-    env->height = height;
-    env->card_width = card_width;
-    env->card_height = card_height;
-    env->game_over = game_over;
-    env->misc_logging = misc_logging;
-
+void init_ctripletriad(CTripleTriad* env) {
     // Allocate memory for board_x, board_y, and board_states
     env->board_x = (float*)calloc(9, sizeof(float));
     env->board_y = (float*)calloc(9, sizeof(float));
@@ -152,8 +194,6 @@ CTripleTriad* init_ctripletriad( unsigned char* actions,
             env->board_card_values[i][j] = (int*)calloc(4, sizeof(int));
         }
     }
-    env->num_cards = num_cards;
-
     generate_board_positions(env);
     generate_cards_in_hand(env);
     generate_card_locations(env);
@@ -161,22 +201,15 @@ CTripleTriad* init_ctripletriad( unsigned char* actions,
     generate_board_states(env);
     generate_board_card_values(env);
     generate_scores(env);
-    return env;
 }
 
-CTripleTriad* allocate_ctripletriad(int width, int height,
-    int card_width, int card_height, int game_over, int num_cards) {
-
-    unsigned char* actions = (unsigned char*)calloc(1, sizeof(unsigned char));
-    float* observations = (float*)calloc(width * height, sizeof(float));
-    unsigned char* dones = (unsigned char*)calloc(1, sizeof(unsigned char));
-    float* rewards = (float*)calloc(1, sizeof(float));
-    unsigned int* misc_logging = (unsigned int*)calloc(2, sizeof(unsigned int));
-    CTripleTriad* env = init_ctripletriad(actions,
-        observations, rewards, dones, misc_logging, width, height,
-            card_width, card_height, game_over, num_cards);
-
-    return env;
+void allocate_ctripletriad(CTripleTriad* env) {
+    env->actions = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->observations = (float*)calloc(env->width*env->height, sizeof(float));
+    env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->rewards = (float*)calloc(1, sizeof(float));
+    env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
+    init_ctripletriad(env);
 }
 
 void free_ctripletriad(CTripleTriad* env) {
@@ -213,7 +246,7 @@ void free_allocated_ctripletriad(CTripleTriad* env) {
     free(env->observations);
     free(env->dones);
     free(env->rewards);
-    free(env->misc_logging);
+    free_logbuffer(env->log_buffer);
     free_ctripletriad(env);
 }
 
@@ -262,11 +295,9 @@ void compute_observations(CTripleTriad* env) {
     }
 }
 
-
-
 void reset(CTripleTriad* env) {
-    env->misc_logging[0] = 1;
-    env->misc_logging[1] = env->score[0];
+    env->log = (Log){0};
+    env->game_over = 0;
     for(int i=0; i< 2; i++) {
         for(int j=0; j< 5; j++) {
             for(int k=0; k< 4; k++) {
@@ -301,6 +332,7 @@ void reset(CTripleTriad* env) {
         env->score[i] = 5;
     }
     env->dones[0] = 0;
+    compute_observations(env);
 }
 
 void select_card(CTripleTriad* env, int card_selected, int player) {
@@ -340,8 +372,6 @@ void update_action_masks(CTripleTriad* env) {
     }
 }
 
-
-
 void check_win_condition(CTripleTriad* env, int player) {
     int count = 0;
     for (int i=0; i< 3; i++) {
@@ -351,21 +381,21 @@ void check_win_condition(CTripleTriad* env, int player) {
             } 
         }
     }
-    if (count ==9) {
+    if (count == 9) {
         // add a draw condition and winner value is 0
         if (env->score[0] == env->score[1]) {
             env->dones[0] = 1;
-            env->rewards[0] = -0.1;
+            env->rewards[0] = 0.0;
             env->game_over = 1;
         } else {
             int winner = env->score[0] > env->score[1] ? 1 : -1;
             env->dones[0] = 1;
             env->rewards[0] = winner; // 1 for player win, -1 for opponent win
+            env->log.episode_return += winner;
             env->game_over = 1;
         }
     }
     return;
-    
 }
 
 int get_bot_card_placement(CTripleTriad* env) {
@@ -459,28 +489,37 @@ void check_card_conversions(CTripleTriad* env, int card_placement, int player) {
             }
         }
     }
-
 }
+
 void step(CTripleTriad* env) {
+    env->log.episode_length += 1;
     env->rewards[0] = 0.0;
     int action = env->actions[0];
     // reset the game if game over
     if (env->game_over == 1) {
+        env->log.score = env->score[0];
+        add_log(env->log_buffer, &env->log);
+        //printf("Log: %f, %f, %f\n", env->log.episode_return, env->log.episode_length, env->log.score);
         reset(env);
-        env->game_over = 0;
         return;
     }
     // select a card if the card is in the range of 1-5 and the card is not placed
-    if (action >= SELECT_CARD_1 && action <= SELECT_CARD_5 ) {
+    if (action == NOOP) {
+        env->rewards[0] -= 0.1;
+        env->log.episode_return -= 0.1;
+    } else if (action >= SELECT_CARD_1 && action <= SELECT_CARD_5 ) {
+        // Prevent model from just swapping between selected cards to avoid playing
+        env->log.episode_return -= 0.1;
+        env->rewards[0] -= 0.1;
+
         int card_selected = action;
         if(env->card_locations[0][card_selected-1] == 0) {
             select_card(env,card_selected, 1);
         }
-
     }
     // place a card if the card is in the range of 1-9 and the card is selected
     else if (action >= PLACE_CARD_1 && action <= PLACE_CARD_9  ) {
-        int card_placement = action -5;
+        int card_placement = action - 5;
         bool card_placed = false;
         if(env->card_selected[0] >= 0) {
             if(check_legal_placement(env, card_placement, 1)) {
@@ -490,7 +529,13 @@ void step(CTripleTriad* env) {
                 update_action_masks(env);
                 env->card_selected[0] = -1;
                 card_placed = true;
+            } else {
+                env->log.episode_return -= 0.1;
+                env->rewards[0] -= 0.1;
             }
+        } else {
+            env->log.episode_return -= 0.1;
+            env->rewards[0] -= 0.1;
         }
 
         // opponent turn 
@@ -511,10 +556,8 @@ void step(CTripleTriad* env) {
     if (env->dones[0] == 1) {
         env->game_over=1;
     }
-
     compute_observations(env);
 }
-
 
 typedef struct Client Client;
 struct Client {
@@ -527,8 +570,8 @@ Client* make_client(int width, int height) {
     client->width = width;
     client->height = height;
 
-    InitWindow(width, height, "PufferLib Ray Connect4");
-    SetTargetFPS(15);
+    InitWindow(width, height, "PufferLib Ray TripleTriad");
+    SetTargetFPS(60);
 
     //sound_path = os.path.join(*self.__module__.split(".")[:-1], "hit.wav")
     //self.sound = rl.LoadSound(sound_path.encode())
@@ -542,29 +585,24 @@ void render(Client* client, CTripleTriad* env) {
     }
 
     BeginDrawing();
-    ClearBackground((Color){6, 24, 24, 255});
-
+    ClearBackground(PUFF_BACKGROUND);
 
     // create 3x3 board for triple triad
     for (int row = 0; row < 3; row++) {
         for (int col = 0; col < 3; col++) {
             int board_idx = row * 3 + col;
             Color piece_color=PURPLE;
-
             if (env->board_states[row][col] == 0.0) {
-                piece_color = BLACK;
+                piece_color = PUFF_BACKGROUND;
             } else if (env->board_states[row][col] == 1.0) {
-                piece_color = RED;
+                piece_color = PUFF_CYAN;
             } else if (env->board_states[row][col] == -1.0) {
-                piece_color = BLUE;
+                piece_color = PUFF_RED;
             }
             int x = env->board_x[board_idx];
             int y = env->board_y[board_idx];
-            Color board_color = DARKBLUE;
             DrawRectangle(x+196+10 , y+30 , env->card_width, env->card_height, piece_color);
-            DrawRectangleLines(x+196+10 , y+30 , env->card_width, env->card_height, WHITE);
-
-            
+            DrawRectangleLines(x+196+10 , y+30 , env->card_width, env->card_height, PUFF_WHITE);
         }
     }
     for(int i=0; i< 2; i++) {
@@ -580,15 +618,15 @@ void render(Client* client, CTripleTriad* env) {
             }
             // Draw card background
             // adjusts card color based on board state 
-            Color card_color = (i == 0) ? RED : BLUE;
+            Color card_color = (i == 0) ? PUFF_RED : PUFF_CYAN;
             // check if index is in bounds first    
             if (env->card_locations[i][j] != 0) {
                 if (env->board_states[(env->card_locations[i][j]-1)/3][(env->card_locations[i][j]-1)%3] == -1) {
-                    card_color = BLUE;
+                    card_color = PUFF_RED;
                 } else if (env->board_states[(env->card_locations[i][j]-1)/3][(env->card_locations[i][j]-1)%3] == 1) {
-                    card_color = RED;
+                    card_color = PUFF_CYAN;
                 } else {
-                    card_color = (i == 0) ? RED : BLUE;
+                    card_color = (i == 0) ? PUFF_CYAN : PUFF_RED;
                 }
             }
             DrawRectangle(card_x, card_y, env->card_width, env->card_height, card_color);
@@ -596,7 +634,7 @@ void render(Client* client, CTripleTriad* env) {
             if (env->card_selected[i] == j) {
                 DrawRectangleLines(card_x, card_y, env->card_width, env->card_height, YELLOW);
             } else {
-                DrawRectangleLines(card_x, card_y, env->card_width, env->card_height, WHITE);
+                DrawRectangleLines(card_x, card_y, env->card_width, env->card_height, PUFF_WHITE);
             }
         
             for(int k=0; k< 4; k++) {
@@ -620,33 +658,31 @@ void render(Client* client, CTripleTriad* env) {
                         break;
                 }
 
-                Color text_color = WHITE;
+                Color text_color = PUFF_WHITE;
                 DrawText(TextFormat("%d", env->cards_in_hand[i][j][k]), x_offset, y_offset, 20, text_color);
             }
             // add a little text on the top right that says Card 1, Card 2, Card 3, Card 4, Card 5
-            DrawText(TextFormat("Card %d", j+1), card_x + env->card_width -50, card_y + 5, 10, WHITE);
+            DrawText(TextFormat("Card %d", j+1), card_x + env->card_width -50, card_y + 5, 10, PUFF_WHITE);
         }
         if (i == 0) {
-            DrawText(TextFormat("%d", env->score[i]), env->card_width *0.4, env->height - 400, 100, WHITE);
+            DrawText(TextFormat("%d", env->score[i]), env->card_width *0.4, env->height - 400, 100, PUFF_WHITE);
         } else {
-            DrawText(TextFormat("%d", env->score[i]), env->width - env->card_width *.6, env->height - 400, 100, WHITE);
+            DrawText(TextFormat("%d", env->score[i]), env->width - env->card_width *.6, env->height - 400, 100, PUFF_WHITE);
         }
     }
-    DrawText("Triple Triad", 20, 10, 20, WHITE);
+    DrawText("Triple Triad", 20, 10, 20, PUFF_WHITE);
 
     // give instructions to player 1: 
-    DrawText("How to Play: Use 1-5 to select a card", 20, env->height - 280, 20, WHITE);
-    DrawText("Click an empty space on the board to place a card", 20, env->height - 250, 20, WHITE);
+    DrawText("How to Play: Use 1-5 to select a card", 20, env->height - 280, 20, PUFF_WHITE);
+    DrawText("Click an empty space on the board to place a card", 20, env->height - 250, 20, PUFF_WHITE);
 
     // Explain further rules 
-    DrawText("Goal: Place all your cards on the board. The player with the highest score wins.", 20, env->height - 220, 20, WHITE);
-    DrawText("Rules: Each card has 4 values, N, S, E, W.", 20, env->height - 190, 20, WHITE);
-    DrawText("You may not place a card on top of an opponent's card.", 20, env->height - 160, 20, WHITE);
-    DrawText("Scoring Example: Player 1 places a card with a 2 in the North direction.", 20, env->height - 100, 20, WHITE);
-    DrawText("If Player 2 has a card above Player 1's card with a 1 in the South direction. ", 20, env->height - 70, 20, WHITE);
-    DrawText("Player 1 captures Player 2's card. Player 1 gains a point. Player 2 loses a point.", 20, env->height - 40, 20, WHITE);
-
-
+    DrawText("Goal: Place all your cards on the board. The player with the highest score wins.", 20, env->height - 220, 20, PUFF_WHITE);
+    DrawText("Rules: Each card has 4 values, N, S, E, W.", 20, env->height - 190, 20, PUFF_WHITE);
+    DrawText("You may not place a card on top of an opponent's card.", 20, env->height - 160, 20, PUFF_WHITE);
+    DrawText("Scoring Example: Player 1 places a card with a 2 in the North direction.", 20, env->height - 100, 20, PUFF_WHITE);
+    DrawText("If Player 2 has a card above Player 1's card with a 1 in the South direction. ", 20, env->height - 70, 20, PUFF_WHITE);
+    DrawText("Player 1 captures Player 2's card. Player 1 gains a point. Player 2 loses a point.", 20, env->height - 40, 20, PUFF_WHITE);
 
     EndDrawing();
 

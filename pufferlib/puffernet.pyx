@@ -68,6 +68,3 @@ def puf_argmax_multidiscrete(cnp.ndarray input, cnp.ndarray output,
     _argmax_multidiscrete(<float*> input.data, <int*> output.data,
         batch_size, <int*> logit_sizes.data, num_actions)
 
-
-
-

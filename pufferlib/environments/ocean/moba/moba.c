@@ -42,13 +42,13 @@ MOBANet* init_mobanet(Weights* weights, int num_agents) {
 }
 
 void free_mobanet(MOBANet* net) {
-    free_conv2d(net->conv1);
-    free_relu(net->relu1);
-    free_conv2d(net->conv2);
-    free_linear(net->flat);
-    free_linear(net->proj);
-    free_linear(net->actor);
-    free_linear(net->value_fn);
+    free(net->conv1);
+    free(net->relu1);
+    free(net->conv2);
+    free(net->flat);
+    free(net->proj);
+    free(net->actor);
+    free(net->value_fn);
 }
 
 void forward(MOBANet* net, unsigned char* observations, int* actions) {
@@ -95,40 +95,72 @@ void forward(MOBANet* net, unsigned char* observations, int* actions) {
     }
 }
 
-int main() {
-    int num_agents = 10;
-    int num_creeps = 100;
-    int num_neutrals = 72;
-    int num_towers = 24;
-    int vision_range = 5;
-    float agent_speed = 1.0;
-    bool discretize = true;
-    float reward_death = -1.0;
-    float reward_xp = 0.006;
-    float reward_distance = 0.05;
-    float reward_tower = 3.0;
+void demo() {
+    Weights* weights = load_weights("resources/moba/moba_weights.bin", 168856);
+    MOBANet* net = init_mobanet(weights, 10);
 
-    Weights* weights = load_weights("moba_weights.bin", 168856);
-    MOBANet* net = init_mobanet(weights, num_agents);
-
-    MOBA* env = allocate_moba(num_agents, num_creeps, num_neutrals, num_towers, vision_range,
-        agent_speed, discretize, reward_death, reward_xp, reward_distance, reward_tower);
+    MOBA env = {
+        .vision_range = 5,
+        .agent_speed = 1.0,
+        .discretize = true,
+        .reward_death = -1.0,
+        .reward_xp = 0.006,
+        .reward_distance = 0.05,
+        .reward_tower = 3.0,
+    };
+    allocate_moba(&env);
 
     GameRenderer* renderer = init_game_renderer(32, 41, 23);
 
-    reset(env);
+    reset(&env);
     int frame = 0;
     while (!WindowShouldClose()) {
         if (frame % 12 == 0) {
-            step(env);
-            forward(net, env->observations, env->actions);
+            step(&env);
+            forward(net, env.observations, env.actions);
         }
-        render_game(renderer, env, frame);
+        render_game(renderer, &env, frame);
         frame = (frame + 1) % 12;
     }
     free_mobanet(net);
-    free_weights(weights);
-    free_allocated_moba(env);
+    free(weights);
+    free_allocated_moba(&env);
     close_game_renderer(renderer);
+}
+
+void test_performance(float test_time) {
+    MOBA env = {
+        .vision_range = 5,
+        .agent_speed = 1.0,
+        .discretize = true,
+        .reward_death = -1.0,
+        .reward_xp = 0.006,
+        .reward_distance = 0.05,
+        .reward_tower = 3.0,
+    };
+    allocate_moba(&env);
+
+    reset(&env);
+    int start = time(NULL);
+    int i = 0;
+    while (time(NULL) - start < test_time) {
+        for (int j = 0; j < 10; j++) {
+            env.actions[6*j] = rand()%600 - 300;
+            env.actions[6*j + 1] = rand()%600 - 300;
+            env.actions[6*j + 2] = rand()%3;
+            env.actions[6*j + 3] = rand()%2;
+            env.actions[6*j + 4] = rand()%2;
+            env.actions[6*j + 5] = rand()%2;
+        }
+        step(&env);
+        i++;
+    }
+    int end = time(NULL);
+    printf("SPS: %f\n", 10.0f*i / (end - start));
+}
+
+int main() {
+    demo();
+    //test_performance(30.0f);
     return 0;
 }

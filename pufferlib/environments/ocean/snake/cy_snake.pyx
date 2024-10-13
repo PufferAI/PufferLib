@@ -1,12 +1,48 @@
+cimport numpy as cnp
+from libc.stdlib cimport calloc, free
 
 cdef extern from "snake.h":
     cdef:
+        int LOG_BUFFER_SIZE
+
+        ctypedef struct Log:
+            float episode_return;
+            float episode_length;
+            float score;
+
+        ctypedef struct LogBuffer
+        LogBuffer* allocate_logbuffer(int)
+        void free_logbuffer(LogBuffer*)
+        Log aggregate_and_clear(LogBuffer*)
+
+        ctypedef struct CSnake:
+            char* observations
+            unsigned int* actions
+            float* rewards
+            unsigned char* terminals
+            LogBuffer* log_buffer
+            Log* logs
+            char* grid
+            int* snake
+            int* snake_lengths
+            int* snake_ptr
+            int* snake_lifetimes
+            int* snake_colors
+            int num_snakes
+            int width
+            int height
+            int max_snake_length
+            int food
+            int vision
+            int window
+            int obs_size
+            unsigned char leave_corpse_on_death
+            float reward_food
+            float reward_corpse
+            float reward_death
+
         ctypedef struct CSnake
-        CSnake* init_csnake(char* grid, int* snake, char* observations, int* snake_lengths,
-            int* snake_ptr, int* snake_lifetimes, int* snake_colors, unsigned int* actions,
-            float* rewards, int num_snakes, int width, int height, int max_snake_length,
-            int food, int vision, bint leave_corpse_on_death, float reward_food,
-            float reward_corpse, float reward_death)
+        void init_csnake(CSnake* env)
         void step_all(CSnake* env)
         void compute_observations(CSnake* env)
         void spawn_snake(CSnake* env, int snake_id)
@@ -14,70 +50,89 @@ cdef extern from "snake.h":
         void reset(CSnake* env)
         void step_snake(CSnake* env, int i)
         void step(CSnake* env)
-        ctypedef struct Renderer
-        Renderer* init_renderer(int cell_size, int width, int height)
-        void render_global(Renderer* renderer, CSnake* env)
-        void close_renderer(Renderer* renderer)
-
-cimport numpy as cnp
+        ctypedef struct Client
+        Client* make_client(int cell_size, int width, int height)
+        void render(Client* client, CSnake* env)
+        void close_client(Client* client)
 
 cdef class Snake:
     cdef:
-        CSnake *env
-        Renderer *renderer
-        char[:, :] grid
-        char[:, :, :] observations
-        int[:, :, :] snake
-        int[:] snake_lengths
-        int[:] snake_ptr
-        int[:] snake_lifetimes
-        int[:] snake_colors
-        unsigned int[:] actions
-        float[:] rewards
+        CSnake *envs
+        Client* client
+        LogBuffer* logs
+        int num_envs
+        
+    def __init__(self, cnp.ndarray observations, cnp.ndarray actions,
+             cnp.ndarray rewards, cnp.ndarray terminals,
+             list widths, list heights, list num_snakes,
+             list num_food, int vision, int max_snake_length,
+             bint leave_corpse_on_death, float reward_food,
+             float reward_corpse, float reward_death):
 
-    def __init__(self, cnp.ndarray grid, cnp.ndarray snake,
-            cnp.ndarray observations, cnp.ndarray snake_lengths,
-            cnp.ndarray snake_ptr, cnp.ndarray snake_lifetimes,
-            cnp.ndarray snake_colors, cnp.ndarray actions,
-            cnp.ndarray rewards, int food, int vision,
-            int max_snake_length, bint leave_corpse_on_death,
-            float reward_food, float reward_corpse,
-            float reward_death):
+        self.num_envs = len(num_snakes)
+        self.envs = <CSnake*>calloc(self.num_envs, sizeof(CSnake*))
+        self.logs = allocate_logbuffer(LOG_BUFFER_SIZE)
+        self.client = NULL
 
         cdef:
-            char* grid_view = <char*> grid.data
-            int* snake_view = <int*> snake.data
-            char* observations_view = <char*> observations.data
-            int* snake_lengths_view = <int*> snake_lengths.data
-            int* snake_ptr_view = <int*> snake_ptr.data
-            int* snake_lifetimes_view = <int*> snake_lifetimes.data
-            int* snake_colors_view = <int*> snake_colors.data
-            unsigned int* actions_view = <unsigned int*> actions.data
-            float* rewards_view = <float*> rewards.data
-            int num_snakes = snake.shape[0]
-            int width = grid.shape[1]
-            int height = grid.shape[0]
+            cnp.ndarray observations_i
+            cnp.ndarray actions_i
+            cnp.ndarray rewards_i
+            cnp.ndarray terminals_i
 
-        self.env = init_csnake(grid_view, snake_view, observations_view, snake_lengths_view,
-            snake_ptr_view, snake_lifetimes_view, snake_colors_view, actions_view,
-            rewards_view, num_snakes, width, height, max_snake_length,
-            food, vision, leave_corpse_on_death, reward_food,
-            reward_corpse, reward_death)
-        self.renderer = NULL
+        cdef int i
+        cdef int n = 0
+        for i in range(self.num_envs):
+            observations_i = observations[n:n+num_snakes[i]]
+            actions_i = actions[n:n+num_snakes[i]]
+            rewards_i = rewards[n:n+num_snakes[i]]
+            terminals_i = terminals[n:n+num_snakes[i]]
+            n += num_snakes[i]
+
+            self.envs[i] = CSnake(
+                observations = <char*> observations_i.data,
+                actions = <unsigned int*> actions_i.data,
+                rewards = <float*> rewards_i.data,
+                terminals = <unsigned char*> terminals_i.data,
+                log_buffer=self.logs,
+                width=widths[i],
+                height=heights[i],
+                num_snakes=num_snakes[i],
+                food=num_food[i],
+                vision=vision,
+                max_snake_length=max_snake_length,
+                leave_corpse_on_death=leave_corpse_on_death,
+                reward_food=reward_food,
+                reward_corpse=reward_corpse,
+                reward_death=reward_death,
+            )
+            init_csnake(&self.envs[i])
 
     def reset(self):
-        reset(self.env)
+        cdef int i
+        for i in range(self.num_envs):
+            reset(&self.envs[i])
 
     def step(self):
-        step(self.env)
+        cdef int i
+        for i in range(self.num_envs):
+            step(&self.envs[i])
 
-    def render(self, int cell_size=16, int width=80, int height=45):
-        if self.renderer == NULL:
-            self.renderer = init_renderer(cell_size, width, height)
+    def render(self):
+        cdef CSnake* env = &self.envs[0]
+        if self.client == NULL:
+            self.client = make_client(8, env.width, env.height)
 
-        render_global(self.renderer, self.env)
+        render(self.client, env)
 
     def close(self):
-        if self.renderer != NULL:
-            close_renderer(self.renderer)
-            self.renderer = NULL
+        if self.client != NULL:
+            close_client(self.client)
+            self.client = NULL
+
+        # TODO: free
+        #free(self.envs)
+
+    def log(self):
+        cdef Log log = aggregate_and_clear(self.logs)
+        return log
