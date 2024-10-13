@@ -1,1 +1,0 @@
-emcc -o build/game.html snake.c --embed-file flat_snake.pt -Os -Wall ./raylib/src/libraylib.a -I./raylib/src -L. -L./raylib/src/libraylib.a -s USE_GLFW=3 -s ASYNCIFY -sFILESYSTEM -s FORCE_FILESYSTEM=1 --shell-file ./raylib/src/minshell.html -DPLATFORM_WEB

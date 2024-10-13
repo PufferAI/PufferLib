@@ -23,7 +23,7 @@ int main() {
     int hidden_dim = 128;
     int output_dim = 4;
     MLP* mlp = allocate_mlp(batch_size, input_dim, hidden_dim, output_dim);
-    if (load_weights("flat_snake.pt", mlp))
+    if (load_weights("resources/snake_weights.bin", mlp))
         return 1;
 
     reset(&env);
