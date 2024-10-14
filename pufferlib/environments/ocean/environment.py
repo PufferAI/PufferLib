@@ -6,10 +6,7 @@ from .breakout import breakout
 from .connect4 import connect4
 from .tripletriad import tripletriad
 from .moba import moba
-
-def make_go(num_envs=1):
-    from .go import go
-    return go.MyGo(num_envs=num_envs)
+from .go import go
 
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):

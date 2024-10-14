@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdio.h>
 #include <math.h>
 #include <assert.h>
 #include "raylib.h"
@@ -14,6 +15,62 @@
 #define NUM_DIRECTIONS 4
 static const int DIRECTIONS[NUM_DIRECTIONS][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
 //  LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./gogame
+#define LOG_BUFFER_SIZE 1024
+
+typedef struct Log Log;
+struct Log {
+    float episode_return;
+    float episode_length;
+    int games_played;
+    float score;
+};
+
+typedef struct LogBuffer LogBuffer;
+struct LogBuffer {
+    Log* logs;
+    int length;
+    int idx;
+};
+
+LogBuffer* allocate_logbuffer(int size) {
+    LogBuffer* logs = (LogBuffer*)calloc(1, sizeof(LogBuffer));
+    logs->logs = (Log*)calloc(size, sizeof(Log));
+    logs->length = size;
+    logs->idx = 0;
+    return logs;
+}
+
+void free_logbuffer(LogBuffer* buffer) {
+    free(buffer->logs);
+    free(buffer);
+}
+
+void add_log(LogBuffer* logs, Log* log) {
+    if (logs->idx == logs->length) {
+        return;
+    }
+    logs->logs[logs->idx] = *log;
+    logs->idx += 1;
+    //printf("Log: %f, %f, %f\n", log->episode_return, log->episode_length, log->score);
+}
+
+Log aggregate_and_clear(LogBuffer* logs) {
+    Log log = {0};
+    if (logs->idx == 0) {
+        return log;
+    }
+    for (int i = 0; i < logs->idx; i++) {
+        log.episode_return += logs->logs[i].episode_return;
+        log.episode_length += logs->logs[i].episode_length;
+        log.games_played += logs->logs[i].games_played;
+        log.score += logs->logs[i].score;
+    }
+    log.episode_return /= logs->idx;
+    log.episode_length /= logs->idx;
+    log.score /= logs->idx;
+    logs->idx = 0;
+    return log;
+}
 
 typedef struct CGo CGo;
 struct CGo {
@@ -21,6 +78,8 @@ struct CGo {
     unsigned short* actions;
     float* rewards;
     unsigned char* dones;
+    LogBuffer* log_buffer;
+    Log log;
     float score;
     int width;
     int height;
@@ -37,9 +96,7 @@ struct CGo {
     int moves_made;
     int* capture_count;
     float komi;
-    bool* visited;
-    int client_initialized;
-    int turn;
+    int* visited;
 };
 
 void generate_board_positions(CGo* env) {
@@ -58,11 +115,10 @@ void init(CGo* env) {
     env->board_x = (int*)calloc((env->grid_size)*(env->grid_size), sizeof(int));
     env->board_y = (int*)calloc((env->grid_size)*(env->grid_size), sizeof(int));
     env->board_states = (int*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(int));
-    env->visited = (bool*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(bool));
+    env->visited = (int*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(int));
     env->previous_board_state = (int*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(int));
     env->temp_board_states = (int*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(int));
     env->capture_count = (int*)calloc(2, sizeof(int));
-    env->last_capture_position = -1;
     generate_board_positions(env);
 }
 
@@ -72,6 +128,7 @@ void allocate(CGo* env) {
     env->actions = (unsigned short*)calloc(1, sizeof(unsigned short));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
 }
 
 void free_initialized(CGo* env) {
@@ -99,8 +156,8 @@ void compute_observations(CGo* env) {
     for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
         env->observations[i + (env->grid_size+1)*(env->grid_size+1)] = (float)env->previous_board_state[i];
     }
-    env->observations[2*(env->grid_size+1)*(env->grid_size+1)] = (float)env->capture_count[0];
-    env->observations[2*(env->grid_size+1)*(env->grid_size+1)+1] = (float)env->capture_count[1];
+    // env->observations[2*(env->grid_size+1)*(env->grid_size+1)] = (float)env->capture_count[0];
+    // env->observations[2*(env->grid_size+1)*(env->grid_size+1)+1] = (float)env->capture_count[1];
 
 }
 
@@ -116,7 +173,7 @@ bool has_liberties(CGo* env, int* board,  int x, int y, int player) {
         return false;
     }
     
-    env->visited[pos] = true;
+    env->visited[pos] = 1;
 
     if (board[pos] == 0) {
         return true;  // Found a liberty
@@ -172,9 +229,11 @@ void check_capture_pieces(CGo* env, int* board, int tile_placement, int simulate
                     env->capture_count[board[tile_placement]-1]++;
                     if (board[tile_placement] == 1) {
                         env->rewards[0] += .1;
+                        env->log.score +=.1;
                     }
                     else {
                         env->rewards[0] -= .1;
+                        env->log.score +=.1;
                     }
                 }
                 captured = true;
@@ -234,7 +293,7 @@ void flood_fill(CGo* env, int x, int y, int* territory, int player) {
     if (env->visited[pos] || env->board_states[pos] != 0) {
         return;
     }
-    env->visited[pos] = true;
+    env->visited[pos] = 1;
     territory[player]++;
     // Check adjacent positions
     for (int i = 0; i < 4; i++) {
@@ -249,13 +308,13 @@ void compute_score_tromp_taylor(CGo* env) {
     reset_visited(env);
     // Count stones and mark them as visited
     for (int i = 0; i < (env->grid_size + 1) * (env->grid_size + 1); i++) {
-        env->visited[i] = false;
+        env->visited[i] = 0;
         if (env->board_states[i] == 1) {
             player_score++;
-            env->visited[i] = true;
+            env->visited[i] = 1;
         } else if (env->board_states[i] == 2) {
             opponent_score++;
-            env->visited[i] = true;
+            env->visited[i] = 1;
         }
     }
     for (int y = 0; y < env->grid_size + 1; y++) {
@@ -291,39 +350,9 @@ void compute_score_tromp_taylor(CGo* env) {
     opponent_score += territory[2];
     env->score = (float)player_score - (float)opponent_score - env->komi;
 }
-  
-void reset(CGo* env) {
-    env->dones[0] = 0;
-    env->score = 0;
-    for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
-        env->board_states[i] = 0;
-        env->temp_board_states[i] = 0;
-        env->visited[i] = 0;
-        env->previous_board_state[i] = 0;
-    }
-    env->capture_count[0] = 0;
-    env->capture_count[1] = 0;
-    env->last_capture_position = -1;
-    env->moves_made = 0;
-    compute_observations(env);
-}
 
-void step(CGo* env) {
-    env->rewards[0] = 0.0;
-    int action = (int)env->actions[0];
-    if (action >= MOVE_MIN && action <= (env->grid_size+1)*(env->grid_size+1)) {
-        memcpy(env->previous_board_state, env->board_states, sizeof(int) * (env->grid_size+1) * (env->grid_size+1));
-        if (check_legal_placement(env, action-1, 1)) {
-            env->board_states[action-1] = 1;
-            check_capture_pieces(env, env->board_states, action-1,0);
-            env->moves_made++;
-        }
-        else {
-            env->rewards[0] -= 0.1;
-            compute_observations(env);
-            return;
-        }
-        // in place shuffle
+void enemy_move(CGo* env){
+// in place shuffle
         int shuffle_positions[(env->grid_size+1)*(env->grid_size+1)];
         int num_positions = (env->grid_size+1)*(env->grid_size+1);
         // Initialize the array with all possible positions
@@ -352,39 +381,109 @@ void step(CGo* env) {
         } else {
             env->dones[0] = 1;
         }
+}
+  
+void reset(CGo* env) {
+    env->log = (Log){0};
+    env->dones[0] = 0;
+    env->score = 0;
+    for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
+        env->board_states[i] = 0;
+        env->temp_board_states[i] = 0;
+        env->visited[i] = 0;
+        env->previous_board_state[i] = 0;
+    }
+    env->capture_count[0] = 0;
+    env->capture_count[1] = 0;
+    env->last_capture_position = -1;
+    env->moves_made = 0;
+    compute_observations(env);
+}
+
+void end_game(CGo* env){
+    compute_score_tromp_taylor(env);
+    if (env->score > 0) {
+        env->rewards[0] = 1.0 ;
+    }
+    else if (env->score < 0) {
+        env->rewards[0] = -1.0 ;
+    }
+    else {
+        env->rewards[0] = 0.0;
+    }
+    env->log.score = env->score;
+    env->log.games_played++;
+    env->log.episode_return = env->rewards[0];
+    add_log(env->log_buffer, &env->log);
+    compute_observations(env);
+    reset(env);
+}
+
+void step(CGo* env) {
+    env->log.episode_length += 1;
+    env->rewards[0] = 0.0;
+    int action = (int)env->actions[0];
+    if (action >= NOOP && action <= (env->grid_size+1)*(env->grid_size+1)) {
+        if(action == NOOP){
+            enemy_move(env);
+            if (env->dones[0] == 1) {
+                end_game(env);
+                return;
+            }
+            compute_observations(env);
+            return;
+        }
+        memcpy(env->previous_board_state, env->board_states, sizeof(int) * (env->grid_size+1) * (env->grid_size+1));
+        if (check_legal_placement(env, action-1, 1)) {
+            env->board_states[action-1] = 1;
+            check_capture_pieces(env, env->board_states, action-1,0);
+            env->moves_made++;
+        }
+        else {
+            env->rewards[0] -= 0.1;
+            env->log.score -= 0.1;
+
+            compute_observations(env);
+            return;
+        }
+        enemy_move(env);
+        
     }
 
-    if (env->moves_made >= 722) {        
+    if (env->moves_made >= (env->grid_size+1)*(env->grid_size+1)*2) {        
         env->dones[0] = 1;
     }
 
     if (env->dones[0] == 1) {
-        compute_score_tromp_taylor(env);
-        if (env->score > 0) {
-            env->rewards[0] = 1.0 + (env->score / (env->grid_size * env->grid_size));
-        }
-        else if (env->score < 0) {
-            env->rewards[0] = -1.0 - (env->score / (env->grid_size * env->grid_size));
-        }
-        else {
-            env->rewards[0] = 0.0;
-        }
-        reset(env);
+        end_game(env);
         return;
     }
     compute_observations(env);
 }
 
-void init_client(CGo* env) {
-    InitWindow(env->width, env->height, "PufferLib Ray Go");
-    SetTargetFPS(60);
+typedef struct Client Client;
+struct Client {
+    float width;
+    float height;
+    Texture2D puffers;
+};
+
+Client* make_client(int width, int height) {
+    Client* client = (Client*)calloc(1, sizeof(Client));
+    client->width = width;
+    client->height = height;
+
+    InitWindow(width, height, "PufferLib Ray Go");
+    SetTargetFPS(15);
+
+    //sound_path = os.path.join(*self.__module__.split(".")[:-1], "hit.wav")
+    //self.sound = rl.LoadSound(sound_path.encode())
+
+    client->puffers = LoadTexture("resources/puffers_128.png");
+    return client;
 }
 
-void close_client(CGo* env) {
-    CloseWindow();
-}
-
-void render(CGo* env) {
+void render(Client* client, CGo* env) {
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
     }
@@ -427,4 +526,8 @@ void render(CGo* env) {
     DrawText(TextFormat("Player 1 Capture Count: %d", env->capture_count[0]), env->width - 300, 110, 20, WHITE);
     DrawText(TextFormat("Player 2 Capture Count: %d", env->capture_count[1]), env->width - 300, 130, 20, WHITE);
     EndDrawing();
+}
+void close_client(Client* client) {
+    CloseWindow();
+    free(client);
 }

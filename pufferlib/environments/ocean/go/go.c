@@ -2,23 +2,23 @@
 
 int main() {
     CGo env = {
-        .width = 1500,
-        .height = 1200,
+        .width = 1000,
+        .height = 800,
         .grid_size = 9,
-        .board_width = 1000,
-        .board_height = 1000,
-        .grid_square_size = 1000/9,
+        .board_width = 600,
+        .board_height = 600,
+        .grid_square_size = 600/9,
         .moves_made = 0,
         .komi = 7.5
     };
     allocate(&env);
     reset(&env);
  
-    init_client(&env);
+    Client* client = make_client(env.width, env.height);
 
     while (!WindowShouldClose()) {
         // User can take control of the paddle
-        env.actions[0] = 0;
+        env.actions[0] = -1;
 
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             Vector2 mousePos = GetMousePosition();
@@ -43,9 +43,9 @@ int main() {
             }
         }
         step(&env);
-        render(&env);
+        render(client,&env);
     }
-    close_client(&env);
+    close_client(client);
     free_allocated(&env);
     return 0;
 }
