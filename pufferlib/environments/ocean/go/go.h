@@ -415,7 +415,6 @@ void end_game(CGo* env){
     env->log.games_played++;
     env->log.episode_return = env->rewards[0];
     add_log(env->log_buffer, &env->log);
-    compute_observations(env);
     reset(env);
 }
 
