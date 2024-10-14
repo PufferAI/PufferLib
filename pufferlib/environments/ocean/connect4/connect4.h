@@ -57,7 +57,6 @@ void add_log(LogBuffer* logs, Log* log) {
     }
     logs->logs[logs->idx] = *log;
     logs->idx += 1;
-    //printf("Log: %f, %f, %f\n", log->episode_return, log->episode_length, log->score);
 }
 
 Log aggregate_and_clear(LogBuffer* logs) {
@@ -262,7 +261,6 @@ void step(CConnect4* env) {
 
     // generate random action from 1- 6 must be int and set board state to -1
     if (action != NOOP && env->dones[0] == 0)  {
-
         int best_column = -1;
         int best_reward = -3;
         for (int candidate_column = 0; candidate_column < 7; candidate_column++) {
@@ -276,7 +274,6 @@ void step(CConnect4* env) {
             if (invalid) {
                 reward = -1;
             } else {
-
                 // Check whether this move wins
                 bool win = check_win_condition(env, -1.0, candidate_row, candidate_column);                
                 undo_move(env, candidate_row, candidate_column);

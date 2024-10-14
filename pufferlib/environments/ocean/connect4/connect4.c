@@ -26,7 +26,9 @@ int main() {
         if(IsKeyPressed(KEY_SIX)) env.actions[0] = 6;
         if(IsKeyPressed(KEY_SEVEN)) env.actions[0] = 7;
 
-        step(&env);
+        if (env.actions[0] != 0) {
+            step(&env);
+        }
         render(client, &env);
     }
     close_client(client);
