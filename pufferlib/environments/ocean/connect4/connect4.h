@@ -95,6 +95,11 @@ struct CConnect4 {
     int pieces_placed;
 };
 
+struct ActionValue {
+    int column;
+    float reward;
+};
+
 void generate_board_positions(CConnect4* env) {
     for (int row = 0; row < 6; row++) {
         for (int col = 0; col < 7; col++) {
@@ -163,27 +168,20 @@ void reset(CConnect4* env) {
     compute_observations(env);
 }
 
-// if place piece at bottom of column 0 if no pieces is there idx should be 35
-// if there is a piece, it should be location 28
-int stage_move(CConnect4* env, int action_location, int player) {
-    for (int row = 5; row >= 0; row--) {
-        if (env->board_states[row][action_location] == 0.0) {
-            env->board_states[row][action_location] = player;
-            env->pieces_placed++;
-            return row;
-        }
-    }
-    return -1;
-}
-
 bool check_draw_condition(CConnect4* env) {
     // Check whether a draw has been reached
     return env->pieces_placed >= 42;
 }
 
-bool check_win_condition(CConnect4* env, float player, int row, int col) {
-    // Check whether 'player' has a winning line of pieces through 'row', 'col'
-
+int compute_reward(CConnect4* env, int row, int col) {
+    // Compute the reward, restrict the computation to lines going through 
+    // 'row', 'col'.
+    float player = env->board_states[row][col];
+    
+    if (player == 0.0) {
+        // There is no piece at this position
+        return 0.0;
+    }
     // Horizontal, Vertical, Diagonal down, Diagonal up
     int directions[4][2] = {{0, 1}, {1, 0}, {1, 1}, {1, -1}}; 
 
@@ -211,20 +209,37 @@ bool check_win_condition(CConnect4* env, float player, int row, int col) {
         }
         
         if (count >= WIN_CONDITION) {
-            return true;
+            return player;
         }
     }
-    return false;
+    return 0.0;
 }
 
-void commit_move(CConnect4* env, int row, int column, float player) {
-    // Commit a move previously made by 'stage_move'
-    bool won = check_win_condition(env, player, row, column);
-    if (won) {
+int stage_move(CConnect4* env, int column, int player) {
+    for (int row = 5; row >= 0; row--) {
+        if (env->board_states[row][column] == 0.0) {
+            env->board_states[row][column] = player;
+            return row;
+        }
+    }
+    return -1;
+}
+
+void commit_move(CConnect4* env, int row, int column) {
+    // Commit a move previously staged with 'stage_move'
+
+    if (row == -1) {
+        // Move is invalid, don't do anything
+        return;
+    }
+    env->pieces_placed++;
+    float reward = compute_reward(env, row, column);
+    bool win = (reward != 0.0);
+    if (win) {
         env->dones[0] = 1;
-        env->rewards[0] = player;
-        env->log.score = player;
-        env->log.episode_return = player;
+        env->rewards[0] = reward;
+        env->log.score = reward;
+        env->log.episode_return = reward;
         add_log(env->log_buffer, &env->log);
     } else {
         bool draw = check_draw_condition(env);
@@ -234,10 +249,54 @@ void commit_move(CConnect4* env, int row, int column, float player) {
     }
 }
 
-void undo_move(CConnect4* env, int row, int column) {
-    // Undo a move previously made by 'stage_move'
+void unstage_move(CConnect4* env, int row, int column) {
+    // Undo a move previously staged with 'stage_move'
     env->board_states[row][column] = 0.0;
-    env->pieces_placed--;
+}
+
+struct ActionValue minmax(CConnect4* env, struct ActionValue action_value, float player, int depth) {
+    // Find the best action to play using the minmax algorithm 
+    // https://en.wikipedia.org/wiki/Minimax
+
+    if (depth == 0 || check_draw_condition(env) || action_value.reward != 0.0) {
+        return action_value;
+    }
+
+    bool maximising_player = player == 1.0;
+
+    struct ActionValue best = { -1, maximising_player ? -100.0 : 100};
+    for (int column = 0; column < 7; column++) {
+        int row = stage_move(env, column, player);
+
+        bool invalid = (row == -1);
+        if (invalid) {
+            continue;
+        }
+
+        int tmpcol = action_value.column == -1 ? column : action_value.column;
+        float tmpreward = compute_reward(env, row, column);
+
+        struct ActionValue child_action_value = minmax(
+            env,
+            (struct ActionValue) { tmpcol, tmpreward},
+            -player,
+            depth - 1
+        );
+
+        unstage_move(env, row, column);
+
+        if (maximising_player) {
+            if (child_action_value.reward > best.reward) {
+                best = child_action_value;
+            }
+        } else {
+            if (child_action_value.reward < best.reward) {
+                best = child_action_value;
+            }
+        }
+    }
+
+    return best;
 }
 
 void step(CConnect4* env) {
@@ -252,52 +311,20 @@ void step(CConnect4* env) {
         return;
     }
 
+    // Input player action
     if (action >= PLACE_PIECE_1 && action <= PLACE_PIECE_7) {
-        int selected_row = stage_move(env, action - PLACE_PIECE_1, 1.0);
-        if (selected_row != -1) {
-            commit_move(env, selected_row, action - PLACE_PIECE_1, 1.0);
-        }
+        int column = action - PLACE_PIECE_1;
+        int row = stage_move(env, column, 1.0);
+        commit_move(env, row, column);
     }
 
-    // generate random action from 1- 6 must be int and set board state to -1
+    // Scripted opponent action
     if (action != NOOP && env->dones[0] == 0)  {
-        int best_column = -1;
-        int best_reward = -3;
-        for (int candidate_column = 0; candidate_column < 7; candidate_column++) {
-            
-            // Simulate making the move
-            int candidate_row = stage_move(env, candidate_column, -1.0);
-            bool invalid = (candidate_row == -1);
+        struct ActionValue action_value = minmax(env, (struct ActionValue) { -1, 0.0 }, -1.0, 4);
+        // printf("column=%d, reward=%f\n", action_value.column, action_value.reward);
 
-            // Calculate a crude reward for the simulated move
-            int reward = 0;
-            if (invalid) {
-                reward = -1;
-            } else {
-                // Check whether this move wins
-                bool win = check_win_condition(env, -1.0, candidate_row, candidate_column);                
-                undo_move(env, candidate_row, candidate_column);
-
-                // Check whether the opponent would win if they played this move
-                stage_move(env, candidate_column, 1.0);
-                bool opp_win = check_win_condition(env, 1.0, candidate_row, candidate_column);                
-                undo_move(env, candidate_row, candidate_column);
-
-                if (win || opp_win) {
-                    reward = 1;
-                } else {
-                    reward = 0;
-                }
-            }
-
-            if (reward > best_reward) {
-                best_reward = reward;
-                best_column = candidate_column;
-            }
-        }
-        
-        int row = stage_move(env, best_column, -1.0);
-        commit_move(env, row, best_column, -1.0);
+        int row = stage_move(env, action_value.column, -1.0);
+        commit_move(env, row, action_value.column);
     }
 
     if (env->dones[0] == 1) {
