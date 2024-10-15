@@ -65,11 +65,12 @@ class MyGo(pufferlib.PufferEnv):
         self.c_envs.close() 
 
 def test_performance(timeout=10, atn_cache=1024):
-    env = MyGo(num_envs=1000)
+    num_envs=1000;
+    env = MyGo(num_envs=num_envs)
     env.reset()
     tick = 0
 
-    actions = np.random.randint(0, 2, (atn_cache, env.num_envs))
+    actions = np.random.randint(0, env.single_action_space.n + 1, (atn_cache, num_envs))
 
     import time
     start = time.time()
@@ -78,7 +79,7 @@ def test_performance(timeout=10, atn_cache=1024):
         env.step(atn)
         tick += 1
 
-    print(f'SPS: %f', env.num_envs * tick / (time.time() - start))
-
+    sps = num_envs * tick / (time.time() - start)
+    print(f'SPS: {sps:,}')
 if __name__ == '__main__':
     test_performance()

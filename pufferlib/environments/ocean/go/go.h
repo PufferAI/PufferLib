@@ -14,7 +14,7 @@
 #define TICK_RATE 1.0f/60.0f
 #define NUM_DIRECTIONS 4
 static const int DIRECTIONS[NUM_DIRECTIONS][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-//  LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./gogame
+//  LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./go
 #define LOG_BUFFER_SIZE 1024
 
 typedef struct Log Log;
@@ -229,11 +229,11 @@ void check_capture_pieces(CGo* env, int* board, int tile_placement, int simulate
                     env->capture_count[board[tile_placement]-1]++;
                     if (board[tile_placement] == 1) {
                         env->rewards[0] += .1;
-                        env->log.score +=.1;
+                        env->log.episode_return +=.1;
                     }
                     else {
                         env->rewards[0] -= .1;
-                        env->log.score +=.1;
+                        env->log.episode_return -=.1;
                     }
                 }
                 captured = true;
@@ -413,7 +413,7 @@ void end_game(CGo* env){
     }
     env->log.score = env->score;
     env->log.games_played++;
-    env->log.episode_return = env->rewards[0];
+    env->log.episode_return += env->rewards[0];
     add_log(env->log_buffer, &env->log);
     reset(env);
 }
@@ -422,16 +422,17 @@ void step(CGo* env) {
     env->log.episode_length += 1;
     env->rewards[0] = 0.0;
     int action = (int)env->actions[0];
-    if (action >= NOOP && action <= (env->grid_size+1)*(env->grid_size+1)) {
-        if(action == NOOP){
-            enemy_move(env);
-            if (env->dones[0] == 1) {
-                end_game(env);
-                return;
-            }
-            compute_observations(env);
+
+    if(action == NOOP){
+        enemy_move(env);
+        if (env->dones[0] == 1) {
+            end_game(env);
             return;
         }
+        compute_observations(env);
+        return;
+    }
+    if (action >= MOVE_MIN && action <= (env->grid_size+1)*(env->grid_size+1)) {
         memcpy(env->previous_board_state, env->board_states, sizeof(int) * (env->grid_size+1) * (env->grid_size+1));
         if (check_legal_placement(env, action-1, 1)) {
             env->board_states[action-1] = 1;
@@ -440,7 +441,7 @@ void step(CGo* env) {
         }
         else {
             env->rewards[0] -= 0.1;
-            env->log.score -= 0.1;
+            env->log.episode_return -= 0.1;
 
             compute_observations(env);
             return;
