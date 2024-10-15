@@ -6,6 +6,7 @@ from .breakout import breakout
 from .connect4 import connect4
 from .tripletriad import tripletriad
 from .moba import moba
+from .go import go
 
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
@@ -184,6 +185,7 @@ MAKE_FNS = {
     'performance_empiric': make_performance_empiric,
     'my_connect4': connect4.MyConnect4,
     'my_tripletriad': tripletriad.MyTripleTriad,
+    'my_go': go.MyGo,
 }
 
 def env_creator(name='squared'):
