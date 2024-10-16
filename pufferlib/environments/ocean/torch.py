@@ -99,7 +99,7 @@ class Grid(nn.Module):
             return action, value
 
 class MOBA(nn.Module):
-    def __init__(self, env, cnn_channels=32, hidden_size=128, **kwargs):
+    def __init__(self, env, cnn_channels=128, hidden_size=128, **kwargs):
         super().__init__()
         self.cnn = nn.Sequential(
             pufferlib.pytorch.layer_init(
@@ -109,8 +109,8 @@ class MOBA(nn.Module):
                 nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1)),
             nn.Flatten(),
         )
-        self.flat = pufferlib.pytorch.layer_init(nn.Linear(26, 32))
-        self.proj = pufferlib.pytorch.layer_init(nn.Linear(32+cnn_channels, hidden_size))
+        self.flat = pufferlib.pytorch.layer_init(nn.Linear(26, 128))
+        self.proj = pufferlib.pytorch.layer_init(nn.Linear(128+cnn_channels, hidden_size))
 
         self.is_continuous = isinstance(env.single_action_space, pufferlib.spaces.Box)
         if self.is_continuous:
