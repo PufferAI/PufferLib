@@ -6,6 +6,7 @@ from .breakout import breakout
 from .connect4 import connect4
 from .tripletriad import tripletriad
 from .moba import moba
+from .rocket_lander import rocket_lander
 
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
@@ -170,6 +171,7 @@ MAKE_FNS = {
     'moba': moba.PufferMoba,
     'my_pong': pong.MyPong,
     'my_breakout': breakout.MyBreakout,
+    'rocket_lander': rocket_lander.RocketLander,
     'foraging': make_foraging,
     'predator_prey': make_predator_prey,
     'group': make_group,
