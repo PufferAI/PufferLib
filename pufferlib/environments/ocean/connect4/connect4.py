@@ -1,4 +1,4 @@
-'''High-perf Pong
+'''High-perf Connect 4
 
 Inspired from https://gist.github.com/Yttrmin/18ecc3d2d68b407b4be1
 & https://jair.org/index.php/jair/article/view/10819/25823
@@ -7,8 +7,6 @@ Inspired from https://gist.github.com/Yttrmin/18ecc3d2d68b407b4be1
 
 import numpy as np
 import gymnasium
-
-from raylib import rl
 
 import pufferlib
 from pufferlib.environments.ocean.connect4.cy_connect4 import CyConnect4
@@ -51,11 +49,15 @@ class MyConnect4(pufferlib.PufferEnv):
         self.c_envs.render()
 
 def test_performance(timeout=10, atn_cache=1024):
-    env = MyConnect4(num_envs=1000)
+    num_envs = 1000
+    env = MyConnect4(num_envs=num_envs)
     env.reset()
     tick = 0
 
-    actions = np.random.randint(0, 2, (atn_cache, env.num_envs))
+    actions = np.random.randint(
+        0, env.single_action_space.n + 1,
+        (atn_cache, num_envs)
+    )
 
     import time
     start = time.time()
@@ -64,7 +66,8 @@ def test_performance(timeout=10, atn_cache=1024):
         env.step(atn)
         tick += 1
 
-    print(f'SPS: %f', env.num_envs * tick / (time.time() - start))
+    sps = num_envs * tick / (time.time() - start)
+    print(f'SPS: {sps:,}')
 
 if __name__ == '__main__':
     test_performance()
