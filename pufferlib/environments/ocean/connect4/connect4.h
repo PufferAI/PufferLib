@@ -20,6 +20,23 @@ const Color PUFF_CYAN = (Color){0, 187, 187, 255};
 const Color PUFF_WHITE = (Color){241, 241, 241, 241};
 const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
 
+const int P0 = 1.0;
+const int P1 = -1.0;
+const int ROWS = 6;
+const int COLUMNS = 7;
+
+const int MAX_VALUE = 31;
+const int WIN_VALUE = 30;
+const int DRAW_VALUE = 0;
+const int SQUARE_VALUES[42] = {
+     9,11,13,15,13,11, 9,
+    11,14,16,18,16,14,11,
+    13,16,19,21,19,16,13,
+    13,16,19,21,19,16,13,
+    11,14,16,18,16,14,11,
+     9,11,13,15,13,11, 9,
+};
+
 // how to start game compile - LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./connect4game 
 
 #define LOG_BUFFER_SIZE 1024
@@ -78,49 +95,26 @@ Log aggregate_and_clear(LogBuffer* logs) {
  
 typedef struct CConnect4 CConnect4;
 struct CConnect4 {
+    // Pufferlib inputs / outputs
     float* observations;
     unsigned char* actions;
     float* rewards;
     unsigned char* dones;
+
+    // Bit string representations of the game state
+    uint64_t position;
+    uint64_t mask;
+
+    // Misc
     LogBuffer* log_buffer;
     Log log;
     int piece_width;
     int piece_height;
-    float* board_x;
-    float* board_y;
-    float board_states[6][7];
     int width;
     int height;
-    int game_over;
-    int pieces_placed;
 };
 
-struct ActionValue {
-    int column;
-    float reward;
-};
-
-void generate_board_positions(CConnect4* env) {
-    for (int row = 0; row < 6; row++) {
-        for (int col = 0; col < 7; col++) {
-            int idx = row * 7 + col;
-            env->board_x[idx] = col* env->piece_width;
-            env->board_y[idx] = row*env->piece_height;
-        }
-    }
-}
-
-void init_cconnect4(CConnect4* env) {
-    // Allocate memory for board_x, board_y, and board_states
-    env->board_x = (float*)calloc(42, sizeof(float));
-    env->board_y = (float*)calloc(42, sizeof(float));
-    for(int i=0; i< 6; i++) {
-        for(int j=0; j< 7; j++) {
-            env->board_states[i][j] = 0.0;
-        }
-    }
-    generate_board_positions(env);
-}
+void init_cconnect4(CConnect4* env) {}
 
 void allocate_cconnect4(CConnect4* env) {
     env->observations = (float*)calloc(42, sizeof(float));
@@ -128,12 +122,11 @@ void allocate_cconnect4(CConnect4* env) {
     env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
+
     init_cconnect4(env);
 }
 
 void free_cconnect4(CConnect4* env) {
-    free(env->board_x);
-    free(env->board_y);
     free(env->log_buffer);
     free(env);
 }
@@ -146,157 +139,153 @@ void free_allocated_cconnect4(CConnect4* env) {
     free_cconnect4(env);
 }
 
-void compute_observations(CConnect4* env) {
-    int idx=0;
-    for (int i = 0; i < 6; i++) {
-        for (int j = 0; j < 7; j++) {
-            env->observations[idx] = env->board_states[i][j];
-            idx++;
+uint64_t top_mask(int column) {
+  return (UINT64_C(1) << (ROWS - 1)) << column * (ROWS + 1);
+}
+
+uint64_t bottom_mask(int column) {
+  return UINT64_C(1) << column * (ROWS + 1);
+}
+
+bool valid_move(int column, u_int64_t mask) {
+    return (mask & top_mask(column)) == 0;
+}
+
+uint64_t play(int column, u_int64_t mask) {
+    mask |= mask + bottom_mask(column);
+    return mask;
+}
+
+bool draw(uint64_t mask) {
+    return false;
+}
+
+bool won(uint64_t position) {
+  // horizontal 
+  uint64_t m = position & (position >> (ROWS + 1));
+  if(m & (m >> (2 * (ROWS + 1)))) return true;
+
+  // diagonal 1
+  m = position & (position >> ROWS);
+  if(m & (m >> (2 * ROWS))) return true;
+
+  // diagonal 2 
+  m = position & (position >> (ROWS + 2));
+  if(m & (m >> (2 * (ROWS + 2)))) return true;
+
+  // vertical;
+  m = position & (position >> 1);
+  if(m & (m >> 2)) return true;
+
+  return false;
+}
+
+int minmax(u_int64_t position, u_int64_t mask, int depth, bool maximising_player) {
+    // https://en.wikipedia.org/wiki/Minimax
+    bool has_won = won(position);
+    if (depth == 0 || has_won || draw(mask)) {
+        if (has_won) {
+            if (maximising_player) {
+                return -WIN_VALUE;
+            } else {
+                return WIN_VALUE;
+            }
         }
+        return DRAW_VALUE;
+    }
+
+    if (maximising_player) {
+        float value = -MAX_VALUE;
+        for (int column = 0; column < 8; column ++) {
+            if (!valid_move(column, mask)) {
+                continue;
+            }
+            u_int64_t child_mask = play(column, mask);
+            u_int64_t child_position = position ^ child_mask;
+            int child_value = minmax(child_position, child_mask, depth - 1, false);
+            if (child_value > value) {
+                value = child_value;
+            }
+        }
+        return value;
+    } else {
+        float value = MAX_VALUE;
+        for (int column = 0; column < 8; column ++) {
+            if (!valid_move(column, mask)) {
+                continue;
+            }
+            u_int64_t child_mask = play(column, mask);
+            u_int64_t child_position = position ^ child_mask;
+            int child_value = minmax(child_position, child_mask, depth - 1, true);
+            if (child_value < value) {
+                value = child_value;
+            }
+        }
+        return value;
+    }
+}
+
+int compute_env_move(CConnect4* env) {
+    int best_column;
+    int best_value = -MAX_VALUE;
+    for (int column = 0; column < 8; column ++) {
+        if (!valid_move(column, env->mask)) { continue; }
+        u_int64_t child_mask = play(column, env->mask);
+        u_int64_t child_position = env->position ^ child_mask;
+        
+        int value = minmax(child_position, child_mask, 2, false);
+
+        if (value == DRAW_VALUE) {
+            value = SQUARE_VALUES[column];
+        }
+
+        if (value > best_value) {
+            best_value = value;
+            best_column = column;
+        }
+    }
+    return best_column;
+}
+
+void compute_observation(CConnect4* env) {
+    // Use the bitstring representation of the game state to populate
+    //  the observations vector
+    uint64_t p0 = env->position;
+    uint64_t p1 = env->position ^ env->mask;
+
+    int obs_idx = 0;
+    for (int i = 0; i < 49; i++) {
+        // Skip the sentinel row
+        if ((i + 1) % 7 == 0) { continue; }
+        obs_idx += 1;
+
+        int p0_bit = (p0 >> i) & 1;
+        if (p0_bit == 1) {
+            env->observations[obs_idx] = P0;
+        }
+        int p1_bit = (p1 >> i) & 1;
+        if (p1_bit == 1) {
+            env->observations[obs_idx] = P1;
+        }
+    }
+}
+
+void reset_observation(CConnect4* env) {
+    for (int i = 0; i < 42; i ++) {
+        env->observations[i] = 0.0;
     }
 }
 
 void reset(CConnect4* env) {
     env->log = (Log){0};
-    for(int i=0; i< 6; i++) {
-        for(int j=0; j< 7; j++) {
-            env->board_states[i][j] = 0.0;
-        }
-    }
-    env->pieces_placed = 0;
     env->dones[0] = 0;
-    compute_observations(env);
-}
 
-bool check_draw_condition(CConnect4* env) {
-    // Check whether a draw has been reached
-    return env->pieces_placed >= 42;
-}
-
-int compute_reward(CConnect4* env, int row, int col) {
-    // Compute the reward, restrict the computation to lines going through 
-    // 'row', 'col'.
-    float player = env->board_states[row][col];
-    
-    if (player == 0.0) {
-        // There is no piece at this position
-        return 0.0;
-    }
-    // Horizontal, Vertical, Diagonal down, Diagonal up
-    int directions[4][2] = {{0, 1}, {1, 0}, {1, 1}, {1, -1}}; 
-
-    for (int d = 0; d < 4; d++) {
-        int count = 1;
-        int r = row;
-        int c = col;
-        
-        // Check in positive direction
-        while (true) {
-            r += directions[d][0];
-            c += directions[d][1];
-            if (r < 0 || r >= 6 || c < 0 || c >= 7 || env->board_states[r][c] != player) break;
-            count++;
-        }
-        
-        // Check in negative direction
-        r = row;
-        c = col;
-        while (true) {
-            r -= directions[d][0];
-            c -= directions[d][1];
-            if (r < 0 || r >= 6 || c < 0 || c >= 7 || env->board_states[r][c] != player) break;
-            count++;
-        }
-        
-        if (count >= WIN_CONDITION) {
-            return player;
-        }
-    }
-    return 0.0;
-}
-
-int stage_move(CConnect4* env, int column, int player) {
-    for (int row = 5; row >= 0; row--) {
-        if (env->board_states[row][column] == 0.0) {
-            env->board_states[row][column] = player;
-            return row;
-        }
-    }
-    return -1;
-}
-
-void commit_move(CConnect4* env, int row, int column) {
-    // Commit a move previously staged with 'stage_move'
-
-    if (row == -1) {
-        // Move is invalid, don't do anything
-        return;
-    }
-    env->pieces_placed++;
-    float reward = compute_reward(env, row, column);
-    bool win = (reward != 0.0);
-    if (win) {
-        env->dones[0] = 1;
-        env->rewards[0] = reward;
-        env->log.score = reward;
-        env->log.episode_return = reward;
-        add_log(env->log_buffer, &env->log);
-    } else {
-        bool draw = check_draw_condition(env);
-        if (draw) {
-            env->dones[0] = 1;
-        }
-    }
-}
-
-void unstage_move(CConnect4* env, int row, int column) {
-    // Undo a move previously staged with 'stage_move'
-    env->board_states[row][column] = 0.0;
-}
-
-struct ActionValue minmax(CConnect4* env, struct ActionValue action_value, float player, int depth) {
-    // Find the best action to play using the minmax algorithm 
-    // https://en.wikipedia.org/wiki/Minimax
-
-    if (depth == 0 || check_draw_condition(env) || action_value.reward != 0.0) {
-        return action_value;
-    }
-
-    bool maximising_player = player == 1.0;
-
-    struct ActionValue best = { -1, maximising_player ? -100.0 : 100};
-    for (int column = 0; column < 7; column++) {
-        int row = stage_move(env, column, player);
-
-        bool invalid = (row == -1);
-        if (invalid) {
-            continue;
-        }
-
-        int tmpcol = action_value.column == -1 ? column : action_value.column;
-        float tmpreward = compute_reward(env, row, column);
-
-        struct ActionValue child_action_value = minmax(
-            env,
-            (struct ActionValue) { tmpcol, tmpreward},
-            -player,
-            depth - 1
-        );
-
-        unstage_move(env, row, column);
-
-        if (maximising_player) {
-            if (child_action_value.reward > best.reward) {
-                best = child_action_value;
-            }
-        } else {
-            if (child_action_value.reward < best.reward) {
-                best = child_action_value;
-            }
-        }
-    }
-
-    return best;
+    // Bit string representation from:
+    //  https://towardsdatascience.com/creating-the-perfect-connect-four-ai-bot-c165115557b0
+    //  & http://blog.gamesolver.org/solving-connect-four/01-introduction/
+    env->position = 0;
+    env->mask = 0;
+    reset_observation(env);
 }
 
 void step(CConnect4* env) {
@@ -304,33 +293,59 @@ void step(CConnect4* env) {
     env->rewards[0] = 0.0;
     int action = env->actions[0];
 
-    if (env->game_over == 1) {
+    if (env->dones[0] == 1) {
         add_log(env->log_buffer, &env->log);
         reset(env);
-        env->game_over = 0;
         return;
     }
 
     // Input player action
     if (action >= PLACE_PIECE_1 && action <= PLACE_PIECE_7) {
         int column = action - PLACE_PIECE_1;
-        int row = stage_move(env, column, 1.0);
-        commit_move(env, row, column);
+        if (valid_move(column, env->mask)) {
+            env->mask = play(column, env->mask);
+
+            // Swap player
+            env->position ^= env->mask;
+
+            // Check for a win
+            if (won(env->position)) {
+                // printf("Player won!");
+                env->rewards[0] = P0;
+                env->dones[0] = 1;
+            }
+
+        } else {
+            // printf("Player played an invalid move...");
+            env->rewards[0] = P1;
+            env->dones[0] = 1;
+        }
     }
 
     // Scripted opponent action
-    if (action != NOOP && env->dones[0] == 0)  {
-        struct ActionValue action_value = minmax(env, (struct ActionValue) { -1, 0.0 }, -1.0, 4);
-        // printf("column=%d, reward=%f\n", action_value.column, action_value.reward);
+    if (action != NOOP && env->dones[0] == 0) {
+        int column = compute_env_move(env);
 
-        int row = stage_move(env, action_value.column, -1.0);
-        commit_move(env, row, action_value.column);
+        if (valid_move(column, env->mask)) {
+            env->mask = play(column, env->mask);
+
+            // Swap player
+            env->position ^= env->mask;
+
+            // Check for a win
+            if (won(env->position)) {
+                // printf("Environment won!");
+                env->rewards[0] = P1;
+                env->dones[0] = 1;
+            }
+        } else {
+            // printf("Player played an invalid move...");
+            env->rewards[0] = P0;
+            env->dones[0] = 1;
+        }
     }
 
-    if (env->dones[0] == 1) {
-        env->game_over=1;
-    }
-    compute_observations(env);
+    compute_observation(env);
 }
 
 
@@ -365,40 +380,48 @@ void render(Client* client, CConnect4* env) {
     ClearBackground(PUFF_BACKGROUND);
 
     // create a connect 4 board. there should be a hollow outline of tthe board where its a grid of 7x6 and then a circle in each of the 42 slots.
-    for (int row = 0; row < 6; row++) {
-        for (int col = 0; col < 7; col++) {
-            int board_idx = row * 7 + col;
-            Color piece_color=PURPLE;
-            int color_idx = 0;
-            if (env->board_states[row][col] == 0.0) {
-                piece_color = BLACK;
-            } else if (env->board_states[row][col] == 1.0) {
-                piece_color = PUFF_CYAN;
-                color_idx = 1;
-            } else if (env->board_states[row][col] == -1.0) {
-                piece_color = PUFF_RED;
-                color_idx = 2;
-            }
-            int x = env->board_x[board_idx];
-            int y = env->board_y[board_idx];
-            Color board_color = (Color){0, 80, 80, 255};
-            DrawRectangle(x , y , env->piece_width, env->piece_width, board_color);
-            DrawCircle(x + env->piece_width/2, y + env->piece_width/2, env->piece_width/2, piece_color);
-            if (color_idx == 0) {
-                continue;
-            }
-            DrawTexturePro(
-                client->puffers,
-                (Rectangle){
-                    (color_idx == 1) ? 0 : 128,
-                    0, 128, 128,
-                },
-                (Rectangle){x+16, y+16, env->piece_width-32, env->piece_width-32},
-                (Vector2){0, 0},
-                0,
-                WHITE
-            );
+    
+    int y_offset = client->height - env->piece_height;
+    int obs_idx = 0;
+    for (int i = 0; i < 49; i++) {
+        // TODO: Simplify this by iterating over the observation more directly
+        if ((i + 1) % 7 == 0) { continue; }
+        obs_idx += 1;
+
+        int row = i % (ROWS + 1);
+        int column = i / (ROWS + 1);
+        int y = y_offset - row * env->piece_height;
+        int x = column * env->piece_width;
+
+        Color piece_color=PURPLE;
+        int color_idx = 0;
+        if (env->observations[obs_idx] == 0.0) {
+            piece_color = BLACK;
+        } else if (env->observations[obs_idx]  == 1.0) {
+            piece_color = PUFF_CYAN;
+            color_idx = 1;
+        } else if (env->observations[obs_idx]  == -1.0) {
+            piece_color = PUFF_RED;
+            color_idx = 2;
         }
+
+        Color board_color = (Color){0, 80, 80, 255};
+        DrawRectangle(x , y , env->piece_width, env->piece_width, board_color);
+        DrawCircle(x + env->piece_width/2, y + env->piece_width/2, env->piece_width/2, piece_color);
+        if (color_idx == 0) {
+            continue;
+        }
+        DrawTexturePro(
+            client->puffers,
+            (Rectangle){
+                (color_idx == 1) ? 0 : 128,
+                0, 128, 128,
+            },
+            (Rectangle){x+16, y+16, env->piece_width-32, env->piece_width-32},
+            (Vector2){0, 0},
+            0,
+            WHITE
+        );
     }
     EndDrawing();
     //PlaySound(client->sound);
