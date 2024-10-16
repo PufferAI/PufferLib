@@ -437,20 +437,23 @@ struct MOBA {
 };
 
 void free_moba(MOBA* env) {
+    free(env->reward_components);
     free(env->map->grid);
     free(env->map);
     free(env->rng->rng);
     free(env->rng);
-    free(env);
 }
 
 void free_allocated_moba(MOBA* env) {
+    free_logbuffer(env->log_buffer);
     free(env->rewards);
     free(env->map->pids);
     free(env->ai_path_buffer);
     free(env->ai_paths);
     free(env->observations);
     free(env->actions);
+    free(env->terminals);
+    free(env->truncations);
     free(env->entities);
     free_moba(env);
 }
@@ -511,7 +514,6 @@ void compute_observations(MOBA* env) {
                 obs_map[ob_y][ob_x][0] = tile;
                 if (tile > 15) {
                     printf("Invalid map value: %i at %i, %i\n", map->grid[adr], yy, xx);
-                    exit(1);
                 }
                 int target_pid = env->map->pids[adr];
                 if (target_pid == -1)
@@ -1735,6 +1737,7 @@ MOBA* allocate_moba(MOBA* env) {
     }
 
     init_moba(env, game_map_npy);
+    free(game_map_npy);
     return env;
 }
  
