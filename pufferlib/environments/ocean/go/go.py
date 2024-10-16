@@ -32,12 +32,12 @@ class MyGo(pufferlib.PufferEnv):
         self.num_act = (grid_size+1) * (grid_size+1) + 1
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(self.num_obs,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.Discrete(101)
+        self.single_action_space = gymnasium.spaces.Discrete(self.num_act)
 
         super().__init__(buf=buf)
         self.c_envs = CyGo(self.observations, self.actions, self.rewards,
-            self.terminals, num_envs, width, height, grid_size, board_width,board_height, grid_square_size, moves_made, komi, score,last_capture_position)
-
+            self.terminals, num_envs, width, height, grid_size, board_width,
+            board_height, grid_square_size, moves_made, komi, score,last_capture_position)
 
 
     def reset(self, seed=None):

@@ -109,8 +109,6 @@ void generate_board_positions(CGo* env) {
     }
 }
 
-
-
 void init(CGo* env) {
     env->board_x = (int*)calloc((env->grid_size)*(env->grid_size), sizeof(int));
     env->board_y = (int*)calloc((env->grid_size)*(env->grid_size), sizeof(int));
@@ -423,7 +421,16 @@ void step(CGo* env) {
     env->rewards[0] = 0.0;
     int action = (int)env->actions[0];
 
+    if (env->log.episode_length > 100) {
+        env->dones[0] = 1;
+        end_game(env);
+        compute_observations(env);
+        return;
+    }
+
     if(action == NOOP){
+        env->rewards[0] -= 0.25;
+        env->log.episode_return -= 0.25;
         enemy_move(env);
         if (env->dones[0] == 1) {
             end_game(env);
@@ -438,6 +445,8 @@ void step(CGo* env) {
             env->board_states[action-1] = 1;
             check_capture_pieces(env, env->board_states, action-1,0);
             env->moves_made++;
+            env->rewards[0] += 0.1;
+            env->log.episode_return += 0.1;
         }
         else {
             env->rewards[0] -= 0.1;
