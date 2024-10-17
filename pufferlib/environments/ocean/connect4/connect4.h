@@ -3,17 +3,7 @@
 #include "raylib.h"
 #include <stdio.h>
 
-#define NOOP 0
-#define PLACE_PIECE_1 1
-#define PLACE_PIECE_2 2
-#define PLACE_PIECE_3 3
-#define PLACE_PIECE_4 4
-#define PLACE_PIECE_5 5
-#define PLACE_PIECE_6 6
-#define PLACE_PIECE_7 7
 #define WIN_CONDITION 4
-#define Y_OFFSET 10
-#define TICK_RATE 1.0f/60.0f
 
 const Color PUFF_RED = (Color){187, 0, 0, 255};
 const Color PUFF_CYAN = (Color){0, 187, 187, 255};
@@ -25,19 +15,9 @@ const int P1 = -1.0;
 const int ROWS = 6;
 const int COLUMNS = 7;
 
-const int MAX_VALUE = 31;
-const int WIN_VALUE = 30;
-const int DRAW_VALUE = 0;
-const int SQUARE_VALUES[42] = {
-     9,11,13,15,13,11, 9,
-    11,14,16,18,16,14,11,
-    13,16,19,21,19,16,13,
-    13,16,19,21,19,16,13,
-    11,14,16,18,16,14,11,
-     9,11,13,15,13,11, 9,
-};
-
-// how to start game compile - LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./connect4game 
+const float MAX_VALUE = 31;
+const float WIN_VALUE = 30;
+const float DRAW_VALUE = 0;
 
 #define LOG_BUFFER_SIZE 1024
 
@@ -100,14 +80,16 @@ struct CConnect4 {
     unsigned char* actions;
     float* rewards;
     unsigned char* dones;
+    LogBuffer* log_buffer;
+    Log log;
 
-    // Bit string representations of the game state
+    // Bit string representation from:
+    //  https://towardsdatascience.com/creating-the-perfect-connect-four-ai-bot-c165115557b0
+    //  & http://blog.gamesolver.org/solving-connect-four/01-introduction/
     uint64_t position;
     uint64_t mask;
 
-    // Misc
-    LogBuffer* log_buffer;
-    Log log;
+    // Rendering configuration
     int piece_width;
     int piece_height;
     int width;
@@ -147,6 +129,10 @@ uint64_t bottom_mask(int column) {
   return UINT64_C(1) << column * (ROWS + 1);
 }
 
+uint64_t bottom() {
+  return UINT64_C(1) << (COLUMNS - 1) * (ROWS + 1);
+}
+
 bool valid_move(int column, u_int64_t mask) {
     return (mask & top_mask(column)) == 0;
 }
@@ -157,86 +143,87 @@ uint64_t play(int column, u_int64_t mask) {
 }
 
 bool draw(uint64_t mask) {
-    return false;
+    return mask == 4432406249472;
 }
 
 bool won(uint64_t position) {
-  // horizontal 
+  // Horizontal 
   uint64_t m = position & (position >> (ROWS + 1));
   if(m & (m >> (2 * (ROWS + 1)))) return true;
 
-  // diagonal 1
+  // Diagonal 1
   m = position & (position >> ROWS);
   if(m & (m >> (2 * ROWS))) return true;
 
-  // diagonal 2 
+  // Diagonal 2 
   m = position & (position >> (ROWS + 2));
   if(m & (m >> (2 * (ROWS + 2)))) return true;
 
-  // vertical;
+  // Vertical;
   m = position & (position >> 1);
   if(m & (m >> 2)) return true;
 
   return false;
 }
 
-int minmax(u_int64_t position, u_int64_t mask, int depth, bool maximising_player) {
+float minmax(u_int64_t position, u_int64_t mask, int depth, bool maximising_player) {
     // https://en.wikipedia.org/wiki/Minimax
     bool has_won = won(position);
     if (depth == 0 || has_won || draw(mask)) {
         if (has_won) {
+            float discount = (4 - depth) * 0.1; // Discount short games
             if (maximising_player) {
-                return -WIN_VALUE;
+                return WIN_VALUE + discount;
             } else {
-                return WIN_VALUE;
+                return -WIN_VALUE - discount;
             }
         }
         return DRAW_VALUE;
     }
 
+    float value;
     if (maximising_player) {
-        float value = -MAX_VALUE;
-        for (int column = 0; column < 8; column ++) {
-            if (!valid_move(column, mask)) {
-                continue;
-            }
-            u_int64_t child_mask = play(column, mask);
-            u_int64_t child_position = position ^ child_mask;
-            int child_value = minmax(child_position, child_mask, depth - 1, false);
-            if (child_value > value) {
-                value = child_value;
-            }
-        }
-        return value;
+        value = -MAX_VALUE;
     } else {
-        float value = MAX_VALUE;
-        for (int column = 0; column < 8; column ++) {
-            if (!valid_move(column, mask)) {
-                continue;
-            }
-            u_int64_t child_mask = play(column, mask);
-            u_int64_t child_position = position ^ child_mask;
-            int child_value = minmax(child_position, child_mask, depth - 1, true);
-            if (child_value < value) {
-                value = child_value;
-            }
-        }
-        return value;
+        value = MAX_VALUE;
     }
+    for (uint64_t column = 0; column < 7; column ++) {
+        if (!valid_move(column, mask)) {
+            continue;
+        }
+        u_int64_t child_position = position ^ mask;
+        u_int64_t child_mask = play(column, mask);
+        float child_value = minmax(child_position, child_mask, depth - 1, !maximising_player);
+        if (maximising_player && child_value > value) {
+            value = child_value;
+        }
+        if (!maximising_player && child_value < value) {
+            value = child_value;
+        }
+    }
+    return value;
 }
 
 int compute_env_move(CConnect4* env) {
-    int best_column;
-    int best_value = -MAX_VALUE;
-    for (int column = 0; column < 8; column ++) {
-        if (!valid_move(column, env->mask)) { continue; }
-        u_int64_t child_mask = play(column, env->mask);
-        u_int64_t child_position = env->position ^ child_mask;
-        
-        int value = minmax(child_position, child_mask, 2, false);
+    // Hard coded opening book
+    uint64_t hash = env->position + env->mask + bottom();
+    // TODO: Add more opening book moves
+    if (hash == 4398048608256) {
+        return 2;
+    }
 
+    uint64_t best_column = 0;
+    float best_value = -MAX_VALUE;
+    for (uint64_t column = 0; column < 7; column ++) {
+        if (!valid_move(column, env->mask)) { continue; }
+        u_int64_t child_position = env->position ^ env->mask;
+        u_int64_t child_mask = play(column, env->mask);
+        
+        float value = minmax(child_position, child_mask, 2, false);
         if (value == DRAW_VALUE) {
-            value = SQUARE_VALUES[column];
+            // Break ties between equal valued positions randomly
+            // TODO: Implement a heuristic for non-terminal states
+            value = (float) (rand() % 10);
         }
 
         if (value > best_value) {
@@ -279,19 +266,15 @@ void reset_observation(CConnect4* env) {
 void reset(CConnect4* env) {
     env->log = (Log){0};
     env->dones[0] = 0;
-
-    // Bit string representation from:
-    //  https://towardsdatascience.com/creating-the-perfect-connect-four-ai-bot-c165115557b0
-    //  & http://blog.gamesolver.org/solving-connect-four/01-introduction/
     env->position = 0;
     env->mask = 0;
+
     reset_observation(env);
 }
 
 void step(CConnect4* env) {
     env->log.episode_length += 1;
     env->rewards[0] = 0.0;
-    int action = env->actions[0];
 
     if (env->dones[0] == 1) {
         add_log(env->log_buffer, &env->log);
@@ -300,54 +283,51 @@ void step(CConnect4* env) {
     }
 
     // Input player action
-    if (action >= PLACE_PIECE_1 && action <= PLACE_PIECE_7) {
-        int column = action - PLACE_PIECE_1;
+    if (true) {
+        uint64_t column = env->actions[0];;
         if (valid_move(column, env->mask)) {
+            env->position ^= env->mask; // Swap player
             env->mask = play(column, env->mask);
 
-            // Swap player
-            env->position ^= env->mask;
-
-            // Check for a win
             if (won(env->position)) {
-                // printf("Player won!");
-                env->rewards[0] = P0;
+                int reward = P1;
+                env->rewards[0] = reward;
                 env->dones[0] = 1;
+                env->position ^= env->mask;
+                env->log.score = reward;
+                env->log.episode_return = reward;
+                add_log(env->log_buffer, &env->log);
             }
-
         } else {
-            // printf("Player played an invalid move...");
             env->rewards[0] = P1;
             env->dones[0] = 1;
         }
     }
 
     // Scripted opponent action
-    if (action != NOOP && env->dones[0] == 0) {
-        int column = compute_env_move(env);
+    if (env->dones[0] == 0) {
+        uint64_t column = compute_env_move(env);
 
         if (valid_move(column, env->mask)) {
+            env->position ^= env->mask; // Swap player
             env->mask = play(column, env->mask);
 
-            // Swap player
-            env->position ^= env->mask;
-
-            // Check for a win
             if (won(env->position)) {
-                // printf("Environment won!");
-                env->rewards[0] = P1;
+                int reward = P0;
+                env->rewards[0] = reward;
                 env->dones[0] = 1;
+
+                env->log.score = reward;
+                env->log.episode_return = reward;
+                add_log(env->log_buffer, &env->log);
             }
         } else {
-            // printf("Player played an invalid move...");
             env->rewards[0] = P0;
             env->dones[0] = 1;
         }
     }
-
     compute_observation(env);
 }
-
 
 typedef struct Client Client;
 struct Client {
@@ -364,9 +344,6 @@ Client* make_client(int width, int height) {
     InitWindow(width, height, "PufferLib Ray Connect4");
     SetTargetFPS(15);
 
-    //sound_path = os.path.join(*self.__module__.split(".")[:-1], "hit.wav")
-    //self.sound = rl.LoadSound(sound_path.encode())
-
     client->puffers = LoadTexture("resources/puffers_128.png");
     return client;
 }
@@ -378,8 +355,6 @@ void render(Client* client, CConnect4* env) {
 
     BeginDrawing();
     ClearBackground(PUFF_BACKGROUND);
-
-    // create a connect 4 board. there should be a hollow outline of tthe board where its a grid of 7x6 and then a circle in each of the 42 slots.
     
     int y_offset = client->height - env->piece_height;
     int obs_idx = 0;
@@ -397,10 +372,10 @@ void render(Client* client, CConnect4* env) {
         int color_idx = 0;
         if (env->observations[obs_idx] == 0.0) {
             piece_color = BLACK;
-        } else if (env->observations[obs_idx]  == 1.0) {
+        } else if (env->observations[obs_idx]  == P0) {
             piece_color = PUFF_CYAN;
             color_idx = 1;
-        } else if (env->observations[obs_idx]  == -1.0) {
+        } else if (env->observations[obs_idx]  == P1) {
             piece_color = PUFF_RED;
             color_idx = 2;
         }
@@ -424,7 +399,6 @@ void render(Client* client, CConnect4* env) {
         );
     }
     EndDrawing();
-    //PlaySound(client->sound);
 }
 
 void close_client(Client* client) {

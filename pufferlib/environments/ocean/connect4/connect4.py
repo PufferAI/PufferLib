@@ -11,6 +11,7 @@ import gymnasium
 import pufferlib
 from pufferlib.environments.ocean.connect4.cy_connect4 import CyConnect4
 
+
 class MyConnect4(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=128,
              width=672, height=576, piece_width=96, piece_height=96, buf=None):
@@ -47,29 +48,32 @@ class MyConnect4(pufferlib.PufferEnv):
 
     def render(self):
         self.c_envs.render()
-        import time
-        time.sleep(0.5)
 
-def test_performance(timeout=10, atn_cache=1024):
-    num_envs = 1000
+    def close(self):
+        self.c_envs.close()
+
+
+def test_performance(timeout=10, atn_cache=1024, num_envs=1024):
+    import time
+
     env = MyConnect4(num_envs=num_envs)
     env.reset()
     tick = 0
 
-    actions = np.random.randint(0, env.single_action_space.n + 1, (atn_cache, num_envs))
+    actions = np.random.randint(
+        0,
+        env.single_action_space.n + 1,
+        (atn_cache, num_envs),
+    )
 
-    import time
     start = time.time()
     while time.time() - start < timeout:
-        atn = actions[tick % atn_cache]
-        # atn = int(input("input action: "))+1
-        _, reward, dones, *_ = env.step(atn)
-        # env.render()
-        # print(dones)
-        # print(reward[dones].mean())
+        atn = actions[tick % atn_cache]         
+        env.step(atn)
         tick += 1
 
-    print(f'SPS: %f', num_envs * tick / (time.time() - start))
+    print(f'SPS: {num_envs * tick / (time.time() - start)}')
+
 
 if __name__ == '__main__':
     test_performance()
