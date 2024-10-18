@@ -1,7 +1,9 @@
 #include "connect4.h"
 #include "time.h"
 
-int main() {
+const unsigned char NOOP = 8;
+
+void interactive() {
     CConnect4 env = {
         .width = 672,
         .height = 576,
@@ -14,8 +16,7 @@ int main() {
     Client* client = make_client(env.width, env.height);
 
     while (!WindowShouldClose()) {
-        // User can take control of the paddle
-        env.actions[0] = -1;
+        env.actions[0] = NOOP;
         // user inputs 1 - 7 key pressed
         if(IsKeyPressed(KEY_ONE)) env.actions[0] = 0;
         if(IsKeyPressed(KEY_TWO)) env.actions[0] = 1;
@@ -25,17 +26,17 @@ int main() {
         if(IsKeyPressed(KEY_SIX)) env.actions[0] = 5;
         if(IsKeyPressed(KEY_SEVEN)) env.actions[0] = 6;
 
-        if (env.actions[0] != -1) {
+        if (env.actions[0] >= 0 && env.actions[0] <= 6) {
             step(&env);
         }
         render(client, &env);
     }
     close_client(client);
     free_allocated_cconnect4(&env);
-    return 0;
 }
 
-void test_performance(float test_time) {
+void performance_test() {
+    long test_time = 10;
     CConnect4 env = {
         .width = 672,
         .height = 576,
@@ -45,17 +46,20 @@ void test_performance(float test_time) {
     allocate_cconnect4(&env);
     reset(&env);
  
-    float start = time(NULL);
+    long start = time(NULL);
     int i = 0;
     while (time(NULL) - start < test_time) {
-        for (int j = 0; j < 10; j++) {
-            env.actions[0] = rand() % 7;
-        }
+        env.actions[0] = rand() % 7;
         step(&env);
         i++;
     }
-    float end = time(NULL);
-    printf("SPS: %f\n", i / (end - start));
+    long end = time(NULL);
+    printf("SPS: %ld\n", i / (end - start));
+    free_allocated_cconnect4(&env);
 }
 
-
+int main() {
+    // performance_test();
+    interactive();
+    return 0;
+}
