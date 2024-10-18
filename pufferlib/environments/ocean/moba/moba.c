@@ -133,7 +133,7 @@ void demo() {
     }
     free_mobanet(net);
     free(weights);
-    free_allocated_moba(env);
+    free_allocated_moba(&env);
     close_game_renderer(renderer);
 }
 

@@ -246,6 +246,7 @@ extension_paths = [
     'pufferlib/environments/ocean/snake/cy_snake',
     'pufferlib/environments/ocean/pong/cy_pong',
     'pufferlib/environments/ocean/breakout/cy_breakout',
+    'pufferlib/environments/ocean/connect4/cy_connect4',
     'pufferlib/environments/ocean/grid/cy_grid',
     'pufferlib/environments/ocean/tripletriad/cy_tripletriad',
 ]

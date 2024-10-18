@@ -23,6 +23,12 @@ if [ "$MODE" = "local" ]; then
         ./raylib/lib/libraylib.a -lm -lpthread \
         -fsanitize=address,undefined,bounds,pointer-overflow,leak \
         -framework Cocoa -framework IOKit -framework CoreVideo
+    # gcc -g -O2 -Wall \
+    #     -I./raylib/include \
+    #     -I./pufferlib\
+    #     "$SRC_DIR/$ENV.c" -o "$OUTPUT_DIR/$ENV" \
+    #     ./raylib/lib/libraylib.a -lm -lpthread \
+    #     -fsanitize=address,undefined,bounds,pointer-overflow,leak \
 
     echo "Built to: $OUTPUT_DIR/$ENV"
 elif [ "$MODE" = "web" ]; then

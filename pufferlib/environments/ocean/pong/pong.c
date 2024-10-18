@@ -27,17 +27,17 @@ int main() {
     Client* client = make_client(&env);
 
     reset(&env);
-    while (true) {
-        if (IsKeyPressed(KEY_Q)) break;
-        // if (IsKeyDown(KEY_LEFT_SHIFT)) {
-        //     env.actions[0] = 0;
-        //     if (IsKeyDown(KEY_UP)    || IsKeyDown(KEY_W)) env.actions[0] = 1;
-        //     if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = 2;
-        // } else {
-        //     forward_linearlstm(net, env.observations, env.actions);
-        // }
+    while (!WindowShouldClose()) {
+        // User can take control of the paddle
+        if (IsKeyDown(KEY_LEFT_SHIFT)) {
+            env.actions[0] = 0;
+            if (IsKeyDown(KEY_UP)    || IsKeyDown(KEY_W)) env.actions[0] = 1;
+            if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = 2;
+        } else {
+            forward_linearlstm(net, env.observations, env.actions);
+        }
 
-        // step(&env);t
+        step(&env);
         render(client, &env);
     }
     free_linearlstm(net);

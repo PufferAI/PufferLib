@@ -1,10 +1,20 @@
 cimport numpy as cnp
 from libc.stdlib cimport calloc, free
-from libc.stdint cimport uint64_t
 import os
 
-cdef extern from "connect4.h":
+cdef extern from "rocket_lander.h":
     int LOG_BUFFER_SIZE
+
+    ctypedef struct b2WorldId:
+        unsigned short index1
+        unsigned short revision
+    ctypedef struct b2BodyId:
+        int index1
+        unsigned short revision
+        unsigned char world0
+    ctypedef struct b2Vec2:
+        float x
+        float y
 
     ctypedef struct Log:
         float episode_return;
@@ -16,46 +26,50 @@ cdef extern from "connect4.h":
     void free_logbuffer(LogBuffer*)
     Log aggregate_and_clear(LogBuffer*)
 
-    ctypedef struct CConnect4:
-        float* observations
-        unsigned char* actions
-        float* rewards
-        unsigned char* dones
+    ctypedef struct Entity:
+        b2BodyId bodyId;
+        b2Vec2 extent;
+
+    ctypedef struct Lander:
+        float* observations;
+        float* actions;
+        float* reward;
+        unsigned char* terminal;
+        unsigned char* truncation;
         LogBuffer* log_buffer;
         Log log;
-
-        uint64_t position;
-        uint64_t mask;
-
-        int piece_width;
-        int piece_height;
-        int width;
-        int height;
+        int tick;
+        b2WorldId world_id;
+        b2BodyId barge_id;
+        b2BodyId lander_id;
+        Entity barge;
+        Entity lander;
 
     ctypedef struct Client
 
-    void free_cconnect4(CConnect4* env)
+    void init_lander(Lander* env)
+    void reset(Lander* env)
+    void step(Lander* env)
+    void free_lander(Lander* env)
 
-    Client* make_client(float width, float height)
+    Client* make_client(Lander* env)
+    void render(Client* client, Lander* env)
     void close_client(Client* client)
-    void render(Client* client, CConnect4* env)
-    void reset(CConnect4* env)
-    void step(CConnect4* env)
 
-cdef class CyConnect4:
+cdef class CyRocketLander:
     cdef:
-        CConnect4* envs
+        Lander* envs
         Client* client
         LogBuffer* logs
         int num_envs
 
     def __init__(self, cnp.ndarray observations, cnp.ndarray actions,
-            cnp.ndarray rewards, cnp.ndarray terminals, int num_envs,
-            int width, int height, int piece_width, int piece_height):
+            cnp.ndarray rewards, cnp.ndarray terminals,
+            cnp.ndarray truncations, int num_envs):
 
         self.num_envs = num_envs
         self.client = NULL
-        self.envs = <CConnect4*> calloc(num_envs, sizeof(CConnect4))
+        self.envs = <Lander*> calloc(num_envs, sizeof(Lander))
         self.logs = allocate_logbuffer(LOG_BUFFER_SIZE)
 
         cdef:
@@ -63,9 +77,7 @@ cdef class CyConnect4:
             cnp.ndarray actions_i
             cnp.ndarray rewards_i
             cnp.ndarray terminals_i
-        
-            uint64_t position = 0
-            uint64_t mask = 0
+            cnp.ndarray truncations_i
 
         cdef int i
         for i in range(num_envs):
@@ -73,19 +85,16 @@ cdef class CyConnect4:
             actions_i = actions[i:i+1]
             rewards_i = rewards[i:i+1]
             terminals_i = terminals[i:i+1]
-            self.envs[i] = CConnect4(
+            truncations_i = truncations[i:i+1]
+            self.envs[i] = Lander(
                 observations = <float*> observations_i.data,
-                actions = <unsigned char*> actions_i.data,
-                rewards = <float*> rewards_i.data,
-                dones = <unsigned char*> terminals_i.data,
+                actions = <float*> actions_i.data,
+                reward = <float*> rewards_i.data,
+                terminal = <unsigned char*> terminals_i.data,
+                truncation = <unsigned char*> truncations_i.data,
                 log_buffer=self.logs,
-                position=position,
-                mask=mask,
-                piece_width=piece_width,
-                piece_height=piece_height,
-                width=width,
-                height=height,
             )
+            init_lander(&self.envs[i])
 
     def reset(self):
         cdef int i
@@ -98,9 +107,9 @@ cdef class CyConnect4:
             step(&self.envs[i])
 
     def render(self):
-        cdef CConnect4* env = &self.envs[0]
+        cdef Lander* env = &self.envs[0]
         if self.client == NULL:
-            self.client = make_client(env.width, env.height)
+            self.client = make_client(env)
 
         render(self.client, env)
 
@@ -109,8 +118,11 @@ cdef class CyConnect4:
             close_client(self.client)
             self.client = NULL
 
-        # TODO: free
-        free_cconnect4(self.envs)
+        cdef int i
+        for i in range(self.num_envs):
+            free_lander(&self.envs[i])
+        free(self.envs)
+        free(self.logs)
 
     def log(self):
         cdef Log log = aggregate_and_clear(self.logs)
