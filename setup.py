@@ -296,7 +296,6 @@ setup(
         "pufferlib/puffernet.pyx",
         "pufferlib/environments/ocean/grid/c_grid.pyx",
         "pufferlib/environments/ocean/snake/c_snake.pyx",
-        "pufferlib/environments/ocean/my_pong/c_my_pong.pyx",
         "pufferlib/environments/ocean/moba/c_moba.pyx",
         "pufferlib/environments/ocean/moba/c_precompute_pathing.pyx",
         *extensions,
