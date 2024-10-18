@@ -106,8 +106,7 @@ void allocate_cconnect4(CConnect4* env) {
 }
 
 void free_cconnect4(CConnect4* env) {
-    free(env->log_buffer);
-    free(env);
+    free_logbuffer(env->log_buffer);
 }
 
 void free_allocated_cconnect4(CConnect4* env) {
@@ -142,7 +141,7 @@ uint64_t swap_player(uint64_t position, uint64_t mask) {
     return position ^ mask;
 }
 
-uint64_t play(int column, u_int64_t mask) {
+uint64_t play(int column, uint64_t mask) {
     mask |= mask + bottom_mask(column);
     return mask;
 }
@@ -173,7 +172,7 @@ bool won(uint64_t position) {
     return false;
 }
 
-float minmax(u_int64_t position, u_int64_t mask, int depth, bool maximising_player) {
+float minmax(uint64_t position, uint64_t mask, int depth, bool maximising_player) {
     // https://en.wikipedia.org/wiki/Minimax
     bool has_won = won(position);
     if (depth == 0 || has_won || draw(mask)) {
@@ -189,8 +188,8 @@ float minmax(u_int64_t position, u_int64_t mask, int depth, bool maximising_play
         if (!valid_move(column, mask)) {
             continue;
         }
-        u_int64_t child_position = swap_player(position, mask);  // Swap the player
-        u_int64_t child_mask = play(column, mask);
+        uint64_t child_position = swap_player(position, mask);
+        uint64_t child_mask = play(column, mask);
         float child_value = minmax(child_position, child_mask, depth - 1, !maximising_player);
         if (maximising_player && child_value > value) {
             value = child_value;
@@ -217,8 +216,8 @@ int compute_env_move(CConnect4* env) {
     float best_value = -MAX_VALUE;
     for (uint64_t column = 0; column < 7; column ++) {
         if (!valid_move(column, env->mask)) { continue; }
-        u_int64_t child_position = env->position ^ env->mask;
-        u_int64_t child_mask = play(column, env->mask);
+        uint64_t child_position = swap_player(env->position, env->mask);
+        uint64_t child_mask = play(column, env->mask);
         
         float value = minmax(child_position, child_mask, 2, false);
         if (value == DRAW_VALUE) {
@@ -240,13 +239,14 @@ void compute_observation(CConnect4* env) {
     //  the observations vector.
     // Details: http://blog.gamesolver.org/solving-connect-four/06-bitboard/
     uint64_t p0 = env->position;
-    uint64_t p1 = env->position ^ env->mask;
+    uint64_t p1 = swap_player(env->position, env->mask);
 
     int obs_idx = 0;
     for (int i = 0; i < 49; i++) {
         // Skip the sentinel row
-        if ((i + 1) % 7 == 0) { continue; }
-        obs_idx += 1;
+        if ((i + 1) % 7 == 0) {
+            continue;
+        }
 
         int p0_bit = (p0 >> i) & 1;
         if (p0_bit == 1) {
@@ -256,6 +256,7 @@ void compute_observation(CConnect4* env) {
         if (p1_bit == 1) {
             env->observations[obs_idx] = P1;
         }
+        obs_idx += 1;
     }
 }
 
@@ -362,8 +363,9 @@ void render(Client* client, CConnect4* env) {
     int obs_idx = 0;
     for (int i = 0; i < 49; i++) {
         // TODO: Simplify this by iterating over the observation more directly
-        if ((i + 1) % 7 == 0) { continue; }
-        obs_idx += 1;
+        if ((i + 1) % 7 == 0) {
+            continue;
+        }
 
         int row = i % (ROWS + 1);
         int column = i / (ROWS + 1);
@@ -381,6 +383,7 @@ void render(Client* client, CConnect4* env) {
             piece_color = PUFF_RED;
             color_idx = 2;
         }
+        obs_idx += 1;
 
         Color board_color = (Color){0, 80, 80, 255};
         DrawRectangle(x , y , env->piece_width, env->piece_width, board_color);

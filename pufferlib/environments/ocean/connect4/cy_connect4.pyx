@@ -1,5 +1,6 @@
 cimport numpy as cnp
 from libc.stdlib cimport calloc, free
+from libc.stdint cimport uint64_t
 import os
 
 cdef extern from "connect4.h":
@@ -22,16 +23,14 @@ cdef extern from "connect4.h":
         unsigned char* dones
         LogBuffer* log_buffer;
         Log log;
-        int game_over
+
+        uint64_t position;
+        uint64_t mask;
+
         int piece_width;
         int piece_height;
-        float* board_x;
-        float* board_y;
-        float board_states[6][7];
-        int* longest_connected;
         int width;
         int height;
-        int pieces_placed;
 
     ctypedef struct Client
 
@@ -64,6 +63,9 @@ cdef class CyConnect4:
             cnp.ndarray actions_i
             cnp.ndarray rewards_i
             cnp.ndarray terminals_i
+        
+            uint64_t position = 0
+            uint64_t mask = 0
 
         cdef int i
         for i in range(num_envs):
@@ -77,6 +79,8 @@ cdef class CyConnect4:
                 rewards = <float*> rewards_i.data,
                 dones = <unsigned char*> terminals_i.data,
                 log_buffer=self.logs,
+                position=position,
+                mask=mask,
                 piece_width=piece_width,
                 piece_height=piece_height,
                 width=width,
