@@ -1,7 +1,8 @@
 #include <stdlib.h>
 #include <math.h>
-#include "raylib.h"
 #include <stdio.h>
+#include <stdint.h>
+#include "raylib.h"
 
 #define WIN_CONDITION 4
 
@@ -117,13 +118,13 @@ void free_allocated_cconnect4(CConnect4* env) {
     free_cconnect4(env);
 }
 
-uint64_t top_mask(int column) {
+uint64_t top_mask(uint64_t column) {
     // Get the bit at the top of 'column'. If the bit is 0 the column can be
     //  played.
     return (UINT64_C(1) << (ROWS - 1)) << column * (ROWS + 1);
 }
 
-uint64_t bottom_mask(int column) {
+uint64_t bottom_mask(uint64_t column) {
     // Get a bit mask for where a piece played at 'column' would end up.
     return UINT64_C(1) << column * (ROWS + 1);
 }
@@ -133,7 +134,7 @@ uint64_t bottom() {
     return UINT64_C(1) << (COLUMNS - 1) * (ROWS + 1);
 }
 
-bool valid_move(int column, u_int64_t mask) {
+bool valid_move(int column, uint64_t mask) {
     return (mask & top_mask(column)) == 0;
 }
 

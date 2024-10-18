@@ -1,4 +1,5 @@
 #include "connect4.h"
+#include "time.h"
 
 int main() {
     CConnect4 env = {
@@ -33,4 +34,28 @@ int main() {
     free_allocated_cconnect4(&env);
     return 0;
 }
+
+void test_performance(float test_time) {
+    CConnect4 env = {
+        .width = 672,
+        .height = 576,
+        .piece_width = 96,
+        .piece_height = 96,
+    };
+    allocate_cconnect4(&env);
+    reset(&env);
+ 
+    float start = time(NULL);
+    int i = 0;
+    while (time(NULL) - start < test_time) {
+        for (int j = 0; j < 10; j++) {
+            env.actions[0] = rand() % 7;
+        }
+        step(&env);
+        i++;
+    }
+    float end = time(NULL);
+    printf("SPS: %f\n", i / (end - start));
+}
+
 
