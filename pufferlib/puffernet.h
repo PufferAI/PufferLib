@@ -467,6 +467,49 @@ void softmax_multidiscrete(Multidiscrete* layer, float* input, int* output) {
 }
 
 // Default models
+
+typedef struct Default Default;
+struct Default {
+    int num_agents;
+    float* obs;
+    Linear* encoder;
+    ReLU* relu1;
+    Linear* actor;
+    Linear* value_fn;
+    Multidiscrete* multidiscrete;
+};
+
+Default* make_default(Weights* weights, int num_agents, int input_dim, int hidden_dim, int action_dim) {
+    Default* net = calloc(1, sizeof(Default));
+    net->num_agents = num_agents;
+    net->obs = (float*)calloc(num_agents*input_dim, sizeof(float));
+    net->encoder = make_linear(weights, num_agents, input_dim, hidden_dim);
+    net->relu1 = make_relu(num_agents, hidden_dim);
+    net->actor = make_linear(weights, num_agents, hidden_dim, action_dim);
+    net->value_fn = make_linear(weights, num_agents, hidden_dim, 1);
+    int logit_sizes[1] = {action_dim};
+    net->multidiscrete = make_multidiscrete(num_agents, logit_sizes, 1);
+    return net;
+}
+
+void free_default(Default* net) {
+    free(net->obs);
+    free(net->encoder);
+    free(net->relu1);
+    free(net->actor);
+    free(net->value_fn);
+    free(net->multidiscrete);
+    free(net);
+}
+
+void forward_default(Default* net, float* observations, int* actions) {
+    linear(net->encoder, observations);
+    relu(net->relu1, net->encoder->output);
+    linear(net->actor, net->relu1->output);
+    linear(net->value_fn, net->relu1->output);
+    softmax_multidiscrete(net->multidiscrete, net->actor->output, actions);
+}
+
 typedef struct LinearLSTM LinearLSTM;
 struct LinearLSTM {
     int num_agents;
@@ -504,7 +547,7 @@ void free_linearlstm(LinearLSTM* net) {
     free(net);
 }
 
-void forward_linearlstm(LinearLSTM* net, float* observations, unsigned int* actions) {
+void forward_linearlstm(LinearLSTM* net, float* observations, int* actions) {
     linear(net->encoder, observations);
     relu(net->relu1, net->encoder->output);
     lstm(net->lstm, net->relu1->output);
