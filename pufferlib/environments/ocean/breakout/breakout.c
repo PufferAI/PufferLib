@@ -43,4 +43,3 @@ int main() {
     close_client(client);
     return 0;
 }
-
