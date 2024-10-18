@@ -35,7 +35,6 @@ cdef extern from "connect4.h":
 
     ctypedef struct Client
 
-    CConnect4* init_cconnect4(CConnect4* env)
     void free_cconnect4(CConnect4* env)
 
     Client* make_client(float width, float height)
@@ -83,7 +82,6 @@ cdef class CyConnect4:
                 width=width,
                 height=height,
             )
-            init_cconnect4(&self.envs[i])
 
     def reset(self):
         cdef int i

@@ -1,4 +1,5 @@
 #include "connect4.h"
+#include "time.h"
 
 int main() {
     CConnect4 env = {
@@ -6,8 +7,6 @@ int main() {
         .height = 576,
         .piece_width = 96,
         .piece_height = 96,
-        .game_over = 0,
-        .pieces_placed = 0,
     };
     allocate_cconnect4(&env);
     reset(&env);
@@ -16,21 +15,47 @@ int main() {
 
     while (!WindowShouldClose()) {
         // User can take control of the paddle
-        env.actions[0] = 0;
+        env.actions[0] = -1;
         // user inputs 1 - 7 key pressed
-        if(IsKeyPressed(KEY_ONE)) env.actions[0] = 1;
-        if(IsKeyPressed(KEY_TWO)) env.actions[0] = 2;
-        if(IsKeyPressed(KEY_THREE)) env.actions[0] = 3;
-        if(IsKeyPressed(KEY_FOUR)) env.actions[0] = 4;
-        if(IsKeyPressed(KEY_FIVE)) env.actions[0] = 5;
-        if(IsKeyPressed(KEY_SIX)) env.actions[0] = 6;
-        if(IsKeyPressed(KEY_SEVEN)) env.actions[0] = 7;
+        if(IsKeyPressed(KEY_ONE)) env.actions[0] = 0;
+        if(IsKeyPressed(KEY_TWO)) env.actions[0] = 1;
+        if(IsKeyPressed(KEY_THREE)) env.actions[0] = 2;
+        if(IsKeyPressed(KEY_FOUR)) env.actions[0] = 3;
+        if(IsKeyPressed(KEY_FIVE)) env.actions[0] = 4;
+        if(IsKeyPressed(KEY_SIX)) env.actions[0] = 5;
+        if(IsKeyPressed(KEY_SEVEN)) env.actions[0] = 6;
 
-        step(&env);
+        if (env.actions[0] != -1) {
+            step(&env);
+        }
         render(client, &env);
     }
     close_client(client);
     free_allocated_cconnect4(&env);
     return 0;
 }
+
+void test_performance(float test_time) {
+    CConnect4 env = {
+        .width = 672,
+        .height = 576,
+        .piece_width = 96,
+        .piece_height = 96,
+    };
+    allocate_cconnect4(&env);
+    reset(&env);
+ 
+    float start = time(NULL);
+    int i = 0;
+    while (time(NULL) - start < test_time) {
+        for (int j = 0; j < 10; j++) {
+            env.actions[0] = rand() % 7;
+        }
+        step(&env);
+        i++;
+    }
+    float end = time(NULL);
+    printf("SPS: %f\n", i / (end - start));
+}
+
 
