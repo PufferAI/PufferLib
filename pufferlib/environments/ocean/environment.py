@@ -100,10 +100,6 @@ def make_snake(widths=None, heights=None, num_snakes=None, num_food=None, vision
         vision=vision,
     )
 
-def make_my_pong(num_envs=1024, render_mode=None):
-    from .my_pong import my_pong
-    return my_pong.MyPong(num_envs=num_envs, render_mode=render_mode)
-
 def make_continuous(discretize=False, **kwargs):
     from . import sanity
     env = sanity.Continuous(discretize=discretize)
@@ -178,8 +174,7 @@ MAKE_FNS = {
     'puffer': make_puffer,
     'puffergrid': make_puffergrid,
     'snake': make_snake,
-    'my_pong': make_my_pong,
-    'tactical': make_tactical,
+    # 'tactical': make_tactical,
     'continuous': make_continuous,
     'squared': make_squared,
     'bandit': make_bandit,
