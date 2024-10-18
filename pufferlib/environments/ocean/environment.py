@@ -174,6 +174,7 @@ MAKE_FNS = {
     'puffer': make_puffer,
     'puffergrid': make_puffergrid,
     'snake': make_snake,
+    # 'tactical': make_tactical,
     'continuous': make_continuous,
     'squared': make_squared,
     'bandit': make_bandit,
