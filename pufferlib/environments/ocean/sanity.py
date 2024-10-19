@@ -30,7 +30,7 @@ class Bandit(gymnasium.Env):
         self.action_space=gymnasium.spaces.Discrete(num_actions)
         self.render_mode = 'ansi'
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         # Bandit problem requires a single fixed seed
         # for all environments
         seed = self.hard_fixed_seed
@@ -84,7 +84,7 @@ class Memory(gymnasium.Env):
         self.action_space=gymnasium.spaces.Discrete(2)
         self.render_mode = 'ansi'
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         if seed is not None:
             random.seed(seed)
             np.random.seed(seed)
@@ -178,7 +178,7 @@ class Multiagent(pettingzoo.ParallelEnv):
     def action_space(self, agent):
         return gymnasium.spaces.Discrete(2)
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         # Reallocating is faster than zeroing
         self.view=np.zeros((2, 5), dtype=np.float32)
         return self.observation, {}
@@ -248,7 +248,7 @@ class Password(gymnasium.Env):
         self.action_space=gymnasium.spaces.Discrete(2)
         self.render_mode = 'ansi'
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         # Bandit problem requires a single fixed seed
         # for all environments
         seed = self.hard_fixed_seed
@@ -315,7 +315,7 @@ class Performance(gymnasium.Env):
         self.observation = self.observation_space.sample()
         self.render_mode = 'ansi'
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         return self.observation, {}
 
     def step(self, action):
@@ -342,7 +342,7 @@ class PerformanceEmpiric(gymnasium.Env):
         self.bandwidth = bandwidth
         self.render_mode = 'ansi'
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         return self.observation, {}
 
     def step(self, action):
@@ -378,7 +378,7 @@ class Spaces(gymnasium.Env):
         })
         self.render_mode = 'ansi'
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         self.observation = {
             'image': np.random.randn(5, 5).astype(np.float32),
             'flat': np.random.randint(-1, 2, (5,), dtype=np.int8),
@@ -445,7 +445,7 @@ class Squared(gymnasium.Env):
         return [(x, y) for x in range(grid_size) for y in range(grid_size)
                 if x == 0 or y == 0 or x == grid_size - 1 or y == grid_size - 1]
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         if seed is not None:
             random.seed(seed)
             np.random.seed(seed)
@@ -548,7 +548,7 @@ class Stochastic(gymnasium.Env):
         self.action_space = gymnasium.spaces.Discrete(2)
         self.render_mode = 'ansi'
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         if seed is not None:
             random.seed(seed)
             np.random.seed(seed)
