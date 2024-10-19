@@ -323,6 +323,9 @@ class Multiprocessing:
         self.initialized = False
         self.zero_copy = zero_copy
 
+        self.ready_workers = []
+        self.waiting_workers = []
+
     def recv(self):
         recv_precheck(self)
         while True:
@@ -415,6 +418,15 @@ class Multiprocessing:
         self.buf.semaphores[idxs] = STEP
 
     def async_reset(self, seed=42):
+        # Flush any waiting workers
+        while self.waiting_workers:
+            worker = self.waiting_workers.pop(0)
+            sem = self.buf.semaphores[worker]
+            if sem >= MAIN:
+                self.ready_workers.append(worker)
+            else:
+                self.waiting_workers.append(worker)
+
         self.flag = RECV
         seed = make_seeds(seed, self.num_environments)
         self.prev_env_id = []
