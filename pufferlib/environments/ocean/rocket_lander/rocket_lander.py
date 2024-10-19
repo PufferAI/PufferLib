@@ -43,7 +43,6 @@ class RocketLander(pufferlib.PufferEnv):
             if log['episode_length'] > 0:
                 info.append(log)
 
-        breakpoint()
         self.tick += 1
         return (self.observations, self.rewards,
             self.terminals, self.truncations, info)

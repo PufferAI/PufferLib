@@ -141,7 +141,7 @@ void free_logbuffer(LogBuffer* buffer) {
 }
 
 void add_log(LogBuffer* logs, Log* log) {
-    printf("Log: %f, %f, %f\n", log->episode_return, log->episode_length, log->score);
+    //printf("Log: %f, %f, %f\n", log->episode_return, log->episode_length, log->score);
     if (logs->idx == logs->length) {
         return;
     }
@@ -332,6 +332,7 @@ void compute_observations_and_reward(Lander* env, float prev_x, float prev_y) {
     //printf("\t Velocity: %f, %f\n", vel.x, vel.y);
     //printf("\t Reward x: %f, y: %f, rot: %f, speed: %f\n", reward_x, reward_y, reward_rot, reward_speed);
     
+    //reward = (env->actions[0] == 0) ? 0 : reward;
     env->reward[0] = reward;
     env->log.episode_return += reward;
 
