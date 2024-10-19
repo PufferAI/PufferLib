@@ -22,7 +22,7 @@ if [ "$MODE" = "local" ]; then
         "$SRC_DIR/$ENV.c" -o "$OUTPUT_DIR/$ENV" \
         ./raylib/lib/libraylib.a -lm -lpthread \
         -fsanitize=address,undefined,bounds,pointer-overflow,leak \
-        -framework Cocoa -framework IOKit -framework CoreVideo
+        #-framework Cocoa -framework IOKit -framework CoreVideo
     # gcc -g -O2 -Wall \
     #     -I./raylib/include \
     #     -I./pufferlib\
