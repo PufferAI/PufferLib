@@ -242,22 +242,23 @@ common = cleanrl + [environments[env] for env in [
 ]]
 
 extension_paths = [
-    'pufferlib/environments/ocean/moba/cy_moba',
-    'pufferlib/environments/ocean/snake/cy_snake',
-    'pufferlib/environments/ocean/pong/cy_pong',
-    'pufferlib/environments/ocean/breakout/cy_breakout',
-    'pufferlib/environments/ocean/connect4/cy_connect4',
-    'pufferlib/environments/ocean/grid/cy_grid',
-    'pufferlib/environments/ocean/tripletriad/cy_tripletriad',
+    #'pufferlib/environments/ocean/moba/cy_moba',
+    #'pufferlib/environments/ocean/snake/cy_snake',
+    #'pufferlib/environments/ocean/pong/cy_pong',
+    'pufferlib/environments/ocean/rocket_lander/cy_rocket_lander',
+    #'pufferlib/environments/ocean/breakout/cy_breakout',
+    #'pufferlib/environments/ocean/connect4/cy_connect4',
+    #'pufferlib/environments/ocean/grid/cy_grid',
+    #'pufferlib/environments/ocean/tripletriad/cy_tripletriad',
 ]
 
 extensions = [Extension(
     path.replace('/', '.'),
     [path + '.pyx'],
-    include_dirs=[numpy.get_include(), 'raylib/include'],
-    library_dirs=['raylib/lib'],
-    libraries=["raylib"],
-    runtime_library_dirs=["raylib/lib"],
+    include_dirs=[numpy.get_include(), 'raylib/include', 'box2d/include'],
+    library_dirs=['raylib/lib', 'box2d/build/src'],
+    libraries=["raylib", "box2d"],
+    runtime_library_dirs=["raylib/lib", "box2d/build/src"],
     extra_compile_args=['-DPLATFORM_DESKTOP', '-O2'],#, '-g'],
 ) for path in extension_paths]
  

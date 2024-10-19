@@ -18,10 +18,13 @@ if [ "$MODE" = "local" ]; then
     echo "Building $ENV for local testing..."
     clang -g -O2 -Wall \
         -I./raylib/include \
-        -I./pufferlib\
+        -I./pufferlib \
+        -I./box2d/include \
         "$SRC_DIR/$ENV.c" -o "$OUTPUT_DIR/$ENV" \
+        -L./box2d/build/src \
         ./raylib/lib/libraylib.a -lm -lpthread \
         -fsanitize=address,undefined,bounds,pointer-overflow,leak \
+        -lbox2d 
         #-framework Cocoa -framework IOKit -framework CoreVideo
     # gcc -g -O2 -Wall \
     #     -I./raylib/include \
@@ -56,6 +59,7 @@ elif [ "$MODE" = "web" ]; then
         -s USE_WEBGL2=1 \
         -s ASYNCIFY \
         -sFILESYSTEM \
+        -s STACK_SIZE=512MB \
         -s FORCE_FILESYSTEM=1 \
         --shell-file ./minshell.html \
         -DPLATFORM_WEB \

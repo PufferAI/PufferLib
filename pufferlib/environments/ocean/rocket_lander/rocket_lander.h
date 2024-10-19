@@ -11,6 +11,108 @@
 //
 #define LOG_BUFFER_SIZE 1024
 
+const Color PUFF_BACKGROUND = {6, 24, 24, 255}; // window background
+const Color PUFF_TEXT = {0, 187, 187, 255}; // main text color
+const Color CYAN = {0, 255, 255, 255}; // main text color
+
+#include "raylib.h"
+#include <math.h>
+
+/*
+void DrawRotatedShape(Vector2 *points, int num_points, Vector2 origin, float angle, Vector2 position, Color color)
+{
+    // Convert angle from degrees to radians
+    float angle_rad = angle * DEG2RAD;
+    
+    // Precompute sine and cosine of the angle
+    float cos_theta = cosf(angle_rad);
+    float sin_theta = sinf(angle_rad);
+    
+    // Allocate memory for transformed points
+    Vector2 *transformed_points = (Vector2 *)malloc(num_points * sizeof(Vector2));
+    if (transformed_points == NULL)
+    {
+        TraceLog(LOG_ERROR, "Memory allocation failed for transformed points.");
+        return;
+    }
+    
+    // Transform each point
+    for (int i = 0; i < num_points; i++)
+    {
+        // Translate point relative to the origin
+        Vector2 translated;
+        translated.x = points[i].x - origin.x;
+        translated.y = points[i].y - origin.y;
+        
+        // Rotate the point
+        Vector2 rotated;
+        rotated.x = translated.x * cos_theta - translated.y * sin_theta;
+        rotated.y = translated.x * sin_theta + translated.y * cos_theta;
+        
+        // Translate back and add position
+        transformed_points[i].x = rotated.x + origin.x + position.x;
+        transformed_points[i].y = rotated.y + origin.y + position.y;
+    }
+    
+    // Draw lines between the transformed points
+    for (int i = 0; i < num_points - 1; i++)
+    {
+        DrawLineV(transformed_points[i], transformed_points[i + 1], color);
+    }
+    // Optionally, connect the last point to the first to close the shape
+    DrawLineV(transformed_points[num_points - 1], transformed_points[0], color);
+    
+    // Free allocated memory
+    free(transformed_points);
+}
+*/
+
+Vector2 RotatePoint(Vector2 point, Vector2 origin, float angle) {
+    // Translate point back to origin
+    float s = sin(angle);
+    float c = cos(angle);
+
+    point.x -= origin.x;
+    point.y -= origin.y;
+
+    // Rotate point
+    float newX = point.x * c - point.y * s;
+    float newY = point.x * s + point.y * c;
+
+    // Translate point back
+    point.x = newX + origin.x;
+    point.y = newY + origin.y;
+
+    return point;
+}
+
+// Function to draw rotated shape
+void DrawRotatedShape(Vector2* points, int num_points, Vector2 origin, float angle, Color color) {
+    // Draw lines between consecutive points (rotate each point)
+    for (int i = 0; i < num_points; i++) {
+        Vector2 p1 = RotatePoint(points[i], origin, angle);
+        Vector2 p2 = RotatePoint(points[(i + 1) % num_points], origin, angle); // Wrap around to the first point
+
+        DrawLineV(p1, p2, color);
+    }
+}
+
+void DrawRectangleLinesPro(Rectangle rec, Vector2 origin, int width, float rotation, Color color) {
+    /*
+	Vector2 points[4] = {
+        (Vector2){rec.x, rec.y},
+        (Vector2){rec.x + rec.width, rec.y},
+        (Vector2){rec.x + rec.width, rec.y + rec.height},
+        (Vector2){rec.x, rec.y + rec.height}
+    };
+    DrawRotatedShape(points, 4, origin, rotation, color);
+    */
+
+    DrawRectanglePro(rec, origin, rotation, color);
+    Rectangle inner = (Rectangle){rec.x + width/2, rec.y + width/2, rec.width - width, rec.height - width};
+    DrawRectanglePro(inner, origin, rotation, PUFF_BACKGROUND);
+}
+
 typedef struct Log Log;
 struct Log {
     float episode_return;
@@ -124,7 +226,10 @@ void DrawEntity(const Entity* entity, Color color)
         PX_PER_METER*width,
         PX_PER_METER*height,
     };
-    DrawRectanglePro(rec, (Vector2){rec.width/2, rec.height/2}, -degrees, color);
+    //DrawRectanglePro(rec, (Vector2){rec.width/2, rec.height/2}, -degrees, color);
+    DrawRectangleLinesPro(rec, (Vector2){rec.width/2, rec.height/2}, 4, degrees, color);
+
+
 	//DrawTextureEx(entity->texture, ps, RAD2DEG * radians, 1.0f, WHITE);
 
 	// I used these circles to ensure the coordinates are correct
@@ -216,17 +321,16 @@ void compute_observations_and_reward(Lander* env, float prev_x, float prev_y) {
     b2Vec2 vel = b2Body_GetLinearVelocity(env->lander_id);
     float ang_vel = b2Body_GetAngularVelocity(env->lander_id);
 
-    float reward_x = (fabsf(prev_x) - fabsf(pos.x))/ 1000;
-    float reward_y = (fabsf(prev_y) - fabsf(pos.y))/ 1000;
-    //float reward_rot = -fabsf(rot)/ PI / 10;
+    float reward_x = (fabsf(prev_x) - fabsf(pos.x))/ 10;
+    float reward_y = (fabsf(prev_y) - fabsf(pos.y))/ 10;
+    float reward_rot = -fabsf(rot)/ PI;
+    float reward_speed = -fabsf(vel.x)/ 1000 - fabsf(vel.y)/ 1000;
     //printf("Reward: %f, %f, %f\n", reward_x, reward_y, reward_rot);
-    float reward = reward_x + reward_y;// + reward_rot;
-    
-    reward = 0;
-    if (env->actions[0] == 0) {
-        reward = 1;
-    }
+    float reward = (reward_x + reward_y + reward_rot + reward_speed) / 5;
 
+    //printf("\t Velocity: %f, %f\n", vel.x, vel.y);
+    //printf("\t Reward x: %f, y: %f, rot: %f, speed: %f\n", reward_x, reward_y, reward_rot, reward_speed);
+    
     env->reward[0] = reward;
     env->log.episode_return += reward;
 
@@ -255,13 +359,24 @@ void reset(Lander* env) {
     env->reward[0] = 0;
     compute_observations_and_reward(env, pos.x, pos.y);
     env->reward[0] = 0;
+
+    // Apply random force to lander. From the left for now
+    b2Vec2 p_left = b2Body_GetWorldPoint(env->lander_id,
+        (b2Vec2){-LANDER_WIDTH/2, LANDER_HEIGHT/2});
+    int mag = 2000000;
+    b2Vec2 force = (b2Vec2){
+        (float)(rand() % mag - mag/2),
+        (float)(rand() % mag - mag/2)
+    };
+    b2Body_ApplyForce(env->lander_id, force, p_left, true);
+    b2World_Step(env->world_id, 1.0/60.0f, 4);
 }
 
 void step(Lander* env) {
     env->reward[0] = 0;
     b2Transform transform = b2Body_GetTransform(env->lander_id);
     b2Vec2 pos = transform.p;
-    printf("Pos x: %f, y: %f\n", pos.x, pos.y);
+    //printf("Pos x: %f, y: %f\n", pos.x, pos.y);
 
     b2Vec2 p_thrust = b2Body_GetWorldPoint(env->lander_id,
         (b2Vec2){0, -LANDER_HEIGHT/2});
@@ -302,8 +417,7 @@ void step(Lander* env) {
     };
     b2Body_ApplyForce(env->lander_id, force, p_right, true);
 
-    b2World_Step(env->world_id, 60.0f, 4);
-
+    b2World_Step(env->world_id, 1.0/60.0f, 4);
 
     transform = b2Body_GetTransform(env->lander_id);
     bool do_reset = false;
@@ -314,14 +428,11 @@ void step(Lander* env) {
     }
     if (transform.p.y < 120) {
         do_reset = true;
-        printf("Transform y: %f\n", transform.p.y);
     }
     if (env->tick > 1000) {
         do_reset = true;
-        printf("Tick: %i\n", env->tick);
     }
     if (do_reset) {
-        printf("Reset\n");
         env->log.episode_length = env->tick;
         add_log(env->log_buffer, &env->log);
         reset(env);
@@ -329,6 +440,7 @@ void step(Lander* env) {
     env->tick += 1;
 
     compute_observations_and_reward(env, pos.x, pos.y);
+    //printf("Reward: %f\n", env->reward[0]);
     //printf("Reward: %f\n", env->reward[0]);
     //env->reward[0] = -(atn_thrust + atn_left + atn_right) / 10000000;
 }
@@ -369,7 +481,7 @@ void render(Client* client, Lander* env) {
         exit(0);
     }
     BeginDrawing();
-    ClearBackground(DARKGRAY);
+    ClearBackground(PUFF_BACKGROUND);
     BeginMode2D(client->camera);
 
     env->actions[0] = 0;
@@ -439,7 +551,7 @@ void render(Client* client, Lander* env) {
 
     //DrawRectangle(0, 0, 100, 100, RED);
     DrawEntity(&env->barge, RED);
-    DrawEntity(&env->lander, BLUE);
+    DrawEntity(&env->lander, CYAN);
     //DrawEntity(&legs[0], GREEN);
     //DrawEntity(&legs[1], GREEN);
     EndMode2D();
@@ -449,8 +561,9 @@ void render(Client* client, Lander* env) {
 void demo() {
     Lander env = {0};
     allocate_lander(&env);
-    Client* client = make_client(&env);
+    reset(&env);
 
+    Client* client = make_client(&env);
     while (!WindowShouldClose()) {
         step(&env);
         render(client, &env);
@@ -463,7 +576,7 @@ void test_render() {
 
     while (!WindowShouldClose()) {
         BeginDrawing();
-        ClearBackground(DARKGRAY);
+        ClearBackground(PUFF_BACKGROUND);
 
         Rectangle rec = (Rectangle){500, 500, 200, 200};
         Vector2 origin = (Vector2){rec.width/2, rec.height/2};

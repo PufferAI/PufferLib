@@ -1,12 +1,12 @@
 import pufferlib.emulation
 import pufferlib.postprocess
 
-from .pong import pong
-from .breakout import breakout
-from .connect4 import connect4
-from .tripletriad import tripletriad
-from .moba import moba
-#from .rocket_lander import rocket_lander
+#from .pong import pong
+#from .breakout import breakout
+#from .connect4 import connect4
+#from .tripletriad import tripletriad
+#from .moba import moba
+from .rocket_lander import rocket_lander
 
 def make_foraging(width=1080, height=720, num_agents=4096, horizon=512,
         discretize=True, food_reward=0.1, render_mode='rgb_array'):
@@ -164,11 +164,11 @@ def make_multiagent(**kwargs):
     return pufferlib.emulation.PettingZooPufferEnv(env=env)
 
 MAKE_FNS = {
-    'moba': moba.PufferMoba,
-    'my_pong': pong.MyPong,
-    'my_breakout': breakout.MyBreakout,
-    #'rocket_lander': rocket_lander.RocketLander,
-    'foraging': make_foraging,
+    #'moba': moba.PufferMoba,
+    #'my_pong': pong.MyPong,
+    #'my_breakout': breakout.MyBreakout,
+    'rocket_lander': rocket_lander.RocketLander,
+    #'foraging': make_foraging,
     'predator_prey': make_predator_prey,
     'group': make_group,
     'puffer': make_puffer,
@@ -185,8 +185,8 @@ MAKE_FNS = {
     'spaces': make_spaces,
     'performance': make_performance,
     'performance_empiric': make_performance_empiric,
-    'my_connect4': connect4.MyConnect4,
-    'my_tripletriad': tripletriad.MyTripleTriad,
+    #'my_connect4': connect4.MyConnect4,
+    #'my_tripletriad': tripletriad.MyTripleTriad,
 }
 
 def env_creator(name='squared'):
