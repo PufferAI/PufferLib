@@ -141,6 +141,7 @@ void free_logbuffer(LogBuffer* buffer) {
 }
 
 void add_log(LogBuffer* logs, Log* log) {
+    printf("Log: %f, %f, %f\n", log->episode_return, log->episode_length, log->score);
     if (logs->idx == logs->length) {
         return;
     }
@@ -374,6 +375,7 @@ void reset(Lander* env) {
 
 void step(Lander* env) {
     env->reward[0] = 0;
+    env->terminal[0] = false;
     b2Transform transform = b2Body_GetTransform(env->lander_id);
     b2Vec2 pos = transform.p;
     //printf("Pos x: %f, y: %f\n", pos.x, pos.y);
@@ -388,7 +390,6 @@ void step(Lander* env) {
     b2Vec2 force = (b2Vec2){0, 0};
     b2Rot rotation = b2Body_GetRotation(env->lander_id);
     float radians = b2Rot_GetAngle(rotation);
-
 
     // Main thruster
     float atn_thrust = THRUST_SCALE * env->actions[0];
@@ -435,6 +436,7 @@ void step(Lander* env) {
     if (do_reset) {
         env->log.episode_length = env->tick;
         add_log(env->log_buffer, &env->log);
+        env->terminal[0] = true;
         reset(env);
     }
     env->tick += 1;

@@ -13,8 +13,8 @@ from pufferlib.environments.ocean.rocket_lander.cy_rocket_lander import CyRocket
 
 class RocketLander(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=32, buf=None):
-        self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
-            shape=(6,), dtype=np.float32)
+        self.single_observation_space = gymnasium.spaces.Box(
+            low=0, high=1, shape=(6,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Discrete(4)
         self.render_mode = render_mode
         self.num_agents = num_envs
@@ -43,6 +43,7 @@ class RocketLander(pufferlib.PufferEnv):
             if log['episode_length'] > 0:
                 info.append(log)
 
+        breakpoint()
         self.tick += 1
         return (self.observations, self.rewards,
             self.terminals, self.truncations, info)
