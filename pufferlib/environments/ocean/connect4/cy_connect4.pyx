@@ -24,8 +24,8 @@ cdef extern from "connect4.h":
         LogBuffer* log_buffer;
         Log log;
 
-        uint64_t position;
-        uint64_t mask;
+        uint64_t player_position;
+        uint64_t env_position;
 
         int piece_width;
         int piece_height;
@@ -64,9 +64,6 @@ cdef class CyConnect4:
             cnp.ndarray rewards_i
             cnp.ndarray terminals_i
         
-            uint64_t position = 0
-            uint64_t mask = 0
-
         cdef int i
         for i in range(num_envs):
             observations_i = observations[i:i+1]
@@ -79,8 +76,8 @@ cdef class CyConnect4:
                 rewards = <float*> rewards_i.data,
                 dones = <unsigned char*> terminals_i.data,
                 log_buffer=self.logs,
-                position=position,
-                mask=mask,
+                player_position=0,
+                env_position=0,
                 piece_width=piece_width,
                 piece_height=piece_height,
                 width=width,
