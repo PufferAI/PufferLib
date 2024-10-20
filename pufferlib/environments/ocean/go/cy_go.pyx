@@ -20,6 +20,17 @@ cdef extern from "go.h":
     void free_logbuffer(LogBuffer*)
     Log aggregate_and_clear(LogBuffer*)
 
+    ctypedef struct Group:
+        int parent
+        int rank
+        int size
+        int liberties
+
+    int find(Group*)
+    void union_groups(Group*, int, int)
+
+
+
     ctypedef struct CGo:
         float* observations
         unsigned short* actions
@@ -44,6 +55,8 @@ cdef extern from "go.h":
         int* capture_count
         float komi
         int* visited
+        Group* groups
+        Group* temp_groups
 
     ctypedef struct Client
 
