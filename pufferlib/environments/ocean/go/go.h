@@ -14,12 +14,6 @@
 #define TICK_RATE 1.0f/60.0f
 #define NUM_DIRECTIONS 4
 static const int DIRECTIONS[NUM_DIRECTIONS][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-#define NUM_NEIGHBORS 8
-static const int NEIGHBORS[NUM_NEIGHBORS][2] = {
-    {-1, -1}, {-1, 0}, {-1, 1},
-    {0, -1},           {0, 1},
-    {1, -1},  {1, 0},  {1, 1}
-};
 //  LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./go
 #define LOG_BUFFER_SIZE 1024
 
@@ -205,14 +199,14 @@ void free_allocated(CGo* env) {
 }
 
 void compute_observations(CGo* env) {
+    int observation_indx=0;
     for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
-        env->observations[i] = (float)env->board_states[i];
+        env->observations[observation_indx++] = (float)env->board_states[i];
     }
     for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
-        env->observations[i + (env->grid_size+1)*(env->grid_size+1)] = (float)env->previous_board_state[i];
+        env->observations[observation_indx++] = (float)env->previous_board_state[i];
     }
-    // env->observations[2*(env->grid_size+1)*(env->grid_size+1)] = (float)env->capture_count[0];
-    // env->observations[2*(env->grid_size+1)*(env->grid_size+1)+1] = (float)env->capture_count[1];
+    env->observations[observation_indx++] = env->score;
 
 }
 
@@ -563,6 +557,10 @@ void reset(CGo* env) {
         env->temp_board_states[i] = 0;
         env->visited[i] = 0;
         env->previous_board_state[i] = 0;
+        env->groups[i].parent = i;
+        env->groups[i].rank = 0;
+        env->groups[i].size = 0;
+        env->groups[i].liberties = 0;
     }
     env->capture_count[0] = 0;
     env->capture_count[1] = 0;
@@ -594,12 +592,12 @@ void step(CGo* env) {
     env->rewards[0] = 0.0;
     int action = (int)env->actions[0];
 
-    // if (env->log.episode_length > 100) {
-    //     env->dones[0] = 1;
-    //     end_game(env);
-    //     compute_observations(env);
-    //     return;
-    // }
+    if (env->log.episode_length > 100) {
+        env->dones[0] = 1;
+        end_game(env);
+        compute_observations(env);
+        return;
+    }
 
     if(action == NOOP){
         env->rewards[0] -= 0.25;
