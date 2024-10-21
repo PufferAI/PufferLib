@@ -5,12 +5,6 @@
 #include "raylib.h"
 
 #define WIN_CONDITION 4
-
-const Color PUFF_RED = (Color){187, 0, 0, 255};
-const Color PUFF_CYAN = (Color){0, 187, 187, 255};
-const Color PUFF_WHITE = (Color){241, 241, 241, 241};
-const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
-
 const int PLAYER_WIN = 1.0;
 const int ENV_WIN = -1.0;
 const unsigned char DONE = 1;
@@ -22,8 +16,6 @@ const float MAX_VALUE = 31;
 const float WIN_VALUE = 30;
 const float DRAW_VALUE = 0;
 
-#define LOG_BUFFER_SIZE 1024
-
 typedef struct Log Log;
 struct Log {
     float episode_return;
@@ -31,6 +23,7 @@ struct Log {
     float score;
 };
 
+#define LOG_BUFFER_SIZE 1024
 typedef struct LogBuffer LogBuffer;
 struct LogBuffer {
     Log* logs;
@@ -119,24 +112,18 @@ void free_allocated_cconnect4(CConnect4* env) {
     free_cconnect4(env);
 }
 
+// Get the bit at the top of 'column'. Column can be played if bit is 0
 uint64_t top_mask(uint64_t column) {
-    // Get the bit at the top of 'column'. If the bit is 0 the column can be
-    //  played.
     return (UINT64_C(1) << (ROWS - 1)) << column * (ROWS + 1);
 }
 
+// Get a bit mask for where a piece played at 'column' would end up.
 uint64_t bottom_mask(uint64_t column) {
-    // Get a bit mask for where a piece played at 'column' would end up.
     return UINT64_C(1) << column * (ROWS + 1);
 }
 
-uint64_t mask(uint64_t pieces, uint64_t other_pieces) {
-    // Create a piece mask containing both 'pieces' and 'other_pieces'.
-    return pieces | other_pieces;
-}
-
+// A bit mask used to create unique representation of the game state.
 uint64_t bottom() {
-    // A bit mask used to create unique representation of the game state.
     return UINT64_C(1) << (COLUMNS - 1) * (ROWS + 1);
 }
 
@@ -145,18 +132,17 @@ bool invalid_move(int column, uint64_t mask) {
 }
 
 uint64_t play(int column, uint64_t mask,  uint64_t other_pieces) {
-    mask |= mask + bottom_mask(column);
+    mask |= mask + bottom_mask(column); // Somehow faster than |= bottom_mask(column)
     return other_pieces ^ mask;
 }
 
+// A full board has this specifc value
 bool draw(uint64_t mask) {
-    // A full board has this specifc value
     return mask == 4432406249472;
 }
 
+// Determine if 'pieces' contains at least one line of connected pieces.
 bool won(uint64_t pieces) {
-    // Determine if 'pieces' contains at least one line of connected pieces.
-
     // Horizontal 
     uint64_t m = pieces & (pieces >> (ROWS + 1));
     if(m & (m >> (2 * (ROWS + 1)))) {
@@ -184,15 +170,14 @@ bool won(uint64_t pieces) {
     return false;
 }
 
+// https://en.wikipedia.org/wiki/Negamax#Negamax_variant_with_no_color_parameter
 float negamax(uint64_t pieces, uint64_t other_pieces, int depth) {
-    // https://en.wikipedia.org/wiki/Negamax#Negamax_variant_with_no_color_parameter
-    uint64_t piece_mask = mask(pieces, other_pieces);
-    
-    bool opp_won = won(other_pieces);
-    if (depth == 0 || opp_won || draw(piece_mask)) {
-        if (opp_won) {
-            return -WIN_VALUE;
-        }
+    uint64_t piece_mask = pieces | other_pieces;
+    if (won(other_pieces)) {
+        return -WIN_VALUE;
+    }
+
+    if (depth == 0 || draw(piece_mask)) {
         // Break ties between non-terminal states
         return (float) (rand() % 10);
     }
@@ -209,9 +194,7 @@ float negamax(uint64_t pieces, uint64_t other_pieces, int depth) {
 }
 
 int compute_env_move(CConnect4* env) {
-    uint64_t piece_mask = mask(env->player_pieces, env->env_pieces);
-    
-    // Compute a unique hash for this game state
+    uint64_t piece_mask = env->player_pieces | env->env_pieces;
     uint64_t hash = env->player_pieces + piece_mask + bottom();
 
     // Hard coded opening book to handle some early game traps
@@ -227,7 +210,6 @@ int compute_env_move(CConnect4* env) {
             return 3;
     }
 
-    // https://en.wikipedia.org/wiki/Negamax#Negamax_variant_with_no_color_parameter
     uint64_t best_column = 0;
     float best_value = -MAX_VALUE;
     for (uint64_t column = 0; column < 7; column ++) {
@@ -246,9 +228,8 @@ int compute_env_move(CConnect4* env) {
 }
 
 void compute_observation(CConnect4* env) {
-    // Use the bitstring representation of the game state to populate
-    //  the observations vector.
-    // Details: http://blog.gamesolver.org/solving-connect-four/06-bitboard/
+    // Populate observations from bitstring game representation
+    // http://blog.gamesolver.org/solving-connect-four/06-bitboard/
     uint64_t player_pieces = env->player_pieces;
     uint64_t env_pieces = env->env_pieces;
 
@@ -290,8 +271,6 @@ void finish_game(CConnect4* env, float reward) {
 }
 
 void step(CConnect4* env) {
-    uint64_t column, piece_mask;
-
     env->log.episode_length += 1;
     env->rewards[0] = 0.0;
 
@@ -302,16 +281,14 @@ void step(CConnect4* env) {
     }
 
     // Player action (PLAYER_WIN)
-    column = env->actions[0];
-
-    piece_mask = mask(env->player_pieces, env->env_pieces);
+    uint64_t column = env->actions[0];
+    uint64_t piece_mask = env->player_pieces | env->env_pieces;
     if (invalid_move(column, piece_mask)) {
         finish_game(env, ENV_WIN);
         return;
     }
 
     env->player_pieces = play(column, piece_mask, env->env_pieces);
-
     if (won(env->player_pieces)) {
         finish_game(env, PLAYER_WIN);
         return;
@@ -319,15 +296,13 @@ void step(CConnect4* env) {
 
     // Environment action (ENV_WIN)
     column = compute_env_move(env);
-
-    piece_mask = mask(env->player_pieces, env->env_pieces);
+    piece_mask = env->player_pieces | env->env_pieces;
     if (invalid_move(column, piece_mask)) {
         finish_game(env, PLAYER_WIN);
         return;
     }
 
     env->env_pieces = play(column, piece_mask, env->player_pieces);
-
     if (won(env->env_pieces)) {
         finish_game(env, ENV_WIN);
         return;
@@ -335,6 +310,11 @@ void step(CConnect4* env) {
 
     compute_observation(env);
 }
+
+const Color PUFF_RED = (Color){187, 0, 0, 255};
+const Color PUFF_CYAN = (Color){0, 187, 187, 255};
+const Color PUFF_WHITE = (Color){241, 241, 241, 241};
+const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
 
 typedef struct Client Client;
 struct Client {
@@ -349,7 +329,7 @@ Client* make_client(int width, int height) {
     client->height = height;
 
     InitWindow(width, height, "PufferLib Ray Connect4");
-    SetTargetFPS(15);
+    SetTargetFPS(60);
 
     client->puffers = LoadTexture("resources/puffers_128.png");
     return client;
@@ -387,14 +367,15 @@ void render(Client* client, CConnect4* env) {
             piece_color = PUFF_RED;
             color_idx = 2;
         }
-        obs_idx += 1;
 
+        obs_idx += 1;
         Color board_color = (Color){0, 80, 80, 255};
         DrawRectangle(x , y , env->piece_width, env->piece_width, board_color);
         DrawCircle(x + env->piece_width/2, y + env->piece_width/2, env->piece_width/2, piece_color);
         if (color_idx == 0) {
             continue;
         }
+
         DrawTexturePro(
             client->puffers,
             (Rectangle){

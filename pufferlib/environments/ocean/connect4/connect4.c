@@ -49,6 +49,8 @@ void interactive() {
 
         render(client, &env);
     }
+    free_default(net);
+    free(weights);
     close_client(client);
     free_allocated_cconnect4(&env);
 }

@@ -24,8 +24,8 @@ cdef extern from "connect4.h":
         LogBuffer* log_buffer;
         Log log;
 
-        uint64_t player_position;
-        uint64_t env_position;
+        uint64_t player_pieces;
+        uint64_t env_pieces;
 
         int piece_width;
         int piece_height;
@@ -33,9 +33,7 @@ cdef extern from "connect4.h":
         int height;
 
     ctypedef struct Client
-
     void free_cconnect4(CConnect4* env)
-
     Client* make_client(float width, float height)
     void close_client(Client* client)
     void render(Client* client, CConnect4* env)
@@ -76,8 +74,8 @@ cdef class CyConnect4:
                 rewards = <float*> rewards_i.data,
                 dones = <unsigned char*> terminals_i.data,
                 log_buffer=self.logs,
-                player_position=0,
-                env_position=0,
+                player_pieces=0,
+                env_pieces=0,
                 piece_width=piece_width,
                 piece_height=piece_height,
                 width=width,
