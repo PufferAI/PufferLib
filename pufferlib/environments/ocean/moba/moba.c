@@ -22,16 +22,17 @@ struct MOBANet {
 
 MOBANet* init_mobanet(Weights* weights, int num_agents) {
     MOBANet* net = calloc(1, sizeof(MOBANet));
+    int hidden = 128;
     net->num_agents = num_agents;
     net->obs_2d = calloc(num_agents*11*11*19, sizeof(float));
     net->obs_1d = calloc(num_agents*26, sizeof(float));
-    net->conv1 = make_conv2d(weights, num_agents, 11, 11, 19, 32, 5, 3);
-    net->relu1 = make_relu(num_agents, 32*3*3);
-    net->conv2 = make_conv2d(weights, num_agents, 3, 3, 32, 32, 3, 1);
-    net->flat = make_linear(weights, num_agents, 26, 32);
-    net->cat = make_cat_dim1(num_agents, 32, 32);
-    net->relu2 = make_relu(num_agents, 64);
-    net->proj = make_linear(weights, num_agents, 64, 128);
+    net->conv1 = make_conv2d(weights, num_agents, 11, 11, 19, hidden, 5, 3);
+    net->relu1 = make_relu(num_agents, hidden*3*3);
+    net->conv2 = make_conv2d(weights, num_agents, 3, 3, hidden, hidden, 3, 1);
+    net->flat = make_linear(weights, num_agents, 26, hidden);
+    net->cat = make_cat_dim1(num_agents, hidden, hidden);
+    net->relu2 = make_relu(num_agents, 2*hidden);
+    net->proj = make_linear(weights, num_agents, 2*hidden, 128);
     net->relu3 = make_relu(num_agents, 128);
     net->actor = make_linear(weights, num_agents, 128, 23);
     net->value_fn = make_linear(weights, num_agents, 128, 1);
@@ -42,13 +43,21 @@ MOBANet* init_mobanet(Weights* weights, int num_agents) {
 }
 
 void free_mobanet(MOBANet* net) {
+    free(net->obs_2d);
+    free(net->obs_1d);
     free(net->conv1);
     free(net->relu1);
     free(net->conv2);
     free(net->flat);
+    free(net->cat);
+    free(net->relu2);
     free(net->proj);
+    free(net->relu3);
     free(net->actor);
     free(net->value_fn);
+    free(net->lstm);
+    free(net->multidiscrete);
+    free(net);
 }
 
 void forward(MOBANet* net, unsigned char* observations, int* actions) {
@@ -96,7 +105,7 @@ void forward(MOBANet* net, unsigned char* observations, int* actions) {
 }
 
 void demo() {
-    Weights* weights = load_weights("resources/moba/moba_weights.bin", 168856);
+    Weights* weights = load_weights("resources/moba/moba_weights.bin", 380056);
     MOBANet* net = init_mobanet(weights, 10);
 
     MOBA env = {
@@ -159,7 +168,40 @@ void test_performance(float test_time) {
     printf("SPS: %f\n", 10.0f*i / (end - start));
 }
 
+void test_bugs(float test_time) {
+    Weights* weights = load_weights("resources/moba/moba_weights.bin", 380056);
+    MOBANet* net = init_mobanet(weights, 10);
+
+    MOBA env = {
+        .vision_range = 5,
+        .agent_speed = 1.0,
+        .discretize = true,
+        .reward_death = -1.0,
+        .reward_xp = 0.006,
+        .reward_distance = 0.05,
+        .reward_tower = 3.0,
+    };
+    allocate_moba(&env);
+
+    reset(&env);
+    int start = time(NULL);
+    int i = 0;
+    while (time(NULL) - start < test_time) {
+        step(&env);
+        forward(net, env.observations, env.actions);
+        i++;
+    }
+    int end = time(NULL);
+    printf("SPS: %f\n", 10.0f*i / (end - start));
+    printf("Frames: %i\n", i);
+    free_mobanet(net);
+    free(weights);
+    free_allocated_moba(&env);
+}
+
+
 int main() {
+    //test_bugs(2.0f);
     demo();
     //test_performance(30.0f);
     return 0;

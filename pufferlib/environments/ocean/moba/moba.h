@@ -202,6 +202,10 @@ Log aggregate_and_clear(LogBuffer* logs) {
             aggregated[j]->damage_received += individual[j]->damage_received / logs->idx;
             aggregated[j]->healing_dealt += individual[j]->healing_dealt / logs->idx;
             aggregated[j]->healing_received += individual[j]->healing_received / logs->idx;
+            aggregated[j]->creeps_killed += individual[j]->creeps_killed / logs->idx;
+            aggregated[j]->neutrals_killed += individual[j]->neutrals_killed / logs->idx;
+            aggregated[j]->towers_killed += individual[j]->towers_killed / logs->idx;
+            aggregated[j]->usage_auto += individual[j]->usage_auto / logs->idx;
             aggregated[j]->usage_q += individual[j]->usage_q / logs->idx;
             aggregated[j]->usage_w += individual[j]->usage_w / logs->idx;
             aggregated[j]->usage_e += individual[j]->usage_e / logs->idx;
@@ -433,20 +437,23 @@ struct MOBA {
 };
 
 void free_moba(MOBA* env) {
+    free(env->reward_components);
     free(env->map->grid);
     free(env->map);
     free(env->rng->rng);
     free(env->rng);
-    free(env);
 }
 
 void free_allocated_moba(MOBA* env) {
+    free_logbuffer(env->log_buffer);
     free(env->rewards);
     free(env->map->pids);
     free(env->ai_path_buffer);
     free(env->ai_paths);
     free(env->observations);
     free(env->actions);
+    free(env->terminals);
+    free(env->truncations);
     free(env->entities);
     free_moba(env);
 }
@@ -507,7 +514,6 @@ void compute_observations(MOBA* env) {
                 obs_map[ob_y][ob_x][0] = tile;
                 if (tile > 15) {
                     printf("Invalid map value: %i at %i, %i\n", map->grid[adr], yy, xx);
-                    exit(1);
                 }
                 int target_pid = env->map->pids[adr];
                 if (target_pid == -1)
@@ -691,6 +697,7 @@ int attack(MOBA* env, Entity* player, Entity* target, float damage) {
     int target_type = target->entity_type;
     if (target_type == ENTITY_PLAYER) {
         env->reward_components[target->pid].death = env->reward_death;
+        target_log->reward_death = env->reward_death;
         player_log->kills += 1;
         target_log->deaths += 1;
         spawn_player(env->map, target);
@@ -750,8 +757,11 @@ int attack(MOBA* env, Entity* player, Entity* target, float damage) {
 
         int level = ally->level;
         ally->level = calc_level(env, ally->xp);
-        if (ally->level > level)
+        if (ally->level > level) {
+            PlayerLog* ally_log = &env->log[ally->pid];
+            ally_log->level = ally->level;
             env->total_levels_gained += 1;
+        }
 
         ally->max_health = ally->base_health + ally->level*ally->hp_gain_per_level;
         ally->max_mana = ally->base_mana + ally->level*ally->mana_gain_per_level;
@@ -1478,6 +1488,11 @@ void step_players(MOBA* env) {
             reward->distance +
             reward->tower
         );
+        env->log[pid].reward_death = reward->death;
+        env->log[pid].reward_xp = reward->xp;
+        env->log[pid].reward_distance = reward->distance;
+        env->log[pid].reward_tower = reward->tower;
+        env->log[pid].episode_return += env->rewards[pid];
     }
 }
 
@@ -1722,6 +1737,7 @@ MOBA* allocate_moba(MOBA* env) {
     }
 
     init_moba(env, game_map_npy);
+    free(game_map_npy);
     return env;
 }
  
@@ -1756,6 +1772,7 @@ void reset(MOBA* env) {
 
     // Respawn agents
     for (int i = 0; i < NUM_AGENTS; i++) {
+        env->log[i] = (PlayerLog){0};
         Entity* player = &env->entities[i];
         player->target_pid = -1;
         player->xp = 0;

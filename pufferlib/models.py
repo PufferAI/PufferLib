@@ -23,6 +23,7 @@ class Default(nn.Module):
     '''
     def __init__(self, env, hidden_size=128):
         super().__init__()
+        self.hidden_size = hidden_size
         self.is_multidiscrete = isinstance(env.single_action_space,
                 pufferlib.spaces.MultiDiscrete)
         self.is_continuous = isinstance(env.single_action_space,

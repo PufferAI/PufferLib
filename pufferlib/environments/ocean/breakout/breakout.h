@@ -9,6 +9,7 @@
 #define RIGHT 3
 #define HALF_MAX_SCORE 432
 #define MAX_SCORE 864
+#define MAX_BALL_SPEED 448
 #define HALF_PADDLE_WIDTH 31
 #define Y_OFFSET 50
 #define TICK_RATE 1.0f/60.0f
@@ -102,6 +103,7 @@ struct Breakout {
     int brick_height;
     int num_balls;
     int frameskip;
+    unsigned char hit_brick;
 };
 
 void generate_brick_positions(Breakout* env) {
@@ -184,24 +186,28 @@ bool handle_paddle_ball_collisions(Breakout* env) {
     }
 
     // Check for collision
-    if (check_collision_discrete(env->paddle_x, env->paddle_y,
+    if (!check_collision_discrete(env->paddle_x, env->paddle_y,
             env->paddle_width, env->paddle_height, env->ball_x,
             env->ball_y, env->ball_width, env->ball_height)) {
-        float relative_intersection = ((env->ball_x +
-            env->ball_width / 2) - env->paddle_x) / env->paddle_width;
-        float angle = -base_angle + relative_intersection * 2 * base_angle;
-        env->ball_vx = sin(angle) * env->ball_speed * TICK_RATE;
-        env->ball_vy = -cos(angle) * env->ball_speed * TICK_RATE;
-        env->hits += 1;
-        if (env->hits % 4 == 0 && env->hits <= 12) {
-            env->ball_speed += 64;
-        }
-        if (env->score == HALF_MAX_SCORE) {
-            env->brick_states[0] = 0.0;
-        }
-        return true;
+        return false;
     }
-    return false;
+
+    env->hit_brick = false;
+    float relative_intersection = ((env->ball_x +
+        env->ball_width / 2) - env->paddle_x) / env->paddle_width;
+    float angle = -base_angle + relative_intersection * 2 * base_angle;
+    env->ball_vx = sin(angle) * env->ball_speed * TICK_RATE;
+    env->ball_vy = -cos(angle) * env->ball_speed * TICK_RATE;
+    env->hits += 1;
+    if (env->hits % 4 == 0  && env->ball_speed < MAX_BALL_SPEED) {
+        env->ball_speed += 64;
+    }
+    if (env->score == HALF_MAX_SCORE) {
+        for (int i = 0; i < env->num_bricks; i++) {
+            env->brick_states[i] = 0.0;
+        }
+    }
+    return true;
 }
 
 bool handle_wall_ball_collisions(Breakout* env) {
@@ -248,40 +254,31 @@ bool handle_brick_ball_collisions(Breakout* env) {
         if (env->brick_states[brick_idx] == 1.0) {
             continue;
         }
-        if (check_collision_discrete(env->brick_x[brick_idx],
+
+        if (!check_collision_discrete(env->brick_x[brick_idx],
                 env->brick_y[brick_idx], env->brick_width, env->brick_height,
                 env->ball_x, env->ball_y, env->ball_width, env->ball_height)) {
-            env->brick_states[brick_idx] = 1.0;
-            float score = 7 - 3 * (brick_idx / env->brick_cols / 2);
-            env->rewards[0] += 1.0;
-            env->log.episode_return += 1.0;
-            env->score += score;
-
-            // Determine collision direction
-            if (env->ball_y + env->ball_height <= env->brick_y[brick_idx] + (env->brick_height / 2)) {
-                // Hit was from below the brick
-                env->ball_vy *= -1;
-                return true;
-            } else if (env->ball_y >= env->brick_y[brick_idx] + (env->brick_height / 2)) {
-                // Hit was from above the brick
-                env->ball_vy *= -1;
-                return true;
-            } else if (env->ball_x + env->ball_width <= env->brick_x[brick_idx] + (env->brick_width / 2)) {
-                // Hit was from the left
-                env->ball_vx *= -1;
-                return true;
-            } else if (env->ball_x >= env->brick_x[brick_idx] + (env->brick_width / 2)) {
-                // Hit was from the right
-                env->ball_vx *= -1;
-                return true;
-            }
+            continue;
         }
+
+        env->score += 7 - 3 * (brick_idx / env->brick_cols / 2);
+        env->brick_states[brick_idx] = 1.0;
+        env->log.episode_return += 1.0;
+        env->rewards[0] += 1.0;
+
+        if (brick_idx / env->brick_cols < 3) {
+            env->ball_speed = MAX_BALL_SPEED;
+        }
+
+        env->ball_vy *= -1;
+        return true;
     }
     return false;
 }
 
 void reset_round(Breakout* env) {
     env->balls_fired = 0;
+    env->hit_brick = false;
     env->hits = 0;
     env->ball_speed = 256;
     env->paddle_width = 2 * HALF_PADDLE_WIDTH;
@@ -306,50 +303,55 @@ void reset(Breakout* env) {
     compute_observations(env);
 }
 
+void step_frame(Breakout* env, int action) {
+    if (action == FIRE && env->balls_fired == 0) {
+        env->balls_fired = 1;
+        float direction = M_PI / 3.25f;
+
+        env->ball_vy = cos(direction) * env->ball_speed * TICK_RATE;
+        env->ball_vx = sin(direction) * env->ball_speed * TICK_RATE;
+        if (rand() % 2 == 0) {
+            env->ball_vx = -env->ball_vx;
+        }
+    } else if (action == LEFT) {
+        env->paddle_x -= 620 * TICK_RATE;
+        env->paddle_x = fmaxf(0, env->paddle_x);
+    } else if (action == RIGHT) {
+        env->paddle_x += 620 * TICK_RATE;
+        env->paddle_x = fminf(env->width - env->paddle_width, env->paddle_x);
+    }
+
+    if (!env->hit_brick) {
+        handle_brick_ball_collisions(env);
+    }
+    handle_paddle_ball_collisions(env);
+    handle_wall_ball_collisions(env);
+
+    env->ball_x += env->ball_vx;
+    env->ball_y += env->ball_vy;
+
+    if (env->ball_y >= env->paddle_y + env->paddle_height) {
+        env->num_balls -= 1;
+        reset_round(env);
+    }
+    if (env->num_balls < 0 || env->score == MAX_SCORE) {
+        env->dones[0] = 1;
+        env->log.score = env->score;
+        add_log(env->log_buffer, &env->log);
+        reset(env);
+    }
+}
+
 void step(Breakout* env) {
     env->dones[0] = 0;
     env->log.episode_length += 1;
     env->rewards[0] = 0.0;
+
     int action = env->actions[0];
-
     for (int i = 0; i < env->frameskip; i++) {
-        if (action == FIRE && env->balls_fired == 0) {
-            env->balls_fired = 1;
-            float direction = M_PI / 3.25f;
-
-            if (rand() % 2 == 0) {
-                env->ball_vx = sin(direction) * env->ball_speed * TICK_RATE;
-                env->ball_vy = cos(direction) * env->ball_speed * TICK_RATE;
-            } else {
-                env->ball_vx = -sin(direction) * env->ball_speed * TICK_RATE;
-                env->ball_vy = cos(direction) * env->ball_speed * TICK_RATE;
-            }
-        } else if (action == LEFT) {
-            env->paddle_x -= 620 * TICK_RATE;
-            env->paddle_x = fmaxf(0, env->paddle_x);
-        } else if (action == RIGHT) {
-            env->paddle_x += 620 * TICK_RATE;
-            env->paddle_x = fminf(env->width - env->paddle_width, env->paddle_x);
-        }
-
-        handle_brick_ball_collisions(env);
-        handle_paddle_ball_collisions(env);
-        handle_wall_ball_collisions(env);
-
-        env->ball_x += env->ball_vx;
-        env->ball_y += env->ball_vy;
-
-        if (env->ball_y >= env->paddle_y + env->paddle_height) {
-            env->num_balls -= 1;
-            reset_round(env);
-        }
-        if (env->num_balls < 0 || env->score == MAX_SCORE) {
-            env->dones[0] = 1;
-            env->log.score = env->score;
-            add_log(env->log_buffer, &env->log);
-            reset(env);
-        }
+        step_frame(env, action);
     }
+
     compute_observations(env);
 }
 
@@ -380,6 +382,9 @@ Client* make_client(Breakout* env) {
 void render(Client* client, Breakout* env) {
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
+    }
+    if (IsKeyPressed(KEY_TAB)) {
+        ToggleFullscreen();
     }
 
     BeginDrawing();
