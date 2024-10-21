@@ -461,7 +461,7 @@ int make_move(CGo* env, int pos, int player){
 }
 
 
-void play_random_move(CGo* env){
+void enemy_random_move(CGo* env){
     int num_positions = (env->grid_size+1)*(env->grid_size+1);
     int positions[num_positions];
     int count = 0;
@@ -519,7 +519,43 @@ int find_group_liberty(CGo* env, int root){
     return -1; // Should not happen if liberties > 0
 }
 
-void enemy_move(CGo* env){
+void enemy_greedy_hard(CGo* env){
+	// Attempt to capture opponent stones in atari
+    int liberties[4][(env->grid_size+1) * (env->grid_size+1)];
+    int liberty_counts[4] = {0};
+    for(int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++){
+	if(env->board_states[i]==0){
+            continue;
+        }
+        if (env->board_states[i]==1){
+            int root = find(env->groups, i);
+            int group_liberties = env->groups[root].liberties;
+            if (group_liberties >= 1 && group_liberties <= 4) {
+                int liberty = find_group_liberty(env, root);
+                liberties[group_liberties - 1][liberty_counts[group_liberties - 1]++] = liberty;
+            }
+        } else if (env->board_states[i]==2){
+            int root = find(env->groups, i);
+            int group_liberties = env->groups[root].liberties;
+            if (group_liberties==1) {
+                int liberty = find_group_liberty(env, root);
+                liberties[group_liberties - 1][liberty_counts[group_liberties - 1]++] = liberty;
+            }
+        }
+    }
+    // make move to attack or defend
+    for (int priority = 0; priority < 4; priority++) {
+        for (int i = 0; i < liberty_counts[priority]; i++) {
+            if (make_move(env, liberties[priority][i], 2)) {
+                return;
+            }
+        }
+    }
+    // Play a random legal move
+    enemy_random_move(env);
+}
+
+void enemy_greedy_easy(CGo* env){
     // Attempt to capture opponent stones in atari
     for(int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++){
         if(env->board_states[i] == 1){ // Opponent stones from enemy's perspective
@@ -544,8 +580,9 @@ void enemy_move(CGo* env){
             }
         }
     }
+    
     // Play a random legal move
-    play_random_move(env);
+    enemy_random_move(env);
 }
 
 void reset(CGo* env) {
@@ -592,17 +629,19 @@ void step(CGo* env) {
     env->rewards[0] = 0.0;
     int action = (int)env->actions[0];
 
-    if (env->log.episode_length > 100) {
+    // useful for training , can prob be a hyper param. Recommend to increase with larger board size
+    /*if (env->log.episode_length >150) {
         env->dones[0] = 1;
         end_game(env);
         compute_observations(env);
         return;
-    }
+    }*/
+    
 
     if(action == NOOP){
-        env->rewards[0] -= 0.25;
+        env->rewards[0] -= 0.25;;
         env->log.episode_return -= 0.25;
-        enemy_move(env);
+        enemy_greedy_hard(env);
         if (env->dones[0] == 1) {
             end_game(env);
             return;
@@ -616,7 +655,7 @@ void step(CGo* env) {
             env->moves_made++;
             env->rewards[0] += 0.1;
             env->log.episode_return += 0.1;
-            enemy_move(env);
+            enemy_greedy_hard(env);
 
         } else {
             env->rewards[0] -= 0.1;

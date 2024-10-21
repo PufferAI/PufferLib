@@ -14,9 +14,9 @@ from pufferlib.environments.ocean.go.cy_go import CyGo
 class MyGo(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=1,
             width=1200, height=800,
-            grid_size=9,
+            grid_size=6,
             board_width=600, board_height=600,
-            grid_square_size=600/9,
+            grid_square_size=600/6,
             moves_made=0,
             komi=7.5,
             score = 0.0,
@@ -28,7 +28,7 @@ class MyGo(pufferlib.PufferEnv):
         self.render_mode = render_mode
         self.report_interval = report_interval
         
-        self.num_obs = (grid_size+1) * (grid_size+1)*2 + 2
+        self.num_obs = (grid_size+1) * (grid_size+1)*2 + 3
         self.num_act = (grid_size+1) * (grid_size+1) + 1
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(self.num_obs,), dtype=np.float32)
