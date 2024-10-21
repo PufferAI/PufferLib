@@ -172,7 +172,7 @@ void init(CGo* env) {
 
 void allocate(CGo* env) {
     init(env);
-    env->observations = (float*)calloc((env->grid_size+1)*(env->grid_size+1)*2, sizeof(float));
+    env->observations = (float*)calloc((env->grid_size+1)*(env->grid_size+1)*2 + 3, sizeof(float));
     env->actions = (unsigned short*)calloc(1, sizeof(unsigned short));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
@@ -188,6 +188,7 @@ void free_initialized(CGo* env) {
     free(env->temp_board_states);
     free(env->capture_count);
     free(env->temp_groups);
+    free(env->groups);
 }
 
 void free_allocated(CGo* env) {
@@ -630,12 +631,12 @@ void step(CGo* env) {
     int action = (int)env->actions[0];
 
     // useful for training , can prob be a hyper param. Recommend to increase with larger board size
-    if (env->log.episode_length >150) {
-        env->dones[0] = 1;
-        end_game(env);
-        compute_observations(env);
-        return;
-    }
+    // if (env->log.episode_length >150) {
+    //     env->dones[0] = 1;
+    //     end_game(env);
+    //     compute_observations(env);
+    //     return;
+    // }
     
 
     if(action == NOOP){
