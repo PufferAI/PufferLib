@@ -1,6 +1,7 @@
+#include <time.h>
 #include "go.h"
 
-int main() {
+void demo() {
     CGo env = {
         .width = 1000,
         .height = 800,
@@ -47,6 +48,37 @@ int main() {
     }
     close_client(client);
     free_allocated(&env);
-    return 0;
 }
 
+void performance_test() {
+    long test_time = 10;
+    CGo env = {
+        .width = 1000,
+        .height = 800,
+        .grid_size = 9,
+        .board_width = 600,
+        .board_height = 600,
+        .grid_square_size = 600/9,
+        .moves_made = 0,
+        .komi = 7.5
+    };
+    allocate(&env);
+    reset(&env);
+
+    long start = time(NULL);
+    int i = 0;
+    while (time(NULL) - start < test_time) {
+        env.actions[0] = rand() % (env.grid_size+1)*(env.grid_size+1);
+        step(&env);
+        i++;
+    }
+    long end = time(NULL);
+    printf("SPS: %ld\n", i / (end - start));
+    free_allocated(&env);
+}
+
+int main() {
+    demo();
+    //performance_test();
+    return 0;
+}

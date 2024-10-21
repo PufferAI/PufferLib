@@ -196,6 +196,7 @@ void free_allocated(CGo* env) {
     free(env->observations);
     free(env->dones);
     free(env->rewards);
+    free_logbuffer(env->log_buffer);
     free_initialized(env);
 }
 
@@ -212,9 +213,7 @@ void compute_observations(CGo* env) {
 }
 
 void reset_visited(CGo* env) {
-    for (int i = 0; i < (env->grid_size + 1) * (env->grid_size + 1); i++) {
-        env->visited[i] = 0;
-    }
+    memset(env->visited, 0, sizeof(int) * (env->grid_size + 1) * (env->grid_size + 1));
 }
 
 void flood_fill(CGo* env, int x, int y, int* territory, int player) {
@@ -287,7 +286,7 @@ void compute_score_tromp_taylor(CGo* env) {
 
 void capture_group(CGo* env, int* board, int root, int* affected_groups, int* affected_count) {
     // Reset visited array
-    memset(env->visited, 0, sizeof(int) * (env->grid_size + 1) * (env->grid_size + 1));
+    reset_visited(env);
 
     // Use a queue for BFS
     int queue_size = (env->grid_size + 1) * (env->grid_size + 1);
@@ -341,15 +340,14 @@ void capture_group(CGo* env, int* board, int root, int* affected_groups, int* af
 }
 
 
-int count_liberties(CGo* env, int root) {
+int count_liberties(CGo* env, int root, int* queue) {
     reset_visited(env);
     int liberties = 0;
-    int queue[(env->grid_size + 1) * (env->grid_size + 1)];
-    int front = 0, rear = 0;
+    int front = 0;
+    int rear = 0;
     
     queue[rear++] = root;
     env->visited[root] = 1;
-    
     while (front < rear) {
         int pos = queue[front++];
         int x = pos % (env->grid_size + 1);
@@ -358,24 +356,25 @@ int count_liberties(CGo* env, int root) {
         for (int i = 0; i < 4; i++) {
             int nx = x + DIRECTIONS[i][0];
             int ny = y + DIRECTIONS[i][1];
-            int npos = ny * (env->grid_size + 1) + nx;
-            
             if (nx < 0 || nx >= env->grid_size + 1 || ny < 0 || ny >= env->grid_size + 1) {
                 continue;
             }
             
-            if (env->temp_board_states[npos] == 0) {
-                if (!env->visited[npos]) {
-                    liberties++;
-                    env->visited[npos] = 1;
-                }
-            } else if (env->temp_board_states[npos] == env->temp_board_states[root] && !env->visited[npos]) {
+            int npos = ny * (env->grid_size + 1) + nx;
+            if (env->visited[npos]) {
+                continue;
+            }
+
+            int temp_npos = env->temp_board_states[npos];
+            if (temp_npos == 0) {
+                liberties++;
+                env->visited[npos] = 1;
+            } else if (temp_npos == env->temp_board_states[root]) {
                 queue[rear++] = npos;
                 env->visited[npos] = 1;
             }
         }
     }
-    
     return liberties;
 }
 
@@ -397,9 +396,11 @@ int make_move(CGo* env, int pos, int player){
     env->temp_groups[pos].liberties = 0;
     
     int max_affected_groups = (env->grid_size + 1) * (env->grid_size + 1);
-    int* affected_groups = (int*)malloc(sizeof(int) * max_affected_groups);
+    int affected_groups[max_affected_groups];
     int affected_count = 0;
     affected_groups[affected_count++] = pos;
+
+    int queue[(env->grid_size + 1) * (env->grid_size + 1)];
 
     // Perform unions and track affected groups
     for (int i = 0; i < 4; i++) {
@@ -420,7 +421,7 @@ int make_move(CGo* env, int pos, int player){
     // Recalculate liberties only for affected groups
     for (int i = 0; i < affected_count; i++) {
         int root = find(env->temp_groups, affected_groups[i]);
-        env->temp_groups[root].liberties = count_liberties(env, root);
+        env->temp_groups[root].liberties = count_liberties(env, root, queue);
     }
 
     // Check for captures
@@ -436,7 +437,7 @@ int make_move(CGo* env, int pos, int player){
     if (captured) {
         for (int i = 0; i < affected_count; i++) {
             int root = find(env->temp_groups, affected_groups[i]);
-            env->temp_groups[root].liberties = count_liberties(env, root);
+            env->temp_groups[root].liberties = count_liberties(env, root, queue);
         }
         // Check for ko rule violation
         bool is_ko = true;
