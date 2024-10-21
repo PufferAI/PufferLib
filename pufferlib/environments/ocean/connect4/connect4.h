@@ -188,8 +188,9 @@ float negamax(uint64_t pieces, uint64_t other_pieces, int depth) {
     // https://en.wikipedia.org/wiki/Negamax#Negamax_variant_with_no_color_parameter
     uint64_t piece_mask = mask(pieces, other_pieces);
     
-    if (depth == 0 || won(other_pieces) || draw(piece_mask)) {
-        if (won(other_pieces)) {
+    bool opp_won = won(other_pieces);
+    if (depth == 0 || opp_won || draw(piece_mask)) {
+        if (opp_won) {
             return -WIN_VALUE;
         }
         // Break ties between non-terminal states
@@ -201,8 +202,8 @@ float negamax(uint64_t pieces, uint64_t other_pieces, int depth) {
         if (invalid_move(column, piece_mask)) {
             continue;
         }
-        uint64_t child_position = play(column, piece_mask, other_pieces);
-        value = fmax(value, -negamax(other_pieces, child_position, depth - 1));
+        uint64_t child_pieces = play(column, piece_mask, other_pieces);
+        value = fmax(value, -negamax(other_pieces, child_pieces, depth - 1));
     }
     return value;
 }
