@@ -630,18 +630,18 @@ void step(CGo* env) {
     int action = (int)env->actions[0];
 
     // useful for training , can prob be a hyper param. Recommend to increase with larger board size
-    /*if (env->log.episode_length >150) {
+    if (env->log.episode_length >150) {
         env->dones[0] = 1;
         end_game(env);
         compute_observations(env);
         return;
-    }*/
+    }
     
 
     if(action == NOOP){
         env->rewards[0] -= 0.25;;
         env->log.episode_return -= 0.25;
-        enemy_greedy_hard(env);
+        enemy_greedy_easy(env);
         if (env->dones[0] == 1) {
             end_game(env);
             return;
@@ -655,7 +655,7 @@ void step(CGo* env) {
             env->moves_made++;
             env->rewards[0] += 0.1;
             env->log.episode_return += 0.1;
-            enemy_greedy_hard(env);
+            enemy_greedy_easy(env);
 
         } else {
             env->rewards[0] -= 0.1;
