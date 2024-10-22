@@ -174,21 +174,23 @@ bool won(uint64_t pieces) {
 float negamax(uint64_t pieces, uint64_t other_pieces, int depth) {
     uint64_t piece_mask = pieces | other_pieces;
     if (won(other_pieces)) {
-        return -WIN_VALUE;
+        return pow(10, depth);
+    }
+    if (won(pieces)) {
+        return 0;
     }
 
     if (depth == 0 || draw(piece_mask)) {
-        // Break ties between non-terminal states
-        return (float) (rand() % 10);
+        return 0;
     }
 
-    float value = -MAX_VALUE;
+    float value = 0;
     for (uint64_t column = 0; column < 7; column ++) {
         if (invalid_move(column, piece_mask)) {
             continue;
         }
         uint64_t child_pieces = play(column, piece_mask, other_pieces);
-        value = fmax(value, -negamax(other_pieces, child_pieces, depth - 1));
+        value -= negamax(other_pieces, child_pieces, depth - 1);
     }
     return value;
 }
@@ -210,21 +212,39 @@ int compute_env_move(CConnect4* env) {
             return 3;
     }
 
-    uint64_t best_column = 0;
-    float best_value = -MAX_VALUE;
+    float best_value = 999;
+    float values[7] = {999};
     for (uint64_t column = 0; column < 7; column ++) {
-
         if (invalid_move(column, piece_mask)) {
             continue;
         }
         uint64_t child_env_pieces = play(column, piece_mask, env->player_pieces);
-        float value = -negamax(env->player_pieces, child_env_pieces, 2);
-        if (value > best_value) {
-            best_value = value;
-            best_column = column;
+        if (won(child_env_pieces)) {
+            return column;
+        }
+        float val = -negamax(env->player_pieces, child_env_pieces, 3);
+        values[column] = val;
+        if (val < best_value) {
+            best_value = val;
         }
     }
-    return best_column;
+    int num_ties = 0;
+    for (uint64_t column = 0; column < 7; column ++) {
+        if (values[column] == best_value) {
+            num_ties++;
+        }
+    }
+    //printf("Values: %f, %f, %f, %f, %f, %f, %f\n", values[0], values[1], values[2], values[3], values[4], values[5], values[6]);
+    int best_tie = rand() % num_ties;
+    for (uint64_t column = 0; column < 7; column ++) {
+        if (values[column] == best_value) {
+            if (best_tie == 0) {
+                return column;
+            }
+            best_tie--;
+        }
+    }
+    exit(1);
 }
 
 void compute_observation(CConnect4* env) {
