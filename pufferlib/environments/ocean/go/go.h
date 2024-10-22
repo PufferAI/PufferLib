@@ -738,6 +738,9 @@ void render(Client* client, CGo* env) {
             DrawCircleLines(circle_x, circle_y, env->grid_square_size / 2, WHITE);
         }
     }
+    // design a pass button
+    DrawRectangle(env->width - 300, 200, 100, 50, GRAY);
+    DrawText("Pass", env->width - 280, 215, 20, WHITE);
     // show capture count for both players
     DrawText(TextFormat("Player 1 Capture Count: %d", env->capture_count[0]), env->width - 300, 110, 20, WHITE);
     DrawText(TextFormat("Player 2 Capture Count: %d", env->capture_count[1]), env->width - 300, 130, 20, WHITE);

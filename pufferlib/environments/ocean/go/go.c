@@ -42,6 +42,16 @@ void demo() {
                 int pointIndex = cellY * (env.grid_size) + cellX + 1; 
                 env.actions[0] = (unsigned short)pointIndex;
             }
+        // Check if pass button is clicked
+            int passButtonX = env.width - 300;
+            int passButtonY = 200;
+            int passButtonWidth = 100;
+            int passButtonHeight = 50;
+
+            if (mousePos.x >= passButtonX && mousePos.x <= passButtonX + passButtonWidth &&
+                mousePos.y >= passButtonY && mousePos.y <= passButtonY + passButtonHeight) {
+                env.actions[0] = 0; // Send action 0 for pass
+            }
         }
         step(&env);
         render(client,&env);
