@@ -85,7 +85,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
 typedef struct CTripleTriad CTripleTriad;
 struct CTripleTriad {
     float* observations;
-    unsigned char* actions;
+    int* actions;
     float* rewards;
     unsigned char* dones;
     LogBuffer* log_buffer;
@@ -204,7 +204,7 @@ void init_ctripletriad(CTripleTriad* env) {
 }
 
 void allocate_ctripletriad(CTripleTriad* env) {
-    env->actions = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->actions = (int*)calloc(1, sizeof(int));
     env->observations = (float*)calloc(env->width*env->height, sizeof(float));
     env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
     env->rewards = (float*)calloc(1, sizeof(float));

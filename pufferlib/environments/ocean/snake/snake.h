@@ -68,7 +68,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
  
 typedef struct {
     char* observations;
-    unsigned int* actions;
+    int* actions;
     float* rewards;
     unsigned char* terminals;
     LogBuffer* log_buffer;
@@ -109,7 +109,7 @@ void init_csnake(CSnake* env) {
 void allocate_csnake(CSnake* env) {
     int obs_size = (2*env->vision + 1) * (2*env->vision + 1);
     env->observations = (char*)calloc(env->num_snakes*obs_size, sizeof(char));
-    env->actions = (unsigned int*)calloc(env->num_snakes, sizeof(unsigned int));
+    env->actions = (int*)calloc(env->num_snakes, sizeof(int));
     env->rewards = (float*)calloc(env->num_snakes, sizeof(float));
     env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
     init_csnake(env);
@@ -130,7 +130,6 @@ void free_csnake(CSnake* env) {
     free(env->rewards);
     free_logbuffer(env->log_buffer);
     free(env->logs);
-    free(env);
 }
 
 void compute_observations(CSnake* env) {
@@ -360,98 +359,4 @@ void render(Client* client, CSnake* env) {
     DrawText("Reinforcement learned snakes running in your browswer! Hold W/A/S/D to control the yellow snake.", 10, 10, 20, COLORS[8]);
     DrawText("<500 lines of pure C by @jsuarez5341. Star it on GitHub/pufferai/pufferlib to support my work!", 10, 40, 20, COLORS[8]);
     EndDrawing();
-}
-
-// Simple MLP inference. Operation order matches PyTorch
-void linear_layer(float* input, float* weights, float* bias, float* output,
-        int batch_size, int input_dim, int output_dim) {
-    for (int b = 0; b < batch_size; b++) {
-        for (int o = 0; o < output_dim; o++) {
-            float sum = 0.0f;
-            for (int i = 0; i < input_dim; i++)
-                sum += input[b*input_dim + i] * weights[o*input_dim + i];
-            output[b*output_dim + o] = sum + bias[o];
-        }
-    }
-}
-
-void relu(float* data, int size) {
-    for (int i = 0; i < size; i++)
-        data[i] = fmaxf(0.0f, data[i]);
-}
-
-typedef struct {
-    int batch_size;
-    int input_dim;
-    int hidden_dim;
-    int output_dim;
-    int total_weights;
-    float* w1;
-    float* b1;
-    float* w2;
-    float* b2;
-    float* observations;
-    float* hidden;
-    float* output;
-} MLP;
-
-MLP* allocate_mlp(int batch_size, int input_dim, int hidden_dim, int output_dim) {
-    MLP* mlp = (MLP*)malloc(sizeof(MLP));
-    mlp->batch_size = batch_size;
-    mlp->input_dim = input_dim;
-    mlp->hidden_dim = hidden_dim;
-    mlp->output_dim = output_dim;
-    mlp->total_weights = input_dim*(hidden_dim + 1) + hidden_dim*(output_dim + 1);
-    mlp->observations = (float*)malloc(batch_size * input_dim * sizeof(float));
-    mlp->hidden = (float*)malloc(batch_size * hidden_dim * sizeof(float));
-    mlp->output = (float*)malloc(batch_size * output_dim * sizeof(float));
-    mlp->w1 = (float*)malloc(mlp->total_weights * sizeof(float));
-    mlp->b1 = mlp->w1 + input_dim*hidden_dim;
-    mlp->w2 = mlp->b1 + hidden_dim;
-    mlp->b2 = mlp->w2 + hidden_dim*output_dim;
-    return mlp;
-}
-
-void free_mlp(MLP* mlp) {
-    free(mlp->observations);
-    free(mlp->hidden);
-    free(mlp->output);
-    free(mlp->w1); // The other pointers are just offsets
-    free(mlp);
-}
-
-void mlp_forward(MLP* mlp, unsigned int* actions) {
-    linear_layer(mlp->observations, mlp->w1, mlp->b1, mlp->hidden,
-        mlp->batch_size, mlp->input_dim, mlp->hidden_dim);
-    relu(mlp->hidden, mlp->batch_size*mlp->hidden_dim);
-    linear_layer(mlp->hidden, mlp->w2, mlp->b2, mlp->output,
-        mlp->batch_size, mlp->hidden_dim, mlp->output_dim);
-    for (int i = 0; i < mlp->batch_size; i++) {
-        float max_logit = mlp->output[i*mlp->output_dim];
-        for (int j = 1; j < mlp->output_dim; j++) {
-            float out = mlp->output[i*mlp->output_dim + j];
-            if (out > max_logit) {
-                max_logit = out;
-                actions[i] = j;
-            }
-        }
-    }
-}
-
-// File format is obained by flattening and concatenating all pytorch layers
-int load_weights(const char* filename, MLP* mlp) {
-    FILE* file = fopen(filename, "rb");
-    if (!file) {
-        perror("Error opening file");
-        return 1;
-    }
-    fseek(file, 0, SEEK_END);
-    rewind(file);
-    size_t read_size = fread(mlp->w1, sizeof(float), mlp->total_weights, file);
-    fclose(file);
-    if (read_size != mlp->total_weights) {
-        perror("Error reading file");
-        return 1;
-    }
-    return 0;
 }

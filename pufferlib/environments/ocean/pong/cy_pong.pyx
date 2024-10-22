@@ -17,7 +17,7 @@ cdef extern from "pong.h":
 
     ctypedef struct Pong:
         float* observations
-        unsigned int* actions
+        int* actions
         float* rewards
         unsigned char* terminals
         LogBuffer* log_buffer;
@@ -73,8 +73,8 @@ cdef class CyPong:
         float ball_width
         float ball_height
 
-    def __init__(self, cnp.ndarray observations, cnp.ndarray actions,
-            cnp.ndarray rewards, cnp.ndarray terminals, int num_envs,
+    def __init__(self, float[:, :] observations, int[:] actions,
+            float[:] rewards, unsigned char[:] terminals, int num_envs,
             float width, float height, float paddle_width, float paddle_height,
             float ball_width, float ball_height, float paddle_speed,
             float ball_initial_speed_x, float ball_initial_speed_y,
@@ -86,23 +86,13 @@ cdef class CyPong:
         self.envs = <Pong*> calloc(num_envs, sizeof(Pong))
         self.logs = allocate_logbuffer(LOG_BUFFER_SIZE)
 
-        cdef:
-            cnp.ndarray observations_i
-            cnp.ndarray actions_i
-            cnp.ndarray rewards_i
-            cnp.ndarray terminals_i
-
         cdef int i
         for i in range(num_envs):
-            observations_i = observations[i:i+1]
-            actions_i = actions[i:i+1]
-            rewards_i = rewards[i:i+1]
-            terminals_i = terminals[i:i+1]
             self.envs[i] = Pong(
-                observations = <float*> observations_i.data,
-                actions = <unsigned int*> actions_i.data,
-                rewards = <float*> rewards_i.data,
-                terminals = <unsigned char*> terminals_i.data,
+                observations = &observations[i, 0],
+                actions = &actions[i],
+                rewards = &rewards[i],
+                terminals = &terminals[i],
                 log_buffer=self.logs,
                 width=width,
                 height=height,

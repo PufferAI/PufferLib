@@ -73,7 +73,7 @@ typedef struct CConnect4 CConnect4;
 struct CConnect4 {
     // Pufferlib inputs / outputs
     float* observations;
-    unsigned char* actions;
+    int* actions;
     float* rewards;
     unsigned char* dones;
     LogBuffer* log_buffer;
@@ -94,7 +94,7 @@ struct CConnect4 {
 
 void allocate_cconnect4(CConnect4* env) {
     env->observations = (float*)calloc(42, sizeof(float));
-    env->actions = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->actions = (int*)calloc(1, sizeof(int));
     env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);

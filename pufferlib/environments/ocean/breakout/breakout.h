@@ -72,7 +72,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
 typedef struct Breakout Breakout;
 struct Breakout {
     float* observations;
-    unsigned int* actions;
+    int* actions;
     float* rewards;
     unsigned char* dones;
     LogBuffer* log_buffer;
@@ -130,7 +130,7 @@ void init(Breakout* env) {
 void allocate(Breakout* env) {
     init(env);
     env->observations = (float*)calloc(11 + env->num_bricks, sizeof(float));
-    env->actions = (unsigned int*)calloc(1, sizeof(unsigned int));
+    env->actions = (int*)calloc(1, sizeof(int));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
     env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);

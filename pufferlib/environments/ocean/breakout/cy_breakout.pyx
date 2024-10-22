@@ -1,6 +1,4 @@
-cimport numpy as cnp
 from libc.stdlib cimport calloc, free
-import os
 
 cdef extern from "breakout.h":
     int LOG_BUFFER_SIZE
@@ -17,7 +15,7 @@ cdef extern from "breakout.h":
 
     ctypedef struct Breakout:
         float* observations
-        unsigned char* actions
+        int* actions;
         float* rewards
         unsigned char* dones
         LogBuffer* log_buffer;
@@ -68,8 +66,8 @@ cdef class CyBreakout:
         LogBuffer* logs
         int num_envs
 
-    def __init__(self, cnp.ndarray observations, cnp.ndarray actions,
-            cnp.ndarray rewards, cnp.ndarray terminals, int num_envs,  int frameskip,
+    def __init__(self, float[:, :] observations, int[:] actions,
+            float[:] rewards, unsigned char[:] terminals, int num_envs,  int frameskip,
             int width, int height, float paddle_width, float paddle_height,
             int ball_width, int ball_height, int brick_width, int brick_height,
             int brick_rows, int brick_cols):
@@ -79,23 +77,13 @@ cdef class CyBreakout:
         self.envs = <Breakout*> calloc(num_envs, sizeof(Breakout))
         self.logs = allocate_logbuffer(LOG_BUFFER_SIZE)
 
-        cdef:
-            cnp.ndarray observations_i
-            cnp.ndarray actions_i
-            cnp.ndarray rewards_i
-            cnp.ndarray terminals_i
-
         cdef int i
         for i in range(num_envs):
-            observations_i = observations[i:i+1]
-            actions_i = actions[i:i+1]
-            rewards_i = rewards[i:i+1]
-            terminals_i = terminals[i:i+1]
             self.envs[i] = Breakout(
-                observations=<float*> observations_i.data,
-                actions=<unsigned char*> actions_i.data,
-                rewards=<float*> rewards_i.data,
-                dones=<unsigned char*> terminals_i.data,
+                observations=&observations[i, 0],
+                actions=&actions[i],
+                rewards=&rewards[i],
+                dones=&terminals[i],
                 log_buffer=self.logs,
                 width=width,
                 height=height,

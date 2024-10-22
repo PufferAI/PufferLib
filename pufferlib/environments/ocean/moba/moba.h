@@ -467,7 +467,7 @@ void compute_observations(MOBA* env) {
     unsigned char (*observations)[11*11*4 + 26] = (unsigned char(*)[11*11*4 + 26])env->observations;
     for (int pid = 0; pid < NUM_AGENTS; pid++) {
         // Does this copy?
-        unsigned char (*obs_map)[11][4] = (unsigned char(*)[11][4])&observations[pid];
+        unsigned char* obs_map = &observations[pid][0];
         unsigned char* obs_extra = &observations[pid][11*11*4];
 
         Entity* player = &env->entities[pid];
@@ -509,9 +509,11 @@ void compute_observations(MOBA* env) {
                 int ob_x = dx + vis;
                 int ob_y = dy + vis;
 
+                int map_idx = ob_y*11 + ob_x;
+
                 int adr = map_offset(map, yy, xx);
                 int tile = map->grid[adr];
-                obs_map[ob_y][ob_x][0] = tile;
+                obs_map[map_idx] = tile;
                 if (tile > 15) {
                     printf("Invalid map value: %i at %i, %i\n", map->grid[adr], yy, xx);
                 }
@@ -520,11 +522,11 @@ void compute_observations(MOBA* env) {
                     continue;
 
                 Entity* target = &env->entities[target_pid];
-                obs_map[ob_y][ob_x][1] = 255*target->health/target->max_health;
+                obs_map[map_idx+1] = 255*target->health/target->max_health;
                 if (target->max_mana > 0) { // Towers do not have mana
-                    obs_map[ob_y][ob_x][2] = 255*target->mana/target->max_mana;
+                    obs_map[map_idx+2] = 255*target->mana/target->max_mana;
                 }
-                obs_map[ob_y][ob_x][3] = target->level/30.0;
+                obs_map[map_idx+3] = target->level/30.0;
             }
         }
     }
@@ -1505,7 +1507,7 @@ unsigned char* read_file(char* filename) {
         return NULL;
     }
     fseek(file, 0, SEEK_END);
-    long file_bytes = ftell(file);
+    size_t file_bytes = ftell(file);
     fseek(file, 0, SEEK_SET);
     array = calloc(file_bytes, sizeof(unsigned char));
     if (array == NULL) {

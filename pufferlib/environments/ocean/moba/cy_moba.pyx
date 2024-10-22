@@ -1,18 +1,4 @@
-# distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: initializedcheck=False
-# cython: wraparound=False
-# cython: cdivision=True
-# cython: nonecheck=False
-# cython: profile=False
-
-from libc.stdlib cimport rand, RAND_MAX, calloc, free
-from libc.math cimport sqrtf
-from cpython.list cimport PyList_GET_ITEM
-from libc.string cimport memcpy
-cimport cython
-cimport numpy as cnp
+from libc.stdlib cimport calloc, free
 import numpy as np
 
 cdef extern from "moba.h":
@@ -234,8 +220,8 @@ cdef class CyMOBA:
     cdef int* ai_path_buffer
     cdef unsigned char* ai_paths
 
-    def __init__(self, cnp.ndarray observations, cnp.ndarray actions,
-            cnp.ndarray rewards, cnp.ndarray terminals, int num_envs,  int vision_range,
+    def __init__(self, unsigned char[:, :] observations, int[:, :] actions,
+            float[:] rewards, unsigned char[:] terminals, int num_envs,  int vision_range,
             float agent_speed, bint discretize, float reward_death, float reward_xp,
             float reward_distance, float reward_tower):
 
@@ -252,22 +238,12 @@ cdef class CyMOBA:
         for i in range(128*128*128*128):
             self.ai_paths[i] = 255
 
-        cdef:
-            cnp.ndarray observations_i
-            cnp.ndarray actions_i
-            cnp.ndarray rewards_i
-            cnp.ndarray terminals_i
-
         for i in range(num_envs):
-            observations_i = observations[10*i:10*(i+1)]
-            actions_i = actions[10*i:10*(i+1)]
-            rewards_i = rewards[10*i:10*(i+1)]
-            terminals_i = terminals[10*i:10*(i+1)]
             self.envs[i] = MOBA(
-                observations = <unsigned char*> observations_i.data,
-                actions = <int*> actions_i.data,
-                rewards = <float*> rewards_i.data,
-                terminals = <unsigned char*> terminals_i.data,
+                observations=&observations[10*i, 0],
+                actions=&actions[10*i, 0],
+                rewards=&rewards[10*i],
+                terminals=&terminals[10*i],
                 ai_paths = self.ai_paths,
                 ai_path_buffer = self.ai_path_buffer,
                 log_buffer=self.logs,

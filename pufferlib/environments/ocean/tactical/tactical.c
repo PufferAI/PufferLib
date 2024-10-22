@@ -8,7 +8,7 @@ int main() {
     GameRenderer* client = init_game_renderer(env);
 
     reset(env);
-    while (true) { // Escape key is used in the game
+    while (!WindowShouldClose()) {
         if (IsKeyPressed(KEY_Q) || IsKeyPressed(KEY_BACKSPACE)) break;
         step(env);
         render_game(client, env);

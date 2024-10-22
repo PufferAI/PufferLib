@@ -17,7 +17,7 @@ cdef extern from "snake.h":
 
         ctypedef struct CSnake:
             char* observations
-            unsigned int* actions
+            int* actions
             float* rewards
             unsigned char* terminals
             LogBuffer* log_buffer
@@ -62,8 +62,8 @@ cdef class Snake:
         LogBuffer* logs
         int num_envs
         
-    def __init__(self, cnp.ndarray observations, cnp.ndarray actions,
-             cnp.ndarray rewards, cnp.ndarray terminals,
+    def __init__(self, char[:, :, :] observations, int[:] actions,
+             float[:] rewards, unsigned char[:] terminals,
              list widths, list heights, list num_snakes,
              list num_food, int vision, int max_snake_length,
              bint leave_corpse_on_death, float reward_food,
@@ -74,26 +74,14 @@ cdef class Snake:
         self.logs = allocate_logbuffer(LOG_BUFFER_SIZE)
         self.client = NULL
 
-        cdef:
-            cnp.ndarray observations_i
-            cnp.ndarray actions_i
-            cnp.ndarray rewards_i
-            cnp.ndarray terminals_i
-
         cdef int i
         cdef int n = 0
         for i in range(self.num_envs):
-            observations_i = observations[n:n+num_snakes[i]]
-            actions_i = actions[n:n+num_snakes[i]]
-            rewards_i = rewards[n:n+num_snakes[i]]
-            terminals_i = terminals[n:n+num_snakes[i]]
-            n += num_snakes[i]
-
             self.envs[i] = CSnake(
-                observations = <char*> observations_i.data,
-                actions = <unsigned int*> actions_i.data,
-                rewards = <float*> rewards_i.data,
-                terminals = <unsigned char*> terminals_i.data,
+                observations=&observations[n, 0, 0],
+                actions=&actions[n],
+                rewards=&rewards[n],
+                terminals=&terminals[n],
                 log_buffer=self.logs,
                 width=widths[i],
                 height=heights[i],
@@ -107,6 +95,7 @@ cdef class Snake:
                 reward_death=reward_death,
             )
             init_csnake(&self.envs[i])
+            n += num_snakes[i]
 
     def reset(self):
         cdef int i

@@ -259,7 +259,7 @@ extensions = [Extension(
     library_dirs=['raylib/lib'],
     libraries=["raylib"],
     runtime_library_dirs=["raylib/lib"],
-    extra_compile_args=['-DPLATFORM_DESKTOP', '-O2'],#, '-g'],
+    extra_compile_args=['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', '-Werror', '-DPLATFORM_DESKTOP', '-O2'],#, '-g'],
 ) for path in extension_paths]
  
 setup(
@@ -301,6 +301,15 @@ setup(
         "pufferlib/environments/ocean/moba/c_precompute_pathing.pyx",
         *extensions,
     ], 
+    compiler_directives={
+        'language_level': 3,
+        'boundscheck': False,
+        'initializedcheck': False,
+        'wraparound': False,
+        'cdivision': True,
+        'nonecheck': False,
+        'profile': False,
+    },
        #nthreads=6,
        #annotate=True,
        #compiler_directives={'profile': True},# annotate=True

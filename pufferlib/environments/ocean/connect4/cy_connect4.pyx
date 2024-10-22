@@ -18,7 +18,7 @@ cdef extern from "connect4.h":
 
     ctypedef struct CConnect4:
         float* observations
-        unsigned char* actions
+        int* actions
         float* rewards
         unsigned char* dones
         LogBuffer* log_buffer;
@@ -47,8 +47,8 @@ cdef class CyConnect4:
         LogBuffer* logs
         int num_envs
 
-    def __init__(self, cnp.ndarray observations, cnp.ndarray actions,
-            cnp.ndarray rewards, cnp.ndarray terminals, int num_envs,
+    def __init__(self, float[:, :] observations, int[:] actions,
+            float[:] rewards, unsigned char[:] terminals, int num_envs,
             int width, int height, int piece_width, int piece_height):
 
         self.num_envs = num_envs
@@ -56,23 +56,13 @@ cdef class CyConnect4:
         self.envs = <CConnect4*> calloc(num_envs, sizeof(CConnect4))
         self.logs = allocate_logbuffer(LOG_BUFFER_SIZE)
 
-        cdef:
-            cnp.ndarray observations_i
-            cnp.ndarray actions_i
-            cnp.ndarray rewards_i
-            cnp.ndarray terminals_i
-        
         cdef int i
         for i in range(num_envs):
-            observations_i = observations[i:i+1]
-            actions_i = actions[i:i+1]
-            rewards_i = rewards[i:i+1]
-            terminals_i = terminals[i:i+1]
             self.envs[i] = CConnect4(
-                observations = <float*> observations_i.data,
-                actions = <unsigned char*> actions_i.data,
-                rewards = <float*> rewards_i.data,
-                dones = <unsigned char*> terminals_i.data,
+                observations=&observations[i, 0],
+                actions=&actions[i],
+                rewards=&rewards[i],
+                dones=&terminals[i],
                 log_buffer=self.logs,
                 player_pieces=0,
                 env_pieces=0,

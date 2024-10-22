@@ -61,7 +61,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
 typedef struct Pong Pong;
 struct Pong {
     float* observations;
-    unsigned int* actions;
+    int* actions;
     float* rewards;
     unsigned char* terminals;
     LogBuffer* log_buffer;
@@ -111,7 +111,7 @@ void init(Pong* env) {
 void allocate(Pong* env) {
     init(env);
     env->observations = (float*)calloc(8, sizeof(float));
-    env->actions = (unsigned int*)calloc(2, sizeof(unsigned int));
+    env->actions = (int*)calloc(2, sizeof(int));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
     env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);

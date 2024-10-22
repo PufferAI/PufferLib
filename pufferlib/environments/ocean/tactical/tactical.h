@@ -783,7 +783,7 @@ GameRenderer* init_game_renderer(Tactical* env) {
     renderer->max_fps = 120;
 
     InitWindow(renderer->width, renderer->height, "Tactical RL");
-    // SetTargetFPS(60);
+    SetTargetFPS(60);
 
     return renderer;
 }
@@ -806,7 +806,7 @@ int get_cell_at_cursor(GameRenderer* renderer, Tactical* env) {
 }
 
 void draw_debug_info(GameRenderer* renderer) {
-    DrawText(TextFormat("%i FPS", (int)(1 / renderer->dt)), 10, 10, 20, COLOR_TEXT_DEFAULT);
+    //DrawText(TextFormat("%i FPS", (int)(1 / renderer->dt)), 10, 10, 20, COLOR_TEXT_DEFAULT);
     DrawText(TextFormat("Mouse: %i, %i", renderer->mx, renderer->my), 150, 10, 15, COLOR_TEXT_DEFAULT);
     DrawText(TextFormat("Cell: %i (row %i, col %i)", renderer->mcell, renderer->mrow, renderer->mcol), 150, 30, 15, COLOR_TEXT_DEFAULT);
     DrawText(TextFormat("Cell type: %s",
@@ -1104,12 +1104,15 @@ int render_game(GameRenderer* renderer, Tactical* env) {
     }
 
     // cap FPS and compute dt
+    /*
     clock_t current_time;
     do {
         current_time = clock();
         renderer->dt = (double)(current_time - renderer->last_render_time) / CLOCKS_PER_SEC;
     } while (renderer->dt < 1 / renderer->max_fps);
     renderer->last_render_time = current_time;
+    */
+    renderer->dt = 1.0 / 60.0;
 
     BeginDrawing();
     ClearBackground(COLOR_BACKGROUND);

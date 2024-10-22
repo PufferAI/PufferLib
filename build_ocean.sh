@@ -29,7 +29,15 @@ if [ "$MODE" = "local" ]; then
     #     "$SRC_DIR/$ENV.c" -o "$OUTPUT_DIR/$ENV" \
     #     ./raylib/lib/libraylib.a -lm -lpthread \
     #     -fsanitize=address,undefined,bounds,pointer-overflow,leak \
-
+elif [ "$MODE" = "fast" ]; then
+    echo "Building $ENV for local testing..."
+    clang -pg -O2 -Wall \
+        -I./raylib/include \
+        -I./pufferlib\
+        "$SRC_DIR/$ENV.c" -o "$OUTPUT_DIR/$ENV" \
+        ./raylib/lib/libraylib.a -lm -lpthread \
+        #-framework Cocoa -framework IOKit -framework CoreVideo
+ 
     echo "Built to: $OUTPUT_DIR/$ENV"
 elif [ "$MODE" = "web" ]; then
     echo "Building $ENV for web deployment..."
