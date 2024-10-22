@@ -7,7 +7,7 @@
 const unsigned char NOOP = 8;
 
 void interactive() {
-    Weights* weights = load_weights("resources/pong_weights.bin", 6536);
+    Weights* weights = load_weights("resources/connect4_weights.bin", 6536);
     Default* net = make_default(weights, 1, 42, 128, 7);
 
     CConnect4 env = {
