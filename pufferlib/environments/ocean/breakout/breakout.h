@@ -7,14 +7,17 @@
 #define FIRE 1
 #define LEFT 2
 #define RIGHT 3
-#define HALF_MAX_SCORE 432
-#define MAX_SCORE 864
 #define MAX_BALL_SPEED 448
 #define HALF_PADDLE_WIDTH 31
 #define Y_OFFSET 50
 #define TICK_RATE 1.0f/60.0f
 
 #define LOG_BUFFER_SIZE 1024
+
+#define BRICK_INDEX_NO_COLLISION -4
+#define BRICK_INDEX_SIDEWALL_COLLISION -3
+#define BRICK_INDEX_BACKWALL_COLLISION -2
+#define BRICK_INDEX_PADDLE_COLLISION -1
 
 typedef struct Log Log;
 struct Log {
@@ -102,18 +105,34 @@ struct Breakout {
     int brick_width;
     int brick_height;
     int num_balls;
+    int max_score;
+    int half_max_score;
     int frameskip;
     unsigned char hit_brick;
 };
 
+typedef struct CollisionInfo CollisionInfo;
+struct CollisionInfo {
+    float t;
+    float overlap;
+    float x;
+    float y;
+    float vx; 
+    float vy;
+    int brick_index;
+};
+
 void generate_brick_positions(Breakout* env) {
+    env->half_max_score=0;
     for (int row = 0; row < env->brick_rows; row++) {
         for (int col = 0; col < env->brick_cols; col++) {
             int idx = row * env->brick_cols + col;
             env->brick_x[idx] = col*env->brick_width;
             env->brick_y[idx] = row*env->brick_height + Y_OFFSET;
+            env->half_max_score += 7 - 3 * (idx / env->brick_cols / 2);
         }
     }
+    env->max_score=2*env->half_max_score;
 }
 
 void init(Breakout* env) {
@@ -166,43 +185,148 @@ void compute_observations(Breakout* env) {
     }
 }
 
-bool check_collision_discrete(float x, float y, int width, int height,
-        float other_x, float other_y, int other_width, int other_height) {
-    if (x + width <= other_x || other_x + other_width <= x) {
-        return false;
+// Collision of a stationary vertical line segment (xw,yw) to (xw,yw+hw)
+// with a moving line segment (x+vx*t,y+vy*t) to (x+vx*t,y+vy*t+h).
+static inline bool calc_vline_collision(float xw, float yw, float hw, float x,
+        float y, float vx, float vy, float h, CollisionInfo* col) {
+    float t_new = (xw - x) / vx;
+    float topmost = fmin(yw + hw, y + h + vy * t_new);
+    float botmost = fmax(yw, y + vy * t_new);
+    float overlap_new = topmost - botmost;
+
+    // Collision finds the smallest time of collision with the greatest overlap
+    // between the ball and the wall.
+    if (overlap_new > 0.0f && t_new > 0.0f && t_new <= 1.0f  && 
+        (t_new < col->t || (t_new == col->t && overlap_new > col->overlap))) {
+        col->t = t_new;
+        col->overlap = overlap_new;
+        col->x = xw;
+        col->y = y + vy * t_new;
+        col->vx = -vx;
+        col->vy = vy;
+        return true;
     }
-    if (y + height <= other_y || other_y + other_height <= y) {
-        return false;
+    return false;
+}
+static inline bool calc_hline_collision(float xw, float yw, float ww,
+        float x, float y, float vx, float vy, float w, CollisionInfo* col) {
+    float t_new = (yw - y) / vy;
+    float rightmost = fminf(xw + ww, x + w + vx * t_new);
+    float leftmost = fmaxf(xw, x + vx * t_new);
+    float overlap_new = rightmost - leftmost;
+
+    // Collision finds the smallest time of collision with the greatest overlap between the ball and the wall.
+    if (overlap_new > 0.0f && t_new > 0.0f && t_new <= 1.0f && 
+        (t_new < col->t || (t_new == col->t && overlap_new > col->overlap))) {
+        col->t = t_new;
+        col->overlap = overlap_new;
+        col->x = x + vx * t_new;
+        col->y = yw;
+        col->vx = vx;
+        col->vy = -vy;
+        return true;
     }
-    return true;
+    return false;
+}
+static inline void calc_brick_collision(Breakout* env, int idx, 
+        CollisionInfo* collision_info) {
+    bool collision = false;
+    // Brick left wall collides with ball right side
+    if (env->ball_vx > 0) {
+        if (calc_vline_collision(env->brick_x[idx], env->brick_y[idx], env->brick_height,
+                env->ball_x + env->ball_width, env->ball_y, env->ball_vx, env->ball_vy, env->ball_height, collision_info)) {
+            collision = true;
+            collision_info->x -= env->ball_width;
+        }
+    }
+
+    // Brick right wall collides with ball left side
+    if (env->ball_vx < 0) {
+        if (calc_vline_collision(env->brick_x[idx] + env->brick_width, env->brick_y[idx], env->brick_height,
+                env->ball_x, env->ball_y, env->ball_vx, env->ball_vy, env->ball_height, collision_info)) {
+            collision = true;
+        }
+    }
+
+    // Brick top wall collides with ball bottom side
+    if (env->ball_vy > 0) {
+        if (calc_hline_collision(env->brick_x[idx], env->brick_y[idx], env->brick_width,
+                env->ball_x, env->ball_y + env->ball_height, env->ball_vx, env->ball_vy, env->ball_width, collision_info)) {
+            collision = true;
+            collision_info->y -= env->ball_height;
+        }
+    }
+
+    // Brick bottom wall collides with ball top side
+    if (env->ball_vy < 0) {
+        if (calc_hline_collision(env->brick_x[idx], env->brick_y[idx] + env->brick_height, env->brick_width,
+                env->ball_x, env->ball_y, env->ball_vx, env->ball_vy, env->ball_width, collision_info)) {
+            collision = true;
+        }
+    }
+    if (collision) {
+        collision_info->brick_index = idx;
+    }
+}
+static inline int column_index(Breakout* env, float x) {
+    return (int)(floorf(x / env->brick_width));
+}
+static inline int row_index(Breakout* env, float y) {
+    return (int)(floorf((y - Y_OFFSET) / env->brick_height));
 }
 
-bool handle_paddle_ball_collisions(Breakout* env) {
+void calc_all_brick_collisions(Breakout* env, CollisionInfo* collision_info) {
+    int column_from = column_index(env, fminf(env->ball_x + env->ball_vx, env->ball_x));
+    column_from = fmaxf(column_from, 0);
+    int column_to = column_index(env, fmaxf(env->ball_x + env->ball_width + env->ball_vx, env->ball_x + env->ball_width));
+    column_to = fminf(column_to, env->brick_cols - 1);
+    int row_from = row_index(env, fminf(env->ball_y + env->ball_vy, env->ball_y));
+    row_from = fmaxf(row_from, 0);
+    int row_to = row_index(env, fmaxf(env->ball_y + env->ball_height + env->ball_vy, env->ball_y + env->ball_height));
+    row_to = fminf(row_to, env->brick_rows - 1);
+
+    for (int row = row_from; row <= row_to; row++) {
+        for (int column = column_from; column <= column_to; column++) {
+            int brick_index = row * env->brick_cols + column;
+            if (env->brick_states[brick_index] == 0.0)
+                calc_brick_collision(env, brick_index, collision_info);
+        }
+    }
+}
+
+bool calc_paddle_ball_collisions(Breakout* env, CollisionInfo* collision_info) {
     float base_angle = M_PI / 4.0f;
 
     // Check if ball is above the paddle
-    if (env->ball_y + env->ball_height < env->paddle_y) {
+    if (env->ball_y + env->ball_height + env->ball_vy < env->paddle_y) {
         return false;
     }
 
     // Check for collision
-    if (!check_collision_discrete(env->paddle_x, env->paddle_y,
-            env->paddle_width, env->paddle_height, env->ball_x,
-            env->ball_y, env->ball_width, env->ball_height)) {
+    // If we've found another collision (eg the ball hits the wall before the paddle)
+    // this correctly skips the paddle collision.
+    if (!calc_hline_collision(env->paddle_x, env->paddle_y, env->paddle_width,
+          env->ball_x, env->ball_y + env->ball_height, env->ball_vx, env->ball_vy, env->ball_width,
+          collision_info) || collision_info->t > 1.0f) {
         return false;
     }
 
+    collision_info->y -= env->ball_height;
+    collision_info->brick_index = BRICK_INDEX_PADDLE_COLLISION;
+
     env->hit_brick = false;
     float relative_intersection = ((env->ball_x +
-        env->ball_width / 2) - env->paddle_x) / env->paddle_width;
+                                    env->ball_width / 2) -
+                                   env->paddle_x) /
+                                  env->paddle_width;
     float angle = -base_angle + relative_intersection * 2 * base_angle;
     env->ball_vx = sin(angle) * env->ball_speed * TICK_RATE;
     env->ball_vy = -cos(angle) * env->ball_speed * TICK_RATE;
     env->hits += 1;
-    if (env->hits % 4 == 0  && env->ball_speed < MAX_BALL_SPEED) {
+    if (env->hits % 4 == 0 && env->ball_speed < MAX_BALL_SPEED) {
         env->ball_speed += 64;
     }
-    if (env->score == HALF_MAX_SCORE) {
+    if (env->score == env->half_max_score) {
         for (int i = 0; i < env->num_bricks; i++) {
             env->brick_states[i] = 0.0;
         }
@@ -210,70 +334,87 @@ bool handle_paddle_ball_collisions(Breakout* env) {
     return true;
 }
 
-bool handle_wall_ball_collisions(Breakout* env) {
-    if (env->ball_x > 0 && env->ball_x
-            + env->ball_width < env->width && env->ball_y > 0) {
-        return false;
+void calc_all_wall_collisions(Breakout* env, CollisionInfo* collision_info) {
+    //bool collision = false;
+    if (env->ball_vx < 0) {
+        if (calc_vline_collision(0, 0, env->height,
+                env->ball_x, env->ball_y, env->ball_vx, env->ball_vy, env->ball_height,
+                collision_info)) {
+            //collision = true;
+            collision_info->brick_index = BRICK_INDEX_SIDEWALL_COLLISION;
+        }
     }
-
-    // Left Wall Collision
-    if (check_collision_discrete(-Y_OFFSET, 0, Y_OFFSET, env->height,
-            env->ball_x, env->ball_y, env->ball_width, env->ball_height)) {
-        env->ball_x = 0;
-        env->ball_vx *= -1;
-        return true;
+    if (env->ball_vx > 0) {
+        if (calc_vline_collision(env->width, 0, env->height,
+                 env->ball_x + env->ball_width, env->ball_y, env->ball_vx, env->ball_vy, env->ball_height,
+                 collision_info)) {
+            //collision = true;
+            collision_info->x -= env->ball_width;
+            collision_info->brick_index = BRICK_INDEX_SIDEWALL_COLLISION;
+        }
     }
-
-    // Top Wall Collision
-    if (check_collision_discrete(0, -Y_OFFSET, env->width, Y_OFFSET,
-            env->ball_x, env->ball_y, env->ball_width, env->ball_height)) {
-        env->ball_y = 0;
-        env->ball_vy *= -1;
-        env->paddle_width = HALF_PADDLE_WIDTH;
-        return true;
+    if (env->ball_vy < 0) {
+        if (calc_hline_collision(0, 0, env->width,
+                 env->ball_x, env->ball_y, env->ball_vx, env->ball_vy, env->ball_width,
+                 collision_info)) {
+            //collision = true;
+            collision_info->brick_index = BRICK_INDEX_BACKWALL_COLLISION;
+        }
     }
-
-    // Right Wall Collision
-    if (check_collision_discrete(env->width, 0, Y_OFFSET, env->height,
-            env->ball_x, env->ball_y, env->ball_width, env->ball_height)) {
-        env->ball_x = env->width - env->ball_width;
-        env->ball_vx *= -1;
-        return true;
-    }
-
-    return false;
 }
 
-bool handle_brick_ball_collisions(Breakout* env) {
-    if (env->ball_y > env->brick_y[env->num_bricks-1] + env->brick_height) {
-        return false;
+// With rare floating point conditions, the ball could escape the bounds.
+// Let's handle that explicitly.
+void check_wall_bounds(Breakout* env) {
+    if (env->ball_x < 0)
+        env->ball_x += MAX_BALL_SPEED * 1.1f * TICK_RATE;
+    if (env->ball_x > env->width)
+        env->ball_x -= MAX_BALL_SPEED * 1.1f * TICK_RATE;
+    if (env->ball_y < 0)
+        env->ball_y += MAX_BALL_SPEED * 1.1f * TICK_RATE;
+}
+
+void destroy_brick(Breakout* env, int brick_idx) {
+    env->score += 7 - 3 * (brick_idx / env->brick_cols / 2);
+    env->brick_states[brick_idx] = 1.0;
+    env->log.episode_return += 1.0;
+    env->rewards[0] += 1.0;
+
+    if (brick_idx / env->brick_cols < 3) {
+        env->ball_speed = MAX_BALL_SPEED;
     }
-    
-    // Loop over bricks in reverse to check lower bricks first
-    for (int brick_idx = env->num_bricks - 1; brick_idx >= 0; brick_idx--) {
-        if (env->brick_states[brick_idx] == 1.0) {
-            continue;
+}
+
+bool handle_collisions(Breakout* env) {
+    CollisionInfo collision_info = {
+        .t = 2.0f,
+        .overlap = -1.0f,
+        .x = 0.0f,
+        .y = 0.0f,
+        .vx = 0.0f,
+        .vy = 0.0f,
+        .brick_index = BRICK_INDEX_NO_COLLISION,
+    };
+
+    check_wall_bounds(env);
+
+    calc_all_brick_collisions(env, &collision_info);
+    calc_all_wall_collisions(env, &collision_info);
+    calc_paddle_ball_collisions(env, &collision_info);
+    if (collision_info.brick_index != BRICK_INDEX_PADDLE_COLLISION 
+            && collision_info.t <= 1.0f) {
+        env->ball_x = collision_info.x;
+        env->ball_y = collision_info.y;
+        env->ball_vx = collision_info.vx;
+        env->ball_vy = collision_info.vy;
+        if (collision_info.brick_index >= 0) {
+            destroy_brick(env, collision_info.brick_index);
         }
-
-        if (!check_collision_discrete(env->brick_x[brick_idx],
-                env->brick_y[brick_idx], env->brick_width, env->brick_height,
-                env->ball_x, env->ball_y, env->ball_width, env->ball_height)) {
-            continue;
+        if (collision_info.brick_index == BRICK_INDEX_BACKWALL_COLLISION) {
+            env->paddle_width = HALF_PADDLE_WIDTH;
         }
-
-        env->score += 7 - 3 * (brick_idx / env->brick_cols / 2);
-        env->brick_states[brick_idx] = 1.0;
-        env->log.episode_return += 1.0;
-        env->rewards[0] += 1.0;
-
-        if (brick_idx / env->brick_cols < 3) {
-            env->ball_speed = MAX_BALL_SPEED;
-        }
-
-        env->ball_vy *= -1;
-        return true;
     }
-    return false;
+    return collision_info.brick_index != BRICK_INDEX_NO_COLLISION;
 }
 
 void reset_round(Breakout* env) {
@@ -285,6 +426,7 @@ void reset_round(Breakout* env) {
 
     env->paddle_x = env->width / 2.0 - env->paddle_width / 2;
     env->paddle_y = env->height - env->paddle_height - 10;
+
 
     env->ball_x = env->paddle_x + (env->paddle_width / 2 - env->ball_width / 2);
     env->ball_y = env->height / 2 - 30;
@@ -321,20 +463,19 @@ void step_frame(Breakout* env, int action) {
         env->paddle_x = fminf(env->width - env->paddle_width, env->paddle_x);
     }
 
-    if (!env->hit_brick) {
-        handle_brick_ball_collisions(env);
-    }
-    handle_paddle_ball_collisions(env);
-    handle_wall_ball_collisions(env);
 
-    env->ball_x += env->ball_vx;
-    env->ball_y += env->ball_vy;
+    //Handle collisions. 
+    //Regular timestepping is done only if there are no collisions.
+    if(!handle_collisions(env)){
+        env->ball_x += env->ball_vx;
+        env->ball_y += env->ball_vy;
+    }
 
     if (env->ball_y >= env->paddle_y + env->paddle_height) {
         env->num_balls -= 1;
         reset_round(env);
     }
-    if (env->num_balls < 0 || env->score == MAX_SCORE) {
+    if (env->num_balls < 0 || env->score == env->max_score) {
         env->dones[0] = 1;
         env->log.score = env->score;
         add_log(env->log_buffer, &env->log);
