@@ -18,14 +18,14 @@
 #endif
 
 
-#define NUM_AGENTS 10
+#define NUM_PLAYERS 10
 #define NUM_CREEPS 100
 #define NUM_NEUTRALS 72
 #define NUM_TOWERS 24
-#define NUM_ENTITIES (NUM_AGENTS + NUM_CREEPS + NUM_NEUTRALS + NUM_TOWERS)
-#define CREEP_OFFSET NUM_AGENTS
-#define NEUTRAL_OFFSET (NUM_AGENTS + NUM_CREEPS)
-#define TOWER_OFFSET (NUM_AGENTS + NUM_CREEPS + NUM_NEUTRALS)
+#define NUM_ENTITIES (NUM_PLAYERS + NUM_CREEPS + NUM_NEUTRALS + NUM_TOWERS)
+#define CREEP_OFFSET NUM_PLAYERS
+#define NEUTRAL_OFFSET (NUM_PLAYERS + NUM_CREEPS)
+#define TOWER_OFFSET (NUM_PLAYERS + NUM_CREEPS + NUM_NEUTRALS)
 
 #define EMPTY 0
 #define WALL 1
@@ -402,6 +402,7 @@ struct MOBA {
     int vision_range;
     float agent_speed;
     bool discretize;
+    bool script_opponents;
     int obs_size;
     int creep_idx;
     int tick;
@@ -459,13 +460,14 @@ void free_allocated_moba(MOBA* env) {
 }
 
 void compute_observations(MOBA* env) {
-    memset(env->observations, 0, NUM_AGENTS*(11*11*4 + 26)*sizeof(unsigned char));
+    int agents = (env->script_opponents) ? NUM_PLAYERS/2 : NUM_PLAYERS;
+    memset(env->observations, 0, agents*(11*11*4 + 26)*sizeof(unsigned char));
 
     int vis = env->vision_range;
     Map* map = env->map;
 
     unsigned char (*observations)[11*11*4 + 26] = (unsigned char(*)[11*11*4 + 26])env->observations;
-    for (int pid = 0; pid < NUM_AGENTS; pid++) {
+    for (int pid = 0; pid < agents; pid++) {
         // Does this copy?
         unsigned char* obs_map = &observations[pid][0];
         unsigned char* obs_extra = &observations[pid][11*11*4];
@@ -551,7 +553,7 @@ int calc_level(MOBA* env, int xp) {
         if (xp < XP_FOR_LEVEL[i])
             return i + 1;
     }
-    return i + 1;
+    return i;
 }
 
 Reward* get_reward(MOBA* env, int pid) {
@@ -646,6 +648,7 @@ void spawn_player(Map* map, Entity* entity) {
     entity->w_timer = 0;
     entity->e_timer = 0;
     entity->target_pid = -1;
+    entity->waypoint = 1;
     
     // TODO: Cache noise?
     // Also.. technically can infinite loop?
@@ -1409,7 +1412,7 @@ void step_towers(MOBA* env) {
 
 void step_players(MOBA* env) {
     // Clear rewards
-    for (int pid = 0; pid < NUM_AGENTS; pid++) {
+    for (int pid = 0; pid < NUM_PLAYERS; pid++) {
         Reward* reward = &env->reward_components[pid];
         reward->death = 0;
         reward->xp = 0;
@@ -1417,9 +1420,10 @@ void step_players(MOBA* env) {
         reward->tower = 0;
     }
 
-    for (int pid = 0; pid < NUM_AGENTS; pid++) {
+    for (int pid = 0; pid < NUM_PLAYERS; pid++) {
         Entity* player = &env->entities[pid];
         PlayerLog* log = &env->log[pid];
+        Reward* reward = &env->reward_components[pid];
         // TODO: Is this needed?
         //if (rand() % 1024 == 0)
         //    spawn_player(env->map, player);
@@ -1439,62 +1443,83 @@ void step_players(MOBA* env) {
         if (player->stun_timer > 0)
             continue;
 
-        int (*actions)[6] = (int(*)[6])env->actions;
-        //float vel_y = (actions[pid][0] > 0) ? 1 : -1;
-        //float vel_x = (actions[pid][1] > 0) ? 1 : -1;
-        float vel_y = actions[pid][0] / 300.0f;
-        float vel_x = actions[pid][1] / 300.0f;
-        float mag = sqrtf(vel_y*vel_y + vel_x*vel_x);
-        if (mag > 1) {
-            vel_y /= mag;
-            vel_x /= mag;
-        }
+        if (env->script_opponents && pid >= 5) {
+            creep_ai(env, player);
 
-        int attack_target = actions[pid][2];
-        bool use_q = actions[pid][3];
-        bool use_w = actions[pid][4];
-        bool use_e = actions[pid][5];
-
-        if (attack_target == 1 || attack_target == 0) {
-            // Scan everything
             scan_aoe(env, player, env->vision_range, true, false, false, false, false);
-        } else if (attack_target == 2) {
-            // Scan only heros and towers
-            scan_aoe(env, player, env->vision_range, true, false, true, true, false);
+            Entity* target = NULL;
+            if (env->scanned_targets[pid][0] != NULL)
+                target = nearest_scanned_target(env, player);
+
+            if (player->q_timer <= 0 && env->skills[pid][0](env, player, target) == 0) {
+                log->usage_q += 1;
+            } else if (player->w_timer <= 0 && env->skills[pid][1](env, player, target) == 0) {
+                log->usage_w += 1;
+            } else if (player->e_timer <= 0 && env->skills[pid][2](env, player, target) == 0) {
+                log->usage_e += 1;
+            }
+        } else {
+            int (*actions)[6] = (int(*)[6])env->actions;
+            //float vel_y = (actions[pid][0] > 0) ? 1 : -1;
+            //float vel_x = (actions[pid][1] > 0) ? 1 : -1;
+            float vel_y = actions[pid][0] / 300.0f;
+            float vel_x = actions[pid][1] / 300.0f;
+            float mag = sqrtf(vel_y*vel_y + vel_x*vel_x);
+            if (mag > 1) {
+                vel_y /= mag;
+                vel_x /= mag;
+            }
+
+            int attack_target = actions[pid][2];
+            bool use_q = actions[pid][3];
+            bool use_w = actions[pid][4];
+            bool use_e = actions[pid][5];
+
+            if (attack_target == 1 || attack_target == 0) {
+                // Scan everything
+                scan_aoe(env, player, env->vision_range, true, false, false, false, false);
+            } else if (attack_target == 2) {
+                // Scan only heros and towers
+                scan_aoe(env, player, env->vision_range, true, false, true, true, false);
+            }
+
+            Entity* target = NULL;
+            // TODO: What is this logic here?
+            if (env->scanned_targets[pid][0] != NULL)
+                target = nearest_scanned_target(env, player);
+
+            // TODO: Clean this mess
+            if (use_q && player->q_timer <= 0 && env->skills[pid][0](env, player, target) == 0) {
+                log->usage_q += 1;
+            } else if (use_w && player->w_timer <= 0 && env->skills[pid][1](env, player, target) == 0) {
+                log->usage_w += 1;
+            } else if (use_e && player->e_timer <= 0 && env->skills[pid][2](env, player, target) == 0) {
+                log->usage_e += 1;
+            } else if (target != NULL && basic_attack(env, player, target)==0) {
+                log->usage_auto += 1;
+            }
+
+            float dest_y = player->y + player->move_modifier*env->agent_speed*vel_y;
+            float dest_x = player->x + player->move_modifier*env->agent_speed*vel_x;
+            move_to(env->map, player, dest_y, dest_x);
         }
 
-        Entity* target = NULL;
-        // TODO: What is this logic here?
-        if (env->scanned_targets[pid][0] != NULL)
-            target = nearest_scanned_target(env, player);
-
-        // TODO: Clean this mess
-        if (use_q && player->q_timer <= 0 && env->skills[pid][0](env, player, target) == 0) {
-            log->usage_q += 1;
-        } else if (use_w && player->w_timer <= 0 && env->skills[pid][1](env, player, target) == 0) {
-            log->usage_w += 1;
-        } else if (use_e && player->e_timer <= 0 && env->skills[pid][2](env, player, target) == 0) {
-            log->usage_e += 1;
-        } else if (target != NULL && basic_attack(env, player, target)==0) {
-            log->usage_auto += 1;
-        }
-
-        float dest_y = player->y + player->move_modifier*env->agent_speed*vel_y;
-        float dest_x = player->x + player->move_modifier*env->agent_speed*vel_x;
-        move_to(env->map, player, dest_y, dest_x);
-
-        Reward* reward = &env->reward_components[pid];
-        env->rewards[pid] = (
+        float sum_reward = (
             reward->death +
             reward->xp +
             reward->distance +
             reward->tower
         );
+
         env->log[pid].reward_death = reward->death;
         env->log[pid].reward_xp = reward->xp;
         env->log[pid].reward_distance = reward->distance;
         env->log[pid].reward_tower = reward->tower;
-        env->log[pid].episode_return += env->rewards[pid];
+        env->log[pid].episode_return += sum_reward;
+
+        if (!env->script_opponents || pid < 5) {
+            env->rewards[pid] = sum_reward;
+        }
     }
 }
 
@@ -1534,7 +1559,7 @@ void init_moba(MOBA* env, unsigned char* game_map_npy) {
     env->dire_victories = 0;
 
     env->entities = calloc(NUM_ENTITIES, sizeof(Entity));
-    env->reward_components = calloc(NUM_AGENTS, sizeof(Reward));
+    env->reward_components = calloc(NUM_PLAYERS, sizeof(Reward));
 
     env->map = (Map*)calloc(1, sizeof(Map));
     env->map->grid = calloc(128*128, sizeof(unsigned char));
@@ -1605,6 +1630,7 @@ void init_moba(MOBA* env, unsigned char* game_map_npy) {
         player->hp_gain_per_level = 100;
         player->mana_gain_per_level = 50;
         player->damage_gain_per_level = 10;
+        player->lane = 2 + 3*team;
 
         pid = 5*team + 1;
         player = &env->entities[pid];
@@ -1621,6 +1647,7 @@ void init_moba(MOBA* env, unsigned char* game_map_npy) {
         player->hp_gain_per_level = 100;
         player->mana_gain_per_level = 65;
         player->damage_gain_per_level = 10;
+        player->lane = 1 + 3*team;
 
         pid = 5*team + 2;
         player = &env->entities[pid];
@@ -1637,6 +1664,7 @@ void init_moba(MOBA* env, unsigned char* game_map_npy) {
         player->hp_gain_per_level = 75;
         player->mana_gain_per_level = 90;
         player->damage_gain_per_level = 10;
+        player->lane = 1 + 3*team;
 
         pid = 5*team + 3;
         player = &env->entities[pid];
@@ -1653,6 +1681,7 @@ void init_moba(MOBA* env, unsigned char* game_map_npy) {
         player->hp_gain_per_level = 150;
         player->mana_gain_per_level = 50;
         player->damage_gain_per_level = 15;
+        player->lane = 3*team;
 
         pid = 5*team + 4;
         player = &env->entities[pid];
@@ -1669,6 +1698,7 @@ void init_moba(MOBA* env, unsigned char* game_map_npy) {
         player->hp_gain_per_level = 50;
         player->mana_gain_per_level = 50;
         player->damage_gain_per_level = 25;
+        player->lane = 2 + 3*team;
     }
 
     Entity *tower;
@@ -1724,11 +1754,12 @@ void init_moba(MOBA* env, unsigned char* game_map_npy) {
 
 MOBA* allocate_moba(MOBA* env) {
     // TODO: Don't hardcode sizes
-    env->observations = calloc(NUM_AGENTS*(11*11*4 + 26), sizeof(unsigned char));
-    env->actions = calloc(NUM_AGENTS*6, sizeof(int));
-    env->rewards = calloc(NUM_AGENTS, sizeof(float));
-    env->terminals = calloc(NUM_AGENTS, sizeof(unsigned char));
-    env->truncations = calloc(NUM_AGENTS, sizeof(unsigned char));
+    int agents = (env->script_opponents) ? NUM_PLAYERS/2 : NUM_PLAYERS;
+    env->observations = calloc(agents*(11*11*4 + 26), sizeof(unsigned char));
+    env->actions = calloc(agents*6, sizeof(int));
+    env->rewards = calloc(agents, sizeof(float));
+    env->terminals = calloc(agents, sizeof(unsigned char));
+    env->truncations = calloc(agents, sizeof(unsigned char));
     env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
 
     unsigned char* game_map_npy = read_file("resources/moba/game_map.npy");
@@ -1773,7 +1804,7 @@ void reset(MOBA* env) {
     }
 
     // Respawn agents
-    for (int i = 0; i < NUM_AGENTS; i++) {
+    for (int i = 0; i < NUM_PLAYERS; i++) {
         env->log[i] = (PlayerLog){0};
         Entity* player = &env->entities[i];
         player->target_pid = -1;

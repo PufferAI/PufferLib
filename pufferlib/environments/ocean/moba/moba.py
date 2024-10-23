@@ -15,12 +15,12 @@ PLAYER_OBS_N = 26
 class PufferMoba(pufferlib.PufferEnv):
     def __init__(self, num_envs=4, vision_range=5, agent_speed=1.0,
             discretize=True, reward_death=-1.0, reward_xp=0.006,
-            reward_distance=0.05, reward_tower=3.0,
-            report_interval=32, render_mode='human', buf=None):
+            reward_distance=0.05, reward_tower=3.0, report_interval=32,
+            script_opponents=True, render_mode='human', buf=None):
 
         self.report_interval = report_interval
         self.render_mode = render_mode
-        self.num_agents = 10*num_envs
+        self.num_agents = 5*num_envs if script_opponents else 10*num_envs
 
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=255,
             shape=(MAP_OBS_N + PLAYER_OBS_N,), dtype=np.uint8)
@@ -29,7 +29,7 @@ class PufferMoba(pufferlib.PufferEnv):
         super().__init__(buf=buf)
         self.c_envs = CyMOBA(self.observations, self.actions, self.rewards,
             self.terminals, num_envs, vision_range, agent_speed, True,
-            reward_death, reward_xp, reward_distance, reward_tower)
+            reward_death, reward_xp, reward_distance, reward_tower, script_opponents)
 
     def reset(self, seed=0):
         self.c_envs.reset()

@@ -106,7 +106,10 @@ void forward(MOBANet* net, unsigned char* observations, int* actions) {
 
 void demo() {
     Weights* weights = load_weights("resources/moba/moba_weights.bin", 380056);
-    MOBANet* net = init_mobanet(weights, 10);
+    bool script_opponents = true;
+
+    int num_agents = script_opponents ? 5 : 10;
+    MOBANet* net = init_mobanet(weights, num_agents);
 
     MOBA env = {
         .vision_range = 5,
@@ -116,6 +119,7 @@ void demo() {
         .reward_xp = 0.006,
         .reward_distance = 0.05,
         .reward_tower = 3.0,
+        .script_opponents = script_opponents,
     };
     allocate_moba(&env);
 
@@ -138,6 +142,9 @@ void demo() {
 }
 
 void test_performance(float test_time) {
+    bool script_opponents = true;
+    int num_agents = script_opponents ? 5 : 10;
+
     MOBA env = {
         .vision_range = 5,
         .agent_speed = 1.0,
@@ -146,6 +153,7 @@ void test_performance(float test_time) {
         .reward_xp = 0.006,
         .reward_distance = 0.05,
         .reward_tower = 3.0,
+        .script_opponents = script_opponents,
     };
     allocate_moba(&env);
 
@@ -153,7 +161,7 @@ void test_performance(float test_time) {
     int start = time(NULL);
     int i = 0;
     while (time(NULL) - start < test_time) {
-        for (int j = 0; j < 10; j++) {
+        for (int j = 0; j < num_agents; j++) {
             env.actions[6*j] = rand()%600 - 300;
             env.actions[6*j + 1] = rand()%600 - 300;
             env.actions[6*j + 2] = rand()%3;
@@ -165,7 +173,7 @@ void test_performance(float test_time) {
         i++;
     }
     int end = time(NULL);
-    printf("SPS: %f\n", 10.0f*i / (end - start));
+    printf("SPS: %f\n", (float)num_agents*i / (end - start));
 }
 
 void test_bugs(float test_time) {
@@ -180,6 +188,7 @@ void test_bugs(float test_time) {
         .reward_xp = 0.006,
         .reward_distance = 0.05,
         .reward_tower = 3.0,
+        .script_opponents = true,
     };
     allocate_moba(&env);
 
@@ -202,7 +211,7 @@ void test_bugs(float test_time) {
 
 int main() {
     //test_bugs(2.0f);
-    demo();
-    //test_performance(30.0f);
+    //demo();
+    test_performance(30.0f);
     return 0;
 }

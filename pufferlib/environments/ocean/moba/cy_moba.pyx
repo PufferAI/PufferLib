@@ -153,6 +153,7 @@ cdef extern from "moba.h":
         int vision_range;
         float agent_speed;
         unsigned char discretize;
+        unsigned char script_opponents;
         int obs_size;
         int creep_idx;
         int tick;
@@ -223,7 +224,7 @@ cdef class CyMOBA:
     def __init__(self, unsigned char[:, :] observations, int[:, :] actions,
             float[:] rewards, unsigned char[:] terminals, int num_envs,  int vision_range,
             float agent_speed, bint discretize, float reward_death, float reward_xp,
-            float reward_distance, float reward_tower):
+            float reward_distance, float reward_tower, bint script_opponents):
 
         self.num_envs = num_envs
         self.client = NULL
@@ -238,12 +239,13 @@ cdef class CyMOBA:
         for i in range(128*128*128*128):
             self.ai_paths[i] = 255
 
+        cdef int inc = 5 if script_opponents else 10
         for i in range(num_envs):
             self.envs[i] = MOBA(
-                observations=&observations[10*i, 0],
-                actions=&actions[10*i, 0],
-                rewards=&rewards[10*i],
-                terminals=&terminals[10*i],
+                observations=&observations[inc*i, 0],
+                actions=&actions[inc*i, 0],
+                rewards=&rewards[inc*i],
+                terminals=&terminals[inc*i],
                 ai_paths = self.ai_paths,
                 ai_path_buffer = self.ai_path_buffer,
                 log_buffer=self.logs,
@@ -254,6 +256,7 @@ cdef class CyMOBA:
                 reward_xp=reward_xp,
                 reward_distance=reward_distance,
                 reward_tower=reward_tower,
+                script_opponents=script_opponents,
             )
             init_moba(&self.envs[i], game_map_npy)
 
