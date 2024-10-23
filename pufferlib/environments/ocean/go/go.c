@@ -1,14 +1,14 @@
 #include <time.h>
 #include "go.h"
 
-void demo() {
+void demo(int grid_size) {
     CGo env = {
-        .width = 1000,
-        .height = 800,
-        .grid_size = 9,
-        .board_width = 600,
-        .board_height = 600,
-        .grid_square_size = 600/9,
+        .width = 950,
+        .height = 64*(grid_size+1),
+        .grid_size = grid_size,
+        .board_width = 64*(grid_size+1) + 400,
+        .board_height = 64*(grid_size+1),
+        .grid_square_size = 64,
         .moves_made = 0,
         .komi = 7.5
     };
@@ -25,8 +25,8 @@ void demo() {
             Vector2 mousePos = GetMousePosition();
     
             // Calculate the offset for the board
-            int boardOffsetX = 100; // 196 from the DrawRectangle call in render(), plus 10 for padding
-            int boardOffsetY = 100; // From the DrawRectangle call in render()
+            int boardOffsetX = env.grid_square_size;
+            int boardOffsetY = env.grid_square_size;
             
             // Adjust mouse position relative to the board
             int relativeX = mousePos.x - boardOffsetX;
@@ -88,7 +88,7 @@ void performance_test() {
 }
 
 int main() {
-    demo();
+    demo(9);
     // performance_test();
     return 0;
 }

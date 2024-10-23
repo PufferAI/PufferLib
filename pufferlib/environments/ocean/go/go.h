@@ -682,6 +682,13 @@ void step(CGo* env) {
     compute_observations(env);
 }
 
+const Color STONE_GRAY = (Color){80, 80, 80, 255};
+const Color PUFF_RED = (Color){187, 0, 0, 255};
+const Color PUFF_CYAN = (Color){0, 187, 187, 255};
+const Color PUFF_WHITE = (Color){241, 241, 241, 241};
+const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
+const Color PUFF_BACKGROUND2 = (Color){18, 72, 72, 255};
+
 typedef struct Client Client;
 struct Client {
     float width;
@@ -705,17 +712,30 @@ void render(Client* client, CGo* env) {
     }
 
     BeginDrawing();
-    ClearBackground((Color){6, 24, 24, 255});
+    ClearBackground(PUFF_BACKGROUND);
 
-    for (int row = 0; row < env->grid_size-1; row++) {
-        for (int col = 0; col < env->grid_size-1; col++) {
-            int idx = row * (env->grid_size-1) + col;
-            int x = env->board_x[idx];
-            int y = env->board_y[idx];
-            Color tile_color = (Color){ 253, 208, 124, 255 };
-            DrawRectangle(x+100, y+100, env->grid_square_size, env->grid_square_size, tile_color);
-            DrawRectangleLines(x+100, y+100, env->grid_square_size, env->grid_square_size, BLACK);
-        }
+    int board_size = (env->grid_size + 1) * env->grid_square_size;
+    DrawRectangle(0, 0, board_size, board_size, PUFF_BACKGROUND);
+    DrawRectangle(
+        env->grid_square_size,
+        env->grid_square_size,
+        board_size - 2*env->grid_square_size,
+        board_size - 2*env->grid_square_size,
+        PUFF_BACKGROUND2
+    );
+    int start = env->grid_square_size;
+    int end = board_size - env->grid_square_size;
+    for (int i = 1; i <= env->grid_size; i++) {
+        DrawLineEx(
+            (Vector2){start, i*start},
+            (Vector2){end, i*start},
+            4, PUFF_BACKGROUND
+        );
+        DrawLineEx(
+            (Vector2){i*start, start},
+            (Vector2){i*start, end},
+            4, PUFF_BACKGROUND
+        );
     }
 
     for (int i = 0; i < (env->grid_size) * (env->grid_size); i++) {
@@ -725,25 +745,34 @@ void render(Client* client, CGo* env) {
         int x = col * env->grid_square_size;
         int y = row * env->grid_square_size;
         // Calculate the circle position based on the grid
-        int circle_x = x + 100;
-        int circle_y = y + 100;
+        int circle_x = x + env->grid_square_size;
+        int circle_y = y + env->grid_square_size;
         // if player draw circle tile for black 
+        int inner = (env->grid_square_size / 2) - 4;
+        int outer = (env->grid_square_size / 2) - 2;
         if (position_state == 1) {
-            DrawCircle(circle_x, circle_y, env->grid_square_size / 2, BLACK);
-            DrawCircleLines(circle_x, circle_y, env->grid_square_size / 2, BLACK);
+            DrawCircleGradient(circle_x, circle_y, outer, STONE_GRAY, BLACK);
         }
         // if enemy draw circle tile for white
         if (position_state == 2) {
-            DrawCircle(circle_x, circle_y, env->grid_square_size / 2, WHITE);
-            DrawCircleLines(circle_x, circle_y, env->grid_square_size / 2, WHITE);
+            DrawCircleGradient(circle_x, circle_y, inner, WHITE, GRAY);
         }
     }
     // design a pass button
-    DrawRectangle(env->width - 300, 200, 100, 50, GRAY);
-    DrawText("Pass", env->width - 280, 215, 20, WHITE);
+    int left = (env->grid_size + 1)*env->grid_square_size;
+    int top = env->grid_square_size;
+    DrawRectangle(left, top + 90, 100, 50, GRAY);
+    DrawText("Pass", left + 25, top + 105, 20, PUFF_WHITE);
+
     // show capture count for both players
-    DrawText(TextFormat("Player 1 Capture Count: %d", env->capture_count[0]), env->width - 300, 110, 20, WHITE);
-    DrawText(TextFormat("Player 2 Capture Count: %d", env->capture_count[1]), env->width - 300, 130, 20, WHITE);
+    DrawText(
+        TextFormat("Player 1 Capture Count: %d", env->capture_count[0]),
+        left, top, 20, PUFF_WHITE
+    );
+    DrawText(
+        TextFormat("Player 2 Capture Count: %d", env->capture_count[1]),
+        left, top + 40, 20, PUFF_WHITE
+    );
     EndDrawing();
 }
 void close_client(Client* client) {
