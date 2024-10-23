@@ -212,8 +212,11 @@ int compute_env_move(CConnect4* env) {
             return 3;
     }
 
-    float best_value = 999;
-    float values[7] = {999};
+    float best_value = 9999;
+    float values[7];
+    for (int i = 0; i < 7; i++) {
+        values[i] = 9999;
+    }
     for (uint64_t column = 0; column < 7; column ++) {
         if (invalid_move(column, piece_mask)) {
             continue;
@@ -240,11 +243,12 @@ int compute_env_move(CConnect4* env) {
         if (values[column] == best_value) {
             if (best_tie == 0) {
                 return column;
+
             }
             best_tie--;
         }
     }
-    exit(1);
+    return 0;
 }
 
 void compute_observation(CConnect4* env) {
