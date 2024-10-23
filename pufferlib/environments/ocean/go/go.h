@@ -639,12 +639,12 @@ void step(CGo* env) {
     env->rewards[0] = 0.0;
     int action = (int)env->actions[0];
     // useful for training , can prob be a hyper param. Recommend to increase with larger board size
-    // if (env->log.episode_length >150) {
-    //     env->dones[0] = 1;
-    //     end_game(env);
-    //     compute_observations(env);
-    //     return;
-    // }
+    /*if (env->log.episode_length >150) {
+         env->dones[0] = 1;
+         end_game(env);
+         compute_observations(env);
+         return;
+    }*/
     if(action == NOOP){
         env->rewards[0] -= 0.25;;
         env->log.episode_return -= 0.25;
