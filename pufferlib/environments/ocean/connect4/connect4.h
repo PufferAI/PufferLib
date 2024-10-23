@@ -128,7 +128,7 @@ uint64_t bottom() {
 }
 
 bool invalid_move(int column, uint64_t mask) {
-    return (mask & top_mask(column)) == 1;
+    return (mask & top_mask(column)) != 0;
 }
 
 uint64_t play(int column, uint64_t mask,  uint64_t other_pieces) {
