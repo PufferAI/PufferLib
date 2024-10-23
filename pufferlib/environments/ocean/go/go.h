@@ -2,19 +2,15 @@
 #include <stdio.h>
 #include <math.h>
 #include <assert.h>
-#include "raylib.h"
 #include <string.h>
+#include "raylib.h"
+
 #define NOOP 0
 #define MOVE_MIN 1
-#define MOVE_MAX 1000
-#define HALF_MAX_SCORE 432
-#define MAX_SCORE 864
-#define HALF_PADDLE_WIDTH 31
-#define Y_OFFSET 50
 #define TICK_RATE 1.0f/60.0f
 #define NUM_DIRECTIONS 4
 static const int DIRECTIONS[NUM_DIRECTIONS][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-//  LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./go
+//  LD_LIBRARY_PATH=raylib/lib ./go
 #define LOG_BUFFER_SIZE 1024
 
 typedef struct Log Log;
@@ -138,17 +134,16 @@ struct CGo {
 };
 
 void generate_board_positions(CGo* env) {
-    for (int row = 0; row < env->grid_size ; row++) {
-        for (int col = 0; col < env->grid_size; col++) {
-            int idx = row * env->grid_size + col;
-            env->board_x[idx] = col* env->grid_square_size;
-            env->board_y[idx] = row*env->grid_square_size;
-        }
+    for (int i = 0; i < (env->grid_size-1) * (env->grid_size-1); i++) {
+        int row = i / (env->grid_size-1);
+        int col = i % (env->grid_size-1);
+        env->board_x[i] = col * (env->grid_square_size-1);
+        env->board_y[i] = row * (env->grid_square_size-1);
     }
 }
 
 void init_groups(CGo* env) {
-    for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
+    for (int i = 0; i < (env->grid_size)*(env->grid_size); i++) {
         env->groups[i].parent = i;
         env->groups[i].rank = 0;
         env->groups[i].size = 1;
@@ -157,22 +152,24 @@ void init_groups(CGo* env) {
 }
 
 void init(CGo* env) {
-    env->board_x = (int*)calloc((env->grid_size)*(env->grid_size), sizeof(int));
-    env->board_y = (int*)calloc((env->grid_size)*(env->grid_size), sizeof(int));
-    env->board_states = (int*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(int));
-    env->visited = (int*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(int));
-    env->previous_board_state = (int*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(int));
-    env->temp_board_states = (int*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(int));
+    int board_render_size = (env->grid_size-1)*(env->grid_size-1);
+    int grid_size = env->grid_size*env->grid_size;
+    env->board_x = (int*)calloc(board_render_size, sizeof(int));
+    env->board_y = (int*)calloc(board_render_size, sizeof(int));
+    env->board_states = (int*)calloc(grid_size, sizeof(int));
+    env->visited = (int*)calloc(grid_size, sizeof(int));
+    env->previous_board_state = (int*)calloc(grid_size, sizeof(int));
+    env->temp_board_states = (int*)calloc(grid_size, sizeof(int));
     env->capture_count = (int*)calloc(2, sizeof(int));
-    env->groups = (Group*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(Group));
-    env->temp_groups = (Group*)calloc((env->grid_size+1)*(env->grid_size+1), sizeof(Group));
+    env->groups = (Group*)calloc(grid_size, sizeof(Group));
+    env->temp_groups = (Group*)calloc(grid_size, sizeof(Group));
     generate_board_positions(env);
     init_groups(env);
 }
 
 void allocate(CGo* env) {
     init(env);
-    env->observations = (float*)calloc((env->grid_size+1)*(env->grid_size+1)*2 + 3, sizeof(float));
+    env->observations = (float*)calloc((env->grid_size)*(env->grid_size)*2 + 3, sizeof(float));
     env->actions = (unsigned short*)calloc(1, sizeof(unsigned short));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
@@ -202,26 +199,32 @@ void free_allocated(CGo* env) {
 
 void compute_observations(CGo* env) {
     int observation_indx=0;
-    for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
-        env->observations[observation_indx++] = (float)env->board_states[i];
+    for (int i = 0; i < (env->grid_size)*(env->grid_size); i++) {
+        env->observations[observation_indx] = (float)env->board_states[i];
+        observation_indx++;
     }
-    for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
-        env->observations[observation_indx++] = (float)env->previous_board_state[i];
+    for (int i = 0; i < (env->grid_size)*(env->grid_size); i++) {
+        env->observations[observation_indx] = (float)env->previous_board_state[i];
+        observation_indx++;
     }
-    env->observations[observation_indx++] = env->score;
+    env->observations[observation_indx] = env->score;
 
+}
+
+int is_valid_position(CGo* env, int x, int y) {
+    return (x >= 0 && x < env->grid_size && y >= 0 && y < env->grid_size);
 }
 
 void reset_visited(CGo* env) {
-    memset(env->visited, 0, sizeof(int) * (env->grid_size + 1) * (env->grid_size + 1));
+    memset(env->visited, 0, sizeof(int) * (env->grid_size) * (env->grid_size));
 }
 
 void flood_fill(CGo* env, int x, int y, int* territory, int player) {
-    if (x < 0 || x >= env->grid_size + 1 || y < 0 || y >= env->grid_size + 1) {
+    if (!is_valid_position(env, x, y)) {
         return;
     }
 
-    int pos = y * (env->grid_size + 1) + x;
+    int pos = y * (env->grid_size) + x;
     if (env->visited[pos] || env->board_states[pos] != 0) {
         return;
     }
@@ -239,7 +242,7 @@ void compute_score_tromp_taylor(CGo* env) {
     int territory[3] = {0, 0, 0}; // [neutral, player, opponent]
     reset_visited(env);
     // Count stones and mark them as visited
-    for (int i = 0; i < (env->grid_size + 1) * (env->grid_size + 1); i++) {
+    for (int i = 0; i < (env->grid_size) * (env->grid_size); i++) {
         env->visited[i] = 0;
         if (env->board_states[i] == 1) {
             player_score++;
@@ -249,38 +252,46 @@ void compute_score_tromp_taylor(CGo* env) {
             env->visited[i] = 1;
         }
     }
-    for (int y = 0; y < env->grid_size + 1; y++) {
-        for (int x = 0; x < env->grid_size + 1; x++) {
-            int pos = y * (env->grid_size + 1) + x;
-            if (env->visited[pos]) {
+    for (int pos = 0; pos < (env->grid_size) * (env->grid_size); pos++) {
+        int x = pos % (env->grid_size);
+        int y = pos / (env->grid_size);
+        if (env->visited[pos]) {
+            continue;
+        }
+        int player = 0; // Start as neutral
+        // Check adjacent positions to determine territory owner
+        for (int i = 0; i < 4; i++) {
+            int nx = x + DIRECTIONS[i][0];
+            int ny = y + DIRECTIONS[i][1];
+            if (!is_valid_position(env, nx, ny)) {
                 continue;
             }
-            int player = 0; // Start as neutral
-            // Check adjacent positions to determine territory owner
-            for (int i = 0; i < 4; i++) {
-                int nx = x + DIRECTIONS[i][0];
-                int ny = y + DIRECTIONS[i][1];
-                if (nx < 0 || nx >= env->grid_size + 1 || ny < 0 || ny >= env->grid_size + 1) {
-                    continue;
-                }
-                int npos = ny * (env->grid_size + 1) + nx;
-                if (env->board_states[npos] == 0) {
-                    continue;
-                }
-                if (player == 0) {
-                    player = env->board_states[npos];
-                } else if (player != env->board_states[npos]) {
-                    player = 0; // Neutral if bordered by both players
-                    break;
-                }
+            int npos = ny * (env->grid_size) + nx;
+            if (env->board_states[npos] == 0) {
+                continue;
             }
-            flood_fill(env, x, y, territory, player);
+            if (player == 0) {
+                player = env->board_states[npos];
+            } else if (player != env->board_states[npos]) {
+                player = 0; // Neutral if bordered by both players
+                break;
+            }
         }
+        flood_fill(env, x, y, territory, player);
     }
     // Calculate final scores
     player_score += territory[1];
     opponent_score += territory[2];
     env->score = (float)player_score - (float)opponent_score - env->komi;
+}
+
+int find_in_group(int* group, int group_size, int value) {
+    for (int i = 0; i < group_size; i++) {
+        if (group[i] == value) {
+            return 1;  // Found
+        }
+    }
+    return 0;  // Not found
 }
 
 
@@ -289,8 +300,8 @@ void capture_group(CGo* env, int* board, int root, int* affected_groups, int* af
     reset_visited(env);
 
     // Use a queue for BFS
-    int queue_size = (env->grid_size + 1) * (env->grid_size + 1);
-    int* queue = (int*)malloc(sizeof(int) * queue_size);
+    int queue_size = (env->grid_size) * (env->grid_size);
+    int queue[queue_size];
     int front = 0, rear = 0;
 
     int captured_player = board[root];       // Player whose stones are being captured
@@ -304,15 +315,15 @@ void capture_group(CGo* env, int* board, int root, int* affected_groups, int* af
         board[pos] = 0;  // Remove stone
         env->capture_count[capturing_player - 1]++;  // Update capturing player's count
 
-        int x = pos % (env->grid_size + 1);
-        int y = pos / (env->grid_size + 1);
+        int x = pos % (env->grid_size);
+        int y = pos / (env->grid_size);
 
         for (int i = 0; i < 4; i++) {
             int nx = x + DIRECTIONS[i][0];
             int ny = y + DIRECTIONS[i][1];
-            int npos = ny * (env->grid_size + 1) + nx;
+            int npos = ny * (env->grid_size) + nx;
 
-            if (nx < 0 || nx >= env->grid_size + 1 || ny < 0 || ny >= env->grid_size + 1) {
+            if (!is_valid_position(env, nx, ny)) {
                 continue;
             }
 
@@ -322,21 +333,14 @@ void capture_group(CGo* env, int* board, int root, int* affected_groups, int* af
             }
             else if (board[npos] == capturing_player) {
                 int adj_root = find(env->temp_groups, npos);
-                bool already_added = false;
-                for (int i = 0; i < *affected_count; i++) {
-                    if (affected_groups[i] == adj_root) {
-                        already_added = true;
-                        break;
-                    }
+                if (find_in_group(affected_groups, *affected_count, adj_root)) {
+                    continue;
                 }
-                if (!already_added) {
-                    affected_groups[(*affected_count)++] = adj_root;
-                }
+                affected_groups[(*affected_count)] = adj_root;
+                (*affected_count)++;
             }
         }
     }
-
-    free(queue);
 }
 
 
@@ -350,17 +354,17 @@ int count_liberties(CGo* env, int root, int* queue) {
     env->visited[root] = 1;
     while (front < rear) {
         int pos = queue[front++];
-        int x = pos % (env->grid_size + 1);
-        int y = pos / (env->grid_size + 1);
+        int x = pos % (env->grid_size);
+        int y = pos / (env->grid_size);
         
         for (int i = 0; i < 4; i++) {
             int nx = x + DIRECTIONS[i][0];
             int ny = y + DIRECTIONS[i][1];
-            if (nx < 0 || nx >= env->grid_size + 1 || ny < 0 || ny >= env->grid_size + 1) {
+            if (!is_valid_position(env, nx, ny)) {
                 continue;
             }
             
-            int npos = ny * (env->grid_size + 1) + nx;
+            int npos = ny * (env->grid_size) + nx;
             if (env->visited[npos]) {
                 continue;
             }
@@ -378,16 +382,25 @@ int count_liberties(CGo* env, int root, int* queue) {
     return liberties;
 }
 
+int is_ko(CGo* env) {
+    for (int i = 0; i < (env->grid_size) * (env->grid_size); i++) {
+        if (env->temp_board_states[i] != env->previous_board_state[i]) {
+            return 0;  // Not a ko
+        }
+    }
+    return 1;  // Is a ko
+}
+
 int make_move(CGo* env, int pos, int player){
-    int x = pos % (env->grid_size + 1);
-    int y = pos / (env->grid_size + 1);
+    int x = pos % (env->grid_size);
+    int y = pos / (env->grid_size);
     // cannot place stone on occupied tile
     if (env->board_states[pos] != 0) {
         return 0 ;
     }
     // temp structures
-    memcpy(env->temp_board_states, env->board_states, sizeof(int) * (env->grid_size+1) * (env->grid_size+1));
-    memcpy(env->temp_groups, env->groups, sizeof(Group) * (env->grid_size+1) * (env->grid_size+1));
+    memcpy(env->temp_board_states, env->board_states, sizeof(int) * (env->grid_size) * (env->grid_size));
+    memcpy(env->temp_groups, env->groups, sizeof(Group) * (env->grid_size) * (env->grid_size));
     // create new group
     env->temp_board_states[pos] = player;
     env->temp_groups[pos].parent = pos;
@@ -395,19 +408,19 @@ int make_move(CGo* env, int pos, int player){
     env->temp_groups[pos].size = 1;
     env->temp_groups[pos].liberties = 0;
     
-    int max_affected_groups = (env->grid_size + 1) * (env->grid_size + 1);
+    int max_affected_groups = (env->grid_size) * (env->grid_size);
     int affected_groups[max_affected_groups];
     int affected_count = 0;
     affected_groups[affected_count++] = pos;
 
-    int queue[(env->grid_size + 1) * (env->grid_size + 1)];
+    int queue[(env->grid_size) * (env->grid_size)];
 
     // Perform unions and track affected groups
     for (int i = 0; i < 4; i++) {
         int nx = x + DIRECTIONS[i][0];
         int ny = y + DIRECTIONS[i][1];
-        int npos = ny * (env->grid_size + 1) + nx;
-        if (nx < 0 || nx >= env->grid_size + 1 || ny < 0 || ny >= env->grid_size + 1) {
+        int npos = ny * (env->grid_size) + nx;
+        if (!is_valid_position(env, nx, ny)) {
             continue;
         }
         if (env->temp_board_states[npos] == player) {
@@ -440,31 +453,24 @@ int make_move(CGo* env, int pos, int player){
             env->temp_groups[root].liberties = count_liberties(env, root, queue);
         }
         // Check for ko rule violation
-        bool is_ko = true;
-        for (int i = 0; i < (env->grid_size+1) * (env->grid_size+1); i++) {
-            if (env->temp_board_states[i] != env->previous_board_state[i]) {
-                is_ko = false;
-                break;
-            }
-        }
-        if (is_ko) {
-            return 0;  // Ko rule violation
+        if(is_ko(env)) {
+            return 0;
         }
     }
-    
+    // self capture
     int root = find(env->temp_groups, pos);
     if (env->temp_groups[root].liberties == 0) {
         return 0;
     }
-    memcpy(env->board_states, env->temp_board_states, sizeof(int) * (env->grid_size + 1) * (env->grid_size + 1));
-    memcpy(env->groups, env->temp_groups, sizeof(Group) * (env->grid_size + 1) * (env->grid_size + 1));
+    memcpy(env->board_states, env->temp_board_states, sizeof(int) * (env->grid_size) * (env->grid_size));
+    memcpy(env->groups, env->temp_groups, sizeof(Group) * (env->grid_size) * (env->grid_size));
     return 1;
 
 }
 
 
 void enemy_random_move(CGo* env){
-    int num_positions = (env->grid_size+1)*(env->grid_size+1);
+    int num_positions = (env->grid_size)*(env->grid_size);
     int positions[num_positions];
     int count = 0;
 
@@ -493,21 +499,21 @@ void enemy_random_move(CGo* env){
 
 int find_group_liberty(CGo* env, int root){
     reset_visited(env);
-    int queue[(env->grid_size + 1)*(env->grid_size + 1)];
+    int queue[(env->grid_size)*(env->grid_size)];
     int front = 0, rear = 0;
     queue[rear++] = root;
     env->visited[root] = 1;
 
     while(front < rear){
         int pos = queue[front++];
-        int x = pos % (env->grid_size + 1);
-        int y = pos / (env->grid_size + 1);
+        int x = pos % (env->grid_size);
+        int y = pos / (env->grid_size);
 
         for(int i = 0; i < 4; i++){
             int nx = x + DIRECTIONS[i][0];
             int ny = y + DIRECTIONS[i][1];
-            int npos = ny * (env->grid_size + 1) + nx;
-            if(nx < 0 || nx >= env->grid_size + 1 || ny < 0 || ny >= env->grid_size + 1){
+            int npos = ny * (env->grid_size) + nx;
+            if(!is_valid_position(env, nx, ny)){
                 continue;
             }
             if(env->board_states[npos] == 0){
@@ -523,11 +529,11 @@ int find_group_liberty(CGo* env, int root){
 
 void enemy_greedy_hard(CGo* env){
 	// Attempt to capture opponent stones in atari
-    int liberties[4][(env->grid_size+1) * (env->grid_size+1)];
+    int liberties[4][(env->grid_size) * (env->grid_size)];
     int liberty_counts[4] = {0};
-    for(int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++){
-	if(env->board_states[i]==0){
-            continue;
+    for(int i = 0; i < (env->grid_size)*(env->grid_size); i++){
+        if(env->board_states[i]==0){
+                continue;
         }
         if (env->board_states[i]==1){
             int root = find(env->groups, i);
@@ -553,36 +559,38 @@ void enemy_greedy_hard(CGo* env){
             }
         }
     }
-    // Play a random legal move
+    // random move
     enemy_random_move(env);
 }
 
 void enemy_greedy_easy(CGo* env){
     // Attempt to capture opponent stones in atari
-    for(int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++){
-        if(env->board_states[i] == 1){ // Opponent stones from enemy's perspective
-            int root = find(env->groups, i);
-            if(env->groups[root].liberties == 1){
-                int liberty = find_group_liberty(env, root);
-                if(make_move(env, liberty, 2)){
-                    return; // Successful capture
-                }
+    for(int i = 0; i < (env->grid_size)*(env->grid_size); i++){
+        if(env->board_states[i] != 1){
+            continue;
+        }
+        int root = find(env->groups, i);
+        if(env->groups[root].liberties == 1){
+            int liberty = find_group_liberty(env, root);
+            if(make_move(env, liberty, 2)){
+                return; // Successful capture
             }
         }
     }
     // Protect own stones in atari
-    for(int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++){
-        if(env->board_states[i] == 2){ // Enemy's own stones
-            int root = find(env->groups, i);
-            if(env->groups[root].liberties == 1){
-                int liberty = find_group_liberty(env, root);
-                if(make_move(env, liberty, 2)){
-                    return; // Successful defense
-                }
+    for(int i = 0; i < (env->grid_size)*(env->grid_size); i++){
+        if(env->board_states[i] != 2){
+            continue;
+        }
+        // Enemy's own stones
+        int root = find(env->groups, i);
+        if(env->groups[root].liberties == 1){
+            int liberty = find_group_liberty(env, root);
+            if(make_move(env, liberty, 2)){
+                return; // Successful defense
             }
         }
     }
-    
     // Play a random legal move
     enemy_random_move(env);
 }
@@ -591,7 +599,7 @@ void reset(CGo* env) {
     env->log = (Log){0};
     env->dones[0] = 0;
     env->score = 0;
-    for (int i = 0; i < (env->grid_size+1)*(env->grid_size+1); i++) {
+    for (int i = 0; i < (env->grid_size)*(env->grid_size); i++) {
         env->board_states[i] = 0;
         env->temp_board_states[i] = 0;
         env->visited[i] = 0;
@@ -630,20 +638,17 @@ void step(CGo* env) {
     env->log.episode_length += 1;
     env->rewards[0] = 0.0;
     int action = (int)env->actions[0];
-
     // useful for training , can prob be a hyper param. Recommend to increase with larger board size
-    // if (env->log.episode_length >150) {
-    //     env->dones[0] = 1;
-    //     end_game(env);
-    //     compute_observations(env);
-    //     return;
-    // }
-    
-
+    /*if (env->log.episode_length >150) {
+         env->dones[0] = 1;
+         end_game(env);
+         compute_observations(env);
+         return;
+    }*/
     if(action == NOOP){
         env->rewards[0] -= 0.25;;
         env->log.episode_return -= 0.25;
-        enemy_greedy_easy(env);
+        enemy_greedy_hard(env);
         if (env->dones[0] == 1) {
             end_game(env);
             return;
@@ -651,13 +656,13 @@ void step(CGo* env) {
         compute_observations(env);
         return;
     }
-    if (action >= MOVE_MIN && action <= (env->grid_size+1)*(env->grid_size+1)) {
-        memcpy(env->previous_board_state, env->board_states, sizeof(int) * (env->grid_size+1) * (env->grid_size+1));
+    if (action >= MOVE_MIN && action <= (env->grid_size)*(env->grid_size)) {
+        memcpy(env->previous_board_state, env->board_states, sizeof(int) * (env->grid_size) * (env->grid_size));
         if(make_move(env, action-1, 1)) {
             env->moves_made++;
             env->rewards[0] += 0.1;
             env->log.episode_return += 0.1;
-            enemy_greedy_easy(env);
+            enemy_greedy_hard(env);
 
         } else {
             env->rewards[0] -= 0.1;
@@ -666,7 +671,7 @@ void step(CGo* env) {
         compute_observations(env);
     }
 
-    if (env->moves_made >= (env->grid_size+1)*(env->grid_size+1)*2) {        
+    if (env->moves_made >= (env->grid_size)*(env->grid_size)*2) {        
         env->dones[0] = 1;
     }
 
@@ -688,13 +693,8 @@ Client* make_client(int width, int height) {
     Client* client = (Client*)calloc(1, sizeof(Client));
     client->width = width;
     client->height = height;
-
     InitWindow(width, height, "PufferLib Ray Go");
     SetTargetFPS(15);
-
-    //sound_path = os.path.join(*self.__module__.split(".")[:-1], "hit.wav")
-    //self.sound = rl.LoadSound(sound_path.encode())
-
     client->puffers = LoadTexture("resources/puffers_128.png");
     return client;
 }
@@ -707,9 +707,9 @@ void render(Client* client, CGo* env) {
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});
 
-    for (int row = 0; row < env->grid_size; row++) {
-        for (int col = 0; col < env->grid_size; col++) {
-            int idx = row * env->grid_size + col;
+    for (int row = 0; row < env->grid_size-1; row++) {
+        for (int col = 0; col < env->grid_size-1; col++) {
+            int idx = row * (env->grid_size-1) + col;
             int x = env->board_x[idx];
             int y = env->board_y[idx];
             Color tile_color = (Color){ 253, 208, 124, 255 };
@@ -718,10 +718,10 @@ void render(Client* client, CGo* env) {
         }
     }
 
-    for (int i = 0; i < (env->grid_size + 1) * (env->grid_size + 1); i++) {
+    for (int i = 0; i < (env->grid_size) * (env->grid_size); i++) {
         int position_state = env->board_states[i];
-        int row = i / (env->grid_size + 1);
-        int col = i % (env->grid_size + 1);
+        int row = i / (env->grid_size);
+        int col = i % (env->grid_size);
         int x = col * env->grid_square_size;
         int y = row * env->grid_square_size;
         // Calculate the circle position based on the grid
@@ -738,6 +738,9 @@ void render(Client* client, CGo* env) {
             DrawCircleLines(circle_x, circle_y, env->grid_square_size / 2, WHITE);
         }
     }
+    // design a pass button
+    DrawRectangle(env->width - 300, 200, 100, 50, GRAY);
+    DrawText("Pass", env->width - 280, 215, 20, WHITE);
     // show capture count for both players
     DrawText(TextFormat("Player 1 Capture Count: %d", env->capture_count[0]), env->width - 300, 110, 20, WHITE);
     DrawText(TextFormat("Player 2 Capture Count: %d", env->capture_count[1]), env->width - 300, 130, 20, WHITE);
@@ -747,4 +750,3 @@ void close_client(Client* client) {
     CloseWindow();
     free(client);
 }
-

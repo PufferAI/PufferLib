@@ -28,8 +28,8 @@ class MyGo(pufferlib.PufferEnv):
         self.render_mode = render_mode
         self.report_interval = report_interval
         
-        self.num_obs = (grid_size+1) * (grid_size+1)*2 + 3
-        self.num_act = (grid_size+1) * (grid_size+1) + 1
+        self.num_obs = (grid_size) * (grid_size)*2 + 3
+        self.num_act = (grid_size) * (grid_size) + 1
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(self.num_obs,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Discrete(self.num_act)
@@ -70,7 +70,7 @@ def test_performance(timeout=10, atn_cache=1024):
     env.reset()
     tick = 0
 
-    actions = np.random.randint(0, env.single_action_space.n + 1, (atn_cache, num_envs))
+    actions = np.random.randint(0, env.single_action_space.n, (atn_cache, num_envs))
 
     import time
     start = time.time()
