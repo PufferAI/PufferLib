@@ -1858,15 +1858,17 @@ void step(MOBA* env) {
     if (ancient->health <= 0) {
         do_reset = true;
         radiant_victory = 1;
+        printf("Radiant victory\n");
     }
 
     ancient = &env->entities[dire_pid];
     if (ancient->health <= 0) {
         do_reset = true;
         dire_victory = 1;
+        printf("Dire victory\n");
     }
 
-    if (do_reset || rand() % 128 == 0) {
+    if (do_reset) {
         Log log = {0};
         log.episode_length = env->tick;
         log.radiant_victory = radiant_victory;
