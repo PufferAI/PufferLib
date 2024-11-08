@@ -280,7 +280,7 @@ setup(
         f'gymnasium<={GYMNASIUM_VERSION}',
         f'pettingzoo<={PETTINGZOO_VERSION}',
         'shimmy[gym-v21]',
-        'psutil==5.9.5',
+        'psutil',
         'pynvml',
         'imageio',
     ],
