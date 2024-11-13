@@ -498,9 +498,13 @@ class Utilization(Thread):
             self.cpu_util.append(psutil.cpu_percent())
             mem = psutil.virtual_memory()
             self.cpu_mem.append(mem.active / mem.total)
-            self.gpu_util.append(torch.cuda.utilization())
-            free, total = torch.cuda.mem_get_info()
-            self.gpu_mem.append(free / total)
+            if torch.cuda.is_available():
+                self.gpu_util.append(torch.cuda.utilization())
+                free, total = torch.cuda.mem_get_info()
+                self.gpu_mem.append(free / total)
+            else:
+                self.gpu_util.append(0)
+                self.gpu_mem.append(0)
             time.sleep(self.delay)
 
     def stop(self):
