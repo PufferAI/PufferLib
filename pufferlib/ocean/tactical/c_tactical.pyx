@@ -24,7 +24,7 @@ cdef class CTactical:
     cdef Tactical* env
     cdef GameRenderer* renderer
 
-    def __init__(self, 
+    def __init__(self,
                  cnp.ndarray observations,
                  cnp.ndarray rewards,
                  cnp.ndarray actions,):

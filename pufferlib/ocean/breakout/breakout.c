@@ -21,7 +21,7 @@ void demo() {
     };
     allocate(&env);
     reset(&env);
- 
+
     Client* client = make_client(&env);
 
     while (!WindowShouldClose()) {

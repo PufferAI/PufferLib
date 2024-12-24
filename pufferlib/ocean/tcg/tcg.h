@@ -214,7 +214,7 @@ bool phase_untap(TCG* env, unsigned char atn) {
             board->cards[i].tapped = false;
         }
     }
-    
+
     push(env->stack, phase_draw);
     return TO_STACK;
 }
@@ -349,7 +349,7 @@ bool phase_block(TCG* env, unsigned char atn) {
         printf("\t Skipping block for %i (not attacking)\n", env->block_idx);
         env->block_idx++;
     }
-    
+
     bool can_block = false;
     for (int i = 0; i < defender_board->length; i++) {
         Card* card = &defender_board->cards[i];
@@ -365,7 +365,7 @@ bool phase_block(TCG* env, unsigned char atn) {
     if (!can_block) {
         env->block_idx = board->length;
     }
- 
+
     if (env->block_idx == board->length) {
         printf("\t Attacker board length: %i\n", board->length);
         for (int atk = 0; atk < board->length; atk++) {
@@ -530,7 +530,7 @@ void render_label(int x, int y, int idx) {
 void render(TCG* env) {
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});
-   
+
     for (int i = 0; i < env->my_hand->length; i++) {
         Card card = env->my_hand->cards[i];
         int x = card_x(i, env->my_hand->length);
@@ -597,7 +597,7 @@ void render(TCG* env) {
         DrawText("Attack", x, y, 20, WHITE);
     } else if (fn == phase_block) {
         DrawText("Block", x, y, 20, WHITE);
-    } 
+    }
 
     DrawText(TextFormat("Health: %i", env->my_health), 32, 32, 20, WHITE);
     DrawText(TextFormat("Health: %i", env->op_health), 32, GetScreenHeight() - 64, 20, WHITE);

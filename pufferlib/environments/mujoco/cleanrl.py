@@ -120,7 +120,7 @@ if __name__ == "__main__":
         policy = CleanRLPolicy(envs)
     elif args.policy == "puffer":
         policy = Policy(envs)
-    
+
     agent = pufferlib.cleanrl.Policy(policy).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 

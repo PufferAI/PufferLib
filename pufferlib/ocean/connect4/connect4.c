@@ -16,7 +16,7 @@ void interactive() {
     };
     allocate_cconnect4(&env);
     reset(&env);
- 
+
     Client* client = make_client(env.width, env.height);
     float observations[42] = {0};
     int actions[1] = {0};
@@ -64,7 +64,7 @@ void performance_test() {
     };
     allocate_cconnect4(&env);
     reset(&env);
- 
+
     long start = time(NULL);
     int i = 0;
     while (time(NULL) - start < test_time) {

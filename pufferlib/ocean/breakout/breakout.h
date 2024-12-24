@@ -71,7 +71,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
     logs->idx = 0;
     return log;
 }
- 
+
 typedef struct Breakout Breakout;
 struct Breakout {
     float* observations;
@@ -117,7 +117,7 @@ struct CollisionInfo {
     float overlap;
     float x;
     float y;
-    float vx; 
+    float vx;
     float vy;
     int brick_index;
 };
@@ -196,7 +196,7 @@ static inline bool calc_vline_collision(float xw, float yw, float hw, float x,
 
     // Collision finds the smallest time of collision with the greatest overlap
     // between the ball and the wall.
-    if (overlap_new > 0.0f && t_new > 0.0f && t_new <= 1.0f  && 
+    if (overlap_new > 0.0f && t_new > 0.0f && t_new <= 1.0f  &&
         (t_new < col->t || (t_new == col->t && overlap_new > col->overlap))) {
         col->t = t_new;
         col->overlap = overlap_new;
@@ -216,7 +216,7 @@ static inline bool calc_hline_collision(float xw, float yw, float ww,
     float overlap_new = rightmost - leftmost;
 
     // Collision finds the smallest time of collision with the greatest overlap between the ball and the wall.
-    if (overlap_new > 0.0f && t_new > 0.0f && t_new <= 1.0f && 
+    if (overlap_new > 0.0f && t_new > 0.0f && t_new <= 1.0f &&
         (t_new < col->t || (t_new == col->t && overlap_new > col->overlap))) {
         col->t = t_new;
         col->overlap = overlap_new;
@@ -228,7 +228,7 @@ static inline bool calc_hline_collision(float xw, float yw, float ww,
     }
     return false;
 }
-static inline void calc_brick_collision(Breakout* env, int idx, 
+static inline void calc_brick_collision(Breakout* env, int idx,
         CollisionInfo* collision_info) {
     bool collision = false;
     // Brick left wall collides with ball right side
@@ -404,7 +404,7 @@ bool handle_collisions(Breakout* env) {
     calc_all_brick_collisions(env, &collision_info);
     calc_all_wall_collisions(env, &collision_info);
     calc_paddle_ball_collisions(env, &collision_info);
-    if (collision_info.brick_index != BRICK_INDEX_PADDLE_COLLISION 
+    if (collision_info.brick_index != BRICK_INDEX_PADDLE_COLLISION
             && collision_info.t <= 1.0f) {
         env->ball_x = collision_info.x;
         env->ball_y = collision_info.y;
@@ -467,7 +467,7 @@ void step_frame(Breakout* env, int action) {
     }
 
 
-    //Handle collisions. 
+    //Handle collisions.
     //Regular timestepping is done only if there are no collisions.
     if(!handle_collisions(env)){
         env->ball_x += env->ball_vx;

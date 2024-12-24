@@ -18,7 +18,7 @@ def test_pack_unpack():
         unpack_sample = split(pack_sample, flat_space, sz, batched=False)
         unflat_sample = unflatten(unpack_sample, space)
         assert pufferlib.utils.compare_space_samples(sample, unflat_sample), "Unflatten failed."
- 
+
 test_cases = [
     # Nested Dict with Box and Discrete spaces
     gym.spaces.Dict({

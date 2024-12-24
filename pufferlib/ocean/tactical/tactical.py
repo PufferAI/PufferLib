@@ -54,7 +54,7 @@ class Tactical:
         # map_path = 'pufferlib/environments/ocean/tactical/map_test.txt'
         # print(map_path)
         # self.load_map(map_path)
-    
+
     def load_map(self, filename):
         with open(filename, 'r') as f:
             self.map_str = [line.strip() for line in f.read().strip().split('\n') if line[0] != ';']
@@ -80,7 +80,7 @@ class Tactical:
         self.actions[:] = actions
         for c_env in self.c_envs:
             c_env.step()
-        
+
         info = {}
 
         return (self.buf.observations, self.buf.rewards,
@@ -104,13 +104,13 @@ def a_star_search(map, start, goal):
     cost_so_far = {}
     came_from[start] = None
     cost_so_far[start] = 0
-    
+
     while len(frontier) > 0:
         current = heapq.heappop(frontier)[1]
-        
+
         if current == goal:
             break
-        
+
         for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
             next = (current[0] + dx, current[1] + dy)
             if next[0] < 0 or next[1] < 0 or next[0] >= map.shape[0] or next[1] >= map.shape[1] or map[next] != GROUND:
@@ -121,7 +121,7 @@ def a_star_search(map, start, goal):
                 priority = new_cost + abs(next[0] - goal[0]) + abs(next[1] - goal[1])
                 heapq.heappush(frontier, (priority, next))
                 came_from[next] = current
-    
+
     # return came_from, cost_so_far
     # reconstruct path
     path = []
@@ -281,8 +281,8 @@ class RaylibClient:
                     # note: bresenham alone doesnt find all cells covered by the lines
                     # implementation from https://www.redblobgames.com/grids/line-drawing/#supercover (covers all quadrants) <- here it is explained very well, the algo is pretty simple
                     # now we could precompute this on the map for every pair of points
-                    # the question is: if we add one obstacle, how does it change lines of sight? mb its fast enough to just simulate in real time? 
-                    # ONE OTHER APPROACH: for every pair of points, assume one point is the observer and the other is a wall (so, ignoring the geometry of the map). then, what lines of sight do we have? then we just need to do a logical and for all lines of sight. not sure its even faster though, it doesnt seem to be. 
+                    # the question is: if we add one obstacle, how does it change lines of sight? mb its fast enough to just simulate in real time?
+                    # ONE OTHER APPROACH: for every pair of points, assume one point is the observer and the other is a wall (so, ignoring the geometry of the map). then, what lines of sight do we have? then we just need to do a logical and for all lines of sight. not sure its even faster though, it doesnt seem to be.
                     # an optimization: instead of doing lines of sight for all pair of points, we could check between observer and all border cells of the map? then, we set all cells to line of sight true and as soon as we hit an obstacle, we'll set all subsequent cells to line of sight false. this should hit all the cells?
                     # bressenham: check all points between character and (i, j), if any is an obstacle then cancel the line of sight
                     x0 = self.col
@@ -294,7 +294,7 @@ class RaylibClient:
                     dy = y1 - y0
                     nx = abs(dx)
                     ny = abs(dy)
-                    sign_x = 1 if dx > 0 else -1 
+                    sign_x = 1 if dx > 0 else -1
                     sign_y = 1 if dy > 0 else -1
                     px = x0
                     py = y0
@@ -322,7 +322,7 @@ class RaylibClient:
 
 
 
-    # bool IsMouseButtonPressed(int button);   
+    # bool IsMouseButtonPressed(int button);
 
 
         # naive (O(n^3)) for each pair of cell A, B
@@ -332,17 +332,17 @@ class RaylibClient:
         # if any of these is an obstacle, then there is no line of sight between A and B. Otherwise there is.
 
         # maybe better: for each obstacle, directly find all the cells this obstacle hides and mask them
-        
+
 
 
 
         # draw cells from top-left to bottom-right
         #  isometric cell               link to bottom   link to top
-        #    (ground)                                         4    
+        #    (ground)                                         4
         #       a                             a           5   a   6
         #   b   e   c  (b<->c = cw)       b   0   c       b   7   c
-        #       d                         1   d   2           d    
-        #     (a<->d = ch)                    3                    
+        #       d                         1   d   2           d
+        #     (a<->d = ch)                    3
         # cell dimensions (as per drawing above)
         for i, row in enumerate(map):
             for j, cell in enumerate(row):
@@ -368,7 +368,7 @@ class RaylibClient:
                         #elif abs(i - self.row) + abs(j - self.col) <= 10 and abs(i - self.row) + abs(j - self.col) > 0:
                         if los[(i, j)]:
                             if (i, j) == (ci, cj):
-                                col = [255, 165, 0, 255]                            
+                                col = [255, 165, 0, 255]
                             else:
                                 col = [68, 109, 153, 255]
                         else:
@@ -494,4 +494,3 @@ if __name__ == '__main__':
                 break
         steps += 1
     print('SPS:', 1 * steps / (time.time() - t0))
-    

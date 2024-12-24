@@ -269,5 +269,3 @@ def test_env_performance(env, timeout=10):
     end = time.time()
     fps = num_agents * num_steps / (end - start)
     print(f"Test Environment Performance FPS: {fps:.2f}")
-
-

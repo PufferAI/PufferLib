@@ -29,9 +29,9 @@ class Default(nn.Module):
         self.is_continuous = isinstance(env.single_action_space,
                 pufferlib.spaces.Box)
         try:
-            self.is_dict_obs = isinstance(env.env.observation_space, pufferlib.spaces.Dict) 
+            self.is_dict_obs = isinstance(env.env.observation_space, pufferlib.spaces.Dict)
         except:
-            self.is_dict_obs = isinstance(env.observation_space, pufferlib.spaces.Dict) 
+            self.is_dict_obs = isinstance(env.observation_space, pufferlib.spaces.Dict)
 
         if self.is_dict_obs:
             self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
@@ -67,7 +67,7 @@ class Default(nn.Module):
         if self.is_dict_obs:
             observations = pufferlib.pytorch.nativize_tensor(observations, self.dtype)
             observations = torch.cat([v.view(batch_size, -1) for v in observations.values()], dim=1)
-        else: 
+        else:
             observations = observations.view(batch_size, -1)
         return torch.relu(self.encoder(observations.float())), None
 
@@ -144,7 +144,7 @@ class Convolutional(nn.Module):
             channels_last=False, downsample=1, **kwargs):
         '''The CleanRL default NatureCNN policy used for Atari.
         It's just a stack of three convolutions followed by a linear layer
-        
+
         Takes framestack as a mandatory keyword argument. Suggested default is 1 frame
         with LSTM or 4 frames without.'''
         super().__init__()
@@ -216,7 +216,7 @@ class ProcgenResnet(nn.Module):
     def encode_observations(self, x):
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)
         return hidden, None
- 
+
     def decode_actions(self, hidden, lookup):
         '''linear decoder function'''
         action = self.actor(hidden)

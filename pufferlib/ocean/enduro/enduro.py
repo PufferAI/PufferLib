@@ -44,12 +44,12 @@ class Enduro(pufferlib.PufferEnv):
             self.truncations,
             num_envs
         )
-    
+
     def reset(self, seed=None):
         self.tick = 0
         self.c_envs.reset()
         return self.observations, []
-    
+
     def step(self, actions):
         for _ in range(self.frame_skip):
             self.actions[:] = actions
@@ -80,19 +80,19 @@ class Enduro(pufferlib.PufferEnv):
             self.truncations,
             info
         )
-    
+
     def render(self):
         self.c_envs.render()
 
     def close(self):
         self.c_envs.close()
-        
+
     def validate_probabilities(prob_tensor):
         import torch
         if torch.isnan(prob_tensor).any() or torch.isinf(prob_tensor).any() or (prob_tensor < 0).any():
             raise ValueError("Invalid probability values detected")
         return prob_tensor
-        
+
 def test_performance(timeout=10, atn_cache=8192):
     num_envs = 4096
     env = Enduro(num_envs=num_envs)

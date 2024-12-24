@@ -12,4 +12,3 @@ time_preallocated = timeit.timeit('preallocated_array[:] = 0', setup='import num
 
 print(f"Time for np.zeros(2, 5) over 100000 iterations: {time_zeros} seconds")
 print(f"Time for preallocated *= 0 over 100000 iterations: {time_preallocated} seconds")
-

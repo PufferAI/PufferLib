@@ -230,7 +230,7 @@ class Password(gymnasium.Env):
 
     Guess the password, which is a static binary string. Your policy has to
     not determinize before it happens to get the reward, and it also has to
-    latch onto the reward within a few instances of getting it. 
+    latch onto the reward within a few instances of getting it.
 
     Observation space: Box(0, 1, (password_length,)). A binary vector containing your guesses so far, so that the environment will be solvable without memory.
     Action space: Discrete(2). Your guess for the next digit.
@@ -239,7 +239,7 @@ class Password(gymnasium.Env):
         password_length: The number of binary digits in the password.
         hard_fixed_seed: A fixed seed for the environment. It should be the same for all instances. This environment does not make sense when randomly generated.
     '''
- 
+
     def __init__(self, password_length=5, hard_fixed_seed=42):
         self.password_length = password_length
         self.hard_fixed_seed = hard_fixed_seed
@@ -418,7 +418,7 @@ class Squared(gymnasium.Env):
     Args:
         distance_to_target: The distance from the center to the closest target.
         num_targets: The number of targets to randomly generate.
- 
+
     '''
 
     MOVES = [(0, -1), (0, 1), (-1, 0), (1, 0), (1, -1), (-1, -1), (1, 1), (-1, 1)]
@@ -502,7 +502,7 @@ class Squared(gymnasium.Env):
             self.agent_pos = self.distance_to_target, self.distance_to_target
         else:
             self.agent_pos = x, y
-        
+
         self.grid[self.agent_pos] = -1
         self.tick += 1
 

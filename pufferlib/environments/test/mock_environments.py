@@ -58,7 +58,7 @@ class PerformanceEnv:
 
     def action_space(self, agent):
         return Discrete(2)
-    
+
 
 ### Other Mock environments and utilities
 def _agent_str_to_int(agent):
@@ -227,7 +227,7 @@ MOCK_OBSERVATION_SPACES = [
         'tty_colors': Box(0, 31, (24, 80), 'int8'),
         'tty_cursor': Box(0, 255, (2,), 'uint8'),
     }),
-    
+
     # Neural MMO space
     Dict({
         'ActionTargets': Dict({
@@ -416,7 +416,7 @@ for obs_space in MOCK_OBSERVATION_SPACES:
                 action_space=act_space,
             )
         )
- 
+
         MOCK_MULTI_AGENT_ENVIRONMENTS.append(
             make_mock_multiagent_env(
                 observation_space=obs_space,

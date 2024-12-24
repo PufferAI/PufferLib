@@ -2,7 +2,7 @@ from pufferlib import namespace, dataclass
 
 def test_namespace_as_function():
     ns = namespace(x=1, y=2, z=3)
-    
+
     assert ns.x == 1
     assert ns.y == 2
     assert ns.z == 3
@@ -17,7 +17,7 @@ class TestClass:
 
 def test_namespace_as_decorator():
     obj = TestClass(a=4, b=5)
-    
+
     assert obj.a == 4
     assert obj.b == 5
     assert list(obj.keys()) == ['a', 'b']

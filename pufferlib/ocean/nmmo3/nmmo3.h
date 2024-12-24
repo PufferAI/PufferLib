@@ -290,7 +290,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
     logs->idx = 0;
     return log;
 }
- 
+
 // TODO: This is actually simplex and we should probably use the original impl
 // ALSO: Not seeded correctly
 void perlin_noise(float* map, int width, int height,
@@ -531,7 +531,7 @@ void generate_terrain(char* terrain, unsigned char* rendered,
     int offset_x = rand() % 100000;
     int offset_y = rand() % 100000;
     perlin_noise(perlin_map, C, R, 1.0/64.0, 2, offset_x, offset_y);
- 
+
     // Flood fill connected components to determine biomes
     unsigned char* ridges = calloc(R*C, sizeof(unsigned char));
     for (int r = 0; r < R; r++) {
@@ -899,7 +899,7 @@ int ATTACK_BASIC[4][1][2] = {
     {{0, 1}},
     {{0, -1}},
 };
-    
+
 int ATTACK_SWORD[4][3][2] = {
     {{1, -1}, {1, 0}, {1, 1}},
     {{-1, -1}, {-1, 0}, {-1, 1}},
@@ -934,7 +934,7 @@ bool PASSABLE[16] = {
 
 bool is_grass(int tile) {
     return (tile >= TILE_SPRING_GRASS && tile <= TILE_WINTER_GRASS);
-} 
+}
 
 bool is_dirt(int tile) {
     return (tile >= TILE_SPRING_DIRT && tile <= TILE_WINTER_DIRT);
@@ -1065,7 +1065,7 @@ int safe_tile(MMO* env, int delta) {
         }
         int r = idx / env->width;
         int c = idx % env->width;
- 
+
         for (int dr = -delta; dr <= delta; dr++) {
             for (int dc = -delta; dc <= delta; dc++) {
                 int adr = map_offset(env, r+dr, c+dc);
@@ -1318,7 +1318,7 @@ void wander(MMO* env, int pid) {
 // Agents gain 2 damage per level and 1 per equip level. With 3
 // pieces of equipment, that is a total of 5 per level. Base damage is
 // 40 and enemies start with a decrease of 25. So with a 5 level difference,
-// players and enemies are equally matched. 
+// players and enemies are equally matched.
 int calc_damage(MMO* env, int pid, int target_id) {
     Entity* attacker = get_entity(env, pid);
     Entity* defender = get_entity(env, target_id);
@@ -1577,7 +1577,7 @@ void use_item(MMO* env, int pid, int inventory_idx) {
     if (player->equipment[equip_slot] != 0) {
         return;
     }
-    
+
     // Equip the current item
     player->is_equipped[inventory_idx] = 1;
     player->equipment[equip_slot] = item_id;
@@ -1688,7 +1688,7 @@ void reset(MMO* env, int seed) {
         env->items[i] = 0;
         //env->counts[i] = 0;
     }
-    
+
     // Pid crops?
     int ore_count = 0;
     int herb_count = 0;
@@ -1788,15 +1788,15 @@ void reset(MMO* env, int seed) {
         }
 
         if (
-            player_count == env->num_players && 
-            enemy_count == env->num_enemies && 
-            ore_count == env->num_resources && 
-            herb_count == env->num_resources && 
-            wood_count == env->num_weapons && 
-            hilt_count == env->num_weapons && 
-            earth_gem_count == env->num_gems && 
-            fire_gem_count == env->num_gems && 
-            air_gem_count == env->num_gems && 
+            player_count == env->num_players &&
+            enemy_count == env->num_enemies &&
+            ore_count == env->num_resources &&
+            herb_count == env->num_resources &&
+            wood_count == env->num_weapons &&
+            hilt_count == env->num_weapons &&
+            earth_gem_count == env->num_gems &&
+            fire_gem_count == env->num_gems &&
+            air_gem_count == env->num_gems &&
             water_gem_count == env->num_gems
         ) {
             break;
@@ -1996,7 +1996,7 @@ void step(MMO* env) {
         if (entity->hp < entity->hp_max) {
             entity->hp += 1;
         }
-        
+
         // Decrement combat counter
         if (entity->in_combat > 0) {
             entity->in_combat -= 1;
@@ -2073,7 +2073,7 @@ void step(MMO* env) {
             if (inventory_idx == -1) {
                 continue;
             }
-         
+
             buyer->gold -= price;
             buyer->inventory[inventory_idx] = market->item_id;
 
@@ -2092,7 +2092,7 @@ void step(MMO* env) {
             // if (env->rewards[buyer_id].gold > 99) {
             //     env->rewards[buyer_id].gold = 99;
             // }
-            
+
             entity->inventory[inventory_idx] = item_id;
             entity->purchases += 1;
         } else if (is_sell(ui_mode)) {
@@ -2523,13 +2523,13 @@ Client* make_client(MMO* env) {
     UnloadImage(img);
     client->shader_terrain_data = malloc(env->width*env->height*4);
     //SetShaderValue(client->shader, client->shader_terrain_loc, &client->terrain, SHADER_UNIFORM_INT);
-   
+
     for (int i = 0; i < env->width*env->height; i++) {
         int tile = client->terrain[i];
         //if (tile >= 240 && tile < 240+4*4*4*4) {
         //    tile += 3.9*delta;
         //}
- 
+
         client->shader_terrain_data[4*i] = tile/64;
         client->shader_terrain_data[4*i+1] = tile%64;
         //client->shader_terrain_data[2*i] = 0;
@@ -2589,7 +2589,7 @@ void close_client(Client* client) {
     free(client->shader_terrain_data);
     CloseWindow();
 }
-        
+
 void draw_health_bar(int bar_x, int bar_y, int health, int max_health) {
     DrawRectangle(bar_x, bar_y, HEALTH_BAR_WIDTH,
         HEALTH_BAR_HEIGHT, RED);
@@ -2743,7 +2743,7 @@ void draw_entity(Client* client, MMO* env, int pid, float delta) {
     int element = entity->element;
     int hashed = simple_hash(pid + client->start_time % 100);
     Texture2D* tex = &client->players[element][hashed % NUM_PLAYER_TEXTURES];
- 
+
     int frame = delta * animation->num_frames;
     Rectangle source_rect = {
         .x = SPRITE_SIZE*animation->frames[frame],
@@ -2895,7 +2895,7 @@ void render_centered(Client* client, MMO* env, int pid, int action, float delta)
     }
     travel_x *= TILE_SIZE;
     travel_y *= TILE_SIZE;
- 
+
     client->camera.offset.x = SCREEN_WIDTH/2;
     client->camera.offset.y = SCREEN_HEIGHT/2;
     client->camera.target.x = (c + 0.5)*TILE_SIZE + (delta - 1)*travel_x;
@@ -2906,7 +2906,7 @@ void render_centered(Client* client, MMO* env, int pid, int action, float delta)
     if (start_c < 0) {
         start_c = 0;
     }
-    
+
     int start_r = r - Y_WINDOW - 2;
     if (start_r < 0) {
         start_r = 0;
@@ -3200,5 +3200,3 @@ int tick(Client* client, MMO* env, float delta) {
     EndDrawing();
     return action;
 }
-
-

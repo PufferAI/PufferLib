@@ -92,7 +92,7 @@ def test_vectorization_api(print_errors=False):
         pufferlib.vector.Serial,
         pufferlib.vector.Multiprocessing,
         pufferlib.vector.Ray]:
-            
+
         for creator in [gymnasium_creator, pettingzoo_creator]:
             vec = pufferlib.vector.make(creator, num_envs=6,
                 num_workers=3, backend=backend)

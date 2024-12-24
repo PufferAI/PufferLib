@@ -104,7 +104,7 @@ struct Log {
     float reward_xp;
     float reward_distance;
     float reward_tower;
- 
+
     float radiant_victory;
     float radiant_level;
     float radiant_towers_alive;
@@ -112,7 +112,7 @@ struct Log {
     float dire_victory;
     float dire_level;
     float dire_towers_alive;
-   
+
     PlayerLog radiant_support;
     PlayerLog radiant_assassin;
     PlayerLog radiant_burst;
@@ -212,7 +212,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
     logs->idx = 0;
     return log;
 }
- 
+
 typedef struct MOBA MOBA;
 typedef struct Entity Entity;
 typedef int (*skill)(MOBA*, Entity*, Entity*);
@@ -424,7 +424,7 @@ struct MOBA {
     float reward_xp;
     float reward_distance;
     float reward_tower;
-    
+
     int total_towers_taken;
     int total_levels_gained;
     int radiant_victories;
@@ -534,11 +534,11 @@ void compute_observations(MOBA* env) {
         }
     }
 }
-        
+
 static inline int xp_for_player_kill(Entity* entity) {
     return 100 + (int)(entity->xp / 7.69);
 }
- 
+
 static inline float clip(float x) {
     return fmaxf(-1.0f, fminf(x, 1.0f));
 }
@@ -651,7 +651,7 @@ void spawn_player(Map* map, Entity* entity) {
     entity->max_health = entity->base_health + entity->level*entity->hp_gain_per_level;
     entity->max_mana = entity->base_mana + entity->level*entity->mana_gain_per_level;
     entity->damage = entity->base_damage + entity->level*entity->damage_gain_per_level;
- 
+
     entity->health = entity->max_health;
     entity->mana = entity->max_mana;
     entity->basic_attack_timer = 0;
@@ -663,7 +663,7 @@ void spawn_player(Map* map, Entity* entity) {
     entity->e_timer = 0;
     entity->target_pid = -1;
     entity->waypoint = 1;
-    
+
     // TODO: Cache noise?
     // Also.. technically can infinite loop?
     bool valid_pos = false;
@@ -1102,7 +1102,7 @@ void neutral_ai(MOBA* env, Entity* neutral) {
     if (env->tick % 5 == 0) {
         scan_aoe(env, neutral, NEUTRAL_VISION, true, false, true, true, true);
     }
-    
+
     int pid = neutral->pid;
     if (env->scanned_targets[pid][0] != NULL) {
         Entity* target = nearest_scanned_target(env, neutral);
@@ -1110,7 +1110,7 @@ void neutral_ai(MOBA* env, Entity* neutral) {
             basic_attack(env, neutral, target);
         else
             move_towards(env, neutral, target->y, target->x, env->agent_speed);
-        
+
     } else if (l1_distance(neutral->y, neutral->x,
             neutral->spawn_y, neutral->spawn_x) > 2) {
         move_towards(env, neutral, neutral->spawn_y, neutral->spawn_x, env->agent_speed);
@@ -1128,24 +1128,24 @@ void randomize_tower_hp(MOBA* env) {
 void update_status(Entity* entity) {
     if (entity->stun_timer > 0)
         entity->stun_timer -= 1;
-    
+
     if (entity->move_timer > 0)
         entity->move_timer -= 1;
-    
+
     if (entity->move_timer == 0)
         entity->move_modifier = 1.0;
 }
-    
+
 void update_cooldowns(Entity* entity) {
     if (entity->q_timer > 0)
         entity->q_timer -= 1;
-    
+
     if (entity->w_timer > 0)
         entity->w_timer -= 1;
-    
+
     if (entity->e_timer > 0)
         entity->e_timer -= 1;
-    
+
     if (entity->basic_attack_timer > 0)
         entity->basic_attack_timer -= 1;
 }
@@ -1227,7 +1227,7 @@ int skill_assassin_move_buff(MOBA* env, Entity* player, Entity* target) {
     int mana_cost = 100;
     if (player->mana < mana_cost)
         return 1;
-    
+
     player->move_modifier = 2.0;
     player->move_timer = 25;
     player->mana -= mana_cost;
@@ -1445,7 +1445,7 @@ void step_towers(MOBA* env) {
         }
 
         Entity* target = nearest_scanned_target(env, tower);
-        if (target != NULL) 
+        if (target != NULL)
             basic_attack(env, tower, target);
     }
 }
@@ -1819,11 +1819,11 @@ MOBA* allocate_moba(MOBA* env) {
     free(game_map_npy);
     return env;
 }
- 
+
 void reset(MOBA* env) {
     //map->pids[:] = -1
     //randomize_tower_hp(env);
-    
+
     env->tick = 0;
 
     // Reset scanned targets
@@ -2022,7 +2022,7 @@ Color COLORS[] = {
     (Color){255, 0, 0, 255},     // Dire Tank
     (Color){255, 0, 0, 255},     // Dire Carry
 };
- 
+
 // High-level map overview
 typedef struct {
     int cell_size;
@@ -2088,7 +2088,7 @@ typedef struct {
     float shader_camera_y;
     float shader_time;
     int shader_texture1;
-    float last_click_x;	
+    float last_click_x;
     float last_click_y;
     int render_entities[128*128];
     int human_player;
@@ -2143,7 +2143,7 @@ GameRenderer* init_game_renderer(int cell_size, int width, int height) {
     struct timespec time_spec;
     clock_gettime(CLOCK_REALTIME, &time_spec);
     renderer->shader_start_seconds = time_spec.tv_sec;
- 
+
     renderer->camera = (Camera2D){0};
     renderer->camera.target = (Vector2){0.0, 0.0};
     // TODO: Init this?
@@ -2254,7 +2254,7 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
             renderer->last_click_x = -1;
             renderer->last_click_y = -1;
         }
-       
+
         if (HUMAN_CONTROL) {
             actions[human][0] = 300*dy;
             actions[human][1] = 300*dx;
@@ -2322,7 +2322,7 @@ int render_game(GameRenderer* renderer, MOBA* env, int frame) {
             if (tile == EMPTY || tile == WALL) {
                 continue;
             }
-       
+
             pid = map->pids[adr];
             if (pid == -1) {
                 DrawRectangle(x*ts, y*ts, ts, ts, RED);
@@ -2474,5 +2474,3 @@ void close_game_renderer(GameRenderer* renderer) {
     CloseWindow();
     free(renderer);
 }
-
-

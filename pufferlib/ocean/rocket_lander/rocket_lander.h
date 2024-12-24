@@ -63,7 +63,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
     logs->idx = 0;
     return log;
 }
- 
+
 typedef struct Entity
 {
 	b2BodyId bodyId;
@@ -221,7 +221,7 @@ void compute_observations_and_reward(Lander* env, float prev_x, float prev_y) {
     //float reward_rot = -fabsf(rot)/ PI / 10;
     //printf("Reward: %f, %f, %f\n", reward_x, reward_y, reward_rot);
     float reward = reward_x + reward_y;// + reward_rot;
-    
+
     reward = 0;
     if (env->actions[0] == 0) {
         reward = 1;
@@ -248,7 +248,7 @@ void reset(Lander* env) {
         b2MakeRot(0)
     );
     b2Body_SetLinearVelocity(env->lander_id, (b2Vec2){0, 0});
-    b2Body_SetAngularVelocity(env->lander_id, 0.0f); 
+    b2Body_SetAngularVelocity(env->lander_id, 0.0f);
 
     b2Transform transform = b2Body_GetTransform(env->lander_id);
     b2Vec2 pos = transform.p;
@@ -475,5 +475,3 @@ void test_render() {
     }
 
 }
-
-

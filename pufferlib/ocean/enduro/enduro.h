@@ -44,7 +44,7 @@
 #define DECELERATION_RATE 0.01f
 #define MIN_SPEED -2.5f
 #define MAX_SPEED 7.5f
-#define ENEMY_CAR_SPEED 0.1f 
+#define ENEMY_CAR_SPEED 0.1f
 // Times of day logic
 #define NUM_BACKGROUND_TRANSITIONS 16
 // Seconds spent in each time of day
@@ -506,7 +506,7 @@ void close_client(Client* client, Enduro* env);
 void render_car(Client* client, GameState* gameState);
 
 // GameState rendering functions
-void initRaylib(GameState* gameState); 
+void initRaylib(GameState* gameState);
 void loadTextures(GameState* gameState);
 void updateCarAnimation(GameState* gameState);
 void updateScoreboard(GameState* gameState);
@@ -644,7 +644,7 @@ void init(Enduro* env, int seed, int env_index) {
     env->car_height = CAR_HEIGHT;
 
     memcpy(env->dayTransitionTimes, BACKGROUND_TRANSITION_TIMES, sizeof(BACKGROUND_TRANSITION_TIMES));
-    
+
     env->step_count = 0;
     env->collision_cooldown_car_vs_car = 0.0f;
     env->collision_cooldown_car_vs_road = 0.0f;
@@ -1074,7 +1074,7 @@ void accelerate(Enduro* env) {
     validate_speed(env);
 }
 
-void c_step(Enduro* env) {  
+void c_step(Enduro* env) {
     env->rewards[0] = 0.0f;
     env->elapsedTimeEnv += (1.0f / TARGET_FPS);
     update_time_of_day(env);
@@ -1148,7 +1148,7 @@ void c_step(Enduro* env) {
                 env->player_x -= movement_amount;
                 if (env->player_x < road_left) env->player_x = road_left;
                 break;
-        
+
         // Reset crashed_penalty
         env->crashed_penalty = 0.0f;
         }
@@ -1237,7 +1237,7 @@ void c_step(Enduro* env) {
     float curve_vanishing_point_shift = env->current_curve_direction * CURVE_VANISHING_POINT_SHIFT;
     env->vanishing_point_x = env->base_vanishing_point_x + curve_vanishing_point_shift;
 
-    // After curve shift        
+    // After curve shift
     // Wiggle logic
     if (env->wiggle_active) {
         float min_wiggle_period = 5.8f; // Slow wiggle period at min speed
@@ -1271,11 +1271,11 @@ void c_step(Enduro* env) {
         env->speed = fmaxf((env->speed - 1.25f), MIN_SPEED);
         env->collision_cooldown_car_vs_road = CRASH_NOOP_DURATION_CAR_VS_ROAD;
         env->drift_direction = 0; // Reset drift direction, has priority over car collisions
-        env->player_x = fmaxf(road_left + 1, fminf(road_right - 1, env->player_x));        
+        env->player_x = fmaxf(road_left + 1, fminf(road_right - 1, env->player_x));
     }
 
     // Enemy car logic
-    for (int i = 0; i < env->numEnemies; i++) {    
+    for (int i = 0; i < env->numEnemies; i++) {
             Car* car = &env->enemyCars[i];
 
             // Remove off-screen cars that move below the screen
@@ -1299,7 +1299,7 @@ void c_step(Enduro* env) {
                 i--;
                 continue;
             }
-        
+
             // If the car is behind the player and speed ≤ 0, move it to the furthest lane
             if (env->speed <= 0 && car->y >= env->player_y + CAR_HEIGHT) {
                 // Determine the furthest lane
@@ -1381,7 +1381,7 @@ void c_step(Enduro* env) {
         // For days beyond first, decrease max_spawn_interval further
         max_spawn_interval = maxSpawnIntervals[numMaxSpawnIntervals - 1] - (dayIndex - numMaxSpawnIntervals + 1) * 0.1f;
         if (max_spawn_interval < 0.1f) {
-            max_spawn_interval = 0.1f; 
+            max_spawn_interval = 0.1f;
         }
     }
 
@@ -1453,7 +1453,7 @@ void c_step(Enduro* env) {
             env->carsToPass = 300; // Always 300 after the first day
             env->dayCompleted = false;
             add_log(env->log_buffer, &env->log);
-                    
+
         } else {
             // Player failed to pass required cars, soft-reset environment
             env->log.days_failed += 1.0f;
@@ -1465,7 +1465,7 @@ void c_step(Enduro* env) {
         }
     }
 
-    // Reward each step after a car is passed until a collision occurs. 
+    // Reward each step after a car is passed until a collision occurs.
     // Then, no rewards per step until next car is passed.
     if (env->car_passed_no_crash_active) {
         env->rewards[0] += env->step_rew_car_passed_no_crash;
@@ -1480,7 +1480,7 @@ void c_step(Enduro* env) {
 
     float normalizedSpeed = fminf(fmaxf(env->speed, 1.0f), 2.0f);
     env->score += (int)normalizedSpeed;
-    
+
     env->log.score = env->score;
     int local_cars_to_pass = env->carsToPass;
     env->log.cars_to_pass = (int)local_cars_to_pass;
@@ -1583,8 +1583,8 @@ void compute_observations(Enduro* env) {
     // Add drift direction (-1.0 to 1.0), normalized magnitude (0.0 to 1.0), and curve factor (-1.0 to 1.0)
     obs[obs_index++] = drift_direction;
     obs[obs_index++] = normalized_drift_magnitude;
-    obs[obs_index++] = env->current_curve_factor; 
-    
+    obs[obs_index++] = env->current_curve_factor;
+
     // Time of day
     // idx 63
     float total_day_length = env->dayTransitionTimes[15];
@@ -1634,10 +1634,10 @@ void compute_observations(Enduro* env) {
 void update_road_curve(Enduro* env) {
     int* current_curve_stage = &env->current_curve_stage;
     int* steps_in_current_stage = &env->steps_in_current_stage;
-    
+
     // Map speed to the scale between 0.5 and 3.5
     float speed_scale = 0.5f + ((fabs(env->speed) / env->max_speed) * (MAX_SPEED - MIN_SPEED));
-    float vanishing_point_transition_speed = VANISHING_POINT_TRANSITION_SPEED + speed_scale; 
+    float vanishing_point_transition_speed = VANISHING_POINT_TRANSITION_SPEED + speed_scale;
 
     // Randomize step thresholds and curve directions
     int step_thresholds[3];
@@ -1701,7 +1701,7 @@ void update_road_curve(Enduro* env) {
     } else if (env->current_curve_factor > env->target_curve_factor) {
         env->current_curve_factor = fmaxf(env->current_curve_factor - CURVE_TRANSITION_SPEED, env->target_curve_factor);
     }
-    env->current_curve_direction = fabsf(env->current_curve_factor) < 0.1f ? CURVE_STRAIGHT 
+    env->current_curve_direction = fabsf(env->current_curve_factor) < 0.1f ? CURVE_STRAIGHT
                              : (env->current_curve_factor > 0) ? CURVE_RIGHT : CURVE_LEFT;
 
     // Move the vanishing point gradually
@@ -1721,19 +1721,19 @@ void update_road_curve(Enduro* env) {
 // Quadratic bezier curve helper function
 float quadratic_bezier(float bottom_x, float control_x, float top_x, float t) {
     float one_minus_t = 1.0f - t;
-    return one_minus_t * one_minus_t * bottom_x + 
-           2.0f * one_minus_t * t * control_x + 
+    return one_minus_t * one_minus_t * bottom_x +
+           2.0f * one_minus_t * t * control_x +
            t * t * top_x;
 }
 
-// Computes the edges of the road. Use for both L and R. 
+// Computes the edges of the road. Use for both L and R.
 // Lots of magic numbers to replicate as exactly as possible
 // original Atari 2600 Enduro road rendering.
 float road_edge_x(Enduro* env, float y, float offset, unsigned char left) {
     float t = (PLAYABLE_AREA_BOTTOM - y) / (PLAYABLE_AREA_BOTTOM - VANISHING_POINT_Y);
     float base_offset = left ? -ROAD_LEFT_OFFSET : ROAD_RIGHT_OFFSET;
     float bottom_x = env->base_vanishing_point_x + base_offset + offset;
-    float top_x = env->current_vanishing_point_x + offset;    
+    float top_x = env->current_vanishing_point_x + offset;
     float edge_x;
     if (fabsf(env->current_curve_factor) < 0.01f) {
         // Straight road
@@ -1765,7 +1765,7 @@ float road_edge_x(Enduro* env, float y, float offset, unsigned char left) {
         wiggle_offset *= (left ? 1.0f : -1.0f);
         // Scale wiggle offset based on y position, starting at 0.03f at the vanishing point
         float depth = (y - VANISHING_POINT_Y) / (PLAYABLE_AREA_BOTTOM - VANISHING_POINT_Y);
-        float scale = 0.03f + (depth * depth); 
+        float scale = 0.03f + (depth * depth);
         if (scale > 0.3f) {
             scale = 0.3f;
         }
@@ -1793,7 +1793,7 @@ Client* make_client(Enduro* env) {
     // State data from env (Enduro*)
     client->width = env->width;
     client->height = env->height;
-    
+
     initRaylib(&client->gameState); // Pass gameState here
     loadTextures(&client->gameState);
 
@@ -1887,7 +1887,7 @@ void loadTextures(GameState* gameState) {
     gameState->playerCarRightTreadIndex = ASSET_PLAYER_CAR_RIGHT_TREAD;
     gameState->levelCompleteFlagLeftIndex = ASSET_LEVEL_COMPLETE_FLAG_LEFT;
     gameState->levelCompleteFlagRightIndex = ASSET_LEVEL_COMPLETE_FLAG_RIGHT;
-    
+
     // Initialize animation variables
     gameState->carAnimationTimer = 0.0f;
     gameState->carAnimationInterval = 0.05f; // Initial interval, will be updated based on speed
@@ -2182,7 +2182,7 @@ void c_render(Client* client, Enduro* env) {
     updateCarAnimation(gameState);
     updateMountains(gameState);
     renderMountains(gameState);
-    
+
     int bgIndex = gameState->currentBackgroundIndex;
     unsigned char isNightFogStage = (bgIndex == 13);
     unsigned char isNightStage = (bgIndex == 12 || bgIndex == 13 || bgIndex == 14);
@@ -2234,7 +2234,7 @@ void c_render(Client* client, Enduro* env) {
     unsigned char skipFogCars = isNightFogStage;
     for (int i = 0; i < env->numEnemies; i++) {
         Car* car = &env->enemyCars[i];
-        
+
         // Don't render cars in fog
         if (skipFogCars && car->y < 92.0f) {
             continue;

@@ -45,4 +45,3 @@ int main() {
     free_allocated(&env);
     close_client(client);
 }
-

@@ -88,7 +88,7 @@ cdef class CGrid:
         cdef:
             int i
             bint done
-        
+
         for i in range(self.num_envs):
             done = step(self.envs[i])
             if done:

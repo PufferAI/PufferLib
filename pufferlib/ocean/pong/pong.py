@@ -36,7 +36,7 @@ class Pong(pufferlib.PufferEnv):
             paddle_width, paddle_height, ball_width, ball_height,
             paddle_speed, ball_initial_speed_x, ball_initial_speed_y,
             ball_max_speed_y, ball_speed_y_increment, max_score, frameskip)
- 
+
     def reset(self, seed=None):
         self.tick = 0
         self.c_envs.reset()

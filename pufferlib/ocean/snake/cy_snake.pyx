@@ -61,7 +61,7 @@ cdef class CySnake:
         Client* client
         LogBuffer* logs
         int num_envs
-        
+
     def __init__(self, char[:, :, :] observations, int[:] actions,
              float[:] rewards, unsigned char[:] terminals,
              list widths, list heights, list num_snakes,

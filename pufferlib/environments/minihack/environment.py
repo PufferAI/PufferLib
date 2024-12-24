@@ -59,4 +59,3 @@ class MinihackWrapper:
         chars = nle.nethack.tty_render(
             self.obs['tty_chars'], self.obs['tty_colors'], self.obs['tty_cursor'])
         return chars
-

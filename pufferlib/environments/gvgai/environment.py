@@ -25,4 +25,3 @@ def make(name, obs_type='grayscale', frameskip=4, full_action_space=False,
     env = pufferlib.postprocess.EpisodeStats(env)
     env = pufferlib.emulation.GymnasiumPufferEnv(env=env, buf=buf)
     return env
-

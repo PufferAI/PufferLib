@@ -166,7 +166,7 @@ class Grid(nn.Module):
 class Go(nn.Module):
     def __init__(self, env, cnn_channels=64, hidden_size=128, **kwargs):
         super().__init__()
-        # 3 categories 2 boards. 
+        # 3 categories 2 boards.
         # categories = player, opponent, empty
         # boards = current, previous
         self.cnn = nn.Sequential(
@@ -182,9 +182,9 @@ class Go(nn.Module):
         self.grid_size = int(np.sqrt((obs_size-2)/2))
         output_size = self.grid_size - 4
         cnn_flat_size = cnn_channels * output_size * output_size
-        
+
         self.flat = pufferlib.pytorch.layer_init(nn.Linear(2,32))
-        
+
         self.proj = pufferlib.pytorch.layer_init(nn.Linear(cnn_flat_size + 32, hidden_size))
 
         self.actor = pufferlib.pytorch.layer_init(
@@ -192,7 +192,7 @@ class Go(nn.Module):
 
         self.value_fn = pufferlib.pytorch.layer_init(
                 nn.Linear(hidden_size, 1), std=1)
-   
+
     def forward(self, observations):
         hidden, lookup = self.encode_observations(observations)
         actions, value = self.decode_actions(hidden, lookup)
@@ -200,7 +200,7 @@ class Go(nn.Module):
 
     def encode_observations(self, observations):
         grid_size = int(np.sqrt((observations.shape[1] - 2) / 2))
-        full_board = grid_size * grid_size 
+        full_board = grid_size * grid_size
         black_board = observations[:, :full_board].view(-1,1, grid_size,grid_size).float()
         white_board = observations[:, full_board:-2].view(-1,1, grid_size, grid_size).float()
         board_features = torch.cat([black_board, white_board],dim=1)
@@ -221,7 +221,7 @@ class Go(nn.Module):
         value = self.value_fn(flat_hidden)
         action = self.actor(flat_hidden)
         return action, value
-    
+
 class MOBA(nn.Module):
     def __init__(self, env, cnn_channels=128, hidden_size=128, **kwargs):
         super().__init__()

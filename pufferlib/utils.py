@@ -139,12 +139,12 @@ def compare_lists(list_1, list_2, idx):
     for v1, v2 in zip(list_1, list_2):
         if not compare_space_samples(v1, v2, idx):
             return False
-        
+
     return True
-    
+
 def compare_space_samples(sample_1, sample_2, sample_2_batch_idx=None):
     '''Compare two samples from the same space
-    
+
     Optionally, sample_2 may be a batch of samples from the same space
     concatenated along the first dimension of the leaves. In this case,
     sample_2_batch_idx specifies which sample to compare.
@@ -250,12 +250,12 @@ class Profiler:
         self.memory = None
         self.pytorch_memory = None
         self.prev = 0
-        
+
         self.track_elapsed = elapsed
         self.track_calls = calls
         self.track_memory = memory
         self.track_pytorch_memory = pytorch_memory
-        
+
         if memory:
             self.process = psutil.Process()
 

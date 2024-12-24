@@ -50,7 +50,7 @@ cdef extern from "tripletriad.h":
 cdef class CyTripleTriad:
     cdef:
         CTripleTriad* envs
-        Client* client  
+        Client* client
         LogBuffer* logs
         int num_envs
 

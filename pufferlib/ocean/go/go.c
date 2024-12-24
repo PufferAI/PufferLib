@@ -63,32 +63,32 @@ void free_gonet(GoNet* net) {
 }
 
 void forward(GoNet* net, float* observations, int* actions, int grid_size) {
-    int full_board = grid_size * grid_size;    
+    int full_board = grid_size * grid_size;
     // Clear previous observations
     memset(net->obs_2d, 0, net->num_agents * grid_size * grid_size * 2 * sizeof(float));
     memset(net->obs_1d, 0, net->num_agents * 2 * sizeof(float));
-    
+
     // Reshape observations into 2D boards and additional features
     float (*obs_2d)[2][grid_size][grid_size] = (float (*)[2][grid_size][grid_size])net->obs_2d;
     float (*obs_1d)[2] = (float (*)[2])net->obs_1d;
-    
+
     for (int b = 0; b < net->num_agents; b++) {
         int b_offset = b * (full_board * 2 + 2);  // offset for each batch
-        
+
         // Process black stones board
         for (int i = 0; i < grid_size; i++) {
             for (int j = 0; j < grid_size; j++) {
                 obs_2d[b][0][i][j] = observations[b_offset + i*grid_size + j];
             }
         }
-        
+
         // Process white stones board
         for (int i = 0; i < grid_size; i++) {
             for (int j = 0; j < grid_size; j++) {
                 obs_2d[b][1][i][j] = observations[b_offset + full_board + i*grid_size + j];
             }
         }
-        
+
         // Process additional features
         obs_1d[b][0] = observations[b_offset + full_board * 2];
         obs_1d[b][1] = observations[b_offset + full_board * 2 + 1];
@@ -104,7 +104,7 @@ void forward(GoNet* net, float* observations, int* actions, int grid_size) {
     cat_dim1(net->cat, net->conv2->output, net->flat->output);
     linear(net->proj, net->cat->output);
     relu(net->relu3, net->proj->output);
-    
+
     lstm(net->lstm, net->relu3->output);
     linear(net->actor, net->lstm->state_h);
     linear(net->value_fn, net->lstm->state_h);
@@ -134,7 +134,7 @@ void demo(int grid_size) {
     GoNet* net = init_gonet(weights, 1, grid_size);
     allocate(&env);
     reset(&env);
- 
+
     Client* client = make_client(env.width, env.height);
     int tick = 0;
 
@@ -156,23 +156,23 @@ void demo(int grid_size) {
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 Vector2 mousePos = GetMousePosition();
-        
+
                 // Calculate the offset for the board
                 int boardOffsetX = env.grid_square_size;
                 int boardOffsetY = env.grid_square_size;
-                
+
                 // Adjust mouse position relative to the board
                 int relativeX = mousePos.x - boardOffsetX;
                 int relativeY = mousePos.y - boardOffsetY;
-                
+
                 // Calculate cell indices for the corners
                 int cellX = (relativeX + env.grid_square_size / 2) / env.grid_square_size;
                 int cellY = (relativeY + env.grid_square_size / 2) / env.grid_square_size;
-                
+
                 // Ensure the click is within the game board
                 if (cellX >= 0 && cellX <= env.grid_size && cellY >= 0 && cellY <= env.grid_size) {
                     // Calculate the point index (1-19) based on the click position
-                    int pointIndex = cellY * (env.grid_size) + cellX + 1; 
+                    int pointIndex = cellY * (env.grid_size) + cellX + 1;
                     env.actions[0] = (unsigned short)pointIndex;
                 }
             // Check if pass button is clicked

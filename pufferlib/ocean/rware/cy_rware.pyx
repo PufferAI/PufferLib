@@ -64,7 +64,7 @@ cdef class CyRware:
 
     def __init__(self, float[:, :] observations, int[:] actions,
             float[:] rewards, unsigned char[:] terminals, int num_envs,
-            int width, int height, int map_choice, int num_agents, int num_requested_shelves, 
+            int width, int height, int map_choice, int num_agents, int num_requested_shelves,
             int grid_square_size, int human_agent_idx):
 
         self.client = NULL

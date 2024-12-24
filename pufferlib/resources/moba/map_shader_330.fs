@@ -2,7 +2,7 @@
 
 // Input vertex attributes (from vertex shader)
 in vec2 fragTexCoord;       // Fragment input: vertex attribute: texture coordinates
-in vec4 fragColor;          // Fragment input: vertex attribute: color 
+in vec4 fragColor;          // Fragment input: vertex attribute: color
 
 // Input uniform values
 uniform sampler2D texture0; // Fragment input: texture
@@ -66,12 +66,12 @@ void main()
     vec4 texelLeftDown = texture(texture1, vec2(scaledTexCoord.x - dist, scaledTexCoord.y + dist)) * colDiffuse * fragColor;
     vec4 texelRightUp = texture(texture1, vec2(scaledTexCoord.x + dist, scaledTexCoord.y - dist)) * colDiffuse * fragColor;
     vec4 texelLeftUp = texture(texture1, vec2(scaledTexCoord.x  - dist, scaledTexCoord.y - dist)) * colDiffuse * fragColor;
-    
+
     // Calculate the position within the scaled tile
     vec2 tilePos = fract(scaledTexCoord * resolution.xy);
-    
+
     // Check if the pixel is on the border of the tile
-	bool isBorder = 
+	bool isBorder =
     	(texelColor.rgb == vec3(0.0, 0.0, 0.0)) && (
     	(texelColor != texelRight) ||
     	(texelColor != texelDown) ||
@@ -147,4 +147,3 @@ void main()
     }
     */
 }
-

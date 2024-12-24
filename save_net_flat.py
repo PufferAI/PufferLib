@@ -7,7 +7,7 @@ def save_model_weights(model, filename):
     for name, param in model.named_parameters():
         weights.append(param.data.cpu().numpy().flatten())
         print(name, param.shape, param.data.cpu().numpy().ravel()[0])
-    
+
     weights = np.concatenate(weights)
     print('Num weights:', len(weights))
     weights.tofile(filename)
@@ -107,7 +107,7 @@ def test_model_forward(model):
     breakpoint()
     pass
 
-	
+
 if __name__ == '__main__':
     #test_lstm()
     model = torch.load('snake.pt', map_location='cpu')

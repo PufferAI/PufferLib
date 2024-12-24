@@ -99,7 +99,7 @@ void move(Env* env, Robot* robot, float distance) {
         robot->energy -= 0.6;
         return;
     }
-    
+
     robot->x = new_x;
     robot->y = new_y;
 
@@ -238,7 +238,7 @@ void step(Env* env) {
         int turn_atn = env->actions[atn_offset + 1];
         float turn_degrees = turn(env, robot, turn_atn);
 
-        // Gun 
+        // Gun
         float gun_degrees = env->actions[atn_offset + 2] + turn_degrees;
         robot->gun_heading += gun_degrees;
         if (robot->gun_heading > 360) {
@@ -330,7 +330,7 @@ void render(Client* client, Env* env) {
         };
         DrawTriangle(robot_pos, radar_left_pos, radar_right_pos, (Color){0, 255, 0, 128});
 
-        // Gun 
+        // Gun
         Vector2 gun_pos = (Vector2){
             robot.x + 64*cos_deg(robot.gun_heading),
             robot.y + 64*sin_deg(robot.gun_heading)

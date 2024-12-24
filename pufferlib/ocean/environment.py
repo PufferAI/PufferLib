@@ -164,5 +164,3 @@ def env_creator(name='squared'):
         return MAKE_FNS[name]
     else:
         raise ValueError(f'Invalid environment name: {name}')
-
-

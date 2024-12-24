@@ -49,7 +49,7 @@ class Snake(pufferlib.PufferEnv):
             num_snakes, num_food, vision, max_snake_length,
             leave_corpse_on_death, reward_food, reward_corpse,
             reward_death)
- 
+
     def reset(self, seed=None):
         self.c_envs.reset()
         self.tick = 0

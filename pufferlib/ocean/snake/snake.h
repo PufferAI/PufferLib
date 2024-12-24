@@ -62,7 +62,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
     logs->idx = 0;
     return log;
 }
- 
+
 typedef struct {
     char* observations;
     int* actions;
@@ -102,7 +102,7 @@ void init_csnake(CSnake* env) {
     for (int i = 1; i<env->num_snakes; i++)
         env->snake_colors[i] = i%4 + 4; // Randomize snake colors
 }
- 
+
 void allocate_csnake(CSnake* env) {
     int obs_size = (2*env->vision + 1) * (2*env->vision + 1);
     env->observations = (char*)calloc(env->num_snakes*obs_size, sizeof(char));

@@ -52,7 +52,7 @@ int main() {
     Env* env = alloc_locked_room_env();
     reset_locked_room(env);
     */
- 
+
     Renderer* renderer = init_renderer(render_cell_size, width, height);
 
     int t = 0;
@@ -86,4 +86,3 @@ int main() {
     free_allocated_grid(env);
     return 0;
 }
-

@@ -75,7 +75,7 @@ def profile_emulation(env_creator, timeout=DEFAULT_TIMEOUT, seed=42):
 
         if multiagent:
             action = {agent: env.action_space(agent).sample() for agent in ob}
-            agent_step_count += len(env.agents)    
+            agent_step_count += len(env.agents)
         else:
             action = env.action_space.sample()
             agent_step_count += 1
@@ -310,7 +310,7 @@ if __name__ == '__main__':
     #delays = [0, 0.1, 0.25, 0.5, 1]
     #bandwidth = [1, 1e4, 1e5, 1e6]
 
-    
+
     #synthetic_creators = {}
     #for count in counts:
     #    name = f'test_delay_{count}'

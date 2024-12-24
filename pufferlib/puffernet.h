@@ -113,7 +113,7 @@ void _conv2d(float* input, float* weights, float* bias,
                 for (int w = 0; w < w_out; w++) {
                     int out_adr = (
                         b*out_channels*h_out*w_out
-                        + oc*h_out*w_out+ 
+                        + oc*h_out*w_out+
                         + h*w_out
                         + w
                     );

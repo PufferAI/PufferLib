@@ -14,7 +14,7 @@ int main() {
         .num_cards = 10,
     };
     allocate_ctripletriad(&env);
-    reset(&env); 
+    reset(&env);
     Client* client = make_client(env.width, env.height);
 
     int tick = 0;
@@ -32,22 +32,22 @@ int main() {
             // Handle Card Placement ( 1-9 for placing a card)
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 Vector2 mousePos = GetMousePosition();
-        
+
                 // Calculate the offset for the board
                 int boardOffsetX = 196 + 10; // 196 from the DrawRectangle call in render(), plus 10 for padding
                 int boardOffsetY = 30; // From the DrawRectangle call in render()
-                
+
                 // Adjust mouse position relative to the board
                 int relativeX = mousePos.x - boardOffsetX;
                 int relativeY = mousePos.y - boardOffsetY;
-                
+
                 // Calculate cell indices
                 int cellX = relativeX / env.card_width;
                 int cellY = relativeY / env.card_height;
-                
+
                 // Calculate the cell index (1-9) based on the click position
-                int cellIndex = cellY * 3 + cellX+1; 
-                
+                int cellIndex = cellY * 3 + cellX+1;
+
                 // Ensure the click is within the game board
                 if (cellX >= 0 && cellX < 3 && cellY >= 0 && cellY < 3) {
                     env.actions[0] = cellIndex + 5;

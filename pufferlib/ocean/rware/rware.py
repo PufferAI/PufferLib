@@ -28,7 +28,7 @@ class Rware(pufferlib.PufferEnv):
         self.num_agents = num_envs*num_agents
         self.render_mode = render_mode
         self.report_interval = report_interval
-        
+
         self.num_obs = 27
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(self.num_obs,), dtype=np.float32)
@@ -59,9 +59,9 @@ class Rware(pufferlib.PufferEnv):
 
     def render(self):
         self.c_envs.render()
-        
+
     def close(self):
-        self.c_envs.close() 
+        self.c_envs.close()
 
 def test_performance(timeout=10, atn_cache=1024):
     num_envs=1000;

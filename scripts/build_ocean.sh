@@ -35,14 +35,14 @@ if [ "$MODE" = "web" ]; then
         -sSTACK_SIZE=512KB \
         -DPLATFORM_WEB \
         -DGRAPHICS_API_OPENGL_ES3 \
-        --preload-file pufferlib/resources@resources/ 
+        --preload-file pufferlib/resources@resources/
     echo "Web build completed: $WEB_OUTPUT_DIR/game.html"
     exit 0
 fi
 
 FLAGS=(
     -Wall
-    -I./raylib/include 
+    -I./raylib/include
     -I./pufferlib
     "$SRC_DIR/$ENV.c" -o "$ENV"
     ./raylib/lib/libraylib.a
@@ -69,7 +69,7 @@ if [ "$MODE" = "local" ]; then
         FLAGS+=(
             -fsanitize=address,undefined,bounds,pointer-overflow,leak
         )
-    fi  
+    fi
     clang -g -O0 ${FLAGS[@]}
 elif [ "$MODE" = "fast" ]; then
     echo "Building optimized $ENV for local testing..."

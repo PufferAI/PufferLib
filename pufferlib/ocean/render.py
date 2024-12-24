@@ -68,7 +68,7 @@ class AnsiRender:
             frame = '\n'.join(lines)
 
         return frame
- 
+
 class RGBArrayRender:
     def __init__(self, colors=None, upscale=1):
         self.colors = colors
@@ -104,7 +104,7 @@ class GridRender:
 
         camera = pyray.Camera2D()
         camera.target= (width/2, height/2)
-        camera.rotation = 0.0 
+        camera.rotation = 0.0
         camera.zoom = min(screen_width/width, screen_height/height)
         self.camera = camera
 
@@ -244,4 +244,3 @@ if __name__ == '__main__':
     grid = np.random.randint(0, 3, (256, 256), dtype=np.uint8)
     while True:
         frame = renderer.render(grid)
-

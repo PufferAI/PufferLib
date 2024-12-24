@@ -1,3 +1,9 @@
 [build-system]
 requires = ["setuptools", "wheel", "Cython", "numpy"]
 build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 130
+
+[tool.ruff.format]
+quote-style = "single"

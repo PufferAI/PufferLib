@@ -171,7 +171,7 @@ class RenderCharImagesWithNumpyWrapper(gym.Wrapper):
         self.observation_space = gym.spaces.Box(
             low=0, high=255, shape=self.chw_image_shape, dtype=np.uint8
         )
- 
+
         '''
         obs_spaces = {
             "screen_image": gym.spaces.Box(

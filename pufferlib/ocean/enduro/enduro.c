@@ -18,7 +18,7 @@ void get_input(Enduro* env) {
         } else if (IsKeyDown(KEY_SPACE) && (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D))) {
             env->actions[0] = ACTION_RIGHTFIRE; // Accelerate and move right
         } else if (IsKeyDown(KEY_SPACE) && (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A))) {
-            env->actions[0] = ACTION_LEFTFIRE; // Accelerate and move left   
+            env->actions[0] = ACTION_LEFTFIRE; // Accelerate and move left
         } else if (IsKeyDown(KEY_SPACE)) {
             env->actions[0] = ACTION_FIRE; // Accelerate
         } else if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S)) {

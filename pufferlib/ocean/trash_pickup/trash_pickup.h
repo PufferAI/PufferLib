@@ -214,7 +214,7 @@ void compute_observations(CTrashPickupEnv* env) {
 // Helper functions
 void place_random_entities(CTrashPickupEnv* env, int count, int item_type, int gridIndexStart) {
     int placed = 0;
-    while (placed < count) 
+    while (placed < count)
     {
         int x = rand() % env->grid_size;
         int y = rand() % env->grid_size;
@@ -255,7 +255,7 @@ void move_agent(CTrashPickupEnv* env, int agent_idx, int action) {
     else if (action == ACTION_LEFT) move_dir_x = -1;
     else if (action == ACTION_RIGHT) move_dir_x = 1;
     else printf("Undefined action: %d", action);
-    
+
     int new_x = thisAgent->pos_x + move_dir_x;
     int new_y = thisAgent->pos_y + move_dir_y;
 
@@ -266,7 +266,7 @@ void move_agent(CTrashPickupEnv* env, int agent_idx, int action) {
     GridCell* newGridCell = &env->grid[get_grid_index(env, new_x, new_y)];
     int cell_state_type = newGridCell->entity ? newGridCell->entity->type : EMPTY;
 
-    if (cell_state_type == EMPTY) 
+    if (cell_state_type == EMPTY)
     {
         thisAgent->pos_x = new_x;
         thisAgent->pos_y = new_y;
@@ -276,8 +276,8 @@ void move_agent(CTrashPickupEnv* env, int agent_idx, int action) {
 
         currentGridCell->index = -1;
         currentGridCell->entity = NULL;
-    } 
-    else if (cell_state_type == TRASH && thisAgent->carrying == false) 
+    }
+    else if (cell_state_type == TRASH && thisAgent->carrying == false)
     {
         Entity* thisTrash = &env->entities[newGridCell->index];
         thisTrash->presence = false; // Mark as not present
@@ -295,8 +295,8 @@ void move_agent(CTrashPickupEnv* env, int agent_idx, int action) {
         currentGridCell->index = -1;
 
         add_reward(env, agent_idx, env->positive_reward);
-    } 
-    else if (cell_state_type == TRASH_BIN) 
+    }
+    else if (cell_state_type == TRASH_BIN)
     {
         if (thisAgent->carrying)
         {
@@ -338,14 +338,14 @@ void move_agent(CTrashPickupEnv* env, int agent_idx, int action) {
 }
 
 bool is_episode_over(CTrashPickupEnv* env) {
-    for (int i = 0; i < env->num_agents; i++) 
+    for (int i = 0; i < env->num_agents; i++)
     {
-        if (env->entities[i].carrying) 
+        if (env->entities[i].carrying)
             return false;
     }
 
     int start_index = get_entity_type_start_index(env, TRASH);
-    for (int i = start_index; i < start_index + env->num_trash; i++) 
+    for (int i = start_index; i < start_index + env->num_trash; i++)
     {
         if (env->entities[i].presence)
             return false;
@@ -358,7 +358,7 @@ void reset(CTrashPickupEnv* env) {
     env->current_step = 0;
     env->total_episode_reward = 0;
 
-    for (int i = 0; i < env->grid_size * env->grid_size; i++) 
+    for (int i = 0; i < env->grid_size * env->grid_size; i++)
     {
         env->grid[i].entity = NULL;
         env->grid[i].index = -1;
@@ -409,7 +409,7 @@ void step(CTrashPickupEnv* env) {
     }
 
     env->current_step++;
-    if (env->current_step >= env->max_steps || is_episode_over(env)) 
+    if (env->current_step >= env->max_steps || is_episode_over(env))
     {
         memset(env->dones, 1, sizeof(unsigned char) * env->num_agents);
 
@@ -419,7 +419,7 @@ void step(CTrashPickupEnv* env) {
         log.episode_return = env->total_episode_reward;
 
         int total_trash_not_collected = 0;
-        for (int i = env->num_agents + 1; i < env->num_agents + env->num_trash; i++) 
+        for (int i = env->num_agents + 1; i < env->num_agents + env->num_trash; i++)
         {
             total_trash_not_collected += env->entities[i].presence;
         }
@@ -564,10 +564,10 @@ void render(Client* client, CTrashPickupEnv* env) {
                 }
 
                 DrawTexturePro(
-                    client->agent_texture, 
+                    client->agent_texture,
                     (Rectangle) {0, 0, 128, 128},
                     (Rectangle) {
-                        screen_x + client->cell_size / 2, 
+                        screen_x + client->cell_size / 2,
                         screen_y + client->cell_size / 2,
                         client->cell_size,
                         client->cell_size
@@ -578,7 +578,7 @@ void render(Client* client, CTrashPickupEnv* env) {
                 );
 
                 Entity* thisAgent = &env->entities[gridCell.index];
-                
+
                 if (thisAgent->carrying)
                 {
                     DrawRectangle(

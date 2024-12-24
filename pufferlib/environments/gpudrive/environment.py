@@ -80,7 +80,7 @@ class PufferGPUDrive:
         '''There is no point in closing the env because
         Madrona doesn't close correctly anyways. You will want
         to cache this copy for later use. Cuda errors if you don't'''
-        pass 
+        pass
         #self.env.close()
         #del self.env.sim
 

@@ -1,5 +1,5 @@
 #!/bin/bash
- 
+
 environments=(
     "puffer_breakout"
     "puffer_connect4"

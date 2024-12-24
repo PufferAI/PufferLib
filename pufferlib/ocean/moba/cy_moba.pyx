@@ -61,7 +61,7 @@ cdef extern from "moba.h":
         float reward_xp
         float reward_distance
         float reward_tower
-     
+
         float radiant_victory
         float radiant_level
         float radiant_towers_alive
@@ -69,7 +69,7 @@ cdef extern from "moba.h":
         float dire_victory
         float dire_level
         float dire_towers_alive
-       
+
         PlayerLog radiant_support
         PlayerLog radiant_assassin
         PlayerLog radiant_burst
@@ -175,7 +175,7 @@ cdef extern from "moba.h":
         float reward_xp;
         float reward_distance;
         float reward_tower;
-        
+
         int total_towers_taken;
         int total_levels_gained;
         int radiant_victories;
@@ -195,7 +195,7 @@ cdef extern from "moba.h":
     ctypedef struct Reward
     void init_moba(MOBA* env, unsigned char* game_map_npy)
     void free_moba(MOBA* env)
- 
+
     unsigned char* read_file(char* filename)
 
     void reset(MOBA* env)

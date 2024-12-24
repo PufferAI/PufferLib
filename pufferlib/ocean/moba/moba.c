@@ -91,7 +91,7 @@ void forward(MOBANet* net, unsigned char* observations, int* actions) {
     relu(net->relu2, net->cat->output);
     linear(net->proj, net->relu2->output);
     relu(net->relu3, net->proj->output);
-    
+
     lstm(net->lstm, net->relu3->output);
 
     linear(net->actor, net->lstm->state_h);

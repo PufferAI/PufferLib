@@ -31,7 +31,7 @@ def unpack_obs(obs_flat):
     # Find the ends of each section
     ro_end_idx = PARTNER_DIM * ROADMAP_AGENT_FEAT_DIM
     rg_end_idx = ro_end_idx + (ROAD_MAP_DIM * TOP_K_ROADPOINTS)
-    
+
     # Unflatten and reshape to (batch_size, num_objects, object_dim)
     road_objects = (vis_state[:, :ro_end_idx]).reshape(
         -1, ROADMAP_AGENT_FEAT_DIM, PARTNER_DIM

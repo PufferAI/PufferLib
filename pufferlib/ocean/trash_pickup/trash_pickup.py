@@ -6,7 +6,7 @@ from pufferlib.ocean.trash_pickup.cy_trash_pickup import CyTrashPickup
 
 
 class TrashPickupEnv(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, report_interval=1, buf=None, 
+    def __init__(self, num_envs=1, render_mode=None, report_interval=1, buf=None,
                  grid_size=10, num_agents=3, num_trash=15, num_bins=2, max_steps=300, agent_sight_range=5):
         # Env Setup
         self.render_mode = render_mode
@@ -50,7 +50,7 @@ class TrashPickupEnv(pufferlib.PufferEnv):
         # num_obs_bin = num_bins * 2  # [x pos, y pos] for each bin
         # num_obs_agent = num_agents * 3  # [carrying trash, x pos, y pos] for each agent
         # self.num_obs = num_obs_trash + num_obs_bin + num_obs_agent;
-        
+
         # 2D Local crop obs space
         self.num_obs = ((((agent_sight_range * 2 + 1) * (agent_sight_range * 2 + 1)) * 5));  # one-hot encoding for all cell types in local crop around agent (minus the cell the agent is currently in)
 
@@ -83,6 +83,6 @@ class TrashPickupEnv(pufferlib.PufferEnv):
 
     def render(self):
         self.c_envs.render()
-        
+
     def close(self):
-        self.c_envs.close() 
+        self.c_envs.close()

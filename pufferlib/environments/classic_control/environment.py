@@ -37,4 +37,3 @@ class MountainCarWrapper(gymnasium.Wrapper):
         obs, reward, terminated, truncated, info = self.env.step(action)
         reward = abs(obs[0]+0.5)
         return obs, reward, terminated, truncated, info
-

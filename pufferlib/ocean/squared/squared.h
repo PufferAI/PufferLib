@@ -11,7 +11,7 @@ const unsigned char RIGHT = 4;
 const unsigned char EMPTY = 0;
 const unsigned char AGENT = 1;
 const unsigned char TARGET = 2;
- 
+
 typedef struct Squared Squared;
 struct Squared {
     unsigned char* observations;
@@ -68,7 +68,7 @@ void step(Squared* env) {
         env->c -= 1;
     }
 
-    if (env->tick > 3*env->size 
+    if (env->tick > 3*env->size
             || env->r < 0
             || env->c < 0
             || env->r >= env->size

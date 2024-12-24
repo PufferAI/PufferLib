@@ -61,4 +61,3 @@ def test_perf(n=100, agents=1024):
 
 if __name__ == '__main__':
     test_perf()
-

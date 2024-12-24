@@ -40,7 +40,7 @@ def make(
         min_simulations=int(min_simulations),
         max_simulations=int(max_simulations),
     )
- 
+
     if multiplayer:
         env = OpenSpielPettingZooEnvironment(**kwargs)
         wrapper_cls = pufferlib.emulation.PettingZooPufferEnv
@@ -53,4 +53,3 @@ def make(
         postprocessor_cls=pufferlib.emulation.BasicPostprocessor,
         buf=buf,
     )
-

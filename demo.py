@@ -20,7 +20,7 @@ import signal # Aggressively exit on ctrl+c
 signal.signal(signal.SIGINT, lambda sig, frame: os._exit(0))
 
 import clean_pufferl
-   
+
 def make_policy(env, policy_cls, rnn_cls, args):
     policy = policy_cls(env, **args['policy'])
     if rnn_cls is not None:
@@ -426,7 +426,7 @@ if __name__ == '__main__':
 
     make_env = env_module.env_creator(env_name)
     policy_cls = getattr(env_module.torch, args['base']['policy_name'])
-    
+
     rnn_name = args['base']['rnn_name']
     rnn_cls = None
     if rnn_name is not None:

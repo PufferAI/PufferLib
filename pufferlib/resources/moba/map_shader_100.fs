@@ -3,17 +3,17 @@
 // Vertex shader will need to pass these as varyings
 precision mediump float;
 
-varying vec2 fragTexCoord; 
-varying vec4 fragColor;          
+varying vec2 fragTexCoord;
+varying vec4 fragColor;
 
 // Input uniform values
-uniform sampler2D texture0; 
-uniform sampler2D texture1; 
-uniform vec4 colDiffuse;    
+uniform sampler2D texture0;
+uniform sampler2D texture1;
+uniform vec4 colDiffuse;
 
-//uniform vec3 resolution;    
-uniform vec4 mouse;         
-uniform float time;         
+//uniform vec3 resolution;
+uniform vec4 mouse;
+uniform float time;
 uniform float camera_x;
 uniform float camera_y;
 

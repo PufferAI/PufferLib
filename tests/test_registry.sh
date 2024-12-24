@@ -9,10 +9,10 @@ for folder in pufferlib/registry/*; do
     if [[ $folder_name == __* ]]; then
       continue
     fi
-   
+
     # Install package with extras
     pip install -e .[$folder_name] > /dev/null 2>&1
-    
+
     # Run tests
     python tests/test_registry.py $folder_name
   fi

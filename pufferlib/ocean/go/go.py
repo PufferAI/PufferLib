@@ -32,7 +32,7 @@ class Go(pufferlib.PufferEnv):
         self.num_agents = num_envs
         self.render_mode = render_mode
         self.report_interval = report_interval
-        
+
         self.num_obs = (grid_size) * (grid_size)*2 + 2
         self.num_act = (grid_size) * (grid_size) + 1
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
@@ -66,9 +66,9 @@ class Go(pufferlib.PufferEnv):
 
     def render(self):
         self.c_envs.render()
-        
+
     def close(self):
-        self.c_envs.close() 
+        self.c_envs.close()
 
 def test_performance(timeout=10, atn_cache=1024):
     num_envs=1000;

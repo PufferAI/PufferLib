@@ -29,7 +29,7 @@ int main() {
         if (env.turn == 1) {
             atn = rand() % 11;
         }
- 
+
         render(&env);
     }
     free_tcg(&env);

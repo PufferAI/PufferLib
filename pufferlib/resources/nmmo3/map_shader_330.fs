@@ -57,7 +57,7 @@ void main()
 
     tile_high_byte = int(tile/64.0);
     tile_low_byte = int(tile%64);
- 
+
     vec2 tile_uv = vec2(
         tile_low_byte/64.0 + x_frac/64.0,
         tile_high_byte/64.0 + y_frac/64.0
@@ -65,4 +65,3 @@ void main()
 
     outputColor = texture(texture_tiles, tile_uv);
 }
-

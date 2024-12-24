@@ -6,7 +6,7 @@ import gymnasium
 from pufferlib import namespace
 
 
-def init(self, 
+def init(self,
     env,
     n_rollouts,
     min_simulations,
@@ -64,7 +64,7 @@ def get_obs_and_infos(state):
 
     if state.state.is_terminal():
         return (
-            state.last_obs, 
+            state.last_obs,
             {player: {} for player in range(state.env.num_players())},
         )
 

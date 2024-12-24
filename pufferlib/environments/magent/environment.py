@@ -18,7 +18,7 @@ def make(name, buf=None):
         env_cls = battle_v4.env
     else:
         raise ValueError(f'Unknown environment name {name}')
- 
+
     env = env_cls()
     env = aec_to_parallel_wrapper(env)
     env = pufferlib.wrappers.PettingZooTruncatedWrapper(env)

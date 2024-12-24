@@ -1,5 +1,5 @@
 #!/bin/bash
- 
+
 environments=(
     "puffer_squared"
     "puffer_password"

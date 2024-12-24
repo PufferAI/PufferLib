@@ -30,5 +30,3 @@ def compute_gae(cnp.ndarray dones, cnp.ndarray values,
         c_advantages[t_cur] = lastgaelam
 
     return advantages
-
-

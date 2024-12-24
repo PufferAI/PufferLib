@@ -319,7 +319,7 @@ bool spell_flying_arrow_anim(Tactical* env, GameRenderer* renderer, int caster_c
 
     if (t <= phase1_duration) {
         DrawCircle(vec.x, vec.y, 10, (Color){0, 255, 0, 255});
-    } else {                    
+    } else {
         Entity* target = env->cell_to_entity[target_cell];
         if (target) {
             add_animation_text(env, renderer, TextFormat("-%i HP", spell->damage),
@@ -428,7 +428,7 @@ bool spell_wind_arrow_anim(Tactical* env, GameRenderer* renderer, int caster_cel
         float progress = t / phase1_duration;
         DrawLineEx((Vector2){xe0, ye0-renderer->ch}, (Vector2){xe1, ye1-renderer->ch}, 4,
             (Color){50, 200, 50, 125 + 125 * sin(progress * 10)});
-    } else {                    
+    } else {
         Entity* target = env->cell_to_entity[target_cell];
         if (target) {
             add_animation_text(env, renderer, TextFormat("-%i HP", spell->damage),
@@ -461,7 +461,7 @@ void spell_swift_rabbit(Tactical* env, Entity* caster, int target_cell, Spell* s
         compute_movement(env, target);
     }
 }
-bool spell_swift_rabbit_anim(Tactical* env, GameRenderer* renderer, int caster_cell, int target_cell, float t, Spell* spell) {  
+bool spell_swift_rabbit_anim(Tactical* env, GameRenderer* renderer, int caster_cell, int target_cell, float t, Spell* spell) {
     Entity* target = env->cell_to_entity[target_cell];
     if (target && spell->animation_state == 0) {
         add_animation_text(env, renderer, "+5 MP",
@@ -473,7 +473,7 @@ bool spell_swift_rabbit_anim(Tactical* env, GameRenderer* renderer, int caster_c
 
     if (t <= phase1_duration) {
         DrawCircle(renderer->xe[caster_cell], renderer->ye[caster_cell], t * 3000, (Color){0, 255, 0, 255 - t/0.3*255});
-    } else {  
+    } else {
         return true;
     }
     return false;
@@ -513,7 +513,7 @@ void compute_observations(Tactical* env) {
 void compute_movement(Tactical* env, Entity* entity) {
     // Do a BFS from the entity's current position to find all reachable cells
     // within a distance of the entity's available movement points.
-    // Store the result in env->movement_path, where each reachable cell 
+    // Store the result in env->movement_path, where each reachable cell
     // points to the previous cell in the path, and in env->movement_distance,
     // where each reachable cell stores the distance to the player (or -1 if unreachable).
 
@@ -751,7 +751,7 @@ GameRenderer* init_game_renderer(Tactical* env) {
     renderer->text_anim_count = 0;
 
     renderer->spell_anim = NULL;
-    
+
     renderer->xa = calloc(env->map_size, sizeof(float));
     renderer->xb = calloc(env->map_size, sizeof(float));
     renderer->xc = calloc(env->map_size, sizeof(float));
@@ -813,7 +813,7 @@ void draw_debug_info(GameRenderer* renderer) {
         renderer->mcell_type == CELL_EMPTY ? "EMPTY" :
         renderer->mcell_type == CELL_GROUND ? "GROUND" :
         renderer->mcell_type == CELL_HOLE ? "HOLE" :
-        renderer->mcell_type == CELL_WALL ? "WALL" : 
+        renderer->mcell_type == CELL_WALL ? "WALL" :
         renderer->mcell_type == -1 ? "NONE" : "UNKNOWN"), 150, 45, 15, COLOR_TEXT_DEFAULT);
 }
 
@@ -872,7 +872,7 @@ void draw_cells_and_entities(GameRenderer* renderer, Tactical* env) {
             if (renderer->movement_cells[cell]) {
                 const unsigned int dist = env->movement_distance[cell];
                 const char* text = TextFormat("%i", dist);
-                DrawText(text, 
+                DrawText(text,
                     renderer->xe[cell] - MeasureText(text, 12) / 2,
                     renderer->ye[cell] - 6, 12, COLOR_CELL_MOVE_TEXT);
             }
@@ -939,7 +939,7 @@ void draw_cells_and_entities(GameRenderer* renderer, Tactical* env) {
         // if entity is under move animation, handle it differently
         if (renderer->move_anim_entity && renderer->move_anim_path[renderer->move_anim_path_idx] == cell) {
             draw_player(renderer, renderer->move_anim_entity,
-                renderer->xe[cell] + renderer->move_anim_dx, renderer->ye[cell] + renderer->move_anim_dy, 
+                renderer->xe[cell] + renderer->move_anim_dx, renderer->ye[cell] + renderer->move_anim_dy,
                 renderer->move_anim_entity->color, renderer->move_anim_entity == env->current_player, cell_color);
         }
     }
@@ -965,7 +965,7 @@ void draw_player_dashboard(GameRenderer* renderer, Entity* dashboard_entity, boo
         DrawText(TextFormat("[%i]", i+1), 300, renderer->height - 125 + i * 20, 20, spell_active ? COLOR_SPELL : COLOR_SPELL_COOLDOWN);
         DrawText(TextFormat("(%i AP)", spell->ap_cost), 300 + 30, renderer->height - 125 + i * 20, 20, cooldown ? COLOR_SPELL_COOLDOWN : COLOR_ACTION_POINTS);
         if (spell->remaining_cooldown > 0) {
-            DrawText(TextFormat("%s (cooldown: %i)", spell->name, spell->remaining_cooldown), 
+            DrawText(TextFormat("%s (cooldown: %i)", spell->name, spell->remaining_cooldown),
                 300 + 100, renderer->height - 125 + i * 20, 20, COLOR_SPELL_COOLDOWN);
         } else {
             DrawText(spell->name,
@@ -1123,7 +1123,7 @@ int render_game(GameRenderer* renderer, Tactical* env) {
     renderer->mcell = get_cell_at_cursor(renderer, env);
     renderer->mcell_type = renderer->mcell == -1 ? -1 : env->map[renderer->mcell];
     draw_debug_info(renderer);
-    
+
     const int mcell = renderer->mcell;
     // movement path display, if applicable ; and spells
     memset(renderer->movement_cells, 0, env->map_size * sizeof(bool));
@@ -1257,7 +1257,7 @@ int render_game(GameRenderer* renderer, Tactical* env) {
                 }
             }
         }
-    }        
+    }
     memset(renderer->active_spell_cells, 0, env->map_size * sizeof(bool));
     if (renderer->active_spell && renderer->spell_cells[mcell]) {
         Spell* spell = renderer->active_spell;
@@ -1266,7 +1266,7 @@ int render_game(GameRenderer* renderer, Tactical* env) {
                 int cell = get_cell_with_delta(env, mcell, delta_row, delta_col);
                 if (env->map[cell] == CELL_GROUND) {
                     renderer->active_spell_cells[cell] = true;
-                }                
+                }
             }
         }
     }

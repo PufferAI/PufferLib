@@ -18,7 +18,7 @@ class Squared(pufferlib.PufferEnv):
         super().__init__(buf)
         self.c_envs = CySquared(self.observations, self.actions,
             self.rewards, self.terminals, num_envs, size)
- 
+
     def reset(self, seed=None):
         self.c_envs.reset()
         return self.observations, []

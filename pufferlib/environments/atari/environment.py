@@ -38,7 +38,7 @@ def make(name, obs_type='grayscale', frameskip=4,
         render_mode=ale_render_mode)
 
     action_set = env._action_set
-                    
+
     if render_mode != 'human':
         env = pufferlib.postprocess.ResizeObservation(env, downscale=2)
 

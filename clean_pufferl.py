@@ -448,7 +448,7 @@ class Experience:
         ptr = self.ptr
         indices = torch.where(mask)[0].numpy()[:self.batch_size - ptr]
         end = ptr + len(indices)
- 
+
         self.obs[ptr:end] = obs.to(self.obs.device)[indices]
         self.values_np[ptr:end] = value.cpu().numpy()[indices]
         self.actions_np[ptr:end] = action[indices]
@@ -694,7 +694,7 @@ def print_dashboard(env_name, utilization, global_step, epoch,
         f'{c1}DRAM: {c3}{dram_percent:.1f}%',
         f'{c1}VRAM: {c3}{vram_percent:.1f}%',
     )
-        
+
     s = Table(box=None, expand=True)
     s.add_column(f"{c1}Summary", justify='left', vertical='top', width=16)
     s.add_column(f"{c1}Value", justify='right', vertical='top', width=8)

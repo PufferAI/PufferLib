@@ -26,7 +26,7 @@ class NMMOWrapper(pufferlib.postprocess.PettingZooWrapper):
     @property
     def render_mode(self):
         return 'rgb_array'
-    
+
     def render(self):
         '''Quick little renderer for NMMO'''
         tiles = self.env.tile_map[:, :, 2].astype(np.uint8)
@@ -73,5 +73,3 @@ class NMMOWrapper(pufferlib.postprocess.PettingZooWrapper):
 
     def close(self):
         return self.env.close()
-
-    

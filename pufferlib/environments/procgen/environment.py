@@ -24,7 +24,7 @@ def make(name, num_envs=1, num_levels=0, start_level=0,
     assert int(num_envs) == float(num_envs), "num_envs must be an integer"
     num_envs = int(num_envs)
 
-    procgen = pufferlib.environments.try_import('procgen') 
+    procgen = pufferlib.environments.try_import('procgen')
     envs = procgen.ProcgenEnv(
         env_name=name,
         num_envs=num_envs,

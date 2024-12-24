@@ -14,7 +14,7 @@ class Policy (nn.Module):
             output_size=256, **kwargs):
         '''The CleanRL default NatureCNN policy used for Atari.
         It's just a stack of three convolutions followed by a linear layer
-        
+
         Takes framestack as a mandatory keyword argument. Suggested default is 1 frame
         with LSTM or 4 frames without.'''
         super().__init__()

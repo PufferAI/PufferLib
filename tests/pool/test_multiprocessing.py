@@ -32,7 +32,7 @@ if __name__ == '__main__':
     # 645 sps
     #test_envpool(num_envs=24, envs_per_worker=4, envs_per_batch=24, env_pool=False)
 
-    # 755 sps 
+    # 755 sps
     # test_envpool(num_envs=24, envs_per_worker=4, envs_per_batch=24)
 
     # 1050 sps

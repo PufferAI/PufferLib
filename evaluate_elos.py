@@ -111,7 +111,7 @@ def calc_elo(checkpoint, checkpoint_dir, elos, num_envs=128, num_games=128, num_
     paths.remove(f'{checkpoint_dir}/{checkpoint}')
     print(f'Removed {checkpoint} from paths')
     elos[checkpoint] = 1000
-    
+
     # Sample with replacement if not enough models
     print(f'Sampling {num_opponents} opponents')
     n_models = len(paths)
@@ -171,4 +171,3 @@ if __name__ == '__main__':
     checkpoint = 'model_0.pt'
     elos = {'model_random.pt': 1000}
     calc_elo(checkpoint, checkpoint_dir, elos, num_games=16)
-

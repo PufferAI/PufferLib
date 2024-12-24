@@ -28,7 +28,7 @@ def test_speed(envs_per_worker=1, delay_mean=0.01, delay_std=0.001, num_workers=
 
     for p in processes:
         p.start()
- 
+
     send_idxs = {i for i in range(num_workers)}
 
     # Register all receive pipes with the selector
@@ -91,4 +91,3 @@ if __name__ == '__main__':
     test_speed(delay_mean=0, delay_std=0, num_workers=24, batch_size=6, sync=False)
     test_speed(delay_mean=0, delay_std=0, num_workers=24, batch_size=24, sync=False)
     test_speed(delay_mean=0, delay_std=0, num_workers=24, batch_size=6, sync=True)
-

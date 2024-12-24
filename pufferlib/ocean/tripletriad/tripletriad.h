@@ -25,7 +25,7 @@ const Color PUFF_CYAN = (Color){0, 187, 187, 255};
 const Color PUFF_WHITE = (Color){241, 241, 241, 241};
 const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
 
-// how to start game compile - LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./tripletriadgame 
+// how to start game compile - LD_LIBRARY_PATH=raylib-5.0_linux_amd64/lib ./tripletriadgame
 
 #define LOG_BUFFER_SIZE 1024
 
@@ -81,7 +81,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
     logs->idx = 0;
     return log;
 }
- 
+
 typedef struct CTripleTriad CTripleTriad;
 struct CTripleTriad {
     float* observations;
@@ -377,7 +377,7 @@ void check_win_condition(CTripleTriad* env, int player) {
         for (int j=0; j< 3; j++) {
             if (env->board_states[i][j] !=0) {
                 count++;
-            } 
+            }
         }
     }
     if (count == 9) {
@@ -408,7 +408,7 @@ int get_bot_card_placement(CTripleTriad* env) {
             if (num_valid_placements == 9) break;  // Safety check
         }
     }
-    
+
     // Randomly select a valid placement
     if (num_valid_placements > 0) {
         return valid_placements[rand() % num_valid_placements];
@@ -449,8 +449,8 @@ bool check_legal_placement(CTripleTriad* env, int card_placement, int player) {
 }
 
 void check_card_conversions(CTripleTriad* env, int card_placement, int player) {
-    // Given that card locations last 4 values of the most inner array are organized, NSEW. 
-    // Check the cards in those directions and what their values are 
+    // Given that card locations last 4 values of the most inner array are organized, NSEW.
+    // Check the cards in those directions and what their values are
     // If the card in the direction is greater than the card in the current location, then convert the game state of the lower value card to the player with the higher value card.
     int card_idx = card_placement - 1;
     int row = card_idx / 3;
@@ -537,7 +537,7 @@ void step(CTripleTriad* env) {
             env->rewards[0] -= 0.1;
         }
 
-        // opponent turn 
+        // opponent turn
         if (env->dones[0] == 0 && card_placed == true ) {
             int bot_card_selected = get_bot_card_selection(env);
             if(bot_card_selected > 0) {
@@ -549,7 +549,7 @@ void step(CTripleTriad* env) {
                 update_action_masks(env);
                 env->card_selected[1] = -1;
             }
-            
+
         }
     }
     if (env->dones[0] == 1) {
@@ -613,9 +613,9 @@ void render(Client* client, CTripleTriad* env) {
                 card_y = env->board_y[env->card_locations[i][j]-1] + 10;
             }
             // Draw card background
-            // adjusts card color based on board state 
+            // adjusts card color based on board state
             Color card_color = (i != 0) ? PUFF_RED : PUFF_CYAN;
-            // check if index is in bounds first    
+            // check if index is in bounds first
             if (env->card_locations[i][j] != 0) {
                 if (env->board_states[(env->card_locations[i][j]-1)/3][(env->card_locations[i][j]-1)%3] == -1) {
                     card_color = PUFF_RED;
@@ -633,7 +633,7 @@ void render(Client* client, CTripleTriad* env) {
             } else {
                 DrawRectangleLinesEx(rect, 2, PUFF_WHITE);
             }
-        
+
             for(int k=0; k< 4; k++) {
                 int x_offset, y_offset;
                 switch(k) {

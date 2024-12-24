@@ -6,18 +6,23 @@ import urllib.request
 import zipfile
 import tarfile
 import platform
-	
+
 #  python3 setup.py built_ext --inplace
 
 VERSION = '2.0.3'
 
 RAYLIB_BASE = 'https://github.com/raysan5/raylib/releases/download/5.0/'
-RAYLIB_NAME = 'raylib-5.0_macos' if platform.system() == "Darwin" else 'raylib-5.0_linux_amd64'
+RAYLIB_NAME = 'raylib-5.0_macos' if platform.system() == 'Darwin' else 'raylib-5.0_linux_amd64'
 RAYLIB_WASM_URL = RAYLIB_BASE + 'raylib-5.0_webassembly.zip'
 RAYLIB_URL = RAYLIB_BASE + RAYLIB_NAME + '.tar.gz'
 
+if platform.system() == 'Darwin':
+    RAYLIB_INCLUDE_DIR = 'raylib/include'
+else:
+    RAYLIB_INCLUDE_DIR = 'raylib-5.0_linux_amd64/include'
+
 if not os.path.exists('raylib'):
-    print("Raylib not found, downloading...")
+    print('Raylib not found, downloading...')
     urllib.request.urlretrieve(RAYLIB_URL, 'raylib.tar.gz')
     with tarfile.open('raylib.tar.gz', 'r') as tar_ref:
         tar_ref.extractall()
@@ -26,17 +31,13 @@ if not os.path.exists('raylib'):
     os.remove('raylib.tar.gz')
 
 if not os.path.exists('raylib_wasm'):
-    print("Raylib WASM not found, downloading...")
+    print('Raylib WASM not found, downloading...')
     urllib.request.urlretrieve(RAYLIB_WASM_URL, 'raylib.zip')
     with zipfile.ZipFile('raylib.zip', 'r') as zip_ref:
         zip_ref.extractall()
         os.rename('raylib-5.0_webassembly', 'raylib_wasm')
 
     os.remove('raylib.zip')
-    
-#import os
-#os.environ['CFLAGS'] = '-O3 -march=native -Wall'
-
 
 # Default Gym/Gymnasium/PettingZoo versions
 # Gym:
@@ -142,9 +143,6 @@ environments = {
     'minerl': [
         'gym==0.17.0',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        #'git+https://github.com/minerllabs/minerl'
-        # Compatiblity warning with urllib3 and chardet
-        #'requests==2.31.0',
     ],
     'minigrid': [
         f'gym=={GYM_VERSION}',
@@ -195,15 +193,9 @@ environments = {
     'procgen': [
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        'procgen-mirror==0.10.7', # Procgen mirror for 3.11 and 3.12 support
+        'procgen-mirror==0.10.7',  # Procgen mirror for 3.11 and 3.12 support
         # Note: You need glfw==2.7 after installing for some torch versions
     ],
-    #'smac': [
-    #    'git+https://github.com/oxwhirl/smac.git',
-    #],
-    #'stable-retro': [
-    #    'git+https://github.com/Farama-Foundation/stable-retro.git',
-    #]
     'slimevolley': [
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
@@ -221,25 +213,28 @@ environments = {
 # We force updated versions of Gym/Gymnasium/PettingZoo here to
 # ensure that users do not have issues with conflicting versions
 # when switching to incompatible environments
-common = cleanrl + [environments[env] for env in [
-    'atari',
-    #'box2d',
-    'bsuite',
-    #'butterfly',
-    'classic_control',
-    'crafter',
-    'dm_control',
-    'dm_lab',
-    'griddly',
-    'microrts',
-    'minigrid',
-    'minihack',
-    'nethack',
-    'nmmo',
-    'pokemon_red',
-    'procgen',
-    'vizdoom',
-]]
+common = cleanrl + [
+    environments[env]
+    for env in [
+        'atari',
+        #'box2d',
+        'bsuite',
+        #'butterfly',
+        'classic_control',
+        'crafter',
+        'dm_control',
+        'dm_lab',
+        'griddly',
+        'microrts',
+        'minigrid',
+        'minihack',
+        'nethack',
+        'nmmo',
+        'pokemon_red',
+        'procgen',
+        'vizdoom',
+    ]
+]
 
 extension_paths = [
     'pufferlib/ocean/nmmo3/cy_nmmo3',
@@ -255,31 +250,52 @@ extension_paths = [
     'pufferlib/ocean/tripletriad/cy_tripletriad',
     'pufferlib/ocean/go/cy_go',
     'pufferlib/ocean/rware/cy_rware',
-    'pufferlib/ocean/trash_pickup/cy_trash_pickup'
+    'pufferlib/ocean/trash_pickup/cy_trash_pickup',
 ]
 
-extensions = [Extension(
-    path.replace('/', '.'),
-    [path + '.pyx'],
-    include_dirs=[numpy.get_include(), 'raylib/include'],
-    library_dirs=['raylib/lib'],
-    libraries=["raylib"],
-    runtime_library_dirs=["raylib/lib"],
-    extra_compile_args=['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', '-DPLATFORM_DESKTOP', '-O2', '-Wno-alloc-size-larger-than'],#, '-g'],
-    extra_link_args=["-Wl,-rpath,$ORIGIN/raylib/lib"]
+system = platform.system()
 
-) for path in extension_paths]
- 
+if system == 'Darwin':
+    # On macOS, use @loader_path.
+    # The extension “.so” is typically in pufferlib/ocean/...,
+    # and “raylib/lib” is (maybe) two directories up from ocean/<env>.
+    # So @loader_path/../../raylib/lib is common.
+    rpath_arg = '-Wl,-rpath,@loader_path/../../raylib/lib'
+elif system == 'Linux':
+    # On Linux, $ORIGIN works
+    rpath_arg = '-Wl,-rpath,$ORIGIN/raylib/lib'
+else:
+    # Windows, or anything else
+    # Typically you either copy .dll next to the extension or rely on PATH
+    rpath_arg = ''
+
+
+extensions = [
+    Extension(
+        path.replace('/', '.'),
+        [path + '.pyx'],
+        include_dirs=[numpy.get_include(), 'raylib/include'],
+        library_dirs=['raylib/lib'],
+        libraries=['raylib'],
+        runtime_library_dirs=['raylib/lib'],
+        extra_compile_args=[
+            '-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION',
+            '-DPLATFORM_DESKTOP',
+            '-O2',
+            '-Wno-alloc-size-larger-than',
+        ],
+        extra_link_args=[rpath_arg] if rpath_arg else [],
+    )
+    for path in extension_paths
+]
+
 setup(
-    name="pufferlib",
-    description="PufferAI Library"
-    "PufferAI's library of RL tools and utilities",
-    long_description_content_type="text/markdown",
+    name='pufferlib',
+    description='PufferAI Library' "PufferAI's library of RL tools and utilities",
+    long_description_content_type='text/markdown',
     version=VERSION,
     packages=find_packages(),
-    package_data={
-        "pufferlib": ["raylib/lib/libraylib.so.500", "raylib/lib/libraylib.so"]
-    },
+    package_data={'pufferlib': ['raylib/lib/libraylib.so.500', 'raylib/lib/libraylib.so']},
     include_package_data=True,
     install_requires=[
         'numpy==1.23.3',
@@ -302,49 +318,38 @@ setup(
         'common': common,
         **environments,
     },
-    ext_modules = cythonize([
-        "pufferlib/extensions.pyx",
-        "c_gae.pyx",
-        "pufferlib/puffernet.pyx",
-        "pufferlib/ocean/grid/c_grid.pyx",
-        *extensions,
-    ], 
-    compiler_directives={
-        'language_level': 3,
-        'boundscheck': False,
-        'initializedcheck': False,
-        'wraparound': False,
-        'cdivision': True,
-        'nonecheck': False,
-        'profile': False,
-    },
-       #nthreads=6,
-       #annotate=True,
-       #compiler_directives={'profile': True},# annotate=True
+    ext_modules=cythonize(
+        [
+            'pufferlib/extensions.pyx',
+            'c_gae.pyx',
+            'pufferlib/puffernet.pyx',
+            'pufferlib/ocean/grid/c_grid.pyx',
+            *extensions,
+        ],
+        compiler_directives={
+            'language_level': 3,
+            'boundscheck': False,
+            'initializedcheck': False,
+            'wraparound': False,
+            'cdivision': True,
+            'nonecheck': False,
+            'profile': False,
+        },
     ),
-    include_dirs=[numpy.get_include(), 'raylib-5.0_linux_amd64/include'],
-    python_requires=">=3.8",
-    license="MIT",
-    author="Joseph Suarez",
-    author_email="jsuarez@puffer.ai",
-    url="https://github.com/PufferAI/PufferLib",
-    keywords=["Puffer", "AI", "RL", "Reinforcement Learning"],
+    include_dirs=[numpy.get_include(), RAYLIB_INCLUDE_DIR],
+    python_requires='>=3.8',
+    license='MIT',
+    author='Joseph Suarez',
+    author_email='jsuarez@puffer.ai',
+    url='https://github.com/PufferAI/PufferLib',
+    keywords=['Puffer', 'AI', 'RL', 'Reinforcement Learning'],
     classifiers=[
-        "Intended Audience :: Science/Research",
-        "Intended Audience :: Developers",
-        "License :: OSI Approved :: MIT License",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
+        'Intended Audience :: Science/Research',
+        'Intended Audience :: Developers',
+        'License :: OSI Approved :: MIT License',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
     ],
 )
-
-#stable_baselines3
-#supersuit==3.3.5
-#'git+https://github.com/oxwhirl/smac.git',
-
-#curl -L -o smac.zip https://blzdistsc2-a.akamaihd.net/Linux/SC2.4.10.zip
-#unzip -P iagreetotheeula smac.zip 
-#curl -L -o maps.zip https://github.com/oxwhirl/smac/releases/download/v0.1-beta1/SMAC_Maps.zip
-#unzip maps.zip && mv SMAC_Maps/ StarCraftII/Maps/

@@ -74,7 +74,7 @@ cdef extern from "go.h":
     Client* make_client(float width, float height)
     void close_client(Client* client)
     void render(Client* client, CGo* env)
-    
+
 
 cdef class CyGo:
     cdef:

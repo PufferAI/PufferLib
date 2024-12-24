@@ -11,7 +11,7 @@ import pufferlib.postprocess
 
 ALIASES = {
     'spiders': 'GDY-Spiders-v0',
-}    
+}
 
 def env_creator(name='spiders'):
     return functools.partial(make, name)

@@ -68,7 +68,7 @@ def test_performance(timeout=10, atn_cache=1024, num_envs=1024):
 
     start = time.time()
     while time.time() - start < timeout:
-        atn = actions[tick % atn_cache]         
+        atn = actions[tick % atn_cache]
         env.step(atn)
         tick += 1
 

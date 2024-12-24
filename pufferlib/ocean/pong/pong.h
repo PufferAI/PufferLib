@@ -57,7 +57,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
     logs->idx = 0;
     return log;
 }
- 
+
 typedef struct Pong Pong;
 struct Pong {
     float* observations;
@@ -104,7 +104,7 @@ void init(Pong* env) {
     // precompute
     env->min_paddle_y = -env->paddle_height / 2;
     env->max_paddle_y = env->height - env->paddle_height/2;
-    
+
     env->paddle_dir = 0;
 }
 
@@ -174,7 +174,7 @@ void step(Pong* env) {
 
     for (int i = 0; i < env->frameskip; i++) {
         env->paddle_yr += env->paddle_speed * env->paddle_dir;
-        
+
         // move opponent paddle
         float opp_paddle_delta = env->ball_y - (env->paddle_yl + env->paddle_height / 2);
         opp_paddle_delta = fminf(fmaxf(opp_paddle_delta, -env->paddle_speed), env->paddle_speed);

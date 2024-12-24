@@ -67,4 +67,3 @@ class SkipWrapper(gym.Wrapper):
     def reset(self):
         self.stepcount = 0
         return self.env.reset()
-

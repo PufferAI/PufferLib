@@ -27,7 +27,7 @@ def test_puffernet_relu(batch_size=16, input_size=128):
 
     input_torch = torch.from_numpy(input_puffer)
     output_torch = torch.relu(input_torch).detach()
-    
+
     # PufferNet done second because it is in-place on the input
     puffernet.puf_relu(input_puffer, input_puffer, batch_size*input_size)
 

@@ -392,7 +392,7 @@ Env* make_locked_room_env(unsigned char* observations,
 
     Env* env = init_grid(observations, actions, rewards, dones,
         width, height, num_agents, horizon, vision, agent_speed, discretize);
- 
+
     env->agents[0].spawn_y = 9+vision;
     env->agents[0].spawn_x = 9+vision;
     env->agents[0].color = AGENT_1;
@@ -525,5 +525,3 @@ Env** make_locked_rooms(unsigned char* observations,
     }
     return envs;
 }
-
-

@@ -69,7 +69,7 @@ def print_dashboard(performance_data, loss_data, user_data, min_interval=0.25, l
         f'{c1}DRAM: {c3}{dram_percent:.1f}%',
         f'{c1}VRAM: {c3}{vram_percent:.1f}%',
     )
-        
+
     summary= Table(box=None, expand=True)
     summary.add_column(f"{c1}Summary", justify='left', vertical='top')
     summary.add_column(f"{c1}Value", justify='right', vertical='top')
@@ -80,7 +80,7 @@ def print_dashboard(performance_data, loss_data, user_data, min_interval=0.25, l
     summary.add_row(f'{c2}Agent Steps', f'{b2}{abbreviate(performance.agent_steps)}')
     summary.add_row(f'{c2}Steps/sec', f'{b2}{abbreviate(performance.sps)}')
     summary.add_row(f'{c2}sec/Batch', f'{b2}{performance.epoch_time:.2f}')
-   
+
     perf = Table(box=None, expand=True)
     perf.add_column(f"{c1}Performance", justify="left", ratio=1.0)
     perf.add_column(f"{c1}Time", justify="right", ratio=0.5)
@@ -132,7 +132,7 @@ class Dashboard:
             Layout(name="utilization", size=5),
             Layout(name="monitoring"),
         )
- 
+
         self.layout = layout
         '''
         layout.split(
@@ -199,7 +199,7 @@ class Dashboard:
         megatable.add_row(user)
         self.layout["monitoring"].update(megatable)
         self.console.clear()
-        self.console.print(self.layout) 
+        self.console.print(self.layout)
 
 
     def update_topline(self, total_uptime, estimated_time, total_steps, steps_per_second):
@@ -224,7 +224,7 @@ class Dashboard:
 
         return table
         self.console.clear()
-        self.console.print(self.layout) 
+        self.console.print(self.layout)
 
     def update_losses(self, data):
         table = Table(box=None, expand=True)
@@ -238,7 +238,7 @@ class Dashboard:
 
         return table
         self.console.clear()
-        self.console.print(self.layout) 
+        self.console.print(self.layout)
 
     def update_user_stats(self, data):
         table = Table(box=None, expand=True)
@@ -250,7 +250,7 @@ class Dashboard:
 
         return table
         self.console.clear()
-        self.console.print(self.layout) 
+        self.console.print(self.layout)
 
 
 #dashboard = Dashboard()
@@ -288,4 +288,3 @@ try:
         time.sleep(1)
 except KeyboardInterrupt:
     dashboard.stop()
-

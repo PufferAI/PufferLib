@@ -52,7 +52,7 @@ class Policy(torch.nn.Module):
     tile = env_outputs['Tile']
     # Center on player
     # This is cursed without clone??
-    tile[:, :, :2] -= tile[:, 112:113, :2].clone() 
+    tile[:, :, :2] -= tile[:, 112:113, :2].clone()
     tile[:, :, :2] += 7
     tile = self.embedding(
         tile.long().clip(0, 255) + self.tile_offset.to(tile.device)

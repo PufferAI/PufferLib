@@ -34,7 +34,7 @@ ELEMENTS = (
     ('fire', 5, ray.Color(255, 128, 128, 255)),
     ('water', 9, ray.Color(128, 128, 255, 255)),
     ('earth', 11, ray.Color(128, 255, 128, 255)),
-    ('air', 3, ray.Color(255, 255, 128, 255)),      
+    ('air', 3, ray.Color(255, 255, 128, 255)),
 )
 
 BASE = list(range(8))
@@ -100,7 +100,7 @@ sword_mask = np.array((
 ))
 
 bow_mask = np.array((
-    (0, 0, 0, 0, 0, 0, 0, 0), 
+    (0, 0, 0, 0, 0, 0, 0, 0),
     (1, 1, 1, 1, 1, 1, 1, 1),
     (1, 0, 0, 0, 0, 0, 0, 0),
     (1, 0, 0, 0, 0, 0, 0, 0),
@@ -243,11 +243,11 @@ def copy_and_scale_files(source_directory, target_directory, scale_factor):
         relative_path = os.path.relpath(root, source_directory)
         target_path = os.path.join(target_directory)
         os.makedirs(target_path, exist_ok=True)
-        
+
         for file in files:
             src_file_path = os.path.join(root, file)
             target_file_path = os.path.join(target_directory, file)
-            
+
             path = src_file_path.lower()
             if path.endswith('.ttf'):
                 os.copy(src_file_path, target_file_path)
@@ -445,7 +445,7 @@ for sheet in SEASONS:
         for dx, dy in OFFSETS:
             dst_r, dst_c = divmod(idx, SHEET_SIZE)
             idx += 1
-            
+
             src_pos = slice(dy+src_dy, dx+src_dx)
             tile_tex = sheet[src_pos]
 

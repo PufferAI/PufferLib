@@ -40,7 +40,7 @@ void demo(int grid_size, int num_agents, int num_trash, int num_bins, int max_st
                     for (int e = 0; e < env.total_num_obs; e++) {
                         net->obs[e] = env.observations[e];
                     }
-                    forward_convlstm(net, net->obs, env.actions);    
+                    forward_convlstm(net, net->obs, env.actions);
                 }
                 else{
                     env.actions[i] = rand() % 4; // 0 = UP, 1 = DOWN, 2 = LEFT, 3 = RIGHT
@@ -65,7 +65,7 @@ void demo(int grid_size, int num_agents, int num_trash, int num_bins, int max_st
 
             // Step the environment and render the grid
             step(&env);
-            
+
         }
         tick++;
 

@@ -68,7 +68,7 @@ Log aggregate_and_clear(LogBuffer* logs) {
     logs->idx = 0;
     return log;
 }
- 
+
 typedef struct CConnect4 CConnect4;
 struct CConnect4 {
     // Pufferlib inputs / outputs
@@ -143,7 +143,7 @@ bool draw(uint64_t mask) {
 
 // Determine if 'pieces' contains at least one line of connected pieces.
 bool won(uint64_t pieces) {
-    // Horizontal 
+    // Horizontal
     uint64_t m = pieces & (pieces >> (ROWS + 1));
     if(m & (m >> (2 * (ROWS + 1)))) {
         return true;
@@ -155,7 +155,7 @@ bool won(uint64_t pieces) {
         return true;
     }
 
-    // Diagonal 2 
+    // Diagonal 2
     m = pieces & (pieces >> (ROWS + 2));
     if(m & (m >> (2 * (ROWS + 2)))) {
         return true;
@@ -366,7 +366,7 @@ void render(Client* client, CConnect4* env) {
 
     BeginDrawing();
     ClearBackground(PUFF_BACKGROUND);
-    
+
     int y_offset = client->height - env->piece_height;
     int obs_idx = 0;
     for (int i = 0; i < 49; i++) {

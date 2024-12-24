@@ -24,7 +24,7 @@ class RocketLander(pufferlib.PufferEnv):
         self.float_actions = np.zeros((num_envs, 3), dtype=np.float32)
         self.c_envs = CyRocketLander(self.observations, self.float_actions, self.rewards,
             self.terminals, self.truncations, num_envs)
- 
+
     def reset(self, seed=None):
         self.tick = 0
         self.c_envs.reset()

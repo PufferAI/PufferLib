@@ -19,3 +19,7 @@ All of our documentation is hosted at [puffer.ai](https://puffer.ai "PufferLib D
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=pufferai/pufferlib&type=Date" />
  </picture>
 </a>
+
+## Contributions
+
+We're always looking for new contributors! When first starting out, don't forget to run `pre-commit install` before committing.

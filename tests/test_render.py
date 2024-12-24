@@ -50,4 +50,3 @@ if __name__ == '__main__':
         start = time.time()
         if time.time() - start < 1/60:
             time.sleep(1/60 - (time.time() - start))
-           

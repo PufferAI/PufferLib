@@ -30,11 +30,11 @@ def create_bots(state, seed):
         uct_c=2,
         max_simulations=a,
         evaluator=evaluator,
-        random_state=rnd_state, 
+        random_state=rnd_state,
         child_selection_fn=mcts.SearchNode.puct_value,
         solve=True,
     ) for a in range(state.min_simulations, state.max_simulations + 1)]
-    
+
 def reset(state, seed = None, options = None):
     state.state = state.env.new_initial_state()
 
@@ -49,7 +49,7 @@ def reset(state, seed = None, options = None):
     if np.random.rand() < 0.5:
         bot_atn = state.bot.step(state.state)
         state.state.apply_action(bot_atn)
-    
+
     obs, infos = get_obs_and_infos(state)
     player = state.state.current_player()
     return obs[player], infos[player]

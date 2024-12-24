@@ -39,7 +39,7 @@ MOCK_OBSERVATION_SPACES = [
         'tty_colors': Box(0, 31, (24, 80), 'int8'),
         'tty_cursor': Box(0, 255, (2,), 'uint8'),
     }),
-    
+
     # Neural MMO space
     Dict({
         'ActionTargets': Dict({
@@ -222,7 +222,7 @@ DEFAULT_OBSERVATION_SPACE = gymnasium.spaces.Box(
     shape=(1,), dtype=np.float32
 )
 DEFAULT_ACTION_SPACE = gymnasium.spaces.Discrete(2)
- 
+
 
 def make_all_mock_environments():
     mock_single_agent_environments = []
@@ -235,7 +235,7 @@ def make_all_mock_environments():
                     action_space=act_space,
                 )
             )
-     
+
             mock_multi_agent_environments.append(
                 PettingZooTestEnv(
                     observation_space=obs_space,
@@ -291,7 +291,7 @@ class PettingZooPerformanceEnv:
 
     def action_space(self, agent):
         return DEFAULT_ACTION_SPACE
- 
+
     def reset(self, seed=None):
         return {1: self.observation_space(1).sample()}, {1: {}}
 

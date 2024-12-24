@@ -21,7 +21,7 @@ char map1[] =
 
 unsigned int map2_height = 28;
 unsigned int map2_width = 29;
-char map2[] = 
+char map2[] =
     "-------------#.--------------"
     "-----------.#..--------------"
     "----------......-------------"
@@ -53,7 +53,7 @@ char map2[] =
 
 unsigned int map3_height = 28;
 unsigned int map3_width = 29;
-char map3[] = 
+char map3[] =
     "-------------#.--------------"
     "-----------.#..--------------"
     "----------.......------------"

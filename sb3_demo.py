@@ -53,4 +53,3 @@ for _ in range(1000):
     action, _states = model.predict(ob)
     ob, reward, terminal, truncated, info = env.step(action[0])
     env.render()
-       

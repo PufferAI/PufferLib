@@ -14,4 +14,3 @@ Key concepts:
 # C version
 
 The C version is a direct port of the Cython version, plus a few minor tweaks. It includes a pure C raylib client and a pure C MLP forward pass for running local inference. I made this so that we could run a cool demo in the browser 100% client side. I may port additional simulators in the future, and you are welcome to contribute C code to PufferLib, but this is not required. You can make things plenty fast in Cython. To build this locally, all you need is the raylib source. If you want to build for web, follow RayLib's emscripten setup.
-

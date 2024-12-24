@@ -11,7 +11,7 @@ class Policy(Base):
     def __init__(self, env, input_size=128, hidden_size=128):
         '''Default PyTorch policy, meant for debugging.
         This should run with any environment but is unlikely to learn anything.
-        
+
         Uses a single linear layer + relu to encode observations and a list of
         linear layers to decode actions. The value function is a single linear layer.
         '''

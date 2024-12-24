@@ -18,7 +18,7 @@ def test_cleanrl_utils():
         env_creator=pufferlib.environments.classic_control.env_creator('cartpole'),
         num_envs=4, envs_per_worker=2
     )
- 
+
     obs, info, _, _ = envs.reset()
 
     policy = pufferlib.models.Default(envs.driver_env)
@@ -81,7 +81,7 @@ def correct_sample_logits(logits, action=None):
     entropy = torch.stack([c.entropy() for c in multi_categorical]).T.sum(1)
     return action, logprob, entropy
 
- 
+
 if __name__ == '__main__':
     test_cleanrl_utils()
     #test_sample_logits()

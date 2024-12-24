@@ -37,7 +37,7 @@ cdef extern from "trash_pickup.h":
 
     Client* make_client(CTrashPickupEnv* env)
     void close_client(Client* client)
-    void render(Client* client, CTrashPickupEnv* env) 
+    void render(Client* client, CTrashPickupEnv* env)
 
     void reset(CTrashPickupEnv* env)
     void step(CTrashPickupEnv* env)
@@ -50,8 +50,8 @@ cdef class CyTrashPickup:
         int num_envs
 
     def __init__(self, char[:, :] observations, int[:] actions,
-            float[:] rewards, unsigned char[:] terminals, int num_envs, 
-            int num_agents=3, int grid_size=10, int num_trash=15, 
+            float[:] rewards, unsigned char[:] terminals, int num_envs,
+            int num_agents=3, int grid_size=10, int num_trash=15,
             int num_bins=2, int max_steps=300, int agent_sight_range=5):
         self.num_envs = num_envs
         self.envs = <CTrashPickupEnv*>calloc(num_envs, sizeof(CTrashPickupEnv))
@@ -62,7 +62,7 @@ cdef class CyTrashPickup:
         self.logs = allocate_logbuffer(LOG_BUFFER_SIZE)
 
         cdef int inc = num_agents
-        
+
         cdef int i
         for i in range(num_envs):
             self.envs[i] = CTrashPickupEnv(
@@ -70,11 +70,11 @@ cdef class CyTrashPickup:
                 actions=&actions[inc*i],
                 rewards=&rewards[inc*i],
                 dones=&terminals[inc*i],
-                log_buffer=self.logs, 
-                grid_size=grid_size, 
+                log_buffer=self.logs,
+                grid_size=grid_size,
                 num_agents=num_agents,
-                num_trash=num_trash, 
-                num_bins=num_bins, 
+                num_trash=num_trash,
+                num_bins=num_bins,
                 max_steps=max_steps,
                 agent_sight_range=agent_sight_range
             )

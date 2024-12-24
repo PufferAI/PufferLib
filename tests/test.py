@@ -73,7 +73,7 @@ def test_pettingzoo_emulation(env_cls, steps=100):
             if puf_env.is_obs_emulated:
                 puf_ob = pufferlib.emulation.nativize(
                     puf_ob, puf_env.env.single_observation_space, puf_env.obs_dtype)
-            
+
             assert pufferlib.utils.compare_space_samples(raw_ob, puf_ob)
 
         raw_actions = {a: raw_env.action_space(a).sample()
@@ -138,7 +138,7 @@ def test_puffer_vectorization(env_cls, puffer_cls, steps=100, num_envs=1, **kwar
                 raw_rewards.append(r_rew)
                 raw_terminals.append(r_term)
                 raw_truncations.append(r_trunc)
-                
+
         vec_obs, vec_rewards, vec_terminals, vec_truncations, _ = vec_envs.step(actions)
 
         rew = raw_rewards

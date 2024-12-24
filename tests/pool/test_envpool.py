@@ -92,7 +92,7 @@ def sweep_performance_tests():
     backends = (
         gymnasium.vector.SyncVectorEnv, Serial,
         gymnasium.vector.AsyncVectorEnv, 'SyncMultiprocessing',
-        Multiprocessing, 
+        Multiprocessing,
         'SyncRay', Ray,
     )
     results = {}

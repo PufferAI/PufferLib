@@ -48,7 +48,7 @@ cdef class Environment:
             observations, rewards, int width, int height, int num_agents, int horizon,
             int vision_range, float agent_speed, bint discretize, float food_reward,
             int expected_lifespan):
-        self.width = width 
+        self.width = width
         self.height = height
         self.num_agents = num_agents
         self.horizon = horizon

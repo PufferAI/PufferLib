@@ -90,9 +90,9 @@ int find(Group* groups, int x) {
 void union_groups(Group* groups, int pos1, int pos2) {
     pos1 = find(groups, pos1);
     pos2 = find(groups, pos2);
-    
+
     if (pos1 == pos2) return;
-    
+
     if (groups[pos1].rank < groups[pos2].rank) {
         groups[pos1].parent = pos2;
         groups[pos2].size += groups[pos1].size;
@@ -212,7 +212,7 @@ void compute_observations(CGo* env) {
     for (int i = 0; i < (env->grid_size)*(env->grid_size); i++) {
 	if(env->board_states[i] ==1 ){
 		env->observations[observation_indx] = 1.0;
-	}	
+	}
 	else {
 		env->observations[observation_indx] = 0.0;
 	}
@@ -221,7 +221,7 @@ void compute_observations(CGo* env) {
     for (int i = 0; i < (env->grid_size)*(env->grid_size); i++) {
         if(env->board_states[i] ==2 ){
             env->observations[observation_indx] = 1.0;
-        }	
+        }
         else {
             env->observations[observation_indx] = 0.0;
         }
@@ -261,11 +261,11 @@ void compute_score_tromp_taylor(CGo* env) {
     int player_score = 0;
     int opponent_score = 0;
     reset_visited(env);
-    
+
     // Queue for BFS
     int queue_size = (env->grid_size) * (env->grid_size);
     int queue[queue_size];
-    
+
     // First count stones
     for (int i = 0; i < queue_size; i++) {
         if (env->board_states[i] == 1) {
@@ -274,40 +274,40 @@ void compute_score_tromp_taylor(CGo* env) {
             opponent_score++;
         }
     }
-    
+
     // Then process empty territories
     for (int start_pos = 0; start_pos < queue_size; start_pos++) {
         // Skip if not empty or already visited
         if (env->board_states[start_pos] != 0 || env->visited[start_pos]) {
             continue;
         }
-        
+
         // Initialize BFS
         int front = 0, rear = 0;
         int territory_size = 0;
         int bordering_player = 0;  // 0=neutral, 1=player1, 2=player2, 3=mixed
-        
+
         queue[rear++] = start_pos;
         env->visited[start_pos] = 1;
-        
+
         // Process connected empty points
         while (front < rear) {
             int pos = queue[front++];
             territory_size++;
             int x = pos % env->grid_size;
             int y = pos / env->grid_size;
-            
+
             // Check all adjacent positions
             for (int i = 0; i < 4; i++) {
                 int nx = x + DIRECTIONS[i][0];
                 int ny = y + DIRECTIONS[i][1];
-                
+
                 if (!is_valid_position(env, nx, ny)) {
                     continue;
                 }
-                
+
                 int npos = ny * env->grid_size + nx;
-                
+
                 if (env->board_states[npos] == 0 && !env->visited[npos]) {
                     // Add unvisited empty points to queue
                     queue[rear++] = npos;
@@ -319,7 +319,7 @@ void compute_score_tromp_taylor(CGo* env) {
                 }
             }
         }
-        
+
         // Assign territory points
         if (bordering_player == 1) {
             player_score += territory_size;
@@ -328,7 +328,7 @@ void compute_score_tromp_taylor(CGo* env) {
         }
         // Mixed territories (bordering_player == 3) are neutral and not counted
     }
-    
+
     env->score = (float)player_score - (float)opponent_score - env->komi;
 }
 
@@ -402,21 +402,21 @@ int count_liberties(CGo* env, int root, int* queue) {
     int liberties = 0;
     int front = 0;
     int rear = 0;
-    
+
     queue[rear++] = root;
     env->visited[root] = 1;
     while (front < rear) {
         int pos = queue[front++];
         int x = pos % (env->grid_size);
         int y = pos / (env->grid_size);
-        
+
         for (int i = 0; i < 4; i++) {
             int nx = x + DIRECTIONS[i][0];
             int ny = y + DIRECTIONS[i][1];
             if (!is_valid_position(env, nx, ny)) {
                 continue;
             }
-            
+
             int npos = ny * (env->grid_size) + nx;
             if (env->visited[npos]) {
                 continue;
@@ -460,7 +460,7 @@ int make_move(CGo* env, int pos, int player){
     env->temp_groups[pos].rank = 0;
     env->temp_groups[pos].size = 1;
     env->temp_groups[pos].liberties = 0;
-    
+
     int max_affected_groups = (env->grid_size) * (env->grid_size);
     int affected_groups[max_affected_groups];
     int affected_count = 0;
@@ -730,7 +730,7 @@ void step(CGo* env) {
 
     if(env->rewards[0] > 1){
 	    env->rewards[0] = 1;
-    } 
+    }
     if(env->rewards[0] < -1){
 	    env->rewards[0] = -1;
     }
@@ -739,7 +739,7 @@ void step(CGo* env) {
         end_game(env);
         return;
     }
-    
+
     compute_observations(env);
 }
 
@@ -808,7 +808,7 @@ void render(Client* client, CGo* env) {
         // Calculate the circle position based on the grid
         int circle_x = x + env->grid_square_size;
         int circle_y = y + env->grid_square_size;
-        // if player draw circle tile for black 
+        // if player draw circle tile for black
         int inner = (env->grid_square_size / 2) - 4;
         int outer = (env->grid_square_size / 2) - 2;
         if (position_state == 1) {

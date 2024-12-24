@@ -14,7 +14,7 @@ def env_creator(name='GlobalAgentCombinedRewardEnv'):
 
 def make(name, buf=None):
     '''Gym MicroRTS creation function
-    
+
     This library appears broken. Step crashes in Java.
     '''
     pufferlib.environments.try_import('gym_microrts')
