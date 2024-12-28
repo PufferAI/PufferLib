@@ -1,6 +1,7 @@
 #!/bin/bash
  
 environments=(
+    "puffer_codeball"
     "puffer_breakout"
     "puffer_connect4"
     "puffer_pong"
@@ -10,6 +11,7 @@ environments=(
     "puffer_go"
     "puffer_tactics"
     "puffer_moba"
+    "puffer_codeball"
 )
 
 for env in "${environments[@]}"; do

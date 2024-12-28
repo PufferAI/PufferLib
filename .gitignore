@@ -149,3 +149,13 @@ checkpoints/
 experiments/
 wandb/
 raylib/
+
+raylib_wasm/*
+c_gae.c
+pufferlib/puffernet.c
+pufferlib/extensions.c
+pufferlib/ocean/tactical/c_tactical.c
+pufferlib/ocean/grid/c_grid.c
+.idea/
+*.dSYM/
+/codeball

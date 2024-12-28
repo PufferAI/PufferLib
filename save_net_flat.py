@@ -110,9 +110,14 @@ def test_model_forward(model):
 	
 if __name__ == '__main__':
     #test_lstm()
-    model = torch.load('snake.pt', map_location='cpu')
+    wp = None
+    if wp is None:
+        from glob import glob
+        wp = sorted(glob("experiments/**/model_*.pt", recursive=True))[-1]
+    model = torch.load(wp, map_location='cpu')
+    # model = torch.load('snake.pt', map_location='cpu')
     #test_model_forward(model)
     #test_model(model)
 
-    save_model_weights(model, 'snake_weights.bin')
+    save_model_weights(model, 'pufferlib/resources/codeball_weights.bin')
     print('saved')

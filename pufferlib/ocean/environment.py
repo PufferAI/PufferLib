@@ -14,6 +14,7 @@ from .moba.moba import Moba
 from .nmmo3.nmmo3 import NMMO3
 from .go.go import Go
 from .rware.rware import Rware
+from .codeball.codeball import CodeBall
 #from .rocket_lander import rocket_lander
 from .trash_pickup.trash_pickup import TrashPickupEnv
 
@@ -137,8 +138,8 @@ MAKE_FNS = {
     'tactical': Tactical,
     'go': Go,
     'rware': Rware,
+    'codeball': CodeBall,
     'trash_pickup': TrashPickupEnv,
-
     #'rocket_lander': rocket_lander.RocketLander,
     'foraging': make_foraging,
     'predator_prey': make_predator_prey,

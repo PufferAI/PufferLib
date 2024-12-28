@@ -11,9 +11,12 @@ import platform
 
 VERSION = '2.0.3'
 
-RAYLIB_BASE = 'https://github.com/raysan5/raylib/releases/download/5.0/'
-RAYLIB_NAME = 'raylib-5.0_macos' if platform.system() == "Darwin" else 'raylib-5.0_linux_amd64'
-RAYLIB_WASM_URL = RAYLIB_BASE + 'raylib-5.0_webassembly.zip'
+# RAYLIB_BASE = 'https://github.com/raysan5/raylib/releases/download/5.0/'
+# RAYLIB_NAME = 'raylib-5.0_macos' if platform.system() == "Darwin" else 'raylib-5.0_linux_amd64'
+# RAYLIB_WASM_URL = RAYLIB_BASE + 'raylib-5.0_webassembly.zip'
+RAYLIB_BASE = 'https://github.com/raysan5/raylib/releases/download/5.5/'
+RAYLIB_NAME = 'raylib-5.5_macos' if platform.system() == "Darwin" else 'raylib-5.5_linux_amd64'
+RAYLIB_WASM_URL = RAYLIB_BASE + 'raylib-5.5_webassembly.zip'
 RAYLIB_URL = RAYLIB_BASE + RAYLIB_NAME + '.tar.gz'
 
 if not os.path.exists('raylib'):
@@ -30,7 +33,7 @@ if not os.path.exists('raylib_wasm'):
     urllib.request.urlretrieve(RAYLIB_WASM_URL, 'raylib.zip')
     with zipfile.ZipFile('raylib.zip', 'r') as zip_ref:
         zip_ref.extractall()
-        os.rename('raylib-5.0_webassembly', 'raylib_wasm')
+        os.rename('raylib-5.5_webassembly', 'raylib_wasm')
 
     os.remove('raylib.zip')
     
