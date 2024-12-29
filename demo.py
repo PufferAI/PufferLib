@@ -53,7 +53,7 @@ def sweep(args, env_name, make_env, policy_cls, rnn_cls):
         try:
             wandb = init_wandb(args, env_name, id=args['exp_id'])
             args['train'].update(wandb.config.train)
-            train(args, make_env, policy_cls, rnn_cls, wandb)
+            train(args, make_env, policy_cls, rnn_cls, wandb, get_optim(args.optimizer))
         except Exception as e:
             Console().print_exception()
 
@@ -253,7 +253,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         print(wandb.config.policy)
         try:
             stats, uptime, new_elos, vecenv['vecenv'] = train(args, make_env, policy_cls, rnn_cls,
-                wandb, elos=elos, vecenv=vecenv['vecenv'] if cache_vecenv else None)
+                wandb, get_optim(args.optimizer), elos=elos, vecenv=vecenv['vecenv'] if cache_vecenv else None)
             elos.update(new_elos)
         except Exception as e:
             import traceback
@@ -273,7 +273,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
 
     wandb.agent(sweep_id, main, count=500)
 
-def train(args, make_env, policy_cls, rnn_cls, wandb,
+def train(args, make_env, policy_cls, rnn_cls, wandb, optimizer,
         eval_frac=0.1, elos={'model_random.pt': 1000}, vecenv=None, subprocess=False, queue=None):
     if subprocess:
         from multiprocessing import Process, Queue
@@ -318,7 +318,7 @@ def train(args, make_env, policy_cls, rnn_cls, wandb,
 
     train_config = pufferlib.namespace(**args['train'], env=env_name,
         exp_id=args['exp_id'] or env_name + '-' + str(uuid.uuid4())[:8])
-    data = clean_pufferl.create(train_config, vecenv, policy, wandb=wandb)
+    data = clean_pufferl.create(train_config, vecenv, policy, optimizer=optimizer, wandb=wandb)
     while data.global_step < train_config.total_timesteps:
         clean_pufferl.evaluate(data)
         clean_pufferl.train(data)
@@ -351,6 +351,15 @@ def train(args, make_env, policy_cls, rnn_cls, wandb,
 
     return stats, uptime, elos, vecenv
 
+def get_optim(name):
+    if hasattr(torch.optim, args.optimizer):
+       return getattr(torch.optim, args.optimizer)
+    if name.startswith('heavyball.'):
+       name = name[len('heavyball.'):]
+
+    import heavyball
+    return getattr(heavyball, name)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description=f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]'
@@ -375,8 +384,10 @@ if __name__ == '__main__':
     parser.add_argument('--track', action='store_true', help='Track on WandB')
     parser.add_argument('--wandb-project', type=str, default='pufferlib')
     parser.add_argument('--wandb-group', type=str, default='debug')
+    parser.add_argument('--optimizer', type=str, default='Adam')
+    
     args = parser.parse_known_args()[0]
-
+       
     file_paths = glob.glob('config/**/*.ini', recursive=True)
     for path in file_paths:
         p = configparser.ConfigParser()
@@ -450,7 +461,7 @@ if __name__ == '__main__':
         wandb = None
         if args['track']:
             wandb = init_wandb(args, env_name, id=args['exp_id'])
-        train(args, make_env, policy_cls, rnn_cls, wandb=wandb)
+        train(args, make_env, policy_cls, rnn_cls, wandb=wandb, optimizer=get_optim(args.optimizer))
     elif args['mode'] in ('eval', 'evaluate'):
         vec = pufferlib.vector.Serial
         if args['vec'] == 'native':
@@ -477,7 +488,7 @@ if __name__ == '__main__':
         pufferlib.vector.autotune(make_env, batch_size=args['train']['env_batch_size'])
     elif args['mode'] == 'profile':
         import cProfile
-        cProfile.run('train(args, make_env, policy_cls, rnn_cls, wandb=None)', 'stats.profile')
+        cProfile.run('train(args, make_env, policy_cls, rnn_cls, wandb=None, optimizer=optimizer)', 'stats.profile')
         import pstats
         from pstats import SortKey
         p = pstats.Stats('stats.profile')
