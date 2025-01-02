@@ -248,7 +248,7 @@ bool phase_play(TCG* env, unsigned char atn) {
     bool* land_played = (env->turn == 0) ? &env->my_land_played : &env->op_land_played;
 
     if (board->length == BOARD_SIZE && lands->length == LAND_SIZE) {
-        printf("\t Board full\n");
+        printf("\t Board and lands full\n");
         push(env->stack, phase_attack);
         return TO_STACK;
     }
@@ -595,30 +595,38 @@ void render_op_board(TCG* env) {
 }
 
 void render_my_lands(TCG* env) {
+    int num_untapped = 0;
     for (int i = 0; i < env->my_lands->length; i++) {
         Card card = env->my_lands->cards[i];
         int x = LAND_ZONE_OFFSET;
         int y = card_y(2);
         render_card(&card, x, y, RED);
+        if (!card.tapped) {
+            num_untapped += 1;
+        }
     }
     if (env->my_lands->length > 0) {
         int x = LAND_ZONE_OFFSET + 4;
         int y = card_y(2) + 4;
-        DrawText(TextFormat("%i", env->my_lands->length), x, y, 20, YELLOW);
+        DrawText(TextFormat("%i", num_untapped), x, y, 20, YELLOW);
     }
 }
 
 void render_op_lands(TCG* env) {
+    int num_untapped = 0;
     for (int i = 0; i < env->op_lands->length; i++) {
         Card card = env->op_lands->cards[i];
         int x = (GetScreenWidth() - LAND_ZONE_OFFSET);
         int y = card_y(1);
         render_card(&card, x, y, BLUE);
+        if (!card.tapped) {
+            num_untapped += 1;
+        }
     }
     if (env->op_lands->length > 0) {
         int x = (GetScreenWidth() - LAND_ZONE_OFFSET) + 4;
         int y = card_y(1) + 4;
-        DrawText(TextFormat("%i", env->op_lands->length), x, y, 20, YELLOW);
+        DrawText(TextFormat("%i", num_untapped), x, y, 20, YELLOW);
     }
 }
 
