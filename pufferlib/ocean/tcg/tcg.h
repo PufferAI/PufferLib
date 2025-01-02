@@ -5,9 +5,13 @@
 #include "raylib.h"
 
 #define HAND_SIZE 10
-#define BOARD_SIZE 10
+// TODO: Fix land and board sizes
+#define BOARD_SIZE 6
+#define LAND_SIZE 4
 #define DECK_SIZE 60
 #define STACK_SIZE 100
+
+#define LAND_ZONE_OFFSET 128
 
 #define ACTION_ENTER 10
 #define ACTION_NOOP 11
@@ -78,6 +82,7 @@ void free_card_array(CardArray* ary) {
     free(ary);
 }
 
+// Remove all cards marked for removal and condense the array to the left
 void condense_card_array(CardArray* ary) {
     int idx = 0;
     for (int i = 0; i < ary->length; i++) {
@@ -92,6 +97,7 @@ void condense_card_array(CardArray* ary) {
 struct TCG {
     CardArray* my_hand;
     CardArray* my_board;
+    CardArray* my_lands;
     CardArray* my_deck;
     int my_health;
     int my_mana;
@@ -99,6 +105,7 @@ struct TCG {
 
     CardArray* op_hand;
     CardArray* op_board;
+    CardArray* op_lands;
     CardArray* op_deck;
     int op_health;
     int op_mana;
@@ -117,6 +124,8 @@ void allocate_tcg(TCG* env) {
     env->op_hand = allocate_card_array(HAND_SIZE);
     env->my_board = allocate_card_array(BOARD_SIZE);
     env->op_board = allocate_card_array(BOARD_SIZE);
+    env->my_lands = allocate_card_array(LAND_SIZE);
+    env->op_lands = allocate_card_array(LAND_SIZE);
     env->my_deck = allocate_card_array(DECK_SIZE);
     env->op_deck = allocate_card_array(DECK_SIZE);
 }
@@ -126,10 +135,13 @@ void free_tcg(TCG* env) {
     free_card_array(env->op_hand);
     free_card_array(env->my_board);
     free_card_array(env->op_board);
+    free_card_array(env->my_lands);
+    free_card_array(env->op_lands);
     free_card_array(env->my_deck);
     free_card_array(env->op_deck);
 }
 
+// TODO: Actually randomize the deck based on how many cards of each type are in the deck
 void randomize_deck(CardArray* deck) {
     for (int i = 0; i < deck->length; i++) {
         deck->cards[i].defending = -1;
@@ -158,21 +170,12 @@ void draw_card(TCG* env, CardArray* deck, CardArray* hand) {
     hand->length += 1;
 }
 
-bool can_attack(CardArray* board) {
-    for (int i = 0; i < board->length; i++) {
-        if (!board->cards[i].is_land) {
-            return true;
-        }
-    }
-    return false;
-}
-
 int tappable_mana(TCG* env) {
-    CardArray* board = (env->turn == 0) ? env->my_board : env->op_board;
+    CardArray* lands = (env->turn == 0) ? env->my_lands : env->op_lands;
     int tappable = 0;
-    for (int i = 0; i < board->length; i++) {
-        Card card = board->cards[i];
-        if (card.is_land && !card.tapped) {
+    for (int i = 0; i < lands->length; i++) {
+        Card card = lands->cards[i];
+        if (!card.tapped) {
             tappable += 1;
         }
     }
@@ -204,14 +207,22 @@ bool phase_untap(TCG* env, unsigned char atn) {
 
     env->turn = 1 - env->turn;
     CardArray* board = (env->turn == 0) ? env->my_board : env->op_board;
+    CardArray* lands = (env->turn == 0) ? env->my_lands : env->op_lands;
 
     int* mana = (env->turn == 0) ? &env->my_mana : &env->op_mana;
     *mana = 0;
 
     for (int i = 0; i < board->length; i++) {
         Card card = board->cards[i];
-        if (card.is_land && card.tapped) {
+        if (card.tapped) {
             board->cards[i].tapped = false;
+        }
+    }
+
+    for (int i = 0; i < lands->length; i++) {
+        Card card = lands->cards[i];
+        if (card.tapped) {
+            lands->cards[i].tapped = false;
         }
     }
     
@@ -232,10 +243,11 @@ bool phase_play(TCG* env, unsigned char atn) {
     printf("PHASE_PLAY\n");
     CardArray* hand = (env->turn == 0) ? env->my_hand : env->op_hand;
     CardArray* board = (env->turn == 0) ? env->my_board : env->op_board;
+    CardArray* lands = (env->turn == 0) ? env->my_lands : env->op_lands;
     int* mana = (env->turn == 0) ? &env->my_mana : &env->op_mana;
     bool* land_played = (env->turn == 0) ? &env->my_land_played : &env->op_land_played;
 
-    if (board->length == BOARD_SIZE) {
+    if (board->length == BOARD_SIZE && lands->length == LAND_SIZE) {
         printf("\t Board full\n");
         push(env->stack, phase_attack);
         return TO_STACK;
@@ -266,8 +278,8 @@ bool phase_play(TCG* env, unsigned char atn) {
             push(env->stack, phase_play);
             return TO_USER;
         }
-        board->cards[board->length] = card;
-        board->length += 1;
+        lands->cards[lands->length] = card;
+        lands->length += 1;
         *land_played = true;
         hand->cards[atn].remove = true;
         condense_card_array(hand);
@@ -283,14 +295,14 @@ bool phase_play(TCG* env, unsigned char atn) {
     }
 
     // Auto tap lands?
-    for (int i = 0; i < board->length; i++) {
+    for (int i = 0; i < lands->length; i++) {
         if (card.cost <= *mana) {
             break;
         }
-        Card card = board->cards[i];
-        if (card.is_land && !card.tapped) {
+        Card card = lands->cards[i];
+        if (!card.tapped) {
             *mana += 1;
-            board->cards[i].tapped = true;
+            lands->cards[i].tapped = true;
         }
     }
 
@@ -309,12 +321,6 @@ bool phase_attack(TCG* env, unsigned char atn) {
     printf("PHASE_ATTACK\n");
     CardArray* board = (env->turn == 0) ? env->my_board : env->op_board;
 
-    if (!can_attack(board)) {
-        printf("\t No valid attacks. Phase end\n");
-        push(env->stack, phase_untap);
-        return TO_STACK;
-    }
-
     if (atn == ACTION_NOOP) {
         push(env->stack, phase_attack);
         return TO_USER;
@@ -327,13 +333,11 @@ bool phase_attack(TCG* env, unsigned char atn) {
         printf("\t Invalid action %i\n", atn);
         push(env->stack, phase_attack);
         return TO_USER;
-    } else if (board->cards[atn].is_land) {
-        printf("\t Cannot attack with land\n");
-        push(env->stack, phase_attack);
-        return TO_USER;
     } else {
         printf("\t Setting attacker %i\n", atn);
         board->cards[atn].attacking = !board->cards[atn].attacking;
+        /*board->cards[atn].tapped = !board->cards[atn].tapped;*/
+        board->cards[atn].tapped = true;
         push(env->stack, phase_attack);
         return TO_USER;
     }
@@ -353,12 +357,9 @@ bool phase_block(TCG* env, unsigned char atn) {
     bool can_block = false;
     for (int i = 0; i < defender_board->length; i++) {
         Card* card = &defender_board->cards[i];
-        if (card->is_land) {
-            continue;
-        }
-        if (card->defending == -1 || card->defending == env->block_idx) {
+        if ((card->defending == -1 || card->defending == env->block_idx) && !card->tapped) {
             can_block = true;
-            printf("\t Can block with %i\n", i);
+            printf("\t Can block with %i\n", i+1);
             break;
         }
     }
@@ -437,15 +438,16 @@ bool phase_block(TCG* env, unsigned char atn) {
         printf("\t Invalid block action %i\n", atn);
         push(env->stack, phase_block);
         return TO_USER;
-    } else if (defender_board->cards[atn].is_land) {
-        printf("\t Cannot block with land\n");
-        push(env->stack, phase_block);
-        return TO_USER;
     }
 
     for (int i = 0; i < env->block_idx; i++) {
         if (defender_board->cards[atn].defending == i) {
             printf("\t Already blocked\n");
+            push(env->stack, phase_block);
+            return TO_USER;
+        }
+        if (defender_board->cards[atn].tapped) {
+            printf("\t Cannot block with tapped card\n");
             push(env->stack, phase_block);
             return TO_USER;
         }
@@ -480,6 +482,8 @@ void reset(TCG* env) {
     env->op_hand->length = 0;
     env->my_board->length = 0;
     env->op_board->length = 0;
+    env->my_lands->length = 0;
+    env->op_lands->length = 0;
     env->my_health = 20;
     env->op_health = 20;
     randomize_deck(env->my_deck);
@@ -527,10 +531,7 @@ void render_label(int x, int y, int idx) {
     DrawText(TextFormat("%i", (idx+1)%10), x+32, y+96, 20, YELLOW);
 }
 
-void render(TCG* env) {
-    BeginDrawing();
-    ClearBackground((Color){6, 24, 24, 255});
-   
+void render_my_hand(TCG* env) {
     for (int i = 0; i < env->my_hand->length; i++) {
         Card card = env->my_hand->cards[i];
         int x = card_x(i, env->my_hand->length);
@@ -540,9 +541,21 @@ void render(TCG* env) {
             render_label(x, y, i);
         }
     }
+}
 
+void render_op_hand(TCG* env) {
+    for (int i = 0; i < env->op_hand->length; i++) {
+        Card card = env->op_hand->cards[i];
+        int x = card_x(i, env->op_hand->length);
+        int y = card_y(0);
+        render_card(&card, x, y, BLUE);
+    }
+}
+
+void render_my_board(TCG* env) {
     for (int i = 0; i < env->my_board->length; i++) {
         Card card = env->my_board->cards[i];
+
         int x = card_x(i, env->my_board->length);
         int y = card_y(2);
         if (card.attacking) {
@@ -553,17 +566,6 @@ void render(TCG* env) {
         if (env->turn == 0) {
             render_label(x, y, i);
         }
-    }
-
-    for (int i = 0; i < env->op_board->length; i++) {
-        Card card = env->op_board->cards[i];
-        int x = card_x(i, env->op_board->length);
-        int y = card_y(1);
-        if (card.attacking) {
-            y += 16;
-        }
-        Color color = (card.tapped) ? (Color){0, 0, 128, 255}: BLUE;
-        render_card(&card, x, y, color);
     }
 
     for (int i = 0; i < env->my_board->length; i++) {
@@ -577,13 +579,64 @@ void render(TCG* env) {
             3.0f, WHITE
         );
     }
+}
 
-    for (int i = 0; i < env->op_hand->length; i++) {
-        Card card = env->op_hand->cards[i];
-        int x = card_x(i, env->op_hand->length);
-        int y = card_y(0);
+void render_op_board(TCG* env) {
+    for (int i = 0; i < env->op_board->length; i++) {
+        Card card = env->op_board->cards[i];
+        int x = card_x(i, env->op_board->length);
+        int y = card_y(1);
+        if (card.attacking) {
+            y += 16;
+        }
+        Color color = (card.tapped) ? (Color){0, 0, 128, 255}: BLUE;
+        render_card(&card, x, y, color);
+    }
+}
+
+void render_my_lands(TCG* env) {
+    for (int i = 0; i < env->my_lands->length; i++) {
+        Card card = env->my_lands->cards[i];
+        int x = LAND_ZONE_OFFSET;
+        int y = card_y(2);
+        render_card(&card, x, y, RED);
+    }
+    if (env->my_lands->length > 0) {
+        int x = LAND_ZONE_OFFSET + 4;
+        int y = card_y(2) + 4;
+        DrawText(TextFormat("%i", env->my_lands->length), x, y, 20, YELLOW);
+    }
+}
+
+void render_op_lands(TCG* env) {
+    for (int i = 0; i < env->op_lands->length; i++) {
+        Card card = env->op_lands->cards[i];
+        int x = (GetScreenWidth() - LAND_ZONE_OFFSET);
+        int y = card_y(1);
         render_card(&card, x, y, BLUE);
     }
+    if (env->op_lands->length > 0) {
+        int x = (GetScreenWidth() - LAND_ZONE_OFFSET) + 4;
+        int y = card_y(1) + 4;
+        DrawText(TextFormat("%i", env->op_lands->length), x, y, 20, YELLOW);
+    }
+}
+
+void render(TCG* env) {
+    BeginDrawing();
+    ClearBackground((Color){6, 24, 24, 255});
+   
+
+    render_my_hand(env);
+
+    render_my_board(env);
+    render_op_board(env);
+
+    render_my_lands(env);
+    render_op_lands(env);
+
+    render_op_hand(env);
+
 
     int x = GetScreenWidth() - 128;
     int y = 32;
