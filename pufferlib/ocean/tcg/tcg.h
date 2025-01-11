@@ -239,31 +239,6 @@ void no_trigger(TCG* env) {}
 bool no_condition(TCG* env) { return true; }
 void no_activate(TCG* env, int target_idx) {}
 
-bool opponent_has_creature(TCG* env) {
-    Zone* op_board = (env->turn == 0) ? env->op_board : env->my_board;
-    for (int i = 0; i < op_board->length; i++) {
-        if (op_board->cards[i].type == TYPE_CREATURE) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void lightning_bolt_activate(TCG* env, int target_idx) {
-    Zone* op_board = (env->turn == 0) ? env->op_board : env->my_board;
-    Zone* op_graveyard = (env->turn == 0) ? env->op_graveyard : env->my_graveyard;
-    printf("Lightning bolt activated\n");
-    Card* card = &op_board->cards[target_idx];
-    assert (card->type == TYPE_CREATURE);
-    card->data.creature.health -= 3;
-    if (card->data.creature.health <= 0) {
-        printf("Lightning Bolt kills creature\n");
-        card->data.creature.health = 0;
-        move_card(env, op_board, op_graveyard, target_idx);
-    }
-}
-
-
 void allocate_tcg(TCG* env) {
     env->stack = calloc(1, sizeof(Stack));
     env->my_hand = allocate_card_array(HAND_SIZE);
