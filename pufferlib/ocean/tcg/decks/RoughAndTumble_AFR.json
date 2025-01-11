@@ -1,0 +1,164 @@
+[
+    {
+        "name": "Dragonsguard Elite",
+        "type": "creature",
+        "count": 1,
+        "cost": 2.0,
+        "attack": "2",
+        "health": "2",
+        "effect": "Magecraft \u2014 Whenever you cast or copy an instant or sorcery spell, put a +1/+1 counter on Dragonsguard Elite.\n{4}{G}{G}: Double the number of +1/+1 counters on Dragonsguard Elite."
+    },
+    {
+        "name": "Asmodeus the Archfiend",
+        "type": "creature",
+        "count": 1,
+        "cost": 6.0,
+        "attack": "6",
+        "health": "6",
+        "effect": "Binding Contract \u2014 If you would draw a card, exile the top card of your library face down instead.\n{B}{B}{B}: Draw seven cards.\n{B}: Return all cards exiled with Asmodeus the Archfiend to their owner's hand and you lose that much life."
+    },
+    {
+        "name": "Black Dragon",
+        "type": "creature",
+        "count": 2,
+        "cost": 7.0,
+        "attack": "4",
+        "health": "4",
+        "effect": "Flying\nAcid Breath \u2014 When Black Dragon enters, target creature an opponent controls gets -3/-3 until end of turn."
+    },
+    {
+        "name": "Cleaving Reaper",
+        "type": "creature",
+        "count": 1,
+        "cost": 5.0,
+        "attack": "5",
+        "health": "3",
+        "effect": "Flying, trample\nPay 3 life: Return Cleaving Reaper from your graveyard to your hand. Activate only if you had an Angel or Berserker enter the battlefield under your control this turn."
+    },
+    {
+        "name": "Cragplate Baloth",
+        "type": "creature",
+        "count": 1,
+        "cost": 7.0,
+        "attack": "6",
+        "health": "6",
+        "effect": "Kicker {2}{G}\nThis spell can't be countered.\nHexproof, haste\nIf Cragplate Baloth was kicked, it enters with four +1/+1 counters on it."
+    },
+    {
+        "name": "Dauntless Survivor",
+        "type": "creature",
+        "count": 4,
+        "cost": 2.0,
+        "attack": "1",
+        "health": "1",
+        "effect": "When Dauntless Survivor enters, put a +1/+1 counter on target creature."
+    },
+    {
+        "name": "Evolving Wilds",
+        "type": "land",
+        "count": 4,
+        "cost": 0.0,
+        "attack": null,
+        "health": null,
+        "effect": "{T}, Sacrifice this land: Search your library for a basic land card, put it onto the battlefield tapped, then shuffle."
+    },
+    {
+        "name": "Forest",
+        "type": "land",
+        "count": 12,
+        "cost": 0.0,
+        "attack": null,
+        "health": null,
+        "effect": "({T}: Add {G}.)"
+    },
+    {
+        "name": "Karfell Kennel-Master",
+        "type": "creature",
+        "count": 2,
+        "cost": 5.0,
+        "attack": "4",
+        "health": "4",
+        "effect": "When Karfell Kennel-Master enters, up to two target creatures each get +1/+0 and gain indestructible until end of turn. (Damage and effects that say \"destroy\" don't destroy them.)"
+    },
+    {
+        "name": "Might of Murasa",
+        "type": "instant",
+        "count": 4,
+        "cost": 2.0,
+        "attack": null,
+        "health": null,
+        "effect": "Kicker {2}{G} (You may pay an additional {2}{G} as you cast this spell.)\nTarget creature gets +3/+3 until end of turn. If this spell was kicked, that creature gets +5/+5 until end of turn instead."
+    },
+    {
+        "name": "Murasa Brute",
+        "type": "creature",
+        "count": 3,
+        "cost": 3.0,
+        "attack": "3",
+        "health": "3",
+        "effect": null
+    },
+    {
+        "name": "Oblivion's Hunger",
+        "type": "instant",
+        "count": 2,
+        "cost": 2.0,
+        "attack": null,
+        "health": null,
+        "effect": "Target creature you control gains indestructible until end of turn. Draw a card if that creature has a +1/+1 counter on it. (Damage and effects that say \"destroy\" don't destroy the creature.)"
+    },
+    {
+        "name": "Oran-Rief Ooze",
+        "type": "creature",
+        "count": 1,
+        "cost": 3.0,
+        "attack": "2",
+        "health": "2",
+        "effect": "When Oran-Rief Ooze enters, put a +1/+1 counter on target creature you control.\nWhenever Oran-Rief Ooze attacks, put a +1/+1 counter on each attacking creature with a +1/+1 counter on it."
+    },
+    {
+        "name": "Rabid Bite",
+        "type": "sorcery",
+        "count": 3,
+        "cost": 2.0,
+        "attack": null,
+        "health": null,
+        "effect": "Target creature you control deals damage equal to its power to target creature you don't control."
+    },
+    {
+        "name": "Scurrid Colony",
+        "type": "creature",
+        "count": 3,
+        "cost": 2.0,
+        "attack": "2",
+        "health": "2",
+        "effect": "Reach\nScurrid Colony gets +2/+2 as long as you control eight or more lands."
+    },
+    {
+        "name": "Specter of the Fens",
+        "type": "creature",
+        "count": 2,
+        "cost": 4.0,
+        "attack": "2",
+        "health": "3",
+        "effect": "Flying\n{5}{B}: Target opponent loses 2 life and you gain 2 life."
+    },
+    {
+        "name": "Swamp",
+        "type": "land",
+        "count": 11,
+        "cost": 0.0,
+        "attack": null,
+        "health": null,
+        "effect": "({T}: Add {B}.)"
+    },
+    {
+        "name": "Vampire Spawn",
+        "type": "creature",
+        "count": 3,
+        "cost": 3.0,
+        "attack": "2",
+        "health": "3",
+        "effect": "When this creature enters, each opponent loses 2 life and you gain 2 life."
+    }
+]

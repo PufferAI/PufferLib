@@ -6,8 +6,8 @@
 
 #define HAND_SIZE 10
 // TODO: Fix land and board sizes
-#define BOARD_SIZE 6
-#define LAND_SIZE 4
+#define BOARD_SIZE 10
+#define LAND_SIZE 10
 #define DECK_SIZE 60
 #define GRAVEYARD_SIZE 60
 #define STACK_SIZE 100
@@ -17,18 +17,21 @@
 
 #define ACTION_ENTER 10
 #define ACTION_NOOP 11
+#define ACTION_SPACE 12
 
-#define TO_USER true;
-#define TO_STACK false;
+#define TO_USER true
+#define TO_STACK false
 
-#define TAPPED_COLOR (Color){128, 0, 0, 255}
-#define CREATURE_COLOR RED
-#define CREATURE_SUMMONING_SICK_COLOR ORANGE
-#define SPELL_COLOR BLUE
-#define INSTANT_COLOR GREEN
-#define LAND_COLOR YELLOW
-
-#define GRAVEYARD_COLOR GRAY
+#define LAND_COLOR          (Color){139, 69, 19, 255}    // Brown
+#define CREATURE_COLOR      (Color){255, 0, 0, 255}      // Red
+#define INSTANT_COLOR       (Color){0, 255, 255, 255}    // Cyan
+#define SORCERY_COLOR       (Color){128, 0, 128, 255}    // Purple
+#define ARTIFACT_COLOR      (Color){192, 192, 192, 255}  // Silver
+#define ENCHANTMENT_COLOR   (Color){255, 215, 0, 255}    // Gold
+#define PLANESWALKER_COLOR  (Color){0, 100, 255, 255}    // Dark Blue
+#define GRAVEYARD_COLOR     (Color){64, 64, 64, 255}     // Dark Grey
+#define TAPPED_COLOR        (Color){128, 0, 0, 128}      // Dimmed Red
+#define SUMMONING_SICKNESS_COLOR (Color){255, 165, 0, 255} // Orange
 
 typedef struct TCG TCG;
 typedef struct Card Card;
@@ -43,6 +46,7 @@ bool phase_play(TCG* env, unsigned char atn);
 bool phase_attack(TCG* env, unsigned char atn);
 bool phase_block(TCG* env, unsigned char atn);
 bool phase_priority(TCG* env, unsigned char atn);
+bool phase_target(TCG* env, unsigned char atn);
 void reset(TCG* env);
 
 typedef enum {
@@ -102,6 +106,7 @@ struct Effect {
 };
 
 struct Card {
+    char name[256];
     CardType type;
     int cost;
     bool tapped;
@@ -109,7 +114,7 @@ struct Card {
 
     union {
         struct { Effect effect; int attack, health; bool summoning_sickness, attacking; int defending; } creature;
-        struct { Effect effect; } spell;
+        struct { Effect effect; int num_targets; } spell;
     } data;
 };
 
@@ -137,23 +142,25 @@ Card* allocate_creature(int cost, int attack, int health, Effect effect) {
     return card;
 }
 
-Card* allocate_instant(int cost, Effect effect) {
+Card* allocate_instant(int cost, Effect effect, int num_targets) {
     Card* card = (Card*)calloc(1, sizeof(Card));
     card->type = TYPE_INSTANT;
     card->cost = cost;
     card->tapped = false;
     card->color = INSTANT_COLOR;
     card->data.spell.effect = effect;
+    card->data.spell.num_targets = num_targets;
     return card;
 }
 
-Card* allocate_sorcery(int cost, Effect effect) {
+Card* allocate_sorcery(int cost, Effect effect, int num_targets) {
     Card* card = (Card*)calloc(1, sizeof(Card));
     card->type = TYPE_SORCERY;
     card->cost = cost;
     card->tapped = false;
     card->color = RED;
     card->data.spell.effect = effect;
+    card->data.spell.num_targets = num_targets;
     return card;
 }
 
@@ -202,6 +209,7 @@ struct TCG {
     int turn;
     int priority;
     bool priority_passed;
+    bool participate_in_priority;
 };
 
 void add_card_to(TCG* env, Card card, Zone* to) {
@@ -307,40 +315,16 @@ void draw_card_activate(TCG* env, int target_idx) {
     draw_card(env, deck, hand);
 }
 
-// TODO: Actually randomize the deck based on how many cards of each type are in the deck
 void randomize_deck(Zone* deck) {
+    // Fisher-Yates shuffle
     for (int i = 0; i < deck->length; i++) {
-        int type = rand() % 4;
-        if (type == 0) {
-            deck->cards[i] = *allocate_land();
-        } else if (type == 1) {
-            int cost = rand() % 6;
-            Effect effect = {
-                .description = "No effect",
-                .trigger = no_trigger,
-                .condition = no_condition,
-                .activate = no_activate,
-            };
-            deck->cards[i] = *allocate_creature(cost, cost + 1, cost + 1, effect);
-        } else if (type == 2) {
-            int cost = 1;
-            Effect effect = {
-                .description = "Draw a card",
-                .trigger = no_trigger,
-                .condition = my_hand_not_full,
-                .activate = draw_card_activate,
-            };
-            deck->cards[i] = *allocate_sorcery(cost, effect);
-        } else if (type == 3) {
-            int cost = 1;
-            Effect effect = {
-                    .description = "Lightning Bolt",
-                    .trigger = no_trigger,
-                    .condition = opponent_has_creature,
-                    .activate = lightning_bolt_activate,
-            };
-            deck->cards[i] = *allocate_instant(cost, effect);
-        } 
+        // Generate a random index between i and deck->length - 1
+        int randomIndex = i + rand() % (deck->length - i);
+        
+        // Swap the current card with the card at randomIndex
+        Card temp = deck->cards[i];
+        deck->cards[i] = deck->cards[randomIndex];
+        deck->cards[randomIndex] = temp;
     }
 }
 
@@ -490,6 +474,12 @@ bool phase_play(TCG* env, unsigned char atn) {
     } else if (atn == ACTION_ENTER) {
         push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_attack});
         return TO_STACK;
+    } else if (atn == ACTION_SPACE) {
+        printf("Toggling participate in priority\n");
+        env->participate_in_priority = !env->participate_in_priority;
+        printf("Participate in priority: %i\n", env->participate_in_priority);
+        push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_play});
+        return TO_USER;
     } else if (atn >= hand->length) {
         printf("\t Invalid action: %i\n. Hand length: %i\n", atn, hand->length);
         push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_play});
@@ -499,7 +489,7 @@ bool phase_play(TCG* env, unsigned char atn) {
     Card card = hand->cards[atn];
 
     if (!can_play_card(env, card)) {
-        printf("Condition for playing card not met");
+        printf("Condition for playing card not met\n");
         push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_play});
         return TO_USER;
     }
@@ -534,7 +524,10 @@ bool phase_play(TCG* env, unsigned char atn) {
                 }
             });
             push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_priority});
-            return TO_STACK;
+            if (card.data.spell.num_targets > 0) {
+                printf("Please choose a target\n");
+            }
+            return card.data.spell.num_targets == 0 ? TO_STACK : TO_USER;
         case TYPE_SORCERY:
             move_card(env, hand, graveyard, atn);
             printf("\t Sorcery played\n");
@@ -547,7 +540,7 @@ bool phase_play(TCG* env, unsigned char atn) {
                 }
             });
             push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_priority});
-            return TO_STACK;
+            return card.data.spell.num_targets == 0 ? TO_STACK : TO_USER;
         default:
             printf("\t Unknown card type\n");
             push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_play});
@@ -764,6 +757,10 @@ bool phase_priority(TCG* env, unsigned char atn) {
     Zone* lands = (env->priority == 0) ? env->my_lands : env->op_lands;
     int* mana = (env->turn == 0) ? &env->my_mana : &env->op_mana;
 
+    /*if (env->priority == 0 && !env->participate_in_priority) {*/
+    /*    atn = ACTION_ENTER;*/
+    /*}*/
+
     if (atn == ACTION_NOOP) {
         push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_priority});
         return TO_USER;
@@ -774,8 +771,8 @@ bool phase_priority(TCG* env, unsigned char atn) {
             env->priority_passed = false;
             return TO_STACK;
         }
-        pass_priority(env);
         printf("Player %i passed priority\n", env->priority);
+        pass_priority(env);
         env->priority_passed = true;
         push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_priority});
         return TO_USER;
@@ -803,6 +800,12 @@ bool phase_priority(TCG* env, unsigned char atn) {
 
     tap_lands_for_mana(lands, mana, card.cost);
 
+    // TODO: Remove this debug print after testing
+    if (*mana < card.cost) {
+        printf("\t Not enough mana\n");
+        printf("\t Remaining mana: %i\n", *mana);
+        printf("\t Required mana: %i\n", card.cost);
+    }
     assert(*mana >= card.cost);
     *mana -= card.cost;
 
@@ -820,6 +823,25 @@ bool phase_priority(TCG* env, unsigned char atn) {
     return TO_USER;
 }
 
+/*bool phase_target(TCG* env, unsigned char atn) {*/
+/*    printf("PHASE_TARGET\n");*/
+/**/
+/*    Zone* hand = (env->priority == 0) ? env->my_hand : env->op_hand;*/
+/*    Zone* board = (env->priority == 0) ? env->my_board : env->op_board;*/
+/*    Zone* graveyard = (env->priority == 0) ? env->my_graveyard : env->op_graveyard;*/
+/**/
+/*    if (atn == ACTION_NOOP) {*/
+/*        push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_target});*/
+/*        return TO_USER;*/
+/*    } else if (atn == ACTION_ENTER) {*/
+/*        return TO_STACK;*/
+/*    } else if (atn >= board->length) {*/
+/*        printf("\t Invalid action: %i\n. Board length: %i\n", atn, board->length);*/
+/*        push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_play});*/
+/*        return TO_USER;*/
+/*    }*/
+/*}*/
+
 void step(TCG* env, unsigned char atn) {
     printf("Turn: %i, Action: %i\n", env->turn, atn);
     printf("PRIORITY: %i\n", env->priority);
@@ -828,11 +850,19 @@ void step(TCG* env, unsigned char atn) {
         if (item.type == STACK_PHASE) {
             bool return_to_user = item.phase_func(env, atn);
             if (return_to_user) {
+                StackItem next_item = peek(env->stack);
+                if (next_item.type == STACK_PHASE &&
+                        item.phase_func == phase_priority && next_item.phase_func == phase_priority &&
+                        env->priority == 0 &&
+                        !env->participate_in_priority) {
+                    atn = ACTION_ENTER;
+                    continue;
+                }
                 return;
             }
         } else if (item.type == STACK_EFFECT) {
             printf("ACTIVATING EFFECT FROM STACK");
-            item.effect.activate(env, item.effect.target_idx);
+            item.effect.activate(env, atn);
         }
         atn = ACTION_NOOP;
     }
@@ -856,6 +886,7 @@ void reset(TCG* env) {
     env->turn = rand() % 2;
     env->priority = env->turn;
     env->priority_passed = false;
+    env->participate_in_priority = false;
     for (int i = 0; i < 5; i++) {
         draw_card(env, env->my_deck, env->my_hand);
         draw_card(env, env->op_deck, env->op_hand);
@@ -883,25 +914,43 @@ int card_y(int row) {
     return 64 + (128 + 20)*row;
 }
 
-void render_card(Card* card, int x, int y, Color color) {
+void render_creature(Card card, int x, int y) {
+    Color color = (card.tapped) ? TAPPED_COLOR : card.data.creature.summoning_sickness ? SUMMONING_SICKNESS_COLOR : CREATURE_COLOR;
     DrawRectangle(x, y, 64, 128, color);
-    if (card->type == TYPE_LAND) {
-        DrawText("Land", x + 16, y + 40, 16, WHITE);
-    } else if (card->type == TYPE_CREATURE) {
-        DrawText(TextFormat("%i", card->cost), x + 32, y+16, 20, WHITE);
-        DrawText(TextFormat("%i", card->data.creature.attack), x + 32, y + 40, 20, WHITE);
-        DrawText(TextFormat("%i", card->data.creature.health), x + 32, y + 64, 20, WHITE);
-    } else if (card->type == TYPE_INSTANT) {
-        // draw "Instant" on card and cost
-        DrawText("Instant", x + 16, y + 40, 8, WHITE);
-        DrawText(TextFormat("%i", card->cost), x + 32, y+16, 20, WHITE);
-    } else if (card->type == TYPE_SORCERY) {
-        // draw "Sorcery" on card and cost
-        DrawText("Sorcery", x + 16, y + 40, 8, WHITE);
-        DrawText(TextFormat("%i", card->cost), x + 32, y+16, 20, WHITE);
-    } else {
-        printf("Invalid card type: %i\n", card->type);
+    if (card.data.creature.attacking) {
+        y -= 16;
     }
+    DrawText(TextFormat("%i", card.cost), x + 32, y+32, 20, WHITE);
+    DrawText(TextFormat("%i", card.data.creature.attack), x + 32, y + 52, 20, WHITE);
+    DrawText(TextFormat("%i", card.data.creature.health), x + 32, y + 72, 20, WHITE);
+}
+void render_instant(Card card, int x, int y) {
+    DrawRectangle(x, y, 64, 128, INSTANT_COLOR);
+    DrawText(TextFormat("%i", card.cost), x + 32, y+32, 20, WHITE);
+}
+
+void render_sorcery(Card card, int x, int y) {
+    DrawRectangle(x, y, 64, 128, SORCERY_COLOR);
+    DrawText(TextFormat("%i", card.cost), x + 32, y+32, 20, WHITE);
+}
+
+void render_land(Card card, int x, int y) {
+    DrawRectangle(x, y, 64, 128, LAND_COLOR);
+}
+
+void render_card(Card card, int x, int y) {
+    if (card.type == TYPE_LAND) {
+        render_land(card, x, y);
+    } else if (card.type == TYPE_CREATURE) {
+        render_creature(card, x, y);
+    } else if (card.type == TYPE_INSTANT) {
+        render_instant(card, x, y);
+    } else if (card.type == TYPE_SORCERY) {
+        render_sorcery(card, x, y);
+    } else {
+        printf("Invalid card type: %i\n", card.type);
+    }
+    DrawText(TextFormat("%.5s", card.name), x + 8, y + 16, 16, WHITE);
 }
 
 void render_label(int x, int y, int idx) {
@@ -913,7 +962,7 @@ void render_my_hand(TCG* env) {
         Card card = env->my_hand->cards[i];
         int x = card_x(i, env->my_hand->length);
         int y = card_y(3);
-        render_card(&card, x, y, RED);
+        render_card(card, x, y);
         if (env->turn == 0) {
             render_label(x, y, i);
         }
@@ -925,21 +974,10 @@ void render_op_hand(TCG* env) {
         Card card = env->op_hand->cards[i];
         int x = card_x(i, env->op_hand->length);
         int y = card_y(0);
-        render_card(&card, x, y, BLUE);
+        render_card(card, x, y);
     }
 }
 
-void render_creature(TCG* env, Card card, int x, int y) {
-    if (card.data.creature.attacking) {
-        y -= 16;
-    }
-    Color color = (card.tapped) ? (Color){128, 0, 0, 255}: card.data.creature.summoning_sickness ? ORANGE : RED;
-    render_card(&card, x, y, color);
-}
-void render_instant(TCG* env, Card card, int x, int y) {
-    Color color = (card.tapped) ? (Color){128, 0, 0, 255}: card.data.creature.summoning_sickness ? SKYBLUE : BLUE;
-    render_card(&card, x, y, color);
-}
 
 void render_my_board(TCG* env) {
     for (int i = 0; i < env->my_board->length; i++) {
@@ -948,11 +986,7 @@ void render_my_board(TCG* env) {
         int x = card_x(i, env->my_board->length);
         int y = card_y(2);
 
-        if (card.type == TYPE_CREATURE) {
-            render_creature(env, card, x, y);
-        } else if (card.type == TYPE_INSTANT) {
-            render_instant(env, card, x, y);
-        }
+        render_card(card, x, y);
         if (env->turn == 0) {
             render_label(x, y, i);
         }
@@ -978,11 +1012,7 @@ void render_op_board(TCG* env) {
         int x = card_x(i, env->op_board->length);
         int y = card_y(1);
 
-        if (card.type == TYPE_CREATURE) {
-            render_creature(env, card, x, y);
-        } else if (card.type == TYPE_INSTANT) {
-            render_instant(env, card, x, y);
-        }
+        render_card(card, x, y);
     }
 }
 
@@ -993,7 +1023,7 @@ void render_my_lands(TCG* env) {
         int x = LAND_ZONE_OFFSET;
         int y = card_y(2);
         assert(card.type == TYPE_LAND);
-        render_card(&card, x, y, RED);
+        render_card(card, x, y);
         if (!card.tapped) {
             num_untapped += 1;
         }
@@ -1011,7 +1041,7 @@ void render_op_lands(TCG* env) {
         Card card = env->op_lands->cards[i];
         int x = (GetScreenWidth() - LAND_ZONE_OFFSET);
         int y = card_y(1);
-        render_card(&card, x, y, BLUE);
+        render_card(card, x, y);
         if (!card.tapped) {
             num_untapped += 1;
         }
@@ -1028,7 +1058,7 @@ void render_my_graveyard(TCG* env) {
         Card card = env->my_graveyard->cards[i];
         int x = (GetScreenWidth() - GRAVEYARD_ZONE_OFFSET);
         int y = card_y(2);
-        render_card(&card, x, y, GRAVEYARD_COLOR);
+        render_card(card, x, y);
     }
 }
 
@@ -1037,7 +1067,7 @@ void render_op_graveyard(TCG* env) {
         Card card = env->op_graveyard->cards[i];
         int x = GRAVEYARD_ZONE_OFFSET;
         int y = card_y(1);
-        render_card(&card, x, y, GRAVEYARD_COLOR);
+        render_card(card, x, y);
     }
 }
 
@@ -1058,6 +1088,13 @@ void render(TCG* env) {
     render_op_graveyard(env);
 
     render_op_hand(env);
+
+    // render participate in priority in the bottom right corner
+    if (env->participate_in_priority) {
+        DrawText("Participate in Priority", GetScreenWidth() - 256, GetScreenHeight() - 64, 20, WHITE);
+    } else {
+        DrawText("Do not participate in Priority", GetScreenWidth() - 320, GetScreenHeight() - 64, 20, WHITE);
+    }
 
 
     int x = GetScreenWidth() - 128;
