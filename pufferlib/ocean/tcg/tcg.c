@@ -48,7 +48,7 @@ void load_deck_from_json(const char* filename, Zone* deck) {
             continue;
         }
 
-        const char* name = name_item->valuestring;
+        char* name = name_item->valuestring;
         const char* type = type_item->valuestring;
         int count = count_item->valueint;
         double cost = cost_item->valuedouble;
@@ -71,13 +71,9 @@ void load_deck_from_json(const char* filename, Zone* deck) {
                 creature_effect.condition = no_condition;
                 creature_effect.activate = no_activate;
 
-                new_card = allocate_creature(cost, attack, health, creature_effect);
-                strncpy(new_card->name, name, sizeof(new_card->name) - 1);
-
+                new_card = allocate_creature(name, cost, attack, health, creature_effect);
             } else if (strcmp(type, "land") == 0) {
-                new_card = allocate_land();
-                strncpy(new_card->name, name, sizeof(new_card->name) - 1);
-
+                new_card = allocate_land(name);
             } else if (strcmp(type, "instant") == 0 || strcmp(type, "sorcery") == 0) {
                 Effect spell_effect = {0};
                 strncpy(spell_effect.description, effect, sizeof(spell_effect.description) - 1);
@@ -86,12 +82,10 @@ void load_deck_from_json(const char* filename, Zone* deck) {
                 spell_effect.activate = no_activate;
 
                 if (strcmp(type, "instant") == 0) {
-                    new_card = allocate_instant(cost, spell_effect, 0);
+                    new_card = allocate_instant(name, cost, spell_effect, 0);
                 } else {
-                    new_card = allocate_sorcery(cost, spell_effect, 0);
+                    new_card = allocate_sorcery(name, cost, spell_effect, 0);
                 }
-
-                strncpy(new_card->name, name, sizeof(new_card->name) - 1);
             } else {
                 fprintf(stderr, "Unknown card type: %s\n", type);
                 continue;

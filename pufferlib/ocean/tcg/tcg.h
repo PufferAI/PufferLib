@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 #include <stdio.h>
 #include <assert.h>
 #include "raylib.h"
@@ -127,8 +128,9 @@ struct Zone {
 
 
 
-Card* allocate_creature(int cost, int attack, int health, Effect effect) {
+Card* allocate_creature(char* name, int cost, int attack, int health, Effect effect) {
     Card* card = (Card*)calloc(1, sizeof(Card));
+    strncpy(card->name, name, sizeof(card->name) - 1);
     card->type = TYPE_CREATURE;
     card->cost = cost;
     card->tapped = false;
@@ -142,8 +144,9 @@ Card* allocate_creature(int cost, int attack, int health, Effect effect) {
     return card;
 }
 
-Card* allocate_instant(int cost, Effect effect, int num_targets) {
+Card* allocate_instant(char* name, int cost, Effect effect, int num_targets) {
     Card* card = (Card*)calloc(1, sizeof(Card));
+    strncpy(card->name, name, sizeof(card->name) - 1);
     card->type = TYPE_INSTANT;
     card->cost = cost;
     card->tapped = false;
@@ -153,8 +156,9 @@ Card* allocate_instant(int cost, Effect effect, int num_targets) {
     return card;
 }
 
-Card* allocate_sorcery(int cost, Effect effect, int num_targets) {
+Card* allocate_sorcery(char* name, int cost, Effect effect, int num_targets) {
     Card* card = (Card*)calloc(1, sizeof(Card));
+    strncpy(card->name, name, sizeof(card->name) - 1);
     card->type = TYPE_SORCERY;
     card->cost = cost;
     card->tapped = false;
@@ -164,8 +168,9 @@ Card* allocate_sorcery(int cost, Effect effect, int num_targets) {
     return card;
 }
 
-Card* allocate_land() {
+Card* allocate_land(char* name) {
     Card* card = (Card*)calloc(1, sizeof(Card));
+    strncpy(card->name, name, sizeof(card->name) - 1);
     card->type = TYPE_LAND;
     card->cost = 0;
     card->tapped = false;
@@ -455,7 +460,6 @@ bool phase_play(TCG* env, unsigned char atn) {
     printf("PHASE_PLAY\n");
     Zone* hand = (env->turn == 0) ? env->my_hand : env->op_hand;
     Zone* board = (env->turn == 0) ? env->my_board : env->op_board;
-    /*Zone* op_board = (env->turn == 0) ? env->op_board : env->my_board;*/
     Zone* lands = (env->turn == 0) ? env->my_lands : env->op_lands;
     Zone* graveyard = (env->turn == 0) ? env->my_graveyard : env->op_graveyard;
     int* mana = (env->turn == 0) ? &env->my_mana : &env->op_mana;
@@ -757,10 +761,6 @@ bool phase_priority(TCG* env, unsigned char atn) {
     Zone* lands = (env->priority == 0) ? env->my_lands : env->op_lands;
     int* mana = (env->turn == 0) ? &env->my_mana : &env->op_mana;
 
-    /*if (env->priority == 0 && !env->participate_in_priority) {*/
-    /*    atn = ACTION_ENTER;*/
-    /*}*/
-
     if (atn == ACTION_NOOP) {
         push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_priority});
         return TO_USER;
@@ -800,12 +800,6 @@ bool phase_priority(TCG* env, unsigned char atn) {
 
     tap_lands_for_mana(lands, mana, card.cost);
 
-    // TODO: Remove this debug print after testing
-    if (*mana < card.cost) {
-        printf("\t Not enough mana\n");
-        printf("\t Remaining mana: %i\n", *mana);
-        printf("\t Required mana: %i\n", card.cost);
-    }
     assert(*mana >= card.cost);
     *mana -= card.cost;
 
@@ -823,28 +817,8 @@ bool phase_priority(TCG* env, unsigned char atn) {
     return TO_USER;
 }
 
-/*bool phase_target(TCG* env, unsigned char atn) {*/
-/*    printf("PHASE_TARGET\n");*/
-/**/
-/*    Zone* hand = (env->priority == 0) ? env->my_hand : env->op_hand;*/
-/*    Zone* board = (env->priority == 0) ? env->my_board : env->op_board;*/
-/*    Zone* graveyard = (env->priority == 0) ? env->my_graveyard : env->op_graveyard;*/
-/**/
-/*    if (atn == ACTION_NOOP) {*/
-/*        push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_target});*/
-/*        return TO_USER;*/
-/*    } else if (atn == ACTION_ENTER) {*/
-/*        return TO_STACK;*/
-/*    } else if (atn >= board->length) {*/
-/*        printf("\t Invalid action: %i\n. Board length: %i\n", atn, board->length);*/
-/*        push(env->stack, (StackItem){.type = STACK_PHASE, .phase_func = phase_play});*/
-/*        return TO_USER;*/
-/*    }*/
-/*}*/
-
 void step(TCG* env, unsigned char atn) {
     printf("Turn: %i, Action: %i\n", env->turn, atn);
-    printf("PRIORITY: %i\n", env->priority);
     while (true) {
         StackItem item = pop(env->stack);
         if (item.type == STACK_PHASE) {
@@ -861,7 +835,7 @@ void step(TCG* env, unsigned char atn) {
                 return;
             }
         } else if (item.type == STACK_EFFECT) {
-            printf("ACTIVATING EFFECT FROM STACK");
+            printf("Activating effect from stack\n");
             item.effect.activate(env, atn);
         }
         atn = ACTION_NOOP;
