@@ -22,7 +22,7 @@ void demo(int grid_size, int num_agents, int num_trash, int num_bins, int max_st
     if (use_pretrained_model){
         weights = load_weights("resources/trash_pickup_weights.bin", 150245);
         int vision = 2*env.agent_sight_range + 1;
-        net = make_convlstm(weights, env.num_agents, vision, 5, 32, 128, 4);
+        net = make_convlstm(weights, env.num_agents, vision, 5, 32, 128, 5);
     }
 
     allocate(&env);
@@ -43,13 +43,15 @@ void demo(int grid_size, int num_agents, int num_trash, int num_bins, int max_st
                     forward_convlstm(net, net->obs, env.actions);    
                 }
                 else{
-                    env.actions[i] = rand() % 4; // 0 = UP, 1 = DOWN, 2 = LEFT, 3 = RIGHT
+                    env.actions[i] = rand() % 5; // 0 = UP, 1 = DOWN, 2 = LEFT, 3 = RIGHT, 4 = NOOP
                 }
                 // printf("action: %d \n", env.actions[i]);
             }
 
             // Override human control actions
             if (IsKeyDown(KEY_LEFT_SHIFT)) {
+                env.actions[0] = ACTION_NOOP;
+
                 // Handle keyboard input only for selected agent
                 if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W)) {
                     env.actions[0] = ACTION_UP;
@@ -98,8 +100,9 @@ void performance_test() {
     int inc = env.num_agents;
     while (time(NULL) - start < test_time) {
         for (int e = 0; e < env.num_agents; e++) {
-            env.actions[e] = rand() % 4;
+            env.actions[e] = rand() % 5;
         }
+
         step(&env);
         i += inc;
     }

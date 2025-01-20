@@ -14,6 +14,7 @@
 #define ACTION_DOWN 1
 #define ACTION_LEFT 2
 #define ACTION_RIGHT 3
+#define ACTION_NOOP 4
 
 #define LOG_BUFFER_SIZE 1024
 
@@ -252,7 +253,8 @@ void move_agent(CTrashPickupEnv* env, int agent_idx, int action) {
     else if (action == ACTION_DOWN) move_dir_y = 1;
     else if (action == ACTION_LEFT) move_dir_x = -1;
     else if (action == ACTION_RIGHT) move_dir_x = 1;
-    else printf("Undefined action: %d", action);
+    else if (action == ACTION_NOOP) return;
+    else printf("Undefined action: %d\n", action);
     
     int new_x = thisAgent->pos_x + move_dir_x;
     int new_y = thisAgent->pos_y + move_dir_y;
@@ -375,7 +377,7 @@ void initialize_env(CTrashPickupEnv* env) {
     env->current_step = 0;
 
     env->positive_reward = 0.5f; // / env->num_trash;
-    env->negative_reward = -0.0f; // / (env->max_steps * env->num_agents);
+    env->negative_reward = -0.01f; // / (env->max_steps * env->num_agents);
 
     env->grid = (GridCell*)calloc(env->grid_size * env->grid_size, sizeof(GridCell));
     env->entities = (Entity*)calloc(env->num_agents + env->num_bins + env->num_trash, sizeof(Entity));
