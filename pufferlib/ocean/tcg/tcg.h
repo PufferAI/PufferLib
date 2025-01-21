@@ -786,8 +786,7 @@ void step(TCG* env, unsigned char atn) {
             bool return_to_user = item.phase_func(env, atn);
             if (return_to_user) {
                 StackItem next_item = peek(env->stack);
-                if (next_item.type == STACK_PHASE &&
-                        item.phase_func == resolve_priority && next_item.phase_func == resolve_priority &&
+                if (next_item.type == STACK_PHASE && next_item.phase_func == resolve_priority &&
                         env->priority == 0 &&
                         !env->participate_in_priority) {
                     atn = ACTION_ENTER;
