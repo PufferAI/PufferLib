@@ -4,7 +4,7 @@
 #include <string.h>
 #include "cJSON.h"
 
-void load_deck_from_json(const char* filename, Zone* deck) {
+void load_deck_from_json(const char* filename, CardArray* deck) {
     FILE* file = fopen(filename, "r");
     if (!file) {
         perror("Failed to open file");
@@ -82,9 +82,9 @@ void load_deck_from_json(const char* filename, Zone* deck) {
                 spell_effect.activate = no_activate;
 
                 if (strcmp(type, "instant") == 0) {
-                    new_card = allocate_instant(name, cost, spell_effect, 0);
+                    new_card = allocate_instant(name, cost, spell_effect);
                 } else {
-                    new_card = allocate_sorcery(name, cost, spell_effect, 0);
+                    new_card = allocate_sorcery(name, cost, spell_effect);
                 }
             } else {
                 fprintf(stderr, "Unknown card type: %s\n", type);
