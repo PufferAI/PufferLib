@@ -1,5 +1,5 @@
 #include "squared.h"
-#include "puffernet.h"
+#include "../../puffernet.h"
 
 int main() {
     //Weights* weights = load_weights("resources/pong_weights.bin", 133764);
@@ -10,7 +10,7 @@ int main() {
 
     Client* client = make_client(&env);
 
-    reset(&env);
+    c_reset(&env);
     while (!WindowShouldClose()) {
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
             env.actions[0] = 0;
@@ -22,8 +22,8 @@ int main() {
             env.actions[0] = NOOP;
             //forward_linearlstm(net, env.observations, env.actions);
         }
-        step(&env);
-        render(client, &env);
+        c_step(&env);
+        c_render(client, &env);
     }
     //free_linearlstm(net);
     //free(weights);
