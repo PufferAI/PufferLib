@@ -1,0 +1,9 @@
+#!/bin/bash
+COMMAND="$(screen -ls | grep -ie file)"
+if [ "$COMMAND" = '' ]; then
+  screen -dmS file streamlink https://twitch.tv/jsuarez5341 audio_only;
+  #https://youtube.com/@neuralmmo/live 1080p
+  echo 'starting';
+else
+  echo 'already running';
+fi
