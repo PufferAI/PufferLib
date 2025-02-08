@@ -1,4 +1,6 @@
 #!/bin/bash
+
+#if needed: apt-get install streamlink screen
 COMMAND="$(screen -ls | grep -ie file)"
 if [ "$COMMAND" = '' ]; then
   screen -dmS file streamlink https://twitch.tv/jsuarez5341 audio_only;
