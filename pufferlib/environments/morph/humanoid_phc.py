@@ -197,6 +197,7 @@ class HumanoidPHC:
         self.flag_test = False
         self.flag_im_eval = False
         self.flag_debug = self.device == "cpu"  # CHECK ME
+        self.flag_amp_obs = False
 
         ### Motion data
         # NOTE: self.flag_im_eval is used in _load_motion
@@ -271,14 +272,15 @@ class HumanoidPHC:
 
         self._compute_observations()  # observation for the next step.
 
-        self._update_hist_amp_obs()  # One step for the amp obs
-        self._compute_amp_observations()
-
         self.extras["terminate"] = self._terminate_buf
         self.extras["reward_raw"] = self.reward_raw.detach()
 
-        amp_obs_flat = self._amp_obs_buf.view(-1, self.num_amp_obs)
-        self.extras["amp_obs"] = amp_obs_flat  ## ZL: hooks for adding amp_obs for trianing
+        if self.flag_amp_obs:
+            self._update_hist_amp_obs()  # One step for the amp obs
+            self._compute_amp_observations()
+
+            amp_obs_flat = self._amp_obs_buf.view(-1, self.num_amp_obs)
+            self.extras["amp_obs"] = amp_obs_flat  ## ZL: hooks for adding amp_obs for training
 
         if self.flag_im_eval:
             motion_times = (

@@ -23,6 +23,10 @@ class Policy(nn.Module):
             nn.Tanh(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
+            layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.Tanh(),
         )
 
         # NOTE: Original PHC network
@@ -56,6 +60,8 @@ class Policy(nn.Module):
         ### Separate Critic
         self.critic_mlp = nn.Sequential(
             layer_init(nn.Linear(input_size, hidden_size)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nn.Tanh(),
