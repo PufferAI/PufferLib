@@ -17,6 +17,8 @@ cdef extern from "radars.h":
         float singer_sigma
         float singer_theta
         float priority
+        bint is_active
+        bint is_tracked
 
     ctypedef struct Radars:
         short* observations
@@ -28,17 +30,16 @@ cdef extern from "radars.h":
         int x_band_t_until_free
         Target* targets
         int initial_targets
+        int max_trackers
 
     ctypedef struct Client:
         unsigned int px
 
     void c_reset(Radars* env)
     void c_step(Radars* env)
-    Client* make_client(Radars* env)
+    Client* make_client(int scale)
     void close_client(Client* client)
     void c_render(Client* client, Radars* env)
-
-    int MAX_TRACKERS
 
 cdef class CyRadars:
     cdef:
@@ -49,7 +50,7 @@ cdef class CyRadars:
 
 
     def __init__(self, short[:, :] observations, int[:] actions,
-            float[:] rewards, unsigned char[:] terminals, int num_envs, int initial_targets):
+            float[:] rewards, unsigned char[:] terminals, int num_envs, int initial_targets, int max_trackers):
 
         self.envs = <Radars*> calloc(num_envs, sizeof(Radars))
         self.num_envs = num_envs
@@ -58,7 +59,7 @@ cdef class CyRadars:
         cdef int i
 
         for i in range(num_envs):
-            self.envs[i].targets = <Target*> calloc(MAX_TRACKERS, sizeof(Target))
+            self.envs[i].targets = <Target*> calloc(max_trackers, sizeof(Target))
 
             self.envs[i].observations = &observations[i, 0]
             self.envs[i].actions = &actions[i]
@@ -68,7 +69,8 @@ cdef class CyRadars:
             self.envs[i].s_band_t_until_free = 0
             self.envs[i].x_band_t_until_free = 0
             self.envs[i].initial_targets = initial_targets
-        
+            self.envs[i].max_trackers = max_trackers
+
     def reset(self):
         cdef int i
         for i in range(self.num_envs):
@@ -79,16 +81,18 @@ cdef class CyRadars:
         for i in range(self.num_envs):
             c_step(&self.envs[i])
 
-    def render(self):
+    def render(self, scale=2):
         cdef Radars* env = &self.envs[0]
         if self.client == NULL:
-            self.client = make_client(env)
+            self.client = make_client(scale)
 
         c_render(self.client, env)
 
     def close(self):
-        if self.client != NULL:
-            close_client(self.client)
-            self.client = NULL
+        cdef int i
+        for i in range(self.num_envs):
+            if self.client != NULL:
+                close_client(self.client)
+                self.client = NULL
 
         free(self.envs)

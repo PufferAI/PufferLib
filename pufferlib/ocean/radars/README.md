@@ -25,4 +25,6 @@ Sufficiently delayed trackers are lost, and incur an additional penalty.
 ## TODO
 
 - [ ] Implement a multi-sensor EST baseline
+- [ ] Force search at 30?
+
 
