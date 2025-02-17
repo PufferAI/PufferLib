@@ -68,6 +68,7 @@ const float REFERENCE_SNR = 40.0f;
 
 const float TRACK_UPDATE_REWARD = 1.0f;
 const float TRACK_DELAY_PENALTY = 0.1f; // Penalty per ms
+const float TRACK_LOSS_PENALTY = 10.0f;
 
 const float VERTICAL_MOTION_FACTOR = 0.1f;
 
@@ -281,7 +282,7 @@ void search_sector(Radars *env, int sector) {
 void c_step(Radars *env) {
   int action = env->actions[0];
   env->terminals[0] = 0;
-  env->rewards[0] = 0;
+  env->rewards[0] = 0.0f;
 
   if (action == SEARCH) {
     // Find the least recently used sector
@@ -341,7 +342,7 @@ void c_step(Radars *env) {
         env->rewards[0] -=
             (float)(env->observations[MAX_AZ_SLICES * MAX_EL_SLICES +
                                       action * FEATURES_PER_TRACKER] *
-                    TRACK_DELAY_PENALTY / env->targets[action].priority);
+                    TRACK_DELAY_PENALTY / (1 + env->targets[action].priority));
       }
 
       float target_range =
@@ -397,6 +398,12 @@ void c_step(Radars *env) {
                         i * FEATURES_PER_TRACKER] -= delta_t;
       env->observations[MAX_AZ_SLICES * MAX_EL_SLICES +
                         i * FEATURES_PER_TRACKER + 1] -= delta_t;
+      // if the tracker has expired, lose the track and apply the penalty
+      if (env->observations[MAX_AZ_SLICES * MAX_EL_SLICES +
+                            i * FEATURES_PER_TRACKER + 1] < 0) {
+        env->targets[i].is_tracked = false;
+        env->rewards[0] -= TRACK_LOSS_PENALTY;
+      }
       // t_dwell_estimate does not change
     }
 
@@ -449,6 +456,8 @@ void c_step(Radars *env) {
       return;
     }
   }
+
+  printf("Reward: %f\n", env->rewards[0]);
 }
 
 typedef struct {
@@ -590,11 +599,11 @@ void c_render(Client *client, Radars *env) {
       };
       if (env->targets[i].is_tracked) {
         if (env->targets[i].priority >= 2) {
-          DrawTriangle(points[0], points[1], points[2], COLORS[8]);
+          DrawTriangle(points[0], points[1], points[2], COLORS[1]);
         } else if (env->targets[i].priority >= 1) {
           DrawTriangle(points[0], points[1], points[2], COLORS[2]);
         } else {
-          DrawTriangle(points[0], points[1], points[2], COLORS[1]);
+          DrawTriangle(points[0], points[1], points[2], COLORS[8]);
         }
       } else {
         // This draws untracked targets
