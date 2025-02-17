@@ -16,7 +16,7 @@ class Recurrent(pufferlib.models.LSTMWrapper):
 
 
 # Difference between CleanRL and PufferRL policies is that
-# CleanRL has seperate actor and critic networks, while
+# CleanRL has separate actor and critic networks, while
 # PufferRL has a single encoding network that is shared between
 # the actor and critic networks
 class CleanRLPolicy(torch.nn.Module):
