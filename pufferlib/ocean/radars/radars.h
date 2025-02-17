@@ -62,7 +62,7 @@ const unsigned int S_BAND_SENSOR = 0;
 const unsigned int X_BAND_SENSOR = 1;
 
 const float REFERENCE_DWELL_TIME = 0.01f;
-const float REFERENCE_RANGE = 184000.0f;
+const float REFERENCE_RANGE = 184000000.0f;
 const float REFERENCE_CROSS_SECTION = 1.0f;
 const float REFERENCE_SNR = 40.0f;
 
@@ -394,17 +394,19 @@ void c_step(Radars *env) {
       env->observations[i] -= delta_t;
     }
     for (int i = 0; i < env->max_trackers; i++) {
-      env->observations[MAX_AZ_SLICES * MAX_EL_SLICES +
-                        i * FEATURES_PER_TRACKER] -= delta_t;
-      env->observations[MAX_AZ_SLICES * MAX_EL_SLICES +
-                        i * FEATURES_PER_TRACKER + 1] -= delta_t;
-      // if the tracker has expired, lose the track and apply the penalty
-      if (env->observations[MAX_AZ_SLICES * MAX_EL_SLICES +
-                            i * FEATURES_PER_TRACKER + 1] < 0) {
-        env->targets[i].is_tracked = false;
-        env->rewards[0] -= TRACK_LOSS_PENALTY;
+      if (env->targets[i].is_tracked) {
+        env->observations[MAX_AZ_SLICES * MAX_EL_SLICES +
+                          i * FEATURES_PER_TRACKER] -= delta_t;
+        env->observations[MAX_AZ_SLICES * MAX_EL_SLICES +
+                          i * FEATURES_PER_TRACKER + 1] -= delta_t;
+        // if the tracker has expired, lose the track and apply the penalty
+        if (env->observations[MAX_AZ_SLICES * MAX_EL_SLICES +
+                              i * FEATURES_PER_TRACKER + 1] < 0) {
+          env->targets[i].is_tracked = false;
+          env->rewards[0] -= TRACK_LOSS_PENALTY;
+        }
+        // t_dwell_estimate does not change
       }
-      // t_dwell_estimate does not change
     }
 
     // Update locations
