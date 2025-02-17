@@ -458,8 +458,6 @@ void c_step(Radars *env) {
       return;
     }
   }
-
-  printf("Reward: %f\n", env->rewards[0]);
 }
 
 typedef struct {
