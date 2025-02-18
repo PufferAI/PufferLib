@@ -18,15 +18,19 @@ class Policy(nn.Module):
         input_size = env.single_observation_space.shape[0]
         action_size = env.single_action_space.shape[0]
 
+        self.obs_norm = torch.jit.script(RunningNorm(input_size))
+
         self.actor_mlp = nn.Sequential(
             layer_init(nn.Linear(input_size, hidden_size)),
-            nn.Tanh(),
+            nn.SiLU(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
+            nn.SiLU(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
+            nn.SiLU(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
+            nn.SiLU(),
+            layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.SiLU(),
         )
 
         # NOTE: Original PHC network
@@ -60,13 +64,15 @@ class Policy(nn.Module):
         ### Separate Critic
         self.critic_mlp = nn.Sequential(
             layer_init(nn.Linear(input_size, hidden_size)),
-            nn.Tanh(),
+            nn.SiLU(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
+            nn.SiLU(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
+            nn.SiLU(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.Tanh(),
+            nn.SiLU(),
+            layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.SiLU(),
             layer_init(nn.Linear(hidden_size, 1)),
         )
 
@@ -104,11 +110,13 @@ class Policy(nn.Module):
         self.obs_pointer = None
 
     def forward(self, observations):
-        if self.obs_mean is None:
-            self.obs_mean = torch.mean(observations, dim=0)
-            self.obs_std = torch.std(observations, dim=0)
+        # if self.obs_mean is None:
+        #     self.obs_mean = torch.mean(observations, dim=0)
+        #     self.obs_std = torch.std(observations, dim=0)
+        # observations = torch.clamp((observations - self.obs_mean) / self.obs_std, -10.0, 10.0)
 
-        observations = torch.clamp((observations - self.obs_mean) / self.obs_std, -10.0, 10.0)
+        # observations = observations.float()
+        observations = self.obs_norm(observations)
 
         hidden, lookup = self.encode_observations(observations)
         actions, _ = self.decode_actions(hidden, lookup)
@@ -117,8 +125,8 @@ class Policy(nn.Module):
 
     def encode_observations(self, obs):
         # Remember the obs to use in the critic
-        self.obs_pointer = obs
-        return self.actor_mlp(obs), None
+        self.obs_pointer = self.obs_norm(obs)
+        return self.actor_mlp(self.obs_pointer), None
 
     def decode_actions(self, hidden, lookup=None):
         mu = self.mu(hidden)
@@ -145,3 +153,60 @@ class Policy(nn.Module):
 
         weights.append(torch.flatten(self._disc_logits.weight))
         return weights
+
+    def update_obs_stats(self, obs):
+        self.obs_norm.update(obs)
+
+# This replaces gymnasium's NormalizeObservation wrapper
+# NOTE: Tried BatchNorm1d with momentum=None, but the policy did not learn. Check again later.
+# CHECK ME: To normalize obs, dividing by a constant is good, but each mujoco/brax env has a different scale...
+class RunningNorm(nn.Module):
+    def __init__(self, shape: int, epsilon=1e-5, clip=10.0):
+        super().__init__()
+        self.register_buffer("running_mean", torch.zeros((1, shape), dtype=torch.float32))
+        self.register_buffer("running_var", torch.ones((1, shape), dtype=torch.float32))
+        self.register_buffer("count", torch.ones(1, dtype=torch.float32))
+        self.epsilon = epsilon
+        self.clip = clip
+
+    def forward(self, x):
+        return torch.clamp(
+            (x - self.running_mean.expand_as(x))
+            / torch.sqrt(self.running_var.expand_as(x) + self.epsilon),
+            -self.clip,
+            self.clip,
+        )
+
+    @torch.jit.ignore
+    def update(self, x):
+        # NOTE: Separated update from forward to compile the policy
+        # update() must be called to update the running mean and var
+        if self.training:
+            with torch.no_grad():
+                x = x.float()
+                assert x.dim() == 2, "x must be 2D"
+                mean = x.mean(0, keepdim=True)
+                var = x.var(0, unbiased=False, keepdim=True)
+                weight = 1 / self.count
+                self.running_mean = self.running_mean * (1 - weight) + mean * weight
+                self.running_var = self.running_var * (1 - weight) + var * weight
+                self.count += 1
+
+    # NOTE: below are needed to torch.save() the model
+    @torch.jit.ignore
+    def __getstate__(self):
+        return {
+            "running_mean": self.running_mean,
+            "running_var": self.running_var,
+            "count": self.count,
+            "epsilon": self.epsilon,
+            "clip": self.clip,
+        }
+
+    @torch.jit.ignore
+    def __setstate__(self, state):
+        self.running_mean = state["running_mean"]
+        self.running_var = state["running_var"]
+        self.count = state["count"]
+        self.epsilon = state["epsilon"]
+        self.clip = state["clip"]
