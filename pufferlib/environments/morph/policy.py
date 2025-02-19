@@ -64,16 +64,16 @@ class Policy(nn.Module):
         self.critic_mlp = nn.Sequential(
             layer_init(nn.Linear(input_size, hidden_size)),
             nn.LayerNorm(hidden_size),
-            nn.SiLU(),
+            nn.ReLU(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nn.LayerNorm(hidden_size),
-            nn.SiLU(),
+            nn.ReLU(),
             layer_init(nn.Linear(hidden_size, 512)),
             nn.LayerNorm(512),
-            nn.SiLU(),
+            nn.ReLU(),
             layer_init(nn.Linear(512, 256)),
             nn.LayerNorm(256),
-            nn.SiLU(),
+            nn.ReLU(),
             layer_init(nn.Linear(256, 1), std=0.01),
         )
 
