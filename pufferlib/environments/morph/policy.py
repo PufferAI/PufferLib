@@ -25,9 +25,9 @@ class Policy(nn.Module):
             nn.SiLU(),
             layer_init(nn.Linear(2048, 2048)),
             nn.SiLU(),
-            layer_init(nn.Linear(2048, 1024)),
+            layer_init(nn.Linear(2048, 2048)),
             nn.SiLU(),
-            layer_init(nn.Linear(1024, 512)),
+            layer_init(nn.Linear(2048, 512)),
             nn.SiLU(),
         )
 
