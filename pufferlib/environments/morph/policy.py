@@ -66,13 +66,17 @@ class Policy(nn.Module):
             nn.SiLU(),
             layer_init(nn.Linear(hidden_size, hidden_size)),
             nn.SiLU(),
-            layer_init(nn.Linear(hidden_size, hidden_size)),
+            layer_init(nn.Linear(hidden_size, 512)),
             nn.SiLU(),
-            layer_init(nn.Linear(hidden_size, hidden_size)),
+            layer_init(nn.Linear(512, 512)),
             nn.SiLU(),
-            layer_init(nn.Linear(hidden_size, hidden_size)),
+            layer_init(nn.Linear(512, 256)),
             nn.SiLU(),
-            layer_init(nn.Linear(hidden_size, 1)),
+            layer_init(nn.Linear(256, 256)),
+            nn.SiLU(),
+            layer_init(nn.Linear(256, 128)),
+            nn.SiLU(),
+            layer_init(nn.Linear(128, 1)),
         )
 
         # NOTE: Original PHC network

@@ -590,7 +590,11 @@ def save_checkpoint(data):
     if os.path.exists(model_path):
         return model_path
 
-    torch.save(data.uncompiled_policy, model_path)
+    checkpoint = {
+        "config": data.config,
+        "state_dict": data.uncompiled_policy.state_dict()
+    }
+    torch.save(checkpoint, model_path)
 
     state = {
         'optimizer_state_dict': data.optimizer.state_dict(),
@@ -632,10 +636,10 @@ def rollout(env_creator, env_kwargs, policy_cls, rnn_cls, agent_creator, agent_k
     # single-agent/multi-agent API for evaluation
     env = pufferlib.vector.make(env_creator, env_kwargs=env_kwargs, backend=backend)
 
-    if model_path is None:
-        agent = agent_creator(env, policy_cls, rnn_cls, agent_kwargs).to(device)
-    else:
-        agent = torch.load(model_path, map_location=device)
+    agent = agent_creator(env, policy_cls, rnn_cls, agent_kwargs).to(device)
+    if model_path:
+        checkpoint = torch.load(model_path, map_location=device)
+        agent.load_state_dict(checkpoint['state_dict'])
 
     ob, info = env.reset()
     driver = env.driver_env

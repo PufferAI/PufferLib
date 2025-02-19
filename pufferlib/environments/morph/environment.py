@@ -93,6 +93,9 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         self.demo = self.env.demo
         self.state = self.env.state
 
+        # NOTE: Simple reward scaling
+        rew = self.rewards.clone() * 0.01
+
         self.terminals[:] = self.env.reset_buf
         done_indices = torch.nonzero(self.terminals).squeeze(-1)
         if len(done_indices) > 0:
@@ -101,6 +104,10 @@ class PHCPufferEnv(pufferlib.PufferEnv):
             self._infos["episode_length"] += self.episode_lengths[done_indices].tolist()
             self.episode_returns[done_indices] = 0
             self.episode_lengths[done_indices] = 0
+
+            # Set rew to 0 for "terminated" envs
+            term_envs = torch.nonzero(self.env.extras["terminate"]).squeeze(-1)
+            rew[term_envs] = 0
 
         self.episode_returns[~self.terminals] += self.rewards[~self.terminals]
         self.episode_lengths[~self.terminals] += 1
@@ -111,9 +118,6 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         if self.tick % self.log_interval == 0:
             info = self.mean_and_log()
 
-        # NOTE: Simple reward scaling
-        rew = self.rewards.clone() * 0.01
-
         return self.observations, rew, self.terminals, self.truncations, info
 
     def render(self):
@@ -123,8 +127,8 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         self.env.close()
 
     def mean_and_log(self):
-        if len(self._infos["episode_return"]) < self.log_interval:
-            return []
+        # if len(self._infos["episode_return"]) < self.log_interval:
+        #     return []
 
         info = {
             "episode_return": np.mean(self._infos["episode_return"]),
