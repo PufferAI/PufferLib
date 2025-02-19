@@ -953,7 +953,8 @@ class HumanoidPHC:
             self._compute_observations(env_ids)
             self._state_reset_happened = True
 
-        self._init_amp_obs(env_ids)
+        if self.flag_amp_obs:
+            self._init_amp_obs(env_ids)
 
     def _reset_actors(self, env_ids):
         if self._state_init == StateInit.Default:

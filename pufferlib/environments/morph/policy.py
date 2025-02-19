@@ -50,7 +50,6 @@ class Policy(nn.Module):
         # )
 
         self.mu = nn.Sequential(
-            # nn.Tanh(),
             layer_init(nn.Linear(hidden_size, action_size), std=0.01),
         )
 
@@ -115,12 +114,8 @@ class Policy(nn.Module):
         #     self.obs_std = torch.std(observations, dim=0)
         # observations = torch.clamp((observations - self.obs_mean) / self.obs_std, -10.0, 10.0)
 
-        # observations = observations.float()
-        observations = self.obs_norm(observations)
-
         hidden, lookup = self.encode_observations(observations)
-        actions, _ = self.decode_actions(hidden, lookup)
-        value = self.critic_mlp(observations)
+        actions, value = self.decode_actions(hidden, lookup)
         return actions, value
 
     def encode_observations(self, obs):
@@ -154,8 +149,12 @@ class Policy(nn.Module):
         weights.append(torch.flatten(self._disc_logits.weight))
         return weights
 
-    def update_obs_stats(self, obs):
-        self.obs_norm.update(obs)
+    def update_running_stats(self, obs):
+        self.obs_norm.update_running_stats(obs)
+
+    def update_obs_norm(self):
+        self.obs_norm.update_forward_vars()
+
 
 # This replaces gymnasium's NormalizeObservation wrapper
 # NOTE: Tried BatchNorm1d with momentum=None, but the policy did not learn. Check again later.
@@ -163,6 +162,12 @@ class Policy(nn.Module):
 class RunningNorm(nn.Module):
     def __init__(self, shape: int, epsilon=1e-5, clip=10.0):
         super().__init__()
+
+        # For inference
+        self.register_buffer("forward_mean", torch.zeros((1, shape), dtype=torch.float32))
+        self.register_buffer("forward_var", torch.ones((1, shape), dtype=torch.float32))
+
+        # For update
         self.register_buffer("running_mean", torch.zeros((1, shape), dtype=torch.float32))
         self.register_buffer("running_var", torch.ones((1, shape), dtype=torch.float32))
         self.register_buffer("count", torch.ones(1, dtype=torch.float32))
@@ -171,14 +176,14 @@ class RunningNorm(nn.Module):
 
     def forward(self, x):
         return torch.clamp(
-            (x - self.running_mean.expand_as(x))
-            / torch.sqrt(self.running_var.expand_as(x) + self.epsilon),
+            (x - self.forward_mean.expand_as(x))
+            / torch.sqrt(self.forward_var.expand_as(x) + self.epsilon),
             -self.clip,
             self.clip,
         )
 
     @torch.jit.ignore
-    def update(self, x):
+    def update_running_stats(self, x):
         # NOTE: Separated update from forward to compile the policy
         # update() must be called to update the running mean and var
         if self.training:
@@ -192,10 +197,17 @@ class RunningNorm(nn.Module):
                 self.running_var = self.running_var * (1 - weight) + var * weight
                 self.count += 1
 
+    @torch.jit.ignore
+    def update_forward_vars(self):
+        self.forward_mean.copy_(self.running_mean)
+        self.forward_var.copy_(self.running_var)
+
     # NOTE: below are needed to torch.save() the model
     @torch.jit.ignore
     def __getstate__(self):
         return {
+            "forward_mean": self.forward_mean,
+            "forward_var": self.forward_var,
             "running_mean": self.running_mean,
             "running_var": self.running_var,
             "count": self.count,
@@ -205,6 +217,8 @@ class RunningNorm(nn.Module):
 
     @torch.jit.ignore
     def __setstate__(self, state):
+        self.forward_mean = state["forward_mean"]
+        self.forward_var = state["forward_var"]
         self.running_mean = state["running_mean"]
         self.running_var = state["running_var"]
         self.count = state["count"]

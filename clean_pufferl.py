@@ -158,7 +158,8 @@ def train(data):
     losses = data.losses
 
     with profile.train_misc:
-        update_obs_stats = getattr(data.policy, "update_obs_stats", None)
+        update_running_stats = getattr(data.policy.policy, "update_running_stats", None)
+        update_obs_norm = getattr(data.policy.policy, "update_obs_norm", None)
 
         idxs = experience.sort_training_data()
         dones_np = experience.dones_np[idxs]
@@ -214,8 +215,8 @@ def train(data):
                 ret = experience.b_returns[mb]
 
             with profile.train_forward:
-                if update_obs_stats is not None:
-                    update_obs_stats(obs.reshape(-1, *data.vecenv.single_observation_space.shape))
+                if update_running_stats:
+                    update_running_stats(obs.reshape(-1, *data.vecenv.single_observation_space.shape))
 
                 if experience.lstm_h is not None:
                     _, newlogprob, entropy, newvalue, lstm_state = data.policy(
@@ -302,6 +303,9 @@ def train(data):
             frac = 1.0 - data.global_step / config.total_timesteps
             lrnow = frac * config.learning_rate
             data.optimizer.param_groups[0]["lr"] = lrnow
+
+        if update_obs_norm:
+            update_obs_norm()
 
         y_pred = experience.values_np
         y_true = experience.returns_np
