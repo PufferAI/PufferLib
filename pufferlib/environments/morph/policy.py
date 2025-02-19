@@ -21,15 +21,13 @@ class Policy(nn.Module):
         self.obs_norm = torch.jit.script(RunningNorm(input_size))
 
         self.actor_mlp = nn.Sequential(
-            layer_init(nn.Linear(input_size, hidden_size)),
+            layer_init(nn.Linear(input_size, 2048)),
             nn.SiLU(),
-            layer_init(nn.Linear(hidden_size, hidden_size)),
+            layer_init(nn.Linear(2048, 2048)),
             nn.SiLU(),
-            layer_init(nn.Linear(hidden_size, hidden_size)),
+            layer_init(nn.Linear(2048, 1024)),
             nn.SiLU(),
-            layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.SiLU(),
-            layer_init(nn.Linear(hidden_size, hidden_size)),
+            layer_init(nn.Linear(1024, 512)),
             nn.SiLU(),
         )
 
@@ -50,7 +48,7 @@ class Policy(nn.Module):
         # )
 
         self.mu = nn.Sequential(
-            layer_init(nn.Linear(hidden_size, action_size), std=0.01),
+            layer_init(nn.Linear(512, action_size), std=0.01),
         )
 
         # NOTE: Original PHC uses a constant std. Something to experiment?
