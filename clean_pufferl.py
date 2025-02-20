@@ -277,6 +277,8 @@ def train(data):
                 entropy_loss = entropy.mean()
                 loss = pg_loss - config.ent_coef * entropy_loss + v_loss * config.vf_coef #+ disc_loss * config.disc_coef
 
+                loss += data.policy.policy.mean_bound_loss * 10.0 # hard coded for now
+
             with profile.learn:
                 data.optimizer.zero_grad()
                 loss.backward()
@@ -293,6 +295,7 @@ def train(data):
                 losses.old_approx_kl += old_approx_kl.item() / total_minibatches
                 losses.approx_kl += approx_kl.item() / total_minibatches
                 losses.clipfrac += clipfrac.item() / total_minibatches
+                losses.mean_bound_loss += data.policy.policy.mean_bound_loss.item() / total_minibatches
 
         if config.target_kl is not None:
             if approx_kl > config.target_kl:
@@ -437,6 +440,7 @@ def make_losses():
         approx_kl=0,
         clipfrac=0,
         explained_variance=0,
+        mean_bound_loss=0,
     )
 
 class Experience:

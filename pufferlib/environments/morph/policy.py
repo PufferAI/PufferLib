@@ -25,9 +25,9 @@ class Policy(nn.Module):
             nn.SiLU(),
             layer_init(nn.Linear(2048, 2048)),
             nn.SiLU(),
-            layer_init(nn.Linear(2048, 2048)),
+            layer_init(nn.Linear(2048, 1024)),
             nn.SiLU(),
-            layer_init(nn.Linear(2048, 512)),
+            layer_init(nn.Linear(1024, 512)),
             nn.SiLU(),
         )
 
@@ -104,9 +104,10 @@ class Policy(nn.Module):
         self._disc_logits = layer_init(torch.nn.Linear(hidden_size, 1))
 
         # NOTE: A hack to normalize the obs
-        self.obs_mean = None
+        # self.obs_mean = None
 
         self.obs_pointer = None
+        self.mean_bound_loss = None
 
     def forward(self, observations):
         # if self.obs_mean is None:
@@ -127,6 +128,10 @@ class Policy(nn.Module):
         mu = self.mu(hidden)
         std = torch.exp(self.sigma).expand_as(mu)
         probs = torch.distributions.Normal(mu, std)
+
+        # Mean bound loss
+        mean_violation = nn.functional.relu(torch.abs(mu) - 1)  # bound hard coded to 1
+        self.mean_bound_loss = mean_violation.mean()
 
         # NOTE: Separate critic network takes input directly
         value = self.critic_mlp(self.obs_pointer)
