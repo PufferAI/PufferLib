@@ -130,8 +130,9 @@ class Policy(nn.Module):
         probs = torch.distributions.Normal(mu, std)
 
         # Mean bound loss
-        mean_violation = nn.functional.relu(torch.abs(mu) - 1)  # bound hard coded to 1
-        self.mean_bound_loss = mean_violation.mean()
+        if self.training:
+            mean_violation = nn.functional.relu(torch.abs(mu) - 1)  # bound hard coded to 1
+            self.mean_bound_loss = mean_violation.mean()
 
         # NOTE: Separate critic network takes input directly
         value = self.critic_mlp(self.obs_pointer)
