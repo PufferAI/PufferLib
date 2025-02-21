@@ -206,7 +206,6 @@ def init_wandb(args, name, id=None, resume=True):
     wandb.init(
         id=id or wandb.util.generate_id(),
         project=args["wandb_project"],
-        group=args["wandb_group"],
         allow_val_change=True,
         save_code=True,
         resume=resume,
