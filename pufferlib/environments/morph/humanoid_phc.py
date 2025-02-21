@@ -4,6 +4,7 @@ from enum import Enum
 from types import SimpleNamespace
 
 from isaacgym import gymapi
+
 try:
     import gymtorch
 except ImportError:
@@ -259,10 +260,6 @@ class HumanoidPHC:
 
         self._refresh_sim_tensors()
 
-        #body_pos = self._rigid_body_pos
-        #self.rew_buf[:] = body_pos[:, 0, 2]
-        #self.reset_buf[:] = body_pos[:, 0, 2] < 0.25
-
         self._compute_reward()
 
         # NOTE: Which envs must be reset is computed here, but the envs get reset outside the env
@@ -488,7 +485,7 @@ class HumanoidPHC:
         ### Motion/AMP-related
         self.seq_motions = False
         self._min_motion_len = 5  # env_config.get("min_length", -1)
-        
+
         # NOTE: Some AMASS motion is over 7000 frames, and it substantially
         # slows down the evaluation. So we limit the max length to 600.
         self._max_motion_len = 600
@@ -917,7 +914,7 @@ class HumanoidPHC:
             # TODO: find a way to evaluate full motion, probably not during training
             max_length=self.max_episode_length,
             im_eval=self.flag_im_eval,
-            multi_thread=False,
+            num_thread=4,
             smpl_type=self.humanoid_type,
             step_dt=self.dt,
             is_deterministic=self.flag_debug,
@@ -1272,10 +1269,10 @@ class HumanoidPHC:
         if env_ids is None:
             env_ids = slice(None)
 
-        body_pos = self._rigid_body_pos[env_ids]#[..., self._track_bodies_id]
-        body_rot = self._rigid_body_rot[env_ids]#[..., self._track_bodies_id]
-        body_vel = self._rigid_body_vel[env_ids]#[..., self._track_bodies_id]
-        body_ang_vel = self._rigid_body_ang_vel[env_ids]#[..., self._track_bodies_id]
+        body_pos = self._rigid_body_pos[env_ids]  # [..., self._track_bodies_id]
+        body_rot = self._rigid_body_rot[env_ids]  # [..., self._track_bodies_id]
+        body_vel = self._rigid_body_vel[env_ids]  # [..., self._track_bodies_id]
+        body_ang_vel = self._rigid_body_ang_vel[env_ids]  # [..., self._track_bodies_id]
 
         sim_obs = compute_humanoid_observations_smpl_max(
             body_pos,
@@ -1301,10 +1298,10 @@ class HumanoidPHC:
             self._sampled_motion_ids[env_ids], motion_times, self._global_offset[env_ids]
         )  # pass in the env_ids such that the motion is in synced.
 
-        demo_pos = motion_res["rg_pos"]#[..., self._track_bodies_id]
-        demo_rot = motion_res["rb_rot"]#[..., self._track_bodies_id]
-        demo_vel = motion_res["body_vel"]#[..., self._track_bodies_id]
-        demo_ang_vel = motion_res["body_ang_vel"]#[..., self._track_bodies_id]
+        demo_pos = motion_res["rg_pos"]  # [..., self._track_bodies_id]
+        demo_rot = motion_res["rb_rot"]  # [..., self._track_bodies_id]
+        demo_vel = motion_res["body_vel"]  # [..., self._track_bodies_id]
+        demo_ang_vel = motion_res["body_ang_vel"]  # [..., self._track_bodies_id]
 
         demo_obs = compute_humanoid_observations_smpl_max(
             demo_pos,
@@ -1507,7 +1504,7 @@ class HumanoidPHC:
         body_rot = self._rigid_body_rot
         body_vel = self._rigid_body_vel
         body_ang_vel = self._rigid_body_ang_vel
-        
+
         motion_times = (
             self.progress_buf * self.dt + self._motion_start_times + self._motion_start_times_offset
         )  # reward is computed after physics step, and progress_buf is already updated for next time step.
@@ -1775,7 +1772,7 @@ def remove_base_rot(quat):
     return quat_mul(quat, base_rot.repeat(shape, 1))
 
 
-#@torch.jit.script
+# @torch.jit.script
 def compute_humanoid_observations_smpl_max(
     body_pos,
     body_rot,

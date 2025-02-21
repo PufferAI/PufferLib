@@ -231,7 +231,9 @@ def train(args, vec_env, policy):
             if data.epoch % train_config.checkpoint_interval == 0:
                 eval_stats = EvalStats(vec_env, failed_save_path=os.path.join(data_dir, f"failed_{data.epoch:06d}.pkl"))
                 rollout(vec_env, policy, eval_stats)
-                eval_stats.update_env_and_close()
+                eval_results = eval_stats.update_env_and_close()
+                if data.wandb:
+                    wandb.log(eval_results)
 
             # Resample motions every 200 epochs (train_config.motion_resample_interval)
             vec_env.env.resample_motions()

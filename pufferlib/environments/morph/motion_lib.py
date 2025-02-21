@@ -34,6 +34,7 @@
 
 import gc
 import glob
+import time
 import random
 import os.path as osp
 from enum import Enum
@@ -87,24 +88,49 @@ def to_torch(tensor):
         return torch.from_numpy(tensor)
 
 
-def local_rotation_to_dof_vel(local_rot0, local_rot1, dt):
-    # Assume each joint is 3dof
-    diff_quat_data = torch_utils.quat_mul(torch_utils.quat_conjugate(local_rot0), local_rot1)
-    diff_angle, diff_axis = torch_utils.quat_to_angle_axis(diff_quat_data)
-    dof_vel = diff_axis * diff_angle.unsqueeze(-1) / dt
+# def local_rotation_to_dof_vel(local_rot0, local_rot1, dt):
+#     # Assume each joint is 3dof
+#     diff_quat_data = torch_utils.quat_mul(torch_utils.quat_conjugate(local_rot0), local_rot1)
+#     diff_angle, diff_axis = torch_utils.quat_to_angle_axis(diff_quat_data)
+#     dof_vel = diff_axis * diff_angle.unsqueeze(-1) / dt
 
-    return dof_vel[1:, :].flatten()
+#     return dof_vel[1:, :].flatten()
 
 
-def compute_motion_dof_vels(motion):
-    num_frames = motion.tensor.shape[0]
-    dt = 1.0 / motion.fps
+# def compute_motion_dof_vels(motion):
+#     num_frames = motion.tensor.shape[0]
+#     dt = 1.0 / motion.fps
+#     dof_vels = []
+
+#     for f in range(num_frames - 1):
+#         local_rot0 = motion.local_rotation[f]
+#         local_rot1 = motion.local_rotation[f + 1]
+#         frame_dof_vel = local_rotation_to_dof_vel(local_rot0, local_rot1, dt)
+#         dof_vels.append(frame_dof_vel)
+
+#     dof_vels.append(dof_vels[-1])
+#     dof_vels = torch.stack(dof_vels, dim=0).view(num_frames, -1, 3)
+
+#     return dof_vels
+
+
+# ~15% faster than compute_motion_dof_vels
+@torch.jit.script
+def compute_motion_dof_vels_jit(local_rotation, fps):
+    # type: (Tensor, int) -> Tensor
+    num_frames = local_rotation.shape[0]
+    dt = 1.0 / fps
     dof_vels = []
-
     for f in range(num_frames - 1):
-        local_rot0 = motion.local_rotation[f]
-        local_rot1 = motion.local_rotation[f + 1]
-        frame_dof_vel = local_rotation_to_dof_vel(local_rot0, local_rot1, dt)
+        local_rot0 = local_rotation[f]
+        local_rot1 = local_rotation[f + 1]
+
+        # frame_dof_vel = local_rotation_to_dof_vel(local_rot0, local_rot1, dt)
+        diff_quat_data = torch_utils.quat_mul(torch_utils.quat_conjugate(local_rot0), local_rot1)
+        diff_angle, diff_axis = torch_utils.quat_to_angle_axis(diff_quat_data)
+        dof_vel = diff_axis * diff_angle.unsqueeze(-1) / dt
+        frame_dof_vel = dof_vel[1:, :].flatten()
+
         dof_vels.append(frame_dof_vel)
 
     dof_vels.append(dof_vels[-1])
@@ -160,7 +186,7 @@ class MotionLibBase:
         self.mesh_parsers = None
 
         self.load_data(self.m_cfg.motion_file, min_length=self.m_cfg.min_length, im_eval=self.m_cfg.im_eval)
-        self.setup_constants(fix_height=self.m_cfg.fix_height, multi_thread=self.m_cfg.multi_thread)
+        self.setup_constants(fix_height=self.m_cfg.fix_height, num_thread=self.m_cfg.num_thread)
 
     def load_data(self, motion_file, min_length=-1, im_eval=False):
         if osp.isfile(motion_file):
@@ -203,9 +229,9 @@ class MotionLibBase:
                 self._motion_data_load[0]
             )  # set self._motion_data_load to a sample of the data
 
-    def setup_constants(self, fix_height=FixHeightMode.full_fix, multi_thread=True):
+    def setup_constants(self, fix_height=FixHeightMode.full_fix, num_thread=1):
         self.fix_height = fix_height
-        self.multi_thread = multi_thread
+        self.num_thread = max(num_thread, 1)
 
         #### Termination history
         self._curr_motion_ids = None
@@ -291,6 +317,8 @@ class MotionLibBase:
             self._sampling_prob[self._curr_motion_ids] / self._sampling_prob[self._curr_motion_ids].sum()
         )
 
+        start_time = time.time()
+
         print("\n****************************** Current motion keys ******************************")
         print("Sampling motion:", sample_idxes[:30])
         if len(self.curr_motion_keys) < 100:
@@ -305,10 +333,8 @@ class MotionLibBase:
 
         manager = mp.Manager()
         queue = manager.Queue()
-        num_jobs = min(mp.cpu_count(), 64)
 
-        if num_jobs <= 8 or not self.multi_thread:
-            num_jobs = 1
+        num_jobs = self.num_thread
 
         res_acc = {}  # using dictionary ensures order of the results.
         jobs = motion_data_list
@@ -333,11 +359,11 @@ class MotionLibBase:
             worker.start()
         res_acc.update(self.load_motion_with_skeleton(*jobs[0], None, 0))
 
-        for i in tqdm(range(len(jobs) - 1)):
+        for i in range(len(jobs) - 1):
             res = queue.get()
             res_acc.update(res)
 
-        for f in tqdm(range(len(res_acc))):
+        for f in range(len(res_acc)):
             motion_file_data, curr_motion = res_acc[f]
             if USE_CACHE:
                 curr_motion = DeviceCache(curr_motion, self._device)
@@ -393,6 +419,8 @@ class MotionLibBase:
         num_motions = self.num_motions()
         total_len = self.get_total_length()
         print(f"Loaded {num_motions:d} motions with a total length of {total_len:.3f}s and {self.gts.shape[0]} frames.")
+        print(f"Time to load motions: {int(time.time() - start_time)}s")
+
         return motions
 
     def num_motions(self):
@@ -644,7 +672,7 @@ class MotionLibSMPL(MotionLibBase):
     def __init__(self, motion_lib_cfg):
         super().__init__(motion_lib_cfg=motion_lib_cfg)
 
-        data_dir = 'resources/morph'
+        data_dir = "resources/morph"
         if osp.exists(data_dir):
             if motion_lib_cfg.smpl_type == "smpl":
                 # NOTE: SMPL model files must be present in the data_dir.
@@ -727,7 +755,7 @@ class MotionLibSMPL(MotionLibBase):
         res = {}
         assert len(ids) == len(motion_data_list)
 
-        if pid == 0 and not config.multi_thread:
+        if pid == 0 and config.num_thread == 1:
             pbar = tqdm(range(len(motion_data_list)))
         else:
             pbar = range(len(motion_data_list))
@@ -779,7 +807,8 @@ class MotionLibSMPL(MotionLibBase):
             )
 
             curr_motion = SkeletonMotion.from_skeleton_state(sk_state, curr_file.get("fps", 30))
-            curr_dof_vels = compute_motion_dof_vels(curr_motion)
+            # curr_dof_vels = compute_motion_dof_vels(curr_motion)
+            curr_dof_vels = compute_motion_dof_vels_jit(curr_motion.local_rotation, curr_motion.fps)
 
             curr_motion.dof_vels = curr_dof_vels
             curr_motion.gender_beta = curr_gender_beta

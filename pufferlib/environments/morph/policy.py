@@ -48,6 +48,7 @@ class Policy(nn.Module):
         # )
 
         self.mu = nn.Sequential(
+            nn.SiLU(),  # handle the LSTM output
             layer_init(nn.Linear(hidden_size, action_size), std=0.01),
         )
 
