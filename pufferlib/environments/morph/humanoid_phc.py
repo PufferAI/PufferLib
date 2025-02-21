@@ -272,7 +272,7 @@ class HumanoidPHC:
 
         self._compute_observations()  # observation for the next step.
 
-        self.extras["terminate"] = self._terminate_buf
+        self.extras["terminate"] = self._terminate_buf.clone()
         self.extras["reward_raw"] = self.reward_raw.detach()
 
         if self.flag_amp_obs:
@@ -919,7 +919,6 @@ class HumanoidPHC:
             im_eval=self.flag_im_eval,
             multi_thread=False,
             smpl_type=self.humanoid_type,
-            randomrize_heading=True,
             step_dt=self.dt,
             is_deterministic=self.flag_debug,
         )

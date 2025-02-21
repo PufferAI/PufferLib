@@ -71,6 +71,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         self.log_interval = log_interval
         self.episode_returns = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self.episode_lengths = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+        self.episode_count = 0
         self._infos = {
             "episode_return": [],
             "episode_length": [],
@@ -100,6 +101,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         done_indices = torch.nonzero(self.terminals).squeeze(-1)
         if len(done_indices) > 0:
             self.env.reset(done_indices)
+            self.episode_count += len(done_indices)
             self._infos["episode_return"] += self.episode_returns[done_indices].tolist()
             self._infos["episode_length"] += self.episode_lengths[done_indices].tolist()
             self.episode_returns[done_indices] = 0

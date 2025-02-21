@@ -18,6 +18,7 @@ import torch
 import pufferlib
 import pufferlib.utils
 import pufferlib.pytorch
+import pufferlib.cleanrl
 
 torch.set_float32_matmul_precision('high')
 
@@ -158,9 +159,6 @@ def train(data):
     losses = data.losses
 
     with profile.train_misc:
-        update_running_stats = getattr(data.policy.policy, "update_running_stats", None)
-        update_obs_norm = getattr(data.policy.policy, "update_obs_norm", None)
-
         idxs = experience.sort_training_data()
         dones_np = experience.dones_np[idxs]
         values_np = experience.values_np[idxs]
@@ -215,9 +213,6 @@ def train(data):
                 ret = experience.b_returns[mb]
 
             with profile.train_forward:
-                if update_running_stats:
-                    update_running_stats(obs.reshape(-1, *data.vecenv.single_observation_space.shape))
-
                 if experience.lstm_h is not None:
                     _, newlogprob, entropy, newvalue, lstm_state = data.policy(
                         obs, state=lstm_state, action=atn)
@@ -277,7 +272,16 @@ def train(data):
                 entropy_loss = entropy.mean()
                 loss = pg_loss - config.ent_coef * entropy_loss + v_loss * config.vf_coef #+ disc_loss * config.disc_coef
 
-                loss += data.policy.policy.mean_bound_loss * 10.0 # hard coded for now
+                # Mean bound loss
+                if isinstance(data.policy, pufferlib.cleanrl.Policy):
+                    mean_bound_loss = getattr(data.policy.policy, "mean_bound_loss", None)
+                elif isinstance(data.policy, pufferlib.cleanrl.RecurrentPolicy):
+                    mean_bound_loss = getattr(data.policy.policy.policy, "mean_bound_loss", None)
+                else:
+                    mean_bound_loss = None
+
+                if mean_bound_loss:
+                    loss += mean_bound_loss * 10.0 # hard coded for now
 
             with profile.learn:
                 data.optimizer.zero_grad()
@@ -295,7 +299,9 @@ def train(data):
                 losses.old_approx_kl += old_approx_kl.item() / total_minibatches
                 losses.approx_kl += approx_kl.item() / total_minibatches
                 losses.clipfrac += clipfrac.item() / total_minibatches
-                losses.mean_bound_loss += data.policy.policy.mean_bound_loss.item() / total_minibatches
+                
+                if mean_bound_loss:
+                    losses.mean_bound_loss += mean_bound_loss.item() / total_minibatches
 
         if config.target_kl is not None:
             if approx_kl > config.target_kl:
@@ -306,9 +312,6 @@ def train(data):
             frac = 1.0 - data.global_step / config.total_timesteps
             lrnow = frac * config.learning_rate
             data.optimizer.param_groups[0]["lr"] = lrnow
-
-        if update_obs_norm:
-            update_obs_norm()
 
         y_pred = experience.values_np
         y_true = experience.returns_np

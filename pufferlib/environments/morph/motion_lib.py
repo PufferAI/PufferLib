@@ -755,7 +755,7 @@ class MotionLibSMPL(MotionLibBase):
             B, J, N = pose_quat_global.shape
 
             ##### ZL: randomize the heading ######
-            if not config.is_deterministic:
+            if not (config.is_deterministic or config.im_eval):
                 random_rot = np.zeros(3)
                 random_rot[2] = np.pi * (2 * np.random.random() - 1.0)
                 random_heading_rot = sRot.from_euler("xyz", random_rot)

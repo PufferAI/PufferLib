@@ -182,7 +182,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         #carbs_param('vision', 'linear', search_center=5, is_integer=True),
         carbs_param('train', 'learning_rate', 'log', sweep_parameters, search_center=1e-4),
         carbs_param('train', 'gamma', 'logit', sweep_parameters, search_center=0.95),
-        carbs_param('train', 'gae_lambda', 'logit', sweep_parameters, search_center=0.90),
+        carbs_param('train', 'gae_lambda', 'logit', sweep_parameters, search_center=0.50),
         carbs_param('train', 'update_epochs', 'linear', sweep_parameters,
             search_center=3, is_integer=True),
         carbs_param('train', 'clip_coef', 'logit', sweep_parameters, search_center=0.2),
@@ -325,6 +325,18 @@ def train(args, make_env, policy_cls, rnn_cls, wandb,
     data = clean_pufferl.create(train_config, vecenv, policy, wandb=wandb)
     while data.global_step < train_config.total_timesteps:
         clean_pufferl.evaluate(data)
+
+        if env_name.startswith('morph'):
+            # Update obs running mean and std
+            # During evaluate() and train(), the obs_norm is NOT updated.
+            rms_update_fn = None
+            if isinstance(data.policy, pufferlib.cleanrl.Policy):
+                rms_update_fn = getattr(data.policy.policy, "update_obs_rms", None)
+            elif isinstance(data.policy, pufferlib.cleanrl.RecurrentPolicy):
+                rms_update_fn = getattr(data.policy.policy.policy, "update_obs_rms", None)
+            if rms_update_fn:
+                rms_update_fn(data.experience.obs)
+
         clean_pufferl.train(data)
 
     uptime = data.profile.uptime

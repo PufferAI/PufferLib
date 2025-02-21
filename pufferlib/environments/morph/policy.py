@@ -27,7 +27,7 @@ class Policy(nn.Module):
             nn.SiLU(),
             layer_init(nn.Linear(2048, 1024)),
             nn.SiLU(),
-            layer_init(nn.Linear(1024, 512)),
+            layer_init(nn.Linear(1024, hidden_size)),
             nn.SiLU(),
         )
 
@@ -48,7 +48,7 @@ class Policy(nn.Module):
         # )
 
         self.mu = nn.Sequential(
-            layer_init(nn.Linear(512, action_size), std=0.01),
+            layer_init(nn.Linear(hidden_size, action_size), std=0.01),
         )
 
         # NOTE: Original PHC uses a constant std. Something to experiment?
@@ -60,13 +60,13 @@ class Policy(nn.Module):
 
         ### Separate Critic
         self.critic_mlp = nn.Sequential(
-            layer_init(nn.Linear(input_size, hidden_size)),
-            nn.LayerNorm(hidden_size),
+            layer_init(nn.Linear(input_size, 1024)),
+            nn.LayerNorm(1024),
             nn.ReLU(),
-            layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.LayerNorm(hidden_size),
+            layer_init(nn.Linear(1024, 1024)),
+            nn.LayerNorm(1024),
             nn.ReLU(),
-            layer_init(nn.Linear(hidden_size, 512)),
+            layer_init(nn.Linear(1024, 512)),
             nn.LayerNorm(512),
             nn.ReLU(),
             layer_init(nn.Linear(512, 256)),
@@ -155,11 +155,8 @@ class Policy(nn.Module):
         weights.append(torch.flatten(self._disc_logits.weight))
         return weights
 
-    def update_running_stats(self, obs):
-        self.obs_norm.update_running_stats(obs)
-
-    def update_obs_norm(self):
-        self.obs_norm.update_forward_vars()
+    def update_obs_rms(self, obs):
+        self.obs_norm.update(obs)
 
 
 # This replaces gymnasium's NormalizeObservation wrapper
@@ -169,11 +166,6 @@ class RunningNorm(nn.Module):
     def __init__(self, shape: int, epsilon=1e-5, clip=10.0):
         super().__init__()
 
-        # For inference
-        self.register_buffer("forward_mean", torch.zeros((1, shape), dtype=torch.float32))
-        self.register_buffer("forward_var", torch.ones((1, shape), dtype=torch.float32))
-
-        # For update
         self.register_buffer("running_mean", torch.zeros((1, shape), dtype=torch.float32))
         self.register_buffer("running_var", torch.ones((1, shape), dtype=torch.float32))
         self.register_buffer("count", torch.ones(1, dtype=torch.float32))
@@ -182,38 +174,30 @@ class RunningNorm(nn.Module):
 
     def forward(self, x):
         return torch.clamp(
-            (x - self.forward_mean.expand_as(x))
-            / torch.sqrt(self.forward_var.expand_as(x) + self.epsilon),
+            (x - self.running_mean.expand_as(x))
+            / torch.sqrt(self.running_var.expand_as(x) + self.epsilon),
             -self.clip,
             self.clip,
         )
 
     @torch.jit.ignore
-    def update_running_stats(self, x):
+    def update(self, x):
         # NOTE: Separated update from forward to compile the policy
         # update() must be called to update the running mean and var
-        if self.training:
-            with torch.no_grad():
-                x = x.float()
-                assert x.dim() == 2, "x must be 2D"
-                mean = x.mean(0, keepdim=True)
-                var = x.var(0, unbiased=False, keepdim=True)
-                weight = 1 / self.count
-                self.running_mean = self.running_mean * (1 - weight) + mean * weight
-                self.running_var = self.running_var * (1 - weight) + var * weight
-                self.count += 1
-
-    @torch.jit.ignore
-    def update_forward_vars(self):
-        self.forward_mean.copy_(self.running_mean)
-        self.forward_var.copy_(self.running_var)
+        with torch.no_grad():
+            x = x.float()
+            assert x.dim() == 2, "x must be 2D"
+            mean = x.mean(0, keepdim=True)
+            var = x.var(0, unbiased=False, keepdim=True)
+            weight = 1 / self.count
+            self.running_mean = self.running_mean * (1 - weight) + mean * weight
+            self.running_var = self.running_var * (1 - weight) + var * weight
+            self.count += 1
 
     # NOTE: below are needed to torch.save() the model
     @torch.jit.ignore
     def __getstate__(self):
         return {
-            "forward_mean": self.forward_mean,
-            "forward_var": self.forward_var,
             "running_mean": self.running_mean,
             "running_var": self.running_var,
             "count": self.count,
@@ -223,8 +207,6 @@ class RunningNorm(nn.Module):
 
     @torch.jit.ignore
     def __setstate__(self, state):
-        self.forward_mean = state["forward_mean"]
-        self.forward_var = state["forward_var"]
         self.running_mean = state["running_mean"]
         self.running_var = state["running_var"]
         self.count = state["count"]
