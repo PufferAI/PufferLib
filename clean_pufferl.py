@@ -280,7 +280,7 @@ def train(data):
                 else:
                     mean_bound_loss = None
 
-                if mean_bound_loss:
+                if mean_bound_loss is not None:
                     loss += mean_bound_loss * 10.0 # hard coded for now
 
             with profile.learn:

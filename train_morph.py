@@ -233,6 +233,8 @@ def train(args, vec_env, policy):
                 rollout(vec_env, policy, eval_stats)
                 eval_results = eval_stats.update_env_and_close()
                 if data.wandb:
+                    eval_results["0verview/agent_steps"] = data.global_step
+                    eval_results["0verview/epoch"] = data.epoch
                     wandb.log(eval_results)
 
             # Resample motions every 200 epochs (train_config.motion_resample_interval)

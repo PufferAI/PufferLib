@@ -399,6 +399,7 @@ class MotionLibBase:
         self._motion_limb_weights = torch.tensor(np.array(limb_weights), device=self._device, dtype=torch.float32)
         self._num_motions = len(motions)
 
+        # NOTE: These take ~20s for 4096 envs
         self.gts = torch.cat([m.global_translation for m in motions], dim=0).float().to(self._device)
         self.grs = torch.cat([m.global_rotation for m in motions], dim=0).float().to(self._device)
         self.lrs = torch.cat([m.local_rotation for m in motions], dim=0).float().to(self._device)
