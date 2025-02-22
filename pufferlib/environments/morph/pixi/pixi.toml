@@ -1,0 +1,40 @@
+[project]
+channels = ["pytorch", "nvidia", "conda-forge"]
+name = "pufferlib"
+platforms = ["linux-64"]
+
+[system-requirements]
+cuda = "12.1"
+
+[dependencies]
+python = ">=3.8,<3.9"
+pip = ">=24.3.1,<25"
+cython = ">=3.0.11,<4"
+setuptools = ">=75.3.0,<76"
+wheel = ">=0.45.1,<0.46"
+pre-commit = ">=3.5.0,<4"
+ruff = ">=0.6.2,<0.7"
+wandb = ">=0.16.6,<0.17"
+tyro = ">=0.8.14,<0.9"
+
+pytorch = "==2.3.1"
+pytorch-cuda = "==12.1"
+
+# isaacgym deps
+torchvision = ">=0.18.1,<0.19"
+scipy = ">=1.10.1,<2"
+imageio = ">=2.36.0,<3"
+fsspec = ">=2024.10.0,<2025"
+omegaconf = ">=2.3.0,<3"
+
+[pypi-dependencies]
+pufferlib = { path = ".", editable = true }
+smpl_sim = { git = "https://github.com/kywch/SMPLSim.git" }
+chumpy = { git = "https://github.com/nico-von-huene/chumpy.git" }
+
+
+[activation]
+scripts = ["env_setup.sh"]
+
+[tasks]
+test_isaac = "python -c 'import isaacgym, torch; print(torch.cuda.is_available())'"
