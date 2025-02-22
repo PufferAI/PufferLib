@@ -77,6 +77,8 @@ class PHCPufferEnv(pufferlib.PufferEnv):
             "episode_length": [],
         }
 
+        self.raw_rewards = torch.zeros(5, dtype=torch.float32, device=self.device)
+
     def reset(self, seed=None):
         self.env.reset()
         self.demo = self.env.demo
@@ -96,6 +98,9 @@ class PHCPufferEnv(pufferlib.PufferEnv):
 
         # NOTE: Simple reward scaling
         rew = self.rewards.clone() * 0.01
+
+        # Extract reward-related info for logging
+        self.raw_rewards += self.env.extras["reward_raw"].mean(dim=0)
 
         self.terminals[:] = self.env.reset_buf
         done_indices = torch.nonzero(self.terminals).squeeze(-1)
@@ -119,6 +124,22 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         self.tick += 1
         if self.tick % self.log_interval == 0:
             info = self.mean_and_log()
+
+            # Extract reward-related info
+            reward_info = {
+                "rew_body_pos": self.raw_rewards[0].item() / self.log_interval,
+                "rew_body_rot": self.raw_rewards[1].item() / self.log_interval,
+                "rew_lin_vel": self.raw_rewards[2].item() / self.log_interval,
+                "rew_ang_vel": self.raw_rewards[3].item() / self.log_interval,
+                "rew_power": self.raw_rewards[4].item() / self.log_interval,
+            }
+
+            self.raw_rewards[:] = 0
+            
+            if len(info) > 0:
+                info[0].update(reward_info)
+            else:
+                info.append(reward_info)
 
         return self.observations, rew, self.terminals, self.truncations, info
 
