@@ -506,7 +506,7 @@ class HumanoidPHC:
 
         ### Reward-related
         self.use_power_reward = True
-        self.power_coefficient = 0.0005  # cfg["env"].get("power_coefficient", 0.0005)
+        self.power_coefficient = env_config.get("rew_power_coef", 0.0005)
 
         # NOTE: body pos reward, body rot reward, body vel reward, body ang vel reward
         self._imitation_reward_dim = 4

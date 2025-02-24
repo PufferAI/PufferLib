@@ -31,12 +31,14 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         device_id=0,
         headless=True,
         log_interval=32,
+        rew_power_coef=0.0005,
     ):
         self.render_mode = "native"
         cfg = {
             "env": {
                 "num_envs": num_envs,
                 "motion_file": motion_file,
+                "rew_power_coef": rew_power_coef,
             },
             "robot": {
                 "has_self_collision": has_self_collision,
