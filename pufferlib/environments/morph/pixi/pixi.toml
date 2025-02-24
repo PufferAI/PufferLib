@@ -31,6 +31,7 @@ omegaconf = ">=2.3.0,<3"
 pufferlib = { path = ".", editable = true }
 smpl_sim = { git = "https://github.com/kywch/SMPLSim.git" }
 chumpy = { git = "https://github.com/nico-von-huene/chumpy.git" }
+carbs = { git = "https://github.com/PufferAI/carbs.git" }
 
 
 [activation]

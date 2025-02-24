@@ -1,7 +1,9 @@
 import os
 import gc
 import ast
+import sys
 import uuid
+import time
 import signal
 import argparse
 import configparser
@@ -200,11 +202,10 @@ def make_policy(env, policy_cls, rnn_cls, args):
     return policy.to(args["train"]["device"])
 
 
-def init_wandb(args, name, id=None, resume=True):
+def init_wandb(args, name, resume=True):
     import wandb
 
     wandb.init(
-        id=id or wandb.util.generate_id(),
         project=args["wandb_project"],
         allow_val_change=True,
         save_code=True,
@@ -215,9 +216,10 @@ def init_wandb(args, name, id=None, resume=True):
     return wandb
 
 
-def train(args, vec_env, policy):
+def train(args, vec_env, policy, wandb=None, skip_resample=False):
     exp_id = args["env_name"] + "-" + str(uuid.uuid4())[:8]
-    wandb = init_wandb(args, args["env_name"], id=exp_id) if args["track"] else None
+    if wandb is not None and args["track"]:
+        wandb = init_wandb(args, args["env_name"])
 
     train_config = pufferlib.namespace(**args["train"], env=args["env_name"], exp_id=exp_id)
     data = clean_pufferl.create(train_config, vec_env, policy, wandb=wandb)
@@ -226,7 +228,7 @@ def train(args, vec_env, policy):
     os.makedirs(data_dir, exist_ok=True)
 
     while data.global_step < train_config.total_timesteps:
-        if data.epoch > 0 and data.epoch % train_config.motion_resample_interval == 0:
+        if not skip_resample and data.epoch > 0 and data.epoch % train_config.motion_resample_interval == 0:
             # Evaluate the model every 600 epochs (train_config.checkpoint_interval)
             if data.epoch % train_config.checkpoint_interval == 0:
                 eval_stats = EvalStats(vec_env, failed_save_path=os.path.join(data_dir, f"failed_{data.epoch:06d}.pkl"))
@@ -259,16 +261,26 @@ def train(args, vec_env, policy):
     uptime = data.profile.uptime
 
     # Final evaluation
-    steps_evaluated = 0
-    steps_to_eval = int(train_config.eval_timesteps)
-    batch_size = int(train_config.batch_size)
-    while steps_evaluated < steps_to_eval:
-        stats, _ = clean_pufferl.evaluate(data)
-        steps_evaluated += batch_size
-    clean_pufferl.mean_and_log(data)
+    eval_stats = EvalStats(vec_env)
+    rollout(vec_env, policy, eval_stats)
+    eval_results = eval_stats.update_env_and_close()
+    if data.wandb:
+        eval_results["0verview/agent_steps"] = data.global_step
+        eval_results["0verview/epoch"] = data.epoch
+        wandb.log(eval_results)
+
+    # NOTE: Not using standard eval
+    # steps_evaluated = 0
+    # steps_to_eval = int(train_config.eval_timesteps)
+    # batch_size = int(train_config.batch_size)
+    # while steps_evaluated < steps_to_eval:
+    #     stats, _ = clean_pufferl.evaluate(data)
+    #     steps_evaluated += batch_size
+    # clean_pufferl.mean_and_log(data)
+
     clean_pufferl.close(data)
 
-    return stats, uptime
+    return eval_results, uptime
 
 
 def rollout(vec_env, policy, eval_stats=None):
@@ -301,10 +313,209 @@ def rollout(vec_env, policy, eval_stats=None):
                 break
 
 
+### CARBS Sweeps
+def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
+    from math import log, ceil, floor
+
+    from carbs import CARBS
+    from carbs import CARBSParams
+    from carbs import LinearSpace
+    from carbs import LogSpace
+    from carbs import LogitSpace
+    from carbs import ObservationInParam
+
+    # from carbs import ParamDictType
+    from carbs import Param
+
+    def closest_power(x):
+        possible_results = floor(log(x, 2)), ceil(log(x, 2))
+        return int(2 ** min(possible_results, key=lambda z: abs(x - 2**z)))
+
+    def carbs_param(
+        group,
+        name,
+        space,
+        wandb_params,
+        mmin=None,
+        mmax=None,
+        search_center=None,
+        is_integer=False,
+        rounding_factor=1,
+        scale=1,
+    ):
+        wandb_param = wandb_params[group]["parameters"][name]
+        if "values" in wandb_param:
+            values = wandb_param["values"]
+            mmin = min(values)
+            mmax = max(values)
+
+        if mmin is None:
+            mmin = float(wandb_param["min"])
+        if mmax is None:
+            mmax = float(wandb_param["max"])
+
+        if space == "log":
+            Space = LogSpace
+            if search_center is None:
+                search_center = 2 ** (np.log2(mmin) + np.log2(mmax) / 2)
+        elif space == "linear":
+            Space = LinearSpace
+            if search_center is None:
+                search_center = (mmin + mmax) / 2
+        elif space == "logit":
+            Space = LogitSpace
+            assert mmin == 0
+            assert mmax == 1
+            assert search_center is not None
+        else:
+            raise ValueError(f"Invalid CARBS space: {space} (log/linear)")
+
+        return Param(
+            name=f"{group}/{name}",
+            space=Space(
+                min=mmin,
+                max=mmax,
+                is_integer=is_integer,
+                rounding_factor=rounding_factor,
+                scale=scale,
+            ),
+            search_center=search_center,
+        )
+
+    if not os.path.exists("checkpoints"):
+        os.system("mkdir checkpoints")
+
+    import wandb
+
+    sweep_id = wandb.sweep(
+        sweep=args["sweep"],
+        project="carbs",
+    )
+    target_metric = args["sweep"]["metric"]["name"].split("/")[-1]
+    sweep_parameters = args["sweep"]["parameters"]
+
+    # Must be hardcoded and match wandb sweep space for now
+    param_spaces = []
+    if "total_timesteps" in sweep_parameters["train"]["parameters"]:
+        time_param = sweep_parameters["train"]["parameters"]["total_timesteps"]
+        min_timesteps = time_param["min"]
+        param_spaces.append(
+            carbs_param(
+                "train", "total_timesteps", "log", sweep_parameters, search_center=min_timesteps, is_integer=True
+            )
+        )
+
+    # batch_param = sweep_parameters['train']['parameters']['batch_size']
+    # default_batch = (batch_param['max'] - batch_param['min']) // 2
+
+    # minibatch_param = sweep_parameters['train']['parameters']['minibatch_size']
+    # default_minibatch = (minibatch_param['max'] - minibatch_param['min']) // 2
+
+    # env params to sweep
+    if "env" in sweep_parameters:
+        param_spaces.append(carbs_param("env", "rew_power_coef", "linear", sweep_parameters, search_center=0.0005))
+
+    param_spaces += [
+        carbs_param("train", "learning_rate", "log", sweep_parameters, search_center=0.00002),
+        # carbs_param('train', 'gamma', 'logit', sweep_parameters, search_center=0.95),
+        # carbs_param('train', 'gae_lambda', 'logit', sweep_parameters, search_center=0.75),
+        # carbs_param('train', 'update_epochs', 'linear', sweep_parameters,
+        #     search_center=3, is_integer=True),
+        carbs_param("train", "clip_coef", "logit", sweep_parameters, search_center=0.02),
+        carbs_param("train", "vf_coef", "linear", sweep_parameters, search_center=1.0),
+        carbs_param("train", "vf_clip_coef", "logit", sweep_parameters, search_center=0.2),
+        # carbs_param('train', 'max_grad_norm', 'linear', sweep_parameters, search_center=1.0),
+        # carbs_param('train', 'ent_coef', 'log', sweep_parameters, search_center=0.0001),
+        # carbs_param('train', 'batch_size', 'log', sweep_parameters,
+        #     search_center=default_batch, is_integer=True),
+        # carbs_param('train', 'minibatch_size', 'log', sweep_parameters,
+        #     search_center=default_minibatch, is_integer=True),
+        # carbs_param('train', 'bptt_horizon', 'log', sweep_parameters,
+        #     search_center=8, is_integer=True),
+    ]
+
+    carbs_params = CARBSParams(
+        better_direction_sign=1,
+        is_wandb_logging_enabled=False,
+        resample_frequency=5,
+        num_random_samples=len(param_spaces),
+        max_suggestion_cost=max_suggestion_cost,
+        is_saved_on_every_observation=False,
+    )
+    carbs = CARBS(carbs_params, param_spaces)
+
+    def main():
+        # set torch and pytorch seeds to current time
+        np.random.seed(int(time.time()))
+        torch.manual_seed(int(time.time()))
+
+        wandb = init_wandb(args, args["env_name"])
+        wandb.config.__dict__["_locked"] = {}
+
+        orig_suggestion = carbs.suggest().suggestion
+        suggestion = orig_suggestion.copy()
+        print("Suggestion:", suggestion)
+        train_suggestion = {k.split("/")[1]: v for k, v in suggestion.items() if k.startswith("train/")}
+        env_suggestion = {k.split("/")[1]: v for k, v in suggestion.items() if k.startswith("env/")}
+        args["train"].update(train_suggestion)
+        # args['train']['batch_size'] = closest_power(
+        #     train_suggestion['batch_size'])
+        # args['train']['minibatch_size'] = closest_power(
+        #     train_suggestion['minibatch_size'])
+        # args['train']['bptt_horizon'] = closest_power(
+        #     train_suggestion['bptt_horizon'])
+
+        args["env"].update(env_suggestion)
+        args["track"] = True
+        wandb.config.update({"train": args["train"]}, allow_val_change=True)
+        wandb.config.update({"env": args["env"]}, allow_val_change=True)
+
+        print(wandb.config.train)
+        print(wandb.config.env)
+        print(wandb.config.policy)
+
+        try:
+            vec_env = pufferlib.vector.make(env_creator, env_kwargs=args["env"])
+            policy_cls = getattr(policy_module, args["policy_name"])
+            rnn_cls = None
+            if "rnn_name" in args:
+                rnn_cls = getattr(policy_module, args["rnn_name"])
+            policy = make_policy(vec_env.driver_env, policy_cls, rnn_cls, args)
+
+            stats, uptime = train(args, vec_env, policy, wandb, skip_resample=True)
+
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+
+        else:
+            observed_value = 0
+            for k, v in stats.items():
+                if k.endswith(target_metric):
+                    observed_value = v
+                    break
+
+            print("Observed value:", observed_value)
+            print("Uptime:", uptime)
+
+            carbs.observe(
+                ObservationInParam(
+                    input=orig_suggestion,
+                    output=observed_value,
+                    cost=uptime,
+                )
+            )
+
+    wandb.agent(sweep_id, main, count=sweep_count)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter, add_help=False)
     parser.add_argument("--config", default="config/morph.ini")
-    parser.add_argument("--mode", type=str, default="train", choices="train eval".split())  # render-eval, batch-eval?
+    parser.add_argument(
+        "--mode", type=str, default="train", choices="train eval sweep".split()
+    )  # render-eval, batch-eval?
     parser.add_argument("-m", "--motion-file", type=str, default=None, help="Path to motion file")
     parser.add_argument("-p", "--eval-model-path", type=str, default=None, help="Path to a pretrained checkpoint")
     parser.add_argument("--track", action="store_true", help="Track on WandB")
@@ -349,9 +560,14 @@ if __name__ == "__main__":
     args["env"]["device_type"] = device
     if args["motion_file"]:
         args["env"]["motion_file"] = args["motion_file"]
-    vec_env = pufferlib.vector.make(env_creator, env_kwargs=args["env"])
 
-    # Create the policy
+    # If sweep, run sweep here and exit
+    if args["mode"] == "sweep":
+        sweep_carbs(args, sweep_count=500)
+        sys.exit(0)
+
+    # Create the env and policy
+    vec_env = pufferlib.vector.make(env_creator, env_kwargs=args["env"])
     policy_cls = getattr(policy_module, args["policy_name"])
     rnn_cls = None
     if "rnn_name" in args:
