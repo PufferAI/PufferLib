@@ -413,10 +413,10 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
 
     # env params to sweep
     if "env" in sweep_parameters:
-        param_spaces.append(carbs_param("env", "rew_power_coef", "linear", sweep_parameters, search_center=0.0005))
+        param_spaces.append(carbs_param("env", "rew_power_coef", "linear", sweep_parameters, search_center=args["ssc_rew"]))
 
     param_spaces += [
-        carbs_param("train", "learning_rate", "log", sweep_parameters, search_center=0.00002),
+        carbs_param("train", "learning_rate", "log", sweep_parameters, search_center=args["ssc_lr"]),
         # carbs_param('train', 'gamma', 'logit', sweep_parameters, search_center=0.95),
         # carbs_param('train', 'gae_lambda', 'logit', sweep_parameters, search_center=0.75),
         # carbs_param('train', 'update_epochs', 'linear', sweep_parameters,
@@ -520,6 +520,9 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--eval-model-path", type=str, default=None, help="Path to a pretrained checkpoint")
     parser.add_argument("--track", action="store_true", help="Track on WandB")
     parser.add_argument("--wandb-project", type=str, default="pufferlib")
+    parser.add_argument("--ssc-lr", type=float, default=.00002, help="Sweep search center for learning rate")
+    parser.add_argument("--ssc-rew", type=float, default=.0005, help="Sweep search center for rew power")
+
     args = parser.parse_known_args()[0]
 
     p = configparser.ConfigParser()
