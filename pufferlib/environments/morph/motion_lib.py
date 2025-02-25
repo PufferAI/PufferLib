@@ -261,6 +261,7 @@ class MotionLibBase:
         random_sample=True,
         start_idx=0,
         max_len=-1,
+        sample_idxes=None,
     ):
         # load motion load the same number of motions as there are skeletons (humanoids)
         if "gts" in self.__dict__:
@@ -298,14 +299,16 @@ class MotionLibBase:
         self.num_joints = len(skeleton_trees[0].node_names)
         num_motion_to_load = len(skeleton_trees)
 
-        if not self.m_cfg.is_deterministic and random_sample:
-            sample_idxes = torch.multinomial(self._sampling_prob, num_samples=num_motion_to_load, replacement=True).to(
-                self._device
-            )
-        else:
-            sample_idxes = torch.remainder(torch.arange(len(skeleton_trees)) + start_idx, self._num_unique_motions).to(
-                self._device
-            )
+        # If sample_idxes is provided, use it
+        if sample_idxes is None or len(sample_idxes) != num_motion_to_load:
+            if not self.m_cfg.is_deterministic and random_sample:
+                sample_idxes = torch.multinomial(self._sampling_prob, num_samples=num_motion_to_load, replacement=True).to(
+                    self._device
+                )
+            else:
+                sample_idxes = torch.remainder(torch.arange(len(skeleton_trees)) + start_idx, self._num_unique_motions).to(
+                    self._device
+                )
 
         # import ipdb; ipdb.set_trace()
         self._curr_motion_ids = sample_idxes

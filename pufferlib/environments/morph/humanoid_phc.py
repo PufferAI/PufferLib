@@ -920,19 +920,27 @@ class HumanoidPHC:
             is_deterministic=self.flag_debug,
         )
         self._motion_train_lib = MotionLibSMPL(motion_lib_cfg)
+        self._motion_lib = self._motion_train_lib
 
         # TODO: Use motion_test_file for eval?
         motion_lib_cfg.im_eval = True
         self._motion_eval_lib = MotionLibSMPL(motion_lib_cfg)
 
-        self._motion_lib = self._motion_train_lib
+        # When loading the motions the first time, use even sampling
+        interval = self.num_unique_motions / (self.num_envs + 50)  # 50 is arbitrary
+        sample_idxes = np.arange(0, self.num_unique_motions, interval)
+        sample_idxes = np.floor(sample_idxes).astype(int)[:self.num_envs]
+        sample_idxes = torch.from_numpy(sample_idxes).to(self.device)
+
         self._motion_lib.load_motions(
             skeleton_trees=self.skeleton_trees,
             gender_betas=self.humanoid_shapes.cpu(),
             limb_weights=self.humanoid_limb_and_weights.cpu(),
-            random_sample=(not self.flag_test) and (not self.seq_motions),
+            # NOTE: During initial loading, use even sampling
+            sample_idxes=sample_idxes,
+            # random_sample=(not self.flag_test) and (not self.seq_motions),
             # max_len=-1 if self.flag_test else self.max_episode_length,  # NOTE: this is ignored in motion lib
-            start_idx=self._motion_sample_start_idx,
+            # start_idx=self._motion_sample_start_idx,
         )
 
     #####################################################################

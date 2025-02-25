@@ -4,7 +4,6 @@ import ast
 import sys
 import uuid
 import time
-import signal
 import argparse
 import configparser
 
@@ -27,10 +26,6 @@ from pufferlib.environments.morph.environment import make as env_creator
 import pufferlib.environments.morph.policy as policy_module
 
 import clean_pufferl
-
-
-# Aggressively exit on ctrl+c
-signal.signal(signal.SIGINT, lambda sig, frame: os._exit(0))
 
 
 class EvalStats:
@@ -205,7 +200,9 @@ def make_policy(env, policy_cls, rnn_cls, args):
 def init_wandb(args, name, resume=True):
     import wandb
 
+    exp_id = args["env_name"] + "-" + str(uuid.uuid4())[:8]
     wandb.init(
+        id = exp_id,
         project=args["wandb_project"],
         allow_val_change=True,
         save_code=True,
@@ -213,13 +210,15 @@ def init_wandb(args, name, resume=True):
         config=args,
         name=name,
     )
-    return wandb
+    return wandb, exp_id
 
 
-def train(args, vec_env, policy, wandb=None, skip_resample=False):
-    exp_id = args["env_name"] + "-" + str(uuid.uuid4())[:8]
-    if wandb is not None and args["track"]:
-        wandb = init_wandb(args, args["env_name"])
+def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
+    if wandb is None and args["track"]:
+        wandb, exp_id = init_wandb(args, args["env_name"])
+
+    if exp_id is None:
+        exp_id = args["env_name"] + "-" + str(uuid.uuid4())[:8]
 
     train_config = pufferlib.namespace(**args["train"], env=args["env_name"], exp_id=exp_id)
     data = clean_pufferl.create(train_config, vec_env, policy, wandb=wandb)
@@ -421,7 +420,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
         # carbs_param('train', 'gae_lambda', 'logit', sweep_parameters, search_center=0.75),
         # carbs_param('train', 'update_epochs', 'linear', sweep_parameters,
         #     search_center=3, is_integer=True),
-        carbs_param("train", "clip_coef", "logit", sweep_parameters, search_center=0.02),
+        carbs_param("train", "clip_coef", "logit", sweep_parameters, search_center=0.1),
         carbs_param("train", "vf_coef", "linear", sweep_parameters, search_center=1.0),
         carbs_param("train", "vf_clip_coef", "logit", sweep_parameters, search_center=0.2),
         # carbs_param('train', 'max_grad_norm', 'linear', sweep_parameters, search_center=1.0),
@@ -449,7 +448,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
         np.random.seed(int(time.time()))
         torch.manual_seed(int(time.time()))
 
-        wandb = init_wandb(args, args["env_name"])
+        wandb, exp_id = init_wandb(args, args["env_name"])
         wandb.config.__dict__["_locked"] = {}
 
         orig_suggestion = carbs.suggest().suggestion
@@ -482,7 +481,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
                 rnn_cls = getattr(policy_module, args["rnn_name"])
             policy = make_policy(vec_env.driver_env, policy_cls, rnn_cls, args)
 
-            stats, uptime = train(args, vec_env, policy, wandb, skip_resample=True)
+            stats, uptime = train(args, vec_env, policy, wandb, exp_id, skip_resample=True)
 
         except Exception as e:
             import traceback
@@ -512,7 +511,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter, add_help=False)
-    parser.add_argument("--config", default="config/morph.ini")
+    parser.add_argument("--config", default="config/morph_debug.ini")
     parser.add_argument(
         "--mode", type=str, default="train", choices="train eval sweep".split()
     )  # render-eval, batch-eval?
