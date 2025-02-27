@@ -186,6 +186,42 @@ class EvalStats:
         return self.results
 
 
+class NumpyRunningMeanStd:
+    def __init__(self, epsilon=1e-5, clip=5.0):
+        self.mean = 0.0
+        self.var = 1.0
+        self.count = 0
+        self.epsilon = epsilon
+        self.clip = clip
+
+    def normalize(self, x, update=True):
+        batch = np.asarray(x)
+        
+        if update and batch.size > 0:
+            batch_mean = np.mean(batch)
+            batch_var = np.var(batch)
+            
+            # Update combined mean and variance
+            batch_size = batch.size
+            new_count = self.count + batch_size
+            delta = batch_mean - self.mean
+            
+            # Update mean
+            self.mean = self.mean + delta * batch_size / new_count
+            # Update variance using Welford's algorithm
+            self.var = (self.count * self.var + batch_size * batch_var + 
+                       delta**2 * self.count * batch_size / new_count) / new_count
+            # Update count
+            self.count = new_count
+        
+        normalized = (batch - self.mean) / np.sqrt(self.var + self.epsilon)
+        
+        if self.clip is not None:
+            normalized = np.clip(normalized, -self.clip, self.clip)
+            
+        return normalized
+
+
 def make_policy(env, policy_cls, rnn_cls, args):
     policy = policy_cls(env, **args["policy"])
     if rnn_cls is not None:
@@ -223,6 +259,9 @@ def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
     train_config = pufferlib.namespace(**args["train"], env=args["env_name"], exp_id=exp_id)
     data = clean_pufferl.create(train_config, vec_env, policy, wandb=wandb)
 
+    # External value normalizer, used only for training
+    val_norm = NumpyRunningMeanStd()
+
     data_dir = os.path.join(train_config.data_dir, exp_id)
     os.makedirs(data_dir, exist_ok=True)
 
@@ -253,6 +292,10 @@ def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
             rms_update_fn = getattr(data.policy.policy.policy, "update_obs_rms", None)
         if rms_update_fn:
             rms_update_fn(data.experience.obs)
+
+        # RMS normalize reward
+        if not args["disable_rew_norm"]:
+            data.experience.rewards_np[:] = val_norm.normalize(data.experience.rewards_np)
 
         # Update policy
         clean_pufferl.train(data)
@@ -416,12 +459,12 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
 
     param_spaces += [
         carbs_param("train", "learning_rate", "log", sweep_parameters, search_center=args["ssc_lr"]),
-        # carbs_param('train', 'gamma', 'logit', sweep_parameters, search_center=0.95),
+        carbs_param('train', 'gamma', 'logit', sweep_parameters, search_center=0.92),
         # carbs_param('train', 'gae_lambda', 'logit', sweep_parameters, search_center=0.75),
         # carbs_param('train', 'update_epochs', 'linear', sweep_parameters,
         #     search_center=3, is_integer=True),
         carbs_param("train", "clip_coef", "logit", sweep_parameters, search_center=0.05),
-        carbs_param("train", "vf_coef", "linear", sweep_parameters, search_center=1.0),
+        # carbs_param("train", "vf_coef", "linear", sweep_parameters, search_center=1.0),
         # carbs_param("train", "vf_clip_coef", "logit", sweep_parameters, search_center=0.2),
         # carbs_param('train', 'max_grad_norm', 'linear', sweep_parameters, search_center=1.0),
         # carbs_param('train', 'ent_coef', 'log', sweep_parameters, search_center=0.0001),
@@ -521,6 +564,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb-project", type=str, default="pufferlib")
     parser.add_argument("--ssc-lr", type=float, default=.0001, help="Sweep search center for learning rate")
     parser.add_argument("--ssc-rew", type=float, default=.0005, help="Sweep search center for rew power")
+    parser.add_argument("--disable-rew-norm", action="store_true", help="Disable reward normalization")
 
     args = parser.parse_known_args()[0]
 

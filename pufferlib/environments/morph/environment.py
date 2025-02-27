@@ -98,9 +98,6 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         self.demo = self.env.demo
         self.state = self.env.state
 
-        # NOTE: Simple reward scaling
-        rew = self.rewards.clone() * 0.01
-
         # Extract reward-related info for logging
         self.raw_rewards += self.env.extras["reward_raw"].mean(dim=0)
 
@@ -113,10 +110,6 @@ class PHCPufferEnv(pufferlib.PufferEnv):
             self._infos["episode_length"] += self.episode_lengths[done_indices].tolist()
             self.episode_returns[done_indices] = 0
             self.episode_lengths[done_indices] = 0
-
-            # Set rew to 0 for "terminated" envs
-            term_envs = torch.nonzero(self.env.extras["terminate"]).squeeze(-1)
-            rew[term_envs] = 0
 
         self.episode_returns[~self.terminals] += self.rewards[~self.terminals]
         self.episode_lengths[~self.terminals] += 1
@@ -143,7 +136,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
             else:
                 info.append(reward_info)
 
-        return self.observations, rew, self.terminals, self.truncations, info
+        return self.observations, self.rewards, self.terminals, self.truncations, info
 
     def render(self):
         return self.env.render()
