@@ -4,6 +4,7 @@ import ast
 import sys
 import uuid
 import time
+import math
 import argparse
 import configparser
 
@@ -299,6 +300,13 @@ def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
 
         # Update policy
         clean_pufferl.train(data)
+
+        # Apply learning rate exp decay
+        if data.config.lr_decay_rate > 0:
+            decay = math.exp(-data.config.lr_decay_rate * data.epoch)
+            if decay < data.config.lr_decay_floor:
+                decay = data.config.lr_decay_floor
+            data.optimizer.param_groups[0]["lr"] = data.config.learning_rate * decay
 
     uptime = data.profile.uptime
 
