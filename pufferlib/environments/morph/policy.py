@@ -60,39 +60,22 @@ class Policy(nn.Module):
         nn.init.constant_(self.sigma, -2.9)
 
         ### Separate Critic
+        # NOTE: Original PHC network
         self.critic_mlp = nn.Sequential(
-            layer_init(nn.Linear(input_size, 1024)),
-            nn.LayerNorm(1024),
+            layer_init(nn.Linear(input_size, 2048)),
+            nn.ReLU(),
+            layer_init(nn.Linear(2048, 1536)),
+            nn.ReLU(),
+            layer_init(nn.Linear(1536, 1024)),
             nn.ReLU(),
             layer_init(nn.Linear(1024, 1024)),
-            nn.LayerNorm(1024),
             nn.ReLU(),
             layer_init(nn.Linear(1024, 512)),
-            nn.LayerNorm(512),
             nn.ReLU(),
-            layer_init(nn.Linear(512, 256)),
-            nn.LayerNorm(256),
+            layer_init(nn.Linear(512, hidden_size)),
             nn.ReLU(),
-            layer_init(nn.Linear(256, 1), std=0.01),
+            layer_init(nn.Linear(hidden_size, 1), std=0.01),
         )
-
-        # NOTE: Original PHC network
-        # self.critic_mlp = nn.Sequential(
-        #     layer_init(nn.Linear(input_dim, 2048)),
-        #     nn.SiLU(),
-        #     layer_init(nn.Linear(2048, 1536)),
-        #     nn.SiLU(),
-        #     layer_init(nn.Linear(1536, 1024)),
-        #     nn.SiLU(),
-        #     layer_init(nn.Linear(1024, 1024)),
-        #     nn.SiLU(),
-        #     layer_init(nn.Linear(1024, 512)),
-        #     nn.SiLU(),
-        #     layer_init(nn.Linear(512, hidden)),
-        #     nn.SiLU(),
-        #     layer_init(nn.Linear(hidden, 1)),
-        # )
-        # self.value = nn.Linear(hidden, 1)
 
         ### Discriminator
         # NOTE: Check the demo_size from the env
