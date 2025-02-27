@@ -113,9 +113,15 @@ class PHCPufferEnv(pufferlib.PufferEnv):
             self.episode_returns[done_indices] = 0
             self.episode_lengths[done_indices] = 0
 
+            ### Simple reward shaping
             # Set rew to 0 for "terminated" envs
             term_envs = torch.nonzero(self.env.extras["terminate"]).squeeze(-1)
             rew[term_envs] = 0
+
+            # Provide success reward for non-early-termination envs
+            # NOTE: Can this mitigate not handling truncation in gae?
+            success_envs = done_indices[~torch.isin(done_indices, term_envs)]
+            rew[success_envs] = 2.0  # hard coded
 
         self.episode_returns[~self.terminals] += self.rewards[~self.terminals]
         self.episode_lengths[~self.terminals] += 1
