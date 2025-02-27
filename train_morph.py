@@ -468,7 +468,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
 
     param_spaces += [
         carbs_param("train", "learning_rate", "log", sweep_parameters, search_center=args["ssc_lr"]),
-        carbs_param('train', 'gamma', 'logit', sweep_parameters, search_center=0.92),
+        # carbs_param('train', 'gamma', 'logit', sweep_parameters, search_center=0.92),
         # carbs_param('train', 'gae_lambda', 'logit', sweep_parameters, search_center=0.75),
         # carbs_param('train', 'update_epochs', 'linear', sweep_parameters,
         #     search_center=3, is_integer=True),
