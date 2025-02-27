@@ -11,7 +11,7 @@ class Recurrent(pufferlib.models.LSTMWrapper):
 
 
 class Policy(nn.Module):
-    def __init__(self, env, demo_size=358, hidden_size=512):
+    def __init__(self, env, demo_size=358, hidden_size=512, larger_critic=False):
         super().__init__()
         self.is_continuous = True
 
@@ -60,21 +60,36 @@ class Policy(nn.Module):
         nn.init.constant_(self.sigma, -2.9)
 
         ### Separate Critic
-        self.critic_mlp = nn.Sequential(
-            layer_init(nn.Linear(input_size, 1024)),
-            nn.LayerNorm(1024),
-            nn.ReLU(),
-            layer_init(nn.Linear(1024, 1024)),
-            nn.LayerNorm(1024),
-            nn.ReLU(),
-            layer_init(nn.Linear(1024, 512)),
-            nn.LayerNorm(512),
-            nn.ReLU(),
-            layer_init(nn.Linear(512, 256)),
-            nn.LayerNorm(256),
-            nn.ReLU(),
-            layer_init(nn.Linear(256, 1), std=0.01),
-        )
+        if larger_critic:
+            self.critic_mlp = nn.Sequential(
+                layer_init(nn.Linear(input_size, 2048)),
+                nn.LayerNorm(2048),
+                nn.ReLU(),
+                layer_init(nn.Linear(2048, 1024)),
+                nn.ReLU(),
+                layer_init(nn.Linear(1024, 1024)),
+                nn.ReLU(),
+                layer_init(nn.Linear(1024, 512)),
+                nn.ReLU(),
+                layer_init(nn.Linear(512, 1), std=0.01),
+            )
+
+        else:
+            self.critic_mlp = nn.Sequential(
+                layer_init(nn.Linear(input_size, 1024)),
+                nn.LayerNorm(1024),
+                nn.ReLU(),
+                layer_init(nn.Linear(1024, 1024)),
+                nn.LayerNorm(1024),
+                nn.ReLU(),
+                layer_init(nn.Linear(1024, 512)),
+                nn.LayerNorm(512),
+                nn.ReLU(),
+                layer_init(nn.Linear(512, 256)),
+                nn.LayerNorm(256),
+                nn.ReLU(),
+                layer_init(nn.Linear(256, 1), std=0.01),
+            )
 
         """
         # NOTE: Original PHC network
