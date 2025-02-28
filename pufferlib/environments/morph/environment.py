@@ -77,6 +77,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         self._infos = {
             "episode_return": [],
             "episode_length": [],
+            "truncated_rate": [],
         }
 
         self.raw_rewards = torch.zeros(5, dtype=torch.float32, device=self.device)
@@ -103,8 +104,10 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         # Extract reward-related info for logging
         self.raw_rewards += self.env.extras["reward_raw"].mean(dim=0)
 
-        # reset_buf flags the envs that are (early-) terminated or truncated (succcesful imitation)
+        # reset_buf flags the envs that are (early-) terminated or truncated.
         # Early-terminated envs are in self.env.extras["terminate"]
+        # NOTE: Truncated does NOT mean all the all parts of the motion has been played out because
+        # during reset, the initial frame is randomly selected, so it could start from the very end.
         self.terminals[:] = False
         self.truncations[:] = False
         reset_indices = torch.nonzero(self.env.reset_buf).squeeze(-1)
@@ -119,9 +122,11 @@ class PHCPufferEnv(pufferlib.PufferEnv):
             # Set terminals and truncations
             term_envs = torch.nonzero(self.env.extras["terminate"]).squeeze(-1)
             self.terminals[term_envs] = True
+            self._infos["truncated_rate"] += [0.0] * len(term_envs)
 
-            success_envs = reset_indices[~torch.isin(reset_indices, term_envs)]
-            self.truncations[success_envs] = True
+            trunc_envs = reset_indices[~torch.isin(reset_indices, term_envs)]
+            self.truncations[trunc_envs] = True
+            self._infos["truncated_rate"] += [1.0] * len(trunc_envs)
 
             # Set rew to 0 for "terminated" envs
             # CHECK ME: Still useful?
@@ -167,9 +172,11 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         info = {
             "episode_return": np.mean(self._infos["episode_return"]),
             "episode_length": np.mean(self._infos["episode_length"]),
+            "epi_trunc_rate": np.mean(self._infos["truncated_rate"]),
         }
         self._infos["episode_return"].clear()
         self._infos["episode_length"].clear()
+        self._infos["truncated_rate"].clear()
 
         return [info]
 
