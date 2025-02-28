@@ -110,6 +110,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         # during reset, the initial frame is randomly selected, so it could start from the very end.
         self.terminals[:] = False
         self.truncations[:] = False
+        self.masks[:] = True
         reset_indices = torch.nonzero(self.env.reset_buf).squeeze(-1)
         if len(reset_indices) > 0:
             self.env.reset(reset_indices)
@@ -127,6 +128,9 @@ class PHCPufferEnv(pufferlib.PufferEnv):
             trunc_envs = reset_indices[~torch.isin(reset_indices, term_envs)]
             self.truncations[trunc_envs] = True
             self._infos["truncated_rate"] += [1.0] * len(trunc_envs)
+
+            # Mask out the truncations
+            self.masks[trunc_envs] = False
 
             # Set rew to 0 for "terminated" envs
             # CHECK ME: Still useful?

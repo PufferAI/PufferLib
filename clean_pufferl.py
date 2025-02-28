@@ -186,23 +186,13 @@ def train(data):
     # TODO: Nans in adversarial reward and gae
     adversarial_reward_np = adversarial_reward.cpu().numpy().ravel()
 
+    # For motion imitation, done is True ONLY when the env is terminated early.
+    # Successful replay of motions will get done=False, truncation=True
+    # Since gae is using only dones, the advantages for truncated steps are 
+    # computed as the same as the nonterminal steps.
     advantages_np = compute_gae(dones_np, values_np,
         rewards_np + adversarial_reward_np, config.gamma, config.gae_lambda)
 
-    # NOTE: cythonized gae does not support truncated
-    if hasattr(config, "handle_truncated") and config.handle_truncated:
-        for t_cur in range(1, experience.batch_size-1):
-            t_next = t_cur + 1
-            
-            # CHECK ME: For motion imitation, done is True ONLY when the env is terminated early.
-            # Successful replay of motions will get done=False, truncation=True
-            if trunc_np[t_next] > 0:
-                t_prev = t_cur - 1
-                
-                # Correct the advantages for truncation
-                delta = rewards_np[t_cur] + config.gamma * values_np[t_next] - values_np[t_cur]
-                advantages_np[t_cur] = delta + config.gamma * config.gae_lambda * advantages_np[t_prev]
-        
     advantages = torch.as_tensor(advantages_np).to(config.device)
     experience.b_advantages = advantages.reshape(experience.minibatch_rows,
         experience.num_minibatches, experience.bptt_horizon).transpose(0, 1).reshape(
