@@ -103,28 +103,32 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         # Extract reward-related info for logging
         self.raw_rewards += self.env.extras["reward_raw"].mean(dim=0)
 
-        self.terminals[:] = self.env.reset_buf
-        done_indices = torch.nonzero(self.terminals).squeeze(-1)
-        if len(done_indices) > 0:
-            self.env.reset(done_indices)
-            self.episode_count += len(done_indices)
-            self._infos["episode_return"] += self.episode_returns[done_indices].tolist()
-            self._infos["episode_length"] += self.episode_lengths[done_indices].tolist()
-            self.episode_returns[done_indices] = 0
-            self.episode_lengths[done_indices] = 0
+        # reset_buf flags the envs that are (early-) terminated or truncated (succcesful imitation)
+        # Early-terminated envs are in self.env.extras["terminate"]
+        self.terminals[:] = False
+        self.truncations[:] = False
+        reset_indices = torch.nonzero(self.env.reset_buf).squeeze(-1)
+        if len(reset_indices) > 0:
+            self.env.reset(reset_indices)
+            self.episode_count += len(reset_indices)
+            self._infos["episode_return"] += self.episode_returns[reset_indices].tolist()
+            self._infos["episode_length"] += self.episode_lengths[reset_indices].tolist()
+            self.episode_returns[reset_indices] = 0
+            self.episode_lengths[reset_indices] = 0
 
-            ### Simple reward shaping
-            # Set rew to 0 for "terminated" envs
+            # Set terminals and truncations
             term_envs = torch.nonzero(self.env.extras["terminate"]).squeeze(-1)
+            self.terminals[term_envs] = True
+
+            success_envs = reset_indices[~torch.isin(reset_indices, term_envs)]
+            self.truncations[success_envs] = True
+
+            # Set rew to 0 for "terminated" envs
+            # CHECK ME: Still useful?
             rew[term_envs] = 0
 
-            # Provide success reward for non-early-termination envs
-            # NOTE: Can this mitigate not handling truncation in gae?
-            success_envs = done_indices[~torch.isin(done_indices, term_envs)]
-            rew[success_envs] = 2.0  # hard coded
-
-        self.episode_returns[~self.terminals] += self.rewards[~self.terminals]
-        self.episode_lengths[~self.terminals] += 1
+        self.episode_returns[~self.env.reset_buf] += self.rewards[~self.env.reset_buf]
+        self.episode_lengths[~self.env.reset_buf] += 1
 
         # TODO: self.env.extras has infos. Extract useful info?
         info = []

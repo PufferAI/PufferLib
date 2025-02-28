@@ -99,6 +99,7 @@ def evaluate(data):
             o_device = o.to(config.device)
             r = torch.as_tensor(r)
             d = torch.as_tensor(d)
+            t = torch.as_tensor(t)
 
         with profile.eval_forward, torch.no_grad():
             # TODO: In place-update should be faster. Leaking 7% speed max
@@ -123,7 +124,7 @@ def evaluate(data):
 
             state = data.vecenv.state
             demo = data.vecenv.demo
-            experience.store(o, state, demo, value, actions, logprob, r, d, env_id, mask)
+            experience.store(o, state, demo, value, actions, logprob, r, d, t, env_id, mask)
 
             for i in info:
                 for k, v in pufferlib.utils.unroll_nested_dict(i):
@@ -161,6 +162,7 @@ def train(data):
     with profile.train_misc:
         idxs = experience.sort_training_data()
         dones_np = experience.dones_np[idxs]
+        trunc_np = experience.truncateds_np[idxs]
         values_np = experience.values_np[idxs]
         rewards_np = experience.rewards_np[idxs]
         experience.flatten_batch()
@@ -183,8 +185,24 @@ def train(data):
 
     # TODO: Nans in adversarial reward and gae
     adversarial_reward_np = adversarial_reward.cpu().numpy().ravel()
+
     advantages_np = compute_gae(dones_np, values_np,
         rewards_np + adversarial_reward_np, config.gamma, config.gae_lambda)
+
+    # NOTE: cythonized gae does not support truncated
+    if hasattr(config, "handle_truncated") and config.handle_truncated:
+        for t_cur in range(1, experience.batch_size-1):
+            t_next = t_cur + 1
+            
+            # CHECK ME: For motion imitation, done is True ONLY when the env is terminated early.
+            # Successful replay of motions will get done=False, truncation=True
+            if trunc_np[t_next] > 0:
+                t_prev = t_cur - 1
+                
+                # Correct the advantages for truncation
+                delta = rewards_np[t_cur] + config.gamma * values_np[t_next] - values_np[t_cur]
+                advantages_np[t_cur] = delta + config.gamma * config.gae_lambda * advantages_np[t_prev]
+        
     advantages = torch.as_tensor(advantages_np).to(config.device)
     experience.b_advantages = advantages.reshape(experience.minibatch_rows,
         experience.num_minibatches, experience.bptt_horizon).transpose(0, 1).reshape(
@@ -507,7 +525,7 @@ class Experience:
     def full(self):
         return self.ptr >= self.batch_size
 
-    def store(self, obs, state, demo, value, action, logprob, reward, done, env_id, mask):
+    def store(self, obs, state, demo, value, action, logprob, reward, done, trunc, env_id, mask):
         # Mask learner and Ensure indices do not exceed batch size
         ptr = self.ptr
         indices = torch.where(mask)[0].numpy()[:self.batch_size - ptr]
@@ -521,6 +539,7 @@ class Experience:
         self.logprobs_np[ptr:end] = logprob.cpu().numpy()[indices]
         self.rewards_np[ptr:end] = reward.cpu().numpy()[indices]
         self.dones_np[ptr:end] = done.cpu().numpy()[indices]
+        self.truncateds_np[ptr:end] = trunc.cpu().numpy()[indices]
         self.sort_keys.extend([(env_id[i], self.step) for i in indices])
         self.ptr = end
         self.step += 1
@@ -548,6 +567,7 @@ class Experience:
         self.b_actions = self.actions.to(self.device, non_blocking=True)
         self.b_logprobs = self.logprobs.to(self.device, non_blocking=True)
         self.b_dones = self.dones.to(self.device, non_blocking=True)
+        self.b_truncated = self.truncateds.to(self.device, non_blocking=True)
         self.b_values = self.values.to(self.device, non_blocking=True)
         self.b_obs = self.obs[self.b_idxs_obs]
         self.b_state = self.state[self.b_idxs_state]
@@ -555,6 +575,7 @@ class Experience:
         self.b_actions = self.b_actions[b_idxs].contiguous()
         self.b_logprobs = self.b_logprobs[b_idxs]
         self.b_dones = self.b_dones[b_idxs]
+        self.b_truncated = self.b_truncated[b_idxs]
         self.b_values = self.b_values[b_flat]
 
 class Utilization(Thread):

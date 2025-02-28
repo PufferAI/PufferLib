@@ -25,7 +25,7 @@ def compute_gae(cnp.ndarray dones, cnp.ndarray values,
         t_cur = num_steps - 2 - t
         t_next = num_steps - 1 - t
         nextnonterminal = 1.0 - c_dones[t_next]
-        delta = c_rewards[t_next] + gamma * c_values[t_next] * nextnonterminal - c_values[t_cur]
+        delta = c_rewards[t_cur] + gamma * c_values[t_next] * nextnonterminal - c_values[t_cur]
         lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
         c_advantages[t_cur] = lastgaelam
 
