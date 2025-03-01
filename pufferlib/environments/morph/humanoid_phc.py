@@ -516,11 +516,11 @@ class HumanoidPHC:
                 "k_pos": 100,
                 "k_rot": 10,
                 "k_vel": 0.1,
-                "k_ang_vel": 0.1,
+                "k_ang_vel": 0.3,
                 "w_pos": 0.5,
-                "w_rot": 0.3,
+                "w_rot": 0.25,
                 "w_vel": 0.1,
-                "w_ang_vel": 0.1,
+                "w_ang_vel": 0.15,
             },
         )
 
