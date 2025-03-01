@@ -295,9 +295,9 @@ def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
             rms_update_fn(data.experience.obs)
 
         # Mixing RMS norm reward with the raw 0-1 reward
-        if not args["disable_rew_norm"]:
-            # NOTE: 0.1 hard coded for now
-            data.experience.rewards_np += 0.1 * val_norm.normalize(data.experience.rewards_np)
+        # if not args["disable_rew_norm"]:
+        #     # NOTE: 0.1 hard coded for now
+        #     data.experience.rewards_np += 0.1 * val_norm.normalize(data.experience.rewards_np)
 
         # Update policy
         clean_pufferl.train(data)
