@@ -28,10 +28,8 @@ class Policy(nn.Module):
 
         input_size = env.single_observation_space.shape[0]
         action_size = env.single_action_space.shape[0]
-        amp_obs_size = env.amp_observation_space.shape[0]
 
         self.obs_norm = torch.jit.script(RunningNorm(input_size))
-        self.amp_obs_norm = torch.jit.script(RunningNorm(amp_obs_size))
 
         self.actor_mlp = nn.Sequential(
             layer_init(nn.Linear(input_size, 2048)),
@@ -125,13 +123,20 @@ class Policy(nn.Module):
 
         ### Discriminator
         # NOTE: Check the demo_size from the env
-        self._disc_mlp = nn.Sequential(
-            layer_init(nn.Linear(amp_obs_size, 1024)),
-            nn.ReLU(),
-            layer_init(nn.Linear(1024, hidden_size)),
-            nn.ReLU(),
-        )
-        self._disc_logits = layer_init(torch.nn.Linear(hidden_size, 1))
+        self.use_amp_obs = env.amp_observation_space is not None
+        self.amp_obs_norm = None
+
+        if self.use_amp_obs:
+            amp_obs_size = env.amp_observation_space.shape[0]
+            self.amp_obs_norm = torch.jit.script(RunningNorm(amp_obs_size))
+
+            self._disc_mlp = nn.Sequential(
+                layer_init(nn.Linear(amp_obs_size, 1024)),
+                nn.ReLU(),
+                layer_init(nn.Linear(1024, hidden_size)),
+                nn.ReLU(),
+            )
+            self._disc_logits = layer_init(torch.nn.Linear(hidden_size, 1))
 
         self.obs_pointer = None
         self.mean_bound_loss = None
@@ -173,6 +178,9 @@ class Policy(nn.Module):
         self._deterministic_action = value
 
     def discriminate(self, amp_obs):
+        if not self.use_amp_obs:
+            return None
+
         norm_amp_obs = self.amp_obs_norm(amp_obs)
         disc_mlp_out = self._disc_mlp(norm_amp_obs)
         disc_logits = self._disc_logits(disc_mlp_out)
@@ -194,6 +202,9 @@ class Policy(nn.Module):
         self.obs_norm.update(obs)
 
     def update_amp_obs_rms(self, amp_obs):
+        if not self.use_amp_obs:
+            return
+
         self.amp_obs_norm.update(amp_obs)
 
 # This replaces gymnasium's NormalizeObservation wrapper

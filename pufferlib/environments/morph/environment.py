@@ -32,6 +32,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         headless=True,
         log_interval=32,
         rew_power_coef=0.0005,
+        use_amp_obs=False,
     ):
         self.render_mode = "native"
         cfg = {
@@ -39,6 +40,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
                 "num_envs": num_envs,
                 "motion_file": motion_file,
                 "rew_power_coef": rew_power_coef,
+                "use_amp_obs": use_amp_obs,
             },
             "robot": {
                 "has_self_collision": has_self_collision,
@@ -56,7 +58,8 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         self.clip_actions = clip_actions
         self.device = self.env.device
 
-        self.amp_observation_space = self.env.amp_observation_space
+        self.use_amp_obs = use_amp_obs
+        self.amp_observation_space = self.env.amp_observation_space if use_amp_obs else None
 
         # Check the buffer data types, match them to puffer
         buffers = pufferlib.namespace(
@@ -90,7 +93,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
 
         # self.demo = self.env.demo
         # self.state = self.env.state
-        self.amp_obs = self.env.amp_obs
+        self.amp_obs = self.env.amp_obs if self.use_amp_obs else None
 
         return self.observations, []
 
@@ -104,7 +107,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
 
         # self.demo = self.env.demo
         # self.state = self.env.state
-        self.amp_obs = self.env.amp_obs
+        self.amp_obs = self.env.amp_obs if self.use_amp_obs else None
 
         rew = self.rewards.clone()
 

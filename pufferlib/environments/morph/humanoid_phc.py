@@ -198,7 +198,6 @@ class HumanoidPHC:
         self.flag_test = False
         self.flag_im_eval = False
         self.flag_debug = self.device == "cpu"  # CHECK ME
-        self.flag_amp_obs = True
 
         ### Motion data
         # NOTE: self.flag_im_eval is used in _load_motion
@@ -272,7 +271,7 @@ class HumanoidPHC:
         self.extras["terminate"] = self._terminate_buf.clone()
         self.extras["reward_raw"] = self.reward_raw.detach()
 
-        if self.flag_amp_obs:
+        if self.use_amp_obs:
             self._update_hist_amp_obs()  # One step for the amp obs
             self._compute_amp_observations()
             self.extras["amp_obs"] = self.amp_obs  ## ZL: hooks for adding amp_obs for training
@@ -466,10 +465,6 @@ class HumanoidPHC:
             self._eval_bodies.remove(name)
         self._eval_track_bodies_id = self._build_body_ids_tensor(self._eval_bodies)
 
-        # NOTE: temp_running_mean affects how obs is normalized, using running_mean_std vs. running_mean_std_temp
-        # Remove this and running_mean_std_temp, if these don't affect the training performance
-        self.temp_running_mean = True
-
         self.add_obs_noise = False
         self.add_action_noise = False
         self.action_noise_std = 0.05
@@ -490,6 +485,8 @@ class HumanoidPHC:
 
         self._state_init = StateInit["Random"]
         self._hybrid_init_prob = 0.5
+
+        self.use_amp_obs = env_config.get("use_amp_obs", False)
         self._num_amp_obs_steps = 10
         self._amp_root_height_obs = True
 
@@ -526,14 +523,14 @@ class HumanoidPHC:
         # See self._compute_reward()
         self._full_body_reward = True
 
-        ### TODO: Remove these
-        self.getup_schedule = False  # training for getting up after falling -- not used in PHC
-        self.obs_v = 6
-        self.amp_obs_v = 1
-        self.self_obs_v = 1
-        self.zero_out_far = False
-        # self.zero_out_far_train = True
-        self.cycle_motion = False
+        # ### TODO: Remove these
+        # self.getup_schedule = False  # training for getting up after falling -- not used in PHC
+        # self.obs_v = 6
+        # self.amp_obs_v = 1
+        # self.self_obs_v = 1
+        # self.zero_out_far = False
+        # # self.zero_out_far_train = True
+        # self.cycle_motion = False
 
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
@@ -957,7 +954,7 @@ class HumanoidPHC:
             self._compute_observations(env_ids)
             self._state_reset_happened = True
 
-        if self.flag_amp_obs:
+        if self.use_amp_obs:
             self._init_amp_obs(env_ids)
 
     def _reset_actors(self, env_ids):
@@ -1634,10 +1631,10 @@ class HumanoidPHC:
 
     @property
     def amp_obs(self):
-        return self._amp_obs_buf.view(-1, self.num_amp_obs)
+        return self._amp_obs_buf.view(-1, self.num_amp_obs) if self.use_amp_obs else None
 
     def fetch_amp_obs_demo(self):
-        return self._amp_obs_demo_buf.view(-1, self.num_amp_obs)
+        return self._amp_obs_demo_buf.view(-1, self.num_amp_obs) if self.use_amp_obs else None
 
     # def fetch_amp_obs_demo(self, num_samples):
     #     # Creates the reference motion amp obs, for discriminator.

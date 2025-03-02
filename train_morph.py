@@ -252,7 +252,7 @@ def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
             rms_update_fn(data.experience.obs)
 
         amp_rms_update_fn = getattr(data.policy.policy, "update_amp_obs_rms", None)
-        if amp_rms_update_fn:
+        if data.use_amp_obs and amp_rms_update_fn:
             amp_rms_update_fn(data.experience.amp_obs)
 
         # Update policy
@@ -433,7 +433,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
         # carbs_param('train', 'update_epochs', 'linear', sweep_parameters,
         #     search_center=3, is_integer=True),
         carbs_param("train", "clip_coef", "logit", sweep_parameters, search_center=0.03),
-        carbs_param("train", "vf_coef", "linear", sweep_parameters, search_center=1.0),
+        carbs_param("train", "vf_coef", "linear", sweep_parameters, search_center=2.0),
         # carbs_param("train", "vf_clip_coef", "logit", sweep_parameters, search_center=0.2),
         # carbs_param('train', 'max_grad_norm', 'linear', sweep_parameters, search_center=1.0),
         # carbs_param('train', 'ent_coef', 'log', sweep_parameters, search_center=0.0001),

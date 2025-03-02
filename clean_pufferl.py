@@ -44,10 +44,13 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
     atn_dtype = vecenv.single_action_space.dtype
     total_agents = vecenv.num_agents
 
+    use_amp_obs = getattr(vecenv, "use_amp_obs", False)
+
     lstm = policy.lstm if hasattr(policy, 'lstm') else None
     experience = Experience(config.batch_size, config.bptt_horizon,
         config.minibatch_size, obs_shape, obs_dtype, atn_shape, atn_dtype,
-        config.cpu_offload, config.device, lstm, total_agents)
+        config.cpu_offload, config.device, lstm, total_agents,
+        use_amp_obs)
 
     uncompiled_policy = policy
 
@@ -73,6 +76,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
         msg=msg,
         last_log_time=0,
         utilization=utilization,
+        use_amp_obs=use_amp_obs,
     )
 
 @pufferlib.utils.profile
@@ -122,7 +126,7 @@ def evaluate(data):
             mask = torch.as_tensor(mask)# * policy.mask)
             o = o if config.cpu_offload else o_device
 
-            amp_obs = data.vecenv.amp_obs
+            amp_obs = data.vecenv.amp_obs if data.use_amp_obs else None
             experience.store(o, amp_obs, value, actions, logprob, r, d, t, env_id, mask)
 
             for i in info:
@@ -166,8 +170,9 @@ def train(data):
         rewards_np = experience.rewards_np[idxs]
         experience.flatten_batch()
 
-        amp_obs_demo = data.vecenv.fetch_amp_obs_demo()  # [num_envs, amp_obs_size]
-        amp_minibatch_size = amp_obs_demo.shape[0]
+        if data.use_amp_obs:
+            amp_obs_demo = data.vecenv.fetch_amp_obs_demo()  # [num_envs, amp_obs_size]
+            amp_minibatch_size = amp_obs_demo.shape[0]
 
         # Mean bound loss attribute
         mean_bound_loss = getattr(data.policy.policy, "mean_bound_loss", None)
@@ -178,7 +183,7 @@ def train(data):
         experience.num_minibatches, config.minibatch_size).to(config.device)
 
     discriminate = getattr(data.policy.policy, "discriminate", None)
-    if discriminate is not None:
+    if data.use_amp_obs and discriminate is not None:
         with torch.no_grad():
             for mb in range(experience.num_minibatches):
                 disc_logits = discriminate(experience.b_amp_obs[mb]).squeeze()
@@ -218,10 +223,12 @@ def train(data):
                 val = experience.b_values[mb]
                 adv = experience.b_advantages[mb]
                 ret = experience.b_returns[mb]
-                amp_obs_agent = torch.cat([
-                    experience.b_amp_obs[mb][:amp_minibatch_size],
-                    experience.b_amp_obs_replay[mb][:amp_minibatch_size],
-                ])
+                
+                if data.use_amp_obs:
+                    amp_obs_agent = torch.cat([
+                        experience.b_amp_obs[mb][:amp_minibatch_size],
+                        experience.b_amp_obs_replay[mb][:amp_minibatch_size],
+                    ])
 
             with profile.train_forward:
                 if experience.lstm_h is not None:
@@ -268,17 +275,18 @@ def train(data):
                         config.vf_clip_coef,
                     )
                     v_loss_clipped = (v_clipped - ret) ** 2
-                    v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                    v_loss = 0.5 * v_loss_max.mean()
+                    v_loss = torch.max(v_loss_unclipped, v_loss_clipped).mean()
                 else:
-                    v_loss = 0.5 * ((newvalue - ret) ** 2).mean()
+                    v_loss = ((newvalue - ret) ** 2).mean()
 
                 # Discriminator loss
-                disc_agent_logits = discriminate(amp_obs_agent)
-                disc_demo_logits = discriminate(amp_obs_demo)
-                disc_loss_agent = torch.nn.BCEWithLogitsLoss()(disc_agent_logits, torch.zeros_like(disc_agent_logits))
-                disc_loss_demo = torch.nn.BCEWithLogitsLoss()(disc_demo_logits, torch.ones_like(disc_demo_logits))
-                disc_loss = 0.5 * (disc_loss_agent + disc_loss_demo)
+                disc_loss = 0.0
+                if data.use_amp_obs:
+                    disc_agent_logits = discriminate(amp_obs_agent)
+                    disc_demo_logits = discriminate(amp_obs_demo)
+                    disc_loss_agent = torch.nn.BCEWithLogitsLoss()(disc_agent_logits, torch.zeros_like(disc_agent_logits))
+                    disc_loss_demo = torch.nn.BCEWithLogitsLoss()(disc_demo_logits, torch.ones_like(disc_demo_logits))
+                    disc_loss = 0.5 * (disc_loss_agent + disc_loss_demo)
 
                 entropy_loss = entropy.mean()
                 loss = pg_loss - config.ent_coef * entropy_loss + v_loss * config.vf_coef + disc_loss * config.disc_coef
@@ -289,7 +297,19 @@ def train(data):
             with profile.learn:
                 data.optimizer.zero_grad()
                 loss.backward()
+
+                before_clip_grad_norm = 0
+                for p in data.policy.parameters():
+                    if p.grad is not None:
+                        before_clip_grad_norm += p.grad.norm().item()
+
                 torch.nn.utils.clip_grad_norm_(data.policy.parameters(), config.max_grad_norm)
+
+                # after_clip_grad_norm = 0
+                # for p in data.policy.parameters():
+                #     if p.grad is not None:
+                #         after_clip_grad_norm += p.grad.norm().item()
+
                 data.optimizer.step()
                 if config.device == 'cuda':
                     torch.cuda.synchronize()
@@ -301,10 +321,13 @@ def train(data):
                 losses.old_approx_kl += old_approx_kl.item() / total_minibatches
                 losses.approx_kl += approx_kl.item() / total_minibatches
                 losses.clipfrac += clipfrac.item() / total_minibatches
+                losses.before_clip_grad_norm += before_clip_grad_norm / total_minibatches
+                # losses.after_clip_grad_norm += after_clip_grad_norm / total_minibatches
 
-                losses.disc_loss += disc_loss.item() / total_minibatches
-                losses.disc_agent_acc += (disc_agent_logits < 0).float().mean() / total_minibatches
-                losses.disc_demo_acc += (disc_demo_logits > 0).float().mean() / total_minibatches
+                if data.use_amp_obs:
+                    losses.disc_loss += disc_loss.item() / total_minibatches
+                    losses.disc_agent_acc += (disc_agent_logits < 0).float().mean() / total_minibatches
+                    losses.disc_demo_acc += (disc_demo_logits > 0).float().mean() / total_minibatches
 
                 if mean_bound_loss:
                     losses.mean_bound_loss += mean_bound_loss.item() / total_minibatches
@@ -452,13 +475,15 @@ def make_losses():
         clipfrac=0,
         explained_variance=0,
         mean_bound_loss=0,
+        before_clip_grad_norm=0,
+        # after_clip_grad_norm=0,
     )
 
 class Experience:
     '''Flat tensor storage and array views for faster indexing'''
     def __init__(self, batch_size, bptt_horizon, minibatch_size, obs_shape, obs_dtype, atn_shape, atn_dtype,
                  cpu_offload=False, device='cuda', lstm=None, lstm_total_agents=0,
-                 amp_obs_size=1960, amp_obs_update_prob=0.01):
+                 use_amp_obs=False, amp_obs_size=1960, amp_obs_update_prob=0.01):
         if minibatch_size is None:
             minibatch_size = batch_size
 
@@ -468,15 +493,6 @@ class Experience:
         obs_device = device if not pin else 'cpu'
         self.obs=torch.zeros(batch_size, *obs_shape, dtype=obs_dtype,
             pin_memory=pin, device=device if not pin else 'cpu')
-
-        self.amp_obs=torch.zeros(batch_size, amp_obs_size, dtype=obs_dtype,
-            pin_memory=pin, device=device if not pin else 'cpu')
-        self.amp_obs_replay=torch.zeros(batch_size, amp_obs_size, dtype=obs_dtype,
-            pin_memory=pin, device=device if not pin else 'cpu')
-        # self.demo=torch.zeros(batch_size, 358, dtype=obs_dtype,
-        #     pin_memory=pin, device=device if not pin else 'cpu')
-        # self.state=torch.zeros(batch_size, 358, dtype=obs_dtype,
-        #     pin_memory=pin, device=device if not pin else 'cpu')
 
         self.actions=torch.zeros(batch_size, *atn_shape, dtype=atn_dtype, pin_memory=pin)
         self.logprobs=torch.zeros(batch_size, pin_memory=pin)
@@ -517,8 +533,20 @@ class Experience:
         self.sort_keys = []
         self.ptr = 0
         self.step = 0
-        self.amp_obs_replay_filled = False
-        self.amp_obs_update_prob = amp_obs_update_prob
+
+        self.use_amp_obs = use_amp_obs
+        if self.use_amp_obs:
+            self.amp_obs=torch.zeros(batch_size, amp_obs_size, dtype=obs_dtype,
+                pin_memory=pin, device=device if not pin else 'cpu')
+            self.amp_obs_replay=torch.zeros(batch_size, amp_obs_size, dtype=obs_dtype,
+                pin_memory=pin, device=device if not pin else 'cpu')
+            # self.demo=torch.zeros(batch_size, 358, dtype=obs_dtype,
+            #     pin_memory=pin, device=device if not pin else 'cpu')
+            # self.state=torch.zeros(batch_size, 358, dtype=obs_dtype,
+            #     pin_memory=pin, device=device if not pin else 'cpu')
+
+            self.amp_obs_replay_filled = False
+            self.amp_obs_update_prob = amp_obs_update_prob
 
     @property
     def full(self):
@@ -531,7 +559,9 @@ class Experience:
         end = ptr + len(indices)
  
         self.obs[ptr:end] = obs.to(self.obs.device)[indices]
-        self.amp_obs[ptr:end] = amp_obs.to(self.amp_obs.device)[indices]
+        if self.use_amp_obs:
+            self.amp_obs[ptr:end] = amp_obs.to(self.amp_obs.device)[indices]
+
         self.values_np[ptr:end] = value.cpu().numpy()[indices]
         self.actions_np[ptr:end] = action[indices]
         self.logprobs_np[ptr:end] = logprob.cpu().numpy()[indices]
@@ -569,21 +599,22 @@ class Experience:
         self.b_values = self.b_values[b_flat]
 
         # AMP, only used for discriminator training
-        self.b_amp_obs = self.amp_obs[b_flat]
+        if self.use_amp_obs:
+            self.b_amp_obs = self.amp_obs[b_flat]
 
-        # Update the amp obs replay
-        if not self.amp_obs_replay_filled:
-            self.amp_obs_replay[:] = self.amp_obs[:]
-            self.amp_obs_replay_filled = True
-        else:
-            # Only update the fraction of the replay buffer
-            update_idx = torch.rand(self.batch_size) < self.amp_obs_update_prob
-            self.amp_obs_replay[update_idx] = self.amp_obs[update_idx]
+            # Update the amp obs replay
+            if not self.amp_obs_replay_filled:
+                self.amp_obs_replay[:] = self.amp_obs[:]
+                self.amp_obs_replay_filled = True
+            else:
+                # Only update the fraction of the replay buffer
+                update_idx = torch.rand(self.batch_size) < self.amp_obs_update_prob
+                self.amp_obs_replay[update_idx] = self.amp_obs[update_idx]
 
-        # For the replay, the order does not matter
-        rep_idx = torch.randperm(self.batch_size).reshape(
-            self.num_minibatches, self.minibatch_size)
-        self.b_amp_obs_replay = self.amp_obs_replay[rep_idx]
+            # For the replay, the order does not matter
+            rep_idx = torch.randperm(self.batch_size).reshape(
+                self.num_minibatches, self.minibatch_size)
+            self.b_amp_obs_replay = self.amp_obs_replay[rep_idx]
 
 class Utilization(Thread):
     def __init__(self, delay=1, maxlen=20):
