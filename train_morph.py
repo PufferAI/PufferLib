@@ -523,7 +523,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter, add_help=False)
-    parser.add_argument("--config", default="config/morph_debug.ini")
+    parser.add_argument("--config", default="config/morph.ini")
     parser.add_argument(
         "--mode", type=str, default="train", choices="train eval sweep".split()
     )  # render-eval, batch-eval?
