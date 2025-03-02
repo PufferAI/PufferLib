@@ -243,7 +243,7 @@ def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
             vec_env.env.resample_motions()
 
         # Collect data
-        clean_pufferl.evaluate(data)
+        results, _ = clean_pufferl.evaluate(data)
 
         # Update obs running mean and std
         # During evaluate() and train(), the obs_norm is NOT updated.
@@ -270,11 +270,11 @@ def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
     # Final evaluation
     eval_stats = EvalStats(vec_env)
     rollout(vec_env, policy, eval_stats)
-    eval_results = eval_stats.update_env_and_close()
+    results.update(eval_stats.update_env_and_close())
     if data.wandb:
-        eval_results["0verview/agent_steps"] = data.global_step
-        eval_results["0verview/epoch"] = data.epoch
-        wandb.log(eval_results)
+        results["0verview/agent_steps"] = data.global_step
+        results["0verview/epoch"] = data.epoch
+        wandb.log(results)
 
     # NOTE: Not using standard eval
     # steps_evaluated = 0
@@ -287,7 +287,7 @@ def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
 
     clean_pufferl.close(data)
 
-    return eval_results, uptime
+    return results, uptime
 
 
 def rollout(vec_env, policy, eval_stats=None):
@@ -493,7 +493,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
                 rnn_cls = getattr(policy_module, args["rnn_name"])
             policy = make_policy(vec_env.driver_env, policy_cls, rnn_cls, args)
 
-            stats, uptime = train(args, vec_env, policy, wandb, exp_id, skip_resample=True)
+            stats, uptime = train(args, vec_env, policy, wandb, exp_id)  # , skip_resample=True)
 
         except Exception as e:
             import traceback
