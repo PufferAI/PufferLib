@@ -9,11 +9,22 @@ class Recurrent(pufferlib.models.LSTMWrapper):
     def __init__(self, env, policy, input_size=512, hidden_size=512, num_layers=1):
         super().__init__(env, policy, input_size, hidden_size, num_layers)
 
+        # Point to the original policy's methods
+        self.set_deterministic_action = self.policy.set_deterministic_action
+        self.discriminate = self.policy.discriminate
+        self.update_obs_rms = self.policy.update_obs_rms
+        self.update_amp_obs_rms = self.policy.update_amp_obs_rms
+
+    @property
+    def mean_bound_loss(self):
+        return self.policy.mean_bound_loss
+
 
 class Policy(nn.Module):
     def __init__(self, env, hidden_size=512, larger_critic=False):
         super().__init__()
         self.is_continuous = True
+        self._deterministic_action = False
 
         input_size = env.single_observation_space.shape[0]
         action_size = env.single_action_space.shape[0]
@@ -143,6 +154,10 @@ class Policy(nn.Module):
     def decode_actions(self, hidden, lookup=None):
         mu = self.mu(hidden)
         std = torch.exp(self.sigma).expand_as(mu)
+        
+        if self._deterministic_action is True:
+            std = torch.clamp(std, max=1e-6)
+
         probs = torch.distributions.Normal(mu, std)
 
         # Mean bound loss
@@ -153,6 +168,9 @@ class Policy(nn.Module):
         # NOTE: Separate critic network takes input directly
         value = self.critic_mlp(self.obs_pointer)
         return probs, value
+
+    def set_deterministic_action(self, value):
+        self._deterministic_action = value
 
     def discriminate(self, amp_obs):
         norm_amp_obs = self.amp_obs_norm(amp_obs)

@@ -247,19 +247,11 @@ def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
 
         # Update obs running mean and std
         # During evaluate() and train(), the obs_norm is NOT updated.
-        rms_update_fn = None
-        if isinstance(data.policy, pufferlib.cleanrl.Policy):
-            rms_update_fn = getattr(data.policy.policy, "update_obs_rms", None)
-        elif isinstance(data.policy, pufferlib.cleanrl.RecurrentPolicy):
-            rms_update_fn = getattr(data.policy.policy.policy, "update_obs_rms", None)
+        rms_update_fn = getattr(data.policy.policy, "update_obs_rms", None)
         if rms_update_fn:
             rms_update_fn(data.experience.obs)
 
-        amp_rms_update_fn = None
-        if isinstance(data.policy, pufferlib.cleanrl.Policy):
-            amp_rms_update_fn = getattr(data.policy.policy, "update_amp_obs_rms", None)
-        elif isinstance(data.policy, pufferlib.cleanrl.RecurrentPolicy):
-            amp_rms_update_fn = getattr(data.policy.policy.policy, "update_amp_obs_rms", None)
+        amp_rms_update_fn = getattr(data.policy.policy, "update_amp_obs_rms", None)
         if amp_rms_update_fn:
             amp_rms_update_fn(data.experience.amp_obs)
 
@@ -299,6 +291,9 @@ def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
 
 
 def rollout(vec_env, policy, eval_stats=None):
+    # NOTE (Important): Using deterministic action for evaluation
+    policy.policy.set_deterministic_action(True)  # Ugly... but...
+
     obs, _ = vec_env.reset()
     state = None
 
@@ -325,6 +320,7 @@ def rollout(vec_env, policy, eval_stats=None):
         if eval_stats:
             is_done = eval_stats.post_step_eval()
             if is_done:
+                policy.policy.set_deterministic_action(False)
                 break
 
 
@@ -527,7 +523,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter, add_help=False)
-    parser.add_argument("--config", default="config/morph.ini")
+    parser.add_argument("--config", default="config/morph_debug.ini")
     parser.add_argument(
         "--mode", type=str, default="train", choices="train eval sweep".split()
     )  # render-eval, batch-eval?

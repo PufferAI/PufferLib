@@ -170,22 +170,14 @@ def train(data):
         amp_minibatch_size = amp_obs_demo.shape[0]
 
         # Mean bound loss attribute
-        mean_bound_loss = None
-        if isinstance(data.policy, pufferlib.cleanrl.Policy):
-            mean_bound_loss = getattr(data.policy.policy, "mean_bound_loss", None)
-        elif isinstance(data.policy, pufferlib.cleanrl.RecurrentPolicy):
-            mean_bound_loss = getattr(data.policy.policy.policy, "mean_bound_loss", None)
+        mean_bound_loss = getattr(data.policy.policy, "mean_bound_loss", None)
 
     # Compute adversarial reward. Note: discriminator doesn't get
     # updated as often this way, but GAE is more accurate
     adversarial_reward = torch.zeros(
         experience.num_minibatches, config.minibatch_size).to(config.device)
 
-    if isinstance(data.policy, pufferlib.cleanrl.Policy):
-        discriminate = getattr(data.policy.policy, "discriminate", None)
-    elif isinstance(data.policy, pufferlib.cleanrl.RecurrentPolicy):
-        discriminate = getattr(data.policy.policy.policy, "discriminate", None)
-
+    discriminate = getattr(data.policy.policy, "discriminate", None)
     if discriminate is not None:
         with torch.no_grad():
             for mb in range(experience.num_minibatches):
