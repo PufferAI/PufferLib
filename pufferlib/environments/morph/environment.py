@@ -56,6 +56,8 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         self.clip_actions = clip_actions
         self.device = self.env.device
 
+        self.amp_observation_space = self.env.amp_observation_space
+
         # Check the buffer data types, match them to puffer
         buffers = pufferlib.namespace(
             observations=self.env.obs_buf,
@@ -83,10 +85,13 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         self.raw_rewards = torch.zeros(5, dtype=torch.float32, device=self.device)
 
     def reset(self, seed=None):
-        self.env.reset()
-        self.demo = self.env.demo
-        self.state = self.env.state
         self.tick = 0
+        self.env.reset()
+
+        # self.demo = self.env.demo
+        # self.state = self.env.state
+        self.amp_obs = self.env.amp_obs
+
         return self.observations, []
 
     def step(self, actions_np):
@@ -96,8 +101,10 @@ class PHCPufferEnv(pufferlib.PufferEnv):
 
         # obs, reward, done are put into the buffers
         self.env.step(self.actions)
-        self.demo = self.env.demo
-        self.state = self.env.state
+
+        # self.demo = self.env.demo
+        # self.state = self.env.state
+        self.amp_obs = self.env.amp_obs
 
         rew = self.rewards.clone()
 
@@ -183,6 +190,9 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         self._infos["truncated_rate"].clear()
 
         return [info]
+
+    def fetch_amp_obs_demo(self):
+        return self.env.fetch_amp_obs_demo()
 
 
 if __name__ == "__main__":

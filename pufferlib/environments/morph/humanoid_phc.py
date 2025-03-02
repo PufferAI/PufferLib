@@ -198,7 +198,7 @@ class HumanoidPHC:
         self.flag_test = False
         self.flag_im_eval = False
         self.flag_debug = self.device == "cpu"  # CHECK ME
-        self.flag_amp_obs = False
+        self.flag_amp_obs = True
 
         ### Motion data
         # NOTE: self.flag_im_eval is used in _load_motion
@@ -275,9 +275,7 @@ class HumanoidPHC:
         if self.flag_amp_obs:
             self._update_hist_amp_obs()  # One step for the amp obs
             self._compute_amp_observations()
-
-            amp_obs_flat = self._amp_obs_buf.view(-1, self.num_amp_obs)
-            self.extras["amp_obs"] = amp_obs_flat  ## ZL: hooks for adding amp_obs for training
+            self.extras["amp_obs"] = self.amp_obs  ## ZL: hooks for adding amp_obs for training
 
         if self.flag_im_eval:
             motion_times = (
@@ -894,8 +892,10 @@ class HumanoidPHC:
         self._curr_amp_obs_buf = self._amp_obs_buf[:, 0]
         self._hist_amp_obs_buf = self._amp_obs_buf[:, 1:]
 
-        # NOTE: this is created during training init. Buffer size depends on amp_batch_size
-        self._amp_obs_demo_buf = None
+        # amp_obs_demo_buf is fed into the discriminator training as the real motion data
+        # This replaces the demo replay buffer in the original PHC code
+        # amp_batch_size is fixed to the number of envs
+        self._amp_obs_demo_buf = torch.zeros_like(self._amp_obs_buf)
 
         # NOTE: These don't seem to be used, except ref_dof_pos when self._res_action is True
         # self.ref_body_pos = torch.zeros_like(self._rigid_body_pos)
@@ -1077,7 +1077,8 @@ class HumanoidPHC:
         self._compute_amp_observations(env_ids)
 
         if len(self._reset_default_env_ids) > 0:
-            self._init_amp_obs_default(self._reset_default_env_ids)
+            raise NotImplementedError("Not tested yet")
+            # self._init_amp_obs_default(self._reset_default_env_ids)
 
         if len(self._reset_ref_env_ids) > 0:
             self._init_amp_obs_ref(self._reset_ref_env_ids, self._reset_ref_motion_ids, self._reset_ref_motion_times)
@@ -1098,6 +1099,9 @@ class HumanoidPHC:
 
         amp_obs_demo = self._get_amp_obs(motion_ids, motion_times)
         self._hist_amp_obs_buf[env_ids] = amp_obs_demo.view(self._hist_amp_obs_buf[env_ids].shape)
+
+        # amp_obs_demo_buf is fed into the discriminator training as the real motion data
+        self._amp_obs_demo_buf[env_ids] = self._amp_obs_buf[env_ids]
 
     def _get_amp_obs(self, motion_ids, motion_times):
         motion_res = self._get_state_from_motionlib_cache(motion_ids, motion_times)
@@ -1229,9 +1233,10 @@ class HumanoidPHC:
         # Possible the original paper only uses imitation
         obs = torch.cat([state, imitation], dim=-1)
 
+        # NOTE: Not using it for now.
         # This is the normalized vector with position, rotation, velocity, and
         # angular velocity for the simulated humanoid and the demo data
-        self.state, self.demo = self._compute_state_obs(env_ids)
+        # self.state, self.demo = self._compute_state_obs(env_ids)
 
         if self.add_obs_noise and not self.flag_test:
             obs = obs + torch.randn_like(obs) * 0.1
@@ -1627,45 +1632,52 @@ class HumanoidPHC:
     ### Motion/AMP
     #####################################################################
 
-    def fetch_amp_obs_demo(self, num_samples):
-        # Creates the reference motion amp obs, for discriminator.
+    @property
+    def amp_obs(self):
+        return self._amp_obs_buf.view(-1, self.num_amp_obs)
 
-        if self._amp_obs_demo_buf is None:
-            # NOTE: This is called during training init. Buffer size depends on amp_batch_size.
-            self._amp_obs_demo_buf = torch.zeros(
-                (num_samples, self._num_amp_obs_steps, self._num_amp_obs_per_step),
-                device=self.device,
-                dtype=torch.float32,
-            )
-        else:
-            # Buffer size (amp_batch_size) must not change during training
-            assert self._amp_obs_demo_buf.shape[0] == num_samples
+    def fetch_amp_obs_demo(self):
+        return self._amp_obs_demo_buf.view(-1, self.num_amp_obs)
 
-        motion_ids = self._motion_lib.sample_motions(num_samples)
-        motion_times0 = self._sample_time(motion_ids)
-        amp_obs_demo = self.build_amp_obs_demo(motion_ids, motion_times0)
-        self._amp_obs_demo_buf[:] = amp_obs_demo.view(self._amp_obs_demo_buf.shape)
-        amp_obs_demo_flat = self._amp_obs_demo_buf.view(-1, self.num_amp_obs)
+    # def fetch_amp_obs_demo(self, num_samples):
+    #     # Creates the reference motion amp obs, for discriminator.
 
-        return amp_obs_demo_flat
+    #     if self._amp_obs_demo_buf is None:
+    #         # NOTE: This is called during training init. Buffer size depends on amp_batch_size.
+    #         self._amp_obs_demo_buf = torch.zeros(
+    #             (num_samples, self._num_amp_obs_steps, self._num_amp_obs_per_step),
+    #             device=self.device,
+    #             dtype=torch.float32,
+    #         )
+    #     else:
+    #         # Buffer size (amp_batch_size) must not change during training
+    #         assert self._amp_obs_demo_buf.shape[0] == num_samples
 
-    def build_amp_obs_demo(self, motion_ids, motion_times0):
-        # Compute observation for the motion starting point
-        dt = self.dt
-        motion_ids = torch.tile(motion_ids.unsqueeze(-1), [1, self._num_amp_obs_steps])
+    #     motion_ids = self._motion_lib.sample_motions(num_samples)
+    #     motion_times0 = self._sample_time(motion_ids)
+    #     amp_obs_demo = self.build_amp_obs_demo(motion_ids, motion_times0)
+    #     self._amp_obs_demo_buf[:] = amp_obs_demo.view(self._amp_obs_demo_buf.shape)
+    #     amp_obs_demo_flat = self._amp_obs_demo_buf.view(-1, self.num_amp_obs)
 
-        motion_times = motion_times0.unsqueeze(-1)
-        time_steps = -dt * torch.arange(0, self._num_amp_obs_steps, device=self.device)
-        motion_times = motion_times + time_steps
+    #     return amp_obs_demo_flat
 
-        motion_ids = motion_ids.view(-1)
-        motion_times = motion_times.view(-1)
+    # def build_amp_obs_demo(self, motion_ids, motion_times0):
+    #     # Compute observation for the motion starting point
+    #     dt = self.dt
+    #     motion_ids = torch.tile(motion_ids.unsqueeze(-1), [1, self._num_amp_obs_steps])
 
-        amp_obs_demo = self._get_amp_obs(motion_ids, motion_times)
-        # if self._add_amp_input_noise:
-        #     amp_obs_demo = amp_obs_demo + torch.randn_like(amp_obs_demo) * 0.01
+    #     motion_times = motion_times0.unsqueeze(-1)
+    #     time_steps = -dt * torch.arange(0, self._num_amp_obs_steps, device=self.device)
+    #     motion_times = motion_times + time_steps
 
-        return amp_obs_demo
+    #     motion_ids = motion_ids.view(-1)
+    #     motion_times = motion_times.view(-1)
+
+    #     amp_obs_demo = self._get_amp_obs(motion_ids, motion_times)
+    #     # if self._add_amp_input_noise:
+    #     #     amp_obs_demo = amp_obs_demo + torch.randn_like(amp_obs_demo) * 0.01
+
+    #     return amp_obs_demo
 
     def resample_motions(self):
         if self.flag_test:

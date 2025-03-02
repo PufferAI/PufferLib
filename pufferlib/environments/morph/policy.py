@@ -11,14 +11,16 @@ class Recurrent(pufferlib.models.LSTMWrapper):
 
 
 class Policy(nn.Module):
-    def __init__(self, env, demo_size=358, hidden_size=512, larger_critic=False):
+    def __init__(self, env, hidden_size=512, larger_critic=False):
         super().__init__()
         self.is_continuous = True
 
         input_size = env.single_observation_space.shape[0]
         action_size = env.single_action_space.shape[0]
+        amp_obs_size = env.amp_observation_space.shape[0]
 
         self.obs_norm = torch.jit.script(RunningNorm(input_size))
+        self.amp_obs_norm = torch.jit.script(RunningNorm(amp_obs_size))
 
         self.actor_mlp = nn.Sequential(
             layer_init(nn.Linear(input_size, 2048)),
@@ -113,15 +115,12 @@ class Policy(nn.Module):
         ### Discriminator
         # NOTE: Check the demo_size from the env
         self._disc_mlp = nn.Sequential(
-            layer_init(nn.Linear(demo_size, hidden_size)),
+            layer_init(nn.Linear(amp_obs_size, 1024)),
             nn.ReLU(),
-            # layer_init(nn.Linear(1024, hidden)),
-            # nn.ReLU(),
+            layer_init(nn.Linear(1024, hidden_size)),
+            nn.ReLU(),
         )
         self._disc_logits = layer_init(torch.nn.Linear(hidden_size, 1))
-
-        # NOTE: A hack to normalize the obs
-        # self.obs_mean = None
 
         self.obs_pointer = None
         self.mean_bound_loss = None
@@ -156,25 +155,28 @@ class Policy(nn.Module):
         return probs, value
 
     def discriminate(self, amp_obs):
-        disc_mlp_out = self._disc_mlp(amp_obs)
+        norm_amp_obs = self.amp_obs_norm(amp_obs)
+        disc_mlp_out = self._disc_mlp(norm_amp_obs)
         disc_logits = self._disc_logits(disc_mlp_out)
         return disc_logits
 
-    def disc_logit_weights(self):
-        return torch.flatten(self._disc_logits.weight)
+    # def disc_logit_weights(self):
+    #     return torch.flatten(self._disc_logits.weight)
 
-    def disc_weights(self):
-        weights = []
-        for m in self._disc_mlp.modules():
-            if isinstance(m, nn.Linear):
-                weights.append(torch.flatten(m.weight))
+    # def disc_weights(self):
+    #     weights = []
+    #     for m in self._disc_mlp.modules():
+    #         if isinstance(m, nn.Linear):
+    #             weights.append(torch.flatten(m.weight))
 
-        weights.append(torch.flatten(self._disc_logits.weight))
-        return weights
+    #     weights.append(torch.flatten(self._disc_logits.weight))
+    #     return weights
 
     def update_obs_rms(self, obs):
         self.obs_norm.update(obs)
 
+    def update_amp_obs_rms(self, amp_obs):
+        self.amp_obs_norm.update(amp_obs)
 
 # This replaces gymnasium's NormalizeObservation wrapper
 # NOTE: Tried BatchNorm1d with momentum=None, but the policy did not learn. Check again later.
