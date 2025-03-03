@@ -95,6 +95,16 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         # self.state = self.env.state
         self.amp_obs = self.env.amp_obs if self.use_amp_obs else None
 
+        # Clear the buffers
+        self.rewards[:] = 0
+        self.terminals[:] = False
+        self.truncations[:] = False
+        self.masks[:] = True
+        self.actions[:] = 0
+        self._infos["episode_return"].clear()
+        self._infos["episode_length"].clear()
+        self._infos["truncated_rate"].clear()
+
         return self.observations, []
 
     def step(self, actions_np):

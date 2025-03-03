@@ -54,6 +54,7 @@ class EvalStats:
 
     def post_step_eval(self):
         motion_num_steps = self.task_env.get_motion_steps()
+        next_batch = False
 
         # Eval-related info is stored in the extras
         info = self.task_env.extras
@@ -109,9 +110,10 @@ class EvalStats:
 
             # All motions have been fully evaluated
             if self.task_env.motion_sample_start_idx + self.num_envs >= self.num_unique_motions:
-                return self.get_final_stats()
+                return self.get_final_stats(), next_batch
 
             # Move on to the next motion
+            next_batch = True
             self.task_env.forward_motion_samples()
             self.terminate_state[:] = False
 
@@ -122,7 +124,7 @@ class EvalStats:
         update_str = f"Terminated: {self.terminate_state.sum().item()} | max frames: {curr_max} | steps {self.curr_steps} | Start: {self.task_env.motion_sample_start_idx} | Succ rate: {self.success_rate:.3f} | Mpjpe: {np.mean(self.mpjpe_all) * 1000:.3f}"
         self.pbar.set_description(update_str)
 
-        return False
+        return False, next_batch
 
     def get_final_stats(self):
         self.pbar.clear()
@@ -242,6 +244,12 @@ def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
             # Resample motions every 200 epochs (train_config.motion_resample_interval)
             vec_env.env.resample_motions()
 
+            # Reset the envs and lstm hidden states
+            vec_env.reset()
+            if data.experience.lstm_h is not None:
+                data.experience.lstm_h[:] = 0
+                data.experience.lstm_c[:] = 0
+
         # Collect data
         results, _ = clean_pufferl.evaluate(data)
 
@@ -308,7 +316,14 @@ def rollout(vec_env, policy, eval_stats=None):
 
             action = action.cpu().numpy().reshape(vec_env.action_space.shape)
 
-        obs, _, _, _, info = vec_env.step(action)
+        obs, _, done, trunc, info = vec_env.step(action)
+
+        if hasattr(policy, "lstm"):
+            # Reset lstm states for the reset
+            reset_envs = torch.logical_or(done, trunc)
+            if reset_envs.any():
+                state[0][:, reset_envs] = 0
+                state[1][:, reset_envs] = 0
 
         # Get episode-related info here
         if len(info) > 0:
@@ -318,11 +333,15 @@ def rollout(vec_env, policy, eval_stats=None):
             ep_cnt = vec_env.episode_count
 
         if eval_stats:
-            is_done = eval_stats.post_step_eval()
+            is_done, next_batch = eval_stats.post_step_eval()
             if is_done:
                 policy.policy.set_deterministic_action(False)
                 break
 
+            if next_batch and state is not None:
+                # Reset the states
+                state[0][:] = 0
+                state[1][:] = 0
 
 ### CARBS Sweeps
 def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):

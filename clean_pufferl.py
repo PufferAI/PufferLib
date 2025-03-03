@@ -109,6 +109,12 @@ def evaluate(data):
             # TODO: In place-update should be faster. Leaking 7% speed max
             # Also should be using a cuda tensor to index
             if lstm_h is not None:
+                # Reset the hidden states for the done/truncated envs
+                reset_envs = torch.logical_or(d, t)
+                if reset_envs.any():
+                    lstm_h[:, reset_envs] = 0
+                    lstm_c[:, reset_envs] = 0
+
                 h = lstm_h[:, env_id]
                 c = lstm_c[:, env_id]
                 actions, logprob, _, value, (h, c) = policy(o_device, (h, c))
