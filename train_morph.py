@@ -205,7 +205,7 @@ def init_wandb(args, name, resume=True):
 
     exp_id = args["env_name"] + "-" + str(uuid.uuid4())[:8]
     wandb.init(
-        id = exp_id,
+        id=exp_id,
         project=args["wandb_project"],
         allow_val_change=True,
         save_code=True,
@@ -216,7 +216,7 @@ def init_wandb(args, name, resume=True):
     return wandb, exp_id
 
 
-def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
+def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False, final_eval=False):
     if wandb is None and args["track"]:
         wandb, exp_id = init_wandb(args, args["env_name"])
 
@@ -276,13 +276,14 @@ def train(args, vec_env, policy, wandb=None, exp_id=None, skip_resample=False):
     uptime = data.profile.uptime
 
     # Final evaluation
-    eval_stats = EvalStats(vec_env)
-    rollout(vec_env, policy, eval_stats)
-    results.update(eval_stats.update_env_and_close())
-    if data.wandb:
-        results["0verview/agent_steps"] = data.global_step
-        results["0verview/epoch"] = data.epoch
-        wandb.log(results)
+    if final_eval:
+        eval_stats = EvalStats(vec_env)
+        rollout(vec_env, policy, eval_stats)
+        results.update(eval_stats.update_env_and_close())
+        if data.wandb:
+            results["0verview/agent_steps"] = data.global_step
+            results["0verview/epoch"] = data.epoch
+            wandb.log(results)
 
     # NOTE: Not using standard eval
     # steps_evaluated = 0
@@ -342,6 +343,7 @@ def rollout(vec_env, policy, eval_stats=None):
                 # Reset the states
                 state[0][:] = 0
                 state[1][:] = 0
+
 
 ### CARBS Sweeps
 def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
@@ -443,12 +445,14 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
 
     # env params to sweep
     if "env" in sweep_parameters:
-        param_spaces.append(carbs_param("env", "rew_power_coef", "linear", sweep_parameters, search_center=args["ssc_rew"]))
+        param_spaces.append(
+            carbs_param("env", "rew_power_coef", "linear", sweep_parameters, search_center=args["ssc_rew"])
+        )
 
     param_spaces += [
         carbs_param("train", "learning_rate", "log", sweep_parameters, search_center=args["ssc_lr"]),
-        carbs_param('train', 'gamma', 'logit', sweep_parameters, search_center=0.97),
-        carbs_param('train', 'gae_lambda', 'logit', sweep_parameters, search_center=0.50),
+        carbs_param("train", "gamma", "logit", sweep_parameters, search_center=0.97),
+        carbs_param("train", "gae_lambda", "logit", sweep_parameters, search_center=0.50),
         # carbs_param('train', 'update_epochs', 'linear', sweep_parameters,
         #     search_center=3, is_integer=True),
         carbs_param("train", "clip_coef", "logit", sweep_parameters, search_center=0.03),
@@ -542,7 +546,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter, add_help=False)
-    parser.add_argument("--config", default="config/morph.ini")
+    parser.add_argument("--config", default="config/morph_debug.ini")
     parser.add_argument(
         "--mode", type=str, default="train", choices="train eval sweep".split()
     )  # render-eval, batch-eval?
@@ -550,8 +554,8 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--eval-model-path", type=str, default=None, help="Path to a pretrained checkpoint")
     parser.add_argument("--track", action="store_true", help="Track on WandB")
     parser.add_argument("--wandb-project", type=str, default="pufferlib")
-    parser.add_argument("--ssc-lr", type=float, default=.0002, help="Sweep search center for learning rate")
-    parser.add_argument("--ssc-rew", type=float, default=.0005, help="Sweep search center for rew power")
+    parser.add_argument("--ssc-lr", type=float, default=0.0001, help="Sweep search center for learning rate")
+    parser.add_argument("--ssc-rew", type=float, default=0.0005, help="Sweep search center for rew power")
 
     args = parser.parse_known_args()[0]
 

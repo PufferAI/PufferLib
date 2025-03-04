@@ -497,7 +497,7 @@ class HumanoidPHC:
         # NOTE: Auto PMCP updates the motion sampling prob during training
         # See IMAmpAgent.update_training_data() in the eval function
         self.auto_pmcp = False
-        self.auto_pmcp_soft = True
+        self.auto_pmcp_soft = env_config.get("auto_pmcp_soft", False)
 
         ### Reward-related
         self.use_power_reward = True
@@ -926,7 +926,7 @@ class HumanoidPHC:
         # When loading the motions the first time, use even sampling
         interval = self.num_unique_motions / (self.num_envs + 50)  # 50 is arbitrary
         sample_idxes = np.arange(0, self.num_unique_motions, interval)
-        sample_idxes = np.floor(sample_idxes).astype(int)[:self.num_envs]
+        sample_idxes = np.floor(sample_idxes).astype(int)[: self.num_envs]
         sample_idxes = torch.from_numpy(sample_idxes).to(self.device)
 
         self._motion_lib.load_motions(
