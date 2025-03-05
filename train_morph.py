@@ -455,7 +455,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
         carbs_param("train", "gae_lambda", "logit", sweep_parameters, search_center=0.50),
         # carbs_param('train', 'update_epochs', 'linear', sweep_parameters,
         #     search_center=3, is_integer=True),
-        carbs_param("train", "clip_coef", "logit", sweep_parameters, search_center=0.03),
+        carbs_param("train", "clip_coef", "logit", sweep_parameters, search_center=0.1),
         carbs_param("train", "vf_coef", "linear", sweep_parameters, search_center=2.0),
         # carbs_param("train", "vf_clip_coef", "logit", sweep_parameters, search_center=0.2),
         # carbs_param('train', 'max_grad_norm', 'linear', sweep_parameters, search_center=1.0),
@@ -516,7 +516,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
                 rnn_cls = getattr(policy_module, args["rnn_name"])
             policy = make_policy(vec_env.driver_env, policy_cls, rnn_cls, args)
 
-            stats, uptime = train(args, vec_env, policy, wandb, exp_id)  # , skip_resample=True)
+            stats, uptime = train(args, vec_env, policy, wandb, exp_id, skip_resample=args["skip_resample"])
 
         except Exception as e:
             import traceback
@@ -546,7 +546,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter, add_help=False)
-    parser.add_argument("--config", default="config/morph_debug.ini")
+    parser.add_argument("--config", default="config/morph.ini")
     parser.add_argument(
         "--mode", type=str, default="train", choices="train eval sweep".split()
     )  # render-eval, batch-eval?
@@ -556,6 +556,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb-project", type=str, default="pufferlib")
     parser.add_argument("--ssc-lr", type=float, default=0.0001, help="Sweep search center for learning rate")
     parser.add_argument("--ssc-rew", type=float, default=0.0005, help="Sweep search center for rew power")
+    parser.add_argument("--skip-resample", action="store_true", help="Skip resampling motions")
 
     args = parser.parse_known_args()[0]
 
