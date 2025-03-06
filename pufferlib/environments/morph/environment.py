@@ -103,6 +103,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         self.truncations[:] = False
         self.masks[:] = True
         self.actions[:] = 0
+        self.raw_rewards[:] = 0
         self._infos["episode_return"].clear()
         self._infos["episode_length"].clear()
         self._infos["truncated_rate"].clear()
@@ -155,8 +156,8 @@ class PHCPufferEnv(pufferlib.PufferEnv):
             self.masks[trunc_envs] = False
 
             # Set rew to 0 for "terminated" envs
-            # CHECK ME: Still useful?
-            rew[term_envs] = 0
+            # CHECK ME: Useful? Not in the original PHC
+            # rew[term_envs] = 0
 
         self.episode_returns[~self.env.reset_buf] += self.rewards[~self.env.reset_buf]
         self.episode_lengths[~self.env.reset_buf] += 1

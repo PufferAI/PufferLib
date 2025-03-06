@@ -111,6 +111,13 @@ class PolicyWithDiscriminator(nn.Module):
 
         self.amp_obs_norm.update(amp_obs)
 
+    def bound_loss(self, mu, soft_bound=1.0):
+        soft_bound = 1.0
+        mu_loss_high = torch.clamp_min(mu - soft_bound, 0.0) ** 2
+        mu_loss_low = torch.clamp_max(mu + soft_bound, 0.0) ** 2
+        b_loss = (mu_loss_low + mu_loss_high).sum(axis=-1)
+        return b_loss    
+
 
 # NOTE: The PHC implementation, which has no LSTM. 17.0M params
 class PHCPolicy(PolicyWithDiscriminator):
@@ -166,8 +173,9 @@ class PHCPolicy(PolicyWithDiscriminator):
 
         # Mean bound loss
         if self.training:
-            mean_violation = nn.functional.relu(torch.abs(mu) - 1)  # bound hard coded to 1
-            self.mean_bound_loss = mean_violation.mean()
+            # mean_violation = nn.functional.relu(torch.abs(mu) - 1)  # bound hard coded to 1
+            # self.mean_bound_loss = mean_violation.mean()
+            self.mean_bound_loss = self.bound_loss(mu)
 
         # NOTE: Separate critic network takes input directly
         value = self.critic_mlp(self.obs_pointer)
@@ -231,8 +239,9 @@ class LSTMCriticPolicy(PolicyWithDiscriminator):
 
         # Mean bound loss
         if self.training:
-            mean_violation = nn.functional.relu(torch.abs(mu) - 1)  # bound hard coded to 1
-            self.mean_bound_loss = mean_violation.mean()
+            # mean_violation = nn.functional.relu(torch.abs(mu) - 1)  # bound hard coded to 1
+            # self.mean_bound_loss = mean_violation.mean()
+            self.mean_bound_loss = self.bound_loss(mu)
 
         # NOTE: hidden from LSTM goes to the critic head
         value = self.value(hidden)
@@ -292,8 +301,9 @@ class LSTMActorPolicy(PolicyWithDiscriminator):
 
         # Mean bound loss
         if self.training:
-            mean_violation = nn.functional.relu(torch.abs(mu) - 1)  # bound hard coded to 1
-            self.mean_bound_loss = mean_violation.mean()
+            # mean_violation = nn.functional.relu(torch.abs(mu) - 1)  # bound hard coded to 1
+            # self.mean_bound_loss = mean_violation.mean()
+            self.mean_bound_loss = self.bound_loss(mu)
 
         # NOTE: Separate critic network takes input directly
         value = self.critic_mlp(self.obs_pointer)

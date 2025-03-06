@@ -516,7 +516,9 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
                 rnn_cls = getattr(policy_module, args["rnn_name"])
             policy = make_policy(vec_env.driver_env, policy_cls, rnn_cls, args)
 
-            stats, uptime = train(args, vec_env, policy, wandb, exp_id, skip_resample=args["skip_resample"])
+            stats, uptime = train(args, vec_env, policy, wandb, exp_id,
+                                  skip_resample=args["skip_resample"],
+                                  final_eval=args["final_eval"])
 
         except Exception as e:
             import traceback
@@ -557,6 +559,7 @@ if __name__ == "__main__":
     parser.add_argument("--ssc-lr", type=float, default=0.0001, help="Sweep search center for learning rate")
     parser.add_argument("--ssc-rew", type=float, default=0.0005, help="Sweep search center for rew power")
     parser.add_argument("--skip-resample", action="store_true", help="Skip resampling motions")
+    parser.add_argument("--final-eval", action="store_true", help="Final evaluation")
 
     args = parser.parse_known_args()[0]
 
