@@ -115,8 +115,8 @@ class PolicyWithDiscriminator(nn.Module):
         soft_bound = 1.0
         mu_loss_high = torch.clamp_min(mu - soft_bound, 0.0) ** 2
         mu_loss_low = torch.clamp_max(mu + soft_bound, 0.0) ** 2
-        b_loss = (mu_loss_low + mu_loss_high).sum(axis=-1)
-        return b_loss    
+        b_loss = (mu_loss_low + mu_loss_high).mean()  # sum(axis=-1)
+        return b_loss
 
 
 # NOTE: The PHC implementation, which has no LSTM. 17.0M params
