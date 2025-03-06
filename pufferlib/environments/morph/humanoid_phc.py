@@ -558,8 +558,8 @@ class HumanoidPHC:
         dof_prop["driveMode"] = gymapi.DOF_MODE_POS
         dof_prop["stiffness"] *= self._kp_scale
         dof_prop["damping"] *= self._kd_scale
-        dof_prop["stiffness"] = 1000
-        dof_prop["damping"] = 200
+        # dof_prop["stiffness"] = 1000
+        # dof_prop["damping"] = 200
 
         # NOTE: (from Joseph) You get a small perf boost (~4%) by putting all the actors in the same env
         for i in range(self.num_envs):
