@@ -21,10 +21,11 @@ class Recurrent(pufferlib.models.LSTMWrapper):
 
 
 class PolicyWithDiscriminator(nn.Module):
-    def __init__(self, env, hidden_size=512):
+    def __init__(self, env, hidden_size=512, action_scale_factor=0.9):
         super().__init__()
         self.is_continuous = True
         self._deterministic_action = False
+        self.action_scale_factor = action_scale_factor
 
         self.input_size = env.single_observation_space.shape[0]
         self.action_size = env.single_action_space.shape[0]
@@ -33,8 +34,10 @@ class PolicyWithDiscriminator(nn.Module):
 
         ### Actor
         self.actor_mlp = None
+        # Add Tanh and scaling to limit the action range
         self.mu = nn.Sequential(
             layer_init(nn.Linear(hidden_size, self.action_size), std=0.01),
+            nn.Tanh(),
         )
 
         # NOTE: Original PHC uses a constant std. Something to experiment?
@@ -163,7 +166,7 @@ class PHCPolicy(PolicyWithDiscriminator):
         return self.actor_mlp(self.obs_pointer), None
 
     def decode_actions(self, hidden, lookup=None):
-        mu = self.mu(hidden)
+        mu = self.mu(hidden) * self.action_scale_factor  # 0.9 is the scaling factor
         std = torch.exp(self.sigma).expand_as(mu)
 
         if self._deterministic_action is True:
