@@ -4,6 +4,7 @@ from enum import Enum
 from types import SimpleNamespace
 
 from isaacgym import gymapi
+
 try:
     import gymtorch
 except ImportError:
@@ -197,7 +198,6 @@ class HumanoidPHC:
         self.flag_test = False
         self.flag_im_eval = False
         self.flag_debug = self.device == "cpu"  # CHECK ME
-        self.flag_amp_obs = False
 
         ### Motion data
         # NOTE: self.flag_im_eval is used in _load_motion
@@ -259,10 +259,6 @@ class HumanoidPHC:
 
         self._refresh_sim_tensors()
 
-        #body_pos = self._rigid_body_pos
-        #self.rew_buf[:] = body_pos[:, 0, 2]
-        #self.reset_buf[:] = body_pos[:, 0, 2] < 0.25
-
         self._compute_reward()
 
         # NOTE: Which envs must be reset is computed here, but the envs get reset outside the env
@@ -272,15 +268,13 @@ class HumanoidPHC:
 
         self._compute_observations()  # observation for the next step.
 
-        self.extras["terminate"] = self._terminate_buf
+        self.extras["terminate"] = self._terminate_buf.clone()
         self.extras["reward_raw"] = self.reward_raw.detach()
 
-        if self.flag_amp_obs:
+        if self.use_amp_obs:
             self._update_hist_amp_obs()  # One step for the amp obs
             self._compute_amp_observations()
-
-            amp_obs_flat = self._amp_obs_buf.view(-1, self.num_amp_obs)
-            self.extras["amp_obs"] = amp_obs_flat  ## ZL: hooks for adding amp_obs for training
+            self.extras["amp_obs"] = self.amp_obs  ## ZL: hooks for adding amp_obs for training
 
         if self.flag_im_eval:
             motion_times = (
@@ -471,10 +465,6 @@ class HumanoidPHC:
             self._eval_bodies.remove(name)
         self._eval_track_bodies_id = self._build_body_ids_tensor(self._eval_bodies)
 
-        # NOTE: temp_running_mean affects how obs is normalized, using running_mean_std vs. running_mean_std_temp
-        # Remove this and running_mean_std_temp, if these don't affect the training performance
-        self.temp_running_mean = True
-
         self.add_obs_noise = False
         self.add_action_noise = False
         self.action_noise_std = 0.05
@@ -488,13 +478,15 @@ class HumanoidPHC:
         ### Motion/AMP-related
         self.seq_motions = False
         self._min_motion_len = 5  # env_config.get("min_length", -1)
-        
+
         # NOTE: Some AMASS motion is over 7000 frames, and it substantially
         # slows down the evaluation. So we limit the max length to 600.
         self._max_motion_len = 600
 
         self._state_init = StateInit["Random"]
         self._hybrid_init_prob = 0.5
+
+        self.use_amp_obs = env_config.get("use_amp_obs", False)
         self._num_amp_obs_steps = 10
         self._amp_root_height_obs = True
 
@@ -505,11 +497,11 @@ class HumanoidPHC:
         # NOTE: Auto PMCP updates the motion sampling prob during training
         # See IMAmpAgent.update_training_data() in the eval function
         self.auto_pmcp = False
-        self.auto_pmcp_soft = True
+        self.auto_pmcp_soft = env_config.get("auto_pmcp_soft", False)
 
         ### Reward-related
         self.use_power_reward = True
-        self.power_coefficient = 0.0005  # cfg["env"].get("power_coefficient", 0.0005)
+        self.power_coefficient = 0.0005  # env_config.get("rew_power_coef", 0.0005)
 
         # NOTE: body pos reward, body rot reward, body vel reward, body ang vel reward
         self._imitation_reward_dim = 4
@@ -531,14 +523,14 @@ class HumanoidPHC:
         # See self._compute_reward()
         self._full_body_reward = True
 
-        ### TODO: Remove these
-        self.getup_schedule = False  # training for getting up after falling -- not used in PHC
-        self.obs_v = 6
-        self.amp_obs_v = 1
-        self.self_obs_v = 1
-        self.zero_out_far = False
-        # self.zero_out_far_train = True
-        self.cycle_motion = False
+        # ### TODO: Remove these
+        # self.getup_schedule = False  # training for getting up after falling -- not used in PHC
+        # self.obs_v = 6
+        # self.amp_obs_v = 1
+        # self.self_obs_v = 1
+        # self.zero_out_far = False
+        # # self.zero_out_far_train = True
+        # self.cycle_motion = False
 
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
@@ -566,8 +558,8 @@ class HumanoidPHC:
         dof_prop["driveMode"] = gymapi.DOF_MODE_POS
         dof_prop["stiffness"] *= self._kp_scale
         dof_prop["damping"] *= self._kd_scale
-        dof_prop["stiffness"] = 1000
-        dof_prop["damping"] = 200
+        # dof_prop["stiffness"] = 1000
+        # dof_prop["damping"] = 200
 
         # NOTE: (from Joseph) You get a small perf boost (~4%) by putting all the actors in the same env
         for i in range(self.num_envs):
@@ -897,8 +889,10 @@ class HumanoidPHC:
         self._curr_amp_obs_buf = self._amp_obs_buf[:, 0]
         self._hist_amp_obs_buf = self._amp_obs_buf[:, 1:]
 
-        # NOTE: this is created during training init. Buffer size depends on amp_batch_size
-        self._amp_obs_demo_buf = None
+        # amp_obs_demo_buf is fed into the discriminator training as the real motion data
+        # This replaces the demo replay buffer in the original PHC code
+        # amp_batch_size is fixed to the number of envs
+        self._amp_obs_demo_buf = torch.zeros_like(self._amp_obs_buf)
 
         # NOTE: These don't seem to be used, except ref_dof_pos when self._res_action is True
         # self.ref_body_pos = torch.zeros_like(self._rigid_body_pos)
@@ -917,26 +911,33 @@ class HumanoidPHC:
             # TODO: find a way to evaluate full motion, probably not during training
             max_length=self.max_episode_length,
             im_eval=self.flag_im_eval,
-            multi_thread=False,
+            num_thread=4,
             smpl_type=self.humanoid_type,
-            randomrize_heading=True,
             step_dt=self.dt,
             is_deterministic=self.flag_debug,
         )
         self._motion_train_lib = MotionLibSMPL(motion_lib_cfg)
+        self._motion_lib = self._motion_train_lib
 
         # TODO: Use motion_test_file for eval?
         motion_lib_cfg.im_eval = True
         self._motion_eval_lib = MotionLibSMPL(motion_lib_cfg)
 
-        self._motion_lib = self._motion_train_lib
+        # When loading the motions the first time, use even sampling
+        interval = self.num_unique_motions / (self.num_envs + 50)  # 50 is arbitrary
+        sample_idxes = np.arange(0, self.num_unique_motions, interval)
+        sample_idxes = np.floor(sample_idxes).astype(int)[: self.num_envs]
+        sample_idxes = torch.from_numpy(sample_idxes).to(self.device)
+
         self._motion_lib.load_motions(
             skeleton_trees=self.skeleton_trees,
             gender_betas=self.humanoid_shapes.cpu(),
             limb_weights=self.humanoid_limb_and_weights.cpu(),
-            random_sample=(not self.flag_test) and (not self.seq_motions),
+            # NOTE: During initial loading, use even sampling
+            sample_idxes=sample_idxes,
+            # random_sample=(not self.flag_test) and (not self.seq_motions),
             # max_len=-1 if self.flag_test else self.max_episode_length,  # NOTE: this is ignored in motion lib
-            start_idx=self._motion_sample_start_idx,
+            # start_idx=self._motion_sample_start_idx,
         )
 
     #####################################################################
@@ -953,7 +954,8 @@ class HumanoidPHC:
             self._compute_observations(env_ids)
             self._state_reset_happened = True
 
-        self._init_amp_obs(env_ids)
+        if self.use_amp_obs:
+            self._init_amp_obs(env_ids)
 
     def _reset_actors(self, env_ids):
         if self._state_init == StateInit.Default:
@@ -1072,7 +1074,8 @@ class HumanoidPHC:
         self._compute_amp_observations(env_ids)
 
         if len(self._reset_default_env_ids) > 0:
-            self._init_amp_obs_default(self._reset_default_env_ids)
+            raise NotImplementedError("Not tested yet")
+            # self._init_amp_obs_default(self._reset_default_env_ids)
 
         if len(self._reset_ref_env_ids) > 0:
             self._init_amp_obs_ref(self._reset_ref_env_ids, self._reset_ref_motion_ids, self._reset_ref_motion_times)
@@ -1093,6 +1096,9 @@ class HumanoidPHC:
 
         amp_obs_demo = self._get_amp_obs(motion_ids, motion_times)
         self._hist_amp_obs_buf[env_ids] = amp_obs_demo.view(self._hist_amp_obs_buf[env_ids].shape)
+
+        # amp_obs_demo_buf is fed into the discriminator training as the real motion data
+        self._amp_obs_demo_buf[env_ids] = self._amp_obs_buf[env_ids]
 
     def _get_amp_obs(self, motion_ids, motion_times):
         motion_res = self._get_state_from_motionlib_cache(motion_ids, motion_times)
@@ -1224,9 +1230,10 @@ class HumanoidPHC:
         # Possible the original paper only uses imitation
         obs = torch.cat([state, imitation], dim=-1)
 
+        # NOTE: Not using it for now.
         # This is the normalized vector with position, rotation, velocity, and
         # angular velocity for the simulated humanoid and the demo data
-        self.state, self.demo = self._compute_state_obs(env_ids)
+        # self.state, self.demo = self._compute_state_obs(env_ids)
 
         if self.add_obs_noise and not self.flag_test:
             obs = obs + torch.randn_like(obs) * 0.1
@@ -1272,10 +1279,10 @@ class HumanoidPHC:
         if env_ids is None:
             env_ids = slice(None)
 
-        body_pos = self._rigid_body_pos[env_ids]#[..., self._track_bodies_id]
-        body_rot = self._rigid_body_rot[env_ids]#[..., self._track_bodies_id]
-        body_vel = self._rigid_body_vel[env_ids]#[..., self._track_bodies_id]
-        body_ang_vel = self._rigid_body_ang_vel[env_ids]#[..., self._track_bodies_id]
+        body_pos = self._rigid_body_pos[env_ids]  # [..., self._track_bodies_id]
+        body_rot = self._rigid_body_rot[env_ids]  # [..., self._track_bodies_id]
+        body_vel = self._rigid_body_vel[env_ids]  # [..., self._track_bodies_id]
+        body_ang_vel = self._rigid_body_ang_vel[env_ids]  # [..., self._track_bodies_id]
 
         sim_obs = compute_humanoid_observations_smpl_max(
             body_pos,
@@ -1301,10 +1308,10 @@ class HumanoidPHC:
             self._sampled_motion_ids[env_ids], motion_times, self._global_offset[env_ids]
         )  # pass in the env_ids such that the motion is in synced.
 
-        demo_pos = motion_res["rg_pos"]#[..., self._track_bodies_id]
-        demo_rot = motion_res["rb_rot"]#[..., self._track_bodies_id]
-        demo_vel = motion_res["body_vel"]#[..., self._track_bodies_id]
-        demo_ang_vel = motion_res["body_ang_vel"]#[..., self._track_bodies_id]
+        demo_pos = motion_res["rg_pos"]  # [..., self._track_bodies_id]
+        demo_rot = motion_res["rb_rot"]  # [..., self._track_bodies_id]
+        demo_vel = motion_res["body_vel"]  # [..., self._track_bodies_id]
+        demo_ang_vel = motion_res["body_ang_vel"]  # [..., self._track_bodies_id]
 
         demo_obs = compute_humanoid_observations_smpl_max(
             demo_pos,
@@ -1507,7 +1514,7 @@ class HumanoidPHC:
         body_rot = self._rigid_body_rot
         body_vel = self._rigid_body_vel
         body_ang_vel = self._rigid_body_ang_vel
-        
+
         motion_times = (
             self.progress_buf * self.dt + self._motion_start_times + self._motion_start_times_offset
         )  # reward is computed after physics step, and progress_buf is already updated for next time step.
@@ -1622,45 +1629,52 @@ class HumanoidPHC:
     ### Motion/AMP
     #####################################################################
 
-    def fetch_amp_obs_demo(self, num_samples):
-        # Creates the reference motion amp obs, for discriminator.
+    @property
+    def amp_obs(self):
+        return self._amp_obs_buf.view(-1, self.num_amp_obs) if self.use_amp_obs else None
 
-        if self._amp_obs_demo_buf is None:
-            # NOTE: This is called during training init. Buffer size depends on amp_batch_size.
-            self._amp_obs_demo_buf = torch.zeros(
-                (num_samples, self._num_amp_obs_steps, self._num_amp_obs_per_step),
-                device=self.device,
-                dtype=torch.float32,
-            )
-        else:
-            # Buffer size (amp_batch_size) must not change during training
-            assert self._amp_obs_demo_buf.shape[0] == num_samples
+    def fetch_amp_obs_demo(self):
+        return self._amp_obs_demo_buf.view(-1, self.num_amp_obs) if self.use_amp_obs else None
 
-        motion_ids = self._motion_lib.sample_motions(num_samples)
-        motion_times0 = self._sample_time(motion_ids)
-        amp_obs_demo = self.build_amp_obs_demo(motion_ids, motion_times0)
-        self._amp_obs_demo_buf[:] = amp_obs_demo.view(self._amp_obs_demo_buf.shape)
-        amp_obs_demo_flat = self._amp_obs_demo_buf.view(-1, self.num_amp_obs)
+    # def fetch_amp_obs_demo(self, num_samples):
+    #     # Creates the reference motion amp obs, for discriminator.
 
-        return amp_obs_demo_flat
+    #     if self._amp_obs_demo_buf is None:
+    #         # NOTE: This is called during training init. Buffer size depends on amp_batch_size.
+    #         self._amp_obs_demo_buf = torch.zeros(
+    #             (num_samples, self._num_amp_obs_steps, self._num_amp_obs_per_step),
+    #             device=self.device,
+    #             dtype=torch.float32,
+    #         )
+    #     else:
+    #         # Buffer size (amp_batch_size) must not change during training
+    #         assert self._amp_obs_demo_buf.shape[0] == num_samples
 
-    def build_amp_obs_demo(self, motion_ids, motion_times0):
-        # Compute observation for the motion starting point
-        dt = self.dt
-        motion_ids = torch.tile(motion_ids.unsqueeze(-1), [1, self._num_amp_obs_steps])
+    #     motion_ids = self._motion_lib.sample_motions(num_samples)
+    #     motion_times0 = self._sample_time(motion_ids)
+    #     amp_obs_demo = self.build_amp_obs_demo(motion_ids, motion_times0)
+    #     self._amp_obs_demo_buf[:] = amp_obs_demo.view(self._amp_obs_demo_buf.shape)
+    #     amp_obs_demo_flat = self._amp_obs_demo_buf.view(-1, self.num_amp_obs)
 
-        motion_times = motion_times0.unsqueeze(-1)
-        time_steps = -dt * torch.arange(0, self._num_amp_obs_steps, device=self.device)
-        motion_times = motion_times + time_steps
+    #     return amp_obs_demo_flat
 
-        motion_ids = motion_ids.view(-1)
-        motion_times = motion_times.view(-1)
+    # def build_amp_obs_demo(self, motion_ids, motion_times0):
+    #     # Compute observation for the motion starting point
+    #     dt = self.dt
+    #     motion_ids = torch.tile(motion_ids.unsqueeze(-1), [1, self._num_amp_obs_steps])
 
-        amp_obs_demo = self._get_amp_obs(motion_ids, motion_times)
-        # if self._add_amp_input_noise:
-        #     amp_obs_demo = amp_obs_demo + torch.randn_like(amp_obs_demo) * 0.01
+    #     motion_times = motion_times0.unsqueeze(-1)
+    #     time_steps = -dt * torch.arange(0, self._num_amp_obs_steps, device=self.device)
+    #     motion_times = motion_times + time_steps
 
-        return amp_obs_demo
+    #     motion_ids = motion_ids.view(-1)
+    #     motion_times = motion_times.view(-1)
+
+    #     amp_obs_demo = self._get_amp_obs(motion_ids, motion_times)
+    #     # if self._add_amp_input_noise:
+    #     #     amp_obs_demo = amp_obs_demo + torch.randn_like(amp_obs_demo) * 0.01
+
+    #     return amp_obs_demo
 
     def resample_motions(self):
         if self.flag_test:
@@ -1775,7 +1789,7 @@ def remove_base_rot(quat):
     return quat_mul(quat, base_rot.repeat(shape, 1))
 
 
-#@torch.jit.script
+# @torch.jit.script
 def compute_humanoid_observations_smpl_max(
     body_pos,
     body_rot,

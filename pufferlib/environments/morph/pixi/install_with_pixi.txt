@@ -1,0 +1,19 @@
+1. Install pixi: see https://pixi.sh/latest/#installation
+
+2. Copy pixi.toml and env_setup.sh to the root of the repo
+
+3. Run `pixi shell`
+This will install all the dependencies and activate the virtual env.
+
+4. Download the Isaac Gym Preview 4 (https://developer.nvidia.com/isaac-gym)
+Then go to the issac gym folder and install, like below:
+
+```
+cd ../isaacgym/python
+pip install -e .
+```
+
+5. Test if Isaac Gym and torch are working
+```
+pixi run test_isaac
+```
