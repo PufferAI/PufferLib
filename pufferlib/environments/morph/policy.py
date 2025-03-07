@@ -1,8 +1,29 @@
 import torch
 from torch import nn
+from torch.distributions import TransformedDistribution
+from torch.distributions.transforms import TanhTransform, AffineTransform
+
 from pufferlib.pytorch import layer_init
 
 import pufferlib.models
+
+
+class TanhNormal(TransformedDistribution):
+    def __init__(self, loc, scale, affine_scale=1.0):
+        self.loc = loc
+        self.scale = scale
+        
+        # Create a Normal distribution
+        self._normal = torch.distributions.Normal(loc, scale)
+        
+        # Create a tanh transformation
+        transforms = [TanhTransform(), AffineTransform(loc=0, scale=affine_scale)]
+        
+        # Initialize the TransformedDistribution parent
+        super().__init__(self._normal, transforms)
+
+    def entropy(self):
+        return self._normal.entropy()
 
 
 class Recurrent(pufferlib.models.LSTMWrapper):
@@ -34,10 +55,8 @@ class PolicyWithDiscriminator(nn.Module):
 
         ### Actor
         self.actor_mlp = None
-        # Add Tanh and scaling to limit the action range
         self.mu = nn.Sequential(
             layer_init(nn.Linear(hidden_size, self.action_size), std=0.01),
-            nn.Tanh(),
         )
 
         # NOTE: Original PHC uses a constant std. Something to experiment?
@@ -166,13 +185,13 @@ class PHCPolicy(PolicyWithDiscriminator):
         return self.actor_mlp(self.obs_pointer), None
 
     def decode_actions(self, hidden, lookup=None):
-        mu = self.mu(hidden) * self.action_scale_factor  # 0.9 is the scaling factor
+        mu = self.mu(hidden)
         std = torch.exp(self.sigma).expand_as(mu)
 
         if self._deterministic_action is True:
             std = torch.clamp(std, max=1e-6)
 
-        probs = torch.distributions.Normal(mu, std)
+        probs = TanhNormal(mu, std, affine_scale=self.action_scale_factor)
 
         # Mean bound loss
         if self.training:
@@ -238,7 +257,7 @@ class LSTMCriticPolicy(PolicyWithDiscriminator):
         if self._deterministic_action is True:
             std = torch.clamp(std, max=1e-6)
 
-        probs = torch.distributions.Normal(mu, std)
+        probs = TanhNormal(mu, std, affine_scale=self.action_scale_factor)
 
         # Mean bound loss
         if self.training:
