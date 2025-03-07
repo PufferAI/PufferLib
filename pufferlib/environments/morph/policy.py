@@ -42,7 +42,7 @@ class Recurrent(pufferlib.models.LSTMWrapper):
 
 
 class PolicyWithDiscriminator(nn.Module):
-    def __init__(self, env, hidden_size=512, action_scale_factor=0.9):
+    def __init__(self, env, hidden_size=512, action_scale_factor=0.95):
         super().__init__()
         self.is_continuous = True
         self._deterministic_action = False
@@ -133,11 +133,18 @@ class PolicyWithDiscriminator(nn.Module):
 
         self.amp_obs_norm.update(amp_obs)
 
-    def bound_loss(self, mu, soft_bound=1.0):
-        soft_bound = 1.0
-        mu_loss_high = torch.clamp_min(mu - soft_bound, 0.0) ** 2
-        mu_loss_low = torch.clamp_max(mu + soft_bound, 0.0) ** 2
-        b_loss = (mu_loss_low + mu_loss_high).mean()  # sum(axis=-1)
+    def bound_loss(self, mu, soft_bound=2.0):
+        # Tanh(2) ~ 0.964, so apply loss when mu is outside of [-2, 2]
+
+        # mu_loss_high = torch.clamp_min(mu - soft_bound, 0.0) ** 2
+        # mu_loss_low = torch.clamp_max(mu + soft_bound, 0.0) ** 2
+        # b_loss = (mu_loss_low + mu_loss_high).mean()  # sum(axis=-1)
+
+        mu_loss = torch.zeros_like(mu)
+        mu_loss = torch.where(mu > soft_bound, (mu - soft_bound) ** 2, mu_loss)
+        mu_loss = torch.where(mu < -soft_bound, (mu + soft_bound) ** 2, mu_loss)
+        b_loss = mu_loss.mean()
+
         return b_loss
 
 
