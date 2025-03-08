@@ -8,6 +8,17 @@ from pufferlib.pytorch import layer_init
 import pufferlib.models
 
 
+class StableTanhTransform(TanhTransform):
+    def __init__(self, epsilon=0.001):
+        super().__init__()
+        self.epsilon = epsilon
+        
+    def _inverse(self, y):
+        # Clamp y to avoid values too close to ±1
+        y = torch.clamp(y, min=-1.0 + self.epsilon, max=1.0 - self.epsilon)
+        return torch.atanh(y)
+
+
 class TanhNormal(TransformedDistribution):
     def __init__(self, loc, scale, affine_scale=1.0):
         self.loc = loc
@@ -17,7 +28,7 @@ class TanhNormal(TransformedDistribution):
         self._normal = torch.distributions.Normal(loc, scale)
         
         # Create a tanh transformation
-        transforms = [TanhTransform(), AffineTransform(loc=0, scale=affine_scale)]
+        transforms = [StableTanhTransform(), AffineTransform(loc=0, scale=affine_scale)]
         
         # Initialize the TransformedDistribution parent
         super().__init__(self._normal, transforms)
