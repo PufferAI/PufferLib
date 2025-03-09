@@ -1,35 +1,8 @@
 import torch
 from torch import nn
-from torch.distributions import TransformedDistribution
-from torch.distributions.transforms import TanhTransform, AffineTransform
 
 from pufferlib.pytorch import layer_init
-
 import pufferlib.models
-
-
-class StableTanhTransform(TanhTransform):
-    def __init__(self, epsilon=0.1):
-        super().__init__()
-        self.epsilon = epsilon
-        
-    def _inverse(self, y):
-        # Clamp y to [-0.9, 0.9] range
-        # NOTE: With epsilon of 0.0001, I've been getting NaNs,
-        # perhaps due to numerical issues/exploding gradients
-        y = torch.clamp(y, min=-1.0 + self.epsilon, max=1.0 - self.epsilon)
-        return torch.atanh(y)
-
-
-class TanhNormal(TransformedDistribution):
-    def __init__(self, loc, scale):
-        self.loc = loc
-        self.scale = scale
-        self._normal = torch.distributions.Normal(loc, scale)
-        super().__init__(self._normal, [StableTanhTransform()])
-
-    def entropy(self):
-        return self._normal.entropy()
 
 
 class Recurrent(pufferlib.models.LSTMWrapper):
@@ -138,9 +111,7 @@ class PolicyWithDiscriminator(nn.Module):
 
         self.amp_obs_norm.update(amp_obs)
 
-    def bound_loss(self, mu, soft_bound=1.4):
-        # Tanh(1.4) ~ 0.88, so apply loss when mu is outside of [-1.4, 1.4]
-
+    def bound_loss(self, mu, soft_bound=0.9):
         # mu_loss_high = torch.clamp_min(mu - soft_bound, 0.0) ** 2
         # mu_loss_low = torch.clamp_max(mu + soft_bound, 0.0) ** 2
         # b_loss = (mu_loss_low + mu_loss_high).mean()  # sum(axis=-1)
@@ -203,7 +174,7 @@ class PHCPolicy(PolicyWithDiscriminator):
         if self._deterministic_action is True:
             std = torch.clamp(std, max=1e-6)
 
-        probs = TanhNormal(mu, std)
+        probs = torch.distributions.Normal(mu, std)
 
         # Mean bound loss
         if self.training:
@@ -269,7 +240,7 @@ class LSTMCriticPolicy(PolicyWithDiscriminator):
         if self._deterministic_action is True:
             std = torch.clamp(std, max=1e-6)
 
-        probs = TanhNormal(mu, std)
+        probs = torch.distributions.Normal(mu, std)
 
         # Mean bound loss
         if self.training:
