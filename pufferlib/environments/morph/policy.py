@@ -9,29 +9,24 @@ import pufferlib.models
 
 
 class StableTanhTransform(TanhTransform):
-    def __init__(self, epsilon=0.001):
+    def __init__(self, epsilon=0.1):
         super().__init__()
         self.epsilon = epsilon
         
     def _inverse(self, y):
-        # Clamp y to avoid values too close to ±1
+        # Clamp y to [-0.9, 0.9] range
+        # NOTE: With epsilon of 0.0001, I've been getting NaNs,
+        # perhaps due to numerical issues/exploding gradients
         y = torch.clamp(y, min=-1.0 + self.epsilon, max=1.0 - self.epsilon)
         return torch.atanh(y)
 
 
 class TanhNormal(TransformedDistribution):
-    def __init__(self, loc, scale, affine_scale=1.0):
+    def __init__(self, loc, scale):
         self.loc = loc
         self.scale = scale
-        
-        # Create a Normal distribution
         self._normal = torch.distributions.Normal(loc, scale)
-        
-        # Create a tanh transformation
-        transforms = [StableTanhTransform(), AffineTransform(loc=0, scale=affine_scale)]
-        
-        # Initialize the TransformedDistribution parent
-        super().__init__(self._normal, transforms)
+        super().__init__(self._normal, [StableTanhTransform()])
 
     def entropy(self):
         return self._normal.entropy()
@@ -53,11 +48,10 @@ class Recurrent(pufferlib.models.LSTMWrapper):
 
 
 class PolicyWithDiscriminator(nn.Module):
-    def __init__(self, env, hidden_size=512, action_scale_factor=0.95):
+    def __init__(self, env, hidden_size=512):
         super().__init__()
         self.is_continuous = True
         self._deterministic_action = False
-        self.action_scale_factor = action_scale_factor
 
         self.input_size = env.single_observation_space.shape[0]
         self.action_size = env.single_action_space.shape[0]
@@ -144,8 +138,8 @@ class PolicyWithDiscriminator(nn.Module):
 
         self.amp_obs_norm.update(amp_obs)
 
-    def bound_loss(self, mu, soft_bound=2.0):
-        # Tanh(2) ~ 0.964, so apply loss when mu is outside of [-2, 2]
+    def bound_loss(self, mu, soft_bound=1.4):
+        # Tanh(1.4) ~ 0.88, so apply loss when mu is outside of [-1.4, 1.4]
 
         # mu_loss_high = torch.clamp_min(mu - soft_bound, 0.0) ** 2
         # mu_loss_low = torch.clamp_max(mu + soft_bound, 0.0) ** 2
@@ -209,7 +203,7 @@ class PHCPolicy(PolicyWithDiscriminator):
         if self._deterministic_action is True:
             std = torch.clamp(std, max=1e-6)
 
-        probs = TanhNormal(mu, std, affine_scale=self.action_scale_factor)
+        probs = TanhNormal(mu, std)
 
         # Mean bound loss
         if self.training:
@@ -275,7 +269,7 @@ class LSTMCriticPolicy(PolicyWithDiscriminator):
         if self._deterministic_action is True:
             std = torch.clamp(std, max=1e-6)
 
-        probs = TanhNormal(mu, std, affine_scale=self.action_scale_factor)
+        probs = TanhNormal(mu, std)
 
         # Mean bound loss
         if self.training:
