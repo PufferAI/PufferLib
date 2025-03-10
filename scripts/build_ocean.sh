@@ -42,21 +42,25 @@ fi
 
 FLAGS=(
     -Wall
-    -I./raylib-5.0_linux_amd64/include 
     -I./pufferlib
     "$SRC_DIR/$ENV.c" -o "$ENV"
-    ./raylib-5.0_linux_amd64/lib/libraylib.a
     -lm
     -lpthread
     -DPLATFORM_DESKTOP
 )
 
-
 if [ "$PLATFORM" = "Darwin" ]; then
     FLAGS+=(
+        -I./raylib-5.0_macos/include 
+        ./raylib-5.0_macos/lib/libraylib.a
         -framework Cocoa
         -framework IOKit
         -framework CoreVideo
+    )
+else
+    FLAGS+=(
+        -I./raylib-5.0_linux_amd64/include 
+        ./raylib-5.0_linux_amd64/lib/libraylib.a
     )
 fi
 
@@ -64,12 +68,13 @@ echo ${FLAGS[@]}
 
 if [ "$MODE" = "local" ]; then
     echo "Building $ENV for local testing..."
-    if [ "$PLATFORM" = "Linux" ]; then
-        # These important debug flags don't work on macos
+    # if [ "$PLATFORM" = "Linux" ]; then
+        # js?: These important debug flags don't work on macos
+        # ah: they work on macos with clang 19.1.7
         FLAGS+=(
             -fsanitize=address,undefined,bounds,pointer-overflow,leak
         )
-    fi  
+    # fi  
     clang -g -O0 ${FLAGS[@]}
 elif [ "$MODE" = "fast" ]; then
     echo "Building optimized $ENV for local testing..."

@@ -281,15 +281,11 @@ elif system == 'Linux':
 else:
     raise ValueError(f'Unsupported system: {system}')
 
-extra_compile_args=['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', '-DPLATFORM_DESKTOP', '-O2', '-fwrapv'] #, '-g']
-if system == 'Linux':
-    extra_compile_args += ['-Wno-alloc-size-larger-than']
-
 extensions = [Extension(
     path.replace('/', '.'),
     [path + '.pyx'],
     include_dirs=[numpy.get_include(), RAYLIB_INCLUDE],
-    extra_compile_args=extra_compile_args,
+    extra_compile_args=['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', '-DPLATFORM_DESKTOP', '-O2', '-Wno-alloc-size-larger-than', '-fwrapv'],#, '-g'],
     extra_link_args=['-Bsymbolic-functions', '-O2', '-fwrapv'],
     extra_objects=[f'{RAYLIB_LIB}/libraylib.a']
 ) for path in extension_paths]

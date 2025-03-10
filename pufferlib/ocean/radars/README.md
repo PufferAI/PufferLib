@@ -26,5 +26,8 @@ Sufficiently delayed trackers are lost, and incur an additional penalty.
 
 - [ ] Implement a multi-sensor EST baseline
 - [ ] Force search at 30?
-
+- [ ] Massive Observation Space needs to be normalized
+- [ ] grab logging stuff from pong
+- [x] update clang and use f-sanatize flags
+- [ ] table of all constants
 

@@ -86,9 +86,6 @@ def test_performance(timeout=100):
     env.reset()
     tick = 0
 
-    # actions =
-    #
-
     import time
 
     start = time.time()
