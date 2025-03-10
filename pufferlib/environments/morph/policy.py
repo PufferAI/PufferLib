@@ -132,7 +132,6 @@ class PHCPolicy(PolicyWithDiscriminator):
         # NOTE: Original PHC network + LayerNorm
         self.actor_mlp = nn.Sequential(
             layer_init(nn.Linear(self.input_size, 2048)),
-            nn.LayerNorm(2048),
             nn.SiLU(),
             layer_init(nn.Linear(2048, 1536)),
             nn.SiLU(),
@@ -150,16 +149,15 @@ class PHCPolicy(PolicyWithDiscriminator):
         # NOTE: Original PHC network + LayerNorm
         self.critic_mlp = nn.Sequential(
             layer_init(nn.Linear(self.input_size, 2048)),
-            nn.LayerNorm(2048),
-            nn.ReLU(),
+            nn.SiLU(),
             layer_init(nn.Linear(2048, 1536)),
-            nn.ReLU(),
+            nn.SiLU(),
             layer_init(nn.Linear(1536, 1024)),
-            nn.ReLU(),
+            nn.SiLU(),
             layer_init(nn.Linear(1024, 1024)),
-            nn.ReLU(),
+            nn.SiLU(),
             layer_init(nn.Linear(1024, 512)),
-            nn.ReLU(),
+            nn.SiLU(),
             layer_init(nn.Linear(512, hidden_size)),
             nn.LayerNorm(hidden_size),
             nn.ReLU(),
