@@ -160,7 +160,7 @@ class PHCPolicy(PolicyWithDiscriminator):
             nn.SiLU(),
             layer_init(nn.Linear(512, hidden_size)),
             nn.LayerNorm(hidden_size),
-            nn.ReLU(),
+            nn.SiLU(),
             layer_init(nn.Linear(hidden_size, 1), std=0.01),
         )
 
