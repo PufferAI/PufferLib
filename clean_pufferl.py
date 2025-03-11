@@ -294,7 +294,7 @@ def train(data):
 
                 # Discriminator loss
                 disc_loss = 0.0
-                if data.use_amp_obs:
+                if config.disc_coef > 0 and data.use_amp_obs:
                     disc_agent_logits = discriminate(amp_obs_agent)
                     disc_demo_logits = discriminate(amp_obs_demo)
                     disc_loss_agent = torch.nn.BCEWithLogitsLoss()(disc_agent_logits, torch.zeros_like(disc_agent_logits))
@@ -304,16 +304,17 @@ def train(data):
                 entropy_loss = entropy.mean()
                 loss = pg_loss - config.ent_coef * entropy_loss + v_loss * config.vf_coef + disc_loss * config.disc_coef
 
-                if mean_bound_loss is not None:
-                    loss += mean_bound_loss * 10.0 # hard coded for now
+                if config.bound_coef > 0 and mean_bound_loss is not None:
+                    loss += mean_bound_loss * config.bound_coef
 
                 # Regenerative regularization, https://arxiv.org/pdf/2308.11958
                 l2_init_reg_loss = 0
-                for name, param in data.policy.named_parameters():
-                    if name in data.initial_params:
-                        l2_init_reg_loss += (param - data.initial_params[name]).pow(2).mean()
-                
-                loss += l2_init_reg_loss * 0.001  # hard coded for now, 1e-3 in paper
+                if config.l2_reg_coef > 0:
+                    for name, param in data.policy.named_parameters():
+                        if name in data.initial_params:
+                            l2_init_reg_loss += (param - data.initial_params[name]).pow(2).mean()
+                    
+                    loss += l2_init_reg_loss * config.l2_reg_coef
 
             with profile.learn:
                 data.optimizer.zero_grad()

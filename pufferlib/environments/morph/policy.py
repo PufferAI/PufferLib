@@ -29,6 +29,9 @@ class PolicyWithDiscriminator(nn.Module):
         self.input_size = env.single_observation_space.shape[0]
         self.action_size = env.single_action_space.shape[0]
 
+        # Assume the action space is symmetric (low=-high)
+        self.soft_bound = 0.9 * env.single_action_space.high[0]
+
         self.obs_norm = torch.jit.script(RunningNorm(self.input_size))
 
         ### Actor
@@ -111,17 +114,11 @@ class PolicyWithDiscriminator(nn.Module):
 
         self.amp_obs_norm.update(amp_obs)
 
-    def bound_loss(self, mu, soft_bound=0.9):
-        # mu_loss_high = torch.clamp_min(mu - soft_bound, 0.0) ** 2
-        # mu_loss_low = torch.clamp_max(mu + soft_bound, 0.0) ** 2
-        # b_loss = (mu_loss_low + mu_loss_high).mean()  # sum(axis=-1)
-
+    def bound_loss(self, mu):
         mu_loss = torch.zeros_like(mu)
-        mu_loss = torch.where(mu > soft_bound, (mu - soft_bound) ** 2, mu_loss)
-        mu_loss = torch.where(mu < -soft_bound, (mu + soft_bound) ** 2, mu_loss)
-        b_loss = mu_loss.mean()
-
-        return b_loss
+        mu_loss = torch.where(mu > self.soft_bound, (mu - self.soft_bound) ** 2, mu_loss)
+        mu_loss = torch.where(mu < -self.soft_bound, (mu + self.soft_bound) ** 2, mu_loss)
+        return mu_loss.mean()
 
 
 # NOTE: The PHC implementation, which has no LSTM. 17.0M params
@@ -180,8 +177,6 @@ class PHCPolicy(PolicyWithDiscriminator):
 
         # Mean bound loss
         if self.training:
-            # mean_violation = nn.functional.relu(torch.abs(mu) - 1)  # bound hard coded to 1
-            # self.mean_bound_loss = mean_violation.mean()
             self.mean_bound_loss = self.bound_loss(mu)
 
         # NOTE: Separate critic network takes input directly
