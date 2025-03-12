@@ -345,7 +345,9 @@ def train(data):
                 losses.clipfrac += clipfrac.item() / total_minibatches
                 losses.before_clip_grad_norm += before_clip_grad_norm / total_minibatches
                 # losses.after_clip_grad_norm += after_clip_grad_norm / total_minibatches
-                losses.l2_init_reg_loss += l2_init_reg_loss.item() / total_minibatches
+
+                if config.l2_reg_coef > 0:
+                    losses.l2_init_reg_loss += l2_init_reg_loss.item() / total_minibatches
 
                 if data.use_amp_obs:
                     losses.disc_loss += disc_loss.item() / total_minibatches
