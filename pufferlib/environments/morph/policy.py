@@ -1,7 +1,7 @@
 import torch
 from torch import nn
-from pufferlib.pytorch import layer_init
 
+from pufferlib.pytorch import layer_init
 import pufferlib.models
 
 
@@ -28,6 +28,9 @@ class PolicyWithDiscriminator(nn.Module):
 
         self.input_size = env.single_observation_space.shape[0]
         self.action_size = env.single_action_space.shape[0]
+
+        # Assume the action space is symmetric (low=-high)
+        self.soft_bound = 0.9 * env.single_action_space.high[0]
 
         self.obs_norm = torch.jit.script(RunningNorm(self.input_size))
 
@@ -111,12 +114,11 @@ class PolicyWithDiscriminator(nn.Module):
 
         self.amp_obs_norm.update(amp_obs)
 
-    def bound_loss(self, mu, soft_bound=1.0):
-        soft_bound = 1.0
-        mu_loss_high = torch.clamp_min(mu - soft_bound, 0.0) ** 2
-        mu_loss_low = torch.clamp_max(mu + soft_bound, 0.0) ** 2
-        b_loss = (mu_loss_low + mu_loss_high).mean()  # sum(axis=-1)
-        return b_loss
+    def bound_loss(self, mu):
+        mu_loss = torch.zeros_like(mu)
+        mu_loss = torch.where(mu > self.soft_bound, (mu - self.soft_bound) ** 2, mu_loss)
+        mu_loss = torch.where(mu < -self.soft_bound, (mu + self.soft_bound) ** 2, mu_loss)
+        return mu_loss.mean()
 
 
 # NOTE: The PHC implementation, which has no LSTM. 17.0M params
@@ -124,7 +126,7 @@ class PHCPolicy(PolicyWithDiscriminator):
     def __init__(self, env, hidden_size=512):
         super().__init__(env, hidden_size)
 
-        # NOTE: Original PHC network
+        # NOTE: Original PHC network + LayerNorm
         self.actor_mlp = nn.Sequential(
             layer_init(nn.Linear(self.input_size, 2048)),
             nn.SiLU(),
@@ -137,23 +139,25 @@ class PHCPolicy(PolicyWithDiscriminator):
             layer_init(nn.Linear(1024, 512)),
             nn.SiLU(),
             layer_init(nn.Linear(512, hidden_size)),
+            nn.LayerNorm(hidden_size),
             nn.SiLU(),
         )
 
-        # NOTE: Original PHC network
+        # NOTE: Original PHC network + LayerNorm
         self.critic_mlp = nn.Sequential(
             layer_init(nn.Linear(self.input_size, 2048)),
-            nn.ReLU(),
+            nn.SiLU(),
             layer_init(nn.Linear(2048, 1536)),
-            nn.ReLU(),
+            nn.SiLU(),
             layer_init(nn.Linear(1536, 1024)),
-            nn.ReLU(),
+            nn.SiLU(),
             layer_init(nn.Linear(1024, 1024)),
-            nn.ReLU(),
+            nn.SiLU(),
             layer_init(nn.Linear(1024, 512)),
-            nn.ReLU(),
+            nn.SiLU(),
             layer_init(nn.Linear(512, hidden_size)),
-            nn.ReLU(),
+            nn.LayerNorm(hidden_size),
+            nn.SiLU(),
             layer_init(nn.Linear(hidden_size, 1), std=0.01),
         )
 
@@ -173,8 +177,6 @@ class PHCPolicy(PolicyWithDiscriminator):
 
         # Mean bound loss
         if self.training:
-            # mean_violation = nn.functional.relu(torch.abs(mu) - 1)  # bound hard coded to 1
-            # self.mean_bound_loss = mean_violation.mean()
             self.mean_bound_loss = self.bound_loss(mu)
 
         # NOTE: Separate critic network takes input directly
@@ -207,7 +209,6 @@ class LSTMCriticPolicy(PolicyWithDiscriminator):
         ### Critic with LSTM
         self.critic_mlp = nn.Sequential(
             layer_init(nn.Linear(self.input_size, 2048)),
-            nn.LayerNorm(2048),
             nn.ReLU(),
             layer_init(nn.Linear(2048, 1024)),
             nn.ReLU(),
@@ -271,7 +272,6 @@ class LSTMActorPolicy(PolicyWithDiscriminator):
 
         self.critic_mlp = nn.Sequential(
             layer_init(nn.Linear(self.input_size, 1024)),
-            nn.LayerNorm(1024),
             nn.ReLU(),
             layer_init(nn.Linear(1024, 1024)),
             # nn.LayerNorm(1024),

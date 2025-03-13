@@ -444,10 +444,10 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
     # default_minibatch = (minibatch_param['max'] - minibatch_param['min']) // 2
 
     # env params to sweep
-    if "env" in sweep_parameters:
-        param_spaces.append(
-            carbs_param("env", "rew_power_coef", "linear", sweep_parameters, search_center=args["ssc_rew"])
-        )
+    # if "env" in sweep_parameters:
+    #     param_spaces.append(
+    #         carbs_param("env", "rew_power_coef", "linear", sweep_parameters, search_center=args["ssc_rew"])
+    #     )
 
     param_spaces += [
         carbs_param("train", "learning_rate", "log", sweep_parameters, search_center=args["ssc_lr"]),
@@ -557,7 +557,6 @@ if __name__ == "__main__":
     parser.add_argument("--track", action="store_true", help="Track on WandB")
     parser.add_argument("--wandb-project", type=str, default="pufferlib")
     parser.add_argument("--ssc-lr", type=float, default=0.0001, help="Sweep search center for learning rate")
-    parser.add_argument("--ssc-rew", type=float, default=0.0005, help="Sweep search center for rew power")
     parser.add_argument("--skip-resample", action="store_true", help="Skip resampling motions")
     parser.add_argument("--final-eval", action="store_true", help="Final evaluation")
 

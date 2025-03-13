@@ -483,7 +483,8 @@ class HumanoidPHC:
         # slows down the evaluation. So we limit the max length to 600.
         self._max_motion_len = 600
 
-        self._state_init = StateInit["Random"]
+        state_init = env_config.get("state_init", "Random")
+        self._state_init = StateInit[state_init]
         self._hybrid_init_prob = 0.5
 
         self.use_amp_obs = env_config.get("use_amp_obs", False)

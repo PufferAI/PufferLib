@@ -60,6 +60,12 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
     optimizer = torch.optim.Adam(policy.parameters(),
         lr=config.learning_rate, eps=1e-5)
 
+    # Store initial policy weights for regenerative regularization
+    # https://arxiv.org/pdf/2308.11958
+    initial_params = {}
+    for name, param in policy.named_parameters():
+        initial_params[name] = param.detach().clone()
+
     return pufferlib.namespace(
         config=config,
         vecenv=vecenv,
@@ -77,6 +83,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
         last_log_time=0,
         utilization=utilization,
         use_amp_obs=use_amp_obs,
+        initial_params=initial_params,
     )
 
 @pufferlib.utils.profile
@@ -285,6 +292,9 @@ def train(data):
                 else:
                     v_loss = ((newvalue - ret) ** 2).mean()
 
+                entropy_loss = entropy.mean()
+                loss = pg_loss - config.ent_coef * entropy_loss + v_loss * config.vf_coef
+
                 # Discriminator loss
                 disc_loss = 0.0
                 if data.use_amp_obs:
@@ -294,11 +304,20 @@ def train(data):
                     disc_loss_demo = torch.nn.BCEWithLogitsLoss()(disc_demo_logits, torch.ones_like(disc_demo_logits))
                     disc_loss = 0.5 * (disc_loss_agent + disc_loss_demo)
 
-                entropy_loss = entropy.mean()
-                loss = pg_loss - config.ent_coef * entropy_loss + v_loss * config.vf_coef + disc_loss * config.disc_coef
+                if config.disc_coef > 0:
+                    loss += disc_loss * config.disc_coef
 
-                if mean_bound_loss is not None:
-                    loss += mean_bound_loss * 10.0 # hard coded for now
+                if config.bound_coef > 0 and mean_bound_loss is not None:
+                    loss += mean_bound_loss * config.bound_coef
+
+                # Regenerative regularization, https://arxiv.org/pdf/2308.11958
+                l2_init_reg_loss = 0
+                for name, param in data.policy.named_parameters():
+                    if name in data.initial_params:
+                        l2_init_reg_loss += (param - data.initial_params[name]).pow(2).mean()
+
+                if config.l2_reg_coef > 0:
+                    loss += l2_init_reg_loss * config.l2_reg_coef
 
             with profile.learn:
                 data.optimizer.zero_grad()
@@ -329,6 +348,7 @@ def train(data):
                 losses.clipfrac += clipfrac.item() / total_minibatches
                 losses.before_clip_grad_norm += before_clip_grad_norm / total_minibatches
                 # losses.after_clip_grad_norm += after_clip_grad_norm / total_minibatches
+                losses.l2_init_reg_loss += l2_init_reg_loss.item() / total_minibatches
 
                 if data.use_amp_obs:
                     losses.disc_loss += disc_loss.item() / total_minibatches
@@ -483,6 +503,7 @@ def make_losses():
         mean_bound_loss=0,
         before_clip_grad_norm=0,
         # after_clip_grad_norm=0,
+        l2_init_reg_loss=0,
     )
 
 class Experience:
