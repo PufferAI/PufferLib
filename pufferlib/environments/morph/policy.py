@@ -209,7 +209,6 @@ class LSTMCriticPolicy(PolicyWithDiscriminator):
         ### Critic with LSTM
         self.critic_mlp = nn.Sequential(
             layer_init(nn.Linear(self.input_size, 2048)),
-            nn.LayerNorm(2048),
             nn.ReLU(),
             layer_init(nn.Linear(2048, 1024)),
             nn.ReLU(),
@@ -273,7 +272,6 @@ class LSTMActorPolicy(PolicyWithDiscriminator):
 
         self.critic_mlp = nn.Sequential(
             layer_init(nn.Linear(self.input_size, 1024)),
-            nn.LayerNorm(1024),
             nn.ReLU(),
             layer_init(nn.Linear(1024, 1024)),
             # nn.LayerNorm(1024),

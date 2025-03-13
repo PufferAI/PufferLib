@@ -292,17 +292,20 @@ def train(data):
                 else:
                     v_loss = ((newvalue - ret) ** 2).mean()
 
+                entropy_loss = entropy.mean()
+                loss = pg_loss - config.ent_coef * entropy_loss + v_loss * config.vf_coef
+
                 # Discriminator loss
                 disc_loss = 0.0
-                if config.disc_coef > 0 and data.use_amp_obs:
+                if data.use_amp_obs:
                     disc_agent_logits = discriminate(amp_obs_agent)
                     disc_demo_logits = discriminate(amp_obs_demo)
                     disc_loss_agent = torch.nn.BCEWithLogitsLoss()(disc_agent_logits, torch.zeros_like(disc_agent_logits))
                     disc_loss_demo = torch.nn.BCEWithLogitsLoss()(disc_demo_logits, torch.ones_like(disc_demo_logits))
                     disc_loss = 0.5 * (disc_loss_agent + disc_loss_demo)
 
-                entropy_loss = entropy.mean()
-                loss = pg_loss - config.ent_coef * entropy_loss + v_loss * config.vf_coef + disc_loss * config.disc_coef
+                if config.disc_coef > 0:
+                    loss += disc_loss * config.disc_coef
 
                 if config.bound_coef > 0 and mean_bound_loss is not None:
                     loss += mean_bound_loss * config.bound_coef
