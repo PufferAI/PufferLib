@@ -1,18 +1,17 @@
 import time
 import argparse
-from types import SimpleNamespace
 
 import isaacgym  # noqa
 
 import torch
 import numpy as np
-from scipy.spatial.transform import Rotation as sRot
 
+import joblib
 import mujoco
 import mujoco.viewer
 
-from pufferlib.environments.morph.poselib_skeleton import SkeletonTree
-from pufferlib.environments.morph.motion_lib import MotionLibSMPL, FixHeightMode
+from pufferlib.environments.morph.poselib_skeleton import SkeletonTree, SkeletonState
+from pufferlib.environments.morph.torch_utils import quat_to_exp_map
 
 SMPL_XML = "resources/morph/smpl_humanoid.xml"
 
@@ -44,87 +43,57 @@ def add_visual_capsule(scene, point1, point2, radius, rgba):
     )
 
 
-def key_call_back(keycode):
-    global curr_start, num_motions, motion_id, motion_acc, time_step, dt, paused
-    if chr(keycode) == "R":
-        print("Reset")
-        time_step = 0
-    elif chr(keycode) == " ":
-        print("Paused")
-        paused = not paused
-    else:
-        print("not mapped", chr(keycode))
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-m", "--motion-file", type=str, default="amass_train_129_upright.pkl", help="Path to motion file"
     )
+    parser.add_argument("-i", "--motion-idx", type=int, default=0, help="Index of the motion to play")
     args = parser.parse_known_args()[0]
 
-    curr_start, num_motions, motion_id, motion_acc, time_step, dt, paused = 0, 1, 0, set(), 0, 1 / 30, False
-    motion_lib_cfg = SimpleNamespace(
-        motion_file=args.motion_file,
-        device=torch.device("cpu"),
-        fix_height=FixHeightMode.full_fix,
-        min_length=-1,
-        max_length=-1,
-        im_eval=False,
-        smpl_type="smpl",
-        step_dt=dt,
-        num_thread=1,
-        is_deterministic=True,
-    )
+    motion_data = joblib.load(args.motion_file)
+    keys = list(motion_data.keys())
+
+    motion = motion_data[keys[args.motion_idx]]
+    dt = 1.0 / motion["fps"]
 
     sk_tree = SkeletonTree.from_mjcf(SMPL_XML)
-    motion_lib = MotionLibSMPL(motion_lib_cfg)
-    motion_lib.load_motions(
-        skeleton_trees=[sk_tree] * num_motions,
-        gender_betas=[torch.zeros(17)] * num_motions,
-        limb_weights=[np.zeros(10)] * num_motions,
-        random_sample=False,
-        start_idx=curr_start,
+    sk_state = SkeletonState.from_rotation_and_root_translation(
+        sk_tree, torch.from_numpy(motion["pose_quat_global"]), motion["root_trans_offset"], is_local=False
     )
 
     mj_model = mujoco.MjModel.from_xml_path(SMPL_XML)
     mj_data = mujoco.MjData(mj_model)
     mj_model.opt.timestep = dt
-    with mujoco.viewer.launch_passive(mj_model, mj_data, key_callback=key_call_back) as viewer:
+
+    frame_idx = 0
+    num_frames = motion["root_trans_offset"].shape[0]
+
+    z_offset = sk_state.global_translation[0, :, 2].min()
+    global_translation = sk_state.global_translation.clone()
+    global_translation[:, :, 2] -= z_offset
+
+    with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
         for _ in range(len(sk_tree._node_indices)):
             add_visual_capsule(viewer.user_scn, np.zeros(3), np.array([0.001, 0, 0]), 0.01, np.array([1, 0, 0, 1]))
 
         while viewer.is_running():
-            step_start = time.time()
-            motion_len = motion_lib.get_motion_length(motion_id).item()
-            motion_time = time_step % motion_len
-            motion_res = motion_lib.get_motion_state(torch.tensor([motion_id]), torch.tensor([motion_time]))
+            root_pos = global_translation[frame_idx]
+            root_rot = sk_state.global_rotation[frame_idx][0]  # joint 0 is root
+            local_rot = sk_state.local_rotation[frame_idx][1:]
+            dof_pos = quat_to_exp_map(local_rot).flatten()
 
-            (
-                root_pos,
-                root_rot,
-                dof_pos,
-                rb_pos,
-            ) = (
-                motion_res["root_pos"],
-                motion_res["root_rot"],
-                motion_res["dof_pos"],
-                motion_res["rg_pos"],
-            )
-
-            mj_data.qpos[:3] = root_pos[0].cpu().numpy()
-            mj_data.qpos[3:7] = root_rot[0].cpu().numpy()[[3, 0, 1, 2]]
-            mj_data.qpos[7:] = sRot.from_rotvec(dof_pos[0].cpu().numpy().reshape(-1, 3)).as_euler("XYZ").flatten()
+            mj_data.qpos[:3] = root_pos[0]
+            mj_data.qpos[3:7] = root_rot[[3, 0, 1, 2]]  # xyzw -> wxyz
+            mj_data.qpos[7:] = dof_pos
 
             mujoco.mj_forward(mj_model, mj_data)
-            if not paused:
-                time_step += dt
 
-            for i in range(rb_pos.shape[1]):
-                viewer.user_scn.geoms[i].pos = rb_pos[0, i]
+            # Display the red dots for keypoints
+            for i in range(root_pos.shape[0]):
+                viewer.user_scn.geoms[i].pos = root_pos[i]
 
-            # Pick up changes to the physics state, apply perturbations, update options from GUI.
             viewer.sync()
-            time_until_next_step = mj_model.opt.timestep - (time.time() - step_start)
-            if time_until_next_step > 0:
-                time.sleep(time_until_next_step)
+
+            frame_idx = (frame_idx + 1) % num_frames
+            time.sleep(dt)
