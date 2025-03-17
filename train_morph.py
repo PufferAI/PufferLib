@@ -5,6 +5,7 @@ import sys
 import uuid
 import time
 import math
+import json
 import argparse
 import configparser
 
@@ -550,8 +551,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter, add_help=False)
     parser.add_argument("--config", default="config/morph.ini")
     parser.add_argument(
-        "--mode", type=str, default="train", choices="train eval sweep".split()
-    )  # render-eval, batch-eval?
+        "--mode", type=str, default="train", choices="train eval play sweep".split()
+    )
     parser.add_argument("-m", "--motion-file", type=str, default=None, help="Path to motion file")
     parser.add_argument("-p", "--eval-model-path", type=str, default=None, help="Path to a pretrained checkpoint")
     parser.add_argument("--track", action="store_true", help="Track on WandB")
@@ -622,6 +623,18 @@ if __name__ == "__main__":
     if args["mode"] == "train":
         train(args, vec_env, policy)
 
+    elif args["mode"] == "play":
+        # Just to play and render without collecting stats
+        rollout(vec_env, policy)
+
     elif args["mode"] == "eval":
-        eval_stats = None  # EvalStats(vec_env)
-        stats = rollout(vec_env, policy, eval_stats)
+        eval_stats = EvalStats(vec_env)
+        rollout(vec_env, policy, eval_stats)
+
+        with open("failed_motion_keys.json", "w") as f:
+            json.dump(eval_stats.failed_keys, f)
+        
+        with open("eval_summary.json", "w") as f:
+            json.dump(eval_stats.results, f)
+
+        eval_stats.update_env_and_close()
