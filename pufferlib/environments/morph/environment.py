@@ -34,6 +34,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         rew_power_coef=0.0005,
         use_amp_obs=False,
         auto_pmcp_soft=False,
+        termination_distance=0.25,
     ):
         self.render_mode = "native"
         cfg = {
@@ -43,6 +44,7 @@ class PHCPufferEnv(pufferlib.PufferEnv):
                 "rew_power_coef": rew_power_coef,
                 "use_amp_obs": use_amp_obs,
                 "auto_pmcp_soft": auto_pmcp_soft,
+                "termination_distance": termination_distance,
             },
             "robot": {
                 "has_self_collision": has_self_collision,

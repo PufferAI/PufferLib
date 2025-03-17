@@ -428,7 +428,7 @@ class HumanoidPHC:
         ### Overall env-related
         self.max_episode_length = env_config.get("episode_length", 300)
         self._enable_early_termination = True
-        termination_distance = 0.25  # env_config.get("terminationDistance", 0.5)
+        termination_distance = env_config.get("termination_distance", 0.25)
         self._termination_distances = to_torch(np.array([termination_distance] * self.num_bodies), device=self.device)
         # NOTE: _termination_distances is changed between train/eval, so keep a backup
         self._termination_distances_backup = self._termination_distances.clone()
