@@ -41,7 +41,11 @@ class EvalStats:
         self.num_unique_motions = self.task_env.toggle_eval_mode()
 
         self.terminate_state = torch.zeros(self.num_envs, dtype=torch.bool, device=device)
+        self.played_steps_buf = torch.zeros(self.num_envs, dtype=torch.short, device=device)
         self.terminate_memory = []
+        self.motion_length = []
+        self.played_steps = []
+
         self.mpjpe, self.mpjpe_all = [], []
         self.gt_pos, self.gt_pos_all = [], []
         self.pred_pos, self.pred_pos_all = [], []
@@ -49,6 +53,7 @@ class EvalStats:
         self.success_rate = 0
         self.failed_keys = []
         self.results = None
+        self.results_by_motion = None
 
         self.pbar = tqdm(range(self.num_unique_motions // self.num_envs))
         self.pbar.set_description("")
@@ -61,8 +66,14 @@ class EvalStats:
         info = self.task_env.extras
 
         # If terminate after the last frame, then it is not a termination. curr_step is one step behind simulation.
-        termination_state = torch.logical_and(self.curr_steps <= motion_num_steps - 1, info["terminate"])
+        termination_state = torch.logical_and(self.curr_steps < motion_num_steps, info["terminate"])
         self.terminate_state = torch.logical_or(termination_state, self.terminate_state, out=self.terminate_state)
+
+        # Record the number of steps played
+        current_envs = torch.logical_and(~self.terminate_state, self.curr_steps < motion_num_steps)
+        if current_envs.any():
+            self.played_steps_buf[current_envs] += 1
+
         if (~self.terminate_state).sum() > 0:
             # NOTE: This is to handle when there are more envs than the motions
             max_possible_id = self.num_unique_motions - 1
@@ -92,6 +103,9 @@ class EvalStats:
         if self.curr_steps >= curr_max or self.terminate_state.sum() == self.num_envs:
             self.curr_steps = 0
             self.terminate_memory.append(self.terminate_state.cpu().numpy())
+            self.motion_length.append(self.task_env.get_motion_steps().cpu().numpy())
+            self.played_steps.append(self.played_steps_buf.cpu().numpy())
+
             self.success_rate = 1 - np.concatenate(self.terminate_memory)[: self.num_unique_motions].mean()
 
             # MPJPE
@@ -117,6 +131,7 @@ class EvalStats:
             next_batch = True
             self.task_env.forward_motion_samples()
             self.terminate_state[:] = False
+            self.played_steps_buf[:] = 0
 
             self.pbar.update(1)
             self.pbar.refresh()
@@ -144,8 +159,8 @@ class EvalStats:
         metrics_all = compute_metrics_lite(pred_pos_all, gt_pos_all)
         metrics_succ = compute_metrics_lite(pred_pos_all_succ, gt_pos_all_succ)
 
-        metrics_all_print = {m: np.mean(v) for m, v in metrics_all.items()}
-        metrics_succ_print = {m: np.mean(v) for m, v in metrics_succ.items()}
+        metrics_all_print = {m: float(np.mean(v)) for m, v in metrics_all.items()}
+        metrics_succ_print = {m: float(np.mean(v)) for m, v in metrics_succ.items()}
 
         if len(metrics_succ_print) == 0:
             print("No success!!!")
@@ -158,7 +173,7 @@ class EvalStats:
         print("Failed keys: ", len(self.failed_keys), ",", self.failed_keys)
 
         self.results = {
-            "eval/success_rate": self.success_rate,
+            "eval/success_rate": float(self.success_rate),
             "eval/mpjpe_all": metrics_all_print["mpjpe_g"],
             "eval/mpjpe_succ": metrics_succ_print["mpjpe_g"],
             "eval/accel_dist": metrics_succ_print["accel_dist"],
@@ -166,6 +181,13 @@ class EvalStats:
             "eval/mpjpel_all": metrics_all_print["mpjpe_l"],
             "eval/mpjpel_succ": metrics_succ_print["mpjpe_l"],
             "eval/mpjpe_pa": metrics_succ_print["mpjpe_pa"],
+        }
+
+        self.results_by_motion = {
+            "motion_keys": self.task_env.motion_data_keys.tolist(),
+            "motion_length": np.concatenate(self.motion_length)[: self.num_unique_motions],
+            "played_steps": np.concatenate(self.played_steps)[: self.num_unique_motions],
+            "success": ~terminate_hist[: self.num_unique_motions],
         }
 
         return True
@@ -454,8 +476,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
         carbs_param("train", "learning_rate", "log", sweep_parameters, search_center=args["ssc_lr"]),
         # carbs_param("train", "gamma", "logit", sweep_parameters, search_center=0.97),
         carbs_param("train", "gae_lambda", "logit", sweep_parameters, search_center=0.50),
-        carbs_param('train', 'update_epochs', 'linear', sweep_parameters,
-            search_center=3, is_integer=True),
+        carbs_param("train", "update_epochs", "linear", sweep_parameters, search_center=3, is_integer=True),
         carbs_param("train", "clip_coef", "logit", sweep_parameters, search_center=0.1),
         carbs_param("train", "vf_coef", "linear", sweep_parameters, search_center=2.0),
         # carbs_param("train", "vf_clip_coef", "logit", sweep_parameters, search_center=0.2),
@@ -517,9 +538,9 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
                 rnn_cls = getattr(policy_module, args["rnn_name"])
             policy = make_policy(vec_env.driver_env, policy_cls, rnn_cls, args)
 
-            stats, uptime = train(args, vec_env, policy, wandb, exp_id,
-                                  skip_resample=args["skip_resample"],
-                                  final_eval=args["final_eval"])
+            stats, uptime = train(
+                args, vec_env, policy, wandb, exp_id, skip_resample=args["skip_resample"], final_eval=args["final_eval"]
+            )
 
         except Exception as e:
             import traceback
@@ -550,9 +571,7 @@ def sweep_carbs(args, sweep_count=500, max_suggestion_cost=3600):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter, add_help=False)
     parser.add_argument("--config", default="config/morph.ini")
-    parser.add_argument(
-        "--mode", type=str, default="train", choices="train eval play sweep".split()
-    )
+    parser.add_argument("--mode", type=str, default="train", choices="train eval play sweep".split())
     parser.add_argument("-m", "--motion-file", type=str, default=None, help="Path to motion file")
     parser.add_argument("-p", "--eval-model-path", type=str, default=None, help="Path to a pretrained checkpoint")
     parser.add_argument("--track", action="store_true", help="Track on WandB")
@@ -628,13 +647,15 @@ if __name__ == "__main__":
         rollout(vec_env, policy)
 
     elif args["mode"] == "eval":
+        import polars as pl
+
         eval_stats = EvalStats(vec_env)
         rollout(vec_env, policy, eval_stats)
 
-        with open("failed_motion_keys.json", "w") as f:
-            json.dump(eval_stats.failed_keys, f)
-        
         with open("eval_summary.json", "w") as f:
-            json.dump(eval_stats.results, f)
+            json.dump(eval_stats.results, f, indent=4)
+
+        df = pl.DataFrame(eval_stats.results_by_motion)
+        df.write_csv("results_by_motion.tsv", separator="\t")
 
         eval_stats.update_env_and_close()
