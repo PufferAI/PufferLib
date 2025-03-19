@@ -35,6 +35,8 @@ class PHCPufferEnv(pufferlib.PufferEnv):
         use_amp_obs=False,
         auto_pmcp_soft=False,
         termination_distance=0.25,
+        kp_scale=1.0,
+        kd_scale=1.0,
     ):
         self.render_mode = "native"
         cfg = {
@@ -45,6 +47,8 @@ class PHCPufferEnv(pufferlib.PufferEnv):
                 "use_amp_obs": use_amp_obs,
                 "auto_pmcp_soft": auto_pmcp_soft,
                 "termination_distance": termination_distance,
+                "kp_scale": kp_scale,
+                "kd_scale": kd_scale,
             },
             "robot": {
                 "has_self_collision": has_self_collision,

@@ -203,9 +203,6 @@ class HumanoidPHC:
         # NOTE: self.flag_im_eval is used in _load_motion
         self._load_motion(self.motion_file)
 
-        # TODO: Remove these. Used by rl-games
-        self.has_task = False
-
     def reset(self, env_ids=None):
         safe_reset = (env_ids is None) or len(env_ids) == self.num_envs
         if env_ids is None:
@@ -472,7 +469,7 @@ class HumanoidPHC:
         ### Control-related
         self.control_mode = "isaac_pd"
         self._kp_scale = env_config.get("kp_scale", 1.0)
-        self._kd_scale = env_config.get("kd_scale", self._kp_scale)
+        self._kd_scale = env_config.get("kd_scale", 1.0)
         self._res_action = env_config.get("res_action", False)
 
         ### Motion/AMP-related
@@ -490,10 +487,6 @@ class HumanoidPHC:
         self.use_amp_obs = env_config.get("use_amp_obs", False)
         self._num_amp_obs_steps = 10
         self._amp_root_height_obs = True
-
-        # NOTE: Used in amp_agent (rl-games), used to resample motions for training.
-        # TODO: Remove shape_resampling_interval (this is for rl-games)
-        self.motion_resampling_interval = self.shape_resampling_interval = 500
 
         # NOTE: Auto PMCP updates the motion sampling prob during training
         # See IMAmpAgent.update_training_data() in the eval function
@@ -524,15 +517,6 @@ class HumanoidPHC:
         # See self._compute_reward()
         self._full_body_reward = True
 
-        # ### TODO: Remove these
-        # self.getup_schedule = False  # training for getting up after falling -- not used in PHC
-        # self.obs_v = 6
-        # self.amp_obs_v = 1
-        # self.self_obs_v = 1
-        # self.zero_out_far = False
-        # # self.zero_out_far_train = True
-        # self.cycle_motion = False
-
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
         plane_params.normal = gymapi.Vec3(0, 0, 1)  # z-up
@@ -559,8 +543,6 @@ class HumanoidPHC:
         dof_prop["driveMode"] = gymapi.DOF_MODE_POS
         dof_prop["stiffness"] *= self._kp_scale
         dof_prop["damping"] *= self._kd_scale
-        # dof_prop["stiffness"] = 1000
-        # dof_prop["damping"] = 200
 
         # NOTE: (from Joseph) You get a small perf boost (~4%) by putting all the actors in the same env
         for i in range(self.num_envs):
@@ -774,21 +756,6 @@ class HumanoidPHC:
         self.single_action_space = spaces.Box(
             np.ones(self.num_actions) * -1.0, np.ones(self.num_actions) * 1.0, dtype=np.float32
         )
-
-    # TODO: Remove this. Used by rl-games
-    def get_running_mean_size(self):
-        return (self.num_obs,)
-
-    # TODO: Remove this. Used by rl-games
-    def get_task_obs_size(self):
-        return self._task_obs_size
-
-    # TODO: Remove this. Used by rl-games
-    def get_task_obs_size_detail(self):
-        return {
-            "target": self._task_obs_size,
-            "track_bodies": self._track_bodies,
-        }
 
     def _setup_gym_tensors(self):
         ### get gym GPU state tensors
@@ -1637,46 +1604,6 @@ class HumanoidPHC:
     def fetch_amp_obs_demo(self):
         return self._amp_obs_demo_buf.view(-1, self.num_amp_obs) if self.use_amp_obs else None
 
-    # def fetch_amp_obs_demo(self, num_samples):
-    #     # Creates the reference motion amp obs, for discriminator.
-
-    #     if self._amp_obs_demo_buf is None:
-    #         # NOTE: This is called during training init. Buffer size depends on amp_batch_size.
-    #         self._amp_obs_demo_buf = torch.zeros(
-    #             (num_samples, self._num_amp_obs_steps, self._num_amp_obs_per_step),
-    #             device=self.device,
-    #             dtype=torch.float32,
-    #         )
-    #     else:
-    #         # Buffer size (amp_batch_size) must not change during training
-    #         assert self._amp_obs_demo_buf.shape[0] == num_samples
-
-    #     motion_ids = self._motion_lib.sample_motions(num_samples)
-    #     motion_times0 = self._sample_time(motion_ids)
-    #     amp_obs_demo = self.build_amp_obs_demo(motion_ids, motion_times0)
-    #     self._amp_obs_demo_buf[:] = amp_obs_demo.view(self._amp_obs_demo_buf.shape)
-    #     amp_obs_demo_flat = self._amp_obs_demo_buf.view(-1, self.num_amp_obs)
-
-    #     return amp_obs_demo_flat
-
-    # def build_amp_obs_demo(self, motion_ids, motion_times0):
-    #     # Compute observation for the motion starting point
-    #     dt = self.dt
-    #     motion_ids = torch.tile(motion_ids.unsqueeze(-1), [1, self._num_amp_obs_steps])
-
-    #     motion_times = motion_times0.unsqueeze(-1)
-    #     time_steps = -dt * torch.arange(0, self._num_amp_obs_steps, device=self.device)
-    #     motion_times = motion_times + time_steps
-
-    #     motion_ids = motion_ids.view(-1)
-    #     motion_times = motion_times.view(-1)
-
-    #     amp_obs_demo = self._get_amp_obs(motion_ids, motion_times)
-    #     # if self._add_amp_input_noise:
-    #     #     amp_obs_demo = amp_obs_demo + torch.randn_like(amp_obs_demo) * 0.01
-
-    #     return amp_obs_demo
-
     def resample_motions(self):
         if self.flag_test:
             self.forward_motion_samples()
@@ -1736,11 +1663,6 @@ class HumanoidPHC:
 
     def get_motion_steps(self):
         return self._motion_lib.get_motion_num_steps()
-
-    # TODO: Remove this. Used by rl-games
-    @property
-    def start_idx(self):
-        return self._motion_sample_start_idx
 
     #####################################################################
     ### Toggle train/eval model. Used in the training/eval code
