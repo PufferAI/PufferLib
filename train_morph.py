@@ -8,6 +8,7 @@ import math
 import json
 import argparse
 import configparser
+from datetime import datetime
 
 import joblib
 from tqdm import tqdm
@@ -573,7 +574,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", default="config/morph.ini")
     parser.add_argument("--mode", type=str, default="train", choices="train eval play sweep".split())
     parser.add_argument("-m", "--motion-file", type=str, default=None, help="Path to motion file")
-    parser.add_argument("-p", "--eval-model-path", type=str, default=None, help="Path to a pretrained checkpoint")
+    parser.add_argument("-c", "--checkpoint-path", type=str, default=None, help="Path to a pretrained checkpoint")
     parser.add_argument("--track", action="store_true", help="Track on WandB")
     parser.add_argument("--wandb-project", type=str, default="pufferlib")
     parser.add_argument("--ssc-lr", type=float, default=0.0001, help="Sweep search center for learning rate")
@@ -621,6 +622,11 @@ if __name__ == "__main__":
     if args["motion_file"]:
         args["env"]["motion_file"] = args["motion_file"]
 
+    # If play, change these env args
+    if args["mode"] == "play":
+        args["env"]["num_envs"] = 16
+        args["env"]["headless"] = False
+
     # If sweep, run sweep here and exit
     if args["mode"] == "sweep":
         sweep_carbs(args, sweep_count=500)
@@ -634,9 +640,10 @@ if __name__ == "__main__":
         rnn_cls = getattr(policy_module, args["rnn_name"])
     policy = make_policy(vec_env.driver_env, policy_cls, rnn_cls, args)
 
-    if args["eval_model_path"]:
-        checkpoint = torch.load(args["eval_model_path"], map_location=device)
+    if args["checkpoint_path"]:
+        checkpoint = torch.load(args["checkpoint_path"], map_location=device)
         policy.load_state_dict(checkpoint["state_dict"])
+        print(f"Loaded checkpoint from {args['checkpoint_path']}")
 
     # Train or evaluate
     if args["mode"] == "train":
@@ -644,6 +651,7 @@ if __name__ == "__main__":
 
     elif args["mode"] == "play":
         # Just to play and render without collecting stats
+        vec_env.env.set_termination_distances(10)
         rollout(vec_env, policy)
 
     elif args["mode"] == "eval":
@@ -652,10 +660,10 @@ if __name__ == "__main__":
         eval_stats = EvalStats(vec_env)
         rollout(vec_env, policy, eval_stats)
 
-        with open("eval_summary.json", "w") as f:
+        with open(f"eval_summary_{datetime.now().strftime('%m%d_%H%M')}.json", "w") as f:
             json.dump(eval_stats.results, f, indent=4)
 
         df = pl.DataFrame(eval_stats.results_by_motion)
-        df.write_csv("results_by_motion.tsv", separator="\t")
+        df.write_csv(f"results_by_motion_{datetime.now().strftime('%m%d_%H%M')}.tsv", separator="\t")
 
         eval_stats.update_env_and_close()
