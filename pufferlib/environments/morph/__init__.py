@@ -5,7 +5,7 @@ try:
 except ImportError:
     pass
 else:
-    from pufferlib.environments.morph.policy import Policy
+    from pufferlib.environments.morph.policy import PHCPolicy, LSTMCriticPolicy
     try:
         from pufferlib.environments.morph.policy import Recurrent
     except:

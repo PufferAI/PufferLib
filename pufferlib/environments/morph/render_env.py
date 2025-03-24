@@ -15,7 +15,7 @@ import imageio
 import matplotlib
 import matplotlib.pyplot as plt
 
-from pufferlib.environments.morph.humanoid_phc import HumanoidPHC
+from pufferlib.environments.morph.humanoid_phc import HumanoidPHC, StateInit
 from pufferlib.environments.morph.torch_utils import to_torch, exp_map_to_quat
 
 
@@ -43,6 +43,9 @@ class HumanoidRenderEnv(HumanoidPHC):
         self.flag_server_mode = False
         self.flag_show_traj = True
         self.flag_add_proj = False
+
+        # Reset the init state to the start of the motion
+        cfg["env"]["state_init"] = "Start"
 
         super().__init__(cfg, sim_params, physics_engine, device_type, device_id, headless)
 
