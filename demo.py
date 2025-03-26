@@ -45,8 +45,9 @@ def init_wandb(args, name, id=None, resume=True, tag=None):
 
 def init_neptune(args, name, id=None, resume=True, tag=None):
     import neptune
+    workspace = args['workspace']
     run = neptune.init_run(
-        project="pufferai/ablations",
+        project=f"{workspace['name']}/{workspace['project']}",
         capture_hardware_metrics=False,
         capture_stdout=False,
         capture_stderr=False,
