@@ -365,8 +365,8 @@ struct LSTM {
     float* weights_input;
     float* weights_state;
     float* bias_input;
-    float*bias_state;
-    float *buffer;
+    float* bias_state;
+    float* buffer;
     int batch_size;
     int input_size;
     int hidden_size;
