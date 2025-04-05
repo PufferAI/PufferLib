@@ -69,6 +69,7 @@ void load_deck_from_json(const char* filename, CardArray* deck) {
                 strncpy(creature_effect.description, effect, sizeof(creature_effect.description) - 1);
                 creature_effect.trigger = no_trigger;
                 creature_effect.condition = no_condition;
+                creature_effect.target_fn = single_target_hand;
                 creature_effect.activate = no_activate;
 
                 new_card = allocate_creature(name, cost, attack, health, creature_effect);
@@ -79,6 +80,7 @@ void load_deck_from_json(const char* filename, CardArray* deck) {
                 strncpy(spell_effect.description, effect, sizeof(spell_effect.description) - 1);
                 spell_effect.trigger = no_trigger;
                 spell_effect.condition = no_condition;
+                spell_effect.target_fn = single_target_hand;
                 spell_effect.activate = no_activate;
 
                 if (strcmp(type, "instant") == 0) {
@@ -92,7 +94,7 @@ void load_deck_from_json(const char* filename, CardArray* deck) {
             }
 
             if (deck->length < deck->max) {
-                deck->cards[deck->length++] = *new_card;
+                deck->cards[deck->length++] = new_card;
             } else {
                 fprintf(stderr, "Deck is full, cannot add more cards.\n");
                 free(new_card);
@@ -110,8 +112,8 @@ int main() {
     TCG env = {0}; // MUST ZERO
     allocate_tcg(&env);
 
-    load_deck_from_json("/Users/noahfarr/Documents/PufferLib/pufferlib/ocean/tcg/decks/RoughAndTumble_AFR.json", env.my_deck);
-    load_deck_from_json("/Users/noahfarr/Documents/PufferLib/pufferlib/ocean/tcg/decks/RoughAndTumble_AFR.json", env.op_deck);
+    load_deck_from_json("resources/tcg/decks/RoughAndTumble_AFR.json", env.my_player->deck);
+    load_deck_from_json("resources/tcg/decks/RoughAndTumble_AFR.json", env.op_player->deck);
 
     printf("Successfully loaded decks\n");
 
