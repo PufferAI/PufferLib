@@ -105,7 +105,7 @@ void init(Boids* env) {
     // env->min_paddle_y = -env->paddle_height / 2;
     // env->max_paddle_y = env->height - env->paddle_height/2;
     
-    env->paddle_dir = 0;
+    // env->paddle_dir = 0;
 }
 
 void allocate(Boids* env) {
@@ -270,13 +270,13 @@ typedef struct Client Client;
 struct Client {
     float width;
     float height;
-    float paddle_width;
-    float paddle_height;
+    // float paddle_width;
+    // float paddle_height;
     float ball_width;
     float ball_height;
     float x_pad;
-    Color paddle_left_color;
-    Color paddle_right_color;
+    // Color paddle_left_color;
+    // Color paddle_right_color;
     Color ball_color;
     Texture2D ball;
 };
@@ -285,13 +285,13 @@ Client* make_client(Boids* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
     client->width = env->width;
     client->height = env->height;
-    client->paddle_width = env->paddle_width;
-    client->paddle_height = env->paddle_height;
+    // client->paddle_width = env->paddle_width;
+    // client->paddle_height = env->paddle_height;
     client->ball_width = env->ball_width;
     client->ball_height = env->ball_height;
-    client->x_pad = 3*client->paddle_width;
-    client->paddle_left_color = (Color){255, 0, 0, 255};
-    client->paddle_right_color = (Color){0, 255, 255, 255};
+    client->x_pad = 3*client->ball_width;
+    // client->paddle_left_color = (Color){255, 0, 0, 255};
+    // client->paddle_right_color = (Color){0, 255, 255, 255};
     client->ball_color = (Color){255, 255, 255, 255};
 
     InitWindow(env->width + 2*client->x_pad, env->height, "PufferLib Boids");
