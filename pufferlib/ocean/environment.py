@@ -5,6 +5,7 @@ from .snake.snake import Snake
 from .squared.squared import Squared
 from .squared.pysquared import PySquared
 from .pong.pong import Pong
+from .boids.boids import Boids
 from .breakout.breakout import Breakout
 from .enduro.enduro import Enduro
 from .connect4.connect4 import Connect4
@@ -138,6 +139,7 @@ MAKE_FNS = {
     'go': Go,
     'rware': Rware,
     'trash_pickup': TrashPickupEnv,
+    'boids': Boids,
 
     #'rocket_lander': rocket_lander.RocketLander,
     'foraging': make_foraging,
