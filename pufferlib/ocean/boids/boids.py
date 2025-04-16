@@ -1,4 +1,4 @@
-'''High-perf Pong
+'''High-perf Boids
 
 Inspired from https://gist.github.com/Yttrmin/18ecc3d2d68b407b4be1
 & https://jair.org/index.php/jair/article/view/10819/25823
