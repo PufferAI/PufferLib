@@ -11,20 +11,22 @@ import platform
 
 VERSION = '2.0.6'
 
-RAYLIB_BASE = 'https://github.com/raysan5/raylib/releases/download/5.0/'
+RAYLIB_BASE = 'https://github.com/raysan5/raylib/releases/download/5.5/'
+RAYLIB_NAME = 'raylib-5.5_macos' if platform.system() == "Darwin" else 'raylib-5.5_linux_amd64'
 
-RAYLIB_NAME = 'raylib-5.0_macos' if platform.system() == "Darwin" else 'raylib-5.0_linux_amd64'
-
-RAYLIB_LINUX = 'raylib-5.0_linux_amd64'
+RAYLIB_LINUX = 'raylib-5.5_linux_amd64'
 RAYLIB_LINUX_URL = RAYLIB_BASE + RAYLIB_LINUX + '.tar.gz'
+RLIGHTS_URL = 'https://raw.githubusercontent.com/raysan5/raylib/refs/heads/master/examples/shaders/rlights.h'
+
 if not os.path.exists(RAYLIB_LINUX):
     urllib.request.urlretrieve(RAYLIB_LINUX_URL, RAYLIB_LINUX + '.tar.gz')
     with tarfile.open(RAYLIB_LINUX + '.tar.gz', 'r') as tar_ref:
         tar_ref.extractall()
 
     os.remove(RAYLIB_LINUX + '.tar.gz')
+    urllib.request.urlretrieve(RLIGHTS_URL, 'raylib-5.5_linux_amd64/include/rlights.h')
 
-RAYLIB_MACOS = 'raylib-5.0_macos'
+RAYLIB_MACOS = 'raylib-5.5_macos'
 RAYLIB_MACOS_URL = RAYLIB_BASE + RAYLIB_MACOS + '.tar.gz'
 if not os.path.exists(RAYLIB_MACOS):
     urllib.request.urlretrieve(RAYLIB_MACOS_URL, RAYLIB_MACOS + '.tar.gz')
@@ -32,8 +34,10 @@ if not os.path.exists(RAYLIB_MACOS):
         tar_ref.extractall()
 
     os.remove(RAYLIB_MACOS + '.tar.gz')
+    urllib.request.urlretrieve(RLIGHTS_URL, 'raylib-5.5_macos/include/rlights.h')
 
-RAYLIB_WASM = 'raylib-5.0_webassembly'
+
+RAYLIB_WASM = 'raylib-5.5_webassembly'
 RAYLIB_WASM_URL = RAYLIB_BASE + RAYLIB_WASM + '.zip'
 if not os.path.exists(RAYLIB_WASM):
     urllib.request.urlretrieve(RAYLIB_WASM_URL, RAYLIB_WASM + '.zip')
@@ -41,6 +45,7 @@ if not os.path.exists(RAYLIB_WASM):
         zip_ref.extractall()
 
     os.remove(RAYLIB_WASM + '.zip')
+    urllib.request.urlretrieve(RLIGHTS_URL, 'raylib-5.5_webassembly/include/rlights.h')
 
 # Default Gym/Gymnasium/PettingZoo versions
 # Gym:
@@ -71,6 +76,8 @@ cleanrl = [
     'torch',
     'tyro==0.8.6',
     'wandb==0.19.1',
+    'scipy',
+    'pyro-ppl',
 ]
 
 ray = [
@@ -259,7 +266,8 @@ extension_paths = [
     'pufferlib/ocean/tripletriad/cy_tripletriad',
     'pufferlib/ocean/go/cy_go',
     'pufferlib/ocean/rware/cy_rware',
-    'pufferlib/ocean/trash_pickup/cy_trash_pickup'
+    'pufferlib/ocean/trash_pickup/cy_trash_pickup',
+    'pufferlib/ocean/tower_climb/cy_tower_climb',
 ]
 
 system = platform.system()
@@ -268,53 +276,38 @@ if system == 'Darwin':
     # The extension “.so” is typically in pufferlib/ocean/...,
     # and “raylib/lib” is (maybe) two directories up from ocean/<env>.
     # So @loader_path/../../raylib/lib is common.
-    RAYLIB_INCLUDE = f'{RAYLIB_MACOS}/include'
-    RAYLIB_LIB = f'{RAYLIB_MACOS}/lib'
+    rpath_arg = f'-Wl,-rpath,@loader_path/../../{RAYLIB_NAME}/lib'
 elif system == 'Linux':
-    # TODO: Check if anything moves packages around after they are installed.
-    # That would break this linking. Rel path doesn't work outside the pufferlib dir
-    RAYLIB_INCLUDE = f'{RAYLIB_LINUX}/include'
-    RAYLIB_LIB = f'{RAYLIB_LINUX}/lib'
+    # On Linux, $ORIGIN works
+    rpath_arg = f'-Wl,-rpath,$ORIGIN/{RAYLIB_NAME}/lib'
 else:
     raise ValueError(f'Unsupported system: {system}')
 
 extensions = [Extension(
     path.replace('/', '.'),
     [path + '.pyx'],
-    include_dirs=[numpy.get_include(), RAYLIB_INCLUDE],
-    extra_compile_args=['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', '-DPLATFORM_DESKTOP', '-O2', '-Wno-alloc-size-larger-than', '-fwrapv'],#, '-g'],
-    extra_link_args=['-Bsymbolic-functions', '-O2', '-fwrapv'],
-    extra_objects=[f'{RAYLIB_LIB}/libraylib.a']
+    include_dirs=[numpy.get_include(), 'raylib/include'],
+    library_dirs=[RAYLIB_NAME + '/lib'],
+    libraries=['raylib'],
+    runtime_library_dirs=[RAYLIB_NAME + '/lib'],
+    extra_compile_args=['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', '-DPLATFORM_DESKTOP', '-O2', '-Wno-alloc-size-larger-than'],#, '-g'],
+    extra_link_args=[rpath_arg]
+
 ) for path in extension_paths]
-
-# Prevent Conda from injecting garbage compile flags
-from distutils.sysconfig import get_config_vars
-cfg_vars = get_config_vars()
-for key in ('CC', 'CXX', 'LDSHARED'):
-    if cfg_vars[key]:
-        cfg_vars[key] = cfg_vars[key].replace('-B /root/anaconda3/compiler_compat', '')
-        cfg_vars[key] = cfg_vars[key].replace('-pthread', '')
-        cfg_vars[key] = cfg_vars[key].replace('-fno-strict-overflow', '')
-
-for key, value in cfg_vars.items():
-    if value and '-fno-strict-overflow' in str(value):
-        cfg_vars[key] = value.replace('-fno-strict-overflow', '')
-
+ 
 setup(
     name="pufferlib",
     description="PufferAI Library"
     "PufferAI's library of RL tools and utilities",
     long_description_content_type="text/markdown",
     version=VERSION,
-    packages=find_namespace_packages() + find_packages(),
+    packages=find_packages(),
     package_data={
-        "pufferlib": [
-            f'{RAYLIB_LIB}/libraylib.a',
-        ]
+        "pufferlib": [RAYLIB_NAME + '/lib/libraylib.so.550', RAYLIB_NAME + '/lib/libraylib.so']
     },
     include_package_data=True,
     install_requires=[
-        'numpy>=1.23.3',
+        'numpy<2',
         'opencv-python==3.4.17.63',
         'cython>=3.0.0',
         'rich',
@@ -326,6 +319,7 @@ setup(
         'psutil==5.9.5',
         'pynvml',
         'imageio',
+        'setuptools'
     ],
     extras_require={
         'docs': docs,
@@ -338,7 +332,6 @@ setup(
         "pufferlib/extensions.pyx",
         "c_gae.pyx",
         "pufferlib/puffernet.pyx",
-        "pufferlib/ocean/grid/c_grid.pyx",
         *extensions,
     ], 
     compiler_directives={
@@ -354,7 +347,7 @@ setup(
        #annotate=True,
        #compiler_directives={'profile': True},# annotate=True
     ),
-    include_dirs=[numpy.get_include(), RAYLIB_INCLUDE],
+    include_dirs=[numpy.get_include(), RAYLIB_NAME + '/include'],
     python_requires=">=3.9",
     license="MIT",
     author="Joseph Suarez",
@@ -371,7 +364,6 @@ setup(
         "Programming Language :: Python :: 3.11",
     ],
 )
-
 #stable_baselines3
 #supersuit==3.3.5
 #'git+https://github.com/oxwhirl/smac.git',

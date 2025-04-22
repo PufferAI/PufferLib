@@ -9,6 +9,7 @@ cdef extern from "trash_pickup.h":
         float episode_return;
         float episode_length;
         float trash_collected;
+        float score;
 
     ctypedef struct LogBuffer
     LogBuffer* allocate_logbuffer(int)

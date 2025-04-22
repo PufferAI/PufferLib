@@ -4,9 +4,8 @@
 #include "raylib.h"
 
 #define NOOP 0
-#define FIRE 1
-#define LEFT 2
-#define RIGHT 3
+#define LEFT 1
+#define RIGHT 2
 #define MAX_BALL_SPEED 448
 #define HALF_PADDLE_WIDTH 31
 #define Y_OFFSET 50
@@ -449,7 +448,7 @@ void c_reset(Breakout* env) {
 }
 
 void step_frame(Breakout* env, int action) {
-    if (action == FIRE && env->balls_fired == 0) {
+    if (env->balls_fired == 0) {
         env->balls_fired = 1;
         float direction = M_PI / 3.25f;
 
@@ -465,7 +464,6 @@ void step_frame(Breakout* env, int action) {
         env->paddle_x += 620 * TICK_RATE;
         env->paddle_x = fminf(env->width - env->paddle_width, env->paddle_x);
     }
-
 
     //Handle collisions. 
     //Regular timestepping is done only if there are no collisions.

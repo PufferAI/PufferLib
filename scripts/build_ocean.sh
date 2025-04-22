@@ -7,6 +7,13 @@ MODE=${2:-local}
 PLATFORM="$(uname -s)"
 SRC_DIR="pufferlib/ocean/$ENV"
 WEB_OUTPUT_DIR="build_web/$ENV"
+RAYLIB_NAME='raylib-5.5_macos'
+if [ "$PLATFORM" = "Linux" ]; then
+    RAYLIB_NAME='raylib-5.5_linux_amd64'
+fi
+if [ "$MODE" = "web" ]; then
+    RAYLIB_NAME='raylib-5.5_webassembly'
+fi
 
 # Create build output directory
 mkdir -p "$WEB_OUTPUT_DIR"
@@ -18,11 +25,11 @@ if [ "$MODE" = "web" ]; then
         "$SRC_DIR/$ENV.c" \
         -O3 \
         -Wall \
-        ./raylib_wasm/lib/libraylib.a \
-        -I./raylib_wasm/include \
+        ./$RAYLIB_NAME/lib/libraylib.a \
+        -I./$RAYLIB_NAME/include \
         -I./pufferlib\
         -L. \
-        -L./raylib_wasm/lib \
+        -L./$RAYLIB_NAME/lib \
         -sASSERTIONS=2 \
         -gsource-map \
         -s USE_GLFW=3 \
@@ -42,10 +49,10 @@ fi
 
 FLAGS=(
     -Wall
-    -I./raylib-5.0_linux_amd64/include 
+    -I./$RAYLIB_NAME/include 
     -I./pufferlib
     "$SRC_DIR/$ENV.c" -o "$ENV"
-    ./raylib-5.0_linux_amd64/lib/libraylib.a
+    ./$RAYLIB_NAME/lib/libraylib.a
     -lm
     -lpthread
     -DPLATFORM_DESKTOP
@@ -67,7 +74,7 @@ if [ "$MODE" = "local" ]; then
     if [ "$PLATFORM" = "Linux" ]; then
         # These important debug flags don't work on macos
         FLAGS+=(
-            -fsanitize=address,undefined,bounds,pointer-overflow,leak
+            -fsanitize=address,undefined,bounds,pointer-overflow,leak -g
         )
     fi  
     clang -g -O0 ${FLAGS[@]}

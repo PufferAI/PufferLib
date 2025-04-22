@@ -18,16 +18,18 @@ int main() {
     Client* client = make_client(env.width, env.height);
 
     int tick = 0;
+    int action;
     while (!WindowShouldClose()) {
+        action = -1;
+
         // User can take control of the player
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
-            env.actions[0] = 0;
             // Handle Card Selection ( 1-5 for selecting a card)
-            if (IsKeyPressed(KEY_ONE)) env.actions[0] = 1;
-            if (IsKeyPressed(KEY_TWO)) env.actions[0] = 2;
-            if (IsKeyPressed(KEY_THREE)) env.actions[0] = 3;
-            if (IsKeyPressed(KEY_FOUR)) env.actions[0] = 4;
-            if (IsKeyPressed(KEY_FIVE)) env.actions[0] = 5;
+            if (IsKeyPressed(KEY_ONE)) action = SELECT_CARD_1;
+            if (IsKeyPressed(KEY_TWO)) action = SELECT_CARD_2;
+            if (IsKeyPressed(KEY_THREE)) action = SELECT_CARD_3;
+            if (IsKeyPressed(KEY_FOUR)) action = SELECT_CARD_4;
+            if (IsKeyPressed(KEY_FIVE)) action = SELECT_CARD_5;
 
             // Handle Card Placement ( 1-9 for placing a card)
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
@@ -50,11 +52,12 @@ int main() {
                 
                 // Ensure the click is within the game board
                 if (cellX >= 0 && cellX < 3 && cellY >= 0 && cellY < 3) {
-                    env.actions[0] = cellIndex + 5;
+                    action = cellIndex + 4;
                 }
             }
         } else if (tick % 45 == 0) {
             forward_linearlstm(net, env.observations, env.actions);
+            action = env.actions[0];
         }
 
         tick = (tick + 1) % 45;

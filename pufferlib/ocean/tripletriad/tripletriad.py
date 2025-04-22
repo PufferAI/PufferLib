@@ -9,7 +9,7 @@ class TripleTriad(pufferlib.PufferEnv):
             width=990, height=690, piece_width=192, piece_height=224, buf=None):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(114,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.Discrete(15)
+        self.single_action_space = gymnasium.spaces.Discrete(14)
         self.report_interval = report_interval
         self.render_mode = render_mode
         self.num_agents = num_envs

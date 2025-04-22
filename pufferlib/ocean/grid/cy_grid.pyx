@@ -7,126 +7,163 @@
 # cython: nonecheck=False
 # cython: profile=True
 
-from libc.stdlib cimport calloc, free
+from libc.stdlib cimport calloc, free, rand
 
 cdef extern from "grid.h":
+    int LOG_BUFFER_SIZE
+
+    ctypedef struct Log:
+        float episode_return;
+        float episode_length;
+        float score;
+
+    ctypedef struct LogBuffer
+    LogBuffer* allocate_logbuffer(int)
+    void free_logbuffer(LogBuffer*)
+    Log aggregate_and_clear(LogBuffer*)
+
     ctypedef struct Agent:
         float y;
         float x;
+        float prev_y;
+        float prev_x;
         float spawn_y;
         float spawn_x;
         int color;
-        int direction;
-        int held_object;
-        int keys[6];
+        float direction;
+        int held;
 
-    ctypedef struct Env:
+    ctypedef struct Grid:
         int width;
         int height;
         int num_agents;
         int horizon;
         int vision;
         float speed;
-        bint discretize;
         int obs_size;
-        int tick;
-        float episode_return;
-
-        unsigned char* grid;
+        int max_size;
+        bint discretize;
+        Log log;
+        LogBuffer* log_buffer;
         Agent* agents;
+        unsigned char* grid;
         unsigned char* observations;
-        unsigned int* actions;
+        float* actions;
         float* rewards;
-        float* dones;
+        unsigned char* dones;
+
+    ctypedef struct State:
+        int width;
+        int height;
+        int num_agents;
+        Agent* agents;
+        unsigned char* grid;
 
     cdef:
-        #Env* init_grid(
-        #        unsigned char* observations, unsigned int* actions, float* rewards, float* dones,
-        #        int width, int height, int num_agents, int horizon,
-        #        int vision, float speed, bint discretize)
-        Env** make_locked_room_env(unsigned char* observations,
+        void create_maze_level(Grid* env, int width, int height, float difficulty, int seed)
+        void load_locked_room_env(unsigned char* observations,
             unsigned int* actions, float* rewards, float* dones)
-        void reset_locked_room(Env* env)
-        bint step(Env* env)
-        void free_envs(Env** env, int num_envs)
-        Env** make_locked_rooms(unsigned char* observations,
-            unsigned int* actions, float* rewards, float* dones, int num_envs)
+        void init_grid(Grid* env)
+        void reset(Grid* env, int seed)
+        bint step(Grid* env)
         ctypedef struct Renderer
         Renderer* init_renderer(int cell_size, int width, int height)
-        void render_global(Renderer*erenderer, Env* env)
+        void render_global(Renderer*erenderer, Grid* env, float frac)
         void close_renderer(Renderer* renderer)
+        void init_state(State* state, int max_size, int num_agents)
+        void free_state(State* state)
+        void get_state(Grid* env, State* state)
+        void set_state(Grid* env, State* state)
 
+import numpy as np
 cimport numpy as cnp
 
 cdef class CGrid:
     cdef:
-        Env **envs
-        Renderer *renderer
+        Grid* envs
+        State* levels
+        Renderer* client
+        LogBuffer* logs
         int num_envs
-        int num_finished
-        float sum_returns
+        int num_maps
+        int max_size
 
-    def __init__(self, cnp.ndarray observations, cnp.ndarray actions,
-                 cnp.ndarray rewards, cnp.ndarray dones, int num_envs):
+    def __init__(self, unsigned char[:, :] observations, float[:] actions,
+            float[:] rewards, unsigned char[:] terminals, int num_envs, int num_maps,
+            int max_size):
 
-        #self.env = init_grid(<unsigned char*> observations.data, <unsigned int*> actions.data,
-        #    <float*> rewards.data, <float*> dones.data, width, height, num_agents, horizon,
-        #    vision, speed, discretize)
-        self.envs = make_locked_rooms(
-            <unsigned char*> observations.data, <unsigned int*> actions.data,
-            <float*> rewards.data, <float*> dones.data, num_envs)
-
-        self.renderer = NULL
         self.num_envs = num_envs
+        self.num_maps = num_maps
+        self.max_size = max_size
+        self.client = NULL
+        self.levels = <State*> calloc(num_maps, sizeof(State))
+        self.envs = <Grid*> calloc(num_envs, sizeof(Grid))
+        self.logs = allocate_logbuffer(LOG_BUFFER_SIZE)
+
+        cdef int i
+        for i in range(num_envs):
+            self.envs[i] = Grid(
+                observations = &observations[i, 0],
+                actions = &actions[i],
+                rewards = &rewards[i],
+                dones = &terminals[i],
+                log_buffer = self.logs,
+                max_size =  max_size,
+                num_agents = 1,
+                vision = 5,
+                speed = 1,
+                discretize = True,
+            )
+            init_grid(&self.envs[i])
+
+        cdef float difficulty
+        cdef int size
+        for i in range(num_maps):
+            size = np.random.randint(5, max_size)
+            if size % 2 == 0:
+                size -= 1
+
+            difficulty = np.random.rand()
+            create_maze_level(&self.envs[0], size, size, difficulty, i)
+            init_state(&self.levels[i], max_size, 1)
+            get_state(&self.envs[0], &self.levels[i])
 
     def reset(self):
-        cdef int i
+        cdef int i, idx
         for i in range(self.num_envs):
-            reset_locked_room(self.envs[i])
+            idx = rand() % self.num_maps
+            reset(&self.envs[i], i)
+            set_state(&self.envs[i], &self.levels[idx])
 
     def step(self):
         cdef:
-            int i
+            int i, idx
             bint done
         
         for i in range(self.num_envs):
-            done = step(self.envs[i])
+            done = step(&self.envs[i])
             if done:
-                self.num_finished += 1
-                self.sum_returns += self.envs[i].episode_return
-                reset_locked_room(self.envs[i])
+                idx = rand() % self.num_maps
+                reset(&self.envs[i], i)
+                set_state(&self.envs[i], &self.levels[idx])
 
-    def get_returns(self):
-        cdef float returns = self.sum_returns / self.num_finished
-        self.sum_returns = 0
-        self.num_finished = 0
-        return returns
-
-    def has_key(self):
-        cdef int num_keys = 0
-        cdef int i
-        for i in range(self.num_envs):
-            if self.envs[i].agents[0].keys[5] == 1:
-                num_keys += 1
-
-        return num_keys
-
-    def render(self, int cell_size=16, int width=80, int height=45):
-        if self.renderer == NULL:
+    def render(self, int cell_size=16):
+        if self.client == NULL:
             import os
-            path = os.path.abspath(os.getcwd())
-            print(path)
-            c_path = os.path.join(os.sep, *__file__.split('/')[:-1])
-            print(c_path)
-            os.chdir(c_path)
-            self.renderer = init_renderer(cell_size, width, height)
-            os.chdir(path)
+            cwd = os.getcwd()
+            os.chdir(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+            self.client = init_renderer(cell_size, self.max_size, self.max_size)
+            os.chdir(cwd)
 
-        render_global(self.renderer, self.envs[0])
+        render_global(self.client, &self.envs[0], 0)
+
+    def log(self):
+        cdef Log log = aggregate_and_clear(self.logs)
+        return log
 
     def close(self):
-        if self.renderer != NULL:
-            close_renderer(self.renderer)
-            self.renderer = NULL
+        if self.client != NULL:
+            close_renderer(self.client)
+            self.client = NULL
 
-        free_envs(self.envs, self.num_envs)
+        #free_envs(self.envs, self.num_envs)

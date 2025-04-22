@@ -20,7 +20,7 @@ class Breakout(pufferlib.PufferEnv):
             brick_rows=6, brick_cols=18, buf=None):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(11 + brick_rows*brick_cols,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.Discrete(4)
+        self.single_action_space = gymnasium.spaces.Discrete(3)
         self.report_interval = report_interval
         self.render_mode = render_mode
         self.num_agents = num_envs

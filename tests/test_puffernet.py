@@ -82,6 +82,33 @@ def test_puffernet_convolution_layer(batch_size=16, in_width=11, in_height=11,
     output_torch = torch_conv(input_torch).detach()
 
     assert_near(output_puffer, output_torch.numpy())
+    
+def test_puffernet_convolution_3d_layer(batch_size=4096, in_width=9, in_height=5, in_depth=5,
+        in_channels=1, out_channels=16, kernel_size=2, stride=1):
+    input_np = make_dummy_data(batch_size, in_channels, in_depth, in_height, in_width)
+    weights_np = make_dummy_data(out_channels, in_channels, kernel_size, kernel_size, kernel_size)
+    bias_np = make_dummy_data(out_channels)
+    
+    out_depth = int((in_depth - kernel_size)/stride + 1)
+    out_height = int((in_height - kernel_size)/stride + 1)
+    out_width = int((in_width - kernel_size)/stride + 1)
+    output_puffer = np.zeros((batch_size, out_channels, out_depth, out_height, out_width), dtype=np.float32)
+    
+    puffernet.puf_convolution_3d_layer(input_np, weights_np, bias_np, output_puffer,
+        batch_size, in_width, in_height, in_depth, in_channels, out_channels, kernel_size, stride)
+    
+    input_torch = torch.from_numpy(input_np)
+    weights_torch = torch.from_numpy(weights_np)
+    bias_torch = torch.from_numpy(bias_np)
+    
+    torch_conv = torch.nn.Conv3d(in_channels, out_channels, kernel_size, stride)
+    torch_conv.weight.data = weights_torch
+    torch_conv.bias.data = bias_torch
+    output_torch = torch_conv(input_torch).detach()
+    assert_near(output_puffer, output_torch.numpy())
+    
+    
+    
 
 def test_puffernet_lstm(batch_size=16, input_size=128, hidden_size=128):
     input_np = make_dummy_data(batch_size, input_size, seed=42)
@@ -176,6 +203,7 @@ if __name__ == '__main__':
     test_puffernet_sigmoid()
     test_puffernet_linear_layer()
     test_puffernet_convolution_layer()
+    test_puffernet_convolution_3d_layer()
     test_puffernet_lstm()
     test_puffernet_embedding()
     test_puffernet_one_hot()

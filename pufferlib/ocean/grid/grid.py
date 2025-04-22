@@ -3,93 +3,63 @@ import os
 
 import gymnasium
 
-from raylib import rl, colors
-
 import pufferlib
-from pufferlib.ocean import render
 from pufferlib.ocean.grid.cy_grid import CGrid
 
-EMPTY = 0
-FOOD = 1
-WALL = 2
-AGENT_1 = 3
-AGENT_2 = 4
-AGENT_3 = 5
-AGENT_4 = 6
-
-PASS = 0
-NORTH = 1
-SOUTH = 2
-EAST = 3
-WEST = 4
-
-
 class PufferGrid(pufferlib.PufferEnv):
-    def __init__(self, render_mode='rgb_array', vision_range=3, num_envs=4096, report_interval=1024):
-        super().__init__()
-        self.vision_range = vision_range
-
-        self.obs_size = 2*self.vision_range + 1
-        self.report_interval = report_interval
-        self.emulated = None
-
-        self.buf = pufferlib.namespace(
-            observations = np.zeros(
-                (num_envs, self.obs_size*self.obs_size + 3), dtype=np.uint8),
-            rewards = np.zeros(num_envs, dtype=np.float32),
-            terminals = np.zeros(num_envs, dtype=bool),
-            truncations = np.zeros(num_envs, dtype=bool),
-            masks = np.ones(num_envs, dtype=bool),
-        )
-        self.actions = np.zeros(num_envs, dtype=np.uint32)
-        self.dones = np.ones(num_envs, dtype=bool)
-        self.not_done = np.zeros(num_envs, dtype=bool)
-
+    def __init__(self, render_mode='raylib', vision_range=5,
+            num_envs=4096, num_maps=1000, max_map_size=9,
+            report_interval=128, buf=None):
+        self.obs_size = 2*vision_range + 1
+        self.single_observation_space = gymnasium.spaces.Box(low=0, high=255,
+            shape=(self.obs_size*self.obs_size,), dtype=np.uint8)
+        self.single_action_space = gymnasium.spaces.Discrete(5)
         self.render_mode = render_mode
-        self.observation_space = gymnasium.spaces.Box(low=0, high=255,
-            shape=(self.obs_size*self.obs_size+3,), dtype=np.uint8)
-
-        self.action_space = gymnasium.spaces.Discrete(5)
-
-        self.single_observation_space = self.observation_space
-        self.single_action_space = self.action_space
-        self.cenv = None
-        self.done = True
-        self.human_action = None
-        self.infos = {}
         self.num_agents = num_envs
+        self.report_interval = report_interval
+        super().__init__(buf=buf)
+        self.float_actions = np.zeros_like(self.actions).astype(np.float32)
+        self.c_envs = CGrid(self.observations, self.float_actions,
+            self.rewards, self.terminals, num_envs, num_maps, max_map_size)
+        pass
 
-    def render(self):
-        self.cenv.render()
-
-    def reset(self, seed=0):
-        if self.cenv is None:
-            self.cenv = CGrid(self.buf.observations, self.actions,
-                self.buf.rewards, self.dones, self.num_agents)
-        self.cenv.reset()
-
-        self.agents = [0]
-        self.done = False
-        self.tick = 1
-        self.episode_reward = 0
-        self.sum_rewards = 0
-
-        return self.buf.observations, self.infos
+    def reset(self, seed=None):
+        self.tick = 0
+        self.c_envs.reset()
+        return self.observations, []
 
     def step(self, actions):
-        self.tick += 1
-        self.actions[:] = actions
-        self.buf.rewards.fill(0)
-        self.cenv.step()
+        self.float_actions[:] = actions
+        self.c_envs.step()
 
-        self.sum_rewards += self.buf.rewards.sum()
-
-        infos = {}
+        info = []
         if self.tick % self.report_interval == 0:
-            infos['episode_return'] = self.cenv.get_returns()
-            infos['sum_rewards'] = self.sum_rewards
-            infos['has_key'] = self.cenv.has_key()
-            self.sum_rewards = 0
+            log = self.c_envs.log()
+            if log['episode_length'] > 0:
+               info.append(log)
 
-        return (self.buf.observations, self.buf.rewards,
-            self.buf.terminals, self.buf.truncations, infos)
+        self.tick += 1
+        return (self.observations, self.rewards,
+            self.terminals, self.truncations, info)
+
+    def render(self):
+        self.c_envs.render()
+
+    def close(self):
+        self.c_envs.close()
+
+def test_performance(timeout=10, atn_cache=1024):
+    env = CGrid(num_envs=1000)
+    env.reset()
+    tick = 0
+
+    actions = np.random.randint(0, 2, (atn_cache, env.num_envs))
+
+    import time
+    start = time.time()
+    while time.time() - start < timeout:
+        atn = actions[tick % atn_cache]
+        env.step(atn)
+        tick += 1
+
+    print(f'SPS: %f', env.num_envs * tick / (time.time() - start))

@@ -18,6 +18,12 @@ class NMMO3(pufferlib.PufferEnv):
             reward_combat_level=1.0, reward_prof_level=1.0,
             reward_item_level=0.5, reward_market=0.01,
             reward_death=-1.0, buf=None):
+
+        if len(width) > num_envs:
+            width = width[:num_envs]
+        if len(height) > num_envs:
+            height = height[:num_envs]
+
         if not isinstance(width, list):
             width = num_envs * [width]
         if not isinstance(height, list):

@@ -22,6 +22,9 @@ cdef extern from "puffernet.h":
     void _conv2d(float* input, float* weights, float* bias,
         float* output, int batch_size, int in_width, int in_height,
         int in_channels, int out_channels, int kernel_size, int stride)
+    void _conv3d(float* input, float* weights, float* bias,
+        float* output, int batch_size, int in_width, int in_height, int in_depth,
+        int in_channels, int out_channels, int kernel_size, int stride)
     void _embedding(int* input, float* weights, float* output,
         int batch_size, int num_embeddings, int embedding_dim)
     void _lstm(float* input, float* state_h, float* state_c, float* weights_input,
@@ -50,6 +53,13 @@ def puf_convolution_layer(cnp.ndarray input, cnp.ndarray weights, cnp.ndarray bi
         int in_channels, int out_channels, int kernel_size, int stride):
     _conv2d(<float*> input.data, <float*> weights.data, <float*> bias.data,
         <float*> output.data, batch_size, in_width, in_height, in_channels, out_channels,
+        kernel_size, stride)
+
+def puf_convolution_3d_layer(cnp.ndarray input, cnp.ndarray weights, cnp.ndarray bias,
+        cnp.ndarray output, int batch_size, int in_width, int in_height, int in_depth,
+        int in_channels, int out_channels, int kernel_size, int stride):
+    _conv3d(<float*> input.data, <float*> weights.data, <float*> bias.data,
+        <float*> output.data, batch_size, in_width, in_height, in_depth, in_channels, out_channels,
         kernel_size, stride)
 
 def puf_lstm(cnp.ndarray input, cnp.ndarray state_h, cnp.ndarray state_c, cnp.ndarray weights_input,

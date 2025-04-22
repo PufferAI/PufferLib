@@ -21,6 +21,7 @@ typedef struct Log {
     float episode_return;
     float episode_length;
     float trash_collected;
+    float score;
 } Log;
 
 typedef struct LogBuffer {
@@ -52,10 +53,12 @@ Log aggregate_and_clear(LogBuffer* logs) {
         log.episode_return += logs->logs[i].episode_return;
         log.episode_length += logs->logs[i].episode_length;
         log.trash_collected += logs->logs[i].trash_collected;
+        log.score += logs->logs[i].score;
     }
     log.episode_return /= logs->idx;
     log.episode_length /= logs->idx;
     log.trash_collected /= logs->idx;
+    log.score /= logs->idx;
     logs->idx = 0;
     return log;
 }
@@ -422,7 +425,7 @@ void c_step(CTrashPickupEnv* env) {
         }
 
         log.trash_collected = (float) (env->num_trash - total_trash_not_collected);
-
+        log.score = log.trash_collected - 0.1*log.episode_length;
         add_log(env->log_buffer, &log);
 
         c_reset(env);

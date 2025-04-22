@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.table import Table
 
 import torch
+import torch.distributed as dist
 
 import pufferlib
 import pufferlib.utils
@@ -27,7 +28,7 @@ torch.set_float32_matmul_precision('high')
 from c_gae import compute_gae
 
 
-def create(config, vecenv, policy, optimizer=None, wandb=None):
+def create(config, vecenv, policy, optimizer=None, wandb=None, neptune=None):
     seed_everything(config.seed, config.torch_deterministic)
     profile = Profile()
     losses = make_losses()
@@ -66,6 +67,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
         profile=profile,
         losses=losses,
         wandb=wandb,
+        neptune=neptune,
         global_step=0,
         epoch=0,
         stats=defaultdict(list),
@@ -127,9 +129,13 @@ def evaluate(data):
 
     with profile.eval_misc:
         for k, v in infos.items():
-            if '_map' in k and data.wandb is not None:
-                data.stats[f'Media/{k}'] = data.wandb.Image(v[0])
-                continue
+            if '_map' in k:
+                if data.wandb is not None:
+                    data.stats[f'Media/{k}'] = data.wandb.Image(v[0])
+                    continue
+                elif data.neptune is not None:
+                    # TODO: Add neptune image logging
+                    pass
 
             if isinstance(v, np.ndarray):
                 v = v.tolist()
@@ -276,6 +282,20 @@ def train(data):
             save_checkpoint(data)
             data.msg = f'Checkpoint saved at update {data.epoch}'
 
+def dist_sum(value, device):
+    if not dist.is_initialized():
+        return value
+
+    tensor = torch.tensor(value, device=device)
+    dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+    return tensor.item()
+
+def dist_mean(value, device):
+    if not dist.is_initialized():
+        return value
+
+    return dist_sum(value, device) / dist.get_world_size()
+
 def mean_and_log(data):
     for k in list(data.stats.keys()):
         v = data.stats[k]
@@ -286,19 +306,41 @@ def mean_and_log(data):
 
         data.stats[k] = v
 
-    if data.wandb is None:
+    device = data.config.device
+    sps = dist_sum(data.profile.SPS, device)
+    agent_steps = dist_sum(data.global_step, device)
+    epoch = dist_sum(data.epoch, device)
+    learning_rate = data.optimizer.param_groups[0]["lr"]
+    environment = {k: dist_mean(v, device) for k, v in data.stats.items()}
+    losses = {k: dist_mean(v, device) for k, v in data.losses.items()}
+    performance = {k: dist_sum(v, device) for k, v in data.profile}
+
+    if not dist.is_initialized() or dist.get_rank() != 0:
         return
 
-    data.last_log_time = time.time()
-    data.wandb.log({
-        '0verview/SPS': data.profile.SPS,
-        '0verview/agent_steps': data.global_step,
-        '0verview/epoch': data.epoch,
-        '0verview/learning_rate': data.optimizer.param_groups[0]["lr"],
-        **{f'environment/{k}': v for k, v in data.stats.items()},
-        **{f'losses/{k}': v for k, v in data.losses.items()},
-        **{f'performance/{k}': v for k, v in data.profile},
-    })
+    if data.wandb is not None:
+        data.last_log_time = time.time()
+        data.wandb.log({
+            '0verview/SPS': sps,
+            '0verview/agent_steps': agent_steps,
+            '0verview/epoch': epoch,
+            '0verview/learning_rate': learning_rate,
+            **{f'environment/{k}': v for k, v in environment.items()},
+            **{f'losses/{k}': v for k, v in losses.items()},
+            **{f'performance/{k}': v for k, v in performance.items()},
+        })
+    elif data.neptune is not None:
+        data.last_log_time = time.time()
+        data.neptune['SPS'].append(sps, step=agent_steps)
+        data.neptune['agent_steps'].append(agent_steps, step=agent_steps)
+        data.neptune['epoch'].append(epoch, step=agent_steps)
+        data.neptune['learning_rate'].append(learning_rate, step=agent_steps)
+        for k, v in environment.items():
+            data.neptune[f'environment/{k}'].append(v, step=agent_steps)
+        for k, v in losses.items():
+            data.neptune[f'losses/{k}'].append(v, step=agent_steps)
+        for k, v in performance.items():
+            data.neptune[f'performance/{k}'].append(v, step=agent_steps)
 
 def close(data):
     data.vecenv.close()
@@ -311,6 +353,8 @@ def close(data):
         artifact.add_file(model_path)
         data.wandb.run.log_artifact(artifact)
         data.wandb.finish()
+    elif data.neptune is not None:
+        data.neptune.stop()
 
 class Profile:
     SPS: ... = 0
@@ -390,9 +434,6 @@ class Experience:
     '''Flat tensor storage and array views for faster indexing'''
     def __init__(self, batch_size, bptt_horizon, minibatch_size, obs_shape, obs_dtype, atn_shape, atn_dtype,
                  cpu_offload=False, device='cuda', lstm=None, lstm_total_agents=0):
-        if minibatch_size is None:
-            minibatch_size = batch_size
-
         obs_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_dtype]
         atn_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_dtype]
         pin = device == 'cuda' and cpu_offload
