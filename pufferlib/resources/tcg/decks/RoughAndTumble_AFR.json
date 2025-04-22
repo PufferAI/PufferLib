@@ -1,0 +1,164 @@
+[
+    {
+        "name": "Dracoguard Sentinel",
+        "type": "creature",
+        "count": 1,
+        "cost": 2.0,
+        "attack": "2",
+        "health": "2",
+        "effect": "Magecraft — Whenever you cast or copy an instant or sorcery spell, put a +1/+1 counter on Dracoguard Sentinel.\n{4}{G}{G}: Double the number of +1/+1 counters on Dracoguard Sentinel."
+    },
+    {
+        "name": "Abaddon the Dreadlord",
+        "type": "creature",
+        "count": 1,
+        "cost": 6.0,
+        "attack": "6",
+        "health": "6",
+        "effect": "Binding Contract — If you would draw a card, exile the top card of your library face down instead.\n{B}{B}{B}: Draw seven cards.\n{B}: Return all cards exiled with Abaddon the Dreadlord to their owner's hand and you lose that much life."
+    },
+    {
+        "name": "Obsidian Drake",
+        "type": "creature",
+        "count": 2,
+        "cost": 7.0,
+        "attack": "4",
+        "health": "4",
+        "effect": "Flying\nAcid Breath — When Obsidian Drake enters, target creature an opponent controls gets -3/-3 until end of turn."
+    },
+    {
+        "name": "Sundering Reaper",
+        "type": "creature",
+        "count": 1,
+        "cost": 5.0,
+        "attack": "5",
+        "health": "3",
+        "effect": "Flying, trample\nPay 3 life: Return Sundering Reaper from your graveyard to your hand. Activate only if you had an Angel or Berserker enter the battlefield under your control this turn."
+    },
+    {
+        "name": "Rockhide Behemoth",
+        "type": "creature",
+        "count": 1,
+        "cost": 7.0,
+        "attack": "6",
+        "health": "6",
+        "effect": "Kicker {2}{G}\nThis spell can't be countered.\nHexproof, haste\nIf Rockhide Behemoth was kicked, it enters with four +1/+1 counters on it."
+    },
+    {
+        "name": "Stalwart Scion",
+        "type": "creature",
+        "count": 4,
+        "cost": 2.0,
+        "attack": "1",
+        "health": "1",
+        "effect": "When Stalwart Scion enters, put a +1/+1 counter on target creature."
+    },
+    {
+        "name": "Shifting Wilds",
+        "type": "land",
+        "count": 4,
+        "cost": 0.0,
+        "attack": null,
+        "health": null,
+        "effect": "{T}, Sacrifice this land: Search your library for a basic land card, put it onto the battlefield tapped, then shuffle."
+    },
+    {
+        "name": "Sylvan Realm",
+        "type": "land",
+        "count": 12,
+        "cost": 0.0,
+        "attack": null,
+        "health": null,
+        "effect": "({T}: Add {G}.)"
+    },
+    {
+        "name": "Wasteland Houndmaster",
+        "type": "creature",
+        "count": 2,
+        "cost": 5.0,
+        "attack": "4",
+        "health": "4",
+        "effect": "When Wasteland Houndmaster enters, up to two target creatures each get +1/+0 and gain indestructible until end of turn. (Damage and effects that say \"destroy\" don't destroy them.)"
+    },
+    {
+        "name": "Force of the Wilds",
+        "type": "instant",
+        "count": 4,
+        "cost": 2.0,
+        "attack": null,
+        "health": null,
+        "effect": "Kicker {2}{G} (You may pay an additional {2}{G} as you cast this spell.)\nTarget creature gets +3/+3 until end of turn. If this spell was kicked, that creature gets +5/+5 until end of turn instead."
+    },
+    {
+        "name": "Wildland Brute",
+        "type": "creature",
+        "count": 3,
+        "cost": 3.0,
+        "attack": "3",
+        "health": "3",
+        "effect": null
+    },
+    {
+        "name": "Insatiable Abyss",
+        "type": "instant",
+        "count": 2,
+        "cost": 2.0,
+        "attack": null,
+        "health": null,
+        "effect": "Target creature you control gains indestructible until end of turn. Draw a card if that creature has a +1/+1 counter on it. (Damage and effects that say \"destroy\" don't destroy the creature.)"
+    },
+    {
+        "name": "Lifebloom Ooze",
+        "type": "creature",
+        "count": 1,
+        "cost": 3.0,
+        "attack": "2",
+        "health": "2",
+        "effect": "When Lifebloom Ooze enters, put a +1/+1 counter on target creature you control.\nWhenever Lifebloom Ooze attacks, put a +1/+1 counter on each attacking creature with a +1/+1 counter on it."
+    },
+    {
+        "name": "Savage Strike",
+        "type": "sorcery",
+        "count": 3,
+        "cost": 2.0,
+        "attack": null,
+        "health": null,
+        "effect": "Target creature you control deals damage equal to its power to target creature you don't control."
+    },
+    {
+        "name": "Creeping Colony",
+        "type": "creature",
+        "count": 3,
+        "cost": 2.0,
+        "attack": "2",
+        "health": "2",
+        "effect": "Reach\nCreeping Colony gets +2/+2 as long as you control eight or more lands."
+    },
+    {
+        "name": "Marsh Wraith",
+        "type": "creature",
+        "count": 2,
+        "cost": 4.0,
+        "attack": "2",
+        "health": "3",
+        "effect": "Flying\n{5}{B}: Target opponent loses 2 life and you gain 2 life."
+    },
+    {
+        "name": "Nightmarsh",
+        "type": "land",
+        "count": 11,
+        "cost": 0.0,
+        "attack": null,
+        "health": null,
+        "effect": "({T}: Add {B}.)"
+    },
+    {
+        "name": "Bloodborne Spawn",
+        "type": "creature",
+        "count": 3,
+        "cost": 3.0,
+        "attack": "2",
+        "health": "3",
+        "effect": "When this creature enters, each opponent loses 2 life and you gain 2 life."
+    }
+]
