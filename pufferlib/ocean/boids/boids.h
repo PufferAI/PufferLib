@@ -83,11 +83,12 @@ void c_reset(Boids* env) {
 
 void c_step(Boids* env, Velocity* action) {
     for (unsigned int indx = 0; indx < env->num_boids; indx++) {
-        Boid* ptr_current_boid = &env->boids[indx];
-        ptr_current_boid->velocity.x = action->x;
-        ptr_current_boid->velocity.y = action->y;
-        ptr_current_boid->x += ptr_current_boid->velocity.x;
-        ptr_current_boid->y += ptr_current_boid->velocity.y;
+        // Apply action
+        Boid* current_boid = &env->boids[indx];
+        current_boid->velocity.x = action->x;
+        current_boid->velocity.y = action->y;
+        current_boid->x += current_boid->velocity.x;
+        current_boid->y += current_boid->velocity.y;
     }
 }
 
