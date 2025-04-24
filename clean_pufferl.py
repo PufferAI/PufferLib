@@ -113,9 +113,16 @@ def create(config, vecenv, policy, optimizer=None, wandb=None, neptune=None):
     # TODO: This breaks compile
     if isinstance(policy, torch.nn.LSTM):
         assert total_agents > 0
-        shape = (total_agents, policy.hidden_size)
-        lstm_h = torch.zeros(shape).to(config.device)
-        lstm_c = torch.zeros(shape).to(config.device)
+        if config.env_batch_size > 1:
+            shape = (total_agents, policy.hidden_size)
+            lstm_h = torch.zeros(shape).to(config.device)
+            lstm_c = torch.zeros(shape).to(config.device)
+        else:
+            # TODO: Doesn't exist in native envs
+            n = vecenv.agents_per_batch
+            shape = (n, policy.hidden_size)
+            lstm_h = {(i*n, (i+1)*n):torch.zeros(shape).to(config.device) for i in range(total_agents//n)}
+            lstm_c = {(i*n, (i+1)*n):torch.zeros(shape).to(config.device) for i in range(total_agents//n)}
 
     minibatch_size = min(config.minibatch_size, config.max_minibatch_size)
     uncompiled_policy = policy
@@ -256,8 +263,12 @@ def evaluate(data):
         h = None
         c = None
         if lstm_h is not None:
-            h = lstm_h[gpu_env_id]
-            c = lstm_c[gpu_env_id]
+            if config.env_batch_size == 1:
+                h = lstm_h[(gpu_env_id.start, gpu_env_id.stop)]
+                c = lstm_c[(gpu_env_id.start, gpu_env_id.stop)]
+            else:
+                h = lstm_h[gpu_env_id]
+                c = lstm_c[gpu_env_id]
 
         profile('eval_forward', epoch)
         with torch.no_grad():
@@ -280,8 +291,12 @@ def evaluate(data):
         profile('eval_copy', epoch)
         with torch.no_grad():
             if lstm_h is not None:
-                lstm_h[gpu_env_id] = state.lstm_h
-                lstm_c[gpu_env_id] = state.lstm_c
+                if config.env_batch_size == 1:
+                    lstm_h[(gpu_env_id.start, gpu_env_id.stop)] = state.lstm_h
+                    lstm_c[(gpu_env_id.start, gpu_env_id.stop)] = state.lstm_c
+                else:
+                    lstm_h[gpu_env_id] = state.lstm_h
+                    lstm_c[gpu_env_id] = state.lstm_c
 
             o = o if config.cpu_offload else o_device
             actions = store(data, state, o, value, action, logprob, r, d, gpu_env_id, mask)
