@@ -52,11 +52,8 @@ cdef class CyBoids:
 
         cdef int indx
         for indx in range(self.num_envs):
-            print("INDEX: %d\n", indx)
             self.envs[indx] = Boids()
-            print("INITIALIZED STRUCT\n")
             c_init(&self.envs[indx], num_boids)
-            print("INITIALIZED ENV\n")
 
     def reset(self):
         cdef int indx

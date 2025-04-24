@@ -43,6 +43,10 @@ typedef struct {
     Texture2D boid_texture;
 } Client;
 
+float get_random_float(float min, float max) {
+    return min + (float)(rand() % (int)(max - min + 1));
+}
+
 void c_init(Boids* env, unsigned int num_boids) {
     printf("STARTING INIT\n");
     env->observations = (Boid*)calloc(num_boids * num_boids, sizeof(Boid));
@@ -52,8 +56,8 @@ void c_init(Boids* env, unsigned int num_boids) {
     env->boids = (Boid*)calloc(num_boids, sizeof(Boid));
     env->num_boids = num_boids;
     for (unsigned int indx = 0; indx < num_boids; indx++) {
-        env->boids[indx].x = WIDTH / 2;
-        env->boids[indx].y = HEIGHT / 2;
+        env->boids[indx].x = get_random_float(LEFT_MARGIN, WIDTH - RIGHT_MARGIN);
+        env->boids[indx].y = get_random_float(BOTTOM_MARGIN, HEIGHT - TOP_MARGIN);
         env->boids[indx].velocity.x = 0;
         env->boids[indx].velocity.y = 0;
     }
@@ -79,11 +83,11 @@ void c_reset(Boids* env) {
 
 void c_step(Boids* env, Velocity* action) {
     for (unsigned int indx = 0; indx < env->num_boids; indx++) {
-        Boid* current_boid = &env->boids[indx]; // TODO: remove pointer, try using the struct directly
-        current_boid->velocity.x = action->x;
-        current_boid->velocity.y = action->y;
-        current_boid->x += current_boid->velocity.x;
-        current_boid->y += current_boid->velocity.y;
+        Boid* ptr_current_boid = &env->boids[indx];
+        ptr_current_boid->velocity.x = action->x;
+        ptr_current_boid->velocity.y = action->y;
+        ptr_current_boid->x += ptr_current_boid->velocity.x;
+        ptr_current_boid->y += ptr_current_boid->velocity.y;
     }
 }
 
@@ -112,24 +116,26 @@ void c_render(Client* client, Boids* env) {
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});
 
-    DrawTexturePro(
-        client->boid_texture,
-        (Rectangle){
-            (env->boids[0].velocity.x > 0) ? 0 : 128,
+    for (unsigned int indx = 0; indx < env->num_boids; indx++) {
+        DrawTexturePro(
+            client->boid_texture,
+            (Rectangle){
+                (env->boids[indx].velocity.x > 0) ? 0 : 128,
+                0,
+                128,
+                128,
+            },
+            (Rectangle){
+                env->boids[indx].x,
+                env->boids[indx].y,
+                client->boid_width,
+                client->boid_height
+            },
+            (Vector2){0, 0},
             0,
-            128,
-            128,
-        },
-        (Rectangle){
-            env->boids[0].x,
-            env->boids[0].y,
-            client->boid_width,
-            client->boid_height
-        },
-        (Vector2){0, 0},
-        0,
-        WHITE
-    );
+            WHITE
+        );
+    }
 
     EndDrawing();
 }
