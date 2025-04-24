@@ -29,7 +29,7 @@ cdef extern from "boids.h":
         float width
         float height
 
-    void c_init(Boids* env)
+    void c_init(Boids* env, int num_boids)
     void c_reset(Boids* env)
     void c_step(Boids* env, Velocity* action)
 
@@ -45,15 +45,18 @@ cdef class CyBoids:
         float width
         float height
 
-    def __init__(self, int num_envs, float[:, :] observations, Velocity[:] actions, float[:] rewards, unsigned char[:] terminals):
+    def __init__(self, int num_envs, unsigned int num_boids, float[:, :] observations, Velocity[:, :] actions, float[:] rewards, unsigned char[:] terminals):
         self.num_envs = num_envs
         self.client = NULL
         self.envs = <Boids*> calloc(num_envs, sizeof(Boids))
 
         cdef int indx
         for indx in range(self.num_envs):
+            print("INDEX: %d\n", indx)
             self.envs[indx] = Boids()
-            c_init(&self.envs[indx])
+            print("INITIALIZED STRUCT\n")
+            c_init(&self.envs[indx], num_boids)
+            print("INITIALIZED ENV\n")
 
     def reset(self):
         cdef int indx
