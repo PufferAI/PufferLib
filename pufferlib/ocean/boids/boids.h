@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <stdbool.h>
-#include <math.h>
 #include "raylib.h"
 
 #define TOP_MARGIN 50
