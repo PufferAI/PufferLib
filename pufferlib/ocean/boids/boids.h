@@ -1,4 +1,3 @@
-// TODO: create a c_free function to free allocations in the c_init, fixing memory leaks
 #include <stdlib.h>
 #include <stdbool.h>
 #include "raylib.h"
@@ -64,6 +63,14 @@ void c_init(Boids* env, unsigned int num_boids) {
         env->boids[indx].velocity.x = 0;
         env->boids[indx].velocity.y = 0;
     }
+}
+
+void c_free(Boids* env) {
+    free(env->observations);
+    free(env->actions);
+    free(env->rewards);
+    free(env->terminals);
+    free(env->boids);
 }
 
 void c_compute_observations(Boids* env) {
