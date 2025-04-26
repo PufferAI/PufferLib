@@ -68,11 +68,11 @@ void c_compute_observations(Boids* env) {
     unsigned int current_observations_start_indx = 0;
     for (unsigned int current_boid_indx = 0; current_boid_indx < env->num_boids; current_boid_indx++) {
         current_observations_start_indx = current_boid_indx * env->num_boids;
-        for (unsigned int observed_boid_indx = 0; observed_boid_indx < current_boid_indx; observed_boid_indx++) {
-            env->observations[current_observations_start_indx + observed_boid_indx] = env->boids[observed_boid_indx];
+        for (unsigned int observed_indx = 0; observed_indx < current_boid_indx; observed_indx++) {
+            env->observations[current_observations_start_indx + observed_indx] = env->boids[observed_indx];
         }
-        for (unsigned int observed_boid_indx = current_boid_indx + 1; observed_boid_indx < env->num_boids; observed_boid_indx++) {
-            env->observations[current_observations_start_indx + observed_boid_indx] = env->boids[observed_boid_indx];
+        for (unsigned int observed_indx = current_boid_indx + 1; observed_indx < env->num_boids; observed_indx++) {
+            env->observations[current_observations_start_indx + observed_indx] = env->boids[observed_indx];
         }
     }
 }
