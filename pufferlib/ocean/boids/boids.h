@@ -45,7 +45,7 @@ typedef struct {
     Texture2D boid_texture;
 } Client;
 
-float get_random_float(float min, float max) {
+float random_float(float min, float max) {
     return min + (float)(rand() % (int)(max - min + 1));
 }
 
@@ -56,8 +56,8 @@ void c_init(Boids* env) {
     env->terminals = (unsigned char*)calloc(env->num_boids, sizeof(unsigned char));
     env->boids = (Boid*)calloc(env->num_boids, sizeof(Boid));
     for (unsigned int indx = 0; indx < env->num_boids; indx++) {
-        env->boids[indx].x = get_random_float(LEFT_MARGIN, WIDTH - RIGHT_MARGIN);
-        env->boids[indx].y = get_random_float(BOTTOM_MARGIN, HEIGHT - TOP_MARGIN);
+        env->boids[indx].x = random_float(LEFT_MARGIN, WIDTH - RIGHT_MARGIN);
+        env->boids[indx].y = random_float(BOTTOM_MARGIN, HEIGHT - TOP_MARGIN);
         env->boids[indx].velocity.x = 0;
         env->boids[indx].velocity.y = 0;
     }
