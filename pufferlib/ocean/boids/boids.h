@@ -84,14 +84,68 @@ void c_reset(Boids* env) {
 }
 
 void c_step(Boids* env, Velocity* action) {
+    Boid* current_boid;
+    Boid observed_boid;
+    float diff_x;
+    float diff_y;
+    float squared_distance;
+    float reward;
+    unsigned int visual_boids_num;
+    Boid visual_avg_boid;
+
     for (unsigned int indx = 0; indx < env->num_boids; indx++) {
         // Apply action
-        Boid* current_boid = &env->boids[indx];
+        current_boid = &env->boids[indx];
         // TODO: change = to +=
         current_boid->velocity.x = action->x;
         current_boid->velocity.y = action->y;
         current_boid->x += current_boid->velocity.x;
         current_boid->y += current_boid->velocity.y;
+
+        // Calculate rewards
+        reward = 0, visual_boids_num = 0;
+        visual_avg_boid.x = 0, visual_avg_boid.y = 0;
+        visual_avg_boid.velocity.x = 0, visual_avg_boid.velocity.y = 0;
+        for (unsigned int observed_indx = 0; observed_indx < env->num_boids; observed_indx++) {
+            observed_boid = env->observations[observed_indx];
+            diff_x = current_boid->x - observed_boid.x;
+            diff_y = current_boid->y - observed_boid.y;
+            squared_distance = diff_x*diff_x + diff_y*diff_y;
+            if (squared_distance < PROTECTED_RANGE_SQUARED) {
+                reward -= (PROTECTED_RANGE_SQUARED - squared_distance) * AVOID_FACTOR;
+            } else if (squared_distance < VISUAL_RANGE_SQUARED) {
+                visual_avg_boid.x += observed_boid.x;
+                visual_avg_boid.y += observed_boid.y;
+                visual_avg_boid.velocity.x += observed_boid.velocity.x;
+                visual_avg_boid.velocity.y += observed_boid.velocity.y;
+                visual_boids_num++;
+            }
+        }
+
+        if (visual_boids_num > 0) {
+            visual_avg_boid.x /= visual_boids_num;
+            visual_avg_boid.y /= visual_boids_num;
+            visual_avg_boid.velocity.x /= visual_boids_num;
+            visual_avg_boid.velocity.y /= visual_boids_num;
+            reward -= (visual_avg_boid.velocity.x - current_boid->velocity.x)*MATCHING_FACTOR;
+            reward -= (visual_avg_boid.velocity.y - current_boid->velocity.y)*MATCHING_FACTOR;
+            reward -= (visual_avg_boid.x - current_boid->x)*CENTERING_FACTOR;
+            reward -= (visual_avg_boid.y - current_boid->y)*CENTERING_FACTOR;
+        }
+
+        if (current_boid->y < TOP_MARGIN) {
+            reward -= MARGIN_TURN_FACTOR;
+        } else if (current_boid->y > HEIGHT - BOTTOM_MARGIN) {
+            reward -= MARGIN_TURN_FACTOR;
+        }
+
+        if (current_boid->x < LEFT_MARGIN) {
+            reward -= MARGIN_TURN_FACTOR;
+        } else if (current_boid->x > WIDTH - RIGHT_MARGIN) {
+            reward -= MARGIN_TURN_FACTOR;
+        }
+
+        env->rewards[indx] = reward;
     }
 }
 
