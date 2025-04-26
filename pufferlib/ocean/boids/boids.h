@@ -93,7 +93,7 @@ void c_step(Boids* env, Velocity* action) {
     Boid observed_boid;
     float diff_x;
     float diff_y;
-    float squared_distance;
+    float distance_squared;
     float reward;
     unsigned int visual_boids_num;
     Boid visual_avg_boid;
@@ -114,10 +114,10 @@ void c_step(Boids* env, Velocity* action) {
             observed_boid = env->observations[observed_indx];
             diff_x = current_boid->x - observed_boid.x;
             diff_y = current_boid->y - observed_boid.y;
-            squared_distance = diff_x*diff_x + diff_y*diff_y;
-            if (squared_distance < PROTECTED_RANGE_SQUARED) {
-                reward -= (PROTECTED_RANGE_SQUARED - squared_distance) * AVOID_FACTOR;
-            } else if (squared_distance < VISUAL_RANGE_SQUARED) {
+            distance_squared = diff_x*diff_x + diff_y*diff_y;
+            if (distance_squared < PROTECTED_RANGE_SQUARED) {
+                reward -= (PROTECTED_RANGE_SQUARED - distance_squared) * AVOID_FACTOR;
+            } else if (distance_squared < VISUAL_RANGE_SQUARED) {
                 visual_avg_boid.x += observed_boid.x;
                 visual_avg_boid.y += observed_boid.y;
                 visual_avg_boid.velocity.x += observed_boid.velocity.x;
