@@ -96,9 +96,8 @@ void c_step(Boids* env, Velocity* action) {
     for (unsigned int indx = 0; indx < env->num_boids; indx++) {
         // Apply action
         current_boid = &env->boids[indx];
-        // TODO: change = to +=
-        current_boid->velocity.x = action->x;
-        current_boid->velocity.y = action->y;
+        current_boid->velocity.x += action->x;
+        current_boid->velocity.y += action->y;
         current_boid->x += current_boid->velocity.x;
         current_boid->y += current_boid->velocity.y;
 
