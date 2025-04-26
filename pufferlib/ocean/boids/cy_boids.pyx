@@ -24,12 +24,13 @@ cdef extern from "boids.h":
         float rewards[NUM_BOIDS]
         unsigned char* terminals
         Boid boids[NUM_BOIDS]
+        unsigned int num_boids
 
     ctypedef struct Client:
         float width
         float height
 
-    void c_init(Boids* env, int num_boids)
+    void c_init(Boids* env)
     void c_reset(Boids* env)
     void c_step(Boids* env, Velocity* action)
 
@@ -52,8 +53,8 @@ cdef class CyBoids:
 
         cdef int indx
         for indx in range(self.num_envs):
-            self.envs[indx] = Boids()
-            c_init(&self.envs[indx], num_boids)
+            self.envs[indx] = Boids(num_boids=num_boids)
+            c_init(&self.envs[indx])
 
     def reset(self):
         cdef int indx

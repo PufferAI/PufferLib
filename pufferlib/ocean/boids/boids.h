@@ -49,15 +49,13 @@ float get_random_float(float min, float max) {
     return min + (float)(rand() % (int)(max - min + 1));
 }
 
-// TODO: remove num_boids initialization out from the c_init and into the struct initialization of Boids
-void c_init(Boids* env, unsigned int num_boids) {
-    env->observations = (Boid*)calloc(num_boids * num_boids, sizeof(Boid));
-    env->actions = (Velocity*)calloc(num_boids, sizeof(Velocity));
-    env->rewards = (float*)calloc(num_boids, sizeof(float));
-    env->terminals = (unsigned char*)calloc(num_boids, sizeof(unsigned char));
-    env->boids = (Boid*)calloc(num_boids, sizeof(Boid));
-    env->num_boids = num_boids;
-    for (unsigned int indx = 0; indx < num_boids; indx++) {
+void c_init(Boids* env) {
+    env->observations = (Boid*)calloc(env->num_boids * env->num_boids, sizeof(Boid));
+    env->actions = (Velocity*)calloc(env->num_boids, sizeof(Velocity));
+    env->rewards = (float*)calloc(env->num_boids, sizeof(float));
+    env->terminals = (unsigned char*)calloc(env->num_boids, sizeof(unsigned char));
+    env->boids = (Boid*)calloc(env->num_boids, sizeof(Boid));
+    for (unsigned int indx = 0; indx < env->num_boids; indx++) {
         env->boids[indx].x = get_random_float(LEFT_MARGIN, WIDTH - RIGHT_MARGIN);
         env->boids[indx].y = get_random_float(BOTTOM_MARGIN, HEIGHT - TOP_MARGIN);
         env->boids[indx].velocity.x = 0;
