@@ -1,3 +1,4 @@
+// TODO: create a c_free function to free allocations in the c_init, fixing memory leaks
 #include <stdlib.h>
 #include <stdbool.h>
 #include "raylib.h"
@@ -47,8 +48,8 @@ float get_random_float(float min, float max) {
     return min + (float)(rand() % (int)(max - min + 1));
 }
 
+// TODO: remove num_boids initialization out from the c_init and into the struct initialization of Boids
 void c_init(Boids* env, unsigned int num_boids) {
-    printf("STARTING INIT\n");
     env->observations = (Boid*)calloc(num_boids * num_boids, sizeof(Boid));
     env->actions = (Velocity*)calloc(num_boids, sizeof(Velocity));
     env->rewards = (float*)calloc(num_boids, sizeof(float));
@@ -61,7 +62,6 @@ void c_init(Boids* env, unsigned int num_boids) {
         env->boids[indx].velocity.x = 0;
         env->boids[indx].velocity.y = 0;
     }
-    printf("ENDING INIT\n");
 }
 
 void c_compute_observations(Boids* env) {
