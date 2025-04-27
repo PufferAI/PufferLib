@@ -170,7 +170,10 @@ void c_step(Boids* env, Velocity* action) {
             reward -= MARGIN_TURN_FACTOR;
         }
 
-        env->rewards[indx] = reward;
+        // min-max normalizing reward
+        env->rewards[indx] = 2
+            * ((reward-env->min_rewrard) / (env->max_rewrard - env->min_rewrard))
+            - 1;
     }
 }
 
