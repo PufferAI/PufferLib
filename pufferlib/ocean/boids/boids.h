@@ -52,6 +52,14 @@ float flmax(float num1, float num2) {
     return (num1 > num2) ? num1 : num2;
 }
 
+float flmin(float num1, float num2) {
+    return (num1 > num2) ? num2 : num1;
+}
+
+float flclip(float num, float min, float max) {
+    return flmin(max, flmax(min, num));
+}
+
 float random_float(float min, float max) {
     return min + (float)(rand() % (int)(max - min + 1));
 }
@@ -115,13 +123,12 @@ void c_step(Boids* env, Velocity* action) {
     Boid visual_avg_boid;
 
     for (unsigned int indx = 0; indx < env->num_boids; indx++) {
-        // TODO: Don't allow boids to fly out of the window/screen.
         // Apply action
         current_boid = &env->boids[indx];
         current_boid->velocity.x += action->x;
         current_boid->velocity.y += action->y;
-        current_boid->x += current_boid->velocity.x;
-        current_boid->y += current_boid->velocity.y;
+        current_boid->x = flclip(current_boid->x + current_boid->velocity.x, 0, WIDTH);
+        current_boid->y = flclip(current_boid->y + current_boid->velocity.y, 0, HEIGHT);
 
         // Calculate rewards
         reward = 0, visual_boids_num = 0;
