@@ -38,8 +38,8 @@ typedef struct {
     unsigned char* terminals;
     Boid* boids;
     unsigned int num_boids;
-    int max_rewrard;
-    int min_rewrard;
+    int max_reward;
+    int min_reward;
 } Boids;
 
 typedef struct {
@@ -73,8 +73,8 @@ void c_init(Boids* env) {
     }
 
     // Claculate max and min rewards
-    env->max_rewrard = 0;
-    env->min_rewrard = -1
+    env->max_reward = 0;
+    env->min_reward = -1
         * flmax(MAX_AVOID_DISTANCE_SQAURED * env->num_boids, MAX_AVG_POSITION_SQAURED)
         - 2*MARGIN_TURN_FACTOR;
 }
@@ -172,7 +172,7 @@ void c_step(Boids* env, Velocity* action) {
 
         // min-max normalizing reward
         env->rewards[indx] = 2
-            * ((reward-env->min_rewrard) / (env->max_rewrard - env->min_rewrard))
+            * ((reward-env->min_reward) / (env->max_reward - env->min_reward))
             - 1;
     }
 }
