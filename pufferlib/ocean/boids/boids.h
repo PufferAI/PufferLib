@@ -100,6 +100,7 @@ void c_step(Boids* env, Velocity* action) {
     Boid visual_avg_boid;
 
     for (unsigned int indx = 0; indx < env->num_boids; indx++) {
+        // TODO: Don't allow boids to fly out of the window/screen.
         // Apply action
         current_boid = &env->boids[indx];
         current_boid->velocity.x += action->x;
