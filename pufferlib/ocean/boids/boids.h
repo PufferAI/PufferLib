@@ -76,7 +76,7 @@ void c_init(Boids* env) {
     env->max_rewrard = 0;
     env->min_rewrard = -1
         * flmax(MAX_AVOID_DISTANCE_SQAURED * env->num_boids, MAX_AVG_POSITION_SQAURED)
-        - (MARGIN_TURN_FACTOR * 2);
+        - 2*MARGIN_TURN_FACTOR;
 }
 
 void c_free(Boids* env) {
