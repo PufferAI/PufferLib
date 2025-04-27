@@ -1,4 +1,7 @@
-'''High-perf Boids'''
+'''
+High-perf Boids
+Inspired by https://people.ece.cornell.edu/land/courses/ece4760/labs/s2021/Boids/Boids.html
+'''
 
 import numpy as np
 import gymnasium
