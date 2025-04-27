@@ -20,6 +20,9 @@
 #define MAX_AVG_VELOCITY_SQUARED VELOCITY_CAP * 4 * MATCHING_FACTOR
 #define WIDTH 800
 #define HEIGHT 600
+#define BOID_WIDTH 32
+#define BOID_HEIGHT 32
+
 typedef struct {
     float x;
     float y;
@@ -127,8 +130,8 @@ void c_step(Boids* env, Velocity* action) {
         current_boid = &env->boids[indx];
         current_boid->velocity.x += flclip(action->x, -VELOCITY_CAP, VELOCITY_CAP);
         current_boid->velocity.y += flclip(action->y, -VELOCITY_CAP, VELOCITY_CAP);
-        current_boid->x = flclip(current_boid->x + current_boid->velocity.x, 0, WIDTH);
-        current_boid->y = flclip(current_boid->y + current_boid->velocity.y, 0, HEIGHT);
+        current_boid->x = flclip(current_boid->x + current_boid->velocity.x, 0, WIDTH - BOID_WIDTH);
+        current_boid->y = flclip(current_boid->y + current_boid->velocity.y, 0, HEIGHT - BOID_HEIGHT);
 
         // Calculate rewards
         reward = 0, visual_boids_num = 0;
@@ -190,8 +193,8 @@ Client* c_make_client(Boids* env) {
     InitWindow(WIDTH, HEIGHT, "PufferLib Boids");
     SetTargetFPS(60);
     client->boid_texture = LoadTexture("resources/puffers_128.png");
-    client->boid_width = 32;
-    client->boid_height = 32;
+    client->boid_width = BOID_WIDTH;
+    client->boid_height = BOID_HEIGHT;
 
     return client;
 }
