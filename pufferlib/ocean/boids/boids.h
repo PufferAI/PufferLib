@@ -57,11 +57,14 @@ float random_float(float min, float max) {
 }
 
 void c_init(Boids* env) {
+    // Dynamic allocs
     env->observations = (Boid*)calloc(env->num_boids * env->num_boids, sizeof(Boid));
     env->actions = (Velocity*)calloc(env->num_boids, sizeof(Velocity));
     env->rewards = (float*)calloc(env->num_boids, sizeof(float));
     env->terminals = (unsigned char*)calloc(env->num_boids, sizeof(unsigned char));
     env->boids = (Boid*)calloc(env->num_boids, sizeof(Boid));
+
+    // Initialization
     for (unsigned int indx = 0; indx < env->num_boids; indx++) {
         env->boids[indx].x = random_float(LEFT_MARGIN, WIDTH - RIGHT_MARGIN);
         env->boids[indx].y = random_float(BOTTOM_MARGIN, HEIGHT - TOP_MARGIN);
@@ -130,6 +133,7 @@ void c_step(Boids* env, Velocity* action) {
             diff_y = current_boid->y - observed_boid.y;
             distance_squared = diff_x*diff_x + diff_y*diff_y;
             if (distance_squared < PROTECTED_RANGE_SQUARED) {
+                // seperation/avoidance reward
                 reward -= (PROTECTED_RANGE_SQUARED - distance_squared) * AVOID_FACTOR;
             } else if (distance_squared < VISUAL_RANGE_SQUARED) {
                 visual_avg_boid.x += observed_boid.x;
@@ -145,12 +149,15 @@ void c_step(Boids* env, Velocity* action) {
             visual_avg_boid.y /= visual_boids_num;
             visual_avg_boid.velocity.x /= visual_boids_num;
             visual_avg_boid.velocity.y /= visual_boids_num;
+
+            // alignement and cohesion rewards
             reward -= (visual_avg_boid.velocity.x - current_boid->velocity.x)*MATCHING_FACTOR;
             reward -= (visual_avg_boid.velocity.y - current_boid->velocity.y)*MATCHING_FACTOR;
             reward -= (visual_avg_boid.x - current_boid->x)*CENTERING_FACTOR;
             reward -= (visual_avg_boid.y - current_boid->y)*CENTERING_FACTOR;
         }
 
+        // Margin rewards
         if (current_boid->y < TOP_MARGIN) {
             reward -= MARGIN_TURN_FACTOR;
         } else if (current_boid->y > HEIGHT - BOTTOM_MARGIN) {
