@@ -6,7 +6,7 @@
 #define BOTTOM_MARGIN 50
 #define LEFT_MARGIN 50
 #define RIGHT_MARGIN 50
-#define VELOCITY_CAP 3 // TODO: apply to velocity cap to each boid
+#define VELOCITY_CAP 3
 #define MARGIN_TURN_FACTOR 0.2
 #define VISUAL_RANGE 20
 #define VISUAL_RANGE_SQUARED VISUAL_RANGE * VISUAL_RANGE
@@ -125,8 +125,8 @@ void c_step(Boids* env, Velocity* action) {
     for (unsigned int indx = 0; indx < env->num_boids; indx++) {
         // Apply action
         current_boid = &env->boids[indx];
-        current_boid->velocity.x += action->x;
-        current_boid->velocity.y += action->y;
+        current_boid->velocity.x += flclip(action->x, -VELOCITY_CAP, VELOCITY_CAP);
+        current_boid->velocity.y += flclip(action->y, -VELOCITY_CAP, VELOCITY_CAP);
         current_boid->x = flclip(current_boid->x + current_boid->velocity.x, 0, WIDTH);
         current_boid->y = flclip(current_boid->y + current_boid->velocity.y, 0, HEIGHT);
 
