@@ -6,6 +6,7 @@
 #define BOTTOM_MARGIN 50
 #define LEFT_MARGIN 50
 #define RIGHT_MARGIN 50
+#define VELOCITY_CAP 3 // TODO: apply to velocity cap to each boid
 #define MARGIN_TURN_FACTOR 0.2
 #define VISUAL_RANGE 20
 #define VISUAL_RANGE_SQUARED VISUAL_RANGE * VISUAL_RANGE
