@@ -15,11 +15,11 @@
 #define CENTERING_FACTOR 0.0005
 #define AVOID_FACTOR 0.05
 #define MATCHING_FACTOR 0.05
-#define MAX_SPEED 3
-#define MIN_SPEED 2
+#define MAX_AVOID_DISTANCE_SQAURED PROTECTED_RANGE_SQUARED * AVOID_FACTOR
+#define MAX_AVG_POSITION_SQAURED VISUAL_RANGE_SQUARED * CENTERING_FACTOR
+#define MAX_AVG_VELOCITY_SQUARED VELOCITY_CAP * 4 * MATCHING_FACTOR
 #define WIDTH 800
 #define HEIGHT 600
-
 typedef struct {
     float x;
     float y;
@@ -38,6 +38,8 @@ typedef struct {
     unsigned char* terminals;
     Boid* boids;
     unsigned int num_boids;
+    int max_rewrard;
+    int min_rewrard;
 } Boids;
 
 typedef struct {
@@ -45,6 +47,10 @@ typedef struct {
     float boid_height;
     Texture2D boid_texture;
 } Client;
+
+float flmax(float num1, float num2) {
+    return (num1 > num2) ? num1 : num2;
+}
 
 float random_float(float min, float max) {
     return min + (float)(rand() % (int)(max - min + 1));
@@ -62,6 +68,12 @@ void c_init(Boids* env) {
         env->boids[indx].velocity.x = 0;
         env->boids[indx].velocity.y = 0;
     }
+
+    // Claculate max and min rewards
+    env->max_rewrard = 0;
+    env->min_rewrard = -1
+        * flmax(MAX_AVOID_DISTANCE_SQAURED * env->num_boids, MAX_AVG_POSITION_SQAURED)
+        - (MARGIN_TURN_FACTOR * 2);
 }
 
 void c_free(Boids* env) {
