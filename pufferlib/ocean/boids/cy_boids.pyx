@@ -19,11 +19,11 @@ cdef extern from "boids.h":
         Velocity velocity
         
     ctypedef struct Boids:
-        Boid observations[NUM_BOIDS][NUM_BOIDS]
-        Velocity actions[NUM_BOIDS]
-        float rewards[NUM_BOIDS]
+        Boid* observations
+        float* actions
+        float* rewards
         unsigned char* terminals
-        Boid boids[NUM_BOIDS]
+        Boid* boids
         unsigned int num_boids
 
     ctypedef struct Client:
@@ -32,7 +32,7 @@ cdef extern from "boids.h":
 
     void c_init(Boids* env)
     void c_reset(Boids* env)
-    void c_step(Boids* env, Velocity* action)
+    void c_step(Boids* env)
 
     Client* c_make_client(Boids* env)
     void c_close_client(Client* client)
@@ -46,14 +46,28 @@ cdef class CyBoids:
         float width
         float height
 
-    def __init__(self, int num_envs, unsigned int num_boids, float[:, :] observations, Velocity[:, :] actions, float[:] rewards, unsigned char[:] terminals):
+    def __init__(
+        self,
+        float[:, :, :] observations,
+        float[:, :] actions,
+        float[:] rewards,
+        unsigned char[:] terminals,
+        int num_envs,
+        unsigned int num_boids
+    ):
         self.num_envs = num_envs
         self.client = NULL
         self.envs = <Boids*> calloc(num_envs, sizeof(Boids))
 
         cdef int indx
         for indx in range(self.num_envs):
-            self.envs[indx] = Boids(num_boids=num_boids)
+            self.envs[indx] = Boids(
+                observations=&observations[indx],
+                actions=&actions[indx],
+                # rewards=&rewards[indx],
+                # terminals=&terminals[indx]
+                num_boids=num_boids,
+            )
             c_init(&self.envs[indx])
 
     def reset(self):
@@ -61,12 +75,13 @@ cdef class CyBoids:
         for indx in range(self.num_envs):
             c_reset(&self.envs[indx])
 
-    def step(self, actions):
+    def step(self):
         cdef int indx
-        cdef Velocity action
+        print("CYTHON ACTIONS 0:", self.envs[0].actions[0])
+        print("CYTHON ACTIONS 1:", self.envs[0].actions[1])
         for indx in range(self.num_envs):
-            action = actions[indx] # Converting each action to a Velocity struct
-            c_step(&self.envs[indx], &action)
+            c_step(&self.envs[indx])
+            # print("CYTHON REWARDS", self.envs[indx].rewards[1])
 
     def render(self):
         cdef Boids* env = &self.envs[0]

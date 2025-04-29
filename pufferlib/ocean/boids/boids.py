@@ -9,19 +9,34 @@ import gymnasium
 import pufferlib
 from pufferlib.ocean.boids.cy_boids import CyBoids
 
-velocity_dtype = np.dtype([('x', np.float32), ('y', np.float32)])
-
 class Boids(pufferlib.PufferEnv):
-    def __init__(self, num_envs=2, width=500, height=640, num_boids=1, buf=None, render_mode=None, report_interval=128):
-        self.single_action_space = gymnasium.spaces.Box(-100.0, 100.0, shape=(2,))
-        self.single_observation_space = gymnasium.spaces.Box(-100.0, 100.0, shape=(2,))
-        self.num_agents = num_boids * num_envs
+    def __init__(
+        self,
+        num_envs=2,
+        width=500,
+        height=640,
+        num_boids=1,
+        buf=None,
+        render_mode=None,
+        report_interval=128
+    ):
+        self.num_agents = num_envs
+        self.single_action_space = gymnasium.spaces.Box(-3.0, 3.0, shape=(2,))
+        self.single_observation_space = gymnasium.spaces.Box(-1000.0, 1000.0, shape=(num_boids, 2))
         self.render_mode = render_mode
         self.report_interval = report_interval
 
         super().__init__(buf)
-        self.actions = self.actions.view(velocity_dtype)
-        self.c_envs = CyBoids(num_envs, num_boids, self.observations, self.actions, self.rewards, self.terminals)
+        # print(f"PYTHON OBSERVATIONS: {self.observations}")
+        self.actions = self.actions
+        self.c_envs = CyBoids(
+            self.observations,
+            self.actions,
+            self.rewards,
+            self.terminals,
+            num_envs,
+            num_boids,
+        )
  
     def reset(self, seed=None):
         self.tick = 0
@@ -29,7 +44,9 @@ class Boids(pufferlib.PufferEnv):
         return self.observations, []
 
     def step(self, actions):
-        self.c_envs.step(actions.view(velocity_dtype))
+        print(f"PYTHON REWARDS: {self.actions}")
+        self.actions[:] = actions
+        self.c_envs.step()
 
         self.tick += 1
         return (self.observations, self.rewards,
