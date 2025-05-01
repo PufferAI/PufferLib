@@ -246,20 +246,21 @@ common = cleanrl + [environments[env] for env in [
 ]]
 
 extension_paths = [
-    'pufferlib/ocean/nmmo3/cy_nmmo3',
-    'pufferlib/ocean/moba/cy_moba',
-    'pufferlib/ocean/tactical/c_tactical',
-    'pufferlib/ocean/squared/cy_squared',
-    'pufferlib/ocean/snake/cy_snake',
-    'pufferlib/ocean/pong/cy_pong',
-    'pufferlib/ocean/breakout/cy_breakout',
-    'pufferlib/ocean/enduro/cy_enduro',
-    'pufferlib/ocean/connect4/cy_connect4',
-    'pufferlib/ocean/grid/cy_grid',
-    'pufferlib/ocean/tripletriad/cy_tripletriad',
-    'pufferlib/ocean/go/cy_go',
-    'pufferlib/ocean/rware/cy_rware',
-    'pufferlib/ocean/trash_pickup/cy_trash_pickup'
+    # 'pufferlib/ocean/nmmo3/cy_nmmo3',
+    # 'pufferlib/ocean/moba/cy_moba',
+    # 'pufferlib/ocean/tactical/c_tactical',
+    # 'pufferlib/ocean/squared/cy_squared',
+    # 'pufferlib/ocean/snake/cy_snake',
+    # 'pufferlib/ocean/pong/cy_pong',
+    'pufferlib/ocean/boids/cy_boids',
+    # 'pufferlib/ocean/breakout/cy_breakout',
+    # 'pufferlib/ocean/enduro/cy_enduro',
+    # 'pufferlib/ocean/connect4/cy_connect4',
+    # 'pufferlib/ocean/grid/cy_grid',
+    # 'pufferlib/ocean/tripletriad/cy_tripletriad',
+    # 'pufferlib/ocean/go/cy_go',
+    # 'pufferlib/ocean/rware/cy_rware',
+    # 'pufferlib/ocean/trash_pickup/cy_trash_pickup'
 ]
 
 system = platform.system()
