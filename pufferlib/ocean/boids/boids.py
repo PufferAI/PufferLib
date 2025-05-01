@@ -3,6 +3,7 @@ High-perf Boids
 Inspired by https://people.ece.cornell.edu/land/courses/ece4760/labs/s2021/Boids/Boids.html
 '''
 
+from code import interact
 import numpy as np
 import gymnasium
 
@@ -27,8 +28,7 @@ class Boids(pufferlib.PufferEnv):
         self.report_interval = report_interval
 
         super().__init__(buf)
-        # print(f"PYTHON OBSERVATIONS: {self.observations}")
-        self.actions = self.actions
+        self.actions = self.actions.flatten()
         self.c_envs = CyBoids(
             self.observations,
             self.actions,
@@ -44,8 +44,8 @@ class Boids(pufferlib.PufferEnv):
         return self.observations, []
 
     def step(self, actions):
-        print(f"PYTHON REWARDS: {self.actions}")
-        self.actions[:] = actions
+        self.actions[:] = np.clip(actions.flatten(), -1, 1)
+        print("PYTHON ACTIONS", self.actions)
         self.c_envs.step()
 
         self.tick += 1

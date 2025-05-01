@@ -1,6 +1,7 @@
 cimport numpy as cnp
 from libc.stdlib cimport calloc, free
 import os
+import logging
 
 # NOTE: Only methods that are really necessary are c_reset, c_step, and c_render
 cdef extern from "boids.h":
@@ -49,7 +50,7 @@ cdef class CyBoids:
     def __init__(
         self,
         float[:, :, :] observations,
-        float[:, :] actions,
+        float[:] actions,
         float[:] rewards,
         unsigned char[:] terminals,
         int num_envs,
@@ -62,10 +63,10 @@ cdef class CyBoids:
         cdef int indx
         for indx in range(self.num_envs):
             self.envs[indx] = Boids(
-                observations=&observations[indx],
-                actions=&actions[indx],
-                # rewards=&rewards[indx],
-                # terminals=&terminals[indx]
+                observations=&observations[indx, 0],
+                actions=&actions[indx, 0],
+                rewards=&rewards[indx],
+                terminals=&terminals[indx],
                 num_boids=num_boids,
             )
             c_init(&self.envs[indx])
@@ -75,13 +76,10 @@ cdef class CyBoids:
         for indx in range(self.num_envs):
             c_reset(&self.envs[indx])
 
-    def step(self):
+    def step(self, actions):
         cdef int indx
-        print("CYTHON ACTIONS 0:", self.envs[0].actions[0])
-        print("CYTHON ACTIONS 1:", self.envs[0].actions[1])
         for indx in range(self.num_envs):
             c_step(&self.envs[indx])
-            # print("CYTHON REWARDS", self.envs[indx].rewards[1])
 
     def render(self):
         cdef Boids* env = &self.envs[0]

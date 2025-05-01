@@ -36,9 +36,11 @@ typedef struct {
 } Boid;
 
 typedef struct {
-    Boid* observations;
-    // an array of shape (num_boids, 2)
+    // an array of shape (num_boids, 4) with the 4 values correspoinding to (x, y, velocity x, velocity y)
+    float* observations;
+    // an array of shape (num_boids, 2) with the 2 values correspoinding to (velocity x, velocity y)
     float* actions;
+    // an array of shape (num_boids, 1) with the reward for each boid
     float* rewards;
     unsigned char* terminals;
     Boid* boids;
@@ -71,8 +73,8 @@ float random_float(float min, float max) {
 
 void c_init(Boids* env) {
     // Dynamic allocs
-    env->observations = (Boid*)calloc(env->num_boids * env->num_boids, sizeof(Boid));
-    env->actions = (float*)calloc(env->num_boids, sizeof(float));
+    env->observations = (float*)calloc(env->num_boids * env->num_boids, sizeof(float));
+    env->actions = (float*)calloc(2, sizeof(float));
     env->rewards = (float*)calloc(env->num_boids, sizeof(float));
     env->terminals = (unsigned char*)calloc(env->num_boids, sizeof(unsigned char));
     env->boids = (Boid*)calloc(env->num_boids, sizeof(Boid));
@@ -101,14 +103,14 @@ void c_free(Boids* env) {
 }
 
 void c_compute_observations(Boids* env) {
-    unsigned int current_observations_start_indx = 0;
+    unsigned int current_start_indx = 0;
     for (unsigned int current_boid_indx = 0; current_boid_indx < env->num_boids; current_boid_indx++) {
-        current_observations_start_indx = current_boid_indx * env->num_boids;
-        for (unsigned int observed_indx = 0; observed_indx < current_boid_indx; observed_indx++) {
-            env->observations[current_observations_start_indx + observed_indx] = env->boids[observed_indx];
-        }
-        for (unsigned int observed_indx = current_boid_indx + 1; observed_indx < env->num_boids; observed_indx++) {
-            env->observations[current_observations_start_indx + observed_indx] = env->boids[observed_indx];
+        current_start_indx = current_boid_indx * env->num_boids;
+        for (unsigned int observed_indx = 0; observed_indx < env->num_boids; observed_indx++) {
+            env->observations[current_start_indx + observed_indx] = env->boids[observed_indx].x;
+            env->observations[current_start_indx + observed_indx + 1] = env->boids[observed_indx].y;
+            env->observations[current_start_indx + observed_indx + 2] = env->boids[observed_indx].velocity.x;
+            env->observations[current_start_indx + observed_indx + 3] = env->boids[observed_indx].velocity.y;
         }
     }
 }
@@ -128,9 +130,7 @@ void c_step(Boids* env) {
     Boid visual_avg_boid;
 
     printf("actions: %p\n", env->actions);
-    for (unsigned int indx = 0; indx < env->num_boids * 10; indx++) {
-        printf("action: %f\n", env->actions[indx]);
-    }
+    printf("action: %f, %f\n", env->actions[0], env->actions[1]);
     return;
     // for (unsigned int indx = 0; indx < env->num_boids; indx++) {
     //     // Apply action
@@ -139,7 +139,7 @@ void c_step(Boids* env) {
     //     current_boid->velocity.y += flclip(action->y, -VELOCITY_CAP, VELOCITY_CAP);
     //     current_boid->x = flclip(current_boid->x + current_boid->velocity.x, 0, WIDTH - BOID_WIDTH);
     //     current_boid->y = flclip(current_boid->y + current_boid->velocity.y, 0, HEIGHT - BOID_HEIGHT);
-
+    //
     //     // Calculate rewards
     //     reward = 0, visual_boids_num = 0;
     //     visual_avg_boid.x = 0, visual_avg_boid.y = 0;
@@ -160,33 +160,33 @@ void c_step(Boids* env) {
     //             visual_boids_num++;
     //         }
     //     }
-
+    //
     //     if (visual_boids_num > 0) {
     //         visual_avg_boid.x /= visual_boids_num;
     //         visual_avg_boid.y /= visual_boids_num;
     //         visual_avg_boid.velocity.x /= visual_boids_num;
     //         visual_avg_boid.velocity.y /= visual_boids_num;
-
+    //
     //         // alignement and cohesion rewards
     //         reward -= (visual_avg_boid.velocity.x - current_boid->velocity.x)*MATCHING_FACTOR;
     //         reward -= (visual_avg_boid.velocity.y - current_boid->velocity.y)*MATCHING_FACTOR;
     //         reward -= (visual_avg_boid.x - current_boid->x)*CENTERING_FACTOR;
     //         reward -= (visual_avg_boid.y - current_boid->y)*CENTERING_FACTOR;
     //     }
-
+    //
     //     // Margin rewards
     //     if (current_boid->y < TOP_MARGIN) {
     //         reward -= MARGIN_TURN_FACTOR;
     //     } else if (current_boid->y > HEIGHT - BOTTOM_MARGIN) {
     //         reward -= MARGIN_TURN_FACTOR;
     //     }
-
+    //
     //     if (current_boid->x < LEFT_MARGIN) {
     //         reward -= MARGIN_TURN_FACTOR;
     //     } else if (current_boid->x > WIDTH - RIGHT_MARGIN) {
     //         reward -= MARGIN_TURN_FACTOR;
     //     }
-
+    //
     //     // min-max normalizing reward
     //     env->rewards[indx] = 2
     //         * ((reward-env->min_reward) / (env->max_reward - env->min_reward))
