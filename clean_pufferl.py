@@ -373,7 +373,8 @@ def train(data):
                 horizon = 16
 
             advantages = advantages.cpu().numpy()
-            torch.cuda.synchronize()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
         elif config.use_vtrace:
             importance = advantages = torch.zeros(experience.values.shape, device=config.device).to(config.device)
             vs = torch.zeros(experience.values.shape, device=config.device)
@@ -888,7 +889,8 @@ class Profile:
         if epoch % self.frequency != 0:
             return
 
-        torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         tick = time.time()
 
         if len(self.stack) != 0 and not nest:
@@ -905,7 +907,8 @@ class Profile:
         profile.calls += 1
 
     def end(self):
-        torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         end = time.time()
 
         for i in range(len(self.stack)):
