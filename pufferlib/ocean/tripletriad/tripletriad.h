@@ -31,9 +31,10 @@ const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
 
 typedef struct Log Log;
 struct Log {
+    float perf;
+    float score;
     float episode_return;
     float episode_length;
-    float score;
 };
 
 typedef struct LogBuffer LogBuffer;
@@ -73,10 +74,12 @@ Log aggregate_and_clear(LogBuffer* logs) {
     for (int i = 0; i < logs->idx; i++) {
         log.episode_return += logs->logs[i].episode_return;
         log.episode_length += logs->logs[i].episode_length;
+        log.perf += logs->logs[i].perf;
         log.score += logs->logs[i].score;
     }
     log.episode_return /= logs->idx;
     log.episode_length /= logs->idx;
+    log.perf /= logs->idx;
     log.score /= logs->idx;
     logs->idx = 0;
     return log;
@@ -504,6 +507,7 @@ void c_step(CTripleTriad* env) {
     // reset the game if game over
     if (env->game_over == 1) {
         env->log.score = env->score[0];
+        env->log.perf = (env->score[0] > env->score[1]) ? 1.0 : 0.0;
         add_log(env->log_buffer, &env->log);
         //printf("Log: %f, %f, %f\n", env->log.episode_return, env->log.episode_length, env->log.score);
         c_reset(env);

@@ -1,1 +1,0 @@
-clang -Wall -Wuninitialized -Wmisleading-indentation -fsanitize=address -ferror-limit=3 -g -o tacticalgame tactical.h -I/opt/homebrew/opt/raylib/include -L/opt/homebrew/opt/raylib/lib/ -lraylib -lm -lpthread -ldl -DPLATFORM_DESKTOP

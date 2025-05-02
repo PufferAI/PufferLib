@@ -4,9 +4,10 @@ cdef extern from "tripletriad.h":
     int LOG_BUFFER_SIZE
 
     ctypedef struct Log:
+        float perf;
+        float score;
         float episode_return;
         float episode_length;
-        float score;
 
     ctypedef struct LogBuffer
     LogBuffer* allocate_logbuffer(int)

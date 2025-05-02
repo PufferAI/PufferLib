@@ -55,6 +55,8 @@ cdef extern from "moba.h":
         float usage_e
 
     ctypedef struct Log:
+        float perf
+        float score
         float episode_return
         float episode_length
         float reward_death

@@ -5,6 +5,9 @@ from collections.abc import Mapping
 def __getitem__(self, key):
     return self.__dict__[key]
 
+def __setitem__(self, key, value):
+    self.__dict__[key] = value
+
 def keys(self):
     return self.__dict__.keys()
 
@@ -22,6 +25,7 @@ def __len__(self):
 
 class Namespace(SimpleNamespace, Mapping):
     __getitem__ = __getitem__
+    __setitem__ = __setitem__
     __iter__ = __iter__
     __len__ = __len__
     keys = keys
@@ -42,6 +46,7 @@ def dataclass(cls):
 
     cls.__init__ = __init__
     setattr(cls, "__getitem__", __getitem__)
+    setattr(cls, "__setitem__", __setitem__)
     setattr(cls, "__iter__", __iter__)
     setattr(cls, "__len__", __len__)
     setattr(cls, "keys", keys)

@@ -13,7 +13,7 @@ class Snake(pufferlib.PufferEnv):
             vision=5, leave_corpse_on_death=True,
             reward_food=0.1, reward_corpse=0.1, reward_death=-1.0,
             report_interval=128, max_snake_length=1024,
-            render_mode='human', buf=None):
+            render_mode='human', buf=None, seed=0):
         
         if num_envs is not None:
             num_snakes = num_envs * [num_snakes]

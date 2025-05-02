@@ -1,0 +1,5 @@
+file(READ "${SOURCE}" FILE_CONTENTS)
+string(CONCAT FILE_CONTENTS "${FILE_CONTENTS}" "\n    cdef struct b2TreeNode\n")
+string(REPLACE "bool " "bint " FILE_CONTENTS "${FILE_CONTENTS}")
+string(REPLACE "bool*" "bint*" FILE_CONTENTS "${FILE_CONTENTS}")
+file(WRITE "${TARGET}" "${FILE_CONTENTS}")

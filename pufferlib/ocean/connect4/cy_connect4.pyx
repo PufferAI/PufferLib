@@ -7,9 +7,11 @@ cdef extern from "connect4.h":
     int LOG_BUFFER_SIZE
 
     ctypedef struct Log:
-        float episode_return;
-        float episode_length;
-        float score;
+        float perf
+        float score
+        float episode_return
+        float episode_length
+        float n
 
     ctypedef struct LogBuffer
     LogBuffer* allocate_logbuffer(int)

@@ -13,9 +13,10 @@
 
 typedef struct Log Log;
 struct Log {
+    float perf;
+    float score;
     float episode_return;
     float episode_length;
-    float score;
 };
 
 typedef struct LogBuffer LogBuffer;
@@ -55,10 +56,12 @@ Log aggregate_and_clear(LogBuffer* logs) {
         log.episode_return += logs->logs[i].episode_return;
         log.episode_length += logs->logs[i].episode_length;
         log.score += logs->logs[i].score;
+        log.perf += logs->logs[i].score / logs->logs[i].episode_length;
     }
     log.episode_return /= logs->idx;
     log.episode_length /= logs->idx;
     log.score /= logs->idx;
+    log.perf /= logs->idx;
     logs->idx = 0;
     return log;
 }

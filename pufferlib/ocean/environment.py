@@ -118,8 +118,10 @@ def make_multiagent(buf=None, **kwargs):
 
 MAKE_FNS = {
     'breakout':      lambda: lazy_import('pufferlib.ocean.breakout.breakout', 'Breakout'),
+    'blastar':       lambda: lazy_import('pufferlib.ocean.blastar.blastar', 'Blastar'),
     'pong':          lambda: lazy_import('pufferlib.ocean.pong.pong', 'Pong'),
     'enduro':        lambda: lazy_import('pufferlib.ocean.enduro.enduro', 'Enduro'),
+    'cartpole':      lambda: lazy_import('pufferlib.ocean.cartpole.cartpole', 'Cartpole'),
     'moba':          lambda: lazy_import('pufferlib.ocean.moba.moba', 'Moba'),
     'nmmo3':         lambda: lazy_import('pufferlib.ocean.nmmo3.nmmo3', 'NMMO3'),
     'snake':         lambda: lazy_import('pufferlib.ocean.snake.snake', 'Snake'),
@@ -134,6 +136,8 @@ MAKE_FNS = {
     'tower_climb':   lambda: lazy_import('pufferlib.ocean.tower_climb.tower_climb', 'TowerClimb'),
     'grid':          lambda: lazy_import('pufferlib.ocean.grid.grid', 'Grid'),
     'cpr':           lambda: lazy_import('pufferlib.ocean.cpr.cpr', 'PyCPR'),
+    'impulse_wars':  lambda: lazy_import('pufferlib.ocean.impulse_wars.impulse_wars', 'ImpulseWars'),
+    'gpudrive':      lambda: lazy_import('pufferlib.ocean.gpudrive.gpudrive', 'GPUDrive'),
     #'rocket_lander': rocket_lander.RocketLander,
     'foraging': make_foraging,
     'predator_prey': make_predator_prey,

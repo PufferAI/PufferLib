@@ -14,7 +14,7 @@ from pufferlib.ocean.connect4.cy_connect4 import CyConnect4
 
 class Connect4(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=128,
-             width=672, height=576, piece_width=96, piece_height=96, buf=None):
+             width=672, height=576, piece_width=96, piece_height=96, buf=None, seed=0):
 
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(42,), dtype=np.float32)

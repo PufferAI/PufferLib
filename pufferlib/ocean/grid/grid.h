@@ -35,54 +35,13 @@
 
 typedef struct Log Log;
 struct Log {
+    float perf;
+    float score;
     float episode_return;
     float episode_length;
-    float score;
+    float n;
 };
 
-typedef struct LogBuffer LogBuffer;
-struct LogBuffer {
-    Log* logs;
-    int length;
-    int idx;
-};
-
-LogBuffer* allocate_logbuffer(int size) {
-    LogBuffer* logs = (LogBuffer*)calloc(1, sizeof(LogBuffer));
-    logs->logs = (Log*)calloc(size, sizeof(Log));
-    logs->length = size;
-    logs->idx = 0;
-    return logs;
-}
-
-void free_logbuffer(LogBuffer* buffer) {
-    free(buffer->logs);
-    free(buffer);
-}
-
-void add_log(LogBuffer* logs, Log* log) {
-    if (logs->idx == logs->length) {
-        return;
-    }
-    logs->logs[logs->idx] = *log;
-    logs->idx += 1;
-    //printf("Log: %f, %f, %f\n", log->episode_return, log->episode_length, log->score);
-}
-
-Log aggregate_and_clear(LogBuffer* logs) {
-    Log log = {0};
-    if (logs->idx == 0) {
-        return log;
-    }
-    for (int i = 0; i < logs->idx; i++) {
-        log.episode_return += logs->logs[i].episode_return / logs->idx;
-        log.episode_length += logs->logs[i].episode_length / logs->idx;
-        log.score += logs->logs[i].score / logs->idx;
-    }
-    logs->idx = 0;
-    return log;
-}
- 
 // 8 unique agents
 bool is_agent(int idx) {
     return idx >= AGENT && idx < AGENT + 8;
@@ -118,29 +77,38 @@ struct Agent {
     int held;
 };
 
+typedef struct Renderer Renderer;
+typedef struct State State;
 typedef struct Grid Grid;
 struct Grid{
+    Renderer* renderer;
+    State* levels;
+    int num_maps;
     int width;
     int height;
     int num_agents;
     int horizon;
     int vision;
+    int tick;
     float speed;
     int obs_size;
     int max_size;
     bool discretize;
     Log log;
-    LogBuffer* log_buffer;
     Agent* agents;
     unsigned char* grid;
     int* counts;
     unsigned char* observations;
     float* actions;
     float* rewards;
-    unsigned char* dones;
+    unsigned char* terminals;
 };
 
 void init_grid(Grid* env) {
+    env->num_agents = 1;
+    env->vision = 5;
+    env->speed = 1;
+    env->discretize = true;
     env->obs_size = 2*env->vision + 1;
     int env_mem= env->max_size * env->max_size;
     env->grid = calloc(env_mem, sizeof(unsigned char));
@@ -162,8 +130,7 @@ Grid* allocate_grid(int max_size, int num_agents, int horizon,
         num_agents*obs_size*obs_size, sizeof(unsigned char));
     env->actions = calloc(num_agents, sizeof(float));
     env->rewards = calloc(num_agents, sizeof(float));
-    env->dones = calloc(num_agents, sizeof(unsigned char));
-    env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
+    env->terminals = calloc(num_agents, sizeof(unsigned char));
     init_grid(env);
     return env;
 }
@@ -178,8 +145,7 @@ void free_allocated_grid(Grid* env) {
     free(env->observations);
     free(env->actions);
     free(env->rewards);
-    free(env->dones);
-    free_logbuffer(env->log_buffer);
+    free(env->terminals);
     free_env(env);
 }
 
@@ -192,6 +158,14 @@ int grid_offset(Grid* env, int y, int x) {
     return y*env->max_size + x;
 }
 
+void add_log(Grid* env, int idx) {
+    env->log.perf += env->rewards[idx];
+    env->log.score += env->rewards[idx];
+    env->log.episode_return += env->rewards[idx];
+    env->log.episode_length += env->tick;
+    env->log.n += 1.0;
+}
+ 
 void compute_observations(Grid* env) {
     memset(env->observations, 0, env->obs_size*env->obs_size*env->num_agents);
     for (int agent_idx = 0; agent_idx < env->num_agents; agent_idx++) {
@@ -275,7 +249,6 @@ void spawn_agent(Grid* env, int idx, int x, int y) {
     agent->color = AGENT;
 }
 
-typedef struct State State;
 struct State {
     int width;
     int height;
@@ -312,10 +285,13 @@ void set_state(Grid* env, State* state) {
     memcpy(env->grid, state->grid, env->max_size*env->max_size);
 }
 
-void reset(Grid* env, int seed) {
-    env->log = (Log){0};
+void c_reset(Grid* env) {
     memset(env->grid, 0, env->max_size*env->max_size);
     memset(env->counts, 0, env->max_size*env->max_size*sizeof(int));
+    env->tick = 0;
+    int idx = rand() % env->num_maps;
+    set_state(env, &env->levels[idx]);
+    compute_observations(env);
 }
 
 int move_to(Grid* env, int agent_idx, float y, float x) {
@@ -330,9 +306,8 @@ int move_to(Grid* env, int agent_idx, float y, float x) {
         return 1;
     } else if (dest == REWARD || dest == GOAL) {
         env->rewards[agent_idx] = 1.0;
-        env->dones[agent_idx] = 1;
-        env->log.episode_return += 1.0;
-        env->log.score += 1.0;
+        env->terminals[agent_idx] = 1;
+        add_log(env, agent_idx);
     } else if (is_key(dest)) {
         if (agent->held != -1) {
             return 1;
@@ -428,9 +403,10 @@ bool step_agent(Grid* env, int idx) {
     return true;
 }
 
-bool step(Grid* env) {
-    memset(env->dones, 0, env->num_agents);
+void c_step(Grid* env) {
+    memset(env->terminals, 0, env->num_agents);
     memset(env->rewards, 0, env->num_agents*sizeof(float));
+    env->tick++;
 
     for (int i = 0; i < env->num_agents; i++) {
         step_agent(env, i);
@@ -439,21 +415,23 @@ bool step(Grid* env) {
 
     bool done = true;
     for (int i = 0; i < env->num_agents; i++) {
-        if (!env->dones[i]) {
+        if (!env->terminals[i]) {
             done = false;
             break;
         }
     }
 
-    env->log.episode_length += 1;
-    if (env->log.episode_length >= env->horizon) {
+    if (env->tick >= env->horizon) {
         done = true;
+        add_log(env, 0);
     }
 
     if (done) {
-        add_log(env->log_buffer, &env->log);
+        c_reset(env);
+        int idx = rand() % env->num_maps;
+        set_state(env, &env->levels[idx]);
+        compute_observations(env);
     }
-    return done;
 }
 
 // Raylib client
@@ -480,13 +458,13 @@ Rectangle UV_COORDS[7] = {
     (Rectangle){384, 0, 128, 128},
 };
 
-typedef struct {
+struct Renderer {
     int cell_size;
     int width;
     int height;
     Texture2D puffer;
     float* overlay;
-} Renderer;
+};
 
 Renderer* init_renderer(int cell_size, int width, int height) {
     Renderer* renderer = (Renderer*)calloc(1, sizeof(Renderer));
@@ -513,7 +491,15 @@ void close_renderer(Renderer* renderer) {
     free(renderer);
 }
 
-void render_global(Renderer* renderer, Grid* env, float frac, float overlay) {
+void c_render(Grid* env) {
+    // TODO: fractional rendering
+    float frac = 0.0;
+    float overlay = 0.0;
+    if (env->renderer == NULL) {
+        env->renderer = init_renderer(16, env->width, env->height);
+    }
+    Renderer* renderer = env->renderer;
+ 
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
     }
@@ -524,7 +510,7 @@ void render_global(Renderer* renderer, Grid* env, float frac, float overlay) {
     int adr = grid_offset(env, r, c);
     //renderer->overlay[adr] = overlay;
     //renderer->overlay[adr] -= 0.1;
-    renderer->overlay[adr] = -1 + 1.0/(float)env->counts[adr];
+    //renderer->overlay[adr] = -1 + 1.0/(float)env->counts[adr];
 
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});
@@ -535,6 +521,7 @@ void render_global(Renderer* renderer, Grid* env, float frac, float overlay) {
             adr = grid_offset(env, r, c);
             int tile = env->grid[adr];
             if (tile == EMPTY) {
+                continue;
                 overlay = renderer->overlay[adr];
                 if (overlay == 0) {
                     continue;

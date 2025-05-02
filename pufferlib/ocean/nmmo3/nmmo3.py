@@ -5,19 +5,22 @@ import gymnasium
 import pettingzoo
 import time
 
-from pufferlib.ocean.nmmo3.cy_nmmo3 import Environment, entity_dtype, reward_dtype
+from pufferlib.ocean.nmmo3 import binding
+#import binding
 
 import pufferlib
 
 class NMMO3(pufferlib.PufferEnv):
-    def __init__(self, width=4*[512], height=4*[512], num_envs=4,
+    def __init__(self, width=8*[512], height=8*[512], num_envs=4,
             num_players=1024, num_enemies=2048, num_resources=2048,
             num_weapons=1024, num_gems=512, tiers=5, levels=40,
             teleportitis_prob=0.001, enemy_respawn_ticks=2,
             item_respawn_ticks=100, x_window=7, y_window=5,
             reward_combat_level=1.0, reward_prof_level=1.0,
             reward_item_level=0.5, reward_market=0.01,
-            reward_death=-1.0, buf=None):
+            reward_death=-1.0, log_interval=128, buf=None, seed=0):
+
+        self.log_interval = log_interval
 
         if len(width) > num_envs:
             width = width[:num_envs]
@@ -133,13 +136,6 @@ class NMMO3(pufferlib.PufferEnv):
         self.num_players = total_players
         self.num_enemies = total_enemies
 
-        self.players = np.frombuffer(self.players_flat,
-            dtype=entity_dtype()).view(np.recarray)
-        self.enemies = np.frombuffer(self.enemies_flat,
-            dtype=entity_dtype()).view(np.recarray)
-        self.struct_rewards = np.frombuffer(self.rewards_flat,
-            dtype=reward_dtype()).view(np.recarray)
-
         self.comb_goal_mask = np.array([1, 0, 1, 0, 1, 1, 0, 1, 1, 1])
         self.prof_goal_mask = np.array([0, 0, 0, 1, 0, 0, 1, 1, 1, 1])
         self.tick = 0
@@ -150,54 +146,64 @@ class NMMO3(pufferlib.PufferEnv):
         self.render_mode = 'human'
 
         super().__init__(buf)
-        self.c_env = Environment(self.observations, self.players_flat,
-            self.enemies_flat, self.rewards_flat, self.actions,
-            width, height, num_envs, num_players, num_enemies,
-            num_resources, num_weapons, num_gems, tiers, levels,
-            teleportitis_prob, enemy_respawn_ticks, item_respawn_ticks,
-            reward_combat_level, reward_prof_level, reward_item_level,
-            reward_market, reward_death, x_window, y_window)
+        player_count = 0
+        enemy_count = 0
+        c_envs = []
+        for i in range(num_envs):
+            players = num_players[i]
+            enemies = num_enemies[i]
+            env_id = binding.env_init(
+                self.observations[player_count:player_count+players],
+                self.actions[player_count:player_count+players],
+                self.rewards[player_count:player_count+players],
+                self.terminals[player_count:player_count+players],
+                self.truncations[player_count:player_count+players],
+                i + seed*num_envs,
+                width=width[i],
+                height=height[i],
+                num_players=num_players[i],
+                num_enemies=num_enemies[i],
+                num_resources=num_resources[i],
+                num_weapons=num_weapons[i],
+                num_gems=num_gems[i],
+                tiers=tiers[i],
+                levels=levels[i],
+                teleportitis_prob=teleportitis_prob[i],
+                enemy_respawn_ticks=enemy_respawn_ticks[i],
+                item_respawn_ticks=item_respawn_ticks[i],
+                x_window=x_window,
+                y_window=y_window,
+                reward_combat_level=reward_combat_level,
+                reward_prof_level=reward_prof_level,
+                reward_item_level=reward_item_level,
+                reward_market=reward_market,
+                reward_death=reward_death,
+            )
+            c_envs.append(env_id)
+            player_count += players
+            enemy_count += enemies
+
+        self.c_envs = binding.vectorize(*c_envs)
 
     def reset(self, seed=None):
-        self.struct_rewards.fill(0)
         self.rewards.fill(0)
         self.is_reset = True
-        self.c_env.reset()
+        binding.vec_reset(self.c_envs, seed)
         return self.observations, []
 
     def step(self, actions):
         if not hasattr(self, 'is_reset'):
             raise Exception('Must call reset before step')
         self.rewards.fill(0)
-        rewards = self.struct_rewards
-        rewards.fill(0)
         self.actions[:] = actions[:]
-        self.c_env.step()
+        binding.vec_step(self.c_envs)
 
-        rewards = rewards.total
-        infos = []
-        if self.tick % 128 == 0:
-            log = self.c_env.log()
-            if log['episode_length'] > 0:
-                infos.append(log)
-
-            '''
-            print(
-                f'Comb lvl: {np.mean(self.players.comb_lvl)} (max {np.max(self.players.comb_lvl)})',
-                f'Prof lvl: {np.mean(self.players.prof_lvl)} (max {np.max(self.players.prof_lvl)})',
-                f'Time alive: {np.mean(self.players.time_alive)} (max {np.max(self.players.time_alive)})',
-            )
-            '''
-
-        if False and self.tick % 128 == 0:
-            # TODO: Log images to Wandb in latest version
-            infos['nmmo3_map'] = self.render()
+        info = []
+        if self.tick % self.log_interval == 0:
+            info.append(binding.vec_log(self.c_envs))
 
         self.tick += 1
-
-        self.rewards[:] = rewards.ravel()
-
-        return self.observations, self.rewards, self.terminals, self.truncations, infos
+        return self.observations, self.rewards, self.terminals, self.truncations, info
 
     def render(self):
         self.c_env.render()
@@ -250,30 +256,21 @@ class NMMO3(pufferlib.PufferEnv):
     def close(self):
         self.c_envs.close()
 
-class Overlays:
-    def __init__(self, width, height):
-        self.counts = np.zeros((width, height), dtype=int)
-        self.value_function = np.zeros((width, height), dtype=np.float32)
+def test_performance(cls, timeout=10, atn_cache=1024):
+    env = cls(num_envs=1)
+    env.reset()
+    tick = 0
 
-def test_env_performance(env, timeout=10):
-    num_agents = env.num_players
-
-    actions = {t:
-        {agent: np.random.randint(0, 6) for agent in range(1, num_agents+1)}
-        for t in range(100)
-    }
-    actions = {t: np.random.randint(0, 6, num_agents) for t in range(100)}
-    idx = 0
+    actions = np.random.randint(0, 2, (atn_cache, env.num_agents))
 
     import time
     start = time.time()
-    num_steps = 0
     while time.time() - start < timeout:
-        env.step(actions[num_steps % 100])
-        num_steps += 1
+        atn = actions[tick % atn_cache]
+        env.step(atn)
+        tick += 1
 
-    end = time.time()
-    fps = num_agents * num_steps / (end - start)
-    print(f"Test Environment Performance FPS: {fps:.2f}")
+    print(f'{env.__class__.__name__}: SPS: {env.num_agents * tick / (time.time() - start)}')
 
-
+if __name__ == '__main__':
+    test_performance(NMMO3)

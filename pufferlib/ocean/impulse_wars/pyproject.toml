@@ -1,0 +1,24 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "autopxd2>=2.5.0", "cython>=3.0.11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "cy_impulse_wars"
+version = "1.0.0"
+requires-python = ">=3.11"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+cmake.build-type = "Release"
+build.verbose = true
+logging.level = "INFO"
+
+[tool.scikit-build.cmake.define]
+BUILD_PYTHON_MODULE = true
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+# skip "Module level import not at top of file"
+ignore = ["E402"]

@@ -6,8 +6,11 @@ import contextlib
 import numpy as np
 import torch
 from torch import nn
+from torch.distributions import Categorical
+from torch.distributions.utils import logits_to_probs
 
 import pufferlib
+import pufferlib.models
 
 
 numpy_to_torch_dtype_dict = {
@@ -41,7 +44,6 @@ LITTLE_BYTE_ORDER = sys.byteorder == "little"
 # could be a namedtuple or dataclass
 NativeDTypeValue = Tuple[torch.dtype, List[int], int, int]
 NativeDType = Union[NativeDTypeValue, Dict[str, Union[NativeDTypeValue, "NativeDType"]]]
-
 
 # TODO: handle discrete obs
 # Spend some time trying to break this fn with differnt obs
@@ -256,3 +258,65 @@ class PolicyPool(torch.nn.Module):
             self.values[samp_mask] = val.flatten()
 
         return self.actions, self.logprobs, self.entropy, self.values, (lstm_h, lstm_c)
+
+# taken from torch.distributions.Categorical
+def log_prob(logits, value):
+    value = value.long().unsqueeze(-1)
+    value, log_pmf = torch.broadcast_tensors(value, logits)
+    value = value[..., :1]
+    return log_pmf.gather(-1, value).squeeze(-1)
+
+# taken from torch.distributions.Categorical
+def entropy(logits):
+    min_real = torch.finfo(logits.dtype).min
+    logits = torch.clamp(logits, min=min_real)
+    p_log_p = logits * logits_to_probs(logits)
+    return -p_log_p.sum(-1)
+
+def entropy_probs(logits, probs):
+    p_log_p = logits * probs
+    return -p_log_p.sum(-1)
+
+
+def sample_logits(logits: Union[torch.Tensor, List[torch.Tensor]],
+        action=None, is_continuous=False):
+    is_discrete = isinstance(logits, torch.Tensor)
+    if is_continuous:
+        batch = logits.loc.shape[0]
+        if action is None:
+            action = logits.sample().view(batch, -1)
+
+        log_probs = logits.log_prob(action.view(batch, -1)).sum(1)
+        logits_entropy = logits.entropy().view(batch, -1).sum(1)
+        return action, log_probs, logits_entropy
+    elif is_discrete:
+        logits = logits.unsqueeze(0)
+    else: #multi-discrete
+        logits = torch.nn.utils.rnn.pad_sequence(
+            [l.transpose(0,1) for l in logits], 
+            batch_first=False, 
+            padding_value=-torch.inf
+        ).permute(1,2,0)
+
+    normalized_logits = logits - logits.logsumexp(dim=-1, keepdim=True)
+    probs = logits_to_probs(normalized_logits)
+
+    if action is None:
+        action = torch.multinomial(probs.reshape(-1, probs.shape[-1]), 1, replacement=True)
+        action = action.reshape(probs.shape[:-1])
+    else:
+        batch = logits[0].shape[0]
+        action = action.view(batch, -1).T
+        probs = logits_to_probs(normalized_logits)
+
+    assert len(logits) == len(action)
+    logprob = log_prob(normalized_logits, action)
+    logits_entropy = entropy(normalized_logits).sum(0)
+
+    if is_discrete:
+        return action.squeeze(0), logprob.squeeze(0), logits_entropy.squeeze(0)
+
+    return action.T, logprob.sum(0), logits_entropy
+
+
+

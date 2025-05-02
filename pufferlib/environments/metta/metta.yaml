@@ -1,0 +1,223 @@
+name: "GDY-MettaGrid"
+_target_: mettagrid.mettagrid_env.MettaGridEnv
+
+report_stats_interval: 100
+normalize_rewards: false
+semi_compact_obs: true
+track_last_action: false
+
+sampling: 0
+
+hidden_features:
+  grid_obs: [
+    "agent:energy",
+    "agent:hp",
+  ]
+
+game:
+  num_agents: 16
+  obs_width: 11
+  obs_height: 11
+  max_steps: 1000
+  tile_size: 16
+  no_energy_steps: 500
+  recursive_map_builder: true
+
+  agent:
+    max_inventory: 50
+    freeze_duration: 0
+    hp: 10
+    mortal: False
+    rewards:
+      # action_failure_penalty: 0.00001
+      action_failure_penalty: 0
+      ore.red: 0.25
+      ore.red_max: 5
+      battery: 0.25
+      battery_max: 5
+      heart: 1
+      heart_max: 100
+
+  groups:
+    agent:
+      id: 0
+      sprite: 0
+      props: {}
+
+    team_1:
+      id: 1
+      sprite: 1
+      group_reward_pct: 0.5
+      props: {}
+
+    team_2:
+      id: 2
+      sprite: 4
+      group_reward_pct: 0.5
+      props: {}
+
+    team_3:
+      id: 3
+      sprite: 8
+      group_reward_pct: 0.5
+      props: {}
+
+    team_4:
+      id: 4
+      sprite: 1
+      group_reward_pct: 0.5
+      props: {}
+
+    prey:
+      id: 5
+      sprite: 12
+      props: {}
+
+    predator:
+      id: 6
+      sprite: 6
+      props: {}
+
+  objects:
+    altar:
+      hp: 30
+      input_battery: 3
+      output_heart: 1
+      max_output: 5
+      conversion_ticks: 1
+      cooldown: 10
+      initial_items: 1
+
+    mine:
+      hp: 30
+      output_ore.red: 1
+      max_output: 5
+      conversion_ticks: 1
+      cooldown: 50
+      initial_items: 1
+
+    mine.red:
+      hp: 30
+      output_ore.red: 1
+      max_output: 5
+      conversion_ticks: 1
+      cooldown: 50
+      initial_items: 1
+
+    generator.red:
+      hp: 30
+      input_ore.red: 1
+      output_battery: 1
+      max_output: 5
+      conversion_ticks: 1
+      cooldown: 50
+      initial_items: 1
+
+    armory:
+      hp: 30
+      input_ore.red: 3
+      output_armor: 1
+      max_output: 5
+      conversion_ticks: 1
+      cooldown: 20
+      initial_items: 1
+
+    lasery:
+      hp: 30
+      input_ore.red: 1
+      input_battery: 2
+      output_laser: 1
+      max_output: 5
+      conversion_ticks: 1
+      cooldown: 20
+      initial_items: 1
+
+    lab:
+      hp: 30
+      input_ore.red: 3
+      input_battery: 3
+      output_blueprint: 1
+      max_output: 5
+      conversion_ticks: 1
+      cooldown: 5
+      initial_items: 1
+    factory:
+      hp: 30
+      input_blueprint: 1
+      input_ore.red: 5
+      input_battery: 5
+      output_armor: 5
+      output_laser: 5
+      max_output: 5
+      conversion_ticks: 1
+      cooldown: 5
+      initial_items: 1
+
+    temple:
+      hp: 30
+      input_heart: 1
+      input_blueprint: 1
+      output_heart: 5
+      max_output: 5
+      conversion_ticks: 1
+      cooldown: 5
+      initial_items: 1
+
+    wall:
+      hp: 10
+
+  actions:
+    noop:
+      enabled: true
+    move:
+      enabled: true
+    rotate:
+      enabled: true
+    put_items:
+      enabled: true
+    get_items:
+      enabled: true
+    attack:
+      enabled: true
+    swap:
+      enabled: true
+    change_color:
+      enabled: true
+
+  reward_sharing:
+    groups:
+      team_1:
+        team_1: 0.5
+      team_2:
+        team_2: 0.5
+      team_3:
+        team_3: 0.5
+      team_4:
+        team_4: 0.5
+
+  map_builder:
+    _target_: mettagrid.config.room.multi_room.MultiRoom
+    num_rooms: ${div:${..num_agents},4}
+    border_width: 6
+
+    room:
+      _target_: mettagrid.config.room.random.Random
+      width: 25
+      height: 25
+      border_width: 0
+
+      agents: 4
+
+      objects:
+        mine: 10
+        generator: 2
+        altar: 1
+        armory: 1
+        lasery: 1
+        lab: 1
+        factory: 1
+        temple: 1
+
+        wall: 40
+
+

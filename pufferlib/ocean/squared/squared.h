@@ -11,9 +11,21 @@ const unsigned char RIGHT = 4;
 const unsigned char EMPTY = 0;
 const unsigned char AGENT = 1;
 const unsigned char TARGET = 2;
+
+typedef struct Log Log;
+struct Log {
+    float perf;
+    float score;
+    float episode_return;
+    float episode_length;
+    float n;
+};
  
+typedef struct Client Client;
 typedef struct Squared Squared;
 struct Squared {
+    Log log;
+    Client* client;
     unsigned char* observations;
     int* actions;
     float* rewards;
@@ -38,6 +50,14 @@ void free_allocated(Squared* env) {
     free(env->terminals);
 }
 
+void add_log(Squared* env) {
+    env->log.perf += (env->rewards[0] > 0) ? 1 : 0;
+    env->log.score += env->rewards[0];
+    env->log.episode_length += env->tick;
+    env->log.episode_return += env->rewards[0];
+    env->log.n++;
+}
+
 void c_reset(Squared* env) {
     memset(env->observations, 0, env->size*env->size*sizeof(unsigned char));
     env->observations[env->size*env->size/2] = AGENT;
@@ -52,6 +72,8 @@ void c_reset(Squared* env) {
 }
 
 void c_step(Squared* env) {
+    env->tick += 1;
+
     int action = env->actions[0];
     env->terminals[0] = 0;
     env->rewards[0] = 0;
@@ -75,6 +97,7 @@ void c_step(Squared* env) {
             || env->c >= env->size) {
         env->terminals[0] = 1;
         env->rewards[0] = -1.0;
+        add_log(env);
         c_reset(env);
         return;
     }
@@ -83,12 +106,12 @@ void c_step(Squared* env) {
     if (env->observations[pos] == TARGET) {
         env->terminals[0] = 1;
         env->rewards[0] = 1.0;
+        add_log(env);
         c_reset(env);
         return;
     }
 
     env->observations[pos] = AGENT;
-    env->tick += 1;
 }
 
 typedef struct Client Client;
@@ -111,7 +134,11 @@ void close_client(Client* client) {
     free(client);
 }
 
-void c_render(Client* client, Squared* env) {
+void c_render(Squared* env) {
+    if (env->client == NULL) {
+        env->client = make_client(env);
+    }
+
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
     }

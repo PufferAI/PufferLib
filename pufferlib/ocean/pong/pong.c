@@ -25,7 +25,7 @@ int main() {
     };
     allocate(&env);
 
-    Client* client = make_client(&env);
+    env.client = make_client(&env);
 
     c_reset(&env);
     while (!WindowShouldClose()) {
@@ -42,15 +42,17 @@ int main() {
                 if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = 2.0;
             }
         } else {
-            forward_linearlstm(net, env.observations, env.actions);
+            int* actions = (int*)env.actions;
+            forward_linearlstm(net, env.observations, actions);
+            env.actions[0] = actions[0];
         }
 
         c_step(&env);
-        c_render(client, &env);
+        c_render(&env);
     }
     free_linearlstm(net);
     free(weights);
     free_allocated(&env);
-    close_client(client);
+    close_client(env.client);
 }
 

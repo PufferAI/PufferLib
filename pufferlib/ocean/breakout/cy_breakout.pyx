@@ -4,9 +4,9 @@ cdef extern from "breakout.h":
     int LOG_BUFFER_SIZE
 
     ctypedef struct Log:
-        float episode_return;
-        float episode_length;
-        float score;
+        float episode_return
+        float episode_length
+        float score
 
     ctypedef struct LogBuffer
     LogBuffer* allocate_logbuffer(int)
@@ -15,11 +15,11 @@ cdef extern from "breakout.h":
 
     ctypedef struct Breakout:
         float* observations
-        float* actions;
+        float* actions
         float* rewards
-        unsigned char* dones
-        LogBuffer* log_buffer;
-        Log log;
+        unsigned char* terminals
+        LogBuffer* log_buffer
+        Log log
         int score
         float episode_return
         float paddle_x
@@ -48,31 +48,32 @@ cdef extern from "breakout.h":
         int num_balls
         int frameskip
         int continuous
-    ctypedef struct Client
 
     void init(Breakout* env)
-    void free_initialized(Breakout* env)
-
-    Client* make_client(Breakout* env)
-    void close_client(Client* client)
-    void c_render(Client* client, Breakout* env)
     void c_reset(Breakout* env)
     void c_step(Breakout* env)
+    void c_render(Breakout* env)
 
 cdef class CyBreakout:
     cdef:
         Breakout* envs
-        Client* client
         LogBuffer* logs
         int num_envs
+        float width
+        float height
+        float paddle_width
+        float paddle_height
+        float ball_width
+        float ball_height
 
     def __init__(self, float[:, :] observations, float[:] actions,
-            float[:] rewards, unsigned char[:] terminals, int num_envs,  int frameskip,
-            int width, int height, float paddle_width, float paddle_height,
-            int ball_width, int ball_height, int brick_width, int brick_height,
+            float[:] rewards, unsigned char[:] terminals, int num_envs,
+            int frameskip, int width, int height,
+            float paddle_width, float paddle_height,
+            int ball_width, int ball_height,
+            int brick_width, int brick_height,
             int brick_rows, int brick_cols, int continuous):
 
-        self.client = NULL
         self.num_envs = num_envs
         self.envs = <Breakout*> calloc(num_envs, sizeof(Breakout))
         self.logs = allocate_logbuffer(LOG_BUFFER_SIZE)
@@ -83,7 +84,7 @@ cdef class CyBreakout:
                 observations=&observations[i, 0],
                 actions=&actions[i],
                 rewards=&rewards[i],
-                dones=&terminals[i],
+                terminals=&terminals[i],
                 log_buffer=self.logs,
                 width=width,
                 height=height,
@@ -99,7 +100,6 @@ cdef class CyBreakout:
                 continuous=continuous,  
             )
             init(&self.envs[i])
-            self.client = NULL
 
     def reset(self):
         cdef int i
@@ -108,26 +108,17 @@ cdef class CyBreakout:
 
     def step(self):
         cdef int i
+
         for i in range(self.num_envs):
             c_step(&self.envs[i])
 
     def render(self):
         cdef Breakout* env = &self.envs[0]
-        if self.client == NULL:
-            import os
-            cwd = os.getcwd()
-            os.chdir(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-            self.client = make_client(env)
-            os.chdir(cwd)
-
-        c_render(self.client, env)
+        c_render(env)
 
     def close(self):
-        if self.client != NULL:
-            close_client(self.client)
-            self.client = NULL
-
         free(self.envs)
+        free(self.logs)
 
     def log(self):
         cdef Log log = aggregate_and_clear(self.logs)

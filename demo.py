@@ -15,7 +15,6 @@ import pufferlib
 import pufferlib.sweep
 import pufferlib.utils
 import pufferlib.vector
-import pufferlib.cleanrl
 
 from rich_argparse import RichHelpFormatter
 from rich.console import Console
@@ -26,14 +25,7 @@ import signal # Aggressively exit on ctrl+c
 signal.signal(signal.SIGINT, lambda sig, frame: os._exit(0))
 
 import clean_pufferl
-
-def downsample_linear(arr, m):
-    n = len(arr)
-    x_old = np.linspace(0, 1, n)  # Original indices normalized
-    x_new = np.linspace(0, 1, m)  # New indices normalized
-    return np.interp(x_new, x_old, arr)
-
-  
+ 
 def init_wandb(args, name, id=None, resume=True, tag=None):
     import wandb
     wandb.init(
@@ -49,26 +41,37 @@ def init_wandb(args, name, id=None, resume=True, tag=None):
     )
     return wandb
 
-def init_neptune(args, name, id=None, resume=True, tag=None):
+def init_neptune(args, name, id=None, resume=True, tag=None, mode="async"):
     import neptune
-    workspace = args['workspace']
-    run = neptune.init_run(
-        project=f"{workspace['name']}/{workspace['project']}",
-        capture_hardware_metrics=False,
-        capture_stdout=False,
-        capture_stderr=False,
-        capture_traceback=False,
-        tags=[tag] if tag is not None else [],
-    )
+    import neptune.exceptions
+    try:
+        workspace = args['workspace']
+        run = neptune.init_run(
+                project=f"{workspace['name']}/{workspace['project']}",
+                capture_hardware_metrics=False,
+                capture_stdout=False,
+                capture_stderr=False,
+                capture_traceback=False,
+                tags=[tag] if tag is not None else [],
+                mode=mode,
+            )
+    except neptune.exceptions.NeptuneConnectionLostException:
+        print("couldn't connect to neptune, logging in offline mode")
+        return init_neptune(args, name, id, resume, tag, mode="offline")
     return run
 
 def make_policy(env, policy_cls, rnn_cls, args):
-    policy = policy_cls(env, **args['policy'])
+    policy = policy_cls(env, **args['policy'],
+        #batch_size=args['train']['batch_size'],
+        use_p3o=args['train']['use_p3o'],
+        p3o_horizon=args['train']['p3o_horizon'],
+        use_diayn=args['train']['use_diayn'],
+        diayn_skills=args['train']['diayn_archive'],
+    )
+    args['rnn']['input_size'] = policy.hidden_size
+    args['rnn']['hidden_size'] = policy.hidden_size
     if rnn_cls is not None:
         policy = rnn_cls(env, policy, **args['rnn'])
-        policy = pufferlib.cleanrl.RecurrentPolicy(policy)
-    else:
-        policy = pufferlib.cleanrl.Policy(policy)
 
     return policy.to(args['train']['device'])
 
@@ -82,10 +85,17 @@ def sweep(args, env_name, make_env, policy_cls, rnn_cls):
         sweep = pufferlib.sweep.Protein(
             args['sweep'],
             resample_frequency=0,
-            num_random_samples=10, # Should be number of params
+            num_random_samples=50, # Should be number of params
             max_suggestion_cost=args['max_suggestion_cost'],
             min_score = args['sweep']['metric']['min'],
             max_score = args['sweep']['metric']['max'],
+        )
+    elif method == 'carbs':
+        sweep = pufferlib.sweep.Carbs(
+            args['sweep'],
+            resample_frequency=5,
+            num_random_samples=10, # Should be number of params
+            max_suggestion_cost=args['max_suggestion_cost'],
         )
     else:
         raise ValueError(f'Invalid sweep method {method} (random/pareto_genetic/protein)')
@@ -96,13 +106,21 @@ def sweep(args, env_name, make_env, policy_cls, rnn_cls):
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
- 
+
         info = sweep.suggest(args)
+        if args['train']['minibatch_size'] >= args['train']['batch_size']:
+            sweep.observe(args, 0.0, 0.0)
+            continue
+        
         scores, costs, timesteps, _, _ = train(args, make_env, policy_cls, rnn_cls, target_metric)
 
+        # Hacky patch to prevent increasing total_timesteps when not swept
+        total_timesteps = args['train']['total_timesteps']
         for score, cost, timestep in zip(scores, costs, timesteps):
             args['train']['total_timesteps'] = timestep
             sweep.observe(args, score, cost)
+
+        args['train']['total_timesteps'] = total_timesteps
 
         print('Score:', score, 'Cost:', cost, 'Timesteps:', timestep)
 
@@ -129,6 +147,7 @@ def train(args, make_env, policy_cls, rnn_cls, target_metric, min_eval_points=10
             batch_size=args['train']['env_batch_size'],
             zero_copy=args['train']['zero_copy'],
             overwork=args['vec_overwork'],
+            seed=args['train']['seed'],
             backend=vec,
         )
 
@@ -138,15 +157,9 @@ def train(args, make_env, policy_cls, rnn_cls, target_metric, min_eval_points=10
         from torch.nn.parallel import DistributedDataParallel as DDP
         orig_policy = policy
         policy = DDP(policy, device_ids=[args['rank']])
+        # TODO: Test this? isinstance?
         if hasattr(orig_policy, 'lstm'):
             policy.lstm = orig_policy.lstm
-
-    '''
-    if env_name == 'moba':
-        import torch
-        os.makedirs('moba_elo', exist_ok=True)
-        torch.save(policy, os.path.join('moba_elo', 'model_random.pt'))
-    '''
 
     neptune = None
     wandb = None
@@ -165,20 +178,21 @@ def train(args, make_env, policy_cls, rnn_cls, target_metric, min_eval_points=10
     scores = []
     costs = []
     target_key = f'environment/{target_metric}'
+
+    vecenv.async_reset(train_config.seed)
     while data.global_step < train_config.total_timesteps:
         clean_pufferl.evaluate(data)
         logs = clean_pufferl.train(data)
         if logs is not None and target_key in logs:
             timesteps.append(logs['agent_steps'])
             scores.append(logs[target_key])
-            costs.append(data.profile.uptime)
+            #costs.append(data.profile.uptime)
 
     steps_evaluated = 0
-    cost = data.profile.uptime
+    cost = time.time() - data.start_time
     batch_size = args['train']['batch_size']
     while len(data.stats[target_metric]) < min_eval_points:
         stats, _ = clean_pufferl.evaluate(data)
-        data.experience.sort_keys = []
         steps_evaluated += batch_size
 
     clean_pufferl.mean_and_log(data)
@@ -189,6 +203,12 @@ def train(args, make_env, policy_cls, rnn_cls, target_metric, min_eval_points=10
     costs.append(cost)
     timesteps.append(data.global_step)
 
+    def downsample_linear(arr, m):
+        n = len(arr)
+        x_old = np.linspace(0, 1, n)  # Original indices normalized
+        x_new = np.linspace(0, 1, m)  # New indices normalized
+        return np.interp(x_new, x_old, arr)
+     
     scores = downsample_linear(scores, 10)
     costs = downsample_linear(costs, 10)
     timesteps = downsample_linear(timesteps, 10)
@@ -199,17 +219,6 @@ def train(args, make_env, policy_cls, rnn_cls, target_metric, min_eval_points=10
     elif args['wandb']:
         wandb.log({'score': score, 'cost': cost})
 
-    '''
-    if env_name == 'moba':
-        exp_n = len(elos)
-        model_name = f'model_{exp_n}.pt'
-        torch.save(policy, os.path.join('moba_elo', model_name))
-        from evaluate_elos import calc_elo
-        elos = calc_elo(model_name, 'moba_elo', elos)
-        stats['elo'] = elos[model_name]
-        if wandb is not None:
-            wandb.log({'environment/elo': elos[model_name]})
-    '''
     clean_pufferl.close(data)
     return scores, costs, timesteps, elos, vecenv
 
@@ -362,8 +371,11 @@ if __name__ == '__main__':
         pufferlib.vector.autotune(make_env, batch_size=args['train']['env_batch_size'])
     elif args['mode'] == 'profile':
         import cProfile
-        cProfile.run('train(args, make_env, policy_cls, rnn_cls, wandb=None)', 'stats.profile')
+        target_metric = args['sweep']['metric']['name']
+        cProfile.run('train(args, make_env, policy_cls, rnn_cls, target_metric)', 'stats.profile')
         import pstats
         from pstats import SortKey
         p = pstats.Stats('stats.profile')
         p.sort_stats(SortKey.TIME).print_stats(10)
+        breakpoint()
+        pass

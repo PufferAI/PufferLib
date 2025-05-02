@@ -3,69 +3,24 @@
 #include <math.h>
 #include "raylib.h"
 
-#define LOG_BUFFER_SIZE 1024
-
 typedef struct Log Log;
 struct Log {
+    float perf;
+    float score;
     float episode_return;
     float episode_length;
-    float score;
+    float n;
 };
 
-typedef struct LogBuffer LogBuffer;
-struct LogBuffer {
-    Log* logs;
-    int length;
-    int idx;
-};
-
-LogBuffer* allocate_logbuffer(int size) {
-    LogBuffer* logs = (LogBuffer*)calloc(1, sizeof(LogBuffer));
-    logs->logs = (Log*)calloc(size, sizeof(Log));
-    logs->length = size;
-    logs->idx = 0;
-    return logs;
-}
-
-void free_logbuffer(LogBuffer* buffer) {
-    free(buffer->logs);
-    free(buffer);
-}
-
-void add_log(LogBuffer* logs, Log* log) {
-    if (logs->idx == logs->length) {
-        return;
-    }
-    logs->logs[logs->idx] = *log;
-    logs->idx += 1;
-    //printf("Log: %f, %f, %f\n", log->episode_return, log->episode_length, log->score);
-}
-
-Log aggregate_and_clear(LogBuffer* logs) {
-    Log log = {0};
-    if (logs->idx == 0) {
-        return log;
-    }
-    for (int i = 0; i < logs->idx; i++) {
-        log.episode_return += logs->logs[i].episode_return;
-        log.episode_length += logs->logs[i].episode_length;
-        log.score += logs->logs[i].score;
-    }
-    log.episode_return /= logs->idx;
-    log.episode_length /= logs->idx;
-    log.score /= logs->idx;
-    logs->idx = 0;
-    return log;
-}
- 
+typedef struct Client Client;
 typedef struct Pong Pong;
 struct Pong {
+    Client* client;
+    Log log;
     float* observations;
     float* actions;
     float* rewards;
     unsigned char* terminals;
-    LogBuffer* log_buffer;
-    Log log;
     float paddle_yl;
     float paddle_yr;
     float ball_x;
@@ -115,7 +70,6 @@ void allocate(Pong* env) {
     env->actions = (float*)calloc(1, sizeof(float));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
-    env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
 }
 
 void free_allocated(Pong* env) {
@@ -123,7 +77,15 @@ void free_allocated(Pong* env) {
     free(env->actions);
     free(env->rewards);
     free(env->terminals);
-    free_logbuffer(env->log_buffer);
+}
+
+void add_log(Pong* env) {
+    float score = (float)env->score_r - (float)env->score_l;
+    env->log.episode_length += env->tick;
+    env->log.episode_return += score;
+    env->log.score += score;
+    env->log.perf += (float)(env->score_r) / ((float)env->score_l + (float)env->score_r);
+    env->log.n += 1;
 }
 
 void compute_observations(Pong* env) {
@@ -149,7 +111,6 @@ void reset_round(Pong* env) {
 }
 
 void c_reset(Pong* env) {
-    env->log = (Log){0};
     reset_round(env);
     env->score_l = 0;
     env->score_r = 0;
@@ -158,7 +119,6 @@ void c_reset(Pong* env) {
 
 void c_step(Pong* env) {
     env->tick += 1;
-    env->log.episode_length += 1;
     env->rewards[0] = 0;
     env->terminals[0] = 0;
     // move ego paddle
@@ -211,12 +171,9 @@ void c_step(Pong* env) {
                 env->win = 1;
                 env->score_r += 1;
                 env->rewards[0] = 1; // agent wins
-                env->log.episode_return += 1;
-                env->log.score += 1.0;
-
                 if (env->score_r == env->max_score) {
                     env->terminals[0] = 1;
-                    add_log(env->log_buffer, &env->log);
+                    add_log(env);
                     c_reset(env);
                     return;
                 } else {
@@ -245,11 +202,9 @@ void c_step(Pong* env) {
                 env->win = 0;
                 env->score_l += 1;
                 env->rewards[0] = -1.0;
-                env->log.score -= 1.0;
-                env->log.episode_return -= 1.0;
                 if (env->score_l == env->max_score) {
                     env->terminals[0] = 1;
-                    add_log(env->log_buffer, &env->log);
+                    add_log(env);
                     c_reset(env);
                     return;
                 } else {
@@ -306,7 +261,12 @@ void close_client(Client* client) {
     free(client);
 }
 
-void c_render(Client* client, Pong* env) {
+void c_render(Pong* env) {
+    if (env->client == NULL) {
+        env->client = make_client(env);
+    }
+    Client* client = env->client;
+
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
     }

@@ -9,6 +9,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
 #include <float.h>
 #include <stdbool.h>
@@ -31,7 +32,6 @@
 #define MODE_BUY_ITEM 2
 #define MODE_SELL_SELECT 3
 #define MODE_SELL_PRICE 4
-
 
 // Animations
 #define ANIM_IDLE 0
@@ -213,12 +213,13 @@ unsigned char RENDER_COLORS[16][3] = {
     {210, 240, 255}, // Winter water
 };
 
-#define LOG_BUFFER_SIZE 1024
-
 typedef struct Log Log;
 struct Log {
+    float perf;
+    float score;
     float episode_return;
     float episode_length;
+    float n;
     float return_comb_lvl;
     float return_prof_lvl;
     float return_item_atk_lvl;
@@ -234,62 +235,6 @@ struct Log {
     float r;
     float c;
 };
-
-typedef struct LogBuffer LogBuffer;
-struct LogBuffer {
-    Log* logs;
-    int length;
-    int idx;
-};
-
-LogBuffer* allocate_logbuffer(int size) {
-    LogBuffer* logs = (LogBuffer*)calloc(1, sizeof(LogBuffer));
-    logs->logs = (Log*)calloc(size, sizeof(Log));
-    logs->length = size;
-    logs->idx = 0;
-    return logs;
-}
-
-void free_logbuffer(LogBuffer* buffer) {
-    free(buffer->logs);
-    free(buffer);
-}
-
-void add_log(LogBuffer* logs, Log* log) {
-    if (logs->idx == logs->length) {
-        return;
-    }
-    logs->logs[logs->idx] = *log;
-    logs->idx += 1;
-    //printf("Log: %f, %f, %f\n", log->episode_return, log->episode_length, log->score);
-}
-
-Log aggregate_and_clear(LogBuffer* logs) {
-    Log log = {0};
-    if (logs->idx == 0) {
-        return log;
-    }
-    for (int i = 0; i < logs->idx; i++) {
-        log.episode_return += logs->logs[i].episode_return / logs->idx;
-        log.episode_length += logs->logs[i].episode_length / logs->idx;
-        log.return_comb_lvl += logs->logs[i].return_comb_lvl / logs->idx;
-        log.return_prof_lvl += logs->logs[i].return_prof_lvl / logs->idx;
-        log.return_item_atk_lvl += logs->logs[i].return_item_atk_lvl / logs->idx;
-        log.return_item_def_lvl += logs->logs[i].return_item_def_lvl / logs->idx;
-        log.return_market_buy += logs->logs[i].return_market_buy / logs->idx;
-        log.return_market_sell += logs->logs[i].return_market_sell / logs->idx;
-        log.return_death += logs->logs[i].return_death / logs->idx;
-        log.min_comb_prof += logs->logs[i].min_comb_prof / logs->idx;
-        log.purchases += logs->logs[i].purchases / logs->idx;
-        log.sales += logs->logs[i].sales / logs->idx;
-        log.equip_attack += logs->logs[i].equip_attack / logs->idx;
-        log.equip_defense += logs->logs[i].equip_defense / logs->idx;
-        log.r += logs->logs[i].r / logs->idx;
-        log.c += logs->logs[i].c / logs->idx;
-    }
-    logs->idx = 0;
-    return log;
-}
  
 // TODO: This is actually simplex and we should probably use the original impl
 // ALSO: Not seeded correctly
@@ -663,8 +608,7 @@ int peek_price(ItemMarket* market) {
 }
 
 typedef struct Reward Reward;
-struct Reward {
-    float total;
+struct Reward{
     float death;
     float pioneer;
     float comb_lvl;
@@ -730,8 +674,10 @@ Respawnable pop_from_buffer(RespawnBuffer* buffer, int tick) {
     return buffer->data[offset];
 }
 
+typedef struct Client Client;
 typedef struct MMO MMO;
 struct MMO {
+    Client* client;
     int width;
     int height;
     int num_players;
@@ -745,9 +691,12 @@ struct MMO {
     Entity* enemies;
     short* pids;
     unsigned char* items;
-    Reward* rewards;
     unsigned char* counts;
-    unsigned char* obs;
+    unsigned char* observations;
+    float* rewards;
+    float* terminals;
+    Reward* reward_struct;
+    Reward* returns;
     int* actions;
     int tick;
     int tiers;
@@ -764,8 +713,7 @@ struct MMO {
     RespawnBuffer* resource_respawn_buffer;
     RespawnBuffer* enemy_respawn_buffer;
     RespawnBuffer* drop_respawn_buffer;
-    Log* logs;
-    LogBuffer* log_buffer;
+    Log log;
     float reward_combat_level;
     float reward_prof_level;
     float reward_item_level;
@@ -782,24 +730,37 @@ Entity* get_entity(MMO* env, int pid) {
 }
 
 void add_player_log(MMO* env, int pid) {
-    LogBuffer* logs = env->log_buffer;
-    Log* log = &env->logs[pid];
+    Reward * ret = &env->returns[pid];
     Entity* player = get_entity(env, pid);
-    log->episode_return = (log->return_comb_lvl + log->return_prof_lvl + log->return_item_atk_lvl
-        + log->return_item_def_lvl + log->return_market_buy + log->return_market_sell + log->return_death);
-    log->episode_length = player->time_alive;
-    log->min_comb_prof = (player->prof_lvl > player->comb_lvl) ? player->comb_lvl : player->prof_lvl;
-    log->purchases = player->purchases;
-    log->sales = player->sales;
-    log->equip_attack = player->equipment_attack;
-    log->equip_defense = player->equipment_defense;
-    log->r = player->r;
-    log->c = player->c;
-    add_log(logs, log);
-    env->logs[pid] = (Log){0};
+    Log* log = &env->log;
+    log->return_comb_lvl += ret->comb_lvl;
+    log->return_prof_lvl += ret->prof_lvl;
+    log->return_item_atk_lvl += ret->item_atk_lvl;
+    log->return_item_def_lvl += ret->item_def_lvl;
+    log->return_market_buy += ret->market_buy;
+    log->return_market_sell += ret->market_sell;
+    log->return_death += ret->death;
+    log->min_comb_prof += (player->prof_lvl > player->comb_lvl) ? player->comb_lvl : player->prof_lvl;
+    log->purchases += player->purchases;
+    log->sales += player->sales;
+    log->equip_attack += player->equipment_attack;
+    log->equip_defense += player->equipment_defense;
+    log->r += player->r;
+    log->c += player->c;
+    log->episode_return += (
+        ret->comb_lvl + ret->prof_lvl
+        + ret->item_atk_lvl + ret->item_def_lvl
+        + ret->market_buy + ret->market_sell
+        + ret->death
+    );
+    log->episode_length += player->time_alive;
+    log->score = log->min_comb_prof;
+    log->perf = log->min_comb_prof / (float)env->levels;
+    log->n++;
+    *ret = (Reward){0};
 }
 
-void init_mmo(MMO* env) {
+void init(MMO* env) {
     init_items();
 
     int sz = env->width*env->height;
@@ -817,22 +778,23 @@ void init_mmo(MMO* env) {
         env->num_enemies, env->enemy_respawn_ticks);
     env->drop_respawn_buffer = make_respawn_buffer(2*env->num_enemies, 20);
 
+    env->returns = calloc(env->num_players, sizeof(Reward));
+    env->reward_struct = calloc(env->num_players, sizeof(Reward));
+    env->players = calloc(env->num_players, sizeof(Entity));
+    env->enemies = calloc(env->num_enemies, sizeof(Entity));
+
     // TODO: Figure out how to cast to array. Size is static
     int num_market = (MAX_TIERS+1)*(I_N+1);
     env->market = (ItemMarket*)calloc(num_market, sizeof(ItemMarket));
-
-    env->logs = calloc(env->num_players, sizeof(Log));
 }
 
 void allocate_mmo(MMO* env) {
     // TODO: Not hardcode
-    env->obs = calloc(env->num_players*(11*15*10+47+10), sizeof(unsigned char));
-    env->rewards = calloc(env->num_players, sizeof(Reward));
-    env->players = calloc(env->num_players, sizeof(Entity));
-    env->enemies = calloc(env->num_enemies, sizeof(Entity));
+    env->observations = calloc(env->num_players*(11*15*10+47+10), sizeof(unsigned char));
+    env->rewards = calloc(env->num_players, sizeof(float));
+    env->terminals = calloc(env->num_players, sizeof(float));
     env->actions = calloc(env->num_players, sizeof(int));
-    env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
-    init_mmo(env);
+    init(env);
 }
 
 void free_mmo(MMO* env) {
@@ -844,17 +806,18 @@ void free_mmo(MMO* env) {
     free_respawn_buffer(env->resource_respawn_buffer);
     free_respawn_buffer(env->enemy_respawn_buffer);
     free_respawn_buffer(env->drop_respawn_buffer);
-    free(env->logs);
     free(env->market);
 }
 
 void free_allocated_mmo(MMO* env) {
-    free(env->obs);
+    free(env->observations);
     free(env->rewards);
+    free(env->terminals);
+    free(env->returns);
+    free(env->reward_struct);
     free(env->players);
     free(env->enemies);
     free(env->actions);
-    free_logbuffer(env->log_buffer);
     free_mmo(env);
 }
 
@@ -980,19 +943,19 @@ void compute_all_obs(MMO* env) {
 
                 // Split by terrain type and season
                 unsigned char terrain = env->terrain[map_adr];
-                env->obs[obs_adr] = terrain % 4;
-                env->obs[obs_adr+1] = terrain / 4;
+                env->observations[obs_adr] = terrain % 4;
+                env->observations[obs_adr+1] = terrain / 4;
 
                 // Split by item type and tier
                 unsigned char item = env->items[map_adr];
-                env->obs[obs_adr+2] = item % 17;
-                env->obs[obs_adr+3] = item / 17;
+                env->observations[obs_adr+2] = item % 17;
+                env->observations[obs_adr+3] = item / 17;
 
                 int pid = env->pids[map_adr];
                 if (pid != -1) {
                     Entity* seen = get_entity(env, pid);
-                    env->obs[obs_adr+4] = seen->type;
-                    env->obs[obs_adr+5] = seen->element;
+                    env->observations[obs_adr+4] = seen->type;
+                    env->observations[obs_adr+5] = seen->element;
                     int delta_comb_obs = (seen->comb_lvl - comb_lvl) / 2;
                     if (delta_comb_obs < 0) {
                         delta_comb_obs = 0;
@@ -1000,55 +963,55 @@ void compute_all_obs(MMO* env) {
                     if (delta_comb_obs > 4) {
                         delta_comb_obs = 4;
                     }
-                    env->obs[obs_adr+6] = delta_comb_obs;
-                    env->obs[obs_adr+7] = seen->hp / 20; // Bucketed for discrete
-                    env->obs[obs_adr+8] = seen->anim;
-                    env->obs[obs_adr+9] = seen->dir;
+                    env->observations[obs_adr+6] = delta_comb_obs;
+                    env->observations[obs_adr+7] = seen->hp / 20; // Bucketed for discrete
+                    env->observations[obs_adr+8] = seen->anim;
+                    env->observations[obs_adr+9] = seen->dir;
                 }
                 obs_adr += 10;
             }
         }
 
         // Player observation
-        env->obs[obs_adr] = player->type;
-        env->obs[obs_adr+1] = player->comb_lvl;
-        env->obs[obs_adr+2] = player->element;
-        env->obs[obs_adr+3] = player->dir;
-        env->obs[obs_adr+4] = player->anim;
-        env->obs[obs_adr+5] = player->hp;
-        env->obs[obs_adr+6] = player->hp_max;
-        env->obs[obs_adr+7] = player->prof_lvl;
-        env->obs[obs_adr+8] = player->ui_mode;
-        env->obs[obs_adr+9] = player->market_tier;
-        env->obs[obs_adr+10] = player->sell_idx;
-        env->obs[obs_adr+11] = player->gold;
-        env->obs[obs_adr+12] = player->in_combat;
+        env->observations[obs_adr] = player->type;
+        env->observations[obs_adr+1] = player->comb_lvl;
+        env->observations[obs_adr+2] = player->element;
+        env->observations[obs_adr+3] = player->dir;
+        env->observations[obs_adr+4] = player->anim;
+        env->observations[obs_adr+5] = player->hp;
+        env->observations[obs_adr+6] = player->hp_max;
+        env->observations[obs_adr+7] = player->prof_lvl;
+        env->observations[obs_adr+8] = player->ui_mode;
+        env->observations[obs_adr+9] = player->market_tier;
+        env->observations[obs_adr+10] = player->sell_idx;
+        env->observations[obs_adr+11] = player->gold;
+        env->observations[obs_adr+12] = player->in_combat;
         for (int j = 0; j < 5; j++) {
-            env->obs[obs_adr+13+j] = player->equipment[j];
+            env->observations[obs_adr+13+j] = player->equipment[j];
         }
         for (int j = 0; j < 12; j++) {
-            env->obs[obs_adr+18+j] = player->inventory[j];
+            env->observations[obs_adr+18+j] = player->inventory[j];
         }
         for (int j = 0; j < 12; j++) {
-            env->obs[obs_adr+30+j] = player->is_equipped[j];
+            env->observations[obs_adr+30+j] = player->is_equipped[j];
         }
-        env->obs[obs_adr+42] = player->wander_range;
-        env->obs[obs_adr+43] = player->ranged;
-        env->obs[obs_adr+44] = player->goal;
-        env->obs[obs_adr+45] = player->equipment_attack;
-        env->obs[obs_adr+46] = player->equipment_defense;
+        env->observations[obs_adr+42] = player->wander_range;
+        env->observations[obs_adr+43] = player->ranged;
+        env->observations[obs_adr+44] = player->goal;
+        env->observations[obs_adr+45] = player->equipment_attack;
+        env->observations[obs_adr+46] = player->equipment_defense;
 
         // Reward observation
-        Reward* reward = &env->rewards[pid];
-        env->obs[obs_adr+47] = (reward->death == 0) ? 0 : 1;
-        env->obs[obs_adr+48] = (reward->pioneer == 0) ? 0 : 1;
-        env->obs[obs_adr+49] = reward->comb_lvl / 20;
-        env->obs[obs_adr+50] = reward->prof_lvl / 20;
-        env->obs[obs_adr+51] = reward->item_atk_lvl / 20;
-        env->obs[obs_adr+52] = reward->item_def_lvl / 20;
-        env->obs[obs_adr+53] = reward->item_tool_lvl / 20;
-        env->obs[obs_adr+54] = reward->market_buy / 20;
-        env->obs[obs_adr+55] = reward->market_sell / 20;
+        Reward* reward = &env->reward_struct[pid];
+        env->observations[obs_adr+47] = (reward->death == 0) ? 0 : 1;
+        env->observations[obs_adr+48] = (reward->pioneer == 0) ? 0 : 1;
+        env->observations[obs_adr+49] = reward->comb_lvl / 20;
+        env->observations[obs_adr+50] = reward->prof_lvl / 20;
+        env->observations[obs_adr+51] = reward->item_atk_lvl / 20;
+        env->observations[obs_adr+52] = reward->item_def_lvl / 20;
+        env->observations[obs_adr+53] = reward->item_tool_lvl / 20;
+        env->observations[obs_adr+54] = reward->market_buy / 20;
+        env->observations[obs_adr+55] = reward->market_sell / 20;
     }
 }
 
@@ -1199,14 +1162,14 @@ void pickup_item(MMO* env, int pid) {
     // Harvest resource
     Respawnable respawnable = {.id = ground_id, .r = r, .c = c};
     add_to_buffer(env->resource_respawn_buffer, respawnable, env->tick);
-    Reward* reward = &env->rewards[pid];
-    Log* log = &env->logs[pid];
+    Reward* reward = &env->reward_struct[pid];
+    Reward* ret = &env->returns[pid];
 
     // Level up for a worthy harvest
     if (player->prof_lvl < env->levels && player->prof_lvl < tier_level(ground_tier)) {
         player->prof_lvl += 1;
         reward->prof_lvl = env->reward_prof_level;
-        log->return_prof_lvl += env->reward_prof_level;
+        ret->prof_lvl += env->reward_prof_level;
     }
 
     // Some items are different on the ground and in inventory
@@ -1265,7 +1228,7 @@ void move(MMO* env, int pid, int direction, bool run) {
     // Update visitation map. Skips run tiles
     if (entity->type == ENTITY_PLAYER) {
         if (env->counts[map_offset(env, rr, cc)] == 0) {
-            env->rewards[pid].pioneer = 1.0;
+            env->reward_struct[pid].pioneer = 1.0;
         }
         if (env->counts[map_offset(env, rr, cc)] < 255) {
             env->counts[map_offset(env, rr, cc)] += 1;
@@ -1441,11 +1404,11 @@ void attack(MMO* env, int pid, int target_id) {
     // Defender dies
     defender->hp = 0;
     if (defender->type == ENTITY_PLAYER) {
-        Reward* reward = &env->rewards[target_id];
-        Log* log = &env->logs[target_id];
+        Reward* reward = &env->reward_struct[target_id];
+        Reward* ret = &env->returns[target_id];
         reward->death = env->reward_death;
-        log->return_death += env->reward_death;
-        env->rewards[target_id].death = -1;
+        ret->death += env->reward_death;
+        env->reward_struct[target_id].death = -1;
         add_player_log(env, target_id);
     } else {
         // Add to respawn buffer
@@ -1455,8 +1418,8 @@ void attack(MMO* env, int pid, int target_id) {
     }
 
     if (attacker->type == ENTITY_PLAYER) {
-        Reward* reward = &env->rewards[pid];
-        Log* log = &env->logs[pid];
+        Reward* reward = &env->reward_struct[pid];
+        Reward* ret = &env->returns[pid];
         int attacker_lvl = attacker->comb_lvl;
         int defender_lvl = defender->comb_lvl;
 
@@ -1464,7 +1427,7 @@ void attack(MMO* env, int pid, int target_id) {
         if (defender_lvl >= attacker_lvl && attacker_lvl < env->levels) {
             attacker->comb_lvl += 1;
             reward->comb_lvl = env->reward_combat_level;
-            log->return_comb_lvl += env->reward_combat_level;
+            ret->comb_lvl += env->reward_combat_level;
         }
         if (defender->type == ENTITY_ENEMY) {
             drop_loot(env, target_id);
@@ -1479,8 +1442,8 @@ void attack(MMO* env, int pid, int target_id) {
 
 void use_item(MMO* env, int pid, int inventory_idx) {
     Entity* player = &env->players[pid];
-    Reward* reward = &env->rewards[pid];
-    Log* log = &env->logs[pid];
+    Reward* reward = &env->reward_struct[pid];
+    Reward* ret = &env->returns[pid];
     int item_id = player->inventory[inventory_idx];
 
     if (item_id == 0) {
@@ -1559,11 +1522,11 @@ void use_item(MMO* env, int pid, int inventory_idx) {
         } else {
             if (attack > 0) {
                 reward->item_atk_lvl = -item_reward;
-                log->return_item_atk_lvl -= item_reward;
+                ret->item_atk_lvl -= item_reward;
             }
             if (defense > 0) {
                 reward->item_def_lvl = -item_reward;
-                log->return_item_def_lvl -= item_reward;
+                ret->item_def_lvl -= item_reward;
             }
         }
         if (equip_slot == SLOT_GEM) {
@@ -1588,11 +1551,11 @@ void use_item(MMO* env, int pid, int inventory_idx) {
     } else {
         if (attack > 0) {
             reward->item_atk_lvl = item_reward;
-            log->return_item_atk_lvl += item_reward;
+            ret->item_atk_lvl += item_reward;
         }
         if (defense > 0) {
             reward->item_def_lvl = item_reward;
-            log->return_item_def_lvl += item_reward;
+            ret->item_def_lvl += item_reward;
         }
     }
 
@@ -1669,8 +1632,7 @@ void enemy_ai(MMO* env, int pid) {
     wander(env, pid);
 }
 
-void c_reset(MMO* env, int seed) {
-    srand(time(NULL));
+void c_reset(MMO* env) {
     env->tick = 0;
 
     env->market_sells = 0;
@@ -2008,17 +1970,8 @@ void c_step(MMO* env) {
             continue;
         }
 
-        Reward* reward = &env->rewards[pid];
-        reward->total = 0;
-        reward->death = 0;
-        reward->pioneer = 0;
-        reward->comb_lvl = 0;
-        reward->prof_lvl = 0;
-        reward->item_atk_lvl = 0;
-        reward->item_def_lvl = 0;
-        reward->item_tool_lvl = 0;
-        reward->market_buy = 0;
-        reward->market_sell = 0;
+        Reward* reward = &env->reward_struct[pid];
+        *reward = (Reward){0};
 
         // Update entity heading
         int action = env->actions[pid];
@@ -2085,9 +2038,9 @@ void c_step(MMO* env) {
 
             market->stock -= 1;
             env->market_buys += 1;
-            Log* log = &env->logs[pid];
             reward->market_buy = env->reward_market;
-            log->return_market_buy = env->reward_market;
+            Reward* ret = &env->returns[pid];
+            ret->market_buy += env->reward_market;
             // env->rewards[buyer_id].gold += price;
             // if (env->rewards[buyer_id].gold > 99) {
             //     env->rewards[buyer_id].gold = 99;
@@ -2143,9 +2096,9 @@ void c_step(MMO* env) {
             entity->inventory[inventory_idx] = 0;
             entity->sales += 1;
             env->market_sells += 1;
-            Log* log = &env->logs[pid];
             reward->market_sell = env->reward_market;
-            log->return_market_sell = env->reward_market;
+            Reward* ret = &env->returns[pid];
+            ret->market_sell += env->reward_market;
         } else if (action == ATN_ATTACK) {
             int target_id = find_target(env, pid, ENTITY_ENEMY);
             if (target_id != -1) {
@@ -2165,10 +2118,12 @@ void c_step(MMO* env) {
     }
     compute_all_obs(env);
     for (int pid = 0; pid < env->num_players; pid++) {
-        Reward* reward = &env->rewards[pid];
-        reward->total = reward->death + reward->comb_lvl
+        Reward* reward = &env->reward_struct[pid];
+        env->rewards[pid] = (
+            reward->death + reward->comb_lvl
             + reward->prof_lvl + reward->item_atk_lvl + reward->item_def_lvl
-            + reward->market_buy + reward->market_sell;
+            + reward->market_buy + reward->market_sell
+        );
     }
 }
 
@@ -2214,7 +2169,6 @@ void c_step(MMO* env) {
 
 int ITEM_TEXTURES[ITEM_TYPES*MAX_TIERS];
 
-typedef struct Client Client;
 struct Client {
     Texture2D tiles;
     Texture2D players[5][NUM_PLAYER_TEXTURES];
@@ -2253,6 +2207,7 @@ struct Client {
     int active_overlay;
     int my_player;
     int start_time;
+    float render_delta;
 };
 
 #define TILE_SPRING_GRASS 0
@@ -2495,12 +2450,12 @@ void render_conversion(char* flat_tiles, int* flat_converted, int R, int C) {
 }
 
 Client* make_client(MMO* env) {
-
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "NMMO3");
     SetTargetFPS(FRAME_RATE);
 
     Client* client = calloc(1, sizeof(Client));
     client->start_time = time(NULL);
+    client->render_delta = 1.0/TICK_FRAMES;
     client->command_len = 0;
 
     client->terrain = calloc(env->height*env->width, sizeof(int));
@@ -3156,7 +3111,14 @@ void process_command_input(Client* client, MMO* env) {
     DrawText(text, 10, 10, 20, BLACK);
 }
 
-int tick(Client* client, MMO* env, float delta) {
+int c_render(MMO* env) {
+    if (env->client == NULL) {
+        // Must reset before making client
+        env->client = make_client(env);
+    }
+    Client* client = env->client;
+    float delta = client->render_delta;
+
     BeginDrawing();
     ClearBackground(BLANK);
     int action = 0;

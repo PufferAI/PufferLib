@@ -1,6 +1,7 @@
 from pdb import set_trace as T
 
 from collections import OrderedDict
+from contextlib import nullcontext
 
 import numpy as np
 
@@ -243,26 +244,35 @@ def format_bytes(size):
     else:
         return f'{size} B'
 
+# TODO: 5% perf gain by doing cuda sync less frequently
 class Profiler:
-    def __init__(self, elapsed=True, calls=True, memory=False, pytorch_memory=False):
+    def __init__(self, elapsed=True, calls=True, memory=False,
+            pytorch_memory=False, sync_cuda=True, frequency=10, amp_context=nullcontext()):
         self.elapsed = 0 if elapsed else None
         self.calls = 0 if calls else None
         self.memory = None
         self.pytorch_memory = None
         self.prev = 0
+        self.delta = 0
         
         self.track_elapsed = elapsed
         self.track_calls = calls
         self.track_memory = memory
         self.track_pytorch_memory = pytorch_memory
+        self.sync_cuda = sync_cuda
+        self.frequency = frequency
+        self.epoch = 0
         
         if memory:
             self.process = psutil.Process()
 
-        if pytorch_memory:
+        if pytorch_memory or sync_cuda:
             import torch
             self.torch = torch
 
+        self.amp_context = amp_context
+
+    '''
     @property
     def serial(self):
         return {
@@ -278,8 +288,19 @@ class Profiler:
         ret = self.elapsed - self.prev if self.elapsed is not None else None
         self.prev = self.elapsed
         return ret
+    '''
+
+    def __call__(self, epoch):
+        self.epoch = epoch
+        return self
 
     def __enter__(self):
+        if self.epoch % self.frequency != 0:
+            return self
+
+        if self.sync_cuda:
+            self.torch.cuda.synchronize()
+        self.amp_context.__enter__()
         if self.track_elapsed:
             self.start_time = time.perf_counter()
         if self.track_memory:
@@ -289,9 +310,16 @@ class Profiler:
         return self
 
     def __exit__(self, *args):
+        if self.epoch % self.frequency != 0:
+            return self
+
+        self.amp_context.__exit__(None, None, None)
+        if self.sync_cuda:
+            self.torch.cuda.synchronize()
         if self.track_elapsed:
             self.end_time = time.perf_counter()
-            self.elapsed += self.end_time - self.start_time
+            self.delta += self.end_time - self.start_time
+            self.elapsed += self.delta
         if self.track_calls:
             self.calls += 1
         if self.track_memory:

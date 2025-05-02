@@ -110,9 +110,9 @@ def test_model_forward(model):
 	
 if __name__ == '__main__':
     #test_lstm()
-    model = torch.load('snake.pt', map_location='cpu')
+    model = torch.load('nmmo3.pt', map_location='cpu', weights_only=False)
     #test_model_forward(model)
     #test_model(model)
 
-    save_model_weights(model, 'snake_weights.bin')
+    save_model_weights(model, 'nmmo3_2025.bin')
     print('saved')

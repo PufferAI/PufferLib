@@ -6,9 +6,10 @@ cdef extern from "snake.h":
         int LOG_BUFFER_SIZE
 
         ctypedef struct Log:
-            float episode_return;
-            float episode_length;
-            float score;
+            float perf
+            float score
+            float episode_return
+            float episode_length
 
         ctypedef struct LogBuffer
         LogBuffer* allocate_logbuffer(int)

@@ -5,7 +5,7 @@ import os
 #import heapq
 
 import pufferlib
-from pufferlib.ocean.tactical.c_tactical import CTactical
+from pufferlib.ocean.tactical import binding
 # from pufferlib.environments.ocean import render
 
 EMPTY = 0
@@ -22,7 +22,7 @@ MAP_DICT = {
 
 
 class Tactical:
-    def __init__(self, num_envs=200, render_mode='human'):
+    def __init__(self, num_envs=200, render_mode='human', seed=0):
         self.num_envs = num_envs
         self.render_mode = render_mode
 
@@ -45,6 +45,17 @@ class Tactical:
             masks = np.ones(num_envs, dtype=bool),
         )
         self.actions = np.zeros(num_envs, dtype=np.uint32)
+        
+        self.c_envs = binding.vec_init(
+            self.buf.observations,
+            self.actions,
+            self.buf.rewards,
+            self.buf.terminals,
+            self.buf.truncations,
+            num_envs,
+            seed,
+            num_obs=self.buf.observations.shape[1]
+        )
 
         # render
         # if render_mode == 'human':
@@ -68,18 +79,18 @@ class Tactical:
     def reset(self, seed=None):
         self.c_envs = []
         for i in range(self.num_envs):
-            self.c_envs.append(CTactical(
+            self.c_envs.append(binding.vec_init(
                 self.buf.observations[i],
                 self.actions[i:i+1],
                 self.buf.rewards[i:i+1]))
-            self.c_envs[i].reset()
+            binding.vec_reset(self.c_envs[i])
 
         return self.buf.observations, {}
 
     def step(self, actions):
         self.actions[:] = actions
         for c_env in self.c_envs:
-            c_env.step()
+            binding.vec_step(c_env)
         
         info = {}
 
@@ -87,13 +98,13 @@ class Tactical:
             self.buf.terminals, self.buf.truncations, info)
 
     def render(self):
-        return self.c_envs[0].render()
+        return binding.vec_render(self.c_envs, 0)
         # if self.render_mode == 'human':
         #     return self.client.render(self.map)
 
     def close(self):
         for c_env in self.c_envs:
-            c_env.close()
+            binding.vec_close(c_env)
 
 '''
 def a_star_search(map, start, goal):

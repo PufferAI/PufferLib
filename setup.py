@@ -78,6 +78,8 @@ cleanrl = [
     'wandb==0.19.1',
     'scipy',
     'pyro-ppl',
+    'neptune',
+    'heavyball',
 ]
 
 ray = [
@@ -119,6 +121,11 @@ environments = {
         f'gymnasium=={GYMNASIUM_VERSION}',
         'crafter==1.8.3',
     ],
+    'craftax': [
+        f'gym=={GYM_VERSION}',
+        f'gymnasium=={GYMNASIUM_VERSION}',
+        'craftax',
+    ],
     'dm_control': [
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
@@ -135,6 +142,11 @@ environments = {
         f'gymnasium=={GYMNASIUM_VERSION}',
         'griddly==1.6.7',
         'imageio',
+    ],
+    'kinetix': [
+        f'gym=={GYM_VERSION}',
+        f'gymnasium=={GYMNASIUM_VERSION}',
+        'kinetix-env',
     ],
     'magent': [
         f'gym=={GYM_VERSION}',
@@ -253,21 +265,23 @@ common = cleanrl + [environments[env] for env in [
 ]]
 
 extension_paths = [
-    'pufferlib/ocean/nmmo3/cy_nmmo3',
+    #'pufferlib/ocean/nmmo3/cy_nmmo3',
     'pufferlib/ocean/moba/cy_moba',
-    'pufferlib/ocean/tactical/c_tactical',
-    'pufferlib/ocean/squared/cy_squared',
+    # 'pufferlib/ocean/tactical/c_tactical',
+    #'pufferlib/ocean/squared/cy_squared',
     'pufferlib/ocean/snake/cy_snake',
-    'pufferlib/ocean/pong/cy_pong',
-    'pufferlib/ocean/breakout/cy_breakout',
-    'pufferlib/ocean/enduro/cy_enduro',
+    'pufferlib/ocean/gpudrive/cy_gpudrive',
+    #'pufferlib/ocean/pong/cy_pong',
+    # 'pufferlib/ocean/breakout/cy_breakout',
+    # 'pufferlib/ocean/cartpole/cy_cartpole',
     'pufferlib/ocean/connect4/cy_connect4',
-    'pufferlib/ocean/grid/cy_grid',
+    #'pufferlib/ocean/grid/cy_grid',
     'pufferlib/ocean/tripletriad/cy_tripletriad',
-    'pufferlib/ocean/go/cy_go',
+    # 'pufferlib/ocean/go/cy_go',
     'pufferlib/ocean/rware/cy_rware',
     'pufferlib/ocean/trash_pickup/cy_trash_pickup',
     'pufferlib/ocean/cpr/cy_cpr',
+    # 'pufferlib/ocean/tower_climb/cy_tower_climb',
 ]
 
 system = platform.system()
@@ -277,11 +291,11 @@ if system == 'Darwin':
     # and “raylib/lib” is (maybe) two directories up from ocean/<env>.
     # So @loader_path/../../raylib/lib is common.
     extra_compile_args = ['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION','-DPLATFORM_DESKTOP', '-O2']
-    extra_link_args=['-fwrapv']
+    extra_link_args=['-fwrapv', '-framework', 'Cocoa', '-framework', 'OpenGL', '-framework', 'IOKit']
 
 elif system == 'Linux':
-    extra_compile_args = ['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', '-DPLATFORM_DESKTOP', '-O2', '-Wno-alloc-size-larger-than']
-    extra_link_args=['-fwrapv', '-Bsymbolic-functions']
+    extra_compile_args = ['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', '-DPLATFORM_DESKTOP', '-O2', '-Wno-alloc-size-larger-than', '-fmax-errors=3', '-g']
+    extra_link_args=['-fwrapv', '-Bsymbolic-functions', '-O2']
 
     # On Linux, $ORIGIN works
 else:
@@ -291,11 +305,29 @@ extensions = [Extension(
     path.replace('/', '.'),
     [path + '.pyx'],
     include_dirs=[numpy.get_include(), 'raylib/include'],
-    extra_compile_args=extra_compile_args,#, '-g'],
+    extra_compile_args=extra_compile_args,
     extra_link_args=extra_link_args,
-    extra_objects=[f'{RAYLIB_NAME}/lib/libraylib.a']
-
+    extra_objects=[f'{RAYLIB_NAME}/lib/libraylib.a'],
 ) for path in extension_paths]
+
+#c_args = ['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', '-DPLATFORM_DESKTOP', '-O0', '-Wno-alloc-size-larger-than', '-g']
+#c_args = ['-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', '-DPLATFORM_DESKTOP', '-O2']
+#c_args += "-Wsign-compare -DNDEBUG -g -O2 -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -g -fwrapv -O2 -fPIC".split()
+
+
+pure_c_extensions = ['squared', 'pong', 'breakout', 'enduro', 'blastar', 'grid', 'nmmo3', 'tactical', 'go', 'cartpole']
+
+extensions += [
+    Extension(
+        f'pufferlib.ocean.{name}.binding',
+        sources=[f'pufferlib/ocean/{name}/binding.c'],
+        include_dirs=[numpy.get_include(), 'raylib/include'],
+        extra_compile_args=extra_compile_args,# + ['-fsanitize=address,undefined,bounds,pointer-overflow,leak'],
+        extra_link_args=extra_link_args,# + ['-fsanitize=address,undefined,bounds,pointer-overflow,leak', '-g'],
+        extra_objects=[f'{RAYLIB_NAME}/lib/libraylib.a'],
+    )
+    for name in pure_c_extensions
+]
 
 # Prevent Conda from injecting garbage compile flags
 from distutils.sysconfig import get_config_vars
@@ -345,7 +377,7 @@ setup(
     },
     ext_modules = cythonize([
         "pufferlib/extensions.pyx",
-        "c_gae.pyx",
+        "c_advantage.pyx",
         "pufferlib/puffernet.pyx",
         *extensions,
     ], 

@@ -22,7 +22,7 @@ class Rware(pufferlib.PufferEnv):
             grid_square_size=64,
             human_agent_idx=0,
             reward_type=1,
-            buf = None):
+            buf = None, seed=0):
 
         # env
         self.num_agents = num_envs*num_agents

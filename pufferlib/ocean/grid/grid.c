@@ -22,8 +22,15 @@ int main() {
     //env->agents[0].color = 6;
     //reset(env, seed);
     //load_locked_room_preset(env);
+     
  
-    create_maze_level(env, 5, 5, 0.85, seed);
+    State* levels = calloc(1, sizeof(State));
+
+    create_maze_level(env, 11, 11, 0.85, seed);
+    init_state(levels, max_size, num_agents);
+    get_state(env, levels);
+    env->num_maps = 1;
+    env->levels = levels;
     //generate_locked_room(env);
     //State state;
     //init_state(&state, env->max_size, env->num_agents);
@@ -40,9 +47,8 @@ int main() {
     env->grid[(env->height-2)*env->max_size + (env->width - 2)] = GOAL;
     */
  
-    Renderer* renderer = init_renderer(render_cell_size, width, height);
-
     int tick = 0;
+    render(env);
     while (!WindowShouldClose()) {
         // User can take control of the first agent
         env->actions[0] = ATN_FORWARD;
@@ -74,20 +80,13 @@ int main() {
         //env->actions[0] = actions[t];
         tick = (tick + 1)%12;
         bool done = false;
-        if (tick % 12 == 0) {
-            done = step(env);
+        if (tick % 1 == 0) {
+            c_step(env);
             printf("direction: %f\n", env->agents[0].direction);
 
         }
-        if (done) {
-            printf("Done, reward: %f\n", env->rewards[0]);
-            seed++;
-            reset(env, seed);
-            create_maze_level(env, 5, 5, 0.85, seed);
-        }
-        render_global(renderer, env, (float)tick/12.0);
+        render(env);
     }
-    close_renderer(renderer);
     free_allocated_grid(env);
     return 0;
 }

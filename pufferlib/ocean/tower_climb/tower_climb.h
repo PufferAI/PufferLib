@@ -138,10 +138,10 @@ void free_puzzle_state(PuzzleState* ps){
 
 typedef struct Log Log;
 struct Log {
+    float perf;
+    float score;
     float episode_return;
     float episode_length;
-    float rows_cleared;
-    float levels_completed;
 };
 
 typedef struct LogBuffer LogBuffer;
@@ -179,8 +179,8 @@ Log aggregate_and_clear(LogBuffer* logs) {
     for (int i = 0; i < logs->idx; i++) {
         log.episode_return  += logs->logs[i].episode_return  / logs->idx;
         log.episode_length  += logs->logs[i].episode_length  / logs->idx;
-        log.rows_cleared    += logs->logs[i].rows_cleared    / logs->idx;
-	    log.levels_completed += logs->logs[i].levels_completed / logs->idx;
+        log.score += logs->logs[i].score / logs->idx;
+	    log.perf += logs->logs[i].perf / logs->idx;
     }
 
     logs->idx = 0;
@@ -352,7 +352,7 @@ void illegal_move(CTowerClimb* env){
 void death(CTowerClimb* env){
 	env->rewards[0] = -1;
 	env->log.episode_return -= 1;
-	env->log.levels_completed = 0;
+	env->log.perf = 0;
 	add_log(env->log_buffer, &env->log);
 }
 
@@ -383,7 +383,7 @@ int climb(PuzzleState* outState, int action, int mode, CTowerClimb* env, const L
         env->rows_cleared = floor_cleared;
         env->rewards[0] = env->reward_climb_row;
         env->log.episode_return += env->reward_climb_row;
-        env->log.rows_cleared = floor_cleared;
+        env->log.score = floor_cleared;
     }
     outState->robot_position = cell_next_above;
     outState->robot_state = 0;
@@ -788,7 +788,7 @@ int c_step(CTowerClimb* env) {
     env->rewards[0] = 0.0;
     if(env->log.episode_length > 60){
          env->rewards[0] = 0;
-         env->log.levels_completed = 0;
+         env->log.perf = 0;
          add_log(env->log_buffer, &env->log);
          return 1;
     }
@@ -807,7 +807,7 @@ int c_step(CTowerClimb* env) {
     if (isGoal(env->state, env->level)) {
         env->rewards[0] = 1.0;
         env->log.episode_return +=1.0;
-        env->log.levels_completed = 1.0;
+        env->log.perf = 1.0;
         add_log(env->log_buffer, &env->log);
         return 1;
     }

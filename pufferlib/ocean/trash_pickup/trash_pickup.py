@@ -7,7 +7,7 @@ from pufferlib.ocean.trash_pickup.cy_trash_pickup import CyTrashPickup
 
 class TrashPickupEnv(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=1, buf=None, 
-                 grid_size=10, num_agents=3, num_trash=15, num_bins=2, max_steps=300, agent_sight_range=5):
+                 grid_size=10, num_agents=3, num_trash=15, num_bins=2, max_steps=300, agent_sight_range=5, seed=0):
         # Env Setup
         self.render_mode = render_mode
         self.report_interval = report_interval

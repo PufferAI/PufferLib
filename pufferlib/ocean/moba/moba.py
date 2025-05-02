@@ -16,7 +16,7 @@ class Moba(pufferlib.PufferEnv):
     def __init__(self, num_envs=4, vision_range=5, agent_speed=1.0,
             discretize=True, reward_death=-1.0, reward_xp=0.006,
             reward_distance=0.05, reward_tower=3.0, report_interval=32,
-            script_opponents=True, render_mode='human', buf=None):
+            script_opponents=True, render_mode='human', buf=None, seed=0):
 
         self.report_interval = report_interval
         self.render_mode = render_mode

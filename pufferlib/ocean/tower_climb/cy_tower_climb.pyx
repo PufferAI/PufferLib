@@ -5,10 +5,10 @@ cdef extern from "tower_climb.h":
     int LOG_BUFFER_SIZE
 
     ctypedef struct Log:
+        float perf;
+        float score;
         float episode_return;
         float episode_length;
-        float rows_cleared;
-        float levels_completed;
 
     ctypedef struct LogBuffer
     LogBuffer* allocate_logbuffer(int)

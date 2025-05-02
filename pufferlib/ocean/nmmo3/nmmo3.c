@@ -144,10 +144,11 @@ void forward(MMONet* net, unsigned char* observations, int* actions) {
 }
 
 void demo(int num_players) {
-    Weights* weights = load_weights("resources/nmmo3/nmmo_1500.bin", 1101403);
+    Weights* weights = load_weights("resources/nmmo3/nmmo_2025.bin", 1101403);
     MMONet* net = init_mmonet(weights, num_players);
 
     MMO env = {
+        .client = NULL,
         .width = 512,
         .height = 512,
         .num_players = num_players,
@@ -165,10 +166,8 @@ void demo(int num_players) {
     };
     allocate_mmo(&env);
 
-    c_reset(&env, 42);
-
-    // Must reset before making client
-    Client* client = make_client(&env);
+    c_reset(&env);
+    c_render(&env, 0);
 
     int human_action = ATN_NOOP;
     bool human_mode = false;
@@ -178,7 +177,7 @@ void demo(int num_players) {
             human_mode = !human_mode;
         }
         if (i % 36 == 0) {
-            forward(net, env.obs, env.actions);
+            forward(net, env.observations, env.actions);
             if (human_mode) {
                 env.actions[0] = human_action;
             }
@@ -187,7 +186,7 @@ void demo(int num_players) {
             //printf("Reward: %f\n\tDeath: %f\n\tProf: %f\n\tComb: %f\n\tItem: %f\n", env.rewards[0].death, env.rewards[0].death, env.rewards[0].prof_lvl, env.rewards[0].comb_lvl, env.rewards[0].item_atk_lvl);
             human_action = ATN_NOOP;
         } else {
-            int atn = tick(client, &env, i/36.0f);
+            int atn = c_render(&env, i/36.0f);
             if (atn != ATN_NOOP) {
                 human_action = atn;
             }
@@ -198,7 +197,7 @@ void demo(int num_players) {
     free_mmonet(net);
     free(weights);
     free_allocated_mmo(&env);
-    close_client(client);
+    //close_client(client);
 }
 
 void test_mmonet_performance(int num_players, int timeout) {
@@ -222,12 +221,12 @@ void test_mmonet_performance(int num_players, int timeout) {
         .y_window = 5,
     };
     allocate_mmo(&env);
-    c_reset(&env, 42);
+    c_reset(&env);
 
     int start = time(NULL);
     int num_steps = 0;
     while (time(NULL) - start < timeout) {
-        forward(net, env.obs, env.actions);
+        forward(net, env.observations, env.actions);
         c_step(&env);
         num_steps++;
     }
@@ -434,7 +433,7 @@ void test_performance(int num_players, int timeout) {
         .y_window = 5,
     };
     allocate_mmo(&env);
-    c_reset(&env, 0);
+    c_reset(&env);
 
     int start = time(NULL);
     int num_steps = 0;

@@ -6,7 +6,7 @@ from pufferlib.ocean.tripletriad.cy_tripletriad import CyTripleTriad
 
 class TripleTriad(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=1,
-            width=990, height=690, piece_width=192, piece_height=224, buf=None):
+            width=990, height=690, piece_width=192, piece_height=224, buf=None, seed=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(114,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Discrete(14)

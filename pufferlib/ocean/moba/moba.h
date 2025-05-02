@@ -98,6 +98,8 @@ struct PlayerLog {
 
 typedef struct Log Log;
 struct Log {
+    float perf;
+    float score;
     float episode_return;
     float episode_length;
     float reward_death;
@@ -166,6 +168,8 @@ Log aggregate_and_clear(LogBuffer* logs) {
         &log.dire_assassin, &log.dire_burst, &log.dire_tank, &log.dire_carry
     };
     for (int i = 0; i < logs->idx; i++) {
+        log.perf += logs->logs[i].radiant_victory / logs->idx;
+        log.score += logs->logs[i].radiant_towers_alive / logs->idx;
         log.episode_return += logs->logs[i].episode_return / logs->idx;
         log.episode_length += logs->logs[i].episode_length / logs->idx;
         log.reward_death += logs->logs[i].reward_death / logs->idx;

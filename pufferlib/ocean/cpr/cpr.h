@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 #include "raylib.h"
 
@@ -41,11 +42,15 @@
 
 typedef struct Log Log;
 struct Log {
+  float perf;
   float score;
+  float episode_return;
+  float episode_length;
   float moves;
   float food_nb;
   float agents_alive;
   float alive_steps;
+  float n;
 };
 
 typedef struct LogBuffer LogBuffer;
@@ -72,9 +77,10 @@ void add_log(LogBuffer *logs, Log *log) {
   if (logs->idx == logs->length) {
     return;
   }
+  log->episode_return = log->score;
+  log->perf = fmaxf(0, 1.0 - 0.01*log->episode_length);
   logs->logs[logs->idx] = *log;
   logs->idx += 1;
-  // printf("Log: %f, %f \n", log->score, log->moves);
 }
 
 Log aggregate_and_clear(LogBuffer *logs) {
@@ -84,16 +90,24 @@ Log aggregate_and_clear(LogBuffer *logs) {
   }
   for (int i = 0; i < logs->idx; i++) {
     log.score += logs->logs[i].score;
+    log.perf += logs->logs[i].perf;
+    log.episode_return += logs->logs[i].episode_return;
+    log.episode_length += logs->logs[i].episode_length;
     log.moves += logs->logs[i].moves;
     log.food_nb += logs->logs[i].food_nb;
     log.agents_alive += logs->logs[i].agents_alive;
     log.alive_steps += logs->logs[i].alive_steps;
+    log.n += 1;
   }
   log.score /= logs->idx;
+  log.perf /= logs->idx;
+  log.episode_return /= logs->idx;
+  log.episode_length /= logs->idx;
   log.moves /= logs->idx;
   log.food_nb /= logs->idx;
   log.agents_alive /= logs->idx;
   log.alive_steps /= logs->idx;
+  log.n /= logs->idx;
   logs->idx = 0;
   return log;
 }
@@ -475,6 +489,7 @@ void step_agent(CCpr *env, int i) {
   Agent *agent = &env->agents[i];
 
   int action = env->actions[i];
+  env->logs[i].episode_length += 1;
 
   int dr = 0;
   int dc = 0;

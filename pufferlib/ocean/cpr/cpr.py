@@ -17,7 +17,8 @@ class PyCPR(pufferlib.PufferEnv):
                 food_base_spawn_rate=2e-3,
                 report_interval=1,
                 render_mode=None, 
-                buf=None
+                buf=None,
+                seed=0,
             ):
         widths = num_envs*widths
         heights = num_envs*heights 

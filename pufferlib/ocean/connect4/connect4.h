@@ -18,9 +18,11 @@ const float DRAW_VALUE = 0;
 
 typedef struct Log Log;
 struct Log {
+    float perf;
+    float score;
     float episode_return;
     float episode_length;
-    float score;
+    float n;
 };
 
 #define LOG_BUFFER_SIZE 1024
@@ -60,10 +62,13 @@ Log aggregate_and_clear(LogBuffer* logs) {
     for (int i = 0; i < logs->idx; i++) {
         log.episode_return += logs->logs[i].episode_return;
         log.episode_length += logs->logs[i].episode_length;
+        log.perf += logs->logs[i].perf;
         log.score += logs->logs[i].score;
+        log.n += 1;
     }
     log.episode_return /= logs->idx;
     log.episode_length /= logs->idx;
+    log.perf /= logs->idx;
     log.score /= logs->idx;
     logs->idx = 0;
     return log;
@@ -289,6 +294,7 @@ void c_reset(CConnect4* env) {
 void finish_game(CConnect4* env, float reward) {
     env->rewards[0] = reward;
     env->dones[0] = DONE;
+    env->log.perf = (float)(reward == PLAYER_WIN);
     env->log.score = reward;
     env->log.episode_return = reward;
     compute_observation(env);

@@ -16,7 +16,8 @@ def env_creator(name='breakout'):
 
 def make(name, obs_type='grayscale', frameskip=4,
         full_action_space=False, framestack=1,
-        repeat_action_probability=0.0, render_mode='rgb_array', buf=None):
+        repeat_action_probability=0.0, render_mode='rgb_array',
+        buf=None, seed=0):
     '''Atari creation function'''
     pufferlib.environments.try_import('ale_py', 'AtariEnv')
 
