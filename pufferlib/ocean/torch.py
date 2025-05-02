@@ -156,10 +156,13 @@ class Snake(nn.Module):
         #obs = obs.reshape(B, f*c, h, w)
         return self.diayn_discriminator(obs)
 
-    def forward(self, observations):
-        hidden, lookup = self.encode_observations(observations)
-        actions, value = self.decode_actions(hidden, lookup)
-        return (actions, value), hidden
+    def forward(self, observations, state=None):
+        hidden = self.encode_observations(observations)
+        actions, value = self.decode_actions(hidden)
+        return actions, value
+
+    def forward_train(self, x, state=None):
+        return self.forward(x, state)
 
     def encode_observations(self, observations, state=None):
         observations = F.one_hot(observations.long(), 8).permute(0, 3, 1, 2).float()
@@ -213,9 +216,12 @@ class Grid(nn.Module):
             nn.Linear(hidden_size, 1), std=1)
 
     def forward(self, observations, state=None):
-        hidden, lookup = self.encode_observations(observations)
-        actions, value = self.decode_actions(hidden, lookup)
+        hidden = self.encode_observations(observations)
+        actions, value = self.decode_actions(hidden)
         return actions, value
+
+    def forward_train(self, x, state=None):
+        return self.forward(x, state)
 
     def encode_observations(self, observations, state=None):
         hidden = observations.view(-1, 11, 11).long()
@@ -269,9 +275,12 @@ class Go(nn.Module):
                 nn.Linear(hidden_size, 1), std=1)
    
     def forward(self, observations, state=None):
-        hidden, lookup = self.encode_observations(observations)
-        actions, value = self.decode_actions(hidden, lookup)
+        hidden = self.encode_observations(observations)
+        actions, value = self.decode_actions(hidden)
         return actions, value
+
+    def forward_train(self, x, state=None):
+        return self.forward(x, state)
 
     def encode_observations(self, observations, state=None):
         grid_size = int(np.sqrt((observations.shape[1] - 2) / 2))
@@ -327,9 +336,12 @@ class MOBA(nn.Module):
             nn.Linear(hidden_size, 1), std=1)
 
     def forward(self, observations, state=None):
-        hidden, lookup = self.encode_observations(observations)
-        actions, value = self.decode_actions(hidden, lookup)
+        hidden = self.encode_observations(observations)
+        actions, value = self.decode_actions(hidden)
         return actions, value
+
+    def forward_train(self, x, state=None):
+        return self.forward(x, state)
 
     def encode_observations(self, observations, state=None):
         cnn_features = observations[:, :-26].view(-1, 11, 11, 4).long()
@@ -395,9 +407,12 @@ class TrashPickup(nn.Module):
             nn.Linear(hidden_size, 1), std=1)
 
     def forward(self, observations, state=None):
-        hidden, lookup = self.encode_observations(observations)
-        actions, value = self.decode_actions(hidden, lookup)
+        hidden = self.encode_observations(observations)
+        actions, value = self.decode_actions(hidden)
         return actions, value
+
+    def forward_train(self, x, state=None):
+        return self.forward(x, state)
 
     def encode_observations(self, observations, state=None):
         observations = observations.view(-1, 5, 11, 11).float()
@@ -439,9 +454,12 @@ class TowerClimb(nn.Module):
                 nn.Linear(hidden_size, 1 ), std=1)
 
     def forward(self, observations, state=None):
-        hidden, lookup = self.encode_observations(observations)
-        actions, value = self.decode_actions(hidden, lookup)
-        return actions, value, state
+        hidden = self.encode_observations(observations)
+        actions, value = self.decode_actions(hidden)
+        return actions, value
+
+    def forward_train(self, x, state=None):
+        return self.forward(x, state)
 
     def encode_observations(self, observations, state=None):
         board_state = observations[:,:225]
@@ -590,6 +608,9 @@ class ImpulseWarsPolicy(nn.Module):
         actions, value = self.decode_actions(hidden)
         return actions, value
 
+    def forward_train(self, x, state=None):
+        return self.forward(x, state)
+
     def unpack(self, batchSize: int, obs: torch.Tensor) -> torch.Tensor:
         # prepare map obs to be unpacked
         mapObs = obs[:, : self.obsInfo.mapObsSize].reshape((batchSize, -1, 1))
@@ -719,10 +740,13 @@ class GPUDrive(nn.Module):
                 nn.Linear(hidden_size, 1 ), std=1)
     
     def forward(self, observations, state=None):
-        hidden, lookup = self.encode_observations(observations)
-        actions, value = self.decode_actions(hidden, lookup)
+        hidden = self.encode_observations(observations)
+        actions, value = self.decode_actions(hidden)
         return actions, value
-    
+
+    def forward_train(self, x, state=None):
+        return self.forward(x, state)
+   
     def encode_observations(self, observations, state=None):
         ego_dim = 6
         partner_dim = 63 * 7

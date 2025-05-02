@@ -476,8 +476,8 @@ def train(data):
             mask_block = mask_block[:, :(horizon+3)]
             v_loss = v_loss[mask_block.bool()].mean()
         elif config.clip_vloss:
-            newvalue = newvalue#.flatten()
             ret = batch.returns#.flatten()
+            newvalue = newvalue.view(ret.shape)
             v_loss_unclipped = (newvalue - ret) ** 2
             val = batch.values#.flatten()
             v_clipped = val + torch.clamp(
