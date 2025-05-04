@@ -9,12 +9,12 @@ import numpy as np
 import gymnasium
 
 import pufferlib
-from pufferlib.ocean.connect4.cy_connect4 import CyConnect4
+from pufferlib.ocean.connect4 import binding
 
 
 class Connect4(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=128,
-             width=672, height=576, piece_width=96, piece_height=96, buf=None, seed=0):
+             buf=None, seed=0):
 
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(42,), dtype=np.float32)
@@ -24,22 +24,25 @@ class Connect4(pufferlib.PufferEnv):
         self.num_agents = num_envs
 
         super().__init__(buf=buf)
-        self.c_envs = CyConnect4(self.observations, self.actions, self.rewards,
-            self.terminals, num_envs, width, height, piece_width, piece_height)
+        self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
+            self.terminals, self.truncations, num_envs, seed)
 
     def reset(self, seed=None):
-        self.c_envs.reset()
         self.tick = 0
+        if seed is None:
+            binding.vec_reset(self.c_envs, 0)
+        else:
+            binding.vec_reset(self.c_envs, seed)
         return self.observations, []
 
     def step(self, actions):
         self.actions[:] = actions
-        self.c_envs.step()
+        binding.vec_step(self.c_envs)
         self.tick += 1
 
         info = []
         if self.tick % self.report_interval == 0:
-            log = self.c_envs.log()
+            log = binding.vec_log(self.c_envs)
             if log['episode_length'] > 0:
                 info.append(log)
 
@@ -47,10 +50,10 @@ class Connect4(pufferlib.PufferEnv):
             self.terminals, self.truncations, info)
 
     def render(self):
-        self.c_envs.render()
+        binding.vec_render(self.c_envs)
 
     def close(self):
-        self.c_envs.close()
+        binding.vec_close(self.c_envs)
 
 
 def test_performance(timeout=10, atn_cache=1024, num_envs=1024):

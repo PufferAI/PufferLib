@@ -9,15 +9,11 @@ void interactive() {
     LinearLSTM* net = make_linearlstm(weights, 1, 42, 7);
 
     CConnect4 env = {
-        .width = 672,
-        .height = 576,
-        .piece_width = 96,
-        .piece_height = 96,
     };
     allocate_cconnect4(&env);
     c_reset(&env);
  
-    Client* client = make_client(env.width, env.height);
+    env.client = make_client();
     float observations[42] = {0};
     int actions[1] = {0};
 
@@ -46,21 +42,17 @@ void interactive() {
             c_step(&env);
         }
 
-        c_render(client, &env);
+        c_render(&env);
     }
     free_linearlstm(net);
     free(weights);
-    close_client(client);
+    close_client(env.client);
     free_allocated_cconnect4(&env);
 }
 
 void performance_test() {
     long test_time = 10;
     CConnect4 env = {
-        .width = 672,
-        .height = 576,
-        .piece_width = 96,
-        .piece_height = 96,
     };
     allocate_cconnect4(&env);
     c_reset(&env);
@@ -78,7 +70,7 @@ void performance_test() {
 }
 
 int main() {
-    //performance_test();
+    // performance_test();
     interactive();
     return 0;
 }
