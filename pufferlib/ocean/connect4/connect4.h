@@ -11,6 +11,10 @@ const unsigned char DONE = 1;
 const unsigned char NOT_DONE = 0;
 const int ROWS = 6;
 const int COLUMNS = 7;
+const int WIDTH = 672;
+const int HEIGHT = 576;
+const int PIECE_WIDTH = 96;
+const int PIECE_HEIGHT = 96;
 
 const float MAX_VALUE = 31;
 const float WIN_VALUE = 30;
@@ -25,64 +29,16 @@ struct Log {
     float n;
 };
 
-#define LOG_BUFFER_SIZE 1024
-typedef struct LogBuffer LogBuffer;
-struct LogBuffer {
-    Log* logs;
-    int length;
-    int idx;
-};
-
-LogBuffer* allocate_logbuffer(int size) {
-    LogBuffer* logs = (LogBuffer*)calloc(1, sizeof(LogBuffer));
-    logs->logs = (Log*)calloc(size, sizeof(Log));
-    logs->length = size;
-    logs->idx = 0;
-    return logs;
-}
-
-void free_logbuffer(LogBuffer* buffer) {
-    free(buffer->logs);
-    free(buffer);
-}
-
-void add_log(LogBuffer* logs, Log* log) {
-    if (logs->idx == logs->length) {
-        return;
-    }
-    logs->logs[logs->idx] = *log;
-    logs->idx += 1;
-}
-
-Log aggregate_and_clear(LogBuffer* logs) {
-    Log log = {0};
-    if (logs->idx == 0) {
-        return log;
-    }
-    for (int i = 0; i < logs->idx; i++) {
-        log.episode_return += logs->logs[i].episode_return;
-        log.episode_length += logs->logs[i].episode_length;
-        log.perf += logs->logs[i].perf;
-        log.score += logs->logs[i].score;
-        log.n += 1;
-    }
-    log.episode_return /= logs->idx;
-    log.episode_length /= logs->idx;
-    log.perf /= logs->idx;
-    log.score /= logs->idx;
-    logs->idx = 0;
-    return log;
-}
- 
+typedef struct Client Client;
 typedef struct CConnect4 CConnect4;
 struct CConnect4 {
     // Pufferlib inputs / outputs
     float* observations;
     int* actions;
     float* rewards;
-    unsigned char* dones;
-    LogBuffer* log_buffer;
+    unsigned char* terminals;
     Log log;
+    Client* client;
 
     // Bit string representation from:
     //  https://towardsdatascience.com/creating-the-perfect-connect-four-ai-bot-c165115557b0
@@ -90,31 +46,34 @@ struct CConnect4 {
     uint64_t player_pieces;
     uint64_t env_pieces;
 
-    // Rendering configuration
-    int piece_width;
-    int piece_height;
-    int width;
-    int height;
+    int tick;
 };
 
 void allocate_cconnect4(CConnect4* env) {
     env->observations = (float*)calloc(42, sizeof(float));
     env->actions = (int*)calloc(1, sizeof(int));
-    env->dones = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
     env->rewards = (float*)calloc(1, sizeof(float));
-    env->log_buffer = allocate_logbuffer(LOG_BUFFER_SIZE);
-}
-
-void free_cconnect4(CConnect4* env) {
-    free_logbuffer(env->log_buffer);
 }
 
 void free_allocated_cconnect4(CConnect4* env) {
     free(env->actions);
     free(env->observations);
-    free(env->dones);
+    free(env->terminals);
     free(env->rewards);
-    free_cconnect4(env);
+}
+
+void add_log(CConnect4* env) {
+    env->log.perf += (float)(env->rewards[0] == PLAYER_WIN);
+    env->log.score += env->rewards[0];
+    env->log.episode_return += env->rewards[0];
+    env->log.episode_length += env->log.episode_length;
+    env->log.n += 1;
+}
+
+void init(CConnect4* env) {
+    env->log = (Log){0};
+    env->tick = 0;
 }
 
 // Get the bit at the top of 'column'. Column can be played if bit is 0
@@ -283,7 +242,7 @@ void compute_observation(CConnect4* env) {
 
 void c_reset(CConnect4* env) {
     env->log = (Log){0};
-    env->dones[0] = NOT_DONE;
+    env->terminals[0] = NOT_DONE;
     env->player_pieces = 0;
     env->env_pieces = 0;
     for (int i = 0; i < 42; i ++) {
@@ -293,10 +252,8 @@ void c_reset(CConnect4* env) {
 
 void finish_game(CConnect4* env, float reward) {
     env->rewards[0] = reward;
-    env->dones[0] = DONE;
-    env->log.perf = (float)(reward == PLAYER_WIN);
-    env->log.score = reward;
-    env->log.episode_return = reward;
+    env->terminals[0] = DONE;
+    add_log(env);
     compute_observation(env);
 }
 
@@ -304,8 +261,7 @@ void c_step(CConnect4* env) {
     env->log.episode_length += 1;
     env->rewards[0] = 0.0;
 
-    if (env->dones[0] == DONE) {
-        add_log(env->log_buffer, &env->log);
+    if (env->terminals[0] == DONE) {
         c_reset(env);
         return;
     }
@@ -353,27 +309,33 @@ struct Client {
     Texture2D puffers;
 };
 
-Client* make_client(int width, int height) {
+Client* make_client() {
     Client* client = (Client*)calloc(1, sizeof(Client));
-    client->width = width;
-    client->height = height;
+    client->width = WIDTH;
+    client->height = HEIGHT;
 
-    InitWindow(width, height, "PufferLib Ray Connect4");
+    InitWindow(WIDTH, HEIGHT, "PufferLib Ray Connect4");
     SetTargetFPS(60);
 
     client->puffers = LoadTexture("resources/puffers_128.png");
     return client;
 }
 
-void c_render(Client* client, CConnect4* env) {
+void c_render(CConnect4* env) {
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
     }
 
+    if (env->client == NULL) {
+        env->client = make_client();
+    }
+
+    Client* client = env->client;
+
     BeginDrawing();
     ClearBackground(PUFF_BACKGROUND);
     
-    int y_offset = client->height - env->piece_height;
+    int y_offset = client->height - PIECE_HEIGHT;
     int obs_idx = 0;
     for (int i = 0; i < 49; i++) {
         // TODO: Simplify this by iterating over the observation more directly
@@ -383,8 +345,8 @@ void c_render(Client* client, CConnect4* env) {
 
         int row = i % (ROWS + 1);
         int column = i / (ROWS + 1);
-        int y = y_offset - row * env->piece_height;
-        int x = column * env->piece_width;
+        int y = y_offset - row * PIECE_HEIGHT;
+        int x = column * PIECE_WIDTH;
 
         Color piece_color=PURPLE;
         int color_idx = 0;
@@ -400,8 +362,8 @@ void c_render(Client* client, CConnect4* env) {
 
         obs_idx += 1;
         Color board_color = (Color){0, 80, 80, 255};
-        DrawRectangle(x , y , env->piece_width, env->piece_width, board_color);
-        DrawCircle(x + env->piece_width/2, y + env->piece_width/2, env->piece_width/2, piece_color);
+        DrawRectangle(x , y , PIECE_WIDTH, PIECE_WIDTH, board_color);
+        DrawCircle(x + PIECE_WIDTH/2, y + PIECE_WIDTH/2, PIECE_WIDTH/2, piece_color);
         if (color_idx == 0) {
             continue;
         }
@@ -412,7 +374,7 @@ void c_render(Client* client, CConnect4* env) {
                 (color_idx == 1) ? 0 : 128,
                 0, 128, 128,
             },
-            (Rectangle){x+16, y+16, env->piece_width-32, env->piece_width-32},
+            (Rectangle){x+16, y+16, PIECE_WIDTH-32, PIECE_WIDTH-32},
             (Vector2){0, 0},
             0,
             WHITE
