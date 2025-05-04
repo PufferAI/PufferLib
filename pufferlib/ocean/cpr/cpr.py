@@ -85,12 +85,12 @@ if __name__ == "__main__":
 
     import time 
     start = time.time()
-    # while time.time() - start < timeout:
-    while tick < 500:
+    while time.time() - start < timeout:
+    # while tick < 500:
         atns = actions[tick % 1024]
         env.step(atns)
-        if -1 in env.rewards:
-            breakpoint()
+        # if -1 in env.rewards:
+        #     breakpoint()
         # env.render()
         tick += 1
 
