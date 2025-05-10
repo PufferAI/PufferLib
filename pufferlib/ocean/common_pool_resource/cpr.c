@@ -9,7 +9,7 @@ int main() {
   int render_cell_size = 32;
 
   CCpr env = {
-      .num_agents = 1,
+      .num_agents = 8,
       .width = width,
       .height = height,
       .vision = 3,

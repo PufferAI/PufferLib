@@ -489,7 +489,7 @@ void step_agent(CCpr *env, int i) {
   Agent *agent = &env->agents[i];
 
   int action = env->actions[i];
-  env->log[i].episode_length += 1;
+  env->log->episode_length += 1;
 
   int dr = 0;
   int dc = 0;
@@ -696,7 +696,7 @@ Renderer *init_renderer(int cell_size, int width, int height) {
   InitWindow(width * cell_size, height * cell_size, "CPR");
   SetTargetFPS(10);
 
-  renderer->puffer = LoadTexture("resources/cpr/puffers_128.png");
+  renderer->puffer = LoadTexture("resources/common_pool_resource/puffers_128.png");
   return renderer;
 }
 

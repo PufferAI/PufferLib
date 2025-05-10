@@ -280,7 +280,7 @@ extension_paths = [
     # 'pufferlib/ocean/go/cy_go',
     'pufferlib/ocean/rware/cy_rware',
     'pufferlib/ocean/trash_pickup/cy_trash_pickup',
-    'pufferlib/ocean/cpr/cy_cpr',
+    'pufferlib/ocean/common_pool_resource/cy_cpr',
     # 'pufferlib/ocean/tower_climb/cy_tower_climb',
 ]
 
