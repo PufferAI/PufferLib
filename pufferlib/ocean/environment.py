@@ -135,7 +135,7 @@ MAKE_FNS = {
     'trash_pickup':  lambda: lazy_import('pufferlib.ocean.trash_pickup.trash_pickup', 'TrashPickupEnv'),
     'tower_climb':   lambda: lazy_import('pufferlib.ocean.tower_climb.tower_climb', 'TowerClimb'),
     'grid':          lambda: lazy_import('pufferlib.ocean.grid.grid', 'Grid'),
-    'cpr':           lambda: lazy_import('pufferlib.ocean.cpr.cpr', 'PyCPR'),
+    'cpr':           lambda: lazy_import('pufferlib.ocean.common_pool_resource.cpr', 'PyCPR'),
     'impulse_wars':  lambda: lazy_import('pufferlib.ocean.impulse_wars.impulse_wars', 'ImpulseWars'),
     'gpudrive':      lambda: lazy_import('pufferlib.ocean.gpudrive.gpudrive', 'GPUDrive'),
     #'rocket_lander': rocket_lander.RocketLander,
