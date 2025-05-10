@@ -282,6 +282,8 @@ extension_paths = [
     'pufferlib/ocean/trash_pickup/cy_trash_pickup',
     'pufferlib/ocean/common_pool_resource/cy_cpr',
     # 'pufferlib/ocean/tower_climb/cy_tower_climb',
+    'pufferlib/ocean/tower_climb/cy_tower_climb',
+    'pufferlib/ocean/gpudrive/cy_gpudrive',
 ]
 
 system = platform.system()

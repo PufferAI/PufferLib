@@ -1,4 +1,5 @@
-from libc.stdlib cimport calloc, free
+from libc.stdlib cimport calloc, malloc, free
+from libc.string cimport strcpy
 import numpy as np
 cdef extern from "gpudrive.h":
     int LOG_BUFFER_SIZE
@@ -82,6 +83,8 @@ cdef extern from "gpudrive.h":
         float reward_offroad_collision;
         char* map_name;
         char* reached_goal_this_turn;
+        float world_mean_x;
+        float world_mean_y;
 
     ctypedef struct Client
 
@@ -179,47 +182,62 @@ cdef class CyGPUDrive:
 
         self.client = NULL
         self.num_envs = num_envs
-        self.envs = <GPUDrive*> calloc(num_envs, sizeof(GPUDrive))
+        cdef int num_clones
+        num_clones = 8
+        self.envs = <GPUDrive*> calloc(num_envs*num_clones, sizeof(GPUDrive))
         self.agent_offsets = <int*> calloc(num_envs + 1, sizeof(int))
         self.logs = allocate_logbuffer(LOG_BUFFER_SIZE)
         cdef int i
         for i in range(num_envs + 1):
             self.agent_offsets[i] = offsets[i]
         cdef int inc
-        for i in range(num_envs):
-            inc = self.agent_offsets[i]
-            print(inc)
-            map_file = f"resources/gpudrive/binaries/map_{i:03d}.bin".encode('utf-8')
+        cdef int index
+        cdef int total_envs
+        total_envs = num_envs * num_clones
+        cdef int total_agents
+        total_agents = self.agent_offsets[num_envs]
+        cdef char* c_map_file
+        for i in range(total_envs):
+            env_index = i % num_envs
+            clone_index = i // num_envs
+            inc = self.agent_offsets[env_index]
+            count = self.agent_offsets[env_index+1] - self.agent_offsets[env_index]
+            clone_agent_offset = clone_index * total_agents + inc
+            print("Env Index: ", env_index)
+            print("Increment: ", inc)
+            print("clone_agent_offset: ", clone_agent_offset)
+            map_file = f"resources/gpudrive/binaries/map_{env_index:03d}.bin".encode('utf-8')
+            c_map_file = <char*>malloc(len(map_file) + 1)
+            strcpy(c_map_file, map_file)
             print("cython map_name", map_file)
             self.envs[i] = GPUDrive(
-                observations=&observations[inc, 0],
-                actions=&actions[inc,0],
-                rewards=&rewards[inc],
-                masks=&masks[inc],
-                dones=&terminals[inc],
+                observations=&observations[clone_agent_offset, 0],
+                actions=&actions[clone_agent_offset,0],
+                rewards=&rewards[clone_agent_offset],
+                masks=&masks[clone_agent_offset],
+                dones=&terminals[clone_agent_offset],
                 log_buffer=self.logs,
                 human_agent_idx=human_agent_idx,
                 reward_vehicle_collision=reward_vehicle_collision,
                 reward_offroad_collision=reward_offroad_collision,
-                map_name = map_file
+                map_name = c_map_file
             )
-            print("init")
             init(&self.envs[i])
             self.client = NULL
 
 
     def reset(self):
         cdef int i
-        for i in range(self.num_envs):
+        for i in range(self.num_envs*8):
             c_reset(&self.envs[i])
 
     def step(self):
         cdef int i
-        for i in range(self.num_envs):
+        for i in range(self.num_envs*8):
             c_step(&self.envs[i])
 
     def render(self):
-        cdef GPUDrive* env = &self.envs[211]
+        cdef GPUDrive* env = &self.envs[11]
         if self.client == NULL:
             import os
             cwd = os.getcwd()

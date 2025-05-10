@@ -179,7 +179,7 @@ void init_ccpr(CCpr *env) {
       (unsigned char *)calloc(env->width * env->height, sizeof(unsigned char));
   env->agents = (Agent *)calloc(env->num_agents, sizeof(Agent));
   env->vision_window = 2 * env->vision + 1;
-  env->obs_size = env->vision_window * env->vision_window + 1;
+  env->obs_size = env->vision_window * env->vision_window;// + 1;
   env->log = (Log *)calloc(1, sizeof(Log));
   env->interactive_food_agent_count =
       (uint8_t *)calloc((env->width * env->height + 7) / 8, sizeof(uint8_t));
@@ -188,7 +188,7 @@ void init_ccpr(CCpr *env) {
 
 void allocate_ccpr(CCpr *env) {
   // Called by C stuff
-  int obs_size = (2 * env->vision + 1) * (2 * env->vision + 1) + 1;
+  int obs_size = (2 * env->vision + 1) * (2 * env->vision + 1); //+ 1;
   env->observations = (unsigned char *)calloc(env->num_agents * obs_size,
                                               sizeof(unsigned char));
   env->actions = (int *)calloc(env->num_agents, sizeof(unsigned int));
@@ -235,10 +235,10 @@ void add_food(CCpr *env, int grid_idx, int food_type) {
 
 void reward_agent(CCpr *env, int agent_id, float reward) {
   // We don't reward if agent is full life
-  Agent *agent = &env->agents[agent_id];
-  if (agent->hp >= MAX_HP) {
-    return;
-  }
+  // Agent *agent = &env->agents[agent_id];
+  // if (agent->hp >= MAX_HP) {
+  //   return;
+  // }
   env->rewards[agent_id] += reward;
 }
 
@@ -340,7 +340,7 @@ void compute_observations(CCpr *env) {
   // For partial obs
   for (int i = 0; i < env->num_agents; i++) {
     Agent *agent = &env->agents[i];
-    env->observations[env->vision_window*env->vision_window + i*env->obs_size] = agent->hp;
+    // env->observations[env->vision_window*env->vision_window + i*env->obs_size] = agent->hp;
     if (agent->hp == 0) {
       continue;
     }
@@ -568,7 +568,7 @@ void step_agent(CCpr *env, int i) {
     break;
   case EMPTY:
     env->log->score += LOG_SCORE_REWARD_MOVE;
-    env->rewards[i] += env->reward_move;
+    env->rewards[i] = env->reward_move;
     break;
   }
 
@@ -648,12 +648,6 @@ void c_step(CCpr *env) {
     if (alive_agents == 0) {
       memset(env->terminals, 1, env->num_agents * sizeof(unsigned char)); 
     } else {
-      //Agents get rewarded for going all the way to the end
-      for (int i = 0; i < env->num_agents; i++) {
-        if (env->agents[i].hp > 0) {
-          env->rewards[i] += 1;
-        }
-      }
       memset(env->truncations, 1, env->num_agents * sizeof(unsigned char));
     }
   }

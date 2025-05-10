@@ -36,9 +36,9 @@ class NMMO3(nn.Module):
         self.is_continuous = False
 
         self.map_2d = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Conv2d(self.multihot_dim, 64, 5, stride=3)),
+            pufferlib.pytorch.layer_init(nn.Conv2d(self.multihot_dim, 256, 5, stride=3)),
             nn.ReLU(),
-            pufferlib.pytorch.layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            pufferlib.pytorch.layer_init(nn.Conv2d(256, 256, 3, stride=1)),
             nn.Flatten(),
         )
 
@@ -46,9 +46,8 @@ class NMMO3(nn.Module):
             nn.Embedding(128, 32),
             nn.Flatten(),
         )
-
         self.proj = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(1689, hidden_size)),
+            pufferlib.pytorch.layer_init(nn.Linear(2073, hidden_size)),
             nn.ReLU(),
         )
 
@@ -479,7 +478,7 @@ class TowerClimb(nn.Module):
         return action, value
 
 
-# TODO: remove once Impulse Wars build is stable
+# ToDO: remove once Impulse Wars build is stable
 try:
     from cy_impulse_wars import obsConstants
 except:
@@ -699,22 +698,25 @@ class GPUDrive(nn.Module):
         self.ego_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
                 nn.Linear(6, input_size)),
-            #nn.ReLU(),
-            #pufferlib.pytorch.layer_init(
+            # nn.ReLU(),
+            # pufferlib.pytorch.layer_init(
             #    nn.Linear(input_size, input_size))
         )
-        max_road_objects = 7
+        max_road_objects = 13
         self.road_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
                 nn.Linear(max_road_objects, input_size)),
-            #nn.ReLU(),
-            
+            # nn.ReLU(),
+            # pufferlib.pytorch.layer_init(
+            #    nn.Linear(input_size, input_size))
         )
         max_partner_objects = 7
         self.partner_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
                 nn.Linear(max_partner_objects, input_size)),
-            #nn.ReLU()
+            # nn.ReLU(),
+            # pufferlib.pytorch.layer_init(
+            #    nn.Linear(input_size, input_size))
         )
 
         '''
@@ -750,13 +752,17 @@ class GPUDrive(nn.Module):
     def encode_observations(self, observations, state=None):
         ego_dim = 6
         partner_dim = 63 * 7
-        road_dim = 64*7
+        road_dim = 200*7
         ego_obs = observations[:, :ego_dim]
         partner_obs = observations[:, ego_dim:ego_dim+partner_dim]
         road_obs = observations[:, ego_dim+partner_dim:ego_dim+partner_dim+road_dim]
         
         partner_objects = partner_obs.view(-1, 63, 7)
-        road_objects = road_obs.view(-1, 64, 7)
+        road_objects = road_obs.view(-1, 200, 7)
+        road_continuous = road_objects[:, :, :6]  # First 6 features
+        road_categorical = road_objects[:, :, 6]
+        road_onehot = F.one_hot(road_categorical.long(), num_classes=7)  # Shape: [batch, 200, 7]
+        road_objects = torch.cat([road_continuous, road_onehot], dim=2)
 
         ego_features = self.ego_encoder(ego_obs)
         partner_features, _ = self.partner_encoder(partner_objects).max(dim=1)
@@ -774,8 +780,8 @@ class GPUDrive(nn.Module):
         # )[0]
         
         # Pass through shared embedding
-        #embedding = F.relu(self.shared_embedding(concat_features))
-        embedding = self.shared_embedding(concat_features)
+        embedding = F.relu(self.shared_embedding(concat_features))
+        # embedding = self.shared_embedding(concat_features)
         return embedding
     
     def decode_actions(self, flat_hidden):

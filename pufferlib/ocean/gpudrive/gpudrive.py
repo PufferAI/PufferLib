@@ -12,7 +12,8 @@ class GPUDrive(pufferlib.PufferEnv):
             human_agent_idx=0,
             reward_vehicle_collision=-0.1,
             reward_offroad_collision=-0.1,
-            buf = None, seed=1):
+            buf = None,
+            seed=1):
 
         # env
         self.num_agents = num_envs
@@ -20,7 +21,7 @@ class GPUDrive(pufferlib.PufferEnv):
         self.report_interval = report_interval
         print("Num envs: ", num_envs)
         
-        self.num_obs = 6 + 63*7 + 64*7
+        self.num_obs = 6 + 63*7 + 200*7
         self.single_observation_space = gymnasium.spaces.Box(low=-1, high=1,
             shape=(self.num_obs,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.MultiDiscrete([7, 13])
@@ -28,7 +29,7 @@ class GPUDrive(pufferlib.PufferEnv):
         total_agents, agent_offsets =CyGPUDrive.get_total_agent_count(
             num_envs, human_agent_idx, reward_vehicle_collision, reward_offroad_collision)
         
-        self.num_agents = total_agents
+        self.num_agents = total_agents * 8
         print("Num agents: ", self.num_agents)
         super().__init__(buf=buf)
         self.c_envs = CyGPUDrive(self.observations, self.actions, self.rewards, self.masks,
@@ -167,7 +168,7 @@ def save_map_binary(map_data, output_file):
             geometry = road.get('geometry', [])
             road_type = road.get('map_element_id', 0)
             # breakpoint()
-            if(len(geometry) > 10 and road_type >= 14 and road_type <=16):
+            if(len(geometry) > 10 and road_type <=16):
                 geometry = simplify_polyline(geometry, .1)
             size = len(geometry)
             # breakpoint()
@@ -242,13 +243,13 @@ def process_all_maps():
         except Exception as e:
             print(f"Error processing {map_path.name}: {e}")
 
-def test_performance(timeout=10, atn_cache=1024, num_envs=256):
+def test_performance(timeout=10, atn_cache=1024, num_envs=75):
     import time
 
     env = GPUDrive(num_envs=num_envs)
     env.reset()
     tick = 0
-    num_agents = 1670
+    num_agents = 3968
     actions = np.stack([
         np.random.randint(0, space.n + 1, (atn_cache, num_agents))
         for space in env.single_action_space
@@ -264,5 +265,5 @@ def test_performance(timeout=10, atn_cache=1024, num_envs=256):
 
 
 if __name__ == '__main__':
-    #test_performance()
+    # test_performance()
     process_all_maps()

@@ -31,7 +31,7 @@ TowerClimbNet* init_tower_climb_net(Weights* weights, int num_agents) {
 
     net->num_agents = num_agents;
     net->obs_3d = calloc(5 * 5 * 9, sizeof(float));
-    net->obs_1d = calloc(4, sizeof(float));
+    net->obs_1d = calloc(3, sizeof(float));
     net->conv1 = make_conv3d(weights, num_agents, 9, 5, 5, 1, cnn_channels, 3, 1);
     net->relu1 = make_relu(num_agents, cnn_channels * 3 * 3 * 7);
     net->conv2 = make_conv3d(weights, num_agents, 7, 3, 3, cnn_channels, cnn_channels, 3, 1);
@@ -48,13 +48,13 @@ TowerClimbNet* init_tower_climb_net(Weights* weights, int num_agents) {
 
 void forward(TowerClimbNet* net, unsigned char* observations, int* actions) {
     int vision_size = 5 * 5 * 9;
-    int player_size = 4;
+    int player_size = 3;
     // clear previous observations
     memset(net->obs_3d, 0, vision_size * sizeof(float));
     memset(net->obs_1d, 0, player_size * sizeof(float));
     // reshape board to 3d tensor
     float (*obs_3d)[1][5][5][9] = (float (*)[1][5][5][9])net->obs_3d;
-    float (*obs_1d)[4] = (float (*)[4])net->obs_1d;
+    float (*obs_1d)[3] = (float (*)[3])net->obs_1d;
     // process vision board
     int obs_3d_idx = 0;
     for (int b = 0; b < 1; b++) {
@@ -71,7 +71,7 @@ void forward(TowerClimbNet* net, unsigned char* observations, int* actions) {
     for (int i = 0; i < player_size; i++) {
         obs_1d[0][i] = observations[vision_size + i];
     }
-    
+
     conv3d(net->conv1, net->obs_3d);
     relu(net->relu1, net->conv1->output);
     conv3d(net->conv2, net->relu1->output);
