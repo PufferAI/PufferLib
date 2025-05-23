@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+
 #include "raylib.h"
 
 // Required struct. Only use floats!
