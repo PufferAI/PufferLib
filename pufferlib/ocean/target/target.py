@@ -21,11 +21,11 @@ class Target(pufferlib.PufferEnv):
         c_envs = []
         for i in range(num_envs):
             c_env = binding.env_init(
-                self.observations[i*num_agents:    (i+1)*num_agents],
-                self.actions[i*num_agents:         (i+1)*num_agents],
-                self.rewards[i*num_agents:         (i+1)*num_agents],
-                self.terminals[i*num_agents:       (i+1)*num_agents],
-                self.truncations[i*num_agents:     (i+1)*num_agents],
+                self.observations[i*num_agents:(i+1)*num_agents],
+                self.actions[i*num_agents:(i+1)*num_agents],
+                self.rewards[i*num_agents:(i+1)*num_agents],
+                self.terminals[i*num_agents:(i+1)*num_agents],
+                self.truncations[i*num_agents:(i+1)*num_agents],
                 seed, width=width, height=height,
                 num_agents=num_agents, num_goals=num_goals)
             c_envs.append(c_env)
