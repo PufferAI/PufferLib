@@ -9,8 +9,8 @@ from pufferlib.ocean.target import binding
 class Target(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, width=1080, height=720, num_agents=8,
             num_goals=4, render_mode=None, log_interval=128, size=11, buf=None, seed=0):
-        self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
-            shape=(2*(num_agents+num_goals) + 4,), dtype=np.float32)
+        self.single_observation_space = gymnasium.spaces.Box(
+            low=0, high=1, shape=(2*(num_agents+num_goals) + 4,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.MultiDiscrete([9, 5])
 
         self.render_mode = render_mode
@@ -21,11 +21,11 @@ class Target(pufferlib.PufferEnv):
         c_envs = []
         for i in range(num_envs):
             c_env = binding.env_init(
-                self.observations[i*num_agents:(i+1)*num_agents],
-                self.actions[i*num_agents:(i+1)*num_agents],
-                self.rewards[i*num_agents:(i+1)*num_agents],
-                self.terminals[i*num_agents:(i+1)*num_agents],
-                self.truncations[i*num_agents:(i+1)*num_agents],
+                self.observations[i*num_agents:    (i+1)*num_agents],
+                self.actions[i*num_agents:         (i+1)*num_agents],
+                self.rewards[i*num_agents:         (i+1)*num_agents],
+                self.terminals[i*num_agents:       (i+1)*num_agents],
+                self.truncations[i*num_agents:     (i+1)*num_agents],
                 seed, width=width, height=height,
                 num_agents=num_agents, num_goals=num_goals)
             c_envs.append(c_env)
@@ -58,21 +58,20 @@ class Target(pufferlib.PufferEnv):
         binding.vec_close(self.c_envs)
 
 if __name__ == '__main__':
-    N = 512
-
+    ENVS = 512
+    CACHE = 1024
+    TIMEOUT = 10
+    
     env = Target(num_envs=N)
     env.reset()
     steps = 0
 
-    CACHE = 1024
     actions = np.random.randint(env.single_action_space.nvec, size=(CACHE, 2))
 
-    i = 0
     import time
     start = time.time()
-    while time.time() - start < 10:
+    while time.time() - start < TIMEOUT:
         env.step(actions[i % CACHE])
-        steps += env.num_agents
-        i += 1
+        steps += 1
 
-    print('Target SPS:', int(steps / (time.time() - start)))
+    print(f'Target SPS: {int(env.num_agents * steps / (time.time() - start))}:_')
