@@ -7,9 +7,9 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->num_boids = unpack(kwargs, "num_boids");
     env->report_interval = unpack(kwargs, "report_interval");
     env->margin_turn_factor = unpack(kwargs, "margin_turn_factor");
-    env->centering_factor = unpack(kwargs, "centering_factor");
-    env->avoid_factor = unpack(kwargs, "avoid_factor");
-    env->matching_factor = unpack(kwargs, "matching_factor");
+    env->cohesion_factor = unpack(kwargs, "cohesion_factor");
+    env->seperation_factor = unpack(kwargs, "seperation_factor");
+    env->alignment_factor = unpack(kwargs, "alignment_factor");
     init(env);
     return 0;
 }

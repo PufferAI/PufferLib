@@ -52,9 +52,9 @@ typedef struct {
     Boid* boids;
     unsigned int num_boids;
     float margin_turn_factor;
-    float centering_factor;
-    float avoid_factor;
-    float matching_factor;
+    float cohesion_factor;
+    float seperation_factor;
+    float alignment_factor;
     unsigned tick;
     Log log;
     Log* boid_logs;
@@ -134,8 +134,8 @@ void c_step(Boids *env) {
             current_boid->velocity.x = flclip(current_boid->velocity.x + (mouse_x - current_boid->x), -VELOCITY_CAP, VELOCITY_CAP);
             current_boid->velocity.y = flclip(current_boid->velocity.y + (mouse_y - current_boid->y), -VELOCITY_CAP, VELOCITY_CAP);
         } else {
-            current_boid->velocity.x = flclip(current_boid->velocity.x + 2*env->actions[current_indx * 2 + 0], -VELOCITY_CAP, VELOCITY_CAP);
-            current_boid->velocity.y = flclip(current_boid->velocity.y + 2*env->actions[current_indx * 2 + 1], -VELOCITY_CAP, VELOCITY_CAP);
+            current_boid->velocity.x = flclip(current_boid->velocity.x + env->actions[current_indx * 2 + 0], -VELOCITY_CAP, VELOCITY_CAP);
+            current_boid->velocity.y = flclip(current_boid->velocity.y + env->actions[current_indx * 2 + 1], -VELOCITY_CAP, VELOCITY_CAP);
         }
         current_boid->x = flclip(current_boid->x + current_boid->velocity.x, 0, WIDTH  - BOID_WIDTH);
         current_boid->y = flclip(current_boid->y + current_boid->velocity.y, 0, HEIGHT - BOID_HEIGHT);
@@ -161,8 +161,8 @@ void c_step(Boids *env) {
             }
         }
         if (protected_count > 0) {
-            //current_boid_reward -= fabsf(protected_dist_sum / protected_count) * env->avoid_factor;
-            current_boid_reward -= flclip(protected_count/5.0, 0.0f, 1.0f) * env->avoid_factor;
+            //current_boid_reward -= fabsf(protected_dist_sum / protected_count) * env->seperation_factor;
+            current_boid_reward -= flclip(protected_count/5.0, 0.0f, 1.0f) * env->seperation_factor;
         }
         if (visual_count) {
             vis_x_avg  = vis_x_sum  / visual_count;
@@ -170,10 +170,10 @@ void c_step(Boids *env) {
             vis_vx_avg = vis_vx_sum / visual_count;
             vis_vy_avg = vis_vy_sum / visual_count;
 
-            current_boid_reward -= fabsf(vis_vx_avg - current_boid->velocity.x) * env->matching_factor;
-            current_boid_reward -= fabsf(vis_vy_avg - current_boid->velocity.y) * env->matching_factor;
-            current_boid_reward -= fabsf(vis_x_avg  - current_boid->x) * env->centering_factor;
-            current_boid_reward -= fabsf(vis_y_avg  - current_boid->y) * env->centering_factor;
+            current_boid_reward -= fabsf(vis_vx_avg - current_boid->velocity.x) * env->alignment_factor;
+            current_boid_reward -= fabsf(vis_vy_avg - current_boid->velocity.y) * env->alignment_factor;
+            current_boid_reward -= fabsf(vis_x_avg  - current_boid->x) * env->cohesion_factor;
+            current_boid_reward -= fabsf(vis_y_avg  - current_boid->y) * env->cohesion_factor;
         }
         if (current_boid->y < TOP_MARGIN || current_boid->y > HEIGHT - BOTTOM_MARGIN) {
             current_boid_reward -= env->margin_turn_factor;
