@@ -834,6 +834,8 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
         logger = NeptuneLogger(args)
     elif args['wandb']:
         logger = WandbLogger(args)
+    else:
+        logger = NoLogger(args)
 
     train_config = dict(**args['train'], env=args['env_name'])
     pufferl = PuffeRL(train_config, vecenv, policy, logger)
