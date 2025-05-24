@@ -88,8 +88,6 @@ void init(Boids *env) {
 
 
 static void compute_observations(Boids *env) {
-    unsigned base_indx;
-
     int idx = 0;
     for (unsigned i=0; i<env->num_boids; i++) {
         for (unsigned j=0; j<env->num_boids; j++) {
