@@ -22,10 +22,7 @@
 #define BOID_TEXTURE_PATH "./resources/puffers_128.png"
 
 typedef struct {
-    float perf;
     float score;
-    float episode_return;
-    float episode_length;
     float n;
 } Log;
 
@@ -60,7 +57,6 @@ typedef struct {
     Log* boid_logs;
     unsigned report_interval;
     Client* client;
-
 } Boids;
 
 static inline float flmax(float a, float b) { return a > b ? a : b; }
@@ -191,13 +187,9 @@ void c_step(Boids *env) {
         env->rewards[current_indx] = current_boid_reward / 2.0f;
 
         //log updates
-        if (env->tick == env->report_interval) {
-            env->log.score          += env->rewards[current_indx];
-            env->log.n              += 1.0f;
-
-            /* clear per-boid log for next episode */
-            // env->boid_logs[boid_indx] = (Log){0};
-            env->tick = 0;
+        if (env->tick % env->report_interval == 0) {
+            env->log.score += env->rewards[current_indx];
+            env->log.n += 1.0f;
         }
     }
     //env->log.score /= env->num_boids;
