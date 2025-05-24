@@ -5,7 +5,6 @@ Inspired by https://people.ece.cornell.edu/land/courses/ece4760/labs/s2021/Boids
 
 import numpy as np
 import gymnasium
-
 import pufferlib
 from pufferlib.ocean.boids import binding
 
@@ -74,12 +73,6 @@ class Boids(pufferlib.PufferEnv):
     def step(self, actions):
         # Clip actions to valid range
         clipped_actions = (actions.astype(np.float32) - 2.0) / 4.0
-        #clipped_actions = np.clip(actions, -1.0, 1.0)
-        
-        # Copy the clipped actions to our flat actions buffer for C binding
-        # Flatten from [num_agents, num_boids, 2] to a 1D array for C
-        # TODO: Check if I even need this? its not like I'm using the actions anywhere else
-        #self.flat_actions[:] = clipped_actions.reshape(-1)
         
         # Save the original actions for the experience buffer
         # TODO: Same thing with this
@@ -94,7 +87,6 @@ class Boids(pufferlib.PufferEnv):
             if log_data:
                 info.append(log_data)
 
-        # print(f"OBSERVATIONS: {self.observations}")
         return (self.observations, self.rewards,
             self.terminals, self.truncations, info)
 
