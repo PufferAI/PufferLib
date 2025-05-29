@@ -54,7 +54,6 @@ typedef struct {
     float alignment_factor;
     unsigned tick;
     Log log;
-    Log* boid_logs;
     unsigned report_interval;
     Client* client;
 } Boids;
@@ -69,12 +68,10 @@ static void respawn_boid(Boids *env, unsigned int i) {
     env->boids[i].y = rndf(BOTTOM_MARGIN, HEIGHT - TOP_MARGIN);
     env->boids[i].velocity.x = 0;
     env->boids[i].velocity.y = 0;
-    env->boid_logs[i]       = (Log){0};
 }
 
 void init(Boids *env) {
     env->boids = (Boid*)calloc(env->num_boids, sizeof(Boid));
-    env->boid_logs = (Log*)calloc(env->num_boids, sizeof(Log));
     env->log = (Log){0};
     env->tick = 0;
 
@@ -117,10 +114,12 @@ void c_step(Boids *env) {
     bool manual_control = IsKeyDown(KEY_LEFT_SHIFT);
     float mouse_x = (float)GetMouseX();
     float mouse_y = (float)GetMouseY();
+    float avg_reward = 0.0f;
 
     env->tick++;
     env->rewards[0] = 0;
     env->log.score = 0;
+    env->log.n = 0;
     for (unsigned current_indx = 0; current_indx < env->num_boids; current_indx++) {
         // apply action
         current_boid = &env->boids[current_indx];
@@ -183,14 +182,14 @@ void c_step(Boids *env) {
         // env->rewards[current_indx] = current_boid_reward / 15.0f;
         // printf("current_boid_reward: %f\n", current_boid_reward);
         env->rewards[current_indx] = current_boid_reward / 2.0f;
-
-        //log updates
-        if (env->tick % env->report_interval == 0) {
-            env->log.score += env->rewards[current_indx];
-            env->log.n += 1.0f;
-        }
+        avg_reward += env->rewards[current_indx];
     }
-    //env->log.score /= env->num_boids;
+    //log updates
+    avg_reward /= env->num_boids;
+    if (env->tick % env->report_interval == 0) {
+        env->log.score = avg_reward;
+        env->log.n = 1;
+    }
 
     compute_observations(env);
 }
@@ -210,7 +209,6 @@ void c_close_client(Client* client) {
 
 void c_close(Boids* env) {
     free(env->boids);
-    free(env->boid_logs);
     if (env->client != NULL) {
         c_close_client(env->client);
     }
