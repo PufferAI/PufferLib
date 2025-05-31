@@ -71,6 +71,14 @@ static void respawn_boid(Boids *env, unsigned int i) {
 }
 
 void init(Boids *env) {
+    if(env->num_boids < 1) {
+        printf("ERROR: num_boids must be bigger than 0\n");
+        exit(1);
+    }
+    if (env->report_interval < 1) {
+        printf("ERROR: report_interval must be bigger than 0\n");
+        exit(1);
+    }
     env->boids = (Boid*)calloc(env->num_boids, sizeof(Boid));
     env->log = (Log){0};
     env->tick = 0;
