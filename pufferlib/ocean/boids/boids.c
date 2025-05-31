@@ -7,6 +7,7 @@
 
 // --- Demo Configuration ---
 #define NUM_BOIDS_DEMO 20   // Number of boids for the standalone demo
+#define REPORT_INTERVAL_DEMO 1000 // Report interval for the demo
 #define MAX_STEPS_DEMO 500 // Max steps per episode in the demo
 #define ACTION_SCALE 3.0f   // Corresponds to action space [-3.0, 3.0]
 
@@ -27,11 +28,12 @@ void demo() {
     // Initialize Boids environment struct
     Boids env = {0}; 
     env.num_boids = NUM_BOIDS_DEMO;
+    env.report_interval = REPORT_INTERVAL_DEMO;
     
     // In the Python binding, these pointers are assigned from NumPy arrays.
     // Here, we need to allocate them explicitly.
-    size_t obs_size = env.num_boids * 4; // num_boids * (x, y, vx, vy)
-    size_t act_size = env.num_boids * 2; // num_boids * (dvx, dvy)
+    size_t obs_size = env.num_boids * env.num_boids * 4; // the 4 = (x, y, vx, vy)
+    size_t act_size = env.num_boids * 2; // the 2 = (dvx, dvy)
     env.observations = (float*)calloc(obs_size, sizeof(float));
     env.actions = (float*)calloc(act_size, sizeof(float));
     env.rewards = (float*)calloc(env.num_boids, sizeof(float)); // Env-level reward
