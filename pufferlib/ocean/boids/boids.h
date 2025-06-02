@@ -117,7 +117,7 @@ void c_step(Boids *env) {
     Boid* current_boid;
     Boid observed_boid;
     float vis_vx_sum, vis_vy_sum, vis_x_sum, vis_y_sum, vis_x_avg, vis_y_avg, vis_vx_avg, vis_vy_avg;
-    float diff_x, diff_y, dist, protected_dist_sum, current_boid_reward;
+    float diff_x, diff_y, dist, current_boid_reward;
     unsigned visual_count, protected_count;
     bool manual_control = IsKeyDown(KEY_LEFT_SHIFT);
     float mouse_x = (float)GetMouseX();
@@ -142,7 +142,7 @@ void c_step(Boids *env) {
         current_boid->y = flclip(current_boid->y + current_boid->velocity.y, 0, HEIGHT - BOID_HEIGHT);
 
         // reward calculation
-        current_boid_reward = 0.0f, protected_dist_sum = 0.0f, protected_count = 0.0f;
+        current_boid_reward = 0.0f, protected_count = 0.0f;
         visual_count = 0.0f, vis_vx_sum = 0.0f, vis_vy_sum = 0.0f, vis_x_sum = 0.0f, vis_y_sum = 0.0f;
         for (unsigned observed_indx = 0; observed_indx < env->num_boids; observed_indx++) {
             if (current_indx == observed_indx) continue;
@@ -151,7 +151,6 @@ void c_step(Boids *env) {
             diff_y = current_boid->y - observed_boid.y;
             dist = sqrtf(diff_x*diff_x + diff_y*diff_y);
             if (dist < PROTECTED_RANGE) {
-                protected_dist_sum += (PROTECTED_RANGE - dist);
                 protected_count++;
             } else if (dist < VISUAL_RANGE) {
                 vis_x_sum += observed_boid.x;
@@ -162,8 +161,7 @@ void c_step(Boids *env) {
             }
         }
         if (protected_count > 0) {
-            //current_boid_reward -= fabsf(protected_dist_sum / protected_count) * env->seperation_factor;
-            current_boid_reward -= flclip(protected_count/5.0, 0.0f, 1.0f) * env->seperation_factor;
+            current_boid_reward -= flclip(protected_count/env->num_boids * env->avoid_factor, 0.0f, 1.0f);
         }
         if (visual_count) {
             vis_x_avg  = vis_x_sum  / visual_count;
@@ -189,15 +187,21 @@ void c_step(Boids *env) {
         // Normalization
         // env->rewards[current_indx] = current_boid_reward / 15.0f;
         // printf("current_boid_reward: %f\n", current_boid_reward);
-        env->rewards[current_indx] = current_boid_reward / 2.0f;
-        avg_reward += env->rewards[current_indx];
+        // env->rewards[current_indx] = current_boid_reward / 2.0f;
+        env->rewards[current_indx] = current_boid_reward;
+
+
+        //log updates
+        if (env->tick == env->report_interval) {
+            env->log.score          += env->rewards[current_indx];
+            env->log.n              += 1.0f;
+
+            /* clear per-boid log for next episode */
+            // env->boid_logs[boid_indx] = (Log){0};
+            env->tick = 0;
+        }
     }
-    //log updates
-    avg_reward /= env->num_boids;
-    if (env->tick % env->report_interval == 0) {
-        env->log.score = avg_reward;
-        env->log.n = 1;
-    }
+    //env->log.score /= env->num_boids;
 
     compute_observations(env);
 }
