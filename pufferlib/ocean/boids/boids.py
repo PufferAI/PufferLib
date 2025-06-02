@@ -49,7 +49,6 @@ class Boids(pufferlib.PufferEnv):
         for env_num in range(num_envs):
             c_envs.append(binding.env_init(
                 self.observations[env_num*num_boids:(env_num+1)*num_boids],
-                #self.flat_actions[env_num*num_boids*ACTION_SPACE_SIZE:(env_num+1)*num_boids*ACTION_SPACE_SIZE],
                 self.actions[env_num*num_boids:(env_num+1)*num_boids],
                 self.rewards[env_num*num_boids:(env_num+1)*num_boids],
                 self.terminals[env_num*num_boids:(env_num+1)*num_boids],
