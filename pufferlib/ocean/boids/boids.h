@@ -122,7 +122,6 @@ void c_step(Boids *env) {
     bool manual_control = IsKeyDown(KEY_LEFT_SHIFT);
     float mouse_x = (float)GetMouseX();
     float mouse_y = (float)GetMouseY();
-    float avg_reward = 0.0f;
 
     env->tick++;
     env->rewards[0] = 0;
@@ -161,7 +160,7 @@ void c_step(Boids *env) {
             }
         }
         if (protected_count > 0) {
-            current_boid_reward -= flclip(protected_count/env->num_boids * env->avoid_factor, 0.0f, 1.0f);
+            current_boid_reward -= (float)((env->num_boids - protected_count) - protected_count) / env->num_boids * env->seperation_factor;
         }
         if (visual_count) {
             vis_x_avg  = vis_x_sum  / visual_count;
