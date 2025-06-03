@@ -3,6 +3,9 @@ c_*.c
 pufferlib/extensions.c
 pufferlib/puffernet.c
 
+# Annoying mac files
+.DS_Store
+
 # Raylib
 raylib_wasm/
 

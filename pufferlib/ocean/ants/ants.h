@@ -1,0 +1,601 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <math.h>
+#include <string.h>
+#include <time.h>
+#include "raylib.h"
+
+// Constants for the simulation
+#define WINDOW_WIDTH 1280
+#define WINDOW_HEIGHT 720
+#define MAX_ANTS_PER_COLONY 50
+#define NUM_COLONIES 2
+#define MAX_FOOD_SOURCES 20
+#define MAX_FOOD_PER_SOURCE 100
+#define ANT_SPEED 1.0f
+#define ANT_SIZE 4
+#define FOOD_SIZE 6
+#define COLONY_SIZE 20
+#define PHEROMONE_EVAPORATION_RATE 0.001f
+#define PHEROMONE_DEPOSIT_AMOUNT 1.0f
+#define MAX_PHEROMONES 5000
+#define PHEROMONE_SIZE 2
+#define ANT_VISION_RANGE 50.0f
+#define ANT_VISION_ANGLE (M_PI / 2)
+#define TURN_ANGLE (M_PI / 20)
+#define MIN_FOOD_COLONY_DISTANCE 100.0f
+#define ANT_LIFETIME 100000
+
+// Actions
+#define ACTION_MOVE_FORWARD 0
+#define ACTION_TURN_LEFT 1
+#define ACTION_TURN_RIGHT 2
+#define ACTION_DROP_PHEROMONE 3
+
+// Colors
+#define COLONY1_COLOR (Color){220, 0, 0, 255}
+#define COLONY2_COLOR (Color){0, 0, 220, 255}
+#define PHEROMONE1_COLOR (Color){255, 200, 200, 100}
+#define PHEROMONE2_COLOR (Color){200, 200, 255, 100}
+#define FOOD_COLOR (Color){0, 200, 0, 255}
+#define BACKGROUND_COLOR (Color){50, 50, 50, 255}
+
+// Required Log struct for PufferLib
+typedef struct Log Log;
+struct Log {
+    float perf;              // Performance metric
+    float score;             // Total score
+    float episode_return;    // Cumulative rewards
+    float episode_length;    // Episode duration
+    float n;                 // Episode count - REQUIRED AS LAST FIELD
+};
+
+// Forward declarations
+typedef struct Client Client;
+typedef struct AntsEnv AntsEnv;
+
+// Environment structs
+typedef struct {
+    float x, y;
+} Vector2D;
+
+typedef struct {
+    Vector2D position;
+    int amount;
+} FoodSource;
+
+typedef struct {
+    Vector2D position;
+    float strength;
+    int colony_id;
+} Pheromone;
+
+typedef struct {
+    Vector2D position;
+    float direction;
+    int colony_id;
+    bool has_food;
+    int lifetime;            // Track ant lifetime for performance metrics
+} Ant;
+
+typedef struct {
+    Vector2D position;
+    int food_collected;
+} Colony;
+
+// Raylib client structure - FOLLOWING SNAKE PATTERN
+struct Client {
+    int cell_size;
+    int width;
+    int height;
+};
+
+// Main environment struct - RESTRUCTURED FOLLOWING SNAKE PATTERN
+struct AntsEnv {
+    // Required PufferLib fields - IDENTICAL TO SNAKE
+    float* observations;        // Flattened observations for all ants
+    int* actions;              // Actions for all ants
+    float* rewards;            // Rewards for all ants
+    unsigned char* terminals;   // Terminal flags
+    Log log;                   // Main aggregated log
+    Log* ant_logs;             // Individual ant logs - CRITICAL ADDITION
+    
+    // Environment state
+    Colony colonies[NUM_COLONIES];
+    Ant* ants;                 // Dynamic array of all ants
+    FoodSource food_sources[MAX_FOOD_SOURCES];
+    Pheromone pheromones[MAX_PHEROMONES];
+    int num_pheromones;
+    int num_food_sources;
+    
+    // Environment parameters
+    int num_ants;              // Total number of ants
+    int width;                 // Environment width
+    int height;                // Environment height
+    int obs_size;              // Observation size per ant
+    int tick;                  // Current timestep
+    
+    // Reward parameters
+    float reward_food;
+    float reward_delivery;
+    float reward_death;
+    
+    // Rendering
+    Client* client;            // Raylib client
+    int cell_size;
+};
+
+/**
+ * Add an ant's log to the main log when the ant's episode ends.
+ * CRITICAL FUNCTION - COPIED FROM SNAKE PATTERN
+ * This should only be called during termination conditions for a specific ant.
+ * Accumulates the ant's stats into the main log and resets the ant's individual log.
+ */
+void add_log(AntsEnv* env, int ant_id) {
+    env->log.perf += env->ant_logs[ant_id].perf;
+    env->log.score += env->ant_logs[ant_id].score;
+    env->log.episode_return += env->ant_logs[ant_id].episode_return;
+    env->log.episode_length += env->ant_logs[ant_id].episode_length;
+    env->log.n += 1;
+    
+    // Reset individual ant log
+    env->ant_logs[ant_id] = (Log){0};
+}
+
+// Memory management functions - FOLLOWING SNAKE PATTERN
+void init_ants_env(AntsEnv* env) {
+    env->ants = (Ant*)calloc(env->num_ants, sizeof(Ant));
+    env->ant_logs = (Log*)calloc(env->num_ants, sizeof(Log));
+    env->tick = 0;
+    env->client = NULL;
+    env->num_pheromones = 0;
+    
+    // Initialize food sources
+    env->num_food_sources = MAX_FOOD_SOURCES;
+    for (int i = 0; i < env->num_food_sources; i++) {
+        env->food_sources[i].amount = 0; // Will be set in reset
+    }
+    
+    // Initialize colonies
+    env->colonies[0].position = (Vector2D){env->width / 4, env->height / 2};
+    env->colonies[1].position = (Vector2D){3 * env->width / 4, env->height / 2};
+    env->colonies[0].food_collected = 0;
+    env->colonies[1].food_collected = 0;
+}
+
+void allocate_ants_env(AntsEnv* env) {
+    env->obs_size = 9; // Fixed observation size per ant
+    env->observations = (float*)calloc(env->num_ants * env->obs_size, sizeof(float));
+    env->actions = (int*)calloc(env->num_ants, sizeof(int));
+    env->rewards = (float*)calloc(env->num_ants, sizeof(float));
+    env->terminals = (unsigned char*)calloc(env->num_ants, sizeof(unsigned char));
+    init_ants_env(env);
+}
+
+void c_close(AntsEnv* env) {
+    if (env->ants) {
+        free(env->ants);
+        env->ants = NULL;
+    }
+    if (env->ant_logs) {
+        free(env->ant_logs);
+        env->ant_logs = NULL;
+    }
+}
+
+void free_ants_env(AntsEnv* env) {
+    c_close(env);
+    if (env->observations) {
+        free(env->observations);
+        env->observations = NULL;
+    }
+    if (env->actions) {
+        free(env->actions);
+        env->actions = NULL;
+    }
+    if (env->rewards) {
+        free(env->rewards);
+        env->rewards = NULL;
+    }
+    if (env->terminals) {
+        free(env->terminals);
+        env->terminals = NULL;
+    }
+}
+
+// Helper function implementations
+static inline float random_float(float min, float max) {
+    return min + (max - min) * ((float)rand() / (float)RAND_MAX);
+}
+
+static inline float wrap_angle(float angle) {
+    while (angle > M_PI) angle -= 2 * M_PI;
+    while (angle < -M_PI) angle += 2 * M_PI;
+    return angle;
+}
+
+static inline float distance_squared(Vector2D a, Vector2D b) {
+    float dx = a.x - b.x;
+    float dy = a.y - b.y;
+    return dx * dx + dy * dy;
+}
+
+static inline float get_angle(Vector2D a, Vector2D b) {
+    return atan2(b.y - a.y, b.x - a.x);
+}
+
+static inline bool is_in_vision(Vector2D ant_pos, Vector2D target) {
+    float dist_sq = distance_squared(ant_pos, target);
+    if (dist_sq > ANT_VISION_RANGE * ANT_VISION_RANGE) {
+        return false;
+    }
+    else {
+        return true;
+    }
+}
+
+
+
+static inline void add_pheromone(AntsEnv* env, Vector2D position, int colony_id) {
+    if (env->num_pheromones >= MAX_PHEROMONES) {
+        // Replace oldest pheromone
+        for (int i = 0; i < env->num_pheromones - 1; i++) {
+            env->pheromones[i] = env->pheromones[i + 1];
+        }
+        env->num_pheromones--;
+    }
+    
+    env->pheromones[env->num_pheromones].position = position;
+    env->pheromones[env->num_pheromones].strength = PHEROMONE_DEPOSIT_AMOUNT;
+    env->pheromones[env->num_pheromones].colony_id = colony_id;
+    env->num_pheromones++;
+}
+
+void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
+    Ant* ant = &env->ants[ant_idx];
+    Colony* colony = &env->colonies[ant->colony_id];
+    
+    // Observation structure (9 elements):
+    // [0-1]: ant position (normalized)
+    // [2]: ant direction (normalized to 0-1)
+    // [3]: has_food (0 or 1)
+    // [4]: angle to colony (normalized to 0-1)
+    // [5]: distance to colony (normalized)
+    // [6]: closest food direction (normalized to 0-1)
+    // [7]: closest food distance (normalized)
+    // [8]: strongest pheromone direction (normalized to 0-1) COMMENTED OUT
+    
+    obs[0] = ant->position.x / env->width;
+    obs[1] = ant->position.y / env->height;
+    obs[2] = (ant->direction + M_PI) / (2 * M_PI);
+    obs[3] = ant->has_food ? 1.0f : 0.0f;
+    
+    // Relative position to colony
+    obs[4] = (get_angle(ant->position, colony->position) + M_PI) / (2 * M_PI);
+    obs[5] = distance_squared(ant->position, colony->position) / (env->width * env->width + env->height * env->height);
+    
+    // Find closest visible food
+    float closest_food_dist_sq = env->width * env->width;
+    Vector2D closest_food_pos = {0, 0};
+    for (int i = 0; i < env->num_food_sources; i++) {
+        if (env->food_sources[i].amount > 0) {
+            float dist_sq = distance_squared(ant->position, env->food_sources[i].position);
+            if (
+                dist_sq < closest_food_dist_sq && 
+                is_in_vision(ant->position, env->food_sources[i].position)
+            ) {
+                closest_food_dist_sq = dist_sq;
+                closest_food_pos.x = env->food_sources[i].position.x;
+                closest_food_pos.y = env->food_sources[i].position.y;
+            }
+        }
+    }
+    // Direction to closest visible food
+    obs[6] = (get_angle(ant->position, closest_food_pos) + M_PI) / (2 * M_PI);
+    // Distance to closest visible food
+    obs[7] = sqrt(closest_food_dist_sq) / sqrt(env->width * env->width + env->height * env->height);
+    
+    // Find strongest visible pheromone
+    // float strongest_pheromone = 0;
+    // Vector2D pheromone_pos = {0, 0};
+    // for (int i = 0; i < env->num_pheromones; i++) {
+    //     if (env->pheromones[i].colony_id == ant->colony_id) {
+    //         float dist_sq = distance_squared(ant->position, env->pheromones[i].position);
+    //         if (
+    //             is_in_vision(ant->position, env->pheromones[i].position)
+    //         ) {
+    //             float strength = env->pheromones[i].strength / (sqrt(dist_sq) + 1);
+    //             if (strength > strongest_pheromone) {
+    //                 strongest_pheromone = strength;
+    //                 pheromone_pos.x = env->pheromones[i].position.x;
+    //                 pheromone_pos.y = env->pheromones[i].position.y;
+    //             }
+    //         }
+    //     }
+    // }
+    // obs[8] = get_angle(ant->position, pheromone_pos);
+}
+
+void compute_observations(AntsEnv* env) {
+    for (int i = 0; i < env->num_ants; i++) {
+        get_observation_for_ant(env, i, &env->observations[i * env->obs_size]);
+    }
+}
+
+void spawn_ant(AntsEnv* env, int ant_id) {
+    Ant* ant = &env->ants[ant_id];
+    Colony* colony = &env->colonies[ant->colony_id];
+    
+    ant->position = colony->position;
+    ant->direction = random_float(0, 2 * M_PI);
+    ant->has_food = false;
+    ant->lifetime = 0;
+    
+    // Reset individual ant log
+    env->ant_logs[ant_id] = (Log){0};
+}
+
+void spawn_food(AntsEnv* env) {
+    int idx;
+    bool valid_position;
+    int attempts = 0;
+    
+    do {
+        float x = random_float(50, env->width - 50);
+        float y = random_float(50, env->height - 50);
+        
+        valid_position = true;
+        for (int j = 0; j < NUM_COLONIES; j++) {
+            float dist_sq = distance_squared((Vector2D){x, y}, env->colonies[j].position);
+            if (dist_sq < MIN_FOOD_COLONY_DISTANCE * MIN_FOOD_COLONY_DISTANCE) {
+                valid_position = false;
+                break;
+            }
+        }
+        
+        if (valid_position) {
+            // Find an empty food source slot
+            for (idx = 0; idx < env->num_food_sources; idx++) {
+                if (env->food_sources[idx].amount == 0) {
+                    env->food_sources[idx].position.x = x;
+                    env->food_sources[idx].position.y = y;
+                    env->food_sources[idx].amount = MAX_FOOD_PER_SOURCE;
+                    return;
+                }
+            }
+        }
+        attempts++;
+    } while (!valid_position && attempts < 100);
+}
+
+void c_reset(AntsEnv* env) {
+    env->tick = 0;
+    env->log = (Log){0};
+    env->num_pheromones = 0;
+    
+    // Reset colonies
+    env->colonies[0].food_collected = 0;
+    env->colonies[1].food_collected = 0;
+    
+    // Initialize all ants
+    int ant_idx = 0;
+    for (int i = 0; i < NUM_COLONIES; i++) {
+        for (int j = 0; j < env->num_ants / NUM_COLONIES; j++) {
+            env->ants[ant_idx].colony_id = i;
+            spawn_ant(env, ant_idx);
+            ant_idx++;
+        }
+    }
+    
+    // Clear food sources and spawn new ones
+    for (int i = 0; i < env->num_food_sources; i++) {
+        env->food_sources[i].amount = 0;
+    }
+    
+    for (int i = 0; i < env->num_food_sources; i++) {
+        spawn_food(env);
+    }
+    
+    // Clear buffers
+    memset(env->rewards, 0, env->num_ants * sizeof(float));
+    memset(env->terminals, 0, env->num_ants * sizeof(unsigned char));
+    
+    // Generate initial observations
+    compute_observations(env);
+}
+
+void step_ant(AntsEnv* env, int ant_id) {
+    Ant* ant = &env->ants[ant_id];
+    env->ant_logs[ant_id].episode_length += 1;
+    ant->lifetime++;
+    
+    int action = env->actions[ant_id];
+    
+    // Execute action
+    switch (action) {
+        case ACTION_TURN_LEFT:
+            ant->direction -= TURN_ANGLE;
+            ant->direction = wrap_angle(ant->direction);
+            break;
+        case ACTION_TURN_RIGHT:
+            ant->direction += TURN_ANGLE;
+            ant->direction = wrap_angle(ant->direction);
+            break;
+        case ACTION_DROP_PHEROMONE:
+            add_pheromone(env, ant->position, ant->colony_id);
+            break;
+    }
+    
+    // Always move forward
+    ant->position.x += ANT_SPEED * cos(ant->direction);
+    ant->position.y += ANT_SPEED * sin(ant->direction);
+    
+    // Wrap around edges
+    if (ant->position.x < 0) ant->position.x = env->width;
+    if (ant->position.x > env->width) ant->position.x = 0;
+    if (ant->position.y < 0) ant->position.y = env->height;
+    if (ant->position.y > env->height) ant->position.y = 0;
+    
+    // Check for food collection
+    if (!ant->has_food) {
+        for (int j = 0; j < env->num_food_sources; j++) {
+            if (env->food_sources[j].amount > 0) {
+                float dist_sq = distance_squared(ant->position, env->food_sources[j].position);
+                if (dist_sq < (ANT_SIZE + FOOD_SIZE) * (ANT_SIZE + FOOD_SIZE)) {
+                    // printf("Ant %d collected food\n", ant_id);
+                    ant->has_food = true;
+                    env->food_sources[j].amount--;
+                    env->rewards[ant_id] = env->reward_food;
+                    env->ant_logs[ant_id].episode_return += env->reward_food;
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Check for food delivery
+    if (ant->has_food) {
+        Colony* colony = &env->colonies[ant->colony_id];
+        float dist_sq = distance_squared(ant->position, colony->position);
+        if (dist_sq < (ANT_SIZE + COLONY_SIZE) * (ANT_SIZE + COLONY_SIZE)) {
+            ant->has_food = false;
+            colony->food_collected++;
+            env->rewards[ant_id] = env->reward_delivery;
+            env->ant_logs[ant_id].episode_return += env->reward_delivery;
+            env->ant_logs[ant_id].score += 1; // Score based on deliveries
+        }
+    }
+    
+    // MULTIPLE TERMINAL CONDITIONS FOR FREQUENT LOG GENERATION
+    bool should_terminate = false;
+    
+    // Terminal Condition 1: Shorter lifetime limit (similar to snake death frequency)
+    if (ant->lifetime > ANT_LIFETIME) {
+        should_terminate = true;
+    }
+    
+    // // Terminal Condition 2: Random death chance (0.1% per step after 50 steps)
+    // if (ant->lifetime > 50 && (rand() % 1000) < 1) {
+    //     should_terminate = true;
+    // }
+    
+    // // Terminal Condition 3: Performance-based termination after food delivery
+    // if (env->ant_logs[ant_id].score > 0 && (rand() % 100) < 5) {
+    //     should_terminate = true;
+    // }
+    
+    // Execute termination and log aggregation
+    if (should_terminate) {
+        env->ant_logs[ant_id].perf = env->ant_logs[ant_id].episode_length > 0 ? 
+                                     env->ant_logs[ant_id].score / env->ant_logs[ant_id].episode_length : 0;
+        add_log(env, ant_id);
+        spawn_ant(env, ant_id);
+        env->terminals[ant_id] = 1;
+        
+        // Debug output for terminal condition verification
+        if (env->tick % 100 == 0) {
+            printf("Ant %d terminated at tick %d, lifetime %d, score %.1f\n", 
+                   ant_id, env->tick, ant->lifetime, env->ant_logs[ant_id].score);
+        }
+    }
+}
+
+void c_step(AntsEnv* env) {
+    env->tick++;
+    
+    // Clear rewards and terminals
+    memset(env->rewards, 0, env->num_ants * sizeof(float));
+    memset(env->terminals, 0, env->num_ants * sizeof(unsigned char));
+    
+    // Step all ants
+    for (int i = 0; i < env->num_ants; i++) {
+        step_ant(env, i);
+    }
+    
+    // Update pheromones
+    for (int i = 0; i < env->num_pheromones; i++) {
+        env->pheromones[i].strength -= PHEROMONE_EVAPORATION_RATE;
+        if (env->pheromones[i].strength <= 0) {
+            // Remove evaporated pheromone
+            env->pheromones[i] = env->pheromones[env->num_pheromones - 1];
+            env->num_pheromones--;
+            i--;
+        }
+    }
+    
+    // Generate new observations
+    compute_observations(env);
+}
+
+// Raylib client functions - FOLLOWING SNAKE PATTERN
+Client* make_client(int cell_size, int width, int height) {
+    Client* client = (Client*)malloc(sizeof(Client));
+    client->cell_size = cell_size;
+    client->width = width;
+    client->height = height;
+    InitWindow(width, height, "PufferLib Ant Colony");
+    SetTargetFPS(60);
+    return client;
+}
+
+void close_client(Client* client) {
+    CloseWindow();
+    free(client);
+}
+
+void c_render(AntsEnv* env) {
+    if (IsKeyDown(KEY_ESCAPE)) {
+        exit(0);
+    }
+    
+    if (env->client == NULL) {
+        env->client = make_client(1, env->width, env->height);
+    }
+    
+    BeginDrawing();
+    ClearBackground(BACKGROUND_COLOR);
+    
+    // Draw colonies
+    for (int i = 0; i < NUM_COLONIES; i++) {
+        Color colony_color = (i == 0) ? COLONY1_COLOR : COLONY2_COLOR;
+        DrawCircle(env->colonies[i].position.x, env->colonies[i].position.y, COLONY_SIZE, colony_color);
+    }
+    
+    // Draw food sources
+    for (int i = 0; i < env->num_food_sources; i++) {
+        if (env->food_sources[i].amount > 0) {
+            DrawCircle(env->food_sources[i].position.x, env->food_sources[i].position.y, 
+                      FOOD_SIZE, FOOD_COLOR);
+            DrawText(TextFormat("%d", env->food_sources[i].amount), 
+                     env->food_sources[i].position.x, env->food_sources[i].position.y, 10, RAYWHITE);
+        }
+    }
+    
+    // Draw pheromones
+    for (int i = 0; i < env->num_pheromones; i++) {
+        Color pheromone_color = (env->pheromones[i].colony_id == 0) ? PHEROMONE1_COLOR : PHEROMONE2_COLOR;
+        pheromone_color.a = (unsigned char)(100 * env->pheromones[i].strength);
+        DrawCircle(env->pheromones[i].position.x, env->pheromones[i].position.y, 
+                  PHEROMONE_SIZE, pheromone_color);
+    }
+    
+    // Draw ants
+    for (int i = 0; i < env->num_ants; i++) {
+        Ant* ant = &env->ants[i];
+        Color ant_color = (ant->colony_id == 0) ? COLONY1_COLOR : COLONY2_COLOR;
+        DrawCircle(ant->position.x, ant->position.y, ANT_SIZE, ant->has_food ? FOOD_COLOR : ant_color);
+        
+        // Draw direction indicator
+        float dir_x = ant->position.x + (ANT_SIZE * 1.5f) * cos(ant->direction);
+        float dir_y = ant->position.y + (ANT_SIZE * 1.5f) * sin(ant->direction);
+        DrawLine(ant->position.x, ant->position.y, dir_x, dir_y, RAYWHITE);
+    }
+    
+    // Draw UI
+    DrawText(TextFormat("Colony 1 Food: %d", env->colonies[0].food_collected), 20, 20, 20, COLONY1_COLOR);
+    DrawText(TextFormat("Colony 2 Food: %d", env->colonies[1].food_collected), 20, 50, 20, COLONY2_COLOR);
+    DrawText(TextFormat("Tick: %d", env->tick), env->width - 120, 20, 20, RAYWHITE);
+    
+    EndDrawing();
+}
