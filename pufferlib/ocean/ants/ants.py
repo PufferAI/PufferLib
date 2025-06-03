@@ -20,13 +20,13 @@ class AntsEnv(pufferlib.PufferEnv):
     
     def __init__(
             self, 
-            num_envs=64, 
+            num_envs=1, 
             width=1280, 
             height=720,
             num_ants=32,
             reward_food=0.1, 
             reward_delivery=1.0, 
-            reward_death=-1.0,
+            reward_death=0.0,
             report_interval=1, 
             render_mode=None, 
             buf=None, 
@@ -45,14 +45,13 @@ class AntsEnv(pufferlib.PufferEnv):
                 raise APIUsageError('width and height must be at least 100')
         
         self.report_interval = report_interval
-        
-        self.single_observation_space = gymnasium.spaces.Box(
-            low=0.0, high=1.0, shape=(8,), dtype=np.float32 # obs_size
-        )
-        self.single_action_space = gymnasium.spaces.Discrete(4)
         self.num_agents = sum(num_ants)
         self.render_mode = render_mode
         self.tick = 0
+        self.single_action_space = gymnasium.spaces.Discrete(4)
+        self.single_observation_space = gymnasium.spaces.Box(
+            low=0.0, high=1.0, shape=(8,), dtype=np.float32
+        )
         
         # Calculate cell size for rendering
         self.cell_size = int(np.ceil(1280 / max(max(width), max(height))))

@@ -9,11 +9,10 @@
 // Constants for the simulation
 #define WINDOW_WIDTH 1280
 #define WINDOW_HEIGHT 720
-#define MAX_ANTS_PER_COLONY 50
 #define NUM_COLONIES 2
 #define MAX_FOOD_SOURCES 20
 #define MAX_FOOD_PER_SOURCE 100
-#define ANT_SPEED 1.0f
+#define ANT_SPEED 5.0f
 #define ANT_SIZE 4
 #define FOOD_SIZE 6
 #define COLONY_SIZE 20
@@ -21,11 +20,11 @@
 #define PHEROMONE_DEPOSIT_AMOUNT 1.0f
 #define MAX_PHEROMONES 5000
 #define PHEROMONE_SIZE 2
-#define ANT_VISION_RANGE 50.0f
+#define ANT_VISION_RANGE 5000.0f
 #define ANT_VISION_ANGLE (M_PI / 2)
 #define TURN_ANGLE (M_PI / 20)
 #define MIN_FOOD_COLONY_DISTANCE 100.0f
-#define ANT_LIFETIME 100000
+#define ANT_LIFETIME 5000
 
 // Actions
 #define ACTION_MOVE_FORWARD 0
@@ -49,6 +48,7 @@ struct Log {
     float episode_return;    // Cumulative rewards
     float episode_length;    // Episode duration
     float n;                 // Episode count - REQUIRED AS LAST FIELD
+    float reward;
 };
 
 // Forward declarations
@@ -138,7 +138,7 @@ void add_log(AntsEnv* env, int ant_id) {
     env->log.episode_return += env->ant_logs[ant_id].episode_return;
     env->log.episode_length += env->ant_logs[ant_id].episode_length;
     env->log.n += 1;
-    
+    env->log.reward += env->ant_logs[ant_id].reward;
     // Reset individual ant log
     env->ant_logs[ant_id] = (Log){0};
 }
@@ -282,8 +282,8 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
         if (env->food_sources[i].amount > 0) {
             float dist_sq = distance_squared(ant->position, env->food_sources[i].position);
             if (
-                dist_sq < closest_food_dist_sq && 
-                is_in_vision(ant->position, env->food_sources[i].position)
+                dist_sq < closest_food_dist_sq
+                && is_in_vision(ant->position, env->food_sources[i].position)
             ) {
                 closest_food_dist_sq = dist_sq;
                 closest_food_pos.x = env->food_sources[i].position.x;
@@ -291,10 +291,16 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
             }
         }
     }
-    // Direction to closest visible food
-    obs[6] = (get_angle(ant->position, closest_food_pos) + M_PI) / (2 * M_PI);
-    // Distance to closest visible food
-    obs[7] = sqrt(closest_food_dist_sq) / sqrt(env->width * env->width + env->height * env->height);
+    if(closest_food_pos.x == 0 && closest_food_pos.y == 0) {
+        obs[6] = -1.0f;
+        obs[7] = -1.0f;
+    }
+    else {
+        // Direction to closest visible food
+        obs[6] = (get_angle(ant->position, closest_food_pos) + M_PI) / (2 * M_PI);
+        // Distance to closest visible food
+        obs[7] = sqrt(closest_food_dist_sq) / sqrt(env->width * env->width + env->height * env->height);
+    }
     
     // Find strongest visible pheromone
     // float strongest_pheromone = 0;
@@ -328,9 +334,9 @@ void spawn_ant(AntsEnv* env, int ant_id) {
     Colony* colony = &env->colonies[ant->colony_id];
     
     ant->position = colony->position;
-    ant->direction = random_float(0, 2 * M_PI);
+    ant->direction = wrap_angle(random_float(0, 2 * M_PI));
     ant->has_food = false;
-    ant->lifetime = 0;
+    ant->lifetime = random_float(0, ANT_LIFETIME);
     
     // Reset individual ant log
     env->ant_logs[ant_id] = (Log){0};
@@ -448,6 +454,7 @@ void step_ant(AntsEnv* env, int ant_id) {
                     env->food_sources[j].amount--;
                     env->rewards[ant_id] = env->reward_food;
                     env->ant_logs[ant_id].episode_return += env->reward_food;
+                    env->ant_logs[ant_id].reward += env->reward_food;
                     break;
                 }
             }
@@ -464,21 +471,35 @@ void step_ant(AntsEnv* env, int ant_id) {
             env->rewards[ant_id] = env->reward_delivery;
             env->ant_logs[ant_id].episode_return += env->reward_delivery;
             env->ant_logs[ant_id].score += 1; // Score based on deliveries
+            env->ant_logs[ant_id].reward += 1;
+
         }
+        float angle_to_colony = get_angle(ant->position, colony->position);
+        float angle_diff = wrap_angle(angle_to_colony - ant->direction);
+
+        if(angle_diff > 0.1 && env->actions[ant_id] == ACTION_TURN_RIGHT){
+            env->rewards[ant_id] += 0.0001;
+            env->ant_logs[ant_id].reward += 0.0001;
+        }
+        else if (angle_diff < -0.1 && env->actions[ant_id] == ACTION_TURN_LEFT){
+            env->rewards[ant_id] += 0.0001;
+            env->ant_logs[ant_id].reward += 0.0001;
+        }
+        
     }
     
     // MULTIPLE TERMINAL CONDITIONS FOR FREQUENT LOG GENERATION
     bool should_terminate = false;
     
     // Terminal Condition 1: Shorter lifetime limit (similar to snake death frequency)
-    if (ant->lifetime > ANT_LIFETIME) {
-        should_terminate = true;
-    }
-    
-    // // Terminal Condition 2: Random death chance (0.1% per step after 50 steps)
-    // if (ant->lifetime > 50 && (rand() % 1000) < 1) {
+    // if (ant->lifetime > ANT_LIFETIME) {
     //     should_terminate = true;
     // }
+    
+    // // Terminal Condition 2: Random death chance (0.1% per step after lifetime)
+    if (ant->lifetime > ANT_LIFETIME && (rand() % 1000) < 1) {
+        should_terminate = true;
+    }
     
     // // Terminal Condition 3: Performance-based termination after food delivery
     // if (env->ant_logs[ant_id].score > 0 && (rand() % 100) < 5) {

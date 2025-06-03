@@ -8,7 +8,7 @@
 int demo() {
     // Initialize environment with proper parameters - FOLLOWING SNAKE PATTERN
     AntsEnv env = {
-        .num_ants = NUM_COLONIES * MAX_ANTS_PER_COLONY,
+        .num_ants = 32,
         .width = WINDOW_WIDTH,
         .height = WINDOW_HEIGHT,
         .reward_food = 0.1f,
