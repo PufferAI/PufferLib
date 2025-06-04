@@ -452,6 +452,12 @@ void step_ant(AntsEnv* env, int ant_id) {
                     // printf("Ant %d collected food\n", ant_id);
                     ant->has_food = true;
                     env->food_sources[j].amount--;
+                    
+                    // If food source is exhausted, respawn it
+                    if (env->food_sources[j].amount <= 0) {
+                        spawn_food(env);
+                    }
+                    
                     env->rewards[ant_id] = env->reward_food;
                     env->ant_logs[ant_id].episode_return += env->reward_food;
                     env->ant_logs[ant_id].reward += env->reward_food;
