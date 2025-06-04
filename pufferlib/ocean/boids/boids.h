@@ -194,13 +194,9 @@ void c_step(Boids *env) {
         if (env->tick == env->report_interval) {
             env->log.score          += env->rewards[current_indx];
             env->log.n              += 1.0f;
-
-            /* clear per-boid log for next episode */
-            // env->boid_logs[boid_indx] = (Log){0};
             env->tick = 0;
         }
     }
-    //env->log.score /= env->num_boids;
 
     compute_observations(env);
 }
