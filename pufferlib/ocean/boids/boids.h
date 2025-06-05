@@ -161,7 +161,7 @@ void c_step(Boids *env) {
         }
         if (protected_count > 0) {
             protected_range_diff = (float)(env->num_boids - protected_count) - protected_count;
-            current_boid_reward += protected_range_diff / env->num_boids * env->seperation_factor;
+            current_boid_reward += protected_range_diff * env->seperation_factor;
         }
         if (visual_count) {
             vis_x_avg  = vis_x_sum  / visual_count;
