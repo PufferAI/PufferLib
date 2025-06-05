@@ -13,7 +13,7 @@
 #define LEFT_MARGIN 50
 #define RIGHT_MARGIN 50
 #define VELOCITY_CAP 5
-#define VISUAL_RANGE 20
+#define VISUAL_RANGE 400
 #define PROTECTED_RANGE 100
 #define WIDTH 1080
 #define HEIGHT 720
