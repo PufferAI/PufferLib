@@ -10,6 +10,10 @@
 #define REPORT_INTERVAL_DEMO 1000 // Report interval for the demo
 #define MAX_STEPS_DEMO 500 // Max steps per episode in the demo
 #define ACTION_SCALE 3.0f   // Corresponds to action space [-3.0, 3.0]
+#define MARGIN_TURN_FACTOR 1.0
+#define COHESION_FACTOR 0.0
+#define SEPERATION_FACTOR 0.0
+#define ALIGNMENT_FACTOR 0.0
 
 // Dummy action generation: random velocity changes for each boid
 void generate_dummy_actions(Boids* env) {
@@ -29,6 +33,10 @@ void demo() {
     Boids env = {0}; 
     env.num_boids = NUM_BOIDS_DEMO;
     env.report_interval = REPORT_INTERVAL_DEMO;
+    env.margin_turn_factor = MARGIN_TURN_FACTOR;
+    env.cohesion_factor = COHESION_FACTOR;
+    env.seperation_factor = SEPERATION_FACTOR;
+    env.alignment_factor = ALIGNMENT_FACTOR;
     
     // In the Python binding, these pointers are assigned from NumPy arrays.
     // Here, we need to allocate them explicitly.
