@@ -182,7 +182,7 @@ void c_step(Boids *env) {
         }
 
         // Normalization
-        env->rewards[current_indx] = current_boid_reward / 4.0f;
+        env->rewards[current_indx] = current_boid_reward / 2.0f;
 
         //log updates
         if (env->tick == env->report_interval) {
@@ -256,6 +256,11 @@ void c_render(Boids* env) {
 
         BeginDrawing();
         ClearBackground((Color){6, 24, 24, 255});
+
+        DrawLine(LEFT_MARGIN, 0, LEFT_MARGIN, HEIGHT, RED);
+        DrawLine(WIDTH - RIGHT_MARGIN, 0, WIDTH - RIGHT_MARGIN, HEIGHT, RED);
+        DrawLine(0, TOP_MARGIN, WIDTH, TOP_MARGIN, RED);
+        DrawLine(0, HEIGHT - BOTTOM_MARGIN, WIDTH, HEIGHT - BOTTOM_MARGIN, RED);
 
         for (unsigned boid_indx = 0; boid_indx < env->num_boids; boid_indx++) {
             DrawTexturePro(
