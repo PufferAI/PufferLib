@@ -174,10 +174,10 @@ void c_step(Boids *env) {
             current_boid_reward -= fabsf(vis_x_avg  - current_boid->x) * env->cohesion_factor;
             current_boid_reward -= fabsf(vis_y_avg  - current_boid->y) * env->cohesion_factor;
         }
-        if (current_boid->y < TOP_MARGIN || current_boid->y > HEIGHT - BOTTOM_MARGIN) {
+        if (current_boid->y < TOP_MARGIN || current_boid->y + BOID_HEIGHT > HEIGHT - BOTTOM_MARGIN) {
             current_boid_reward -= env->margin_turn_factor;
         }
-        if (current_boid->x < LEFT_MARGIN || current_boid->x > WIDTH  - RIGHT_MARGIN) {
+        if (current_boid->x < LEFT_MARGIN || current_boid->x + BOID_WIDTH > WIDTH - RIGHT_MARGIN) {
             current_boid_reward -= env->margin_turn_factor;
         }
 
