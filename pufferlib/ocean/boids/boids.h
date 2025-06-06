@@ -8,8 +8,8 @@
 
 #include "raylib.h"
 
-#define TOP_MARGIN 50
-#define BOTTOM_MARGIN 50
+#define TOP_MARGIN 100
+#define BOTTOM_MARGIN 100
 #define LEFT_MARGIN 100
 #define RIGHT_MARGIN 100
 #define VELOCITY_CAP 5
