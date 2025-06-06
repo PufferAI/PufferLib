@@ -10,8 +10,8 @@
 
 #define TOP_MARGIN 50
 #define BOTTOM_MARGIN 50
-#define LEFT_MARGIN 50
-#define RIGHT_MARGIN 50
+#define LEFT_MARGIN 100
+#define RIGHT_MARGIN 100
 #define VELOCITY_CAP 5
 #define VISUAL_RANGE 400
 #define PROTECTED_RANGE 100
@@ -176,20 +176,13 @@ void c_step(Boids *env) {
         }
         if (current_boid->y < TOP_MARGIN || current_boid->y > HEIGHT - BOTTOM_MARGIN) {
             current_boid_reward -= env->margin_turn_factor;
-        } else {
-            current_boid_reward += env->margin_turn_factor;
         }
         if (current_boid->x < LEFT_MARGIN || current_boid->x > WIDTH  - RIGHT_MARGIN) {
             current_boid_reward -= env->margin_turn_factor;
-        } else {
-            current_boid_reward += env->margin_turn_factor;
         }
-        // Normalization
-        // env->rewards[current_indx] = current_boid_reward / 15.0f;
-        // printf("current_boid_reward: %f\n", current_boid_reward);
-        // env->rewards[current_indx] = current_boid_reward / 2.0f;
-        env->rewards[current_indx] = current_boid_reward;
 
+        // Normalization
+        env->rewards[current_indx] = current_boid_reward / 4.0f;
 
         //log updates
         if (env->tick == env->report_interval) {
