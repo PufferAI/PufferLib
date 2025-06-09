@@ -1,3 +1,5 @@
+//puffer train puffer_robocode
+//puffer eval puffer_robocode
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdio.h>
