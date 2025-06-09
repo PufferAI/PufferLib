@@ -12,7 +12,7 @@
 #define NUM_COLONIES 2
 #define MAX_FOOD_SOURCES 20
 #define MAX_FOOD_PER_SOURCE 100
-#define ANT_SPEED 5.0f
+#define ANT_SPEED 3.0f
 #define ANT_SIZE 4
 #define FOOD_SIZE 6
 #define COLONY_SIZE 20
@@ -20,9 +20,9 @@
 #define PHEROMONE_DEPOSIT_AMOUNT 1.0f
 #define MAX_PHEROMONES 5000
 #define PHEROMONE_SIZE 2
-#define ANT_VISION_RANGE 5000.0f
+#define ANT_VISION_RANGE 500.0f
 #define ANT_VISION_ANGLE (M_PI / 2)
-#define TURN_ANGLE (M_PI / 20)
+#define TURN_ANGLE (M_PI / 36)
 #define MIN_FOOD_COLONY_DISTANCE 100.0f
 #define ANT_LIFETIME 5000
 
@@ -260,9 +260,9 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
     // [0-1]: ant position (normalized)
     // [2]: ant direction (normalized to 0-1)
     // [3]: has_food (0 or 1)
-    // [4]: angle to colony (normalized to 0-1)
+    // [4]: angle diff to colony (normalized to 0-1)
     // [5]: distance to colony (normalized)
-    // [6]: closest food direction (normalized to 0-1)
+    // [6]: angle diff to closest food (normalized to 0-1)
     // [7]: closest food distance (normalized)
     // [8]: strongest pheromone direction (normalized to 0-1) COMMENTED OUT
     
@@ -272,7 +272,9 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
     obs[3] = ant->has_food ? 1.0f : 0.0f;
     
     // Relative position to colony
-    obs[4] = (get_angle(ant->position, colony->position) + M_PI) / (2 * M_PI);
+    float angle_to_colony = get_angle(ant->position, colony->position);
+    float angle_diff_colony = wrap_angle(angle_to_colony - ant->direction);
+    obs[4] = (angle_diff_colony + M_PI) / (2 * M_PI);
     obs[5] = distance_squared(ant->position, colony->position) / (env->width * env->width + env->height * env->height);
     
     // Find closest visible food
@@ -296,8 +298,10 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
         obs[7] = -1.0f;
     }
     else {
-        // Direction to closest visible food
-        obs[6] = (get_angle(ant->position, closest_food_pos) + M_PI) / (2 * M_PI);
+        // Direction difference to closest visible food
+        float angle_to_food = get_angle(ant->position, closest_food_pos);
+        float angle_diff_food = wrap_angle(angle_to_food - ant->direction);
+        obs[6] = (angle_diff_food + M_PI) / (2 * M_PI);
         // Distance to closest visible food
         obs[7] = sqrt(closest_food_dist_sq) / sqrt(env->width * env->width + env->height * env->height);
     }
@@ -449,7 +453,6 @@ void step_ant(AntsEnv* env, int ant_id) {
             if (env->food_sources[j].amount > 0) {
                 float dist_sq = distance_squared(ant->position, env->food_sources[j].position);
                 if (dist_sq < (ANT_SIZE + FOOD_SIZE) * (ANT_SIZE + FOOD_SIZE)) {
-                    // printf("Ant %d collected food\n", ant_id);
                     ant->has_food = true;
                     env->food_sources[j].amount--;
                     
@@ -458,9 +461,30 @@ void step_ant(AntsEnv* env, int ant_id) {
                         spawn_food(env);
                     }
                     
-                    env->rewards[ant_id] = env->reward_food;
-                    env->ant_logs[ant_id].episode_return += env->reward_food;
-                    env->ant_logs[ant_id].reward += env->reward_food;
+                    env->rewards[ant_id] = 1.0f;
+                    env->ant_logs[ant_id].episode_return += 1.0f;
+                    env->ant_logs[ant_id].reward += 1.0f;
+                    break;
+                }
+            }
+        }
+        
+        // Small negative reward for wandering without food
+        // env->rewards[ant_id] -= 0.001f;
+        // env->ant_logs[ant_id].reward -= 0.001f;
+        
+        // Small positive reward for heading towards visible food
+        for (int j = 0; j < env->num_food_sources; j++) {
+            if (env->food_sources[j].amount > 0) {
+                // float dist_sq = distance_squared(ant->position, env->food_sources[j].position);
+                if (is_in_vision(ant->position, env->food_sources[j].position)) {
+                    float angle_to_food = get_angle(ant->position, env->food_sources[j].position);
+                    float angle_diff = wrap_angle(angle_to_food - ant->direction);
+                    
+                    if (fabs(angle_diff) < TURN_ANGLE) {
+                        env->rewards[ant_id] += 0.0005f;
+                        env->ant_logs[ant_id].reward += 0.0005f;
+                    }
                     break;
                 }
             }
@@ -474,24 +498,24 @@ void step_ant(AntsEnv* env, int ant_id) {
         if (dist_sq < (ANT_SIZE + COLONY_SIZE) * (ANT_SIZE + COLONY_SIZE)) {
             ant->has_food = false;
             colony->food_collected++;
-            env->rewards[ant_id] = env->reward_delivery;
-            env->ant_logs[ant_id].episode_return += env->reward_delivery;
-            env->ant_logs[ant_id].score += 1; // Score based on deliveries
-            env->ant_logs[ant_id].reward += 1;
-
-        }
-        float angle_to_colony = get_angle(ant->position, colony->position);
-        float angle_diff = wrap_angle(angle_to_colony - ant->direction);
-
-        if(angle_diff > 0.1 && env->actions[ant_id] == ACTION_TURN_RIGHT){
-            env->rewards[ant_id] += 0.0001;
-            env->ant_logs[ant_id].reward += 0.0001;
-        }
-        else if (angle_diff < -0.1 && env->actions[ant_id] == ACTION_TURN_LEFT){
-            env->rewards[ant_id] += 0.0001;
-            env->ant_logs[ant_id].reward += 0.0001;
+            env->rewards[ant_id] += 5.0f; // Larger reward for food delivery
+            env->ant_logs[ant_id].episode_return += 5.0f;
+            env->ant_logs[ant_id].score += 1;
+            env->ant_logs[ant_id].reward += 5.0f;
         }
         
+        // Reward for heading towards colony when carrying food
+        float angle_to_colony = get_angle(ant->position, colony->position);
+        float angle_diff = wrap_angle(angle_to_colony - ant->direction);
+        
+        if (fabs(angle_diff) < TURN_ANGLE) {
+            env->rewards[ant_id] += 0.001f;
+            env->ant_logs[ant_id].reward += 0.001f;
+        } else {
+            // Small negative reward for not heading towards colony when carrying food
+            env->rewards[ant_id] -= 0.0005f;
+            env->ant_logs[ant_id].reward -= 0.0005f;
+        }
     }
     
     // MULTIPLE TERMINAL CONDITIONS FOR FREQUENT LOG GENERATION
