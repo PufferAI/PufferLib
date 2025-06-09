@@ -1,5 +1,4 @@
-//puffer train puffer_robocode
-//puffer eval puffer_robocode
+
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -7,7 +6,7 @@
 #include <math.h>
 #include <unistd.h> 
 #include "raylib.h"
-// #include "logger.h"
+
 #define NUM_ACTIONS 5
 #define NUM_BULLETS 16
 #define MAX_VELOCITY 8.0f
@@ -29,7 +28,10 @@
 #define GUN_TURN_IDX 2
 #define RADAR_TURN_IDX 3
 #define FIRE_IDX 4
-
+//scripts/build_ocean.sh robocode local
+//puffer train puffer_robocode
+//puffer eval puffer_robocode
+// sudo python3 setup.py build_ext --inplace --force
 
 typedef struct {
     float perf; // Recommended 0-1 normalized single real number perf metric
@@ -102,7 +104,7 @@ typedef  struct {
     float* info;
     float* observations;
     
-}Robocode;
+} Robocode;
 
 void init(Robocode* env) {
     env->robots = (Robot*)calloc(env->num_agents, sizeof(Robot));
@@ -466,26 +468,31 @@ float compute_reward(Robocode* env){
         - Hitting a wall
         - Aiming at the enemy
     */
-    Robot* advserial = &env->robots[ADVERSARIAL_IDX];
-    Robot* agent = &env->robots[AGENT_IDX];
-    float reward = 0.0f;
-    reward += 0.1f;
+   for (int i = 0; i < env->num_agents; i++) {
+        Robot* agent = &env->robots[i];
+        int op_idx = (i == AGENT_IDX) ? ADVERSARIAL_IDX : AGENT_IDX;
+        Robot* opponent = &env->robots[op_idx];
+        float reward = 0.0f;
 
-    if (agent->hit_enemy){
-        reward += HIT_ENEMY_REWARD;
-        env->log.score += HIT_ENEMY_REWARD;
-        env->log.perf += 1.0f;
+        // Staying alive
+        reward += 0.1f;
+
+        if (agent->hit_enemy){
+            reward += HIT_ENEMY_REWARD;
+            env->log.score += HIT_ENEMY_REWARD;
+        }
+
+        if(agent->was_hit){
+            reward -= GOT_HIT_PENALTY;
+        }
+
+        reward += RELATIVE_ENERGY_SCALE * (agent->energy - opponent->energy);
+        // Reset flags after computing reward
+        agent->hit_enemy = false;
+        agent->was_hit = false;
+        
+        env->rewards[i] = reward;
     }
-
-    if(agent->was_hit){
-        reward -= GOT_HIT_PENALTY;
-    }
-
-    reward += RELATIVE_ENERGY_SCALE*(agent->energy - advserial->energy);
-    // Reset flags after computing reward
-    agent->hit_enemy = false;
-    agent->was_hit = false;
-    return reward;
 }
 
 void c_reset(Robocode* env) {
@@ -553,7 +560,7 @@ void c_step(Robocode* env) {
 
     update_bullets(env);
     radar_detection_step(env);
-    adversarial_agent_step(env);
+    //adversarial_agent_step(env);
 
 
     for (int agent_idx = 0; agent_idx < env->num_agents; agent_idx++) {
@@ -605,7 +612,7 @@ void c_step(Robocode* env) {
     }
     
 
-    env->rewards[AGENT_IDX] = compute_reward(env);
+    compute_reward(env);
 }
 
 
