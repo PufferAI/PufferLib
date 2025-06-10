@@ -7,13 +7,18 @@
 #include <unistd.h> 
 #include "raylib.h"
 
+#define MAX_EPISODE_LENGTH 1000
+
 #define NUM_ACTIONS 5
 #define NUM_BULLETS 16
 #define MAX_VELOCITY 8.0f
+#define MIN_ENERGY 0.0f
+
 // Reward
 #define HIT_ENEMY_REWARD 10.0f
 #define GOT_HIT_PENALTY 10.0f
 #define RELATIVE_ENERGY_SCALE 0.1f
+#define LAST_SURVIVOR_REWARD 50.0f
 
 //IDS
 #define AGENT_IDX 0
@@ -104,7 +109,36 @@ typedef  struct {
     float* info;
     float* observations;
     
+    // Id of the sole survivor or -1 for draw
+    int sole_survor_id;
+    int max_episode_length;
+    bool episode_ended;
 } Robocode;
+
+bool should_episode_end(Robocode* env){
+    if(env->tick >= env->max_episode_length) {
+        env->episode_ended = true;
+        env->sole_survor_id = -1; // Draw due to timeout
+        return true;
+    }
+
+    int alive_count = 0;
+    int last_alive_id = -1;
+
+    for(int i = 0; i < env->num_agents; i++){
+        if(env->robots[i].energy > MIN_ENERGY){
+            alive_count++;
+            last_alive_id = i;
+        }
+    }
+
+    if (alive_count <= 1) {
+        env->episode_ended = true;
+        env->sole_survor_id = last_alive_id; // Set the sole survivor
+        return true;
+    }
+    return false;
+}
 
 void init(Robocode* env) {
     env->robots = (Robot*)calloc(env->num_agents, sizeof(Robot));
@@ -359,7 +393,6 @@ void update_bullets(Robocode* env) {
         Robot* robot = &env->robots[agent_idx];
 
         if (robot->energy <= 0) {
-            // c_reset(env);
             env->terminals[agent_idx] = 1;
             return;
         }
@@ -497,6 +530,10 @@ float compute_reward(Robocode* env){
 
 void c_reset(Robocode* env) {
     env->tick = 0;
+    env->episode_ended = false;
+    env->sole_survor_id = -1; 
+    env->max_episode_length = MAX_EPISODE_LENGTH;
+
     int idx = 0;
     float x, y;
     while (idx < env->num_agents) {
@@ -544,19 +581,18 @@ void c_reset(Robocode* env) {
         env->rewards[i] = 0.0f;
         env->terminals[i] = 0;
     }
-    
+    env->log.episode_length = 0;
+    env->log.score = 0.0f;
+    env->log.episode_return = 0.0f;
     compute_observations(env);
 }
-
 
 void c_step(Robocode* env) {    
     env->tick++;
     env->log.episode_length += 1;
     //Reset rewards and terminals
-    for (int i = 0; i < env->num_agents; i++) {
+    for (int i = 0; i < env->num_agents; i++)
         env->rewards[i] = 0.0f;
-        env->terminals[i] = 0;
-    }
 
     update_bullets(env);
     radar_detection_step(env);
@@ -565,6 +601,11 @@ void c_step(Robocode* env) {
 
     for (int agent_idx = 0; agent_idx < env->num_agents; agent_idx++) {
         Robot* robot = &env->robots[agent_idx];
+
+        //Skip if agent is dead
+        if (robot->energy <= MIN_ENERGY)
+            continue;
+        
         int atn_offset = agent_idx * NUM_ACTIONS;
 
         // Cool down gun
@@ -606,13 +647,25 @@ void c_step(Robocode* env) {
             fire(env, robot, firepower);
         }
 
-       
+        // Boundary check
         robot->pose.x = fmax(16, fmin(env->width - 16, robot->pose.x));
         robot->pose.y = fmax(16, fmin(env->height - 16, robot->pose.y));
     }
-    
 
     compute_reward(env);
+
+    if(should_episode_end(env)) {
+        // Set all remaining agents as terminal (incase some agents are still alive)
+        for (int i = 0; i < env->num_agents; i++)
+            env->terminals[i] = 1;
+
+        // Compute final rewards
+        if (env->sole_survor_id >= 0) {
+            env->rewards[env->sole_survor_id] += LAST_SURVIVOR_REWARD; // Victory bonus
+            env->log.score += 100.0f;
+        }
+    }
+    compute_observations(env);
 }
 
 
