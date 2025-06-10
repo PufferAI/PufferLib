@@ -113,6 +113,7 @@ typedef  struct {
     int sole_survor_id;
     int max_episode_length;
     bool episode_ended;
+    bool new_episode;
 } Robocode;
 
 bool should_episode_end(Robocode* env){
@@ -530,6 +531,7 @@ float compute_reward(Robocode* env){
 
 void c_reset(Robocode* env) {
     env->tick = 0;
+    env->new_episode = false; //False since we perform intialisation regardless below
     env->episode_ended = false;
     env->sole_survor_id = -1; 
     env->max_episode_length = MAX_EPISODE_LENGTH;
@@ -662,7 +664,11 @@ void c_step(Robocode* env) {
         // Compute final rewards
         if (env->sole_survor_id >= 0) {
             env->rewards[env->sole_survor_id] += LAST_SURVIVOR_REWARD; // Victory bonus
-            env->log.score += 100.0f;
+            env->log.score += LAST_SURVIVOR_REWARD;
+        }
+
+        for (int i = 0; i < env->num_agents; i++) {
+            env->robots[i].energy = 100;  // Full energy restore
         }
     }
     compute_observations(env);
