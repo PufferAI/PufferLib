@@ -42,7 +42,7 @@ int main() {
     while (!WindowShouldClose()) {
         // Generate random actions for testing (only for the learning agent)
         // The adversarial agent uses its own hardcoded strategy
-        for (int i = 0; i < 1; i++) {  // Only control agent 0, adversarial is agent 1
+        for (int i = 0; i < env.num_agents; i++) {  // Only control agent 0, adversarial is agent 1
             int action_offset = i * 5;
             
             // Random actions within valid ranges
