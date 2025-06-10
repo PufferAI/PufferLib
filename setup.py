@@ -317,7 +317,7 @@ docs = [
 train = [
     'stable_baselines3==2.1.0',
     'tensorboard==2.11.2',
-    # 'torch',
+    'torch',
     'tyro==0.8.6',
     'wandb==0.19.1',
     'scipy',
@@ -472,7 +472,7 @@ setup(
         f'gym<={GYM_VERSION}',
         f'gymnasium<={GYMNASIUM_VERSION}',
         f'pettingzoo<={PETTINGZOO_VERSION}',
-        # 'torch',
+        'torch',
         'shimmy[gym-v21]',
         'psutil==5.9.5',
         'pynvml',
