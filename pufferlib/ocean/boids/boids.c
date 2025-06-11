@@ -8,7 +8,7 @@
 // --- Demo Configuration ---
 #define NUM_BOIDS_DEMO 20   // Number of boids for the standalone demo
 #define REPORT_INTERVAL_DEMO 1000 // Report interval for the demo
-#define MAX_STEPS_DEMO 500 // Max steps per episode in the demo
+#define MAX_STEPS_DEMO 10000 // Max steps per episode in the demo
 #define ACTION_SCALE 3.0f   // Corresponds to action space [-3.0, 3.0]
 #define MARGIN_TURN_FACTOR 1.0
 #define COHESION_FACTOR 0.0
