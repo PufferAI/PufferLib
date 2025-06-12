@@ -95,11 +95,23 @@ void init(Boids *env) {
 static void compute_observations(Boids *env) {
     int idx = 0;
     for (unsigned i=0; i<env->num_boids; i++) {
+        env->observations[idx++] = env->boids[i].x / WIDTH;
+        env->observations[idx++] = env->boids[i].y / HEIGHT;
+        env->observations[idx++] = env->boids[i].velocity.x / VELOCITY_CAP;
+        env->observations[idx++] = env->boids[i].velocity.y / VELOCITY_CAP;
+        for (unsigned j=0; j<4; j++) {
+            env->observations[idx++] = 0;
+        }
         for (unsigned j=0; j<env->num_boids; j++) {
-            env->observations[idx++] = (env->boids[j].x - env->boids[i].x) / WIDTH;
-            env->observations[idx++] = (env->boids[j].y - env->boids[i].y) / HEIGHT;
-            env->observations[idx++] = (env->boids[j].velocity.x - env->boids[i].velocity.x) / VELOCITY_CAP;
-            env->observations[idx++] = (env->boids[j].velocity.y - env->boids[i].velocity.y) / VELOCITY_CAP;
+            if (i == j) continue;
+            env->observations[idx++] = env->boids[j].x / WIDTH;
+            env->observations[idx++] = env->boids[j].y / HEIGHT;
+            env->observations[idx++] = env->boids[j].velocity.x / VELOCITY_CAP;
+            env->observations[idx++] = env->boids[j].velocity.y / VELOCITY_CAP;
+            env->observations[idx++] = (env->boids[i].x - env->boids[j].x) / WIDTH;
+            env->observations[idx++] = (env->boids[i].y - env->boids[j].y) / HEIGHT;
+            env->observations[idx++] = (env->boids[i].velocity.x - env->boids[j].velocity.x) / VELOCITY_CAP;
+            env->observations[idx++] = (env->boids[i].velocity.y - env->boids[j].velocity.y) / VELOCITY_CAP;
         }
     }
 }
