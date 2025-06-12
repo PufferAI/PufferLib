@@ -39,9 +39,12 @@ typedef struct {
 
 typedef struct Client Client;
 typedef struct {
-    // an array of shape (num_boids, 4) with the 4 values correspoinding to (x, y, velocity x, velocity y)
+    // Flat array of shape (num_boids * 8) values:
+    // - Each boid has 8 values corresponding to (x, y, vx, vy, dx, dy, dvx, dvy)
+    // - The first 8 values are for the boid itself
+    // - All the other 8 values for the other boids
     float* observations;
-    // an array of shape (num_boids, 2) with the 2 values correspoinding to (velocity x, velocity y)
+    // an array of shape (num_boids, 2) with the 2 values correspoinding to (dvx, dvy)
     float* actions;
     // an array of shape (1) with the summed up reward for all boids
     float* rewards;
