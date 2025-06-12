@@ -257,11 +257,6 @@ void c_render(Boids* env) {
         BeginDrawing();
         ClearBackground((Color){6, 24, 24, 255});
 
-        DrawLine(LEFT_MARGIN, 0, LEFT_MARGIN, HEIGHT, RED);
-        DrawLine(WIDTH - RIGHT_MARGIN, 0, WIDTH - RIGHT_MARGIN, HEIGHT, RED);
-        DrawLine(0, TOP_MARGIN, WIDTH, TOP_MARGIN, RED);
-        DrawLine(0, HEIGHT - BOTTOM_MARGIN, WIDTH, HEIGHT - BOTTOM_MARGIN, RED);
-
         for (unsigned boid_indx = 0; boid_indx < env->num_boids; boid_indx++) {
             DrawTexturePro(
                 env->client->boid_texture,
