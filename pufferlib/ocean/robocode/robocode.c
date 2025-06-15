@@ -1,57 +1,69 @@
+/* Pure C demo file for Robocode. Build it with:
+ * bash scripts/build_ocean.sh robocode local (debug)
+ * bash scripts/build_ocean.sh robocode fast
+ * We suggest building and debugging your env in pure C first. You
+ * get faster builds and better error messages
+ */
 #include "robocode.h"
 
+/* Puffernet is our lightweight cpu inference library that
+ * lets you load basic PyTorch model architectures so that
+ * you can run them in pure C or on the web via WASM
+ */
+#include "puffernet.h"
+
 int main() {
-    Env env = {0};
-    env.num_agents = 2;
-    env.width = 768;
-    env.height = 576;
-    allocate_env(&env);
-    reset(&env);
+    int num_agents = 2;  // Agent + Adversarial
+    int num_obs = 15;    // 15 observations per agent
 
-    Client* client = make_client(&env);
 
+    // Box action space: 5 continuous actions
+    // [move, turn, gun_turn, radar_turn, fire]
+ 
+
+    Robocode env = {
+        .width = 768,
+        .height = 576,
+        .num_agents = num_agents
+    };
+    init(&env);
+
+    // Allocate these manually since they aren't being passed from Python
+    env.observations = calloc(env.num_agents * num_obs, sizeof(float));
+    env.actions = calloc(5 * env.num_agents, sizeof(float));  // 5 float actions per agent
+    env.rewards = calloc(env.num_agents, sizeof(float));
+    env.terminals = calloc(env.num_agents, sizeof(unsigned char));
+
+    // Always call reset and render first
+    c_reset(&env);
+    c_render(&env);
+
+    // while(True) will break web builds
     while (!WindowShouldClose()) {
-        for (int i = 0; i < NUM_ACTIONS; i++) {
-            env.actions[i] = 0;
+        // Generate random actions for testing (only for the learning agent)
+        // The adversarial agent uses its own hardcoded strategy
+        for (int i = 0; i < env.num_agents; i++) {  // Only control agent 0, adversarial is agent 1
+            int action_offset = i * 5;
+            
+            // Random actions within valid ranges
+            env.actions[action_offset + 0] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;    // move: -1 to 1
+            env.actions[action_offset + 1] = ((float)rand() / RAND_MAX) * 20.0f - 10.0f;  // turn: -10 to 10
+            env.actions[action_offset + 2] = ((float)rand() / RAND_MAX) * 40.0f - 20.0f;  // gun_turn: -20 to 20
+            env.actions[action_offset + 3] = ((float)rand() / RAND_MAX) * 90.0f - 45.0f;  // radar_turn: -45 to 45
+            env.actions[action_offset + 4] = ((float)rand() / RAND_MAX) * 3.0f;           // fire: 0 to 3
         }
 
-        env.actions[0] = 16.0f;
-        float x = env.robots[0].x;
-        float y = env.robots[0].y;
-        float op_x = env.robots[1].x;
-        float op_y = env.robots[1].y;
-        float gun_heading = env.robots[0].gun_heading;
-        float angle_to_op = 180*atan2(op_y - y, op_x - x)/M_PI;
-        float gun_delta = angle_to_op - gun_heading;
-        if (gun_delta < -180) gun_delta += 360;
-        env.actions[2] = (gun_delta > 0) ? 1.0f : -1.0f;
-        if (gun_delta < 5 && gun_delta > -5) env.actions[4] = 1.0;
-
-        env.actions[5] = 16.0f;
-        x = env.robots[1].x;
-        y = env.robots[1].y;
-        op_x = env.robots[0].x;
-        op_y = env.robots[0].y;
-        gun_heading = env.robots[1].gun_heading;
-        angle_to_op = 180*atan2(op_y - y, op_x - x)/M_PI;
-        gun_delta = angle_to_op - gun_heading;
-        if (gun_delta < -180) gun_delta += 360;
-        env.actions[7] = (gun_delta > 0) ? 1.0f : -1.0f;
-        if (gun_delta < 5 && gun_delta > -5) env.actions[9] = 1.0;
-
-
-        //if (IsKeyPressed(KEY_ESCAPE)) break;
-        if (IsKeyDown(KEY_W)) env.actions[0] = 16.0f;
-        if (IsKeyDown(KEY_S)) env.actions[0] = -16.0f;
-        if (IsKeyDown(KEY_A)) env.actions[1] = -2.0f;
-        if (IsKeyDown(KEY_D)) env.actions[1] = 2.0f;
-        if (IsKeyDown(KEY_Q)) env.actions[2] = -1.0f;
-        if (IsKeyDown(KEY_E)) env.actions[2] = 1.0f;
-        if (IsKeyDown(KEY_SPACE)) env.actions[4] = 1.0f;
-
-        step(&env);
-        render(client, &env);
+        // If you have a trained model, use this instead of random actions: 
+        c_step(&env);
+        c_render(&env);
     }
-    CloseWindow();
+
+    // Try to clean up after yourself
+    free(env.observations);
+    free(env.actions);
+    free(env.rewards);
+    free(env.terminals);
+    c_close(&env);
+    
     return 0;
 }
