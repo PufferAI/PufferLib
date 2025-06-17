@@ -50,7 +50,7 @@ class AntsEnv(pufferlib.PufferEnv):
         self.tick = 0
         self.single_action_space = gymnasium.spaces.Discrete(4)
         self.single_observation_space = gymnasium.spaces.Box(
-            low=0.0, high=1.0, shape=(8,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(8,), dtype=np.float32
         )
         
         # Calculate cell size for rendering

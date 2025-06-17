@@ -43,15 +43,41 @@ int demo() {
     // Initialize rendering client
     env.client = make_client(1, env.width, env.height);
     
+    // Track key states for single-press detection
+    bool left_pressed = false;
+    bool right_pressed = false;
+    bool space_pressed = false;
+    
     // Main loop - FOLLOWING SNAKE PATTERN
     while (!WindowShouldClose()) {
         // User can take control with shift key
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
             // Control first ant of colony 1 for demo
             env.actions[0] = ACTION_MOVE_FORWARD;
-            if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) env.actions[0] = ACTION_TURN_LEFT;
-            if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = ACTION_TURN_RIGHT;
-            if (IsKeyDown(KEY_SPACE)) env.actions[0] = ACTION_DROP_PHEROMONE;
+            
+            // Handle left turn
+            if ((IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) && !left_pressed) {
+                env.actions[0] = ACTION_TURN_LEFT;
+                left_pressed = true;
+            } else if (!IsKeyDown(KEY_LEFT) && !IsKeyDown(KEY_A)) {
+                left_pressed = false;
+            }
+            
+            // Handle right turn
+            if ((IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) && !right_pressed) {
+                env.actions[0] = ACTION_TURN_RIGHT;
+                right_pressed = true;
+            } else if (!IsKeyDown(KEY_RIGHT) && !IsKeyDown(KEY_D)) {
+                right_pressed = false;
+            }
+            
+            // Handle pheromone drop
+            if (IsKeyDown(KEY_SPACE) && !space_pressed) {
+                env.actions[0] = ACTION_DROP_PHEROMONE;
+                space_pressed = true;
+            } else if (!IsKeyDown(KEY_SPACE)) {
+                space_pressed = false;
+            }
             
             // Rest of ants act via scripted behaviors
             for (int i = 1; i < env.num_ants; i++) {

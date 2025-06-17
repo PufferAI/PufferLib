@@ -11,8 +11,8 @@
 #define WINDOW_HEIGHT 720
 #define NUM_COLONIES 2
 #define MAX_FOOD_SOURCES 20
-#define MAX_FOOD_PER_SOURCE 100
-#define ANT_SPEED 3.0f
+#define MAX_FOOD_PER_SOURCE 20
+#define ANT_SPEED 5.0f
 #define ANT_SIZE 4
 #define FOOD_SIZE 6
 #define COLONY_SIZE 20
@@ -22,15 +22,15 @@
 #define PHEROMONE_SIZE 2
 #define ANT_VISION_RANGE 500.0f
 #define ANT_VISION_ANGLE (M_PI / 2)
-#define TURN_ANGLE (M_PI / 36)
-#define MIN_FOOD_COLONY_DISTANCE 100.0f
+#define TURN_ANGLE (M_PI / 2)
+#define MIN_FOOD_COLONY_DISTANCE 50.0f
 #define ANT_LIFETIME 5000
 
 // Actions
-#define ACTION_MOVE_FORWARD 0
-#define ACTION_TURN_LEFT 1
-#define ACTION_TURN_RIGHT 2
-#define ACTION_DROP_PHEROMONE 3
+#define ACTION_TURN_LEFT 0
+#define ACTION_TURN_RIGHT 1
+#define ACTION_DROP_PHEROMONE 2
+#define ACTION_MOVE_FORWARD 3
 
 // Colors
 #define COLONY1_COLOR (Color){220, 0, 0, 255}
@@ -226,13 +226,14 @@ static inline float get_angle(Vector2D a, Vector2D b) {
 }
 
 static inline bool is_in_vision(Vector2D ant_pos, Vector2D target) {
-    float dist_sq = distance_squared(ant_pos, target);
-    if (dist_sq > ANT_VISION_RANGE * ANT_VISION_RANGE) {
-        return false;
-    }
-    else {
-        return true;
-    }
+//     float dist_sq = distance_squared(ant_pos, target);
+//     if (dist_sq > (ANT_VISION_RANGE * ANT_VISION_RANGE)) {
+//         return false;
+//     }
+//     else {
+//         return true;
+//     }
+    return true;
 }
 
 
@@ -258,23 +259,26 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
     
     // Observation structure (9 elements):
     // [0-1]: ant position (normalized)
-    // [2]: ant direction (normalized to 0-1)
+    // [2]: ant direction (normalized between 0 and 1)
     // [3]: has_food (0 or 1)
-    // [4]: angle diff to colony (normalized to 0-1)
+    // [4]: direction to colony (normalized between 0 and 1)
     // [5]: distance to colony (normalized)
-    // [6]: angle diff to closest food (normalized to 0-1)
+    // [6]: direction to closest food (normalized between 0 and 1)
     // [7]: closest food distance (normalized)
     // [8]: strongest pheromone direction (normalized to 0-1) COMMENTED OUT
     
     obs[0] = ant->position.x / env->width;
     obs[1] = ant->position.y / env->height;
+    
+    // Normalize direction to 0-1 range (0 = right, 0.25 = up, 0.5 = left, 0.75 = down)
     obs[2] = (ant->direction + M_PI) / (2 * M_PI);
+    
     obs[3] = ant->has_food ? 1.0f : 0.0f;
     
-    // Relative position to colony
+    // Get direction to colony (normalized between 0 and 1)
     float angle_to_colony = get_angle(ant->position, colony->position);
-    float angle_diff_colony = wrap_angle(angle_to_colony - ant->direction);
-    obs[4] = (angle_diff_colony + M_PI) / (2 * M_PI);
+    obs[4] = (angle_to_colony + M_PI) / (2 * M_PI);
+    
     obs[5] = distance_squared(ant->position, colony->position) / (env->width * env->width + env->height * env->height);
     
     // Find closest visible food
@@ -293,38 +297,17 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
             }
         }
     }
+    
     if(closest_food_pos.x == 0 && closest_food_pos.y == 0) {
         obs[6] = -1.0f;
         obs[7] = -1.0f;
     }
     else {
-        // Direction difference to closest visible food
+        // Get direction to closest food (normalized between 0 and 1)
         float angle_to_food = get_angle(ant->position, closest_food_pos);
-        float angle_diff_food = wrap_angle(angle_to_food - ant->direction);
-        obs[6] = (angle_diff_food + M_PI) / (2 * M_PI);
-        // Distance to closest visible food
+        obs[6] = (angle_to_food + M_PI) / (2 * M_PI);
         obs[7] = sqrt(closest_food_dist_sq) / sqrt(env->width * env->width + env->height * env->height);
     }
-    
-    // Find strongest visible pheromone
-    // float strongest_pheromone = 0;
-    // Vector2D pheromone_pos = {0, 0};
-    // for (int i = 0; i < env->num_pheromones; i++) {
-    //     if (env->pheromones[i].colony_id == ant->colony_id) {
-    //         float dist_sq = distance_squared(ant->position, env->pheromones[i].position);
-    //         if (
-    //             is_in_vision(ant->position, env->pheromones[i].position)
-    //         ) {
-    //             float strength = env->pheromones[i].strength / (sqrt(dist_sq) + 1);
-    //             if (strength > strongest_pheromone) {
-    //                 strongest_pheromone = strength;
-    //                 pheromone_pos.x = env->pheromones[i].position.x;
-    //                 pheromone_pos.y = env->pheromones[i].position.y;
-    //             }
-    //         }
-    //     }
-    // }
-    // obs[8] = get_angle(ant->position, pheromone_pos);
 }
 
 void compute_observations(AntsEnv* env) {
@@ -338,7 +321,7 @@ void spawn_ant(AntsEnv* env, int ant_id) {
     Colony* colony = &env->colonies[ant->colony_id];
     
     ant->position = colony->position;
-    ant->direction = wrap_angle(random_float(0, 2 * M_PI));
+    ant->direction = wrap_angle((rand() % 4) * (M_PI / 2)); // Randomly choose between 0, 90, 180, or 270 degrees
     ant->has_food = false;
     ant->lifetime = random_float(0, ANT_LIFETIME);
     
@@ -435,6 +418,8 @@ void step_ant(AntsEnv* env, int ant_id) {
         case ACTION_DROP_PHEROMONE:
             add_pheromone(env, ant->position, ant->colony_id);
             break;
+        case ACTION_MOVE_FORWARD:
+            break;
     }
     
     // Always move forward
@@ -461,7 +446,7 @@ void step_ant(AntsEnv* env, int ant_id) {
                         spawn_food(env);
                     }
                     
-                    env->rewards[ant_id] = 1.0f;
+                    env->rewards[ant_id] += 1.0f;
                     env->ant_logs[ant_id].episode_return += 1.0f;
                     env->ant_logs[ant_id].reward += 1.0f;
                     break;
@@ -469,26 +454,23 @@ void step_ant(AntsEnv* env, int ant_id) {
             }
         }
         
-        // Small negative reward for wandering without food
-        // env->rewards[ant_id] -= 0.001f;
-        // env->ant_logs[ant_id].reward -= 0.001f;
         
         // Small positive reward for heading towards visible food
-        for (int j = 0; j < env->num_food_sources; j++) {
-            if (env->food_sources[j].amount > 0) {
-                // float dist_sq = distance_squared(ant->position, env->food_sources[j].position);
-                if (is_in_vision(ant->position, env->food_sources[j].position)) {
-                    float angle_to_food = get_angle(ant->position, env->food_sources[j].position);
-                    float angle_diff = wrap_angle(angle_to_food - ant->direction);
+        // for (int j = 0; j < env->num_food_sources; j++) {
+        //     if (env->food_sources[j].amount > 0) {
+        //         // float dist_sq = distance_squared(ant->position, env->food_sources[j].position);
+        //         if (is_in_vision(ant->position, env->food_sources[j].position)) {
+        //             float angle_to_food = get_angle(ant->position, env->food_sources[j].position);
+        //             float angle_diff = wrap_angle(angle_to_food - ant->direction);
                     
-                    if (fabs(angle_diff) < TURN_ANGLE) {
-                        env->rewards[ant_id] += 0.0005f;
-                        env->ant_logs[ant_id].reward += 0.0005f;
-                    }
-                    break;
-                }
-            }
-        }
+        //             if (fabs(angle_diff) < TURN_ANGLE) {
+        //                 env->rewards[ant_id] += 0.0005f;
+        //                 env->ant_logs[ant_id].reward += 0.0005f;
+        //             }
+        //             break;
+        //         }
+        //     }
+        // }
     }
     
     // Check for food delivery
@@ -498,24 +480,24 @@ void step_ant(AntsEnv* env, int ant_id) {
         if (dist_sq < (ANT_SIZE + COLONY_SIZE) * (ANT_SIZE + COLONY_SIZE)) {
             ant->has_food = false;
             colony->food_collected++;
-            env->rewards[ant_id] += 5.0f; // Larger reward for food delivery
-            env->ant_logs[ant_id].episode_return += 5.0f;
+            env->rewards[ant_id] += 50; // Larger reward for food delivery
+            env->ant_logs[ant_id].episode_return += 50;
             env->ant_logs[ant_id].score += 1;
-            env->ant_logs[ant_id].reward += 5.0f;
+            env->ant_logs[ant_id].reward += 50;
         }
         
-        // Reward for heading towards colony when carrying food
-        float angle_to_colony = get_angle(ant->position, colony->position);
-        float angle_diff = wrap_angle(angle_to_colony - ant->direction);
+        // // Reward for heading towards colony when carrying food
+        // float angle_to_colony = get_angle(ant->position, colony->position);
+        // float angle_diff = wrap_angle(angle_to_colony - ant->direction);
         
-        if (fabs(angle_diff) < TURN_ANGLE) {
-            env->rewards[ant_id] += 0.001f;
-            env->ant_logs[ant_id].reward += 0.001f;
-        } else {
-            // Small negative reward for not heading towards colony when carrying food
-            env->rewards[ant_id] -= 0.0005f;
-            env->ant_logs[ant_id].reward -= 0.0005f;
-        }
+        // if (fabs(angle_diff) < TURN_ANGLE) {
+        //     env->rewards[ant_id] += 0.01f;
+        //     env->ant_logs[ant_id].reward += 0.01f;
+        // } else {
+        //     // Small negative reward for not heading towards colony when carrying food
+        //     env->rewards[ant_id] -= 0.0005f;
+        //     env->ant_logs[ant_id].reward -= 0.0005f;
+        // }
     }
     
     // MULTIPLE TERMINAL CONDITIONS FOR FREQUENT LOG GENERATION
@@ -541,7 +523,7 @@ void step_ant(AntsEnv* env, int ant_id) {
         env->ant_logs[ant_id].perf = env->ant_logs[ant_id].episode_length > 0 ? 
                                      env->ant_logs[ant_id].score / env->ant_logs[ant_id].episode_length : 0;
         add_log(env, ant_id);
-        spawn_ant(env, ant_id);
+        spawn_ant(env, ant_id); //Respawn the ant
         env->terminals[ant_id] = 1;
         
         // Debug output for terminal condition verification
