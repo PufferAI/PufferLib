@@ -445,20 +445,19 @@ static inline void set_chase_targets(PacmanEnv *env) {
     env->ghosts[BLINKY].target = env->player_pos;
 
     Position inky_intermediate = pos_move(env->player_pos, env->player_direction, INKY_TARGET_LEAD);
-    env->ghosts[INKY].target.x = 2 * inky_intermediate.x - env->ghosts[1].pos.x;
-    env->ghosts[INKY].target.y = 2 * inky_intermediate.y - env->ghosts[1].pos.y;
+    env->ghosts[INKY].target.x = 2 * inky_intermediate.x - env->ghosts[BLINKY].pos.x;
+    env->ghosts[INKY].target.y = 2 * inky_intermediate.y - env->ghosts[BLINKY].pos.y;
 
-    int clyde_distance = pos_distance_squared(env->player_pos, env->ghosts[3].pos);
+    int clyde_distance = pos_distance_squared(env->player_pos, env->ghosts[CLYDE].pos);
     if (clyde_distance > CLYDE_TARGET_RADIUS * CLYDE_TARGET_RADIUS) {
         env->ghosts[CLYDE].target = env->player_pos;
     } else {
-        env->ghosts[CLYDE].target = GHOST_CORNERS[3];
+        env->ghosts[CLYDE].target = GHOST_CORNERS[CLYDE];
     }
 }
 
 static inline bool check_collision(Position a, Position old_a, Position b, Position old_b) {
-    return (a.x >= b.x - 1 && a.x <= b.x + 1 && a.y == b.y) ||
-           (a.y >= b.y - 1 && a.y <= b.y + 1 && a.x == b.x);
+    return pos_equal(a, b) || (pos_equal(a, old_b) && pos_equal(old_a, b));
 }
 
 static inline void ghost_move(PacmanEnv *env, Ghost *ghost, Position old_player_pos) {
@@ -495,6 +494,7 @@ static inline void ghost_move(PacmanEnv *env, Ghost *ghost, Position old_player_
             ghost->return_to_spawn = true;
 
             env->rewards[0] += 1.0f;
+            env->score += 1.0f;
         } else {
             env->player_caught = true;
         }
@@ -581,7 +581,7 @@ struct Client {
         Texture2D tileset;
         Texture2D pacman;
         Texture2D frightened;
-        DirectionSprites ghost_sprites[4];
+        DirectionSprites ghost_sprites[NUM_GHOSTS];
         DirectionSprites eyes;
 };
 
@@ -680,7 +680,6 @@ Client *make_client(PacmanEnv *env) {
 }
 
 const Color PUFF_RED = (Color){187, 0, 0, 255};
-const Color PUFF_CYAN = (Color){0, 187, 187, 255};
 const Color PUFF_WHITE = (Color){241, 241, 241, 241};
 const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
 
