@@ -47,8 +47,8 @@ struct Log {
     float score;             // Total score
     float episode_return;    // Cumulative rewards
     float episode_length;    // Episode duration
+    float reward;            // Reward for the current step
     float n;                 // Episode count - REQUIRED AS LAST FIELD
-    float reward;
 };
 
 // Forward declarations
@@ -165,7 +165,7 @@ void init_ants_env(AntsEnv* env) {
 }
 
 void allocate_ants_env(AntsEnv* env) {
-    env->obs_size = 9; // Fixed observation size per ant
+    env->obs_size = 8; // Fixed observation size per ant
     env->observations = (float*)calloc(env->num_ants * env->obs_size, sizeof(float));
     env->actions = (int*)calloc(env->num_ants, sizeof(int));
     env->rewards = (float*)calloc(env->num_ants, sizeof(float));
@@ -218,7 +218,7 @@ static inline float wrap_angle(float angle) {
 static inline float distance_squared(Vector2D a, Vector2D b) {
     float dx = a.x - b.x;
     float dy = a.y - b.y;
-    return dx * dx + dy * dy;
+    return (dx * dx) + (dy * dy);
 }
 
 static inline float get_angle(Vector2D a, Vector2D b) {
@@ -276,7 +276,7 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
     obs[3] = ant->has_food ? 1.0f : 0.0f;
     
     // Get direction to colony (normalized between 0 and 1)
-    float angle_to_colony = get_angle(ant->position, colony->position);
+    float angle_to_colony = wrap_angle(get_angle(ant->position, colony->position));
     obs[4] = (angle_to_colony + M_PI) / (2 * M_PI);
     
     obs[5] = distance_squared(ant->position, colony->position) / (env->width * env->width + env->height * env->height);
@@ -304,9 +304,9 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
     }
     else {
         // Get direction to closest food (normalized between 0 and 1)
-        float angle_to_food = get_angle(ant->position, closest_food_pos);
+        float angle_to_food = wrap_angle(get_angle(ant->position, closest_food_pos));
         obs[6] = (angle_to_food + M_PI) / (2 * M_PI);
-        obs[7] = sqrt(closest_food_dist_sq) / sqrt(env->width * env->width + env->height * env->height);
+        obs[7] = closest_food_dist_sq / ((env->width * env->width) + (env->height * env->height));
     }
 }
 
@@ -446,9 +446,9 @@ void step_ant(AntsEnv* env, int ant_id) {
                         spawn_food(env);
                     }
                     
-                    env->rewards[ant_id] += 1.0f;
-                    env->ant_logs[ant_id].episode_return += 1.0f;
-                    env->ant_logs[ant_id].reward += 1.0f;
+                    env->rewards[ant_id] += env->reward_food;
+                    env->ant_logs[ant_id].episode_return += env->reward_food;
+                    env->ant_logs[ant_id].reward += env->reward_food;
                     break;
                 }
             }
@@ -480,10 +480,10 @@ void step_ant(AntsEnv* env, int ant_id) {
         if (dist_sq < (ANT_SIZE + COLONY_SIZE) * (ANT_SIZE + COLONY_SIZE)) {
             ant->has_food = false;
             colony->food_collected++;
-            env->rewards[ant_id] += 50; // Larger reward for food delivery
-            env->ant_logs[ant_id].episode_return += 50;
+            env->rewards[ant_id] += env->reward_delivery; // Larger reward for food delivery
+            env->ant_logs[ant_id].episode_return += env->reward_delivery;
             env->ant_logs[ant_id].score += 1;
-            env->ant_logs[ant_id].reward += 50;
+            env->ant_logs[ant_id].reward += env->reward_delivery;
         }
         
         // // Reward for heading towards colony when carrying food
