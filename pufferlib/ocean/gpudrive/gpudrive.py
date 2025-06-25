@@ -33,7 +33,7 @@ class GPUDrive(pufferlib.PufferEnv):
         self.spawn_immunity_timer = spawn_immunity_timer
         self.human_agent_idx = human_agent_idx
         self.resample_frequency = resample_frequency
-        self.num_obs = 6 + 63*7 + 200*7
+        self.num_obs = 6 + 63*7 + 50*7
         self.single_observation_space = gymnasium.spaces.Box(low=-1, high=1,
             shape=(self.num_obs,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.MultiDiscrete([7, 13])
@@ -195,7 +195,7 @@ def save_map_binary(map_data, output_file):
             elif(obj_type == 'cyclist'):
                 obj_type = 3;
             f.write(struct.pack('i', obj_type))  # type
-            f.write(struct.pack('i', obj.get('id', 0)))   # id  
+            # f.write(struct.pack('i', obj.get('id', 0)))   # id  
             f.write(struct.pack('i', trajectory_length))                  # array_size
             # Write position arrays
             positions = obj.get('position', [])
@@ -208,7 +208,7 @@ def save_map_binary(map_data, output_file):
             for i in range(trajectory_length):
                 pos = positions[i] if i < len(positions) else {'x': 0.0, 'y': 0.0, 'z': 0.0}
                 f.write(struct.pack('f', float(pos.get('z', 0.0))))
-            
+
             # Write velocity arrays
             velocities = obj.get('velocity', [])
             for arr, key in [(velocities, 'x'), (velocities, 'y'), (velocities, 'z')]:
@@ -263,7 +263,7 @@ def save_map_binary(map_data, output_file):
                 road_type = 10
             # Write base entity data
             f.write(struct.pack('i', road_type))  # type
-            f.write(struct.pack('i', road.get('id', 0)))    # id
+            # f.write(struct.pack('i', road.get('id', 0)))    # id
             f.write(struct.pack('i', size))                 # array_size
             
             # Write position arrays

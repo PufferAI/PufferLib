@@ -233,25 +233,15 @@ void add_log(GPUDrive* env) {
 
 Entity* load_map_binary(const char* filename, GPUDrive* env) {
     FILE* file = fopen(filename, "rb");
-    //printf("fileanme: %s\n", filename);
     if (!file) return NULL;
     fread(&env->num_objects, sizeof(int), 1, file);
     fread(&env->num_roads, sizeof(int), 1, file);
-    env->num_entities = env->num_objects + env->num_roads;
-    //printf("Num entities: %d\n", env->num_entities);
+    env->num_entities = env->num_objects + env->num_roads; 
     Entity* entities = (Entity*)malloc(env->num_entities * sizeof(Entity));
-    //printf("Num entities: %d\n", env->num_entities);
+    // printf("num entities: %d\n", env->num_entities);
     for (int i = 0; i < env->num_entities; i++) {
 	// Read base entity data
         fread(&entities[i].type, sizeof(int), 1, file);
-        if(entities[i].type < 4){
-            fread(&entities[i].road_object_id, sizeof(int), 1, file);
-            entities[i].road_point_id = -1;
-        }
-        else{
-            fread(&entities[i].road_point_id, sizeof(int), 1, file);
-            entities[i].road_object_id = -1;
-        }
         fread(&entities[i].array_size, sizeof(int), 1, file);
         // Allocate arrays based on type
         int size = entities[i].array_size;
