@@ -5,11 +5,11 @@
 #include "ants.h"
 #include "puffernet.h"
 
-// Function to visualize ant 1's observations
+// Function to visualize ant observations
 void render_ant_observations(AntsEnv* env, int ant_id) {
     if (ant_id >= env->num_ants) return;
     
-    // Get ant 1's observations
+    // Get ant observations
     float* obs = &env->observations[ant_id * env->obs_size];
     Ant* ant = &env->ants[ant_id];
     
@@ -40,7 +40,7 @@ void render_ant_observations(AntsEnv* env, int ant_id) {
     DrawText(TextFormat("Direction: %.3f", obs[2]), panel_x, y_offset, 14, RAYWHITE);
     y_offset += line_height;
     
-    DrawText(TextFormat("Has Food: %s", obs[3] > 0.5f ? "YES" : "NO"), 
+    DrawText(TextFormat("Has Food: %s", obs[3] == 1 ? "YES" : "NO"), 
              panel_x, y_offset, 14, obs[3] > 0.5f ? GREEN : RED);
     y_offset += line_height;
     
