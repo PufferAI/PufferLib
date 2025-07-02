@@ -5,6 +5,99 @@
 #include "ants.h"
 #include "puffernet.h"
 
+// Function to visualize ant 1's observations
+void render_ant_observations(AntsEnv* env, int ant_id) {
+    if (ant_id >= env->num_ants) return;
+    
+    // Get ant 1's observations
+    float* obs = &env->observations[ant_id * env->obs_size];
+    Ant* ant = &env->ants[ant_id];
+    
+    // Define UI panel position
+    int panel_x = 20;
+    int panel_y = 100;
+    int panel_width = 300;
+    int panel_height = 200;
+    
+    // Draw semi-transparent background panel
+    DrawRectangle(panel_x - 10, panel_y - 10, panel_width + 20, panel_height + 20, 
+                  (Color){0, 0, 0, 180});
+    DrawRectangleLines(panel_x - 10, panel_y - 10, panel_width + 20, panel_height + 20, RAYWHITE);
+    
+    // Title
+    DrawText(TextFormat("ANT %d OBSERVATIONS", ant_id), panel_x, panel_y, 16, YELLOW);
+    
+    int y_offset = panel_y + 25;
+    int line_height = 18;
+    
+    // Display each observation with description
+    DrawText(TextFormat("Position X: %.3f", obs[0]), panel_x, y_offset, 14, RAYWHITE);
+    y_offset += line_height;
+    
+    DrawText(TextFormat("Position Y: %.3f", obs[1]), panel_x, y_offset, 14, RAYWHITE);
+    y_offset += line_height;
+    
+    DrawText(TextFormat("Direction: %.3f", obs[2]), panel_x, y_offset, 14, RAYWHITE);
+    y_offset += line_height;
+    
+    DrawText(TextFormat("Has Food: %s", obs[3] > 0.5f ? "YES" : "NO"), 
+             panel_x, y_offset, 14, obs[3] > 0.5f ? GREEN : RED);
+    y_offset += line_height;
+    
+    DrawText(TextFormat("Colony Dir: %.3f", obs[4]), panel_x, y_offset, 14, RAYWHITE);
+    y_offset += line_height;
+    
+    DrawText(TextFormat("Colony Dist: %.3f", obs[5]), panel_x, y_offset, 14, RAYWHITE);
+    y_offset += line_height;
+    
+    DrawText(TextFormat("Food Dir: %.3f", obs[6]), panel_x, y_offset, 14, 
+             obs[6] < 0 ? GRAY : RAYWHITE);
+    y_offset += line_height;
+    
+    DrawText(TextFormat("Food Dist: %.3f", obs[7]), panel_x, y_offset, 14, 
+             obs[7] < 0 ? GRAY : RAYWHITE);
+    
+    // Visual indicators on the ant
+    Vector2D ant_pos = ant->position;
+    
+    // Highlight the selected ant
+    DrawCircleLines(ant_pos.x, ant_pos.y, ANT_SIZE + 3, YELLOW);
+    DrawCircleLines(ant_pos.x, ant_pos.y, ANT_SIZE + 5, YELLOW);
+    
+    // Draw direction to colony (if valid)
+    if (obs[4] >= 0) {
+        float colony_angle = (obs[4] * 2 * M_PI) - M_PI;
+        float line_length = 40.0f;
+        Vector2D colony_end = {
+            ant_pos.x + line_length * cos(colony_angle),
+            ant_pos.y + line_length * sin(colony_angle)
+        };
+        DrawLineEx((Vector2){ant_pos.x, ant_pos.y}, (Vector2){colony_end.x, colony_end.y}, 3, BLUE);
+        DrawText("COLONY", colony_end.x + 5, colony_end.y - 10, 12, BLUE);
+    }
+    
+    // Draw direction to food (if visible)
+    if (obs[6] >= 0) {
+        float food_angle = (obs[6] * 2 * M_PI) - M_PI;
+        float line_length = 30.0f;
+        Vector2D food_end = {
+            ant_pos.x + line_length * cos(food_angle),
+            ant_pos.y + line_length * sin(food_angle)
+        };
+        DrawLineEx((Vector2){ant_pos.x, ant_pos.y}, (Vector2){food_end.x, food_end.y}, 2, GREEN);
+        DrawText("FOOD", food_end.x + 5, food_end.y - 10, 12, GREEN);
+    }
+    
+    // Draw current direction
+    float current_angle = (obs[2] * 2 * M_PI) - M_PI;
+    float dir_length = 25.0f;
+    Vector2D dir_end = {
+        ant_pos.x + dir_length * cos(current_angle),
+        ant_pos.y + dir_length * sin(current_angle)
+    };
+    DrawLineEx((Vector2){ant_pos.x, ant_pos.y}, (Vector2){dir_end.x, dir_end.y}, 4, YELLOW);
+}
+
 int demo() {
     // Initialize environment with proper parameters - FOLLOWING SNAKE PATTERN
     AntsEnv env = {
@@ -144,6 +237,11 @@ int demo() {
         c_step(&env);
         c_render(&env);
         
+        // Visualize ant observations when shift is pressed
+        if (IsKeyDown(KEY_LEFT_SHIFT)) {
+            render_ant_observations(&env, 0);
+        }
+        
         // Print stats periodically
         if (env.tick % 1000 == 0 && env.log.n > 0) {
             printf("Tick %d: Episodes completed: %.0f, Avg score: %.2f, Avg return: %.2f\n",
@@ -220,7 +318,7 @@ int main() {
     
     printf("Ant Colony Environment Demo\n");
     printf("Controls:\n");
-    printf("- Hold SHIFT to control the first ant\n");
+    printf("- Hold SHIFT to control the first ant AND view ant 1's observations\n");
     printf("- A/D or LEFT/RIGHT to turn\n");
     printf("- SPACE to drop pheromone\n");
     printf("- ESC to exit\n\n");
