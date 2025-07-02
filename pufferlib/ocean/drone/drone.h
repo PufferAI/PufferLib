@@ -37,6 +37,7 @@
 #define MAX_RPM 750.0f  // rad/s
 #define MAX_VEL 50.0f   // m/s
 #define MAX_OMEGA 50.0f // rad/s
+#define MOTOR_TAU 0.15f // motor time constant in seconds (realistic for small quadcopter motors)
 
 typedef struct Log Log;
 struct Log {
@@ -207,6 +208,9 @@ struct Drone {
     Quat quat;  // roll/pitch/yaw (phi/theta/psi) as a quaternion
     Vec3 omega; // angular velocity (p, q, r)
 
+    // Motor dynamics - actual motor RPM with time constants
+    float motor_rpm[4]; // actual motor speeds (rad/s)
+
     Client *client;
 };
 
@@ -304,6 +308,11 @@ void c_reset(Drone *env) {
     env->omega = (Vec3){0.0f, 0.0f, 0.0f};
     env->quat = (Quat){1.0f, 0.0f, 0.0f, 0.0f};
 
+    // Initialize motor RPMs to zero (motors start at rest)
+    for (int i = 0; i < 4; i++) {
+        env->motor_rpm[i] = 0.0f;
+    }
+
     compute_observations(env);
 }
 
@@ -315,10 +324,26 @@ void c_step(Drone *env) {
     env->terminals[0] = 0;
     env->log.score = 0;
 
-    // motor thrusts
+    // Motor dynamics with time constants
+    // Convert actions [-1,1] to commanded motor RPM [0, MAX_RPM]
+    float motor_rpm_cmd[4];
+    for (int i = 0; i < 4; i++) {
+        motor_rpm_cmd[i] = (env->actions[i] + 1.0f) * 0.5f * MAX_RPM;
+    }
+    
+    // Update actual motor RPMs using first-order lag: τ * d(ω)/dt = ω_cmd - ω
+    // Discrete integration: ω_new = ω_old + (dt/τ) * (ω_cmd - ω_old)
+    float motor_gain = DT / MOTOR_TAU;
+    for (int i = 0; i < 4; i++) {
+        env->motor_rpm[i] += motor_gain * (motor_rpm_cmd[i] - env->motor_rpm[i]);
+        // Clamp to physical limits
+        env->motor_rpm[i] = clampf(env->motor_rpm[i], 0.0f, MAX_RPM);
+    }
+
+    // Calculate motor thrusts from actual RPMs (not commanded)
     float T[4];
     for (int i = 0; i < 4; i++) {
-        T[i] = K_THRUST * powf((env->actions[i] + 1.0f) * 0.5f * MAX_RPM, 2.0f);
+        T[i] = K_THRUST * powf(env->motor_rpm[i], 2.0f);
     }
 
     // body frame net force
