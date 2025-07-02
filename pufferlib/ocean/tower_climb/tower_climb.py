@@ -29,7 +29,7 @@ class TowerClimb(pufferlib.PufferEnv):
             reward_fall_row=reward_fall_row, reward_illegal_move=reward_illegal_move,
             reward_move_block=reward_move_block, state=self.c_state)
 
-    def reset(self, seed=None):
+    def reset(self, seed=0):
         binding.vec_reset(self.c_envs, seed)
         self.tick = 0
         return self.observations, []

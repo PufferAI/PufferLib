@@ -49,7 +49,7 @@ class Go(pufferlib.PufferEnv):
             reward_move_valid=reward_move_valid, reward_player_capture=reward_player_capture,
             reward_opponent_capture=reward_opponent_capture)
 
-    def reset(self, seed=None):
+    def reset(self, seed=0):
         binding.vec_reset(self.c_envs, seed)
         self.tick = 0
         return self.observations, []

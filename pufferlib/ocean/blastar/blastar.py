@@ -27,7 +27,7 @@ class Blastar(pufferlib.PufferEnv):
             num_obs=self.num_obs
         )
 
-    def reset(self, seed=None):
+    def reset(self, seed=0):
         self.tick = 0
         binding.vec_reset(self.c_envs, seed)
         return self.observations, []

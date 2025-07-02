@@ -26,7 +26,7 @@ class Grid(pufferlib.PufferEnv):
             state=self.c_state, max_size=max_size, num_maps=num_maps)
         pass
 
-    def reset(self, seed=None):
+    def reset(self, seed=0):
         self.tick = 0
         binding.vec_reset(self.c_envs, seed)
         return self.observations, []
