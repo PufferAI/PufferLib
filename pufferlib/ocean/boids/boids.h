@@ -102,9 +102,7 @@ static void compute_observations(Boids *env) {
         env->observations[idx++] = env->boids[i].y / HEIGHT;
         env->observations[idx++] = env->boids[i].velocity.x / VELOCITY_CAP;
         env->observations[idx++] = env->boids[i].velocity.y / VELOCITY_CAP;
-        for (unsigned j=0; j<4; j++) {
-            env->observations[idx++] = 0;
-        }
+        for (unsigned j=0; j<4; j++) { env->observations[idx++] = 0; }
         for (unsigned j=0; j<env->num_boids; j++) {
             if (i == j) continue;
             env->observations[idx++] = env->boids[j].x / WIDTH;
