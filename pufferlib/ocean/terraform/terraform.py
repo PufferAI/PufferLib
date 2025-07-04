@@ -39,7 +39,7 @@ class Terraform(pufferlib.PufferEnv):
 
         self.c_envs = binding.vectorize(*c_envs)
  
-    def reset(self, seed=None):
+    def reset(self, seed=0):
         binding.vec_reset(self.c_envs, seed)
         self.tick = 0
         return self.observations, []
