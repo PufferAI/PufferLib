@@ -8,7 +8,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->report_interval = unpack(kwargs, "report_interval");
     env->margin_turn_factor = unpack(kwargs, "margin_turn_factor");
     env->cohesion_factor = unpack(kwargs, "cohesion_factor");
-    env->seperation_factor = unpack(kwargs, "seperation_factor");
+    env->separation_factor = unpack(kwargs, "separation_factor");
     env->alignment_factor = unpack(kwargs, "alignment_factor");
     init(env);
     return 0;

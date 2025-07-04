@@ -19,7 +19,7 @@ class Boids(pufferlib.PufferEnv):
         num_boids=1,
         margin_turn_factor=1.0,
         cohesion_factor=0.0,
-        seperation_factor=0.0,
+        separation_factor=0.0,
         alignment_factor=0.0
     ):
         ACTION_SPACE_SIZE = 2
@@ -58,7 +58,7 @@ class Boids(pufferlib.PufferEnv):
                 report_interval=self.report_interval,
                 margin_turn_factor=margin_turn_factor,
                 cohesion_factor=cohesion_factor,
-                seperation_factor=seperation_factor,
+                separation_factor=separation_factor,
                 alignment_factor=alignment_factor,
             ))
         

@@ -12,7 +12,7 @@
 #define ACTION_SCALE 3.0f   // Corresponds to action space [-3.0, 3.0]
 #define MARGIN_TURN_FACTOR 1.0
 #define COHESION_FACTOR 0.0
-#define SEPERATION_FACTOR 0.0
+#define SEPARATION_FACTOR 0.0
 #define ALIGNMENT_FACTOR 0.0
 
 // Dummy action generation: random velocity changes for each boid
@@ -35,7 +35,7 @@ void demo() {
     env.report_interval = REPORT_INTERVAL_DEMO;
     env.margin_turn_factor = MARGIN_TURN_FACTOR;
     env.cohesion_factor = COHESION_FACTOR;
-    env.seperation_factor = SEPERATION_FACTOR;
+    env.separation_factor = SEPARATION_FACTOR;
     env.alignment_factor = ALIGNMENT_FACTOR;
     
     size_t obs_size = env.num_boids * env.num_boids * 8; // 8 = (x, y, vx, vy, dx, dy, dvx, dvy)

@@ -53,7 +53,7 @@ typedef struct {
     unsigned int num_boids;
     float margin_turn_factor;
     float cohesion_factor;
-    float seperation_factor;
+    float separation_factor;
     float alignment_factor;
     unsigned tick;
     Log log;
