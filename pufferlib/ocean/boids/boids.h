@@ -130,7 +130,7 @@ void c_step(Boids *env) {
     Boid* current_boid;
     Boid observed_boid;
     float vis_vx_sum, vis_vy_sum, vis_x_sum, vis_y_sum, vis_x_avg, vis_y_avg, vis_vx_avg, vis_vy_avg;
-    float diff_x, diff_y, dist, current_boid_reward, protected_range_diff;
+    float diff_x, diff_y, dist, current_boid_reward;
     unsigned visual_count, protected_count;
     bool manual_control = IsKeyDown(KEY_LEFT_SHIFT);
     float mouse_x = (float)GetMouseX();
@@ -173,8 +173,10 @@ void c_step(Boids *env) {
             }
         }
         if (protected_count > 0) {
-            protected_range_diff = (float)(env->num_boids - protected_count) - protected_count;
-            current_boid_reward += protected_range_diff * env->seperation_factor;
+            // protected_range_diff = (float)(env->num_boids - protected_count) - protected_count;
+            // current_boid_reward += protected_range_diff * env->seperation_factor;
+
+            current_boid_reward -= protected_count * env->separation_factor;
         }
         if (visual_count) {
             vis_x_avg  = vis_x_sum  / visual_count;
