@@ -197,7 +197,10 @@ void c_step(Boids *env) {
         }
 
         // Normalization
-        env->rewards[current_indx] = current_boid_reward / 2.0f;
+        // env->rewards[current_indx] = current_boid_reward;
+        env->rewards[current_indx] = current_boid_reward / 6.0f;
+        // env->rewards[current_indx] = current_boid_reward / 205.0f;
+        // env->rewards[current_indx] = current_boid_reward / 10.0f;
 
         //log updates
         if (env->tick == env->report_interval) {
