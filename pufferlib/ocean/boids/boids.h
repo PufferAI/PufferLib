@@ -19,7 +19,7 @@
 #define HEIGHT 720
 #define BOID_WIDTH 32
 #define BOID_HEIGHT 32
-#define BOID_TEXTURE_PATH "./resources/puffers_128.png"
+#define BOID_TEXTURE_PATH "./resources/shared/puffers_128.png"
 
 typedef struct {
     float score;
