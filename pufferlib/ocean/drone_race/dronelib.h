@@ -270,7 +270,11 @@ void init_drone(Drone* drone, float size, float dr) {
     drone->max_omega = BASE_MAX_OMEGA;
 }
 
+void explicit_euler(Drone* drone, Vec3 v_dot, Quat q_dot, Vec3 w_dot, float dt);
+
 void move_drone(Drone* drone, float* actions) {
+    // TODO: Add F_aero and Tau_aero from https://pmc.ncbi.nlm.nih.gov/articles/PMC10468397/pdf/41586_2023_Article_6419.pdf (Article/Methods)
+    // This requires defining a lot of constants, which the paper determines using motion capture. (we could use domain randomisation)
     clamp4(actions, -1.0f, 1.0f);
 
     // motor thrusts
@@ -279,9 +283,8 @@ void move_drone(Drone* drone, float* actions) {
         T[i] = drone->k_thrust*powf((actions[i] + 1.0f) * 0.5f * drone->max_rpm, 2.0f);
     }
 
-
     // body frame net force
-    Vec3 F_body = {0.0f, 0.0f, T[0] + T[1] + T[2] + T[3]};
+    Vec3 F_prop = {0.0f, 0.0f, T[0] + T[1] + T[2] + T[3]};
 
     // body frame torques
     Vec3 M = {drone->arm_len*(T[1] - T[3]), drone->arm_len*(T[2] - T[0]),
@@ -293,54 +296,62 @@ void move_drone(Drone* drone, float* actions) {
     M.z -= drone->k_ang_damp * drone->omega.z;
 
     // body frame force -> world frame force
-    Vec3 F_world = quat_rotate(drone->quat, F_body);
+    Vec3 F_world = quat_rotate(drone->quat, F_prop);
 
     // world frame linear drag
     F_world.x -= drone->b_drag * drone->vel.x;
     F_world.y -= drone->b_drag * drone->vel.y;
     F_world.z -= drone->b_drag * drone->vel.z;
 
-    // world frame gravity
-    Vec3 accel = {
-        F_world.x / drone->mass,
-        F_world.y / drone->mass,
-        (F_world.z / drone->mass) - drone->gravity
-    };
+    // velocity rates
+    Vec3 v_dot;
+    v_dot.x = F_world.x / drone->mass;
+    v_dot.y = F_world.y / drone->mass;
+    v_dot.z = (F_world.z / drone->mass) - drone->gravity;
 
-    // from the definition of q dot
+    // quaternion rates
     Quat omega_q = {0.0f, drone->omega.x, drone->omega.y, drone->omega.z};
     Quat q_dot = quat_mul(drone->quat, omega_q);
-
     q_dot.w *= 0.5f;
     q_dot.x *= 0.5f;
     q_dot.y *= 0.5f;
     q_dot.z *= 0.5f;
 
+    // angular velocity rates
+    Vec3 w_dot;
+    w_dot.x = (M.x / drone->ixx);
+    w_dot.y = (M.y / drone->iyy);
+    w_dot.z = (M.z / drone->izz);
+
     // Domain randomized dt
     float dt = DT * rndf(1.0f - DT_RNG, 1.0 + DT_RNG);
 
-    // integrations
+    // update drone state
+    explicit_euler(drone, v_dot, q_dot, w_dot, dt);
+
+    // clamp and normalise for observations
+    clamp3(&drone->vel, -drone->max_vel, drone->max_vel);
+    clamp3(&drone->omega, -drone->max_omega, drone->max_omega);
+    quat_normalize(&drone->quat);
+}
+
+void explicit_euler(Drone* drone, Vec3 v_dot, Quat q_dot, Vec3 w_dot, float dt) {
     drone->pos.x += drone->vel.x * dt;
     drone->pos.y += drone->vel.y * dt;
     drone->pos.z += drone->vel.z * dt;
 
-    drone->vel.x += accel.x * dt;
-    drone->vel.y += accel.y * dt;
-    drone->vel.z += accel.z * dt;
+    drone->vel.x += v_dot.x * dt;
+    drone->vel.y += v_dot.y * dt;
+    drone->vel.z += v_dot.z * dt;
 
-    drone->omega.x += (M.x / drone->ixx) * dt;
-    drone->omega.y += (M.y / drone->iyy) * dt;
-    drone->omega.z += (M.z / drone->izz) * dt;
-
-    clamp3(&drone->vel, -drone->max_vel, drone->max_vel);
-    clamp3(&drone->omega, -drone->max_omega, drone->max_omega);
+    drone->omega.x += w_dot.x * dt;
+    drone->omega.y += w_dot.y * dt;
+    drone->omega.z += w_dot.z * dt;
 
     drone->quat.w += q_dot.w * dt;
     drone->quat.x += q_dot.x * dt;
     drone->quat.y += q_dot.y * dt;
     drone->quat.z += q_dot.z * dt;
-
-    quat_normalize(&drone->quat);
 }
 
 float check_ring(Drone* drone, Ring* ring) {
