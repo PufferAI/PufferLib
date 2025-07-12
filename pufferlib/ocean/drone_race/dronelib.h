@@ -33,7 +33,7 @@
 #define BASE_MAX_VEL 50.0f   // m/s
 #define BASE_MAX_OMEGA 50.0f // rad/s
 #define BASE_K_MOT 0.1f      // s (Motor lag constant)
-#define BASE_J_MOT 1e-4f     // kgm^2 (Motor rotational inertia)
+#define BASE_J_MOT 1e-5f     // kgm^2 (Motor rotational inertia)
 
 // Simulation properties
 #define GRID_SIZE 10.0f
