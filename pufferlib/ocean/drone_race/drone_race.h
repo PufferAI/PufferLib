@@ -119,6 +119,11 @@ void compute_observations(DroneRace *env) {
     env->observations[22] = drone->quat.x;
     env->observations[23] = drone->quat.y;
     env->observations[24] = drone->quat.z;
+
+    env->observations[25] = drone->rpms[0] / drone->max_rpm;
+    env->observations[26] = drone->rpms[0] / drone->max_rpm;
+    env->observations[27] = drone->rpms[0] / drone->max_rpm;
+    env->observations[28] = drone->rpms[0] / drone->max_rpm;
 }
 
 void c_reset(DroneRace *env) {

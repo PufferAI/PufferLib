@@ -32,6 +32,8 @@
 #define BASE_MAX_RPM 750.0f  // rad/s
 #define BASE_MAX_VEL 50.0f   // m/s
 #define BASE_MAX_OMEGA 50.0f // rad/s
+#define BASE_K_MOT 0.1f      // s (Motor lag constant)
+#define BASE_J_MOT 1e-4f     // kgm^2 (Motor rotational inertia)
 
 // Simulation properties
 #define GRID_SIZE 10.0f
@@ -179,11 +181,12 @@ typedef struct {
 
 typedef struct {
     Vec3 spawn_pos;
-    Vec3 pos; // global position (x, y, z)
+    Vec3 pos;      // global position (x, y, z)
     Vec3 prev_pos;
-    Vec3 vel;   // linear velocity (u, v, w)
-    Quat quat;  // roll/pitch/yaw (phi/theta/psi) as a quaternion
-    Vec3 omega; // angular velocity (p, q, r)
+    Vec3 vel;      // linear velocity (u, v, w)
+    Quat quat;     // roll/pitch/yaw (phi/theta/psi) as a quaternion
+    Vec3 omega;    // angular velocity (p, q, r)
+    float rpms[4]; // motor RPMs
     
     Vec3 target_pos;
     Vec3 target_vel;
@@ -211,23 +214,9 @@ typedef struct {
     float max_rpm; // rad/s
     float max_vel; // m/s
     float max_omega; // rad/s
+    float k_mot; // s
+    float j_mot; // kgm^2
 } Drone;
-
-// Physical constants for the drone
-#define BASE_MASS 1.0f       // kg
-#define BASE_IXX 0.01f       // kgm^2
-#define BASE_IYY 0.01f       // kgm^2
-#define BASE_IZZ 0.02f       // kgm^2
-#define BASE_ARM_LEN 0.1f    // m
-#define BASE_K_THRUST 3e-5f  // thrust coefficient
-#define BASE_K_ANG_DAMP 0.2f // angular damping coefficient
-#define BASE_K_DRAG 1e-6f    // drag (torque) coefficient
-#define BASE_B_DRAG 0.1f     // linear drag coefficient
-#define BASE_GRAVITY 9.81f   // m/s^2
-#define BASE_MAX_RPM 750.0f  // rad/s
-#define BASE_MAX_VEL 50.0f   // m/s
-#define BASE_MAX_OMEGA 50.0f // rad/s
-
 
 void init_drone(Drone* drone, float size, float dr) {
 
@@ -268,46 +257,55 @@ void init_drone(Drone* drone, float size, float dr) {
 
     drone->max_vel = BASE_MAX_VEL;
     drone->max_omega = BASE_MAX_OMEGA;
+
+    for (int i = 0; i < 4; i++) {
+        drone->rpms[i] = 0.0f;
+    }
+    drone->k_mot = BASE_K_MOT * rndf(1.0f - dr, 1.0f + dr);
+    drone->j_mot = BASE_J_MOT * I_scale * rndf(1.0f - dr, 1.0f + dr);
 }
 
-void explicit_euler(Drone* drone, Vec3 v_dot, Quat q_dot, Vec3 w_dot, float dt);
+void explicit_euler(Drone* drone, Vec3 v_dot, Quat q_dot, Vec3 w_dot, float rpm_dot[4], float dt);
 
 void move_drone(Drone* drone, float* actions) {
-    // TODO: Add F_aero and Tau_aero from https://pmc.ncbi.nlm.nih.gov/articles/PMC10468397/pdf/41586_2023_Article_6419.pdf (Article/Methods)
-    // This requires defining a lot of constants, which the paper determines using motion capture. (we could use domain randomisation)
+    // Physics outlined in: 
+    // https://pmc.ncbi.nlm.nih.gov/articles/PMC10468397/pdf/41586_2023_Article_6419.pdf
     clamp4(actions, -1.0f, 1.0f);
+
+    // first order rpm lag
+    float target_rpms[4];
+    for (int i = 0; i < 4; i++) {
+        target_rpms[i] = (actions[i] + 1.0f) * 0.5f * drone->max_rpm;
+    }
+
+    // rpm rates
+    float rpm_dot[4];
+    for (int i = 0; i < 4; i++) {
+        rpm_dot[i] = (1.0f / drone->k_mot) * (target_rpms[i] - drone->rpms[i]);
+    }
 
     // motor thrusts
     float T[4];
     for (int i = 0; i < 4; i++) {
-        T[i] = drone->k_thrust*powf((actions[i] + 1.0f) * 0.5f * drone->max_rpm, 2.0f);
+        T[i] = drone->k_thrust * powf(drone->rpms[i], 2.0f);
     }
 
     // body frame net force
-    Vec3 F_prop = {0.0f, 0.0f, T[0] + T[1] + T[2] + T[3]};
-
-    // body frame torques
-    Vec3 M = {drone->arm_len*(T[1] - T[3]), drone->arm_len*(T[2] - T[0]),
-              drone->k_drag*(T[0] - T[1] + T[2] - T[3])};
-
-    // applies angular damping to torques
-    M.x -= drone->k_ang_damp * drone->omega.x;
-    M.y -= drone->k_ang_damp * drone->omega.y;
-    M.z -= drone->k_ang_damp * drone->omega.z;
+    Vec3 F_prop_body = {0.0f, 0.0f, T[0] + T[1] + T[2] + T[3]};
 
     // body frame force -> world frame force
-    Vec3 F_world = quat_rotate(drone->quat, F_prop);
+    F_prop = quat_rotate(drone->quat, F_prop_body);
 
     // world frame linear drag
-    F_world.x -= drone->b_drag * drone->vel.x;
-    F_world.y -= drone->b_drag * drone->vel.y;
-    F_world.z -= drone->b_drag * drone->vel.z;
+    F_aero.x = -drone->b_drag * drone->vel.x;
+    F_aero.y = -drone->b_drag * drone->vel.y;
+    F_aero.z = -drone->b_drag * drone->vel.z;
 
-    // velocity rates
+    // velocity rates, a = F/m
     Vec3 v_dot;
-    v_dot.x = F_world.x / drone->mass;
-    v_dot.y = F_world.y / drone->mass;
-    v_dot.z = (F_world.z / drone->mass) - drone->gravity;
+    v_dot.x = (F_prop.x + F_aero.x) / drone->mass;
+    v_dot.y = (F_prop.y + F_aero.y) / drone->mass;
+    v_dot.z = ((F_prop.z + F_aero.z) / drone->mass) - drone->gravity;
 
     // quaternion rates
     Quat omega_q = {0.0f, drone->omega.x, drone->omega.y, drone->omega.z};
@@ -317,17 +315,38 @@ void move_drone(Drone* drone, float* actions) {
     q_dot.y *= 0.5f;
     q_dot.z *= 0.5f;
 
+    // body frame torques
+    Vec3 Tau_prop;
+    Tau_prop.x = drone->arm_len*(T[1] - T[3]);
+    Tau_prop.y = drone->arm_len*(T[2] - T[0]);
+    Tau_prop.z = drone->k_drag*(T[0] - T[1] + T[2] - T[3]);
+
+    // torque from chaging motor speeds
+    float Tau_mot_z = drone->j_mot * (rpm_dot[0] - rpm_dot[1] + rpm_dot[2] - rpm_dot[3]);
+
+    // torque from angular damping
+    Vec3 Tau_aero;
+    Tau_aero.x = -drone->k_ang_damp * drone->omega.x;
+    Tau_aero.y = -drone->k_ang_damp * drone->omega.y;
+    Tau_aero.z = -drone->k_ang_damp * drone->omega.z;
+    
+    // gyroscopic torque
+    Vec3 Tau_iner;
+    Tau_iner.x = (drone->iyy - drone->izz) * drone->omega.y * drone->omega.z;
+    Tau_iner.y = (drone->izz - drone->ixx) * drone->omega.z * drone->omega.x;
+    Tau_iner.z = (drone->ixx - drone->iyy) * drone->omega.x * drone->omega.y;
+
     // angular velocity rates
     Vec3 w_dot;
-    w_dot.x = (M.x / drone->ixx);
-    w_dot.y = (M.y / drone->iyy);
-    w_dot.z = (M.z / drone->izz);
+    w_dot.x = (Tau_prop.x + Tau_aero.x + Tau_iner.x) / drone->ixx;
+    w_dot.y = (Tau_prop.y + Tau_aero.y + Tau_iner.y) / drone->iyy;
+    w_dot.z = (Tau_prop.z + Tau_aero.z + Tau_iner.z + Tau_mot_z) / drone->izz;
 
     // Domain randomized dt
     float dt = DT * rndf(1.0f - DT_RNG, 1.0 + DT_RNG);
 
     // update drone state
-    explicit_euler(drone, v_dot, q_dot, w_dot, dt);
+    explicit_euler(drone, v_dot, q_dot, w_dot, rpm_dot, dt);
 
     // clamp and normalise for observations
     clamp3(&drone->vel, -drone->max_vel, drone->max_vel);
@@ -335,7 +354,7 @@ void move_drone(Drone* drone, float* actions) {
     quat_normalize(&drone->quat);
 }
 
-void explicit_euler(Drone* drone, Vec3 v_dot, Quat q_dot, Vec3 w_dot, float dt) {
+void explicit_euler(Drone* drone, Vec3 v_dot, Quat q_dot, Vec3 w_dot, float rpm_dot[4], float dt) {
     drone->pos.x += drone->vel.x * dt;
     drone->pos.y += drone->vel.y * dt;
     drone->pos.z += drone->vel.z * dt;
@@ -352,6 +371,11 @@ void explicit_euler(Drone* drone, Vec3 v_dot, Quat q_dot, Vec3 w_dot, float dt) 
     drone->quat.x += q_dot.x * dt;
     drone->quat.y += q_dot.y * dt;
     drone->quat.z += q_dot.z * dt;
+
+    drone->rpms[0] += rpm_dot[0] * dt;
+    drone->rpms[1] += rpm_dot[1] * dt;
+    drone->rpms[2] += rpm_dot[2] * dt;
+    drone->rpms[3] += rpm_dot[3] * dt;
 }
 
 float check_ring(Drone* drone, Ring* ring) {
