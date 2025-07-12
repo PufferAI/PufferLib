@@ -294,9 +294,10 @@ void move_drone(Drone* drone, float* actions) {
     Vec3 F_prop_body = {0.0f, 0.0f, T[0] + T[1] + T[2] + T[3]};
 
     // body frame force -> world frame force
-    F_prop = quat_rotate(drone->quat, F_prop_body);
+    Vec3 F_prop = quat_rotate(drone->quat, F_prop_body);
 
     // world frame linear drag
+    Vec3 F_aero;
     F_aero.x = -drone->b_drag * drone->vel.x;
     F_aero.y = -drone->b_drag * drone->vel.y;
     F_aero.z = -drone->b_drag * drone->vel.z;
