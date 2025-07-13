@@ -899,6 +899,15 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
     elif args['wandb']:
         logger = WandbLogger(args)
 
+    temp_env_name = env_name
+
+    if 'puffer_' in env_name:
+        temp_env_name = env_name.split('puffer_')[1]
+    if logger is not None:
+        # Path to the .ini file
+        file_path = f'experiments/{logger.run_id}/{temp_env_name}.ini'
+        _save_config(args, file_path)
+
     train_config = dict(**args['train'], env=env_name)
     pufferl = PuffeRL(train_config, vecenv, policy, logger)
 
@@ -927,6 +936,15 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
     pufferl.print_dashboard()
     model_path = pufferl.close()
     pufferl.logger.close(model_path)
+
+    print(logger)
+    print(type(logger))
+    if logger is None:
+        # Path to the .ini file
+        temp_path = model_path.replace('.pt','')
+        file_path = f'{temp_path}/{env_name}.ini'
+        _save_config(args, file_path)
+
     return all_logs
 
 def eval(env_name, args=None, vecenv=None, policy=None):
@@ -1188,6 +1206,36 @@ def load_config(env_name):
     args['train']['use_rnn'] = args['rnn_name'] is not None
     return args
 
+def _flatten_dict(d, parent_key=''):
+    items = {}
+    for k, v in d.items():
+        new_key = f"{parent_key}.{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.update(_flatten_dict(v, new_key))
+        elif v is not None:
+            items[new_key] = v
+    return items
+
+def _save_config(config, path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    flat = _flatten_dict(config)
+    parser = configparser.ConfigParser()
+
+    for compound_key, value in flat.items():
+        keys = compound_key.split('.')
+        if len(keys) == 1:
+            section = 'base'
+            key = keys[0]
+        else:
+            section = ".".join(keys[:-1])
+            key = keys[-1]
+
+        if section not in parser:
+            parser.add_section(section)
+        parser[section][key] = str(value)
+
+    with open(path, 'w') as f:
+        parser.write(f)
 def main():
     err = 'Usage: puffer [train, eval, sweep, autotune, profile, export] [env_name] [optional args]. --help for more info'
     if len(sys.argv) < 3:
