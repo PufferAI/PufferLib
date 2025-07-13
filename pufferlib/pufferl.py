@@ -937,8 +937,6 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
     model_path = pufferl.close()
     pufferl.logger.close(model_path)
 
-    print(logger)
-    print(type(logger))
     if logger is None:
         # Path to the .ini file
         temp_path = model_path.replace('.pt','')
