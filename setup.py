@@ -427,6 +427,10 @@ if not NO_OCEAN:
         if "impulse_wars" in c_ext.name:
             print(f"Adding {c_ext.name} to extra objects")
             c_ext.extra_objects.append(f'{BOX2D_NAME}/libbox2d.a')
+        elif "froggy" in c_ext.name:
+            print(f"Configuring {c_ext.name} with ncurses")
+            c_ext.extra_objects = []  # Remove raylib
+            c_ext.extra_link_args = c_ext.extra_link_args + ['-lncurses']
 
 # Check if CUDA compiler is available. You need cuda dev, not just runtime.
 torch_extensions = []
