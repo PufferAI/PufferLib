@@ -20,7 +20,7 @@ class AntsEnv(pufferlib.PufferEnv):
     
     def __init__(
             self, 
-            num_envs=1, 
+            num_envs=32, 
             width=1280, 
             height=720,
             num_ants=32,
