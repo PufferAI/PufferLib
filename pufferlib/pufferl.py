@@ -1026,7 +1026,6 @@ def profile(args=None, env_name=None, vecenv=None, policy=None):
     train_config = dict(**args['train'], env=args['env_name'], tag=args['tag'])
     pufferl = PuffeRL(train_config, vecenv, policy, neptune=args['neptune'], wandb=args['wandb'])
 
-    import torchvision.models as models
     from torch.profiler import profile, record_function, ProfilerActivity
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
         with record_function("model_inference"):
