@@ -359,7 +359,7 @@ cleanrl = [
 common = [environments[env] for env in [
     'atari',
     #'box2d',
-    'bsuite',
+    #'bsuite',
     #'butterfly',
     'classic_control',
     'crafter',
@@ -376,7 +376,7 @@ common = [environments[env] for env in [
     'vizdoom',
 ]]
 
-# Extensions 
+# Extensions
 class BuildExt(build_ext):
     def run(self):
         # Propagate any build_ext options (e.g., --inplace, --force) to subcommands
@@ -522,6 +522,6 @@ setup(
 #'git+https://github.com/oxwhirl/smac.git',
 
 #curl -L -o smac.zip https://blzdistsc2-a.akamaihd.net/Linux/SC2.4.10.zip
-#unzip -P iagreetotheeula smac.zip 
+#unzip -P iagreetotheeula smac.zip
 #curl -L -o maps.zip https://github.com/oxwhirl/smac/releases/download/v0.1-beta1/SMAC_Maps.zip
 #unzip maps.zip && mv SMAC_Maps/ StarCraftII/Maps/
