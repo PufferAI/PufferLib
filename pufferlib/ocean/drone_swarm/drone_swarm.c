@@ -126,7 +126,7 @@ int main() {
     env->task = TASK_ORBIT;
     init(env);
 
-    size_t obs_size = 34;
+    size_t obs_size = 41;
     size_t act_size = 4;
     env->observations = (float *)calloc(env->num_agents * obs_size, sizeof(float));
     env->actions = (float *)calloc(env->num_agents * act_size, sizeof(float));

@@ -18,7 +18,7 @@ class DroneSwarm(pufferlib.PufferEnv):
         self.single_observation_space = gymnasium.spaces.Box(
             low=-1,
             high=1,
-            shape=(37,),
+            shape=(41,),
             dtype=np.float32,
         )
 
