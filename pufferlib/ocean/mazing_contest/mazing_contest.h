@@ -947,7 +947,11 @@ void c_step(MazingContest* env) {
             place_tower(env, x, y, TOWER_THUNDERCLAP);
         }
         
-        if (env->gold == 0 && env->lumber == 0) {
+        int can_build_walls = (env->gold >= get_tower_cost(TOWER_WALL));
+        int can_build_thunderclap = (env->lumber >= get_tower_lumber_cost(TOWER_THUNDERCLAP));
+        int time_limit_reached = (env->phase_timer >= env->build_time_limit);
+        
+        if ((!can_build_walls && !can_build_thunderclap) || time_limit_reached) {
             int path_exists = is_path_valid(env);
             
             if (path_exists) {
@@ -1081,6 +1085,7 @@ void allocate(MazingContest* env) {
     
     env->moves_left = env->max_moves;
     
+    init(env);
     init_round(env);
 }
 

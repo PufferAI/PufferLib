@@ -4,13 +4,11 @@
 #include "../env_binding.h"
 
 static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
-    env->build_time_limit = unpack(kwargs, "build_time_limit");
-    env->max_moves = unpack(kwargs, "max_moves");
-    env->max_rounds = unpack(kwargs, "max_rounds");
-    env->min_gold = unpack(kwargs, "min_gold");
-    env->max_gold = unpack(kwargs, "max_gold");
-    env->min_lumber = unpack(kwargs, "min_lumber");
-    env->max_lumber = unpack(kwargs, "max_lumber");
+    int width = unpack(kwargs, "width");
+    int height = unpack(kwargs, "height");
+    int cell_size = unpack(kwargs, "cell_size");
+    env->cell_size_render = (float)cell_size;
+    
     allocate(env);
     return 0;
 }

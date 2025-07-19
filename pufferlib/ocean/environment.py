@@ -153,7 +153,7 @@ MAKE_FUNCTIONS = {
     'pacman': 'Pacman',
     'checkers': 'Checkers',
     'asteroids': 'Asteroids',
-    'mazing_contest': 'mazing_contest',
+    'mazing_contest': 'MazingContest',
     'spaces': make_spaces,
     'multiagent': make_multiagent,
 }

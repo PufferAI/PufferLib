@@ -9,13 +9,9 @@ class MazingContest(pufferlib.PufferEnv):
         self,
         num_envs=1,
         render_mode=None,
-        build_time_limit=None,
-        max_moves=None,
-        max_rounds=None,
-        min_gold=None,
-        max_gold=None,
-        min_lumber=None,
-        max_lumber=None,
+        width=800,
+        height=600,
+        cell_size=64,
         report_interval=128,
         buf=None,
         seed=0,
@@ -35,23 +31,13 @@ class MazingContest(pufferlib.PufferEnv):
         self.tick = 0
 
         super().__init__(buf)
-        self.actions = self.actions.astype(np.int32)
+        self.actions = self.actions.astype(np.float32)
 
-        kwargs = {}
-        if build_time_limit is not None:
-            kwargs['build_time_limit'] = build_time_limit
-        if max_moves is not None:
-            kwargs['max_moves'] = max_moves
-        if max_rounds is not None:
-            kwargs['max_rounds'] = max_rounds
-        if min_gold is not None:
-            kwargs['min_gold'] = min_gold
-        if max_gold is not None:
-            kwargs['max_gold'] = max_gold
-        if min_lumber is not None:
-            kwargs['min_lumber'] = min_lumber
-        if max_lumber is not None:
-            kwargs['max_lumber'] = max_lumber
+        kwargs = {
+            'width': width,
+            'height': height,
+            'cell_size': cell_size,
+        }
 
         self.c_envs = binding.vec_init(
             self.observations, self.actions, self.rewards,
