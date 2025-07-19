@@ -196,14 +196,6 @@ typedef struct {
 #define OBS_SIZE (GRID_SIZE + 8)
 
 // ============================================================================
-// PATHFINDING FUNCTIONS
-// ============================================================================
-
-static int find_path(const MazingContest* env, int start_x, int start_y, int end_x, int end_y);
-static int calculate_path_length(const MazingContest* env, int start_x, int start_y, int end_x, int end_y);
-static int find_next_step(const MazingContest* env, int start_x, int start_y, int end_x, int end_y, int* next_x, int* next_y);
-
-// ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 
@@ -237,17 +229,17 @@ static int is_valid_position(int x, int y) {
     return x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT;
 }
 
-
-
 static float fast_distance_normalize(float dx, float dy) {
     return sqrtf(dx * dx + dy * dy);
 }
 
-
-
 // ============================================================================
-// SHARED HELPER FUNCTIONS
+// PATHFINDING FUNCTIONS
 // ============================================================================
+
+static int find_path(const MazingContest* env, int start_x, int start_y, int end_x, int end_y);
+static int calculate_path_length(const MazingContest* env, int start_x, int start_y, int end_x, int end_y);
+static int find_next_step(const MazingContest* env, int start_x, int start_y, int end_x, int end_y, int* next_x, int* next_y);
 
 static int calculate_total_path_length(const MazingContest* env) {
     int entrance_to_goal = calculate_path_length(env, env->entrance_x, env->entrance_y, env->goal_x, env->goal_y);
@@ -427,6 +419,10 @@ static int calculate_path_length(const MazingContest* env, int start_x, int star
     
     return -1;
 }
+
+// ============================================================================
+// GAME LOGIC FUNCTIONS
+// ============================================================================
 
 static void place_tower(MazingContest* env, int x, int y, TowerType type) {
     if (!is_valid_position(x, y) || env->grid[x][y] != 0) return;
@@ -1089,7 +1085,7 @@ void allocate(MazingContest* env) {
 }
 
 // ============================================================================
-// RENDERING CONSTANTS
+// RENDERING FUNCTIONS
 // ============================================================================
 
 #define UI_PANEL_HEIGHT 110
@@ -1154,10 +1150,6 @@ static const Color COLOR_INFO = {150, 200, 255, 255};
 static const Color COLOR_TIMER_NORMAL = {255, 255, 255, 255};
 static const Color COLOR_TIMER_WARNING = {255, 100, 100, 255};
 static const Color COLOR_TIMER_RUNNING = {100, 255, 100, 255};
-
-// ============================================================================
-// RENDERING HELPER FUNCTIONS
-// ============================================================================
 
 static void render_grid_background(MazingContest* env, float cell_size) {
     for (int y = 0; y < GRID_HEIGHT; y++) {
@@ -1350,10 +1342,6 @@ static void render_ui_panel(MazingContest* env) {
                 20, ui_y + 70, UI_TEXT_MEDIUM, WHITE);
     }
 }
-
-// ============================================================================
-// CLIENT AND RENDERING FUNCTIONS
-// ============================================================================
 
 static Client* make_client(MazingContest* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
