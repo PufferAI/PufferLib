@@ -70,8 +70,8 @@ void add_log(FlappyBirdMini* env) {
     float max_possible_walls = 1000.0f / OBSTACLE_SPAWN_INTERVAL;
     env->log.perf = (float)env->score / max_possible_walls; 
     env->log.score = env->score;
-    env->log.episode_length = env->tick;
     env->log.episode_return = env->score;
+    env->log.episode_length = env->tick;
     env->log.n++;
 }
 
