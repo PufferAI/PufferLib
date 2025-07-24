@@ -791,26 +791,29 @@ class GPUDrive(nn.Module):
         self.hidden_size = hidden_size
         self.ego_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
-                nn.Linear(6, input_size)),
+                nn.Linear(7, input_size)),
+            nn.LayerNorm(input_size),
             # nn.ReLU(),
-            # pufferlib.pytorch.layer_init(
-            #    nn.Linear(input_size, input_size))
+            pufferlib.pytorch.layer_init(
+                nn.Linear(input_size, input_size))
         )
         max_road_objects = 13
         self.road_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
                 nn.Linear(max_road_objects, input_size)),
+            nn.LayerNorm(input_size),
             # nn.ReLU(),
-            # pufferlib.pytorch.layer_init(
-            #    nn.Linear(input_size, input_size))
+            pufferlib.pytorch.layer_init(
+                nn.Linear(input_size, input_size))
         )
         max_partner_objects = 7
         self.partner_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
                 nn.Linear(max_partner_objects, input_size)),
+            nn.LayerNorm(input_size),
             # nn.ReLU(),
-            # pufferlib.pytorch.layer_init(
-            #    nn.Linear(input_size, input_size))
+            pufferlib.pytorch.layer_init(
+                nn.Linear(input_size, input_size))
         )
 
         '''
@@ -844,7 +847,7 @@ class GPUDrive(nn.Module):
         return self.forward(x, state)
    
     def encode_observations(self, observations, state=None):
-        ego_dim = 6
+        ego_dim = 7
         partner_dim = 63 * 7
         road_dim = 200*7
         ego_obs = observations[:, :ego_dim]
@@ -857,7 +860,6 @@ class GPUDrive(nn.Module):
         road_categorical = road_objects[:, :, 6]
         road_onehot = F.one_hot(road_categorical.long(), num_classes=7)  # Shape: [batch, 200, 7]
         road_objects = torch.cat([road_continuous, road_onehot], dim=2)
-
         ego_features = self.ego_encoder(ego_obs)
         partner_features, _ = self.partner_encoder(partner_objects).max(dim=1)
         road_features, _ = self.road_encoder(road_objects).max(dim=1)
