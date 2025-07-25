@@ -3,8 +3,8 @@ from pdb import set_trace as T
 import pufferlib
 import pufferlib.emulation
 import pufferlib.vector
-from pufferlib.exceptions import APIUsageError, InvalidAgentError
 from pufferlib.environments import test
+import functools
 
 def print_if(e, print_errors):
     if print_errors:
@@ -18,12 +18,12 @@ def test_gymnasium_api(print_errors=False):
 
     try:
         env.step({})
-    except APIUsageError as e:
+    except pufferlib.APIUsageError as e:
         print_if(e, print_errors)
 
     try:
         env.close()
-    except APIUsageError as e:
+    except pufferlib.APIUsageError as e:
         print_if(e, print_errors)
 
     env.observation_space.sample()
@@ -33,7 +33,7 @@ def test_gymnasium_api(print_errors=False):
     try:
         bad_action = env.observation_space.sample()
         env.step(bad_action)
-    except APIUsageError as e:
+    except pufferlib.APIUsageError as e:
         print_if(e, print_errors)
 
     action = env.action_space.sample()
@@ -45,22 +45,22 @@ def test_pettingzoo_api_usage(print_errors=False):
 
     try:
         env.step({})
-    except APIUsageError as e:
+    except pufferlib.APIUsageError as e:
         print_if(e, print_errors)
 
     try:
         env.close()
-    except APIUsageError as e:
+    except pufferlib.APIUsageError as e:
         print_if(e, print_errors)
 
     try:
         env.observation_space('foo')
-    except InvalidAgentError as e:
+    except pufferlib.InvalidAgentError as e:
         print_if(e, print_errors)
 
     try:
         env.action_space('foo')
-    except InvalidAgentError as e:
+    except pufferlib.InvalidAgentError as e:
         print_if(e, print_errors)
 
     env.observation_space('agent_1')
@@ -70,12 +70,12 @@ def test_pettingzoo_api_usage(print_errors=False):
     try:
         bad_actions = {agent: env.observation_space(agent).sample() for agent in env.agents}
         env.step(bad_actions)
-    except APIUsageError as e:
+    except pufferlib.APIUsageError as e:
         print_if(e, print_errors)
 
     try:
         env.step({'foo': None})
-    except InvalidAgentError as e:
+    except pufferlib.InvalidAgentError as e:
         print_if(e, print_errors)
 
 
@@ -83,15 +83,19 @@ def test_pettingzoo_api_usage(print_errors=False):
     obs, rewards, terminals, truncateds, infos = env.step(actions)
 
 def test_vectorization_api(print_errors=False):
-    gymnasium_creator = lambda: pufferlib.emulation.GymnasiumPufferEnv(
-        env_creator=test.GymnasiumTestEnv)
-    pettingzoo_creator = lambda: pufferlib.emulation.PettingZooPufferEnv(
-        env_creator=test.PettingZooTestEnv)
+    def gymnasium_creator(*args, buf = None, **kwargs):
+        env = test.GymnasiumTestEnv(*args)
+        return pufferlib.emulation.GymnasiumPufferEnv(*args, env=env, buf=buf)
 
+    def pettingzoo_creator(*args, buf = None, **kwargs):
+        env = test.PettingZooTestEnv(*args)
+        return pufferlib.emulation.PettingZooPufferEnv(*args, env=env, buf=buf)
+    
     for backend in [
         pufferlib.vector.Serial,
         pufferlib.vector.Multiprocessing,
-        pufferlib.vector.Ray]:
+        pufferlib.vector.Ray
+    ]:
             
         for creator in [gymnasium_creator, pettingzoo_creator]:
             vec = pufferlib.vector.make(creator, num_envs=6,
@@ -114,19 +118,19 @@ def test_vectorization_api(print_errors=False):
 
         try:
             vec = pufferlib.vector.make(test.GymnasiumTestEnv)
-        except APIUsageError as e:
+        except pufferlib.APIUsageError as e:
             print_if(e, print_errors)
 
         try:
             vec = pufferlib.vector.make(gymnasium_creator,
                 num_envs=3, num_workers=2)
-        except APIUsageError as e:
+        except pufferlib.APIUsageError as e:
             print_if(e, print_errors)
 
         try:
             vec = pufferlib.vector.make(gymnasium_creator,
                 num_envs=4, num_workers=2, batch_size=3)
-        except APIUsageError as e:
+        except pufferlib.APIUsageError as e:
             print_if(e, print_errors)
 
 
