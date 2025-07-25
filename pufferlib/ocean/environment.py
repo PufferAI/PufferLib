@@ -155,6 +155,7 @@ MAKE_FUNCTIONS = {
     'pacman': 'Pacman',
     'checkers': 'Checkers',
     'asteroids': 'Asteroids',
+    'four_rooms': 'FourRooms',
     'whisker_racer': 'WhiskerRacer',
     'spaces': make_spaces,
     'multiagent': make_multiagent,
