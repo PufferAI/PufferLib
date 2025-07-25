@@ -20,85 +20,54 @@ import numpy as np
 
 
 class FourRoomsConv(nn.Module):
-    """Lightweight wrapper around pufferlib.models.Default that preprocesses 
-    7x7 grid observations for better spatial understanding.
+    """Alternative implementation using a pure CNN approach, similar to 
+    the existing Convolutional policy but adapted for discrete grid observations.
     
-    This approach reuses the existing Default policy architecture but adds
-    a preprocessing step that creates spatial features from the flat grid.
+    This version processes the entire observation through CNN layers rather 
+    than mixing flat and spatial features.
     """
     def __init__(self, env, hidden_size=128, **kwargs):
         super().__init__()
+        self.hidden_size = hidden_size
+        self.is_continuous = False
         
-        # Create a modified observation space for the base policy
-        # We'll expand the 49-element flat obs to 49 + spatial features
-        expanded_obs_size = 49 + 16  # Original + spatial features
-        
-        # Create a dummy env with expanded observation space for the base policy
-        class ExpandedObsEnv:
-            def __init__(self, base_env):
-                self.single_action_space = base_env.single_action_space
-                # Expanded observation space
-                import gymnasium
-                self.single_observation_space = gymnasium.spaces.Box(
-                    low=0, high=3, shape=(expanded_obs_size,), dtype=np.uint8
-                )
-        
-        expanded_env = ExpandedObsEnv(env)
-        
-        # Use the standard Default policy with expanded observations
-        self.base_policy = pufferlib.models.Default(
-            expanded_env, hidden_size=hidden_size, **kwargs
+        # CNN feature extractor for 7x7 grid
+        self.cnn = nn.Sequential(
+            layer_init(nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1)),  # 7x7 -> 7x7
+            nn.ReLU(),
+            layer_init(nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)),  # 7x7 -> 7x7  
+            nn.ReLU(),
+            layer_init(nn.Conv2d(32, 32, kernel_size=3, stride=2, padding=1)),  # 7x7 -> 4x4
+            nn.ReLU(),
+            nn.Flatten(),  # 32 * 4 * 4 = 512
+            layer_init(nn.Linear(32 * 4 * 4, hidden_size)),
+            nn.ReLU(),
         )
         
-        # Copy attributes needed by PufferLib
-        self.hidden_size = self.base_policy.hidden_size
-        self.is_continuous = self.base_policy.is_continuous
-        
-        # Spatial feature extractor for 7x7 grid
-        self.spatial_extractor = nn.Sequential(
-            layer_init(nn.Conv2d(1, 8, kernel_size=3, stride=1, padding=1)),  # 7x7 -> 7x7
-            nn.ReLU(),
-            layer_init(nn.Conv2d(8, 16, kernel_size=3, stride=2, padding=1)),  # 7x7 -> 4x4
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d(1),  # 4x4 -> 1x1
-            nn.Flatten(),  # -> 16
-        )
+        # Action and value heads (same as Default policy)
+        self.decoder = layer_init(
+            nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
+        self.value = layer_init(
+            nn.Linear(hidden_size, 1), std=1)
 
     def forward(self, observations, state=None):
-        # Preprocess observations to add spatial features
-        processed_obs = self._preprocess_observations(observations)
-        # Use base policy
-        return self.base_policy.forward(processed_obs, state)
+        hidden = self.encode_observations(observations, state)
+        logits, values = self.decode_actions(hidden)
+        return logits, values
 
     def forward_train(self, observations, state=None):
-        processed_obs = self._preprocess_observations(observations)
-        return self.base_policy.forward_train(processed_obs, state)
+        return self.forward(observations, state)
 
     def encode_observations(self, observations, state=None):
-        processed_obs = self._preprocess_observations(observations)
-        return self.base_policy.encode_observations(processed_obs, state)
-
-    def decode_actions(self, flat_hidden):
-        return self.base_policy.decode_actions(flat_hidden)
-    
-    def _preprocess_observations(self, observations):
-        """Convert flat 49-element grid to expanded observation with spatial features"""
         batch_size = observations.shape[0]
-        
-        # Reshape flat observation to 7x7 grid
-        grid_obs = observations.view(batch_size, 1, 7, 7).float()
-        
-        # Normalize grid values (0=empty, 1=wall, 2=agent, 3=goal)
-        grid_obs = grid_obs / 3.0  # Scale to [0, 1]
-        
-        # Extract spatial features using small CNN
-        spatial_features = self.spatial_extractor(grid_obs)  # (batch_size, 16)
-        
-        # Combine original flat observation with spatial features
-        flat_obs = observations.float()
-        expanded_obs = torch.cat([flat_obs, spatial_features], dim=1)
-        
-        return expanded_obs
+        # Reshape flat observation to 7x7 grid and normalize
+        grid_obs = observations.view(batch_size, 1, 7, 7).float() / 3.0
+        return self.cnn(grid_obs)
+
+    def decode_actions(self, hidden):
+        logits = self.decoder(hidden)
+        values = self.value(hidden)
+        return logits, values
 
 
 class Boids(nn.Module):
