@@ -134,8 +134,19 @@ int main() {
     env->terminals = (unsigned char *)calloc(env->num_agents, sizeof(float));
 
     //Weights *weights = load_weights("resources/drone/drone_weights.bin", 136073);
-    //int logit_sizes[1] = {4};
-    //LinearContLSTM *net = make_linearcontlstm(weights, env->num_agents, obs_size, logit_sizes, 1);
+    Weights *weights;
+    
+    if (argc > 1) {
+        char wpath[255];
+        snprintf(wpath, sizeof(wpath), "experiments/%s", argv[1]);
+        weights = load_weights(wpath, 145073);
+    } else {
+
+        weights = load_weights("resources/drone/drone_weights.bin", 136073);
+    }
+
+    int logit_sizes[1] = {4};
+    LinearContLSTM *net = make_linearcontlstm(weights, env->num_agents, obs_size, logit_sizes, 1);
 
     if (!env->observations || !env->actions || !env->rewards) {
         fprintf(stderr, "ERROR: Failed to allocate memory for demo buffers.\n");
@@ -162,13 +173,13 @@ int main() {
     c_render(env);
 
     while (!WindowShouldClose()) {
-        //forward_linearcontlstm(net, env->observations, env->actions);
+        forward_linearcontlstm(net, env->observations, env->actions);
         c_step(env);
         c_render(env);
     }
 
     c_close(env);
-    //free_linearcontlstm(net);
+    free_linearcontlstm(net);
     free(env->observations);
     free(env->actions);
     free(env->rewards);
