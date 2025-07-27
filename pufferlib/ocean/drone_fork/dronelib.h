@@ -18,6 +18,9 @@
 #define TRAIL_LENGTH 50
 #define HORIZON 1024
 
+#define ROCKET_COOLDOWN 20
+
+
 // Physical constants for the drone
 #define BASE_MASS 1.0f       // kg
 #define BASE_IXX 0.01f       // kgm^2
@@ -195,7 +198,11 @@ typedef struct {
     
     Vec3 target_pos;
     Vec3 target_vel;
-   
+
+    int uid;
+    int health;
+    int rocket_cooldown;
+
     float last_abs_reward;
     float last_target_reward;
     float last_collision_reward;
@@ -228,6 +235,7 @@ typedef struct {
 void init_drone(Drone* drone, float size, float dr) {
     drone->arm_len = size / 2.0f;
 
+    drone->rocket_cooldown = ROCKET_COOLDOWN;
     // m ~ x^3
     float mass_scale = powf(drone->arm_len, 3.0f) / powf(BASE_ARM_LEN, 3.0f);
     drone->mass = BASE_MASS * mass_scale * rndf(1.0f - dr, 1.0f + dr);
