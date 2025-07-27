@@ -38,7 +38,7 @@ void demo() {
     env.separation_factor = SEPARATION_FACTOR;
     env.alignment_factor = ALIGNMENT_FACTOR;
     
-    size_t obs_size = env.num_boids * env.num_boids * 8; // 8 = (x, y, vx, vy, dx, dy, dvx, dvy)
+    size_t obs_size = env.num_boids * env.num_boids * 9; // 9 = (x, y, vx, vy, dx, dy, dist, dvx, dvy)
     size_t act_size = env.num_boids * 2; // the 2 = (dvx, dvy)
     env.observations = (float*)calloc(obs_size, sizeof(float));
     env.actions = (float*)calloc(act_size, sizeof(float));
