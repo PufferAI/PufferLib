@@ -20,6 +20,7 @@
 #define BOID_WIDTH 32
 #define BOID_HEIGHT 32
 #define BOID_TEXTURE_PATH "./resources/shared/puffers_128.png"
+#define MAX_DIST 2000
 
 typedef struct {
     float score;
@@ -97,20 +98,30 @@ void init(Boids *env) {
 
 static void compute_observations(Boids *env) {
     int idx = 0;
+    float diff_x, diff_y, dist;
     for (unsigned i=0; i<env->num_boids; i++) {
+        // observations for the current boid
         env->observations[idx++] = env->boids[i].x / WIDTH;
         env->observations[idx++] = env->boids[i].y / HEIGHT;
         env->observations[idx++] = env->boids[i].velocity.x / VELOCITY_CAP;
         env->observations[idx++] = env->boids[i].velocity.y / VELOCITY_CAP;
-        for (unsigned j=0; j<4; j++) { env->observations[idx++] = 0; }
+        // zeros for relative observations since comparing to itself will always be 0
+        for (unsigned j=0; j<5; j++) { env->observations[idx++] = 0; }
+
+        // observations for the other boids compared to the current boid
         for (unsigned j=0; j<env->num_boids; j++) {
             if (i == j) continue;
+            diff_x = env->boids[i].x - env->boids[j].x;
+            diff_y = env->boids[i].y - env->boids[j].y;
+            dist = sqrtf(diff_x*diff_x + diff_y*diff_y);
+
             env->observations[idx++] = env->boids[j].x / WIDTH;
             env->observations[idx++] = env->boids[j].y / HEIGHT;
             env->observations[idx++] = env->boids[j].velocity.x / VELOCITY_CAP;
             env->observations[idx++] = env->boids[j].velocity.y / VELOCITY_CAP;
-            env->observations[idx++] = (env->boids[i].x - env->boids[j].x) / WIDTH;
-            env->observations[idx++] = (env->boids[i].y - env->boids[j].y) / HEIGHT;
+            env->observations[idx++] = diff_x / WIDTH;
+            env->observations[idx++] = diff_y / HEIGHT;
+            env->observations[idx++] = dist / MAX_DIST;
             env->observations[idx++] = (env->boids[i].velocity.x - env->boids[j].velocity.x) / VELOCITY_CAP;
             env->observations[idx++] = (env->boids[i].velocity.y - env->boids[j].velocity.y) / VELOCITY_CAP;
         }

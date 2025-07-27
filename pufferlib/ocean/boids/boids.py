@@ -27,7 +27,7 @@ class Boids(pufferlib.PufferEnv):
         self.num_boids = num_boids
 
         self.single_observation_space = gymnasium.spaces.Box(
-            -1000.0, 1000.0, shape=(num_boids*8,), dtype=np.float32
+            -1000.0, 1000.0, shape=(num_boids*9,), dtype=np.float32
         )
         
         #self.single_action_space = gymnasium.spaces.Box(
