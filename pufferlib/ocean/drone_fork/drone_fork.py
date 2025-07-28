@@ -7,6 +7,9 @@ from pufferlib.ocean.drone_fork import binding
 import os
 import json
 
+# Generate random 4-digit number for unique log file (shared across all instances)
+LOG_SUFFIX = random.randint(1000, 9999)
+
 class DroneFork(pufferlib.PufferEnv):
     def __init__(
         self,
@@ -33,9 +36,6 @@ class DroneFork(pufferlib.PufferEnv):
         self.render_mode = render_mode
         self.report_interval = report_interval
         self.tick = 0
-        
-        # Generate random 4-bit number for unique log file
-        self.log_suffix = random.randint(0, 15)
 
         super().__init__(buf)
         self.actions = self.actions.astype(np.float32)
@@ -71,7 +71,7 @@ class DroneFork(pufferlib.PufferEnv):
         if self.tick % self.report_interval == 0:
             log_data = binding.vec_log(self.c_envs)
             if log_data:
-                log_path = os.path.join(os.path.dirname(__file__), f"train_log_{self.log_suffix}.txt")
+                log_path = os.path.join(os.path.dirname(__file__), f"train_log_{LOG_SUFFIX}.txt")
                 with open(log_path, "a") as f:
                     f.write(json.dumps(log_data) + "\n")
                 info.append(log_data)
