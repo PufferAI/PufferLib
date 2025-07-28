@@ -449,7 +449,7 @@ void c_step(DroneSwarm *env) {
         // check out of bounds
         bool out_of_bounds = agent->pos.x < -GRID_X || agent->pos.x > GRID_X ||
                              agent->pos.y < -GRID_Y || agent->pos.y > GRID_Y ||
-                             agent->pos.z < -GRID_Z || agent->pos.z > GRID_Z;
+                             agent->pos.z <  0.0f   || agent->pos.z > GRID_Z;
 
         // Only collision reward (no formation/target rewards)
         float reward = compute_reward(env, agent, true);

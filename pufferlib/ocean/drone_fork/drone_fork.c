@@ -97,6 +97,7 @@ void forward_linearcontlstm(LinearContLSTM *net, float *observations, float *act
             float std = expf(logstd);
             float mean = net->actor->output[idx];
             mean = tanhf(mean);
+            
             float sample = randn(mean, std);
             if (sample < -1.0f) sample = -1.0f;
             if (sample > 1.0f) sample = 1.0f;
