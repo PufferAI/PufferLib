@@ -18,7 +18,7 @@
 #define TRAIL_LENGTH 50
 #define HORIZON 1024
 
-#define ROCKET_COOLDOWN 20
+#define ROCKET_COOLDOWN 10
 
 
 // Physical constants for the drone
@@ -59,6 +59,7 @@ struct Log {
     float rings_passed;
     float collision_rate;
     float oob;
+    float rocket_hits;
     float score;
     float perf;
     float n;

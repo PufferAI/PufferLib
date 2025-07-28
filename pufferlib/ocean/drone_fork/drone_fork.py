@@ -3,6 +3,8 @@ import gymnasium
 
 import pufferlib
 from pufferlib.ocean.drone_swarm import binding
+import os
+import json
 
 class DroneFork(pufferlib.PufferEnv):
     def __init__(
@@ -64,6 +66,9 @@ class DroneFork(pufferlib.PufferEnv):
         if self.tick % self.report_interval == 0:
             log_data = binding.vec_log(self.c_envs)
             if log_data:
+                log_path = os.path.join(os.path.dirname(__file__), "train_log.txt")
+                with open(log_path, "a") as f:
+                    f.write(json.dumps(log_data) + "\n")
                 info.append(log_data)
 
         return (self.observations, self.rewards, self.terminals, self.truncations, info)
@@ -76,7 +81,7 @@ class DroneFork(pufferlib.PufferEnv):
 
 def test_performance(timeout=10, atn_cache=1024):
     env = DroneFork(num_envs=1000)
-    env.reset()
+    env.reset(0)
     tick = 0
 
     actions = [env.action_space.sample() for _ in range(atn_cache)]
