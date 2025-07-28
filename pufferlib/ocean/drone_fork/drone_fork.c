@@ -5,6 +5,7 @@
 #include "drone_fork.h"
 #include "puffernet.h"
 #include <time.h>
+#include <sys/stat.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -30,6 +31,12 @@ double randn(double mean, double std) {
     s = sqrt(-2.0 * log(s) / s);
     spare = v * s;
     return mean + std * (u * s);
+}
+
+static size_t get_file_size(const char *path) {
+    struct stat st;
+    if(stat(path,&st)!=0) exit(1);
+    return st.st_size;
 }
 
 typedef struct LinearContLSTM LinearContLSTM;
@@ -84,9 +91,17 @@ void forward_linearcontlstm(LinearContLSTM *net, float *observations, float *act
     for (int agentid = 0; agentid < net->num_agents; agentid++) {
         for (int i = 0; i < net->num_actions; i++) {
             int idx = agentid * net->num_actions + i;
-            float std = expf(net->log_std[i]);
+            float logstd = net->log_std[i];
+            if (logstd < -10.0f) logstd = -10.0f;
+            if (logstd > 0.0f) logstd = 0.0f;
+            float std = expf(logstd);
             float mean = net->actor->output[idx];
-            actions[idx] = randn(mean, std);
+            mean = tanhf(mean);
+            float sample = randn(mean, std);
+            if (sample < -1.0f) sample = -1.0f;
+            if (sample > 1.0f) sample = 1.0f;
+            if (i == 4) actions[idx] = sample > 0.0f ? 1.0f : 0.0f;
+            else actions[idx] = sample;
         }
     }
 }
@@ -125,8 +140,7 @@ int main(int argc, char** argv) {
 
     DroneSwarm *env = calloc(1, sizeof(DroneSwarm));
     env->num_agents = 8;
-    env->max_rings = 10;
-    env->task = TASK_ORBIT;
+
     init(env);
 
     size_t obs_size = 41;
@@ -136,17 +150,18 @@ int main(int argc, char** argv) {
     env->rewards = (float *)calloc(env->num_agents, sizeof(float));
     env->terminals = (unsigned char *)calloc(env->num_agents, sizeof(float));
 
-    //Weights *weights = load_weights("resources/drone/drone_weights.bin", 136073);
     Weights *weights;
-    
+    char wpath[255];
+    const char *weight_path;
     if (argc > 1) {
-        char wpath[255];
         snprintf(wpath, sizeof(wpath), "experiments/%s", argv[1]);
-        weights = load_weights(wpath, 195073);
+        weight_path = wpath;
     } else {
-
-        weights = load_weights("resources/drone/drone_weights.bin", 196073);
+        weight_path = "resources/drone/drone_weights.bin";
     }
+    size_t num_bytes = get_file_size(weight_path);
+    size_t num_weights = num_bytes / sizeof(float);
+    weights = load_weights(weight_path, num_weights);
 
     int logit_sizes[1] = {7};
     LinearContLSTM *net = make_linearcontlstm(weights, env->num_agents, obs_size, logit_sizes, 1);

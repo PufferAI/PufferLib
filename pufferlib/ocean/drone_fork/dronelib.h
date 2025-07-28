@@ -63,6 +63,7 @@ struct Log {
     float score;
     float perf;
     float n;
+    float nan_fraction;
 };
 
 typedef struct {
@@ -79,6 +80,18 @@ static inline float clampf(float v, float min, float max) {
     if (v > max)
         return max;
     return v;
+}
+
+static inline float safe_div(float numerator, float denominator, float fallback) {
+    if (fabsf(denominator) < 1e-8f) return fallback;
+    float result = numerator / denominator;
+    if (!isfinite(result) || fabsf(result) > 1e6f) return fallback;
+    return result;
+}
+
+static inline float safe_obs(float value) {
+    if (!isfinite(value)) return 0.0f;
+    return clampf(value, -1e6f, 1e6f);
 }
 
 static inline float rndf(float a, float b) {
