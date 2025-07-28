@@ -247,25 +247,42 @@ void compute_observations(DroneSwarm *env) {
             env->observations[idx++] = 0.0f;
         }
 
-        // Ring obs
-        if (env->task == TASK_RACE) {
-            Ring ring = env->ring_buffer[agent->ring_idx];
-            Vec3 to_ring = quat_rotate(q_inv, sub3(ring.pos, agent->pos));
-            Vec3 ring_norm = quat_rotate(q_inv, ring.normal);
-            env->observations[idx++] = to_ring.x / GRID_X;
-            env->observations[idx++] = to_ring.y / GRID_Y;
-            env->observations[idx++] = to_ring.z / GRID_Z;
-            env->observations[idx++] = ring_norm.x;
-            env->observations[idx++] = ring_norm.y;
-            env->observations[idx++] = ring_norm.z;
-        } else {
-            env->observations[idx++] = 0.0f;
-            env->observations[idx++] = 0.0f;
-            env->observations[idx++] = 0.0f;
-            env->observations[idx++] = 0.0f;
-            env->observations[idx++] = 0.0f;
-            env->observations[idx++] = 0.0f;
+        // Rocket obs (replace legacy ring features)
+        float cooldown_norm = (float)agent->rocket_cooldown / (float)ROCKET_COOLDOWN;
+        float rockets_norm = (float)env->rocket_count / (float)MAX_ROCKETS;
+        Vec3 dir_body = {0.0f, 0.0f, 0.0f};
+        float dist_norm = 0.0f;
+        float nearest_dist = MAX_DIST;
+        for (int r = 0; r < env->rocket_count; r++) {
+            Rocket *rocket = &env->rockets[r];
+            if (rocket->parent == agent) continue;
+            float dx = rocket->pos.x - agent->pos.x;
+            float dy = rocket->pos.y - agent->pos.y;
+            float dz = rocket->pos.z - agent->pos.z;
+            float d = sqrtf(dx*dx + dy*dy + dz*dz);
+            if (d < nearest_dist) {
+                nearest_dist = d;
+                Vec3 dir_world = {dx, dy, dz};
+                if (d > 0) {
+                    float inv_d = 1.0f / d;
+                    dir_world.x *= inv_d;
+                    dir_world.y *= inv_d;
+                    dir_world.z *= inv_d;
+                }
+                dir_body = quat_rotate(q_inv, dir_world);
+            }
         }
+        if (nearest_dist < MAX_DIST) dist_norm = nearest_dist / MAX_DIST;
+        env->observations[idx++] = cooldown_norm;
+        env->observations[idx++] = rockets_norm;
+        env->observations[idx++] = dir_body.x;
+        env->observations[idx++] = dir_body.y;
+        env->observations[idx++] = dir_body.z;
+        env->observations[idx++] = dist_norm;
+    }
+    int total = env->num_agents * 41;
+    for (int j = 0; j < total; j++) {
+        if (!isfinite(env->observations[j])) env->observations[j] = 0.0f;
     }
 }
 

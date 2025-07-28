@@ -2,7 +2,7 @@ import numpy as np
 import gymnasium
 
 import pufferlib
-from pufferlib.ocean.drone_swarm import binding
+from pufferlib.ocean.drone_fork import binding
 import os
 import json
 
@@ -25,7 +25,7 @@ class DroneFork(pufferlib.PufferEnv):
         )
 
         self.single_action_space = gymnasium.spaces.Box(
-            low=-1, high=1, shape=(4,), dtype=np.float32
+            low=-1, high=1, shape=(7,), dtype=np.float32
         )
 
         self.num_agents = num_envs*num_drones
@@ -57,7 +57,8 @@ class DroneFork(pufferlib.PufferEnv):
         return self.observations, []
 
     def step(self, actions):
-        self.actions[:] = actions
+        clean = np.nan_to_num(actions, nan=0.0, posinf=1.0, neginf=-1.0)
+        self.actions[:] = np.clip(clean, -1.0, 1.0)
 
         self.tick += 1
         binding.vec_step(self.c_envs)
