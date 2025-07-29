@@ -2,7 +2,7 @@
 // Compile using: ./scripts/build_ocean.sh drone [local|fast]
 // Run with: ./drone
 
-#include "drone_fork.h"
+#include "rocket_drone.h"
 #include "puffernet.h"
 #include <time.h>
 #include <sys/stat.h>
@@ -58,17 +58,32 @@ LinearContLSTM *make_linearcontlstm(Weights *weights, int num_agents, int input_
     net->num_agents = num_agents;
     net->obs = calloc(num_agents * input_dim, sizeof(float));
     net->num_actions = logit_sizes[0];
+    
+    printf("Creating network with %d agents, input_dim=%d\n", num_agents, input_dim);
+    printf("Initial weights: idx=%d, size=%d\n", weights->idx, weights->size);
+    
     net->log_std = weights->data;
     weights->idx += net->num_actions;
+    printf("After log_std (%d): idx=%d\n", net->num_actions, weights->idx);
+    
     net->encoder = make_linear(weights, num_agents, input_dim, 128);
+    printf("After encoder: idx=%d\n", weights->idx);
+    
     net->gelu1 = make_gelu(num_agents, 128);
     int atn_sum = 0;
     for (int i = 0; i < num_actions; i++) {
         atn_sum += logit_sizes[i];
     }
+    
     net->actor = make_linear(weights, num_agents, 128, atn_sum);
+    printf("After actor: idx=%d\n", weights->idx);
+    
     net->value_fn = make_linear(weights, num_agents, 128, 1);
+    printf("After value_fn: idx=%d\n", weights->idx);
+    
     net->lstm = make_lstm(weights, num_agents, 128, 128);
+    printf("After lstm: idx=%d\n", weights->idx);
+    
     return net;
 }
 
@@ -107,7 +122,7 @@ void forward_linearcontlstm(LinearContLSTM *net, float *observations, float *act
     }
 }
 
-void generate_dummy_actions(DroneSwarm *env) {
+void generate_dummy_actions(RocketDrone *env) {
     // Generate random floats in [-1, 1] range
     env->actions[0] = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f;
     env->actions[1] = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f;
@@ -117,14 +132,14 @@ void generate_dummy_actions(DroneSwarm *env) {
 
 #ifdef __EMSCRIPTEN__
 typedef struct {
-    DroneSwarm *env;
+    RocketDrone *env;
     LinearContLSTM *net;
     Weights *weights;
 } WebRenderArgs;
 
 void emscriptenStep(void *e) {
     WebRenderArgs *args = (WebRenderArgs *)e;
-    DroneSwarm *env = args->env;
+    RocketDrone *env = args->env;
     LinearContLSTM *net = args->net;
     if (!player_active) forward_linearcontlstm(net, env->observations, env->actions);
     else player_character(env, player_idx);
@@ -139,7 +154,7 @@ WebRenderArgs *web_args = NULL;
 int main(int argc, char** argv) {
     srand(time(NULL)); // Seed random number generator
 
-    DroneSwarm *env = calloc(1, sizeof(DroneSwarm));
+    RocketDrone *env = calloc(1, sizeof(RocketDrone));
     env->num_agents = 8;
 
     init(env);
@@ -155,14 +170,17 @@ int main(int argc, char** argv) {
     char wpath[255];
     const char *weight_path;
     if (argc > 1) {
-        snprintf(wpath, sizeof(wpath), "experiments/%s", argv[1]);
+        snprintf(wpath, sizeof(wpath), "pufferlib/resources/rocket_drones/%s", argv[1]);
         weight_path = wpath;
     } else {
-        weight_path = "resources/drone/drone_weights.bin";
+        weight_path = "pufferlib/resources/rocket_drones/drone_weights.bin";
     }
     size_t num_bytes = get_file_size(weight_path);
     size_t num_weights = num_bytes / sizeof(float);
+    printf("Loading weights from: %s\n", weight_path);
+    printf("File size: %zu bytes = %zu weights\n", num_bytes, num_weights);
     weights = load_weights(weight_path, num_weights);
+    printf("Weights loaded successfully. Size: %d, Index: %d\n", weights->size, weights->idx);
 
     int logit_sizes[1] = {7};
     LinearContLSTM *net = make_linearcontlstm(weights, env->num_agents, obs_size, logit_sizes, 1);

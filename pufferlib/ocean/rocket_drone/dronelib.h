@@ -39,9 +39,9 @@
 #define BASE_J_MOT 1e-5f     // kgm^2 (Motor rotational inertia)
 
 // Simulation properties
-#define GRID_X 30.0f
-#define GRID_Y 30.0f
-#define GRID_Z 10.0f
+#define GRID_X 25.0f
+#define GRID_Y 25.0f
+#define GRID_Z 20.0f
 #define MARGIN_X (GRID_X - 1)
 #define MARGIN_Y (GRID_Y - 1)
 #define MARGIN_Z (GRID_Z - 1)
@@ -182,7 +182,7 @@ Ring rndring(float radius) {
 
     ring.pos.x = rndf(-GRID_X + 2*radius, GRID_X - 2*radius);
     ring.pos.y = rndf(-GRID_Y + 2*radius, GRID_Y - 2*radius);
-    ring.pos.z = rndf(-GRID_Z + 2*radius, GRID_Z - 2*radius);
+    ring.pos.z = rndf(2*radius, GRID_Z - 2*radius);
 
     ring.orientation = rndquat();
 

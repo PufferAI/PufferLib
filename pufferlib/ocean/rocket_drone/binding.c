@@ -1,6 +1,6 @@
-#include "drone_fork.h"
+#include "rocket_drone.h"
 
-#define Env DroneSwarm
+#define Env RocketDrone
 #include "../env_binding.h"
 
 static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
@@ -18,6 +18,6 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "episode_return", log->episode_return);
     assign_to_dict(dict, "episode_length", log->episode_length);
     assign_to_dict(dict, "n", log->n);
-    assign_to_dict(dict, "nan_fraction", log->nan_fraction);
+
     return 0;
 }

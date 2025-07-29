@@ -1,5 +1,5 @@
-// Standalone C demo for DroneSwarm environment
-// Compile using: ./scripts/build_ocean.sh drone [local|fast]
+// Standalone C demo for RocketDrone environment
+// Compile using: ./scripts/build_ocean.sh rocket_drone [local|fast]
 // Run with: ./drone
 
 
@@ -89,11 +89,11 @@ typedef struct {
     int rocket_count;
 
     Client *client;
-} DroneSwarm;
+} RocketDrone;
 static bool player_active = false;
 static int player_idx = -1;
 static float player_yaw = 0.0f, player_pitch = 0.0f;
-static void player_character(DroneSwarm* env, int idx) {
+static void player_character(RocketDrone* env, int idx) {
     Drone *player = &env->agents[idx];
     float *atn = &env->actions[7 * idx];
     const float base = 0.5f;
@@ -120,13 +120,13 @@ static void player_character(DroneSwarm* env, int idx) {
     atn[6] = player_pitch / (M_PI/2);
 }
 
-void init(DroneSwarm *env) {
+void init(RocketDrone *env) {
     env->agents = calloc(env->num_agents, sizeof(Drone));
     env->log = (Log){0};
     env->tick = 0;
 }
 
-void add_log(DroneSwarm *env, int idx, bool oob) {
+void add_log(RocketDrone *env, int idx, bool oob) {
     Drone *agent = &env->agents[idx];
     env->log.score += agent->score;
     env->log.episode_return += agent->episode_return;
@@ -142,7 +142,7 @@ void add_log(DroneSwarm *env, int idx, bool oob) {
     agent->episode_return = 0.0f;
 }
 
-Drone* nearest_drone(DroneSwarm* env, Drone *agent) {
+Drone* nearest_drone(RocketDrone* env, Drone *agent) {
     float min_dist = 999999.0f;
     Drone *nearest = NULL;
     for (int i = 0; i < env->num_agents; i++) {
@@ -165,7 +165,7 @@ Drone* nearest_drone(DroneSwarm* env, Drone *agent) {
     return nearest;
 }
 
-void compute_observations(DroneSwarm *env) {
+void compute_observations(RocketDrone *env) {
     int idx = 0;
     for (int i = 0; i < env->num_agents; i++) {
         Drone *agent = &env->agents[i];
@@ -175,6 +175,7 @@ void compute_observations(DroneSwarm *env) {
         Vec3 drone_up_world = quat_rotate(agent->quat, (Vec3){0.0f, 0.0f, 1.0f});
 
         // Safe_obs = somewhat hacky way of avoiding numerical errors in training
+        
         env->observations[idx++] = safe_obs(safe_div(linear_vel_body.x, agent->max_vel, 0.0f));
         env->observations[idx++] = safe_obs(safe_div(linear_vel_body.y, agent->max_vel, 0.0f));
         env->observations[idx++] = safe_obs(safe_div(linear_vel_body.z, agent->max_vel, 0.0f));
@@ -229,7 +230,7 @@ void compute_observations(DroneSwarm *env) {
             env->observations[idx++] = 0.0f;
         }
 
-        // Rocket obs with safe division
+        // rocket obs: firing status, rocket count, nearest (enemy) rocket.
         float cooldown_norm = safe_div((float)agent->rocket_cooldown, (float)ROCKET_COOLDOWN, 0.0f);
         float rockets_norm = safe_div((float)env->rocket_count, (float)MAX_ROCKETS, 0.0f);
         Vec3 dir_body = {0.0f, 0.0f, 0.0f};
@@ -261,24 +262,11 @@ void compute_observations(DroneSwarm *env) {
         env->observations[idx++] = safe_obs(dist_norm);
     }
     
-    // Enhanced safeguard with debugging
-    int total = env->num_agents * 41;
-    int nan_count = 0;
-    for (int j = 0; j < total; j++) {
-        if (!isfinite(env->observations[j]) || fabsf(env->observations[j]) > 1e3f) {
-            env->observations[j] = 0.0f;
-            nan_count++;
-        }
-    }
-    if (nan_count > 0) {
-        printf("Warning: %d problematic observation values sanitized\n", nan_count);
-    }
-    env->log.nan_fraction = (float)nan_count / (float)total;
 }
 
 // All target-setting functions removed - pure combat mode
 
-float compute_reward(DroneSwarm* env, Drone *agent, bool collision) {
+float compute_reward(RocketDrone* env, Drone *agent, bool collision) {
     // Only collision penalties for physical crashes, no formation rewards
     float collision_penalty = 0.0f;
     if (collision && env->num_agents > 1) {
@@ -305,13 +293,31 @@ float compute_reward(DroneSwarm* env, Drone *agent, bool collision) {
     return collision_penalty;
 }
 
-void reset_agent(DroneSwarm* env, Drone *agent, int idx) {
+void reset_agent(RocketDrone* env, Drone *agent, int idx) {
     agent->uid = uid_tracker++;
     agent->episode_return = 0.0f;
     agent->episode_length = 0;
     agent->collisions = 0.0f;
     agent->score = 0.0f;
-    agent->pos = (Vec3){rndf(-9, 9), rndf(-9, 9), rndf(-9, 9)};
+    agent->health = 100;
+
+
+    // spawn new drones in a sphere centered at origin, touching close to env boundaries
+    float u1 = rndf(0, 1);
+    float u2 = rndf(0, 1);
+    float z_norm = 1 - 2 * u1;
+    float phi = 2 * M_PI * u2;
+    float r_norm = sqrtf(1 - z_norm * z_norm);
+    float x_norm = r_norm * cosf(phi);
+    float y_norm = r_norm * sinf(phi);
+    
+    float sphere_radius = rndf(7, 9);
+    Vec3 sphere_center = {0, 0, GRID_Z / 2.0f};
+    agent->pos = (Vec3){
+        sphere_center.x + x_norm * sphere_radius,
+        sphere_center.y + y_norm * sphere_radius, 
+        sphere_center.z + z_norm * sphere_radius
+    };
     agent->spawn_pos = agent->pos;
     agent->vel = (Vec3){0.0f, 0.0f, 0.0f};
     agent->omega = (Vec3){0.0f, 0.0f, 0.0f};
@@ -324,11 +330,13 @@ void reset_agent(DroneSwarm* env, Drone *agent, int idx) {
     compute_reward(env, agent, true);
 }
 
-void c_reset(DroneSwarm *env) {
+void c_reset(RocketDrone *env) {
+    // printf("RESET: Full environment reset (episode timeout or manual)\n");
     env->tick = 0;
     
     for (int i = 0; i < env->num_agents; i++) {
         Drone *agent = &env->agents[i];
+        // printf("RESET: Agent %d - Full environment reset\n", i);
         reset_agent(env, agent, i);
     }
  
@@ -336,7 +344,7 @@ void c_reset(DroneSwarm *env) {
 }
 
 // maps drone unique identifier to env array identifier
-int drone_index_lookup(DroneSwarm *env, int uid) {
+int drone_index_lookup(RocketDrone *env, int uid) {
     for (int aid = 0; aid < env->num_agents; aid++) {
         if (env->agents[aid].uid == uid) {
             return aid;
@@ -356,19 +364,19 @@ bool check_collision(Rocket* rocket, Drone* drone) {
 }
 
 
-void update_rockets(DroneSwarm *env) {
+void update_rockets(RocketDrone *env) {
 
-    for (int r = 0; r < env->rocket_count; r++) {  // increment vel + oob check
+    for (int r = 0; r < env->rocket_count; r++) {  // increment vel + oob / collision check
         Rocket *rocket = &env->rockets[r];
         rocket->pos = add3(rocket->pos, scalmul3(rocket->vel, DT));
         
         if (rocket->pos.x < -GRID_X || rocket->pos.x > GRID_X ||
             rocket->pos.y < -GRID_Y || rocket->pos.y > GRID_Y ||
-            rocket->pos.z < -GRID_Z || rocket->pos.z > GRID_Z) {
+            rocket->pos.z < 0.0f || rocket->pos.z > GRID_Z) {
             env->rockets[r] = env->rockets[--env->rocket_count]; r--; continue;
         }
     
-        for (int d = 0; d < env->num_agents; d++) {    // collision check
+        for (int d = 0; d < env->num_agents; d++) {    
             Drone *drone = &env->agents[d];
             if (drone->uid == rocket->parent->uid) continue;
             if (check_collision(rocket, drone)) {
@@ -376,11 +384,15 @@ void update_rockets(DroneSwarm *env) {
                 int target_idx = d;
                 env->rewards[shooter_idx] += HIT_REWARD;
                 env->log.rocket_hits += 1.0f;
+
                 env->rewards[target_idx] -= HIT_PUNISH;
                 drone->health -= ROCKET_DMG;
                 if (drone->health <= 0) {
+                    printf("RESET: Agent %d - Destroyed by rocket from Agent %d\n", 
+                            target_idx, shooter_idx);
                     env->rewards[target_idx] -= DEATH_PUNISH;
                     env->terminals[target_idx] = 1;
+
                 }
                 env->rockets[r] = env->rockets[env->rocket_count - 1];
                 env->rocket_count--;
@@ -398,47 +410,26 @@ void update_rockets(DroneSwarm *env) {
 
 
 
-
-void fire_rocket(Drone* drone, float* actions) {
-
-
-    // TODO: Implement rocket firing
-}
-void c_step(DroneSwarm *env) {
-    env->tick = (env->tick + 1) % HORIZON;
+void c_step(RocketDrone *env) {
+    env->tick++;
     update_rockets(env);
     for (int i = 0; i < env->num_agents; i++) {
         Drone *agent = &env->agents[i];
         env->rewards[i] = 0;
         env->terminals[i] = 0;
 
-        float* atn = &env->actions[7*i];
+        float* atn = &env->actions[7*i];   // 4 movement actions + 3 rocket (fire bool + angles)
         
-        // NaN detection for each action with debugging output
-        for(int j = 0; j < 7; j++) {
-            if(!isfinite(atn[j])) {
-                printf("Agent %d: NaN detected in action[%d] = %f\n", i, j, atn[j]);
-                atn[j] = 0.0f;
-            }
-        }
-        
-        // Bounds checking for critical actions
-        if(atn[5] < -10.0f || atn[5] > 10.0f) {
-            printf("Agent %d: Extreme azimuth action[5] = %f\n", i, atn[5]);
-        }
-        if(atn[6] < -10.0f || atn[6] > 10.0f) {
-            printf("Agent %d: Extreme elevation action[6] = %f\n", i, atn[6]);
-        }
         
         move_drone(agent, atn);
 
-        // Check cooldown before firing rocket
+        
         if(atn[4]>0.f && env->rocket_count<MAX_ROCKETS && agent->rocket_cooldown <= 0){
-            // Azimuth: wrap around (angles naturally cycle)
+            // horizontal angle
             float az_norm = atn[5] - 2.0f * floorf((atn[5] + 1.0f) / 2.0f);
             float az = az_norm * M_PI;
             
-            // Elevation: clamp (physical bounds on pitch)
+            // vertical angle
             float el = clampf(atn[6], -1.0f, 1.0f) * 1.57079632679f;
             Vec3 dir={cosf(el)*cosf(az),cosf(el)*sinf(az),sinf(el)};
             Rocket r={agent->pos,scalmul3(dir,ROCKET_VEL),agent};
@@ -446,35 +437,39 @@ void c_step(DroneSwarm *env) {
             agent->rocket_cooldown = ROCKET_COOLDOWN;
         }
 
-        // check out of bounds
+        
         bool out_of_bounds = agent->pos.x < -GRID_X || agent->pos.x > GRID_X ||
                              agent->pos.y < -GRID_Y || agent->pos.y > GRID_Y ||
                              agent->pos.z <  0.0f   || agent->pos.z > GRID_Z;
 
-        // Only collision reward (no formation/target rewards)
+        
         float reward = compute_reward(env, agent, true);
 
         env->rewards[i] += reward;
         agent->episode_return += reward;
 
         if (out_of_bounds) {
+            // printf("RESET: Agent %d - Out of bounds (pos: %.1f, %.1f, %.1f)\n", 
+            //        i, agent->pos.x, agent->pos.y, agent->pos.z);
             env->rewards[i] -= 5;
             env->terminals[i] = 1;
             add_log(env, i, true);
             reset_agent(env, agent, i);
         } else if (env->tick >= HORIZON - 1) {
+            // printf("RESET: Agent %d - Episode timeout (will reset next step)\n", i);
             env->terminals[i] = 1;
             add_log(env, i, false);
         }
-    }
-    // Decrease cooldown for all drones
-    for (int i = 0; i < env->num_agents; i++) {
+
         if (env->agents[i].rocket_cooldown > 0) {
             env->agents[i].rocket_cooldown--;
         }
     }
+    
+
 
     if (env->tick >= HORIZON - 1) {
+        // printf("RESET: Episode timeout reached (tick %d >= %d)\n", env->tick, HORIZON - 1);
         c_reset(env);
     }
 
@@ -486,7 +481,7 @@ void c_close_client(Client *client) {
     free(client);
 }
 
-void c_close(DroneSwarm *env) {
+void c_close(RocketDrone *env) {
     if (env->client != NULL) {
         c_close_client(env->client);
     }
@@ -501,8 +496,8 @@ static void update_camera_position(Client *c) {
     float y = r * cosf(el) * sinf(az);
     float z = r * sinf(el);
 
-    c->camera.position = (Vector3){x, y, z};
-    c->camera.target = (Vector3){0, 0, 0};
+    c->camera.position = (Vector3){x, y, z + GRID_Z / 2.0f};
+    c->camera.target = (Vector3){0, 0, GRID_Z / 2.0f};
 }
 
 void handle_camera_controls(Client *client) {
@@ -542,14 +537,14 @@ void handle_camera_controls(Client *client) {
     }
 }
 
-Client *make_client(DroneSwarm *env) {
+Client *make_client(RocketDrone *env) {
     Client *client = (Client *)calloc(1, sizeof(Client));
 
     client->width = WIDTH;
     client->height = HEIGHT;
 
     SetConfigFlags(FLAG_MSAA_4X_HINT); // antialiasing
-    InitWindow(WIDTH, HEIGHT, "PufferLib DroneSwarm");
+    InitWindow(WIDTH, HEIGHT, "PufferLib RocketDrone");
 
 #ifndef __EMSCRIPTEN__
     SetTargetFPS(60);
@@ -561,9 +556,9 @@ Client *make_client(DroneSwarm *env) {
         return NULL;
     }
 
-    client->camera_distance = 40.0f;
+    client->camera_distance = 30.0f;
     client->camera_azimuth = 0.0f;
-    client->camera_elevation = PI / 10.0f;
+    client->camera_elevation = PI / 6.0f;
     client->is_dragging = false;
     client->last_mouse_pos = (Vector2){0.0f, 0.0f};
 
@@ -592,36 +587,20 @@ const Color PUFF_CYAN = (Color){0, 187, 187, 255};
 const Color PUFF_WHITE = (Color){241, 241, 241, 241};
 const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
 
-void DrawRing3D(Ring ring, float thickness, Color entryColor, Color exitColor) {
-    float half_thick = thickness / 2.0f;
 
-    Vector3 center_pos = {ring.pos.x, ring.pos.y, ring.pos.z};
-
-    Vector3 entry_start_pos = {center_pos.x - half_thick * ring.normal.x,
-                               center_pos.y - half_thick * ring.normal.y,
-                               center_pos.z - half_thick * ring.normal.z};
-
-    DrawCylinderWiresEx(entry_start_pos, center_pos, ring.radius, ring.radius, 32, entryColor);
-
-    Vector3 exit_end_pos = {center_pos.x + half_thick * ring.normal.x,
-                            center_pos.y + half_thick * ring.normal.y,
-                            center_pos.z + half_thick * ring.normal.z};
-
-    DrawCylinderWiresEx(center_pos, exit_end_pos, ring.radius, ring.radius, 32, exitColor);
-}
-
-
-
-
-
-void draw_rockets(DroneSwarm *env) {
+void draw_rockets(RocketDrone *env) {
     for(int i = 0; i < env->rocket_count; i++) {
         Rocket *rocket = &env->rockets[i];
         DrawSphere((Vector3){rocket->pos.x, rocket->pos.y, rocket->pos.z}, 0.1f, RED);
     }
 }
 
-void c_render(DroneSwarm *env) {
+void c_render(RocketDrone *env) {
+    static int last_tick = -1;
+    
+
+    last_tick = env->tick;
+    
     if (env->client == NULL) {
         env->client = make_client(env);
         if (env->client == NULL) {
@@ -649,15 +628,9 @@ void c_render(DroneSwarm *env) {
         handle_camera_controls(env->client);
     }
     Client *client = env->client;
-    if (player_active) {
-        Drone *p = &env->agents[player_idx];
-        Vec3 fwd = {cosf(player_pitch)*cosf(player_yaw), cosf(player_pitch)*sinf(player_yaw), sinf(player_pitch)};
-        client->camera.position = (Vector3){p->pos.x, p->pos.y, p->pos.z};
-        client->camera.target = (Vector3){p->pos.x + fwd.x, p->pos.y + fwd.y, p->pos.z + fwd.z};
-        client->camera.up = (Vector3){0.0f, 0.0f, 1.0f};
-    } else {
-        Client *client = env->client;
-    }
+
+    Client *client = env->client;
+
 
     for (int i = 0; i < env->num_agents; i++) {
         Drone *agent = &env->agents[i];
@@ -678,15 +651,15 @@ void c_render(DroneSwarm *env) {
 
     BeginMode3D(client->camera);
 
-    // draws bounding cube
-    DrawCubeWires((Vector3){0.0f, 0.0f, 0.0f}, GRID_X * 2.0f,
-        GRID_Y * 2.0f, GRID_Z * 2.0f, WHITE);
+ 
+    DrawCubeWires((Vector3){0.0f, 0.0f, GRID_Z / 2.0f}, GRID_X * 2.0f,
+        GRID_Y * 2.0f, GRID_Z, WHITE);
     draw_rockets(env);
     for (int i = 0; i < env->num_agents; i++) {
         if (player_active && i == player_idx) continue;
         Drone *agent = &env->agents[i];
 
-        // draws drone body
+   
         Color body_color = FLAG_COLORS[i];
         DrawSphere((Vector3){agent->pos.x, agent->pos.y, agent->pos.z}, 0.3f, body_color);
 

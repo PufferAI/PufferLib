@@ -131,7 +131,7 @@ MAKE_FUNCTIONS = {
     'boids': 'Boids',
     'drone_race': 'DroneRace',
     'drone_swarm': 'DroneSwarm',
-    'drone_fork': 'DroneFork',
+    'rocket_drone': 'RocketDrone',
     'nmmo3': 'NMMO3',
     'snake': 'Snake',
     'squared': 'Squared',

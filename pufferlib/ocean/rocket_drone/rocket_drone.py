@@ -3,14 +3,14 @@ import gymnasium
 import random
 
 import pufferlib
-from pufferlib.ocean.drone_fork import binding
+from pufferlib.ocean.rocket_drone import binding
 import os
 import json
 
 # Generate random 4-digit number for unique log file (shared across all instances)
 LOG_SUFFIX = random.randint(1000, 9999)
 
-class DroneFork(pufferlib.PufferEnv):
+class RocketDrone(pufferlib.PufferEnv):
     def __init__(
         self,
         num_envs=16,
@@ -85,7 +85,7 @@ class DroneFork(pufferlib.PufferEnv):
         binding.vec_close(self.c_envs)
 
 def test_performance(timeout=10, atn_cache=1024):
-    env = DroneFork(num_envs=1000)
+    env = RocketDrone(num_envs=1000)
     env.reset(0)
     tick = 0
 
