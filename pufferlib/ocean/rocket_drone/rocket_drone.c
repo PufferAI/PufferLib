@@ -58,16 +58,12 @@ LinearContLSTM *make_linearcontlstm(Weights *weights, int num_agents, int input_
     net->num_agents = num_agents;
     net->obs = calloc(num_agents * input_dim, sizeof(float));
     net->num_actions = logit_sizes[0];
-    
-    printf("Creating network with %d agents, input_dim=%d\n", num_agents, input_dim);
-    printf("Initial weights: idx=%d, size=%d\n", weights->idx, weights->size);
-    
+
     net->log_std = weights->data;
     weights->idx += net->num_actions;
-    printf("After log_std (%d): idx=%d\n", net->num_actions, weights->idx);
-    
+
     net->encoder = make_linear(weights, num_agents, input_dim, 128);
-    printf("After encoder: idx=%d\n", weights->idx);
+
     
     net->gelu1 = make_gelu(num_agents, 128);
     int atn_sum = 0;
@@ -76,13 +72,13 @@ LinearContLSTM *make_linearcontlstm(Weights *weights, int num_agents, int input_
     }
     
     net->actor = make_linear(weights, num_agents, 128, atn_sum);
-    printf("After actor: idx=%d\n", weights->idx);
+
     
     net->value_fn = make_linear(weights, num_agents, 128, 1);
-    printf("After value_fn: idx=%d\n", weights->idx);
+
     
     net->lstm = make_lstm(weights, num_agents, 128, 128);
-    printf("After lstm: idx=%d\n", weights->idx);
+
     
     return net;
 }
