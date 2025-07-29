@@ -13,9 +13,10 @@
 #include "puffernet.h"
 
 int main() {
-    int num_agents = 8;
-    int num_goals = 4;
+    int num_agents = 1;
+    int num_goals = 2;
     int num_obs = 2*(num_agents + num_goals) + 4;
+    printf("----------------- WORKING -----------------\n\n");
 
     // Weights are exported by running puffer export
     Weights* weights = load_weights("resources/target/target_weights.bin", 137743);
