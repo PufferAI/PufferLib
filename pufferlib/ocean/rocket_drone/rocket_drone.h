@@ -588,7 +588,7 @@ void c_render(RocketDrone *env) {
     }
 
     Client *client = env->client;
-
+    handle_camera_controls(client);
 
     for (int i = 0; i < env->num_agents; i++) {
         Drone *agent = &env->agents[i];
