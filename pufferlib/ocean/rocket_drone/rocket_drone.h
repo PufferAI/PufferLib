@@ -90,35 +90,7 @@ typedef struct {
 
     Client *client;
 } RocketDrone;
-static bool player_active = false;
-static int player_idx = -1;
-static float player_yaw = 0.0f, player_pitch = 0.0f;
-static void player_character(RocketDrone* env, int idx) {
-    Drone *player = &env->agents[idx];
-    float *atn = &env->actions[7 * idx];
-    const float base = 0.5f;
-    float a0 = base, a1 = base, a2 = base, a3 = base;
-    const float tilt = 0.2f;
-    if (IsKeyDown(KEY_W)) { a0 -= tilt; a1 += tilt; }
-    if (IsKeyDown(KEY_S)) { a0 += tilt; a1 -= tilt; }
-    if (IsKeyDown(KEY_D)) { a2 += tilt; a3 -= tilt; }
-    if (IsKeyDown(KEY_A)) { a2 -= tilt; a3 += tilt; }
-    a0 = clampf(a0, 0.0f, 1.0f);
-    a1 = clampf(a1, 0.0f, 1.0f);
-    a2 = clampf(a2, 0.0f, 1.0f);
-    a3 = clampf(a3, 0.0f, 1.0f);
-    atn[0] = a0; atn[1] = a1; atn[2] = a2; atn[3] = a3;
-    Vector2 md = GetMouseDelta();
-    const float sens = 0.003f;
-    player_yaw += md.x * sens;
-    player_pitch -= md.y * sens;
-    if (player_pitch > M_PI/2 - 0.1f) player_pitch = M_PI/2 - 0.1f;
-    if (player_pitch < -M_PI/2 + 0.1f) player_pitch = -M_PI/2 + 0.1f;
-    Vec3 fwd = {cosf(player_pitch)*cosf(player_yaw), cosf(player_pitch)*sinf(player_yaw), sinf(player_pitch)};
-    atn[4] = IsMouseButtonDown(MOUSE_BUTTON_LEFT) ? 1.0f : 0.0f;
-    atn[5] = player_yaw / M_PI;
-    atn[6] = player_pitch / (M_PI/2);
-}
+
 
 void init(RocketDrone *env) {
     env->agents = calloc(env->num_agents, sizeof(Drone));
@@ -388,8 +360,8 @@ void update_rockets(RocketDrone *env) {
                 env->rewards[target_idx] -= HIT_PUNISH;
                 drone->health -= ROCKET_DMG;
                 if (drone->health <= 0) {
-                    printf("RESET: Agent %d - Destroyed by rocket from Agent %d\n", 
-                            target_idx, shooter_idx);
+                   // printf("RESET: Agent %d - Destroyed by rocket from Agent %d\n", 
+                     //       target_idx, shooter_idx);
                     env->rewards[target_idx] -= DEATH_PUNISH;
                     env->terminals[target_idx] = 1;
 
@@ -596,11 +568,7 @@ void draw_rockets(RocketDrone *env) {
 }
 
 void c_render(RocketDrone *env) {
-    static int last_tick = -1;
-    
 
-    last_tick = env->tick;
-    
     if (env->client == NULL) {
         env->client = make_client(env);
         if (env->client == NULL) {
@@ -618,16 +586,6 @@ void c_render(RocketDrone *env) {
         c_close(env);
         exit(0);
     }
-
-    if (IsKeyPressed(KEY_SPACE)) {
-        player_active = !player_active;
-        player_idx = player_active ? env->num_agents - 1 : -1;
-    }
-
-    if (!player_active) {
-        handle_camera_controls(env->client);
-    }
-    Client *client = env->client;
 
     Client *client = env->client;
 
@@ -656,7 +614,7 @@ void c_render(RocketDrone *env) {
         GRID_Y * 2.0f, GRID_Z, WHITE);
     draw_rockets(env);
     for (int i = 0; i < env->num_agents; i++) {
-        if (player_active && i == player_idx) continue;
+
         Drone *agent = &env->agents[i];
 
    

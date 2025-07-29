@@ -207,7 +207,7 @@ int main(int argc, char** argv) {
 
     while (!WindowShouldClose()) {
         forward_linearcontlstm(net, env->observations, env->actions);
-        if (player_active) player_character(env, player_idx);
+
         c_step(env);
         c_render(env);
     }

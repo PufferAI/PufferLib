@@ -7,7 +7,7 @@ from pufferlib.ocean.rocket_drone import binding
 import os
 import json
 
-# Generate random 4-digit number for unique log file (shared across all instances)
+# log suffix to append to log file
 LOG_SUFFIX = random.randint(1000, 9999)
 
 class RocketDrone(pufferlib.PufferEnv):
@@ -68,6 +68,7 @@ class RocketDrone(pufferlib.PufferEnv):
         binding.vec_step(self.c_envs)
 
         info = []
+        # save logs to a log file
         if self.tick % self.report_interval == 0:
             log_data = binding.vec_log(self.c_envs)
             if log_data:
