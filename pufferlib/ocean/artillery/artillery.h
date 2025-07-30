@@ -66,6 +66,7 @@ typedef struct Artillery {
     float max_reward;
     float max_reward_dist;
     float max_score;
+    int fired;
 
     float ftmp1;
     float ftmp2;
@@ -109,6 +110,36 @@ void add_log(Artillery* env) {
     env->log.n += 1;
 }
 
+float calculate_parabola_closest_distance(Artillery* env) {
+    float v0 = env->powder * 300.0f + 50.0f;
+    float vx0 = v0 * cosf(env->angle);
+    float vy0 = v0 * sinf(env->angle);
+    float x0 = 30.0f;
+    float y0 = 30.0f;
+
+    float tx = env->tx;
+    float ty = env->ty;
+
+    float min_dist = 999999.0f;
+
+    for (float t = 0; t < 20.0f; t += 0.1f) {
+        float x = x0 + vx0 * t;
+        float y = y0 + vy0 * t - 0.5f * env->g * t * t;
+
+        if (y < 0 || x < 0 || x > env->width) break;
+
+        float dx = x - tx;
+        float dy = y - ty;
+        float dist = sqrtf(dx * dx + dy * dy);
+
+        if (dist < min_dist) {
+            min_dist = dist;
+        }
+    }
+
+    return min_dist;
+}
+
 float calculate_score(Artillery* env, float hit_x, float hit_y) {
     float dx = hit_x - env->tx;
     float dy = hit_y - env->ty;
@@ -118,6 +149,22 @@ float calculate_score(Artillery* env, float hit_x, float hit_y) {
     if (dist >= env->max_reward_dist) return 0.0f;
 
     return 1.0f - (dist / env->max_reward_dist);
+}
+
+void fire_projectile(Artillery* env) {
+    float closest_dist = calculate_parabola_closest_distance(env);
+    float score = calculate_score(env, 0, 0);
+
+    if (closest_dist <= 15.0f) { // Hit target
+        score = 1.0f;
+    } else if (closest_dist >= env->max_reward_dist) {
+        score = 0.0f;
+    } else {
+        score = 1.0f - (closest_dist / env->max_reward_dist);
+    }
+    //printf("env%d closest_dist = %.3f score=%.3f\n", env->i, closest_dist, score);
+    env->score = score;
+    env->rewards[0] += score;
 }
 
 void compute_observations(Artillery* env) {
@@ -155,6 +202,7 @@ void get_random_start(Artillery* env) {
 
     env->angle = ((float)rand() / RAND_MAX) * (env->max_aim_angle - env->min_aim_angle) + env->min_aim_angle;
     env->powder = (float)rand() / RAND_MAX;
+    env->fired = 0;
 }
 
 void reset_round(Artillery* env) {
@@ -239,7 +287,7 @@ void allocate(Artillery* env) {
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
 }
-
+/*
 void fire_projectile(Artillery* env) {
     if (env->projectile_active) return;
 
@@ -250,34 +298,48 @@ void fire_projectile(Artillery* env) {
     env->py = 30.0f;
     env->projectile_active = 1;
 }
-
+*/
 void step_frame(Artillery* env, float action) {
     float act = 0.0;
 
     if (action == FIRE) {
         act = -1.0;
+        env->fired = 1;
         fire_projectile(env);
     } else if (action == ADDPOWDER) {
         act = -0.5;
+        env->score -= 0.001;
+        env->rewards[0] -= 0.001;
         if (env->powder < 0.95) env->powder += 0.05;
     } else if (action == RMPOWDER) {
         act = 0.0;
+        env->score -= 0.001;
+        env->rewards[0] -= 0.001;
         if (env->powder > 0.05) env->powder -= 0.05;
     } else if (action == AIMUP) {
         act = 0.5;
+        env->score -= 0.001;
+        env->rewards[0] -= 0.001;
         if (env->angle < env->max_aim_angle - 0.05) env->angle += 0.05;
     } else if (action == AIMDOWN) {
         act = 1.0;
+        env->score -= 0.001;
+        env->rewards[0] -= 0.001;
         if (env->angle > env->min_aim_angle + 0.05) env->angle -= 0.05;
     }
     if (env->continuous) {
         act = action;
     }
-
+/*
     if (env->projectile_active) {
-        env->px = env->px + env->vx * 0.016f; // Assuming ~60fps
-        env->py = env->py + env->vy * 0.016f;
-        env->vy = env->vy - env->g * 0.016f;
+        float dt = 0.05f; //0.016f; // Assuming ~60fps
+        float dx =env->vx * dt;
+        float dy =env->vy * dt;
+        printf("dx = %.3f\n", dx);
+        printf("dy = %.3f\n", dy);
+        env->px = env->px + dx;
+        env->py = env->py + dy;
+        env->vy = env->vy - env->g * dt;
 
         if (env->px < 0 || env->px > env->width || env->py < 0) {
             env->projectile_active = 0;
@@ -285,9 +347,9 @@ void step_frame(Artillery* env, float action) {
             env->terminals[0] = 1;
         }
 
-        float dx = env->px - env->tx;
-        float dy = env->py - env->ty;
-        float dist = sqrtf(dx * dx + dy * dy);
+        float dx2 = env->px - env->tx;
+        float dy2 = env->py - env->ty;
+        float dist = sqrtf(dx2 * dx2 + dy2 * dy2);
 
         if (dist <= 15.0f) {
             float score = calculate_score(env, env->px, env->py);
@@ -297,8 +359,8 @@ void step_frame(Artillery* env, float action) {
             env->terminals[0] = 1;
         }
     }
-
-    if (env->px > env->tx + 20) { // Missed
+*/
+    if (env->fired == 1) {
         env->terminals[0] = 1;
         add_log(env);
         c_reset(env);
