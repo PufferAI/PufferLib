@@ -236,10 +236,9 @@ void compute_observations(RocketDrone *env) {
     
 }
 
-// All target-setting functions removed - pure combat mode
 
 float compute_reward(RocketDrone* env, Drone *agent, bool collision) {
-    // Only collision penalties for physical crashes, no formation rewards
+    
     float collision_penalty = 0.0f;
     if (collision && env->num_agents > 1) {
         Drone *nearest = nearest_drone(env, agent);

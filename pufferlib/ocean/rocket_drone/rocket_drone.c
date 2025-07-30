@@ -162,6 +162,8 @@ int main(int argc, char** argv) {
     env->rewards = (float *)calloc(env->num_agents, sizeof(float));
     env->terminals = (unsigned char *)calloc(env->num_agents, sizeof(float));
 
+
+    // usage ./rocket_drone -> load default weights, ./rocket_drone {weights} -> load specified weights
     Weights *weights;
     char wpath[255];
     const char *weight_path;
