@@ -1,5 +1,5 @@
-#include "gpudrive.h"
-#define Env GPUDrive
+#include "drive.h"
+#define Env Drive
 #define MY_SHARED
 #define MY_PUT
 #include "../env_binding.h"
@@ -81,8 +81,8 @@ static PyObject* my_shared(PyObject* self, PyObject* args, PyObject* kwargs) {
     while(total_agent_count < num_agents && env_count < max_envs){
         char map_file[100];
         int map_id = rand() % num_maps;
-        GPUDrive* env = calloc(1, sizeof(GPUDrive));
-        sprintf(map_file, "resources/gpudrive/binaries/map_%03d.bin", map_id);
+        Drive* env = calloc(1, sizeof(Drive));
+        sprintf(map_file, "resources/drive/binaries/map_%03d.bin", map_id);
         env->entities = load_map_binary(map_file, env);
         set_active_agents(env);
         // Store map_id
@@ -147,7 +147,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     int max_agents = unpack(kwargs, "max_agents");
 
     char map_file[100];
-    sprintf(map_file, "resources/gpudrive/binaries/map_%03d.bin", map_id);
+    sprintf(map_file, "resources/drive/binaries/map_%03d.bin", map_id);
     env->num_agents = max_agents;
     env->map_name = strdup(map_file);
     init(env);

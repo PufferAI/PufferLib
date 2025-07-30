@@ -5,9 +5,9 @@ import struct
 import os
 import random
 import pufferlib
-from pufferlib.ocean.gpudrive import binding
+from pufferlib.ocean.drive import binding
 
-class GPUDrive(pufferlib.PufferEnv):
+class Drive(pufferlib.PufferEnv):
     def __init__(self, render_mode=None, report_interval=1,
             width=1280, height=1024,
             human_agent_idx=0,
@@ -41,9 +41,9 @@ class GPUDrive(pufferlib.PufferEnv):
         #     low=-1, high=1, shape=(2,), dtype=np.float32
         # )
         # Check if resources directory exists
-        binary_path = "resources/gpudrive/binaries/map_000.bin"
+        binary_path = "resources/drive/binaries/map_000.bin"
         if not os.path.exists(binary_path):
-            raise FileNotFoundError(f"Required directory {binary_path} not found. Please ensure the GPUDrive maps are downloaded and installed correctly per docs.")
+            raise FileNotFoundError(f"Required directory {binary_path} not found. Please ensure the Drive maps are downloaded and installed correctly per docs.")
         agent_offsets, map_ids, num_envs = binding.shared(num_agents=num_agents, num_maps=num_maps)
         self.num_agents = num_agents
         self.agent_offsets = agent_offsets
@@ -89,7 +89,7 @@ class GPUDrive(pufferlib.PufferEnv):
             log = binding.vec_log(self.c_envs)
             if log:
                 info.append(log)
-                print(log)
+                #print(log)
         if(self.tick > 0 and self.resample_frequency > 0 and self.tick % self.resample_frequency == 0):
             self.tick = 0
             will_resample = 1
@@ -297,11 +297,11 @@ def process_all_maps():
     from pathlib import Path
 
     # Create the binaries directory if it doesn't exist
-    binary_dir = Path("resources/gpudrive/binaries")
+    binary_dir = Path("resources/drive/binaries")
     binary_dir.mkdir(parents=True, exist_ok=True)
 
     # Path to the training data
-    data_dir = Path("data/processed_big/validation")
+    data_dir = Path("data/processed_big/training")
     
     # Get all JSON files in the training directory
     json_files = sorted(data_dir.glob("*.json"))
@@ -322,7 +322,7 @@ def process_all_maps():
 def test_performance(timeout=10, atn_cache=1024, num_agents=1024):
     import time
 
-    env = GPUDrive(num_agents=num_agents)
+    env = Drive(num_agents=num_agents)
     env.reset()
     tick = 0
     num_agents = 1024

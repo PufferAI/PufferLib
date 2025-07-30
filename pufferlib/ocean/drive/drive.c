@@ -1,19 +1,29 @@
 #include <time.h>
 #include <unistd.h>
-#include "gpudrive.h"
+#include "drive.h"
 #include "puffernet.h"
 
-typedef struct GPUDriveNet GPUDriveNet;
-struct GPUDriveNet {
+typedef struct DriveNet DriveNet;
+struct DriveNet {
     int num_agents;
     float* obs_self;
     float* obs_partner;
     float* obs_road;
     float* partner_linear_output;
     float* road_linear_output;
+    float* partner_layernorm_output;
+    float* road_layernorm_output;
+    float* partner_linear_output_two;
+    float* road_linear_output_two;
     Linear* ego_encoder;
     Linear* road_encoder;
     Linear* partner_encoder;
+    LayerNorm* ego_layernorm;
+    LayerNorm* road_layernorm;
+    LayerNorm* partner_layernorm;
+    Linear* ego_encoder_two;
+    Linear* road_encoder_two;
+    Linear* partner_encoder_two;
     MaxDim1* partner_max;
     MaxDim1* road_max;
     CatDim1* cat1;
@@ -27,20 +37,30 @@ struct GPUDriveNet {
     Multidiscrete* multidiscrete;
 };
 
-GPUDriveNet* init_gpudrivenet(Weights* weights, int num_agents) {
-    GPUDriveNet* net = calloc(1, sizeof(GPUDriveNet));
-    int hidden_size = 512;
+DriveNet* init_drivenet(Weights* weights, int num_agents) {
+    DriveNet* net = calloc(1, sizeof(DriveNet));
+    int hidden_size = 256;
     int input_size = 64;
 
     net->num_agents = num_agents;
-    net->obs_self = calloc(num_agents*6, sizeof(float)); // 6 features
+    net->obs_self = calloc(num_agents*7, sizeof(float)); // 7 features
     net->obs_partner = calloc(num_agents*63*7, sizeof(float)); // 63 objects, 7 features
     net->obs_road = calloc(num_agents*200*13, sizeof(float)); // 200 objects, 13 features
     net->partner_linear_output = calloc(num_agents*63*input_size, sizeof(float));
     net->road_linear_output = calloc(num_agents*200*input_size, sizeof(float));
-    net->ego_encoder = make_linear(weights, num_agents, 6, input_size);
+    net->partner_linear_output_two = calloc(num_agents*63*input_size, sizeof(float));
+    net->road_linear_output_two = calloc(num_agents*200*input_size, sizeof(float));
+    net->partner_layernorm_output = calloc(num_agents*63*input_size, sizeof(float));
+    net->road_layernorm_output = calloc(num_agents*200*input_size, sizeof(float));
+    net->ego_encoder = make_linear(weights, num_agents, 7, input_size);
+    net->ego_layernorm = make_layernorm(weights, num_agents, input_size);
+    net->ego_encoder_two = make_linear(weights, num_agents, input_size, input_size);
     net->road_encoder = make_linear(weights, num_agents, 13, input_size);
+    net->road_layernorm = make_layernorm(weights, num_agents, input_size);
+    net->road_encoder_two = make_linear(weights, num_agents, input_size, input_size);
     net->partner_encoder = make_linear(weights, num_agents, 7, input_size);
+    net->partner_layernorm = make_layernorm(weights, num_agents, input_size);
+    net->partner_encoder_two = make_linear(weights, num_agents, input_size, input_size);
     net->partner_max = make_max_dim1(num_agents, 63, input_size);
     net->road_max = make_max_dim1(num_agents, 200, input_size);
     net->cat1 = make_cat_dim1(num_agents, input_size, input_size);
@@ -50,21 +70,31 @@ GPUDriveNet* init_gpudrivenet(Weights* weights, int num_agents) {
     net->relu = make_relu(num_agents, hidden_size);
     net->actor = make_linear(weights, num_agents, hidden_size, 20); 
     net->value_fn = make_linear(weights, num_agents, hidden_size, 1);
-    net->lstm = make_lstm(weights, num_agents, hidden_size, 512);
+    net->lstm = make_lstm(weights, num_agents, hidden_size, 256);
+    memset(net->lstm->state_h, 0, num_agents*256*sizeof(float));
+    memset(net->lstm->state_c, 0, num_agents*256*sizeof(float));
     int logit_sizes[2] = {7, 13};
     net->multidiscrete = make_multidiscrete(num_agents, logit_sizes, 2);
     return net;
 }
 
-void free_gpudrivenet(GPUDriveNet* net) {
+void free_drivenet(DriveNet* net) {
     free(net->obs_self);
     free(net->obs_partner);
     free(net->obs_road);
     free(net->partner_linear_output);
     free(net->road_linear_output);
+    free(net->partner_linear_output_two);
+    free(net->road_linear_output_two);
     free(net->ego_encoder);
     free(net->road_encoder);
-    free(net->partner_encoder);
+    free(net->partner_encoder); 
+    free(net->ego_layernorm);
+    free(net->road_layernorm);
+    free(net->partner_layernorm);
+    free(net->ego_encoder_two);
+    free(net->road_encoder_two);
+    free(net->partner_encoder_two);
     free(net->partner_max);
     free(net->road_max);
     free(net->cat1);
@@ -79,23 +109,23 @@ void free_gpudrivenet(GPUDriveNet* net) {
     free(net);
 }
 
-void forward(GPUDriveNet* net, float* observations, int* actions) {
+void forward(DriveNet* net, float* observations, int* actions) {
     // Clear previous observations
-    memset(net->obs_self, 0, net->num_agents * 6 * sizeof(float));
+    memset(net->obs_self, 0, net->num_agents * 7 * sizeof(float));
     memset(net->obs_partner, 0, net->num_agents * 63 * 7 * sizeof(float));
     memset(net->obs_road, 0, net->num_agents * 200 * 13 * sizeof(float));
     
     // Reshape observations into 2D boards and additional features
-    float (*obs_self)[6] = (float (*)[6])net->obs_self;
+    float (*obs_self)[7] = (float (*)[7])net->obs_self;
     float (*obs_partner)[63][7] = (float (*)[63][7])net->obs_partner;
     float (*obs_road)[200][13] = (float (*)[200][13])net->obs_road;
     
     for (int b = 0; b < net->num_agents; b++) {
-        int b_offset = b * (6 + 63*7 + 200*7);  // offset for each batch
-        int partner_offset = b_offset + 6;
-        int road_offset = b_offset + 6 + 63*7;
+        int b_offset = b * (7 + 63*7 + 200*7);  // offset for each batch
+        int partner_offset = b_offset + 7;
+        int road_offset = b_offset + 7 + 63*7;
         // Process self observation
-        for(int i = 0; i < 6; i++) {
+        for(int i = 0; i < 7; i++) {
             obs_self[b][i] = observations[b_offset + i];
         }
 
@@ -123,6 +153,8 @@ void forward(GPUDriveNet* net, float* observations, int* actions) {
 
     // Forward pass through the network
     linear(net->ego_encoder, net->obs_self);
+    layernorm(net->ego_layernorm, net->ego_encoder->output);
+    linear(net->ego_encoder_two, net->ego_layernorm->output);
     for (int b = 0; b < net->num_agents; b++) {
         for (int obj = 0; obj < 63; obj++) {
             // Get the 7 features for this object
@@ -130,6 +162,24 @@ void forward(GPUDriveNet* net, float* observations, int* actions) {
             // Apply linear layer to this object
             _linear(obj_features, net->partner_encoder->weights, net->partner_encoder->bias,
                    &net->partner_linear_output[b*63*64 + obj*64], 1, 7, 64);
+        }
+    }
+
+    for (int b = 0; b < net->num_agents; b++) {
+        for (int obj = 0; obj < 63; obj++) {
+            float* after_first = &net->partner_linear_output[b*63*64 + obj*64];
+            _layernorm(after_first, net->partner_layernorm->weights, net->partner_layernorm->bias,
+                        &net->partner_layernorm_output[b*63*64 + obj*64], 1, 64);
+        }
+    }
+    for (int b = 0; b < net->num_agents; b++) {
+        for (int obj = 0; obj < 63; obj++) {
+            // Get the 7 features for this object
+            float* obj_features = &net->partner_layernorm_output[b*63*64 + obj*64];
+            // Apply linear layer to this object
+            _linear(obj_features, net->partner_encoder_two->weights, net->partner_encoder_two->bias,
+                   &net->partner_linear_output_two[b*63*64 + obj*64], 1, 64, 64);
+            
         }
     }
     
@@ -143,9 +193,26 @@ void forward(GPUDriveNet* net, float* observations, int* actions) {
                    &net->road_linear_output[b*200*64 + obj*64], 1, 13, 64);
         }
     }
-    max_dim1(net->partner_max, net->partner_linear_output);
-    max_dim1(net->road_max, net->road_linear_output);
-    cat_dim1(net->cat1, net->ego_encoder->output, net->road_max->output);
+    
+    // Apply layer norm and second linear to each road object
+    for (int b = 0; b < net->num_agents; b++) {
+        for (int obj = 0; obj < 200; obj++) {
+            float* after_first = &net->road_linear_output[b*200*64 + obj*64];
+            _layernorm(after_first, net->road_layernorm->weights, net->road_layernorm->bias,
+                        &net->road_layernorm_output[b*200*64 + obj*64], 1, 64);
+        }
+    }
+    for (int b = 0; b < net->num_agents; b++) {
+        for (int obj = 0; obj < 200; obj++) {
+            float* after_first = &net->road_layernorm_output[b*200*64 + obj*64];
+            _linear(after_first, net->road_encoder_two->weights, net->road_encoder_two->bias,
+                    &net->road_linear_output_two[b*200*64 + obj*64], 1, 64, 64);
+        }
+    }
+    
+    max_dim1(net->partner_max, net->partner_linear_output_two);
+    max_dim1(net->road_max, net->road_linear_output_two);
+    cat_dim1(net->cat1, net->ego_encoder_two->output, net->road_max->output);
     cat_dim1(net->cat2, net->cat1->output, net->partner_max->output);
     gelu(net->gelu, net->cat2->output);
     linear(net->shared_embedding, net->gelu->output);
@@ -156,23 +223,22 @@ void forward(GPUDriveNet* net, float* observations, int* actions) {
 
     // Get action by taking argmax of actor output
     softmax_multidiscrete(net->multidiscrete, net->actor->output, actions);
-
 }
 void demo() {
 
-    GPUDrive env = {
+    Drive env = {
         .dynamics_model = CLASSIC,
         .human_agent_idx = 0,
         .reward_vehicle_collision = -0.1f,
         .reward_offroad_collision = -0.1f,
-	    .map_name = "resources/gpudrive/binaries/map_942.bin",
+	    .map_name = "resources/drive/binaries/map_942.bin",
         .spawn_immunity_timer = 50
     };
     allocate(&env);
     c_reset(&env);
     c_render(&env);
-    Weights* weights = load_weights("resources/gpudrive/gpudrive_weights.bin", 2212693);
-    GPUDriveNet* net = init_gpudrivenet(weights, env.active_agent_count);
+    Weights* weights = load_weights("resources/drive/puffer_drive_weights.bin", 595925);
+    DriveNet* net = init_drivenet(weights, env.active_agent_count);
     //Client* client = make_client(&env);
     int accel_delta = 2;
     int steer_delta = 4;
@@ -221,16 +287,16 @@ void demo() {
 
     close_client(env.client);
     free_allocated(&env);
-    free_gpudrivenet(net);
+    free_drivenet(net);
     free(weights);
 }
 
 void performance_test() {
     long test_time = 10;
-    GPUDrive env = {
+    Drive env = {
         .dynamics_model = CLASSIC,
         .human_agent_idx = 0,
-	    .map_name = "resources/gpudrive/binaries/map_055.bin"
+	    .map_name = "resources/drive/binaries/map_942.bin"
     };
     clock_t start_time, end_time;
     double cpu_time_used;

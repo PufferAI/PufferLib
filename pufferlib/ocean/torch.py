@@ -785,7 +785,7 @@ class ImpulseWarsPolicy(nn.Module):
             t = torch.as_tensor(mapSpace.sample()[None])
             return self.mapCNN(t).shape[1]
 
-class GPUDrive(nn.Module):
+class Drive(nn.Module):
     def __init__(self, env, input_size=128, hidden_size=128, **kwargs):
         super().__init__()
         self.hidden_size = hidden_size
@@ -816,16 +816,7 @@ class GPUDrive(nn.Module):
                 nn.Linear(input_size, input_size))
         )
 
-        '''
-        self.post_mask_road_encoder = nn.Sequential(
-            pufferlib.pytorch.layer_init(
-                nn.Linear(input_size, input_size)),
-        )
-        self.post_mask_partner_encoder = nn.Sequential(
-            pufferlib.pytorch.layer_init(
-                nn.Linear(input_size, input_size)),
-        )
-        '''
+
         self.shared_embedding = nn.Sequential(
             nn.GELU(),
             pufferlib.pytorch.layer_init(nn.Linear(3*input_size,  hidden_size)),
