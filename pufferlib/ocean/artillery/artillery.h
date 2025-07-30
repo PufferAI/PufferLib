@@ -49,6 +49,13 @@ typedef struct Artillery {
     float tx;
     float ty;
 
+    float px;
+    float py;
+    float vx;
+    float vy;
+    float g;
+    int projectile_active;
+
     float target_min_x;
     float target_max_x;
     float target_min_y;
@@ -102,6 +109,17 @@ void add_log(Artillery* env) {
     env->log.n += 1;
 }
 
+float calculate_score(Artillery* env, float hit_x, float hit_y) {
+    float dx = hit_x - env->tx;
+    float dy = hit_y - env->ty;
+    float dist = sqrtf(dx * dx + dy * dy);
+
+    if (dist <= 10.0f) return 1.0f; // Direct hit
+    if (dist >= env->max_reward_dist) return 0.0f;
+
+    return 1.0f - (dist / env->max_reward_dist);
+}
+
 void compute_observations(Artillery* env) {
     env->observations[0] = env->powder;
     env->observations[1] = env->angle;
@@ -132,15 +150,16 @@ void get_random_start(Artillery* env) {
     env->ty = rand() % env->height;
     if (env->tx < env->target_min_x) env->tx = env->target_min_x;
     if (env->tx > env->target_max_x) env->tx = env->target_max_x;
-    if (env->tx < env->target_min_y) env->ty = env->target_min_y;
-    if (env->tx > env->target_max_y) env->ty = env->target_max_y;
+    if (env->ty < env->target_min_y) env->ty = env->target_min_y;
+    if (env->ty > env->target_max_y) env->ty = env->target_max_y;
 
-    env->angle = rand();
-    env->powder = rand();
+    env->angle = ((float)rand() / RAND_MAX) * (env->max_aim_angle - env->min_aim_angle) + env->min_aim_angle;
+    env->powder = (float)rand() / RAND_MAX;
 }
 
 void reset_round(Artillery* env) {
     get_random_start(env);
+    env->projectile_active = 0;
 }
 
 void c_reset(Artillery* env) {
@@ -151,7 +170,6 @@ void c_reset(Artillery* env) {
 }
 
 void c_render(Artillery* env) {
-
     int height = env->height;
 
     env->render = 1;
@@ -166,35 +184,44 @@ void c_render(Artillery* env) {
         ToggleFullscreen();
     }
 
-    if (env->render_many)
-    {
+    if (env->render_many) {
         env->method = rand() % 3;
         get_random_start(env);
     }
 
     BeginDrawing();
     SetConfigFlags(FLAG_MSAA_4X_HINT);
-    ClearBackground((Color){0, 255, 255, 255});
+    ClearBackground((Color){135, 206, 235, 255});
 
-    float car_width = 24.0f;
-    float car_height = 12.0f;
-    float car_x = env->tx;
-    float car_y = height - env->ty;
-    Vector2 origin = {car_width / 2.0f, car_height / 2.0f};
-    DrawRectanglePro(
-        (Rectangle){car_x, car_y, car_width, car_height},
-        origin,
-        0 * 180.0f / PI,
-        (Color){255, 0, 255, 255}
-    );
+    DrawCircle(env->tx, height - env->ty, 15.0f, RED);
+    DrawCircleLines(env->tx, height - env->ty, 15.0f, BLUE);
+
+    float barrel_length = 40.0f;
+    float barrel_width = 8.0f;
+    float barrel_x = 30.0f;
+    float barrel_y = height - 30.0f;
+
+    Vector2 barrel_start = {barrel_x, barrel_y};
+    Vector2 barrel_end = {
+        barrel_x + barrel_length * cosf(env->angle),
+        barrel_y - barrel_length * sinf(env->angle)
+    };
+
+    DrawLineEx(barrel_start, barrel_end, barrel_width, DARKGRAY);
+    DrawCircle(barrel_x, barrel_y, 12.0f, GRAY);
+
+    if (env->projectile_active) {
+        DrawCircle(env->px, height - env->py, 4.0f, BLACK);
+    }
 
     EndDrawing();
 }
 
 void init(Artillery* env) {
     env->tick = 0;
-
     env->debug = 0;
+    env->g = 9.8f;
+    env->projectile_active = 0;
 
     env->inv_width = 1.0f / env->width;
     env->inv_height = 1.0f / env->height;
@@ -213,12 +240,23 @@ void allocate(Artillery* env) {
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
 }
 
+void fire_projectile(Artillery* env) {
+    if (env->projectile_active) return;
+
+    float velocity = env->powder * 300.0f + 50.0f; // Convert powder to velocity
+    env->vx = velocity * cosf(env->angle);
+    env->vy = velocity * sinf(env->angle);
+    env->px = 30.0f;
+    env->py = 30.0f;
+    env->projectile_active = 1;
+}
+
 void step_frame(Artillery* env, float action) {
     float act = 0.0;
 
     if (action == FIRE) {
         act = -1.0;
-        // pew
+        fire_projectile(env);
     } else if (action == ADDPOWDER) {
         act = -0.5;
         if (env->powder < 0.95) env->powder += 0.05;
@@ -232,24 +270,39 @@ void step_frame(Artillery* env, float action) {
         act = 1.0;
         if (env->angle > env->min_aim_angle + 0.05) env->angle -= 0.05;
     }
-    if (env->continuous){
+    if (env->continuous) {
         act = action;
     }
 
-/*
-    env->vx = env->v * cosf(env->ang);
-    env->vy = env->v * sinf(env->ang);
-    env->px = env->px + env->vx;
-    env->py = env->py + env->vy;
-    if (env->px < 0) env->px = 0;
-    else if (env->px > env->width) env->px = env->width;
-    if (env->py < 0) env->py = 0;
-    else if (env->py > env->height) env->py = env->height;
+    if (env->projectile_active) {
+        env->px = env->px + env->vx * 0.016f; // Assuming ~60fps
+        env->py = env->py + env->vy * 0.016f;
+        env->vy = env->vy - env->g * 0.016f;
 
-    calc_whisker_lengths(env);
+        if (env->px < 0 || env->px > env->width || env->py < 0) {
+            env->projectile_active = 0;
+            env->rewards[0] = 0.0f;
+            env->terminals[0] = 1;
+        }
 
-    update_radial_progress(env);
-*/
+        float dx = env->px - env->tx;
+        float dy = env->py - env->ty;
+        float dist = sqrtf(dx * dx + dy * dy);
+
+        if (dist <= 15.0f) {
+            float score = calculate_score(env, env->px, env->py);
+            env->score += score * 100.0f;
+            env->rewards[0] = score;
+            env->projectile_active = 0;
+            env->terminals[0] = 1;
+        }
+    }
+
+    if (env->px > env->tx + 20) { // Missed
+        env->terminals[0] = 1;
+        add_log(env);
+        c_reset(env);
+    }
 }
 
 void c_step(Artillery* env) {

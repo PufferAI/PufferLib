@@ -8,6 +8,8 @@ from pufferlib.ocean.artillery import binding
 class Artillery(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
                  frameskip=4, width=640, height=480,
+                 target_min_x=50, target_max_x=1870, target_min_y=50, target_max_y=1030,
+                 min_aim_angle=1.0, max_aim_angle=1.57, max_reward=1.0, max_reward_dist=100, max_score=100.0,
                  render=0,
                  continuous=False, log_interval=128,
                  ftmp1=0.1, ftmp2=0.1, ftmp3=0.1, ftmp4=0.1,
@@ -42,6 +44,8 @@ class Artillery(pufferlib.PufferEnv):
                 self.terminals[i:i+1],
                 self.truncations[i:i+1],
                 seed, num_envs=num_envs, seed=seed, frameskip=frameskip, width=width, height=height,
+                target_min_x=target_min_x, target_max_x=target_max_x, target_min_y=target_min_y, target_max_y=target_max_y,
+                min_aim_angle=min_aim_angle, max_aim_angle=max_aim_angle, max_reward=max_reward, max_reward_dist=max_reward_dist, max_score=max_score,
                 render=render, continuous=continuous,
                 ftmp1=ftmp1,ftmp2=ftmp2,ftmp3=ftmp3,ftmp4=ftmp4,
                 render_many=render_many, rng=rng+i, i=i, method=method
