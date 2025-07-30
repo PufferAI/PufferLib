@@ -8,7 +8,7 @@ void demo() {
     int logit_sizes[1] = {5};
     LinearLSTM* net = make_linearlstm(weights, 1, 118, logit_sizes, 5);
 
-    WhiskerRacer env = {
+    Artillery env = {
         .frameskip = 1,
         .width = 640,
         .height = 480,
@@ -20,6 +20,7 @@ void demo() {
         .max_aim_angle = 1.57,
         .max_reward = 1.0,
         .max_reward_dist = 100,
+        .max_score = 100,
         .render = 0,
         .continuous = 0,
         .ftmp1 = 0.1,

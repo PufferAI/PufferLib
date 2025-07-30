@@ -15,6 +15,14 @@
 
 #define PI2 PI * 2
 
+typedef struct Log {
+    float perf;
+    float score;
+    float episode_return;
+    float episode_length;
+    float n;
+} Log;
+
 typedef struct Client {
     float width;   // 640
     float height;  // 480
@@ -29,8 +37,12 @@ typedef struct Artillery {
     float* actions;
     float* rewards;
     unsigned char* terminals;
-    float score;
     int i;
+
+    int width;
+    int height;
+    float score;
+    int tick;
 
     float powder;
     float angle;
@@ -46,14 +58,33 @@ typedef struct Artillery {
     float max_aim_angle;
     float max_reward;
     float max_reward_dist;
+    float max_score;
+
+    float ftmp1;
+    float ftmp2;
+    float ftmp3;
+    float ftmp4;
+
+    int frameskip;
+    int render;
+    int continuous;
 
     int debug;
     unsigned int rng;
     int render_many;
     int method;
+
+    // Math
+    float inv_width;
+    float inv_height;
+    float inv_pi2;
 } Artillery;
 
-void free_allocated(WhiskerRacer* env) {
+void c_close(Artillery* env) {
+    //unload_track();
+}
+
+void free_allocated(Artillery* env) {
     free(env->actions);
     free(env->observations);
     free(env->terminals);
@@ -61,7 +92,7 @@ void free_allocated(WhiskerRacer* env) {
     c_close(env);
 }
 
-void add_log(WhiskerRacer* env) {
+void add_log(Artillery* env) {
     env->log.episode_length += env->tick;
     if (env->log.episode_length > 0.01f) {
     }
@@ -71,7 +102,7 @@ void add_log(WhiskerRacer* env) {
     env->log.n += 1;
 }
 
-void compute_observations(WhiskerRacer* env) {
+void compute_observations(Artillery* env) {
     env->observations[0] = env->powder;
     env->observations[1] = env->angle;
     env->observations[2] = env->tx;
@@ -79,7 +110,7 @@ void compute_observations(WhiskerRacer* env) {
     env->observations[4] = env->score / 100.0f;
 }
 
-Client* make_client(WhiskerRacer* env) {
+Client* make_client(Artillery* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
     client->width = env->width;
     client->height = env->height;
@@ -96,9 +127,9 @@ void close_client(Client* client) {
     free(client);
 }
 
-void get_random_start(WhiskerRacer* env) {
-    int env->tx = rand() % env->width;
-    int env->ty = rand() % env->height;
+void get_random_start(Artillery* env) {
+    env->tx = rand() % env->width;
+    env->ty = rand() % env->height;
     if (env->tx < env->target_min_x) env->tx = env->target_min_x;
     if (env->tx > env->target_max_x) env->tx = env->target_max_x;
     if (env->tx < env->target_min_y) env->ty = env->target_min_y;
@@ -108,18 +139,18 @@ void get_random_start(WhiskerRacer* env) {
     env->powder = rand();
 }
 
-void reset_round(WhiskerRacer* env) {
+void reset_round(Artillery* env) {
     get_random_start(env);
 }
 
-void c_reset(WhiskerRacer* env) {
+void c_reset(Artillery* env) {
     env->score = 0;
     reset_round(env);
     env->tick = 0;
     compute_observations(env);
 }
 
-void c_render(WhiskerRacer* env) {
+void c_render(Artillery* env) {
 
     int height = env->height;
 
@@ -143,7 +174,7 @@ void c_render(WhiskerRacer* env) {
 
     BeginDrawing();
     SetConfigFlags(FLAG_MSAA_4X_HINT);
-    ClearBackground(LIGHTBLUE);
+    ClearBackground((Color){0, 255, 255, 255});
 
     float car_width = 24.0f;
     float car_height = 12.0f;
@@ -160,7 +191,7 @@ void c_render(WhiskerRacer* env) {
     EndDrawing();
 }
 
-void init(WhiskerRacer* env) {
+void init(Artillery* env) {
     env->tick = 0;
 
     env->debug = 0;
@@ -174,7 +205,7 @@ void init(WhiskerRacer* env) {
     get_random_start(env);
 }
 
-void allocate(WhiskerRacer* env) {
+void allocate(Artillery* env) {
     init(env);
     env->observations = (float*)calloc(5, sizeof(float));
     env->actions = (float*)calloc(1, sizeof(float));
@@ -182,7 +213,7 @@ void allocate(WhiskerRacer* env) {
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
 }
 
-void step_frame(WhiskerRacer* env, float action) {
+void step_frame(Artillery* env, float action) {
     float act = 0.0;
 
     /*#define FIRE 0
@@ -227,7 +258,7 @@ void step_frame(WhiskerRacer* env, float action) {
 */
 }
 
-void c_step(WhiskerRacer* env) {
+void c_step(Artillery* env) {
     env->terminals[0] = 0;
     env->rewards[0] = 0.0;
 
