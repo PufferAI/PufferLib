@@ -46,7 +46,7 @@
 #define SLOTS_PER_CELL (MAX_ENTITIES_PER_CELL*2 + 1)
 
 // Max road segment observation entities
-#define MAX_ROAD_SEGMENT_OBSERVATIONS 50
+#define MAX_ROAD_SEGMENT_OBSERVATIONS 200
 #define MAX_CARS 64
 // Observation Space Constants
 #define MAX_SPEED 100.0f
@@ -371,7 +371,7 @@ void init_grid_map(GPUDrive* env){
     float bottom_right_y;
     int first_valid_point = 0;
     for(int i = 0; i < env->num_entities; i++){
-        if(env->entities[i].type == 6){
+        if(env->entities[i].type > 3 && env->entities[i].type < 7){
             // Check all points in the trajectory for road elements
             Entity* e = &env->entities[i];
             for(int j = 0; j < e->array_size; j++){
@@ -406,7 +406,7 @@ void init_grid_map(GPUDrive* env){
     env->grid_cells = (int*)calloc(grid_cell_count*SLOTS_PER_CELL, sizeof(int));
     // Populate grid cells
     for(int i = 0; i < env->num_entities; i++){
-        if(env->entities[i].type == 6){
+        if(env->entities[i].type > 3 && env->entities[i].type < 7){
             for(int j = 0; j < env->entities[i].array_size - 1; j++){
                 float x_center = (env->entities[i].traj_x[j] + env->entities[i].traj_x[j+1]) / 2;
                 float y_center = (env->entities[i].traj_y[j] + env->entities[i].traj_y[j+1]) / 2;

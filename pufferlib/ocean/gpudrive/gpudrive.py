@@ -33,7 +33,7 @@ class GPUDrive(pufferlib.PufferEnv):
         self.spawn_immunity_timer = spawn_immunity_timer
         self.human_agent_idx = human_agent_idx
         self.resample_frequency = resample_frequency
-        self.num_obs = 6 + 63*7 + 50*7
+        self.num_obs = 7 + 63*7 + 200*7
         self.single_observation_space = gymnasium.spaces.Box(low=-1, high=1,
             shape=(self.num_obs,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.MultiDiscrete([7, 13])
@@ -301,7 +301,7 @@ def process_all_maps():
     binary_dir.mkdir(parents=True, exist_ok=True)
 
     # Path to the training data
-    data_dir = Path("data/processed/validation")
+    data_dir = Path("data/processed_big/validation")
     
     # Get all JSON files in the training directory
     json_files = sorted(data_dir.glob("*.json"))
@@ -309,7 +309,7 @@ def process_all_maps():
     print(f"Found {len(json_files)} JSON files")
     
     # Process each JSON file
-    for i, map_path in enumerate(json_files):
+    for i, map_path in enumerate(json_files[:10000]):
         binary_file = f"map_{i:03d}.bin"  # Use zero-padded numbers for consistent sorting
         binary_path = binary_dir / binary_file
         
