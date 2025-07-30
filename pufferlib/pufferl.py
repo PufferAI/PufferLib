@@ -1051,6 +1051,10 @@ def export(args=None, env_name=None, vecenv=None, policy=None):
     weights = np.concatenate(weights)
     weights.tofile(path)
     print(f'Saved {len(weights)} weights to {path}')
+    
+    target_name = env_name.replace('puffer_', '')
+    print(f'You can copy this to the environment\'s resources using cp -L {path} ./resources/{target_name}/{target_name}_weights.bin')
+    os._exit(0)
 
 def autotune(args=None, env_name=None, vecenv=None, policy=None):
     package = args['package']
