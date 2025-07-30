@@ -216,15 +216,9 @@ void allocate(Artillery* env) {
 void step_frame(Artillery* env, float action) {
     float act = 0.0;
 
-    /*#define FIRE 0
-    #define ADDPOWDER 1
-    #define RMPOWDER 2
-    #define AIMUP 3
-    #define AIMDOWN 4*/
-
     if (action == FIRE) {
         act = -1.0;
-        // pew env->ang += PI / env->turn_pi_frac;
+        // pew
     } else if (action == ADDPOWDER) {
         act = -0.5;
         if (env->powder < 0.95) env->powder += 0.05;
