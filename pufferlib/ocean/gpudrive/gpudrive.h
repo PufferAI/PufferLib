@@ -46,7 +46,7 @@
 #define SLOTS_PER_CELL (MAX_ENTITIES_PER_CELL*2 + 1)
 
 // Max road segment observation entities
-#define MAX_ROAD_SEGMENT_OBSERVATIONS 200
+#define MAX_ROAD_SEGMENT_OBSERVATIONS 50
 #define MAX_CARS 64
 // Observation Space Constants
 #define MAX_SPEED 100.0f
@@ -105,8 +105,6 @@ struct Log {
 typedef struct Entity Entity;
 struct Entity {
     int type;
-    int road_object_id;
-    int road_point_id;
     int array_size;
     float* traj_x;
     float* traj_y;
@@ -238,7 +236,6 @@ Entity* load_map_binary(const char* filename, GPUDrive* env) {
     fread(&env->num_roads, sizeof(int), 1, file);
     env->num_entities = env->num_objects + env->num_roads; 
     Entity* entities = (Entity*)malloc(env->num_entities * sizeof(Entity));
-    // printf("num entities: %d\n", env->num_entities);
     for (int i = 0; i < env->num_entities; i++) {
 	// Read base entity data
         fread(&entities[i].type, sizeof(int), 1, file);
@@ -374,7 +371,7 @@ void init_grid_map(GPUDrive* env){
     float bottom_right_y;
     int first_valid_point = 0;
     for(int i = 0; i < env->num_entities; i++){
-        if(env->entities[i].type > 3 && env->entities[i].type < 7){
+        if(env->entities[i].type == 6){
             // Check all points in the trajectory for road elements
             Entity* e = &env->entities[i];
             for(int j = 0; j < e->array_size; j++){
@@ -409,7 +406,7 @@ void init_grid_map(GPUDrive* env){
     env->grid_cells = (int*)calloc(grid_cell_count*SLOTS_PER_CELL, sizeof(int));
     // Populate grid cells
     for(int i = 0; i < env->num_entities; i++){
-        if(env->entities[i].type > 3 && env->entities[i].type < 7){
+        if(env->entities[i].type == 6){
             for(int j = 0; j < env->entities[i].array_size - 1; j++){
                 float x_center = (env->entities[i].traj_x[j] + env->entities[i].traj_x[j+1]) / 2;
                 float y_center = (env->entities[i].traj_y[j] + env->entities[i].traj_y[j+1]) / 2;
@@ -755,7 +752,7 @@ int collision_check(GPUDrive* env, int agent_idx) {
     int is_active_agent = env->entities[agent_idx].active_agent;
     int respawned = env->entities[agent_idx].respawn_timestep != -1;
     int exceeded_spawn_immunity_agent = (env->timestep - env->entities[agent_idx].respawn_timestep) >= env->spawn_immunity_timer;
-    if(collided == VEHICLE_COLLISION && is_active_agent == 1 && respawned){
+    if(collided == VEHICLE_COLLISION && is_active_agent == 1 && respawned && !exceeded_spawn_immunity_agent){
         agent->collision_state = 0;
     }
 
@@ -766,7 +763,10 @@ int collision_check(GPUDrive* env, int agent_idx) {
     int respawned_collided_with_car = env->entities[car_collided_with_index].respawn_timestep != -1;
     int exceeded_spawn_immunity_collided_with_car = (env->timestep - env->entities[car_collided_with_index].respawn_timestep) >= env->spawn_immunity_timer;
     int within_spawn_immunity_collided_with_car = (env->timestep - env->entities[car_collided_with_index].respawn_timestep) < env->spawn_immunity_timer;
-    if (respawned_collided_with_car) {
+    if (respawned_collided_with_car && exceeded_spawn_immunity_collided_with_car) {
+        int f = 0;
+        //env->entities[car_collided_with_index].collision_state = VEHICLE_COLLISION;
+    } else if (respawned_collided_with_car && within_spawn_immunity_collided_with_car) {
         agent->collision_state = 0;
     }
 
@@ -896,7 +896,6 @@ void init(GPUDrive* env){
     env->human_agent_idx = 0;
     env->timestep = 0;
     env->entities = load_map_binary(env->map_name, env);
-    // printf("num entities: %d\n", env->num_entities);
     env->dynamics_model = CLASSIC;
     set_means(env);
     init_grid_map(env);
@@ -929,7 +928,7 @@ void c_close(GPUDrive* env){
 
 void allocate(GPUDrive* env){
     init(env);
-    int max_obs = 7 + 7*(MAX_CARS - 1) + 7*MAX_ROAD_SEGMENT_OBSERVATIONS;
+    int max_obs = 6 + 7*(MAX_CARS - 1) + 7*MAX_ROAD_SEGMENT_OBSERVATIONS;
     // printf("max obs: %d\n", max_obs*env->active_agent_count);
     // printf("num cars: %d\n", env->num_cars);
     // printf("num static cars: %d\n", env->static_car_count);
@@ -1023,17 +1022,13 @@ float reverse_normalize_value(float value, float min, float max){
 }
 
 void compute_observations(GPUDrive* env) {
-    int max_obs = 7 + 7*(MAX_CARS - 1) + 7*MAX_ROAD_SEGMENT_OBSERVATIONS;
+    int max_obs = 6 + 7*(MAX_CARS - 1) + 7*MAX_ROAD_SEGMENT_OBSERVATIONS;
     memset(env->observations, 0, max_obs*env->active_agent_count*sizeof(float));
     float (*observations)[max_obs] = (float(*)[max_obs])env->observations; 
     for(int i = 0; i < env->active_agent_count; i++) {
         float* obs = &observations[i][0];
         Entity* ego_entity = &env->entities[env->active_agent_indices[i]];
         if(ego_entity->type > 3) break;
-        if(ego_entity->respawn_timestep != -1) {
-            obs[6] = 1;
-            //continue;
-        }
         float ego_heading = ego_entity->heading;
         float cos_heading = ego_entity->heading_x;
         float sin_heading = ego_entity->heading_y;
@@ -1046,8 +1041,8 @@ void compute_observations(GPUDrive* env) {
         float rel_goal_y = -goal_x*sin_heading + goal_y*cos_heading;
         //obs[0] = normalize_value(rel_goal_x, MIN_REL_GOAL_COORD, MAX_REL_GOAL_COORD);
         //obs[1] = normalize_value(rel_goal_y, MIN_REL_GOAL_COORD, MAX_REL_GOAL_COORD);
-        obs[0] = rel_goal_x* 0.005f;
-        obs[1] = rel_goal_y* 0.005f;
+        obs[0] = rel_goal_x* 0.01f;
+        obs[1] = rel_goal_y* 0.01f;
         //obs[2] = ego_speed / MAX_SPEED;
         obs[2] = ego_speed * 0.01f;
         obs[3] = ego_entity->width / MAX_VEH_WIDTH;
@@ -1055,7 +1050,7 @@ void compute_observations(GPUDrive* env) {
         obs[5] = (ego_entity->collision_state > 0) ? 1 : 0;
         
         // Relative Pos of other cars
-        int obs_idx = 7;  // Start after goal distances
+        int obs_idx = 6;  // Start after goal distances
         int cars_seen = 0;
         for(int j = 0; j < MAX_CARS; j++) {
             int index = -1;
@@ -1068,8 +1063,8 @@ void compute_observations(GPUDrive* env) {
             if(env->entities[index].type > 3) break;
             if(index == env->active_agent_indices[i]) continue;  // Skip self, but don't increment obs_idx
             Entity* other_entity = &env->entities[index];
-            if(ego_entity->respawn_timestep != -1) continue;
-            if(other_entity->respawn_timestep != -1) continue;
+            if(other_entity->respawn_timestep > 0 && env->timestep - other_entity->respawn_timestep < env->spawn_immunity_timer) continue;
+            if(ego_entity->respawn_timestep > 0 && env->timestep - ego_entity->respawn_timestep < env->spawn_immunity_timer) continue;
             // Store original relative positions
             float dx = other_entity->x - ego_entity->x;
             float dy = other_entity->y - ego_entity->y;
@@ -1079,8 +1074,8 @@ void compute_observations(GPUDrive* env) {
             float rel_x = dx*cos_heading + dy*sin_heading;
             float rel_y = -dx*sin_heading + dy*cos_heading;
             // Store observations with correct indexing
-            obs[obs_idx] = rel_x * 0.02f;
-            obs[obs_idx + 1] = rel_y * 0.02f;
+            obs[obs_idx] = rel_x * 0.01f;
+            obs[obs_idx + 1] = rel_y * 0.01f;
             obs[obs_idx + 2] = other_entity->width / MAX_VEH_WIDTH;
             obs[obs_idx + 3] = other_entity->length / MAX_VEH_LEN;
             // relative heading
@@ -1089,8 +1084,8 @@ void compute_observations(GPUDrive* env) {
             float rel_heading_y = other_entity->heading_y * ego_entity->heading_x - 
                                 other_entity->heading_x * ego_entity->heading_y;  // sin(a-b) = sin(a)cos(b) - cos(a)sin(b)
 
-            obs[obs_idx + 4] = rel_heading_x;
-            obs[obs_idx + 5] = rel_heading_y;
+            obs[obs_idx + 4] = rel_heading_x / MAX_ORIENTATION_RAD;
+            obs[obs_idx + 5] = rel_heading_y / MAX_ORIENTATION_RAD;
             // obs[obs_idx + 4] = cosf(rel_heading) / MAX_ORIENTATION_RAD;
             // obs[obs_idx + 5] = sinf(rel_heading) / MAX_ORIENTATION_RAD;
             // // relative speed
@@ -1135,12 +1130,12 @@ void compute_observations(GPUDrive* env) {
             // Compute sin and cos of relative angle directly without atan2f
             float cos_angle = dx_norm*cos_heading + dy_norm*sin_heading;
             float sin_angle = -dx_norm*sin_heading + dy_norm*cos_heading;
-            obs[obs_idx] = x_obs * 0.02f;
-            obs[obs_idx + 1] = y_obs * 0.02f;
+            obs[obs_idx] = x_obs * 0.01f;
+            obs[obs_idx + 1] = y_obs * 0.01f;
             obs[obs_idx + 2] = length / MAX_ROAD_SEGMENT_LENGTH;
             obs[obs_idx + 3] = width / MAX_ROAD_SCALE;
-            obs[obs_idx + 4] = cos_angle;
-            obs[obs_idx + 5] = sin_angle;
+            obs[obs_idx + 4] = cos_angle / MAX_ORIENTATION_RAD;
+            obs[obs_idx + 5] = sin_angle / MAX_ORIENTATION_RAD;
             obs[obs_idx + 6] = entity->type - 4.0f;
             obs_idx += 7;
         }
@@ -1179,7 +1174,6 @@ void respawn_agent(GPUDrive* env, int agent_idx){
 
 void c_step(GPUDrive* env){
     memset(env->rewards, 0, env->active_agent_count * sizeof(float));
-    memset(env->terminals, 0, env->active_agent_count * sizeof(unsigned char));
     env->timestep++;
     if(env->timestep == TRAJECTORY_LENGTH){
         add_log(env);
@@ -1205,12 +1199,12 @@ void c_step(GPUDrive* env){
     for(int i = 0; i < env->active_agent_count; i++){
         int agent_idx = env->active_agent_indices[i];
         env->entities[agent_idx].collision_state = 0;
-        //if(env->entities[agent_idx].respawn_timestep != -1) continue;
         collision_check(env, agent_idx);
         int collision_state = env->entities[agent_idx].collision_state;
         
         if(collision_state > 0){
-            if(collision_state == VEHICLE_COLLISION && env->entities[agent_idx].respawn_timestep == -1){
+            if(collision_state == VEHICLE_COLLISION){
+                // printf("map: %s\n", env->map_name);
                 if(env->entities[agent_idx].respawn_timestep != -1) {
                     env->rewards[i] = env->reward_vehicle_collision_post_respawn;
                     env->logs[i].episode_return += env->reward_vehicle_collision_post_respawn;
@@ -1244,7 +1238,6 @@ void c_step(GPUDrive* env){
             } else { 
                 env->rewards[i] += 1.0f;
                 env->logs[i].episode_return += 1.0f;
-                //env->terminals[i] = 1;
             }
 	        env->entities[agent_idx].reached_goal = 1;
             env->entities[agent_idx].reached_goal_this_episode = 1;
@@ -1255,11 +1248,8 @@ void c_step(GPUDrive* env){
         int agent_idx = env->active_agent_indices[i];
         int reached_goal = env->entities[agent_idx].reached_goal;
         int collision_state = env->entities[agent_idx].collision_state;
-        if(reached_goal){
+        if(reached_goal || collision_state > 0){
             respawn_agent(env, agent_idx);
-            //env->entities[agent_idx].x = -10000;
-            //env->entities[agent_idx].y = -10000;
-            //env->entities[agent_idx].respawn_timestep = env->timestep;
         }
     }
     compute_observations(env);

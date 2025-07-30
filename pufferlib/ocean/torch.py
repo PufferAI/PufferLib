@@ -849,13 +849,13 @@ class GPUDrive(nn.Module):
     def encode_observations(self, observations, state=None):
         ego_dim = 7
         partner_dim = 63 * 7
-        road_dim = 200*7
+        road_dim = 50*7
         ego_obs = observations[:, :ego_dim]
         partner_obs = observations[:, ego_dim:ego_dim+partner_dim]
         road_obs = observations[:, ego_dim+partner_dim:ego_dim+partner_dim+road_dim]
         
         partner_objects = partner_obs.view(-1, 63, 7)
-        road_objects = road_obs.view(-1, 200, 7)
+        road_objects = road_obs.view(-1, 50, 7)
         road_continuous = road_objects[:, :, :6]  # First 6 features
         road_categorical = road_objects[:, :, 6]
         road_onehot = F.one_hot(road_categorical.long(), num_classes=7)  # Shape: [batch, 200, 7]
