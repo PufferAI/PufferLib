@@ -6,6 +6,9 @@ import sys
 import os
 import re
 
+# script to convert pt file in experiments/ to bin file in pufferlib/resources/rocket_drones/
+
+
 def extract_weights_from_pt(pt_filepath, output_dir):
     """
     Extract weights from PyTorch .pt file and save as binary file.
