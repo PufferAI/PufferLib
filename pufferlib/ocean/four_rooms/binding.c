@@ -6,7 +6,7 @@
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->size = unpack(kwargs, "size");
     env->seed = unpack(kwargs, "seed");
-    // Allocate grid memory for full state
+    // Allocate grid memory for full state (stores OBJECT_IDX values)
     env->grid = (unsigned char*)calloc(env->size * env->size, sizeof(unsigned char));
     return 0;
 }
