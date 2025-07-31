@@ -19,57 +19,6 @@ from pufferlib.pytorch import layer_init, _nativize_dtype, nativize_tensor
 import numpy as np
 
 
-class FourRoomsConv(nn.Module):
-    """Alternative implementation using a pure CNN approach, similar to 
-    the existing Convolutional policy but adapted for discrete grid observations.
-    
-    This version processes the entire observation through CNN layers rather 
-    than mixing flat and spatial features.
-    """
-    def __init__(self, env, hidden_size=128, **kwargs):
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.is_continuous = False
-        
-        # CNN feature extractor for 7x7 grid
-        self.cnn = nn.Sequential(
-            layer_init(nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1)),  # 7x7 -> 7x7
-            nn.ReLU(),
-            layer_init(nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)),  # 7x7 -> 7x7  
-            nn.ReLU(),
-            layer_init(nn.Conv2d(32, 32, kernel_size=3, stride=2, padding=1)),  # 7x7 -> 4x4
-            nn.ReLU(),
-            nn.Flatten(),  # 32 * 4 * 4 = 512
-            layer_init(nn.Linear(32 * 4 * 4, hidden_size)),
-            nn.ReLU(),
-        )
-        
-        # Action and value heads (same as Default policy)
-        self.decoder = layer_init(
-            nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
-        self.value = layer_init(
-            nn.Linear(hidden_size, 1), std=1)
-
-    def forward(self, observations, state=None):
-        hidden = self.encode_observations(observations, state)
-        logits, values = self.decode_actions(hidden)
-        return logits, values
-
-    def forward_train(self, observations, state=None):
-        return self.forward(observations, state)
-
-    def encode_observations(self, observations, state=None):
-        batch_size = observations.shape[0]
-        # Reshape flat observation to 7x7 grid and normalize
-        grid_obs = observations.view(batch_size, 1, 7, 7).float() / 3.0
-        return self.cnn(grid_obs)
-
-    def decode_actions(self, hidden):
-        logits = self.decoder(hidden)
-        values = self.value(hidden)
-        return logits, values
-
-
 class Boids(nn.Module):
     def __init__(self, env, cnn_channels=32, hidden_size=128, **kwargs):
         super().__init__()
