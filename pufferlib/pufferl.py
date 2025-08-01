@@ -192,6 +192,25 @@ class PuffeRL:
             self.amp_context = torch.amp.autocast(device_type=device_type, dtype=getattr(torch, precision))
         if precision not in ('float32', 'bfloat16'):
             raise pufferlib.APIUsageError(f'Invalid precision: {precision}: use float32 or bfloat16')
+        
+        # Verify MPS is actually being used
+        if 'mps' in str(device):
+            if torch.backends.mps.is_available():
+                # Test MPS with a small operation
+                try:
+                    test_tensor = torch.randn(100, 100, device=device)
+                    _ = torch.matmul(test_tensor, test_tensor.T)
+                    torch.mps.synchronize()
+                    self.mps_enabled = True
+                    print(f"✓ MPS (Metal Performance Shaders) enabled and verified on {device}")
+                except Exception as e:
+                    self.mps_enabled = False
+                    print(f"✗ MPS requested but failed: {e}")
+            else:
+                self.mps_enabled = False
+                print("✗ MPS requested but not available on this system")
+        else:
+            self.mps_enabled = False
 
         # Initializations
         self.config = config
@@ -565,12 +584,27 @@ class PuffeRL:
         table.add_column(justify="center", width=13)
         table.add_column(justify="right", width=13)
 
+        # Handle MPS display
+        gpu_util = np.mean(self.utilization.gpu_util)
+        gpu_mem = np.mean(self.utilization.gpu_mem)
+        
+        if hasattr(self, 'mps_enabled') and self.mps_enabled:
+            if gpu_util < 0:  # MPS is active but no metrics
+                gpu_label = f'{c1}MPS: {b2}Active{c2}'
+                vram_label = f'{c1}MPS Mem: {b2}Active{c2}'
+            else:
+                gpu_label = f'{c1}MPS: {b2}{gpu_util:.1f}{c2}%'
+                vram_label = f'{c1}MPS Mem: {b2}{gpu_mem:.1f}{c2}%'
+        else:
+            gpu_label = f'{c1}GPU: {b2}{gpu_util:.1f}{c2}%'
+            vram_label = f'{c1}VRAM: {b2}{gpu_mem:.1f}{c2}%'
+        
         table.add_row(
             f'{b1}PufferLib {b2}3.0 {idx[0]*" "}:blowfish:',
             f'{c1}CPU: {b2}{np.mean(self.utilization.cpu_util):.1f}{c2}%',
-            f'{c1}GPU: {b2}{np.mean(self.utilization.gpu_util):.1f}{c2}%',
+            gpu_label,
             f'{c1}DRAM: {b2}{np.mean(self.utilization.cpu_mem):.1f}{c2}%',
-            f'{c1}VRAM: {b2}{np.mean(self.utilization.gpu_mem):.1f}{c2}%',
+            vram_label,
         )
         idx[0] = (idx[0] - 1) % 10
             
@@ -588,6 +622,8 @@ class PuffeRL:
         s.add_row(f'{c2}Epoch', f'{b2}{self.epoch}')
         s.add_row(f'{c2}Uptime', duration(self.uptime, b2, c2))
         s.add_row(f'{c2}Remaining', remaining)
+        if hasattr(self, 'mps_enabled') and self.mps_enabled:
+            s.add_row(f'{c2}Device', f'{b2}MPS ✓{c2}')
 
         delta = profile.eval['buffer'] + profile.train['buffer']
         p = Table(box=None, expand=True, show_header=False)
@@ -878,6 +914,8 @@ class Utilization(Thread):
             self.cpu_util.append(100*psutil.cpu_percent()/psutil.cpu_count())
             mem = psutil.virtual_memory()
             self.cpu_mem.append(100*mem.active/mem.total)
+            
+            # Check for GPU availability (CUDA or MPS)
             if torch.cuda.is_available():
                 # Monitoring in distributed crashes nvml
                 if torch.distributed.is_initialized():
@@ -887,6 +925,23 @@ class Utilization(Thread):
                 self.gpu_util.append(torch.cuda.utilization())
                 free, total = torch.cuda.mem_get_info()
                 self.gpu_mem.append(100*(total-free)/total)
+            elif torch.backends.mps.is_available():
+                # MPS monitoring - no direct utilization API
+                # Use memory as a proxy for activity
+                try:
+                    allocated = torch.mps.current_allocated_memory()
+                    driver_allocated = torch.mps.driver_allocated_memory()
+                    if driver_allocated > 0:
+                        # Use memory allocation as proxy for utilization
+                        # This is not perfect but gives some indication
+                        self.gpu_util.append(min(100 * allocated / driver_allocated, 100))
+                        self.gpu_mem.append(100 * allocated / driver_allocated)
+                    else:
+                        self.gpu_util.append(-1)  # -1 indicates MPS active but no metrics
+                        self.gpu_mem.append(-1)
+                except:
+                    self.gpu_util.append(-1)  # -1 indicates MPS active but metrics failed
+                    self.gpu_mem.append(-1)
             else:
                 self.gpu_util.append(0)
                 self.gpu_mem.append(0)
