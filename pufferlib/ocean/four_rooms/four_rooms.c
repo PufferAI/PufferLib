@@ -1,5 +1,3 @@
-/* FourRooms standalone test program */
-
 #include "four_rooms.h"
 
 int main() {

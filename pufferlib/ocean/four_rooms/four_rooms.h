@@ -1,24 +1,8 @@
-/* FourRooms: Classic four room navigation environment compatible with MinGrid
- * Agent has 7x7x3 partial observation and must navigate to goal
- * Observation encoding: (OBJECT_IDX, COLOR_IDX, STATE) as per MinGrid spec
- * 
- * Implementation notes:
- * - Action space: 7 actions (0=left, 1=right, 2=forward, 3=pickup, 4=drop, 5=toggle, 6=done)
- *   Only actions 0-2 are used in FourRooms
- * - Observation space: 7x7x3 flattened to 147 elements
- *   Each cell encodes (OBJECT_IDX, COLOR_IDX, STATE) following MinGrid standard
- * - Objects: empty=1, wall=2, goal=8, agent=10 (from OBJECT_TO_IDX)
- * - Colors: grey=5 (walls), blue=2 (agent), green=1 (goal) (from COLOR_TO_IDX)
- * - State: always 0 (no doors in FourRooms)
- * - Mission: implicit "reach the goal" (no mission string in PufferLib)
- * - Rendering: Uses PufferLib standard colors (PUFF_CYAN for agent, PUFF_RED for goal)
- */
-
 #include <stdlib.h>
 #include <string.h>
 #include "raylib.h"
 
-// MinGrid-compatible action space
+// Action space
 const unsigned char LEFT = 0;
 const unsigned char RIGHT = 1; 
 const unsigned char FORWARD = 2;
@@ -27,7 +11,7 @@ const unsigned char DROP = 4; // Unused
 const unsigned char TOGGLE = 5; // Unused
 const unsigned char DONE = 6; // Unused
 
-// MinGrid object type constants (OBJECT_TO_IDX from minigrid/core/constants.py)
+// Observation: Objects
 const unsigned char UNSEEN = 0;
 const unsigned char EMPTY = 1;
 const unsigned char WALL = 2;
@@ -40,8 +24,8 @@ const unsigned char GOAL = 8;
 const unsigned char LAVA = 9; // Unused
 const unsigned char AGENT = 10;
 
-// MinGrid color constants (COLOR_TO_IDX from minigrid/core/constants.py)
-const unsigned char COLOR_RED = 0;
+// Observation: Colors
+const unsigned char COLOR_BLACK = 0;
 const unsigned char COLOR_GREEN = 1;
 const unsigned char COLOR_BLUE = 2;
 const unsigned char COLOR_PURPLE = 3;
@@ -68,13 +52,13 @@ typedef struct {
     int* actions;
     float* rewards;
     unsigned char* terminals;
-    int size; // Grid size (default 19)
+    int size; // default 19
     int tick;
     int agent_x, agent_y;
     int agent_dir; // 0=East, 1=South, 2=West, 3=North
     int goal_x, goal_y;
-    unsigned char* grid; // Full grid state (stores OBJECT_IDX values)
-    int seed;
+    unsigned char* grid; // Stores OBJECT_IDX values
+    int see_through_walls;
     Texture2D puffers;
 } FourRooms;
 
@@ -86,9 +70,48 @@ void add_log(FourRooms* env) {
     env->log.n++;
 }
 
+int can_see_cell(FourRooms* env, int agent_x, int agent_y, int target_x, int target_y) {
+    if (env->see_through_walls) {
+        return 1;
+    }
+
+    // Use Bresenham's line algorithm to check line of sight
+    int dx = abs(target_x - agent_x);
+    int dy = abs(target_y - agent_y);
+    int x = agent_x;
+    int y = agent_y;
+    int x_inc = (target_x > agent_x) ? 1 : -1;
+    int y_inc = (target_y > agent_y) ? 1 : -1;
+    int error = dx - dy;
+
+    while (x != target_x || y != target_y) {
+        // If we've reached the target cell, stop (target cell should always be visible)
+        if (x == target_x && y == target_y) {
+            break;
+        }
+
+        int error2 = 2 * error;
+        if (error2 > -dy) {
+            error -= dy;
+            x += x_inc;
+        }
+        if (error2 < dx) {
+            error += dx;
+            y += y_inc;
+        }
+
+        // If the next cell (not the target) is a wall, block vision beyond but allow seeing the wall itself
+        if ((x != target_x || y != target_y) &&
+            x >= 0 && x < env->size && y >= 0 && y < env->size &&
+            env->grid[y * env->size + x] == WALL) {
+            return 0; // Wall blocks the view beyond, but wall itself is visible
+        }
+    }
+    return 1; // Target cell is visible
+}
+
 void generate_observation(FourRooms* env) {
-    // Generate 7x7x3 MinGrid-compatible observation centered on agent's view direction
-    // Each cell contains (OBJECT_IDX, COLOR_IDX, STATE) tuple
+    // Generate 7x7x3 observation centered on agent's view direction
     int view_size = 7;
     int half_view = view_size / 2;
     
@@ -112,20 +135,24 @@ void generate_observation(FourRooms* env) {
             
             unsigned char object_idx, color_idx, state;
             
-            // Check bounds - out of bounds is treated as wall
+            // Check bounds, out of bounds is treated as wall
             if (world_x < 0 || world_x >= env->size || world_y < 0 || world_y >= env->size) {
                 object_idx = WALL;
-                color_idx = COLOR_GREY;  // Walls are grey in MinGrid
-                state = 0;               // No state for walls
+                color_idx = COLOR_GREY;
+                state = 0;
+            } else if (!can_see_cell(env, env->agent_x, env->agent_y, world_x, world_y)) {
+                object_idx = UNSEEN; // Cell is blocked by walls
+                color_idx = COLOR_BLACK;
+                state = 0;
             } else {
                 int grid_idx = world_y * env->size + world_x;
                 unsigned char grid_cell = env->grid[grid_idx];
                 
-                // Map grid cell to MinGrid encoding
+                // Map grid cell to MiniGrid encoding
                 switch (grid_cell) {
                     case EMPTY:
                         object_idx = EMPTY;
-                        color_idx = 0;  // No color for empty
+                        color_idx = COLOR_BLACK;
                         state = 0;
                         break;
                     case WALL:
@@ -135,12 +162,12 @@ void generate_observation(FourRooms* env) {
                         break;
                     case AGENT:
                         object_idx = AGENT;
-                        color_idx = COLOR_BLUE;  // Agent is blue in MinGrid
+                        color_idx = COLOR_BLUE;
                         state = 0;
                         break;
                     case GOAL:
                         object_idx = GOAL;
-                        color_idx = COLOR_GREEN;  // Goal is green in MinGrid
+                        color_idx = COLOR_GREEN;
                         state = 0;
                         break;
                     default:
@@ -151,7 +178,6 @@ void generate_observation(FourRooms* env) {
                 }
             }
             
-            // Store the (OBJECT_IDX, COLOR_IDX, STATE) tuple
             env->observations[base_idx] = object_idx;
             env->observations[base_idx + 1] = color_idx;
             env->observations[base_idx + 2] = state;
@@ -167,21 +193,21 @@ void create_four_rooms_grid(FourRooms* env) {
     
     // Create outer walls
     for (int i = 0; i < size; i++) {
-        env->grid[0 * size + i] = WALL; // Top wall
-        env->grid[(size-1) * size + i] = WALL; // Bottom wall
-        env->grid[i * size + 0] = WALL; // Left wall
-        env->grid[i * size + (size-1)] = WALL; // Right wall
+        env->grid[0 * size + i] = WALL; // Top
+        env->grid[(size-1) * size + i] = WALL; // Bottom
+        env->grid[i * size + 0] = WALL; // Left
+        env->grid[i * size + (size-1)] = WALL; // Right
     }
     
     int room_w = size / 2;
     int room_h = size / 2;
     
-    // Create vertical separating wall (with gap)
+    // Create vertical separating wall
     for (int y = 0; y < size; y++) {
         env->grid[y * size + room_w] = WALL;
     }
     
-    // Create horizontal separating wall (with gap)
+    // Create horizontal separating wall
     for (int x = 0; x < size; x++) {
         env->grid[room_h * size + x] = WALL;
     }
@@ -205,9 +231,7 @@ void create_four_rooms_grid(FourRooms* env) {
 }
 
 void c_reset(FourRooms* env) {
-    // Set environment-specific seed
-    srand(env->seed + env->tick);  // Adding tick provides variation across resets
-    
+
     create_four_rooms_grid(env);
     
     // Place agent randomly in valid position
@@ -249,24 +273,22 @@ void c_step(FourRooms* env) {
     int new_dir = env->agent_dir;
     
     if (action == LEFT) {
-        new_dir = (env->agent_dir + 3) % 4; // Turn left
+        new_dir = (env->agent_dir + 3) % 4;
     } else if (action == RIGHT) {
-        new_dir = (env->agent_dir + 1) % 4; // Turn right
+        new_dir = (env->agent_dir + 1) % 4;
     } else if (action == FORWARD) {
-        // Move forward in current direction
-        if (env->agent_dir == 0) new_x += 1; // East
-        else if (env->agent_dir == 1) new_y += 1; // South
-        else if (env->agent_dir == 2) new_x -= 1; // West
-        else if (env->agent_dir == 3) new_y -= 1; // North
-        
-        // Check if move is valid (not into wall)
+        if (env->agent_dir == 0) new_x += 1;
+        else if (env->agent_dir == 1) new_y += 1;
+        else if (env->agent_dir == 2) new_x -= 1;
+        else if (env->agent_dir == 3) new_y -= 1;
+
+        // Check if move is valid
         if (new_x >= 0 && new_x < env->size && new_y >= 0 && new_y < env->size &&
             env->grid[new_y * env->size + new_x] != WALL) {
             env->agent_x = new_x;
             env->agent_y = new_y;
         }
     }
-    // Note: PICKUP, DROP, TOGGLE, DONE actions are ignored in FourRooms
     
     env->agent_dir = new_dir;
     
@@ -275,8 +297,6 @@ void c_step(FourRooms* env) {
         env->terminals[0] = 1;
         env->rewards[0] = 1.0;
         add_log(env);
-        // Update seed for next episode to ensure variety
-        env->seed += 1;
         c_reset(env);
         return;
     }
@@ -289,8 +309,6 @@ void c_step(FourRooms* env) {
         env->terminals[0] = 1;
         env->rewards[0] = 0.0;
         add_log(env);
-        // Update seed for next episode to ensure variety
-        env->seed += 1;
         c_reset(env);
         return;
     }
@@ -300,7 +318,7 @@ void c_step(FourRooms* env) {
 
 void c_render(FourRooms* env) {
     if (!IsWindowReady()) {
-        InitWindow(32*env->size, 32*env->size, "PufferLib FourRooms (MinGrid Compatible)");
+        InitWindow(32*env->size, 32*env->size, "PufferLib FourRooms");
         SetTargetFPS(10);
         env->puffers = LoadTexture("resources/shared/puffers_128.png");
     }
@@ -320,11 +338,9 @@ void c_render(FourRooms* env) {
             int cell = env->grid[y * env->size + x];
             Color color = PUFF_BACKGROUND;
             
-            // Use PufferLib standard colors for visual consistency
             if (cell == WALL) color = PUFF_BACKGROUND2;
             else if (cell == GOAL) color = PUFF_RED;
-            // Agent will be drawn as sprite, not rectangle
-            
+
             if (cell != EMPTY && cell != AGENT) {
                 DrawRectangle(x*px, y*px, px, px, color);
             }
@@ -345,21 +361,22 @@ void c_render(FourRooms* env) {
     else if (env->agent_dir == 2) center_x -= half_view; // West
     else if (env->agent_dir == 3) center_y -= half_view; // North
     
-    // Draw semi-transparent overlay for observation window (light gray)
-    Color obs_overlay = (Color){180, 180, 180, 80}; // Light gray with transparency
+    // Draw semi-transparent overlay for observation window
+    Color obs_overlay = (Color){180, 180, 180, 80};
     for (int i = 0; i < view_size; i++) {
         for (int j = 0; j < view_size; j++) {
             int world_x = center_x - half_view + j;
             int world_y = center_y - half_view + i;
             
-            // Only draw overlay for cells within grid bounds
-            if (world_x >= 0 && world_x < env->size && world_y >= 0 && world_y < env->size) {
+            // Only draw overlay for cells within grid bounds and visible to agent
+            if (world_x >= 0 && world_x < env->size && world_y >= 0 && world_y < env->size &&
+                can_see_cell(env, env->agent_x, env->agent_y, world_x, world_y)) {
                 DrawRectangle(world_x*px, world_y*px, px, px, obs_overlay);
             }
         }
     }
     
-    // Draw agent as pufferfish sprite with proper rotation
+    // Draw agent
     int starting_sprite_x = 0;
     int rotation = 90 * env->agent_dir; // 0=East(0°), 1=South(90°), 2=West(180°), 3=North(270°)
     if (rotation == 180) {
@@ -369,7 +386,7 @@ void c_render(FourRooms* env) {
     
     DrawTexturePro(
         env->puffers,
-        (Rectangle){starting_sprite_x, 0, 128, 128}, // Source rectangle from sprite sheet
+        (Rectangle){starting_sprite_x, 0, 128, 128},
         (Rectangle){
             env->agent_x * px + px/2,
             env->agent_y * px + px/2,

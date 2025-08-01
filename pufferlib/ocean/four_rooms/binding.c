@@ -5,7 +5,7 @@
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->size = unpack(kwargs, "size");
-    env->seed = unpack(kwargs, "seed");
+    env->see_through_walls = 0; // Default to false for MinGrid compatibility
     // Allocate grid memory for full state (stores OBJECT_IDX values)
     env->grid = (unsigned char*)calloc(env->size * env->size, sizeof(unsigned char));
     return 0;

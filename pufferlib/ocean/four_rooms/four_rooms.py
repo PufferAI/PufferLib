@@ -7,12 +7,8 @@ from pufferlib.ocean.four_rooms import binding
 
 class FourRooms(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=19, buf=None, seed=0):
-        # MinGrid-compatible observation space: 7x7x3 (OBJECT_IDX, COLOR_IDX, STATE)
-        # Flattened to 147 elements for PufferLib compatibility  
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=10,
             shape=(7*7*3,), dtype=np.uint8)
-        # MinGrid-compatible action space: 7 actions (only first 3 used in FourRooms)
-        # 0=left, 1=right, 2=forward, 3=pickup, 4=drop, 5=toggle, 6=done
         self.single_action_space = gymnasium.spaces.Discrete(7)
         self.render_mode = render_mode
         self.num_agents = num_envs
