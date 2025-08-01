@@ -23,3 +23,6 @@ Homepage = "https://github.com/PufferAI/PufferLib"
 [build-system]
 requires = ["setuptools", "wheel", "Cython", "numpy", "torch"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv]
+no-build-isolation-package = ["pufferlib"]

@@ -2,6 +2,12 @@
 # --no-build-isolation for 5090
 # Make c and torch compile at the same time
 # CUDA_VISIBLE_DEVICES=None LD_PRELOAD=$(gcc -print-file-name=libasan.so) python3.12 -m pufferlib.clean_pufferl eval --train.device cpu
+
+# Installation on Mac with Apple Silicon (M1/M2/M3/M4):
+# NO_TRAIN=1 uv pip install --no-build-isolation -v .
+# This avoids PyTorch version mismatches and skips optional CUDA extensions
+# After installation, use --train.device mps for GPU acceleration
+
 '''
 Pain points for docs:
     - Build in C first
@@ -237,7 +243,7 @@ environments = {
     'magent': [
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
-        'pettingzoo==1.19.0',
+        f'pettingzoo=={PETTINGZOO_VERSION}',
         'magent==0.2.4',
         # The Magent2 package is broken for now
         #'magent2==0.3.2',
@@ -249,8 +255,8 @@ environments = {
         'hydra-core',
         'duckdb',
         'raylib>=5.5.0',  # Python bindings for raylib graphics library
-        'metta-common @ git+https://github.com/metta-ai/metta.git@richard-alt-versions#subdirectory=common',
-        'metta-mettagrid @ git+https://github.com/metta-ai/metta.git@richard-alt-versions#subdirectory=mettagrid',
+        'metta-common @ git+https://github.com/metta-ai/metta.git@main#subdirectory=common',
+        'metta-mettagrid @ git+https://github.com/metta-ai/metta.git@main#subdirectory=mettagrid',
     ],
     'microrts': [
         f'gym=={GYM_VERSION}',
@@ -259,7 +265,7 @@ environments = {
         'gym_microrts==0.3.2',
     ],
     'minerl': [
-        'gym==0.17.0',
+        f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
         #'git+https://github.com/minerllabs/minerl'
         # Compatiblity warning with urllib3 and chardet
@@ -294,7 +300,7 @@ environments = {
         f'gym=={GYM_VERSION}',
         f'gymnasium=={GYMNASIUM_VERSION}',
         'open_spiel==1.3',
-        'pettingzoo==1.19.0',
+        f'pettingzoo=={PETTINGZOO_VERSION}',
     ],
     'pokemon_red': [
         f'gym=={GYM_VERSION}',
