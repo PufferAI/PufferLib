@@ -1043,6 +1043,10 @@ class WandbLogger:
  
 def train(env_name, args=None, vecenv=None, policy=None, logger=None):
     args = args or load_config(env_name)
+    
+    # Apply hardware-specific optimizations for 'auto' values
+    from pufferlib.hardware_optimizer import optimize_for_hardware
+    args = optimize_for_hardware(args, env_name, verbose=True)
 
     # Assume TorchRun DDP is used if LOCAL_RANK is set
     if 'LOCAL_RANK' in os.environ:
@@ -1109,6 +1113,11 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
 
 def eval(env_name, args=None, vecenv=None, policy=None):
     args = args or load_config(env_name)
+    
+    # Apply hardware-specific optimizations
+    from pufferlib.hardware_optimizer import optimize_for_hardware
+    args = optimize_for_hardware(args, env_name, verbose=False)
+    
     backend = args['vec']['backend']
     if backend != 'PufferEnv':
         backend = 'Serial'

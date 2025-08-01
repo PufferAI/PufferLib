@@ -1,0 +1,782 @@
+W0801 00:42:17.562000 78625 .venv/lib/python3.13/site-packages/torch/distributed/elastic/multiprocessing/redirects.py:29] NOTE: Redirects are currently not supported in Windows or MacOs.
+/Users/jaythibs/code/pufferlib/pufferlib/pufferl.py:44: UserWarning: C/CUDA advantage kernel not available - using Python fallback (expected on Mac)
+  warnings.warn('C/CUDA advantage kernel not available - using Python fallback (expected on Mac)', UserWarning)
+PufferLib Advantage Computation Benchmark
+==========================================
+Apple Metal Performance Shaders detected
+Numba JIT available: True
+
+
+🔥 Running benchmark on CPU
+==================================================
+🚀 Starting Comprehensive Advantage Computation Benchmark
+Device: cpu
+Numba Available: True
+Warmup runs: 3, Benchmark runs: 5
+================================================================================
+
+Testing: 8 segments × 32 horizon = 256 batch size
+  Pure Python: 0.67ms, 0.4M steps/sec
+  Numba JIT: 0.66ms, 0.4M steps/sec
+  🏆 Best: Numba JIT (CPU) (0.4M steps/sec)
+  📈 Speedup vs Python: 1.0x
+
+Testing: 16 segments × 32 horizon = 512 batch size
+  Pure Python: 0.66ms, 0.8M steps/sec
+  Numba JIT: 0.66ms, 0.8M steps/sec
+  🏆 Best: Numba JIT (CPU) (0.8M steps/sec)
+  📈 Speedup vs Python: 1.0x
+
+Testing: 32 segments × 32 horizon = 1,024 batch size
+  Pure Python: 0.66ms, 1.6M steps/sec
+  Numba JIT: 0.65ms, 1.6M steps/sec
+  🏆 Best: Numba JIT (CPU) (1.6M steps/sec)
+  📈 Speedup vs Python: 1.0x
+
+Testing: 64 segments × 32 horizon = 2,048 batch size
+  Pure Python: 0.66ms, 3.1M steps/sec
+  Numba JIT: 0.09ms, 23.4M steps/sec
+  🏆 Best: Numba JIT (CPU) (23.4M steps/sec)
+  📈 Speedup vs Python: 7.5x
+
+Testing: 8 segments × 64 horizon = 512 batch size
+  Pure Python: 1.35ms, 0.4M steps/sec
+  Numba JIT: 1.34ms, 0.4M steps/sec
+  🏆 Best: Numba JIT (CPU) (0.4M steps/sec)
+  📈 Speedup vs Python: 1.0x
+
+Testing: 16 segments × 64 horizon = 1,024 batch size
+  Pure Python: 1.33ms, 0.8M steps/sec
+  Numba JIT: 1.32ms, 0.8M steps/sec
+  🏆 Best: Numba JIT (CPU) (0.8M steps/sec)
+  📈 Speedup vs Python: 1.0x
+
+Testing: 32 segments × 64 horizon = 2,048 batch size
+  Pure Python: 1.32ms, 1.6M steps/sec
+  Numba JIT: 1.33ms, 1.5M steps/sec
+  🏆 Best: Pure Python (1.6M steps/sec)
+  📈 Speedup vs Python: 1.0x
+
+Testing: 64 segments × 64 horizon = 4,096 batch size
+  Pure Python: 1.31ms, 3.1M steps/sec
+  Numba JIT: 0.10ms, 41.8M steps/sec
+  🏆 Best: Numba JIT (CPU) (41.8M steps/sec)
+  📈 Speedup vs Python: 13.4x
+
+Testing: 8 segments × 128 horizon = 1,024 batch size
+  Pure Python: 2.57ms, 0.4M steps/sec
+  Numba JIT: 2.59ms, 0.4M steps/sec
+  🏆 Best: Pure Python (0.4M steps/sec)
+  📈 Speedup vs Python: 1.0x
+
+Testing: 16 segments × 128 horizon = 2,048 batch size
+  Pure Python: 2.60ms, 0.8M steps/sec
+  Numba JIT: 2.62ms, 0.8M steps/sec
+  🏆 Best: Pure Python (0.8M steps/sec)
+  📈 Speedup vs Python: 1.0x
+
+Testing: 32 segments × 128 horizon = 4,096 batch size
+  Pure Python: 2.64ms, 1.6M steps/sec
+  Numba JIT: 2.59ms, 1.6M steps/sec
+  🏆 Best: Numba JIT (CPU) (1.6M steps/sec)
+  📈 Speedup vs Python: 1.0x
+
+Testing: 64 segments × 128 horizon = 8,192 batch size
+  Pure Python: 2.79ms, 2.9M steps/sec
+  Numba JIT: 0.11ms, 74.3M steps/sec
+  🏆 Best: Numba JIT (CPU) (74.3M steps/sec)
+  📈 Speedup vs Python: 25.3x
+
+Testing: 128 segments × 32 horizon = 4,096 batch size
+  Pure Python: 0.68ms, 6.0M steps/sec
+  Numba JIT: 0.11ms, 38.9M steps/sec
+  🏆 Best: Numba JIT (CPU) (38.9M steps/sec)
+  📈 Speedup vs Python: 6.5x
+
+Testing: 256 segments × 32 horizon = 8,192 batch size
+  Pure Python: 0.67ms, 12.2M steps/sec
+  Numba JIT: 0.10ms, 82.9M steps/sec
+  🏆 Best: Numba JIT (CPU) (82.9M steps/sec)
+  📈 Speedup vs Python: 6.8x
+
+Testing: 512 segments × 32 horizon = 16,384 batch size
+  Pure Python: 0.75ms, 21.7M steps/sec
+  Numba JIT: 0.12ms, 140.6M steps/sec
+  🏆 Best: Numba JIT (CPU) (140.6M steps/sec)
+  📈 Speedup vs Python: 6.5x
+
+Testing: 128 segments × 64 horizon = 8,192 batch size
+  Pure Python: 1.36ms, 6.0M steps/sec
+  Numba JIT: 0.10ms, 78.3M steps/sec
+  🏆 Best: Numba JIT (CPU) (78.3M steps/sec)
+  📈 Speedup vs Python: 13.0x
+
+Testing: 256 segments × 64 horizon = 16,384 batch size
+  Pure Python: 1.38ms, 11.8M steps/sec
+  Numba JIT: 0.11ms, 143.7M steps/sec
+  🏆 Best: Numba JIT (CPU) (143.7M steps/sec)
+  📈 Speedup vs Python: 12.1x
+
+Testing: 512 segments × 64 horizon = 32,768 batch size
+  Pure Python: 1.52ms, 21.6M steps/sec
+  Numba JIT: 0.13ms, 251.8M steps/sec
+  🏆 Best: Numba JIT (CPU) (251.8M steps/sec)
+  📈 Speedup vs Python: 11.7x
+
+Testing: 128 segments × 128 horizon = 16,384 batch size
+  Pure Python: 2.77ms, 5.9M steps/sec
+  Numba JIT: 0.11ms, 144.3M steps/sec
+  🏆 Best: Numba JIT (CPU) (144.3M steps/sec)
+  📈 Speedup vs Python: 24.4x
+
+Testing: 256 segments × 128 horizon = 32,768 batch size
+  Pure Python: 2.72ms, 12.1M steps/sec
+  Numba JIT: 0.14ms, 238.8M steps/sec
+  🏆 Best: Numba JIT (CPU) (238.8M steps/sec)
+  📈 Speedup vs Python: 19.8x
+
+Testing: 512 segments × 128 horizon = 65,536 batch size
+  Pure Python: 3.06ms, 21.4M steps/sec
+  Numba JIT: 0.19ms, 338.8M steps/sec
+  🏆 Best: Numba JIT (CPU) (338.8M steps/sec)
+  📈 Speedup vs Python: 15.8x
+
+Testing: 128 segments × 256 horizon = 32,768 batch size
+  Pure Python: 5.45ms, 6.0M steps/sec
+  Numba JIT: 0.16ms, 201.9M steps/sec
+  🏆 Best: Numba JIT (CPU) (201.9M steps/sec)
+  📈 Speedup vs Python: 33.6x
+
+Testing: 256 segments × 256 horizon = 65,536 batch size
+  Pure Python: 5.53ms, 11.9M steps/sec
+  Numba JIT: 0.19ms, 348.1M steps/sec
+  🏆 Best: Numba JIT (CPU) (348.1M steps/sec)
+  📈 Speedup vs Python: 29.3x
+
+Testing: 1024 segments × 32 horizon = 32,768 batch size
+  Pure Python: 0.91ms, 36.2M steps/sec
+  Numba JIT: 0.15ms, 216.2M steps/sec
+  🏆 Best: Numba JIT (CPU) (216.2M steps/sec)
+  📈 Speedup vs Python: 6.0x
+
+Testing: 2048 segments × 32 horizon = 65,536 batch size
+  Pure Python: 1.18ms, 55.5M steps/sec
+  Numba JIT: 0.23ms, 285.6M steps/sec
+  🏆 Best: Numba JIT (CPU) (285.6M steps/sec)
+  📈 Speedup vs Python: 5.1x
+
+Testing: 4096 segments × 32 horizon = 131,072 batch size
+  Pure Python: 1.72ms, 76.2M steps/sec
+  Numba JIT: 0.29ms, 457.1M steps/sec
+  🏆 Best: Numba JIT (CPU) (457.1M steps/sec)
+  📈 Speedup vs Python: 6.0x
+
+Testing: 1024 segments × 64 horizon = 65,536 batch size
+  Pure Python: 1.81ms, 36.1M steps/sec
+  Numba JIT: 0.32ms, 205.3M steps/sec
+  🏆 Best: Numba JIT (CPU) (205.3M steps/sec)
+  📈 Speedup vs Python: 5.7x
+
+Testing: 2048 segments × 64 horizon = 131,072 batch size
+  Pure Python: 2.70ms, 48.5M steps/sec
+  Numba JIT: 0.25ms, 520.1M steps/sec
+  🏆 Best: Numba JIT (CPU) (520.1M steps/sec)
+  📈 Speedup vs Python: 10.7x
+
+Testing: 4096 segments × 64 horizon = 262,144 batch size
+  Pure Python: 3.34ms, 78.5M steps/sec
+  Numba JIT: 0.39ms, 670.3M steps/sec
+  🏆 Best: Numba JIT (CPU) (670.3M steps/sec)
+  📈 Speedup vs Python: 8.5x
+
+Testing: 1024 segments × 128 horizon = 131,072 batch size
+  Pure Python: 3.59ms, 36.5M steps/sec
+  Numba JIT: 0.29ms, 456.0M steps/sec
+  🏆 Best: Numba JIT (CPU) (456.0M steps/sec)
+  📈 Speedup vs Python: 12.5x
+
+Testing: 2048 segments × 128 horizon = 262,144 batch size
+  Pure Python: 4.70ms, 55.7M steps/sec
+  Numba JIT: 0.40ms, 654.6M steps/sec
+  🏆 Best: Numba JIT (CPU) (654.6M steps/sec)
+  📈 Speedup vs Python: 11.7x
+
+Testing: 4096 segments × 128 horizon = 524,288 batch size
+  Pure Python: 7.45ms, 70.4M steps/sec
+  Numba JIT: 0.82ms, 642.4M steps/sec
+  🏆 Best: Numba JIT (CPU) (642.4M steps/sec)
+  📈 Speedup vs Python: 9.1x
+
+Testing: 1024 segments × 256 horizon = 262,144 batch size
+  Pure Python: 7.28ms, 36.0M steps/sec
+  Numba JIT: 0.44ms, 595.5M steps/sec
+  🏆 Best: Numba JIT (CPU) (595.5M steps/sec)
+  📈 Speedup vs Python: 16.5x
+
+Testing: 2048 segments × 256 horizon = 524,288 batch size
+  Pure Python: 10.12ms, 51.8M steps/sec
+  Numba JIT: 0.90ms, 582.3M steps/sec
+  🏆 Best: Numba JIT (CPU) (582.3M steps/sec)
+  📈 Speedup vs Python: 11.2x
+
+Testing: 8192 segments × 32 horizon = 262,144 batch size
+  Pure Python: 2.69ms, 97.3M steps/sec
+  Numba JIT: 0.39ms, 677.3M steps/sec
+  🏆 Best: Numba JIT (CPU) (677.3M steps/sec)
+  📈 Speedup vs Python: 7.0x
+
+Testing: 16384 segments × 32 horizon = 524,288 batch size
+  Pure Python: 5.91ms, 88.7M steps/sec
+  Numba JIT: 0.94ms, 557.8M steps/sec
+  🏆 Best: Numba JIT (CPU) (557.8M steps/sec)
+  📈 Speedup vs Python: 6.3x
+
+Testing: 8192 segments × 64 horizon = 524,288 batch size
+  Pure Python: 6.13ms, 85.6M steps/sec
+  Numba JIT: 0.96ms, 547.7M steps/sec
+  🏆 Best: Numba JIT (CPU) (547.7M steps/sec)
+  📈 Speedup vs Python: 6.4x
+
+Testing: 16384 segments × 64 horizon = 1,048,576 batch size
+  Pure Python: 18.71ms, 56.0M steps/sec
+  Numba JIT: 1.65ms, 634.4M steps/sec
+  🏆 Best: Numba JIT (CPU) (634.4M steps/sec)
+  📈 Speedup vs Python: 11.3x
+
+Testing: 8192 segments × 128 horizon = 1,048,576 batch size
+  Pure Python: 16.36ms, 64.1M steps/sec
+  Numba JIT: 1.61ms, 652.6M steps/sec
+  🏆 Best: Numba JIT (CPU) (652.6M steps/sec)
+  📈 Speedup vs Python: 10.2x
+
+Testing: 16384 segments × 128 horizon = 2,097,152 batch size
+  Pure Python: 51.24ms, 40.9M steps/sec
+  Numba JIT: 4.29ms, 489.3M steps/sec
+  🏆 Best: Numba JIT (CPU) (489.3M steps/sec)
+  📈 Speedup vs Python: 12.0x
+
+🔥 Running benchmark on MPS
+==================================================
+🚀 Starting Comprehensive Advantage Computation Benchmark
+Device: mps
+Numba Available: True
+Warmup runs: 3, Benchmark runs: 5
+================================================================================
+
+Testing: 8 segments × 32 horizon = 256 batch size
+  Pure Python: 8.19ms, 0.0M steps/sec
+  Numba JIT: 0.66ms, 0.4M steps/sec
+  GPU+Transfer: 8.47ms, 0.0M steps/sec
+  🏆 Best: Numba JIT (CPU) (0.4M steps/sec)
+  📈 Speedup vs Python: 12.4x
+
+Testing: 16 segments × 32 horizon = 512 batch size
+  Pure Python: 8.24ms, 0.1M steps/sec
+  Numba JIT: 0.65ms, 0.8M steps/sec
+  GPU+Transfer: 8.47ms, 0.1M steps/sec
+  🏆 Best: Numba JIT (CPU) (0.8M steps/sec)
+  📈 Speedup vs Python: 12.7x
+
+Testing: 32 segments × 32 horizon = 1,024 batch size
+  Pure Python: 7.99ms, 0.1M steps/sec
+  Numba JIT: 0.66ms, 1.6M steps/sec
+  GPU+Transfer: 9.57ms, 0.1M steps/sec
+  🏆 Best: Numba JIT (CPU) (1.6M steps/sec)
+  📈 Speedup vs Python: 12.2x
+
+Testing: 64 segments × 32 horizon = 2,048 batch size
+  Pure Python: 8.38ms, 0.2M steps/sec
+  Numba JIT: 0.09ms, 22.7M steps/sec
+  GPU+Transfer: 1.77ms, 1.2M steps/sec
+  🏆 Best: Numba JIT (CPU) (22.7M steps/sec)
+  📈 Speedup vs Python: 92.7x
+
+Testing: 8 segments × 64 horizon = 512 batch size
+  Pure Python: 16.04ms, 0.0M steps/sec
+  Numba JIT: 1.30ms, 0.4M steps/sec
+  GPU+Transfer: 16.39ms, 0.0M steps/sec
+  🏆 Best: Numba JIT (CPU) (0.4M steps/sec)
+  📈 Speedup vs Python: 12.4x
+
+Testing: 16 segments × 64 horizon = 1,024 batch size
+  Pure Python: 16.59ms, 0.1M steps/sec
+  Numba JIT: 1.29ms, 0.8M steps/sec
+  GPU+Transfer: 16.52ms, 0.1M steps/sec
+  🏆 Best: Numba JIT (CPU) (0.8M steps/sec)
+  📈 Speedup vs Python: 12.9x
+
+Testing: 32 segments × 64 horizon = 2,048 batch size
+  Pure Python: 16.01ms, 0.1M steps/sec
+  Numba JIT: 1.31ms, 1.6M steps/sec
+  GPU+Transfer: 16.34ms, 0.1M steps/sec
+  🏆 Best: Numba JIT (CPU) (1.6M steps/sec)
+  📈 Speedup vs Python: 12.3x
+
+Testing: 64 segments × 64 horizon = 4,096 batch size
+  Pure Python: 16.49ms, 0.2M steps/sec
+  Numba JIT: 0.08ms, 49.6M steps/sec
+  GPU+Transfer: 1.36ms, 3.0M steps/sec
+  🏆 Best: Numba JIT (CPU) (49.6M steps/sec)
+  📈 Speedup vs Python: 199.6x
+
+Testing: 8 segments × 128 horizon = 1,024 batch size
+  Pure Python: 33.32ms, 0.0M steps/sec
+  Numba JIT: 3.75ms, 0.3M steps/sec
+  GPU+Transfer: 33.02ms, 0.0M steps/sec
+  🏆 Best: Numba JIT (CPU) (0.3M steps/sec)
+  📈 Speedup vs Python: 8.9x
+
+Testing: 16 segments × 128 horizon = 2,048 batch size
+  Pure Python: 32.37ms, 0.1M steps/sec
+  Numba JIT: 2.57ms, 0.8M steps/sec
+  GPU+Transfer: 32.50ms, 0.1M steps/sec
+  🏆 Best: Numba JIT (CPU) (0.8M steps/sec)
+  📈 Speedup vs Python: 12.6x
+
+Testing: 32 segments × 128 horizon = 4,096 batch size
+  Pure Python: 32.91ms, 0.1M steps/sec
+  Numba JIT: 2.60ms, 1.6M steps/sec
+  GPU+Transfer: 34.08ms, 0.1M steps/sec
+  🏆 Best: Numba JIT (CPU) (1.6M steps/sec)
+  📈 Speedup vs Python: 12.7x
+
+Testing: 64 segments × 128 horizon = 8,192 batch size
+  Pure Python: 32.25ms, 0.3M steps/sec
+  Numba JIT: 0.09ms, 87.9M steps/sec
+  GPU+Transfer: 1.41ms, 5.8M steps/sec
+  🏆 Best: Numba JIT (CPU) (87.9M steps/sec)
+  📈 Speedup vs Python: 346.0x
+
+Testing: 128 segments × 32 horizon = 4,096 batch size
+  Pure Python: 8.10ms, 0.5M steps/sec
+  Numba JIT: 0.09ms, 43.4M steps/sec
+  GPU+Transfer: 1.43ms, 2.9M steps/sec
+  🏆 Best: Numba JIT (CPU) (43.4M steps/sec)
+  📈 Speedup vs Python: 85.9x
+
+Testing: 256 segments × 32 horizon = 8,192 batch size
+  Pure Python: 8.13ms, 1.0M steps/sec
+  Numba JIT: 0.08ms, 96.8M steps/sec
+  GPU+Transfer: 1.36ms, 6.0M steps/sec
+  🏆 Best: Numba JIT (CPU) (96.8M steps/sec)
+  📈 Speedup vs Python: 96.1x
+
+Testing: 512 segments × 32 horizon = 16,384 batch size
+  Pure Python: 8.08ms, 2.0M steps/sec
+  Numba JIT: 0.14ms, 115.2M steps/sec
+  GPU+Transfer: 1.43ms, 11.4M steps/sec
+  🏆 Best: Numba JIT (CPU) (115.2M steps/sec)
+  📈 Speedup vs Python: 56.8x
+
+Testing: 128 segments × 64 horizon = 8,192 batch size
+  Pure Python: 16.18ms, 0.5M steps/sec
+  Numba JIT: 0.09ms, 90.1M steps/sec
+  GPU+Transfer: 1.38ms, 5.9M steps/sec
+  🏆 Best: Numba JIT (CPU) (90.1M steps/sec)
+  📈 Speedup vs Python: 178.0x
+
+Testing: 256 segments × 64 horizon = 16,384 batch size
+  Pure Python: 16.07ms, 1.0M steps/sec
+  Numba JIT: 0.13ms, 122.0M steps/sec
+  GPU+Transfer: 1.46ms, 11.2M steps/sec
+  🏆 Best: Numba JIT (CPU) (122.0M steps/sec)
+  📈 Speedup vs Python: 119.6x
+
+Testing: 512 segments × 64 horizon = 32,768 batch size
+  Pure Python: 16.75ms, 2.0M steps/sec
+  Numba JIT: 0.15ms, 223.5M steps/sec
+  GPU+Transfer: 1.36ms, 24.1M steps/sec
+  🏆 Best: Numba JIT (CPU) (223.5M steps/sec)
+  📈 Speedup vs Python: 114.3x
+
+Testing: 128 segments × 128 horizon = 16,384 batch size
+  Pure Python: 34.33ms, 0.5M steps/sec
+  Numba JIT: 0.09ms, 179.0M steps/sec
+  GPU+Transfer: 1.45ms, 11.3M steps/sec
+  🏆 Best: Numba JIT (CPU) (179.0M steps/sec)
+  📈 Speedup vs Python: 375.0x
+
+Testing: 256 segments × 128 horizon = 32,768 batch size
+  Pure Python: 32.66ms, 1.0M steps/sec
+  Numba JIT: 0.10ms, 318.2M steps/sec
+  GPU+Transfer: 1.47ms, 22.4M steps/sec
+  🏆 Best: Numba JIT (CPU) (318.2M steps/sec)
+  📈 Speedup vs Python: 317.1x
+
+Testing: 512 segments × 128 horizon = 65,536 batch size
+  Pure Python: 32.94ms, 2.0M steps/sec
+  Numba JIT: 0.21ms, 308.2M steps/sec
+  GPU+Transfer: 1.70ms, 38.5M steps/sec
+  🏆 Best: Numba JIT (CPU) (308.2M steps/sec)
+  📈 Speedup vs Python: 154.9x
+
+Testing: 128 segments × 256 horizon = 32,768 batch size
+  Pure Python: 64.79ms, 0.5M steps/sec
+  Numba JIT: 0.14ms, 233.3M steps/sec
+  GPU+Transfer: 1.52ms, 21.6M steps/sec
+  🏆 Best: Numba JIT (CPU) (233.3M steps/sec)
+  📈 Speedup vs Python: 461.3x
+
+Testing: 256 segments × 256 horizon = 65,536 batch size
+  Pure Python: 65.89ms, 1.0M steps/sec
+  Numba JIT: 0.26ms, 250.4M steps/sec
+  GPU+Transfer: 1.72ms, 38.2M steps/sec
+  🏆 Best: Numba JIT (CPU) (250.4M steps/sec)
+  📈 Speedup vs Python: 251.8x
+
+Testing: 1024 segments × 32 horizon = 32,768 batch size
+  Pure Python: 8.45ms, 3.9M steps/sec
+  Numba JIT: 0.11ms, 293.2M steps/sec
+  GPU+Transfer: 1.50ms, 21.8M steps/sec
+  🏆 Best: Numba JIT (CPU) (293.2M steps/sec)
+  📈 Speedup vs Python: 75.6x
+
+Testing: 2048 segments × 32 horizon = 65,536 batch size
+  Pure Python: 8.09ms, 8.1M steps/sec
+  Numba JIT: 0.16ms, 415.8M steps/sec
+  GPU+Transfer: 1.67ms, 39.2M steps/sec
+  🏆 Best: Numba JIT (CPU) (415.8M steps/sec)
+  📈 Speedup vs Python: 51.3x
+
+Testing: 4096 segments × 32 horizon = 131,072 batch size
+  Pure Python: 8.31ms, 15.8M steps/sec
+  Numba JIT: 0.27ms, 480.1M steps/sec
+  GPU+Transfer: 2.04ms, 64.2M steps/sec
+  🏆 Best: Numba JIT (CPU) (480.1M steps/sec)
+  📈 Speedup vs Python: 30.4x
+
+Testing: 1024 segments × 64 horizon = 65,536 batch size
+  Pure Python: 16.50ms, 4.0M steps/sec
+  Numba JIT: 0.19ms, 340.0M steps/sec
+  GPU+Transfer: 1.69ms, 38.9M steps/sec
+  🏆 Best: Numba JIT (CPU) (340.0M steps/sec)
+  📈 Speedup vs Python: 85.6x
+
+Testing: 2048 segments × 64 horizon = 131,072 batch size
+  Pure Python: 16.31ms, 8.0M steps/sec
+  Numba JIT: 0.30ms, 430.3M steps/sec
+  GPU+Transfer: 1.99ms, 65.8M steps/sec
+  🏆 Best: Numba JIT (CPU) (430.3M steps/sec)
+  📈 Speedup vs Python: 53.5x
+
+Testing: 4096 segments × 64 horizon = 262,144 batch size
+  Pure Python: 16.37ms, 16.0M steps/sec
+  Numba JIT: 0.40ms, 658.2M steps/sec
+  GPU+Transfer: 2.61ms, 100.4M steps/sec
+  🏆 Best: Numba JIT (CPU) (658.2M steps/sec)
+  📈 Speedup vs Python: 41.1x
+
+Testing: 1024 segments × 128 horizon = 131,072 batch size
+  Pure Python: 32.76ms, 4.0M steps/sec
+  Numba JIT: 0.26ms, 498.8M steps/sec
+  GPU+Transfer: 2.03ms, 64.5M steps/sec
+  🏆 Best: Numba JIT (CPU) (498.8M steps/sec)
+  📈 Speedup vs Python: 124.7x
+
+Testing: 2048 segments × 128 horizon = 262,144 batch size
+  Pure Python: 32.40ms, 8.1M steps/sec
+  Numba JIT: 0.45ms, 581.7M steps/sec
+  GPU+Transfer: 2.61ms, 100.5M steps/sec
+  🏆 Best: Numba JIT (CPU) (581.7M steps/sec)
+  📈 Speedup vs Python: 71.9x
+
+Testing: 4096 segments × 128 horizon = 524,288 batch size
+  Pure Python: 32.92ms, 15.9M steps/sec
+  Numba JIT: 0.84ms, 622.6M steps/sec
+  GPU+Transfer: 3.60ms, 145.5M steps/sec
+  🏆 Best: Numba JIT (CPU) (622.6M steps/sec)
+  📈 Speedup vs Python: 39.1x
+
+Testing: 1024 segments × 256 horizon = 262,144 batch size
+  Pure Python: 64.78ms, 4.0M steps/sec
+  Numba JIT: 0.43ms, 612.5M steps/sec
+  GPU+Transfer: 2.58ms, 101.5M steps/sec
+  🏆 Best: Numba JIT (CPU) (612.5M steps/sec)
+  📈 Speedup vs Python: 151.4x
+
+Testing: 2048 segments × 256 horizon = 524,288 batch size
+  Pure Python: 65.78ms, 8.0M steps/sec
+  Numba JIT: 1.07ms, 490.5M steps/sec
+  GPU+Transfer: 3.86ms, 135.8M steps/sec
+  🏆 Best: Numba JIT (CPU) (490.5M steps/sec)
+  📈 Speedup vs Python: 61.5x
+
+Testing: 8192 segments × 32 horizon = 262,144 batch size
+  Pure Python: 8.48ms, 30.9M steps/sec
+  Numba JIT: 0.41ms, 637.1M steps/sec
+  GPU+Transfer: 2.44ms, 107.4M steps/sec
+  🏆 Best: Numba JIT (CPU) (637.1M steps/sec)
+  📈 Speedup vs Python: 20.6x
+
+Testing: 16384 segments × 32 horizon = 524,288 batch size
+  Pure Python: 9.00ms, 58.2M steps/sec
+  Numba JIT: 0.88ms, 592.5M steps/sec
+  GPU+Transfer: 3.74ms, 140.0M steps/sec
+  🏆 Best: Numba JIT (CPU) (592.5M steps/sec)
+  📈 Speedup vs Python: 10.2x
+
+Testing: 8192 segments × 64 horizon = 524,288 batch size
+  Pure Python: 16.63ms, 31.5M steps/sec
+  Numba JIT: 0.83ms, 628.9M steps/sec
+  GPU+Transfer: 3.75ms, 139.7M steps/sec
+  🏆 Best: Numba JIT (CPU) (628.9M steps/sec)
+  📈 Speedup vs Python: 20.0x
+
+Testing: 16384 segments × 64 horizon = 1,048,576 batch size
+  Pure Python: 17.59ms, 59.6M steps/sec
+  Numba JIT: 1.98ms, 529.7M steps/sec
+  GPU+Transfer: 8.83ms, 118.7M steps/sec
+  🏆 Best: Numba JIT (CPU) (529.7M steps/sec)
+  📈 Speedup vs Python: 8.9x
+
+Testing: 8192 segments × 128 horizon = 1,048,576 batch size
+  Pure Python: 33.93ms, 30.9M steps/sec
+  Numba JIT: 1.69ms, 620.1M steps/sec
+  GPU+Transfer: 6.50ms, 161.2M steps/sec
+  🏆 Best: Numba JIT (CPU) (620.1M steps/sec)
+  📈 Speedup vs Python: 20.1x
+
+Testing: 16384 segments × 128 horizon = 2,097,152 batch size
+  Pure Python: 35.15ms, 59.7M steps/sec
+  Numba JIT: 3.26ms, 642.3M steps/sec
+  GPU+Transfer: 12.12ms, 173.0M steps/sec
+  🏆 Best: Numba JIT (CPU) (642.3M steps/sec)
+  📈 Speedup vs Python: 10.8x
+
+====================================================================================================
+COMPREHENSIVE BENCHMARK RESULTS
+====================================================================================================
+Implementation       Segments Horizon  Batch Size   Time (ms)    M Steps/sec  Memory (MB) 
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      8        32       256          0.66         0.4          0.0         
+Numba JIT (CPU)      8        32       256          0.66         0.4          0.0         
+Pure Python          8        32       256          0.67         0.4          0.0         
+Pure Python          8        32       256          8.19         0.0          0.0         
+GPU + Transfer (MPS) 8        32       256          8.47         0.0          0.1         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      16       32       512          0.65         0.8          0.0         
+Numba JIT (CPU)      16       32       512          0.66         0.8          0.0         
+Pure Python          16       32       512          0.66         0.8          0.0         
+Numba JIT (CPU)      8        64       512          1.30         0.4          0.0         
+Numba JIT (CPU)      8        64       512          1.34         0.4          0.0         
+Pure Python          8        64       512          1.35         0.4          0.0         
+Pure Python          16       32       512          8.24         0.1          0.0         
+GPU + Transfer (MPS) 16       32       512          8.47         0.1          0.1         
+Pure Python          8        64       512          16.04        0.0          0.1         
+GPU + Transfer (MPS) 8        64       512          16.39        0.0          0.1         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      32       32       1,024        0.65         1.6          0.0         
+Pure Python          32       32       1,024        0.66         1.6          0.0         
+Numba JIT (CPU)      32       32       1,024        0.66         1.6          0.0         
+Numba JIT (CPU)      16       64       1,024        1.29         0.8          0.0         
+Numba JIT (CPU)      16       64       1,024        1.32         0.8          0.0         
+Pure Python          16       64       1,024        1.33         0.8          0.0         
+Pure Python          8        128      1,024        2.57         0.4          0.0         
+Numba JIT (CPU)      8        128      1,024        2.59         0.4          0.0         
+Numba JIT (CPU)      8        128      1,024        3.75         0.3          0.0         
+Pure Python          32       32       1,024        7.99         0.1          0.0         
+GPU + Transfer (MPS) 32       32       1,024        9.57         0.1          0.1         
+GPU + Transfer (MPS) 16       64       1,024        16.52        0.1          0.1         
+Pure Python          16       64       1,024        16.59        0.1          0.1         
+GPU + Transfer (MPS) 8        128      1,024        33.02        0.0          0.6         
+Pure Python          8        128      1,024        33.32        0.0          0.2         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      64       32       2,048        0.09         23.4         0.0         
+Numba JIT (CPU)      64       32       2,048        0.09         22.7         0.0         
+Pure Python          64       32       2,048        0.66         3.1          0.0         
+Numba JIT (CPU)      32       64       2,048        1.31         1.6          0.0         
+Pure Python          32       64       2,048        1.32         1.6          0.0         
+Numba JIT (CPU)      32       64       2,048        1.33         1.5          0.0         
+GPU + Transfer (MPS) 64       32       2,048        1.77         1.2          0.0         
+Numba JIT (CPU)      16       128      2,048        2.57         0.8          0.0         
+Pure Python          16       128      2,048        2.60         0.8          0.0         
+Numba JIT (CPU)      16       128      2,048        2.62         0.8          0.0         
+Pure Python          64       32       2,048        8.38         0.2          0.0         
+Pure Python          32       64       2,048        16.01        0.1          0.1         
+GPU + Transfer (MPS) 32       64       2,048        16.34        0.1          0.1         
+Pure Python          16       128      2,048        32.37        0.1          0.2         
+GPU + Transfer (MPS) 16       128      2,048        32.50        0.1          0.2         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      64       64       4,096        0.08         49.6         0.0         
+Numba JIT (CPU)      128      32       4,096        0.09         43.4         0.0         
+Numba JIT (CPU)      64       64       4,096        0.10         41.8         0.0         
+Numba JIT (CPU)      128      32       4,096        0.11         38.9         0.0         
+Pure Python          128      32       4,096        0.68         6.0          0.0         
+Pure Python          64       64       4,096        1.31         3.1          0.0         
+GPU + Transfer (MPS) 64       64       4,096        1.36         3.0          0.0         
+GPU + Transfer (MPS) 128      32       4,096        1.43         2.9          0.1         
+Numba JIT (CPU)      32       128      4,096        2.59         1.6          0.0         
+Numba JIT (CPU)      32       128      4,096        2.60         1.6          0.1         
+Pure Python          32       128      4,096        2.64         1.6          0.0         
+Pure Python          128      32       4,096        8.10         0.5          0.0         
+Pure Python          64       64       4,096        16.49        0.2          0.1         
+Pure Python          32       128      4,096        32.91        0.1          0.2         
+GPU + Transfer (MPS) 32       128      4,096        34.08        0.1          0.2         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      256      32       8,192        0.08         96.8         0.0         
+Numba JIT (CPU)      128      64       8,192        0.09         90.1         0.0         
+Numba JIT (CPU)      64       128      8,192        0.09         87.9         0.0         
+Numba JIT (CPU)      256      32       8,192        0.10         82.9         0.0         
+Numba JIT (CPU)      128      64       8,192        0.10         78.3         0.0         
+Numba JIT (CPU)      64       128      8,192        0.11         74.3         0.1         
+Pure Python          256      32       8,192        0.67         12.2         0.0         
+GPU + Transfer (MPS) 256      32       8,192        1.36         6.0          0.1         
+Pure Python          128      64       8,192        1.36         6.0          0.0         
+GPU + Transfer (MPS) 128      64       8,192        1.38         5.9          0.1         
+GPU + Transfer (MPS) 64       128      8,192        1.41         5.8          0.1         
+Pure Python          64       128      8,192        2.79         2.9          0.0         
+Pure Python          256      32       8,192        8.13         1.0          0.0         
+Pure Python          128      64       8,192        16.18        0.5          0.1         
+Pure Python          64       128      8,192        32.25        0.3          0.2         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      128      128      16,384       0.09         179.0        0.0         
+Numba JIT (CPU)      128      128      16,384       0.11         144.3        0.0         
+Numba JIT (CPU)      256      64       16,384       0.11         143.7        0.0         
+Numba JIT (CPU)      512      32       16,384       0.12         140.6        0.0         
+Numba JIT (CPU)      256      64       16,384       0.13         122.0        0.0         
+Numba JIT (CPU)      512      32       16,384       0.14         115.2        0.1         
+Pure Python          512      32       16,384       0.75         21.7         0.0         
+Pure Python          256      64       16,384       1.38         11.8         0.0         
+GPU + Transfer (MPS) 512      32       16,384       1.43         11.4         0.4         
+GPU + Transfer (MPS) 128      128      16,384       1.45         11.3         0.0         
+GPU + Transfer (MPS) 256      64       16,384       1.46         11.2         0.2         
+Pure Python          128      128      16,384       2.77         5.9          0.0         
+Pure Python          512      32       16,384       8.08         2.0          0.0         
+Pure Python          256      64       16,384       16.07        1.0          0.1         
+Pure Python          128      128      16,384       34.33        0.5          0.2         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      256      128      32,768       0.10         318.2        0.0         
+Numba JIT (CPU)      1024     32       32,768       0.11         293.2        0.0         
+Numba JIT (CPU)      512      64       32,768       0.13         251.8        0.0         
+Numba JIT (CPU)      256      128      32,768       0.14         238.8        0.0         
+Numba JIT (CPU)      128      256      32,768       0.14         233.3        0.0         
+Numba JIT (CPU)      512      64       32,768       0.15         223.5        0.0         
+Numba JIT (CPU)      1024     32       32,768       0.15         216.2        0.0         
+Numba JIT (CPU)      128      256      32,768       0.16         201.9        0.0         
+Pure Python          1024     32       32,768       0.91         36.2         0.0         
+GPU + Transfer (MPS) 512      64       32,768       1.36         24.1         0.4         
+GPU + Transfer (MPS) 256      128      32,768       1.47         22.4         0.0         
+GPU + Transfer (MPS) 1024     32       32,768       1.50         21.8         0.0         
+GPU + Transfer (MPS) 128      256      32,768       1.52         21.6         0.2         
+Pure Python          512      64       32,768       1.52         21.6         0.0         
+Pure Python          256      128      32,768       2.72         12.1         0.0         
+Pure Python          128      256      32,768       5.45         6.0          0.0         
+Pure Python          1024     32       32,768       8.45         3.9          0.1         
+Pure Python          512      64       32,768       16.75        2.0          0.1         
+Pure Python          256      128      32,768       32.66        1.0          0.2         
+Pure Python          128      256      32,768       64.79        0.5          0.4         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      2048     32       65,536       0.16         415.8        0.0         
+Numba JIT (CPU)      256      256      65,536       0.19         348.1        0.0         
+Numba JIT (CPU)      1024     64       65,536       0.19         340.0        0.0         
+Numba JIT (CPU)      512      128      65,536       0.19         338.8        0.0         
+Numba JIT (CPU)      512      128      65,536       0.21         308.2        0.0         
+Numba JIT (CPU)      2048     32       65,536       0.23         285.6        0.0         
+Numba JIT (CPU)      256      256      65,536       0.26         250.4        0.0         
+Numba JIT (CPU)      1024     64       65,536       0.32         205.3        0.9         
+Pure Python          2048     32       65,536       1.18         55.5         0.0         
+GPU + Transfer (MPS) 2048     32       65,536       1.67         39.2         0.0         
+GPU + Transfer (MPS) 1024     64       65,536       1.69         38.9         0.0         
+GPU + Transfer (MPS) 512      128      65,536       1.70         38.5         1.0         
+GPU + Transfer (MPS) 256      256      65,536       1.72         38.2         0.2         
+Pure Python          1024     64       65,536       1.81         36.1         0.0         
+Pure Python          512      128      65,536       3.06         21.4         0.2         
+Pure Python          256      256      65,536       5.53         11.9         0.0         
+Pure Python          2048     32       65,536       8.09         8.1          0.0         
+Pure Python          1024     64       65,536       16.50        4.0          0.1         
+Pure Python          512      128      65,536       32.94        2.0          0.2         
+Pure Python          256      256      65,536       65.89        1.0          0.4         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      2048     64       131,072      0.25         520.1        0.0         
+Numba JIT (CPU)      1024     128      131,072      0.26         498.8        0.0         
+Numba JIT (CPU)      4096     32       131,072      0.27         480.1        0.2         
+Numba JIT (CPU)      4096     32       131,072      0.29         457.1        0.0         
+Numba JIT (CPU)      1024     128      131,072      0.29         456.0        0.0         
+Numba JIT (CPU)      2048     64       131,072      0.30         430.3        0.0         
+Pure Python          4096     32       131,072      1.72         76.2         0.5         
+GPU + Transfer (MPS) 2048     64       131,072      1.99         65.8         2.0         
+GPU + Transfer (MPS) 1024     128      131,072      2.03         64.5         0.0         
+GPU + Transfer (MPS) 4096     32       131,072      2.04         64.2         3.5         
+Pure Python          2048     64       131,072      2.70         48.5         0.0         
+Pure Python          1024     128      131,072      3.59         36.5         0.0         
+Pure Python          4096     32       131,072      8.31         15.8         0.0         
+Pure Python          2048     64       131,072      16.31        8.0          0.1         
+Pure Python          1024     128      131,072      32.76        4.0          0.2         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      8192     32       262,144      0.39         677.3        0.0         
+Numba JIT (CPU)      4096     64       262,144      0.39         670.3        0.0         
+Numba JIT (CPU)      4096     64       262,144      0.40         658.2        0.0         
+Numba JIT (CPU)      2048     128      262,144      0.40         654.6        0.0         
+Numba JIT (CPU)      8192     32       262,144      0.41         637.1        0.0         
+Numba JIT (CPU)      1024     256      262,144      0.43         612.5        0.0         
+Numba JIT (CPU)      1024     256      262,144      0.44         595.5        0.0         
+Numba JIT (CPU)      2048     128      262,144      0.45         581.7        0.0         
+GPU + Transfer (MPS) 8192     32       262,144      2.44         107.4        0.0         
+GPU + Transfer (MPS) 1024     256      262,144      2.58         101.5        0.0         
+GPU + Transfer (MPS) 2048     128      262,144      2.61         100.5        2.0         
+GPU + Transfer (MPS) 4096     64       262,144      2.61         100.4        3.0         
+Pure Python          8192     32       262,144      2.69         97.3         0.0         
+Pure Python          4096     64       262,144      3.34         78.5         0.0         
+Pure Python          2048     128      262,144      4.70         55.7         0.0         
+Pure Python          1024     256      262,144      7.28         36.0         0.0         
+Pure Python          8192     32       262,144      8.48         30.9         0.0         
+Pure Python          4096     64       262,144      16.37        16.0         0.1         
+Pure Python          2048     128      262,144      32.40        8.1          0.2         
+Pure Python          1024     256      262,144      64.78        4.0          0.4         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      4096     128      524,288      0.82         642.4        0.0         
+Numba JIT (CPU)      8192     64       524,288      0.83         628.9        0.0         
+Numba JIT (CPU)      4096     128      524,288      0.84         622.6        0.0         
+Numba JIT (CPU)      16384    32       524,288      0.88         592.5        0.0         
+Numba JIT (CPU)      2048     256      524,288      0.90         582.3        0.0         
+Numba JIT (CPU)      16384    32       524,288      0.94         557.8        0.0         
+Numba JIT (CPU)      8192     64       524,288      0.96         547.7        2.0         
+Numba JIT (CPU)      2048     256      524,288      1.07         490.5        0.0         
+GPU + Transfer (MPS) 4096     128      524,288      3.60         145.5        10.0        
+GPU + Transfer (MPS) 16384    32       524,288      3.74         140.0        10.3        
+GPU + Transfer (MPS) 8192     64       524,288      3.75         139.7        0.0         
+GPU + Transfer (MPS) 2048     256      524,288      3.86         135.8        7.0         
+Pure Python          16384    32       524,288      5.91         88.7         2.0         
+Pure Python          8192     64       524,288      6.13         85.6         0.0         
+Pure Python          4096     128      524,288      7.45         70.4         0.0         
+Pure Python          16384    32       524,288      9.00         58.2         0.0         
+Pure Python          2048     256      524,288      10.12        51.8         0.0         
+Pure Python          8192     64       524,288      16.63        31.5         0.1         
+Pure Python          4096     128      524,288      32.92        15.9         0.2         
+Pure Python          2048     256      524,288      65.78        8.0          0.4         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      8192     128      1,048,576    1.61         652.6        0.0         
+Numba JIT (CPU)      16384    64       1,048,576    1.65         634.4        4.0         
+Numba JIT (CPU)      8192     128      1,048,576    1.69         620.1        0.0         
+Numba JIT (CPU)      16384    64       1,048,576    1.98         529.7        0.0         
+GPU + Transfer (MPS) 8192     128      1,048,576    6.50         161.2        8.3         
+GPU + Transfer (MPS) 16384    64       1,048,576    8.83         118.7        20.1        
+Pure Python          8192     128      1,048,576    16.36        64.1         0.0         
+Pure Python          16384    64       1,048,576    17.59        59.6         0.1         
+Pure Python          16384    64       1,048,576    18.71        56.0         4.1         
+Pure Python          8192     128      1,048,576    33.93        30.9         0.2         
+------------------------------------------------------------------------------------------
+Numba JIT (CPU)      16384    128      2,097,152    3.26         642.3        0.0         
+Numba JIT (CPU)      16384    128      2,097,152    4.29         489.3        0.0         
+GPU + Transfer (MPS) 16384    128      2,097,152    12.12        173.0        16.0        
+Pure Python          16384    128      2,097,152    35.15        59.7         0.2         
+Pure Python          16384    128      2,097,152    51.24        40.9         8.0         
+
+============================================================
+ANALYSIS & RECOMMENDATIONS
+============================================================
+
+💡 CPU+Numba outperforms GPU+Transfer at all tested scales
+
+📊 Numba Scaling:
+  Small batches: 0.4M steps/sec
+  Large batches: 565.8M steps/sec
+  Scaling efficiency: 1462.0x
+
+🎯 Recommendations:
+  1. CPU+Numba consistently outperforms GPU+Transfer at tested scales
+  2. Numba JIT achieves 278M steps/sec average performance
+
+📄 Results saved to advantage_benchmark_results.csv
+
+✅ Benchmark complete! Tested 200 configurations.
