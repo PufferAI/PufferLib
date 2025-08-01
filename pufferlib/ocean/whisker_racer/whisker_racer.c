@@ -4,9 +4,9 @@
 
 void demo() {
     printf("demo\n");
-    Weights* weights = load_weights("resources/whisker_racer/whisker_racer_weights.bin", 147844);
+    Weights* weights = load_weights("/puffertank/bet/test/PufferLib/pufferlib/resources/whisker_racer/puffer_whisker_racer_weights.bin", 133124);
     int logit_sizes[1] = {3};
-    LinearLSTM* net = make_linearlstm(weights, 1, 118, logit_sizes, 1);
+    LinearLSTM* net = make_linearlstm(weights, 1, 3, logit_sizes, 1);
 
     WhiskerRacer env = {
         .frameskip = 1,
