@@ -30,6 +30,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->ftmp2 = unpack(kwargs, "ftmp2");
     env->ftmp3 = unpack(kwargs, "ftmp3");
     env->ftmp4 = unpack(kwargs, "ftmp4");
+    env->mode7 = unpack(kwargs, "mode7");
     env->render_many = unpack(kwargs, "render_many");
     env->rng = unpack(kwargs, "rng");
     env->method = unpack(kwargs, "method");

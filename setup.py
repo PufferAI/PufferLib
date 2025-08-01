@@ -1,7 +1,6 @@
-#TODO:
-# --no-build-isolation for 5090
-# Make c and torch compile at the same time
-# CUDA_VISIBLE_DEVICES=None LD_PRELOAD=$(gcc -print-file-name=libasan.so) python3.12 -m pufferlib.clean_pufferl eval --train.device cpu
+# Debug command:
+#    DEBUG=1 python setup.py build_ext --inplace --force
+#    CUDA_VISIBLE_DEVICES=None LD_PRELOAD=$(gcc -print-file-name=libasan.so) python3.12 -m pufferlib.clean_pufferl eval --train.device cpu
 
 # Installation on Mac with Apple Silicon (M1/M2/M3/M4):
 # NO_TRAIN=1 uv pip install --no-build-isolation -v .
@@ -20,7 +19,6 @@ Pain points for docs:
     - Use debug mode to catch segaults
     - TODO: Add check on num agents vs obs shape!!
 '''
-
 
 from setuptools import find_packages, find_namespace_packages, setup, Extension
 import numpy
@@ -418,7 +416,7 @@ extension_kwargs = dict(
     extra_objects=[RAYLIB_A],
 )
 
-# TODO: Include other C files so rebuild is auto?
+# Find C extensions
 c_extensions = []
 if not NO_OCEAN:
     c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
@@ -478,12 +476,12 @@ for key, value in cfg_vars.items():
         cfg_vars[key] = value.replace('-fno-strict-overflow', '')
 
 install_requires = [
+    'setuptools',
     'numpy<2.0',
-    f'gym<={GYM_VERSION}',
-    f'gymnasium<={GYMNASIUM_VERSION}',
-    f'pettingzoo<={PETTINGZOO_VERSION}',
     'shimmy[gym-v21]',
-    'setuptools'
+    'gym==0.23',
+    'gymnasium==0.29.1',
+    'pettingzoo==1.24.1',
 ]
 
 if not NO_TRAIN:
@@ -501,22 +499,13 @@ if not NO_TRAIN:
     ]
 
 setup(
-    name="pufferlib",
     version="3.0.0",
-    long_description_content_type="text/markdown",
     packages=find_namespace_packages() + find_packages() + c_extension_paths + ['pufferlib/extensions'],
     package_data={
         "pufferlib": [RAYLIB_NAME + '/lib/libraylib.a']
     },
     include_package_data=True,
     install_requires=install_requires,
-    extras_require={
-        'docs': docs,
-        'ray': ray,
-        'cleanrl': cleanrl,
-        'common': common,
-        **environments,
-    },
     ext_modules = c_extensions + torch_extensions,
     cmdclass={
         "build_ext": BuildExt,
@@ -524,17 +513,4 @@ setup(
         "build_c": CBuildExt,
     },
     include_dirs=[numpy.get_include(), RAYLIB_NAME + '/include'],
-    entry_points={
-        'console_scripts': [
-            'puffer = pufferlib.pufferl:main',
-        ],
-    },
 )
-#stable_baselines3
-#supersuit==3.3.5
-#'git+https://github.com/oxwhirl/smac.git',
-
-#curl -L -o smac.zip https://blzdistsc2-a.akamaihd.net/Linux/SC2.4.10.zip
-#unzip -P iagreetotheeula smac.zip 
-#curl -L -o maps.zip https://github.com/oxwhirl/smac/releases/download/v0.1-beta1/SMAC_Maps.zip
-#unzip maps.zip && mv SMAC_Maps/ StarCraftII/Maps/
