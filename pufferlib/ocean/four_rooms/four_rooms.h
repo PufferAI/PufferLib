@@ -63,7 +63,7 @@ typedef struct {
 } FourRooms;
 
 void add_log(FourRooms* env) {
-    env->log.perf += (env->rewards[0] > 0) ? 1 : 0;
+    env->log.perf += (env->rewards[0] > 0) ? 1.0 : 0.0;
     env->log.score += env->rewards[0];
     env->log.episode_length += env->tick;
     env->log.episode_return += env->rewards[0];
