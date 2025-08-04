@@ -14,7 +14,7 @@ class Artillery(pufferlib.PufferEnv):
                  continuous=False, log_interval=128,
                  ftmp1=0.1, ftmp2=0.1, ftmp3=0.1, ftmp4=0.1,
                  render_many=0, seed=42,
-                 buf=None, rng=42, i=1, method=0):
+                 buf=None, rng=42, i=1, method=0, debug=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
                                             shape=(5,), dtype=np.float32)
         self.render_mode = render_mode
@@ -48,7 +48,7 @@ class Artillery(pufferlib.PufferEnv):
                 min_aim_angle=min_aim_angle, max_aim_angle=max_aim_angle, max_reward=max_reward, max_reward_dist=max_reward_dist, max_score=max_score,
                 turn_penalty=turn_penalty, render=render, continuous=continuous,
                 ftmp1=ftmp1,ftmp2=ftmp2,ftmp3=ftmp3,ftmp4=ftmp4,
-                render_many=render_many, rng=rng+i, i=i, method=method
+                render_many=render_many, rng=rng+i, i=i, method=method, debug=debug
             )
             c_envs.append(env_id)
         self.c_envs = binding.vectorize(*c_envs)
