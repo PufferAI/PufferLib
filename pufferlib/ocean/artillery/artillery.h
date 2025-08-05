@@ -77,8 +77,10 @@ typedef struct Artillery {
     float max_reward;
     float max_reward_dist;
     float max_reward_distn;
+    float dist_fade;
     float turn_penalty;
     float turn_penaltyn;
+    int turn_penalty_delay;
     float miss_penalty;
     float max_score;
     int fired;
@@ -102,6 +104,8 @@ typedef struct Artillery {
     // Math
     float inv_width;
     float inv_height;
+    float inv_max_angle;
+    float inv_angle_range;
 } Artillery;
 
 void c_close(Artillery* env) {
@@ -188,7 +192,7 @@ void compute_observations(Artillery* env) {
     if (env->debug > 0) printf("  Compute Observations\n");
     env->observations[0] = env->powder;
     if (env->debug > 0) printf("    powder = %.3f\n", env->observations[0]);
-    env->observations[1] = env->angle;
+    env->observations[1] = (env->angle - env->min_aim_angle) * env->inv_angle_range;
     if (env->debug > 0) printf("    angle = %.3f\n", env->observations[1]);
     env->observations[2] = env->tx * env->inv_width;
     if (env->debug > 0) printf("    tx = %.3f\n", env->observations[2]);
@@ -196,6 +200,8 @@ void compute_observations(Artillery* env) {
     if (env->debug > 0) printf("    ty = %.3f\n", env->observations[3]);
     env->observations[4] = env->score;
     if (env->debug > 0) printf("    score = %.6f\n", env->observations[4]);
+    env->observations[5] = env->tick * 0.01;
+    if (env->debug > 0) printf("    tick = %.3f\n", env->observations[5]);
 }
 
 Client* make_client(Artillery* env) {
@@ -244,7 +250,7 @@ void reset_round(Artillery* env) {
     env->fired = 0;
     env->projectile_active = 0;
     env->projectile_time = 0.0f;
-    env->max_reward_distn = 1000 - (int)(env->runs*env->ftmp3);
+    env->max_reward_distn = 1000 - (int)(env->runs * env->dist_fade);
     if (env->max_reward_distn < env->max_reward_dist) env->max_reward_distn = env->max_reward_dist;
 }
 
@@ -306,6 +312,9 @@ void init(Artillery* env) {
 
     env->inv_width = 1.0f / env->width;
     env->inv_height = 1.0f / env->height;
+    env->inv_max_angle = 1.0f / env->max_aim_angle;
+    env->inv_angle_range = 1.0f / (env->max_aim_angle - env->min_aim_angle);
+
 
     srand(env->rng + env->i + env->log.n);
 
@@ -314,14 +323,14 @@ void init(Artillery* env) {
 
 void allocate(Artillery* env) {
     init(env);
-    env->observations = (float*)calloc(5, sizeof(float));
+    env->observations = (float*)calloc(6, sizeof(float));
     env->actions = (float*)calloc(1, sizeof(float));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
 }
 
 float get_turn_penalty(Artillery* env) {
-    if (env->tick <= 20) {
+    if (env->tick <= env->turn_penalty_delay) {
         return 0.0f;
     } else if (env->tick <= 50) {
         float progress = (env->tick - 20) / 30.0f;

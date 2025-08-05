@@ -17,7 +17,9 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->max_aim_angle = unpack(kwargs, "max_aim_angle");
     env->max_reward = unpack(kwargs, "max_reward");
     env->max_reward_dist = unpack(kwargs, "max_reward_dist");
+    env->dist_fade = unpack(kwargs, "dist_fade");
     env->turn_penalty = unpack(kwargs, "turn_penalty");
+    env->turn_penalty_delay = unpack(kwargs, "turn_penalty_delay");
     env->miss_penalty = unpack(kwargs, "miss_penalty");
     env->ftmp1 = unpack(kwargs, "ftmp1");
     env->ftmp2 = unpack(kwargs, "ftmp2");
