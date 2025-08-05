@@ -19,6 +19,8 @@ typedef struct Log {
     float episode_return;
     float episode_length;
     float dist;
+    float max_reward_distn;
+    float turn_penaltyn;
     float n;
 } Log;
 
@@ -45,7 +47,9 @@ typedef struct Artillery {
     float dist;
 
     float powder;
+    float powder0;
     float angle;
+    float angle0;
     float tx;
     float ty;
 
@@ -72,7 +76,10 @@ typedef struct Artillery {
     float max_aim_angle;
     float max_reward;
     float max_reward_dist;
+    float max_reward_distn;
     float turn_penalty;
+    float turn_penaltyn;
+    float miss_penalty;
     float max_score;
     int fired;
 
@@ -89,6 +96,8 @@ typedef struct Artillery {
     unsigned int rng;
     int render_many;
     int method;
+    int same_runs;
+    int runs;
 
     // Math
     float inv_width;
@@ -113,6 +122,8 @@ void add_log(Artillery* env) {
     env->log.score += env->score;
     env->log.perf += env->score / (float)env->max_score;
     env->log.dist += env->dist;
+    env->log.max_reward_distn += env->max_reward_distn;
+    env->log.turn_penaltyn += env->turn_penaltyn;
     env->log.n += 1;
 }
 
@@ -154,10 +165,10 @@ void fire_projectile(Artillery* env) {
 
     if (closest_dist <= 15.0f) { // Hit target
         score = 1.0f;
-    } else if (closest_dist >= env->max_reward_dist) {
-        score = 0.0f;
+    } else if (closest_dist >= env->max_reward_distn) {
+        score = env->miss_penalty;
     } else {
-        score = 1.0f - (closest_dist / env->max_reward_dist);
+        score = 1.0f - (closest_dist / env->max_reward_distn);
     }
     if (env->debug > 0) printf("    env%d tick%d closest_dist = %.3f score=%.3f\n", env->i, env->tick, closest_dist, score);
     env->score += score;
@@ -213,23 +224,33 @@ void get_random_start(Artillery* env) {
     if (env->tx > env->target_max_x) env->tx = env->target_max_x;
     if (env->ty < env->target_min_y) env->ty = env->target_min_y;
     if (env->ty > env->target_max_y) env->ty = env->target_max_y;
-
     env->angle = ((float)rand() / RAND_MAX) * (env->max_aim_angle - env->min_aim_angle) + env->min_aim_angle;
+    env->angle0 = env->angle;
     env->powder = (float)rand() / RAND_MAX;
-    env->fired = 0;
+    env->powder0 = env->powder;
 }
 
 void reset_round(Artillery* env) {
-    get_random_start(env);
+    if (env->runs % env->same_runs == 0) {
+        get_random_start(env);
+    }
+    else {
+        env->angle = env->angle0;
+        env->powder = env->powder0;
+    }
+    env->tick = 0;
+    env->runs += 1;
+    env->score = 0;
+    env->fired = 0;
     env->projectile_active = 0;
     env->projectile_time = 0.0f;
+    env->max_reward_distn = 1000 - (int)(env->runs*env->ftmp3);
+    if (env->max_reward_distn < env->max_reward_dist) env->max_reward_distn = env->max_reward_dist;
 }
 
 void c_reset(Artillery* env) {
     compute_observations(env);
-    env->score = 0;
     reset_round(env);
-    env->tick = 0;
 }
 
 void c_render(Artillery* env) {
@@ -276,7 +297,9 @@ void c_render(Artillery* env) {
 }
 
 void init(Artillery* env) {
+    env->runs = 0;
     env->tick = 0;
+    if (env->same_runs < 1) env->same_runs = 1;
     env->g = 9.8f;
     env->projectile_active = 0;
     env->projectile_time = 0.0f;
@@ -297,41 +320,39 @@ void allocate(Artillery* env) {
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
 }
 
+float get_turn_penalty(Artillery* env) {
+    if (env->tick <= 20) {
+        return 0.0f;
+    } else if (env->tick <= 50) {
+        float progress = (env->tick - 20) / 30.0f;
+        return env->turn_penalty * progress;
+    } else {
+        return env->turn_penalty;
+    }
+}
+
 void step_frame(Artillery* env, float action) {
     if (env->debug > 0) printf("STEP env%d tick%d=========================\n", env->i, env->tick);
-    float act = 0.0f;
-
-    //if (env->tick == 20) action = FIRE;
 
     if (action == FIRE) {
-        act = -1.0f;
         env->fired = 1;
         if (env->projectile_active == 0) {
             fire_projectile(env);
         }
     } else if (action == ADDPOWDER) {
-        act = -0.5f;
-        env->score += env->turn_penalty;
-        env->rewards[0] += env->turn_penalty;
         if (env->powder < 0.95) env->powder += 0.05;
     } else if (action == RMPOWDER) {
-        act = 0.0f;
-        env->score += env->turn_penalty;
-        env->rewards[0] += env->turn_penalty;
         if (env->powder > 0.05) env->powder -= 0.05;
     } else if (action == AIMUP) {
-        act = 0.5f;
-        env->score += env->turn_penalty;
-        env->rewards[0] += env->turn_penalty;
         if (env->angle < env->max_aim_angle - 0.05) env->angle += 0.05;
     } else if (action == AIMDOWN) {
-        act = 1.0f;
-        env->score += env->turn_penalty;
-        env->rewards[0] += env->turn_penalty;
         if (env->angle > env->min_aim_angle + 0.05) env->angle -= 0.05;
     }
-    if (env->continuous) {
-        act = action;
+
+    if (action != FIRE) {
+        env->turn_penaltyn = get_turn_penalty(env);
+        env->score += env->turn_penaltyn;
+        env->rewards[0] += env->turn_penaltyn;
     }
 
     if (env->projectile_active) {

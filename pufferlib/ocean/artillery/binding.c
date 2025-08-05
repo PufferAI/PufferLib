@@ -18,6 +18,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->max_reward = unpack(kwargs, "max_reward");
     env->max_reward_dist = unpack(kwargs, "max_reward_dist");
     env->turn_penalty = unpack(kwargs, "turn_penalty");
+    env->miss_penalty = unpack(kwargs, "miss_penalty");
     env->ftmp1 = unpack(kwargs, "ftmp1");
     env->ftmp2 = unpack(kwargs, "ftmp2");
     env->ftmp3 = unpack(kwargs, "ftmp3");
@@ -26,6 +27,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->rng = unpack(kwargs, "rng");
     env->method = unpack(kwargs, "method");
     env->debug = unpack(kwargs, "debug");
+    env->same_runs = unpack(kwargs, "same_runs");
     env->i = unpack(kwargs, "i");
 
     init(env);
@@ -38,5 +40,7 @@ static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "episode_return", log->episode_return);
     assign_to_dict(dict, "episode_length", log->episode_length);
     assign_to_dict(dict, "dist", log->dist);
+    assign_to_dict(dict, "max_reward_distn", log->max_reward_distn);
+    assign_to_dict(dict, "turn_penaltyn", log->turn_penaltyn);
     return 0;
 }
