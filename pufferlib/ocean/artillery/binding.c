@@ -44,5 +44,6 @@ static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "dist", log->dist);
     assign_to_dict(dict, "max_reward_distn", log->max_reward_distn);
     assign_to_dict(dict, "turn_penaltyn", log->turn_penaltyn);
+    //assign_to_dict(dict, "sigman", log->sigman);
     return 0;
 }

@@ -144,7 +144,7 @@ float calculate_parabola_closest_distance(Artillery* env) {
 
     float min_dist = 999999.0f;
 
-    for (float t = 0; t < 20.0f; t += 0.25f) {
+    for (float t = 0; t < 60.0f; t += 0.25f) {
         float x = env->x0 + env->vx0 * t;
         float y = env->y0 + env->vy0 * t - 0.5f * env->g * t * t;
 
@@ -159,11 +159,12 @@ float calculate_parabola_closest_distance(Artillery* env) {
         }
     }
     env->dist = min_dist;
+    //if (env->i == 1) printf("%.1f\n", min_dist);
     return min_dist;
 }
 
 void fire_projectile(Artillery* env) {
-    if (env->debug > 0) printf("  !!!!!!!!!!!!!!!!FIRE!!!!!!!!!!!!!!!!!\n");
+    if (env->debug > 0) printf("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!FIRE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
     float closest_dist = calculate_parabola_closest_distance(env);
     float score;
 
@@ -174,6 +175,10 @@ void fire_projectile(Artillery* env) {
     } else {
         score = 1.0f - (closest_dist / env->max_reward_distn);
     }
+
+    //env->score2 += 1.0f / (1.0f + closest_dist);
+    //env->score3 += exp(-(closest_dist*closest_dist)/(2*env->sigman*env->sigman));
+
     if (env->debug > 0) printf("    env%d tick%d closest_dist = %.3f score=%.3f\n", env->i, env->tick, closest_dist, score);
     env->score += score;
     env->rewards[0] += score;
@@ -192,7 +197,7 @@ void compute_observations(Artillery* env) {
     if (env->debug > 0) printf("  Compute Observations\n");
     env->observations[0] = env->powder;
     if (env->debug > 0) printf("    powder = %.3f\n", env->observations[0]);
-    env->observations[1] = (env->angle - env->min_aim_angle) * env->inv_angle_range;
+    env->observations[1] = env->angle - env->min_aim_angle;
     if (env->debug > 0) printf("    angle = %.3f\n", env->observations[1]);
     env->observations[2] = env->tx * env->inv_width;
     if (env->debug > 0) printf("    tx = %.3f\n", env->observations[2]);
@@ -292,12 +297,35 @@ void c_render(Artillery* env) {
         barrel_y - barrel_length * sinf(env->angle)
     };
 
+    float v0 = env->powder * env->ftmp1 + env->ftmp2;
+    float vx0 = v0 * cosf(env->angle);
+    float vy0 = v0 * sinf(env->angle);
+    float x0 = 30.0f;
+    float y0 = 30.0f;
+
+    Vector2 prev_point = {x0, height - y0};
+    int j = 0;
+    for (float t = 0.25f; t < 60.0f; t += 0.5f) {
+        float x = x0 + vx0 * t;
+        float y = y0 + vy0 * t - 0.5f * env->g * t * t;
+
+        if (y < 0 || x < 0 || x > env->width) break;
+
+        Vector2 current_point = {x, height - y};
+        if (j % 2 == 0) DrawLineV(prev_point, current_point, WHITE);
+        if (j % 2 == 1) DrawLineV(prev_point, current_point, BLACK);
+        prev_point = current_point;
+        j += 1;
+    }
+
     DrawLineEx(barrel_start, barrel_end, barrel_width, DARKGRAY);
     DrawCircle(barrel_x, barrel_y, 12.0f, GRAY);
 
     if (env->projectile_active) {
         DrawCircle(env->px, height - env->py, 4.0f, BLACK);
     }
+
+    DrawText(TextFormat("%.3f", env->score), 10, 10, 20, BLACK);
 
     EndDrawing();
 }
@@ -315,8 +343,10 @@ void init(Artillery* env) {
     env->inv_max_angle = 1.0f / env->max_aim_angle;
     env->inv_angle_range = 1.0f / (env->max_aim_angle - env->min_aim_angle);
 
+    //env->sigman = env->sigma;
 
-    srand(env->rng + env->i + env->log.n);
+    //srand(env->rng + env->i + env->log.n);
+    srand(env->rng + env->i);
 
     get_random_start(env);
 }
@@ -361,6 +391,8 @@ void step_frame(Artillery* env, float action) {
     if (action != FIRE) {
         env->turn_penaltyn = get_turn_penalty(env);
         env->score += env->turn_penaltyn;
+        //env->score2 += env->turn_penaltyn;
+        //env->score3 += env->turn_penaltyn;
         env->rewards[0] += env->turn_penaltyn;
     }
 
@@ -373,7 +405,7 @@ void step_frame(Artillery* env, float action) {
         if (env->debug > 1) printf("env->py = %.3f, env->vy0 = %.3f, ptime = %.3f\n", env->py, env->vy0, env->projectile_time);
     }
     if (env->debug > 1) printf("  env->px = %.1f env->tx = %.1f env->render=%d\n", env->px, env->tx, env->render);
-    if (env->fired == 1 && (!env->render || env->px > env->tx + 15.0f || env->py < 0.0f)) {
+    if (env->fired == 1 && (!env->render || env->px > env->tx + 15.0f || env->py < 0.0f) || env->score < -1.0f) {
         if (env->debug > 0) printf("==================terminate=================\n\n\n\n\n\n\n\n\n\n");
         env->terminals[0] = 1;
         add_log(env);

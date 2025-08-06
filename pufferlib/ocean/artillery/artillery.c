@@ -27,7 +27,7 @@ void demo() {
         .miss_penalty = -0.00001,
         .render = 0,
         .continuous = 0,
-        .ftmp1 = 300.0,
+        .ftmp1 = 100.0,
         .ftmp2 = 50.0,
         .ftmp3 = 0.22,
         .ftmp4 = 0.1,
@@ -56,9 +56,12 @@ void demo() {
                 float clamped_wheel = fmaxf(-1.0f, fminf(1.0f, move));
                 env.actions[0] = clamped_wheel;
             } else {
-                env.actions[0] = 0.0;
-                if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 1;
-                if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 2;
+                env.actions[0] = 100;
+                if (IsKeyDown(KEY_SPACE)) env.actions[0] = 0;
+                if (IsKeyDown(KEY_UP)  || IsKeyDown(KEY_W)) env.actions[0] = 1;
+                if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = 2;
+                if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 3;
+                if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 4;
             }
         } else if (frame % 4 == 0) {
             // Apply frameskip outside the env for smoother rendering
