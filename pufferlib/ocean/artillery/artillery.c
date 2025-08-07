@@ -4,21 +4,21 @@
 
 void demo() {
     printf("demo\n");
-    Weights* weights = load_weights("resources/artillery/puffer_artillery_weights.bin", 133766); // 133638
+    Weights* weights = load_weights("resources/artillery/puffer_artillery_weights8.bin", 133766); // 133638
     int logit_sizes[1] = {5};
     LinearLSTM* net = make_linearlstm(weights, 1, 5, logit_sizes, 1);
 
     Artillery env = {
         .width = 1280,
         .height = 720,
-        .debug = 2,
+        .debug = 0,
         .dist_fade = 0.3,
         .frameskip = 1,
         .ftmp1 = 100.0,
         .ftmp2 = 50.0,
         .ftmp3 = 0.22,
         .ftmp4 = 0.1,
-        .method = 0,
+        .method = -1,
         .miss_penalty = -0.2,
         .min_aim_angle = 0.56,
         .max_aim_angle = 1.56,
@@ -29,12 +29,12 @@ void demo() {
         .out_bounds_penalty = -0.1,
         .target_min_x = 600,
         .target_max_x = 1230,
-        .target_min_y = 50,
-        .target_max_y = 300,
+        .target_min_y = 300,
+        .target_max_y = 670,
         .turn_penalty = -0.03,
         .turn_penalty_delay = 75,
         .turn_penalty_ramp = 0.015,
-        .render = 0,
+        .render = 1,
         .rng = 7,
         .same_runs = 1,
         .vm = 150.0,
@@ -51,7 +51,7 @@ void demo() {
     printf("demo about to c_reset\n");
     c_reset(&env);
     int frame = 0;
-    SetTargetFPS(60);
+    SetTargetFPS(10);
     while (!WindowShouldClose()) {
         // User can take control of the paddle
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
@@ -67,14 +67,14 @@ void demo() {
                 if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 3;
                 if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 4;
             }
-        } else if (frame % 4 == 0) {
+        } else {
             // Apply frameskip outside the env for smoother rendering
             int* actions = (int*)env.actions;
             forward_linearlstm(net, env.observations, actions);
             env.actions[0] = actions[0];
         }
 
-        frame = (frame + 1) % 4;
+        frame = (frame + 1) % 1;
         c_step(&env);
         c_render(&env);
     }

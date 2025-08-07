@@ -7,15 +7,15 @@ from pufferlib.ocean.artillery import binding
 
 class Artillery(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
-                 frameskip=4, width=640, height=480,
-                 target_min_x=50, target_max_x=1870, target_min_y=50, target_max_y=1030,
-                 min_aim_angle=1.0, max_aim_angle=1.57, max_reward=1.0, max_reward_dist=100, max_score=100.0,
-                 dist_fade=0.22, turn_penalty_delay=20, turn_penalty_ramp=20, max_dist0=1000.0,
-                 turn_penalty=-0.001, miss_penalty=-1.0, render=0, out_bounds_penalty=-0.1,
+                 frameskip=1, width=1280, height=720,
+                 target_min_x=600, target_max_x=1230, target_min_y=300, target_max_y=670,
+                 min_aim_angle=0.56, max_aim_angle=1.56, max_reward=1.0, max_reward_dist=30, max_score=1.0,
+                 dist_fade=0.3, turn_penalty_delay=75, turn_penalty_ramp=0.015, max_dist0=250.0,
+                 turn_penalty=-0.03, miss_penalty=-0.2, render=1, out_bounds_penalty=-0.1,
                  continuous=False, log_interval=128,
-                 ftmp1=0.1, ftmp2=0.1, ftmp3=0.1, ftmp4=0.1, vm=100.0,
-                 render_many=0, seed=42,
-                 buf=None, rng=42, i=1, method=0, debug=0, same_runs=0):
+                 ftmp1=0.1, ftmp2=0.1, ftmp3=0.1, ftmp4=0.1, vm=150.0,
+                 render_many=0, seed=7,
+                 buf=None, rng=7, i=1, method=0, debug=0, same_runs=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
                                             shape=(6,), dtype=np.float32)
         self.render_mode = render_mode
