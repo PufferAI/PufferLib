@@ -4,7 +4,7 @@
 
 void demo() {
     printf("demo\n");
-    Weights* weights = load_weights("resources/artillery/puffer_artillery_weights.bin", 133638);
+    Weights* weights = load_weights("resources/artillery/puffer_artillery_weights.bin", 133766); // 133638
     int logit_sizes[1] = {5};
     LinearLSTM* net = make_linearlstm(weights, 1, 5, logit_sizes, 1);
 
@@ -16,14 +16,16 @@ void demo() {
         .target_max_x = 1230,
         .target_min_y = 50,
         .target_max_y = 670,
-        .min_aim_angle = 1.0,
-        .max_aim_angle = 1.57,
+        .min_aim_angle = 0.56,
+        .max_aim_angle = 1.56,
         .max_reward = 1.0,
         .max_reward_dist = 100,
+        .max_dist0 = 1000.0,
         .dist_fade = 0.22,
         .max_score = 1.0,
         .turn_penalty = -0.001,
         .turn_penalty_delay = 20,
+        .turn_penalty_ramp = 0.03,
         .miss_penalty = -0.00001,
         .render = 0,
         .continuous = 0,
@@ -37,6 +39,8 @@ void demo() {
         .method = 0,
         .debug = 2,
         .same_runs = 1,
+        .vm = 150.0,
+        .out_bounds_penalty = -0.1,
     };
     printf("about to allocate\n");
     allocate(&env);
