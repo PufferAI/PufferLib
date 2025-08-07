@@ -391,21 +391,29 @@ void step_frame(Artillery* env, float action) {
     } else if (action == ADDPOWDER) {
         if (env->powder < 0.95) {
             env->powder += 0.05;
+        }
+        else {
             env->score += env->out_bounds_penalty;
         }
     } else if (action == RMPOWDER) {
         if (env->powder > 0.05) {
             env->powder -= 0.05;
+        }
+        else {
             env->score += env->out_bounds_penalty;
         }
     } else if (action == AIMUP) {
         if (env->angle < env->max_aim_angle - 0.05) {
             env->angle += 0.05;
+        }
+        else {
             env->score += env->out_bounds_penalty;
         }
     } else if (action == AIMDOWN) {
         if (env->angle > env->min_aim_angle + 0.05) {
             env->angle -= 0.05;
+        }
+        else {
             env->score += env->out_bounds_penalty;
         }
     }
