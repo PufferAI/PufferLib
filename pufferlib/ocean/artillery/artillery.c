@@ -4,9 +4,9 @@
 
 void demo() {
     printf("demo\n");
-    Weights* weights = load_weights("resources/artillery/puffer_artillery_weights8.bin", 133766); // 133638
+    Weights* weights = load_weights("resources/artillery/puffer_artillery_weights.bin", 133766); // 133638
     int logit_sizes[1] = {5};
-    LinearLSTM* net = make_linearlstm(weights, 1, 5, logit_sizes, 1);
+    LinearLSTM* net = make_linearlstm(weights, 1, 6, logit_sizes, 1);
 
     Artillery env = {
         .width = 1280,
