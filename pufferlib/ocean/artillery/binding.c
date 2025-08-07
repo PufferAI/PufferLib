@@ -13,6 +13,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->target_max_x = unpack(kwargs, "target_max_x");
     env->target_min_y = unpack(kwargs, "target_min_y");
     env->target_max_y = unpack(kwargs, "target_max_y");
+    env->target_size = unpack(kwargs, "target_size");
     env->min_aim_angle = unpack(kwargs, "min_aim_angle");
     env->max_aim_angle = unpack(kwargs, "max_aim_angle");
     env->max_reward = unpack(kwargs, "max_reward");
@@ -22,11 +23,12 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->turn_penalty_delay = unpack(kwargs, "turn_penalty_delay");
     env->turn_penalty_ramp = unpack(kwargs, "turn_penalty_ramp");
     env->miss_penalty = unpack(kwargs, "miss_penalty");
+    env->moving_target = unpack(kwargs, "moving_target");
+    env->timed_shell = unpack(kwargs, "timed_shell");
     env->ftmp1 = unpack(kwargs, "ftmp1");
     env->ftmp2 = unpack(kwargs, "ftmp2");
     env->ftmp3 = unpack(kwargs, "ftmp3");
     env->ftmp4 = unpack(kwargs, "ftmp4");
-    env->render_many = unpack(kwargs, "render_many");
     env->rng = unpack(kwargs, "rng");
     env->method = unpack(kwargs, "method");
     env->debug = unpack(kwargs, "debug");

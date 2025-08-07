@@ -4,14 +4,13 @@
 
 void demo() {
     printf("demo\n");
-    Weights* weights = load_weights("resources/artillery/puffer_artillery_weights.bin", 133766); // 133638
-    int logit_sizes[1] = {5};
-    LinearLSTM* net = make_linearlstm(weights, 1, 6, logit_sizes, 1);
 
     Artillery env = {
         .width = 1280,
         .height = 720,
         .debug = 0,
+        .moving_target = 0,
+        .timed_shell = 0,
         .dist_fade = 0.3,
         .frameskip = 1,
         .ftmp1 = 100.0,
@@ -31,6 +30,7 @@ void demo() {
         .target_max_x = 1230,
         .target_min_y = 300,
         .target_max_y = 670,
+        .target_size = 15,
         .turn_penalty = -0.03,
         .turn_penalty_delay = 75,
         .turn_penalty_ramp = 0.015,
@@ -39,7 +39,6 @@ void demo() {
         .same_runs = 1,
         .vm = 150.0,
         .continuous = 0,
-        .render_many = 0,
         .i = 1,
     };
     printf("about to allocate\n");
@@ -47,6 +46,10 @@ void demo() {
 
     printf("demo about to make_client\n");
     env.client = make_client(&env);
+
+    Weights* weights = load_weights("resources/artillery/puffer_artillery_weights.bin", 133766); // 133638
+    int logit_sizes[1] = {5};
+    LinearLSTM* net = make_linearlstm(weights, 1, 6, logit_sizes, 1);
 
     printf("demo about to c_reset\n");
     c_reset(&env);
