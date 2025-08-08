@@ -50,6 +50,7 @@ void demo() {
     const char* weights_path = (env.moving_target == 1) ? 
         "resources/artillery/puffer_artillery_weights_moving.bin" : 
         "resources/artillery/puffer_artillery_weights_stationary.bin";
+    printf(weights_path);
     int weights_size = (env.moving_target == 1) ? 134022 : 133766;
 
     Weights* weights = load_weights(weights_path, weights_size); // 133638
@@ -60,7 +61,7 @@ void demo() {
     printf("demo about to c_reset\n");
     c_reset(&env);
     int frame = 0;
-    SetTargetFPS(10);
+    SetTargetFPS(30);
     while (!WindowShouldClose()) {
         // User can take control of the paddle
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
