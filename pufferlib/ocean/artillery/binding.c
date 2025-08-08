@@ -24,11 +24,6 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->turn_penalty_ramp = unpack(kwargs, "turn_penalty_ramp");
     env->miss_penalty = unpack(kwargs, "miss_penalty");
     env->moving_target = unpack(kwargs, "moving_target");
-    env->timed_shell = unpack(kwargs, "timed_shell");
-    env->ftmp1 = unpack(kwargs, "ftmp1");
-    env->ftmp2 = unpack(kwargs, "ftmp2");
-    env->ftmp3 = unpack(kwargs, "ftmp3");
-    env->ftmp4 = unpack(kwargs, "ftmp4");
     env->rng = unpack(kwargs, "rng");
     env->method = unpack(kwargs, "method");
     env->debug = unpack(kwargs, "debug");
@@ -43,7 +38,6 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
 }
 
 static int my_log(PyObject* dict, Log* log) {
-    assign_to_dict(dict, "perf", log->perf);
     assign_to_dict(dict, "score", log->score);
     assign_to_dict(dict, "episode_return", log->episode_return);
     assign_to_dict(dict, "episode_length", log->episode_length);

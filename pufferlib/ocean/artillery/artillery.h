@@ -13,8 +13,10 @@
 #define AIMUP 3
 #define AIMDOWN 4
 
+#define MAX_PROJECTILE_TIME 60.0f
+#define TIMESTEP 0.25f
+
 typedef struct Log {
-    float perf;
     float score;
     float episode_return;
     float episode_length;
@@ -48,14 +50,11 @@ typedef struct Artillery {
     float dist;
 
     int moving_target;
-    int timed_shell;
 
     float powder;
     float powder0;
     float angle;
     float angle0;
-    float tx;
-    float ty;
 
     float px;
     float py;
@@ -78,6 +77,8 @@ typedef struct Artillery {
     float target_size;
     float target_vx;
     float target_vy;
+    float tx;
+    float ty;
 
     float min_aim_angle;
     float max_aim_angle;
@@ -91,15 +92,9 @@ typedef struct Artillery {
     int turn_penalty_delay;
     float turn_penalty_ramp;
     float miss_penalty;
-    float max_score;
     int fired;
     float vm;
     float out_bounds_penalty;
-
-    float ftmp1;
-    float ftmp2;
-    float ftmp3;
-    float ftmp4;
 
     int frameskip;
     int render;
@@ -114,12 +109,9 @@ typedef struct Artillery {
     // Math
     float inv_width;
     float inv_height;
-    float inv_max_angle;
-    float inv_angle_range;
 } Artillery;
 
 void c_close(Artillery* env) {
-    //unload_track();
 }
 
 void free_allocated(Artillery* env) {
@@ -157,7 +149,7 @@ void calculate_parabola_closest_distance(Artillery* env) {
 
     float min_dist2 = 99999999.0f;
 
-    for (float t = 0; t < 60.0f; t += 0.25f) {
+    for (float t = 0; t < MAX_PROJECTILE_TIME; t += TIMESTEP) {
         float x = env->x0 + env->vx0 * t;
         float y = env->y0 + env->vy0 * t - 0.5f * env->g * t * t;
 
@@ -326,7 +318,7 @@ void c_render(Artillery* env) {
 
     Vector2 prev_point = {x0, height - y0};
     int j = 0;
-    for (float t = 0.25f; t < 60.0f; t += 0.5f) {
+    for (float t = TIMESTEP; t < MAX_PROJECTILE_TIME; t += 0.5f) {
         float x = x0 + vx0 * t;
         float y = y0 + vy0 * t - 0.5f * env->g * t * t;
 
@@ -362,8 +354,6 @@ void init(Artillery* env) {
 
     env->inv_width = 1.0f / env->width;
     env->inv_height = 1.0f / env->height;
-    env->inv_max_angle = 1.0f / env->max_aim_angle;
-    env->inv_angle_range = 1.0f / (env->max_aim_angle - env->min_aim_angle);
 
     srand(env->rng + env->i);
 
@@ -439,7 +429,7 @@ void step_frame(Artillery* env, float action) {
         }
     }
     else { // Projectile Active
-        env->projectile_time += 0.25f;
+        env->projectile_time += TIMESTEP;
         env->px = env->x0 + env->vx0 * env->projectile_time;
         if (env->debug > 1) printf("env->px = %.3f, env->vx0 = %.3f, ptime = %.3f\n", env->px, env->vx0, env->projectile_time);
         if (env->debug > 1) printf("env->tx = %.3f\n", env->tx);
@@ -448,8 +438,8 @@ void step_frame(Artillery* env, float action) {
     }
 
     if (env->moving_target == 1) {
-        env->tx += env->target_vx * 0.25f;
-        env->ty += env->target_vy * 0.25f;
+        env->tx += env->target_vx * TIMESTEP;
+        env->ty += env->target_vy * TIMESTEP;
     }
 
     if (env->debug > 1) printf("  env->px = %.1f env->tx = %.1f env->render=%d\n", env->px, env->tx, env->render);
