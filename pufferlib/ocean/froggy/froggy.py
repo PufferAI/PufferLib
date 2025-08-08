@@ -6,17 +6,12 @@ from pufferlib.ocean.froggy import binding
 
 class Froggy(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=5, width=11, height=11, episode_length=1000, buf=None, seed=0):
-        basic_low = np.array([0, 0, 0, 0, -np.inf], dtype=np.float32)  # frog_x, frog_y, lives, crossings, score
-        basic_high = np.array([width-1, height-1, 3, np.inf, np.inf], dtype=np.float32)
-        car_low = np.array([-1, -1, 0, 0, -1] * 15, dtype=np.float32)  # car: x, y, active, speed, direction
-        car_high = np.array([1, 1, 1, 1, 1] * 15, dtype=np.float32)
-        grid_low = np.array([-1] * 50, dtype=np.float32)  # 25 map cells + 25 car presence
-        grid_high = np.array([1] * 50, dtype=np.float32)
-        low = np.concatenate([basic_low, car_low, grid_low])
-        high = np.concatenate([basic_high, car_high, grid_high])
-        
-        self.single_observation_space = gymnasium.spaces.Box(low=low, high=high,
-            shape=(130,), dtype=np.float32)  # 5 basic + 75 car + 50 grid = 130 total
+        # 5 basic + 25 map cells + 25 car presence = 55 total observations
+
+        low = np.array([0, 0, 0, 0, -np.inf] + [-1, -1, 0, 0, -1] * 30 + [-1] * 25 + [0] * 25, dtype=np.float32)
+        high = np.array([width-1, height-1, 3, np.inf, np.inf] + [1, 1, 1, 1, 1] * 30 + [1] * 50, dtype=np.float32)
+
+        self.single_observation_space = gymnasium.spaces.Box(low=low, high=high, dtype=np.float32)
         # up, down, left, right
         self.single_action_space = gymnasium.spaces.Discrete(4)
         self.render_mode = render_mode

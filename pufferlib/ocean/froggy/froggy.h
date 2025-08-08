@@ -5,37 +5,40 @@
 #include <time.h>
 #include <signal.h>
 
-#define PAIR_EMPTY 0
-#define PAIR_PUFFER 1
-#define PAIR_BACKGROUND 2
-#define PAIR_ROAD 3
-#define PAIR_WATER 4
-#define PAIR_OBSTACLE 5
-#define PAIR_LILYPAD 6
-#define PAIR_WATERFROG 7
-#define PAIR_GOAL 8
-#define PAIR_START 9
-
-#define NUM_LANES 5
+#define NUM_LANES 10
 #define MAX_CARS_PER_LANE 3
 #define KEY_ESC 27
 #define MAX_MAP_HEIGHT 25
 #define MAX_MAP_WIDTH 100
-
-#define CELL_EMPTY 0
-#define CELL_ROAD 1
-#define CELL_WATER 2
-#define CELL_GOAL 3
-#define CELL_START 4
-#define CELL_OBSTACLE 5
-#define CELL_LILYPAD 6
-
 #define BASIC_OBSERVATIONS 5
 #define CAR_OBSERVATIONS_PER_CAR 5  // x_pos, y_pos, active, speed, direction
-#define TOTAL_CAR_OBSERVATIONS (NUM_LANES * MAX_CARS_PER_LANE * CAR_OBSERVATIONS_PER_CAR)
+#define TOTAL_CAR_OBSERVATIONS 0 // (NUM_LANES * MAX_CARS_PER_LANE * CAR_OBSERVATIONS_PER_CAR)
 #define GRID_SIZE 5
 #define GRID_OBSERVATIONS (GRID_SIZE * GRID_SIZE * 2)  // Both map cells and car presence
 #define TOTAL_OBSERVATIONS (BASIC_OBSERVATIONS + TOTAL_CAR_OBSERVATIONS + GRID_OBSERVATIONS)
+
+enum ColorPairs {
+    PAIR_EMPTY = 0,
+    PAIR_PUFFER = 1,
+    PAIR_BACKGROUND = 2,
+    PAIR_ROAD = 3,
+    PAIR_WATER = 4,
+    PAIR_OBSTACLE = 5,
+    PAIR_LILYPAD = 6,
+    PAIR_WATERFROG = 7,
+    PAIR_GOAL = 8,
+    PAIR_START = 9
+};
+
+enum CellTypes {
+    CELL_EMPTY = 0,
+    CELL_ROAD = 1,
+    CELL_WATER = 2,
+    CELL_GOAL = 3,
+    CELL_START = 4,
+    CELL_OBSTACLE = 5,
+    CELL_LILYPAD = 6
+};
 
 typedef struct {
     float lives_remaining;
@@ -110,8 +113,10 @@ void compute_observations(Froggy* env) {
     const float inv_height = 1.0f / env->height;
     const float inv_max_speed = 1.0f / 3.0f;
     
-    // car obs
+    // // car obs
     int obs_index = BASIC_OBSERVATIONS;
+    int car_grid[MAX_MAP_HEIGHT][MAX_MAP_WIDTH];
+    memset(car_grid, 0, sizeof(car_grid));
     for (int lane = 0; lane < NUM_LANES; lane++) {
         for (int car = 0; car < MAX_CARS_PER_LANE; car++) {
             if (obs_index + 5 > TOTAL_OBSERVATIONS) break;  // Prevent buffer overflow
@@ -128,59 +133,39 @@ void compute_observations(Froggy* env) {
             obs[obs_index++] = active ? env->car_speeds[lane] * inv_max_speed : 0.0f;
             // car dir
             obs[obs_index++] = active ? (float)env->car_directions[lane] : 0.0f;
-        }
-        if (obs_index + 5 > TOTAL_OBSERVATIONS) break;
-    }
-
-    int car_grid[MAX_MAP_HEIGHT][MAX_MAP_WIDTH];
-    memset(car_grid, 0, sizeof(car_grid));
-    for (int lane = 0; lane < NUM_LANES; lane++) {
-        for (int car = 0; car < MAX_CARS_PER_LANE; car++) {
-            const Car *c = &env->cars[lane][car];
             if (c->active && c->x >= 0 && c->x < env->width && c->y >= 0 && c->y < env->height &&
                 c->y < MAX_MAP_HEIGHT && c->x < MAX_MAP_WIDTH) {
                 car_grid[c->y][c->x] = 1;
             }
         }
+        if (obs_index + 5 > TOTAL_OBSERVATIONS) break;
     }
     
     // 5x5 obs
     const int grid_radius = GRID_SIZE / 2;
     const float inv_cell_types = 1.0f / 6.0f;
-    
+    const int map_channel_start = obs_index;
+    const int car_channel_start = obs_index + (GRID_SIZE * GRID_SIZE);
+    int grid_index = 0;
     for (int dy = -grid_radius; dy <= grid_radius; dy++) {
         for (int dx = -grid_radius; dx <= grid_radius; dx++) {
             const int world_x = env->frog_x + dx;
             const int world_y = env->frog_y + dy;
             const int in_bounds = (world_x >= 0 && world_x < env->width && world_y >= 0 && world_y < env->height);
+            // map tiles
+            obs[map_channel_start + grid_index] = in_bounds ? env->map[world_y][world_x] * inv_cell_types : -1.0f;
+            // +25 offset for is car
+            obs[car_channel_start + grid_index] = (in_bounds && car_grid[world_y][world_x]) ? 1.0f : 0.0f;
             
-            // Add bounds check for obs_index
-            if (obs_index >= TOTAL_OBSERVATIONS) break;
-            obs[obs_index++] = in_bounds ? env->map[world_y][world_x] * inv_cell_types : -1.0f;
+            grid_index++;
         }
-        if (obs_index >= TOTAL_OBSERVATIONS) break;
-    }
-    
-    // is car 5x5
-    for (int dy = -grid_radius; dy <= grid_radius; dy++) {
-        for (int dx = -grid_radius; dx <= grid_radius; dx++) {
-            const int world_x = env->frog_x + dx;
-            const int world_y = env->frog_y + dy;
-            const int in_bounds = (world_x >= 0 && world_x < env->width && 
-                                 world_y >= 0 && world_y < env->height);
-            
-            // Add bounds check for obs_index
-            if (obs_index >= TOTAL_OBSERVATIONS) break;
-            obs[obs_index++] = (in_bounds && car_grid[world_y][world_x]) ? 1.0f : 0.0f;
-        }
-        if (obs_index >= TOTAL_OBSERVATIONS) break;
     }
 }
 void add_log(Froggy* env) {
-    env->log.lives_remaining = env->lives;
-    env->log.crossings = env->crossings;
-    env->log.episode_length = env->step_count;
-    env->log.episode_return = env->score;
+    env->log.lives_remaining += env->lives;
+    env->log.crossings += env->crossings;
+    env->log.episode_length += env->step_count;
+    env->log.episode_return += env->score;
     env->log.n++;
 }
 
@@ -242,27 +227,34 @@ void c_step(Froggy* env) {
     env->step_count++;
     move_frog(env);
 
-    if (env->frog_y < env->last_y) {
+    // Cache frequently accessed values
+    const int frog_x = env->frog_x;
+    const int frog_y = env->frog_y;
+    const int width = env->width;
+    const int height = env->height;
+
+    if (frog_y < env->last_y) {
         env->rewards[0] = 0.1;
         env->score += 0.1;
-        env->last_y = env->frog_y;
+        env->last_y = frog_y;
         // add_log(env);
     }
     
     // hit water or obstacle
-    if (env->frog_y >= 0 && env->frog_y < env->height && env->frog_y < MAX_MAP_HEIGHT &&
-        env->frog_x >= 0 && env->frog_x < env->width && env->frog_x < MAX_MAP_WIDTH) {
-        if (env->map[env->frog_y][env->frog_x] == CELL_WATER) {
+    if (frog_y >= 0 && frog_y < height && frog_y < MAX_MAP_HEIGHT &&
+        frog_x >= 0 && frog_x < width && frog_x < MAX_MAP_WIDTH) {
+        const int cell_type = env->map[frog_y][frog_x];
+        if (cell_type == CELL_WATER) {
             died(env);
             return;
         }
-        if (env->map[env->frog_y][env->frog_x] == CELL_OBSTACLE) {
+        if (cell_type == CELL_OBSTACLE) {
             died(env);
             return;
         }
     }
 
-    if (env->frog_y <= 0) {
+    if (frog_y <= 0) {
         env->rewards[0] = 1;
         env->score += 1;
         env->crossings += 1;
@@ -283,41 +275,52 @@ void c_step(Froggy* env) {
         c_reset(env);
         return;
     }
-    
-    // move car
+
+    // move cars
     for (int lane = 0; lane < NUM_LANES; lane++) {
+        const int car_direction = env->car_directions[lane];
+        const int car_speed = env->car_speeds[lane];
+        const int direction_speed = car_direction * car_speed;
+        
         for (int car = 0; car < MAX_CARS_PER_LANE; car++) {
-            if (env->cars[lane][car].active) {
+            Car* current_car = &env->cars[lane][car];
+            if (current_car->active) {
+                const int car_x = current_car->x;
+                const int car_y = current_car->y;
+                
                 // frog hit
-                if (env->cars[lane][car].x == env->frog_x && env->cars[lane][car].y == env->frog_y) {
+                if (car_x == frog_x && car_y == frog_y) {
                     died(env);
                     return;
                 }
                 
-                int old_x = env->cars[lane][car].x;
-                env->cars[lane][car].x += env->car_directions[lane] * env->car_speeds[lane];
-                if (env->cars[lane][car].x < -2 || env->cars[lane][car].x > env->width + 1) {
-                    env->cars[lane][car].active = 0;
-                    continue;
-                }
-                int car_in_bounds = (env->cars[lane][car].x >= 0 && env->cars[lane][car].x < env->width &&
-                                   env->cars[lane][car].y >= 0 && env->cars[lane][car].y < env->height &&
-                                   env->cars[lane][car].y < MAX_MAP_HEIGHT && env->cars[lane][car].x < MAX_MAP_WIDTH);
+                const int old_x = car_x;
+                const int new_x = car_x + direction_speed;
+                current_car->x = new_x;
                 
-                if (car_in_bounds && env->map[env->cars[lane][car].y][env->cars[lane][car].x] == CELL_OBSTACLE) {
-                    env->cars[lane][car].active = 0; 
+                if (new_x < -2 || new_x > width + 1) {
+                    current_car->active = 0;
                     continue;
                 }
-                if (car_in_bounds && env->map[env->cars[lane][car].y][env->cars[lane][car].x] != CELL_ROAD) {
-                    env->cars[lane][car].x = old_x;
-                    if (old_x < 0 || old_x >= env->width || old_x >= MAX_MAP_WIDTH ||
-                        env->cars[lane][car].y < 0 || env->cars[lane][car].y >= MAX_MAP_HEIGHT ||
-                        env->map[env->cars[lane][car].y][old_x] != CELL_ROAD) {
-                        env->cars[lane][car].active = 0;
+                
+                const int car_in_bounds = (new_x >= 0 && new_x < width &&
+                                         car_y >= 0 && car_y < height &&
+                                         car_y < MAX_MAP_HEIGHT && new_x < MAX_MAP_WIDTH);
+                
+                if (car_in_bounds && env->map[car_y][new_x] == CELL_OBSTACLE) {
+                    current_car->active = 0; 
+                    continue;
+                }
+                if (car_in_bounds && env->map[car_y][new_x] != CELL_ROAD) {
+                    current_car->x = old_x;
+                    if (old_x < 0 || old_x >= width || old_x >= MAX_MAP_WIDTH ||
+                        car_y < 0 || car_y >= MAX_MAP_HEIGHT ||
+                        env->map[car_y][old_x] != CELL_ROAD) {
+                        current_car->active = 0;
                     }
                 }
                 // hit frog
-                if (env->cars[lane][car].active && env->cars[lane][car].x == env->frog_x && env->cars[lane][car].y == env->frog_y) {
+                if (current_car->active && current_car->x == frog_x && current_car->y == frog_y) {
                     died(env);
                     return;
                 }
@@ -330,9 +333,9 @@ void c_step(Froggy* env) {
 
             int road_rows[MAX_MAP_HEIGHT];
             int road_count = 0;
-            for (int y = 1; y < env->height - 1; y++) {
+            for (int y = 1; y < height - 1; y++) {
                 int is_road_row = 0;
-                for (int x = 0; x < env->width; x++) {
+                for (int x = 0; x < width; x++) {
                     if (env->map[y][x] == CELL_ROAD) {
                         is_road_row = 1;
                         break;
@@ -344,16 +347,17 @@ void c_step(Froggy* env) {
                 }
             }
             if (road_count > 0) {
-                int spawn_y = road_rows[lane % road_count];
-                int spawn_x = (env->car_directions[lane] > 0) ? -1 : env->width;
+                const int spawn_y = road_rows[lane % road_count];
+                const int spawn_x = (car_direction > 0) ? -1 : width;
                 
                 // is car
                 bool position_occupied = false;
                 for (int check_lane = 0; check_lane < NUM_LANES && !position_occupied; check_lane++) {
                     for (int check_car = 0; check_car < MAX_CARS_PER_LANE; check_car++) {
-                        if (env->cars[check_lane][check_car].active &&
-                            env->cars[check_lane][check_car].x == spawn_x &&
-                            env->cars[check_lane][check_car].y == spawn_y) {
+                        const Car* check_car_ptr = &env->cars[check_lane][check_car];
+                        if (check_car_ptr->active &&
+                            check_car_ptr->x == spawn_x &&
+                            check_car_ptr->y == spawn_y) {
                             position_occupied = true;
                             break;
                         }
@@ -361,10 +365,11 @@ void c_step(Froggy* env) {
                 }
                 if (!position_occupied) {
                     for (int car = 0; car < MAX_CARS_PER_LANE; car++) {
-                        if (!env->cars[lane][car].active) {
-                            env->cars[lane][car].active = 1;
-                            env->cars[lane][car].y = spawn_y;
-                            env->cars[lane][car].x = spawn_x;
+                        Car* spawn_car = &env->cars[lane][car];
+                        if (!spawn_car->active) {
+                            spawn_car->active = 1;
+                            spawn_car->y = spawn_y;
+                            spawn_car->x = spawn_x;
                             break;
                         }
                     }
