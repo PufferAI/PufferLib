@@ -73,6 +73,8 @@ class Artillery(pufferlib.PufferEnv):
         if self.tick % self.log_interval == 0:
             info.append(binding.vec_log(self.c_envs))
 
+        #print('P Obs:', ' '.join(f'{x:.3f}' for x in self.observations.flatten()))
+
         return (self.observations, self.rewards,
             self.terminals, self.truncations, info)
 

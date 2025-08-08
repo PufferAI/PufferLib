@@ -41,16 +41,13 @@ void demo() {
         .continuous = 0,
         .i = 1,
     };
-    printf("about to allocate\n");
     allocate(&env);
 
-    printf("demo about to make_client\n");
     env.client = make_client(&env);
 
     const char* weights_path = (env.moving_target == 1) ? 
         "resources/artillery/puffer_artillery_weights_moving.bin" : 
         "resources/artillery/puffer_artillery_weights_stationary.bin";
-    printf(weights_path);
     int weights_size = (env.moving_target == 1) ? 134022 : 133766;
 
     Weights* weights = load_weights(weights_path, weights_size); // 133638
@@ -58,12 +55,10 @@ void demo() {
     int obs_size = (env.moving_target == 1) ? 8 : 6;
     LinearLSTM* net = make_linearlstm(weights, 1, obs_size, logit_sizes, 1);
 
-    printf("demo about to c_reset\n");
     c_reset(&env);
     int frame = 0;
     SetTargetFPS(30);
     while (!WindowShouldClose()) {
-        // User can take control of the paddle
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
             if(env.continuous) {
                 float move = GetMouseWheelMove();
@@ -78,13 +73,23 @@ void demo() {
                 if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 4;
             }
         } else {
-            // Apply frameskip outside the env for smoother rendering
             int* actions = (int*)env.actions;
+            //printf("C Obs: ");
+            //for(int i = 0; i < obs_size; i++) {
+            //    printf("%.3f ", env.observations[i]);
+            //}
+            //printf("\n");
             forward_linearlstm(net, env.observations, actions);
+            //printf("LSTM state_h[0-3]: %.3f %.3f %.3f %.3f\n",
+            //    net->lstm->state_h[0], net->lstm->state_h[1],
+            //    net->lstm->state_h[2], net->lstm->state_h[3]);
+            //printf("Logits: ");
+            //for(int i = 0; i < 5; i++) {
+            //    printf("%.3f ", net->actor->output[i]);
+            //}
+            //printf("\n");
             env.actions[0] = actions[0];
         }
-
-        frame = (frame + 1) % 1;
         c_step(&env);
         c_render(&env);
     }
@@ -97,5 +102,4 @@ void demo() {
 
 int main() {
     demo();
-    //test_performance(10); // found in breakout.c
 }

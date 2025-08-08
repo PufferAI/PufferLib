@@ -223,6 +223,11 @@ void compute_observations(Artillery* env) {
         env->observations[7] = env->target_vy * 0.01;
         if (env->debug > 0) printf("    target_vy = %.3f\n", env->observations[7]);
     }
+    //printf("H Obs: ");
+    //for(int i = 0; i < 8; i++) {
+    //    printf("%.3f ", env->observations[i]);
+    //}
+    //printf("\n");
 }
 
 Client* make_client(Artillery* env) {
@@ -258,6 +263,7 @@ void get_random_start(Artillery* env) {
 }
 
 void reset_round(Artillery* env) {
+    env->terminals[0] = 0;
     if (env->runs % (int)env->same_runs == 0) {
         get_random_start(env);
     }
