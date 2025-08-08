@@ -7,7 +7,7 @@ from pufferlib.ocean.artillery import binding
 
 class Artillery(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
-                 frameskip=1, width=1280, height=720, moving_target=0, timed_shell=0,
+                 frameskip=1, width=1280, height=720, moving_target=1, timed_shell=0,
                  target_min_x=600, target_max_x=1230, target_min_y=300, target_max_y=670, target_size=15,
                  min_aim_angle=0.56, max_aim_angle=1.56, max_reward=1.0, max_reward_dist=30, max_score=1.0,
                  dist_fade=0.3, turn_penalty_delay=75, turn_penalty_ramp=0.015, max_dist0=250.0,
@@ -16,8 +16,8 @@ class Artillery(pufferlib.PufferEnv):
                  ftmp1=0.1, ftmp2=0.1, ftmp3=0.1, ftmp4=0.1, vm=150.0,
                  seed=7,
                  buf=None, rng=7, i=1, method=0, debug=0, same_runs=0):
-        self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
-                                            shape=(6,), dtype=np.float32)
+        obs_size = 8 if moving_target == 1 else 6
+        self.single_observation_space = gymnasium.spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.continuous = continuous
@@ -59,9 +59,8 @@ class Artillery(pufferlib.PufferEnv):
         binding.vec_reset(self.c_envs, seed)
         self.tick = 0
         return self.observations, []
-    
+
     def step(self, actions):
-        #start = time.time()
         if self.continuous:
             self.actions[:] = np.clip(actions.flatten(), -1.0, 1.0)
         else:
@@ -73,8 +72,7 @@ class Artillery(pufferlib.PufferEnv):
         info = []
         if self.tick % self.log_interval == 0:
             info.append(binding.vec_log(self.c_envs))
-        #end = time.time()
-        #print(f"python step took {end - start:.3e} seconds")
+
         return (self.observations, self.rewards,
             self.terminals, self.truncations, info)
 
@@ -85,7 +83,6 @@ class Artillery(pufferlib.PufferEnv):
         binding.vec_close(self.c_envs)
 
 def test_performance(timeout=10, atn_cache=1024):
-    print("test_performance in artillery.py")
     env = Artillery(num_envs=1)
     env.reset()
     tick = 0
@@ -95,14 +92,11 @@ def test_performance(timeout=10, atn_cache=1024):
     import time
     start = time.time()
     while time.time() - start < timeout:
-        print("atn = actions[tick % atn_cache] in artillery.py")
+
         atn = actions[tick % atn_cache]
-        print("env.step in artillery.py")
+
         env.step(atn)
         tick += 1
 
-    print(f'SPS: %f', env.num_agents * tick / (time.time() - start))
-
 if __name__ == '__main__':
-    print("artillery.py")
     test_performance()

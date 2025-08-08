@@ -9,7 +9,7 @@ void demo() {
         .width = 1280,
         .height = 720,
         .debug = 0,
-        .moving_target = 0,
+        .moving_target = 1,
         .timed_shell = 0,
         .dist_fade = 0.3,
         .frameskip = 1,
@@ -47,9 +47,15 @@ void demo() {
     printf("demo about to make_client\n");
     env.client = make_client(&env);
 
-    Weights* weights = load_weights("resources/artillery/puffer_artillery_weights.bin", 133766); // 133638
+    const char* weights_path = (env.moving_target == 1) ? 
+        "resources/artillery/puffer_artillery_weights_moving.bin" : 
+        "resources/artillery/puffer_artillery_weights_stationary.bin";
+    int weights_size = (env.moving_target == 1) ? 134022 : 133766;
+
+    Weights* weights = load_weights(weights_path, weights_size); // 133638
     int logit_sizes[1] = {5};
-    LinearLSTM* net = make_linearlstm(weights, 1, 6, logit_sizes, 1);
+    int obs_size = (env.moving_target == 1) ? 8 : 6;
+    LinearLSTM* net = make_linearlstm(weights, 1, obs_size, logit_sizes, 1);
 
     printf("demo about to c_reset\n");
     c_reset(&env);
