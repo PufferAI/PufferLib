@@ -25,7 +25,6 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->miss_penalty = unpack(kwargs, "miss_penalty");
     env->moving_target = unpack(kwargs, "moving_target");
     env->rng = unpack(kwargs, "rng");
-    env->method = unpack(kwargs, "method");
     env->debug = unpack(kwargs, "debug");
     env->same_runs = unpack(kwargs, "same_runs");
     env->vm = unpack(kwargs, "vm");

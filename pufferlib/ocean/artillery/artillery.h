@@ -58,8 +58,6 @@ typedef struct Artillery {
 
     float px;
     float py;
-    float vx;
-    float vy;
     float g;
     int projectile_active;
     float projectile_time;
@@ -102,7 +100,6 @@ typedef struct Artillery {
 
     int debug;
     unsigned int rng;
-    int method;
     int same_runs;
     int runs;
 
@@ -189,8 +186,6 @@ void fire_projectile(Artillery* env) {
         env->projectile_time = 0.0f;
         env->px = env->x0;
         env->py = env->y0;
-        env->vx = env->vx0;
-        env->vy = env->vy0;
     }
 }
 

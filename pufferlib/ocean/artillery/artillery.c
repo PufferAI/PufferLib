@@ -12,7 +12,6 @@ void demo() {
         .moving_target = 1,
         .dist_fade = 0.36,
         .frameskip = 1,
-        .method = -1,
         .miss_penalty = -0.1,
         .min_aim_angle = 0.56,
         .max_aim_angle = 1.56,
@@ -50,7 +49,6 @@ void demo() {
     LinearLSTM* net = make_linearlstm(weights, 1, obs_size, logit_sizes, 1);
 
     c_reset(&env);
-    int frame = 0;
     SetTargetFPS(30);
     while (!WindowShouldClose()) {
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
