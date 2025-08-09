@@ -7,7 +7,7 @@
 int main(void) {
     VisionTest env = {};
 
-    env.observations = (uint8_t*)calloc(3*64, sizeof(uint8_t));  // Alloc our 16x16 window compressed to float
+    env.observations = (uint8_t*)calloc(3*64 + 1, sizeof(uint8_t));  // Alloc our 16x16 window compressed to float
     env.actions = (int*)calloc(5, sizeof(int));
     env.rewards = (float*)calloc(1, sizeof(float));
     env.terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
