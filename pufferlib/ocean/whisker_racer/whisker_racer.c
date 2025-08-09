@@ -4,48 +4,38 @@
 
 void demo() {
     printf("demo\n");
-    Weights* weights = load_weights("resources/whisker_racer/whisker_racer_weights.bin", 147844);
+    Weights* weights = load_weights("resources/whisker_racer/puffer_whisker_racer_weights.bin", 133124);
     int logit_sizes[1] = {3};
-    LinearLSTM* net = make_linearlstm(weights, 1, 118, logit_sizes, 1);
+    LinearLSTM* net = make_linearlstm(weights, 1, 3, logit_sizes, 1);
 
     WhiskerRacer env = {
         .frameskip = 1,
-        .width = 640,
-        .height = 480,
-        .llw_ang = -PI/4,
-        .flw_ang = -PI/6,
-        .frw_ang = PI/6,
-        .rrw_ang = PI/4,
+        .width = 1920,
+        .height = 1080,
         .max_whisker_length = 100,
-        .turn_pi_frac = 20,
+        .turn_pi_frac = 40,
         .maxv = 5,
         .render = 0,
         .continuous = 0,
         .reward_yellow = 0.25,
-        .reward_green = 0.0,
-        .gamma = 0.9,
-        .track_width = 50,
-        .num_radial_sectors = 16,
-        .num_points = 4,
-        .bezier_resolution = 16,
-        .w_ang = 0.523,
+        .reward_green = -0.001,
+        .track_width = 75,
+        .num_radial_sectors = 180,
+        .num_points = 16,
+        .bezier_resolution = 4,
+        .w_ang = 0.777,
         .corner_thresh = 0.5,
-        .ftmp1 = 0.1,
-        .ftmp2 = 0.1,
-        .ftmp3 = 0.1,
-        .ftmp4 = 0.1,
+        .mode7 = 0, // If mode7 = 1 then 640X480 recommended
         .render_many = 0,
-        .rng=42,
-        .i = 1,
-        .method = 0,
+        .rng = 3, // rng = 3 for puffer track
+        .i = 1, // i = 1 for puffer track
+        .method = 1, // method = 1 for puffer track
     };
-    printf("about to allocate\n");
+
     allocate(&env);
 
-    printf("demo about to make_client\n");
     env.client = make_client(&env);
 
-    printf("demo about to c_reset\n");
     c_reset(&env);
     int frame = 0;
     SetTargetFPS(60);
@@ -57,9 +47,17 @@ void demo() {
                 float clamped_wheel = fmaxf(-1.0f, fminf(1.0f, move));
                 env.actions[0] = clamped_wheel;
             } else {
-                env.actions[0] = 0.0;
-                if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 1;
-                if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 2;
+                env.actions[0] = 1.0;                                               // Straight
+                if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 0.0; // Left
+                if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 2.0; // Right
+                if (IsKeyDown(KEY_M)) {
+                    if (env.mode7 == 1) {
+                        env.mode7 = 0;
+                    }
+                    else {
+                        env.mode7 = 1;
+                    }
+                }
             }
         } else if (frame % 4 == 0) {
             // Apply frameskip outside the env for smoother rendering
@@ -76,10 +74,8 @@ void demo() {
     free(weights);
     free_allocated(&env);
     close_client(env.client);
-    printf("end demo\n");
 }
 
 int main() {
     demo();
-    //test_performance(10); // found in breakout.c
 }

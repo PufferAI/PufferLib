@@ -17,7 +17,7 @@ class WhiskerRacer(pufferlib.PufferEnv):
                  reward_yellow=0.25, reward_green=0.0, gamma=0.9, track_width=50,
                  num_radial_sectors=16, num_points=4, bezier_resolution=16, w_ang=0.523,
                  corner_thresh=0.5, ftmp1=0.1, ftmp2=0.1, ftmp3=0.1, ftmp4=0.1,
-                 render_many=0, seed=42,
+                 mode7=0, render_many=0, seed=42,
                  buf=None, rng=42, i=1, method=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
                                             shape=(3,), dtype=np.float32)
@@ -53,7 +53,7 @@ class WhiskerRacer(pufferlib.PufferEnv):
                 reward_yellow=reward_yellow, reward_green=reward_green, gamma=gamma, track_width=track_width,
                 num_radial_sectors=num_radial_sectors, num_points=num_points, bezier_resolution=bezier_resolution, w_ang=w_ang,
                 corner_thresh=corner_thresh, ftmp1=ftmp1,ftmp2=ftmp2,ftmp3=ftmp3,ftmp4=ftmp4,
-                render_many=render_many, rng=rng+i, i=i, method=method
+                mode7=mode7, render_many=render_many, rng=rng+i, i=i, method=method
             )
             c_envs.append(env_id)
         self.c_envs = binding.vectorize(*c_envs)
