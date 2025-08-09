@@ -6,15 +6,14 @@ void demo() {
     printf("demo\n");
 
     Artillery3D env = {
-        .width = 1280,
-        .height = 720,
+        .x_size = 2000,
+        .y_size = 2000,
+        .z_size = 200,
         .debug = 0,
         .moving_target = 1,
         .dist_fade = 0.36,
         .frameskip = 1,
         .miss_penalty = -0.1,
-        .min_aim_angle = 0.56,
-        .max_aim_angle = 1.56,
         .max_reward = 1.0,
         .max_reward_dist = 8.5,
         .max_dist0 = 100,
@@ -23,6 +22,8 @@ void demo() {
         .target_max_x = 1230,
         .target_min_y = 300,
         .target_max_y = 670,
+        .target_min_z = 300,
+        .target_max_z = 670,
         .target_size = 15,
         .turn_penalty = -0.03,
         .turn_penalty_delay = 64,
@@ -30,7 +31,6 @@ void demo() {
         .render = 1,
         .rng = 7,
         .same_runs = 1,
-        .vm = 150.0,
         .continuous = 0,
         .i = 1,
     };

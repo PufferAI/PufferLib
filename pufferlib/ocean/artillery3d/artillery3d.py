@@ -7,7 +7,7 @@ from pufferlib.ocean.artillery3d import binding
 
 class Artillery3D(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
-                 frameskip=1, width=1280, height=720, moving_target=1,
+                 frameskip=1, x_size=2000, y_size=2000, z_size=2000, moving_target=1,
                  target_min_x=600, target_max_x=1230, target_min_y=300, target_max_y=670, target_size=15,
                  min_aim_angle=0.56, max_aim_angle=1.56, max_reward=1.0, max_reward_dist=30,
                  dist_fade=0.3, turn_penalty_delay=75, turn_penalty_ramp=0.015, max_dist0=250.0,
@@ -44,7 +44,7 @@ class Artillery3D(pufferlib.PufferEnv):
                 self.rewards[i:i+1],
                 self.terminals[i:i+1],
                 self.truncations[i:i+1],
-                seed, num_envs=num_envs, seed=seed, frameskip=frameskip, width=width, height=height, moving_target=moving_target,
+                seed, num_envs=num_envs, seed=seed, frameskip=frameskip, x_size=x_size, y_size=y_size, z_size=z_size, moving_target=moving_target,
                 target_min_x=target_min_x, target_max_x=target_max_x, target_min_y=target_min_y, target_max_y=target_max_y, target_size=target_size,
                 min_aim_angle=min_aim_angle, max_aim_angle=max_aim_angle, max_reward=max_reward, max_reward_dist=max_reward_dist,
                 dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, turn_penalty_ramp=turn_penalty_ramp, max_dist0=max_dist0,
