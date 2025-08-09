@@ -479,11 +479,7 @@ void GenerateRandomControlPoints(WhiskerRacer* env) {
             int pos;
             do {
                 pos = rand() % n;
-                int prev = (pos - 1 + n) % n;
-                int next = (pos + 1) % n;
-
                 bool valid = (assigned[pos] == 0);
-
                 if (valid) break;
                 attempts++;
             } while (attempts < 50);
@@ -503,7 +499,6 @@ void GenerateRandomControlPoints(WhiskerRacer* env) {
                 int prev_prev = (pos - 2 + n) % n;
                 int prev = (pos - 1 + n) % n;
                 int next = (pos + 1) % n;
-                int next_next = (pos + 2) % n;
 
                 bool valid = (corner_types[pos] == 2) &&
                             (corner_types[prev_prev] > 0) &&
@@ -740,14 +735,7 @@ void TopDownTexture(WhiskerRacer* env, RenderTexture2D* mode7RenderTexture, Vect
             DrawSplineBasis(curb_points, 4, 5.0f, RED); // 5 pixel wide red curbs
         }
 
-        float puffer_width = 48.0f;
-        float puffer_height = 48.0f;
-        float car_x = env->px;
-        float car_y = env->height - env->py;
-        Vector2 origin = {puffer_width / 2.0f, puffer_height / 2.0f};
-
         EndTextureMode();
-
         env->texture_initialized = 1;
     }
 }
@@ -860,6 +848,15 @@ void c_render(WhiskerRacer* env) {
     }
     if (IsKeyPressed(KEY_TAB)) {
         ToggleFullscreen();
+    }
+
+    if (IsKeyDown(KEY_M)) {
+        if (env->mode7 == 1) {
+  	    env->mode7 = 0;
+        }
+        else {
+   	    env->mode7 = 1;
+        }
     }
 
     if (env->render_many)

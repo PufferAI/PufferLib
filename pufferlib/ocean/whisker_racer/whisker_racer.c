@@ -10,8 +10,8 @@ void demo() {
 
     WhiskerRacer env = {
         .frameskip = 1,
-        .width = 1920,
-        .height = 1080,
+        .width = 1080,
+        .height = 720,
         .max_whisker_length = 100,
         .turn_pi_frac = 40,
         .maxv = 5,
@@ -25,7 +25,7 @@ void demo() {
         .bezier_resolution = 4,
         .w_ang = 0.777,
         .corner_thresh = 0.5,
-        .mode7 = 0, // If mode7 = 1 then 640X480 recommended
+        .mode7 = 1, // If mode7 = 1 then 640X480 recommended
         .render_many = 0,
         .rng = 3, // rng = 3 for puffer track
         .i = 1, // i = 1 for puffer track
@@ -50,14 +50,6 @@ void demo() {
                 env.actions[0] = 1.0;                                               // Straight
                 if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 0.0; // Left
                 if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 2.0; // Right
-                if (IsKeyDown(KEY_M)) {
-                    if (env.mode7 == 1) {
-                        env.mode7 = 0;
-                    }
-                    else {
-                        env.mode7 = 1;
-                    }
-                }
             }
         } else if (frame % 4 == 0) {
             // Apply frameskip outside the env for smoother rendering

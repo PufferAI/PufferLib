@@ -7,7 +7,7 @@ from pufferlib.ocean.whisker_racer import binding
 
 class WhiskerRacer(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
-                 frameskip=4, width=640, height=480,
+                 frameskip=4, width=1080, height=720,
                  llw_ang=-3.14/4, flw_ang=-3.14/6,
                  frw_ang=3.14/6, rrw_ang=3.14/4,
                  max_whisker_length=100,
