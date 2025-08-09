@@ -18,12 +18,12 @@ void demo() {
         .max_reward_dist = 8.5,
         .max_dist0 = 100,
         .out_bounds_penalty = -0.1,
-        .target_min_x = 600,
-        .target_max_x = 1230,
-        .target_min_y = 300,
-        .target_max_y = 670,
-        .target_min_z = 300,
-        .target_max_z = 670,
+        .target_min_x = 1000,
+        .target_max_x = 1900,
+        .target_min_y = 1000,
+        .target_max_y = 1900,
+        .target_min_z = 10,
+        .target_max_z = 100,
         .target_size = 15,
         .turn_penalty = -0.03,
         .turn_penalty_delay = 64,
@@ -44,8 +44,8 @@ void demo() {
     int weights_size = (env.moving_target == 1) ? 134022 : 133766;
 
     Weights* weights = load_weights(weights_path, weights_size); // 133638
-    int logit_sizes[1] = {5};
-    int obs_size = (env.moving_target == 1) ? 8 : 6;
+    int logit_sizes[1] = {7};
+    int obs_size = 11;
     LinearLSTM* net = make_linearlstm(weights, 1, obs_size, logit_sizes, 1);
 
     c_reset(&env);

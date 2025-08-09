@@ -386,7 +386,7 @@ void c_render(Artillery3D* env) {
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
     }
-    
+
     if (IsKeyPressed(KEY_TAB)) {
         ToggleFullscreen();
     }
@@ -399,8 +399,8 @@ void c_render(Artillery3D* env) {
     BeginMode3D(env->client->camera);
 
     DrawPlane((Vector3){0.0f, 0.0f, 0.0f}, (Vector2){env->x_size * 2.0f, env->y_size * 2.0f}, (Color){34, 139, 34, 255});
-    
-    DrawCubeWires((Vector3){env->x_size / 2.0f, env->y_size / 2.0f, env->z_size / 2.0f}, 
+
+    DrawCubeWires((Vector3){env->x_size / 2.0f, env->y_size / 2.0f, env->z_size / 2.0f},
                   env->x_size, env->y_size, env->z_size, WHITE);
 
     DrawSphere((Vector3){env->tx, env->ty, env->tz}, env->target_size, RED);
@@ -411,7 +411,7 @@ void c_render(Artillery3D* env) {
 
     float azimuth = env->azimuth;
     float elevation = env->elevation;
-    
+
     Vector3 barrel_direction = {
         cosf(azimuth) * cosf(elevation),
         sinf(azimuth) * cosf(elevation),
@@ -425,17 +425,17 @@ void c_render(Artillery3D* env) {
     };
 
     DrawCylinderEx(cannon_pos, barrel_end, barrel_radius, barrel_radius, 12, DARKGRAY);
-    
+
     DrawSphere(cannon_pos, 12.0f, GRAY);
 
     float v0 = env->muzzle_v;
     float vx0 = v0 * barrel_direction.x;
     float vy0 = v0 * barrel_direction.y;
     float vz0 = v0 * barrel_direction.z;
-    
+
     Vector3 prev_point = cannon_pos;
     int segment_count = 0;
-    
+
     for (float t = TIMESTEP; t < MAX_PROJECTILE_TIME; t += TIMESTEP) {
         float x = cannon_pos.x + vx0 * t;
         float y = cannon_pos.y + vy0 * t;
@@ -444,10 +444,10 @@ void c_render(Artillery3D* env) {
         if (z < 0 || x < 0 || x > env->x_size || y < 0 || y > env->y_size) break;
 
         Vector3 current_point = {x, y, z};
-        
+
         Color trajectory_color = (segment_count % 2 == 0) ? WHITE : LIGHTGRAY;
         DrawLine3D(prev_point, current_point, trajectory_color);
-        
+
         prev_point = current_point;
         segment_count++;
     }

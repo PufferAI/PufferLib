@@ -13,10 +13,9 @@ class Artillery3D(pufferlib.PufferEnv):
                  dist_fade=0.3, turn_penalty_delay=75, turn_penalty_ramp=0.015, max_dist0=250.0,
                  turn_penalty=-0.03, miss_penalty=-0.2, render=1, out_bounds_penalty=-0.1,
                  continuous=False, log_interval=128,
-                 vm=150.0,
                  seed=7,
                  buf=None, rng=7, i=1, debug=0, same_runs=0):
-        obs_size = 8 if moving_target == 1 else 6
+        obs_size = 11
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         self.render_mode = render_mode
         self.num_agents = num_envs
@@ -27,7 +26,7 @@ class Artillery3D(pufferlib.PufferEnv):
         if continuous:
             self.single_action_space = gymnasium.spaces.Box(low=-1, high=1, shape=(1,), dtype=np.float32)
         else:
-            self.single_action_space = gymnasium.spaces.Discrete(5)
+            self.single_action_space = gymnasium.spaces.Discrete(7)
 
         super().__init__(buf)
 
@@ -49,7 +48,7 @@ class Artillery3D(pufferlib.PufferEnv):
                 min_aim_angle=min_aim_angle, max_aim_angle=max_aim_angle, max_reward=max_reward, max_reward_dist=max_reward_dist,
                 dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, turn_penalty_ramp=turn_penalty_ramp, max_dist0=max_dist0,
                 turn_penalty=turn_penalty, miss_penalty=miss_penalty, render=render, continuous=continuous,
-                vm=vm, out_bounds_penalty=out_bounds_penalty,
+                out_bounds_penalty=out_bounds_penalty,
                 rng=rng+i, i=i, debug=debug, same_runs=same_runs
             )
             c_envs.append(env_id)
