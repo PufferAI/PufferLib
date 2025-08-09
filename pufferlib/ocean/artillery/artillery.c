@@ -47,6 +47,8 @@ void demo() {
     int logit_sizes[1] = {5};
     int obs_size = (env.moving_target == 1) ? 8 : 6;
     LinearLSTM* net = make_linearlstm(weights, 1, obs_size, logit_sizes, 1);
+    //memset(net->lstm->state_h, 0, 128 * sizeof(float));
+    //memset(net->lstm->state_c, 0, 128 * sizeof(float));
 
     c_reset(&env);
     SetTargetFPS(30);

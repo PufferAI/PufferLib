@@ -359,7 +359,7 @@ void allocate(Artillery* env) {
     init(env);
     int obs_size = (env->moving_target == 1) ? 8 : 6;
     env->observations = (float*)calloc(obs_size, sizeof(float));
-    env->actions = (float*)calloc(1, sizeof(float));
+    env->actions = (int*)calloc(1, sizeof(int));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
 }
