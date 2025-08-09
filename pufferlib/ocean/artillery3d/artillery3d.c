@@ -38,10 +38,8 @@ void demo() {
 
     env.client = make_client(&env);
 
-    const char* weights_path = (env.moving_target == 1) ? 
-        "resources/artillery3d/puffer_artillery3d_weights_moving.bin" : 
-        "resources/artillery3d/puffer_artillery3d_weights_stationary.bin";
-    int weights_size = (env.moving_target == 1) ? 134022 : 133766;
+    const char* weights_path = "resources/artillery3d/puffer_artillery3d_weights.bin";
+    int weights_size = 134664;
 
     Weights* weights = load_weights(weights_path, weights_size); // 133638
     int logit_sizes[1] = {7};

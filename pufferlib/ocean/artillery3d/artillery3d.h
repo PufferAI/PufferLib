@@ -314,8 +314,20 @@ Client* make_client(Artillery3D* env) {
     client->y_size = env->y_size;
     client->z_size = env->z_size;
 
-    InitWindow(env->x_size, env->y_size, "PufferLib Artillery3D");
+    InitWindow(1280, 720, "PufferLib Artillery3D");
     SetTargetFPS(30);
+
+    client->camera_distance = 200.0f;
+    client->camera_azimuth = -15.0f;
+    client->camera_elevation = PI / 15.0f;
+    client->is_dragging = false;
+    client->last_mouse_pos = (Vector2){0.0f, 0.0f};
+
+    client->camera.up = (Vector3){0.0f, 0.0f, 1.0f};
+    client->camera.fovy = 45.0f;
+    client->camera.projection = CAMERA_PERSPECTIVE;
+
+    update_camera_position(client);
 
     return client;
 }
