@@ -38,17 +38,10 @@ void demo() {
 
     env.client = make_client(&env);
 
-    const char* weights_path = (env.moving_target == 1) ? 
-        "resources/artillery/puffer_artillery_weights_moving.bin" : 
-        "resources/artillery/puffer_artillery_weights_stationary.bin";
-    int weights_size = (env.moving_target == 1) ? 134022 : 133766;
-
-    Weights* weights = load_weights(weights_path, weights_size); // 133638
+    Weights* weights = load_weights("resources/artillery/puffer_artillery_weights.bin", 134022);
     int logit_sizes[1] = {5};
-    int obs_size = (env.moving_target == 1) ? 8 : 6;
+    int obs_size = 8;
     LinearLSTM* net = make_linearlstm(weights, 1, obs_size, logit_sizes, 1);
-    //memset(net->lstm->state_h, 0, 128 * sizeof(float));
-    //memset(net->lstm->state_c, 0, 128 * sizeof(float));
 
     c_reset(&env);
     SetTargetFPS(30);
