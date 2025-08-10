@@ -3,8 +3,6 @@
 #include "puffernet.h"
 
 void demo() {
-    printf("demo\n");
-
     Artillery env = {
         .width = 1280,
         .height = 720,
