@@ -27,27 +27,18 @@ class Artillery(pufferlib.PufferEnv):
 
         super().__init__(buf)
 
-
         self.actions = self.actions.astype(np.float32)
 
-        c_envs = []
-        for i in range(num_envs):
-            env_id = binding.env_init(
-                self.observations[i:i+1],
-                self.actions[i:i+1],
-                self.rewards[i:i+1],
-                self.terminals[i:i+1],
-                self.truncations[i:i+1],
-                seed, num_envs=num_envs, seed=seed, frameskip=frameskip, width=width, height=height, moving_target=moving_target,
-                target_min_x=target_min_x, target_max_x=target_max_x, target_min_y=target_min_y, target_max_y=target_max_y, target_size=target_size,
-                min_aim_angle=min_aim_angle, max_aim_angle=max_aim_angle, max_reward=max_reward, max_reward_dist=max_reward_dist,
-                dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, turn_penalty_ramp=turn_penalty_ramp, max_dist0=max_dist0,
-                turn_penalty=turn_penalty, miss_penalty=miss_penalty, render=render,
-                vm=vm, out_bounds_penalty=out_bounds_penalty,
-                rng=rng+i, i=i, debug=debug, same_runs=same_runs
-            )
-            c_envs.append(env_id)
-        self.c_envs = binding.vectorize(*c_envs)
+        self.c_envs = binding.vec_init(
+            self.observations, self.actions, self.rewards, self.terminals, self.truncations, num_envs,
+            seed, num_envs=num_envs, seed=seed, frameskip=frameskip, width=width, height=height, moving_target=moving_target,
+            target_min_x=target_min_x, target_max_x=target_max_x, target_min_y=target_min_y, target_max_y=target_max_y, target_size=target_size,
+            min_aim_angle=min_aim_angle, max_aim_angle=max_aim_angle, max_reward=max_reward, max_reward_dist=max_reward_dist,
+            dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, turn_penalty_ramp=turn_penalty_ramp, max_dist0=max_dist0,
+            turn_penalty=turn_penalty, miss_penalty=miss_penalty, render=render,
+            vm=vm, out_bounds_penalty=out_bounds_penalty,
+            rng=rng+i, i=i, debug=debug, same_runs=same_runs
+        )
 
     def reset(self, seed=0):
         binding.vec_reset(self.c_envs, seed)
