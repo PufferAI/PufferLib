@@ -20,6 +20,11 @@
 #define MUZZLEV 850.0f
 #define FUSEMULT 2.0f // Fuse Time Multiplier
 
+#define X0 30.0f
+#define Y0 30.0f
+#define Z0 30.0f
+#define G -9.81f
+
 typedef struct Log {
     float score;
     float episode_return;
@@ -80,9 +85,6 @@ typedef struct Artillery3D {
     float vx0;
     float vy0;
     float vz0;
-    float x0;
-    float y0;
-    float z0;
 
     float target_min_x;
     float target_max_x;
@@ -151,15 +153,12 @@ void calculate_distance(Artillery3D* env) {
     env->vx0 = MUZZLEV * cosf(env->azimuth);
     env->vy0 = MUZZLEV * sinf(env->azimuth);
     env->vz0 = MUZZLEV * sinf(env->elevation);
-    env->x0 = 30.0f;
-    env->y0 = 30.0f;
-    env->z0 = 30.0f;
 
     float ft = env->fuse_t * FUSEMULT;
 
-    float px = env->x0 + env->vx0 * ft;
-    float py = env->y0 + env->vy0 * ft;
-    float pz = env->z0 + env->vz0 * ft - 0.5f * env->g * ft * ft;
+    float px = X0 + env->vx0 * ft;
+    float py = Y0 + env->vy0 * ft;
+    float pz = Z0 + env->vz0 * ft - 0.5f * G * ft * ft;
 
     float txn = env->tx + env->target_vx * ft;
     float tyn = env->ty + env->target_vy * ft;
@@ -190,9 +189,9 @@ void fire_projectile(Artillery3D* env) {
     if (env->render) {
         env->projectile_active = 1;
         env->projectile_time = 0.0f;
-        env->px = env->x0;
-        env->py = env->y0;
-        env->pz = env->z0;
+        env->px = X0;
+        env->py = Y0;
+        env->pz = Z0;
     }
 }
 
@@ -363,6 +362,7 @@ void reset_round(Artillery3D* env) {
     env->fired = 0;
     env->projectile_active = 0;
     env->projectile_time = 0.0f;
+    env->dist = env->x_size;
     env->max_reward_distn = env->max_dist0 - (int)(env->runs * env->dist_fade);
     if (env->max_reward_distn < env->max_reward_dist) env->max_reward_distn = env->max_reward_dist;
 }
@@ -447,7 +447,7 @@ void c_render(Artillery3D* env) {
     for (float t = TIMESTEP; t < MAX_PROJECTILE_TIME; t += TIMESTEP) {
         x = cannon_pos.x + vx0 * t;
         y = cannon_pos.y + vy0 * t;
-        z = cannon_pos.z + vz0 * t - 0.5f * env->g * t * t;
+        z = cannon_pos.z + vz0 * t - 0.5f * G * t * t;
 
         if (z < 0 || x < 0 || x > env->x_size || y < 0 || y > env->y_size) break;
 
@@ -479,7 +479,6 @@ void init(Artillery3D* env) {
     env->tick = 0;
     env->t = 0;
     if (env->same_runs < 1) env->same_runs = 1;
-    env->g = 9.8f;
     env->projectile_active = 0;
     env->projectile_time = 0.0f;
     env->dist = env->x_size;
@@ -503,15 +502,12 @@ void allocate(Artillery3D* env) {
 
 float get_turn_penalty(Artillery3D* env) {
     int start_tick = env->turn_penalty_delay;
-    int end_tick = start_tick + env->turn_penalty_ramp;
 
     if (env->tick <= start_tick) {
         return 0.0f;
-    } else if (env->tick < end_tick) {
+    } else {
         float progress = (env->tick - start_tick) * env->turn_penalty_ramp;
         return env->turn_penalty * progress;
-    } else {
-        return env->turn_penalty;
     }
 }
 
@@ -570,18 +566,17 @@ void step_frame(Artillery3D* env, float action) {
 
         if (action != FIRE) {
             env->turn_penaltyn = get_turn_penalty(env);
+            if (env->turn_penaltyn > env->turn_penalty) env->turn_penaltyn = env->turn_penalty;
             env->score += env->turn_penaltyn;
             env->rewards[0] += env->turn_penaltyn;
         }
     }
     else { // Projectile Active
         env->projectile_time += TIMESTEP;
-        env->px = env->x0 + env->vx0 * env->projectile_time;
-        if (env->debug > 1) printf("env->px = %.3f, env->vx0 = %.3f, ptime = %.3f\n", env->px, env->vx0, env->projectile_time);
-        if (env->debug > 1) printf("env->tx = %.3f\n", env->tx);
-        env->py = env->y0 + env->vy0 * env->projectile_time;
-        env->pz = env->z0 + env->vz0 * env->projectile_time - 0.5f * env->g * env->projectile_time * env->projectile_time;
-        if (env->debug > 1) printf("env->py = %.3f, env->vy0 = %.3f, ptime = %.3f\n", env->py, env->vy0, env->projectile_time);
+        float pt = env->projectile_time;
+        env->px = X0 + env->vx0 * pt;
+        env->py = Y0 + env->vy0 * pt;
+        env->pz = Z0 + env->vz0 * pt - 0.5f * G * pt * pt;
     }
 
     env->tx += env->target_vx * TIMESTEP;
