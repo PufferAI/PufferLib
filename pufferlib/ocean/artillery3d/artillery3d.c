@@ -10,7 +10,6 @@ void demo() {
         .y_size = 2000,
         .z_size = 200,
         .debug = 0,
-        .moving_target = 1,
         .dist_fade = 0.36,
         .frameskip = 1,
         .miss_penalty = -0.1,

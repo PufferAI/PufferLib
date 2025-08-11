@@ -15,8 +15,10 @@
 #define FUSETUP 5
 #define FUSETDOWN 6
 
-#define MAX_PROJECTILE_TIME 60.0f
+#define MAX_PROJECTILE_TIME 4.0f
 #define TIMESTEP 0.25f
+#define MUZZLEV 850.0f
+#define FUSEMULT 2.0f // Fuse Time Multiplier
 
 typedef struct Log {
     float score;
@@ -59,14 +61,13 @@ typedef struct Artillery3D {
     int tick;
     float dist;
 
-    int moving_target;
-
-    float muzzle_v;
     float fuse_t;
+    float fuse_t0;
     float azimuth;
     float azimuth0;
     float elevation;
     float elevation0;
+    float t;
 
     float px;
     float py;
@@ -146,45 +147,34 @@ void add_log(Artillery3D* env) {
     env->log.acc1000 += 750.0f - env->dist;
 }
 
-void calculate_parabola_closest_distance(Artillery3D* env) {
-    env->v0 = env->muzzle_v;
-    env->vx0 = env->v0 * cosf(env->azimuth);
-    env->vy0 = env->v0 * sinf(env->azimuth);
-    env->vz0 = env->v0 * sinf(env->elevation);
+void calculate_distance(Artillery3D* env) {
+    env->vx0 = MUZZLEV * cosf(env->azimuth);
+    env->vy0 = MUZZLEV * sinf(env->azimuth);
+    env->vz0 = MUZZLEV * sinf(env->elevation);
     env->x0 = 30.0f;
     env->y0 = 30.0f;
     env->z0 = 30.0f;
 
-    float tx = env->tx;
-    float ty = env->ty;
-    float tz = env->tz;
-    float tvx = env->target_vx;
-    float tvy = env->target_vy;
-    float tvz = env->target_vz;
-    float txn = tx;
-    float tyn = ty;
-    float tzn = tz;
+    float ft = env->fuse_t * FUSEMULT;
 
-    float t = env->fuse_t;
+    float px = env->x0 + env->vx0 * ft;
+    float py = env->y0 + env->vy0 * ft;
+    float pz = env->z0 + env->vz0 * ft - 0.5f * env->g * ft * ft;
 
-    float x = env->x0 + env->vx0 * t;
-    float y = env->y0 + env->vy0 * t;
-    float z = env->z0 + env->vz0 * t - 0.5f * env->g * t * t;
+    float txn = env->tx + env->target_vx * ft;
+    float tyn = env->ty + env->target_vy * ft;
+    float tzn = env->tz + env->target_vz * ft;
 
-    txn = tx + tvx * t;
-    tyn = ty + tvy * t;
-    tzn = tz + tvz * t;
-
-    float dx = x - txn;
-    float dy = y - tyn;
-    float dz = z - tzn;
+    float dx = px - txn;
+    float dy = py - tyn;
+    float dz = pz - tzn;
 
     env->dist = sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 void fire_projectile(Artillery3D* env) {
     if (env->debug > 0) printf("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!FIRE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-    calculate_parabola_closest_distance(env);
+    calculate_distance(env);
     float score;
 
     if (env->dist >= env->max_reward_distn) {
@@ -302,7 +292,7 @@ void handle_camera_controls(Client *client) {
     float wheel = GetMouseWheelMove();
     if (wheel != 0) {
         client->camera_distance -= wheel * 2.0f;
-        client->camera_distance = clampf(client->camera_distance, 5.0f, 50.0f);
+        client->camera_distance = clampf(client->camera_distance, 5.0f, 1000.0f);
         update_camera_position(client);
     }
 }
@@ -316,9 +306,9 @@ Client* make_client(Artillery3D* env) {
     InitWindow(1280, 720, "PufferLib Artillery3D");
     SetTargetFPS(30);
 
-    client->camera_distance = 200.0f;
+    client->camera_distance = 800.0f;
     client->camera_azimuth = -15.0f;
-    client->camera_elevation = PI / 15.0f;
+    client->camera_elevation = PI / 30.0f;
     client->is_dragging = false;
     client->last_mouse_pos = (Vector2){0.0f, 0.0f};
 
@@ -351,6 +341,8 @@ void get_random_start(Artillery3D* env) {
     env->azimuth0 = env->azimuth;
     env->elevation = (float)rand() / (float)RAND_MAX;
     env->elevation0 = env->elevation;
+    env->fuse_t = (float)rand() / (float)RAND_MAX;
+    env->fuse_t0 = env->fuse_t;
     env->target_vx = -rand() % 20 - 30;
     env->target_vy = -rand() % 20 - 30;
     env->target_vz = -rand() % 5 - 5;
@@ -403,16 +395,18 @@ void c_render(Artillery3D* env) {
     }
 
     handle_camera_controls(env->client);
-
+    rlSetClipPlanes(1.0, 10000.0);
     BeginDrawing();
     ClearBackground((Color){135, 206, 235, 255});
 
     BeginMode3D(env->client->camera);
 
-    DrawPlane((Vector3){0.0f, 0.0f, 0.0f}, (Vector2){env->x_size * 2.0f, env->y_size * 2.0f}, (Color){34, 139, 34, 255});
+    //DrawPlane((Vector3){0.0f, 0.0f, 0.0f}, (Vector2){env->x_size * 2.0f, env->y_size * 2.0f}, (Color){34, 139, 34, 255});
 
-    DrawCubeWires((Vector3){env->x_size / 2.0f, env->y_size / 2.0f, env->z_size / 2.0f},
-                  env->x_size, env->y_size, env->z_size, WHITE);
+    float corner_size = 20.0f;
+    DrawSphere((Vector3){env->x_size, 0, 0}, corner_size, YELLOW);
+    DrawSphere((Vector3){0, env->y_size, 0}, corner_size, YELLOW);
+    DrawSphere((Vector3){env->x_size, env->y_size, 0}, corner_size, YELLOW);
 
     DrawSphere((Vector3){env->tx, env->ty, env->tz}, env->target_size, RED);
 
@@ -439,18 +433,21 @@ void c_render(Artillery3D* env) {
 
     DrawSphere(cannon_pos, 12.0f, GRAY);
 
-    float v0 = env->muzzle_v;
-    float vx0 = v0 * barrel_direction.x;
-    float vy0 = v0 * barrel_direction.y;
-    float vz0 = v0 * barrel_direction.z;
+    float vx0 = MUZZLEV * barrel_direction.x;
+    float vy0 = MUZZLEV * barrel_direction.y;
+    float vz0 = MUZZLEV * barrel_direction.z;
 
     Vector3 prev_point = cannon_pos;
     int segment_count = 0;
 
+    float x;
+    float y;
+    float z;
+
     for (float t = TIMESTEP; t < MAX_PROJECTILE_TIME; t += TIMESTEP) {
-        float x = cannon_pos.x + vx0 * t;
-        float y = cannon_pos.y + vy0 * t;
-        float z = cannon_pos.z + vz0 * t - 0.5f * env->g * t * t;
+        x = cannon_pos.x + vx0 * t;
+        y = cannon_pos.y + vy0 * t;
+        z = cannon_pos.z + vz0 * t - 0.5f * env->g * t * t;
 
         if (z < 0 || x < 0 || x > env->x_size || y < 0 || y > env->y_size) break;
 
@@ -480,6 +477,7 @@ void c_render(Artillery3D* env) {
 void init(Artillery3D* env) {
     env->runs = 0;
     env->tick = 0;
+    env->t = 0;
     if (env->same_runs < 1) env->same_runs = 1;
     env->g = 9.8f;
     env->projectile_active = 0;
@@ -586,19 +584,24 @@ void step_frame(Artillery3D* env, float action) {
         if (env->debug > 1) printf("env->py = %.3f, env->vy0 = %.3f, ptime = %.3f\n", env->py, env->vy0, env->projectile_time);
     }
 
-    if (env->moving_target == 1) {
-        env->tx += env->target_vx * TIMESTEP;
-        env->ty += env->target_vy * TIMESTEP;
-        env->tz += env->target_vz * TIMESTEP;
-    }
+    env->tx += env->target_vx * TIMESTEP;
+    if (env->tx < 0) env->tx = 0.0f;
+    if (env->tx > env->x_size) env->tx = env->x_size;
+    env->ty += env->target_vy * TIMESTEP;
+    if (env->ty < 0) env->ty = 0.0f;
+    if (env->ty > env->y_size) env->ty = env->y_size;
+    env->tz += env->target_vz * TIMESTEP;
+    if (env->tz < 0) env->tz = 0.0f;
+    if (env->tz > env->z_size) env->tz = env->z_size;
 
     if (env->debug > 1) printf("  env->px = %.1f env->tx = %.1f env->render=%d\n", env->px, env->tx, env->render);
-    if ((env->fired == 1 && (!env->render || env->px > env->tx + env->target_size || env->py < 0.0f)) || (env->score < -1.0f)) {
+    if ((env->fired == 1 && (!env->render || env->px > env->x_size || env->py > env->y_size)) || (env->score < -1.0f)) {
         if (env->debug > 0) printf("==================terminate=================\n\n\n\n\n\n\n\n\n\n");
         env->terminals[0] = 1;
         add_log(env);
         c_reset(env);
     }
+    env->t += TIMESTEP;
 }
 
 void c_step(Artillery3D* env) {
