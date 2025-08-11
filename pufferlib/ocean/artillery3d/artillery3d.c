@@ -31,7 +31,6 @@ void demo() {
         .render = 1,
         .rng = 7,
         .same_runs = 1,
-        .continuous = 0,
         .i = 1,
     };
     allocate(&env);
@@ -50,18 +49,12 @@ void demo() {
     SetTargetFPS(30);
     while (!WindowShouldClose()) {
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
-            if(env.continuous) {
-                float move = GetMouseWheelMove();
-                float clamped_wheel = fmaxf(-1.0f, fminf(1.0f, move));
-                env.actions[0] = clamped_wheel;
-            } else {
-                env.actions[0] = 100;
-                if (IsKeyDown(KEY_SPACE)) env.actions[0] = 0;
-                if (IsKeyDown(KEY_UP)  || IsKeyDown(KEY_W)) env.actions[0] = 1;
-                if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = 2;
-                if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 3;
-                if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 4;
-            }
+            env.actions[0] = 100;
+            if (IsKeyDown(KEY_SPACE)) env.actions[0] = 0;
+            if (IsKeyDown(KEY_UP)  || IsKeyDown(KEY_W)) env.actions[0] = 1;
+            if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = 2;
+            if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 3;
+            if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 4;
         } else {
             int* actions = (int*)env.actions;
             //printf("C Obs: ");

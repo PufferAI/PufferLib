@@ -9,7 +9,6 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->y_size = unpack(kwargs, "y_size");
     env->z_size = unpack(kwargs, "z_size");
     env->render = unpack(kwargs, "render");
-    env->continuous = unpack(kwargs, "continuous");
     env->target_min_x = unpack(kwargs, "target_min_x");
     env->target_max_x = unpack(kwargs, "target_max_x");
     env->target_min_y = unpack(kwargs, "target_min_y");

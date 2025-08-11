@@ -112,7 +112,6 @@ typedef struct Artillery3D {
 
     int frameskip;
     int render;
-    int continuous;
 
     int debug;
     unsigned int rng;
