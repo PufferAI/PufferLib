@@ -7,11 +7,9 @@ from pufferlib.ocean.artillery3d import binding
 
 class Artillery3D(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
-                 frameskip=1, x_size=2000, y_size=2000, z_size=2000,
-                 target_min_x=600, target_max_x=1230, target_min_y=300, target_max_y=670, target_min_z=300, target_max_z=670,
-                 min_aim_angle=0.56, max_aim_angle=1.56, max_reward=1.0, max_reward_dist=30,  target_size=15,
-                 dist_fade=0.3, turn_penalty_delay=75, turn_penalty_ramp=0.015, max_dist0=250.0,
-                 turn_penalty=-0.03, miss_penalty=-0.2, render=1, out_bounds_penalty=-0.1,
+                 max_reward=1.0, max_reward_dist=5,  target_size=15,
+                 dist_fade=0.15, turn_penalty_delay=64, turn_penalty_ramp=0.01, max_dist0=250.0,
+                 turn_penalty=-0.003, miss_penalty=-0.15, render=1, out_bounds_penalty=-0.01,
                  log_interval=128,
                  seed=7,
                  buf=None, rng=7, i=1, debug=0, same_runs=0):
@@ -26,7 +24,7 @@ class Artillery3D(pufferlib.PufferEnv):
 
         super().__init__(buf)
 
-        self.actions = self.actions.astype(np.float32)
+        #self.actions = self.actions.astype(np.float32)
 
         c_envs = []
         for i in range(num_envs):
@@ -36,9 +34,8 @@ class Artillery3D(pufferlib.PufferEnv):
                 self.rewards[i:i+1],
                 self.terminals[i:i+1],
                 self.truncations[i:i+1],
-                seed, num_envs=num_envs, seed=seed, frameskip=frameskip, x_size=x_size, y_size=y_size, z_size=z_size,
-                target_min_x=target_min_x, target_max_x=target_max_x, target_min_y=target_min_y, target_max_y=target_max_y, target_min_z=target_min_z, target_max_z=target_max_z,
-                min_aim_angle=min_aim_angle, max_aim_angle=max_aim_angle, max_reward=max_reward, max_reward_dist=max_reward_dist,  target_size=target_size,
+                seed, num_envs=num_envs, seed=seed,
+                max_reward=max_reward, max_reward_dist=max_reward_dist,  target_size=target_size,
                 dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, turn_penalty_ramp=turn_penalty_ramp, max_dist0=max_dist0,
                 turn_penalty=turn_penalty, miss_penalty=miss_penalty, render=render,
                 out_bounds_penalty=out_bounds_penalty,

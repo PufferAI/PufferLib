@@ -15,15 +15,25 @@
 #define FUSETUP 5
 #define FUSETDOWN 6
 
-#define MAX_PROJECTILE_TIME 4.0f
-#define TIMESTEP 0.25f
+#define TIMESTEP 0.0333f
 #define MUZZLEV 850.0f
 #define FUSEMULT 2.0f // Fuse Time Multiplier
 
+#define XSIZE 2000
+#define YSIZE 1000
+#define ZSIZE 200
+
 #define X0 30.0f
-#define Y0 30.0f
+#define Y0 YSIZE * 0.5f
 #define Z0 30.0f
-#define G -9.81f
+#define G 9.81f
+
+#define TXMIN 1500 // Target X Min
+#define TXMAX 1900
+#define TYMIN 250
+#define TYMAX 750
+#define TZMIN 10
+#define TZMAX 100
 
 typedef struct Log {
     float score;
@@ -38,9 +48,6 @@ typedef struct Log {
 
 typedef struct Client {
     Camera3D camera;
-    float x_size;
-    float y_size;
-    float z_size;
     int render;
     int debug;
     float camera_distance;
@@ -54,14 +61,11 @@ typedef struct Artillery3D {
     Client* client;
     Log log;
     float* observations;
-    float* actions;
+    int* actions;
     float* rewards;
     unsigned char* terminals;
     int i;
 
-    int x_size;
-    int y_size;
-    int z_size;
     float score;
     int tick;
     float dist;
@@ -73,25 +77,22 @@ typedef struct Artillery3D {
     float elevation;
     float elevation0;
     float t;
+    float fire_t;
 
     float px;
     float py;
     float pz;
-    float g;
     int projectile_active;
     float projectile_time;
+    float boom_x;
+    float boom_y;
+    float boom_z;
 
     float v0;
     float vx0;
     float vy0;
     float vz0;
 
-    float target_min_x;
-    float target_max_x;
-    float target_min_y;
-    float target_max_y;
-    float target_min_z;
-    float target_max_z;
     float target_size;
     float target_vx;
     float target_vy;
@@ -113,7 +114,6 @@ typedef struct Artillery3D {
     int fired;
     float out_bounds_penalty;
 
-    int frameskip;
     int render;
 
     int debug;
@@ -150,8 +150,8 @@ void add_log(Artillery3D* env) {
 }
 
 void calculate_distance(Artillery3D* env) {
-    env->vx0 = MUZZLEV * cosf(env->azimuth);
-    env->vy0 = MUZZLEV * sinf(env->azimuth);
+    env->vx0 = MUZZLEV * cosf(env->azimuth-0.5f);
+    env->vy0 = MUZZLEV * sinf(env->azimuth-0.5f);
     env->vz0 = MUZZLEV * sinf(env->elevation);
 
     float ft = env->fuse_t * FUSEMULT;
@@ -159,6 +159,10 @@ void calculate_distance(Artillery3D* env) {
     float px = X0 + env->vx0 * ft;
     float py = Y0 + env->vy0 * ft;
     float pz = Z0 + env->vz0 * ft - 0.5f * G * ft * ft;
+
+    env->boom_x = px;
+    env->boom_y = py;
+    env->boom_z = pz;
 
     float txn = env->tx + env->target_vx * ft;
     float tyn = env->ty + env->target_vy * ft;
@@ -175,6 +179,7 @@ void fire_projectile(Artillery3D* env) {
     if (env->debug > 0) printf("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!FIRE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
     calculate_distance(env);
     float score;
+    env->fire_t = env->t;
 
     if (env->dist >= env->max_reward_distn) {
         score = env->miss_penalty;
@@ -251,12 +256,12 @@ static void update_camera_position(Client *c) {
     float az = c->camera_azimuth;
     float el = c->camera_elevation;
 
-    float x = r * cosf(el) * cosf(az);
-    float y = r * cosf(el) * sinf(az);
-    float z = r * sinf(el);
+    float x = X0 + r * cosf(el) * cosf(az);
+    float y = Y0 + r * cosf(el) * sinf(az);
+    float z = Z0 + r * sinf(el);
 
     c->camera.position = (Vector3){x, y, z};
-    c->camera.target = (Vector3){0, 0, 0};
+    c->camera.target = (Vector3){X0, Y0, Z0+30};
 }
 
 void handle_camera_controls(Client *client) {
@@ -290,7 +295,7 @@ void handle_camera_controls(Client *client) {
 
     float wheel = GetMouseWheelMove();
     if (wheel != 0) {
-        client->camera_distance -= wheel * 2.0f;
+        client->camera_distance -= wheel * 50.0f;
         client->camera_distance = clampf(client->camera_distance, 5.0f, 1000.0f);
         update_camera_position(client);
     }
@@ -298,16 +303,13 @@ void handle_camera_controls(Client *client) {
 
 Client* make_client(Artillery3D* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
-    client->x_size = env->x_size;
-    client->y_size = env->y_size;
-    client->z_size = env->z_size;
 
     InitWindow(1280, 720, "PufferLib Artillery3D");
     SetTargetFPS(30);
 
-    client->camera_distance = 800.0f;
-    client->camera_azimuth = -15.0f;
-    client->camera_elevation = PI / 30.0f;
+    client->camera_distance = 100.0f;
+    client->camera_azimuth = -3.14f;
+    client->camera_elevation = PI / 5.0f;
     client->is_dragging = false;
     client->last_mouse_pos = (Vector2){0.0f, 0.0f};
 
@@ -327,23 +329,23 @@ void close_client(Client* client) {
 
 void get_random_start(Artillery3D* env) {
     if (env->debug > 0) printf("get_random_start\n");
-    env->tx = rand() % env->x_size;
-    env->ty = rand() % env->y_size;
-    env->tz = rand() % env->z_size;
-    if (env->tx < env->target_min_x) env->tx = env->target_min_x;
-    if (env->tx > env->target_max_x) env->tx = env->target_max_x;
-    if (env->ty < env->target_min_y) env->ty = env->target_min_y;
-    if (env->ty > env->target_max_y) env->ty = env->target_max_y;
-    if (env->tz < env->target_min_z) env->tz = env->target_min_z;
-    if (env->tz > env->target_max_z) env->tz = env->target_max_z;
-    env->azimuth = (float)rand() / (float)RAND_MAX;
+    env->tx = rand() % XSIZE;
+    env->ty = rand() % XSIZE;
+    env->tz = rand() % XSIZE;
+    if (env->tx < TXMIN) env->tx = TXMIN;
+    if (env->tx > TXMAX) env->tx = TXMAX;
+    if (env->ty < TYMIN) env->ty = TYMIN;
+    if (env->ty > TYMAX) env->ty = TYMAX;
+    if (env->tz < TZMIN) env->tz = TZMIN;
+    if (env->tz > TZMAX) env->tz = TZMAX;
+    env->azimuth = 0.5f;
     env->azimuth0 = env->azimuth;
-    env->elevation = (float)rand() / (float)RAND_MAX;
+    env->elevation = 0.0f;
     env->elevation0 = env->elevation;
-    env->fuse_t = (float)rand() / (float)RAND_MAX;
+    env->fuse_t = 0.7f; //(float)rand() / (float)RAND_MAX;
     env->fuse_t0 = env->fuse_t;
-    env->target_vx = -rand() % 20 - 30;
-    env->target_vy = -rand() % 20 - 30;
+    env->target_vx = -rand() % 50 - 30;
+    env->target_vy = -rand() % 30 - 20;
     env->target_vz = -rand() % 5 - 5;
 }
 
@@ -362,7 +364,8 @@ void reset_round(Artillery3D* env) {
     env->fired = 0;
     env->projectile_active = 0;
     env->projectile_time = 0.0f;
-    env->dist = env->x_size;
+    env->fire_t = 99999.0f;
+    env->dist = XSIZE;
     env->max_reward_distn = env->max_dist0 - (int)(env->runs * env->dist_fade);
     if (env->max_reward_distn < env->max_reward_dist) env->max_reward_distn = env->max_reward_dist;
 }
@@ -401,21 +404,23 @@ void c_render(Artillery3D* env) {
 
     BeginMode3D(env->client->camera);
 
-    //DrawPlane((Vector3){0.0f, 0.0f, 0.0f}, (Vector2){env->x_size * 2.0f, env->y_size * 2.0f}, (Color){34, 139, 34, 255});
-
     float corner_size = 20.0f;
-    DrawSphere((Vector3){env->x_size, 0, 0}, corner_size, YELLOW);
-    DrawSphere((Vector3){0, env->y_size, 0}, corner_size, YELLOW);
-    DrawSphere((Vector3){env->x_size, env->y_size, 0}, corner_size, YELLOW);
-
-    DrawSphere((Vector3){env->tx, env->ty, env->tz}, env->target_size, RED);
+    DrawSphere((Vector3){0, 0, 0}, corner_size, YELLOW);
+    DrawSphere((Vector3){XSIZE, 0, 0}, corner_size, YELLOW);
+    DrawSphere((Vector3){0, YSIZE, 0}, corner_size, YELLOW);
+    DrawSphere((Vector3){XSIZE, YSIZE, 0}, corner_size, YELLOW);
 
     float barrel_length = 40.0f;
     float barrel_radius = 4.0f;
-    Vector3 cannon_pos = {30.0f, 30.0f, 30.0f};
 
-    float azimuth = env->azimuth;
+    float azimuth = env->azimuth - 0.5f;
     float elevation = env->elevation;
+
+    Vector3 cannon_pos = {
+        X0,
+        Y0,
+        Z0
+    };
 
     Vector3 barrel_direction = {
         cosf(azimuth) * cosf(elevation),
@@ -424,9 +429,9 @@ void c_render(Artillery3D* env) {
     };
 
     Vector3 barrel_end = {
-        cannon_pos.x + barrel_length * barrel_direction.x,
-        cannon_pos.y + barrel_length * barrel_direction.y,
-        cannon_pos.z + barrel_length * barrel_direction.z
+        X0 + barrel_length * barrel_direction.x,
+        Y0 + barrel_length * barrel_direction.y,
+        Z0 + barrel_length * barrel_direction.z
     };
 
     DrawCylinderEx(cannon_pos, barrel_end, barrel_radius, barrel_radius, 12, DARKGRAY);
@@ -444,12 +449,12 @@ void c_render(Artillery3D* env) {
     float y;
     float z;
 
-    for (float t = TIMESTEP; t < MAX_PROJECTILE_TIME; t += TIMESTEP) {
-        x = cannon_pos.x + vx0 * t;
-        y = cannon_pos.y + vy0 * t;
-        z = cannon_pos.z + vz0 * t - 0.5f * G * t * t;
+    for (float t = TIMESTEP; t < FUSEMULT; t += TIMESTEP) {
+        x = X0 + vx0 * t;
+        y = Y0 + vy0 * t;
+        z = Z0 + vz0 * t - 0.5f * G * t * t;
 
-        if (z < 0 || x < 0 || x > env->x_size || y < 0 || y > env->y_size) break;
+        if (z < 0 || x < 0 || x > XSIZE || y < 0 || y > YSIZE) break;
 
         Vector3 current_point = {x, y, z};
 
@@ -460,9 +465,21 @@ void c_render(Artillery3D* env) {
         segment_count++;
     }
 
+    int drew_drone = 0;
+
     if (env->projectile_active) {
         DrawSphere((Vector3){env->px, env->py, env->pz}, 4.0f, BLACK);
+        if (env->t > env->fire_t + env->fuse_t * FUSEMULT) {
+            DrawSphere((Vector3){env->boom_x, env->boom_y, env->boom_z}, 30.0f, (Color){128, 128, 128, 128});
+            if (env->dist < 30.0f) {
+                DrawSphere((Vector3){env->boom_x, env->boom_y, env->boom_z}, 30.0f+10*(env->t-env->fire_t), (Color){255, 0, 0, 128});
+                DrawSphere((Vector3){env->tx, env->ty, env->tz}, env->target_size, RED);
+                drew_drone = 1;
+            }
+        }
     }
+
+    if (!drew_drone) DrawSphere((Vector3){env->tx, env->ty, env->tz}, env->target_size, BLUE);
 
     EndMode3D();
 
@@ -477,15 +494,16 @@ void c_render(Artillery3D* env) {
 void init(Artillery3D* env) {
     env->runs = 0;
     env->tick = 0;
-    env->t = 0;
+    env->t = 0.0f;
+    env->fire_t = 99999.0f;
     if (env->same_runs < 1) env->same_runs = 1;
     env->projectile_active = 0;
     env->projectile_time = 0.0f;
-    env->dist = env->x_size;
+    env->dist = XSIZE;
 
-    env->inv_x_size = 1.0f / env->x_size;
-    env->inv_y_size = 1.0f / env->y_size;
-    env->inv_z_size = 1.0f / env->z_size;
+    env->inv_x_size = 1.0f / XSIZE;
+    env->inv_y_size = 1.0f / YSIZE;
+    env->inv_z_size = 1.0f / ZSIZE;
 
     srand(env->rng + env->i);
 
@@ -495,7 +513,7 @@ void init(Artillery3D* env) {
 void allocate(Artillery3D* env) {
     init(env);
     env->observations = (float*)calloc(11, sizeof(float));
-    env->actions = (float*)calloc(1, sizeof(float));
+    env->actions = (int*)calloc(1, sizeof(int));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
 }
@@ -511,7 +529,7 @@ float get_turn_penalty(Artillery3D* env) {
     }
 }
 
-void step_frame(Artillery3D* env, float action) {
+void step_frame(Artillery3D* env, int action) {
     if (env->debug > 0) printf("STEP env%d tick%d=========================\n", env->i, env->tick);
 
     if (!env->projectile_active) {
@@ -521,43 +539,43 @@ void step_frame(Artillery3D* env, float action) {
                 fire_projectile(env);
             }
         } else if (action == LEFT) {
-            if (env->azimuth < 0.95) {
-                env->azimuth += 0.05;
+            if (env->azimuth < 0.99) {
+                env->azimuth += 0.01;
             }
             else {
                 env->score += env->out_bounds_penalty;
             }
         } else if (action == RIGHT) {
-            if (env->azimuth > 0.05) {
-                env->azimuth -= 0.05;
+            if (env->azimuth > 0.01) {
+                env->azimuth -= 0.01;
             }
             else {
                 env->score += env->out_bounds_penalty;
             }
         } else if (action == UP) {
-            if (env->elevation < 0.95) {
-                env->elevation += 0.05;
+            if (env->elevation < 0.99) {
+                env->elevation += 0.01;
             }
             else {
                 env->score += env->out_bounds_penalty;
             }
         } else if (action == DOWN) {
-            if (env->elevation > 0.05) {
-                env->elevation -= 0.05;
+            if (env->elevation > 0.01) {
+                env->elevation -= 0.01;
             }
             else {
                 env->score += env->out_bounds_penalty;
             }
         } else if (action == FUSETUP) {
-            if (env->fuse_t < 0.95) {
-                env->fuse_t += 0.05;
+            if (env->fuse_t < 0.99) {
+                env->fuse_t += 0.01;
             }
             else {
                 env->score += env->out_bounds_penalty;
             }
         } else if (action == FUSETDOWN) {
-            if (env->fuse_t > 0.05) {
-                env->fuse_t -= 0.05;
+            if (env->fuse_t > 0.01) {
+                env->fuse_t -= 0.01;
             }
             else {
                 env->score += env->out_bounds_penalty;
@@ -581,16 +599,16 @@ void step_frame(Artillery3D* env, float action) {
 
     env->tx += env->target_vx * TIMESTEP;
     if (env->tx < 0) env->tx = 0.0f;
-    if (env->tx > env->x_size) env->tx = env->x_size;
+    if (env->tx > XSIZE) env->tx = XSIZE;
     env->ty += env->target_vy * TIMESTEP;
     if (env->ty < 0) env->ty = 0.0f;
-    if (env->ty > env->y_size) env->ty = env->y_size;
+    if (env->ty > YSIZE) env->ty = YSIZE;
     env->tz += env->target_vz * TIMESTEP;
     if (env->tz < 0) env->tz = 0.0f;
-    if (env->tz > env->z_size) env->tz = env->z_size;
+    if (env->tz > ZSIZE) env->tz = ZSIZE;
 
     if (env->debug > 1) printf("  env->px = %.1f env->tx = %.1f env->render=%d\n", env->px, env->tx, env->render);
-    if ((env->fired == 1 && (!env->render || env->px > env->x_size || env->py > env->y_size)) || (env->score < -1.0f)) {
+    if ((env->fired == 1 && (!env->render || env->px > XSIZE || env->py > YSIZE)) || (env->score < -1.0f)) {
         if (env->debug > 0) printf("==================terminate=================\n\n\n\n\n\n\n\n\n\n");
         env->terminals[0] = 1;
         add_log(env);
@@ -603,10 +621,8 @@ void c_step(Artillery3D* env) {
     env->terminals[0] = 0;
     env->rewards[0] = 0.0;
 
-    float action = env->actions[0];
-    for (int i = 0; i < env->frameskip; i++) {
-        env->tick += 1;
-        step_frame(env, action);
-    }
+    int action = env->actions[0];
+    env->tick += 1;
+    step_frame(env, action);
     compute_observations(env);
 }
