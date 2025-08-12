@@ -1190,6 +1190,10 @@ def load_config(env_name):
         prev[subkey] = value
 
     args['train']['use_rnn'] = args['rnn_name'] is not None
+    if args['vec']['num_workers'] == 'auto':
+        import psutil
+        cores = psutil.cpu_count(logical=False)
+        args['vec']['num_workers'] = cores
     return args
 
 def main():
