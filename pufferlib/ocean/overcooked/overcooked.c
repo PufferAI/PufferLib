@@ -1,64 +1,64 @@
-/* Pure C demo file for Target. Build it with:
- * bash scripts/build_ocean.sh target local (debug)
- * bash scripts/build_ocean.sh target fast
+/* Pure C demo file for Overcooked. Build it with:
+ * bash scripts/build_ocean.sh overcooked local (debug)
+ * bash scripts/build_ocean.sh overcooked fast
  * We suggest building and debugging your env in pure C first. You
- * get faster builds and better error messages
+ * get faster builds and better error messages. To keep this example
+ * simple, it does not include C neural nets.
  */
-#include "target.h"
 
-/* Puffernet is our lightweight cpu inference library that
- * lets you load basic PyTorch model architectures so that
- * you can run them in pure C or on the web via WASM
- */
-#include "puffernet.h"
+#include "overcooked.h"
 
 int main() {
-    int num_agents = 8;
-    int num_goals = 4;
-    int num_obs = 2*(num_agents + num_goals) + 4;
-
-    // Weights are exported by running puffer export
-    Weights* weights = load_weights("resources/target/target_weights.bin", 137743);
-
-    int logit_sizes[2] = {9, 5};
-    LinearLSTM* net = make_linearlstm(weights, num_agents, num_obs, logit_sizes, 2);
-
-    Target env = {
-        .width = 1080,
-        .height = 720,
-        .num_agents = num_agents,
-        .num_goals = num_goals 
+    Overcooked env = {
+        .width = 10,
+        .height = 10,
+        .max_steps = 200,
+        .grid_size = 50,
+        .reward_dish_served = 10.0f,
+        .reward_step_penalty = -0.1f,
+        .observation_size = 100  // Adjust based on your observation design
     };
+    
+    // Allocate required arrays
+    env.observations = (float*)calloc(env.observation_size, sizeof(float));
+    env.actions = (int*)calloc(1, sizeof(int));
+    env.rewards = (float*)calloc(1, sizeof(float));
+    env.terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
+    
+    // Initialize environment
     init(&env);
-
-    // Allocate these manually since they aren't being passed from Python
-    env.observations = calloc(env.num_agents*num_obs, sizeof(float));
-    env.actions = calloc(2*env.num_agents, sizeof(int));
-    env.rewards = calloc(env.num_agents, sizeof(float));
-    env.terminals = calloc(env.num_agents, sizeof(unsigned char));
-
-    // Always call reset and render first
     c_reset(&env);
     c_render(&env);
-
-    // while(True) will break web builds
+    
+    // Main game loop
     while (!WindowShouldClose()) {
-        for (int i=0; i<env.num_agents; i++) {
-            env.actions[2*i] = rand() % 9;
-            env.actions[2*i + 1] = rand() % 5;
+        // Manual control with shift key, random actions otherwise
+        if (IsKeyDown(KEY_LEFT_SHIFT)) {
+            env.actions[0] = ACTION_NOOP;
+            if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W)) env.actions[0] = ACTION_UP;
+            if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S)) env.actions[0] = ACTION_DOWN;
+            if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) env.actions[0] = ACTION_LEFT;
+            if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = ACTION_RIGHT;
+            if (IsKeyPressed(KEY_SPACE)) env.actions[0] = ACTION_INTERACT;
+        } else {
+            env.actions[0] = rand() % 6;  // Random action (0-5)
         }
-
-        forward_linearlstm(net, env.observations, env.actions);
+        
         c_step(&env);
         c_render(&env);
+        
+        // Reset if episode ends
+        if (env.terminals[0]) {
+            c_reset(&env);
+        }
     }
-
-    // Try to clean up after yourself
-    free_linearlstm(net);
+    
+    // Clean up
     free(env.observations);
     free(env.actions);
     free(env.rewards);
     free(env.terminals);
     c_close(&env);
+    
+    return 0;
 }
-
