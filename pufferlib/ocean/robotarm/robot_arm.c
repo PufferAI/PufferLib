@@ -143,6 +143,24 @@ static void update_object_physics(ManipObject* obj, float dt) {
     } else {
         body->contact_time = 0.0f;
     }
+
+    float bottom = body->pos[2] - obj->size[2] * 0.5f;
+    if (bottom < TABLE_HEIGHT) {
+        body->pos[2] = TABLE_HEIGHT + obj->size[2] * 0.5f;
+        if (body->vel[2] < 0.0f) {
+            body->vel[2] *= -obj->restitution;
+            float horizontal_speed = safe_sqrt(body->vel[0]*body->vel[0] + body->vel[1]*body->vel[1]);
+            if (horizontal_speed > 1e-3f) {
+                float friction_force = obj->friction * obj->mass * fabsf(GRAVITY);
+                float friction_decel = friction_force / obj->mass;
+                float new_speed = fmaxf(0.0f, horizontal_speed - friction_decel * dt);
+                float scale = (horizontal_speed > 0.0f) ? (new_speed / horizontal_speed) : 0.0f;
+                body->vel[0] *= scale;
+                body->vel[1] *= scale;
+            }
+        }
+        body->on_surface = true;
+    }
 }
 
 static inline void rotate_world_to_ee(const float ee_rpy[3], const float v[3], float out[3]) {
