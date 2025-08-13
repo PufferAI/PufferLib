@@ -11,10 +11,10 @@
 #define M_PI_2 1.57079632679489661923f
 #endif
 
-#define WORKSPACE_X_MIN -0.5f
-#define WORKSPACE_X_MAX  0.5f
-#define WORKSPACE_Y_MIN -0.5f
-#define WORKSPACE_Y_MAX  0.5f
+#define WORKSPACE_X_MIN -0.65f
+#define WORKSPACE_X_MAX  0.65f
+#define WORKSPACE_Y_MIN -0.65f
+#define WORKSPACE_Y_MAX  0.65f
 #define WORKSPACE_Z_MIN  0.0f
 #define WORKSPACE_Z_MAX  0.8f
 
@@ -31,7 +31,7 @@
 
 #define GRAVITY -9.81f
 #define TABLE_HEIGHT 0.25f
-#define OBJECT_MASS 0.02f
+#define OBJECT_MASS 0.05f
 #define OBJECT_RESTITUTION 0.2f
 #define OBJECT_FRICTION 0.8f
 #define AIR_DAMPING 0.95f
@@ -119,7 +119,7 @@ typedef struct RobotArm {
     int max_steps;
     int episode_steps;
     int task;
-    int reach_only;
+    // reach_only removed - pick-and-place mode only
     int pick_and_place_mode;
 
     float joint_angles[6];
@@ -190,30 +190,26 @@ typedef struct RobotArm {
     float on_gripper_spawn_min;
     float on_gripper_spawn_prob;
     float start_grasp_prob;
-
     int   target_spawn_step;
     int   target_touch_awarded;
     float touch_bonus_max;
     int   touch_decay_steps;
-
     int   stagnation_steps;
     int   stagnation_limit;
     float best_metric;
-
     int   assist_enabled;
     int   assist_episodes;
-
     int   continuous_gripper;
     int   extended_observation;
     int   terminate_on_place;
-
     int   use_unified_clamp;
     float unified_clamp_min;
     float unified_clamp_max;
-
     int   placed_event;
-
     int   oob_steps;
+    int   early_reach_episodes;
+    float early_reach_bonus;
+    int   near_object_steps;
 } RobotArm;
 
 void c_reset(RobotArm *env);

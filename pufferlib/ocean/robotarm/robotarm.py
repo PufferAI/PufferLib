@@ -20,17 +20,11 @@ class RobotArm(pufferlib.PufferEnv):
         pick_and_place_mode=False,
         **kwargs
     ):
-        
-        self.pick_and_place_mode = pick_and_place_mode
-        
-        if pick_and_place_mode:
-            obs_shape = (19,)
-            obs_doc = "19D: robot_state + target_object_info + target_basket_info + target_type_onehot"
-        else:
-            obs_shape = (14,)
-            obs_doc = "14D: joint_angles + target_relative_info + distance + progress"
-            
-        # Tighter bounds to prevent NaN in policy network
+
+        self.pick_and_place_mode = True
+        obs_shape = (19,)
+        obs_doc = "19D: robot_state + target_object_info + target_basket_info + target_type_onehot"
+
         self.single_observation_space = gymnasium.spaces.Box(
             low=-2.0,
             high=2.0,
@@ -69,16 +63,16 @@ class RobotArm(pufferlib.PufferEnv):
                     },
                     reinit=True,
                 )
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 print(f"[wandb] init failed: {e}")
                 self._wandb = None
         
         super().__init__(buf)
         
-        self.actions = self.actions.astype(np.float32)
+        self._terminals_bool = np.empty_like(self.terminals, dtype=bool)
+        self._truncations = np.zeros_like(self.terminals, dtype=bool)
         c_envs = []
         forward_kwargs = dict(kwargs)
-        forward_kwargs.pop('reach_only', None)
         forward_kwargs.pop('max_steps', None)
         forward_kwargs.pop('pick_and_place_mode', None)
 
@@ -112,7 +106,7 @@ class RobotArm(pufferlib.PufferEnv):
             if isinstance(v, bool):
                 return int(v)
             try:
-                import numpy as _np  # local import safety
+                import numpy as _np
                 if isinstance(v, (_np.bool_,)):
                     return int(bool(v))
             except Exception:
@@ -151,8 +145,7 @@ class RobotArm(pufferlib.PufferEnv):
             except Exception:
                 return 0.0
 
-        forward_kwargs['pick_and_place_mode'] = _to_int_boolish(self.pick_and_place_mode)
-        forward_kwargs['reach_only'] = _to_int_boolish(kwargs.get('reach_only', not self.pick_and_place_mode))
+        forward_kwargs['pick_and_place_mode'] = 1
 
         int_keys = [
             'frame_skip', 'domain_randomization', 'curriculum_episodes',
@@ -235,17 +228,17 @@ class RobotArm(pufferlib.PufferEnv):
                 if self._wandb:
                     try:
                         self._wandb.log(simple)
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:
                         print(f"[wandb] log failed: {e}")
         
-        truncations = np.zeros_like(self.terminals, dtype=bool)
+        np.not_equal(self.terminals, 0, out=self._terminals_bool)
         
         return (
-            self.observations, 
-            self.rewards, 
-            self.terminals.astype(bool), 
-            truncations,
-            info
+            self.observations,
+            self.rewards,
+            self._terminals_bool,
+            self._truncations,
+            info,
         )
     
     def render(self, env_id=0):

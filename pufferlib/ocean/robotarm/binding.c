@@ -9,7 +9,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     if (!env) return -1;
     env->max_steps = (int)unpack(kwargs, "max_steps");
     env->pick_and_place_mode = (int)unpack(kwargs, "pick_and_place_mode");
-    env->reach_only = (int)unpack(kwargs, "reach_only");
+    // reach_only removed - pick-and-place mode only
     env->frame_skip = (int)unpack(kwargs, "frame_skip");
     env->success_distance = (float)unpack(kwargs, "success_distance");
     env->domain_randomization = (int)unpack(kwargs, "domain_randomization");
