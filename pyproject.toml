@@ -149,8 +149,7 @@ minihack =  [
 ]
 
 mujoco = [
-    'gymnasium[mujoco]==1.0.0',
-    'moviepy',
+    'gymnasium[mujoco]==0.29.1',
 ]
 
 nethack = [
