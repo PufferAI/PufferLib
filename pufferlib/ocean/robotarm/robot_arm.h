@@ -32,9 +32,9 @@
 #define GRAVITY -9.81f
 #define TABLE_HEIGHT 0.25f
 #define OBJECT_MASS 0.05f
-#define OBJECT_RESTITUTION 0.2f
+#define OBJECT_RESTITUTION 0.1f
 #define OBJECT_FRICTION 0.8f
-#define AIR_DAMPING 0.95f
+#define AIR_DAMPING 0.90f
 #define CONTACT_STIFFNESS 300.0f
 #define CONTACT_DAMPING 30.0f
 
@@ -75,7 +75,6 @@ typedef struct {
     bool grasped;
     bool in_basket;
     int target_basket;
-
     float size[3];
     float mass;
     float restitution;
@@ -114,14 +113,10 @@ typedef struct RobotArm {
     float *actions;
     float *rewards;
     unsigned char *terminals;
-
-    // Episode control
     int max_steps;
     int episode_steps;
     int task;
-    // reach_only removed - pick-and-place mode only
     int pick_and_place_mode;
-
     float joint_angles[6];
     float end_effector[3];
     float end_effector_orient[3];
@@ -138,6 +133,7 @@ typedef struct RobotArm {
     int   was_grasped_last_step;
     ManipObject objects[MAX_OBJECTS];
     Basket baskets[MAX_BASKETS];
+    int   basket_disabled[MAX_BASKETS];
     int current_target_object;
     ObjectType target_type;
     int task_stage;
@@ -149,6 +145,7 @@ typedef struct RobotArm {
     float cached_cos[6];
     float prev_distance;
     float current_distance;
+    float best_place_dist;
 
     float episode_score_accum;
     float episode_return_accum;
@@ -210,6 +207,7 @@ typedef struct RobotArm {
     int   early_reach_episodes;
     float early_reach_bonus;
     int   near_object_steps;
+    int   target_unreachable_steps;
 } RobotArm;
 
 void c_reset(RobotArm *env);

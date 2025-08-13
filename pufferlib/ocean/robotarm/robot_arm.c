@@ -30,13 +30,15 @@ static inline float distance3d(const float a[3], const float b[3]) {
     return safe_sqrt(dx*dx + dy*dy + dz*dz);
 }
 
-
 static const float AIR_DAMPING_LOG = 0.0f;
-
 static const float FINGER_HARD_RADIUS = 0.020f;
-static const float GRIPPER_TANGENTIAL_FRICTION = 0.8f; // Coulomb-like friction coef
+static const float GRIPPER_TANGENTIAL_FRICTION = 1.2f;
 static const float WALL_RESTITUTION = 0.3f;
-static const float WALL_FRICTION = 0.6f; // tangential damping on wall hits
+static const float WALL_FRICTION = 0.6f;
+static const float HOLD_SPRING_K = 400.0f;
+static const float HOLD_DAMPING_C = 20.0f;
+static const float MAGNET_FORCE_CAP = 5.0f;  // max pre-grasp magnetic force (N)
+static const float MAGNET_BASE_GAIN = 0.0f;  // 0 power when off; linear with gripper_state
 
 static inline float get_air_damping_log() {
     static int initialized = 0;
@@ -91,20 +93,6 @@ static void init_physics_body(PhysicsBody* body, const float pos[3]) {
     body->in_contact = false;
     body->contact_time = 0.0f;
 }
-
-// check_ground_collision removed; ground contact is resolved post-integration
-
-static bool check_gripper_collision(const ManipObject* obj, const GripperFinger* finger) {
-    float dx = obj->physics.pos[0] - finger->pos[0];
-    float dy = obj->physics.pos[1] - finger->pos[1];
-    float dz = obj->physics.pos[2] - finger->pos[2];
-    float dist_sq = dx*dx + dy*dy + dz*dz;
-    float obj_radius = obj->size[0] * 0.5f;
-    float contact_dist = (GRIPPER_CONTACT_RADIUS + obj_radius);
-    float hard_dist = (FINGER_HARD_RADIUS + obj_radius);
-    return dist_sq < (contact_dist * contact_dist) || dist_sq < (hard_dist * hard_dist);
-}
-
 
 typedef struct {
     float pos[3];
@@ -170,6 +158,7 @@ static void rk4_integrate_physics(ManipObject* obj, float dt) {
 
 static void update_object_physics(ManipObject* obj, float dt) {
     if (obj->in_basket) return;
+    if (obj->grasped) return;
     
     PhysicsBody* body = &obj->physics;
 
@@ -237,16 +226,24 @@ static void update_object_physics(ManipObject* obj, float dt) {
         body->vel[0] *= (1.0f - WALL_FRICTION * dt);
         body->vel[1] *= (1.0f - WALL_FRICTION * dt);
     }
+    if (body->pos[2] < TABLE_HEIGHT + obj->size[2]*0.5f) {
+        body->pos[2] = TABLE_HEIGHT + obj->size[2]*0.5f;
+        if (body->vel[2] < 0.0f) body->vel[2] *= -obj->restitution;
+        body->vel[0] *= (1.0f - obj->friction * dt);
+        body->vel[1] *= (1.0f - obj->friction * dt);
+    }
 }
 
 static void resolve_object_collisions(RobotArm *env, float dt) {
     for (int i = 0; i < MAX_OBJECTS; i++) {
         ManipObject *oi = &env->objects[i];
         if (oi->in_basket) continue;
+        if (env->grasped_object_id == i) continue;
         float ri = oi->size[0] * 0.5f;
         for (int j = i + 1; j < MAX_OBJECTS; j++) {
             ManipObject *oj = &env->objects[j];
             if (oj->in_basket) continue;
+            if (env->grasped_object_id == j) continue;
             float rj = oj->size[0] * 0.5f;
 
             float dx = oj->physics.pos[0] - oi->physics.pos[0];
@@ -547,31 +544,47 @@ static float compute_reward(RobotArm *env) {
             float current_dist = distance3d(o->physics.pos, env->baskets[bidx].pos);
             float prev_dist = env->prev_distance;
             float movement_delta = prev_dist - current_dist;
-            reward += (movement_delta > 0.0f) ? (movement_delta * 2.5f) : (movement_delta * 0.5f);
-            reward += fmaxf(0.0f, (BASKET_SIZE * 0.6f) - current_dist) * 3.0f;
+            if (current_dist + 1e-5f < env->best_place_dist) {
+                env->best_place_dist = current_dist;
+                reward += fmaxf(0.0f, movement_delta) * 8.0f;
+            } else {
+                reward += fminf(0.0f, movement_delta) * 0.2f;
+            }
+            reward += fmaxf(0.0f, (BASKET_SIZE * 0.8f) - current_dist) * 6.0f;
             float lift = o->physics.pos[2] - (TABLE_HEIGHT + OBJECT_SIZE * 0.5f);
             if (lift > 0.03f) {
                 reward += fminf(2.0f, lift * 20.0f);
                 reward += 0.02f;
             }
             
-            bool near_basket = current_dist < (BASKET_SIZE * 0.6f);
+            bool near_basket = current_dist < (BASKET_SIZE * 0.7f);
             bool opened = env->gripper_state < 0.3f;
             
             if (near_basket && opened) {
                 o->in_basket = true;
                 env->grasped_object_id = -1;
-                reward += 10.0f;
+                reward += 20.0f;
                 env->episode_score_accum += 1.0f;
                 env->episode_place_count += 1.0f;
 
                 env->log.place_success_rate += 1.0f;
                 env->baskets[bidx].collected_count += 1.0f;
                 env->placed_event = 1;
-                env->target_type = (ObjectType)(rand() % 3);
-                env->current_target_object = -1;
-                for (int i = 0; i < MAX_OBJECTS; i++) {
-                    if (!env->objects[i].in_basket && env->objects[i].type == env->target_type) { env->current_target_object = i; break; }
+                env->best_place_dist = 1e9f; // reset for next target
+                int disabled_idx = bidx;
+                for (int attempt = 0; attempt < 3; attempt++) {
+                    ObjectType new_type = (ObjectType)(rand() % 3);
+                    int basket_idx = -1;
+                    for (int bi = 0; bi < MAX_BASKETS; bi++) {
+                        if (env->baskets[bi].type == (BasketType)new_type) { basket_idx = bi; break; }
+                    }
+                    if (basket_idx >= 0 && basket_idx != disabled_idx) {
+                        int found = -1;
+                        for (int oi = 0; oi < MAX_OBJECTS; oi++) {
+                            if (!env->objects[oi].in_basket && env->objects[oi].type == new_type) { found = oi; break; }
+                        }
+                        if (found >= 0) { env->target_type = new_type; env->current_target_object = found; break; }
+                    }
                 }
             }
 
@@ -631,112 +644,47 @@ static void update_gripper_fingers(RobotArm *env) {
 }
 
 static void apply_gripper_forces(RobotArm *env) {
-    
     env->gripper_force = 0.0f;
-    
     env->grasp_event = 0;
+
+    if (env->grasped_object_id >= 0) return;
+    int ci = -1;
+    float best_d2 = 1e12f;
     for (int i = 0; i < MAX_OBJECTS; i++) {
         ManipObject* obj = &env->objects[i];
-        if (obj->in_basket) continue;
-        
+        if (obj->in_basket || obj->type != env->target_type) continue;
+        float dx = env->end_effector[0] - obj->physics.pos[0];
+        float dy = env->end_effector[1] - obj->physics.pos[1];
+        float dz = (env->end_effector[2] - 0.02f) - obj->physics.pos[2];
+        float d2 = dx*dx + dy*dy + dz*dz;
+        if (d2 < best_d2) { best_d2 = d2; ci = i; }
+    }
+    if (ci < 0) return;
 
-        bool left_contact = check_gripper_collision(obj, &env->left_finger);
-        bool right_contact = check_gripper_collision(obj, &env->right_finger);
-        
-        obj->physics.in_contact = left_contact || right_contact;
-        
-        if (left_contact) {
-            env->left_finger.in_contact = true;
-            env->left_finger.contact_object_id = i;
-        }
-        if (right_contact) {
-            env->right_finger.in_contact = true;
-            env->right_finger.contact_object_id = i;
-        }
-        
-        if (obj->physics.in_contact && env->gripper_state > 0.1f) {
-            float center[3] = {
-                env->end_effector[0],
-                env->end_effector[1],
-                env->end_effector[2] - 0.02f
-            };
-            float to_center[3] = {
-                center[0] - obj->physics.pos[0],
-                center[1] - obj->physics.pos[1],
-                center[2] - obj->physics.pos[2]
-            };
-            float dist = vec3_length(to_center);
-            if (dist > 1e-4f) {
-                vec3_scale(to_center, to_center, 1.0f / dist);
-            }
-            float k = 8.0f;
-            float c = 1.5f;
-            float f_mag = env->gripper_state * fminf(0.5f, k * dist);
-            // Normal component (pull to center)
-            obj->physics.force[0] += to_center[0] * f_mag - c * obj->physics.vel[0];
-            obj->physics.force[1] += to_center[1] * f_mag - c * obj->physics.vel[1];
-            obj->physics.force[2] += to_center[2] * f_mag - c * obj->physics.vel[2];
-            // Tangential friction to reduce sliding
-            float vn = obj->physics.vel[0]*to_center[0] + obj->physics.vel[1]*to_center[1] + obj->physics.vel[2]*to_center[2];
-            float vt_x = obj->physics.vel[0] - vn*to_center[0];
-            float vt_y = obj->physics.vel[1] - vn*to_center[1];
-            float vt_z = obj->physics.vel[2] - vn*to_center[2];
-            obj->physics.force[0] += -GRIPPER_TANGENTIAL_FRICTION * vt_x;
-            obj->physics.force[1] += -GRIPPER_TANGENTIAL_FRICTION * vt_y;
-            obj->physics.force[2] += -GRIPPER_TANGENTIAL_FRICTION * vt_z;
+    ManipObject* obj = &env->objects[ci];
+    float center[3] = { env->end_effector[0], env->end_effector[1], env->end_effector[2] - 0.02f };
+    float to_center[3] = { center[0] - obj->physics.pos[0], center[1] - obj->physics.pos[1], center[2] - obj->physics.pos[2] };
+    float dist = vec3_length(to_center);
+    if (dist > 1e-6f) vec3_scale(to_center, to_center, 1.0f / fmaxf(dist, 1e-6f));
+    float k = HOLD_SPRING_K * 0.70f;
+    float c = HOLD_DAMPING_C * 0.5f;
+    float gain = fmaxf(0.0f, fminf(1.0f, env->gripper_state));
+    float f_mag = gain * fminf(MAGNET_FORCE_CAP, k * dist);
+    obj->physics.force[0] += to_center[0] * f_mag - c * obj->physics.vel[0] * 0.25f;
+    obj->physics.force[1] += to_center[1] * f_mag - c * obj->physics.vel[1] * 0.25f;
+    obj->physics.force[2] += to_center[2] * f_mag - c * obj->physics.vel[2] * 0.25f;
+    env->gripper_force = f_mag;
 
-            env->gripper_force = f_mag;
-
-            float contact_threshold = 0.006f;
-            if (obj->physics.contact_time > contact_threshold && 
-                env->gripper_state > 0.45f &&
-                (left_contact || right_contact)) {
-                if (!obj->grasped) {
-                    obj->grasped = true;
-                    env->grasped_object_id = i;
-                    env->grasp_stability = 1.0f;
-                    env->grasp_event = 1;
-                }
-            }
-        }
-
-        if (env->left_finger.in_contact) {
-            float dx = obj->physics.pos[0] - env->left_finger.pos[0];
-            float dy = obj->physics.pos[1] - env->left_finger.pos[1];
-            float dz = obj->physics.pos[2] - env->left_finger.pos[2];
-            float dist = safe_sqrt(dx*dx + dy*dy + dz*dz);
-            float target = FINGER_HARD_RADIUS + (obj->size[0]*0.5f);
-            if (dist < target && dist > 1e-5f) {
-                float pen = target - dist;
-                float nx = dx / dist, ny = dy / dist, nz = dz / dist;
-                float k_n = 100.0f;
-                obj->physics.force[0] += nx * k_n * pen;
-                obj->physics.force[1] += ny * k_n * pen;
-                obj->physics.force[2] += nz * k_n * pen;
-            }
-        }
-
-        if (env->right_finger.in_contact) {
-            float dx = obj->physics.pos[0] - env->right_finger.pos[0];
-            float dy = obj->physics.pos[1] - env->right_finger.pos[1];
-            float dz = obj->physics.pos[2] - env->right_finger.pos[2];
-            float dist = safe_sqrt(dx*dx + dy*dy + dz*dz);
-            float target = FINGER_HARD_RADIUS + (obj->size[0]*0.5f);
-            if (dist < target && dist > 1e-5f) {
-                float pen = target - dist;
-                float nx = dx / dist, ny = dy / dist, nz = dz / dist;
-                float k_n = 100.0f;
-                obj->physics.force[0] += nx * k_n * pen;
-                obj->physics.force[1] += ny * k_n * pen;
-                obj->physics.force[2] += nz * k_n * pen;
-            }
-        }
+    if (dist < 0.10f && gain > 0.5f && !obj->grasped) {
+        obj->grasped = true;
+        env->grasped_object_id = ci;
+        env->grasp_stability = 1.0f;
+        env->grasp_event = 1;
     }
 }
 
 static void update_gripper(RobotArm *env) {
-    // Always update gripper for pick-and-place mode
-    
+
     float gripper_cmd = env->actions ? env->actions[6] : 0.0f;
     if (env->continuous_gripper) {
         float mapped = 0.5f * (gripper_cmd + 1.0f);
@@ -763,26 +711,29 @@ static void update_gripper(RobotArm *env) {
     if (env->grasped_object_id >= 0) {
         ManipObject* grasped_obj = &env->objects[env->grasped_object_id];
 
-        if (env->gripper_state < 0.3f) {
+        if (env->gripper_state < 0.15f) {
             grasped_obj->grasped = false;
             env->grasped_object_id = -1;
             env->grasp_stability = 0.0f;
         } else {
-            if (grasped_obj->physics.in_contact) {
+            if (env->gripper_state > 0.40f) {
                 env->grasp_stability = fminf(1.0f, env->grasp_stability + 0.05f);
-            } else {
-                env->grasp_stability = fmaxf(0.0f, env->grasp_stability - 0.02f);
+            } else if (env->gripper_state < 0.20f) {
+                env->grasp_stability = fmaxf(0.0f, env->grasp_stability - 0.05f);
             }
 
             if (env->grasp_stability <= 0.0f) {
                 grasped_obj->grasped = false;
                 env->grasped_object_id = -1;
             } else {
-                float offset[3] = {0.0f, 0.0f, -0.03f};
-                grasped_obj->physics.pos[0] = env->end_effector[0] + offset[0];
-                grasped_obj->physics.pos[1] = env->end_effector[1] + offset[1];
-                grasped_obj->physics.pos[2] = env->end_effector[2] + offset[2];
+                float hold_target[3] = {env->end_effector[0], env->end_effector[1], env->end_effector[2] - 0.02f};
+                grasped_obj->physics.pos[0] = hold_target[0];
+                grasped_obj->physics.pos[1] = hold_target[1];
+                grasped_obj->physics.pos[2] = hold_target[2];
                 vec3_zero(grasped_obj->physics.vel);
+                vec3_zero(grasped_obj->physics.force);
+                vec3_zero(grasped_obj->physics.torque);
+                grasped_obj->physics.in_contact = true;
             }
         }
     }
@@ -794,9 +745,9 @@ static void apply_actions(RobotArm *env) {
         1.5f,
         1.2f,
         2.0f,
-        1.2f, // slower wrist roll to reduce flailing/collapse
-        1.2f, // slower wrist pitch
-        1.2f  // slower wrist yaw
+        1.2f,
+        1.2f,
+        1.2f
     };
 
     float alpha = 0.4f;
@@ -811,7 +762,6 @@ static void apply_actions(RobotArm *env) {
         v_des[i] = env->cmd_filt[i];
     }
 
-    // Use Euler for joints (simpler, joints are controlled anyway)
     for (int i = 0; i < 6; i++) {
         float amax = 30.0f;
         float damp = 0.10f;
@@ -831,7 +781,6 @@ static void apply_actions(RobotArm *env) {
     env->joint_angles[4] = clampf(env->joint_angles[4], -M_PI_2 * 0.6f, M_PI_2 * 0.6f);  // Wrist pitch: ±54°
     env->joint_angles[5] = clampf(env->joint_angles[5], -M_PI_2 * 0.7f, M_PI_2 * 0.7f);  // Wrist yaw: ±63°
     
-    // Pick-and-place mode only
     update_gripper(env);
 }
 
@@ -851,20 +800,30 @@ static void init_pick_place_scene(RobotArm *env) {
     env->objects[i].restitution = OBJECT_RESTITUTION*0.5f;
     env->objects[i].friction = fminf(1.0f, OBJECT_FRICTION*1.2f);
         
-        // Removed curriculum variables - using fixed easy placement
-        
         float initial_pos[3];
-        
-        // FORCE EASY PLACEMENT: Always spawn objects very close for testing
-        float offset_dist = randf(0.06f, 0.10f);  // Very close range (6-10cm)
-        float angle = randf(0.0f, 2.0f * M_PI);
-        initial_pos[0] = env->end_effector[0] + offset_dist * cosf(angle);
-        initial_pos[1] = env->end_effector[1] + offset_dist * sinf(angle);
-        initial_pos[2] = env->end_effector[2] + randf(-0.02f, 0.02f);  // Minimal Z variation
-
-        initial_pos[0] = clampf(initial_pos[0], WORKSPACE_X_MIN + OBJECT_SIZE, WORKSPACE_X_MAX - OBJECT_SIZE);
-        initial_pos[1] = clampf(initial_pos[1], WORKSPACE_Y_MIN + OBJECT_SIZE, WORKSPACE_Y_MAX - OBJECT_SIZE);
-        initial_pos[2] = clampf(initial_pos[2], TABLE_HEIGHT + OBJECT_SIZE*0.5f, WORKSPACE_Z_MAX - OBJECT_SIZE);
+        const float margin_x = OBJECT_SIZE + 0.02f;
+        const float margin_y = OBJECT_SIZE + 0.02f;
+        const float min_sep = OBJECT_SIZE * 1.5f;
+        int placed = 0;
+        for (int attempt = 0; attempt < 50 && !placed; attempt++) {
+            initial_pos[0] = randf(WORKSPACE_X_MIN + margin_x, WORKSPACE_X_MAX - margin_x);
+            initial_pos[1] = randf(WORKSPACE_Y_MIN + margin_y, WORKSPACE_Y_MAX - margin_y);
+            initial_pos[2] = TABLE_HEIGHT + OBJECT_SIZE * 0.5f + randf(0.0f, 0.01f);
+            int ok = 1;
+            for (int j = 0; j < i; j++) {
+                float dx = initial_pos[0] - env->objects[j].physics.pos[0];
+                float dy = initial_pos[1] - env->objects[j].physics.pos[1];
+                float dz = initial_pos[2] - env->objects[j].physics.pos[2];
+                float d2 = dx*dx + dy*dy + dz*dz;
+                if (d2 < (min_sep*min_sep)) { ok = 0; break; }
+            }
+            if (ok) placed = 1;
+        }
+        if (!placed) {
+            initial_pos[0] = clampf(initial_pos[0], WORKSPACE_X_MIN + margin_x, WORKSPACE_X_MAX - margin_x);
+            initial_pos[1] = clampf(initial_pos[1], WORKSPACE_Y_MIN + margin_y, WORKSPACE_Y_MAX - margin_y);
+            initial_pos[2] = TABLE_HEIGHT + OBJECT_SIZE * 0.5f;
+        }
 
         init_physics_body(&env->objects[i].physics, initial_pos);
         env->objects[i].physics.on_surface = true;
@@ -916,8 +875,6 @@ static void init_pick_place_scene(RobotArm *env) {
     }
     env->prev_distance = min_d;
 }
-
-// pick_new_target function removed - pick-and-place mode only
 
 void c_reset(RobotArm *env) {
     if (!env) return;
@@ -983,13 +940,11 @@ void c_reset(RobotArm *env) {
 
     compute_forward_kinematics(env);
 
-    // Safety clamp to ensure robot starts in valid workspace
     env->joint_angles[0] = clampf(env->joint_angles[0], -M_PI * 0.25f, M_PI * 0.25f);  // Base: ±45°
     env->joint_angles[1] = clampf(env->joint_angles[1], 0.2f, 0.7f);                   // Shoulder: safe range
     env->joint_angles[2] = clampf(env->joint_angles[2], -1.0f, -0.5f);                 // Elbow: safe range
     compute_forward_kinematics(env);
 
-    // Pick-and-place mode only
     init_pick_place_scene(env);
 
     if (env->frame_skip <= 0) env->frame_skip = 2;
@@ -1006,7 +961,7 @@ void c_reset(RobotArm *env) {
     env->continuous_gripper = 1;
     env->use_unified_clamp = 1;
     env->unified_clamp_min = -5.0f;
-    env->unified_clamp_max = 15.0f;
+    env->unified_clamp_max = 30.0f;
     env->terminate_on_place = 1;
     env->extended_observation = 0;
 
@@ -1019,15 +974,16 @@ void c_reset(RobotArm *env) {
         if (env->on_gripper_spawn_min <= 0.0f) env->on_gripper_spawn_min = 0.005f;
         if (env->curriculum_episodes <= 0) env->curriculum_episodes = 200;
         if (env->assist_episodes <= 0) env->assist_episodes = 200;
-        // Disable reach-only termination by default; can be enabled via params
         if (env->early_reach_episodes < 0) env->early_reach_episodes = 0;
         if (env->early_reach_bonus < 0.0f) env->early_reach_bonus = 0.0f;
     }
+    env->best_place_dist = 1e9f;
     env->near_object_steps = 0;
 
     env->stagnation_steps = 0;
     env->stagnation_limit = 400;
     env->best_metric = 1e9f;
+    env->target_unreachable_steps = 0;
 }
 
 void c_step(RobotArm *env) {
@@ -1041,11 +997,12 @@ void c_step(RobotArm *env) {
     for (int s=0; s<skip; s++) {
         apply_actions(env);
         compute_forward_kinematics(env);
+        // Magnet/gripper uses up-to-date end effector pose
+        update_gripper(env);
 
         for (int i = 0; i < MAX_OBJECTS; i++) {
             update_object_physics(&env->objects[i], ARM_DT);
         }
-        // Object-object collisions after physics step
         resolve_object_collisions(env, ARM_DT);
 
         if (env->end_effector[0] < WORKSPACE_X_MIN || env->end_effector[0] > WORKSPACE_X_MAX ||
@@ -1098,14 +1055,18 @@ void c_step(RobotArm *env) {
         else env->stagnation_steps++;
     }
 
+    int was_grasped_prev = env->was_grasped_last_step;
     env->was_grasped_last_step = (env->grasped_object_id >= 0);
 
     env->placed_event = 0;
     float r = compute_reward(env);
     if (env->rewards) env->rewards[0] = r;
     env->episode_return_accum += r;
-    
-    // Near-object patience cap to avoid hovering without grasp
+    if (!was_grasped_prev && env->grasped_object_id >= 0) {
+        env->episode_pick_count += 1.0f;
+        env->log.pick_success_rate += 1.0f;
+    }
+
     if (env->grasped_object_id < 0) {
         float min_obj_dist = 1e9f;
         for (int i = 0; i < MAX_OBJECTS; i++) {
@@ -1254,7 +1215,7 @@ void c_render(RobotArm *env) {
 
     if (!IsWindowReady()) {
         SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
-        InitWindow(1200, 800, "PufferLib Robot Arm");
+        InitWindow(1200, 800, "Puffer Robot Arm");
         SetTargetFPS(60);
     }
 
@@ -1309,7 +1270,6 @@ void c_render(RobotArm *env) {
     DrawCylinderEx(ee, g1, 0.006f, 0.006f, 8, METAL_LIGHT);
     DrawCylinderEx(ee, g2, 0.006f, 0.006f, 8, METAL_LIGHT);
 
-    // Pick-and-place mode only - render objects and baskets
     {
         float best_d = 1e9f;
         int   best_i = -1;
@@ -1346,7 +1306,6 @@ void c_render(RobotArm *env) {
     EndMode3D();
 
     DrawText("Robot Arm - Pick and Place", 20, 20, 20, BLACK);
-    // Pick-and-place mode only UI
     {
         float best_d = 1e9f;
         for (int i = 0; i < MAX_OBJECTS; i++) {
@@ -1362,8 +1321,6 @@ void c_render(RobotArm *env) {
         }
     }
     DrawText(TextFormat("Score: %.2f", env->log.score), 20, 80, 16, BLACK);
-
-    // Joint angle indicator (degrees)
     DrawText("Joint Angles (deg)", 20, 100, 16, BLACK);
     DrawText(TextFormat("J0: %5.1f  J1: %5.1f  J2: %5.1f",
                        env->joint_angles[0] * (180.0f / M_PI),
