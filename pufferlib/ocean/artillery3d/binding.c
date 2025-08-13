@@ -26,12 +26,13 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
 
 static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "score", log->score);
-    assign_to_dict(dict, "episode_return", log->episode_return);
+    //assign_to_dict(dict, "episode_return", log->episode_return);
     assign_to_dict(dict, "episode_length", log->episode_length);
     assign_to_dict(dict, "dist", log->dist);
     assign_to_dict(dict, "max_reward_distn", log->max_reward_distn);
     assign_to_dict(dict, "turn_penaltyn", log->turn_penaltyn);
     assign_to_dict(dict, "acc1000", log->acc1000);
+    assign_to_dict(dict, "shots_fired", log->shots_fired);
     //assign_to_dict(dict, "sigman", log->sigman);
     return 0;
 }

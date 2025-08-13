@@ -13,7 +13,7 @@ class Artillery3D(pufferlib.PufferEnv):
                  log_interval=128,
                  seed=7,
                  buf=None, rng=7, i=1, debug=0, same_runs=0):
-        obs_size = 11
+        obs_size = 7 + 12
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         self.render_mode = render_mode
         self.num_agents = num_envs
@@ -34,7 +34,7 @@ class Artillery3D(pufferlib.PufferEnv):
                 self.rewards[i:i+1],
                 self.terminals[i:i+1],
                 self.truncations[i:i+1],
-                seed, num_envs=num_envs, seed=seed,
+                seed, num_envs=num_envs,
                 max_reward=max_reward, max_reward_dist=max_reward_dist,  target_size=target_size,
                 dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, turn_penalty_ramp=turn_penalty_ramp, max_dist0=max_dist0,
                 turn_penalty=turn_penalty, miss_penalty=miss_penalty, render=render,

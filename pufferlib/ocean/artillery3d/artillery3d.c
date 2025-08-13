@@ -26,12 +26,12 @@ void demo() {
 
     env.client = make_client(&env);
 
-    const char* weights_path = "resources/artillery3d/puffer_artillery3d_weights.bin";
-    int weights_size = 134664;
+    const char* weights_path = "resources/artillery3d/puffer_artillery3d_weights2.bin";
+    int weights_size = 135688; //134664;
 
     Weights* weights = load_weights(weights_path, weights_size); // 133638
     int logit_sizes[1] = {7};
-    int obs_size = 11;
+    int obs_size = 19;
     LinearLSTM* net = make_linearlstm(weights, 1, obs_size, logit_sizes, 1);
 
     c_reset(&env);
