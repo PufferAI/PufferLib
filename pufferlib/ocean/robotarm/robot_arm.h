@@ -40,7 +40,7 @@
 
 #define GRIPPER_FINGER_LENGTH 0.05f
 #define GRIPPER_MAX_FORCE 2.0f
-#define GRIPPER_CONTACT_RADIUS 0.035f
+#define GRIPPER_CONTACT_RADIUS 0.060f
 
 
 typedef enum {
@@ -202,6 +202,18 @@ typedef struct RobotArm {
 
     int   assist_enabled;
     int   assist_episodes;
+
+    int   continuous_gripper;
+    int   extended_observation;
+    int   terminate_on_place;
+
+    int   use_unified_clamp;
+    float unified_clamp_min;
+    float unified_clamp_max;
+
+    int   placed_event;
+
+    int   oob_steps;
 } RobotArm;
 
 void c_reset(RobotArm *env);

@@ -203,30 +203,38 @@ class RobotArm(pufferlib.PufferEnv):
         
         info = []
         if self.tick % self.report_interval == 0:
-            log_data = binding.vec_log(self.c_envs)
-            if log_data:
-                n = float(log_data.get('n', 0.0) or 0.0)
-                avg_ret = float(log_data.get('episode_return', 0.0) or 0.0)
-                avg_len = float(log_data.get('episode_length', 0.0) or 0.0)
-                if 'pick_success_count' in log_data:
-                    log_data['environment/pick_success_count'] = float(log_data['pick_success_count']) * n
-                if 'place_success_count' in log_data:
-                    log_data['environment/place_success_count'] = float(log_data['place_success_count']) * n
+            raw = binding.vec_log(self.c_envs)
+            if raw:
+                n = float(raw.get('n', 0.0) or 0.0)
+                avg_ret = float(raw.get('episode_return', 0.0) or 0.0)
+                avg_len = float(raw.get('episode_length', 0.0) or 0.0)
+                pick_rate_ep = float(raw.get('pick_success_rate', 0.0) or 0.0)
+                place_rate_ep = float(raw.get('place_success_rate', 0.0) or 0.0)
+                picks_total = pick_rate_ep * n
+                places_total = place_rate_ep * n
+                avg_ep = float(self._reward_cum / self._episodes_cum) if self._episodes_cum else 0.0
+
                 total_ret = avg_ret * n
                 total_len = avg_len * n
                 self._reward_cum += total_ret
                 self._episodes_cum += n
                 self._steps_cum += total_len
 
-                log_data['environment/reward_total_cumulative'] = self._reward_cum
-                log_data['environment/episodes_cumulative'] = self._episodes_cum
-                log_data['environment/steps_cumulative'] = self._steps_cum
-                log_data['environment/avg_reward_per_step'] = (avg_ret / max(1.0, avg_len)) if avg_len else 0.0
+                simple = {
+                    'avg_reward_per_ep':avg_ep,
+                    'avg_ep_return': avg_ret,
+                    'avg_ep_length': avg_len,
+                    'picks_total': picks_total,
+                    'places_total': places_total,
+                    'episodes_cum': self._episodes_cum,
+                    'steps_cum': self._steps_cum,
+                    'reward_total_cum': self._reward_cum,
+                }
 
-                info.append(log_data)
+                info.append(simple)
                 if self._wandb:
                     try:
-                        self._wandb.log(log_data)
+                        self._wandb.log(simple)
                     except Exception as e:  # noqa: BLE001
                         print(f"[wandb] log failed: {e}")
         

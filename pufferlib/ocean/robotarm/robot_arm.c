@@ -271,6 +271,15 @@ static void update_observations(RobotArm *env) {
         obs[obs_idx++] = (env->target_type == OBJ_RED)   ? 1.0f : 0.0f;
         obs[obs_idx++] = (env->target_type == OBJ_BLUE)  ? 1.0f : 0.0f;
         obs[obs_idx++] = (env->target_type == OBJ_GREEN) ? 1.0f : 0.0f;
+
+        // Extended observation: append joint velocities and contact flags
+        if (env->extended_observation) {
+            for (int i = 0; i < 6; i++) {
+                obs[obs_idx++] = clampf(env->joint_vel[i] / 3.0f, -1.0f, 1.0f);
+            }
+            obs[obs_idx++] = env->left_finger.in_contact ? 1.0f : 0.0f;
+            obs[obs_idx++] = env->right_finger.in_contact ? 1.0f : 0.0f;
+        }
         
     } else {
         for (int i = 0; i < 6; i++) {
@@ -303,7 +312,7 @@ static void update_observations(RobotArm *env) {
 
 static float compute_reward(RobotArm *env) {
     if (env->pick_and_place_mode) {
-        float reward = -0.001f;
+        float reward = 0.0f;
 
         float min_obj_dist = 1e9f;
         int closest_obj = -1;
@@ -318,11 +327,18 @@ static float compute_reward(RobotArm *env) {
             float current_dist = min_obj_dist;
             float prev_dist = env->prev_distance;
             float movement_delta = prev_dist - current_dist;
-            reward += (movement_delta > 0.0f) ? (movement_delta * 0.8f) : (movement_delta * 2.5f);
-            
-
-            if (min_obj_dist < 0.08f && env->gripper_state > 0.5f) reward += 2.0f;
-            if (min_obj_dist >= 0.12f && env->gripper_state > 0.8f) reward -= 0.5f;
+            reward += (movement_delta > 0.0f) ? (movement_delta * 2.0f) : (movement_delta * 0.5f);
+            reward += fmaxf(0.0f, 0.20f - current_dist) * 2.0f;
+            {
+                int ci = closest_obj;
+                if (ci >= 0) {
+                    ManipObject* obj = &env->objects[ci];
+                    float dz = fabsf(env->end_effector[2] - obj->physics.pos[2]);
+                    reward += fmaxf(0.0f, 0.05f - dz) * 1.0f;
+                }
+            }
+            if (current_dist < 0.10f && env->gripper_state > 0.5f) reward += 2.0f;
+            if (current_dist >= 0.20f && env->gripper_state > 0.6f) reward -= 1.0f;
             
             if (env->grasp_event) {
                 reward += 5.0f;
@@ -333,17 +349,20 @@ static float compute_reward(RobotArm *env) {
             }
             env->prev_distance = current_dist;
 
-            if (env->action_penalty_coef > 0.0f && env->actions) {
-                float a_l2 = 0.0f;
-                for (int i = 0; i < 7; i++) { float a = env->actions[i]; a_l2 += a*a; }
-                reward -= env->action_penalty_coef * a_l2;
+            {
+                float base = reward;
+                float scale = (env->reward_scale > 0.0f ? env->reward_scale : 1.0f);
+                base *= scale;
+                float penalty = 0.0f;
+                if (env->action_penalty_coef > 0.0f && env->actions) {
+                    for (int i = 0; i < 7; i++) { float a = env->actions[i]; penalty += a*a; }
+                    penalty *= env->action_penalty_coef;
+                }
+                reward = base - penalty;
             }
-
-            if (env->action_penalty_coef > 0.0f && env->actions) {
-                float a_l2 = 0.0f; for (int i = 0; i < 7; i++) { float a = env->actions[i]; a_l2 += a*a; }
-                reward -= env->action_penalty_coef * a_l2;
+            if (env->use_unified_clamp) {
+                return clampf(reward, env->unified_clamp_min, env->unified_clamp_max);
             }
-            reward *= (env->reward_scale > 0.0f ? env->reward_scale : 1.0f);
             return clampf(reward, -3.0f, 8.0f);
         }
 
@@ -358,7 +377,13 @@ static float compute_reward(RobotArm *env) {
             float current_dist = distance3d(o->physics.pos, env->baskets[bidx].pos);
             float prev_dist = env->prev_distance;
             float movement_delta = prev_dist - current_dist;
-            reward += (movement_delta > 0.0f) ? (movement_delta * 1.0f) : (movement_delta * 3.5f);
+            reward += (movement_delta > 0.0f) ? (movement_delta * 2.0f) : (movement_delta * 0.5f);
+            reward += fmaxf(0.0f, (BASKET_SIZE * 0.6f) - current_dist) * 2.0f;
+            float lift = o->physics.pos[2] - (TABLE_HEIGHT + OBJECT_SIZE * 0.5f);
+            if (lift > 0.03f) {
+                reward += fminf(2.0f, lift * 20.0f);
+                reward += 0.02f;
+            }
             
             bool near_basket = current_dist < (BASKET_SIZE * 0.6f);
             bool opened = env->gripper_state < 0.3f;
@@ -367,34 +392,54 @@ static float compute_reward(RobotArm *env) {
                 o->in_basket = true;
                 env->grasped_object_id = -1;
                 reward += 8.0f;
-                env->target_type = (ObjectType)(rand() % 3);
-                env->current_target_object = -1;
-                for (int i = 0; i < MAX_OBJECTS; i++) {
-                    if (!env->objects[i].in_basket && env->objects[i].type == env->target_type) { env->current_target_object = i; break; }
-                }
                 env->episode_score_accum += 1.0f;
                 env->episode_place_count += 1.0f;
 
                 env->log.place_success_rate += 1.0f;
                 env->baskets[bidx].collected_count += 1.0f;
+                env->placed_event = 1;
+                // Select next target for continuous runs
+                env->target_type = (ObjectType)(rand() % 3);
+                env->current_target_object = -1;
+                for (int i = 0; i < MAX_OBJECTS; i++) {
+                    if (!env->objects[i].in_basket && env->objects[i].type == env->target_type) { env->current_target_object = i; break; }
+                }
             }
 
             if (env->was_grasped_last_step && !o->physics.in_contact && env->gripper_state < 0.9f) {
                 reward -= 3.0f;
             }
             env->prev_distance = current_dist;
-            if (env->action_penalty_coef > 0.0f && env->actions) {
-                float a_l2 = 0.0f; for (int i = 0; i < 7; i++) { float a = env->actions[i]; a_l2 += a*a; }
-                reward -= env->action_penalty_coef * a_l2;
+            {
+                float base = reward;
+                float scale = (env->reward_scale > 0.0f ? env->reward_scale : 1.0f);
+                base *= scale;
+                float penalty = 0.0f;
+                if (env->action_penalty_coef > 0.0f && env->actions) {
+                    for (int i = 0; i < 7; i++) { float a = env->actions[i]; penalty += a*a; }
+                    penalty *= env->action_penalty_coef;
+                }
+                reward = base - penalty;
             }
-            reward *= (env->reward_scale > 0.0f ? env->reward_scale : 1.0f);
+            if (env->use_unified_clamp) {
+                return clampf(reward, env->unified_clamp_min, env->unified_clamp_max);
+            }
             return clampf(reward, -4.0f, 10.0f);
         }
-        if (env->action_penalty_coef > 0.0f && env->actions) {
-            float a_l2 = 0.0f; for (int i = 0; i < 7; i++) { float a = env->actions[i]; a_l2 += a*a; }
-            reward -= env->action_penalty_coef * a_l2;
+        {
+            float base = reward;
+            float scale = (env->reward_scale > 0.0f ? env->reward_scale : 1.0f);
+            base *= scale;
+            float penalty = 0.0f;
+            if (env->action_penalty_coef > 0.0f && env->actions) {
+                for (int i = 0; i < 7; i++) { float a = env->actions[i]; penalty += a*a; }
+                penalty *= env->action_penalty_coef;
+            }
+            reward = base - penalty;
         }
-        reward *= (env->reward_scale > 0.0f ? env->reward_scale : 1.0f);
+        if (env->use_unified_clamp) {
+            return clampf(reward, env->unified_clamp_min, env->unified_clamp_max);
+        }
         return clampf(reward, -2.0f, 120.0f);
         
     } else {
@@ -423,11 +468,17 @@ static float compute_reward(RobotArm *env) {
         float action_bonus = 0.1f;
         
         float reward = base_reward + movement_reward + proximity_bonus + action_bonus;
-        if (env->action_penalty_coef > 0.0f && env->actions) {
-            float a_l2 = 0.0f; for (int i = 0; i < 7; i++) { float a = env->actions[i]; a_l2 += a*a; }
-            reward -= env->action_penalty_coef * a_l2;
+        {
+            float base = reward;
+            float scale = (env->reward_scale > 0.0f ? env->reward_scale : 1.0f);
+            base *= scale;
+            float penalty = 0.0f;
+            if (env->action_penalty_coef > 0.0f && env->actions) {
+                for (int i = 0; i < 7; i++) { float a = env->actions[i]; penalty += a*a; }
+                penalty *= env->action_penalty_coef;
+            }
+            reward = base - penalty;
         }
-        reward *= (env->reward_scale > 0.0f ? env->reward_scale : 1.0f);
         return clampf(reward, -2.0f, 15.0f);
     }
 }
@@ -438,10 +489,10 @@ static void update_gripper_fingers(RobotArm *env) {
     float finger_separation = (1.0f - env->gripper_state) * (GRIPPER_FINGER_LENGTH * 0.6f);
     env->left_finger.pos[0] = env->end_effector[0] - finger_separation * 0.5f;
     env->left_finger.pos[1] = env->end_effector[1];
-    env->left_finger.pos[2] = env->end_effector[2] - 0.02f; 
+    env->left_finger.pos[2] = env->end_effector[2] - 0.015f; 
     env->right_finger.pos[0] = env->end_effector[0] + finger_separation * 0.5f;
     env->right_finger.pos[1] = env->end_effector[1];
-    env->right_finger.pos[2] = env->end_effector[2] - 0.02f;
+    env->right_finger.pos[2] = env->end_effector[2] - 0.015f;
     env->left_finger.in_contact = false;
     env->left_finger.contact_object_id = -1;
     env->right_finger.in_contact = false;
@@ -490,8 +541,8 @@ static void apply_gripper_forces(RobotArm *env) {
             if (dist > 1e-4f) {
                 vec3_scale(to_center, to_center, 1.0f / dist);
             }
-            float k = 5.0f;
-            float c = 2.0f;
+            float k = 8.0f;
+            float c = 1.5f;
             float f_mag = env->gripper_state * fminf(0.5f, k * dist);
             obj->physics.force[0] += to_center[0] * f_mag - c * obj->physics.vel[0];
             obj->physics.force[1] += to_center[1] * f_mag - c * obj->physics.vel[1];
@@ -499,10 +550,10 @@ static void apply_gripper_forces(RobotArm *env) {
 
             env->gripper_force = f_mag;
 
-            float contact_threshold = 0.06f;
+            float contact_threshold = 0.010f;
             if (obj->physics.contact_time > contact_threshold && 
-                env->gripper_state > 0.7f &&
-                left_contact && right_contact) {
+                env->gripper_state > 0.5f &&
+                (left_contact || right_contact)) {
                 if (!obj->grasped) {
                     obj->grasped = true;
                     env->grasped_object_id = i;
@@ -518,10 +569,15 @@ static void update_gripper(RobotArm *env) {
     if (!env->pick_and_place_mode) return;
     
     float gripper_cmd = env->actions ? env->actions[6] : 0.0f;
-    if (gripper_cmd > 0.5f) {
-        env->gripper_command = 1.0f;
-    } else if (gripper_cmd < -0.5f) {
-        env->gripper_command = 0.0f;
+    if (env->continuous_gripper) {
+        float mapped = 0.5f * (gripper_cmd + 1.0f);
+        env->gripper_command = clampf(mapped, 0.0f, 1.0f);
+    } else {
+        if (gripper_cmd > 0.5f) {
+            env->gripper_command = 1.0f;
+        } else if (gripper_cmd < -0.5f) {
+            env->gripper_command = 0.0f;
+        }
     }
     
     float gripper_speed = 5.0f;
@@ -573,10 +629,6 @@ static void apply_actions(RobotArm *env) {
         float a = env->actions ? env->actions[i] : 0.0f;
         if (env->actuation_noise_std > 0.0f) a += randf(-env->actuation_noise_std, env->actuation_noise_std);
         a = clampf(a, -1.0f, 1.0f);
-        float deadzone = 0.01f;
-        if (fabsf(a) < deadzone) a = 0.0f;
-        else a = (a > 0.0f) ? (a - deadzone) / (1.0f - deadzone) : (a + deadzone) / (1.0f - deadzone);
-        
         float target_vel = a * vmax[i];
         env->cmd_filt[i] = (1.0f - alpha) * env->cmd_filt[i] + alpha * target_vel;
         v_des[i] = env->cmd_filt[i];
@@ -589,10 +641,34 @@ static void apply_actions(RobotArm *env) {
         env->joint_vel[i] += dv;
         
         env->joint_vel[i] *= (1.0f - damp * ARM_DT);
+
+        // Soft-limit velocity scaling near joint limits
+        const float lo[6] = {
+            -M_PI * 0.75f,
+            -M_PI_2 * 0.6f,
+            -2.0f,
+            -M_PI * 0.6f,
+            -M_PI_2 * 0.6f,
+            -M_PI_2 * 0.7f
+        };
+        const float hi[6] = {
+            M_PI * 0.75f,
+            M_PI_2 * 0.9f,
+            -0.1f,
+            M_PI * 0.6f,
+            M_PI_2 * 0.6f,
+            M_PI_2 * 0.7f
+        };
+        float margin_lo = env->joint_angles[i] - lo[i];
+        float margin_hi = hi[i] - env->joint_angles[i];
+        float margin = fminf(margin_lo, margin_hi);
+        // Scale velocity when within 0.1–0.3 rad of a limit
+        float scale = clampf((margin - 0.10f) / 0.20f, 0.15f, 1.0f);
+        env->joint_vel[i] *= scale;
         
-        float vel_limit = vmax[i] * 1.0f;
+        float vel_limit = vmax[i] * scale;
         env->joint_vel[i] = clampf(env->joint_vel[i], -vel_limit, vel_limit);
-        float jitter = (env->episode_steps < 300) ? randf(-0.002f, 0.002f) : 0.0f;
+        float jitter = 0.0f; // Disable early jitter to avoid pushing into limits
         env->joint_angles[i] += (env->joint_vel[i] + jitter) * ARM_DT;
     }
 
@@ -865,6 +941,12 @@ void c_reset(RobotArm *env) {
     update_observations(env);
 
     env->camera_initialized = false;
+    env->placed_event = 0;
+    env->continuous_gripper = 1;
+    env->use_unified_clamp = 1;
+    env->unified_clamp_min = -5.0f;
+    env->unified_clamp_max = 15.0f;
+    env->terminate_on_place = 1;
 
     if (env->episodes_completed == 0) {
         if (env->success_distance_start > 0.0f) env->success_distance = env->success_distance_start;
@@ -941,6 +1023,7 @@ void c_step(RobotArm *env) {
 
     env->was_grasped_last_step = (env->grasped_object_id >= 0);
 
+    env->placed_event = 0;
     float r = compute_reward(env);
     if (env->rewards) env->rewards[0] = r;
     env->episode_return_accum += r;
@@ -982,8 +1065,7 @@ void c_step(RobotArm *env) {
         env->best_metric = 1e9f;
     }
 
-    if (env->episode_steps >= env->max_steps) {
-        if (env->rewards) env->rewards[0] = -2.0f;
+    if ((env->terminate_on_place && env->placed_event) || (env->episode_steps >= env->max_steps)) {
         if (env->terminals) env->terminals[0] = 1;
         env->log.n += 1.0f;
         env->log.episode_length += env->episode_steps;
@@ -1158,6 +1240,19 @@ void c_render(RobotArm *env) {
         }
     }
     DrawText(TextFormat("Score: %.2f", env->log.score), 20, 80, 16, BLACK);
+
+    // Joint angle indicator (degrees)
+    DrawText("Joint Angles (deg)", 20, 100, 16, BLACK);
+    DrawText(TextFormat("J0: %5.1f  J1: %5.1f  J2: %5.1f",
+                       env->joint_angles[0] * (180.0f / M_PI),
+                       env->joint_angles[1] * (180.0f / M_PI),
+                       env->joint_angles[2] * (180.0f / M_PI)),
+             20, 120, 16, BLACK);
+    DrawText(TextFormat("J3: %5.1f  J4: %5.1f  J5: %5.1f",
+                       env->joint_angles[3] * (180.0f / M_PI),
+                       env->joint_angles[4] * (180.0f / M_PI),
+                       env->joint_angles[5] * (180.0f / M_PI)),
+             20, 140, 16, BLACK);
 
     EndDrawing();
 }
