@@ -16,25 +16,25 @@ class Breakout(pufferlib.PufferEnv):
             continuous=False, log_interval=128,
             buf=None, seed=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
-            shape=(10 + brick_rows*brick_cols,), dtype=np.float32)
+            shape=(6,), dtype=np.float32)
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.continuous = continuous
         self.log_interval = log_interval
         self.tick = 0
-        
+
         if continuous:
             self.single_action_space = gymnasium.spaces.Box(low=-1, high=1,
                 shape=(1,), dtype=np.float32)
         else:
             self.single_action_space = gymnasium.spaces.Discrete(3)
-            
+
         super().__init__(buf)
         if continuous:
             self.actions = self.actions.flatten()
         else:
             self.actions = self.actions.astype(np.float32)
-            
+
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
             self.terminals, self.truncations, num_envs, seed, frameskip=frameskip,
             width=width, height=height, paddle_width=paddle_width,
@@ -56,7 +56,7 @@ class Breakout(pufferlib.PufferEnv):
             self.actions[:] = np.clip(actions.flatten(), -1.0, 1.0)
         else:
             self.actions[:] = actions
-            
+
         self.tick += 1
         binding.vec_step(self.c_envs)
 
