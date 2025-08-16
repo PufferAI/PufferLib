@@ -11,6 +11,9 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->pick_and_place_mode = (int)unpack(kwargs, "pick_and_place_mode");
     // reach_only removed - pick-and-place mode only
     env->frame_skip = (int)unpack(kwargs, "frame_skip");
+    if (PyDict_Contains(kwargs, PyUnicode_FromString("physics_substeps"))) {
+        env->physics_substeps = (int)unpack(kwargs, "physics_substeps");
+    }
     env->success_distance = (float)unpack(kwargs, "success_distance");
     env->domain_randomization = (int)unpack(kwargs, "domain_randomization");
 
@@ -43,17 +46,37 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->assist_enabled = (int)unpack(kwargs, "assist_enabled");
     env->assist_episodes = (int)unpack(kwargs, "assist_episodes");
 
+    // Rendering controls (optional)
+    env->headless = (int)unpack(kwargs, "headless");
+    int rd = (int)unpack(kwargs, "render_decimation");
+    env->render_decimation = rd > 0 ? rd : 1;
+    env->render_target_fps = (int)unpack(kwargs, "render_target_fps");
+    env->vsync = (int)unpack(kwargs, "vsync");
+    if (PyDict_Contains(kwargs, PyUnicode_FromString("cube_model_visual_mul"))) {
+        env->cube_model_visual_mul = (float)unpack(kwargs, "cube_model_visual_mul");
+    }
+
     env->task = 0;
     return 0;
 }
 
 static int my_log(PyObject* dict, Log* log) {
     if (!dict || !log) return -1;
+    float n = log->n;
+    float inv = (n > 0.0f) ? (1.0f / n) : 0.0f;
+    assign_to_dict(dict, "n", n);
     assign_to_dict(dict, "perf", log->perf);
     assign_to_dict(dict, "score", log->score);
-    assign_to_dict(dict, "episode_return", log->episode_return);
-    assign_to_dict(dict, "episode_length", log->episode_length);
-    assign_to_dict(dict, "pick_success_count", log->pick_success_rate);
-    assign_to_dict(dict, "place_success_count", log->place_success_rate);
+    assign_to_dict(dict, "episode_return", log->episode_return * inv);
+    assign_to_dict(dict, "episode_length", log->episode_length * inv);
+    assign_to_dict(dict, "pick_success_rate", log->pick_success_rate * inv);
+    assign_to_dict(dict, "place_success_rate", log->place_success_rate * inv);
+    log->perf = 0.0f;
+    log->score = 0.0f;
+    log->episode_return = 0.0f;
+    log->episode_length = 0.0f;
+    log->pick_success_rate = 0.0f;
+    log->place_success_rate = 0.0f;
+    log->n = 0.0f;
     return 0;
 }

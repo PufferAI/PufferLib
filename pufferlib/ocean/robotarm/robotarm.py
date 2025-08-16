@@ -21,7 +21,7 @@ class RobotArm(pufferlib.PufferEnv):
         **kwargs
     ):
 
-        self.pick_and_place_mode = True
+        self.pick_and_place_mode = pick_and_place_mode
         obs_shape = (19,)
         obs_doc = "19D: robot_state + target_object_info + target_basket_info + target_type_onehot"
 
@@ -78,7 +78,7 @@ class RobotArm(pufferlib.PufferEnv):
 
         defaults = {
             'frame_skip': 2,
-            'success_distance': 0.05,
+            'success_distance': 0.06,
             'domain_randomization': 0,
             'obs_noise_std': 0.0,
             'actuation_noise_std': 0.0,
@@ -87,17 +87,23 @@ class RobotArm(pufferlib.PufferEnv):
             'damping': 0.05,
             'action_penalty_coef': 0.0,
             'reward_scale': 1.0,
+            'headless': 0,
+            'render_decimation': 1,
+            'render_target_fps': 60,
+            'vsync': 1,
             'curriculum_episodes': 200,
-            'success_distance_start': 0.08,
+            'success_distance_start': 0.12,
             'success_distance_min': 0.03,
-            'on_gripper_spawn_start': 0.02,
+            'on_gripper_spawn_start': 0.05,
             'on_gripper_spawn_min': 0.005,
-            'on_gripper_spawn_prob': 0.02,
-            'start_grasp_prob': 0.10,
+            'on_gripper_spawn_prob': 0.05,
+            'start_grasp_prob': 0.20,
             'touch_bonus_max': 0.0,
             'touch_decay_steps': 0,
             'assist_enabled': 0,
             'assist_episodes': 200,
+            'early_reach_episodes': 200,
+            'early_reach_bonus': 0.5,
         }
         for k, v in defaults.items():
             forward_kwargs.setdefault(k, v)
@@ -149,14 +155,15 @@ class RobotArm(pufferlib.PufferEnv):
 
         int_keys = [
             'frame_skip', 'domain_randomization', 'curriculum_episodes',
-            'touch_decay_steps', 'assist_enabled', 'assist_episodes'
+            'touch_decay_steps', 'assist_enabled', 'assist_episodes', 'early_reach_episodes',
+            'headless', 'render_decimation', 'render_target_fps', 'vsync'
         ]
         float_keys = [
             'success_distance', 'obs_noise_std', 'actuation_noise_std',
             'action_smoothing_alpha', 'accel_limit', 'damping',
             'success_distance_start', 'success_distance_min',
             'on_gripper_spawn_start', 'on_gripper_spawn_min',
-            'on_gripper_spawn_prob', 'start_grasp_prob', 'touch_bonus_max'
+            'on_gripper_spawn_prob', 'start_grasp_prob', 'touch_bonus_max', 'early_reach_bonus'
         ]
         for k in int_keys:
             if k in forward_kwargs:
@@ -164,6 +171,9 @@ class RobotArm(pufferlib.PufferEnv):
         for k in float_keys:
             if k in forward_kwargs:
                 forward_kwargs[k] = _to_float(forward_kwargs[k])
+
+        if 'headless' not in forward_kwargs:
+            forward_kwargs['headless'] = 1 if self.render_mode is None else 0
 
         for env_num in range(num_envs):
             c_envs.append(binding.env_init(
@@ -272,4 +282,29 @@ def make_robotarm_pick_and_place(num_envs=16, render_mode=None, max_steps=5000, 
         max_steps=max_steps,
         pick_and_place_mode=True,
         **kwargs
+    )
+
+def make_robotarm_train(num_envs=16, max_steps=5000, **kwargs):
+    """High-throughput training: headless by default, no rendering overhead."""
+    kwargs.setdefault('headless', 1)
+    return RobotArm(
+        num_envs=num_envs,
+        render_mode=None,
+        max_steps=max_steps,
+        pick_and_place_mode=True,
+        **kwargs,
+    )
+
+def make_robotarm_eval(num_envs=1, max_steps=5000, **kwargs):
+    """Evaluation with rendering enabled and sensible defaults."""
+    kwargs.setdefault('headless', 0)
+    kwargs.setdefault('render_decimation', 1)
+    kwargs.setdefault('render_target_fps', 60)
+    kwargs.setdefault('vsync', 1)
+    return RobotArm(
+        num_envs=num_envs,
+        render_mode='human',
+        max_steps=max_steps,
+        pick_and_place_mode=True,
+        **kwargs,
     )

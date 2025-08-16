@@ -1,34 +1,27 @@
 #ifndef PUFFERLIB_OCEAN_ROBOT_ARM_H
 #define PUFFERLIB_OCEAN_ROBOT_ARM_H
-
 #include <stdbool.h>
 #include "raylib.h"
-
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
 #endif
 #ifndef M_PI_2
 #define M_PI_2 1.57079632679489661923f
 #endif
-
 #define WORKSPACE_X_MIN -0.65f
 #define WORKSPACE_X_MAX  0.65f
 #define WORKSPACE_Y_MIN -0.65f
 #define WORKSPACE_Y_MAX  0.65f
 #define WORKSPACE_Z_MIN  0.0f
 #define WORKSPACE_Z_MAX  0.8f
-
 #define ARM_LINK1_LENGTH 0.35f
 #define ARM_LINK2_LENGTH 0.25f
 #define ARM_LINK3_LENGTH 0.10f
-
 #define MAX_OBJECTS 4
 #define MAX_BASKETS 3
 #define OBJECT_SIZE 0.03f
 #define BASKET_SIZE 0.08f
-
 #define ARM_DT 0.01f
-
 #define GRAVITY -9.81f
 #define TABLE_HEIGHT 0.25f
 #define OBJECT_MASS 0.05f
@@ -37,10 +30,12 @@
 #define AIR_DAMPING 0.90f
 #define CONTACT_STIFFNESS 300.0f
 #define CONTACT_DAMPING 30.0f
-
 #define GRIPPER_FINGER_LENGTH 0.05f
 #define GRIPPER_MAX_FORCE 2.0f
 #define GRIPPER_CONTACT_RADIUS 0.060f
+#ifndef ARM_USE_EULER
+#define ARM_USE_EULER 1
+#endif
 
 
 typedef enum {
@@ -167,9 +162,22 @@ typedef struct RobotArm {
     float obs_noise_std;
     float actuation_noise_std;
     float success_distance;
+    float success_distance2;
     int   domain_randomization;
     float action_penalty_coef;
     float reward_scale;
+
+    int   headless;
+    int   render_decimation;
+    int   render_counter;
+    int   render_target_fps;
+    int   vsync;
+
+    Model cube_model;
+    int   cube_model_loaded;
+    float cube_model_scale;
+    float cube_model_offset[3];
+    float cube_model_visual_mul;
 
     float action_smoothing_alpha;
     float accel_limit;
@@ -208,6 +216,10 @@ typedef struct RobotArm {
     float early_reach_bonus;
     int   near_object_steps;
     int   target_unreachable_steps;
+    int   nearest_target_idx;
+    float nearest_target_d2;
+    int   fk_dirty;
+    int   physics_substeps;
 } RobotArm;
 
 void c_reset(RobotArm *env);
