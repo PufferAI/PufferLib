@@ -501,7 +501,6 @@ static void update_observations(RobotArm *env) {
 static inline float finalize_reward(RobotArm *env, float r, float clamp_min, float clamp_max) {
     float scale = (env->reward_scale > 0.0f ? env->reward_scale : 1.0f);
     float out = r * scale;
-    if (out < 0.0f) out = 0.0f;
     if (env->use_unified_clamp) return clampf(out, env->unified_clamp_min, env->unified_clamp_max);
     return clampf(out, clamp_min, clamp_max);
 }
@@ -510,9 +509,71 @@ static float compute_reward(RobotArm *env) {
     float reward = 0.0f;
     const float base_step = 0.02f;
     reward += base_step;
+    if (env->release_event && env->recent_release_object_id >= 0) {
+        int oi = env->recent_release_object_id;
+        ManipObject *o = &env->objects[oi];
+        env->release_event = 0;
+        if (!o->in_basket) {
+            int bidx = o->target_basket;
+            Basket *b = &env->baskets[bidx];
+            float dx = o->physics.pos[0] - b->pos[0];
+            float dy = o->physics.pos[1] - b->pos[1];
+            float dxy = safe_sqrt(dx*dx + dy*dy);
+            float rad_ok = BASKET_SIZE * 0.7f;
+            if (dxy > rad_ok) {
+                float excess = dxy - rad_ok;
+                reward -= fminf(10.0f, 40.0f * excess);
+            }
+        }
+    }
 
     int closest_obj = env->nearest_target_idx;
     float min_obj_dist = (closest_obj >= 0) ? safe_sqrt(env->nearest_target_d2) : 1e9f;
+
+    if (env->grasped_object_id < 0) {
+        for (int oi = 0; oi < MAX_OBJECTS; oi++) {
+            ManipObject *o = &env->objects[oi];
+            if (o->in_basket || o->grasped) continue;
+            int bidx = o->target_basket;
+            Basket *b = &env->baskets[bidx];
+            float dx = o->physics.pos[0] - b->pos[0];
+            float dy = o->physics.pos[1] - b->pos[1];
+            float r2 = dx*dx + dy*dy;
+            float rad = BASKET_SIZE * 0.55f;
+            float topZ = b->pos[2] + 0.5f * BASKET_SIZE;
+            bool inside_xy = (r2 < rad*rad);
+            bool below_rim = (o->physics.pos[2] <= topZ + 0.02f);
+            bool settled = (o->physics.on_surface || fabsf(o->physics.vel[2]) < 0.05f);
+            if (inside_xy && below_rim && settled) {
+                o->in_basket = true;
+                float frac_remaining = 0.0f;
+                if (env->max_steps > 0) {
+                    float t = (float)env->episode_steps / (float)env->max_steps;
+                    frac_remaining = clampf(1.0f - t, 0.0f, 1.0f);
+                }
+                float time_bonus = 80.0f * frac_remaining;
+                reward += 20.0f + time_bonus;
+                env->episode_score_accum += 1.0f;
+                env->episode_place_count += 1.0f;
+                env->log.place_success_rate += 1.0f;
+                b->collected_count += 1.0f;
+                env->placed_event = 1;
+                env->best_place_dist = 1e9f;
+                int disabled_idx = bidx;
+                for (int attempt = 0; attempt < 3; attempt++) {
+                    ObjectType new_type = (ObjectType)(rand() % 3);
+                    int basket_idx = -1;
+                    for (int bi = 0; bi < MAX_BASKETS; bi++) if (env->baskets[bi].type == (BasketType)new_type) { basket_idx = bi; break; }
+                    if (basket_idx >= 0 && basket_idx != disabled_idx) {
+                        int found = -1;
+                        for (int oj = 0; oj < MAX_OBJECTS; oj++) if (!env->objects[oj].in_basket && env->objects[oj].type == new_type) { found = oj; break; }
+                        if (found >= 0) { env->target_type = new_type; env->current_target_object = found; break; }
+                    }
+                }
+                return finalize_reward(env, reward, 0.0f, 200.0f);
+            }
+        }
+    }
 
     if (env->grasped_object_id < 0 && closest_obj >= 0) {
         float current_dist = min_obj_dist;
@@ -520,11 +581,11 @@ static float compute_reward(RobotArm *env) {
         float movement_delta = prev_dist - current_dist;
 
         if (movement_delta > 0.0f) {
-            reward += 4.0f * movement_delta;      // progress bonus
-            reward += 1.5f * movement_delta;      // speed bonus (progress-weighted)
+            reward += 4.0f * movement_delta;
+            reward += 1.5f * movement_delta;
         }
-        reward += fmaxf(0.0f, 0.30f - current_dist) * 3.0f; // closeness shaping
-        if (current_dist < 0.06f) reward += 0.8f;            // near-grasp bonus
+        reward += fmaxf(0.0f, 0.30f - current_dist) * 3.0f;
+        if (current_dist < 0.06f) reward += 0.8f;
 
         if (env->grasp_event) { reward += 2.5f; env->grasp_event = 0; }
         env->prev_distance = current_dist;
@@ -544,27 +605,26 @@ static float compute_reward(RobotArm *env) {
 
         if (current_dist + 1e-5f < env->best_place_dist) env->best_place_dist = current_dist;
         if (movement_delta > 0.0f) {
-            reward += 8.0f * movement_delta;     // progress to basket
-            reward += 2.0f * movement_delta;     // speed bonus
+            reward += 10.0f * movement_delta;
+            reward += 3.0f * movement_delta;
         }
-        reward += fmaxf(0.0f, (BASKET_SIZE * 0.9f) - current_dist) * 6.0f; // closeness shaping
+        reward += fmaxf(0.0f, (BASKET_SIZE * 1.0f) - current_dist) * 8.0f;
         float lift = o->physics.pos[2] - (TABLE_HEIGHT + OBJECT_SIZE * 0.5f);
         if (lift > 0.03f) reward += fminf(2.0f, lift * 15.0f);
 
         float near_thresh2 = (BASKET_SIZE * 0.7f) * (BASKET_SIZE * 0.7f);
         bool near_basket = d2b < near_thresh2;
         bool opened = env->gripper_state < 0.3f;
-            if (near_basket && opened) {
+        if (near_basket && opened) {
             o->in_basket = true;
             env->grasped_object_id = -1;
-                // Large time-dependent placement bonus: earlier placement => larger reward
                 float frac_remaining = 0.0f;
                 if (env->max_steps > 0) {
                     float t = (float)env->episode_steps / (float)env->max_steps;
                     frac_remaining = clampf(1.0f - t, 0.0f, 1.0f);
                 }
-                float time_bonus = 80.0f * frac_remaining; // up to +80 early
-                reward += 20.0f + time_bonus;              // base 20 + time bonus
+                float time_bonus = 80.0f * frac_remaining;
+                reward += 20.0f + time_bonus;
             env->episode_score_accum += 1.0f;
             env->episode_place_count += 1.0f;
             env->log.place_success_rate += 1.0f;
@@ -669,6 +729,9 @@ static void update_gripper(RobotArm *env, float dt) {
             grasped_obj->grasped = false;
             env->grasped_object_id = -1;
             env->grasp_stability = 0.0f;
+            // mark release event for shaping
+            env->release_event = 1;
+            env->recent_release_object_id = (int)(grasped_obj - env->objects);
             float min_z = TABLE_HEIGHT + grasped_obj->size[2] * 0.5f;
             if (grasped_obj->physics.pos[2] < min_z) {
                 grasped_obj->physics.pos[2] = min_z;
@@ -925,6 +988,8 @@ void c_reset(RobotArm *env) {
 
     env->camera_initialized = false;
     env->placed_event = 0;
+    env->release_event = 0;
+    env->recent_release_object_id = -1;
     env->continuous_gripper = 1;
     env->use_unified_clamp = 1;
     env->unified_clamp_min = 0.0f;
@@ -1165,8 +1230,7 @@ void c_render(RobotArm *env) {
                 }
             }
             env->cube_model_scale = OBJECT_SIZE;
-            // Default visual multiplier to 1.5x to scale puffer models up
-            env->cube_model_visual_mul = (env->cube_model_visual_mul > 0.0f) ? env->cube_model_visual_mul : 1.5f;
+            env->cube_model_visual_mul = (env->cube_model_visual_mul > 0.0f) ? env->cube_model_visual_mul : 2.0f;
             env->cube_model_offset[0] = env->cube_model_offset[1] = env->cube_model_offset[2] = 0.0f;
             if (env->cube_model_loaded) {
                 BoundingBox bb = GetModelBoundingBox(env->cube_model);
@@ -1238,23 +1302,20 @@ void c_render(RobotArm *env) {
             Color bc = (b->type == BASKET_RED)   ? CLR_RED :
                        (b->type == BASKET_BLUE)  ? CLR_BLUE :
                        (b->type == BASKET_GREEN) ? CLR_GREEN : METAL_LIGHT;
-            float outerW = BASKET_SIZE * 1.2f; // width along X
-            float outerD = BASKET_SIZE * 1.2f; // depth along Y
+            float outerW = BASKET_SIZE * 1.2f;
+            float outerD = BASKET_SIZE * 1.2f;
             float wallT  = 0.010f;
             float baseT  = 0.008f;
-            float binH   = BASKET_SIZE; // vertical height along Z
+            float binH   = BASKET_SIZE;
             float bottomZ = b->pos[2] - 0.5f * binH;
             Vector3 baseCenter = (Vector3){b->pos[0], b->pos[1], bottomZ + baseT * 0.5f};
             Color baseCol = (Color){235,238,242,230};
-            // DrawCube signature: width(X), height(Y), length(Z). With Z-up, thickness should go into 'length'.
             DrawCube(baseCenter, outerW, outerD, baseT, baseCol);
-            float wallH = binH - baseT; // vertical height (Z)
+            float wallH = binH - baseT;
             float wallZ = bottomZ + baseT + 0.5f * wallH;
             Color wallTint = (Color){bc.r, bc.g, bc.b, 180};
-            // Side walls along X: thin in X (wallT), full depth in Y (outerD), tall in Z (wallH)
             DrawCube((Vector3){b->pos[0] + (outerW*0.5f - wallT*0.5f), b->pos[1], wallZ}, wallT, outerD, wallH, wallTint);
             DrawCube((Vector3){b->pos[0] - (outerW*0.5f - wallT*0.5f), b->pos[1], wallZ}, wallT, outerD, wallH, wallTint);
-            // Front/back walls along Y: full width in X (outerW), thin in Y (wallT), tall in Z (wallH)
             DrawCube((Vector3){b->pos[0], b->pos[1] + (outerD*0.5f - wallT*0.5f), wallZ}, outerW, wallT, wallH, wallTint);
             DrawCube((Vector3){b->pos[0], b->pos[1] - (outerD*0.5f - wallT*0.5f), wallZ}, outerW, wallT, wallH, wallTint);
         }

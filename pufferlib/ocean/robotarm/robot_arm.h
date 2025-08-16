@@ -115,8 +115,6 @@ typedef struct RobotArm {
     float joint_angles[6];
     float end_effector[3];
     float end_effector_orient[3];
-    
-
     float gripper_state;
     float gripper_command;
     float gripper_force;
@@ -132,24 +130,19 @@ typedef struct RobotArm {
     int current_target_object;
     ObjectType target_type;
     int task_stage;
-
     float target_pos[3];
     float target_orient[3];
-
     float cached_sin[6];
     float cached_cos[6];
     float prev_distance;
     float current_distance;
     float best_place_dist;
-
     float episode_score_accum;
     float episode_return_accum;
     float episode_pick_count;
     float episode_place_count;
-
     float joint_vel[6];
     float cmd_filt[6];
-
     Camera3D camera;
     float camera_distance;
     float camera_azimuth;
@@ -157,7 +150,6 @@ typedef struct RobotArm {
     bool is_dragging;
     Vector2 last_mouse_pos;
     bool camera_initialized;
-
     int   frame_skip;
     float obs_noise_std;
     float actuation_noise_std;
@@ -166,27 +158,22 @@ typedef struct RobotArm {
     int   domain_randomization;
     float action_penalty_coef;
     float reward_scale;
-
     int   headless;
     int   render_decimation;
     int   render_counter;
     int   render_target_fps;
     int   vsync;
-
     Model cube_model;
     int   cube_model_loaded;
     float cube_model_scale;
     float cube_model_offset[3];
     float cube_model_visual_mul;
-
     float action_smoothing_alpha;
     float accel_limit;
     float damping;
-
     float link1_length;
     float link2_length;
     float link3_length;
-
     int   episodes_completed;
     int   curriculum_episodes;
     float success_distance_start;
@@ -220,6 +207,8 @@ typedef struct RobotArm {
     float nearest_target_d2;
     int   fk_dirty;
     int   physics_substeps;
+    int   release_event;
+    int   recent_release_object_id;
 } RobotArm;
 
 void c_reset(RobotArm *env);

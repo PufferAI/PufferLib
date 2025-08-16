@@ -9,7 +9,6 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     if (!env) return -1;
     env->max_steps = (int)unpack(kwargs, "max_steps");
     env->pick_and_place_mode = (int)unpack(kwargs, "pick_and_place_mode");
-    // reach_only removed - pick-and-place mode only
     env->frame_skip = (int)unpack(kwargs, "frame_skip");
     if (PyDict_Contains(kwargs, PyUnicode_FromString("physics_substeps"))) {
         env->physics_substeps = (int)unpack(kwargs, "physics_substeps");
@@ -46,7 +45,6 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->assist_enabled = (int)unpack(kwargs, "assist_enabled");
     env->assist_episodes = (int)unpack(kwargs, "assist_episodes");
 
-    // Rendering controls (optional)
     env->headless = (int)unpack(kwargs, "headless");
     int rd = (int)unpack(kwargs, "render_decimation");
     env->render_decimation = rd > 0 ? rd : 1;
