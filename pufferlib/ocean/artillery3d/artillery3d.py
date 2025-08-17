@@ -1,6 +1,5 @@
 import numpy as np
 import gymnasium
-import time
 
 import pufferlib
 from pufferlib.ocean.artillery3d import binding
@@ -23,8 +22,6 @@ class Artillery3D(pufferlib.PufferEnv):
         self.single_action_space = gymnasium.spaces.Discrete(7)
 
         super().__init__(buf)
-
-        #self.actions = self.actions.astype(np.float32)
 
         c_envs = []
         for i in range(num_envs):
@@ -58,8 +55,6 @@ class Artillery3D(pufferlib.PufferEnv):
         info = []
         if self.tick % self.log_interval == 0:
             info.append(binding.vec_log(self.c_envs))
-
-        #print('P Obs:', ' '.join(f'{x:.3f}' for x in self.observations.flatten()))
 
         return (self.observations, self.rewards,
             self.terminals, self.truncations, info)

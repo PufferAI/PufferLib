@@ -53,8 +53,6 @@ typedef struct Log {
 
 typedef struct Client {
     Camera3D camera;
-    int render;
-    int debug;
     float camera_distance;
     float camera_azimuth;
     float camera_elevation;
@@ -233,28 +231,23 @@ void fire_projectile(Artillery3D* env) {
 }
 
 void compute_observations(Artillery3D* env) {
-    if (env->debug > 0) printf("  Compute Observations\n");
-
     env->observations[0] = env->azimuth;
-    if (env->debug > 0) printf("    azimuth = %.3f\n", env->observations[0]);
-
     env->observations[1] = env->elevation;
-    if (env->debug > 0) printf("    elevation = %.3f\n", env->observations[1]);
-
     env->observations[2] = env->score;
-    if (env->debug > 0) printf("    score = %.6f\n", env->observations[2]);
-
     env->observations[3] = env->tick * 0.01;
-    if (env->debug > 0) printf("    tick = %.3f\n", env->observations[3]);
-
     env->observations[4] = env->fuse_t;
-    if (env->debug > 0) printf("    fuse_t = %.3f\n", env->observations[4]);
-
     env->observations[5] = env->shots_fired * env->inv_max_shots;
-    if (env->debug > 0) printf("    shots_fired = %.3f\n", env->observations[5]);
-
     env->observations[6] = env->targets_remaining / NUMTARGETS;
-    if (env->debug > 0) printf("    targets_remaining = %.3f\n", env->observations[6]);
+    if (env->debug > 0) {
+        printf("  Compute Observations\n");
+        printf("    azimuth = %.3f\n", env->observations[0]);
+        printf("    elevation = %.3f\n", env->observations[1]);
+        printf("    score = %.6f\n", env->observations[2]);
+        printf("    tick = %.3f\n", env->observations[3]);
+        printf("    fuse_t = %.3f\n", env->observations[4]);
+        printf("    shots_fired = %.3f\n", env->observations[5]);
+        printf("    targets_remaining = %.3f\n", env->observations[6]);
+    }
 
     int base_obs = 7;
     for (int i = 0; i < NUMTARGETS; i++) {

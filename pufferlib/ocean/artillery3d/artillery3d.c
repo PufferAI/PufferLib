@@ -1,10 +1,7 @@
-#include <time.h>
 #include "artillery3d.h"
 #include "puffernet.h"
 
 void demo() {
-    printf("demo\n");
-
     Artillery3D env = {
         .debug = 0,
         .dist_fade = 0.15,
@@ -56,7 +53,6 @@ void demo() {
     free(weights);
     free_allocated(&env);
     close_client(env.client);
-    printf("end demo\n");
 }
 
 int main() {
