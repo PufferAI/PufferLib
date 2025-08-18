@@ -1,4 +1,4 @@
-#include "2048.h"
+#include "g2048.h"
 #include "puffernet.h"
 
 int main() {
