@@ -188,6 +188,7 @@ extension_kwargs = dict(
 
 # Find C extensions
 c_extensions = []
+c_extension_paths = []
 if not NO_OCEAN:
     c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
     c_extensions = [
