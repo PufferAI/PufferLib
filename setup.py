@@ -176,6 +176,12 @@ class TorchBuildExt(cpp_extension.BuildExtension):
     def run(self):
         self.extensions = [e for e in self.extensions if e.name == "pufferlib._C"]
         super().run()
+    
+    def build_extensions(self):
+        # Allow bypassing CUDA version check via env var (for newer GPUs)
+        if os.getenv("SKIP_CUDA_CHECK", "0") == "1":
+            cpp_extension._check_cuda_version = lambda *args: None
+        super().build_extensions()
 
 RAYLIB_A = f'{RAYLIB_NAME}/lib/libraylib.a'
 INCLUDE = [numpy.get_include(), 'raylib/include', f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src']
