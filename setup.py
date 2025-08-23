@@ -12,8 +12,27 @@ import tarfile
 import platform
 import shutil
 
+# Set CUDA_HOME before importing torch if not already set
+if not os.environ.get('CUDA_HOME'):
+    # Try to find CUDA installation
+    cuda_paths = ['/usr/lib/cuda', '/usr/local/cuda', '/usr']
+    for cuda_path in cuda_paths:
+        if os.path.exists(os.path.join(cuda_path, 'include', 'cuda.h')):
+            os.environ['CUDA_HOME'] = cuda_path
+            print(f"Auto-detected CUDA_HOME: {cuda_path}")
+            break
+
 from setuptools.command.build_ext import build_ext
+
+# Import torch.utils.cpp_extension after setting CUDA_HOME
+# This ensures torch sees the correct CUDA_HOME value
 from torch.utils import cpp_extension
+
+# Now we need to reload the module if CUDA_HOME was set after initial import
+if os.environ.get('CUDA_HOME') and not cpp_extension.CUDA_HOME:
+    import importlib
+    importlib.reload(cpp_extension)
+    
 from torch.utils.cpp_extension import (
     CppExtension,
     CUDAExtension,
@@ -178,9 +197,10 @@ class TorchBuildExt(cpp_extension.BuildExtension):
         super().run()
     
     def build_extensions(self):
-        # Allow bypassing CUDA version check via env var (for newer GPUs)
-        if os.getenv("SKIP_CUDA_CHECK", "0") == "1":
+        # RTX_COMPAT=1 bypasses CUDA checks for newer GPUs (RTX 50 series)
+        if os.getenv("RTX_COMPAT", "0") == "1":
             cpp_extension._check_cuda_version = lambda *args: None
+            os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.9")  # Ada Lovelace
         super().build_extensions()
 
 RAYLIB_A = f'{RAYLIB_NAME}/lib/libraylib.a'
@@ -221,11 +241,30 @@ if not NO_TRAIN:
     torch_sources = [
         "pufferlib/extensions/pufferlib.cpp",
     ]
+    # Check if we can use CUDA
+    use_cuda = False
     if shutil.which("nvcc"):
+        # Check if CUDA_HOME is set and valid
+        cuda_home = os.environ.get('CUDA_HOME') or CUDA_HOME
+        if cuda_home:
+            # Verify the CUDA installation has necessary files
+            cuda_lib = os.path.join(cuda_home, 'lib64')
+            cuda_include = os.path.join(cuda_home, 'include')
+            if os.path.exists(cuda_lib) and os.path.exists(cuda_include):
+                use_cuda = True
+                print(f"CUDA installation found at {cuda_home}")
+            else:
+                print(f"CUDA_HOME set to {cuda_home} but missing lib64 or include directories")
+        else:
+            print("nvcc found but CUDA_HOME not set")
+    
+    if use_cuda:
         extension = CUDAExtension
         torch_sources.append("pufferlib/extensions/cuda/pufferlib.cu")
+        print("Using CUDAExtension for GPU support")
     else:
         extension = CppExtension
+        print("Using CppExtension (CPU only)")
 
     torch_extensions = [
        extension(
