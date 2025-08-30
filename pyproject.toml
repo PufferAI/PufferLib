@@ -233,7 +233,7 @@ puffer = "pufferlib.pufferl:main"
 Homepage = "https://puffer.ai"
 
 [build-system]
-requires = ["setuptools", "wheel", "Cython", "numpy<2.0", "torch"]
+requires = ["setuptools", "wheel", "Cython", "numpy", "torch"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv]
