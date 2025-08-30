@@ -9,7 +9,6 @@
 #define NOOP 0
 #define LEFT 1
 #define RIGHT 2
-#define MAX_BALL_SPEED 448
 #define HALF_PADDLE_WIDTH 31
 #define Y_OFFSET 50
 #define TICK_RATE 1.0f/60.0f
@@ -55,9 +54,13 @@ typedef struct Breakout {
     float* brick_y;
     float* brick_states;
     int balls_fired;
+    float initial_paddle_width;
     float paddle_width;
     float paddle_height;
+    float paddle_speed;
     float ball_speed;
+    float initial_ball_speed;
+    float max_ball_speed;
     int hits;
     int width;
     int height;
@@ -289,15 +292,13 @@ bool calc_paddle_ball_collisions(Breakout* env, CollisionInfo* collision_info) {
     collision_info->brick_index = BRICK_INDEX_PADDLE_COLLISION;
 
     env->hit_brick = false;
-    float relative_intersection = ((env->ball_x +
-                                    env->ball_width / 2) -
-                                   env->paddle_x) /
-                                  env->paddle_width;
+    float relative_intersection = (
+        (env->ball_x + env->ball_width / 2) - env->paddle_x) / env->paddle_width;
     float angle = -base_angle + relative_intersection * 2 * base_angle;
     env->ball_vx = sin(angle) * env->ball_speed * TICK_RATE;
     env->ball_vy = -cos(angle) * env->ball_speed * TICK_RATE;
     env->hits += 1;
-    if (env->hits % 4 == 0 && env->ball_speed < MAX_BALL_SPEED) {
+    if (env->hits % 4 == 0 && env->ball_speed < env->max_ball_speed) {
         env->ball_speed += 64;
     }
     if (env->score == env->half_max_score) {
@@ -336,12 +337,16 @@ void calc_all_wall_collisions(Breakout* env, CollisionInfo* collision_info) {
 // With rare floating point conditions, the ball could escape the bounds.
 // Let's handle that explicitly.
 void check_wall_bounds(Breakout* env) {
-    if (env->ball_x < 0)
-        env->ball_x += MAX_BALL_SPEED * 1.1f * TICK_RATE;
-    if (env->ball_x > env->width)
-        env->ball_x -= MAX_BALL_SPEED * 1.1f * TICK_RATE;
-    if (env->ball_y < 0)
-        env->ball_y += MAX_BALL_SPEED * 1.1f * TICK_RATE;
+    float offset = env->max_ball_speed * 1.1f * TICK_RATE;
+    if (env->ball_x < 0) {
+        env->ball_x += offset;
+    }
+    if (env->ball_x > env->width) {
+        env->ball_x -= offset;
+    }
+    if (env->ball_y < 0) {
+        env->ball_y += offset;
+    }
 }
 
 void destroy_brick(Breakout* env, int brick_idx) {
@@ -353,7 +358,7 @@ void destroy_brick(Breakout* env, int brick_idx) {
     env->rewards[0] += gained_points;
 
     if (brick_idx / env->brick_cols < 3) {
-        env->ball_speed = MAX_BALL_SPEED;
+        env->ball_speed = env->max_ball_speed;
     }
 }
 
@@ -393,8 +398,8 @@ void reset_round(Breakout* env) {
     env->balls_fired = 0;
     env->hit_brick = false;
     env->hits = 0;
-    env->ball_speed = 256;
-    env->paddle_width = 2 * HALF_PADDLE_WIDTH;
+    env->ball_speed = env->initial_ball_speed;
+    env->paddle_width = env->initial_paddle_width;
 
     env->paddle_x = env->width / 2.0 - env->paddle_width / 2;
     env->paddle_y = env->height - env->paddle_height - 10;
@@ -437,7 +442,7 @@ void step_frame(Breakout* env, float action) {
     if (env->continuous){
         act = action;
     }
-    env->paddle_x += act * 620 * TICK_RATE;
+    env->paddle_x += act * env->paddle_speed * TICK_RATE;
     if (env->paddle_x <= 0){
         env->paddle_x = fmaxf(0, env->paddle_x);
     } else {
