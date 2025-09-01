@@ -20,7 +20,7 @@ game:
     - laser
     - blueprint
 
-  num_agents: 64
+  num_agents: 60
   obs_width: 11
   obs_height: 11
   num_observation_tokens: 200
@@ -237,7 +237,7 @@ game:
       height: 64
       border_width: 0
 
-      agents: 64
+      agents: 66
 
       objects:
         mine_red: 128

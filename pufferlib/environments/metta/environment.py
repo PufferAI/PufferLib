@@ -6,8 +6,7 @@ import pufferlib
 
 from omegaconf import OmegaConf
 from metta.mettagrid.mettagrid_env import MettaGridEnv
-from metta.mettagrid.curriculum.core import SingleTaskCurriculum
-from metta.mettagrid.replay_writer import ReplayWriter
+from metta.mettagrid.config.envs import make_arena
 
 def env_creator(name='metta'):
     return functools.partial(make, name)
@@ -17,16 +16,20 @@ def make(name, config='pufferlib/environments/metta/metta.yaml', render_mode='au
     '''Metta creation function'''
     
     OmegaConf.register_new_resolver("div", oc_divide, replace=True)
-    cfg = OmegaConf.load(config)
+    yaml_cfg = OmegaConf.load(config)
     
-    # Update rewards under the new structure: agent.rewards.inventory
-    inventory_rewards = cfg['game']['agent']['rewards']['inventory']
-    inventory_rewards['ore_red'] = float(ore_reward)
-    inventory_rewards['heart'] = float(heart_reward)
-    inventory_rewards['battery_red'] = float(battery_reward)
+    # Get the number of agents from the YAML config
+    num_agents = yaml_cfg['game']['num_agents']
     
-    curriculum = SingleTaskCurriculum('puffer', cfg)
-    return MettaPuff(curriculum, render_mode=render_mode, buf=buf, seed=seed)
+    # Create a basic arena configuration using the make_arena function
+    mettagrid_cfg = make_arena(num_agents=num_agents)
+    
+    # Apply reward overrides
+    mettagrid_cfg.game.agent.rewards.inventory['ore_red'] = float(ore_reward)
+    mettagrid_cfg.game.agent.rewards.inventory['heart'] = float(heart_reward)
+    mettagrid_cfg.game.agent.rewards.inventory['battery_red'] = float(battery_reward)
+    
+    return MettaPuff(mettagrid_cfg, render_mode=render_mode, buf=buf, seed=seed)
 
 def oc_divide(a, b):
     """
@@ -40,15 +43,14 @@ def oc_divide(a, b):
     return result
 
 class MettaPuff(MettaGridEnv):
-    def __init__(self, curriculum, render_mode='human', buf=None, seed=0):
+    def __init__(self, env_cfg, render_mode='human', buf=None, seed=0):
         self.replay_writer = None
         #if render_mode == 'auto':
         #    self.replay_writer = ReplayWriter("metta/")
 
         super().__init__(
-            curriculum=curriculum,
+            env_cfg=env_cfg,
             render_mode=render_mode,
-            buf=buf,
             replay_writer=self.replay_writer
         )
         self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.num_agents)
