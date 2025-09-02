@@ -12,14 +12,9 @@ def env_creator(name='metta'):
     return functools.partial(make, name)
 
 def make(name, config='pufferlib/environments/metta/metta.yaml', render_mode='auto', buf=None, seed=0,
-         ore_reward=0.17088483842567775, battery_reward=0.9882859711234822, heart_reward=1.0):
+         ore_reward=0.17088483842567775, battery_reward=0.9882859711234822, heart_reward=1.0, num_agents=60):
     '''Metta creation function'''
-    
-    OmegaConf.register_new_resolver("div", oc_divide, replace=True)
-    yaml_cfg = OmegaConf.load(config)
-    
-    # Get the number of agents from the YAML config
-    num_agents = yaml_cfg['game']['num_agents']
+
     
     # Create a basic arena configuration using the make_arena function
     mettagrid_cfg = make_arena(num_agents=num_agents)
