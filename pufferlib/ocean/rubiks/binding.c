@@ -1,13 +1,13 @@
-#include "target.h"
+#include "cube.h"
 
-#define Env Target
+#define Env Cube
 #include "../env_binding.h"
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    env->width = unpack(kwargs, "width");
-    env->height = unpack(kwargs, "height");
-    env->num_agents = unpack(kwargs, "num_agents");
-    env->num_goals = unpack(kwargs, "num_goals");
+    env->N = unpack(kwargs, "N");
+    env->shuffles = unpack(kwargs, "shuffles;");
+    env->obs_type = unpack(kwargs, "obs_type;");
+    env->size = unpack(kwargs, "size;");
     init(env);
     return 0;
 }

@@ -4,34 +4,48 @@ import gymnasium
 import numpy as np
 
 import pufferlib
-from pufferlib.ocean.target import binding
+from pufferlib.ocean.rubiks import binding
 
-class Target(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, width=1080, height=720, num_agents=8,
-            num_goals=4, render_mode=None, log_interval=128, size=11, buf=None, seed=0):
-        self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
-            shape=(2*(num_agents+num_goals) + 4,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.MultiDiscrete([9, 5])
+class Cube(pufferlib.PufferEnv):
+    def __init__(self, 
+                 num_envs=1,
+                 render_mode=None, 
+                 log_interval=128, 
+                 N=3,
+                 shuffles = 1,
+                 obs_type='basic',
+                 buf=None, 
+                 seed=0):
+
+        if obs_type == 'basic':
+            self.single_observations_space = gymnasium.spaces.Box(low=0, 
+                                                                 high=1, 
+                                                                 shape=(6, N, N, 6), #faces, height, width, colours
+                                                                 dtype=np.float32) 
+        else:
+            raise NotImplementedError(f'Cublets not yet implemented: {obs_type}')
+
+        self.single_action_space = gymnasium.spaces.Discrete(12) # 6 faces, clockwise and anticlockwise
+
 
         self.render_mode = render_mode
-        self.num_agents = num_envs*num_agents
         self.log_interval = log_interval
-
+        self.size = np.prod(self.single_observations_space.shape)
         super().__init__(buf)
-        c_envs = []
-        for i in range(num_envs):
-            c_env = binding.env_init(
-                self.observations[i*num_agents:(i+1)*num_agents],
-                self.actions[i*num_agents:(i+1)*num_agents],
-                self.rewards[i*num_agents:(i+1)*num_agents],
-                self.terminals[i*num_agents:(i+1)*num_agents],
-                self.truncations[i*num_agents:(i+1)*num_agents],
-                seed, width=width, height=height,
-                num_agents=num_agents, num_goals=num_goals)
-            c_envs.append(c_env)
-
-        self.c_envs = binding.vectorize(*c_envs)
-
+        self.c_envs = binding.env_init(self.observations,
+                                       self.actions,
+                                       self.rewards,
+                                       self.terminals,
+                                       self.truncations,
+                                       shuffles = shuffles,
+                                       N = N,
+                                       obs_type = obs_type,
+                                       size = self.size,
+                                       seed= seed,
+                                       num_envs = num_envs)
+                        
+                  
+     
     def reset(self, seed=0):
         binding.vec_reset(self.c_envs, seed)
         self.tick = 0
@@ -60,7 +74,7 @@ class Target(pufferlib.PufferEnv):
 if __name__ == '__main__':
     N = 512
 
-    env = Target(num_envs=N)
+    env = Cube(num_envs=N)
     env.reset()
     steps = 0
 
