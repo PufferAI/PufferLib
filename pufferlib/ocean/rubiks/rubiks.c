@@ -4,7 +4,7 @@
  * We suggest building and debugging your env in pure C first. You
  * get faster builds and better error messages
  */
-#include "target.h"
+#include "rubiks.h"
 
 /* Puffernet is our lightweight cpu inference library that
  * lets you load basic PyTorch model architectures so that
@@ -13,52 +13,76 @@
 #include "puffernet.h"
 
 int main() {
-    int num_agents = 8;
-    int num_goals = 4;
-    int num_obs = 2*(num_agents + num_goals) + 4;
+    int N = 3;
+    int num_obs = 6*N*N*6;
 
-    // Weights are exported by running puffer export
-    Weights* weights = load_weights("resources/target/target_weights.bin", 137743);
 
-    int logit_sizes[2] = {9, 5};
-    LinearLSTM* net = make_linearlstm(weights, num_agents, num_obs, logit_sizes, 2);
-
-    Target env = {
-        .width = 1080,
-        .height = 720,
-        .num_agents = num_agents,
-        .num_goals = num_goals 
+    Cube env = {
+        .N = N,
+        .shuffles = 0,
+        .size = num_obs
     };
     init(&env);
 
     // Allocate these manually since they aren't being passed from Python
-    env.observations = calloc(env.num_agents*num_obs, sizeof(float));
-    env.actions = calloc(2*env.num_agents, sizeof(int));
-    env.rewards = calloc(env.num_agents, sizeof(float));
-    env.terminals = calloc(env.num_agents, sizeof(unsigned char));
+    env.observations = calloc(num_obs, sizeof(float));
+    env.actions = calloc(12, sizeof(int));
+    env.rewards = calloc(1, sizeof(float));
+    env.terminals = calloc(1, sizeof(unsigned char));
+    env.max_episode_steps = 1000;
+    
 
     // Always call reset and render first
     c_reset(&env);
-    c_render(&env);
+   // check_face_mapping_bijection(&env);
+    //check_projection_solved(&env);
+    //
+   
+   c_render(&env);
 
-    // while(True) will break web builds
-    while (!WindowShouldClose()) {
-        for (int i=0; i<env.num_agents; i++) {
-            env.actions[2*i] = rand() % 9;
-            env.actions[2*i + 1] = rand() % 5;
-        }
-
-        forward_linearlstm(net, env.observations, env.actions);
+   /* int a=0;
+    for (int i=0; i<12; i++) {
+        printf("Action %d\n", a);
+        env.actions[0] = a:;
         c_step(&env);
-        c_render(&env);
-    }
+        a++;
 
-    // Try to clean up after yourself
-    free_linearlstm(net);
+        }*/
+   env.actions[0] = 1;
+    c_step(&env);
+    env.actions[0] = 0;
+    c_step(&env);
+
+    env.actions[0] =2;
+    c_step(&env);
+    env.actions[0] =3;
+    c_step(&env);
+    env.actions[0] =4;
+    c_step(&env);       
+    env.actions[0] =5;
+    c_step(&env);
+    env.actions[0] =6;
+    c_step(&env);
+    env.actions[0] =7;
+    c_step(&env);
+    env.actions[0] =8;      
+    c_step(&env);
+    env.actions[0] =9;
+    c_step(&env);
+    env.actions[0] =10;
+    c_step(&env);
+    env.actions[0] =11;
+    c_step(&env);
+
+   // print_strips(&env);
+    //test_moves(&env);
+   
     free(env.observations);
     free(env.actions);
     free(env.rewards);
     free(env.terminals);
     c_close(&env);
+    printf("Done\n");
+    
 }
 

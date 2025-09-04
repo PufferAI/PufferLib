@@ -3,6 +3,7 @@
 #include <string.h>
 #include <math.h>
 #include "raylib.h"
+#include <stdio.h>
 
 // Required struct. Only use floats!
 typedef struct {
@@ -10,7 +11,6 @@ typedef struct {
     float score; // Recommended unnormalized single real number perf metric
     float episode_return; // Recommended metric: sum of agent rewards over episode
     float episode_length; // Recommended metric: number of steps of agent episode
-    // Any extra fields you add here may be exported to Python in binding.c
     float n; // Required as the last field 
 } Log;
 
@@ -22,6 +22,13 @@ typedef struct {
     int dc;    // col step
 } strip_t;
 
+typedef struct {
+    Vector3 pos;
+    Color faces[6];
+    int ix, iy, iz;   // grid coordinates 0..N-1
+} Cubelet_r;
+
+
 
 typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
@@ -29,7 +36,8 @@ typedef struct {
     int* actions; // Required. int* for discrete/multidiscrete, float* for box
     float* rewards; // Required
     unsigned char* terminals; // Required. We don't yet have truncations as standard 
-    float score; 
+    float score;
+    int max_episode_steps;
     int tick;
     int N; // size of cube NxNxN
     int size;
@@ -37,6 +45,8 @@ typedef struct {
     char obs_type[10];
     int *stickers; // 6xNxN stickers
     strip_t strips[6][4]; // Precomputed strips for each face
+    Cubelet_r *cubelets; // for rendering
+    int total_cubelets;
 } Cube;
 
 
@@ -44,61 +54,125 @@ typedef struct {
         ((env)->observations[ ((f)*(env)->N*(env)->N*6) + ((r)*(env)->N*6) + ((c)*6) + (color) ])
 #define STICKER(env,f,r,c) ((env)->stickers[(f)*(env)->N*(env)->N + (r)*(env)->N + (c)])
 
+
+//Faces are Up, Down, Right, Left, Front, Back
 enum { U=0, D=1, R=2, L=3, F=4, B=5 };
 
 
+static Color sticker_colors[6] = {
+    WHITE,  // U
+    YELLOW, // D
+    RED,    // R
+    ORANGE, // L
+    GREEN,  // F
+    BLUE    // B
+};
+
+
+
+
+typedef struct {
+    int rotating;      // 0 idle, 1 anim
+    float elapsed;
+    float duration;    // e.g. 0.5f
+    int axis;          // 0=X,1=Y,2=Z
+    int layer;         // 0..N-1
+    int dir;           // +1 or -1
+} MoveState;
+
+static MoveState anim = {0};
+
+void add_log(Cube* env) {
+    env->log.perf += (env->rewards[0] > 0) ? 1 : 0;
+    env->log.score += env->score;
+    env->log.episode_length += env->tick;
+    env->log.episode_return += env->rewards[0];
+    env->log.n++;
+}
+
+
 // Precompute strips for l=0 (outer layer)
+
+
+
+
+
 void precompute_strips(Cube *env) {
     int N = env->N;
-    // Front
-    env->strips[F][0] = (strip_t){U, N-1, 0, 0, 1};
-    env->strips[F][1] = (strip_t){L, N-1, N-1, -1, 0};
-    env->strips[F][2] = (strip_t){D, 0, 0, 0, 1};
-    env->strips[F][3] = (strip_t){R, 0, 0, 1, 0};
-    // Back
-    env->strips[B][0] = (strip_t){U, 0, 0, 0, 1};
-    env->strips[B][1] = (strip_t){R, 0, N-1, 1, 0};
-    env->strips[B][2] = (strip_t){D, N-1, 0, 0, 1};
-    env->strips[B][3] = (strip_t){L, N-1, 0, -1, 0};
-    // Up
-    env->strips[U][0] = (strip_t){B, 0, 0, 0, 1};
-    env->strips[U][1] = (strip_t){R, 0, 0, 0, 1};
-    env->strips[U][2] = (strip_t){F, 0, 0, 0, 1};
-    env->strips[U][3] = (strip_t){L, 0, 0, 0, 1};
-    // Down
-    env->strips[D][0] = (strip_t){F, N-1, 0, 0, 1};
-    env->strips[D][1] = (strip_t){R, N-1, 0, 0, 1};
-    env->strips[D][2] = (strip_t){B, N-1, 0, 0, 1};
-    env->strips[D][3] = (strip_t){L, N-1, 0, 0, 1};
-    // Right
-    env->strips[R][0] = (strip_t){U, 0, N-1, 1, 0};
-    env->strips[R][1] = (strip_t){F, 0, N-1, 1, 0};
-    env->strips[R][2] = (strip_t){D, 0, N-1, 1, 0};
-    env->strips[R][3] = (strip_t){B, N-1, 0, -1, 0};
-    // Left
-    env->strips[L][0] = (strip_t){U, 0, 0, 1, 0};
-    env->strips[L][1] = (strip_t){B, N-1, N-1, -1, 0};
-    env->strips[L][2] = (strip_t){D, 0, 0, 1, 0};
-    env->strips[L][3] = (strip_t){F, 0, 0, 1, 0};
+
+    
+    // FRONT (F): U row 0 → R col N-1 → D row N-1 → L col N-1
+    env->strips[F][0] = (strip_t){U, 0,   0,   0,  1};   // U row 0,   L→R  (edge near F)
+    env->strips[F][1] = (strip_t){R, 0,   N-1, 1,  0};   // R col N-1, T→B
+    env->strips[F][2] = (strip_t){D, N-1, 0,   0,  1};   // D row N-1, L→R  (edge near F)
+    env->strips[F][3] = (strip_t){L, N-1, N-1,-1, 0};   // L col N-1, B→T
+                                                         // 
+   
+    // BACK (B): U back row → L left col → D top row → R left col  (clockwise, viewed from back)
+    env->strips[B][0] = (strip_t){U, N-1, N-1, 0, -1};   // U row N-1, R→L  (U back edge)
+    env->strips[B][1] = (strip_t){L, 0,    0,   1,  0};   // L col 0,   T→B
+    env->strips[B][2] = (strip_t){D, 0,    0,   0,  1};   // D row 0,   L→R  (D top edge)
+    env->strips[B][3] = (strip_t){R, 0,    0,   1,  0};   // R col 0,   T→B  (R back edge)
+
+    // UP (U): F top → R top → B top → L top  (clockwise, viewed from above)
+    env->strips[U][0] = (strip_t){F, 0, 0,   0,  1};   // F row 0, L→R
+    env->strips[U][1] = (strip_t){R, 0, 0,   0,  1};   // R row 0, L→R
+    env->strips[U][2] = (strip_t){B, 0, 0,   0,  1};   // B row 0, L→R   (not reversed)
+    env->strips[U][3] = (strip_t){L, 0, N-1, 0, -1};   // L row 0, R→L   (reversed)
+                                                        //
+    // DOWN (D): F bottom → R bottom → B bottom → L bottom
+    env->strips[D][0] = (strip_t){F, N-1, 0,   0, 1};      // F row N-1, L→R
+    env->strips[D][1] = (strip_t){R, N-1, 0,   0, 1};      // R row N-1, L→R
+    env->strips[D][2] = (strip_t){B, N-1, N-1, 0,-1};      // B row N-1, R→L
+    env->strips[D][3] = (strip_t){L, N-1, 0,   0, 1};      // L row N-1, L→R
+
+  
+    // RIGHT (R): U right → B left → D right → F right
+    env->strips[R][0] = (strip_t){U, 0,   N-1, 1, 0};    // U col N-1, T→B
+    env->strips[R][1] = (strip_t){B, N-1, 0,  -1,0};     // B col 0,   B→T
+    env->strips[R][2] = (strip_t){D, 0,   N-1, 1, 0};    // D col N-1, T→B
+    env->strips[R][3] = (strip_t){F, 0,   N-1, 1, 0};    // F col N-1, T→B
+
+    // LEFT (L): U left → F left → D left → B right
+    env->strips[L][0] = (strip_t){U, 0,   0, 1, 0};        // U col 0,   T→B
+    env->strips[L][1] = (strip_t){F, 0,   0, 1, 0};        // F col 0,   T→B
+    env->strips[L][2] = (strip_t){D, 0,   0, 1, 0};        // D col 0,   T→B
+    env->strips[L][3] = (strip_t){B, N-1, N-1,-1,0};       // B col N-1, B→T
 }
 
 
 
-/* Recommended to have an init function of some kind if you allocate 
- * extra memory. This should be freed by c_close. Don't forget to call
- * this in binding.c!
- */
+
 void init(Cube* env) {
     // Allocate any extra memory you need here. Don't forget to free in c_close!
     env->stickers = malloc(6 * env->N * env->N * sizeof(int));
+    env->cubelets = NULL;
+    env->total_cubelets = 0;
     precompute_strips(env);
+    
+    for (int f = 0; f < 6; f++) {
+        for (int s = 0; s < 4; s++) {
+            strip_t idx = env->strips[f][s];
+            if (idx.face < 0 || idx.face >= 6 ||
+                idx.row  < 0 || idx.row  >= 3 ||
+                idx.col  < 0 || idx.col  >= 3) {
+                printf("Bad strip: face %d slot %d -> (%d,%d,%d)\n",
+                       f, s, idx.face, idx.row, idx.col);
+            }
+        }
+}
+
+fprintf(stderr, "sizeof(Cube)=%zu sizeof(strip_t)=%zu\n",
+        sizeof(Cube), sizeof(strip_t));
+
 }
 
 void reset_stickers(Cube* env) {
     for(int i = 0; i < 6; i++) {
+        int col = i;
             for(int j = 0; j < env->N; j++) {
                for(int k = 0; k < env->N; k++) {
-                   STICKERS(i,j,k) = i;
+                   STICKER(env, i,j,k) = col;
                }
             }
     }
@@ -124,23 +198,65 @@ static void rotate_strips(Cube *env, strip_t s[4]) {
     int N = env->N;
     int tmp[N];
     for (int k=0;k<N;k++)
-        tmp[k] = STICKER(env, s[0].face, s[0].row + s[0].dr*k, s[0].col + s[0].dc*k);
+        tmp[k] = STICKER(env, s[3].face, s[3].row + s[3].dr*k, s[3].col + s[3].dc*k);
 
-    for (int j=0;j<3;j++) {
+    for (int j=3;j>0;j--) {
         for (int k=0;k<N;k++) {
             STICKER(env, s[j].face, s[j].row + s[j].dr*k, s[j].col + s[j].dc*k) =
-                STICKER(env, s[j+1].face, s[j+1].row + s[j+1].dr*k, s[j+1].col + s[j+1].dc*k);
+                STICKER(env, s[j-1].face, s[j-1].row + s[j-1].dr*k, s[j-1].col + s[j-1].dc*k);
         }
     }
 
     for (int k=0;k<N;k++)
-        STICKER(env, s[3].face, s[3].row + s[3].dr*k, s[3].col + s[3].dc*k) = tmp[k];
+        STICKER(env, s[0].face, s[0].row + s[0].dr*k, s[0].col + s[0].dc*k) = tmp[k];
 }
+  
+// Rotates the strips COUNTER-CLOCKWISE
+static void rotate_strips_ccw(Cube *env, strip_t s[4]) {
+    int N = env->N;
+    int tmp[N];
+    // copy first strip
+    for (int k=0;k<N;k++)
+        tmp[k] = STICKER(env, s[0].face,
+                         s[0].row + s[0].dr*k,
+                         s[0].col + s[0].dc*k);
+
+    // shift others down
+    for (int j=0;j<3;j++) {
+        for (int k=0;k<N;k++) {
+            STICKER(env, s[j].face,
+                    s[j].row + s[j].dr*k,
+                    s[j].col + s[j].dc*k) =
+                STICKER(env, s[j+1].face,
+                        s[j+1].row + s[j+1].dr*k,
+                        s[j+1].col + s[j+1].dc*k);
+        }
+    }
+
+    // put saved strip into last
+    for (int k=0;k<N;k++)
+        STICKER(env, s[3].face,
+                s[3].row + s[3].dr*k,
+                s[3].col + s[3].dc*k) = tmp[k];
+}
+
+// rotate face counter-clockwise
+static void rotate_face_ccw(Cube *env, int f) {
+    int N = env->N;
+    int tmp[N][N];
+    for (int i=0;i<N;i++)
+        for (int j=0;j<N;j++)
+            tmp[N-1-j][i] = STICKER(env,f,i,j);
+    for (int i=0;i<N;i++)
+        for (int j=0;j<N;j++)
+            STICKER(env,f,i,j) = tmp[i][j];
+}
+
 
 // Just rotates the face CLOCKWISE
 static void rotate_face(Cube *env, int f) {
     int N = env->N;
-    int tmp[N][N]; // VLA; use malloc if your compiler forbids VLAs
+    int tmp[N][N];     
     for (int i=0;i<N;i++)
         for (int j=0;j<N;j++)
             tmp[j][N-1-i] = STICKER(env,f,i,j);
@@ -150,14 +266,30 @@ static void rotate_face(Cube *env, int f) {
 }
 
 
+
 void move(Cube *env, int face, int turns) {
+    int dir = (turns > 0) ? +1 : -1;
+    turns = abs(turns) % 4;
+    for (int t=0; t<turns; t++) {
+        if (dir > 0) {
+            rotate_strips(env, env->strips[face]);
+            rotate_face(env, face);
+        } else {
+            rotate_strips_ccw(env, env->strips[face]);
+            rotate_face_ccw(env, face);
+        }
+    }
+}
+
+
+/*void move(Cube *env, int face, int turns) {
     // Normalize turns to [0,3] if -1 then = 3 so use -ves for anti-clockwise 
     turns = (turns % 4 + 4) % 4; 
     for (int t=0;t<turns;t++) {
         rotate_strips(env, env->strips[face]);
         rotate_face(env, face);
     }
-}
+}*/
 
 void shuffle(Cube* env, int shuffles){
     for (int i=0;i<shuffles;i++) {
@@ -172,6 +304,57 @@ static inline void decode_action(int action, int *face, int *turns) {
     *turns = (action % 2 == 0) ? +1 : -1;
 }
 
+static inline bool rendering_enabled(void) {
+    return IsWindowReady();
+}
+
+float score(Cube* env) {
+
+    float temp_score = 1.0f;
+    for (int f=0;f<6; f++) {
+        int t_colour = f;
+        int face_score = 0;
+        for (int r = 0; r < env->N; r++) {
+            for (int c = 0; c < env->N; c++) {
+                if (STICKER(env, f,r,c) == t_colour) {
+                    face_score += 1.0;
+                }
+            }
+        }
+        temp_score *= face_score;
+    }   
+    return temp_score;
+}
+
+int is_solved(Cube *env) {
+    for (int f = 0; f < 6; f++) {
+        int color = f;
+        for (int r = 0; r < env->N; r++) {
+            for (int c = 0; c < env->N; c++) {
+                if (STICKER(env, f, r, c) != color) {
+                    return 0; 
+                }
+            }
+        }
+    }
+    return 1; 
+}
+
+void print_stickers(Cube* env) {
+    for (int f=0;f<6; f++) {
+        printf("Face %d:\n", f);
+        for (int r=0; r<env->N; r++) {
+            for (int c=0; c<env->N; c++) {
+                printf("%d ", STICKER(env,f,r,c));
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+}
+
+
+
 // Required function
 void c_reset(Cube* env) {
 
@@ -184,37 +367,338 @@ void c_reset(Cube* env) {
     compute_observations(env);
 }
 
-// Required function
-void c_step(Cube* env) {
 
+void print_strips(Cube *env) {
+    const char *names[6] = {"U","D","R","L","F","B"};
+    for (int f=0; f<6; f++) {
+        printf("Face %s strips:\n", names[f]);
+        for (int s=0; s<4; s++) {
+            printf("  Strip %d: ", s);
+            for (int k=0; k<env->N; k++) {
+                int r = env->strips[f][s].row + env->strips[f][s].dr * k;
+                int c = env->strips[f][s].col + env->strips[f][s].dc * k;
+                printf("(%d,%d,%d) ", env->strips[f][s].face, r, c);
+            }
+            printf("\n");
+        }
+    }
+}
+// --- test harness ---
+void test_moves(Cube *env) {
+    const char *names[6] = {"U","D","R","L","F","B"};
+
+    reset_stickers(env);
+    printf("Initial (solved):\n");
+    print_stickers(env);
+
+    for (int f=0; f<6; f++) {
+        printf("\n=== Test face %s ===\n", names[f]);
+
+        // apply one clockwise turn
+        move(env, f, +1);
+        printf("After %s:\n", names[f]);
+        print_stickers(env);
+
+        // undo with 3 clockwise (equivalent to one counter-clockwise)
+        move(env, f, +3);
+        printf("After %s + %s':\n", names[f], names[f]);
+        print_stickers(env);
+
+        // check restored
+        if (!is_solved(env))
+            printf("ERROR: %s rotation did not restore\n", names[f]);
+        else
+            printf("OK: %s rotation restores cube\n", names[f]);
+    }
+}
+
+
+//RENDER STUFF
+//
+//
+//
+
+
+
+
+
+static inline Vector3 axis_vector(int axis) {
+    return (axis==0)? (Vector3){1,0,0} :
+           (axis==1)? (Vector3){0,1,0} :
+                      (Vector3){0,0,1};
+}
+
+static inline int in_layer(Vector3 pos, int axis, int layer, int N) {
+    float half = (N - 1) / 2.0f;
+    // spacing must match cubelet spacing in c_render
+    float spacing = 1.1f;
+    int coord = (axis==0)? (int)roundf(pos.x/spacing + half) :
+                (axis==1)? (int)roundf(pos.y/spacing + half) :
+                           (int)roundf(pos.z/spacing + half);
+    return coord == layer;
+}
+
+
+#include "rlgl.h"
+
+static void DrawQuad(Vector3 v1, Vector3 v2, Vector3 v3, Vector3 v4, Color color) {
+    rlBegin(RL_QUADS);
+        rlColor4ub(color.r, color.g, color.b, color.a);
+        rlVertex3f(v1.x, v1.y, v1.z);
+        rlVertex3f(v2.x, v2.y, v2.z);
+        rlVertex3f(v3.x, v3.y, v3.z);
+        rlVertex3f(v4.x, v4.y, v4.z);
+    rlEnd();
+}
+
+void DrawCubelet(Vector3 pos, float size, Color faceColors[6]) {
+    float h = size * 0.5f;
+
+    // +X
+    DrawQuad(
+        (Vector3){pos.x+h, pos.y-h, pos.z+h},
+        (Vector3){pos.x+h, pos.y-h, pos.z-h},
+        (Vector3){pos.x+h, pos.y+h, pos.z-h},
+        (Vector3){pos.x+h, pos.y+h, pos.z+h},
+        faceColors[0]);
+
+    // -X
+    DrawQuad(
+        (Vector3){pos.x-h, pos.y-h, pos.z-h},
+        (Vector3){pos.x-h, pos.y-h, pos.z+h},
+        (Vector3){pos.x-h, pos.y+h, pos.z+h},
+        (Vector3){pos.x-h, pos.y+h, pos.z-h},
+        faceColors[1]);
+
+    // +Y
+    DrawQuad(
+        (Vector3){pos.x-h, pos.y+h, pos.z+h},
+        (Vector3){pos.x+h, pos.y+h, pos.z+h},
+        (Vector3){pos.x+h, pos.y+h, pos.z-h},
+        (Vector3){pos.x-h, pos.y+h, pos.z-h},
+        faceColors[2]);
+
+    // -Y
+    DrawQuad(
+        (Vector3){pos.x-h, pos.y-h, pos.z-h},
+        (Vector3){pos.x+h, pos.y-h, pos.z-h},
+        (Vector3){pos.x+h, pos.y-h, pos.z+h},
+        (Vector3){pos.x-h, pos.y-h, pos.z+h},
+        faceColors[3]);
+
+    // +Z
+    DrawQuad(
+        (Vector3){pos.x-h, pos.y-h, pos.z+h},
+        (Vector3){pos.x+h, pos.y-h, pos.z+h},
+        (Vector3){pos.x+h, pos.y+h, pos.z+h},
+        (Vector3){pos.x-h, pos.y+h, pos.z+h},
+        faceColors[4]);
+
+    // -Z
+    DrawQuad(
+        (Vector3){pos.x+h, pos.y-h, pos.z-h},
+        (Vector3){pos.x-h, pos.y-h, pos.z-h},
+        (Vector3){pos.x-h, pos.y+h, pos.z-h},
+        (Vector3){pos.x+h, pos.y+h, pos.z-h},
+        faceColors[5]);
+}
+
+
+/*static void rotate_layer_indices(Cubelet_r *cubelets, int total, int N,
+                                 int axis, int layer, int dir) {
+    for (int i=0; i<total; i++) {
+        int x = cubelets[i].ix;
+        int y = cubelets[i].iy;
+        int z = cubelets[i].iz;
+
+        if ((axis==0 && x==layer) ||
+            (axis==1 && y==layer) ||
+            (axis==2 && z==layer)) {
+
+            int nx=x, ny=y, nz=z;
+            if (axis==0) { // rotate around X
+                ny = (dir>0) ? (N-1 - z) : z;
+                nz = (dir>0) ? y         : (N-1 - y);
+            } else if (axis==1) { // rotate around Y
+                nx = (dir>0) ? z         : (N-1 - z);
+                nz = (dir>0) ? (N-1 - x) : x;
+            } else { // axis==2
+                nx = (dir>0) ? (N-1 - y) : y;
+                ny = (dir>0) ? x         : (N-1 - x);
+            }
+            cubelets[i].ix = nx;
+            cubelets[i].iy = ny;
+            cubelets[i].iz = nz;
+        }
+    }
+}*/
+
+
+
+// Required function. Should handle creating the client on first call
+
+void c_render(Cube* env) {
+    static int initialized = 0;
+    static Camera camera;
+
+    float half = (env->N - 1) / 2.0f;
+    float spacing = 1.1f;
+
+     // Standard across our envs so exiting is always the same
+    if (IsKeyDown(KEY_ESCAPE)) {
+        exit(0);
+    }
+
+    if (!initialized) {
+        if (!IsWindowReady()) {
+            InitWindow(800, 600, "PufferLib Rubik's");
+            SetTargetFPS(60);
+        }
+
+        camera.position = (Vector3){10.0f,10.0f,10.0f};
+        camera.target   = (Vector3){0.0f,0.0f,0.0f};
+        camera.up       = (Vector3){0.0f,1.0f,0.0f};
+        camera.fovy     = 45.0f;
+        camera.projection = CAMERA_PERSPECTIVE;
+
+        initialized = 1;
+    }
+
+    BeginDrawing();
+    ClearBackground((Color){6,24,24,255});
+    BeginMode3D(camera);
+    UpdateCamera(&camera, CAMERA_THIRD_PERSON);
+
+    for (int x=0; x<env->N; x++) {
+        for (int y=0; y<env->N; y++) {
+            for (int z=0; z<env->N; z++) {
+
+                Vector3 pos = (Vector3){
+                    (x-half)*spacing,
+                    (y-half)*spacing,
+                    (z-half)*spacing
+                };
+
+                Color faces[6] = { BLACK, BLACK, BLACK, BLACK, BLACK, BLACK };
+
+                // Right (+X)
+                if (x == env->N - 1)
+                    faces[0] = sticker_colors[ STICKER(env, R, env->N - 1 - y, z) ];
+                // Left (−X)
+                if (x == 0)
+                    faces[1] = sticker_colors[ STICKER(env, L, env->N - 1 - y,  z) ];
+                // Up (+Y)
+                if (y == env->N - 1)
+                    faces[2] = sticker_colors[ STICKER(env, U, env->N-1-z, x) ];
+                // Down (−Y)
+                if (y == 0)
+                    faces[3] = sticker_colors[ STICKER(env, D, z, x) ];
+                // Front (+Z)
+                if (z == env->N - 1)
+                    faces[4] = sticker_colors[ STICKER(env, F, env->N - 1 - y, x) ];
+                // Back (−Z)
+                if (z == 0)
+                    faces[5] = sticker_colors[ STICKER(env, B, env->N - 1 - y, env->N - 1 - x) ];
+
+                rlPushMatrix();
+                // rotate only the turning layer while animating
+                if (anim.rotating && in_layer(pos, anim.axis, anim.layer, env->N)) {
+                    Vector3 axis = axis_vector(anim.axis);
+                    rlRotatef(anim.dir * (anim.elapsed / anim.duration) * 90.0f,
+                              axis.x, axis.y, axis.z);
+                }
+                rlTranslatef(pos.x, pos.y, pos.z);
+                DrawCubelet((Vector3){0,0,0}, 1.0f, faces);
+                rlPopMatrix();
+            }
+        }
+    }
+
+    EndMode3D();
+    char buf[50];
+    snprintf(buf, sizeof(buf), "Tick %d", env->tick);
+    DrawText(buf, 10, 10, 20, WHITE);
+
+    snprintf(buf, sizeof(buf), "Score %.2f", env->score);
+    DrawText(buf, 10, 40, 20, WHITE);
+
+    EndDrawing();
+}
+
+// Required function
+
+
+void c_step(Cube* env) {
     env->rewards[0] = 0;
     env->terminals[0] = 0;
     env->tick += 1;
+
     int face, turns;
     decode_action(env->actions[0], &face, &turns);
-    move(env, face, turns);
+    printf("Action: face=%d turns=%d\n", face, turns);
+    printf("Before move:\n");
+    print_stickers(env);
 
-    //main below
-    //
-    //
-    //Then update reward and terminals as needed
-    //env->rewards[0] = ...;
-    //env->terminals[0] = ...;
-    //env->score += env->rewards[0];
+    int dir = (turns > 0) ? +1 : -1;
+    anim.dir = dir;
+    if (face == U || face == R || face == F)
+      anim.dir = -dir;
+
+   
+    if (rendering_enabled()) {
+        anim.rotating = 1;
+        anim.axis     = (face==U||face==D) ? 1 : (face==L||face==R) ? 0 : 2;
+        anim.layer    = (face==U||face==R||face==F) ? env->N-1 : 0;
+        anim.elapsed  = 0.0f;
+        anim.duration = 2.0f; // seconds per move
+
+        // animate with OLD stickers
+        while (anim.elapsed < anim.duration) {
+            if (WindowShouldClose()) break;
+            anim.elapsed += GetFrameTime();
+            c_render(env);
+        }
+
+        // only now commit the move
+        move(env, face, turns);
+        anim.rotating = 0;
+    } else {
+        // no animation, just commit directly
+        move(env, face, turns);
+    }
+    c_render(env);
+
+    printf("After move:\n");
+    print_stickers(env);
+
+    env->score = score(env);
+    env->rewards[0] -= 1.0f;
+
+    if (is_solved(env)) {
+        env->terminals[0] = 1;
+        env->rewards[0] = 1.0f;
+        add_log(env);
+        c_reset(env);
+        return;
+    }
+    if (env->tick >= env->max_episode_steps) {
+        env->terminals[0] = 1;
+        add_log(env);
+        c_reset(env);
+        return;
+    }
+
     compute_observations(env);
 }
 
-// Required function. Should handle creating the client on first call
-void c_render(Cube* env) {
- 
-    EndDrawing();
-}
+
 
 // Required function. Should clean up anything you allocated
 // Do not free env->observations, actions, rewards, terminals
 void c_close(Cube* env) {
     //free memory you allocated in init
     free(env->stickers);
+    free(env->cubelets);
    if (IsWindowReady()) {
         CloseWindow();      
     }

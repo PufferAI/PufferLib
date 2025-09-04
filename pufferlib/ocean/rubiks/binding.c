@@ -8,6 +8,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->shuffles = unpack(kwargs, "shuffles;");
     env->obs_type = unpack(kwargs, "obs_type;");
     env->size = unpack(kwargs, "size;");
+    env->max_episode_steps = unpack(kwargs, "max_episode_steps;");
     init(env);
     return 0;
 }

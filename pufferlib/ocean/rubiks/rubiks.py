@@ -14,7 +14,8 @@ class Cube(pufferlib.PufferEnv):
                  N=3,
                  shuffles = 1,
                  obs_type='basic',
-                 buf=None, 
+                 buf=None,
+                 max_steps = 1000
                  seed=0):
 
         if obs_type == 'basic':
@@ -42,7 +43,8 @@ class Cube(pufferlib.PufferEnv):
                                        obs_type = obs_type,
                                        size = self.size,
                                        seed= seed,
-                                       num_envs = num_envs)
+                                       num_envs = num_envs
+                                       max_episode_steps = max_steps)
                         
                   
      
