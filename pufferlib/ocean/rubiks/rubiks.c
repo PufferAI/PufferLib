@@ -5,6 +5,7 @@
  * get faster builds and better error messages
  */
 #include "rubiks.h"
+#include <unistd.h>
 
 /* Puffernet is our lightweight cpu inference library that
  * lets you load basic PyTorch model architectures so that
@@ -48,7 +49,7 @@ int main() {
         a++;
 
         }*/
-   env.actions[0] = 1;
+   /*env.actions[0] = 1;
     c_step(&env);
     env.actions[0] = 0;
     c_step(&env);
@@ -72,7 +73,50 @@ int main() {
     env.actions[0] =10;
     c_step(&env);
     env.actions[0] =11;
+    c_step(&env);*/
+    /*int acts[25];
+    int act;
+    for (int i=0; i<5; i++) {
+             act = rand() % 12;
+             acts[i] = act;
+             env.actions[0] = act;
+             c_step(&env);
+    }*/
+   /*for (int f =0; f<12; f++){
+        for (int i=0; i<5; i++) {
+                 env.actions[0] = f;
+                 c_step(&env);
+        }
+}*/
+
+    // for (int i=0; i<25; i++) {
+    //     printf("Action %d\n", acts[i]);
+    // }
+    // printf("Final state:\n");
+    // print_stickers(&env);
+
+    /*env.actions[0] = 8;
     c_step(&env);
+    sleep(2);
+    env.actions[0] = 4;
+    c_step(&env);
+    sleep(2);
+    env.actions[0] = 8;
+    c_step(&env);
+    sleep(2);*/
+    /*for (int i=0; i<12;i++) {
+        env.actions[0] = i;
+        c_step(&env);
+        i++;
+    }*/
+
+   int actions[] = {0,2,4,6,8,10,4,6,10};
+int n = sizeof(actions) / sizeof(actions[0]);
+for (int i = 0; i < n; i++) {
+    env.actions[0] = actions[i];
+    c_step(&env);
+}
+
 
    // print_strips(&env);
     //test_moves(&env);

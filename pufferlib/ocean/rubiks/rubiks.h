@@ -639,19 +639,31 @@ void c_step(Cube* env) {
     printf("Before move:\n");
     print_stickers(env);
 
-    int dir = (turns > 0) ? +1 : -1;
-    anim.dir = dir;
-    if (face == U || face == R || face == F)
-      anim.dir = -dir;
 
-   
+
+    //printf("ENTER c_step tick=%d\n", env->tick);
+
+    //anim.dir = dir;
+    //if (face == U || face == R || face == F)
+     //anim.dir = -dir;
+     
+    // Faces: U=0, D=1, R=2, L=3, F=4, B=5
+    //
+    //
+    static const int FACE_AXIS[6]  = {1, 1, 0, 0, 2, 2};          // Y,Y,X,X,Z,Z
+    static const int FACE_LAYER[6] = {1, 0, 1, 0, 1, 0};          // 1->N-1, 0->0
+    static const int FACE_SIGN[6]  = {+1,+1,-1,+1,-1,+1};         // anim sign
+    int dir = (turns > 0) ? +1 : -1;
+
     if (rendering_enabled()) {
+
         anim.rotating = 1;
-        anim.axis     = (face==U||face==D) ? 1 : (face==L||face==R) ? 0 : 2;
-        anim.layer    = (face==U||face==R||face==F) ? env->N-1 : 0;
+        anim.axis     = FACE_AXIS[face];
+        anim.layer    = FACE_LAYER[face] ? env-> N-1 : 0 ;
+        anim.dir      = FACE_SIGN[face] * dir;
         anim.elapsed  = 0.0f;
         anim.duration = 2.0f; // seconds per move
-
+                                                     //
         // animate with OLD stickers
         while (anim.elapsed < anim.duration) {
             if (WindowShouldClose()) break;
@@ -666,7 +678,7 @@ void c_step(Cube* env) {
         // no animation, just commit directly
         move(env, face, turns);
     }
-    c_render(env);
+    //c_render(env);
 
     printf("After move:\n");
     print_stickers(env);
@@ -674,13 +686,13 @@ void c_step(Cube* env) {
     env->score = score(env);
     env->rewards[0] -= 1.0f;
 
-    if (is_solved(env)) {
+    /*if (is_solved(env)) {
         env->terminals[0] = 1;
         env->rewards[0] = 1.0f;
         add_log(env);
         c_reset(env);
         return;
-    }
+    }*/
     if (env->tick >= env->max_episode_steps) {
         env->terminals[0] = 1;
         add_log(env);
