@@ -100,32 +100,37 @@ void add_log(Cube* env) {
 void precompute_strips(Cube *env) {
     int N = env->N;
 
-    
+   // face row col drow dcol 
     // FRONT (F): U row 0 → R col N-1 → D row N-1 → L col N-1
-    env->strips[F][0] = (strip_t){U, 0,   0,   0,  1};   // U row 0,   L→R  (edge near F)
-    env->strips[F][1] = (strip_t){R, 0,   N-1, 1,  0};   // R col N-1, T→B
-    env->strips[F][2] = (strip_t){D, N-1, 0,   0,  1};   // D row N-1, L→R  (edge near F)
-    env->strips[F][3] = (strip_t){L, N-1, N-1,-1, 0};   // L col N-1, B→T
-                                                         // 
-   
+     env->strips[F][0] = (strip_t){U, N-1, 0,   0,  1};   // U bottom row, L→R
+    env->strips[F][1] = (strip_t){R, 0,   0,   1,  0};   // R left col, T→B
+    env->strips[F][2] = (strip_t){D, 0,   N-1, 0, -1};   // D top row, R→L
+    env->strips[F][3] = (strip_t){L, N-1, N-1,-1,  0};   // L right col, B→T                                                       // 
+       
     // BACK (B): U back row → L left col → D top row → R left col  (clockwise, viewed from back)
-    env->strips[B][0] = (strip_t){U, N-1, N-1, 0, -1};   // U row N-1, R→L  (U back edge)
-    env->strips[B][1] = (strip_t){L, 0,    0,   1,  0};   // L col 0,   T→B
-    env->strips[B][2] = (strip_t){D, 0,    0,   0,  1};   // D row 0,   L→R  (D top edge)
-    env->strips[B][3] = (strip_t){R, 0,    0,   1,  0};   // R col 0,   T→B  (R back edge)
-
-    // UP (U): F top → R top → B top → L top  (clockwise, viewed from above)
-    env->strips[U][0] = (strip_t){F, 0, 0,   0,  1};   // F row 0, L→R
-    env->strips[U][1] = (strip_t){R, 0, 0,   0,  1};   // R row 0, L→R
-    env->strips[U][2] = (strip_t){B, 0, 0,   0,  1};   // B row 0, L→R   (not reversed)
-    env->strips[U][3] = (strip_t){L, 0, N-1, 0, -1};   // L row 0, R→L   (reversed)
+  // BACK (B): U top → L left → D bottom → R right  (clockwise, viewed from back)
+    env->strips[B][0] = (strip_t){U, 0,    N-1, 0, -1};   // U row 0,     R→L
+    env->strips[B][1] = (strip_t){L, 0,    0,   1,  0};   // L col 0,     T→B
+    env->strips[B][2] = (strip_t){D, N-1,  0,   0,  1};   // D row N-1,   L→R
+    env->strips[B][3] = (strip_t){R, N-1,  N-1, -1, 0};   // R col N-1,   B→T
+//UP
+ /* env->strips[U][0] = (strip_t){F, 0, 0,   0,  1};    // F top row, L→R
+    env->strips[U][1] = (strip_t){L, 0, N-1, 0, -1};    // L top row, R→L
+    env->strips[U][2] = (strip_t){B, 0, 0,   0,  1};    // B top row, L→R
+    env->strips[U][3] = (strip_t){R, 0, N-1, 0, -1};    // R top row, R→L*/
                                                         //
-    // DOWN (D): F bottom → R bottom → B bottom → L bottom
-    env->strips[D][0] = (strip_t){F, N-1, 0,   0, 1};      // F row N-1, L→R
-    env->strips[D][1] = (strip_t){R, N-1, 0,   0, 1};      // R row N-1, L→R
-    env->strips[D][2] = (strip_t){B, N-1, N-1, 0,-1};      // B row N-1, R→L
-    env->strips[D][3] = (strip_t){L, N-1, 0,   0, 1};      // L row N-1, L→R
+// UP face (looking down on U): cycle is F → L → B → R
+env->strips[U][0] = (strip_t){F, 0, 0,   0, +1};  // F top row, left→right
+env->strips[U][1] = (strip_t){L, 0, 0,   0, +1};  // L top row, left→right
+env->strips[U][2] = (strip_t){B, 0, 0,   0, +1};  // B top row, left→right
+env->strips[U][3] = (strip_t){R, 0, 0,   0, +1};  // R top row, left→right
 
+    // DOWN (D): F bottom → L bottom → B bottom → R bottom  (clockwise by your rule)
+    env->strips[D][0] = (strip_t){F, N-1, 0, 0, 1};  // F row N-1, L→R
+    env->strips[D][1] = (strip_t){L, N-1, 0, 0, 1};  // L row N-1, L→R
+    env->strips[D][2] = (strip_t){B, N-1, 0, 0, 1};  // B row N-1, L→R
+    env->strips[D][3] = (strip_t){R, N-1, 0, 0, 1};  // R row N-1, L→R
+   
   
     // RIGHT (R): U right → B left → D right → F right
     env->strips[R][0] = (strip_t){U, 0,   N-1, 1, 0};    // U col N-1, T→B
@@ -583,23 +588,22 @@ void c_render(Cube* env) {
 
                 // Right (+X)
                 if (x == env->N - 1)
-                    faces[0] = sticker_colors[ STICKER(env, R, env->N - 1 - y, z) ];
+                    faces[0] = sticker_colors[ STICKER(env, R, env->N - 1 - y, env->N - 1 - z) ];
                 // Left (−X)
                 if (x == 0)
-                    faces[1] = sticker_colors[ STICKER(env, L, env->N - 1 - y,  z) ];
+                    faces[1] = sticker_colors[ STICKER(env, L, env->N - 1 - y, z) ];
                 // Up (+Y)
                 if (y == env->N - 1)
-                    faces[2] = sticker_colors[ STICKER(env, U, env->N-1-z, x) ];
+                    faces[2] = sticker_colors[ STICKER(env, U, z, x) ];
                 // Down (−Y)
                 if (y == 0)
-                    faces[3] = sticker_colors[ STICKER(env, D, z, x) ];
+                    faces[3] = sticker_colors[ STICKER(env, D, env->N-1-z, x) ];
                 // Front (+Z)
                 if (z == env->N - 1)
                     faces[4] = sticker_colors[ STICKER(env, F, env->N - 1 - y, x) ];
                 // Back (−Z)
                 if (z == 0)
                     faces[5] = sticker_colors[ STICKER(env, B, env->N - 1 - y, env->N - 1 - x) ];
-
                 rlPushMatrix();
                 // rotate only the turning layer while animating
                 if (anim.rotating && in_layer(pos, anim.axis, anim.layer, env->N)) {
@@ -652,7 +656,7 @@ void c_step(Cube* env) {
     //
     static const int FACE_AXIS[6]  = {1, 1, 0, 0, 2, 2};          // Y,Y,X,X,Z,Z
     static const int FACE_LAYER[6] = {1, 0, 1, 0, 1, 0};          // 1->N-1, 0->0
-    static const int FACE_SIGN[6]  = {+1,+1,-1,+1,-1,+1};         // anim sign
+    static const int FACE_SIGN[6]  = {-1,-1,-1,+1,-1,+1};         // anim sign
     int dir = (turns > 0) ? +1 : -1;
 
     if (rendering_enabled()) {
