@@ -2,13 +2,14 @@
 name = "pufferlib"
 version = "3.0.0"
 description = "Fast and sane reinforcement learning"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 readme = {file = "README.md", content-type = "text/markdown"}
 license= {file = "LICENSE"}
 authors = [{ name = "Joseph Suarez", email = "jsuarez@puffer.ai" }]
 classifiers=[
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
