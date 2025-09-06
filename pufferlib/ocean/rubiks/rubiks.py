@@ -13,11 +13,12 @@ class Cube(pufferlib.PufferEnv):
                  render_mode=None, 
                  log_interval=128, 
                  N=3,
-                 shuffles = 1,
+                 shuffles = 0,
                  obs_type='basic',
                  buf=None,
                  max_steps = 1000,
-                 seed=0):
+                 seed=0,
+                 anim_time = 0.5):
 
         if obs_type == 'basic':
             self.single_observation_space = gymnasium.spaces.Box(low=0, 
@@ -46,7 +47,9 @@ class Cube(pufferlib.PufferEnv):
                                        shuffles = shuffles,
                                        N = N,
                                        size = self.size,
-                                       max_episode_steps = max_steps)
+                                       max_episode_steps = max_steps,
+                                       anim_time = anim_time
+                                       )
                         
                   
      
@@ -76,13 +79,13 @@ class Cube(pufferlib.PufferEnv):
         binding.vec_close(self.c_envs)
 
 if __name__ == '__main__':
-    N = 2
-    env = Cube(num_envs = N)
+    num_envs = 1
+    env = Cube(num_envs = num_envs)
     env.reset()
     steps = 0
-
+    env.render()
     CACHE = 1000
-    actions = np.random.randint(0, 12, (CACHE, N))
+    actions = np.random.randint(0, 12, (CACHE, num_envs))
    
     i = 0
     import time

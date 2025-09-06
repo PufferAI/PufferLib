@@ -47,6 +47,7 @@ typedef struct {
     Cubelet_r *cubelets; // for rendering
     int total_cubelets;
     int render; //global OpenGL window so only render if called but we need render stuff in step for the animation
+    float anim_time;
 } Cube;
 
 
@@ -510,34 +511,6 @@ void DrawCubelet(Vector3 pos, float size, Color faceColors[6]) {
 }
 
 
-/*static void rotate_layer_indices(Cubelet_r *cubelets, int total, int N,
-                                 int axis, int layer, int dir) {
-    for (int i=0; i<total; i++) {
-        int x = cubelets[i].ix;
-        int y = cubelets[i].iy;
-        int z = cubelets[i].iz;
-
-        if ((axis==0 && x==layer) ||
-            (axis==1 && y==layer) ||
-            (axis==2 && z==layer)) {
-
-            int nx=x, ny=y, nz=z;
-            if (axis==0) { // rotate around X
-                ny = (dir>0) ? (N-1 - z) : z;
-                nz = (dir>0) ? y         : (N-1 - y);
-            } else if (axis==1) { // rotate around Y
-                nx = (dir>0) ? z         : (N-1 - z);
-                nz = (dir>0) ? (N-1 - x) : x;
-            } else { // axis==2
-                nx = (dir>0) ? (N-1 - y) : y;
-                ny = (dir>0) ? x         : (N-1 - x);
-            }
-            cubelets[i].ix = nx;
-            cubelets[i].iy = ny;
-            cubelets[i].iz = nz;
-        }
-    }
-}*/
 
 
 
@@ -575,6 +548,55 @@ void c_render(Cube* env) {
     ClearBackground((Color){6,24,24,255});
     BeginMode3D(camera);
     UpdateCamera(&camera, CAMERA_THIRD_PERSON);
+
+    //BACKGROUND
+    //
+    float size = 20.0f;   // half-size of the room
+    int steps = 20;       // subdivisions per wall
+    float step = (2*size) / steps;
+    Color cyan = (Color){0,255,255,255};
+
+    // XY planes at z = ±size
+    for (int i = 0; i <= steps; i++) {
+        float x = -size + i*step;
+        DrawLine3D((Vector3){x,-size,-size}, (Vector3){x,size,-size}, cyan);
+        DrawLine3D((Vector3){x,-size, size}, (Vector3){x,size, size}, cyan);
+    }
+    for (int j = 0; j <= steps; j++) {
+        float y = -size + j*step;
+        DrawLine3D((Vector3){-size,y,-size}, (Vector3){ size,y,-size}, cyan);
+        DrawLine3D((Vector3){-size,y, size}, (Vector3){ size,y, size}, cyan);
+    }
+
+    // XZ planes at y = ±size
+    for (int i = 0; i <= steps; i++) {
+        float x = -size + i*step;
+        DrawLine3D((Vector3){x,-size,-size}, (Vector3){x,-size, size}, cyan);
+        DrawLine3D((Vector3){x, size,-size}, (Vector3){x, size, size}, cyan);
+    }
+    for (int j = 0; j <= steps; j++) {
+        float z = -size + j*step;
+        DrawLine3D((Vector3){-size,-size,z}, (Vector3){ size,-size,z}, cyan);
+        DrawLine3D((Vector3){-size, size,z}, (Vector3){ size, size,z}, cyan);
+    }
+
+    // YZ planes at x = ±size
+    for (int i = 0; i <= steps; i++) {
+        float y = -size + i*step;
+        DrawLine3D((Vector3){-size,y,-size}, (Vector3){-size,y, size}, cyan);
+        DrawLine3D((Vector3){ size,y,-size}, (Vector3){ size,y, size}, cyan);
+    }
+    for (int j = 0; j <= steps; j++) {
+        float z = -size + j*step;
+        DrawLine3D((Vector3){-size,-size,z}, (Vector3){-size, size,z}, cyan);
+        DrawLine3D((Vector3){ size,-size,z}, (Vector3){ size, size,z}, cyan);
+    }
+    
+
+
+
+
+    //CUBE
 
     for (int x=0; x<env->N; x++) {
         for (int y=0; y<env->N; y++) {
@@ -668,7 +690,7 @@ void c_step(Cube* env) {
         anim.layer    = FACE_LAYER[face] ? env-> N-1 : 0 ;
         anim.dir      = FACE_SIGN[face] * dir;
         anim.elapsed  = 0.0f;
-        anim.duration = 1.0f; // seconds per move
+        anim.duration = env->anim_time; // seconds per move
                                                      //
         // animate with OLD stickers
         while (anim.elapsed < anim.duration) {
