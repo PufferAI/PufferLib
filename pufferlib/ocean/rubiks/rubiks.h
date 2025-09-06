@@ -42,7 +42,6 @@ typedef struct {
     int N; // size of cube NxNxN
     int size;
     int shuffles; // number of random moves to shuffle at reset
-    char obs_type[10];
     int *stickers; // 6xNxN stickers
     strip_t strips[6][4]; // Precomputed strips for each face
     Cubelet_r *cubelets; // for rendering
@@ -167,8 +166,8 @@ void init(Cube* env) {
         }
 }
 
-fprintf(stderr, "sizeof(Cube)=%zu sizeof(strip_t)=%zu\n",
-        sizeof(Cube), sizeof(strip_t));
+//fprintf(stderr, "sizeof(Cube)=%zu sizeof(strip_t)=%zu\n",
+       // sizeof(Cube), sizeof(strip_t));
 
 }
 
@@ -639,9 +638,9 @@ void c_step(Cube* env) {
 
     int face, turns;
     decode_action(env->actions[0], &face, &turns);
-    printf("Action: face=%d turns=%d\n", face, turns);
-    printf("Before move:\n");
-    print_stickers(env);
+    //printf("Action: face=%d turns=%d\n", face, turns);
+    //printf("Before move:\n");
+    //print_stickers(env);
 
 
 
@@ -666,7 +665,7 @@ void c_step(Cube* env) {
         anim.layer    = FACE_LAYER[face] ? env-> N-1 : 0 ;
         anim.dir      = FACE_SIGN[face] * dir;
         anim.elapsed  = 0.0f;
-        anim.duration = 2.0f; // seconds per move
+        anim.duration = 1.0f; // seconds per move
                                                      //
         // animate with OLD stickers
         while (anim.elapsed < anim.duration) {
@@ -684,8 +683,8 @@ void c_step(Cube* env) {
     }
     //c_render(env);
 
-    printf("After move:\n");
-    print_stickers(env);
+   // printf("After move:\n");
+   // print_stickers(env);
 
     env->score = score(env);
     env->rewards[0] -= 1.0f;

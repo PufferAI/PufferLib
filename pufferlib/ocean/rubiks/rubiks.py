@@ -8,18 +8,19 @@ from pufferlib.ocean.rubiks import binding
 
 class Cube(pufferlib.PufferEnv):
     def __init__(self, 
-                 num_envs=1,
+                 num_envs=2,
+                 num_agents=1,
                  render_mode=None, 
                  log_interval=128, 
                  N=3,
                  shuffles = 1,
                  obs_type='basic',
                  buf=None,
-                 max_steps = 1000
+                 max_steps = 1000,
                  seed=0):
 
         if obs_type == 'basic':
-            self.single_observations_space = gymnasium.spaces.Box(low=0, 
+            self.single_observation_space = gymnasium.spaces.Box(low=0, 
                                                                  high=1, 
                                                                  shape=(6, N, N, 6), #faces, height, width, colours
                                                                  dtype=np.float32) 
@@ -27,23 +28,24 @@ class Cube(pufferlib.PufferEnv):
             raise NotImplementedError(f'Cublets not yet implemented: {obs_type}')
 
         self.single_action_space = gymnasium.spaces.Discrete(12) # 6 faces, clockwise and anticlockwise
-
-
+        self.num_envs = num_envs
+        self.seed = seed
+        self.num_envs = num_envs
+        self.num_agents=num_envs
         self.render_mode = render_mode
         self.log_interval = log_interval
-        self.size = np.prod(self.single_observations_space.shape)
+        self.size = int(np.prod(self.single_observation_space.shape))
         super().__init__(buf)
-        self.c_envs = binding.env_init(self.observations,
+        self.c_envs = binding.vec_init(self.observations,
                                        self.actions,
                                        self.rewards,
                                        self.terminals,
                                        self.truncations,
+                                       num_envs,
+                                       seed,
                                        shuffles = shuffles,
                                        N = N,
-                                       obs_type = obs_type,
                                        size = self.size,
-                                       seed= seed,
-                                       num_envs = num_envs
                                        max_episode_steps = max_steps)
                         
                   
@@ -74,15 +76,15 @@ class Cube(pufferlib.PufferEnv):
         binding.vec_close(self.c_envs)
 
 if __name__ == '__main__':
-    N = 512
-
-    env = Cube(num_envs=N)
+    N = 1
+    env = Cube(num_envs = N)
     env.reset()
+    env.render()
     steps = 0
 
-    CACHE = 1024
-    actions = np.random.randint(env.single_action_space.nvec, size=(CACHE, 2))
-
+    CACHE = 20
+    actions = np.random.randint(0, 12, (CACHE, N))
+   
     i = 0
     import time
     start = time.time()
@@ -91,4 +93,4 @@ if __name__ == '__main__':
         steps += env.num_agents
         i += 1
 
-    print('Target SPS:', int(steps / (time.time() - start)))
+    print('Rubiks SPS:', int(steps / (time.time() - start)))
