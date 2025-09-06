@@ -46,6 +46,7 @@ typedef struct {
     strip_t strips[6][4]; // Precomputed strips for each face
     Cubelet_r *cubelets; // for rendering
     int total_cubelets;
+    int render; //global OpenGL window so only render if called but we need render stuff in step for the animation
 } Cube;
 
 
@@ -153,6 +154,7 @@ void init(Cube* env) {
     env->cubelets = NULL;
     env->total_cubelets = 0;
     precompute_strips(env);
+    env->render = 0;
     
     for (int f = 0; f < 6; f++) {
         for (int s = 0; s < 4; s++) {
@@ -308,9 +310,9 @@ static inline void decode_action(int action, int *face, int *turns) {
     *turns = (action % 2 == 0) ? +1 : -1;
 }
 
-static inline bool rendering_enabled(void) {
+/*static inline bool rendering_enabled(void) {
     return IsWindowReady();
-}
+}*/
 
 float score(Cube* env) {
 
@@ -542,6 +544,7 @@ void DrawCubelet(Vector3 pos, float size, Color faceColors[6]) {
 // Required function. Should handle creating the client on first call
 
 void c_render(Cube* env) {
+    env->render = 1;
     static int initialized = 0;
     static Camera camera;
 
@@ -658,7 +661,7 @@ void c_step(Cube* env) {
     static const int FACE_SIGN[6]  = {-1,-1,-1,+1,-1,+1};         // anim sign
     int dir = (turns > 0) ? +1 : -1;
 
-    if (rendering_enabled()) {
+    if (env->render) {
 
         anim.rotating = 1;
         anim.axis     = FACE_AXIS[face];

@@ -76,13 +76,12 @@ class Cube(pufferlib.PufferEnv):
         binding.vec_close(self.c_envs)
 
 if __name__ == '__main__':
-    N = 1
+    N = 2
     env = Cube(num_envs = N)
     env.reset()
-    env.render()
     steps = 0
 
-    CACHE = 20
+    CACHE = 1000
     actions = np.random.randint(0, 12, (CACHE, N))
    
     i = 0
