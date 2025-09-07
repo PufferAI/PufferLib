@@ -6,7 +6,7 @@ import pufferlib
 
 from omegaconf import OmegaConf
 from metta.mettagrid.mettagrid_env import MettaGridEnv
-from metta.mettagrid.config.envs import make_arena
+from metta.mettagrid.builder.envs import make_arena
 
 def env_creator(name='metta'):
     return functools.partial(make, name)
