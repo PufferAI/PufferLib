@@ -6,12 +6,64 @@
  */
 #include "rubiks.h"
 #include <unistd.h>
+#include <string.h>
 
 /* Puffernet is our lightweight cpu inference library that
  * lets you load basic PyTorch model architectures so that
  * you can run them in pure C or on the web via WASM
  */
 #include "puffernet.h"
+
+
+//For checks when we break stuff
+
+int compare_logs(const char *ref_path, const char *new_path) {
+    FILE *ref = fopen(ref_path, "r");
+    FILE *newf = fopen(new_path, "r");
+    if (!ref || !newf) {
+        perror("fopen");
+        return -1;
+    }
+
+    char a[512], b[512];
+    int line = 1;
+    int diff_found = 0;
+
+    while (1) {
+        char *ra = fgets(a, sizeof a, ref);
+        char *rb = fgets(b, sizeof b, newf);
+
+        if (!ra || !rb) {
+            if (ra != rb) {
+                printf("Length mismatch starting at line %d\n", line);
+                diff_found = 1;
+            }
+            break;
+        }
+
+        if (strcmp(a, b) != 0) {
+            printf("Line %d differs:\n", line);
+            printf("  ref: %s", a);
+            printf("  new: %s", b);
+            diff_found = 1;
+        }
+        line++;
+    }
+
+    fclose(ref);
+    fclose(newf);
+
+    if (remove(new_path) != 0) {
+        perror("remove");
+    }
+
+    if (!diff_found) {
+        printf("Logs match exactly\n");
+        return 0;
+    } else {
+        return 1;
+    }
+}
 
 int main() {
     int N = 3;
@@ -25,7 +77,6 @@ int main() {
     };
     init(&env);
 
-    // Allocate these manually since they aren't being passed from Python
     env.observations = calloc(num_obs, sizeof(float));
     env.actions = calloc(12, sizeof(int));
     env.rewards = calloc(1, sizeof(float));
@@ -33,86 +84,32 @@ int main() {
     env.max_episode_steps = 1000;
     
 
-    // Always call reset and render first
     c_reset(&env);
-   // check_face_mapping_bijection(&env);
-    //check_projection_solved(&env);
-    //
-   
-   c_render(&env);
+    c_render(&env);
 
-   /* int a=0;
+    //TESTING
+
+    FILE *log = fopen("stickers_checking.log", "a");
+
     for (int i=0; i<12; i++) {
-        printf("Action %d\n", a);
-        env.actions[0] = a:;
-        c_step(&env);
-        a++;
-        }*/
-    /*env.actions[0] = 0;
+    print_stickers_file(&env, log);
+    env.actions[0] = 0;
     c_step(&env);
-    env.actions[0] = 1;
-    c_step(&env);
+    fprintf(log, "Step %d\n", i);
+    print_stickers_file(&env, log);
+}
+    fclose(log);
 
-    env.actions[0] =2;
-    c_step(&env);
-    env.actions[0] =3;
-    c_step(&env);
-    env.actions[0] =4;
-    c_step(&env);       
-    env.actions[0] =5;
-    c_step(&env);
-    env.actions[0] =6;
-    c_step(&env);
-    env.actions[0] =7;
-    c_step(&env);
-    env.actions[0] =8;      
-    c_step(&env);
-    env.actions[0] =9;
-    c_step(&env);
-    env.actions[0] =10;
-    c_step(&env);
-    env.actions[0] =11;
-    c_step(&env);*/
-   int act;
-    for (int i=0; i<30; i++) {
-             act = rand() % 12;
-             env.actions[0] = act;
-             c_step(&env);
+
+    int res = compare_logs("pufferlib/ocean/rubiks/stickers.log", "stickers_checking.log");
+    if (res == 0) {
+        printf("Logs match\n");
+    } else {
+        printf("Logs differ\n");
     }
- 
 
-    
+    //END TESTING
 
-    /*env.actions[0] = 8;
-    c_step(&env);
-    sleep(2);
-    env.actions[0] = 4;
-    c_step(&env);
-    sleep(2);
-    env.actions[0] = 8;
-    c_step(&env);
-    sleep(2);*/
-    /*for (int i=0; i<12;i++) {
-        env.actions[0] = i;
-        c_step(&env);
-        i++;
-    }*/
-
-  /* int actions[] = {0,2,4,6,8,10,4,6,10};
-int n = sizeof(actions) / sizeof(actions[0]);
-for (int i = 0; i < n; i++) {
-    env.actions[0] = actions[i];
-    c_step(&env);
-}*/
-
-   /*env.actions[0] = 10;
-   c_step(&env);
-   env.actions[0] = 11;
-   c_step(&env);*/
-
-
-   // print_strips(&env);
-    //test_moves(&env);
    
     free(env.observations);
     free(env.actions);

@@ -307,17 +307,23 @@ int is_solved(Cube *env) {
     return 1; 
 }
 
-void print_stickers(Cube* env) {
-    for (int f=0;f<6; f++) {
-        printf("Face %d:\n", f);
+
+
+void print_stickers_file(Cube* env, FILE *out) {
+    for (int f=0; f<6; f++) {
+        fprintf(out, "Face %d:\n", f);
         for (int r=0; r<env->N; r++) {
             for (int c=0; c<env->N; c++) {
-                printf("%d ", STICKER(env,f,r,c));
+                fprintf(out, "%d ", STICKER(env,f,r,c));
             }
-            printf("\n");
+            fprintf(out, "\n");
         }
-        printf("\n");
+        fprintf(out, "\n");
     }
+}
+
+void print_stickers(Cube* env) {
+    print_stickers_file(env, stdout);
 }
 
 
