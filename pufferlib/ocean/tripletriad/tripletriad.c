@@ -23,6 +23,7 @@ void interactive() {
 
     int tick = 0;
     int action;
+    srand(time(NULL));
     while (!WindowShouldClose()) {
         action = NOOP;
 
