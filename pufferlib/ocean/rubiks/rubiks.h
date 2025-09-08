@@ -1,9 +1,5 @@
 //Some code inspired by https://github.com/Princeton-RL/CRTR/blob/main/envs/rubik/gym_rubik/envs/cube.py
 
-
-//TODO:
-//layer highlight and user
-
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -60,6 +56,9 @@ typedef struct {
     int render; //global OpenGL window so only render if called but we need render stuff in step for the animation
     float anim_time;
     int user_mode;
+    int highlight_layer;
+    int highlight_axis;
+    float episode_return;
 } Cube;
 
 
@@ -94,7 +93,7 @@ void add_log(Cube* env) {
     env->log.perf += (env->rewards[0] > 0) ? 1 : 0;
     env->log.score += env->score;
     env->log.episode_length += env->tick;
-    env->log.episode_return += env->rewards[0];
+    env->log.episode_return += env->episode_return;
     env->log.n++;
 }
 
@@ -153,6 +152,9 @@ void init(Cube* env) {
     precompute_strips(env);
     env->render = 0;
     env->user_mode = 0;
+    env->highlight_axis = 0;  // 0=X,1=Y,2=Z
+    env->highlight_layer = 0;
+    env->anim_time = 0.5;
 }
 
 void reset_stickers(Cube* env) {
@@ -333,8 +335,9 @@ void c_reset(Cube* env) {
     memset(env->observations, 0, sizeof(float) * env->size); 
     reset_stickers(env); 
     shuffle(env, env->shuffles);
-    env -> tick = 0;
-    env -> score = 0;
+    env->tick = 0;
+    env->score = 0;
+    env->episode_return = 0;
     compute_observations(env);
 }
 
@@ -553,35 +556,36 @@ void c_render(Cube* env) {
         }
     }
     if (env->user_mode){
-        static int highlight_axis = 0;  // 0=X,1=Y,2=Z
-        static int highlight_layer = 0;
+       
         rlDisableDepthTest();
         rlDisableBackfaceCulling();
 
-            // change axis
-        if (IsKeyPressed(KEY_UP))    highlight_axis = (highlight_axis + 1) % 3;
-        if (IsKeyPressed(KEY_DOWN))  highlight_axis = (highlight_axis + 2) % 3;
+        // change axis
+        if (IsKeyPressed(KEY_UP))    env->highlight_axis = (env->highlight_axis + 1) % 3;
+        if (IsKeyPressed(KEY_DOWN))  env->highlight_axis = (env->highlight_axis + 2) % 3;
 
         // toggle between external layers
         if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_LEFT)) {
-            highlight_layer = (highlight_layer == 0) ? env->N - 1 : 0;
+            env->highlight_layer = (env->highlight_layer == 0) ? env->N - 1 : 0;
+
+
 }        // draw highlight
         float spacing = 1.1f;
         float half = (env->N-1)/2.0f;
-        float coord = (highlight_layer-half)*spacing;
+        float coord = (env->highlight_layer-half)*spacing;
         float extent = (env->N*spacing)/2.0f + 0.1f;
-        Color highlight = (Color){0,255,255,150}; // translucent yellow
+        Color highlight = (Color){0,255,255,100}; // translucent yellow
 
 
         float thickness = spacing;  // slab thickness
         Vector3 pos = {0,0,0};
         float dx = 2*extent, dy = 2*extent, dz = 2*extent;
 
-        if (highlight_axis == 0) {
+        if (env->highlight_axis == 0) {
             pos = (Vector3){coord, 0, 0};
             dx = thickness;   // thin along X
         }
-        else if (highlight_axis == 1) {
+        else if (env->highlight_axis == 1) {
             pos = (Vector3){0, coord, 0};
             dy = thickness;   // thin along Y
         }
@@ -694,6 +698,7 @@ void c_step(Cube* env) {
    if (is_solved(env)) {
        env->terminals[0] = 1;
        env->rewards[0] = 1.0f;
+       env->episode_return += env->rewards[0];
        add_log(env);
        c_reset(env);
        return;
@@ -701,11 +706,12 @@ void c_step(Cube* env) {
 
    if (env->tick >= env->max_episode_steps) {
        env->terminals[0] = 1;
+       env->episode_return += env->rewards[0];
        add_log(env);
        c_reset(env);
        return;
    }
-
+    env->episode_return += env->rewards[0];
     compute_observations(env);
 }
 
