@@ -88,6 +88,7 @@ int main() {
     c_render(&env);
 
     //TESTING
+    /*
 
     FILE *log = fopen("stickers_checking.log", "a");
 
@@ -107,10 +108,16 @@ int main() {
     } else {
         printf("Logs differ\n");
     }
-
+    */
     //END TESTING
-
-   
+    //
+    //
+    env.user_mode = 1;
+     while (!WindowShouldClose()) {
+            c_render(&env);
+        }
+      
+       
     free(env.observations);
     free(env.actions);
     free(env.rewards);

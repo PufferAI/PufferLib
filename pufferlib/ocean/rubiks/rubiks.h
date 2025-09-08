@@ -2,7 +2,6 @@
 
 
 //TODO:
-//tests
 //layer highlight and user
 
 #include <stdlib.h>
@@ -60,6 +59,7 @@ typedef struct {
     int total_cubelets;
     int render; //global OpenGL window so only render if called but we need render stuff in step for the animation
     float anim_time;
+    int user_mode;
 } Cube;
 
 
@@ -152,6 +152,7 @@ void init(Cube* env) {
     env->total_cubelets = 0;
     precompute_strips(env);
     env->render = 0;
+    env->user_mode = 0;
 }
 
 void reset_stickers(Cube* env) {
@@ -551,8 +552,89 @@ void c_render(Cube* env) {
             }
         }
     }
+    if (env->user_mode){
+        static int highlight_axis = 0;  // 0=X,1=Y,2=Z
+        static int highlight_layer = 0;
+        rlDisableDepthTest();
+        rlDisableBackfaceCulling();
 
+            // change axis
+        if (IsKeyPressed(KEY_UP))    highlight_axis = (highlight_axis + 1) % 3;
+        if (IsKeyPressed(KEY_DOWN))  highlight_axis = (highlight_axis + 2) % 3;
+
+        // toggle between external layers
+        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_LEFT)) {
+            highlight_layer = (highlight_layer == 0) ? env->N - 1 : 0;
+}        // draw highlight
+        float spacing = 1.1f;
+        float half = (env->N-1)/2.0f;
+        float coord = (highlight_layer-half)*spacing;
+        float extent = (env->N*spacing)/2.0f + 0.1f;
+        Color highlight = (Color){0,255,255,150}; // translucent yellow
+
+
+        float thickness = spacing;  // slab thickness
+        Vector3 pos = {0,0,0};
+        float dx = 2*extent, dy = 2*extent, dz = 2*extent;
+
+        if (highlight_axis == 0) {
+            pos = (Vector3){coord, 0, 0};
+            dx = thickness;   // thin along X
+        }
+        else if (highlight_axis == 1) {
+            pos = (Vector3){0, coord, 0};
+            dy = thickness;   // thin along Y
+        }
+        else {
+            pos = (Vector3){0, 0, coord};
+            dz = thickness;   // thin along Z
+        }
+        float hx = dx * 0.5f;
+        float hy = dy * 0.5f;
+        float hz = dz * 0.5f;
+
+        // +X
+        DrawQuad((Vector3){pos.x+hx, pos.y-hy, pos.z-hz},
+                 (Vector3){pos.x+hx, pos.y-hy, pos.z+hz},
+                 (Vector3){pos.x+hx, pos.y+hy, pos.z+hz},
+                 (Vector3){pos.x+hx, pos.y+hy, pos.z-hz}, highlight);
+
+        // -X
+        DrawQuad((Vector3){pos.x-hx, pos.y-hy, pos.z+hz},
+                 (Vector3){pos.x-hx, pos.y-hy, pos.z-hz},
+                 (Vector3){pos.x-hx, pos.y+hy, pos.z-hz},
+                 (Vector3){pos.x-hx, pos.y+hy, pos.z+hz}, highlight);
+
+        // +Y
+        DrawQuad((Vector3){pos.x-hx, pos.y+hy, pos.z-hz},
+                 (Vector3){pos.x+hx, pos.y+hy, pos.z-hz},
+                 (Vector3){pos.x+hx, pos.y+hy, pos.z+hz},
+                 (Vector3){pos.x-hx, pos.y+hy, pos.z+hz}, highlight);
+
+        // -Y
+        DrawQuad((Vector3){pos.x-hx, pos.y-hy, pos.z+hz},
+                 (Vector3){pos.x+hx, pos.y-hy, pos.z+hz},
+                 (Vector3){pos.x+hx, pos.y-hy, pos.z-hz},
+                 (Vector3){pos.x-hx, pos.y-hy, pos.z-hz}, highlight);
+
+        // +Z
+        DrawQuad((Vector3){pos.x-hx, pos.y-hy, pos.z+hz},
+                 (Vector3){pos.x+hx, pos.y-hy, pos.z+hz},
+                 (Vector3){pos.x+hx, pos.y+hy, pos.z+hz},
+                 (Vector3){pos.x-hx, pos.y+hy, pos.z+hz}, highlight);
+
+        // -Z
+        DrawQuad((Vector3){pos.x+hx, pos.y-hy, pos.z-hz},
+                 (Vector3){pos.x-hx, pos.y-hy, pos.z-hz},
+                 (Vector3){pos.x-hx, pos.y+hy, pos.z-hz},
+                 (Vector3){pos.x+hx, pos.y+hy, pos.z-hz}, highlight);
+       
+    rlEnableDepthTest();  
+    }
     EndMode3D();
+
+   
+    rlEnableBackfaceCulling();
     char buf[50];
     snprintf(buf, sizeof(buf), "Tick %d", env->tick);
     DrawText(buf, 10, 10, 20, WHITE);
