@@ -13,10 +13,10 @@ class Cube(pufferlib.PufferEnv):
                  render_mode=None, 
                  log_interval=128, 
                  N=3,
-                 shuffles = 0,
+                 shuffles =1,
                  obs_type='basic',
                  buf=None,
-                 max_steps = 1000,
+                 max_steps = 300,
                  seed=0,
                  anim_time = 0.5):
 
@@ -80,7 +80,8 @@ class Cube(pufferlib.PufferEnv):
 
 if __name__ == '__main__':
     num_envs = 1
-    env = Cube(num_envs = num_envs)
+    N = 5
+    env = Cube(N= N,num_envs = num_envs)
     env.reset()
     steps = 0
     env.render()
