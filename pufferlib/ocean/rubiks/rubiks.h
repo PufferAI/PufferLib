@@ -1,6 +1,7 @@
+//Some code inspired by https://github.com/Princeton-RL/CRTR/blob/main/envs/rubik/gym_rubik/envs/cube.py
+
 
 //TODO:
-//check score
 //tests
 //layer highlight and user
 
@@ -272,6 +273,7 @@ static inline void decode_action(int action, int *face, int *turns) {
     *turns = (action % 2 == 0) ? +1 : -1;
 }
 
+//Distnace from solved based on centre sticker as thr colour for that face
 float score(Cube* env) {
     float temp_score = 1.0f;
     for (int f=0;f<6; f++) {
@@ -289,6 +291,8 @@ float score(Cube* env) {
     return temp_score;
 }
 
+//NB in this code we dont move centre stickers so face colour = centre sticker as in score
+//This is a VERY rough heuristic
 int is_solved(Cube *env) {
     for (int f = 0; f < 6; f++) {
         int color = f;
