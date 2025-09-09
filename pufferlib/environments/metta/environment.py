@@ -1,17 +1,20 @@
 import functools
-from typing import Optional
+
+import gymnasium
 import numpy as np
 
+import pufferlib
 from metta.mettagrid.builder.envs import make_arena
-from metta.mettagrid.puffer_base import MettaGridPufferBase
+from metta.mettagrid.mettagrid_env import MettaGridEnv
 
 
 def env_creator(name="metta"):
     return functools.partial(make, name)
 
+
 def make(
     name,
-    config: Optional[str] = None,
+    config="pufferlib/environments/metta/metta.yaml",
     render_mode="auto",
     buf=None,
     seed=0,
@@ -64,33 +67,49 @@ def oc_divide(a, b):
     return result
 
 
-class MettaPuff(MettaGridPufferBase):
+class MettaPuff(MettaGridEnv):
     def __init__(self, env_cfg, render_mode="human", buf=None, seed=0):
-        # Initialize the parent PufferBase class
-        super().__init__(mg_config=env_cfg, render_mode=render_mode, buf=buf)
+        self.replay_writer = None
+        # if render_mode == 'auto':
+        #    self.replay_writer = ReplayWriter("metta/")
 
-        # Set seed if provided
-        if seed != 0:
-            self._current_seed = seed
-
-        # Ensure actions are int32 for PufferLib compatibility
+        super().__init__(env_cfg=env_cfg, render_mode=render_mode, replay_writer=self.replay_writer)
+        self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.num_agents)
         self.actions = self.actions.astype(np.int32)
+
+    @property
+    def single_action_space(self):
+        # Prefer exposing a flattened Discrete action space matching Metta's
+        # internal "full" action logits when we can determine the action
+        # parameterization. This keeps PufferLib's sampling path (which
+        # expects a single discrete action) compatible with Metta's joint
+        # action representation.
+        try:
+            # MettaGridEnv exposes `max_action_args` describing per-action
+            # parameter counts; the flattened action count is sum(max_param+1).
+            max_args = getattr(self, "max_action_args", None)
+            if max_args is not None:
+                total = int(sum([int(x) + 1 for x in max_args]))
+                # Return a 1-D MultiDiscrete so atn_shape is non-empty
+                # and the shared-memory actions buffer is 2-D (workers, agents, 1)
+                return gymnasium.spaces.MultiDiscrete([total], dtype=np.int32)
+        except Exception:
+            pass
+
+        # Fallback to previous behavior
+        return gymnasium.spaces.MultiDiscrete(super().single_action_space.nvec, dtype=np.int32)
 
     def step(self, actions):
         obs, rew, term, trunc, info = super().step(actions)
 
-        # Handle episode completion
         if all(term) or all(trunc):
-            # Note: MettaGridPufferBase handles auto-reset internally
-            # Clean up info dictionary if it exists
-            if isinstance(info, dict):
-                if "agent_raw" in info:
-                    del info["agent_raw"]
-                if "episode_rewards" in info:
-                    info["score"] = info["episode_rewards"]
-                return obs, rew, term, trunc, [info]
-            else:
-                return obs, rew, term, trunc, [{}]
+            self.reset()
+            if "agent_raw" in info:
+                del info["agent_raw"]
+            if "episode_rewards" in info:
+                info["score"] = info["episode_rewards"]
+
         else:
-            # Return empty info list for non-terminal steps
-            return obs, rew, term, trunc, []
+            info = []
+
+        return obs, rew, term, trunc, [info]
