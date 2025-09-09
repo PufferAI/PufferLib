@@ -9,7 +9,6 @@ from metta.mettagrid.puffer_base import MettaGridPufferBase
 def env_creator(name="metta"):
     return functools.partial(make, name)
 
-
 def make(
     name,
     config: Optional[str] = None,
