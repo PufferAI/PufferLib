@@ -1,161 +1,117 @@
 import numpy as np
 import torch
 from torch import nn
+from tensordict import TensorDict
 
 import pufferlib.models
 from metta.agent.pytorch.fast import Fast
 
 
 class Policy(nn.Module):
+    """Policy wrapper around Metta's Fast policy for Pufferlib integration."""
+
     def __init__(self, env, input_size=128, hidden_size=128, **kwargs):
         super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Create the Metta Fast policy
+        # Core Fast policy
         self.fast_policy = Fast(
             env, input_size=input_size, hidden_size=hidden_size, **kwargs
         )
 
-        # Initialize the policy to the environment
-        # Get the actual MettaGrid environment from the wrapper
-        metta_env = env
-        if metta_env is not None:
-            action_names = metta_env.action_names
-            max_action_args = metta_env.max_action_args
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._initialize_to_environment(env)
 
-            # Replicate MettaAgent.initialize_to_environment() logic
+    def _initialize_to_environment(self, env):
+        """Initialize Fast policy tensors and mappings from the environment."""
 
-            # Create cumulative action max params (like MettaAgent does)
-            cum_action_max_params = torch.tensor(
-                [0] + list(np.cumsum(max_action_args)), dtype=torch.int32, device=device
-            )
-
-            # Create action index tensor
-            action_index_tensor = torch.tensor(
-                [
-                    [idx, j]
-                    for idx, max_param in enumerate(max_action_args)
-                    for j in range(max_param + 1)
-                ],
-                device=device,
-                dtype=torch.int32,
-            )
-
-            # Generate full action names
-            full_action_names = [
-                f"{name}_{i}"
-                for name, max_param in zip(action_names, max_action_args, strict=False)
-                for i in range(max_param + 1)
-            ]
-
-            # Initialize the Fast policy to the environment (mixin method signature)
-            self.fast_policy.initialize_to_environment(full_action_names, device)
-
-            # Share tensors with policy (like MettaAgent does)
-            self.fast_policy.action_index_tensor = action_index_tensor
-            self.fast_policy.cum_action_max_params = cum_action_max_params
-
-
-    def forward_training(self, observations, action, state=None):
-        # Convert observations to TensorDict format expected by Metta Fast policy
-        from tensordict import TensorDict
-
-        lstm_h = self.fast_policy.lstm_h
-        if lstm_h:
-            if list(lstm_h.values())[0].shape[0] != observations.shape[0]:
-                self.fast_policy.reset_memory()
-
-        # Create TensorDict with proper structure
-        td = TensorDict(
-            {
-                "env_obs": observations,
-            },
-            batch_size=observations.shape[0],
+        # Cumulative action max params (like MettaAgent does)
+        cum_action_max_params = torch.tensor(
+            [0] + list(np.cumsum(env.max_action_args)),
+            dtype=torch.int32,
+            device=self.device,
         )
 
-        # Handle state TensorDict batch size mismatch
-        if state is not None and isinstance(state, dict):
-            # Create a clean state dict with only LSTM state, excluding action TensorDict
-            clean_state = {}
-            for key, value in state.items():
-                if key in ["lstm_h", "lstm_c", "hidden"]:
-                    # Keep LSTM state as-is, let fast policy handle batch size
-                    clean_state[key] = value
-                elif key == "action":
-                    # Skip the action TensorDict that's causing batch size issues
-                    continue
-                else:
-                    clean_state[key] = value
-            state = clean_state
+        # Action index tensor
+        action_index_tensor = torch.tensor(
+            [
+                [idx, j]
+                for idx, max_param in enumerate(env.max_action_args)
+                for j in range(max_param + 1)
+            ],
+            dtype=torch.int32,
+            device=self.device,
+        )
 
-        # Forward through Metta Fast policy
+        full_action_names = [
+            f"{name}_{i}"
+            for name, max_param in zip(env.action_names, env.max_action_args, strict=False)
+            for i in range(max_param + 1)
+        ]
+
+        # Initialize Fast policy
+        self.fast_policy.initialize_to_environment(full_action_names, self.device)
+
+        # Share tensors with Fast policy (MettaAgent style)
+        self.fast_policy.action_index_tensor = action_index_tensor
+        self.fast_policy.cum_action_max_params = cum_action_max_params
+
+    def forward_training(self, observations, action, state=None):
+        """Forward pass during training (with action)."""
+        self._maybe_reset_memory(observations)
+
+        td = TensorDict({"env_obs": observations}, batch_size=observations.shape[0])
+        state = self._sanitize_state(state)
+
         result_td = self.fast_policy(td, state=state, action=action)
 
         logits = result_td["full_log_probs"]
         value = result_td["values"]
-        entropy = result_td.get("entropy", None)
+        entropy = result_td.get("entropy")
 
         return [logits], value, entropy
 
     def forward_eval(self, observations, state=None):
-        # Convert observations to TensorDict format expected by Metta Fast policy
-        from tensordict import TensorDict
+        """Forward pass during evaluation (no action)."""
+        self._maybe_reset_memory(observations)
 
-        lstm_h = self.fast_policy.lstm_h
-        if lstm_h:
-            if list(lstm_h.values())[0].shape[0] != observations.shape[0]:
-                self.fast_policy.reset_memory()
-
-        # Create TensorDict with proper structure
-        td = TensorDict(
-            {
-                "env_obs": observations,
-            },
-            batch_size=observations.shape[0],
-        )
-
-        # Forward through Metta Fast policy
+        td = TensorDict({"env_obs": observations}, batch_size=observations.shape[0])
         result_td = self.fast_policy(td, state=state, action=None)
 
-        # Return Metta's flat full_log_probs and values directly. The
-        # environment `single_action_space` has been adjusted to expose a
-        # flattened Discrete space so pufferlib's sampling expects a single
-        # integer action that indexes into this flat vector.
         logits = result_td["full_log_probs"]  # Shape: [batch_size, total_actions]
         values = result_td["values"]
 
-        # Return a single-element list so pufferlib's `sample_logits`
-        # treats this as a (multi-discrete) list of argument logits and
-        # produces an action of shape [batch_size, 1], matching the
-        # environment's `single_action_space` of shape (1,).
+        # Pufferlib expects a list for multi-discrete compatibility
         return [logits], values
 
     def forward(self, observations, state=None):
-        # For inference, let the fast policy handle action sampling
-        # Don't pass action from state to avoid batch size mismatches
-        logits, value, entropy = self.forward_training(
-            observations, action=None, state=state
-        )
+        """Default forward (inference)."""
+        logits, value, _ = self.forward_training(observations, action=None, state=state)
         return logits, value
 
+    def _maybe_reset_memory(self, observations):
+        """Reset LSTM memory if batch size mismatch occurs."""
+        lstm_h = self.fast_policy.lstm_h
+        if lstm_h and list(lstm_h.values())[0].shape[0] != observations.shape[0]:
+            self.fast_policy.reset_memory()
+
+    def _sanitize_state(self, state):
+        """Remove incompatible entries from state (e.g., action TensorDict)."""
+        if state is None or not isinstance(state, dict):
+            return state
+
+        return {
+            k: v
+            for k, v in state.items()
+            if k in {"lstm_h", "lstm_c", "hidden"}  # keep LSTM state
+        }
+
     def to(self, device):
-        """Override to method to ensure action tensors are moved with the policy."""
+        """Ensure action tensors move with the module."""
         result = super().to(device)
 
-        # Move action tensors to the same device if they exist
-        if (
-            hasattr(self.fast_policy, "action_index_tensor")
-            and self.fast_policy.action_index_tensor is not None
-        ):
-            self.fast_policy.action_index_tensor = (
-                self.fast_policy.action_index_tensor.to(device)
-            )
-        if (
-            hasattr(self.fast_policy, "cum_action_max_params")
-            and self.fast_policy.cum_action_max_params is not None
-        ):
-            self.fast_policy.cum_action_max_params = (
-                self.fast_policy.cum_action_max_params.to(device)
-            )
+        for tensor_name in ("action_index_tensor", "cum_action_max_params"):
+            tensor = getattr(self.fast_policy, tensor_name, None)
+            if tensor is not None:
+                setattr(self.fast_policy, tensor_name, tensor.to(device))
 
         return result
