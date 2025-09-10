@@ -17,7 +17,7 @@ class Policy(nn.Module):
 
         # Initialize the policy to the environment
         # Get the actual MettaGrid environment from the wrapper
-        metta_env = self._get_metta_env(env)
+        metta_env = env
         if metta_env is not None:
             action_names = metta_env.action_names
             max_action_args = metta_env.max_action_args
@@ -55,29 +55,6 @@ class Policy(nn.Module):
             self.fast_policy.action_index_tensor = action_index_tensor
             self.fast_policy.cum_action_max_params = cum_action_max_params
 
-    def _get_metta_env(self, env):
-        """Extract the MettaGrid environment from PufferLib wrappers."""
-        # Try to find the underlying MettaGrid environment
-        current_env = env
-
-        # Look for common attributes that indicate we have a MettaGrid environment
-        while hasattr(current_env, "_env") or hasattr(current_env, "env"):
-            if hasattr(current_env, "get_observation_features"):
-                return current_env
-
-            # Try _env first, then env
-            if hasattr(current_env, "_env"):
-                current_env = current_env._env
-            elif hasattr(current_env, "env"):
-                current_env = current_env.env
-            else:
-                break
-
-        # Check if current_env has the required methods
-        if hasattr(current_env, "get_observation_features"):
-            return current_env
-
-        return None
 
     def forward_training(self, observations, action, state=None):
         # Convert observations to TensorDict format expected by Metta Fast policy
