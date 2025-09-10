@@ -150,7 +150,7 @@ static int is_valid_position(Overcooked* env, int x, int y) {
     if (x < 0 || x >= env->width || y < 0 || y >= env->height) {
         return 0;
     }
-    return env->grid[y * env->width + x] != WALL;
+    return env->grid[y * env->width + x] == EMPTY;
 }
 
 static Item* get_item_at(Overcooked* env, int x, int y) {
