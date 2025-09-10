@@ -143,7 +143,50 @@ static void compute_observations(Overcooked* env) {
 }
 
 static void handle_interaction(Overcooked* env) {
-    // Placeholder for interaction logic
+    // Get position agent is facing
+    int target_x = env->agent.x;
+    int target_y = env->agent.y;
+    
+    switch (env->agent.facing_direction) {
+        case 0: target_y -= 1; break; // Up
+        case 1: target_y += 1; break; // Down
+        case 2: target_x -= 1; break; // Left
+        case 3: target_x += 1; break; // Right
+    }
+    
+    // Check bounds
+    if (target_x < 0 || target_x >= env->width || target_y < 0 || target_y >= env->height) {
+        return;
+    }
+    
+    int tile = env->grid[target_y * env->width + target_x];
+    Item* item = get_item_at(env, target_x, target_y);
+    
+    // If agent is holding something
+    if (env->agent.held_item != NO_ITEM) {
+        // Can only put down on empty counters or specific stations
+        if ((tile == COUNTER || tile == CUTTING_BOARD || tile == STOVE) && item == NULL) {
+            // Put down the item
+            add_item(env, env->agent.held_item, target_x, target_y);
+            env->agent.held_item = NO_ITEM;
+        }
+    }
+    // If agent is empty handed
+    else {
+        // Pick up item if there is one
+        if (item != NULL) {
+            env->agent.held_item = item->type;
+            remove_item(env, target_x, target_y);
+        }
+        // Special case: get new ingredients from ingredient box
+        else if (tile == INGREDIENT_BOX) {
+            env->agent.held_item = ONION; // Always gives onions for now
+        }
+        // Special case: get plates from plate box
+        else if (tile == PLATE_BOX) {
+            env->agent.held_item = PLATE;
+        }
+    }
 }
 
 static int is_valid_position(Overcooked* env, int x, int y) {
