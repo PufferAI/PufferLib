@@ -86,7 +86,7 @@ class Policy(nn.Module):
         )
 
         # Forward through Metta Fast policy
-        result_td = self.fast_policy(td)
+        result_td = self.fast_policy(td, state)
 
         # Return Metta's flat full_log_probs and values directly. The
         # environment `single_action_space` has been adjusted to expose a
