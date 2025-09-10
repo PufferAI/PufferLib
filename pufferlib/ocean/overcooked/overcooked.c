@@ -10,10 +10,10 @@
 
 int main() {
     Overcooked env = {
-        .width = 10,
-        .height = 10,
+        .width = 5,
+        .height = 5,
         .max_steps = 200,
-        .grid_size = 50,
+        .grid_size = 100,
         .reward_dish_served = 10.0f,
         .reward_step_penalty = -0.1f,
         .observation_size = 100  // Adjust based on your observation design

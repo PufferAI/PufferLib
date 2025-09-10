@@ -15,6 +15,8 @@
 #define INGREDIENT_BOX 4
 #define SERVING_AREA 5
 #define WALL 6
+#define PLATE_BOX 7
+#define AGENT 8
 
 // Item types
 #define NO_ITEM 0
@@ -96,75 +98,62 @@ typedef struct {
     int observation_size;
 } Overcooked;
 
-// Simple kitchen layout for testing (10x10)
-static const char DEFAULT_KITCHEN[10][10] = {
-    {'#','#','#','#','#','#','#','#','#','#'},
-    {'#','4','1','1','1','1','1','1','5','#'},
-    {'#',' ',' ',' ',' ',' ',' ',' ',' ','#'},
-    {'#','1','1','2','1','1','3','1','1','#'},
-    {'#',' ',' ',' ',' ',' ',' ',' ',' ','#'},
-    {'#',' ',' ',' ',' ',' ',' ',' ',' ','#'},
-    {'#','1','1','1','1','1','1','1','1','#'},
-    {'#',' ',' ',' ',' ',' ',' ',' ',' ','#'},
-    {'#',' ',' ',' ',' ',' ',' ',' ',' ','#'},
-    {'#','#','#','#','#','#','#','#','#','#'}
+
+// From overcooked-ai repo; 5x5
+static const char CRAMPED_ROOM[5][5] = {
+    {'1', '1', '2', '1', '1'},
+    {'4', ' ', ' ', ' ', '4'},
+    {'1', ' ', ' ', ' ', '1'},
+    {'1', ' ', ' ', ' ', '1'},
+    {'1', '7', '1', '5', '1'}
 };
 
-// Initialize environment (allocate memory)
+static void parse_grid(Overcooked* env) {
+    for (int y = 0; y < env->height && y < 5; y++) {
+        for (int x = 0; x < env->width && x < 5; x++) {
+            char tile = CRAMPED_ROOM[y][x];
+            int idx = y * env->width + x;
+            switch (tile) {
+                case '#': env->grid[idx] = WALL; break;
+                case '1': env->grid[idx] = COUNTER; break;
+                case '2': env->grid[idx] = STOVE; break;
+                case '3': env->grid[idx] = CUTTING_BOARD; break;
+                case '4': env->grid[idx] = INGREDIENT_BOX; break;
+                case '5': env->grid[idx] = SERVING_AREA; break;
+                case '7': env->grid[idx] = PLATE_BOX; break;
+                default: env->grid[idx] = EMPTY; break;
+            }
+        }
+    }
+}
+
 static void init(Overcooked* env) {
-    // TODO: Allocate memory for grid
     env->grid = calloc(env->width * env->height, sizeof(char));
-    
-    // TODO: Allocate memory for items array
     env->max_items = 20;
     env->items = calloc(env->max_items, sizeof(Item));
     env->num_items = 0;
-    
-    // TODO: Copy default kitchen layout to grid
-    // Implement grid initialization
-    
-    // TODO: Initialize other components
+    parse_grid(env);
     env->client = NULL;
 }
 
-// Compute observations for the agent
 static void compute_observations(Overcooked* env) {
-    // TODO: Fill observations array with:
-    // - Grid layout around agent (e.g., 7x7 window)
-    // - Agent position
-    // - Agent held item
-    // - Items on the map
-    // - Other relevant state
-    
-    // For now, just zero out observations
-    int obs_idx = 0;
     for (int i = 0; i < env->observation_size; i++) {
-        env->observations[obs_idx++] = 0.0f;
+        env->observations[i] = 0.0f;
     }
 }
 
-// Handle agent interaction with the environment
 static void handle_interaction(Overcooked* env) {
-    // TODO: Handle agent interaction based on what they're facing
-    // - Pick up item if empty-handed
-    // - Put down item if holding something
-    // - Use station (stove, cutting board, etc.)
+    // Placeholder for interaction logic
 }
 
-// Check if position is valid (not wall, within bounds)
 static int is_valid_position(Overcooked* env, int x, int y) {
-    // TODO: Check if position is within bounds and not a wall
     if (x < 0 || x >= env->width || y < 0 || y >= env->height) {
         return 0;
     }
-    
-    int idx = y * env->width + x;
-    return env->grid[idx] != WALL;
+    return env->grid[y * env->width + x] != WALL;
 }
 
-// Get item at position
 static Item* get_item_at(Overcooked* env, int x, int y) {
-    // TODO: Find and return item at given position
     for (int i = 0; i < env->num_items; i++) {
         if ((int)env->items[i].x == x && (int)env->items[i].y == y) {
             return &env->items[i];
@@ -173,9 +162,7 @@ static Item* get_item_at(Overcooked* env, int x, int y) {
     return NULL;
 }
 
-// Add item to the environment
 static void add_item(Overcooked* env, int type, int x, int y) {
-    // TODO: Add new item to the environment
     if (env->num_items < env->max_items) {
         env->items[env->num_items].type = type;
         env->items[env->num_items].x = x;
@@ -185,12 +172,9 @@ static void add_item(Overcooked* env, int type, int x, int y) {
     }
 }
 
-// Remove item from position
 static void remove_item(Overcooked* env, int x, int y) {
-    // TODO: Remove item at given position
     for (int i = 0; i < env->num_items; i++) {
         if ((int)env->items[i].x == x && (int)env->items[i].y == y) {
-            // Shift remaining items
             for (int j = i; j < env->num_items - 1; j++) {
                 env->items[j] = env->items[j + 1];
             }
@@ -200,72 +184,41 @@ static void remove_item(Overcooked* env, int x, int y) {
     }
 }
 
-// Required function
 void c_reset(Overcooked* env) {
-    // TODO: Reset environment state
     env->current_step = 0;
     env->num_items = 0;
+    parse_grid(env);
     
-    // TODO: Initialize grid from default kitchen
-    // Copy DEFAULT_KITCHEN to env->grid
-    
-    // TODO: Place agent at starting position
-    env->agent.x = 5;
-    env->agent.y = 5;
+    env->agent.x = 2;
+    env->agent.y = 2;
     env->agent.held_item = NO_ITEM;
     env->agent.facing_direction = 0;
     
-    // TODO: Place initial items (ingredients)
-    // add_item(env, TOMATO, x, y);
-    
-    // TODO: Reset rewards and terminals
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0;
     
-    // TODO: Compute initial observations
     compute_observations(env);
     
-    // Reset log
     env->log.episode_length = 0;
     env->log.episode_return = 0;
     env->log.dishes_served = 0;
 }
 
-// Required function
 void c_step(Overcooked* env) {
-    // TODO: Get action from actions array
     int action = env->actions[0];
-    
-    // Reset reward for this step
     env->rewards[0] = env->reward_step_penalty;
     
-    // TODO: Process movement actions
     int new_x = env->agent.x;
     int new_y = env->agent.y;
     
     switch (action) {
-        case ACTION_UP:
-            new_y -= 1;
-            env->agent.facing_direction = 0;
-            break;
-        case ACTION_DOWN:
-            new_y += 1;
-            env->agent.facing_direction = 1;
-            break;
-        case ACTION_LEFT:
-            new_x -= 1;
-            env->agent.facing_direction = 2;
-            break;
-        case ACTION_RIGHT:
-            new_x += 1;
-            env->agent.facing_direction = 3;
-            break;
-        case ACTION_INTERACT:
-            handle_interaction(env);
-            break;
+        case ACTION_UP:    new_y -= 1; env->agent.facing_direction = 0; break;
+        case ACTION_DOWN:  new_y += 1; env->agent.facing_direction = 1; break;
+        case ACTION_LEFT:  new_x -= 1; env->agent.facing_direction = 2; break;
+        case ACTION_RIGHT: new_x += 1; env->agent.facing_direction = 3; break;
+        case ACTION_INTERACT: handle_interaction(env); break;
     }
     
-    // TODO: Check if new position is valid and update
     if (action != ACTION_INTERACT && action != ACTION_NOOP) {
         if (is_valid_position(env, new_x, new_y)) {
             env->agent.x = new_x;
@@ -273,24 +226,14 @@ void c_step(Overcooked* env) {
         }
     }
     
-    // TODO: Update game state
-    // - Check if dish was served
-    // - Update cooking timers
-    // - etc.
-    
-    // Update step counter
     env->current_step++;
     env->log.episode_length++;
     
-    // TODO: Check terminal conditions
     if (env->current_step >= env->max_steps) {
         env->terminals[0] = 1;
     }
     
-    // Update log
     env->log.episode_return += env->rewards[0];
-    
-    // TODO: Compute new observations
     compute_observations(env);
 }
 
@@ -301,21 +244,15 @@ void c_render(Overcooked* env) {
         SetTargetFPS(60);
         env->client = (Client*)calloc(1, sizeof(Client));
         
-        // TODO: Load textures after InitWindow
-        // env->client->tiles = LoadTexture("resources/overcooked/tiles.png");
-        // env->client->items = LoadTexture("resources/overcooked/items.png");
-        // env->client->agent = LoadTexture("resources/overcooked/agent.png");
+        // Textures can be loaded here if available
     }
     
-    // Standard across our envs so exiting is always the same
-    if (IsKeyDown(KEY_ESCAPE)) {
-        exit(0);
-    }
+    if (IsKeyDown(KEY_ESCAPE)) exit(0);
     
     BeginDrawing();
     ClearBackground((Color){240, 240, 240, 255});
     
-    // TODO: Draw grid tiles
+    // Draw grid tiles
     for (int y = 0; y < env->height; y++) {
         for (int x = 0; x < env->width; x++) {
             int idx = y * env->width + x;
@@ -340,6 +277,12 @@ void c_render(Overcooked* env) {
                 case SERVING_AREA:
                     tile_color = GOLD;
                     break;
+                case PLATE_BOX:
+                    tile_color = SKYBLUE;
+                    break;
+                case EMPTY:
+                    tile_color = WHITE;
+                    break;
             }
             
             DrawRectangle(
@@ -349,10 +292,19 @@ void c_render(Overcooked* env) {
                 env->grid_size,
                 tile_color
             );
+            
+            // Draw grid lines for better visibility
+            DrawRectangleLines(
+                x * env->grid_size,
+                y * env->grid_size,
+                env->grid_size,
+                env->grid_size,
+                LIGHTGRAY
+            );
         }
     }
     
-    // TODO: Draw items
+    // Draw items
     for (int i = 0; i < env->num_items; i++) {
         Color item_color = GRAY;
         switch (env->items[i].type) {
@@ -378,7 +330,7 @@ void c_render(Overcooked* env) {
         );
     }
     
-    // TODO: Draw agent
+    // Draw agent
     DrawRectangle(
         env->agent.x * env->grid_size + env->grid_size/4,
         env->agent.y * env->grid_size + env->grid_size/4,
@@ -416,18 +368,11 @@ void c_render(Overcooked* env) {
     EndDrawing();
 }
 
-// Required function. Should clean up anything you allocated
 void c_close(Overcooked* env) {
     free(env->grid);
     free(env->items);
-    
     if (env->client != NULL) {
-        Client* client = env->client;
-        // TODO: Unload textures if loaded
-        // UnloadTexture(client->tiles);
-        // UnloadTexture(client->items);
-        // UnloadTexture(client->agent);
         CloseWindow();
-        free(client);
+        free(env->client);
     }
 }
