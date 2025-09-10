@@ -11,7 +11,9 @@ class Policy(nn.Module):
         super().__init__()
 
         # Create the Metta Fast policy
-        self.fast_policy = Fast(env, input_size=input_size, hidden_size=hidden_size, **kwargs)
+        self.fast_policy = Fast(
+            env, input_size=input_size, hidden_size=hidden_size, **kwargs
+        )
 
         # Initialize the policy to the environment
         # Get the actual MettaGrid environment from the wrapper
@@ -30,7 +32,11 @@ class Policy(nn.Module):
 
             # Create action index tensor
             action_index_tensor = torch.tensor(
-                [[idx, j] for idx, max_param in enumerate(max_action_args) for j in range(max_param + 1)],
+                [
+                    [idx, j]
+                    for idx, max_param in enumerate(max_action_args)
+                    for j in range(max_param + 1)
+                ],
                 device=device,
                 dtype=torch.int32,
             )
@@ -73,9 +79,55 @@ class Policy(nn.Module):
 
         return None
 
+    def forward_training(self, observations, action, state=None):
+        # Convert observations to TensorDict format expected by Metta Fast policy
+        from tensordict import TensorDict
+
+        lstm_h = self.fast_policy.lstm_h
+        if lstm_h:
+            if list(lstm_h.values())[0].shape[0] != observations.shape[0]:
+                self.fast_policy.reset_memory()
+
+        # Create TensorDict with proper structure
+        td = TensorDict(
+            {
+                "env_obs": observations,
+            },
+            batch_size=observations.shape[0],
+        )
+
+        # Handle state TensorDict batch size mismatch
+        if state is not None and isinstance(state, dict):
+            # Create a clean state dict with only LSTM state, excluding action TensorDict
+            clean_state = {}
+            for key, value in state.items():
+                if key in ["lstm_h", "lstm_c", "hidden"]:
+                    # Keep LSTM state as-is, let fast policy handle batch size
+                    clean_state[key] = value
+                elif key == "action":
+                    # Skip the action TensorDict that's causing batch size issues
+                    continue
+                else:
+                    clean_state[key] = value
+            state = clean_state
+
+        # Forward through Metta Fast policy
+        result_td = self.fast_policy(td, state=state, action=action)
+
+        logits = result_td["full_log_probs"]
+        value = result_td["values"]
+        entropy = result_td.get("entropy", None)
+
+        return [logits], value, entropy
+
     def forward_eval(self, observations, state=None):
         # Convert observations to TensorDict format expected by Metta Fast policy
         from tensordict import TensorDict
+
+        lstm_h = self.fast_policy.lstm_h
+        if lstm_h:
+            if list(lstm_h.values())[0].shape[0] != observations.shape[0]:
+                self.fast_policy.reset_memory()
 
         # Create TensorDict with proper structure
         td = TensorDict(
@@ -86,7 +138,7 @@ class Policy(nn.Module):
         )
 
         # Forward through Metta Fast policy
-        result_td = self.fast_policy(td, state)
+        result_td = self.fast_policy(td, state=state, action=None)
 
         # Return Metta's flat full_log_probs and values directly. The
         # environment `single_action_space` has been adjusted to expose a
@@ -102,57 +154,31 @@ class Policy(nn.Module):
         return [logits], values
 
     def forward(self, observations, state=None):
-        # Training path: pufferl passes a `state` dict (may contain lstm_h/lstm_c).
-        # To avoid mismatches with Metta's internal LSTM batching, handle the
-        # non-recurrent training path by calling the inner policy's
-        # encode/decode directly (no LSTM). For evaluation/inference we
-        # continue to use the full Metta Fast forward.
-        if state is not None:
-            # Use the policy's encode/decode pipeline without running the LSTM
-            # to produce logits and values compatible with pufferlib training.
-            try:
-                # The Fast instance stores the underlying Policy at `policy`.
-                inner_policy = getattr(self.fast_policy, "policy", None)
-                if inner_policy is None:
-                    # Fallback to full forward
-                    return self.forward_eval(observations, state)
-
-                # Encode observations to hidden (matches Fast.encode_observations)
-                hidden = inner_policy.encode_observations(observations, state)
-
-                # hidden may be shaped (B, ...) or (B, TT, -1). Ensure flattened
-                # shape expected by decode_actions: (batch_size, hidden_size)
-                if hidden.dim() > 2:
-                    flat_hidden = hidden.reshape(hidden.shape[0], -1)
-                    batch_size = flat_hidden.shape[0]
-                else:
-                    flat_hidden = hidden
-                    batch_size = flat_hidden.shape[0]
-
-                logits, value = inner_policy.decode_actions(flat_hidden, batch_size)
-                return logits, value
-            except Exception:
-                # On any error, fallback to evaluation forward which uses the
-                # full Fast.forward that handles recurrent cases.
-                return self.forward_eval(observations, state)
-
-        return self.forward_eval(observations, state)
+        # For inference, let the fast policy handle action sampling
+        # Don't pass action from state to avoid batch size mismatches
+        logits, value, entropy = self.forward_training(
+            observations, action=None, state=state
+        )
+        return logits, value
 
     def to(self, device):
         """Override to method to ensure action tensors are moved with the policy."""
         result = super().to(device)
 
         # Move action tensors to the same device if they exist
-        if hasattr(self.fast_policy, "action_index_tensor") and self.fast_policy.action_index_tensor is not None:
-            self.fast_policy.action_index_tensor = self.fast_policy.action_index_tensor.to(device)
-        if hasattr(self.fast_policy, "cum_action_max_params") and self.fast_policy.cum_action_max_params is not None:
-            self.fast_policy.cum_action_max_params = self.fast_policy.cum_action_max_params.to(device)
+        if (
+            hasattr(self.fast_policy, "action_index_tensor")
+            and self.fast_policy.action_index_tensor is not None
+        ):
+            self.fast_policy.action_index_tensor = (
+                self.fast_policy.action_index_tensor.to(device)
+            )
+        if (
+            hasattr(self.fast_policy, "cum_action_max_params")
+            and self.fast_policy.cum_action_max_params is not None
+        ):
+            self.fast_policy.cum_action_max_params = (
+                self.fast_policy.cum_action_max_params.to(device)
+            )
 
         return result
-class Recurrent(pufferlib.models.LSTMWrapper):
-    def __init__(self, env, policy=None, input_size=128, hidden_size=128, **kwargs):
-        if policy is None:
-            policy = Policy(env, input_size=input_size, hidden_size=hidden_size, **kwargs)
-        super().__init__(env, policy, input_size, hidden_size)
-
-
