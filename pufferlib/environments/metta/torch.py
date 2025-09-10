@@ -81,7 +81,6 @@ class Policy(nn.Module):
         td = TensorDict(
             {
                 "env_obs": observations,
-                "env_id": torch.arange(observations.shape[0], device=observations.device),
             },
             batch_size=observations.shape[0],
         )
@@ -150,10 +149,10 @@ class Policy(nn.Module):
             self.fast_policy.cum_action_max_params = self.fast_policy.cum_action_max_params.to(device)
 
         return result
-
-
 class Recurrent(pufferlib.models.LSTMWrapper):
     def __init__(self, env, policy=None, input_size=128, hidden_size=128, **kwargs):
         if policy is None:
             policy = Policy(env, input_size=input_size, hidden_size=hidden_size, **kwargs)
         super().__init__(env, policy, input_size, hidden_size)
+
+
