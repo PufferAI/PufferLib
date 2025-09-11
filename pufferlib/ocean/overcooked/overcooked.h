@@ -99,6 +99,11 @@ typedef struct {
 } Overcooked;
 
 
+// Forward declarations for helper functions
+static Item* get_item_at(Overcooked* env, int x, int y);
+static void add_item(Overcooked* env, int type, int x, int y);
+static void remove_item(Overcooked* env, int x, int y);
+
 // From overcooked-ai repo; 5x5
 static const char CRAMPED_ROOM[5][5] = {
     {'1', '1', '2', '1', '1'},
@@ -224,6 +229,23 @@ static void remove_item(Overcooked* env, int x, int y) {
             env->num_items--;
             break;
         }
+    }
+}
+
+static Color get_agent_color(int held_item) {
+    switch (held_item) {
+        case NO_ITEM:
+            return BLUE;      // Blue when empty-handed
+        case TOMATO:
+            return (Color){200, 50, 50, 255};   // Dark red when holding tomato
+        case ONION:
+            return (Color){255, 200, 100, 255}; // Light orange when holding onion
+        case PLATE:
+            return (Color){200, 200, 220, 255}; // Light blue-gray when holding plate
+        case SOUP:
+            return (Color){255, 140, 0, 255};   // Orange when holding soup
+        default:
+            return BLUE;      // Default to blue
     }
 }
 
@@ -373,13 +395,14 @@ void c_render(Overcooked* env) {
         );
     }
     
-    // Draw agent
+    // Draw agent with color based on held item
+    Color agent_color = get_agent_color(env->agent.held_item);
     DrawRectangle(
         env->agent.x * env->grid_size + env->grid_size/4,
         env->agent.y * env->grid_size + env->grid_size/4,
         env->grid_size/2,
         env->grid_size/2,
-        BLUE
+        agent_color
     );
     
     // Draw held item above agent
