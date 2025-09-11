@@ -25,6 +25,17 @@
 #define PLATE 3
 #define SOUP 4
 
+// Cooking states
+#define NOT_COOKING 0
+#define COOKING 1
+#define COOKED 2
+#define BURNT 3
+
+// Cooking parameters
+#define COOKING_TIME 20  // Steps to cook
+#define BURN_TIME 40     // Steps until burnt
+#define MAX_INGREDIENTS 5 // Max ingredients per pot
+
 // Agent actions
 #define ACTION_NOOP 0
 #define ACTION_UP 1
@@ -64,6 +75,16 @@ typedef struct {
     Texture2D soup_onion;
     Texture2D soup_tomato;
     
+    // Cooking stage textures
+    Texture2D soup_onion_cooking_1;
+    Texture2D soup_onion_cooking_2;
+    Texture2D soup_onion_cooking_3;
+    Texture2D soup_onion_cooked;
+    Texture2D soup_tomato_cooking_1;
+    Texture2D soup_tomato_cooking_2;
+    Texture2D soup_tomato_cooking_3;
+    Texture2D soup_tomato_cooked;
+    
     // Chef sprites (4 directions)
     Texture2D chef_north;
     Texture2D chef_south;
@@ -97,6 +118,15 @@ typedef struct {
     int state;  // For items that can change state (e.g., cooking progress)
 } Item;
 
+typedef struct {
+    int cooking_state;      // NOT_COOKING, COOKING, COOKED, BURNT
+    int cooking_progress;   // Steps since cooking started
+    int ingredient_types[MAX_INGREDIENTS];  // Types of ingredients added
+    int ingredient_count;   // Number of ingredients in pot
+    int num_onions;        // Count of onions
+    int num_tomatoes;      // Count of tomatoes
+} CookingPot;
+
 // Required that you have some struct for your env
 typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
@@ -108,6 +138,10 @@ typedef struct {
     int num_items;
     int max_items;
     Agent agent;
+    
+    // Cooking state for each stove position
+    CookingPot* cooking_pots;  // Array of cooking pots (one per stove)
+    int num_stoves;
     
     // Required arrays
     float* observations; // Required. You can use any obs type, but make sure it matches in Python!
@@ -133,6 +167,9 @@ typedef struct {
 static Item* get_item_at(Overcooked* env, int x, int y);
 static void add_item(Overcooked* env, int type, int x, int y);
 static void remove_item(Overcooked* env, int x, int y);
+static CookingPot* get_pot_at(Overcooked* env, int x, int y);
+static void init_cooking_pots(Overcooked* env);
+static void update_cooking(Overcooked* env);
 
 // From overcooked-ai repo; 5x5
 static const char CRAMPED_ROOM[5][5] = {
@@ -168,6 +205,7 @@ static void init(Overcooked* env) {
     env->items = calloc(env->max_items, sizeof(Item));
     env->num_items = 0;
     parse_grid(env);
+    init_cooking_pots(env);
     env->client = NULL;
 }
 
@@ -196,17 +234,55 @@ static void handle_interaction(Overcooked* env) {
     
     int tile = env->grid[target_y * env->width + target_x];
     Item* item = get_item_at(env, target_x, target_y);
+    CookingPot* pot = get_pot_at(env, target_x, target_y);
     
-    // If agent is holding something
+    // Special stove interaction
+    if (tile == STOVE && pot != NULL) {
+        // If agent is holding an ingredient and pot is not cooking yet
+        if (env->agent.held_item == ONION || env->agent.held_item == TOMATO) {
+            if (pot->cooking_state == NOT_COOKING && pot->ingredient_count < MAX_INGREDIENTS) {
+                // Add ingredient to pot
+                pot->ingredient_types[pot->ingredient_count] = env->agent.held_item;
+                pot->ingredient_count++;
+                if (env->agent.held_item == ONION) {
+                    pot->num_onions++;
+                } else if (env->agent.held_item == TOMATO) {
+                    pot->num_tomatoes++;
+                }
+                env->agent.held_item = NO_ITEM;
+            }
+        }
+        // If agent is empty handed and pot has ingredients, start cooking
+        else if (env->agent.held_item == NO_ITEM && pot->ingredient_count > 0) {
+            if (pot->cooking_state == NOT_COOKING) {
+                pot->cooking_state = COOKING;
+                pot->cooking_progress = 0;
+            }
+            // Pick up cooked soup
+            else if (pot->cooking_state == COOKED) {
+                env->agent.held_item = SOUP;
+                // Reset pot
+                pot->cooking_state = NOT_COOKING;
+                pot->cooking_progress = 0;
+                pot->ingredient_count = 0;
+                pot->num_onions = 0;
+                pot->num_tomatoes = 0;
+                for (int i = 0; i < MAX_INGREDIENTS; i++) {
+                    pot->ingredient_types[i] = NO_ITEM;
+                }
+            }
+        }
+        return;
+    }
+    
+    // Normal interaction (non-stove)
     if (env->agent.held_item != NO_ITEM) {
-        // Can only put down on empty counters or specific stations
-        if ((tile == COUNTER || tile == CUTTING_BOARD || tile == STOVE) && item == NULL) {
-            // Put down the item
+        // Can only put down on empty counters or cutting boards
+        if ((tile == COUNTER || tile == CUTTING_BOARD) && item == NULL) {
             add_item(env, env->agent.held_item, target_x, target_y);
             env->agent.held_item = NO_ITEM;
         }
     }
-    // If agent is empty handed
     else {
         // Pick up item if there is one
         if (item != NULL) {
@@ -279,10 +355,89 @@ static Color get_agent_color(int held_item) {
     }
 }
 
+static void init_cooking_pots(Overcooked* env) {
+    // Count stoves in the grid
+    env->num_stoves = 0;
+    for (int i = 0; i < env->width * env->height; i++) {
+        if (env->grid[i] == STOVE) {
+            env->num_stoves++;
+        }
+    }
+    
+    // Allocate cooking pots
+    env->cooking_pots = calloc(env->num_stoves, sizeof(CookingPot));
+    
+    // Initialize each pot
+    int pot_index = 0;
+    for (int y = 0; y < env->height; y++) {
+        for (int x = 0; x < env->width; x++) {
+            if (env->grid[y * env->width + x] == STOVE) {
+                CookingPot* pot = &env->cooking_pots[pot_index];
+                pot->cooking_state = NOT_COOKING;
+                pot->cooking_progress = 0;
+                pot->ingredient_count = 0;
+                pot->num_onions = 0;
+                pot->num_tomatoes = 0;
+                for (int i = 0; i < MAX_INGREDIENTS; i++) {
+                    pot->ingredient_types[i] = NO_ITEM;
+                }
+                pot_index++;
+            }
+        }
+    }
+}
+
+static CookingPot* get_pot_at(Overcooked* env, int x, int y) {
+    if (env->grid[y * env->width + x] != STOVE) {
+        return NULL;
+    }
+    
+    // Find which stove index this is
+    int stove_index = 0;
+    for (int sy = 0; sy < env->height; sy++) {
+        for (int sx = 0; sx < env->width; sx++) {
+            if (env->grid[sy * env->width + sx] == STOVE) {
+                if (sx == x && sy == y) {
+                    return &env->cooking_pots[stove_index];
+                }
+                stove_index++;
+            }
+        }
+    }
+    return NULL;
+}
+
+static void update_cooking(Overcooked* env) {
+    for (int i = 0; i < env->num_stoves; i++) {
+        CookingPot* pot = &env->cooking_pots[i];
+        if (pot->cooking_state == COOKING) {
+            pot->cooking_progress++;
+            if (pot->cooking_progress >= COOKING_TIME) {
+                pot->cooking_state = COOKED;
+            } else if (pot->cooking_progress >= BURN_TIME) {
+                pot->cooking_state = BURNT;
+            }
+        }
+    }
+}
+
 void c_reset(Overcooked* env) {
     env->current_step = 0;
     env->num_items = 0;
     parse_grid(env);
+    
+    // Reset cooking pots
+    for (int i = 0; i < env->num_stoves; i++) {
+        CookingPot* pot = &env->cooking_pots[i];
+        pot->cooking_state = NOT_COOKING;
+        pot->cooking_progress = 0;
+        pot->ingredient_count = 0;
+        pot->num_onions = 0;
+        pot->num_tomatoes = 0;
+        for (int j = 0; j < MAX_INGREDIENTS; j++) {
+            pot->ingredient_types[j] = NO_ITEM;
+        }
+    }
     
     env->agent.x = 2;
     env->agent.y = 2;
@@ -321,6 +476,9 @@ void c_step(Overcooked* env) {
         }
     }
     
+    // Update cooking progress
+    update_cooking(env);
+    
     env->current_step++;
     env->log.episode_length++;
     
@@ -354,6 +512,16 @@ void c_render(Overcooked* env) {
         env->client->dish = LoadTexture("pufferlib/resources/overcooked/objects/dish.png");
         env->client->soup_onion = LoadTexture("pufferlib/resources/overcooked/objects/soup-onion-cooked.png");
         env->client->soup_tomato = LoadTexture("pufferlib/resources/overcooked/objects/soup-tomato-cooked.png");
+        
+        // Load cooking stage textures
+        env->client->soup_onion_cooking_1 = LoadTexture("pufferlib/resources/overcooked/objects/soup-onion-1-cooking.png");
+        env->client->soup_onion_cooking_2 = LoadTexture("pufferlib/resources/overcooked/objects/soup-onion-2-cooking.png");
+        env->client->soup_onion_cooking_3 = LoadTexture("pufferlib/resources/overcooked/objects/soup-onion-3-cooking.png");
+        env->client->soup_onion_cooked = LoadTexture("pufferlib/resources/overcooked/objects/soup-onion-cooked.png");
+        env->client->soup_tomato_cooking_1 = LoadTexture("pufferlib/resources/overcooked/objects/soup-tomato-1-cooking.png");
+        env->client->soup_tomato_cooking_2 = LoadTexture("pufferlib/resources/overcooked/objects/soup-tomato-2-cooking.png");
+        env->client->soup_tomato_cooking_3 = LoadTexture("pufferlib/resources/overcooked/objects/soup-tomato-3-cooking.png");
+        env->client->soup_tomato_cooked = LoadTexture("pufferlib/resources/overcooked/objects/soup-tomato-cooked.png");
         
         // Load chef sprites
         env->client->chef_north = LoadTexture("pufferlib/resources/overcooked/chefs/NORTH.png");
@@ -426,6 +594,82 @@ void c_render(Overcooked* env) {
                 DrawTexturePro(*texture,
                     (Rectangle){0, 0, texture->width, texture->height},
                     dest, (Vector2){0, 0}, 0, WHITE);
+            }
+            
+            // Draw cooking state on stoves
+            if (env->grid[idx] == STOVE) {
+                CookingPot* pot = get_pot_at(env, x, y);
+                if (pot && pot->ingredient_count > 0) {
+                    Texture2D* cooking_texture = NULL;
+                    
+                    // Determine if soup is primarily onion or tomato based
+                    bool is_onion_soup = (pot->num_onions >= pot->num_tomatoes);
+                    
+                    if (pot->cooking_state == COOKING) {
+                        // Select cooking stage texture based on progress
+                        float progress = (float)pot->cooking_progress / COOKING_TIME;
+                        if (is_onion_soup) {
+                            if (progress < 0.33f) {
+                                cooking_texture = &env->client->soup_onion_cooking_1;
+                            } else if (progress < 0.66f) {
+                                cooking_texture = &env->client->soup_onion_cooking_2;
+                            } else {
+                                cooking_texture = &env->client->soup_onion_cooking_3;
+                            }
+                        } else {
+                            if (progress < 0.33f) {
+                                cooking_texture = &env->client->soup_tomato_cooking_1;
+                            } else if (progress < 0.66f) {
+                                cooking_texture = &env->client->soup_tomato_cooking_2;
+                            } else {
+                                cooking_texture = &env->client->soup_tomato_cooking_3;
+                            }
+                        }
+                        
+                        // Draw progress bar below
+                        DrawRectangle(x * env->grid_size + 5,
+                                    y * env->grid_size + env->grid_size - 10,
+                                    (env->grid_size - 10) * progress, 3, GREEN);
+                        DrawRectangleLines(x * env->grid_size + 5,
+                                         y * env->grid_size + env->grid_size - 10,
+                                         env->grid_size - 10, 3, BLACK);
+                    }
+                    else if (pot->cooking_state == COOKED) {
+                        cooking_texture = is_onion_soup ? &env->client->soup_onion_cooked : 
+                                                          &env->client->soup_tomato_cooked;
+                        // Small "READY!" text
+                        DrawText("READY!", x * env->grid_size + 5,
+                               y * env->grid_size + env->grid_size - 10,
+                               8, GREEN);
+                    }
+                    else if (pot->cooking_state == BURNT) {
+                        // Still use cooked texture but tint it darker
+                        cooking_texture = is_onion_soup ? &env->client->soup_onion_cooked : 
+                                                          &env->client->soup_tomato_cooked;
+                        DrawText("BURNT!", x * env->grid_size + 5,
+                               y * env->grid_size + env->grid_size - 10,
+                               8, RED);
+                    }
+                    else if (pot->cooking_state == NOT_COOKING) {
+                        // Show ingredients not cooking yet - use first cooking stage
+                        cooking_texture = is_onion_soup ? &env->client->soup_onion_cooking_1 : 
+                                                          &env->client->soup_tomato_cooking_1;
+                    }
+                    
+                    // Draw the cooking texture on top of the pot
+                    if (cooking_texture && cooking_texture->id != 0) {
+                        Rectangle pot_dest = {
+                            x * env->grid_size + env->grid_size/4,
+                            y * env->grid_size + env->grid_size/4,
+                            env->grid_size/2,
+                            env->grid_size/2
+                        };
+                        Color tint = (pot->cooking_state == BURNT) ? DARKGRAY : WHITE;
+                        DrawTexturePro(*cooking_texture,
+                            (Rectangle){0, 0, cooking_texture->width, cooking_texture->height},
+                            pot_dest, (Vector2){0, 0}, 0, tint);
+                    }
+                }
             }
         }
     }
@@ -553,6 +797,7 @@ void c_render(Overcooked* env) {
 void c_close(Overcooked* env) {
     free(env->grid);
     free(env->items);
+    free(env->cooking_pots);
     if (env->client != NULL) {
         // Unload terrain textures
         UnloadTexture(env->client->floor);
@@ -569,6 +814,16 @@ void c_close(Overcooked* env) {
         UnloadTexture(env->client->dish);
         UnloadTexture(env->client->soup_onion);
         UnloadTexture(env->client->soup_tomato);
+        
+        // Unload cooking stage textures
+        UnloadTexture(env->client->soup_onion_cooking_1);
+        UnloadTexture(env->client->soup_onion_cooking_2);
+        UnloadTexture(env->client->soup_onion_cooking_3);
+        UnloadTexture(env->client->soup_onion_cooked);
+        UnloadTexture(env->client->soup_tomato_cooking_1);
+        UnloadTexture(env->client->soup_tomato_cooking_2);
+        UnloadTexture(env->client->soup_tomato_cooking_3);
+        UnloadTexture(env->client->soup_tomato_cooked);
         
         // Unload chef sprites
         UnloadTexture(env->client->chef_north);
