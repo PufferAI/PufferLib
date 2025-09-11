@@ -28,29 +28,15 @@ def make(
     # Create a basic arena configuration using the make_arena function
     mettagrid_cfg = make_arena(num_agents=num_agents)
 
-    # Apply arena_basic_easy_shaped configuration
-    # Set inventory rewards (matching arena_basic_easy_shaped)
+    # Apply reward shaping based on parameters
     mettagrid_cfg.game.agent.rewards.inventory = {
-        "heart": float(heart_reward),
-        "ore_red": float(ore_reward),
-        "battery_red": float(battery_reward),
-        "laser": 0.5,
-        "armor": 0.5,
-        "blueprint": 0.5,
+        "heart": heart_reward,
+        "ore_red": ore_reward,
+        "battery_red": battery_reward,
+        "laser": 0.05,
+        "armor": 0.05,
+        "blueprint": 0.0,
     }
-
-    # Set inventory max limits (matching arena_basic_easy_shaped)
-    mettagrid_cfg.game.agent.rewards.inventory_max = {
-        "heart": 100,
-        "ore_red": 1,
-        "battery_red": 1,
-        "laser": 1,
-        "armor": 1,
-        "blueprint": 1,
-    }
-
-    # Easy converter: 1 battery_red to 1 heart (instead of 3 to 1)
-    mettagrid_cfg.game.objects["altar"].input_resources = {"battery_red": 1}
 
     return MettaPuff(mettagrid_cfg, render_mode=render_mode, buf=buf, seed=seed)
 
@@ -66,48 +52,30 @@ def oc_divide(a, b):
         return int(result)
     return result
 
-
 class MettaPuff(MettaGridEnv):
-    def __init__(self, env_cfg, render_mode="human", buf=None, seed=0):
+    def __init__(self, env_cfg, render_mode='human', buf=None, seed=0):
         self.replay_writer = None
-        # if render_mode == 'auto':
+        #if render_mode == 'auto':
         #    self.replay_writer = ReplayWriter("metta/")
 
-        super().__init__(env_cfg=env_cfg, render_mode=render_mode, replay_writer=self.replay_writer)
+        super().__init__(
+            env_cfg=env_cfg,
+            render_mode=render_mode,
+            replay_writer=self.replay_writer,
+        )
         self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.num_agents)
         self.actions = self.actions.astype(np.int32)
 
-    @property
-    def single_action_space(self):
-        # Prefer exposing a flattened Discrete action space matching Metta's
-        # internal "full" action logits when we can determine the action
-        # parameterization. This keeps PufferLib's sampling path (which
-        # expects a single discrete action) compatible with Metta's joint
-        # action representation.
-        try:
-            # MettaGridEnv exposes `max_action_args` describing per-action
-            # parameter counts; the flattened action count is sum(max_param+1).
-            max_args = getattr(self, "max_action_args", None)
-            if max_args is not None:
-                total = int(sum([int(x) + 1 for x in max_args]))
-                # Return a 1-D MultiDiscrete so atn_shape is non-empty
-                # and the shared-memory actions buffer is 2-D (workers, agents, 1)
-                return gymnasium.spaces.MultiDiscrete([total], dtype=np.int32)
-        except Exception:
-            pass
-
-        # Fallback to previous behavior
-        return gymnasium.spaces.MultiDiscrete(super().single_action_space.nvec, dtype=np.int32)
 
     def step(self, actions):
         obs, rew, term, trunc, info = super().step(actions)
 
         if all(term) or all(trunc):
             self.reset()
-            if "agent_raw" in info:
-                del info["agent_raw"]
-            if "episode_rewards" in info:
-                info["score"] = info["episode_rewards"]
+            if 'agent_raw' in info:
+                del info['agent_raw']
+            if 'episode_rewards' in info:
+                info['score'] = info['episode_rewards']
 
         else:
             info = []
