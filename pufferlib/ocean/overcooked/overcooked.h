@@ -405,12 +405,8 @@ void c_render(Overcooked* env) {
                     texture = &env->client->counter;  // Use counter for cutting board
                     break;
                 case INGREDIENT_BOX:
-                    // Check if it's onion or tomato box based on position
-                    if (x == 0) {
-                        texture = &env->client->onions_box;
-                    } else {
-                        texture = &env->client->tomatoes_box;
-                    }
+                    // for now, we only use the onions box
+                    texture = &env->client->onions_box;
                     break;
                 case SERVING_AREA:
                     texture = &env->client->serve;
