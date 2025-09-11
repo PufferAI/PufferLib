@@ -356,10 +356,10 @@ void c_render(Overcooked* env) {
         env->client->soup_tomato = LoadTexture("pufferlib/resources/overcooked/objects/soup-tomato-cooked.png");
         
         // Load chef sprites
-        env->client->chef_north = LoadTexture("pufferlib/resources/overcooked/chefs/NORTH-bluehat.png");
-        env->client->chef_south = LoadTexture("pufferlib/resources/overcooked/chefs/SOUTH-bluehat.png");
-        env->client->chef_east = LoadTexture("pufferlib/resources/overcooked/chefs/EAST-bluehat.png");
-        env->client->chef_west = LoadTexture("pufferlib/resources/overcooked/chefs/WEST-bluehat.png");
+        env->client->chef_north = LoadTexture("pufferlib/resources/overcooked/chefs/NORTH.png");
+        env->client->chef_south = LoadTexture("pufferlib/resources/overcooked/chefs/SOUTH.png");
+        env->client->chef_east = LoadTexture("pufferlib/resources/overcooked/chefs/EAST.png");
+        env->client->chef_west = LoadTexture("pufferlib/resources/overcooked/chefs/WEST.png");
         env->client->chef_north_onion = LoadTexture("pufferlib/resources/overcooked/chefs/NORTH-onion.png");
         env->client->chef_south_onion = LoadTexture("pufferlib/resources/overcooked/chefs/SOUTH-onion.png");
         env->client->chef_east_onion = LoadTexture("pufferlib/resources/overcooked/chefs/EAST-onion.png");
