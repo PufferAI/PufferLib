@@ -48,9 +48,39 @@ typedef struct {
 } Log;
 
 typedef struct {
-    Texture2D tiles;
-    Texture2D items;
-    Texture2D agent;
+    // Terrain textures
+    Texture2D floor;
+    Texture2D counter;
+    Texture2D pot;
+    Texture2D serve;
+    Texture2D onions_box;
+    Texture2D tomatoes_box;
+    Texture2D dishes_box;
+    
+    // Object textures
+    Texture2D onion;
+    Texture2D tomato;
+    Texture2D dish;
+    Texture2D soup_onion;
+    Texture2D soup_tomato;
+    
+    // Chef sprites (4 directions)
+    Texture2D chef_north;
+    Texture2D chef_south;
+    Texture2D chef_east;
+    Texture2D chef_west;
+    Texture2D chef_north_onion;
+    Texture2D chef_south_onion;
+    Texture2D chef_east_onion;
+    Texture2D chef_west_onion;
+    Texture2D chef_north_tomato;
+    Texture2D chef_south_tomato;
+    Texture2D chef_east_tomato;
+    Texture2D chef_west_tomato;
+    Texture2D chef_north_dish;
+    Texture2D chef_south_dish;
+    Texture2D chef_east_dish;
+    Texture2D chef_west_dish;
 } Client;
 
 typedef struct {
@@ -309,7 +339,39 @@ void c_render(Overcooked* env) {
         SetTargetFPS(60);
         env->client = (Client*)calloc(1, sizeof(Client));
         
-        // Textures can be loaded here if available
+        // Load terrain textures
+        env->client->floor = LoadTexture("pufferlib/resources/overcooked/terrain/floor.png");
+        env->client->counter = LoadTexture("pufferlib/resources/overcooked/terrain/counter.png");
+        env->client->pot = LoadTexture("pufferlib/resources/overcooked/terrain/pot.png");
+        env->client->serve = LoadTexture("pufferlib/resources/overcooked/terrain/serve.png");
+        env->client->onions_box = LoadTexture("pufferlib/resources/overcooked/terrain/onions.png");
+        env->client->tomatoes_box = LoadTexture("pufferlib/resources/overcooked/terrain/tomatoes.png");
+        env->client->dishes_box = LoadTexture("pufferlib/resources/overcooked/terrain/dishes.png");
+        
+        // Load object textures
+        env->client->onion = LoadTexture("pufferlib/resources/overcooked/objects/onion.png");
+        env->client->tomato = LoadTexture("pufferlib/resources/overcooked/objects/tomato.png");
+        env->client->dish = LoadTexture("pufferlib/resources/overcooked/objects/dish.png");
+        env->client->soup_onion = LoadTexture("pufferlib/resources/overcooked/objects/soup-onion-cooked.png");
+        env->client->soup_tomato = LoadTexture("pufferlib/resources/overcooked/objects/soup-tomato-cooked.png");
+        
+        // Load chef sprites
+        env->client->chef_north = LoadTexture("pufferlib/resources/overcooked/chefs/NORTH-bluehat.png");
+        env->client->chef_south = LoadTexture("pufferlib/resources/overcooked/chefs/SOUTH-bluehat.png");
+        env->client->chef_east = LoadTexture("pufferlib/resources/overcooked/chefs/EAST-bluehat.png");
+        env->client->chef_west = LoadTexture("pufferlib/resources/overcooked/chefs/WEST-bluehat.png");
+        env->client->chef_north_onion = LoadTexture("pufferlib/resources/overcooked/chefs/NORTH-onion.png");
+        env->client->chef_south_onion = LoadTexture("pufferlib/resources/overcooked/chefs/SOUTH-onion.png");
+        env->client->chef_east_onion = LoadTexture("pufferlib/resources/overcooked/chefs/EAST-onion.png");
+        env->client->chef_west_onion = LoadTexture("pufferlib/resources/overcooked/chefs/WEST-onion.png");
+        env->client->chef_north_tomato = LoadTexture("pufferlib/resources/overcooked/chefs/NORTH-tomato.png");
+        env->client->chef_south_tomato = LoadTexture("pufferlib/resources/overcooked/chefs/SOUTH-tomato.png");
+        env->client->chef_east_tomato = LoadTexture("pufferlib/resources/overcooked/chefs/EAST-tomato.png");
+        env->client->chef_west_tomato = LoadTexture("pufferlib/resources/overcooked/chefs/WEST-tomato.png");
+        env->client->chef_north_dish = LoadTexture("pufferlib/resources/overcooked/chefs/NORTH-dish.png");
+        env->client->chef_south_dish = LoadTexture("pufferlib/resources/overcooked/chefs/SOUTH-dish.png");
+        env->client->chef_east_dish = LoadTexture("pufferlib/resources/overcooked/chefs/EAST-dish.png");
+        env->client->chef_west_dish = LoadTexture("pufferlib/resources/overcooked/chefs/WEST-dish.png");
     }
     
     if (IsKeyDown(KEY_ESCAPE)) exit(0);
@@ -317,118 +379,176 @@ void c_render(Overcooked* env) {
     BeginDrawing();
     ClearBackground((Color){240, 240, 240, 255});
     
-    // Draw grid tiles
+    // Draw grid tiles with textures
     for (int y = 0; y < env->height; y++) {
         for (int x = 0; x < env->width; x++) {
             int idx = y * env->width + x;
-            Color tile_color = WHITE;
+            Rectangle dest = {x * env->grid_size, y * env->grid_size, env->grid_size, env->grid_size};
             
-            switch (env->grid[idx]) {
-                case WALL:
-                    tile_color = DARKGRAY;
-                    break;
-                case COUNTER:
-                    tile_color = BROWN;
-                    break;
-                case STOVE:
-                    tile_color = RED;
-                    break;
-                case CUTTING_BOARD:
-                    tile_color = BEIGE;
-                    break;
-                case INGREDIENT_BOX:
-                    tile_color = GREEN;
-                    break;
-                case SERVING_AREA:
-                    tile_color = GOLD;
-                    break;
-                case PLATE_BOX:
-                    tile_color = SKYBLUE;
-                    break;
-                case EMPTY:
-                    tile_color = WHITE;
-                    break;
+            // Draw floor for all tiles first
+            if (env->client->floor.id != 0) {
+                DrawTexturePro(env->client->floor, 
+                    (Rectangle){0, 0, env->client->floor.width, env->client->floor.height},
+                    dest, (Vector2){0, 0}, 0, WHITE);
             }
             
-            DrawRectangle(
-                x * env->grid_size,
-                y * env->grid_size,
-                env->grid_size,
-                env->grid_size,
-                tile_color
-            );
+            // Draw specific tile overlays
+            Texture2D* texture = NULL;
+            switch (env->grid[idx]) {
+                case COUNTER:
+                    texture = &env->client->counter;
+                    break;
+                case STOVE:
+                    texture = &env->client->pot;
+                    break;
+                case CUTTING_BOARD:
+                    texture = &env->client->counter;  // Use counter for cutting board
+                    break;
+                case INGREDIENT_BOX:
+                    // Check if it's onion or tomato box based on position
+                    if (x == 0) {
+                        texture = &env->client->onions_box;
+                    } else {
+                        texture = &env->client->tomatoes_box;
+                    }
+                    break;
+                case SERVING_AREA:
+                    texture = &env->client->serve;
+                    break;
+                case PLATE_BOX:
+                    texture = &env->client->dishes_box;
+                    break;
+                case WALL:
+                    // Draw a dark rectangle for walls
+                    DrawRectangle(x * env->grid_size, y * env->grid_size, 
+                                  env->grid_size, env->grid_size, DARKGRAY);
+                    continue;
+            }
             
-            // Draw grid lines for better visibility
-            DrawRectangleLines(
-                x * env->grid_size,
-                y * env->grid_size,
-                env->grid_size,
-                env->grid_size,
-                LIGHTGRAY
-            );
+            // Draw the texture if available
+            if (texture && texture->id != 0) {
+                DrawTexturePro(*texture,
+                    (Rectangle){0, 0, texture->width, texture->height},
+                    dest, (Vector2){0, 0}, 0, WHITE);
+            }
         }
     }
     
-    // Draw items
+    // Draw items with textures
     for (int i = 0; i < env->num_items; i++) {
-        Color item_color = GRAY;
+        Texture2D* texture = NULL;
         switch (env->items[i].type) {
             case TOMATO:
-                item_color = RED;
+                texture = &env->client->tomato;
                 break;
             case ONION:
-                item_color = YELLOW;
+                texture = &env->client->onion;
                 break;
             case PLATE:
-                item_color = WHITE;
+                texture = &env->client->dish;
                 break;
             case SOUP:
-                item_color = ORANGE;
+                // Could check soup type if tracked
+                texture = &env->client->soup_onion;
                 break;
         }
         
-        DrawCircle(
-            env->items[i].x * env->grid_size + env->grid_size/2,
-            env->items[i].y * env->grid_size + env->grid_size/2,
-            env->grid_size/4,
-            item_color
-        );
+        if (texture && texture->id != 0) {
+            Rectangle dest = {
+                env->items[i].x * env->grid_size + env->grid_size/4,
+                env->items[i].y * env->grid_size + env->grid_size/4,
+                env->grid_size/2,
+                env->grid_size/2
+            };
+            DrawTexturePro(*texture,
+                (Rectangle){0, 0, texture->width, texture->height},
+                dest, (Vector2){0, 0}, 0, WHITE);
+        } else {
+            // Fallback to colored circle if texture not loaded
+            Color item_color = GRAY;
+            switch (env->items[i].type) {
+                case TOMATO: item_color = RED; break;
+                case ONION: item_color = YELLOW; break;
+                case PLATE: item_color = WHITE; break;
+                case SOUP: item_color = ORANGE; break;
+            }
+            DrawCircle(
+                env->items[i].x * env->grid_size + env->grid_size/2,
+                env->items[i].y * env->grid_size + env->grid_size/2,
+                env->grid_size/4,
+                item_color
+            );
+        }
     }
     
-    // Draw agent with color based on held item
-    Color agent_color = get_agent_color(env->agent.held_item);
-    DrawRectangle(
-        env->agent.x * env->grid_size + env->grid_size/4,
-        env->agent.y * env->grid_size + env->grid_size/4,
-        env->grid_size/2,
-        env->grid_size/2,
-        agent_color
-    );
+    // Draw agent with appropriate chef sprite
+    Texture2D* chef_texture = NULL;
     
-    // Draw held item above agent
-    if (env->agent.held_item != NO_ITEM) {
-        Color held_color = GRAY;
-        switch (env->agent.held_item) {
-            case TOMATO:
-                held_color = RED;
-                break;
-            case ONION:
-                held_color = YELLOW;
-                break;
-            case PLATE:
-                held_color = WHITE;
-                break;
-            case SOUP:
-                held_color = ORANGE;
-                break;
+    // Select chef texture based on direction and held item
+    if (env->agent.held_item == NO_ITEM) {
+        // Empty handed chef
+        switch (env->agent.facing_direction) {
+            case 0: chef_texture = &env->client->chef_north; break;
+            case 1: chef_texture = &env->client->chef_south; break;
+            case 2: chef_texture = &env->client->chef_west; break;
+            case 3: chef_texture = &env->client->chef_east; break;
         }
-        
-        DrawCircle(
-            env->agent.x * env->grid_size + env->grid_size/2,
+    } else if (env->agent.held_item == ONION) {
+        switch (env->agent.facing_direction) {
+            case 0: chef_texture = &env->client->chef_north_onion; break;
+            case 1: chef_texture = &env->client->chef_south_onion; break;
+            case 2: chef_texture = &env->client->chef_west_onion; break;
+            case 3: chef_texture = &env->client->chef_east_onion; break;
+        }
+    } else if (env->agent.held_item == TOMATO) {
+        switch (env->agent.facing_direction) {
+            case 0: chef_texture = &env->client->chef_north_tomato; break;
+            case 1: chef_texture = &env->client->chef_south_tomato; break;
+            case 2: chef_texture = &env->client->chef_west_tomato; break;
+            case 3: chef_texture = &env->client->chef_east_tomato; break;
+        }
+    } else if (env->agent.held_item == PLATE || env->agent.held_item == SOUP) {
+        switch (env->agent.facing_direction) {
+            case 0: chef_texture = &env->client->chef_north_dish; break;
+            case 1: chef_texture = &env->client->chef_south_dish; break;
+            case 2: chef_texture = &env->client->chef_west_dish; break;
+            case 3: chef_texture = &env->client->chef_east_dish; break;
+        }
+    }
+    
+    // Draw the chef sprite if texture is loaded
+    if (chef_texture && chef_texture->id != 0) {
+        Rectangle dest = {
+            env->agent.x * env->grid_size,
             env->agent.y * env->grid_size,
-            env->grid_size/6,
-            held_color
+            env->grid_size,
+            env->grid_size
+        };
+        DrawTexturePro(*chef_texture,
+            (Rectangle){0, 0, chef_texture->width, chef_texture->height},
+            dest, (Vector2){0, 0}, 0, WHITE);
+    } else {
+        // Fallback to colored rectangle with item indicator
+        Color agent_color = get_agent_color(env->agent.held_item);
+        DrawRectangle(
+            env->agent.x * env->grid_size + env->grid_size/4,
+            env->agent.y * env->grid_size + env->grid_size/4,
+            env->grid_size/2,
+            env->grid_size/2,
+            agent_color
         );
+        
+        // Draw direction indicator
+        int dir_x = env->agent.x * env->grid_size + env->grid_size/2;
+        int dir_y = env->agent.y * env->grid_size + env->grid_size/2;
+        int end_x = dir_x, end_y = dir_y;
+        switch (env->agent.facing_direction) {
+            case 0: end_y -= env->grid_size/4; break; // Up
+            case 1: end_y += env->grid_size/4; break; // Down
+            case 2: end_x -= env->grid_size/4; break; // Left  
+            case 3: end_x += env->grid_size/4; break; // Right
+        }
+        DrawLine(dir_x, dir_y, end_x, end_y, BLACK);
     }
     
     EndDrawing();
@@ -438,6 +558,40 @@ void c_close(Overcooked* env) {
     free(env->grid);
     free(env->items);
     if (env->client != NULL) {
+        // Unload terrain textures
+        UnloadTexture(env->client->floor);
+        UnloadTexture(env->client->counter);
+        UnloadTexture(env->client->pot);
+        UnloadTexture(env->client->serve);
+        UnloadTexture(env->client->onions_box);
+        UnloadTexture(env->client->tomatoes_box);
+        UnloadTexture(env->client->dishes_box);
+        
+        // Unload object textures
+        UnloadTexture(env->client->onion);
+        UnloadTexture(env->client->tomato);
+        UnloadTexture(env->client->dish);
+        UnloadTexture(env->client->soup_onion);
+        UnloadTexture(env->client->soup_tomato);
+        
+        // Unload chef sprites
+        UnloadTexture(env->client->chef_north);
+        UnloadTexture(env->client->chef_south);
+        UnloadTexture(env->client->chef_east);
+        UnloadTexture(env->client->chef_west);
+        UnloadTexture(env->client->chef_north_onion);
+        UnloadTexture(env->client->chef_south_onion);
+        UnloadTexture(env->client->chef_east_onion);
+        UnloadTexture(env->client->chef_west_onion);
+        UnloadTexture(env->client->chef_north_tomato);
+        UnloadTexture(env->client->chef_south_tomato);
+        UnloadTexture(env->client->chef_east_tomato);
+        UnloadTexture(env->client->chef_west_tomato);
+        UnloadTexture(env->client->chef_north_dish);
+        UnloadTexture(env->client->chef_south_dish);
+        UnloadTexture(env->client->chef_east_dish);
+        UnloadTexture(env->client->chef_west_dish);
+        
         CloseWindow();
         free(env->client);
     }
