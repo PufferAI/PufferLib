@@ -23,7 +23,8 @@
 #define TOMATO 1
 #define ONION 2
 #define PLATE 3
-#define SOUP 4
+#define SOUP 4  // Generic soup (deprecated)
+#define PLATED_SOUP 5  // Soup on a plate with ingredient info
 
 // Cooking states
 #define NOT_COOKING 0
@@ -102,6 +103,19 @@ typedef struct {
     Texture2D chef_south_dish;
     Texture2D chef_east_dish;
     Texture2D chef_west_dish;
+    // Chef sprites holding soup
+    Texture2D chef_north_soup_onion;
+    Texture2D chef_south_soup_onion;
+    Texture2D chef_east_soup_onion;
+    Texture2D chef_west_soup_onion;
+    Texture2D chef_north_soup_tomato;
+    Texture2D chef_south_soup_tomato;
+    Texture2D chef_east_soup_tomato;
+    Texture2D chef_west_soup_tomato;
+    
+    // Plated soup textures
+    Texture2D soup_onion_dish;
+    Texture2D soup_tomato_dish;
 } Client;
 
 typedef struct {
@@ -109,6 +123,10 @@ typedef struct {
     float y;
     int held_item;  // Item type the agent is holding (NO_ITEM if empty)
     int facing_direction;  // 0=up, 1=down, 2=left, 3=right
+    // Temporary storage for soup recipe when holding plated soup
+    int held_soup_onions;
+    int held_soup_tomatoes;
+    int held_soup_total;
 } Agent;
 
 typedef struct {
@@ -116,6 +134,10 @@ typedef struct {
     float x;
     float y;
     int state;  // For items that can change state (e.g., cooking progress)
+    // For plated soups, track the recipe
+    int num_onions;     // Number of onions in the soup
+    int num_tomatoes;   // Number of tomatoes in the soup
+    int total_ingredients;  // Total ingredient count
 } Item;
 
 typedef struct {
@@ -258,18 +280,30 @@ static void handle_interaction(Overcooked* env) {
                 pot->cooking_state = COOKING;
                 pot->cooking_progress = 0;
             }
-            // Pick up cooked soup
+            // Pick up cooked soup only with a plate
             else if (pot->cooking_state == COOKED) {
-                env->agent.held_item = SOUP;
-                // Reset pot
-                pot->cooking_state = NOT_COOKING;
-                pot->cooking_progress = 0;
-                pot->ingredient_count = 0;
-                pot->num_onions = 0;
-                pot->num_tomatoes = 0;
-                for (int i = 0; i < MAX_INGREDIENTS; i++) {
-                    pot->ingredient_types[i] = NO_ITEM;
-                }
+                // Can't pick up soup without a plate
+                return;
+            }
+        }
+        // If agent is holding a plate and pot has cooked soup
+        else if (env->agent.held_item == PLATE && pot->cooking_state == COOKED) {
+            // Create plated soup with ingredient info
+            env->agent.held_item = PLATED_SOUP;
+            // Store the soup's ingredient info in agent's temporary state
+            // We'll need to track this when placing the soup down
+            env->agent.held_soup_onions = pot->num_onions;
+            env->agent.held_soup_tomatoes = pot->num_tomatoes;
+            env->agent.held_soup_total = pot->ingredient_count;
+            
+            // Reset pot
+            pot->cooking_state = NOT_COOKING;
+            pot->cooking_progress = 0;
+            pot->ingredient_count = 0;
+            pot->num_onions = 0;
+            pot->num_tomatoes = 0;
+            for (int i = 0; i < MAX_INGREDIENTS; i++) {
+                pot->ingredient_types[i] = NO_ITEM;
             }
         }
         return;
@@ -279,13 +313,35 @@ static void handle_interaction(Overcooked* env) {
     if (env->agent.held_item != NO_ITEM) {
         // Can only put down on empty counters or cutting boards
         if ((tile == COUNTER || tile == CUTTING_BOARD) && item == NULL) {
-            add_item(env, env->agent.held_item, target_x, target_y);
+            // Special handling for plated soup to preserve recipe
+            if (env->agent.held_item == PLATED_SOUP) {
+                add_item(env, env->agent.held_item, target_x, target_y);
+                // Transfer soup recipe to the placed item
+                Item* placed_soup = get_item_at(env, target_x, target_y);
+                if (placed_soup) {
+                    placed_soup->num_onions = env->agent.held_soup_onions;
+                    placed_soup->num_tomatoes = env->agent.held_soup_tomatoes;
+                    placed_soup->total_ingredients = env->agent.held_soup_total;
+                }
+                // Clear agent's soup info
+                env->agent.held_soup_onions = 0;
+                env->agent.held_soup_tomatoes = 0;
+                env->agent.held_soup_total = 0;
+            } else {
+                add_item(env, env->agent.held_item, target_x, target_y);
+            }
             env->agent.held_item = NO_ITEM;
         }
     }
     else {
         // Pick up item if there is one
         if (item != NULL) {
+            // Special handling for plated soup to preserve recipe
+            if (item->type == PLATED_SOUP) {
+                env->agent.held_soup_onions = item->num_onions;
+                env->agent.held_soup_tomatoes = item->num_tomatoes;
+                env->agent.held_soup_total = item->total_ingredients;
+            }
             env->agent.held_item = item->type;
             remove_item(env, target_x, target_y);
         }
@@ -322,6 +378,9 @@ static void add_item(Overcooked* env, int type, int x, int y) {
         env->items[env->num_items].x = x;
         env->items[env->num_items].y = y;
         env->items[env->num_items].state = 0;
+        env->items[env->num_items].num_onions = 0;
+        env->items[env->num_items].num_tomatoes = 0;
+        env->items[env->num_items].total_ingredients = 0;
         env->num_items++;
     }
 }
@@ -350,6 +409,8 @@ static Color get_agent_color(int held_item) {
             return (Color){200, 200, 220, 255}; // Light blue-gray when holding plate
         case SOUP:
             return (Color){255, 140, 0, 255};   // Orange when holding soup
+        case PLATED_SOUP:
+            return (Color){255, 165, 0, 255};   // Brighter orange when holding plated soup
         default:
             return BLUE;      // Default to blue
     }
@@ -443,6 +504,9 @@ void c_reset(Overcooked* env) {
     env->agent.y = 2;
     env->agent.held_item = NO_ITEM;
     env->agent.facing_direction = 0;
+    env->agent.held_soup_onions = 0;
+    env->agent.held_soup_tomatoes = 0;
+    env->agent.held_soup_total = 0;
     
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0;
@@ -512,6 +576,8 @@ void c_render(Overcooked* env) {
         env->client->dish = LoadTexture("pufferlib/resources/overcooked/objects/dish.png");
         env->client->soup_onion = LoadTexture("pufferlib/resources/overcooked/objects/soup-onion-cooked.png");
         env->client->soup_tomato = LoadTexture("pufferlib/resources/overcooked/objects/soup-tomato-cooked.png");
+        env->client->soup_onion_dish = LoadTexture("pufferlib/resources/overcooked/objects/soup-onion-dish.png");
+        env->client->soup_tomato_dish = LoadTexture("pufferlib/resources/overcooked/objects/soup-tomato-dish.png");
         
         // Load cooking stage textures
         env->client->soup_onion_cooking_1 = LoadTexture("pufferlib/resources/overcooked/objects/soup-onion-1-cooking.png");
@@ -540,6 +606,16 @@ void c_render(Overcooked* env) {
         env->client->chef_south_dish = LoadTexture("pufferlib/resources/overcooked/chefs/SOUTH-dish.png");
         env->client->chef_east_dish = LoadTexture("pufferlib/resources/overcooked/chefs/EAST-dish.png");
         env->client->chef_west_dish = LoadTexture("pufferlib/resources/overcooked/chefs/WEST-dish.png");
+        
+        // Load chef sprites holding soup
+        env->client->chef_north_soup_onion = LoadTexture("pufferlib/resources/overcooked/chefs/NORTH-soup-onion.png");
+        env->client->chef_south_soup_onion = LoadTexture("pufferlib/resources/overcooked/chefs/SOUTH-soup-onion.png");
+        env->client->chef_east_soup_onion = LoadTexture("pufferlib/resources/overcooked/chefs/EAST-soup-onion.png");
+        env->client->chef_west_soup_onion = LoadTexture("pufferlib/resources/overcooked/chefs/WEST-soup-onion.png");
+        env->client->chef_north_soup_tomato = LoadTexture("pufferlib/resources/overcooked/chefs/NORTH-soup-tomato.png");
+        env->client->chef_south_soup_tomato = LoadTexture("pufferlib/resources/overcooked/chefs/SOUTH-soup-tomato.png");
+        env->client->chef_east_soup_tomato = LoadTexture("pufferlib/resources/overcooked/chefs/EAST-soup-tomato.png");
+        env->client->chef_west_soup_tomato = LoadTexture("pufferlib/resources/overcooked/chefs/WEST-soup-tomato.png");
     }
     
     if (IsKeyDown(KEY_ESCAPE)) exit(0);
@@ -688,8 +764,15 @@ void c_render(Overcooked* env) {
                 texture = &env->client->dish;
                 break;
             case SOUP:
-                // Could check soup type if tracked
                 texture = &env->client->soup_onion;
+                break;
+            case PLATED_SOUP:
+                // Use the plated soup sprites
+                if (env->items[i].num_onions >= env->items[i].num_tomatoes) {
+                    texture = &env->client->soup_onion_dish;
+                } else {
+                    texture = &env->client->soup_tomato_dish;
+                }
                 break;
         }
         
@@ -711,6 +794,7 @@ void c_render(Overcooked* env) {
                 case ONION: item_color = YELLOW; break;
                 case PLATE: item_color = WHITE; break;
                 case SOUP: item_color = ORANGE; break;
+                case PLATED_SOUP: item_color = ORANGE; break;
             }
             DrawCircle(
                 env->items[i].x * env->grid_size + env->grid_size/2,
@@ -747,12 +831,30 @@ void c_render(Overcooked* env) {
             case 2: chef_texture = &env->client->chef_west_tomato; break;
             case 3: chef_texture = &env->client->chef_east_tomato; break;
         }
-    } else if (env->agent.held_item == PLATE || env->agent.held_item == SOUP) {
+    } else if (env->agent.held_item == PLATE) {
         switch (env->agent.facing_direction) {
             case 0: chef_texture = &env->client->chef_north_dish; break;
             case 1: chef_texture = &env->client->chef_south_dish; break;
             case 2: chef_texture = &env->client->chef_west_dish; break;
             case 3: chef_texture = &env->client->chef_east_dish; break;
+        }
+    } else if (env->agent.held_item == PLATED_SOUP) {
+        // Use soup-specific sprites based on the soup type
+        bool is_onion_soup = (env->agent.held_soup_onions >= env->agent.held_soup_tomatoes);
+        if (is_onion_soup) {
+            switch (env->agent.facing_direction) {
+                case 0: chef_texture = &env->client->chef_north_soup_onion; break;
+                case 1: chef_texture = &env->client->chef_south_soup_onion; break;
+                case 2: chef_texture = &env->client->chef_west_soup_onion; break;
+                case 3: chef_texture = &env->client->chef_east_soup_onion; break;
+            }
+        } else {
+            switch (env->agent.facing_direction) {
+                case 0: chef_texture = &env->client->chef_north_soup_tomato; break;
+                case 1: chef_texture = &env->client->chef_south_soup_tomato; break;
+                case 2: chef_texture = &env->client->chef_west_soup_tomato; break;
+                case 3: chef_texture = &env->client->chef_east_soup_tomato; break;
+            }
         }
     }
     
@@ -814,6 +916,8 @@ void c_close(Overcooked* env) {
         UnloadTexture(env->client->dish);
         UnloadTexture(env->client->soup_onion);
         UnloadTexture(env->client->soup_tomato);
+        UnloadTexture(env->client->soup_onion_dish);
+        UnloadTexture(env->client->soup_tomato_dish);
         
         // Unload cooking stage textures
         UnloadTexture(env->client->soup_onion_cooking_1);
@@ -842,6 +946,14 @@ void c_close(Overcooked* env) {
         UnloadTexture(env->client->chef_south_dish);
         UnloadTexture(env->client->chef_east_dish);
         UnloadTexture(env->client->chef_west_dish);
+        UnloadTexture(env->client->chef_north_soup_onion);
+        UnloadTexture(env->client->chef_south_soup_onion);
+        UnloadTexture(env->client->chef_east_soup_onion);
+        UnloadTexture(env->client->chef_west_soup_onion);
+        UnloadTexture(env->client->chef_north_soup_tomato);
+        UnloadTexture(env->client->chef_south_soup_tomato);
+        UnloadTexture(env->client->chef_east_soup_tomato);
+        UnloadTexture(env->client->chef_west_soup_tomato);
         
         CloseWindow();
         free(env->client);
