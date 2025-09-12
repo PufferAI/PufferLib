@@ -380,6 +380,19 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
         return;
     }
     
+    // Check for serving completed dish
+    if (tile == SERVING_AREA && agent->held_item == PLATED_SOUP) {
+        // Evaluate the dish and assign rewards based on rules
+        evaluate_dish_served(env, agent);
+        
+        // Clear the plated soup from agent's hands (whether correct or not)
+        agent->held_item = NO_ITEM;
+        agent->held_soup_onions = 0;
+        agent->held_soup_tomatoes = 0;
+        agent->held_soup_total = 0;
+        return;
+    }
+    
     // Normal interaction (non-stove)
     if (agent->held_item != NO_ITEM) {
         // Can only put down on empty counters or cutting boards
@@ -558,6 +571,49 @@ static void update_cooking(Overcooked* env) {
             } else if (pot->cooking_progress >= BURN_TIME) {
                 pot->cooking_state = BURNT;
             }
+        }
+    }
+}
+
+// Dedicated function to evaluate dish and assign rewards
+// Easy to modify rules here without changing interaction logic
+static void evaluate_dish_served(Overcooked* env, Agent* agent) {
+    // Rule 1: Check if soup has exactly 3 onions
+    int is_correct_recipe = (agent->held_soup_onions == 3);
+    
+    // You can add more rules here, e.g.:
+    // int has_no_tomatoes = (agent->held_soup_tomatoes == 0);
+    // int is_not_burnt = 1;  // Could track if soup was burnt
+    // int served_quickly = (env->current_step < 100);
+    
+    if (is_correct_recipe) {
+        // Correct dish - give full reward to all agents
+        float reward = env->reward_dish_served;
+        
+        // Could add bonuses based on other conditions
+        // if (served_quickly) reward += 5.0f;
+        
+        for (int i = 0; i < env->num_agents; i++) {
+            env->rewards[i] += reward;
+        }
+        
+        env->log.dishes_served++;
+        env->log.score += reward;
+        
+        // Track any special achievements
+        // if (agent->held_soup_total == MAX_INGREDIENTS) {
+        //     env->log.cooperation_score += 1.0f;
+        // }
+    } else {
+        // Wrong recipe - apply penalty
+        float penalty = 1.0f;
+        
+        // Could vary penalty based on how wrong it is
+        // if (agent->held_soup_onions == 0) penalty = 2.0f;  // No onions at all
+        // else if (agent->held_soup_tomatoes > 0) penalty = 0.5f;  // Has tomatoes (minor mistake)
+        
+        for (int i = 0; i < env->num_agents; i++) {
+            env->rewards[i] -= penalty;
         }
     }
 }
