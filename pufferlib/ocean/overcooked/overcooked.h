@@ -195,6 +195,7 @@ static void remove_item(Overcooked* env, int x, int y);
 static CookingPot* get_pot_at(Overcooked* env, int x, int y);
 static void init_cooking_pots(Overcooked* env);
 static void update_cooking(Overcooked* env);
+static void evaluate_dish_served(Overcooked* env, Agent* agent);
 
 // From overcooked-ai repo; 5x5
 static const char CRAMPED_ROOM[5][5] = {
@@ -241,7 +242,6 @@ static void compute_observations(Overcooked* env) {
     int obs_idx = 0;
     
     for (int agent_idx = 0; agent_idx < env->num_agents; agent_idx++) {
-        Agent* agent = &env->agents[agent_idx];
         obs_idx = 0;  // Reset for each agent
         
         // 1. Grid tiles (5x5 = 25 values) - normalized tile types
@@ -718,7 +718,10 @@ void c_step(Overcooked* env) {
 // Required function. Should handle creating the client on first call
 void c_render(Overcooked* env) {
     if (env->client == NULL) {
-        InitWindow(env->width * env->grid_size, env->height * env->grid_size, "PufferLib Overcooked");
+        // Add extra height for status display
+        int window_width = env->width * env->grid_size;
+        int window_height = env->height * env->grid_size + 80;  // Extra 80 pixels for status
+        InitWindow(window_width, window_height, "PufferLib Overcooked");
         SetTargetFPS(60);
         env->client = (Client*)calloc(1, sizeof(Client));
         
@@ -784,11 +787,17 @@ void c_render(Overcooked* env) {
     BeginDrawing();
     ClearBackground((Color){240, 240, 240, 255});
     
-    // Draw grid tiles with textures
+    // Draw game status at the top
+    DrawText(TextFormat("Step: %d / %d", env->current_step, env->max_steps), 10, 10, 20, BLACK);
+    DrawText(TextFormat("Dishes Served: %d", (int)env->log.dishes_served), 10, 35, 20, BLACK);
+    DrawText("Recipe: 3 Onions", 10, 60, 16, DARKGRAY);
+    
+    // Draw grid tiles with textures (offset by 80 pixels for status area)
+    int grid_offset_y = 80;
     for (int y = 0; y < env->height; y++) {
         for (int x = 0; x < env->width; x++) {
             int idx = y * env->width + x;
-            Rectangle dest = {x * env->grid_size, y * env->grid_size, env->grid_size, env->grid_size};
+            Rectangle dest = {x * env->grid_size, y * env->grid_size + grid_offset_y, env->grid_size, env->grid_size};
             
             // Draw floor for all tiles first
             if (env->client->floor.id != 0) {
@@ -865,10 +874,10 @@ void c_render(Overcooked* env) {
                         
                         // Draw progress bar below
                         DrawRectangle(x * env->grid_size + 5,
-                                    y * env->grid_size + env->grid_size - 10,
+                                    y * env->grid_size + grid_offset_y + env->grid_size - 10,
                                     (env->grid_size - 10) * progress, 3, GREEN);
                         DrawRectangleLines(x * env->grid_size + 5,
-                                         y * env->grid_size + env->grid_size - 10,
+                                         y * env->grid_size + grid_offset_y + env->grid_size - 10,
                                          env->grid_size - 10, 3, BLACK);
                     }
                     else if (pot->cooking_state == COOKED) {
@@ -876,7 +885,7 @@ void c_render(Overcooked* env) {
                                                           &env->client->soup_tomato_cooked;
                         // Small "READY!" text
                         DrawText("READY!", x * env->grid_size + 5,
-                               y * env->grid_size + env->grid_size - 10,
+                               y * env->grid_size + grid_offset_y + env->grid_size - 10,
                                8, GREEN);
                     }
                     else if (pot->cooking_state == BURNT) {
@@ -884,7 +893,7 @@ void c_render(Overcooked* env) {
                         cooking_texture = is_onion_soup ? &env->client->soup_onion_cooked : 
                                                           &env->client->soup_tomato_cooked;
                         DrawText("BURNT!", x * env->grid_size + 5,
-                               y * env->grid_size + env->grid_size - 10,
+                               y * env->grid_size + grid_offset_y + env->grid_size - 10,
                                8, RED);
                     }
                     else if (pot->cooking_state == NOT_COOKING) {
@@ -897,7 +906,7 @@ void c_render(Overcooked* env) {
                     if (cooking_texture && cooking_texture->id != 0) {
                         Rectangle pot_dest = {
                             x * env->grid_size + env->grid_size/4,
-                            y * env->grid_size + env->grid_size/4,
+                            y * env->grid_size + grid_offset_y + env->grid_size/4,
                             env->grid_size/2,
                             env->grid_size/2
                         };
@@ -940,7 +949,7 @@ void c_render(Overcooked* env) {
         if (texture && texture->id != 0) {
             Rectangle dest = {
                 env->items[i].x * env->grid_size + env->grid_size/4,
-                env->items[i].y * env->grid_size + env->grid_size/4,
+                env->items[i].y * env->grid_size + grid_offset_y + env->grid_size/4,
                 env->grid_size/2,
                 env->grid_size/2
             };
@@ -959,7 +968,7 @@ void c_render(Overcooked* env) {
             }
             DrawCircle(
                 env->items[i].x * env->grid_size + env->grid_size/2,
-                env->items[i].y * env->grid_size + env->grid_size/2,
+                env->items[i].y * env->grid_size + grid_offset_y + env->grid_size/2,
                 env->grid_size/4,
                 item_color
             );
@@ -1025,7 +1034,7 @@ void c_render(Overcooked* env) {
         if (chef_texture && chef_texture->id != 0) {
             Rectangle dest = {
                 agent->x * env->grid_size,
-                agent->y * env->grid_size,
+                agent->y * env->grid_size + grid_offset_y,
                 env->grid_size,
                 env->grid_size
             };
@@ -1050,7 +1059,7 @@ void c_render(Overcooked* env) {
             }
             DrawRectangle(
                 agent->x * env->grid_size + env->grid_size/4,
-                agent->y * env->grid_size + env->grid_size/4,
+                agent->y * env->grid_size + grid_offset_y + env->grid_size/4,
                 env->grid_size/2,
                 env->grid_size/2,
                 agent_color
@@ -1058,7 +1067,7 @@ void c_render(Overcooked* env) {
             
             // Draw direction indicator
             int dir_x = agent->x * env->grid_size + env->grid_size/2;
-            int dir_y = agent->y * env->grid_size + env->grid_size/2;
+            int dir_y = agent->y * env->grid_size + grid_offset_y + env->grid_size/2;
             int end_x = dir_x, end_y = dir_y;
             switch (agent->facing_direction) {
                 case 0: end_y -= env->grid_size/4; break; // Up
@@ -1071,7 +1080,7 @@ void c_render(Overcooked* env) {
             // Draw agent number
             DrawText(TextFormat("%d", agent_idx + 1), 
                      agent->x * env->grid_size + 2,
-                     agent->y * env->grid_size + 2,
+                     agent->y * env->grid_size + grid_offset_y + 2,
                      10, BLACK);
         }
     }
