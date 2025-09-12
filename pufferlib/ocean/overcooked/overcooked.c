@@ -19,7 +19,7 @@ int main() {
         .grid_size = 100,
         .reward_dish_served = 10.0f,
         .reward_step_penalty = -0.1f,
-        .observation_size = 102  // Adjust based on your observation design (grid + agent states)
+        .observation_size = 5 * 5 * 21 + 2  // 5x5 grid * 21 channels + 2 global values = 527
     };
     
     // Allocate required arrays for multiple agents

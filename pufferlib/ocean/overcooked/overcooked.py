@@ -12,11 +12,17 @@ class Overcooked(pufferlib.PufferEnv):
                  max_steps=1000, grid_size=32, 
                  reward_dish_served=10.0, reward_step_penalty=-0.01):
         
-        # Define observation space
-        # For now: 7x7 grid view + agent states (position, held item for all agents)
-        grid_obs_size = 7 * 7 * 2  # 7x7 window, 2 channels (tiles, items)
-        agent_state_size = 4 * num_agents  # x, y, held_item, facing_direction for each agent
-        observation_size = grid_obs_size + agent_state_size
+        # Define observation space - One-hot encoded grid
+        # Channels: 8 terrain + 5 items + (2*num_agents) agent + 4 cooking = total channels
+        n_terrain_channels = 8
+        n_item_channels = 5  
+        n_agent_channels = num_agents * 2
+        n_cooking_channels = 4
+        n_channels = n_terrain_channels + n_item_channels + n_agent_channels + n_cooking_channels
+        
+        grid_obs_size = width * height * n_channels  # (width, height, channels) flattened
+        global_state_size = 2  # Time progress + dishes served
+        observation_size = grid_obs_size + global_state_size
         
         self.single_observation_space = gymnasium.spaces.Box(
             low=0, high=1,
