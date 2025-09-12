@@ -15,10 +15,10 @@ int main() {
         .width = 5,
         .height = 5,
         .num_agents = num_agents,
-        .max_steps = 200,
+        .max_steps = 400,
         .grid_size = 100,
-        .reward_dish_served = 10.0f,
-        .reward_step_penalty = -0.1f,
+        .reward_dish_served = 1.0f,
+        .reward_step_penalty = 0.0f,
         .observation_size = 25 + 8 + 30 + 5 + 3  // Grid + agents + items + pots + global = 71
     };
     
