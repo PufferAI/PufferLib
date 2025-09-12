@@ -6,6 +6,7 @@
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->width = unpack(kwargs, "width");
     env->height = unpack(kwargs, "height");
+    env->num_agents = unpack(kwargs, "num_agents");
     env->max_steps = unpack(kwargs, "max_steps");
     env->grid_size = unpack(kwargs, "grid_size");
     env->observation_size = unpack(kwargs, "observation_size");
@@ -21,5 +22,6 @@ static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "episode_return", log->episode_return);
     assign_to_dict(dict, "episode_length", log->episode_length);
     assign_to_dict(dict, "dishes_served", log->dishes_served);
+    assign_to_dict(dict, "cooperation_score", log->cooperation_score);
     return 0;
 }

@@ -9,21 +9,24 @@
 #include "overcooked.h"
 
 int main() {
+    int num_agents = 2;  // Support 2 agents for cooperative play
+    
     Overcooked env = {
         .width = 5,
         .height = 5,
+        .num_agents = num_agents,
         .max_steps = 200,
         .grid_size = 100,
         .reward_dish_served = 10.0f,
         .reward_step_penalty = -0.1f,
-        .observation_size = 100  // Adjust based on your observation design
+        .observation_size = 102  // Adjust based on your observation design (grid + agent states)
     };
     
-    // Allocate required arrays
-    env.observations = (float*)calloc(env.observation_size, sizeof(float));
-    env.actions = (int*)calloc(1, sizeof(int));
-    env.rewards = (float*)calloc(1, sizeof(float));
-    env.terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
+    // Allocate required arrays for multiple agents
+    env.observations = (float*)calloc(env.observation_size * num_agents, sizeof(float));
+    env.actions = (int*)calloc(num_agents, sizeof(int));
+    env.rewards = (float*)calloc(num_agents, sizeof(float));
+    env.terminals = (unsigned char*)calloc(num_agents, sizeof(unsigned char));
     
     // Initialize environment
     init(&env);
@@ -32,23 +35,42 @@ int main() {
     
     // Main game loop
     while (!WindowShouldClose()) {
-        // Manual control with shift key, random actions otherwise
+        // Manual control for agent 0 with WASD/Space
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
+            // Agent 0 controls (WASD + Space)
             env.actions[0] = ACTION_NOOP;
-            if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W)) env.actions[0] = ACTION_UP;
-            if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S)) env.actions[0] = ACTION_DOWN;
-            if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) env.actions[0] = ACTION_LEFT;
-            if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = ACTION_RIGHT;
+            if (IsKeyDown(KEY_W)) env.actions[0] = ACTION_UP;
+            if (IsKeyDown(KEY_S)) env.actions[0] = ACTION_DOWN;
+            if (IsKeyDown(KEY_A)) env.actions[0] = ACTION_LEFT;
+            if (IsKeyDown(KEY_D)) env.actions[0] = ACTION_RIGHT;
             if (IsKeyPressed(KEY_SPACE)) env.actions[0] = ACTION_INTERACT;
+            
+            // Agent 1 controls (Arrow keys + Enter)
+            env.actions[1] = ACTION_NOOP;
+            if (IsKeyDown(KEY_UP)) env.actions[1] = ACTION_UP;
+            if (IsKeyDown(KEY_DOWN)) env.actions[1] = ACTION_DOWN;
+            if (IsKeyDown(KEY_LEFT)) env.actions[1] = ACTION_LEFT;
+            if (IsKeyDown(KEY_RIGHT)) env.actions[1] = ACTION_RIGHT;
+            if (IsKeyPressed(KEY_ENTER)) env.actions[1] = ACTION_INTERACT;
         } else {
-            env.actions[0] = rand() % 6;  // Random action (0-5)
+            // Random actions for both agents
+            for (int i = 0; i < num_agents; i++) {
+                env.actions[i] = rand() % 6;  // Random action (0-5)
+            }
         }
         
         c_step(&env);
         c_render(&env);
         
-        // Reset if episode ends
-        if (env.terminals[0]) {
+        // Reset if any agent's episode ends
+        int should_reset = 0;
+        for (int i = 0; i < num_agents; i++) {
+            if (env.terminals[i]) {
+                should_reset = 1;
+                break;
+            }
+        }
+        if (should_reset) {
             c_reset(&env);
         }
     }

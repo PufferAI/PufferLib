@@ -1,5 +1,5 @@
-/* Overcooked: a single-agent cooking coordination environment.
- * Agent can walk around, pick up items, and put down items.
+/* Overcooked: a multi-agent cooking coordination environment.
+ * Agents can walk around, pick up items, and put down items.
  */
 
 #include <stdlib.h>
@@ -56,6 +56,7 @@ typedef struct {
     float episode_return; // Recommended metric: sum of agent rewards over episode
     float episode_length; // Recommended metric: number of steps of agent episode
     float dishes_served; // Number of dishes successfully served
+    float cooperation_score; // Bonus for cooperative actions
     float n; // Required as the last field 
 } Log;
 
@@ -159,7 +160,8 @@ typedef struct {
     Item* items;  // Dynamic items in the kitchen
     int num_items;
     int max_items;
-    Agent agent;
+    Agent* agents;  // Array of agents
+    int num_agents;
     
     // Cooking state for each stove position
     CookingPot* cooking_pots;  // Array of cooking pots (one per stove)
@@ -226,23 +228,29 @@ static void init(Overcooked* env) {
     env->max_items = 20;
     env->items = calloc(env->max_items, sizeof(Item));
     env->num_items = 0;
+    env->agents = calloc(env->num_agents, sizeof(Agent));
     parse_grid(env);
     init_cooking_pots(env);
     env->client = NULL;
 }
 
 static void compute_observations(Overcooked* env) {
-    for (int i = 0; i < env->observation_size; i++) {
-        env->observations[i] = 0.0f;
+    // Clear all observations
+    for (int a = 0; a < env->num_agents; a++) {
+        for (int i = 0; i < env->observation_size; i++) {
+            env->observations[a * env->observation_size + i] = 0.0f;
+        }
+        // TODO: Fill in actual observation data for each agent
     }
 }
 
-static void handle_interaction(Overcooked* env) {
+static void handle_interaction(Overcooked* env, int agent_idx) {
+    Agent* agent = &env->agents[agent_idx];
     // Get position agent is facing
-    int target_x = env->agent.x;
-    int target_y = env->agent.y;
+    int target_x = agent->x;
+    int target_y = agent->y;
     
-    switch (env->agent.facing_direction) {
+    switch (agent->facing_direction) {
         case 0: target_y -= 1; break; // Up
         case 1: target_y += 1; break; // Down
         case 2: target_x -= 1; break; // Left
@@ -261,21 +269,21 @@ static void handle_interaction(Overcooked* env) {
     // Special stove interaction
     if (tile == STOVE && pot != NULL) {
         // If agent is holding an ingredient and pot is not cooking yet
-        if (env->agent.held_item == ONION || env->agent.held_item == TOMATO) {
+        if (agent->held_item == ONION || agent->held_item == TOMATO) {
             if (pot->cooking_state == NOT_COOKING && pot->ingredient_count < MAX_INGREDIENTS) {
                 // Add ingredient to pot
-                pot->ingredient_types[pot->ingredient_count] = env->agent.held_item;
+                pot->ingredient_types[pot->ingredient_count] = agent->held_item;
                 pot->ingredient_count++;
-                if (env->agent.held_item == ONION) {
+                if (agent->held_item == ONION) {
                     pot->num_onions++;
-                } else if (env->agent.held_item == TOMATO) {
+                } else if (agent->held_item == TOMATO) {
                     pot->num_tomatoes++;
                 }
-                env->agent.held_item = NO_ITEM;
+                agent->held_item = NO_ITEM;
             }
         }
         // If agent is empty handed and pot has ingredients, start cooking
-        else if (env->agent.held_item == NO_ITEM && pot->ingredient_count > 0) {
+        else if (agent->held_item == NO_ITEM && pot->ingredient_count > 0) {
             if (pot->cooking_state == NOT_COOKING) {
                 pot->cooking_state = COOKING;
                 pot->cooking_progress = 0;
@@ -287,14 +295,14 @@ static void handle_interaction(Overcooked* env) {
             }
         }
         // If agent is holding a plate and pot has cooked soup
-        else if (env->agent.held_item == PLATE && pot->cooking_state == COOKED) {
+        else if (agent->held_item == PLATE && pot->cooking_state == COOKED) {
             // Create plated soup with ingredient info
-            env->agent.held_item = PLATED_SOUP;
+            agent->held_item = PLATED_SOUP;
             // Store the soup's ingredient info in agent's temporary state
             // We'll need to track this when placing the soup down
-            env->agent.held_soup_onions = pot->num_onions;
-            env->agent.held_soup_tomatoes = pot->num_tomatoes;
-            env->agent.held_soup_total = pot->ingredient_count;
+            agent->held_soup_onions = pot->num_onions;
+            agent->held_soup_tomatoes = pot->num_tomatoes;
+            agent->held_soup_total = pot->ingredient_count;
             
             // Reset pot
             pot->cooking_state = NOT_COOKING;
@@ -310,27 +318,27 @@ static void handle_interaction(Overcooked* env) {
     }
     
     // Normal interaction (non-stove)
-    if (env->agent.held_item != NO_ITEM) {
+    if (agent->held_item != NO_ITEM) {
         // Can only put down on empty counters or cutting boards
         if ((tile == COUNTER || tile == CUTTING_BOARD) && item == NULL) {
             // Special handling for plated soup to preserve recipe
-            if (env->agent.held_item == PLATED_SOUP) {
-                add_item(env, env->agent.held_item, target_x, target_y);
+            if (agent->held_item == PLATED_SOUP) {
+                add_item(env, agent->held_item, target_x, target_y);
                 // Transfer soup recipe to the placed item
                 Item* placed_soup = get_item_at(env, target_x, target_y);
                 if (placed_soup) {
-                    placed_soup->num_onions = env->agent.held_soup_onions;
-                    placed_soup->num_tomatoes = env->agent.held_soup_tomatoes;
-                    placed_soup->total_ingredients = env->agent.held_soup_total;
+                    placed_soup->num_onions = agent->held_soup_onions;
+                    placed_soup->num_tomatoes = agent->held_soup_tomatoes;
+                    placed_soup->total_ingredients = agent->held_soup_total;
                 }
                 // Clear agent's soup info
-                env->agent.held_soup_onions = 0;
-                env->agent.held_soup_tomatoes = 0;
-                env->agent.held_soup_total = 0;
+                agent->held_soup_onions = 0;
+                agent->held_soup_tomatoes = 0;
+                agent->held_soup_total = 0;
             } else {
-                add_item(env, env->agent.held_item, target_x, target_y);
+                add_item(env, agent->held_item, target_x, target_y);
             }
-            env->agent.held_item = NO_ITEM;
+            agent->held_item = NO_ITEM;
         }
     }
     else {
@@ -338,29 +346,38 @@ static void handle_interaction(Overcooked* env) {
         if (item != NULL) {
             // Special handling for plated soup to preserve recipe
             if (item->type == PLATED_SOUP) {
-                env->agent.held_soup_onions = item->num_onions;
-                env->agent.held_soup_tomatoes = item->num_tomatoes;
-                env->agent.held_soup_total = item->total_ingredients;
+                agent->held_soup_onions = item->num_onions;
+                agent->held_soup_tomatoes = item->num_tomatoes;
+                agent->held_soup_total = item->total_ingredients;
             }
-            env->agent.held_item = item->type;
+            agent->held_item = item->type;
             remove_item(env, target_x, target_y);
         }
         // Special case: get new ingredients from ingredient box
         else if (tile == INGREDIENT_BOX) {
-            env->agent.held_item = ONION; // Always gives onions for now
+            agent->held_item = ONION; // Always gives onions for now
         }
         // Special case: get plates from plate box
         else if (tile == PLATE_BOX) {
-            env->agent.held_item = PLATE;
+            agent->held_item = PLATE;
         }
     }
 }
 
-static int is_valid_position(Overcooked* env, int x, int y) {
+static int is_valid_position(Overcooked* env, int x, int y, int excluding_agent) {
     if (x < 0 || x >= env->width || y < 0 || y >= env->height) {
         return 0;
     }
-    return env->grid[y * env->width + x] == EMPTY;
+    if (env->grid[y * env->width + x] != EMPTY) {
+        return 0;
+    }
+    // Check for collision with other agents
+    for (int i = 0; i < env->num_agents; i++) {
+        if (i != excluding_agent && (int)env->agents[i].x == x && (int)env->agents[i].y == y) {
+            return 0;  // Position occupied by another agent
+        }
+    }
+    return 1;
 }
 
 static Item* get_item_at(Overcooked* env, int x, int y) {
@@ -500,43 +517,61 @@ void c_reset(Overcooked* env) {
         }
     }
     
-    env->agent.x = 2;
-    env->agent.y = 2;
-    env->agent.held_item = NO_ITEM;
-    env->agent.facing_direction = 0;
-    env->agent.held_soup_onions = 0;
-    env->agent.held_soup_tomatoes = 0;
-    env->agent.held_soup_total = 0;
-    
-    env->rewards[0] = 0.0f;
-    env->terminals[0] = 0;
+    // Reset all agents with different starting positions
+    for (int i = 0; i < env->num_agents; i++) {
+        // Place agents at different starting positions
+        if (i == 0) {
+            env->agents[i].x = 1;
+            env->agents[i].y = 2;
+        } else if (i == 1) {
+            env->agents[i].x = 3;
+            env->agents[i].y = 2;
+        } else {
+            // For more than 2 agents, distribute them
+            env->agents[i].x = 1 + (i % 3);
+            env->agents[i].y = 1 + (i / 3);
+        }
+        env->agents[i].held_item = NO_ITEM;
+        env->agents[i].facing_direction = 0;
+        env->agents[i].held_soup_onions = 0;
+        env->agents[i].held_soup_tomatoes = 0;
+        env->agents[i].held_soup_total = 0;
+        
+        env->rewards[i] = 0.0f;
+        env->terminals[i] = 0;
+    }
     
     compute_observations(env);
     
     env->log.episode_length = 0;
     env->log.episode_return = 0;
     env->log.dishes_served = 0;
+    env->log.cooperation_score = 0;
 }
 
 void c_step(Overcooked* env) {
-    int action = env->actions[0];
-    env->rewards[0] = env->reward_step_penalty;
-    
-    int new_x = env->agent.x;
-    int new_y = env->agent.y;
-    
-    switch (action) {
-        case ACTION_UP:    new_y -= 1; env->agent.facing_direction = 0; break;
-        case ACTION_DOWN:  new_y += 1; env->agent.facing_direction = 1; break;
-        case ACTION_LEFT:  new_x -= 1; env->agent.facing_direction = 2; break;
-        case ACTION_RIGHT: new_x += 1; env->agent.facing_direction = 3; break;
-        case ACTION_INTERACT: handle_interaction(env); break;
-    }
-    
-    if (action != ACTION_INTERACT && action != ACTION_NOOP) {
-        if (is_valid_position(env, new_x, new_y)) {
-            env->agent.x = new_x;
-            env->agent.y = new_y;
+    // Process actions for all agents
+    for (int i = 0; i < env->num_agents; i++) {
+        int action = env->actions[i];
+        env->rewards[i] = env->reward_step_penalty;
+        
+        Agent* agent = &env->agents[i];
+        int new_x = agent->x;
+        int new_y = agent->y;
+        
+        switch (action) {
+            case ACTION_UP:    new_y -= 1; agent->facing_direction = 0; break;
+            case ACTION_DOWN:  new_y += 1; agent->facing_direction = 1; break;
+            case ACTION_LEFT:  new_x -= 1; agent->facing_direction = 2; break;
+            case ACTION_RIGHT: new_x += 1; agent->facing_direction = 3; break;
+            case ACTION_INTERACT: handle_interaction(env, i); break;
+        }
+        
+        if (action != ACTION_INTERACT && action != ACTION_NOOP) {
+            if (is_valid_position(env, new_x, new_y, i)) {
+                agent->x = new_x;
+                agent->y = new_y;
+            }
         }
     }
     
@@ -546,11 +581,18 @@ void c_step(Overcooked* env) {
     env->current_step++;
     env->log.episode_length++;
     
+    // Check for terminal condition
     if (env->current_step >= env->max_steps) {
-        env->terminals[0] = 1;
+        for (int i = 0; i < env->num_agents; i++) {
+            env->terminals[i] = 1;
+        }
     }
     
-    env->log.episode_return += env->rewards[0];
+    // Update episode return
+    for (int i = 0; i < env->num_agents; i++) {
+        env->log.episode_return += env->rewards[i];
+    }
+    
     compute_observations(env);
 }
 
@@ -805,92 +847,114 @@ void c_render(Overcooked* env) {
         }
     }
     
-    // Draw agent with appropriate chef sprite
-    Texture2D* chef_texture = NULL;
-    
-    // Select chef texture based on direction and held item
-    if (env->agent.held_item == NO_ITEM) {
-        // Empty handed chef
-        switch (env->agent.facing_direction) {
-            case 0: chef_texture = &env->client->chef_north; break;
-            case 1: chef_texture = &env->client->chef_south; break;
-            case 2: chef_texture = &env->client->chef_west; break;
-            case 3: chef_texture = &env->client->chef_east; break;
-        }
-    } else if (env->agent.held_item == ONION) {
-        switch (env->agent.facing_direction) {
-            case 0: chef_texture = &env->client->chef_north_onion; break;
-            case 1: chef_texture = &env->client->chef_south_onion; break;
-            case 2: chef_texture = &env->client->chef_west_onion; break;
-            case 3: chef_texture = &env->client->chef_east_onion; break;
-        }
-    } else if (env->agent.held_item == TOMATO) {
-        switch (env->agent.facing_direction) {
-            case 0: chef_texture = &env->client->chef_north_tomato; break;
-            case 1: chef_texture = &env->client->chef_south_tomato; break;
-            case 2: chef_texture = &env->client->chef_west_tomato; break;
-            case 3: chef_texture = &env->client->chef_east_tomato; break;
-        }
-    } else if (env->agent.held_item == PLATE) {
-        switch (env->agent.facing_direction) {
-            case 0: chef_texture = &env->client->chef_north_dish; break;
-            case 1: chef_texture = &env->client->chef_south_dish; break;
-            case 2: chef_texture = &env->client->chef_west_dish; break;
-            case 3: chef_texture = &env->client->chef_east_dish; break;
-        }
-    } else if (env->agent.held_item == PLATED_SOUP) {
-        // Use soup-specific sprites based on the soup type
-        bool is_onion_soup = (env->agent.held_soup_onions >= env->agent.held_soup_tomatoes);
-        if (is_onion_soup) {
-            switch (env->agent.facing_direction) {
-                case 0: chef_texture = &env->client->chef_north_soup_onion; break;
-                case 1: chef_texture = &env->client->chef_south_soup_onion; break;
-                case 2: chef_texture = &env->client->chef_west_soup_onion; break;
-                case 3: chef_texture = &env->client->chef_east_soup_onion; break;
-            }
-        } else {
-            switch (env->agent.facing_direction) {
-                case 0: chef_texture = &env->client->chef_north_soup_tomato; break;
-                case 1: chef_texture = &env->client->chef_south_soup_tomato; break;
-                case 2: chef_texture = &env->client->chef_west_soup_tomato; break;
-                case 3: chef_texture = &env->client->chef_east_soup_tomato; break;
-            }
-        }
-    }
-    
-    // Draw the chef sprite if texture is loaded
-    if (chef_texture && chef_texture->id != 0) {
-        Rectangle dest = {
-            env->agent.x * env->grid_size,
-            env->agent.y * env->grid_size,
-            env->grid_size,
-            env->grid_size
-        };
-        DrawTexturePro(*chef_texture,
-            (Rectangle){0, 0, chef_texture->width, chef_texture->height},
-            dest, (Vector2){0, 0}, 0, WHITE);
-    } else {
-        // Fallback to colored rectangle with item indicator
-        Color agent_color = get_agent_color(env->agent.held_item);
-        DrawRectangle(
-            env->agent.x * env->grid_size + env->grid_size/4,
-            env->agent.y * env->grid_size + env->grid_size/4,
-            env->grid_size/2,
-            env->grid_size/2,
-            agent_color
-        );
+    // Draw all agents with appropriate chef sprites
+    for (int agent_idx = 0; agent_idx < env->num_agents; agent_idx++) {
+        Agent* agent = &env->agents[agent_idx];
+        Texture2D* chef_texture = NULL;
         
-        // Draw direction indicator
-        int dir_x = env->agent.x * env->grid_size + env->grid_size/2;
-        int dir_y = env->agent.y * env->grid_size + env->grid_size/2;
-        int end_x = dir_x, end_y = dir_y;
-        switch (env->agent.facing_direction) {
-            case 0: end_y -= env->grid_size/4; break; // Up
-            case 1: end_y += env->grid_size/4; break; // Down
-            case 2: end_x -= env->grid_size/4; break; // Left  
-            case 3: end_x += env->grid_size/4; break; // Right
+        // Select chef texture based on direction and held item
+        if (agent->held_item == NO_ITEM) {
+            // Empty handed chef
+            switch (agent->facing_direction) {
+                case 0: chef_texture = &env->client->chef_north; break;
+                case 1: chef_texture = &env->client->chef_south; break;
+                case 2: chef_texture = &env->client->chef_west; break;
+                case 3: chef_texture = &env->client->chef_east; break;
+            }
+        } else if (agent->held_item == ONION) {
+            switch (agent->facing_direction) {
+                case 0: chef_texture = &env->client->chef_north_onion; break;
+                case 1: chef_texture = &env->client->chef_south_onion; break;
+                case 2: chef_texture = &env->client->chef_west_onion; break;
+                case 3: chef_texture = &env->client->chef_east_onion; break;
+            }
+        } else if (agent->held_item == TOMATO) {
+            switch (agent->facing_direction) {
+                case 0: chef_texture = &env->client->chef_north_tomato; break;
+                case 1: chef_texture = &env->client->chef_south_tomato; break;
+                case 2: chef_texture = &env->client->chef_west_tomato; break;
+                case 3: chef_texture = &env->client->chef_east_tomato; break;
+            }
+        } else if (agent->held_item == PLATE) {
+            switch (agent->facing_direction) {
+                case 0: chef_texture = &env->client->chef_north_dish; break;
+                case 1: chef_texture = &env->client->chef_south_dish; break;
+                case 2: chef_texture = &env->client->chef_west_dish; break;
+                case 3: chef_texture = &env->client->chef_east_dish; break;
+            }
+        } else if (agent->held_item == PLATED_SOUP) {
+            // Use soup-specific sprites based on the soup type
+            bool is_onion_soup = (agent->held_soup_onions >= agent->held_soup_tomatoes);
+            if (is_onion_soup) {
+                switch (agent->facing_direction) {
+                    case 0: chef_texture = &env->client->chef_north_soup_onion; break;
+                    case 1: chef_texture = &env->client->chef_south_soup_onion; break;
+                    case 2: chef_texture = &env->client->chef_west_soup_onion; break;
+                    case 3: chef_texture = &env->client->chef_east_soup_onion; break;
+                }
+            } else {
+                switch (agent->facing_direction) {
+                    case 0: chef_texture = &env->client->chef_north_soup_tomato; break;
+                    case 1: chef_texture = &env->client->chef_south_soup_tomato; break;
+                    case 2: chef_texture = &env->client->chef_west_soup_tomato; break;
+                    case 3: chef_texture = &env->client->chef_east_soup_tomato; break;
+                }
+            }
         }
-        DrawLine(dir_x, dir_y, end_x, end_y, BLACK);
+        
+        // Draw the chef sprite if texture is loaded
+        if (chef_texture && chef_texture->id != 0) {
+            Rectangle dest = {
+                agent->x * env->grid_size,
+                agent->y * env->grid_size,
+                env->grid_size,
+                env->grid_size
+            };
+            // Tint agents with different colors to distinguish them
+            Color tint = WHITE;
+            if (agent_idx == 0) {
+                tint = (Color){255, 255, 255, 255};  // White for player 1
+            } else if (agent_idx == 1) {
+                tint = (Color){200, 200, 255, 255};  // Light blue tint for player 2
+            } else {
+                tint = (Color){255, 200, 200, 255};  // Light red tint for other players
+            }
+            DrawTexturePro(*chef_texture,
+                (Rectangle){0, 0, chef_texture->width, chef_texture->height},
+                dest, (Vector2){0, 0}, 0, tint);
+        } else {
+            // Fallback to colored rectangle with item indicator
+            Color agent_color = get_agent_color(agent->held_item);
+            // Modify color based on agent index
+            if (agent_idx == 1) {
+                agent_color = (Color){agent_color.r * 0.8, agent_color.g * 0.8, agent_color.b, agent_color.a};
+            }
+            DrawRectangle(
+                agent->x * env->grid_size + env->grid_size/4,
+                agent->y * env->grid_size + env->grid_size/4,
+                env->grid_size/2,
+                env->grid_size/2,
+                agent_color
+            );
+            
+            // Draw direction indicator
+            int dir_x = agent->x * env->grid_size + env->grid_size/2;
+            int dir_y = agent->y * env->grid_size + env->grid_size/2;
+            int end_x = dir_x, end_y = dir_y;
+            switch (agent->facing_direction) {
+                case 0: end_y -= env->grid_size/4; break; // Up
+                case 1: end_y += env->grid_size/4; break; // Down
+                case 2: end_x -= env->grid_size/4; break; // Left  
+                case 3: end_x += env->grid_size/4; break; // Right
+            }
+            DrawLine(dir_x, dir_y, end_x, end_y, BLACK);
+            
+            // Draw agent number
+            DrawText(TextFormat("%d", agent_idx + 1), 
+                     agent->x * env->grid_size + 2,
+                     agent->y * env->grid_size + 2,
+                     10, BLACK);
+        }
     }
     
     EndDrawing();
@@ -899,6 +963,7 @@ void c_render(Overcooked* env) {
 void c_close(Overcooked* env) {
     free(env->grid);
     free(env->items);
+    free(env->agents);
     free(env->cooking_pots);
     if (env->client != NULL) {
         // Unload terrain textures
