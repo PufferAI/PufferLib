@@ -236,108 +236,74 @@ static void init(Overcooked* env) {
 }
 
 static void compute_observations(Overcooked* env) {
-    // One-hot encoded observation: (width, height, n_channels)
-    // Channels:
-    // 0-6: Terrain types (EMPTY, COUNTER, STOVE, CUTTING_BOARD, INGREDIENT_BOX, SERVING_AREA, WALL, PLATE_BOX)
-    // 7-11: Item types (TOMATO, ONION, PLATE, SOUP, PLATED_SOUP)
-    // 12-15: Agent positions (one channel per agent, with held item encoded)
-    // 16-19: Cooking states (NOT_COOKING, COOKING, COOKED, BURNT)
-    // Total: ~20 channels
+    // Simple flat array observation for each agent
+    // Same structure for all agents but from their perspective
+    int obs_idx = 0;
     
-    int n_terrain_channels = 8;  // Terrain tile types
-    int n_item_channels = 5;     // Item types
-    int n_agent_channels = env->num_agents * 2;  // Position + held item for each agent
-    int n_cooking_channels = 4;  // Cooking states
-    int n_channels = n_terrain_channels + n_item_channels + n_agent_channels + n_cooking_channels;
-    
-    // Compute observations for each agent (same global view for all)
     for (int agent_idx = 0; agent_idx < env->num_agents; agent_idx++) {
-        float* obs = &env->observations[agent_idx * env->observation_size];
+        Agent* agent = &env->agents[agent_idx];
+        obs_idx = 0;  // Reset for each agent
         
-        // Clear observation
-        for (int i = 0; i < env->observation_size; i++) {
-            obs[i] = 0.0f;
-        }
-        
-        // Fill one-hot encoded grid
+        // 1. Grid tiles (5x5 = 25 values) - normalized tile types
         for (int y = 0; y < env->height; y++) {
             for (int x = 0; x < env->width; x++) {
-                int base_idx = (y * env->width + x) * n_channels;
-                
-                // 1. Terrain channel (one-hot)
                 int tile = env->grid[y * env->width + x];
-                if (tile >= 0 && tile < n_terrain_channels) {
-                    obs[base_idx + tile] = 1.0f;
-                }
-                
-                // 2. Item channels (one-hot for items at this position)
-                Item* item = get_item_at(env, x, y);
-                if (item != NULL) {
-                    int item_channel = n_terrain_channels + item->type - 1;  // TOMATO=1 maps to channel 8
-                    if (item_channel >= n_terrain_channels && item_channel < n_terrain_channels + n_item_channels) {
-                        obs[base_idx + item_channel] = 1.0f;
-                        
-                        // Additional info for plated soup (encode recipe as values)
-                        if (item->type == PLATED_SOUP) {
-                            obs[base_idx + item_channel] = 0.5f + 0.5f * (item->num_onions / (float)MAX_INGREDIENTS);
-                        }
-                    }
-                }
-                
-                // 3. Agent channels (position and held item)
-                for (int a = 0; a < env->num_agents; a++) {
-                    if ((int)env->agents[a].x == x && (int)env->agents[a].y == y) {
-                        int agent_channel = n_terrain_channels + n_item_channels + a * 2;
-                        obs[base_idx + agent_channel] = 1.0f;  // Agent position
-                        
-                        // Encode held item in next channel
-                        if (env->agents[a].held_item != NO_ITEM) {
-                            obs[base_idx + agent_channel + 1] = env->agents[a].held_item / 5.0f;
-                        }
-                        
-                        // Encode facing direction as fractional value
-                        obs[base_idx + agent_channel] += env->agents[a].facing_direction * 0.1f;
-                    }
-                }
-                
-                // 4. Cooking state channels (for stoves)
-                if (tile == STOVE) {
-                    CookingPot* pot = get_pot_at(env, x, y);
-                    if (pot && pot->ingredient_count > 0) {
-                        int cooking_channel = n_terrain_channels + n_item_channels + n_agent_channels + pot->cooking_state;
-                        if (cooking_channel < n_channels) {
-                            // Encode progress as value intensity
-                            float progress = pot->cooking_state == COOKING ? 
-                                (float)pot->cooking_progress / COOKING_TIME : 1.0f;
-                            obs[base_idx + cooking_channel] = progress;
-                            
-                            // Encode ingredients as fractional values
-                            if (pot->num_onions > 0) {
-                                obs[base_idx + cooking_channel] += pot->num_onions * 0.01f;
-                            }
-                            if (pot->num_tomatoes > 0) {
-                                obs[base_idx + cooking_channel] += pot->num_tomatoes * 0.001f;
-                            }
-                        }
-                    }
-                }
+                env->observations[agent_idx * env->observation_size + obs_idx++] = tile / 7.0f;
             }
         }
         
-        // Add global info at the end (outside the grid)
-        int global_idx = env->width * env->height * n_channels;
-        if (global_idx < env->observation_size) {
-            obs[global_idx] = (float)env->current_step / (float)env->max_steps;  // Time progress
-            obs[global_idx + 1] = env->log.dishes_served / 10.0f;  // Normalized dishes served
+        // 2. All agent states (4 values per agent)
+        for (int a = 0; a < env->num_agents; a++) {
+            env->observations[agent_idx * env->observation_size + obs_idx++] = env->agents[a].x / (float)env->width;
+            env->observations[agent_idx * env->observation_size + obs_idx++] = env->agents[a].y / (float)env->height;
+            env->observations[agent_idx * env->observation_size + obs_idx++] = env->agents[a].held_item / 5.0f;
+            env->observations[agent_idx * env->observation_size + obs_idx++] = env->agents[a].facing_direction / 3.0f;
         }
         
-        // Debug info on first step
-        if (agent_idx == 0 && env->current_step == 0) {
-            printf("Observation: %dx%dx%d grid + 2 global = %d values (allocated: %d)\n", 
-                   env->width, env->height, n_channels, 
-                   env->width * env->height * n_channels + 2,
-                   env->observation_size);
+        // 3. Item positions and types (max 10 items, 3 values each)
+        for (int i = 0; i < 10; i++) {
+            if (i < env->num_items) {
+                env->observations[agent_idx * env->observation_size + obs_idx++] = env->items[i].x / (float)env->width;
+                env->observations[agent_idx * env->observation_size + obs_idx++] = env->items[i].y / (float)env->height;
+                env->observations[agent_idx * env->observation_size + obs_idx++] = env->items[i].type / 5.0f;
+            } else {
+                env->observations[agent_idx * env->observation_size + obs_idx++] = -1.0f;  // No item
+                env->observations[agent_idx * env->observation_size + obs_idx++] = -1.0f;
+                env->observations[agent_idx * env->observation_size + obs_idx++] = 0.0f;
+            }
         }
+        
+        // 4. Cooking pot states (for each stove, 5 values each)
+        for (int i = 0; i < env->num_stoves; i++) {
+            CookingPot* pot = &env->cooking_pots[i];
+            
+            // Find stove position
+            int stove_idx = 0;
+            float stove_x = -1, stove_y = -1;
+            for (int y = 0; y < env->height && stove_x < 0; y++) {
+                for (int x = 0; x < env->width; x++) {
+                    if (env->grid[y * env->width + x] == STOVE) {
+                        if (stove_idx == i) {
+                            stove_x = x / (float)env->width;
+                            stove_y = y / (float)env->height;
+                            break;
+                        }
+                        stove_idx++;
+                    }
+                }
+            }
+            
+            env->observations[agent_idx * env->observation_size + obs_idx++] = stove_x;
+            env->observations[agent_idx * env->observation_size + obs_idx++] = stove_y;
+            env->observations[agent_idx * env->observation_size + obs_idx++] = pot->cooking_state / 3.0f;
+            env->observations[agent_idx * env->observation_size + obs_idx++] = pot->cooking_progress / (float)BURN_TIME;
+            env->observations[agent_idx * env->observation_size + obs_idx++] = pot->ingredient_count / (float)MAX_INGREDIENTS;
+        }
+        
+        // 5. Global state
+        env->observations[agent_idx * env->observation_size + obs_idx++] = env->current_step / (float)env->max_steps;
+        env->observations[agent_idx * env->observation_size + obs_idx++] = env->log.dishes_served / 10.0f;
+        env->observations[agent_idx * env->observation_size + obs_idx++] = env->rewards[agent_idx];  // Last reward
     }
 }
 
