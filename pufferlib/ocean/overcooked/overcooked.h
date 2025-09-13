@@ -607,17 +607,11 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent) {
         }
         
         env->log.dishes_served++;
-        env->log.correct_dishes++;  // Track correct dishes
+        env->log.correct_dishes++;
         env->log.score += reward;
-        
-        // Calculate cooking efficiency bonus
-        if (env->current_step > 0) {
-            float efficiency = (float)env->log.correct_dishes / (env->current_step / 100.0f);
-            env->log.cooking_time_efficiency = efficiency > 1.0f ? 1.0f : efficiency;
-        }
     } else {
         // Wrong recipe - no penalty, just track it
-        env->log.wrong_dishes++;  // Track wrong dishes
+        env->log.wrong_dishes++;
     }
 }
 
