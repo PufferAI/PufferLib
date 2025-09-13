@@ -616,13 +616,7 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent) {
             env->log.cooking_time_efficiency = efficiency > 1.0f ? 1.0f : efficiency;
         }
     } else {
-        // Wrong recipe - apply penalty
-        float penalty = 1.0f;
-        
-        for (int i = 0; i < env->num_agents; i++) {
-            env->rewards[i] -= penalty;
-        }
-        
+        // Wrong recipe - no penalty, just track it
         env->log.wrong_dishes++;  // Track wrong dishes
     }
 }
