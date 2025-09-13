@@ -58,6 +58,14 @@ typedef struct {
     float episode_length; // Recommended metric: number of steps of agent episode
     float dishes_served; // Number of dishes successfully served
     float cooperation_score; // Bonus for cooperative actions
+    // User-defined stats
+    float correct_dishes; // Number of correct 3-onion dishes
+    float wrong_dishes; // Number of wrong dishes submitted
+    float ingredients_picked; // Total ingredients picked up
+    float pots_started; // Number of cooking sessions started
+    float items_dropped; // Number of items dropped/placed
+    float agent_collisions; // Number of times agents tried to move to same spot
+    float cooking_time_efficiency; // Average cooking efficiency (0-1)
     float n; // Required as the last field 
 } Log;
 
@@ -350,6 +358,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
             if (pot->cooking_state == NOT_COOKING) {
                 pot->cooking_state = COOKING;
                 pot->cooking_progress = 0;
+                env->log.pots_started++;  // Track cooking sessions started
             }
             // Pick up cooked soup only with a plate
             else if (pot->cooking_state == COOKED) {
@@ -415,6 +424,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
                 add_item(env, agent->held_item, target_x, target_y);
             }
             agent->held_item = NO_ITEM;
+            env->log.items_dropped++;  // Track items dropped
         }
     }
     else {
@@ -432,10 +442,12 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
         // Special case: get new ingredients from ingredient box
         else if (tile == INGREDIENT_BOX) {
             agent->held_item = ONION; // Always gives onions for now
+            env->log.ingredients_picked++;  // Track ingredient pickups
         }
         // Special case: get plates from plate box
         else if (tile == PLATE_BOX) {
             agent->held_item = PLATE;
+            env->log.items_dropped++;  // Track items picked up (reusing counter)
         }
     }
 }
@@ -590,31 +602,28 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent) {
         // Correct dish - give full reward to all agents
         float reward = env->reward_dish_served;
         
-        // Could add bonuses based on other conditions
-        // if (served_quickly) reward += 5.0f;
-        
         for (int i = 0; i < env->num_agents; i++) {
             env->rewards[i] += reward;
         }
         
         env->log.dishes_served++;
+        env->log.correct_dishes++;  // Track correct dishes
         env->log.score += reward;
         
-        // Track any special achievements
-        // if (agent->held_soup_total == MAX_INGREDIENTS) {
-        //     env->log.cooperation_score += 1.0f;
-        // }
+        // Calculate cooking efficiency bonus
+        if (env->current_step > 0) {
+            float efficiency = (float)env->log.correct_dishes / (env->current_step / 100.0f);
+            env->log.cooking_time_efficiency = efficiency > 1.0f ? 1.0f : efficiency;
+        }
     } else {
         // Wrong recipe - apply penalty
         float penalty = 1.0f;
         
-        // Could vary penalty based on how wrong it is
-        // if (agent->held_soup_onions == 0) penalty = 2.0f;  // No onions at all
-        // else if (agent->held_soup_tomatoes > 0) penalty = 0.5f;  // Has tomatoes (minor mistake)
-        
         for (int i = 0; i < env->num_agents; i++) {
             env->rewards[i] -= penalty;
         }
+        
+        env->log.wrong_dishes++;  // Track wrong dishes
     }
 }
 
@@ -666,6 +675,14 @@ void c_reset(Overcooked* env) {
     env->log.episode_return = 0;
     env->log.dishes_served = 0;
     env->log.cooperation_score = 0;
+    // Initialize user stats
+    env->log.correct_dishes = 0;
+    env->log.wrong_dishes = 0;
+    env->log.ingredients_picked = 0;
+    env->log.pots_started = 0;
+    env->log.items_dropped = 0;
+    env->log.agent_collisions = 0;
+    env->log.cooking_time_efficiency = 0;
 }
 
 void c_step(Overcooked* env) {
@@ -690,6 +707,14 @@ void c_step(Overcooked* env) {
             if (is_valid_position(env, new_x, new_y, i)) {
                 agent->x = new_x;
                 agent->y = new_y;
+            } else {
+                // Check if collision was with another agent
+                for (int j = 0; j < env->num_agents; j++) {
+                    if (j != i && (int)env->agents[j].x == new_x && (int)env->agents[j].y == new_y) {
+                        env->log.agent_collisions++;
+                        break;
+                    }
+                }
             }
         }
     }
