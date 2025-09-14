@@ -24,7 +24,7 @@ void demo() {
         .grid_size = 100,
         .reward_dish_served = 1.0f,
         .reward_step_penalty = 0.0f,
-        .observation_size = 25 + 8 + 30 + 5 + 3  // Grid + agents + items + pots + global = 71
+        .observation_size = 96  // 96-dimensional observation vector per agent
     };
     
     // Allocate required arrays for multiple agents
