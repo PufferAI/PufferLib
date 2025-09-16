@@ -888,6 +888,7 @@ void c_reset(Overcooked* env) {
     env->log.items_dropped = 0;
     env->log.agent_collisions = 0;
     env->log.cooking_time_efficiency = 0;
+    env->log.n = 0;  // Initialize episode counter
 }
 
 void c_step(Overcooked* env) {
@@ -935,6 +936,10 @@ void c_step(Overcooked* env) {
         for (int i = 0; i < env->num_agents; i++) {
             env->terminals[i] = 1;
         }
+        // Update performance metrics when episode ends
+        env->log.perf = env->log.dishes_served / 20.0f;  // Normalize to 0-1 (20 dishes would be excellent)
+        env->log.score = env->log.episode_return;
+        env->log.n += 1;  // Increment episode count for logging
     }
     
     // Update episode return
