@@ -12,7 +12,7 @@ class Overcooked(pufferlib.PufferEnv):
                  max_steps=400, grid_size=32, 
                  reward_dish_served=1.0, reward_step_penalty=0.0):
         
-        # Define observation space - 96-dimensional vector per agent
+        # Define observation space - 76-dimensional vector per agent
         # Structure:
         # - Player features: 28 dims
         #   * Orientation (one-hot): 4
@@ -24,9 +24,9 @@ class Overcooked(pufferlib.PufferEnv):
         #   * Cooking time: 1
         # - Teammate features: 46 dims (28 mirrored + 18 simplified + 2 relative pos)
         # - Absolute position: 2 dims
-        # Total: 96 dimensions
+        # Total: 76 dimensions
         
-        observation_size = 96
+        observation_size = 76
         
         self.single_observation_space = gymnasium.spaces.Box(
             low=0, high=1,

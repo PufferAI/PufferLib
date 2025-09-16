@@ -14,7 +14,7 @@ void demo() {
     // Load neural network weights
     Weights* weights = load_weights("resources/overcooked/puffer_overcooked_weights.bin", 142215);
     int logit_sizes[] = {6};  // 6 actions: up, down, left, right, interact, noop
-    LinearLSTM* net = make_linearlstm(weights, num_agents, 71, logit_sizes, 1);
+    LinearLSTM* net = make_linearlstm(weights, num_agents, 76, logit_sizes, 1);
     
     Overcooked env = {
         .width = 5,
@@ -24,7 +24,7 @@ void demo() {
         .grid_size = 100,
         .reward_dish_served = 1.0f,
         .reward_step_penalty = 0.0f,
-        .observation_size = 96  // 96-dimensional observation vector per agent
+        .observation_size = 76  // 76-dimensional observation vector per agent
     };
     
     // Allocate required arrays for multiple agents
