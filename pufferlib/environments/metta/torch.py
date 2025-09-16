@@ -112,15 +112,17 @@ class Policy(nn.Module):
         
         for action_type in range(num_action_types):
             if action_type_logits_list[action_type]:
+                # Use mean instead of logsumexp to preserve probability distribution
                 stacked_logits = torch.stack(action_type_logits_list[action_type], dim=1)
-                action_type_logits[:, action_type] = torch.logsumexp(stacked_logits, dim=1)
+                action_type_logits[:, action_type] = stacked_logits.mean(dim=1)
             else:
                 action_type_logits[:, action_type] = float('-inf')
                 
         for action_param in range(max_action_params):
             if action_param_logits_list[action_param]:
+                # Use mean instead of logsumexp to preserve probability distribution
                 stacked_logits = torch.stack(action_param_logits_list[action_param], dim=1)
-                action_param_logits[:, action_param] = torch.logsumexp(stacked_logits, dim=1)
+                action_param_logits[:, action_param] = stacked_logits.mean(dim=1)
             else:
                 action_param_logits[:, action_param] = float('-inf')
                 
@@ -135,21 +137,14 @@ class Policy(nn.Module):
 
         result_td = self.fast_policy(td, state=state, action=action)
 
-        # Use Metta's native log probabilities for training
-        action_log_probs = result_td["act_log_prob"]  # Correct log probs for taken actions
-        full_log_probs = result_td["full_log_probs"]
+        # Get Metta's computed values
+        full_log_probs = result_td["full_log_probs"]  # This is the raw logits from Metta
         value = result_td["values"]
         entropy = result_td.get("entropy")
 
-        # Cache the correct log probabilities
-        self._cached_log_probs = action_log_probs
-        self._cached_entropy = entropy
-
-        # Split flattened logits for PufferLib compatibility (only used for action sampling during eval)
-        logits_list = self._split_logits_for_multidiscrete(full_log_probs)
-
-        # Return format that includes cached log probs for metta_sample_logits
-        return logits_list, value, entropy, action_log_probs
+        # Return the raw logits directly - don't split them!
+        # This preserves Metta's exact probability computation
+        return full_log_probs, value, entropy
 
     def forward_eval(self, observations, state=None):
         """Forward pass during evaluation (no action)."""
@@ -161,7 +156,7 @@ class Policy(nn.Module):
         flattened_logits = result_td["full_log_probs"]  # Shape: [batch_size, total_actions]
         values = result_td["values"]
 
-        # Split flattened logits into separate action dimensions for MultiDiscrete
+        # For evaluation, we need to split logits for PufferLib's action sampling
         logits_list = self._split_logits_for_multidiscrete(flattened_logits)
         
         return logits_list, values
