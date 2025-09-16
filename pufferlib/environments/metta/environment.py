@@ -28,15 +28,28 @@ def make(
     # Create a basic arena configuration using the make_arena function
     mettagrid_cfg = make_arena(num_agents=num_agents)
 
-    # Apply reward shaping based on parameters
+    # Apply reward shaping based on parameters - match easy_shaped_arena_basic
     mettagrid_cfg.game.agent.rewards.inventory = {
         "heart": heart_reward,
         "ore_red": ore_reward,
         "battery_red": battery_reward,
-        "laser": 0.05,
-        "armor": 0.05,
-        "blueprint": 0.0,
+        "laser": 0.5,      # Match easy shaped config
+        "armor": 0.5,      # Match easy shaped config  
+        "blueprint": 0.5,  # Match easy shaped config
     }
+    
+    # Set inventory max limits like easy shaped config
+    mettagrid_cfg.game.agent.rewards.inventory_max = {
+        "heart": 100,
+        "ore_red": 1,
+        "battery_red": 1,
+        "laser": 1,
+        "armor": 1,
+        "blueprint": 1,
+    }
+    
+    # CRITICAL: Easy converter - only 1 battery_red needed for 1 heart (instead of 3)
+    mettagrid_cfg.game.objects["altar"].input_resources = {"battery_red": 1}
 
     return MettaPuff(mettagrid_cfg, render_mode=render_mode, buf=buf, seed=seed)
 
@@ -76,8 +89,7 @@ class MettaPuff(MettaGridEnv):
                 del info['agent_raw']
             if 'episode_rewards' in info:
                 info['score'] = info['episode_rewards']
-
-        else:
-            info = []
-
+        # Don't discard info during non-terminal steps - this preserves heart.gained statistics
+        # The original code set info = [] which lost all intermediate statistics
+        
         return obs, rew, term, trunc, [info]
