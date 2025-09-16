@@ -372,6 +372,8 @@ class PuffeRL:
             profile('train_misc', epoch)
             newlogprob = newlogprob.reshape(mb_logprobs.shape)
             logratio = newlogprob - mb_logprobs
+            # Clamp log ratio to prevent extreme importance sampling ratios (like Metta does)
+            logratio = torch.clamp(logratio, -10, 10)
             ratio = logratio.exp()
             self.ratio[idx] = ratio.detach()
 
@@ -380,11 +382,13 @@ class PuffeRL:
                 approx_kl = ((ratio - 1) - logratio).mean()
                 clipfrac = ((ratio - 1.0).abs() > config['clip_coef']).float().mean()
 
+            # Compute V-trace advantages properly
             adv = advantages[idx]
             adv = compute_puff_advantage(mb_values, mb_rewards, mb_terminals,
                 ratio, adv, config['gamma'], config['gae_lambda'],
                 config['vtrace_rho_clip'], config['vtrace_c_clip'])
-            adv = mb_advantages
+            # Don't overwrite computed advantages - use them!
+            # Normalize advantages with prioritized weights
             adv = mb_prio * (adv - adv.mean()) / (adv.std() + 1e-8)
 
             # Losses
@@ -423,6 +427,10 @@ class PuffeRL:
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), config['max_grad_norm'])
                 self.optimizer.step()
                 self.optimizer.zero_grad()
+            
+            # Early stopping if KL divergence is too high (stability measure)
+            if config.get('target_kl') and approx_kl > config['target_kl']:
+                break
 
         # Reprioritize experience
         profile('train_misc', epoch)
