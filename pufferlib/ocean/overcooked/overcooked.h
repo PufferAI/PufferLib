@@ -242,6 +242,9 @@ static void init(Overcooked* env) {
     parse_grid(env);
     init_cooking_pots(env);
     env->client = NULL;
+
+    // Initialize log stats to zero
+    memset(&env->log, 0, sizeof(Log));
 }
 
 // Helper function to find nearest object of a type
@@ -876,19 +879,8 @@ void c_reset(Overcooked* env) {
     
     compute_observations(env);
     
-    env->log.episode_length = 0;
-    env->log.episode_return = 0;
-    env->log.dishes_served = 0;
-    env->log.cooperation_score = 0;
-    // Initialize user stats
-    env->log.correct_dishes = 0;
-    env->log.wrong_dishes = 0;
-    env->log.ingredients_picked = 0;
-    env->log.pots_started = 0;
-    env->log.items_dropped = 0;
-    env->log.agent_collisions = 0;
-    env->log.cooking_time_efficiency = 0;
-    env->log.n = 0;  // Initialize episode counter
+    // Don't reset log stats here - they accumulate across episodes
+    // Only reset them when logs are actually collected
 }
 
 void c_step(Overcooked* env) {
@@ -937,8 +929,8 @@ void c_step(Overcooked* env) {
             env->terminals[i] = 1;
         }
         // Update performance metrics when episode ends
-        env->log.perf = env->log.dishes_served / 20.0f;  // Normalize to 0-1 (20 dishes would be excellent)
-        env->log.score = env->log.episode_return;
+        env->log.perf += env->log.dishes_served / 20.0f;  // Normalize to 0-1 (20 dishes would be excellent)
+        env->log.score += env->log.episode_return;
         env->log.n += 1;  // Increment episode count for logging
     }
     
