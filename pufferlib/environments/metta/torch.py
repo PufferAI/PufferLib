@@ -6,6 +6,18 @@ from tensordict import TensorDict
 import pufferlib.models
 from metta.agent.pytorch.fast import Fast
 
+# Override PufferLib's sample_logits for Metta
+def metta_sample_logits(policy_output, action=None):
+    """Custom sample_logits that uses Metta's native log probabilities."""
+    logits_list, value, entropy, cached_log_probs = policy_output
+    
+    if action is None:
+        # For evaluation - PufferLib will handle action sampling from logits_list
+        return logits_list, None, entropy
+    else:
+        # For training - return the cached log probabilities from Metta
+        return action, cached_log_probs, entropy
+
 
 class Policy(nn.Module):
     """Policy wrapper around Metta's Fast policy for Pufferlib integration."""
@@ -21,6 +33,10 @@ class Policy(nn.Module):
 
         # Store action space info for logits splitting
         self.action_nvec = env.single_action_space.nvec
+        
+        # Cache for storing computed log probabilities to avoid PufferLib's sample_logits
+        self._cached_log_probs = None
+        self._cached_entropy = None
         
         self._initialize_to_environment(env)
 
@@ -119,14 +135,21 @@ class Policy(nn.Module):
 
         result_td = self.fast_policy(td, state=state, action=action)
 
-        flattened_logits = result_td["full_log_probs"]
+        # Use Metta's native log probabilities for training
+        action_log_probs = result_td["act_log_prob"]  # Correct log probs for taken actions
+        full_log_probs = result_td["full_log_probs"]
         value = result_td["values"]
         entropy = result_td.get("entropy")
 
-        # Split flattened logits into separate action dimensions
-        logits_list = self._split_logits_for_multidiscrete(flattened_logits)
+        # Cache the correct log probabilities
+        self._cached_log_probs = action_log_probs
+        self._cached_entropy = entropy
 
-        return logits_list, value, entropy
+        # Split flattened logits for PufferLib compatibility (only used for action sampling during eval)
+        logits_list = self._split_logits_for_multidiscrete(full_log_probs)
+
+        # Return format that includes cached log probs for metta_sample_logits
+        return logits_list, value, entropy, action_log_probs
 
     def forward_eval(self, observations, state=None):
         """Forward pass during evaluation (no action)."""
@@ -145,8 +168,7 @@ class Policy(nn.Module):
 
     def forward(self, observations, state=None):
         """Default forward (inference)."""
-        logits, value, _ = self.forward_training(observations, action=None, state=state)
-        return logits, value
+        return self.forward_eval(observations, state=state)
 
     def _maybe_reset_memory(self, observations):
         """Reset LSTM memory if batch size mismatch occurs."""

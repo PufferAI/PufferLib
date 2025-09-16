@@ -367,7 +367,18 @@ class PuffeRL:
             )
 
             logits, newvalue = self.policy(mb_obs, state)
-            actions, newlogprob, entropy = pufferlib.pytorch.sample_logits(logits, action=mb_actions)
+            
+            # Special handling for Metta policy to use correct log probabilities
+            if hasattr(self.policy, 'fast_policy'):
+                # For Metta policy, we need to call forward_training to get correct log probs
+                result = self.policy.forward_training(mb_obs.reshape(mb_obs.shape[0], -1), mb_actions.reshape(mb_actions.shape[0], -1), state)
+                if len(result) == 4:  # Has cached log probs
+                    _, _, entropy, newlogprob = result
+                    actions = mb_actions
+                else:
+                    actions, newlogprob, entropy = pufferlib.pytorch.sample_logits(logits, action=mb_actions)
+            else:
+                actions, newlogprob, entropy = pufferlib.pytorch.sample_logits(logits, action=mb_actions)
 
             profile('train_misc', epoch)
             newlogprob = newlogprob.reshape(mb_logprobs.shape)
