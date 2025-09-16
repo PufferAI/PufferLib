@@ -6,18 +6,6 @@ from tensordict import TensorDict
 import pufferlib.models
 from metta.agent.pytorch.fast import Fast
 
-# Override PufferLib's sample_logits for Metta
-def metta_sample_logits(policy_output, action=None):
-    """Custom sample_logits that uses Metta's native log probabilities."""
-    logits_list, value, entropy, cached_log_probs = policy_output
-    
-    if action is None:
-        # For evaluation - PufferLib will handle action sampling from logits_list
-        return logits_list, None, entropy
-    else:
-        # For training - return the cached log probabilities from Metta
-        return action, cached_log_probs, entropy
-
 
 class Policy(nn.Module):
     """Policy wrapper around Metta's Fast policy for Pufferlib integration."""
