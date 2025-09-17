@@ -2,7 +2,7 @@ import gymnasium
 import numpy as np 
 
 import pufferlib 
-from pufferlib.ocean.cpr import binding
+from pufferlib.ocean.shared_pool import binding
 
 class PyCPR(pufferlib.PufferEnv):
     def __init__(self, 
