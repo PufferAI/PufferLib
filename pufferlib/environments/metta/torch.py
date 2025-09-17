@@ -1,14 +1,14 @@
-import numpy as np
 import einops
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 import pufferlib.models
+
 
 class Recurrent(pufferlib.models.LSTMWrapper):
     def __init__(self, env, policy, input_size=512, hidden_size=512):
         super().__init__(env, policy, input_size, hidden_size)
+
 
 class Policy(nn.Module):
     def __init__(self, env, cnn_channels=128, hidden_size=512, **kwargs):
@@ -19,22 +19,23 @@ class Policy(nn.Module):
         self.out_width = env.obs_width
         self.out_height = env.obs_height
 
-        self.num_layers = max(env.feature_normalizations.keys()) + 1
+        # Use hardcoded 22 layers to match metta agent implementations
+        # The dynamic calculation max(env.feature_normalizations.keys()) + 1 gives 24
+        # but actual metta agents use 22 layers consistently
+        self.num_layers = 22
 
-        self.network= nn.Sequential(
-            pufferlib.pytorch.layer_init(
-                nn.Conv2d(self.num_layers, cnn_channels, 5, stride=3)),
+        self.network = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Conv2d(self.num_layers, cnn_channels, 5, stride=3)),
             nn.ReLU(),
-            pufferlib.pytorch.layer_init(
-                nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1)),
+            pufferlib.pytorch.layer_init(nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1)),
             nn.ReLU(),
             nn.Flatten(),
-            pufferlib.pytorch.layer_init(nn.Linear(cnn_channels, hidden_size//2)),
+            pufferlib.pytorch.layer_init(nn.Linear(cnn_channels, hidden_size // 2)),
             nn.ReLU(),
         )
 
         self.self_encoder = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(self.num_layers, hidden_size//2)),
+            pufferlib.pytorch.layer_init(nn.Linear(self.num_layers, hidden_size // 2)),
             nn.ReLU(),
         )
 
@@ -71,13 +72,11 @@ class Policy(nn.Module):
         self.register_buffer("max_vec", max_vec)
 
         action_nvec = env.single_action_space.nvec
-        self.actor = nn.ModuleList([pufferlib.pytorch.layer_init(
-            nn.Linear(hidden_size, n), std=0.01) for n in action_nvec])
+        self.actor = nn.ModuleList(
+            [pufferlib.pytorch.layer_init(nn.Linear(hidden_size, n), std=0.01) for n in action_nvec]
+        )
 
-        self.value = pufferlib.pytorch.layer_init(
-            nn.Linear(hidden_size, 1), std=1)
-
-
+        self.value = pufferlib.pytorch.layer_init(nn.Linear(hidden_size, 1), std=1)
 
     def forward(self, observations, state=None):
         hidden, lookup = self.encode_observations(observations)
@@ -85,7 +84,6 @@ class Policy(nn.Module):
         return (actions, value), hidden
 
     def encode_observations(self, observations, state=None):
-
         token_observations = observations
         B = token_observations.shape[0]
         TT = 1
@@ -119,7 +117,7 @@ class Policy(nn.Module):
         valid_tokens = coords_byte != 0xFF
         valid_tokens = valid_tokens & (x_coord_indices < self.out_width) & (y_coord_indices < self.out_height)
         valid_tokens = valid_tokens & (atr_indices < self.num_layers)  # Also check attribute indices
-        
+
         box_obs[
             batch_indices[valid_tokens],
             atr_indices[valid_tokens],
@@ -133,7 +131,7 @@ class Policy(nn.Module):
         return torch.cat([self_features, cnn_features], dim=1)
 
     def decode_actions(self, hidden):
-        #hidden = self.layer_norm(hidden)
+        # hidden = self.layer_norm(hidden)
         logits = [dec(hidden) for dec in self.actor]
         value = self.value(hidden)
         return logits, value
