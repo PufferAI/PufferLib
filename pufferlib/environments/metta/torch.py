@@ -38,11 +38,33 @@ class Policy(nn.Module):
             nn.ReLU(),
         )
 
-        max_values = [1.0] * self.num_layers  # Default to 1.0
-        for feature_id, norm_value in env.feature_normalizations.items():
-            if feature_id < self.num_layers:
-                max_values[feature_id] = norm_value if norm_value > 0 else 1.0
-        max_vec = torch.tensor(max_values, dtype=torch.float32)[None, :, None, None]
+        max_vec = torch.tensor(
+            [
+                9.0,
+                1.0,
+                1.0,
+                10.0,
+                3.0,
+                254.0,
+                1.0,
+                1.0,
+                235.0,
+                8.0,
+                9.0,
+                250.0,
+                29.0,
+                1.0,
+                1.0,
+                8.0,
+                1.0,
+                1.0,
+                6.0,
+                3.0,
+                1.0,
+                2.0,
+            ],
+            dtype=torch.float32,
+        )
         self.register_buffer('max_vec', max_vec)
 
         action_nvec = env.single_action_space.nvec
@@ -51,6 +73,8 @@ class Policy(nn.Module):
 
         self.value = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, 1), std=1)
+
+
 
     def forward(self, observations, state=None):
         hidden, lookup = self.encode_observations(observations)
