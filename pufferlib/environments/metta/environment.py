@@ -1,16 +1,14 @@
 import functools
-
-import gymnasium
 import numpy as np
+import gymnasium
 
 import pufferlib
+
 from metta.mettagrid.builder.envs import make_arena
 from metta.mettagrid.mettagrid_env import MettaGridEnv
 
-
-def env_creator(name="metta"):
+def env_creator(name='metta'):
     return functools.partial(make, name)
-
 
 def make(
     name,
@@ -21,7 +19,7 @@ def make(
     ore_reward=0.1,
     battery_reward=0.8,
     heart_reward=1.0,
-    num_agents=60,
+    num_agents=24,
 ):
     """Metta creation function"""
 
@@ -52,7 +50,6 @@ def make(
     mettagrid_cfg.game.objects["altar"].input_resources = {"battery_red": 1}
 
     return MettaPuff(mettagrid_cfg, render_mode=render_mode, buf=buf, seed=seed)
-
 
 def oc_divide(a, b):
     """
