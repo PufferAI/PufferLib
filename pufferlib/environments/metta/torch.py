@@ -78,15 +78,6 @@ class Policy(nn.Module):
 
         self.value = pufferlib.pytorch.layer_init(nn.Linear(hidden_size, 1), std=1)
 
-    def forward(self, observations, state=None):
-        hidden, lookup = self.encode_observations(observations)
-
-        lstm_state = (state['lstm_h'], state['lstm_c'])
-
-        lstm_output, (new_h, new_c) = self.lstm(hidden, lstm_state)
-
-        actions, value = self.decode_actions(lstm_output, lookup)
-        return (actions, value), lstm_output
 
     def encode_observations(self, observations, state=None):
         token_observations = observations
