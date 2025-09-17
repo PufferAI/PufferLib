@@ -127,16 +127,7 @@ class Policy(nn.Module):
             y_coord_indices[valid_tokens],
         ] = atr_values[valid_tokens]
 
-        observations = box_obs
-
-        #max_vec = box_obs.max(0)[0].max(1)[0].max(1)[0]
-        #self.max_vec = torch.maximum(self.max_vec, max_vec[None, :, None, None])
-        #if (np.random.rand() < 0.001):
-        #    breakpoint()
-
-        features = observations / self.max_vec
-        #mmax = features.max(0)[0].max(1)[0].max(1)[0]
-        #self.max_vec = torch.maximum(self.max_vec, mmax[None, :, None, None])
+        features = box_obs / (self.max_vec + 1e-8)
         self_features = self.self_encoder(features[:, :, 5, 5])
         cnn_features = self.network(features)
         return torch.cat([self_features, cnn_features], dim=1)
