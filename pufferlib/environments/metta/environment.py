@@ -12,7 +12,6 @@ def env_creator(name='metta'):
 
 def make(
     name,
-    config="pufferlib/environments/metta/metta.yaml",
     render_mode="auto",
     buf=None,
     seed=0,
