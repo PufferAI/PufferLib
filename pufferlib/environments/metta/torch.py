@@ -65,7 +65,10 @@ class Policy(nn.Module):
             ],
             dtype=torch.float32,
         )
-        self.register_buffer('max_vec', max_vec)
+        # Clamp minimum value to 1.0 to avoid near-zero divisions
+        max_vec = torch.maximum(max_vec, torch.ones_like(max_vec))
+        max_vec = max_vec[None, :, None, None]
+        self.register_buffer("max_vec", max_vec)
 
         action_nvec = env.single_action_space.nvec
         self.actor = nn.ModuleList([pufferlib.pytorch.layer_init(
