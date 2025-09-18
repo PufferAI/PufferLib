@@ -71,4 +71,5 @@ class MettaPuff(MettaGridEnv):
             env_cfg=env_cfg,
             render_mode=render_mode,
             replay_writer=self.replay_writer,
+            is_training=True,  # Enable training mode for desync_episodes
         )
