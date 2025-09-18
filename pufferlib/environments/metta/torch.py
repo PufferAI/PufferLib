@@ -79,51 +79,46 @@ class Policy(nn.Module):
         self.value = pufferlib.pytorch.layer_init(nn.Linear(hidden_size, 1), std=1)
 
 
-    def encode_observations(self, observations, state=None):
-        token_observations = observations
-        B = token_observations.shape[0]
-        TT = 1
-        if token_observations.dim() != 3:  # hardcoding for shape [B, M, 3]
-            TT = token_observations.shape[1]
-            token_observations = einops.rearrange(token_observations, "b t m c -> (b t) m c")
+    def encode_observations(self, observations: torch.Tensor, state=None) -> torch.Tensor:
+        """Converts raw observation tokens into a concatenated self + CNN feature vector."""
+        B = observations.shape[0]
+        TT = 1 if observations.dim() == 3 else observations.shape[1]
 
-        assert token_observations.shape[-1] == 3, f"Expected 3 channels per token. Got shape {token_observations.shape}"
-        token_observations[token_observations == 255] = 0
+        if observations.dim() != 3:
+            observations = einops.rearrange(observations, "b t m c -> (b t) m c")
 
-        # coords_byte contains x and y coordinates in a single byte (first 4 bits are x, last 4 bits are y)
-        coords_byte = token_observations[..., 0].to(torch.uint8)
+        observations[observations == 255] = 0
+        coords_byte = observations[..., 0].to(torch.uint8)
 
         # Extract x and y coordinate indices (0-15 range, but we need to make them long for indexing)
-        x_coord_indices = ((coords_byte >> 4) & 0x0F).long()  # Shape: [B_TT, M]
-        y_coord_indices = (coords_byte & 0x0F).long()  # Shape: [B_TT, M]
-        atr_indices = token_observations[..., 1].long()  # Shape: [B_TT, M], ready for embedding
-        atr_values = token_observations[..., 2].float()  # Shape: [B_TT, M]
+        x_coords = ((coords_byte >> 4) & 0x0F).long()  # Shape: [B_TT, M]
+        y_coords = (coords_byte & 0x0F).long()  # Shape: [B_TT, M]
+        atr_indices = observations[..., 1].long()  # Shape: [B_TT, M], ready for embedding
+        atr_values = observations[..., 2].float()  # Shape: [B_TT, M]
 
-        # In ObservationShaper we permute. Here, we create the observations pre-permuted.
-        # We'd like to pre-create this as part of initialization, but we don't know the batch size or time steps at
-        # that point.
         box_obs = torch.zeros(
             (B * TT, self.num_layers, self.out_width, self.out_height),
             dtype=atr_values.dtype,
-            device=token_observations.device,
+            device=observations.device,
         )
-        batch_indices = torch.arange(B * TT, device=token_observations.device).unsqueeze(-1).expand_as(atr_values)
 
-        # Add bounds checking to prevent out-of-bounds access
-        valid_tokens = coords_byte != 0xFF
-        valid_tokens = valid_tokens & (x_coord_indices < self.out_width) & (y_coord_indices < self.out_height)
-        valid_tokens = valid_tokens & (atr_indices < self.num_layers)  # Also check attribute indices
+        valid_tokens = (
+            (coords_byte != 0xFF)
+            & (x_coords < self.out_width)
+            & (y_coords < self.out_height)
+            & (atr_indices < self.num_layers)
+        )
 
-        box_obs[
-            batch_indices[valid_tokens],
-            atr_indices[valid_tokens],
-            x_coord_indices[valid_tokens],
-            y_coord_indices[valid_tokens],
-        ] = atr_values[valid_tokens]
+        batch_idx = torch.arange(B * TT, device=observations.device).unsqueeze(-1).expand_as(atr_values)
+        box_obs[batch_idx[valid_tokens], atr_indices[valid_tokens], x_coords[valid_tokens], y_coords[valid_tokens]] = (
+            atr_values[valid_tokens]
+        )
 
+        # Normalize features with epsilon for numerical stability
         features = box_obs / (self.max_vec + 1e-8)
         self_features = self.self_encoder(features[:, :, 5, 5])
         cnn_features = self.network(features)
+
         return torch.cat([self_features, cnn_features], dim=1)
 
     def decode_actions(self, hidden):
