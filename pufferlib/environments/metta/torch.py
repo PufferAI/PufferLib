@@ -37,10 +37,9 @@ class Policy(nn.Module):
         self.out_width = env.obs_width
         self.out_height = env.obs_height
 
-        # Use hardcoded 22 layers to match metta agent implementations
-        # The dynamic calculation max(env.feature_normalizations.keys()) + 1 gives 24
-        # but actual metta agents use 22 layers consistently
-        self.num_layers = 22
+        # Use dynamic layer calculation to match metta agent implementations
+        # This ensures we process all feature channels provided by the environment
+        self.num_layers = max(env.feature_normalizations.keys()) + 1
 
         # Define CNN layers separately to calculate output size
         # Use gain=1.0 to match Metta's initialization (not sqrt(2))
@@ -76,33 +75,14 @@ class Policy(nn.Module):
             nn.ReLU(),
         )
 
-        max_vec = torch.tensor(
-            [
-                9.0,
-                1.0,
-                1.0,
-                10.0,
-                3.0,
-                254.0,
-                1.0,
-                1.0,
-                235.0,
-                8.0,
-                9.0,
-                250.0,
-                29.0,
-                1.0,
-                1.0,
-                8.0,
-                1.0,
-                1.0,
-                6.0,
-                3.0,
-                1.0,
-                2.0,
-            ],
-            dtype=torch.float32,
-        )
+        # Build normalization vector dynamically from environment feature_normalizations
+        # This matches what Metta's fast policy and ObservationNormalizer do
+        max_values = [1.0] * self.num_layers  # Default to 1.0
+        for feature_id, norm_value in env.feature_normalizations.items():
+            if feature_id < self.num_layers:
+                max_values[feature_id] = norm_value if norm_value > 0 else 1.0
+
+        max_vec = torch.tensor(max_values, dtype=torch.float32)
         # Clamp minimum value to 1.0 to avoid near-zero divisions
         max_vec = torch.maximum(max_vec, torch.ones_like(max_vec))
         max_vec = max_vec[None, :, None, None]
