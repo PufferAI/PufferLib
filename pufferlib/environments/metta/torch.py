@@ -43,11 +43,12 @@ class Policy(nn.Module):
         self.num_layers = 22
 
         # Define CNN layers separately to calculate output size
+        # Use gain=1.0 to match Metta's initialization (not sqrt(2))
         self.conv1 = pufferlib.pytorch.layer_init(
-            nn.Conv2d(self.num_layers, cnn_channels, 5, stride=3)
+            nn.Conv2d(self.num_layers, cnn_channels, 5, stride=3), std=1.0
         )
         self.conv2 = pufferlib.pytorch.layer_init(
-            nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1)
+            nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1), std=1.0
         )
 
         # Calculate actual CNN output size dynamically
@@ -63,13 +64,15 @@ class Policy(nn.Module):
             nn.ReLU(),
             nn.Flatten(),
             pufferlib.pytorch.layer_init(
-                nn.Linear(self.cnn_flattened_size, hidden_size // 2)
+                nn.Linear(self.cnn_flattened_size, hidden_size // 2), std=1.0
             ),
             nn.ReLU(),
         )
 
         self.self_encoder = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(self.num_layers, hidden_size // 2)),
+            pufferlib.pytorch.layer_init(
+                nn.Linear(self.num_layers, hidden_size // 2), std=1.0
+            ),
             nn.ReLU(),
         )
 
