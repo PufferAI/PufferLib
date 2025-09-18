@@ -72,20 +72,3 @@ class MettaPuff(MettaGridEnv):
             render_mode=render_mode,
             replay_writer=self.replay_writer,
         )
-        self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.num_agents)
-        self.actions = self.actions.astype(np.int32)
-
-
-    def step(self, actions):
-        obs, rew, term, trunc, info = super().step(actions)
-
-        if all(term) or all(trunc):
-            self.reset()
-            if 'agent_raw' in info:
-                del info['agent_raw']
-            if 'episode_rewards' in info:
-                info['score'] = info['episode_rewards']
-        # Don't discard info during non-terminal steps - this preserves heart.gained statistics
-        # The original code set info = [] which lost all intermediate statistics
-        
-        return obs, rew, term, trunc, [info]
