@@ -839,7 +839,20 @@ void c_reset(Overcooked* env) {
     env->current_step = 0;
     env->num_items = 0;
     parse_grid(env);
-    
+
+    // Reset per-episode log fields (keep cumulative n, perf, score)
+    env->log.episode_return = 0.0f;
+    env->log.episode_length = 0.0f;
+    env->log.dishes_served = 0.0f;
+    env->log.cooperation_score = 0.0f;
+    env->log.correct_dishes = 0.0f;
+    env->log.wrong_dishes = 0.0f;
+    env->log.ingredients_picked = 0.0f;
+    env->log.pots_started = 0.0f;
+    env->log.items_dropped = 0.0f;
+    env->log.agent_collisions = 0.0f;
+    env->log.cooking_time_efficiency = 0.0f;
+
     // Reset cooking pots
     for (int i = 0; i < env->num_stoves; i++) {
         CookingPot* pot = &env->cooking_pots[i];
@@ -879,8 +892,6 @@ void c_reset(Overcooked* env) {
     
     compute_observations(env);
     
-    // Don't reset log stats here - they accumulate across episodes
-    // Only reset them when logs are actually collected
 }
 
 void c_step(Overcooked* env) {
@@ -919,24 +930,24 @@ void c_step(Overcooked* env) {
     
     // Update cooking progress
     update_cooking(env);
-    
+
+    // Update episode return BEFORE checking terminal
+    for (int i = 0; i < env->num_agents; i++) {
+        env->log.episode_return += env->rewards[i];
+    }
+
     env->current_step++;
     env->log.episode_length++;
-    
+
     // Check for terminal condition
     if (env->current_step >= env->max_steps) {
         for (int i = 0; i < env->num_agents; i++) {
             env->terminals[i] = 1;
         }
-        // Update performance metrics when episode ends
+        // Update cumulative metrics when episode ends
         env->log.perf += env->log.dishes_served / 20.0f;  // Normalize to 0-1 (20 dishes would be excellent)
         env->log.score += env->log.episode_return;
         env->log.n += 1;  // Increment episode count for logging
-    }
-    
-    // Update episode return
-    for (int i = 0; i < env->num_agents; i++) {
-        env->log.episode_return += env->rewards[i];
     }
     
     compute_observations(env);
