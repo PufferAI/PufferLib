@@ -8,7 +8,6 @@
 #include "rlgl.h"
 
 
-// Required struct. Only use floats!
 typedef struct {
     float perf; // Recommended 0-1 normalized single real number perf metric
     float score; // Recommended unnormalized single real number perf metric
@@ -88,7 +87,7 @@ typedef struct {
 
 static MoveState anim = {0};
 
-//Puffer logging - NB n required, all must be +=
+//Puffer logging 
 void add_log(Cube* env) {
     env->log.perf += (env->rewards[0] > 0) ? 1 : 0;
     env->log.score += env->score;
@@ -101,7 +100,7 @@ void add_log(Cube* env) {
         ((env)->observations[ ((f)*(env)->N*(env)->N*6) + ((r)*(env)->N*6) + ((c)*6) + (color) ])
 #define STICKER(env,f,r,c) ((env)->stickers[(f)*(env)->N*(env)->N + (r)*(env)->N + (c)])
 
-// Precompute strips for l=0 (outer layer)
+// Precompute strips that surround each face
 void precompute_strips(Cube *env) {
     int N = env->N;
     // For each face looking at it moving clockwise. Strips on other faces that rotate 
@@ -147,7 +146,6 @@ void precompute_strips(Cube *env) {
 //Main init
 void init(Cube* env) {
     env->stickers = malloc(6 * env->N * env->N * sizeof(int));
-    //MALLOC FOR STRIPS?!
     env->total_cubelets = 0;
     precompute_strips(env);
     env->render = 0;
@@ -175,9 +173,9 @@ static inline void set_color(Cube *env, int f, int r, int c, int k) {
 }
 
 void compute_observations(Cube* env) {
-    for (int f=0; f<6; f++) {
-        for (int r=0; r<env->N; r++) {
-            for (int c=0; c<env->N; c++) {
+    for (int f=0; f<6; f++) { //face
+        for (int r=0; r<env->N; r++) { //row
+            for (int c=0; c<env->N; c++) { //col
                 int colour = STICKER(env,f,r,c);
                 set_color(env, f, r, c, colour);
             }
@@ -222,7 +220,7 @@ static void rotate_strips_ccw(Cube *env, strip_t s[4]) {
         STICKER(env, s[3].face,s[3].row + s[3].dr*k,s[3].col + s[3].dc*k) = tmp[k];
 }
 
-//Rotate face counter-clockwise
+//Just rotates face stickers counter-clockwise
 static void rotate_face_ccw(Cube *env, int f) {
     int N = env->N;
     int tmp[N][N];
@@ -234,8 +232,7 @@ static void rotate_face_ccw(Cube *env, int f) {
             STICKER(env,f,i,j) = tmp[i][j];
 }
 
-
-//Just rotates the face CLOCKWISE
+//Just rotates the face stickers CLOCKWISE
 static void rotate_face(Cube *env, int f) {
     int N = env->N;
     int tmp[N][N];     
@@ -247,7 +244,7 @@ static void rotate_face(Cube *env, int f) {
             STICKER(env,f,i,j) = tmp[i][j];
 }
 
-//Execute move for face, in theory supports multiple turns but only 1 tested
+//Execute move for face, rotate face rotate strips in theory supports multiple turns but only 1 tested
 void move(Cube *env, int face, int turns) {
     int dir = (turns > 0) ? +1 : -1;
     turns = abs(turns) % 4;
@@ -276,7 +273,8 @@ static inline void decode_action(int action, int *face, int *turns) {
     *turns = (action % 2 == 0) ? +1 : -1;
 }
 
-//Distnace from solved based on centre sticker as thr colour for that face
+//Distance from solved based on centre sticker as the colour for that face
+//VERY rough heuristic
 float score(Cube* env) {
     float temp_score = 1.0f;
     for (int f=0;f<6; f++) {
@@ -295,7 +293,6 @@ float score(Cube* env) {
 }
 
 //NB in this code we dont move centre stickers so face colour = centre sticker as in score
-//This is a VERY rough heuristic
 int is_solved(Cube *env) {
     for (int f = 0; f < 6; f++) {
         int color = f;
@@ -310,7 +307,18 @@ int is_solved(Cube *env) {
     return 1; 
 }
 
+// Required function
+void c_reset(Cube* env) {
+    memset(env->observations, 0, sizeof(float) * env->size); 
+    reset_stickers(env); 
+    shuffle(env, env->shuffles);
+    env->tick = 0;
+    env->score = 0;
+    env->episode_return = 0;
+    compute_observations(env);
+}
 
+//Some debugging functions
 
 void print_stickers_file(Cube* env, FILE *out) {
     for (int f=0; f<6; f++) {
@@ -327,18 +335,6 @@ void print_stickers_file(Cube* env, FILE *out) {
 
 void print_stickers(Cube* env) {
     print_stickers_file(env, stdout);
-}
-
-
-// Required function
-void c_reset(Cube* env) {
-    memset(env->observations, 0, sizeof(float) * env->size); 
-    reset_stickers(env); 
-    shuffle(env, env->shuffles);
-    env->tick = 0;
-    env->score = 0;
-    env->episode_return = 0;
-    compute_observations(env);
 }
 
 void print_strips(Cube *env) {
@@ -358,8 +354,10 @@ void print_strips(Cube *env) {
 }
 
 
+// Step Code at bottom as unfortunately we need to call render code in step for animations
+
+
 /* MAIN RENDERING CODE */
-// Step Code at bottom as unfortunately we need render code in step for animations
 
 static inline Vector3 axis_vector(int axis) {
     return (axis==0)? (Vector3){1,0,0} :
@@ -555,6 +553,7 @@ void c_render(Cube* env) {
             }
         }
     }
+    //for highlights
     if (env->user_mode){
        
         rlDisableDepthTest();
@@ -658,11 +657,6 @@ void c_step(Cube* env) {
     int face, turns;
     decode_action(env->actions[0], &face, &turns);
 
-    //printf("Action: face=%d turns=%d\n", face, turns);
-    //printf("Before move:\n");
-    //print_stickers(env);
-    //Faces: U=0, D=1, R=2, L=3, F=4, B=5
-
     static const int FACE_AXIS[6]  = {1, 1, 0, 0, 2, 2};          
     static const int FACE_LAYER[6] = {1, 0, 1, 0, 1, 0};         
     static const int FACE_SIGN[6]  = {-1,-1,-1,+1,-1,+1};        
@@ -676,7 +670,6 @@ void c_step(Cube* env) {
         anim.dir      = FACE_SIGN[face] * dir;
         anim.elapsed  = 0.0f;
         anim.duration = env->anim_time; // seconds per move
-                                                     //
         // animate with OLD stickers
         while (anim.elapsed < anim.duration) {
             if (WindowShouldClose()) break;
@@ -689,8 +682,6 @@ void c_step(Cube* env) {
         move(env, face, turns);
     }
 
-   // printf("After move:\n");
-   // print_stickers(env);
 
     env->score = score(env);
     env->rewards[0] -= 1.0f;
@@ -715,8 +706,6 @@ void c_step(Cube* env) {
     compute_observations(env);
 }
 
-// Required function. Should clean up anything you allocated
-// Do not free env->observations, actions, rewards, terminals
 void c_close(Cube* env) {
     free(env->stickers);
    if (IsWindowReady()) {
