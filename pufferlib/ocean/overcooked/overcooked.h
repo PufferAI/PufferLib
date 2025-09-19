@@ -306,12 +306,13 @@ static void find_nearest_empty_counter(Overcooked* env, int agent_x, int agent_y
 }
 
 static void compute_observations(Overcooked* env) {
-    // 76-dimensional observation vector for each agent
+    // 77-dimensional observation vector for each agent
     // Structure per agent:
     // - Player features: 28 dims (4 orientation + 4 held + 12 proximity + 2 soup + 1 pot exist + 4 pot state + 1 cook time)
     // - Teammate features: 46 dims (4 orientation + 4 held + 12 proximity + 2 soup + 1 pot exist + 4 pot state + 1 cook time + 2 relative position + 16 padding)
     // - Absolute position: 2 dims
-    // Total: 76 dims
+    // - Reward: 1 dim
+    // Total: 77 dims
     
     for (int agent_idx = 0; agent_idx < env->num_agents; agent_idx++) {
         Agent* agent = &env->agents[agent_idx];
@@ -527,10 +528,13 @@ static void compute_observations(Overcooked* env) {
         // === ABSOLUTE POSITION (2 dims) ===
         obs[obs_idx++] = agent->x / (float)env->width;
         obs[obs_idx++] = agent->y / (float)env->height;
-        
-        // Total should be 76 dims
-        if (obs_idx != 76 && agent_idx == 0 && env->current_step == 0) {
-            printf("Warning: Observation size mismatch! Expected 76, got %d\n", obs_idx);
+
+        // === REWARD (1 dim) ===
+        obs[obs_idx++] = env->rewards[agent_idx];
+
+        // Total should be 77 dims
+        if (obs_idx != 77 && agent_idx == 0 && env->current_step == 0) {
+            printf("Warning: Observation size mismatch! Expected 77, got %d\n", obs_idx);
         }
     }
 }
