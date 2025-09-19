@@ -645,7 +645,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
             }
             agent->held_item = NO_ITEM;
             env->log.items_dropped++;  // Track items dropped
-        } else if ((tile == FLOOR) && item == NULL) {
+        } else if ((tile == EMPTY) && item == NULL) {
             agent->held_item = NO_ITEM;
             // item went to oblivion
             env->log.items_dropped++;
