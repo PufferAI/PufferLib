@@ -12,21 +12,24 @@ class Overcooked(pufferlib.PufferEnv):
                  max_steps=400, grid_size=32, 
                  reward_dish_served=1.0, reward_step_penalty=0.0):
         
-        # Define observation space - 77-dimensional vector per agent
+        # Define observation space - 83-dimensional vector per agent (was 77, added 4 wall + 2 soup ingredients)
         # Structure:
-        # - Player features: 28 dims
+        # - Player features: 34 dims
         #   * Orientation (one-hot): 4
         #   * Held object (one-hot): 4
         #   * Proximity to objects (dx,dy): 12 (6 objects × 2)
-        #   * Soup ingredients: 2
+        #   * Nearest soup ingredients: 2 (onions, tomatoes in plated soup or held)
+        #   * Pot soup ingredients: 2 (onions, tomatoes in nearest pot)
         #   * Pot existence: 1
         #   * Pot state flags: 4
         #   * Cooking time: 1
+        #   * Wall detection: 4 (up, down, left, right)
         # - Teammate features: 46 dims (28 mirrored + 18 simplified + 2 relative pos)
         # - Absolute position: 2 dims
-        # Total: 77 dimensions (including reward)
-        
-        observation_size = 77  # Including reward
+        # - Reward: 1 dim
+        # Total: 83 dimensions (including reward)
+
+        observation_size = 83  # Including reward
         
         self.single_observation_space = gymnasium.spaces.Box(
             low=0, high=1,
