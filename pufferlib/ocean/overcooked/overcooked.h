@@ -593,8 +593,16 @@ static void compute_observations(Overcooked* env) {
         }
         
         // === ABSOLUTE POSITION (2 dims) ===
-        obs[obs_idx++] = agent->x / (float)env->width;
-        obs[obs_idx++] = agent->y / (float)env->height;
+        float abs_x = agent->x / (float)env->width;
+        float abs_y = agent->y / (float)env->height;
+        obs[obs_idx++] = abs_x;
+        obs[obs_idx++] = abs_y;
+
+        // Debug absolute position calculation (only for first few steps)
+        if (agent_idx == 0 && env->current_step < 3) {
+            printf("DEBUG: Agent pos=(%d,%d), grid=(%dx%d), abs_pos=(%.3f,%.3f)\n",
+                   (int)agent->x, (int)agent->y, env->width, env->height, abs_x, abs_y);
+        }
 
         // === REWARD (1 dim) ===
         obs[obs_idx++] = env->rewards[agent_idx];
@@ -1564,7 +1572,7 @@ void c_render(Overcooked* env) {
         obs_panel_y += 13;
 
         // Absolute position (80-81)
-        DrawText(TextFormat("[80-81] AbsPos: %.2f, %.2f", obs[80], obs[81]),
+        DrawText(TextFormat("[80-81] AbsPos: %.3f, %.3f", obs[80], obs[81]),
                  obs_panel_x, obs_panel_y, 9, BLACK);
         obs_panel_y += 10;
 

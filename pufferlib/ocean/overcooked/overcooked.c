@@ -24,7 +24,7 @@ void demo() {
         .grid_size = 100,
         .reward_dish_served = 1.0f,
         .reward_step_penalty = 0.0f,
-        .observation_size = 77  // 77-dimensional observation vector per agent (including reward)
+        .observation_size = 83  // 83-dimensional observation vector per agent (including reward)
     };
     
     // Allocate required arrays for multiple agents
@@ -99,7 +99,7 @@ void test_performance(float test_time) {
         .grid_size = 100,
         .reward_dish_served = 1.0f,
         .reward_step_penalty = 0.0f,
-        .observation_size = 77  // Updated to match new observation size
+        .observation_size = 83  // Updated to match new observation size
     };
 
     // Allocate required arrays
