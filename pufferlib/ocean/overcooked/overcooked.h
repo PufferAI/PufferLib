@@ -536,23 +536,36 @@ static void compute_observations(Overcooked* env) {
             obs_idx += 4;
             
             // 3. Proximity features for teammate (12 dims)
+            // Use the same compute_proximity_feature function for consistency
             float tdx, tdy;
-            find_nearest_object(env, teammate->x, teammate->y, INGREDIENT_BOX, &tdx, &tdy);
+
+            // Nearest onion source (returns (0,0) if holding onion)
+            compute_proximity_feature(env, teammate, INGREDIENT_BOX, &tdx, &tdy);
             obs[obs_idx++] = tdx;
             obs[obs_idx++] = tdy;
-            find_nearest_object(env, teammate->x, teammate->y, PLATE_BOX, &tdx, &tdy);
+
+            // Nearest dish (returns (0,0) if holding plate)
+            compute_proximity_feature(env, teammate, PLATE_BOX, &tdx, &tdy);
             obs[obs_idx++] = tdx;
             obs[obs_idx++] = tdy;
-            find_nearest_item(env, teammate->x, teammate->y, PLATED_SOUP, &tdx, &tdy);
+
+            // Nearest soup (returns (0,0) if holding soup or none exists)
+            compute_proximity_feature(env, teammate, PLATED_SOUP, &tdx, &tdy);
             obs[obs_idx++] = tdx;
             obs[obs_idx++] = tdy;
-            find_nearest_object(env, teammate->x, teammate->y, SERVING_AREA, &tdx, &tdy);
+
+            // Nearest serving area
+            compute_proximity_feature(env, teammate, SERVING_AREA, &tdx, &tdy);
             obs[obs_idx++] = tdx;
             obs[obs_idx++] = tdy;
+
+            // Nearest empty counter
             find_nearest_empty_counter(env, teammate->x, teammate->y, &tdx, &tdy);
             obs[obs_idx++] = tdx;
             obs[obs_idx++] = tdy;
-            find_nearest_object(env, teammate->x, teammate->y, STOVE, &tdx, &tdy);
+
+            // Nearest pot (stove)
+            compute_proximity_feature(env, teammate, STOVE, &tdx, &tdy);
             obs[obs_idx++] = tdx;
             obs[obs_idx++] = tdy;
             
