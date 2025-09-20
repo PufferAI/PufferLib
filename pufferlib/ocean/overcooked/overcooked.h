@@ -81,6 +81,7 @@ typedef struct {
     Texture2D onions_box;
     Texture2D tomatoes_box;
     Texture2D dishes_box;
+    Texture2D wall;
     
     // Object textures
     Texture2D onion;
@@ -210,11 +211,11 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent);
 
 // From overcooked-ai repo; 5x5
 static const char CRAMPED_ROOM[5][5] = {
-    {'1', '1', '2', '1', '1'},
+    {'6', '1', '2', '1', '6'},
     {'4', ' ', ' ', ' ', '4'},
     {'1', ' ', ' ', ' ', '1'},
     {'1', ' ', ' ', ' ', '1'},
-    {'1', '7', '1', '5', '1'}
+    {'6', '7', '1', '5', '6'}
 };
 
 static void parse_grid(Overcooked* env) {
@@ -229,6 +230,7 @@ static void parse_grid(Overcooked* env) {
                 case '3': env->grid[idx] = CUTTING_BOARD; break;
                 case '4': env->grid[idx] = INGREDIENT_BOX; break;
                 case '5': env->grid[idx] = SERVING_AREA; break;
+                case '6': env->grid[idx] = WALL; break;
                 case '7': env->grid[idx] = PLATE_BOX; break;
                 default: env->grid[idx] = EMPTY; break;
             }
@@ -1077,7 +1079,8 @@ void c_render(Overcooked* env) {
         env->client->onions_box = LoadTexture("pufferlib/resources/overcooked/terrain/onions.png");
         env->client->tomatoes_box = LoadTexture("pufferlib/resources/overcooked/terrain/tomatoes.png");
         env->client->dishes_box = LoadTexture("pufferlib/resources/overcooked/terrain/dishes.png");
-        
+        env->client->wall = LoadTexture("pufferlib/resources/overcooked/terrain/counter.png");
+
         // Load object textures
         env->client->onion = LoadTexture("pufferlib/resources/overcooked/objects/onion.png");
         env->client->tomato = LoadTexture("pufferlib/resources/overcooked/objects/tomato.png");
@@ -1173,10 +1176,8 @@ void c_render(Overcooked* env) {
                     texture = &env->client->dishes_box;
                     break;
                 case WALL:
-                    // Draw a dark rectangle for walls
-                    DrawRectangle(x * env->grid_size, y * env->grid_size, 
-                                  env->grid_size, env->grid_size, DARKGRAY);
-                    continue;
+                    texture = &env->client->wall;
+                    break;
             }
             
             // Draw the texture if available
@@ -1446,6 +1447,7 @@ void c_close(Overcooked* env) {
         UnloadTexture(env->client->onions_box);
         UnloadTexture(env->client->tomatoes_box);
         UnloadTexture(env->client->dishes_box);
+        UnloadTexture(env->client->wall);
         
         // Unload object textures
         UnloadTexture(env->client->onion);
