@@ -19,13 +19,13 @@
 #define PLATE_BOX 7
 #define AGENT 8
 
-// Item types
-#define NO_ITEM 0
-#define TOMATO 1
-#define ONION 2
-#define PLATE 3
-#define SOUP 4  // Generic soup (deprecated)
-#define PLATED_SOUP 5  // Soup on a plate with ingredient info
+// Item types (starting at 10 to avoid collision with grid tiles)
+#define NO_ITEM 10
+#define TOMATO 11
+#define ONION 12
+#define PLATE 13
+#define SOUP 14  // Generic soup (deprecated)
+#define PLATED_SOUP 15  // Soup on a plate with ingredient info
 
 // Cooking states
 #define NOT_COOKING 0
@@ -263,6 +263,7 @@ static void compute_proximity_feature(Overcooked* env, Agent* agent, int feature
     if (feature_type == INGREDIENT_BOX && agent->held_item == ONION) return;  // Holding onion
     if (feature_type == PLATE_BOX && agent->held_item == PLATE) return;       // Holding dish
     if (feature_type == PLATED_SOUP && agent->held_item == PLATED_SOUP) return; // Holding soup
+    // Note: SERVING_AREA should always show distance, even when holding soup (agents need to know where to deliver)
 
     // For items on counters (plated soup)
     if (feature_type == PLATED_SOUP) {
@@ -296,43 +297,6 @@ static void compute_proximity_feature(Overcooked* env, Agent* agent, int feature
     }
 }
 
-// Helper function to find nearest object of a type (kept for compatibility)
-static void find_nearest_object(Overcooked* env, int agent_x, int agent_y, int object_type, float* dx, float* dy) {
-    float min_dist = 1000.0f;
-    *dx = 0.0f;
-    *dy = 0.0f;
-
-    for (int y = 0; y < env->height; y++) {
-        for (int x = 0; x < env->width; x++) {
-            if (env->grid[y * env->width + x] == object_type) {
-                float dist = (float)(abs(x - agent_x) + abs(y - agent_y));  // Manhattan distance
-                if (dist < min_dist) {
-                    min_dist = dist;
-                    *dx = (x - agent_x) / (float)env->width;  // Normalize
-                    *dy = (y - agent_y) / (float)env->height;
-                }
-            }
-        }
-    }
-}
-
-// Helper function to find nearest item of a type
-static void find_nearest_item(Overcooked* env, int agent_x, int agent_y, int item_type, float* dx, float* dy) {
-    float min_dist = 1000.0f;
-    *dx = 0.0f;
-    *dy = 0.0f;
-    
-    for (int i = 0; i < env->num_items; i++) {
-        if (env->items[i].type == item_type) {
-            float dist = (float)(abs(env->items[i].x - agent_x) + abs(env->items[i].y - agent_y));
-            if (dist < min_dist) {
-                min_dist = dist;
-                *dx = (env->items[i].x - agent_x) / (float)env->width;
-                *dy = (env->items[i].y - agent_y) / (float)env->height;
-            }
-        }
-    }
-}
 
 // Clever empty counter finder - returns (0,0) if no empty counters exist
 static void find_nearest_empty_counter(Overcooked* env, int agent_x, int agent_y, float* dx, float* dy) {
@@ -1077,8 +1041,8 @@ void c_step(Overcooked* env) {
 // Required function. Should handle creating the client on first call
 void c_render(Overcooked* env) {
     if (env->client == NULL) {
-        // Add extra height for status display
-        int window_width = env->width * env->grid_size;
+        // Add extra width for observation panel and height for status display
+        int window_width = env->width * env->grid_size + 350;  // Extra 350 pixels for obs panel
         int window_height = env->height * env->grid_size + 80;  // Extra 80 pixels for status
         InitWindow(window_width, window_height, "PufferLib Overcooked");
         SetTargetFPS(4);
@@ -1442,7 +1406,214 @@ void c_render(Overcooked* env) {
                      10, BLACK);
         }
     }
-    
+
+    // Draw observation info panel on the right side
+    int obs_panel_x = env->width * env->grid_size + 10;
+    int obs_panel_y = grid_offset_y;
+
+    // Show observation info for agent 0
+    if (env->num_agents > 0) {
+        float* obs = &env->observations[0];
+
+        DrawText("=== OBSERVATION ARRAY (83 dims) ===", obs_panel_x, obs_panel_y, 11, BLACK);
+        obs_panel_y += 18;
+
+        // PLAYER FEATURES (indices 0-33)
+        DrawText("-- PLAYER (0-33) --", obs_panel_x, obs_panel_y, 10, DARKGREEN);
+        obs_panel_y += 13;
+
+        // Orientation (0-3)
+        DrawText(TextFormat("[0-3] Orient: %.0f %.0f %.0f %.0f",
+                 obs[0], obs[1], obs[2], obs[3]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 11;
+
+        // Held item (4-7)
+        DrawText(TextFormat("[4-7] Held: %.0f %.0f %.0f %.0f",
+                 obs[4], obs[5], obs[6], obs[7]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 11;
+
+        // Proximity features (8-19)
+        DrawText(TextFormat("[8-9] Onion: %.2f, %.2f", obs[8], obs[9]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+        DrawText(TextFormat("[10-11] Dish: %.2f, %.2f", obs[10], obs[11]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+        DrawText(TextFormat("[12-13] Soup: %.2f, %.2f", obs[12], obs[13]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+        DrawText(TextFormat("[14-15] Serve: %.2f, %.2f", obs[14], obs[15]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+        DrawText(TextFormat("[16-17] Empty: %.2f, %.2f", obs[16], obs[17]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+        DrawText(TextFormat("[18-19] Pot: %.2f, %.2f", obs[18], obs[19]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 11;
+
+        // Soup ingredients (20-21)
+        DrawText(TextFormat("[20-21] SoupIngr: %.2f, %.2f", obs[20], obs[21]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+
+        // Pot ingredients (22-23)
+        DrawText(TextFormat("[22-23] PotIngr: %.2f, %.2f", obs[22], obs[23]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+
+        // Pot exists (24)
+        DrawText(TextFormat("[24] PotExists: %.0f", obs[24]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+
+        // Pot state (25-28)
+        DrawText(TextFormat("[25-28] PotState: %.0f %.0f %.0f %.0f",
+                 obs[25], obs[26], obs[27], obs[28]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+
+        // Cook time (29)
+        DrawText(TextFormat("[29] CookTime: %.2f", obs[29]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+
+        // Walls (30-33)
+        DrawText(TextFormat("[30-33] Walls: %.0f %.0f %.0f %.0f",
+                 obs[30], obs[31], obs[32], obs[33]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 13;
+
+        // TEAMMATE FEATURES (indices 34-79)
+        DrawText("-- TEAMMATE (34-79) --", obs_panel_x, obs_panel_y, 10, DARKBLUE);
+        obs_panel_y += 13;
+
+        if (env->num_agents > 1) {
+            // Teammate orientation (34-37)
+            DrawText(TextFormat("[34-37] T.Orient: %.0f %.0f %.0f %.0f",
+                     obs[34], obs[35], obs[36], obs[37]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+
+            // Teammate held (38-41)
+            DrawText(TextFormat("[38-41] T.Held: %.0f %.0f %.0f %.0f",
+                     obs[38], obs[39], obs[40], obs[41]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+
+            // Teammate proximities (42-53)
+            DrawText(TextFormat("[42-43] T.Onion: %.2f, %.2f", obs[42], obs[43]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+            DrawText(TextFormat("[44-45] T.Dish: %.2f, %.2f", obs[44], obs[45]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+            DrawText(TextFormat("[46-47] T.Soup: %.2f, %.2f", obs[46], obs[47]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+            DrawText(TextFormat("[48-49] T.Serve: %.2f, %.2f", obs[48], obs[49]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+            DrawText(TextFormat("[50-51] T.Empty: %.2f, %.2f", obs[50], obs[51]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+            DrawText(TextFormat("[52-53] T.Pot: %.2f, %.2f", obs[52], obs[53]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+
+            // Teammate pot ingredients (54-55)
+            DrawText(TextFormat("[54-55] T.PotIngr: %.2f, %.2f", obs[54], obs[55]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+
+            // Teammate pot exists (56)
+            DrawText(TextFormat("[56] T.PotExists: %.0f", obs[56]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+
+            // Teammate pot state (57-60)
+            DrawText(TextFormat("[57-60] T.PotState: %.0f %.0f %.0f %.0f",
+                     obs[57], obs[58], obs[59], obs[60]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+
+            // Teammate cook time (61)
+            DrawText(TextFormat("[61] T.CookTime: %.2f", obs[61]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+
+            // Teammate relative position (62-63)
+            DrawText(TextFormat("[62-63] T.RelPos: %.2f, %.2f", obs[62], obs[63]),
+                     obs_panel_x, obs_panel_y, 9, BLACK);
+            obs_panel_y += 10;
+
+            // Padding (64-79)
+            DrawText("[64-79] Padding: (zeros)", obs_panel_x, obs_panel_y, 9, GRAY);
+            obs_panel_y += 10;
+        } else {
+            DrawText("No teammate", obs_panel_x, obs_panel_y, 9, GRAY);
+            obs_panel_y += 10;
+        }
+
+        obs_panel_y += 3;
+
+        // ABSOLUTE POSITION & REWARD (indices 80-82)
+        DrawText("-- MISC (80-82) --", obs_panel_x, obs_panel_y, 10, DARKGRAY);
+        obs_panel_y += 13;
+
+        // Absolute position (80-81)
+        DrawText(TextFormat("[80-81] AbsPos: %.2f, %.2f", obs[80], obs[81]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+
+        // Reward (82)
+        DrawText(TextFormat("[82] Reward: %.2f", obs[82]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+    }
+
+    // Draw proximity arrows
+    if (env->num_agents > 0) {
+        Agent* agent = &env->agents[0];
+        float* obs = &env->observations[0];
+
+        // Draw arrows from agent to nearest objects
+        int agent_screen_x = agent->x * env->grid_size + env->grid_size/2;
+        int agent_screen_y = agent->y * env->grid_size + grid_offset_y + env->grid_size/2;
+
+        // Onion box arrow (green)
+        float dx_onion = obs[8] * env->width;
+        float dy_onion = obs[9] * env->height;
+        if (dx_onion != 0 || dy_onion != 0) {
+            DrawLine(agent_screen_x, agent_screen_y,
+                    agent_screen_x + dx_onion * env->grid_size,
+                    agent_screen_y + dy_onion * env->grid_size,
+                    (Color){0, 200, 0, 100});
+        }
+
+        // Serving area arrow (blue)
+        float dx_serve = obs[14] * env->width;
+        float dy_serve = obs[15] * env->height;
+        if (dx_serve != 0 || dy_serve != 0) {
+            DrawLine(agent_screen_x, agent_screen_y,
+                    agent_screen_x + dx_serve * env->grid_size,
+                    agent_screen_y + dy_serve * env->grid_size,
+                    (Color){0, 0, 200, 100});
+        }
+
+        // Pot arrow (red)
+        float dx_pot = obs[18] * env->width;
+        float dy_pot = obs[19] * env->height;
+        if (dx_pot != 0 || dy_pot != 0) {
+            DrawLine(agent_screen_x, agent_screen_y,
+                    agent_screen_x + dx_pot * env->grid_size,
+                    agent_screen_y + dy_pot * env->grid_size,
+                    (Color){200, 0, 0, 100});
+        }
+    }
+
     EndDrawing();
 }
 
