@@ -282,7 +282,7 @@ static void compute_proximity_feature(Overcooked* env, Agent* agent, int feature
         for (int y = 0; y < env->height; y++) {
             for (int x = 0; x < env->width; x++) {
                 if (env->grid[y * env->width + x] == feature_type) {
-                    float dist = (float)(abs(x - agent->x) + abs(y - agent->y));
+                    float dist = (float)(abs(x - (int)agent->x) + abs(y - (int)agent->y));
                     if (dist < min_dist) {
                         min_dist = dist;
                         *dx = (x - agent->x) / (float)env->width;
@@ -337,7 +337,6 @@ static void find_nearest_empty_counter(Overcooked* env, int agent_x, int agent_y
     float min_dist = 1000.0f;
     *dx = 0.0f;
     *dy = 0.0f;
-    bool found = false;
 
     for (int y = 0; y < env->height; y++) {
         for (int x = 0; x < env->width; x++) {
@@ -347,7 +346,6 @@ static void find_nearest_empty_counter(Overcooked* env, int agent_x, int agent_y
                     min_dist = dist;
                     *dx = (x - agent_x) / (float)env->width;
                     *dy = (y - agent_y) / (float)env->height;
-                    found = true;
                 }
             }
         }
@@ -435,7 +433,7 @@ static void compute_observations(Overcooked* env) {
             // Find nearest plated soup on counter
             Item* nearest_soup = NULL;
             float min_soup_dist = 1000.0f;
-            for (int i = 0; i < env->item_count; i++) {
+            for (int i = 0; i < env->num_items; i++) {
                 if (env->items[i].type == PLATED_SOUP) {
                     float dist = (float)(abs((int)env->items[i].x - (int)agent->x) +
                                          abs((int)env->items[i].y - (int)agent->y));
@@ -502,10 +500,10 @@ static void compute_observations(Overcooked* env) {
 
         // 9. Wall detection (4 dims: up, down, left, right)
         // Check each direction for walls, stoves, and counters (all are non-walkable)
-        int wall_up = (agent->y > 0) ? env->grid[(agent->y - 1) * env->width + agent->x] : WALL;
-        int wall_down = (agent->y < env->height - 1) ? env->grid[(agent->y + 1) * env->width + agent->x] : WALL;
-        int wall_left = (agent->x > 0) ? env->grid[agent->y * env->width + (agent->x - 1)] : WALL;
-        int wall_right = (agent->x < env->width - 1) ? env->grid[agent->y * env->width + (agent->x + 1)] : WALL;
+        int wall_up = (agent->y > 0) ? env->grid[((int)agent->y - 1) * env->width + (int)agent->x] : WALL;
+        int wall_down = (agent->y < env->height - 1) ? env->grid[((int)agent->y + 1) * env->width + (int)agent->x] : WALL;
+        int wall_left = (agent->x > 0) ? env->grid[(int)agent->y * env->width + ((int)agent->x - 1)] : WALL;
+        int wall_right = (agent->x < env->width - 1) ? env->grid[(int)agent->y * env->width + ((int)agent->x + 1)] : WALL;
 
         obs[obs_idx++] = (wall_up == WALL || wall_up == STOVE || wall_up == COUNTER) ? 1.0f : 0.0f;
         obs[obs_idx++] = (wall_down == WALL || wall_down == STOVE || wall_down == COUNTER) ? 1.0f : 0.0f;
