@@ -144,8 +144,8 @@ typedef struct {
 
 typedef struct {
     int type;
-    float x;
-    float y;
+    int x;  // Changed from float to int for grid positioning
+    int y;  // Changed from float to int for grid positioning
     int state;  // For items that can change state (e.g., cooking progress)
     // For plated soups, track the recipe
     int num_onions;     // Number of onions in the soup
@@ -267,7 +267,7 @@ static void compute_proximity_feature(Overcooked* env, Agent* agent, int feature
         float min_dist = 1000.0f;
         for (int i = 0; i < env->num_items; i++) {
             if (env->items[i].type == PLATED_SOUP) {
-                float dist = fabs(env->items[i].x - agent->x) + fabs(env->items[i].y - agent->y);
+                float dist = (float)(abs(env->items[i].x - (int)agent->x) + abs(env->items[i].y - (int)agent->y));
                 if (dist < min_dist) {
                     min_dist = dist;
                     *dx = (env->items[i].x - agent->x) / (float)env->width;
@@ -322,7 +322,7 @@ static void find_nearest_item(Overcooked* env, int agent_x, int agent_y, int ite
     
     for (int i = 0; i < env->num_items; i++) {
         if (env->items[i].type == item_type) {
-            float dist = fabs(env->items[i].x - agent_x) + fabs(env->items[i].y - agent_y);  // fabs is correct here (floats)
+            float dist = (float)(abs(env->items[i].x - agent_x) + abs(env->items[i].y - agent_y));
             if (dist < min_dist) {
                 min_dist = dist;
                 *dx = (env->items[i].x - agent_x) / (float)env->width;
@@ -1066,7 +1066,7 @@ void c_render(Overcooked* env) {
         int window_width = env->width * env->grid_size;
         int window_height = env->height * env->grid_size + 80;  // Extra 80 pixels for status
         InitWindow(window_width, window_height, "PufferLib Overcooked");
-        SetTargetFPS(60);
+        SetTargetFPS(4);
         env->client = (Client*)calloc(1, sizeof(Client));
         
         // Load terrain textures
