@@ -3,6 +3,12 @@
 #include "../env_binding.h"
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {   
+    env->cart_mass = unpack(kwargs, "cart_mass");
+    env->pole_mass = unpack(kwargs, "pole_mass");
+    env->pole_length = unpack(kwargs, "pole_length");
+    env->gravity = unpack(kwargs, "gravity");
+    env->force_mag = unpack(kwargs, "force_mag");
+    env->tau = unpack(kwargs, "dt");
     env->continuous = unpack(kwargs, "continuous");
     init(env);
     return 0;

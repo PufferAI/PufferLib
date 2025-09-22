@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include "cpr.h"
 #include "puffernet.h"
+#include "shared_pool.h"
 
 int main() {
   CCpr env = {
