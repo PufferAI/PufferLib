@@ -109,16 +109,6 @@ class Policy(nn.Module):
         if observations.dim() != 3:
             observations = einops.rearrange(observations, "b t m c -> (b t) m c")
 
-        # print(f"TORCH: shape={observations.shape}, non_zero={torch.count_nonzero(observations).item()}")
-        # print(observations)
-
-
-        # print(f"[PUFFERLIB] OBSERVATIONS: observations.shape = {observations.shape}")
-        # print(f"[PUFFERLIB] OBSERVATIONS: standard deviation = {observations.float().std()}")
-        # print(f"[PUFFERLIB] OBSERVATIONS: mean = {observations.float().mean()}")
-        # print(f"[PUFFERLIB] OBSERVATIONS: min = {observations.float().min()}")
-        # print(f"[PUFFERLIB] OBSERVATIONS: max = {observations.float().max()}")
-
         observations[observations == 255] = 0
         coords_byte = observations[..., 0].to(torch.uint8)
 
@@ -129,12 +119,6 @@ class Policy(nn.Module):
             ..., 1
         ].long()  # Shape: [B_TT, M], ready for embedding
         atr_values = observations[..., 2].float()  # Shape: [B_TT, M]
-
-        # # DEBUG: Print coordinate extraction
-        # print(f"[PUFFERLIB] COORDS: x_coords[0, :10] = {x_coords[0, :10]}")
-        # print(f"[PUFFERLIB] COORDS: y_coords[0, :10] = {y_coords[0, :10]}")
-        # print(f"[PUFFERLIB] COORDS: atr_indices[0, :10] = {atr_indices[0, :10]}")
-        # print(f"[PUFFERLIB] COORDS: atr_values[0, :10] = {atr_values[0, :10]}")
 
         box_obs = torch.zeros(
             (B * TT, self.num_layers, self.out_width, self.out_height),
@@ -149,10 +133,6 @@ class Policy(nn.Module):
             & (atr_indices < self.num_layers)
         )
 
-        # # DEBUG: Print valid tokens
-        # valid_count = valid_tokens[0].sum().item()
-        # print(f"[PUFFERLIB] VALID: valid_tokens[0] count = {valid_count}")
-        # print(f"[PUFFERLIB] VALID: num_layers = {self.num_layers}")
 
         batch_idx = (
             torch.arange(B * TT, device=observations.device)
@@ -166,34 +146,14 @@ class Policy(nn.Module):
             y_coords[valid_tokens],
         ] = atr_values[valid_tokens]
 
-        # # DEBUG: Print box_obs statistics
-        # non_zero_count = (box_obs > 0).sum().item()
-        # print(f"[PUFFERLIB] BOX_OBS: shape = {box_obs.shape}")
-        # print(f"[PUFFERLIB] BOX_OBS: non_zero_count = {non_zero_count}")
-        # print(f"[PUFFERLIB] BOX_OBS: max_vec.shape = {self.max_vec.shape}")
-        # print(f"[PUFFERLIB] BOX_OBS: max_vec[0, :10, 0, 0] = {self.max_vec[0, :10, 0, 0]}")
-
         # Normalize features with epsilon for numerical stability
         features = box_obs / (self.max_vec + 1e-8)
-
-        # # DEBUG: Print features after normalization
-        # print(f"[PUFFERLIB] FEATURES: features.shape = {features.shape}")
-        # print(f"[PUFFERLIB] FEATURES: features[0, :5, 5, 5] = {features[0, :5, 5, 5]}")
 
         self_features = self.self_encoder(features[:, :, 5, 5])
         cnn_features = self.network(features)
 
-        # # DEBUG: Print encoded features
-        # print(f"[PUFFERLIB] ENCODED: self_features.shape = {self_features.shape}")
-        # print(f"[PUFFERLIB] ENCODED: cnn_features.shape = {cnn_features.shape}")
-        # print(f"[PUFFERLIB] ENCODED: self_features[0, :10] = {self_features[0, :10]}")
-        # print(f"[PUFFERLIB] ENCODED: cnn_features[0, :10] = {cnn_features[0, :10]}")
 
         result = torch.cat([self_features, cnn_features], dim=1)
-        # print(f"[PUFFERLIB] RESULT: result.shape = {result.shape}")
-        # print(f"[PUFFERLIB] RESULT: result[0, :10] = {result[0, :10]}")
-        # print("=" * 80)
-
         return result
 
     def decode_actions(self, hidden):
