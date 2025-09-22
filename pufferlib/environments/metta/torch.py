@@ -151,13 +151,11 @@ class Policy(nn.Module):
 
         self_features = self.self_encoder(features[:, :, 5, 5])
         cnn_features = self.network(features)
-
-
         result = torch.cat([self_features, cnn_features], dim=1)
         return result
 
     def decode_actions(self, hidden):
-        # hidden = self.layer_norm(hidden)
+        #hidden = self.layer_norm(hidden)
         logits = [dec(hidden) for dec in self.actor]
         value = self.value(hidden)
         return logits, value
