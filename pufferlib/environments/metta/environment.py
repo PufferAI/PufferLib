@@ -4,8 +4,8 @@ import gymnasium
 
 import pufferlib
 
-from metta.mettagrid.builder.envs import make_arena
-from metta.mettagrid.mettagrid_env import MettaGridEnv
+from mettagrid.builder.envs import make_arena
+from mettagrid.envs.mettagrid_env import MettaGridEnv
 
 def env_creator(name='metta'):
     return functools.partial(make, name)
@@ -48,7 +48,12 @@ def make(
     # CRITICAL: Easy converter - only 1 battery_red needed for 1 heart (instead of 3)
     mettagrid_cfg.game.objects["altar"].input_resources = {"battery_red": 1}
 
-    return MettaPuff(mettagrid_cfg, render_mode=render_mode, buf=buf, seed=seed)
+    env = MettaPuff(mettagrid_cfg, render_mode=render_mode, buf=buf, seed=seed)
+    
+    env.async_reset(seed=42)
+
+    return env
+    
 
 def oc_divide(a, b):
     """
@@ -66,10 +71,20 @@ class MettaPuff(MettaGridEnv):
         self.replay_writer = None
         #if render_mode == 'auto':
         #    self.replay_writer = ReplayWriter("metta/")
-
         super().__init__(
             env_cfg=env_cfg,
             render_mode=render_mode,
             replay_writer=self.replay_writer,
             is_training=True,  # Enable training mode for desync_episodes
         )
+        self.infos = []
+
+    def reset(self, seed=None):
+        obs, info = super().reset(seed)
+        self.infos = [info] * self.num_agents
+        return obs, self.infos
+
+    def step(self, actions):
+        obs, rewards, terminals, truncations, infos = super().step(actions)
+        self.infos = infos
+        return obs, rewards, terminals, truncations, infos
