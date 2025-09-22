@@ -46,12 +46,12 @@ def make(
         "blueprint": 1,
     }
 
-    # CRITICAL: Easy converter - only 1 battery_red needed for 1 heart (instead of 3)
+    # Easy converter - only 1 battery_red needed for 1 heart (instead of 3)
     mettagrid_cfg.game.objects["altar"].input_resources = {"battery_red": 1}
 
     env = MettaPuff(mettagrid_cfg, render_mode=render_mode, seed=seed)
 
-    # CRITICAL: Set buffers correctly like Metta does it
+    # Set buffers correctly like Metta does it
     set_buffers(env, buf)
 
     env.async_reset(seed=42)
