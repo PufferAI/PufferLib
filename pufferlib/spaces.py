@@ -13,9 +13,11 @@ def joint_space(space, n):
     if isinstance(space, Discrete):
         return gymnasium.spaces.MultiDiscrete([space.n] * n)
     elif isinstance(space, MultiDiscrete):
-        return gymnasium.spaces.Box(low=0,
-            high=np.repeat(space.nvec[None] - 1, n, axis=0),
-            shape=(n, len(space)), dtype=space.dtype)
+        # return gymnasium.spaces.Box(low=0,
+        #     high=np.repeat(space.nvec[None] - 1, n, axis=0),
+        #     shape=(n, len(space)), dtype=space.dtype)
+        return gymnasium.spaces.MultiDiscrete(np.repeat(space.nvec[None], n, axis=0)) 
+
     elif isinstance(space, Box):
         low = np.repeat(space.low[None], n, axis=0)
         high = np.repeat(space.high[None], n, axis=0)
