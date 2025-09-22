@@ -278,9 +278,8 @@ class PuffeRL:
 
                 logits, value = self.policy.forward_eval(o_device, state)
                 action, logprob, _ = pufferlib.pytorch.sample_logits(logits)
-                # Skip reward clipping for Metta environments to preserve multi-agent reward signals
-                # if not self._is_metta_env():
-                #     r = torch.clamp(r, -1, 1)
+                
+                r = torch.clamp(r, -1, 1)
 
             profile('eval_copy', epoch)
             with torch.no_grad():
