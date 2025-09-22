@@ -201,26 +201,6 @@ class PuffeRL:
         self.model_size = sum(p.numel() for p in policy.parameters() if p.requires_grad)
         self.print_dashboard(clear=True)
 
-    def _is_metta_env(self):
-        """Detect if the environment is a Metta environment to skip reward clipping."""
-        try:
-            # Check if vecenv has Metta-specific attributes or class names
-            env_name = str(type(self.vecenv)).lower()
-            if 'metta' in env_name:
-                return True
-            
-            # Check if the underlying environment is MettaPuff or similar
-            if hasattr(self.vecenv, 'envs') and len(self.vecenv.envs) > 0:
-                first_env = self.vecenv.envs[0]
-                env_class_name = str(type(first_env)).lower()
-                if 'metta' in env_class_name:
-                    return True
-            
-            return False
-        except Exception:
-            # If detection fails, default to applying reward clipping (safer)
-            return False
-
     @property
     def uptime(self):
         return time.time() - self.start_time
@@ -278,7 +258,7 @@ class PuffeRL:
 
                 logits, value = self.policy.forward_eval(o_device, state)
                 action, logprob, _ = pufferlib.pytorch.sample_logits(logits)
-                
+
                 r = torch.clamp(r, -1, 1)
 
             profile('eval_copy', epoch)
