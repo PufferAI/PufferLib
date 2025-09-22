@@ -179,7 +179,7 @@ static void remove_item(Overcooked* env, int x, int y);
 static CookingPot* get_pot_at(Overcooked* env, int x, int y);
 static void init_cooking_pots(Overcooked* env);
 static void update_cooking(Overcooked* env);
-static void evaluate_dish_served(Overcooked* env, Agent* agent);
+static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx);
 
 static const char CRAMPED_ROOM[5][5] = {
     {'6', '1', '2', '1', '6'},
@@ -604,6 +604,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
                 pot->ingredient_count++;
                 if (agent->held_item == ONION) {
                     pot->num_onions++;
+                    env->rewards[agent_idx] += 0.1f;
                 } else if (agent->held_item == TOMATO) {
                     pot->num_tomatoes++;
                 }
@@ -615,6 +616,9 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
                 pot->cooking_state = COOKING;
                 pot->cooking_progress = 0;
                 env->log.pots_started++;
+                if (pot->num_onions == 3) {
+                    env->rewards[agent_idx] += 0.1f;
+                }
             }
             else if (pot->cooking_state == COOKED) {
                 return;
@@ -625,7 +629,9 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
             agent->held_soup_onions = pot->num_onions;
             agent->held_soup_tomatoes = pot->num_tomatoes;
             agent->held_soup_total = pot->ingredient_count;
-            
+
+            env->rewards[agent_idx] += 0.1f;
+
             pot->cooking_state = NOT_COOKING;
             pot->cooking_progress = 0;
             pot->ingredient_count = 0;
@@ -639,7 +645,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
     }
     
     if (tile == SERVING_AREA && agent->held_item == PLATED_SOUP) {
-        evaluate_dish_served(env, agent);
+        evaluate_dish_served(env, agent, agent_idx);
         
         agent->held_item = NO_ITEM;
         agent->held_soup_onions = 0;
@@ -822,10 +828,10 @@ static void update_cooking(Overcooked* env) {
     }
 }
 
-static void evaluate_dish_served(Overcooked* env, Agent* agent) {
+static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
     // Rule 1: Check if soup has exactly 3 onions
     int is_correct_recipe = (agent->held_soup_onions == 3);
-    
+
     // You can add more rules here, e.g.:
     // int has_no_tomatoes = (agent->held_soup_tomatoes == 0);
     // int is_not_burnt = 1;  // Could track if soup was burnt
@@ -833,15 +839,20 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent) {
     
     if (is_correct_recipe) {
         float reward = env->reward_dish_served;
-        
+        // reward the particular agent for serving the dish
+        env->rewards[agent_idx] += 5.0f;
         for (int i = 0; i < env->num_agents; i++) {
-            env->rewards[i] += reward;
+            env->rewards[i] += reward; // reward all agents for serving the dish
         }
         
         env->log.dishes_served++;
         env->log.correct_dishes++;
         env->log.score += reward;
     } else {
+        env->rewards[agent_idx] += 0.1f;
+        for (int i = 0; i < env->num_agents; i++) {
+            env->rewards[i] += 0.1f; // reward all agents for serving
+        }
         env->log.wrong_dishes++;
     }
 }

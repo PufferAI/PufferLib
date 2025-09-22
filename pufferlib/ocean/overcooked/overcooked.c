@@ -22,7 +22,7 @@ void demo() {
         .num_agents = num_agents,
         .max_steps = 400,
         .grid_size = 100,
-        .reward_dish_served = 1.0f,
+        .reward_dish_served = 20.0f,
         .reward_step_penalty = 0.0f,
         .observation_size = 83  // 83-dimensional observation vector per agent (including reward)
     };

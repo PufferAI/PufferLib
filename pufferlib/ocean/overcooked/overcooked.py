@@ -10,7 +10,7 @@ class Overcooked(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, width=5, height=5, num_agents=2,
                  render_mode=None, log_interval=128, buf=None, seed=0,
                  max_steps=400, grid_size=32, 
-                 reward_dish_served=1.0, reward_step_penalty=0.0):
+                 reward_dish_served=20.0, reward_step_penalty=0.0):
         
         # Define observation space - 83-dimensional vector per agent (was 77, added 4 wall + 2 soup ingredients)
         # Structure:
