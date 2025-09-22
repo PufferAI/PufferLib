@@ -68,7 +68,6 @@ class PuffeRL:
         atn_space = vecenv.single_action_space
         total_agents = vecenv.num_agents
         self.total_agents = total_agents
-        self.vecenv = vecenv  # Store vecenv reference for environment detection
 
         # Experience
         if config['batch_size'] == 'auto' and config['bptt_horizon'] == 'auto':
@@ -258,7 +257,6 @@ class PuffeRL:
 
                 logits, value = self.policy.forward_eval(o_device, state)
                 action, logprob, _ = pufferlib.pytorch.sample_logits(logits)
-
                 r = torch.clamp(r, -1, 1)
 
             profile('eval_copy', epoch)
