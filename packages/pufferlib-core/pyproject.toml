@@ -3,12 +3,13 @@ requires = [
     "setuptools>=45",
     "wheel",
     "numpy<2.0",
+    "torch",
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pufferlib-core"
-version = "3.0.9"
+version = "3.0.10"
 description = "PufferLib core functionality with vectorized environments and reinforcement learning"
 readme = "README.md"
 requires-python = ">=3.8"
