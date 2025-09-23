@@ -14,6 +14,7 @@ def _import_modules():
     current_module.PufferEnv = pufferlib.PufferEnv
     current_module.set_buffers = pufferlib.set_buffers
     current_module.unroll_nested_dict = pufferlib.unroll_nested_dict
+    current_module.APIUsageError = pufferlib.APIUsageError
 
     from . import emulation
     from . import vector
