@@ -18,10 +18,34 @@ def _import_modules():
     from . import emulation
     from . import vector
 
-    return spaces, pufferlib, emulation, vector
+    # Try to import C extensions if available
+    try:
+        from . import _C
+        current_module._C = _C
+    except ImportError:
+        # C extensions not available, continue without them
+        pass
+
+    # Try to import PyTorch modules if available (optional dependency)
+    pytorch_modules = []
+    try:
+        from . import pytorch
+        from . import models
+        current_module.pytorch = pytorch
+        current_module.models = models
+        pytorch_modules = [pytorch, models]
+    except ImportError:
+        # PyTorch not available, continue without it
+        pass
+
+    return spaces, pufferlib, emulation, vector, pytorch_modules
 
 # Perform the imports
-spaces, pufferlib, emulation, vector = _import_modules()
+spaces, pufferlib, emulation, vector, pytorch_modules = _import_modules()
 
 __version__ = "3.0.3"
 __all__ = ["spaces", "emulation", "vector", "pufferlib"]
+
+# Add pytorch and models to __all__ if they are available
+if pytorch_modules:
+    __all__.extend(["pytorch", "models"])

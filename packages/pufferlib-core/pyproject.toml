@@ -1,10 +1,14 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = [
+    "setuptools>=45",
+    "wheel",
+    "numpy<2.0",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pufferlib-core"
-version = "3.0.3"
+version = "3.0.6"
 description = "Minimal PufferLib core functionality with vectorized environments"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -41,6 +45,15 @@ dependencies = [
     "psutil"
 ]
 
+[project.optional-dependencies]
+ext = [
+    "torch",
+    "nvidia-ml-py",
+]
+pytorch = [
+    "torch",
+]
+
 [project.urls]
 Homepage = "https://github.com/PufferAI/PufferLib"
 Documentation = "https://puffer.ai"
@@ -51,4 +64,4 @@ Issues = "https://github.com/PufferAI/PufferLib/issues"
 include = ["pufferlib*"]
 
 [tool.setuptools.package-data]
-pufferlib = ["*.py"]
+pufferlib = ["*.py", "*.so", "*.pyd"]
