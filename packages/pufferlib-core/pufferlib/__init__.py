@@ -26,26 +26,21 @@ def _import_modules():
         # C extensions not available, continue without them
         pass
 
-    # Try to import PyTorch modules if available (optional dependency)
-    pytorch_modules = []
-    try:
-        from . import pytorch
-        from . import models
-        current_module.pytorch = pytorch
-        current_module.models = models
-        pytorch_modules = [pytorch, models]
-    except ImportError:
-        # PyTorch not available, continue without it
-        pass
+    # Import PyTorch modules (now required dependencies)
+    from . import pytorch
+    from . import models
+    current_module.pytorch = pytorch
+    current_module.models = models
+    pytorch_modules = [pytorch, models]
 
-    return spaces, pufferlib, emulation, vector, pytorch_modules
+    # Import pufferl module
+    from . import pufferl
+    current_module.pufferl = pufferl
+
+    return spaces, pufferlib, emulation, vector, pytorch_modules, pufferl
 
 # Perform the imports
-spaces, pufferlib, emulation, vector, pytorch_modules = _import_modules()
+spaces, pufferlib, emulation, vector, pytorch_modules, pufferl = _import_modules()
 
 __version__ = "3.0.3"
-__all__ = ["spaces", "emulation", "vector", "pufferlib"]
-
-# Add pytorch and models to __all__ if they are available
-if pytorch_modules:
-    __all__.extend(["pytorch", "models"])
+__all__ = ["spaces", "emulation", "vector", "pufferlib", "pytorch", "models", "pufferl"]

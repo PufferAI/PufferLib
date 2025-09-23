@@ -8,8 +8,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pufferlib-core"
-version = "3.0.7"
-description = "Minimal PufferLib core functionality with vectorized environments"
+version = "3.0.8"
+description = "PufferLib core functionality with vectorized environments and reinforcement learning"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
@@ -42,16 +42,11 @@ classifiers = [
 dependencies = [
     "numpy",
     "gymnasium",
-    "psutil"
-]
-
-[project.optional-dependencies]
-ext = [
+    "psutil",
     "torch",
     "nvidia-ml-py",
-]
-pytorch = [
-    "torch",
+    "rich",
+    "rich-argparse"
 ]
 
 [project.urls]
