@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pufferlib-core"
-version = "3.0.6"
+version = "3.0.7"
 description = "Minimal PufferLib core functionality with vectorized environments"
 readme = "README.md"
 requires-python = ">=3.8"
