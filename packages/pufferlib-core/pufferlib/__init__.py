@@ -13,6 +13,7 @@ def _import_modules():
     current_module = sys.modules[__name__]
     current_module.PufferEnv = pufferlib.PufferEnv
     current_module.set_buffers = pufferlib.set_buffers
+    current_module.unroll_nested_dict = pufferlib.unroll_nested_dict
 
     from . import emulation
     from . import vector
