@@ -9,12 +9,12 @@
 #include "puffernet.h"
 
 void demo() {
-    int num_agents = 2;  // Support 2 agents for cooperative play
+    int num_agents = 1;  // Single agent environment
 
-    // Load neural network weights
-    Weights* weights = load_weights("resources/overcooked/puffer_overcooked_weights.bin", 142215);
+    // Load neural network weights for 1 agent
+    Weights* weights = load_weights("resources/overcooked/puffer_overcooked_weights.bin", 575004);
     int logit_sizes[] = {6};  // 6 actions: up, down, left, right, interact, noop
-    LinearLSTM* net = make_linearlstm(weights, num_agents, 77, logit_sizes, 1);
+    LinearLSTM* net = make_linearlstm(weights, num_agents, 83, logit_sizes, 1);
     
     Overcooked env = {
         .width = 5,
@@ -24,7 +24,7 @@ void demo() {
         .grid_size = 100,
         .reward_dish_served = 20.0f,
         .reward_step_penalty = 0.0f,
-        .observation_size = 83  // 83-dimensional observation vector per agent (including reward)
+        .observation_size = 83  // 83-dimensional observation vector (including reward)
     };
     
     // Allocate required arrays for multiple agents
@@ -40,23 +40,15 @@ void demo() {
     
     // Main game loop
     while (!WindowShouldClose()) {
-        // Manual control for agents with Shift key
+        // Manual control for single agent with Shift key
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
-            // Agent 0 controls (WASD + Space)
+            // Agent controls (WASD + Space)
             env.actions[0] = ACTION_NOOP;
             if (IsKeyDown(KEY_W)) env.actions[0] = ACTION_UP;
             if (IsKeyDown(KEY_S)) env.actions[0] = ACTION_DOWN;
             if (IsKeyDown(KEY_A)) env.actions[0] = ACTION_LEFT;
             if (IsKeyDown(KEY_D)) env.actions[0] = ACTION_RIGHT;
             if (IsKeyPressed(KEY_SPACE)) env.actions[0] = ACTION_INTERACT;
-
-            // Agent 1 controls (Arrow keys + Enter)
-            env.actions[1] = ACTION_NOOP;
-            if (IsKeyDown(KEY_UP)) env.actions[1] = ACTION_UP;
-            if (IsKeyDown(KEY_DOWN)) env.actions[1] = ACTION_DOWN;
-            if (IsKeyDown(KEY_LEFT)) env.actions[1] = ACTION_LEFT;
-            if (IsKeyDown(KEY_RIGHT)) env.actions[1] = ACTION_RIGHT;
-            if (IsKeyPressed(KEY_ENTER)) env.actions[1] = ACTION_INTERACT;
         } else {
             // Use neural network for actions
             forward_linearlstm(net, env.observations, env.actions);
@@ -89,7 +81,7 @@ void demo() {
 }
 
 void test_performance(float test_time) {
-    int num_agents = 2;
+    int num_agents = 1;
 
     Overcooked env = {
         .width = 5,
@@ -99,7 +91,7 @@ void test_performance(float test_time) {
         .grid_size = 100,
         .reward_dish_served = 1.0f,
         .reward_step_penalty = 0.0f,
-        .observation_size = 83  // Updated to match new observation size
+        .observation_size = 83  // 83-dimensional observation vector
     };
 
     // Allocate required arrays
