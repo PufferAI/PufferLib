@@ -117,8 +117,8 @@ metta = [
     'hydra-core',
     'duckdb',
     'raylib>=5.5.0',
-    'metta-common @ git+https://github.com/metta-ai/metta.git@main#subdirectory=common',
-    'metta-mettagrid @ git+https://github.com/metta-ai/metta.git@main#subdirectory=mettagrid',
+    'metta-common @ git+https://github.com/Metta-AI/metta.git@main#subdirectory=common',
+    'mettagrid @ git+https://github.com/Metta-AI/metta.git@main#subdirectory=packages/mettagrid',
 ]
 
 microrts = [
