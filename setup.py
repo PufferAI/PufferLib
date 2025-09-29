@@ -60,7 +60,7 @@ def download_raylib(platform, ext):
 
 if not NO_OCEAN:
     download_raylib('raylib-5.5_webassembly', '.zip')
-    download_raylib(RAYLIB_NAME, '.tar.gz')
+    download_raylib(RAYLIB_NAME, '.tar.gz' if platform.system() != "Windows" else '.zip')
 
 BOX2D_URL = 'https://github.com/capnspacehook/box2d/releases/latest/download/'
 BOX2D_NAME = 'box2d-macos-arm64' if platform.system() == "Darwin" else 'box2d-linux-amd64'
