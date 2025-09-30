@@ -47,6 +47,7 @@ def download_raylib(platform, ext):
 
 if not NO_OCEAN:
     download_raylib('raylib-5.5_webassembly', '.zip')
+    download_raylib(RAYLIB_NAME, '.tar.gz')
 
 BOX2D_URL = 'https://github.com/capnspacehook/box2d/releases/latest/download/'
 BOX2D_NAME = 'box2d-macos-arm64' if platform.system() == "Darwin" else 'box2d-linux-amd64'
@@ -64,6 +65,7 @@ def download_box2d(platform):
 
 if not NO_OCEAN:
     download_box2d('box2d-web')
+    download_box2d(BOX2D_NAME)
 
 # Shared compile args for all platforms
 extra_compile_args = [
@@ -122,8 +124,6 @@ if system == 'Linux':
     extra_link_args += [
         '-Bsymbolic-functions',
     ]
-    if not NO_OCEAN:
-        download_raylib('raylib-5.5_linux_amd64', '.tar.gz')
 elif system == 'Darwin':
     extra_compile_args += [
         '-Wno-error=int-conversion',
@@ -135,13 +135,8 @@ elif system == 'Darwin':
         '-framework', 'OpenGL',
         '-framework', 'IOKit',
     ]
-    if not NO_OCEAN:
-        download_raylib('raylib-5.5_macos', '.tar.gz')
 else:
     raise ValueError(f'Unsupported system: {system}')
-
-if not NO_OCEAN:
-    download_box2d(BOX2D_NAME)
 
 # Default Gym/Gymnasium/PettingZoo versions
 # Gym:
@@ -177,8 +172,8 @@ class TorchBuildExt(cpp_extension.BuildExtension):
         self.extensions = [e for e in self.extensions if e.name == "pufferlib._C"]
         super().run()
 
+INCLUDE = [f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src']
 RAYLIB_A = f'{RAYLIB_NAME}/lib/libraylib.a'
-INCLUDE = [numpy.get_include(), 'raylib/include', f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src']
 extension_kwargs = dict(
     include_dirs=INCLUDE,
     extra_compile_args=extra_compile_args,
@@ -258,7 +253,7 @@ if not NO_TRAIN:
     install_requires += [
         'torch',
         'psutil',
-        'pynvml',
+        'nvidia-ml-py',
         'rich',
         'rich_argparse',
         'imageio',
