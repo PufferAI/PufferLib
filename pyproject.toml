@@ -112,7 +112,7 @@ magent = [
 
 metta = [
     'gym==0.23',
-    'gymnasium==0.29.1',
+    'gymnasium>=1.1.1',
     'omegaconf',
     'hydra-core',
     'duckdb',
