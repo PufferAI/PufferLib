@@ -246,7 +246,7 @@ install_requires = [
     'shimmy[gym-v21]',
     'gym==0.23',
     'gymnasium>=0.29.1',
-    'pettingzoo>=1.25',
+    'pettingzoo>=1.24.1',
 ]
 
 if not NO_TRAIN:
