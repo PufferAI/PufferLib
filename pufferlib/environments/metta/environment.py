@@ -21,22 +21,17 @@ def make(
     heart_reward=1.0,
     num_agents=24,
 ):
-    """Metta creation function"""
-
-    # Create a basic arena configuration using the make_arena function
     mettagrid_cfg = make_arena(num_agents=num_agents)
 
-    # Apply reward shaping based on parameters - match easy_shaped_arena_basic
     mettagrid_cfg.game.agent.rewards.inventory = {
         "heart": heart_reward,
         "ore_red": ore_reward,
         "battery_red": battery_reward,
-        "laser": 0.5,      # Match easy shaped config
-        "armor": 0.5,      # Match easy shaped config
-        "blueprint": 0.5,  # Match easy shaped config
+        "laser": 0.5,
+        "armor": 0.5,
+        "blueprint": 0.5,
     }
 
-    # Set inventory max limits like easy shaped config
     mettagrid_cfg.game.agent.rewards.inventory_max = {
         "heart": 100,
         "ore_red": 1,
@@ -46,14 +41,10 @@ def make(
         "blueprint": 1,
     }
 
-    # Easy converter - only 1 battery_red needed for 1 heart (instead of 3)
     mettagrid_cfg.game.objects["altar"].input_resources = {"battery_red": 1}
 
     env = MettaPuff(mettagrid_cfg, render_mode=render_mode, seed=seed)
-
-    # Set buffers correctly like Metta does it
     set_buffers(env, buf)
-
     env.async_reset(seed=42)
 
     return env
