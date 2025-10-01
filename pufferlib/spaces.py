@@ -16,7 +16,6 @@ def joint_space(space, n):
         return gymnasium.spaces.Box(low=0,
             high=np.repeat(space.nvec[None] - 1, n, axis=0),
             shape=(n, len(space)), dtype=space.dtype)
-
     elif isinstance(space, Box):
         low = np.repeat(space.low[None], n, axis=0)
         high = np.repeat(space.high[None], n, axis=0)
