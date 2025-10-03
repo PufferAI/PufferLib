@@ -137,6 +137,7 @@ MAKE_FUNCTIONS = {
     'snake': 'Snake',
     'squared': 'Squared',
     'pysquared': 'PySquared',
+    'tictactoe': 'TicTacToe',
     'connect4': 'Connect4',
     'g2048': 'G2048',
     'terraform': 'Terraform',
