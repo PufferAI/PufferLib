@@ -159,3 +159,12 @@ pufferlib/ocean/impulse_wars/*-release/
 pufferlib/ocean/impulse_wars/debug-*/
 pufferlib/ocean/impulse_wars/release-*/
 pufferlib/ocean/impulse_wars/benchmark/
+*.bak
+*.swp
+diagnostic.py
+fix_*.py
+patch_*.py
+__pycache__/
+.pytest_cache/
+pokegym/
+envs/
