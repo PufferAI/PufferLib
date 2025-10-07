@@ -281,13 +281,13 @@ static void find_nearest_empty_counter(Overcooked* env, int agent_x, int agent_y
 }
 
 static void compute_observations(Overcooked* env) {
-    // 83-dimensional observation vector for each agent (was 77, adding 4 wall + 2 soup ingredients)
+    // 39-dimensional observation vector for each agent
     // Structure per agent:
     // - Player features: 34 dims (4 orientation + 4 held + 12 proximity + 2 nearest soup ingredients + 2 pot soup ingredients + 1 pot exist + 4 pot state + 1 cook time + 4 walls)
-    // - Teammate features: 46 dims (4 orientation + 4 held + 12 proximity + 2 soup + 1 pot exist + 4 pot state + 1 cook time + 2 relative position + 16 padding)
+    // - Teammate relative position: 2 dims
     // - Absolute position: 2 dims
     // - Reward: 1 dim
-    // Total: 83 dims
+    // Total: 39 dims
     
     for (int agent_idx = 0; agent_idx < env->num_agents; agent_idx++) {
         Agent* agent = &env->agents[agent_idx];
@@ -437,122 +437,19 @@ static void compute_observations(Overcooked* env) {
         obs[obs_idx++] = (wall_left == WALL || wall_left == STOVE || wall_left == COUNTER) ? 1.0f : 0.0f;
         obs[obs_idx++] = (wall_right == WALL || wall_right == STOVE || wall_right == COUNTER) ? 1.0f : 0.0f;
 
-        // === TEAMMATE FEATURES (46 dims as specified) ===
+        // === TEAMMATE RELATIVE POSITION (2 dims) ===
         // Find teammate (other agent)
         int teammate_idx = (agent_idx == 0) ? 1 : 0;
         if (teammate_idx < env->num_agents) {
             Agent* teammate = &env->agents[teammate_idx];
-            
-            // Mirror all player features for teammate (28 dims same as player)
-            // 1. Orientation (4 dims)
-            obs[obs_idx + teammate->facing_direction] = 1.0f;
-            obs_idx += 4;
-            
-            // 2. Held object (4 dims)
-            if (teammate->held_item == NO_ITEM) {
-                obs[obs_idx + 3] = 1.0f;
-            } else if (teammate->held_item == ONION) {
-                obs[obs_idx + 0] = 1.0f;
-            } else if (teammate->held_item == PLATED_SOUP) {
-                obs[obs_idx + 1] = 1.0f;
-            } else if (teammate->held_item == PLATE) {
-                obs[obs_idx + 2] = 1.0f;
-            }
-            obs_idx += 4;
-            
-            // 3. Proximity features for teammate (12 dims)
-            // Use the same compute_proximity_feature function for consistency
-            float tdx, tdy;
-
-            // Nearest onion source (returns (0,0) if holding onion)
-            compute_proximity_feature(env, teammate, INGREDIENT_BOX, &tdx, &tdy);
-            obs[obs_idx++] = tdx;
-            obs[obs_idx++] = tdy;
-
-            // Nearest dish (returns (0,0) if holding plate)
-            compute_proximity_feature(env, teammate, PLATE_BOX, &tdx, &tdy);
-            obs[obs_idx++] = tdx;
-            obs[obs_idx++] = tdy;
-
-            // Nearest soup (returns (0,0) if holding soup or none exists)
-            compute_proximity_feature(env, teammate, PLATED_SOUP, &tdx, &tdy);
-            obs[obs_idx++] = tdx;
-            obs[obs_idx++] = tdy;
-
-            // Nearest serving area
-            compute_proximity_feature(env, teammate, SERVING_AREA, &tdx, &tdy);
-            obs[obs_idx++] = tdx;
-            obs[obs_idx++] = tdy;
-
-            // Nearest empty counter
-            find_nearest_empty_counter(env, teammate->x, teammate->y, &tdx, &tdy);
-            obs[obs_idx++] = tdx;
-            obs[obs_idx++] = tdy;
-
-            // Nearest pot (stove)
-            compute_proximity_feature(env, teammate, STOVE, &tdx, &tdy);
-            obs[obs_idx++] = tdx;
-            obs[obs_idx++] = tdy;
-            
-            // 4. Soup ingredients in nearest pot for teammate (2 dims)
-            // Find nearest pot for teammate
-            float min_teammate_pot_dist = 1000.0f;
-            CookingPot* nearest_teammate_pot = NULL;
-
-            for (int y = 0; y < env->height; y++) {
-                for (int x = 0; x < env->width; x++) {
-                    if (env->grid[y * env->width + x] == STOVE) {
-                        float dist = (float)(abs(x - (int)teammate->x) + abs(y - (int)teammate->y));
-                        if (dist < min_teammate_pot_dist) {
-                            min_teammate_pot_dist = dist;
-                            nearest_teammate_pot = get_pot_at(env, x, y);
-                        }
-                    }
-                }
-            }
-
-            if (nearest_teammate_pot) {
-                obs[obs_idx++] = nearest_teammate_pot->num_onions / (float)MAX_INGREDIENTS;
-                obs[obs_idx++] = 0.0f;  // No tomatoes in our version
-            } else {
-                obs[obs_idx++] = 0.0f;
-                obs[obs_idx++] = 0.0f;
-            }
-
-            // 5. Reachable pot existence for teammate (1 dim)
-            obs[obs_idx++] = (nearest_teammate_pot != NULL) ? 1.0f : 0.0f;
-
-            // 6. Pot state flags for teammate (4 dims: empty, full, cooking, ready)
-            if (nearest_teammate_pot) {
-                obs[obs_idx++] = (nearest_teammate_pot->ingredient_count == 0) ? 1.0f : 0.0f;  // Empty
-                obs[obs_idx++] = (nearest_teammate_pot->ingredient_count >= 3) ? 1.0f : 0.0f;  // Full (3+ ingredients)
-                obs[obs_idx++] = (nearest_teammate_pot->cooking_state == COOKING) ? 1.0f : 0.0f;  // Cooking
-                obs[obs_idx++] = (nearest_teammate_pot->cooking_state == COOKED) ? 1.0f : 0.0f;  // Ready
-            } else {
-                obs_idx += 4;  // Skip pot state if no pot found
-            }
-
-            // 7. Remaining cooking time for teammate (1 dim)
-            if (nearest_teammate_pot && nearest_teammate_pot->cooking_state == COOKING) {
-                float remaining = (COOKING_TIME - nearest_teammate_pot->cooking_progress) / (float)COOKING_TIME;
-                obs[obs_idx++] = remaining;
-            } else {
-                obs[obs_idx++] = 0.0f;
-            }
-            
-            // 8. Relative position of teammate (2 dims)
             obs[obs_idx++] = (teammate->x - agent->x) / (float)env->width;
             obs[obs_idx++] = (teammate->y - agent->y) / (float)env->height;
-
-            // 9. Padding to reach 46 teammate dims (16 dims of zeros)
-            for (int pad = 0; pad < 16; pad++) {
-                obs[obs_idx++] = 0.0f;
-            }
         } else {
-            // No teammate, skip all teammate features
-            obs_idx += 46;
+            // No teammate, set relative position to 0
+            obs[obs_idx++] = 0.0f;
+            obs[obs_idx++] = 0.0f;
         }
-        
+
         // === ABSOLUTE POSITION (2 dims) ===
         obs[obs_idx++] = agent->x / (float)env->width;
         obs[obs_idx++] = agent->y / (float)env->height;
@@ -560,9 +457,9 @@ static void compute_observations(Overcooked* env) {
         // === REWARD (1 dim) ===
         obs[obs_idx++] = env->rewards[agent_idx];
 
-        // Total should be 83 dims (was 77, added 4 wall + 2 soup ingredients)
-        if (obs_idx != 83 && agent_idx == 0 && env->current_step == 0) {
-            printf("Warning: Observation size mismatch! Expected 83, got %d\n", obs_idx);
+        // Total should be 39 dims (34 player features + 2 teammate relative position + 2 absolute position + 1 reward)
+        if (obs_idx != 39 && agent_idx == 0 && env->current_step == 0) {
+            printf("Warning: Observation size mismatch! Expected 39, got %d\n", obs_idx);
         }
 
         // Debug: Print observation array if flag is set
@@ -1305,7 +1202,7 @@ void c_render(Overcooked* env) {
     if (env->num_agents > 0) {
         float* obs = &env->observations[0];
 
-        DrawText("=== OBSERVATION ARRAY (83 dims) ===", obs_panel_x, obs_panel_y, 11, BLACK);
+        DrawText("=== OBSERVATION ARRAY (39 dims) ===", obs_panel_x, obs_panel_y, 11, BLACK);
         obs_panel_y += 18;
 
         DrawText("-- PLAYER (0-33) --", obs_panel_x, obs_panel_y, 10, DARKGREEN);
@@ -1366,61 +1263,12 @@ void c_render(Overcooked* env) {
                  obs_panel_x, obs_panel_y, 9, BLACK);
         obs_panel_y += 13;
 
-        DrawText("-- TEAMMATE (34-79) --", obs_panel_x, obs_panel_y, 10, DARKBLUE);
+        DrawText("-- TEAMMATE (34-35) --", obs_panel_x, obs_panel_y, 10, DARKBLUE);
         obs_panel_y += 13;
 
         if (env->num_agents > 1) {
-            DrawText(TextFormat("[34-37] T.Orient: %.0f %.0f %.0f %.0f",
-                     obs[34], obs[35], obs[36], obs[37]),
+            DrawText(TextFormat("[34-35] T.RelPos: %.2f, %.2f", obs[34], obs[35]),
                      obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-
-            DrawText(TextFormat("[38-41] T.Held: %.0f %.0f %.0f %.0f",
-                     obs[38], obs[39], obs[40], obs[41]),
-                     obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-
-            DrawText(TextFormat("[42-43] T.Onion: %.2f, %.2f", obs[42], obs[43]),
-                     obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-            DrawText(TextFormat("[44-45] T.Dish: %.2f, %.2f", obs[44], obs[45]),
-                     obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-            DrawText(TextFormat("[46-47] T.Soup: %.2f, %.2f", obs[46], obs[47]),
-                     obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-            DrawText(TextFormat("[48-49] T.Serve: %.2f, %.2f", obs[48], obs[49]),
-                     obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-            DrawText(TextFormat("[50-51] T.Empty: %.2f, %.2f", obs[50], obs[51]),
-                     obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-            DrawText(TextFormat("[52-53] T.Pot: %.2f, %.2f", obs[52], obs[53]),
-                     obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-
-            DrawText(TextFormat("[54-55] T.PotIngr: %.2f, %.2f", obs[54], obs[55]),
-                     obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-
-            DrawText(TextFormat("[56] T.PotExists: %.0f", obs[56]),
-                     obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-
-            DrawText(TextFormat("[57-60] T.PotState: %.0f %.0f %.0f %.0f",
-                     obs[57], obs[58], obs[59], obs[60]),
-                     obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-
-            DrawText(TextFormat("[61] T.CookTime: %.2f", obs[61]),
-                     obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-
-            DrawText(TextFormat("[62-63] T.RelPos: %.2f, %.2f", obs[62], obs[63]),
-                     obs_panel_x, obs_panel_y, 9, BLACK);
-            obs_panel_y += 10;
-
-            DrawText("[64-79] Padding: (zeros)", obs_panel_x, obs_panel_y, 9, GRAY);
             obs_panel_y += 10;
         } else {
             DrawText("No teammate", obs_panel_x, obs_panel_y, 9, GRAY);
@@ -1428,15 +1276,14 @@ void c_render(Overcooked* env) {
         }
 
         obs_panel_y += 3;
-
-        DrawText("-- MISC (80-82) --", obs_panel_x, obs_panel_y, 10, DARKGRAY);
+        DrawText("-- MISC (36-38) --", obs_panel_x, obs_panel_y, 10, DARKGRAY);
         obs_panel_y += 13;
 
-        DrawText(TextFormat("[80-81] AbsPos: %.3f, %.3f", obs[80], obs[81]),
+        DrawText(TextFormat("[36-37] AbsPos: %.3f, %.3f", obs[36], obs[37]),
                  obs_panel_x, obs_panel_y, 9, BLACK);
         obs_panel_y += 10;
 
-        DrawText(TextFormat("[82] Reward: %.2f", obs[82]),
+        DrawText(TextFormat("[38] Reward: %.2f", obs[38]),
                  obs_panel_x, obs_panel_y, 9, BLACK);
         obs_panel_y += 10;
     }
