@@ -20,20 +20,35 @@ typedef struct {
 // Environment struct
 typedef struct {
     Log log;                      // Required field
-    unsigned char* observations;  // Required. 9 cells, values 0-2
-    int* actions;                 // Required. Position 0-8
+    unsigned char* observations;  // Required. 10 values per agent: 9 cells + 1 turn flag
+    int* actions;                 // Required. Position 0-8 for each agent
     float* rewards;               // Required
     unsigned char* terminals;     // Required
     int tick;                     // Number of agent actions this episode
-    int num_moves;                // Total moves (agent + enemy) on board
+    int num_moves;                // Total moves on board
+    int current_player;           // Which player's turn (0 or 1)
 } TicTacToe;
 
 void add_log(TicTacToe* env) {
+    // Log from agent 0's perspective
     env->log.perf += (env->rewards[0] > 0) ? 1.0 : 0.0;
     env->log.score += env->rewards[0];
     env->log.episode_length += env->tick;
     env->log.episode_return += env->rewards[0];
     env->log.n++;
+}
+
+// Compute observations for both agents
+void compute_observations(TicTacToe* env) {
+    // Agent 0: board as-is (obs[0..8]) + turn flag (obs[9])
+    env->observations[9] = (env->current_player == 0) ? 1 : 0;
+
+    // Agent 1: flipped board (obs[10..18]) + turn flag (obs[19])
+    for (int i = 0; i < 9; i++) {
+        unsigned char cell = env->observations[i];
+        env->observations[10 + i] = (cell == 1) ? 2 : (cell == 2) ? 1 : 0;
+    }
+    env->observations[19] = (env->current_player == 1) ? 1 : 0;
 }
 
 // Check if a player has won
@@ -59,46 +74,52 @@ int check_winner(TicTacToe* env, unsigned char player) {
 
 // Required function
 void c_reset(TicTacToe* env) {
+    // Clear board (first 9 cells of observations)
     memset(env->observations, EMPTY, 9 * sizeof(unsigned char));
     env->tick = 0;
     env->num_moves = 0;
+    env->current_player = rand() % 2; // Randomly choose who starts
 
-    // Randomly decide if enemy goes first
-    int enemy_first = rand() % 2;
-    if (enemy_first) {
-        int enemy_move = rand() % 9;
-        env->observations[enemy_move] = ENEMY;
-        env->num_moves = 1;
-    }
+    // Compute observations for both agents
+    compute_observations(env);
 }
 
 // Required function
 void c_step(TicTacToe* env) {
     env->tick++;
 
-    int action = env->actions[0];
+    // Get action from current player
+    int action = env->actions[env->current_player];
 
     // Zero out rewards and terminals at the start
     env->terminals[0] = 0;
+    env->terminals[1] = 0;
     env->rewards[0] = 0;
+    env->rewards[1] = 0;
 
-    // Check if agent's move is valid
+    // Check if move is valid
     if (env->observations[action] != EMPTY) {
+        // Invalid move - current player loses
         env->terminals[0] = 1;
-        env->rewards[0] = -1.0;
+        env->terminals[1] = 1;
+        env->rewards[env->current_player] = -1.0;
+        env->rewards[1 - env->current_player] = 1.0;
         add_log(env);
         c_reset(env);
         return;
     }
 
-    // Make agent's move
-    env->observations[action] = AGENT;
+    // Make current player's move
+    unsigned char player_piece = (env->current_player == 0) ? AGENT : ENEMY;
+    env->observations[action] = player_piece;
     env->num_moves++;
 
-    // Check if agent won
-    if (check_winner(env, AGENT)) {
+    // Check if current player won
+    if (check_winner(env, player_piece)) {
         env->terminals[0] = 1;
-        env->rewards[0] = 1.0;
+        env->terminals[1] = 1;
+        env->rewards[env->current_player] = 1.0;
+        env->rewards[1 - env->current_player] = -1.0;
         add_log(env);
         c_reset(env);
         return;
@@ -107,43 +128,19 @@ void c_step(TicTacToe* env) {
     // Check for draw (board full)
     if (env->num_moves == 9) {
         env->terminals[0] = 1;
+        env->terminals[1] = 1;
         env->rewards[0] = 0.0;
+        env->rewards[1] = 0.0;
         add_log(env);
         c_reset(env);
         return;
     }
 
-    // Enemy makes a random valid move
-    int enemy_move;
-    int attempts = 0;
-    do {
-        enemy_move = rand() % 9;
-        attempts++;
-        if (attempts > 100) break; // Safety check
-    } while (env->observations[enemy_move] != EMPTY);
+    // Switch to other player
+    env->current_player = 1 - env->current_player;
 
-    if (env->observations[enemy_move] == EMPTY) {
-        env->observations[enemy_move] = ENEMY;
-        env->num_moves++;
-
-        // Check if enemy won
-        if (check_winner(env, ENEMY)) {
-            env->terminals[0] = 1;
-            env->rewards[0] = -1.0;
-            add_log(env);
-            c_reset(env);
-            return;
-        }
-
-        // Check for draw after enemy move
-        if (env->num_moves == 9) {
-            env->terminals[0] = 1;
-            env->rewards[0] = 0.0;
-            add_log(env);
-            c_reset(env);
-            return;
-        }
-    }
+    // Update observations for both agents
+    compute_observations(env);
 }
 
 // Required function

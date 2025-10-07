@@ -1,4 +1,4 @@
-'''TicTacToe: Single-agent tic-tac-toe against a random opponent (C version)'''
+'''TicTacToe: Two-agent self-play tic-tac-toe (C version)'''
 
 import gymnasium
 import numpy as np
@@ -7,12 +7,12 @@ import pufferlib
 from pufferlib.ocean.tictactoe import binding
 
 class TicTacToe(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, log_interval=128, buf=None, seed=0):
+    def __init__(self, num_envs=1, num_agents=2, render_mode=None, log_interval=128, buf=None, seed=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=2,
-            shape=(9,), dtype=np.uint8)
+            shape=(10,), dtype=np.uint8)
         self.single_action_space = gymnasium.spaces.Discrete(9)
         self.render_mode = render_mode
-        self.num_agents = num_envs
+        self.num_agents = num_envs * num_agents
         self.log_interval = log_interval
 
         super().__init__(buf)
