@@ -585,6 +585,8 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
             remove_item(env, target_x, target_y);
         }
         else if (tile == INGREDIENT_BOX) {
+            // TODO @mmbajo: What if we have Tomatoes as well?
+            // Add logs for each ingredient type
             agent->held_item = ONION; // Always gives onions for now
             env->log.ingredients_picked++;
         }
