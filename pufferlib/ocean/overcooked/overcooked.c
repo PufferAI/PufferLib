@@ -9,9 +9,9 @@
 #include "puffernet.h"
 
 void demo() {
-    int num_agents = 1;  // Single agent environment
+    // Training debug -> 1 agent for now
+    int num_agents = 1;
 
-    // Load neural network weights for 1 agent
     Weights* weights = load_weights("resources/overcooked/puffer_overcooked_weights.bin", 575004);
     int logit_sizes[] = {6};  // 6 actions: up, down, left, right, interact, noop
     LinearLSTM* net = make_linearlstm(weights, num_agents, 39, logit_sizes, 1);
@@ -24,21 +24,18 @@ void demo() {
         .grid_size = 100,
         .reward_dish_served = 20.0f,
         .reward_step_penalty = 0.0f,
-        .observation_size = 39  // 39-dimensional observation vector
+        .observation_size = 39
     };
     
-    // Allocate required arrays for multiple agents
     env.observations = (float*)calloc(env.observation_size * num_agents, sizeof(float));
     env.actions = (int*)calloc(num_agents, sizeof(int));
     env.rewards = (float*)calloc(num_agents, sizeof(float));
     env.terminals = (unsigned char*)calloc(num_agents, sizeof(unsigned char));
     
-    // Initialize environment
     init(&env);
     c_reset(&env);
     c_render(&env);
     
-    // Main game loop
     while (!WindowShouldClose()) {
         // Manual control for single agent with Shift key
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
@@ -50,14 +47,12 @@ void demo() {
             if (IsKeyDown(KEY_D)) env.actions[0] = ACTION_RIGHT;
             if (IsKeyPressed(KEY_SPACE)) env.actions[0] = ACTION_INTERACT;
         } else {
-            // Use neural network for actions
             forward_linearlstm(net, env.observations, env.actions);
         }
         
         c_step(&env);
         c_render(&env);
         
-        // Reset if any agent's episode ends
         int should_reset = 0;
         for (int i = 0; i < num_agents; i++) {
             if (env.terminals[i]) {
@@ -70,7 +65,6 @@ void demo() {
         }
     }
     
-    // Clean up
     free_linearlstm(net);
     free(weights);
     free(env.observations);

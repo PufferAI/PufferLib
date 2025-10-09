@@ -111,9 +111,8 @@ if __name__ == '__main__':
         if env.render_mode:
             env.render()
         
-        steps += num_agents  # Count steps for all agents
+        steps += num_agents
         
-        # Reset if any agent is done
         if any(dones):
             env.reset()
     
