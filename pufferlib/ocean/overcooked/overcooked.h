@@ -750,6 +750,7 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
     } else {
         env->rewards[agent_idx] += 0.1f;
         for (int i = 0; i < env->num_agents; i++) {
+            // TODO @mmbajo: Pls generalize this into a struct? for easy changing
             env->rewards[i] += 0.1f; // reward all agents for serving
         }
         env->log.wrong_dishes++;
