@@ -34,8 +34,6 @@
 #define BURN_TIME 40
 #define MAX_INGREDIENTS 5
 
-#define DEBUG_OBSERVATIONS 0
-
 #define ACTION_NOOP 0
 #define ACTION_UP 1
 #define ACTION_DOWN 2
@@ -288,6 +286,8 @@ static void compute_observations(Overcooked* env) {
     // - Absolute position: 2 dims
     // - Reward: 1 dim
     // Total: 39 dims
+    // No tomatoes! Just onions for now...
+    // TODO @mmbajo: Add tomatoes
     
     for (int agent_idx = 0; agent_idx < env->num_agents; agent_idx++) {
         Agent* agent = &env->agents[agent_idx];
@@ -461,16 +461,6 @@ static void compute_observations(Overcooked* env) {
         if (obs_idx != 39 && agent_idx == 0 && env->current_step == 0) {
             printf("Warning: Observation size mismatch! Expected 39, got %d\n", obs_idx);
         }
-
-        // Debug: Print observation array if flag is set
-        #if DEBUG_OBSERVATIONS
-        printf("Agent %d Observation (step %d): [", agent_idx, env->current_step);
-        for (int i = 0; i < env->observation_size; i++) {
-            printf("%.2f", obs[i]);
-            if (i < env->observation_size - 1) printf(", ");
-        }
-        printf("]\n");
-        #endif
     }
 }
 
@@ -728,7 +718,7 @@ static void update_cooking(Overcooked* env) {
 }
 
 static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
-    // Rule 1: Check if soup has exactly 3 onions
+    // Rule 1: Check if soup has exactly 3 onions -> actually the only rule atm
     int is_correct_recipe = (agent->held_soup_onions == 3);
 
     // You can add more rules here, e.g.:
