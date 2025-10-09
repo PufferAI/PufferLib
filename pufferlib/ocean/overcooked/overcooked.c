@@ -85,10 +85,9 @@ void test_performance(float test_time) {
         .grid_size = 100,
         .reward_dish_served = 1.0f,
         .reward_step_penalty = 0.0f,
-        .observation_size = 39  // 39-dimensional observation vector
+        .observation_size = 39
     };
 
-    // Allocate required arrays
     env.observations = (float*)calloc(env.observation_size * num_agents, sizeof(float));
     env.actions = (int*)calloc(num_agents, sizeof(int));
     env.rewards = (float*)calloc(num_agents, sizeof(float));
@@ -120,7 +119,6 @@ void test_performance(float test_time) {
     float sps = (float)(num_agents * steps) / (end - start);
     printf("SPS: %f\n", sps);
 
-    // Clean up
     free(env.observations);
     free(env.actions);
     free(env.rewards);

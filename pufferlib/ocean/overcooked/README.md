@@ -1,6 +1,6 @@
 # Overcooked Environment
 
-A multi-agent cooking coordination environment where agents cooperate to prepare and serve onion soup.
+A multi-agent cooking coordination environment where agents cooperate to prepare and serve onion soup. Here we describe the rewards system and observation space.
 
 ## Observation Space
 
