@@ -67,8 +67,7 @@ The correct recipe requires **exactly 3 onions** in the soup. Agents must:
 
 ## Game Constants
 
-- **Cooking time**: 20 steps — [COOKING_TIME](overcooked.h#L33)
-- **Burn time**: 40 steps (currently unused) — [BURN_TIME](overcooked.h#L34)
-- **Max ingredients per pot**: 5 — [MAX_INGREDIENTS](overcooked.h#L35)
-- **Grid size**: 5×5 (default) — [CRAMPED_ROOM](overcooked.h#L182)
+- **Cooking time**: 20 steps — [COOKING_TIME](overcooked.h#L32)
+- **Max ingredients per pot**: 3 — [MAX_INGREDIENTS](overcooked.h#L33)
+- **Grid size**: 5×5 (default) — [CRAMPED_ROOM](overcooked.h#L186)
 - **Max episode steps**: 400 (default) — [overcooked.py:12](overcooked.py#L12)

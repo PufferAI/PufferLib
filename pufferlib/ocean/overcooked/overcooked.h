@@ -28,10 +28,8 @@
 #define NOT_COOKING 0
 #define COOKING 1
 #define COOKED 2
-#define BURNT 3
 
 #define COOKING_TIME 20
-#define BURN_TIME 40
 #define MAX_INGREDIENTS 3
 
 #define ACTION_NOOP 0
@@ -146,7 +144,7 @@ typedef struct {
 } Item;
 
 typedef struct {
-    int cooking_state;      // NOT_COOKING, COOKING, COOKED, BURNT
+    int cooking_state;      // NOT_COOKING, COOKING, COOKED
     int cooking_progress;   // Steps since cooking started
     int ingredient_types[MAX_INGREDIENTS];  // Types of ingredients added
     int ingredient_count;   // Number of ingredients in pot
@@ -719,8 +717,6 @@ static void update_cooking(Overcooked* env) {
             pot->cooking_progress++;
             if (pot->cooking_progress >= COOKING_TIME) {
                 pot->cooking_state = COOKED;
-            } else if (pot->cooking_progress >= BURN_TIME) {
-                pot->cooking_state = BURNT;
             }
         }
     }
@@ -732,7 +728,6 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
 
     // You can add more rules here, e.g.:
     // int has_no_tomatoes = (agent->held_soup_tomatoes == 0);
-    // int is_not_burnt = 1;  // Could track if soup was burnt
     // int served_quickly = (env->current_step < 100);
     
     if (is_correct_recipe) {
@@ -1015,13 +1010,6 @@ void c_render(Overcooked* env) {
                                y * env->grid_size + grid_offset_y + env->grid_size - 10,
                                8, GREEN);
                     }
-                    else if (pot->cooking_state == BURNT) {
-                        cooking_texture = is_onion_soup ? &env->client->soup_onion_cooked : 
-                                                          &env->client->soup_tomato_cooked;
-                        DrawText("BURNT!", x * env->grid_size + 5,
-                               y * env->grid_size + grid_offset_y + env->grid_size - 10,
-                               8, RED);
-                    }
                     else if (pot->cooking_state == NOT_COOKING) {
                         cooking_texture = is_onion_soup ? &env->client->soup_onion_cooking_1 : 
                                                           &env->client->soup_tomato_cooking_1;
@@ -1034,10 +1022,9 @@ void c_render(Overcooked* env) {
                             env->grid_size/2,
                             env->grid_size/2
                         };
-                        Color tint = (pot->cooking_state == BURNT) ? DARKGRAY : WHITE;
                         DrawTexturePro(*cooking_texture,
                             (Rectangle){0, 0, cooking_texture->width, cooking_texture->height},
-                            pot_dest, (Vector2){0, 0}, 0, tint);
+                            pot_dest, (Vector2){0, 0}, 0, WHITE);
                     }
                 }
             }
