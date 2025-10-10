@@ -32,7 +32,7 @@
 
 #define COOKING_TIME 20
 #define BURN_TIME 40
-#define MAX_INGREDIENTS 5
+#define MAX_INGREDIENTS 3
 
 #define ACTION_NOOP 0
 #define ACTION_UP 1
@@ -410,7 +410,7 @@ static void compute_observations(Overcooked* env) {
         // 7. Pot state flags (4 dims: empty, full, cooking, ready)
         if (nearest_pot) {
             obs[obs_idx++] = (nearest_pot->ingredient_count == 0) ? 1.0f : 0.0f;  // Empty
-            obs[obs_idx++] = (nearest_pot->ingredient_count >= 3) ? 1.0f : 0.0f;  // Full (3+ ingredients)
+            obs[obs_idx++] = (nearest_pot->ingredient_count == MAX_INGREDIENTS) ? 1.0f : 0.0f;  // Full (exactly MAX_INGREDIENTS)
             obs[obs_idx++] = (nearest_pot->cooking_state == COOKING) ? 1.0f : 0.0f;  // Cooking
             obs[obs_idx++] = (nearest_pot->cooking_state == COOKED) ? 1.0f : 0.0f;  // Ready
         } else {
