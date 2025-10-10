@@ -9,8 +9,14 @@ from pufferlib.ocean.overcooked import binding
 class Overcooked(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, width=5, height=5, num_agents=2,
                  render_mode=None, log_interval=128, buf=None, seed=0,
-                 max_steps=400, grid_size=32, 
-                 reward_dish_served=20.0, reward_step_penalty=0.0):
+                 max_steps=400, grid_size=32,
+                 reward_dish_served_whole_team=20.0,
+                 reward_dish_served_agent=5.0,
+                 reward_pot_started=0.1,
+                 reward_ingredient_added=0.1,
+                 reward_soup_plated=0.1,
+                 reward_wrong_dish_served=0.1,
+                 reward_step_penalty=0.0):
         
         # Define observation space - 39-dimensional vector per agent
         # Structure:
@@ -60,7 +66,12 @@ class Overcooked(pufferlib.PufferEnv):
                 max_steps=max_steps,
                 grid_size=grid_size,
                 observation_size=observation_size,
-                reward_dish_served=reward_dish_served,
+                reward_dish_served_whole_team=reward_dish_served_whole_team,
+                reward_dish_served_agent=reward_dish_served_agent,
+                reward_pot_started=reward_pot_started,
+                reward_ingredient_added=reward_ingredient_added,
+                reward_soup_plated=reward_soup_plated,
+                reward_wrong_dish_served=reward_wrong_dish_served,
                 reward_step_penalty=reward_step_penalty
             )
             c_envs.append(c_env)

@@ -45,6 +45,16 @@
 #define AGENT_HOLDING_ITEM 1
 
 typedef struct {
+    float dish_served_whole_team;
+    float dish_served_agent;
+    float pot_started;
+    float ingredient_added;
+    float soup_plated;
+    float wrong_dish_served;
+    float step_penalty;
+} RewardConfig;
+
+typedef struct {
     float perf; // Recommended 0-1 normalized single real number perf metric
     float score; // Recommended unnormalized single real number perf metric
     float episode_return; // Recommended metric: sum of agent rewards over episode
@@ -164,9 +174,8 @@ typedef struct {
     int height;
     int max_steps;
     int current_step;
-    int grid_size; 
-    float reward_dish_served;
-    float reward_step_penalty;
+    int grid_size;
+    RewardConfig rewards_config;
     int observation_size;
 } Overcooked;
 
@@ -491,7 +500,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
                 pot->ingredient_count++;
                 if (agent->held_item == ONION) {
                     pot->num_onions++;
-                    env->rewards[agent_idx] += 0.1f;
+                    env->rewards[agent_idx] += env->rewards_config.ingredient_added;
                 } else if (agent->held_item == TOMATO) {
                     pot->num_tomatoes++;
                 }
@@ -504,7 +513,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
                 pot->cooking_progress = 0;
                 env->log.pots_started++;
                 if (pot->num_onions == 3) {
-                    env->rewards[agent_idx] += 0.1f;
+                    env->rewards[agent_idx] += env->rewards_config.pot_started;
                 }
             }
             else if (pot->cooking_state == COOKED) {
@@ -517,7 +526,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
             agent->held_soup_tomatoes = pot->num_tomatoes;
             agent->held_soup_total = pot->ingredient_count;
 
-            env->rewards[agent_idx] += 0.1f;
+            env->rewards[agent_idx] += env->rewards_config.soup_plated;
 
             pot->cooking_state = NOT_COOKING;
             pot->cooking_progress = 0;
@@ -727,21 +736,19 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
     // int served_quickly = (env->current_step < 100);
     
     if (is_correct_recipe) {
-        float reward = env->reward_dish_served;
         // reward the particular agent for serving the dish
-        env->rewards[agent_idx] += 5.0f;
+        env->rewards[agent_idx] += env->rewards_config.dish_served_agent;
         for (int i = 0; i < env->num_agents; i++) {
-            env->rewards[i] += reward; // reward all agents for serving the dish
+            env->rewards[i] += env->rewards_config.dish_served_whole_team; // reward all agents for serving the dish
         }
-        
+
         env->log.dishes_served++;
         env->log.correct_dishes++;
-        env->log.score += reward;
+        env->log.score += env->rewards_config.dish_served_whole_team;
     } else {
-        env->rewards[agent_idx] += 0.1f;
+        env->rewards[agent_idx] += env->rewards_config.wrong_dish_served;
         for (int i = 0; i < env->num_agents; i++) {
-            // TODO @mmbajo: Pls generalize this into a struct? for easy changing
-            env->rewards[i] += 0.1f; // reward all agents for serving
+            env->rewards[i] += env->rewards_config.wrong_dish_served; // reward all agents for serving
         }
         env->log.wrong_dishes++;
     }
@@ -804,7 +811,7 @@ void c_reset(Overcooked* env) {
 void c_step(Overcooked* env) {
     for (int i = 0; i < env->num_agents; i++) {
         int action = env->actions[i];
-        env->rewards[i] = env->reward_step_penalty;
+        env->rewards[i] = env->rewards_config.step_penalty;
         
         Agent* agent = &env->agents[i];
         int new_x = agent->x;

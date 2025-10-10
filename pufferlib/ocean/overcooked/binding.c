@@ -10,8 +10,13 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->max_steps = unpack(kwargs, "max_steps");
     env->grid_size = unpack(kwargs, "grid_size");
     env->observation_size = unpack(kwargs, "observation_size");
-    env->reward_dish_served = unpack(kwargs, "reward_dish_served");
-    env->reward_step_penalty = unpack(kwargs, "reward_step_penalty");
+    env->rewards_config.dish_served_whole_team = unpack(kwargs, "reward_dish_served_whole_team");
+    env->rewards_config.dish_served_agent = unpack(kwargs, "reward_dish_served_agent");
+    env->rewards_config.pot_started = unpack(kwargs, "reward_pot_started");
+    env->rewards_config.ingredient_added = unpack(kwargs, "reward_ingredient_added");
+    env->rewards_config.soup_plated = unpack(kwargs, "reward_soup_plated");
+    env->rewards_config.wrong_dish_served = unpack(kwargs, "reward_wrong_dish_served");
+    env->rewards_config.step_penalty = unpack(kwargs, "reward_step_penalty");
     init(env);
     return 0;
 }

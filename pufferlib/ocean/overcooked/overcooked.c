@@ -22,8 +22,15 @@ void demo() {
         .num_agents = num_agents,
         .max_steps = 400,
         .grid_size = 100,
-        .reward_dish_served = 20.0f,
-        .reward_step_penalty = 0.0f,
+        .rewards_config = {
+            .dish_served_whole_team = 20.0f,
+            .dish_served_agent = 5.0f,
+            .pot_started = 0.1f,
+            .ingredient_added = 0.1f,
+            .soup_plated = 0.1f,
+            .wrong_dish_served = 0.1f,
+            .step_penalty = 0.0f
+        },
         .observation_size = 39
     };
     
@@ -83,8 +90,15 @@ void test_performance(float test_time) {
         .num_agents = num_agents,
         .max_steps = 400,
         .grid_size = 100,
-        .reward_dish_served = 1.0f,
-        .reward_step_penalty = 0.0f,
+        .rewards_config = {
+            .dish_served_whole_team = 20.0f,
+            .dish_served_agent = 5.0f,
+            .pot_started = 0.1f,
+            .ingredient_added = 0.1f,
+            .soup_plated = 0.1f,
+            .wrong_dish_served = 0.1f,
+            .step_penalty = 0.0f
+        },
         .observation_size = 39
     };
 
