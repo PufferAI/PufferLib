@@ -737,7 +737,6 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
             env->rewards[i] += env->rewards_config.dish_served_whole_team; // reward all agents for serving the dish
         }
 
-        env->log.dishes_served++;
         env->log.correct_dishes++;
         env->log.score += env->rewards_config.dish_served_whole_team;
     } else {
@@ -747,6 +746,7 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
         }
         env->log.wrong_dishes++;
     }
+    env->log.dishes_served++;
 }
 
 void c_reset(Overcooked* env) {
@@ -848,7 +848,7 @@ void c_step(Overcooked* env) {
         for (int i = 0; i < env->num_agents; i++) {
             env->terminals[i] = 1;
         }
-        env->log.perf += env->log.dishes_served / 20.0f;  // Normalize to 0-1 (20 dishes would be excellent)
+        env->log.perf += env->log.correct_dishes / 20.0f;  // Normalize to 0-1 (20 dishes would be excellent)
         env->log.score += env->log.episode_return;
         env->log.n += 1;
     }
