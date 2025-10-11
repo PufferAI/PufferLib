@@ -2,6 +2,7 @@
  * Players fill cells based on row and column clues (run-length encoding)
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "raylib.h"
@@ -265,6 +266,18 @@ void c_step(Nonogram* env) {
     env->terminals[0] = 0;
     env->rewards[0] = 0;
 
+    env->steps_taken++;
+
+    // Check timeout FIRST before any game logic
+    if (env->steps_taken >= env->max_steps) {
+        env->terminals[0] = 1;
+        env->rewards[0] = REWARD_TIMEOUT;
+        env->episode_reward += REWARD_TIMEOUT;
+        add_log(env);
+        c_reset(env);
+        return;
+    }
+
     unsigned char current = env->observations[pos];
 
     // If toggling on (EMPTY -> FILLED)
@@ -274,7 +287,6 @@ void c_step(Nonogram* env) {
             env->cols_totals[col] == env->cols_target_sum[col]) {
             env->rewards[0] = REWARD_INVALID_MOVE;
             env->episode_reward += REWARD_INVALID_MOVE;
-            env->steps_taken++;
             return;
         }
 
@@ -282,14 +294,12 @@ void c_step(Nonogram* env) {
         if (get_row_run_length(env, row, col) > env->rows_max_clue[row]) {
             env->rewards[0] = REWARD_INVALID_MOVE;
             env->episode_reward += REWARD_INVALID_MOVE;
-            env->steps_taken++;
             return;
         }
 
         if (get_col_run_length(env, row, col) > env->cols_max_clue[col]) {
             env->rewards[0] = REWARD_INVALID_MOVE;
             env->episode_reward += REWARD_INVALID_MOVE;
-            env->steps_taken++;
             return;
         }
 
@@ -308,7 +318,6 @@ void c_step(Nonogram* env) {
                 env->observations[pos] = EMPTY;
                 env->rewards[0] = REWARD_INVALID_MOVE;
                 env->episode_reward += REWARD_INVALID_MOVE;
-                env->steps_taken++;
                 return;
             }
             env->observations[pos] = EMPTY;
@@ -329,7 +338,6 @@ void c_step(Nonogram* env) {
                 env->observations[pos] = EMPTY;
                 env->rewards[0] = REWARD_INVALID_MOVE;
                 env->episode_reward += REWARD_INVALID_MOVE;
-                env->steps_taken++;
                 return;
             }
             env->observations[pos] = EMPTY;
@@ -360,23 +368,11 @@ void c_step(Nonogram* env) {
         env->filled_total--;
     }
 
-    env->steps_taken++;
-
     // Check if solved
     if (env->filled_total == env->target_total) {
         env->terminals[0] = 1;
         env->rewards[0] = REWARD_WIN;
         env->episode_reward += REWARD_WIN;
-        add_log(env);
-        c_reset(env);
-        return;
-    }
-
-    // Check if ran out of steps
-    if (env->steps_taken >= env->max_steps) {
-        env->terminals[0] = 1;
-        env->rewards[0] = REWARD_TIMEOUT;
-        env->episode_reward += REWARD_TIMEOUT;
         add_log(env);
         c_reset(env);
         return;
