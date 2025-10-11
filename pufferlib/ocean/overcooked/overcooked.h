@@ -433,16 +433,16 @@ static void compute_observations(Overcooked* env) {
         }
 
         // 9. Wall detection (4 dims: up, down, left, right)
-        // Check each direction for walls, stoves, and counters (all are non-walkable)
+        // Check each direction for any non-EMPTY tile (walls, stoves, counters, serving area, ingredient box, plate box, cutting board - all are non-walkable)
         int wall_up = (agent->y > 0) ? env->grid[((int)agent->y - 1) * env->width + (int)agent->x] : WALL;
         int wall_down = (agent->y < env->height - 1) ? env->grid[((int)agent->y + 1) * env->width + (int)agent->x] : WALL;
         int wall_left = (agent->x > 0) ? env->grid[(int)agent->y * env->width + ((int)agent->x - 1)] : WALL;
         int wall_right = (agent->x < env->width - 1) ? env->grid[(int)agent->y * env->width + ((int)agent->x + 1)] : WALL;
 
-        obs[obs_idx++] = (wall_up == WALL || wall_up == STOVE || wall_up == COUNTER) ? 1.0f : 0.0f;
-        obs[obs_idx++] = (wall_down == WALL || wall_down == STOVE || wall_down == COUNTER) ? 1.0f : 0.0f;
-        obs[obs_idx++] = (wall_left == WALL || wall_left == STOVE || wall_left == COUNTER) ? 1.0f : 0.0f;
-        obs[obs_idx++] = (wall_right == WALL || wall_right == STOVE || wall_right == COUNTER) ? 1.0f : 0.0f;
+        obs[obs_idx++] = (wall_up != EMPTY) ? 1.0f : 0.0f;
+        obs[obs_idx++] = (wall_down != EMPTY) ? 1.0f : 0.0f;
+        obs[obs_idx++] = (wall_left != EMPTY) ? 1.0f : 0.0f;
+        obs[obs_idx++] = (wall_right != EMPTY) ? 1.0f : 0.0f;
 
         // === TEAMMATE RELATIVE POSITION (2 dims) ===
         // Find teammate (other agent)
