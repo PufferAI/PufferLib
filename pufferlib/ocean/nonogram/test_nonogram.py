@@ -136,6 +136,8 @@ def main():
     message = ""
     steps_taken = 0
     max_steps = 4 * size * size
+    total_reward = 0.0
+    last_reward = 0.0
 
     # Maintain a display board that we control - always update it when playing
     grid_size = size * size
@@ -176,6 +178,10 @@ def main():
                     # Take step
                     obs, rewards, terminals, truncations, info = env.step(np.array([action]))
 
+                    # Update rewards
+                    last_reward = rewards[0]
+                    total_reward += rewards[0]
+
                     # Check for game end
                     if terminals[0]:
                         game_over = True
@@ -199,6 +205,8 @@ def main():
             is_win = False
             message = ""
             steps_taken = 0
+            total_reward = 0.0
+            last_reward = 0.0
 
         # Drawing
         rl.BeginDrawing()
@@ -222,6 +230,10 @@ def main():
         status = f"Steps: {steps_taken}/{max_steps} | Filled: {filled_total}/{target_total}".encode()
         rl.DrawText(status, 20, status_y, 20, colors.RAYWHITE)
 
+        # Draw reward info
+        reward_info = f"Last Reward: {last_reward:.3f} | Episode Return: {total_reward:.3f}".encode()
+        rl.DrawText(reward_info, 20, status_y + 25, 20, colors.RAYWHITE)
+
         # Draw message
         if message:
             if "Congratulations" in message:
@@ -232,10 +244,10 @@ def main():
                 color = colors.ORANGE
             else:
                 color = colors.YELLOW
-            rl.DrawText(message.encode(), 20, status_y + 30, 20, color)
+            rl.DrawText(message.encode(), 20, status_y + 55, 20, color)
 
         # Draw instructions
-        rl.DrawText(b"Click cells to toggle | Press R to reset | ESC to quit", 20, status_y + 60, 16, colors.LIGHTGRAY)
+        rl.DrawText(b"Click cells to toggle | Press R to reset | ESC to quit", 20, status_y + 85, 16, colors.LIGHTGRAY)
 
         rl.EndDrawing()
 

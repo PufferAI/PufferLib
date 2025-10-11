@@ -12,7 +12,7 @@ class Nonogram(pufferlib.PufferEnv):
         obs_size = size * size + 2 * size * max_clues
         self.size = size
 
-        self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
+        self.single_observation_space = gymnasium.spaces.Box(low=0, high=size,
             shape=(obs_size,), dtype=np.uint8)
         self.single_action_space = gymnasium.spaces.Discrete(size * size)
         self.render_mode = render_mode

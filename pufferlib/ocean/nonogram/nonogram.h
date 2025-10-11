@@ -15,6 +15,7 @@ const unsigned char FILLED = 1;
 const float REWARD_WIN = 1.0;
 const float REWARD_INVALID_MOVE = -0.01;
 const float REWARD_TIMEOUT = -1.0;
+const float REWARD_COMPLETE_LINE = 0.01;
 
 // Required struct for logging
 typedef struct {
@@ -56,6 +57,13 @@ typedef struct {
     // Current totals
     unsigned char rows_totals[MAX_SIZE];
     unsigned char cols_totals[MAX_SIZE];
+
+    // Track completed lines
+    unsigned char rows_completed[MAX_SIZE];
+    unsigned char cols_completed[MAX_SIZE];
+
+    // Episode reward accumulator
+    float episode_reward;
 } Nonogram;
 
 // Helper function implementations
@@ -63,7 +71,7 @@ void add_log(Nonogram* env) {
     env->log.perf += (env->rewards[0] > 0) ? 1 : 0;
     env->log.score += env->rewards[0];
     env->log.episode_length += env->steps_taken;
-    env->log.episode_return += env->rewards[0];
+    env->log.episode_return += env->episode_reward;
     env->log.n++;
 }
 
@@ -207,6 +215,8 @@ void c_reset(Nonogram* env) {
     // Calculate max clues and target sums
     memset(env->rows_totals, 0, MAX_SIZE);
     memset(env->cols_totals, 0, MAX_SIZE);
+    memset(env->rows_completed, 0, MAX_SIZE);
+    memset(env->cols_completed, 0, MAX_SIZE);
     env->filled_total = 0;
 
     for (int i = 0; i < env->size; i++) {
@@ -244,6 +254,7 @@ void c_reset(Nonogram* env) {
     }
 
     env->steps_taken = 0;
+    env->episode_reward = 0;
 }
 
 void c_step(Nonogram* env) {
@@ -262,6 +273,7 @@ void c_step(Nonogram* env) {
         if (env->rows_totals[row] == env->rows_target_sum[row] ||
             env->cols_totals[col] == env->cols_target_sum[col]) {
             env->rewards[0] = REWARD_INVALID_MOVE;
+            env->episode_reward += REWARD_INVALID_MOVE;
             env->steps_taken++;
             return;
         }
@@ -269,17 +281,22 @@ void c_step(Nonogram* env) {
         // Check if filling this cell would create a run longer than max allowed
         if (get_row_run_length(env, row, col) > env->rows_max_clue[row]) {
             env->rewards[0] = REWARD_INVALID_MOVE;
+            env->episode_reward += REWARD_INVALID_MOVE;
             env->steps_taken++;
             return;
         }
 
         if (get_col_run_length(env, row, col) > env->cols_max_clue[col]) {
             env->rewards[0] = REWARD_INVALID_MOVE;
+            env->episode_reward += REWARD_INVALID_MOVE;
             env->steps_taken++;
             return;
         }
 
         // Second check: if completing row/col, check runs match
+        int row_completed = 0;
+        int col_completed = 0;
+
         if (env->rows_totals[row] == env->rows_target_sum[row] - 1) {
             // Temporarily fill to check
             env->observations[pos] = FILLED;
@@ -290,10 +307,12 @@ void c_step(Nonogram* env) {
                 // Runs don't match - invalid move
                 env->observations[pos] = EMPTY;
                 env->rewards[0] = REWARD_INVALID_MOVE;
+                env->episode_reward += REWARD_INVALID_MOVE;
                 env->steps_taken++;
                 return;
             }
             env->observations[pos] = EMPTY;
+            row_completed = 1;
         }
 
         if (env->cols_totals[col] == env->cols_target_sum[col] - 1) {
@@ -309,10 +328,12 @@ void c_step(Nonogram* env) {
                 // Runs don't match - invalid move
                 env->observations[pos] = EMPTY;
                 env->rewards[0] = REWARD_INVALID_MOVE;
+                env->episode_reward += REWARD_INVALID_MOVE;
                 env->steps_taken++;
                 return;
             }
             env->observations[pos] = EMPTY;
+            col_completed = 1;
         }
 
         // Apply toggle
@@ -320,6 +341,17 @@ void c_step(Nonogram* env) {
         env->rows_totals[row]++;
         env->cols_totals[col]++;
         env->filled_total++;
+
+        // Give reward for newly completed lines only
+        int row_newly_completed = row_completed && !env->rows_completed[row];
+        int col_newly_completed = col_completed && !env->cols_completed[col];
+
+        if (row_newly_completed) env->rows_completed[row] = 1;
+        if (col_newly_completed) env->cols_completed[col] = 1;
+
+        float line_reward = (row_newly_completed + col_newly_completed) * REWARD_COMPLETE_LINE;
+        env->rewards[0] += line_reward;
+        env->episode_reward += line_reward;
     } else {
         // Toggling off (FILLED -> EMPTY) - always allowed
         env->observations[pos] = EMPTY;
@@ -334,6 +366,7 @@ void c_step(Nonogram* env) {
     if (env->filled_total == env->target_total) {
         env->terminals[0] = 1;
         env->rewards[0] = REWARD_WIN;
+        env->episode_reward += REWARD_WIN;
         add_log(env);
         c_reset(env);
         return;
@@ -343,6 +376,7 @@ void c_step(Nonogram* env) {
     if (env->steps_taken >= env->max_steps) {
         env->terminals[0] = 1;
         env->rewards[0] = REWARD_TIMEOUT;
+        env->episode_reward += REWARD_TIMEOUT;
         add_log(env);
         c_reset(env);
         return;
