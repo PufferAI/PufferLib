@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Interactive Nonogram testing script with raylib"""
+"""Interactive Nonogram testing script with raylib - C version"""
 
 import numpy as np
-from nonogram import Nonogram
+from pufferlib.ocean.nonogram.nonogram import Nonogram
 from raylib import rl, colors
 
 CELL_SIZE = 40
@@ -10,48 +10,52 @@ CLUE_AREA = 120
 BOARD_SPACING = 60
 FONT_SIZE = 20
 
-def draw_board(env, offset_x, offset_y, is_solution=False):
+def draw_board(board, clues, offset_x, offset_y, show_result=False, is_win=False):
     """Draw a nonogram board at the given offset"""
-    max_clues = env.size // 2
+    size = 8  # MAX_SIZE from C
+    max_clues = size // 2
+
+    row_clues = clues[0]
+    col_clues = clues[1]
 
     # Draw column clues
     for clue_row in range(max_clues):
-        for c in range(env.size):
-            clue = env.cols_clues[c, clue_row]
+        for c in range(size):
+            clue = col_clues[c, clue_row]
             if clue > 0:
                 x = offset_x + CLUE_AREA + c * CELL_SIZE + CELL_SIZE // 2
                 y = offset_y + clue_row * 20 + 10
-                text = str(clue).encode()
+                text = str(int(clue)).encode()
                 text_width = rl.MeasureText(text, FONT_SIZE)
                 rl.DrawText(text, x - text_width // 2, y, FONT_SIZE, colors.RAYWHITE)
 
     # Draw row clues
-    for r in range(env.size):
+    for r in range(size):
         clue_x = offset_x + 10
         for clue_idx in range(max_clues):
-            clue = env.rows_clues[r, clue_idx]
+            clue = row_clues[r, clue_idx]
             if clue > 0:
                 y = offset_y + CLUE_AREA + r * CELL_SIZE + CELL_SIZE // 2 - FONT_SIZE // 2
-                text = str(clue).encode()
+                text = str(int(clue)).encode()
                 rl.DrawText(text, clue_x, y, FONT_SIZE, colors.RAYWHITE)
                 clue_x += rl.MeasureText(text, FONT_SIZE) + 5
 
     # Draw grid
-    grid_size = env.size * env.size
-    if is_solution:
-        grid = env.solution
-    else:
-        grid = env.observations[0, :grid_size].reshape(env.size, env.size)
+    grid = board.reshape(size, size)
 
-    for r in range(env.size):
-        for c in range(env.size):
+    for r in range(size):
+        for c in range(size):
             x = offset_x + CLUE_AREA + c * CELL_SIZE
             y = offset_y + CLUE_AREA + r * CELL_SIZE
 
             # Draw cell background
             if grid[r, c] == 1:  # FILLED
-                if is_solution:
-                    rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.GREEN)
+                if show_result:
+                    # Show result coloring
+                    if is_win:
+                        rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.GREEN)
+                    else:
+                        rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.RED)
                 else:
                     rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.WHITE)
             else:
@@ -60,23 +64,95 @@ def draw_board(env, offset_x, offset_y, is_solution=False):
             # Draw cell border
             rl.DrawRectangleLines(x, y, CELL_SIZE, CELL_SIZE, colors.LIGHTGRAY)
 
-def main():
-    env = Nonogram(size=8, seed=42)
-    env.reset()
+def draw_solution_board(env, offset_x, offset_y):
+    """Draw the solution board at the given offset"""
+    size = 8
+    max_clues = size // 2
+    grid_size = size * size
 
-    board_width = CLUE_AREA + env.size * CELL_SIZE
-    board_height = CLUE_AREA + env.size * CELL_SIZE
+    # Get solution
+    solutions = env.get_solutions()
+    solution = solutions[0].reshape(size, size)
+
+    # Extract clues from observation
+    obs = env.observations[0]
+    row_clues = obs[grid_size:grid_size + size * max_clues].reshape(size, max_clues)
+    col_clues = obs[grid_size + size * max_clues:].reshape(size, max_clues)
+
+    # Draw column clues
+    for clue_row in range(max_clues):
+        for c in range(size):
+            clue = col_clues[c, clue_row]
+            if clue > 0:
+                x = offset_x + CLUE_AREA + c * CELL_SIZE + CELL_SIZE // 2
+                y = offset_y + clue_row * 20 + 10
+                text = str(int(clue)).encode()
+                text_width = rl.MeasureText(text, FONT_SIZE)
+                rl.DrawText(text, x - text_width // 2, y, FONT_SIZE, colors.RAYWHITE)
+
+    # Draw row clues
+    for r in range(size):
+        clue_x = offset_x + 10
+        for clue_idx in range(max_clues):
+            clue = row_clues[r, clue_idx]
+            if clue > 0:
+                y = offset_y + CLUE_AREA + r * CELL_SIZE + CELL_SIZE // 2 - FONT_SIZE // 2
+                text = str(int(clue)).encode()
+                rl.DrawText(text, clue_x, y, FONT_SIZE, colors.RAYWHITE)
+                clue_x += rl.MeasureText(text, FONT_SIZE) + 5
+
+    # Draw solution grid
+    for r in range(size):
+        for c in range(size):
+            x = offset_x + CLUE_AREA + c * CELL_SIZE
+            y = offset_y + CLUE_AREA + r * CELL_SIZE
+
+            # Draw cell background
+            if solution[r, c] == 1:  # FILLED
+                rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.GREEN)
+            else:
+                rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.DARKGRAY)
+
+            # Draw cell border
+            rl.DrawRectangleLines(x, y, CELL_SIZE, CELL_SIZE, colors.LIGHTGRAY)
+
+def main():
+    # Create environment with single instance for interactive play
+    env = Nonogram(num_envs=1, size=8)
+    env.reset(seed=42)
+
+    size = 8
+    board_width = CLUE_AREA + size * CELL_SIZE
+    board_height = CLUE_AREA + size * CELL_SIZE
 
     screen_width = board_width * 2 + BOARD_SPACING + 40
     screen_height = board_height + 140
 
-    rl.InitWindow(screen_width, screen_height, b"Nonogram - Click to Toggle")
+    rl.InitWindow(screen_width, screen_height, b"Nonogram (C) - Click to Toggle")
     rl.SetTargetFPS(60)
 
     game_over = False
+    is_win = False
     message = ""
+    steps_taken = 0
+    max_steps = 4 * size * size
+
+    # Maintain a display board that we control - always update it when playing
+    grid_size = size * size
+    max_clues = size // 2
+    display_board = env.observations[0, :grid_size].copy()
+
+    # Extract clues once (they don't change)
+    obs = env.observations[0]
+    row_clues = obs[grid_size:grid_size + size * max_clues].reshape(size, max_clues)
+    col_clues = obs[grid_size + size * max_clues:].reshape(size, max_clues)
+    clues = (row_clues, col_clues)
 
     while not rl.WindowShouldClose():
+        # Update display board from current env state when game is active
+        if not game_over:
+            display_board[:] = env.observations[0, :grid_size]
+
         # Handle mouse clicks
         if not game_over and rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT):
             mouse_x = rl.GetMouseX()
@@ -86,54 +162,64 @@ def main():
             board_x = 20 + CLUE_AREA
             board_y = 60 + CLUE_AREA
 
-            if (board_x <= mouse_x < board_x + env.size * CELL_SIZE and
-                board_y <= mouse_y < board_y + env.size * CELL_SIZE):
+            if (board_x <= mouse_x < board_x + size * CELL_SIZE and
+                board_y <= mouse_y < board_y + size * CELL_SIZE):
 
                 # Convert mouse position to grid coordinates
                 col = (mouse_x - board_x) // CELL_SIZE
                 row = (mouse_y - board_y) // CELL_SIZE
 
-                if 0 <= col < env.size and 0 <= row < env.size:
+                if 0 <= col < size and 0 <= row < size:
                     # Convert to action
-                    action = row * env.size + col
+                    action = row * size + col
 
                     # Take step
-                    obs, reward, term, trunc, info = env.step([action])
+                    obs, rewards, terminals, truncations, info = env.step(np.array([action]))
 
                     # Check for game end
-                    if term[0]:
+                    if terminals[0]:
                         game_over = True
-                        if env.filled_total == env.target_total:
-                            message = "Congratulations! Puzzle Solved!"
+                        is_win = rewards[0] > 0
+                        if is_win:
+                            message = "Congratulations! Puzzle Solved! Press R to play again"
                         else:
-                            message = "Game Over - Timeout!"
-                    elif reward[0] < 0:
+                            message = "Game Over - Timeout! Press R to play again"
+                        # display_board will keep the last state since we stop updating it
+                    elif rewards[0] < 0:
                         message = "Invalid move!"
+                        steps_taken += 1
                     else:
                         message = ""
+                        steps_taken += 1
 
         # Handle reset
         if rl.IsKeyPressed(rl.KEY_R):
             env.reset()
             game_over = False
+            is_win = False
             message = ""
+            steps_taken = 0
 
         # Drawing
         rl.BeginDrawing()
         rl.ClearBackground(colors.BLACK)
 
-        # Draw title
+        # Draw titles
         rl.DrawText(b"CURRENT BOARD", 20, 20, 24, colors.RAYWHITE)
         solution_x = board_width + BOARD_SPACING + 20
         rl.DrawText(b"SOLUTION", solution_x, 20, 24, colors.RAYWHITE)
 
         # Draw boards
-        draw_board(env, 20, 60, is_solution=False)
-        draw_board(env, solution_x, 60, is_solution=True)
+        draw_board(display_board, clues, 20, 60, show_result=game_over, is_win=is_win)
+        draw_solution_board(env, solution_x, 60)
+
+        # Count filled cells
+        filled_total = int(display_board.sum())
+        target_total = int(row_clues.sum())
 
         # Draw status
         status_y = board_height + 80
-        status = f"Steps: {env.steps_taken}/{env.max_steps} | Filled: {env.filled_total}/{env.target_total}".encode()
+        status = f"Steps: {steps_taken}/{max_steps} | Filled: {filled_total}/{target_total}".encode()
         rl.DrawText(status, 20, status_y, 20, colors.RAYWHITE)
 
         # Draw message
@@ -154,6 +240,7 @@ def main():
         rl.EndDrawing()
 
     rl.CloseWindow()
+    env.close()
 
 if __name__ == '__main__':
     main()
