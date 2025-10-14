@@ -7,24 +7,24 @@ import pufferlib
 from pufferlib.ocean.nonogram import binding
 
 class Nonogram(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=8, buf=None, seed=0):
-        max_clues = size // 2
-        obs_size = size * size + 2 * size * max_clues
-        self.size = size
+    def __init__(self, num_envs=1, render_mode=None, log_interval=128,
+                 min_size=2, max_size=8, buf=None, seed=0):
+        max_clues = max_size // 2
+        obs_size = max_size * max_size + 2 * max_size * max_clues
 
-        self.single_observation_space = gymnasium.spaces.Box(low=0, high=size,
+        self.single_observation_space = gymnasium.spaces.Box(low=0, high=max_size,
             shape=(obs_size,), dtype=np.uint8)
-        self.single_action_space = gymnasium.spaces.Discrete(size * size)
+        self.single_action_space = gymnasium.spaces.Discrete(max_size * max_size)
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.log_interval = log_interval
 
         super().__init__(buf)
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
-            self.terminals, self.truncations, num_envs, seed, size=size)
+            self.terminals, self.truncations, num_envs, seed,
+            min_size=min_size, max_size=max_size)
 
-        # Allocate array for solutions
-        self.solutions = np.zeros((num_envs, size * size), dtype=np.uint8)
+        self.solutions = np.zeros((num_envs, max_size * max_size), dtype=np.uint8)
 
     def reset(self, seed=0):
         binding.vec_reset(self.c_envs, seed)
@@ -55,10 +55,14 @@ class Nonogram(pufferlib.PufferEnv):
         binding.vec_get_solutions(self.c_envs, self.solutions)
         return self.solutions
 
+    def get_size(self):
+        """Get current board size"""
+        return binding.vec_get_size(self.c_envs)
+
 if __name__ == '__main__':
     N = 4096
 
-    env = Nonogram(num_envs=N, size=8)
+    env = Nonogram(num_envs=N, min_size=2, max_size=8)
     env.reset()
     steps = 0
 

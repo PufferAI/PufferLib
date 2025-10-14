@@ -10,9 +10,8 @@ CLUE_AREA = 120
 BOARD_SPACING = 60
 FONT_SIZE = 20
 
-def draw_board(board, clues, offset_x, offset_y, show_result=False, is_win=False):
+def draw_board(board, clues, size, offset_x, offset_y, show_result=False, is_win=False):
     """Draw a nonogram board at the given offset"""
-    size = 8  # MAX_SIZE from C
     max_clues = size // 2
 
     row_clues = clues[0]
@@ -64,20 +63,19 @@ def draw_board(board, clues, offset_x, offset_y, show_result=False, is_win=False
             # Draw cell border
             rl.DrawRectangleLines(x, y, CELL_SIZE, CELL_SIZE, colors.LIGHTGRAY)
 
-def draw_solution_board(env, offset_x, offset_y):
+def draw_solution_board(env, size, offset_x, offset_y):
     """Draw the solution board at the given offset"""
-    size = 8
     max_clues = size // 2
-    grid_size = size * size
+    grid_size = 64  # MAX_SIZE * MAX_SIZE
 
     # Get solution
     solutions = env.get_solutions()
-    solution = solutions[0].reshape(size, size)
+    solution = solutions[0].reshape(8, 8)[:size, :size]
 
     # Extract clues from observation
     obs = env.observations[0]
-    row_clues = obs[grid_size:grid_size + size * max_clues].reshape(size, max_clues)
-    col_clues = obs[grid_size + size * max_clues:].reshape(size, max_clues)
+    row_clues = obs[grid_size:grid_size + 32].reshape(8, 4)[:size, :max_clues]
+    col_clues = obs[grid_size + 32:].reshape(8, 4)[:size, :max_clues]
 
     # Draw column clues
     for clue_row in range(max_clues):
@@ -118,36 +116,39 @@ def draw_solution_board(env, offset_x, offset_y):
 
 def main():
     # Create environment with single instance for interactive play
-    env = Nonogram(num_envs=1, size=8)
+    env = Nonogram(num_envs=1, min_size=2, max_size=8)
     env.reset(seed=42)
 
-    size = 8
-    board_width = CLUE_AREA + size * CELL_SIZE
-    board_height = CLUE_AREA + size * CELL_SIZE
+    max_size = 8
+    board_width = CLUE_AREA + max_size * CELL_SIZE
+    board_height = CLUE_AREA + max_size * CELL_SIZE
 
     screen_width = board_width * 2 + BOARD_SPACING + 40
     screen_height = board_height + 140
 
-    rl.InitWindow(screen_width, screen_height, b"Nonogram (C) - Click to Toggle")
+    rl.InitWindow(screen_width, screen_height, b"Nonogram - Variable Difficulty")
     rl.SetTargetFPS(60)
 
     game_over = False
     is_win = False
     message = ""
     steps_taken = 0
-    max_steps = 4 * size * size
     total_reward = 0.0
     last_reward = 0.0
 
-    # Maintain a display board that we control - always update it when playing
+    # Get actual board size from environment
+    size = env.get_size()
+    max_steps = 4 * size * size
     grid_size = size * size
     max_clues = size // 2
+
+    # Maintain a display board that we control
     display_board = env.observations[0, :grid_size].copy()
 
-    # Extract clues once (they don't change)
+    # Extract clues
     obs = env.observations[0]
-    row_clues = obs[grid_size:grid_size + size * max_clues].reshape(size, max_clues)
-    col_clues = obs[grid_size + size * max_clues:].reshape(size, max_clues)
+    row_clues = obs[64:64 + 32].reshape(8, 4)[:size, :max_clues]
+    col_clues = obs[64 + 32:].reshape(8, 4)[:size, :max_clues]
     clues = (row_clues, col_clues)
 
     while not rl.WindowShouldClose():
@@ -208,6 +209,19 @@ def main():
             total_reward = 0.0
             last_reward = 0.0
 
+            # Get new board size
+            size = env.get_size()
+            max_steps = 4 * size * size
+            grid_size = size * size
+            max_clues = size // 2
+            display_board = env.observations[0, :grid_size].copy()
+
+            # Extract new clues
+            obs = env.observations[0]
+            row_clues = obs[64:64 + 32].reshape(8, 4)[:size, :max_clues]
+            col_clues = obs[64 + 32:].reshape(8, 4)[:size, :max_clues]
+            clues = (row_clues, col_clues)
+
         # Drawing
         rl.BeginDrawing()
         rl.ClearBackground(colors.BLACK)
@@ -218,8 +232,8 @@ def main():
         rl.DrawText(b"SOLUTION", solution_x, 20, 24, colors.RAYWHITE)
 
         # Draw boards
-        draw_board(display_board, clues, 20, 60, show_result=game_over, is_win=is_win)
-        draw_solution_board(env, solution_x, 60)
+        draw_board(display_board, clues, size, 20, 60, show_result=game_over, is_win=is_win)
+        draw_solution_board(env, size, solution_x, 60)
 
         # Count filled cells
         filled_total = int(display_board.sum())
@@ -227,7 +241,7 @@ def main():
 
         # Draw status
         status_y = board_height + 80
-        status = f"Steps: {steps_taken}/{max_steps} | Filled: {filled_total}/{target_total}".encode()
+        status = f"Steps: {steps_taken}/{max_steps} | Filled: {filled_total}/{target_total} | Size: {size}x{size}".encode()
         rl.DrawText(status, 20, status_y, 20, colors.RAYWHITE)
 
         # Draw reward info

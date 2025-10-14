@@ -1,17 +1,22 @@
 #include <Python.h>
 #include "nonogram.h"
 
-// Forward declare custom method
+// Forward declare custom methods
 static PyObject* vec_get_solutions(PyObject* self, PyObject* args);
+static PyObject* vec_get_size(PyObject* self, PyObject* args);
 
 #define Env Nonogram
-#define MY_METHODS {"vec_get_solutions", vec_get_solutions, METH_VARARGS, "Get solutions from all environments"}
+#define MY_METHODS \
+    {"vec_get_solutions", vec_get_solutions, METH_VARARGS, "Get solutions from all environments"}, \
+    {"vec_get_size", vec_get_size, METH_VARARGS, "Get current board size"}
 
 #include "../env_binding.h"
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    env->size = unpack(kwargs, "size");
-    env->max_steps = 4 * env->size * env->size;
+    env->min_size = unpack(kwargs, "min_size");
+    env->max_size = unpack(kwargs, "max_size");
+    env->size = env->max_size;
+    env->max_steps = 4 * env->max_size * env->max_size;
     return 0;
 }
 
@@ -46,13 +51,24 @@ static PyObject* vec_get_solutions(PyObject* self, PyObject* args) {
         return NULL;
     }
 
-    // Copy solutions from each environment
+    // Copy solutions from each environment (always use max_size for buffer)
     unsigned char* sol_ptr = PyArray_DATA(solutions);
+    int max_grid_size = MAX_SIZE * MAX_SIZE;
     for (int i = 0; i < vec->num_envs; i++) {
         Nonogram* env = vec->envs[i];
-        int grid_size = env->size * env->size;
-        memcpy(sol_ptr + i * grid_size, env->solution, grid_size);
+        memcpy(sol_ptr + i * max_grid_size, env->solution, max_grid_size);
     }
 
     Py_RETURN_NONE;
+}
+
+// Get current board size from first environment
+static PyObject* vec_get_size(PyObject* self, PyObject* args) {
+    VecEnv* vec = unpack_vecenv(args);
+    if (!vec) {
+        return NULL;
+    }
+
+    Nonogram* env = vec->envs[0];
+    return PyLong_FromLong(env->size);
 }

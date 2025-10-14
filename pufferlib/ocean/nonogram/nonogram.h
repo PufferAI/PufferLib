@@ -8,10 +8,12 @@
 #include "raylib.h"
 
 #define MAX_SIZE 8
+#define MIN_SIZE 2
 #define MAX_CLUES (MAX_SIZE / 2)
 
 const unsigned char EMPTY = 0;
 const unsigned char FILLED = 1;
+const unsigned char PADDING = 2;
 
 const float REWARD_WIN = 1.0;
 const float REWARD_INVALID_MOVE = -0.01;
@@ -37,6 +39,8 @@ typedef struct {
 
     // Environment state
     int size;
+    int min_size;
+    int max_size;
     int max_steps;
     int steps_taken;
     int filled_total;
@@ -153,10 +157,21 @@ int check_line_matches(unsigned char* line_data, unsigned char* clues, int num_r
 
 // Required functions
 void c_reset(Nonogram* env) {
-    int grid_size = env->size * env->size;
+    env->size = env->min_size + (rand() % (env->max_size - env->min_size + 1));
+    env->max_steps = 4 * env->size * env->size;
 
-    // Initialize player grid as all EMPTY
-    memset(env->observations, EMPTY, grid_size * sizeof(unsigned char));
+    int grid_size = env->size * env->size;
+    int full_grid_size = MAX_SIZE * MAX_SIZE;
+    int max_clues = MAX_SIZE / 2;
+    int obs_size = full_grid_size + 2 * MAX_SIZE * max_clues;
+
+    // Initialize all grid as PADDING, then clear valid area to EMPTY
+    memset(env->observations, PADDING, full_grid_size);
+    for (int i = 0; i < grid_size; i++) {
+        env->observations[i] = EMPTY;
+    }
+    // Clear clue areas
+    memset(env->observations + full_grid_size, 0, 2 * MAX_SIZE * max_clues);
 
     // Generate random solution
     for (int i = 0; i < grid_size; i++) {
@@ -164,7 +179,6 @@ void c_reset(Nonogram* env) {
     }
 
     // Reset clues arrays
-    int max_clues = env->size / 2;
     memset(env->rows_clues, 0, MAX_SIZE * MAX_CLUES);
     memset(env->cols_clues, 0, MAX_SIZE * MAX_CLUES);
 
@@ -209,9 +223,8 @@ void c_reset(Nonogram* env) {
     }
 
     // Store clues in observation
-    int clue_size = env->size * max_clues;
-    memcpy(env->observations + grid_size, env->rows_clues, clue_size);
-    memcpy(env->observations + grid_size + clue_size, env->cols_clues, clue_size);
+    memcpy(env->observations + full_grid_size, env->rows_clues, MAX_SIZE * max_clues);
+    memcpy(env->observations + full_grid_size + MAX_SIZE * max_clues, env->cols_clues, MAX_SIZE * max_clues);
 
     // Calculate max clues and target sums
     memset(env->rows_totals, 0, MAX_SIZE);
@@ -260,8 +273,6 @@ void c_reset(Nonogram* env) {
 
 void c_step(Nonogram* env) {
     int pos = env->actions[0];
-    int row = pos / env->size;
-    int col = pos % env->size;
 
     env->terminals[0] = 0;
     env->rewards[0] = 0;
@@ -277,6 +288,15 @@ void c_step(Nonogram* env) {
         c_reset(env);
         return;
     }
+    
+    if (pos >= env->size * env->size) {
+        env->rewards[0] = REWARD_INVALID_MOVE;
+        env->episode_reward += REWARD_INVALID_MOVE;
+        return;
+    }
+
+    int row = pos / env->size;
+    int col = pos % env->size;
 
     unsigned char current = env->observations[pos];
 
@@ -381,8 +401,8 @@ void c_step(Nonogram* env) {
 
 void c_render(Nonogram* env) {
     if (!IsWindowReady()) {
-        int board_width = 120 + env->size * 40;
-        int board_height = 120 + env->size * 40;
+        int board_width = 120 + MAX_SIZE * 40;
+        int board_height = 120 + MAX_SIZE * 40;
         int screen_width = board_width * 2 + 60 + 40;
         int screen_height = board_height + 140;
         InitWindow(screen_width, screen_height, "Nonogram (C)");
@@ -510,8 +530,8 @@ void c_render(Nonogram* env) {
     int board_height = clue_area + env->size * cell_size;
     int status_y = board_height + 80;
     char status[128];
-    snprintf(status, sizeof(status), "Steps: %d/%d | Filled: %d/%d",
-             env->steps_taken, env->max_steps, env->filled_total, env->target_total);
+    snprintf(status, sizeof(status), "Steps: %d/%d | Filled: %d/%d | Size: %dx%d",
+             env->steps_taken, env->max_steps, env->filled_total, env->target_total, env->size, env->size);
     DrawText(status, 20, status_y, 20, RAYWHITE);
 
     // Draw instructions
