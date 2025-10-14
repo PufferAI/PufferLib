@@ -10,8 +10,12 @@ class Nonogram(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, log_interval=128,
                  min_size=2, max_size=8, buf=None, seed=0):
         max_clues = max_size // 2
-        obs_size = max_size * max_size + 2 * max_size * max_clues
+        # Add (max_size - min_size + 1) for one-hot size encoding
+        size_encoding_len = max_size - min_size + 1
+        obs_size = max_size * max_size + 2 * max_size * max_clues + size_encoding_len
 
+        # Observation space: grid cells (0-2), clues (0-max_size), size encoding (0-1)
+        # Using max_size as high covers all values
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=max_size,
             shape=(obs_size,), dtype=np.uint8)
         self.single_action_space = gymnasium.spaces.Discrete(max_size * max_size)

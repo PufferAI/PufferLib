@@ -17,6 +17,7 @@ const unsigned char PADDING = 2;
 
 const float REWARD_WIN = 1.0;
 const float REWARD_INVALID_MOVE = -0.01;
+const float REWARD_OUT_OF_BOUNDS = -1.0;
 const float REWARD_TIMEOUT = -1.0;
 const float REWARD_COMPLETE_LINE = 0.01;
 
@@ -229,6 +230,12 @@ void c_reset(Nonogram* env) {
     memcpy(env->observations + full_grid_size, env->rows_clues, MAX_SIZE * max_clues);
     memcpy(env->observations + full_grid_size + MAX_SIZE * max_clues, env->cols_clues, MAX_SIZE * max_clues);
 
+    // Add one-hot encoding of board size at the end
+    int size_encoding_offset = full_grid_size + 2 * MAX_SIZE * max_clues;
+    int size_encoding_len = MAX_SIZE - MIN_SIZE + 1;
+    memset(env->observations + size_encoding_offset, 0, size_encoding_len);
+    env->observations[size_encoding_offset + (env->size - MIN_SIZE)] = 1;
+
     // Calculate max clues and target sums
     memset(env->rows_totals, 0, MAX_SIZE);
     memset(env->cols_totals, 0, MAX_SIZE);
@@ -298,8 +305,8 @@ void c_step(Nonogram* env) {
 
     // Check if action is out of bounds (hitting padding area)
     if (row >= env->size || col >= env->size) {
-        env->rewards[0] = REWARD_INVALID_MOVE;
-        env->episode_reward += REWARD_INVALID_MOVE;
+        env->rewards[0] = REWARD_OUT_OF_BOUNDS;
+        env->episode_reward += REWARD_OUT_OF_BOUNDS;
         return;
     }
 
