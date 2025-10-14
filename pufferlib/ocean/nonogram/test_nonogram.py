@@ -10,46 +10,55 @@ CELL_SIZE = 40
 CLUE_AREA = 120
 BOARD_SPACING = 60
 FONT_SIZE = 20
+MAX_SIZE = 8
+MAX_CLUES = 4
 
 def draw_board(board, clues, size, offset_x, offset_y, show_result=False, is_win=False):
-    """Draw a nonogram board at the given offset"""
-    MAX_CLUES = 4  # Fixed constant matching C code
-
+    """Draw a nonogram board at the given offset - shows ALL cells including padding"""
     row_clues = clues[0]
     col_clues = clues[1]
 
-    # Draw column clues
+    # Draw column clues - show ALL columns including padding
     for clue_row in range(MAX_CLUES):
-        for c in range(size):
-            clue = col_clues[c, clue_row]
+        for c in range(MAX_SIZE):
+            clue = col_clues[c, clue_row] if c < len(col_clues) else 0
+            x = offset_x + CLUE_AREA + c * CELL_SIZE + CELL_SIZE // 2
+            y = offset_y + clue_row * 20 + 10
             if clue > 0:
-                x = offset_x + CLUE_AREA + c * CELL_SIZE + CELL_SIZE // 2
-                y = offset_y + clue_row * 20 + 10
                 text = str(int(clue)).encode()
                 text_width = rl.MeasureText(text, FONT_SIZE)
                 rl.DrawText(text, x - text_width // 2, y, FONT_SIZE, colors.RAYWHITE)
+            elif c >= size:
+                # Show 'P' for padding clue columns
+                rl.DrawText(b"P", x - 5, y, FONT_SIZE - 4, colors.GRAY)
 
-    # Draw row clues
-    for r in range(size):
+    # Draw row clues - show ALL rows including padding
+    for r in range(MAX_SIZE):
         clue_x = offset_x + 10
         for clue_idx in range(MAX_CLUES):
-            clue = row_clues[r, clue_idx]
+            clue = row_clues[r, clue_idx] if r < len(row_clues) else 0
+            y = offset_y + CLUE_AREA + r * CELL_SIZE + CELL_SIZE // 2 - FONT_SIZE // 2
             if clue > 0:
-                y = offset_y + CLUE_AREA + r * CELL_SIZE + CELL_SIZE // 2 - FONT_SIZE // 2
                 text = str(int(clue)).encode()
                 rl.DrawText(text, clue_x, y, FONT_SIZE, colors.RAYWHITE)
                 clue_x += rl.MeasureText(text, FONT_SIZE) + 5
+            elif r >= size and clue_idx == 0:
+                # Show 'P' for padding clue rows
+                rl.DrawText(b"P", clue_x, y, FONT_SIZE - 4, colors.GRAY)
+                break
 
-    # Draw grid
-    grid = board.reshape(size, size)
+    # Draw grid - board uses MAX_SIZE stride, show ALL cells
+    grid = board.reshape(MAX_SIZE, MAX_SIZE)
 
-    for r in range(size):
-        for c in range(size):
+    for r in range(MAX_SIZE):
+        for c in range(MAX_SIZE):
             x = offset_x + CLUE_AREA + c * CELL_SIZE
             y = offset_y + CLUE_AREA + r * CELL_SIZE
 
             # Draw cell background
-            if grid[r, c] == 1:  # FILLED
+            if grid[r, c] == 2:  # PADDING
+                rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.PURPLE)
+            elif grid[r, c] == 1:  # FILLED
                 if show_result:
                     # Show result coloring
                     if is_win:
@@ -58,59 +67,68 @@ def draw_board(board, clues, size, offset_x, offset_y, show_result=False, is_win
                         rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.RED)
                 else:
                     rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.WHITE)
-            else:
+            else:  # EMPTY
                 rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.DARKGRAY)
 
             # Draw cell border
             rl.DrawRectangleLines(x, y, CELL_SIZE, CELL_SIZE, colors.LIGHTGRAY)
 
 def draw_solution_board(env, size, offset_x, offset_y):
-    """Draw the solution board at the given offset"""
-    MAX_CLUES = 4  # Fixed constant matching C code
-    MAX_SIZE = 8
-    grid_size = 64  # MAX_SIZE * MAX_SIZE
+    """Draw the solution board at the given offset - shows ALL cells including padding"""
+    grid_size = MAX_SIZE * MAX_SIZE
 
     # Get solution
     solutions = env.get_solutions()
-    solution = solutions[0].reshape(MAX_SIZE, MAX_SIZE)[:size, :size]
+    solution = solutions[0].reshape(MAX_SIZE, MAX_SIZE)
 
     # Extract clues from observation
     obs = env.observations[0]
-    row_clues = obs[grid_size:grid_size + 32].reshape(MAX_SIZE, MAX_CLUES)[:size, :MAX_CLUES]
-    col_clues = obs[grid_size + 32:].reshape(MAX_SIZE, MAX_CLUES)[:size, :MAX_CLUES]
+    clue_size = MAX_SIZE * MAX_CLUES
+    row_clues = obs[grid_size:grid_size + clue_size].reshape(MAX_SIZE, MAX_CLUES)
+    col_clues = obs[grid_size + clue_size:].reshape(MAX_SIZE, MAX_CLUES)
 
-    # Draw column clues
+    # Draw column clues - show ALL columns
     for clue_row in range(MAX_CLUES):
-        for c in range(size):
+        for c in range(MAX_SIZE):
             clue = col_clues[c, clue_row]
+            x = offset_x + CLUE_AREA + c * CELL_SIZE + CELL_SIZE // 2
+            y = offset_y + clue_row * 20 + 10
             if clue > 0:
-                x = offset_x + CLUE_AREA + c * CELL_SIZE + CELL_SIZE // 2
-                y = offset_y + clue_row * 20 + 10
                 text = str(int(clue)).encode()
                 text_width = rl.MeasureText(text, FONT_SIZE)
                 rl.DrawText(text, x - text_width // 2, y, FONT_SIZE, colors.RAYWHITE)
+            elif c >= size:
+                # Show 'P' for padding clue columns
+                rl.DrawText(b"P", x - 5, y, FONT_SIZE - 4, colors.GRAY)
 
-    # Draw row clues
-    for r in range(size):
+    # Draw row clues - show ALL rows
+    for r in range(MAX_SIZE):
         clue_x = offset_x + 10
         for clue_idx in range(MAX_CLUES):
             clue = row_clues[r, clue_idx]
+            y = offset_y + CLUE_AREA + r * CELL_SIZE + CELL_SIZE // 2 - FONT_SIZE // 2
             if clue > 0:
-                y = offset_y + CLUE_AREA + r * CELL_SIZE + CELL_SIZE // 2 - FONT_SIZE // 2
                 text = str(int(clue)).encode()
                 rl.DrawText(text, clue_x, y, FONT_SIZE, colors.RAYWHITE)
                 clue_x += rl.MeasureText(text, FONT_SIZE) + 5
+            elif r >= size and clue_idx == 0:
+                # Show 'P' for padding clue rows
+                rl.DrawText(b"P", clue_x, y, FONT_SIZE - 4, colors.GRAY)
+                break
 
-    # Draw solution grid
-    for r in range(size):
-        for c in range(size):
+    # Draw solution grid - show ALL cells
+    for r in range(MAX_SIZE):
+        for c in range(MAX_SIZE):
             x = offset_x + CLUE_AREA + c * CELL_SIZE
             y = offset_y + CLUE_AREA + r * CELL_SIZE
 
             # Draw cell background
-            if solution[r, c] == 1:  # FILLED
+            if r >= size or c >= size:
+                # Padding area
+                rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.PURPLE)
+            elif solution[r, c] == 1:  # FILLED
                 rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.GREEN)
-            else:
+            else:  # EMPTY
                 rl.DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, colors.DARKGRAY)
 
             # Draw cell border
@@ -118,7 +136,6 @@ def draw_solution_board(env, size, offset_x, offset_y):
 
 def main():
     # Create environment with single instance for interactive play
-    MAX_SIZE = 8
     env = Nonogram(num_envs=1, min_size=2, max_size=MAX_SIZE)
     env.reset(seed=42)
 
@@ -142,26 +159,23 @@ def main():
     # Get actual board size from environment
     size = env.get_size()
     max_steps = 4 * size * size
-    grid_size = size * size
-    MAX_CLUES = 4  # Fixed constant matching C code
 
-    # Maintain a display board that we control
+    # Maintain a display board that we control - always full grid
+    grid_size = MAX_SIZE * MAX_SIZE
     display_board = env.observations[0, :grid_size].copy()
 
     # Extract clues
     obs = env.observations[0]
-    row_clues = obs[64:64 + 32].reshape(8, 4)[:size, :MAX_CLUES]
-    col_clues = obs[64 + 32:].reshape(8, 4)[:size, :MAX_CLUES]
+    clue_size = MAX_SIZE * MAX_CLUES
+    row_clues = obs[grid_size:grid_size + clue_size].reshape(MAX_SIZE, MAX_CLUES)
+    col_clues = obs[grid_size + clue_size:].reshape(MAX_SIZE, MAX_CLUES)
     clues = (row_clues, col_clues)
 
     while not rl.WindowShouldClose():
         # Update display board from current env state when game is active
         if not game_over:
-            # Recreate display_board if size changed
-            if len(display_board) != grid_size:
-                display_board = env.observations[0, :grid_size].copy()
-            else:
-                display_board[:] = env.observations[0, :grid_size]
+            # Always copy full grid
+            display_board[:] = env.observations[0, :grid_size]
 
         # Handle mouse clicks
         if not game_over and rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT):
@@ -180,8 +194,8 @@ def main():
                 row = (mouse_y - board_y) // CELL_SIZE
 
                 if 0 <= col < size and 0 <= row < size:
-                    # Convert to action
-                    action = row * size + col
+                    # Convert to action using MAX_SIZE stride
+                    action = row * MAX_SIZE + col
 
                     # Take step
                     obs, rewards, terminals, truncations, info = env.step(np.array([action]))
@@ -219,13 +233,12 @@ def main():
             # Get new board size
             size = env.get_size()
             max_steps = 4 * size * size
-            grid_size = size * size
             display_board = env.observations[0, :grid_size].copy()
 
             # Extract new clues
             obs = env.observations[0]
-            row_clues = obs[64:64 + 32].reshape(8, 4)[:size, :MAX_CLUES]
-            col_clues = obs[64 + 32:].reshape(8, 4)[:size, :MAX_CLUES]
+            row_clues = obs[grid_size:grid_size + clue_size].reshape(MAX_SIZE, MAX_CLUES)
+            col_clues = obs[grid_size + clue_size:].reshape(MAX_SIZE, MAX_CLUES)
             clues = (row_clues, col_clues)
 
         # Drawing
@@ -241,8 +254,13 @@ def main():
         draw_board(display_board, clues, size, 20, 60, show_result=game_over, is_win=is_win)
         draw_solution_board(env, size, solution_x, 60)
 
-        # Count filled cells
-        filled_total = int(display_board.sum())
+        # Count filled cells - only count valid area using MAX_SIZE stride
+        filled_total = 0
+        grid = display_board.reshape(MAX_SIZE, MAX_SIZE)
+        for r in range(size):
+            for c in range(size):
+                if grid[r, c] == 1:
+                    filled_total += 1
         target_total = int(row_clues.sum())
 
         # Draw status

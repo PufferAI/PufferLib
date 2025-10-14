@@ -81,7 +81,7 @@ void add_log(Nonogram* env) {
 }
 
 int get_row_run_length(Nonogram* env, int row, int col) {
-    int row_start = row * env->size;
+    int row_start = row * MAX_SIZE;
     int run_length = 1;
 
     // Count left
@@ -110,7 +110,7 @@ int get_col_run_length(Nonogram* env, int row, int col) {
 
     // Count up
     for (int r = row - 1; r >= 0; r--) {
-        if (env->observations[r * env->size + col] == FILLED) {
+        if (env->observations[r * MAX_SIZE + col] == FILLED) {
             run_length++;
         } else {
             break;
@@ -119,7 +119,7 @@ int get_col_run_length(Nonogram* env, int row, int col) {
 
     // Count down
     for (int r = row + 1; r < env->size; r++) {
-        if (env->observations[r * env->size + col] == FILLED) {
+        if (env->observations[r * MAX_SIZE + col] == FILLED) {
             run_length++;
         } else {
             break;
@@ -160,15 +160,15 @@ void c_reset(Nonogram* env) {
     env->size = env->min_size + (rand() % (env->max_size - env->min_size + 1));
     env->max_steps = 4 * env->size * env->size;
 
-    int grid_size = env->size * env->size;
     int full_grid_size = MAX_SIZE * MAX_SIZE;
     int max_clues = MAX_SIZE / 2;
-    int obs_size = full_grid_size + 2 * MAX_SIZE * max_clues;
 
-    // Initialize all grid as PADDING, then clear valid area to EMPTY
+    // Initialize all grid as PADDING, then clear valid cells to EMPTY (using MAX_SIZE stride)
     memset(env->observations, PADDING, full_grid_size);
-    for (int i = 0; i < grid_size; i++) {
-        env->observations[i] = EMPTY;
+    for (int r = 0; r < env->size; r++) {
+        for (int c = 0; c < env->size; c++) {
+            env->observations[r * MAX_SIZE + c] = EMPTY;
+        }
     }
     // Clear clue areas
     memset(env->observations + full_grid_size, 0, 2 * MAX_SIZE * max_clues);
@@ -291,15 +291,17 @@ void c_step(Nonogram* env) {
         c_reset(env);
         return;
     }
-    
-    if (pos >= env->size * env->size) {
+
+    // Convert action to row/col using MAX_SIZE stride
+    int row = pos / MAX_SIZE;
+    int col = pos % MAX_SIZE;
+
+    // Check if action is out of bounds (hitting padding area)
+    if (row >= env->size || col >= env->size) {
         env->rewards[0] = REWARD_INVALID_MOVE;
         env->episode_reward += REWARD_INVALID_MOVE;
         return;
     }
-
-    int row = pos / env->size;
-    int col = pos % env->size;
 
     unsigned char current = env->observations[pos];
 
@@ -333,7 +335,7 @@ void c_step(Nonogram* env) {
         if (env->rows_totals[row] == env->rows_target_sum[row] - 1) {
             // Temporarily fill to check
             env->observations[pos] = FILLED;
-            int row_start = row * env->size;
+            int row_start = row * MAX_SIZE;
             if (!check_line_matches(env->observations + row_start,
                                    env->rows_clues + row * MAX_CLUES,
                                    env->rows_num_runs[row], env->size)) {
@@ -352,7 +354,7 @@ void c_step(Nonogram* env) {
             env->observations[pos] = FILLED;
             unsigned char col_data[MAX_SIZE];
             for (int i = 0; i < env->size; i++) {
-                col_data[i] = env->observations[i * env->size + col];
+                col_data[i] = env->observations[i * MAX_SIZE + col];
             }
             if (!check_line_matches(col_data,
                                    env->cols_clues + col * MAX_CLUES,
@@ -468,7 +470,7 @@ void c_render(Nonogram* env) {
         for (int c = 0; c < env->size; c++) {
             int x = offset_x + clue_area + c * cell_size;
             int y = offset_y + clue_area + r * cell_size;
-            int pos = r * env->size + c;
+            int pos = r * MAX_SIZE + c;
 
             if (env->observations[pos] == FILLED) {
                 DrawRectangle(x, y, cell_size, cell_size, WHITE);
