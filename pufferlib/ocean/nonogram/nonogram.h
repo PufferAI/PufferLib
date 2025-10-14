@@ -173,9 +173,12 @@ void c_reset(Nonogram* env) {
     // Clear clue areas
     memset(env->observations + full_grid_size, 0, 2 * MAX_SIZE * max_clues);
 
-    // Generate random solution
-    for (int i = 0; i < grid_size; i++) {
-        env->solution[i] = (rand() % 2 == 0) ? EMPTY : FILLED;
+    // Generate random solution using MAX_SIZE stride for consistent buffer layout
+    memset(env->solution, EMPTY, MAX_SIZE * MAX_SIZE);
+    for (int i = 0; i < env->size; i++) {
+        for (int j = 0; j < env->size; j++) {
+            env->solution[i * MAX_SIZE + j] = (rand() % 2 == 0) ? EMPTY : FILLED;
+        }
     }
 
     // Reset clues arrays
@@ -187,7 +190,7 @@ void c_reset(Nonogram* env) {
         int clue_idx = 0;
         int count = 0;
         for (int j = 0; j < env->size; j++) {
-            if (env->solution[i * env->size + j] == FILLED) {
+            if (env->solution[i * MAX_SIZE + j] == FILLED) {
                 count++;
             } else if (count > 0) {
                 env->rows_clues[i * MAX_CLUES + clue_idx] = count;
@@ -207,7 +210,7 @@ void c_reset(Nonogram* env) {
         int clue_idx = 0;
         int count = 0;
         for (int i = 0; i < env->size; i++) {
-            if (env->solution[i * env->size + j] == FILLED) {
+            if (env->solution[i * MAX_SIZE + j] == FILLED) {
                 count++;
             } else if (count > 0) {
                 env->cols_clues[j * MAX_CLUES + clue_idx] = count;
@@ -420,7 +423,6 @@ void c_render(Nonogram* env) {
     int clue_area = 120;
     int board_spacing = 60;
     int font_size = 20;
-    int max_clues = env->size / 2;
 
     // Draw titles
     DrawText("CURRENT BOARD", 20, 20, 24, RAYWHITE);
@@ -432,7 +434,7 @@ void c_render(Nonogram* env) {
     int offset_y = 60;
 
     // Draw column clues for current board
-    for (int clue_row = 0; clue_row < max_clues; clue_row++) {
+    for (int clue_row = 0; clue_row < MAX_CLUES; clue_row++) {
         for (int c = 0; c < env->size; c++) {
             int clue = env->cols_clues[c * MAX_CLUES + clue_row];
             if (clue > 0) {
@@ -449,7 +451,7 @@ void c_render(Nonogram* env) {
     // Draw row clues for current board
     for (int r = 0; r < env->size; r++) {
         int clue_x = offset_x + 10;
-        for (int clue_idx = 0; clue_idx < max_clues; clue_idx++) {
+        for (int clue_idx = 0; clue_idx < MAX_CLUES; clue_idx++) {
             int clue = env->rows_clues[r * MAX_CLUES + clue_idx];
             if (clue > 0) {
                 char text[4];
@@ -481,7 +483,7 @@ void c_render(Nonogram* env) {
     offset_x = solution_x;
 
     // Draw column clues for solution
-    for (int clue_row = 0; clue_row < max_clues; clue_row++) {
+    for (int clue_row = 0; clue_row < MAX_CLUES; clue_row++) {
         for (int c = 0; c < env->size; c++) {
             int clue = env->cols_clues[c * MAX_CLUES + clue_row];
             if (clue > 0) {
@@ -498,7 +500,7 @@ void c_render(Nonogram* env) {
     // Draw row clues for solution
     for (int r = 0; r < env->size; r++) {
         int clue_x = offset_x + 10;
-        for (int clue_idx = 0; clue_idx < max_clues; clue_idx++) {
+        for (int clue_idx = 0; clue_idx < MAX_CLUES; clue_idx++) {
             int clue = env->rows_clues[r * MAX_CLUES + clue_idx];
             if (clue > 0) {
                 char text[4];
@@ -515,7 +517,7 @@ void c_render(Nonogram* env) {
         for (int c = 0; c < env->size; c++) {
             int x = offset_x + clue_area + c * cell_size;
             int y = offset_y + clue_area + r * cell_size;
-            int pos = r * env->size + c;
+            int pos = r * MAX_SIZE + c;
 
             if (env->solution[pos] == FILLED) {
                 DrawRectangle(x, y, cell_size, cell_size, GREEN);
@@ -534,8 +536,14 @@ void c_render(Nonogram* env) {
              env->steps_taken, env->max_steps, env->filled_total, env->target_total, env->size, env->size);
     DrawText(status, 20, status_y, 20, RAYWHITE);
 
+    // Draw reward info
+    char reward_info[128];
+    snprintf(reward_info, sizeof(reward_info), "Last Reward: %.3f | Episode Return: %.3f",
+             env->rewards[0], env->episode_reward);
+    DrawText(reward_info, 20, status_y + 25, 20, RAYWHITE);
+
     // Draw instructions
-    DrawText("Click cells to toggle | Press R to reset | ESC to quit", 20, status_y + 30, 16, LIGHTGRAY);
+    DrawText("Click cells to toggle | Press R to reset | ESC to quit", 20, status_y + 60, 16, LIGHTGRAY);
 
     EndDrawing();
 }

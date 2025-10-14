@@ -2,6 +2,7 @@
 """Interactive Nonogram testing script with raylib - C version"""
 
 import numpy as np
+import random
 from pufferlib.ocean.nonogram.nonogram import Nonogram
 from raylib import rl, colors
 
@@ -12,13 +13,13 @@ FONT_SIZE = 20
 
 def draw_board(board, clues, size, offset_x, offset_y, show_result=False, is_win=False):
     """Draw a nonogram board at the given offset"""
-    max_clues = size // 2
+    MAX_CLUES = 4  # Fixed constant matching C code
 
     row_clues = clues[0]
     col_clues = clues[1]
 
     # Draw column clues
-    for clue_row in range(max_clues):
+    for clue_row in range(MAX_CLUES):
         for c in range(size):
             clue = col_clues[c, clue_row]
             if clue > 0:
@@ -31,7 +32,7 @@ def draw_board(board, clues, size, offset_x, offset_y, show_result=False, is_win
     # Draw row clues
     for r in range(size):
         clue_x = offset_x + 10
-        for clue_idx in range(max_clues):
+        for clue_idx in range(MAX_CLUES):
             clue = row_clues[r, clue_idx]
             if clue > 0:
                 y = offset_y + CLUE_AREA + r * CELL_SIZE + CELL_SIZE // 2 - FONT_SIZE // 2
@@ -65,20 +66,21 @@ def draw_board(board, clues, size, offset_x, offset_y, show_result=False, is_win
 
 def draw_solution_board(env, size, offset_x, offset_y):
     """Draw the solution board at the given offset"""
-    max_clues = size // 2
+    MAX_CLUES = 4  # Fixed constant matching C code
+    MAX_SIZE = 8
     grid_size = 64  # MAX_SIZE * MAX_SIZE
 
     # Get solution
     solutions = env.get_solutions()
-    solution = solutions[0].reshape(8, 8)[:size, :size]
+    solution = solutions[0].reshape(MAX_SIZE, MAX_SIZE)[:size, :size]
 
     # Extract clues from observation
     obs = env.observations[0]
-    row_clues = obs[grid_size:grid_size + 32].reshape(8, 4)[:size, :max_clues]
-    col_clues = obs[grid_size + 32:].reshape(8, 4)[:size, :max_clues]
+    row_clues = obs[grid_size:grid_size + 32].reshape(MAX_SIZE, MAX_CLUES)[:size, :MAX_CLUES]
+    col_clues = obs[grid_size + 32:].reshape(MAX_SIZE, MAX_CLUES)[:size, :MAX_CLUES]
 
     # Draw column clues
-    for clue_row in range(max_clues):
+    for clue_row in range(MAX_CLUES):
         for c in range(size):
             clue = col_clues[c, clue_row]
             if clue > 0:
@@ -91,7 +93,7 @@ def draw_solution_board(env, size, offset_x, offset_y):
     # Draw row clues
     for r in range(size):
         clue_x = offset_x + 10
-        for clue_idx in range(max_clues):
+        for clue_idx in range(MAX_CLUES):
             clue = row_clues[r, clue_idx]
             if clue > 0:
                 y = offset_y + CLUE_AREA + r * CELL_SIZE + CELL_SIZE // 2 - FONT_SIZE // 2
@@ -116,12 +118,13 @@ def draw_solution_board(env, size, offset_x, offset_y):
 
 def main():
     # Create environment with single instance for interactive play
-    env = Nonogram(num_envs=1, min_size=2, max_size=8)
+    MAX_SIZE = 8
+    env = Nonogram(num_envs=1, min_size=2, max_size=MAX_SIZE)
     env.reset(seed=42)
 
-    max_size = 8
-    board_width = CLUE_AREA + max_size * CELL_SIZE
-    board_height = CLUE_AREA + max_size * CELL_SIZE
+    # Always size the window for maximum grid size
+    board_width = CLUE_AREA + MAX_SIZE * CELL_SIZE
+    board_height = CLUE_AREA + MAX_SIZE * CELL_SIZE
 
     screen_width = board_width * 2 + BOARD_SPACING + 40
     screen_height = board_height + 140
@@ -140,21 +143,25 @@ def main():
     size = env.get_size()
     max_steps = 4 * size * size
     grid_size = size * size
-    max_clues = size // 2
+    MAX_CLUES = 4  # Fixed constant matching C code
 
     # Maintain a display board that we control
     display_board = env.observations[0, :grid_size].copy()
 
     # Extract clues
     obs = env.observations[0]
-    row_clues = obs[64:64 + 32].reshape(8, 4)[:size, :max_clues]
-    col_clues = obs[64 + 32:].reshape(8, 4)[:size, :max_clues]
+    row_clues = obs[64:64 + 32].reshape(8, 4)[:size, :MAX_CLUES]
+    col_clues = obs[64 + 32:].reshape(8, 4)[:size, :MAX_CLUES]
     clues = (row_clues, col_clues)
 
     while not rl.WindowShouldClose():
         # Update display board from current env state when game is active
         if not game_over:
-            display_board[:] = env.observations[0, :grid_size]
+            # Recreate display_board if size changed
+            if len(display_board) != grid_size:
+                display_board = env.observations[0, :grid_size].copy()
+            else:
+                display_board[:] = env.observations[0, :grid_size]
 
         # Handle mouse clicks
         if not game_over and rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT):
@@ -201,7 +208,7 @@ def main():
 
         # Handle reset
         if rl.IsKeyPressed(rl.KEY_R):
-            env.reset()
+            env.reset(seed=random.randint(0, 2**31 - 1))
             game_over = False
             is_win = False
             message = ""
@@ -213,13 +220,12 @@ def main():
             size = env.get_size()
             max_steps = 4 * size * size
             grid_size = size * size
-            max_clues = size // 2
             display_board = env.observations[0, :grid_size].copy()
 
             # Extract new clues
             obs = env.observations[0]
-            row_clues = obs[64:64 + 32].reshape(8, 4)[:size, :max_clues]
-            col_clues = obs[64 + 32:].reshape(8, 4)[:size, :max_clues]
+            row_clues = obs[64:64 + 32].reshape(8, 4)[:size, :MAX_CLUES]
+            col_clues = obs[64 + 32:].reshape(8, 4)[:size, :MAX_CLUES]
             clues = (row_clues, col_clues)
 
         # Drawing
