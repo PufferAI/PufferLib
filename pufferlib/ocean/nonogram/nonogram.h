@@ -8,7 +8,7 @@
 #include "raylib.h"
 
 #define MAX_SIZE 8
-#define MIN_SIZE 2
+#define MIN_SIZE 4
 #define MAX_CLUES (MAX_SIZE / 2)
 
 const unsigned char EMPTY = 0;
@@ -17,7 +17,7 @@ const unsigned char PADDING = 2;
 
 const float REWARD_WIN = 1.0;
 const float REWARD_INVALID_MOVE = -0.01;
-const float REWARD_OUT_OF_BOUNDS = -1.0;
+const float REWARD_OUT_OF_BOUNDS = -0.01;
 const float REWARD_TIMEOUT = -1.0;
 const float REWARD_COMPLETE_LINE = 0.01;
 
@@ -156,6 +156,11 @@ int check_line_matches(unsigned char* line_data, unsigned char* clues, int num_r
     return run_idx == num_runs;
 }
 
+// Helper to generate random float in [0, 1]
+float rand_uniform() {
+    return (float)rand() / (float)RAND_MAX;
+}
+
 // Required functions
 void c_reset(Nonogram* env) {
     env->size = env->min_size + (rand() % (env->max_size - env->min_size + 1));
@@ -174,12 +179,25 @@ void c_reset(Nonogram* env) {
     // Clear clue areas
     memset(env->observations + full_grid_size, 0, 2 * MAX_SIZE * max_clues);
 
-    // Generate random solution using MAX_SIZE stride for consistent buffer layout
+    // Generate random solution using MAX_SIZE stride with uniform fill probability
+    // Sample fill probability p uniformly from [0, 1] for difficulty variation
+    float fill_prob = rand_uniform();
     memset(env->solution, EMPTY, MAX_SIZE * MAX_SIZE);
+    int has_filled = 0;
     for (int i = 0; i < env->size; i++) {
         for (int j = 0; j < env->size; j++) {
-            env->solution[i * MAX_SIZE + j] = (rand() % 2 == 0) ? EMPTY : FILLED;
+            if (rand_uniform() < fill_prob) {
+                env->solution[i * MAX_SIZE + j] = FILLED;
+                has_filled = 1;
+            }
         }
+    }
+
+    // Ensure at least one square is set
+    if (!has_filled) {
+        int rand_row = rand() % env->size;
+        int rand_col = rand() % env->size;
+        env->solution[rand_row * MAX_SIZE + rand_col] = FILLED;
     }
 
     // Reset clues arrays

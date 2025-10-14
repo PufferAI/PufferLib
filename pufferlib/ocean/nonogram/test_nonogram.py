@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Interactive Nonogram testing script with raylib - C version"""
 
+import argparse
+import glob
+import os
 import numpy as np
 import random
+import torch
 from pufferlib.ocean.nonogram.nonogram import Nonogram
 from raylib import rl, colors
 
@@ -11,6 +15,7 @@ CLUE_AREA = 120
 BOARD_SPACING = 60
 FONT_SIZE = 20
 MAX_SIZE = 8
+MIN_SIZE = 4
 MAX_CLUES = 4
 
 def draw_board(board, clues, size, offset_x, offset_y, show_result=False, is_win=False):
@@ -135,9 +140,71 @@ def draw_solution_board(env, size, offset_x, offset_y):
             rl.DrawRectangleLines(x, y, CELL_SIZE, CELL_SIZE, colors.LIGHTGRAY)
 
 def main():
+    parser = argparse.ArgumentParser(description='Test Nonogram environment')
+    parser.add_argument('--model', type=str, default=None,
+                        help='Path to model checkpoint, or "latest" to auto-select')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
+                        help='Device to run model on')
+    parser.add_argument('--use-rnn', action='store_true', help='Use RNN policy')
+    args = parser.parse_args()
+
     # Create environment with single instance for interactive play
-    env = Nonogram(num_envs=1, min_size=2, max_size=MAX_SIZE)
-    env.reset(seed=42)
+    env = Nonogram(num_envs=1, min_size=MIN_SIZE, max_size=MAX_SIZE)
+    env.reset(seed=args.seed)
+
+    # Load model if specified
+    policy = None
+    lstm_h = None
+    lstm_c = None
+    if args.model:
+        print(f"Loading model from {args.model}...")
+
+        # Handle 'latest' keyword
+        if args.model == 'latest':
+            pattern = "experiments/puffer_nonogram_*/*.pt"
+            models = glob.glob(pattern)
+            models = [m for m in models if 'trainer_state' not in m]
+            if not models:
+                raise FileNotFoundError(f"No model files found matching {pattern}")
+            args.model = max(models, key=os.path.getctime)
+            print(f"Auto-selected latest model: {args.model}")
+
+        # Import policy class
+        from pufferlib.ocean.torch import Policy, Recurrent
+
+        # Create policy
+        base_policy = Policy(env, hidden_size=128)
+        if args.use_rnn:
+            policy = Recurrent(env, base_policy, input_size=128, hidden_size=128)
+            lstm_h = torch.zeros(1, policy.hidden_size, device=args.device)
+            lstm_c = torch.zeros(1, policy.hidden_size, device=args.device)
+        else:
+            policy = base_policy
+
+        # Load weights and auto-detect RNN
+        state_dict = torch.load(args.model, map_location=args.device, weights_only=True)
+        state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+
+        # Auto-detect if model uses RNN
+        has_rnn = any('lstm' in k or 'cell' in k for k in state_dict.keys())
+        if has_rnn and not args.use_rnn:
+            print("Auto-detected RNN in model, switching to RNN mode...")
+            args.use_rnn = True
+            policy = Recurrent(env, base_policy, input_size=128, hidden_size=128)
+            lstm_h = torch.zeros(1, policy.hidden_size, device=args.device)
+            lstm_c = torch.zeros(1, policy.hidden_size, device=args.device)
+        elif not has_rnn and args.use_rnn:
+            print("Warning: --use-rnn specified but model doesn't have RNN weights, using base policy")
+            args.use_rnn = False
+            policy = base_policy
+
+        policy.load_state_dict(state_dict)
+        policy = policy.to(args.device)
+        policy.eval()
+        print(f"Model loaded successfully!")
+        print(f"Using device: {args.device}")
+        print(f"Using RNN: {args.use_rnn}")
 
     # Always size the window for maximum grid size
     board_width = CLUE_AREA + MAX_SIZE * CELL_SIZE
@@ -171,14 +238,79 @@ def main():
     col_clues = obs[grid_size + clue_size:].reshape(MAX_SIZE, MAX_CLUES)
     clues = (row_clues, col_clues)
 
+    # Auto-play mode settings
+    auto_play = policy is not None
+    auto_play_delay = 0.05  # seconds between AI moves
+    last_auto_play_time = 0
+
     while not rl.WindowShouldClose():
         # Update display board from current env state when game is active
         if not game_over:
             # Always copy full grid
             display_board[:] = env.observations[0, :grid_size]
 
-        # Handle mouse clicks
-        if not game_over and rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT):
+        # Toggle auto-play with SPACE (only if model is loaded)
+        if policy is not None and rl.IsKeyPressed(rl.KEY_SPACE):
+            auto_play = not auto_play
+            message = "Auto-play: " + ("ON" if auto_play else "OFF")
+
+        # Auto-play with AI
+        if auto_play and policy is not None and not game_over:
+            import time
+            current_time = time.time()
+            if current_time - last_auto_play_time >= auto_play_delay:
+                last_auto_play_time = current_time
+
+                # Get observation and convert to tensor
+                obs_tensor = torch.from_numpy(env.observations[0:1]).float().to(args.device)
+
+                # Get action from policy
+                with torch.no_grad():
+                    if args.use_rnn:
+                        state = {'lstm_h': lstm_h, 'lstm_c': lstm_c}
+                        logits, value = policy.forward_eval(obs_tensor, state)
+                        lstm_h = state['lstm_h']
+                        lstm_c = state['lstm_c']
+                    else:
+                        logits, value = policy.forward_eval(obs_tensor, None)
+
+                    # Sample action
+                    if isinstance(logits, torch.distributions.Normal):
+                        action = logits.mean
+                    else:
+                        probs = torch.softmax(logits, dim=-1)
+                        action = torch.argmax(probs, dim=-1)
+
+                    action = action.cpu().numpy()[0]
+
+                # Take step
+                obs, rewards, terminals, truncations, info = env.step(np.array([action]))
+
+                # Update rewards
+                last_reward = rewards[0]
+                total_reward += rewards[0]
+
+                # Check for game end
+                if terminals[0]:
+                    game_over = True
+                    is_win = rewards[0] > 0
+                    if is_win:
+                        message = "AI Solved! Press R to play again"
+                    else:
+                        message = "AI Failed - Timeout! Press R to play again"
+                    # Reset LSTM state
+                    if args.use_rnn:
+                        lstm_h.zero_()
+                        lstm_c.zero_()
+                elif rewards[0] < 0:
+                    message = f"AI Invalid move at action {action}!"
+                    steps_taken += 1
+                else:
+                    message = ""
+                    steps_taken += 1
+
+        # Handle mouse clicks (manual play)
+        if not auto_play and not game_over and rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT):
             mouse_x = rl.GetMouseX()
             mouse_y = rl.GetMouseY()
 
@@ -229,6 +361,11 @@ def main():
             steps_taken = 0
             total_reward = 0.0
             last_reward = 0.0
+
+            # Reset LSTM state if using RNN
+            if args.use_rnn and lstm_h is not None:
+                lstm_h.zero_()
+                lstm_c.zero_()
 
             # Get new board size
             size = env.get_size()
@@ -285,7 +422,11 @@ def main():
             rl.DrawText(message.encode(), 20, status_y + 55, 20, color)
 
         # Draw instructions
-        rl.DrawText(b"Click cells to toggle | Press R to reset | ESC to quit", 20, status_y + 85, 16, colors.LIGHTGRAY)
+        if policy is not None:
+            mode_text = f"Mode: {'AI' if auto_play else 'MANUAL'} | Press SPACE to toggle | Press R to reset | ESC to quit".encode()
+            rl.DrawText(mode_text, 20, status_y + 85, 16, colors.LIGHTGRAY)
+        else:
+            rl.DrawText(b"Click cells to toggle | Press R to reset | ESC to quit", 20, status_y + 85, 16, colors.LIGHTGRAY)
 
         rl.EndDrawing()
 
