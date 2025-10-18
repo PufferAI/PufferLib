@@ -156,6 +156,20 @@ class PuffeRL:
         elif config['optimizer'] == 'muon':
             from heavyball import ForeachMuon
             warnings.filterwarnings(action='ignore', category=UserWarning, module=r'heavyball.*')
+            try:
+                import heavyball.utils as heavyball_utils
+            except ImportError:
+                heavyball_utils = None
+            disable_heavyball_compile = config.get('device') != 'cuda'
+            if not disable_heavyball_compile:
+                try:
+                    # torch.cuda.current_device() raises if CUDA is unavailable or misconfigured
+                    torch.cuda.current_device()
+                except Exception:
+                    disable_heavyball_compile = True
+            if disable_heavyball_compile and heavyball_utils and getattr(heavyball_utils, 'compile_mode', None) is not None:
+                # Heavyball wraps many ops in torch.compile; on CPU-only runs this trips CUDA checks
+                heavyball_utils.compile_mode = None
 
             # # optionally a little bit better/faster alternative to newtonschulz iteration
             # import heavyball.utils
@@ -512,6 +526,8 @@ class PuffeRL:
         self.vecenv.close()
         self.utilization.stop()
         model_path = self.save_checkpoint()
+        if model_path is None:
+            return None
         run_id = self.logger.run_id
         path = os.path.join(self.config['data_dir'], f'{self.config["env"]}_{run_id}.pt')
         shutil.copy(model_path, path)
