@@ -432,8 +432,8 @@ class PuffeRL:
         y_pred = self.values.flatten()
         y_true = advantages.flatten() + self.values.flatten()
         var_y = y_true.var()
-        explained_var = torch.nan if var_y == 0 else 1 - (y_true - y_pred).var() / var_y
-        losses['explained_variance'] = explained_var.item()
+        explained_var = torch.nan if var_y == 0 else (1 - (y_true - y_pred).var() / var_y).item()
+        losses['explained_variance'] = explained_var
 
         profile.end()
         logs = None
@@ -857,9 +857,9 @@ class WandbLogger:
         self.wandb.log(logs, step=step)
 
     def close(self, model_path):
-        artifact = self.wandb.Artifact(self.run_id, type='model')
-        artifact.add_file(model_path)
-        self.wandb.run.log_artifact(artifact)
+        # artifact = self.wandb.Artifact(self.run_id, type='model')
+        # artifact.add_file(model_path)
+        # self.wandb.run.log_artifact(artifact)
         self.wandb.finish()
 
     def download(self):
