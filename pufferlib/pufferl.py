@@ -526,9 +526,6 @@ class PuffeRL:
 
         if torch.distributed.is_initialized():
            if torch.distributed.get_rank() != 0:
-               self.logger.log(logs, agent_steps)
-               return logs
-           else:
                return None
 
         self.logger.log(logs, agent_steps)
@@ -1057,16 +1054,27 @@ def sweep(args=None, env_name=None):
         raise pufferlib.APIUsageError(f'Invalid sweep method {method}. See pufferlib.sweep')
 
     sweep = sweep_cls(args['sweep'])
+    seed_rng = random.Random(args['train'].get('seed', 0))
     points_per_run = args['sweep']['downsample']
     target_key = f'environment/{args["sweep"]["metric"]}'
     for i in range(args['max_runs']):
-        seed = time.time_ns() & 0xFFFFFFFF
+        seed = seed_rng.getrandbits(32)
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
         sweep.suggest(args)
         total_timesteps = args['train']['total_timesteps']
         all_logs = train(env_name, args=args)
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+        else:
+            rank = 0
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            payload = [all_logs if rank == 0 else None]
+            torch.distributed.broadcast_object_list(payload, src=0)
+            all_logs = payload[0] if payload[0] is not None else []
+        elif all_logs is None:
+            all_logs = []
         all_logs = [e for e in all_logs if target_key in e]
         scores = downsample([log[target_key] for log in all_logs], points_per_run)
         costs = downsample([log['uptime'] for log in all_logs], points_per_run)
