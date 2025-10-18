@@ -470,7 +470,19 @@ class PuffeRL:
         logs = None
         self.epoch += 1
         done_training = self.global_step >= config['total_timesteps']
-        if done_training or self.global_step == 0 or time.time() > self.last_log_time + 0.25:
+        should_log = done_training or self.global_step == 0 \
+            or time.time() > self.last_log_time + 0.25
+
+        if torch.distributed.is_initialized():
+            # Ensure all ranks participate in logging/all-reduce together
+            flag = torch.tensor(
+                1 if should_log else 0,
+                device=self.values.device,
+            )
+            torch.distributed.all_reduce(flag, op=torch.distributed.ReduceOp.MAX)
+            should_log = bool(flag.item())
+
+        if should_log:
             logs = self.mean_and_log()
             self.losses = losses
             self.print_dashboard()
