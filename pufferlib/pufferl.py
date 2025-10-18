@@ -902,6 +902,11 @@ class WandbLogger:
         self.wandb.log(logs, step=step)
 
     def close(self, model_path):
+        if not model_path:
+            # Skip artifact upload if no checkpoint was produced.
+            self.wandb.finish()
+            return
+
         artifact = self.wandb.Artifact(self.run_id, type='model')
         artifact.add_file(model_path)
         self.wandb.run.log_artifact(artifact)
@@ -932,7 +937,8 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
 
     if 'LOCAL_RANK' in os.environ:
         args['train']['device'] = torch.cuda.current_device()
-        torch.distributed.init_process_group(backend='nccl', world_size=world_size)
+        if torch.distributed.is_available() and not torch.distributed.is_initialized():
+            torch.distributed.init_process_group(backend='nccl', world_size=world_size)
         policy = policy.to(local_rank)
         model = torch.nn.parallel.DistributedDataParallel(
             policy, device_ids=[local_rank], output_device=local_rank
