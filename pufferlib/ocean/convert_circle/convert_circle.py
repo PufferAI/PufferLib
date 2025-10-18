@@ -8,7 +8,8 @@ from pufferlib.ocean.convert_circle import binding
 
 class ConvertCircle(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, width=1920, height=1080, num_agents=1024, num_factories=32,
-            num_resources=8, equidistant=0, radius=30, render_mode=None, log_interval=128, buf=None, seed=0):
+            num_resources=8, equidistant=0, radius=30, render_mode=None, log_interval=128, buf=None, 
+            seed=0, max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(2*num_resources + 4 + num_resources,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.MultiDiscrete([9, 5])
@@ -20,7 +21,7 @@ class ConvertCircle(pufferlib.PufferEnv):
         if num_resources < 1 or num_resources > 8:
             raise pufferlib.APIUsageError('num_resources must be in [1, 8]')
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
         c_envs = []
         for i in range(num_envs):
             c_env = binding.env_init(

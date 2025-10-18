@@ -937,6 +937,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
             if pufferl.global_step > 0.20*train_config['total_timesteps']:
                 all_logs.append(logs)
 
+    print("Final eval")
     # Final eval. You can reset the env here, but depending on
     # your env, this can skew data (i.e. you only collect the shortest
     # rollouts within a fixed number of epochs)
@@ -951,8 +952,10 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
         all_logs.append(logs)
 
     pufferl.print_dashboard()
+    print(f"Starting model save:")
     model_path = pufferl.close()
     pufferl.logger.close(model_path)
+    print(f"...Model saved to {model_path}")
     return all_logs
 
 def eval(env_name, args=None, vecenv=None, policy=None):
@@ -1134,6 +1137,7 @@ def load_policy(args, vecenv, env_name=''):
         #optim_state = torch.load(state_path)['optimizer_state_dict']
         #pufferl.optimizer.load_state_dict(optim_state)
 
+    print(f'Loaded model from {load_path}')
     return policy
 
 def load_config(env_name, parser=None):

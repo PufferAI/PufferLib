@@ -18,7 +18,8 @@ class NMMO3(pufferlib.PufferEnv):
             item_respawn_ticks=100, x_window=7, y_window=5,
             reward_combat_level=1.0, reward_prof_level=1.0,
             reward_item_level=0.5, reward_market=0.01,
-            reward_death=-1.0, log_interval=128, buf=None, seed=0):
+            reward_death=-1.0, log_interval=128, buf=None, seed=0,
+            max_num_threads=0):
 
         self.log_interval = log_interval
 
@@ -145,7 +146,7 @@ class NMMO3(pufferlib.PufferEnv):
         self.single_action_space = gymnasium.spaces.Discrete(26)
         self.render_mode = 'human'
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
         player_count = 0
         enemy_count = 0
         c_envs = []

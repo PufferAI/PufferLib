@@ -5,7 +5,7 @@ import pufferlib
 from pufferlib.ocean.checkers import binding
 
 class Checkers(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=8, buf=None, seed=0):
+    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=8, buf=None, seed=0, max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(size*size,), dtype=np.uint8)
         num_move_types = 8  # Move types are: NW, NE, SW, SE, 2*NW, 2*NE, 2*SW, 2*SE,
@@ -15,7 +15,7 @@ class Checkers(pufferlib.PufferEnv):
         self.num_agents = num_envs
         self.log_interval = log_interval
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
             self.terminals, self.truncations, num_envs, seed, size=size)
  

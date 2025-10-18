@@ -9,7 +9,8 @@ from pufferlib.ocean.battle import binding
 class Battle(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, width=1920, height=1080, size_x=1.0,
             size_y=1.0, size_z=1.0, num_agents=1024, num_factories=32,
-            num_armies=4, render_mode=None, log_interval=128, buf=None, seed=0):
+            num_armies=4, render_mode=None, log_interval=128, buf=None, seed=0,
+            max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(num_armies*3 + 4*16 + 22 + 8,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Box(
@@ -23,7 +24,7 @@ class Battle(pufferlib.PufferEnv):
         if num_agents % num_armies != 0:
             raise pufferlib.APIUsageError('num_agents must be a multiple of num_armies')
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
         c_envs = []
         for i in range(num_envs):
             c_env = binding.env_init(

@@ -8,7 +8,7 @@ from pufferlib.ocean.tower_climb import binding
 class TowerClimb(pufferlib.PufferEnv):
     def __init__(self, num_envs=4096, render_mode=None, report_interval=1,
             num_maps=50, reward_climb_row = .25, reward_fall_row = 0, reward_illegal_move = -0.01,
-            reward_move_block = 0.2, buf = None, seed=0):
+            reward_move_block = 0.2, buf = None, seed=0, max_num_threads=0):
 
         # env
         self.num_agents = num_envs
@@ -20,7 +20,7 @@ class TowerClimb(pufferlib.PufferEnv):
             shape=(self.num_obs,), dtype=np.uint8)
         self.single_action_space = gymnasium.spaces.Discrete(6)
 
-        super().__init__(buf=buf)   
+        super().__init__(buf, binding, max_num_threads)
         c_envs = []
         self.c_state = binding.shared(num_maps=num_maps)
         self.c_envs = binding.vec_init(self.observations, self.actions,

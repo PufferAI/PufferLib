@@ -7,7 +7,7 @@ import pufferlib
 from pufferlib.ocean.matsci import binding
 
 class Matsci(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, num_atoms=2, render_mode=None, log_interval=128, buf=None, seed=0):
+    def __init__(self, num_envs=1, num_atoms=2, render_mode=None, log_interval=128, buf=None, seed=0, max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(3,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Box(
@@ -16,7 +16,7 @@ class Matsci(pufferlib.PufferEnv):
         self.render_mode = render_mode
         self.num_agents = num_envs*num_atoms
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
         c_envs = []
         for i in range(num_envs):
             c_envs.append(binding.env_init(

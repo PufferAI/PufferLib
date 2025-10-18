@@ -6,7 +6,8 @@ from pufferlib.ocean.trash_pickup import binding
 
 class TrashPickupEnv(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=1, buf=None, 
-                 grid_size=10, num_agents=3, num_trash=15, num_bins=2, max_steps=300, agent_sight_range=5, seed=0):
+                 grid_size=10, num_agents=3, num_trash=15, num_bins=2, max_steps=300, agent_sight_range=5, seed=0,
+                 max_num_threads=0):
         # Env Setup
         self.render_mode = render_mode
         self.report_interval = report_interval
@@ -57,7 +58,7 @@ class TrashPickupEnv(pufferlib.PufferEnv):
             shape=(self.num_obs,), dtype=np.int8)
         self.single_action_space = spaces.Discrete(4)
 
-        super().__init__(buf=buf)
+        super().__init__(buf, binding, max_num_threads)
         c_envs = []
         for i in range(num_envs):
             env_id = binding.env_init(

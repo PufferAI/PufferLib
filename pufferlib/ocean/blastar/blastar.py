@@ -4,7 +4,8 @@ import pufferlib
 from pufferlib.ocean.blastar import binding
 
 class Blastar(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, buf=None, seed=0):
+    def __init__(self, num_envs=1, render_mode=None, buf=None, seed=0,
+        max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(
             low=0, high=1, shape=(10,), dtype=np.float32
         )
@@ -15,7 +16,7 @@ class Blastar(pufferlib.PufferEnv):
         self.tick = 0
         self.log_interval = 1
         
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
         self.c_envs = binding.vec_init(
             self.observations,
             self.actions,

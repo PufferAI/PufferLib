@@ -17,7 +17,8 @@ class Pacman(pufferlib.PufferEnv):
             scatter_mode_length = 70,
             chase_mode_length = 140,
             log_interval=128,
-            buf=None, seed=0):
+            buf=None, seed=0, 
+            max_num_threads=0):
         
         ghost_observations_count = 9
         player_observations_count = 11
@@ -40,7 +41,7 @@ class Pacman(pufferlib.PufferEnv):
         self.human_action = None
         self.tick = 0
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
 
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
             self.terminals, self.truncations, num_envs, seed,
