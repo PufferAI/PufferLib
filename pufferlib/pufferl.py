@@ -220,6 +220,7 @@ class PuffeRL:
         self.stats = defaultdict(list)
         self.last_stats = defaultdict(list)
         self.losses = {}
+        self.all_ranks_done = False
 
         # Dashboard
         self.model_size = sum(p.numel() for p in policy.parameters() if p.requires_grad)
@@ -470,6 +471,14 @@ class PuffeRL:
         logs = None
         self.epoch += 1
         done_training = self.global_step >= config['total_timesteps']
+        if torch.distributed.is_initialized():
+            done_tensor = torch.tensor(
+                1 if done_training else 0,
+                device=self.values.device,
+            )
+            torch.distributed.all_reduce(done_tensor, op=torch.distributed.ReduceOp.MIN)
+            done_training = bool(done_tensor.item())
+        self.all_ranks_done = done_training
         should_log = done_training or self.global_step == 0 \
             or time.time() > self.last_log_time + 0.25
 
@@ -956,7 +965,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
     pufferl = PuffeRL(train_config, vecenv, policy, logger)
 
     all_logs = []
-    while pufferl.global_step < train_config['total_timesteps']:
+    while True:
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
         pufferl.evaluate()
@@ -967,6 +976,8 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
         if logs is not None:
             if pufferl.global_step > 0.20*train_config['total_timesteps']:
                 all_logs.append(logs)
+        if pufferl.all_ranks_done:
+            break
 
     # Final eval. You can reset the env here, but depending on
     # your env, this can skew data (i.e. you only collect the shortest
