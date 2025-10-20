@@ -16,10 +16,16 @@ CoinFinder is a 2D grid-based environment where an agent must navigate to collec
 - **Reward**: +1 for each coin collected, 0 otherwise
 
 ### Observation Space
+12-dimensional vector
 
-12-dimensional continuous observation vector (Box[-1, 1]):
-- Elements 0-1: Agent position (x, y)
-- Elements 2-11: Five coin positions (x1, y1, x2, y2, ..., x5, y5)
+Structure:
+  1. Agent position (2 values):
+  2. 5 Coins positions (10 values [x,y]):
+
+  Value ranges:
+  - Agent position: [0.0, 0.9] (since positions are 0-9 divided by GRID_SIZE=10)
+  - Uncollected coins: [0.0, 0.9]
+  - Collected coins: -1.0
 
 ### Action Space
 
