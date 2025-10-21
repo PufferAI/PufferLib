@@ -58,6 +58,8 @@ typedef struct {
     int highlight_layer;
     int highlight_axis;
     float episode_return;
+    int *tmp;
+    int *r_tmp;
 } Cube;
 
 
@@ -102,9 +104,7 @@ void add_log(Cube* env) {
         ((env)->observations[ ((f)*(env)->N*(env)->N*6) + ((r)*(env)->N*6) + ((c)*6) + (color) ])
 #define STICKER(env,f,r,c) ((env)->stickers[(f)*(env)->N*(env)->N + (r)*(env)->N + (c)])
 
-static int *tmp; //temp array for computing strips and rotations later
-static int *r_tmp; //temp array for computing strips and rotations later
-#define R_TMP(i,j) r_tmp[(i)*(env)->N + (j)]
+#define R_TMP(i,j) (env)->r_tmp[(i)*(env)->N + (j)]
 
 
 // Precompute strips that surround each face
@@ -160,8 +160,8 @@ void init(Cube* env) {
     env->highlight_axis = 0;  // 0=X,1=Y,2=Z
     env->highlight_layer = 0;
     env->anim_time = 0.5;
-    tmp = malloc(env->N * sizeof(int));
-    r_tmp = malloc(env->N * env->N * sizeof(int));
+    env->tmp = malloc(env->N * sizeof(int));
+    env->r_tmp = malloc(env->N * env->N * sizeof(int));
 }
 
 void reset_stickers(Cube* env) {
@@ -198,7 +198,7 @@ static void rotate_strips(Cube *env, strip_t s[4]) {
     int N = env->N;
     //Copy last strip
     for (int k=0;k<N;k++)
-        tmp[k] = STICKER(env, s[3].face, s[3].row + s[3].dr*k, s[3].col + s[3].dc*k);
+        env->tmp[k] = STICKER(env, s[3].face, s[3].row + s[3].dr*k, s[3].col + s[3].dc*k);
     //Shift
     for (int j=3;j>0;j--) {
         for (int k=0;k<N;k++) {
@@ -208,7 +208,7 @@ static void rotate_strips(Cube *env, strip_t s[4]) {
     }
     //Copy last back
     for (int k=0;k<N;k++)
-        STICKER(env, s[0].face, s[0].row + s[0].dr*k, s[0].col + s[0].dc*k) = tmp[k];
+        STICKER(env, s[0].face, s[0].row + s[0].dr*k, s[0].col + s[0].dc*k) = env->tmp[k];
 }
   
 // Rotates the strips COUNTER-CLOCKWISE
@@ -216,7 +216,7 @@ static void rotate_strips_ccw(Cube *env, strip_t s[4]) {
     int N = env->N;
     //Copy first strip
     for (int k=0;k<N;k++)
-        tmp[k] = STICKER(env, s[0].face,s[0].row + s[0].dr*k,s[0].col + s[0].dc*k);
+        env->tmp[k] = STICKER(env, s[0].face,s[0].row + s[0].dr*k,s[0].col + s[0].dc*k);
     //shift others
     for (int j=0;j<3;j++) {
         for (int k=0;k<N;k++) {
@@ -226,7 +226,7 @@ static void rotate_strips_ccw(Cube *env, strip_t s[4]) {
     }
     //Copy first
     for (int k=0;k<N;k++)
-        STICKER(env, s[3].face,s[3].row + s[3].dr*k,s[3].col + s[3].dc*k) = tmp[k];
+        STICKER(env, s[3].face,s[3].row + s[3].dr*k,s[3].col + s[3].dc*k) = env->tmp[k];
 }
 
 //Just rotates face stickers counter-clockwise
@@ -715,8 +715,8 @@ void c_step(Cube* env) {
 
 void c_close(Cube* env) {
     free(env->stickers);
-    free(tmp);
-    free(r_tmp);
+    free(env->tmp);
+    free(env->r_tmp);
    if (IsWindowReady()) {
         CloseWindow();      
    }
