@@ -126,6 +126,7 @@ MAKE_FUNCTIONS = {
     'freeway': 'Freeway',
     'enduro': 'Enduro',
     'tetris': 'Tetris',
+    'nonogram': 'Nonogram',
     'cartpole': 'Cartpole',
     'moba': 'Moba',
     'matsci': 'Matsci',
