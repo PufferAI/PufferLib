@@ -65,15 +65,17 @@ typedef struct {
 //Faces are Up, Down, Right, Left, Front, Back
 enum { U=0, D=1, R=2, L=3, F=4, B=5 };
 
+static Color sticker_colors[6];
 
-static Color sticker_colors[6] = {
-    WHITE,  // U
-    YELLOW, // D
-    RED,    // R
-    ORANGE, // L
-    GREEN,  // F
-    BLUE    // B
-};
+void init_sticker_colors(void) {
+    sticker_colors[0] = WHITE;
+    sticker_colors[1] = YELLOW;
+    sticker_colors[2] = RED;
+    sticker_colors[3] = ORANGE;
+    sticker_colors[4] = GREEN;
+    sticker_colors[5] = BLUE;
+}
+
 
 //Holds info for the animation
 typedef struct {
@@ -94,11 +96,17 @@ void add_log(Cube* env) {
     env->log.episode_length += env->tick;
     env->log.episode_return += env->episode_return;
     env->log.n++;
+    init_sticker_colors();
 }
 
 #define OBS(env,f,r,c,color) \
         ((env)->observations[ ((f)*(env)->N*(env)->N*6) + ((r)*(env)->N*6) + ((c)*6) + (color) ])
 #define STICKER(env,f,r,c) ((env)->stickers[(f)*(env)->N*(env)->N + (r)*(env)->N + (c)])
+
+static int *tmp; //temp array for computing strips and rotations later
+static int *r_tmp; //temp array for computing strips and rotations later
+#define R_TMP(i,j) tmp[(i)*(env)->N + (j)]
+
 
 // Precompute strips that surround each face
 void precompute_strips(Cube *env) {
@@ -153,6 +161,8 @@ void init(Cube* env) {
     env->highlight_axis = 0;  // 0=X,1=Y,2=Z
     env->highlight_layer = 0;
     env->anim_time = 0.5;
+    tmp = malloc(env->N * sizeof(int));
+    r_tmp = malloc(env->N * env->N * sizeof(int));
 }
 
 void reset_stickers(Cube* env) {
@@ -182,10 +192,11 @@ void compute_observations(Cube* env) {
         }
     }
 }
+
+
 //Just rotates the strips CLOCKWISE, not the face itself
 static void rotate_strips(Cube *env, strip_t s[4]) {
     int N = env->N;
-    int tmp[N];
     //Copy last strip
     for (int k=0;k<N;k++)
         tmp[k] = STICKER(env, s[3].face, s[3].row + s[3].dr*k, s[3].col + s[3].dc*k);
@@ -204,7 +215,6 @@ static void rotate_strips(Cube *env, strip_t s[4]) {
 // Rotates the strips COUNTER-CLOCKWISE
 static void rotate_strips_ccw(Cube *env, strip_t s[4]) {
     int N = env->N;
-    int tmp[N];
     //Copy first strip
     for (int k=0;k<N;k++)
         tmp[k] = STICKER(env, s[0].face,s[0].row + s[0].dr*k,s[0].col + s[0].dc*k);
@@ -223,25 +233,23 @@ static void rotate_strips_ccw(Cube *env, strip_t s[4]) {
 //Just rotates face stickers counter-clockwise
 static void rotate_face_ccw(Cube *env, int f) {
     int N = env->N;
-    int tmp[N][N];
     for (int i=0;i<N;i++)
         for (int j=0;j<N;j++)
-            tmp[N-1-j][i] = STICKER(env,f,i,j);
+            R_TMP(N-1-j,i) = STICKER(env,f,i,j);
     for (int i=0;i<N;i++)
         for (int j=0;j<N;j++)
-            STICKER(env,f,i,j) = tmp[i][j];
+            STICKER(env,f,i,j) = R_TMP(i,j);
 }
 
 //Just rotates the face stickers CLOCKWISE
 static void rotate_face(Cube *env, int f) {
     int N = env->N;
-    int tmp[N][N];     
     for (int i=0;i<N;i++)
         for (int j=0;j<N;j++)
-            tmp[j][N-1-i] = STICKER(env,f,i,j);
+            R_TMP(j,N-1-i) = STICKER(env,f,i,j);
     for (int i=0;i<N;i++)
         for (int j=0;j<N;j++)
-            STICKER(env,f,i,j) = tmp[i][j];
+            STICKER(env,f,i,j) = R_TMP(i,j);
 }
 
 //Execute move for face, rotate face rotate strips in theory supports multiple turns but only 1 tested
@@ -275,20 +283,19 @@ static inline void decode_action(int action, int *face, int *turns) {
 
 //Distance from solved based on centre sticker as the colour for that face
 //VERY rough heuristic
-float score(Cube* env) {
+float score(Cube *env) {
     float temp_score = 1.0f;
-    for (int f=0;f<6; f++) {
+    for (int f = 0; f < 6; f++) {
         int t_colour = f;
         int face_score = 0;
         for (int r = 0; r < env->N; r++) {
             for (int c = 0; c < env->N; c++) {
-                if (STICKER(env, f,r,c) == t_colour) {
-                    face_score += 1.0;
-                }
+                if (STICKER(env, f, r, c) == t_colour)
+                    face_score++;
             }
         }
-        temp_score *= face_score;
-    }   
+        temp_score *= (float)face_score;
+    }
     return temp_score;
 }
 
@@ -708,6 +715,8 @@ void c_step(Cube* env) {
 
 void c_close(Cube* env) {
     free(env->stickers);
+    free(tmp);
+    free(r_tmp);
    if (IsWindowReady()) {
         CloseWindow();      
    }
