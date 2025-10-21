@@ -154,8 +154,7 @@ float rand_uniform() { return (float)rand() / (float)RAND_MAX; }
 
 void c_reset(Nonogram *env) {
   env->size = env->min_size + (rand() % (env->max_size - env->min_size + 1));
-  env->max_steps =
-      env->easy_learn ? env->size * env->size : 4 * env->size * env->size;
+  env->max_steps = env->size * env->size;
 
   int full_grid_size = MAX_SIZE * MAX_SIZE;
   int max_clues = MAX_SIZE / 2;
