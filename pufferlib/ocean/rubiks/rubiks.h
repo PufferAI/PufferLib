@@ -96,7 +96,6 @@ void add_log(Cube* env) {
     env->log.episode_length += env->tick;
     env->log.episode_return += env->episode_return;
     env->log.n++;
-    init_sticker_colors();
 }
 
 #define OBS(env,f,r,c,color) \
@@ -105,7 +104,7 @@ void add_log(Cube* env) {
 
 static int *tmp; //temp array for computing strips and rotations later
 static int *r_tmp; //temp array for computing strips and rotations later
-#define R_TMP(i,j) tmp[(i)*(env)->N + (j)]
+#define R_TMP(i,j) r_tmp[(i)*(env)->N + (j)]
 
 
 // Precompute strips that surround each face
@@ -460,6 +459,7 @@ void c_render(Cube* env) {
         if (!IsWindowReady()) {
             InitWindow(800, 600, "PufferLib Rubik's");
             SetTargetFPS(60);
+            init_sticker_colors();
         }
 
         camera.position = (Vector3){10.0f,10.0f,10.0f};
