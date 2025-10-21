@@ -8,6 +8,34 @@ from pufferlib import pufferl
 def cli():
     pufferl.train('puffer_breakout')
 
+# Simple trainer based on pufferl functions
+def simple_trainer(env_name='puffer_breakout'):
+    args = pufferl.load_config(env_name)
+
+    # You can customize the puffer-provided config
+    args['vec']['num_envs'] = 2
+    args['env']['num_envs'] = 2048
+    args['policy']['hidden_size'] = 256
+    args['rnn']['input_size'] = 256
+    args['rnn']['hidden_size'] = 256
+    args['train']['total_timesteps'] = 10_000_000
+    args['train']['learning_rate'] = 0.03
+
+    # Or, you can create and use a separate config file
+    # args = pufferl.load_config_file(<YOUR_OWN_CONFIG.ini>, fill_in_default=True)
+
+    vecenv = pufferl.load_env(env_name, args)
+    policy = pufferl.load_policy(args, vecenv, env_name)
+
+    trainer = pufferl.PuffeRL(args['train'], vecenv, policy)
+
+    while trainer.epoch < trainer.total_epochs:
+        trainer.evaluate()
+        logs = trainer.train()
+
+    trainer.print_dashboard()
+    trainer.close()
+
 class Policy(torch.nn.Module):
     def __init__(self, env):
         super().__init__()

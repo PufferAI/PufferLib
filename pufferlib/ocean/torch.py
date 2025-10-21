@@ -598,7 +598,6 @@ class ImpulseWarsPolicy(nn.Module):
         num_drones: int = 2,
         continuous: bool = False,
         is_training: bool = True,
-        device: str = "cuda",
         **kwargs,
     ):
         super().__init__()
@@ -616,13 +615,13 @@ class ImpulseWarsPolicy(nn.Module):
             + [self.obsInfo.wallTypes + 1] * self.obsInfo.numFloatingWallObs
             + [self.numDrones + 1] * self.obsInfo.numProjectileObs,
         )
-        discreteOffsets = torch.tensor([0] + list(np.cumsum(self.discreteFactors)[:-1]), device=device).view(
+        discreteOffsets = torch.tensor([0] + list(np.cumsum(self.discreteFactors)[:-1])).view(
             1, -1
         )
         self.register_buffer("discreteOffsets", discreteOffsets, persistent=False)
         self.discreteMultihotDim = self.discreteFactors.sum()
 
-        multihotBuffer = torch.zeros(batch_size, self.discreteMultihotDim, device=device)
+        multihotBuffer = torch.zeros(batch_size, self.discreteMultihotDim)
         self.register_buffer("multihotOutput", multihotBuffer, persistent=False)
 
         # most of the observation is a 2D array of bytes, but the end

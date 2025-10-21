@@ -856,6 +856,7 @@ void renderUI(const iwEnv *e, const bool starting) {
     renderTimer(e, timerStr, PUFF_WHITE);
 }
 
+// TODO: track when trails begine and end (ie when respawning)
 void renderBrakeTrails(iwEnv *e, const droneEntity *drone) {
     const float maxLifetime = 3.0f * e->frameRate;
     const float maxAlpha = 0.33f;
@@ -923,7 +924,7 @@ void renderBrakeTrails(iwEnv *e, const droneEntity *drone) {
     }
 }
 
-// TODO: improve
+// TODO: make 2D circles
 void renderExplosions(const iwEnv *e) {
     const uint16_t maxRenderSteps = EXPLOSION_TIME * e->frameRate;
 
@@ -940,7 +941,7 @@ void renderExplosions(const iwEnv *e) {
             continue;
         }
 
-        // color bursts with a bit of the parent drone's color'
+        // color bursts with a bit of the parent drone's color
         const float alpha = (float)explosion->renderSteps / maxRenderSteps;
         BeginBlendMode(BLEND_ALPHA);
         if (false && explosion->isBurst) {
@@ -1658,9 +1659,6 @@ void _renderEnv(iwEnv *e, const bool starting, const bool ending, const int8_t w
     BeginBlendMode(BLEND_ALPHA);
     for (uint8_t i = 0; i < cc_array_size(e->drones); i++) {
         const droneEntity *drone = safe_array_get_at(e->drones, i);
-        if (drone->dead) {
-            continue;
-        }
         renderBrakeTrails(e, drone);
     }
     EndBlendMode();
@@ -1726,10 +1724,13 @@ void _renderEnv(iwEnv *e, const bool starting, const bool ending, const int8_t w
         renderDroneUI(drone);
     }
 
-    if (!b2VecEqual(e->debugPoint, b2Vec2_zero)) {
-        const Vector2 pos = {.x = e->debugPoint.x, .y = e->debugPoint.y};
-        DrawCircleV(pos, DRONE_RADIUS * 0.5f, WHITE);
+#ifndef NDEBUG
+    for (uint8_t i = 0; i < cc_array_size(e->debugPoints); i++) {
+        debugPoint *point = safe_array_get_at(e->debugPoints, i);
+        const Vector2 pos = {.x = point->pos.x, .y = point->pos.y};
+        DrawCircleV(pos, point->size, point->color);
     }
+#endif
 
     EndMode2D();
 

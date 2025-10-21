@@ -10,15 +10,31 @@ const uint8_t NUM_NEAR_PICKUPS = 1;
 const float WALL_CHECK_DISTANCE_SQUARED = SQUARED(6.0f);
 const float WALL_AVOID_DISTANCE = 4.0f;
 const float WALL_DANGER_DISTANCE = 3.0f;
-const float WALL_BRAKE_DISTANCE = 20.0f;
-const float WALL_BRAKE_SPEED = 12.5f;
-const float WALL_BRAKE_TIME = 0.5f;
+const float WALL_BURST_CHECK_DISTANCE = 5.0f;
+const float WALL_BURST_CHECK_SPEED = 20.0f;
 const float BURST_MIN_RADIUS_SQUARED = SQUARED(DRONE_BURST_RADIUS_MIN);
-const float MOVE_SPEED_SQUARED = SQUARED(5.0f);
+const float STABILIZE_MOVE_SPEED = 5.0f;
+const float SHOTGUN_DANGER_DISTANCE = 4.0f;
+
+void addDebugPoint(iwEnv *e, b2Vec2 pos, float size, Color color) {
+#ifndef NDEBUG
+    debugPoint *point = fastCalloc(1, sizeof(debugPoint));
+    point->pos = pos;
+    point->size = size;
+    point->color = color;
+    cc_array_add(e->debugPoints, point);
+#else
+    MAYBE_UNUSED(e);
+    MAYBE_UNUSED(pos);
+    MAYBE_UNUSED(size);
+    MAYBE_UNUSED(color);
+#endif
+}
 
 typedef struct castCircleCtx {
     bool hit;
     b2ShapeId shapeID;
+    b2Vec2 point;
 } castCircleCtx;
 
 float castCircleCallback(b2ShapeId shapeId, b2Vec2 point, b2Vec2 normal, float fraction, void *context) {
@@ -33,6 +49,7 @@ float castCircleCallback(b2ShapeId shapeId, b2Vec2 point, b2Vec2 normal, float f
     castCircleCtx *ctx = context;
     ctx->hit = true;
     ctx->shapeID = shapeId;
+    ctx->point = point;
 
     return 0.0f;
 }
@@ -122,45 +139,70 @@ void pathfindBFS(const iwEnv *e, uint8_t *flatPaths, uint16_t destCellIdx) {
     }
 }
 
-float distanceWithDamping(const iwEnv *e, const droneEntity *drone, const b2Vec2 direction, const float linearDamping, const float steps) {
-    float speed = drone->weaponInfo->recoilMagnitude * DRONE_INV_MASS;
-    if (!b2VecEqual(drone->velocity, b2Vec2_zero)) {
-        speed = b2Length(b2MulAdd(drone->velocity, speed, direction));
-    }
-
-    const float damping = 1.0f + linearDamping * e->deltaTime;
+float distanceWithDamping(const iwEnv *e, const float speed, const float linearDamping, const float steps) {
+    const float damping = 1.0f + (linearDamping * e->deltaTime);
     return speed * (damping / linearDamping) * (1.0f - powf(1.0f / damping, steps));
 }
 
+b2Vec2 positionWithDamping(const iwEnv *e, const droneEntity *drone, const b2Vec2 impulse, const float linearDamping, const float steps) {
+    const b2Vec2 newVel = b2Add(drone->velocity, impulse);
+    const float speed = b2Length(newVel);
+    const float distance = distanceWithDamping(e, speed, linearDamping, steps);
+    const b2Vec2 direction = b2Normalize(newVel);
+    return b2MulAdd(drone->pos, distance, direction);
+}
+
+// returns true if drone can fire in the given direction without hitting
+// or getting too close to a death wall before it can fire again
 bool safeToFire(iwEnv *e, const droneEntity *drone, const b2Vec2 direction) {
+    // don't shoot shotgun point blank at walls, the shots will immediately
+    // bounce back and send the drone flying uncontrollably
+    if (drone->weaponInfo->type == SHOTGUN_WEAPON) {
+        const b2Vec2 rayEnd = b2MulAdd(drone->pos, SHOTGUN_DANGER_DISTANCE, direction);
+        const b2Vec2 translation = b2Sub(rayEnd, drone->pos);
+        const b2QueryFilter filter = {.categoryBits = PROJECTILE_SHAPE, .maskBits = WALL_SHAPE | FLOATING_WALL_SHAPE};
+        const b2RayResult rayRes = b2World_CastRayClosest(e->worldID, drone->pos, translation, filter);
+        if (rayRes.hit) {
+            return false;
+        }
+    }
+
     float shotWait;
     if (drone->ammo > 1) {
         shotWait = ((drone->weaponInfo->coolDown + drone->weaponInfo->charge) / e->deltaTime) * 1.5f;
     } else {
         shotWait = ((e->defaultWeapon->coolDown + e->defaultWeapon->charge) / e->deltaTime) * 1.5f;
     }
-    const b2Vec2 invDirection = b2MulSV(-1.0f, direction);
-    const float recoilDistance = distanceWithDamping(e, drone, invDirection, DRONE_LINEAR_DAMPING, shotWait);
+    const float recoilSpeed = -drone->weaponInfo->recoilMagnitude * DRONE_INV_MASS;
+    const b2Vec2 recoil = b2MulSV(recoilSpeed, direction);
+    const b2Vec2 recoilPos = positionWithDamping(e, drone, recoil, DRONE_LINEAR_DAMPING, shotWait);
 
-    // e->debugPoint = b2MulAdd(drone->pos, recoilDistance, invDirection);
+    addDebugPoint(e, b2MulAdd(drone->pos, 2.0f * DRONE_RADIUS, direction), 0.5f, WHITE);
 
     const b2Vec2 pos = drone->pos;
-    const b2Vec2 rayEnd = b2MulAdd(pos, recoilDistance, invDirection);
+    const b2Vec2 rayEnd = recoilPos;
     const b2Vec2 translation = b2Sub(rayEnd, pos);
-    const b2ShapeProxy cirProxy = b2MakeProxy(&pos, 1, DRONE_RADIUS);
+    float radius = DRONE_RADIUS;
+    if (drone->shield != NULL) {
+        radius = DRONE_SHIELD_RADIUS;
+    }
+    const b2ShapeProxy cirProxy = b2MakeProxy(&pos, 1, radius);
     const b2QueryFilter filter = {.categoryBits = DRONE_SHAPE, .maskBits = WALL_SHAPE | FLOATING_WALL_SHAPE | DRONE_SHAPE};
 
     castCircleCtx ctx = {0};
     b2World_CastShape(e->worldID, &cirProxy, translation, filter, castCircleCallback, &ctx);
     if (!ctx.hit) {
+        addDebugPoint(e, recoilPos, 0.5f, LIME);
         return true;
     } else {
         const entity *ent = b2Shape_GetUserData(ctx.shapeID);
-        if (ent->type == STANDARD_WALL_ENTITY || ent->type == BOUNCY_WALL_ENTITY || ent->type == DRONE_ENTITY) {
+        if (entityTypeIsWall(ent->type) && ent->type != DEATH_WALL_ENTITY) {
+            addDebugPoint(e, recoilPos, 0.5f, LIME);
             return true;
         }
     }
 
+    addDebugPoint(e, recoilPos, 0.5f, MAROON);
     return false;
 }
 
@@ -168,6 +210,8 @@ bool weaponSafeForMovement(const droneEntity *drone) {
     switch (drone->weaponInfo->type) {
     case IMPLODER_WEAPON:
     case MINE_LAUNCHER_WEAPON:
+    case BLACK_HOLE_WEAPON:
+    case NUKE_WEAPON:
         return false;
     default:
         return true;
@@ -236,6 +280,11 @@ float weaponIdealRangeSquared(const droneEntity *drone) {
 }
 
 bool shouldShootAtEnemy(iwEnv *e, const droneEntity *drone, const droneEntity *enemyDrone, const b2Vec2 enemyDroneDirection) {
+    // don't shoot at shielded enemies with railguns since it will likely
+    // bounce back and hit us
+    if (drone->weaponInfo->type == SNIPER_WEAPON && enemyDrone->shield != NULL) {
+        return false;
+    }
     if (!safeToFire(e, drone, enemyDroneDirection)) {
         return false;
     }
@@ -257,6 +306,10 @@ bool shouldShootAtEnemy(iwEnv *e, const droneEntity *drone, const droneEntity *e
     if (ent == NULL || ent->type != DRONE_ENTITY) {
         return false;
     }
+    const droneEntity *hitDrone = ent->entity;
+    if (hitDrone->idx != enemyDrone->idx) {
+        return false;
+    }
 
     return true;
 }
@@ -267,42 +320,42 @@ b2Vec2 predictiveAim(const droneEntity *drone, const droneEntity *enemyDrone, co
     return b2Normalize(b2Sub(predictedPos, drone->pos));
 }
 
-void handleWallProximity(iwEnv *e, const droneEntity *drone, const wallEntity *wall, const float distance, agentActions *actions) {
-    if (distance > WALL_BRAKE_DISTANCE) {
-        return;
-    }
-
-    const b2Vec2 wallDirection = b2Normalize(b2Sub(wall->pos, drone->pos));
-    const float speedToWall = b2Dot(drone->velocity, wallDirection);
-    if (speedToWall > WALL_BRAKE_SPEED) {
-        float damping = DRONE_LINEAR_DAMPING;
-        if (drone->braking) {
-            damping *= DRONE_BRAKE_DAMPING_COEF;
-        }
-        const float travelDistance = distanceWithDamping(e, drone, wallDirection, damping, WALL_BRAKE_TIME / e->deltaTime);
-        if (travelDistance >= distance) {
-            actions->brake = true;
-        }
-    }
-    if (actions->brake || distance <= WALL_AVOID_DISTANCE) {
-        const b2Vec2 invWallDirection = b2MulSV(-1.0f, wallDirection);
-        actions->move = b2MulAdd(actions->move, distance, invWallDirection);
-    }
-
-    if (distance > WALL_DANGER_DISTANCE) {
-        return;
-    }
-
-    // shoot to move away faster from a death wall if we're too close and it's safe
-    if (weaponSafeForMovement(drone) && safeToFire(e, drone, wallDirection)) {
-        actions->aim = wallDirection;
-        scriptedAgentShoot(drone, actions);
-    }
-}
-
 void scriptedAgentBurst(const droneEntity *drone, agentActions *actions) {
     if (drone->chargingBurst) {
         return;
+    } else {
+        actions->chargingBurst = true;
+    }
+}
+
+void handleWallProximity(iwEnv *e, const droneEntity *drone, const wallEntity *wall, const float distance, agentActions *actions) {
+    // shoot to move away faster from a death wall if we're too close and it's safe
+    const b2Vec2 wallDirection = b2Normalize(b2Sub(wall->pos, drone->pos));
+    if (distance <= WALL_DANGER_DISTANCE && weaponSafeForMovement(drone) && safeToFire(e, drone, wallDirection)) {
+        actions->aim = b2MulAdd(actions->aim, distance, wallDirection);
+        scriptedAgentShoot(drone, actions);
+    }
+    // move away from the wall if we're too close
+    if (distance <= WALL_AVOID_DISTANCE) {
+        actions->move = b2MulAdd(actions->move, -distance, wallDirection);
+    }
+}
+
+// charge burst until we're close enough to a death wall to burst off
+// of it
+void wallBurst(iwEnv *e, const droneEntity *drone, const float distance, agentActions *actions) {
+    if (distance < DRONE_BURST_RADIUS_MIN) {
+        scriptedAgentBurst(drone, actions);
+        return;
+    }
+
+    float damping = DRONE_LINEAR_DAMPING;
+    if (drone->braking || actions->brake) {
+        damping *= DRONE_BRAKE_DAMPING_COEF;
+    }
+    const float travelDistance = distanceWithDamping(e, b2Length(drone->velocity), damping, e->frameSkip);
+    if (travelDistance > distance) {
+        scriptedAgentBurst(drone, actions);
     } else {
         actions->chargingBurst = true;
     }
@@ -314,17 +367,18 @@ agentActions scriptedAgentActions(iwEnv *e, droneEntity *drone) {
         return actions;
     }
 
-    // keep the weapon charged and ready if it needs it
+    // keep the weapon charged and ready
     if (drone->weaponInfo->charge != 0.0f) {
         actions.chargingWeapon = true;
         actions.shoot = true;
     }
 
-    // find the nearest death wall or floating wall
+    // find the N nearest death walls or floating walls
     nearEntity nearWalls[MAX_NEAREST_WALLS] = {0};
     findNearWalls(e, drone, nearWalls, NUM_NEAR_WALLS);
 
-    // find the distance between the closest points on the drone and the nearest wall
+    // move away from and shoot at death walls if we're too close
+    float closestWallDistance = FLT_MAX;
     for (uint8_t i = 0; i < NUM_NEAR_WALLS; i++) {
         const wallEntity *wall = nearWalls[i].entity;
         if (wall->type != DEATH_WALL_ENTITY) {
@@ -332,6 +386,7 @@ agentActions scriptedAgentActions(iwEnv *e, droneEntity *drone) {
         }
 
         const b2DistanceOutput output = closestPoint(drone->ent, wall->ent);
+        closestWallDistance = min(closestWallDistance, output.distance);
         handleWallProximity(e, drone, wall, output.distance, &actions);
     }
 
@@ -345,7 +400,58 @@ agentActions scriptedAgentActions(iwEnv *e, droneEntity *drone) {
         }
 
         const b2DistanceOutput output = closestPoint(drone->ent, floatingWall->ent);
+        closestWallDistance = min(closestWallDistance, output.distance);
         handleWallProximity(e, drone, floatingWall, output.distance, &actions);
+    }
+
+    // TODO: shoot mines around enemy, only if not too close
+
+    // if we are moving towards a death wall at a high speed, do everything
+    // possible to avoid hitting it
+    const float droneSpeed = b2Length(drone->velocity);
+    if (drone->braking || drone->chargingBurst || closestWallDistance <= WALL_BURST_CHECK_DISTANCE || droneSpeed >= WALL_BURST_CHECK_SPEED) {
+        float damping = DRONE_LINEAR_DAMPING;
+        if (drone->braking || actions.brake) {
+            damping *= DRONE_BRAKE_DAMPING_COEF;
+        }
+        const b2Vec2 recoilPos = positionWithDamping(e, drone, b2Vec2_zero, damping, 0.5f / e->deltaTime);
+        const b2Vec2 pos = drone->pos;
+        const b2Vec2 rayEnd = recoilPos;
+        const b2Vec2 translation = b2Sub(rayEnd, pos);
+        float radius = DRONE_RADIUS;
+        if (drone->shield != NULL) {
+            radius = DRONE_SHIELD_RADIUS;
+        }
+        const b2ShapeProxy cirProxy = b2MakeProxy(&pos, 1, radius);
+        const b2QueryFilter filter = {.categoryBits = DRONE_SHAPE, .maskBits = WALL_SHAPE | FLOATING_WALL_SHAPE};
+
+        castCircleCtx ctx = {0};
+        b2World_CastShape(e->worldID, &cirProxy, translation, filter, castCircleCallback, &ctx);
+        if (ctx.hit) {
+            const entity *ent = b2Shape_GetUserData(ctx.shapeID);
+            if (entityTypeIsWall(ent->type) && ent->type == DEATH_WALL_ENTITY) {
+                actions.brake = true;
+                if (drone->shield == NULL) {
+                    wallBurst(e, drone, b2Distance(drone->pos, ctx.point), &actions);
+                }
+
+                const b2Vec2 droneDirection = b2Normalize(drone->velocity);
+                if (b2VecEqual(actions.move, b2Vec2_zero)) {
+                    actions.move = b2MulSV(-1.0f, droneDirection);
+                }
+                if (b2VecEqual(actions.aim, b2Vec2_zero) && weaponSafeForMovement(drone)) {
+                    actions.aim = droneDirection;
+                    scriptedAgentShoot(drone, &actions);
+                }
+                return actions;
+            }
+        }
+    }
+
+    // if we're close enough to a wall to need to shoot at it, don't
+    // worry about enemies
+    if (!b2VecEqual(actions.aim, b2Vec2_zero)) {
+        return actions;
     }
 
     // get a weapon if the standard weapon is active
@@ -389,12 +495,10 @@ agentActions scriptedAgentActions(iwEnv *e, droneEntity *drone) {
         }
     }
     if (enemyDrone == NULL) {
-        return actions;
-    }
-
-    // if we're close enough to a wall to need to shoot at it, don't
-    // worry about enemies
-    if (!b2VecEqual(actions.aim, b2Vec2_zero)) {
+        // fight recoil if we're not otherwise moving
+        if (b2VecEqual(actions.move, b2Vec2_zero) && droneSpeed >= STABILIZE_MOVE_SPEED) {
+            actions.move = b2MulSV(-1.0f, b2Normalize(drone->velocity));
+        }
         return actions;
     }
 
@@ -423,11 +527,8 @@ agentActions scriptedAgentActions(iwEnv *e, droneEntity *drone) {
     }
 
     // fight recoil if we're not otherwise moving
-    if (b2VecEqual(actions.move, b2Vec2_zero)) {
-        const float speedSquared = b2LengthSquared(drone->velocity);
-        if (speedSquared > MOVE_SPEED_SQUARED) {
-            actions.move = b2MulSV(-1.0f, b2Normalize(drone->velocity));
-        }
+    if (b2VecEqual(actions.move, b2Vec2_zero) && droneSpeed >= STABILIZE_MOVE_SPEED) {
+        actions.move = b2MulSV(-1.0f, b2Normalize(drone->velocity));
     }
 
     return actions;
