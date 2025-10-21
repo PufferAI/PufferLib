@@ -953,9 +953,6 @@ class Nonogram(nn.Module):
         self.hidden_size = hidden_size
         self.is_continuous = False
 
-        # Tetris-style architecture: multi-layer CNN for grid + separate scalar encoder
-
-        # Grid CNN (like Tetris): multiple conv layers with strides
         self.conv_grid = nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Conv2d(4, cnn_channels, kernel_size=3, stride=1, padding=1)),
             nn.ReLU(),
@@ -967,7 +964,6 @@ class Nonogram(nn.Module):
             pufferlib.pytorch.layer_init(nn.Linear(cnn_channels * 2 * 2, input_size)),
         )
 
-        # Separate encoders for row clues, column clues, and size (NO weight sharing)
         self.fc_row_clues = nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Linear(8 * 4 * 9, input_size // 2)),
             nn.ReLU(),
@@ -983,14 +979,11 @@ class Nonogram(nn.Module):
             nn.ReLU(),
         )
 
-        # Projection layer (like Tetris): combine grid and all scalar features
-        # input_size (grid) + input_size//2 (rows) + input_size//2 (cols) + input_size//4 (size) = 2.25 * input_size
         self.proj = nn.Sequential(
             pufferlib.pytorch.layer_init(nn.Linear(input_size + input_size // 2 + input_size // 2 + input_size // 4, hidden_size)),
             nn.ReLU(),
         )
 
-        # Output heads
         self.actor = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
         self.value_fn = pufferlib.pytorch.layer_init(
@@ -1007,23 +1000,18 @@ class Nonogram(nn.Module):
     def encode_observations(self, observations, state=None):
         B = observations.shape[0]
 
-        # Parse observations
-        grid = F.one_hot(observations[:, :64].view(B, 8, 8).long(), 4).permute(0, 3, 1, 2).float()  # (B, 4, 8, 8)
-        row_clues = F.one_hot(observations[:, 64:96].view(B, 8, 4).long(), 9).float()  # (B, 8, 4, 9)
-        col_clues = F.one_hot(observations[:, 96:128].view(B, 8, 4).long(), 9).float()  # (B, 8, 4, 9)
-        board_size = F.one_hot(observations[:, 128].long(), 9).float()  # (B, 9)
+        grid = F.one_hot(observations[:, :64].view(B, 8, 8).long(), 4).permute(0, 3, 1, 2).float()
+        row_clues = F.one_hot(observations[:, 64:96].view(B, 8, 4).long(), 9).float()
+        col_clues = F.one_hot(observations[:, 96:128].view(B, 8, 4).long(), 9).float()
+        board_size = F.one_hot(observations[:, 128].long(), 9).float()
 
-        # Process grid through CNN (Tetris-style)
-        grid_feat = self.conv_grid(grid)  # (B, input_size)
+        grid_feat = self.conv_grid(grid)
+        row_feat = self.fc_row_clues(row_clues.reshape(B, -1))
+        col_feat = self.fc_col_clues(col_clues.reshape(B, -1))
+        size_feat = self.fc_size(board_size)
 
-        # Process scalar features separately (NO weight sharing)
-        row_feat = self.fc_row_clues(row_clues.reshape(B, -1))  # (B, input_size//2)
-        col_feat = self.fc_col_clues(col_clues.reshape(B, -1))  # (B, input_size//2)
-        size_feat = self.fc_size(board_size)  # (B, input_size//4)
-
-        # Combine and project (Tetris-style)
         combined = torch.cat([grid_feat, row_feat, col_feat, size_feat], dim=-1)
-        features = self.proj(combined)  # (B, hidden_size)
+        features = self.proj(combined)
 
         return features
 
