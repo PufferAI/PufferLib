@@ -159,6 +159,7 @@ MAKE_FUNCTIONS = {
     'asteroids': 'Asteroids',
     'whisker_racer': 'WhiskerRacer',
     'onestateworld': 'World',
+    'onlyfish': 'OnlyFish',
     'chain_mdp': 'Chain',
     'spaces': make_spaces,
     'multiagent': make_multiagent,

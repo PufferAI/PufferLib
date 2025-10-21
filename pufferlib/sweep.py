@@ -1,18 +1,33 @@
-import numpy as np
 import random
 import math
 import warnings
-
 from copy import deepcopy
+from contextlib import contextmanager
 
+import numpy as np
 import pufferlib
 
 import torch
-import pyro
-from pyro.contrib import gp as gp
-from pyro.contrib.gp.kernels import Kernel
-from pyro.contrib.gp.models import GPRegression
+import gpytorch
+from gpytorch.models import ExactGP
+from gpytorch.likelihoods import GaussianLikelihood
+from gpytorch.kernels import MaternKernel, PolynomialKernel, ScaleKernel, AdditiveKernel
+from gpytorch.means import ConstantMean
+from gpytorch.mlls import ExactMarginalLogLikelihood
+from gpytorch.priors import LogNormalPrior
+from scipy.stats.qmc import Sobol
+from scipy.spatial import KDTree
 
+EPSILON = 1e-6
+
+@contextmanager
+def default_tensor_dtype(dtype):
+    old_dtype = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(dtype)
+        yield
+    finally:
+        torch.set_default_dtype(old_dtype)
 
 class Space:
     def __init__(self, min, max, scale, mean, is_integer=False):
@@ -114,7 +129,7 @@ class Logit(Space):
 def _params_from_puffer_sweep(sweep_config):
     param_spaces = {}
     for name, param in sweep_config.items():
-        if name in ('method', 'metric', 'goal', 'downsample'):
+        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto'):
             continue
 
         assert isinstance(param, dict)
@@ -216,22 +231,62 @@ class Hyperparameters:
 
         return idx
 
+    def get_flat_idx(self, flat_key):
+        return list(self.flat_spaces.keys()).index(flat_key)
 
-def pareto_points(observations, eps=1e-6):
+
+def pareto_points(observations):
+    if not observations:
+        return [], []
+
     scores = np.array([e['output'] for e in observations])
     costs = np.array([e['cost'] for e in observations])
-    pareto = []
-    idxs = []
-    for idx, obs in enumerate(observations):
-        higher_score = scores + eps > scores[idx]
-        lower_cost = costs - eps < costs[idx]
-        better = higher_score & lower_cost
-        better[idx] = False
-        if not better.any():
-            pareto.append(obs)
-            idxs.append(idx)
 
-    return pareto, idxs
+    # Sort by cost to find non-dominated points efficiently
+    sorted_indices = np.argsort(costs)
+    
+    pareto = []
+    pareto_idxs = []
+    max_score_so_far = -np.inf
+
+    for idx in sorted_indices:
+        if scores[idx] > max_score_so_far + EPSILON:
+            pareto.append(observations[idx])
+            pareto_idxs.append(idx)
+            max_score_so_far = scores[idx]
+
+    return pareto, pareto_idxs
+
+def prune_pareto_front(pareto, efficiency_threshold=0.5, pruning_stop_score_fraction=0.98):
+    # Prune the high-cost long tail of a pareto front
+    # like (score 0.99, cost 100), (score 0.991, cost 200)
+    if not pareto or len(pareto) < 2:
+        return pareto
+
+    sorted_pareto = sorted(pareto, key=lambda x: x['cost'])
+    scores = np.array([e['output'] for e in sorted_pareto])
+    costs = np.array([e['cost'] for e in sorted_pareto])
+    score_range = max(scores.max() - scores.min(), EPSILON)
+    cost_range = max(costs.max() - costs.min(), EPSILON)
+
+    max_pareto_score = scores[-1] if scores.size > 0 else -np.inf
+
+    for i in range(len(sorted_pareto) - 1, 0, -1):
+        if scores[i] < pruning_stop_score_fraction * max_pareto_score:
+            break
+
+        norm_score_gain = (scores[i] - scores[i-1]) / score_range
+        norm_cost_increase = (costs[i] - costs[i-1]) / cost_range
+        efficiency = norm_score_gain / (norm_cost_increase + EPSILON)
+
+        if efficiency < efficiency_threshold:
+            sorted_pareto.pop(i)
+        else:
+            # Stop pruning if we find an efficient point
+            break
+
+    return sorted_pareto
+
 
 class Random:
     def __init__(self,
@@ -310,20 +365,55 @@ class ParetoGenetic:
         ))
 
 
-def create_gp(x_dim, scale_length=1.0):
-    # Dummy data
-    X = scale_length * torch.ones((1, x_dim))
-    y = torch.zeros((1,))
+class ExactGPModel(ExactGP):
+    def __init__(self, train_x, train_y, likelihood, x_dim):
+        super(ExactGPModel, self).__init__(train_x, train_y, likelihood)
+        self.mean_module = ConstantMean()
+        # Matern 3/2 kernel (equivalent to Pyro's Matern32)
+        matern_kernel = MaternKernel(nu=1.5, ard_num_dims=x_dim)
 
-    matern_kernel = gp.kernels.Matern32(input_dim=x_dim, lengthscale=X)
-    linear_kernel = gp.kernels.Polynomial(x_dim, degree=1)
-    kernel = gp.kernels.Sum(linear_kernel, matern_kernel)
+        # NOTE: setting this constraint changes GP behavior, including the lengthscale
+        # even though the lengthscale is well within the range ... Commenting out for now.
+        # lengthscale_constraint = gpytorch.constraints.Interval(0.01, 10.0)
+        # matern_kernel = MaternKernel(nu=1.5, ard_num_dims=x_dim, lengthscale_constraint=lengthscale_constraint)
 
-    # Params taken from HEBO: https://arxiv.org/abs/2012.03826
-    model = gp.models.GPRegression(X, y, kernel=kernel, jitter=1.0e-4)
-    model.noise = pyro.nn.PyroSample(pyro.distributions.LogNormal(math.log(1e-2), 0.5))
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-    return model, optimizer
+        linear_kernel = PolynomialKernel(power=1)
+        self.covar_module = ScaleKernel(AdditiveKernel(linear_kernel, matern_kernel))
+
+    def forward(self, x):
+        mean_x = self.mean_module(x)
+        covar_x = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
+    @property
+    def lengthscale_range(self):
+        # Get lengthscale from MaternKernel
+        lengthscale = self.covar_module.base_kernel.kernels[1].lengthscale.tolist()[0]
+        return min(lengthscale), max(lengthscale)
+
+def train_gp_model(model, likelihood, mll, optimizer, train_x, train_y, training_iter=50):
+    model.train()
+    likelihood.train()
+    model.set_train_data(inputs=train_x, targets=train_y, strict=False)
+
+    loss = None
+    for _ in range(training_iter):
+        try:
+            optimizer.zero_grad()
+            output = model(train_x)
+            loss = -mll(output, train_y)
+            loss.backward()
+            optimizer.step()
+            loss = loss.detach()
+
+        except gpytorch.utils.errors.NotPSDError:
+            # It's rare but it does happen. Hope it's a transient issue.
+            break
+
+    model.eval()
+    likelihood.eval()
+    return loss.item() if loss is not None else 0
+
 
 # TODO: Eval defaults
 class Protein:
@@ -331,41 +421,171 @@ class Protein:
             sweep_config,
             max_suggestion_cost = 3600,
             resample_frequency = 0,
-            num_random_samples = 50,
+            num_random_samples = 30,
             global_search_scale = 1,
-            random_suggestions = 1024,
             suggestions_per_pareto = 256,
             seed_with_search_center = True,
             expansion_rate = 0.25,
+            gp_training_iter = 50,
+            gp_learning_rate = 0.001,
+            gp_max_obs = 750,  # gp train time jumps after 800
+            infer_batch_size = 4096,            
+            optimizer_reset_frequency = 50,
+            use_gpu = True,
+            cost_param = "train/total_timesteps",
+            prune_pareto = True,
         ):
+        self.device = torch.device("cuda:0" if use_gpu and torch.cuda.is_available() else "cpu")
         self.hyperparameters = Hyperparameters(sweep_config)
-        self.num_random_samples = num_random_samples
         self.global_search_scale = global_search_scale
-        self.random_suggestions = random_suggestions
         self.suggestions_per_pareto = suggestions_per_pareto
         self.seed_with_search_center = seed_with_search_center
         self.resample_frequency = resample_frequency
         self.max_suggestion_cost = max_suggestion_cost
         self.expansion_rate = expansion_rate
+        self.gp_training_iter = gp_training_iter
+        self.gp_learning_rate = gp_learning_rate
+        self.optimizer_reset_frequency = optimizer_reset_frequency
+        self.prune_pareto = prune_pareto
 
         self.success_observations = []
         self.failure_observations = []
         self.suggestion_idx = 0
+        self.min_score, self.max_score = math.inf, -math.inf
+        self.log_c_min, self.log_c_max = math.inf, -math.inf
 
-        self.gp_score, self.score_opt = create_gp(self.hyperparameters.num)
-        self.gp_cost, self.cost_opt = create_gp(self.hyperparameters.num)
+        # Use Sobel seq for structured random exploration
+        self.sobol = Sobol(d=self.hyperparameters.num, scramble=True)
+        self.num_random_samples = num_random_samples
+        # NOTE: test if sobol sampling really helps
+        # points_per_run = sweep_config['downsample']
+        # self.num_random_samples = 3 * points_per_run * self.hyperparameters.num
+
+        self.cost_param_idx = self.hyperparameters.get_flat_idx(cost_param)
+        self.cost_random_suggestion = self.hyperparameters.search_centers[self.cost_param_idx]
+
+        self.gp_max_obs = gp_max_obs  # train time bumps after 800?
+        self.infer_batch_size = infer_batch_size
+
+        # Use 64 bit for GP regression
+        with default_tensor_dtype(torch.float64):
+            # Params taken from HEBO: https://arxiv.org/abs/2012.03826
+            noise_prior = LogNormalPrior(math.log(1e-2), 0.5)
+
+            # Create dummy data for model initialization on the selected device
+            dummy_x = torch.ones((1, self.hyperparameters.num), device=self.device)
+            dummy_y = torch.zeros(1, device=self.device)
+            # Score GP
+            self.likelihood_score = GaussianLikelihood(noise_prior=deepcopy(noise_prior)).to(self.device)
+            self.gp_score = ExactGPModel(dummy_x, dummy_y, self.likelihood_score, self.hyperparameters.num).to(self.device)
+            self.mll_score = ExactMarginalLogLikelihood(self.likelihood_score, self.gp_score).to(self.device)
+            self.score_opt = torch.optim.Adam(self.gp_score.parameters(), lr=self.gp_learning_rate, amsgrad=True)
+
+            # Cost GP
+            self.likelihood_cost = GaussianLikelihood(noise_prior=deepcopy(noise_prior)).to(self.device)
+            self.gp_cost = ExactGPModel(dummy_x, dummy_y, self.likelihood_cost, self.hyperparameters.num).to(self.device)
+            self.mll_cost = ExactMarginalLogLikelihood(self.likelihood_cost, self.gp_cost).to(self.device)
+            self.cost_opt = torch.optim.Adam(self.gp_cost.parameters(), lr=self.gp_learning_rate, amsgrad=True)
+
+            # Buffers for GP training and inference
+            self.gp_params_buffer = torch.empty(self.gp_max_obs, self.hyperparameters.num, device=self.device)
+            self.gp_score_buffer = torch.empty(self.gp_max_obs, device=self.device)
+            self.gp_cost_buffer = torch.empty(self.gp_max_obs, device=self.device)
+            self.infer_batch_buffer = torch.empty(self.infer_batch_size, self.hyperparameters.num, device=self.device)
+
+    def _filter_near_duplicates(self, inputs, duplicate_threshold=EPSILON):
+        if len(inputs) < 2:
+            return np.arange(len(inputs))
+
+        tree = KDTree(inputs)
+        to_keep = np.ones(len(inputs), dtype=bool)
+        # Iterate from most recent to oldest
+        for i in range(len(inputs) - 1, -1, -1):
+            if to_keep[i]:
+                nearby_indices = tree.query_ball_point(inputs[i], r=duplicate_threshold)
+                # Exclude the point itself from being marked for removal
+                nearby_indices.remove(i)
+                if nearby_indices:
+                    to_keep[nearby_indices] = False
+
+        return np.where(to_keep)[0]
+
+    def _sample_observations(self, max_size=None, recent_ratio=0.5):
+        if not self.success_observations:
+            return []
+
+        # Update the stats using the full data
+        y = np.array([e['output'] for e in self.success_observations])
+        self.min_score, self.max_score = y.min(), y.max()
+
+        c = np.array([e['cost'] for e in self.success_observations])
+        log_c = np.log(np.maximum(c, EPSILON))
+        self.log_c_min, self.log_c_max = log_c.min(), log_c.max()
+
+        params = np.array([e['input'] for e in self.success_observations])
+        dedup_indices = self._filter_near_duplicates(params)
+        observations = [self.success_observations[i] for i in dedup_indices]
+
+        if max_size is None:
+            max_size = self.gp_max_obs
+
+        if len(observations) <= max_size:
+            return observations
+        
+        recent_size = int(recent_ratio*max_size)
+        recent_obs = observations[-recent_size:]
+        older_obs = observations[:-recent_size]
+        num_to_sample = max_size - recent_size
+        random_sample_obs = random.sample(older_obs, num_to_sample)
+
+        return random_sample_obs + recent_obs
+
+    def _train_gp_models(self):
+        if not self.success_observations:
+            return 0, 0
+        
+        sampled_observations = self._sample_observations(max_size=self.gp_max_obs)
+        num_sampled = len(sampled_observations)
+
+        # Prepare tensors using pre-allocated buffers
+        params = np.array([e['input'] for e in sampled_observations])
+        params_tensor = self.gp_params_buffer[:num_sampled]
+        params_tensor.copy_(torch.from_numpy(params))
+
+        # Normalized scores and costs
+        y = np.array([e['output'] for e in sampled_observations])
+        y_norm = (y - self.min_score) / (np.abs(self.max_score - self.min_score) + EPSILON)
+        y_norm_tensor = self.gp_score_buffer[:num_sampled]
+        y_norm_tensor.copy_(torch.from_numpy(y_norm))
+
+        c = np.array([e['cost'] for e in sampled_observations])
+        log_c = np.log(np.maximum(c, EPSILON)) # Ensure log is not taken on zero
+        log_c_norm = (log_c - self.log_c_min) / (self.log_c_max - self.log_c_min + EPSILON)
+        log_c_norm_tensor = self.gp_cost_buffer[:num_sampled]
+        log_c_norm_tensor.copy_(torch.from_numpy(log_c_norm))
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", gpytorch.utils.warnings.NumericalWarning)
+            score_loss = train_gp_model(self.gp_score, self.likelihood_score, self.mll_score, self.score_opt, params_tensor, y_norm_tensor, training_iter=self.gp_training_iter)
+            cost_loss = train_gp_model(self.gp_cost, self.likelihood_cost, self.mll_cost, self.cost_opt, params_tensor, log_c_norm_tensor, training_iter=self.gp_training_iter)
+
+        return score_loss, cost_loss
 
     def suggest(self, fill):
-        # TODO: Clip random samples to bounds so we don't get bad high cost samples
         info = {}
         self.suggestion_idx += 1
         if len(self.success_observations) == 0 and self.seed_with_search_center:
-            best = self.hyperparameters.search_centers
-            return self.hyperparameters.to_dict(best, fill), info
-        elif not self.seed_with_search_center and len(self.success_observations) < self.num_random_samples:
-            suggestions = self.hyperparameters.sample(self.random_suggestions)
-            self.suggestion = random.choice(suggestions)
-            return self.hyperparameters.to_dict(self.suggestion, fill), info
+            suggestion = self.hyperparameters.search_centers
+            return self.hyperparameters.to_dict(suggestion, fill), info
+
+        elif len(self.success_observations) < self.num_random_samples:
+            # Suggest the next point in the Sobol sequence
+            zero_one = self.sobol.random(1)[0]
+            suggestion = 2*zero_one - 1  # Scale from [0, 1) to [-1, 1)
+            cost_suggestion = self.cost_random_suggestion + 0.1 * np.random.randn()
+            suggestion[self.cost_param_idx] = np.clip(cost_suggestion, -1, 1)  # limit the cost
+            return self.hyperparameters.to_dict(suggestion, fill), info
+
         elif self.resample_frequency and self.suggestion_idx % self.resample_frequency == 0:
             candidates, _ = pareto_points(self.success_observations)
             suggestions = np.stack([e['input'] for e in candidates])
@@ -373,162 +593,96 @@ class Protein:
             best = suggestions[best_idx]
             return self.hyperparameters.to_dict(best, fill), info
 
-        params = np.array([e['input'] for e in self.success_observations])
-        params = torch.from_numpy(params)
+        score_loss, cost_loss = self._train_gp_models()
 
-        # Scores variable y
-        y = np.array([e['output'] for e in self.success_observations])
-
-        # Transformed scores
-        min_score = np.min(y)
-        max_score = np.max(y)
-        y_norm = (y - min_score) / (np.abs(max_score - min_score) + 1e-6)
-
-        self.gp_score.set_data(params, torch.from_numpy(y_norm))
-        self.gp_score.train()
-        gp.util.train(self.gp_score, self.score_opt)
-        self.gp_score.eval()
-
-        # Log costs
-        c = np.array([e['cost'] for e in self.success_observations])
-
-        log_c = np.log(c)
-
-        # Linear input norm creates clean 1 mean fn
-        log_c_min = np.min(log_c)
-        log_c_max = np.max(log_c)
-        log_c_norm = (log_c - log_c_min) / (log_c_max - log_c_min + 1e-6)
-
-        self.gp_cost.mean_function = lambda x: 1
-        self.gp_cost.set_data(params, torch.from_numpy(log_c_norm))
-        self.gp_cost.train()
-        gp.util.train(self.gp_cost, self.cost_opt)
-        self.gp_cost.eval()
-
+        if self.optimizer_reset_frequency and self.suggestion_idx % self.optimizer_reset_frequency == 0:
+            print(f'Resetting GP optimizers at suggestion {self.suggestion_idx}')
+            self.score_opt = torch.optim.Adam(self.gp_score.parameters(), lr=self.gp_learning_rate, amsgrad=True)
+            self.cost_opt = torch.optim.Adam(self.gp_cost.parameters(), lr=self.gp_learning_rate, amsgrad=True)
+       
         candidates, pareto_idxs = pareto_points(self.success_observations)
-        pareto_costs = np.array([e['cost'] for e in candidates])
+
+        if self.prune_pareto:
+            candidates = prune_pareto_front(candidates)
 
         ### Sample suggestions
         search_centers = np.stack([e['input'] for e in candidates])
         suggestions = self.hyperparameters.sample(
             len(candidates)*self.suggestions_per_pareto, mu=search_centers)
 
-        ### Predict scores and costs
-        suggestions = torch.from_numpy(suggestions)
-        with torch.no_grad():
-            gp_y_norm, gp_y_norm_var = self.gp_score(suggestions)
-            gp_log_c_norm, gp_log_c_norm_var = self.gp_cost(suggestions)
+        dedup_indices = self._filter_near_duplicates(suggestions)
+        suggestions = suggestions[dedup_indices]
 
-        gp_y_norm = gp_y_norm.numpy()
-        gp_log_c_norm = gp_log_c_norm.numpy()
+        if len(suggestions) == 0:
+            return self.suggest(fill) # Fallback to random if all suggestions are filtered
+
+        ### Predict scores and costs
+        # Batch predictions to avoid GPU OOM for large number of suggestions
+        gp_y_norm_list, gp_log_c_norm_list = [], []
+
+        with torch.no_grad(), gpytorch.settings.fast_pred_var(), warnings.catch_warnings():
+            warnings.simplefilter("ignore", gpytorch.utils.warnings.NumericalWarning)
+
+            # Create a reusable buffer on the device to avoid allocating a huge tensor
+            for i in range(0, len(suggestions), self.infer_batch_size):
+                batch_numpy = suggestions[i:i+self.infer_batch_size]
+                current_batch_size = len(batch_numpy)
+
+                # Use a slice of the buffer if the current batch is smaller
+                batch_tensor = self.infer_batch_buffer[:current_batch_size]
+                batch_tensor.copy_(torch.from_numpy(batch_numpy))
+
+                try:
+                    # Score and cost prediction
+                    pred_y_mean = self.likelihood_score(self.gp_score(batch_tensor)).mean.cpu()
+                    pred_c_mean = self.likelihood_cost(self.gp_cost(batch_tensor)).mean.cpu()
+
+                except RuntimeError:
+                    # Handle numerical errors during GP prediction
+                    pred_y_mean, pred_c_mean = torch.zeros(current_batch_size)
+
+                gp_y_norm_list.append(pred_y_mean.cpu())
+                gp_log_c_norm_list.append(pred_c_mean.cpu())
+
+                del pred_y_mean, pred_c_mean
+
+        # Concatenate results from all batches
+        gp_y_norm = torch.cat(gp_y_norm_list).numpy()
+        gp_log_c_norm = torch.cat(gp_log_c_norm_list).numpy()
 
         # Unlinearize
-        gp_y = gp_y_norm*(max_score - min_score) + min_score
-
-        gp_log_c = gp_log_c_norm*(log_c_max - log_c_min) + log_c_min
+        gp_y = gp_y_norm*(self.max_score - self.min_score) + self.min_score
+        gp_log_c = gp_log_c_norm*(self.log_c_max - self.log_c_min) + self.log_c_min
         gp_c = np.exp(gp_log_c)
-
-        gp_c_min = np.min(gp_c)
-        gp_c_max = np.max(gp_c)
-        gp_c_norm = (gp_c - gp_c_min) / (gp_c_max - gp_c_min + 1e-6)
-
-        pareto_y = y[pareto_idxs]
-        pareto_c = c[pareto_idxs]
-        pareto_log_c_norm = log_c_norm[pareto_idxs]
-
-        max_c = np.max(c)
-        min_c = np.min(c)
 
         max_c_mask = gp_c < self.max_suggestion_cost
 
         target = (1 + self.expansion_rate)*np.random.rand()
         weight = 1 - abs(target - gp_log_c_norm)
 
+        # NOTE: Tried upper confidence bounds, but it did more harm because gp was noisy
+        score = gp_y_norm
+
         suggestion_scores = self.hyperparameters.optimize_direction * max_c_mask * (
-                gp_y_norm*weight)
+                score * weight)
 
         best_idx = np.argmax(suggestion_scores)
         info = dict(
             cost = gp_c[best_idx].item(),
             score = gp_y[best_idx].item(),
             rating = suggestion_scores[best_idx].item(),
+            score_loss = score_loss,
+            cost_loss = cost_loss,
+            score_lengthscale = self.gp_score.lengthscale_range,
+            cost_lengthscale = self.gp_cost.lengthscale_range,
         )
         print('Predicted -- ',
             f'Score: {info["score"]:.3f}',
             f'Cost: {info["cost"]:.3f}',
             f'Rating: {info["rating"]:.3f}',
         )
-        '''
-        if info['rating'] < 10:
-            from bokeh.models import ColumnDataSource, LinearColorMapper
-            from bokeh.plotting import figure, show
-            from bokeh.palettes import Turbo256
 
-            source = ColumnDataSource(data=dict(
-                x=c,
-                y=y,
-                order=np.argsort(c),
-            ))
-            mapper = LinearColorMapper(
-                palette=Turbo256,
-                low=0,
-                high=len(c)
-            )
-
-            idxs = np.argsort(pareto_c)
-            pareto_source = ColumnDataSource(data=dict(
-                x=pareto_c[idxs],
-                y=pareto_y[idxs],
-            ))
-
-            c_sorted = sorted(c)
-            cost_source = ColumnDataSource(data=dict(
-                x = c_sorted,
-                y = np.cumsum(c_sorted) / np.sum(c_sorted),
-            ))
-
-            #gp_pareto_source = ColumnDataSource(data=dict(
-            #    x=gp_c,
-            #    y=gp_y,
-            #    order=np.argsort(gp_c),
-            #))
-
-            preds = [{
-                'output': gp_y[i],
-                'cost': gp_c[i],
-            } for i in range(len(gp_c))]
-            _, pareto_idxs = pareto_points(preds)
-
-            gp_c_pareto = gp_c[pareto_idxs]
-            gp_y_pareto = gp_y[pareto_idxs]
-            idxs = np.argsort(gp_c_pareto)
-            gp_source = ColumnDataSource(data=dict(
-                x=gp_c_pareto[idxs],
-                y=gp_y_pareto[idxs],
-            ))
-
-            p = figure(title='Hyperparam Test', 
-                       x_axis_label='Cost', 
-                       y_axis_label='Score')
-
-            # Original data
-            p.scatter(
-                x='x', 
-                y='y', 
-                color={'field': 'order', 'transform': mapper}, 
-                size=10, 
-                source=source
-            )
-
-            p.line(x='x', y='y', color='red', source=pareto_source)
-            p.line(x='x', y='y', color='blue', source=gp_source)
-            p.line(x='x', y='y', color='green', source=cost_source)
-            #p.line(x='x', y='y', color='green', source=gp_pareto_source)
-
-            show(p)
-        '''
-
-        best = suggestions[best_idx].numpy()
+        best = suggestions[best_idx]
         return self.hyperparameters.to_dict(best, fill), info
 
     def observe(self, hypers, score, cost, is_failure=False):
@@ -540,104 +694,21 @@ class Protein:
             is_failure=is_failure,
         )
 
-        if len(self.success_observations) == 0:
-            self.success_observations.append(new_observation)
+        if is_failure or not np.isfinite(score) or np.isnan(score):
+            new_observation['is_failure'] = True
+            self.failure_observations.append(new_observation)
             return
 
-        success_params = np.stack([e['input'] for e in self.success_observations])
-        dist = np.linalg.norm(params - success_params, axis=1)
-        same = np.where(dist < 1e-6)[0]
-        if len(same) > 0:
-            self.success_observations[same[0]] = new_observation
-        else:
-            self.success_observations.append(new_observation)
+        if self.success_observations:
+            success_params = np.stack([e['input'] for e in self.success_observations])
+            dist = np.linalg.norm(params - success_params, axis=1)
+            same = np.where(dist < EPSILON)[0]
+            if len(same) > 0:
+                self.success_observations[same[0]] = new_observation
+                return
 
-def _carbs_params_from_puffer_sweep(sweep_config):
-    from carbs import (
-        Param,
-        LinearSpace,
-        LogSpace,
-        LogitSpace,
-    )
+        # Ignore obs that are below the minimum cost
+        if params[self.cost_param_idx] <= -1:
+            return
 
-    param_spaces = {}
-    for name, param in sweep_config.items():
-        if name in ('method', 'name', 'metric', 'max_score'):
-            continue
-
-        assert isinstance(param, dict)
-        if any(isinstance(param[k], dict) for k in param):
-            param_spaces[name] = _carbs_params_from_puffer_sweep(param)
-            continue
- 
-        assert 'distribution' in param
-        distribution = param['distribution']
-        search_center = param['mean']
-        kwargs = dict(
-            min=param['min'],
-            max=param['max'],
-        )
-        if distribution == 'uniform':
-            space = LinearSpace(**kwargs)
-        elif distribution in ('int_uniform', 'uniform_pow2'):
-            space = LinearSpace(**kwargs, is_integer=True)
-        elif distribution == 'log_normal':
-            space = LogSpace(**kwargs)
-        elif distribution == 'logit_normal':
-            space = LogitSpace(**kwargs)
-        else:
-            raise ValueError(f'Invalid distribution: {distribution}')
-
-        param_spaces[name] = Param(
-            name=name,
-            space=space,
-            search_center=search_center
-        )
-
-    return param_spaces
-
-class Carbs:
-    def __init__(self,
-            sweep_config: dict,
-            max_suggestion_cost: float = 3600,
-            resample_frequency: int = 5,
-            num_random_samples: int = 10,
-        ):
-
-        param_spaces = _carbs_params_from_puffer_sweep(sweep_config)
-        flat_spaces = [e[1] for e in pufferlib.unroll_nested_dict(param_spaces)]
-        for e in flat_spaces:
-            print(e.name, e.space)
-
-        from carbs import (
-            CARBSParams,
-            CARBS,
-        )
-
-        carbs_params = CARBSParams(
-            better_direction_sign=1,
-            is_wandb_logging_enabled=False,
-            resample_frequency=resample_frequency,
-            num_random_samples=num_random_samples,
-            max_suggestion_cost=max_suggestion_cost,
-            is_saved_on_every_observation=False,
-        )
-        self.carbs = CARBS(carbs_params, flat_spaces)
-
-    def suggest(self, args):
-        self.suggestion = self.carbs.suggest().suggestion
-        for k in ('train', 'env'):
-            for name, param in args['sweep'][k].items():
-                if name in self.suggestion:
-                    args[k][name] = self.suggestion[name]
-
-    def observe(self, hypers, score, cost, is_failure=False):
-        from carbs import ObservationInParam
-        self.carbs.observe(
-            ObservationInParam(
-                input=self.suggestion,
-                output=score,
-                cost=cost,
-                is_failure=is_failure,
-            )
-        )
+        self.success_observations.append(new_observation)

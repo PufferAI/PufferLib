@@ -4,8 +4,7 @@ version = "3.0.0"
 description = "Fast and sane reinforcement learning"
 requires-python = ">=3.9"
 readme = {file = "README.md", content-type = "text/markdown"}
-license = "MIT"
-license-files = ["LICENSE"]
+license = {text = "MIT"}
 authors = [{ name = "Joseph Suarez", email = "jsuarez@puffer.ai" }]
 classifiers=[
     "Intended Audience :: Science/Research",
@@ -246,3 +245,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.uv]
 no-build-isolation-package = ["torch"]
+
+[tool.setuptools]
+license-files = ["LICENSE"]
