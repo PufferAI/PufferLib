@@ -851,7 +851,7 @@ void c_render(DroneDelivery *env) {
         Vec3 render_pos = agent->box_pos;
         DrawCube((Vector3){render_pos.x, render_pos.y, render_pos.z}, agent->box_size, agent->box_size, agent->box_size, BROWN);
         DrawCube((Vector3){agent->drop_pos.x, agent->drop_pos.y, agent->drop_pos.z}, 0.5f, 0.5f, 0.1f, YELLOW);
-        DrawSphere((Vector3){agent->hidden_pos.x, agent->hidden_pos.y, agent->hidden_pos.z}, 0.2f, YELLOW);
+        //DrawSphere((Vector3){agent->hidden_pos.x, agent->hidden_pos.y, agent->hidden_pos.z}, 0.2f, YELLOW);
     }
 
     if (IsKeyDown(KEY_TAB)) {
