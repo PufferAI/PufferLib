@@ -119,15 +119,10 @@ int main() {
     DroneDelivery *env = calloc(1, sizeof(DroneDelivery));
     env->num_agents = 64;
 
-    env->box_base_density = 50.0;
-    env->box_k_growth = 0.25;
-
-    env->dist_decay = 15.0;
-    env->episode_gain_increment = 15.0;
-
-    env->grip_k_decay = 5.0;
     env->grip_k_max = 17.105300970916993;
-    env->grip_k_min = 1.0;
+
+    env->num_envs = 16;
+    env->perfect_deadline = 150000000;
 
     env->pos_const = 0.7108647198043252;
     env->pos_penalty = 0.0009629600280207475;

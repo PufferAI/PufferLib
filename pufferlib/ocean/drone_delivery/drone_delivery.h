@@ -17,8 +17,6 @@
 #include "raylib.h"
 #include "dronelib_delivery.h"
 
-#define EPISODE_GAIN_INCREMENT 0.25f
-
 typedef struct Client Client;
 struct Client {
     Camera3D camera;
@@ -50,10 +48,9 @@ typedef struct {
 
     int num_agents;
     Drone* agents;
+    int num_envs;
 
-    float box_base_density;
     float box_k;
-    float box_k_growth;
     float box_k_max;
     float box_k_min;
 
@@ -62,12 +59,16 @@ typedef struct {
     float grip_k;
     float grip_k_decay;
     float grip_k_max;
-    float grip_k_min;
+
+    float perfect_deadline;
+    float perfect_episode;
+    float inv_perfect_episode;
 
     float pos_const;
     float pos_penalty;
 
     float reward_dist;
+    float inv_reward_dist;
     float reward_grip;
     float reward_ho_drop;
     float reward_hover;
@@ -99,6 +100,10 @@ void init(DroneDelivery *env) {
     env->log = (Log){0};
     env->tick = 0;
     env->episode_num = 0;
+    env->perfect_episode = env->perfect_deadline / (env->num_envs * env->num_envs * env->num_agents * HORIZON);
+    env->inv_perfect_episode = 1.0f / env->perfect_episode;
+    env->grip_k_decay = env->grip_k_max * env->inv_perfect_episode;
+    env->dist_decay = env->reward_max_dist * env->inv_perfect_episode;
 }
 
 void add_log(DroneDelivery *env, int idx, bool oob) {
@@ -116,6 +121,7 @@ void add_log(DroneDelivery *env, int idx, bool oob) {
 
     env->log.episode_num += env->episode_num;
     env->log.tick += env->tick;
+    env->log.episode_gain += env->episode_gain;
 
     agent->episode_length = 0;
     agent->episode_return = 0.0f;
@@ -245,9 +251,7 @@ float compute_reward(DroneDelivery* env, Drone *agent, bool collision) {
                                       agent->state.omega.y * agent->state.omega.y +
                                       agent->state.omega.z * agent->state.omega.z);
 
-    env->reward_dist = clampf(env->tick * -env->dist_decay + env->reward_max_dist, env->reward_min_dist, 100.0f);
-
-    float proximity_factor = clampf(1.0f - dist / env->reward_dist, 0.0f, 1.0f);
+    float proximity_factor = clampf(1.0f - dist * env->inv_reward_dist, 0.0f, 1.0f);
 
     float position_reward = clampf(expf(-dist / (env->reward_dist * env->pos_const)), -env->pos_penalty, 1.0f);
 
@@ -267,7 +271,7 @@ float compute_reward(DroneDelivery* env, Drone *agent, bool collision) {
                         to_target_unit.y * agent->state.vel.y +
                         to_target_unit.z * agent->state.vel.z;
 
-    float approach_weight = clampf(dist / env->reward_dist, 0.0f, 1.0f); // todo
+    float approach_weight = clampf(dist * env->inv_reward_dist, 0.0f, 1.0f); // todo
     float approach_reward = approach_weight * clampf(approach_dot * agent->params.inv_max_vel, -0.5f, 0.5f);
 
     float hover_bonus = 0.0f; // todo add a K
@@ -336,7 +340,7 @@ void reset_delivery(DroneDelivery* env, Drone *agent, int idx) {
     agent->box_size = rndf(0.3f, fmaxf(fminf(drone_capacity, 1.0f), 0.3f));
 
     float box_volume = agent->box_size * agent->box_size * agent->box_size;
-    agent->box_base_mass = fminf(env->box_base_density * box_volume * rndf(0.05f, 2.0f), agent->box_mass_max);
+    agent->box_base_mass = fminf(BASE_BOX_DENSITY * box_volume * rndf(0.05f, 2.0f), agent->box_mass_max);
     agent->box_mass = env->box_k * agent->box_base_mass;
 
     agent->base_mass = agent->params.mass;
@@ -417,8 +421,9 @@ void update_gripping_physics(Drone* agent) {
 void c_reset(DroneDelivery *env) {
     env->tick = 0;
     env->episode_num += 1;
-    //if (env->episode_num > 1) env->episode_gain = clampf(env->episode_gain + EPISODE_GAIN_INCREMENT, 0.0f, 1.0f);
-    if (env->episode_num > 1) env->episode_gain = clampf(env->episode_gain + env->episode_gain_increment, 0.0f, 1.0f);
+    env->reward_dist = clampf(env->reward_max_dist - env->episode_num * env->dist_decay, env->reward_min_dist, 100.0f);
+    env->inv_reward_dist = 1.0f / env->reward_dist;
+    if (env->episode_num > 1) env->episode_gain = clampf(env->episode_gain + env->inv_perfect_episode, 0.0f, 1.0f);
 
     for (int i = 0; i < env->num_agents; i++) {
         Drone *agent = &env->agents[i];
@@ -434,6 +439,8 @@ void c_step(DroneDelivery *env) {
     env->tick = (env->tick + 1) % HORIZON;
     //env->log.dist = 0.0f;
     //env->log.dist100 = 0.0f;
+    env->grip_k = clampf(env->grip_k_max - env->episode_num * env->grip_k_decay, 1.0f, 100.0f);
+    env->box_k = clampf(env->box_k_min + env->episode_num * env->inv_perfect_episode, env->box_k_min, env->box_k_max);
     for (int i = 0; i < env->num_agents; i++) {
         Drone *agent = &env->agents[i];
         env->rewards[i] = 0;
@@ -448,10 +455,6 @@ void c_step(DroneDelivery *env) {
                              agent->state.pos.z < -GRID_Z || agent->state.pos.z > GRID_Z;
 
         float reward = 0.0f;
-
-        int db_tick_perfect_grip = -1;
-        float db_grip_k_at_grip = -1.0f;
-        float db_box_x_at_grip = -1.0f;
 
         if (!agent->gripping) {
             agent->box_pos.x += agent->box_vel.x * DT;
@@ -472,9 +475,6 @@ void c_step(DroneDelivery *env) {
                         agent->state.vel.z - agent->hidden_vel.z};
         float speed = sqrtf(vel_error.x * vel_error.x + vel_error.y * vel_error.y + vel_error.z * vel_error.z);
 
-        env->grip_k = clampf(env->episode_num * -env->grip_k_decay + env->grip_k_max, env->grip_k_min, 100.0f);
-
-        env->box_k = clampf(env->episode_num * env->box_k_growth + env->box_k_min, env->box_k_min, env->box_k_max);
         agent->box_mass = env->box_k * agent->box_base_mass;
         float k = env->grip_k;
         if (!agent->gripping) {
@@ -511,10 +511,7 @@ void c_step(DroneDelivery *env) {
                     speed < k * 0.1f &&
                     agent->state.vel.z > k * -0.05f && agent->state.vel.z < 0.0f
                 ) {
-                    db_grip_k_at_grip = k;
-                    db_box_x_at_grip = env->box_k;
                     if (k < 1.01 && env->box_k > 0.99f) {
-                        db_tick_perfect_grip = env->tick;
                         agent->perfect_grip = true;
                         agent->color = (Color){100, 100, 255, 255}; // Light Blue
                     }
@@ -585,14 +582,6 @@ void c_step(DroneDelivery *env) {
 
         for (int i = 0; i < env->num_agents; i++) {
             Drone *a = &env->agents[i];
-            env->log.dist += env->dist;
-            env->log.dist100 += 100 - env->dist;
-            env->log.jitter += a->jitter;
-            if (a->approaching_pickup) env->log.to_pickup += 1.0f;
-            if (a->hovering_pickup) env->log.ho_pickup += 1.0f;
-            if (a->descent_pickup) env->log.de_pickup += 1.0f;
-            if (a->gripping) env->log.gripping += 1.0f;
-            if (a->delivered) env->log.delivered += 1.0f;
             if (a->perfect_grip && env->grip_k < 1.01f && env->box_k > 0.99f) {
                 env->log.perfect_grip += 1.0f;
             }
@@ -602,8 +591,6 @@ void c_step(DroneDelivery *env) {
             if (a->perfect_deliv && env->grip_k < 1.01f && a->perfect_grip && a->perfect_now && env->box_k > 0.99f) {
                 env->log.perfect_now += 1.0f;
             }
-            if (a->approaching_drop) env->log.to_drop += 1.0f;
-            if (a->hovering_drop) env->log.ho_drop += 1.0f;
         }
 
         env->rewards[i] += reward;
@@ -752,7 +739,6 @@ void c_render(DroneDelivery *env) {
     }
     env->render = true;
     env->grip_k_max = 1.0f;
-    env->grip_k_min = 1.0f;
     env->box_k_max = 1.0f;
     env->box_k_min = 1.0f;
     env->box_k = 1.0f;

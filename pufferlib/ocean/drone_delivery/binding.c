@@ -6,14 +6,10 @@
 static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     env->num_agents = unpack(kwargs, "num_agents");
 
-    env->box_base_density = unpack(kwargs, "box_base_density");
-    env->box_k_growth = unpack(kwargs, "box_k_growth");
-
-    env->dist_decay = unpack(kwargs, "dist_decay");
-
-    env->grip_k_decay = unpack(kwargs, "grip_k_decay");
     env->grip_k_max = unpack(kwargs, "grip_k_max");
-    env->grip_k_min = unpack(kwargs, "grip_k_min");
+
+    env->num_envs = unpack(kwargs, "num_envs");
+    env->perfect_deadline = unpack(kwargs, "perfect_deadline");
 
     env->pos_const = unpack(kwargs, "pos_const");
     env->pos_penalty = unpack(kwargs, "pos_penalty");
@@ -58,6 +54,7 @@ static int my_log(PyObject *dict, Log *log) {
 
     assign_to_dict(dict, "episode_num", log->episode_num);
     assign_to_dict(dict, "tick", log->tick);
+    assign_to_dict(dict, "episode_gain", log->episode_gain);
 
     assign_to_dict(dict, "n", log->n);
     return 0;

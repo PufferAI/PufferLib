@@ -10,16 +10,9 @@ class DroneDelivery(pufferlib.PufferEnv):
         num_envs=16,
         num_drones=64,
 
-        box_base_density=50.0,
-        box_k_growth=0.25,
-
-        dist_decay=15.0,
-
-        episode_gain_increment=0.01,
-
-        grip_k_decay=5.0,
         grip_k_max=17.105300970916993,
-        grip_k_min=1.0,
+
+        perfect_deadline=150000000,
 
         pos_const=0.7108647198043252,
         pos_penalty=0.0009629600280207475,
@@ -73,16 +66,10 @@ class DroneDelivery(pufferlib.PufferEnv):
                 i,
                 num_agents=num_drones,
 
-                box_base_density=box_base_density,
-                box_k_growth=box_k_growth,
-
-                dist_decay=dist_decay,
-
-                episode_gain_increment=episode_gain_increment,
-
-                grip_k_decay=grip_k_decay,
                 grip_k_max=grip_k_max,
-                grip_k_min=grip_k_min,
+
+                num_envs=num_envs,
+                perfect_deadline=perfect_deadline,
 
                 pos_const=pos_const,
                 pos_penalty=pos_penalty,

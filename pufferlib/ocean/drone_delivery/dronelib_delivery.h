@@ -56,6 +56,8 @@
 // Corner to corner distance
 #define MAX_DIST sqrtf((2*GRID_X)*(2*GRID_X) + (2*GRID_Y)*(2*GRID_Y) + (2*GRID_Z)*(2*GRID_Z))
 
+#define BASE_BOX_DENSITY 50.0f
+
 typedef struct Log Log;
 struct Log {
     float episode_return;
@@ -80,6 +82,7 @@ struct Log {
     float dist100;
     float jitter;
     float episode_num;
+    float episode_gain;
     float tick;
     float n;
 };
