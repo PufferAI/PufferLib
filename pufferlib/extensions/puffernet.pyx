@@ -18,6 +18,7 @@ cdef extern from "puffernet.h":
     void _linear(float* input, float* weights, float* bias, float* output,
         int batch_size, int input_dim, int output_dim)
     void _relu(float* input, float* output,int size)
+    void _gelu(float* input, float* output,int size)
     float _sigmoid(float x)
     void _conv2d(float* input, float* weights, float* bias,
         float* output, int batch_size, int in_width, int in_height,
@@ -46,6 +47,9 @@ def puf_linear_layer(cnp.ndarray input, cnp.ndarray weights, cnp.ndarray bias, c
 
 def puf_relu(cnp.ndarray input, cnp.ndarray output, int size):
     _relu(<float*> input.data, <float*> output.data, size)
+
+def puf_gelu(cnp.ndarray input, cnp.ndarray output, int size):
+    _gelu(<float*> input.data, <float*> output.data, size)
 
 def puf_sigmoid(float x):
     return _sigmoid(x)
