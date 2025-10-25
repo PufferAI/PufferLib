@@ -79,6 +79,8 @@ struct Log {
     float dist;
     float dist100;
     float jitter;
+    float episode_num;
+    float tick;
     float n;
 };
 

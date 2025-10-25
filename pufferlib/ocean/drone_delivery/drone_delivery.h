@@ -84,6 +84,7 @@ typedef struct {
 
     int episode_num;
     float episode_gain;
+    float episode_gain_increment;
 
     Client *client;
 } DroneDelivery;
@@ -106,11 +107,15 @@ void add_log(DroneDelivery *env, int idx, bool oob) {
     env->log.episode_return += agent->episode_return;
     env->log.episode_length += agent->episode_length;
     env->log.collision_rate += agent->collisions / (float)agent->episode_length;
-    env->log.perf += agent->score / (float)agent->episode_length;
+    //env->log.perf += agent->score / (float)agent->episode_length;
+    env->log.perf += agent->perfect_deliv;
     if (oob) {
         env->log.oob += 1.0f;
     }
     env->log.n += 1.0f;
+
+    env->log.episode_num += env->episode_num;
+    env->log.tick += env->tick;
 
     agent->episode_length = 0;
     agent->episode_return = 0.0f;
@@ -412,7 +417,8 @@ void update_gripping_physics(Drone* agent) {
 void c_reset(DroneDelivery *env) {
     env->tick = 0;
     env->episode_num += 1;
-    if (env->episode_num > 1) env->episode_gain = clampf(env->episode_gain + EPISODE_GAIN_INCREMENT, 0.0f, 1.0f);
+    //if (env->episode_num > 1) env->episode_gain = clampf(env->episode_gain + EPISODE_GAIN_INCREMENT, 0.0f, 1.0f);
+    if (env->episode_num > 1) env->episode_gain = clampf(env->episode_gain + env->episode_gain_increment, 0.0f, 1.0f);
 
     for (int i = 0; i < env->num_agents; i++) {
         Drone *agent = &env->agents[i];

@@ -123,6 +123,7 @@ int main() {
     env->box_k_growth = 0.25;
 
     env->dist_decay = 15.0;
+    env->episode_gain_increment = 15.0;
 
     env->grip_k_decay = 5.0;
     env->grip_k_max = 17.105300970916993;

@@ -15,6 +15,8 @@ class DroneDelivery(pufferlib.PufferEnv):
 
         dist_decay=15.0,
 
+        episode_gain_increment=0.01,
+
         grip_k_decay=5.0,
         grip_k_max=17.105300970916993,
         grip_k_min=1.0,
@@ -75,6 +77,8 @@ class DroneDelivery(pufferlib.PufferEnv):
                 box_k_growth=box_k_growth,
 
                 dist_decay=dist_decay,
+
+                episode_gain_increment=episode_gain_increment,
 
                 grip_k_decay=grip_k_decay,
                 grip_k_max=grip_k_max,
