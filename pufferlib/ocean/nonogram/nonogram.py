@@ -1,0 +1,85 @@
+'''Nonogram logic puzzle environment'''
+
+import gymnasium
+import numpy as np
+
+import pufferlib
+from pufferlib.ocean.nonogram import binding
+
+MAX_SIZE = 8
+MIN_SIZE = 4
+MAX_CLUES = MAX_SIZE // 2
+OBS_SIZE = MAX_SIZE * MAX_SIZE + 2 * MAX_SIZE * MAX_CLUES + 1  # +1 for board size
+
+class Nonogram(pufferlib.PufferEnv):
+    def __init__(self, num_envs=1, render_mode=None, log_interval=128,
+                 min_size=4, max_size=8, easy_learn=0, buf=None, seed=0):
+        # Observation space: grid cells (0-3: EMPTY/WHITE/BLACK/PADDING), clues (0-max_size), size encoding (0-1)
+        # Using max_size as high covers all values
+        self.single_observation_space = gymnasium.spaces.Box(low=0, high=max_size,
+            shape=(OBS_SIZE,), dtype=np.uint8)
+        # Action space: 0-63 = mark WHITE, 64-127 = mark BLACK
+        self.single_action_space = gymnasium.spaces.Discrete(MAX_SIZE * MAX_SIZE * 2)
+        self.render_mode = render_mode
+        self.num_agents = num_envs
+        self.log_interval = log_interval
+
+        super().__init__(buf)
+        self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
+            self.terminals, self.truncations, num_envs, seed,
+            min_size=min_size, max_size=max_size, easy_learn=easy_learn)
+
+        self.solutions = np.zeros((num_envs, max_size * max_size), dtype=np.uint8)
+
+    def reset(self, seed=0):
+        binding.vec_reset(self.c_envs, seed)
+        self.tick = 0
+        return self.observations, []
+
+    def step(self, actions):
+        self.tick += 1
+
+        self.actions[:] = actions
+        binding.vec_step(self.c_envs)
+
+        info = []
+        if self.tick % self.log_interval == 0:
+            info.append(binding.vec_log(self.c_envs))
+
+        return (self.observations, self.rewards,
+            self.terminals, self.truncations, info)
+
+    def render(self):
+        binding.vec_render(self.c_envs, 0)
+
+    def close(self):
+        binding.vec_close(self.c_envs)
+
+    def get_solutions(self):
+        """Get the solution grids for all environments"""
+        binding.vec_get_solutions(self.c_envs, self.solutions)
+        return self.solutions
+
+    def get_size(self):
+        """Get current board size"""
+        return binding.vec_get_size(self.c_envs)
+
+if __name__ == '__main__':
+    N = 4096
+
+    env = Nonogram(num_envs=N, min_size=2, max_size=8)
+    env.reset()
+    steps = 0
+
+    CACHE = 1024
+    actions = np.random.randint(0, 64, (CACHE, N))
+
+    i = 0
+    import time
+    start = time.time()
+    while time.time() - start < 10:
+        env.step(actions[i % CACHE])
+        steps += N
+        i += 1
+
+    print('Nonogram SPS:', int(steps / (time.time() - start)))
