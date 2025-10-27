@@ -50,6 +50,11 @@ typedef struct {
     Drone* agents;
     int num_envs;
 
+    float anneal;
+    float anneal_min;
+    float annealed_episode;
+    float inv_annealed_episode;
+
     float box_k;
     float box_k_max;
     float box_k_min;
@@ -60,6 +65,7 @@ typedef struct {
     float grip_k_decay;
     float grip_k_max;
 
+    float perfect_anneal;
     float perfect_deadline;
     float perfect_episode;
     float inv_perfect_episode;
@@ -102,8 +108,11 @@ void init(DroneDelivery *env) {
     env->episode_num = 0;
     env->perfect_episode = env->perfect_deadline / (env->num_envs * env->num_envs * env->num_agents * HORIZON);
     env->inv_perfect_episode = 1.0f / env->perfect_episode;
+    env->annealed_episode = (env->perfect_anneal - env->perfect_deadline) / (env->num_envs * env->num_envs * env->num_agents * HORIZON);
+    env->inv_annealed_episode = 1.0f / env->annealed_episode;
     env->grip_k_decay = env->grip_k_max * env->inv_perfect_episode;
     env->dist_decay = env->reward_max_dist * env->inv_perfect_episode;
+    env->anneal = 1.0f;
 }
 
 void add_log(DroneDelivery *env, int idx, bool oob) {
@@ -122,6 +131,7 @@ void add_log(DroneDelivery *env, int idx, bool oob) {
     env->log.episode_num += env->episode_num;
     env->log.tick += env->tick;
     env->log.episode_gain += env->episode_gain;
+    env->log.anneal += env->anneal;
 
     agent->episode_length = 0;
     agent->episode_return = 0.0f;
@@ -311,7 +321,7 @@ float compute_reward(DroneDelivery* env, Drone *agent, bool collision) {
     env->dist = dist * dist;
     agent->jitter = 10.0f - (dist + vel_magnitude + angular_vel_magnitude);
 
-    return delta_reward;
+    return delta_reward * env->anneal;
 }
 
 void reset_delivery(DroneDelivery* env, Drone *agent, int idx) {
@@ -431,6 +441,10 @@ void c_reset(DroneDelivery *env) {
         agent->target_pos = (Vec3){agent->box_pos.x, agent->box_pos.y, agent->box_pos.z};
         agent->target_vel = agent->box_vel;
     }
+
+    if (env->grip_k < 1.01 && env->box_k > 0.99f) {
+        env->anneal = clampf(env->anneal - (env->inv_annealed_episode * (1.0f - env->anneal_min)), env->anneal_min, 1.0f);
+    }
  
     compute_observations(env);
 }
@@ -516,7 +530,7 @@ void c_step(DroneDelivery *env) {
                         agent->color = (Color){100, 100, 255, 255}; // Light Blue
                     }
                     agent->gripping = true;
-                    reward += env->reward_grip;
+                    reward += env->reward_grip * env->anneal;
                     random_bump(agent);
                 } else if (dist_to_hidden > 0.4f || speed > 0.4f) {
                     agent->color = (Color){255, 100, 100, 255}; // Light Red
@@ -533,9 +547,9 @@ void c_step(DroneDelivery *env) {
                                         powf(agent->state.pos.y - agent->drop_pos.y, 2));
             float z_dist_above_drop = agent->state.pos.z - agent->drop_pos.z;
 
-            if (xy_dist_to_drop < 2.0f && agent->state.pos.z < agent->target_pos.z + 10.0f) {
-                reward -= 0.001f * env->episode_num - 0.001f;
-            }
+            //if (xy_dist_to_drop < 2.0f && agent->state.pos.z < agent->target_pos.z + 10.0f) {
+            //    reward -= 0.001f * env->episode_num - 0.001f;
+            //}
 
             if (!agent->box_physics_on && agent->state.vel.z > 0.3f) {
                 update_gripping_physics(agent);
@@ -547,7 +561,7 @@ void c_step(DroneDelivery *env) {
                 agent->hidden_vel = (Vec3){0.0f, 0.0f, 0.0f};
                 if (xy_dist_to_drop < k * 0.4f && z_dist_above_drop > 0.7f && z_dist_above_drop < 1.3f) {
                     agent->hovering_drop = true;
-                    reward += env->reward_ho_drop;
+                    reward += env->reward_ho_drop * env->anneal;
                     agent->color = (Color){0, 0, 255, 255}; // Blue
                 }
             }

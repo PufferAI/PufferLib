@@ -84,6 +84,7 @@ struct Log {
     float episode_num;
     float episode_gain;
     float tick;
+    float anneal;
     float n;
 };
 

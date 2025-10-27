@@ -8,7 +8,10 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
 
     env->grip_k_max = unpack(kwargs, "grip_k_max");
 
+    env->anneal_min = unpack(kwargs, "anneal_min");
+
     env->num_envs = unpack(kwargs, "num_envs");
+    env->perfect_anneal = unpack(kwargs, "perfect_anneal");
     env->perfect_deadline = unpack(kwargs, "perfect_deadline");
 
     env->pos_const = unpack(kwargs, "pos_const");
@@ -50,12 +53,13 @@ static int my_log(PyObject *dict, Log *log) {
     //assign_to_dict(dict, "to_drop", log->to_drop);
     //assign_to_dict(dict, "ho_drop", log->ho_drop);
     //assign_to_dict(dict, "dist", log->dist);
-    assign_to_dict(dict, "dist100", log->dist100);
+    //assign_to_dict(dict, "dist100", log->dist100);
 
     assign_to_dict(dict, "episode_num", log->episode_num);
-    assign_to_dict(dict, "tick", log->tick);
+    //assign_to_dict(dict, "tick", log->tick);
     assign_to_dict(dict, "episode_gain", log->episode_gain);
+    assign_to_dict(dict, "anneal", log->anneal);
 
-    assign_to_dict(dict, "n", log->n);
+    //assign_to_dict(dict, "n", log->n);
     return 0;
 }

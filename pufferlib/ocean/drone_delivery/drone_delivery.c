@@ -121,7 +121,11 @@ int main() {
 
     env->grip_k_max = 17.105300970916993;
 
+    env->anneal_min = 0.5;
+
     env->num_envs = 16;
+    env->perfect_anneal = 250000000;
+    env->perfect_anneal_start = 175000000;
     env->perfect_deadline = 150000000;
 
     env->pos_const = 0.7108647198043252;

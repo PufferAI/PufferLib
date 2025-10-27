@@ -10,8 +10,11 @@ class DroneDelivery(pufferlib.PufferEnv):
         num_envs=16,
         num_drones=64,
 
+        anneal_min=0.5,
+
         grip_k_max=17.105300970916993,
 
+        perfect_anneal=150000000,
         perfect_deadline=150000000,
 
         pos_const=0.7108647198043252,
@@ -66,9 +69,12 @@ class DroneDelivery(pufferlib.PufferEnv):
                 i,
                 num_agents=num_drones,
 
+                anneal_min=anneal_min,
+
                 grip_k_max=grip_k_max,
 
                 num_envs=num_envs,
+                perfect_anneal=perfect_anneal,
                 perfect_deadline=perfect_deadline,
 
                 pos_const=pos_const,
