@@ -11,6 +11,8 @@
 
 #include "grid.h"
 
+#define MAX_TIMESTEPS 1000 // If no agent died by then, we reset
+
 #define EMPTY 0
 // Anything non empty should be obstacles
 #define NORMAL_FOOD 1
@@ -67,6 +69,7 @@ struct Agent {
   int direction;
   int held_food;
   float hp;
+  int start_tick;
   unsigned char anim;
 };
 
@@ -101,6 +104,7 @@ struct PredPrey {
   int obs_size;
 
   int tick;
+  int last_agent_dead_tick;
 
   float reward_food;
 
@@ -123,7 +127,7 @@ struct PredPrey {
 
 void add_log(PredPrey *env, Log *log) {
   //TODO fix perf calculation
-  env->log.perf = fmaxf(0, log->score);
+  env->log.perf = fmaxf(0, log->score/MAX_TIMESTEPS);
   env->log.steals += log->steals;
   env->log.episode_return += log->episode_return;
   env->log.score += log->score;
@@ -309,9 +313,13 @@ void compute_observations(PredPrey *env) {
 
 void remove_agent(PredPrey *env, int agent_id) {
   Agent *agent = &env->agents[agent_id];
-  int adr = grid_index(env, agent->r, agent->c);
-  assert(env->grid[adr] == get_agent_tile_from_id(agent->id));
-  env->grid[adr] = EMPTY;
+  if (agent->r < 0 || agent->c < 0) {
+    return;
+  }
+  int grid_idx = grid_index(env, agent->r, agent->c);
+  env->grid[grid_idx] = EMPTY;
+  agent->r = -1;
+  agent->c = -1;
 }
 
 void add_hp(PredPrey *env, int agent_id, float hp) {
@@ -321,11 +329,12 @@ void add_hp(PredPrey *env, int agent_id, float hp) {
     agent->hp = MAX_HP;
   } else if (agent->hp <= 0) {
     agent->hp = 0;
-    env->agent_logs[agent->id].score += LOG_SCORE_REWARD_DEATH;
+    env->agent_logs[agent->id].score = env->tick - agent->start_tick;
     reward_agent(env, agent_id, REWARD_DEATH);
     env->terminals[agent->id] = 1;
     add_log(env, &env->agent_logs[agent_id]);
     remove_agent(env, agent_id);
+    env->last_agent_dead_tick = env->tick;
   }
 }
 
@@ -386,6 +395,9 @@ void spawn_agent(PredPrey *env, int i){
   Agent *agent = &env->agents[i];
   agent->id = i;
   agent->hp = 100;
+  agent->start_tick = env->tick;
+  agent->held_food = 0;
+
   int adr = 0;
 
   bool allocated = false;
@@ -520,22 +532,10 @@ void step_agent(PredPrey *env, int i) {
     if (agent->held_food > 0) {
       agent->held_food -= 1;
       add_hp(env, i, HP_REWARD_FOOD);
-      env->agent_logs[i].score += 1;
       reward_agent(env, i, env->reward_food);
     }
   }
   return;
-}
-
-void clear_agent(PredPrey *env, int agent_id) {
-  Agent *agent = &env->agents[agent_id];
-  if (agent->r < 0 || agent->c < 0) {
-    return;
-  }
-  int grid_idx = grid_index(env, agent->r, agent->c);
-  env->grid[grid_idx] = EMPTY;
-  agent->r = -1;
-  agent->c = -1;
 }
 
 void c_step(PredPrey *env) {
@@ -550,6 +550,11 @@ void c_step(PredPrey *env) {
     }
     step_agent(env, i);
     remove_hp(env, i, HP_LOSS_PER_STEP);
+  }
+
+  if (env->tick - env->last_agent_dead_tick >= MAX_TIMESTEPS) {
+    c_reset(env);
+    return;
   }
 
   spawn_foods(env);
