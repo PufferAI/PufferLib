@@ -19,7 +19,7 @@ class PredPrey(pufferlib.PufferEnv):
                 seed=0,
             ):
         obs_shape = ((2*vision+1)*(2*vision+1)*3)+1
-        self.single_observation_space = gymnasium.spaces.Box(low=0, high=255, shape=(obs_shape,), dtype=np.float64)
+        self.single_observation_space = gymnasium.spaces.Box(low=0, high=255, shape=(obs_shape,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Discrete(7)
         self.render_mode = render_mode
         self.num_agents = num_agents * num_envs
@@ -73,23 +73,30 @@ class PredPrey(pufferlib.PufferEnv):
     def close(self):
         binding.vec_close(self.c_envs)
 
+def pret(obs, i):
+    for j in range(7):
+        print(obs[i,j*7*3:(j+1)*7*3])
+        print("************************")
+
 if __name__ == "__main__":
     print("Testing PredatorPrey CEnv")
     
     env = PredPrey()
-    env.reset()
+    o, _ = env.reset()
     tick = 0
     timeout=30
 
     tot_agents = env.num_agents
     actions = np.random.randint(0,7,(1024,tot_agents))
 
+    env.render()
     import time 
     start = time.time()
+    # while tick < 1000:
     while time.time() - start < timeout:
         atns = actions[tick % 1024]
-        env.step(atns)
-        # env.render()
+        o, r, t, trun, info = env.step(atns)
+        env.render()
         tick += 1
 
     print(f'SPS: {int(tot_agents * tick / (time.time() - start)):_}')

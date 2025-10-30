@@ -270,10 +270,13 @@ void spawn_foods(PredPrey *env) {
 }
 
 void compute_observations(PredPrey *env) {
-  int obs_idx = 0;
   for (int i = 0; i < env->num_agents; i++) {
+    int obs_idx = i * env->obs_size;
     Agent *agent = &env->agents[i];
     if (agent->hp <= 0) {
+      for (int j = 0; j < env->obs_size; j++) {
+        env->observations[obs_idx++] = 0.0f;
+      }
       continue;
     }
     // int obs_offset = (i * env->obs_size);
@@ -281,15 +284,7 @@ void compute_observations(PredPrey *env) {
     int c_offset = agent->c - env->vision;
     for (int r = 0; r < env->vision_window; r++) {
       for (int c = 0; c < env->vision_window; c++) {
-        int grid_idx = (r_offset + r) * env->width + c_offset + c;
-        // int obs_idx = obs_offset + (r * env->vision_window + c ) * MAX_CELL_OBS;
-
-        size_t flat_obs_len = (size_t)env->num_agents * env->obs_size;
-        if ((size_t)obs_idx + 2 >= flat_obs_len) { // +2 because you write 3 entries
-            fprintf(stderr, "OBS IDX OOB: agent=%d obs_idx=%d max=%zu vision=%d\n",
-                    i, obs_idx, flat_obs_len, env->vision);
-            assert(0 && "obs_idx out of range");
-        }
+        int grid_idx = grid_index(env,r_offset + r, c_offset + c);
 
         // First obs is the cell type
         env->observations[obs_idx++] = env->grid[grid_idx];
@@ -297,8 +292,9 @@ void compute_observations(PredPrey *env) {
         float food_norm = 0.0f;
         if (env->grid[grid_idx] >= AGENTS) {
             int agent_id = get_agent_id_from_tile(env->grid[grid_idx]);
-            hp_norm = env->agents[agent_id].hp / (float)MAX_HP;
-            food_norm = env->agents[agent_id].held_food / (float)MAX_INVENTORY_ITEM;
+            Agent *grid_agent = &env->agents[agent_id]; 
+            hp_norm = grid_agent->hp / (float)MAX_HP;
+            food_norm = grid_agent->held_food / (float)MAX_INVENTORY_ITEM;
         }
 
         env->observations[obs_idx++] = hp_norm;
