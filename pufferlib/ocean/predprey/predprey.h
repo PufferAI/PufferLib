@@ -11,7 +11,7 @@
 
 #include "grid.h"
 
-#define MAX_TIMESTEPS 10 // If no agent died by then, we reset
+#define MAX_TIMESTEPS 1000 // If no agent died by then, we reset
 
 #define EMPTY 0
 // Anything non empty should be obstacles
