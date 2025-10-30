@@ -11,7 +11,7 @@
 
 #include "grid.h"
 
-#define MAX_TIMESTEPS 1000 // If no agent died by then, we reset
+#define MAX_TIMESTEPS 10 // If no agent died by then, we reset
 
 #define EMPTY 0
 // Anything non empty should be obstacles
@@ -123,6 +123,7 @@ struct PredPrey {
 
   FoodList *foods;
   float food_base_spawn_rate;
+  float max_food;
 };
 
 void add_log(PredPrey *env, Log *log) {
@@ -144,6 +145,12 @@ void init_cenv(PredPrey *env) {
   env->foods = allocate_foodlist(env->width * env->height);
   env->agent_logs = (Log *)calloc(env->num_agents, sizeof(Log));
   env->masks = (unsigned char *)calloc(env->num_agents, sizeof(unsigned char));
+  // Arbitrarly set max food to a proportion of available tiles
+  env->max_food = 0.55 * (
+    (env->width * env->height) - (
+      env->vision*env->width*2 +
+      env->vision*2*(env->height - 2*env->vision)
+    ) - env->num_agents); 
 }
 
 void allocate_cenv(PredPrey *env) {
@@ -235,6 +242,10 @@ void spawn_foods(PredPrey *env) {
   // After each step, check existing foods and spawns new food in the
   // neighborhood Iterates over food_list for efficiency instead of the entire
   // grid.
+  // Only do it if the number of foods is less than max_foods
+  if (env->foods->size >= env->max_food) {
+    return;
+  }
   FoodList *foods = env->foods;
   int original_size = foods->size;
   for (int i = 0; i < original_size; i++) {
@@ -552,7 +563,6 @@ void c_step(PredPrey *env) {
     c_reset(env);
     return;
   }
-
   spawn_foods(env);
   compute_observations(env);
 }
