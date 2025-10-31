@@ -8,6 +8,7 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
 
     env->grip_k_max = unpack(kwargs, "grip_k_max");
 
+    env->ablation = unpack(kwargs, "ablation");
     env->anneal_min = unpack(kwargs, "anneal_min");
 
     env->num_envs = unpack(kwargs, "num_envs");

@@ -121,6 +121,7 @@ int main() {
 
     env->grip_k_max = 17.105300970916993;
 
+    env->ablation = 0.0;
     env->anneal_min = 0.5;
 
     env->num_envs = 16;

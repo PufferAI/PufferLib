@@ -10,6 +10,7 @@ class DroneDelivery(pufferlib.PufferEnv):
         num_envs=16,
         num_drones=64,
 
+        ablation=0.0,
         anneal_min=0.5,
 
         grip_k_max=17.105300970916993,
@@ -69,6 +70,7 @@ class DroneDelivery(pufferlib.PufferEnv):
                 i,
                 num_agents=num_drones,
 
+                ablation=ablation,
                 anneal_min=anneal_min,
 
                 grip_k_max=grip_k_max,

@@ -50,6 +50,7 @@ typedef struct {
     Drone* agents;
     int num_envs;
 
+    float ablation;
     float anneal;
     float anneal_min;
     float annealed_episode;
@@ -113,6 +114,19 @@ void init(DroneDelivery *env) {
     env->grip_k_decay = env->grip_k_max * env->inv_perfect_episode;
     env->dist_decay = env->reward_max_dist * env->inv_perfect_episode;
     env->anneal = 1.0f;
+
+    float ablation = env->ablation;
+    if (ablation > 0.000001f && ablation < 0.2f) {
+        env->w_approach = 0.0f;
+    } else if (ablation >= 0.2f && ablation < 0.4f) {
+        env->w_position - 0.0f;
+    }  else if (ablation >= 0.4f && ablation < 0.6f) {
+        env->w_stability - 0.0f;
+    }  else if (ablation >= 0.6f && ablation < 0.8f) {
+        env->w_velocity - 0.0f;
+    }  else if (ablation >= 0.8f) {
+        env->reward_hover - 0.0f;
+    }
 }
 
 void add_log(DroneDelivery *env, int idx, bool oob) {
