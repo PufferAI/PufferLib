@@ -43,7 +43,7 @@ class Default(nn.Module):
                 pufferlib.pytorch.layer_init(nn.Linear(num_obs, hidden_size)),
                 nn.GELU(),
             )
-            
+
         if self.is_multidiscrete:
             self.action_nvec = tuple(env.single_action_space.nvec)
             num_atns = sum(self.action_nvec)
@@ -56,8 +56,9 @@ class Default(nn.Module):
         else:
             self.decoder_mean = pufferlib.pytorch.layer_init(
                 nn.Linear(hidden_size, env.single_action_space.shape[0]), std=0.01)
-            self.decoder_logstd = nn.Parameter(torch.zeros(
-                1, env.single_action_space.shape[0]))
+            # Initialize logstd to -0.5 (std ~0.6) for more conservative exploration
+            self.decoder_logstd = nn.Parameter(torch.ones(
+                1, env.single_action_space.shape[0]) * -0.5)
 
         self.value = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, 1), std=1)
@@ -77,24 +78,90 @@ class Default(nn.Module):
         if self.is_dict_obs:
             observations = pufferlib.pytorch.nativize_tensor(observations, self.dtype)
             observations = torch.cat([v.view(batch_size, -1) for v in observations.values()], dim=1)
-        else: 
+        else:
             observations = observations.view(batch_size, -1)
+
+        # Check for NaN in observations and replace with zeros
+        if torch.isnan(observations).any():
+            #print(f"Warning: NaN detected in observations, replacing with zeros")
+            observations = torch.nan_to_num(observations, nan=0.0)
+
+        # Clamp observations to prevent extreme values
+        observations = torch.clamp(observations, min=-100.0, max=100.0)
+
         return self.encoder(observations.float())
+
+    def check_and_fix_weights(self):
+        '''Check for NaN in model weights and reinitialize if needed'''
+        nan_found = False
+        for name, param in self.named_parameters():
+            if torch.isnan(param).any():
+                #print(f"Warning: NaN found in weight {name}, reinitializing")
+                nan_found = True
+                # Reinitialize the parameter
+                if 'decoder_logstd' in name:
+                    param.data.fill_(-0.5)
+                elif 'bias' in name:
+                    param.data.zero_()
+                else:
+                    # Use Xavier initialization for weights
+                    if param.dim() >= 2:
+                        torch.nn.init.xavier_uniform_(param)
+                    else:
+                        param.data.normal_(0, 0.01)
+        return nan_found
 
     def decode_actions(self, hidden):
         '''Decodes a batch of hidden states into (multi)discrete actions.
         Assumes no time dimension (handled by LSTM wrappers).'''
+        # Check for NaN in hidden states first
+        if torch.isnan(hidden).any():
+            #print(f"Warning: NaN in hidden states before decode, replacing with zeros")
+            hidden = torch.nan_to_num(hidden, nan=0.0)
+            # Also check weights when NaN is detected
+            self.check_and_fix_weights()
+
         if self.is_multidiscrete:
             logits = self.decoder(hidden).split(self.action_nvec, dim=1)
         elif self.is_continuous:
             mean = self.decoder_mean(hidden)
+
+            # More aggressive clamping
+            mean = torch.clamp(mean, min=-5.0, max=5.0)
+
+            # Check for NaN before continuing
+            if torch.isnan(mean).any():
+                #print(f"Warning: NaN in mean after decoder, checking weights")
+                self.check_and_fix_weights()
+                # Retry with fixed weights
+                mean = self.decoder_mean(hidden)
+                mean = torch.clamp(mean, min=-5.0, max=5.0)
+
+            # Clamp logstd more conservatively
             logstd = self.decoder_logstd.expand_as(mean)
+            logstd = torch.clamp(logstd, min=-5.0, max=0.0)  # Max std = 1.0
             std = torch.exp(logstd)
+
+            # Add small epsilon to std to ensure numerical stability
+            std = std + 1e-6
+
+            # Final NaN check and replace with safe values
+            if torch.isnan(mean).any() or torch.isnan(std).any():
+                #print(f"Warning: NaN detected in policy - mean: {torch.isnan(mean).any()}, std: {torch.isnan(std).any()}")
+                mean = torch.nan_to_num(mean, nan=0.0)
+                std = torch.nan_to_num(std, nan=0.5)
+
             logits = torch.distributions.Normal(mean, std)
         else:
             logits = self.decoder(hidden)
 
         values = self.value(hidden)
+
+        # Check values for NaN
+        if torch.isnan(values).any():
+            #print(f"Warning: NaN in value output, replacing with zeros")
+            values = torch.nan_to_num(values, nan=0.0)
+
         return logits, values
 
 class LSTMWrapper(nn.Module):
@@ -186,7 +253,16 @@ class LSTMWrapper(nn.Module):
         #hidden = self.pre_layernorm(hidden)
         hidden, (lstm_h, lstm_c) = self.lstm.forward(hidden, lstm_state)
         hidden = hidden.float()
- 
+
+        # Check for NaN after LSTM and replace with zeros
+        if torch.isnan(hidden).any():
+            #print(f"Warning: NaN detected after LSTM, replacing with zeros")
+            hidden = torch.nan_to_num(hidden, nan=0.0)
+        if torch.isnan(lstm_h).any() or torch.isnan(lstm_c).any():
+            #print(f"Warning: NaN detected in LSTM state, resetting")
+            lstm_h = torch.nan_to_num(lstm_h, nan=0.0)
+            lstm_c = torch.nan_to_num(lstm_c, nan=0.0)
+
         #hidden = self.post_layernorm(hidden)
         hidden = hidden.transpose(0, 1)
 

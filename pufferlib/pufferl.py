@@ -1,8 +1,7 @@
-## puffer [train | eval | sweep] [env_name] [optional args] -- See https://puffer.ai for full detail0
+# puffer [train | eval | sweep] [env_name] [optional args] -- See https://puffer.ai for full details
 # This is the same as python -m pufferlib.pufferl [train | eval | sweep] [env_name] [optional args]
 # Distributed example: torchrun --standalone --nnodes=1 --nproc-per-node=6 -m pufferlib.pufferl train puffer_nmmo3
 
-import contextlib
 import warnings
 warnings.filterwarnings('error', category=RuntimeWarning)
 
@@ -136,9 +135,7 @@ class PuffeRL:
         self.uncompiled_policy = policy
         self.policy = policy
         if config['compile']:
-            self.policy = torch.compile(policy, mode=config['compile_mode'])
-            self.policy.forward_eval = torch.compile(policy, mode=config['compile_mode'])
-            pufferlib.pytorch.sample_logits = torch.compile(pufferlib.pytorch.sample_logits, mode=config['compile_mode'])
+            self.policy = torch.compile(policy, mode=config['compile_mode'], fullgraph=config['compile_fullgraph'])
 
         # Optimizer
         if config['optimizer'] == 'adam':
@@ -176,9 +173,7 @@ class PuffeRL:
 
         # Automatic mixed precision
         precision = config['precision']
-        self.amp_context = contextlib.nullcontext()
-        if config.get('amp', True) and config['device'] == 'cuda':
-            self.amp_context = torch.amp.autocast(device_type='cuda', dtype=getattr(torch, precision))
+        self.amp_context = torch.amp.autocast(device_type='cuda', dtype=getattr(torch, precision))
         if precision not in ('float32', 'bfloat16'):
             raise pufferlib.APIUsageError(f'Invalid precision: {precision}: use float32 or bfloat16')
 
@@ -222,8 +217,8 @@ class PuffeRL:
 
         if config['use_rnn']:
             for k in self.lstm_h:
-                self.lstm_h[k] = torch.zeros(self.lstm_h[k].shape, device=device)
-                self.lstm_c[k] = torch.zeros(self.lstm_c[k].shape, device=device)
+                self.lstm_h[k].zero_()
+                self.lstm_c[k].zero_()
 
         self.full_rows = 0
         while self.full_rows < self.segments:
@@ -418,11 +413,45 @@ class PuffeRL:
 
             # Learn on accumulated minibatches
             profile('learn', epoch)
+
+            # Check for NaN in loss before backward
+            if torch.isnan(loss):
+                print(f"Warning: NaN loss detected, skipping backward pass")
+                self.optimizer.zero_grad()
+                # Reduce learning rate on NaN
+                for g in self.optimizer.param_groups:
+                    g['lr'] *= 0.5
+                print(f"Reduced learning rate to {self.optimizer.param_groups[0]['lr']}")
+                continue
+
             loss.backward()
+
+            # Check for NaN in gradients
+            has_nan_grad = False
+            for name, param in self.policy.named_parameters():
+                if param.grad is not None and torch.isnan(param.grad).any():
+                    print(f"Warning: NaN gradient in {name}")
+                    has_nan_grad = True
+                    param.grad = torch.nan_to_num(param.grad, nan=0.0)
+
             if (mb + 1) % self.accumulate_minibatches == 0:
+
+                # More aggressive gradient clipping for continuous actions
+                policy_obj = self.policy.policy if hasattr(self.policy, 'policy') else self.policy
+                if hasattr(policy_obj, 'is_continuous') and policy_obj.is_continuous:
+                    torch.nn.utils.clip_grad_norm_(self.policy.parameters(), min(config['max_grad_norm'], 0.5))
+                else:
+                    torch.nn.utils.clip_grad_norm_(self.policy.parameters(), config['max_grad_norm'])
+
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), config['max_grad_norm'])
                 self.optimizer.step()
                 self.optimizer.zero_grad()
+
+                # Check for NaN in weights after update
+                policy_obj = self.policy.policy if hasattr(self.policy, 'policy') else self.policy
+                if hasattr(policy_obj, 'check_and_fix_weights'):
+                    if policy_obj.check_and_fix_weights():
+                        print("Warning: NaN in weights after optimizer step, weights reinitialized")
 
         # Reprioritize experience
         profile('train_misc', epoch)
@@ -496,7 +525,7 @@ class PuffeRL:
         self.utilization.stop()
         model_path = self.save_checkpoint()
         run_id = self.logger.run_id
-        path = os.path.join(self.config['data_dir'], f'{self.config["env"]}_{run_id}.pt')
+        path = os.path.join(self.config['data_dir'], f'{run_id}.pt')
         shutil.copy(model_path, path)
         return path
 
@@ -506,11 +535,11 @@ class PuffeRL:
                return
  
         run_id = self.logger.run_id
-        path = os.path.join(self.config['data_dir'], f'{self.config["env"]}_{run_id}')
+        path = os.path.join(self.config['data_dir'], run_id)
         if not os.path.exists(path):
             os.makedirs(path)
 
-        model_name = f'model_{self.config["env"]}_{self.epoch:06d}.pt'
+        model_name = f'model_{self.epoch:06d}.pt'
         model_path = os.path.join(path, model_name)
         if os.path.exists(model_path):
             return model_path
@@ -527,7 +556,7 @@ class PuffeRL:
         }
         state_path = os.path.join(path, 'trainer_state.pt')
         torch.save(state, state_path + '.tmp')
-        os.replace(state_path + '.tmp', state_path)
+        os.rename(state_path + '.tmp', state_path)
         return model_path
 
     def print_dashboard(self, clear=False, idx=[0],
@@ -869,6 +898,7 @@ class WandbLogger:
         return f'{data_dir}/{model_file}'
  
 def train(env_name, args=None, vecenv=None, policy=None, logger=None):
+    print("train pufferl")
     args = args or load_config(env_name)
 
     # Assume TorchRun DDP is used if LOCAL_RANK is set
@@ -882,8 +912,11 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
         torch.cuda.set_device(local_rank)
         os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
 
+    print("  vecenv train() pufferl before")
+    print(f"  vecenv = {vecenv}")
     vecenv = vecenv or load_env(env_name, args)
-    policy = policy or load_policy(args, vecenv, env_name)
+    print("--vecenv train() pufferl after")
+    policy = policy or load_policy(args, vecenv)
 
     if 'LOCAL_RANK' in os.environ:
         args['train']['device'] = torch.cuda.current_device()
@@ -909,11 +942,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
 
     all_logs = []
     while pufferl.global_step < train_config['total_timesteps']:
-        if train_config['device'] == 'cuda':
-            torch.compiler.cudagraph_mark_step_begin()
         pufferl.evaluate()
-        if train_config['device'] == 'cuda':
-            torch.compiler.cudagraph_mark_step_begin()
         logs = pufferl.train()
 
         if logs is not None:
@@ -936,6 +965,8 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
     pufferl.print_dashboard()
     model_path = pufferl.close()
     pufferl.logger.close(model_path)
+    print("======================LAST BREAKPOINT END TRAIN IN PUFFERL.PY======================")
+    #breakpoint()
     return all_logs
 
 def eval(env_name, args=None, vecenv=None, policy=None):
@@ -947,7 +978,7 @@ def eval(env_name, args=None, vecenv=None, policy=None):
     args['vec'] = dict(backend=backend, num_envs=1)
     vecenv = vecenv or load_env(env_name, args)
 
-    policy = policy or load_policy(args, vecenv, env_name)
+    policy = policy or load_policy(args, vecenv)
     ob, info = vecenv.reset()
     driver = vecenv.driver_env
     num_agents = vecenv.observation_space.shape[0]
@@ -1070,13 +1101,18 @@ def autotune(args=None, env_name=None, vecenv=None, policy=None):
     pufferlib.vector.autotune(make_env, batch_size=args['train']['env_batch_size'])
  
 def load_env(env_name, args):
+    print("    load_env pufferl.py begin")
     package = args['package']
     module_name = 'pufferlib.ocean' if package == 'ocean' else f'pufferlib.environments.{package}'
     env_module = importlib.import_module(module_name)
     make_env = env_module.env_creator(env_name)
-    return pufferlib.vector.make(make_env, env_kwargs=args['env'], **args['vec'])
+    print("      about to pufferlib.vector.make(make_env in load_env in pufferl.py")
+    thing = pufferlib.vector.make(make_env, env_kwargs=args['env'], **args['vec'])
+    print(f"    thing = {thing}")
+    print("    load_env pufferl.py end")
+    return thing
 
-def load_policy(args, vecenv, env_name=''):
+def load_policy(args, vecenv):
     package = args['package']
     module_name = 'pufferlib.ocean' if package == 'ocean' else f'pufferlib.environments.{package}'
     env_module = importlib.import_module(module_name)
@@ -1107,7 +1143,7 @@ def load_policy(args, vecenv, env_name=''):
 
     load_path = args['load_model_path']
     if load_path == 'latest':
-        load_path = max(glob.glob(f"experiments/{env_name}*.pt"), key=os.path.getctime)
+        load_path = max(glob.glob("experiments/*.pt"), key=os.path.getctime)
 
     if load_path is not None:
         state_dict = torch.load(load_path, map_location=device)
@@ -1160,19 +1196,24 @@ def load_config(env_name):
             raise pufferlib.APIUsageError('No config for env_name {}'.format(env_name))
 
     # Dynamic help menu from config
-    def puffer_type(value):
-        try:
-            return ast.literal_eval(value)
-        except:
-            return value
+    def auto_type(value):
+        """Type inference for numeric args that use 'auto' as a default value"""
+        if value == 'auto': return value
+        if value.isnumeric(): return int(value)
+        return float(value)
 
     for section in p.sections():
         for key in p[section]:
+            try:
+                value = ast.literal_eval(p[section][key])
+            except:
+                value = p[section][key]
+
             fmt = f'--{key}' if section == 'base' else f'--{section}.{key}'
             parser.add_argument(
                 fmt.replace('_', '-'),
-                default=puffer_type(p[section][key]),
-                type=puffer_type
+                default=value,
+                type=auto_type if value == 'auto' else type(value)
             )
 
     parser.add_argument('-h', '--help', default=argparse.SUPPRESS,
@@ -1213,6 +1254,7 @@ def main():
         export(env_name=env_name)
     else:
         raise pufferlib.APIUsageError(err)
+    print("END OF MAIN")
 
 if __name__ == '__main__':
     main()
