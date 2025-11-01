@@ -9,3 +9,7 @@ puffer eval puffer_ants --load-model-path experiments/ANTS-XXX.pt --train.device
 ```
 scripts/build_ocean.sh ants
 ```
+
+```
+python setup.py build_ext --inplace
+```
