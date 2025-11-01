@@ -29,6 +29,12 @@
 // Entities
 #define ENTITY_AGENT 0
 
+// Animations
+#define ANIM_IDLE 0
+#define ANIM_INTERACT 1
+#define ANIM_EAT 2
+
+
 #define MAX_CELL_OBS 3 // Maximum number of info per cell in observations
 #define LOG_BUFFER_SIZE 8192
 
@@ -553,6 +559,7 @@ void step_agent(PredPrey *env, int i) {
   Agent *agent = &env->agents[i];
 
   int action = env->actions[i];
+  agent->anim = ANIM_IDLE;
 
   /////////////////////////////////
   // Movement
@@ -626,6 +633,7 @@ void step_agent(PredPrey *env, int i) {
         agent->held_food = other_agent->held_food;
         other_agent->held_food = 0;
         env->agent_logs[i].steals += 1;
+        agent->anim = ANIM_INTERACT;
       }
     } 
 
@@ -638,7 +646,7 @@ void step_agent(PredPrey *env, int i) {
       env->items[next_grid_idx] = EMPTY;
       env->food_count -= 1;
       env->agent_logs[i].collects += 1;
-
+      agent->anim = ANIM_INTERACT;
     }
   }
   
@@ -647,6 +655,7 @@ void step_agent(PredPrey *env, int i) {
       agent->held_food -= 1;
       add_hp(env, i, HP_REWARD_FOOD);
       reward_agent(env, i, env->reward_food);
+      agent->anim = ANIM_EAT;
     }
   }
   return;
@@ -674,44 +683,21 @@ void c_step(PredPrey *env) {
   compute_observations(env);
 }
 
-// Animations
-#define ANIM_IDLE 0
-#define ANIM_MOVE 1
-#define ANIM_DEATH 2
-#define ANIM_ATTACK 3
-
+// Simplified animations to just be poses (1 frame only)
 typedef struct Animation Animation;
 struct Animation {
-    int num_frames;
-    int tiles_traveled;
-    int offset; // Number of tiles from the top of the sheet
-    int frames[10]; // Order of frames in sheet, left to right
+    int x; // x position in sprite sheet 
 };
 
-Animation ANIMATIONS[4] = {
+Animation ANIMATIONS[3] = {
     (Animation){ // ANIM_IDLE
-        .num_frames = 1,
-        .tiles_traveled = 0,
-        .offset = 0,
-        .frames = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+      .x = 0,
     },
-    (Animation){ // ANIM_MOVE
-        .num_frames = 6,
-        .tiles_traveled = 1,
-        .offset = 4,
-        .frames = {0, 1, 2, 3, 4, 5, 0, 0, 0, 0}
+    (Animation){ // ANIM_INTERACT
+        .x = 5
     },
-    (Animation){ // ANIM_DEATH
-        .num_frames = 3,
-        .tiles_traveled = 0,
-        .offset = 0,
-        .frames = {5, 6, 7, 0, 0, 0, 0, 0, 0, 0}
-    },
-    (Animation){ // ANIM_ATTACK
-        .num_frames = 2,
-        .tiles_traveled = 0,
-        .offset = 0,
-        .frames = {1, 2, 0, 0, 0, 0, 0, 0, 0, 0}
+    (Animation){ // ANIM_EAT
+      .x = 3,
     },
 };
 
@@ -789,7 +775,7 @@ void c_render(PredPrey *env) {
       int terrain_type = env->terrain[adr];
       int item_type = env->items[adr];
       int entity_id = env->pids[adr];
-      
+
       Vector2 pos = {
           .x = c * TILE_SIZE,
           .y = r * TILE_SIZE,
@@ -826,7 +812,7 @@ void c_render(PredPrey *env) {
             .y = y_pos,
         };        
         Rectangle source_rect = {
-          .x = 0,
+          .x = animation.x * SPRITE_SIZE,
           .y = starting_sprite_y,
           .width = SPRITE_SIZE,
           .height = SPRITE_SIZE
