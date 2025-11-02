@@ -116,7 +116,7 @@ void init(DroneDelivery *env) {
     env->anneal = 1.0f;
 
     float ablation = env->ablation;
-    if (ablation > 0.000001f && ablation < 0.2f) {
+    if (ablation >= 0.0f && ablation < 0.2f) {
         env->w_approach = 0.0f;
     } else if (ablation >= 0.2f && ablation < 0.4f) {
         env->w_position - 0.0f;
@@ -225,9 +225,9 @@ void compute_observations(DroneDelivery *env) {
         env->observations[idx++] = dy * INV_GRID_Y;
         env->observations[idx++] = dz * INV_GRID_Z;
 
-        env->observations[idx++] = agent->last_collision_reward;
-        env->observations[idx++] = agent->last_target_reward;
-        env->observations[idx++] = agent->last_abs_reward;
+        //env->observations[idx++] = agent->last_collision_reward;
+        //env->observations[idx++] = agent->last_target_reward;
+        //env->observations[idx++] = agent->last_abs_reward;
         // todo add other rewards like vel stab approach hover etc
 
         // Multiagent obs
