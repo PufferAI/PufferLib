@@ -770,6 +770,7 @@ void c_render(DroneDelivery *env) {
     env->box_k_max = 1.0f;
     env->box_k_min = 1.0f;
     env->box_k = 1.0f;
+    env->reward_dist = env->reward_min_dist;
     if (WindowShouldClose()) {
         c_close(env);
         exit(0);
