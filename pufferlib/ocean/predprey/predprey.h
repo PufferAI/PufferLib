@@ -13,7 +13,6 @@
 
 #define MAX_TIMESTEPS 1000 // If no agent died by then, we reset
 
-#define EMPTY 0
 
 // Tiles
 #define TILE_DIRT 0
@@ -22,6 +21,7 @@
 #define TILE_HOUSE 3
 
 // Items
+#define EMPTY 0
 #define ITEM_FOOD 10
 #define ITEM_WOOD 13
 #define ITEM_BED 8
@@ -35,7 +35,7 @@
 #define ANIM_EAT 2
 
 
-#define MAX_CELL_OBS 3 // Maximum number of info per cell in observations
+#define MAX_CELL_OBS 5 // Maximum number of info per cell in observations
 #define LOG_BUFFER_SIZE 8192
 
 #define SET_BIT(arr, i) (arr[(i) / 8] |= (1 << ((i) % 8)))
@@ -408,8 +408,12 @@ void compute_observations(PredPrey *env) {
         unsigned char item_idx = env->items[grid_idx];
         short entity_id = env->pids[grid_idx];
 
-        // First obs is items if any
-        env->observations[obs_idx++] = item_idx;
+        // First obs is terrain
+        env->observations[obs_idx++] = (float)env->terrain[grid_idx];
+        // Second is item 
+        env->observations[obs_idx++] = (float)item_idx;
+        // Thirs is entity id 
+        env->observations[obs_idx++] = (float)entity_id;
         float hp_norm = 0.0f;
         float food_norm = 0.0f;
         if (entity_id != -1) {
@@ -689,6 +693,7 @@ void step_agent(PredPrey *env, int i) {
       env->food_count -= 1;
       env->agent_logs[i].collects += 1;
       agent->anim = ANIM_INTERACT;
+      reward_agent(env, i, 0.1f);
     }
   }
   
@@ -713,9 +718,9 @@ void c_step(PredPrey *env) {
     if (env->agents[i].hp <= 0) {
       spawn_agent(env, i);
       continue;
-    }
+    } 
     step_agent(env, i);
-    remove_hp(env, i, HP_LOSS_PER_STEP);
+    remove_hp(env, i, HP_LOSS_PER_STEP); 
     if ((env->tick - env->agents[i].start_tick) % MAX_TIMESTEPS == 0 && env->agents[i].hp > 0) {
       add_agent_log(env, i);
     }

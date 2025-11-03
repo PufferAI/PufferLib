@@ -18,7 +18,7 @@ class PredPrey(pufferlib.PufferEnv):
                 buf=None,
                 seed=0,
             ):
-        obs_shape = ((2*vision+1)*(2*vision+1)*3)+1
+        obs_shape = ((2*vision+1)*(2*vision+1)*5)+1
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=255, shape=(obs_shape,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Discrete(7)
         self.render_mode = render_mode
