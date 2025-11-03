@@ -116,7 +116,7 @@ void init(DroneDelivery *env) {
     env->anneal = 1.0f;
 
     float ablation = env->ablation;
-    if (ablation >= 0.0f && ablation < 0.2f) {
+    if (ablation > 0.0001f && ablation < 0.2f) {
         env->w_approach = 0.0f;
     } else if (ablation >= 0.2f && ablation < 0.4f) {
         env->w_position - 0.0f;
