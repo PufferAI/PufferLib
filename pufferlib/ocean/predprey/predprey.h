@@ -115,6 +115,9 @@ struct Biome_idx {
 
   int *dirt_idx;
   int dirt_count;
+
+  int *house_idx;
+  int house_count;
 };
 
 typedef struct Renderer Renderer;
@@ -162,9 +165,11 @@ void init_biome_idx(PredPrey *env) {
   // I only do that once on load - will need to do that every reset if map changes
   env->biome_idxs.grass_idx = (int *)calloc(env->width * env->height, sizeof(int));
   env->biome_idxs.dirt_idx = (int *)calloc(env->width * env->height, sizeof(int));
+  env->biome_idxs.house_idx = (int *)calloc(env->width * env->height, sizeof(int));
 
   env->biome_idxs.grass_count = 0;
   env->biome_idxs.dirt_count = 0;
+  env->biome_idxs.house_count = 0;
 
   for (int r = 0; r < env->height; r++) {
     for (int c = 0; c < env->width; c++) {
@@ -174,6 +179,8 @@ void init_biome_idx(PredPrey *env) {
         env->biome_idxs.grass_idx[env->biome_idxs.grass_count++] = grid_idx;
       } else if (tile == TILE_DIRT) {
         env->biome_idxs.dirt_idx[env->biome_idxs.dirt_count++] = grid_idx;
+      } else if (tile == TILE_HOUSE) {
+        env->biome_idxs.house_idx[env->biome_idxs.house_count++] = grid_idx;
       }
     }
   }
@@ -187,6 +194,22 @@ void add_log(PredPrey *env, Log *log) {
   env->log.score += log->score;
   env->log.collects += log->collects;
   env->log.n += 1;
+}
+
+void add_agent_log(PredPrey *env, int agent_id) {
+  int time_alive = env->tick - env->agents[agent_id].start_tick;
+  assert(time_alive > 0);
+  env->agent_logs[agent_id].score = time_alive;
+  env->agent_logs[agent_id].steals /= time_alive;
+  env->agent_logs[agent_id].collects /= time_alive;
+  add_log(env, &env->agent_logs[agent_id]);
+  
+  //I don't fully reset because the agent might not be dead yet
+  //So I still need to keep track of collect & steal counts
+  //episode_returns will accumulate over life
+  //score will be overwritten next time
+  env->agent_logs[agent_id].steals *= time_alive;
+  env->agent_logs[agent_id].collects *= time_alive;
 }
 
 void init_cenv(PredPrey *env) {
@@ -205,6 +228,10 @@ void init_cenv(PredPrey *env) {
   env->terrain = (unsigned char *)calloc(env->width * env->height, sizeof(unsigned char));
   env->items = (unsigned char *)calloc(env->width * env->height, sizeof(unsigned char));
   env->pids = (short *)calloc(env->width * env->height, sizeof(short));
+
+  // make_grid_from_scratch(env);
+  memcpy(env->terrain, terrain, env->width * env->height * sizeof(unsigned char));
+  init_biome_idx(env);
 }
 
 void allocate_cenv(PredPrey *env) {
@@ -223,6 +250,7 @@ void allocate_cenv(PredPrey *env) {
 void free_biome(PredPrey *env) {
   free(env->biome_idxs.grass_idx);
   free(env->biome_idxs.dirt_idx);
+  free(env->biome_idxs.house_idx);
 }
 
 void c_close(PredPrey *env) {
@@ -251,6 +279,19 @@ void reward_agent(PredPrey *env, int agent_id, float reward) {
   // Simple helper function which loggs as well
   env->rewards[agent_id] += reward;
   env->agent_logs[agent_id].episode_return += reward;
+}
+
+bool is_obstacle(PredPrey *env, int idx) {
+  int tile = env->terrain[idx];
+  if (tile == TILE_WATER) {
+    return true;
+  }
+
+  short entity_id = env->pids[idx];
+  if (entity_id != -1){
+    return true;
+  }
+  return false; 
 }
 
 void init_foods(PredPrey *env) {
@@ -329,7 +370,11 @@ void regrow_food(PredPrey *env){
   // Regrow food in all dirt tiles that do not have food already with some probability
   for (int i = 0; i < env->biome_idxs.dirt_count; i++) {
     int grid_idx = env->biome_idxs.dirt_idx[i];
-    if (env->items[grid_idx] == EMPTY && rand() / (double)RAND_MAX < env->food_base_spawn_rate) {
+    if (
+      env->items[grid_idx] == EMPTY && 
+      rand() / (double)RAND_MAX < env->food_base_spawn_rate &&
+      env->food_count < env->max_food
+    ) {
       env->items[grid_idx] = ITEM_FOOD;
       env->food_count += 1;
     }
@@ -401,10 +446,9 @@ void add_hp(PredPrey *env, int agent_id, float hp) {
     agent->hp = MAX_HP;
   } else if (agent->hp <= 0) {
     agent->hp = 0;
-    env->agent_logs[agent->id].score = env->tick - agent->start_tick;
     reward_agent(env, agent_id, REWARD_DEATH);
     env->terminals[agent->id] = 1;
-    add_log(env, &env->agent_logs[agent_id]);
+    add_agent_log(env, agent_id);    
     remove_agent(env, agent_id);
     env->last_agent_dead_tick = env->tick;
   }
@@ -490,41 +534,49 @@ void make_grid_from_scratch(PredPrey *env){
   save_terrain_to_file(env, "terrain.h");
 }
 
-void spawn_agent(PredPrey *env, int i){
-  Agent *agent = &env->agents[i];
-  agent->id = i;
+void spawn_agent(PredPrey *env, int agent_id){
+  Agent *agent = &env->agents[agent_id];
+  agent->id = agent_id;
   agent->hp = 100;
   agent->start_tick = env->tick;
   agent->held_food = 0;
 
+  // Spawn only in the house area
   int adr = 0;
-
-  bool allocated = false;
-  while (!allocated) {
-    adr = rand() % (env->height * env->width);
-    if (env->pids[adr] == -1 && env->terrain[adr] != TILE_WATER) {
-      int r = adr / env->width;
-      int c = adr % env->width;
-      agent->r = r;
-      agent->c = c;
-      allocated = true;
+  for (int i = 0; i < env->biome_idxs.house_count; i++) {
+    adr = env->biome_idxs.house_idx[i];
+    if (is_obstacle(env, adr)){
+      continue;
     }
+    int r = adr / env->width;
+    int c = adr % env->width;
+    agent->r = r;
+    agent->c = c;
+    break;
   }
+
+  // bool allocated = false;
+  // while (!allocated) {
+  //   adr = rand() % (env->height * env->width);
+  //   if (!is_obstacle(env, adr)) {
+  //     int r = adr / env->width;
+  //     int c = adr % env->width;
+  //     agent->r = r;
+  //     agent->c = c;
+  //     allocated = true;
+  //   }
+  // }
   assert(env->pids[adr] == -1);
   env->pids[adr] = agent->id;
-  env->agent_logs[i] = (Log){0};
+  env->agent_logs[agent_id] = (Log){0};
 }
 void c_reset(PredPrey *env) {
+  
   env->tick = 0;
+  env->last_agent_dead_tick = 0;
+
   memset(env->agent_logs, 0, env->num_agents * sizeof(Log));
   env->log = (Log){0};
-  env->food_count = 0;
-  // env->foods->size = 0;
-  // memset(env->foods->indexes, 0, env->width * env->height * sizeof(int));
-
-  // make_grid_from_scratch(env);
-  memcpy(env->terrain, terrain, env->width * env->height * sizeof(unsigned char));
-  init_biome_idx(env); // TODO dump that for current map & memcpy
 
   memset(env->items, EMPTY, env->width * env->height * sizeof(unsigned char));
   // Carrefull here but -1 works with memset
@@ -534,28 +586,18 @@ void c_reset(PredPrey *env) {
     spawn_agent(env, i);
   }
 
+  env->food_count = 0;
   init_foods(env);
+
   memset(env->observations, 0, env->num_agents * env->obs_size * sizeof(float));
   memset(env->terminals, 0, env->num_agents * sizeof(unsigned char));
   memset(env->masks, 1, env->num_agents * sizeof(unsigned char));
+
   compute_observations(env);
 }
 
-bool is_obstacle(PredPrey *env, int idx) {
-  int tile = env->terrain[idx];
-  if (tile == TILE_WATER) {
-    return true;
-  }
-
-  short entity_id = env->pids[idx];
-  if (entity_id != -1){
-    return true;
-  }
-  return false; 
-}
-
 void step_agent(PredPrey *env, int i) {
-
+  
   Agent *agent = &env->agents[i];
 
   int action = env->actions[i];
@@ -591,15 +633,15 @@ void step_agent(PredPrey *env, int i) {
   int next_r = agent->r + dr;
   int next_c = agent->c + dc;
 
-  int prev_grid_idx = flat_idx(env, agent->r, agent->c);
+  int curr_grid_idx = flat_idx(env, agent->r, agent->c);
   int next_grid_idx = flat_idx(env, next_r, next_c);
   if (is_obstacle(env, next_grid_idx)) {
-    next_grid_idx = prev_grid_idx;
+    next_grid_idx = curr_grid_idx;
     next_r = agent->r;
     next_c = agent->c;
   }
   // update the grid tiles values
-  env->pids[prev_grid_idx] = -1;
+  env->pids[curr_grid_idx] = -1;
   env->pids[next_grid_idx] = agent->id;
   agent->r = next_r;
   agent->c = next_c;
@@ -625,9 +667,9 @@ void step_agent(PredPrey *env, int i) {
       break;
     }
 
-    int facing_tile = env->pids[facing_tile_idx];
-    if (facing_tile != -1) {
-      Agent *other_agent = &env->agents[facing_tile];
+    int facing_agent = env->pids[facing_tile_idx];
+    if (facing_agent != -1) {
+      Agent *other_agent = &env->agents[facing_agent];
       // Steal food from other agent
       if (other_agent->held_food > 0) {
         agent->held_food = other_agent->held_food;
@@ -637,13 +679,13 @@ void step_agent(PredPrey *env, int i) {
       }
     } 
 
-    if (env->items[next_grid_idx] == ITEM_FOOD) {
+    if (env->items[curr_grid_idx] == ITEM_FOOD) {
+      if (agent->held_food >= MAX_INVENTORY_ITEM) {
+        return;
+      }
       // Pick up food
       agent->held_food += 1;
-      if (agent->held_food > MAX_INVENTORY_ITEM) {
-        agent->held_food = MAX_INVENTORY_ITEM;
-      }
-      env->items[next_grid_idx] = EMPTY;
+      env->items[curr_grid_idx] = EMPTY;
       env->food_count -= 1;
       env->agent_logs[i].collects += 1;
       agent->anim = ANIM_INTERACT;
@@ -651,12 +693,13 @@ void step_agent(PredPrey *env, int i) {
   }
   
   if (action == EAT) {
-    if (agent->held_food > 0) {
-      agent->held_food -= 1;
-      add_hp(env, i, HP_REWARD_FOOD);
-      reward_agent(env, i, env->reward_food);
-      agent->anim = ANIM_EAT;
+    if (agent->held_food <= 0) {
+      return;
     }
+    agent->held_food -= 1;
+    add_hp(env, i, HP_REWARD_FOOD);
+    reward_agent(env, i, env->reward_food);
+    agent->anim = ANIM_EAT;
   }
   return;
 }
@@ -667,18 +710,24 @@ void c_step(PredPrey *env) {
   memset(env->rewards, 0, env->num_agents * sizeof(float));
 
   for (int i = 0; i < env->num_agents; i++) {
-    if (env->agents[i].hp == 0) {
+    if (env->agents[i].hp <= 0) {
       spawn_agent(env, i);
       continue;
     }
     step_agent(env, i);
     remove_hp(env, i, HP_LOSS_PER_STEP);
+    if ((env->tick - env->agents[i].start_tick) % MAX_TIMESTEPS == 0) {
+      add_agent_log(env, i);
+    }
   }
 
-  if (env->tick - env->last_agent_dead_tick >= MAX_TIMESTEPS) {
-    c_reset(env);
-    return;
-  }
+  // if (env->tick - env->last_agent_dead_tick >= MAX_TIMESTEPS) {
+  //   for (int i = 0; i < env->num_agents; i++) {
+  //     add_agent_log(env, i);
+  //   }
+  //   env->last_agent_dead_tick = env->tick;
+  // }
+
   spawn_items(env);
   compute_observations(env);
 }
