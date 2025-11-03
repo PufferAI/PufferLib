@@ -716,7 +716,7 @@ void c_step(PredPrey *env) {
     }
     step_agent(env, i);
     remove_hp(env, i, HP_LOSS_PER_STEP);
-    if ((env->tick - env->agents[i].start_tick) % MAX_TIMESTEPS == 0) {
+    if ((env->tick - env->agents[i].start_tick) % MAX_TIMESTEPS == 0 && env->agents[i].hp > 0) {
       add_agent_log(env, i);
     }
   }
