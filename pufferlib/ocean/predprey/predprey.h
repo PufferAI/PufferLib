@@ -693,7 +693,7 @@ void step_agent(PredPrey *env, int i) {
       env->food_count -= 1;
       env->agent_logs[i].collects += 1;
       agent->anim = ANIM_INTERACT;
-      reward_agent(env, i, 0.1f);
+      // reward_agent(env, i, 0.1f);
     }
   }
   
