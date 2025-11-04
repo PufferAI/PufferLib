@@ -57,7 +57,7 @@ ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
 class PuffeRL:
     def __init__(self, config, vecenv, policy, logger=None):
         # Backend perf optimization
-        torch.set_float32_matmul_precision('high')
+        self._configure_tf32()
         torch.backends.cudnn.deterministic = config['torch_deterministic']
         torch.backends.cudnn.benchmark = True
 
@@ -212,6 +212,30 @@ class PuffeRL:
         # Dashboard
         self.model_size = sum(p.numel() for p in policy.parameters() if p.requires_grad)
         self.print_dashboard(clear=True)
+
+    @staticmethod
+    def _configure_tf32():
+        '''Configure TF32 execution using the latest PyTorch API with fallbacks.'''
+        if not torch.backends.cuda.is_built():
+            return
+
+        try:
+            torch.backends.cuda.matmul.fp32_precision = 'tf32'
+        except Exception:
+            try:
+                torch.backends.cuda.matmul.allow_tf32 = True
+            except Exception:
+                pass
+
+        cudnn_conv = getattr(torch.backends.cudnn, 'conv', None)
+        if cudnn_conv is not None:
+            try:
+                cudnn_conv.fp32_precision = 'tf32'
+            except Exception:
+                try:
+                    torch.backends.cudnn.allow_tf32 = True
+                except Exception:
+                    pass
 
     @property
     def uptime(self):
