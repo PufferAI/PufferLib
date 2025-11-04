@@ -412,7 +412,7 @@ void compute_observations(PredPrey *env) {
         env->observations[obs_idx++] = (float)env->terrain[grid_idx];
         // Second is item 
         env->observations[obs_idx++] = (float)item_idx;
-        // Thirs is entity id 
+        // Thirds is entity id 
         env->observations[obs_idx++] = (float)entity_id;
         float hp_norm = 0.0f;
         float food_norm = 0.0f;
@@ -547,8 +547,9 @@ void spawn_agent(PredPrey *env, int agent_id){
 
   // Spawn only in the house area
   int adr = 0;
-  for (int i = 0; i < env->biome_idxs.house_count; i++) {
-    adr = env->biome_idxs.house_idx[i];
+  bool allocated = false;
+  while (!allocated){
+    adr = env->biome_idxs.house_idx[rand() % env->biome_idxs.house_count];
     if (is_obstacle(env, adr)){
       continue;
     }
@@ -556,7 +557,7 @@ void spawn_agent(PredPrey *env, int agent_id){
     int c = adr % env->width;
     agent->r = r;
     agent->c = c;
-    break;
+    allocated = true;
   }
 
   // bool allocated = false;
@@ -573,6 +574,29 @@ void spawn_agent(PredPrey *env, int agent_id){
   assert(env->pids[adr] == -1);
   env->pids[adr] = agent->id;
   env->agent_logs[agent_id] = (Log){0};
+}
+
+void teleport_rnd(PredPrey *env, int agent_id){
+  // Teleport an agent to a random free tile on the map
+  Agent *agent = &env->agents[agent_id];
+  int old_idx = flat_idx(env, agent->r, agent->c);
+
+  int adr = 0;
+  bool allocated = false;
+  while (!allocated){
+    adr = rand() % (env->width * env->height);
+    if (is_obstacle(env, adr)){
+      continue;
+    }
+    int r = adr / env->width;
+    int c = adr % env->width;
+    agent->r = r;
+    agent->c = c;
+    allocated = true;
+  }
+  assert(env->pids[adr] == -1);
+  env->pids[old_idx] = -1;
+  env->pids[adr] = agent->id;
 }
 void c_reset(PredPrey *env) {
   
@@ -693,7 +717,7 @@ void step_agent(PredPrey *env, int i) {
       env->food_count -= 1;
       env->agent_logs[i].collects += 1;
       agent->anim = ANIM_INTERACT;
-      // reward_agent(env, i, 0.1f);
+      // reward_agent(env, i, 0.05f);
     }
   }
   
@@ -723,6 +747,7 @@ void c_step(PredPrey *env) {
     remove_hp(env, i, HP_LOSS_PER_STEP); 
     if ((env->tick - env->agents[i].start_tick) % MAX_TIMESTEPS == 0 && env->agents[i].hp > 0) {
       add_agent_log(env, i);
+      teleport_rnd(env, i);
     }
   }
 
