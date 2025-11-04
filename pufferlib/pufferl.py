@@ -154,8 +154,10 @@ class PuffeRL:
                 eps=config['adam_eps'],
             )
         elif config['optimizer'] == 'muon':
+            import heavyball
             from heavyball import ForeachMuon
             warnings.filterwarnings(action='ignore', category=UserWarning, module=r'heavyball.*')
+            heavyball.utils.compile_mode = "default"
 
             # # optionally a little bit better/faster alternative to newtonschulz iteration
             # import heavyball.utils
@@ -449,8 +451,8 @@ class PuffeRL:
         y_pred = self.values.flatten()
         y_true = advantages.flatten() + self.values.flatten()
         var_y = y_true.var()
-        explained_var = torch.nan if var_y == 0 else 1 - (y_true - y_pred).var() / var_y
-        losses['explained_variance'] = explained_var.item()
+        explained_var = torch.nan if var_y == 0 else (1 - (y_true - y_pred).var() / var_y).item()
+        losses['explained_variance'] = explained_var
 
         profile.end()
         logs = None
@@ -548,7 +550,7 @@ class PuffeRL:
         return model_path
 
     def print_dashboard(self, clear=False, idx=[0],
-            c1='[cyan]', c2='[white]', b1='[bright_cyan]', b2='[bright_white]'):
+            c1='[cyan]', c2='[dim default]', b1='[bright_cyan]', b2='[default]'):
         config = self.config
         sps = dist_sum(self.sps, config['device'])
         agent_steps = dist_sum(self.global_step, config['device'])
@@ -579,19 +581,19 @@ class PuffeRL:
         idx[0] = (idx[0] - 1) % 10
             
         s = Table(box=None, expand=True)
-        remaining = 'A hair past a freckle'
+        remaining = f'{b2}A hair past a freckle{c2}'
         if sps != 0:
             remaining = duration((config['total_timesteps'] - agent_steps)/sps, b2, c2)
 
         s.add_column(f"{c1}Summary", justify='left', vertical='top', width=10)
         s.add_column(f"{c1}Value", justify='right', vertical='top', width=14)
-        s.add_row(f'{c2}Env', f'{b2}{config["env"]}')
-        s.add_row(f'{c2}Params', abbreviate(self.model_size, b2, c2))
-        s.add_row(f'{c2}Steps', abbreviate(agent_steps, b2, c2))
-        s.add_row(f'{c2}SPS', abbreviate(sps, b2, c2))
-        s.add_row(f'{c2}Epoch', f'{b2}{self.epoch}')
-        s.add_row(f'{c2}Uptime', duration(self.uptime, b2, c2))
-        s.add_row(f'{c2}Remaining', remaining)
+        s.add_row(f'{b2}Env', f'{b2}{config["env"]}')
+        s.add_row(f'{b2}Params', abbreviate(self.model_size, b2, c2))
+        s.add_row(f'{b2}Steps', abbreviate(agent_steps, b2, c2))
+        s.add_row(f'{b2}SPS', abbreviate(sps, b2, c2))
+        s.add_row(f'{b2}Epoch', f'{b2}{self.epoch}')
+        s.add_row(f'{b2}Uptime', duration(self.uptime, b2, c2))
+        s.add_row(f'{b2}Remaining', remaining)
 
         delta = profile.eval['buffer'] + profile.train['buffer']
         p = Table(box=None, expand=True, show_header=False)
@@ -599,21 +601,21 @@ class PuffeRL:
         p.add_column(f"{c1}Time", justify="right", width=8)
         p.add_column(f"{c1}%", justify="right", width=4)
         p.add_row(*fmt_perf('Evaluate', b1, delta, profile.eval, b2, c2))
-        p.add_row(*fmt_perf('  Forward', c2, delta, profile.eval_forward, b2, c2))
-        p.add_row(*fmt_perf('  Env', c2, delta, profile.env, b2, c2))
-        p.add_row(*fmt_perf('  Copy', c2, delta, profile.eval_copy, b2, c2))
-        p.add_row(*fmt_perf('  Misc', c2, delta, profile.eval_misc, b2, c2))
+        p.add_row(*fmt_perf('  Forward', b2, delta, profile.eval_forward, b2, c2))
+        p.add_row(*fmt_perf('  Env', b2, delta, profile.env, b2, c2))
+        p.add_row(*fmt_perf('  Copy', b2, delta, profile.eval_copy, b2, c2))
+        p.add_row(*fmt_perf('  Misc', b2, delta, profile.eval_misc, b2, c2))
         p.add_row(*fmt_perf('Train', b1, delta, profile.train, b2, c2))
-        p.add_row(*fmt_perf('  Forward', c2, delta, profile.train_forward, b2, c2))
-        p.add_row(*fmt_perf('  Learn', c2, delta, profile.learn, b2, c2))
-        p.add_row(*fmt_perf('  Copy', c2, delta, profile.train_copy, b2, c2))
-        p.add_row(*fmt_perf('  Misc', c2, delta, profile.train_misc, b2, c2))
+        p.add_row(*fmt_perf('  Forward', b2, delta, profile.train_forward, b2, c2))
+        p.add_row(*fmt_perf('  Learn', b2, delta, profile.learn, b2, c2))
+        p.add_row(*fmt_perf('  Copy', b2, delta, profile.train_copy, b2, c2))
+        p.add_row(*fmt_perf('  Misc', b2, delta, profile.train_misc, b2, c2))
 
         l = Table(box=None, expand=True, )
         l.add_column(f'{c1}Losses', justify="left", width=16)
         l.add_column(f'{c1}Value', justify="right", width=8)
         for metric, value in self.losses.items():
-            l.add_row(f'{c2}{metric}', f'{b2}{value:.3f}')
+            l.add_row(f'{b2}{metric}', f'{b2}{value:.3f}')
 
         monitor = Table(box=None, expand=True, pad_edge=False)
         monitor.add_row(s, p, l)
@@ -640,7 +642,7 @@ class PuffeRL:
                 continue
 
             u = left if i % 2 == 0 else right
-            u.add_row(f'{c2}{metric}', f'{b2}{value:.3f}')
+            u.add_row(f'{b2}{metric}', f'{b2}{value:.3f}')
             i += 1
             if i == 30:
                 break
@@ -678,15 +680,15 @@ def compute_puff_advantage(values, rewards, terminals,
 
 def abbreviate(num, b2, c2):
     if num < 1e3:
-        return str(num)
+        return f'{b2}{num}{c2}'
     elif num < 1e6:
-        return f'{num/1e3:.1f}K'
+        return f'{b2}{num/1e3:.1f}{c2}K'
     elif num < 1e9:
-        return f'{num/1e6:.1f}M'
+        return f'{b2}{num/1e6:.1f}{c2}M'
     elif num < 1e12:
-        return f'{num/1e9:.1f}B'
+        return f'{b2}{num/1e9:.1f}{c2}B'
     else:
-        return f'{num/1e12:.2f}T'
+        return f'{b2}{num/1e12:.2f}{c2}T'
 
 def duration(seconds, b2, c2):
     if seconds < 0:
@@ -728,7 +730,8 @@ class Profile:
         return self.profiles[name]
 
     def __call__(self, name, epoch, nest=False):
-        if epoch % self.frequency != 0:
+        # Skip profiling the first few epochs, which are noisy due to setup
+        if (epoch + 1) % self.frequency != 0:
             return
 
         #if torch.cuda.is_available():
@@ -744,8 +747,9 @@ class Profile:
     def pop(self, end):
         profile = self.profiles[self.stack.pop()]
         delta = end - profile['start']
-        profile['elapsed'] += delta
         profile['delta'] += delta
+        # Multiply delta by freq to account for skipped epochs
+        profile['elapsed'] += delta * self.frequency
 
     def end(self):
         #if torch.cuda.is_available():
@@ -795,22 +799,25 @@ class Utilization(Thread):
     def stop(self):
         self.stopped = True
 
-def downsample(arr, m):
-    if len(arr) < m:
-        return arr
+def downsample(data_list, num_points):
+    if not data_list or num_points <= 0:
+        return []
+    if num_points == 1:
+        return [data_list[-1]]
+    if len(data_list) <= num_points:
+        return data_list
 
-    if m == 0:
-        return [arr[-1]]
+    last = data_list[-1]
+    data_list = data_list[:-1]
 
-    orig_arr = arr
-    last = arr[-1]
-    arr = arr[:-1]
-    arr = np.array(arr)
-    n = len(arr)
-    n = (n//m)*m
-    arr = arr[-n:]
-    downsampled = arr.reshape(m, -1).mean(axis=1)
-    return np.concatenate([downsampled, [last]])
+    data_np = np.array(data_list)
+    num_points -= 1  # one down for the last one
+
+    n = (len(data_np) // num_points) * num_points
+    data_np = data_np[-n:] if n > 0 else data_np
+    downsampled = data_np.reshape(num_points, -1).mean(axis=1)
+
+    return downsampled.tolist() + [last]
 
 class NoLogger:
     def __init__(self, args):
@@ -841,13 +848,18 @@ class NeptuneLogger:
         self.neptune = neptune
         for k, v in pufferlib.unroll_nested_dict(args):
             neptune[k].append(v)
+        self.should_upload_model = not args['no_model_upload']
 
     def log(self, logs, step):
         for k, v in logs.items():
             self.neptune[k].append(v, step=step)
 
-    def close(self, model_path):
+    def upload_model(self, model_path):
         self.neptune['model'].track_files(model_path)
+
+    def close(self, model_path):
+        if self.should_upload_model:
+            self.upload_model(model_path)
         self.neptune.stop()
 
     def download(self):
@@ -869,14 +881,19 @@ class WandbLogger:
         )
         self.wandb = wandb
         self.run_id = wandb.run.id
+        self.should_upload_model = not args['no_model_upload']
 
     def log(self, logs, step):
         self.wandb.log(logs, step=step)
 
-    def close(self, model_path):
+    def upload_model(self, model_path):
         artifact = self.wandb.Artifact(self.run_id, type='model')
         artifact.add_file(model_path)
         self.wandb.run.log_artifact(artifact)
+
+    def close(self, model_path):
+        if self.should_upload_model:
+            self.upload_model(model_path)
         self.wandb.finish()
 
     def download(self):
@@ -884,8 +901,8 @@ class WandbLogger:
         data_dir = artifact.download()
         model_file = max(os.listdir(data_dir))
         return f'{data_dir}/{model_file}'
- 
-def train(env_name, args=None, vecenv=None, policy=None, logger=None):
+
+def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_stop_early=None):
     args = args or load_config(env_name)
 
     # Assume TorchRun DDP is used if LOCAL_RANK is set
@@ -937,15 +954,19 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
             if pufferl.global_step > 0.20*train_config['total_timesteps']:
                 all_logs.append(logs)
 
+            if should_stop_early is not None and should_stop_early(logs):
+                model_path = pufferl.close()
+                pufferl.logger.close(model_path)
+                return all_logs
+
     print("Final eval")
     # Final eval. You can reset the env here, but depending on
     # your env, this can skew data (i.e. you only collect the shortest
     # rollouts within a fixed number of epochs)
-    i = 0
-    stats = {}
-    while i < 32 or not stats:
+    for i in range(128):  # Run eval for at least 32, but put a hard stop at 128.
         stats = pufferl.evaluate()
-        i += 1
+        if i >= 32 and stats:
+            break
 
     logs = pufferl.mean_and_log()
     if logs is not None:
@@ -1014,6 +1035,9 @@ def eval(env_name, args=None, vecenv=None, policy=None):
             imageio.mimsave(args['gif_path'], frames, fps=args['fps'], loop=0)
             print(f'Saved {len(frames)} frames to {args["gif_path"]}')
 
+def stop_if_loss_nan(logs):
+    return any("losses/" in k and np.isnan(v) for k, v in logs.items())
+
 def sweep(args=None, env_name=None):
     args = args or load_config(env_name)
     if not args['wandb'] and not args['neptune']:
@@ -1033,13 +1057,27 @@ def sweep(args=None, env_name=None):
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
+
         sweep.suggest(args)
-        total_timesteps = args['train']['total_timesteps']
-        all_logs = train(env_name, args=args)
+        all_logs = train(env_name, args=args, should_stop_early=stop_if_loss_nan)
         all_logs = [e for e in all_logs if target_key in e]
+
+        if not all_logs:
+            sweep.observe(args, 0, 0, is_failure=True)
+            continue
+
+        total_timesteps = args['train']['total_timesteps']
+
         scores = downsample([log[target_key] for log in all_logs], points_per_run)
         costs = downsample([log['uptime'] for log in all_logs], points_per_run)
         timesteps = downsample([log['agent_steps'] for log in all_logs], points_per_run)
+
+        if len(timesteps) > 0 and timesteps[-1] < 0.7 * total_timesteps:  # 0.7 is arbitrary
+            s = scores.pop()
+            c = costs.pop()
+            args['train']['total_timesteps'] = timesteps.pop()
+            sweep.observe(args, s, c, is_failure=True)
+
         for score, cost, timestep in zip(scores, costs, timesteps):
             args['train']['total_timesteps'] = timestep
             sweep.observe(args, score, cost)
@@ -1068,6 +1106,7 @@ def profile(args=None, env_name=None, vecenv=None, policy=None):
 
 def export(args=None, env_name=None, vecenv=None, policy=None):
     args = args or load_config(env_name)
+    args['vec'] = dict(backend='Serial', num_envs=1)
     vecenv = vecenv or load_env(env_name, args)
     policy = policy or load_policy(args, vecenv)
 
@@ -1192,6 +1231,7 @@ def make_parser():
     parser.add_argument('--neptune', action='store_true', help='Use neptune for logging')
     parser.add_argument('--neptune-name', type=str, default='pufferai')
     parser.add_argument('--neptune-project', type=str, default='ablations')
+    parser.add_argument('--no-model-upload', action='store_true', help='Do not upload models to wandb or neptune')
     parser.add_argument('--local-rank', type=int, default=0, help='Used by torchrun for DDP')
     parser.add_argument('--tag', type=str, default=None, help='Tag for experiment')
     return parser

@@ -39,6 +39,11 @@ const Color FENCE_COLOR = {240, 210, 130, 255};
 const Color COIN_COLOR = {240, 210, 130, 255};
 const Color GROUND_COLOR = {128, 227, 153, 255};
 
+const Color PUFF_RED = (Color){187, 0, 0, 255};
+const Color PUFF_CYAN = (Color){0, 187, 187, 255};
+const Color PUFF_WHITE = (Color){241, 241, 241, 241};
+const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
+
 // UTILS
 typedef struct {
     float x;
@@ -62,6 +67,10 @@ float to_y_pixel(float y){
     return WINDOW_HEIGHT - y * FACTOR;
 }
 
+float randf() {
+    return (float)rand() / (float)RAND_MAX;
+}
+
 // OBJECTS
 typedef struct {
     float x;
@@ -73,10 +82,6 @@ typedef struct {
     float prev_y;
     Color c;
 } Ball;
-
-void ball_display(Ball* ball){
-    DrawCircleV((Vector2){to_x_pixel(ball->x), to_y_pixel(ball->y)}, to_p(ball->r), ball->c);
-}
 
 void ball_move(Ball* ball){
     ball->prev_x = ball->x;
@@ -258,8 +263,8 @@ void agent_display(Agent *agent, float bx, float by) {
     float dist = sqrtf(ballX * ballX + ballY * ballY);
     float eyeX = 0, eyeY = 0;
     if (dist > 0) {
-        float eyeX = ballX / dist;
-        float eyeY = ballY / dist;
+        eyeX = ballX / dist;
+        eyeY = ballY / dist;
     }
 
     // Draw white of the eye
@@ -391,6 +396,7 @@ typedef struct {
     float* bot_observations; // Optional, for bot control
     float* bot_actions; // Optional, for bot control
     int tick;
+    Texture2D puffers;
 } SlimeVolley;
 
 
@@ -417,8 +423,8 @@ void init(SlimeVolley* env) {
 void c_reset(SlimeVolley* env) {
     env->tick = 0;
     env->delay_frames = INIT_DELAY_FRAMES;
-    float ball_vx = ((float) rand() / RAND_MAX)*40.0f - 20.0f;
-    float ball_vy = ((float) rand() / RAND_MAX)*15.0f + 10.0f;
+    float ball_vx = 40.0f*randf() - 20.0f;
+    float ball_vy = 15.0f*randf() + 10.0f;
     *env->ball = (Ball){
         .x = 0,
         .y = REF_W/4,
@@ -444,7 +450,7 @@ void c_reset(SlimeVolley* env) {
             .dir = i == 0 ? -1 : 1,
             .x = i == 0 ? -REF_W/4 : REF_W/4,
             .y = REF_U,
-            .c = i == 0 ? AGENT_LEFT_COLOR : AGENT_RIGHT_COLOR,
+            .c = i == 0 ? PUFF_RED : PUFF_CYAN,
             .r = 1.5,
             .lives = MAXLIVES,
             .observations = observations
@@ -464,8 +470,8 @@ float clip(float val, float min, float max) {
 }
 
 void new_match(SlimeVolley* env) {
-    float ball_vx = ((float) rand() / RAND_MAX)*40.0f - 20.0f;
-    float ball_vy = ((float) rand() / RAND_MAX)*15.0f + 10.0f;
+    float ball_vx = 40.0f*randf() - 20.0f;
+    float ball_vy = 15.0f*randf() + 10.0f;
     *env->ball = (Ball){
         .x = 0,
         .y = REF_W/4,
@@ -575,8 +581,10 @@ void c_step(SlimeVolley* env) {
 // Required function. Should handle creating the client on first call
 void c_render(SlimeVolley* env) {
     if (!IsWindowReady()) {
+        SetConfigFlags(FLAG_MSAA_4X_HINT);
         InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "PufferLib SlimeVolley");
-        SetTargetFPS(60);
+        SetTargetFPS(50); // From original
+        env->puffers = LoadTexture("resources/shared/puffers.png");
     }
 
     // Standard across our envs so exiting is always the same
@@ -584,11 +592,35 @@ void c_render(SlimeVolley* env) {
         exit(0);
     }
     BeginDrawing();
-    ClearBackground(BACKGROUND_COLOR);
+    ClearBackground(PUFF_BACKGROUND);
     wall_display(env->ground);
     wall_display(env->fence);
-    ball_display(env->fence_stub);
-    ball_display(env->ball);
+
+    // Fence
+    Ball* stub = env->fence_stub;
+    DrawCircleV(
+        (Vector2){to_x_pixel(stub->x), to_y_pixel(stub->y)},
+        to_p(stub->r), stub->c
+    );
+
+    Ball* puff = env->ball;
+    DrawTexturePro(
+        env->puffers,
+        (Rectangle){
+            0,
+            (puff->vx > 0 ? 576 : 608),
+            32, 32,
+        },
+        (Rectangle){
+            to_x_pixel(puff->x) - 16,
+            to_y_pixel(puff->y) - 16,
+            32,
+           32 
+        },
+        (Vector2){0, 0},
+        0,
+        WHITE
+    );
 
     for (int i=0; i<2; i++) {
         agent_display(&env->agents[i], env->ball->x, env->ball->y);

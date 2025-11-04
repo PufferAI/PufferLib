@@ -190,47 +190,6 @@ class Terraform(nn.Module):
         return action, value
 
 
-class G2048(nn.Module):
-    def __init__(self, env, cnn_channels=32, hidden_size=128):
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.is_continuous = False
-
-        self.cnn = nn.Sequential(
-            pufferlib.pytorch.layer_init(
-                nn.Conv2d(1, cnn_channels, 2, stride=1)),
-            nn.GELU(),
-            pufferlib.pytorch.layer_init(
-                nn.Conv2d(cnn_channels, cnn_channels, 2, stride=1)),
-            nn.Flatten(),
-            nn.GELU(),
-            pufferlib.pytorch.layer_init(
-            nn.Linear(128, hidden_size), std=0.01),
-        )
-
-        self.decoder = pufferlib.pytorch.layer_init(
-            nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
-        self.value = pufferlib.pytorch.layer_init(
-            nn.Linear(hidden_size, 1), std=1)
-
-    def forward_eval(self, observations, state=None):
-        hidden = self.encode_observations(observations)
-        actions, value = self.decode_actions(hidden)
-        return actions, value
-
-    def forward(self, x, state=None):
-        return self.forward_eval(x, state)
-
-    def encode_observations(self, observations, state=None):
-        #observations = F.one_hot(observations.long(), 16).view(-1, 16, 4, 4).float()
-        observations = observations.float().view(-1, 1, 4, 4)
-        return self.cnn(observations)
-
-    def decode_actions(self, hidden):
-        action = self.decoder(hidden)
-        value = self.value(hidden)
-        return action, value
-
 class Snake(nn.Module):
     def __init__(self, env, cnn_channels=32, hidden_size=128):
         super().__init__()
@@ -865,81 +824,6 @@ class Drive(nn.Module):
         action = self.actor(flat_hidden)
         action = torch.split(action, self.atn_dim, dim=1)
         value = self.value_fn(flat_hidden)
-        return action, value
-
-class Tetris(nn.Module):
-    def __init__(
-        self, 
-        env, 
-        cnn_channels=32,
-        input_size=128,
-        hidden_size=128,
-        **kwargs
-    ):
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.cnn_channels =  cnn_channels   
-        self.n_cols = env.n_cols
-        self.n_rows = env.n_rows
-        self.scalar_input_size = (6 + 7 * (env.deck_size + 1))
-        self.flat_conv_size = cnn_channels * 3 * 10
-        self.is_continuous = isinstance(env.single_action_space, pufferlib.spaces.Box)
-
-        self.conv_grid = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Conv2d(2, cnn_channels, kernel_size=(5, 3), stride=(2,1), padding=(2,1))),
-            nn.ReLU(),
-            pufferlib.pytorch.layer_init(nn.Conv2d(cnn_channels, cnn_channels, kernel_size=(5, 3), stride=(2,1), padding=(2,1))),
-            nn.ReLU(),
-            pufferlib.pytorch.layer_init(nn.Conv2d(cnn_channels, cnn_channels, kernel_size=(5, 5), stride=(2,1), padding=(2,2))),
-            nn.ReLU(),
-            nn.Flatten(),
-            pufferlib.pytorch.layer_init(nn.Linear(self.flat_conv_size, input_size)),
-        )
-
-        self.fc_scalar = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(self.scalar_input_size, input_size)),
-            nn.ReLU(),
-        )
-
-        self.proj = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(2 * input_size, hidden_size)),
-            nn.ReLU(),
-        )
-
-        self.actor = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, 7), std=0.01),
-            nn.Flatten()
-        )
-
-        self.value_fn = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, 1)),
-            nn.ReLU(),
-        )
-
-    def forward(self, observations, state=None):
-        hidden = self.encode_observations(observations) 
-        actions, value = self.decode_actions(hidden)
-        return actions, value
-
-    def forward_train(self, x, state=None):
-        return self.forward(x, state)
-
-    def encode_observations(self, observations, state=None):
-        B = observations.shape[0]
-        grid_info = observations[:, 0:(self.n_cols * self.n_rows)].view(B, self.n_rows, self.n_cols)  # (B, n_rows, n_cols)
-        grid_info = torch.stack([(grid_info == 1).float(), (grid_info == 2).float()], dim=1)  # (B, 2, n_rows, n_cols)
-        scalar_info = observations[:, (self.n_cols * self.n_rows):(self.n_cols * self.n_rows + self.scalar_input_size)].float()
-
-        grid_feat = self.conv_grid(grid_info)  # (B, input_size)
-        scalar_feat = self.fc_scalar(scalar_info)  # (B, input_size)
-
-        combined = torch.cat([grid_feat, scalar_feat], dim=-1)  # (B, 2 * input_size)
-        features = self.proj(combined)  # (B, hidden_size)
-        return features
-
-    def decode_actions(self, hidden):
-        action = self.actor(hidden)  # (B, 4 * n_cols)
-        value = self.value_fn(hidden)  # (B, 1)
         return action, value
 
 class Drone(nn.Module):

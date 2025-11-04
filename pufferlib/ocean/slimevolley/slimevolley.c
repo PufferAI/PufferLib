@@ -20,9 +20,9 @@ void abranti_simple_policy(float* obs, float* action) {
 }
 
 void random_policy(float* obs, float* action) {
-    action[0] = rand() * 2 - 1;
-    action[1] = rand() * 2 - 1;
-    action[2] = rand() * 2 - 1;
+    action[0] = 2*randf() - 1;
+    action[1] = 2*randf() - 1;
+    action[2] = 2*randf() - 1;
 }
 
 int main() {
@@ -41,20 +41,18 @@ int main() {
     fprintf(stderr, "num agents: %d\n", env.num_agents);
 
     while (!WindowShouldClose()) {
-        for (int i=0; i<env.num_agents; i++) {
-            if (i == 0) {
-                random_policy(&env.observations[12*i], &env.actions[3*i]);
-                
-            } else {
-                abranti_simple_policy(&env.observations[12*i], &env.actions[3*i]);
-            }
+        env.actions[0] = 0.0;
+        env.actions[1] = 0.0;
+        env.actions[2] = 0.0;
+        if (IsKeyDown(KEY_LEFT_SHIFT)) {
+            if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 1.0;
+            if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) env.actions[1] = 1.0;
+            if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W) || IsKeyDown(KEY_SPACE)) env.actions[2] = 1.0;
+        } else {
+            abranti_simple_policy(env.observations, env.actions);
         }
         c_step(&env);
         c_render(&env);
-        if (env.terminals[0] || env.terminals[1]) {
-            fprintf(stderr, "Episode ended. Rewards: %f, %f\n", env.rewards[0], env.rewards[1]);
-            break;
-        }
     }
 
     // Try to clean up after yourself

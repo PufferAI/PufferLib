@@ -5,6 +5,7 @@
 #include <math.h>
 #include <string.h>
 #include "raylib.h"
+#define max(a, b) (((a) > (b)) ? (a) : (b))
 
 #define SIZE 4
 #define EMPTY 0
@@ -12,15 +13,20 @@
 #define DOWN 2
 #define LEFT 3
 #define RIGHT 4
+#define BASE_MAX_TICKS 2000
 
 // Precomputed constants
-#define REWARD_MULTIPLIER 0.09090909f
+#define REWARD_MULTIPLIER 0.0625f
 #define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
+
+// To normalize perf from 0 to 1. Reachable with hidden size 256.
+#define OBSERVED_MAX_TILE 4096.0f
 
 typedef struct {
     float perf;
     float score;
+    float merge_score;
     float episode_return;
     float episode_length;
     float n;
@@ -36,6 +42,8 @@ typedef struct {
     int tick;
     unsigned char grid[SIZE][SIZE];
     float episode_reward;           // Accumulate episode reward
+    int moves_made;
+    int max_episode_ticks;          // Dynamic max_ticks based on score
     
     // Cached values to avoid recomputation
     int empty_count;
@@ -93,9 +101,24 @@ static inline void update_empty_count(Game* game) {
     game->empty_count = count;
 }
 
+static inline unsigned char get_max_tile(Game* game) {
+    unsigned char max_tile = 0;
+    // Unroll loop for better performance
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+            if (game->grid[i][j] > max_tile) {
+                max_tile = game->grid[i][j];
+            }
+        }
+    }
+    return max_tile;
+}
+
 void add_log(Game* game) {
-    game->log.score = (float)(1 << game->score);
-    game->log.perf += ((float)game->score) * REWARD_MULTIPLIER;
+    unsigned char s = get_max_tile(game);
+    game->log.score += (float)(1 << s);
+    game->log.perf += (float)(1 << s) / OBSERVED_MAX_TILE;
+    game->log.merge_score += (float)game->score;
     game->log.episode_length += game->tick;
     game->log.episode_return += game->episode_reward;
     game->log.n += 1;
@@ -114,6 +137,8 @@ void c_reset(Game* game) {
     game->empty_count = SIZE * SIZE;
     game->game_over_cached = false;
     game->grid_changed = true;
+    game->moves_made = 0;
+    game->max_episode_ticks = BASE_MAX_TICKS;
     
     if (game->terminals) game->terminals[0] = 0;
     
@@ -153,6 +178,7 @@ void add_random_tile(Game* game) {
     if (chosen_pos >= 0) {
         int i = chosen_pos / SIZE;
         int j = chosen_pos % SIZE;
+        // Implement the 90% 2, 10% 4 rule
         game->grid[i][j] = (rand() % 10 == 0) ? 2 : 1;
         game->empty_count--;
         game->grid_changed = true;
@@ -162,7 +188,7 @@ void add_random_tile(Game* game) {
 }
 
 // Optimized slide and merge with fewer memory operations
-static inline bool slide_and_merge(unsigned char* row, float* reward) {
+static inline bool slide_and_merge(unsigned char* row, float* reward, float* score_increase) {
     bool moved = false;
     int write_pos = 0;
     
@@ -183,6 +209,7 @@ static inline bool slide_and_merge(unsigned char* row, float* reward) {
         if (row[i] != EMPTY && row[i] == row[i + 1]) {
             row[i]++;
             *reward += ((float)row[i]) * REWARD_MULTIPLIER;
+            *score_increase += (float)(1 << (int)row[i]);
             // Shift remaining elements left
             for (int j = i + 1; j < SIZE - 1; j++) {
                 row[j] = row[j + 1];
@@ -195,7 +222,7 @@ static inline bool slide_and_merge(unsigned char* row, float* reward) {
     return moved;
 }
 
-bool move(Game* game, int direction, float* reward) {
+bool move(Game* game, int direction, float* reward, float* score_increase) {
     bool moved = false;
     unsigned char temp[SIZE];
     
@@ -207,7 +234,7 @@ bool move(Game* game, int direction, float* reward) {
                 temp[i] = game->grid[idx][col];
             }
             
-            if (slide_and_merge(temp, reward)) {
+            if (slide_and_merge(temp, reward, score_increase)) {
                 moved = true;
                 // Write back column
                 for (int i = 0; i < SIZE; i++) {
@@ -224,7 +251,7 @@ bool move(Game* game, int direction, float* reward) {
                 temp[i] = game->grid[row][idx];
             }
             
-            if (slide_and_merge(temp, reward)) {
+            if (slide_and_merge(temp, reward, score_increase)) {
                 moved = true;
                 // Write back row
                 for (int i = 0; i < SIZE; i++) {
@@ -235,9 +262,7 @@ bool move(Game* game, int direction, float* reward) {
         }
     }
 
-    if (!moved) {
-        *reward = INVALID_MOVE_PENALTY;
-    } else {
+    if (moved) {
         game->grid_changed = true;
         game->game_over_cached = false; // Invalidate cache
     }
@@ -280,34 +305,28 @@ bool is_game_over(Game* game) {
     return true;
 }
 
-// Optimized score calculation
-static inline unsigned char calc_score(Game* game) {
-    unsigned char max_tile = 0;
-    // Unroll loop for better performance
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            if (game->grid[i][j] > max_tile) {
-                max_tile = game->grid[i][j];
-            }
-        }
-    }
-    return max_tile;
-}
-
 void c_step(Game* game) {
     float reward = 0.0f;
-    bool did_move = move(game, game->actions[0] + 1, &reward);
+    float score_add = 0.0f;
+    bool did_move = move(game, game->actions[0] + 1, &reward, &score_add);
     game->tick++;
     
     if (did_move) {
+        game->moves_made++;
         add_random_tile(game);
-        game->score = calc_score(game);
+        game->score += score_add;
         update_empty_count(game); // Update after adding tile
+        // This is to limit infinite invalid moves during eval
+        // Don't need to be tight. Don't need to show to user?
+        game->max_episode_ticks = max(BASE_MAX_TICKS, game->score / 10);
+    } else {
+        reward = INVALID_MOVE_PENALTY;
     }
-    
+
     bool game_over = is_game_over(game);
-    game->terminals[0] = game_over ? 1 : 0;
-    
+    bool max_ticks_reached = game->tick >= game->max_episode_ticks;
+    game->terminals[0] = (game_over || max_ticks_reached) ? 1 : 0;
+
     if (game_over) {
         reward = GAME_OVER_PENALTY;
     }
@@ -369,8 +388,11 @@ void c_render(Game* game) {
     }
     
     // Draw score (format once per frame)
-    snprintf(score_text, sizeof(score_text), "Score: %d", 1 << game->score);
+    snprintf(score_text, sizeof(score_text), "Score: %d", game->score);
     DrawText(score_text, 10, px * SIZE + 10, 24, PUFF_WHITE);
+
+    snprintf(score_text, sizeof(score_text), "Moves: %d", game->moves_made);
+    DrawText(score_text, 210, px * SIZE + 10, 24, PUFF_WHITE);
     
     EndDrawing();
 }
