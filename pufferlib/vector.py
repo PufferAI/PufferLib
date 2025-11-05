@@ -57,7 +57,7 @@ class Serial:
     def num_envs(self):
         return self.agents_per_batch
  
-    def __init__(self, env_creators, env_args, env_kwargs, num_envs, buf=None, seed=0, max_num_threads=0, **kwargs):
+    def __init__(self, env_creators, env_args, env_kwargs, num_envs, max_num_threads=0,buf=None, seed=0,  **kwargs):
         self.driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
         self.agents_per_batch = self.driver_env.num_agents * num_envs
         self.num_agents = self.agents_per_batch
