@@ -753,7 +753,7 @@ class Multithreading:
         for env in self.envs:
             env.close()
 def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=PufferEnv, num_envs=1, seed=0, 
-         max_num_threads = 0, **kwargs):
+         max_num_threads=0, **kwargs):
     if num_envs < 1:
         raise pufferlib.APIUsageError('num_envs must be at least 1')
     if num_envs != int(num_envs):
