@@ -265,8 +265,11 @@ typedef struct {
 
     // logging utils
     float last_abs_reward;
-    float last_target_reward;
     float last_collision_reward;
+    float last_position_reward;
+    float last_velocity_reward;
+    float last_stability_reward;
+    float last_approach_reward;
     float episode_return;
     float collisions;
     int episode_length;

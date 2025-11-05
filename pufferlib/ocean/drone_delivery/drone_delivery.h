@@ -225,10 +225,12 @@ void compute_observations(DroneDelivery *env) {
         env->observations[idx++] = dy * INV_GRID_Y;
         env->observations[idx++] = dz * INV_GRID_Z;
 
-        //env->observations[idx++] = agent->last_collision_reward;
-        //env->observations[idx++] = agent->last_target_reward;
-        //env->observations[idx++] = agent->last_abs_reward;
-        // todo add other rewards like vel stab approach hover etc
+        env->observations[idx++] = agent->last_collision_reward;
+        env->observations[idx++] = agent->last_abs_reward;
+        env->observations[idx++] = clampf(agent->last_position_reward, -1.0f, 1.0f);
+        env->observations[idx++] = clampf(agent->last_velocity_reward, -1.0f, 1.0f);
+        env->observations[idx++] = clampf(agent->last_stability_reward, -1.0f, 1.0f);
+        env->observations[idx++] = clampf(agent->last_approach_reward, -1.0f, 1.0f);
 
         // Multiagent obs
         Drone* nearest = nearest_drone(env, agent);
@@ -277,13 +279,13 @@ float compute_reward(DroneDelivery* env, Drone *agent, bool collision) {
 
     float proximity_factor = clampf(1.0f - dist * env->inv_reward_dist, 0.0f, 1.0f);
 
-    float position_reward = clampf(expf(-dist / (env->reward_dist * env->pos_const)), -env->pos_penalty, 1.0f);
+    agent->last_position_reward = clampf(expf(-dist / (env->reward_dist * env->pos_const)), -env->pos_penalty, 1.0f);
 
     // slight reward for 0.05 for example, large penalty for over 0.4
     float velocity_reward = clampf(proximity_factor * (2.0f * expf(-(vel_magnitude - 0.05f) * 10.0f) - 1.0f), -env->vel_penalty_clamp, 1.0f);
-    if (velocity_reward < 0.0f) velocity_reward = velocity_reward * env->episode_gain;
+    if (velocity_reward < 0.0f) agent->last_velocity_reward = velocity_reward * env->episode_gain;
 
-    float stability_reward = -angular_vel_magnitude * agent->params.inv_max_omega;
+    agent->last_stability_reward = -angular_vel_magnitude * agent->params.inv_max_omega;
 
     Vec3 to_target_unit = {0, 0, 0};
     if (dist > 0.001f) {
@@ -296,7 +298,7 @@ float compute_reward(DroneDelivery* env, Drone *agent, bool collision) {
                         to_target_unit.z * agent->state.vel.z;
 
     float approach_weight = clampf(dist * env->inv_reward_dist, 0.0f, 1.0f); // todo
-    float approach_reward = approach_weight * clampf(approach_dot * agent->params.inv_max_vel, -0.5f, 0.5f);
+    agent->last_approach_reward = approach_weight * clampf(approach_dot * agent->params.inv_max_vel, -0.5f, 0.5f);
 
     float hover_bonus = 0.0f; // todo add a K
     if (dist < env->reward_dist * 0.2f && vel_magnitude < 0.2f && agent->state.vel.z < 0.0f) {
@@ -316,10 +318,10 @@ float compute_reward(DroneDelivery* env, Drone *agent, bool collision) {
         }
     }
 
-    float total_reward = env->w_position * position_reward +
-                        env->w_velocity * velocity_reward +
-                        env->w_stability * stability_reward +
-                        env->w_approach * approach_reward +
+    float total_reward = env->w_position * agent->last_position_reward +
+                        env->w_velocity * agent->last_velocity_reward +
+                        env->w_stability * agent->last_stability_reward +
+                        env->w_approach * agent->last_approach_reward +
                         hover_bonus +
                         collision_penalty;
 
@@ -328,7 +330,6 @@ float compute_reward(DroneDelivery* env, Drone *agent, bool collision) {
     float delta_reward = total_reward - agent->last_abs_reward;
 
     agent->last_collision_reward = collision_penalty;
-    agent->last_target_reward = position_reward;
     agent->last_abs_reward = total_reward;
     agent->episode_length++;
     agent->score += total_reward;
