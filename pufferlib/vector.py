@@ -632,10 +632,13 @@ class Multithreading:
         # - Convert [env] num_envs to be [vec].num_envs * [env].num_envs instead
         # - Make [vec] num_envs and num_workers be 1
         # - Pass max_num_threads to each env to limit threads per env
-        if isinstance(env_kwargs[0], dict) and 'num_envs' in env_kwargs[0]:
+        if isinstance(env_kwargs[0], dict):
           env_kwargs[0] = env_kwargs[0].copy()
-          env_kwargs[0]['num_envs'] *= num_envs 
-          env_kwargs[0]['max_num_threads'] = max_num_threads
+          if 'num_envs' in env_kwargs[0]:
+            env_kwargs[0]['num_envs'] *= num_envs 
+            env_kwargs[0]['max_num_threads'] = max_num_threads
+          elif 'num_agents' in env_kwargs[0]:
+            env_kwargs[0]['max_num_threads'] = max_num_threads
         
         # Reset num_envs to 1 since multithreading is handled inside the env now.
         num_envs = 1
@@ -843,7 +846,7 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Puffer
 
     # TODO: First step action space check
     
-    return backend(env_creators, env_args, env_kwargs, num_envs, max_num_threads, **kwargs)
+    return backend(env_creators, env_args, env_kwargs, num_envs, max_num_threads=max_num_threads, **kwargs)
 
 def make_seeds(seed, num_envs):
     if isinstance(seed, int):

@@ -20,7 +20,8 @@ class Drive(pufferlib.PufferEnv):
             num_maps=100,
             num_agents=512,
             buf = None,
-            seed=1):
+            seed=1,
+            max_num_threads=0):
 
         # env
         self.render_mode = render_mode
@@ -49,7 +50,7 @@ class Drive(pufferlib.PufferEnv):
         self.agent_offsets = agent_offsets
         self.map_ids = map_ids
         self.num_envs = num_envs
-        super().__init__(buf=buf)
+        super().__init__(buf=buf, binding=binding, max_num_threads=max_num_threads)
         env_ids = []
         for i in range(num_envs):
             cur = agent_offsets[i]
