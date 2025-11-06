@@ -652,9 +652,7 @@ class Multithreading:
         self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.agents_per_batch)
         self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.agents_per_batch)
 
-
         set_buffers(self, buf, True)
-
 
         # TODO(perumaal): Refactor this from self.envs to just a self.env
         self.envs = []

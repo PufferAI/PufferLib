@@ -895,6 +895,7 @@ class WandbLogger:
         return f'{data_dir}/{model_file}'
 
 def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_stop_early=None):
+    # If args is not provided, load config from config/default.ini and override with provided config/<env_name>.ini
     args = args or load_config(env_name)
 
     # Assume TorchRun DDP is used if LOCAL_RANK is set
