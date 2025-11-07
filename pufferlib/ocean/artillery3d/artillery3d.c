@@ -1,6 +1,29 @@
 #include "artillery3d.h"
 #include "puffernet.h"
 
+void allocate(Artillery3D* env) {
+    init(env);
+    env->observations = (float*)calloc(19, sizeof(float));
+    env->actions = (int*)calloc(1, sizeof(int));
+    env->rewards = (float*)calloc(1, sizeof(float));
+    env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
+}
+
+void free_allocated(Artillery3D* env) {
+    free(env->actions);
+    free(env->observations);
+    free(env->terminals);
+    free(env->rewards);
+    free(env->tx);
+    free(env->ty);
+    free(env->tz);
+    free(env->target_vx);
+    free(env->target_vy);
+    free(env->target_vz);
+    free(env->time_target_vanish);
+    c_close(env);
+}
+
 void demo() {
     Artillery3D env = {
         .debug = 0,

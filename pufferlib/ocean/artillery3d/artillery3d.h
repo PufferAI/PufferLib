@@ -187,14 +187,6 @@ void init(Artillery3D* env) {
     get_random_start(env);
 }
 
-void allocate(Artillery3D* env) {
-    init(env);
-    env->observations = (float*)calloc(19, sizeof(float));
-    env->actions = (int*)calloc(1, sizeof(int));
-    env->rewards = (float*)calloc(1, sizeof(float));
-    env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
-}
-
 float get_turn_penalty(Artillery3D* env) {
     int start_tick = env->turn_penalty_delay;
 
@@ -473,21 +465,6 @@ void c_step(Artillery3D* env) {
 }
 
 void c_close(Artillery3D* env) {
-}
-
-void free_allocated(Artillery3D* env) {
-    free(env->actions);
-    free(env->observations);
-    free(env->terminals);
-    free(env->rewards);
-    free(env->tx);
-    free(env->ty);
-    free(env->tz);
-    free(env->target_vx);
-    free(env->target_vy);
-    free(env->target_vz);
-    free(env->time_target_vanish);
-    c_close(env);
 }
 
 static inline float clampf(float v, float min, float max) {
