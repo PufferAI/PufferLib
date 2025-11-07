@@ -187,7 +187,7 @@ void init(Artillery3D* env) {
     get_random_start(env);
 }
 
-float get_turn_penalty(Artillery3D* env) {
+static inline float get_turn_penalty(Artillery3D* env) {
     int start_tick = env->turn_penalty_delay;
 
     if (env->tick <= start_tick) {
@@ -210,7 +210,7 @@ void add_log(Artillery3D* env) {
     env->log.targets_remaining += env->targets_remaining;
 }
 
-void compute_observations(Artillery3D* env) {
+static inline void compute_observations(Artillery3D* env) {
     env->observations[0] = env->azimuth;
     env->observations[1] = env->elevation;
     env->observations[2] = env->score;
@@ -273,7 +273,7 @@ void c_reset(Artillery3D* env) {
     reset_round(env);
 }
 
-void calculate_distance(Artillery3D* env) {
+static inline void calculate_distance(Artillery3D* env) {
     env->vx0 = MUZZLEV * cosf(env->azimuth-0.5f);
     env->vy0 = MUZZLEV * sinf(env->azimuth-0.5f);
     env->vz0 = MUZZLEV * sinf(env->elevation);
@@ -311,7 +311,7 @@ void calculate_distance(Artillery3D* env) {
     }
 }
 
-void fire_projectile(Artillery3D* env) {
+static inline void fire_projectile(Artillery3D* env) {
     if (env->debug > 0) printf("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!FIRE env%d!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", env->i);
     calculate_distance(env);
     float score;
@@ -339,7 +339,7 @@ void fire_projectile(Artillery3D* env) {
     env->shots_remaining -= 1;
 }
 
-void step_frame(Artillery3D* env, int action) {
+static inline void step_frame(Artillery3D* env, int action) {
     if (env->debug > 0) printf("STEP env%d tick%d=========================\n", env->i, env->tick);
 
     if (!env->projectile_active) {
