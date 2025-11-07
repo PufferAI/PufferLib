@@ -249,6 +249,33 @@ void compute_observations(Artillery3D* env) {
     }
 }
 
+void reset_round(Artillery3D* env) {
+    env->terminals[0] = 0;
+    if (env->runs % (int)env->same_runs == 0) {
+        get_random_start(env);
+    }
+    else {
+        env->azimuth = env->azimuth0;
+        env->elevation = env->elevation0;
+    }
+    env->tick = 0;
+    env->runs += 1;
+    env->score = 0;
+    env->fired = 0;
+    env->shots_fired = 0;
+    env->shots_remaining = MAXSHOTS;
+    env->targets_remaining = NUMTARGETS;
+    env->projectile_active = 0;
+    env->projectile_time = 0.0f;
+    env->fire_t = 99999.0f;
+    env->dist = XSIZE;
+    env->max_reward_distn = env->max_dist0 - (int)(env->runs * env->dist_fade);
+    if (env->max_reward_distn < env->max_reward_dist) env->max_reward_distn = env->max_reward_dist;
+    for (int i = 0; i < NUMTARGETS; i++) {
+        env->time_target_vanish[i] = 99999999.9f;
+    }
+}
+
 void c_reset(Artillery3D* env) {
     compute_observations(env);
     reset_round(env);
@@ -545,33 +572,6 @@ Client* make_client(Artillery3D* env) {
 void close_client(Client* client) {
     CloseWindow();
     free(client);
-}
-
-void reset_round(Artillery3D* env) {
-    env->terminals[0] = 0;
-    if (env->runs % (int)env->same_runs == 0) {
-        get_random_start(env);
-    }
-    else {
-        env->azimuth = env->azimuth0;
-        env->elevation = env->elevation0;
-    }
-    env->tick = 0;
-    env->runs += 1;
-    env->score = 0;
-    env->fired = 0;
-    env->shots_fired = 0;
-    env->shots_remaining = MAXSHOTS;
-    env->targets_remaining = NUMTARGETS;
-    env->projectile_active = 0;
-    env->projectile_time = 0.0f;
-    env->fire_t = 99999.0f;
-    env->dist = XSIZE;
-    env->max_reward_distn = env->max_dist0 - (int)(env->runs * env->dist_fade);
-    if (env->max_reward_distn < env->max_reward_dist) env->max_reward_distn = env->max_reward_dist;
-    for (int i = 0; i < NUMTARGETS; i++) {
-        env->time_target_vanish[i] = 99999999.9f;
-    }
 }
 
 void c_render(Artillery3D* env) {
