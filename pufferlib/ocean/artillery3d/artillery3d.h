@@ -134,6 +134,31 @@ typedef struct Artillery3D {
     float inv_max_shots;
 } Artillery3D;
 
+void get_random_start(Artillery3D* env) {
+    for (int i = 0; i < NUMTARGETS; i++) {
+        env->tx[i] = (rand() % (TXMAX - TXMIN)) + TXMIN;
+        env->ty[i] = (rand() % (TYMAX - TYMIN)) + TYMIN;
+        env->tz[i] = (rand() % (TZMAX - TZMIN)) + TZMIN;
+        if (env->tx[i] < TXMIN) env->tx[i] = TXMIN;
+        if (env->tx[i] > TXMAX) env->tx[i] = TXMAX;
+        if (env->ty[i] < TYMIN) env->ty[i] = TYMIN;
+        if (env->ty[i] > TYMAX) env->ty[i] = TYMAX;
+        if (env->tz[i] < TZMIN) env->tz[i] = TZMIN;
+        if (env->tz[i] > TZMAX) env->tz[i] = TZMAX;
+
+        env->target_vx[i] = -rand() % 50 - 30;
+        env->target_vy[i] = -rand() % 30 - 20;
+        env->target_vz[i] = -rand() % 5 - 5;
+        if (env->ty[i] < Y0) env->target_vy[i] = env->target_vy[i] * -1.0f;
+    }
+    env->azimuth = 0.5f;
+    env->azimuth0 = env->azimuth;
+    env->elevation = 0.0f;
+    env->elevation0 = env->elevation;
+    env->fuse_t = 0.7f;
+    env->fuse_t0 = env->fuse_t;
+}
+
 void init(Artillery3D* env) {
     env->runs = 0;
     env->tick = 0;
@@ -179,6 +204,120 @@ float get_turn_penalty(Artillery3D* env) {
         float progress = (env->tick - start_tick) * env->turn_penalty_ramp;
         return env->turn_penalty * progress;
     }
+}
+
+void add_log(Artillery3D* env) {
+    env->log.episode_length += env->tick;
+    env->log.score += env->score;
+    env->log.dist += env->dist;
+    env->log.max_reward_distn += env->max_reward_distn;
+    env->log.turn_penaltyn += env->turn_penaltyn;
+    env->log.n += 1;
+    env->log.acc1000 += 750.0f - env->dist;
+    env->log.shots_fired += env->shots_fired;
+    env->log.targets_remaining += env->targets_remaining;
+}
+
+void compute_observations(Artillery3D* env) {
+    env->observations[0] = env->azimuth;
+    env->observations[1] = env->elevation;
+    env->observations[2] = env->score;
+    env->observations[3] = env->tick * 0.01;
+    env->observations[4] = env->fuse_t;
+    env->observations[5] = env->shots_fired * env->inv_max_shots;
+    env->observations[6] = env->targets_remaining / NUMTARGETS;
+    if (env->debug > 0) {
+        printf("  Compute Observations\n");
+        printf("    azimuth = %.3f\n", env->observations[0]);
+        printf("    elevation = %.3f\n", env->observations[1]);
+        printf("    score = %.6f\n", env->observations[2]);
+        printf("    tick = %.3f\n", env->observations[3]);
+        printf("    fuse_t = %.3f\n", env->observations[4]);
+        printf("    shots_fired = %.3f\n", env->observations[5]);
+        printf("    targets_remaining = %.3f\n", env->observations[6]);
+    }
+
+    int base_obs = 7;
+    for (int i = 0; i < NUMTARGETS; i++) {
+        int idx = base_obs + i * 6;
+        env->observations[idx + 0] = env->tx[i] * env->inv_x_size;
+        env->observations[idx + 1] = env->ty[i] * env->inv_y_size;
+        env->observations[idx + 2] = env->tz[i] * env->inv_z_size;
+        env->observations[idx + 3] = env->target_vx[i] * 0.01;
+        env->observations[idx + 4] = env->target_vy[i] * 0.01;
+        env->observations[idx + 5] = env->target_vz[i] * 0.01;
+    }
+}
+
+void c_reset(Artillery3D* env) {
+    compute_observations(env);
+    reset_round(env);
+}
+
+void calculate_distance(Artillery3D* env) {
+    env->vx0 = MUZZLEV * cosf(env->azimuth-0.5f);
+    env->vy0 = MUZZLEV * sinf(env->azimuth-0.5f);
+    env->vz0 = MUZZLEV * sinf(env->elevation);
+
+    float ft = env->fuse_t * FUSEMULT;
+
+    float px = X0 + env->vx0 * ft;
+    float py = Y0 + env->vy0 * ft;
+    float pz = Z0 + env->vz0 * ft - 0.5f * G * ft * ft;
+
+    env->boom_x = px;
+    env->boom_y = py;
+    env->boom_z = pz;
+
+    env->dist = XSIZE;
+    for (int i = 0; i < NUMTARGETS; i++) {
+        if (env->target_vx[i] == 0.0f) continue;
+
+        float txn = env->tx[i] + env->target_vx[i] * ft;
+        float tyn = env->ty[i] + env->target_vy[i] * ft;
+        float tzn = env->tz[i] + env->target_vz[i] * ft;
+
+        float dx = px - txn;
+        float dy = py - tyn;
+        float dz = pz - tzn;
+
+        float dist = sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist < env->dist) {
+            env->dist = dist;
+        }
+        if (dist < EXPLRAD) {
+            env->targets_remaining -= 1;
+            env->time_target_vanish[i] = (env->t + ft) * env->render; // Do not wait in headless, wait when rendering
+        }
+    }
+}
+
+void fire_projectile(Artillery3D* env) {
+    if (env->debug > 0) printf("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!FIRE env%d!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", env->i);
+    calculate_distance(env);
+    float score;
+    env->fire_t = env->t;
+
+    if (env->dist >= env->max_reward_distn) {
+        score = env->miss_penalty;
+    } else {
+        score = env->inv_max_shots * (1.0f - (env->dist / env->max_reward_distn));
+    }
+
+    if (env->debug > 0) printf("    env%d tick%d closest_dist = %.3f score=%.3f\n", env->i, env->tick, env->dist, score);
+    env->score += score;
+    env->rewards[0] += score;
+
+    if (env->render) {
+        env->projectile_active = 1;
+        env->projectile_time = 0.0f;
+        env->px = X0;
+        env->py = Y0;
+        env->pz = Z0;
+    }
+
+    env->shots_fired += 1;
+    env->shots_remaining -= 1;
 }
 
 void step_frame(Artillery3D* env, int action) {
@@ -324,115 +463,6 @@ void free_allocated(Artillery3D* env) {
     c_close(env);
 }
 
-void add_log(Artillery3D* env) {
-    env->log.episode_length += env->tick;
-    env->log.score += env->score;
-    env->log.dist += env->dist;
-    env->log.max_reward_distn += env->max_reward_distn;
-    env->log.turn_penaltyn += env->turn_penaltyn;
-    env->log.n += 1;
-    env->log.acc1000 += 750.0f - env->dist;
-    env->log.shots_fired += env->shots_fired;
-    env->log.targets_remaining += env->targets_remaining;
-}
-
-void calculate_distance(Artillery3D* env) {
-    env->vx0 = MUZZLEV * cosf(env->azimuth-0.5f);
-    env->vy0 = MUZZLEV * sinf(env->azimuth-0.5f);
-    env->vz0 = MUZZLEV * sinf(env->elevation);
-
-    float ft = env->fuse_t * FUSEMULT;
-
-    float px = X0 + env->vx0 * ft;
-    float py = Y0 + env->vy0 * ft;
-    float pz = Z0 + env->vz0 * ft - 0.5f * G * ft * ft;
-
-    env->boom_x = px;
-    env->boom_y = py;
-    env->boom_z = pz;
-
-    env->dist = XSIZE;
-    for (int i = 0; i < NUMTARGETS; i++) {
-        if (env->target_vx[i] == 0.0f) continue;
-
-        float txn = env->tx[i] + env->target_vx[i] * ft;
-        float tyn = env->ty[i] + env->target_vy[i] * ft;
-        float tzn = env->tz[i] + env->target_vz[i] * ft;
-
-        float dx = px - txn;
-        float dy = py - tyn;
-        float dz = pz - tzn;
-
-        float dist = sqrt(dx * dx + dy * dy + dz * dz);
-        if (dist < env->dist) {
-            env->dist = dist;
-        }
-        if (dist < EXPLRAD) {
-            env->targets_remaining -= 1;
-            env->time_target_vanish[i] = (env->t + ft) * env->render; // Do not wait in headless, wait when rendering
-        }
-    }
-}
-
-void fire_projectile(Artillery3D* env) {
-    if (env->debug > 0) printf("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!FIRE env%d!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", env->i);
-    calculate_distance(env);
-    float score;
-    env->fire_t = env->t;
-
-    if (env->dist >= env->max_reward_distn) {
-        score = env->miss_penalty;
-    } else {
-        score = env->inv_max_shots * (1.0f - (env->dist / env->max_reward_distn));
-    }
-
-    if (env->debug > 0) printf("    env%d tick%d closest_dist = %.3f score=%.3f\n", env->i, env->tick, env->dist, score);
-    env->score += score;
-    env->rewards[0] += score;
-
-    if (env->render) {
-        env->projectile_active = 1;
-        env->projectile_time = 0.0f;
-        env->px = X0;
-        env->py = Y0;
-        env->pz = Z0;
-    }
-
-    env->shots_fired += 1;
-    env->shots_remaining -= 1;
-}
-
-void compute_observations(Artillery3D* env) {
-    env->observations[0] = env->azimuth;
-    env->observations[1] = env->elevation;
-    env->observations[2] = env->score;
-    env->observations[3] = env->tick * 0.01;
-    env->observations[4] = env->fuse_t;
-    env->observations[5] = env->shots_fired * env->inv_max_shots;
-    env->observations[6] = env->targets_remaining / NUMTARGETS;
-    if (env->debug > 0) {
-        printf("  Compute Observations\n");
-        printf("    azimuth = %.3f\n", env->observations[0]);
-        printf("    elevation = %.3f\n", env->observations[1]);
-        printf("    score = %.6f\n", env->observations[2]);
-        printf("    tick = %.3f\n", env->observations[3]);
-        printf("    fuse_t = %.3f\n", env->observations[4]);
-        printf("    shots_fired = %.3f\n", env->observations[5]);
-        printf("    targets_remaining = %.3f\n", env->observations[6]);
-    }
-
-    int base_obs = 7;
-    for (int i = 0; i < NUMTARGETS; i++) {
-        int idx = base_obs + i * 6;
-        env->observations[idx + 0] = env->tx[i] * env->inv_x_size;
-        env->observations[idx + 1] = env->ty[i] * env->inv_y_size;
-        env->observations[idx + 2] = env->tz[i] * env->inv_z_size;
-        env->observations[idx + 3] = env->target_vx[i] * 0.01;
-        env->observations[idx + 4] = env->target_vy[i] * 0.01;
-        env->observations[idx + 5] = env->target_vz[i] * 0.01;
-    }
-}
-
 static inline float clampf(float v, float min, float max) {
     if (v < min)
         return min;
@@ -517,31 +547,6 @@ void close_client(Client* client) {
     free(client);
 }
 
-void get_random_start(Artillery3D* env) {
-    for (int i = 0; i < NUMTARGETS; i++) {
-        env->tx[i] = (rand() % (TXMAX - TXMIN)) + TXMIN;
-        env->ty[i] = (rand() % (TYMAX - TYMIN)) + TYMIN;
-        env->tz[i] = (rand() % (TZMAX - TZMIN)) + TZMIN;
-        if (env->tx[i] < TXMIN) env->tx[i] = TXMIN;
-        if (env->tx[i] > TXMAX) env->tx[i] = TXMAX;
-        if (env->ty[i] < TYMIN) env->ty[i] = TYMIN;
-        if (env->ty[i] > TYMAX) env->ty[i] = TYMAX;
-        if (env->tz[i] < TZMIN) env->tz[i] = TZMIN;
-        if (env->tz[i] > TZMAX) env->tz[i] = TZMAX;
-
-        env->target_vx[i] = -rand() % 50 - 30;
-        env->target_vy[i] = -rand() % 30 - 20;
-        env->target_vz[i] = -rand() % 5 - 5;
-        if (env->ty[i] < Y0) env->target_vy[i] = env->target_vy[i] * -1.0f;
-    }
-    env->azimuth = 0.5f;
-    env->azimuth0 = env->azimuth;
-    env->elevation = 0.0f;
-    env->elevation0 = env->elevation;
-    env->fuse_t = 0.7f;
-    env->fuse_t0 = env->fuse_t;
-}
-
 void reset_round(Artillery3D* env) {
     env->terminals[0] = 0;
     if (env->runs % (int)env->same_runs == 0) {
@@ -567,11 +572,6 @@ void reset_round(Artillery3D* env) {
     for (int i = 0; i < NUMTARGETS; i++) {
         env->time_target_vanish[i] = 99999999.9f;
     }
-}
-
-void c_reset(Artillery3D* env) {
-    compute_observations(env);
-    reset_round(env);
 }
 
 void c_render(Artillery3D* env) {
