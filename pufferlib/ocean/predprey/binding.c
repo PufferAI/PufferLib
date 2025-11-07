@@ -8,7 +8,13 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->height = unpack(kwargs, "height");
     env->num_agents = unpack(kwargs, "num_agents");
     env->vision = unpack(kwargs, "vision");
-    env->reward_food = unpack(kwargs, "reward_food");
+    env->reward_death_scale = unpack(kwargs, "reward_death_scale");
+    env->reward_eat = unpack(kwargs, "reward_eat");
+    env->reward_collect = unpack(kwargs, "reward_collect");
+    env->timestep_reward = unpack(kwargs, "timestep_reward");
+    env->reward_steal = unpack(kwargs, "reward_steal");
+    env->hp_reward_scale = unpack(kwargs, "hp_reward_scale");
+    env->held_food_reward_scale = unpack(kwargs, "held_food_reward_scale");
     env->food_base_spawn_rate = unpack(kwargs, "food_base_spawn_rate");
     init_cenv(env);
     return 0;

@@ -11,7 +11,7 @@
 
 #include "terrain.h"
 
-#define MAX_TIMESTEPS 1000 // If no agent died by then, we reset
+#define MAX_TIMESTEPS 2000 // If no agent died by then, we reset
 
 
 // Tiles
@@ -51,6 +51,7 @@
 #define HP_REWARD_FOOD 20
 #define HP_LOSS_PER_STEP 1
 #define MAX_HP 100 
+#define START_HP 80
 
 #define DOWN 0 
 #define UP 1
@@ -135,7 +136,13 @@ struct PredPrey {
   int tick;
   int last_agent_dead_tick;
 
-  float reward_food;
+  float reward_death_scale;
+  float reward_eat;
+  float reward_collect;
+  float timestep_reward;
+  float reward_steal;
+  float hp_reward_scale;
+  float held_food_reward_scale;
 
   float *observations;
   int *actions;
@@ -188,7 +195,7 @@ void init_biome_idx(PredPrey *env) {
 
 void add_log(PredPrey *env, Log *log) {
   //TODO fix perf calculation
-  env->log.perf = fmaxf(0, log->score/MAX_TIMESTEPS);
+  env->log.perf += fmaxf(0, log->score/MAX_TIMESTEPS);
   env->log.steals += log->steals;
   env->log.episode_return += log->episode_return;
   env->log.score += log->score;
@@ -204,12 +211,12 @@ void add_agent_log(PredPrey *env, int agent_id) {
   env->agent_logs[agent_id].collects /= time_alive;
   add_log(env, &env->agent_logs[agent_id]);
   
-  //I don't fully reset because the agent might not be dead yet
-  //So I still need to keep track of collect & steal counts
-  //episode_returns will accumulate over life
-  //score will be overwritten next time
-  env->agent_logs[agent_id].steals *= time_alive;
-  env->agent_logs[agent_id].collects *= time_alive;
+  // //I don't fully reset because the agent might not be dead yet
+  // //So I still need to keep track of collect & steal counts
+  // //episode_returns will accumulate over life
+  // //score will be overwritten next time
+  // env->agent_logs[agent_id].steals *= time_alive;
+  // env->agent_logs[agent_id].collects *= time_alive;
 }
 
 void init_cenv(PredPrey *env) {
@@ -445,12 +452,17 @@ void remove_agent(PredPrey *env, int agent_id) {
 
 void add_hp(PredPrey *env, int agent_id, float hp) {
   Agent *agent = &env->agents[agent_id];
+  if (agent->hp == 0) {
+    return;
+  }
   agent->hp += hp;
   if (agent->hp > MAX_HP) {
     agent->hp = MAX_HP;
   } else if (agent->hp <= 0) {
     agent->hp = 0;
-    reward_agent(env, agent_id, REWARD_DEATH);
+    int time_alive = env->tick - agent->start_tick;
+    float reward = (((float)time_alive-START_HP) / (float)MAX_TIMESTEPS) * env->reward_death_scale;
+    reward_agent(env, agent_id, reward);
     env->terminals[agent->id] = 1;
     add_agent_log(env, agent_id);    
     remove_agent(env, agent_id);
@@ -541,7 +553,7 @@ void make_grid_from_scratch(PredPrey *env){
 void spawn_agent(PredPrey *env, int agent_id){
   Agent *agent = &env->agents[agent_id];
   agent->id = agent_id;
-  agent->hp = 100;
+  agent->hp = START_HP;
   agent->start_tick = env->tick;
   agent->held_food = 0;
 
@@ -559,18 +571,6 @@ void spawn_agent(PredPrey *env, int agent_id){
     agent->c = c;
     allocated = true;
   }
-
-  // bool allocated = false;
-  // while (!allocated) {
-  //   adr = rand() % (env->height * env->width);
-  //   if (!is_obstacle(env, adr)) {
-  //     int r = adr / env->width;
-  //     int c = adr % env->width;
-  //     agent->r = r;
-  //     agent->c = c;
-  //     allocated = true;
-  //   }
-  // }
   assert(env->pids[adr] == -1);
   env->pids[adr] = agent->id;
   env->agent_logs[agent_id] = (Log){0};
@@ -607,8 +607,12 @@ void c_reset(PredPrey *env) {
   env->log = (Log){0};
 
   memset(env->items, EMPTY, env->width * env->height * sizeof(unsigned char));
-  // Carrefull here but -1 works with memset
-  memset(env->pids, -1, env->width * env->height * sizeof(short));
+  for (int r = 0; r < env->height; r++){
+    for (int c = 0; c < env->width; c++){
+      int grid_idx = flat_idx(env, r, c);
+      env->pids[grid_idx] = -1;
+    }
+  }
 
   for (int i = 0; i < env->num_agents; i++) {
     spawn_agent(env, i);
@@ -627,6 +631,11 @@ void c_reset(PredPrey *env) {
 void step_agent(PredPrey *env, int i) {
   
   Agent *agent = &env->agents[i];
+
+  reward_agent(env, i, env->timestep_reward);
+  float reward_hp = (agent->hp / (float)MAX_HP) * env->hp_reward_scale;
+  reward_agent(env, i, reward_hp);
+  float reward_food = (agent->held_food / (float)MAX_INVENTORY_ITEM) * env->held_food_reward_scale;
 
   int action = env->actions[i];
   agent->anim = ANIM_IDLE;
@@ -704,6 +713,7 @@ void step_agent(PredPrey *env, int i) {
         other_agent->held_food = 0;
         env->agent_logs[i].steals += 1;
         agent->anim = ANIM_INTERACT;
+        reward_agent(env, i, env->reward_steal);
       }
     } 
 
@@ -717,7 +727,7 @@ void step_agent(PredPrey *env, int i) {
       env->food_count -= 1;
       env->agent_logs[i].collects += 1;
       agent->anim = ANIM_INTERACT;
-      // reward_agent(env, i, 0.05f);
+      reward_agent(env, i, env->reward_collect);
     }
   }
   
@@ -727,7 +737,7 @@ void step_agent(PredPrey *env, int i) {
     }
     agent->held_food -= 1;
     add_hp(env, i, HP_REWARD_FOOD);
-    reward_agent(env, i, env->reward_food);
+    reward_agent(env, i, env->reward_eat);
     agent->anim = ANIM_EAT;
   }
   return;
@@ -737,26 +747,27 @@ void c_step(PredPrey *env) {
   env->tick++;
 
   memset(env->rewards, 0, env->num_agents * sizeof(float));
+  memset(env->terminals, 0, env->num_agents * sizeof(unsigned char));
 
   for (int i = 0; i < env->num_agents; i++) {
+    step_agent(env, i);
+    remove_hp(env, i, HP_LOSS_PER_STEP); 
+    
+    // If agent survived long enough, reward and reset agent. 
+    if ((env->tick - env->agents[i].start_tick) >= MAX_TIMESTEPS && env->agents[i].hp > 0) {
+      env->terminals[i] = 1;
+      reward_agent(env, i, env->reward_death_scale);
+      add_agent_log(env, i);
+      spawn_agent(env, i);
+      continue;
+    }
+
+    // Immediate respawn if died
     if (env->agents[i].hp <= 0) {
       spawn_agent(env, i);
       continue;
     } 
-    step_agent(env, i);
-    remove_hp(env, i, HP_LOSS_PER_STEP); 
-    if ((env->tick - env->agents[i].start_tick) % MAX_TIMESTEPS == 0 && env->agents[i].hp > 0) {
-      add_agent_log(env, i);
-      teleport_rnd(env, i);
-    }
   }
-
-  // if (env->tick - env->last_agent_dead_tick >= MAX_TIMESTEPS) {
-  //   for (int i = 0; i < env->num_agents; i++) {
-  //     add_agent_log(env, i);
-  //   }
-  //   env->last_agent_dead_tick = env->tick;
-  // }
 
   spawn_items(env);
   compute_observations(env);

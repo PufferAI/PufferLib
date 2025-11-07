@@ -5,12 +5,19 @@
 #include "predprey.h"
 
 int main() {
+  srand(43);
   PredPrey env = {
       .num_agents = 4,
       .width = 32,
       .height = 32,
       .vision = 3,
-      .reward_food = 0.0f,
+      .reward_death_scale = 1.0f,
+      .reward_eat = 0.0f,
+      .reward_collect = 0.0f,
+      .timestep_reward = 0.0f,
+      .reward_steal = 0.0f,
+      .hp_reward_scale = 0.0f,
+      .held_food_reward_scale = 0.0f,
       .food_base_spawn_rate = 1e-1,
   };
   allocate_cenv(&env);
