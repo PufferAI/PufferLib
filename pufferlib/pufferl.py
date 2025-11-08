@@ -154,23 +154,15 @@ class PuffeRL:
                 eps=config['adam_eps'],
             )
         elif config['optimizer'] == 'muon':
-            import heavyball
             from heavyball import ForeachMuon
             warnings.filterwarnings(action='ignore', category=UserWarning, module=r'heavyball.*')
-            heavyball.utils.compile_mode = "default"
-
-            # # optionally a little bit better/faster alternative to newtonschulz iteration
-            # import heavyball.utils
-            # heavyball.utils.zeroth_power_mode = 'thinky_polar_express'
-
-            # heavyball_momentum=True introduced in heavyball 2.1.1
-            # recovers heavyball-1.7.2 behaviour - previously swept hyperparameters work well
+            import heavyball.utils
+            heavyball.utils.compile_mode = config['compile_mode'] if config['compile'] else None
             optimizer = ForeachMuon(
                 self.policy.parameters(),
                 lr=config['learning_rate'],
                 betas=(config['adam_beta1'], config['adam_beta2']),
                 eps=config['adam_eps'],
-                heavyball_momentum=True,
             )
         else:
             raise ValueError(f'Unknown optimizer: {config["optimizer"]}')
@@ -903,6 +895,7 @@ class WandbLogger:
         return f'{data_dir}/{model_file}'
 
 def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_stop_early=None):
+    # If args is not provided, load config from config/default.ini and override with provided config/<env_name>.ini
     args = args or load_config(env_name)
 
     # Assume TorchRun DDP is used if LOCAL_RANK is set
@@ -943,11 +936,11 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
 
     all_logs = []
     while pufferl.global_step < train_config['total_timesteps']:
-        if train_config['device'] == 'cuda':
-            torch.compiler.cudagraph_mark_step_begin()
+        # if train_config['device'] == 'cuda':
+        #     torch.compiler.cudagraph_mark_step_begin()
         pufferl.evaluate()
-        if train_config['device'] == 'cuda':
-            torch.compiler.cudagraph_mark_step_begin()
+        # if train_config['device'] == 'cuda':
+        #     torch.compiler.cudagraph_mark_step_begin()
         logs = pufferl.train()
 
         if logs is not None:
@@ -959,6 +952,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
                 pufferl.logger.close(model_path)
                 return all_logs
 
+    print("Final eval")
     # Final eval. You can reset the env here, but depending on
     # your env, this can skew data (i.e. you only collect the shortest
     # rollouts within a fixed number of epochs)
@@ -972,8 +966,10 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
         all_logs.append(logs)
 
     pufferl.print_dashboard()
+    print(f"Starting model save:")
     model_path = pufferl.close()
     pufferl.logger.close(model_path)
+    print(f"...Model saved to {model_path}")
     return all_logs
 
 def eval(env_name, args=None, vecenv=None, policy=None):
@@ -1173,6 +1169,7 @@ def load_policy(args, vecenv, env_name=''):
         #optim_state = torch.load(state_path)['optimizer_state_dict']
         #pufferl.optimizer.load_state_dict(optim_state)
 
+    print(f'Loaded model from {load_path}')
     return policy
 
 def load_config(env_name, parser=None):

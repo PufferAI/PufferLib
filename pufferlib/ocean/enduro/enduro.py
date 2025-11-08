@@ -9,7 +9,7 @@ class Enduro(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
                  width=152, height=210, car_width=16, car_height=11,
                  max_enemies=10, frameskip=1, continuous=False,
-                 log_interval=128, buf=None, seed=None):
+                 log_interval=128, buf=None, seed=None, max_num_threads=0):
         
         self.single_observation_space = gymnasium.spaces.Box(
             low=0, high=1, shape=(8 + (5 * max_enemies) + 9 + 1,), dtype=np.float32
@@ -27,7 +27,7 @@ class Enduro(pufferlib.PufferEnv):
             self.seed = random.randint(1, 1000000)
         else:
             self.seed = 0
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
 
         self.c_envs = binding.vec_init(
             self.observations, self.actions, self.rewards,

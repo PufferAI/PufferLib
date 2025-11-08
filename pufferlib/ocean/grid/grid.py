@@ -9,7 +9,7 @@ from pufferlib.ocean.grid import binding
 class Grid(pufferlib.PufferEnv):
     def __init__(self, render_mode='raylib', vision_range=5,
             num_envs=4096, num_maps=1000, map_size=-1, max_size=9,
-            report_interval=128, buf=None, seed=0):
+            report_interval=128, buf=None, seed=0, max_num_threads=0):
         assert map_size <= max_size
         self.obs_size = 2*vision_range + 1
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=255,
@@ -18,7 +18,7 @@ class Grid(pufferlib.PufferEnv):
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.report_interval = report_interval
-        super().__init__(buf=buf)
+        super().__init__(buf, binding, max_num_threads)
         self.float_actions = np.zeros_like(self.actions).astype(np.float32)
         self.c_state = binding.shared(num_maps=num_maps, max_size=max_size, size=map_size)
         self.c_envs = binding.vec_init(self.observations, self.float_actions,

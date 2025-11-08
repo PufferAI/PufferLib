@@ -162,3 +162,9 @@ pufferlib/ocean/impulse_wars/*-release/
 pufferlib/ocean/impulse_wars/debug-*/
 pufferlib/ocean/impulse_wars/release-*/
 pufferlib/ocean/impulse_wars/benchmark/
+*.bak
+pufferlib/resources/drive/binaries/
+data/
+
+pufferlib/resources/drive/binaries/
+data/

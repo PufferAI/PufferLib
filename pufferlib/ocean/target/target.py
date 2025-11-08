@@ -8,16 +8,23 @@ from pufferlib.ocean.target import binding
 
 class Target(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, width=1080, height=720, num_agents=8,
-            num_goals=4, render_mode=None, log_interval=128, size=11, buf=None, seed=0):
+            num_goals=4, render_mode=None, log_interval=128, size=11, buf=None, seed=0,
+            max_num_threads=0):
+        # Observation space: Each agent observes how close they are to the goals, and the other agents (including self).
+        # NOTE: Distance to self for each agent is (0, 0).
+        # 4 additional features (heading, reward, agent (self) speed, agent (self) heading, etc.)
+        # All x,y coordinates are normalized to [0, 1] range.
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(2*(num_agents+num_goals) + 4,), dtype=np.float32)
+        # See https://gymnasium.farama.org/api/spaces/fundamental/#gymnasium.spaces.MultiDiscrete
+        # Heading: 9 discrete actions, Speed: 4 discrete speeds.
         self.single_action_space = gymnasium.spaces.MultiDiscrete([9, 5])
 
         self.render_mode = render_mode
         self.num_agents = num_envs*num_agents
         self.log_interval = log_interval
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
         c_envs = []
         for i in range(num_envs):
             c_env = binding.env_init(

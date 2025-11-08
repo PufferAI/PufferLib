@@ -26,6 +26,7 @@ class Freeway(pufferlib.PufferEnv):
         log_interval=128,
         buf=None,
         seed=0,
+        max_num_threads=0,
     ):
         assert level < 8, "Level should be in {0, 1, 2, 3, 4, 5, 6, 7} or -1. Level -1 is a random mix of all 8 supported levels."
         self.single_observation_space = gymnasium.spaces.Box(
@@ -38,7 +39,7 @@ class Freeway(pufferlib.PufferEnv):
 
         self.single_action_space = gymnasium.spaces.Discrete(3)
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
 
         self.c_envs = binding.vec_init(
             self.observations,

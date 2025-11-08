@@ -15,7 +15,8 @@ class Tetris(pufferlib.PufferEnv):
         render_mode=None, 
         log_interval=32,
         buf=None, 
-        seed=0
+        seed=0,
+        max_num_threads=0,
     ):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(n_cols*n_rows + 6 + 7 * 4 + n_noise_obs,), dtype=np.float32)
@@ -24,7 +25,7 @@ class Tetris(pufferlib.PufferEnv):
         self.log_interval = log_interval
         self.num_agents = num_envs
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
         self.n_cols = n_cols
         self.n_rows = n_rows
         self.c_envs = binding.vec_init(

@@ -26,7 +26,7 @@ class Go(pufferlib.PufferEnv):
             reward_move_valid = 0.1,
             reward_player_capture = 0.25,
             reward_opponent_capture = -0.25,
-            buf = None, seed=0):
+            buf = None, seed=0, max_num_threads=0):
 
         # env
         self.num_agents = num_envs
@@ -39,7 +39,7 @@ class Go(pufferlib.PufferEnv):
             shape=(self.num_obs,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Discrete(self.num_act)
 
-        super().__init__(buf=buf)
+        super().__init__(buf, binding, max_num_threads)
         height = 64*(grid_size+1)
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
             self.terminals, self.truncations, num_envs, seed, width=width, height=height, grid_size=grid_size,

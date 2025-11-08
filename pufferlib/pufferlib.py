@@ -19,9 +19,10 @@ calling super() before you have assigned the attribute.
 '''
 
 
-def set_buffers(env, buf=None):
+def set_buffers(env, buf=None, is_multi_threaded=False):
     if buf is None:
         obs_space = env.single_observation_space
+        # TODO(perumaal): If is_multi_threaded, we are in a multithreaded env in a single process so we can use torch directly instead of via numpy transfers.
         env.observations = np.zeros((env.num_agents, *obs_space.shape), dtype=obs_space.dtype)
         env.rewards = np.zeros(env.num_agents, dtype=np.float32)
         env.terminals = np.zeros(env.num_agents, dtype=bool)
@@ -43,7 +44,7 @@ def set_buffers(env, buf=None):
         env.actions = buf['actions']
 
 class PufferEnv:
-    def __init__(self, buf=None):
+    def __init__(self, buf=None, binding=None, max_num_threads=0):
         if not hasattr(self, 'single_observation_space'):
             raise APIUsageError(ENV_ERROR.format('single_observation_space'))
         if not hasattr(self, 'single_action_space'):
@@ -64,7 +65,19 @@ class PufferEnv:
                 and not isinstance(self.single_action_space, pufferlib.spaces.Box)):
             raise APIUsageError('Native action_space must be a Discrete, MultiDiscrete, or Box')
 
-        set_buffers(self, buf)
+        set_buffers(self, buf, max_num_threads > 0)
+
+        # Setup multi-threading (if enabled via config file).
+        if (binding != None) and max_num_threads > 2:
+            import psutil
+            num_cores = psutil.cpu_count(logical=False)
+            if (num_cores is not None) and (num_cores >= 4):
+              # Reserves the main thread to run steps as well.
+              num_threads = min(num_cores, max_num_threads)
+              num_threads = min(1024, num_threads) # Sanity check limit to 1024 threads - otherwise might bork.
+              num_threads -= 1
+              binding.vec_enable_mt(num_threads)
+              print(f'Multithreading: Using {self.num_agents} total envs / {num_threads} threads in a single process. Available cores: {num_cores}.')
 
         self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.num_agents)
         self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.num_agents)

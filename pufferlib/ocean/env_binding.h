@@ -1,6 +1,9 @@
 #include <Python.h>
 #include <numpy/arrayobject.h>
 
+#include <pthread.h>
+#include <stdatomic.h>
+
 // Forward declarations for env-specific functions supplied by user
 static int my_log(PyObject* dict, Log* log);
 static int my_init(Env* env, PyObject* args, PyObject* kwargs);
@@ -192,7 +195,7 @@ static PyObject* env_reset(PyObject* self, PyObject* args) {
 static PyObject* env_step(PyObject* self, PyObject* args) {
     int num_args = PyTuple_Size(args);
     if (num_args != 1) {
-        PyErr_SetString(PyExc_TypeError, "vec_render requires 1 argument");
+        PyErr_SetString(PyExc_TypeError, "env_step requires 1 argument");
         return NULL;
     }
 
@@ -259,10 +262,149 @@ static PyObject* env_put(PyObject* self, PyObject* args, PyObject* kwargs) {
     Py_RETURN_NONE;
 }
 
+
+typedef struct
+{
+    atomic_int work_index;
+    atomic_int num_running_threads;
+    volatile int num_threads;
+    pthread_cond_t wake_cnd;
+    pthread_t* threads;
+} ThreadData;
+
 typedef struct {
     Env** envs;
     int num_envs;
+    ThreadData* thread_data;
 } VecEnv;
+
+static int global_num_threads = 0;
+
+// Main worker thread; initializes itself and runs a tight loop running through c_step (after waiting for work signal).
+static void* c_threadstep(void* arg)
+{
+    VecEnv* vec_env = (VecEnv*)arg;
+
+    pthread_mutex_t mtx;
+    pthread_mutex_init(&mtx, NULL);
+    pthread_cond_t* wake = &vec_env->thread_data->wake_cnd;
+
+    atomic_int* work_index = &vec_env->thread_data->work_index;
+    atomic_int* num_running_threads = &vec_env->thread_data->num_running_threads;
+    volatile int* num_threads = &vec_env->thread_data->num_threads;
+    int index;
+    atomic_fetch_add(num_running_threads, 1);
+    while (1)
+    {
+        // Wait for work
+        pthread_mutex_lock(&mtx);
+        pthread_cond_wait(wake, &mtx);
+        pthread_mutex_unlock(&mtx);
+
+        if (*num_threads <= 0) { break; } // Exit thread gracefully.
+
+        // Got work to do now.
+        atomic_fetch_add(num_running_threads, 1);
+        do
+        {
+            // This is important: Go do a bunch of work in our thread, without context switches or locks
+            // or any new allocs. This is the main speedup and core to ensuring the threads do as little work
+            // as part of their main loop as possible. We can afford to this as the load balancing naturally happens
+            // with mutually exclusive index values spread across threads.
+            index = atomic_fetch_sub(work_index, 1);
+            if (index >= 0) { c_step(vec_env->envs[index]); }
+        }
+        while (index > 0);
+        atomic_fetch_sub(num_running_threads, 1);
+    }
+    pthread_mutex_destroy(&mtx);
+    return NULL;
+}
+
+// Waits for and exits all threads (if needed).
+static void c_vecclose(VecEnv* vec_env)
+{
+    if (global_num_threads <= 2 || vec_env->num_envs <= 2 || !vec_env->thread_data || vec_env->thread_data->num_threads == 0) { return; }
+    if (vec_env->thread_data->threads)
+    {
+        int num_threads = vec_env->thread_data->num_threads;
+        atomic_store(&vec_env->thread_data->work_index, -1);
+        vec_env->thread_data->num_threads = 0; // Signal to threads to exit
+        pthread_cond_broadcast(&vec_env->thread_data->wake_cnd);
+        // Wait for them to exit.
+        while (atomic_load(&vec_env->thread_data->num_running_threads) > 0) {}
+
+        for (int i = 0; i < num_threads; ++i)
+        {
+            pthread_join(vec_env->thread_data->threads[i], NULL);
+        }
+        pthread_cond_destroy(&vec_env->thread_data->wake_cnd);
+        free(vec_env->thread_data->threads);
+        vec_env->thread_data->threads = NULL;
+    }
+    free(vec_env->thread_data);
+}
+
+// Inits multi-threading if enabled via vec_enable_mt.
+static int c_vecinit(VecEnv* vec_env)
+{
+    // If we have only a couple envs, it's not worth parallelizing. Also, don't penalize the user as they
+    // may want to change the .ini dynamically without having to worry about this.
+    if (global_num_threads <= 2 || vec_env->num_envs <= 2)
+    {
+        global_num_threads = 0;
+        return 1;
+    }
+    // NOTE: On failure, we may have sem-initialized state - but it's okay because we will quit the entire program at that point.  
+    vec_env->thread_data = (ThreadData*)calloc(1, sizeof(ThreadData));
+    vec_env->thread_data->num_threads = global_num_threads;
+    vec_env->thread_data->threads = (pthread_t*)calloc(vec_env->thread_data->num_threads, sizeof(pthread_t));
+    if (!vec_env->thread_data->threads) { return 0; }
+    if (pthread_cond_init(&vec_env->thread_data->wake_cnd, NULL) != 0) { return 0; }
+    atomic_store(&vec_env->thread_data->num_running_threads, 0);
+    atomic_store(&vec_env->thread_data->work_index, -1);
+
+    for (int i = 0; i < vec_env->thread_data->num_threads; ++i)
+    {
+        if (pthread_create(&vec_env->thread_data->threads[i], NULL, c_threadstep, vec_env) != 0) { return 0; }
+    }
+
+    // Wait for all threads to initialize (okay to busy wait here).
+    while (atomic_load(&vec_env->thread_data->num_running_threads) < vec_env->thread_data->num_threads) {}
+    atomic_store_explicit(&vec_env->thread_data->num_running_threads, 0, memory_order_relaxed);
+    return 1;
+}
+
+// Signals worker threads to step across all environments. This is called from the main thread.
+// NOTE: Also uses the main thread to avoid having a signal/wait object.
+static int c_vecstep(VecEnv* vec_env)
+{
+    if (vec_env->thread_data->num_threads == 0 || atomic_load(&vec_env->thread_data->work_index) >= 0) { return 0; }
+
+    // Produce work for the worker threads.
+    atomic_int* work_index = &vec_env->thread_data->work_index;
+    atomic_store_explicit(work_index, vec_env->num_envs - 1, memory_order_relaxed);
+
+    // Signal to other threads that there is new work to be done.
+    pthread_cond_broadcast(&vec_env->thread_data->wake_cnd);
+
+    // Why waste a (main) thread? (Also no need for a lock/condition variable etc).
+    int index;
+    do
+    {
+        index = atomic_fetch_sub(work_index, 1);
+        if (index >= 0) { c_step(vec_env->envs[index]); }
+    }
+    while (index > 0);
+
+    // Wait for all threads to finish fully.
+    // TODO(perumaal): I think this is a bad idea though - we should never spin CPU cycles busy waiting. 
+    //      This is a simple initial solution and assumes SIMD-like work happening in the worker threads
+    //      which significantly reduces the chance of busy waiting here.
+    while (atomic_load(&vec_env->thread_data->num_running_threads) > 0) {}
+
+    return 1;
+}
 
 static VecEnv* unpack_vecenv(PyObject* args) {
     PyObject* handle_obj = PyTuple_GetItem(args, 0);
@@ -284,6 +426,23 @@ static VecEnv* unpack_vecenv(PyObject* args) {
 
     return vec;
 }
+
+static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
+    if (PyTuple_Size(args) != 1) {
+        PyErr_SetString(PyExc_TypeError, "vec_enable_mt requires 1 arguments");
+        return NULL;
+    }
+
+    PyObject* num_threads_arg = PyTuple_GetItem(args, 0);
+    if (!PyObject_TypeCheck(num_threads_arg, &PyLong_Type)) {
+        PyErr_SetString(PyExc_TypeError, "num_threads_arg must be an integer");
+        return NULL;
+    }
+    global_num_threads = PyLong_AsLong(num_threads_arg);
+    Py_RETURN_NONE;
+}
+
+
 
 static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
     if (PyTuple_Size(args) != 7) {
@@ -401,7 +560,6 @@ static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
     } else {
         Py_INCREF(kwargs);  // We need to increment the reference since we'll be modifying it
     }
-
     for (int i = 0; i < num_envs; i++) {
         Env* env = (Env*)calloc(1, sizeof(Env));
         if (!env) {
@@ -440,13 +598,18 @@ static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
             return NULL;
         }
     }
+    if (!c_vecinit(vec)) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
+        return NULL;
+    }
 
     Py_DECREF(kwargs);
     return PyLong_FromVoidPtr(vec);
 }
 
 
-// Python function to close the environment
+// Python function to vectorize an array of enviroments and return a strong pointer 
+// to an internal structure (VecEnv) for use later.
 static PyObject* vectorize(PyObject* self, PyObject* args) {
     int num_envs = PyTuple_Size(args);
     if (num_envs == 0) {
@@ -475,7 +638,10 @@ static PyObject* vectorize(PyObject* self, PyObject* args) {
         }
         vec->envs[i] = (Env*)PyLong_AsVoidPtr(handle_obj);
     }
-
+    if (!c_vecinit(vec)) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
+        return NULL;
+    }
     return PyLong_FromVoidPtr(vec);
 }
 
@@ -496,7 +662,9 @@ static PyObject* vec_reset(PyObject* self, PyObject* args) {
         return NULL;
     }
     int seed = PyLong_AsLong(seed_arg);
- 
+
+    // TODO(perumaal): Should this be multi-thread aware as well? (see vec_step below).
+    // Main issue is that srand is not thread-safe. But do we care?
     for (int i = 0; i < vec->num_envs; i++) {
         // Assumes each process has the same number of environments
         srand(i + seed*vec->num_envs);
@@ -516,9 +684,13 @@ static PyObject* vec_step(PyObject* self, PyObject* arg) {
     if (!vec) {
         return NULL;
     }
-
-    for (int i = 0; i < vec->num_envs; i++) {
-        c_step(vec->envs[i]);
+    if (global_num_threads > 2) {
+        c_vecstep(vec);
+    }
+    else {
+        for (int i = 0; i < vec->num_envs; i++) {
+            c_step(vec->envs[i]);
+        }
     }
     Py_RETURN_NONE;
 }
@@ -603,6 +775,7 @@ static PyObject* vec_close(PyObject* self, PyObject* args) {
         return NULL;
     }
 
+    c_vecclose(vec);
     for (int i = 0; i < vec->num_envs; i++) {
         c_close(vec->envs[i]);
         free(vec->envs[i]);
@@ -649,6 +822,7 @@ static PyMethodDef methods[] = {
     {"env_close", env_close, METH_VARARGS, "Close the environment"},
     {"env_get", env_get, METH_VARARGS, "Get the environment state"},
     {"env_put", (PyCFunction)env_put, METH_VARARGS | METH_KEYWORDS, "Put stuff into env"},
+    {"vec_enable_mt", vec_enable_mt, METH_VARARGS, "Sets up multi-threading with provided number of threads"},
     {"vectorize", vectorize, METH_VARARGS, "Make a vector of environment handles"},
     {"vec_init", (PyCFunction)vec_init, METH_VARARGS | METH_KEYWORDS, "Initialize a vector of environments"},
     {"vec_reset", vec_reset, METH_VARARGS, "Reset the vector of environments"},

@@ -6,7 +6,8 @@ from pufferlib.ocean.tripletriad import binding
 
 class TripleTriad(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=1,
-            width=990, height=690, card_width=192, card_height=224, buf=None, seed=0):
+            width=990, height=690, card_width=192, card_height=224, buf=None, seed=0,
+            max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(114,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Discrete(14)
@@ -14,7 +15,7 @@ class TripleTriad(pufferlib.PufferEnv):
         self.render_mode = render_mode
         self.num_agents = num_envs
 
-        super().__init__(buf=buf)
+        super().__init__(buf, binding, max_num_threads)
         self.c_envs = binding.vec_init(self.observations, self.actions,
             self.rewards, self.terminals, self.truncations, num_envs, seed, width=width, height=height,
             card_width=card_width, card_height=card_height)

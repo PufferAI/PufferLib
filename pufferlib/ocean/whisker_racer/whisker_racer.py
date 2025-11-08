@@ -17,8 +17,8 @@ class WhiskerRacer(pufferlib.PufferEnv):
                  reward_yellow=0.25, reward_green=0.0, gamma=0.9, track_width=50,
                  num_radial_sectors=16, num_points=4, bezier_resolution=16, w_ang=0.523,
                  corner_thresh=0.5, ftmp1=0.1, ftmp2=0.1, ftmp3=0.1, ftmp4=0.1,
-                 mode7=0, render_many=0, seed=42,
-                 buf=None, rng=42, i=1, method=0):
+                 render_many=0, seed=42,
+                 buf=None, rng=42, i=1, method=0, max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
                                             shape=(3,), dtype=np.float32)
         self.render_mode = render_mode
@@ -32,7 +32,7 @@ class WhiskerRacer(pufferlib.PufferEnv):
         else:
             self.single_action_space = gymnasium.spaces.Discrete(3)
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
 
         if continuous:
             self.actions = self.actions.flatten()
