@@ -228,9 +228,9 @@ void compute_observations(DroneDelivery *env) {
         env->observations[idx++] = agent->last_collision_reward;
         env->observations[idx++] = agent->last_abs_reward;
         env->observations[idx++] = clampf(agent->last_position_reward, -1.0f, 1.0f);
-        env->observations[idx++] = clampf(agent->last_velocity_reward, -1.0f, 1.0f);
-        env->observations[idx++] = clampf(agent->last_stability_reward, -1.0f, 1.0f);
-        env->observations[idx++] = clampf(agent->last_approach_reward, -1.0f, 1.0f);
+        //env->observations[idx++] = clampf(agent->last_velocity_reward, -1.0f, 1.0f);
+        //env->observations[idx++] = clampf(agent->last_stability_reward, -1.0f, 1.0f);
+        //env->observations[idx++] = clampf(agent->last_approach_reward, -1.0f, 1.0f);
 
         // Multiagent obs
         Drone* nearest = nearest_drone(env, agent);

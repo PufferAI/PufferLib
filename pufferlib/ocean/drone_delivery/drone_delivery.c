@@ -148,7 +148,7 @@ int main() {
 
     init(env);
 
-    size_t obs_size = 48;
+    size_t obs_size = 45;
     size_t act_size = 4;
     env->observations = (float *)calloc(env->num_agents * obs_size, sizeof(float));
     env->actions = (float *)calloc(env->num_agents * act_size, sizeof(float));
