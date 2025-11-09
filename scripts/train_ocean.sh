@@ -1,6 +1,7 @@
 #!/bin/bash
  
 environments=(
+    "puffer_artymulti"
     "puffer_breakout"
     "puffer_connect4"
     "puffer_pong"
