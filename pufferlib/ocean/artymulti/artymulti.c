@@ -2,6 +2,23 @@
 #include "artillery.h"
 #include "puffernet.h"
 
+void allocate(ArtyMulti* env) {
+    init(env);
+    int obs_size = 6;
+    env->observations = (float*)calloc(obs_size, sizeof(float));
+    env->actions = (int*)calloc(1, sizeof(int));
+    env->rewards = (float*)calloc(1, sizeof(float));
+    env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
+}
+
+void free_allocated(ArtyMulti* env) {
+    free(env->actions);
+    free(env->observations);
+    free(env->terminals);
+    free(env->rewards);
+    c_close(env);
+}
+
 void demo() {
     Artillery env = {
         .width = 1280,
