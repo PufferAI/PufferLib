@@ -7,7 +7,7 @@ from pufferlib.ocean.artymulti import binding
 
 class ArtyMulti(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
-                 frameskip=1, width=1280, height=720, moving_target=1,
+                 frameskip=1, width=1280, height=720,
                  target_min_x=600, target_max_x=1230, target_min_y=300, target_max_y=670, target_size=15,
                  min_aim_angle=0.56, max_aim_angle=1.56, max_reward=1.0, max_reward_dist=8.5,
                  dist_fade=0.36, turn_penalty_delay=64, turn_penalty_ramp=0.023, max_dist0=100.0,
@@ -16,7 +16,7 @@ class ArtyMulti(pufferlib.PufferEnv):
                  vm=150.0,
                  seed=7,
                  buf=None, rng=7, i=1, debug=0, same_runs=0):
-        obs_size = 8 if moving_target == 1 else 6
+        obs_size = 6
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         self.render_mode = render_mode
         self.num_agents = num_envs
@@ -24,6 +24,7 @@ class ArtyMulti(pufferlib.PufferEnv):
         self.tick = 0
 
         self.single_action_space = gymnasium.spaces.Discrete(5)
+        #self.single_action_space = gymnasium.spaces.MultiDiscrete([5] * 2)
 
         super().__init__(buf)
 
@@ -31,7 +32,7 @@ class ArtyMulti(pufferlib.PufferEnv):
 
         self.c_envs = binding.vec_init(
             self.observations, self.actions, self.rewards, self.terminals, self.truncations, num_envs,
-            seed, num_envs=num_envs, seed=seed, frameskip=frameskip, width=width, height=height, moving_target=moving_target,
+            seed, num_envs=num_envs, seed=seed, frameskip=frameskip, width=width, height=height,
             target_min_x=target_min_x, target_max_x=target_max_x, target_min_y=target_min_y, target_max_y=target_max_y, target_size=target_size,
             min_aim_angle=min_aim_angle, max_aim_angle=max_aim_angle, max_reward=max_reward, max_reward_dist=max_reward_dist,
             dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, turn_penalty_ramp=turn_penalty_ramp, max_dist0=max_dist0,

@@ -22,7 +22,6 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->turn_penalty_delay = unpack(kwargs, "turn_penalty_delay");
     env->turn_penalty_ramp = unpack(kwargs, "turn_penalty_ramp");
     env->miss_penalty = unpack(kwargs, "miss_penalty");
-    env->moving_target = unpack(kwargs, "moving_target");
     env->rng = unpack(kwargs, "rng");
     env->debug = unpack(kwargs, "debug");
     env->same_runs = unpack(kwargs, "same_runs");

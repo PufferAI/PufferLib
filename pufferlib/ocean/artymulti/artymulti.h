@@ -49,8 +49,6 @@ typedef struct ArtyMulti {
     int tick;
     float dist;
 
-    int moving_target;
-
     float powder;
     float powder0;
     float angle;
@@ -73,8 +71,6 @@ typedef struct ArtyMulti {
     float target_min_y;
     float target_max_y;
     float target_size;
-    float target_vx;
-    float target_vy;
     float tx;
     float ty;
 
@@ -138,8 +134,6 @@ void calculate_parabola_closest_distance(ArtyMulti* env) {
 
     float tx = env->tx;
     float ty = env->ty;
-    float tvx = env->target_vx;
-    float tvy = env->target_vy;
     float txn = tx;
     float tyn = ty;
 
@@ -151,11 +145,8 @@ void calculate_parabola_closest_distance(ArtyMulti* env) {
 
         if (y < 0 || x < 0 || x > env->width) break;
 
-        txn = tx + tvx * t;
-        tyn = ty + tvy * t;
-
-        float dx = x - txn;
-        float dy = y - tyn;
+        float dx = x - tx;
+        float dy = y - ty;
         float dist2 = dx * dx + dy * dy;
 
         if (dist2 < min_dist2) {
@@ -203,12 +194,6 @@ void compute_observations(ArtyMulti* env) {
     env->observations[5] = env->tick * 0.01;
     if (env->debug > 0) printf("    tick = %.3f\n", env->observations[5]);
 
-    if (env->moving_target == 1) {
-        env->observations[6] = env->target_vx * 0.01;
-        if (env->debug > 0) printf("    target_vx = %.3f\n", env->observations[6]);
-        env->observations[7] = env->target_vy * 0.01;
-        if (env->debug > 0) printf("    target_vy = %.3f\n", env->observations[7]);
-    }
     //printf("H Obs: ");
     //for(int i = 0; i < 8; i++) {
     //    printf("%.3f ", env->observations[i]);
@@ -244,8 +229,6 @@ void get_random_start(ArtyMulti* env) {
     env->angle0 = env->angle;
     env->powder = (float)rand() / (float)RAND_MAX;
     env->powder0 = env->powder;
-    env->target_vx = -rand() % 20 - 10;
-    env->target_vy = -rand() % 10 - 5;
 }
 
 void reset_round(ArtyMulti* env) {
@@ -356,7 +339,7 @@ void init(ArtyMulti* env) {
 
 void allocate(ArtyMulti* env) {
     init(env);
-    int obs_size = (env->moving_target == 1) ? 8 : 6;
+    int obs_size = 6;
     env->observations = (float*)calloc(obs_size, sizeof(float));
     env->actions = (int*)calloc(1, sizeof(int));
     env->rewards = (float*)calloc(1, sizeof(float));
@@ -429,11 +412,6 @@ void step_frame(ArtyMulti* env, float action) {
         if (env->debug > 1) printf("env->tx = %.3f\n", env->tx);
         env->py = env->y0 + env->vy0 * env->projectile_time - 0.5f * env->g * env->projectile_time * env->projectile_time;
         if (env->debug > 1) printf("env->py = %.3f, env->vy0 = %.3f, ptime = %.3f\n", env->py, env->vy0, env->projectile_time);
-    }
-
-    if (env->moving_target == 1) {
-        env->tx += env->target_vx * TIMESTEP;
-        env->ty += env->target_vy * TIMESTEP;
     }
 
     if (env->debug > 1) printf("  env->px = %.1f env->tx = %.1f env->render=%d\n", env->px, env->tx, env->render);
