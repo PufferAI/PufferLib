@@ -7,6 +7,11 @@
 #include "raylib.h"
 #include <time.h>
 
+#define WIDTH 1280
+#define INVWIDTH 1.0f / WIDTH
+#define HEIGHT 720
+#define INVHEIGHT 1.0f / HEIGHT
+
 #define FIRE 0
 #define ADDPOWDER 1
 #define RMPOWDER 2
@@ -17,6 +22,10 @@
 #define MAXX1 1230
 #define MINY1 300
 #define MAXY1 670
+#define MINAIMANGLE 0.56f
+#define MAXAIMANGLE 1.56f
+
+#define VCOEFF 150.0f
 
 #define MAX_PROJECTILE_TIME 60.0f
 #define TIMESTEP 0.25f
@@ -33,8 +42,6 @@ typedef struct Log {
 } Log;
 
 typedef struct Client {
-    float width;
-    float height;
     int render;
     int debug;
 } Client;
@@ -48,16 +55,12 @@ typedef struct ArtyMulti {
     unsigned char* terminals;
     int i;
 
-    int width;
-    int height;
     float score;
     int tick;
     float dist;
 
     float powder;
-    float powder0;
     float angle;
-    float angle0;
 
     float px;
     float py;
@@ -71,13 +74,9 @@ typedef struct ArtyMulti {
     float x0;
     float y0;
 
-    float target_size;
     float tx;
     float ty;
 
-    float min_aim_angle;
-    float max_aim_angle;
-    float max_reward;
     float max_reward_dist;
     float max_reward_distn;
     float max_dist0;
@@ -88,7 +87,6 @@ typedef struct ArtyMulti {
     float turn_penalty_ramp;
     float miss_penalty;
     int fired;
-    float vm;
     float out_bounds_penalty;
 
     int frameskip;
@@ -96,12 +94,7 @@ typedef struct ArtyMulti {
 
     int debug;
     unsigned int rng;
-    int same_runs;
     int runs;
-
-    // Math
-    float inv_width;
-    float inv_height;
 } ArtyMulti;
 
 void c_close(ArtyMulti* env) {
@@ -122,11 +115,11 @@ void compute_observations(ArtyMulti* env) {
     if (env->debug > 0) printf("  Compute Observations\n");
     env->observations[0] = env->powder;
     if (env->debug > 0) printf("    powder = %.3f\n", env->observations[0]);
-    env->observations[1] = env->angle - env->min_aim_angle;
+    env->observations[1] = env->angle - MINAIMANGLE;
     if (env->debug > 0) printf("    angle = %.3f\n", env->observations[1]);
-    env->observations[2] = env->tx * env->inv_width;
+    env->observations[2] = env->tx * INVWIDTH;
     if (env->debug > 0) printf("    tx = %.3f\n", env->observations[2]);
-    env->observations[3] = env->ty * env->inv_height;
+    env->observations[3] = env->ty * INVHEIGHT;
     if (env->debug > 0) printf("    ty = %.3f\n", env->observations[3]);
     env->observations[4] = env->score;
     if (env->debug > 0) printf("    score = %.6f\n", env->observations[4]);
@@ -142,27 +135,20 @@ void compute_observations(ArtyMulti* env) {
 
 void get_random_start(ArtyMulti* env) {
     if (env->debug > 0) printf("get_random_start\n");
-    env->tx = rand() % env->width;
-    env->ty = rand() % env->height;
+    env->tx = rand() % WIDTH;
+    env->ty = rand() % HEIGHT;
     if (env->tx < MINX1) env->tx = MINX1;
     if (env->tx > MAXX1) env->tx = MAXX1;
     if (env->ty < MINY1) env->ty = MINY1;
     if (env->ty > MAXY1) env->ty = MAXY1;
-    env->angle = ((float)rand() / (float)RAND_MAX) + env->min_aim_angle;
-    env->angle0 = env->angle;
+    env->angle = ((float)rand() / (float)RAND_MAX) + MINAIMANGLE;
     env->powder = (float)rand() / (float)RAND_MAX;
-    env->powder0 = env->powder;
 }
 
 void reset_round(ArtyMulti* env) {
     env->terminals[0] = 0;
-    if (env->runs % (int)env->same_runs == 0) {
-        get_random_start(env);
-    }
-    else {
-        env->angle = env->angle0;
-        env->powder = env->powder0;
-    }
+    env->rewards[0] = 0;
+    get_random_start(env);
     env->tick = 0;
     env->runs += 1;
     env->score = 0;
@@ -181,14 +167,10 @@ void c_reset(ArtyMulti* env) {
 void init(ArtyMulti* env) {
     env->runs = 0;
     env->tick = 0;
-    if (env->same_runs < 1) env->same_runs = 1;
-    env->g = 9.8f;
+    env->g = 9.81f;
     env->projectile_active = 0;
     env->projectile_time = 0.0f;
-    env->dist = env->width;
-
-    env->inv_width = 1.0f / env->width;
-    env->inv_height = 1.0f / env->height;
+    env->dist = WIDTH;
 
     srand(env->rng + env->i);
 
@@ -210,7 +192,7 @@ float get_turn_penalty(ArtyMulti* env) {
 }
 
 void calculate_parabola_closest_distance(ArtyMulti* env) {
-    env->v0 = env->powder * env->vm;
+    env->v0 = env->powder * VCOEFF;
     env->vx0 = env->v0 * cosf(env->angle);
     env->vy0 = env->v0 * sinf(env->angle);
     env->x0 = 30.0f;
@@ -227,7 +209,7 @@ void calculate_parabola_closest_distance(ArtyMulti* env) {
         float x = env->x0 + env->vx0 * t;
         float y = env->y0 + env->vy0 * t - 0.5f * env->g * t * t;
 
-        if (y < 0 || x < 0 || x > env->width) break;
+        if (y < 0 || x < 0 || x > WIDTH) break;
 
         float dx = x - tx;
         float dy = y - ty;
@@ -287,14 +269,14 @@ void step_frame(ArtyMulti* env, float action) {
                 env->score += env->out_bounds_penalty;
             }
         } else if (action == AIMUP) {
-            if (env->angle < env->max_aim_angle - 0.05) {
+            if (env->angle < MAXAIMANGLE - 0.05) {
                 env->angle += 0.05;
             }
             else {
                 env->score += env->out_bounds_penalty;
             }
         } else if (action == AIMDOWN) {
-            if (env->angle > env->min_aim_angle + 0.05) {
+            if (env->angle > MINAIMANGLE + 0.05) {
                 env->angle -= 0.05;
             }
             else {
@@ -318,7 +300,7 @@ void step_frame(ArtyMulti* env, float action) {
     }
 
     if (env->debug > 1) printf("  env->px = %.1f env->tx = %.1f env->render=%d\n", env->px, env->tx, env->render);
-    if ((env->fired == 1 && (!env->render || env->px > env->tx + env->target_size || env->py < 0.0f)) || (env->score < -1.0f)) {
+    if ((env->fired == 1 && (!env->render || env->px > env->tx + 30 || env->py < 0.0f)) || (env->score < -1.0f)) {
         if (env->debug > 0) printf("==================terminate=================\n\n\n\n\n\n\n\n\n\n");
         env->terminals[0] = 1;
         add_log(env);
@@ -340,10 +322,8 @@ void c_step(ArtyMulti* env) {
 
 Client* make_client(ArtyMulti* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
-    client->width = env->width;
-    client->height = env->height;
 
-    InitWindow(env->width, env->height, "PufferLib ArtyMulti");
+    InitWindow(WIDTH, HEIGHT, "PufferLib ArtyMulti");
     SetTargetFPS(30);
 
     return client;
@@ -355,8 +335,6 @@ void close_client(Client* client) {
 }
 
 void c_render(ArtyMulti* env) {
-    int height = env->height;
-
     env->render = 1;
     if (env->client == NULL) {
         env->client = make_client(env);
@@ -373,12 +351,12 @@ void c_render(ArtyMulti* env) {
     SetConfigFlags(FLAG_MSAA_4X_HINT);
     ClearBackground((Color){135, 206, 235, 255});
 
-    DrawCircle(env->tx, height - env->ty, env->target_size, RED);
+    DrawCircle(env->tx, HEIGHT - env->ty, 15, RED);
 
     float barrel_length = 40.0f;
     float barrel_width = 8.0f;
     float barrel_x = 30.0f;
-    float barrel_y = height - 30.0f;
+    float barrel_y = HEIGHT - 30.0f;
 
     Vector2 barrel_start = {barrel_x, barrel_y};
     Vector2 barrel_end = {
@@ -386,21 +364,21 @@ void c_render(ArtyMulti* env) {
         barrel_y - barrel_length * sinf(env->angle)
     };
 
-    float v0 = env->powder * env->vm;
+    float v0 = env->powder * VCOEFF;
     float vx0 = v0 * cosf(env->angle);
     float vy0 = v0 * sinf(env->angle);
     float x0 = 30.0f;
     float y0 = 30.0f;
 
-    Vector2 prev_point = {x0, height - y0};
+    Vector2 prev_point = {x0, HEIGHT - y0};
     int j = 0;
     for (float t = TIMESTEP; t < MAX_PROJECTILE_TIME; t += 0.5f) {
         float x = x0 + vx0 * t;
         float y = y0 + vy0 * t - 0.5f * env->g * t * t;
 
-        if (y < 0 || x < 0 || x > env->width) break;
+        if (y < 0 || x < 0 || x > WIDTH) break;
 
-        Vector2 current_point = {x, height - y};
+        Vector2 current_point = {x, HEIGHT - y};
         if (j % 2 == 0) DrawLineV(prev_point, current_point, WHITE);
         if (j % 2 == 1) DrawLineV(prev_point, current_point, BLACK);
         prev_point = current_point;
@@ -411,7 +389,7 @@ void c_render(ArtyMulti* env) {
     DrawCircle(barrel_x, barrel_y, 12.0f, GRAY);
 
     if (env->projectile_active) {
-        DrawCircle(env->px, height - env->py, 4.0f, BLACK);
+        DrawCircle(env->px, HEIGHT - env->py, 4.0f, BLACK);
     }
 
     DrawText(TextFormat("%.3f", env->score), 10, 10, 20, BLACK);

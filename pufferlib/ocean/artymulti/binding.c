@@ -5,13 +5,7 @@
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->frameskip = unpack(kwargs, "frameskip");
-    env->width = unpack(kwargs, "width");
-    env->height = unpack(kwargs, "height");
     env->render = unpack(kwargs, "render");
-    env->target_size = unpack(kwargs, "target_size");
-    env->min_aim_angle = unpack(kwargs, "min_aim_angle");
-    env->max_aim_angle = unpack(kwargs, "max_aim_angle");
-    env->max_reward = unpack(kwargs, "max_reward");
     env->max_reward_dist = unpack(kwargs, "max_reward_dist");
     env->dist_fade = unpack(kwargs, "dist_fade");
     env->turn_penalty = unpack(kwargs, "turn_penalty");
@@ -20,8 +14,6 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->miss_penalty = unpack(kwargs, "miss_penalty");
     env->rng = unpack(kwargs, "rng");
     env->debug = unpack(kwargs, "debug");
-    env->same_runs = unpack(kwargs, "same_runs");
-    env->vm = unpack(kwargs, "vm");
     env->max_dist0 = unpack(kwargs, "max_dist0");
     env->out_bounds_penalty = unpack(kwargs, "out_bounds_penalty");
     env->i = unpack(kwargs, "i");
