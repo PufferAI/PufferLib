@@ -8,10 +8,6 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->width = unpack(kwargs, "width");
     env->height = unpack(kwargs, "height");
     env->render = unpack(kwargs, "render");
-    env->target_min_x = unpack(kwargs, "target_min_x");
-    env->target_max_x = unpack(kwargs, "target_max_x");
-    env->target_min_y = unpack(kwargs, "target_min_y");
-    env->target_max_y = unpack(kwargs, "target_max_y");
     env->target_size = unpack(kwargs, "target_size");
     env->min_aim_angle = unpack(kwargs, "min_aim_angle");
     env->max_aim_angle = unpack(kwargs, "max_aim_angle");

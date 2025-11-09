@@ -13,6 +13,11 @@
 #define AIMUP 3
 #define AIMDOWN 4
 
+#define MINX1 600
+#define MAXX1 1230
+#define MINY1 300
+#define MAXY1 670
+
 #define MAX_PROJECTILE_TIME 60.0f
 #define TIMESTEP 0.25f
 
@@ -66,10 +71,6 @@ typedef struct ArtyMulti {
     float x0;
     float y0;
 
-    float target_min_x;
-    float target_max_x;
-    float target_min_y;
-    float target_max_y;
     float target_size;
     float tx;
     float ty;
@@ -221,10 +222,10 @@ void get_random_start(ArtyMulti* env) {
     if (env->debug > 0) printf("get_random_start\n");
     env->tx = rand() % env->width;
     env->ty = rand() % env->height;
-    if (env->tx < env->target_min_x) env->tx = env->target_min_x;
-    if (env->tx > env->target_max_x) env->tx = env->target_max_x;
-    if (env->ty < env->target_min_y) env->ty = env->target_min_y;
-    if (env->ty > env->target_max_y) env->ty = env->target_max_y;
+    if (env->tx < MINX1) env->tx = MINX1;
+    if (env->tx > MAXX1) env->tx = MAXX1;
+    if (env->ty < MINY1) env->ty = MINY1;
+    if (env->ty > MAXY1) env->ty = MAXY1;
     env->angle = ((float)rand() / (float)RAND_MAX) + env->min_aim_angle;
     env->angle0 = env->angle;
     env->powder = (float)rand() / (float)RAND_MAX;
