@@ -217,7 +217,7 @@ float get_turn_penalty(ArtyMulti* env) {
     }
 }
 
-void calculate_parabola_closest_distance(ArtyMulti* env, int gun_idx) {
+float calculate_parabola_closest_distance(ArtyMulti* env, int gun_idx) {
     Gun* gun = &env->gun[gun_idx];
     gun->v0 = gun->powder * VCOEFF;
 
@@ -230,11 +230,20 @@ void calculate_parabola_closest_distance(ArtyMulti* env, int gun_idx) {
 
     float min_dist2 = 99999999.0f;
 
+    float mid_x = (gun->x0 + tx) * 0.5f;
+    float mid_y = 0.0f;
+    int found_mid = 0;
+
     for (float t = 0; t < MAX_PROJECTILE_TIME; t += TIMESTEP) {
         float x = gun->x0 + gun->vx0 * t;
         float y = gun->y0 + gun->vy0 * t - 0.5f * env->g * t * t;
 
         if (y < 0 || x < 0 || x > WIDTH) break;
+
+        if (!found_mid && ((gun_idx == 0 && x >= mid_x) || (gun_idx == 1 && x <= mid_x))) {
+            mid_y = y;
+            found_mid = 1;
+        }
 
         float dx = x - tx;
         float dy = y - ty;
@@ -245,18 +254,33 @@ void calculate_parabola_closest_distance(ArtyMulti* env, int gun_idx) {
         }
     }
     gun->dist = sqrt(min_dist2);
+
+    float traj_score = 0.0f;
+    if (found_mid) {
+        if (gun_idx == 0) {
+            traj_score = (mid_y < ty) ? 1.0f : 0.5f;
+        } else {
+            traj_score = (mid_y > ty * 2.0) ? 1.0f : 0.25f;
+        }
+    }
+
+    return traj_score;
 }
 
 void fire_projectile(ArtyMulti* env, int gun_idx) {
     Gun* gun = &env->gun[gun_idx];
     if (env->debug > 0) printf("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!FIRE GUN %d!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", gun_idx);
-    calculate_parabola_closest_distance(env, gun_idx);
+    float traj_score = calculate_parabola_closest_distance(env, gun_idx);
     float score;
 
     if (gun->dist >= env->max_reward_distn) {
         score = env->miss_penalty;
     } else {
         score = 1.0f - (gun->dist / env->max_reward_distn);
+    }
+
+    if (score > 0.0f) {
+        score = score * traj_score;
     }
 
     if (env->debug > 0) printf("    env%d tick%d gun%d closest_dist = %.3f score=%.3f\n", env->i, env->tick, gun_idx, gun->dist, score);
