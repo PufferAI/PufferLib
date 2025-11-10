@@ -27,20 +27,20 @@ void free_allocated(Artillery3D* env) {
 void demo() {
     Artillery3D env = {
         .debug = 0,
-        .dist_fade = 0.15,
-        .miss_penalty = -0.1,
+        .dist_fade = 0.7493789405520497,
+        .max_dist0 = 127.50246246114087,
         .max_reward = 1.0,
-        .max_reward_dist = 5,
-        .max_dist0 = 250,
+        .max_reward_dist = 23.620013496047616,
+        .miss_penalty = -0.1858434974084412,
         .out_bounds_penalty = -0.01,
         .target_size = 15,
         .turn_penalty = -0.003,
-        .turn_penalty_delay = 64,
-        .turn_penalty_ramp = 0.01,
-        .render = 1,
+        .turn_penalty_delay = 72.37761171826367,
+        .turn_penalty_ramp = 0.02,
         .rng = 7,
         .same_runs = 1,
-        .i = 1,
+        .render = 1,
+        .i = 0,
     };
     allocate(&env);
 

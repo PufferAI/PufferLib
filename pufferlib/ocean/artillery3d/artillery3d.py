@@ -6,9 +6,9 @@ from pufferlib.ocean.artillery3d import binding
 
 class Artillery3D(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
-                 max_reward=1.0, max_reward_dist=5,  target_size=15,
-                 dist_fade=0.15, turn_penalty_delay=64, turn_penalty_ramp=0.01, max_dist0=250.0,
-                 turn_penalty=-0.003, miss_penalty=-0.15, render=1, out_bounds_penalty=-0.01,
+                 max_reward=1.0, max_reward_dist=23.620013496047616,  target_size=15,
+                 dist_fade=0.7493789405520497, turn_penalty_delay=72.37761171826367, turn_penalty_ramp=0.2, max_dist0=127.50246246114087,
+                 turn_penalty=-0.003, miss_penalty=-0.1858434974084412, render=1, out_bounds_penalty=-0.01,
                  log_interval=128,
                  seed=7,
                  buf=None, rng=7, i=1, debug=0, same_runs=0):

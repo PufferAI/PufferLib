@@ -189,15 +189,14 @@ extension_kwargs = dict(
 # Find C extensions
 c_extensions = []
 if not NO_OCEAN:
-    #c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
-    c_extension_paths = ["pufferlib/ocean/artillery3d/binding.c"]
+    c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
     c_extensions = [
         Extension(
             path.rstrip('.c').replace('/', '.'),
             sources=[path],
             **extension_kwargs,
         )
-        for path in c_extension_paths# if 'matsci' not in path
+        for path in c_extension_paths if 'matsci' not in path
     ]
     c_extension_paths = [os.path.join(*path.split('/')[:-1]) for path in c_extension_paths]
 

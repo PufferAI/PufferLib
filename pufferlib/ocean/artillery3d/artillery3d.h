@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <string.h>
 #include "raylib.h"
+#include "rlgl.h"
 #include <time.h>
 
 #define FIRE 0
@@ -218,16 +219,6 @@ static inline void compute_observations(Artillery3D* env) {
     env->observations[4] = env->fuse_t;
     env->observations[5] = env->shots_fired * env->inv_max_shots;
     env->observations[6] = env->targets_remaining / NUMTARGETS;
-    if (env->debug > 0) {
-        printf("  Compute Observations\n");
-        printf("    azimuth = %.3f\n", env->observations[0]);
-        printf("    elevation = %.3f\n", env->observations[1]);
-        printf("    score = %.6f\n", env->observations[2]);
-        printf("    tick = %.3f\n", env->observations[3]);
-        printf("    fuse_t = %.3f\n", env->observations[4]);
-        printf("    shots_fired = %.3f\n", env->observations[5]);
-        printf("    targets_remaining = %.3f\n", env->observations[6]);
-    }
 
     int base_obs = 7;
     for (int i = 0; i < NUMTARGETS; i++) {
@@ -312,7 +303,6 @@ static inline void calculate_distance(Artillery3D* env) {
 }
 
 static inline void fire_projectile(Artillery3D* env) {
-    if (env->debug > 0) printf("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!FIRE env%d!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", env->i);
     calculate_distance(env);
     float score;
     env->fire_t = env->t;
@@ -323,7 +313,6 @@ static inline void fire_projectile(Artillery3D* env) {
         score = env->inv_max_shots * (1.0f - (env->dist / env->max_reward_distn));
     }
 
-    if (env->debug > 0) printf("    env%d tick%d closest_dist = %.3f score=%.3f\n", env->i, env->tick, env->dist, score);
     env->score += score;
     env->rewards[0] += score;
 
@@ -340,7 +329,6 @@ static inline void fire_projectile(Artillery3D* env) {
 }
 
 static inline void step_frame(Artillery3D* env, int action) {
-    if (env->debug > 0) printf("STEP env%d tick%d=========================\n", env->i, env->tick);
 
     if (!env->projectile_active) {
         if (action == FIRE) {
@@ -440,13 +428,11 @@ static inline void step_frame(Artillery3D* env, int action) {
         }
     }
 
-    if (env->debug > 1) printf("  fired = %d remaining = %d\n", env->shots_fired, env->shots_remaining);
     if (
             (env->shots_remaining < 1 && (!env->render || env->px > XSIZE)) ||
             (env->score < -1.0f) ||
             (env->targets_remaining < 1 && (!env->render || env->px > XSIZE))
         ) {
-        if (env->debug > 0) printf("==================terminate=================\n\n\n\n\n\n\n\n\n\n");
         env->terminals[0] = 1;
         add_log(env);
         c_reset(env);
