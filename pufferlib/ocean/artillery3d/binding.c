@@ -15,7 +15,6 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->miss_penalty = unpack(kwargs, "miss_penalty");
     env->rng = unpack(kwargs, "rng");
     env->debug = unpack(kwargs, "debug");
-    env->same_runs = unpack(kwargs, "same_runs");
     env->max_dist0 = unpack(kwargs, "max_dist0");
     env->out_bounds_penalty = unpack(kwargs, "out_bounds_penalty");
     env->i = unpack(kwargs, "i");

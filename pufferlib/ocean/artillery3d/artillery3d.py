@@ -11,7 +11,7 @@ class Artillery3D(pufferlib.PufferEnv):
                  turn_penalty=-0.003, miss_penalty=-0.1858434974084412, render=1, out_bounds_penalty=-0.01,
                  log_interval=128,
                  seed=7,
-                 buf=None, rng=7, i=1, debug=0, same_runs=0):
+                 buf=None, rng=7, i=1, debug=0):
         obs_size = 7 + 12
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         self.render_mode = render_mode
@@ -36,7 +36,7 @@ class Artillery3D(pufferlib.PufferEnv):
                 dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, turn_penalty_ramp=turn_penalty_ramp, max_dist0=max_dist0,
                 turn_penalty=turn_penalty, miss_penalty=miss_penalty, render=render,
                 out_bounds_penalty=out_bounds_penalty,
-                rng=rng+i, i=i, debug=debug, same_runs=same_runs
+                rng=rng+i, i=i, debug=debug
             )
             c_envs.append(env_id)
         self.c_envs = binding.vectorize(*c_envs)

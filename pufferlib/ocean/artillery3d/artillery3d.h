@@ -126,7 +126,6 @@ typedef struct Artillery3D {
 
     int debug;
     unsigned int rng;
-    int same_runs;
     int runs;
 
     float inv_x_size;
@@ -165,7 +164,6 @@ void init(Artillery3D* env) {
     env->tick = 0;
     env->t = 0.0f;
     env->fire_t = 99999.0f;
-    if (env->same_runs < 1) env->same_runs = 1;
     env->projectile_active = 0;
     env->projectile_time = 0.0f;
     env->dist = XSIZE;
@@ -234,13 +232,7 @@ static inline void compute_observations(Artillery3D* env) {
 
 void reset_round(Artillery3D* env) {
     env->terminals[0] = 0;
-    if (env->runs % (int)env->same_runs == 0) {
-        get_random_start(env);
-    }
-    else {
-        env->azimuth = env->azimuth0;
-        env->elevation = env->elevation0;
-    }
+    get_random_start(env);
     env->tick = 0;
     env->runs += 1;
     env->score = 0;
