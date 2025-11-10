@@ -14,15 +14,14 @@ class ArtyMulti(pufferlib.PufferEnv):
                  log_interval=128,
                  seed=7,
                  buf=None, rng=7, i=1, debug=0):
-        obs_size = 6
+        obs_size = 10
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.log_interval = log_interval
         self.tick = 0
 
-        self.single_action_space = gymnasium.spaces.Discrete(5)
-        #self.single_action_space = gymnasium.spaces.MultiDiscrete([5] * 2)
+        self.single_action_space = gymnasium.spaces.MultiDiscrete([5, 5])
 
         super().__init__(buf)
 
@@ -53,8 +52,6 @@ class ArtyMulti(pufferlib.PufferEnv):
         if self.tick % self.log_interval == 0:
             info.append(binding.vec_log(self.c_envs))
 
-        #print('P Obs:', ' '.join(f'{x:.3f}' for x in self.observations.flatten()))
-
         return (self.observations, self.rewards,
             self.terminals, self.truncations, info)
 
@@ -69,14 +66,12 @@ def test_performance(timeout=10, atn_cache=1024):
     env.reset()
     tick = 0
 
-    actions = np.random.randint(0, 4, (atn_cache, env.num_agents))
+    actions = np.random.randint(0, 5, (atn_cache, env.num_agents, 2))
 
     import time
     start = time.time()
     while time.time() - start < timeout:
-
         atn = actions[tick % atn_cache]
-
         env.step(atn)
         tick += 1
 

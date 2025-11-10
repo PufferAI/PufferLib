@@ -31,10 +31,13 @@
 #define TIMESTEP 0.25f
 
 typedef struct Log {
-    float score;
     float episode_return;
+    float score;
+    float scoreL;
+    float scoreR;
+    float distL;
+    float distR;
     float episode_length;
-    float dist;
     float max_reward_distn;
     float turn_penaltyn;
     float acc1000;
@@ -46,6 +49,26 @@ typedef struct Client {
     int debug;
 } Client;
 
+typedef struct Gun {
+    float powder;
+    float angle;
+    float px;
+    float py;
+    int projectile_active;
+    float projectile_time;
+    float v0;
+    float vx0;
+    float vy0;
+    float x0;
+    float y0;
+    float tx;
+    float ty;
+    float dist;
+    float score;
+    int fired;
+    float turn_penaltyn;
+} Gun;
+
 typedef struct ArtyMulti {
     Client* client;
     Log log;
@@ -56,37 +79,22 @@ typedef struct ArtyMulti {
     int i;
 
     float score;
+    float scoreL;
+    float scoreR;
     int tick;
-    float dist;
 
-    float powder;
-    float angle;
+    Gun gun[2];
 
-    float px;
-    float py;
     float g;
-    int projectile_active;
-    float projectile_time;
-
-    float v0;
-    float vx0;
-    float vy0;
-    float x0;
-    float y0;
-
-    float tx;
-    float ty;
 
     float max_reward_dist;
     float max_reward_distn;
     float max_dist0;
     float dist_fade;
     float turn_penalty;
-    float turn_penaltyn;
-    int turn_penalty_delay;
+    float turn_penalty_delay;
     float turn_penalty_ramp;
     float miss_penalty;
-    int fired;
     float out_bounds_penalty;
 
     int frameskip;
@@ -104,45 +112,54 @@ void add_log(ArtyMulti* env) {
     env->log.episode_length += env->tick;
     env->log.episode_return += env->score;
     env->log.score += env->score;
-    env->log.dist += env->dist;
+    env->log.scoreL += env->gun[0].score;
+    env->log.scoreR += env->gun[1].score;
+    env->log.distL += env->gun[0].dist;
+    env->log.distR += env->gun[1].dist;
+
     env->log.max_reward_distn += env->max_reward_distn;
-    env->log.turn_penaltyn += env->turn_penaltyn;
+    env->log.turn_penaltyn += env->gun[0].turn_penaltyn + env->gun[1].turn_penaltyn;
     env->log.n += 1;
-    env->log.acc1000 += 750.0f - env->dist;
+    env->log.acc1000 += 1500.0f - (env->gun[0].dist + env->gun[1].dist);
 }
 
 void compute_observations(ArtyMulti* env) {
     if (env->debug > 0) printf("  Compute Observations\n");
-    env->observations[0] = env->powder;
-    if (env->debug > 0) printf("    powder = %.3f\n", env->observations[0]);
-    env->observations[1] = env->angle - MINAIMANGLE;
-    if (env->debug > 0) printf("    angle = %.3f\n", env->observations[1]);
-    env->observations[2] = env->tx * INVWIDTH;
-    if (env->debug > 0) printf("    tx = %.3f\n", env->observations[2]);
-    env->observations[3] = env->ty * INVHEIGHT;
-    if (env->debug > 0) printf("    ty = %.3f\n", env->observations[3]);
-    env->observations[4] = env->score;
-    if (env->debug > 0) printf("    score = %.6f\n", env->observations[4]);
-    env->observations[5] = env->tick * 0.01;
-    if (env->debug > 0) printf("    tick = %.3f\n", env->observations[5]);
 
-    //printf("H Obs: ");
-    //for(int i = 0; i < 8; i++) {
-    //    printf("%.3f ", env->observations[i]);
-    //}
-    //printf("\n");
+    env->observations[0] = env->gun[0].powder;
+    env->observations[1] = env->gun[0].angle - MINAIMANGLE;
+    env->observations[2] = env->gun[0].tx * INVWIDTH;
+    env->observations[3] = env->gun[0].ty * INVHEIGHT;
+
+    env->observations[4] = env->gun[1].powder;
+    env->observations[5] = env->gun[1].angle - MINAIMANGLE;
+    env->observations[6] = env->gun[1].tx * INVWIDTH;
+    env->observations[7] = env->gun[1].ty * INVHEIGHT;
+
+    env->observations[8] = env->score;
+    env->observations[9] = env->tick * 0.01;
 }
 
 void get_random_start(ArtyMulti* env) {
     if (env->debug > 0) printf("get_random_start\n");
-    env->tx = rand() % WIDTH;
-    env->ty = rand() % HEIGHT;
-    if (env->tx < MINX1) env->tx = MINX1;
-    if (env->tx > MAXX1) env->tx = MAXX1;
-    if (env->ty < MINY1) env->ty = MINY1;
-    if (env->ty > MAXY1) env->ty = MAXY1;
-    env->angle = ((float)rand() / (float)RAND_MAX) + MINAIMANGLE;
-    env->powder = (float)rand() / (float)RAND_MAX;
+
+    env->gun[0].tx = (rand() % (WIDTH/2 - 100)) + WIDTH/2 + 50;
+    env->gun[0].ty = rand() % HEIGHT;
+    if (env->gun[0].ty < MINY1) env->gun[0].ty = MINY1;
+    if (env->gun[0].ty > MAXY1) env->gun[0].ty = MAXY1;
+    env->gun[0].angle = 0.5f;
+    env->gun[0].powder = 0.95f;
+    env->gun[0].x0 = 30.0f;
+    env->gun[0].y0 = 30.0f;
+
+    env->gun[1].tx = (rand() % (WIDTH/2 - 100)) + 50;
+    env->gun[1].ty = rand() % HEIGHT;
+    if (env->gun[1].ty < MINY1) env->gun[1].ty = MINY1;
+    if (env->gun[1].ty > MAXY1) env->gun[1].ty = MAXY1;
+    env->gun[1].angle = 0.95f;
+    env->gun[1].powder = 0.75f;
+    env->gun[1].x0 = WIDTH - 30.0f;
+    env->gun[1].y0 = 30.0f;
 }
 
 void reset_round(ArtyMulti* env) {
@@ -152,9 +169,15 @@ void reset_round(ArtyMulti* env) {
     env->tick = 0;
     env->runs += 1;
     env->score = 0;
-    env->fired = 0;
-    env->projectile_active = 0;
-    env->projectile_time = 0.0f;
+
+    for (int i = 0; i < 2; i++) {
+        env->gun[i].fired = 0;
+        env->gun[i].projectile_active = 0;
+        env->gun[i].projectile_time = 0.0f;
+        env->gun[i].score = 0;
+        env->gun[i].turn_penaltyn = 0;
+    }
+
     env->max_reward_distn = env->max_dist0 - (int)(env->runs * env->dist_fade);
     if (env->max_reward_distn < env->max_reward_dist) env->max_reward_distn = env->max_reward_dist;
 }
@@ -168,12 +191,15 @@ void init(ArtyMulti* env) {
     env->runs = 0;
     env->tick = 0;
     env->g = 9.81f;
-    env->projectile_active = 0;
-    env->projectile_time = 0.0f;
-    env->dist = WIDTH;
+
+    for (int i = 0; i < 2; i++) {
+        env->gun[i].projectile_active = 0;
+        env->gun[i].projectile_time = 0.0f;
+        env->gun[i].dist = WIDTH;
+        env->gun[i].fired = 0;
+    }
 
     srand(env->rng + env->i);
-
     get_random_start(env);
 }
 
@@ -191,23 +217,22 @@ float get_turn_penalty(ArtyMulti* env) {
     }
 }
 
-void calculate_parabola_closest_distance(ArtyMulti* env) {
-    env->v0 = env->powder * VCOEFF;
-    env->vx0 = env->v0 * cosf(env->angle);
-    env->vy0 = env->v0 * sinf(env->angle);
-    env->x0 = 30.0f;
-    env->y0 = 30.0f;
+void calculate_parabola_closest_distance(ArtyMulti* env, int gun_idx) {
+    Gun* gun = &env->gun[gun_idx];
+    gun->v0 = gun->powder * VCOEFF;
 
-    float tx = env->tx;
-    float ty = env->ty;
-    float txn = tx;
-    float tyn = ty;
+    float angle_multiplier = (gun_idx == 0) ? 1.0f : -1.0f;
+    gun->vx0 = gun->v0 * cosf(gun->angle) * angle_multiplier;
+    gun->vy0 = gun->v0 * sinf(gun->angle);
+
+    float tx = gun->tx;
+    float ty = gun->ty;
 
     float min_dist2 = 99999999.0f;
 
     for (float t = 0; t < MAX_PROJECTILE_TIME; t += TIMESTEP) {
-        float x = env->x0 + env->vx0 * t;
-        float y = env->y0 + env->vy0 * t - 0.5f * env->g * t * t;
+        float x = gun->x0 + gun->vx0 * t;
+        float y = gun->y0 + gun->vy0 * t - 0.5f * env->g * t * t;
 
         if (y < 0 || x < 0 || x > WIDTH) break;
 
@@ -219,88 +244,107 @@ void calculate_parabola_closest_distance(ArtyMulti* env) {
             min_dist2 = dist2;
         }
     }
-    env->dist = sqrt(min_dist2);
+    gun->dist = sqrt(min_dist2);
 }
 
-void fire_projectile(ArtyMulti* env) {
-    if (env->debug > 0) printf("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!FIRE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-    calculate_parabola_closest_distance(env);
+void fire_projectile(ArtyMulti* env, int gun_idx) {
+    Gun* gun = &env->gun[gun_idx];
+    if (env->debug > 0) printf("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!FIRE GUN %d!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", gun_idx);
+    calculate_parabola_closest_distance(env, gun_idx);
     float score;
 
-    if (env->dist >= env->max_reward_distn) {
+    if (gun->dist >= env->max_reward_distn) {
         score = env->miss_penalty;
     } else {
-        score = 1.0f - (env->dist / env->max_reward_distn);
+        score = 1.0f - (gun->dist / env->max_reward_distn);
     }
 
-    if (env->debug > 0) printf("    env%d tick%d closest_dist = %.3f score=%.3f\n", env->i, env->tick, env->dist, score);
-    env->score += score;
-    env->rewards[0] += score;
+    if (env->debug > 0) printf("    env%d tick%d gun%d closest_dist = %.3f score=%.3f\n", env->i, env->tick, gun_idx, gun->dist, score);
+    gun->score += score;
+    env->score += score * 0.5f;
+    if (gun_idx == 0) env->scoreL += score * 0.5f;
+    if (gun_idx == 1) env->scoreR += score * 0.5f;
+    env->rewards[0] += score * 0.5f;
 
     if (env->render) {
-        env->projectile_active = 1;
-        env->projectile_time = 0.0f;
-        env->px = env->x0;
-        env->py = env->y0;
+        gun->projectile_active = 1;
+        gun->projectile_time = 0.0f;
+        gun->px = gun->x0;
+        gun->py = gun->y0;
     }
 }
 
-void step_frame(ArtyMulti* env, float action) {
+void step_frame(ArtyMulti* env, float action0, float action1) {
     if (env->debug > 0) printf("STEP env%d tick%d=========================\n", env->i, env->tick);
+    if (env->debug > 0) printf("  Gun0 Action%.3f    Gun1 Action%.3f\n", action0, action1);
 
-    if (!env->projectile_active) {
-        if (action == FIRE) {
-            env->fired = 1;
-            if (env->projectile_active == 0) {
-                fire_projectile(env);
-            }
-        } else if (action == ADDPOWDER) {
-            if (env->powder < 0.95) {
-                env->powder += 0.05;
-            }
-            else {
-                env->score += env->out_bounds_penalty;
-            }
-        } else if (action == RMPOWDER) {
-            if (env->powder > 0.05) {
-                env->powder -= 0.05;
-            }
-            else {
-                env->score += env->out_bounds_penalty;
-            }
-        } else if (action == AIMUP) {
-            if (env->angle < MAXAIMANGLE - 0.05) {
-                env->angle += 0.05;
-            }
-            else {
-                env->score += env->out_bounds_penalty;
-            }
-        } else if (action == AIMDOWN) {
-            if (env->angle > MINAIMANGLE + 0.05) {
-                env->angle -= 0.05;
-            }
-            else {
-                env->score += env->out_bounds_penalty;
-            }
-        }
+    float actions[2] = {action0, action1};
 
-        if (action != FIRE) {
-            env->turn_penaltyn = get_turn_penalty(env);
-            env->score += env->turn_penaltyn;
-            env->rewards[0] += env->turn_penaltyn;
+    for (int gun_idx = 0; gun_idx < 2; gun_idx++) {
+        Gun* gun = &env->gun[gun_idx];
+        float action = actions[gun_idx];
+
+        if (!gun->projectile_active) {
+            if (action == FIRE) {
+                gun->fired = 1;
+                if (gun->projectile_active == 0) {
+                    fire_projectile(env, gun_idx);
+                }
+            } else if (action == ADDPOWDER) {
+                if (gun->powder < 0.95) {
+                    gun->powder += 0.05;
+                } else {
+                    env->score += env->out_bounds_penalty;
+                }
+            } else if (action == RMPOWDER) {
+                if (gun->powder > 0.05) {
+                    gun->powder -= 0.05;
+                } else {
+                    env->score += env->out_bounds_penalty;
+                }
+            } else if (action == AIMUP) {
+                if (gun->angle < MAXAIMANGLE - 0.05) {
+                    gun->angle += 0.05;
+                } else {
+                    env->score += env->out_bounds_penalty;
+                }
+            } else if (action == AIMDOWN) {
+                if (gun->angle > MINAIMANGLE + 0.05) {
+                    gun->angle -= 0.05;
+                } else {
+                    env->score += env->out_bounds_penalty;
+                }
+            }
+
+            if (action != FIRE) {
+                float turn_pen = get_turn_penalty(env);
+                gun->turn_penaltyn = turn_pen;
+                gun->score += turn_pen;
+                env->score += turn_pen * 0.5f;
+                if (gun_idx == 0) env->scoreL += turn_pen * 0.5f;
+                if (gun_idx == 1) env->scoreR += turn_pen * 0.5f;
+                env->rewards[0] += gun->turn_penaltyn * 0.5f;
+            }
+        } else { // Projectile Active
+            gun->projectile_time += TIMESTEP;
+            gun->px = gun->x0 + gun->vx0 * gun->projectile_time;
+            gun->py = gun->y0 + gun->vy0 * gun->projectile_time - 0.5f * env->g * gun->projectile_time * gun->projectile_time;
         }
     }
-    else { // Projectile Active
-        env->projectile_time += TIMESTEP;
-        env->px = env->x0 + env->vx0 * env->projectile_time;
-        if (env->debug > 1) printf("env->px = %.3f, env->vx0 = %.3f, ptime = %.3f\n", env->px, env->vx0, env->projectile_time);
-        if (env->debug > 1) printf("env->tx = %.3f\n", env->tx);
-        env->py = env->y0 + env->vy0 * env->projectile_time - 0.5f * env->g * env->projectile_time * env->projectile_time;
-        if (env->debug > 1) printf("env->py = %.3f, env->vy0 = %.3f, ptime = %.3f\n", env->py, env->vy0, env->projectile_time);
+
+    int both_fired = env->gun[0].fired && env->gun[1].fired;
+    int projectiles_done = 1;
+
+    if (env->render) {
+        for (int i = 0; i < 2; i++) {
+            Gun* gun = &env->gun[i];
+            if (gun->projectile_active && gun->px > 0 && gun->px < WIDTH && gun->py > 0) {
+                projectiles_done = 0;
+            }
+        }
     }
 
-    if (env->debug > 1) printf("  env->px = %.1f env->tx = %.1f env->render=%d\n", env->px, env->tx, env->render);
-    if ((env->fired == 1 && (!env->render || env->px > env->tx + 30 || env->py < 0.0f)) || (env->score < -1.0f)) {
+    if ((both_fired && (projectiles_done || !env->render)) || (env->score < -2.0f)) {
         if (env->debug > 0) printf("==================terminate=================\n\n\n\n\n\n\n\n\n\n");
         env->terminals[0] = 1;
         add_log(env);
@@ -312,10 +356,12 @@ void c_step(ArtyMulti* env) {
     env->terminals[0] = 0;
     env->rewards[0] = 0.0;
 
-    float action = env->actions[0];
+    float action0 = env->actions[0];
+    float action1 = env->actions[1];
+
     for (int i = 0; i < env->frameskip; i++) {
         env->tick += 1;
-        step_frame(env, action);
+        step_frame(env, action0, action1);
     }
     compute_observations(env);
 }
@@ -323,7 +369,7 @@ void c_step(ArtyMulti* env) {
 Client* make_client(ArtyMulti* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
 
-    InitWindow(WIDTH, HEIGHT, "PufferLib ArtyMulti");
+    InitWindow(WIDTH, HEIGHT, "PufferLib ArtyMulti Dual");
     SetTargetFPS(30);
 
     return client;
@@ -351,48 +397,58 @@ void c_render(ArtyMulti* env) {
     SetConfigFlags(FLAG_MSAA_4X_HINT);
     ClearBackground((Color){135, 206, 235, 255});
 
-    DrawCircle(env->tx, HEIGHT - env->ty, 15, RED);
+    DrawCircle(env->gun[0].tx, HEIGHT - env->gun[0].ty, 15, RED);
+    DrawCircle(env->gun[1].tx, HEIGHT - env->gun[1].ty, 15, BLUE);
 
-    float barrel_length = 40.0f;
-    float barrel_width = 8.0f;
-    float barrel_x = 30.0f;
-    float barrel_y = HEIGHT - 30.0f;
+    for (int gun_idx = 0; gun_idx < 2; gun_idx++) {
+        Gun* gun = &env->gun[gun_idx];
 
-    Vector2 barrel_start = {barrel_x, barrel_y};
-    Vector2 barrel_end = {
-        barrel_x + barrel_length * cosf(env->angle),
-        barrel_y - barrel_length * sinf(env->angle)
-    };
+        float barrel_length = 40.0f;
+        float barrel_width = 8.0f;
+        float barrel_x = gun->x0;
+        float barrel_y = HEIGHT - gun->y0;
 
-    float v0 = env->powder * VCOEFF;
-    float vx0 = v0 * cosf(env->angle);
-    float vy0 = v0 * sinf(env->angle);
-    float x0 = 30.0f;
-    float y0 = 30.0f;
+        float angle_multiplier = (gun_idx == 0) ? 1.0f : -1.0f;
 
-    Vector2 prev_point = {x0, HEIGHT - y0};
-    int j = 0;
-    for (float t = TIMESTEP; t < MAX_PROJECTILE_TIME; t += 0.5f) {
-        float x = x0 + vx0 * t;
-        float y = y0 + vy0 * t - 0.5f * env->g * t * t;
+        Vector2 barrel_start = {barrel_x, barrel_y};
+        Vector2 barrel_end = {
+            barrel_x + barrel_length * cosf(gun->angle) * angle_multiplier,
+            barrel_y - barrel_length * sinf(gun->angle)
+        };
 
-        if (y < 0 || x < 0 || x > WIDTH) break;
+        Vector2 prev_point = {gun->x0, HEIGHT - gun->y0};
+        int j = 0;
+        for (float t = TIMESTEP; t < MAX_PROJECTILE_TIME; t += 0.5f) {
 
-        Vector2 current_point = {x, HEIGHT - y};
-        if (j % 2 == 0) DrawLineV(prev_point, current_point, WHITE);
-        if (j % 2 == 1) DrawLineV(prev_point, current_point, BLACK);
-        prev_point = current_point;
-        j += 1;
+
+            float v0 = gun->powder * VCOEFF;
+            float vx0 = v0 * cosf(gun->angle) * angle_multiplier;
+            float vy0 = v0 * sinf(gun->angle);
+
+            float x = gun->x0 + vx0 * t;
+            float y = gun->y0 + vy0 * t - 0.5f * env->g * t * t;
+
+            if (y < 0 || x < 0 || x > WIDTH) break;
+
+            Vector2 current_point = {x, HEIGHT - y};
+            Color line_color = (gun_idx == 0) ? ORANGE : SKYBLUE;
+            if (j % 2 == 0) DrawLineV(prev_point, current_point, BLACK);
+            prev_point = current_point;
+            j += 1;
+        }
+
+        Color gun_color = (gun_idx == 0) ? DARKGRAY : DARKBLUE;
+        DrawLineEx(barrel_start, barrel_end, barrel_width, gun_color);
+        DrawCircle(barrel_x, barrel_y, 12.0f, gun_color);
+
+        if (gun->projectile_active) {
+            Color proj_color = (gun_idx == 0) ? ORANGE : BLUE;
+            DrawCircle(gun->px, HEIGHT - gun->py, 4.0f, proj_color);
+        }
     }
 
-    DrawLineEx(barrel_start, barrel_end, barrel_width, DARKGRAY);
-    DrawCircle(barrel_x, barrel_y, 12.0f, GRAY);
-
-    if (env->projectile_active) {
-        DrawCircle(env->px, HEIGHT - env->py, 4.0f, BLACK);
-    }
-
-    DrawText(TextFormat("%.3f", env->score), 10, 10, 20, BLACK);
+    DrawText(TextFormat("Score: %.3f", env->score), 10, 10, 20, BLACK);
+    DrawText(TextFormat("Gun0: %.3f Gun1: %.3f", env->gun[0].score, env->gun[1].score), 10, 35, 20, BLACK);
 
     EndDrawing();
 }

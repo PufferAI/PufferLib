@@ -4,9 +4,9 @@
 
 void allocate(ArtyMulti* env) {
     init(env);
-    int obs_size = 6;
+    int obs_size = 10;
     env->observations = (float*)calloc(obs_size, sizeof(float));
-    env->actions = (int*)calloc(1, sizeof(int));
+    env->actions = (int*)calloc(2, sizeof(int));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
 }
@@ -40,37 +40,33 @@ void demo() {
     env.client = make_client(&env);
 
     Weights* weights = load_weights("resources/artymulti/puffer_artymulti_weights.bin", 134022);
-    int logit_sizes[1] = {5};
-    int obs_size = 8;
-    LinearLSTM* net = make_linearlstm(weights, 1, obs_size, logit_sizes, 1);
+    int logit_sizes[2] = {5, 5};
+    int obs_size = 10;
+    LinearLSTM* net = make_linearlstm(weights, 2, obs_size, logit_sizes, 1);
 
     c_reset(&env);
     SetTargetFPS(30);
     while (!WindowShouldClose()) {
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
             env.actions[0] = 100;
+            env.actions[1] = 100;
+
             if (IsKeyDown(KEY_SPACE)) env.actions[0] = 0;
-            if (IsKeyDown(KEY_UP)  || IsKeyDown(KEY_W)) env.actions[0] = 1;
-            if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = 2;
-            if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 3;
-            if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 4;
+            if (IsKeyDown(KEY_W)) env.actions[0] = 1;
+            if (IsKeyDown(KEY_S)) env.actions[0] = 2;
+            if (IsKeyDown(KEY_A)) env.actions[0] = 3;
+            if (IsKeyDown(KEY_D)) env.actions[0] = 4;
+
+            if (IsKeyDown(KEY_ENTER)) env.actions[1] = 0;
+            if (IsKeyDown(KEY_UP)) env.actions[1] = 1;
+            if (IsKeyDown(KEY_DOWN)) env.actions[1] = 2;
+            if (IsKeyDown(KEY_LEFT)) env.actions[1] = 3;
+            if (IsKeyDown(KEY_RIGHT)) env.actions[1] = 4;
         } else {
             int* actions = (int*)env.actions;
-            //printf("C Obs: ");
-            //for(int i = 0; i < obs_size; i++) {
-            //    printf("%.3f ", env.observations[i]);
-            //}
-            //printf("\n");
             forward_linearlstm(net, env.observations, actions);
-            //printf("LSTM state_h[0-3]: %.3f %.3f %.3f %.3f\n",
-            //    net->lstm->state_h[0], net->lstm->state_h[1],
-            //    net->lstm->state_h[2], net->lstm->state_h[3]);
-            //printf("Logits: ");
-            //for(int i = 0; i < 5; i++) {
-            //    printf("%.3f ", net->actor->output[i]);
-            //}
-            //printf("\n");
             env.actions[0] = actions[0];
+            env.actions[1] = actions[1];
         }
         c_step(&env);
         c_render(&env);
