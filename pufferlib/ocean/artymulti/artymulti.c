@@ -1,5 +1,5 @@
 #include <time.h>
-#include "artillery.h"
+#include "artymulti.h"
 #include "puffernet.h"
 
 void allocate(ArtyMulti* env) {
@@ -20,8 +20,9 @@ void free_allocated(ArtyMulti* env) {
 }
 
 void demo() {
-    Artillery env = {
+    ArtyMulti env = {
         .debug = 0,
+        .adj = 0.025,
         .dist_fade = 0.36,
         .frameskip = 1,
         .miss_penalty = -0.1,
@@ -30,7 +31,6 @@ void demo() {
         .out_bounds_penalty = -0.1,
         .turn_penalty = -0.03,
         .turn_penalty_delay = 64,
-        .turn_penalty_ramp = 0.023,
         .render = 1,
         .rng = 7,
         .i = 1,
@@ -39,10 +39,10 @@ void demo() {
 
     env.client = make_client(&env);
 
-    Weights* weights = load_weights("resources/artymulti/puffer_artymulti_weights.bin", 134022);
+    Weights* weights = load_weights("resources/artymulti/puffer_artymulti_weights.bin", 134923);
     int logit_sizes[2] = {5, 5};
     int obs_size = 10;
-    LinearLSTM* net = make_linearlstm(weights, 2, obs_size, logit_sizes, 1);
+    LinearLSTM* net = make_linearlstm(weights, 1, obs_size, logit_sizes, 1);
 
     c_reset(&env);
     SetTargetFPS(30);

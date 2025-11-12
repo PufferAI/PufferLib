@@ -9,7 +9,7 @@ class ArtyMulti(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
                  frameskip=1,
                  min_aim_angle=0.56, max_aim_angle=1.56, max_reward_dist=8.5,
-                 dist_fade=0.36, turn_penalty_delay=64, turn_penalty_ramp=0.023, max_dist0=100.0,
+                 adj=0.025, dist_fade=0.36, turn_penalty_delay=64, max_dist0=100.0,
                  turn_penalty=-0.03, miss_penalty=-0.1, render=1, out_bounds_penalty=-0.1,
                  log_interval=128,
                  seed=7,
@@ -31,7 +31,7 @@ class ArtyMulti(pufferlib.PufferEnv):
             self.observations, self.actions, self.rewards, self.terminals, self.truncations, num_envs,
             seed, num_envs=num_envs, seed=seed, frameskip=frameskip,
             min_aim_angle=min_aim_angle, max_aim_angle=max_aim_angle, max_reward_dist=max_reward_dist,
-            dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, turn_penalty_ramp=turn_penalty_ramp, max_dist0=max_dist0,
+            adj=adj, dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, max_dist0=max_dist0,
             turn_penalty=turn_penalty, miss_penalty=miss_penalty, render=render,
             out_bounds_penalty=out_bounds_penalty,
             rng=rng+i, i=i, debug=debug
