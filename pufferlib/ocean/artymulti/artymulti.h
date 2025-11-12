@@ -116,11 +116,10 @@ void add_log(ArtyMulti* env) {
     env->log.scoreR += env->gun[1].score;
     env->log.distL += env->gun[0].dist;
     env->log.distR += env->gun[1].dist;
-
     env->log.max_reward_distn += env->max_reward_distn;
     env->log.turn_penaltyn += env->gun[0].turn_penaltyn + env->gun[1].turn_penaltyn;
     env->log.n += 1;
-    env->log.acc1000 += 1500.0f - (env->gun[0].dist + env->gun[1].dist);
+    env->log.acc1000 += env->gun[1].score * (1500.0f - (env->gun[0].dist + env->gun[1].dist));
 }
 
 void compute_observations(ArtyMulti* env) {
