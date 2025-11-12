@@ -122,7 +122,10 @@ void c_render(Squared* env) {
     }
 
     BeginDrawing();
-    ClearBackground((Color){6, 24, 24, 255});
+    ClearBackground({6, 24, 24, 255});
+
+    Color color1 = {0, 187, 187, 255};
+    Color color2 = {187, 0, 0, 255};
 
     int px = 64;
     for (int i = 0; i < env->size; i++) {
@@ -131,7 +134,7 @@ void c_render(Squared* env) {
             if (tex == EMPTY) {
                 continue;
             }
-            Color color = (tex == AGENT) ? (Color){0, 187, 187, 255} : (Color){187, 0, 0, 255};
+            Color color = (tex == AGENT) ? color1 : color2;
             DrawRectangle(j*px, i*px, px, px, color);
         }
     }
