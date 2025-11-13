@@ -25,7 +25,7 @@ class ArtyMulti(pufferlib.PufferEnv):
 
         super().__init__(buf)
 
-        self.actions = self.actions.astype(np.float32)
+        self.actions = self.actions
 
         self.c_envs = binding.vec_init(
             self.observations, self.actions, self.rewards, self.terminals, self.truncations, num_envs,
