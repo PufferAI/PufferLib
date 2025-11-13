@@ -8,9 +8,9 @@ from pufferlib.ocean.artymulti import binding
 class ArtyMulti(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
                  frameskip=1,
-                 min_aim_angle=0.56, max_aim_angle=1.56, max_reward_dist=8.5,
-                 adj=0.025, dist_fade=0.36, turn_penalty_delay=64, max_dist0=100.0,
-                 turn_penalty=-0.03, miss_penalty=-0.1, render=1, out_bounds_penalty=-0.1,
+                 min_aim_angle=0.56, max_aim_angle=1.56, max_reward_dist=45,
+                 adj=0.0008, dist_fade=0.11, turn_penalty_delay=58, max_dist0=136,
+                 turn_penalty=-0.1, miss_penalty=-0.03, render=1, out_bounds_penalty=-0.1,
                  log_interval=128,
                  seed=7,
                  buf=None, rng=7, i=1, debug=0):
