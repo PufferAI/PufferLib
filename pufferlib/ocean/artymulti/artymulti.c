@@ -22,15 +22,15 @@ void free_allocated(ArtyMulti* env) {
 void demo() {
     ArtyMulti env = {
         .debug = 0,
-        .adj = 0.025,
-        .dist_fade = 0.36,
+        .adj = 0.008340523121815914,
+        .dist_fade = 0.10813009001338028,
         .frameskip = 1,
-        .miss_penalty = -0.1,
-        .max_reward_dist = 8.5,
-        .max_dist0 = 100,
+        .miss_penalty = -0.03448853813284214,
+        .max_reward_dist = 44.700659812685586,
+        .max_dist0 = 136.33416713214024,
         .out_bounds_penalty = -0.1,
-        .turn_penalty = -0.03,
-        .turn_penalty_delay = 64,
+        .turn_penalty = -0.1,
+        .turn_penalty_delay = 57.64829992415082,
         .render = 1,
         .rng = 7,
         .i = 1,
@@ -42,14 +42,14 @@ void demo() {
     Weights* weights = load_weights("resources/artymulti/puffer_artymulti_weights.bin", 134923);
     int logit_sizes[2] = {5, 5};
     int obs_size = 10;
-    LinearLSTM* net = make_linearlstm(weights, 1, obs_size, logit_sizes, 1);
+    LinearLSTM* net = make_linearlstm(weights, 1, obs_size, logit_sizes, 2);
 
     c_reset(&env);
     SetTargetFPS(30);
     while (!WindowShouldClose()) {
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
-            env.actions[0] = 100;
-            env.actions[1] = 100;
+            env.actions[0] = 4.0f;
+            env.actions[1] = 4.0f;
 
             if (IsKeyDown(KEY_SPACE)) env.actions[0] = 0;
             if (IsKeyDown(KEY_W)) env.actions[0] = 1;
@@ -63,10 +63,10 @@ void demo() {
             if (IsKeyDown(KEY_LEFT)) env.actions[1] = 3;
             if (IsKeyDown(KEY_RIGHT)) env.actions[1] = 4;
         } else {
-            int* actions = (int*)env.actions;
-            forward_linearlstm(net, env.observations, actions);
-            env.actions[0] = actions[0];
-            env.actions[1] = actions[1];
+            int discrete_actions[2];
+            forward_linearlstm(net, env.observations, discrete_actions);
+            env.actions[0] = discrete_actions[0];
+            env.actions[1] = discrete_actions[1];
         }
         c_step(&env);
         c_render(&env);

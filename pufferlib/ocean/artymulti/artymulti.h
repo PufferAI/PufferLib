@@ -73,7 +73,7 @@ typedef struct ArtyMulti {
     Client* client;
     Log log;
     float* observations;
-    float* actions;
+    int* actions;
     float* rewards;
     unsigned char* terminals;
     int i;
@@ -277,7 +277,7 @@ void fire_projectile(ArtyMulti* env, int gun_idx) {
 }
 
 void step_frame(ArtyMulti* env, float action0, float action1) {
-    float actions[2] = {action0, action1};
+    int actions[2] = {(int)action0, (int)action1};
     float adj = env->adj;
 
     for (int gun_idx = 0; gun_idx < 2; gun_idx++) {
