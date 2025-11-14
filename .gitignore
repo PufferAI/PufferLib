@@ -3,6 +3,9 @@ c_*.c
 pufferlib/extensions.c
 pufferlib/puffernet.c
 
+# hipified cuda extensions dir [HIP/ROCM]
+pufferlib/extensions/hip/
+
 # Raylib
 raylib_wasm/
 

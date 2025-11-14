@@ -20,7 +20,12 @@ from torch.utils.cpp_extension import (
     CUDAExtension,
     BuildExtension,
     CUDA_HOME,
+    ROCM_HOME
 )
+
+# build cuda extension if torch can find CUDA or HIP/ROCM in the system
+# may require `uv pip install --no-build-isolation` or `python setup.py build_ext --inplace`
+BUID_CUDA_EXT = bool(CUDA_HOME or ROCM_HOME)
 
 # Build with DEBUG=1 to enable debug symbols
 DEBUG = os.getenv("DEBUG", "0") == "1"
@@ -55,6 +60,7 @@ def download_raylib(platform, ext):
 
 if not NO_OCEAN:
     download_raylib('raylib-5.5_webassembly', '.zip')
+    download_raylib(RAYLIB_NAME, '.tar.gz')
 
 BOX2D_URL = 'https://github.com/capnspacehook/box2d/releases/latest/download/'
 BOX2D_NAME = 'box2d-macos-arm64' if platform.system() == "Darwin" else 'box2d-linux-amd64'
@@ -72,6 +78,7 @@ def download_box2d(platform):
 
 if not NO_OCEAN:
     download_box2d('box2d-web')
+    download_box2d(BOX2D_NAME)
 
 # Shared compile args for all platforms
 extra_compile_args = [
@@ -83,8 +90,12 @@ extra_link_args = [
 ]
 cxx_args = [
     '-fdiagnostics-color=always',
+    '-std=c++17',
 ]
-nvcc_args = ['-Xcompiler=-D_GLIBCXX_USE_CXX11_ABI=1']
+nvcc_args = [
+    '-Xcompiler=-D_GLIBCXX_USE_CXX11_ABI=1',
+    '-std=c++17',
+]
 
 if DEBUG:
     extra_compile_args += [
@@ -129,8 +140,6 @@ if system == 'Linux':
     extra_link_args += [
         '-Bsymbolic-functions',
     ]
-    if not NO_OCEAN:
-        download_raylib('raylib-5.5_linux_amd64', '.tar.gz')
 elif system == 'Darwin':
     extra_compile_args += [
         '-Wno-error=int-conversion',
@@ -149,9 +158,6 @@ elif system == 'Windows':
         download_raylib('raylib-5.5_win64_msvc16', '.zip')
 else:
     raise ValueError(f'Unsupported system: {system}')
-
-if not NO_OCEAN:
-    download_box2d(BOX2D_NAME)
 
 # Default Gym/Gymnasium/PettingZoo versions
 # Gym:
@@ -189,8 +195,7 @@ class TorchBuildExt(cpp_extension.BuildExtension):
         super().run()
 
 RAYLIB_A = f'{RAYLIB_NAME}/lib/raylibdll.lib' if system == "Windows" else f'{RAYLIB_NAME}/lib/libraylib.a'
-
-INCLUDE = [numpy.get_include(), 'raylib/include', f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src']
+INCLUDE = [f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src']
 extension_kwargs = dict(
     include_dirs=INCLUDE,
     extra_compile_args=extra_compile_args,
@@ -221,28 +226,54 @@ if not NO_OCEAN:
             c_ext.include_dirs.append('/usr/local/include')
             c_ext.extra_link_args.extend(['-L/usr/local/lib', '-llammps'])
 
+# Define cmdclass outside of setup to add dynamic commands
+cmdclass = {
+    "build_ext": BuildExt,
+    "build_torch": TorchBuildExt,
+    "build_c": CBuildExt,
+}
+
+if not NO_OCEAN:
+    def create_env_build_class(full_name):
+        class EnvBuildExt(build_ext):
+            def run(self):
+                self.extensions = [e for e in self.extensions if e.name == full_name]
+                super().run()
+        return EnvBuildExt
+
+    # Add a build_<env> command for each env
+    for c_ext in c_extensions:
+        env_name = c_ext.name.split('.')[-2]
+        cmdclass[f"build_{env_name}"] = create_env_build_class(c_ext.name)
+
+
 # Check if CUDA compiler is available. You need cuda dev, not just runtime.
 torch_extensions = []
 if not NO_TRAIN:
     torch_sources = [
         "pufferlib/extensions/pufferlib.cpp",
     ]
-    if shutil.which("nvcc"):
+    if BUID_CUDA_EXT:
         extension = CUDAExtension
         torch_sources.append("pufferlib/extensions/cuda/pufferlib.cu")
         torch_sources.append("pufferlib/extensions/cuda/squared_torch.cu")
+        torch_sources.append("pufferlib/extensions/cuda/kernels.cu")
+        torch_sources.append("pufferlib/extensions/cuda/modules.cu")
     else:
         extension = CppExtension
 
+    import torch
     torch_extensions = [
        extension(
             "pufferlib._C",
             torch_sources,
-            include_dirs=[pybind11.get_include()],
+            include_dirs=[pybind11.get_include(), torch.utils.cpp_extension.include_paths()[0]],
             extra_compile_args = {
-                "cxx": cxx_args,
+                "cxx": extra_compile_args + cxx_args,
                 "nvcc": nvcc_args,
-            }
+            },
+            extra_link_args=extra_link_args,
+            extra_objects=[RAYLIB_A],
         ),
     ]
 
@@ -271,14 +302,13 @@ install_requires = [
 
 if not NO_TRAIN:
     install_requires += [
-        'torch',
+        'torch>=2.9',
         'psutil',
-        'pynvml',
+        'nvidia-ml-py',
         'rich',
         'rich_argparse',
         'imageio',
-        'pyro-ppl',
-        'heavyball<2.0',
+        'gpytorch',
         'neptune',
         'wandb',
     ]
@@ -292,10 +322,6 @@ setup(
     include_package_data=True,
     install_requires=install_requires,
     ext_modules = c_extensions + torch_extensions,
-    cmdclass={
-        "build_ext": BuildExt,
-        "build_torch": TorchBuildExt,
-        "build_c": CBuildExt,
-    },
+    cmdclass=cmdclass,
     include_dirs=[numpy.get_include(), RAYLIB_NAME + '/include'],
 )

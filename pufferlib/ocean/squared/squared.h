@@ -58,7 +58,7 @@ void c_reset(Squared* env) {
     env->r = env->size/2;
     env->c = env->size/2;
     env->tick = 0;
-    int target_idx;
+    int target_idx = 0; // Deterministic for testing
     do {
         target_idx = rand() % tiles;
     } while (target_idx == tiles/2);

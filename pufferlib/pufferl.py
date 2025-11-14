@@ -32,7 +32,6 @@ from torch.distributed.elastic.multiprocessing.errors import record
 import torch.utils.cpp_extension
 
 import pufferlib
-from pufferlib.models import forward_train
 import pufferlib.sweep
 import pufferlib.vector
 import pufferlib.pytorch
@@ -45,12 +44,14 @@ except ImportError:
 #def meta_step_environments(envs):
 #    pass
 
-class SquaredEnv:
-    def __init__(self, num_envs, grid_size):
+class CPPEnv:
+    def __init__(self, num_envs):
         dummy = torch.zeros(5).cuda()
-        self.env, self.observations, self.actions, self.rewards, self.terminals = _C.create_squared_environments(num_envs, grid_size, dummy)
+        #self.env, self.observations, self.actions, self.rewards, self.terminals = _C.create_squared_environments(num_envs, grid_size, dummy)
+        self.env, self.observations, self.actions, self.rewards, self.terminals = _C.create_environments(num_envs)
         self.observations = self.observations.view(num_envs, -1)
-        self.indices = torch.arange(num_envs).cuda().int()
+        #self.indices = torch.arange(num_envs).cuda().int()
+        self.indices = torch.arange(num_envs).int()
 
     def reset(self):
         _C.reset_environments(self.env, self.indices)
@@ -60,6 +61,13 @@ class SquaredEnv:
         self.actions[:] = actions
         _C.step_environments(self.env)
         return self.observations, self.rewards, self.terminals
+
+    def log(self):
+        return _C.log_environments(self.env, self.indices)
+
+    def close(self):
+        # TODO
+        pass
 
 import rich
 import rich.traceback
@@ -71,43 +79,44 @@ rich.traceback.install(show_locals=False)
 import signal # Aggressively exit on ctrl+c
 signal.signal(signal.SIGINT, lambda sig, frame: os._exit(0))
 
-# Assume advantage kernel has been built if CUDA compiler is available
-ADVANTAGE_CUDA = shutil.which("nvcc") is not None
+from torch.utils.cpp_extension import (
+    CUDA_HOME,
+    ROCM_HOME
+)
+# Assume advantage kernel has been built if torch has been compiled with CUDA or HIP support
+# and can find CUDA or HIP in the system
+ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
 
 # DEBUG FLAG IS A BUG. FUCK THIS DO NOT NOT NOT ENABLE
 #torch.autograd.set_detect_anomaly(True)
 #torch._dynamo.config.capture_scalar_outputs = True
 
+
 class PuffeRL:
-    #def __init__(self, config, vecenv, policy, logger=None, verbose=True):
-    #def __init__(self, config, policy, logger=None, verbose=True):
-    def __init__(self, config, logger=None, verbose=True):
+    def __init__(self, config, vecenv, logger=None, verbose=True):
         # Backend perf optimization
-        torch.set_float32_matmul_precision('high')
-        torch.backends.cudnn.deterministic = config['torch_deterministic']
-        torch.backends.cudnn.benchmark = True
+        num_envs = 4096
+        self.num_envs = num_envs
+        #grid_size = 11
+        dummy = torch.zeros(5).cuda()
+
+        vecenv = CPPEnv(num_envs)
+        vecenv.reset()
 
         # Reproducibility
         seed = config['seed']
-        #random.seed(seed)
-        #np.random.seed(seed)
-        #torch.manual_seed(seed)
-
-        num_envs = 4096
-        self.num_envs = num_envs
-        grid_size = 11
-        dummy = torch.zeros(5).cuda()
-        vecenv = SquaredEnv(num_envs, grid_size)
-        vecenv.reset()
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
 
         from gymnasium.spaces import Box, Discrete
-        obs_space = Box(low=-1, high=1, shape=(grid_size*grid_size,), dtype=np.float32)
-        atn_space = Discrete(5)
+        obs_space = Box(low=0, high=2, shape=(118,), dtype=np.float32)
+        atn_space = Discrete(3)
         self.single_observation_space = obs_space
         self.single_action_space = atn_space
 
-        policy = _C.PolicyLSTM(grid_size*grid_size, 5, 128)
-        policy.cuda()
+        #policy = _C.PolicyLSTM(grid_size*grid_size, 5, 128)
+        #policy.cuda()
 
         # Vecenv info
         #vecenv.async_reset(seed)
@@ -156,7 +165,6 @@ class PuffeRL:
         # LSTM
         if config['use_rnn']:
             n = self.agents_per_batch
-            #h = policy.hidden_size
             h = 128
             self.lstm_h = {i*n: torch.zeros(n, h, device=device) for i in range(total_agents//n)}
             self.lstm_c = {i*n: torch.zeros(n, h, device=device) for i in range(total_agents//n)}
@@ -173,56 +181,27 @@ class PuffeRL:
                 f'minibatch_size {self.minibatch_size} must be divisible by bptt_horizon {horizon}'
             )
 
-        # Torch compile
-        self.uncompiled_policy = policy
-        self.policy = policy
-        #self.compiled_policy = torch.compile(policy)
-        if config['compile']:
-            self.policy = torch.compile(policy, mode=config['compile_mode'])
-            #self.policy.forward_eval = torch.compile(policy, mode=config['compile_mode'])
-            pufferlib.pytorch.sample_logits = torch.compile(pufferlib.pytorch.sample_logits, mode=config['compile_mode'])
-
-        # Optimizer
-        if config['optimizer'] == 'adam':
-            optimizer = torch.optim.Adam(
-                self.policy.parameters(),
-                lr=config['learning_rate'],
-                betas=(config['adam_beta1'], config['adam_beta2']),
-                eps=config['adam_eps'],
-            )
-        elif config['optimizer'] == 'muon':
-            from heavyball import ForeachMuon
-            warnings.filterwarnings(action='ignore', category=UserWarning, module=r'heavyball.*')
-            import heavyball.utils
-            heavyball.utils.compile_mode = config['compile_mode'] if config['compile'] else None
-            optimizer = ForeachMuon(
-                self.policy.parameters(),
-                lr=config['learning_rate'],
-                betas=(config['adam_beta1'], config['adam_beta2']),
-                eps=config['adam_eps'],
-            )
-        else:
-            raise ValueError(f'Unknown optimizer: {config["optimizer"]}')
-
-        self.optimizer = optimizer
-
         # Logging
         self.logger = logger
         if logger is None:
             self.logger = Logger(config)
 
-        # Learning rate scheduler
-        epochs = max(1, config['total_timesteps'] // config['batch_size'])
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+        epochs = config['total_timesteps'] // config['batch_size']
         self.total_epochs = epochs
 
-        # Automatic mixed precision
-        precision = config['precision']
-        self.amp_context = contextlib.nullcontext()
-        #if config.get('amp', True) and config['device'] == 'cuda':
-        #    self.amp_context = torch.amp.autocast(device_type='cuda', dtype=getattr(torch, precision))
-        #if precision not in ('float32', 'bfloat16'):
-        #    raise pufferlib.APIUsageError(f'Invalid precision: {precision}: use float32 or bfloat16')
+        self.num_layers = 3
+        self.pufferl_cpp = _C.create_pufferl(
+            #vecenv.envs[0].c_envs,
+            118,
+            3,
+            128,
+            self.num_layers,
+            config['learning_rate'],
+            config['adam_beta1'],
+            config['adam_beta2'],
+            config['adam_eps'],
+            epochs,
+        )
 
         # Initializations
         self.config = config
@@ -240,7 +219,7 @@ class PuffeRL:
         self.verbose = verbose
 
         # Dashboard
-        self.model_size = sum(p.numel() for p in policy.parameters() if p.requires_grad)
+        #self.model_size = sum(p.numel() for p in policy.parameters() if p.requires_grad)
         self.print_dashboard(clear=True)
 
     @property
@@ -254,36 +233,6 @@ class PuffeRL:
 
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
 
-    def _compiled_evaluate(self, lstm_h, lstm_c):
-        config = self.config
-        device = config['device']
-        o = self.vecenv.observations
-        r = self.vecenv.rewards
-        d = self.vecenv.terminals
-        t = torch.zeros(o.shape[0], dtype=torch.bool, device=device)
-        for i in range(config['bptt_horizon']):
-            done_mask = d
-            self.global_step += self.num_envs
-
-            with torch.no_grad(), self.amp_context:
-                logits, value, lstm_h, lstm_c = self.policy(o, lstm_h, lstm_c)
-                action, logprob, _ = pufferlib.pytorch.sample_logits(logits)
-                r = torch.clamp(r, -1, 1)
-
-            with torch.no_grad():
-                self.observations[:, i] = o
-                self.actions[:, i] = action
-                self.logprobs[:, i] = logprob
-                self.rewards[:, i] = r
-                self.terminals[:, i] = d.float()
-                self.values[:, i] = value.flatten()
-
-                if isinstance(logits, torch.distributions.Normal):
-                    action = torch.clamp(action, self.vecenv.action_space.low, self.vecenv.action_space.high)
-
-            self.vecenv.step(action)
-
-
     def evaluate(self):
         profile = self.profile
         epoch = self.epoch
@@ -295,20 +244,45 @@ class PuffeRL:
         if config['use_rnn']:
             n = self.agents_per_batch
             h = 128
+            layers = self.num_layers
             #h = self.policy.hidden_size
  
-            lstm_h = torch.zeros((n, h), device=device)
-            lstm_c = torch.zeros((n, h), device=device)
+            state = torch.zeros((layers, n, h), device=device)
 
-        lstm_h, lstm_c = _C.compiled_evaluate(
+
+        '''
+        for t in range(self.config['bptt_horizon']):
+            lstm_h, lstm_c = _C.evaluate_step(
+                self.pufferl_cpp,
+                self.vecenv.env,
+                self.vecenv.indices,
+                self.vecenv.observations,
+                self.vecenv.actions,
+                self.vecenv.rewards,
+                self.vecenv.terminals,
+                lstm_h,
+                lstm_c,
+                self.observations,
+                self.actions,
+                self.logprobs,
+                self.rewards,
+                self.terminals,
+                self.values,
+                t
+            )
+            self.rewards[:, t].clamp_(-1.0, 1.0)
+            self.vecenv.step(self.actions[:, t])
+        '''
+
+        state = _C.compiled_evaluate(
+            self.pufferl_cpp,
             self.vecenv.env,
+            self.vecenv.indices,
             self.vecenv.observations,
             self.vecenv.actions,
             self.vecenv.rewards,
             self.vecenv.terminals,
-            self.policy,
-            lstm_h,
-            lstm_c,
+            state,
             self.observations,
             self.actions,
             self.logprobs,
@@ -316,8 +290,17 @@ class PuffeRL:
             self.terminals,
             self.values,
             self.config['bptt_horizon'],
-            self.num_envs  # Or wherever num_envs is stored
+            self.num_envs
         )
+
+        torch.cuda.synchronize()
+        logs = self.vecenv.log()
+        if logs.n > 0:
+            self.stats['perf'] = [logs.perf]
+            self.stats['score'] = [logs.score]
+            self.stats['episode_return'] = [logs.episode_return]
+            self.stats['episode_length'] = [logs.episode_length]
+            self.stats['n'] = [logs.n]
 
         self.global_step += config['batch_size']
         profile.end()
@@ -330,7 +313,10 @@ class PuffeRL:
         config = self.config
         device = config['device']
 
+        self.ratio[:] = 1
+
         losses = _C.compiled_train(
+            self.pufferl_cpp,
             self.observations,
             self.actions,
             self.logprobs,
@@ -339,9 +325,7 @@ class PuffeRL:
             self.truncations,
             self.ratio,
             self.values,
-            self.policy,
-            self.optimizer,
-            self.scheduler if self.config['anneal_lr'] else None,
+            #self.scheduler if self.config['anneal_lr'] else None,
             self.total_minibatches,
             self.minibatch_segments,
             self.segments,  # Assuming self.segments = self.num_envs
@@ -366,15 +350,6 @@ class PuffeRL:
 
         # Reprioritize experience
         profile('train_misc', epoch)
-        if config['anneal_lr']:
-            self.scheduler.step()
-
-        #y_pred = self.values.flatten()
-        #y_true = advantages.flatten() + self.values.flatten()
-        #var_y = y_true.var()
-        #explained_var = torch.nan if var_y == 0 else (1 - (y_true - y_pred).var() / var_y).item()
-        #losses['explained_variance'] = explained_var
-
         profile.end()
         logs = None
         self.epoch += 1
@@ -412,7 +387,7 @@ class PuffeRL:
             'agent_steps': agent_steps,
             'uptime': time.time() - self.start_time,
             'epoch': int(dist_sum(self.epoch, device)),
-            'learning_rate': self.optimizer.param_groups[0]["lr"],
+            #'learning_rate': self.optimizer.param_groups[0]["lr"],
             **{f'environment/{k}': v for k, v in self.stats.items()},
             **{f'losses/{k}': v for k, v in self.losses.items()},
             **{f'performance/{k}': v['elapsed'] for k, v in self.profile},
@@ -460,7 +435,7 @@ class PuffeRL:
         #torch.save(self.uncompiled_policy.state_dict(), model_path)
 
         state = {
-            'optimizer_state_dict': self.optimizer.state_dict(),
+            #'optimizer_state_dict': self.optimizer.state_dict(),
             'global_step': self.global_step,
             'agent_step': self.global_step,
             'update': self.epoch,
@@ -469,7 +444,7 @@ class PuffeRL:
         }
         state_path = os.path.join(path, 'trainer_state.pt')
         torch.save(state, state_path + '.tmp')
-        os.rename(state_path + '.tmp', state_path)
+        os.replace(state_path + '.tmp', state_path)
         return model_path
 
     def print_dashboard(self, clear=False, idx=[0],
@@ -507,14 +482,14 @@ class PuffeRL:
         idx[0] = (idx[0] - 1) % 10
             
         s = Table(box=None, expand=True)
-        remaining = 'A hair past a freckle'
+        remaining = f'{b2}A hair past a freckle{c2}'
         if sps != 0:
             remaining = duration((config['total_timesteps'] - agent_steps)/sps, b2, c2)
 
         s.add_column(f"{c1}Summary", justify='left', vertical='top', width=10)
         s.add_column(f"{c1}Value", justify='right', vertical='top', width=14)
         s.add_row(f'{c2}Env', f'{b2}{config["env"]}')
-        s.add_row(f'{c2}Params', abbreviate(self.model_size, b2, c2))
+        #s.add_row(f'{c2}Params', abbreviate(self.model_size, b2, c2))
         s.add_row(f'{c2}Steps', abbreviate(agent_steps, b2, c2))
         s.add_row(f'{c2}SPS', abbreviate(sps, b2, c2))
         s.add_row(f'{c2}Epoch', f'{b2}{self.epoch}')
@@ -527,21 +502,21 @@ class PuffeRL:
         p.add_column(f"{c1}Time", justify="right", width=8)
         p.add_column(f"{c1}%", justify="right", width=4)
         p.add_row(*fmt_perf('Evaluate', b1, delta, profile.eval, b2, c2))
-        p.add_row(*fmt_perf('  Forward', c2, delta, profile.eval_forward, b2, c2))
-        p.add_row(*fmt_perf('  Env', c2, delta, profile.env, b2, c2))
-        p.add_row(*fmt_perf('  Copy', c2, delta, profile.eval_copy, b2, c2))
-        p.add_row(*fmt_perf('  Misc', c2, delta, profile.eval_misc, b2, c2))
+        p.add_row(*fmt_perf('  Forward', b2, delta, profile.eval_forward, b2, c2))
+        p.add_row(*fmt_perf('  Env', b2, delta, profile.env, b2, c2))
+        p.add_row(*fmt_perf('  Copy', b2, delta, profile.eval_copy, b2, c2))
+        p.add_row(*fmt_perf('  Misc', b2, delta, profile.eval_misc, b2, c2))
         p.add_row(*fmt_perf('Train', b1, delta, profile.train, b2, c2))
-        p.add_row(*fmt_perf('  Forward', c2, delta, profile.train_forward, b2, c2))
-        p.add_row(*fmt_perf('  Learn', c2, delta, profile.learn, b2, c2))
-        p.add_row(*fmt_perf('  Copy', c2, delta, profile.train_copy, b2, c2))
-        p.add_row(*fmt_perf('  Misc', c2, delta, profile.train_misc, b2, c2))
+        p.add_row(*fmt_perf('  Forward', b2, delta, profile.train_forward, b2, c2))
+        p.add_row(*fmt_perf('  Learn', b2, delta, profile.learn, b2, c2))
+        p.add_row(*fmt_perf('  Copy', b2, delta, profile.train_copy, b2, c2))
+        p.add_row(*fmt_perf('  Misc', b2, delta, profile.train_misc, b2, c2))
 
         l = Table(box=None, expand=True, )
         l.add_column(f'{c1}Losses', justify="left", width=16)
         l.add_column(f'{c1}Value', justify="right", width=8)
         for metric, value in self.losses.items():
-            l.add_row(f'{c2}{metric}', f'{b2}{value:.3f}')
+            l.add_row(f'{b2}{metric}', f'{b2}{value:.3f}')
 
         monitor = Table(box=None, expand=True, pad_edge=False)
         monitor.add_row(s, p, l)
@@ -568,7 +543,7 @@ class PuffeRL:
                 continue
 
             u = left if i % 2 == 0 else right
-            u.add_row(f'{c2}{metric}', f'{b2}{value:.3f}')
+            u.add_row(f'{b2}{metric}', f'{b2}{value:.3f}')
             i += 1
             if i == 30:
                 break
@@ -606,15 +581,15 @@ def compute_puff_advantage(values, rewards, terminals,
 
 def abbreviate(num, b2, c2):
     if num < 1e3:
-        return str(num)
+        return f'{b2}{num}{c2}'
     elif num < 1e6:
-        return f'{num/1e3:.1f}K'
+        return f'{b2}{num/1e3:.1f}{c2}K'
     elif num < 1e9:
-        return f'{num/1e6:.1f}M'
+        return f'{b2}{num/1e6:.1f}{c2}M'
     elif num < 1e12:
-        return f'{num/1e9:.1f}B'
+        return f'{b2}{num/1e9:.1f}{c2}B'
     else:
-        return f'{num/1e12:.2f}T'
+        return f'{b2}{num/1e12:.2f}{c2}T'
 
 def duration(seconds, b2, c2):
     if seconds < 0:
@@ -659,11 +634,12 @@ class Profile:
         return self.profiles[name]
 
     def __call__(self, name, epoch, nest=False):
-        if epoch % self.frequency != 0:
+        # Skip profiling the first few epochs, which are noisy due to setup
+        if (epoch + 1) % self.frequency != 0:
             return
 
-        #if torch.cuda.is_available():
-        #    torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         tick = time.time()
         if len(self.stack) != 0 and not nest:
@@ -675,12 +651,13 @@ class Profile:
     def pop(self, end):
         profile = self.profiles[self.stack.pop()]
         delta = end - profile['start']
-        profile['elapsed'] += delta
         profile['delta'] += delta
+        # Multiply delta by freq to account for skipped epochs
+        profile['elapsed'] += delta * self.frequency
 
     def end(self):
-        #if torch.cuda.is_available():
-        #    torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         end = time.time()
         for i in range(len(self.stack)):
@@ -691,166 +668,6 @@ class Profile:
             if prof['delta'] > 0:
                 prof['buffer'] = prof['delta']
                 prof['delta'] = 0
-
-@torch.compile(fullgraph=True, mode='reduce-overhead')
-def lstm_loop(policy, params_and_buffers, mb_obs, h, c, logits, newvalue, horizon):
-    for t in range(horizon):
-        l, n, h, c = func.functional_call(policy, params_and_buffers, (mb_obs[:, t], h, c))
-        logits[:, t] = l
-        newvalue[:, t] = n
-
-    return logits, newvalue
-
-def compute_loss(params_and_buffers, policy, lstm, mb_obs,
-        mb_actions, mb_logprobs, mb_rewards, mb_terminals, mb_truncations,
-        mb_ratio, mb_values, mb_returns, mb_advantages, mb_prio, adv,  epoch, idx,
-        config, clip_coef, vf_clip, num_minibatches, mb, horizon, num_atns, segments):
-    segments = int(segments)
-    num_atns = int(num_atns)
-    logits = torch.empty(segments, horizon, num_atns, device=config['device'])
-    newvalue = torch.empty(segments, horizon, 1, device=config['device'])
-    #logits = []
-    #newvalue = []
-    #h = None
-    #c = None
-    
-    '''
-    h = torch.zeros(segments, 128, device=config['device'])
-    c = torch.zeros(segments, 128, device=config['device'])
-    logits, values = lstm_loop(policy, params_and_buffers, mb_obs, h, c, logits, newvalue, horizon)
-    '''
-
-    state = {
-        'lstm_h': None,
-        'lstm_c': None
-    }
-    logits, values = forward_train(policy, lstm, mb_obs, state)
-
-
-    #for t in range(horizon):
-    #    l, n, h, c = func.functional_call(policy, params_and_buffers, (mb_obs[:, t], h, c))
-    #    #l, n, h, c = func.functional_call(policy, params_and_buffers, (mb_obs[:, t], None, None))
-    #    logits[:, t] = l
-    #    newvalue[:, t] = n
-    #    #logits.append(l)
-    #    #newvalue.append(n)
-
-    logits = logits.reshape(segments*horizon, num_atns)
-
-    #logits, newvalue, h, c = policy(mb_obs, h, c)
-    #logits, newvalue = func.functional_call(policy, params_and_buffers, mb_obs)
-
-    #logits = torch.cat(logits, dim=0)
-    #newvalue = torch.stack(newvalue, dim=1)
-
-    actions, newlogprob, entropy = pufferlib.pytorch.sample_logits(logits, action=mb_actions)
-
-    #profile('train_misc', epoch)
-    newlogprob = newlogprob.reshape(mb_logprobs.shape)
-    logratio = newlogprob - mb_logprobs
-    ratio = logratio.exp()
-    #self.ratio[idx] = ratio.detach()
-
-    with torch.no_grad():
-        old_approx_kl = (-logratio).mean()
-        approx_kl = ((ratio - 1) - logratio).mean()
-        clipfrac = ((ratio - 1.0).abs() > config['clip_coef']).float().mean()
-
-    adv_new = compute_puff_advantage(mb_values, mb_rewards, mb_terminals,
-        ratio, adv, config['gamma'], config['gae_lambda'],
-        config['vtrace_rho_clip'], config['vtrace_c_clip'])
-    adv_new = mb_prio * (adv_new - adv_new.mean()) / (adv_new.std() + 1e-8)
-
-    # Losses
-    pg_loss1 = -adv_new * ratio
-    pg_loss2 = -adv_new * torch.clamp(ratio, 1 - clip_coef, 1 + clip_coef)
-    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-
-    newvalue = newvalue.view(mb_returns.shape)
-    v_clipped = mb_values + torch.clamp(newvalue - mb_values, -vf_clip, vf_clip)
-    v_loss_unclipped = (newvalue - mb_returns) ** 2
-    v_loss_clipped = (v_clipped - mb_returns) ** 2
-    v_loss = 0.5*torch.max(v_loss_unclipped, v_loss_clipped).mean()
-
-    entropy_loss = entropy.mean()
-
-    loss = pg_loss + config['vf_coef']*v_loss - config['ent_coef']*entropy_loss
-    return loss
-
-#@torch.compile(fullgraph=True)
-def _compiled_train(policy, lstm, optimizer, observations, actions, logprobs, rewards,
-        terminals, truncations, ratio, values, epoch, total_epochs,
-        minibatch_segments, segments, obs_shape, atn_shape, config):
-
-    config['device']
-    horizon = config['bptt_horizon']
-    device = config['device']
-    b0 = config['prio_beta0']
-    a = config['prio_alpha']
-    clip_coef = config['clip_coef']
-    vf_clip = config['vf_clip_coef']
-    anneal_beta = b0 + (1 - b0)*a*epoch/total_epochs
-
-    ratio = torch.ones_like(values)
-
-    num_minibatches = config['num_minibatches']
-
-    lr = optimizer.param_groups[0]['lr']
-    buffers = {}#dict(policy.named_buffers())
-    param_names = [k for k, v in policy.named_parameters() if v.requires_grad]
-    params = [v for k, v in policy.named_parameters() if v.requires_grad]
-    params_dict = dict(zip(param_names, params))
-    params_and_buffers = {**buffers, **params_dict}
-
-    for mb in range(num_minibatches):
-        shape = values.shape
-        advantages = torch.zeros(shape, device=device)
-        advantages = compute_puff_advantage(values, rewards,
-            terminals, ratio, advantages, config['gamma'],
-            config['gae_lambda'], config['vtrace_rho_clip'], config['vtrace_c_clip'])
-
-        adv = advantages.abs().sum(axis=1)
-        prio_weights = torch.nan_to_num(adv**a, 0, 0, 0)
-        prio_probs = (prio_weights + 1e-6)/(prio_weights.sum() + 1e-6)
-        idx = torch.multinomial(prio_probs,
-            minibatch_segments, replacement=True)
-        mb_prio = (segments*prio_probs[idx, None])**-anneal_beta
-        mb_obs = observations[idx]
-        mb_actions = actions[idx]
-        mb_logprobs = logprobs[idx]
-        mb_rewards = rewards[idx]
-        mb_terminals = terminals[idx]
-        mb_truncations = truncations[idx]
-        mb_ratio = ratio[idx]
-        mb_values = values[idx]
-        mb_returns = advantages[idx] + mb_values
-        mb_advantages = advantages[idx]
-
-        if not config['use_rnn']:
-            mb_obs = mb_obs.reshape(-1, *obs_shape)
-
-
-        adv = advantages[idx]
-
-        optimizer.zero_grad()
-        loss = compute_loss(params_and_buffers, policy, lstm, mb_obs,
-            mb_actions, mb_logprobs, mb_rewards, mb_terminals, mb_truncations,
-            mb_ratio, mb_values, mb_returns, mb_advantages, mb_prio, adv, epoch, idx,
-            config, clip_coef, vf_clip, num_minibatches, mb, horizon, atn_shape, minibatch_segments)
-        loss.backward()
-        optimizer.step()
-
-        '''
-        grad_fn = func.grad(compute_loss, has_aux=False)
-        grads = grad_fn(params_and_buffers, policy, lstm, mb_obs,
-            mb_actions, mb_logprobs, mb_rewards, mb_terminals, mb_truncations,
-            mb_ratio, mb_values, mb_returns, mb_advantages, mb_prio, adv, epoch, idx,
-            config, clip_coef, vf_clip, num_minibatches, mb, horizon, atn_shape, minibatch_segments)
-     
-        for name, param in zip(param_names, params):
-            if name in grads:
-                param.data.sub_(lr * grads[name])
-        '''
 
 class Utilization(Thread):
     def __init__(self, delay=1, maxlen=20):
@@ -889,22 +706,25 @@ class Utilization(Thread):
     def stop(self):
         self.stopped = True
 
-def downsample(arr, m):
-    if len(arr) <= m:
-        return arr
+def downsample(data_list, num_points):
+    if not data_list or num_points <= 0:
+        return []
+    if num_points == 1:
+        return [data_list[-1]]
+    if len(data_list) <= num_points:
+        return data_list
 
-    if m == 0:
-        return [arr[-1]]
+    last = data_list[-1]
+    data_list = data_list[:-1]
 
-    orig_arr = arr
-    last = arr[-1]
-    arr = arr[:-1]
-    arr = np.array(arr)
-    n = len(arr)
-    n = (n//m)*m
-    arr = arr[-n:]
-    downsampled = arr.reshape(m, -1).mean(axis=1)
-    return np.concatenate([downsampled, [last]])
+    data_np = np.array(data_list)
+    num_points -= 1  # one down for the last one
+
+    n = (len(data_np) // num_points) * num_points
+    data_np = data_np[-n:] if n > 0 else data_np
+    downsampled = data_np.reshape(num_points, -1).mean(axis=1)
+
+    return downsampled.tolist() + [last]
 
 class Logger:
     def __init__(self, args):
@@ -953,6 +773,7 @@ class NeptuneLogger:
         self.neptune = neptune
         for k, v in pufferlib.unroll_nested_dict(args):
             neptune[k].append(v)
+        self.should_upload_model = not args['no_model_upload']
 
     def init(self, args):
         pass
@@ -964,8 +785,12 @@ class NeptuneLogger:
         for k, v in logs.items():
             self.neptune[k].append(v, step=step)
 
-    def close(self, model_path):
+    def upload_model(self, model_path):
         self.neptune['model'].track_files(model_path)
+
+    def close(self, model_path):
+        if self.should_upload_model:
+            self.upload_model(model_path)
         self.neptune.stop()
 
     def download(self):
@@ -987,14 +812,19 @@ class WandbLogger:
         )
         self.wandb = wandb
         self.run_id = wandb.run.id
+        self.should_upload_model = not args['no_model_upload']
 
     def log(self, logs, step):
         self.wandb.log(logs, step=step)
 
-    def close(self, model_path):
+    def upload_model(self, model_path):
         artifact = self.wandb.Artifact(self.run_id, type='model')
         artifact.add_file(model_path)
         self.wandb.run.log_artifact(artifact)
+
+    def close(self, model_path):
+        if self.should_upload_model:
+            self.upload_model(model_path)
         self.wandb.finish()
 
     def download(self):
@@ -1002,8 +832,56 @@ class WandbLogger:
         data_dir = artifact.download()
         model_file = max(os.listdir(data_dir))
         return f'{data_dir}/{model_file}'
- 
-def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True):
+
+def check(env_name):
+    torch.set_printoptions(precision=16)
+
+    args = load_config(env_name)
+    args['train']['optimizer'] = 'adam'
+
+    vecenv = load_env(env_name, args)
+
+    torch.manual_seed(args['train']['seed'])
+    policy = load_policy(args, vecenv, env_name)
+
+    import pufferlib.python_pufferl
+    train_config = dict(**args['train'], env=env_name)
+    pufferl_python = pufferlib.python_pufferl.PuffeRL(train_config, vecenv, policy, verbose=False)
+
+    pufferl_cpp = PuffeRL(train_config, verbose=False)
+
+    python_params = dict(policy.named_parameters())
+    for k, v in pufferl_cpp.pufferl_cpp.policy_32.named_parameters():
+        v_python = python_params[k].data
+        assert torch.allclose(v, v_python)
+
+    torch.manual_seed(args['train']['seed'])
+    pufferl_python.evaluate()
+    pufferl_python.train()
+    pufferl_python.evaluate()
+
+    torch.manual_seed(args['train']['seed'])
+    pufferl_cpp.evaluate()
+    pufferl_cpp.train()
+    pufferl_cpp.evaluate()
+
+    for i in range(args['train']['bptt_horizon']):
+        assert torch.allclose(pufferl_python.observations[:, i].float(), pufferl_cpp.observations[:, i]), f'Observation {i} mismatch'
+        assert torch.allclose(pufferl_python.actions[:, i], pufferl_cpp.actions[:, i]), f'Action {i} mismatch'
+        assert torch.allclose(pufferl_python.rewards[:, i], pufferl_cpp.rewards[:, i]), f'Reward {i} mismatch'
+        assert torch.allclose(pufferl_python.terminals[:, i], pufferl_cpp.terminals[:, i]), f'Terminal {i} mismatch'
+        breakpoint()
+        assert torch.allclose(pufferl_python.logprobs[:, i], pufferl_cpp.logprobs[:, i], atol=1e-5), f'Logprob {i} mismatch'
+        assert torch.allclose(pufferl_python.values[:, i], pufferl_cpp.values[:, i], atol=1e-5), f'Value {i} mismatch'
+
+    python_params = dict(policy.named_parameters())
+    for k, v in pufferl_cpp.pufferl_cpp.policy_32.named_parameters():
+        v_python = python_params[k].data
+        assert torch.allclose(v, v_python, atol=1e-5)
+
+    print('Check passed')
+
+def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True, should_stop_early=None):
     args = args or load_config(env_name)
 
     # Assume TorchRun DDP is used if LOCAL_RANK is set
@@ -1039,9 +917,9 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
     elif args['wandb']:
         logger = WandbLogger(args)
 
-    train_config = dict(**args['train'], env=env_name)
+    train_config = dict(**args['train'])#, env=env_name)
     #pufferl = PuffeRL(train_config, vecenv, policy, logger, verbose)
-    pufferl = PuffeRL(train_config, logger, verbose)
+    pufferl = PuffeRL(train_config, vecenv, logger, verbose)
     pufferl.logger.init(args)
 
     all_logs = []
@@ -1060,16 +938,20 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
             if pufferl.global_step > 0.20*train_config['total_timesteps']:
                 all_logs.append(logs)
 
+            if should_stop_early is not None and should_stop_early(logs):
+                model_path = pufferl.close()
+                pufferl.logger.close(model_path)
+                return all_logs
+
     # Final eval. You can reset the env here, but depending on
     # your env, this can skew data (i.e. you only collect the shortest
     # rollouts within a fixed number of epochs)
-    i = 0
-    stats = {}
     uptime = pufferl.uptime
     agent_steps = pufferl.global_step
-    while i < 128 or not stats:
+    for i in range(128):  # Run eval for at least 32, but put a hard stop at 128.
         stats = pufferl.evaluate()
-        i += 1
+        if i >= 32 and stats:
+            break
 
     logs = pufferl.mean_and_log()
     logs['uptime'] = uptime
@@ -1082,6 +964,36 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
     pufferl.logger.log_cost(uptime)
     pufferl.logger.close(model_path)
     return all_logs
+
+def sps(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True, should_stop_early=None):
+    args = args or load_config(env_name)
+    train_config = dict(**args['train'])#, env=env_name)
+    pufferl = PuffeRL(train_config, logger, verbose)
+    # Warmup
+    for _ in range(3):
+        _C.batched_forward(
+            pufferl.pufferl_cpp,
+            pufferl.observations,
+            pufferl.total_minibatches,
+            pufferl.minibatch_segments,
+        )
+
+    N = 100
+    torch.cuda.synchronize()
+    start = time.time()
+    for _ in range(N):
+        _C.batched_forward(
+            pufferl.pufferl_cpp,
+            pufferl.observations,
+            pufferl.total_minibatches,
+            pufferl.minibatch_segments,
+        )
+    torch.cuda.synchronize()
+    end = time.time()
+    dt = end - start
+    sps = pufferl.config['batch_size']*N/dt
+    print(f'SPS: {sps/1e6:.1f}M')
+
 
 def eval(env_name, args=None, vecenv=None, policy=None):
     args = args or load_config(env_name)
@@ -1137,7 +1049,10 @@ def eval(env_name, args=None, vecenv=None, policy=None):
         if len(frames) > 0 and len(frames) == args['save_frames']:
             import imageio
             imageio.mimsave(args['gif_path'], frames, fps=args['fps'], loop=0)
-            frames.append('Done')
+            print(f'Saved {len(frames)} frames to {args["gif_path"]}')
+
+def stop_if_loss_nan(logs):
+    return any("losses/" in k and np.isnan(v) for k, v in logs.items())
 
 def _sweep_worker(env_name, q_host, q_worker, device):
     while True:
@@ -1333,13 +1248,27 @@ def sweep(args=None, env_name=None):
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
+
         sweep.suggest(args)
-        total_timesteps = args['train']['total_timesteps']
-        all_logs = train(env_name, args=args)
+        all_logs = train(env_name, args=args, should_stop_early=stop_if_loss_nan)
         all_logs = [e for e in all_logs if target_key in e]
+
+        if not all_logs:
+            sweep.observe(args, 0, 0, is_failure=True)
+            continue
+
+        total_timesteps = args['train']['total_timesteps']
+
         scores = downsample([log[target_key] for log in all_logs], points_per_run)
         costs = downsample([log['agent_steps'] for log in all_logs], points_per_run)
         timesteps = downsample([log['agent_steps'] for log in all_logs], points_per_run)
+
+        if len(timesteps) > 0 and timesteps[-1] < 0.7 * total_timesteps:  # 0.7 is arbitrary
+            s = scores.pop()
+            c = costs.pop()
+            args['train']['total_timesteps'] = timesteps.pop()
+            sweep.observe(args, s, c, is_failure=True)
+
         for score, cost, timestep in zip(scores, costs, timesteps):
             args['train']['total_timesteps'] = timestep
             sweep.observe(args, score, cost)
@@ -1368,6 +1297,7 @@ def profile(args=None, env_name=None, vecenv=None, policy=None):
 
 def export(args=None, env_name=None, vecenv=None, policy=None):
     args = args or load_config(env_name)
+    args['vec'] = dict(backend='Serial', num_envs=1)
     vecenv = vecenv or load_env(env_name, args)
     policy = policy or load_policy(args, vecenv)
 
@@ -1405,11 +1335,12 @@ def load_policy(args, vecenv, env_name=''):
     policy_cls = getattr(env_module.torch, args['policy_name'])
     policy = policy_cls(vecenv.driver_env, **args['policy'])
 
+    '''
     rnn_name = args['rnn_name']
     if rnn_name is not None:
         rnn_cls = getattr(env_module.torch, args['rnn_name'])
         policy = rnn_cls(vecenv.driver_env, policy, **args['policy'])
-
+    '''
     policy = policy.to(device)
 
     load_id = args['load_id']
@@ -1439,11 +1370,42 @@ def load_policy(args, vecenv, env_name=''):
 
     return policy
 
-def load_config(env_name):
-    parser = argparse.ArgumentParser(
-        description=f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]'
-        ' demo options. Shows valid args for your env and policy',
-        formatter_class=RichHelpFormatter, add_help=False)
+def load_config(env_name, parser=None):
+    puffer_dir = os.path.dirname(os.path.realpath(__file__))
+    puffer_config_dir = os.path.join(puffer_dir, 'config/**/*.ini')
+    puffer_default_config = os.path.join(puffer_dir, 'config/default.ini')
+    if env_name == 'default':
+        p = configparser.ConfigParser()
+        p.read(puffer_default_config)
+    else:
+        for path in glob.glob(puffer_config_dir, recursive=True):
+            p = configparser.ConfigParser()
+            p.read([puffer_default_config, path])
+            if env_name in p['base']['env_name'].split(): break
+        else:
+            raise pufferlib.APIUsageError('No config for env_name {}'.format(env_name))
+
+    return process_config(p, parser=parser)
+
+def load_config_file(file_path, fill_in_default=True, parser=None):
+    if not os.path.exists(file_path):
+        raise pufferlib.APIUsageError('No config file found')
+
+    config_paths = [file_path]
+
+    if fill_in_default:
+        puffer_dir = os.path.dirname(os.path.realpath(__file__))
+        # Process the puffer defaults first
+        config_paths.insert(0, os.path.join(puffer_dir, 'config/default.ini'))
+
+    p = configparser.ConfigParser()
+    p.read(config_paths)
+
+    return process_config(p, parser=parser)
+
+def make_parser():
+    '''Creates the argument parser with default PufferLib arguments.'''
+    parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter, add_help=False)
     parser.add_argument('--load-model-path', type=str, default=None,
         help='Path to a pretrained checkpoint')
     parser.add_argument('--load-id', type=str,
@@ -1460,40 +1422,37 @@ def load_config(env_name):
     parser.add_argument('--neptune', action='store_true', help='Use neptune for logging')
     parser.add_argument('--neptune-name', type=str, default='pufferai')
     parser.add_argument('--neptune-project', type=str, default='ablations')
+    parser.add_argument('--no-model-upload', action='store_true', help='Do not upload models to wandb or neptune')
     parser.add_argument('--local-rank', type=int, default=0, help='Used by torchrun for DDP')
     parser.add_argument('--sweep-gpus', type=int, default=-1, help='multigpu sweeps')
     parser.add_argument('--tag', type=str, default=None, help='Tag for experiment')
-    args = parser.parse_known_args()[0]
+    return parser
 
-    # Load defaults and config
-    puffer_dir = os.path.dirname(os.path.realpath(__file__))
-    puffer_config_dir = os.path.join(puffer_dir, 'config/**/*.ini')
-    puffer_default_config = os.path.join(puffer_dir, 'config/default.ini')
-    if env_name == 'default':
-        p = configparser.ConfigParser()
-        p.read(puffer_default_config)
-    else:
-        for path in glob.glob(puffer_config_dir, recursive=True):
-            p = configparser.ConfigParser()
-            p.read([puffer_default_config, path])
-            if env_name in p['base']['env_name'].split(): break
-        else:
-            raise pufferlib.APIUsageError('No config for env_name {}'.format(env_name))
+def process_config(config, parser=None):
+    if parser is None:
+        parser = make_parser()
 
-    # Dynamic help menu from config
-    def puffer_type(value):
-        try:
-            return ast.literal_eval(value)
-        except:
-            return value
+    parser.description = f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]' \
+        ' demo options. Shows valid args for your env and policy'
 
-    for section in p.sections():
-        for key in p[section]:
+    def auto_type(value):
+        """Type inference for numeric args that use 'auto' as a default value"""
+        if value == 'auto': return value
+        if value.isnumeric(): return int(value)
+        return float(value)
+
+    for section in config.sections():
+        for key in config[section]:
+            try:
+                value = ast.literal_eval(config[section][key])
+            except:
+                value = config[section][key]
+
             fmt = f'--{key}' if section == 'base' else f'--{section}.{key}'
             parser.add_argument(
                 fmt.replace('_', '-'),
-                default=puffer_type(p[section][key]),
-                type=puffer_type
+                default=value,
+                type=auto_type if value == 'auto' else type(value)
             )
 
     parser.add_argument('-h', '--help', default=argparse.SUPPRESS,
@@ -1510,6 +1469,7 @@ def load_config(env_name):
 
         prev[subkey] = value
 
+    args['train']['env'] = args['env_name'] or ''  # for trainer dashboard
     args['train']['use_rnn'] = args['rnn_name'] is not None
     return args
 
@@ -1536,6 +1496,10 @@ def main():
         profile(env_name=env_name)
     elif mode == 'export':
         export(env_name=env_name)
+    elif mode == 'check':
+        check(env_name=env_name)
+    elif mode == 'sps':
+        sps(env_name=env_name)
     else:
         raise pufferlib.APIUsageError(err)
 

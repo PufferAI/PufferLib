@@ -206,13 +206,12 @@ const char* format_tick_label(double value) {
     }
 
     if (fabs(value) < 0.01 || fabs(value) > 10000) {
-        snprintf(buffer, sizeof(buffer), "%.2e", value);
+        snprintf(buffer, sizeof(buffer), "%.2e\0", value);
     } else {
-        snprintf(buffer, sizeof(buffer), "%.*f", precision, value);
-
-        char *end = buffer + strlen(buffer) - 1;
-        while (end > buffer && *end == '0') *end-- = '\0';
-        if (end > buffer && *end == '.') *end = '\0';
+        snprintf(buffer, sizeof(buffer), "%.2f\0", value);
+        //char *end = buffer + strlen(buffer) - 1;
+        //while (end > buffer && *end == '0') *end-- = '\0';
+        //if (end > buffer && *end == '.') *end = '\0';
     }
 
     return buffer;
@@ -736,7 +735,7 @@ void compute_constellation(Dataset *data, int* env_idxs, float* env_dists,
     
  
 int main(void) {
-    FILE *file = fopen("pufferlib/ocean/constellation/all_cache.json", "r");
+    FILE *file = fopen("pufferlib/ocean/constellation/default.json", "r");
     if (!file) {
         printf("Error opening file\n");
         return 1;
@@ -930,7 +929,6 @@ int main(void) {
     PlotArgs args2 = DEFAULT_PLOT_ARGS;
     RenderTexture2D fig2 = LoadRenderTexture(args2.width, args2.height);
     //SetTextureFilter(fig2.texture, TEXTURE_FILTER_POINT);
-    args2.left_margin = 50;
     args2.right_margin = 50;
     args2.log_x = true;
     int fig2_env_idx = 1;
@@ -938,7 +936,7 @@ int main(void) {
     bool fig2_x_active = false;
     int fig2_x_idx = 1;
     bool fig2_y_active = false;
-    int fig2_y_idx = 2;
+    int fig2_y_idx = 3;
     int fig2_color_idx = 1;
     bool fig2_color_active = false;
 
@@ -1130,6 +1128,7 @@ int main(void) {
         args2.x_label = x_label;
         args2.y_label = y_label;
         args2.top_margin = 20;
+        args2.left_margin = 100;
         BeginTextureMode(fig2);
         ClearBackground(PUFF_BACKGROUND);
 
