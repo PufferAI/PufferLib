@@ -1,6 +1,6 @@
 // Standalone C demo for DroneRace environment
-// Compile using: ./scripts/build_ocean.sh drone [local|fast]
-// Run with: ./drone
+// Compile using: ./scripts/build_ocean.sh drone_race [local|fast]
+// Run with: ./drone_race
 
 #include "drone_race.h"
 #include "puffernet.h"
@@ -124,16 +124,16 @@ int main() {
     env->max_moves = 1000;
     env->max_rings = 10;
 
-    size_t obs_size = 25;
+    size_t obs_size = 29;
     size_t act_size = 4;
     env->observations = (float *)calloc(obs_size, sizeof(float));
     env->actions = (float *)calloc(act_size, sizeof(float));
     env->rewards = (float *)calloc(1, sizeof(float));
     env->terminals = (unsigned char *)calloc(1, sizeof(float));
 
-    Weights *weights = load_weights("resources/drone/drone_weights.bin", 136073);
+    Weights *weights = load_weights("resources/drone_race/drone_race_weights.bin", 136585);
     int logit_sizes[1] = {4};
-    LinearContLSTM *net = make_linearcontlstm(weights, 1, 25, logit_sizes, 1);
+    LinearContLSTM *net = make_linearcontlstm(weights, 1, obs_size, logit_sizes, 1);
 
     if (!env->observations || !env->actions || !env->rewards) {
         fprintf(stderr, "ERROR: Failed to allocate memory for demo buffers.\n");
