@@ -21,10 +21,14 @@ from torch.utils.cpp_extension import (
     CUDA_HOME,
     ROCM_HOME
 )
+from torch.backends import mps
 
 # build cuda extension if torch can find CUDA or HIP/ROCM in the system
 # may require `uv pip install --no-build-isolation` or `python setup.py build_ext --inplace`
 BUID_CUDA_EXT = bool(CUDA_HOME or ROCM_HOME)
+
+# build mps extension if torch can find MPS in the system
+BUILD_MPS_EXT = bool(mps.is_available())
 
 # Build with DEBUG=1 to enable debug symbols
 DEBUG = os.getenv("DEBUG", "0") == "1"
@@ -243,6 +247,9 @@ if not NO_TRAIN:
     if BUID_CUDA_EXT:
         extension = CUDAExtension
         torch_sources.append("pufferlib/extensions/cuda/pufferlib.cu")
+    elif BUILD_MPS_EXT:
+        extension = CppExtension
+        torch_sources.append("pufferlib/extensions/mps/pufferlib.mm")
     else:
         extension = CppExtension
 
