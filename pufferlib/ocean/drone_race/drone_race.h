@@ -25,10 +25,7 @@ struct Client {
     bool is_dragging;
     Vector2 last_mouse_pos;
 
-    // Trailing path buffer (for rendering only)
-    Vec3 trail[TRAIL_LENGTH];
-    int trail_index;
-    int trail_count;
+    Trail trail;
 };
 
 typedef struct DroneRace DroneRace;
@@ -58,112 +55,105 @@ struct DroneRace {
 void init(DroneRace *env) {
     env->log = (Log){0};
     env->tick = 0;
-    // one extra ring for observation (requires current ring, next ring)
-    // max_rings and moves_left are initialised in binding.c
-    env->ring_buffer = (Ring *)malloc((env->max_rings + 1) * sizeof(Ring));
+    env->ring_buffer = (Ring*)malloc((env->max_rings) * sizeof(Ring));
 }
 
-void add_log(DroneRace *env) {
+void add_log(DroneRace *env, float oob, float collision, float timeout) {
     env->log.score += env->score;
     env->log.episode_return += env->episodic_return;
     env->log.episode_length += env->tick;
     env->log.perf += (float)env->ring_idx / (float)env->max_rings;
+    env->log.oob += oob;
+    env->log.collision_rate += collision;
+    env->log.timeout += timeout;
     env->log.n += 1.0f;
 }
 
 void compute_observations(DroneRace *env) {
     Drone *drone = &env->drone;
 
-    Quat q_inv = quat_inverse(drone->quat);
+    Quat q_inv = quat_inverse(drone->state.quat);
     Ring curr_ring = env->ring_buffer[env->ring_idx];
-    Ring next_ring = env->ring_buffer[env->ring_idx + 1];
+    Ring next_ring = env->ring_buffer[env->ring_idx % env->max_rings];
 
-    Vec3 to_curr_ring = quat_rotate(q_inv, sub3(curr_ring.pos, drone->pos));
-    Vec3 to_next_ring = quat_rotate(q_inv, sub3(next_ring.pos, drone->pos));
+    Vec3 to_curr_ring = quat_rotate(q_inv, sub3(curr_ring.pos, drone->state.pos));
+    Vec3 to_next_ring = quat_rotate(q_inv, sub3(next_ring.pos, drone->state.pos));
 
     Vec3 curr_ring_norm = quat_rotate(q_inv, curr_ring.normal);
     Vec3 next_ring_norm = quat_rotate(q_inv, next_ring.normal);
 
-    Vec3 linear_vel_body = quat_rotate(q_inv, drone->vel);
-    Vec3 drone_up_world = quat_rotate(drone->quat, (Vec3){0.0f, 0.0f, 1.0f});
+    Vec3 linear_vel_body = quat_rotate(q_inv, drone->state.vel);
+    Vec3 drone_up_world = quat_rotate(drone->state.quat, (Vec3){0.0f, 0.0f, 1.0f});
 
-    env->observations[0] = to_curr_ring.x / GRID_SIZE;
-    env->observations[1] = to_curr_ring.y / GRID_SIZE;
-    env->observations[2] = to_curr_ring.z / GRID_SIZE;
+    env->observations[0] = to_curr_ring.x / GRID_X;
+    env->observations[1] = to_curr_ring.y / GRID_Y;
+    env->observations[2] = to_curr_ring.z / GRID_Z;
 
     env->observations[3] = curr_ring_norm.x;
     env->observations[4] = curr_ring_norm.y;
     env->observations[5] = curr_ring_norm.z;
 
-    env->observations[6] = to_next_ring.x / GRID_SIZE;
-    env->observations[7] = to_next_ring.y / GRID_SIZE;
-    env->observations[8] = to_next_ring.z / GRID_SIZE;
+    env->observations[6] = to_next_ring.x / GRID_X;
+    env->observations[7] = to_next_ring.y / GRID_Y;
+    env->observations[8] = to_next_ring.z / GRID_Z;
 
     env->observations[9] = next_ring_norm.x;
     env->observations[10] = next_ring_norm.y;
     env->observations[11] = next_ring_norm.z;
 
-    env->observations[12] = linear_vel_body.x / drone->max_vel;
-    env->observations[13] = linear_vel_body.y / drone->max_vel;
-    env->observations[14] = linear_vel_body.z / drone->max_vel;
+    env->observations[12] = linear_vel_body.x / drone->params.max_vel;
+    env->observations[13] = linear_vel_body.y / drone->params.max_vel;
+    env->observations[14] = linear_vel_body.z / drone->params.max_vel;
 
-    env->observations[15] = drone->omega.x / drone->max_omega;
-    env->observations[16] = drone->omega.y / drone->max_omega;
-    env->observations[17] = drone->omega.z / drone->max_omega;
+    env->observations[15] = drone->state.omega.x / drone->params.max_omega;
+    env->observations[16] = drone->state.omega.y / drone->params.max_omega;
+    env->observations[17] = drone->state.omega.z / drone->params.max_omega;
 
     env->observations[18] = drone_up_world.x;
     env->observations[19] = drone_up_world.y;
     env->observations[20] = drone_up_world.z;
 
-    env->observations[21] = drone->quat.w;
-    env->observations[22] = drone->quat.x;
-    env->observations[23] = drone->quat.y;
-    env->observations[24] = drone->quat.z;
+    env->observations[21] = drone->state.quat.w;
+    env->observations[22] = drone->state.quat.x;
+    env->observations[23] = drone->state.quat.y;
+    env->observations[24] = drone->state.quat.z;
+
+    env->observations[25] = drone->state.rpms[0] / drone->params.max_rpm;
+    env->observations[26] = drone->state.rpms[1] / drone->params.max_rpm;
+    env->observations[27] = drone->state.rpms[2] / drone->params.max_rpm;
+    env->observations[28] = drone->state.rpms[3] / drone->params.max_rpm;
 }
 
 void c_reset(DroneRace *env) {
     env->tick = 0;
     env->score = 0;
     env->episodic_return = 0.0f;
-
     env->moves_left = env->max_moves;
 
+    // creates rings
     env->ring_idx = 0;
-
-    Drone *drone = &env->drone;
-
-    float size = rndf(0.05f, 0.8);
-    init_drone(drone, size, 0.1f);
-    
-    //init_drone(drone, 0.8f, 0.0f);
-    //init_drone(drone, 0.05f, 0.0f);
-    
-    // creates rings at least MARGIN apart
     float ring_radius = 2.0f;
-    if (env->max_rings + 1 > 0) {
-        env->ring_buffer[0] = rndring(ring_radius);
-    }
+    reset_rings(env->ring_buffer, env->max_rings, ring_radius);
 
-    for (int i = 1; i < env->max_rings + 1; i++) {
-        do {
-            env->ring_buffer[i] = rndring(ring_radius);
-        } while (norm3(sub3(env->ring_buffer[i].pos, env->ring_buffer[i - 1].pos)) < 2.0f*ring_radius);
-    }
+    // creates drone
+    Drone *drone = &env->drone;
+    float size = rndf(0.05f, 0.8f);
+    init_drone(drone, size, 0.1f);
 
-    // start drone at least MARGIN away from the first ring
     do {
-        drone->pos = (Vec3){rndf(-9, 9), rndf(-9, 9), rndf(-9, 9)};
-    } while (norm3(sub3(drone->pos, env->ring_buffer[0].pos)) < 2.0f*ring_radius);
+        drone->state.pos = (Vec3){
+            rndf(-MARGIN_X, MARGIN_X), 
+            rndf(-MARGIN_Y, MARGIN_Y), 
+            rndf(-MARGIN_Z, MARGIN_Z)
+        };
+    } while (norm3(sub3(drone->state.pos, env->ring_buffer[0].pos)) < 2.0f*ring_radius);
 
-    drone->prev_pos = drone->pos;
-    drone->vel = (Vec3){0.0f, 0.0f, 0.0f};
-    drone->omega = (Vec3){0.0f, 0.0f, 0.0f};
-    drone->quat = (Quat){1.0f, 0.0f, 0.0f, 0.0f};
+    drone->prev_pos = drone->state.pos;
+
     compute_observations(env);
 }
 
 void c_step(DroneRace *env) {
-
     env->tick++;
     env->rewards[0] = 0;
     env->terminals[0] = 0;
@@ -173,20 +163,21 @@ void c_step(DroneRace *env) {
     move_drone(drone, env->actions);
 
     // check out of bounds
-    bool out_of_bounds = drone->pos.x < -GRID_SIZE || drone->pos.x > GRID_SIZE ||
-                         drone->pos.y < -GRID_SIZE || drone->pos.y > GRID_SIZE ||
-                         drone->pos.z < -GRID_SIZE || drone->pos.z > GRID_SIZE;
+    bool out_of_bounds = drone->state.pos.x < -GRID_X || drone->state.pos.x > GRID_X ||
+                         drone->state.pos.y < -GRID_Y || drone->state.pos.y > GRID_Y ||
+                         drone->state.pos.z < -GRID_Z || drone->state.pos.z > GRID_Z;
 
     if (out_of_bounds) {
         env->rewards[0] -= 1;
         env->episodic_return -= 1;
         env->terminals[0] = 1;
-        add_log(env);
+        add_log(env, 1.0f, 0.0f, 0.0f);
         c_reset(env);
         compute_observations(env);
         return;
     }
 
+    // check for passing ring
     Ring *ring = &env->ring_buffer[env->ring_idx];
     float reward = check_ring(drone, ring);
     env->rewards[0] += reward;
@@ -197,7 +188,7 @@ void c_step(DroneRace *env) {
         env->ring_idx++;
     } else if (reward < 0) {
         env->terminals[0] = 1;
-        add_log(env);
+        add_log(env, 0.0f, 1.0f, 0.0f);
         c_reset(env);
         return;
     }
@@ -206,12 +197,12 @@ void c_step(DroneRace *env) {
     env->moves_left -= 1;
     if (env->moves_left == 0 || env->ring_idx == env->max_rings) {
         env->terminals[0] = 1;
-        add_log(env);
+        add_log(env, 0.0f, 0.0f, env->moves_left == 0 ? 1.0f : 0.0f);
         c_reset(env);
         return;
     }
 
-    drone->prev_pos = drone->pos;
+    drone->prev_pos = drone->state.pos;
 
     compute_observations(env);
 }
@@ -310,12 +301,10 @@ Client *make_client(DroneRace *env) {
 
     update_camera_position(client);
 
-    // Initialize trail buffer
-    client->trail_index = 0;
-    client->trail_count = 0;
-    Drone *drone = &env->drone;
-    for (int i = 0; i < TRAIL_LENGTH; i++) {
-        client->trail[i] = drone->pos;
+    client->trail.index = 0;
+    client->trail.count = 0;
+    for (int j = 0; j < TRAIL_LENGTH; j++) {
+        client->trail.pos[j] = env->drone.state.pos;
     }
 
     return client;
@@ -362,10 +351,16 @@ void c_render(DroneRace *env) {
     handle_camera_controls(env->client);
 
     Client *client = env->client;
-    client->trail[client->trail_index] = drone->pos;
-    client->trail_index = (client->trail_index + 1) % TRAIL_LENGTH;
-    if (client->trail_count < TRAIL_LENGTH)
-        client->trail_count++;
+
+    client->trail.pos[client->trail.index] = env->drone.state.pos;
+    client->trail.index = (client->trail.index + 1) % TRAIL_LENGTH;
+    if (client->trail.count < TRAIL_LENGTH) {
+        client->trail.count++;
+    }
+    if (env->terminals[0]) {
+        client->trail.index = 0;
+        client->trail.count = 0;
+    }    
 
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});
@@ -373,22 +368,22 @@ void c_render(DroneRace *env) {
     BeginMode3D(client->camera);
 
     // draws bounding cube
-    DrawCubeWires((Vector3){0.0f, 0.0f, 0.0f}, GRID_SIZE * 2.0f, GRID_SIZE * 2.0f, GRID_SIZE * 2.0f,
+    DrawCubeWires((Vector3){0.0f, 0.0f, 0.0f}, GRID_X * 2.0f, GRID_Y * 2.0f, GRID_Z * 2.0f,
                   WHITE);
 
     // draws drone body
-    float r = drone->arm_len;
-    DrawSphere((Vector3){drone->pos.x, drone->pos.y, drone->pos.z}, r/2.0f, RED);
+    float r = drone->params.arm_len;
+    DrawSphere((Vector3){drone->state.pos.x, drone->state.pos.y, drone->state.pos.z}, r/2.0f, RED);
 
     // draws rotors according to thrust
     float T[4];
     for (int i = 0; i < 4; i++) {
-        float rpm = (env->actions[i] + 1.0f) * 0.5f * drone->max_rpm;
-        T[i] = drone->k_thrust * rpm * rpm;
+        float rpm = (env->actions[i] + 1.0f) * 0.5f * drone->params.max_rpm;
+        T[i] = drone->params.k_thrust * rpm * rpm;
     }
 
     const float rotor_radius = r / 4.0f;
-    const float visual_arm_len = 1.0f * drone->arm_len;
+    const float visual_arm_len = 1.0f * drone->params.arm_len;
 
     Vec3 rotor_offsets_body[4] = {{+r, 0.0f, 0.0f},
                                   {-r, 0.0f, 0.0f},
@@ -398,13 +393,13 @@ void c_render(DroneRace *env) {
     Color base_colors[4] = {ORANGE, PURPLE, LIME, SKYBLUE};
 
     for (int i = 0; i < 4; i++) {
-        Vec3 world_off = quat_rotate(drone->quat, rotor_offsets_body[i]);
+        Vec3 world_off = quat_rotate(drone->state.quat, rotor_offsets_body[i]);
 
-        Vector3 rotor_pos = {drone->pos.x + world_off.x, drone->pos.y + world_off.y,
-                             drone->pos.z + world_off.z};
+        Vector3 rotor_pos = {drone->state.pos.x + world_off.x, drone->state.pos.y + world_off.y,
+                             drone->state.pos.z + world_off.z};
 
-        float rpm = (env->actions[i] + 1.0f) * 0.5f * drone->max_rpm;
-        float intensity = 0.75f + 0.25f * (rpm / drone->max_rpm);
+        float rpm = (env->actions[i] + 1.0f) * 0.5f * drone->params.max_rpm;
+        float intensity = 0.75f + 0.25f * (rpm / drone->params.max_rpm);
 
         Color rotor_color = (Color){(unsigned char)(base_colors[i].r * intensity),
                                     (unsigned char)(base_colors[i].g * intensity),
@@ -412,27 +407,28 @@ void c_render(DroneRace *env) {
 
         DrawSphere(rotor_pos, rotor_radius, rotor_color);
 
-        DrawCylinderEx((Vector3){drone->pos.x, drone->pos.y, drone->pos.z}, rotor_pos, 0.02f, 0.02f, 8,
+        DrawCylinderEx((Vector3){drone->state.pos.x, drone->state.pos.y, drone->state.pos.z}, rotor_pos, 0.02f, 0.02f, 8,
                        BLACK);
     }
 
     // draws line with direction and magnitude of velocity / 10
-    if (norm3(drone->vel) > 0.1f) {
-        DrawLine3D((Vector3){drone->pos.x, drone->pos.y, drone->pos.z},
-                   (Vector3){drone->pos.x + drone->vel.x * 0.1f, drone->pos.y + drone->vel.y * 0.1f,
-                             drone->pos.z + drone->vel.z * 0.1f},
+    if (norm3(drone->state.vel) > 0.1f) {
+        DrawLine3D((Vector3){drone->state.pos.x, drone->state.pos.y, drone->state.pos.z},
+                   (Vector3){drone->state.pos.x + drone->state.vel.x * 0.1f, drone->state.pos.y + drone->state.vel.y * 0.1f,
+                             drone->state.pos.z + drone->state.vel.z * 0.1f},
                    MAGENTA);
     }
 
-    // Draw trailing path
-    for (int i = 1; i < client->trail_count; i++) {
-        int idx0 = (client->trail_index + i) % TRAIL_LENGTH;
-        int idx1 = (client->trail_index + i - 1) % TRAIL_LENGTH;
-        float alpha = (float)i / client->trail_count * 0.8f; // fade out
-        Color trail_color = ColorAlpha(YELLOW, alpha);
-        DrawLine3D((Vector3){client->trail[idx0].x, client->trail[idx0].y, client->trail[idx0].z},
-                   (Vector3){client->trail[idx1].x, client->trail[idx1].y, client->trail[idx1].z},
-                   trail_color);
+    if (client->trail.count > 2) {
+        for (int j = 0; j < client->trail.count - 1; j++) {
+            int idx0 = (client->trail.index - j - 1 + TRAIL_LENGTH) % TRAIL_LENGTH;
+            int idx1 = (client->trail.index - j - 2 + TRAIL_LENGTH) % TRAIL_LENGTH;
+            float alpha = (float)(TRAIL_LENGTH - j) / (float)client->trail.count * 0.8f; // fade out
+            Color trail_color = ColorAlpha((Color){0, 187, 187, 255}, alpha);
+            DrawLine3D((Vector3){client->trail.pos[idx0].x, client->trail.pos[idx0].y, client->trail.pos[idx0].z},
+                        (Vector3){client->trail.pos[idx1].x, client->trail.pos[idx1].y, client->trail.pos[idx1].z},
+                        trail_color);
+        }
     }
 
     // draws current and previous ring
@@ -455,9 +451,9 @@ void c_render(DroneRace *env) {
     DrawText(TextFormat("Right: %.3f", T[2]), 10, 175, 18, LIME);
     DrawText(TextFormat("Left:  %.3f", T[3]), 10, 195, 18, SKYBLUE);
 
-    DrawText(TextFormat("Pos: (%.1f, %.1f, %.1f)", drone->pos.x, drone->pos.y, drone->pos.z), 10, 225, 18,
+    DrawText(TextFormat("Pos: (%.1f, %.1f, %.1f)", drone->state.pos.x, drone->state.pos.y, drone->state.pos.z), 10, 225, 18,
              WHITE);
-    DrawText(TextFormat("Vel: %.2f m/s", norm3(drone->vel)), 10, 245, 18, WHITE);
+    DrawText(TextFormat("Vel: %.2f m/s", norm3(drone->state.vel)), 10, 245, 18, WHITE);
 
     DrawText("Left click + drag: Rotate camera", 10, 275, 16, LIGHTGRAY);
     DrawText("Mouse wheel: Zoom in/out", 10, 295, 16, LIGHTGRAY);

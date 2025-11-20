@@ -19,6 +19,9 @@ void demo() {
         .brick_height = 12,
         .brick_rows = 6,
         .brick_cols = 18,
+        .initial_ball_speed = 256,
+        .max_ball_speed = 448,
+        .paddle_speed = 620,
         .continuous = 0,
     };
     allocate(&env);

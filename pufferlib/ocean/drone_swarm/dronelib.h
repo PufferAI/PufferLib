@@ -56,6 +56,7 @@ struct Log {
     float rings_passed;
     float collision_rate;
     float oob;
+    float timeout;
     float score;
     float perf;
     float n;
@@ -83,9 +84,13 @@ static inline float rndf(float a, float b) {
 
 static inline Vec3 add3(Vec3 a, Vec3 b) { return (Vec3){a.x + b.x, a.y + b.y, a.z + b.z}; }
 
+static inline Quat add_quat(Quat a, Quat b) { return (Quat){a.w + b.w, a.x + b.x, a.y + b.y, a.z + b.z}; }
+
 static inline Vec3 sub3(Vec3 a, Vec3 b) { return (Vec3){a.x - b.x, a.y - b.y, a.z - b.z}; }
 
 static inline Vec3 scalmul3(Vec3 a, float b) { return (Vec3){a.x * b, a.y * b, a.z * b}; }
+
+static inline Quat scalmul_quat(Quat a, float b) { return (Quat){a.w * b, a.x * b, a.y * b, a.z * b}; }
 
 static inline float dot3(Vec3 a, Vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 
@@ -183,28 +188,23 @@ typedef struct {
     int count;
 } Trail;
 
+typedef struct {
+    Vec3 pos;      // global position (x, y, z)
+    Vec3 vel;      // linear velocity (u, v, w)
+    Quat quat;     // roll/pitch/yaw (phi/theta/psi) as a quaternion
+    Vec3 omega;    // angular velocity (p, q, r)
+    float rpms[4]; // motor RPMs
+} State;
 
 typedef struct {
-    Vec3 spawn_pos;
-    Vec3 pos; // global position (x, y, z)
-    Vec3 prev_pos;
-    Vec3 vel;   // linear velocity (u, v, w)
-    Quat quat;  // roll/pitch/yaw (phi/theta/psi) as a quaternion
-    Vec3 omega; // angular velocity (p, q, r)
-    float rpms[4]; // motor RPMs            
-    
-    Vec3 target_pos;
-    Vec3 target_vel;
-   
-    float last_abs_reward;
-    float last_target_reward;
-    float last_collision_reward;
-    float episode_return;
-    float collisions;
-    int episode_length;
-    float score;
-    int ring_idx;
+    Vec3 vel;       // Derivative of position
+    Vec3 v_dot;       // Derivative of velocity
+    Quat q_dot;       // Derivative of quaternion
+    Vec3 w_dot;       // Derivative of angular velocity
+    float rpm_dot[4]; // Derivative of motor RPMs
+} StateDerivative;
 
+typedef struct {
     // Physical properties. Modeled as part of the drone
     // to make domain randomization easier.
     float mass; // kg
@@ -222,123 +222,123 @@ typedef struct {
     float max_omega; // rad/s
     float k_mot; // s
     float j_mot; // kgm^2
+} Params;
+
+typedef struct {
+    // core state and parameters
+    State state;
+    Params params;
+
+    // helpers for ring/swarm logic
+    Vec3 spawn_pos;
+    Vec3 prev_pos;
+    Vec3 target_pos;
+    Vec3 target_vel;
+
+    // logging utils
+    float last_abs_reward;
+    float last_target_reward;
+    float last_collision_reward;
+    float episode_return;
+    float collisions;
+    int episode_length;
+    float score;
+    int ring_idx;
 } Drone;
 
 
 void init_drone(Drone* drone, float size, float dr) {
-    drone->arm_len = size / 2.0f;
+    drone->params.arm_len = size / 2.0f;
 
     // m ~ x^3
-    float mass_scale = powf(drone->arm_len, 3.0f) / powf(BASE_ARM_LEN, 3.0f);
-    drone->mass = BASE_MASS * mass_scale * rndf(1.0f - dr, 1.0f + dr);
+    float mass_scale = powf(drone->params.arm_len, 3.0f) / powf(BASE_ARM_LEN, 3.0f);
+    drone->params.mass = BASE_MASS * mass_scale * rndf(1.0f - dr, 1.0f + dr);
 
     // I ~ mx^2
     float base_Iscale = BASE_MASS * BASE_ARM_LEN * BASE_ARM_LEN;
-    float I_scale = drone->mass * powf(drone->arm_len, 2.0f) / base_Iscale;
-    drone->ixx = BASE_IXX * I_scale * rndf(1.0f - dr, 1.0f + dr);
-    drone->iyy = BASE_IYY * I_scale * rndf(1.0f - dr, 1.0f + dr);
-    drone->izz = BASE_IZZ * I_scale * rndf(1.0f - dr, 1.0f + dr);
+    float I_scale = drone->params.mass * powf(drone->params.arm_len, 2.0f) / base_Iscale;
+    drone->params.ixx = BASE_IXX * I_scale * rndf(1.0f - dr, 1.0f + dr);
+    drone->params.iyy = BASE_IYY * I_scale * rndf(1.0f - dr, 1.0f + dr);
+    drone->params.izz = BASE_IZZ * I_scale * rndf(1.0f - dr, 1.0f + dr);
 
     // k_thrust ~ m/l
-    float k_thrust_scale = (drone->mass * drone->arm_len) / (BASE_MASS * BASE_ARM_LEN);
-    drone->k_thrust = BASE_K_THRUST * k_thrust_scale * rndf(1.0f - dr, 1.0f + dr);
+    float k_thrust_scale = (drone->params.mass * drone->params.arm_len) / (BASE_MASS * BASE_ARM_LEN);
+    drone->params.k_thrust = BASE_K_THRUST * k_thrust_scale * rndf(1.0f - dr, 1.0f + dr);
 
     // k_ang_damp ~ I
     float base_avg_inertia = (BASE_IXX + BASE_IYY + BASE_IZZ) / 3.0f;
-    float avg_inertia = (drone->ixx + drone->iyy + drone->izz) / 3.0f;
+    float avg_inertia = (drone->params.ixx + drone->params.iyy + drone->params.izz) / 3.0f;
     float avg_inertia_scale = avg_inertia / base_avg_inertia;
-    drone->k_ang_damp = BASE_K_ANG_DAMP * avg_inertia_scale * rndf(1.0f - dr, 1.0f + dr);
+    drone->params.k_ang_damp = BASE_K_ANG_DAMP * avg_inertia_scale * rndf(1.0f - dr, 1.0f + dr);
 
     // drag ~ x^2
-    float drag_scale = powf(drone->arm_len, 2.0f) / powf(BASE_ARM_LEN, 2.0f);
-    drone->k_drag = BASE_K_DRAG * drag_scale * rndf(1.0f - dr, 1.0f + dr);
-    drone->b_drag = BASE_B_DRAG * drag_scale * rndf(1.0f - dr, 1.0f + dr);
+    float drag_scale = powf(drone->params.arm_len, 2.0f) / powf(BASE_ARM_LEN, 2.0f);
+    drone->params.k_drag = BASE_K_DRAG * drag_scale * rndf(1.0f - dr, 1.0f + dr);
+    drone->params.b_drag = BASE_B_DRAG * drag_scale * rndf(1.0f - dr, 1.0f + dr);
 
     // Small gravity randomization
-    drone->gravity = BASE_GRAVITY * rndf(0.99f, 1.01f);
+    drone->params.gravity = BASE_GRAVITY * rndf(0.99f, 1.01f);
 
     // RPM ~ 1/x
-    float rpm_scale = (BASE_ARM_LEN) / (drone->arm_len);
-    drone->max_rpm = BASE_MAX_RPM * rpm_scale * rndf(1.0f - dr, 1.0f + dr);
+    float rpm_scale = (BASE_ARM_LEN) / (drone->params.arm_len);
+    drone->params.max_rpm = BASE_MAX_RPM * rpm_scale * rndf(1.0f - dr, 1.0f + dr);
 
-    drone->max_vel = BASE_MAX_VEL;
-    drone->max_omega = BASE_MAX_OMEGA;
+    drone->params.max_vel = BASE_MAX_VEL;
+    drone->params.max_omega = BASE_MAX_OMEGA;
 
+    drone->params.k_mot = BASE_K_MOT * rndf(1.0f - dr, 1.0f + dr);
+    drone->params.j_mot = BASE_J_MOT * I_scale * rndf(1.0f - dr, 1.0f + dr);
+    
     for (int i = 0; i < 4; i++) {
-        drone->rpms[i] = 0.0f;
+        drone->state.rpms[i] = 0.0f;
     }
-    drone->k_mot = BASE_K_MOT * rndf(1.0f - dr, 1.0f + dr);
-    drone->j_mot = BASE_J_MOT * I_scale * rndf(1.0f - dr, 1.0f + dr);
+    drone->state.pos = (Vec3){0.0f, 0.0f, 0.0f};
+    drone->prev_pos = drone->state.pos;
+    drone->state.vel = (Vec3){0.0f, 0.0f, 0.0f};
+    drone->state.omega = (Vec3){0.0f, 0.0f, 0.0f};
+    drone->state.quat = (Quat){1.0f, 0.0f, 0.0f, 0.0f};
 }
 
-void explicit_euler(Drone* drone, Vec3 v_dot, Quat q_dot, Vec3 w_dot, float rpm_dot[4], float dt) {
-    drone->pos.x += drone->vel.x * dt;
-    drone->pos.y += drone->vel.y * dt;
-    drone->pos.z += drone->vel.z * dt;
-
-    drone->vel.x += v_dot.x * dt;
-    drone->vel.y += v_dot.y * dt;
-    drone->vel.z += v_dot.z * dt;
-
-    drone->omega.x += w_dot.x * dt;
-    drone->omega.y += w_dot.y * dt;
-    drone->omega.z += w_dot.z * dt;
-
-    drone->quat.w += q_dot.w * dt;
-    drone->quat.x += q_dot.x * dt;
-    drone->quat.y += q_dot.y * dt;
-    drone->quat.z += q_dot.z * dt;
-
-    drone->rpms[0] += rpm_dot[0] * dt;
-    drone->rpms[1] += rpm_dot[1] * dt;
-    drone->rpms[2] += rpm_dot[2] * dt;
-    drone->rpms[3] += rpm_dot[3] * dt;
-}
-
-void move_drone(Drone* drone, float* actions) {
-    // Physics outlined in: 
-    // https://pmc.ncbi.nlm.nih.gov/articles/PMC10468397/pdf/41586_2023_Article_6419.pdf
-    clamp4(actions, -1.0f, 1.0f);
-
+void compute_derivatives(State* state, Params* params, float* actions, StateDerivative* derivatives) {
     // first order rpm lag
     float target_rpms[4];
     for (int i = 0; i < 4; i++) {
-        target_rpms[i] = (actions[i] + 1.0f) * 0.5f * drone->max_rpm;
+        target_rpms[i] = (actions[i] + 1.0f) * 0.5f * params->max_rpm;
     }
 
     // rpm rates
     float rpm_dot[4];
     for (int i = 0; i < 4; i++) {
-        rpm_dot[i] = (1.0f / drone->k_mot) * (target_rpms[i] - drone->rpms[i]);
+        rpm_dot[i] = (1.0f / params->k_mot) * (target_rpms[i] - state->rpms[i]);
     }
 
     // motor thrusts
     float T[4];
     for (int i = 0; i < 4; i++) {
-        T[i] = drone->k_thrust * powf(drone->rpms[i], 2.0f);
+        T[i] = params->k_thrust * powf(state->rpms[i], 2.0f);
     }
 
     // body frame net force
     Vec3 F_prop_body = {0.0f, 0.0f, T[0] + T[1] + T[2] + T[3]};
 
     // body frame force -> world frame force
-    Vec3 F_prop = quat_rotate(drone->quat, F_prop_body);
+    Vec3 F_prop = quat_rotate(state->quat, F_prop_body);
 
     // world frame linear drag
     Vec3 F_aero;
-    F_aero.x = -drone->b_drag * drone->vel.x;
-    F_aero.y = -drone->b_drag * drone->vel.y;
-    F_aero.z = -drone->b_drag * drone->vel.z;
+    F_aero.x = -params->b_drag * state->vel.x;
+    F_aero.y = -params->b_drag * state->vel.y;
+    F_aero.z = -params->b_drag * state->vel.z;
 
     // velocity rates, a = F/m
     Vec3 v_dot;
-    v_dot.x = (F_prop.x + F_aero.x) / drone->mass;
-    v_dot.y = (F_prop.y + F_aero.y) / drone->mass;
-    v_dot.z = ((F_prop.z + F_aero.z) / drone->mass) - drone->gravity;
+    v_dot.x = (F_prop.x + F_aero.x) / params->mass;
+    v_dot.y = (F_prop.y + F_aero.y) / params->mass;
+    v_dot.z = ((F_prop.z + F_aero.z) / params->mass) - params->gravity;
 
     // quaternion rates
-    Quat omega_q = {0.0f, drone->omega.x, drone->omega.y, drone->omega.z};
-    Quat q_dot = quat_mul(drone->quat, omega_q);
+    Quat omega_q = {0.0f, state->omega.x, state->omega.y, state->omega.z};
+    Quat q_dot = quat_mul(state->quat, omega_q);
     q_dot.w *= 0.5f;
     q_dot.x *= 0.5f;
     q_dot.y *= 0.5f;
@@ -346,42 +346,117 @@ void move_drone(Drone* drone, float* actions) {
 
     // body frame torques
     Vec3 Tau_prop;
-    Tau_prop.x = drone->arm_len*(T[1] - T[3]);
-    Tau_prop.y = drone->arm_len*(T[2] - T[0]);
-    Tau_prop.z = drone->k_drag*(T[0] - T[1] + T[2] - T[3]);
+    Tau_prop.x = params->arm_len*(T[1] - T[3]);
+    Tau_prop.y = params->arm_len*(T[2] - T[0]);
+    Tau_prop.z = params->k_drag*(T[0] - T[1] + T[2] - T[3]);
 
     // torque from chaging motor speeds
-    float Tau_mot_z = drone->j_mot * (rpm_dot[0] - rpm_dot[1] + rpm_dot[2] - rpm_dot[3]);
+    float Tau_mot_z = params->j_mot * (rpm_dot[0] - rpm_dot[1] + rpm_dot[2] - rpm_dot[3]);
 
     // torque from angular damping
     Vec3 Tau_aero;
-    Tau_aero.x = -drone->k_ang_damp * drone->omega.x;
-    Tau_aero.y = -drone->k_ang_damp * drone->omega.y;
-    Tau_aero.z = -drone->k_ang_damp * drone->omega.z;
+    Tau_aero.x = -params->k_ang_damp * state->omega.x;
+    Tau_aero.y = -params->k_ang_damp * state->omega.y;
+    Tau_aero.z = -params->k_ang_damp * state->omega.z;
     
     // gyroscopic torque
     Vec3 Tau_iner;
-    Tau_iner.x = (drone->iyy - drone->izz) * drone->omega.y * drone->omega.z;
-    Tau_iner.y = (drone->izz - drone->ixx) * drone->omega.z * drone->omega.x;
-    Tau_iner.z = (drone->ixx - drone->iyy) * drone->omega.x * drone->omega.y;
+    Tau_iner.x = (params->iyy - params->izz) * state->omega.y * state->omega.z;
+    Tau_iner.y = (params->izz - params->ixx) * state->omega.z * state->omega.x;
+    Tau_iner.z = (params->ixx - params->iyy) * state->omega.x * state->omega.y;
 
     // angular velocity rates
     Vec3 w_dot;
-    w_dot.x = (Tau_prop.x + Tau_aero.x + Tau_iner.x) / drone->ixx;
-    w_dot.y = (Tau_prop.y + Tau_aero.y + Tau_iner.y) / drone->iyy;
-    w_dot.z = (Tau_prop.z + Tau_aero.z + Tau_iner.z + Tau_mot_z) / drone->izz;
+    w_dot.x = (Tau_prop.x + Tau_aero.x + Tau_iner.x) / params->ixx;
+    w_dot.y = (Tau_prop.y + Tau_aero.y + Tau_iner.y) / params->iyy;
+    w_dot.z = (Tau_prop.z + Tau_aero.z + Tau_iner.z + Tau_mot_z) / params->izz;
+
+    derivatives->vel = state->vel;
+    derivatives->v_dot = v_dot;
+    derivatives->q_dot = q_dot;
+    derivatives->w_dot = w_dot;
+    for (int i = 0; i < 4; i++) {
+        derivatives->rpm_dot[i] = rpm_dot[i];
+    }
+}
+
+static void step(State* initial, StateDerivative* deriv, float dt, State* output) {
+    output->pos = add3(initial->pos, scalmul3(deriv->vel, dt));
+    output->vel = add3(initial->vel, scalmul3(deriv->v_dot, dt));
+    output->quat = add_quat(initial->quat, scalmul_quat(deriv->q_dot, dt));
+    output->omega = add3(initial->omega, scalmul3(deriv->w_dot, dt));
+    for (int i = 0; i < 4; i++) {
+        output->rpms[i] = initial->rpms[i] + deriv->rpm_dot[i] * dt;
+    }
+    quat_normalize(&output->quat);
+}
+
+void rk4_step(State* state, Params* params, float* actions, float dt) {
+    StateDerivative k1, k2, k3, k4;
+    State temp_state;
+
+    compute_derivatives(state, params, actions, &k1);
+
+    step(state, &k1, dt * 0.5f, &temp_state);
+    compute_derivatives(&temp_state, params, actions, &k2);
+
+    step(state, &k2, dt * 0.5f, &temp_state);
+    compute_derivatives(&temp_state, params, actions, &k3);
+
+    step(state, &k3, dt, &temp_state);
+    compute_derivatives(&temp_state, params, actions, &k4);
+
+    float dt_6 = dt / 6.0f;
+
+    state->pos.x += (k1.vel.x + 2.0f * k2.vel.x + 2.0f * k3.vel.x + k4.vel.x) * dt_6;
+    state->pos.y += (k1.vel.y + 2.0f * k2.vel.y + 2.0f * k3.vel.y + k4.vel.y) * dt_6;
+    state->pos.z += (k1.vel.z + 2.0f * k2.vel.z + 2.0f * k3.vel.z + k4.vel.z) * dt_6;
+
+    state->vel.x += (k1.v_dot.x + 2.0f * k2.v_dot.x + 2.0f * k3.v_dot.x + k4.v_dot.x) * dt_6;
+    state->vel.y += (k1.v_dot.y + 2.0f * k2.v_dot.y + 2.0f * k3.v_dot.y + k4.v_dot.y) * dt_6;
+    state->vel.z += (k1.v_dot.z + 2.0f * k2.v_dot.z + 2.0f * k3.v_dot.z + k4.v_dot.z) * dt_6;
+
+    state->quat.w += (k1.q_dot.w + 2.0f * k2.q_dot.w + 2.0f * k3.q_dot.w + k4.q_dot.w) * dt_6;
+    state->quat.x += (k1.q_dot.x + 2.0f * k2.q_dot.x + 2.0f * k3.q_dot.x + k4.q_dot.x) * dt_6;
+    state->quat.y += (k1.q_dot.y + 2.0f * k2.q_dot.y + 2.0f * k3.q_dot.y + k4.q_dot.y) * dt_6;
+    state->quat.z += (k1.q_dot.z + 2.0f * k2.q_dot.z + 2.0f * k3.q_dot.z + k4.q_dot.z) * dt_6;
+
+    state->omega.x += (k1.w_dot.x + 2.0f * k2.w_dot.x + 2.0f * k3.w_dot.x + k4.w_dot.x) * dt_6;
+    state->omega.y += (k1.w_dot.y + 2.0f * k2.w_dot.y + 2.0f * k3.w_dot.y + k4.w_dot.y) * dt_6;
+    state->omega.z += (k1.w_dot.z + 2.0f * k2.w_dot.z + 2.0f * k3.w_dot.z + k4.w_dot.z) * dt_6;
+
+    for (int i = 0; i < 4; i++) {
+        state->rpms[i] += (k1.rpm_dot[i] + 2.0f * k2.rpm_dot[i] + 2.0f * k3.rpm_dot[i] + k4.rpm_dot[i]) * dt_6;
+    }
+
+    quat_normalize(&state->quat);
+}
+
+void move_drone(Drone* drone, float* actions) {
+    // clamp actions
+    clamp4(actions, -1.0f, 1.0f);
 
     // Domain randomized dt
     float dt = DT * rndf(1.0f - DT_RNG, 1.0 + DT_RNG);
 
     // update drone state
-    drone->prev_pos = drone->pos;
-    explicit_euler(drone, v_dot, q_dot, w_dot, rpm_dot, dt);
+    drone->prev_pos = drone->state.pos;
+    rk4_step(&drone->state, &drone->params, actions, dt);
 
     // clamp and normalise for observations
-    clamp3(&drone->vel, -drone->max_vel, drone->max_vel);
-    clamp3(&drone->omega, -drone->max_omega, drone->max_omega);
-    quat_normalize(&drone->quat);
+    clamp3(&drone->state.vel, -drone->params.max_vel, drone->params.max_vel);
+    clamp3(&drone->state.omega, -drone->params.max_omega, drone->params.max_omega);
+}
+
+void reset_rings(Ring* ring_buffer, int num_rings, float ring_radius) {
+    ring_buffer[0] = rndring(ring_radius);
+    
+    // ensure rings are spaced at least 2*ring_radius apart
+    for (int i = 1; i < num_rings; i++) {
+        do {
+            ring_buffer[i] = rndring(ring_radius);
+        }  while (norm3(sub3(ring_buffer[i].pos, ring_buffer[i - 1].pos)) < 2.0f*ring_radius);
+    }   
 }
 
 float check_ring(Drone* drone, Ring* ring) {
@@ -389,7 +464,7 @@ float check_ring(Drone* drone, Ring* ring) {
     float prev_dot = dot3(sub3(drone->prev_pos, ring->pos), ring->normal);
 
     // new dot product positive if on the 'exit' side of the ring's plane
-    float new_dot = dot3(sub3(drone->pos, ring->pos), ring->normal);
+    float new_dot = dot3(sub3(drone->state.pos, ring->pos), ring->normal);
 
     bool valid_dir = (prev_dot < 0.0f && new_dot > 0.0f);
     bool invalid_dir = (prev_dot > 0.0f && new_dot < 0.0f);
@@ -397,7 +472,7 @@ float check_ring(Drone* drone, Ring* ring) {
     // if we have crossed the plane of the ring
     if (valid_dir || invalid_dir) {
         // find intesection with ring's plane
-        Vec3 dir = sub3(drone->pos, drone->prev_pos);
+        Vec3 dir = sub3(drone->state.pos, drone->prev_pos);
         float t = -prev_dot / dot3(ring->normal, dir); // possible nan
 
         Vec3 intersection = add3(drone->prev_pos, scalmul3(dir, t));
