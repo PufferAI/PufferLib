@@ -75,11 +75,8 @@ typedef struct Artillery3D {
     float dist;
 
     float fuse_t;
-    float fuse_t0;
     float azimuth;
-    float azimuth0;
     float elevation;
-    float elevation0;
     float t;
     float fire_t;
 
@@ -94,7 +91,6 @@ typedef struct Artillery3D {
     int shots_fired;
     int shots_remaining;
 
-    float v0;
     float vx0;
     float vy0;
     float vz0;
@@ -151,11 +147,8 @@ void get_random_start(Artillery3D* env) {
         if (env->ty[i] < Y0) env->target_vy[i] = env->target_vy[i] * -1.0f;
     }
     env->azimuth = 0.5f;
-    env->azimuth0 = env->azimuth;
     env->elevation = 0.0f;
-    env->elevation0 = env->elevation;
     env->fuse_t = 0.7f;
-    env->fuse_t0 = env->fuse_t;
 }
 
 void init(Artillery3D* env) {
