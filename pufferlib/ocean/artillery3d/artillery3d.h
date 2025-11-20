@@ -195,7 +195,7 @@ void add_log(Artillery3D* env) {
     env->log.max_reward_distn += env->max_reward_distn;
     env->log.turn_penaltyn += env->turn_penaltyn;
     env->log.n += 1;
-    env->log.acc1000 += 750.0f - env->dist;
+    env->log.acc1000 += 750.0f - env->dist; // Used to sweep to maximize this
     env->log.shots_fired += env->shots_fired;
     env->log.targets_remaining += env->targets_remaining;
 }
