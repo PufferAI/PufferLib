@@ -550,15 +550,16 @@ void c_render(Artillery3D* env) {
     handle_camera_controls(env->client);
     rlSetClipPlanes(1.0, 10000.0);
     BeginDrawing();
-    ClearBackground((Color){135, 206, 235, 255});
+    ClearBackground((Color){62, 139, 159, 255});
 
     BeginMode3D(env->client->camera);
 
     float corner_size = 20.0f;
-    DrawSphere((Vector3){0, 0, 0}, corner_size, YELLOW);
-    DrawSphere((Vector3){XSIZE, 0, 0}, corner_size, YELLOW);
-    DrawSphere((Vector3){0, YSIZE, 0}, corner_size, YELLOW);
-    DrawSphere((Vector3){XSIZE, YSIZE, 0}, corner_size, YELLOW);
+    Color corner_color = {31, 86, 42, 255};
+    DrawSphere((Vector3){0, 0, 0}, corner_size, corner_color);
+    DrawSphere((Vector3){XSIZE, 0, 0}, corner_size, corner_color);
+    DrawSphere((Vector3){0, YSIZE, 0}, corner_size, corner_color);
+    DrawSphere((Vector3){XSIZE, YSIZE, 0}, corner_size, corner_color);
 
     float barrel_length = 40.0f;
     float barrel_radius = 4.0f;
@@ -614,7 +615,7 @@ void c_render(Artillery3D* env) {
     if (env->projectile_active) {
         DrawSphere((Vector3){env->px, env->py, env->pz}, 4.0f, BLACK);
         if (env->t > env->fire_t + env->fuse_t * FUSEMULT) {
-            DrawSphere((Vector3){env->boom_x, env->boom_y, env->boom_z}, 20.0f, (Color){128, 128, 128, 128});
+            DrawSphere((Vector3){env->boom_x, env->boom_y, env->boom_z}, 20.0f, (Color){69, 69, 69, 128});
             if (env->dist < EXPLRAD) {
                 DrawSphere((Vector3){env->boom_x, env->boom_y, env->boom_z}, 10.0f+20.0f*(env->t-env->fire_t), (Color){255, 0, 0, 128});
             }
@@ -623,7 +624,7 @@ void c_render(Artillery3D* env) {
 
     for (int i = 0; i < NUMTARGETS; i++) {
         if (env->tx[i] > 1.0f) {
-            DrawSphere((Vector3){env->tx[i], env->ty[i], env->tz[i]}, 15.0f, BLUE);
+            DrawSphere((Vector3){env->tx[i], env->ty[i], env->tz[i]}, 15.0f, (Color){191, 126, 37, 255});
         }
     }
 
