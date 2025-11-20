@@ -41,6 +41,7 @@
 #define MAXSHOTS 4
 
 typedef struct Log {
+    float perf;
     float score;
     float episode_length;
     float dist;
@@ -107,6 +108,7 @@ typedef struct Artillery3D {
     float* tz;
     int targets_remaining;
     float* time_target_vanish;
+    float hit;
 
     float max_reward;
     float max_reward_dist;
@@ -123,7 +125,6 @@ typedef struct Artillery3D {
 
     int render;
 
-    int debug;
     int runs;
 
     float inv_x_size;
@@ -194,6 +195,7 @@ static inline float get_turn_penalty(Artillery3D* env) {
 }
 
 void add_log(Artillery3D* env) {
+    env->log.perf += env->hit;
     env->log.episode_length += env->tick;
     env->log.score += env->score;
     env->log.dist += env->dist;
@@ -233,6 +235,7 @@ void reset_round(Artillery3D* env) {
     env->runs += 1;
     env->score = 0;
     env->fired = 0;
+    env->hit = 0.0f;
     env->shots_fired = 0;
     env->shots_remaining = MAXSHOTS;
     env->targets_remaining = NUMTARGETS;
@@ -300,6 +303,8 @@ static inline void fire_projectile(Artillery3D* env) {
     } else {
         score = env->inv_max_shots * (1.0f - (env->dist / env->max_reward_distn));
     }
+
+    if (env->dist < env->target_size) env->hit = 1.0f;
 
     env->score += score;
     env->rewards[0] += score;

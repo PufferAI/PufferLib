@@ -26,7 +26,6 @@ void free_allocated(Artillery3D* env) {
 
 void demo() {
     Artillery3D env = {
-        .debug = 0,
         .dist_fade = 0.7493789405520497,
         .max_dist0 = 127.50246246114087,
         .max_reward = 1.0,

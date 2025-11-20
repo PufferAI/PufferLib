@@ -11,7 +11,7 @@ class Artillery3D(pufferlib.PufferEnv):
                  turn_penalty=-0.003, miss_penalty=-0.1858434974084412, render=1, out_bounds_penalty=-0.01,
                  log_interval=128,
                  seed=0,
-                 buf=None, debug=0):
+                 buf=None):
         obs_size = 7 + 12
         self.single_observation_space = gymnasium.spaces.Box(low=-1, high=1, shape=(obs_size,), dtype=np.float32)
         self.render_mode = render_mode
@@ -34,7 +34,6 @@ class Artillery3D(pufferlib.PufferEnv):
             dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, turn_penalty_ramp=turn_penalty_ramp, max_dist0=max_dist0,
             turn_penalty=turn_penalty, miss_penalty=miss_penalty, render=render,
             out_bounds_penalty=out_bounds_penalty,
-            debug=debug
         )
 
     def reset(self, seed=0):
