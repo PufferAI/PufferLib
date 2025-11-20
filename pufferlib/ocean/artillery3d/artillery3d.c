@@ -37,9 +37,7 @@ void demo() {
         .turn_penalty = -0.003,
         .turn_penalty_delay = 72.37761171826367,
         .turn_penalty_ramp = 0.02,
-        .rng = 7,
         .render = 1,
-        .i = 1,
     };
     allocate(&env);
 

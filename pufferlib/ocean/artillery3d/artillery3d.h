@@ -68,7 +68,6 @@ typedef struct Artillery3D {
     int* actions;
     float* rewards;
     unsigned char* terminals;
-    int i;
 
     float score;
     int tick;
@@ -125,7 +124,6 @@ typedef struct Artillery3D {
     int render;
 
     int debug;
-    unsigned int rng;
     int runs;
 
     float inv_x_size;
@@ -180,8 +178,6 @@ void init(Artillery3D* env) {
     env->target_vy = (float*)calloc(NUMTARGETS, sizeof(float));
     env->target_vz = (float*)calloc(NUMTARGETS, sizeof(float));
     env->time_target_vanish = (float*)calloc(NUMTARGETS, sizeof(float));
-
-    //srand(env->rng + env->i);
 
     get_random_start(env);
 }
