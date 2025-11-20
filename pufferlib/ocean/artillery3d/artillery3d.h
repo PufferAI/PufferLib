@@ -30,7 +30,7 @@
 #define Z0 0.0f
 #define G 9.81f
 
-#define TXMIN 1500 // Target X Min
+#define TXMIN 1500 // Target X Min Meters
 #define TXMAX 1900
 #define TYMIN 250
 #define TYMAX 750
