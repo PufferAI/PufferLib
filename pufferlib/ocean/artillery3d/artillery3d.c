@@ -34,7 +34,7 @@ void demo() {
         .out_bounds_penalty = -0.01,
         .target_size = 15,
         .turn_penalty = -0.003,
-        .turn_penalty_delay = 72.37761171826367,
+        .turn_penalty_delay = 72,
         .turn_penalty_ramp = 0.02,
         .render = 1,
     };
