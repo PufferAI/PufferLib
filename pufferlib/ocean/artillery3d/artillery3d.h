@@ -181,7 +181,7 @@ void init(Artillery3D* env) {
     env->target_vz = (float*)calloc(NUMTARGETS, sizeof(float));
     env->time_target_vanish = (float*)calloc(NUMTARGETS, sizeof(float));
 
-    srand(env->rng + env->i);
+    //srand(env->rng + env->i);
 
     get_random_start(env);
 }
@@ -419,6 +419,8 @@ static inline void step_frame(Artillery3D* env, int action) {
             if (env->tz[i] > ZSIZE) env->tz[i] = ZSIZE;
         }
     }
+
+    if (env->tick < 2 && env->actions[0] == 0) env->score = -1.1f;
 
     if (
             (env->shots_remaining < 1 && (!env->render || env->px > XSIZE)) ||

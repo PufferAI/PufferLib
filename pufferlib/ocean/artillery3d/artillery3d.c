@@ -57,7 +57,7 @@ void demo() {
     SetTargetFPS(30);
     while (!WindowShouldClose()) {
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
-            env.actions[0] = 100;
+            env.actions[0] = 1;
             if (IsKeyDown(KEY_SPACE)) env.actions[0] = 0;
             if (IsKeyDown(KEY_UP)  || IsKeyDown(KEY_W)) env.actions[0] = 1;
             if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = 2;
