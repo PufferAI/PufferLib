@@ -54,12 +54,14 @@ void demo() {
     SetTargetFPS(30);
     while (!WindowShouldClose()) {
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
-            env.actions[0] = 1;
-            if (IsKeyDown(KEY_SPACE)) env.actions[0] = 0;
-            if (IsKeyDown(KEY_UP)  || IsKeyDown(KEY_W)) env.actions[0] = 1;
-            if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = 2;
-            if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 3;
-            if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 4;
+            env.actions[0] = -1;
+            if (IsKeyDown(KEY_SPACE)) env.actions[0] = 0;                      // Fire
+            if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 1;  // Left
+            if (IsKeyDown(KEY_RIGHT)  || IsKeyDown(KEY_D)) env.actions[0] = 2; // Right
+            if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = 3;  // Up
+            if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W)) env.actions[0] = 4;     // Down
+            if (IsKeyDown(KEY_E)) env.actions[0] = 5;                          // Longer Fuse
+            if (IsKeyDown(KEY_Q)) env.actions[0] = 6;                          // Shorter Fuse
         } else {
             int* actions = (int*)env.actions;
             forward_linearlstm(net, env.observations, actions);
