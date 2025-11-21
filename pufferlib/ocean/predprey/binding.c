@@ -12,10 +12,10 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->reward_eat = unpack(kwargs, "reward_eat");
     env->reward_collect = unpack(kwargs, "reward_collect");
     env->timestep_reward = unpack(kwargs, "timestep_reward");
-    env->reward_steal = unpack(kwargs, "reward_steal");
     env->hp_reward_scale = unpack(kwargs, "hp_reward_scale");
     env->held_food_reward_scale = unpack(kwargs, "held_food_reward_scale");
-    env->food_base_spawn_rate = unpack(kwargs, "food_base_spawn_rate");
+    env->reward_fireplace_lit = unpack(kwargs, "reward_fireplace_lit");
+    env->reward_store_chest = unpack(kwargs, "reward_store_chest");
     init_cenv(env);
     return 0;
 }

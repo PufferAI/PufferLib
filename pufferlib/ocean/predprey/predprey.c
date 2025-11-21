@@ -15,10 +15,8 @@ int main() {
       .reward_eat = 0.0f,
       .reward_collect = 0.0f,
       .timestep_reward = 0.0f,
-      .reward_steal = 0.0f,
       .hp_reward_scale = 0.0f,
       .held_food_reward_scale = 0.0f,
-      .food_base_spawn_rate = 1e-1,
   };
   allocate_cenv(&env);
   c_reset(&env);
@@ -63,10 +61,78 @@ int main() {
 
   }
   free_CEnv(&env);
+  close_renderer(env.client);
 
   return 0;
 }
+/////////////////////
+// Reset stress test
+/////////////////////
 
+// int main() {
+//   srand(43);
+//   PredPrey env = {
+//       .num_agents = 4,
+//       .width = 32,
+//       .height = 32,
+//       .vision = 3,
+//       .reward_death_scale = 1.0f,
+//       .reward_eat = 0.0f,
+//       .reward_collect = 0.0f,
+//       .timestep_reward = 0.0f,
+//       .reward_steal = 0.0f,
+//       .hp_reward_scale = 0.0f,
+//       .held_food_reward_scale = 0.0f,
+//       .food_base_spawn_rate = 1e-1,
+//   };
+//   for (int i = 0; i < 1000; i++) {
+//     allocate_cenv(&env);
+//     c_reset(&env);
+//     c_render(&env);
+
+//     // Weights* weights = load_weights("resources/cpr/cpr_weights.bin", 139270);
+//     // int logit_sizes[] = {5};
+//     // LinearLSTM* net = make_linearlstm(weights, env.num_agents, 49, logit_sizes, 1);
+//     for (int i = 0; i < 10; i++) {
+
+//       for (int i = 0; i < env.num_agents; i++) {
+//           env.actions[i] = rand() % 7; 
+//       }
+      
+//       // User can take control of the first puffer
+//       if (IsKeyDown(KEY_LEFT_SHIFT)) {
+//         sleep(1);
+//         env.actions[0] = NO_MOVE;
+//         if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W))
+//           env.actions[0] = UP;
+//         if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S))
+//           env.actions[0] = DOWN;
+//         if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A))
+//           env.actions[0] = LEFT;
+//         if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D))
+//           env.actions[0] = RIGHT;
+//         if (IsKeyDown(KEY_C))
+//           env.actions[0] = INTERACT;
+//         if (IsKeyDown(KEY_E))
+//           env.actions[0] = EAT;
+
+//         printf("Getting user input %d\n", env.actions[0]);
+//       } else {
+//           // for (int i = 0; i < env.num_agents*49; i++) {
+//           //     net->obs[i] = env.observations[i];
+//           // }
+//           // forward_linearlstm(net, net->obs, env.actions);
+//       }
+
+//       c_step(&env);
+//       c_render(&env);
+
+//     }
+//     close_renderer(env.client);
+//     free_CEnv(&env);
+//   }
+//   return 0;
+// }
 
 ////////////////
 // For profile

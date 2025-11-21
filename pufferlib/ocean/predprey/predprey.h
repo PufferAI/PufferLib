@@ -11,20 +11,33 @@
 
 #include "terrain.h"
 
-#define MAX_TIMESTEPS 2000 // If no agent died by then, we reset
 
+// Time
+#define TICK_PER_HOUR 4 //20
+#define HOURS_PER_DAY 4 //24
+#define DAY_PER_MONTH 3 //5
+#define MONTHS_PER_YEAR 4 //4
+#define TICK_PER_DAY (TICK_PER_HOUR * HOURS_PER_DAY)
+#define TICK_PER_MONTH (TICK_PER_DAY * DAY_PER_MONTH)
+#define TICK_PER_YEAR (TICK_PER_MONTH * MONTHS_PER_YEAR)
+
+#define MAX_TIMESTEPS (TICK_PER_YEAR*10) //2000
 
 // Tiles
-#define TILE_DIRT 0
-#define TILE_WATER 4
-#define TILE_GRASS 8
-#define TILE_HOUSE 3
+#define TILE_SOIL 0 
+#define TILE_FLOOR_WOOD 1
+#define TILE_WATER 2
+#define TILE_GRASS 3
+// #define TILE_WATER 4
+// #define TILE_GRASS 8
 
 // Items
 #define EMPTY 0
-#define ITEM_FOOD 10
-#define ITEM_WOOD 13
-#define ITEM_BED 8
+#define ITEM_WOOD 1
+#define ITEM_FOOD 2
+#define ITEM_CHEST 3
+#define ITEM_FIREPLACE_LIT 4
+#define ITEM_FIREPLACE 5
 
 // Entities
 #define ENTITY_AGENT 0
@@ -48,11 +61,17 @@
 #define LOG_SCORE_REWARD_DEATH -1
 
 #define MAX_INVENTORY_ITEM 100
+#define MAX_CHEST_CAPACITY 1000
+#define MAX_COLDNESS 100
+#define MAX_FIRE_TIME 10
 #define HP_REWARD_FOOD 20
-#define HP_LOSS_PER_STEP 1
+#define HP_LOSS_PER_HOUR 2
+#define COLDNESS_LOSS_PER_HOUR 2
+#define HP_LOSS_COLD 10
 #define MAX_HP 100 
 #define START_HP 80
 
+// Actions
 #define DOWN 0 
 #define UP 1
 #define RIGHT 2
@@ -61,8 +80,13 @@
 #define INTERACT 5
 #define EAT 6
 
-#define SPRITE_SIZE 128 
-#define TILE_SIZE 64
+// Spawn rates
+#define FOOD_SPAWN_RATE 0.1f
+#define WOOD_SPAWN_RATE 0.1f
+
+#define SPRITE_SIZE_ENTITY 128 
+#define TILE_SIZE_ENV 64
+#define SPRITE_SIZE 64
 
 #define HEALTH_BAR_WIDTH 48
 #define HEALTH_BAR_HEIGHT 6
@@ -83,10 +107,12 @@ struct Agent {
   int c;
   int id;
   int direction;
-  int held_food;
+  int food_amt;
+  int wood_amt;
   float hp;
   int start_tick;
   unsigned char anim;
+  unsigned char coldness;
 };
 
 // typedef struct FoodList FoodList;
@@ -140,9 +166,10 @@ struct PredPrey {
   float reward_eat;
   float reward_collect;
   float timestep_reward;
-  float reward_steal;
   float hp_reward_scale;
   float held_food_reward_scale;
+  float reward_fireplace_lit;
+  float reward_store_chest;
 
   float *observations;
   int *actions;
@@ -157,15 +184,20 @@ struct PredPrey {
   Log* agent_logs;
 
   // FoodList *foods;
-  float food_base_spawn_rate;
   float max_food;
   int food_count;
+  float max_wood;
+  int wood_count;
 
   unsigned char *terrain; // Array of terrain types, size width*height
   unsigned char *items; // Array of item types, size width*height
   short *pids; // Array of entity idx, size width*height
 
   Biome_idx biome_idxs;
+
+  int chest_food_amt;
+  bool is_fireplace_lit;
+  int fire_time_remaining;
 };
 
 void init_biome_idx(PredPrey *env) {
@@ -184,9 +216,9 @@ void init_biome_idx(PredPrey *env) {
       unsigned char tile = env->terrain[grid_idx];
       if (tile == TILE_GRASS) {
         env->biome_idxs.grass_idx[env->biome_idxs.grass_count++] = grid_idx;
-      } else if (tile == TILE_DIRT) {
+      } else if (tile == TILE_SOIL) {
         env->biome_idxs.dirt_idx[env->biome_idxs.dirt_count++] = grid_idx;
-      } else if (tile == TILE_HOUSE) {
+      } else if (tile == TILE_FLOOR_WOOD) {
         env->biome_idxs.house_idx[env->biome_idxs.house_count++] = grid_idx;
       }
     }
@@ -219,263 +251,8 @@ void add_agent_log(PredPrey *env, int agent_id) {
   // env->agent_logs[agent_id].collects *= time_alive;
 }
 
-void init_cenv(PredPrey *env) {
-  env->agents = (Agent *)calloc(env->num_agents, sizeof(Agent));
-  env->vision_window = 2 * env->vision + 1;
-  env->obs_size = (env->vision_window * env->vision_window) * MAX_CELL_OBS + 1;
-  // env->foods = allocate_foodlist(env->width * env->height);
-  env->agent_logs = (Log *)calloc(env->num_agents, sizeof(Log));
-  env->masks = (unsigned char *)calloc(env->num_agents, sizeof(unsigned char));
-  // Arbitrarly set max food to a proportion of available tiles
-  env->max_food = 0.55 * (
-    (env->width * env->height) - (
-      env->vision*env->width*2 +
-      env->vision*2*(env->height - 2*env->vision)
-    ) - env->num_agents); 
-  env->terrain = (unsigned char *)calloc(env->width * env->height, sizeof(unsigned char));
-  env->items = (unsigned char *)calloc(env->width * env->height, sizeof(unsigned char));
-  env->pids = (short *)calloc(env->width * env->height, sizeof(short));
-
-  // make_grid_from_scratch(env);
-  memcpy(env->terrain, terrain, env->width * env->height * sizeof(unsigned char));
-  init_biome_idx(env);
-}
-
-void allocate_cenv(PredPrey *env) {
-  // Called by C stuff
-  int obs_size = ((2 * env->vision + 1) * (2 * env->vision + 1)) * MAX_CELL_OBS + 1;
-  env->observations = (float *)calloc(env->num_agents * obs_size,
-                                              sizeof(float));
-  env->actions = (int *)calloc(env->num_agents, sizeof(unsigned int));
-  env->rewards = (float *)calloc(env->num_agents, sizeof(float));
-  env->terminals =
-      (unsigned char *)calloc(env->num_agents, sizeof(unsigned char));
-  env->truncations = (unsigned char*)calloc(env->num_agents, sizeof(unsigned char));
-  init_cenv(env);
-}
-
-void free_biome(PredPrey *env) {
-  free(env->biome_idxs.grass_idx);
-  free(env->biome_idxs.dirt_idx);
-  free(env->biome_idxs.house_idx);
-}
-
-void c_close(PredPrey *env) {
-  free(env->agents);
-  // free_foodlist(env->foods);
-  free(env->masks);
-  free(env->agent_logs);
-  free(env->terrain);
-  free(env->items);
-  free(env->pids);
-  free_biome(env);
-}
-
-void free_CEnv(PredPrey *env) {
-  free(env->observations);
-  free(env->actions);
-  free(env->rewards);
-  free(env->terminals);
-  free(env->truncations);
-  c_close(env);
-}
-
-int flat_idx(PredPrey *env, int r, int c) { return r * env->width + c; }
-
-void reward_agent(PredPrey *env, int agent_id, float reward) {
-  // Simple helper function which loggs as well
-  env->rewards[agent_id] += reward;
-  env->agent_logs[agent_id].episode_return += reward;
-}
-
-bool is_obstacle(PredPrey *env, int idx) {
-  int tile = env->terrain[idx];
-  if (tile == TILE_WATER) {
-    return true;
-  }
-
-  short entity_id = env->pids[idx];
-  if (entity_id != -1){
-    return true;
-  }
-  return false; 
-}
-
-void init_foods(PredPrey *env) {
-  // Fill dirt area with food
-  for (int i = 0; i < env->biome_idxs.dirt_count; i++) {
-    int grid_idx = env->biome_idxs.dirt_idx[i];
-    if (env->items[grid_idx] == EMPTY) {
-      env->items[grid_idx] = ITEM_FOOD;
-      env->food_count += 1;
-    }
-  }
-}
-
-// void spawn_foods_organic(PredPrey *env) {
-//   // After each step, check existing foods and spawns new food in the
-//   // neighborhood Iterates over food_list for efficiency instead of the entire
-//   // grid.
-//   // Only do it if the number of foods is less than max_foods
-//   if (env->foods->size >= env->max_food) {
-//     return;
-//   }
-//   FoodList *foods = env->foods;
-//   int original_size = foods->size;
-//   for (int i = 0; i < original_size; i++) {
-//     int idx = foods->indexes[i];
-//     int offset = idx - env->width - 1; // Food spawn in 1 radius
-//     int r = offset / env->width;
-//     int c = offset % env->width;
-//     for (int ri = 0; ri < 3; ri++) {
-//       for (int ci = 0; ci < 3; ci++) {
-//         int neighboor_idx = flat_idx(env, (r + ri), (c + ci));
-//         if (env->terrain[neighboor_idx] != TILE_DIRT && env->items[neighboor_idx] != 0) {
-//           continue;
-//         }
-//         switch (env->items[idx]) {
-//         // %Chance spawning new food
-//         case ITEM_FOOD:
-//           if ((rand() / (double)RAND_MAX) < env->food_base_spawn_rate) {
-//             add_food(env, neighboor_idx, env->items[idx]);
-//           }
-//           break;
-//         }
-//       }
-//     }
-//   }
-
-//   // // Each turn there is random probability for a food to spawn at a random
-//   // // location To cope with resource depletion
-//   // int normalizer = (env->width * env->height) / 576;
-//   // if ((rand() / (double)RAND_MAX) <
-//   //     min((env->food_base_spawn_rate * 2 * normalizer), 1e-2)) {
-//   //   spawn_food_random(env, NORMAL_FOOD);
-//   // }
-// }
-
-bool spawn_food_random(PredPrey *env){
-  // Try x time to spawn food wihtin the DIRT area
-  if (env->food_count >= env->max_food) {
-    return false;
-  }
-  int attempts = 0;
-  while (attempts ++ < 100){
-    int rand_idx = rand() % env->biome_idxs.dirt_count;
-    int grid_idx = env->biome_idxs.dirt_idx[rand_idx];
-
-    if (env->items[grid_idx] == EMPTY) {
-      env->items[grid_idx] = ITEM_FOOD;
-      env->food_count++;
-      return true;
-    }
-  }
-  return false;
-}
-
-void regrow_food(PredPrey *env){
-  // Regrow food in all dirt tiles that do not have food already with some probability
-  for (int i = 0; i < env->biome_idxs.dirt_count; i++) {
-    int grid_idx = env->biome_idxs.dirt_idx[i];
-    if (
-      env->items[grid_idx] == EMPTY && 
-      rand() / (double)RAND_MAX < env->food_base_spawn_rate &&
-      env->food_count < env->max_food
-    ) {
-      env->items[grid_idx] = ITEM_FOOD;
-      env->food_count += 1;
-    }
-  }
-}
-
-void spawn_items(PredPrey *env) {
-  // Currently items are only spawning every step in their corresponding BIOME
-  regrow_food(env);
-  // if (rand() / (double)RAND_MAX < env->food_base_spawn_rate) {
-  //   spawn_food_random(env);
-  // }
-}
-
-void compute_observations(PredPrey *env) {
-  for (int i = 0; i < env->num_agents; i++) {
-    int obs_idx = i * env->obs_size;
-    Agent *agent = &env->agents[i];
-    if (agent->hp <= 0) {
-      for (int j = 0; j < env->obs_size; j++) {
-        env->observations[obs_idx++] = 0.0f;
-      }
-      continue;
-    }
-    // int obs_offset = (i * env->obs_size);
-    int r_offset = agent->r - env->vision;
-    int c_offset = agent->c - env->vision;
-    for (int r = 0; r < env->vision_window; r++) {
-      for (int c = 0; c < env->vision_window; c++) {
-        int grid_idx = flat_idx(env,r_offset + r, c_offset + c);
-        unsigned char item_idx = env->items[grid_idx];
-        short entity_id = env->pids[grid_idx];
-
-        // First obs is terrain
-        env->observations[obs_idx++] = (float)env->terrain[grid_idx];
-        // Second is item 
-        env->observations[obs_idx++] = (float)item_idx;
-        // Thirds is entity id 
-        env->observations[obs_idx++] = (float)entity_id;
-        float hp_norm = 0.0f;
-        float food_norm = 0.0f;
-        if (entity_id != -1) {
-            Agent *grid_agent = &env->agents[entity_id]; 
-            hp_norm = grid_agent->hp / (float)MAX_HP;
-            food_norm = grid_agent->held_food / (float)MAX_INVENTORY_ITEM;
-        }
-
-        env->observations[obs_idx++] = hp_norm;
-        env->observations[obs_idx++] = food_norm;
-
-      } 
-    }
-    //Agent also get its direction
-    env->observations[obs_idx++] = agent->direction;
-  }
-}
-
-void remove_agent(PredPrey *env, int agent_id) {
-  Agent *agent = &env->agents[agent_id];
-  if (agent->r < 0 || agent->c < 0) {
-    return;
-  }
-  int grid_idx = flat_idx(env, agent->r, agent->c);
-  env->pids[grid_idx] = -1;
-  agent->r = -1;
-  agent->c = -1;
-}
-
-void add_hp(PredPrey *env, int agent_id, float hp) {
-  Agent *agent = &env->agents[agent_id];
-  if (agent->hp == 0) {
-    return;
-  }
-  agent->hp += hp;
-  if (agent->hp > MAX_HP) {
-    agent->hp = MAX_HP;
-  } else if (agent->hp <= 0) {
-    agent->hp = 0;
-    int time_alive = env->tick - agent->start_tick;
-    float reward = (((float)time_alive-START_HP) / (float)MAX_TIMESTEPS) * env->reward_death_scale;
-    reward_agent(env, agent_id, reward);
-    env->terminals[agent->id] = 1;
-    add_agent_log(env, agent_id);    
-    remove_agent(env, agent_id);
-    env->last_agent_dead_tick = env->tick;
-  }
-}
-
-void remove_hp(PredPrey *env, int agent_id, float hp) {
-    add_hp(env, agent_id, -hp);
-}
-
 void save_terrain_to_file(PredPrey *env, const char *filename) {
-    char filepath[512];
+    char filepath[1024];
     char dir[512];
     strncpy(dir, __FILE__, sizeof(dir) - 1);
     char *last_slash = strrchr(dir, '/');
@@ -538,9 +315,14 @@ void make_grid_from_scratch(PredPrey *env){
     int row_in_inner = r - env->vision; // row index in inner area reference
     
     if (row_in_inner >= inner_height - house_size) {
-      // Bottom rows: HOUSE on left, DIRT on right
-      memset(env->terrain + row_offset, TILE_HOUSE, house_size * sizeof(env->terrain[0]));
-      memset(env->terrain + row_offset + house_size, TILE_DIRT, field_width * sizeof(env->terrain[0]));
+      // Bottom rows: HOUSE on left, SOIL on right
+      memset(env->terrain + row_offset, TILE_FLOOR_WOOD, house_size * sizeof(env->terrain[0]));
+      memset(env->terrain + row_offset + house_size, TILE_SOIL, field_width * sizeof(env->terrain[0]));
+    } else if (row_in_inner == inner_height - house_size - 1) {
+      // One row of Water between house and grass 
+      memset(env->terrain + row_offset, TILE_WATER, inner_width * sizeof(env->terrain[0]));
+      // With three tiles of GRASS on the left 
+      memset(env->terrain + row_offset, TILE_GRASS, 3 * sizeof(env->terrain[0]));
     } else {
       // Top rows: all GRASS
       memset(env->terrain + row_offset, TILE_GRASS, inner_width * sizeof(env->terrain[0]));
@@ -550,12 +332,348 @@ void make_grid_from_scratch(PredPrey *env){
   save_terrain_to_file(env, "terrain.h");
 }
 
+void init_cenv(PredPrey *env) {
+  env->agents = (Agent *)calloc(env->num_agents, sizeof(Agent));
+  env->vision_window = 2 * env->vision + 1;
+  env->obs_size = (env->vision_window * env->vision_window) * MAX_CELL_OBS + 5;
+  // env->foods = allocate_foodlist(env->width * env->height);
+  env->agent_logs = (Log *)calloc(env->num_agents, sizeof(Log));
+  env->masks = (unsigned char *)calloc(env->num_agents, sizeof(unsigned char));
+  env->terrain = (unsigned char *)calloc(env->width * env->height, sizeof(unsigned char));
+  env->items = (unsigned char *)calloc(env->width * env->height, sizeof(unsigned char));
+  env->pids = (short *)calloc(env->width * env->height, sizeof(short));
+
+  // make_grid_from_scratch(env);
+  memcpy(env->terrain, terrain, env->width * env->height * sizeof(unsigned char));
+  init_biome_idx(env);
+
+  // Arbitrarly set max food to a proportion of available tiles
+  env->max_food = 0.9 * env->biome_idxs.dirt_count;
+  env->max_wood = 0.5 * env->biome_idxs.grass_count;
+}
+
+void allocate_cenv(PredPrey *env) {
+  // Called by C stuff
+  int obs_size = ((2 * env->vision + 1) * (2 * env->vision + 1)) * MAX_CELL_OBS + 5;
+  env->observations = (float *)calloc(env->num_agents * obs_size,
+                                              sizeof(float));
+  env->actions = (int *)calloc(env->num_agents, sizeof(unsigned int));
+  env->rewards = (float *)calloc(env->num_agents, sizeof(float));
+  env->terminals =
+      (unsigned char *)calloc(env->num_agents, sizeof(unsigned char));
+  env->truncations = (unsigned char*)calloc(env->num_agents, sizeof(unsigned char));
+  init_cenv(env);
+}
+
+void free_biome(PredPrey *env) {
+  free(env->biome_idxs.grass_idx);
+  free(env->biome_idxs.dirt_idx);
+  free(env->biome_idxs.house_idx);
+}
+
+void c_close(PredPrey *env) {
+  free(env->agents);
+  // free_foodlist(env->foods);
+  free(env->agent_logs);
+  free(env->terrain);
+  free(env->items);
+  free(env->pids);
+  free_biome(env);
+  env->client = NULL;
+}
+
+void free_CEnv(PredPrey *env) {
+  free(env->observations);
+  free(env->actions);
+  free(env->masks);
+  free(env->rewards);
+  free(env->terminals);
+  free(env->truncations);
+  c_close(env);
+}
+
+int flat_idx(PredPrey *env, int r, int c) { return r * env->width + c; }
+int hour_of_day(PredPrey *env) {
+  int tick_in_day = env->tick % TICK_PER_DAY;
+  return tick_in_day / TICK_PER_HOUR;
+}
+int day_of_month(PredPrey *env) {
+  int tick_in_month = env->tick % TICK_PER_MONTH;
+  return tick_in_month / TICK_PER_DAY;
+}
+int month_of_year(PredPrey *env) {
+  int tick_in_year = env->tick % TICK_PER_YEAR;
+  return tick_in_year / TICK_PER_MONTH;
+}
+
+void reward_agent(PredPrey *env, int agent_id, float reward) {
+  // Simple helper function which loggs as well
+  env->rewards[agent_id] += reward;
+  env->agent_logs[agent_id].episode_return += reward;
+}
+
+bool is_obstacle(PredPrey *env, int idx) {
+  int tile = env->terrain[idx];
+  if (tile == TILE_WATER) {
+    return true;
+  }
+
+  short entity_id = env->pids[idx];
+  if (entity_id != -1){
+    return true;
+  }
+  return false; 
+}
+
+void init_foods(PredPrey *env) {
+  // Fill dirt area with food
+  for (int i = 0; i < env->biome_idxs.dirt_count; i++) {
+    int grid_idx = env->biome_idxs.dirt_idx[i];
+    if (env->items[grid_idx] == EMPTY && 
+        rand() / (double)RAND_MAX < 0.2 &&
+        env->food_count < env->max_food
+    ) {
+      env->items[grid_idx] = ITEM_FOOD;
+      env->food_count += 1;
+    }
+  }
+}
+
+void init_woods(PredPrey *env) {
+  // Fill grass area with wood
+  for (int i = 0; i < env->biome_idxs.grass_count; i++) {
+    int grid_idx = env->biome_idxs.grass_idx[i];
+    if (env->items[grid_idx] == EMPTY && 
+        rand() / (double)RAND_MAX < 0.3 &&
+        env->wood_count < env->max_wood
+      ) { 
+      env->items[grid_idx] = ITEM_WOOD;
+      env->wood_count += 1;
+    }
+  }
+}
+
+void init_items(PredPrey *env) {
+  init_foods(env);
+  // Randomly place fireplace and chest in house area
+  bool allocated_fireplace = false;
+  while (!allocated_fireplace) {
+    int rand_idx = rand() % env->biome_idxs.house_count;
+    int grid_idx = env->biome_idxs.house_idx[rand_idx];
+    if (env->items[grid_idx] == EMPTY) {
+      env->items[grid_idx] = ITEM_FIREPLACE;
+      allocated_fireplace = true;
+    }
+  }
+  bool allocated_chest = false;
+  while (!allocated_chest) {
+    int rand_idx = rand() % env->biome_idxs.house_count;
+    int grid_idx = env->biome_idxs.house_idx[rand_idx];
+    if (env->items[grid_idx] == EMPTY) {
+      env->items[grid_idx] = ITEM_CHEST;
+      allocated_chest = true;
+    }
+  }
+  init_woods(env);
+}
+// void spawn_foods_organic(PredPrey *env) {
+//   // After each step, check existing foods and spawns new food in the
+//   // neighborhood Iterates over food_list for efficiency instead of the entire
+//   // grid.
+//   // Only do it if the number of foods is less than max_foods
+//   if (env->foods->size >= env->max_food) {
+//     return;
+//   }
+//   FoodList *foods = env->foods;
+//   int original_size = foods->size;
+//   for (int i = 0; i < original_size; i++) {
+//     int idx = foods->indexes[i];
+//     int offset = idx - env->width - 1; // Food spawn in 1 radius
+//     int r = offset / env->width;
+//     int c = offset % env->width;
+//     for (int ri = 0; ri < 3; ri++) {
+//       for (int ci = 0; ci < 3; ci++) {
+//         int neighboor_idx = flat_idx(env, (r + ri), (c + ci));
+//         if (env->terrain[neighboor_idx] != TILE_SOIL && env->items[neighboor_idx] != 0) {
+//           continue;
+//         }
+//         switch (env->items[idx]) {
+//         // %Chance spawning new food
+//         case ITEM_FOOD:
+//           if ((rand() / (double)RAND_MAX) < env->food_base_spawn_rate) {
+//             add_food(env, neighboor_idx, env->items[idx]);
+//           }
+//           break;
+//         }
+//       }
+//     }
+//   }
+
+//   // // Each turn there is random probability for a food to spawn at a random
+//   // // location To cope with resource depletion
+//   // int normalizer = (env->width * env->height) / 576;
+//   // if ((rand() / (double)RAND_MAX) <
+//   //     min((env->food_base_spawn_rate * 2 * normalizer), 1e-2)) {
+//   //   spawn_food_random(env, NORMAL_FOOD);
+//   // }
+// }
+
+bool spawn_food_random(PredPrey *env){
+  // Try x time to spawn food wihtin the DIRT area
+  if (env->food_count >= env->max_food) {
+    return false;
+  }
+  int attempts = 0;
+  while (attempts ++ < 100){
+    int rand_idx = rand() % env->biome_idxs.dirt_count;
+    int grid_idx = env->biome_idxs.dirt_idx[rand_idx];
+
+    if (env->items[grid_idx] == EMPTY) {
+      env->items[grid_idx] = ITEM_FOOD;
+      env->food_count++;
+      return true;
+    }
+  }
+  return false;
+}
+
+void regrow_food(PredPrey *env){
+  // Regrow food in all dirt tiles that do not have food already with some probability
+  
+  // Regrow only if we are in the first half of the year
+  if (month_of_year(env) >= MONTHS_PER_YEAR / 2){
+    return;
+  }
+
+  for (int i = 0; i < env->biome_idxs.dirt_count; i++) {
+    int grid_idx = env->biome_idxs.dirt_idx[i];
+    if (
+      env->items[grid_idx] == EMPTY && 
+      rand() / (double)RAND_MAX < FOOD_SPAWN_RATE &&
+      env->food_count < env->max_food
+    ) {
+      env->items[grid_idx] = ITEM_FOOD;
+      env->food_count += 1;
+    }
+  }
+}
+
+void regrow_wood(PredPrey *env){
+  // Wood regrow only in the second part of the year
+  if (month_of_year(env) < MONTHS_PER_YEAR / 2){
+    return;
+  }
+  // Regrow wood in all grass tiles that do not have wood already with some probability
+  for (int i = 0; i < env->biome_idxs.grass_count; i++) {
+    int grid_idx = env->biome_idxs.grass_idx[i];
+    if (env->items[grid_idx] == EMPTY && 
+        rand() / (double)RAND_MAX < WOOD_SPAWN_RATE &&
+        env->wood_count < env->max_wood
+      ) {
+      env->items[grid_idx] = ITEM_WOOD;
+      env->wood_count += 1;
+    }
+  }
+}
+void spawn_items(PredPrey *env) {
+  // Currently items are only spawning every step in their corresponding BIOME
+  regrow_food(env);
+  regrow_wood(env);
+  // if (rand() / (double)RAND_MAX < env->food_base_spawn_rate) {
+  //   spawn_food_random(env);
+  // }
+}
+
+void compute_observations(PredPrey *env) {
+  for (int i = 0; i < env->num_agents; i++) {
+    int obs_idx = i * env->obs_size;
+    Agent *agent = &env->agents[i];
+    if (agent->hp <= 0) {
+      for (int j = 0; j < env->obs_size; j++) {
+        env->observations[obs_idx++] = 0.0f;
+      }
+      continue;
+    }
+    // int obs_offset = (i * env->obs_size);
+    int r_offset = agent->r - env->vision;
+    int c_offset = agent->c - env->vision;
+    for (int r = 0; r < env->vision_window; r++) {
+      for (int c = 0; c < env->vision_window; c++) {
+        int grid_idx = flat_idx(env,r_offset + r, c_offset + c);
+        unsigned char item_idx = env->items[grid_idx];
+        short entity_id = env->pids[grid_idx];
+
+        // First obs is terrain
+        env->observations[obs_idx++] = (float)env->terrain[grid_idx];
+        // Second is item 
+        env->observations[obs_idx++] = (float)item_idx;
+        // Thirds is entity id 
+        env->observations[obs_idx++] = (float)entity_id;
+        float hp_norm = 0.0f;
+        float food_norm = 0.0f;
+        if (entity_id != -1) {
+            Agent *grid_agent = &env->agents[entity_id]; 
+            hp_norm = grid_agent->hp / (float)MAX_HP;
+            food_norm = grid_agent->food_amt / (float)MAX_INVENTORY_ITEM;
+        }
+
+        env->observations[obs_idx++] = hp_norm;
+        env->observations[obs_idx++] = food_norm;
+
+      } 
+    }
+    //Agent also get its direction
+    env->observations[obs_idx++] = agent->direction;
+    env->observations[obs_idx++] = (float)env->is_fireplace_lit;
+    env->observations[obs_idx++] = (float)env->fire_time_remaining/(float)MAX_FIRE_TIME;
+    env->observations[obs_idx++] = (float)env->chest_food_amt/(float)MAX_CHEST_CAPACITY;
+    env->observations[obs_idx++] = (float)agent->coldness/(float)MAX_COLDNESS;
+  }
+}
+
+void remove_agent(PredPrey *env, int agent_id) {
+  Agent *agent = &env->agents[agent_id];
+  if (agent->r < 0 || agent->c < 0) {
+    return;
+  }
+  int grid_idx = flat_idx(env, agent->r, agent->c);
+  env->pids[grid_idx] = -1;
+  agent->r = -1;
+  agent->c = -1;
+}
+
+void add_hp(PredPrey *env, int agent_id, float hp) {
+  Agent *agent = &env->agents[agent_id];
+  if (agent->hp == 0) {
+    return;
+  }
+  agent->hp += hp;
+  if (agent->hp > MAX_HP) {
+    agent->hp = MAX_HP;
+  } else if (agent->hp <= 0) {
+    agent->hp = 0;
+    int time_alive = env->tick - agent->start_tick;
+    float reward = (((float)time_alive-START_HP) / (float)MAX_TIMESTEPS) * env->reward_death_scale;
+    reward_agent(env, agent_id, reward);
+    env->terminals[agent->id] = 1;
+    add_agent_log(env, agent_id);    
+    remove_agent(env, agent_id);
+    env->last_agent_dead_tick = env->tick;
+  }
+}
+
+void remove_hp(PredPrey *env, int agent_id, float hp) {
+    add_hp(env, agent_id, -hp);
+}
+
 void spawn_agent(PredPrey *env, int agent_id){
   Agent *agent = &env->agents[agent_id];
   agent->id = agent_id;
   agent->hp = START_HP;
+  agent->coldness = 0;
   agent->start_tick = env->tick;
-  agent->held_food = 0;
+  agent->food_amt = 0;
+  agent->wood_amt = 0;
 
   // Spawn only in the house area
   int adr = 0;
@@ -619,7 +737,8 @@ void c_reset(PredPrey *env) {
   }
 
   env->food_count = 0;
-  init_foods(env);
+  env->wood_count = 0;
+  init_items(env);
 
   memset(env->observations, 0, env->num_agents * env->obs_size * sizeof(float));
   memset(env->terminals, 0, env->num_agents * sizeof(unsigned char));
@@ -628,119 +747,210 @@ void c_reset(PredPrey *env) {
   compute_observations(env);
 }
 
-void step_agent(PredPrey *env, int i) {
-  
-  Agent *agent = &env->agents[i];
+typedef void (*InteractFn)(PredPrey*, int);
 
-  reward_agent(env, i, env->timestep_reward);
-  float reward_hp = (agent->hp / (float)MAX_HP) * env->hp_reward_scale;
-  reward_agent(env, i, reward_hp);
-  float reward_food = (agent->held_food / (float)MAX_INVENTORY_ITEM) * env->held_food_reward_scale;
-
-  int action = env->actions[i];
-  agent->anim = ANIM_IDLE;
-
-  /////////////////////////////////
-  // Movement
-  ////////////////////////////////
-  int dr = 0;
-  int dc = 0;
-
-  switch (action) {
-  case UP:
-    dr = -1;
-    agent->direction = UP;
-    break;
-  case DOWN:
-    dr = 1;
-    agent->direction = DOWN;
-    break; 
-  case LEFT:
-    dc = -1;
-    agent->direction = LEFT;
-    break; 
-  case RIGHT:
-    dc = 1;
-    agent->direction = RIGHT;
-    break;
-  case NO_MOVE:
+void interact_nothing(PredPrey* env, int agent_id){
+  return;
+};
+void interact_food(PredPrey* env, int agent_id){
+  Agent* agent = &env->agents[agent_id];
+  int curr_grid_idx = flat_idx(env, agent->r, agent->c);
+  if (agent->food_amt >= MAX_INVENTORY_ITEM) {
     return;
   }
-  // Get next row and column
-  int next_r = agent->r + dr;
-  int next_c = agent->c + dc;
+  // Pick up food
+  agent->food_amt += 1;
+  env->items[curr_grid_idx] = EMPTY;
+  env->food_count -= 1;
+  env->agent_logs[agent_id].collects += 1;
+  agent->anim = ANIM_INTERACT;
+  reward_agent(env, agent_id, env->reward_collect);
+};
 
+void interact_wood(PredPrey* env, int agent_id){
+  Agent* agent = &env->agents[agent_id];
   int curr_grid_idx = flat_idx(env, agent->r, agent->c);
-  int next_grid_idx = flat_idx(env, next_r, next_c);
-  if (is_obstacle(env, next_grid_idx)) {
-    next_grid_idx = curr_grid_idx;
-    next_r = agent->r;
-    next_c = agent->c;
+  if (agent->wood_amt >= MAX_INVENTORY_ITEM) {
+    return;
   }
-  // update the grid tiles values
-  env->pids[curr_grid_idx] = -1;
-  env->pids[next_grid_idx] = agent->id;
-  agent->r = next_r;
-  agent->c = next_c;
+  // Pick up wood
+  agent->wood_amt += 1;
+  env->items[curr_grid_idx] = EMPTY;
+  env->wood_count -= 1;
+  env->agent_logs[agent_id].collects += 1;
+  agent->anim = ANIM_INTERACT;
+  reward_agent(env, agent_id, env->reward_collect);
+};
 
-
-  /////////////////////////////////
-  // Interaction / Eating
-  ////////////////////////////////
-  if (action == INTERACT) {
-    int facing_tile_idx = 0;
-    switch (agent->direction) {
-    case UP:
-      facing_tile_idx = flat_idx(env, agent->r - 1, agent->c);
-      break;
-    case DOWN:
-      facing_tile_idx = flat_idx(env, agent->r + 1, agent->c);
-      break;
-    case LEFT:
-      facing_tile_idx = flat_idx(env, agent->r, agent->c - 1);
-      break;
-    case RIGHT:
-      facing_tile_idx = flat_idx(env, agent->r, agent->c + 1);
-      break;
-    }
-
-    int facing_agent = env->pids[facing_tile_idx];
-    if (facing_agent != -1) {
-      Agent *other_agent = &env->agents[facing_agent];
-      // Steal food from other agent
-      if (other_agent->held_food > 0) {
-        agent->held_food = other_agent->held_food;
-        other_agent->held_food = 0;
-        env->agent_logs[i].steals += 1;
-        agent->anim = ANIM_INTERACT;
-        reward_agent(env, i, env->reward_steal);
-      }
-    } 
-
-    if (env->items[curr_grid_idx] == ITEM_FOOD) {
-      if (agent->held_food >= MAX_INVENTORY_ITEM) {
-        return;
-      }
-      // Pick up food
-      agent->held_food += 1;
-      env->items[curr_grid_idx] = EMPTY;
-      env->food_count -= 1;
-      env->agent_logs[i].collects += 1;
-      agent->anim = ANIM_INTERACT;
-      reward_agent(env, i, env->reward_collect);
-    }
-  }
-  
-  if (action == EAT) {
-    if (agent->held_food <= 0) {
+void interact_chest(PredPrey* env, int agent_id){
+  Agent* agent = &env->agents[agent_id];
+  // If agent has food, deposit all in chest
+  if (agent->food_amt > 0) {
+    env->chest_food_amt = fmin(
+      env->chest_food_amt + agent->food_amt, 
+      MAX_CHEST_CAPACITY
+    );
+    agent->food_amt = 0;
+    reward_agent(env, agent_id, env->reward_store_chest);
+  } else {
+    // If agent has no food, withdraw one from chest 
+    if (env->chest_food_amt <= 0) {
       return;
     }
-    agent->held_food -= 1;
-    add_hp(env, i, HP_REWARD_FOOD);
-    reward_agent(env, i, env->reward_eat);
-    agent->anim = ANIM_EAT;
+    agent->food_amt += 1;
+    env->chest_food_amt -= 1;
   }
+  agent->anim = ANIM_INTERACT;
   return;
+};
+
+int facing_delta_row[4] = { 1, -1, 0, 0 };
+int facing_delta_col[4] = { 0, 0, 1, -1 };
+void interact_agent(PredPrey* env, int agent_id){
+  // Remove stealing ability for now
+  return;
+  // Agent* agent = &env->agents[agent_id];
+  // int dr = facing_delta_row[agent->direction];
+  // int dc = facing_delta_col[agent->direction];
+  // int facing_tile_idx = flat_idx(env, agent->r + dr, agent->c + dc);
+  
+  // int facing_agent = env->pids[facing_tile_idx];
+  // if (facing_agent != -1) {
+  //   Agent *other_agent = &env->agents[facing_agent];
+  //   // Steal food from other agent
+  //   if (other_agent->food_amt > 0) {
+  //     agent->food_amt += 1;
+  //     other_agent->food_amt -= 1;
+  //     env->agent_logs[agent_id].steals += 1;
+  //     agent->anim = ANIM_INTERACT;
+  //     reward_agent(env, agent_id, env->reward_steal);
+  //   }
+  // } 
+
+};
+
+void interact_fireplace(PredPrey* env, int agent_id){
+  Agent* agent = &env->agents[agent_id];
+  // If agent has wood, light the fireplace
+  if (agent->wood_amt <= 0) {
+    return;
+  }
+  agent->wood_amt -= 1;
+  env->is_fireplace_lit = true;
+  env->fire_time_remaining += MAX_FIRE_TIME;
+  agent->anim = ANIM_INTERACT;
+  reward_agent(env, agent_id, env->reward_fireplace_lit);
+};
+
+InteractFn interaction_fn[] = {
+    [EMPTY] = interact_nothing,
+    [ITEM_FOOD] = interact_food,
+    [ITEM_WOOD] = interact_wood,
+    [ITEM_CHEST] = interact_chest,
+    [ITEM_FIREPLACE] = interact_fireplace,
+};
+
+void handle_eat(PredPrey* env, int agent_id){
+  Agent* agent = &env->agents[agent_id];
+  if (agent->food_amt <= 0){
+    return;
+  }
+  agent->food_amt -= 1;
+  add_hp(env, agent_id, HP_REWARD_FOOD);
+  agent->anim = ANIM_EAT;
+};
+
+void update_coldness(PredPrey* env, int agent_id){
+  Agent* agent = &env->agents[agent_id];
+  int pos_idx = flat_idx(env, agent->r, agent->c);
+  bool protected = (env->terrain[pos_idx] == TILE_FLOOR_WOOD && env->is_fireplace_lit);
+
+  if (!protected){
+    agent->coldness++;
+  }
+
+  if (agent->coldness >= MAX_COLDNESS){
+    remove_hp(env, agent->id, HP_LOSS_COLD);
+    return;
+  }
+
+  if (protected){
+    agent->coldness = fmax(0, agent->coldness - COLDNESS_LOSS_PER_HOUR);
+  }
+};
+
+void move_agent(PredPrey* env, Agent* agent, int nr, int nc){
+  int curr_idx = flat_idx(env, agent->r, agent->c);
+  int new_idx = flat_idx(env, nr, nc);
+
+  env->pids[curr_idx] = -1;
+  env->pids[new_idx] = agent->id;
+
+  agent->r = nr;
+  agent->c = nc;
+};
+
+bool is_valid_move(PredPrey* env, int nr, int nc){
+  if (nr < 0 || nr >= env->height || nc < 0 || nc >= env->width){
+    return false;
+  }
+  int new_idx = flat_idx(env, nr, nc);
+  if (is_obstacle(env, new_idx)){
+    return false;
+  }
+  return true;
+}
+
+int delta_row[7] = { 1, -1, 0, 0, 0, 0, 0 };
+int delta_col[7] = { 0, 0, 1, -1, 0, 0, 0 };
+void update_movement(PredPrey* env, int agent_id){
+  Agent* agent = &env->agents[agent_id];
+  int action = env->actions[agent_id];
+
+  int dr = delta_row[action];
+  int dc = delta_col[action];
+
+  int nr = agent->r + dr;
+  int nc = agent->c + dc;
+
+  if (dr == 0 && dc == 0){
+    return;
+  }
+
+  agent->direction = action;
+
+  if (!is_valid_move(env, nr, nc))
+      return;
+
+  move_agent(env, agent, nr, nc);
+}
+
+void apply_base_rewards(PredPrey* env, int agent_id){
+  Agent* agent = &env->agents[agent_id];
+  reward_agent(env, agent_id, env->timestep_reward);
+  float reward_hp = (agent->hp / (float)MAX_HP) * env->hp_reward_scale;
+  reward_agent(env, agent_id, reward_hp);
+  float reward_food = (agent->food_amt / (float)MAX_INVENTORY_ITEM) * env->held_food_reward_scale;
+  reward_agent(env, agent_id, reward_food);
+}
+
+void step_agent(PredPrey *env, int i) {
+  Agent *a = &env->agents[i];
+  a->anim = ANIM_IDLE;
+
+  apply_base_rewards(env, i);
+  update_movement(env, i);
+
+  if (env->actions[i] == INTERACT){
+    int tile_idx = flat_idx(env, a->r, a->c);
+    interaction_fn[env->items[tile_idx]](env, i);
+  }
+
+  if (env->actions[i] == EAT){
+    handle_eat(env, i);
+  }
+
+  update_coldness(env, i);
 }
 
 void c_step(PredPrey *env) {
@@ -749,12 +959,23 @@ void c_step(PredPrey *env) {
   memset(env->rewards, 0, env->num_agents * sizeof(float));
   memset(env->terminals, 0, env->num_agents * sizeof(unsigned char));
 
+  if (env->is_fireplace_lit) {
+    env->fire_time_remaining -= 1;
+    if (env->fire_time_remaining <= 0) {
+      env->is_fireplace_lit = false;
+    }
+  }
   for (int i = 0; i < env->num_agents; i++) {
     step_agent(env, i);
-    remove_hp(env, i, HP_LOSS_PER_STEP); 
+
+    if (env->tick % TICK_PER_HOUR == 0) {
+      // Hourly HP decay
+      remove_hp(env, i, HP_LOSS_PER_HOUR);
+    }
     
     // If agent survived long enough, reward and reset agent. 
     if ((env->tick - env->agents[i].start_tick) >= MAX_TIMESTEPS && env->agents[i].hp > 0) {
+      remove_agent(env, i);
       env->terminals[i] = 1;
       reward_agent(env, i, env->reward_death_scale);
       add_agent_log(env, i);
@@ -772,7 +993,99 @@ void c_step(PredPrey *env) {
   spawn_items(env);
   compute_observations(env);
 }
-
+//////////////////////////////////////////////////////////////////
+// Sprites & Animations
+//////////////////////////////////////////////////////////////////
+typedef struct SpriteInfo SpriteInfo;
+struct SpriteInfo {
+  int src_x, src_y; // top-left position in sprite sheet
+  int width, height; // dimensions of the sprite
+  int offset_x, offset_y; // offset to add to the env position when rendering
+};
+SpriteInfo SPRITES_TILES[4] = {
+    (SpriteInfo){ // TILE_SOIL
+        .src_x = 0,
+        .src_y = 0,
+        .width = SPRITE_SIZE,
+        .height = SPRITE_SIZE,
+        .offset_x = 0,
+        .offset_y = 0,
+    },
+    (SpriteInfo){ // TILE_FLOOR_WOOD
+        .src_x = 0,
+        .src_y = SPRITE_SIZE,
+        .width = SPRITE_SIZE,
+        .height = SPRITE_SIZE,
+        .offset_x = 0,
+        .offset_y = 0,
+    },
+    (SpriteInfo){ // TILE_WATER
+        .src_x = 0,
+        .src_y = 2 * SPRITE_SIZE,
+        .width = SPRITE_SIZE,
+        .height = SPRITE_SIZE,
+        .offset_x = 0,
+        .offset_y = 0,
+    },
+    (SpriteInfo){ // TILE_GRASS
+        .src_x = 0,
+        .src_y = 3 * SPRITE_SIZE,
+        .width = SPRITE_SIZE,
+        .height = SPRITE_SIZE,
+        .offset_x = 0,
+        .offset_y = 0,
+    },
+};
+SpriteInfo SPRITE_ITEMS[6] = {
+    (SpriteInfo){ // EMPTY
+        .src_x = 0,
+        .src_y = 0,
+        .width = 0,
+        .height = 0,
+        .offset_x = 0,
+        .offset_y = 0,
+    },
+    (SpriteInfo){ // ITEM_WOOD
+        .src_x = 0,
+        .src_y = SPRITE_SIZE,
+        .width = SPRITE_SIZE,
+        .height = SPRITE_SIZE,
+        .offset_x = 0,
+        .offset_y = 0,
+    },
+    (SpriteInfo){ // ITEM_FOOD
+        .src_x = 0,
+        .src_y = 2 * SPRITE_SIZE,
+        .width = SPRITE_SIZE,
+        .height = SPRITE_SIZE,
+        .offset_x = 0,
+        .offset_y = 0,
+    },
+    (SpriteInfo){ // ITEM_CHEST
+        .src_x = 0,
+        .src_y = 3 * SPRITE_SIZE,
+        .width = SPRITE_SIZE,
+        .height = SPRITE_SIZE,
+        .offset_x = 0,
+        .offset_y = 0,
+    },
+    (SpriteInfo){ // ITEM_FIREPLACE_LIT
+        .src_x = 0,
+        .src_y = 4 * SPRITE_SIZE,
+        .width = 2 * SPRITE_SIZE,
+        .height = 3 * SPRITE_SIZE,
+        .offset_x = - (2 * SPRITE_SIZE) / 2 + 32,
+        .offset_y = - 2 * SPRITE_SIZE,
+    },
+    (SpriteInfo){ // ITEM_FIREPLACE
+        .src_x = 0,
+        .src_y = 7 * SPRITE_SIZE,
+        .width = 2 * SPRITE_SIZE,
+        .height = 3 * SPRITE_SIZE,
+        .offset_x = - (2 * SPRITE_SIZE) / 2 + 32,
+        .offset_y = - 2 * SPRITE_SIZE,
+    },
+};
 // Simplified animations to just be poses (1 frame only)
 typedef struct Animation Animation;
 struct Animation {
@@ -812,7 +1125,7 @@ Renderer *init_renderer(int width, int height) {
   renderer->width = width;
   renderer->height = height;
 
-  InitWindow(width * TILE_SIZE, height * TILE_SIZE, "Predator Prey");
+  InitWindow(width * TILE_SIZE_ENV, height * TILE_SIZE_ENV, "Predator Prey");
   SetTargetFPS(10);
 
   for (int i = 0; i < 10; i++) {
@@ -822,27 +1135,63 @@ Renderer *init_renderer(int width, int height) {
     renderer->agents[3][i] = LoadTexture(TextFormat("resources/nmmo3/earth_%d.png", i));
     renderer->agents[4][i] = LoadTexture(TextFormat("resources/nmmo3/air_%d.png", i));
   }
-  renderer->tiles = LoadTexture("resources/nmmo3/merged_sheet.png");
-  renderer->items = LoadTexture("resources/nmmo3/items_condensed.png");
+  renderer->tiles = LoadTexture("resources/harvest/tiles.png");
+  renderer->items = LoadTexture("resources/harvest/items.png");
   renderer->font = LoadFont("resources/nmmo3/ManaSeedBody.ttf");
 
   return renderer;
 }
 
 void close_renderer(Renderer *renderer) {
+  UnloadTexture(renderer->tiles);
+  UnloadTexture(renderer->items);
+  for (int i = 0; i < 5; i++) {
+    for (int j = 0; j <10; j++) {
+      UnloadTexture(renderer->agents[i][j]);
+    }
+  }
+  UnloadFont(renderer->font);
   CloseWindow();
   free(renderer);
 }
 
    
-void draw_health_bar(int bar_x, int bar_y, int health, int max_health) {
+void draw_ui_bar(int bar_x, int bar_y, int health, int max_health, Color bar_color) {
     DrawRectangle(bar_x, bar_y, HEALTH_BAR_WIDTH,
         HEALTH_BAR_HEIGHT, RED);
     DrawRectangle(bar_x, bar_y,
         HEALTH_BAR_WIDTH * health / max_health,
-        HEALTH_BAR_HEIGHT, GREEN);
+        HEALTH_BAR_HEIGHT, bar_color);
     DrawRectangleLines(bar_x, bar_y, HEALTH_BAR_WIDTH,
         HEALTH_BAR_HEIGHT, BLACK);
+}
+
+void draw_time_info(PredPrey *env, Renderer *renderer) {
+    int hour = hour_of_day(env);
+    int day = day_of_month(env);
+    int month = month_of_year(env);
+
+    char time_text[64];
+    snprintf(time_text, sizeof(time_text), "Time: %02d:00 Day: %02d Month: %02d", hour, day, month);
+
+    DrawTextEx(renderer->font, time_text, (Vector2){10, 10}, 50, 1, BLACK);
+}
+
+void draw_chest_info(PredPrey *env, Renderer *renderer) {
+    char chest_text[64];
+    snprintf(chest_text, sizeof(chest_text), "Chest Food: %d / %d", env->chest_food_amt, MAX_CHEST_CAPACITY);
+
+    DrawTextEx(renderer->font, chest_text, (Vector2){10, 70}, 30, 1, BLACK);
+}
+void draw_fireplace_info(PredPrey *env, Renderer *renderer) {
+    char fireplace_text[64];
+    if (env->is_fireplace_lit) {
+        snprintf(fireplace_text, sizeof(fireplace_text), "Fireplace is lit! Time remaining: %d", env->fire_time_remaining);
+    } else {
+        snprintf(fireplace_text, sizeof(fireplace_text), "Fireplace is not lit.");
+    }
+
+    DrawTextEx(renderer->font, fireplace_text, (Vector2){10, 100}, 30, 1, BLACK);
 }
 
 void c_render(PredPrey *env) {
@@ -858,66 +1207,96 @@ void c_render(PredPrey *env) {
   BeginDrawing();
   ClearBackground(BLANK);
 
+  // Draw terrain
   for (int r = 0; r < env->height; r++) {
     for (int c = 0; c < env->width; c++) {
       int adr = flat_idx(env, r, c);
 
       int terrain_type = env->terrain[adr];
-      int item_type = env->items[adr];
-      int entity_id = env->pids[adr];
-
+      SpriteInfo terrain_info = SPRITES_TILES[terrain_type];
       Vector2 pos = {
-          .x = c * TILE_SIZE,
-          .y = r * TILE_SIZE,
+          .x = c * TILE_SIZE_ENV + terrain_info.offset_x,
+          .y = r * TILE_SIZE_ENV + terrain_info.offset_y,
       };
 
-      // Drawing terrain
       Rectangle source_rect = {
-        .x = 0,
-        .y = terrain_type * TILE_SIZE,
-        .width = TILE_SIZE,
-        .height = TILE_SIZE
+        .x = terrain_info.src_x,
+        .y = terrain_info.src_y,
+        .width = terrain_info.width,
+        .height = terrain_info.height
       };
       DrawTextureRec(renderer->tiles, source_rect, pos, WHITE);
+    }
+  }
 
-      // Drawing items
-      if (item_type != 0) {
+  // Draw items
+  for (int r = 0; r < env->height; r++) {
+    for (int c = 0; c < env->width; c++) {
+      int adr = flat_idx(env, r, c);
+      int item_type = env->items[adr];
+
+      // TODO: change data structure to avoid this ugly
+      if (item_type == ITEM_FIREPLACE && env->is_fireplace_lit) {
+        item_type = ITEM_FIREPLACE_LIT;
+      }
+      
+      SpriteInfo item_info = SPRITE_ITEMS[item_type];
+      Vector2 pos = {
+          .x = c * TILE_SIZE_ENV + item_info.offset_x,
+          .y = r * TILE_SIZE_ENV + item_info.offset_y,
+      };
+
+      if (item_type != EMPTY) {
         Rectangle source_rect = {
-          .x = 4 * TILE_SIZE,
-          .y = item_type * TILE_SIZE,
-          .width = TILE_SIZE,
-          .height = TILE_SIZE
+          .x = item_info.src_x,
+          .y = item_info.src_y,
+          .width = item_info.width,
+          .height = item_info.height
         };
         DrawTextureRec(renderer->items, source_rect, pos, WHITE);
       }
-      
+    }
+  }
+
+  // Draw entities
+  for (int r = 0; r < env->height; r++) {
+    for (int c = 0; c < env->width; c++) {
+      int adr = flat_idx(env, r, c);
+      int entity_id = env->pids[adr];
+
+      Vector2 pos = {
+          .x = c * TILE_SIZE_ENV,
+          .y = r * TILE_SIZE_ENV,
+      };
       if (entity_id != -1) {
         Agent *agent = &env->agents[entity_id];
         Animation animation = ANIMATIONS[agent->anim];
-        int starting_sprite_y = (env->agents[entity_id].direction) * SPRITE_SIZE;
-        int x_pos = (c - 0.5f)*TILE_SIZE;
-        int y_pos = (r - 0.5f)*TILE_SIZE;
+        int starting_sprite_y = (env->agents[entity_id].direction) * SPRITE_SIZE_ENTITY;
+        int x_pos = (c - 0.5f)*TILE_SIZE_ENV;
+        int y_pos = (r - 0.5f)*TILE_SIZE_ENV;
         Vector2 pos = {
             .x = x_pos,
             .y = y_pos,
         };        
         Rectangle source_rect = {
-          .x = animation.x * SPRITE_SIZE,
+          .x = animation.x * SPRITE_SIZE_ENTITY,
           .y = starting_sprite_y,
-          .width = SPRITE_SIZE,
-          .height = SPRITE_SIZE
+          .width = SPRITE_SIZE_ENTITY,
+          .height = SPRITE_SIZE_ENTITY
         };
         DrawTextureRec(renderer->agents[entity_id%5][entity_id%10], source_rect, pos, WHITE);
 
         // Draw HP bar 
-        int bar_x = x_pos + TILE_SIZE - HEALTH_BAR_WIDTH/2;
+        int bar_x = x_pos + TILE_SIZE_ENV - HEALTH_BAR_WIDTH/2;
         int bar_y = y_pos;
-        draw_health_bar(bar_x, bar_y, agent->hp, MAX_HP);
+        draw_ui_bar(bar_x, bar_y, agent->hp, MAX_HP, GREEN);
+        // Draw Coldness bar
+        draw_ui_bar(bar_x, bar_y + 10, MAX_COLDNESS - agent->coldness, MAX_COLDNESS, BLUE);
 
         // Food Number in inventory
         char* txt;
         Color color;
-        txt = (char*) TextFormat("%d: F: %d", entity_id, agent->held_food);
+        txt = (char*) TextFormat("%d: F: %d | W: %d", entity_id, agent->food_amt, agent->wood_amt);
         color = GREEN;
 
         Vector2 text_pos = {.x = bar_x, .y = bar_y - 20};
@@ -926,5 +1305,8 @@ void c_render(PredPrey *env) {
       }
     }
   }
+  draw_time_info(env, renderer);
+  draw_chest_info(env, renderer);
+  draw_fireplace_info(env, renderer);
   EndDrawing();
 }

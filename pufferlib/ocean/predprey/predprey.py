@@ -11,19 +11,20 @@ class PredPrey(pufferlib.PufferEnv):
                 height=32, 
                 num_agents=8,  
                 vision=3, 
-                food_base_spawn_rate=1e-3,
                 reward_death_scale = 1.0,
                 reward_eat = 0,
                 reward_collect = 0,
                 timestep_reward = 0,
-                reward_steal = 0,
                 hp_reward_scale = 0,
-                held_food_reward_scale = 0,                report_interval=1,
+                held_food_reward_scale = 0,
+                reward_fireplace_lit = 0,
+                reward_store_chest = 0,                
+                report_interval=1,
                 render_mode=None, 
                 buf=None,
                 seed=0,
             ):
-        obs_shape = ((2*vision+1)*(2*vision+1)*5)+1
+        obs_shape = ((2*vision+1)*(2*vision+1)*5)+5
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=255, shape=(obs_shape,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Discrete(7)
         self.render_mode = render_mode
@@ -51,10 +52,10 @@ class PredPrey(pufferlib.PufferEnv):
                 reward_eat = reward_eat,
                 reward_collect = reward_collect,
                 timestep_reward = timestep_reward,
-                reward_steal = reward_steal,
                 hp_reward_scale = hp_reward_scale,
                 held_food_reward_scale = held_food_reward_scale,
-                food_base_spawn_rate=food_base_spawn_rate,
+                reward_fireplace_lit = reward_fireplace_lit,
+                reward_store_chest = reward_store_chest,
             )
             c_envs.append(env_id)
 
