@@ -1285,9 +1285,10 @@ def process_config(config, parser=None):
     return args
 
 def main():
-    err = 'Usage: puffer [train, eval, sweep, autotune, profile, export] [env_name] [optional args]. --help for more info'
+    help_message = 'Usage: puffer [train, eval, sweep, autotune, profile, export] [env_name] [optional args].\n Use puffer <subcomand> --help for more info on a particular command'
     if len(sys.argv) < 3:
-        raise pufferlib.APIUsageError(err)
+        print(help_message)
+        return
 
     mode = sys.argv.pop(1)
     env_name = sys.argv.pop(1)
@@ -1304,7 +1305,8 @@ def main():
     elif mode == 'export':
         export(env_name=env_name)
     else:
-        raise pufferlib.APIUsageError(err)
+        print(help_message)
+        return
 
 if __name__ == '__main__':
     main()

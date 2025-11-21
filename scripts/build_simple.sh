@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -i
 
 # Usage: ./build.sh your_file.c [debug|release]
 

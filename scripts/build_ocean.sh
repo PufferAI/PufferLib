@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -i
 
 # Usage: ./build_env.sh pong [local|fast|web]
 
