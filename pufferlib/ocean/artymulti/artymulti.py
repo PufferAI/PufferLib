@@ -13,7 +13,7 @@ class ArtyMulti(pufferlib.PufferEnv):
                  turn_penalty=-0.1, miss_penalty=-0.03, render=1, out_bounds_penalty=-0.1,
                  log_interval=128,
                  seed=7,
-                 buf=None, debug=0):
+                 buf=None):
         obs_size = 10
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         self.render_mode = render_mode
@@ -33,8 +33,7 @@ class ArtyMulti(pufferlib.PufferEnv):
             min_aim_angle=min_aim_angle, max_aim_angle=max_aim_angle, max_reward_dist=max_reward_dist,
             adj=adj, dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, max_dist0=max_dist0,
             turn_penalty=turn_penalty, miss_penalty=miss_penalty, render=render,
-            out_bounds_penalty=out_bounds_penalty,
-            debug=debug
+            out_bounds_penalty=out_bounds_penalty
         )
 
     def reset(self, seed=0):

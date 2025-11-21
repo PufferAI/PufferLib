@@ -46,7 +46,6 @@ typedef struct Log {
 
 typedef struct Client {
     int render;
-    int debug;
 } Client;
 
 typedef struct Gun {
@@ -99,7 +98,6 @@ typedef struct ArtyMulti {
     int frameskip;
     int render;
 
-    int debug;
     int runs;
 } ArtyMulti;
 

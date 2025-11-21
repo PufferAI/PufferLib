@@ -21,7 +21,6 @@ void free_allocated(ArtyMulti* env) {
 
 void demo() {
     ArtyMulti env = {
-        .debug = 0,
         .adj = 0.008340523121815914,
         .dist_fade = 0.10813009001338028,
         .frameskip = 1,
