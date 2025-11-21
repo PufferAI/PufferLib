@@ -25,7 +25,7 @@ All of our documentation is hosted at [puffer.ai](https://puffer.ai "PufferLib D
 ## Installing required software
 This project makes heavy use of C to speed up operations in Python so packages for building native exensions are required. 
 ```bash
-sudo apt update && sudo apt install -y git curl software-properties-common build-essential python3-dev
+sudo apt update && sudo apt install -y git curl wget nano software-properties-common build-essential python3-dev
 ```
 
 Make sure that you have all of your Nvidia drivers configured correctly so that your GPU can be used for accelerating the RL training. One important thing is having NVCC which is a cuda compiler, installed to enable better performance by compiling some PufferLib speciic kernels but this is optional. You can check if nvcc is installed by running.
@@ -35,7 +35,7 @@ nvcc -V
 
 If nvcc is missing or you are missing some nvidia drivers you can install them using the command below. Here are [alternative installtion instructions](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/) for the Cuda Toolkit.
 ```bash
-sudo apt install nvidia-cuda-toolkit
+sudo apt -y install nvidia-cuda-toolkit
 ```
 
 UV is the prefferred package manager for this project but you are free to just use pip and suffer. [alternative installtion instructions](https://docs.astral.sh/uv/getting-started/installation/)
@@ -61,10 +61,15 @@ source ~/.bashrc
 Now that you have all of the required software to start experimenting with PufferLib
 
 ```bash
-git clone git@github.com:PufferAI/PufferLib.git && cd PufferLib
+git clone https://github.com/PufferAI/PufferLib.git && cd PufferLib
 ```
 
-Install the local packages. This also installs in this folder the appropriate version of [Raylib](https://www.raylib.com/) which is a minimalistic library for building video games in C and [Box2D](https://box2d.org/) which is physics engine for 2D games.
+Now you can create a virtual environment and activate it.
+```bash
+uv venv && source .venv/bin/activate
+```
+
+Install the local packages. This also installs in this folder the appropriate version of [Raylib](https://www.raylib.com/) which is a minimalistic library for building video games in C and [Box2D](https://box2d.org/) which is physics engine for 2D games. This can take a while because the cuda dependencies are large (over 1 Gb) and compilation of the custom kernels if enables also takes some time.
 ```bash
 uv pip install -e . 
 ```
