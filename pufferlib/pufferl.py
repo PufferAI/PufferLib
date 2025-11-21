@@ -53,7 +53,7 @@ from torch.utils.cpp_extension import (
 # Assume advantage kernel has been built if torch has been compiled with CUDA or HIP support
 # and can find CUDA or HIP in the system
 ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
-HELP_MESSAGE = 'Usage: puffer [train, eval, sweep, autotune, profile, export] [env_name] [optional args].'
+HELP_MESSAGE = 'Usage: puffer [train, eval, sweep, autotune, profile, export] [env_name] [optional args].\nYou can access help for specific command and environment using: puffer [train, eval, sweep, autotune, profile, export] [env_name] --help e.g. puffer train puffer_target --help'
 
 class PuffeRL:
     def __init__(self, config, vecenv, policy, logger=None):
