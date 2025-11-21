@@ -69,12 +69,12 @@ Now you can create a virtual environment and activate it.
 uv venv && source .venv/bin/activate
 ```
 
-Install the local packages. This also installs in this folder the appropriate version of [Raylib](https://www.raylib.com/) which is a minimalistic library for building video games in C and [Box2D](https://box2d.org/) which is physics engine for 2D games. This can take a while because the cuda dependencies are large (over 1 Gb) and compilation of the custom kernels if enables also takes some time.
+Install the local packages. This also installs in this folder the appropriate version of [Raylib](https://www.raylib.com/) which is a minimalistic library for building video games in C and [Box2D](https://box2d.org/) which is physics engine for 2D games. This can take a while because the cuda dependencies are large (over 1 Gb) and compilation of the custom kernels if enabled also takes some time.
 ```bash
 uv pip install -e . 
 ```
 
-Now you can compile the first RL environemnt. The build_ocean.sh script is used for building Ocean RL environements which is a PufferLib native framework. "target" is the name of the environemnt. You can view all of the environment files as well as other Ocean environments at pufferlib/ocean/target. The environment is configured by a .ini config file which specifies the name, RL policy and training configuration, the one for the target env is located at config/ocean/target.ini. "local" is the type of the build. Local builds contain debug symbols, use an address sanitizer and allow you to verify that the environment works as you intend, a production version can be compiled using the "fast" build. You can also build a web version of the env which will generate an html page. 
+Now you can compile the first RL environemnt. The build_ocean.sh script is used for building Ocean RL environements which is a PufferLib native framework. "target" is the name of the environemnt. You can view all of the environment files as well as other Ocean environments at pufferlib/ocean/target. The environment is configured by a .ini config file which specifies the name, RL policy and training configuration, the one for the target env is located at config/ocean/target.ini. "local" is the type of the build. Local builds contain debug symbols, use an address sanitizer and allow you to verify that the environment works as you intend, a production version can be compiled using the "fast" build. You can also build a "web" version of the env which will generate an html page with WebAssembly.
 
 
 ```bash
