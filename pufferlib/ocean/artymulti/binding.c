@@ -29,6 +29,7 @@ static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "episode_length", log->episode_length);
     assign_to_dict(dict, "max_reward_distn", log->max_reward_distn);
     assign_to_dict(dict, "acc1000", log->acc1000);
+    assign_to_dict(dict, "perf", log->perf);
     //assign_to_dict(dict, "sigman", log->sigman);
     return 0;
 }

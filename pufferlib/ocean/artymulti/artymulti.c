@@ -4,7 +4,7 @@
 
 void allocate(ArtyMulti* env) {
     init(env);
-    int obs_size = 10;
+    int obs_size = 11;
     env->observations = (float*)calloc(obs_size, sizeof(float));
     env->actions = (int*)calloc(2, sizeof(int));
     env->rewards = (float*)calloc(1, sizeof(float));
@@ -36,9 +36,9 @@ void demo() {
 
     env.client = make_client(&env);
 
-    Weights* weights = load_weights("resources/artymulti/puffer_artymulti_weights.bin", 134923);
+    Weights* weights = load_weights("resources/artymulti/puffer_artymulti_weights.bin", 135051);
     int logit_sizes[2] = {5, 5};
-    int obs_size = 10;
+    int obs_size = 11;
     LinearLSTM* net = make_linearlstm(weights, 1, obs_size, logit_sizes, 2);
 
     c_reset(&env);

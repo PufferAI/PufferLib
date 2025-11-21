@@ -31,6 +31,7 @@
 #define TIMESTEP 0.25f
 
 typedef struct Log {
+    float perf;
     float episode_return;
     float score;
     float scoreL;
@@ -65,6 +66,7 @@ typedef struct Gun {
     float dist;
     float score;
     int fired;
+    float hit;
     float turn_penaltyn;
 } Gun;
 
@@ -94,6 +96,7 @@ typedef struct ArtyMulti {
     float turn_penalty_delay;
     float miss_penalty;
     float out_bounds_penalty;
+    float vx;
 
     int frameskip;
     int render;
@@ -105,6 +108,7 @@ void c_close(ArtyMulti* env) {
 }
 
 void add_log(ArtyMulti* env) {
+    env->log.perf += 0.5f * (env->gun[0].hit + env->gun[1].hit);
     env->log.episode_length += env->tick;
     env->log.episode_return += env->score;
     env->log.score += env->score;
@@ -130,6 +134,7 @@ void compute_observations(ArtyMulti* env) {
 
     env->observations[8] = env->score;
     env->observations[9] = env->tick * 0.01;
+    env->observations[10] = env->vx * 0.2f;
 }
 
 void get_random_start(ArtyMulti* env) {
@@ -137,7 +142,7 @@ void get_random_start(ArtyMulti* env) {
     env->gun[0].ty = rand() % HEIGHT;
     if (env->gun[0].ty < MINY1) env->gun[0].ty = MINY1;
     if (env->gun[0].ty > MAXY1) env->gun[0].ty = MAXY1;
-    env->gun[0].angle = 0.5f;
+    env->gun[0].angle = 0.7f;
     env->gun[0].powder = 0.95f;
     env->gun[0].x0 = 30.0f;
     env->gun[0].y0 = 30.0f;
@@ -150,6 +155,8 @@ void get_random_start(ArtyMulti* env) {
     env->gun[1].powder = 0.75f;
     env->gun[1].x0 = WIDTH - 30.0f;
     env->gun[1].y0 = 30.0f;
+
+    env->vx = 5 - rand() % 3;
 }
 
 void reset_round(ArtyMulti* env) {
@@ -166,6 +173,7 @@ void reset_round(ArtyMulti* env) {
         env->gun[i].projectile_time = 0.0f;
         env->gun[i].score = 0;
         env->gun[i].turn_penaltyn = 0;
+        env->gun[i].hit = 0.0f;
     }
 
     env->max_reward_distn = env->max_dist0 - (int)(env->runs * env->dist_fade);
@@ -196,9 +204,14 @@ float calculate_parabola_closest_distance(ArtyMulti* env, int gun_idx) {
     Gun* gun = &env->gun[gun_idx];
     gun->v0 = gun->powder * VCOEFF;
 
-    float angle_multiplier = (gun_idx == 0) ? 1.0f : -1.0f;
-    gun->vx0 = gun->v0 * cosf(gun->angle) * angle_multiplier;
+    float agent_multiplier = (gun_idx == 0) ? 1.0f : -1.0f;
+    gun->vx0 = gun->v0 * cosf(gun->angle) * agent_multiplier;
     gun->vy0 = gun->v0 * sinf(gun->angle);
+
+    //printf("env->vx %.3f\n",env->vx);
+    //printf("gun->tx %.3f\n",gun->tx);
+    //gun->tx = gun->tx - agent_multiplier * env->vx;
+    //printf("gun->tx %.3f\n",gun->tx);
 
     float tx = gun->tx;
     float ty = gun->ty;
@@ -212,6 +225,8 @@ float calculate_parabola_closest_distance(ArtyMulti* env, int gun_idx) {
     for (float t = 0; t < MAX_PROJECTILE_TIME; t += TIMESTEP) {
         float x = gun->x0 + gun->vx0 * t;
         float y = gun->y0 + gun->vy0 * t - 0.5f * env->g * t * t;
+
+        tx = tx - agent_multiplier * env->vx;
 
         if (y < 0 || x < 0 || x > WIDTH) break;
 
@@ -229,6 +244,7 @@ float calculate_parabola_closest_distance(ArtyMulti* env, int gun_idx) {
         }
     }
     gun->dist = sqrt(min_dist2);
+    if (gun->dist < 15.0f) gun->hit = 1.0f;
 
     float traj_score = 0.0f;
     if (found_mid) {
@@ -324,6 +340,7 @@ void step_frame(ArtyMulti* env, float action0, float action1) {
             gun->px = gun->x0 + gun->vx0 * gun->projectile_time;
             gun->py = gun->y0 + gun->vy0 * gun->projectile_time - 0.5f * env->g * gun->projectile_time * gun->projectile_time;
         }
+        gun->tx = gun->tx + (2 * gun_idx - 1) * env->vx; // target velocity vectors must be opposite
     }
 
     int both_fired = env->gun[0].fired && env->gun[1].fired;

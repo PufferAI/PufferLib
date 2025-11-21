@@ -14,7 +14,7 @@ class ArtyMulti(pufferlib.PufferEnv):
                  log_interval=128,
                  seed=7,
                  buf=None):
-        obs_size = 10
+        obs_size = 11
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1, shape=(obs_size,), dtype=np.float32)
         self.render_mode = render_mode
         self.num_agents = num_envs
