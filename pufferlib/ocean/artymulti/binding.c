@@ -12,11 +12,9 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->turn_penalty = unpack(kwargs, "turn_penalty");
     env->turn_penalty_delay = unpack(kwargs, "turn_penalty_delay");
     env->miss_penalty = unpack(kwargs, "miss_penalty");
-    env->rng = unpack(kwargs, "rng");
     env->debug = unpack(kwargs, "debug");
     env->max_dist0 = unpack(kwargs, "max_dist0");
     env->out_bounds_penalty = unpack(kwargs, "out_bounds_penalty");
-    env->i = unpack(kwargs, "i");
 
     init(env);
     return 0;

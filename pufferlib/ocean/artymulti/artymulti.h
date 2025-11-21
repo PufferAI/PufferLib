@@ -76,7 +76,6 @@ typedef struct ArtyMulti {
     int* actions;
     float* rewards;
     unsigned char* terminals;
-    int i;
 
     float score;
     float scoreL;
@@ -101,7 +100,6 @@ typedef struct ArtyMulti {
     int render;
 
     int debug;
-    unsigned int rng;
     int runs;
 } ArtyMulti;
 
@@ -193,7 +191,6 @@ void init(ArtyMulti* env) {
         env->gun[i].fired = 0;
     }
 
-    srand(env->rng + env->i);
     get_random_start(env);
 }
 
