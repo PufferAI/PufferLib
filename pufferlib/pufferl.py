@@ -53,6 +53,7 @@ from torch.utils.cpp_extension import (
 # Assume advantage kernel has been built if torch has been compiled with CUDA or HIP support
 # and can find CUDA or HIP in the system
 ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
+HELP_MESSAGE = 'Usage: puffer [train, eval, sweep, autotune, profile, export] [env_name] [optional args].'
 
 class PuffeRL:
     def __init__(self, config, vecenv, policy, logger=None):
@@ -1195,7 +1196,11 @@ def load_config(env_name, parser=None):
             p.read([puffer_default_config, path])
             if env_name in p['base']['env_name'].split(): break
         else:
-            raise pufferlib.APIUsageError('No config for env_name {}'.format(env_name))
+            if env_name=="--help":
+                print(HELP_MESSAGE)
+                exit(0)
+            else:
+                raise pufferlib.APIUsageError('No config for env_name {}'.format(env_name))
 
     return process_config(p, parser=parser)
 
@@ -1285,9 +1290,8 @@ def process_config(config, parser=None):
     return args
 
 def main():
-    help_message = 'Usage: puffer [train, eval, sweep, autotune, profile, export] [env_name] [optional args].\n Use puffer <subcomand> --help for more info on a particular command'
     if len(sys.argv) < 3:
-        print(help_message)
+        print(HELP_MESSAGE)
         return
 
     mode = sys.argv.pop(1)
@@ -1305,7 +1309,7 @@ def main():
     elif mode == 'export':
         export(env_name=env_name)
     else:
-        print(help_message)
+        print(HELP_MESSAGE)
         return
 
 if __name__ == '__main__':
