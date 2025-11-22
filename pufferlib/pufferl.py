@@ -53,6 +53,7 @@ from torch.utils.cpp_extension import (
 # Assume advantage kernel has been built if torch has been compiled with CUDA or HIP support
 # and can find CUDA or HIP in the system
 ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
+ADVANTAGE_MPS = bool(torch.backends.mps.is_available())
 
 class PuffeRL:
     def __init__(self, config, vecenv, policy, logger=None):
@@ -664,7 +665,8 @@ def compute_puff_advantage(values, rewards, terminals,
     compile the fast version.'''
 
     device = values.device
-    if not ADVANTAGE_CUDA:
+
+    if not ADVANTAGE_CUDA and not ADVANTAGE_MPS:
         values = values.cpu()
         rewards = rewards.cpu()
         terminals = terminals.cpu()
@@ -674,7 +676,7 @@ def compute_puff_advantage(values, rewards, terminals,
     torch.ops.pufferlib.compute_puff_advantage(values, rewards, terminals,
         ratio, advantages, gamma, gae_lambda, vtrace_rho_clip, vtrace_c_clip)
 
-    if not ADVANTAGE_CUDA:
+    if not ADVANTAGE_CUDA and not ADVANTAGE_MPS:
         return advantages.to(device)
 
     return advantages
