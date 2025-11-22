@@ -82,37 +82,11 @@ def run_benchmark(num_steps, horizon, num_warmup=3, num_runs=10, enable_profilin
             gamma, lambda_, rho_clip, c_clip
         )
         torch.mps.synchronize()
-    
-    # Timed runs with optional profiling
+
+
     mps_times = []
-    if enable_profiling:
-        with torch.mps.profiler.profile():
-            if torch.mps.profiler.is_metal_capture_enabled():
-                with torch.mps.profiler.metal_capture("pufferlib_advantage.gputrace"):
-                    for _ in range(num_runs):
-                        advantages_mps.zero_()
-                        torch.mps.synchronize()
-                        start = time.perf_counter()
-                        torch.ops.pufferlib.compute_puff_advantage(
-                            values_mps, rewards_mps, dones_mps, importance_mps, advantages_mps,
-                            gamma, lambda_, rho_clip, c_clip
-                        )
-                        torch.mps.synchronize()
-                        mps_times.append((time.perf_counter() - start) * 1000.0)
-                    print(f"  Metal capture completed - view in Instruments")
-            else:
-                for _ in range(num_runs):
-                    advantages_mps.zero_()
-                    torch.mps.synchronize()
-                    start = time.perf_counter()
-                    torch.ops.pufferlib.compute_puff_advantage(
-                        values_mps, rewards_mps, dones_mps, importance_mps, advantages_mps,
-                        gamma, lambda_, rho_clip, c_clip
-                    )
-                    torch.mps.synchronize()
-                    mps_times.append((time.perf_counter() - start) * 1000.0)
-                print(f"  Profiling data collected - view in Instruments")
-    else:
+
+    def run_mps():
         for _ in range(num_runs):
             advantages_mps.zero_()
             torch.mps.synchronize()
@@ -123,6 +97,16 @@ def run_benchmark(num_steps, horizon, num_warmup=3, num_runs=10, enable_profilin
             )
             torch.mps.synchronize()
             mps_times.append((time.perf_counter() - start) * 1000.0)
+            
+    if enable_profiling:
+        with torch.mps.profiler.profile():
+            if torch.mps.profiler.is_metal_capture_enabled():
+                with torch.mps.profiler.metal_capture("pufferlib_advantage.gputrace"):
+                    run_mps()
+            else:
+                run_mps()
+    else:
+        run_mps()
     mps_time = sum(mps_times) / len(mps_times)
     
     print(f"Benchmark ({num_steps} steps, {horizon} horizon): CPU={cpu_time:.4f}ms MPS={mps_time:.4f}ms Speedup={cpu_time/mps_time:.2f}x")
