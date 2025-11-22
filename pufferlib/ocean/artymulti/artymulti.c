@@ -21,15 +21,15 @@ void free_allocated(ArtyMulti* env) {
 
 void demo() {
     ArtyMulti env = {
-        .adj = 0.008340523121815914,
-        .dist_fade = 0.10813009001338028,
+        .adj = 0.014364991132735087,
+        .dist_fade = 0.11107816724558334,
         .frameskip = 1,
-        .miss_penalty = -0.03448853813284214,
+        .miss_penalty = -0.05521742600140713,
         .max_reward_dist = 44.700659812685586,
-        .max_dist0 = 136.33416713214024,
+        .max_dist0 = 104.59870905085756,
         .out_bounds_penalty = -0.1,
         .turn_penalty = -0.1,
-        .turn_penalty_delay = 57.64829992415082,
+        .turn_penalty_delay = 98,
         .render = 1,
     };
     allocate(&env);

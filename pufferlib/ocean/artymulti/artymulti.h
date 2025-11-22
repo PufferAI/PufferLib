@@ -441,7 +441,6 @@ void c_render(ArtyMulti* env) {
             if (y < 0 || x < 0 || x > WIDTH) break;
 
             Vector2 current_point = {x, HEIGHT - y};
-            Color line_color = (gun_idx == 0) ? ORANGE : SKYBLUE;
             if (j % 2 == 0) DrawLineV(prev_point, current_point, BLACK);
             prev_point = current_point;
             j += 1;
@@ -452,7 +451,7 @@ void c_render(ArtyMulti* env) {
         DrawCircle(barrel_x, barrel_y, 12.0f, gun_color);
 
         if (gun->projectile_active) {
-            Color proj_color = (gun_idx == 0) ? ORANGE : BLUE;
+            Color proj_color = (gun_idx == 0) ? RED : BLUE;
             DrawCircle(gun->px, HEIGHT - gun->py, 4.0f, proj_color);
         }
     }
