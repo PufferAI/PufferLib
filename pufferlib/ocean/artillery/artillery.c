@@ -1,4 +1,3 @@
-#include <time.h>
 #include "artillery.h"
 #include "puffernet.h"
 

@@ -1,11 +1,7 @@
 #include <stdlib.h>
 #include <math.h>
-#include <assert.h>
-#include <unistd.h>
-#include <limits.h>
 #include <string.h>
 #include "raylib.h"
-#include <time.h>
 
 #define WIDTH 1280
 #define INVWIDTH 1.0f / WIDTH
@@ -25,9 +21,9 @@
 #define MINAIMANGLE 0.56f
 #define MAXAIMANGLE 1.56f
 
+#define MAX_PROJECTILE_TIME 60.0f
 #define VCOEFF 150.0f
 
-#define MAX_PROJECTILE_TIME 60.0f
 #define TIMESTEP 0.25f
 
 typedef struct Log {
@@ -207,11 +203,6 @@ float calculate_parabola_closest_distance(Artillery* env, int gun_idx) {
     float agent_multiplier = (gun_idx == 0) ? 1.0f : -1.0f;
     gun->vx0 = gun->v0 * cosf(gun->angle) * agent_multiplier;
     gun->vy0 = gun->v0 * sinf(gun->angle);
-
-    //printf("env->vx %.3f\n",env->vx);
-    //printf("gun->tx %.3f\n",gun->tx);
-    //gun->tx = gun->tx - agent_multiplier * env->vx;
-    //printf("gun->tx %.3f\n",gun->tx);
 
     float tx = gun->tx;
     float ty = gun->ty;
