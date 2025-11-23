@@ -6,7 +6,6 @@
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->render = unpack(kwargs, "render");
     env->target_size = unpack(kwargs, "target_size");
-    env->max_reward = unpack(kwargs, "max_reward");
     env->max_reward_dist = unpack(kwargs, "max_reward_dist");
     env->dist_fade = unpack(kwargs, "dist_fade");
     env->turn_penalty = unpack(kwargs, "turn_penalty");

@@ -1,12 +1,8 @@
 #include <stdlib.h>
 #include <math.h>
-#include <assert.h>
-#include <unistd.h>
-#include <limits.h>
 #include <string.h>
 #include "raylib.h"
 #include "rlgl.h"
-#include <time.h>
 
 #define FIRE 0
 #define LEFT 1
@@ -106,7 +102,6 @@ typedef struct Artillery3D {
     float* time_target_vanish;
     float hit;
 
-    float max_reward;
     float max_reward_dist;
     float max_reward_distn;
     float max_dist0;

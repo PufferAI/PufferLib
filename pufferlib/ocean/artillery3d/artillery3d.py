@@ -6,7 +6,7 @@ from pufferlib.ocean.artillery3d import binding
 
 class Artillery3D(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
-                 max_reward=1.0, max_reward_dist=23.620013496047616,  target_size=15,
+                 max_reward_dist=23.620013496047616,  target_size=15,
                  dist_fade=0.7493789405520497, turn_penalty_delay=72, turn_penalty_ramp=0.02, max_dist0=127.50246246114087,
                  turn_penalty=-0.003, miss_penalty=-0.1858434974084412, render=1, out_bounds_penalty=-0.01,
                  log_interval=128,
@@ -30,7 +30,7 @@ class Artillery3D(pufferlib.PufferEnv):
             self.truncations,
             num_envs,
             seed,
-            max_reward=max_reward, max_reward_dist=max_reward_dist,  target_size=target_size,
+            max_reward_dist=max_reward_dist,  target_size=target_size,
             dist_fade=dist_fade, turn_penalty_delay=turn_penalty_delay, turn_penalty_ramp=turn_penalty_ramp, max_dist0=max_dist0,
             turn_penalty=turn_penalty, miss_penalty=miss_penalty, render=render,
             out_bounds_penalty=out_bounds_penalty,

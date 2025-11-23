@@ -28,7 +28,6 @@ void demo() {
     Artillery3D env = {
         .dist_fade = 0.7493789405520497,
         .max_dist0 = 127.50246246114087,
-        .max_reward = 1.0,
         .max_reward_dist = 23.620013496047616,
         .miss_penalty = -0.1858434974084412,
         .out_bounds_penalty = -0.01,
