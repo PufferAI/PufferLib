@@ -1,6 +1,5 @@
 import numpy as np
 import gymnasium
-import time
 
 import pufferlib
 from pufferlib.ocean.artillery import binding
