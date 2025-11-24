@@ -694,6 +694,12 @@ def abbreviate(num, b2, c2):
     else:
         return f'{b2}{num/1e12:.2f}{c2}T'
 
+def get_accelerator(device):
+    if device == 'default':
+        return torch.accelerator.current_accelerator() if torch.accelerator.is_available() else 'cpu'
+    else:
+        return device
+
 def duration(seconds, b2, c2):
     if seconds < 0:
         return f"{b2}0{c2}s"
@@ -994,7 +1000,7 @@ def eval(env_name, args=None, vecenv=None, policy=None):
     ob, info = vecenv.reset()
     driver = vecenv.driver_env
     num_agents = vecenv.observation_space.shape[0]
-    device = args['train']['device']
+    device = get_accelerator(args['train']['device'])
 
     state = {}
     if args['train']['use_rnn']:
@@ -1146,7 +1152,7 @@ def load_policy(args, vecenv, env_name=''):
     module_name = 'pufferlib.ocean' if package == 'ocean' else f'pufferlib.environments.{package}'
     env_module = importlib.import_module(module_name)
 
-    device = args['train']['device']
+    device = get_accelerator(args['train']['device'])
     policy_cls = getattr(env_module.torch, args['policy_name'])
     policy = policy_cls(vecenv.driver_env, **args['policy'])
 
@@ -1284,6 +1290,7 @@ def process_config(config, parser=None):
 
     args['train']['env'] = args['env_name'] or ''  # for trainer dashboard
     args['train']['use_rnn'] = args['rnn_name'] is not None
+    args['train']['device'] = get_accelerator(args['train']['device'])
     return args
 
 def main():
