@@ -231,7 +231,7 @@ void demo() {
         .human_agent_idx = 0,
         .reward_vehicle_collision = -0.1f,
         .reward_offroad_collision = -0.1f,
-	    .map_name = "resources/drive/binaries/map_942.bin",
+	    .map_name = "resources/drive/map_942.bin",
         .spawn_immunity_timer = 50
     };
     allocate(&env);
@@ -296,7 +296,7 @@ void performance_test() {
     Drive env = {
         .dynamics_model = CLASSIC,
         .human_agent_idx = 0,
-	    .map_name = "resources/drive/binaries/map_942.bin"
+	    .map_name = "resources/drive/map_942.bin"
     };
     clock_t start_time, end_time;
     double cpu_time_used;
