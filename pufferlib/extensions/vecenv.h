@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <stdatomic.h>
 
 #define FLOAT 1
 #define INT 2

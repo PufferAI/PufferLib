@@ -6,6 +6,12 @@ import torch.nn as nn
 
 import pufferlib.emulation
 import pufferlib.spaces
+try:
+    from pufferlib import _C as _pufferc
+    _HAS_FUSED_RMSNORM = hasattr(_pufferc, "rmsnorm")
+except Exception:
+    _pufferc = None
+    _HAS_FUSED_RMSNORM = False
 
 # https://arxiv.org/abs/2410.01201v1
 
@@ -36,6 +42,20 @@ def g(x):
 def log_g(x):
     return torch.where(x >= 0, (F.relu(x) + 0.5).log(), -F.softplus(-x))
 
+class FusedRMSNorm(nn.Module):
+    """Drop-in RMSNorm that prefers the fused CUDA kernel when available."""
+    def __init__(self, hidden_size: int, eps: float = 1e-5):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if _HAS_FUSED_RMSNORM and x.is_cuda:
+            # C++ extension returns a single-element list
+            return _pufferc.rmsnorm(x, self.weight, self.eps)[0]
+        # Fallback to PyTorch implementation (CPU or missing extension)
+        return torch.nn.functional.rms_norm(x, (x.shape[-1],), self.weight, self.eps)
+
 # log-space version of minGRU - B.3.1
 # they enforce the hidden states to be positive
 
@@ -51,7 +71,7 @@ class MinGRULayer(Module):
         self.to_out = Linear(dim_inner, dim, bias = False) if proj_out else Identity()
         #nn.init.orthogonal_(self.to_out.weight)
 
-        self.norm = torch.nn.RMSNorm(dim)
+        self.norm = FusedRMSNorm(dim)
 
     def forward(self, x, prev_hidden = None):
         seq_len = x.shape[1]
@@ -242,7 +262,7 @@ class GRU(nn.Module):
 
         self.gru = nn.GRU(hidden_size, hidden_size, num_layers=num_layers)
         self.cell = nn.ModuleList([torch.nn.GRUCell(hidden_size, hidden_size) for _ in range(num_layers)])
-        self.norm = torch.nn.RMSNorm(hidden_size)
+        self.norm = FusedRMSNorm(hidden_size)
 
         for i in range(num_layers):
             cell = self.cell[i]
