@@ -253,8 +253,10 @@ if not NO_TRAIN:
         torch_sources.append("pufferlib/extensions/cuda/squared_torch.cu")
         torch_sources.append("pufferlib/extensions/cuda/kernels.cu")
         torch_sources.append("pufferlib/extensions/cuda/modules.cu")
+        define_macros = [('PUFFERLIB_WITH_CUDA', None)]
     else:
         extension = CppExtension
+        define_macros = [('PUFFERLIB_NO_CUDA', None)]
 
     import torch
     torch_extensions = [
@@ -262,6 +264,7 @@ if not NO_TRAIN:
             "pufferlib._C",
             torch_sources,
             include_dirs=[pybind11.get_include(), torch.utils.cpp_extension.include_paths()[0]],
+            define_macros=define_macros,
             extra_compile_args = {
                 "cxx": extra_compile_args + cxx_args,
                 "nvcc": nvcc_args,

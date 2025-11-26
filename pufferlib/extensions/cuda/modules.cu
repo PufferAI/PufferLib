@@ -142,7 +142,6 @@ torch::autograd::tensor_list log_coeffs_and_values(
     return LogCoeffsAndValuesFunction::apply(gate, hidden);
 }
 
-/*
 class RMSNormFunction: public torch::autograd::Function<RMSNormFunction> {
 public:
     static torch::autograd::tensor_list forward(
@@ -158,6 +157,10 @@ public:
         TORCH_CHECK(weight.dim() == 1, "weight must be (H,)");
         TORCH_CHECK(x.size(2) == weight.size(0), "H must match");
 
+        // Ensure contiguous for flat indexing
+        x = x.contiguous();
+        weight = weight.contiguous();
+
         auto dtype = x.dtype();
         auto device = x.device();
         auto B = x.size(0);
@@ -167,7 +170,7 @@ public:
         auto out = torch::empty({B, T, H}, x.options());
 
         auto options_float = torch::TensorOptions().dtype(torch::kFloat32).device(device);
-        auto inv_norm = torch::empty({B, T}, options_float);
+        auto inv_norm = torch::empty({B * T}, options_float);
 
         if (dtype == torch::kFloat32) {
             launch_rmsnorm_forward<float>(
@@ -195,13 +198,8 @@ public:
             TORCH_CHECK(false, "Unsupported dtype. Only float32 and bfloat16 supported.");
         }
 
-        // TODO: don't save eps as a tensor
-        //ctx->saved_data["eps"] = eps;   // store in saved_data instead
-                                    
-        // Save for backward
-        auto eps_tensor = torch::tensor(eps);
-        ctx->save_for_backward({x, weight, out, inv_norm, eps_tensor});
-
+        ctx->saved_data["eps"] = eps;
+        ctx->save_for_backward({x, weight, inv_norm});
         return {out};
     }
     static torch::autograd::tensor_list backward(
@@ -211,9 +209,8 @@ public:
         auto saved = ctx->get_saved_variables();
         auto x = saved[0].contiguous();
         auto weight = saved[1].contiguous();
-        auto out = saved[2].contiguous();
-        auto inv_norm = saved[3].contiguous();
-        double eps = saved[4].item<double>();
+        auto inv_norm = saved[2].contiguous();
+        double eps = ctx->saved_data["eps"].to<double>();
 
         auto grad_out = grad_outputs[0].contiguous();
         auto dtype = x.dtype();
@@ -266,7 +263,6 @@ torch::autograd::tensor_list rmsnorm(
 ) {
     return RMSNormFunction::apply(x, weight, eps);
 }
-*/
 
 /*
 class RMSNormImpl : public torch::nn::Module {
