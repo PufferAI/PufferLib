@@ -151,11 +151,8 @@ elif system == 'Darwin':
         '-framework', 'OpenGL',
         '-framework', 'IOKit',
     ]
-    if not NO_OCEAN:
-        download_raylib('raylib-5.5_macos', '.tar.gz')
 elif system == 'Windows':
-    if not NO_OCEAN:
-        download_raylib('raylib-5.5_win64_msvc16', '.zip')
+    pass
 else:
     raise ValueError(f'Unsupported system: {system}')
 
