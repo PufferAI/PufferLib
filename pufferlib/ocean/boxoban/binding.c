@@ -1,10 +1,11 @@
-#include "squared.h"
+#include "boxoban.h"
 
-#define Env Squared
+#define Env Boxoban
 #include "../env_binding.h"
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    env->size = unpack(kwargs, "size");
+    env->size = (int)unpack(kwargs, "size");
+    init(env);
     return 0;
 }
 

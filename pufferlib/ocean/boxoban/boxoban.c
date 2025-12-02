@@ -6,15 +6,15 @@
  * simple, it does not include C neural nets. See Target for that.
  */
 
-#include "squared.h"
+#include "boxoban.h"
 
 int main() {
-    Squared env = {.size = 11};
-    env.observations = (unsigned char*)calloc(env.size*env.size, sizeof(unsigned char));
+    Boxoban env = {.size = 10};
+    env.observations = (unsigned char*)calloc(4*env.size*env.size, sizeof(unsigned char));
     env.actions = (int*)calloc(1, sizeof(int));
     env.rewards = (float*)calloc(1, sizeof(float));
     env.terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
-
+    init(&env);
     c_reset(&env);
     c_render(&env);
     while (!WindowShouldClose()) {

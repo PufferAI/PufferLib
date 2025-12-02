@@ -4,16 +4,42 @@ import gymnasium
 import numpy as np
 
 import pufferlib
-from pufferlib.ocean.squared import binding
+from pufferlib.ocean.boxoban import binding
+from parse_maps import write_bin 
+import os
 
 class Boxoban(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=11, buf=None, seed=0):
+    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=10, buf=None, seed=0, difficulty="medium"):
+        self.shape = size*size*4 #agents walls boxes targets OHE
+
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
-            shape=(size*size,), dtype=np.uint8)
+            shape=(self.shape,), dtype=np.uint8)
         self.single_action_space = gymnasium.spaces.Discrete(5)
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.log_interval = log_interval
+
+        #Load maps
+        if difficulty == "medium":
+            p = "boxoban-levels/medium/train"
+            pv = "boxoban-levels/medium/valid"
+            maps = [os.path.join(p, f) for f in os.listdir(p) if f.endswith('.txt')]
+            maps_valid = [os.path.join(pv, f) for f in os.listdir(pv) if f.endswith('.txt')]
+        elif difficulty == "hard":
+            p = "boxoban-levels/hard"
+            pv = "boxoban-levels/unfiltered/valid"
+            maps = [os.path.join(p, f) for f in os.listdir(p) if f.endswith('.txt')]
+            maps_valid = [os.path.join(pv, f) for f in os.listdir(pv) if f.endswith('.txt')]
+        elif difficulty == "unfiltered":
+            p = "boxoban-levels/unfiltered"
+            pv = "boxoban-levels/unfiltered/valid"
+            maps = [os.path.join(p, f) for f in os.listdir(p) if f.endswith('.txt')]
+            maps_valid = [os.path.join(pv, f) for f in os.listdir(pv) if f.endswith('.txt')]
+        else:
+            raise ValueError("Invalid difficulty")
+        write_bin(maps, 'boxoban_maps.bin')
+        write_bin(maps_valid, 'boxoban_maps_valid.bin')
+
 
         super().__init__(buf)
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
@@ -44,10 +70,11 @@ class Boxoban(pufferlib.PufferEnv):
         binding.vec_close(self.c_envs)
 
 if __name__ == '__main__':
-    N = 4096
+    N = 1
 
-    env = Squared(num_envs=N)
+    env = Boxoban(num_envs=N)
     env.reset()
+    env.render()
     steps = 0
 
     CACHE = 1024
@@ -61,4 +88,4 @@ if __name__ == '__main__':
         steps += N
         i += 1
 
-    print('Squared SPS:', int(steps / (time.time() - start)))
+    print('Boxoban SPS:', int(steps / (time.time() - start)))
