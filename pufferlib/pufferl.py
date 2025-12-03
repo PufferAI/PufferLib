@@ -907,7 +907,6 @@ class WandbLogger:
 
 def train(env_name, args=None, vecenv=None, policy=None, logger=None, early_stop_fn=None):
     args = args or load_config(env_name)
-    breakpoint()
     # Assume TorchRun DDP is used if LOCAL_RANK is set
     if 'LOCAL_RANK' in os.environ:
         world_size = int(os.environ.get('WORLD_SIZE', 1))

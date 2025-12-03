@@ -30,10 +30,6 @@ extern size_t MAP_FILESIZE;
 extern size_t PUZZLE_COUNT;
 extern size_t PUZZLE_SIZE;
 
-
-
-
-
 // Required struct. Only use floats!
 typedef struct {
     float perf; // Recommended 0-1 normalized single real number perf metric
@@ -69,7 +65,6 @@ typedef struct {
 } Boxoban;
 
 void ensure_map_loaded(void); //declare from binding.c
-
 
 static inline const uint8_t get_random_puzzle_idx(const Boxoban *env) {
     int idx = rand() % PUZZLE_COUNT;
@@ -226,8 +221,9 @@ void c_step(Boxoban* env) {
         return;
     }
 
-    if (env->tick > env->max_steps) {
+    if (env->tick >= env->max_steps) {
         env->terminals[0] = 1;
+        env->rewards[0] = -1;
         add_log(env);
         c_reset(env);
         return;
