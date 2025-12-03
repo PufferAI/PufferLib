@@ -43,6 +43,7 @@ class Boxoban(pufferlib.PufferEnv):
         write_bin(maps_valid, 'boxoban_maps_valid.bin')"""
 
 
+
         super().__init__(buf)
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
             self.terminals, self.truncations, num_envs, seed, size=size, max_steps = self.max_steps)

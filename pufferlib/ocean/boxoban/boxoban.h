@@ -46,6 +46,7 @@ typedef struct {
     Texture2D target;
     Texture2D floor;
     Texture2D agent;
+    Texture2D box_on_target;
 } Client;
 
 // Required that you have some struct for your env
@@ -263,6 +264,8 @@ Client* c_create(Boxoban* env) {
     client->target = LoadTexture(resource_path);
     snprintf(resource_path, sizeof(resource_path), "%s/GroundGravel_Concrete.png", sprite_base);
     client->floor = LoadTexture(resource_path);
+    snprintf(resource_path, sizeof(resource_path), "%s/EndPoint_Blue.png", sprite_base);
+    client->box_on_target = LoadTexture(resource_path);
     client->agent = LoadTexture("resources/shared/puffers_128.png");
 
     env-> client = client;
@@ -278,7 +281,7 @@ Texture2D choose_sprite(Client *c, Boxoban *env, int x, int y) {
     int t = OBS(TARGET, x, y);
 
     if (w) return c->wall;
-    //if (b && t) return c->box_on_target;
+    if (b && t) return c->box_on_target;
     if (b) return c->box;
     //if (a && t) return c->agent_on_target;
     if (a) return c->agent;
