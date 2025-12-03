@@ -66,7 +66,6 @@ class PuffeRL:
         #random.seed(seed)
         #np.random.seed(seed)
         #torch.manual_seed(seed)
-
         # Vecenv info
         vecenv.async_reset(seed)
         obs_space = vecenv.single_observation_space
@@ -90,7 +89,6 @@ class PuffeRL:
             raise pufferlib.APIUsageError(
                 f'Total agents {total_agents} <= segments {segments}'
             )
-
         device = config['device']
         self.observations = torch.zeros(segments, horizon, *obs_space.shape,
             dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
@@ -909,7 +907,7 @@ class WandbLogger:
 
 def train(env_name, args=None, vecenv=None, policy=None, logger=None, early_stop_fn=None):
     args = args or load_config(env_name)
-
+    breakpoint()
     # Assume TorchRun DDP is used if LOCAL_RANK is set
     if 'LOCAL_RANK' in os.environ:
         world_size = int(os.environ.get('WORLD_SIZE', 1))

@@ -25,6 +25,15 @@ const unsigned char WALLS = 1;
 const unsigned char BOXES = 2;
 const unsigned char TARGET = 3;
 
+extern uint8_t *MAP_BASE;
+extern size_t MAP_FILESIZE;
+extern size_t PUZZLE_COUNT;
+extern size_t PUZZLE_SIZE;
+
+
+
+
+
 // Required struct. Only use floats!
 typedef struct {
     float perf; // Recommended 0-1 normalized single real number perf metric
@@ -53,67 +62,23 @@ typedef struct {
     unsigned char* terminals; // Required. We don't yet have truncations as standard yet
     int size;
     int tick;
-    uint8_t* puzzles;
-    int puzzle_count;
-    uint8_t* v_puzzles;
-    int v_puzzle_count;
+    int max_steps;
     int agent_x;
     int agent_y;
     Client* client;
 } Boxoban;
 
+void ensure_map_loaded(void); //declare from binding.c
 
 
-//100 bytes agent
-//100 bytes walls
-//100 bytes boxes
-//100 bytes targets
-#define PUZZLE_SIZE 400
-
-static inline void load_bin(uint8_t **buffer, int *count, const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        printf("error opening %s\n", path);
-        exit(1);
-    }
-
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    *count = size / PUZZLE_SIZE;
-    *buffer = malloc(size);
-    if (!*buffer) {
-        printf("malloc failed\n");
-        exit(1);
-    }
-
-    fread(*buffer, 1, size, f);
-    fclose(f);
-}
-
-static inline const uint8_t* get_puzzle(const Boxoban *env, int index) {
-    return env->puzzles + index * PUZZLE_SIZE;
-}
-
-static inline const uint8_t* get_v_puzzle(const Boxoban *env, int index) {
-    return env->v_puzzles + index * PUZZLE_SIZE;
-}
-
-static inline const uint8_t* get_random_puzzle(const Boxoban *env) {
-    int idx = rand() % env->puzzle_count;
-    return get_puzzle(env, idx);
-}
-
-static inline const uint8_t* get_random_v_puzzle(const Boxoban *env) {
-    int idx = rand() % env->v_puzzle_count;
-    return get_v_puzzle(env, idx);
+static inline const uint8_t get_random_puzzle_idx(const Boxoban *env) {
+    int idx = rand() % PUZZLE_COUNT;
+    return idx;
 }
 
 void init (Boxoban* env) {
-    load_bin(&env->puzzles, &env->puzzle_count, "boxoban_maps.bin");
-    load_bin(&env->v_puzzles, &env->v_puzzle_count, "boxoban_maps_valid.bin");
-}
+    ensure_map_loaded();
+  }
 
 //Entity,x,y  convention y moves top to bottom
 #define OBS(e,x,y) (env->observations[(e)*env->size*env->size + (y)*env->size + (x)])
@@ -146,8 +111,9 @@ bool clear(Boxoban* env, int x, int y) {
 
 // Required function
 void c_reset(Boxoban* env) {
-    const uint8_t *p = get_random_puzzle(env);
-    memcpy(env->observations, p, PUZZLE_SIZE);
+    const uint8_t i = get_random_puzzle_idx(env);
+    memcpy(env->observations, 
+            MAP_BASE + (size_t)i * PUZZLE_SIZE, PUZZLE_SIZE);
     env->tick = 0;
     get_agent_pos(env);
 }
@@ -259,6 +225,14 @@ void c_step(Boxoban* env) {
         c_reset(env);
         return;
     }
+
+    if (env->tick > env->max_steps) {
+        env->terminals[0] = 1;
+        add_log(env);
+        c_reset(env);
+        return;
+    }
+
 
     //new obs is modified in place
     env->rewards[0] -= 0.1; //length penalty
@@ -374,8 +348,6 @@ void c_close(Boxoban* env) {
         UnloadTexture(env->client->floor);
         UnloadTexture(env->client->agent);
         free(env->client);
-        free(env->puzzles);
-        free(env->v_puzzles);
         CloseWindow();
     }
 }

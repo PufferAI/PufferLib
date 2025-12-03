@@ -5,11 +5,11 @@ import numpy as np
 
 import pufferlib
 from pufferlib.ocean.boxoban import binding
-from parse_maps import write_bin 
+from pufferlib.ocean.boxoban.parse_maps import write_bin 
 import os
 
 class Boxoban(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=10, buf=None, seed=0, difficulty="medium"):
+    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=10, buf=None, seed=0, difficulty="medium", max_steps = 500):
         self.shape = size*size*4 #agents walls boxes targets OHE
 
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
@@ -18,8 +18,10 @@ class Boxoban(pufferlib.PufferEnv):
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.log_interval = log_interval
+        self.max_steps = max_steps
 
         #Load maps
+        """
         if difficulty == "medium":
             p = "boxoban-levels/medium/train"
             pv = "boxoban-levels/medium/valid"
@@ -38,12 +40,12 @@ class Boxoban(pufferlib.PufferEnv):
         else:
             raise ValueError("Invalid difficulty")
         write_bin(maps, 'boxoban_maps.bin')
-        write_bin(maps_valid, 'boxoban_maps_valid.bin')
+        write_bin(maps_valid, 'boxoban_maps_valid.bin')"""
 
 
         super().__init__(buf)
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
-            self.terminals, self.truncations, num_envs, seed, size=size)
+            self.terminals, self.truncations, num_envs, seed, size=size, max_steps = self.max_steps)
  
     def reset(self, seed=0):
         binding.vec_reset(self.c_envs, seed)
