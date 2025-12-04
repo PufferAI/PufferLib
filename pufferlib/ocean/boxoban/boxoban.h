@@ -69,7 +69,7 @@ typedef struct {
 
 void ensure_map_loaded(void); //declare from binding.c
 
-static inline const uint8_t get_random_puzzle_idx(const Boxoban *env) {
+static inline const uint32_t get_random_puzzle_idx(const Boxoban *env) {
     int idx = rand() % PUZZLE_COUNT;
     return idx;
 }
@@ -111,7 +111,7 @@ bool clear(Boxoban* env, int x, int y) {
 
 // Required function
 void c_reset(Boxoban* env) {
-    const uint8_t i = get_random_puzzle_idx(env);
+    const uint32_t i = get_random_puzzle_idx(env);
     memcpy(env->observations, 
             MAP_BASE + (size_t)i * PUZZLE_SIZE, PUZZLE_SIZE);
 
