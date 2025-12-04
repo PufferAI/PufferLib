@@ -62,6 +62,8 @@ typedef struct {
     int max_steps;
     int agent_x;
     int agent_y;
+    unsigned char* intermediate_rewards;
+    float int_r_coeff;
     Client* client;
 } Boxoban;
 
@@ -74,10 +76,12 @@ static inline const uint8_t get_random_puzzle_idx(const Boxoban *env) {
 
 void init (Boxoban* env) {
     ensure_map_loaded();
+    env->intermediate_rewards = calloc(env->size*env->size, sizeof(int));
   }
 
 //Entity,x,y  convention y moves top to bottom
 #define OBS(e,x,y) (env->observations[(e)*env->size*env->size + (y)*env->size + (x)])
+#define INTERMEDIATE_REWARD(x,y) (env->intermediate_rewards[(y)*env->size + (x)])
 
 void add_log(Boxoban* env) {
     env->log.perf += (env->rewards[0] > 0) ? 1 : 0;
@@ -110,6 +114,11 @@ void c_reset(Boxoban* env) {
     const uint8_t i = get_random_puzzle_idx(env);
     memcpy(env->observations, 
             MAP_BASE + (size_t)i * PUZZLE_SIZE, PUZZLE_SIZE);
+
+    memset(env->intermediate_rewards, 0, env->size*env->size*sizeof(int));
+    memcpy(env->intermediate_rewards,
+            env->observations + TARGET * env->size * env->size,env->size * env->size);
+
     env->tick = 0;
     get_agent_pos(env);
 }
@@ -118,6 +127,24 @@ void move_entity(Boxoban* env,unsigned char entity,int x, int y, int dx, int dy)
     OBS(entity, x, y) = 0;
     OBS(entity, x + dx, y + dy) = 1;
 }
+
+float get_intermediate_rewards(Boxoban* env) {
+    float int_r = 0;
+    for (int y = 0; y < env->size; y++) {
+        for (int x = 0; x < env->size; x++) {
+            if (OBS(BOXES, x, y) == 1 
+                    && OBS(TARGET, x, y) == 1 
+                    && INTERMEDIATE_REWARD(x, y) == 1) {
+                int_r += 1.0;
+                INTERMEDIATE_REWARD(x, y) = 0;
+            }
+                
+        }
+    }
+    return int_r;
+ }
+
+
 
 
 void take_action(Boxoban* env, int action) {
@@ -130,8 +157,9 @@ void take_action(Boxoban* env, int action) {
             env->agent_y += dy;
             return;
         }
-        else if (OBS(BOXES, env->agent_x, env->agent_y + dy) == 1 
-                && clear(env, env->agent_x, env->agent_y + 2*dy)) 
+        else if (clear(env, env->agent_x, env->agent_y + 2*dy)
+             && (OBS(BOXES, env->agent_x, env->agent_y + dy) == 1))
+
         {
             move_entity(env, BOXES, env->agent_x, env->agent_y + dy, dx, dy);
             move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
@@ -146,8 +174,9 @@ void take_action(Boxoban* env, int action) {
             env->agent_y += dy;
             return;
         }
-        else if (OBS(BOXES, env->agent_x, env->agent_y + dy) == 1 
-                && clear(env, env->agent_x, env->agent_y + 2*dy)) 
+        else if (clear(env, env->agent_x, env->agent_y + 2*dy) 
+                && OBS(BOXES, env->agent_x, env->agent_y + dy) == 1)
+                
         {
             move_entity(env, BOXES, env->agent_x, env->agent_y+dy, dx, dy);
             move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
@@ -162,8 +191,9 @@ void take_action(Boxoban* env, int action) {
             env->agent_x += dx;
             return;
         }
-        else if (OBS(BOXES, env->agent_x + dx, env->agent_y) == 1 
-                && clear(env, env->agent_x + 2*dx, env->agent_y)) 
+        else if (clear(env, env->agent_x + 2*dx, env->agent_y)
+                 && OBS(BOXES, env->agent_x + dx, env->agent_y) == 1) 
+                
         {
             move_entity(env, BOXES, env->agent_x+dx, env->agent_y, dx, dy);
             move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
@@ -178,8 +208,8 @@ void take_action(Boxoban* env, int action) {
             env->agent_x += dx;
             return;
         }
-        else if (OBS(BOXES, env->agent_x + dx, env->agent_y) == 1 
-                && clear(env, env->agent_x + 2*dx, env->agent_y)) 
+        else if (clear(env, env->agent_x + 2*dx, env->agent_y)
+                && OBS(BOXES, env->agent_x + dx, env->agent_y) == 1) 
         {
             move_entity(env, BOXES, env->agent_x+dx, env->agent_y, dx, dy);
             move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
@@ -230,9 +260,17 @@ void c_step(Boxoban* env) {
         return;
     }
 
+    //intermediate rewards
+    if (env->int_r_coeff > 0) {
+        float num_int_rewards;
+        num_int_rewards = get_intermediate_rewards(env);
+        env->rewards[0] += num_int_rewards * env->int_r_coeff;
+    }
 
     //new obs is modified in place
-    env->rewards[0] -= 0.1; //length penalty
+
+    //length penalty
+    env->rewards[0] -= 0.1;
 }
 
 Client* c_create(Boxoban* env) {

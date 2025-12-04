@@ -49,6 +49,7 @@ void ensure_map_loaded(void) {
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->size = (int)unpack(kwargs, "size");
     env->max_steps = (int)unpack(kwargs, "max_steps");
+    env->int_r_coeff = (float)unpack(kwargs, "int_r_coeff");
     init(env);
     return 0;
 }
