@@ -1,8 +1,8 @@
-// Standalone C demo for DroneRace environment
+// Standalone C demo for drone environment
 // Compile using: ./scripts/build_ocean.sh drone [local|fast]
 // Run with: ./drone
 
-#include "drone_race.h"
+#include "drone.h"
 #include "puffernet.h"
 #include <time.h>
 
@@ -88,7 +88,7 @@ void forward_linearcontlstm(LinearContLSTM *net, float *observations, float *act
     }
 }
 
-void generate_dummy_actions(DroneRace *env) {
+void generate_dummy_actions(DroneEnv *env) {
     // Generate random floats in [-1, 1] range
     env->actions[0] = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f;
     env->actions[1] = ((float)rand() / (float)RAND_MAX) * 2.0f - 1.0f;
@@ -98,14 +98,14 @@ void generate_dummy_actions(DroneRace *env) {
 
 #ifdef __EMSCRIPTEN__
 typedef struct {
-    DroneRace *env;
+    DroneEnv *env;
     LinearContLSTM *net;
     Weights *weights;
 } WebRenderArgs;
 
 void emscriptenStep(void *e) {
     WebRenderArgs *args = (WebRenderArgs *)e;
-    DroneRace *env = args->env;
+    DroneEnv *env = args->env;
     LinearContLSTM *net = args->net;
 
     forward_linearcontlstm(net, env->observations, env->actions);
@@ -120,20 +120,22 @@ WebRenderArgs *web_args = NULL;
 int main() {
     srand(time(NULL)); // Seed random number generator
 
-    DroneRace *env = calloc(1, sizeof(DroneRace));
-    env->max_moves = 1000;
+    DroneEnv *env = calloc(1, sizeof(DroneEnv));
+    env->num_agents = 64;
     env->max_rings = 10;
+    env->task = ORBIT;
+    init(env);
 
-    size_t obs_size = 25;
+    size_t obs_size = 26;
     size_t act_size = 4;
-    env->observations = (float *)calloc(obs_size, sizeof(float));
-    env->actions = (float *)calloc(act_size, sizeof(float));
-    env->rewards = (float *)calloc(1, sizeof(float));
-    env->terminals = (unsigned char *)calloc(1, sizeof(float));
+    env->observations = (float *)calloc(env->num_agents * obs_size, sizeof(float));
+    env->actions = (float *)calloc(env->num_agents * act_size, sizeof(float));
+    env->rewards = (float *)calloc(env->num_agents, sizeof(float));
+    env->terminals = (unsigned char *)calloc(env->num_agents, sizeof(float));
 
-    Weights *weights = load_weights("resources/drone/drone_weights.bin", 136073);
-    int logit_sizes[1] = {4};
-    LinearContLSTM *net = make_linearcontlstm(weights, 1, 25, logit_sizes, 1);
+    //Weights *weights = load_weights("resources/drone/drone_weights.bin", 136073);
+    //int logit_sizes[1] = {4};
+    //LinearContLSTM *net = make_linearcontlstm(weights, env->num_agents, obs_size, logit_sizes, 1);
 
     if (!env->observations || !env->actions || !env->rewards) {
         fprintf(stderr, "ERROR: Failed to allocate memory for demo buffers.\n");
@@ -160,13 +162,13 @@ int main() {
     c_render(env);
 
     while (!WindowShouldClose()) {
-        forward_linearcontlstm(net, env->observations, env->actions);
+        //forward_linearcontlstm(net, env->observations, env->actions);
         c_step(env);
         c_render(env);
     }
 
     c_close(env);
-    free_linearcontlstm(net);
+    //free_linearcontlstm(net);
     free(env->observations);
     free(env->actions);
     free(env->rewards);

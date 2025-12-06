@@ -19,7 +19,12 @@ from torch.utils.cpp_extension import (
     CUDAExtension,
     BuildExtension,
     CUDA_HOME,
+    ROCM_HOME
 )
+
+# build cuda extension if torch can find CUDA or HIP/ROCM in the system
+# may require `uv pip install --no-build-isolation` or `python setup.py build_ext --inplace`
+BUID_CUDA_EXT = bool(CUDA_HOME or ROCM_HOME)
 
 # Build with DEBUG=1 to enable debug symbols
 DEBUG = os.getenv("DEBUG", "0") == "1"
@@ -199,10 +204,35 @@ if not NO_OCEAN:
         if "impulse_wars" in c_ext.name:
             print(f"Adding {c_ext.name} to extra objects")
             c_ext.extra_objects.append(f'{BOX2D_NAME}/libbox2d.a')
+            # TODO: Figure out why this is necessary for some users
+            impulse_include = 'pufferlib/ocean/impulse_wars/include'
+            if impulse_include not in c_ext.include_dirs:
+                c_ext.include_dirs.append(impulse_include)
 
         if 'matsci' in c_ext.name:
             c_ext.include_dirs.append('/usr/local/include')
             c_ext.extra_link_args.extend(['-L/usr/local/lib', '-llammps'])
+
+# Define cmdclass outside of setup to add dynamic commands
+cmdclass = {
+    "build_ext": BuildExt,
+    "build_torch": TorchBuildExt,
+    "build_c": CBuildExt,
+}
+
+if not NO_OCEAN:
+    def create_env_build_class(full_name):
+        class EnvBuildExt(build_ext):
+            def run(self):
+                self.extensions = [e for e in self.extensions if e.name == full_name]
+                super().run()
+        return EnvBuildExt
+
+    # Add a build_<env> command for each env
+    for c_ext in c_extensions:
+        env_name = c_ext.name.split('.')[-2]
+        cmdclass[f"build_{env_name}"] = create_env_build_class(c_ext.name)
+
 
 # Check if CUDA compiler is available. You need cuda dev, not just runtime.
 torch_extensions = []
@@ -210,7 +240,7 @@ if not NO_TRAIN:
     torch_sources = [
         "pufferlib/extensions/pufferlib.cpp",
     ]
-    if shutil.which("nvcc"):
+    if BUID_CUDA_EXT:
         extension = CUDAExtension
         torch_sources.append("pufferlib/extensions/cuda/pufferlib.cu")
     else:
@@ -245,8 +275,8 @@ install_requires = [
     'numpy<2.0',
     'shimmy[gym-v21]',
     'gym==0.23',
-    'gymnasium==0.29.1',
-    'pettingzoo==1.24.1',
+    'gymnasium>=0.29.1',
+    'pettingzoo>=1.24.1',
 ]
 
 if not NO_TRAIN:
@@ -257,8 +287,9 @@ if not NO_TRAIN:
         'rich',
         'rich_argparse',
         'imageio',
-        'pyro-ppl',
-        'heavyball',
+        'gpytorch',
+        'scikit-learn',
+        'heavyball>=2.2.0', # contains relevant fixes compared to 1.7.2 and 2.1.1
         'neptune',
         'wandb',
     ]
@@ -272,10 +303,6 @@ setup(
     include_package_data=True,
     install_requires=install_requires,
     ext_modules = c_extensions + torch_extensions,
-    cmdclass={
-        "build_ext": BuildExt,
-        "build_torch": TorchBuildExt,
-        "build_c": CBuildExt,
-    },
+    cmdclass=cmdclass,
     include_dirs=[numpy.get_include(), RAYLIB_NAME + '/include'],
 )

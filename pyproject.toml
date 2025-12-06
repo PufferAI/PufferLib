@@ -4,8 +4,7 @@ version = "3.0.0"
 description = "Fast and sane reinforcement learning"
 requires-python = ">=3.9"
 readme = {file = "README.md", content-type = "text/markdown"}
-license = "MIT"
-license-files = ["LICENSE"]
+license = {text = "MIT"}
 authors = [{ name = "Joseph Suarez", email = "jsuarez@puffer.ai" }]
 classifiers=[
     "Intended Audience :: Science/Research",
@@ -120,6 +119,17 @@ metta = [
     'raylib>=5.5.0',
     'metta-common @ git+https://github.com/metta-ai/metta.git@main#subdirectory=common',
     'metta-mettagrid @ git+https://github.com/metta-ai/metta.git@main#subdirectory=mettagrid',
+]
+
+cogames = [
+    'gym',
+    'gymnasium',
+    'omegaconf',
+    'hydra-core',
+    'duckdb',
+    'raylib>=5.5.0',
+    'mettagrid @ git+https://github.com/metta-ai/metta.git@main#subdirectory=packages/mettagrid',
+    'cogames @ git+https://github.com/metta-ai/metta.git@main#subdirectory=packages/cogames',
 ]
 
 microrts = [
@@ -246,3 +256,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.uv]
 no-build-isolation-package = ["torch"]
+
+[tool.setuptools]
+license-files = ["LICENSE"]

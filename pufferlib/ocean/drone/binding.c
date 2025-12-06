@@ -1,11 +1,12 @@
-#include "drone_race.h"
+#include "drone.h"
+#include "render.h"
 
-#define Env DroneRace
+#define Env DroneEnv
 #include "../env_binding.h"
 
 static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
+    env->num_agents = unpack(kwargs, "num_agents");
     env->max_rings = unpack(kwargs, "max_rings");
-    env->max_moves = unpack(kwargs, "max_moves");
     init(env);
     return 0;
 }
@@ -13,6 +14,8 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
 static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "perf", log->perf);
     assign_to_dict(dict, "score", log->score);
+    assign_to_dict(dict, "rings_passed", log->rings_passed);
+    assign_to_dict(dict, "ring_collisions", log->ring_collision);
     assign_to_dict(dict, "collision_rate", log->collision_rate);
     assign_to_dict(dict, "oob", log->oob);
     assign_to_dict(dict, "timeout", log->timeout);

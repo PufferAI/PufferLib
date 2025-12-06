@@ -367,10 +367,10 @@ void computeObs(iwEnv *e) {
                 continue;
             }
 
-            if (agentDrone->stepInfo.shotHit[i]) {
+            if (agentDrone->stepInfo.shotHit[i] != 0.0f) {
                 hitShot = true;
             }
-            if (agentDrone->stepInfo.shotTaken[i]) {
+            if (agentDrone->stepInfo.shotTaken[i] != 0.0f) {
                 tookShot = true;
             }
 
@@ -539,6 +539,19 @@ iwEnv *initEnv(iwEnv *e, uint8_t numDrones, uint8_t numAgents, int8_t mapIdx, ui
     e->sittingDuck = sittingDuck;
     e->isTraining = isTraining;
 
+    e->winReward = WIN_REWARD;
+    e->selfKillPunishment = SELF_KILL_PUNISHMENT;
+    e->enemyDeathReward = ENEMY_DEATH_REWARD;
+    e->enemyKillReward = ENEMY_KILL_REWARD;
+    e->teammateDeathPunishment = TEAMMATE_DEATH_PUNISHMENT;
+    e->teammateKillPunishment = TEAMMATE_KILL_PUNISHMENT;
+    e->deathPunishment = DEATH_PUNISHMENT;
+    e->energyEmptiedPunishment = ENERGY_EMPTY_PUNISHMENT;
+    e->weaponPickupReward = WEAPON_PICKUP_REWARD;
+    e->shieldBreakReward = SHIELD_BREAK_REWARD;
+    e->shotHitRewardCoef = SHOT_HIT_REWARD_COEF;
+    e->explosionHitRewardCoef = EXPLOSION_HIT_REWARD_COEF;
+
     e->obsBytes = obsBytes(e->numDrones);
     e->discreteObsBytes = alignedSize(discreteObsSize(e->numDrones) * sizeof(uint8_t), sizeof(float));
 
@@ -583,7 +596,26 @@ iwEnv *initEnv(iwEnv *e, uint8_t numDrones, uint8_t numAgents, int8_t mapIdx, ui
     e->humanDroneInput = 0;
     e->connectedControllers = 0;
 
+#ifndef NDEBUG
+    create_array(&e->debugPoints, 4);
+#endif
+
     return e;
+}
+
+void setRewards(iwEnv *e, float winReward, float selfKillPunishment, float enemyDeathReward, float enemyKillReward, float teammateDeathPunishment, float teammateKillPunishment, float deathPunishment, float energyEmptiedPunishment, float weaponPickupReward, float shieldBreakReward, float shotHitRewardCoef, float explosionHitRewardCoef) {
+    e->winReward = winReward;
+    e->selfKillPunishment = selfKillPunishment;
+    e->enemyDeathReward = enemyDeathReward;
+    e->enemyKillReward = enemyKillReward;
+    e->teammateDeathPunishment = teammateDeathPunishment;
+    e->teammateKillPunishment = teammateKillPunishment;
+    e->deathPunishment = deathPunishment;
+    e->energyEmptiedPunishment = energyEmptiedPunishment;
+    e->weaponPickupReward = weaponPickupReward;
+    e->shieldBreakReward = shieldBreakReward;
+    e->shotHitRewardCoef = shotHitRewardCoef;
+    e->explosionHitRewardCoef = explosionHitRewardCoef;
 }
 
 void clearEnv(iwEnv *e) {
@@ -673,6 +705,10 @@ void destroyEnv(iwEnv *e) {
     cc_array_destroy(e->dronePieces);
 
     b2DestroyWorld(e->worldID);
+
+#ifndef NDEBUG
+    cc_array_destroy(e->debugPoints);
+#endif
 }
 
 void resetEnv(iwEnv *e) {
@@ -680,21 +716,11 @@ void resetEnv(iwEnv *e) {
     setupEnv(e);
 }
 
-float computeShotReward(const droneEntity *drone, const weaponInformation *weaponInfo) {
-    const float weaponForce = weaponInfo->fireMagnitude * weaponInfo->invMass;
-    const float scaledForce = (weaponForce * (weaponForce * SHOT_HIT_REWARD_COEF)) + 0.25f;
-    return scaledForce + computeHitStrength(drone);
-}
-
-float computeExplosionReward(const droneEntity *drone) {
-    return computeHitStrength(drone) * EXPLOSION_HIT_REWARD_COEF;
-}
-
 float computeReward(iwEnv *e, droneEntity *drone) {
     float reward = 0.0f;
 
     if (drone->energyFullyDepleted && drone->energyRefillWait == DRONE_ENERGY_REFILL_EMPTY_WAIT) {
-        reward += ENERGY_EMPTY_PUNISHMENT;
+        reward += e->energyEmptiedPunishment;
     }
 
     // only reward picking up a weapon if the standard weapon was
@@ -702,7 +728,7 @@ float computeReward(iwEnv *e, droneEntity *drone) {
     // weapon, but other weapons are situational better so don't
     // reward switching a non-standard weapon
     if (drone->stepInfo.pickedUpWeapon && drone->stepInfo.prevWeapon == STANDARD_WEAPON) {
-        reward += WEAPON_PICKUP_REWARD;
+        reward += e->weaponPickupReward;
     }
 
     for (uint8_t i = 0; i < e->numDrones; i++) {
@@ -712,51 +738,51 @@ float computeReward(iwEnv *e, droneEntity *drone) {
         droneEntity *enemyDrone = safe_array_get_at(e->drones, i);
         const bool onTeam = drone->team == enemyDrone->team;
 
-        if (drone->stepInfo.shotHit[i] != 0 && !onTeam) {
-            // subtract 1 from the weapon type because 1 is added so we
-            // can use 0 as no shot was hit
-            const weaponInformation *weaponInfo = weaponInfos[drone->stepInfo.shotHit[i] - 1];
-            reward += computeShotReward(enemyDrone, weaponInfo);
+        // TODO: punish for hitting teammates?
+        if (drone->stepInfo.shotHit[i] != 0.0f && !onTeam) {
+            reward += drone->stepInfo.shotHit[i] * e->shotHitRewardCoef;
         }
-        if (drone->stepInfo.explosionHit[i] && !onTeam) {
-            reward += computeExplosionReward(enemyDrone);
+        if (drone->stepInfo.explosionHit[i] != 0.0f && !onTeam) {
+            reward += drone->stepInfo.explosionHit[i] * e->explosionHitRewardCoef;
+        }
+        if (drone->stepInfo.brokeShield[i] && !onTeam) {
+            reward += e->shieldBreakReward;
         }
 
         if (e->numAgents == e->numDrones) {
-            if (drone->stepInfo.shotTaken[i] != 0 && !onTeam) {
-                const weaponInformation *weaponInfo = weaponInfos[drone->stepInfo.shotTaken[i] - 1];
-                reward -= computeShotReward(drone, weaponInfo) * 0.5f;
+            if (drone->stepInfo.shotTaken[i] != 0) {
+                reward -= drone->stepInfo.shotTaken[i] * e->shotHitRewardCoef;
             }
-            if (drone->stepInfo.explosionTaken[i] && !onTeam) {
-                reward -= computeExplosionReward(drone) * 0.5f;
+            if (drone->stepInfo.explosionTaken[i]) {
+                reward -= drone->stepInfo.explosionTaken[i] * e->explosionHitRewardCoef;
             }
         }
 
         if (enemyDrone->dead && enemyDrone->diedThisStep) {
             if (!onTeam) {
-                reward += ENEMY_DEATH_REWARD;
+                reward += e->enemyDeathReward;
                 if (drone->killed[i]) {
-                    reward += ENEMY_KILL_REWARD;
+                    reward += e->enemyKillReward;
                 }
             } else {
-                reward += TEAMMATE_DEATH_PUNISHMENT;
+                reward += e->teammateDeathPunishment;
                 if (drone->killed[i]) {
-                    reward += TEAMMATE_KILL_PUNISHMENT;
+                    reward += e->teammateKillPunishment;
                 }
             }
             continue;
         }
 
-        const b2Vec2 enemyDirection = b2Normalize(b2Sub(enemyDrone->pos, drone->pos));
-        const float velocityToEnemy = b2Dot(drone->lastVelocity, enemyDirection);
-        const float enemyDistance = b2Distance(enemyDrone->pos, drone->pos);
-        // stop rewarding approaching an enemy if they're very close
-        // to avoid constant clashing; always reward approaching when
-        // the current weapon is the shotgun, it greatly benefits from
-        // being close to enemies
-        if (velocityToEnemy > 0.1f && (drone->weaponInfo->type == SHOTGUN_WEAPON || enemyDistance > DISTANCE_CUTOFF)) {
-            reward += APPROACH_REWARD;
-        }
+        // const b2Vec2 enemyDirection = b2Normalize(b2Sub(enemyDrone->pos, drone->pos));
+        // const float velocityToEnemy = b2Dot(drone->lastVelocity, enemyDirection);
+        // const float enemyDistance = b2Distance(enemyDrone->pos, drone->pos);
+        // // stop rewarding approaching an enemy if they're very close
+        // // to avoid constant clashing; always reward approaching when
+        // // the current weapon is the shotgun, it greatly benefits from
+        // // being close to enemies
+        // if (velocityToEnemy > 0.1f && (drone->weaponInfo->type == SHOTGUN_WEAPON || enemyDistance > DISTANCE_CUTOFF)) {
+        //     reward += APPROACH_REWARD;
+        // }
     }
 
     return reward;
@@ -766,21 +792,19 @@ const float REWARD_EPS = 1.0e-6f;
 
 void computeRewards(iwEnv *e, const bool roundOver, const int8_t winner, const int8_t winningTeam) {
     if (roundOver && winner != -1 && winner < e->numAgents) {
-        e->rewards[winner] += WIN_REWARD;
+        e->rewards[winner] += e->winReward;
     }
 
     for (uint8_t i = 0; i < e->numDrones; i++) {
         float reward = 0.0f;
         droneEntity *drone = safe_array_get_at(e->drones, i);
-        if (!drone->dead) {
-            reward = computeReward(e, drone);
-            if (roundOver && winningTeam == drone->team) {
-                reward += WIN_REWARD;
-            }
+        reward = computeReward(e, drone);
+        if (!drone->dead && roundOver && winningTeam == drone->team) {
+            reward += e->winReward;
         } else if (drone->diedThisStep) {
-            reward = DEATH_PUNISHMENT;
+            reward = e->deathPunishment;
             if (drone->killedBy == drone->idx) {
-                reward += SELF_KILL_PUNISHMENT;
+                reward += e->selfKillPunishment;
             }
         }
         if (i < e->numAgents) {
@@ -985,6 +1009,11 @@ void addLog(iwEnv *e, Log *log) {
         e->log.stats[j].totalBursts += log->stats[j].totalBursts;
         e->log.stats[j].burstsHit += log->stats[j].burstsHit;
         e->log.stats[j].energyEmptied += log->stats[j].energyEmptied;
+        e->log.stats[j].shieldsBroken += log->stats[j].shieldsBroken;
+        e->log.stats[j].ownShieldBroken += log->stats[j].ownShieldBroken;
+        e->log.stats[j].selfKills += log->stats[j].selfKills;
+        e->log.stats[j].kills += log->stats[j].kills;
+        e->log.stats[j].unknownKills += log->stats[j].unknownKills;
 
         for (uint8_t k = 0; k < NUM_WEAPONS; k++) {
             e->log.stats[j].shotsFired[k] += log->stats[j].shotsFired[k];
@@ -1006,6 +1035,7 @@ void addLog(iwEnv *e, Log *log) {
     e->log.n += 1.0f;
 }
 
+// TODO: 2nd agent doesn't seem to work right
 void stepEnv(iwEnv *e) {
     if (e->needsReset) {
         DEBUG_LOG("Resetting environment");
@@ -1016,6 +1046,14 @@ void stepEnv(iwEnv *e) {
         accumulator = 0.0;
 #endif
     }
+
+#ifndef NDEBUG
+    for (uint8_t i = 0; i < cc_array_size(e->debugPoints); i++) {
+        debugPoint *point = safe_array_get_at(e->debugPoints, i);
+        fastFree(point);
+    }
+    cc_array_remove_all(e->debugPoints);
+#endif
 
     agentActions stepActions[e->numDrones];
     memset(stepActions, 0x0, e->numDrones * sizeof(agentActions));

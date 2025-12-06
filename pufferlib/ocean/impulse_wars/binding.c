@@ -100,6 +100,21 @@ static int my_init(iwEnv *e, PyObject *args, PyObject *kwargs) {
         (bool)unpack(kwargs, "is_training"),
         (bool)unpack(kwargs, "continuous")
     );
+    setRewards(
+        e,
+        (float)unpack(kwargs, "reward_win"),
+        (float)unpack(kwargs, "reward_self_kill"),
+        (float)unpack(kwargs, "reward_enemy_death"),
+        (float)unpack(kwargs, "reward_enemy_kill"),
+        0.0f, // teammate death punishment
+        0.0f, // teammate kill punishment
+        (float)unpack(kwargs, "reward_death"),
+        (float)unpack(kwargs, "reward_energy_emptied"),
+        (float)unpack(kwargs, "reward_weapon_pickup"),
+        (float)unpack(kwargs, "reward_shield_break"),
+        (float)unpack(kwargs, "reward_shot_hit_coef"),
+        (float)unpack(kwargs, "reward_explosion_hit_coef")
+    );
     return 0;
 }
 
@@ -131,6 +146,11 @@ static int my_log(PyObject *dict, Log *log) {
         assign_to_dict(dict, droneLog(buf, i, "total_bursts"), log->stats[i].totalBursts);
         assign_to_dict(dict, droneLog(buf, i, "bursts_hit"), log->stats[i].burstsHit);
         assign_to_dict(dict, droneLog(buf, i, "energy_emptied"), log->stats[i].energyEmptied);
+        assign_to_dict(dict, droneLog(buf, i, "shields_broken"), log->stats[i].shieldsBroken);
+        assign_to_dict(dict, droneLog(buf, i, "own_shield_broken"), log->stats[i].ownShieldBroken);
+        assign_to_dict(dict, droneLog(buf, i, "self_kills"), log->stats[i].selfKills);
+        assign_to_dict(dict, droneLog(buf, i, "kills"), log->stats[i].kills);
+        assign_to_dict(dict, droneLog(buf, i, "unknown_kills"), log->stats[i].unknownKills);
         assign_to_dict(dict, droneLog(buf, i, "wins"), log->stats[i].wins);
 
         // useful for debugging weapon balance, but really slows down

@@ -119,6 +119,7 @@ typedef struct wallEntity {
     bool isFloating;
     enum entityType type;
     bool isSuddenDeath;
+    CC_Array *physicsTracking;
 
     entity *ent;
 } wallEntity;
@@ -210,10 +211,11 @@ typedef struct droneStepInfo {
     bool firedShot;
     bool pickedUpWeapon;
     enum weaponType prevWeapon;
-    uint8_t shotHit[_MAX_DRONES];
-    bool explosionHit[_MAX_DRONES];
-    uint8_t shotTaken[_MAX_DRONES];
-    bool explosionTaken[_MAX_DRONES];
+    float shotHit[_MAX_DRONES];
+    float explosionHit[_MAX_DRONES];
+    float shotTaken[_MAX_DRONES];
+    float explosionTaken[_MAX_DRONES];
+    bool brokeShield[_MAX_DRONES];
     bool ownShotTaken;
 } droneStepInfo;
 
@@ -310,6 +312,11 @@ typedef struct droneStats {
     float totalBursts;
     float burstsHit;
     float energyEmptied;
+    float shieldsBroken;
+    float ownShieldBroken;
+    float selfKills;
+    float kills;
+    float unknownKills;
     float wins;
 
     float shotsFired[_NUM_WEAPONS];
@@ -398,6 +405,12 @@ typedef struct pathingInfo {
     int8_t *pathBuffer;
 } pathingInfo;
 
+typedef struct debugPoint {
+    b2Vec2 pos;
+    float size;
+    Color color;
+} debugPoint;
+
 typedef struct iwEnv {
     uint8_t numDrones;
     uint8_t numAgents;
@@ -405,6 +418,19 @@ typedef struct iwEnv {
     bool teamsEnabled;
     bool sittingDuck;
     bool isTraining;
+
+    float winReward;
+    float selfKillPunishment;
+    float enemyDeathReward;
+    float enemyKillReward;
+    float teammateDeathPunishment;
+    float teammateKillPunishment;
+    float deathPunishment;
+    float energyEmptiedPunishment;
+    float weaponPickupReward;
+    float shieldBreakReward;
+    float shotHitRewardCoef;
+    float explosionHitRewardCoef;
 
     uint16_t obsBytes;
     uint16_t discreteObsBytes;
@@ -466,7 +492,7 @@ typedef struct iwEnv {
     rayClient *client;
     float renderScale;
     CC_Array *explosions;
-    b2Vec2 debugPoint;
+    CC_Array *debugPoints;
 } iwEnv;
 
 #endif
