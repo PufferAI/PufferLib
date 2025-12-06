@@ -47,6 +47,7 @@ typedef struct {
     float dish_served_agent;
     float pot_started;
     float ingredient_added;
+    float ingredient_picked;
     float soup_plated;
     float wrong_dish_served;
     float step_penalty;
@@ -586,6 +587,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
             // Add logs for each ingredient type
             agent->held_item = ONION; // Always gives onions for now
             env->log.ingredients_picked++;
+            env->rewards[agent_idx] += env->rewards_config.ingredient_picked;
         }
         else if (tile == PLATE_BOX) {
             agent->held_item = PLATE;
@@ -739,6 +741,7 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
 
         env->log.correct_dishes++;
         env->log.score += env->rewards_config.dish_served_whole_team;
+        env->log.n++;
     } else {
         env->rewards[agent_idx] += env->rewards_config.wrong_dish_served;
         for (int i = 0; i < env->num_agents; i++) {
@@ -848,9 +851,8 @@ void c_step(Overcooked* env) {
         for (int i = 0; i < env->num_agents; i++) {
             env->terminals[i] = 1;
         }
-        env->log.perf += env->log.correct_dishes / 20.0f;  // Normalize to 0-1 (20 dishes would be excellent)
+        env->log.perf += env->log.correct_dishes / 20.0f;
         env->log.score += env->log.episode_return;
-        env->log.n += 1;
     }
     
     compute_observations(env);
