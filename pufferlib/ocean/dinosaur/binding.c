@@ -4,7 +4,11 @@
 #include "../env_binding.h"
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    env->size = unpack(kwargs, "size");
+    env->width = unpack(kwargs, "width");
+    env->height = unpack(kwargs, "height");
+    env->num_agents = unpack(kwargs, "num_agents");
+    env->num_goals = unpack(kwargs, "num_goals");
+    init(env);
     return 0;
 }
 
