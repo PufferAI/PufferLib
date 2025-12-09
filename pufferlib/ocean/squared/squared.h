@@ -53,7 +53,7 @@ void add_log(Squared* env) {
 // Required function
 void c_reset(Squared* env) {
     int tiles = env->size*env->size;
-    memset(env->observations, 0, tiles*sizeof(unsigned char));
+    memset(env->observations, EMPTY, tiles*sizeof(unsigned char));
     env->observations[tiles/2] = AGENT;
     env->r = env->size/2;
     env->c = env->size/2;
