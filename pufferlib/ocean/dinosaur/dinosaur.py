@@ -5,27 +5,31 @@ import pufferlib
 from pufferlib.ocean.dinosaur import binding
 
 class Dinosaur(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, width=1080, height=720, num_agents=8,
-            num_goals=4, render_mode=None, log_interval=128, size=11, buf=None, seed=0):
-        self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
-            shape=(2*(num_agents+num_goals) + 4,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.MultiDiscrete([9, 5])
+    def __init__(self, num_envs=1024, width=800, height=800,
+            speed_init=4, speed_max=8, obstacle_spawn_rate_init=120, obstacle_spawn_rate_min=70,
+            rate_increment_rate=200, max_obstacles=8,
+            render_mode=None, log_interval=128, size=11, buf=None, seed=0):
+        self.single_observation_space = gymnasium.spaces.Box(low=0.0, high=1,
+            shape=(max_obstacles + 4,), dtype=np.float32)
+        self.single_action_space = gymnasium.spaces.Discrete(2)
 
         self.render_mode = render_mode
-        self.num_agents = num_envs*num_agents
+        self.num_agents = num_envs
         self.log_interval = log_interval
 
         super().__init__(buf)
         c_envs = []
         for i in range(num_envs):
             c_env = binding.env_init(
-                self.observations[i*num_agents:(i+1)*num_agents],
-                self.actions[i*num_agents:(i+1)*num_agents],
-                self.rewards[i*num_agents:(i+1)*num_agents],
-                self.terminals[i*num_agents:(i+1)*num_agents],
-                self.truncations[i*num_agents:(i+1)*num_agents],
-                seed, width=width, height=height,
-                num_agents=num_agents, num_goals=num_goals)
+                self.observations[i:i+1],
+                self.actions[i:i+1],
+                self.rewards[i:i+1],
+                self.terminals[i:i+1],
+                self.truncations[i:i+1],
+                seed, width=width, height=height, speed_init=speed_init, speed_max=speed_max,
+                obstacle_spawn_rate_init=obstacle_spawn_rate_init, obstacle_spawn_rate_min=obstacle_spawn_rate_min,
+                rate_increment_rate=rate_increment_rate, max_obstacles=max_obstacles
+            )
             c_envs.append(c_env)
 
         self.c_envs = binding.vectorize(*c_envs)
@@ -63,7 +67,7 @@ if __name__ == '__main__':
     steps = 0
 
     CACHE = 1024
-    actions = np.random.randint(env.single_action_space.nvec, size=(CACHE, 2))
+    actions = np.random.randint(env.single_action_space.nvec, size=(CACHE, 1))
 
     i = 0
     import time

@@ -1,229 +1,230 @@
-/* Dinosaur: a single-agent env that mimics Google's offline dinosaur game */
+/* Dinosaur: a single-agent env that mimics google's offline dinosaur game */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include "raylib.h"
 
-// Required struct. Only use floats!
+#define PLAYER_HEIGHT 20
+#define PLAYER_WIDTH 20
+
+#define CACTUS_HEIGHT 30
+#define CACTUS_WIDTH 15
+
+const unsigned char NOOP = 0;
+const unsigned char JUMP = 1;
+
 typedef struct {
-    float perf; // Recommended 0-1 normalized single real number perf metric
-    float score; // Recommended unnormalized single real number perf metric
-    float episode_return; // Recommended metric: sum of agent rewards over episode
-    float episode_length; // Recommended metric: number of steps of agent episode
-    // Any extra fields you add here may be exported to Python in binding.c
-    float n; // Required as the last field
+    float perf;
+    float score;
+    float episode_return;
+    float episode_length;
+    float n;
 } Log;
 
 typedef struct {
-    Texture2D puffer;
-    Texture2D star;
-} Client;
+    Texture2D dinosaur;
+    Texture2D cactus;
+} Textures;
 
 typedef struct {
     float x;
     float y;
-    float heading;
-    float speed;
-    int ticks_since_reward;
+    float y_velocity;
+    float max_y;
+    float jump_strength;
+    int ticks;
 } Agent;
 
 typedef struct {
     float x;
-    float y;
-} Goal;
+} Obstacle;
 
-// Required that you have some struct for your env
-// Recommended that you name it the same as the env file
 typedef struct {
-    Log log; // Required field. Env binding code uses this to aggregate logs
-    Client* client;
-    Agent* agents;
-    Goal* goals;
-    float* observations; // Required. You can use any obs type, but make sure it matches in Python!
-    int* actions; // Required. int* for discrete/multidiscrete, float* for box
-    float* rewards; // Required
-    unsigned char* terminals; // Required. We don't yet have truncations as standard yet
+    /* Mandatory */
+    Log log;
+    float* observations;
+    int* actions;
+    float* rewards;
+    unsigned char* terminals;
+    /* Not customizable */
+    Textures* textures;
+    Agent* agent;
+    Obstacle* obstacles;
+    int num_obstacles;
+    float floor_y;
+    int speed;
+    int obstacle_spawn_rate;
+    float gravity;
+    /* Customizable */
     int width;
     int height;
-    int num_agents;
-    int num_goals;
+    int speed_init;
+    int speed_max;
+    int obstacle_spawn_rate_init;
+    int obstacle_spawn_rate_min;
+    int rate_increment_rate;
+    int max_obstacles;
 } Dinosaur;
 
-/* Recommended to have an init function of some kind if you allocate
- * extra memory. This should be freed by c_close. Don't forget to call
- * this in binding.c!
- */
 void init(Dinosaur* env) {
-    env->agents = calloc(env->num_agents, sizeof(Agent));
-    env->goals = calloc(env->num_goals, sizeof(Goal));
+    env->gravity = 0.2;
+    env->floor_y = env->height/2.0;
+
+    env->agent = calloc(1, sizeof(Agent));
+    env->agent->x = 0 + 2 * PLAYER_WIDTH;
+    env->agent->y = env->height / 2.0f;
+    env->agent->jump_strength = 4.4f;
 }
 
-void update_goals(Dinosaur* env) {
-    for (int a=0; a<env->num_agents; a++) {
-        Agent* agent = &env->agents[a];
-        for (int g=0; g<env->num_goals; g++) {
-            Goal* goal = &env->goals[g];
-            float dx = (goal->x - agent->x);
-            float dy = (goal->y - agent->y);
-            float dist = sqrt(dx*dx + dy*dy);
-            if (dist > 32) {
-                continue;
-            }
-            goal->x = rand() % env->width;
-            goal->y = rand() % env->height;
-            env->rewards[a] = 1.0f;
-            env->log.perf += 1.0f;
-            env->log.score += 1.0f;
-            env->log.episode_length += agent->ticks_since_reward;
-            agent->ticks_since_reward = 0;
-            env->log.episode_return += 1.0f;
-            env->log.n++;
-        }
-    }
-}
-
-/* Recommended to have an observation function of some kind because
- * you need to compute agent observations in both reset and in step.
- * If using float obs, try to normalize to roughly -1 to 1 by dividing
- * by an appropriate constant.
- */
 void compute_observations(Dinosaur* env) {
     int obs_idx = 0;
-    for (int a=0; a<env->num_agents; a++) {
-        Agent* agent = &env->agents[a];
-        for (int g=0; g<env->num_goals; g++) {
-            Goal* goal = &env->goals[g];
-            env->observations[obs_idx++] = (goal->x - agent->x)/env->width;
-            env->observations[obs_idx++] = (goal->y - agent->y)/env->height;
+    env->observations[obs_idx++] = (1 - env->agent->y/(env->height/2.0f))/0.115;
+    env->observations[obs_idx++] = env->agent->x/env->width;
+    env->observations[obs_idx++] = (float) env->speed / (float) env->speed_max;
+    env->observations[obs_idx++] = env->agent->ticks/100.0f;
+
+    for(int o = 0; o < env->max_obstacles; o++){
+        if (o < env->num_obstacles) {
+            Obstacle* obstacle = &env->obstacles[o];
+            env->observations[obs_idx++] = obstacle->x/env->width;
+        } else {
+            env->observations[obs_idx++] = 1.0;
         }
-        for (int a=0; a<env->num_agents; a++) {
-            Agent* other = &env->agents[a];
-            env->observations[obs_idx++] = (other->x - agent->x)/env->width;
-            env->observations[obs_idx++] = (other->y - agent->y)/env->height;
-        }
-        env->observations[obs_idx++] = agent->heading/(2*PI);
-        env->observations[obs_idx++] = env->rewards[a];
-        env->observations[obs_idx++] = agent->x/env->width;
-        env->observations[obs_idx++] = agent->y/env->height;
     }
 }
 
-// Required function
-void c_reset(Dinosaur* env) {
-    for (int i=0; i<env->num_agents; i++) {
-        env->agents[i].x = rand() % env->width;
-        env->agents[i].y = rand() % env->height;
-        env->agents[i].ticks_since_reward = 0;
+void c_reset(Dinosaur* env){
+    env->speed = env->speed_init;
+    env->obstacle_spawn_rate = env->obstacle_spawn_rate_init;
+
+    env->agent->ticks = 0;
+    env->agent->y_velocity = 0.0f;
+
+    env->num_obstacles = 0;
+    if (env->obstacles != NULL) {
+          free(env->obstacles);
+          env->obstacles = NULL;
     }
-    for (int i=0; i<env->num_goals; i++) {
-        env->goals[i].x = rand() % env->width;
-        env->goals[i].y = rand() % env->height;
-    }
+
     compute_observations(env);
 }
 
-float clip(float val, float min, float max) {
-    if (val < min) {
-        return min;
-    } else if (val > max) {
-        return max;
+void c_step(Dinosaur* env){
+    env->agent->ticks += 1;
+    *env->rewards = 0.01f;
+    *env->terminals = 0;
+
+    // handle jump
+    if(env->actions[0] == JUMP && env->agent->y_velocity == 0){
+        env->agent->y_velocity = -env->agent->jump_strength;
+    } else if (env->actions[0] == NOOP && env->agent->y < env->floor_y){
+        env->agent->y_velocity += env->gravity * 4;
     }
-    return val;
-}
 
-// Required function
-void c_step(Dinosaur* env) {
-    for (int i=0; i<env->num_agents; i++) {
-        env->rewards[i] = 0;
-        Agent* agent = &env->agents[i];
-        agent->ticks_since_reward += 1;
+    env->agent->y_velocity += env->gravity;
+    env->agent->y += env->agent->y_velocity;
+    if(env->agent->y >= env->floor_y){
+        env->agent->y = env->floor_y;
+        env->agent->y_velocity = 0;
+    }
 
-        agent->heading += ((float)env->actions[2*i] - 4.0f)/12.0f;
-        agent->heading = clip(agent->heading, 0, 2*PI);
+    for(int o = 0; o < env->num_obstacles; o++){
+        // move obstacles
+        Obstacle* obstacle = &env->obstacles[o];
+        obstacle->x -= env->speed;
 
-        agent->speed += 1.0f*((float)env->actions[2*i + 1] - 2.0f);
-        agent->speed = clip(agent->speed, -20.0f, 20.0f);
+        // handle collisions
+        float dist_x = env->agent->x - obstacle->x;
+        if(dist_x <= CACTUS_WIDTH && dist_x >= -CACTUS_WIDTH && env->agent->y > env->floor_y - CACTUS_HEIGHT){
+            *env->rewards = -1.0f;
+            *env->terminals = 1;
+            env->log.episode_return += env->agent->ticks / 100.0f - 1.0f;
+            env->log.episode_length += env->agent->ticks;
+            env->log.score += env->agent->ticks / 100.0f - 1.0f;
+            env->log.perf += env->agent->ticks / 100.0f - 1.0f;
+            env->log.n += 1;
+            c_reset(env);
+            return;
+        }
 
-        agent->x += agent->speed*cosf(agent->heading);
-        agent->x = clip(agent->x, 0, env->width);
-
-        agent->y += agent->speed*sinf(agent->heading);
-        agent->y = clip(agent->y, 0, env->height);
-
-        if (agent->ticks_since_reward % 512 == 0) {
-            env->agents[i].x = rand() % env->width;
-            env->agents[i].y = rand() % env->height;
+        // despawn obstacles
+        if(obstacle->x < 0 - 10){
+            for(int j = o; j < env->num_obstacles - 1; j++){
+                env->obstacles[j] = env->obstacles[j+1];
+            }
+            env->num_obstacles--;
+            env->obstacles = realloc(env->obstacles, env->num_obstacles * sizeof(Obstacle));
+            o--;
         }
     }
-    update_goals(env);
+
+    // spawn new obstacles
+    if(env->agent->ticks % env->obstacle_spawn_rate == 0){
+        int spawn_num = rand() % 3 + 1;
+        while(spawn_num + env->num_obstacles >= env->max_obstacles) spawn_num = rand() % 3 + 1;
+
+        for(int i  = 0; i < spawn_num; i++){
+            env->num_obstacles++;
+            env->obstacles = realloc(env->obstacles, env->num_obstacles * sizeof(Obstacle));
+            env->obstacles[env->num_obstacles-1].x = env->width + i * (CACTUS_WIDTH + 10);
+        }
+   }
+
+    // increase speed and decrease obstacle spawn rate
+    if(env->agent->ticks > 0 && env->agent->ticks % env->rate_increment_rate == 0){
+        if(env->speed <= env->speed_max) env->speed+=1;
+        if(env->obstacle_spawn_rate >= env->obstacle_spawn_rate_min) env->obstacle_spawn_rate-=10;
+    }
+
     compute_observations(env);
 }
 
-// Required function. Should handle creating the client on first call
-void c_render(Dinosaur* env) {
-    if (env->client == NULL) {
-        InitWindow(env->width, env->height, "PufferLib Dinosaur");
+void c_render(Dinosaur* env){
+    if(env->textures == NULL) {
+        InitWindow(env->width, env->height, "Pufferlib Dinosaur");
         SetTargetFPS(60);
-        env->client = (Client*)calloc(1, sizeof(Client));
+        env->textures = (Textures*) calloc(1, sizeof(Textures));
 
-        // Don't do this before calling InitWindow
-        env->client->puffer = LoadTexture("resources/shared/puffers_128.png");
-        env->client->star = LoadTexture("resources/dinosaur/star.png");
+        env->textures->cactus = LoadTexture("resources/shared/puffers_128.png");
+        env->textures->dinosaur = LoadTexture("resources/shared/puffers_128.png");
     }
 
-    // Standard across our envs so exiting is always the same
-    if (IsKeyDown(KEY_ESCAPE)) {
+    if(IsKeyDown(KEY_ESCAPE)) {
         exit(0);
     }
 
     BeginDrawing();
-    ClearBackground((Color){6, 24, 24, 255});
 
-    for (int i=0; i<env->num_goals; i++) {
-        Goal* goal = &env->goals[i];
-        DrawTexture(
-            env->client->star,
-            goal->x - 32,
-            goal->y - 32,
-            WHITE
-        );
+    ClearBackground((Color){255, 255, 255, 255});
+    DrawRectangle(0, env->height/2.0, env->width, env->height, (Color){128, 128, 128, 255});
+
+    for(int o = 0; o < env->num_obstacles; o++){
+        Obstacle* obstacle = &env->obstacles[o];
+        DrawRectangle(obstacle->x-CACTUS_WIDTH,
+            env->height/2-CACTUS_HEIGHT,
+            CACTUS_WIDTH,
+            CACTUS_HEIGHT,
+            (Color){0, 0, 255, 255});
     }
 
-    for (int i=0; i<env->num_agents; i++) {
-        Agent* agent = &env->agents[i];
-        float heading = agent->heading;
-        DrawTexturePro(
-            env->client->puffer,
-            (Rectangle){
-                (heading < PI/2 || heading > 3*PI/2) ? 0 : 128,
-                0, 128, 128,
-            },
-            (Rectangle){
-                agent->x - 64,
-                agent->y - 64,
-                128,
-                128
-            },
-            (Vector2){0, 0},
-            0,
-            WHITE
-        );
-    }
+    DrawRectangle(env->agent->x-PLAYER_WIDTH,
+        env->agent->y-PLAYER_HEIGHT,
+        PLAYER_WIDTH,
+        PLAYER_HEIGHT,
+        (Color){255, 0, 0, 255});
 
     EndDrawing();
 }
 
-// Required function. Should clean up anything you allocated
-// Do not free env->observations, actions, rewards, terminals
-void c_close(Dinosaur* env) {
-    free(env->agents);
-    free(env->goals);
-    if (env->client != NULL) {
-        Client* client = env->client;
-        UnloadTexture(client->puffer);
-        UnloadTexture(client->star);
+void c_close(Dinosaur* env){
+    free(env->agent);
+    free(env->obstacles);
+    if(env->textures != NULL){
+        UnloadTexture(env->textures->cactus);
+        UnloadTexture(env->textures->dinosaur);
         CloseWindow();
-        free(client);
+        free(env->textures);
     }
 }
