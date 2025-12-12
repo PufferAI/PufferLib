@@ -107,6 +107,8 @@ int demo() {
         .reward_food = 0.1f,
         .reward_delivery = 1.0f,
         .reward_death = -1.0f,
+        .reward_demo_match = 0.01f,      // Small reward for matching demo
+        .reward_demo_mismatch = -0.01f,  // Small penalty for not matching demo
         .cell_size = 1,
     };
     

@@ -19,17 +19,19 @@ class AntsEnv(pufferlib.PufferEnv):
     """
     
     def __init__(
-            self, 
-            num_envs=32, 
-            width=1280, 
+            self,
+            num_envs=32,
+            width=1280,
             height=720,
             num_ants=32,
-            reward_food=0.1, 
-            reward_delivery=1.0, 
+            reward_food=0.1,
+            reward_delivery=1.0,
             reward_death=0.0,
-            report_interval=1, 
-            render_mode=None, 
-            buf=None, 
+            reward_demo_match=0.01,
+            reward_demo_mismatch=-0.01,
+            report_interval=1,
+            render_mode=None,
+            buf=None,
             seed=0):
         
         if num_envs is not None:
@@ -83,6 +85,8 @@ class AntsEnv(pufferlib.PufferEnv):
                 reward_food=reward_food,
                 reward_delivery=reward_delivery,
                 reward_death=reward_death,
+                reward_demo_match=reward_demo_match,
+                reward_demo_mismatch=reward_demo_mismatch,
                 cell_size=self.cell_size
             )
             c_envs.append(env_id)

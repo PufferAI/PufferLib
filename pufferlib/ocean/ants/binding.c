@@ -9,9 +9,11 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->num_ants = unpack(kwargs, "num_ants");
     env->reward_food = unpack(kwargs, "reward_food");
     env->reward_delivery = unpack(kwargs, "reward_delivery");
+    env->reward_demo_match = unpack(kwargs, "reward_demo_match");
+    env->reward_demo_mismatch = unpack(kwargs, "reward_demo_mismatch");
     env->cell_size = unpack(kwargs, "cell_size");
-    
-    init_ants_env(env);    
+
+    init_ants_env(env);
     return 0;
 }
 

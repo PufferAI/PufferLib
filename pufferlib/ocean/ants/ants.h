@@ -77,6 +77,7 @@ typedef struct {
     int colony_id;
     bool has_food;
     int lifetime;            // Track ant lifetime for performance metrics
+    float prev_target_dist;  // Previous distance to target for reward calculation
 } Ant;
 
 typedef struct {
@@ -120,6 +121,8 @@ struct AntsEnv {
     float reward_food;
     float reward_delivery;
     float reward_death;
+    float reward_demo_match;      // Reward for matching demo action
+    float reward_demo_mismatch;   // Penalty for not matching demo action
     
     // Rendering
     Client* client;            // Raylib client
@@ -236,6 +239,30 @@ static inline bool is_in_vision(Vector2D ant_pos, Vector2D target) {
     return true;
 }
 
+// Get the target position for an ant (colony if carrying food, nearest food otherwise)
+static inline Vector2D get_ant_target(AntsEnv* env, Ant* ant) {
+    if (ant->has_food) {
+        // Target is the colony when carrying food
+        return env->colonies[ant->colony_id].position;
+    } else {
+        // Target is the nearest food source when not carrying food
+        float closest_food_dist_sq = env->width * env->width + env->height * env->height;
+        Vector2D closest_food_pos = ant->position; // Default to current position if no food found
+
+        for (int i = 0; i < env->num_food_sources; i++) {
+            if (env->food_sources[i].amount > 0) {
+                float dist_sq = distance_squared(ant->position, env->food_sources[i].position);
+                if (dist_sq < closest_food_dist_sq) {
+                    closest_food_dist_sq = dist_sq;
+                    closest_food_pos = env->food_sources[i].position;
+                }
+            }
+        }
+
+        return closest_food_pos;
+    }
+}
+
 
 
 static inline void add_pheromone(AntsEnv* env, Vector2D position, int colony_id) {
@@ -319,12 +346,16 @@ void compute_observations(AntsEnv* env) {
 void spawn_ant(AntsEnv* env, int ant_id) {
     Ant* ant = &env->ants[ant_id];
     Colony* colony = &env->colonies[ant->colony_id];
-    
+
     ant->position = colony->position;
     ant->direction = wrap_angle((rand() % 4) * (M_PI / 2)); // Randomly choose between 0, 90, 180, or 270 degrees
     ant->has_food = false;
     ant->lifetime = random_float(0, ANT_LIFETIME);
-    
+
+    // Initialize previous target distance
+    Vector2D target = get_ant_target(env, ant);
+    ant->prev_target_dist = sqrtf(distance_squared(ant->position, target));
+
     // Reset individual ant log
     env->ant_logs[ant_id] = (Log){0};
 }
@@ -398,13 +429,87 @@ void c_reset(AntsEnv* env) {
     compute_observations(env);
 }
 
+// Compute the hardcoded demo action for an ant
+// This replicates the logic from demo() lines 176-226
+int get_demo_action(AntsEnv* env, int ant_id) {
+    Ant* ant = &env->ants[ant_id];
+
+    if (ant->has_food) {
+        // If ant has food, return to colony
+        Colony* colony = &env->colonies[ant->colony_id];
+        float angle_to_colony = get_angle(ant->position, colony->position);
+        float angle_diff = wrap_angle(angle_to_colony - ant->direction);
+
+        // Turn towards colony
+        if (angle_diff > 0.1) {
+            return ACTION_TURN_RIGHT;
+        } else if (angle_diff < -0.1) {
+            return ACTION_TURN_LEFT;
+        } else {
+            return ACTION_MOVE_FORWARD;
+        }
+    } else {
+        // If ant doesn't have food, seek nearest food source
+        float closest_food_dist_sq = env->width * env->width;
+        Vector2D closest_food_pos = {0, 0};
+        bool found_food = false;
+
+        for (int j = 0; j < env->num_food_sources; j++) {
+            if (env->food_sources[j].amount > 0) {
+                float dist_sq = distance_squared(ant->position, env->food_sources[j].position);
+                if (dist_sq < closest_food_dist_sq && is_in_vision(ant->position, env->food_sources[j].position)) {
+                    closest_food_dist_sq = dist_sq;
+                    closest_food_pos = env->food_sources[j].position;
+                    found_food = true;
+                }
+            }
+        }
+
+        if (found_food) {
+            // Turn towards food
+            float angle_to_food = get_angle(ant->position, closest_food_pos);
+            float angle_diff = wrap_angle(angle_to_food - ant->direction);
+
+            if (angle_diff > 0.1) {
+                return ACTION_TURN_RIGHT;
+            } else if (angle_diff < -0.1) {
+                return ACTION_TURN_LEFT;
+            } else {
+                return ACTION_MOVE_FORWARD;
+            }
+        } else {
+            // If no food in sight, move forward (we'll use this as the "default" demo action)
+            // Note: The random turning behavior is not deterministic, so we default to forward
+            return ACTION_MOVE_FORWARD;
+        }
+    }
+}
+
 void step_ant(AntsEnv* env, int ant_id) {
     Ant* ant = &env->ants[ant_id];
     env->ant_logs[ant_id].episode_length += 1;
     ant->lifetime++;
-    
+
     int action = env->actions[ant_id];
-    
+
+    // Store previous target for reward calculation before action execution
+    Vector2D prev_target = get_ant_target(env, ant);
+    float prev_dist_to_target = sqrtf(distance_squared(ant->position, prev_target));
+
+    // Compute demo action and compare with agent's action
+    int demo_action = get_demo_action(env, ant_id);
+    if (action == demo_action) {
+        // Reward for matching the demo action
+        env->rewards[ant_id] += env->reward_demo_match;
+        env->ant_logs[ant_id].episode_return += env->reward_demo_match;
+        env->ant_logs[ant_id].reward += env->reward_demo_match;
+    } else {
+        // Punish for not matching the demo action
+        env->rewards[ant_id] += env->reward_demo_mismatch;
+        env->ant_logs[ant_id].episode_return += env->reward_demo_mismatch;
+        env->ant_logs[ant_id].reward += env->reward_demo_mismatch;
+    }
+
     // Execute action
     switch (action) {
         case ACTION_TURN_LEFT:
@@ -421,11 +526,11 @@ void step_ant(AntsEnv* env, int ant_id) {
         case ACTION_MOVE_FORWARD:
             break;
     }
-    
+
     // Always move forward
     ant->position.x += ANT_SPEED * cos(ant->direction);
     ant->position.y += ANT_SPEED * sin(ant->direction);
-    
+
     // Wrap around edges
     if (ant->position.x < 0) ant->position.x = env->width;
     if (ant->position.x > env->width) ant->position.x = 0;
@@ -440,12 +545,12 @@ void step_ant(AntsEnv* env, int ant_id) {
                 if (dist_sq < (ANT_SIZE + FOOD_SIZE) * (ANT_SIZE + FOOD_SIZE)) {
                     ant->has_food = true;
                     env->food_sources[j].amount--;
-                    
+
                     // If food source is exhausted, respawn it
                     if (env->food_sources[j].amount <= 0) {
                         spawn_food(env);
                     }
-                    
+
                     env->rewards[ant_id] += env->reward_food;
                     env->ant_logs[ant_id].episode_return += env->reward_food;
                     env->ant_logs[ant_id].reward += env->reward_food;
@@ -453,26 +558,8 @@ void step_ant(AntsEnv* env, int ant_id) {
                 }
             }
         }
-        
-        
-        // Small positive reward for heading towards visible food
-        // for (int j = 0; j < env->num_food_sources; j++) {
-        //     if (env->food_sources[j].amount > 0) {
-        //         // float dist_sq = distance_squared(ant->position, env->food_sources[j].position);
-        //         if (is_in_vision(ant->position, env->food_sources[j].position)) {
-        //             float angle_to_food = get_angle(ant->position, env->food_sources[j].position);
-        //             float angle_diff = wrap_angle(angle_to_food - ant->direction);
-                    
-        //             if (fabs(angle_diff) < TURN_ANGLE) {
-        //                 env->rewards[ant_id] += 0.0005f;
-        //                 env->ant_logs[ant_id].reward += 0.0005f;
-        //             }
-        //             break;
-        //         }
-        //     }
-        // }
     }
-    
+
     // Check for food delivery
     if (ant->has_food) {
         Colony* colony = &env->colonies[ant->colony_id];
@@ -480,25 +567,30 @@ void step_ant(AntsEnv* env, int ant_id) {
         if (dist_sq < (ANT_SIZE + COLONY_SIZE) * (ANT_SIZE + COLONY_SIZE)) {
             ant->has_food = false;
             colony->food_collected++;
-            env->rewards[ant_id] += env->reward_delivery; // Larger reward for food delivery
+            env->rewards[ant_id] += env->reward_delivery;
             env->ant_logs[ant_id].episode_return += env->reward_delivery;
             env->ant_logs[ant_id].score += 1;
             env->ant_logs[ant_id].reward += env->reward_delivery;
         }
-        
-        // // Reward for heading towards colony when carrying food
-        // float angle_to_colony = get_angle(ant->position, colony->position);
-        // float angle_diff = wrap_angle(angle_to_colony - ant->direction);
-        
-        // if (fabs(angle_diff) < TURN_ANGLE) {
-        //     env->rewards[ant_id] += 0.01f;
-        //     env->ant_logs[ant_id].reward += 0.01f;
-        // } else {
-        //     // Small negative reward for not heading towards colony when carrying food
-        //     env->rewards[ant_id] -= 0.0005f;
-        //     env->ant_logs[ant_id].reward -= 0.0005f;
-        // }
     }
+
+    // Distance-based reward: reward for getting closer to target, punish for getting further
+    // Get current target (may have changed if ant picked up or delivered food)
+    Vector2D current_target = get_ant_target(env, ant);
+    float current_dist_to_target = sqrtf(distance_squared(ant->position, current_target));
+
+    // Calculate distance change (negative means got closer, positive means got further)
+    float distance_change = current_dist_to_target - prev_dist_to_target;
+
+    // Reward proportional to reduction in distance (negative distance_change is good)
+    float distance_reward = -distance_change * 0.01f; // Scale factor to adjust reward magnitude
+
+    env->rewards[ant_id] += distance_reward;
+    env->ant_logs[ant_id].episode_return += distance_reward;
+    env->ant_logs[ant_id].reward += distance_reward;
+
+    // Update previous distance for next step
+    ant->prev_target_dist = current_dist_to_target;
     
     // MULTIPLE TERMINAL CONDITIONS FOR FREQUENT LOG GENERATION
     bool should_terminate = false;
