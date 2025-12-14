@@ -9,8 +9,8 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->height = unpack(kwargs, "height");
     env->speed_init = unpack(kwargs, "speed_init");
     env->speed_max = unpack(kwargs, "speed_max");
-    env->obstacle_spawn_rate_init = unpack(kwargs, "obstacle_spawn_rate_init");
-    env->obstacle_spawn_rate_min = unpack(kwargs, "obstacle_spawn_rate_min");
+    env->spawn_rate_min = unpack(kwargs, "spawn_rate_min");
+    env->spawn_rate_max = unpack(kwargs, "spawn_rate_max");
     env->rate_increment_rate = unpack(kwargs, "rate_increment_rate");
     env->max_obstacles = unpack(kwargs, "max_obstacles");
     init(env);

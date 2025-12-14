@@ -3,20 +3,20 @@
 
 int main() {
     int max_obstacles = 10;
-    int num_obs = max_obstacles + 4;
+    int num_obs = (max_obstacles*2) + 4;
 
     Weights* weights = load_weights("resources/dinosaur/puffer_dinosaur_weights.bin", 544316);
 
-    int logit_sizes[1] = {2};
+    int logit_sizes[1] = {3};
     LinearLSTM* net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
 
     Dinosaur env = {
         .width = 800,
-        .height = 800,
-        .speed_init = 4,
+        .height = 400,
+        .speed_init = 6,
         .speed_max = 12,
-        .obstacle_spawn_rate_init = 120,
-        .obstacle_spawn_rate_min = 50,
+        .spawn_rate_max = 100,
+        .spawn_rate_min = 40,
         .rate_increment_rate = 400,
         .max_obstacles = 8
     };
@@ -33,7 +33,8 @@ int main() {
     while (!WindowShouldClose()) {
         if(IsKeyDown(KEY_LEFT_SHIFT)){
             env.actions[0] = NOOP;
-            if(IsKeyDown(KEY_SPACE)) env.actions[0] = JUMP;
+            if(IsKeyDown(KEY_UP)) env.actions[0] = JUMP;
+            if(IsKeyDown(KEY_DOWN)) env.actions[0] = CROUCH;
         } else {
             int* actions = (int*)env.actions;
             forward_linearlstm(net, env.observations, actions);

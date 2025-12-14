@@ -6,12 +6,12 @@ from pufferlib.ocean.dinosaur import binding
 
 class Dinosaur(pufferlib.PufferEnv):
     def __init__(self, num_envs=1024, width=800, height=800,
-            speed_init=4, speed_max=8, obstacle_spawn_rate_init=120, obstacle_spawn_rate_min=70,
-            rate_increment_rate=200, max_obstacles=8,
+            speed_init=6, speed_max=12, spawn_rate_max=100, spawn_rate_min=40,
+            rate_increment_rate=400, max_obstacles=10,
             render_mode=None, log_interval=128, size=11, buf=None, seed=0):
-        self.single_observation_space = gymnasium.spaces.Box(low=0.0, high=1,
-            shape=(max_obstacles + 4,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.Discrete(2)
+        self.single_observation_space = gymnasium.spaces.Box(low=-1.0, high=1,
+            shape=((max_obstacles*2) + 4,), dtype=np.float32)
+        self.single_action_space = gymnasium.spaces.Discrete(3)
 
         self.render_mode = render_mode
         self.num_agents = num_envs
@@ -27,7 +27,7 @@ class Dinosaur(pufferlib.PufferEnv):
                 self.terminals[i:i+1],
                 self.truncations[i:i+1],
                 seed, width=width, height=height, speed_init=speed_init, speed_max=speed_max,
-                obstacle_spawn_rate_init=obstacle_spawn_rate_init, obstacle_spawn_rate_min=obstacle_spawn_rate_min,
+                spawn_rate_max=spawn_rate_max, spawn_rate_min=spawn_rate_min,
                 rate_increment_rate=rate_increment_rate, max_obstacles=max_obstacles
             )
             c_envs.append(c_env)
@@ -60,14 +60,12 @@ class Dinosaur(pufferlib.PufferEnv):
         binding.vec_close(self.c_envs)
 
 if __name__ == '__main__':
-    N = 512
-
-    env = Dinosaur(num_envs=N)
+    env = Dinosaur(num_envs=1024)
     env.reset()
     steps = 0
 
     CACHE = 1024
-    actions = np.random.randint(env.single_action_space.nvec, size=(CACHE, 1))
+    actions = np.random.randint(0, 2, (1024, env.num_agents))
 
     i = 0
     import time
