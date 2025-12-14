@@ -6,7 +6,7 @@ from pufferlib.ocean.dinosaur import binding
 
 class Dinosaur(pufferlib.PufferEnv):
     def __init__(self, num_envs=1024, width=800, height=800,
-            speed_init=6, speed_max=12, spawn_rate_max=100, spawn_rate_min=40,
+            speed_init=6, speed_max=12, spawn_rate_max=100, spawn_rate_min=50,
             rate_increment_rate=400, max_obstacles=10,
             render_mode=None, log_interval=128, size=11, buf=None, seed=0):
         self.single_observation_space = gymnasium.spaces.Box(low=-1.0, high=1,

@@ -16,10 +16,11 @@ int main() {
         .speed_init = 6,
         .speed_max = 12,
         .spawn_rate_max = 100,
-        .spawn_rate_min = 40,
+        .spawn_rate_min = 50,
         .rate_increment_rate = 400,
-        .max_obstacles = 8
+        .max_obstacles = 8,
     };
+    env.client = make_client(&env);
     init(&env);
 
     env.observations = calloc(num_obs, sizeof(float));

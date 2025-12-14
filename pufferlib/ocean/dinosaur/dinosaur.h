@@ -31,9 +31,11 @@ typedef struct {
 } Log;
 
 typedef struct {
-    Texture2D dinosaur;
+    Texture2D dinosaur_up;
+    Texture2D dinosaur_down;
     Texture2D cactus;
-} Textures;
+    Texture2D bird;
+} Client;
 
 typedef struct {
     float x;
@@ -44,6 +46,7 @@ typedef struct {
     float width;
     float height;
     float x_offset;
+    Texture2D tex;
 } Agent;
 
 typedef struct {
@@ -51,7 +54,7 @@ typedef struct {
     float y;
     float width;
     float height;
-    Color color;
+    Texture2D tex;
 } Obstacle;
 
 typedef struct {
@@ -62,7 +65,7 @@ typedef struct {
     float* rewards;
     unsigned char* terminals;
     /* Not customizable */
-    Textures* textures;
+    Client* client;
     Agent* agent;
     Obstacle* obstacles;
     int num_obstacles;
@@ -81,6 +84,19 @@ typedef struct {
     int rate_increment_rate;
     int max_obstacles;
 } Dinosaur;
+
+Client* make_client(Dinosaur* env){
+    Client* client = (Client*)calloc(1, sizeof(Client));
+
+    InitWindow(env->width, env->height, "Pufferlib Dinosaur");
+    SetTargetFPS(60);
+
+    client->cactus = LoadTexture("resources/dinosaur/cactus.png");
+    client->bird = LoadTexture("resources/dinosaur/bird.png");
+    client->dinosaur_up = LoadTexture("resources/dinosaur/dino.png");
+    client->dinosaur_down = LoadTexture("resources/dinosaur/dino_down.png");
+    return client;
+}
 
 void init(Dinosaur* env) {
     env->gravity = GRAVITY;
@@ -145,18 +161,21 @@ void c_step(Dinosaur* env){
             env->agent->height = PLAYER_HEIGHT;
             env->agent->width = PLAYER_WIDTH;
             env->agent->x_offset = 0.0f;
+            if(env->client != NULL) env->agent->tex = env->client->dinosaur_up;
             break;
         case CROUCH:
             env->agent->y_velocity = -env->agent->jump_strength;
             env->agent->height = PLAYER_HEIGHT / 2.f;
             env->agent->width = PLAYER_WIDTH * 2.0f;
             env->agent->x_offset = PLAYER_WIDTH;
+            if(env->client != NULL) env->agent->tex = env->client->dinosaur_down;
             break;
         case JUMP:
             if(env->agent->y == 0.0f) env->agent->y_velocity = env->agent->jump_strength;
             env->agent->height = PLAYER_HEIGHT;
             env->agent->width = PLAYER_WIDTH;
             env->agent->x_offset = 0.0f;
+            if(env->client != NULL) env->agent->tex = env->client->dinosaur_up;
             break;
     }
 
@@ -224,7 +243,7 @@ void c_step(Dinosaur* env){
                 env->obstacles[env->num_obstacles-1].y = 0;
                 env->obstacles[env->num_obstacles-1].width = CACTUS_WIDTH;
                 env->obstacles[env->num_obstacles-1].height = CACTUS_HEIGHT;
-                env->obstacles[env->num_obstacles-1].color = (Color){0, 255, 0, 255};
+                if(env->client != NULL) env->obstacles[env->num_obstacles-1].tex = env->client->cactus;
             }
         } else if (env->num_obstacles <= env->max_obstacles){
             env->num_obstacles++;
@@ -233,7 +252,7 @@ void c_step(Dinosaur* env){
             env->obstacles[env->num_obstacles-1].y = BIRD_Y;
             env->obstacles[env->num_obstacles-1].width = BIRD_WIDTH;
             env->obstacles[env->num_obstacles-1].height = BIRD_HEIGHT;
-            env->obstacles[env->num_obstacles-1].color = (Color){0, 0, 255, 255};
+            if(env->client != NULL) env->obstacles[env->num_obstacles-1].tex = env->client->bird;
         }
         env->spawn_rate = rand() % (env->spawn_rate_max - env->spawn_rate_min) + env->spawn_rate_min;
         env->spawn_rate = env->spawn_rate / ((float)env->speed / (float)env->speed_init);
@@ -249,13 +268,8 @@ void c_step(Dinosaur* env){
 }
 
 void c_render(Dinosaur* env){
-    if(env->textures == NULL) {
-        InitWindow(env->width, env->height, "Pufferlib Dinosaur");
-        SetTargetFPS(60);
-        env->textures = (Textures*) calloc(1, sizeof(Textures));
-
-        env->textures->cactus = LoadTexture("resources/shared/puffers_128.png");
-        env->textures->dinosaur = LoadTexture("resources/shared/puffers_128.png");
+    if(env->client == NULL) {
+        env->client = make_client(env);
     }
 
     if(IsKeyDown(KEY_ESCAPE)) {
@@ -265,25 +279,37 @@ void c_render(Dinosaur* env){
     BeginDrawing();
 
     ClearBackground((Color){255, 255, 255, 255});
-    DrawRectangle(0, env->height/2.0, env->width, env->height, (Color){128, 128, 128, 255});
+    DrawRectangle(0, env->height/2.0, env->width, env->height, (Color){95, 87, 79, 255});
 
     for(int o = 0; o < env->num_obstacles; o++){
         Obstacle* obstacle = &env->obstacles[o];
-        DrawRectangle(
-            obstacle->x - obstacle->width,
-            env->floor_y - obstacle->height - obstacle->y,
-            obstacle->width,
-            obstacle->height,
-            obstacle->color
+        DrawTexturePro(
+            obstacle->tex,
+            (Rectangle){0, 0, obstacle->width, obstacle->height},
+            (Rectangle){
+                obstacle->x - obstacle->width,
+                env->floor_y - obstacle->height - obstacle->y,
+                obstacle->width,
+                obstacle->height,
+            },
+            (Vector2){0, 0},
+            0.0,
+            WHITE
         );
     }
 
-    DrawRectangle(
-        env->agent->x - env->agent->width + env->agent->x_offset,
-        env->floor_y - env->agent->height - env->agent->y,
-        env->agent->width,
-        env->agent->height,
-        (Color){255, 0, 0, 255}
+    DrawTexturePro(
+        env->agent->tex,
+        (Rectangle){0, 0, env->agent->width, env->agent->height},
+        (Rectangle){
+            env->agent->x - env->agent->width + env->agent->x_offset,
+            env->floor_y - env->agent->height - env->agent->y,
+            env->agent->width,
+            env->agent->height
+        },
+        (Vector2){0, 0},
+        0.0f,
+        WHITE
     );
 
     EndDrawing();
@@ -292,10 +318,11 @@ void c_render(Dinosaur* env){
 void c_close(Dinosaur* env){
     free(env->agent);
     free(env->obstacles);
-    if(env->textures != NULL){
-        UnloadTexture(env->textures->cactus);
-        UnloadTexture(env->textures->dinosaur);
+    if(env->client != NULL){
+        UnloadTexture(env->client->cactus);
+        UnloadTexture(env->client->dinosaur_up);
+        UnloadTexture(env->client->dinosaur_down);
         CloseWindow();
-        free(env->textures);
+        free(env->client);
     }
 }
