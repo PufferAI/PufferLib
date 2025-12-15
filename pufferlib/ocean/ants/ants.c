@@ -17,7 +17,7 @@ void render_ant_observations(AntsEnv* env, int ant_id) {
     int panel_x = 20;
     int panel_y = 100;
     int panel_width = 300;
-    int panel_height = 200;
+    int panel_height = 240;  // Increased for 2 additional pheromone observations
     
     // Draw semi-transparent background panel
     DrawRectangle(panel_x - 10, panel_y - 10, panel_width + 20, panel_height + 20, 
@@ -50,12 +50,20 @@ void render_ant_observations(AntsEnv* env, int ant_id) {
     DrawText(TextFormat("Colony Dist: %.3f", obs[5]), panel_x, y_offset, 14, RAYWHITE);
     y_offset += line_height;
     
-    DrawText(TextFormat("Food Dir: %.3f", obs[6]), panel_x, y_offset, 14, 
+    DrawText(TextFormat("Food Dir: %.3f", obs[6]), panel_x, y_offset, 14,
              obs[6] < 0 ? GRAY : RAYWHITE);
     y_offset += line_height;
-    
-    DrawText(TextFormat("Food Dist: %.3f", obs[7]), panel_x, y_offset, 14, 
+
+    DrawText(TextFormat("Food Dist: %.3f", obs[7]), panel_x, y_offset, 14,
              obs[7] < 0 ? GRAY : RAYWHITE);
+    y_offset += line_height;
+
+    DrawText(TextFormat("Pheromone Dir: %.3f", obs[8]), panel_x, y_offset, 14,
+             obs[8] < 0 ? GRAY : RAYWHITE);
+    y_offset += line_height;
+
+    DrawText(TextFormat("Pheromone Str: %.3f", obs[9]), panel_x, y_offset, 14,
+             obs[9] < 0 ? GRAY : RAYWHITE);
     
     // Visual indicators on the ant
     Vector2D ant_pos = ant->position;
@@ -87,7 +95,19 @@ void render_ant_observations(AntsEnv* env, int ant_id) {
         DrawLineEx((Vector2){ant_pos.x, ant_pos.y}, (Vector2){food_end.x, food_end.y}, 2, GREEN);
         DrawText("FOOD", food_end.x + 5, food_end.y - 10, 12, GREEN);
     }
-    
+
+    // Draw direction to pheromone (if detected)
+    if (obs[8] >= 0) {
+        float pheromone_angle = (obs[8] * 2 * M_PI) - M_PI;
+        float line_length = 35.0f;
+        Vector2D pheromone_end = {
+            ant_pos.x + line_length * cos(pheromone_angle),
+            ant_pos.y + line_length * sin(pheromone_angle)
+        };
+        DrawLineEx((Vector2){ant_pos.x, ant_pos.y}, (Vector2){pheromone_end.x, pheromone_end.y}, 2, MAGENTA);
+        DrawText("PHEROMONE", pheromone_end.x + 5, pheromone_end.y - 10, 12, MAGENTA);
+    }
+
     // Draw current direction
     float current_angle = (obs[2] * 2 * M_PI) - M_PI;
     float dir_length = 25.0f;
@@ -148,25 +168,26 @@ int demo() {
         // User can take control with shift key
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
             // Control first ant of colony 1 for demo
+            // Default to move forward when no other action is pressed
             env.actions[0] = ACTION_MOVE_FORWARD;
-            
-            // Handle left turn
+
+            // Handle left turn (overrides movement)
             if ((IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) && !left_pressed) {
                 env.actions[0] = ACTION_TURN_LEFT;
                 left_pressed = true;
             } else if (!IsKeyDown(KEY_LEFT) && !IsKeyDown(KEY_A)) {
                 left_pressed = false;
             }
-            
-            // Handle right turn
+
+            // Handle right turn (overrides movement)
             if ((IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) && !right_pressed) {
                 env.actions[0] = ACTION_TURN_RIGHT;
                 right_pressed = true;
             } else if (!IsKeyDown(KEY_RIGHT) && !IsKeyDown(KEY_D)) {
                 right_pressed = false;
             }
-            
-            // Handle pheromone drop
+
+            // Handle pheromone drop (overrides movement)
             if (IsKeyDown(KEY_SPACE) && !space_pressed) {
                 env.actions[0] = ACTION_DROP_PHEROMONE;
                 space_pressed = true;
@@ -175,6 +196,9 @@ int demo() {
             }
             
             // Rest of ants act via scripted behaviors
+            // Threshold is half of turn angle to avoid oscillation with 45-degree turns
+            const float turn_threshold = TURN_ANGLE / 2.0f; // ~22.5 degrees
+
             for (int i = 1; i < env.num_ants; i++) {
                 Ant* ant = &env.ants[i];
                 if (ant->has_food) {
@@ -182,11 +206,11 @@ int demo() {
                     Colony* colony = &env.colonies[ant->colony_id];
                     float angle_to_colony = get_angle(ant->position, colony->position);
                     float angle_diff = wrap_angle(angle_to_colony - ant->direction);
-                    
-                    // Turn towards colony
-                    if (angle_diff > 0.1) {
+
+                    // Turn towards colony if angle difference is significant
+                    if (angle_diff > turn_threshold) {
                         env.actions[i] = ACTION_TURN_RIGHT;
-                    } else if (angle_diff < -0.1) {
+                    } else if (angle_diff < -turn_threshold) {
                         env.actions[i] = ACTION_TURN_LEFT;
                     } else {
                         env.actions[i] = ACTION_MOVE_FORWARD;
@@ -196,7 +220,7 @@ int demo() {
                     float closest_food_dist_sq = env.width * env.width;
                     Vector2D closest_food_pos = {0, 0};
                     bool found_food = false;
-                    
+
                     for (int j = 0; j < env.num_food_sources; j++) {
                         if (env.food_sources[j].amount > 0) {
                             float dist_sq = distance_squared(ant->position, env.food_sources[j].position);
@@ -207,15 +231,15 @@ int demo() {
                             }
                         }
                     }
-                    
+
                     if (found_food) {
-                        // Turn towards food
+                        // Turn towards food if angle difference is significant
                         float angle_to_food = get_angle(ant->position, closest_food_pos);
                         float angle_diff = wrap_angle(angle_to_food - ant->direction);
-                        
-                        if (angle_diff > 0.1) {
+
+                        if (angle_diff > turn_threshold) {
                             env.actions[i] = ACTION_TURN_RIGHT;
-                        } else if (angle_diff < -0.1) {
+                        } else if (angle_diff < -turn_threshold) {
                             env.actions[i] = ACTION_TURN_LEFT;
                         } else {
                             env.actions[i] = ACTION_MOVE_FORWARD;
@@ -321,8 +345,9 @@ int main() {
     printf("Ant Colony Environment Demo\n");
     printf("Controls:\n");
     printf("- Hold SHIFT to control the first ant AND view ant 1's observations\n");
-    printf("- A/D or LEFT/RIGHT to turn\n");
-    printf("- SPACE to drop pheromone\n");
+    printf("- While holding SHIFT: ant moves forward by default\n");
+    printf("- A/D or LEFT/RIGHT to turn 45 degrees (stops movement)\n");
+    printf("- SPACE to drop pheromone (stops movement)\n");
     printf("- ESC to exit\n\n");
     
     demo();

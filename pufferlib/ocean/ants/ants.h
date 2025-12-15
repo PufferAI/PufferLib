@@ -22,7 +22,7 @@
 #define PHEROMONE_SIZE 2
 #define ANT_VISION_RANGE 500.0f
 #define ANT_VISION_ANGLE (M_PI / 2)
-#define TURN_ANGLE (M_PI / 2)
+#define TURN_ANGLE (M_PI / 4)
 #define MIN_FOOD_COLONY_DISTANCE 50.0f
 #define ANT_LIFETIME 5000
 
@@ -168,7 +168,7 @@ void init_ants_env(AntsEnv* env) {
 }
 
 void allocate_ants_env(AntsEnv* env) {
-    env->obs_size = 8; // Fixed observation size per ant
+    env->obs_size = 10; // Fixed observation size per ant (added 2 for pheromone sensing)
     env->observations = (float*)calloc(env->num_ants * env->obs_size, sizeof(float));
     env->actions = (int*)calloc(env->num_ants, sizeof(int));
     env->rewards = (float*)calloc(env->num_ants, sizeof(float));
@@ -283,8 +283,8 @@ static inline void add_pheromone(AntsEnv* env, Vector2D position, int colony_id)
 void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
     Ant* ant = &env->ants[ant_idx];
     Colony* colony = &env->colonies[ant->colony_id];
-    
-    // Observation structure (9 elements):
+
+    // Observation structure (10 elements):
     // [0-1]: ant position (normalized)
     // [2]: ant direction (normalized between 0 and 1)
     // [3]: has_food (0 or 1)
@@ -292,22 +292,23 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
     // [5]: distance to colony (normalized)
     // [6]: direction to closest food (normalized between 0 and 1)
     // [7]: closest food distance (normalized)
-    // [8]: strongest pheromone direction (normalized to 0-1) COMMENTED OUT
-    
+    // [8]: direction to strongest pheromone (normalized to 0-1, -1 if none)
+    // [9]: strongest pheromone strength (normalized, -1 if none)
+
     obs[0] = ant->position.x / env->width;
     obs[1] = ant->position.y / env->height;
-    
+
     // Normalize direction to 0-1 range (0 = right, 0.25 = up, 0.5 = left, 0.75 = down)
     obs[2] = (ant->direction + M_PI) / (2 * M_PI);
-    
+
     obs[3] = ant->has_food ? 1.0f : 0.0f;
-    
+
     // Get direction to colony (normalized between 0 and 1)
     float angle_to_colony = wrap_angle(get_angle(ant->position, colony->position));
     obs[4] = (angle_to_colony + M_PI) / (2 * M_PI);
-    
+
     obs[5] = distance_squared(ant->position, colony->position) / (env->width * env->width + env->height * env->height);
-    
+
     // Find closest visible food
     float closest_food_dist_sq = env->width * env->width;
     Vector2D closest_food_pos = {0, 0};
@@ -324,7 +325,7 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
             }
         }
     }
-    
+
     if(closest_food_pos.x == 0 && closest_food_pos.y == 0) {
         obs[6] = -1.0f;
         obs[7] = -1.0f;
@@ -334,6 +335,27 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
         float angle_to_food = wrap_angle(get_angle(ant->position, closest_food_pos));
         obs[6] = (angle_to_food + M_PI) / (2 * M_PI);
         obs[7] = closest_food_dist_sq / ((env->width * env->width) + (env->height * env->height));
+    }
+
+    // Find strongest pheromone from same colony
+    float strongest_pheromone = 0.0f;
+    Vector2D strongest_pheromone_pos = {0, 0};
+    for (int i = 0; i < env->num_pheromones; i++) {
+        if (env->pheromones[i].colony_id == ant->colony_id) {
+            if (env->pheromones[i].strength > strongest_pheromone) {
+                strongest_pheromone = env->pheromones[i].strength;
+                strongest_pheromone_pos = env->pheromones[i].position;
+            }
+        }
+    }
+
+    if (strongest_pheromone > 0.0f) {
+        float angle_to_pheromone = wrap_angle(get_angle(ant->position, strongest_pheromone_pos));
+        obs[8] = (angle_to_pheromone + M_PI) / (2 * M_PI);
+        obs[9] = strongest_pheromone / PHEROMONE_DEPOSIT_AMOUNT;  // Normalize by max strength
+    } else {
+        obs[8] = -1.0f;
+        obs[9] = -1.0f;
     }
 }
 
@@ -348,7 +370,7 @@ void spawn_ant(AntsEnv* env, int ant_id) {
     Colony* colony = &env->colonies[ant->colony_id];
 
     ant->position = colony->position;
-    ant->direction = wrap_angle((rand() % 4) * (M_PI / 2)); // Randomly choose between 0, 90, 180, or 270 degrees
+    ant->direction = wrap_angle((rand() % 8) * (M_PI / 4)); // Randomly choose between 8 directions (0, 45, 90, 135, 180, 225, 270, 315 degrees)
     ant->has_food = false;
     ant->lifetime = random_float(0, ANT_LIFETIME);
 
@@ -433,6 +455,8 @@ void c_reset(AntsEnv* env) {
 // This replicates the logic from demo() lines 176-226
 int get_demo_action(AntsEnv* env, int ant_id) {
     Ant* ant = &env->ants[ant_id];
+    // Threshold is half of turn angle to avoid oscillation with 45-degree turns
+    const float turn_threshold = TURN_ANGLE / 2.0f; // ~22.5 degrees
 
     if (ant->has_food) {
         // If ant has food, return to colony
@@ -440,10 +464,10 @@ int get_demo_action(AntsEnv* env, int ant_id) {
         float angle_to_colony = get_angle(ant->position, colony->position);
         float angle_diff = wrap_angle(angle_to_colony - ant->direction);
 
-        // Turn towards colony
-        if (angle_diff > 0.1) {
+        // Turn towards colony if angle difference is significant
+        if (angle_diff > turn_threshold) {
             return ACTION_TURN_RIGHT;
-        } else if (angle_diff < -0.1) {
+        } else if (angle_diff < -turn_threshold) {
             return ACTION_TURN_LEFT;
         } else {
             return ACTION_MOVE_FORWARD;
@@ -466,13 +490,13 @@ int get_demo_action(AntsEnv* env, int ant_id) {
         }
 
         if (found_food) {
-            // Turn towards food
+            // Turn towards food if angle difference is significant
             float angle_to_food = get_angle(ant->position, closest_food_pos);
             float angle_diff = wrap_angle(angle_to_food - ant->direction);
 
-            if (angle_diff > 0.1) {
+            if (angle_diff > turn_threshold) {
                 return ACTION_TURN_RIGHT;
-            } else if (angle_diff < -0.1) {
+            } else if (angle_diff < -turn_threshold) {
                 return ACTION_TURN_LEFT;
             } else {
                 return ACTION_MOVE_FORWARD;
@@ -521,15 +545,17 @@ void step_ant(AntsEnv* env, int ant_id) {
             ant->direction = wrap_angle(ant->direction);
             break;
         case ACTION_DROP_PHEROMONE:
-            add_pheromone(env, ant->position, ant->colony_id);
+            // Only drop pheromones when carrying food
+            if (ant->has_food) {
+                add_pheromone(env, ant->position, ant->colony_id);
+            }
             break;
         case ACTION_MOVE_FORWARD:
+            // Move forward only when this action is selected
+            ant->position.x += ANT_SPEED * cos(ant->direction);
+            ant->position.y += ANT_SPEED * sin(ant->direction);
             break;
     }
-
-    // Always move forward
-    ant->position.x += ANT_SPEED * cos(ant->direction);
-    ant->position.y += ANT_SPEED * sin(ant->direction);
 
     // Wrap around edges
     if (ant->position.x < 0) ant->position.x = env->width;
