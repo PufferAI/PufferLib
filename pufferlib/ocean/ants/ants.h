@@ -77,7 +77,6 @@ typedef struct {
     int colony_id;
     bool has_food;
     int lifetime;            // Track ant lifetime for performance metrics
-    float prev_target_dist;  // Previous distance to target for reward calculation
 } Ant;
 
 typedef struct {
@@ -374,10 +373,6 @@ void spawn_ant(AntsEnv* env, int ant_id) {
     ant->has_food = false;
     ant->lifetime = random_float(0, ANT_LIFETIME);
 
-    // Initialize previous target distance
-    Vector2D target = get_ant_target(env, ant);
-    ant->prev_target_dist = sqrtf(distance_squared(ant->position, target));
-
     // Reset individual ant log
     env->ant_logs[ant_id] = (Log){0};
 }
@@ -516,10 +511,6 @@ void step_ant(AntsEnv* env, int ant_id) {
 
     int action = env->actions[ant_id];
 
-    // Store previous target for reward calculation before action execution
-    Vector2D prev_target = get_ant_target(env, ant);
-    float prev_dist_to_target = sqrtf(distance_squared(ant->position, prev_target));
-
     // Compute demo action and compare with agent's action
     int demo_action = get_demo_action(env, ant_id);
     if (action == demo_action) {
@@ -600,24 +591,6 @@ void step_ant(AntsEnv* env, int ant_id) {
         }
     }
 
-    // Distance-based reward: reward for getting closer to target, punish for getting further
-    // Get current target (may have changed if ant picked up or delivered food)
-    Vector2D current_target = get_ant_target(env, ant);
-    float current_dist_to_target = sqrtf(distance_squared(ant->position, current_target));
-
-    // Calculate distance change (negative means got closer, positive means got further)
-    float distance_change = current_dist_to_target - prev_dist_to_target;
-
-    // Reward proportional to reduction in distance (negative distance_change is good)
-    float distance_reward = -distance_change * 0.01f; // Scale factor to adjust reward magnitude
-
-    env->rewards[ant_id] += distance_reward;
-    env->ant_logs[ant_id].episode_return += distance_reward;
-    env->ant_logs[ant_id].reward += distance_reward;
-
-    // Update previous distance for next step
-    ant->prev_target_dist = current_dist_to_target;
-    
     // MULTIPLE TERMINAL CONDITIONS FOR FREQUENT LOG GENERATION
     bool should_terminate = false;
     
