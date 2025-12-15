@@ -16,12 +16,12 @@
 #define ANT_SIZE 4
 #define FOOD_SIZE 6
 #define COLONY_SIZE 20
-#define PHEROMONE_EVAPORATION_RATE 0.001f
-#define PHEROMONE_DEPOSIT_AMOUNT 1.0f
-#define MAX_PHEROMONES 5000
-#define PHEROMONE_SIZE 2
-#define ANT_VISION_RANGE 500.0f
-#define ANT_VISION_ANGLE (M_PI / 2)
+// #define PHEROMONE_EVAPORATION_RATE 0.001f
+// #define PHEROMONE_DEPOSIT_AMOUNT 1.0f
+// #define MAX_PHEROMONES 5000
+// #define PHEROMONE_SIZE 2
+// #define ANT_VISION_RANGE 500.0f
+// #define ANT_VISION_ANGLE (M_PI / 2)
 #define TURN_ANGLE (M_PI / 4)
 #define MIN_FOOD_COLONY_DISTANCE 50.0f
 #define ANT_LIFETIME 5000
@@ -29,14 +29,14 @@
 // Actions
 #define ACTION_TURN_LEFT 0
 #define ACTION_TURN_RIGHT 1
-#define ACTION_DROP_PHEROMONE 2
+// #define ACTION_DROP_PHEROMONE 2
 #define ACTION_MOVE_FORWARD 3
 
 // Colors
 #define COLONY1_COLOR (Color){220, 0, 0, 255}
 #define COLONY2_COLOR (Color){0, 0, 220, 255}
-#define PHEROMONE1_COLOR (Color){255, 200, 200, 100}
-#define PHEROMONE2_COLOR (Color){200, 200, 255, 100}
+// #define PHEROMONE1_COLOR (Color){255, 200, 200, 100}
+// #define PHEROMONE2_COLOR (Color){200, 200, 255, 100}
 #define FOOD_COLOR (Color){0, 200, 0, 255}
 #define BACKGROUND_COLOR (Color){50, 50, 50, 255}
 
@@ -65,11 +65,11 @@ typedef struct {
     int amount;
 } FoodSource;
 
-typedef struct {
-    Vector2D position;
-    float strength;
-    int colony_id;
-} Pheromone;
+// typedef struct {
+//     Vector2D position;
+//     float strength;
+//     int colony_id;
+// } Pheromone;
 
 typedef struct {
     Vector2D position;
@@ -105,8 +105,8 @@ struct AntsEnv {
     Colony colonies[NUM_COLONIES];
     Ant* ants;                 // Dynamic array of all ants
     FoodSource food_sources[MAX_FOOD_SOURCES];
-    Pheromone pheromones[MAX_PHEROMONES];
-    int num_pheromones;
+    // Pheromone pheromones[MAX_PHEROMONES];
+    // int num_pheromones;
     int num_food_sources;
     
     // Environment parameters
@@ -151,7 +151,7 @@ void init_ants_env(AntsEnv* env) {
     env->ant_logs = (Log*)calloc(env->num_ants, sizeof(Log));
     env->tick = 0;
     env->client = NULL;
-    env->num_pheromones = 0;
+    // env->num_pheromones = 0;
     
     // Initialize food sources
     env->num_food_sources = MAX_FOOD_SOURCES;
@@ -167,7 +167,7 @@ void init_ants_env(AntsEnv* env) {
 }
 
 void allocate_ants_env(AntsEnv* env) {
-    env->obs_size = 10; // Fixed observation size per ant (added 2 for pheromone sensing)
+    env->obs_size = 8; // Fixed observation size per ant (removed 2 pheromone slots)
     env->observations = (float*)calloc(env->num_ants * env->obs_size, sizeof(float));
     env->actions = (int*)calloc(env->num_ants, sizeof(int));
     env->rewards = (float*)calloc(env->num_ants, sizeof(float));
@@ -228,13 +228,7 @@ static inline float get_angle(Vector2D a, Vector2D b) {
 }
 
 static inline bool is_in_vision(Vector2D ant_pos, Vector2D target) {
-//     float dist_sq = distance_squared(ant_pos, target);
-//     if (dist_sq > (ANT_VISION_RANGE * ANT_VISION_RANGE)) {
-//         return false;
-//     }
-//     else {
-//         return true;
-//     }
+    // Vision range removed - ants can see everything
     return true;
 }
 
@@ -264,26 +258,26 @@ static inline Vector2D get_ant_target(AntsEnv* env, Ant* ant) {
 
 
 
-static inline void add_pheromone(AntsEnv* env, Vector2D position, int colony_id) {
-    if (env->num_pheromones >= MAX_PHEROMONES) {
-        // Replace oldest pheromone
-        for (int i = 0; i < env->num_pheromones - 1; i++) {
-            env->pheromones[i] = env->pheromones[i + 1];
-        }
-        env->num_pheromones--;
-    }
-    
-    env->pheromones[env->num_pheromones].position = position;
-    env->pheromones[env->num_pheromones].strength = PHEROMONE_DEPOSIT_AMOUNT;
-    env->pheromones[env->num_pheromones].colony_id = colony_id;
-    env->num_pheromones++;
-}
+// static inline void add_pheromone(AntsEnv* env, Vector2D position, int colony_id) {
+//     if (env->num_pheromones >= MAX_PHEROMONES) {
+//         // Replace oldest pheromone
+//         for (int i = 0; i < env->num_pheromones - 1; i++) {
+//             env->pheromones[i] = env->pheromones[i + 1];
+//         }
+//         env->num_pheromones--;
+//     }
+//
+//     env->pheromones[env->num_pheromones].position = position;
+//     env->pheromones[env->num_pheromones].strength = PHEROMONE_DEPOSIT_AMOUNT;
+//     env->pheromones[env->num_pheromones].colony_id = colony_id;
+//     env->num_pheromones++;
+// }
 
 void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
     Ant* ant = &env->ants[ant_idx];
     Colony* colony = &env->colonies[ant->colony_id];
 
-    // Observation structure (10 elements):
+    // Observation structure (8 elements):
     // [0-1]: ant position (normalized)
     // [2]: ant direction (normalized between 0 and 1)
     // [3]: has_food (0 or 1)
@@ -291,8 +285,6 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
     // [5]: distance to colony (normalized)
     // [6]: direction to closest food (normalized between 0 and 1)
     // [7]: closest food distance (normalized)
-    // [8]: direction to strongest pheromone (normalized to 0-1, -1 if none)
-    // [9]: strongest pheromone strength (normalized, -1 if none)
 
     obs[0] = ant->position.x / env->width;
     obs[1] = ant->position.y / env->height;
@@ -334,27 +326,6 @@ void get_observation_for_ant(AntsEnv* env, int ant_idx, float* obs) {
         float angle_to_food = wrap_angle(get_angle(ant->position, closest_food_pos));
         obs[6] = (angle_to_food + M_PI) / (2 * M_PI);
         obs[7] = closest_food_dist_sq / ((env->width * env->width) + (env->height * env->height));
-    }
-
-    // Find strongest pheromone from same colony
-    float strongest_pheromone = 0.0f;
-    Vector2D strongest_pheromone_pos = {0, 0};
-    for (int i = 0; i < env->num_pheromones; i++) {
-        if (env->pheromones[i].colony_id == ant->colony_id) {
-            if (env->pheromones[i].strength > strongest_pheromone) {
-                strongest_pheromone = env->pheromones[i].strength;
-                strongest_pheromone_pos = env->pheromones[i].position;
-            }
-        }
-    }
-
-    if (strongest_pheromone > 0.0f) {
-        float angle_to_pheromone = wrap_angle(get_angle(ant->position, strongest_pheromone_pos));
-        obs[8] = (angle_to_pheromone + M_PI) / (2 * M_PI);
-        obs[9] = strongest_pheromone / PHEROMONE_DEPOSIT_AMOUNT;  // Normalize by max strength
-    } else {
-        obs[8] = -1.0f;
-        obs[9] = -1.0f;
     }
 }
 
@@ -413,7 +384,7 @@ void spawn_food(AntsEnv* env) {
 void c_reset(AntsEnv* env) {
     env->tick = 0;
     env->log = (Log){0};
-    env->num_pheromones = 0;
+    // env->num_pheromones = 0;
     
     // Reset colonies
     env->colonies[0].food_collected = 0;
@@ -535,12 +506,12 @@ void step_ant(AntsEnv* env, int ant_id) {
             ant->direction += TURN_ANGLE;
             ant->direction = wrap_angle(ant->direction);
             break;
-        case ACTION_DROP_PHEROMONE:
-            // Only drop pheromones when carrying food
-            if (ant->has_food) {
-                add_pheromone(env, ant->position, ant->colony_id);
-            }
-            break;
+        // case ACTION_DROP_PHEROMONE:
+        //     // Only drop pheromones when carrying food
+        //     if (ant->has_food) {
+        //         add_pheromone(env, ant->position, ant->colony_id);
+        //     }
+        //     break;
         case ACTION_MOVE_FORWARD:
             // Move forward only when this action is selected
             ant->position.x += ANT_SPEED * cos(ant->direction);
@@ -636,18 +607,18 @@ void c_step(AntsEnv* env) {
     for (int i = 0; i < env->num_ants; i++) {
         step_ant(env, i);
     }
-    
+
     // Update pheromones
-    for (int i = 0; i < env->num_pheromones; i++) {
-        env->pheromones[i].strength -= PHEROMONE_EVAPORATION_RATE;
-        if (env->pheromones[i].strength <= 0) {
-            // Remove evaporated pheromone
-            env->pheromones[i] = env->pheromones[env->num_pheromones - 1];
-            env->num_pheromones--;
-            i--;
-        }
-    }
-    
+    // for (int i = 0; i < env->num_pheromones; i++) {
+    //     env->pheromones[i].strength -= PHEROMONE_EVAPORATION_RATE;
+    //     if (env->pheromones[i].strength <= 0) {
+    //         // Remove evaporated pheromone
+    //         env->pheromones[i] = env->pheromones[env->num_pheromones - 1];
+    //         env->num_pheromones--;
+    //         i--;
+    //     }
+    // }
+
     // Generate new observations
     compute_observations(env);
 }
@@ -697,12 +668,12 @@ void c_render(AntsEnv* env) {
     }
     
     // Draw pheromones
-    for (int i = 0; i < env->num_pheromones; i++) {
-        Color pheromone_color = (env->pheromones[i].colony_id == 0) ? PHEROMONE1_COLOR : PHEROMONE2_COLOR;
-        pheromone_color.a = (unsigned char)(100 * env->pheromones[i].strength);
-        DrawCircle(env->pheromones[i].position.x, env->pheromones[i].position.y, 
-                  PHEROMONE_SIZE, pheromone_color);
-    }
+    // for (int i = 0; i < env->num_pheromones; i++) {
+    //     Color pheromone_color = (env->pheromones[i].colony_id == 0) ? PHEROMONE1_COLOR : PHEROMONE2_COLOR;
+    //     pheromone_color.a = (unsigned char)(100 * env->pheromones[i].strength);
+    //     DrawCircle(env->pheromones[i].position.x, env->pheromones[i].position.y,
+    //               PHEROMONE_SIZE, pheromone_color);
+    // }
     
     // Draw ants
     for (int i = 0; i < env->num_ants; i++) {

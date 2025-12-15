@@ -25,10 +25,10 @@ class AntsEnv(pufferlib.PufferEnv):
             height=720,
             num_ants=32,
             reward_food=0.1,
-            reward_delivery=1.0,
+            reward_delivery=5.0,
             reward_death=0.0,
-            reward_demo_match=0.01,
-            reward_demo_mismatch=-0.01,
+            reward_demo_match=0.001,
+            reward_demo_mismatch=-0.001,
             report_interval=1,
             render_mode=None,
             buf=None,
@@ -69,7 +69,7 @@ class AntsEnv(pufferlib.PufferEnv):
             rew_slice = self.rewards[offset:offset+na]
             term_slice = self.terminals[offset:offset+na]
             trunc_slice = self.truncations[offset:offset+na]
-            
+
             # Seed each env uniquely: i + seed * num_envs
             env_seed = i + seed * num_envs
             env_id = binding.env_init(
