@@ -25,10 +25,14 @@ class AntsEnv(pufferlib.PufferEnv):
             height=720,
             num_ants=32,
             reward_food=0.1,
-            reward_delivery=5.0,
+            reward_delivery=10.0,
             reward_death=0.0,
             reward_demo_match=0.001,
             reward_demo_mismatch=-0.001,
+            reward_progress=0.01,
+            reward_time_penalty=-0.001,
+            reward_wrong_direction=-0.005,
+            reward_efficiency_bonus=2.0,
             report_interval=1,
             render_mode=None,
             buf=None,
@@ -87,6 +91,10 @@ class AntsEnv(pufferlib.PufferEnv):
                 reward_death=reward_death,
                 reward_demo_match=reward_demo_match,
                 reward_demo_mismatch=reward_demo_mismatch,
+                reward_progress=reward_progress,
+                reward_time_penalty=reward_time_penalty,
+                reward_wrong_direction=reward_wrong_direction,
+                reward_efficiency_bonus=reward_efficiency_bonus,
                 cell_size=self.cell_size
             )
             c_envs.append(env_id)

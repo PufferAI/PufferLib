@@ -17,7 +17,7 @@ void render_ant_observations(AntsEnv* env, int ant_id) {
     int panel_x = 20;
     int panel_y = 100;
     int panel_width = 300;
-    int panel_height = 240;  // Increased for 2 additional pheromone observations
+    int panel_height = 180;  // Adjusted for 8 observations (no pheromones)
     
     // Draw semi-transparent background panel
     DrawRectangle(panel_x - 10, panel_y - 10, panel_width + 20, panel_height + 20, 
@@ -56,14 +56,6 @@ void render_ant_observations(AntsEnv* env, int ant_id) {
 
     DrawText(TextFormat("Food Dist: %.3f", obs[7]), panel_x, y_offset, 14,
              obs[7] < 0 ? GRAY : RAYWHITE);
-    y_offset += line_height;
-
-    DrawText(TextFormat("Pheromone Dir: %.3f", obs[8]), panel_x, y_offset, 14,
-             obs[8] < 0 ? GRAY : RAYWHITE);
-    y_offset += line_height;
-
-    DrawText(TextFormat("Pheromone Str: %.3f", obs[9]), panel_x, y_offset, 14,
-             obs[9] < 0 ? GRAY : RAYWHITE);
     
     // Visual indicators on the ant
     Vector2D ant_pos = ant->position;
@@ -94,18 +86,6 @@ void render_ant_observations(AntsEnv* env, int ant_id) {
         };
         DrawLineEx((Vector2){ant_pos.x, ant_pos.y}, (Vector2){food_end.x, food_end.y}, 2, GREEN);
         DrawText("FOOD", food_end.x + 5, food_end.y - 10, 12, GREEN);
-    }
-
-    // Draw direction to pheromone (if detected)
-    if (obs[8] >= 0) {
-        float pheromone_angle = (obs[8] * 2 * M_PI) - M_PI;
-        float line_length = 35.0f;
-        Vector2D pheromone_end = {
-            ant_pos.x + line_length * cos(pheromone_angle),
-            ant_pos.y + line_length * sin(pheromone_angle)
-        };
-        DrawLineEx((Vector2){ant_pos.x, ant_pos.y}, (Vector2){pheromone_end.x, pheromone_end.y}, 2, MAGENTA);
-        DrawText("PHEROMONE", pheromone_end.x + 5, pheromone_end.y - 10, 12, MAGENTA);
     }
 
     // Draw current direction
@@ -161,7 +141,6 @@ int demo() {
     // Track key states for single-press detection
     bool left_pressed = false;
     bool right_pressed = false;
-    bool space_pressed = false;
     
     // Main loop - FOLLOWING SNAKE PATTERN
     while (!WindowShouldClose()) {
@@ -187,13 +166,6 @@ int demo() {
                 right_pressed = false;
             }
 
-            // Handle pheromone drop (overrides movement)
-            if (IsKeyDown(KEY_SPACE) && !space_pressed) {
-                env.actions[0] = ACTION_DROP_PHEROMONE;
-                space_pressed = true;
-            } else if (!IsKeyDown(KEY_SPACE)) {
-                space_pressed = false;
-            }
             
             // Rest of ants act via scripted behaviors
             // Threshold is half of turn angle to avoid oscillation with 45-degree turns
@@ -347,7 +319,6 @@ int main() {
     printf("- Hold SHIFT to control the first ant AND view ant 1's observations\n");
     printf("- While holding SHIFT: ant moves forward by default\n");
     printf("- A/D or LEFT/RIGHT to turn 45 degrees (stops movement)\n");
-    printf("- SPACE to drop pheromone (stops movement)\n");
     printf("- ESC to exit\n\n");
     
     demo();

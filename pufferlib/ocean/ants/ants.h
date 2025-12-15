@@ -77,6 +77,10 @@ typedef struct {
     int colony_id;
     bool has_food;
     int lifetime;            // Track ant lifetime for performance metrics
+
+    // Tracking for reward shaping
+    float prev_dist_to_objective;  // Previous distance to current objective (food or colony)
+    int steps_with_food;           // Steps taken while carrying food (for efficiency bonus)
 } Ant;
 
 typedef struct {
@@ -122,6 +126,12 @@ struct AntsEnv {
     float reward_death;
     float reward_demo_match;      // Reward for matching demo action
     float reward_demo_mismatch;   // Penalty for not matching demo action
+
+    // New reward shaping parameters
+    float reward_progress;           // Reward for moving closer to objective
+    float reward_time_penalty;       // Small penalty per step (encourages efficiency)
+    float reward_wrong_direction;    // Penalty for moving away from objective
+    float reward_efficiency_bonus;   // Bonus multiplier for fast deliveries
     
     // Rendering
     Client* client;            // Raylib client
@@ -344,6 +354,10 @@ void spawn_ant(AntsEnv* env, int ant_id) {
     ant->has_food = false;
     ant->lifetime = random_float(0, ANT_LIFETIME);
 
+    // Initialize reward shaping tracking
+    ant->prev_dist_to_objective = -1.0f;  // -1 indicates uninitialized
+    ant->steps_with_food = 0;
+
     // Reset individual ant log
     env->ant_logs[ant_id] = (Log){0};
 }
@@ -524,7 +538,64 @@ void step_ant(AntsEnv* env, int ant_id) {
     if (ant->position.x > env->width) ant->position.x = 0;
     if (ant->position.y < 0) ant->position.y = env->height;
     if (ant->position.y > env->height) ant->position.y = 0;
-    
+
+    // REWARD SHAPING: Progress-based rewards
+    // Give rewards for moving toward objective, penalty for moving away
+    Vector2D objective_pos;
+    if (ant->has_food) {
+        // Objective is home colony
+        objective_pos = env->colonies[ant->colony_id].position;
+        ant->steps_with_food++;
+    } else {
+        // Objective is nearest food source
+        float closest_food_dist_sq = env->width * env->width + env->height * env->height;
+        for (int j = 0; j < env->num_food_sources; j++) {
+            if (env->food_sources[j].amount > 0) {
+                float dist_sq = distance_squared(ant->position, env->food_sources[j].position);
+                if (dist_sq < closest_food_dist_sq) {
+                    closest_food_dist_sq = dist_sq;
+                    objective_pos = env->food_sources[j].position;
+                }
+            }
+        }
+    }
+
+    // Calculate current distance to objective
+    float current_dist = sqrtf(distance_squared(ant->position, objective_pos));
+
+    // On first step or after picking up food, initialize previous distance
+    if (ant->prev_dist_to_objective < 0) {
+        ant->prev_dist_to_objective = current_dist;
+    }
+
+    // Calculate progress (positive if moving closer, negative if moving away)
+    float progress = ant->prev_dist_to_objective - current_dist;
+
+    // Only give progress rewards if ant actually moved (action was MOVE_FORWARD)
+    if (action == ACTION_MOVE_FORWARD) {
+        if (progress > 0) {
+            // Moving closer to objective
+            float progress_reward = env->reward_progress * progress;
+            env->rewards[ant_id] += progress_reward;
+            env->ant_logs[ant_id].episode_return += progress_reward;
+            env->ant_logs[ant_id].reward += progress_reward;
+        } else if (progress < 0) {
+            // Moving away from objective (penalty)
+            float wrong_dir_penalty = env->reward_wrong_direction * progress; // progress is negative
+            env->rewards[ant_id] += wrong_dir_penalty;
+            env->ant_logs[ant_id].episode_return += wrong_dir_penalty;
+            env->ant_logs[ant_id].reward += wrong_dir_penalty;
+        }
+    }
+
+    // Update previous distance for next step
+    ant->prev_dist_to_objective = current_dist;
+
+    // Time penalty (encourages efficiency)
+    env->rewards[ant_id] += env->reward_time_penalty;
+    env->ant_logs[ant_id].episode_return += env->reward_time_penalty;
+    env->ant_logs[ant_id].reward += env->reward_time_penalty;
+
     // Check for food collection
     if (!ant->has_food) {
         for (int j = 0; j < env->num_food_sources; j++) {
@@ -542,6 +613,10 @@ void step_ant(AntsEnv* env, int ant_id) {
                     env->rewards[ant_id] += env->reward_food;
                     env->ant_logs[ant_id].episode_return += env->reward_food;
                     env->ant_logs[ant_id].reward += env->reward_food;
+
+                    // Reset tracking for new objective (now need to return to colony)
+                    ant->prev_dist_to_objective = -1.0f;
+                    ant->steps_with_food = 0;
                     break;
                 }
             }
@@ -555,10 +630,31 @@ void step_ant(AntsEnv* env, int ant_id) {
         if (dist_sq < (ANT_SIZE + COLONY_SIZE) * (ANT_SIZE + COLONY_SIZE)) {
             ant->has_food = false;
             colony->food_collected++;
-            env->rewards[ant_id] += env->reward_delivery;
-            env->ant_logs[ant_id].episode_return += env->reward_delivery;
+
+            // Base delivery reward
+            float delivery_reward = env->reward_delivery;
+
+            // Efficiency bonus: reward faster deliveries
+            // Normalize by expected optimal steps (width/2 / ANT_SPEED = ~128 steps average)
+            // Bonus decreases as steps_with_food increases
+            if (env->reward_efficiency_bonus > 0 && ant->steps_with_food > 0) {
+                float expected_steps = env->width / (2.0f * ANT_SPEED);
+                float efficiency_ratio = expected_steps / (float)ant->steps_with_food;
+                // Only give bonus if delivery was faster than expected
+                if (efficiency_ratio > 1.0f) {
+                    float efficiency_bonus = env->reward_efficiency_bonus * (efficiency_ratio - 1.0f);
+                    delivery_reward += efficiency_bonus;
+                }
+            }
+
+            env->rewards[ant_id] += delivery_reward;
+            env->ant_logs[ant_id].episode_return += delivery_reward;
             env->ant_logs[ant_id].score += 1;
-            env->ant_logs[ant_id].reward += env->reward_delivery;
+            env->ant_logs[ant_id].reward += delivery_reward;
+
+            // Reset tracking for new foraging trip
+            ant->prev_dist_to_objective = -1.0f;
+            ant->steps_with_food = 0;
         }
     }
 
@@ -582,17 +678,11 @@ void step_ant(AntsEnv* env, int ant_id) {
     
     // Execute termination and log aggregation
     if (should_terminate) {
-        env->ant_logs[ant_id].perf = env->ant_logs[ant_id].episode_length > 0 ? 
+        env->ant_logs[ant_id].perf = env->ant_logs[ant_id].episode_length > 0 ?
                                      env->ant_logs[ant_id].score / env->ant_logs[ant_id].episode_length : 0;
         add_log(env, ant_id);
         spawn_ant(env, ant_id); //Respawn the ant
         env->terminals[ant_id] = 1;
-        
-        // Debug output for terminal condition verification
-        if (env->tick % 100 == 0) {
-            printf("Ant %d terminated at tick %d, lifetime %d, score %.1f\n", 
-                   ant_id, env->tick, ant->lifetime, env->ant_logs[ant_id].score);
-        }
     }
 }
 
