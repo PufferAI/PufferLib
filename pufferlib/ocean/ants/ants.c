@@ -104,12 +104,18 @@ int main() {
 
         // Print stats every 60 frames
         if (env.tick % 60 == 0) {
-            printf("Tick: %d | Colony 1: %d | Colony 2: %d | Episodes: %.0f | Avg Score: %.2f\n",
+            float success_rate = env.log.total_resets > 0
+                ? (env.log.successful_trips / env.log.total_resets * 100.0f)
+                : 0.0f;
+            printf("Tick: %d | C1: %d (%.0f%%) | C2: %d (%.0f%%) | Efficiency: %.1f steps/food | Throughput: %.2f | Success: %.1f%%\n",
                    env.tick,
                    env.colonies[0].food_collected,
+                   env.log.total_deliveries > 0 ? (env.log.colony1_food / env.log.total_deliveries * 100.0f) : 0.0f,
                    env.colonies[1].food_collected,
-                   env.log.n,
-                   env.log.n > 0 ? env.log.score / env.log.n : 0.0f);
+                   env.log.total_deliveries > 0 ? (env.log.colony2_food / env.log.total_deliveries * 100.0f) : 0.0f,
+                   env.log.avg_delivery_steps,
+                   env.log.score,
+                   success_rate);
         }
     }
 

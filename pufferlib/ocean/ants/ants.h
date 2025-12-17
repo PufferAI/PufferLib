@@ -24,7 +24,7 @@
 #define ANT_SIZE 4
 #define FOOD_SIZE 6
 #define COLONY_SIZE 20
-#define TURN_ANGLE (M_PI / 4)
+#define TURN_ANGLE (M_PI / 12)
 #define MIN_FOOD_COLONY_DISTANCE 50.0f
 #define ANT_RESET_INTERVAL 2048  // Reset ant every N steps (like target.c)
 
@@ -55,11 +55,17 @@
 
 // Required Log struct for PufferLib
 typedef struct {
-    float perf;              // Performance metric (score/length)
-    float score;             // Total score (food deliveries)
-    float episode_return;    // Cumulative rewards
-    float episode_length;    // Episode duration
-    float n;                 // Episode count - REQUIRED AS LAST FIELD
+    float perf;                     // Average steps per delivery (efficiency - lower is better)
+    float score;                    // Food deliveries per 1000 steps (throughput)
+    float episode_return;           // Cumulative rewards
+    float episode_length;           // Total steps across all ants
+    float avg_delivery_steps;       // Average steps taken per successful delivery
+    float colony1_food;             // Food collected by colony 1
+    float colony2_food;             // Food collected by colony 2
+    float total_deliveries;         // Total successful food deliveries
+    float successful_trips;         // Number of ants that successfully found food
+    float total_resets;             // Total ant resets (successful + unsuccessful)
+    float n;                        // Episode count - REQUIRED AS LAST FIELD
 } Log;
 
 // Forward declarations
@@ -391,6 +397,9 @@ void update_food_interactions(AntsEnv* env) {
                         // Simple reward
                         env->rewards[a] += env->reward_food_pickup;
                         env->log.episode_return += env->reward_food_pickup;
+
+                        // Track successful trip (ant found food)
+                        env->log.successful_trips += 1.0f;
                         break;
                     }
                 }
@@ -405,12 +414,28 @@ void update_food_interactions(AntsEnv* env) {
                 ant->has_food = false;
                 colony->food_collected++;
 
-                // Reward and log update - LIKE TARGET
+                // Reward and log update - WITH EFFICIENCY METRICS
                 env->rewards[a] += env->reward_delivery;
-                env->log.perf += 1.0f;  // Performance metric (food delivered)
-                env->log.score += 1.0f;  // Score (food delivered)
                 env->log.episode_return += env->reward_delivery;
                 env->log.episode_length += ant->steps_alive;
+                env->log.total_deliveries += 1.0f;
+
+                // Track per-colony performance
+                if (ant->colony_id == 0) {
+                    env->log.colony1_food += 1.0f;
+                } else {
+                    env->log.colony2_food += 1.0f;
+                }
+
+                // Update derived efficiency metrics
+                env->log.avg_delivery_steps = env->log.episode_length / env->log.total_deliveries;
+
+                // Performance: Average steps per delivery (lower is better)
+                env->log.perf = env->log.avg_delivery_steps;
+
+                // Score: Food deliveries per 1000 steps (higher is better)
+                env->log.score = (env->log.total_deliveries * 1000.0f) / env->log.episode_length;
+
                 env->log.n += 1;  // Episode count (number of deliveries)
 
                 // Reset ant after delivery
@@ -472,6 +497,7 @@ void c_step(AntsEnv* env) {
         if (ant->steps_alive % ANT_RESET_INTERVAL == 0) {
             spawn_ant(env, i);
             env->terminals[i] = 1;
+            env->log.total_resets += 1.0f;
         }
     }
 
@@ -581,13 +607,33 @@ void c_render(AntsEnv* env) {
         DrawLine(ant->position.x, ant->position.y, dir_x, dir_y, RAYWHITE);
     }
 
-    // Draw UI
-    DrawText(TextFormat("Colony 1: %d", env->colonies[0].food_collected),
+    // Draw UI - Colony scores
+    DrawText(TextFormat("Colony 1: %d (%.1f%%)",
+                       env->colonies[0].food_collected,
+                       env->log.total_deliveries > 0 ? (env->log.colony1_food / env->log.total_deliveries * 100.0f) : 0.0f),
              20, 20, 20, COLONY1_COLOR);
-    DrawText(TextFormat("Colony 2: %d", env->colonies[1].food_collected),
+    DrawText(TextFormat("Colony 2: %d (%.1f%%)",
+                       env->colonies[1].food_collected,
+                       env->log.total_deliveries > 0 ? (env->log.colony2_food / env->log.total_deliveries * 100.0f) : 0.0f),
              20, 50, 20, COLONY2_COLOR);
+
+    // Efficiency metrics
+    DrawText(TextFormat("Efficiency: %.1f steps/food", env->log.avg_delivery_steps),
+             20, 80, 18, YELLOW);
+    DrawText(TextFormat("Throughput: %.2f food/1000 steps", env->log.score),
+             20, 105, 18, YELLOW);
+
+    // Success rate
+    float success_rate = env->log.total_resets > 0
+        ? (env->log.successful_trips / env->log.total_resets * 100.0f)
+        : 0.0f;
+    DrawText(TextFormat("Success Rate: %.1f%%", success_rate),
+             20, 130, 18, GREEN);
+
+    // Right side - System info
     DrawText(TextFormat("Tick: %d", env->tick), env->width - 120, 20, 20, RAYWHITE);
     DrawText(TextFormat("Pheromones: %d", env->num_pheromones), env->width - 180, 50, 20, RAYWHITE);
+    DrawText(TextFormat("Deliveries: %.0f", env->log.total_deliveries), env->width - 180, 75, 18, RAYWHITE);
 
     // Controls help
     const char* vision_status = env->client->show_vision_cones ? "ON" : "OFF";
