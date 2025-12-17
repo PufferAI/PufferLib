@@ -10,7 +10,7 @@
 
 int main() {
     int num_ants = 64;
-    int num_obs = 6;  // Simplified observation space
+    int num_obs = 10;  // Observation space with pheromones and neighbor awareness
 
     AntsEnv env = {
         .width = 1280,
@@ -32,9 +32,17 @@ int main() {
     c_reset(&env);
     c_render(&env);
 
-    printf("Ant Colony Demo\n");
-    printf("Controls: ESC to exit\n");
-    printf("Using simple heuristic AI: seek food -> return to colony\n\n");
+    printf("Ant Colony Demo with Pheromones, Vision & Neighbor Awareness\n");
+    printf("=============================================================\n");
+    printf("Controls:\n");
+    printf("  [V]   - Toggle vision cone visualization\n");
+    printf("  [ESC] - Exit\n\n");
+    printf("Features:\n");
+    printf("  - Very limited vision: 100px range, 30° narrow beam\n");
+    printf("  - Neighbor awareness: ants can see nearby colony members\n");
+    printf("  - Automatic pheromone trails when carrying food\n");
+    printf("  - Pheromone evaporation (1000 step lifetime)\n");
+    printf("  - Simple heuristic AI: seek food -> return to colony\n\n");
 
     // Main loop - exit with ESC or close window
     while (!WindowShouldClose()) {

@@ -13,11 +13,23 @@ class AntsEnv(pufferlib.PufferEnv):
     Two colonies compete to collect food from the environment.
     Simplified architecture following the Target environment pattern.
 
-    Observations (6 per ant):
+    Observations (8 per ant):
         - colony_dx, colony_dy: Direction to home colony (normalized)
-        - food_dx, food_dy: Direction to nearest food (normalized)
+        - food_dx, food_dy: Direction to nearest VISIBLE food (normalized, with vision constraints)
+        - pheromone_dx, pheromone_dy: Direction to nearest VISIBLE pheromone from own colony
         - has_food: Binary flag (0 or 1)
         - heading: Ant's current direction (normalized)
+
+    Vision System:
+        - Ants have limited vision range (100 pixels) - very short range
+        - Vision cone of 30 degrees (π/6) - narrow focused beam
+        - Can only see food and pheromones within their vision cone
+
+    Pheromone System:
+        - Ants automatically drop pheromones every 5 steps while carrying food
+        - Pheromones evaporate over time (rate: 0.001 per step)
+        - Each colony's pheromones are distinct
+        - Ants only observe pheromones from their own colony
 
     Actions (Discrete 4):
         0: Turn left
@@ -39,9 +51,9 @@ class AntsEnv(pufferlib.PufferEnv):
             buf=None,
             seed=0):
 
-        # Simple observation space: 6 values per ant
+        # Observation space: 8 values per ant (added pheromone observations)
         self.single_observation_space = gymnasium.spaces.Box(
-            low=-1.0, high=1.0, shape=(6,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(8,), dtype=np.float32
         )
         # Discrete action space: turn left, turn right, move forward, noop
         self.single_action_space = gymnasium.spaces.Discrete(4)

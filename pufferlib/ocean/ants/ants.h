@@ -28,6 +28,17 @@
 #define MIN_FOOD_COLONY_DISTANCE 50.0f
 #define ANT_RESET_INTERVAL 2048  // Reset ant every N steps (like target.c)
 
+// Pheromone system constants
+#define MAX_PHEROMONES 5000
+#define PHEROMONE_DEPOSIT_AMOUNT 1.0f
+#define PHEROMONE_EVAPORATION_RATE 0.001f
+#define PHEROMONE_SIZE 2
+#define PHEROMONE_DROP_INTERVAL 5  // Drop pheromone every N steps while carrying food
+
+// Vision system constants
+#define ANT_VISION_RANGE 100.0f
+#define ANT_VISION_ANGLE (M_PI / 6.0f)  // 30 degrees (π/6)
+
 // Actions
 #define ACTION_TURN_LEFT 0
 #define ACTION_TURN_RIGHT 1
@@ -37,6 +48,8 @@
 // Colors
 #define COLONY1_COLOR (Color){220, 0, 0, 255}
 #define COLONY2_COLOR (Color){0, 0, 220, 255}
+#define PHEROMONE1_COLOR (Color){255, 200, 200, 100}
+#define PHEROMONE2_COLOR (Color){200, 200, 255, 100}
 #define FOOD_COLOR (Color){0, 200, 0, 255}
 #define BACKGROUND_COLOR (Color){50, 50, 50, 255}
 
@@ -64,13 +77,21 @@ typedef struct {
     int amount;
 } FoodSource;
 
+// Pheromone trail marker
+typedef struct {
+    Vector2D position;
+    float strength;
+    int colony_id;
+} Pheromone;
+
 // Individual ant agent
 typedef struct {
     Vector2D position;
     float direction;
     int colony_id;
     bool has_food;
-    int steps_alive;  // Track steps for periodic reset
+    int steps_alive;           // Track steps for periodic reset
+    int steps_since_pheromone; // Track when to drop next pheromone
 } Ant;
 
 // Colony home base
@@ -84,6 +105,7 @@ struct Client {
     int cell_size;
     int width;
     int height;
+    bool show_vision_cones;  // Toggle for vision cone visualization
 };
 
 // Main environment struct - FOLLOWING TARGET PATTERN
@@ -93,6 +115,7 @@ struct AntsEnv {
     Ant* ants;                 // Dynamic array of ants
     Colony colonies[NUM_COLONIES];
     FoodSource food_sources[MAX_FOOD_SOURCES];
+    Pheromone pheromones[MAX_PHEROMONES];
 
     // Required PufferLib fields
     float* observations;       // Flattened observations
@@ -105,6 +128,7 @@ struct AntsEnv {
     int width;                // Environment width
     int height;               // Environment height
     int num_food_sources;     // Active food sources
+    int num_pheromones;       // Active pheromones
     int tick;                 // Current timestep
 
     // Simple reward parameters (like target.c)
@@ -139,6 +163,40 @@ static inline float clip(float val, float min, float max) {
     return val;
 }
 
+// Check if target is within ant's vision cone
+static inline bool is_in_vision(Vector2D ant_pos, float ant_dir, Vector2D target) {
+    float dx = target.x - ant_pos.x;
+    float dy = target.y - ant_pos.y;
+    float dist_sq = dx * dx + dy * dy;
+
+    // Check range
+    if (dist_sq > ANT_VISION_RANGE * ANT_VISION_RANGE) {
+        return false;
+    }
+
+    // Check angle
+    float angle_to_target = atan2(dy, dx);
+    float angle_diff = wrap_angle(angle_to_target - ant_dir);
+
+    return fabs(angle_diff) <= ANT_VISION_ANGLE / 2.0f;
+}
+
+// Add pheromone to the environment
+static inline void add_pheromone(AntsEnv* env, Vector2D position, int colony_id) {
+    if (env->num_pheromones >= MAX_PHEROMONES) {
+        // Replace oldest pheromone (circular buffer)
+        for (int i = 0; i < env->num_pheromones - 1; i++) {
+            env->pheromones[i] = env->pheromones[i + 1];
+        }
+        env->num_pheromones--;
+    }
+
+    env->pheromones[env->num_pheromones].position = position;
+    env->pheromones[env->num_pheromones].strength = PHEROMONE_DEPOSIT_AMOUNT;
+    env->pheromones[env->num_pheromones].colony_id = colony_id;
+    env->num_pheromones++;
+}
+
 // Spawn a new ant at its colony
 void spawn_ant(AntsEnv* env, int ant_id) {
     Ant* ant = &env->ants[ant_id];
@@ -148,6 +206,7 @@ void spawn_ant(AntsEnv* env, int ant_id) {
     ant->direction = wrap_angle((rand() % 8) * (M_PI / 4));
     ant->has_food = false;
     ant->steps_alive = 0;
+    ant->steps_since_pheromone = 0;
 }
 
 // Spawn food at a valid location
@@ -188,6 +247,7 @@ void init(AntsEnv* env) {
     env->ants = (Ant*)calloc(env->num_ants, sizeof(Ant));
     env->tick = 0;
     env->client = NULL;
+    env->num_pheromones = 0;
 
     // Initialize colonies
     env->colonies[0].position = (Vector2D){env->width / 4, env->height / 2};
@@ -202,7 +262,7 @@ void init(AntsEnv* env) {
     }
 }
 
-// Compute observations for all ants - FOLLOWING TARGET PATTERN
+// Compute observations for all ants - WITH VISION AND PHEROMONES
 void compute_observations(AntsEnv* env) {
     int obs_idx = 0;
 
@@ -210,30 +270,60 @@ void compute_observations(AntsEnv* env) {
         Ant* ant = &env->ants[a];
         Colony* colony = &env->colonies[ant->colony_id];
 
-        // Find closest food source
+        // Find closest visible food source (with vision constraints)
         float closest_food_dist_sq = env->width * env->width + env->height * env->height;
         Vector2D closest_food_pos = {0, 0};
         bool found_food = false;
 
         for (int i = 0; i < env->num_food_sources; i++) {
             if (env->food_sources[i].amount > 0) {
-                float dist_sq = distance_squared(ant->position, env->food_sources[i].position);
-                if (dist_sq < closest_food_dist_sq) {
-                    closest_food_dist_sq = dist_sq;
-                    closest_food_pos = env->food_sources[i].position;
-                    found_food = true;
+                Vector2D food_pos = env->food_sources[i].position;
+                if (is_in_vision(ant->position, ant->direction, food_pos)) {
+                    float dist_sq = distance_squared(ant->position, food_pos);
+                    if (dist_sq < closest_food_dist_sq) {
+                        closest_food_dist_sq = dist_sq;
+                        closest_food_pos = food_pos;
+                        found_food = true;
+                    }
                 }
             }
         }
 
-        // Observation: [colony_dx, colony_dy, food_dx, food_dy, has_food, heading]
-        // Normalized to roughly -1 to 1 range
+        // Find closest visible pheromone from own colony
+        float closest_pheromone_dist_sq = env->width * env->width + env->height * env->height;
+        Vector2D closest_pheromone_pos = {0, 0};
+        bool found_pheromone = false;
+
+        for (int i = 0; i < env->num_pheromones; i++) {
+            if (env->pheromones[i].colony_id == ant->colony_id) {
+                Vector2D pheromone_pos = env->pheromones[i].position;
+                if (is_in_vision(ant->position, ant->direction, pheromone_pos)) {
+                    float dist_sq = distance_squared(ant->position, pheromone_pos);
+                    if (dist_sq < closest_pheromone_dist_sq) {
+                        closest_pheromone_dist_sq = dist_sq;
+                        closest_pheromone_pos = pheromone_pos;
+                        found_pheromone = true;
+                    }
+                }
+            }
+        }
+
+        // Observation: [colony_dx, colony_dy, food_dx, food_dy, pheromone_dx, pheromone_dy, has_food, heading]
+        // 8 values total - normalized to roughly -1 to 1 range
         env->observations[obs_idx++] = (colony->position.x - ant->position.x) / env->width;
         env->observations[obs_idx++] = (colony->position.y - ant->position.y) / env->height;
 
         if (found_food) {
             env->observations[obs_idx++] = (closest_food_pos.x - ant->position.x) / env->width;
             env->observations[obs_idx++] = (closest_food_pos.y - ant->position.y) / env->height;
+        } else {
+            env->observations[obs_idx++] = 0.0f;
+            env->observations[obs_idx++] = 0.0f;
+        }
+
+        if (found_pheromone) {
+            env->observations[obs_idx++] = (closest_pheromone_pos.x - ant->position.x) / env->width;
+            env->observations[obs_idx++] = (closest_pheromone_pos.y - ant->position.y) / env->height;
         } else {
             env->observations[obs_idx++] = 0.0f;
             env->observations[obs_idx++] = 0.0f;
@@ -248,6 +338,7 @@ void compute_observations(AntsEnv* env) {
 void c_reset(AntsEnv* env) {
     env->tick = 0;
     env->log = (Log){0};
+    env->num_pheromones = 0;
 
     // Reset colonies
     env->colonies[0].food_collected = 0;
@@ -368,10 +459,30 @@ void c_step(AntsEnv* env) {
         if (ant->position.y < 0) ant->position.y = env->height;
         if (ant->position.y > env->height) ant->position.y = 0;
 
+        // Automatic pheromone dropping when carrying food
+        if (ant->has_food) {
+            ant->steps_since_pheromone++;
+            if (ant->steps_since_pheromone >= PHEROMONE_DROP_INTERVAL) {
+                add_pheromone(env, ant->position, ant->colony_id);
+                ant->steps_since_pheromone = 0;
+            }
+        }
+
         // Periodic reset like target.c (lines 158-161)
         if (ant->steps_alive % ANT_RESET_INTERVAL == 0) {
             spawn_ant(env, i);
             env->terminals[i] = 1;
+        }
+    }
+
+    // Update pheromone evaporation
+    for (int i = 0; i < env->num_pheromones; i++) {
+        env->pheromones[i].strength -= PHEROMONE_EVAPORATION_RATE;
+        if (env->pheromones[i].strength <= 0) {
+            // Remove evaporated pheromone (swap with last and shrink)
+            env->pheromones[i] = env->pheromones[env->num_pheromones - 1];
+            env->num_pheromones--;
+            i--;  // Check this slot again
         }
     }
 
@@ -391,11 +502,17 @@ void c_render(AntsEnv* env) {
         env->client->cell_size = 1;
         env->client->width = env->width;
         env->client->height = env->height;
+        env->client->show_vision_cones = true;  // Start with vision cones on
     }
 
     // Standard exit key
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
+    }
+
+    // Toggle vision cones with 'V' key
+    if (IsKeyPressed(KEY_V)) {
+        env->client->show_vision_cones = !env->client->show_vision_cones;
     }
 
     BeginDrawing();
@@ -406,6 +523,14 @@ void c_render(AntsEnv* env) {
         Color color = (i == 0) ? COLONY1_COLOR : COLONY2_COLOR;
         DrawCircle(env->colonies[i].position.x, env->colonies[i].position.y,
                    COLONY_SIZE, color);
+    }
+
+    // Draw pheromones (before other objects for layering)
+    for (int i = 0; i < env->num_pheromones; i++) {
+        Color pheromone_color = (env->pheromones[i].colony_id == 0) ? PHEROMONE1_COLOR : PHEROMONE2_COLOR;
+        pheromone_color.a = (unsigned char)(100 * env->pheromones[i].strength);
+        DrawCircle(env->pheromones[i].position.x, env->pheromones[i].position.y,
+                   PHEROMONE_SIZE, pheromone_color);
     }
 
     // Draw food
@@ -419,19 +544,38 @@ void c_render(AntsEnv* env) {
         }
     }
 
-    // Draw ants
+    // Draw ants with optional vision cones
     for (int i = 0; i < env->num_ants; i++) {
         Ant* ant = &env->ants[i];
-        Color color = (ant->colony_id == 0) ? COLONY1_COLOR : COLONY2_COLOR;
+        Color ant_color = (ant->colony_id == 0) ? COLONY1_COLOR : COLONY2_COLOR;
+
+        // Draw vision cone if enabled (semi-transparent)
+        if (env->client->show_vision_cones) {
+            Color vision_color = ant_color;
+            vision_color.a = 30;  // Very transparent
+
+            // Calculate vision cone arc
+            float start_angle = (ant->direction - ANT_VISION_ANGLE / 2.0f) * 180.0f / M_PI;
+            float end_angle = (ant->direction + ANT_VISION_ANGLE / 2.0f) * 180.0f / M_PI;
+
+            DrawCircleSector(
+                (Vector2){ant->position.x, ant->position.y},
+                ANT_VISION_RANGE,
+                start_angle,
+                end_angle,
+                32,  // segments for smooth arc
+                vision_color
+            );
+        }
 
         // Change color if carrying food
         if (ant->has_food) {
-            color = FOOD_COLOR;
+            ant_color = FOOD_COLOR;
         }
 
-        DrawCircle(ant->position.x, ant->position.y, ANT_SIZE, color);
+        DrawCircle(ant->position.x, ant->position.y, ANT_SIZE, ant_color);
 
-        // Direction indicator
+        // Direction indicator (pointing forward)
         float dir_x = ant->position.x + (ANT_SIZE * 1.5f) * cos(ant->direction);
         float dir_y = ant->position.y + (ANT_SIZE * 1.5f) * sin(ant->direction);
         DrawLine(ant->position.x, ant->position.y, dir_x, dir_y, RAYWHITE);
@@ -443,6 +587,12 @@ void c_render(AntsEnv* env) {
     DrawText(TextFormat("Colony 2: %d", env->colonies[1].food_collected),
              20, 50, 20, COLONY2_COLOR);
     DrawText(TextFormat("Tick: %d", env->tick), env->width - 120, 20, 20, RAYWHITE);
+    DrawText(TextFormat("Pheromones: %d", env->num_pheromones), env->width - 180, 50, 20, RAYWHITE);
+
+    // Controls help
+    const char* vision_status = env->client->show_vision_cones ? "ON" : "OFF";
+    DrawText(TextFormat("[V] Vision Cones: %s", vision_status), 20, env->height - 30, 16, RAYWHITE);
+    DrawText("[ESC] Exit", 20, env->height - 50, 16, GRAY);
 
     EndDrawing();
 }
