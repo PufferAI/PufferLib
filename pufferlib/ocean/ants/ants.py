@@ -1,172 +1,123 @@
+'''Ant Colony Simulation Environment - Simplified following Target pattern'''
+
 import numpy as np
 import gymnasium
 
 import pufferlib
-from pufferlib import APIUsageError
 from pufferlib.ocean.ants import binding
 
 class AntsEnv(pufferlib.PufferEnv):
     """
     Ant Colony Simulation Environment
-    
-    Each ant receives observations about its surroundings and can:
-    - Move forward (always happens)
-    - Turn left/right
-    - Drop pheromone trails
-    
+
     Two colonies compete to collect food from the environment.
-    Following multiagent architecture patterns from snake environment.
+    Simplified architecture following the Target environment pattern.
+
+    Observations (6 per ant):
+        - colony_dx, colony_dy: Direction to home colony (normalized)
+        - food_dx, food_dy: Direction to nearest food (normalized)
+        - has_food: Binary flag (0 or 1)
+        - heading: Ant's current direction (normalized)
+
+    Actions (Discrete 4):
+        0: Turn left
+        1: Turn right
+        2: Move forward
+        3: No-op
     """
-    
+
     def __init__(
             self,
-            num_envs=32,
+            num_envs=1,
             width=1280,
             height=720,
             num_ants=32,
-            reward_food=0.1,
+            reward_food_pickup=0.1,
             reward_delivery=10.0,
-            reward_death=0.0,
-            reward_demo_match=0.001,
-            reward_demo_mismatch=-0.001,
-            reward_progress=0.01,
-            reward_time_penalty=-0.001,
-            reward_wrong_direction=-0.005,
-            reward_efficiency_bonus=2.0,
-            report_interval=1,
             render_mode=None,
+            log_interval=128,
             buf=None,
             seed=0):
-        
-        if num_envs is not None:
-            num_ants = num_envs * [num_ants]
-            width = num_envs * [width]
-            height = num_envs * [height]
-        
-        if not (len(num_ants) == len(width) == len(height)):
-            raise APIUsageError('num_ants, width, height must be lists of equal length')
-        
-        for w, h in zip(width, height):
-            if w < 100 or h < 100:
-                raise APIUsageError('width and height must be at least 100')
-        
-        self.report_interval = report_interval
-        self.num_agents = sum(num_ants)
-        self.render_mode = render_mode
-        self.tick = 0
-        self.single_action_space = gymnasium.spaces.Discrete(4)
+
+        # Simple observation space: 6 values per ant
         self.single_observation_space = gymnasium.spaces.Box(
-            low=-1.0, high=1.0, shape=(8,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(6,), dtype=np.float32
         )
-        
-        # Calculate cell size for rendering
-        self.cell_size = int(np.ceil(1280 / max(max(width), max(height))))
+        # Discrete action space: turn left, turn right, move forward, noop
+        self.single_action_space = gymnasium.spaces.Discrete(4)
+
+        self.render_mode = render_mode
+        self.num_agents = num_envs * num_ants
+        self.log_interval = log_interval
 
         super().__init__(buf)
 
         c_envs = []
-        offset = 0
         for i in range(num_envs):
-            na = num_ants[i]
-            obs_slice = self.observations[offset:offset+na*8]  # Multiply by obs_size
-            act_slice = self.actions[offset:offset+na]
-            rew_slice = self.rewards[offset:offset+na]
-            term_slice = self.terminals[offset:offset+na]
-            trunc_slice = self.truncations[offset:offset+na]
-
-            # Seed each env uniquely: i + seed * num_envs
-            env_seed = i + seed * num_envs
-            env_id = binding.env_init(
-                obs_slice,
-                act_slice,
-                rew_slice,
-                term_slice,
-                trunc_slice,
-                env_seed,
-                width=width[i],
-                height=height[i],
-                num_ants=na,
-                reward_food=reward_food,
-                reward_delivery=reward_delivery,
-                reward_death=reward_death,
-                reward_demo_match=reward_demo_match,
-                reward_demo_mismatch=reward_demo_mismatch,
-                reward_progress=reward_progress,
-                reward_time_penalty=reward_time_penalty,
-                reward_wrong_direction=reward_wrong_direction,
-                reward_efficiency_bonus=reward_efficiency_bonus,
-                cell_size=self.cell_size
+            c_env = binding.env_init(
+                self.observations[i*num_ants:(i+1)*num_ants],
+                self.actions[i*num_ants:(i+1)*num_ants],
+                self.rewards[i*num_ants:(i+1)*num_ants],
+                self.terminals[i*num_ants:(i+1)*num_ants],
+                self.truncations[i*num_ants:(i+1)*num_ants],
+                seed + i,  # Unique seed per env
+                width=width,
+                height=height,
+                num_ants=num_ants,
+                reward_food_pickup=reward_food_pickup,
+                reward_delivery=reward_delivery
             )
-            c_envs.append(env_id)
-            offset += na * 8  # Multiply by obs_size
-        
-        # VECTORIZE ENVIRONMENTS - FOLLOWING SNAKE PATTERN
+            c_envs.append(c_env)
+
         self.c_envs = binding.vectorize(*c_envs)
-    
-    def reset(self, seed=None):
+
+    def reset(self, seed=0):
         """Reset all environments"""
+        binding.vec_reset(self.c_envs, seed)
         self.tick = 0
-        if seed is None:
-            binding.vec_reset(self.c_envs, 0)
-        else:
-            binding.vec_reset(self.c_envs, seed)
         return self.observations, []
-    
+
     def step(self, actions):
         """Execute one step for all agents"""
-        self.actions[:] = actions
         self.tick += 1
+        self.actions[:] = actions
         binding.vec_step(self.c_envs)
-        
+
         info = []
-        if self.tick % self.report_interval == 0:
-            log_data = binding.vec_log(self.c_envs)
-            if log_data:
-                # Add computed metrics
-                info.append(log_data)
-        
+        if self.tick % self.log_interval == 0:
+            log = binding.vec_log(self.c_envs)
+            if log:
+                info.append(log)
+
         return (self.observations, self.rewards,
                 self.terminals, self.truncations, info)
-    
+
     def render(self):
         """Render the first environment"""
         binding.vec_render(self.c_envs, 0)
-    
+
     def close(self):
         """Clean up resources"""
         binding.vec_close(self.c_envs)
 
 
-def test_performance(timeout=10, atn_cache=1024):
-    """Performance test following snake pattern"""
-    env = AntsEnv(num_envs=64, num_ants=50)
+if __name__ == '__main__':
+    # Performance test following target pattern
+    N = 512
+
+    env = AntsEnv(num_envs=N)
     env.reset()
-    tick = 0
-    
-    total_ants = env.num_agents
-    actions = np.random.randint(0, 4, (atn_cache, total_ants))
-    
+    steps = 0
+
+    CACHE = 1024
+    actions = np.random.randint(4, size=(CACHE, N))
+
+    i = 0
     import time
     start = time.time()
-    while time.time() - start < timeout:
-        atns = actions[tick % atn_cache]
-        obs, rewards, dones, truncs, info = env.step(atns)
-        
-        # Print info when available
-        if info:
-            for log_data in info:
-                if 'n' in log_data and log_data['n'] > 0:
-                    print(f"Tick {tick}: Episodes: {log_data['n']:.0f}, "
-                          f"Avg score: {log_data.get('score', 0) / log_data['n']:.2f}, "
-                          f"Avg return: {log_data.get('episode_return', 0) / log_data['n']:.2f}")
-        
-        tick += 1
-    
-    elapsed = time.time() - start
-    sps = total_ants * tick / elapsed
-    print(f'Ant SPS: {sps:.0f} ({tick} environment steps)')
-    env.close()
+    while time.time() - start < 10:
+        env.step(actions[i % CACHE])
+        steps += env.num_agents
+        i += 1
 
-
-if __name__ == '__main__':
-    test_performance()
+    print('Ants SPS:', int(steps / (time.time() - start)))
