@@ -36,8 +36,12 @@
 #define PHEROMONE_DROP_INTERVAL 5  // Drop pheromone every N steps while carrying food
 
 // Vision system constants
-#define ANT_VISION_RANGE 100.0f
+#define ANT_VISION_RANGE 50.0f
 #define ANT_VISION_ANGLE (M_PI / 6.0f)  // 30 degrees (π/6)
+
+// Pheromone sensing constants
+#define ANT_PHEROMONE_RANGE 100.0f  // 100px range
+#define ANT_PHEROMONE_ANGLE (2 * M_PI)  // 360 degrees (full circle)
 
 // Actions
 #define ACTION_TURN_LEFT 0
@@ -111,7 +115,8 @@ struct Client {
     int cell_size;
     int width;
     int height;
-    bool show_vision_cones;  // Toggle for vision cone visualization
+    bool show_vision_cones;     // Toggle for vision cone visualization
+    bool show_pheromone_range;  // Toggle for pheromone range visualization
 };
 
 // Main environment struct - FOLLOWING TARGET PATTERN
@@ -185,6 +190,12 @@ static inline bool is_in_vision(Vector2D ant_pos, float ant_dir, Vector2D target
     float angle_diff = wrap_angle(angle_to_target - ant_dir);
 
     return fabs(angle_diff) <= ANT_VISION_ANGLE / 2.0f;
+}
+
+// Check if target is within ant's pheromone sensing range (360 degrees)
+static inline bool is_in_pheromone_range(Vector2D ant_pos, Vector2D target) {
+    float dist_sq = distance_squared(ant_pos, target);
+    return dist_sq <= ANT_PHEROMONE_RANGE * ANT_PHEROMONE_RANGE;
 }
 
 // Add pheromone to the environment
@@ -295,7 +306,7 @@ void compute_observations(AntsEnv* env) {
             }
         }
 
-        // Find closest visible pheromone from own colony
+        // Find closest pheromone from own colony (using pheromone range, not vision)
         float closest_pheromone_dist_sq = env->width * env->width + env->height * env->height;
         Vector2D closest_pheromone_pos = {0, 0};
         bool found_pheromone = false;
@@ -303,7 +314,7 @@ void compute_observations(AntsEnv* env) {
         for (int i = 0; i < env->num_pheromones; i++) {
             if (env->pheromones[i].colony_id == ant->colony_id) {
                 Vector2D pheromone_pos = env->pheromones[i].position;
-                if (is_in_vision(ant->position, ant->direction, pheromone_pos)) {
+                if (is_in_pheromone_range(ant->position, pheromone_pos)) {
                     float dist_sq = distance_squared(ant->position, pheromone_pos);
                     if (dist_sq < closest_pheromone_dist_sq) {
                         closest_pheromone_dist_sq = dist_sq;
@@ -314,8 +325,18 @@ void compute_observations(AntsEnv* env) {
             }
         }
 
-        // Observation: [colony_dx, colony_dy, food_dx, food_dy, pheromone_dx, pheromone_dy, has_food, heading]
-        // 8 values total - normalized to roughly -1 to 1 range
+        // Count friendly ants within pheromone range (density)
+        int friendly_ants_nearby = 0;
+        for (int i = 0; i < env->num_ants; i++) {
+            if (i != a && env->ants[i].colony_id == ant->colony_id) {
+                if (is_in_pheromone_range(ant->position, env->ants[i].position)) {
+                    friendly_ants_nearby++;
+                }
+            }
+        }
+
+        // Observation: [colony_dx, colony_dy, food_dx, food_dy, pheromone_dx, pheromone_dy, has_food, heading, density]
+        // 9 values total - normalized to roughly -1 to 1 range
         env->observations[obs_idx++] = (colony->position.x - ant->position.x) / env->width;
         env->observations[obs_idx++] = (colony->position.y - ant->position.y) / env->height;
 
@@ -337,6 +358,10 @@ void compute_observations(AntsEnv* env) {
 
         env->observations[obs_idx++] = ant->has_food ? 1.0f : 0.0f;
         env->observations[obs_idx++] = ant->direction / (2 * M_PI);
+
+        // Normalize density by max possible ants per colony (roughly num_ants / 2)
+        float max_friendly_ants = (env->num_ants / NUM_COLONIES) - 1;  // -1 to exclude self
+        env->observations[obs_idx++] = max_friendly_ants > 0 ? (float)friendly_ants_nearby / max_friendly_ants : 0.0f;
     }
 }
 
@@ -528,7 +553,8 @@ void c_render(AntsEnv* env) {
         env->client->cell_size = 1;
         env->client->width = env->width;
         env->client->height = env->height;
-        env->client->show_vision_cones = true;  // Start with vision cones on
+        env->client->show_vision_cones = true;      // Start with vision cones on
+        env->client->show_pheromone_range = false;  // Start with pheromone range off
     }
 
     // Standard exit key
@@ -539,6 +565,11 @@ void c_render(AntsEnv* env) {
     // Toggle vision cones with 'V' key
     if (IsKeyPressed(KEY_V)) {
         env->client->show_vision_cones = !env->client->show_vision_cones;
+    }
+
+    // Toggle pheromone range with 'P' key
+    if (IsKeyPressed(KEY_P)) {
+        env->client->show_pheromone_range = !env->client->show_pheromone_range;
     }
 
     BeginDrawing();
@@ -570,10 +601,17 @@ void c_render(AntsEnv* env) {
         }
     }
 
-    // Draw ants with optional vision cones
+    // Draw ants with optional vision cones and pheromone range
     for (int i = 0; i < env->num_ants; i++) {
         Ant* ant = &env->ants[i];
         Color ant_color = (ant->colony_id == 0) ? COLONY1_COLOR : COLONY2_COLOR;
+
+        // Draw pheromone range if enabled (semi-transparent circle)
+        if (env->client->show_pheromone_range) {
+            Color pheromone_range_color = ant_color;
+            pheromone_range_color.a = 15;  // Very transparent
+            DrawCircle(ant->position.x, ant->position.y, ANT_PHEROMONE_RANGE, pheromone_range_color);
+        }
 
         // Draw vision cone if enabled (semi-transparent)
         if (env->client->show_vision_cones) {
@@ -637,8 +675,10 @@ void c_render(AntsEnv* env) {
 
     // Controls help
     const char* vision_status = env->client->show_vision_cones ? "ON" : "OFF";
+    const char* pheromone_status = env->client->show_pheromone_range ? "ON" : "OFF";
     DrawText(TextFormat("[V] Vision Cones: %s", vision_status), 20, env->height - 30, 16, RAYWHITE);
-    DrawText("[ESC] Exit", 20, env->height - 50, 16, GRAY);
+    DrawText(TextFormat("[P] Pheromone Range: %s", pheromone_status), 20, env->height - 50, 16, RAYWHITE);
+    DrawText("[ESC] Exit", 20, env->height - 70, 16, GRAY);
 
     EndDrawing();
 }

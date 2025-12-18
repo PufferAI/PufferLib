@@ -13,17 +13,23 @@ class AntsEnv(pufferlib.PufferEnv):
     Two colonies compete to collect food from the environment.
     Simplified architecture following the Target environment pattern.
 
-    Observations (8 per ant):
+    Observations (9 per ant):
         - colony_dx, colony_dy: Direction to home colony (normalized)
         - food_dx, food_dy: Direction to nearest VISIBLE food (normalized, with vision constraints)
-        - pheromone_dx, pheromone_dy: Direction to nearest VISIBLE pheromone from own colony
+        - pheromone_dx, pheromone_dy: Direction to nearest pheromone from own colony (within pheromone range)
         - has_food: Binary flag (0 or 1)
         - heading: Ant's current direction (normalized)
+        - density: Number of friendly ants within pheromone range (normalized)
 
     Vision System:
-        - Ants have limited vision range (100 pixels) - very short range
+        - Ants have limited vision range (50 pixels) for seeing food
         - Vision cone of 30 degrees (π/6) - narrow focused beam
-        - Can only see food and pheromones within their vision cone
+        - Can only see food within their vision cone
+
+    Pheromone Sensing:
+        - Separate from vision: 100 pixels range, 360 degrees (omnidirectional)
+        - Can sense pheromones from own colony within this range
+        - Also used to detect nearby friendly ants (density)
 
     Pheromone System:
         - Ants automatically drop pheromones every 5 steps while carrying food
@@ -51,9 +57,9 @@ class AntsEnv(pufferlib.PufferEnv):
             buf=None,
             seed=0):
 
-        # Observation space: 8 values per ant (added pheromone observations)
+        # Observation space: 9 values per ant (colony, food, pheromone, has_food, heading, density)
         self.single_observation_space = gymnasium.spaces.Box(
-            low=-1.0, high=1.0, shape=(8,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(9,), dtype=np.float32
         )
         # Discrete action space: turn left, turn right, move forward, noop
         self.single_action_space = gymnasium.spaces.Discrete(4)
