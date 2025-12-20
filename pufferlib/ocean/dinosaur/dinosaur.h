@@ -46,15 +46,19 @@ typedef struct {
     float width;
     float height;
     float x_offset;
-    Texture2D tex;
 } Agent;
+
+enum ObstacleType {
+    CACTUS,
+    BIRD
+};
 
 typedef struct {
     float x;
     float y;
     float width;
     float height;
-    Texture2D tex;
+    enum ObstacleType type;
 } Obstacle;
 
 typedef struct {
@@ -161,21 +165,18 @@ void c_step(Dinosaur* env){
             env->agent->height = PLAYER_HEIGHT;
             env->agent->width = PLAYER_WIDTH;
             env->agent->x_offset = 0.0f;
-            if(env->client != NULL) env->agent->tex = env->client->dinosaur_up;
             break;
         case CROUCH:
             env->agent->y_velocity = -env->agent->jump_strength;
             env->agent->height = PLAYER_HEIGHT / 2.f;
             env->agent->width = PLAYER_WIDTH * 2.0f;
             env->agent->x_offset = PLAYER_WIDTH;
-            if(env->client != NULL) env->agent->tex = env->client->dinosaur_down;
             break;
         case JUMP:
             if(env->agent->y == 0.0f) env->agent->y_velocity = env->agent->jump_strength;
             env->agent->height = PLAYER_HEIGHT;
             env->agent->width = PLAYER_WIDTH;
             env->agent->x_offset = 0.0f;
-            if(env->client != NULL) env->agent->tex = env->client->dinosaur_up;
             break;
     }
 
@@ -243,7 +244,7 @@ void c_step(Dinosaur* env){
                 env->obstacles[env->num_obstacles-1].y = 0;
                 env->obstacles[env->num_obstacles-1].width = CACTUS_WIDTH;
                 env->obstacles[env->num_obstacles-1].height = CACTUS_HEIGHT;
-                if(env->client != NULL) env->obstacles[env->num_obstacles-1].tex = env->client->cactus;
+                env->obstacles[env->num_obstacles-1].type = CACTUS;
             }
         } else if (env->num_obstacles <= env->max_obstacles){
             env->num_obstacles++;
@@ -252,7 +253,7 @@ void c_step(Dinosaur* env){
             env->obstacles[env->num_obstacles-1].y = BIRD_Y;
             env->obstacles[env->num_obstacles-1].width = BIRD_WIDTH;
             env->obstacles[env->num_obstacles-1].height = BIRD_HEIGHT;
-            if(env->client != NULL) env->obstacles[env->num_obstacles-1].tex = env->client->bird;
+            env->obstacles[env->num_obstacles-1].type = BIRD;
         }
         env->spawn_rate = rand() % (env->spawn_rate_max - env->spawn_rate_min) + env->spawn_rate_min;
         env->spawn_rate = env->spawn_rate / ((float)env->speed / (float)env->speed_init);
@@ -283,8 +284,10 @@ void c_render(Dinosaur* env){
 
     for(int o = 0; o < env->num_obstacles; o++){
         Obstacle* obstacle = &env->obstacles[o];
+        Texture2D tex;
+        tex = obstacle->type == CACTUS ? env->client->cactus : env->client->bird;
         DrawTexturePro(
-            obstacle->tex,
+            tex,
             (Rectangle){0, 0, obstacle->width, obstacle->height},
             (Rectangle){
                 obstacle->x - obstacle->width,
@@ -298,8 +301,18 @@ void c_render(Dinosaur* env){
         );
     }
 
+    Texture2D tex;
+    switch(env->actions[0]){
+        case NOOP:
+        case JUMP:
+            tex = env->client->dinosaur_up;
+            break;
+        case CROUCH:
+            tex = env->client->dinosaur_down;
+            break;
+    }
     DrawTexturePro(
-        env->agent->tex,
+        tex,
         (Rectangle){0, 0, env->agent->width, env->agent->height},
         (Rectangle){
             env->agent->x - env->agent->width + env->agent->x_offset,
