@@ -39,7 +39,7 @@ avalon = [
 atari = [
     'gymnasium[accept-rom-license]==0.29.1',
     'opencv-python==3.4.17.63',
-    'ale_py==0.9.0',
+    'ale_py==0.10.1',
 ]
 
 box2d = [

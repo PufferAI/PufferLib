@@ -16,7 +16,7 @@ def make(name, obs_type='grayscale', frameskip=4,
         repeat_action_probability=0.0, render_mode='rgb_array',
         buf=None, seed=0):
     '''Atari creation function'''
-    pufferlib.environments.try_import('ale_py', 'AtariEnv')
+    pufferlib.environments.try_import('ale_py')
 
     ale_render_mode = render_mode
     if render_mode == 'human':
