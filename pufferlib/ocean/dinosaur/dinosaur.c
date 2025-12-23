@@ -3,9 +3,9 @@
 
 int main() {
     int max_obstacles = 10;
-    int num_obs = (max_obstacles*2) + 4;
+    int num_obs = (max_obstacles*3) + 4;
 
-    Weights* weights = load_weights("resources/dinosaur/puffer_dinosaur_weights.bin", 544316);
+    Weights* weights = load_weights("resources/dinosaur/puffer_dinosaur_weights.bin", 545296);
 
     int logit_sizes[1] = {3};
     LinearLSTM* net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);

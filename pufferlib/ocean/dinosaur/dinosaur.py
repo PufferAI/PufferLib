@@ -10,7 +10,7 @@ class Dinosaur(pufferlib.PufferEnv):
             rate_increment_rate=400, max_obstacles=10,
             render_mode=None, log_interval=128, size=11, buf=None, seed=0):
         self.single_observation_space = gymnasium.spaces.Box(low=-1.0, high=1,
-            shape=((max_obstacles*2) + 4,), dtype=np.float32)
+            shape=((max_obstacles*3) + 4,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Discrete(3)
 
         self.render_mode = render_mode

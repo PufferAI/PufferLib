@@ -8,15 +8,15 @@
 
 #define PLAYER_HEIGHT 48
 #define PLAYER_WIDTH 32
-#define PLAYER_JUMP 8.0f
-#define GRAVITY 0.4f
+#define PLAYER_JUMP 10.0f
+#define GRAVITY 0.5f
 
 #define CACTUS_HEIGHT 24
 #define CACTUS_WIDTH 24
 
 #define BIRD_HEIGHT 24
 #define BIRD_WIDTH 48
-#define BIRD_Y 32
+#define BIRD_Y 44
 
 const unsigned char NOOP = 0;
 const unsigned char JUMP = 1;
@@ -105,7 +105,8 @@ Client* make_client(Dinosaur* env){
 void init(Dinosaur* env) {
     env->gravity = GRAVITY;
     env->floor_y = env->height/2.0f;
-    env->spawn_rate = env->spawn_rate_max;
+    env->spawn_rate = 1;
+    env->spawn_ticks = 0;
 
     env->agent = calloc(1, sizeof(Agent));
     env->agent->x = 0.0f + 2.0f * PLAYER_WIDTH;
@@ -127,16 +128,18 @@ void compute_observations(Dinosaur* env) {
             Obstacle* obstacle = &env->obstacles[o];
             env->observations[obs_idx++] = obstacle->x/env->width;
             env->observations[obs_idx++] = obstacle->y/(env->width / 2);
+            env->observations[obs_idx++] = obstacle->type == CACTUS ? 0.2f : 0.8f;
         } else {
-            env->observations[obs_idx++] = 1.0;
-            env->observations[obs_idx++] = -1.0;
+            env->observations[obs_idx++] = 1.0f;
+            env->observations[obs_idx++] = -1.0f;
+            env->observations[obs_idx++] = 0.0f;
         }
     }
 }
 
 void c_reset(Dinosaur* env){
     env->speed = env->speed_init;
-    env->spawn_rate = env->spawn_rate_max;
+    env->spawn_rate = 1;
     env->spawn_ticks = 0;
 
     env->agent->ticks = 0;
@@ -202,8 +205,6 @@ void c_step(Dinosaur* env){
         float obstacle_x_min = obstacle_x_max - obstacle->width;
         float obstacle_y_min = obstacle->y;
         float obstacle_y_max = obstacle_y_min + env->agent->height;
-
-        //
         if(
             ((agent_x_max <= obstacle_x_max && agent_x_max >= obstacle_x_min) ||
             (agent_x_min <= obstacle_x_max && agent_x_min >= obstacle_x_min)) &&
