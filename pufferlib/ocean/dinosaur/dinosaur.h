@@ -241,20 +241,24 @@ void c_step(Dinosaur* env){
             for(int i  = 0; i < spawn_num; i++){
                 env->num_obstacles++;
                 env->obstacles = realloc(env->obstacles, env->num_obstacles * sizeof(Obstacle));
-                env->obstacles[env->num_obstacles-1].x = env->width + i * (CACTUS_WIDTH + 10);
-                env->obstacles[env->num_obstacles-1].y = 0;
-                env->obstacles[env->num_obstacles-1].width = CACTUS_WIDTH;
-                env->obstacles[env->num_obstacles-1].height = CACTUS_HEIGHT;
-                env->obstacles[env->num_obstacles-1].type = CACTUS;
+                env->obstacles[env->num_obstacles-1] = (Obstacle) {
+                    .x = env->width + i * (CACTUS_WIDTH + 10.0f),
+                    .y = 0,
+                    .width = CACTUS_WIDTH,
+                    .height = CACTUS_HEIGHT,
+                    .type = CACTUS
+                };
             }
         } else if (env->num_obstacles <= env->max_obstacles){
             env->num_obstacles++;
             env->obstacles = realloc(env->obstacles, env->num_obstacles * sizeof(Obstacle));
-            env->obstacles[env->num_obstacles-1].x = env->width + BIRD_WIDTH + 10;
-            env->obstacles[env->num_obstacles-1].y = BIRD_Y;
-            env->obstacles[env->num_obstacles-1].width = BIRD_WIDTH;
-            env->obstacles[env->num_obstacles-1].height = BIRD_HEIGHT;
-            env->obstacles[env->num_obstacles-1].type = BIRD;
+            env->obstacles[env->num_obstacles-1] = (Obstacle) {
+                .x = env->width + BIRD_WIDTH + 10.0f,
+                .y = BIRD_Y,
+                .width = BIRD_WIDTH,
+                .height = BIRD_HEIGHT,
+                .type = BIRD
+            };
         }
         env->spawn_rate = rand() % (env->spawn_rate_max - env->spawn_rate_min) + env->spawn_rate_min;
         env->spawn_rate = env->spawn_rate / ((float)env->speed / (float)env->speed_init);

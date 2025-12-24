@@ -14,10 +14,10 @@ int main() {
         .width = 800,
         .height = 400,
         .speed_init = 6,
-        .speed_max = 12,
-        .spawn_rate_max = 100,
-        .spawn_rate_min = 50,
-        .rate_increment_rate = 400,
+        .speed_max = 14,
+        .spawn_rate_max = 65,
+        .spawn_rate_min = 45,
+        .rate_increment_rate = 600,
         .max_obstacles = 8,
     };
     env.client = make_client(&env);
