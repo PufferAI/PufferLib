@@ -1113,7 +1113,8 @@ def sweep(args=None, env_name=None):
         timesteps = downsample([log['agent_steps'] for log in all_logs], points_per_run)
 
         is_final_loss_nan = all_logs[-1].get('is_loss_nan', False)
-        if is_final_loss_nan:
+        # scores, costs and timesteps can be empty if downsample set to 0 in the env's config
+        if scores and is_final_loss_nan:
             s = scores.pop()
             c = costs.pop()
             args['train']['total_timesteps'] = timesteps.pop()
