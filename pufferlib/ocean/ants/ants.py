@@ -13,10 +13,11 @@ class AntsEnv(pufferlib.PufferEnv):
     Two colonies compete to collect food from the environment.
     Simplified architecture following the Target environment pattern.
 
-    Observations (9 per ant):
+    Observations (10 per ant):
         - colony_dx, colony_dy: Direction to home colony (normalized)
         - food_dx, food_dy: Direction to nearest VISIBLE food (normalized, with vision constraints)
         - pheromone_dx, pheromone_dy: Direction to nearest pheromone from own colony (within pheromone range)
+        - pheromone_direction: Direction the pheromone was placed in (normalized angle, -1 to 1)
         - has_food: Binary flag (0 or 1)
         - heading: Ant's current direction (normalized)
         - density: Number of friendly ants within pheromone range (normalized)
@@ -57,9 +58,9 @@ class AntsEnv(pufferlib.PufferEnv):
             buf=None,
             seed=0):
 
-        # Observation space: 9 values per ant (colony, food, pheromone, has_food, heading, density)
+        # Observation space: 10 values per ant (colony, food, pheromone, pheromone_direction, has_food, heading, density)
         self.single_observation_space = gymnasium.spaces.Box(
-            low=-1.0, high=1.0, shape=(9,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(10,), dtype=np.float32
         )
         # Discrete action space: turn left, turn right, move forward, noop
         self.single_action_space = gymnasium.spaces.Discrete(4)

@@ -92,6 +92,7 @@ typedef struct {
     Vector2D position;
     float strength;
     int colony_id;
+    float direction;  // Direction the ant was moving when placing this pheromone
 } Pheromone;
 
 // Individual ant agent
@@ -199,7 +200,7 @@ static inline bool is_in_pheromone_range(Vector2D ant_pos, Vector2D target) {
 }
 
 // Add pheromone to the environment
-static inline void add_pheromone(AntsEnv* env, Vector2D position, int colony_id) {
+static inline void add_pheromone(AntsEnv* env, Vector2D position, int colony_id, float direction) {
     if (env->num_pheromones >= MAX_PHEROMONES) {
         // Replace oldest pheromone (circular buffer)
         for (int i = 0; i < env->num_pheromones - 1; i++) {
@@ -211,6 +212,7 @@ static inline void add_pheromone(AntsEnv* env, Vector2D position, int colony_id)
     env->pheromones[env->num_pheromones].position = position;
     env->pheromones[env->num_pheromones].strength = PHEROMONE_DEPOSIT_AMOUNT;
     env->pheromones[env->num_pheromones].colony_id = colony_id;
+    env->pheromones[env->num_pheromones].direction = direction;
     env->num_pheromones++;
 }
 
@@ -309,6 +311,7 @@ void compute_observations(AntsEnv* env) {
         // Find closest pheromone from own colony (using pheromone range, not vision)
         float closest_pheromone_dist_sq = env->width * env->width + env->height * env->height;
         Vector2D closest_pheromone_pos = {0, 0};
+        float closest_pheromone_direction = 0.0f;
         bool found_pheromone = false;
 
         for (int i = 0; i < env->num_pheromones; i++) {
@@ -319,6 +322,7 @@ void compute_observations(AntsEnv* env) {
                     if (dist_sq < closest_pheromone_dist_sq) {
                         closest_pheromone_dist_sq = dist_sq;
                         closest_pheromone_pos = pheromone_pos;
+                        closest_pheromone_direction = env->pheromones[i].direction;
                         found_pheromone = true;
                     }
                 }
@@ -335,8 +339,8 @@ void compute_observations(AntsEnv* env) {
             }
         }
 
-        // Observation: [colony_dx, colony_dy, food_dx, food_dy, pheromone_dx, pheromone_dy, has_food, heading, density]
-        // 9 values total - normalized to roughly -1 to 1 range
+        // Observation: [colony_dx, colony_dy, food_dx, food_dy, pheromone_dx, pheromone_dy, pheromone_direction, has_food, heading, density]
+        // 10 values total - normalized to roughly -1 to 1 range
         env->observations[obs_idx++] = (colony->position.x - ant->position.x) / env->width;
         env->observations[obs_idx++] = (colony->position.y - ant->position.y) / env->height;
 
@@ -351,7 +355,10 @@ void compute_observations(AntsEnv* env) {
         if (found_pheromone) {
             env->observations[obs_idx++] = (closest_pheromone_pos.x - ant->position.x) / env->width;
             env->observations[obs_idx++] = (closest_pheromone_pos.y - ant->position.y) / env->height;
+            // Normalize pheromone direction to -1 to 1 range (divide by π)
+            env->observations[obs_idx++] = closest_pheromone_direction / M_PI;
         } else {
+            env->observations[obs_idx++] = 0.0f;
             env->observations[obs_idx++] = 0.0f;
             env->observations[obs_idx++] = 0.0f;
         }
@@ -513,7 +520,7 @@ void c_step(AntsEnv* env) {
         if (ant->has_food) {
             ant->steps_since_pheromone++;
             if (ant->steps_since_pheromone >= PHEROMONE_DROP_INTERVAL) {
-                add_pheromone(env, ant->position, ant->colony_id);
+                add_pheromone(env, ant->position, ant->colony_id, ant->direction);
                 ant->steps_since_pheromone = 0;
             }
         }
