@@ -59,15 +59,13 @@ typedef struct {
     float episode_return; // Recommended metric: sum of agent rewards over episode
     float episode_length; // Recommended metric: number of steps of agent episode
     float dishes_served; // Number of dishes successfully served
-    float cooperation_score; // Bonus for cooperative actions
     float correct_dishes; // Number of correct 3-onion dishes
     float wrong_dishes; // Number of wrong dishes submitted
     float ingredients_picked; // Total ingredients picked up
     float pots_started; // Number of cooking sessions started
     float items_dropped; // Number of items dropped/placed
     float agent_collisions; // Number of times agents tried to move to same spot
-    float cooking_time_efficiency; // Average cooking efficiency (0-1)
-    float n; // Required as the last field 
+    float n; // Required as the last field
 } Log;
 
 typedef struct {
@@ -132,6 +130,7 @@ typedef struct {
     int held_soup_onions;
     int held_soup_tomatoes;
     int held_soup_total;
+    int ticks_since_reward;  // For logging episode length (steps between successful dishes)
 } Agent;
 
 typedef struct {
@@ -171,8 +170,6 @@ typedef struct {
     unsigned char* terminals; // Required. We don't yet have truncations as standard yet
     int width;
     int height;
-    int max_steps;
-    int current_step;
     int grid_size;
     RewardConfig rewards_config;
     int observation_size;
@@ -466,9 +463,7 @@ static void compute_observations(Overcooked* env) {
         obs[obs_idx++] = env->rewards[agent_idx];
 
         // Total should be 39 dims (34 player features + 2 teammate relative position + 2 absolute position + 1 reward)
-        if (obs_idx != 39 && agent_idx == 0 && env->current_step == 0) {
-            printf("Warning: Observation size mismatch! Expected 39, got %d\n", obs_idx);
-        }
+        // Debug check removed - was only useful on first step
     }
 }
 
@@ -591,7 +586,6 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
         }
         else if (tile == PLATE_BOX) {
             agent->held_item = PLATE;
-            env->log.items_dropped++;
         }
     }
 }
@@ -731,7 +725,7 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
     // You can add more rules here, e.g.:
     // int has_no_tomatoes = (agent->held_soup_tomatoes == 0);
     // int served_quickly = (env->current_step < 100);
-    
+
     if (is_correct_recipe) {
         // reward the particular agent for serving the dish
         env->rewards[agent_idx] += env->rewards_config.dish_served_agent;
@@ -739,35 +733,29 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
             env->rewards[i] += env->rewards_config.dish_served_whole_team; // reward all agents for serving the dish
         }
 
+        env->log.episode_length += agent->ticks_since_reward;
+        agent->ticks_since_reward = 0;
+
+        env->log.episode_return += env->rewards_config.dish_served_whole_team;
         env->log.correct_dishes++;
-        env->log.score += env->rewards_config.dish_served_whole_team;
+        env->log.score += 1.0f;
+        env->log.perf += 1.0f;
         env->log.n++;
     } else {
         env->rewards[agent_idx] += env->rewards_config.wrong_dish_served;
         for (int i = 0; i < env->num_agents; i++) {
             env->rewards[i] += env->rewards_config.wrong_dish_served; // reward all agents for serving
         }
+        env->log.episode_return += env->rewards_config.wrong_dish_served;
         env->log.wrong_dishes++;
     }
     env->log.dishes_served++;
 }
 
 void c_reset(Overcooked* env) {
-    env->current_step = 0;
     env->num_items = 0;
     parse_grid(env);
 
-    env->log.episode_return = 0.0f;
-    env->log.episode_length = 0.0f;
-    env->log.dishes_served = 0.0f;
-    env->log.cooperation_score = 0.0f;
-    env->log.correct_dishes = 0.0f;
-    env->log.wrong_dishes = 0.0f;
-    env->log.ingredients_picked = 0.0f;
-    env->log.pots_started = 0.0f;
-    env->log.items_dropped = 0.0f;
-    env->log.agent_collisions = 0.0f;
-    env->log.cooking_time_efficiency = 0.0f;
 
     for (int i = 0; i < env->num_stoves; i++) {
         CookingPot* pot = &env->cooking_pots[i];
@@ -797,24 +785,25 @@ void c_reset(Overcooked* env) {
         env->agents[i].held_soup_onions = 0;
         env->agents[i].held_soup_tomatoes = 0;
         env->agents[i].held_soup_total = 0;
-        
+        env->agents[i].ticks_since_reward = 0;
+
         env->rewards[i] = 0.0f;
         env->terminals[i] = 0;
     }
-    
+
     compute_observations(env);
-    
 }
 
 void c_step(Overcooked* env) {
     for (int i = 0; i < env->num_agents; i++) {
         int action = env->actions[i];
         env->rewards[i] = env->rewards_config.step_penalty;
-        
+        env->agents[i].ticks_since_reward++;
+
         Agent* agent = &env->agents[i];
         int new_x = agent->x;
         int new_y = agent->y;
-        
+
         switch (action) {
             case ACTION_UP:    new_y -= 1; agent->facing_direction = 0; break;
             case ACTION_DOWN:  new_y += 1; agent->facing_direction = 1; break;
@@ -822,7 +811,7 @@ void c_step(Overcooked* env) {
             case ACTION_RIGHT: new_x += 1; agent->facing_direction = 3; break;
             case ACTION_INTERACT: handle_interaction(env, i); break;
         }
-        
+
         if (action != ACTION_INTERACT && action != ACTION_NOOP) {
             if (is_valid_position(env, new_x, new_y, i)) {
                 agent->x = new_x;
@@ -837,24 +826,28 @@ void c_step(Overcooked* env) {
             }
         }
     }
-    
+
     update_cooking(env);
 
     for (int i = 0; i < env->num_agents; i++) {
-        env->log.episode_return += env->rewards[i];
-    }
-
-    env->current_step++;
-    env->log.episode_length++;
-
-    if (env->current_step >= env->max_steps) {
-        for (int i = 0; i < env->num_agents; i++) {
-            env->terminals[i] = 1;
+        if (env->agents[i].ticks_since_reward % 512 == 0 && env->agents[i].ticks_since_reward > 0) {
+            if (i == 0) {
+                env->agents[i].x = 1;
+                env->agents[i].y = 2;
+            } else if (i == 1) {
+                env->agents[i].x = 3;
+                env->agents[i].y = 2;
+            } else {
+                env->agents[i].x = 1 + (i % 3);
+                env->agents[i].y = 1 + (i / 3);
+            }
+            env->agents[i].held_item = NO_ITEM;
+            env->agents[i].held_soup_onions = 0;
+            env->agents[i].held_soup_tomatoes = 0;
+            env->agents[i].held_soup_total = 0;
         }
-        env->log.perf += env->log.correct_dishes / 20.0f;
-        env->log.score += env->log.episode_return;
     }
-    
+
     compute_observations(env);
 }
 
@@ -924,8 +917,8 @@ void c_render(Overcooked* env) {
     BeginDrawing();
     ClearBackground((Color){240, 240, 240, 255});
     
-    DrawText(TextFormat("Step: %d / %d", env->current_step, env->max_steps), 10, 10, 20, BLACK);
-    DrawText(TextFormat("Dishes Served: %d", (int)env->log.dishes_served), 10, 35, 20, BLACK);
+    DrawText(TextFormat("Correct Dishes: %d", (int)env->log.n), 10, 10, 20, BLACK);
+    DrawText(TextFormat("Total Dishes: %d", (int)env->log.dishes_served), 10, 35, 20, BLACK);
     DrawText("Recipe: 3 Onions", 10, 60, 16, DARKGRAY);
     
     int grid_offset_y = 80;

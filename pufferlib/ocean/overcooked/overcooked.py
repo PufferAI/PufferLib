@@ -9,7 +9,7 @@ from pufferlib.ocean.overcooked import binding
 class Overcooked(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, width=5, height=5, num_agents=2,
                  render_mode=None, log_interval=128, buf=None, seed=0,
-                 max_steps=400, grid_size=32,
+                 grid_size=32,
                  reward_dish_served_whole_team=20.0,
                  reward_dish_served_agent=5.0,
                  reward_pot_started=0.1,
@@ -64,7 +64,6 @@ class Overcooked(pufferlib.PufferEnv):
                 width=width,
                 height=height,
                 num_agents=num_agents,
-                max_steps=max_steps,
                 grid_size=grid_size,
                 observation_size=observation_size,
                 reward_dish_served_whole_team=reward_dish_served_whole_team,
