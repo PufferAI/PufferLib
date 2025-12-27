@@ -6,7 +6,7 @@ int main() {
     int num_agents = 2;
     int num_obs = 39;
 
-    Weights* weights = load_weights("resources/overcooked/puffer_overcooked_weights.bin", 137743);
+    Weights* weights = load_weights("resources/overcooked/puffer_overcooked_weights.bin", 552476);
     int logit_sizes[] = {6};
     LinearLSTM* net = make_linearlstm(weights, num_agents, num_obs, logit_sizes, 1);
 
