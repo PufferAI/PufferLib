@@ -856,7 +856,7 @@ void c_render(Overcooked* env) {
         int window_width = env->width * env->grid_size + 350;
         int window_height = env->height * env->grid_size + 80;
         InitWindow(window_width, window_height, "PufferLib Overcooked");
-        SetTargetFPS(4);
+        SetTargetFPS(16);
         env->client = (Client*)calloc(1, sizeof(Client));
         
         env->client->floor = LoadTexture("pufferlib/resources/overcooked/terrain/floor.png");
