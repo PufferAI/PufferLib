@@ -136,7 +136,14 @@ static void compute_observations(Overcooked* env) {
         float dx, dy;
 
         // Nearest onion source (ingredient box) - returns (0,0) if holding onion
-        compute_proximity_feature(env, agent, INGREDIENT_BOX, &dx, &dy);
+        if (agent->held_item == ONION) {
+            dx = 0.0f;
+            dy = 0.0f;
+        } else {
+            compute_tile_proximity_cached(env, agent,
+                env->cache.ingredient_box_positions, env->cache.ingredient_box_count,
+                &dx, &dy);
+        }
         obs[obs_idx++] = dx;
         obs[obs_idx++] = dy;
 
