@@ -7,39 +7,22 @@
 #include "overcooked_types.h"
 #include "overcooked_items.h"
 
-static void compute_proximity_feature(Overcooked* env, Agent* agent, int feature_type, float* dx, float* dy) {
+// Find nearest plated soup item (dynamic items, not cached)
+static void find_nearest_plated_soup(Overcooked* env, Agent* agent, float* dx, float* dy) {
     *dx = 0.0f;
     *dy = 0.0f;
 
-    if (feature_type == INGREDIENT_BOX && agent->held_item == ONION) return;  // Holding onion
-    if (feature_type == PLATE_BOX && agent->held_item == PLATE) return;       // Holding dish
-    if (feature_type == PLATED_SOUP && agent->held_item == PLATED_SOUP) return; // Holding soup
+    // Return (0,0) if already holding soup
+    if (agent->held_item == PLATED_SOUP) return;
 
-    if (feature_type == PLATED_SOUP) {
-        float min_dist = 1000.0f;
-        for (int i = 0; i < env->num_items; i++) {
-            if (env->items[i].type == PLATED_SOUP) {
-                float dist = (float)(abs(env->items[i].x - (int)agent->x) + abs(env->items[i].y - (int)agent->y));
-                if (dist < min_dist) {
-                    min_dist = dist;
-                    *dx = (env->items[i].x - agent->x) / (float)env->width;
-                    *dy = (env->items[i].y - agent->y) / (float)env->height;
-                }
-            }
-        }
-    }
-    else {
-        float min_dist = 1000.0f;
-        for (int y = 0; y < env->height; y++) {
-            for (int x = 0; x < env->width; x++) {
-                if (env->grid[y * env->width + x] == feature_type) {
-                    float dist = (float)(abs(x - (int)agent->x) + abs(y - (int)agent->y));
-                    if (dist < min_dist) {
-                        min_dist = dist;
-                        *dx = (x - agent->x) / (float)env->width;
-                        *dy = (y - agent->y) / (float)env->height;
-                    }
-                }
+    float min_dist = 1000.0f;
+    for (int i = 0; i < env->num_items; i++) {
+        if (env->items[i].type == PLATED_SOUP) {
+            float dist = (float)(abs(env->items[i].x - (int)agent->x) + abs(env->items[i].y - (int)agent->y));
+            if (dist < min_dist) {
+                min_dist = dist;
+                *dx = (env->items[i].x - agent->x) * env->cache.inv_width;
+                *dy = (env->items[i].y - agent->y) * env->cache.inv_height;
             }
         }
     }
@@ -163,7 +146,7 @@ static void compute_observations(Overcooked* env) {
         obs[obs_idx++] = dy;
 
         // Nearest soup (plated soup) - returns (0,0) if holding soup or none exists
-        compute_proximity_feature(env, agent, PLATED_SOUP, &dx, &dy);
+        find_nearest_plated_soup(env, agent, &dx, &dy);
         obs[obs_idx++] = dx;
         obs[obs_idx++] = dy;
 
