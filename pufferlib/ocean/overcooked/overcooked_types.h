@@ -191,6 +191,7 @@ typedef struct {
     int num_agents;
     CookingPot* cooking_pots;  // Array of cooking pots (one per stove)
     int num_stoves;
+    int* pot_index_grid;  // Maps grid cell to pot index (-1 if not a stove)
     float* observations; // Required. You can use any obs type, but make sure it matches in Python!
     int* actions; // Required. int* for discrete/multidiscrete, float* for box
     float* rewards; // Required
