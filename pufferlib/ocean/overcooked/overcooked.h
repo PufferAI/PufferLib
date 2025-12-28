@@ -129,6 +129,7 @@ void c_close(Overcooked* env) {
     free(env->items);
     free(env->agents);
     free(env->cooking_pots);
+    free(env->pot_index_grid);
     if (env->client != NULL) {
         unload_textures(env->client);
         free(env->client);
