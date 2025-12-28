@@ -74,19 +74,22 @@ static void compute_tile_proximity_cached(Overcooked* env, Agent* agent,
 
 
 static void find_nearest_empty_counter(Overcooked* env, int agent_x, int agent_y, float* dx, float* dy) {
-    float min_dist = 1000.0f;
     *dx = 0.0f;
     *dy = 0.0f;
+    int min_dist = 1000;
 
-    for (int y = 0; y < env->height; y++) {
-        for (int x = 0; x < env->width; x++) {
-            if (env->grid[y * env->width + x] == COUNTER && get_item_at(env, x, y) == NULL) {
-                float dist = (float)(abs(x - agent_x) + abs(y - agent_y));
-                if (dist < min_dist) {
-                    min_dist = dist;
-                    *dx = (x - agent_x) / (float)env->width;
-                    *dy = (y - agent_y) / (float)env->height;
-                }
+    // Iterate cached counter positions instead of scanning entire grid
+    for (int i = 0; i < env->cache.counter_count; i++) {
+        int x = env->cache.counter_positions[i * 2];
+        int y = env->cache.counter_positions[i * 2 + 1];
+
+        // Check if counter is empty (no item on it)
+        if (get_item_at(env, x, y) == NULL) {
+            int dist = abs(x - agent_x) + abs(y - agent_y);
+            if (dist < min_dist) {
+                min_dist = dist;
+                *dx = (x - agent_x) * env->cache.inv_width;
+                *dy = (y - agent_y) * env->cache.inv_height;
             }
         }
     }
