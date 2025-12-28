@@ -20,6 +20,7 @@ static void init(Overcooked* env) {
     parse_grid(env);
     init_static_cache(env);
     init_cooking_pots(env);
+    init_pot_indices(env);
     env->client = NULL;
 
     memset(&env->log, 0, sizeof(Log));

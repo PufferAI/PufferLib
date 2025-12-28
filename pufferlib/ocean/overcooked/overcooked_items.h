@@ -69,6 +69,26 @@ static void init_cooking_pots(Overcooked* env) {
     }
 }
 
+static void init_pot_indices(Overcooked* env) {
+    // Allocate pot index grid (same size as main grid)
+    env->pot_index_grid = calloc(env->width * env->height, sizeof(int));
+
+    // Initialize all cells to -1 (not a stove)
+    for (int i = 0; i < env->width * env->height; i++) {
+        env->pot_index_grid[i] = -1;
+    }
+
+    // Map stove cells to their pot indices (same order as init_cooking_pots)
+    int pot_idx = 0;
+    for (int y = 0; y < env->height; y++) {
+        for (int x = 0; x < env->width; x++) {
+            if (env->grid[y * env->width + x] == STOVE) {
+                env->pot_index_grid[y * env->width + x] = pot_idx++;
+            }
+        }
+    }
+}
+
 static CookingPot* get_pot_at(Overcooked* env, int x, int y) {
     if (env->grid[y * env->width + x] != STOVE) {
         return NULL;
