@@ -2,6 +2,9 @@
  * Agents can walk around, pick up items, and put down items.
  */
 
+#ifndef OVERCOOKED_H
+#define OVERCOOKED_H
+
 #include "overcooked_types.h"
 #include "overcooked_items.h"
 #include "overcooked_obs.h"
@@ -24,7 +27,6 @@ static void init(Overcooked* env) {
 void c_reset(Overcooked* env) {
     env->num_items = 0;
     parse_grid(env);
-
 
     for (int i = 0; i < env->num_stoves; i++) {
         CookingPot* pot = &env->cooking_pots[i];
@@ -130,3 +132,5 @@ void c_close(Overcooked* env) {
         free(env->client);
     }
 }
+
+#endif // OVERCOOKED_H
