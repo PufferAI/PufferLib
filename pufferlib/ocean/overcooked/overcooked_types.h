@@ -200,6 +200,7 @@ typedef struct {
     int grid_size;
     RewardConfig rewards_config;
     int observation_size;
+    StaticCache cache;  // Cached static tile positions for O(1) lookup
 } Overcooked;
 
 // Grid layout
