@@ -3,14 +3,9 @@
  */
 
 #include "overcooked_types.h"
+#include "overcooked_items.h"
 
 // Forward declarations
-static Item* get_item_at(Overcooked* env, int x, int y);
-static void add_item(Overcooked* env, int type, int x, int y);
-static void remove_item(Overcooked* env, int x, int y);
-static CookingPot* get_pot_at(Overcooked* env, int x, int y);
-static void init_cooking_pots(Overcooked* env);
-static void update_cooking(Overcooked* env);
 static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx);
 
 static void parse_grid(Overcooked* env) {
@@ -426,40 +421,6 @@ static int is_valid_position(Overcooked* env, int x, int y, int excluding_agent)
     return 1;
 }
 
-static Item* get_item_at(Overcooked* env, int x, int y) {
-    for (int i = 0; i < env->num_items; i++) {
-        if ((int)env->items[i].x == x && (int)env->items[i].y == y) {
-            return &env->items[i];
-        }
-    }
-    return NULL;
-}
-
-static void add_item(Overcooked* env, int type, int x, int y) {
-    if (env->num_items < env->max_items) {
-        env->items[env->num_items].type = type;
-        env->items[env->num_items].x = x;
-        env->items[env->num_items].y = y;
-        env->items[env->num_items].state = 0;
-        env->items[env->num_items].num_onions = 0;
-        env->items[env->num_items].num_tomatoes = 0;
-        env->items[env->num_items].total_ingredients = 0;
-        env->num_items++;
-    }
-}
-
-static void remove_item(Overcooked* env, int x, int y) {
-    for (int i = 0; i < env->num_items; i++) {
-        if ((int)env->items[i].x == x && (int)env->items[i].y == y) {
-            for (int j = i; j < env->num_items - 1; j++) {
-                env->items[j] = env->items[j + 1];
-            }
-            env->num_items--;
-            break;
-        }
-    }
-}
-
 static Color get_agent_color(int held_item) {
     switch (held_item) {
         case NO_ITEM:
@@ -476,66 +437,6 @@ static Color get_agent_color(int held_item) {
             return (Color){255, 165, 0, 255};   // Brighter orange when holding plated soup
         default:
             return BLUE;      // Default to blue
-    }
-}
-
-static void init_cooking_pots(Overcooked* env) {
-    env->num_stoves = 0;
-    for (int i = 0; i < env->width * env->height; i++) {
-        if (env->grid[i] == STOVE) {
-            env->num_stoves++;
-        }
-    }
-    
-    env->cooking_pots = calloc(env->num_stoves, sizeof(CookingPot));
-    
-    int pot_index = 0;
-    for (int y = 0; y < env->height; y++) {
-        for (int x = 0; x < env->width; x++) {
-            if (env->grid[y * env->width + x] == STOVE) {
-                CookingPot* pot = &env->cooking_pots[pot_index];
-                pot->cooking_state = NOT_COOKING;
-                pot->cooking_progress = 0;
-                pot->ingredient_count = 0;
-                pot->num_onions = 0;
-                pot->num_tomatoes = 0;
-                for (int i = 0; i < MAX_INGREDIENTS; i++) {
-                    pot->ingredient_types[i] = NO_ITEM;
-                }
-                pot_index++;
-            }
-        }
-    }
-}
-
-static CookingPot* get_pot_at(Overcooked* env, int x, int y) {
-    if (env->grid[y * env->width + x] != STOVE) {
-        return NULL;
-    }
-    
-    int stove_index = 0;
-    for (int sy = 0; sy < env->height; sy++) {
-        for (int sx = 0; sx < env->width; sx++) {
-            if (env->grid[sy * env->width + sx] == STOVE) {
-                if (sx == x && sy == y) {
-                    return &env->cooking_pots[stove_index];
-                }
-                stove_index++;
-            }
-        }
-    }
-    return NULL;
-}
-
-static void update_cooking(Overcooked* env) {
-    for (int i = 0; i < env->num_stoves; i++) {
-        CookingPot* pot = &env->cooking_pots[i];
-        if (pot->cooking_state == COOKING) {
-            pot->cooking_progress++;
-            if (pot->cooking_progress >= COOKING_TIME) {
-                pot->cooking_state = COOKED;
-            }
-        }
     }
 }
 
