@@ -148,7 +148,14 @@ static void compute_observations(Overcooked* env) {
         obs[obs_idx++] = dy;
 
         // Nearest dish (plate box) - returns (0,0) if holding plate
-        compute_proximity_feature(env, agent, PLATE_BOX, &dx, &dy);
+        if (agent->held_item == PLATE) {
+            dx = 0.0f;
+            dy = 0.0f;
+        } else {
+            compute_tile_proximity_cached(env, agent,
+                env->cache.plate_box_positions, env->cache.plate_box_count,
+                &dx, &dy);
+        }
         obs[obs_idx++] = dx;
         obs[obs_idx++] = dy;
 
