@@ -160,6 +160,25 @@ typedef struct {
     int num_tomatoes;      // Count of tomatoes
 } CookingPot;
 
+// Cache for static tile positions (computed once at init, never changes)
+typedef struct {
+    // Static tile positions stored as x,y pairs: [x0, y0, x1, y1, ...]
+    int ingredient_box_positions[20];  // Max 10 ingredient boxes
+    int ingredient_box_count;
+    int plate_box_positions[20];       // Max 10 plate boxes
+    int plate_box_count;
+    int serving_area_positions[20];    // Max 10 serving areas
+    int serving_area_count;
+    int stove_positions[20];           // Max 10 stoves
+    int stove_count;
+    int counter_positions[100];        // Max 50 counters
+    int counter_count;
+
+    // Precomputed normalization factors
+    float inv_width;   // 1.0f / width
+    float inv_height;  // 1.0f / height
+} StaticCache;
+
 // Required that you have some struct for your env
 typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
