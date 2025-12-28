@@ -177,7 +177,9 @@ static void compute_observations(Overcooked* env) {
         obs[obs_idx++] = dy;
 
         // Nearest pot (stove)
-        compute_proximity_feature(env, agent, STOVE, &dx, &dy);
+        compute_tile_proximity_cached(env, agent,
+            env->cache.stove_positions, env->cache.stove_count,
+            &dx, &dy);
         obs[obs_idx++] = dx;
         obs[obs_idx++] = dy;
 
