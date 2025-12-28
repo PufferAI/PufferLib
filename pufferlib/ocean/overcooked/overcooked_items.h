@@ -89,6 +89,12 @@ static void init_pot_indices(Overcooked* env) {
     }
 }
 
+// O(1) pot lookup using precomputed index grid
+static inline CookingPot* get_pot_at_fast(Overcooked* env, int x, int y) {
+    int idx = env->pot_index_grid[y * env->width + x];
+    return (idx >= 0) ? &env->cooking_pots[idx] : NULL;
+}
+
 static CookingPot* get_pot_at(Overcooked* env, int x, int y) {
     if (env->grid[y * env->width + x] != STOVE) {
         return NULL;
