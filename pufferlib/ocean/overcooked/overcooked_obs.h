@@ -1,0 +1,252 @@
+/* Overcooked Observations: Observation computation functions.
+ */
+
+#ifndef OVERCOOKED_OBS_H
+#define OVERCOOKED_OBS_H
+
+#include "overcooked_types.h"
+#include "overcooked_items.h"
+
+static void compute_proximity_feature(Overcooked* env, Agent* agent, int feature_type, float* dx, float* dy) {
+    *dx = 0.0f;
+    *dy = 0.0f;
+
+    if (feature_type == INGREDIENT_BOX && agent->held_item == ONION) return;  // Holding onion
+    if (feature_type == PLATE_BOX && agent->held_item == PLATE) return;       // Holding dish
+    if (feature_type == PLATED_SOUP && agent->held_item == PLATED_SOUP) return; // Holding soup
+
+    if (feature_type == PLATED_SOUP) {
+        float min_dist = 1000.0f;
+        for (int i = 0; i < env->num_items; i++) {
+            if (env->items[i].type == PLATED_SOUP) {
+                float dist = (float)(abs(env->items[i].x - (int)agent->x) + abs(env->items[i].y - (int)agent->y));
+                if (dist < min_dist) {
+                    min_dist = dist;
+                    *dx = (env->items[i].x - agent->x) / (float)env->width;
+                    *dy = (env->items[i].y - agent->y) / (float)env->height;
+                }
+            }
+        }
+    }
+    else {
+        float min_dist = 1000.0f;
+        for (int y = 0; y < env->height; y++) {
+            for (int x = 0; x < env->width; x++) {
+                if (env->grid[y * env->width + x] == feature_type) {
+                    float dist = (float)(abs(x - (int)agent->x) + abs(y - (int)agent->y));
+                    if (dist < min_dist) {
+                        min_dist = dist;
+                        *dx = (x - agent->x) / (float)env->width;
+                        *dy = (y - agent->y) / (float)env->height;
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+static void find_nearest_empty_counter(Overcooked* env, int agent_x, int agent_y, float* dx, float* dy) {
+    float min_dist = 1000.0f;
+    *dx = 0.0f;
+    *dy = 0.0f;
+
+    for (int y = 0; y < env->height; y++) {
+        for (int x = 0; x < env->width; x++) {
+            if (env->grid[y * env->width + x] == COUNTER && get_item_at(env, x, y) == NULL) {
+                float dist = (float)(abs(x - agent_x) + abs(y - agent_y));
+                if (dist < min_dist) {
+                    min_dist = dist;
+                    *dx = (x - agent_x) / (float)env->width;
+                    *dy = (y - agent_y) / (float)env->height;
+                }
+            }
+        }
+    }
+}
+
+static void compute_observations(Overcooked* env) {
+    // 39-dimensional observation vector for each agent
+    // Structure per agent:
+    // - Player features: 34 dims (4 orientation + 4 held + 12 proximity + 2 nearest soup ingredients + 2 pot soup ingredients + 1 pot exist + 4 pot state + 1 cook time + 4 walls)
+    // - Teammate relative position: 2 dims
+    // - Absolute position: 2 dims
+    // - Reward: 1 dim
+    // Total: 39 dims
+    // No tomatoes! Just onions for now...
+    // TODO @mmbajo: Add tomatoes
+
+    for (int agent_idx = 0; agent_idx < env->num_agents; agent_idx++) {
+        Agent* agent = &env->agents[agent_idx];
+        float* obs = &env->observations[agent_idx * env->observation_size];
+        int obs_idx = 0;
+
+        // Clear observation
+        for (int i = 0; i < env->observation_size; i++) {
+            obs[i] = 0.0f;
+        }
+
+        // === PLAYER-SPECIFIC FEATURES (28 dims) ===
+
+        // 1. Orientation (one-hot, 4 dims)
+        obs[obs_idx + agent->facing_direction] = 1.0f;
+        obs_idx += 4;
+
+        // 2. Held object (one-hot: onion, soup, dish, tomato, empty - 5 dims but we use 4)
+        if (agent->held_item == NO_ITEM) {
+            obs[obs_idx + 3] = 1.0f;  // Empty
+        } else if (agent->held_item == ONION) {
+            obs[obs_idx + 0] = 1.0f;
+        } else if (agent->held_item == PLATED_SOUP) {
+            obs[obs_idx + 1] = 1.0f;  // Soup
+        } else if (agent->held_item == PLATE) {
+            obs[obs_idx + 2] = 1.0f;  // Dish
+        }
+        // Note: We don't use tomatoes in this version, keeping slot for compatibility
+        obs_idx += 4;
+
+        // 3. Proximity to key objects (dx, dy for each, 12 dims total)
+        float dx, dy;
+
+        // Nearest onion source (ingredient box) - returns (0,0) if holding onion
+        compute_proximity_feature(env, agent, INGREDIENT_BOX, &dx, &dy);
+        obs[obs_idx++] = dx;
+        obs[obs_idx++] = dy;
+
+        // Nearest dish (plate box) - returns (0,0) if holding plate
+        compute_proximity_feature(env, agent, PLATE_BOX, &dx, &dy);
+        obs[obs_idx++] = dx;
+        obs[obs_idx++] = dy;
+
+        // Nearest soup (plated soup) - returns (0,0) if holding soup or none exists
+        compute_proximity_feature(env, agent, PLATED_SOUP, &dx, &dy);
+        obs[obs_idx++] = dx;
+        obs[obs_idx++] = dy;
+
+        // Nearest serving area
+        compute_proximity_feature(env, agent, SERVING_AREA, &dx, &dy);
+        obs[obs_idx++] = dx;
+        obs[obs_idx++] = dy;
+
+        // Nearest empty counter - special case, needs custom handling
+        find_nearest_empty_counter(env, agent->x, agent->y, &dx, &dy);
+        obs[obs_idx++] = dx;
+        obs[obs_idx++] = dy;
+
+        // Nearest pot (stove)
+        compute_proximity_feature(env, agent, STOVE, &dx, &dy);
+        obs[obs_idx++] = dx;
+        obs[obs_idx++] = dy;
+
+        // 4. Nearest soup ingredients (2 dims: onions, tomatoes in nearest plated soup or held soup)
+        // Check if agent is holding plated soup
+        if (agent->held_item == PLATED_SOUP) {
+            obs[obs_idx++] = agent->held_soup_onions / (float)MAX_INGREDIENTS;
+            obs[obs_idx++] = agent->held_soup_tomatoes / (float)MAX_INGREDIENTS;
+        } else {
+            // Find nearest plated soup on counter
+            Item* nearest_soup = NULL;
+            float min_soup_dist = 1000.0f;
+            for (int i = 0; i < env->num_items; i++) {
+                if (env->items[i].type == PLATED_SOUP) {
+                    float dist = (float)(abs((int)env->items[i].x - (int)agent->x) +
+                                         abs((int)env->items[i].y - (int)agent->y));
+                    if (dist < min_soup_dist) {
+                        min_soup_dist = dist;
+                        nearest_soup = &env->items[i];
+                    }
+                }
+            }
+            if (nearest_soup) {
+                obs[obs_idx++] = nearest_soup->num_onions / (float)MAX_INGREDIENTS;
+                obs[obs_idx++] = nearest_soup->num_tomatoes / (float)MAX_INGREDIENTS;
+            } else {
+                obs[obs_idx++] = 0.0f;
+                obs[obs_idx++] = 0.0f;
+            }
+        }
+
+        // 5. Pot soup ingredients (2 dims: onion count, always 0 for tomatoes in nearest pot)
+        // Find nearest pot
+        float min_pot_dist = 1000.0f;
+        CookingPot* nearest_pot = NULL;
+
+        for (int y = 0; y < env->height; y++) {
+            for (int x = 0; x < env->width; x++) {
+                if (env->grid[y * env->width + x] == STOVE) {
+                    float dist = (float)(abs(x - (int)agent->x) + abs(y - (int)agent->y));
+                    if (dist < min_pot_dist) {
+                        min_pot_dist = dist;
+                        nearest_pot = get_pot_at(env, x, y);
+                    }
+                }
+            }
+        }
+
+        if (nearest_pot) {
+            obs[obs_idx++] = nearest_pot->num_onions / (float)MAX_INGREDIENTS;
+            obs[obs_idx++] = 0.0f;  // No tomatoes in our version
+        } else {
+            obs[obs_idx++] = 0.0f;
+            obs[obs_idx++] = 0.0f;
+        }
+
+        // 6. Reachable pot existence (1 dim)
+        obs[obs_idx++] = (nearest_pot != NULL) ? 1.0f : 0.0f;
+
+        // 7. Pot state flags (4 dims: empty, full, cooking, ready)
+        if (nearest_pot) {
+            obs[obs_idx++] = (nearest_pot->ingredient_count == 0) ? 1.0f : 0.0f;  // Empty
+            obs[obs_idx++] = (nearest_pot->ingredient_count == MAX_INGREDIENTS) ? 1.0f : 0.0f;  // Full (exactly MAX_INGREDIENTS)
+            obs[obs_idx++] = (nearest_pot->cooking_state == COOKING) ? 1.0f : 0.0f;  // Cooking
+            obs[obs_idx++] = (nearest_pot->cooking_state == COOKED) ? 1.0f : 0.0f;  // Ready
+        } else {
+            obs_idx += 4;  // Skip pot state if no pot found
+        }
+
+        // 8. Remaining cooking time (1 dim)
+        if (nearest_pot && nearest_pot->cooking_state == COOKING) {
+            float remaining = (COOKING_TIME - nearest_pot->cooking_progress) / (float)COOKING_TIME;
+            obs[obs_idx++] = remaining;
+        } else {
+            obs[obs_idx++] = 0.0f;
+        }
+
+        // 9. Wall detection (4 dims: up, down, left, right)
+        // Check each direction for any non-EMPTY tile (walls, stoves, counters, serving area, ingredient box, plate box, cutting board - all are non-walkable)
+        int wall_up = (agent->y > 0) ? env->grid[((int)agent->y - 1) * env->width + (int)agent->x] : WALL;
+        int wall_down = (agent->y < env->height - 1) ? env->grid[((int)agent->y + 1) * env->width + (int)agent->x] : WALL;
+        int wall_left = (agent->x > 0) ? env->grid[(int)agent->y * env->width + ((int)agent->x - 1)] : WALL;
+        int wall_right = (agent->x < env->width - 1) ? env->grid[(int)agent->y * env->width + ((int)agent->x + 1)] : WALL;
+
+        obs[obs_idx++] = (wall_up != EMPTY) ? 1.0f : 0.0f;
+        obs[obs_idx++] = (wall_down != EMPTY) ? 1.0f : 0.0f;
+        obs[obs_idx++] = (wall_left != EMPTY) ? 1.0f : 0.0f;
+        obs[obs_idx++] = (wall_right != EMPTY) ? 1.0f : 0.0f;
+
+        // === TEAMMATE RELATIVE POSITION (2 dims) ===
+        // Find teammate (other agent)
+        int teammate_idx = (agent_idx == 0) ? 1 : 0;
+        if (teammate_idx < env->num_agents) {
+            Agent* teammate = &env->agents[teammate_idx];
+            obs[obs_idx++] = (teammate->x - agent->x) / (float)env->width;
+            obs[obs_idx++] = (teammate->y - agent->y) / (float)env->height;
+        } else {
+            // No teammate, set relative position to 0
+            obs[obs_idx++] = 0.0f;
+            obs[obs_idx++] = 0.0f;
+        }
+
+        // === ABSOLUTE POSITION (2 dims) ===
+        obs[obs_idx++] = agent->x / (float)env->width;
+        obs[obs_idx++] = agent->y / (float)env->height;
+
+        // === REWARD (1 dim) ===
+        obs[obs_idx++] = env->rewards[agent_idx];
+
+        // Total should be 39 dims (34 player features + 2 teammate relative position + 2 absolute position + 1 reward)
+        // Debug check removed - was only useful on first step
+    }
+}
+
+#endif // OVERCOOKED_OBS_H
