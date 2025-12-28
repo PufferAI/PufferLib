@@ -95,25 +95,6 @@ static inline CookingPot* get_pot_at_fast(Overcooked* env, int x, int y) {
     return (idx >= 0) ? &env->cooking_pots[idx] : NULL;
 }
 
-static CookingPot* get_pot_at(Overcooked* env, int x, int y) {
-    if (env->grid[y * env->width + x] != STOVE) {
-        return NULL;
-    }
-
-    int stove_index = 0;
-    for (int sy = 0; sy < env->height; sy++) {
-        for (int sx = 0; sx < env->width; sx++) {
-            if (env->grid[sy * env->width + sx] == STOVE) {
-                if (sx == x && sy == y) {
-                    return &env->cooking_pots[stove_index];
-                }
-                stove_index++;
-            }
-        }
-    }
-    return NULL;
-}
-
 static void update_cooking(Overcooked* env) {
     for (int i = 0; i < env->num_stoves; i++) {
         CookingPot* pot = &env->cooking_pots[i];
