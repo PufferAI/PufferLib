@@ -208,7 +208,7 @@ static void compute_observations(Overcooked* env) {
             int dist = abs(x - (int)agent->x) + abs(y - (int)agent->y);
             if (dist < min_pot_dist) {
                 min_pot_dist = dist;
-                nearest_pot = get_pot_at_fast(env, x, y);
+                nearest_pot = get_pot_at(env, x, y);
             }
         }
 

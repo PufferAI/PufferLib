@@ -110,7 +110,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
 
     int tile = env->grid[target_y * env->width + target_x];
     Item* item = get_item_at(env, target_x, target_y);
-    CookingPot* pot = get_pot_at_fast(env, target_x, target_y);
+    CookingPot* pot = get_pot_at(env, target_x, target_y);
 
     if (tile == STOVE && pot != NULL) {
         if (agent->held_item == ONION || agent->held_item == TOMATO) {
