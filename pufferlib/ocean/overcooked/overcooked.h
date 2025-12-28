@@ -18,6 +18,7 @@ static void init(Overcooked* env) {
     env->num_items = 0;
     env->agents = calloc(env->num_agents, sizeof(Agent));
     parse_grid(env);
+    init_static_cache(env);
     init_cooking_pots(env);
     env->client = NULL;
 

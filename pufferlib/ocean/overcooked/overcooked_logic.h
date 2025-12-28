@@ -30,6 +30,53 @@ static void parse_grid(Overcooked* env) {
     }
 }
 
+static void init_static_cache(Overcooked* env) {
+    // Precompute normalization factors
+    env->cache.inv_width = 1.0f / env->width;
+    env->cache.inv_height = 1.0f / env->height;
+
+    // Reset counts
+    env->cache.ingredient_box_count = 0;
+    env->cache.plate_box_count = 0;
+    env->cache.serving_area_count = 0;
+    env->cache.stove_count = 0;
+    env->cache.counter_count = 0;
+
+    // Scan grid once and cache all static tile positions
+    for (int y = 0; y < env->height; y++) {
+        for (int x = 0; x < env->width; x++) {
+            int tile = env->grid[y * env->width + x];
+            switch (tile) {
+                case INGREDIENT_BOX:
+                    env->cache.ingredient_box_positions[env->cache.ingredient_box_count * 2] = x;
+                    env->cache.ingredient_box_positions[env->cache.ingredient_box_count * 2 + 1] = y;
+                    env->cache.ingredient_box_count++;
+                    break;
+                case PLATE_BOX:
+                    env->cache.plate_box_positions[env->cache.plate_box_count * 2] = x;
+                    env->cache.plate_box_positions[env->cache.plate_box_count * 2 + 1] = y;
+                    env->cache.plate_box_count++;
+                    break;
+                case SERVING_AREA:
+                    env->cache.serving_area_positions[env->cache.serving_area_count * 2] = x;
+                    env->cache.serving_area_positions[env->cache.serving_area_count * 2 + 1] = y;
+                    env->cache.serving_area_count++;
+                    break;
+                case STOVE:
+                    env->cache.stove_positions[env->cache.stove_count * 2] = x;
+                    env->cache.stove_positions[env->cache.stove_count * 2 + 1] = y;
+                    env->cache.stove_count++;
+                    break;
+                case COUNTER:
+                    env->cache.counter_positions[env->cache.counter_count * 2] = x;
+                    env->cache.counter_positions[env->cache.counter_count * 2 + 1] = y;
+                    env->cache.counter_count++;
+                    break;
+            }
+        }
+    }
+}
+
 static int is_valid_position(Overcooked* env, int x, int y, int excluding_agent) {
     if (x < 0 || x >= env->width || y < 0 || y >= env->height) {
         return 0;
