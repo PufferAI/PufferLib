@@ -45,6 +45,33 @@ static void compute_proximity_feature(Overcooked* env, Agent* agent, int feature
     }
 }
 
+// Cached version: iterate over precomputed tile positions instead of scanning grid
+static void compute_tile_proximity_cached(Overcooked* env, Agent* agent,
+                                          int* positions, int count,
+                                          float* dx, float* dy) {
+    *dx = 0.0f;
+    *dy = 0.0f;
+
+    int min_dist = 1000;
+    int best_x = 0, best_y = 0;
+
+    for (int i = 0; i < count; i++) {
+        int x = positions[i * 2];
+        int y = positions[i * 2 + 1];
+        int dist = abs(x - (int)agent->x) + abs(y - (int)agent->y);
+        if (dist < min_dist) {
+            min_dist = dist;
+            best_x = x;
+            best_y = y;
+        }
+    }
+
+    if (min_dist < 1000) {
+        *dx = (best_x - agent->x) * env->cache.inv_width;
+        *dy = (best_y - agent->y) * env->cache.inv_height;
+    }
+}
+
 
 static void find_nearest_empty_counter(Overcooked* env, int agent_x, int agent_y, float* dx, float* dy) {
     float min_dist = 1000.0f;
