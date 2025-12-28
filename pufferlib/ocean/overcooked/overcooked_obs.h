@@ -212,19 +212,17 @@ static void compute_observations(Overcooked* env) {
         }
 
         // 5. Pot soup ingredients (2 dims: onion count, always 0 for tomatoes in nearest pot)
-        // Find nearest pot
-        float min_pot_dist = 1000.0f;
+        // Find nearest pot using cached stove positions
+        int min_pot_dist = 1000;
         CookingPot* nearest_pot = NULL;
 
-        for (int y = 0; y < env->height; y++) {
-            for (int x = 0; x < env->width; x++) {
-                if (env->grid[y * env->width + x] == STOVE) {
-                    float dist = (float)(abs(x - (int)agent->x) + abs(y - (int)agent->y));
-                    if (dist < min_pot_dist) {
-                        min_pot_dist = dist;
-                        nearest_pot = get_pot_at(env, x, y);
-                    }
-                }
+        for (int i = 0; i < env->cache.stove_count; i++) {
+            int x = env->cache.stove_positions[i * 2];
+            int y = env->cache.stove_positions[i * 2 + 1];
+            int dist = abs(x - (int)agent->x) + abs(y - (int)agent->y);
+            if (dist < min_pot_dist) {
+                min_pot_dist = dist;
+                nearest_pot = get_pot_at(env, x, y);
             }
         }
 
