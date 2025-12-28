@@ -165,7 +165,9 @@ static void compute_observations(Overcooked* env) {
         obs[obs_idx++] = dy;
 
         // Nearest serving area
-        compute_proximity_feature(env, agent, SERVING_AREA, &dx, &dy);
+        compute_tile_proximity_cached(env, agent,
+            env->cache.serving_area_positions, env->cache.serving_area_count,
+            &dx, &dy);
         obs[obs_idx++] = dx;
         obs[obs_idx++] = dy;
 
