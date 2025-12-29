@@ -6,7 +6,7 @@
 
 #include "overcooked_types.h"
 
-static inline Item* get_item_at_fast(Overcooked* env, int x, int y) {
+static inline Item* get_item_at(Overcooked* env, int x, int y) {
     int idx = env->item_grid[y * env->width + x];
     return (idx >= 0) ? &env->items[idx] : NULL;
 }
