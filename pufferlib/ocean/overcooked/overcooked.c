@@ -2,7 +2,12 @@
 #include "overcooked.h"
 #include "puffernet.h"
 
-int main() {
+int main(int argc, char** argv) {
+    LayoutType layout_id = LAYOUT_CRAMPED_ROOM;
+    if (argc > 1) {
+        layout_id = get_layout_by_name(argv[1]);
+    }
+
     int num_agents = 2;
     int num_obs = 39;
 
@@ -11,8 +16,7 @@ int main() {
     LinearLSTM* net = make_linearlstm(weights, num_agents, num_obs, logit_sizes, 1);
 
     Overcooked env = {
-        .width = 5,
-        .height = 5,
+        .layout_id = layout_id,
         .num_agents = num_agents,
         .grid_size = 100,
         .rewards_config = {
