@@ -6,15 +6,6 @@
 
 #include "overcooked_types.h"
 
-static Item* get_item_at(Overcooked* env, int x, int y) {
-    for (int i = 0; i < env->num_items; i++) {
-        if ((int)env->items[i].x == x && (int)env->items[i].y == y) {
-            return &env->items[i];
-        }
-    }
-    return NULL;
-}
-
 static inline Item* get_item_at_fast(Overcooked* env, int x, int y) {
     int idx = env->item_grid[y * env->width + x];
     return (idx >= 0) ? &env->items[idx] : NULL;
