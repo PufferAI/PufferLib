@@ -1,6 +1,6 @@
 # Overcooked Environment
 
-A multi-agent cooking coordination environment where agents cooperate to prepare and serve onion soup. Here we describe the rewards system and observation space.
+A multi-agent cooking coordination environment where agents cooperate to prepare and serve onion soup. Based on the popular Overcooked video game, this environment tests agents' ability to coordinate, divide labor, and work together efficiently.
 
 ## File Structure
 
@@ -18,55 +18,56 @@ overcooked/
 
 ## Observation Space
 
-**39-dimensional vector per agent** — *see [compute_observations](overcooked_obs.h#L68)*
+**39-dimensional vector per agent** — *see [compute_observations](overcooked_obs.h#L81)*
 
 ### Player Features (34 dims)
-- **Orientation** (4): One-hot encoding of facing direction — [overcooked_obs.h:92](overcooked_obs.h#L92)
-- **Held Object** (4): One-hot encoding (onion, soup, dish, empty) — [overcooked_obs.h:96-106](overcooked_obs.h#L96-L106)
-- **Proximity Features** (12): Normalized (dx, dy) to nearest — [overcooked_obs.h:108-139](overcooked_obs.h#L108-L139):
+- **Orientation** (4): One-hot encoding of facing direction — [overcooked_obs.h:101-103](overcooked_obs.h#L101-L103)
+- **Held Object** (4): One-hot encoding (onion, plated_soup, plate, empty) — [overcooked_obs.h:105-116](overcooked_obs.h#L105-L116)
+- **Proximity Features** (12): Normalized (dx, dy) to nearest — [overcooked_obs.h:118-167](overcooked_obs.h#L118-L167):
   - Onion source (ingredient box)
   - Dish source (plate box)
   - Plated soup on counter
   - Serving area
   - Empty counter
   - Pot (stove)
-- **Nearest Soup Ingredients** (2): Onion/tomato counts in nearest plated soup or held soup (normalized) — [overcooked_obs.h:141-167](overcooked_obs.h#L141-L167)
-- **Pot Soup Ingredients** (2): Onion/tomato counts in nearest pot (normalized) — [overcooked_obs.h:169-192](overcooked_obs.h#L169-L192)
-- **Pot Existence** (1): Binary flag for reachable pot — [overcooked_obs.h:195](overcooked_obs.h#L195)
-- **Pot State** (4): Binary flags (empty, full, cooking, ready) — [overcooked_obs.h:198-205](overcooked_obs.h#L198-L205)
-- **Cooking Time** (1): Remaining cook time (normalized) — [overcooked_obs.h:208-213](overcooked_obs.h#L208-L213)
-- **Wall Detection** (4): Binary flags for walls/obstacles (up, down, left, right) — [overcooked_obs.h:215-225](overcooked_obs.h#L215-L225)
+- **Nearest Soup Ingredients** (2): Onion/tomato counts in nearest plated soup or held soup (normalized) — [overcooked_obs.h:169-179](overcooked_obs.h#L169-L179)
+- **Pot Soup Ingredients** (2): Onion/tomato counts in nearest pot (normalized) — [overcooked_obs.h:181-202](overcooked_obs.h#L181-L202)
+- **Pot Existence** (1): Binary flag for reachable pot — [overcooked_obs.h:205](overcooked_obs.h#L205)
+- **Pot State** (4): Binary flags (empty, full, cooking, ready) — [overcooked_obs.h:207-215](overcooked_obs.h#L207-L215)
+- **Cooking Time** (1): Remaining cook time (normalized) — [overcooked_obs.h:217-223](overcooked_obs.h#L217-L223)
+- **Wall Detection** (4): Binary flags for walls/obstacles (up, down, left, right) — [overcooked_obs.h:225-235](overcooked_obs.h#L225-L235)
 
 ### Spatial Features (4 dims)
-- **Teammate Relative Position** (2): Normalized (dx, dy) to other agent — [overcooked_obs.h:228-238](overcooked_obs.h#L228-L238)
-- **Absolute Position** (2): Normalized (x, y) coordinates — [overcooked_obs.h:241-242](overcooked_obs.h#L241-L242)
+- **Teammate Relative Position** (2): Normalized (dx, dy) to other agent — [overcooked_obs.h:237-248](overcooked_obs.h#L237-L248)
+- **Absolute Position** (2): Normalized (x, y) coordinates — [overcooked_obs.h:250-252](overcooked_obs.h#L250-L252)
 
 ### Context (1 dim)
-- **Reward** (1): Current step reward — [overcooked_obs.h:245](overcooked_obs.h#L245)
+- **Reward** (1): Current step reward — [overcooked_obs.h:255](overcooked_obs.h#L255)
 
 ## Action Space
 
-**6 discrete actions** — *see [c_step](overcooked.h#L66)*
-- 0: No-op — [ACTION_NOOP](overcooked_types.h#L38)
-- 1: Move up — [ACTION_UP](overcooked_types.h#L39)
-- 2: Move down — [ACTION_DOWN](overcooked_types.h#L40)
-- 3: Move left — [ACTION_LEFT](overcooked_types.h#L41)
-- 4: Move right — [ACTION_RIGHT](overcooked_types.h#L42)
-- 5: Interact (pick up/place items, use equipment) — [ACTION_INTERACT](overcooked_types.h#L43)
+**6 discrete actions** — *see [c_step](overcooked.h#L77)*
+- 0: No-op — [ACTION_NOOP](overcooked_types.h#L43)
+- 1: Move up — [ACTION_UP](overcooked_types.h#L44)
+- 2: Move down — [ACTION_DOWN](overcooked_types.h#L45)
+- 3: Move left — [ACTION_LEFT](overcooked_types.h#L46)
+- 4: Move right — [ACTION_RIGHT](overcooked_types.h#L47)
+- 5: Interact (pick up/place items, use equipment) — [ACTION_INTERACT](overcooked_types.h#L48)
 
 ## Reward System
 
-*See [evaluate_dish_served](overcooked_logic.h#L171) and [handle_interaction](overcooked_logic.h#L48)*
+*See [evaluate_dish_served](overcooked_logic.h#L229) and [handle_interaction](overcooked_logic.h#L106)*
 
 ### Main Rewards
-- **Correct dish served** (3 onions): +20.0 (shared), +5.0 (server bonus) — [overcooked_logic.h:181-184](overcooked_logic.h#L181-L184)
-- **Wrong dish served** (incorrect recipe): +0.1 (shared) — [overcooked_logic.h:195-198](overcooked_logic.h#L195-L198)
-- **Step penalty**: Configurable (default: 0.0) — [overcooked.h:69](overcooked.h#L69)
+- **Correct dish served** (3 onions): +1.0 (shared), +0.0 (server bonus) — [overcooked_logic.h:237-241](overcooked_logic.h#L237-L241)
+- **Wrong dish served** (incorrect recipe): +0.0 (shared) — [overcooked_logic.h:252-258](overcooked_logic.h#L252-L258)
+- **Step penalty**: 0.0 — [overcooked.h:80](overcooked.h#L80)
 
 ### Intermediate Rewards
-- **Add onion to pot**: +0.1 — [overcooked_logic.h:75](overcooked_logic.h#L75)
-- **Start cooking** (3 onions in pot): +0.1 — [overcooked_logic.h:88](overcooked_logic.h#L88)
-- **Plate cooked soup**: +0.1 — [overcooked_logic.h:101](overcooked_logic.h#L101)
+- **Pick up ingredient**: +0.05 — [overcooked_logic.h:221](overcooked_logic.h#L221)
+- **Add onion to pot**: +0.15 — [overcooked_logic.h:133](overcooked_logic.h#L133)
+- **Start cooking** (3 onions in pot): +0.15 — [overcooked_logic.h:145-147](overcooked_logic.h#L145-L147)
+- **Plate cooked soup**: +0.20 — [overcooked_logic.h:159](overcooked_logic.h#L159)
 
 ## Recipe
 
@@ -79,9 +80,88 @@ The correct recipe requires **exactly 3 onions** in the soup. Agents must:
 6. Plate the cooked soup (interact with pot while holding plate)
 7. Deliver plated soup to serving area
 
+## Configuration
+
+*See [Overcooked class](overcooked.py#L9)*
+
+```python
+env = Overcooked(
+    num_envs=1,                          # Number of parallel environments
+    width=5,                             # Grid width
+    height=5,                            # Grid height
+    num_agents=2,                        # Agents per environment
+    render_mode=None,                    # Set to enable rendering
+    log_interval=128,                    # Steps between log aggregation
+    grid_size=32,                        # Render tile size in pixels
+
+    # Reward configuration (from config/ocean/overcooked.ini)
+    reward_dish_served_whole_team=1.0,   # Shared reward for correct dish
+    reward_dish_served_agent=0.0,        # Bonus for serving agent
+    reward_pot_started=0.15,             # Starting correct recipe
+    reward_ingredient_added=0.15,        # Adding onion to pot
+    reward_ingredient_picked=0.05,       # Picking up ingredient
+    reward_soup_plated=0.20,             # Plating cooked soup
+    reward_wrong_dish_served=0.0,        # Serving incorrect dish
+    reward_step_penalty=0.0,             # Per-step penalty
+)
+```
+
 ## Game Constants
 
-- **Cooking time**: 20 steps — [COOKING_TIME](overcooked_types.h#L32)
-- **Max ingredients per pot**: 3 — [MAX_INGREDIENTS](overcooked_types.h#L33)
-- **Grid size**: 5x5 (default) — [CRAMPED_ROOM](overcooked_types.h#L187)
-- **Max episode steps**: 400 (default) — [overcooked.py:12](overcooked.py#L12)
+- **Cooking time**: 20 steps — [COOKING_TIME](overcooked_types.h#L39)
+- **Max ingredients per pot**: 3 — [MAX_INGREDIENTS](overcooked_types.h#L40)
+- **Grid size**: 5x5 (default) — [CRAMPED_ROOM](overcooked_types.h#L211)
+- **Max episode steps**: 400 (default)
+- **Max dynamic items**: 20 — [overcooked.h:16](overcooked.h#L16)
+
+## Map Layout
+
+Default "Cramped Room" layout (5x5) — *see [CRAMPED_ROOM](overcooked_types.h#L211-L217)*:
+
+```
++---+---+---+---+---+
+| W | C | P | C | W |   W = Wall
++---+---+---+---+---+   C = Counter
+| I |   |   |   | I |   P = Pot (Stove)
++---+---+---+---+---+   I = Ingredient Box (Onions)
+| C |   |   |   | C |   D = Dish/Plate Box
++---+---+---+---+---+   S = Serving Area
+| C |   |   |   | C |
++---+---+---+---+---+
+| W | D | C | S | W |
++---+---+---+---+---+
+```
+
+Agents spawn at positions (1,2) and (3,2) — [c_reset](overcooked.h#L47-L57)
+
+## Logging Metrics
+
+*See [Log struct](overcooked_types.h#L65-L78)*
+
+| Metric | Description |
+|--------|-------------|
+| perf | Normalized performance (correct dishes served) |
+| score | Raw score (correct dishes served) |
+| episode_return | Sum of rewards over episode |
+| episode_length | Number of steps in episode |
+| dishes_served | Total dishes served (correct + wrong) |
+| correct_dishes | Number of 3-onion dishes served |
+| wrong_dishes | Number of incorrect dishes served |
+| ingredients_picked | Total ingredients picked up |
+| pots_started | Number of cooking sessions started |
+| items_dropped | Number of items placed on counters |
+| agent_collisions | Number of agent collision attempts |
+
+## Agent Reset Mechanism
+
+If an agent goes 512 steps without receiving a reward, it is automatically reset to its starting position with no held item. This prevents agents from getting stuck — [c_step](overcooked.h#L114-L133)
+
+## Building
+
+```bash
+# Build the environment
+python setup.py build_overcooked --inplace
+
+# Run standalone test
+python pufferlib/ocean/overcooked/overcooked.py
+```
