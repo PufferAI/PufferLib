@@ -11,7 +11,18 @@ int main(int argc, char** argv) {
     int num_agents = 2;
     int num_obs = 39;
 
-    Weights* weights = load_weights("resources/overcooked/puffer_overcooked_weights.bin", 552476);
+    // Select weights file and size based on layout
+    const char* weights_file;
+    int weights_size;
+    if (layout_id == LAYOUT_ASYMMETRIC_ADVANTAGES) {
+        weights_file = "resources/overcooked/puffer_overcooked_weights_aa.bin";
+        weights_size = 138119;
+    } else {
+        weights_file = "resources/overcooked/puffer_overcooked_weights_cr.bin";
+        weights_size = 552476;
+    }
+
+    Weights* weights = load_weights(weights_file, weights_size);
     int logit_sizes[] = {6};
     LinearLSTM* net = make_linearlstm(weights, num_agents, num_obs, logit_sizes, 1);
 
