@@ -66,6 +66,11 @@ void c_reset(Overcooked* env) {
         env->terminals[i] = 0;
     }
 
+    env->agent_position_mask = 0;
+    for (int i = 0; i < env->num_agents; i++) {
+        set_agent_position(env, env->agents[i].x, env->agents[i].y);
+    }
+
     compute_observations(env);
 }
 
