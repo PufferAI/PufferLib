@@ -7,25 +7,26 @@
 #include "overcooked_types.h"
 #include "overcooked_items.h"
 
-// Find nearest plated soup item (dynamic items, not cached)
-static void find_nearest_plated_soup(Overcooked* env, Agent* agent, float* dx, float* dy) {
+static Item* find_nearest_plated_soup(Overcooked* env, Agent* agent, float* dx, float* dy) {
     *dx = 0.0f;
     *dy = 0.0f;
 
-    // Return (0,0) if already holding soup
-    if (agent->held_item == PLATED_SOUP) return;
+    if (agent->held_item == PLATED_SOUP) return NULL;
 
+    Item* nearest = NULL;
     float min_dist = 1000.0f;
     for (int i = 0; i < env->num_items; i++) {
         if (env->items[i].type == PLATED_SOUP) {
             float dist = (float)(abs(env->items[i].x - (int)agent->x) + abs(env->items[i].y - (int)agent->y));
             if (dist < min_dist) {
                 min_dist = dist;
+                nearest = &env->items[i];
                 *dx = (env->items[i].x - agent->x) * env->cache.inv_width;
                 *dy = (env->items[i].y - agent->y) * env->cache.inv_height;
             }
         }
     }
+    return nearest;
 }
 
 // Cached version: iterate over precomputed tile positions instead of scanning grid
@@ -142,7 +143,7 @@ static void compute_observations(Overcooked* env) {
         obs[obs_idx++] = dy;
 
         // Nearest soup (plated soup) - returns (0,0) if holding soup or none exists
-        find_nearest_plated_soup(env, agent, &dx, &dy);
+        Item* nearest_soup = find_nearest_plated_soup(env, agent, &dx, &dy);
         obs[obs_idx++] = dx;
         obs[obs_idx++] = dy;
 
@@ -166,31 +167,15 @@ static void compute_observations(Overcooked* env) {
         obs[obs_idx++] = dy;
 
         // 4. Nearest soup ingredients (2 dims: onions, tomatoes in nearest plated soup or held soup)
-        // Check if agent is holding plated soup
         if (agent->held_item == PLATED_SOUP) {
             obs[obs_idx++] = agent->held_soup_onions / (float)MAX_INGREDIENTS;
             obs[obs_idx++] = agent->held_soup_tomatoes / (float)MAX_INGREDIENTS;
+        } else if (nearest_soup) {
+            obs[obs_idx++] = nearest_soup->num_onions / (float)MAX_INGREDIENTS;
+            obs[obs_idx++] = nearest_soup->num_tomatoes / (float)MAX_INGREDIENTS;
         } else {
-            // Find nearest plated soup on counter
-            Item* nearest_soup = NULL;
-            float min_soup_dist = 1000.0f;
-            for (int i = 0; i < env->num_items; i++) {
-                if (env->items[i].type == PLATED_SOUP) {
-                    float dist = (float)(abs((int)env->items[i].x - (int)agent->x) +
-                                         abs((int)env->items[i].y - (int)agent->y));
-                    if (dist < min_soup_dist) {
-                        min_soup_dist = dist;
-                        nearest_soup = &env->items[i];
-                    }
-                }
-            }
-            if (nearest_soup) {
-                obs[obs_idx++] = nearest_soup->num_onions / (float)MAX_INGREDIENTS;
-                obs[obs_idx++] = nearest_soup->num_tomatoes / (float)MAX_INGREDIENTS;
-            } else {
-                obs[obs_idx++] = 0.0f;
-                obs[obs_idx++] = 0.0f;
-            }
+            obs[obs_idx++] = 0.0f;
+            obs[obs_idx++] = 0.0f;
         }
 
         // 5. Pot soup ingredients (2 dims: onion count, always 0 for tomatoes in nearest pot)
