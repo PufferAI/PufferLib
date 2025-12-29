@@ -17,6 +17,9 @@ int main(int argc, char** argv) {
     if (layout_id == LAYOUT_ASYMMETRIC_ADVANTAGES) {
         weights_file = "resources/overcooked/puffer_overcooked_weights_aa.bin";
         weights_size = 138119;
+    } else if (layout_id == LAYOUT_FORCED_COORDINATION) {
+        weights_file = "resources/overcooked/puffer_overcooked_weights_fc.bin";
+        weights_size = 138119;
     } else {
         weights_file = "resources/overcooked/puffer_overcooked_weights_cr.bin";
         weights_size = 552476;
