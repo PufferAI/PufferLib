@@ -258,4 +258,20 @@ static const LayoutInfo LAYOUTS[LAYOUT_COUNT] = {
     }
 };
 
+static inline const LayoutInfo* get_layout_info(LayoutType id) {
+    if (id < 0 || id >= LAYOUT_COUNT) return &LAYOUTS[0];
+    return &LAYOUTS[id];
+}
+
+static inline char get_layout_tile(const LayoutInfo* info, int x, int y) {
+    return info->grid[y * info->width + x];
+}
+
+static inline LayoutType get_layout_by_name(const char* name) {
+    for (int i = 0; i < LAYOUT_COUNT; i++) {
+        if (strcmp(LAYOUTS[i].name, name) == 0) return (LayoutType)i;
+    }
+    return LAYOUT_CRAMPED_ROOM;
+}
+
 #endif // OVERCOOKED_TYPES_H
