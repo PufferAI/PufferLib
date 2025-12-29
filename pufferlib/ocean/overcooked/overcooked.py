@@ -6,8 +6,13 @@ import numpy as np
 import pufferlib
 from pufferlib.ocean.overcooked import binding
 
+LAYOUTS = {
+    "cramped_room": 0,
+    "asymmetric_advantages": 1,
+}
+
 class Overcooked(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, width=5, height=5, num_agents=2,
+    def __init__(self, num_envs=1, layout="cramped_room", num_agents=2,
                  render_mode=None, log_interval=128, buf=None, seed=0,
                  grid_size=32,
                  reward_dish_served_whole_team=20.0,
@@ -52,6 +57,7 @@ class Overcooked(pufferlib.PufferEnv):
         self.log_interval = log_interval
         
         super().__init__(buf)
+        layout_id = LAYOUTS.get(layout, 0)
         c_envs = []
         for i in range(num_envs):
             c_env = binding.env_init(
@@ -61,8 +67,7 @@ class Overcooked(pufferlib.PufferEnv):
                 self.terminals[i*num_agents:(i+1)*num_agents],
                 self.truncations[i*num_agents:(i+1)*num_agents],
                 seed + i,
-                width=width,
-                height=height,
+                layout=layout_id,
                 num_agents=num_agents,
                 grid_size=grid_size,
                 observation_size=observation_size,
