@@ -82,13 +82,12 @@ The correct recipe requires **exactly 3 onions** in the soup. Agents must:
 
 ## Configuration
 
-*See [Overcooked class](overcooked.py#L9)*
+*See [Overcooked class](overcooked.py#L14)*
 
 ```python
 env = Overcooked(
     num_envs=1,                          # Number of parallel environments
-    width=5,                             # Grid width
-    height=5,                            # Grid height
+    layout="cramped_room",               # Layout name (see Available Layouts)
     num_agents=2,                        # Agents per environment
     render_mode=None,                    # Set to enable rendering
     log_interval=128,                    # Steps between log aggregation
@@ -110,13 +109,14 @@ env = Overcooked(
 
 - **Cooking time**: 20 steps — [COOKING_TIME](overcooked_types.h#L39)
 - **Max ingredients per pot**: 3 — [MAX_INGREDIENTS](overcooked_types.h#L40)
-- **Grid size**: 5x5 (default) — [CRAMPED_ROOM](overcooked_types.h#L211)
 - **Max episode steps**: 400 (default)
-- **Max dynamic items**: 20 — [overcooked.h:16](overcooked.h#L16)
+- **Max dynamic items**: 20 — [overcooked.h:19](overcooked.h#L19)
 
-## Map Layout
+## Available Layouts
 
-Default "Cramped Room" layout (5x5) — *see [CRAMPED_ROOM](overcooked_types.h#L211-L217)*:
+*See [LAYOUTS](overcooked_types.h#L244-L259)*
+
+### cramped_room (5x5)
 
 ```
 +---+---+---+---+---+
@@ -131,8 +131,24 @@ Default "Cramped Room" layout (5x5) — *see [CRAMPED_ROOM](overcooked_types.h#L
 | W | D | C | S | W |
 +---+---+---+---+---+
 ```
+Spawns: (1,2) and (3,2)
 
-Agents spawn at positions (1,2) and (3,2) — [c_reset](overcooked.h#L47-L57)
+### asymmetric_advantages (9x5)
+
+```
++---+---+---+---+---+---+---+---+---+
+| W | C | W | W | W | W | W | C | W |
++---+---+---+---+---+---+---+---+---+
+| I |   | C | S | W | I | C |   | S |
++---+---+---+---+---+---+---+---+---+
+| C |   |   |   | P |   |   |   | C |
++---+---+---+---+---+---+---+---+---+
+| C |   |   |   | P |   |   |   | C |
++---+---+---+---+---+---+---+---+---+
+| W | C | C | D | W | D | C | C | W |
++---+---+---+---+---+---+---+---+---+
+```
+Spawns: (1,2) and (7,2)
 
 ## Logging Metrics
 
@@ -164,4 +180,8 @@ python setup.py build_overcooked --inplace
 
 # Run standalone test
 python pufferlib/ocean/overcooked/overcooked.py
+
+# Run standalone demo with specific layout
+./overcooked cramped_room
+./overcooked asymmetric_advantages
 ```
