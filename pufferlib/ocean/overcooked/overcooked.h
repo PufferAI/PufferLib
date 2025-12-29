@@ -109,18 +109,16 @@ void c_step(Overcooked* env) {
 
     update_cooking(env);
 
+    const LayoutInfo* layout = get_layout_info(env->layout_id);
     for (int i = 0; i < env->num_agents; i++) {
         if (env->agents[i].ticks_since_reward % 512 == 0 && env->agents[i].ticks_since_reward > 0) {
             clear_agent_position(env, env->agents[i].x, env->agents[i].y);
-            if (i == 0) {
-                env->agents[i].x = 1;
-                env->agents[i].y = 2;
-            } else if (i == 1) {
-                env->agents[i].x = 3;
-                env->agents[i].y = 2;
+            if (i < layout->num_spawns) {
+                env->agents[i].x = layout->spawn_positions[i * 2];
+                env->agents[i].y = layout->spawn_positions[i * 2 + 1];
             } else {
-                env->agents[i].x = 1 + (i % 3);
-                env->agents[i].y = 1 + (i / 3);
+                env->agents[i].x = 1 + (i % (env->width - 2));
+                env->agents[i].y = 1 + (i / (env->width - 2));
             }
             set_agent_position(env, env->agents[i].x, env->agents[i].y);
             env->agents[i].held_item = NO_ITEM;
