@@ -11,9 +11,10 @@
 static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx);
 
 static void parse_grid(Overcooked* env) {
-    for (int y = 0; y < env->height && y < 5; y++) {
-        for (int x = 0; x < env->width && x < 5; x++) {
-            char tile = CRAMPED_ROOM[y][x];
+    const LayoutInfo* layout = get_layout_info(env->layout_id);
+    for (int y = 0; y < env->height; y++) {
+        for (int x = 0; x < env->width; x++) {
+            char tile = get_layout_tile(layout, x, y);
             int idx = y * env->width + x;
             switch (tile) {
                 case '#': env->grid[idx] = WALL; break;
