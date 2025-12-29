@@ -44,16 +44,14 @@ void c_reset(Overcooked* env) {
         }
     }
     
+    const LayoutInfo* layout = get_layout_info(env->layout_id);
     for (int i = 0; i < env->num_agents; i++) {
-        if (i == 0) {
-            env->agents[i].x = 1;
-            env->agents[i].y = 2;
-        } else if (i == 1) {
-            env->agents[i].x = 3;
-            env->agents[i].y = 2;
+        if (i < layout->num_spawns) {
+            env->agents[i].x = layout->spawn_positions[i * 2];
+            env->agents[i].y = layout->spawn_positions[i * 2 + 1];
         } else {
-            env->agents[i].x = 1 + (i % 3);
-            env->agents[i].y = 1 + (i / 3);
+            env->agents[i].x = 1 + (i % (env->width - 2));
+            env->agents[i].y = 1 + (i / (env->width - 2));
         }
         env->agents[i].held_item = NO_ITEM;
         env->agents[i].facing_direction = 0;
