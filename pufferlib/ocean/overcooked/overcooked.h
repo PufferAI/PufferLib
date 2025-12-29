@@ -94,8 +94,10 @@ void c_step(Overcooked* env) {
 
         if (action != ACTION_INTERACT && action != ACTION_NOOP) {
             if (is_valid_position(env, new_x, new_y, i)) {
+                clear_agent_position(env, agent->x, agent->y);
                 agent->x = new_x;
                 agent->y = new_y;
+                set_agent_position(env, new_x, new_y);
             } else {
                 for (int j = 0; j < env->num_agents; j++) {
                     if (j != i && (int)env->agents[j].x == new_x && (int)env->agents[j].y == new_y) {
@@ -111,6 +113,7 @@ void c_step(Overcooked* env) {
 
     for (int i = 0; i < env->num_agents; i++) {
         if (env->agents[i].ticks_since_reward % 512 == 0 && env->agents[i].ticks_since_reward > 0) {
+            clear_agent_position(env, env->agents[i].x, env->agents[i].y);
             if (i == 0) {
                 env->agents[i].x = 1;
                 env->agents[i].y = 2;
@@ -121,6 +124,7 @@ void c_step(Overcooked* env) {
                 env->agents[i].x = 1 + (i % 3);
                 env->agents[i].y = 1 + (i / 3);
             }
+            set_agent_position(env, env->agents[i].x, env->agents[i].y);
             env->agents[i].held_item = NO_ITEM;
             env->agents[i].held_soup_onions = 0;
             env->agents[i].held_soup_tomatoes = 0;
