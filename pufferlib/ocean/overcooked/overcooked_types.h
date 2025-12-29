@@ -51,6 +51,23 @@
 #define AGENT_EMPTY_HANDED 0
 #define AGENT_HOLDING_ITEM 1
 
+#define MAX_SPAWN_POSITIONS 8
+
+typedef enum {
+    LAYOUT_CRAMPED_ROOM = 0,
+    LAYOUT_ASYMMETRIC_ADVANTAGES = 1,
+    LAYOUT_COUNT
+} LayoutType;
+
+typedef struct {
+    const char* name;
+    int width;
+    int height;
+    const char* grid;
+    int spawn_positions[MAX_SPAWN_POSITIONS];
+    int num_spawns;
+} LayoutInfo;
+
 typedef struct {
     float dish_served_whole_team;
     float dish_served_agent;
@@ -180,11 +197,11 @@ typedef struct {
     float inv_height;  // 1.0f / height
 } StaticCache;
 
-// Required that you have some struct for your env
 typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
     Client* client;
-    char* grid;  // Kitchen layout (static tiles)
+    LayoutType layout_id;
+    char* grid;
     Item* items;  // Dynamic items in the kitchen
     int num_items;
     int max_items;
@@ -222,6 +239,23 @@ static const char ASYMMETRIC_ADVANTAGES[5][9] = {
     {'1',' ',' ',' ','2',' ',' ',' ','1'},
     {'1',' ',' ',' ','2',' ',' ',' ','1'},
     {'6','1','1','7','6','7','1','1','6'}
+};
+
+static const LayoutInfo LAYOUTS[LAYOUT_COUNT] = {
+    {
+        "cramped_room",
+        5, 5,
+        (const char*)CRAMPED_ROOM,
+        {1, 2, 3, 2},
+        2
+    },
+    {
+        "asymmetric_advantages",
+        9, 5,
+        (const char*)ASYMMETRIC_ADVANTAGES,
+        {1, 2, 7, 2},
+        2
+    }
 };
 
 #endif // OVERCOOKED_TYPES_H
