@@ -142,14 +142,14 @@ typedef struct __attribute__((aligned(32))) {
     int ticks_since_reward;
 } Agent;
 
-typedef struct {
+typedef struct __attribute__((aligned(32))) {
+    int x;
+    int y;
     int type;
-    int x;  // Changed from float to int for grid positioning
-    int y;  // Changed from float to int for grid positioning
-    int state;  // For items that can change state (e.g., cooking progress)
-    int num_onions;     // Number of onions in the soup
-    int num_tomatoes;   // Number of tomatoes in the soup
-    int total_ingredients;  // Total ingredient count
+    int state;
+    int num_onions;
+    int num_tomatoes;
+    int total_ingredients;
 } Item;
 
 typedef struct {
