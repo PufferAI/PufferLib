@@ -12,6 +12,9 @@
 #include "overcooked_render.h"
 
 static void init(Overcooked* env) {
+    const LayoutInfo* layout = get_layout_info(env->layout_id);
+    env->width = layout->width;
+    env->height = layout->height;
     env->grid = calloc(env->width * env->height, sizeof(char));
     env->max_items = 20;
     env->items = calloc(env->max_items, sizeof(Item));
