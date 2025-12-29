@@ -241,6 +241,14 @@ static const char ASYMMETRIC_ADVANTAGES[5][9] = {
     {'6','1','1','7','6','7','1','1','6'}
 };
 
+static const char FORCED_COORDINATION[5][5] = {
+    {'6', '1', '6', '2', '6'},
+    {'4', ' ', '1', ' ', '2'},
+    {'4', ' ', '1', ' ', '1'},
+    {'7', ' ', '1', ' ', '1'},
+    {'6', '1', '6', '5', '6'}
+};
+
 static const LayoutInfo LAYOUTS[LAYOUT_COUNT] = {
     {
         "cramped_room",
