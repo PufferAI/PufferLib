@@ -131,7 +131,7 @@ typedef struct {
     Texture2D soup_tomato_dish;
 } Client;
 
-typedef struct {
+typedef struct __attribute__((aligned(32))) {
     float x;
     float y;
     int facing_direction;
