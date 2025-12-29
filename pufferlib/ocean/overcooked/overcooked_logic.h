@@ -90,16 +90,15 @@ static inline int is_agent_at(Overcooked* env, int x, int y) {
 }
 
 static int is_valid_position(Overcooked* env, int x, int y, int excluding_agent) {
+    (void)excluding_agent;
     if (x < 0 || x >= env->width || y < 0 || y >= env->height) {
         return 0;
     }
     if (env->grid[y * env->width + x] != EMPTY) {
         return 0;
     }
-    for (int i = 0; i < env->num_agents; i++) {
-        if (i != excluding_agent && (int)env->agents[i].x == x && (int)env->agents[i].y == y) {
-            return 0;
-        }
+    if (is_agent_at(env, x, y)) {
+        return 0;
     }
     return 1;
 }
