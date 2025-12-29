@@ -79,11 +79,11 @@ static void init_static_cache(Overcooked* env) {
 }
 
 static inline void set_agent_position(Overcooked* env, int x, int y) {
-    env->agent_position_mask |= (1u << (y * env->width + x));
+    env->agent_position_mask |= (1ULL << (y * env->width + x));
 }
 
 static inline void clear_agent_position(Overcooked* env, int x, int y) {
-    env->agent_position_mask &= ~(1u << (y * env->width + x));
+    env->agent_position_mask &= ~(1ULL << (y * env->width + x));
 }
 
 static inline int is_agent_at(Overcooked* env, int x, int y) {
