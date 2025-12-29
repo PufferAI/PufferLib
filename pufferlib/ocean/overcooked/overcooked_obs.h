@@ -93,10 +93,7 @@ static void compute_observations(Overcooked* env) {
         float* obs = &env->observations[agent_idx * env->observation_size];
         int obs_idx = 0;
 
-        // Clear observation
-        for (int i = 0; i < env->observation_size; i++) {
-            obs[i] = 0.0f;
-        }
+        memset(obs, 0, env->observation_size * sizeof(float));
 
         // === PLAYER-SPECIFIC FEATURES (28 dims) ===
 
