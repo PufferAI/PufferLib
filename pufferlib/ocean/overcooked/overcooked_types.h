@@ -134,12 +134,12 @@ typedef struct {
 typedef struct {
     float x;
     float y;
-    int held_item;  // Item type the agent is holding (NO_ITEM if empty)
-    int facing_direction;  // 0=up, 1=down, 2=left, 3=right
+    int facing_direction;
+    int held_item;
     int held_soup_onions;
     int held_soup_tomatoes;
     int held_soup_total;
-    int ticks_since_reward;  // For logging episode length (steps between successful dishes)
+    int ticks_since_reward;
 } Agent;
 
 typedef struct {
