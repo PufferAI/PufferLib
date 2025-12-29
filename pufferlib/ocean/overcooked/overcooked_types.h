@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdint.h>
 #include "raylib.h"
 
 // Tile types
@@ -189,6 +190,7 @@ typedef struct {
     int max_items;
     Agent* agents;  // Array of agents
     int num_agents;
+    uint32_t agent_position_mask;  // Bit (y * width + x) set if agent present
     CookingPot* cooking_pots;  // Array of cooking pots (one per stove)
     int num_stoves;
     int* pot_index_grid;  // Maps grid cell to pot index (-1 if not a stove)
