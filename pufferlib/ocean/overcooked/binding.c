@@ -4,8 +4,7 @@
 #include "../env_binding.h"
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    env->width = unpack(kwargs, "width");
-    env->height = unpack(kwargs, "height");
+    env->layout_id = (LayoutType)unpack(kwargs, "layout");
     env->num_agents = unpack(kwargs, "num_agents");
     env->grid_size = unpack(kwargs, "grid_size");
     env->observation_size = unpack(kwargs, "observation_size");
