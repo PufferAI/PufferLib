@@ -109,7 +109,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
     }
 
     int tile = env->grid[target_y * env->width + target_x];
-    Item* item = get_item_at(env, target_x, target_y);
+    Item* item = get_item_at_fast(env, target_x, target_y);
     CookingPot* pot = get_pot_at(env, target_x, target_y);
 
     if (tile == STOVE && pot != NULL) {
@@ -173,7 +173,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
         if ((tile == COUNTER || tile == CUTTING_BOARD) && item == NULL) {
             if (agent->held_item == PLATED_SOUP) {
                 add_item(env, agent->held_item, target_x, target_y);
-                Item* placed_soup = get_item_at(env, target_x, target_y);
+                Item* placed_soup = get_item_at_fast(env, target_x, target_y);
                 if (placed_soup) {
                     placed_soup->num_onions = agent->held_soup_onions;
                     placed_soup->num_tomatoes = agent->held_soup_tomatoes;

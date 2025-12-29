@@ -66,8 +66,7 @@ static void find_nearest_empty_counter(Overcooked* env, int agent_x, int agent_y
         int x = env->cache.counter_positions[i * 2];
         int y = env->cache.counter_positions[i * 2 + 1];
 
-        // Check if counter is empty (no item on it)
-        if (get_item_at(env, x, y) == NULL) {
+        if (env->item_grid[y * env->width + x] < 0) {
             int dist = abs(x - agent_x) + abs(y - agent_y);
             if (dist < min_dist) {
                 min_dist = dist;

@@ -22,27 +22,31 @@ static inline Item* get_item_at_fast(Overcooked* env, int x, int y) {
 
 static void add_item(Overcooked* env, int type, int x, int y) {
     if (env->num_items < env->max_items) {
-        env->items[env->num_items].type = type;
-        env->items[env->num_items].x = x;
-        env->items[env->num_items].y = y;
-        env->items[env->num_items].state = 0;
-        env->items[env->num_items].num_onions = 0;
-        env->items[env->num_items].num_tomatoes = 0;
-        env->items[env->num_items].total_ingredients = 0;
+        int idx = env->num_items;
+        env->items[idx].type = type;
+        env->items[idx].x = x;
+        env->items[idx].y = y;
+        env->items[idx].state = 0;
+        env->items[idx].num_onions = 0;
+        env->items[idx].num_tomatoes = 0;
+        env->items[idx].total_ingredients = 0;
+        env->item_grid[y * env->width + x] = idx;
         env->num_items++;
     }
 }
 
 static void remove_item(Overcooked* env, int x, int y) {
-    for (int i = 0; i < env->num_items; i++) {
-        if ((int)env->items[i].x == x && (int)env->items[i].y == y) {
-            for (int j = i; j < env->num_items - 1; j++) {
-                env->items[j] = env->items[j + 1];
-            }
-            env->num_items--;
-            break;
-        }
+    int idx = env->item_grid[y * env->width + x];
+    if (idx < 0) return;
+
+    env->item_grid[y * env->width + x] = -1;
+
+    if (idx < env->num_items - 1) {
+        Item* last = &env->items[env->num_items - 1];
+        env->items[idx] = *last;
+        env->item_grid[last->y * env->width + last->x] = idx;
     }
+    env->num_items--;
 }
 
 static void init_cooking_pots(Overcooked* env) {
