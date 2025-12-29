@@ -29,6 +29,7 @@ static void init(Overcooked* env) {
 
 void c_reset(Overcooked* env) {
     env->num_items = 0;
+    reset_item_grid(env);
     parse_grid(env);
 
     for (int i = 0; i < env->num_stoves; i++) {

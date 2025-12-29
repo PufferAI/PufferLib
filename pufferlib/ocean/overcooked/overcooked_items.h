@@ -15,6 +15,11 @@ static Item* get_item_at(Overcooked* env, int x, int y) {
     return NULL;
 }
 
+static inline Item* get_item_at_fast(Overcooked* env, int x, int y) {
+    int idx = env->item_grid[y * env->width + x];
+    return (idx >= 0) ? &env->items[idx] : NULL;
+}
+
 static void add_item(Overcooked* env, int type, int x, int y) {
     if (env->num_items < env->max_items) {
         env->items[env->num_items].type = type;
@@ -97,6 +102,12 @@ static inline CookingPot* get_pot_at(Overcooked* env, int x, int y) {
 
 static void init_item_grid(Overcooked* env) {
     env->item_grid = calloc(env->width * env->height, sizeof(int));
+    for (int i = 0; i < env->width * env->height; i++) {
+        env->item_grid[i] = -1;
+    }
+}
+
+static void reset_item_grid(Overcooked* env) {
     for (int i = 0; i < env->width * env->height; i++) {
         env->item_grid[i] = -1;
     }
