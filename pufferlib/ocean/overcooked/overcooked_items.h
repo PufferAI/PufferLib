@@ -95,6 +95,13 @@ static inline CookingPot* get_pot_at(Overcooked* env, int x, int y) {
     return (idx >= 0) ? &env->cooking_pots[idx] : NULL;
 }
 
+static void init_item_grid(Overcooked* env) {
+    env->item_grid = calloc(env->width * env->height, sizeof(int));
+    for (int i = 0; i < env->width * env->height; i++) {
+        env->item_grid[i] = -1;
+    }
+}
+
 static void update_cooking(Overcooked* env) {
     for (int i = 0; i < env->num_stoves; i++) {
         CookingPot* pot = &env->cooking_pots[i];

@@ -21,6 +21,7 @@ static void init(Overcooked* env) {
     init_static_cache(env);
     init_cooking_pots(env);
     init_pot_indices(env);
+    init_item_grid(env);
     env->client = NULL;
 
     memset(&env->log, 0, sizeof(Log));
@@ -130,6 +131,7 @@ void c_close(Overcooked* env) {
     free(env->agents);
     free(env->cooking_pots);
     free(env->pot_index_grid);
+    free(env->item_grid);
     if (env->client != NULL) {
         unload_textures(env->client);
         free(env->client);
