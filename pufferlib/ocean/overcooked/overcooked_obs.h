@@ -100,15 +100,14 @@ static void find_nearest_empty_counter(Overcooked* env, int agent_x, int agent_y
 }
 
 static void compute_observations(Overcooked* env) {
-    // 39-dimensional observation vector for each agent
+    // 43-dimensional observation vector for each agent
     // Structure per agent:
-    // - Player features: 34 dims (4 orientation + 4 held + 12 proximity + 2 nearest soup ingredients + 2 pot soup ingredients + 1 pot exist + 4 pot state + 1 cook time + 4 walls)
+    // - Player features: 38 dims (4 orientation + 4 held + 16 proximity + 2 nearest soup ingredients + 2 pot soup ingredients + 1 pot exist + 4 pot state + 1 cook time + 4 walls)
     // - Teammate relative position: 2 dims
     // - Absolute position: 2 dims
     // - Reward: 1 dim
-    // Total: 39 dims
-    // No tomatoes! Just onions for now...
-    // TODO @mmbajo: Add tomatoes
+    // Total: 43 dims
+    // Proximity: onion box, plate box, plated soup, serving, empty counter, pot, pickable onion, pickable plate
 
     for (int agent_idx = 0; agent_idx < env->num_agents; agent_idx++) {
         Agent* agent = &env->agents[agent_idx];
@@ -136,7 +135,7 @@ static void compute_observations(Overcooked* env) {
         // Note: We don't use tomatoes in this version, keeping slot for compatibility
         obs_idx += 4;
 
-        // 3. Proximity to key objects (dx, dy for each, 12 dims total)
+        // 3. Proximity to key objects (dx, dy for each, 16 dims total)
         float dx, dy;
 
         // Nearest onion source (ingredient box) - returns (0,0) if holding onion
@@ -184,6 +183,16 @@ static void compute_observations(Overcooked* env) {
         compute_tile_proximity_cached(env, agent,
             env->cache.stove_positions, env->cache.stove_count,
             &dx, &dy);
+        obs[obs_idx++] = dx;
+        obs[obs_idx++] = dy;
+
+        // Nearest pickable onion on counter (not in box)
+        find_nearest_item_by_type(env, agent, ONION, &dx, &dy);
+        obs[obs_idx++] = dx;
+        obs[obs_idx++] = dy;
+
+        // Nearest pickable plate on counter (not in box)
+        find_nearest_item_by_type(env, agent, PLATE, &dx, &dy);
         obs[obs_idx++] = dx;
         obs[obs_idx++] = dy;
 
@@ -275,7 +284,7 @@ static void compute_observations(Overcooked* env) {
         // === REWARD (1 dim) ===
         obs[obs_idx++] = env->rewards[agent_idx];
 
-        // Total should be 39 dims (34 player features + 2 teammate relative position + 2 absolute position + 1 reward)
+        // Total should be 43 dims (38 player features + 2 teammate relative position + 2 absolute position + 1 reward)
         // Debug check removed - was only useful on first step
     }
 }

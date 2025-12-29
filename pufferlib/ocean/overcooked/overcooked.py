@@ -9,6 +9,7 @@ from pufferlib.ocean.overcooked import binding
 LAYOUTS = {
     "cramped_room": 0,
     "asymmetric_advantages": 1,
+    "forced_coordination": 2,
 }
 
 class Overcooked(pufferlib.PufferEnv):
@@ -24,12 +25,12 @@ class Overcooked(pufferlib.PufferEnv):
                  reward_wrong_dish_served=0.1,
                  reward_step_penalty=0.0):
         
-        # Define observation space - 39-dimensional vector per agent
+        # Define observation space - 43-dimensional vector per agent
         # Structure:
-        # - Player features: 34 dims
+        # - Player features: 38 dims
         #   * Orientation (one-hot): 4
         #   * Held object (one-hot): 4
-        #   * Proximity to objects (dx,dy): 12 (6 objects × 2)
+        #   * Proximity to objects (dx,dy): 16 (8 objects × 2)
         #   * Nearest soup ingredients: 2 (onions, tomatoes in plated soup or held)
         #   * Pot soup ingredients: 2 (onions, tomatoes in nearest pot)
         #   * Pot existence: 1
@@ -39,9 +40,9 @@ class Overcooked(pufferlib.PufferEnv):
         # - Teammate relative position: 2 dims
         # - Absolute position: 2 dims
         # - Reward: 1 dim
-        # Total: 39 dimensions
+        # Total: 43 dimensions
 
-        observation_size = 39
+        observation_size = 43
         
         self.single_observation_space = gymnasium.spaces.Box(
             low=-1, high=1,

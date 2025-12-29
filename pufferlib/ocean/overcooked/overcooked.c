@@ -9,7 +9,7 @@ int main(int argc, char** argv) {
     }
 
     int num_agents = 2;
-    int num_obs = 39;
+    int num_obs = 43;
 
     // Select weights file and size based on layout
     const char* weights_file;

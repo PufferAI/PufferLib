@@ -414,7 +414,7 @@ void c_render(Overcooked* env) {
     if (env->num_agents > 0) {
         float* obs = &env->observations[0];
 
-        DrawText("=== OBSERVATION ARRAY (39 dims) ===", obs_panel_x, obs_panel_y, 11, BLACK);
+        DrawText("=== OBSERVATION ARRAY (43 dims) ===", obs_panel_x, obs_panel_y, 11, BLACK);
         obs_panel_y += 18;
 
         DrawText("-- PLAYER (0-33) --", obs_panel_x, obs_panel_y, 10, DARKGREEN);
