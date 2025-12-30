@@ -150,6 +150,44 @@ Spawns: (1,2) and (3,2)
 ```
 Spawns: (1,2) and (7,2)
 
+### forced_coordination (5x5)
+
+```
++---+---+---+---+---+
+| W | C | W | P | W |   W = Wall
++---+---+---+---+---+   C = Counter
+| I |   | C |   | P |   P = Pot (Stove)
++---+---+---+---+---+   I = Ingredient Box (Onions)
+| I |   | C |   | C |   D = Dish/Plate Box
++---+---+---+---+---+   S = Serving Area
+| D |   | C |   | C |
++---+---+---+---+---+
+| W | C | W | S | W |
++---+---+---+---+---+
+```
+Spawns: (1,2) and (3,2)
+
+A challenging layout with a center wall dividing the kitchen. Agents must coordinate through limited passage points.
+
+### coordination_ring (5x5)
+
+```
++---+---+---+---+---+
+| W | C | C | P | W |   W = Wall
++---+---+---+---+---+   C = Counter
+| C |   |   |   | P |   P = Pot (Stove)
++---+---+---+---+---+   I = Ingredient Box (Onions)
+| D |   | C |   | C |   D = Dish/Plate Box
++---+---+---+---+---+   S = Serving Area
+| I |   |   |   | C |
++---+---+---+---+---+
+| W | I | S | C | W |
++---+---+---+---+---+
+```
+Spawns: (1,2) and (3,2)
+
+Ring-shaped layout with a center counter obstacle. Agents must navigate around the center to coordinate ingredient pickup and soup delivery.
+
 ## Logging Metrics
 
 *See [Log struct](overcooked_types.h#L65-L78)*
@@ -184,4 +222,6 @@ python pufferlib/ocean/overcooked/overcooked.py
 # Run standalone demo with specific layout
 ./overcooked cramped_room
 ./overcooked asymmetric_advantages
+./overcooked forced_coordination
+./overcooked coordination_ring
 ```
