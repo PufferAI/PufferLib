@@ -447,39 +447,47 @@ void c_render(Overcooked* env) {
         obs_panel_y += 10;
         DrawText(TextFormat("[18-19] Pot: %.2f, %.2f", obs[18], obs[19]),
                  obs_panel_x, obs_panel_y, 9, BLACK);
-        obs_panel_y += 11;
+        obs_panel_y += 10;
 
-        DrawText(TextFormat("[20-21] SoupIngr: %.2f, %.2f", obs[20], obs[21]),
+        DrawText(TextFormat("[20-21] PickOnion: %.2f, %.2f", obs[20], obs[21]),
                  obs_panel_x, obs_panel_y, 9, BLACK);
         obs_panel_y += 10;
 
-        DrawText(TextFormat("[22-23] PotIngr: %.2f, %.2f", obs[22], obs[23]),
+        DrawText(TextFormat("[22-23] PickPlate: %.2f, %.2f", obs[22], obs[23]),
                  obs_panel_x, obs_panel_y, 9, BLACK);
         obs_panel_y += 10;
 
-        DrawText(TextFormat("[24] PotExists: %.0f", obs[24]),
+        DrawText(TextFormat("[24-25] SoupIngr: %.2f, %.2f", obs[24], obs[25]),
                  obs_panel_x, obs_panel_y, 9, BLACK);
         obs_panel_y += 10;
 
-        DrawText(TextFormat("[25-28] PotState: %.0f %.0f %.0f %.0f",
-                 obs[25], obs[26], obs[27], obs[28]),
+        DrawText(TextFormat("[26-27] PotIngr: %.2f, %.2f", obs[26], obs[27]),
                  obs_panel_x, obs_panel_y, 9, BLACK);
         obs_panel_y += 10;
 
-        DrawText(TextFormat("[29] CookTime: %.2f", obs[29]),
+        DrawText(TextFormat("[28] PotExists: %.0f", obs[28]),
                  obs_panel_x, obs_panel_y, 9, BLACK);
         obs_panel_y += 10;
 
-        DrawText(TextFormat("[30-33] Walls: %.0f %.0f %.0f %.0f",
-                 obs[30], obs[31], obs[32], obs[33]),
+        DrawText(TextFormat("[29-32] PotState: %.0f %.0f %.0f %.0f",
+                 obs[29], obs[30], obs[31], obs[32]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+
+        DrawText(TextFormat("[33] CookTime: %.2f", obs[33]),
+                 obs_panel_x, obs_panel_y, 9, BLACK);
+        obs_panel_y += 10;
+
+        DrawText(TextFormat("[34-37] Walls: %.0f %.0f %.0f %.0f",
+                 obs[34], obs[35], obs[36], obs[37]),
                  obs_panel_x, obs_panel_y, 9, BLACK);
         obs_panel_y += 13;
 
-        DrawText("-- TEAMMATE (34-35) --", obs_panel_x, obs_panel_y, 10, DARKBLUE);
+        DrawText("-- TEAMMATE (38-39) --", obs_panel_x, obs_panel_y, 10, DARKBLUE);
         obs_panel_y += 13;
 
         if (env->num_agents > 1) {
-            DrawText(TextFormat("[34-35] T.RelPos: %.2f, %.2f", obs[34], obs[35]),
+            DrawText(TextFormat("[38-39] T.RelPos: %.2f, %.2f", obs[38], obs[39]),
                      obs_panel_x, obs_panel_y, 9, BLACK);
             obs_panel_y += 10;
         } else {
@@ -488,14 +496,14 @@ void c_render(Overcooked* env) {
         }
 
         obs_panel_y += 3;
-        DrawText("-- MISC (36-38) --", obs_panel_x, obs_panel_y, 10, DARKGRAY);
+        DrawText("-- MISC (40-42) --", obs_panel_x, obs_panel_y, 10, DARKGRAY);
         obs_panel_y += 13;
 
-        DrawText(TextFormat("[36-37] AbsPos: %.3f, %.3f", obs[36], obs[37]),
+        DrawText(TextFormat("[40-41] AbsPos: %.3f, %.3f", obs[40], obs[41]),
                  obs_panel_x, obs_panel_y, 9, BLACK);
         obs_panel_y += 10;
 
-        DrawText(TextFormat("[38] Reward: %.2f", obs[38]),
+        DrawText(TextFormat("[42] Reward: %.2f", obs[42]),
                  obs_panel_x, obs_panel_y, 9, BLACK);
         obs_panel_y += 10;
     }
