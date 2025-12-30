@@ -57,6 +57,7 @@ typedef enum {
     LAYOUT_CRAMPED_ROOM = 0,
     LAYOUT_ASYMMETRIC_ADVANTAGES = 1,
     LAYOUT_FORCED_COORDINATION = 2,
+    LAYOUT_COORDINATION_RING = 3,
     LAYOUT_COUNT
 } LayoutType;
 
@@ -278,6 +279,13 @@ static const LayoutInfo LAYOUTS[LAYOUT_COUNT] = {
         "forced_coordination",
         5, 5,
         (const char*)FORCED_COORDINATION,
+        {1, 2, 3, 2},
+        2
+    },
+    {
+        "coordination_ring",
+        5, 5,
+        (const char*)COORDINATION_RING,
         {1, 2, 3, 2},
         2
     }

@@ -10,6 +10,7 @@ LAYOUTS = {
     "cramped_room": 0,
     "asymmetric_advantages": 1,
     "forced_coordination": 2,
+    "coordination_ring": 3,
 }
 
 class Overcooked(pufferlib.PufferEnv):
