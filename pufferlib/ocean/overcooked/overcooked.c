@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
         weights_file = "resources/overcooked/puffer_overcooked_weights_fc.bin";
         weights_size = 138631;
     } else if (layout_id == LAYOUT_COORDINATION_RING) {
-        weights_file = "resources/overcooked/puffer_overcooked_weights_cr.bin";
+        weights_file = "resources/overcooked/puffer_overcooked_weights_cor.bin";
         weights_size = 138631;
     } else {
         weights_file = "resources/overcooked/puffer_overcooked_weights_cr.bin";
