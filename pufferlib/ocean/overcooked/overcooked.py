@@ -11,6 +11,7 @@ LAYOUTS = {
     "asymmetric_advantages": 1,
     "forced_coordination": 2,
     "coordination_ring": 3,
+    "counter_circuit": 4,
 }
 
 class Overcooked(pufferlib.PufferEnv):

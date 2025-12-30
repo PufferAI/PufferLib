@@ -58,6 +58,7 @@ typedef enum {
     LAYOUT_ASYMMETRIC_ADVANTAGES = 1,
     LAYOUT_FORCED_COORDINATION = 2,
     LAYOUT_COORDINATION_RING = 3,
+    LAYOUT_COUNTER_CIRCUIT = 4,
     LAYOUT_COUNT
 } LayoutType;
 
@@ -260,6 +261,14 @@ static const char FORCED_COORDINATION[5][5] = {
     {'6', '1', '6', '5', '6'}
 };
 
+static const char COUNTER_CIRCUIT[5][8] = {
+    {'6','1','1','2','2','1','1','6'},
+    {'1',' ',' ',' ',' ',' ',' ','1'},
+    {'7',' ','1','1','1','1',' ','5'},
+    {'1',' ',' ',' ',' ',' ',' ','1'},
+    {'6','1','1','4','4','1','1','6'}
+};
+
 static const LayoutInfo LAYOUTS[LAYOUT_COUNT] = {
     {
         "cramped_room",
@@ -287,6 +296,13 @@ static const LayoutInfo LAYOUTS[LAYOUT_COUNT] = {
         5, 5,
         (const char*)COORDINATION_RING,
         {1, 2, 3, 2},
+        2
+    },
+    {
+        "counter_circuit",
+        8, 5,
+        (const char*)COUNTER_CIRCUIT,
+        {1, 1, 6, 3},
         2
     }
 };

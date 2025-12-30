@@ -188,6 +188,25 @@ Spawns: (1,2) and (3,2)
 
 Ring-shaped layout with a center counter obstacle. Agents must navigate around the center to coordinate ingredient pickup and soup delivery.
 
+### counter_circuit (8x5)
+
+```
++---+---+---+---+---+---+---+---+
+| W | C | C | P | P | C | C | W |
++---+---+---+---+---+---+---+---+
+| C |   |   |   |   |   |   | C |
++---+---+---+---+---+---+---+---+
+| D |   | C | C | C | C |   | S |
++---+---+---+---+---+---+---+---+
+| C |   |   |   |   |   |   | C |
++---+---+---+---+---+---+---+---+
+| W | C | C | I | I | C | C | W |
++---+---+---+---+---+---+---+---+
+```
+Spawns: (1,1) and (6,3)
+
+Circuit-shaped layout with a center counter island. Agents must coordinate around the obstacle to efficiently transport ingredients and serve dishes. Features dual pots and dual ingredient boxes for parallel cooking.
+
 ## Logging Metrics
 
 *See [Log struct](overcooked_types.h#L65-L78)*
@@ -224,4 +243,5 @@ python pufferlib/ocean/overcooked/overcooked.py
 ./overcooked asymmetric_advantages
 ./overcooked forced_coordination
 ./overcooked coordination_ring
+./overcooked counter_circuit
 ```
