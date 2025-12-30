@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
         weights_size = 138631;
     } else {
         weights_file = "resources/overcooked/puffer_overcooked_weights_cr.bin";
-        weights_size = 552476;
+        weights_size = 138631;
     }
 
     Weights* weights = load_weights(weights_file, weights_size);
