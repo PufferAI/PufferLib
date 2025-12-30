@@ -75,6 +75,7 @@ typedef struct {
     float pot_started;
     float ingredient_added;
     float ingredient_picked;
+    float plate_picked;
     float soup_plated;
     float wrong_dish_served;
     float step_penalty;

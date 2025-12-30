@@ -21,6 +21,7 @@ class Overcooked(pufferlib.PufferEnv):
                  reward_pot_started=0.1,
                  reward_ingredient_added=0.1,
                  reward_ingredient_picked=0.0,
+                 reward_plate_picked=0.0,
                  reward_soup_plated=0.1,
                  reward_wrong_dish_served=0.1,
                  reward_step_penalty=0.0):
@@ -77,6 +78,7 @@ class Overcooked(pufferlib.PufferEnv):
                 reward_pot_started=reward_pot_started,
                 reward_ingredient_added=reward_ingredient_added,
                 reward_ingredient_picked=reward_ingredient_picked,
+                reward_plate_picked=reward_plate_picked,
                 reward_soup_plated=reward_soup_plated,
                 reward_wrong_dish_served=reward_wrong_dish_served,
                 reward_step_penalty=reward_step_penalty

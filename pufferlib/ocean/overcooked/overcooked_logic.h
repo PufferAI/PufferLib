@@ -223,6 +223,7 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
         }
         else if (tile == PLATE_BOX) {
             agent->held_item = PLATE;
+            env->rewards[agent_idx] += env->rewards_config.plate_picked;
         }
     }
 }

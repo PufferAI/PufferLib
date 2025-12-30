@@ -39,6 +39,7 @@ int main(int argc, char** argv) {
             .pot_started = 0.15f,
             .ingredient_added = 0.15f,
             .ingredient_picked = 0.05f,
+            .plate_picked = 0.05f,
             .soup_plated = 0.20f,
             .wrong_dish_served = 0.0f,
             .step_penalty = 0.0f
