@@ -3,30 +3,52 @@ import numpy as np
 import gymnasium
 
 import pufferlib
+from pufferlib.pufferlib import set_buffers
 
-from omegaconf import OmegaConf
-from metta.mettagrid.mettagrid_env import MettaGridEnv
-from metta.mettagrid.curriculum.core import SingleTaskCurriculum
-from metta.mettagrid.replay_writer import ReplayWriter
+from mettagrid.builder.envs import make_arena
+from mettagrid.envs.mettagrid_env import MettaGridEnv
 
 def env_creator(name='metta'):
     return functools.partial(make, name)
 
-def make(name, config='pufferlib/environments/metta/metta.yaml', render_mode='auto', buf=None, seed=0,
-         ore_reward=0.17088483842567775, battery_reward=0.9882859711234822, heart_reward=1.0):
-    '''Metta creation function'''
+def make(
+    name,
+    render_mode="auto",
+    buf=None,
+    seed=0,
+    ore_reward=0.1,
+    battery_reward=0.8,
+    heart_reward=1.0,
+    num_agents=24,
+):
+    mettagrid_cfg = make_arena(num_agents=num_agents)
+
+    mettagrid_cfg.game.agent.rewards.inventory = {
+        "heart": heart_reward,
+        "ore_red": ore_reward,
+        "battery_red": battery_reward,
+        "laser": 0.5,
+        "armor": 0.5,
+        "blueprint": 0.5,
+    }
+
+    mettagrid_cfg.game.agent.rewards.inventory_max = {
+        "heart": 100,
+        "ore_red": 1,
+        "battery_red": 1,
+        "laser": 1,
+        "armor": 1,
+        "blueprint": 1,
+    }
+
+    mettagrid_cfg.game.objects["altar"].input_resources = {"battery_red": 1}
+
+    env = MettaPuff(mettagrid_cfg, render_mode=render_mode, seed=seed)
+    set_buffers(env, buf)
+    env.async_reset(seed=42)
+
+    return env
     
-    OmegaConf.register_new_resolver("div", oc_divide, replace=True)
-    cfg = OmegaConf.load(config)
-    
-    # Update rewards under the new structure: agent.rewards.inventory
-    inventory_rewards = cfg['game']['agent']['rewards']['inventory']
-    inventory_rewards['ore_red'] = float(ore_reward)
-    inventory_rewards['heart'] = float(heart_reward)
-    inventory_rewards['battery_red'] = float(battery_reward)
-    
-    curriculum = SingleTaskCurriculum('puffer', cfg)
-    return MettaPuff(curriculum, render_mode=render_mode, buf=buf, seed=seed)
 
 def oc_divide(a, b):
     """
@@ -40,35 +62,37 @@ def oc_divide(a, b):
     return result
 
 class MettaPuff(MettaGridEnv):
-    def __init__(self, curriculum, render_mode='human', buf=None, seed=0):
+    def __init__(self, env_cfg, render_mode='human', seed=0):
         self.replay_writer = None
         #if render_mode == 'auto':
         #    self.replay_writer = ReplayWriter("metta/")
-
         super().__init__(
-            curriculum=curriculum,
+            env_cfg=env_cfg,
             render_mode=render_mode,
-            buf=buf,
-            replay_writer=self.replay_writer
+            replay_writer=self.replay_writer,
+            is_training=True,  # Enable training mode for desync_episodes
         )
-        self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.num_agents)
-        self.actions = self.actions.astype(np.int32)
+        self.infos = []
 
-    @property
-    def single_action_space(self):
-        return gymnasium.spaces.MultiDiscrete(super().single_action_space.nvec, dtype=np.int32)
+    def reset(self, seed=None):
+        obs, info = super().reset(seed)
+
+        # Update shared buffers if they exist (for vectorization)
+        if hasattr(self, 'observations') and self.observations is not None:
+            self.observations[:] = obs
+
+        self.infos = [info] * self.num_agents
+        return obs, self.infos
 
     def step(self, actions):
-        obs, rew, term, trunc, info = super().step(actions)
+        obs, rewards, terminals, truncations, infos = super().step(actions)
 
-        if all(term) or all(trunc):
-            self.reset()
-            if 'agent_raw' in info:
-                del info['agent_raw']
-            if 'episode_rewards' in info:
-                info['score'] = info['episode_rewards']
+        # Update shared buffers if they exist (for vectorization)
+        if hasattr(self, 'observations') and self.observations is not None:
+            self.observations[:] = obs
+            self.rewards[:] = rewards
+            self.terminals[:] = terminals
+            self.truncations[:] = truncations
 
-        else:
-            info = []
-
-        return obs, rew, term, trunc, [info]
+        self.infos = infos
+        return obs, rewards, terminals, truncations, infos
