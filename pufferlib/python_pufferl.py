@@ -31,6 +31,7 @@ import pufferlib
 import pufferlib.sweep
 import pufferlib.vector
 import pufferlib.pytorch
+from pufferlib.muon import Muon
 try:
     from pufferlib import _C
 except ImportError:
@@ -129,43 +130,24 @@ class PuffeRL:
             self.policy.forward_eval = torch.compile(policy.forward_eval, mode=config['compile_mode'])
             pufferlib.pytorch.sample_logits = torch.compile(pufferlib.pytorch.sample_logits, mode=config['compile_mode'])
 
+        '''
         import heavyball
         from heavyball import ForeachMuon
         warnings.filterwarnings(action='ignore', category=UserWarning, module=r'heavyball.*')
-        heavyball.utils.compile_mode = "reduce-overhead"
-
-        # # optionally a little bit better/faster alternative to newtonschulz iteration
-        # import heavyball.utils
-        # heavyball.utils.zeroth_power_mode = 'thinky_polar_express'
-
-        # heavyball_momentum=True introduced in heavyball 2.1.1
-        # recovers heavyball-1.7.2 behaviour - previously swept hyperparameters work well
-        '''
-        self.optimizer = torch.optim.Adam(
-            self.policy.parameters(),
-            lr=config['learning_rate'],
-            betas=(config['adam_beta1'], config['adam_beta2']),
-            eps=config['adam_eps'],
-        )
- 
+        heavyball.utils.compile_mode = "default"
         self.optimizer = ForeachMuon(
             self.policy.parameters(),
             lr=config['learning_rate'],
             betas=(config['adam_beta1'], config['adam_beta2']),
             eps=config['adam_eps'],
-            #heavyball_momentum=True,
+            heavyball_momentum=True,
         )
         '''
-        self.muon = torch.optim.Muon(
-            [e for e in self.policy.parameters() if e.dim() == 2],
+
+        self.optimizer = Muon(
+            self.policy.parameters(),
             lr=config['learning_rate'],
-            eps=config['adam_eps'],
-            adjust_lr_fn='match_rms_adamw'
-        )
-        self.adam = torch.optim.Adam(
-            [e for e in self.policy.parameters() if e.dim() != 2],
-            lr=config['learning_rate'],
-            betas=(config['adam_beta1'], config['adam_beta2']),
+            momentum=config['adam_beta1'],
             eps=config['adam_eps'],
         )
 
@@ -329,10 +311,9 @@ class PuffeRL:
         learning_rate = config['learning_rate']
         if config['anneal_lr'] and self.epoch > 0:
             lr_ratio = self.epoch / self.total_epochs
-            learning_rate = learning_rate * 0.5 * (1 + np.cos(np.pi * lr_ratio))
-            #self.optimizer.param_groups[0]['lr'] = learning_rate
-            self.muon.param_groups[0]['lr'] = learning_rate
-            self.adam.param_groups[0]['lr'] = learning_rate
+            lr_min = config['learning_rate'] * config['min_lr_ratio']
+            learning_rate = lr_min + 0.5*(learning_rate - lr_min) * (1 + np.cos(np.pi * lr_ratio))
+            self.optimizer.param_groups[0]['lr'] = learning_rate
 
         num_minibatches = config['num_minibatches']
         for mb in range(num_minibatches):
@@ -419,12 +400,8 @@ class PuffeRL:
             loss.backward()
             if (mb + 1) % self.accumulate_minibatches == 0:
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), config['max_grad_norm'])
-                #self.optimizer.step()
-                #self.optimizer.zero_grad()
-                self.muon.step()
-                self.adam.step()
-                self.muon.zero_grad()
-                self.adam.zero_grad()
+                self.optimizer.step()
+                self.optimizer.zero_grad()
 
         # Reprioritize experience
         profile('train_misc', epoch)
@@ -926,6 +903,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
             model.hidden_size = policy.hidden_size
 
         model.forward_eval = policy.forward_eval
+        model.initial_state = policy.initial_state
         policy = model.to(local_rank)
 
     if args['neptune']:
@@ -938,8 +916,9 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
     pufferl.logger.init(args)
 
     all_logs = []
+    max_cost = args['train'].get('max_cost', -1)
     while pufferl.global_step < train_config['total_timesteps']:
-        if pufferl.uptime > args['sweep']['max_cost']:
+        if pufferl.uptime > max_cost and max_cost > 0:
             break
 
         if train_config['device'] == 'cuda':
@@ -1292,17 +1271,21 @@ def load_policy(args, vecenv, env_name=''):
     module_name = 'pufferlib.ocean' if package == 'ocean' else f'pufferlib.environments.{package}'
     env_module = importlib.import_module(module_name)
 
-    device = args['train']['device']
+    # NOTE: LSTM API is changing. Trying to make it work now, but should revisit later.
+    rnn_name = args['rnn_name']
+    '''
+    if rnn_name is not None:
+        policy_cls = getattr(env_module.torch, args['policy_name'])
+        def make_policy():
+            return policy_cls(vecenv.driver_env, **args['policy'])
+        rnn_cls = getattr(env_module.torch, args['rnn_name'])
+        policy = rnn_cls(vecenv.driver_env, make_policy, **args['rnn'])
+    else:
+    '''
     policy_cls = getattr(env_module.torch, args['policy_name'])
     policy = policy_cls(vecenv.driver_env, **args['policy'])
 
-    '''
-    rnn_name = args['rnn_name']
-    if rnn_name is not None:
-        rnn_cls = getattr(env_module.torch, args['rnn_name'])
-        policy = rnn_cls(vecenv.driver_env, policy, **args['policy'])
-    '''
-
+    device = args['train']['device']
     policy = policy.to(device)
 
     load_id = args['load_id']

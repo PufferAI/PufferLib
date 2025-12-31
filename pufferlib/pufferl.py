@@ -37,37 +37,9 @@ import pufferlib.vector
 import pufferlib.pytorch
 try:
     from pufferlib import _C
+    from pufferlib import fake_tensors
 except ImportError:
     raise ImportError('Failed to import C/CUDA advantage kernel. If you have non-default PyTorch, try installing with --no-build-isolation')
-
-#@torch.library.impl_abstract("squared::step_environments")
-#def meta_step_environments(envs):
-#    pass
-
-class CPPEnv:
-    def __init__(self, num_envs):
-        dummy = torch.zeros(5).cuda()
-        #self.env, self.observations, self.actions, self.rewards, self.terminals = _C.create_squared_environments(num_envs, grid_size, dummy)
-        self.env, self.observations, self.actions, self.rewards, self.terminals = _C.create_environments(num_envs)
-        self.observations = self.observations.view(num_envs, -1)
-        #self.indices = torch.arange(num_envs).cuda().int()
-        self.indices = torch.arange(num_envs).int()
-
-    def reset(self):
-        _C.reset_environments(self.env, self.indices)
-        return self.observations
-
-    def step(self, actions):
-        self.actions[:] = actions
-        _C.step_environments(self.env)
-        return self.observations, self.rewards, self.terminals
-
-    def log(self):
-        return _C.log_environments(self.env, self.indices)
-
-    def close(self):
-        # TODO
-        pass
 
 import rich
 import rich.traceback
@@ -93,15 +65,15 @@ ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
 
 
 class PuffeRL:
-    def __init__(self, config, vecenv, logger=None, verbose=True):
+    def __init__(self, config, logger=None, verbose=True):
         # Backend perf optimization
-        num_envs = 4096
+        num_envs = 8192
         self.num_envs = num_envs
         #grid_size = 11
         dummy = torch.zeros(5).cuda()
 
-        vecenv = CPPEnv(num_envs)
-        vecenv.reset()
+        #vecenv = CPPEnv(num_envs)
+        #vecenv.reset()
 
         # Reproducibility
         seed = config['seed']
@@ -114,9 +86,6 @@ class PuffeRL:
         atn_space = Discrete(3)
         self.single_observation_space = obs_space
         self.single_action_space = atn_space
-
-        #policy = _C.PolicyLSTM(grid_size*grid_size, 5, 128)
-        #policy.cuda()
 
         # Vecenv info
         #vecenv.async_reset(seed)
@@ -161,14 +130,7 @@ class PuffeRL:
         self.ep_lengths = torch.zeros(total_agents, device=device, dtype=torch.int32)
         self.ep_indices = torch.arange(total_agents, device=device, dtype=torch.int32)
         self.free_idx = total_agents
-
-        # LSTM
-        if config['use_rnn']:
-            n = self.agents_per_batch
-            h = 128
-            self.lstm_h = {i*n: torch.zeros(n, h, device=device) for i in range(total_agents//n)}
-            self.lstm_c = {i*n: torch.zeros(n, h, device=device) for i in range(total_agents//n)}
-
+ 
         # Minibatching & gradient accumulation
         minibatch_size = config['minibatch_size']
         max_minibatch_size = config['max_minibatch_size']
@@ -187,25 +149,33 @@ class PuffeRL:
             self.logger = Logger(config)
 
         epochs = config['total_timesteps'] // config['batch_size']
+        eta_min = config['learning_rate'] * config['min_lr_ratio']
+        
         self.total_epochs = epochs
 
-        self.num_layers = 3
-        self.pufferl_cpp = _C.create_pufferl(
-            #vecenv.envs[0].c_envs,
-            118,
-            3,
-            128,
-            self.num_layers,
-            config['learning_rate'],
-            config['adam_beta1'],
-            config['adam_beta2'],
-            config['adam_eps'],
-            epochs,
-        )
+        self.num_layers = 4
+        config['input_size'] = 118
+        config['num_atns'] = 3
+        config['hidden_size'] = 128
+        config['num_layers'] = self.num_layers
+        config['minibatch_segments'] = self.minibatch_segments
+        config['segments'] = segments
+        config['horizon'] = horizon
+        config['lr'] = config['learning_rate']
+        config['beta1'] = config['adam_beta1']
+        config['beta2'] = config['adam_beta2']
+        config['eps'] = config['adam_eps']
+        config['max_epochs'] = epochs
+        config['total_minibatches'] = self.total_minibatches
+        config['accumulate_minibatches'] = self.accumulate_minibatches
+        config['num_envs'] = self.num_envs
+        config['cudagraphs'] = False
+        config['kernels'] = False
+        self.pufferl_cpp = _C.create_pufferl(config)
 
         # Initializations
         self.config = config
-        self.vecenv = vecenv
+        #self.vecenv = vecenv
         self.epoch = 0
         self.global_step = 0
         self.last_log_step = 0
@@ -222,6 +192,9 @@ class PuffeRL:
         #self.model_size = sum(p.numel() for p in policy.parameters() if p.requires_grad)
         self.print_dashboard(clear=True)
 
+        #self.compiled_evaluate = torch.compile(_C.compiled_evaluate)
+        #self.eval_forward = torch.compile(self.pufferl_cpp.policy.forward, mode='reduce-overhead')
+
     @property
     def uptime(self):
         return time.time() - self.start_time
@@ -233,6 +206,7 @@ class PuffeRL:
 
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
 
+
     def evaluate(self):
         profile = self.profile
         epoch = self.epoch
@@ -241,66 +215,57 @@ class PuffeRL:
         config = self.config
         device = config['device']
 
-        if config['use_rnn']:
-            n = self.agents_per_batch
-            h = 128
-            layers = self.num_layers
-            #h = self.policy.hidden_size
- 
-            state = torch.zeros((layers, n, h), device=device)
-
+        state = _C.rollouts(self.pufferl_cpp,)
 
         '''
-        for t in range(self.config['bptt_horizon']):
-            lstm_h, lstm_c = _C.evaluate_step(
-                self.pufferl_cpp,
-                self.vecenv.env,
-                self.vecenv.indices,
-                self.vecenv.observations,
-                self.vecenv.actions,
-                self.vecenv.rewards,
-                self.vecenv.terminals,
-                lstm_h,
-                lstm_c,
-                self.observations,
-                self.actions,
-                self.logprobs,
-                self.rewards,
-                self.terminals,
-                self.values,
-                t
-            )
-            self.rewards[:, t].clamp_(-1.0, 1.0)
-            self.vecenv.step(self.actions[:, t])
+        obs, act, rew, term = _C.env_buffers(self.pufferl_cpp)
+
+        num_buffers = 2
+        block_size = int(self.num_envs / num_buffers)
+        with torch.no_grad():
+            for i in range(self.config['bptt_horizon']):
+                buf = i % num_buffers
+                h = int(i / num_buffers)
+                _C.python_vec_recv(self.pufferl_cpp, buf)
+
+                start = int(block_size * buf)
+                obs_batch = obs.narrow(0, start, block_size)
+                state_batch = state.narrow(1, start, block_size)
+                logits, value, state_out = self.eval_forward(obs_batch.cuda(), state_batch)
+                state_batch.copy_(state_out)
+
+                logits = torch.nan_to_num(logits)
+                logprobs = torch.log_softmax(logits, dim=1)
+                action = torch.multinomial(logprobs.exp(), 1, True).squeeze(1).to(torch.int32)
+                logprob = logprobs.gather(1, action.unsqueeze(1)).squeeze(1)
+
+                self.observations.select(1, h).narrow(0, start, block_size).copy_(obs_batch, True)
+                self.actions.select(1, h).narrow(0, start, block_size).copy_(action.to(torch.int64), True)
+                self.logprobs.select(1, h).narrow(0, start, block_size).copy_(logprob.to(torch.float32), True)
+                self.values.select(1, h).narrow(0, start, block_size).copy_(value.flatten().to(torch.float32), True)
+
+                rewards_batch = rew.narrow(0, start, block_size)
+                rewards_clamped = torch.clamp(rewards_batch, -1, 1)
+
+                self.rewards.select(1, h).narrow(0, start, block_size).copy_(rewards_clamped.to(torch.float32), True)
+
+                terminals_batch = term.narrow(0, start, block_size)
+                self.terminals.select(1, h).narrow(0, start, block_size).copy_(terminals_batch.to(torch.float32), True)
+
+                act.narrow(0, start, block_size).copy_(action.to(torch.float32), True)
+
+                torch.cuda.synchronize()
+                _C.python_vec_send(self.pufferl_cpp, buf)
         '''
 
-        state = _C.compiled_evaluate(
-            self.pufferl_cpp,
-            self.vecenv.env,
-            self.vecenv.indices,
-            self.vecenv.observations,
-            self.vecenv.actions,
-            self.vecenv.rewards,
-            self.vecenv.terminals,
-            state,
-            self.observations,
-            self.actions,
-            self.logprobs,
-            self.rewards,
-            self.terminals,
-            self.values,
-            self.config['bptt_horizon'],
-            self.num_envs
-        )
-
-        torch.cuda.synchronize()
-        logs = self.vecenv.log()
-        if logs.n > 0:
-            self.stats['perf'] = [logs.perf]
-            self.stats['score'] = [logs.score]
-            self.stats['episode_return'] = [logs.episode_return]
-            self.stats['episode_length'] = [logs.episode_length]
-            self.stats['n'] = [logs.n]
+        #torch.cuda.synchronize()
+        logs = _C.log_environments(self.pufferl_cpp)
+        if logs:
+            self.stats['perf'] = [logs['perf']]
+            self.stats['score'] = [logs['score']]
+            self.stats['episode_return'] = [logs['episode_return']]
+            self.stats['episode_length'] = [logs['episode_length']]
+            self.stats['n'] = [logs['n']]
 
         self.global_step += config['batch_size']
         profile.end()
@@ -315,40 +280,8 @@ class PuffeRL:
 
         self.ratio[:] = 1
 
-        losses = _C.compiled_train(
-            self.pufferl_cpp,
-            self.observations,
-            self.actions,
-            self.logprobs,
-            self.rewards,
-            self.terminals,
-            self.truncations,
-            self.ratio,
-            self.values,
-            #self.scheduler if self.config['anneal_lr'] else None,
-            self.total_minibatches,
-            self.minibatch_segments,
-            self.segments,  # Assuming self.segments = self.num_envs
-            self.accumulate_minibatches,
-            self.config['bptt_horizon'],
-            self.config['prio_beta0'],
-            self.config['prio_alpha'],
-            self.config['clip_coef'],
-            self.config['vf_clip_coef'],
-            self.config['gamma'],
-            self.config['gae_lambda'],
-            self.config['vtrace_rho_clip'],
-            self.config['vtrace_c_clip'],
-            self.config['vf_coef'],
-            self.config['ent_coef'],
-            self.config['max_grad_norm'],
-            self.config['use_rnn'],
-            self.config['anneal_lr'],
-            self.total_epochs,
-            self.epoch
-        )
+        losses = _C.train(self.pufferl_cpp)
 
-        # Reprioritize experience
         profile('train_misc', epoch)
         profile.end()
         logs = None
@@ -407,6 +340,7 @@ class PuffeRL:
         return logs
 
     def close(self):
+        os._exit(0)
         self.vecenv.close()
         self.utilization.stop()
         model_path = self.save_checkpoint()
@@ -638,8 +572,8 @@ class Profile:
         if (epoch + 1) % self.frequency != 0:
             return
 
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        #if torch.cuda.is_available():
+        #    torch.cuda.synchronize()
 
         tick = time.time()
         if len(self.stack) != 0 and not nest:
@@ -656,8 +590,8 @@ class Profile:
         profile['elapsed'] += delta * self.frequency
 
     def end(self):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        #if torch.cuda.is_available():
+        #    torch.cuda.synchronize()
 
         end = time.time()
         for i in range(len(self.stack)):
@@ -809,6 +743,7 @@ class WandbLogger:
             resume=resume,
             config=args,
             tags = [args['tag']] if args['tag'] is not None else [],
+            settings=wandb.Settings(console="off"),  # stop sending dashboard to wandb
         )
         self.wandb = wandb
         self.run_id = wandb.run.id
@@ -896,7 +831,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
         os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
 
     vecenv = vecenv or load_env(env_name, args)
-    policy = policy or load_policy(args, vecenv, env_name)
+    #policy = policy or load_policy(args, vecenv, env_name)
 
     if 'LOCAL_RANK' in os.environ:
         args['train']['device'] = torch.cuda.current_device()
@@ -919,14 +854,14 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
 
     train_config = dict(**args['train'])#, env=env_name)
     #pufferl = PuffeRL(train_config, vecenv, policy, logger, verbose)
-    pufferl = PuffeRL(train_config, vecenv, logger, verbose)
+    pufferl = PuffeRL(train_config, logger, verbose)
     pufferl.logger.init(args)
 
     all_logs = []
+    max_cost = args['train'].get('max_cost', -1)
     while pufferl.global_step < train_config['total_timesteps']:
-        if pufferl.uptime > args['sweep']['max_cost']:
+        if pufferl.uptime > max_cost and max_cost > 0:
             break
-
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
         pufferl.evaluate()
@@ -1233,6 +1168,7 @@ def sweep(args=None, env_name=None):
     args = args or load_config(env_name)
     if not args['wandb'] and not args['neptune']:
         raise pufferlib.APIUsageError('Sweeps require either wandb or neptune')
+    args['no_model_upload'] = True  # Uploading trained model during sweep crashed wandb
 
     method = args['sweep'].pop('method')
     try:
@@ -1249,7 +1185,10 @@ def sweep(args=None, env_name=None):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
-        sweep.suggest(args)
+        # In the first run, skip sweep and use the train args specified in the config
+        if i > 0:
+            sweep.suggest(args)
+
         all_logs = train(env_name, args=args, should_stop_early=stop_if_loss_nan)
         all_logs = [e for e in all_logs if target_key in e]
 
@@ -1277,23 +1216,66 @@ def sweep(args=None, env_name=None):
         args['train']['total_timesteps'] = total_timesteps
 
 def profile(args=None, env_name=None, vecenv=None, policy=None):
-    args = load_config()
-    vecenv = vecenv or load_env(env_name, args)
-    policy = policy or load_policy(args, vecenv)
+    args = load_config(env_name)
+    #vecenv = vecenv or load_env(env_name, args)
+    #policy = policy or load_policy(args, vecenv)
 
-    train_config = dict(**args['train'], env=args['env_name'], tag=args['tag'])
-    pufferl = PuffeRL(train_config, vecenv, policy, neptune=args['neptune'], wandb=args['wandb'])
+    #train_config = dict(**args['train'], env=args['env_name'], tag=args['tag'])
+    train_config = dict(**args['train'])
+    #pufferl = PuffeRL(train_config, vecenv, policy, neptune=args['neptune'], wandb=args['wandb'])
+    pufferl = PuffeRL(train_config)
+
+    # Warmup
+    for _ in range(5):
+        stats = pufferl.evaluate()
+        pufferl.train()
+
+    torch.cuda.synchronize()
+    torch._C._cuda_clearCublasWorkspaces()      # optional, clears cuBLAS heuristics
+    torch.compiler.cudagraph_mark_step_begin()  # forces any pending CUDA graph/JIT work to finish
+    torch.cuda.synchronize()
+
+    pufferl.evaluate()
+    pufferl.train()
+    torch.cuda.synchronize()
 
     import torchvision.models as models
-    from torch.profiler import profile, record_function, ProfilerActivity
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-        with record_function("model_inference"):
-            for _ in range(10):
+    from torch.profiler import profile, record_function, ProfilerActivity, schedule
+
+    with profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        schedule=schedule(
+            skip_first=15,
+            wait=5,
+            warmup=10,
+            active=5,
+            repeat=1
+        ),
+    ) as prof:
+        for _ in range(35):  # 15 + 5 + 10 + 5 
+            with record_function("full_step"):
+                pufferl.evaluate()
+                pufferl.train()
+            prof.step()
+
+    '''
+    with profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        record_shapes=True,
+        with_stack=False,
+    ) as prof:
+        with record_function("full_step"):
+            for _ in range(5):
                 stats = pufferl.evaluate()
                 pufferl.train()
+                prof.step()
+    '''
 
-    print(prof.key_averages().table(sort_by='cuda_time_total', row_limit=10))
-    prof.export_chrome_trace("trace.json")
+    print(prof.key_averages(group_by_input_shape=False).table(
+        sort_by="self_cpu_time_total",
+        row_limit=50,
+    ))
+    #prof.export_chrome_trace("trace.json")
 
 def export(args=None, env_name=None, vecenv=None, policy=None):
     args = args or load_config(env_name)

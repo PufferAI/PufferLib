@@ -1,12 +1,9 @@
-from .environment import env_creator
+"""CoGames integration package."""
+
+from .environment import env_creator, make
 
 try:
     import torch
+    from .torch import Policy, Recurrent
 except ImportError:
     pass
-else:
-    from .torch import Policy
-    try:
-        from .torch import Recurrent
-    except:
-        Recurrent = None

@@ -103,20 +103,21 @@ void free_tower_climb_net(TowerClimbNet* net) {
 void demo() {   
     Weights* weights = load_weights("resources/tower_climb/tower_climb_weights.bin", 560407);
     TowerClimbNet* net = init_tower_climb_net(weights, 1);
+    const char* path = "resources/tower_climb/maps.bin";
 
-    int num_maps = 1;  // Generate 1 map only to start faster
-    Level* levels = calloc(num_maps, sizeof(Level));
+    int num_maps = 0;
+    Level* levels = load_levels_from_file(&num_maps, path);
+    if (levels == NULL || num_maps == 0) {
+        fprintf(stderr, "Failed to load maps for demo. Pre-generate maps with generate_maps.py and put maps.bin under resources/topwer_climb.\n");
+        return;
+    }
+
     PuzzleState* puzzle_states = calloc(num_maps, sizeof(PuzzleState));
 
     srand(time(NULL));
     
     for (int i = 0; i < num_maps; i++) {
-        int goal_height = rand() % 4 + 5;
-        int min_moves = 10;
-        int max_moves = 15;
-        init_level(&levels[i]);
         init_puzzle_state(&puzzle_states[i]);
-        cy_init_random_level(&levels[i], goal_height, max_moves, min_moves, i);
         levelToPuzzleState(&levels[i], &puzzle_states[i]);
     }
 
@@ -124,9 +125,6 @@ void demo() {
     env->num_maps = num_maps;
     env->all_levels = levels;
     env->all_puzzles = puzzle_states;
-
-    int random_level = 5 + (rand() % 4);
-    init_random_level(env, random_level, 15, 10, rand());
     c_reset(env);
     c_render(env);
     Client* client = env->client;
@@ -192,9 +190,10 @@ void demo() {
     free_allocated(env);
     free_tower_climb_net(net);
     free(weights);
-    free(levels[0].map);
+    for (int i = 0; i < num_maps; i++) {
+        free(levels[i].map);
+    }
     free(levels);
-    free(puzzle_states[0].blocks);
     free(puzzle_states);
 }
 
@@ -217,8 +216,5 @@ void performance_test() {
 
 int main() {
     demo();
-    // performance_test();
     return 0;
 }
-
-

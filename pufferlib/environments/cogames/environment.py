@@ -1,42 +1,27 @@
-from pdb import set_trace as T
-import numpy as np
+"""CoGames wrapper for PufferLib."""
+
 import functools
+from cogames.cli.mission import get_mission
+from mettagrid import PufferMettaGridEnv
+from mettagrid.envs.stats_tracker import StatsTracker
+from mettagrid.simulator import Simulator
+from mettagrid.util.stats_writer import NoopStatsWriter
 
-import gymnasium as gym
 
-import pufferlib
-import pufferlib.emulation
-import pufferlib.environments
-from pufferlib.pufferlib import set_buffers
+def env_creator(name="cogames.cogs_v_clips.machina_1.open_world"):
+    return functools.partial(make, name=name)
 
-from mettagrid.envs import MettaGridEnv
 
-def env_creator(name='machina_1'):
-    return functools.partial(make, name)
+def make(name="cogames.cogs_v_clips.machina_1.open_world", variants=None, cogs=None, render_mode="auto", seed=None, buf=None):
+    mission_name = name.removeprefix("cogames.cogs_v_clips.") if name.startswith("cogames.cogs_v_clips.") else name
+    variants = variants.split() if isinstance(variants, str) else variants
+    _, env_cfg, _ = get_mission(mission_name, variants_arg=variants, cogs=cogs)
 
-def make(name, render_mode='rgb_array', buf=None, seed=0):
-    '''Atari creation function'''
-    from cogames import game
-
-    # Load a game configuration
-    config = game.get_mission(name)[0]
-
-    # Create environment
-    env = PufferMettaGridEnv(env_cfg=config)
-    set_buffers(env, buf)
+    render = "none" if render_mode == "auto" else "unicode" if render_mode in {"human", "ansi"} else render_mode
+    simulator = Simulator()
+    simulator.add_event_handler(StatsTracker(NoopStatsWriter()))
+    env = PufferMettaGridEnv(simulator=simulator, cfg=env_cfg, buf=buf, seed=seed or 0)
+    #env.render_mode = render
+    if seed:
+        env.reset(seed)
     return env
-
-class PufferMettaGridEnv(MettaGridEnv):
-    def reset(self, **kwargs):
-        obs, info = super().reset(**kwargs)
-        info = {k: v for k, v in pufferlib.unroll_nested_dict(info)
-            if 'action' not in k}
-        return obs, info
-
-    def step(self, action):
-        obs, reward, terminated, truncated, info = super().step(action)
-        info = {k: v for k, v in pufferlib.unroll_nested_dict(info)
-            if 'action' not in k}
-        info = {k: v for k, v in info.items() if 'action' not in k}
-        return obs, reward, terminated, truncated, info
-

@@ -200,6 +200,9 @@ def sample_logits(logits, action=None):
         logits = logits.unsqueeze(0)
     # TODO: Double check this
     else: #multi-discrete
+        #TODO: This stupid bullshit optimization causes
+        # out of bounds action samples when nans/infs are input
+        # instead of failing gracefully
         logits = torch.nn.utils.rnn.pad_sequence(
             [l.transpose(0,1) for l in logits], 
             batch_first=False, 

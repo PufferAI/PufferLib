@@ -142,6 +142,160 @@ torch::autograd::tensor_list log_coeffs_and_values(
     return LogCoeffsAndValuesFunction::apply(gate, hidden);
 }
 
+/*
+class RMSNormFunction: public torch::autograd::Function<RMSNormFunction> {
+public:
+    static torch::autograd::tensor_list forward(
+        torch::autograd::AutogradContext* ctx,
+        torch::Tensor x,
+        torch::Tensor weight,
+        double eps
+    ) {
+        TORCH_CHECK(x.is_cuda(), "x must be on CUDA");
+        TORCH_CHECK(weight.is_cuda(), "weight must be on CUDA");
+        TORCH_CHECK(x.dtype() == weight.dtype(), "dtypes must match");
+        TORCH_CHECK(x.dim() == 3, "x must be (B, T, H)");
+        TORCH_CHECK(weight.dim() == 1, "weight must be (H,)");
+        TORCH_CHECK(x.size(2) == weight.size(0), "H must match");
+
+        auto dtype = x.dtype();
+        auto device = x.device();
+        auto B = x.size(0);
+        auto T = x.size(1);
+        auto H = x.size(2);
+
+        auto out = torch::empty({B, T, H}, x.options());
+
+        auto options_float = torch::TensorOptions().dtype(torch::kFloat32).device(device);
+        auto inv_norm = torch::empty({B, T}, options_float);
+
+        if (dtype == torch::kFloat32) {
+            launch_rmsnorm_forward<float>(
+                out.data_ptr<float>(),
+                inv_norm.data_ptr<float>(),
+                x.data_ptr<float>(),
+                weight.data_ptr<float>(),
+                static_cast<double>(eps),
+                static_cast<int>(T),
+                static_cast<int>(H),
+                static_cast<int>(B)
+            );
+        } else if (dtype == torch::kBFloat16) {
+            launch_rmsnorm_forward<at::BFloat16>(
+                out.data_ptr<at::BFloat16>(),
+                inv_norm.data_ptr<float>(),
+                x.data_ptr<at::BFloat16>(),
+                weight.data_ptr<at::BFloat16>(),
+                static_cast<double>(eps),
+                static_cast<int>(T),
+                static_cast<int>(H),
+                static_cast<int>(B)
+            );
+        } else {
+            TORCH_CHECK(false, "Unsupported dtype. Only float32 and bfloat16 supported.");
+        }
+
+        // TODO: don't save eps as a tensor
+        //ctx->saved_data["eps"] = eps;   // store in saved_data instead
+                                    
+        // Save for backward
+        auto eps_tensor = torch::tensor(eps);
+        ctx->save_for_backward({x, weight, out, inv_norm, eps_tensor});
+
+        return {out};
+    }
+    static torch::autograd::tensor_list backward(
+        torch::autograd::AutogradContext* ctx,
+        torch::autograd::tensor_list grad_outputs
+    ) {
+        auto saved = ctx->get_saved_variables();
+        auto x = saved[0].contiguous();
+        auto weight = saved[1].contiguous();
+        auto out = saved[2].contiguous();
+        auto inv_norm = saved[3].contiguous();
+        double eps = saved[4].item<double>();
+
+        auto grad_out = grad_outputs[0].contiguous();
+        auto dtype = x.dtype();
+
+        auto B = x.size(0);
+        auto T = x.size(1);
+        auto H = x.size(2);
+
+        auto grad_x = torch::empty_like(x);
+        auto grad_weight = torch::empty_like(weight);
+        auto grad_eps = torch::Tensor();
+
+        if (dtype == torch::kFloat32) {
+            launch_rmsnorm_backward<float>(
+                grad_x.data_ptr<float>(),
+                grad_weight.data_ptr<float>(),
+                grad_out.data_ptr<float>(),
+                inv_norm.data_ptr<float>(),
+                x.data_ptr<float>(),
+                weight.data_ptr<float>(),
+                eps,
+                static_cast<int>(T),
+                static_cast<int>(H),
+                static_cast<int>(B)
+            );
+        } else if (dtype == torch::kBFloat16) {
+            launch_rmsnorm_backward<at::BFloat16>(
+                grad_x.data_ptr<at::BFloat16>(),
+                grad_weight.data_ptr<at::BFloat16>(),
+                grad_out.data_ptr<at::BFloat16>(),
+                inv_norm.data_ptr<float>(),
+                x.data_ptr<at::BFloat16>(),
+                weight.data_ptr<at::BFloat16>(),
+                eps,
+                static_cast<int>(T),
+                static_cast<int>(H),
+                static_cast<int>(B)
+            );
+        } else {
+            TORCH_CHECK(false, "Unsupported dtype");
+        }
+
+        return {grad_x, grad_weight, grad_eps};
+    }
+};
+torch::autograd::tensor_list rmsnorm(
+    torch::Tensor x,
+    torch::Tensor weight,
+    double eps
+) {
+    return RMSNormFunction::apply(x, weight, eps);
+}
+*/
+
+/*
+class RMSNormImpl : public torch::nn::Module {
+public:
+    explicit RMSNormImpl(int64_t hidden_size, double eps = 1e-5)
+        : eps(eps)
+    {
+        // weight is the learnable scale (same shape as the last dimension)
+        // We register it as a parameter so it lives on the right device and is trainable
+        weight = register_parameter("weight", torch::ones({1, 1, hidden_size}));
+        // Optional: initialize weight to 1.0 (common practice)
+        reset_parameters();
+    }
+
+    void reset_parameters() {
+        torch::nn::init::ones_(weight);
+    }
+
+    torch::Tensor forward(torch::Tensor x) {
+        // x is expected to be (B, T, H)
+        // Our custom function handles everything (including broadcasting weight correctly)
+        return rmsnorm(x, weight, eps)[0];   // rmsnorm returns a tensor_list with one element
+    }
+
+    // Expose eps if you want to change it later (optional)
+    double eps;
+    torch::Tensor weight;
+};
+*/
 
 class FusedScanFunction : public torch::autograd::Function<FusedScanFunction> {
 public:
@@ -166,17 +320,17 @@ public:
         auto out = torch::empty({B, T, H}, log_coeffs.options());
 
         // Intermediates: must be float32, but on same device!
-        //auto options_float = torch::TensorOptions().dtype(torch::kFloat32).device(device);
-        auto options_double = torch::TensorOptions().dtype(torch::kFloat64).device(device);
-        auto a_star = torch::empty({B, T, H}, options_double);
-        auto s_vals = torch::empty({B, T, H}, options_double);
+        auto options_float = torch::TensorOptions().dtype(torch::kFloat32).device(device);
+        //auto options_double = torch::TensorOptions().dtype(torch::kFloat64).device(device);
+        auto a_star = torch::empty({B, T, H}, options_float);
+        auto s_vals = torch::empty({B, T, H}, options_float);
 
         // Launch kernel
         if (dtype == torch::kFloat32) {
             launch_fused_scan_forward<float>(
                 out.data_ptr<float>(),
-                a_star.data_ptr<double>(),
-                s_vals.data_ptr<double>(),
+                a_star.data_ptr<float>(),
+                s_vals.data_ptr<float>(),
                 log_coeffs.data_ptr<float>(),
                 log_values.data_ptr<float>(),
                 static_cast<int>(T),
@@ -187,8 +341,8 @@ public:
         } else if (dtype == torch::kBFloat16) {
             launch_fused_scan_forward<at::BFloat16>(
                 out.data_ptr<at::BFloat16>(),
-                a_star.data_ptr<double>(),
-                s_vals.data_ptr<double>(),
+                a_star.data_ptr<float>(),
+                s_vals.data_ptr<float>(),
                 log_coeffs.data_ptr<at::BFloat16>(),
                 log_values.data_ptr<at::BFloat16>(),
                 static_cast<int>(T),
@@ -234,8 +388,8 @@ public:
                 log_coeffs.data_ptr<float>(),
                 log_values.data_ptr<float>(),
                 out.data_ptr<float>(),
-                a_star_buf.data_ptr<double>(),
-                s_vals.data_ptr<double>(),
+                a_star_buf.data_ptr<float>(),
+                s_vals.data_ptr<float>(),
                 static_cast<int>(T), // Probably not needed
                 static_cast<int>(H),
                 static_cast<int>(B)
@@ -248,8 +402,8 @@ public:
                 log_coeffs.data_ptr<at::BFloat16>(),
                 log_values.data_ptr<at::BFloat16>(),
                 out.data_ptr<at::BFloat16>(),
-                a_star_buf.data_ptr<double>(),
-                s_vals.data_ptr<double>(),
+                a_star_buf.data_ptr<float>(),
+                s_vals.data_ptr<float>(),
                 T, H, B
             );
         } else {
@@ -360,8 +514,8 @@ public:
         torch::Tensor prio,             // (N, 1) — importance weights
         torch::Tensor values,           // (N, T)
         torch::Tensor returns,          // (N, T)
-        double adv_mean,
-        double adv_std,
+        torch::Tensor adv_mean,         // (1)
+        torch::Tensor adv_std,          // (1)
         double clip_coef,
         double vf_clip_coef,
         double vf_coef,
@@ -423,8 +577,8 @@ public:
                 prio.data_ptr<float>(),      // (N, 1) → index as [n]
                 values.data_ptr<float>(),
                 returns.data_ptr<float>(),
-                adv_mean,
-                adv_std,
+                adv_mean.data_ptr<float>(),
+                adv_std.data_ptr<float>(),
                 clip_coef,
                 vf_clip_coef,
                 vf_coef,
@@ -443,8 +597,8 @@ public:
                 prio.data_ptr<at::BFloat16>(),
                 values.data_ptr<at::BFloat16>(),
                 returns.data_ptr<at::BFloat16>(),
-                adv_mean,
-                adv_std,
+                adv_mean.data_ptr<float>(), // TODO: is this correct?
+                adv_std.data_ptr<float>(),
                 clip_coef,
                 vf_clip_coef,
                 vf_coef,
@@ -471,8 +625,6 @@ public:
         //auto mean_loss = torch::tensor(accumulated / (N * T), options_float);
 
         // Save scalars
-        ctx->saved_data["adv_mean"] = adv_mean;
-        ctx->saved_data["adv_std"] = adv_std;
         ctx->saved_data["clip_coef"] = clip_coef;
         ctx->saved_data["vf_clip_coef"] = vf_clip_coef;
         ctx->saved_data["vf_coef"] = vf_coef;
@@ -480,7 +632,7 @@ public:
 
         // Save inputs and intermediates
         ctx->save_for_backward({logits, values_pred, actions, old_logprobs, advantages,
-                                prio, values, returns, saved_for_backward});
+                                prio, values, returns, adv_mean, adv_std, saved_for_backward});
 
         return {loss_output / (N * T)};
     }
@@ -497,23 +649,24 @@ public:
         auto prio = saved[5].contiguous();             // (N, 1)
         auto values = saved[6].contiguous();           // (N, T)
         auto returns = saved[7].contiguous();          // (N, T)
-        auto saved_for_backward = saved[8].contiguous();  // (N*T, 5)
+        auto adv_mean = saved[8].contiguous();         // (1)
+        auto adv_std = saved[9].contiguous();          // (1)
+        auto saved_for_backward = saved[10].contiguous();  // (N*T, 5)
 
         auto dtype = logits.dtype();
         auto N = logits.size(0);
         auto T = logits.size(1);
         auto A = logits.size(2);
 
-        float adv_mean = ctx->saved_data["adv_mean"].to<double>();
-        float adv_std = ctx->saved_data["adv_std"].to<double>();
         float clip_coef = ctx->saved_data["clip_coef"].to<double>();
         float vf_clip_coef = ctx->saved_data["vf_clip_coef"].to<double>();
         float vf_coef = ctx->saved_data["vf_coef"].to<double>();
         float ent_coef = ctx->saved_data["ent_coef"].to<double>();
 
-        auto grad_out_scalar = grad_outputs[0].sum();  // dL/d(loss)
-        auto grad_loss = torch::empty({1}, logits.options()).to(torch::kFloat32);
-        grad_loss.fill_(grad_out_scalar.item<float>());
+        auto grad_loss = grad_outputs[0].sum().to(torch::kFloat32).reshape({1});
+        //auto grad_out_scalar = grad_outputs[0].sum();  // dL/d(loss)
+        //auto grad_loss = torch::empty({1}, logits.options()).to(torch::kFloat32);
+        //grad_loss.fill_(grad_out_scalar.item<float>());
 
         auto grad_logits = torch::empty_like(logits);
         auto grad_values_pred = torch::empty_like(values_pred);
@@ -532,8 +685,10 @@ public:
                 values.data_ptr<float>(),
                 returns.data_ptr<float>(),
                 saved_for_backward.data_ptr<double>(),
-                adv_mean, adv_std, clip_coef,
-                vf_clip_coef, vf_coef, ent_coef,
+                adv_mean.data_ptr<float>(),
+                adv_std.data_ptr<float>(),
+                clip_coef, vf_clip_coef,
+                vf_coef, ent_coef,
                 T, A, N
             );
         } else if (dtype == torch::kBFloat16) {
@@ -549,8 +704,10 @@ public:
                 values.data_ptr<at::BFloat16>(),
                 returns.data_ptr<at::BFloat16>(),
                 saved_for_backward.data_ptr<double>(),
-                adv_mean, adv_std, clip_coef,
-                vf_clip_coef, vf_coef, ent_coef,
+                adv_mean.data_ptr<float>(),
+                adv_std.data_ptr<float>(),
+                clip_coef, vf_clip_coef,
+                vf_coef, ent_coef,
                 T, A, N
             );
         }
@@ -559,10 +716,12 @@ public:
         if (err != cudaSuccess) {
             fprintf(stderr, "Backward kernel error: %s\n", cudaGetErrorString(err));
         }
+        /*
         err = cudaDeviceSynchronize();
         if (err != cudaSuccess) {
             fprintf(stderr, "Backward sync error: %s\n", cudaGetErrorString(err));
         }
+        */
 
         return {
             grad_logits,
@@ -582,8 +741,8 @@ torch::autograd::tensor_list fused_ppo_loss(
     torch::Tensor prio,
     torch::Tensor values,
     torch::Tensor returns,
-    float adv_mean,
-    float adv_std,
+    torch::Tensor adv_mean,
+    torch::Tensor adv_std,
     float clip_coef,
     float vf_clip_coef,
     float vf_coef,

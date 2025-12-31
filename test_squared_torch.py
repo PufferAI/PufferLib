@@ -19,8 +19,8 @@ if __name__ == '__main__':
     steps = 10000
     grid_size = 9
     dummy = torch.zeros(5).cuda()
-    indices = torch.arange(num_envs).cuda().int()
-    envs, obs, actions, rewards, terminals = _C.create_squared_environments(num_envs, grid_size, dummy)
+    indices = torch.arange(num_envs).int()
+    envs, obs, actions, rewards, terminals = _C.create_squared_environments(num_envs, grid_size)#, dummy)
     _C.reset_environments(envs, indices)
 
     import time

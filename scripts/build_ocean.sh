@@ -70,7 +70,8 @@ FLAGS=(
     -I./$BOX2D_NAME/include
     -I./$BOX2D_NAME/src
     -I./pufferlib/extensions
-    "$SRC_DIR/cJSON.c" "$SRC_DIR/$ENV.c" -o "$ENV"
+    #"$SRC_DIR/cJSON.c" "$SRC_DIR/$ENV.c" -o "$ENV"
+    "$SRC_DIR/$ENV.c" -o "$ENV"
     $LINK_ARCHIVES
     -lGL
     -lm
@@ -79,6 +80,7 @@ FLAGS=(
     -DPLATFORM_DESKTOP
     # Bite me
     -Werror=incompatible-pointer-types
+    -Werror=return-type
     -Wno-error=incompatible-pointer-types-discards-qualifiers
     -Wno-incompatible-pointer-types-discards-qualifiers
     -Wno-error=array-parameter
