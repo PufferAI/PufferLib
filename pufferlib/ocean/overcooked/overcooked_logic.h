@@ -229,24 +229,15 @@ static void handle_interaction(Overcooked* env, int agent_idx) {
 }
 
 static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
-    // Rule 1: Check if soup has exactly 3 onions -> actually the only rule atm
     int is_correct_recipe = (agent->held_soup_onions == 3);
 
-    // You can add more rules here, e.g.:
-    // int has_no_tomatoes = (agent->held_soup_tomatoes == 0);
-    // int served_quickly = (env->current_step < 100);
-
     if (is_correct_recipe) {
-        // reward the particular agent for serving the dish
         env->rewards[agent_idx] += env->rewards_config.dish_served_agent;
         for (int i = 0; i < env->num_agents; i++) {
-            env->rewards[i] += env->rewards_config.dish_served_whole_team; // reward all agents for serving the dish
+            env->rewards[i] += env->rewards_config.dish_served_whole_team;
         }
-
         env->log.episode_length += agent->ticks_since_reward;
         agent->ticks_since_reward = 0;
-
-        env->log.episode_return += env->rewards_config.dish_served_whole_team;
         env->log.correct_dishes++;
         env->log.score += 1.0f;
         env->log.perf += 1.0f;
@@ -254,9 +245,8 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
     } else {
         env->rewards[agent_idx] += env->rewards_config.wrong_dish_served;
         for (int i = 0; i < env->num_agents; i++) {
-            env->rewards[i] += env->rewards_config.wrong_dish_served; // reward all agents for serving
+            env->rewards[i] += env->rewards_config.wrong_dish_served;
         }
-        env->log.episode_return += env->rewards_config.wrong_dish_served;
         env->log.wrong_dishes++;
     }
     env->log.dishes_served++;

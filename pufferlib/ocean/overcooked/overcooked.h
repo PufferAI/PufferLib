@@ -131,6 +131,10 @@ void c_step(Overcooked* env) {
         }
     }
 
+    for (int i = 0; i < env->num_agents; i++) {
+        env->log.episode_return += env->rewards[i];
+    }
+
     compute_observations(env);
 }
 
