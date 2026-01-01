@@ -37,6 +37,7 @@ typedef struct {
     float episode_return; // Recommended metric: sum of agent rewards over episode
     float episode_length; // Recommended metric: number of steps of agent episode
     // Any extra fields you add here may be exported to Python in binding.c
+    float n_targets;
     float n; // Required as the last field 
 } Log;
 
@@ -64,6 +65,7 @@ typedef struct {
     int agent_y;
     unsigned char* intermediate_rewards;
     float int_r_coeff;
+    int n_targets;
     Client* client;
 } Boxoban;
 
@@ -88,6 +90,7 @@ void add_log(Boxoban* env) {
     env->log.score += env->rewards[0];
     env->log.episode_length += env->tick;
     env->log.episode_return += env->rewards[0];
+    env->log.n_targets += env->n_targets;
     env->log.n++;
 }
 
@@ -259,11 +262,10 @@ void c_step(Boxoban* env) {
         c_reset(env);
         return;
     }
-
+    float num_int_rewards;
+    num_int_rewards = get_intermediate_rewards(env);
     //intermediate rewards
     if (env->int_r_coeff > 0) {
-        float num_int_rewards;
-        num_int_rewards = get_intermediate_rewards(env);
         env->rewards[0] += num_int_rewards * env->int_r_coeff;
     }
 
@@ -271,6 +273,7 @@ void c_step(Boxoban* env) {
 
     //length penalty
     //env->rewards[0] -= 0.1;
+    env->n_targets = num_int_rewards;
 }
 
 Client* c_create(Boxoban* env) {
