@@ -19,8 +19,11 @@ def build_border_grid(size):
     return grid
 
 
-def interior_cells(size):
-    return [(r, c) for r in range(1, size - 1) for c in range(1, size - 1)]
+def interior_cells(size, margin = 0):
+    return [(r, c) 
+            for r in range(1 + margin, size - 1 - margin) 
+            for c in range(1 + margin, size - 1 - margin)
+            ]
 
 
 def is_inside(size, x, y):
@@ -42,19 +45,22 @@ def make_puzzle(size, rng, num_boxes, max_attempts=200):
     if num_boxes < 1:
         raise ValueError("num_boxes must be at least 1")
 
+    agent_choices = interior_cells(size)
     interior = interior_cells(size)
+    confined = interior_cells(size, margin=1)
     needed = num_boxes * 2 + 1  # targets + boxes + agent
-    if needed > len(interior):
+    if needed > len(confined) + (len(agent_choices) - len(confined)):
         raise ValueError(
             f"Grid interior only has {len(interior)} cells, cannot place {needed} objects"
         )
 
     for _ in range(max_attempts):
-        choices = rng.sample(interior, needed)
-        agent_pos = choices[0]
-        target_positions = choices[1 : num_boxes + 1]
-        box_positions = choices[num_boxes + 1 :]
+        agent_pos = rng.choice(agent_choices)
+        confined_samples = rng.sample(confined, num_boxes * 2)
+        target_positions = confined_samples[:num_boxes]
+        box_positions = confined_samples[num_boxes:]
 
+       
         grid = build_border_grid(size)
         for tr, tc in target_positions:
             grid[tr][tc] = TARGET

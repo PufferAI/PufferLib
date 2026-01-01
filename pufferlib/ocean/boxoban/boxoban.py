@@ -8,7 +8,7 @@ from pufferlib.ocean.boxoban.parse_maps import write_bin
 import os
 
 class Boxoban(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=10, buf=None, seed=0, difficulty="easy", max_steps = 500,int_r_coeff = 0.1):
+    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=10, buf=None, seed=0, difficulty="easy", max_steps = 500,int_r_coeff = 0.1, target_loss_pen_coeff = 0.5):
         self.shape = size*size*4 #agents walls boxes targets OHE
 
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
@@ -19,6 +19,7 @@ class Boxoban(pufferlib.PufferEnv):
         self.log_interval = log_interval
         self.max_steps = max_steps
         self.int_r_coeff = int_r_coeff
+        self.target_loss_pen_coeff = target_loss_pen_coeff
 
         #Load maps
         """
@@ -53,7 +54,7 @@ class Boxoban(pufferlib.PufferEnv):
 
         super().__init__(buf)
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
-            self.terminals, self.truncations, num_envs, seed, size=size, max_steps = self.max_steps, int_r_coeff = self.int_r_coeff)
+            self.terminals, self.truncations, num_envs, seed, size=size, max_steps = self.max_steps, int_r_coeff = self.int_r_coeff, target_loss_pen_coeff = self.target_loss_pen_coeff)
  
     def reset(self, seed=0):
         binding.vec_reset(self.c_envs, seed)

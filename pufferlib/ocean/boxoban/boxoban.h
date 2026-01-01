@@ -65,6 +65,7 @@ typedef struct {
     int agent_y;
     unsigned char* intermediate_rewards;
     float int_r_coeff;
+    float target_loss_pen_coeff;
     int n_targets;
     Client* client;
 } Boxoban;
@@ -123,6 +124,7 @@ void c_reset(Boxoban* env) {
             env->observations + TARGET * env->size * env->size,env->size * env->size);
 
     env->tick = 0;
+    env->n_targets = 0;
     get_agent_pos(env);
 }
 
@@ -146,6 +148,16 @@ float get_intermediate_rewards(Boxoban* env) {
     }
     return int_r;
  }
+
+static inline int boxes_on_targets(Boxoban *env) {
+    int total = 0;
+    for (int y = 0; y < env->size; y++) {
+        for (int x = 0; x < env->size; x++) {
+            total += OBS(BOXES, x, y) && OBS(TARGET, x, y);
+        }
+    }
+     return total;
+}
 
 
 
@@ -243,13 +255,31 @@ void c_step(Boxoban* env) {
     env->terminals[0] = 0;
     env->rewards[0] = 0;
 
+    float on_target = boxes_on_targets(env);
+
     //take action
     take_action(env, action);
+
+    float on_target_after = boxes_on_targets(env);
+
+
+    if (on_target_after < on_target) {
+        env->rewards[0] -= env->target_loss_pen_coeff * (on_target - on_target_after);
+    }
+
+    float num_int_rewards = get_intermediate_rewards(env);
+
+    if (num_int_rewards > 0) {
+        env->n_targets += (int)num_int_rewards;
+        if (env->int_r_coeff > 0) {
+            env->rewards[0] += num_int_rewards * env->int_r_coeff;
+        }
+    }
     
     //Terminals
     if (goal(env)) {
         env->terminals[0] = 1;
-        env->rewards[0] = 1.0;
+        env->rewards[0] += 1.0;
         add_log(env);
         c_reset(env);
         return;
@@ -257,23 +287,16 @@ void c_step(Boxoban* env) {
 
     if (env->tick >= env->max_steps) {
         env->terminals[0] = 1;
-        env->rewards[0] = -1;
+        env->rewards[0] -= 1.0;
         add_log(env);
         c_reset(env);
         return;
-    }
-    float num_int_rewards;
-    num_int_rewards = get_intermediate_rewards(env);
-    //intermediate rewards
-    if (env->int_r_coeff > 0) {
-        env->rewards[0] += num_int_rewards * env->int_r_coeff;
     }
 
     //new obs is modified in place
 
     //length penalty
     //env->rewards[0] -= 0.1;
-    env->n_targets = num_int_rewards;
 }
 
 Client* c_create(Boxoban* env) {
@@ -391,4 +414,3 @@ void c_close(Boxoban* env) {
         CloseWindow();
     }
 }
-
