@@ -237,10 +237,10 @@ static void evaluate_dish_served(Overcooked* env, Agent* agent, int agent_idx) {
             env->rewards[i] += env->rewards_config.dish_served_whole_team;
         }
         env->log.episode_length += agent->ticks_since_reward;
+        env->log.score += 25.0 / agent->ticks_since_reward;
+        env->log.perf += 25.0 / agent->ticks_since_reward;
         agent->ticks_since_reward = 0;
         env->log.correct_dishes++;
-        env->log.score += 1.0f;
-        env->log.perf += 1.0f;
         env->log.n++;
     } else {
         env->rewards[agent_idx] += env->rewards_config.wrong_dish_served;
