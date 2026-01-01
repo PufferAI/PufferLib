@@ -1,4 +1,3 @@
-'''A simple sample environment. Use this as a template for your own envs.'''
 
 import gymnasium
 import numpy as np
@@ -9,7 +8,7 @@ from pufferlib.ocean.boxoban.parse_maps import write_bin
 import os
 
 class Boxoban(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=10, buf=None, seed=0, difficulty="medium", max_steps = 500,int_r_coeff = 0):
+    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=10, buf=None, seed=0, difficulty="easy", max_steps = 500,int_r_coeff = 0.1):
         self.shape = size*size*4 #agents walls boxes targets OHE
 
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
@@ -23,7 +22,14 @@ class Boxoban(pufferlib.PufferEnv):
 
         #Load maps
         """
-        if difficulty == "medium":
+        Currently maps are loaded here and this is commented out once done once it maps a maps.bin file for the difficulty laoded
+
+        """
+        
+        if difficulty == "easy":
+            p = "boxoban-levels/easy/train"
+            maps = [os.path.join(p, f) for f in os.listdir(p) if f.endswith('.txt')]
+        elif difficulty == "medium":
             p = "boxoban-levels/medium/train"
             pv = "boxoban-levels/medium/valid"
             maps = [os.path.join(p, f) for f in os.listdir(p) if f.endswith('.txt')]
@@ -41,7 +47,7 @@ class Boxoban(pufferlib.PufferEnv):
         else:
             raise ValueError("Invalid difficulty")
         write_bin(maps, 'boxoban_maps.bin')
-        write_bin(maps_valid, 'boxoban_maps_valid.bin')"""
+        #write_bin(maps_valid, 'boxoban_maps_valid.bin')"""
 
 
 

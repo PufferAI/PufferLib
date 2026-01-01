@@ -270,7 +270,7 @@ void c_step(Boxoban* env) {
     //new obs is modified in place
 
     //length penalty
-    env->rewards[0] -= 0.1;
+    //env->rewards[0] -= 0.1;
 }
 
 Client* c_create(Boxoban* env) {
