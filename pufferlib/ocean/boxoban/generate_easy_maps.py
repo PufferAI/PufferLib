@@ -87,7 +87,7 @@ def main():
     min_boxes = 1
     max_boxes = 4
     seed = 0
-    output_dir = Path("pufferlib/ocean/boxoban/boxoban-levels/easy/train")
+    output_dir = Path("boxoban-levels/easy/train")
 
     rng = random.Random(seed)
     for file_idx in range(num_files):

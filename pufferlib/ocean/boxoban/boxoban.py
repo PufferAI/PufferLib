@@ -25,7 +25,7 @@ class Boxoban(pufferlib.PufferEnv):
         Currently maps are loaded here and this is commented out once done once it maps a maps.bin file for the difficulty laoded
 
         """
-        
+        """
         if difficulty == "easy":
             p = "boxoban-levels/easy/train"
             maps = [os.path.join(p, f) for f in os.listdir(p) if f.endswith('.txt')]
