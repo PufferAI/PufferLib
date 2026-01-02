@@ -18,6 +18,8 @@ Medium and ulfiltered also have validation sets though these aren't used.
 
 ## The first time each difficulty is used a .bin is generated
 
+Play manually using the .c compiled with bash scripts/build_ocean boxoban
+
 <img width="315" height="342" alt="image" src="https://github.com/user-attachments/assets/f5ea4eac-ec64-4444-b54a-b06c9ef2d252" />
 
 
