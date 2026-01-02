@@ -12,6 +12,7 @@ from pufferlib.ocean.boxoban.parse_maps import write_bin
 BOXOBAN_DIR = os.path.dirname(__file__)
 BOXOBAN_LEVELS = os.path.join(BOXOBAN_DIR, "boxoban-levels")
 DIFFICULTY_SOURCES = {
+    "basic": ("basic/train",),
     "easy": ("easy/train",),
     "medium": ("medium/train",),
     "hard": ("hard",),
@@ -51,10 +52,11 @@ def _ensure_bin_exists(difficulty):
     return path
 
 class Boxoban(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=10, buf=None, seed=0, difficulty="easy", max_steps = 500,int_r_coeff = 0.1, target_loss_pen_coeff = 0.5):
+    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=10, buf=None, seed=0, difficulty="basic", max_steps = 500,int_r_coeff = 0.1, target_loss_pen_coeff = 0.5):
         self.shape = size*size*4 #agents walls boxes targets OHE
         difficulty = difficulty.lower()
         self.difficulty = difficulty
+        self._difficulty_stat_key = f"difficulty ({self.difficulty})"
 
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(self.shape,), dtype=np.uint8)
@@ -87,7 +89,9 @@ class Boxoban(pufferlib.PufferEnv):
 
         info = []
         if self.tick % self.log_interval == 0:
-            info.append(binding.vec_log(self.c_envs))
+            log_dict = binding.vec_log(self.c_envs)
+            log_dict[self._difficulty_stat_key] = 1.0
+            info.append(log_dict)
 
         return (self.observations, self.rewards,
             self.terminals, self.truncations, info)

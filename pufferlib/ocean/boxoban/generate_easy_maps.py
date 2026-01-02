@@ -91,9 +91,9 @@ def main():
     size = 10
     num_boxes = None  # set to an int to fix boxes/targets per map
     min_boxes = 1
-    max_boxes = 4
+    max_boxes = 1
     seed = 0
-    output_dir = Path("boxoban-levels/easy/train")
+    output_dir = Path("boxoban-levels/basic/train")
 
     rng = random.Random(seed)
     for file_idx in range(num_files):
