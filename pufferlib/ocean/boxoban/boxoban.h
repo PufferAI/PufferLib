@@ -30,6 +30,91 @@ extern size_t MAP_FILESIZE;
 extern size_t PUZZLE_COUNT;
 extern size_t PUZZLE_SIZE;
 
+#ifdef BOXOBAN_MAPS_IMPLEMENTATION
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+uint8_t *MAP_BASE = NULL;
+size_t MAP_FILESIZE = 0;
+size_t PUZZLE_COUNT = 0;
+size_t PUZZLE_SIZE = 400;
+static char* BOXOBAN_MAP_PATH = NULL;
+
+static void reset_map_cache(void) {
+    if (MAP_BASE != NULL && MAP_BASE != MAP_FAILED && MAP_FILESIZE > 0) {
+        munmap(MAP_BASE, MAP_FILESIZE);
+    }
+    MAP_BASE = NULL;
+    MAP_FILESIZE = 0;
+    PUZZLE_COUNT = 0;
+}
+
+int boxoban_set_map_path(const char *path) {
+    if (path == NULL) {
+        return -1;
+    }
+    if (BOXOBAN_MAP_PATH != NULL && strcmp(BOXOBAN_MAP_PATH, path) == 0) {
+        return 0;
+    }
+
+    char* copied = malloc(strlen(path) + 1);
+    if (copied == NULL) {
+        return -1;
+    }
+    strcpy(copied, path);
+
+    reset_map_cache();
+    free(BOXOBAN_MAP_PATH);
+    BOXOBAN_MAP_PATH = copied;
+    return 0;
+}
+
+static const char* get_default_map_path(void) {
+    const char* env_path = getenv("BOXOBAN_MAP_BIN");
+    if (env_path != NULL) {
+        return env_path;
+    }
+    return "pufferlib/ocean/boxoban/boxoban_maps_basic.bin";
+}
+
+void ensure_map_loaded(void) {
+    if (MAP_BASE != NULL)
+        return;
+
+    if (BOXOBAN_MAP_PATH == NULL) {
+        const char* default_path = get_default_map_path();
+        if (boxoban_set_map_path(default_path) != 0) {
+            fprintf(stderr, "Failed to set default Boxoban map path\n");
+            abort();
+        }
+    }
+
+    int fd = open(BOXOBAN_MAP_PATH, O_RDONLY);
+    if (fd < 0) {
+        perror("open");
+        abort();
+    }
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        perror("fstat");
+        abort();
+    }
+
+    MAP_FILESIZE = st.st_size;
+    PUZZLE_COUNT = MAP_FILESIZE/PUZZLE_SIZE;
+
+    MAP_BASE = mmap(NULL, MAP_FILESIZE, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+
+    if (MAP_BASE == MAP_FAILED) {
+        perror("mmap");
+        abort();
+    }
+}
+#endif
+
 // Required struct. Only use floats!
 typedef struct {
     float perf; // Recommended 0-1 normalized single real number perf metric
@@ -71,6 +156,7 @@ typedef struct {
 } Boxoban;
 
 void ensure_map_loaded(void); //declare from binding.c
+int boxoban_set_map_path(const char *path);
 
 static inline const uint32_t get_random_puzzle_idx(const Boxoban *env) {
     int idx = rand() % PUZZLE_COUNT;
@@ -354,6 +440,53 @@ Texture2D choose_sprite(Client *c, Boxoban *env, int x, int y) {
     return c->floor;
 }
 
+void draw_tile(Boxoban *env, int x, int y) {
+      Client *c = env->client;
+      Rectangle dest = {x * TILE, y * TILE, TILE, TILE};
+
+      // Always lay down the base tile
+      DrawTexturePro(
+          c->floor,
+          (Rectangle){0, 0, (float)c->floor.width, (float)c->floor.height},
+          dest,
+          (Vector2){0, 0},
+          0.0f,
+          WHITE);
+
+      if (OBS(TARGET, x, y)) {
+          DrawTexturePro(
+              c->target,
+              (Rectangle){0, 0, (float)c->target.width, (float)c->target.height},
+              dest,
+              (Vector2){0, 0},
+              0.0f,
+              WHITE);
+      }
+      if (OBS(BOXES, x, y)) {
+          Texture2D tex = OBS(TARGET, x, y) ? c->box_on_target : c->box;
+          DrawTexturePro(
+              tex,
+              (Rectangle){0, 0, (float)tex.width, (float)tex.height},
+              dest,
+              (Vector2){0, 0},
+              0.0f,
+              WHITE);
+      }
+      if (OBS(WALLS, x, y)) {
+          DrawTexturePro(
+              c->wall,
+              (Rectangle){0, 0, (float)c->wall.width, (float)c->wall.height},
+              dest,
+              (Vector2){0, 0},
+              0.0f,
+              WHITE);
+      }
+      if (OBS(AGENT, x, y)) {
+          Rectangle src = {0, 0, c->agent.width / 2.0f, (float)c->agent.height};
+          DrawTexturePro(c->agent, src, dest, (Vector2){0, 0}, 0.0f, WHITE);
+      }
+  }
+
 
 // Required function. Should handle creating the client on first call
 void c_render(Boxoban* env) {
@@ -374,27 +507,11 @@ void c_render(Boxoban* env) {
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});
 
-    
     for (int y = 0; y < env->size; y++) {
-      for (int x = 0; x < env->size; x++) {
-          Texture2D tex = choose_sprite(env->client, env, x, y);
-          Rectangle dest = {x * TILE, y * TILE, TILE, TILE};
-
-          if (tex.id == env->client->agent.id) {
-              Rectangle src = {0, 0, tex.width / 2.0f, (float)tex.height};
-              DrawTexturePro(tex, src, dest, (Vector2){0, 0}, 0.0f, WHITE);
-          } else {
-              DrawTexturePro(
-                  tex,
-                  (Rectangle){0, 0, (float)tex.width, (float)tex.height},
-                  dest,
-                  (Vector2){0, 0},
-                  0.0f,
-                  WHITE
-              );
-          }
-      }
-  }
+        for (int x = 0; x < env->size; x++) {
+            draw_tile(env, x, y);
+        }
+    }
 
 
     EndDrawing();
