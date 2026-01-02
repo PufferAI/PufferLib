@@ -5,6 +5,7 @@ A simple game based on Sokoban where the player must push all boxes on to the ta
 Boxoban-levels contains the levels for the game as .txt files. There are various difficulties chosen by the environment variable 'difficulty' which can be 'basic', 'easy', 'medium', 'hard', 'unfiltered'.
 
 Basic - only externals walls and one box 
+
 Easy - only externals walls and up to 4 boxes
 
 These can both be generated using the generate_easy_maps.py script and settings the internals to required options and output str.
