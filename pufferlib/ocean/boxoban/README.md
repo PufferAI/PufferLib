@@ -1,4 +1,4 @@
-#### BOXBAN
+#### BOXOBAN
 
 A simple game based on Sokoban where the player must push all boxes on to the targets
 
