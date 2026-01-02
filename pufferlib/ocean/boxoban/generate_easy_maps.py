@@ -55,21 +55,28 @@ def make_puzzle(size, rng, num_boxes, max_attempts=200):
         )
 
     for _ in range(max_attempts):
-        agent_pos = rng.choice(agent_choices)
-        confined_samples = rng.sample(confined, num_boxes * 2)
-        target_positions = confined_samples[:num_boxes]
-        box_positions = confined_samples[num_boxes:]
-
-       
         grid = build_border_grid(size)
+
+        target_positions = rng.sample(confined, num_boxes)
         for tr, tc in target_positions:
             grid[tr][tc] = TARGET
+
+        occupied = set(target_positions)
+        box_candidates = [cell for cell in confined if cell not in occupied]
+        if len(box_candidates) < num_boxes:
+            continue
+        box_positions = rng.sample(box_candidates, num_boxes)
         for br, bc in box_positions:
             grid[br][bc] = BOX
+        occupied.update(box_positions)
+
+        agent_candidates = [cell for cell in agent_choices if cell not in occupied]
+        if not agent_candidates:
+            continue
+        ar, ac = rng.choice(agent_candidates)
+        grid[ar][ac] = AGENT
 
         if all(is_pushable(grid, size, bc, br) for br, bc in box_positions):
-            ar, ac = agent_pos
-            grid[ar][ac] = AGENT
             return [''.join(row) for row in grid]
 
     raise RuntimeError("Failed to sample a solvable puzzle after many attempts")
@@ -91,9 +98,9 @@ def main():
     size = 10
     num_boxes = None  # set to an int to fix boxes/targets per map
     min_boxes = 1
-    max_boxes = 1
+    max_boxes = 4
     seed = 0
-    output_dir = Path("boxoban-levels/basic/train")
+    output_dir = Path("boxoban-levels/easy/train")
 
     rng = random.Random(seed)
     for file_idx in range(num_files):
