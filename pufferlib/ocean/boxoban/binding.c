@@ -1,9 +1,9 @@
-#define BOXOBAN_MAPS_IMPLEMENTATION
+#define BOXOBAN_MAPS_IMPLEMENTATION //enables mmap
 #include "boxoban.h"
-
-
 #define Env Boxoban
 #include "../env_binding.h"
+
+//Map stuff
 static int update_map_path(PyObject* kwargs) {
     PyObject* map_path_obj = PyDict_GetItemString(kwargs, "map_path");
     if (map_path_obj == NULL || !PyUnicode_Check(map_path_obj)) {

@@ -1,12 +1,3 @@
-/* Boxoban: a sample single-agent grid env.
- * Use this as a tutorial and template for your first env.
- * See the Target env for a slightly more complex example.
- * Star PufferLib on GitHub to support. It really, really helps!
- */
-
-
-//SWITCH CLEAR AND OBS BOXES CONDITIONS TO CHECK WE ARENT CHECKING OUT OF BOUNDS
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -24,6 +15,11 @@ const unsigned char AGENT = 0;
 const unsigned char WALLS = 1;
 const unsigned char BOXES = 2;
 const unsigned char TARGET = 3;
+
+/*Maps are stored in the binary files with the name indicating the difficulty.
+If the bin doesn't exist it is created on the fly.
+Once the bin exists and MMAP is created and shared between envs (see binding.c)
+*/
 
 extern uint8_t *MAP_BASE;
 extern size_t MAP_FILESIZE;
@@ -122,7 +118,7 @@ typedef struct {
     float episode_return; // Recommended metric: sum of agent rewards over episode
     float episode_length; // Recommended metric: number of steps of agent episode
     // Any extra fields you add here may be exported to Python in binding.c
-    float n_targets;
+    float n_targets; // Number of targets currently boxed
     float n; // Required as the last field 
 } Log;
 
@@ -219,6 +215,8 @@ void move_entity(Boxoban* env,unsigned char entity,int x, int y, int dx, int dy)
     OBS(entity, x + dx, y + dy) = 1;
 }
 
+//NB THIS IS DESTRUCTIVE AND SHOULD BE RUN ONCE PER STEP
+//INTERMEDIATE_REWARD(x, y) is a grid and = 1  means there is reward left to claim
 float get_intermediate_rewards(Boxoban* env) {
     float int_r = 0;
     for (int y = 0; y < env->size; y++) {
@@ -244,9 +242,6 @@ static inline int boxes_on_targets(Boxoban *env) {
     }
      return total;
 }
-
-
-
 
 void take_action(Boxoban* env, int action) {
     int dx = 0;
@@ -343,8 +338,7 @@ void c_step(Boxoban* env) {
 
     float on_target = boxes_on_targets(env);
 
-    //take action
-    take_action(env, action);
+    take_action(env, action); //modifies observations in place
 
     float on_target_after = boxes_on_targets(env);
 
@@ -353,7 +347,7 @@ void c_step(Boxoban* env) {
         env->rewards[0] -= env->target_loss_pen_coeff * (on_target - on_target_after);
     }
 
-    float num_int_rewards = get_intermediate_rewards(env);
+    float num_int_rewards = get_intermediate_rewards(env); //get available rewards for first time box targets
 
     if (num_int_rewards > 0) {
         env->n_targets += (int)num_int_rewards;
@@ -433,7 +427,6 @@ Texture2D choose_sprite(Client *c, Boxoban *env, int x, int y) {
     if (w) return c->wall;
     if (b && t) return c->box_on_target;
     if (b) return c->box;
-    //if (a && t) return c->agent_on_target;
     if (a) return c->agent;
     if (t) return c->target;
 
