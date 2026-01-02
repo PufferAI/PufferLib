@@ -15,6 +15,9 @@ These maps are not easy to generate since they need to be solveable but also int
 
 Medium and ulfiltered also have validation sets though these aren't used.
 
+
+##The first time each difficulty is used a .bin is generated
+
 <img width="315" height="342" alt="image" src="https://github.com/user-attachments/assets/f5ea4eac-ec64-4444-b54a-b06c9ef2d252" />
 
 
