@@ -1,15 +1,60 @@
 
+import os
+
 import gymnasium
 import numpy as np
 
 import pufferlib
 from pufferlib.ocean.boxoban import binding
-from pufferlib.ocean.boxoban.parse_maps import write_bin 
-import os
+from pufferlib.ocean.boxoban.parse_maps import write_bin
+
+# MAP STUFF
+BOXOBAN_DIR = os.path.dirname(__file__)
+BOXOBAN_LEVELS = os.path.join(BOXOBAN_DIR, "boxoban-levels")
+DIFFICULTY_SOURCES = {
+    "easy": ("easy/train",),
+    "medium": ("medium/train",),
+    "hard": ("hard",),
+    "unfiltered": ("unfiltered/train",),
+}
+
+
+def _collect_maps(difficulty):
+    rel_paths = DIFFICULTY_SOURCES.get(difficulty)
+    if rel_paths is None:
+        raise ValueError(f"Invalid difficulty '{difficulty}'")
+
+    maps = []
+    for rel_path in rel_paths:
+        level_dir = os.path.join(BOXOBAN_LEVELS, rel_path)
+        if not os.path.isdir(level_dir):
+            raise FileNotFoundError(f"Missing level directory {level_dir}")
+        for filename in sorted(os.listdir(level_dir)):
+            if filename.endswith(".txt"):
+                maps.append(os.path.join(level_dir, filename))
+
+    if not maps:
+        raise RuntimeError(f"No map files found for difficulty '{difficulty}'")
+    return maps
+
+
+def _bin_path(difficulty):
+    return os.path.join(BOXOBAN_DIR, f"boxoban_maps_{difficulty}.bin")
+
+
+def _ensure_bin_exists(difficulty):
+    path = _bin_path(difficulty)
+    if not os.path.exists(path):
+        maps = _collect_maps(difficulty)
+        print(f"[Boxoban] Generating {len(maps)} maps for '{difficulty}' at {path}")
+        write_bin(maps, path)
+    return path
 
 class Boxoban(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=10, buf=None, seed=0, difficulty="easy", max_steps = 500,int_r_coeff = 0.1, target_loss_pen_coeff = 0.5):
         self.shape = size*size*4 #agents walls boxes targets OHE
+        difficulty = difficulty.lower()
+        self.difficulty = difficulty
 
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(self.shape,), dtype=np.uint8)
@@ -21,40 +66,13 @@ class Boxoban(pufferlib.PufferEnv):
         self.int_r_coeff = int_r_coeff
         self.target_loss_pen_coeff = target_loss_pen_coeff
 
-        #Load maps
-        """
-        Currently maps are loaded here and this is commented out once done once it maps a maps.bin file for the difficulty laoded
-
-        """
-        """
-        if difficulty == "easy":
-            p = "boxoban-levels/easy/train"
-            maps = [os.path.join(p, f) for f in os.listdir(p) if f.endswith('.txt')]
-        elif difficulty == "medium":
-            p = "boxoban-levels/medium/train"
-            pv = "boxoban-levels/medium/valid"
-            maps = [os.path.join(p, f) for f in os.listdir(p) if f.endswith('.txt')]
-            maps_valid = [os.path.join(pv, f) for f in os.listdir(pv) if f.endswith('.txt')]
-        elif difficulty == "hard":
-            p = "boxoban-levels/hard"
-            pv = "boxoban-levels/unfiltered/valid"
-            maps = [os.path.join(p, f) for f in os.listdir(p) if f.endswith('.txt')]
-            maps_valid = [os.path.join(pv, f) for f in os.listdir(pv) if f.endswith('.txt')]
-        elif difficulty == "unfiltered":
-            p = "boxoban-levels/unfiltered"
-            pv = "boxoban-levels/unfiltered/valid"
-            maps = [os.path.join(p, f) for f in os.listdir(p) if f.endswith('.txt')]
-            maps_valid = [os.path.join(pv, f) for f in os.listdir(pv) if f.endswith('.txt')]
-        else:
-            raise ValueError("Invalid difficulty")
-        write_bin(maps, 'boxoban_maps.bin')
-        #write_bin(maps_valid, 'boxoban_maps_valid.bin')"""
+        self.map_path = _ensure_bin_exists(self.difficulty)
 
 
 
         super().__init__(buf)
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
-            self.terminals, self.truncations, num_envs, seed, size=size, max_steps = self.max_steps, int_r_coeff = self.int_r_coeff, target_loss_pen_coeff = self.target_loss_pen_coeff)
+            self.terminals, self.truncations, num_envs, seed, size=size, max_steps = self.max_steps, int_r_coeff = self.int_r_coeff, target_loss_pen_coeff = self.target_loss_pen_coeff, map_path=self.map_path)
  
     def reset(self, seed=0):
         binding.vec_reset(self.c_envs, seed)
