@@ -504,41 +504,6 @@
          obs_panel_y += 10;
      }
  
-     if (env->num_agents > 0) {
-         Agent* agent = &env->agents[0];
-         float* obs = &env->observations[0];
- 
-         int agent_screen_x = agent->x * env->grid_size + env->grid_size/2;
-         int agent_screen_y = agent->y * env->grid_size + grid_offset_y + env->grid_size/2;
- 
-         float dx_onion = obs[8] * env->width;
-         float dy_onion = obs[9] * env->height;
-         if (dx_onion != 0 || dy_onion != 0) {
-             DrawLine(agent_screen_x, agent_screen_y,
-                     agent_screen_x + dx_onion * env->grid_size,
-                     agent_screen_y + dy_onion * env->grid_size,
-                     (Color){0, 200, 0, 100});
-         }
- 
-         float dx_serve = obs[14] * env->width;
-         float dy_serve = obs[15] * env->height;
-         if (dx_serve != 0 || dy_serve != 0) {
-             DrawLine(agent_screen_x, agent_screen_y,
-                     agent_screen_x + dx_serve * env->grid_size,
-                     agent_screen_y + dy_serve * env->grid_size,
-                     (Color){0, 0, 200, 100});
-         }
- 
-         float dx_pot = obs[18] * env->width;
-         float dy_pot = obs[19] * env->height;
-         if (dx_pot != 0 || dy_pot != 0) {
-             DrawLine(agent_screen_x, agent_screen_y,
-                     agent_screen_x + dx_pot * env->grid_size,
-                     agent_screen_y + dy_pot * env->grid_size,
-                     (Color){200, 0, 0, 100});
-         }
-     }
- 
      EndDrawing();
  }
  
