@@ -236,8 +236,33 @@ void c_render(Overcooked* env) {
                                8, GREEN);
                     }
                     else if (pot->cooking_state == NOT_COOKING) {
-                        cooking_texture = is_onion_soup ? &env->client->soup_onion_cooking_1 :
-                                                          &env->client->soup_tomato_cooking_1;
+                        // Draw individual ingredients when not cooking
+                        int onion_size = env->grid_size / 4;
+                        int base_x = x * env->grid_size + env->grid_size / 4;
+                        int base_y = y * env->grid_size + grid_offset_y + env->grid_size / 4;
+
+                        for (int ing = 0; ing < pot->ingredient_count && ing < MAX_INGREDIENTS; ing++) {
+                            Texture2D* ing_texture = NULL;
+                            if (pot->ingredient_types[ing] == ONION) {
+                                ing_texture = &env->client->onion;
+                            } else if (pot->ingredient_types[ing] == TOMATO) {
+                                ing_texture = &env->client->tomato;
+                            }
+
+                            if (ing_texture && ing_texture->id != 0) {
+                                int offset_x = (ing % 2) * (onion_size + 2);
+                                int offset_y = (ing / 2) * (onion_size + 2);
+                                Rectangle ing_dest = {
+                                    base_x + offset_x,
+                                    base_y + offset_y,
+                                    onion_size,
+                                    onion_size
+                                };
+                                DrawTexturePro(*ing_texture,
+                                    (Rectangle){0, 0, ing_texture->width, ing_texture->height},
+                                    ing_dest, (Vector2){0, 0}, 0, WHITE);
+                            }
+                        }
                     }
 
                     if (cooking_texture && cooking_texture->id != 0) {
