@@ -204,17 +204,17 @@ void c_render(Overcooked* env) {
                     if (pot->cooking_state == COOKING) {
                         float progress = (float)pot->cooking_progress / COOKING_TIME;
                         if (is_onion_soup) {
-                            if (progress < 0.33f) {
+                            if (pot->ingredient_count <= 1) {
                                 cooking_texture = &env->client->soup_onion_cooking_1;
-                            } else if (progress < 0.66f) {
+                            } else if (pot->ingredient_count == 2) {
                                 cooking_texture = &env->client->soup_onion_cooking_2;
                             } else {
                                 cooking_texture = &env->client->soup_onion_cooking_3;
                             }
                         } else {
-                            if (progress < 0.33f) {
+                            if (pot->ingredient_count <= 1) {
                                 cooking_texture = &env->client->soup_tomato_cooking_1;
-                            } else if (progress < 0.66f) {
+                            } else if (pot->ingredient_count == 2) {
                                 cooking_texture = &env->client->soup_tomato_cooking_2;
                             } else {
                                 cooking_texture = &env->client->soup_tomato_cooking_3;
@@ -237,9 +237,9 @@ void c_render(Overcooked* env) {
                     }
                     else if (pot->cooking_state == NOT_COOKING) {
                         // Draw individual ingredients when not cooking
-                        int onion_size = env->grid_size / 4;
-                        int base_x = x * env->grid_size + env->grid_size / 4;
-                        int base_y = y * env->grid_size + grid_offset_y + env->grid_size / 4;
+                        int onion_size = env->grid_size / 3;
+                        int base_x = x * env->grid_size + env->grid_size / 3;
+                        int base_y = y * env->grid_size + grid_offset_y + env->grid_size / 3;
 
                         for (int ing = 0; ing < pot->ingredient_count && ing < MAX_INGREDIENTS; ing++) {
                             Texture2D* ing_texture = NULL;
