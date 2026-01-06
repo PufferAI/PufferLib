@@ -4,8 +4,9 @@
 
 void demo() {
     // printf("OBSERVATIONS_COUNT: %d\n", OBSERVATIONS_COUNT);
-    // Weights* weights = load_weights("resources/pacman/pacman_weights.bin", 2253317);
-    // LinearLSTM* net = make_linearlstm(weights, 1, OBSERVATIONS_COUNT, 4);
+    Weights* weights = load_weights("resources/pacman/pacman_weights.bin", 170117);
+    int logit_sizes[1] = {4};
+    LinearLSTM* net = make_linearlstm(weights, 1, OBSERVATIONS_COUNT, logit_sizes, 1);
 
     PacmanEnv env = {
         .randomize_starting_position = false,
@@ -34,7 +35,7 @@ void demo() {
         }
 
         if (!human_control) {
-            // forward_linearlstm(net, env.observations, env.actions);
+            forward_linearlstm(net, env.observations, env.actions);
         }
 
         c_step(&env);
@@ -46,8 +47,8 @@ void demo() {
             c_render(&env);
         }
     }
-    // free_linearlstm(net);
-    // free(weights);
+    free_linearlstm(net);
+    free(weights);
     free_allocated(&env);
     close_client(client);
 }
@@ -71,7 +72,7 @@ void performance_test() {
 }
 
 int main() {
-    performance_test();
-    // demo();
+    //performance_test();
+    demo();
     return 0;
 }

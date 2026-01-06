@@ -15,7 +15,7 @@ PLAYER_OBS_N = 27
 
 class Rware(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, report_interval=1,
-            width=1280, height=1024,
+            width=1280, height=640,
             num_agents=4,
             map_choice=1,
             num_requested_shelves=4,

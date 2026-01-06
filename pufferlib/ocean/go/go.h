@@ -720,7 +720,6 @@ const Color PUFF_BACKGROUND2 = (Color){18, 72, 72, 255};
 struct Client {
     float width;
     float height;
-    Texture2D puffers;
 };
 
 Client* make_client(int width, int height) {
@@ -729,7 +728,6 @@ Client* make_client(int width, int height) {
     client->height = height;
     InitWindow(width, height, "PufferLib Ray Go");
     SetTargetFPS(60);
-    client->puffers = LoadTexture("resources/puffers_128.png");
     return client;
 }
 

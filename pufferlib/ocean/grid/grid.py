@@ -47,7 +47,8 @@ class Grid(pufferlib.PufferEnv):
         binding.vec_render(self.c_envs, overlay)
 
     def close(self):
-        binding.vec_close(self.c_envs)
+        pass
+        #binding.vec_close(self.c_envs)
 
 def test_performance(timeout=10, atn_cache=1024):
     env = CGrid(num_envs=1000)

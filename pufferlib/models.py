@@ -38,18 +38,21 @@ class Default(nn.Module):
             input_size = int(sum(np.prod(v.shape) for v in env.env.observation_space.values()))
             self.encoder = nn.Linear(input_size, self.hidden_size)
         else:
+            num_obs = np.prod(env.single_observation_space.shape)
             self.encoder = torch.nn.Sequential(
-                nn.Linear(np.prod(env.single_observation_space.shape), hidden_size),
+                pufferlib.pytorch.layer_init(nn.Linear(num_obs, hidden_size)),
                 nn.GELU(),
             )
-
+            
         if self.is_multidiscrete:
             self.action_nvec = tuple(env.single_action_space.nvec)
+            num_atns = sum(self.action_nvec)
             self.decoder = pufferlib.pytorch.layer_init(
-                    nn.Linear(hidden_size, sum(self.action_nvec)), std=0.01)
+                    nn.Linear(hidden_size, num_atns), std=0.01)
         elif not self.is_continuous:
+            num_atns = env.single_action_space.n
             self.decoder = pufferlib.pytorch.layer_init(
-                nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
+                nn.Linear(hidden_size, num_atns), std=0.01)
         else:
             self.decoder_mean = pufferlib.pytorch.layer_init(
                 nn.Linear(hidden_size, env.single_action_space.shape[0]), std=0.01)
@@ -59,13 +62,13 @@ class Default(nn.Module):
         self.value = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, 1), std=1)
 
-    def forward(self, observations, state=None):
+    def forward_eval(self, observations, state=None):
         hidden = self.encode_observations(observations, state=state)
         logits, values = self.decode_actions(hidden)
         return logits, values
 
-    def forward_train(self, observations, state=None):
-        return self.forward(observations, state)
+    def forward(self, observations, state=None):
+        return self.forward_eval(observations, state)
 
     def encode_observations(self, observations, state=None):
         '''Encodes a batch of observations into hidden states. Assumes
@@ -127,7 +130,7 @@ class LSTMWrapper(nn.Module):
         #self.pre_layernorm = nn.LayerNorm(hidden_size)
         #self.post_layernorm = nn.LayerNorm(hidden_size)
 
-    def forward(self, observations, state):
+    def forward_eval(self, observations, state):
         '''Forward function for inference. 3x faster than using LSTM directly'''
         hidden = self.policy.encode_observations(observations, state=state)
         h = state['lstm_h']
@@ -149,7 +152,7 @@ class LSTMWrapper(nn.Module):
         logits, values = self.policy.decode_actions(hidden)
         return logits, values
 
-    def forward_train(self, observations, state):
+    def forward(self, observations, state):
         '''Forward function for training. Uses LSTM for fast time-batching'''
         x = observations
         lstm_h = state['lstm_h']
@@ -182,6 +185,8 @@ class LSTMWrapper(nn.Module):
         hidden = hidden.transpose(0, 1)
         #hidden = self.pre_layernorm(hidden)
         hidden, (lstm_h, lstm_c) = self.lstm.forward(hidden, lstm_state)
+        hidden = hidden.float()
+ 
         #hidden = self.post_layernorm(hidden)
         hidden = hidden.transpose(0, 1)
 

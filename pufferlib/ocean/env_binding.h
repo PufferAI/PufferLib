@@ -557,6 +557,7 @@ static int assign_to_dict(PyObject* dict, char* key, float value) {
         PyErr_SetString(PyExc_TypeError, "Failed to set log value");
         return 1;
     }
+    Py_DECREF(v);
     return 0;
 }
 

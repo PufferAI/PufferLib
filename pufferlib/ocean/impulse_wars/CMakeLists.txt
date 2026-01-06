@@ -61,6 +61,9 @@ else()
 	if(CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT DEFINED EMSCRIPTEN)
 		add_link_options("-fuse-ld=lld")
 	endif()
+
+	# add_compile_options("-pg")
+	# add_link_options("-pg")
 endif()
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -82,7 +85,7 @@ FetchContent_MakeAvailable(raylib)
 # maybe due to install prefix schenanigans?
 FetchContent_Declare(
 	box2d
-	URL https://github.com/capnspacehook/box2d/archive/7bdfaf243700aa4b2b82f5eb13f95359966fa5da.zip # 3.1
+	URL https://github.com/capnspacehook/box2d/archive/df25d747be0ab2fd9425eece022d2ec897c2028d.zip
 )
 set(BOX2D_ENABLE_SIMD ON CACHE BOOL "Enable SIMD math (faster)" FORCE)
 set(BOX2D_AVX2 ON CACHE BOOL "Enable AVX2 (faster)" FORCE)
@@ -95,8 +98,8 @@ target_compile_options(box2d PRIVATE "-ffp-contract=fast")
 function(configure_target target_name)
 	target_include_directories(
 		${target_name} PRIVATE
-		"${CMAKE_CURRENT_SOURCE_DIR}/src"
-		"${CMAKE_CURRENT_SOURCE_DIR}/src/include"
+		"${CMAKE_CURRENT_SOURCE_DIR}"
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
 	)
 
 	# Mark box2d as a system include directory to suppress warnings from it
@@ -105,7 +108,7 @@ function(configure_target target_name)
 	target_link_libraries(${target_name} PRIVATE raylib box2d)
 
 	target_compile_options(${target_name} PRIVATE
-		"-Wall" "-Wextra" "-Wpedantic"
+		"-Werror" "-Wall" "-Wextra" "-Wpedantic"
 		"-Wno-implicit-fallthrough" "-Wno-variadic-macros" "-Wno-strict-prototypes" "-Wno-gnu-statement-expression"
 	)
 endfunction()
@@ -117,8 +120,7 @@ if(DEFINED BUILD_PYTHON_MODULE)
 		REQUIRED
 	)
 
-	# TODO: rename to binding.c
-	python_add_library(binding MODULE my_binding.c WITH_SOABI)
+	python_add_library(binding MODULE binding.c WITH_SOABI)
 
 	target_include_directories(binding PRIVATE
     	${Python_NumPy_INCLUDE_DIRS}
@@ -128,9 +130,9 @@ if(DEFINED BUILD_PYTHON_MODULE)
 
 	install(TARGETS binding DESTINATION .)
 elseif(DEFINED BUILD_DEMO)
-	add_executable(demo "${CMAKE_CURRENT_SOURCE_DIR}/src/demo.c")
+	add_executable(demo "${CMAKE_CURRENT_SOURCE_DIR}/impulse_wars.c")
 	configure_target(demo)
 elseif(DEFINED BUILD_BENCHMARK)
-	add_executable(benchmark "${CMAKE_CURRENT_SOURCE_DIR}/src/benchmark.c")
+	add_executable(benchmark "${CMAKE_CURRENT_SOURCE_DIR}/benchmark.c")
 	configure_target(benchmark)
 endif()

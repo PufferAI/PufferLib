@@ -1,13 +1,19 @@
-__version__ = '2.0.6'
+__version__ = 3.0
 
 import os
-import sys
+path = __path__[0]
+link_to = os.path.join(path, 'resources')
+try:
+    os.symlink(link_to, 'resources')
+except FileExistsError:
+    pass
 
 # Silence noisy dependencies
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Silence noisy packages
+import sys
 original_stdout = sys.stdout
 original_stderr = sys.stderr
 sys.stdout = open(os.devnull, 'w')

@@ -18,8 +18,9 @@ int demo() {
     allocate_csnake(&env);
     c_reset(&env);
 
-    Weights* weights = load_weights("resources/snake_weights.bin", 148357);
-    LinearLSTM* net = make_linearlstm(weights, env.num_snakes, env.obs_size, 4);
+    Weights* weights = load_weights("resources/snake/snake_weights.bin", 256773);
+    int logit_sizes[] = {4};
+    LinearLSTM* net = make_linearlstm(weights, env.num_snakes, 968, logit_sizes, 1);
     env.client = make_client(2, env.width, env.height);
 
     while (!WindowShouldClose()) {
@@ -30,8 +31,10 @@ int demo() {
             if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 2;
             if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 3;
         } else {
-            for (int i = 0; i < env.num_snakes*env.obs_size; i++) {
-                net->obs[i] = (float)env.observations[i];
+            memset(net->obs, 0, env.num_snakes*968*sizeof(float));
+            for (int i = 0; i < env.num_snakes*121; i++) {
+                int obs = env.observations[i];
+                net->obs[i*8 + obs] = 1.0f;
             }
             forward_linearlstm(net, net->obs, env.actions);
         }

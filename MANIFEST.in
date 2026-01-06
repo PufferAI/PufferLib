@@ -11,4 +11,9 @@ recursive-exclude wandb *
 recursive-exclude tests *
 include raylib-5.5_linux_amd64/lib/libraylib.a
 include raylib-5.5_macos/lib/libraylib.a
+include box2d-linux-amd64/libbox2d.a
+recursive-exclude box2d-web *
 recursive-exclude raylib-5.5_webassembly * 
+recursive-exclude pufferlib/ocean/impulse_wars/debug* *
+recursive-exclude pufferlib/ocean/impulse_wars/release* *
+recursive-exclude box2d* *

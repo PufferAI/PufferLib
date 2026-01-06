@@ -64,8 +64,8 @@ void c_render(Template* env) {
     }
 
     DrawText("Go to the red square!", 20, 20, 20, PUFF_WHITE);
-    DrawRectangle(540 - 32 + 64*env->goal, 360 - 32, 64, 64, PUFF_CYAN);
-    DrawRectangle(540 - 32 + 64*env->x, 360 - 32, 64, 64, PUFF_RED);
+    DrawRectangle(540 - 32 + 64*env->goal, 360 - 32, 64, 64, PUFF_RED);
+    DrawRectangle(540 - 32 + 64*env->x, 360 - 32, 64, 64, PUFF_CYAN);
 
     BeginDrawing();
     ClearBackground(PUFF_BACKGROUND);

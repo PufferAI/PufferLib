@@ -10,6 +10,7 @@ environments=(
     "puffer_go"
     "puffer_tactics"
     "puffer_moba"
+    "puffer_whisker_racer"
 )
 
 for env in "${environments[@]}"; do

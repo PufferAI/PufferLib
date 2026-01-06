@@ -4,7 +4,6 @@
 
 namespace pufferlib {
 
-static const int max_horizon = 256;
 __host__ __device__ void puff_advantage_row_cuda(float* values, float* rewards, float* dones,
         float* importance, float* advantages, float gamma, float lambda,
         float rho_clip, float c_clip, int horizon) {
@@ -14,7 +13,6 @@ __host__ __device__ void puff_advantage_row_cuda(float* values, float* rewards, 
         float nextnonterminal = 1.0 - dones[t_next];
         float rho_t = fminf(importance[t], rho_clip);
         float c_t = fminf(importance[t], c_clip);
-        // TODO: t_next works and t doesn't. Check original formula
         float delta = rho_t*(rewards[t_next] + gamma*values[t_next]*nextnonterminal - values[t]);
         lastpufferlam = delta + gamma*lambda*c_t*lastpufferlam*nextnonterminal;
         advantages[t] = lastpufferlam;
@@ -33,7 +31,6 @@ void vtrace_check_cuda(torch::Tensor values, torch::Tensor rewards,
         TORCH_CHECK(t.size(0) == num_steps, "First dimension must match num_steps");
         TORCH_CHECK(t.size(1) == horizon, "Second dimension must match horizon");
         TORCH_CHECK(t.dtype() == torch::kFloat32, "All tensors must be float32");
-        assert(horizon <= max_horizon);
         if (!t.is_contiguous()) {
             t.contiguous();
         }
@@ -45,6 +42,9 @@ __global__ void puff_advantage_kernel(float* values, float* rewards,
         float* dones, float* importance, float* advantages, float gamma,
         float lambda, float rho_clip, float c_clip, int num_steps, int horizon) {
     int row = blockIdx.x*blockDim.x + threadIdx.x;
+    if (row >= num_steps) {
+        return;
+    }
     int offset = row*horizon;
     puff_advantage_row_cuda(values + offset, rewards + offset, dones + offset,
         importance + offset, advantages + offset, gamma, lambda, rho_clip, c_clip, horizon);
@@ -57,14 +57,9 @@ void compute_puff_advantage_cuda(torch::Tensor values, torch::Tensor rewards,
     int horizon = values.size(1);
     vtrace_check_cuda(values, rewards, dones, importance, advantages, num_steps, horizon);
     TORCH_CHECK(values.is_cuda(), "All tensors must be on GPU");
-    assert(horizon <= max_horizon);
 
     int threads_per_block = 256;
-    if (threads_per_block > num_steps) {
-        threads_per_block = 2*(num_steps/2);
-    }
     int blocks = (num_steps + threads_per_block - 1) / threads_per_block;
-    assert(num_steps % threads_per_block == 0);
 
     puff_advantage_kernel<<<blocks, threads_per_block>>>(
         values.data_ptr<float>(),

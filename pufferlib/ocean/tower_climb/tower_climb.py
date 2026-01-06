@@ -51,7 +51,8 @@ class TowerClimb(pufferlib.PufferEnv):
         binding.vec_render(self.c_envs, 0)
         
     def close(self):
-        binding.vec_close(self.c_envs)
+        #binding.vec_close(self.c_envs)
+        pass
 
 def test_performance(timeout=10, atn_cache=1024):
     num_envs=1000;

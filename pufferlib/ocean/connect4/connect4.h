@@ -320,7 +320,7 @@ Client* make_client() {
     InitWindow(WIDTH, HEIGHT, "PufferLib Ray Connect4");
     SetTargetFPS(60);
 
-    client->puffers = LoadTexture("resources/puffers_128.png");
+    client->puffers = LoadTexture("resources/shared/puffers_128.png");
     return client;
 }
 

@@ -24,5 +24,5 @@ void main()
     fragPosition = vertexPosition;
 
     // Calculate final vertex position
-    gl_Position = mvp*vec4(vertexPosition + vec3(0.0, 2.0, 0.0), 1.0);
+    gl_Position = mvp*vec4(vertexPosition + vec3(0.0, 0.0, 0.0), 1.0);
 }

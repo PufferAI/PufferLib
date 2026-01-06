@@ -19,11 +19,13 @@
 
 #version 100
 
+precision mediump float;
+
 #define BLOOM_DISABLED 0
 #define BLOOM_ADDITIVE 1
 #define BLOOM_SOFT_LIGHT 2
 
-noperspective in vec2 fragTexCoord;
+varying vec2 fragTexCoord;
 
 uniform sampler2D uTexColor;
 uniform sampler2D uTexBloomBlur;
@@ -31,15 +33,13 @@ uniform sampler2D uTexBloomBlur;
 uniform lowp int uBloomMode;
 uniform float uBloomIntensity;
 
-out vec4 fragColor;
-
 void main()
 {
     // Sampling scene color texture
-    vec3 result = texture(uTexColor, fragTexCoord).rgb;
+    vec3 result = texture2D(uTexColor, fragTexCoord).rgb;
 
     // Apply bloom
-    vec3 bloom = texture(uTexBloomBlur, fragTexCoord).rgb;
+    vec3 bloom = texture2D(uTexBloomBlur, fragTexCoord).rgb;
     bloom *= uBloomIntensity;
 
     if (uBloomMode == BLOOM_SOFT_LIGHT) {
@@ -50,5 +50,5 @@ void main()
     }
 
     // Final color output
-    fragColor = vec4(result, 1.0);
+    gl_FragColor = vec4(result, 1.0);
 }

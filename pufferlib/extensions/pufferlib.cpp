@@ -25,7 +25,6 @@ extern "C" {
 
 namespace pufferlib {
 
-static const int max_horizon = 256;
 void puff_advantage_row(float* values, float* rewards, float* dones,
         float* importance, float* advantages, float gamma, float lambda,
         float rho_clip, float c_clip, int horizon) {
@@ -53,7 +52,6 @@ void vtrace_check(torch::Tensor values, torch::Tensor rewards,
         TORCH_CHECK(t.size(0) == num_steps, "First dimension must match num_steps");
         TORCH_CHECK(t.size(1) == horizon, "Second dimension must match horizon");
         TORCH_CHECK(t.dtype() == torch::kFloat32, "All tensors must be float32");
-        assert(horizon <= max_horizon);
         if (!t.is_contiguous()) {
             t.contiguous();
         }

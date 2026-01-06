@@ -1,20 +1,6 @@
-#TODO:
-# --no-build-isolation for 5090
-# Make c and torch compile at the same time
-# CUDA_VISIBLE_DEVICES=None LD_PRELOAD=$(gcc -print-file-name=libasan.so) python3.12 -m pufferlib.clean_pufferl eval --train.device cpu
-'''
-Pain points for docs:
-    - Build in C first
-    - Make sure obs types match in C and python
-    - Getting obs and action spaces and types correct
-    - Double check obs are not zero
-    - Correct reset behavior
-    - Make sure rewards look correct
-    - don't forget params/init in binding
-    - Use debug mode to catch segaults
-    - TODO: Add check on num agents vs obs shape!!
-'''
-
+# Debug command:
+#    DEBUG=1 python setup.py build_ext --inplace --force
+#    CUDA_VISIBLE_DEVICES=None LD_PRELOAD=$(gcc -print-file-name=libasan.so) python3.12 -m pufferlib.clean_pufferl eval --train.device cpu
 
 from setuptools import find_packages, find_namespace_packages, setup, Extension
 import numpy
@@ -33,13 +19,17 @@ from torch.utils.cpp_extension import (
     CUDAExtension,
     BuildExtension,
     CUDA_HOME,
+    ROCM_HOME
 )
 
-
-VERSION = "2.0.6"
+# build cuda extension if torch can find CUDA or HIP/ROCM in the system
+# may require `uv pip install --no-build-isolation` or `python setup.py build_ext --inplace`
+BUID_CUDA_EXT = bool(CUDA_HOME or ROCM_HOME)
 
 # Build with DEBUG=1 to enable debug symbols
 DEBUG = os.getenv("DEBUG", "0") == "1"
+NO_OCEAN = os.getenv("NO_OCEAN", "0") == "1"
+NO_TRAIN = os.getenv("NO_TRAIN", "0") == "1"
 
 # Build raylib for your platform
 RAYLIB_URL = 'https://github.com/raysan5/raylib/releases/download/5.5/'
@@ -48,6 +38,7 @@ RLIGHTS_URL = 'https://raw.githubusercontent.com/raysan5/raylib/refs/heads/maste
 
 def download_raylib(platform, ext):
     if not os.path.exists(platform):
+        print(f'Downloading Raylib {platform}')
         urllib.request.urlretrieve(RAYLIB_URL + platform + ext, platform + ext)
         if ext == '.zip':
             with zipfile.ZipFile(platform + ext, 'r') as zip_ref:
@@ -59,7 +50,27 @@ def download_raylib(platform, ext):
         os.remove(platform + ext)
         urllib.request.urlretrieve(RLIGHTS_URL, platform + '/include/rlights.h')
 
-download_raylib('raylib-5.5_webassembly', '.zip')
+if not NO_OCEAN:
+    download_raylib('raylib-5.5_webassembly', '.zip')
+    download_raylib(RAYLIB_NAME, '.tar.gz')
+
+BOX2D_URL = 'https://github.com/capnspacehook/box2d/releases/latest/download/'
+BOX2D_NAME = 'box2d-macos-arm64' if platform.system() == "Darwin" else 'box2d-linux-amd64'
+
+def download_box2d(platform):
+    if not os.path.exists(platform):
+        ext = ".tar.gz"
+
+        print(f'Downloading Box2D {platform}')
+        urllib.request.urlretrieve(BOX2D_URL + platform + ext, platform + ext)
+        with tarfile.open(platform + ext, 'r') as tar_ref:
+            tar_ref.extractall()
+
+        os.remove(platform + ext)
+
+if not NO_OCEAN:
+    download_box2d('box2d-web')
+    download_box2d(BOX2D_NAME)
 
 # Shared compile args for all platforms
 extra_compile_args = [
@@ -118,7 +129,6 @@ if system == 'Linux':
     extra_link_args += [
         '-Bsymbolic-functions',
     ]
-    download_raylib('raylib-5.5_linux_amd64', '.tar.gz')
 elif system == 'Darwin':
     extra_compile_args += [
         '-Wno-error=int-conversion',
@@ -130,7 +140,6 @@ elif system == 'Darwin':
         '-framework', 'OpenGL',
         '-framework', 'IOKit',
     ]
-    download_raylib('raylib-5.5_macos', '.tar.gz')
 else:
     raise ValueError(f'Unsupported system: {system}')
 
@@ -143,218 +152,6 @@ else:
 # - 0.21 is the most stable version
 # - <= 0.20 is missing dict methods for gym.spaces.Dict
 # - 0.18-0.21 require setuptools<=65.5.0
-
-GYMNASIUM_VERSION = '0.29.1'
-GYM_VERSION = '0.23'
-PETTINGZOO_VERSION = '1.24.1'
-
-environments = {
-    'avalon': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'avalon-rl==1.0.0',
-    ],
-    'atari': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium[accept-rom-license]=={GYMNASIUM_VERSION}',
-        'ale_py==0.9.0',
-    ],
-    'box2d': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium[box2d]=={GYMNASIUM_VERSION}',
-        'swig==4.1.1',
-    ],
-    'bsuite': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'bsuite==0.3.5',
-    ],
-    'butterfly': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        f'pettingzoo[butterfly]=={PETTINGZOO_VERSION}',
-    ],
-    'classic_control': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-    ],
-    'crafter': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'crafter==1.8.3',
-    ],
-    'craftax': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'craftax',
-    ],
-    'dm_control': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'dm_control==1.0.11',
-    ],
-    'dm_lab': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'gym_deepmindlab==0.1.2',
-        'dm_env==1.6',
-    ],
-    'griddly': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'griddly==1.6.7',
-        'imageio',
-    ],
-    'kinetix': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'kinetix-env',
-    ],
-    'magent': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'pettingzoo==1.19.0',
-        'magent==0.2.4',
-        # The Magent2 package is broken for now
-        #'magent2==0.3.2',
-    ],
-    'metta': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'omegaconf',
-        'hydra-core',
-        'duckdb',
-    ],
-    'microrts': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'ffmpeg==1.4',
-        'gym_microrts==0.3.2',
-    ],
-    'minerl': [
-        'gym==0.17.0',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        #'git+https://github.com/minerllabs/minerl'
-        # Compatiblity warning with urllib3 and chardet
-        #'requests==2.31.0',
-    ],
-    'minigrid': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'minigrid==2.3.1',
-    ],
-    'minihack': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'minihack==0.1.5',
-    ],
-    'mujoco': [
-        f'gymnasium[mujoco]==1.0.0',
-        'moviepy',
-    ],
-    'nethack': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'nle==0.9.1',
-    ],
-    'nmmo': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        f'pettingzoo=={PETTINGZOO_VERSION}',
-        'nmmo>=2.1',
-    ],
-    'open_spiel': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'open_spiel==1.3',
-        'pettingzoo==1.19.0',
-    ],
-    'pokemon_red': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'pokegym>=0.2.0',
-        'einops==0.6.1',
-        'matplotlib',
-        'scikit-image',
-        'pyboy<2.0.0',
-        'hnswlib==0.7.0',
-        'mediapy',
-        'pandas==2.0.2',
-        'pettingzoo',
-        'websockets',
-    ],
-    'procgen': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'procgen-mirror==0.10.7', # Procgen mirror for 3.11 and 3.12 support
-        # Note: You need glfw==2.7 after installing for some torch versions
-    ],
-    #'smac': [
-    #    'git+https://github.com/oxwhirl/smac.git',
-    #],
-    #'stable-retro': [
-    #    'git+https://github.com/Farama-Foundation/stable-retro.git',
-    #]
-    'slimevolley': [
-        f'gym=={GYM_VERSION}',
-        f'gymnasium=={GYMNASIUM_VERSION}',
-        'slimevolley==0.1.0',
-    ],
-    'vizdoom': [
-        'vizdoom==1.2.3',
-    ],
-}
-
-docs = [
-    'sphinx==5.0.0',
-    'sphinx-rtd-theme==0.5.1',
-    'sphinxcontrib-youtube==1.0.1',
-    'sphinx-rtd-theme==0.5.1',
-    'sphinx-design==0.4.1',
-    'furo==2023.3.27',
-]
-
-train = [
-    'stable_baselines3==2.1.0',
-    'tensorboard==2.11.2',
-    'torch',
-    'tyro==0.8.6',
-    'wandb==0.19.1',
-    'scipy',
-    'pyro-ppl',
-    'neptune',
-    'heavyball',
-]
-
-ray = [
-    'ray==2.23.0',
-]
-
-# These are the environments that PufferLib has made
-# compatible with the latest version of Gym/Gymnasium/PettingZoo
-# They are included in PufferTank as a default heavy install
-# We force updated versions of Gym/Gymnasium/PettingZoo here to
-# ensure that users do not have issues with conflicting versions
-# when switching to incompatible environments
-common = train + [environments[env] for env in [
-    'atari',
-    #'box2d',
-    'bsuite',
-    #'butterfly',
-    'classic_control',
-    'crafter',
-    'dm_control',
-    'dm_lab',
-    'griddly',
-    'microrts',
-    'minigrid',
-    'minihack',
-    'nethack',
-    'nmmo',
-    'pokemon_red',
-    'procgen',
-    'vizdoom',
-]]
 
 # Extensions 
 class BuildExt(build_ext):
@@ -380,8 +177,8 @@ class TorchBuildExt(cpp_extension.BuildExtension):
         self.extensions = [e for e in self.extensions if e.name == "pufferlib._C"]
         super().run()
 
+INCLUDE = [f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src']
 RAYLIB_A = f'{RAYLIB_NAME}/lib/libraylib.a'
-INCLUDE = [numpy.get_include(), 'raylib/include']
 extension_kwargs = dict(
     include_dirs=INCLUDE,
     extra_compile_args=extra_compile_args,
@@ -389,56 +186,76 @@ extension_kwargs = dict(
     extra_objects=[RAYLIB_A],
 )
 
-# Put C env names here. PufferLib will look for
-# pufferlib/ocean/<name>/binding.c
-c_extensions_names = [
-    'gpudrive',
-    'squared',
-    'pong',
-    'boids',
-    'breakout',
-    'enduro',
-    'blastar',
-    'grid',
-    'nmmo3',
-    'tactical',
-    'connect4',
-    'go',
-    'cartpole'
-]
+# Find C extensions
+c_extensions = []
+if not NO_OCEAN:
+    c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
+    c_extensions = [
+        Extension(
+            path.rstrip('.c').replace('/', '.'),
+            sources=[path],
+            **extension_kwargs,
+        )
+        for path in c_extension_paths if 'matsci' not in path
+    ]
+    c_extension_paths = [os.path.join(*path.split('/')[:-1]) for path in c_extension_paths]
 
-# TODO: Include other C files so rebuild is auto?
-c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
-c_extensions = [
-    Extension(
-        path.rstrip('.c').replace('/', '.'),
-        sources=[path],
-        **extension_kwargs,
-    )
-    for path in c_extension_paths
-]
-c_extension_paths = [os.path.join(*path.split('/')[:-1]) for path in c_extension_paths]
+    for c_ext in c_extensions:
+        if "impulse_wars" in c_ext.name:
+            print(f"Adding {c_ext.name} to extra objects")
+            c_ext.extra_objects.append(f'{BOX2D_NAME}/libbox2d.a')
+            # TODO: Figure out why this is necessary for some users
+            impulse_include = 'pufferlib/ocean/impulse_wars/include'
+            if impulse_include not in c_ext.include_dirs:
+                c_ext.include_dirs.append(impulse_include)
+
+        if 'matsci' in c_ext.name:
+            c_ext.include_dirs.append('/usr/local/include')
+            c_ext.extra_link_args.extend(['-L/usr/local/lib', '-llammps'])
+
+# Define cmdclass outside of setup to add dynamic commands
+cmdclass = {
+    "build_ext": BuildExt,
+    "build_torch": TorchBuildExt,
+    "build_c": CBuildExt,
+}
+
+if not NO_OCEAN:
+    def create_env_build_class(full_name):
+        class EnvBuildExt(build_ext):
+            def run(self):
+                self.extensions = [e for e in self.extensions if e.name == full_name]
+                super().run()
+        return EnvBuildExt
+
+    # Add a build_<env> command for each env
+    for c_ext in c_extensions:
+        env_name = c_ext.name.split('.')[-2]
+        cmdclass[f"build_{env_name}"] = create_env_build_class(c_ext.name)
+
 
 # Check if CUDA compiler is available. You need cuda dev, not just runtime.
-torch_sources = [
-    "pufferlib/extensions/pufferlib.cpp",
-]
-if shutil.which("nvcc"):
-    extension = CUDAExtension
-    torch_sources.append("pufferlib/extensions/cuda/pufferlib.cu")
-else:
-    extension = CppExtension
+torch_extensions = []
+if not NO_TRAIN:
+    torch_sources = [
+        "pufferlib/extensions/pufferlib.cpp",
+    ]
+    if BUID_CUDA_EXT:
+        extension = CUDAExtension
+        torch_sources.append("pufferlib/extensions/cuda/pufferlib.cu")
+    else:
+        extension = CppExtension
 
-torch_extensions = [
-   extension(
-        "pufferlib._C",
-        torch_sources,
-        extra_compile_args = {
-            "cxx": cxx_args,
-            "nvcc": nvcc_args,
-        }
-    ),
-]
+    torch_extensions = [
+       extension(
+            "pufferlib._C",
+            torch_sources,
+            extra_compile_args = {
+                "cxx": cxx_args,
+                "nvcc": nvcc_args,
+            }
+        ),
+    ]
 
 # Prevent Conda from injecting garbage compile flags
 from distutils.sysconfig import get_config_vars
@@ -453,72 +270,39 @@ for key, value in cfg_vars.items():
     if value and '-fno-strict-overflow' in str(value):
         cfg_vars[key] = value.replace('-fno-strict-overflow', '')
 
+install_requires = [
+    'setuptools',
+    'numpy<2.0',
+    'shimmy[gym-v21]',
+    'gym==0.23',
+    'gymnasium>=0.29.1',
+    'pettingzoo>=1.24.1',
+]
+
+if not NO_TRAIN:
+    install_requires += [
+        'torch',
+        'psutil',
+        'nvidia-ml-py',
+        'rich',
+        'rich_argparse',
+        'imageio',
+        'gpytorch',
+        'scikit-learn',
+        'heavyball>=2.2.0', # contains relevant fixes compared to 1.7.2 and 2.1.1
+        'neptune',
+        'wandb',
+    ]
+
 setup(
-    name="pufferlib",
-    description="PufferAI Library"
-    "PufferAI's library of RL tools and utilities",
-    long_description_content_type="text/markdown",
-    version=VERSION,
+    version="3.0.0",
     packages=find_namespace_packages() + find_packages() + c_extension_paths + ['pufferlib/extensions'],
     package_data={
         "pufferlib": [RAYLIB_NAME + '/lib/libraylib.a']
     },
     include_package_data=True,
-    install_requires=[
-        'numpy',
-        'opencv-python==3.4.17.63',
-        'rich',
-        'rich_argparse',
-        f'gym<={GYM_VERSION}',
-        f'gymnasium<={GYMNASIUM_VERSION}',
-        f'pettingzoo<={PETTINGZOO_VERSION}',
-        'torch',
-        'shimmy[gym-v21]',
-        'psutil==5.9.5',
-        'pynvml',
-        'imageio',
-        'setuptools'
-    ],
-    extras_require={
-        'docs': docs,
-        'ray': ray,
-        'train': train,
-        'common': common,
-        **environments,
-    },
+    install_requires=install_requires,
     ext_modules = c_extensions + torch_extensions,
-    cmdclass={
-        "build_ext": BuildExt,
-        "build_torch": TorchBuildExt,
-        "build_c": CBuildExt,
-    },
+    cmdclass=cmdclass,
     include_dirs=[numpy.get_include(), RAYLIB_NAME + '/include'],
-    python_requires=">=3.9",
-    license="MIT",
-    author="Joseph Suarez",
-    author_email="jsuarez@puffer.ai",
-    url="https://github.com/PufferAI/PufferLib",
-    keywords=["Puffer", "AI", "RL", "Reinforcement Learning"],
-    entry_points={
-        'console_scripts': [
-            'puffer = pufferlib.pufferl:main',
-        ],
-    },
-    classifiers=[
-        "Intended Audience :: Science/Research",
-        "Intended Audience :: Developers",
-        "License :: OSI Approved :: MIT License",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
-        "Programming Language :: Python :: 3.12",
-    ],
 )
-#stable_baselines3
-#supersuit==3.3.5
-#'git+https://github.com/oxwhirl/smac.git',
-
-#curl -L -o smac.zip https://blzdistsc2-a.akamaihd.net/Linux/SC2.4.10.zip
-#unzip -P iagreetotheeula smac.zip 
-#curl -L -o maps.zip https://github.com/oxwhirl/smac/releases/download/v0.1-beta1/SMAC_Maps.zip
-#unzip maps.zip && mv SMAC_Maps/ StarCraftII/Maps/

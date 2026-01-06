@@ -130,7 +130,7 @@ void demo(int grid_size) {
         .reward_move_valid = 0.1
     };
 
-    Weights* weights = load_weights("resources/go_weights.bin", 254867);
+    Weights* weights = load_weights("resources/go/go_weights.bin", 254867);
     GoNet* net = init_gonet(weights, 1, grid_size);
     allocate(&env);
     c_reset(&env);

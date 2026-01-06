@@ -28,7 +28,8 @@ void get_input(Blastar* env) {
 
 int demo() {
     Weights* weights = load_weights(WEIGHTS_PATH, NUM_WEIGHTS);
-    LinearLSTM* net = make_linearlstm(weights, 1, OBSERVATIONS_SIZE, ACTIONS_SIZE);
+    int logit_sizes[1] = {ACTIONS_SIZE};
+    LinearLSTM* net = make_linearlstm(weights, 1, OBSERVATIONS_SIZE, logit_sizes, 1);
     Blastar env = {
         .num_obs = OBSERVATIONS_SIZE,
     };

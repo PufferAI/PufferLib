@@ -433,7 +433,7 @@ Client* make_client(CTrashPickupEnv* env) {
     InitWindow(client->window_width, client->window_height, "Trash Pickup Environment");
     SetTargetFPS(60);
 
-    client->agent_texture = LoadTexture("resources/puffers_128.png");
+    client->agent_texture = LoadTexture("resources/shared/puffers_128.png");
 
     return client;
 }

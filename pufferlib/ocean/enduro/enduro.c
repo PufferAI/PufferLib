@@ -34,7 +34,8 @@ void get_input(Enduro* env) {
 
 int demo() {
     Weights* weights = load_weights("resources/enduro/enduro_weights.bin", 142218);
-    LinearLSTM* net = make_linearlstm(weights, 1, 68, 9);
+    int logit_sizes[1] = {9};
+    LinearLSTM* net = make_linearlstm(weights, 1, 68, logit_sizes, 1);
 
     Enduro env = {
         .num_envs = 1,
@@ -61,7 +62,6 @@ int demo() {
 
     free_linearlstm(net);
     free(weights);
-    //close_client(env.client);
     free_allocated(&env);
     return 0;
 }

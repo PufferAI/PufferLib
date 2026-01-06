@@ -1,15 +1,14 @@
 #version 100
 
+precision highp float;
+
 // Input vertex attributes (from vertex shader)
-in vec3 fragPosition;
-in vec4 fragColor;
+varying vec3 fragPosition;
+varying vec4 fragColor;
 
 // Input uniform values
 uniform vec2 pos[4];
 uniform vec4 color[4];
-
-// Output fragment color
-out vec4 finalColor;
 
 const float falloff = 6.0;
 const float epsilon = 0.1;
@@ -36,5 +35,6 @@ void main()
     if (length(lightAccum) < epsilon) {
         discard;
     }
-    finalColor = vec4(lightAccum, 1.0);
+
+    gl_FragColor = vec4(lightAccum, 1.0);
 }

@@ -75,7 +75,7 @@ class Moba(pufferlib.PufferEnv):
 
     def render(self):
         for frame in range(12):
-            binding.vec_render(self.c_envs)
+            binding.vec_render(self.c_envs, 0)
 
     def close(self):
         binding.vec_close(self.c_envs)

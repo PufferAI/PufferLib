@@ -22,41 +22,36 @@
 
 #version 100
 
-noperspective in vec2 fragTexCoord;
+precision mediump float;
+
+varying vec2 fragTexCoord;
 
 uniform sampler2D uTexture;
 uniform vec2 uTexelDir;
 
-out vec4 fragColor;
+// hard‐coded offsets & weights
+const float O0 = -4.455269417428358;
+const float O1 = -2.4751038298192056;
+const float O2 = -0.4950160492928827;
+const float O3 =  1.485055021558738;
+const float O4 =  3.465172537482815;
+const float O5 =  5.0;
 
-const int SAMPLE_COUNT = 6;
+const float W0 = 0.14587920530480702;
+const float W1 = 0.19230308352110734;
+const float W2 = 0.21647621943673803;
+const float W3 = 0.20809835496561988;
+const float W4 = 0.17082879595769634;
+const float W5 = 0.06641434081403137;
 
-const float OFFSETS[6] = float[6](
-    -4.455269417428358,
-    -2.4751038298192056,
-    -0.4950160492928827,
-    1.485055021558738,
-    3.465172537482815,
-    5
-);
-
-const float WEIGHTS[6] = float[6](
-    0.14587920530480702,
-    0.19230308352110734,
-    0.21647621943673803,
-    0.20809835496561988,
-    0.17082879595769634,
-    0.06641434081403137
-);
-
-void main()
-{
+void main() {
     vec3 result = vec3(0.0);
+    result += texture2D(uTexture, fragTexCoord + uTexelDir * O0).rgb * W0;
+    result += texture2D(uTexture, fragTexCoord + uTexelDir * O1).rgb * W1;
+    result += texture2D(uTexture, fragTexCoord + uTexelDir * O2).rgb * W2;
+    result += texture2D(uTexture, fragTexCoord + uTexelDir * O3).rgb * W3;
+    result += texture2D(uTexture, fragTexCoord + uTexelDir * O4).rgb * W4;
+    result += texture2D(uTexture, fragTexCoord + uTexelDir * O5).rgb * W5;
 
-    for (int i = 0; i < SAMPLE_COUNT; ++i)
-    {
-        result += texture(uTexture, fragTexCoord + uTexelDir * OFFSETS[i]).rgb * WEIGHTS[i];
-    }
-
-    fragColor = vec4(result, 1.0);
+    gl_FragColor = vec4(result, 1.0);
 }

@@ -206,6 +206,7 @@ def sample_logits(logits, action=None):
             padding_value=-torch.inf
         ).permute(1,2,0)
 
+    # This can fail on nans etc
     normalized_logits = logits - logits.logsumexp(dim=-1, keepdim=True)
     probs = logits_to_probs(logits)
 

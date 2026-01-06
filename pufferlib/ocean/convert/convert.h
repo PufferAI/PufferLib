@@ -93,7 +93,6 @@ void compute_observations(Convert* env) {
     }
 }
 
-// Required function
 void c_reset(Convert* env) {
     for (int i=0; i<env->num_agents; i++) {
         env->agents[i].x = 16 + rand()%(env->width-16);
@@ -179,18 +178,14 @@ void c_step(Convert* env) {
     compute_observations(env);
 }
 
-// Required function. Should handle creating the client on first call
 void c_render(Convert* env) {
     if (env->client == NULL) {
         InitWindow(env->width, env->height, "PufferLib Convert");
         SetTargetFPS(30);
         env->client = (Client*)calloc(1, sizeof(Client));
-
-        // Don't do this before calling InitWindow
-        env->client->sprites = LoadTexture("resources/puffers.png");
+        env->client->sprites = LoadTexture("resources/shared/puffers.png");
     }
 
-    // Standard across our envs so exiting is always the same
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
     }
@@ -244,8 +239,6 @@ void c_render(Convert* env) {
     EndDrawing();
 }
 
-// Required function. Should clean up anything you allocated
-// Do not free env->observations, actions, rewards, terminals
 void c_close(Convert* env) {
     free(env->agents);
     free(env->factories);

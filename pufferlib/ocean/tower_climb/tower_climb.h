@@ -8,6 +8,7 @@
 #include "raymath.h"
 #include "rlgl.h"
 #include <time.h>
+#include <unistd.h>
 
 #if defined(PLATFORM_DESKTOP)
     #define GLSL_VERSION            330
@@ -56,11 +57,11 @@
 #define TEST_BIT(mask, i)   ( ((mask)[(i)/8] & (1 << ((i)%8))) != 0 )
 
 // BFS
-#define MAX_BFS_SIZE 70000000
+#define MAX_BFS_SIZE 10000000
 #define MAX_NEIGHBORS 6 // based on action space
 
 // hash table 
-#define TABLE_SIZE 70000003
+#define TABLE_SIZE 10000003
 
 // direction vectors
 #define NUM_DIRECTIONS 4
@@ -147,6 +148,8 @@ struct Log {
 
 typedef struct Client Client;
 typedef struct CTowerClimb CTowerClimb;
+
+void trigger_banner(Client* client, int type);
 struct CTowerClimb {
     Client* client;
     unsigned char* observations;
@@ -167,6 +170,17 @@ struct CTowerClimb {
     float reward_fall_row;
     float reward_illegal_move;
     float reward_move_block;
+    bool pending_reset;
+    bool goal_reached;
+    // Celebration timing (for visual effects)
+    float celebrationStartTime;
+    bool celebrationStarted;
+    bool bannerTriggered;
+    // Glow effect for visited positions
+    int visitedPositions[100];  // Track last 100 positions
+    float visitedTimes[100];    // Time when each position was visited
+    int visitedCount;
+    int visitedIndex;
 };
 
 void add_log(CTowerClimb* env) {
@@ -197,6 +211,14 @@ void init(CTowerClimb* env) {
     init_level(env->level);
     init_puzzle_state(env->state);
     env->rows_cleared = 0;
+    
+    // Initialize with minimal map storage to avoid fallback in c_reset
+    // env->num_maps = 0;
+    // env->all_levels = NULL;
+    // env->all_puzzles = NULL;
+    // env->pending_reset = false;
+    // env->goal_reached = false;
+    // env->bannerTriggered = false;
 }
 
 void setPuzzle(CTowerClimb* env, PuzzleState* src, Level* lvl){
@@ -310,9 +332,30 @@ void compute_observations(CTowerClimb* env) {
 void c_reset(CTowerClimb* env) {
     env->terminals[0] = 0;
     env->rows_cleared = 0;
+    env->goal_reached = false;
+    env->celebrationStarted = false;
+    env->bannerTriggered = false;
+    // Initialize glow tracking
+    env->visitedCount = 0;
+    env->visitedIndex = 0;
+    memset(env->visitedPositions, -1, sizeof(env->visitedPositions));
+    memset(env->visitedTimes, 0, sizeof(env->visitedTimes));
     memset(env->state->blocks, 0, BLOCK_BYTES * sizeof(unsigned char));
-    int idx = rand() % env->num_maps;
-    setPuzzle(env, &env->all_puzzles[idx], &env->all_levels[idx]);
+    
+    // Always use pre-generated maps (ensure at least 1 exists during initialization)
+    // printf("num maps: %d\n", env->num_maps);
+    if (env->num_maps > 0) {
+        int idx = rand() % env->num_maps;
+        setPuzzle(env, &env->all_puzzles[idx], &env->all_levels[idx]);
+    } else {
+        // Emergency fallback: use a simple default level
+        env->level->goal_location = 999;
+        env->level->spawn_location = 0;
+        memset(env->level->map, 0, env->level->total_length * sizeof(int));
+        env->level->map[0] = 1;  // Ground block
+        levelToPuzzleState(env->level, env->state);
+    }
+    
     compute_observations(env);
 }
 
@@ -762,8 +805,19 @@ void c_step(CTowerClimb* env) {
          env->rewards[0] = 0;
          env->buffer.perf = 0;
          add_log(env);
+         if (env->client && !env->bannerTriggered) {
+             trigger_banner(env->client, 2); // Timeout = failure
+             env->bannerTriggered = true;
+         }
          c_reset(env);
     }
+    
+    // Prevent movement if goal is reached (during celebration)
+    if (env->goal_reached) {
+        compute_observations(env);
+        return;
+    }
+    
     // Create next state
     int move_result = applyAction(env->state, env->actions[0], env->level, RL_MODE, env);
     if (move_result == MOVE_ILLEGAL) {
@@ -772,16 +826,39 @@ void c_step(CTowerClimb* env) {
     }
     if (move_result == MOVE_DEATH){
         death(env);
+        if (env->client && !env->bannerTriggered) {
+            trigger_banner(env->client, 2); // Death = failure
+            env->bannerTriggered = true;
+        }
         c_reset(env);
     }
     
     // Check for goal state
     if (isGoal(env->state, env->level)) {
+        env->goal_reached = true;
         env->rewards[0] = 1.0;
         env->buffer.episode_return +=1.0;
         env->buffer.perf = 1.0;
         add_log(env);
-        c_reset(env);
+        if (env->client) {
+            // Start celebration immediately when goal is reached
+            env->celebrationStarted = true;
+            env->celebrationStartTime = GetTime();
+            env->pending_reset = true; // Mark for delayed reset
+            // Banner will be triggered after beam effect completes in render function
+        } else {
+            c_reset(env); // If no client, reset immediately
+        }
+    }
+    
+    // Track the cube the player is standing on or climbing on for glow effect
+    int standingOnPosition = env->state->robot_position - env->level->size;
+    // Only track if the position is valid and has cube
+    if (standingOnPosition >= 0 && TEST_BIT(env->state->blocks, standingOnPosition)) {
+        env->visitedPositions[env->visitedIndex] = standingOnPosition;
+        env->visitedTimes[env->visitedIndex] = GetTime();
+        env->visitedIndex = (env->visitedIndex + 1) % 100;
+        if (env->visitedCount < 100) env->visitedCount++;
     }
     
     // Update observations
@@ -1150,10 +1227,10 @@ typedef enum {
 struct Client {
     float width;
     float height;
-    Texture2D puffers;
     Texture2D background;
     Camera3D camera;
     Model robot;
+    Model puffer;
     Light lights[MAX_LIGHTS];
     Shader shader; 
     ModelAnimation* animations;
@@ -1167,28 +1244,95 @@ struct Client {
     Model cube;
     float scale;
     int enable_animations;
+    // Camera rotation controls
+    Vector2 lastMousePos;
+    bool isDragging;
+    float cameraDistance;
+    float cameraAngleX;
+    float cameraAngleY;
+    bool followPlayer;
+    // Lighting smoothing
+    float lightingSmoothing;
+    float previousLightIntensity;
+    // UI state
+    float bannerStartTime;
+    int bannerType; // 0=none, 1=success, 2=failure
+    bool showBanner;
 };
+
+void trigger_banner(Client* client, int type) {
+    client->bannerType = type;
+    client->bannerStartTime = GetTime();
+    client->showBanner = true;
+}
 
 Client* make_client(CTowerClimb* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
-    client->width = 1600;
-    client->height = 900;
+    
+    // Calculate screen dimensions based on level size
+    float levelWidth = (float)env->level->cols;
+    float levelDepth = (float)env->level->rows;
+    int totalFloors = env->level->total_length / env->level->size;
+    float levelHeight = (float)totalFloors;
+    
+    // Calculate appropriate window size to fit level better
+    // Use aspect ratio based on level dimensions, with some padding
+    float levelAspectRatio = levelWidth / levelHeight;
+    int targetHeight = 900;
+    int targetWidth = (int)(targetHeight * levelAspectRatio * 1.4f * 0.8f);  // 20% smaller window width
+    
+    // Clamp width to reasonable bounds
+    client->width = fmaxf(640, fminf(targetWidth, 1120));  // Reduced bounds by 20%
+    client->height = targetHeight;
+    
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable MSAA
     InitWindow(client->width, client->height, "PufferLib Ray Tower Climb");
     SetTargetFPS(60);
-    // camera
+    
+    // Calculate camera distance to fit entire level height
+    float fovRad = 45.0f * DEG2RAD;
+    float minDistance = (levelHeight * 0.6f) / tanf(fovRad * 0.5f);  // Extra margin with 0.6f factor
+    
+    // Position camera to ensure proper spacing around puffer cube (goal)
+    int goalFloor = env->level->goal_location / env->level->size;
+    float goalHeight = (float)goalFloor;
+    
+    // Calculate visible height at the current distance
+    float visibleHeight = 2.0f * minDistance * tanf(fovRad * 0.5f);
+    
+    float bottomConstraint = -1.0f + visibleHeight * 0.5f;  // 1-tile space below bot
+    float topConstraint = goalHeight + 2.0f - visibleHeight * 0.5f;  // 2-tile space above puffer
+    
+    // Use the higher constraint to ensure both conditions are met
+    float cameraHeight = fmaxf(bottomConstraint, topConstraint);
+    
+    // Clamp to reasonable bounds and apply the -1 tile adjustment requested
+    cameraHeight = fmaxf(cameraHeight - 1.0f, levelHeight * 0.2f);
+    
+    Vector3 levelCenter = {(levelWidth - 1) * 0.5f, cameraHeight, (levelDepth - 1) * 0.5f};
+    
+    // camera - auto-positioned to fit entire level
     client->camera = (Camera3D){ 0 };
-    client->camera.position = (Vector3){ 0.0f, 25.0f, 20.0f };  // Move camera further back and higher up
-    client->camera.target = (Vector3){ 2.0f, 4.0f, 2.0f };     // Keep looking at same target point
+    client->camera.position = (Vector3){ levelCenter.x, levelCenter.y, levelCenter.z + minDistance };
+    client->camera.target = levelCenter;
     client->camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
     client->camera.fovy = 45.0f;
     client->camera.projection = CAMERA_PERSPECTIVE;
     // load background
     client->background = LoadTexture("resources/tower_climb/space2.jpg");
-    client->puffers = LoadTexture("resources/puffers_128.png");
     // load robot & cube models
     client->robot = LoadModel("resources/tower_climb/small_astro.glb");
     client->cube = LoadModel("resources/tower_climb/spacerock.glb");
+    client->puffer = LoadModel("resources/shared/puffer.glb");
+    printf("Loaded puffer.glb with %d meshes and %d materials\n", client->puffer.meshCount, client->puffer.materialCount);
+    if (client->puffer.meshCount == 0) {
+        printf("WARNING: puffer.glb failed to load, trying puffer.usdz...\n");
+        client->puffer = LoadModel("resources/tower_climb/puffer.usdz");
+        printf("Loaded puffer.usdz with %d meshes and %d materials\n", client->puffer.meshCount, client->puffer.materialCount);
+        if (client->puffer.meshCount == 0) {
+            printf("ERROR: Both puffer files failed to load!\n");
+        }
+    }
     BoundingBox bounds = GetModelBoundingBox(client->cube);
     float cubeSize = bounds.max.x - bounds.min.x;
     float scale = 1.0f / cubeSize;
@@ -1207,44 +1351,48 @@ Client* make_client(CTowerClimb* env) {
     client->shader = LoadShader(vsPath, fsPath);
     // Get shader locations
     client->shader.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(client->shader, "viewPos");
-    // Set up ambient light
+    // Set up ambient light (increased for softer overall lighting)
     int ambientLoc = GetShaderLocation(client->shader, "ambient");
-    float ambient[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
+    float ambient[4] = { 0.2f, 0.2f, 0.2f, 1.0f };
     SetShaderValue(client->shader, ambientLoc, ambient, SHADER_UNIFORM_VEC4);
     // apply lighting shader
     client->robot.materials[0].shader = client->shader;
     client->cube.materials[0].shader = client->shader;
-    // Create lights with much brighter colors and closer positions
-    client->lights[0] = CreateLight(LIGHT_POINT, 
-        (Vector3){ 10.0f, 7.0f, 5.0f },  // Front
-        Vector3Zero(), 
-        WHITE,  // ~12% intensity
-        client->shader);
-    // Very dim fill lights
-    client->lights[1] = CreateLight(LIGHT_POINT, 
-        (Vector3){ 3.0f, 5.0f, 8.0f },  // Right side
-        Vector3Zero(), 
-        (Color){ 40, 40, 40, 255 },  // ~15% intensity
+    client->puffer.materials[0].shader = client->shader;
+    // Create softer directional lighting for better depth perception
+    client->lights[0] = CreateLight(LIGHT_DIRECTIONAL, 
+        (Vector3){ 0.0f, 10.0f, 0.0f },    // High above for top lighting
+        (Vector3){ 0.5f, -1.0f, 0.3f },    // Direction: down and slightly forward
+        (Color){ 180, 180, 190, 255 },    // Softer warm white for tops
         client->shader);
     
-    client->lights[2] = CreateLight(LIGHT_POINT, 
-        (Vector3){ 10.0f, 7.0f, 5.0f },  // Front
-        Vector3Zero(), 
-        (Color){ 30, 30, 30, 255 },  // ~12% intensity
+    client->lights[1] = CreateLight(LIGHT_DIRECTIONAL, 
+        (Vector3){ 0.0f, 5.0f, 0.0f },     // Side lighting
+        (Vector3){ -0.8f, -0.2f, 0.0f },   // Direction: from right side
+        (Color){ 100, 100, 120, 255 },    // Softer cool side light
+        client->shader);
+    
+    client->lights[2] = CreateLight(LIGHT_DIRECTIONAL, 
+        (Vector3){ 0.0f, 3.0f, 0.0f },     // Front lighting
+        (Vector3){ 0.0f, -0.3f, -0.9f },   // Direction: toward camera
+        (Color){ 70, 70, 85, 255 },       // Softer front fill
         client->shader);
     
     client->lights[3] = CreateLight(LIGHT_POINT, 
-        (Vector3){ 10.0f, 6.0f, -5.0f },  // Left side
+        (Vector3){ 5.0f, 15.0f, 5.0f },    // High ambient light
         Vector3Zero(), 
-        (Color){ 20, 20, 20, 255 },  // ~8% intensity
+        (Color){ 50, 50, 55, 255 },       // Slightly softer ambient fill
         client->shader);
 
-    // Make sure both models' materials use the lighting shader
+    // Make sure all models' materials use the lighting shader
     for (int i = 0; i < client->robot.materialCount; i++) {
         client->robot.materials[i].shader = client->shader;
     }
     for (int i = 0; i < client->cube.materialCount; i++) {
         client->cube.materials[i].shader = client->shader;
+    }
+    for (int i = 0; i < client->puffer.materialCount; i++) {
+        client->puffer.materials[i].shader = client->shader;
     }
     client->animState = ANIM_IDLE;
     client->previousRobotPosition = env->state->robot_position;
@@ -1259,6 +1407,22 @@ Client* make_client(CTowerClimb* env) {
         z * 1.0f
     };
     client->targetPosition = client->visualPosition;  // Initialize target to match
+    
+    // Initialize camera rotation controls
+    client->lastMousePos = (Vector2){0, 0};
+    client->isDragging = false;
+    client->cameraDistance = minDistance;  // Use calculated distance
+    client->cameraAngleX = 0.0f;  // Horizontal rotation
+    client->cameraAngleY = 20.0f; // Vertical rotation (looking down)
+    client->followPlayer = false; // Player following disabled by default
+    client->bannerStartTime = 0.0f;
+    client->bannerType = 0;
+    client->showBanner = false;
+    
+    // Initialize lighting smoothing
+    client->lightingSmoothing = 0.1f;  // Smoothing factor (0.1 = slow, 0.9 = fast)
+    client->previousLightIntensity = 1.0f;
+    
     return client;
 }
 
@@ -1330,7 +1494,7 @@ static void process_animation_frame(Client* client, CTowerClimb* env) {
     // Handle shimmy movement lerping
     if (client->isMoving && (client->animState == ANIM_SHIMMY_LEFT || 
                             client->animState == ANIM_SHIMMY_RIGHT)) {
-        float progress = 0.1f;
+        float progress = 0.065f;
         // Horizontal movement for UP/DOWN, vertical movement for LEFT/RIGHT
         bool facingNS = env->state->robot_orientation == UP || env->state->robot_orientation == DOWN;
         if (facingNS) {
@@ -1387,26 +1551,59 @@ static void handle_hanging_movement(Client* client, CTowerClimb* env) {
 }
 
 static void update_camera(Client* client, CTowerClimb* env) {
-    int floor = env->state->robot_position / env->level->size;
-    int cameraFloor = (floor - 1) * 0.5;
-    float targetCameraY = cameraFloor * 1.0f + 7.0f;
-    float targetLookY = cameraFloor * 1.0f;
-    float smoothSpeed = 0.025f;
-    // Update camera position
-    client->camera.position.y = Lerp(client->camera.position.y, targetCameraY, smoothSpeed);
-    client->camera.target.y = Lerp(client->camera.target.y, targetLookY, smoothSpeed);
-    client->camera.position = (Vector3){
-        env->level->cols * 0.5f,
-        client->camera.position.y,
-        25.0f
+    Vector3 targetCenter;
+    
+    if (client->followPlayer) {
+        int floor = env->state->robot_position / env->level->size;
+        int goalFloor = env->level->goal_location / env->level->size;
+        
+        // Calculate target position (center of play area, following player height)
+        Vector3 desiredTarget = {
+            (env->level->cols - 1) * 0.5f,
+            floor * 1.0f,  // Follow player floor
+            (env->level->rows - 1) * 0.5f
+        };
+        
+        // Stop following when goal is near top of screen
+        // Calculate how much higher the camera target can go before goal disappears
+        float fovRad = client->camera.fovy * DEG2RAD;
+        float visibleHeight = 2.0f * client->cameraDistance * tanf(fovRad * 0.5f);
+        float maxTargetY = goalFloor - (visibleHeight * 0.2f);  // Stop when goal is 20% from top
+        
+        // Limit the desired target to not exceed the max height
+        if (desiredTarget.y > maxTargetY) {
+            desiredTarget.y = maxTargetY;
+        }
+        
+        // Smooth following with interpolation
+        float followSpeed = 0.02f;  // Very smooth following
+        targetCenter.x = client->camera.target.x + (desiredTarget.x - client->camera.target.x) * followSpeed;
+        targetCenter.y = client->camera.target.y + (desiredTarget.y - client->camera.target.y) * followSpeed;
+        targetCenter.z = client->camera.target.z + (desiredTarget.z - client->camera.target.z) * followSpeed;
+    } else {
+        // Keep current target when not following
+        targetCenter = client->camera.target;
+    }
+    
+    // Convert spherical coordinates to cartesian for free rotation
+    float radX = client->cameraAngleX * DEG2RAD;
+    float radY = client->cameraAngleY * DEG2RAD;
+    
+    Vector3 cameraOffset = {
+        cosf(radY) * sinf(radX) * client->cameraDistance,
+        sinf(radY) * client->cameraDistance,
+        cosf(radY) * cosf(radX) * client->cameraDistance
     };
-    client->camera.target = (Vector3){4.0f, client->camera.target.y, 1.0f};
+    
+    // Update camera position and target
+    client->camera.position = Vector3Add(targetCenter, cameraOffset);
+    client->camera.target = targetCenter;
 }
 
 static void draw_background(Client* client) {
     float scaleWidth = (float)client->width / client->background.width;
     float scaleHeight = (float)client->height / client->background.height;
-    float scale = fmax(scaleWidth, scaleHeight);
+    float scale = fmax(scaleWidth, scaleHeight) * 1.0f;
     
     Rectangle dest = {
         .x = (client->width - client->background.width * scale) * 0.5f,
@@ -1421,21 +1618,176 @@ static void draw_background(Client* client) {
 static void draw_level(Client* client, CTowerClimb* env) {
     int cols = env->level->cols;
     int sz = env->level->size;
+    float currentTime = GetTime();
+    
     for(int i = 0; i < env->level->total_length; i++) {
         int floor = i / sz;
         int grid_pos = i % sz;
         int x = grid_pos % cols;
         int z = grid_pos / cols;
         Vector3 pos = {x * 1.0f, floor * 1.0f, z * 1.0f};
-        if(TEST_BIT(env->state->blocks, i)) {
-            DrawModel(client->cube, pos, client->scale, WHITE);
-            Color wireColor = (i == env->state->block_grabbed) ? RED : BLACK;
-            DrawCubeWires(pos, 1.0f, 1.0f, 1.0f, wireColor);
+        
+        // Check if this position should glow (recently visited)
+        float glowAlpha = 0.0f;
+        for (int j = 0; j < env->visitedCount; j++) {
+            if (env->visitedPositions[j] == i) {
+                float timeSinceVisit = currentTime - env->visitedTimes[j];
+                if (timeSinceVisit < 3.0f) {  // Glow for 3 seconds
+                    glowAlpha = fmaxf(glowAlpha, (1.0f - timeSinceVisit / 3.0f) * 0.9f); // Much more prominent glow
+                }
+            }
         }
-        if (i == env->level->goal_location) {
+        
+        if(TEST_BIT(env->state->blocks, i)) {
+            // Create position-based variation for cube distinctiveness
+            int posHash = (x * 73 + z * 37 + floor * 13) % 256;
+            float variation = (float)posHash / 255.0f;
+            
+            // Base cube color with subtle position-based tinting
+            Color cubeColor = (Color){
+                (unsigned char)(240 + variation * 15),      // Slight brightness variation
+                (unsigned char)(240 + sinf(variation * 6.28f) * 10), // Subtle color shift
+                (unsigned char)(240 + cosf(variation * 6.28f) * 10), // Subtle color shift
+                255
+            };
+            
+                                     // Always draw the cube model with its original texture first
+            DrawModel(client->cube, pos, client->scale, cubeColor);
+            
+            // Add red glow overlay if recently visited
+            if (glowAlpha > 0.0f) {
+                float glowIntensity = glowAlpha * 1.2f; // Moderate intensity boost
+                
+                // Add red glow as overlay effects (preserving underlying cube texture)
+                EndShaderMode();
+                
+                // Inner glow - more opaque, tighter to cube
+                DrawCube(pos, 1.0f, 1.0f, 1.0f, (Color){255, 0, 0, (unsigned char)(glowIntensity * 80)});
+                
+                // Middle glow - medium opacity, slightly larger
+                DrawCube(pos, 1.03f, 1.03f, 1.03f, (Color){255, 40, 40, (unsigned char)(glowIntensity * 60)});
+                
+                // Outer glow - subtle, largest
+                DrawCube(pos, 1.06f, 1.06f, 1.06f, (Color){255, 80, 80, (unsigned char)(glowIntensity * 40)});
+                
+                BeginShaderMode(client->shader);
+            }
+            
+            // Varied wireframe colors based on position and state
+            Color wireColor;
+            if (i == env->state->block_grabbed) {
+                wireColor = (Color){255, 0, 0, 255};  // Bright red for grabbed block
+            } else {
+                // Position-based wireframe variation for distinctiveness
+                float hue = fmodf(variation * 180.0f + floor * 30.0f, 360.0f);
+                unsigned char r, g, b;
+                
+                // Simple HSV to RGB conversion for varied wireframe colors with clamping
+                if (hue < 60) {
+                    r = 180; 
+                    float gVal = 120 + hue;
+                    g = (unsigned char)(gVal > 255 ? 255 : gVal); 
+                    b = 120;
+                } else if (hue < 120) {
+                    float rVal = 240 - hue;
+                    r = (unsigned char)(rVal < 0 ? 0 : rVal); 
+                    g = 180; 
+                    b = 120;
+                } else if (hue < 180) {
+                    r = 120; 
+                    g = 180; 
+                    float bVal = 120 + (hue - 120);
+                    b = (unsigned char)(bVal > 255 ? 255 : bVal);
+                } else if (hue < 240) {
+                    r = 120; 
+                    float gVal = 240 - (hue - 120);
+                    g = (unsigned char)(gVal < 0 ? 0 : gVal); 
+                    b = 180;
+                } else if (hue < 300) {
+                    float rVal = 120 + (hue - 240);
+                    r = (unsigned char)(rVal > 255 ? 255 : rVal); 
+                    g = 120; 
+                    b = 180;
+                } else {
+                    r = 180; 
+                    g = 120; 
+                    float bVal = 240 - (hue - 240);
+                    b = (unsigned char)(bVal < 0 ? 0 : bVal);
+                }
+                
+                wireColor = (Color){r, g, b, 255};
+            }
+            
+            // Draw main wireframe
+            DrawCubeWires(pos, 1.0f, 1.0f, 1.0f, wireColor);
+            
+            // Add secondary wireframe for depth/texture variation
+            if (floor % 2 == 0) {
+                // Even floors get thicker edge lines
+                Color edgeColor = (Color){
+                    (unsigned char)(wireColor.r * 0.7f),
+                    (unsigned char)(wireColor.g * 0.7f),
+                    (unsigned char)(wireColor.b * 0.7f),
+                    180
+                };
+                DrawCubeWires(pos, 1.02f, 1.02f, 1.02f, edgeColor);
+            } else {
+                // Odd floors get inner detail lines
+                float detailR = wireColor.r * 1.3f;
+                float detailG = wireColor.g * 1.3f;
+                float detailB = wireColor.b * 1.3f;
+                Color detailColor = (Color){
+                    (unsigned char)(detailR > 255 ? 255 : detailR),
+                    (unsigned char)(detailG > 255 ? 255 : detailG),
+                    (unsigned char)(detailB > 255 ? 255 : detailB),
+                    160
+                };
+                DrawCubeWires(pos, 0.98f, 0.98f, 0.98f, detailColor);
+            }
+        }
+                if (i == env->level->goal_location) {
             EndShaderMode();
-            DrawCube(pos, 1.0f, 1.0f, 1.0f, PUFF_CYAN);
+            
+            // Puffer cube outline
+            DrawCubeWires(pos, 1.0f, 1.0f, 1.0f, PUFF_CYAN);
+            
             BeginShaderMode(client->shader);
+            
+            if (client->puffer.meshCount > 0) {
+                // Calculate animations
+                float time = GetTime();
+                float spinAngle = fmodf(time * 90.0f, 360.0f);  // Spinning
+                float bobOffset = sinf(time * 2.0f) * 0.09f;      // Gentle bobbing
+                
+                // Celebratory backflip when player climbs on cube
+                float celebratoryFlip = 0.0f;
+                float pufferYOffset = -0.3f;  // Default position in cube
+                if (env->celebrationStarted && env->goal_reached) {
+                    float celebrationDuration = time - env->celebrationStartTime;
+                    // Start flip at 0.6s (after climbing completes), complete at 1.0s
+                    if (celebrationDuration >= 0.8f && celebrationDuration < 1.2f) {
+                        // Move puffer up in cube during celebration
+                        pufferYOffset = -0.1f;  // Higher position in cube
+                        // Backflip over 0.4 seconds (from 0.6s to 1.0s)
+                        float flipProgress = (celebrationDuration - 0.6f) / 0.55f;  // 0 to 1 over 0.4s
+                        celebratoryFlip = flipProgress * 360.0f;  // One complete backflip
+                    }
+                }
+                
+                Vector3 pufferPos = {pos.x, pos.y + pufferYOffset + bobOffset, pos.z};  // Inside cube with bob
+                
+                // Draw the animated puffer
+                rlPushMatrix();
+                rlTranslatef(pufferPos.x, pufferPos.y, pufferPos.z);
+                rlRotatef(-90.0f, 0.0f, 0.0f, 1.0f);  // Z-axis rotation (upright)
+                rlRotatef(spinAngle, 1.0f, 0.0f, 0.0f);  // Normal spinning
+                rlRotatef(celebratoryFlip, 0.0f, -1.0f, 0.0f);  // Celebratory backflip around Z-axis (in place)
+                rlScalef(120.0f, 120.0f, 90.0f);  // Scale - less compressed front-to-back
+                
+                DrawModel(client->puffer, (Vector3){0, 0, 0}, 1.0f, WHITE);
+                
+                rlPopMatrix();
+            }
         }
     }
 }
@@ -1443,12 +1795,161 @@ static void draw_level(Client* client, CTowerClimb* env) {
 static void draw_robot(Client* client, CTowerClimb* env) {
     Vector3 pos = client->visualPosition;
     pos.y -= 0.5f;
-    rlPushMatrix();
-    rlTranslatef(pos.x, pos.y, pos.z);
-    rlRotatef(90.0f, 1, 0, 0);
-    rlRotatef(-90.0f + env->state->robot_orientation * 90.0f, 0, 0, 1);
-    DrawModel(client->robot, (Vector3){0, 0, 0}, 0.5f, WHITE);
-    rlPopMatrix();
+    
+    if (env->goal_reached && env->celebrationStarted) {
+        // Beam of light effect when goal is reached and climbing animation completes
+        float time = GetTime();
+        float celebrationDuration = time - env->celebrationStartTime;
+        
+        // Start beam effect at height of puffer's flip (0.8s) and complete by 1.2s
+        if (celebrationDuration > 0.8f && celebrationDuration < 1.2f) {
+            // Beam the player upwards with light effect
+            float beamProgress = (celebrationDuration - 0.8f) / 0.4f;  // 0 to 1 over 0.4s
+            float beamHeight = beamProgress * 6.0f;  // Beam upwards
+            pos.y += beamHeight;
+            
+            // Draw beam of light effect
+            EndShaderMode();  // Temporarily exit shader mode for bright effects
+            
+            // Main beam cylinder
+            DrawCylinder(pos, 0.15f, 0.15f, beamHeight + 3.0f, 12, (Color){255, 255, 255, 120});
+            DrawCylinder(pos, 0.08f, 0.08f, beamHeight + 4.0f, 8, (Color){255, 255, 255, 180});
+            
+            // Light ray effects
+            for (int i = 0; i < 20; i++) {
+                float angle = (float)i / 20.0f * 2.0f * PI + time * 3.0f;
+                float radius = 0.1f + sinf(time * 4.0f + i) * 0.05f;
+                float height = (float)i / 20.0f * (beamHeight + 2.0f);
+                
+                Vector3 rayStart = {pos.x + cosf(angle) * radius, pos.y + height, pos.z + sinf(angle) * radius};
+                Vector3 rayEnd = {pos.x, pos.y + height + 0.2f, pos.z};
+                 
+                // Draw light rays as thick lines using cylinders
+                Vector3 direction = Vector3Subtract(rayEnd, rayStart);
+                float lineLength = Vector3Length(direction);
+                Vector3 center = Vector3Add(rayStart, Vector3Scale(direction, 0.5f));
+                 
+                // Use c
+                DrawCylinder(center, 0.01f, 0.01f, lineLength, 4, (Color){255, 255, 200, 150});
+            }
+            
+            // Ascending sparkles
+            for (int i = 0; i < 15; i++) {
+                float sparkleTime = fmodf(time * 2.0f + (float)i * 0.3f, 2.0f);
+                float sparkleHeight = sparkleTime * (beamHeight + 1.0f);
+                float sparkleRadius = sinf(sparkleTime * PI) * 0.2f;
+                float angle = (float)i * 0.4f + time;
+                
+                Vector3 sparklePos = {
+                    pos.x + cosf(angle) * sparkleRadius, 
+                    pos.y + sparkleHeight, 
+                    pos.z + sinf(angle) * sparkleRadius
+                };
+                
+                // Small bright points instead of large spheres
+                DrawSphere(sparklePos, 0.02f, (Color){255, 255, 150, 255});
+            }
+            
+            BeginShaderMode(client->shader);  // Re-enter shader mode
+        }
+    }
+    
+    // Draw robot (with transparency if being beamed up, invisible after beam completes)
+    Color robotColor = WHITE;
+    bool shouldDrawRobot = true;
+    
+    if (env->goal_reached && env->celebrationStarted) {
+        float time = GetTime();
+        float celebrationDuration = time - env->celebrationStartTime;
+        
+        if (celebrationDuration > 0.8f && celebrationDuration < 1.2f) {
+            // Make robot increasingly transparent as it gets beamed up
+            float beamProgress = (celebrationDuration - 0.8f) / 0.4f;  // 0 to 1 over 0.4s
+            int alpha = (int)(255 * (1.0f - beamProgress));
+            robotColor = (Color){255, 255, 255, alpha};
+        } else if (celebrationDuration >= 1.2f) {
+            // After beam completes, don't draw robot at all
+            shouldDrawRobot = false;
+        }
+    }
+    
+    if (shouldDrawRobot) {
+        rlPushMatrix();
+        rlTranslatef(pos.x, pos.y, pos.z);
+        rlRotatef(90.0f, 1, 0, 0);
+        rlRotatef(-90.0f + env->state->robot_orientation * 90.0f, 0, 0, 1);
+        DrawModel(client->robot, (Vector3){0, 0, 0}, 0.5f, robotColor);
+        rlPopMatrix();
+    }
+}
+
+
+
+static void draw_ui(Client* client, CTowerClimb* env) {
+    // Draw timer (time remaining)
+    float timeRemaining = 60.0f - env->buffer.episode_length;
+    if (timeRemaining < 0) timeRemaining = 0;
+    
+    // Timer background
+    int timerX = client->width - 120;
+    int timerY = 20;
+    int rectHeight = 40;
+    int fontSize = 20;
+    DrawRectangle(timerX - 10, timerY - 5, 100, rectHeight, (Color){0, 0, 0, 150});
+    DrawRectangleLines(timerX - 10, timerY - 5, 100, rectHeight, WHITE);
+    
+    // Timer text with color based on urgency  
+    Color timerColor = WHITE;
+    if (timeRemaining <= 10) timerColor = RED;
+    else if (timeRemaining <= 20) timerColor = YELLOW;
+    
+    // Center the text vertically in the rectangle
+    int textY = timerY - 5 + (rectHeight - fontSize) / 2;
+    DrawText(TextFormat("Time: %.0f", timeRemaining), timerX, textY, fontSize, timerColor);
+    
+    // Draw banner if active
+    if (client->showBanner) {
+        float currentTime = GetTime();
+        float bannerDuration = currentTime - client->bannerStartTime;
+        
+        if (bannerDuration < 0.7f) { // Show for 0.7 seconds
+            // Banner background
+            int bannerHeight = 80;
+            int bannerY = (client->height - bannerHeight) / 2;
+            DrawRectangle(0, bannerY, client->width, bannerHeight, (Color){0, 0, 0, 200});
+            DrawRectangleLines(0, bannerY, client->width, bannerHeight, WHITE);
+            
+            // Banner text
+            const char* text = "";
+            Color textColor = WHITE;
+            if (client->bannerType == 1) {
+                text = "LEVEL COMPLETED!";
+                textColor = GREEN;
+            } else if (client->bannerType == 2) {
+                text = "LEVEL FAILED!";
+                textColor = RED;
+            }
+            
+            int fontSize = 40;
+            int textWidth = MeasureText(text, fontSize);
+            int textX = (client->width - textWidth) / 2;
+            int textY = bannerY + (bannerHeight - fontSize) / 2;
+            
+            // Add pulsing effect
+            float pulse = sinf(currentTime * 8.0f) * 0.3f + 0.7f;
+            Color pulsedColor = {
+                (unsigned char)(textColor.r * pulse),
+                (unsigned char)(textColor.g * pulse),
+                (unsigned char)(textColor.b * pulse),
+                textColor.a
+            };
+
+            DrawText(text, textX, textY, fontSize, pulsedColor);
+        } else {
+            // Hide banner after duration
+            client->showBanner = false;
+        }
+    }
 }
 
 static void render_scene(Client* client, CTowerClimb* env) {
@@ -1466,11 +1967,33 @@ static void render_scene(Client* client, CTowerClimb* env) {
     };
     SetShaderValue(client->shader, client->shader.locs[SHADER_LOC_VECTOR_VIEW], 
                   cameraPos, SHADER_UNIFORM_VEC3);
+    
+    // Calculate dynamic lighting intensity based on player position and smooth it
+    int playerFloor = env->state->robot_position / env->level->size;
+    float targetIntensity = 0.8f + (playerFloor * 0.05f);  // Slightly brighter at higher floors
+    targetIntensity = fminf(targetIntensity, 1.2f);  // Cap the intensity
+    
+    // Smooth the lighting transition
+    client->previousLightIntensity = client->previousLightIntensity + 
+        (targetIntensity - client->previousLightIntensity) * client->lightingSmoothing;
+    
+    // Apply the smoothed lighting intensity to the main directional light
+    Color adjustedMainLight = {
+        (unsigned char)(180 * client->previousLightIntensity),
+        (unsigned char)(180 * client->previousLightIntensity), 
+        (unsigned char)(190 * client->previousLightIntensity),
+        255
+    };
+    
+    // Update the main light with the smoothed intensity
+    client->lights[0].color = adjustedMainLight;
     BeginBlendMode(BLEND_ALPHA);
     draw_level(client, env);
     EndBlendMode();
     draw_robot(client, env);
     EndMode3D();
+    EndShaderMode();
+    draw_ui(client, env);
     EndDrawing();
 }
 
@@ -1480,7 +2003,94 @@ void c_render(CTowerClimb* env) {
     }
     Client* client = env->client;
 
+    // Check if we should trigger success banner when beam effect starts
+    if (env->goal_reached && env->celebrationStarted && !env->bannerTriggered) {
+        float currentTime = GetTime();
+        float celebrationDuration = currentTime - env->celebrationStartTime;
+        
+        // Trigger banner when beam effect starts (0.8s celebration time)
+        if (celebrationDuration >= 0.8f) {
+            trigger_banner(client, 1); // Success!
+            env->bannerTriggered = true; // Mark as triggered to prevent multiple calls
+        }
+    }
+
     if (IsKeyDown(KEY_ESCAPE)) exit(0);
+    
+    // Toggle player following with spacebar
+    if (IsKeyPressed(KEY_SPACE)) {
+        client->followPlayer = !client->followPlayer;
+    }
+    
+    // Camera controls
+    float cameraSpeed = 0.5f;
+    float zoomSpeed = 2.0f;
+    
+    // Pan controls (WASD only - arrow keys reserved for player)
+    if (IsKeyDown(KEY_A)) {
+        client->camera.position.x -= cameraSpeed;
+        client->camera.target.x -= cameraSpeed;
+    }
+    if (IsKeyDown(KEY_D)) {
+        client->camera.position.x += cameraSpeed;
+        client->camera.target.x += cameraSpeed;
+    }
+    if (IsKeyDown(KEY_W)) {
+        client->camera.position.y += cameraSpeed;
+        client->camera.target.y += cameraSpeed;
+    }
+    if (IsKeyDown(KEY_S)) {
+        client->camera.position.y -= cameraSpeed;
+        client->camera.target.y -= cameraSpeed;
+    }
+    
+    // Zoom controls (Q/E or +/-)
+    if (IsKeyDown(KEY_Q) || IsKeyDown(KEY_KP_SUBTRACT)) {
+        client->camera.position.z += zoomSpeed;  // Zoom out
+    }
+    if (IsKeyDown(KEY_E) || IsKeyDown(KEY_KP_ADD)) {
+        client->camera.position.z -= zoomSpeed;  // Zoom in
+    }
+    
+    // FOV zoom controls (Z/X)
+    if (IsKeyDown(KEY_Z)) {
+        client->camera.fovy = fmaxf(client->camera.fovy - 1.0f, 10.0f);  // Zoom in (min 10°)
+    }
+    if (IsKeyDown(KEY_X)) {
+        client->camera.fovy = fminf(client->camera.fovy + 1.0f, 90.0f);  // Zoom out (max 90°)
+    }
+    
+    // Mouse scroll wheel for distance zoom
+    float wheelMove = GetMouseWheelMove();
+    if (wheelMove != 0) {
+        client->cameraDistance = fmaxf(client->cameraDistance - wheelMove * 2.0f, 3.0f);
+    }
+    
+    // Click and drag camera rotation
+    Vector2 mousePos = GetMousePosition();
+    
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        client->isDragging = true;
+        client->lastMousePos = mousePos;
+    }
+    
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        client->isDragging = false;
+    }
+    
+    if (client->isDragging) {
+        Vector2 mouseDelta = {
+            mousePos.x - client->lastMousePos.x,
+            mousePos.y - client->lastMousePos.y
+        };
+        
+        // Convert mouse movement to rotation
+        float sensitivity = 0.5f;
+        client->cameraAngleX += mouseDelta.x * sensitivity;
+        client->cameraAngleY = fmaxf(fminf(client->cameraAngleY - mouseDelta.y * sensitivity, 89.0f), -89.0f);
+        
+        client->lastMousePos = mousePos;
+    }
     // Handle state transitions - drop animation
     if (env->state->robot_state == DEFAULT && client->animState == ANIM_HANGING && client->enable_animations) {
         update_animation(client, ANIM_IDLE);
@@ -1526,8 +2136,16 @@ void c_render(CTowerClimb* env) {
 }
 
 void close_client(Client* client) {
-    UnloadShader(client->shader);
-    CloseWindow();
+    // First unload all animations
+    UnloadModelAnimations(client->animations, 8);  // We know we have 8 animations
+    // Then unload models (which will also unload their materials and meshes)
     UnloadModel(client->robot);
+    UnloadModel(client->puffer);
+    UnloadModel(client->cube);
+    // Unload shader
+    UnloadShader(client->shader);
+    // Unload texture
+    UnloadTexture(client->background);
+    CloseWindow();
     free(client);
 }

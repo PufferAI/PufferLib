@@ -2,22 +2,24 @@
 
 import gymnasium
 import numpy as np
-
+import random
 import pufferlib
 from pufferlib.ocean.terraform import binding
-
+import time
 OBS_SIZE = 11
 
 class Terraform(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, num_agents=8, map_size=512,
-            render_mode=None, log_interval=32, buf=None, seed=0):
+    def __init__(self, num_envs=1, num_agents=8, map_size=64,
+            render_mode=None, log_interval=32, buf=None, seed=0, reset_frequency=8192,
+                 reward_scale=0.01):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
-            shape=(2*OBS_SIZE*OBS_SIZE + 4,), dtype=np.uint8)
+            shape=(2*OBS_SIZE*OBS_SIZE + 5 + 36*2,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.MultiDiscrete([5, 5, 3], dtype=np.int32)
         self.render_mode = render_mode
         self.num_agents = num_envs*num_agents
         self.log_interval = log_interval
-
+        self.reset_frequency = reset_frequency
+        self.reward_scale = reward_scale
         super().__init__(buf)
         c_envs = []
         for i in range(num_envs):
@@ -30,6 +32,8 @@ class Terraform(pufferlib.PufferEnv):
                 seed,
                 size=map_size,
                 num_agents=num_agents,
+                reset_frequency=reset_frequency,
+                reward_scale=reward_scale,
             )
             c_envs.append(c_env)
 
@@ -42,7 +46,6 @@ class Terraform(pufferlib.PufferEnv):
 
     def step(self, actions):
         self.tick += 1
-
         self.actions[:] = actions
         binding.vec_step(self.c_envs)
 
@@ -63,9 +66,9 @@ class Terraform(pufferlib.PufferEnv):
 
 if __name__ == '__main__':
     TIME = 10
-    env = Terraform(num_envs=512, num_agents=4, render_mode='human', size=11)
-    actions = np.random.randint(0, 5, 2048)
-    env.reset()
+    env = Terraform(num_envs=512, num_agents=1, render_mode='human', map_size=64, seed=0)
+    actions = np.random.randint(0, 5, (512, 3))  # Changed from the stack approach
+
 
     import time
     steps = 0
@@ -74,7 +77,7 @@ if __name__ == '__main__':
         env.step(actions)
         steps += 2048
 
-    print('Cython SPS:', steps / (time.time() - start))
+    print('SPS:', env.num_agents * steps / (time.time() - start))
 
 
 

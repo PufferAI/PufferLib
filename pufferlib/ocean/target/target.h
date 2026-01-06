@@ -172,8 +172,8 @@ void c_render(Target* env) {
         env->client = (Client*)calloc(1, sizeof(Client));
 
         // Don't do this before calling InitWindow
-        env->client->puffer = LoadTexture("resources/puffers_128.png");
-        env->client->star = LoadTexture("resources/star.png");
+        env->client->puffer = LoadTexture("resources/shared/puffers_128.png");
+        env->client->star = LoadTexture("resources/target/star.png");
     }
 
     // Standard across our envs so exiting is always the same

@@ -5,8 +5,9 @@
 #define NOOP -1
 
 void interactive() {
-    Weights* weights = load_weights("resources/tripletriad_weights.bin", 148880);
-    LinearLSTM* net = make_linearlstm(weights, 1, 114, 15);
+    Weights* weights = load_weights("resources/tripletriad/tripletriad_weights.bin", 148751);
+    int logit_sizes[1] = {14};
+    LinearLSTM* net = make_linearlstm(weights, 1, 114, logit_sizes, 1);
 
     CTripleTriad env = {
         .width = 990,
@@ -65,7 +66,8 @@ void interactive() {
 
         tick = (tick + 1) % 45;
 
-        if (env.actions[0] != NOOP) {
+        if (action != NOOP) {
+            env.actions[0] = action;
             c_step(&env);
         }
 

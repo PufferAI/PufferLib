@@ -8,6 +8,34 @@ from pufferlib import pufferl
 def cli():
     pufferl.train('puffer_breakout')
 
+# Simple trainer based on pufferl functions
+def simple_trainer(env_name='puffer_breakout'):
+    args = pufferl.load_config(env_name)
+
+    # You can customize the puffer-provided config
+    args['vec']['num_envs'] = 2
+    args['env']['num_envs'] = 2048
+    args['policy']['hidden_size'] = 256
+    args['rnn']['input_size'] = 256
+    args['rnn']['hidden_size'] = 256
+    args['train']['total_timesteps'] = 10_000_000
+    args['train']['learning_rate'] = 0.03
+
+    # Or, you can create and use a separate config file
+    # args = pufferl.load_config_file(<YOUR_OWN_CONFIG.ini>, fill_in_default=True)
+
+    vecenv = pufferl.load_env(env_name, args)
+    policy = pufferl.load_policy(args, vecenv, env_name)
+
+    trainer = pufferl.PuffeRL(args['train'], vecenv, policy)
+
+    while trainer.epoch < trainer.total_epochs:
+        trainer.evaluate()
+        logs = trainer.train()
+
+    trainer.print_dashboard()
+    trainer.close()
+
 class Policy(torch.nn.Module):
     def __init__(self, env):
         super().__init__()
@@ -19,15 +47,15 @@ class Policy(torch.nn.Module):
         self.action_head = torch.nn.Linear(128, env.single_action_space.n)
         self.value_head = torch.nn.Linear(128, 1)
 
-    def forward(self, observations, state=None):
+    def forward_eval(self, observations, state=None):
         hidden = self.net(observations)
         logits = self.action_head(hidden)
         values = self.value_head(hidden)
         return logits, values
 
     # We use this to work around a major torch perf issue
-    def forward_train(self, observations, state=None):
-        return self.forward(observations, state)
+    def forward(self, observations, state=None):
+        return self.forward_eval(observations, state)
 
 # Managing your own trainer
 if __name__ == '__main__':

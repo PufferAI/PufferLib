@@ -7,7 +7,7 @@
 #define MAP_SMALL_WIDTH 1280
 #define MAP_SMALL_HEIGHT 640
 #define MAP_MEDIUM_WIDTH 1280
-#define MAP_MEDIUM_HEIGHT 1024
+#define MAP_MEDIUM_HEIGHT 640
 
 void demo(int map_choice) {
     int width;
@@ -26,20 +26,21 @@ void demo(int map_choice) {
         .width = width,
         .height = height,
         .map_choice = map_choice,
-        .num_agents = 4,
-        .num_requested_shelves = 4,
+        .num_agents = 8,
+        .num_requested_shelves = 8,
         .grid_square_size = 64,
         .human_agent_idx = 0,
 	.reward_type = 2
     };
-    Weights* weights = load_weights("resources/rware_weights.bin", 136454);
-    LinearLSTM* net = make_linearlstm(weights, env.num_agents, 27, 5);
+    Weights* weights = load_weights("resources/rware/rware_weights.bin", 136454);
+    int logit_sizes[1] = {5};
+    LinearLSTM* net = make_linearlstm(weights, env.num_agents, 27, logit_sizes, 1);
 
     allocate(&env);
     c_reset(&env);
     c_render(&env);
 
-    int tick = 0;
+    int tick = 1;
     while (!WindowShouldClose()) {
         if (tick % 12 == 0) {
             tick = 0;
@@ -114,7 +115,7 @@ void performance_test() {
 }
 
 int main() {
-    demo(1);
+    demo(2);
     //performance_test();
     return 0;
 }

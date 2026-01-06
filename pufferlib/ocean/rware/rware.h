@@ -165,6 +165,7 @@ struct CRware {
     int num_agents;
     int num_requested_shelves;
     int* agent_locations;
+    int* old_agent_locations;
     int* agent_directions;
     int* agent_states;
     int human_agent_idx;
@@ -210,6 +211,7 @@ void place_agent(CRware* env, int agent_idx) {
         }
 
         // Position is valid, place the agent
+        env->old_agent_locations[agent_idx] = random_pos;
         env->agent_locations[agent_idx] = random_pos;
         env->agent_directions[agent_idx] = rand() % 4;
         env->agent_states[agent_idx] = 0;
@@ -274,6 +276,7 @@ void init(CRware* env) {
     int map_size = map_sizes[env->map_choice - 1];
     env->warehouse_states = (int*)calloc(map_size, sizeof(int));
     env->agent_locations = (int*)calloc(env->num_agents, sizeof(int));
+    env->old_agent_locations = (int*)calloc(env->num_agents, sizeof(int));
     env->agent_directions = (int*)calloc(env->num_agents, sizeof(int));
     env->agent_states = (int*)calloc(env->num_agents, sizeof(int));
     env->scores = (float*)calloc(env->num_agents, sizeof(float));
@@ -682,6 +685,7 @@ void c_step(CRware* env) {
     memset(env->rewards, 0, env->num_agents * sizeof(float));
     MovementGraph* graph = env->movement_graph;
     for (int i = 0; i < env->num_agents; i++) {
+        env->old_agent_locations[i] = env->agent_locations[i];
         env->agent_logs[i].episode_length += 1;
         int action = env->actions[i];
         
@@ -721,6 +725,7 @@ const Color PUFF_BACKGROUND2 = (Color){18, 72, 72, 255};
 struct Client {
     float width;
     float height;
+    int tick;
     Texture2D puffers;
 };
 
@@ -728,9 +733,10 @@ Client* make_client(CRware* env) {
     Client* client = (Client*)calloc(1, sizeof(Client));
     client->width = env->width;
     client->height = env->height;
+    client->tick = 0;
     InitWindow(env->width, env->height, "PufferLib Ray RWare");
     SetTargetFPS(60);
-    client->puffers = LoadTexture("resources/puffers_128.png");
+    client->puffers = LoadTexture("resources/shared/puffers_128.png");
     return client;
 }
 
@@ -744,6 +750,7 @@ void c_render(CRware* env) {
         exit(0);
     }
     BeginDrawing();
+    ClearBackground(PUFF_BACKGROUND);    
     
     int map_size = map_sizes[env->map_choice - 1];
     int cols = map_cols[env->map_choice - 1];
@@ -785,42 +792,57 @@ void c_render(CRware* env) {
             env->grid_square_size - 2,
             state != EMPTY ? WHITE : BLANK
         );
-        // draw agent
-        for (int j = 0; j < env->num_agents; j++) {
-            if (env->agent_locations[j] != i) {
-                continue;
-            }
-            int starting_sprite_x = 0;
-            int rotation = 90*env->agent_directions[j];
-            if (rotation == 180) {
-                starting_sprite_x = 128;
-                rotation = 0;
-            }
-            DrawTexturePro(
-                client->puffers,
-                (Rectangle){starting_sprite_x, 0, 128, 128},
-                (Rectangle){
-                    x_pos + env->grid_square_size/2,
-                    y_pos + env->grid_square_size/2,
-                    env->grid_square_size,
-                    env->grid_square_size
-                },
-                (Vector2){env->grid_square_size/2, env->grid_square_size/2},
-                rotation,
-                //env->agent_states[j] != UNLOADED ? RED : WHITE
-                WHITE
-            );
-            // put a number on top of the agent
-            DrawText(
-                TextFormat("%d", j),
+    }
+    // draw agent
+    for (int j = 0; j < env->num_agents; j++) {
+        int cols = map_cols[env->map_choice - 1];
+
+        int old_agent_location = env->old_agent_locations[j];
+        int old_x_pos = (old_agent_location % cols) * env->grid_square_size;
+        int old_y_pos = (old_agent_location / cols) * env->grid_square_size;
+
+        int new_agent_location = env->agent_locations[j];
+        int new_x_pos = (new_agent_location % cols) * env->grid_square_size;
+        int new_y_pos = (new_agent_location / cols) * env->grid_square_size;
+
+        float interp_old = (1.0f - 1.0f/12.0f*(float)client->tick);
+        float interp_new = 1.0f/12.0f*(float)client->tick;
+
+        int x_pos = interp_old*(float)old_x_pos + interp_new*(float)new_x_pos;
+        int y_pos = interp_old*(float)old_y_pos + interp_new*(float)new_y_pos;
+ 
+        int starting_sprite_x = 0;
+        int rotation = 90*env->agent_directions[j];
+        if (rotation == 180) {
+            starting_sprite_x = 128;
+            rotation = 0;
+        }
+        DrawTexturePro(
+            client->puffers,
+            (Rectangle){starting_sprite_x, 0, 128, 128},
+            (Rectangle){
                 x_pos + env->grid_square_size/2,
                 y_pos + env->grid_square_size/2,
-                20,
-                WHITE
-            );
-        }
+                env->grid_square_size,
+                env->grid_square_size
+            },
+            (Vector2){env->grid_square_size/2, env->grid_square_size/2},
+            rotation,
+            //env->agent_states[j] != UNLOADED ? RED : WHITE
+            WHITE
+        );
+        // put a number on top of the agent
+        DrawText(
+            TextFormat("%d", j),
+            x_pos + env->grid_square_size/2,
+            y_pos + env->grid_square_size/2,
+            20,
+            WHITE
+        );
     }
-    ClearBackground(PUFF_BACKGROUND);    
+
+    client->tick = (client->tick + 1) % 12;
+
     EndDrawing();
 }
 void close_client(Client* client) {

@@ -18,6 +18,7 @@ cdef extern from "puffernet.h":
     void _linear(float* input, float* weights, float* bias, float* output,
         int batch_size, int input_dim, int output_dim)
     void _relu(float* input, float* output,int size)
+    void _gelu(float* input, float* output, int size)
     float _sigmoid(float x)
     void _conv2d(float* input, float* weights, float* bias,
         float* output, int batch_size, int in_width, int in_height,
@@ -30,6 +31,8 @@ cdef extern from "puffernet.h":
     void _lstm(float* input, float* state_h, float* state_c, float* weights_input,
         float* weights_state, float* bias_input, float*bias_state,
         float *buffer, int batch_size, int input_size, int hidden_size)
+    void _layernorm(float* input, float* weights, float* bias, float* output,
+        int batch_size, int input_size)
     void _one_hot(int* input, int* output, int batch_size,
         int input_size, int num_classes)
     void _cat_dim1(float* x, float* y, float* output,
@@ -44,6 +47,9 @@ def puf_linear_layer(cnp.ndarray input, cnp.ndarray weights, cnp.ndarray bias, c
 
 def puf_relu(cnp.ndarray input, cnp.ndarray output, int size):
     _relu(<float*> input.data, <float*> output.data, size)
+
+def puf_gelu(cnp.ndarray input, cnp.ndarray output, int size):
+    _gelu(<float*> input.data, <float*> output.data, size)
 
 def puf_sigmoid(float x):
     return _sigmoid(x)
@@ -73,6 +79,11 @@ def puf_embedding(cnp.ndarray input, cnp.ndarray weights, cnp.ndarray output,
         int batch_size, int num_embeddings, int embedding_dim):
     _embedding(<int*> input.data, <float*> weights.data, <float*> output.data,
         batch_size, num_embeddings, embedding_dim)
+
+def puf_layernorm(cnp.ndarray input, cnp.ndarray weights, cnp.ndarray bias,
+        cnp.ndarray output, int batch_size, int input_size):
+    _layernorm(<float*> input.data, <float*> weights.data, <float*> bias.data,
+        <float*> output.data, batch_size, input_size)
 
 def puf_one_hot(cnp.ndarray input, cnp.ndarray output, int batch_size, int input_size, int num_classes):
     _one_hot(<int*> input.data, <int*> output.data, batch_size, input_size, num_classes)

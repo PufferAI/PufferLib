@@ -14,13 +14,13 @@ void demo(int grid_size, int num_agents, int num_trash, int num_bins, int max_st
         .do_human_control = true
     };
 
-    bool use_pretrained_model = false;
+    bool use_pretrained_model = true;
 
     Weights* weights;
     ConvLSTM* net;
 
     if (use_pretrained_model){
-        weights = load_weights("resources/trash_pickup_weights.bin", 150245);
+        weights = load_weights("resources/trash_pickup/trash_pickup_weights.bin", 150245);
         int vision = 2*env.agent_sight_range + 1;
         net = make_convlstm(weights, env.num_agents, vision, 5, 32, 128, 4);
     }
@@ -31,7 +31,7 @@ void demo(int grid_size, int num_agents, int num_trash, int num_bins, int max_st
 
     int tick = 0;
     while (!WindowShouldClose()) {
-        if (tick % 12 == 0) {
+        if (tick % 2 == 0) {
             // Random actions for all agents
             for (int i = 0; i < env.num_agents; i++) {
                 if (use_pretrained_model)
@@ -110,7 +110,7 @@ void performance_test() {
 
 // Main entry point
 int main() {
-    demo(10, 4, 20, 1, 150); // Visual demo
+    demo(20, 8, 40, 2, 300); // Visual demo
     //performance_test(); // Uncomment for benchmarking
     return 0;
 }

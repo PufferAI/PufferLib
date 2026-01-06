@@ -1,7 +1,16 @@
 import torch
 import numpy as np
 
-from pufferlib import puffernet
+
+import pyximport
+pyximport.install(
+    setup_args={"include_dirs": [
+        np.get_include(),
+        'pufferlib/extensions',
+    ]},
+)
+
+from pufferlib.extensions import puffernet
 
 # TODO: Should probably add a safe mode that type checks input arrays
 # It's user error, but it is a big foot gun
@@ -30,6 +39,17 @@ def test_puffernet_relu(batch_size=16, input_size=128):
     
     # PufferNet done second because it is in-place on the input
     puffernet.puf_relu(input_puffer, input_puffer, batch_size*input_size)
+
+    assert_near(input_puffer, output_torch.numpy())
+
+def test_puffernet_gelu(batch_size=16, input_size=128):
+    input_puffer = make_dummy_data(batch_size, input_size)
+
+    input_torch = torch.from_numpy(input_puffer)
+    output_torch = torch.nn.functional.gelu(input_torch, approximate='tanh').detach()
+
+    # PufferNet done second because it is in-place on the input
+    puffernet.puf_gelu(input_puffer, input_puffer, batch_size*input_size)
 
     assert_near(input_puffer, output_torch.numpy())
 
@@ -106,9 +126,6 @@ def test_puffernet_convolution_3d_layer(batch_size=4096, in_width=9, in_height=5
     torch_conv.bias.data = bias_torch
     output_torch = torch_conv(input_torch).detach()
     assert_near(output_puffer, output_torch.numpy())
-    
-    
-    
 
 def test_puffernet_lstm(batch_size=16, input_size=128, hidden_size=128):
     input_np = make_dummy_data(batch_size, input_size, seed=42)
@@ -163,6 +180,24 @@ def test_puffernet_embedding(batch_size=16, num_embeddings=128, embedding_dim=32
 
     assert_near(output_puffer, output_torch.numpy())
 
+def test_puffernet_layernorm(batch_size=16, input_size=128):
+    input_np = make_dummy_data(batch_size, input_size, seed=42)
+    weights_np = make_dummy_data(input_size, seed=43)
+    bias_np = make_dummy_data(input_size, seed=44)
+    output_puffer = np.zeros((batch_size, input_size), dtype=np.float32)
+    puffernet.puf_layernorm(input_np, weights_np, bias_np, output_puffer,
+        batch_size, input_size)
+
+    input_torch = torch.from_numpy(input_np)
+    weights_torch = torch.from_numpy(weights_np)
+    bias_torch = torch.from_numpy(bias_np)
+    torch_layernorm = torch.nn.LayerNorm(input_size)
+    torch_layernorm.weight.data = weights_torch
+    torch_layernorm.bias.data = bias_torch
+    output_torch = torch_layernorm(input_torch).detach()
+
+    assert_near(output_puffer, output_torch.numpy())
+
 def test_puffernet_one_hot(batch_size=16, input_size=128, num_classes=10):
     input_np = make_dummy_int_data(num_classes, batch_size, input_size)
     output_puffer = np.zeros((batch_size, input_size, num_classes), dtype=np.int32)
@@ -198,14 +233,38 @@ def test_puffernet_argmax_multidiscrete(batch_size=16, logit_sizes=[5,7,2]):
 
     assert_near(output_puffer, output_torch.numpy())
 
+def test_nmmo3(batch_size=1, input_size=512, hidden_size=512):
+    input_torch = torch.arange(11*15*10 + 47 + 10) % 4
+    input_torch = input_torch.view(1, -1)
+
+    from pufferlib.ocean.torch import NMMO3, NMMO3LSTM
+    from pufferlib.ocean import env_creator
+    env = env_creator('puffer_nmmo3')()
+    model = NMMO3(env, hidden_size=hidden_size)
+    model = NMMO3LSTM(env, policy=model, input_size=input_size, hidden_size=hidden_size)
+    state_dict = torch.load('nmmo3_642b.pt')
+    state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+    model.load_state_dict(state_dict)
+
+    state = {
+        'lstm_h': torch.zeros(batch_size, hidden_size),
+        'lstm_c': torch.zeros(batch_size, hidden_size),
+    }
+
+    output = model.forward_eval(input_torch, state)
+    pass
+
 if __name__ == '__main__':
     test_puffernet_relu()
+    test_puffernet_gelu()
     test_puffernet_sigmoid()
     test_puffernet_linear_layer()
     test_puffernet_convolution_layer()
     test_puffernet_convolution_3d_layer()
     test_puffernet_lstm()
     test_puffernet_embedding()
+    test_puffernet_layernorm()
     test_puffernet_one_hot()
     test_puffernet_cat_dim1()
     test_puffernet_argmax_multidiscrete()
+    #test_nmmo3()

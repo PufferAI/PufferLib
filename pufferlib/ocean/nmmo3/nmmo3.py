@@ -206,52 +206,8 @@ class NMMO3(pufferlib.PufferEnv):
         return self.observations, self.rewards, self.terminals, self.truncations, info
 
     def render(self):
-        self.c_env.render()
-        #all_maps = [e.rendered.astype(np.float32) for e in self.c_env.envs]
-        #all_counts = [e.counts.astype(np.float32) for e in self.c_env.envs]
-
-        '''
-        agg_maps = np.zeros((2048, 2048, 3), dtype=np.float32)
-        agg_counts = np.zeros((2048, 2048), dtype=np.float32)
-
-        agg_maps[256:512, :1024] = all_maps[0]
-        agg_counts[256:512, :1024] = all_counts[0]
-
-        agg_maps[512:1024, :1024] = all_maps[1]
-        agg_counts[512:1024, :1024] = all_counts[1]
-
-        agg_maps[1024:2048, :1024] = all_maps[2]
-        agg_counts[1024:2048, :1024] = all_counts[2]
-
-        agg_maps[:, 1024:] = all_maps[3]
-        agg_counts[:, 1024:] = all_counts[3]
-
-        agg_maps = all_maps[0]
-        agg_counts = all_counts[0]
-
-        map = agg_maps
-        counts = agg_counts.astype(np.float32)/255
-
-        # Lerp rendered with counts
-        #counts = self.c_env.counts.astype(np.float32)/255
-        counts = np.clip(25*counts, 0, 1)[:, :, None]
-
-        lerped = map * (1 - counts) + counts * np.array([0, 255, 255])
-
-        num_players = self.num_players
-        r = self.players.r
-        c = self.players.c
-        lerped[r[:num_players], c[:num_players]] = np.array([0, 0, 0])
-
-        num_enemies = self.num_enemies
-        r = self.enemies.r
-        c = self.enemies.c
-        lerped[r[:num_enemies], c[:num_enemies]] = np.array([255, 0, 0])
-
-        lerped = lerped[::2, ::2]
-
-        return lerped.astype(np.uint8)
-        '''
+        for i in range(36):
+            binding.vec_render(self.c_envs, 0)
 
     def close(self):
         binding.vec_close(self.c_envs)

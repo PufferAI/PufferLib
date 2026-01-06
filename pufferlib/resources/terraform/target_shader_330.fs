@@ -41,9 +41,9 @@ void main()
     float g = max(glow, delta_color.g - black);
     float b = max(glow, delta_color.b - black);
     float a = max(glow, abs_delta);
-    finalColor.rgba = vec4(r, g, b, a);
+    // finalColor.rgba = vec4(r, g, b, a);
 
 
-    //finalColor.rgba = vec4(delta_color.r-black, delta_color.g-black, delta_color.b-black, abs_delta);
+    finalColor.rgba = vec4(delta_color.r-black, delta_color.g-black, delta_color.b-black, abs_delta);
 }
 

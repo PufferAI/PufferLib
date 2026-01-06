@@ -5,8 +5,9 @@
 const unsigned char NOOP = 8;
 
 void interactive() {
-    Weights* weights = load_weights("resources/connect4_weights.bin", 138632);
-    LinearLSTM* net = make_linearlstm(weights, 1, 42, 7);
+    Weights* weights = load_weights("resources/connect4/connect4_weights.bin", 138632);
+    int logit_sizes[] = {7};
+    LinearLSTM* net = make_linearlstm(weights, 1, 42, logit_sizes, 1);
 
     CConnect4 env = {
     };

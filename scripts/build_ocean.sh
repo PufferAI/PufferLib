@@ -8,11 +8,19 @@ PLATFORM="$(uname -s)"
 SRC_DIR="pufferlib/ocean/$ENV"
 WEB_OUTPUT_DIR="build_web/$ENV"
 RAYLIB_NAME='raylib-5.5_macos'
+BOX2D_NAME='box2d-macos-arm64'
 if [ "$PLATFORM" = "Linux" ]; then
     RAYLIB_NAME='raylib-5.5_linux_amd64'
+    BOX2D_NAME='box2d-linux-amd64'
 fi
 if [ "$MODE" = "web" ]; then
     RAYLIB_NAME='raylib-5.5_webassembly'
+    BOX2D_NAME='box2d-web'
+fi
+
+LINK_ARCHIVES="./$RAYLIB_NAME/lib/libraylib.a"
+if [ "$ENV" = "impulse_wars" ]; then
+    LINK_ARCHIVES="$LINK_ARCHIVES ./$BOX2D_NAME/libbox2d.a"
 fi
 
 # Create build output directory
@@ -25,9 +33,12 @@ if [ "$MODE" = "web" ]; then
         "$SRC_DIR/$ENV.c" \
         -O3 \
         -Wall \
-        ./$RAYLIB_NAME/lib/libraylib.a \
+        $LINK_ARCHIVES \
         -I./$RAYLIB_NAME/include \
-        -I./pufferlib\
+        -I./$BOX2D_NAME/include \
+        -I./$BOX2D_NAME/src \
+        -I./pufferlib/extensions \
+        -I./pufferlib \
         -L. \
         -L./$RAYLIB_NAME/lib \
         -sASSERTIONS=2 \
@@ -39,22 +50,31 @@ if [ "$MODE" = "web" ]; then
         -s FORCE_FILESYSTEM=1 \
         --shell-file ./scripts/minshell.html \
         -sINITIAL_MEMORY=512MB \
+        -sALLOW_MEMORY_GROWTH \
         -sSTACK_SIZE=512KB \
+        -DNDEBUG \
         -DPLATFORM_WEB \
         -DGRAPHICS_API_OPENGL_ES3 \
-        --preload-file pufferlib/resources@resources/ 
+        --preload-file pufferlib/resources/$1@resources/$1 \
+        --preload-file pufferlib/resources/shared@resources/shared 
     echo "Web build completed: $WEB_OUTPUT_DIR/game.html"
+    echo "Preloaded files:"
+    echo "  pufferlib/resources/$1@resources$1"
+    echo "  pufferlib/resources/shared@resources/shared"
     exit 0
 fi
 
 FLAGS=(
     -Wall
-    -I./$RAYLIB_NAME/include 
+    -I./$RAYLIB_NAME/include
+    -I./$BOX2D_NAME/include
+    -I./$BOX2D_NAME/src
     -I./pufferlib/extensions
     "$SRC_DIR/$ENV.c" -o "$ENV"
-    ./$RAYLIB_NAME/lib/libraylib.a
+    $LINK_ARCHIVES
     -lm
     -lpthread
+    -ferror-limit=3
     -DPLATFORM_DESKTOP
 )
 
@@ -81,7 +101,7 @@ if [ "$MODE" = "local" ]; then
     clang -g -O0 ${FLAGS[@]}
 elif [ "$MODE" = "fast" ]; then
     echo "Building optimized $ENV for local testing..."
-    clang -pg -O2 ${FLAGS[@]}
+    clang -pg -O2 -DNDEBUG ${FLAGS[@]}
     echo "Built to: $ENV"
 else
     echo "Invalid mode specified: local|fast|web"

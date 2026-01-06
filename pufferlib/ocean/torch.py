@@ -129,7 +129,7 @@ class Terraform(nn.Module):
         self.hidden_size = hidden_size
         self.is_continuous = False
 
-        self.net_2d = nn.Sequential(
+        self.local_net_2d = nn.Sequential(
             pufferlib.pytorch.layer_init(
                 nn.Conv2d(2, cnn_channels, 5, stride=3)),
             nn.ReLU(),
@@ -138,13 +138,24 @@ class Terraform(nn.Module):
             nn.ReLU(),
             nn.Flatten(),
         )
+
+        self.global_net_2d = nn.Sequential(
+            pufferlib.pytorch.layer_init(
+                nn.Conv2d(2, cnn_channels, 3, stride=1)),
+            nn.ReLU(),
+            pufferlib.pytorch.layer_init(
+                nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1)),
+            nn.ReLU(),
+            nn.Flatten(),
+        )
+
         self.net_1d = nn.Sequential(
             pufferlib.pytorch.layer_init(
-                nn.Linear(4, hidden_size)),
+                nn.Linear(5, hidden_size)),
             nn.Flatten(),
         )
         self.proj = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(hidden_size + cnn_channels, hidden_size)),
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size + cnn_channels*5, hidden_size)),
             nn.ReLU(),
         )
         self.atn_dim = env.single_action_space.nvec.tolist()
@@ -161,11 +172,14 @@ class Terraform(nn.Module):
         return self.forward(x, state)
 
     def encode_observations(self, observations, state=None):
-        obs_2d = observations[:, :242].reshape(-1, 2, 11, 11).float() / 255.0
-        obs_1d = observations[:, 242:].reshape(-1, 4).float() / 255.0
-        hidden_2d = self.net_2d(obs_2d)
+        # breakpoint()
+        obs_2d = observations[:, :242].reshape(-1, 2, 11, 11).float()
+        obs_1d = observations[:, 242:247].reshape(-1, 5).float()
+        location_2d = observations[:, 247:].reshape(-1,2, 6, 6).float()
+        hidden_local_2d = self.local_net_2d(obs_2d)
+        hidden_global_2d = self.global_net_2d(location_2d)
         hidden_1d = self.net_1d(obs_1d)
-        hidden = torch.cat([hidden_2d, hidden_1d], dim=1)
+        hidden = torch.cat([hidden_local_2d, hidden_global_2d, hidden_1d], dim=1)
         return self.proj(hidden)
 
     def decode_actions(self, hidden):
@@ -177,35 +191,14 @@ class Terraform(nn.Module):
 
 
 class Snake(nn.Module):
-    def __init__(self, env, cnn_channels=32, hidden_size=128,
-            use_p3o=False, p3o_horizon=32, use_diayn=False, diayn_skills=8, **kwargs):
+    def __init__(self, env, cnn_channels=32, hidden_size=128):
         super().__init__()
         self.hidden_size = hidden_size
         self.is_continuous = False
-        self.use_diayn = use_diayn
 
         encode_dim = cnn_channels
-        if use_diayn:
-            encode_dim += diayn_skills
-            self.diayn_skills = diayn_skills
-            '''
-            self.diayn_discriminator = nn.Sequential(
-                pufferlib.pytorch.layer_init(
-                    nn.Conv2d(64, cnn_channels, 5, stride=3)),
-                nn.ReLU(),
-                pufferlib.pytorch.layer_init(
-                    nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1)),
-                nn.ReLU(),
-                nn.Flatten(),
-                pufferlib.pytorch.layer_init(nn.Linear(cnn_channels, diayn_skills)),
-            )
-            '''
-            self.diayn_discriminator = nn.Sequential(
-                pufferlib.pytorch.layer_init(nn.Linear(64*env.single_action_space.n, hidden_size)),
-                nn.ReLU(),
-                pufferlib.pytorch.layer_init(nn.Linear(hidden_size, diayn_skills)),
-            )
- 
+
+        '''
         self.network= nn.Sequential(
             pufferlib.pytorch.layer_init(
                 nn.Conv2d(8, cnn_channels, 5, stride=3)),
@@ -219,26 +212,19 @@ class Snake(nn.Module):
             pufferlib.pytorch.layer_init(nn.Linear(encode_dim, hidden_size)),
             nn.ReLU(),
         )
-        self.actor = pufferlib.pytorch.layer_init(
+ 
+        '''
+        self.encoder= torch.nn.Sequential(
+            nn.Linear(8*np.prod(env.single_observation_space.shape), hidden_size),
+            nn.GELU(),
+        )
+        self.decoder = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
-
-        self.use_p3o = use_p3o
-        self.p3o_horizon = p3o_horizon
-        if use_p3o:
-            self.value_mean = pufferlib.pytorch.layer_init(
-                nn.Linear(hidden_size, p3o_horizon), std=1)
-            self.value_logstd = nn.Parameter(torch.zeros(1, p3o_horizon))
-        else:
-            self.value = pufferlib.pytorch.layer_init(
-                nn.Linear(hidden_size, 1), std=1)
-
-    def discrim_forward(self, obs):
-        #obs = F.one_hot(obs.long(), 8).permute(0, 1, 4, 2, 3).float()
-        #B, f, c, h, w = obs.shape
-        #obs = obs.reshape(B, f*c, h, w)
-        return self.diayn_discriminator(obs)
+        self.value = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, 1), std=1)
 
     def forward(self, observations, state=None):
+        #observations = F.one_hot(observations.long(), 8).permute(0, 3, 1, 2).float()
         hidden = self.encode_observations(observations)
         actions, value = self.decode_actions(hidden)
         return actions, value
@@ -247,25 +233,23 @@ class Snake(nn.Module):
         return self.forward(x, state)
 
     def encode_observations(self, observations, state=None):
-        observations = F.one_hot(observations.long(), 8).permute(0, 3, 1, 2).float()
-        hidden = self.network(observations)
-
-        if self.use_diayn:
-            z_one_hot = F.one_hot(state.diayn_z, self.diayn_skills).float()
-            hidden = torch.cat([hidden, z_one_hot], dim=1)
-
-        return self.proj(hidden)
+        observations = F.one_hot(observations.long(), 8).view(-1, 11*11*8).float()
+        return self.encoder(observations)
 
     def decode_actions(self, hidden):
-        action = self.actor(hidden)
+        action = self.decoder(hidden)
+        value = self.value(hidden)
+        return action, value
 
-        if self.use_p3o:
-            value_mean = self.value_mean(hidden)
-            value_logstd = self.value_logstd.expand_as(value_mean)
-            return action, value_mean, value_logstd
-        else:
-            value = self.value(hidden)
-            return action, value
+'''
+class Snake(pufferlib.models.Default):
+    def __init__(self, env, hidden_size=128):
+        super().__init__()
+
+    def encode_observations(self, observations, state=None):
+        observations = F.one_hot(observations.long(), 8).view(-1, 11*11*8).float()
+        super().encode_observations(observations, state)
+'''
 
 class Grid(nn.Module):
     def __init__(self, env, cnn_channels=32, hidden_size=128, **kwargs):
@@ -477,7 +461,6 @@ class TrashPickup(nn.Module):
             nn.ReLU(),
             nn.Flatten(),
             pufferlib.pytorch.layer_init(nn.Linear(cnn_channels, hidden_size)),
-            nn.ReLU(),
         )
         self.actor = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
@@ -574,7 +557,6 @@ class ImpulseWarsPolicy(nn.Module):
         num_drones: int = 2,
         continuous: bool = False,
         is_training: bool = True,
-        device: str = "cuda",
         **kwargs,
     ):
         super().__init__()
@@ -592,13 +574,13 @@ class ImpulseWarsPolicy(nn.Module):
             + [self.obsInfo.wallTypes + 1] * self.obsInfo.numFloatingWallObs
             + [self.numDrones + 1] * self.obsInfo.numProjectileObs,
         )
-        discreteOffsets = torch.tensor([0] + list(np.cumsum(self.discreteFactors)[:-1]), device=device).view(
+        discreteOffsets = torch.tensor([0] + list(np.cumsum(self.discreteFactors)[:-1])).view(
             1, -1
         )
         self.register_buffer("discreteOffsets", discreteOffsets, persistent=False)
         self.discreteMultihotDim = self.discreteFactors.sum()
 
-        multihotBuffer = torch.zeros(batch_size, self.discreteMultihotDim, device=device)
+        multihotBuffer = torch.zeros(batch_size, self.discreteMultihotDim)
         self.register_buffer("multihotOutput", multihotBuffer, persistent=False)
 
         # most of the observation is a 2D array of bytes, but the end
@@ -679,9 +661,6 @@ class ImpulseWarsPolicy(nn.Module):
         hidden = self.encode_observations(obs)
         actions, value = self.decode_actions(hidden)
         return actions, value
-
-    def forward_train(self, x, state=None):
-        return self.forward(x, state)
 
     def unpack(self, batchSize: int, obs: torch.Tensor) -> torch.Tensor:
         # prepare map obs to be unpacked
@@ -764,44 +743,38 @@ class ImpulseWarsPolicy(nn.Module):
             t = torch.as_tensor(mapSpace.sample()[None])
             return self.mapCNN(t).shape[1]
 
-class GPUDrive(nn.Module):
+class Drive(nn.Module):
     def __init__(self, env, input_size=128, hidden_size=128, **kwargs):
         super().__init__()
         self.hidden_size = hidden_size
         self.ego_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
-                nn.Linear(6, input_size)),
+                nn.Linear(7, input_size)),
+            nn.LayerNorm(input_size),
             # nn.ReLU(),
-            # pufferlib.pytorch.layer_init(
-            #    nn.Linear(input_size, input_size))
+            pufferlib.pytorch.layer_init(
+                nn.Linear(input_size, input_size))
         )
         max_road_objects = 13
         self.road_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
                 nn.Linear(max_road_objects, input_size)),
+            nn.LayerNorm(input_size),
             # nn.ReLU(),
-            # pufferlib.pytorch.layer_init(
-            #    nn.Linear(input_size, input_size))
+            pufferlib.pytorch.layer_init(
+                nn.Linear(input_size, input_size))
         )
         max_partner_objects = 7
         self.partner_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
                 nn.Linear(max_partner_objects, input_size)),
+            nn.LayerNorm(input_size),
             # nn.ReLU(),
-            # pufferlib.pytorch.layer_init(
-            #    nn.Linear(input_size, input_size))
+            pufferlib.pytorch.layer_init(
+                nn.Linear(input_size, input_size))
         )
 
-        '''
-        self.post_mask_road_encoder = nn.Sequential(
-            pufferlib.pytorch.layer_init(
-                nn.Linear(input_size, input_size)),
-        )
-        self.post_mask_partner_encoder = nn.Sequential(
-            pufferlib.pytorch.layer_init(
-                nn.Linear(input_size, input_size)),
-        )
-        '''
+
         self.shared_embedding = nn.Sequential(
             nn.GELU(),
             pufferlib.pytorch.layer_init(nn.Linear(3*input_size,  hidden_size)),
@@ -823,7 +796,7 @@ class GPUDrive(nn.Module):
         return self.forward(x, state)
    
     def encode_observations(self, observations, state=None):
-        ego_dim = 6
+        ego_dim = 7
         partner_dim = 63 * 7
         road_dim = 200*7
         ego_obs = observations[:, :ego_dim]
@@ -836,7 +809,6 @@ class GPUDrive(nn.Module):
         road_categorical = road_objects[:, :, 6]
         road_onehot = F.one_hot(road_categorical.long(), num_classes=7)  # Shape: [batch, 200, 7]
         road_objects = torch.cat([road_continuous, road_onehot], dim=2)
-
         ego_features = self.ego_encoder(ego_obs)
         partner_features, _ = self.partner_encoder(partner_objects).max(dim=1)
         road_features, _ = self.road_encoder(road_objects).max(dim=1)
@@ -853,3 +825,141 @@ class GPUDrive(nn.Module):
         action = torch.split(action, self.atn_dim, dim=1)
         value = self.value_fn(flat_hidden)
         return action, value
+
+class Drone(nn.Module):
+    ''' Drone policy. Flattens obs and applies a linear layer.
+    '''
+    def __init__(self, env, hidden_size=128):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.is_multidiscrete = isinstance(env.single_action_space,
+                pufferlib.spaces.MultiDiscrete)
+        self.is_continuous = isinstance(env.single_action_space,
+                pufferlib.spaces.Box)
+        try:
+            self.is_dict_obs = isinstance(env.env.observation_space, pufferlib.spaces.Dict) 
+        except:
+            self.is_dict_obs = isinstance(env.observation_space, pufferlib.spaces.Dict) 
+
+        if self.is_dict_obs:
+            self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
+            input_size = int(sum(np.prod(v.shape) for v in env.env.observation_space.values()))
+            self.encoder = nn.Linear(input_size, self.hidden_size)
+        else:
+            self.encoder = torch.nn.Sequential(
+                nn.Linear(np.prod(env.single_observation_space.shape), hidden_size),
+                nn.GELU(),
+            )
+
+        if self.is_multidiscrete:
+            self.action_nvec = tuple(env.single_action_space.nvec)
+            self.decoder = pufferlib.pytorch.layer_init(
+                    nn.Linear(hidden_size, sum(self.action_nvec)), std=0.01)
+        elif not self.is_continuous:
+            self.decoder = pufferlib.pytorch.layer_init(
+                nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
+        else:
+            self.decoder_mean = pufferlib.pytorch.layer_init(
+                nn.Linear(hidden_size, env.single_action_space.shape[0]), std=0.01)
+            self.decoder_logstd = nn.Parameter(torch.zeros(
+                1, env.single_action_space.shape[0]))
+
+        self.value = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, 1), std=1)
+
+    def forward_eval(self, observations, state=None):
+        hidden = self.encode_observations(observations, state=state)
+        logits, values = self.decode_actions(hidden)
+        return logits, values
+
+    def forward(self, observations, state=None):
+        return self.forward_eval(observations, state)
+
+    def encode_observations(self, observations, state=None):
+        '''Encodes a batch of observations into hidden states. Assumes
+        no time dimension (handled by LSTM wrappers).'''
+        batch_size = observations.shape[0]
+        if self.is_dict_obs:
+            observations = pufferlib.pytorch.nativize_tensor(observations, self.dtype)
+            observations = torch.cat([v.view(batch_size, -1) for v in observations.values()], dim=1)
+        else: 
+            observations = observations.view(batch_size, -1)
+        return self.encoder(observations.float())
+
+    def decode_actions(self, hidden):
+        '''Decodes a batch of hidden states into (multi)discrete actions.
+        Assumes no time dimension (handled by LSTM wrappers).'''
+        if self.is_multidiscrete:
+            logits = self.decoder(hidden).split(self.action_nvec, dim=1)
+        elif self.is_continuous:
+            mean = self.decoder_mean(hidden)
+            logstd = self.decoder_logstd.expand_as(mean)
+            std = torch.exp(logstd)
+            logits = torch.distributions.Normal(mean, std)
+        else:
+            logits = self.decoder(hidden)
+
+        values = self.value(hidden)
+        return logits, values
+
+
+class G2048(nn.Module):
+    def __init__(self, env, hidden_size=128):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.is_continuous = False
+
+        num_obs = np.prod(env.single_observation_space.shape)
+
+        if hidden_size <= 256:
+            self.encoder = torch.nn.Sequential(
+                pufferlib.pytorch.layer_init(nn.Linear(num_obs, 512)),
+                nn.GELU(),
+                pufferlib.pytorch.layer_init(nn.Linear(512, 256)),
+                nn.GELU(),
+                pufferlib.pytorch.layer_init(nn.Linear(256, hidden_size)),
+                nn.GELU(),
+            )
+        else:
+            self.encoder = torch.nn.Sequential(
+                pufferlib.pytorch.layer_init(nn.Linear(num_obs, 2*hidden_size)),
+                nn.GELU(),
+                pufferlib.pytorch.layer_init(nn.Linear(2*hidden_size, hidden_size)),
+                nn.GELU(),
+                pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
+                nn.GELU(),
+            )
+
+        num_atns = env.single_action_space.n
+        self.decoder = torch.nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, num_atns), std=0.01),
+        )
+        self.value = torch.nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, 1), std=1.0),
+        )
+
+    def forward_eval(self, observations, state=None):
+        hidden = self.encode_observations(observations, state=state)
+        logits, values = self.decode_actions(hidden)
+        return logits, values
+
+    def forward(self, observations, state=None):
+        return self.forward_eval(observations, state)
+
+    def encode_observations(self, observations, state=None):
+        batch_size = observations.shape[0]
+        observations = observations.view(batch_size, -1).float()
+
+        # Scale the feat 1 (tile**1.5)
+        observations[:, :16] = observations[:, :16] / 100.0
+
+        return self.encoder(observations)
+
+    def decode_actions(self, hidden):
+        logits = self.decoder(hidden)
+        values = self.value(hidden)
+        return logits, values

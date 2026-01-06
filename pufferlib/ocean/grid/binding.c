@@ -20,6 +20,8 @@ static PyObject* my_shared(PyObject* self, PyObject* args, PyObject* kwargs) {
     env.max_size = max_size;
     init_grid(&env);
 
+    srand(time(NULL));
+    int start_seed = rand();
     for (int i = 0; i < num_maps; i++) {
         int sz = size;
         if (size == -1) {
@@ -31,7 +33,7 @@ static PyObject* my_shared(PyObject* self, PyObject* args, PyObject* kwargs) {
         }
 
         float difficulty = (float)rand()/(float)(RAND_MAX);
-        create_maze_level(&env, sz, sz, difficulty, i);
+        create_maze_level(&env, sz, sz, difficulty, start_seed + i);
         init_state(&levels[i], max_size, 1);
         get_state(&env, &levels[i]);
     }

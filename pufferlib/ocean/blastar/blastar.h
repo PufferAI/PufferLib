@@ -494,7 +494,6 @@ void c_render(Blastar* env) {
         }
         DrawText(TextFormat("SCORE: %d", env->player.score), 10, 10, 20, PUFF_CYAN);
         DrawText(TextFormat("LIVES: %d", env->player.lives), SCREEN_WIDTH - MeasureText(TextFormat("LIVES: %d", env->player.lives), 20) - 10, 10, 20, PUFF_CYAN);
-        DrawText(TextFormat("Episode returns (sum): %.2f", env->log.episode_return), 10, 40, 10, PUFF_RED);
     }
     EndDrawing();
 }

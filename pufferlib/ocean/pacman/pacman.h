@@ -648,7 +648,7 @@ Client *make_client(PacmanEnv *env) {
     SetTargetFPS(60);
 
     client->tileset = LoadTexture("resources/pacman/tileset.png");
-    client->pacman = LoadTexture("resources/puffers_128.png");
+    client->pacman = LoadTexture("resources/shared/puffers_128.png");
     client->frightened = LoadTexture("resources/pacman/scared.png");
 
     client->ghost_sprites[0].up = LoadTexture("resources/pacman/pinky_up.png");

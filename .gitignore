@@ -3,8 +3,8 @@ c_*.c
 pufferlib/extensions.c
 pufferlib/puffernet.c
 
-# Annoying mac files
-.DS_Store
+# hipified cuda extensions dir [HIP/ROCM]
+pufferlib/extensions/hip/
 
 # Raylib
 raylib_wasm/
@@ -39,6 +39,9 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Mac files
+.DS_Store
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -151,10 +154,11 @@ experiments/
 wandb/
 .neptune/
 raylib*/
+box2d*/
 
-# TODO: remove
 # Temp Impulse Wars files
 pufferlib/ocean/impulse_wars/*-debug/
 pufferlib/ocean/impulse_wars/*-release/
 pufferlib/ocean/impulse_wars/debug-*/
 pufferlib/ocean/impulse_wars/release-*/
+pufferlib/ocean/impulse_wars/benchmark/

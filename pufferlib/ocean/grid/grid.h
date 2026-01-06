@@ -475,10 +475,10 @@ Renderer* init_renderer(int cell_size, int width, int height) {
 
     renderer->overlay = (float*)calloc(width*height, sizeof(float));
 
-    InitWindow(width*cell_size, height*cell_size, "PufferLib Ray Grid");
+    InitWindow(width*cell_size, height*cell_size, "PufferLib Grid");
     SetTargetFPS(60);
 
-    renderer->puffer = LoadTexture("resources/puffers_128.png");
+    renderer->puffer = LoadTexture("resources/shared/puffers_128.png");
     return renderer;
 }
 

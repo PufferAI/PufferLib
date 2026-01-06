@@ -18,7 +18,7 @@ int main() {
     int num_obs = 2*(num_agents + num_goals) + 4;
 
     // Weights are exported by running puffer export
-    Weights* weights = load_weights("resources/puffer_target_weights.bin", 137743);
+    Weights* weights = load_weights("resources/target/target_weights.bin", 137743);
 
     int logit_sizes[2] = {9, 5};
     LinearLSTM* net = make_linearlstm(weights, num_agents, num_obs, logit_sizes, 2);

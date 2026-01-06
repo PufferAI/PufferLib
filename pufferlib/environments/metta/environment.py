@@ -4,42 +4,29 @@ import gymnasium
 
 import pufferlib
 
-from mettagrid.mettagrid_env import MettaGridEnv
-from mettagrid.curriculum import SingleTaskCurriculum
+from omegaconf import OmegaConf
+from metta.mettagrid.mettagrid_env import MettaGridEnv
+from metta.mettagrid.curriculum.core import SingleTaskCurriculum
+from metta.mettagrid.replay_writer import ReplayWriter
 
 def env_creator(name='metta'):
     return functools.partial(make, name)
 
 def make(name, config='pufferlib/environments/metta/metta.yaml', render_mode='auto', buf=None, seed=0,
-         ore_reward=0.25, heart_reward=0.5, battery_reward=0.25):
-    '''Crafter creation function'''
-    #return MettaPuff(config, render_mode, buf)
-    import mettagrid.mettagrid_env
-    from omegaconf import OmegaConf
+         ore_reward=0.17088483842567775, battery_reward=0.9882859711234822, heart_reward=1.0):
+    '''Metta creation function'''
+    
     OmegaConf.register_new_resolver("div", oc_divide, replace=True)
     cfg = OmegaConf.load(config)
-    reward_cfg = cfg['game']['agent']['rewards']
-    '''
-    env_overrides = {
-        'game': {
-            'agent': {
-                'rewards': {
-                    'ore.red': 0.25,
-                    'ore.blue': 0.25,
-                    'ore.green': 0.25,
-                    'heart': 0.5,
-                    'battery': 0.25,
-                }
-            }
-        }
-    '''
-    reward_cfg['ore.red'] = ore_reward
-    reward_cfg['ore.blue'] = ore_reward
-    reward_cfg['ore.green'] = ore_reward
-    reward_cfg['heart'] = heart_reward
-    reward_cfg['battery'] = battery_reward
-    cfg = SingleTaskCurriculum('puffer', cfg)
-    return MettaPuff(cfg, render_mode=render_mode, buf=buf)
+    
+    # Update rewards under the new structure: agent.rewards.inventory
+    inventory_rewards = cfg['game']['agent']['rewards']['inventory']
+    inventory_rewards['ore_red'] = float(ore_reward)
+    inventory_rewards['heart'] = float(heart_reward)
+    inventory_rewards['battery_red'] = float(battery_reward)
+    
+    curriculum = SingleTaskCurriculum('puffer', cfg)
+    return MettaPuff(curriculum, render_mode=render_mode, buf=buf, seed=seed)
 
 def oc_divide(a, b):
     """
@@ -53,8 +40,17 @@ def oc_divide(a, b):
     return result
 
 class MettaPuff(MettaGridEnv):
-    def __init__(self, config, render_mode='human', buf=None, seed=0):
-        super().__init__(config, render_mode=render_mode, buf=buf)
+    def __init__(self, curriculum, render_mode='human', buf=None, seed=0):
+        self.replay_writer = None
+        #if render_mode == 'auto':
+        #    self.replay_writer = ReplayWriter("metta/")
+
+        super().__init__(
+            curriculum=curriculum,
+            render_mode=render_mode,
+            buf=buf,
+            replay_writer=self.replay_writer
+        )
         self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.num_agents)
         self.actions = self.actions.astype(np.int32)
 

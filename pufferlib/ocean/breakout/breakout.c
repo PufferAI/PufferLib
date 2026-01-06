@@ -3,8 +3,9 @@
 #include "puffernet.h"
 
 void demo() {
-    Weights* weights = load_weights("resources/breakout_weights.bin", 147972);
-    LinearLSTM* net = make_linearlstm(weights, 1, 119, 3);
+    Weights* weights = load_weights("resources/breakout/breakout_weights.bin", 147844);
+    int logit_sizes[1] = {3};
+    LinearLSTM* net = make_linearlstm(weights, 1, 118, logit_sizes, 1);
 
     Breakout env = {
         .frameskip = 1,
@@ -18,6 +19,9 @@ void demo() {
         .brick_height = 12,
         .brick_rows = 6,
         .brick_cols = 18,
+        .initial_ball_speed = 256,
+        .max_ball_speed = 448,
+        .paddle_speed = 620,
         .continuous = 0,
     };
     allocate(&env);
@@ -25,6 +29,8 @@ void demo() {
     env.client = make_client(&env);
 
     c_reset(&env);
+    int frame = 0;
+    SetTargetFPS(60);
     while (!WindowShouldClose()) {
         // User can take control of the paddle
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
@@ -37,12 +43,14 @@ void demo() {
                 if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = 1;
                 if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = 2;
             }
-        } else {
+        } else if (frame % 4 == 0) {
+            // Apply frameskip outside the env for smoother rendering
             int* actions = (int*)env.actions;
             forward_linearlstm(net, env.observations, actions);
             env.actions[0] = actions[0];
         }
 
+        frame = (frame + 1) % 4;
         c_step(&env);
         c_render(&env);
     }
