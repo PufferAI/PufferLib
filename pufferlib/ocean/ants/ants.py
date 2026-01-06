@@ -13,30 +13,38 @@ class AntsEnv(pufferlib.PufferEnv):
     Two colonies compete to collect food from the environment.
     Simplified architecture following the Target environment pattern.
 
-    Observations (10 per ant):
+    Observations (27 per ant):
         - colony_dx, colony_dy: Direction to home colony (normalized)
         - food_dx, food_dy: Direction to nearest VISIBLE food (normalized, with vision constraints)
-        - pheromone_dx, pheromone_dy: Direction to nearest pheromone from own colony (within pheromone range)
-        - pheromone_direction: Direction the pheromone was placed in (normalized angle, -1 to 1)
+        - pheromone1_dx, pheromone1_dy, pheromone1_direction, pheromone1_strength: Top strongest pheromone from own colony (within pheromone range)
+        - pheromone2_dx, pheromone2_dy, pheromone2_direction, pheromone2_strength: 2nd strongest pheromone
+        - pheromone3_dx, pheromone3_dy, pheromone3_direction, pheromone3_strength: 3rd strongest pheromone
+        - pheromone4_dx, pheromone4_dy, pheromone4_direction, pheromone4_strength: 4th strongest pheromone
+        - pheromone5_dx, pheromone5_dy, pheromone5_direction, pheromone5_strength: 5th strongest pheromone
         - has_food: Binary flag (0 or 1)
         - heading: Ant's current direction (normalized)
         - density: Number of friendly ants within pheromone range (normalized)
 
     Vision System:
-        - Ants have limited vision range (50 pixels) for seeing food
-        - Vision cone of 30 degrees (π/6) - narrow focused beam
+        - Ants have limited vision range (75 pixels) for seeing food
+        - Vision cone of 60 degrees (π/3) - wider beam for better exploration
         - Can only see food within their vision cone
 
     Pheromone Sensing:
         - Separate from vision: 100 pixels range, 360 degrees (omnidirectional)
-        - Can sense pheromones from own colony within this range
+        - Can sense top 5 strongest pheromones from own colony within this range
+        - Pheromones are ranked by strength (not distance)
         - Also used to detect nearby friendly ants (density)
 
     Pheromone System:
         - Ants automatically drop pheromones every 5 steps while carrying food
-        - Pheromones evaporate over time (rate: 0.001 per step)
+        - Pheromones evaporate over time (rate: 0.002 per step) - faster evaporation to break loops
         - Each colony's pheromones are distinct
         - Ants only observe pheromones from their own colony
+    
+    Exploration Mechanism:
+        - Ants that haven't found food for 100+ steps have a 5% chance per step to add random exploration turns
+        - This helps break out of circular patterns and encourages map exploration
 
     Actions (Discrete 4):
         0: Turn left
@@ -58,9 +66,9 @@ class AntsEnv(pufferlib.PufferEnv):
             buf=None,
             seed=0):
 
-        # Observation space: 10 values per ant (colony, food, pheromone, pheromone_direction, has_food, heading, density)
+        # Observation space: 27 values per ant (colony, food, 5 pheromones × 4 values each, has_food, heading, density)
         self.single_observation_space = gymnasium.spaces.Box(
-            low=-1.0, high=1.0, shape=(10,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(27,), dtype=np.float32
         )
         # Discrete action space: turn left, turn right, move forward, noop
         self.single_action_space = gymnasium.spaces.Discrete(4)

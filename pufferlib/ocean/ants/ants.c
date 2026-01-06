@@ -10,7 +10,7 @@
 
 int main() {
     int num_ants = 64;
-    int num_obs = 9;  // Observation space: colony, food, pheromone, has_food, heading, density
+    int num_obs = 27;  // Observation space: colony, food, 5 pheromones (dx, dy, direction, strength each), has_food, heading, density
 
     AntsEnv env = {
         .width = 1280,
@@ -39,11 +39,12 @@ int main() {
     printf("  [P] - Toggle pheromone range visualization\n");
     printf("  [ESC] - Exit\n\n");
     printf("Features:\n");
-    printf("  - Vision: 50px range, 30° narrow beam (for food)\n");
+    printf("  - Vision: 75px range, 60° beam (for food) - improved for exploration\n");
     printf("  - Pheromone sensing: 100px range, 360° omnidirectional\n");
     printf("  - Density awareness: count friendly ants in pheromone range\n");
     printf("  - Automatic pheromone trails when carrying food\n");
-    printf("  - Pheromone evaporation (1000 step lifetime)\n");
+    printf("  - Pheromone evaporation (500 step lifetime) - faster to break loops\n");
+    printf("  - Random exploration: ants stuck >100 steps get random turns (5%% chance)\n");
     printf("  - Simple heuristic AI: seek food -> return to colony\n\n");
 
     // Main loop - exit with ESC or close window

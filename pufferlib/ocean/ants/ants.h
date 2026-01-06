@@ -31,13 +31,13 @@
 // Pheromone system constants
 #define MAX_PHEROMONES 5000
 #define PHEROMONE_DEPOSIT_AMOUNT 1.0f
-#define PHEROMONE_EVAPORATION_RATE 0.001f
+#define PHEROMONE_EVAPORATION_RATE 0.005f  // Increased from 0.001 to break loops faster
 #define PHEROMONE_SIZE 2
 #define PHEROMONE_DROP_INTERVAL 5  // Drop pheromone every N steps while carrying food
 
 // Vision system constants
-#define ANT_VISION_RANGE 50.0f
-#define ANT_VISION_ANGLE (M_PI / 6.0f)  // 30 degrees (π/6)
+#define ANT_VISION_RANGE 75.0f  // Increased from 50 to encourage exploration
+#define ANT_VISION_ANGLE (M_PI / 3.0f)  // 60 degrees (π/3) - increased from 45° for better exploration
 
 // Pheromone sensing constants
 #define ANT_PHEROMONE_RANGE 100.0f  // 100px range
@@ -103,6 +103,7 @@ typedef struct {
     bool has_food;
     int steps_alive;           // Track steps for periodic reset
     int steps_since_pheromone; // Track when to drop next pheromone
+    int steps_without_food;    // Track steps since last food pickup (for exploration)
 } Ant;
 
 // Colony home base
@@ -226,6 +227,7 @@ void spawn_ant(AntsEnv* env, int ant_id) {
     ant->has_food = false;
     ant->steps_alive = 0;
     ant->steps_since_pheromone = 0;
+    ant->steps_without_food = 0;
 }
 
 // Spawn food at a valid location
@@ -308,26 +310,44 @@ void compute_observations(AntsEnv* env) {
             }
         }
 
-        // Find closest pheromone from own colony (using pheromone range, not vision)
-        float closest_pheromone_dist_sq = env->width * env->width + env->height * env->height;
-        Vector2D closest_pheromone_pos = {0, 0};
-        float closest_pheromone_direction = 0.0f;
-        bool found_pheromone = false;
-
+        // Find top 5 strongest pheromones from own colony (using pheromone range, not vision)
+        // Store pheromones in range with their strength for sorting
+        typedef struct {
+            Vector2D position;
+            float strength;
+            float direction;
+        } PheromoneCandidate;
+        
+        PheromoneCandidate candidates[100];  // Max 100 candidates (should be enough)
+        int num_candidates = 0;
+        
         for (int i = 0; i < env->num_pheromones; i++) {
             if (env->pheromones[i].colony_id == ant->colony_id) {
                 Vector2D pheromone_pos = env->pheromones[i].position;
                 if (is_in_pheromone_range(ant->position, pheromone_pos)) {
-                    float dist_sq = distance_squared(ant->position, pheromone_pos);
-                    if (dist_sq < closest_pheromone_dist_sq) {
-                        closest_pheromone_dist_sq = dist_sq;
-                        closest_pheromone_pos = pheromone_pos;
-                        closest_pheromone_direction = env->pheromones[i].direction;
-                        found_pheromone = true;
+                    if (num_candidates < 100) {
+                        candidates[num_candidates].position = pheromone_pos;
+                        candidates[num_candidates].strength = env->pheromones[i].strength;
+                        candidates[num_candidates].direction = env->pheromones[i].direction;
+                        num_candidates++;
                     }
                 }
             }
         }
+        
+        // Sort by strength (descending) - simple bubble sort for small arrays
+        for (int i = 0; i < num_candidates - 1; i++) {
+            for (int j = 0; j < num_candidates - i - 1; j++) {
+                if (candidates[j].strength < candidates[j + 1].strength) {
+                    PheromoneCandidate temp = candidates[j];
+                    candidates[j] = candidates[j + 1];
+                    candidates[j + 1] = temp;
+                }
+            }
+        }
+        
+        // Take top 5 (or fewer if less available)
+        int top_count = num_candidates < 5 ? num_candidates : 5;
 
         // Count friendly ants within pheromone range (density)
         int friendly_ants_nearby = 0;
@@ -339,8 +359,14 @@ void compute_observations(AntsEnv* env) {
             }
         }
 
-        // Observation: [colony_dx, colony_dy, food_dx, food_dy, pheromone_dx, pheromone_dy, pheromone_direction, has_food, heading, density]
-        // 10 values total - normalized to roughly -1 to 1 range
+        // Observation: [colony_dx, colony_dy, food_dx, food_dy, 
+        //               pheromone1_dx, pheromone1_dy, pheromone1_direction, pheromone1_strength,
+        //               pheromone2_dx, pheromone2_dy, pheromone2_direction, pheromone2_strength,
+        //               pheromone3_dx, pheromone3_dy, pheromone3_direction, pheromone3_strength,
+        //               pheromone4_dx, pheromone4_dy, pheromone4_direction, pheromone4_strength,
+        //               pheromone5_dx, pheromone5_dy, pheromone5_direction, pheromone5_strength,
+        //               has_food, heading, density]
+        // 27 values total - normalized to roughly -1 to 1 range
         env->observations[obs_idx++] = (colony->position.x - ant->position.x) / env->width;
         env->observations[obs_idx++] = (colony->position.y - ant->position.y) / env->height;
 
@@ -352,15 +378,22 @@ void compute_observations(AntsEnv* env) {
             env->observations[obs_idx++] = 0.0f;
         }
 
-        if (found_pheromone) {
-            env->observations[obs_idx++] = (closest_pheromone_pos.x - ant->position.x) / env->width;
-            env->observations[obs_idx++] = (closest_pheromone_pos.y - ant->position.y) / env->height;
-            // Normalize pheromone direction to -1 to 1 range (divide by π)
-            env->observations[obs_idx++] = closest_pheromone_direction / M_PI;
-        } else {
-            env->observations[obs_idx++] = 0.0f;
-            env->observations[obs_idx++] = 0.0f;
-            env->observations[obs_idx++] = 0.0f;
+        // Output top 5 strongest pheromones (or zeros if fewer available)
+        for (int p = 0; p < 5; p++) {
+            if (p < top_count) {
+                env->observations[obs_idx++] = (candidates[p].position.x - ant->position.x) / env->width;
+                env->observations[obs_idx++] = (candidates[p].position.y - ant->position.y) / env->height;
+                // Normalize pheromone direction to -1 to 1 range (divide by π)
+                env->observations[obs_idx++] = candidates[p].direction / M_PI;
+                // Normalize pheromone strength (typically 0.0 to 1.0, but can be higher)
+                // Clamp to reasonable range for normalization
+                env->observations[obs_idx++] = candidates[p].strength / PHEROMONE_DEPOSIT_AMOUNT;
+            } else {
+                env->observations[obs_idx++] = 0.0f;
+                env->observations[obs_idx++] = 0.0f;
+                env->observations[obs_idx++] = 0.0f;
+                env->observations[obs_idx++] = 0.0f;
+            }
         }
 
         env->observations[obs_idx++] = ant->has_food ? 1.0f : 0.0f;
@@ -472,6 +505,7 @@ void update_food_interactions(AntsEnv* env) {
 
                 // Reset ant after delivery
                 ant->steps_alive = 0;
+                ant->steps_without_food = 0;  // Reset exploration counter after successful delivery
             }
         }
     }
@@ -489,9 +523,25 @@ void c_step(AntsEnv* env) {
     for (int i = 0; i < env->num_ants; i++) {
         Ant* ant = &env->ants[i];
         ant->steps_alive++;
+        if (!ant->has_food) {
+            ant->steps_without_food++;
+        }
 
         // Execute action
         int action = env->actions[i];
+        
+        // Exploration: Add small random perturbations when ant hasn't found food for a while
+        // This helps break out of circular patterns
+        if (!ant->has_food && ant->steps_without_food > 100) {
+            // 5% chance per step to add random exploration when stuck
+            if ((rand() % 100) < 5) {
+                // Add small random turn to encourage exploration
+                float random_turn = (random_float(-1.0f, 1.0f) * TURN_ANGLE * 2.0f);
+                ant->direction += random_turn;
+                ant->direction = wrap_angle(ant->direction);
+            }
+        }
+        
         switch (action) {
             case ACTION_TURN_LEFT:
                 ant->direction -= TURN_ANGLE;
@@ -702,3 +752,4 @@ void c_close(AntsEnv* env) {
         env->client = NULL;
     }
 }
+
