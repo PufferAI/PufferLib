@@ -2,13 +2,13 @@ import time
 import rich
 
 import torch
+import torch.utils.cpp_extension
 
 import pufferlib
 try:
     from pufferlib import _C
 except ImportError:
     raise ImportError('Failed to import C/CUDA advantage kernel. If you have non-default PyTorch, try installing with --no-build-isolation')
-
 
 B = 512
 T = 64

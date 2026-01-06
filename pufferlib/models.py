@@ -3,6 +3,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 import pufferlib.emulation
 import pufferlib.spaces
@@ -44,12 +45,13 @@ class MinGRULayer(Module):
         super().__init__()
 
         dim_inner = int(dim * expansion_factor)
-        proj_out = default(proj_out, expansion_factor != 1.)
+        self.proj_out = default(proj_out, expansion_factor != 1.)
 
         self.to_hidden_and_gate = Linear(dim, dim_inner * 2, bias = False)
         nn.init.orthogonal_(self.to_hidden_and_gate.weight)
-        self.to_out = Linear(dim_inner, dim, bias = False) if proj_out else Identity()
-        #nn.init.orthogonal_(self.to_out.weight)
+
+        self.to_out = Linear(dim_inner, dim, bias = False)
+        nn.init.orthogonal_(self.to_out.weight)
 
         self.norm = torch.nn.RMSNorm(dim)
 
@@ -80,7 +82,8 @@ class MinGRULayer(Module):
 
         next_prev_hidden = out[:, -1:]
 
-        out = self.to_out(out)
+        if self.proj_out:
+            out = self.to_out(out)
 
         out = out + x
         out = self.norm(out)
@@ -103,10 +106,7 @@ class DefaultEncoder(nn.Module):
             dtype = env.single_observation_space.dtype
 
         self.dtype = dtype
-        self.encoder = torch.nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(num_obs, hidden_size)),
-            nn.GELU(),
-        )
+        self.encoder = pufferlib.pytorch.layer_init(nn.Linear(num_obs, hidden_size))
 
     def forward(self, observations):
         batch_size = observations.shape[0]
@@ -116,7 +116,8 @@ class DefaultEncoder(nn.Module):
         else: 
             observations = observations.view(batch_size, -1)
 
-        return self.encoder(observations.float())
+        hidden = self.encoder(observations.float())
+        return F.gelu(hidden)
 
 class DefaultDecoder(nn.Module):
     def __init__(self, env, hidden_size=128):
@@ -141,7 +142,7 @@ class DefaultDecoder(nn.Module):
             self.decoder_logstd = nn.Parameter(torch.zeros(
                 1, env.single_action_space.shape[0]))
 
-        self.value = pufferlib.pytorch.layer_init(
+        self.value_function = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, 1), std=1)
 
 
@@ -156,7 +157,7 @@ class DefaultDecoder(nn.Module):
         else:
             logits = self.decoder(hidden)
 
-        values = self.value(hidden)
+        values = self.value_function(hidden)
         return logits, values
  
 

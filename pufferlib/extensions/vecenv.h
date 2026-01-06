@@ -117,9 +117,10 @@ void my_log(Log* log, Dict* out);
 // Define function types to be exported to the shared library
 // You don't need these, but you have to do some really gross
 // casts after loading the library without them.
-typedef VecEnv* (*create_environments_fn)(int num_envs, int threads, int buffers, int block_size, bool use_gpu, int test_idx, Dict* kwargs);
+typedef VecEnv* (*create_environments_fn)(int num_envs, int buffers, bool use_gpu, int test_idx, Dict* kwargs);
 typedef Env* (*env_init_fn)(float* observations, float* actions, float* rewards,
         unsigned char* terminals, int seed, Dict* kwargs);
+typedef void (*create_threads_fn)(VecEnv* vec, int threads, int block_size);
 typedef void (*vec_reset_fn)(VecEnv* vec);
 typedef void (*vec_step_fn)(VecEnv* vec);
 typedef void (*vec_recv_fn)(VecEnv* vec, int buffer);

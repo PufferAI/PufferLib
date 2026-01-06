@@ -25,10 +25,10 @@ const double coeffs[5][3] = {
     {2.8366, -3.0525, 1.2012},
 };
 
-MuonOptions::MuonOptions(double lr) : lr_(lr) {}
+MuonOptions::MuonOptions(double initial_lr) : initial_lr_(initial_lr) {}
 
 bool operator==(const MuonOptions& lhs, const MuonOptions& rhs) {
-  return (lhs.lr() == rhs.lr()) &&
+  return (lhs.initial_lr() == rhs.initial_lr()) &&
       (lhs.eps() == rhs.eps()) &&
       (lhs.weight_decay() == rhs.weight_decay()) &&
       (lhs.momentum() == rhs.momentum());
@@ -51,11 +51,11 @@ void MuonOptions::serialize(torch::serialize::InputArchive& archive) {
 */
 
 double MuonOptions::get_lr() const {
-  return lr();
+  return initial_lr();
 }
 
-void MuonOptions::set_lr(const double lr) {
-  this->lr(lr);
+void MuonOptions::set_lr(const double initial_lr) {
+  this->initial_lr(initial_lr);
 }
 
 bool operator==(const MuonParamState& lhs, const MuonParamState& rhs) {
@@ -79,6 +79,7 @@ void MuonParamState::serialize(torch::serialize::InputArchive& archive) {
 //TODO: You actually want this in bfloat16. Still seems slow
 Tensor _zeropower_via_newtonschulz(Tensor G) {
     auto x = G.to(torch::kBFloat16);
+    //auto x = G.clone();
     if (G.size(-2) > G.size(-1)) {
         x = x.mT();
     }
@@ -90,8 +91,6 @@ Tensor _zeropower_via_newtonschulz(Tensor G) {
         auto a = coeffs[i][0];
         auto b = coeffs[i][1];
         auto c = coeffs[i][2];
-
-        // Changed this to be fewer ops. It's faster. I don't know if it introduces any numerical issues.
         auto A = x.mm(x.mT());
         auto gram_update = at::addmm(A, A, A, b, c);  // beta=b, alpha=c
         x = at::addmm(x, gram_update, x, a, 1.0);
@@ -122,9 +121,11 @@ Tensor Muon::step(LossClosure closure) {
       auto& options = static_cast<MuonOptions&>(group.options());
 
       // Perform stepweight decay
+      /*
       if (options.weight_decay() != 0) {
         p.mul_(1 - options.lr() * options.weight_decay());
       }
+      */
 
       // State initialization
       if (param_state == state_.end()) {
@@ -140,7 +141,6 @@ Tensor Muon::step(LossClosure closure) {
       auto& momentum = options.momentum();
       auto weight_decay = options.weight_decay();
       auto eps = options.eps();
-      auto lr = options.lr();
 
       state.step(state.step() + 1);
 
@@ -159,7 +159,9 @@ Tensor Muon::step(LossClosure closure) {
           update.mul_(scale);
       }
 
-      p.mul_(1 - lr * weight_decay);
+      if (options.weight_decay() != 0) {
+        p.mul_(1 - lr * weight_decay);
+      }  
       p.sub_(lr*update.view(p.sizes()));
     }
   }

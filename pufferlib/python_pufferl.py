@@ -130,20 +130,6 @@ class PuffeRL:
             self.policy.forward_eval = torch.compile(policy.forward_eval, mode=config['compile_mode'])
             pufferlib.pytorch.sample_logits = torch.compile(pufferlib.pytorch.sample_logits, mode=config['compile_mode'])
 
-        '''
-        import heavyball
-        from heavyball import ForeachMuon
-        warnings.filterwarnings(action='ignore', category=UserWarning, module=r'heavyball.*')
-        heavyball.utils.compile_mode = "default"
-        self.optimizer = ForeachMuon(
-            self.policy.parameters(),
-            lr=config['learning_rate'],
-            betas=(config['adam_beta1'], config['adam_beta2']),
-            eps=config['adam_eps'],
-            heavyball_momentum=True,
-        )
-        '''
-
         self.optimizer = Muon(
             self.policy.parameters(),
             lr=config['learning_rate'],
@@ -189,6 +175,29 @@ class PuffeRL:
             return sum(p.numel() for p in model.parameters() if p.requires_grad)
         self.print_dashboard(clear=True)
 
+
+        self.num_layers = 4
+        config['input_size'] = 118
+        config['num_atns'] = 3
+        config['hidden_size'] = 128
+        config['num_layers'] = self.num_layers
+        config['minibatch_segments'] = self.minibatch_segments
+        config['segments'] = segments
+        config['horizon'] = horizon
+        config['lr'] = config['learning_rate']
+        config['beta1'] = config['adam_beta1']
+        config['beta2'] = config['adam_beta2']
+        config['eps'] = config['adam_eps']
+        config['max_epochs'] = epochs
+        config['total_minibatches'] = config['num_minibatches']
+        config['accumulate_minibatches'] = self.accumulate_minibatches
+        config['num_envs'] = 8192
+        config['cudagraphs'] = False
+        config['kernels'] = False
+        config['num_buffers'] = 1
+        self.pufferl_cpp = _C.create_pufferl(config)
+
+
     @property
     def uptime(self):
         return time.time() - self.start_time
@@ -216,6 +225,15 @@ class PuffeRL:
         self.full_rows = 0
         while self.full_rows < self.segments:
             profile('env', epoch)
+
+            '''
+            _C.python_vec_recv(self.pufferl_cpp, 0)
+            o, a, r, d = _C.env_buffers(self.pufferl_cpp)
+            t = torch.zeros(8192, device=device)
+            info = {}
+            mask = torch.ones(8192, device=device)
+            env_id = [0, 8191]
+            '''
             o, r, d, t, info, env_id, mask = self.vecenv.recv()
 
             profile('eval_misc', epoch)
@@ -236,6 +254,7 @@ class PuffeRL:
                     state = self.state[env_id.start]
 
                 logits, value, state = self.policy.forward_eval(o_device, state)
+                self.debug = state[0][-1]
                 action, logprob, _ = pufferlib.pytorch.sample_logits(logits)
                 r = torch.clamp(r, -1, 1)
 
@@ -268,6 +287,7 @@ class PuffeRL:
                     self.free_idx += num_full
                     self.full_rows += num_full
 
+                #a[:] = action
                 action = action.cpu().numpy()
                 if isinstance(logits, torch.distributions.Normal):
                     action = np.clip(action, self.vecenv.action_space.low, self.vecenv.action_space.high)
@@ -283,7 +303,19 @@ class PuffeRL:
                         self.stats[k].append(v)
 
             profile('env', epoch)
+
+
+            #_C.python_vec_send(self.pufferl_cpp, 0)
             self.vecenv.send(action)
+
+        logs = _C.log_environments(self.pufferl_cpp)
+        if logs:
+            self.stats['perf'] = [logs['perf']]
+            self.stats['score'] = [logs['score']]
+            self.stats['episode_return'] = [logs['episode_return']]
+            self.stats['episode_length'] = [logs['episode_length']]
+            self.stats['n'] = [logs['n']]
+
 
         profile('eval_misc', epoch)
         self.free_idx = self.total_agents

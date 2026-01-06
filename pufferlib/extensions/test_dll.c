@@ -74,9 +74,9 @@ int main() {
     dict_set_int(kwargs, "paddle_speed", 620);
     dict_set_int(kwargs, "continuous", 0);
 
-    int num_envs = 4096;
+    int num_envs = 8192;
     int threads = 8;
-    int buffers = 4;
+    int buffers = 1;
     int block_size = 256;
 
     /*
@@ -86,15 +86,19 @@ int main() {
     int block_size = 2;
     */
 
-    VecEnv* vec1 = create_environments(num_envs, threads, buffers, block_size, true, 0, kwargs);
+    float* actions = (float*)calloc(num_envs, sizeof(float));
+
+    VecEnv* vec1 = create_environments(num_envs, 0, buffers, block_size, true, 0, kwargs);
     vec_reset(vec1);
 
     VecEnv* vec2 = create_environments(num_envs, threads, buffers, block_size, true, 1, kwargs);
     vec_reset(vec2);
 
+    /*
     float sps = perf_test(vec1, buffers) * num_envs / (float)buffers;
     printf("Performance: %f\n M SPS (%f GB/s)\n", sps/1e6f, 118.0f*sps/1e9f);
     exit(0);
+    */
 
 
     /*
@@ -143,6 +147,18 @@ int main() {
         }
         vec_send(vec2, i%2);
         */
+
+        cudaDeviceSynchronize();
+        for (int i=start; i<end; i++) {
+            int atn = rand() % 3;
+            actions[i] = atn;
+        }
+
+        int num_cpy = end - start;
+        cudaMemcpy(vec1->gpu_actions, actions, num_cpy*sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(vec2->gpu_actions, actions, num_cpy*sizeof(float), cudaMemcpyHostToDevice);
+        cudaDeviceSynchronize();
+
         vec_send(vec1, i%buffers);
         vec_send(vec2, i%buffers);
     }

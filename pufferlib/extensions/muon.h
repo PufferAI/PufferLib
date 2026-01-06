@@ -15,8 +15,8 @@ class InputArchive;
 namespace torch::optim {
 
 struct TORCH_API MuonOptions : public OptimizerCloneableOptions<MuonOptions> {
-  MuonOptions(double lr = 0.0025);
-  TORCH_ARG(double, lr) = 0.0025;
+  MuonOptions(double initial_lr = 0.0025);
+  TORCH_ARG(double, initial_lr) = 0.0025;
   TORCH_ARG(double, weight_decay) = 0.0;
   TORCH_ARG(double, momentum) = 0.9;
   TORCH_ARG(double, eps) = 1e-8;
@@ -46,16 +46,19 @@ struct TORCH_API MuonParamState
 
 class TORCH_API Muon : public Optimizer {
  public:
+  torch::Tensor lr;
   explicit Muon(
       const std::vector<OptimizerParamGroup>& param_groups,
       MuonOptions defaults = {})
       : Optimizer(param_groups, std::make_unique<MuonOptions>(defaults)) {
-    TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
+    TORCH_CHECK(defaults.initial_lr() >= 0, "Invalid initial learning rate: ", defaults.initial_lr());
     TORCH_CHECK(defaults.eps() >= 0, "Invalid epsilon value: ", defaults.eps());
     TORCH_CHECK(
         defaults.weight_decay() >= 0,
         "Invalid weight_decay value: ",
         defaults.weight_decay());
+
+    lr = torch::tensor(defaults.initial_lr(), torch::dtype(torch::kFloat32).device(torch::kCUDA).requires_grad(false));
   }
   explicit Muon(std::vector<Tensor> params, MuonOptions defaults = {})
       : Muon({OptimizerParamGroup(std::move(params))}, std::move(defaults)) {}

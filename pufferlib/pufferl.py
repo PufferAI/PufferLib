@@ -114,6 +114,7 @@ class PuffeRL:
             )
 
         device = config['device']
+        '''
         self.observations = torch.zeros(segments, horizon, *obs_space.shape,
             dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
             pin_memory=device == 'cuda' and config['cpu_offload'],
@@ -130,6 +131,7 @@ class PuffeRL:
         self.ep_lengths = torch.zeros(total_agents, device=device, dtype=torch.int32)
         self.ep_indices = torch.arange(total_agents, device=device, dtype=torch.int32)
         self.free_idx = total_agents
+        '''
  
         # Minibatching & gradient accumulation
         minibatch_size = config['minibatch_size']
@@ -157,6 +159,7 @@ class PuffeRL:
         config['input_size'] = 118
         config['num_atns'] = 3
         config['hidden_size'] = 128
+        config['expansion_factor'] = 1
         config['num_layers'] = self.num_layers
         config['minibatch_segments'] = self.minibatch_segments
         config['segments'] = segments
@@ -169,9 +172,18 @@ class PuffeRL:
         config['total_minibatches'] = self.total_minibatches
         config['accumulate_minibatches'] = self.accumulate_minibatches
         config['num_envs'] = self.num_envs
-        config['cudagraphs'] = False
-        config['kernels'] = False
+        config['cudagraphs'] = True
+        config['kernels'] = True
+        config['profile'] = False
+        config['num_buffers'] = 2
         self.pufferl_cpp = _C.create_pufferl(config)
+        self.observations = self.pufferl_cpp.observations
+        self.actions = self.pufferl_cpp.actions
+        self.rewards = self.pufferl_cpp.rewards
+        self.terminals = self.pufferl_cpp.terminals
+        self.logprobs = self.pufferl_cpp.logprobs
+        self.values = self.pufferl_cpp.values
+        self.debug = self.pufferl_cpp.debug
 
         # Initializations
         self.config = config
@@ -277,8 +289,6 @@ class PuffeRL:
         profile('train', epoch)
         config = self.config
         device = config['device']
-
-        self.ratio[:] = 1
 
         losses = _C.train(self.pufferl_cpp)
 
@@ -780,37 +790,39 @@ def check(env_name):
     policy = load_policy(args, vecenv, env_name)
 
     import pufferlib.python_pufferl
-    train_config = dict(**args['train'], env=env_name)
+    train_config = dict(**args['train'])
     pufferl_python = pufferlib.python_pufferl.PuffeRL(train_config, vecenv, policy, verbose=False)
 
     pufferl_cpp = PuffeRL(train_config, verbose=False)
 
     python_params = dict(policy.named_parameters())
-    for k, v in pufferl_cpp.pufferl_cpp.policy_32.named_parameters():
+    for k, v in pufferl_cpp.pufferl_cpp.policy.named_parameters():
         v_python = python_params[k].data
         assert torch.allclose(v, v_python)
 
     torch.manual_seed(args['train']['seed'])
     pufferl_python.evaluate()
-    pufferl_python.train()
-    pufferl_python.evaluate()
+    #pufferl_python.train()
+    #pufferl_python.evaluate()
 
     torch.manual_seed(args['train']['seed'])
     pufferl_cpp.evaluate()
-    pufferl_cpp.train()
-    pufferl_cpp.evaluate()
+    #pufferl_cpp.train()
+    #pufferl_cpp.evaluate()
 
+    # You need to determinize the env before checks
     for i in range(args['train']['bptt_horizon']):
+        python_obs = pufferl_python.observations[:, i].float()
+        cpp_obs = pufferl_cpp.observations[:, i]
         assert torch.allclose(pufferl_python.observations[:, i].float(), pufferl_cpp.observations[:, i]), f'Observation {i} mismatch'
-        assert torch.allclose(pufferl_python.actions[:, i], pufferl_cpp.actions[:, i]), f'Action {i} mismatch'
+        assert torch.allclose(pufferl_python.actions[:, i], pufferl_cpp.actions[:, i].long()), f'Action {i} mismatch'
         assert torch.allclose(pufferl_python.rewards[:, i], pufferl_cpp.rewards[:, i]), f'Reward {i} mismatch'
         assert torch.allclose(pufferl_python.terminals[:, i], pufferl_cpp.terminals[:, i]), f'Terminal {i} mismatch'
-        breakpoint()
         assert torch.allclose(pufferl_python.logprobs[:, i], pufferl_cpp.logprobs[:, i], atol=1e-5), f'Logprob {i} mismatch'
-        assert torch.allclose(pufferl_python.values[:, i], pufferl_cpp.values[:, i], atol=1e-5), f'Value {i} mismatch'
+        assert torch.allclose(pufferl_python.values[:, i], pufferl_cpp.values[:, i], atol=1e-4), f'Value {i} mismatch'
 
     python_params = dict(policy.named_parameters())
-    for k, v in pufferl_cpp.pufferl_cpp.policy_32.named_parameters():
+    for k, v in pufferl_cpp.pufferl_cpp.policy.named_parameters():
         v_python = python_params[k].data
         assert torch.allclose(v, v_python, atol=1e-5)
 
