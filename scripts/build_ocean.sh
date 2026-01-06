@@ -5,6 +5,7 @@
 ENV=$1
 MODE=${2:-local}
 PLATFORM="$(uname -s)"
+ARCH="$(uname -m)"
 SRC_DIR="pufferlib/ocean/$ENV"
 WEB_OUTPUT_DIR="build_web/$ENV"
 RAYLIB_NAME='raylib-5.5_macos'
@@ -12,6 +13,11 @@ BOX2D_NAME='box2d-macos-arm64'
 if [ "$PLATFORM" = "Linux" ]; then
     RAYLIB_NAME='raylib-5.5_linux_amd64'
     BOX2D_NAME='box2d-linux-amd64'
+    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+        RAYLIB_NAME='raylib-5.5_linux_aarch64'
+    else
+        RAYLIB_NAME='raylib-5.5_linux_amd64'
+    fi
 fi
 if [ "$MODE" = "web" ]; then
     RAYLIB_NAME='raylib-5.5_webassembly'
