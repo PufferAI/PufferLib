@@ -21,7 +21,9 @@ def make(name="cogames.cogs_v_clips.machina_1.open_world", variants=None, cogs=N
     simulator = Simulator()
     simulator.add_event_handler(StatsTracker(NoopStatsWriter()))
     env = PufferMettaGridEnv(simulator=simulator, cfg=env_cfg, buf=buf, seed=seed or 0)
-    env.render_mode = render
+    render_prop = getattr(type(env), "render_mode", None)
+    if isinstance(render_prop, property) and render_prop.fset:
+        env.render_mode = render
     if seed:
         env.reset(seed)
     return env
