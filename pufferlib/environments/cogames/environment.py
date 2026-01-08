@@ -12,14 +12,15 @@ def env_creator(name="cogames.cogs_v_clips.machina_1.open_world"):
     return functools.partial(make, name=name)
 
 
-def make(name="cogames.cogs_v_clips.machina_1.open_world", variants=None, cogs=None, render_mode="auto", seed=None, buf=None):
+def make(
+    name="cogames.cogs_v_clips.machina_1.open_world", variants=None, cogs=None, render_mode="auto", seed=None, buf=None
+):
     mission_name = name.removeprefix("cogames.cogs_v_clips.") if name.startswith("cogames.cogs_v_clips.") else name
     variants = variants.split() if isinstance(variants, str) else variants
     _, env_cfg, _ = get_mission(mission_name, variants_arg=variants, cogs=cogs)
 
     simulator = Simulator()
     simulator.add_event_handler(StatsTracker(NoopStatsWriter()))
-    # render_mode is accepted for API compatibility but not used by MettaGridPufferEnv.
     env = PufferMettaGridEnv(simulator=simulator, cfg=env_cfg, buf=buf, seed=seed or 0)
     if seed:
         env.reset(seed)
