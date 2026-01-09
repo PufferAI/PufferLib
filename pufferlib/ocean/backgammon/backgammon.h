@@ -360,3 +360,189 @@ void make_move(CBackgammon* env, int from, int die_index) {
 bool check_win(CBackgammon* env, int player) {
     return env->off[player] == NUM_CHECKERS;
 }
+
+
+void compute_observations(CBackgammon* env) {
+    float *obs = env->observations;
+    int cur = 0;
+    
+    for (int i = 1; i <= NUM_POINTS; i++) {
+        obs[cur++] = env->board[i] / (float)NUM_CHECKERS;
+    }
+    
+    obs[cur++] = (float)env->bar[WHITE] / NUM_CHECKERS;
+    obs[cur++] = (float)env->bar[BLACK] / NUM_CHECKERS;
+    
+    obs[cur++] = (float)env->off[WHITE] / NUM_CHECKERS;
+    obs[cur++] = (float)env->off[BLACK] / NUM_CHECKERS;
+    
+    for (int i = 0; i < 4; i++) {
+        obs[cur++] = env->dice_available[i] ? (float)env->dice[i] / 6.0f : 0.0f;
+    }
+    
+    obs[cur++] = (float)env->current_player;
+    
+    obs[cur++] = can_bear_off(env, WHITE) ? 1.0f : 0.0f;
+    obs[cur++] = can_bear_off(env, BLACK) ? 1.0f : 0.0f;
+}
+
+
+int score_move(CBackgammon* env, int from, int die_index) {
+    int die_value = env->dice[die_index];
+    int score = 0;
+    
+    if (from == 0) {
+        score += 100;
+        int dst = die_value;  // Black enters at die_value
+        // Bonus for hitting white
+        if (env->board[dst] == 1) score += 50;
+        return score;
+    }
+    
+    int dst = from + die_value;
+    
+    // Bearing off is highest priority
+    if (dst > NUM_POINTS && can_bear_off(env, BLACK)) {
+        score += 200;
+        return score;
+    }
+    
+    // Can't bear off and destination is off board
+    if (dst > NUM_POINTS) return -1000;
+    
+    // Hitting a white checker is very good
+    if (env->board[dst] == 1) {
+        score += 80;
+    }
+    
+    // Making a point (having 2+ checkers) is good for safety
+    if (env->board[dst] == -1) {
+        score += 30;
+    }
+    
+    // Advancing toward home board is good
+    score += dst;
+    
+    // Moving a lone checker (blot) to safety is good
+    if (env->board[from] == -1) {
+        score += 20;
+    }
+    
+    // Prefer not to leave blots in opponent's home board
+    if (env->board[from] == -2 && from >= 1 && from <= 6) {
+        score -= 10;
+    }
+    
+    return score;
+}
+
+void opponent_move(CBackgammon* env) {
+    env->current_player = BLACK;
+    roll_dice(env);
+    env->turns_this_episode++;
+    
+    // find best pre-programmaed move
+    while (has_legal_moves(env)) {
+        int best_from = -1;
+        int best_die = -1;
+        int best_score = -10000;
+        
+        // find the best scoring legal move
+        for (int from = 0; from <= NUM_POINTS; from++) {
+            for (int d = 0; d < env->num_dice; d++) {
+                if (is_legal_move(env, from, d)) {
+                    int score = score_move(env, from, d);
+                    if (score > best_score) {
+                        best_score = score;
+                        best_from = from;
+                        best_die = d;
+                    }
+                }
+            }
+        }
+        
+        if (best_from < 0) break;  // no move found
+        
+        make_move(env, best_from, best_die);
+        
+        // did opponent won
+        if (check_win(env, BLACK)) {
+            return;
+        }
+    }
+    
+    env->current_player = WHITE;
+    roll_dice(env);
+}
+
+
+void add_log(CBackgammon* env) {
+    env->log.episode_return += env->episode_return;
+    env->log.episode_length += env->tick;
+    
+    env->log.win_rate += check_win(env, WHITE) ? 1.0f : 0.0f;
+    
+    if (env->turns_this_episode > 0) {
+        env->log.avg_moves_per_turn += (float)env->moves_this_episode / env->turns_this_episode;
+    }
+    
+    if (env->moves_this_episode > 0) {
+        env->log.hit_rate += (float)env->hits_this_episode / env->moves_this_episode;
+    }
+    
+    env->log.n += 1;
+}
+
+
+void c_step(CBackgammon* env) {
+    if (env->terminals[0]) {
+        c_reset(env);
+        return;
+    }
+
+    int action = env->actions[0];
+    int from = action / 4;
+    int die_index = action % 4;
+
+    float reward = 0.0f;
+    
+    if (is_legal_move(env, from, die_index)) {
+        make_move(env, from, die_index);
+    } else {
+        reward -= 0.1f;
+    }
+
+    if (check_win(env, WHITE)) {
+        reward = 1.0f;
+        env->terminals[0] = 1;
+        env->episode_return += reward;
+        add_log(env);
+        goto end;
+    }
+
+    if (env->dice_used >= env->num_dice || !has_legal_moves(env)) {
+        opponent_move(env);
+    }
+
+    if (check_win(env, BLACK)) {
+        reward = -1.0f;
+        env->terminals[0] = 1;
+        env->episode_return += reward;
+        add_log(env);
+        goto end;
+    }
+
+    if (env->tick >= MAX_STEPS) {
+        env->terminals[0] = 1;
+        env->episode_return += reward;
+        add_log(env);
+        goto end;
+    }
+
+    env->episode_return += reward;
+
+end:
+    env->rewards[0] = reward;
+    compute_observations(env);
+    env->tick++;
+}
