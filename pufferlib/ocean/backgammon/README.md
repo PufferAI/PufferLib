@@ -46,7 +46,7 @@ For training, start with a weak opponent and gradually decrease randomness as th
 ## Training
 
 ```bash
-python -m pufferlib.pufferl train puffer_backgammon   --vec.num-envs 64   --env.num-envs 256   --train.batch-size 1048576   --train.bptt-horizon 64   --train.total-timesteps 500_000_000 --train.learning-rate 0.0001
+python -m pufferlib.pufferl train puffer_backgammon   --vec.num-envs 64   --env.num-envs 256   --train.batch-size 1048576   --train.bptt-horizon 64   --train.total-timesteps 500_000_000 --train.learning-rate 0.001
 ```
 
 Against a random opponent, expect >50% win rate after a few minutes of training.
