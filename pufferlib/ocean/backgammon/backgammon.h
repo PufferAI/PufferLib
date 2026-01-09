@@ -151,7 +151,7 @@ void roll_dice(CBackgammon* env);
 int get_direction(int player);
 bool in_home_board(int player, int point);
 bool can_bear_off(CBackgammon* env, int player);
-bool is_dst_available(CBackgammon* env, int player);
+bool is_dst_available(CBackgammon *env, int position, int player);
 bool is_legal_move(CBackgammon* env, int from, int die_index);
 bool has_legal_moves(CBackgammon* env);
 void make_move(CBackgammon* env, int from, int die_index);
@@ -545,4 +545,23 @@ end:
     env->rewards[0] = reward;
     compute_observations(env);
     env->tick++;
+}
+
+
+// Rendering logic
+
+Client* make_client(CBackgammon* env) {
+    return NULL;
+}
+
+void close_client(Client* client) {
+}
+
+void c_render(CBackgammon* env) {
+}
+
+void c_close(CBackgammon* env) {
+    if (env->client) {
+        close_client(env->client);
+    }
 }
