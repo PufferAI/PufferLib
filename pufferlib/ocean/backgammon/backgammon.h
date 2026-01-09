@@ -261,13 +261,17 @@ bool can_bear_off(CBackgammon *env, int player) {
 }
 
 bool is_dst_available(CBackgammon *env, int position, int player) {
-    if (!env->board[position] || env->board[position] == 1 || env->board[position] == -1) return true;
-    if (player == WHITE) {
-        return env->board[position] > 0;
-    } else {
-        return env->board[position] < 0;
-    }
-
+    int8_t val = env->board[position];
+    
+    if (val == 0) return true;
+    
+    if (player == WHITE && val > 0) return true;
+    if (player == BLACK && val < 0) return true;
+    
+    if (player == WHITE && val == -1) return true;
+    if (player == BLACK && val == 1) return true;
+    
+    return false;
 }
 
 bool is_legal_move(CBackgammon *env, int from, int die_index) {
@@ -545,6 +549,10 @@ end:
     env->rewards[0] = reward;
     compute_observations(env);
     env->tick++;
+    
+    if (env->tick % 100 == 0) {
+        printf("tick=%d white_off=%d black_off=%d\n", env->tick, env->off[WHITE], env->off[BLACK]);
+    }
 }
 
 

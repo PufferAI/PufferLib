@@ -966,13 +966,15 @@ class G2048(nn.Module):
 
 
 class Backgammon(nn.Module):
-    def __init__(self, env, hidden_size=256):
+    def __init__(self, env, hidden_size=1024):
         super().__init__()
         obs_size = env.single_observation_space.shape[0]  # 35
         act_size = env.single_action_space.n  # 104
         
         self.encoder = nn.Sequential(
             nn.Linear(obs_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
