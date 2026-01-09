@@ -1,6 +1,6 @@
 '''Backgammon environment for PufferLib
 
-python -m pufferlib.pufferl train puffer_backgammon   --vec.num-envs 64   --env.num-envs 256   --train.batch-size 1048576   --train.bptt-horizon 64
+python -m pufferlib.pufferl train puffer_backgammon   --vec.num-envs 64   --env.num-envs 256   --train.batch-size 1048576   --train.bptt-horizon 64   --train.total-timesteps 500_000_000
 '''
 
 import gymnasium

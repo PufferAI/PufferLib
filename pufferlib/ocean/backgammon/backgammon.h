@@ -33,16 +33,23 @@
 // 24 points + 2 bar + 2 bear-off + 4 dice + 1 current_player + 2 can_bear_off = 35
 #define OBSERVATION_SIZE 35
 
-#define MAX_STEPS 1000
+#define MAX_STEPS 5000
 #define DEFAULT_LOG_INTERVAL 128
+
+// Opponent difficulty: probability of making a random move instead of greedy
+// 0.0 = fully greedy, 1.0 = fully random
+#define OPPONENT_RANDOM_PROB 0.9f
 
 
 typedef struct Log {
     float episode_return;
     float episode_length;       // Steps in episode
     float win_rate;             // Fraction of games won by white
+    float black_win_rate;       // Fraction of games won by black (opponent)
     float avg_moves_per_turn;
     float hit_rate;             // Rate of hitting opponent blots
+    float checkers_home;        // Avg checkers in home board at episode end
+    float checkers_off;         // Avg checkers borne off at episode end
     float n;                    // Number of episodes
 } Log;
 
@@ -95,17 +102,11 @@ typedef struct CBackgammon {
     // Dice state
     // ========================================================================
     
-    // Dice values (1-6 each)
-    // For doubles, all 4 entries have the same value
     int8_t dice[4];
-    
     // Number of dice available (2 normally, 4 for doubles)
     int8_t num_dice;
-    
     // Number of dice already used this turn
     int8_t dice_used;
-    
-    // Which specific dice are still available (for tracking after partial moves)
     bool dice_available[4];
     
     // ========================================================================
@@ -445,31 +446,52 @@ void opponent_move(CBackgammon* env) {
     roll_dice(env);
     env->turns_this_episode++;
     
-    // find best pre-programmaed move
     while (has_legal_moves(env)) {
-        int best_from = -1;
-        int best_die = -1;
-        int best_score = -10000;
+        int chosen_from = -1;
+        int chosen_die = -1;
         
-        // find the best scoring legal move
-        for (int from = 0; from <= NUM_POINTS; from++) {
-            for (int d = 0; d < env->num_dice; d++) {
-                if (is_legal_move(env, from, d)) {
-                    int score = score_move(env, from, d);
-                    if (score > best_score) {
-                        best_score = score;
-                        best_from = from;
-                        best_die = d;
+        float r = (float)rand() / (float)RAND_MAX;
+        if (r < OPPONENT_RANDOM_PROB) {
+            int legal_moves[NUM_ACTIONS][2];  // [from, die_index]
+            int num_legal = 0;
+            
+            for (int from = 0; from <= NUM_POINTS; from++) {
+                for (int d = 0; d < env->num_dice; d++) {
+                    if (is_legal_move(env, from, d)) {
+                        legal_moves[num_legal][0] = from;
+                        legal_moves[num_legal][1] = d;
+                        num_legal++;
+                    }
+                }
+            }
+            
+            if (num_legal > 0) {
+                int pick = rand() % num_legal;
+                chosen_from = legal_moves[pick][0];
+                chosen_die = legal_moves[pick][1];
+            }
+        } else {
+            // find best scoring legal move
+            int best_score = -10000;
+            
+            for (int from = 0; from <= NUM_POINTS; from++) {
+                for (int d = 0; d < env->num_dice; d++) {
+                    if (is_legal_move(env, from, d)) {
+                        int score = score_move(env, from, d);
+                        if (score > best_score) {
+                            best_score = score;
+                            chosen_from = from;
+                            chosen_die = d;
+                        }
                     }
                 }
             }
         }
         
-        if (best_from < 0) break;  // no move found
+        if (chosen_from < 0) break;  // no move found
         
-        make_move(env, best_from, best_die);
+        make_move(env, chosen_from, chosen_die);
         
-        // did opponent won
         if (check_win(env, BLACK)) {
             return;
         }
@@ -485,6 +507,7 @@ void add_log(CBackgammon* env) {
     env->log.episode_length += env->tick;
     
     env->log.win_rate += check_win(env, WHITE) ? 1.0f : 0.0f;
+    env->log.black_win_rate += check_win(env, BLACK) ? 1.0f : 0.0f;
     
     if (env->turns_this_episode > 0) {
         env->log.avg_moves_per_turn += (float)env->moves_this_episode / env->turns_this_episode;
@@ -493,6 +516,14 @@ void add_log(CBackgammon* env) {
     if (env->moves_this_episode > 0) {
         env->log.hit_rate += (float)env->hits_this_episode / env->moves_this_episode;
     }
+    
+    // Count checkers in home board and borne off for white
+    int home_count = 0;
+    for (int i = 1; i <= 6; i++) {
+        if (env->board[i] > 0) home_count += env->board[i];
+    }
+    env->log.checkers_home += home_count;
+    env->log.checkers_off += env->off[WHITE];
     
     env->log.n += 1;
 }
@@ -510,8 +541,19 @@ void c_step(CBackgammon* env) {
 
     float reward = 0.0f;
     
+    int old_off = env->off[WHITE];
+    int old_bar_opponent = env->bar[BLACK];
+    
     if (is_legal_move(env, from, die_index)) {
         make_move(env, from, die_index);
+        
+        // Reward shaping
+        if (env->off[WHITE] > old_off) {
+            reward += 0.05f;
+        }
+        if (env->bar[BLACK] > old_bar_opponent) {
+            reward += 0.02f;
+        }
     } else {
         reward -= 0.1f;
     }
@@ -550,9 +592,6 @@ end:
     compute_observations(env);
     env->tick++;
     
-    if (env->tick % 100 == 0) {
-        printf("tick=%d white_off=%d black_off=%d\n", env->tick, env->off[WHITE], env->off[BLACK]);
-    }
 }
 
 
