@@ -963,3 +963,23 @@ class G2048(nn.Module):
         logits = self.decoder(hidden)
         values = self.value(hidden)
         return logits, values
+
+
+class Backgammon(nn.Module):
+    def __init__(self, env, hidden_size=256):
+        super().__init__()
+        obs_size = env.single_observation_space.shape[0]  # 35
+        act_size = env.single_action_space.n  # 104
+        
+        self.encoder = nn.Sequential(
+            nn.Linear(obs_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+        )
+        self.policy_head = nn.Linear(hidden_size, act_size)
+        self.value_head = nn.Linear(hidden_size, 1)
+    
+    def forward(self, obs):
+        x = self.encoder(obs)
+        return self.policy_head(x), self.value_head(x)

@@ -1,4 +1,7 @@
-'''Backgammon environment for PufferLib'''
+'''Backgammon environment for PufferLib
+
+Test with: python -m pufferlib.pufferl train puffer_backgammon --vec.num-workers 8
+'''
 
 import gymnasium
 import numpy as np
