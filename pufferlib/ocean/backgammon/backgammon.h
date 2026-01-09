@@ -36,9 +36,9 @@
 #define MAX_STEPS 5000
 #define DEFAULT_LOG_INTERVAL 128
 
-// Opponent difficulty: probability of making a random move instead of greedy
+// Opponent difficulty
 // 0.0 = fully greedy, 1.0 = fully random
-#define OPPONENT_RANDOM_PROB 0.9f
+#define OPPONENT_RANDOM_PROB 1.0f
 
 
 typedef struct Log {
