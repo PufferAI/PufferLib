@@ -713,12 +713,6 @@ def dist_sum(value, device):
     torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.SUM)
     return tensor.item()
 
-def dist_mean(value, device):
-    if not torch.distributed.is_initialized():
-        return value
-
-    return dist_sum(value, device) / torch.distributed.get_world_size()
-
 class Profile:
     def __init__(self, frequency=5):
         self.profiles = defaultdict(lambda: defaultdict(float))

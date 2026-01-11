@@ -1,4 +1,3 @@
-from pdb import set_trace as T
 import numpy as np
 
 from open_spiel.python.algorithms import mcts
