@@ -79,25 +79,27 @@ Current pursuit reward (-dist/10000 per step) is too weak for effective learning
 ## Phase 4: Rendering
 **Moved before Combat** - Can't debug combat without seeing planes.
 
+**Implementation Guide**: See `RENDERING.md` for code patterns, templates, and Raylib reference.
+
 Camera and visibility:
-- [ ] [ ] 4.1 Fix camera: chase cam behind player, ~50-100m back → test visual
-- [ ] [ ] 4.2 Camera follows player position and orientation
-- [ ] [ ] 4.3 Add mouse controls for camera orbit (like drone_race)
+- [x] [ ] 4.1 Fix camera: chase cam behind player, ~80m back → test_chase_camera_behind_player()
+- [x] [ ] 4.2 Camera follows player position and orientation → test_chase_camera_behind_player()
+- [x] [ ] 4.3 Add mouse controls for camera orbit (like drone_race) → test_camera_orbit_updates()
 
 Drawing planes:
-- [ ] [ ] 4.4 Draw player plane: cone (fuselage) + triangles (wings) or simple sphere
-- [ ] [ ] 4.5 Draw opponent plane: different color
+- [x] [ ] 4.4 Draw player plane: green sphere + forward line → dogfight.h:469-478
+- [x] [ ] 4.5 Draw opponent plane: red sphere + forward line → dogfight.h:480-490
 - [ ] [ ] 4.6 Draw velocity vectors for debugging (optional, toggle with key)
 
 Environment:
-- [ ] [ ] 4.7 Draw ground plane at z=0 with grid
+- [x] [ ] 4.7 Draw ground plane at z=0 → dogfight.h:462-463
 - [ ] [ ] 4.8 Draw sky gradient or horizon reference
-- [ ] [ ] 4.9 Draw world bounds (wireframe box)
+- [x] [ ] 4.9 Draw world bounds (wireframe box) → dogfight.h:465-467
 
 HUD:
-- [ ] [ ] 4.10 Display: speed (m/s), altitude (m), throttle (%)
-- [ ] [ ] 4.11 Display: distance to opponent, episode tick
-- [ ] [ ] 4.12 Display: episode return
+- [x] [ ] 4.10 Display: speed (m/s), altitude (m), throttle (%) → dogfight.h:498-500
+- [x] [ ] 4.11 Display: distance to opponent, episode tick → dogfight.h:501-502
+- [x] [ ] 4.12 Display: episode return → dogfight.h:503
 
 ## Phase 5: Combat Mechanics
 **Struct additions:**

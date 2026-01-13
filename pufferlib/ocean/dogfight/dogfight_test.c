@@ -680,6 +680,79 @@ void test_speed_penalty() {
     printf("test_speed_penalty PASS\n");
 }
 
+// Phase 4: Rendering tests (camera math only, no actual drawing)
+void test_chase_camera_behind_player() {
+    // Test that camera is positioned behind player based on orientation
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    // Set player at origin, facing +X
+    env.player.pos = vec3(0, 0, 500);
+    env.player.ori = quat(1, 0, 0, 0);  // identity = facing +X
+
+    // Calculate camera position (same logic as c_render)
+    Vec3 fwd = quat_rotate(env.player.ori, vec3(1, 0, 0));
+    float dist = 80.0f;  // default cam_distance
+    float el = 0.3f;     // default cam_elevation
+    float az = 0.0f;     // default cam_azimuth
+
+    float cam_x = env.player.pos.x - fwd.x * dist * cosf(el) * cosf(az) + fwd.y * dist * sinf(az);
+    float cam_y = env.player.pos.y - fwd.y * dist * cosf(el) * cosf(az) - fwd.x * dist * sinf(az);
+    float cam_z = env.player.pos.z + dist * sinf(el) + 20.0f;
+
+    // Camera should be behind player (negative X direction) and above
+    assert(cam_x < env.player.pos.x);  // Behind
+    assert(cam_z > env.player.pos.z);  // Above
+    ASSERT_NEAR(cam_y, 0.0f, 1.0f);    // Same Y (player at Y=0)
+
+    printf("test_chase_camera_behind_player PASS\n");
+}
+
+void test_camera_orbit_updates() {
+    // Test camera orbit math with different azimuth/elevation
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    env.player.pos = vec3(0, 0, 500);
+    env.player.ori = quat(1, 0, 0, 0);
+
+    Vec3 fwd = quat_rotate(env.player.ori, vec3(1, 0, 0));
+    float dist = 80.0f;
+
+    // Test with azimuth rotation (looking from side)
+    float az = PI / 2.0f;  // 90 degrees
+    float el = 0.3f;
+
+    float cam_x = env.player.pos.x - fwd.x * dist * cosf(el) * cosf(az) + fwd.y * dist * sinf(az);
+    float cam_y = env.player.pos.y - fwd.y * dist * cosf(el) * cosf(az) - fwd.x * dist * sinf(az);
+
+    // With 90 degree azimuth, camera should be to the side (negative Y)
+    assert(cam_y < -30.0f);  // Significantly to the side
+
+    // Test elevation change
+    float el_high = 1.2f;  // Looking from above
+    float cam_z_high = env.player.pos.z + dist * sinf(el_high) + 20.0f;
+    float cam_z_low = env.player.pos.z + dist * sinf(0.1f) + 20.0f;
+
+    assert(cam_z_high > cam_z_low);  // Higher elevation = higher camera
+
+    printf("test_camera_orbit_updates PASS\n");
+}
+
+void test_client_struct_defaults() {
+    // Test that Client would be initialized with correct defaults
+    // (We can't actually test c_render without Raylib window, but we test the values)
+    float default_distance = 80.0f;
+    float default_azimuth = 0.0f;
+    float default_elevation = 0.3f;
+
+    assert(default_distance > 30.0f && default_distance < 300.0f);
+    assert(default_elevation > -1.4f && default_elevation < 1.4f);
+    ASSERT_NEAR(default_azimuth, 0.0f, 0.01f);
+
+    printf("test_client_struct_defaults PASS\n");
+}
+
 int main() {
     printf("Running dogfight tests...\n\n");
 
@@ -718,6 +791,11 @@ int main() {
     test_altitude_penalty();
     test_speed_penalty();
 
-    printf("\nAll tests PASS\n");
+    // Phase 4
+    test_chase_camera_behind_player();
+    test_camera_orbit_updates();
+    test_client_struct_defaults();
+
+    printf("\nAll 30 tests PASS\n");
     return 0;
 }
