@@ -320,13 +320,44 @@ void c_step(Dogfight *env) {
     // Opponent uses simple motion (no actions)
     step_plane(&env->opponent, DT);
 
-    // Pursuit reward: closer = better
-    float dist = norm3(sub3(env->opponent.pos, env->player.pos));
-    env->rewards[0] = -dist / 10000.0f;
-    env->episode_return += env->rewards[0];
+    // === Reward Shaping (Phase 3.5) ===
+    float reward = 0.0f;
+    Plane *p = &env->player;
+    Plane *o = &env->opponent;
+
+    // 1. Base pursuit reward: closer = better
+    Vec3 rel_pos = sub3(o->pos, p->pos);
+    float dist = norm3(rel_pos);
+    reward += -dist / 10000.0f;
+
+    // 2. Closing velocity reward: approaching = good
+    Vec3 rel_vel = sub3(p->vel, o->vel);  // player vel relative to opponent
+    Vec3 rel_pos_norm = normalize3(rel_pos);
+    float closing_rate = dot3(rel_vel, rel_pos_norm);  // positive when closing
+    reward += closing_rate / 500.0f;  // scale: 100 m/s closing = +0.2
+
+    // 3. Tail position reward: behind opponent = good
+    Vec3 opp_forward = quat_rotate(o->ori, vec3(1, 0, 0));
+    float tail_angle = dot3(rel_pos_norm, opp_forward);  // +1 when behind, -1 when in front
+    reward += tail_angle * 0.02f;  // scale: behind = +0.02, in front = -0.02
+
+    // 4. Altitude penalty: too low or too high is bad
+    if (p->pos.z < 200.0f) {
+        reward -= (200.0f - p->pos.z) / 2000.0f;  // max -0.1 at z=0
+    } else if (p->pos.z > 2500.0f) {
+        reward -= (p->pos.z - 2500.0f) / 5000.0f;  // max -0.1 at z=3000
+    }
+
+    // 5. Speed penalty: too slow is stall risk
+    float speed = norm3(p->vel);
+    if (speed < 50.0f) {
+        reward -= (50.0f - speed) / 500.0f;  // max -0.1 at speed=0
+    }
+
+    env->rewards[0] = reward;
+    env->episode_return += reward;
 
     // Check bounds (player only)
-    Plane *p = &env->player;
     bool oob = fabsf(p->pos.x) > WORLD_HALF_X ||
                fabsf(p->pos.y) > WORLD_HALF_Y ||
                p->pos.z < 0 || p->pos.z > WORLD_MAX_Z;

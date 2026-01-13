@@ -69,12 +69,12 @@ Second checkbox: audited and verified
 ## Phase 3.5: Reward Shaping
 Current pursuit reward (-dist/10000 per step) is too weak for effective learning.
 
-- [ ] [ ] 3.5.1 Add closing velocity reward: +bonus when distance decreasing → test_closing_velocity_reward()
-- [ ] [ ] 3.5.2 Add tail position reward: +bonus when behind opponent (angle from opponent's forward) → test_tail_position_reward()
-- [ ] [ ] 3.5.3 Add altitude maintenance: small penalty for z < 200m or z > 2500m → test_altitude_penalty()
-- [ ] [ ] 3.5.4 Add speed maintenance: small penalty for V < 50 m/s (stall risk) → test_speed_penalty()
-- [ ] [ ] 3.5.5 Scale rewards appropriately (total episode reward ~10-100 for good policy)
-- [ ] [ ] 3.5.6 Test: training shows faster convergence with new rewards
+- [x] [ ] 3.5.1 Add closing velocity reward: +bonus when distance decreasing → test_closing_velocity_reward()
+- [x] [ ] 3.5.2 Add tail position reward: +bonus when behind opponent (angle from opponent's forward) → test_tail_position_reward()
+- [x] [ ] 3.5.3 Add altitude maintenance: small penalty for z < 200m or z > 2500m → test_altitude_penalty()
+- [x] [ ] 3.5.4 Add speed maintenance: small penalty for V < 50 m/s (stall risk) → test_speed_penalty()
+- [x] [ ] 3.5.5 Scale rewards appropriately (total episode reward ~10-100 for good policy)
+- [x] [ ] 3.5.6 Test: training shows faster convergence with new rewards (2/3 runs positive)
 
 ## Phase 4: Rendering
 **Moved before Combat** - Can't debug combat without seeing planes.

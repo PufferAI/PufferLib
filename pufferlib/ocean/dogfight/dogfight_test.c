@@ -562,6 +562,124 @@ void test_integration_updates_state() {
     printf("test_integration_updates_state PASS\n");
 }
 
+// Phase 3.5 tests
+
+void test_closing_velocity_reward() {
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    // Scenario 1: Player approaching opponent (closing)
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);  // Moving toward opponent
+    env.opponent.pos = vec3(500, 0, 1000);
+    env.opponent.vel = vec3(50, 0, 0);  // Moving slower
+
+    c_step(&env);
+    float reward_closing = env.rewards[0];
+
+    // Scenario 2: Player moving away from opponent (opening)
+    c_reset(&env);
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(-100, 0, 0);  // Moving away from opponent
+    env.opponent.pos = vec3(500, 0, 1000);
+    env.opponent.vel = vec3(50, 0, 0);
+
+    c_step(&env);
+    float reward_opening = env.rewards[0];
+
+    // Closing should give better reward than opening
+    assert(reward_closing > reward_opening);
+
+    printf("test_closing_velocity_reward PASS\n");
+}
+
+void test_tail_position_reward() {
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    // Scenario 1: Player behind opponent (good position)
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);  // Facing +X
+    env.opponent.pos = vec3(300, 0, 1000);
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);  // Opponent also facing +X (player behind)
+
+    c_step(&env);
+    float reward_behind = env.rewards[0];
+
+    // Scenario 2: Player in front of opponent (bad position)
+    c_reset(&env);
+    env.player.pos = vec3(300, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.opponent.pos = vec3(0, 0, 1000);
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);  // Opponent facing player (player in front)
+
+    c_step(&env);
+    float reward_front = env.rewards[0];
+
+    // Being behind should give better reward
+    assert(reward_behind > reward_front);
+
+    printf("test_tail_position_reward PASS\n");
+}
+
+void test_altitude_penalty() {
+    Dogfight env = make_env(1000);
+
+    // Scenario 1: Good altitude (1000m)
+    c_reset(&env);
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.opponent.pos = vec3(300, 0, 1000);
+
+    c_step(&env);
+    float reward_good_alt = env.rewards[0];
+
+    // Scenario 2: Too low (100m)
+    c_reset(&env);
+    env.player.pos = vec3(0, 0, 100);
+    env.player.vel = vec3(100, 0, 0);
+    env.opponent.pos = vec3(300, 0, 100);
+
+    c_step(&env);
+    float reward_low = env.rewards[0];
+
+    // Good altitude should have better reward (less penalty)
+    assert(reward_good_alt > reward_low);
+
+    printf("test_altitude_penalty PASS\n");
+}
+
+void test_speed_penalty() {
+    Dogfight env = make_env(1000);
+
+    // Scenario 1: Good speed (100 m/s)
+    c_reset(&env);
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.opponent.pos = vec3(300, 0, 1000);
+
+    c_step(&env);
+    float reward_good_speed = env.rewards[0];
+
+    // Scenario 2: Too slow (20 m/s - stall risk)
+    c_reset(&env);
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(20, 0, 0);
+    env.opponent.pos = vec3(300, 0, 1000);
+
+    c_step(&env);
+    float reward_slow = env.rewards[0];
+
+    // Good speed should have better reward
+    assert(reward_good_speed > reward_slow);
+
+    printf("test_speed_penalty PASS\n");
+}
+
 int main() {
     printf("Running dogfight tests...\n\n");
 
@@ -593,6 +711,12 @@ int main() {
     test_glimit_clamps_acceleration();
     test_forces_sum_correctly();
     test_integration_updates_state();
+
+    // Phase 3.5
+    test_closing_velocity_reward();
+    test_tail_position_reward();
+    test_altitude_penalty();
+    test_speed_penalty();
 
     printf("\nAll tests PASS\n");
     return 0;
