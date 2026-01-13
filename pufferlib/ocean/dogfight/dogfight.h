@@ -382,6 +382,57 @@ void c_step(Dogfight *env) {
 // Forward declaration for c_close (used in c_render)
 void c_close(Dogfight *env);
 
+// Draw airplane shape using lines - shows roll/pitch/yaw clearly
+// Body frame: X=forward, Y=right, Z=up
+void draw_plane_shape(Vec3 pos, Quat ori, Color body_color, Color wing_color) {
+    // Body frame points (scaled for visibility: ~20m wingspan, ~25m length)
+    Vec3 nose = vec3(15, 0, 0);
+    Vec3 tail = vec3(-10, 0, 0);
+    Vec3 left_wing = vec3(0, -12, 0);
+    Vec3 right_wing = vec3(0, 12, 0);
+    Vec3 vtail_top = vec3(-8, 0, 8);       // Vertical stabilizer
+    Vec3 htail_left = vec3(-10, -5, 0);    // Horizontal stabilizer
+    Vec3 htail_right = vec3(-10, 5, 0);
+
+    // Rotate all points by orientation and translate to world position
+    Vec3 nose_w = add3(pos, quat_rotate(ori, nose));
+    Vec3 tail_w = add3(pos, quat_rotate(ori, tail));
+    Vec3 lwing_w = add3(pos, quat_rotate(ori, left_wing));
+    Vec3 rwing_w = add3(pos, quat_rotate(ori, right_wing));
+    Vec3 vtop_w = add3(pos, quat_rotate(ori, vtail_top));
+    Vec3 htl_w = add3(pos, quat_rotate(ori, htail_left));
+    Vec3 htr_w = add3(pos, quat_rotate(ori, htail_right));
+
+    // Convert to Raylib Vector3
+    Vector3 nose_r = {nose_w.x, nose_w.y, nose_w.z};
+    Vector3 tail_r = {tail_w.x, tail_w.y, tail_w.z};
+    Vector3 lwing_r = {lwing_w.x, lwing_w.y, lwing_w.z};
+    Vector3 rwing_r = {rwing_w.x, rwing_w.y, rwing_w.z};
+    Vector3 vtop_r = {vtop_w.x, vtop_w.y, vtop_w.z};
+    Vector3 htl_r = {htl_w.x, htl_w.y, htl_w.z};
+    Vector3 htr_r = {htr_w.x, htr_w.y, htr_w.z};
+
+    // Fuselage (nose to tail)
+    DrawLine3D(nose_r, tail_r, body_color);
+
+    // Main wings (left to right, through center for visibility)
+    DrawLine3D(lwing_r, rwing_r, wing_color);
+    // Wing to fuselage connections (makes it look more solid)
+    DrawLine3D(lwing_r, nose_r, wing_color);
+    DrawLine3D(rwing_r, nose_r, wing_color);
+
+    // Vertical stabilizer (tail to top)
+    DrawLine3D(tail_r, vtop_r, body_color);
+
+    // Horizontal stabilizer
+    DrawLine3D(htl_r, htr_r, body_color);
+    DrawLine3D(htl_r, tail_r, body_color);
+    DrawLine3D(htr_r, tail_r, body_color);
+
+    // Small sphere at nose to show front clearly
+    DrawSphere(nose_r, 2.0f, body_color);
+}
+
 void handle_camera_controls(Client *c) {
     Vector2 mouse = GetMousePosition();
 
@@ -469,28 +520,12 @@ void c_render(Dogfight *env) {
     // Bounds: X ±2000, Y ±2000, Z 0-3000 → center at (0, 0, 1500)
     DrawCubeWires((Vector3){0, 0, 1500}, 4000, 4000, 3000, (Color){100, 100, 100, 255});
 
-    // 8. Draw player plane (green sphere + forward line)
-    Vector3 player_pos = {p->pos.x, p->pos.y, p->pos.z};
-    DrawSphere(player_pos, 5.0f, GREEN);
-    // Forward direction indicator
-    Vector3 player_fwd = {
-        p->pos.x + fwd.x * 30,
-        p->pos.y + fwd.y * 30,
-        p->pos.z + fwd.z * 30
-    };
-    DrawLine3D(player_pos, player_fwd, GREEN);
+    // 8. Draw player plane (green wireframe airplane)
+    draw_plane_shape(p->pos, p->ori, GREEN, LIME);
 
-    // 9. Draw opponent plane (red sphere + forward line)
+    // 9. Draw opponent plane (red wireframe airplane)
     Plane *o = &env->opponent;
-    Vector3 opp_pos = {o->pos.x, o->pos.y, o->pos.z};
-    DrawSphere(opp_pos, 5.0f, RED);
-    Vec3 opp_fwd = quat_rotate(o->ori, vec3(1, 0, 0));
-    Vector3 opp_fwd_end = {
-        o->pos.x + opp_fwd.x * 30,
-        o->pos.y + opp_fwd.y * 30,
-        o->pos.z + opp_fwd.z * 30
-    };
-    DrawLine3D(opp_pos, opp_fwd_end, RED);
+    draw_plane_shape(o->pos, o->ori, RED, ORANGE);
 
     EndMode3D();
 
