@@ -753,6 +753,134 @@ void test_client_struct_defaults() {
     printf("test_client_struct_defaults PASS\n");
 }
 
+// Phase 5: Combat tests
+void test_trigger_fires() {
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    // Set up player with fire action
+    env.player.fire_cooldown = 0;
+    env.actions[4] = 1.0f;  // Trigger pulled
+
+    // Step to process fire
+    c_step(&env);
+
+    // Should have fired (cooldown set)
+    assert(env.player.fire_cooldown == FIRE_COOLDOWN);
+    assert(env.log.shots_fired >= 1.0f);
+
+    printf("test_trigger_fires PASS\n");
+}
+
+void test_fire_cooldown() {
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    // Fire once
+    env.player.fire_cooldown = 0;
+    env.actions[4] = 1.0f;
+    c_step(&env);
+    float shots_after_first = env.log.shots_fired;
+
+    // Try to fire again immediately (should be blocked by cooldown)
+    c_step(&env);
+    float shots_after_second = env.log.shots_fired;
+
+    // Should not have fired again (still on cooldown)
+    assert(shots_after_second == shots_after_first);
+
+    printf("test_fire_cooldown PASS\n");
+}
+
+void test_cone_hit_detection() {
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    // Place player at origin facing +X
+    env.player.pos = vec3(0, 0, 500);
+    env.player.ori = quat(1, 0, 0, 0);  // Identity = facing +X
+
+    // Place opponent directly ahead within range
+    env.opponent.pos = vec3(200, 0, 500);  // 200m ahead, in cone
+
+    assert(check_hit(&env.player, &env.opponent) == true);
+
+    // Place opponent too far
+    env.opponent.pos = vec3(600, 0, 500);  // 600m > GUN_RANGE
+    assert(check_hit(&env.player, &env.opponent) == false);
+
+    // Place opponent at side (outside 5 degree cone)
+    env.opponent.pos = vec3(200, 50, 500);  // ~14 degrees off-axis
+    assert(check_hit(&env.player, &env.opponent) == false);
+
+    // Place opponent slightly off-axis but within cone
+    env.opponent.pos = vec3(200, 10, 500);  // ~2.8 degrees off-axis
+    assert(check_hit(&env.player, &env.opponent) == true);
+
+    printf("test_cone_hit_detection PASS\n");
+}
+
+void test_hit_reward() {
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    // Set up guaranteed hit
+    env.player.pos = vec3(0, 0, 500);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.player.fire_cooldown = 0;
+    env.opponent.pos = vec3(200, 0, 500);  // Directly ahead
+
+    env.actions[4] = 1.0f;  // Fire
+
+    float reward_before = env.episode_return;
+    c_step(&env);
+    float reward_after = env.episode_return;
+
+    // Should have gotten hit + kill reward (11.0 total)
+    float reward_gained = reward_after - reward_before;
+    assert(reward_gained > 10.0f);  // At least kill reward
+
+    printf("test_hit_reward PASS\n");
+}
+
+void test_kill_respawns_opponent() {
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    // Set up guaranteed hit
+    env.player.pos = vec3(0, 0, 500);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.player.fire_cooldown = 0;
+    env.opponent.pos = vec3(200, 0, 500);
+
+    Vec3 old_opp_pos = env.opponent.pos;
+    env.actions[4] = 1.0f;
+
+    c_step(&env);
+
+    // Opponent should have respawned (different position)
+    Vec3 new_opp_pos = env.opponent.pos;
+    float dist_moved = norm3(sub3(new_opp_pos, old_opp_pos));
+    assert(dist_moved > 100.0f);  // Should have moved significantly
+
+    // Episode should NOT have terminated
+    assert(env.terminals[0] == 0);
+
+    // Kills should be tracked
+    assert(env.log.kills >= 1.0f);
+
+    printf("test_kill_respawns_opponent PASS\n");
+}
+
+void test_combat_constants() {
+    // Verify combat constants are reasonable
+    assert(GUN_RANGE == 500.0f);
+    assert(GUN_CONE_ANGLE > 0.08f && GUN_CONE_ANGLE < 0.09f);  // ~5 degrees
+    assert(FIRE_COOLDOWN == 10);
+
+    printf("test_combat_constants PASS\n");
+}
+
 int main() {
     printf("Running dogfight tests...\n\n");
 
@@ -796,6 +924,14 @@ int main() {
     test_camera_orbit_updates();
     test_client_struct_defaults();
 
-    printf("\nAll 30 tests PASS\n");
+    // Phase 5
+    test_trigger_fires();
+    test_fire_cooldown();
+    test_cone_hit_detection();
+    test_hit_reward();
+    test_kill_respawns_opponent();
+    test_combat_constants();
+
+    printf("\nAll 36 tests PASS\n");
     return 0;
 }

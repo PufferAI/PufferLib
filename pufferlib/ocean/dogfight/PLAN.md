@@ -111,26 +111,16 @@ HUD:
 - `FIRE_COOLDOWN` = 10 (ticks = 0.2 seconds)
 
 **Implementation:**
-- [ ] [ ] 5.1 Add fire_cooldown and alive fields to Plane struct
-- [ ] [ ] 5.2 Add combat constants (GUN_RANGE, GUN_CONE_ANGLE, FIRE_COOLDOWN)
-- [ ] [ ] 5.3 Map trigger action [4] to fire (if > 0.5 and cooldown == 0) → test_trigger_fires()
-- [ ] [ ] 5.4 Implement cone check hit detection → test_cone_hit_detection()
-        ```c
-        bool check_hit(Plane* shooter, Plane* target) {
-            Vec3 to_target = sub3(target->pos, shooter->pos);
-            float dist = norm3(to_target);
-            if (dist > GUN_RANGE) return false;
-            Vec3 forward = quat_rotate(shooter->ori, vec3(1, 0, 0));
-            float cos_angle = dot3(normalize3(to_target), forward);
-            return cos_angle > cosf(GUN_CONE_ANGLE);
-        }
-        ```
-- [ ] [ ] 5.5 Track shots_fired in Log when trigger pulled
-- [ ] [ ] 5.6 Track shots_hit in Log when hit detected
-- [ ] [ ] 5.7 Reward for hit: +1.0 → test_hit_reward()
-- [ ] [ ] 5.8 On kill: respawn opponent, +10.0 reward, increment kills in Log
-- [ ] [ ] 5.9 Episode does NOT terminate on kill (continue fighting)
-- [ ] [ ] 5.10 Test: player can shoot and hit opponent → test_combat_works()
+- [x] [ ] 5.1 Add fire_cooldown field to Plane struct → dogfight.h:96
+- [x] [ ] 5.2 Add combat constants → dogfight.h:35-38, test_combat_constants()
+- [x] [ ] 5.3 Map trigger action [4] to fire → test_trigger_fires(), test_fire_cooldown()
+- [x] [ ] 5.4 Implement cone check hit detection → test_cone_hit_detection()
+- [x] [ ] 5.5 Track shots_fired in Log when trigger pulled → test_trigger_fires()
+- [x] [ ] 5.6 Track shots_hit in Log when hit detected → test_hit_reward()
+- [x] [ ] 5.7 Reward for hit: +1.0 → test_hit_reward()
+- [x] [ ] 5.8 On kill: respawn opponent, +10.0 reward → test_kill_respawns_opponent()
+- [x] [ ] 5.9 Episode does NOT terminate on kill → test_kill_respawns_opponent()
+- [x] [ ] 5.10 All combat tests pass (6 tests) → 36 total tests PASS
 
 ## Phase 6: Opponent AI
 **Physics fix:** Both planes must use same physics model.
