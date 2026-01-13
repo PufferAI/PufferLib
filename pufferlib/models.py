@@ -111,15 +111,15 @@ class LSTMWrapper(nn.Module):
         self.hidden_size = hidden_size
         self.is_continuous = self.policy.is_continuous
 
-        for name, param in self.named_parameters():
+        self.lstm = nn.LSTM(input_size, hidden_size)
+
+        for name, param in self.lstm.named_parameters():
             if 'layer_norm' in name:
                 continue
             if "bias" in name:
                 nn.init.constant_(param, 0)
             elif "weight" in name and param.ndim >= 2:
                 nn.init.orthogonal_(param, 1.0)
-
-        self.lstm = nn.LSTM(input_size, hidden_size)
 
         self.cell = torch.nn.LSTMCell(input_size, hidden_size)
         self.cell.weight_ih = self.lstm.weight_ih_l0
