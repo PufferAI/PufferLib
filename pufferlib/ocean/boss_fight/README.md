@@ -3,9 +3,9 @@
 ## Goal
 
 Build a **minimal** 2D boss fight environment to learn RL concepts with PufferLib.
-Focus: **observation design, reward shaping, and training experiments** — not game engine complexity.
+Focus: **observation design, reward shaping, training experiments and a bit of game dev using Raylib**
 
-The boss has **1 attack** (AOE burst). All hitboxes are circles. No rendering required.
+The boss has **1 attack** (AOE burst). All hitboxes are circles.
 
 ---
 
