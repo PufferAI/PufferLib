@@ -4,7 +4,7 @@ import gymnasium
 import numpy as np
 
 import pufferlib
-from pufferlib.ocean.template import binding
+from pufferlib.ocean.boss_fight import binding
 
 
 class BossFight(pufferlib.PufferEnv):
