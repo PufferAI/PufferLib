@@ -21,3 +21,4 @@ Historical record of physics test results at specific commits.
 | Commit | Date | max_speed | cruise_50 | min_speed | dive_30 | dive_45 | climb | pitch | roll | Notes |
 |--------|------|-----------|-----------|-----------|---------|---------|-------|-------|------|-------|
 | | | ~144 exp | | ~40 stall | | | m/s | UP | YES | expected |
+| 0116b97c | 2026-01-13 | 86.5 | 80.7 | 75.5 | 10.7 | 40.4 | -4.9 | UP | YES | +2° incidence, rate ctrl still dives |
