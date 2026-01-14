@@ -8,6 +8,7 @@
 #define FLOAT 1
 #define INT 2
 #define UNSIGNED_CHAR 3
+#define DOUBLE 4
 
 typedef struct {
     const char* key;
@@ -29,13 +30,13 @@ typedef struct {
     Env* envs;
     int size;
     float* observations;
-    float* actions;
+    double* actions;
     float* rewards;
-    unsigned char* terminals;
+    float* terminals;
     float* gpu_observations;
-    float* gpu_actions;
+    double* gpu_actions;
     float* gpu_rewards;
-    unsigned char* gpu_terminals;
+    float* gpu_terminals;
     Threading* threading;
     cudaStream_t* streams;
     int buffers;
@@ -118,8 +119,8 @@ void my_log(Log* log, Dict* out);
 // You don't need these, but you have to do some really gross
 // casts after loading the library without them.
 typedef VecEnv* (*create_environments_fn)(int num_envs, int buffers, bool use_gpu, int test_idx, Dict* kwargs);
-typedef Env* (*env_init_fn)(float* observations, float* actions, float* rewards,
-        unsigned char* terminals, int seed, Dict* kwargs);
+typedef Env* (*env_init_fn)(float* observations, double* actions, float* rewards,
+        float* terminals, int seed, Dict* kwargs);
 typedef void (*create_threads_fn)(VecEnv* vec, int threads, int block_size);
 typedef void (*vec_reset_fn)(VecEnv* vec);
 typedef void (*vec_step_fn)(VecEnv* vec);

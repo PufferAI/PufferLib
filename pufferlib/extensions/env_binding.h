@@ -12,6 +12,7 @@
 #define FLOAT 1
 #define INT 2
 #define UNSIGNED_CHAR 3
+#define DOUBLE 4
 
 #define CHECK_CUDA(call)                                            \
     do {                                                            \
@@ -205,7 +206,7 @@ static void* c_threadmanager(void* arg) {
                     cudaMemcpyAsync(
                         &vec->gpu_terminals[start],
                         &vec->terminals[start],
-                        buffer_size*sizeof(unsigned char),
+                        buffer_size*sizeof(float),
                         cudaMemcpyHostToDevice,
                         vec->streams[buf]
                     );
@@ -249,31 +250,31 @@ VecEnv* create_environments(int num_envs, int buffers, bool use_gpu, int test_id
     if (use_gpu) {
         cudaSetDevice(0);
         CHECK_CUDA(cudaHostAlloc((void**)&vec->observations, num_agents*OBS_SIZE*sizeof(float), cudaHostAllocPortable));
-        CHECK_CUDA(cudaHostAlloc((void**)&vec->actions, num_agents*ACT_SIZE*sizeof(float), cudaHostAllocPortable));
+        CHECK_CUDA(cudaHostAlloc((void**)&vec->actions, num_agents*ACT_SIZE*sizeof(double), cudaHostAllocPortable));
         CHECK_CUDA(cudaHostAlloc((void**)&vec->rewards, num_agents*sizeof(float), cudaHostAllocPortable));
-        CHECK_CUDA(cudaHostAlloc((void**)&vec->terminals, num_agents*sizeof(unsigned char), cudaHostAllocPortable));
+        CHECK_CUDA(cudaHostAlloc((void**)&vec->terminals, num_agents*sizeof(float), cudaHostAllocPortable));
     } else {
         vec->observations = calloc(num_agents*OBS_SIZE, sizeof(float));
-        vec->actions = calloc(num_agents*ACT_SIZE, sizeof(float));
+        vec->actions = calloc(num_agents*ACT_SIZE, sizeof(double));
         vec->rewards = calloc(num_agents, sizeof(float));
-        vec->terminals = calloc(num_agents, sizeof(unsigned char));
+        vec->terminals = calloc(num_agents, sizeof(float));
     }
 
     memset(vec->observations, 0, num_agents*OBS_SIZE*sizeof(float));
-    memset(vec->actions, 0, num_agents*ACT_SIZE*sizeof(float));
+    memset(vec->actions, 0, num_agents*ACT_SIZE*sizeof(double));
     memset(vec->rewards, 0, num_agents*sizeof(float));
-    memset(vec->terminals, 0, num_agents*sizeof(unsigned char));
+    memset(vec->terminals, 0, num_agents*sizeof(float));
     //printf("allocated mem host\n");
 
     if (use_gpu) {
         CHECK_CUDA(cudaMalloc((void**)&vec->gpu_observations, num_agents*OBS_SIZE*sizeof(float)));
-        CHECK_CUDA(cudaMalloc((void**)&vec->gpu_actions, num_agents*ACT_SIZE*sizeof(float)));
+        CHECK_CUDA(cudaMalloc((void**)&vec->gpu_actions, num_agents*ACT_SIZE*sizeof(double)));
         CHECK_CUDA(cudaMalloc((void**)&vec->gpu_rewards, num_agents*sizeof(float)));
-        CHECK_CUDA(cudaMalloc((void**)&vec->gpu_terminals, num_agents*sizeof(unsigned char)));
+        CHECK_CUDA(cudaMalloc((void**)&vec->gpu_terminals, num_agents*sizeof(float)));
         cudaMemset(vec->gpu_observations, 0, num_agents*OBS_SIZE*sizeof(float));
-        cudaMemset(vec->gpu_actions, 0, num_agents*ACT_SIZE*sizeof(float));
+        cudaMemset(vec->gpu_actions, 0, num_agents*ACT_SIZE*sizeof(double));
         cudaMemset(vec->gpu_rewards, 0, num_agents*sizeof(float));
-        cudaMemset(vec->gpu_terminals, 0, num_agents*sizeof(unsigned char));
+        cudaMemset(vec->gpu_terminals, 0, num_agents*sizeof(float));
     } else {
         vec->gpu_observations = vec->observations;
         vec->gpu_actions = vec->actions;
@@ -336,8 +337,8 @@ void create_threads(VecEnv* vec, int threads, int block_size) {
     }
 }
 
-Env* env_init(float* observations, float* actions, float* rewards,
-        unsigned char* terminals, int seed, Dict* kwargs) {
+Env* env_init(float* observations, double* actions, float* rewards,
+        float* terminals, int seed, Dict* kwargs) {
     Env* env = (Env*)calloc(1, sizeof(Env));
     assert(env != NULL && "env_init failed to allocated memory\n");
 
@@ -372,7 +373,7 @@ void vec_reset(VecEnv* vec) {
     cudaMemcpy(
         vec->gpu_terminals,
         vec->terminals,
-        vec->size*sizeof(unsigned char),
+        vec->size*sizeof(float),
         cudaMemcpyHostToDevice
     );
     cudaDeviceSynchronize();
@@ -406,7 +407,7 @@ void vec_send(VecEnv* vec, int buffer) {
         cudaMemcpy(
             &vec->actions[start*ACT_SIZE],
             &vec->gpu_actions[start*ACT_SIZE],
-            block_size*ACT_SIZE*sizeof(float),
+            block_size*ACT_SIZE*sizeof(double),
             cudaMemcpyDeviceToHost
         );
         for (int i = start; i < start + block_size; i++) {
@@ -428,7 +429,7 @@ void vec_send(VecEnv* vec, int buffer) {
         cudaMemcpy(
             &vec->gpu_terminals[start],
             &vec->terminals[start],
-            block_size*sizeof(unsigned char),
+            block_size*sizeof(float),
             cudaMemcpyHostToDevice
         );
         cudaDeviceSynchronize();
@@ -438,7 +439,7 @@ void vec_send(VecEnv* vec, int buffer) {
             cudaMemcpy(
                 &vec->actions[start*ACT_SIZE],
                 &vec->gpu_actions[start*ACT_SIZE],
-                block_size*ACT_SIZE*sizeof(float),
+                block_size*ACT_SIZE*sizeof(double),
                 cudaMemcpyDeviceToHost
                 //vec->streams[buffer]
             );

@@ -8,6 +8,7 @@
 #include <cuda_fp16.h>
 #include <cuda_bf16.h>
 #include <curand_kernel.h>
+#include <curand_kernel.h>
 
 #include <cstdio>
 #include <cstdint>
@@ -1548,8 +1549,8 @@ __global__ void ppo_loss_forward_kernel(
     double v_loss_clipped = (v_clipped - ret) * (v_clipped - ret);
     double v_loss = 0.5f * fmax(v_loss_unclipped, v_loss_clipped);
 
-    // === Step 6: total sample loss (pre-divided by N*T for mean) ===
-    double thread_loss = (pg_loss + vf_coef * v_loss - ent_coef * entropy) / double(total_elements);
+    // === Step 6: total sample loss (pre-divided by N*T for mean) (pre-divided by N*T for mean) ===
+    double thread_loss = ((pg_loss + vf_coef * v_loss - ent_coef * entropy) / double(total_elements)) / double(total_elements);
 
     // === Save for backward ===
     double* saved_row = saved_for_backward + idx * 5;
@@ -1561,7 +1562,7 @@ __global__ void ppo_loss_forward_kernel(
 
     // === Block-local reduction using shared memory ===
     int tid = threadIdx.x;
-    block_loss[tid] = float(thread_loss);
+    block_loss[tid] = float(float(thread_loss));
     __syncthreads();
 
     // Reduce within block using tree reduction
@@ -1836,65 +1837,6 @@ void launch_ppo_loss_backward(
 }
 
 // ============================================================================
-// C interface for ctypes (used by test_fused_scan.py)
-// ============================================================================
-
-extern "C" {
-
-// Forward kernels
-void launch_fused_scan_forward_original_f32(
-    float* out, float* next_state, float* a_star, float* s_vals, float* log_values_buf,
-    const float* combined, const float* state, int T_seq, int H, int B
-) {
-    launch_fused_scan_forward<float>(out, next_state, a_star, s_vals, log_values_buf,
-                                     combined, state, T_seq, H, B, nullptr);
-}
-
-void launch_fused_scan_forward_checkpointed_f32(
-    float* out, float* next_state, float* a_star, float* s_vals, float* log_values_buf,
-    const float* combined, const float* state, int T_seq, int H, int B
-) {
-    launch_fused_scan_forward_checkpointed<float>(out, next_state, a_star, s_vals, log_values_buf,
-                                                   combined, state, T_seq, H, B, nullptr);
-}
-
-// Backward kernels
-void launch_fused_scan_backward_original_f32(
-    float* grad_combined, float* grad_state,
-    const float* grad_out, const float* grad_next_state,
-    const float* combined, const float* state,
-    const float* a_star_buf, const float* s_buf, const float* log_values_buf,
-    int T_seq, int H, int B
-) {
-    launch_fused_scan_backward<float>(grad_combined, grad_state, grad_out, grad_next_state,
-                                      combined, state, a_star_buf, s_buf, log_values_buf,
-                                      T_seq, H, B, nullptr);
-}
-
-void launch_fused_scan_backward_checkpointed_f32(
-    float* grad_combined, float* grad_state,
-    const float* grad_out, const float* grad_next_state,
-    const float* combined, const float* state,
-    const float* a_star_buf, const float* s_buf, const float* log_values_buf,
-    int T_seq, int H, int B
-) {
-    launch_fused_scan_backward_checkpointed<float>(grad_combined, grad_state, grad_out, grad_next_state,
-                                                    combined, state, a_star_buf, s_buf, log_values_buf,
-                                                    T_seq, H, B, nullptr);
-}
-
-// Utility functions
-void sync_device() {
-    cudaDeviceSynchronize();
-}
-
-const char* get_last_error() {
-    return cudaGetErrorString(cudaGetLastError());
-}
-
-} // extern "C"
-
-// ============================================================================
 // Fused sample_logits kernel: nan_to_num + log_softmax + multinomial + gather + value copy
 // Inference-only (no gradients needed)
 // Uses inline cuRAND to avoid separate torch::rand() kernel launch
@@ -2028,3 +1970,62 @@ void launch_sample_logits(
         fprintf(stderr, "sample_logits kernel error: %s\n", cudaGetErrorString(err));
     }
 }
+
+// ============================================================================
+// C interface for ctypes (used by test_fused_scan.py)
+// ============================================================================
+
+extern "C" {
+
+// Forward kernels
+void launch_fused_scan_forward_original_f32(
+    float* out, float* next_state, float* a_star, float* s_vals, float* log_values_buf,
+    const float* combined, const float* state, int T_seq, int H, int B
+) {
+    launch_fused_scan_forward<float>(out, next_state, a_star, s_vals, log_values_buf,
+                                     combined, state, T_seq, H, B, nullptr);
+}
+
+void launch_fused_scan_forward_checkpointed_f32(
+    float* out, float* next_state, float* a_star, float* s_vals, float* log_values_buf,
+    const float* combined, const float* state, int T_seq, int H, int B
+) {
+    launch_fused_scan_forward_checkpointed<float>(out, next_state, a_star, s_vals, log_values_buf,
+                                                   combined, state, T_seq, H, B, nullptr);
+}
+
+// Backward kernels
+void launch_fused_scan_backward_original_f32(
+    float* grad_combined, float* grad_state,
+    const float* grad_out, const float* grad_next_state,
+    const float* combined, const float* state,
+    const float* a_star_buf, const float* s_buf, const float* log_values_buf,
+    int T_seq, int H, int B
+) {
+    launch_fused_scan_backward<float>(grad_combined, grad_state, grad_out, grad_next_state,
+                                      combined, state, a_star_buf, s_buf, log_values_buf,
+                                      T_seq, H, B, nullptr);
+}
+
+void launch_fused_scan_backward_checkpointed_f32(
+    float* grad_combined, float* grad_state,
+    const float* grad_out, const float* grad_next_state,
+    const float* combined, const float* state,
+    const float* a_star_buf, const float* s_buf, const float* log_values_buf,
+    int T_seq, int H, int B
+) {
+    launch_fused_scan_backward_checkpointed<float>(grad_combined, grad_state, grad_out, grad_next_state,
+                                                    combined, state, a_star_buf, s_buf, log_values_buf,
+                                                    T_seq, H, B, nullptr);
+}
+
+// Utility functions
+void sync_device() {
+    cudaDeviceSynchronize();
+}
+
+const char* get_last_error() {
+    return cudaGetErrorString(cudaGetLastError());
+}
+
+} // extern "C"

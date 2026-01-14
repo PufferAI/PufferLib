@@ -40,9 +40,9 @@ typedef struct Breakout {
     Client* client;
     Log log;
     float* observations;
-    float* actions;
+    double* actions;
     float* rewards;
-    unsigned char* terminals;
+    float* terminals;
     int score;
     float paddle_x;
     float paddle_y;
@@ -119,9 +119,9 @@ void init(Breakout* env) {
 void allocate(Breakout* env) {
     init(env);
     env->observations = (float*)calloc(11 + env->num_bricks, sizeof(float));
-    env->actions = (float*)calloc(1, sizeof(float));
+    env->actions = (double*)calloc(1, sizeof(double));
     env->rewards = (float*)calloc(1, sizeof(float));
-    env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env->terminals = (float*)calloc(1, sizeof(float));
 }
 
 void c_close(Breakout* env) {

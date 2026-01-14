@@ -286,10 +286,79 @@ def test_rmsnorm():
     print('rmsnorm correctness')
     test_kernel(rmsnorm, _C.rmsnorm, x, weight, eps)
 
+def sample_logits_py(logits):
+    """Reference implementation: nan_to_num + log_softmax + multinomial + gather."""
+    # nan_to_num
+    clean_logits = torch.nan_to_num(logits)
+    # log_softmax
+    log_probs = torch.log_softmax(clean_logits, 1)
+    # multinomial sampling
+    probs = log_probs.exp()
+    actions = torch.multinomial(probs, 1).squeeze(1)
+    # gather logprobs
+    sampled_logprobs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
+    return [actions, sampled_logprobs]
+
+def test_sample_logits():
+    """Test sample_logits kernel.
+
+    Verifies that:
+    1. Actions are valid indices
+    2. Logprobs are correct for the sampled actions (match log_softmax gather)
+    3. Value is correctly copied (handles strided input)
+    """
+    logits = torch.randn(BR, A).cuda()
+    value = torch.randn(BR, 1).cuda()  # (B, 1) like fused decoder output
+    seed = 42
+    offset = torch.zeros(1, dtype=torch.int64, device='cuda')  # Tensor for CUDA graph support
+
+    # Pre-allocate output tensors (kernel writes directly to these)
+    actions = torch.empty(BR, dtype=torch.float64, device='cuda')
+    logprobs = torch.empty(BR, dtype=logits.dtype, device='cuda')
+    value_out = torch.empty(BR, dtype=logits.dtype, device='cuda')
+
+    print('sample_logits')
+
+    # Run kernel (writes to actions, logprobs, value_out in-place)
+    _C.sample_logits(logits, value, actions, logprobs, value_out, seed, offset)
+
+    # Verify actions are valid indices (float64 but should be integer values)
+    valid_actions = actions.min() >= 0 and actions.max() < A
+    action_color = 'green' if valid_actions else 'red'
+    rich.print(f'\tActions valid: [{action_color}]{valid_actions}[/{action_color}]')
+    assert valid_actions, "Actions contain invalid values"
+
+    # Verify logprobs match log_softmax gather
+    log_probs = torch.log_softmax(torch.nan_to_num(logits), 1)
+    # Convert float64 actions to int64 for indexing
+    actions_int = actions.long()
+    expected_logprobs = log_probs.gather(1, actions_int.unsqueeze(1)).squeeze(1)
+    logprob_max_diff = (expected_logprobs - logprobs.float()).abs().max()
+    logprob_match = torch.allclose(expected_logprobs, logprobs.float(), rtol=1e-3, atol=1e-4)
+    match_color = 'green' if logprob_match else 'red'
+    rich.print(f'\tLogprobs = log_softmax[action]: [{match_color}]{logprob_match} (max diff: {logprob_max_diff:.2e})[/{match_color}]')
+
+    # Verify value copy
+    expected_value = value.flatten()
+    value_match = torch.allclose(expected_value, value_out, rtol=1e-5, atol=1e-6)
+    value_color = 'green' if value_match else 'red'
+    rich.print(f'\tValue copy: [{value_color}]{value_match}[/{value_color}]')
+
+    # Benchmark
+    py_sps = time_sps(sample_logits_py, logits)
+    # Wrapper for benchmarking with in-place signature
+    def cpp_sample(logits):
+        _C.sample_logits(logits, value, actions, logprobs, value_out, seed, offset)
+        # Offset increment is now fused into kernel
+        return [actions, logprobs]
+    cpp_sps = time_sps(cpp_sample, logits)
+    print(f'\tForward sps: {py_sps} (naive) {cpp_sps} (C++)')
+
 if __name__ == '__main__':
     #test_mingru_gate()
     #test_log_coeffs_and_values()
     #test_logcumsumexp()
-    test_fused_scan()
+    #test_fused_scan()
     #test_fused_ppo_loss()
+    test_sample_logits()
     #test_rmsnorm()

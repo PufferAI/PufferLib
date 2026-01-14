@@ -33,7 +33,7 @@ class Breakout(pufferlib.PufferEnv):
         if continuous:
             self.actions = self.actions.flatten()
         else:
-            self.actions = self.actions.astype(np.float32)
+            self.actions = self.actions.astype(np.float64)
             
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
             self.terminals, self.truncations, num_envs, seed, frameskip=frameskip,

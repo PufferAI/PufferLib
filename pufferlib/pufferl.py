@@ -837,7 +837,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
         torch.cuda.set_device(local_rank)
         os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
 
-    vecenv = vecenv or load_env(env_name, args)
+    #vecenv = vecenv or load_env(env_name, args)
     #policy = policy or load_policy(args, vecenv, env_name)
 
     if 'LOCAL_RANK' in os.environ:
@@ -888,6 +888,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
     # Final eval. You can reset the env here, but depending on
     # your env, this can skew data (i.e. you only collect the shortest
     # rollouts within a fixed number of epochs)
+    '''
     uptime = pufferl.uptime
     agent_steps = pufferl.global_step
     for i in range(128):  # Run eval for at least 32, but put a hard stop at 128.
@@ -906,6 +907,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
     pufferl.logger.log_cost(uptime)
     pufferl.logger.close(model_path)
     return all_logs
+    '''
 
 def sps(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True, should_stop_early=None):
     args = args or load_config(env_name)

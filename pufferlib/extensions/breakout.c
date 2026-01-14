@@ -2,7 +2,7 @@
 #define OBS_SIZE 118
 #define ACT_SIZE 1
 #define OBS_TYPE FLOAT
-#define ACT_TYPE FLOAT
+#define ACT_TYPE DOUBLE
 
 #define Env Breakout
 #include "env_binding.h"

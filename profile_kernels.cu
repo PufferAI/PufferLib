@@ -1024,12 +1024,158 @@ void profile_ppoloss(int batch, int seq, int actions) {
     free_ppolossargs(args);
 }
 
+// ============================================================================
+// sample_logits profiling
+// ============================================================================
+
+typedef struct {
+    float* logits;        // (B, A)
+    float* value;         // (B, 1)
+    double* actions;      // (B,) - float64 for discrete/continuous compatibility
+    float* logprobs;      // (B,)
+    float* value_out;     // (B,)
+    int64_t* offset;      // RNG offset (on device for CUDA graph support)
+    uint64_t seed;
+    int B;
+    int A;
+} SampleLogitsArgs;
+
+SampleLogitsArgs* create_samplelogitsargs(int batch, int num_actions) {
+    SampleLogitsArgs* args = (SampleLogitsArgs*)calloc(1, sizeof(SampleLogitsArgs));
+    args->B = batch;
+    args->A = num_actions;
+    args->seed = 42;
+
+    int N_logits = batch * num_actions;
+    int N_batch = batch;
+
+    cudaMalloc(&args->logits, N_logits * sizeof(float));
+    cudaMalloc(&args->value, N_batch * sizeof(float));  // (B, 1) flattened
+    cudaMalloc(&args->actions, N_batch * sizeof(double));
+    cudaMalloc(&args->logprobs, N_batch * sizeof(float));
+    cudaMalloc(&args->value_out, N_batch * sizeof(float));
+    cudaMalloc(&args->offset, sizeof(int64_t));
+    cudaMemset(args->offset, 0, sizeof(int64_t));  // Initialize offset to 0
+
+    float* logits_buf = (float*)malloc(N_logits * sizeof(float));
+    float* value_buf = (float*)malloc(N_batch * sizeof(float));
+
+    // Initialize logits and value with random values
+    for (int i = 0; i < N_logits; ++i) {
+        logits_buf[i] = rand1() * 5.0f;
+    }
+    for (int i = 0; i < N_batch; ++i) {
+        value_buf[i] = rand1();
+    }
+
+    cudaMemcpy(args->logits, logits_buf, N_logits * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->value, value_buf, N_batch * sizeof(float), cudaMemcpyHostToDevice);
+
+    free(logits_buf);
+    free(value_buf);
+    return args;
+}
+
+void free_samplelogitsargs(SampleLogitsArgs* args) {
+    cudaFree(args->logits);
+    cudaFree(args->value);
+    cudaFree(args->actions);
+    cudaFree(args->logprobs);
+    cudaFree(args->value_out);
+    cudaFree(args->offset);
+    free(args);
+}
+
+void run_samplelogits_forward(SampleLogitsArgs* args) {
+    launch_sample_logits<float>(
+        args->actions, args->logprobs, args->value_out,
+        args->logits, args->value,
+        args->seed, args->offset,
+        args->A, args->B,
+        args->A,  // logits_stride = A (contiguous)
+        1,        // value_stride = 1 (contiguous, 1D)
+        0);
+    // Note: not incrementing offset here since this is just for profiling
+}
+
+#ifdef USE_TORCH
+
+typedef struct {
+    torch::Tensor logits;       // (B, A)
+    torch::Tensor value;        // (B, 1) - input
+    torch::Tensor actions;      // (B,) float64 - output
+    torch::Tensor logprobs;     // (B,) - output
+    torch::Tensor value_out;    // (B,) - output
+    torch::Tensor offset;       // (1,) int64 - RNG offset tensor
+    uint64_t seed;
+    int B;
+    int A;
+} SampleLogitsArgsTorch;
+
+SampleLogitsArgsTorch* create_samplelogitsargs_torch(SampleLogitsArgs* raw) {
+    SampleLogitsArgsTorch* args = new SampleLogitsArgsTorch();
+    args->B = raw->B;
+    args->A = raw->A;
+    args->seed = 42;
+
+    auto opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+    args->logits = torch::from_blob(raw->logits, {raw->B, raw->A}, opts);
+    args->value = torch::from_blob(raw->value, {raw->B, 1}, opts);
+    args->actions = torch::empty({raw->B}, opts.dtype(torch::kFloat64));
+    args->logprobs = torch::empty({raw->B}, opts);
+    args->value_out = torch::empty({raw->B}, opts);
+    args->offset = torch::zeros({1}, opts.dtype(torch::kInt64));
+
+    return args;
+}
+
+void run_samplelogits_forward_torch(SampleLogitsArgsTorch* args) {
+    torch::NoGradGuard no_grad;
+    sample_logits(args->logits, args->value, args->actions, args->logprobs, args->value_out, args->seed, args->offset);
+    args->offset.add_(1);  // Increment with CUDA op
+}
+
+void run_samplelogits_forward_cpp(SampleLogitsArgsTorch* args) {
+    torch::NoGradGuard no_grad;
+    sample_logits_cpp(args->logits);
+}
+
+#endif
+
+void profile_samplelogits(int batch, int num_actions) {
+    SampleLogitsArgs* args = create_samplelogitsargs(batch, num_actions);
+
+    printf("sample_logits (B=%d, A=%d)\n", batch, num_actions);
+
+    float fwd_ms = profile_kernel((kernel_fn)run_samplelogits_forward, args);
+    print_timing("\tforward", fwd_ms, batch);
+
+#ifdef USE_TORCH
+    SampleLogitsArgsTorch* args_torch = create_samplelogitsargs_torch(args);
+
+    float fwd_torch_ms = profile_kernel((kernel_fn)run_samplelogits_forward_torch, args_torch);
+    print_timing("\tforward (torch)", fwd_torch_ms, batch);
+
+    float fwd_cpp_ms = profile_kernel((kernel_fn)run_samplelogits_forward_cpp, args_torch);
+    print_timing("\tforward (cpp)", fwd_cpp_ms, batch);
+
+    float fwd_graph_ms = profile_graph((kernel_fn)run_samplelogits_forward_torch, args_torch);
+    print_timing("\tforward (graph)", fwd_graph_ms, batch);
+
+    delete args_torch;
+#endif
+    printf("\n");
+
+    free_samplelogitsargs(args);
+}
+
 int main(int argc, char** argv) {
     warmup_gpu();
-    profile_mingrugate(BR, H);
-    profile_logcoeffsandvalues(BT, T, H);
-    profile_logcumsumexp(BT, T, H);
-    profile_fusedscan(BT, T, H);
-    profile_ppoloss(BT, T, A);
+    //profile_mingrugate(BR, H);
+    //profile_logcoeffsandvalues(BT, T, H);
+    //profile_logcumsumexp(BT, T, H);
+    //profile_fusedscan(BT, T, H);
+    profile_samplelogits(BR, A);
+    //profile_ppoloss(BT, T, A);
     return 0;
 }

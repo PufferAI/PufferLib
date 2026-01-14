@@ -383,8 +383,13 @@ public:
             TORCH_CHECK(false, "Unsupported dtype. Only float32 and bfloat16 supported.");
         }
 
-        // Save for backward
-        ctx->save_for_backward({combined, state, a_star, s_vals, log_values_buf});
+        // Save inputs for backward (these go through autograd)
+        ctx->save_for_backward({combined, state});
+
+        // Save float buffers via saved_data to avoid autograd copy overhead
+        ctx->saved_data["a_star"] = a_star;
+        ctx->saved_data["s_vals"] = s_vals;
+        ctx->saved_data["log_values_buf"] = log_values_buf;
 
         return {out, next_state};
     }
@@ -393,14 +398,20 @@ public:
         torch::autograd::tensor_list grad_outputs
     ) {
         auto saved = ctx->get_saved_variables();
-        auto combined = saved[0].contiguous();
-        auto state = saved[1].contiguous();
-        auto a_star_buf = saved[2].contiguous();      // float tensor
-        auto s_vals = saved[3].contiguous();          // float tensor
-        auto log_values_buf = saved[4].contiguous();  // float tensor - cached from forward
+        auto combined = saved[0];
+        auto state = saved[1];
 
-        auto grad_out = grad_outputs[0].contiguous();          // (B, T, H)
-        auto grad_next_state = grad_outputs[1].contiguous();   // (B, 1, H)
+        // Retrieve float buffers from saved_data (avoids autograd copy overhead)
+        auto a_star_buf = ctx->saved_data["a_star"].toTensor();
+        auto s_vals = ctx->saved_data["s_vals"].toTensor();
+        auto log_values_buf = ctx->saved_data["log_values_buf"].toTensor();
+
+        auto grad_out = grad_outputs[0];          // (B, T, H)
+        TORCH_CHECK(grad_out.is_contiguous(), "grad_out must be contiguous");
+
+        auto grad_next_state = grad_outputs[1];   // (B, 1, H)
+        TORCH_CHECK(grad_next_state.is_contiguous(), "grad_next_state must be contiguous");
+
         auto dtype = combined.dtype();
 
         auto B = combined.size(0);
@@ -507,10 +518,10 @@ public:
         torch::autograd::tensor_list grad_outputs
     ) {
         auto saved = ctx->get_saved_variables();
-        auto x = saved[0].contiguous();
-        auto s_buf = saved[2].contiguous();  // s_buf is saved, out is not needed
+        auto x = saved[0].contiguous();  // input x might not be contiguous
+        auto s_buf = saved[2];  // s_buf was from torch::empty, already contiguous
 
-        auto grad_out = grad_outputs[0].contiguous();
+        auto grad_out = grad_outputs[0].contiguous();  // incoming grad might not be contiguous
         auto dtype = x.dtype();
         auto B = x.size(0), T = x.size(1), H = x.size(2);
 
@@ -606,7 +617,7 @@ public:
         // Output: scalar loss
         auto options_float = torch::TensorOptions().dtype(torch::kFloat32).device(device);
         auto options_double = torch::TensorOptions().dtype(torch::kFloat64).device(device);
-        auto loss_output = torch::zeros({1}, options_float);
+        auto loss_output = torch::empty({1}, options_float);  // kernel overwrites, no need to zero
 
         // Saved for backward: (N, T, 5) → but use (N*T, 5) for flat indexing
         auto saved_for_backward = torch::empty({N * T, 5}, options_double);
@@ -683,7 +694,7 @@ public:
         ctx->save_for_backward({logits, values_pred, actions, old_logprobs, advantages,
                                 prio, values, returns, adv_mean, adv_std, saved_for_backward});
 
-        return {loss_output / (N * T)};
+        return {loss_output};  // kernel already divides by N*T
     }
     static torch::autograd::tensor_list backward(
         torch::autograd::AutogradContext* ctx,
@@ -700,7 +711,7 @@ public:
         auto returns = saved[7].contiguous();          // (N, T)
         auto adv_mean = saved[8].contiguous();         // (1)
         auto adv_std = saved[9].contiguous();          // (1)
-        auto saved_for_backward = saved[10].contiguous();  // (N*T, 5)
+        auto saved_for_backward = saved[10];  // (N*T, 5) - was from torch::empty, already contiguous
 
         auto dtype = logits.dtype();
         auto N = logits.size(0);
@@ -712,10 +723,9 @@ public:
         float vf_coef = ctx->saved_data["vf_coef"].to<double>();
         float ent_coef = ctx->saved_data["ent_coef"].to<double>();
 
-        auto grad_loss = grad_outputs[0].sum().to(torch::kFloat32).reshape({1});
-        //auto grad_out_scalar = grad_outputs[0].sum();  // dL/d(loss)
-        //auto grad_loss = torch::empty({1}, logits.options()).to(torch::kFloat32);
-        //grad_loss.fill_(grad_out_scalar.item<float>());
+        // grad_outputs[0] is already scalar - no need for .sum()
+        // Just ensure it's float32 and contiguous for the kernel
+        auto grad_loss = grad_outputs[0].to(torch::kFloat32).contiguous();
 
         auto grad_logits = torch::empty_like(logits);
         auto grad_values_pred = torch::empty_like(values_pred);
@@ -922,4 +932,104 @@ torch::Tensor fused_ppo_loss_cpp(
     auto v_loss = 0.5 * torch::max(v_loss_unclipped, v_loss_clipped).mean();
 
     return pg_loss + vf_coef * v_loss - ent_coef * entropy;
+}
+
+// Fused sample_logits: nan_to_num + log_softmax + multinomial + gather + value copy
+// Writes directly to pre-allocated output tensors to avoid copy overhead
+// logits: (B, A) - raw logits (may be non-contiguous in dim 0)
+// value: (B, 1) or (B,) - value from fused output (may be non-contiguous)
+// actions_out: (B,) float64 - output actions
+// logprobs_out: (B,) same dtype as logits - output log probabilities
+// value_out: (B,) same dtype as logits - output value (flattened copy)
+// seed: RNG seed
+// offset: RNG offset tensor (int64, read at kernel execution time for CUDA graph support)
+//
+// NOTE: Unlike other kernels, this supports non-contiguous logits/value input via stride.
+// This is specifically for fused logit+value decoder output where the decoder outputs
+// (B, V+A) and logits is a view [:, V:] with stride (V+A, 1) instead of (A, 1).
+// Using stride avoids .contiguous() kernel launches.
+//
+// NOTE: offset is a tensor (not scalar) so that CUDA graphs read the current value at
+// replay time. Increment offset with a CUDA tensor op after calling this function.
+void sample_logits(
+    torch::Tensor logits,
+    torch::Tensor value,
+    torch::Tensor actions_out,
+    torch::Tensor logprobs_out,
+    torch::Tensor value_out,
+    uint64_t seed,
+    torch::Tensor offset
+) {
+    TORCH_CHECK(logits.is_cuda(), "logits must be on CUDA");
+    TORCH_CHECK(logits.dim() == 2, "logits must be 2D (B, A)");
+    TORCH_CHECK(logits.stride(1) == 1, "logits must be contiguous in last dim");
+    TORCH_CHECK(actions_out.is_contiguous(), "actions_out must be contiguous");
+    TORCH_CHECK(logprobs_out.is_contiguous(), "logprobs_out must be contiguous");
+    TORCH_CHECK(value_out.is_contiguous(), "value_out must be contiguous");
+    TORCH_CHECK(actions_out.dtype() == torch::kFloat64, "actions_out must be float64");
+    TORCH_CHECK(offset.dtype() == torch::kInt64, "offset must be int64");
+    TORCH_CHECK(offset.is_cuda(), "offset must be on CUDA");
+
+    auto dtype = logits.dtype();
+    auto B = logits.size(0);
+    auto A = logits.size(1);
+    auto logits_stride = logits.stride(0);  // row stride (may be > A for fused output)
+    // value may be (B, 1) or (B,) - stride(0) works for both (gives stride between elements)
+    auto value_stride = value.stride(0);
+
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    if (dtype == torch::kFloat32) {
+        launch_sample_logits<float>(
+            actions_out.data_ptr<double>(),
+            logprobs_out.data_ptr<float>(),
+            value_out.data_ptr<float>(),
+            logits.data_ptr<float>(),
+            value.data_ptr<float>(),
+            seed,
+            offset.data_ptr<int64_t>(),
+            static_cast<int>(A),
+            static_cast<int>(B),
+            static_cast<int>(logits_stride),
+            static_cast<int>(value_stride),
+            stream
+        );
+    } else if (dtype == torch::kBFloat16) {
+        launch_sample_logits<at::BFloat16>(
+            actions_out.data_ptr<double>(),
+            logprobs_out.data_ptr<at::BFloat16>(),
+            value_out.data_ptr<at::BFloat16>(),
+            logits.data_ptr<at::BFloat16>(),
+            value.data_ptr<at::BFloat16>(),
+            seed,
+            offset.data_ptr<int64_t>(),
+            static_cast<int>(A),
+            static_cast<int>(B),
+            static_cast<int>(logits_stride),
+            static_cast<int>(value_stride),
+            stream
+        );
+    } else {
+        TORCH_CHECK(false, "Unsupported dtype. Only float32 and bfloat16 supported.");
+    }
+}
+
+// Reference implementation for sample_logits (for correctness testing)
+std::vector<torch::Tensor> sample_logits_cpp(
+    torch::Tensor logits
+) {
+    // nan_to_num
+    auto clean_logits = torch::nan_to_num(logits);
+
+    // log_softmax
+    auto log_probs = torch::log_softmax(clean_logits, 1);
+
+    // multinomial sampling
+    auto probs = log_probs.exp();
+    auto actions = torch::multinomial(probs, 1, /*replacement=*/false).squeeze(1);
+
+    // gather logprobs
+    auto sampled_logprobs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1);
+
+    return {actions, sampled_logprobs};
 }
