@@ -13,6 +13,7 @@
 #define DEBUG 0
 
 #include "flightlib.h"
+#include "autopilot.h"
 
 // Simulation timing
 #define DT 0.02f
@@ -75,6 +76,8 @@ typedef struct Dogfight {
     float gun_cone_angle;   // Current cone angle (radians)
     float cos_gun_cone;     // cosf(gun_cone_angle)
     float cos_gun_cone_2x;  // cosf(gun_cone_angle * 2)
+    // Opponent autopilot
+    AutopilotState opponent_ap;
 } Dogfight;
 
 void init(Dogfight *env) {
@@ -86,6 +89,8 @@ void init(Dogfight *env) {
     env->gun_cone_angle = GUN_CONE_ANGLE;
     env->cos_gun_cone = cosf(env->gun_cone_angle);
     env->cos_gun_cone_2x = cosf(env->gun_cone_angle * 2.0f);
+    // Initialize opponent autopilot
+    autopilot_init(&env->opponent_ap);
 }
 
 void add_log(Dogfight *env) {
@@ -164,6 +169,13 @@ void c_reset(Dogfight *env) {
     );
     reset_plane(&env->opponent, opp_pos, vel);
 
+    // Handle autopilot: randomize if configured, reset PID state
+    if (env->opponent_ap.randomize_on_reset) {
+        autopilot_randomize(&env->opponent_ap);
+    }
+    env->opponent_ap.prev_vz = 0.0f;
+    env->opponent_ap.prev_bank_error = 0.0f;
+
     if (DEBUG) printf("=== RESET ===\n");
     if (DEBUG) printf("player_pos=(%.1f, %.1f, %.1f)\n", pos.x, pos.y, pos.z);
     if (DEBUG) printf("player_vel=(%.1f, %.1f, %.1f) speed=%.1f\n", vel.x, vel.y, vel.z, norm3(vel));
@@ -200,6 +212,10 @@ void respawn_opponent(Dogfight *env) {
     Vec3 vel = vec3(80, 0, 0);
     reset_plane(&env->opponent, opp_pos, vel);
 
+    // Reset autopilot PID state on respawn
+    env->opponent_ap.prev_vz = 0.0f;
+    env->opponent_ap.prev_bank_error = 0.0f;
+
     if (DEBUG) printf("=== RESPAWN ===\n");
     if (DEBUG) printf("player_pos=(%.1f, %.1f, %.1f)\n", p->pos.x, p->pos.y, p->pos.z);
     if (DEBUG) printf("player_fwd=(%.2f, %.2f, %.2f)\n", fwd.x, fwd.y, fwd.z);
@@ -224,8 +240,14 @@ void c_step(Dogfight *env) {
     // Player uses full physics with actions
     step_plane_with_physics(&env->player, env->actions, DT);
 
-    // Opponent uses simple motion (no actions)
-    step_plane(&env->opponent, DT);
+    // Opponent uses autopilot (if not AP_STRAIGHT, uses full physics)
+    if (env->opponent_ap.mode != AP_STRAIGHT) {
+        float opp_actions[5];
+        autopilot_step(&env->opponent_ap, &env->opponent, opp_actions, DT);
+        step_plane_with_physics(&env->opponent, opp_actions, DT);
+    } else {
+        step_plane(&env->opponent, DT);
+    }
 
     // === Combat (Phase 5) ===
     Plane *p = &env->player;

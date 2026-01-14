@@ -5,6 +5,17 @@ import pufferlib
 from pufferlib.ocean.dogfight import binding
 
 
+# Autopilot mode constants (must match autopilot.h enum)
+class AutopilotMode:
+    STRAIGHT = 0     # Fly straight (current/default behavior)
+    LEVEL = 1        # Level flight with PD on vz
+    TURN_LEFT = 2    # Coordinated left turn
+    TURN_RIGHT = 3   # Coordinated right turn
+    CLIMB = 4        # Constant climb rate
+    DESCEND = 5      # Constant descent rate
+    RANDOM = 6       # Random mode selection at reset
+
+
 class Dogfight(pufferlib.PufferEnv):
     def __init__(
         self,
@@ -126,6 +137,37 @@ class Dogfight(pufferlib.PufferEnv):
 
         # Call C binding with the specific env handle
         binding.env_force_state(self._env_handles[env_idx], **kwargs)
+
+    def set_autopilot(
+        self,
+        env_idx=0,
+        mode=AutopilotMode.STRAIGHT,
+        throttle=1.0,
+        bank_deg=30.0,
+        climb_rate=5.0,
+    ):
+        """
+        Set autopilot mode for opponent aircraft.
+
+        Args:
+            env_idx: Environment index (for vectorized envs)
+            mode: AutopilotMode constant (STRAIGHT, LEVEL, TURN_LEFT, etc.)
+            throttle: Target throttle [0, 1]
+            bank_deg: Bank angle for turn modes (degrees)
+            climb_rate: Target vertical velocity for climb/descend (m/s)
+
+        Usage:
+            env.set_autopilot(mode=AutopilotMode.LEVEL)  # Level flight
+            env.set_autopilot(mode=AutopilotMode.TURN_RIGHT, bank_deg=45)  # 45° right turn
+            env.set_autopilot(mode=AutopilotMode.RANDOM)  # Randomize each episode
+        """
+        binding.env_set_autopilot(
+            self._env_handles[env_idx],
+            mode=mode,
+            throttle=throttle,
+            bank_deg=bank_deg,
+            climb_rate=climb_rate,
+        )
 
 
 def test_performance(timeout=10, atn_cache=1024):

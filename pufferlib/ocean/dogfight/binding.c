@@ -9,12 +9,14 @@
 // Include Python first to get PyObject type
 #include <Python.h>
 
-// Forward declare our custom method
+// Forward declare our custom methods
 static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwargs);
+static PyObject* env_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs);
 
 // Register custom methods before including the template
 #define MY_METHODS \
-    {"env_force_state", (PyCFunction)env_force_state, METH_VARARGS | METH_KEYWORDS, "Force environment state"}
+    {"env_force_state", (PyCFunction)env_force_state, METH_VARARGS | METH_KEYWORDS, "Force environment state"}, \
+    {"env_set_autopilot", (PyCFunction)env_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set opponent autopilot mode"}
 
 #include "../env_binding.h"
 
@@ -117,6 +119,28 @@ static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwarg
         o_ow, o_ox, o_oy, o_oz,
         tick
     );
+
+    Py_RETURN_NONE;
+}
+
+// Set autopilot mode for opponent aircraft
+static PyObject* env_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs) {
+    if (PyTuple_Size(args) != 1) {
+        PyErr_SetString(PyExc_TypeError, "env_set_autopilot requires 1 positional arg (env handle)");
+        return NULL;
+    }
+
+    Env* env = unpack_env(args);
+    if (!env) return NULL;
+
+    // Get autopilot parameters
+    int mode = get_int(kwargs, "mode", AP_STRAIGHT);
+    float throttle = get_float(kwargs, "throttle", AP_DEFAULT_THROTTLE);
+    float bank_deg = get_float(kwargs, "bank_deg", AP_DEFAULT_BANK_DEG);
+    float climb_rate = get_float(kwargs, "climb_rate", AP_DEFAULT_CLIMB_RATE);
+
+    // Set the autopilot mode
+    autopilot_set_mode(&env->opponent_ap, (AutopilotMode)mode, throttle, bank_deg, climb_rate);
 
     Py_RETURN_NONE;
 }

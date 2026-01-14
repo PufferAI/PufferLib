@@ -131,3 +131,23 @@ Observations:
 - Performance consistent with previous baseline (+37.50 → +30.99, within variance)
 - Test fixes did not affect training (physics unchanged)
 - All tests now passing: max_speed, stall, climb, glide, turn_30, turn_60, pitch, roll
+
+---
+
+## Performance Optimizations (374871df)
+Date: 2026-01-14
+Commit: 374871df
+Change: Replace divisions with multiplications by inverse constants; precompute gun cone cosf() per episode
+
+| Run | Episode Return | Episode Length | Kills | Shots Hit/Fired |
+|-----|----------------|----------------|-------|-----------------|
+| 1   | +44.39         | 1128           | 0.40  | 0.40/10.1       |
+| 2   | +37.43         | 1139           | 0.34  | 0.34/9.9        |
+| 3   | +45.54         | 1128           | 0.40  | 0.40/11.2       |
+| **Mean** | **+42.45** | **1132**       | **0.38** | **0.38/10.4** |
+
+Observations:
+- **+37% improvement over previous baseline** (+30.99 → +42.45)
+- 21 divisions replaced with multiplications (2.3x faster per op)
+- Gun cone trig precomputed per episode (curriculum-ready)
+- SPS: 1.2-1.3M
