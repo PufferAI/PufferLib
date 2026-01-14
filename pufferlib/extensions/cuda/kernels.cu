@@ -8,7 +8,6 @@
 #include <cuda_fp16.h>
 #include <cuda_bf16.h>
 #include <curand_kernel.h>
-#include <curand_kernel.h>
 
 #include <cstdio>
 #include <cstdint>
