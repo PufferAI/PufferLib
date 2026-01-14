@@ -1,34 +1,13 @@
 #!/usr/bin/env python3
 """
-Test suite for fused_scan_forward kernel optimization.
+Test suite for fused scan kernel optimization.
 
-This script tests production-scale RL configurations:
-- Batch sizes (B): 512-2048 (typical vectorized RL environments)
-- Sequence length (T): 64-128 (standard rollout horizons)
-- Hidden dimension (H): 256-512 (common model sizes)
-
-The optimized checkpointed kernel shows:
-- 1.4-1.5x overall speedup on production configs
-- 1.8-2.6x forward pass speedup
-- 1.1-1.3x backward pass speedup
-- 33% reduction in memory bandwidth usage
-
-This script:
-1. Loads a precompiled test_fused_scan.so library via ctypes
-2. Tests both original and checkpointed kernels with production-scale configs
-3. Compares outputs for correctness within tolerance
-4. Benchmarks performance
-
-Compile the CUDA extension first:
+Compile:
     cd pufferlib/extensions/cuda
-    nvcc -O3 -arch=sm_86 -shared -Xcompiler -fPIC test_fused_scan.cu -o test_fused_scan.so
+    nvcc -O3 -arch=sm_86 -shared -Xcompiler -fPIC kernels.cu -o kernels.so
 
 Usage:
-    python test_fused_scan.py                    # Run all tests
-    python test_fused_scan.py --benchmark       # Include benchmarks
-    python test_fused_scan.py --sizes medium    # Typical production configs
-    python test_fused_scan.py --verbose         # Detailed output
-    python test_fused_scan.py --test-backward   # Include backward pass tests
+    python test_fused_scan.py
 """
 
 import argparse
@@ -42,22 +21,22 @@ import torch
 
 def load_extension():
     """Load the precompiled CUDA .so via ctypes."""
-    so_file = Path(__file__).parent / "test_fused_scan.so"
+    so_file = Path(__file__).parent / "kernels.so"
     
     if not so_file.exists():
         raise FileNotFoundError(
             f"Compiled library not found: {so_file}\n"
             f"Compile it first with:\n"
             f"  cd {so_file.parent}\n"
-            f"  nvcc -O3 -arch=sm_86 -shared -Xcompiler -fPIC test_fused_scan.cu -o test_fused_scan.so"
+            f"  nvcc -O3 -arch=sm_86 -shared -Xcompiler -fPIC kernels.cu -o kernels.so"
         )
     
     print(f"Loading {so_file}...")
     lib = ctypes.CDLL(str(so_file))
     
-    # Define function signatures
-    # void launch_fused_scan_forward_original(float*, float*, float*, float*, float*, const float*, const float*, int, int, int)
-    lib.launch_fused_scan_forward_original.argtypes = [
+    # Define function signatures for f32 wrappers
+    # Forward original: launch_fused_scan_forward_original_f32
+    lib.launch_fused_scan_forward_original_f32.argtypes = [
         ctypes.c_void_p,  # out
         ctypes.c_void_p,  # next_state
         ctypes.c_void_p,  # a_star
@@ -69,9 +48,10 @@ def load_extension():
         ctypes.c_int,     # H
         ctypes.c_int,     # B
     ]
-    lib.launch_fused_scan_forward_original.restype = None
+    lib.launch_fused_scan_forward_original_f32.restype = None
     
-    lib.launch_fused_scan_forward_optimized.argtypes = [
+    # Forward checkpointed: launch_fused_scan_forward_checkpointed_f32
+    lib.launch_fused_scan_forward_checkpointed_f32.argtypes = [
         ctypes.c_void_p,  # out
         ctypes.c_void_p,  # next_state
         ctypes.c_void_p,  # a_star
@@ -83,10 +63,10 @@ def load_extension():
         ctypes.c_int,     # H
         ctypes.c_int,     # B
     ]
-    lib.launch_fused_scan_forward_optimized.restype = None
+    lib.launch_fused_scan_forward_checkpointed_f32.restype = None
     
-    # Backward function signatures
-    lib.launch_fused_scan_backward_original.argtypes = [
+    # Backward original: launch_fused_scan_backward_original_f32
+    lib.launch_fused_scan_backward_original_f32.argtypes = [
         ctypes.c_void_p,  # grad_combined
         ctypes.c_void_p,  # grad_state
         ctypes.c_void_p,  # grad_out
@@ -100,9 +80,10 @@ def load_extension():
         ctypes.c_int,     # H
         ctypes.c_int,     # B
     ]
-    lib.launch_fused_scan_backward_original.restype = None
+    lib.launch_fused_scan_backward_original_f32.restype = None
     
-    lib.launch_fused_scan_backward_checkpointed_wrapper.argtypes = [
+    # Backward checkpointed: launch_fused_scan_backward_checkpointed_f32
+    lib.launch_fused_scan_backward_checkpointed_f32.argtypes = [
         ctypes.c_void_p,  # grad_combined
         ctypes.c_void_p,  # grad_state
         ctypes.c_void_p,  # grad_out
@@ -116,7 +97,7 @@ def load_extension():
         ctypes.c_int,     # H
         ctypes.c_int,     # B
     ]
-    lib.launch_fused_scan_backward_checkpointed_wrapper.restype = None
+    lib.launch_fused_scan_backward_checkpointed_f32.restype = None
     
     lib.sync_device.argtypes = []
     lib.sync_device.restype = None
@@ -324,14 +305,14 @@ def run_correctness_test(
         combined, state = create_test_tensors(B, T, H)
         
         # Run original
-        outputs_orig = run_kernel(lib, lib.launch_fused_scan_forward_original, combined, state, B, T, H)
+        outputs_orig = run_kernel(lib, lib.launch_fused_scan_forward_original_f32, combined, state, B, T, H)
         
-        # Run optimized
-        outputs_new = run_kernel(lib, lib.launch_fused_scan_forward_optimized, combined, state, B, T, H)
+        # Run optimized (checkpointed)
+        outputs_new = run_kernel(lib, lib.launch_fused_scan_forward_checkpointed_f32, combined, state, B, T, H)
         
-        # Compare
-        output_names = ["out", "next_state", "a_star", "s_vals", "log_values_buf"]
-        passed, details = compare_outputs(outputs_orig, outputs_new, output_names)
+        # Compare only out and next_state (intermediate buffers may differ due to sparse checkpointing)
+        output_names = ["out", "next_state"]
+        passed, details = compare_outputs(outputs_orig[:2], outputs_new[:2], output_names)
         
         return passed, details
     finally:
@@ -354,22 +335,22 @@ def run_benchmark(
         
         # Warmup
         for _ in range(warmup_iters):
-            _ = run_kernel(lib, lib.launch_fused_scan_forward_original, combined, state, B, T, H)
-            _ = run_kernel(lib, lib.launch_fused_scan_forward_optimized, combined, state, B, T, H)
+            _ = run_kernel(lib, lib.launch_fused_scan_forward_original_f32, combined, state, B, T, H)
+            _ = run_kernel(lib, lib.launch_fused_scan_forward_checkpointed_f32, combined, state, B, T, H)
         
         lib.sync_device()
         
         # Benchmark original
         start = time.perf_counter()
         for _ in range(bench_iters):
-            _ = run_kernel(lib, lib.launch_fused_scan_forward_original, combined, state, B, T, H)
+            _ = run_kernel(lib, lib.launch_fused_scan_forward_original_f32, combined, state, B, T, H)
         lib.sync_device()
         orig_time = (time.perf_counter() - start) / bench_iters * 1000  # ms
         
-        # Benchmark optimized
+        # Benchmark optimized (checkpointed)
         start = time.perf_counter()
         for _ in range(bench_iters):
-            _ = run_kernel(lib, lib.launch_fused_scan_forward_optimized, combined, state, B, T, H)
+            _ = run_kernel(lib, lib.launch_fused_scan_forward_checkpointed_f32, combined, state, B, T, H)
         lib.sync_device()
         new_time = (time.perf_counter() - start) / bench_iters * 1000  # ms
         
@@ -442,7 +423,7 @@ def run_backward_correctness_test(
         
         # Run forward to get buffers and outputs
         out, next_state, a_star, s_vals, log_values_buf = run_kernel(
-            lib, lib.launch_fused_scan_forward_original, combined, state, B, T, H
+            lib, lib.launch_fused_scan_forward_original_f32, combined, state, B, T, H
         )
         
         # Create gradient inputs (simulate backward from loss)
@@ -451,14 +432,14 @@ def run_backward_correctness_test(
         
         # Run original backward (reads dense buffers)
         grad_combined_orig, grad_state_orig = run_backward_kernel(
-            lib, lib.launch_fused_scan_backward_original,
+            lib, lib.launch_fused_scan_backward_original_f32,
             grad_out, grad_next_state, combined, state,
             a_star, s_vals, log_values_buf, B, T, H
         )
         
         # Run checkpointed backward (reads sparse checkpoints from same buffers)
         grad_combined_ckpt, grad_state_ckpt = run_backward_kernel(
-            lib, lib.launch_fused_scan_backward_checkpointed_wrapper,
+            lib, lib.launch_fused_scan_backward_checkpointed_f32,
             grad_out, grad_next_state, combined, state,
             a_star, s_vals, log_values_buf, B, T, H
         )
@@ -499,12 +480,12 @@ def run_backward_benchmark(
         
         # Run ORIGINAL forward to get dense buffers for original backward
         out_orig, next_state_orig, a_star_orig, s_vals_orig, log_values_buf_orig = run_kernel(
-            lib, lib.launch_fused_scan_forward_original, combined, state, B, T, H
+            lib, lib.launch_fused_scan_forward_original_f32, combined, state, B, T, H
         )
         
         # Run OPTIMIZED forward to get sparse buffers for checkpointed backward
         out_opt, next_state_opt, a_star_opt, s_vals_opt, log_values_buf_opt = run_kernel(
-            lib, lib.launch_fused_scan_forward_optimized, combined, state, B, T, H
+            lib, lib.launch_fused_scan_forward_checkpointed_f32, combined, state, B, T, H
         )
         
         grad_out = torch.randn_like(out_orig)
@@ -513,12 +494,12 @@ def run_backward_benchmark(
         # Warmup
         for _ in range(warmup_iters):
             _ = run_backward_kernel(
-                lib, lib.launch_fused_scan_backward_original,
+                lib, lib.launch_fused_scan_backward_original_f32,
                 grad_out, grad_next_state, combined, state,
                 a_star_orig, s_vals_orig, log_values_buf_orig, B, T, H
             )
             _ = run_backward_kernel(
-                lib, lib.launch_fused_scan_backward_checkpointed_wrapper,
+                lib, lib.launch_fused_scan_backward_checkpointed_f32,
                 grad_out, grad_next_state, combined, state,
                 a_star_opt, s_vals_opt, log_values_buf_opt, B, T, H
             )
@@ -529,7 +510,7 @@ def run_backward_benchmark(
         start = time.perf_counter()
         for _ in range(bench_iters):
             _ = run_backward_kernel(
-                lib, lib.launch_fused_scan_backward_original,
+                lib, lib.launch_fused_scan_backward_original_f32,
                 grad_out, grad_next_state, combined, state,
                 a_star_orig, s_vals_orig, log_values_buf_orig, B, T, H
             )
@@ -540,7 +521,7 @@ def run_backward_benchmark(
         start = time.perf_counter()
         for _ in range(bench_iters):
             _ = run_backward_kernel(
-                lib, lib.launch_fused_scan_backward_checkpointed_wrapper,
+                lib, lib.launch_fused_scan_backward_checkpointed_f32,
                 grad_out, grad_next_state, combined, state,
                 a_star_opt, s_vals_opt, log_values_buf_opt, B, T, H
             )
@@ -557,44 +538,6 @@ def run_backward_benchmark(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test fused_scan_forward kernel")
-    parser.add_argument(
-        "--sizes",
-        type=str,
-        default="all",
-        choices=["tiny", "small", "medium", "large", "edge_cases", "all"],
-        help="Which size configurations to test",
-    )
-    parser.add_argument(
-        "--benchmark",
-        action="store_true",
-        help="Run benchmarks in addition to correctness tests",
-    )
-    parser.add_argument(
-        "--test-backward",
-        action="store_true",
-        help="Test backward pass (checkpointed vs original)",
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Print detailed output",
-    )
-    parser.add_argument(
-        "--rtol",
-        type=float,
-        default=1e-4,
-        help="Relative tolerance for comparison",
-    )
-    parser.add_argument(
-        "--atol",
-        type=float,
-        default=1e-4,
-        help="Absolute tolerance for comparison",
-    )
-    args = parser.parse_args()
-    
-    # Check CUDA availability
     if not torch.cuda.is_available():
         print("ERROR: CUDA not available")
         return 1
@@ -603,23 +546,17 @@ def main():
     print(f"PyTorch version: {torch.__version__}")
     print()
     
-    # Load extension
     try:
         lib = load_extension()
     except Exception as e:
         print(f"ERROR: Failed to load extension: {e}")
         return 1
     
-    # Determine which configs to test
-    if args.sizes == "all":
-        configs = []
-        for size_name, size_configs in TEST_CONFIGS.items():
-            for cfg in size_configs:
-                configs.append((size_name, cfg))
-    else:
-        configs = [(args.sizes, cfg) for cfg in TEST_CONFIGS[args.sizes]]
+    configs = []
+    for size_name, size_configs in TEST_CONFIGS.items():
+        for cfg in size_configs:
+            configs.append((size_name, cfg))
     
-    # Run tests
     print("=" * 70)
     print("CORRECTNESS TESTS")
     print("=" * 70)
@@ -630,7 +567,7 @@ def main():
         
         try:
             passed, details = run_correctness_test(
-                lib, B, T, H, verbose=args.verbose
+                lib, B, T, H
             )
         except Exception as e:
             print(f"[{size_name:12s}] {config_str}  EXCEPTION: {e}")
@@ -639,14 +576,10 @@ def main():
         
         if passed:
             status = "PASS"
-            if args.verbose:
-                max_diffs = [f"{name}:{d['max_diff']:.2e}" for name, d in details.items()]
-                status += f"  ({', '.join(max_diffs)})"
         else:
             status = "FAIL"
             failed = [name for name, d in details.items() if not d["passed"]]
             status += f"  (failed: {', '.join(failed)})"
-            # Always show max_diffs for failed tests
             max_diffs = [f"{name}:{d['max_diff']:.2e}" for name, d in details.items()]
             status += f"\n             max_diffs: {', '.join(max_diffs)}"
             all_passed = False
@@ -655,7 +588,6 @@ def main():
     
     print()
     
-    # Run benchmarks if requested
     print("=" * 70)
     print("BENCHMARKS")
     print("=" * 70)
@@ -678,7 +610,6 @@ def main():
     
     print()
     
-    # Run backward tests if requested
     print("=" * 70)
     print("BACKWARD CORRECTNESS TESTS")
     print("=" * 70)
@@ -688,7 +619,7 @@ def main():
         
         try:
             passed, details = run_backward_correctness_test(
-                lib, B, T, H, verbose=args.verbose
+                lib, B, T, H
             )
         except Exception as e:
             print(f"[{size_name:12s}] {config_str}  EXCEPTION: {e}")
@@ -697,9 +628,6 @@ def main():
         
         if passed:
             status = "PASS"
-            if args.verbose:
-                max_diffs = [f"{name}:{d['max_diff']:.2e}" for name, d in details.items()]
-                status += f"  ({', '.join(max_diffs)})"
         else:
             status = "FAIL"
             failed = [name for name, d in details.items() if not d["passed"]]
@@ -713,7 +641,6 @@ def main():
         
     print()
         
-    # Run backward benchmarks if requested
     print("=" * 70)
     print("BACKWARD BENCHMARKS")
     print("=" * 70)
@@ -736,7 +663,6 @@ def main():
     
     print()
     
-    # Summary
     print("=" * 70)
     if all_passed:
         print("ALL TESTS PASSED!")
