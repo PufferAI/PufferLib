@@ -224,11 +224,12 @@ Set `#define DEBUG 1` at the top of dogfight.h to enable verbose per-step loggin
 - Combat (aim angle, distance, in_cone, in_range)
 
 ### Python sanity tests
-Run `python test_flight.py` in the dogfight directory to verify physics:
-- Full throttle straight flight → should approach 143 m/s max
-- Pitch direction → positive elevator = nose UP
-- Zero throttle → plane dives to maintain speed (energy conservation)
-- Turn test → bank + pull changes heading
+Run `python pufferlib/ocean/dogfight/test_flight.py` to verify physics:
+- Full throttle straight flight → ~150 m/s max
+- Stall speed → ~50 m/s
+- Climb rate → ~16 m/s
+- Glide L/D → ~14.7
+- Turn tests → 30° and 60° bank with PID control
 
 ---
 

@@ -18,7 +18,8 @@ Historical record of physics test results at specific commits.
 
 ## Results
 
-| Commit | Date | max_speed | cruise_50 | min_speed | dive_30 | dive_45 | climb | pitch | roll | Notes |
-|--------|------|-----------|-----------|-----------|---------|---------|-------|-------|------|-------|
-| | | ~159 exp | | ~45 stall | | | m/s | UP | YES | P-51D targets |
-| 0116b97c | 2026-01-13 | 86.5 | 80.7 | 75.5 | 10.7 | 40.4 | -4.9 | UP | YES | +2° incidence, rate ctrl still dives |
+| Commit | Date | max_speed | stall | climb | L/D | turn_30 | turn_60 | pitch | roll | Notes |
+|--------|------|-----------|-------|-------|-----|---------|---------|-------|------|-------|
+| P-51D  | ref  | 159       | 45    | 15    | 14.6| -       | -       | UP    | YES  | Reference targets |
+| 0116b97c | 2026-01-13 | 86.5 | 75.5 | -4.9 | - | - | - | UP | YES | Old tests, pre-physics fix |
+| 1c30c546 | 2026-01-14 | 149.6 | 50 | 16.3 | 14.7 | 2.2 | 9.4 | UP | YES | Coordinated turn tests, 97% eff |

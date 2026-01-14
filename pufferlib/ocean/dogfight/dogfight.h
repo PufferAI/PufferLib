@@ -24,6 +24,12 @@
 #define MAX_SPEED 250.0f
 #define OBS_SIZE 19  // player(13) + rel_pos(3) + rel_vel(3)
 
+// Inverse constants for faster normalization (multiply instead of divide)
+#define INV_WORLD_HALF_X 0.0005f       // 1/2000
+#define INV_WORLD_HALF_Y 0.0005f       // 1/2000
+#define INV_WORLD_MAX_Z  0.000333333f  // 1/3000
+#define INV_MAX_SPEED    0.004f        // 1/250
+
 // Combat constants
 #define GUN_RANGE 500.0f       // meters
 #define GUN_CONE_ANGLE 0.087f  // ~5 degrees in radians
@@ -90,18 +96,18 @@ void compute_observations(Dogfight *env) {
     if (DEBUG) printf("=== OBS tick=%d ===\n", env->tick);
 
     int i = 0;
-    if (DEBUG) printf("pos_x_norm=%.3f (raw=%.1f)\n", p->pos.x / WORLD_HALF_X, p->pos.x);
-    env->observations[i++] = p->pos.x / WORLD_HALF_X;
-    if (DEBUG) printf("pos_y_norm=%.3f (raw=%.1f)\n", p->pos.y / WORLD_HALF_Y, p->pos.y);
-    env->observations[i++] = p->pos.y / WORLD_HALF_Y;
-    if (DEBUG) printf("pos_z_norm=%.3f (raw=%.1f)\n", p->pos.z / WORLD_MAX_Z, p->pos.z);
-    env->observations[i++] = p->pos.z / WORLD_MAX_Z;
-    if (DEBUG) printf("vel_x_norm=%.3f (raw=%.1f)\n", p->vel.x / MAX_SPEED, p->vel.x);
-    env->observations[i++] = p->vel.x / MAX_SPEED;
-    if (DEBUG) printf("vel_y_norm=%.3f (raw=%.1f)\n", p->vel.y / MAX_SPEED, p->vel.y);
-    env->observations[i++] = p->vel.y / MAX_SPEED;
-    if (DEBUG) printf("vel_z_norm=%.3f (raw=%.1f)\n", p->vel.z / MAX_SPEED, p->vel.z);
-    env->observations[i++] = p->vel.z / MAX_SPEED;
+    if (DEBUG) printf("pos_x_norm=%.3f (raw=%.1f)\n", p->pos.x * INV_WORLD_HALF_X, p->pos.x);
+    env->observations[i++] = p->pos.x * INV_WORLD_HALF_X;
+    if (DEBUG) printf("pos_y_norm=%.3f (raw=%.1f)\n", p->pos.y * INV_WORLD_HALF_Y, p->pos.y);
+    env->observations[i++] = p->pos.y * INV_WORLD_HALF_Y;
+    if (DEBUG) printf("pos_z_norm=%.3f (raw=%.1f)\n", p->pos.z * INV_WORLD_MAX_Z, p->pos.z);
+    env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
+    if (DEBUG) printf("vel_x_norm=%.3f (raw=%.1f)\n", p->vel.x * INV_MAX_SPEED, p->vel.x);
+    env->observations[i++] = p->vel.x * INV_MAX_SPEED;
+    if (DEBUG) printf("vel_y_norm=%.3f (raw=%.1f)\n", p->vel.y * INV_MAX_SPEED, p->vel.y);
+    env->observations[i++] = p->vel.y * INV_MAX_SPEED;
+    if (DEBUG) printf("vel_z_norm=%.3f (raw=%.1f)\n", p->vel.z * INV_MAX_SPEED, p->vel.z);
+    env->observations[i++] = p->vel.z * INV_MAX_SPEED;
     if (DEBUG) printf("ori_w=%.3f\n", p->ori.w);
     env->observations[i++] = p->ori.w;
     if (DEBUG) printf("ori_x=%.3f\n", p->ori.x);
@@ -116,18 +122,18 @@ void compute_observations(Dogfight *env) {
     env->observations[i++] = up.y;
     if (DEBUG) printf("up_z=%.3f\n", up.z);
     env->observations[i++] = up.z;
-    if (DEBUG) printf("rel_pos_x_norm=%.3f (raw=%.1f)\n", rel_pos.x / WORLD_HALF_X, rel_pos.x);
-    env->observations[i++] = rel_pos.x / WORLD_HALF_X;
-    if (DEBUG) printf("rel_pos_y_norm=%.3f (raw=%.1f)\n", rel_pos.y / WORLD_HALF_Y, rel_pos.y);
-    env->observations[i++] = rel_pos.y / WORLD_HALF_Y;
-    if (DEBUG) printf("rel_pos_z_norm=%.3f (raw=%.1f)\n", rel_pos.z / WORLD_MAX_Z, rel_pos.z);
-    env->observations[i++] = rel_pos.z / WORLD_MAX_Z;
-    if (DEBUG) printf("rel_vel_x_norm=%.3f (raw=%.1f)\n", rel_vel.x / MAX_SPEED, rel_vel.x);
-    env->observations[i++] = rel_vel.x / MAX_SPEED;
-    if (DEBUG) printf("rel_vel_y_norm=%.3f (raw=%.1f)\n", rel_vel.y / MAX_SPEED, rel_vel.y);
-    env->observations[i++] = rel_vel.y / MAX_SPEED;
-    if (DEBUG) printf("rel_vel_z_norm=%.3f (raw=%.1f)\n", rel_vel.z / MAX_SPEED, rel_vel.z);
-    env->observations[i++] = rel_vel.z / MAX_SPEED;
+    if (DEBUG) printf("rel_pos_x_norm=%.3f (raw=%.1f)\n", rel_pos.x * INV_WORLD_HALF_X, rel_pos.x);
+    env->observations[i++] = rel_pos.x * INV_WORLD_HALF_X;
+    if (DEBUG) printf("rel_pos_y_norm=%.3f (raw=%.1f)\n", rel_pos.y * INV_WORLD_HALF_Y, rel_pos.y);
+    env->observations[i++] = rel_pos.y * INV_WORLD_HALF_Y;
+    if (DEBUG) printf("rel_pos_z_norm=%.3f (raw=%.1f)\n", rel_pos.z * INV_WORLD_MAX_Z, rel_pos.z);
+    env->observations[i++] = rel_pos.z * INV_WORLD_MAX_Z;
+    if (DEBUG) printf("rel_vel_x_norm=%.3f (raw=%.1f)\n", rel_vel.x * INV_MAX_SPEED, rel_vel.x);
+    env->observations[i++] = rel_vel.x * INV_MAX_SPEED;
+    if (DEBUG) printf("rel_vel_y_norm=%.3f (raw=%.1f)\n", rel_vel.y * INV_MAX_SPEED, rel_vel.y);
+    env->observations[i++] = rel_vel.y * INV_MAX_SPEED;
+    if (DEBUG) printf("rel_vel_z_norm=%.3f (raw=%.1f)\n", rel_vel.z * INV_MAX_SPEED, rel_vel.z);
+    env->observations[i++] = rel_vel.z * INV_MAX_SPEED;
 }
 
 void c_reset(Dogfight *env) {
@@ -243,14 +249,14 @@ void c_step(Dogfight *env) {
     // === Reward Shaping (Phase 3.5) ===
     Vec3 rel_pos = sub3(o->pos, p->pos);
     float dist = norm3(rel_pos);
-    float r_dist = -dist / 10000.0f;
+    float r_dist = -dist * 0.0001f;
     reward += r_dist;
 
     // 2. Closing velocity reward: approaching = good
     Vec3 rel_vel = sub3(p->vel, o->vel);
     Vec3 rel_pos_norm = normalize3(rel_pos);
     float closing_rate = dot3(rel_vel, rel_pos_norm);
-    float r_closing = closing_rate / 500.0f;
+    float r_closing = closing_rate * 0.002f;
     reward += r_closing;
 
     // 3. Tail position reward: behind opponent = good
@@ -262,9 +268,9 @@ void c_step(Dogfight *env) {
     // 4. Altitude penalty: too low or too high is bad
     float r_alt = 0.0f;
     if (p->pos.z < 200.0f) {
-        r_alt = -(200.0f - p->pos.z) / 2000.0f;
+        r_alt = -(200.0f - p->pos.z) * 0.0005f;
     } else if (p->pos.z > 2500.0f) {
-        r_alt = -(p->pos.z - 2500.0f) / 5000.0f;
+        r_alt = -(p->pos.z - 2500.0f) * 0.0002f;
     }
     reward += r_alt;
 
@@ -272,7 +278,7 @@ void c_step(Dogfight *env) {
     float speed = norm3(p->vel);
     float r_speed = 0.0f;
     if (speed < 50.0f) {
-        r_speed = -(50.0f - speed) / 500.0f;
+        r_speed = -(50.0f - speed) * 0.002f;
     }
     reward += r_speed;
 
@@ -280,7 +286,7 @@ void c_step(Dogfight *env) {
     Vec3 player_fwd = quat_rotate(p->ori, vec3(1, 0, 0));
     Vec3 to_opp_norm = normalize3(rel_pos);
     float aim_dot = dot3(to_opp_norm, player_fwd);  // 1.0 = perfect aim
-    float aim_angle_deg = acosf(clampf(aim_dot, -1.0f, 1.0f)) * 180.0f / PI;
+    float aim_angle_deg = acosf(clampf(aim_dot, -1.0f, 1.0f)) * RAD_TO_DEG;
 
     float r_aim = 0.0f;
     // Reward for tracking (within 2x gun cone and in range)

@@ -112,3 +112,22 @@ Observations:
 - Physics refactor did not affect training
 - test_flight.py shows climb_rate test failing (-29.6 vs +15.4 expected)
 - Quaternion sign issue identified in test setup (not affecting training)
+
+---
+
+## Coordinated Turn Tests (1c30c546)
+Date: 2026-01-14
+Commit: 1c30c546 "Coordinated Turn Tests"
+Change: Fixed quaternion signs in tests, added 60° coordinated turn test with PID validation (97% efficiency)
+
+| Run | Episode Return | Episode Length | Kills | Shots Hit/Fired |
+|-----|----------------|----------------|-------|-----------------|
+| 1   | +26.17         | 1151           | 0.29  | 0.29/10.5       |
+| 2   | +55.99         | 1148           | 0.47  | 0.47/10.6       |
+| 3   | +10.82         | 1151           | 0.20  | 0.20/9.6        |
+| **Mean** | **+30.99** | **1150**       | **0.32** | **0.32/10.2** |
+
+Observations:
+- Performance consistent with previous baseline (+37.50 → +30.99, within variance)
+- Test fixes did not affect training (physics unchanged)
+- All tests now passing: max_speed, stall, climb, glide, turn_30, turn_60, pitch, roll

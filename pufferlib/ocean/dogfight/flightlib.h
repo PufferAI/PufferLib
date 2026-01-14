@@ -138,6 +138,11 @@ static inline Quat quat_from_axis_angle(Vec3 axis, float angle) {
 #define G_LIMIT 8.0f           // structural g limit (P-51D: +8g at 8,000 lb)
 #define RHO 1.225f             // air density kg/m^3 (sea level ISA)
 
+// Inverse constants for faster computation (multiply instead of divide)
+#define INV_MASS     0.000245f   // 1/4082
+#define INV_GRAVITY  0.10197f    // 1/9.81
+#define RAD_TO_DEG   57.2957795f // 180/PI
+
 #define MAX_PITCH_RATE 2.5f    // rad/s
 #define MAX_ROLL_RATE 3.0f     // rad/s
 #define MAX_YAW_RATE 1.5f      // rad/s
@@ -339,9 +344,9 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     // ========================================================================
     // Clamp total acceleration to prevent unrealistic maneuvers
     // 8g limit: max accel = 8 * 9.81 = 78.5 m/s^2
-    Vec3 accel = mul3(F_total, 1.0f / MASS);
+    Vec3 accel = mul3(F_total, INV_MASS);
     float accel_mag = norm3(accel);
-    float g_force = accel_mag / GRAVITY;
+    float g_force = accel_mag * INV_GRAVITY;
     float max_accel = G_LIMIT * GRAVITY;
     if (accel_mag > max_accel) {
         accel = mul3(accel, max_accel / accel_mag);
@@ -351,8 +356,8 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     if (DEBUG) printf("speed=%.1f m/s (stall~45, max~159 P-51D)\n", V);
     if (DEBUG) printf("throttle=%.2f\n", throttle);
     if (DEBUG) printf("alpha_body=%.2f deg, alpha_eff=%.2f deg (inc=%.1f, a0=%.1f), C_L=%.3f\n",
-                      alpha * 180.0f / PI, alpha_effective * 180.0f / PI,
-                      WING_INCIDENCE * 180.0f / PI, ALPHA_ZERO * 180.0f / PI, C_L);
+                      alpha * RAD_TO_DEG, alpha_effective * RAD_TO_DEG,
+                      WING_INCIDENCE * RAD_TO_DEG, ALPHA_ZERO * RAD_TO_DEG, C_L);
     if (DEBUG) printf("thrust=%.0f N, lift=%.0f N, drag=%.0f N, weight=%.0f N\n", T_mag, L_mag, D_mag, MASS * GRAVITY);
     if (DEBUG) printf("g_force=%.2f g (limit=8)\n", g_force);
 
