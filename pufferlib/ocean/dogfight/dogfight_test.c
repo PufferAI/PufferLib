@@ -803,19 +803,19 @@ void test_cone_hit_detection() {
     // Place opponent directly ahead within range
     env.opponent.pos = vec3(200, 0, 500);  // 200m ahead, in cone
 
-    assert(check_hit(&env.player, &env.opponent) == true);
+    assert(check_hit(&env.player, &env.opponent, env.cos_gun_cone) == true);
 
     // Place opponent too far
     env.opponent.pos = vec3(600, 0, 500);  // 600m > GUN_RANGE
-    assert(check_hit(&env.player, &env.opponent) == false);
+    assert(check_hit(&env.player, &env.opponent, env.cos_gun_cone) == false);
 
     // Place opponent at side (outside 5 degree cone)
     env.opponent.pos = vec3(200, 50, 500);  // ~14 degrees off-axis
-    assert(check_hit(&env.player, &env.opponent) == false);
+    assert(check_hit(&env.player, &env.opponent, env.cos_gun_cone) == false);
 
     // Place opponent slightly off-axis but within cone
     env.opponent.pos = vec3(200, 10, 500);  // ~2.8 degrees off-axis
-    assert(check_hit(&env.player, &env.opponent) == true);
+    assert(check_hit(&env.player, &env.opponent, env.cos_gun_cone) == true);
 
     printf("test_cone_hit_detection PASS\n");
 }

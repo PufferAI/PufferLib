@@ -71,6 +71,10 @@ typedef struct Dogfight {
     float episode_return;
     Plane player;
     Plane opponent;
+    // Per-episode precomputed values (for curriculum learning)
+    float gun_cone_angle;   // Current cone angle (radians)
+    float cos_gun_cone;     // cosf(gun_cone_angle)
+    float cos_gun_cone_2x;  // cosf(gun_cone_angle * 2)
 } Dogfight;
 
 void init(Dogfight *env) {
@@ -78,6 +82,10 @@ void init(Dogfight *env) {
     env->tick = 0;
     env->episode_return = 0.0f;
     env->client = NULL;
+    // Precompute gun cone trig (can vary per episode for curriculum)
+    env->gun_cone_angle = GUN_CONE_ANGLE;
+    env->cos_gun_cone = cosf(env->gun_cone_angle);
+    env->cos_gun_cone_2x = cosf(env->gun_cone_angle * 2.0f);
 }
 
 void add_log(Dogfight *env) {
@@ -140,6 +148,10 @@ void c_reset(Dogfight *env) {
     env->tick = 0;
     env->episode_return = 0.0f;
 
+    // Recompute gun cone trig (for curriculum: could vary gun_cone_angle here)
+    env->cos_gun_cone = cosf(env->gun_cone_angle);
+    env->cos_gun_cone_2x = cosf(env->gun_cone_angle * 2.0f);
+
     Vec3 pos = vec3(rndf(-500, 500), rndf(-500, 500), rndf(500, 1500));
     Vec3 vel = vec3(80, 0, 0);
     reset_plane(&env->player, pos, vel);
@@ -162,7 +174,7 @@ void c_reset(Dogfight *env) {
 }
 
 // Check if shooter hits target (cone-based hit detection)
-bool check_hit(Plane *shooter, Plane *target) {
+bool check_hit(Plane *shooter, Plane *target, float cos_gun_cone) {
     Vec3 to_target = sub3(target->pos, shooter->pos);
     float dist = norm3(to_target);
     if (dist > GUN_RANGE) return false;
@@ -171,7 +183,7 @@ bool check_hit(Plane *shooter, Plane *target) {
     Vec3 forward = quat_rotate(shooter->ori, vec3(1, 0, 0));
     Vec3 to_target_norm = normalize3(to_target);
     float cos_angle = dot3(to_target_norm, forward);
-    return cos_angle > cosf(GUN_CONE_ANGLE);
+    return cos_angle > cos_gun_cone;
 }
 
 // Respawn opponent at random position ahead of player
@@ -231,7 +243,7 @@ void c_step(Dogfight *env) {
         if (DEBUG) printf("=== FIRED! ===\n");
 
         // Check if hit
-        if (check_hit(p, o)) {
+        if (check_hit(p, o, env->cos_gun_cone)) {
             env->log.shots_hit += 1.0f;
             reward += 1.0f;  // Hit reward
             if (DEBUG) printf("*** HIT! +1.0 reward ***\n");
@@ -290,11 +302,11 @@ void c_step(Dogfight *env) {
 
     float r_aim = 0.0f;
     // Reward for tracking (within 2x gun cone and in range)
-    if (aim_dot > cosf(GUN_CONE_ANGLE * 2.0f) && dist < GUN_RANGE) {
+    if (aim_dot > env->cos_gun_cone_2x && dist < GUN_RANGE) {
         r_aim += 0.05f;
     }
     // Bonus for firing solution (within gun cone, in range)
-    if (aim_dot > cosf(GUN_CONE_ANGLE) && dist < GUN_RANGE) {
+    if (aim_dot > env->cos_gun_cone && dist < GUN_RANGE) {
         r_aim += 0.1f;
     }
     reward += r_aim;
@@ -311,7 +323,7 @@ void c_step(Dogfight *env) {
     if (DEBUG) printf("=== COMBAT ===\n");
     if (DEBUG) printf("aim_angle=%.1f deg (cone=5 deg)\n", aim_angle_deg);
     if (DEBUG) printf("dist_to_target=%.1f m (gun_range=500)\n", dist);
-    if (DEBUG) printf("in_cone=%d, in_range=%d\n", aim_dot > cosf(GUN_CONE_ANGLE), dist < GUN_RANGE);
+    if (DEBUG) printf("in_cone=%d, in_range=%d\n", aim_dot > env->cos_gun_cone, dist < GUN_RANGE);
 
     env->rewards[0] = reward;
     env->episode_return += reward;
