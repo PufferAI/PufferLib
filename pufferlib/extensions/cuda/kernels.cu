@@ -1549,8 +1549,8 @@ __global__ void ppo_loss_forward_kernel(
     double v_loss_clipped = (v_clipped - ret) * (v_clipped - ret);
     double v_loss = 0.5f * fmax(v_loss_unclipped, v_loss_clipped);
 
-    // === Step 6: total sample loss (pre-divided by N*T for mean) (pre-divided by N*T for mean) ===
-    double thread_loss = ((pg_loss + vf_coef * v_loss - ent_coef * entropy) / double(total_elements));
+    // === Step 6: total sample loss (pre-divided by N*T for mean) ===
+    double thread_loss = (pg_loss + vf_coef * v_loss - ent_coef * entropy) / double(total_elements);
 
     // === Save for backward ===
     double* saved_row = saved_for_backward + idx * 5;
