@@ -151,3 +151,29 @@ Observations:
 - 21 divisions replaced with multiplications (2.3x faster per op)
 - Gun cone trig precomputed per episode (curriculum-ready)
 - SPS: 1.2-1.3M
+
+---
+
+## Autopilot Infrastructure (85980679)
+Date: 2026-01-14
+Commit: 85980679
+Change: Add opponent autopilot system for curriculum learning (not enabled by default)
+
+| Run | Episode Return | Episode Length | Kills | Shots Hit/Fired |
+|-----|----------------|----------------|-------|-----------------|
+| 1   | +36.85         | 1140           | 0.33  | 0.33/9.1        |
+| 2   | +55.26         | 1140           | 0.51  | 0.51/11.3       |
+| 3   | +12.78         | 1150           | 0.25  | 0.25/10.9       |
+| **Mean** | **+34.97** | **1143**       | **0.36** | **0.36/10.4** |
+
+Changes:
+- NEW: autopilot.h - 7 autopilot modes (STRAIGHT, LEVEL, TURN_LEFT/RIGHT, CLIMB, DESCEND, RANDOM)
+- NEW: set_autopilot() Python API for curriculum learning
+- Default: AP_STRAIGHT (identical to previous behavior)
+- PID gains from test_flight.py validation
+
+Observations:
+- Performance consistent with baseline (+42.45 → +34.97, within variance)
+- **No regression** - autopilot infrastructure has negligible overhead
+- Autopilot disabled by default (AP_STRAIGHT = old behavior)
+- Ready for curriculum: call `env.set_autopilot(mode=AutopilotMode.RANDOM)` to enable

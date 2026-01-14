@@ -150,24 +150,36 @@ class Dogfight(pufferlib.PufferEnv):
         Set autopilot mode for opponent aircraft.
 
         Args:
-            env_idx: Environment index (for vectorized envs)
+            env_idx: Environment index, or None for all environments
             mode: AutopilotMode constant (STRAIGHT, LEVEL, TURN_LEFT, etc.)
             throttle: Target throttle [0, 1]
             bank_deg: Bank angle for turn modes (degrees)
             climb_rate: Target vertical velocity for climb/descend (m/s)
 
         Usage:
-            env.set_autopilot(mode=AutopilotMode.LEVEL)  # Level flight
+            env.set_autopilot(mode=AutopilotMode.LEVEL)  # Level flight, env 0
             env.set_autopilot(mode=AutopilotMode.TURN_RIGHT, bank_deg=45)  # 45° right turn
             env.set_autopilot(mode=AutopilotMode.RANDOM)  # Randomize each episode
+            env.set_autopilot(env_idx=None, mode=AutopilotMode.RANDOM)  # All envs
         """
-        binding.env_set_autopilot(
-            self._env_handles[env_idx],
-            mode=mode,
-            throttle=throttle,
-            bank_deg=bank_deg,
-            climb_rate=climb_rate,
-        )
+        if env_idx is None:
+            # Vectorized: set all envs at once
+            binding.vec_set_autopilot(
+                self.c_envs,
+                mode=mode,
+                throttle=throttle,
+                bank_deg=bank_deg,
+                climb_rate=climb_rate,
+            )
+        else:
+            # Single env
+            binding.env_set_autopilot(
+                self._env_handles[env_idx],
+                mode=mode,
+                throttle=throttle,
+                bank_deg=bank_deg,
+                climb_rate=climb_rate,
+            )
 
 
 def test_performance(timeout=10, atn_cache=1024):

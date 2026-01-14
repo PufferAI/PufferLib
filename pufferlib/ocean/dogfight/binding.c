@@ -12,11 +12,13 @@
 // Forward declare our custom methods
 static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* env_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs);
+static PyObject* vec_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs);
 
 // Register custom methods before including the template
 #define MY_METHODS \
     {"env_force_state", (PyCFunction)env_force_state, METH_VARARGS | METH_KEYWORDS, "Force environment state"}, \
-    {"env_set_autopilot", (PyCFunction)env_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set opponent autopilot mode"}
+    {"env_set_autopilot", (PyCFunction)env_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set opponent autopilot mode"}, \
+    {"vec_set_autopilot", (PyCFunction)vec_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set autopilot for all envs"}
 
 #include "../env_binding.h"
 
@@ -141,6 +143,31 @@ static PyObject* env_set_autopilot(PyObject* self, PyObject* args, PyObject* kwa
 
     // Set the autopilot mode
     autopilot_set_mode(&env->opponent_ap, (AutopilotMode)mode, throttle, bank_deg, climb_rate);
+
+    Py_RETURN_NONE;
+}
+
+// Set autopilot mode for all environments (vectorized)
+static PyObject* vec_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs) {
+    if (PyTuple_Size(args) != 1) {
+        PyErr_SetString(PyExc_TypeError, "vec_set_autopilot requires 1 positional arg (vec handle)");
+        return NULL;
+    }
+
+    VecEnv* vec = unpack_vecenv(args);
+    if (!vec) return NULL;
+
+    // Get autopilot parameters
+    int mode = get_int(kwargs, "mode", AP_STRAIGHT);
+    float throttle = get_float(kwargs, "throttle", AP_DEFAULT_THROTTLE);
+    float bank_deg = get_float(kwargs, "bank_deg", AP_DEFAULT_BANK_DEG);
+    float climb_rate = get_float(kwargs, "climb_rate", AP_DEFAULT_CLIMB_RATE);
+
+    // Set autopilot for all environments
+    for (int i = 0; i < vec->num_envs; i++) {
+        autopilot_set_mode(&vec->envs[i]->opponent_ap, (AutopilotMode)mode,
+                          throttle, bank_deg, climb_rate);
+    }
 
     Py_RETURN_NONE;
 }
