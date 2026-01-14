@@ -297,7 +297,7 @@ void launch_fused_scan_forward(
 
 // Gradient checkpointing configuration
 // Unified: checkpoint interval = backward chunk size (simpler, less register pressure)
-#define CHECKPOINT_INTERVAL 16  // Save checkpoints every 16 timesteps, process backward in same chunks
+#define CHECKPOINT_INTERVAL 4  // Save checkpoints every 16 timesteps, process backward in same chunks
 
 // ============================================================================
 // NEW optimized fused_scan_forward_kernel with sparse checkpoint writing
