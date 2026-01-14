@@ -648,7 +648,6 @@ __global__ void fused_scan_backward_kernel(
 
         // Read from combined for t >= 1 (still need gate/hidden for backward, proj for output gate)
         float gate_val = 0.0f, hidden_val = 0.0f, proj_val = 0.0f;
-        int combined_base = 0;
 
         if (t >= 1) {
             hidden_val = float(combined[hidden_adr]);
