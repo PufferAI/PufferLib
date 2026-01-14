@@ -29,7 +29,7 @@ void puff_advantage_row(float* values, float* rewards, float* dones,
         float* importance, float* advantages, float gamma, float lambda,
         float rho_clip, float c_clip, int horizon) {
     float lastpufferlam = 0;
-    for (int t = horizon-2; t >= 0; t--) {
+    for (int t = horizon-1; t >= 0; t--) {
         int t_next = t + 1;
         float nextnonterminal = 1.0 - dones[t_next];
         float rho_t = fminf(importance[t], rho_clip);
