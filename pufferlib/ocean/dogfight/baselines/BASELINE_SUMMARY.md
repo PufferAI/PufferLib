@@ -92,3 +92,23 @@ Observations:
 - **+89% improvement in kills** (0.19 → 0.36)
 - **+125% improvement in accuracy** (1.6% → 3.6%)
 - Aiming reward provides gradient for learning to aim, not just fire
+
+---
+
+## Physics Refactor (3582d2d4) - Pre-Quaternion Fix
+Date: 2026-01-13
+Commit: 3582d2d4 "Physics in Own File - Test Flights"
+Change: Moved physics to flightlib.h, added test_flight.py validation tests
+
+| Run | Episode Return | Episode Length | Kills | Shots Hit/Fired |
+|-----|----------------|----------------|-------|-----------------|
+| 1   | +45.32         | 1139           | 0.42  | 0.42/10.2       |
+| 2   | +15.30         | 1136           | 0.19  | 0.19/10.2       |
+| 3   | +51.87         | 1133           | 0.46  | 0.46/10.0       |
+| **Mean** | **+37.50** | **1136**       | **0.36** | **0.36/10.1** |
+
+Observations:
+- Performance consistent with Aiming Reward baseline (+37.04 → +37.50)
+- Physics refactor did not affect training
+- test_flight.py shows climb_rate test failing (-29.6 vs +15.4 expected)
+- Quaternion sign issue identified in test setup (not affecting training)
