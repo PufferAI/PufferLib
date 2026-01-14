@@ -102,38 +102,40 @@ static inline Quat quat_from_axis_angle(Vec3 axis, float angle) {
 }
 
 // ============================================================================
-// AIRCRAFT PARAMETERS
+// AIRCRAFT PARAMETERS - P-51D Mustang Reference
 // ============================================================================
-// These define a WW2-era fighter aircraft (similar to P-51 Mustang / Spitfire)
+// Based on P51d_REFERENCE_DATA.md - validated against historical data
+// Test condition: 9,000 lb (4,082 kg) combat weight, sea level ISA
 //
-// THEORETICAL PERFORMANCE (derived from these constants):
-//   Max speed (level):  V_max = (P*eta / (0.5*rho*S*Cd0))^(1/3) ~ 143.7 m/s
-//   Stall speed:        V_stall = sqrt(2*m*g / (rho*S*Cl_max)) ~ 39.5 m/s
-//   Min sink speed:     V_minsink ~ 1.32 * V_stall ~ 52 m/s
+// THEORETICAL PERFORMANCE (P-51D targets):
+//   Max speed (SL, Military): 355 mph (159 m/s)
+//   Max speed (SL, WEP):      368 mph (164 m/s)
+//   Stall speed (clean):      100 mph (45 m/s)
+//   ROC (SL, Military):       3,030 ft/min (15.4 m/s)
 //
-// WING INCIDENCE:
-//   The wing is mounted at +2 deg relative to the fuselage reference line.
-//   This means at zero body AOA, the wing still generates lift (Cl ~ 0.2).
-//   Level cruise at ~100 m/s requires Cl ~ 0.22, so nearly hands-off flight.
+// LIFT MODEL:
+//   C_L = C_L_alpha * (alpha + incidence - alpha_zero)
+//   The P-51D has a cambered airfoil (NAA 45-100) with alpha_zero = -1.2°
+//   Wing incidence is +1.5° relative to fuselage datum
+//   At 0° body pitch: effective AOA = 1.5° - (-1.2°) = 2.7°, C_L ~ 0.26
 //
 // DRAG POLAR: Cd = Cd0 + K * Cl^2
-//   - Cd0: parasitic/zero-lift drag (skin friction, form drag)
-//   - K: induced drag factor = 1/(pi * e * AR) where e~0.8, AR~wing^2/S
+//   - Cd0 = 0.0163 (P-51D published value, very clean laminar flow wing)
+//   - K = 0.072 = 1/(pi * e * AR) where e=0.75, AR=5.86
 // ============================================================================
 
-#define MASS 3000.0f           // kg (WW2 fighter ~2500-4000)
-#define WING_AREA 22.0f        // m^2 (P-51: 21.6, Spitfire: 22.5)
-#define C_D0 0.02f             // parasitic drag coefficient (clean config)
-#define K 0.05f                // induced drag factor: 1/(pi*e*AR), e~0.8, AR~8
-#define C_L_MAX 1.4f           // max lift coefficient before stall
-#define C_L_ALPHA 5.7f         // lift curve slope dCl/da (per radian), ~2pi for thin airfoil
-#define WING_INCIDENCE 0.035f  // wing incidence angle (rad), ~2 deg (P-51: 2.5, Spitfire: 2)
-                               // This is the angle between wing chord and fuselage reference.
-                               // When fuselage is level (a_body=0), wing sees this AOA.
-#define ENGINE_POWER 1000000.0f // watts (~1340 hp, Merlin engine class)
-#define ETA_PROP 0.8f          // propeller efficiency (typical 0.7-0.85)
+#define MASS 4082.0f           // kg (P-51D combat weight: 9,000 lb)
+#define WING_AREA 21.65f       // m^2 (P-51D: 233 ft^2)
+#define C_D0 0.0163f           // parasitic drag coefficient (P-51D laminar flow)
+#define K 0.072f               // induced drag factor: 1/(pi*0.75*5.86)
+#define C_L_MAX 1.48f          // max lift coefficient before stall (P-51D clean)
+#define C_L_ALPHA 5.56f        // lift curve slope (P-51D: 0.097/deg = 5.56/rad)
+#define ALPHA_ZERO -0.021f     // zero-lift angle (rad), -1.2° for cambered airfoil
+#define WING_INCIDENCE 0.026f  // wing incidence angle (rad), +1.5° (P-51D)
+#define ENGINE_POWER 1112000.0f // watts (P-51D Military: 1,490 hp)
+#define ETA_PROP 0.80f         // propeller efficiency (P-51D cruise: 0.80-0.85)
 #define GRAVITY 9.81f          // m/s^2
-#define G_LIMIT 8.0f           // structural g limit (aerobatic category)
+#define G_LIMIT 8.0f           // structural g limit (P-51D: +8g at 8,000 lb)
 #define RHO 1.225f             // air density kg/m^3 (sea level ISA)
 
 #define MAX_PITCH_RATE 2.5f    // rad/s
@@ -247,14 +249,16 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     // ========================================================================
     // 5. LIFT COEFFICIENT (Linear + Stall Clamp)
     // ========================================================================
-    // The wing is mounted at an incidence angle relative to the fuselage.
-    // Effective AOA for lift = body AOA + wing incidence
-    // This means when body is level (a=0), wing still generates lift.
+    // C_L = C_L_alpha * (alpha - alpha_zero)
+    // For cambered airfoils, alpha_zero < 0 (generates lift at 0° AOA)
+    // P-51D NAA 45-100 airfoil: alpha_zero = -1.2°
     //
-    // Cl = Cl_a * a_effective  (linear region)
-    // Real airfoils stall around 12-15 deg (a ~ 0.2-0.26 rad)
-    // Cl_max = 1.4 occurs at a_eff = 1.4/5.7 ~ 0.245 rad ~ 14 deg
-    float alpha_effective = alpha + WING_INCIDENCE;
+    // Effective AOA for lift = body_alpha + wing_incidence - alpha_zero
+    // At 0° body pitch: alpha_eff = 0 + 1.5° - (-1.2°) = 2.7°
+    // This gives C_L = 5.56 * 0.047 = 0.26, allowing near-level cruise
+    //
+    // Stall occurs at alpha_eff ~ 19° (P-51D clean), C_L_max = 1.48
+    float alpha_effective = alpha + WING_INCIDENCE - ALPHA_ZERO;
     float C_L = C_L_ALPHA * alpha_effective;
     C_L = clampf(C_L, -C_L_MAX, C_L_MAX);  // Stall limiting (symmetric)
 
@@ -344,10 +348,11 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     }
 
     if (DEBUG) printf("=== PHYSICS ===\n");
-    if (DEBUG) printf("speed=%.1f m/s (stall=39.5, max=143)\n", V);
+    if (DEBUG) printf("speed=%.1f m/s (stall~45, max~159 P-51D)\n", V);
     if (DEBUG) printf("throttle=%.2f\n", throttle);
-    if (DEBUG) printf("alpha_body=%.2f deg, alpha_eff=%.2f deg (incidence=%.1f), C_L=%.3f\n",
-                      alpha * 180.0f / PI, alpha_effective * 180.0f / PI, WING_INCIDENCE * 180.0f / PI, C_L);
+    if (DEBUG) printf("alpha_body=%.2f deg, alpha_eff=%.2f deg (inc=%.1f, a0=%.1f), C_L=%.3f\n",
+                      alpha * 180.0f / PI, alpha_effective * 180.0f / PI,
+                      WING_INCIDENCE * 180.0f / PI, ALPHA_ZERO * 180.0f / PI, C_L);
     if (DEBUG) printf("thrust=%.0f N, lift=%.0f N, drag=%.0f N, weight=%.0f N\n", T_mag, L_mag, D_mag, MASS * GRAVITY);
     if (DEBUG) printf("g_force=%.2f g (limit=8)\n", g_force);
 

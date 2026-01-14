@@ -513,3 +513,68 @@ void c_close(Dogfight *env) {
         env->client = NULL;
     }
 }
+
+// Force exact game state for testing. Defaults shown in comments are applied in Python.
+void force_state(
+    Dogfight *env,
+    float p_px,        // = 0.0f, player pos X
+    float p_py,        // = 0.0f, player pos Y
+    float p_pz,        // = 1000.0f, player pos Z
+    float p_vx,        // = 150.0f, player vel X (m/s)
+    float p_vy,        // = 0.0f, player vel Y
+    float p_vz,        // = 0.0f, player vel Z
+    float p_ow,        // = 1.0f, player orientation quat W
+    float p_ox,        // = 0.0f, player orientation quat X
+    float p_oy,        // = 0.0f, player orientation quat Y
+    float p_oz,        // = 0.0f, player orientation quat Z
+    float p_throttle,  // = 1.0f, player throttle [0,1]
+    float o_px,        // = -9999.0f (auto: 400m ahead), opponent pos X
+    float o_py,        // = -9999.0f (auto), opponent pos Y
+    float o_pz,        // = -9999.0f (auto), opponent pos Z
+    float o_vx,        // = -9999.0f (auto: match player), opponent vel X
+    float o_vy,        // = -9999.0f (auto), opponent vel Y
+    float o_vz,        // = -9999.0f (auto), opponent vel Z
+    float o_ow,        // = -9999.0f (auto: match player), opponent ori W
+    float o_ox,        // = -9999.0f (auto), opponent ori X
+    float o_oy,        // = -9999.0f (auto), opponent ori Y
+    float o_oz,        // = -9999.0f (auto), opponent ori Z
+    int tick           // = 0, environment tick
+) {
+    // Player state
+    env->player.pos = vec3(p_px, p_py, p_pz);
+    env->player.vel = vec3(p_vx, p_vy, p_vz);
+    env->player.ori = quat(p_ow, p_ox, p_oy, p_oz);
+    quat_normalize(&env->player.ori);
+    env->player.throttle = p_throttle;
+    env->player.fire_cooldown = 0;
+
+    // Opponent position: auto = 400m ahead of player
+    if (o_px < -9000.0f) {
+        Vec3 fwd = quat_rotate(env->player.ori, vec3(1, 0, 0));
+        env->opponent.pos = add3(env->player.pos, mul3(fwd, 400.0f));
+    } else {
+        env->opponent.pos = vec3(o_px, o_py, o_pz);
+    }
+
+    // Opponent velocity: auto = match player
+    if (o_vx < -9000.0f) {
+        env->opponent.vel = env->player.vel;
+    } else {
+        env->opponent.vel = vec3(o_vx, o_vy, o_vz);
+    }
+
+    // Opponent orientation: auto = match player
+    if (o_ow < -9000.0f) {
+        env->opponent.ori = env->player.ori;
+    } else {
+        env->opponent.ori = quat(o_ow, o_ox, o_oy, o_oz);
+        quat_normalize(&env->opponent.ori);
+    }
+    env->opponent.fire_cooldown = 0;
+
+    // Environment state
+    env->tick = tick;
+    env->episode_return = 0.0f;
+
+    compute_observations(env);
+}

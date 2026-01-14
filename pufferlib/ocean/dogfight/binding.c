@@ -1,6 +1,21 @@
 #include "dogfight.h"
 
 #define Env Dogfight
+
+// We need Python.h for the forward declaration, but env_binding.h includes it
+// So we'll put the forward decl and MY_METHODS after including env_binding.h
+// but we need MY_METHODS defined before... Let's restructure.
+
+// Include Python first to get PyObject type
+#include <Python.h>
+
+// Forward declare our custom method
+static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwargs);
+
+// Register custom methods before including the template
+#define MY_METHODS \
+    {"env_force_state", (PyCFunction)env_force_state, METH_VARARGS | METH_KEYWORDS, "Force environment state"}
+
 #include "../env_binding.h"
 
 static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
@@ -19,4 +34,89 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "shots_hit", log->shots_hit);
     assign_to_dict(dict, "n", log->n);
     return 0;
+}
+
+// Helper to get float from kwargs with default
+static float get_float(PyObject *kwargs, const char *key, float default_val) {
+    if (!kwargs) return default_val;
+    PyObject *val = PyDict_GetItemString(kwargs, key);
+    if (!val) return default_val;
+    if (PyFloat_Check(val)) return (float)PyFloat_AsDouble(val);
+    if (PyLong_Check(val)) return (float)PyLong_AsLong(val);
+    return default_val;
+}
+
+// Helper to get int from kwargs with default
+static int get_int(PyObject *kwargs, const char *key, int default_val) {
+    if (!kwargs) return default_val;
+    PyObject *val = PyDict_GetItemString(kwargs, key);
+    if (!val) return default_val;
+    if (PyLong_Check(val)) return (int)PyLong_AsLong(val);
+    if (PyFloat_Check(val)) return (int)PyFloat_AsDouble(val);
+    return default_val;
+}
+
+// Force state wrapper - unpacks kwargs and calls C function
+static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwargs) {
+    // First arg is env handle
+    if (PyTuple_Size(args) != 1) {
+        PyErr_SetString(PyExc_TypeError, "env_force_state requires 1 positional arg (env handle)");
+        return NULL;
+    }
+
+    Env* env = unpack_env(args);
+    if (!env) return NULL;
+
+    // Extract all parameters with defaults
+    // Player position
+    float p_px = get_float(kwargs, "p_px", 0.0f);
+    float p_py = get_float(kwargs, "p_py", 0.0f);
+    float p_pz = get_float(kwargs, "p_pz", 1000.0f);
+
+    // Player velocity
+    float p_vx = get_float(kwargs, "p_vx", 150.0f);
+    float p_vy = get_float(kwargs, "p_vy", 0.0f);
+    float p_vz = get_float(kwargs, "p_vz", 0.0f);
+
+    // Player orientation (identity quat = wings level, flying +X)
+    float p_ow = get_float(kwargs, "p_ow", 1.0f);
+    float p_ox = get_float(kwargs, "p_ox", 0.0f);
+    float p_oy = get_float(kwargs, "p_oy", 0.0f);
+    float p_oz = get_float(kwargs, "p_oz", 0.0f);
+
+    // Player throttle
+    float p_throttle = get_float(kwargs, "p_throttle", 1.0f);
+
+    // Opponent position (-9999 = auto: 400m ahead)
+    float o_px = get_float(kwargs, "o_px", -9999.0f);
+    float o_py = get_float(kwargs, "o_py", -9999.0f);
+    float o_pz = get_float(kwargs, "o_pz", -9999.0f);
+
+    // Opponent velocity (-9999 = auto: match player)
+    float o_vx = get_float(kwargs, "o_vx", -9999.0f);
+    float o_vy = get_float(kwargs, "o_vy", -9999.0f);
+    float o_vz = get_float(kwargs, "o_vz", -9999.0f);
+
+    // Opponent orientation (-9999 = auto: match player)
+    float o_ow = get_float(kwargs, "o_ow", -9999.0f);
+    float o_ox = get_float(kwargs, "o_ox", -9999.0f);
+    float o_oy = get_float(kwargs, "o_oy", -9999.0f);
+    float o_oz = get_float(kwargs, "o_oz", -9999.0f);
+
+    // Environment tick
+    int tick = get_int(kwargs, "tick", 0);
+
+    // Call the C function
+    force_state(env,
+        p_px, p_py, p_pz,
+        p_vx, p_vy, p_vz,
+        p_ow, p_ox, p_oy, p_oz,
+        p_throttle,
+        o_px, o_py, o_pz,
+        o_vx, o_vy, o_vz,
+        o_ow, o_ox, o_oy, o_oz,
+        tick
+    );
+
+    Py_RETURN_NONE;
 }

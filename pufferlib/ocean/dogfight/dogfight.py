@@ -37,9 +37,9 @@ class Dogfight(pufferlib.PufferEnv):
         super().__init__(buf)
         self.actions = self.actions.astype(np.float32)  # REQUIRED for continuous
 
-        c_envs = []
+        self._env_handles = []
         for env_num in range(num_envs):
-            c_envs.append(binding.env_init(
+            handle = binding.env_init(
                 self.observations[env_num:(env_num+1)],
                 self.actions[env_num:(env_num+1)],
                 self.rewards[env_num:(env_num+1)],
@@ -48,9 +48,10 @@ class Dogfight(pufferlib.PufferEnv):
                 env_num,
                 report_interval=self.report_interval,
                 max_steps=max_steps,
-            ))
+            )
+            self._env_handles.append(handle)
 
-        self.c_envs = binding.vectorize(*c_envs)
+        self.c_envs = binding.vectorize(*self._env_handles)
 
     def reset(self, seed=None):
         self.tick = 0
@@ -76,6 +77,55 @@ class Dogfight(pufferlib.PufferEnv):
 
     def close(self):
         binding.vec_close(self.c_envs)
+
+    def force_state(
+        self,
+        env_idx=0,
+        player_pos=None,       # (x, y, z) tuple, default (0, 0, 1000)
+        player_vel=None,       # (vx, vy, vz) tuple, default (150, 0, 0)
+        player_ori=None,       # (w, x, y, z) quaternion, default (1, 0, 0, 0) = wings level
+        player_throttle=1.0,   # [0, 1], default full throttle
+        opponent_pos=None,     # (x, y, z) or None for auto (400m ahead)
+        opponent_vel=None,     # (vx, vy, vz) or None for auto (match player)
+        opponent_ori=None,     # (w, x, y, z) or None for auto (match player)
+        tick=0,
+    ):
+        """
+        Force exact game state for testing/debugging.
+
+        Usage:
+            env.force_state(player_pos=(-1500, 0, 1000), player_vel=(150, 0, 0))
+            env.force_state(player_vel=(80, 0, 0))  # Just change velocity
+        """
+        # Build kwargs for C binding
+        kwargs = {'tick': tick, 'p_throttle': player_throttle}
+
+        # Player position
+        if player_pos is not None:
+            kwargs['p_px'], kwargs['p_py'], kwargs['p_pz'] = player_pos
+
+        # Player velocity
+        if player_vel is not None:
+            kwargs['p_vx'], kwargs['p_vy'], kwargs['p_vz'] = player_vel
+
+        # Player orientation
+        if player_ori is not None:
+            kwargs['p_ow'], kwargs['p_ox'], kwargs['p_oy'], kwargs['p_oz'] = player_ori
+
+        # Opponent position (None = auto)
+        if opponent_pos is not None:
+            kwargs['o_px'], kwargs['o_py'], kwargs['o_pz'] = opponent_pos
+
+        # Opponent velocity (None = auto)
+        if opponent_vel is not None:
+            kwargs['o_vx'], kwargs['o_vy'], kwargs['o_vz'] = opponent_vel
+
+        # Opponent orientation (None = auto)
+        if opponent_ori is not None:
+            kwargs['o_ow'], kwargs['o_ox'], kwargs['o_oy'], kwargs['o_oz'] = opponent_ori
+
+        # Call C binding with the specific env handle
+        binding.env_force_state(self._env_handles[env_idx], **kwargs)
 
 
 def test_performance(timeout=10, atn_cache=1024):
