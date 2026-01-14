@@ -7,6 +7,7 @@
 #include "ops.cuh"
 #include <cuda_fp16.h>
 #include <cuda_bf16.h>
+#include <curand_kernel.h>
 
 #include <cstdio>
 #include <cstdint>
@@ -1547,8 +1548,8 @@ __global__ void ppo_loss_forward_kernel(
     double v_loss_clipped = (v_clipped - ret) * (v_clipped - ret);
     double v_loss = 0.5f * fmax(v_loss_unclipped, v_loss_clipped);
 
-    // === Step 6: total sample loss ===
-    double thread_loss = pg_loss + vf_coef * v_loss - ent_coef * entropy;
+    // === Step 6: total sample loss (pre-divided by N*T for mean) ===
+    double thread_loss = (pg_loss + vf_coef * v_loss - ent_coef * entropy) / double(total_elements);
 
     // === Save for backward ===
     double* saved_row = saved_for_backward + idx * 5;
@@ -1560,7 +1561,7 @@ __global__ void ppo_loss_forward_kernel(
 
     // === Block-local reduction using shared memory ===
     int tid = threadIdx.x;
-    block_loss[tid] = thread_loss;
+    block_loss[tid] = float(thread_loss);
     __syncthreads();
 
     // Reduce within block using tree reduction
@@ -1892,3 +1893,138 @@ const char* get_last_error() {
 }
 
 } // extern "C"
+
+// ============================================================================
+// Fused sample_logits kernel: nan_to_num + log_softmax + multinomial + gather + value copy
+// Inference-only (no gradients needed)
+// Uses inline cuRAND to avoid separate torch::rand() kernel launch
+//
+// NOTE: This kernel supports strided (non-contiguous) logits/value input.
+// This is needed for fused logit+value decoder output where logits is a view
+// of a larger (B, V+A) tensor. The stride parameters handle this case
+// to avoid .contiguous() kernel launches.
+// ============================================================================
+
+// Single kernel that handles: nan_to_num, log_softmax, multinomial sampling, logprob gather, value copy
+// Input: logits (B, A) with row stride logits_stride, value (B, 1) with row stride value_stride, seed for RNG
+// Output: actions (B,) as float64, logprobs (B,), value_out (B,)
+// NOTE: offset is read from a pointer (not passed by value) so it works correctly with CUDA graphs.
+// The offset tensor is incremented with a CUDA op after this kernel, so each graph replay gets a new offset.
+template<typename T>
+__global__ void sample_logits_kernel(
+    double* __restrict__ actions,         // (B,) output - sampled action indices as float64
+    T* __restrict__ logprobs,             // (B,) output - log prob of sampled action
+    T* __restrict__ value_out,            // (B,) output - copied value (flattened)
+    const T* __restrict__ logits,         // (B, A) input - raw logits (may be non-contiguous)
+    const T* __restrict__ value,          // (B, 1) input - value from fused output (may be non-contiguous)
+    uint64_t seed,                        // RNG seed
+    const int64_t* __restrict__ offset_ptr, // RNG offset pointer (read at execution time for CUDA graph support)
+    int A,                                // number of actions
+    int B,                                // batch size
+    int logits_stride,                    // stride between rows (for non-contiguous logits from fused output)
+    int value_stride                      // stride between rows (for non-contiguous value from fused output)
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= B) return;
+
+    // Read offset at execution time (important for CUDA graph replay)
+    uint64_t offset = static_cast<uint64_t>(*offset_ptr);
+
+    int logits_base = idx * logits_stride;
+
+    // Step 1: Find max for numerical stability (with nan_to_num)
+    float max_val = -INFINITY;
+    for (int a = 0; a < A; ++a) {
+        float l = float(logits[logits_base + a]);
+        // nan_to_num: replace nan with 0
+        if (isnan(l)) l = 0.0f;
+        // clamp inf/-inf (pytorch defaults: neginf=-3.4028e+38, posinf=3.4028e+38)
+        if (isinf(l)) l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
+        max_val = fmaxf(max_val, l);
+    }
+
+    // Step 2: Compute logsumexp for log_softmax denominator
+    float sum_exp = 0.0f;
+    for (int a = 0; a < A; ++a) {
+        float l = float(logits[logits_base + a]);
+        if (isnan(l)) l = 0.0f;
+        if (isinf(l)) l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
+        sum_exp += expf(l - max_val);
+    }
+    float logsumexp = max_val + logf(sum_exp);
+
+    // Step 3: Generate random value using Philox RNG (fast, high quality)
+    curandStatePhilox4_32_10_t state;
+    curand_init(seed, idx, offset, &state);
+    float rand_val = curand_uniform(&state);
+
+    // Step 4: Multinomial sampling using inverse CDF
+    float cumsum = 0.0f;
+    int sampled_action = A - 1;  // default to last action
+
+    for (int a = 0; a < A; ++a) {
+        float l = float(logits[logits_base + a]);
+        if (isnan(l)) l = 0.0f;
+        if (isinf(l)) l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
+        float prob = expf(l - logsumexp);
+        cumsum += prob;
+        if (rand_val < cumsum) {
+            sampled_action = a;
+            break;
+        }
+    }
+
+    // Step 5: Gather log probability of sampled action
+    float sampled_logit = float(logits[logits_base + sampled_action]);
+    if (isnan(sampled_logit)) sampled_logit = 0.0f;
+    if (isinf(sampled_logit)) sampled_logit = (sampled_logit > 0) ? 3.4028e+38f : -3.4028e+38f;
+    float log_prob = sampled_logit - logsumexp;
+
+    // Write outputs (action as float64 for compatibility with continuous/discrete)
+    actions[idx] = double(sampled_action);
+    logprobs[idx] = T(log_prob);
+
+    // Copy value (fused to avoid separate elementwise kernel for strided->contiguous copy)
+    value_out[idx] = value[idx * value_stride];
+
+    // Increment RNG offset for next call (thread 0 only, fused to avoid separate kernel)
+    if (idx == 0) {
+        atomicAdd((unsigned long long*)offset_ptr, 1ULL);
+    }
+}
+
+template<typename T>
+void launch_sample_logits(
+    double* actions,
+    T* logprobs,
+    T* value_out,
+    const T* logits,
+    const T* value,
+    uint64_t seed,
+    const int64_t* offset_ptr,  // pointer to offset tensor (read at execution time for CUDA graphs)
+    int A,
+    int B,
+    int logits_stride,  // stride between rows (for non-contiguous logits from fused output)
+    int value_stride,   // stride between rows (for non-contiguous value from fused output)
+    cudaStream_t stream
+) {
+    int grid = grid_size(B);
+    sample_logits_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
+        actions,
+        logprobs,
+        value_out,
+        logits,
+        value,
+        seed,
+        offset_ptr,
+        A,
+        B,
+        logits_stride,
+        value_stride
+    );
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "sample_logits kernel error: %s\n", cudaGetErrorString(err));
+    }
+}
