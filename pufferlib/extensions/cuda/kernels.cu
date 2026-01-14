@@ -1550,7 +1550,7 @@ __global__ void ppo_loss_forward_kernel(
     double v_loss = 0.5f * fmax(v_loss_unclipped, v_loss_clipped);
 
     // === Step 6: total sample loss (pre-divided by N*T for mean) (pre-divided by N*T for mean) ===
-    double thread_loss = ((pg_loss + vf_coef * v_loss - ent_coef * entropy) / double(total_elements)) / double(total_elements);
+    double thread_loss = ((pg_loss + vf_coef * v_loss - ent_coef * entropy) / double(total_elements));
 
     // === Save for backward ===
     double* saved_row = saved_for_backward + idx * 5;
@@ -1562,7 +1562,7 @@ __global__ void ppo_loss_forward_kernel(
 
     // === Block-local reduction using shared memory ===
     int tid = threadIdx.x;
-    block_loss[tid] = float(float(thread_loss));
+    block_loss[tid] = float(thread_loss);
     __syncthreads();
 
     // Reduce within block using tree reduction
