@@ -375,3 +375,39 @@ Observations:
 - MAXIMALIST occasionally learns combat but inconsistently
 
 **Insight:** The pursuit reward shaping is too strong relative to kill rewards. Agents can achieve high return just by chasing without ever firing. The world-frame observations may make it harder to exploit this pattern because the agent can't "solve" pursuit as cleanly.
+
+---
+
+## Sweepable Rewards v2 (04dd0167)
+Date: 2026-01-14
+Commit: 04dd0167
+Change: Reward system overhaul - kill reward 10.0→1.0, all rewards sweepable via INI, perf metric for kill rate
+
+| Run | Episode Return | Episode Length | Kills | Perf | Accuracy |
+|-----|----------------|----------------|-------|------|----------|
+| 1   | -0.28          | 1155           | 1.18  | 0.706 | 1.3%    |
+| 2   | +43.03         | 1159           | 3.87  | 0.963 | 5.2%    |
+| 3   | +43.91         | 1152           | 5.57  | 0.988 | 6.3%    |
+| **Mean** | **+28.89** | **1155**       | **3.54** | **0.886** | **4.3%** |
+
+Changes:
+- Kill reward: 10.0 → 1.0 (fixed, not swept)
+- Hit reward: 1.0 → 0.5 (sweepable)
+- All shaping rewards now configurable via INI
+- NEW: `perf` metric = fraction of episodes with kills (0.0-1.0)
+- Episode-level kill/shot tracking
+
+**Comparison with Previous Best (Phase 5 Combat):**
+
+| Metric | Old (kill=10) | New (kill=1) | Change |
+|--------|---------------|--------------|--------|
+| Kills/ep | 0.19 | 3.54 | **+1763%** |
+| Accuracy | 1.6% | 4.3% | **+169%** |
+| Return | +23.44 | +28.89 | +23% |
+
+**Observations:**
+- **Massive improvement in kills** - 18x more kills per episode
+- 2/3 runs learned strong combat (perf > 0.96)
+- Run 1 weaker but still learned some shooting
+- Lower kill reward (1.0 vs 10.0) paradoxically improved learning
+- Simpler reward signal easier to optimize
