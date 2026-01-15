@@ -88,7 +88,7 @@ class Default(nn.Module):
             logits = self.decoder(hidden).split(self.action_nvec, dim=1)
         elif self.is_continuous:
             mean = self.decoder_mean(hidden)
-            logstd = self.decoder_logstd.expand_as(mean)
+            logstd = self.decoder_logstd.expand_as(mean).clamp(min=-20, max=2)
             std = torch.exp(logstd)
             logits = torch.distributions.Normal(mean, std)
         else:

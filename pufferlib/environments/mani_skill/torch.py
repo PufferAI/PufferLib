@@ -64,7 +64,7 @@ class FakePolicy(nn.Module):
         '''Decodes a batch of hidden states into (multi)discrete actions.
         Assumes no time dimension (handled by LSTM wrappers).'''
         mean = self.decoder_mean(hidden)
-        logstd = self.decoder_logstd.expand_as(mean)
+        logstd = self.decoder_logstd.expand_as(mean).clamp(min=-20, max=2)
         std = torch.exp(logstd)
         logits = torch.distributions.Normal(mean, std)
         values = self.value(hidden)

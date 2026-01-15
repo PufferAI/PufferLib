@@ -299,7 +299,7 @@ class Grid(nn.Module):
         value = self.value_fn(flat_hidden)
         if self.is_continuous:
             mean = self.decoder_mean(flat_hidden)
-            logstd = self.decoder_logstd.expand_as(mean)
+            logstd = self.decoder_logstd.expand_as(mean).clamp(min=-20, max=2)
             std = torch.exp(logstd)
             probs = torch.distributions.Normal(mean, std)
             batch = flat_hidden.shape[0]
@@ -433,7 +433,7 @@ class MOBA(nn.Module):
         value = self.value_fn(flat_hidden)
         if self.is_continuous:
             mean = self.decoder_mean(flat_hidden)
-            logstd = self.decoder_logstd.expand_as(mean)
+            logstd = self.decoder_logstd.expand_as(mean).clamp(min=-20, max=2)
             std = torch.exp(logstd)
             probs = torch.distributions.Normal(mean, std)
             batch = flat_hidden.shape[0]
@@ -893,7 +893,7 @@ class Drone(nn.Module):
             logits = self.decoder(hidden).split(self.action_nvec, dim=1)
         elif self.is_continuous:
             mean = self.decoder_mean(hidden)
-            logstd = self.decoder_logstd.expand_as(mean)
+            logstd = self.decoder_logstd.expand_as(mean).clamp(min=-20, max=2)
             std = torch.exp(logstd)
             logits = torch.distributions.Normal(mean, std)
         else:
