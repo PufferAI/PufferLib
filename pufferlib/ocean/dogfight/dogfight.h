@@ -53,12 +53,9 @@ static const int OBS_SIZES[OBS_SCHEME_COUNT] = {19, 21, 12, 17, 10, 43};
 typedef struct Log {
     float episode_return;
     float episode_length;
-    float score;
-    float perf;           // Kill rate (0-1): fraction of episodes with kills
-    float kills;
-    float deaths;
-    float shots_fired;
-    float shots_hit;
+    float score;           // 1.0 on kill, 0.0 on failure
+    float perf;            // 1.0 on kill, 0.0 on failure (binary success)
+    float shots_fired;     // Total shots for accuracy stats
     float n;
 } Log;
 
@@ -117,9 +114,8 @@ typedef struct Dogfight {
     // Reward configuration (sweepable)
     RewardConfig rcfg;
     // Episode-level tracking (reset each episode)
-    float episode_kills;
-    float episode_shots_fired;
-    float episode_shots_hit;
+    int kill;                   // 1 if killed this episode, 0 otherwise
+    float episode_shots_fired;  // For accuracy tracking
 } Dogfight;
 
 void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg) {
@@ -139,20 +135,16 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg) {
     // Reward configuration (copy from provided config)
     env->rcfg = *rcfg;
     // Episode tracking
-    env->episode_kills = 0.0f;
+    env->kill = 0;
     env->episode_shots_fired = 0.0f;
-    env->episode_shots_hit = 0.0f;
 }
 
 void add_log(Dogfight *env) {
     env->log.episode_return += env->episode_return;
     env->log.episode_length += (float)env->tick;
-    // PERF = 1.0 if got any kills this episode, 0.0 otherwise
-    env->log.perf += (env->episode_kills > 0) ? 1.0f : 0.0f;
-    // Accumulate combat stats from this episode
-    env->log.kills += env->episode_kills;
+    env->log.perf += env->kill ? 1.0f : 0.0f;
+    env->log.score += env->rewards[0];
     env->log.shots_fired += env->episode_shots_fired;
-    env->log.shots_hit += env->episode_shots_hit;
     env->log.n += 1.0f;
 }
 
@@ -544,10 +536,9 @@ void c_reset(Dogfight *env) {
     env->tick = 0;
     env->episode_return = 0.0f;
 
-    // Clear episode tracking counters
-    env->episode_kills = 0.0f;
+    // Clear episode tracking
+    env->kill = 0;
     env->episode_shots_fired = 0.0f;
-    env->episode_shots_hit = 0.0f;
 
     // Recompute gun cone trig (for curriculum: could vary gun_cone_angle here)
     env->cos_gun_cone = cosf(env->gun_cone_angle);
@@ -660,17 +651,15 @@ void c_step(Dogfight *env) {
         env->episode_shots_fired += 1.0f;
         if (DEBUG) printf("=== FIRED! ===\n");
 
-        // Check if hit
+        // Check if hit = kill = SUCCESS = terminal
         if (check_hit(p, o, env->cos_gun_cone)) {
-            env->episode_shots_hit += 1.0f;
-            reward += env->rcfg.hit;  // Hit reward (sweepable)
-            if (DEBUG) printf("*** HIT! +%.2f reward ***\n", env->rcfg.hit);
-
-            // Kill: respawn opponent, big reward
-            env->episode_kills += 1.0f;
-            reward += env->rcfg.kill;  // Kill reward (fixed at 1.0)
-            if (DEBUG) printf("*** KILL! +%.2f reward, episode kills=%.0f ***\n", env->rcfg.kill, env->episode_kills);
-            respawn_opponent(env);
+            if (DEBUG) printf("*** KILL! ***\n");
+            env->kill = 1;
+            env->rewards[0] = 1.0f;
+            env->terminals[0] = 1;
+            add_log(env);
+            c_reset(env);
+            return;
         } else {
             if (DEBUG) printf("MISS\n");
         }
@@ -752,10 +741,10 @@ void c_step(Dogfight *env) {
                p->pos.z < 0 || p->pos.z > WORLD_MAX_Z;
 
     if (oob || env->tick >= env->max_steps) {
-        if (DEBUG) printf("=== TERMINAL ===\n");
+        if (DEBUG) printf("=== TERMINAL (FAILURE) ===\n");
         if (DEBUG) printf("oob=%d (x=%.1f, y=%.1f, z=%.1f)\n", oob, p->pos.x, p->pos.y, p->pos.z);
         if (DEBUG) printf("max_steps=%d, tick=%d\n", env->max_steps, env->tick);
-        if (DEBUG) printf("episode_return=%.2f\n", env->episode_return);
+        env->rewards[0] = 0.0f;  // No reward on failure
         env->terminals[0] = 1;
         add_log(env);
         c_reset(env);
@@ -934,7 +923,7 @@ void c_render(Dogfight *env) {
     DrawText(TextFormat("Distance: %.0f m", dist_to_opp), 10, 100, 20, WHITE);
     DrawText(TextFormat("Tick: %d / %d", env->tick, env->max_steps), 10, 130, 20, WHITE);
     DrawText(TextFormat("Return: %.2f", env->episode_return), 10, 160, 20, WHITE);
-    DrawText(TextFormat("Kills: %.0f | Shots: %.0f/%.0f", env->log.kills, env->log.shots_hit, env->log.shots_fired), 10, 190, 20, YELLOW);
+    DrawText(TextFormat("Perf: %.1f%% | Shots: %.0f", env->log.perf / fmaxf(env->log.n, 1.0f) * 100.0f, env->log.shots_fired), 10, 190, 20, YELLOW);
 
     // Controls hint
     DrawText("Mouse drag: Orbit | Scroll: Zoom | ESC: Exit", 10, (int)env->client->height - 30, 16, GRAY);

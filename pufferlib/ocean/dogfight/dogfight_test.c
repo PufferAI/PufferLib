@@ -17,7 +17,15 @@ static Dogfight make_env(int max_steps) {
     env.rewards = rew_buf;
     env.terminals = term_buf;
     env.max_steps = max_steps;
-    init(&env);
+    // Default reward config
+    RewardConfig rcfg = {
+        .kill = 1.0f, .hit = 0.5f, .dist_scale = 0.0001f,
+        .closing_scale = 0.002f, .tail_scale = 0.05f,
+        .tracking = 0.05f, .firing_solution = 0.1f,
+        .alt_low = 0.0005f, .alt_high = 0.0002f, .stall = 0.002f,
+        .alt_min = 200.0f, .alt_max = 2500.0f, .speed_min = 50.0f,
+    };
+    init(&env, 0, &rcfg);
     return env;
 }
 
@@ -758,8 +766,12 @@ void test_trigger_fires() {
     Dogfight env = make_env(1000);
     c_reset(&env);
 
-    // Set up player with fire action
+    // Set up player far from opponent (won't hit)
+    env.player.pos = vec3(0, 0, 500);
+    env.player.ori = quat(1, 0, 0, 0);
     env.player.fire_cooldown = 0;
+    env.opponent.pos = vec3(1000, 0, 500);  // Far away, won't hit
+
     env.actions[4] = 1.0f;  // Trigger pulled
 
     // Step to process fire
@@ -767,7 +779,7 @@ void test_trigger_fires() {
 
     // Should have fired (cooldown set)
     assert(env.player.fire_cooldown == FIRE_COOLDOWN);
-    assert(env.log.shots_fired >= 1.0f);
+    assert(env.episode_shots_fired >= 1.0f);
 
     printf("test_trigger_fires PASS\n");
 }
@@ -776,15 +788,20 @@ void test_fire_cooldown() {
     Dogfight env = make_env(1000);
     c_reset(&env);
 
+    // Set up player far from opponent (won't hit)
+    env.player.pos = vec3(0, 0, 500);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.opponent.pos = vec3(1000, 0, 500);  // Far away, won't hit
+
     // Fire once
     env.player.fire_cooldown = 0;
     env.actions[4] = 1.0f;
     c_step(&env);
-    float shots_after_first = env.log.shots_fired;
+    float shots_after_first = env.episode_shots_fired;
 
     // Try to fire again immediately (should be blocked by cooldown)
     c_step(&env);
-    float shots_after_second = env.log.shots_fired;
+    float shots_after_second = env.episode_shots_fired;
 
     // Should not have fired again (still on cooldown)
     assert(shots_after_second == shots_after_first);
@@ -832,18 +849,16 @@ void test_hit_reward() {
 
     env.actions[4] = 1.0f;  // Fire
 
-    float reward_before = env.episode_return;
     c_step(&env);
-    float reward_after = env.episode_return;
 
-    // Should have gotten hit + kill reward (11.0 total)
-    float reward_gained = reward_after - reward_before;
-    assert(reward_gained > 10.0f);  // At least kill reward
+    // Kill = terminal with reward 1.0
+    assert(env.terminals[0] == 1);
+    assert(env.rewards[0] == 1.0f);
 
     printf("test_hit_reward PASS\n");
 }
 
-void test_kill_respawns_opponent() {
+void test_kill_terminates_episode() {
     Dogfight env = make_env(1000);
     c_reset(&env);
 
@@ -853,23 +868,21 @@ void test_kill_respawns_opponent() {
     env.player.fire_cooldown = 0;
     env.opponent.pos = vec3(200, 0, 500);
 
-    Vec3 old_opp_pos = env.opponent.pos;
     env.actions[4] = 1.0f;
 
     c_step(&env);
 
-    // Opponent should have respawned (different position)
-    Vec3 new_opp_pos = env.opponent.pos;
-    float dist_moved = norm3(sub3(new_opp_pos, old_opp_pos));
-    assert(dist_moved > 100.0f);  // Should have moved significantly
+    // Kill should terminate episode
+    assert(env.terminals[0] == 1);
 
-    // Episode should NOT have terminated
-    assert(env.terminals[0] == 0);
+    // Reward should be 1.0 (kill reward)
+    assert(env.rewards[0] == 1.0f);
 
-    // Kills should be tracked
-    assert(env.log.kills >= 1.0f);
+    // Perf should be tracked (1 kill in 1 episode = 1.0)
+    assert(env.log.perf >= 1.0f);
+    assert(env.log.n >= 1.0f);
 
-    printf("test_kill_respawns_opponent PASS\n");
+    printf("test_kill_terminates_episode PASS\n");
 }
 
 void test_combat_constants() {
@@ -929,7 +942,7 @@ int main() {
     test_fire_cooldown();
     test_cone_hit_detection();
     test_hit_reward();
-    test_kill_respawns_opponent();
+    test_kill_terminates_episode();
     test_combat_constants();
 
     printf("\nAll 36 tests PASS\n");
