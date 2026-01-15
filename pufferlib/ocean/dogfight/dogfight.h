@@ -54,8 +54,10 @@ typedef struct Log {
     float episode_return;
     float episode_length;
     float score;           // 1.0 on kill, 0.0 on failure
-    float perf;            // 1.0 on kill, 0.0 on failure (binary success)
-    float shots_fired;     // Total shots for accuracy stats
+    float perf;            // sweep metric (same as kills)
+    float kills;           // cumulative kills
+    float shots_fired;     // cumulative shots
+    float accuracy;        // kills / shots_fired * 100
     float n;
 } Log;
 
@@ -146,8 +148,10 @@ void add_log(Dogfight *env) {
     env->log.episode_return += env->episode_return;
     env->log.episode_length += (float)env->tick;
     env->log.perf += env->kill ? 1.0f : 0.0f;
+    env->log.kills += env->kill ? 1.0f : 0.0f;
     env->log.score += env->rewards[0];
     env->log.shots_fired += env->episode_shots_fired;
+    env->log.accuracy = (env->log.shots_fired > 0.0f) ? (env->log.kills / env->log.shots_fired * 100.0f) : 0.0f;
     env->log.n += 1.0f;
     if (DEBUG) printf("  log.perf=%.2f, log.shots_fired=%.0f, log.n=%.0f\n", env->log.perf, env->log.shots_fired, env->log.n);
 }
@@ -662,6 +666,7 @@ void c_step(Dogfight *env) {
             if (DEBUG) printf("*** KILL! ***\n");
             env->kill = 1;
             env->rewards[0] = 1.0f;
+            env->episode_return += 1.0f;
             env->terminals[0] = 1;
             add_log(env);
             c_reset(env);
