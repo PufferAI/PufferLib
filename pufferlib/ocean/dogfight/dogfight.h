@@ -140,12 +140,16 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg) {
 }
 
 void add_log(Dogfight *env) {
+    if (DEBUG) printf("=== ADD_LOG ===\n");
+    if (DEBUG) printf("  kill=%d, episode_return=%.2f, tick=%d\n", env->kill, env->episode_return, env->tick);
+    if (DEBUG) printf("  episode_shots_fired=%.0f, reward=%.2f\n", env->episode_shots_fired, env->rewards[0]);
     env->log.episode_return += env->episode_return;
     env->log.episode_length += (float)env->tick;
     env->log.perf += env->kill ? 1.0f : 0.0f;
     env->log.score += env->rewards[0];
     env->log.shots_fired += env->episode_shots_fired;
     env->log.n += 1.0f;
+    if (DEBUG) printf("  log.perf=%.2f, log.shots_fired=%.0f, log.n=%.0f\n", env->log.perf, env->log.shots_fired, env->log.n);
 }
 
 // Scheme 0: World frame observations (original baseline)
@@ -564,6 +568,7 @@ void c_reset(Dogfight *env) {
     env->opponent_ap.prev_bank_error = 0.0f;
 
     if (DEBUG) printf("=== RESET ===\n");
+    if (DEBUG) printf("kill=%d, episode_shots_fired=%.0f (now cleared)\n", env->kill, env->episode_shots_fired);
     if (DEBUG) printf("player_pos=(%.1f, %.1f, %.1f)\n", pos.x, pos.y, pos.z);
     if (DEBUG) printf("player_vel=(%.1f, %.1f, %.1f) speed=%.1f\n", vel.x, vel.y, vel.z, norm3(vel));
     if (DEBUG) printf("opponent_pos=(%.1f, %.1f, %.1f)\n", opp_pos.x, opp_pos.y, opp_pos.z);
@@ -646,10 +651,11 @@ void c_step(Dogfight *env) {
     if (o->fire_cooldown > 0) o->fire_cooldown--;
 
     // Player fires: action[4] > 0.5 and cooldown ready
+    if (DEBUG) printf("trigger=%.3f, cooldown=%d\n", env->actions[4], p->fire_cooldown);
     if (env->actions[4] > 0.5f && p->fire_cooldown == 0) {
         p->fire_cooldown = FIRE_COOLDOWN;
         env->episode_shots_fired += 1.0f;
-        if (DEBUG) printf("=== FIRED! ===\n");
+        if (DEBUG) printf("=== FIRED! episode_shots_fired=%.0f ===\n", env->episode_shots_fired);
 
         // Check if hit = kill = SUCCESS = terminal
         if (check_hit(p, o, env->cos_gun_cone)) {
@@ -661,7 +667,8 @@ void c_step(Dogfight *env) {
             c_reset(env);
             return;
         } else {
-            if (DEBUG) printf("MISS\n");
+            if (DEBUG) printf("MISS (dist=%.1f, in_cone=%d)\n", norm3(sub3(o->pos, p->pos)),
+                check_hit(p, o, env->cos_gun_cone));
         }
     }
 

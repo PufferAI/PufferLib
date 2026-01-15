@@ -411,3 +411,39 @@ Changes:
 - Run 1 weaker but still learned some shooting
 - Lower kill reward (1.0 vs 10.0) paradoxically improved learning
 - Simpler reward signal easier to optimize
+
+---
+
+## Terminal on Kill (a31d1dc7)
+Date: 2026-01-15
+Commit: a31d1dc7
+
+### Major Changes
+1. **Terminal on kill**: Episode ends immediately when player kills opponent (was: respawn and continue)
+2. **Binary perf metric**: `perf = env->kill ? 1.0 : 0.0` per episode (was: cumulative kills / episodes)
+3. **Simplified Log struct**: Removed `kills`, `deaths`, `shots_hit` (redundant with terminal-on-kill)
+4. **Kill flag on env**: Added `env->kill` to track success per episode
+5. **Score = terminal reward**: `score = rewards[0]` (1.0 on kill, 0.0 on failure)
+
+### Results
+
+| Run | Episode Return | Episode Length | Perf | Shots/Ep |
+|-----|----------------|----------------|------|----------|
+| 1   | +120.65        | 1102           | 0.002 | 0.01    |
+| 2   | +121.18        | 1264           | 0.002 | 0.01    |
+| 3   | +76.90         | 1232           | 0.009 | 0.04    |
+| **Mean** | **+106.24** | **1199**      | **0.004** | **0.02** |
+
+### Comparison with Previous (Sweepable Rewards v2)
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Perf | 0.886 | 0.004 | -99.5% |
+| Shots/ep | 74.4 | 0.02 | -99.97% |
+| Episode Return | +28.89 | +106.24 | +268% |
+
+### Observations
+- Agent learned to NOT fire - perf dropped from 88.6% to 0.4%
+- Very few shots fired (0.01-0.04 per episode vs 74 before)
+- High return comes from pursuit shaping, not combat
+- Needs investigation: DEBUG printf, check miss penalty, verify shots_fired tracking
