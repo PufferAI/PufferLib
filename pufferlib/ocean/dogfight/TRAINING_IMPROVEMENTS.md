@@ -204,12 +204,12 @@ env->observations[i++] = dist / GUN_RANGE;
 
 2. **If still struggling**:
    - [ ] Widen gun cone temporarily
-   - [ ] Add aim_dot and distance observations
-   - [ ] Run benchmark
+   - [x] Add aim_dot and distance observations → **TESTED** in obs_scheme sweep (schemes 1-5 include aim helpers, but WORLD_FRAME scheme 0 still best - see OBSERVATION_EXPERIMENTS.md)
+   - [x] Run benchmark
 
 3. **For polish**:
-   - [ ] Add target behavior modes
-   - [ ] Implement curriculum
+   - [x] Add target behavior modes → **DONE** autopilot system with 7 modes
+   - [x] Implement curriculum → **DONE** mode_weights for curriculum learning
 
 ---
 

@@ -24,27 +24,7 @@ static PyObject* env_get_autopilot_mode(PyObject* self, PyObject* args);
     {"vec_set_mode_weights", (PyCFunction)vec_set_mode_weights, METH_VARARGS | METH_KEYWORDS, "Set mode weights for all envs"}, \
     {"env_get_autopilot_mode", (PyCFunction)env_get_autopilot_mode, METH_VARARGS, "Get current autopilot mode"}
 
-#include "../env_binding.h"
-
-static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
-    env->max_steps = unpack(kwargs, "max_steps");
-    init(env);
-    return 0;
-}
-
-static int my_log(PyObject *dict, Log *log) {
-    assign_to_dict(dict, "episode_return", log->episode_return);
-    assign_to_dict(dict, "episode_length", log->episode_length);
-    assign_to_dict(dict, "score", log->score);
-    assign_to_dict(dict, "kills", log->kills);
-    assign_to_dict(dict, "deaths", log->deaths);
-    assign_to_dict(dict, "shots_fired", log->shots_fired);
-    assign_to_dict(dict, "shots_hit", log->shots_hit);
-    assign_to_dict(dict, "n", log->n);
-    return 0;
-}
-
-// Helper to get float from kwargs with default
+// Helper to get float from kwargs with default (before env_binding.h since my_init uses it)
 static float get_float(PyObject *kwargs, const char *key, float default_val) {
     if (!kwargs) return default_val;
     PyObject *val = PyDict_GetItemString(kwargs, key);
@@ -62,6 +42,27 @@ static int get_int(PyObject *kwargs, const char *key, int default_val) {
     if (PyLong_Check(val)) return (int)PyLong_AsLong(val);
     if (PyFloat_Check(val)) return (int)PyFloat_AsDouble(val);
     return default_val;
+}
+
+#include "../env_binding.h"
+
+static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
+    env->max_steps = unpack(kwargs, "max_steps");
+    int obs_scheme = get_int(kwargs, "obs_scheme", 0);  // Default to world frame
+    init(env, obs_scheme);
+    return 0;
+}
+
+static int my_log(PyObject *dict, Log *log) {
+    assign_to_dict(dict, "episode_return", log->episode_return);
+    assign_to_dict(dict, "episode_length", log->episode_length);
+    assign_to_dict(dict, "score", log->score);
+    assign_to_dict(dict, "kills", log->kills);
+    assign_to_dict(dict, "deaths", log->deaths);
+    assign_to_dict(dict, "shots_fired", log->shots_fired);
+    assign_to_dict(dict, "shots_hit", log->shots_hit);
+    assign_to_dict(dict, "n", log->n);
+    return 0;
 }
 
 // Force state wrapper - unpacks kwargs and calls C function

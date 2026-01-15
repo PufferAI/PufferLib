@@ -51,19 +51,18 @@ Invalid mode values (e.g., `mode=99`) silently become AP_STRAIGHT.
 
 ## Curriculum Learning Gaps
 
-### Mode Weights for Non-Uniform Selection
-Currently AP_RANDOM picks uniformly. Need weighted selection for curriculum.
-
-```c
-// Needed in AutopilotState:
-float mode_weights[AP_COUNT];
+### ~~Mode Weights for Non-Uniform Selection~~ DONE (0a1c2e6d)
+```python
+env.set_mode_weights(level=0.5, turn_left=0.25, turn_right=0.25, climb=0.0, descend=0.0)
 ```
 
 **Tasks:**
-- [ ] Add `mode_weights` array to AutopilotState
-- [ ] Implement weighted random selection in `autopilot_randomize()`
-- [ ] Add Python API: `set_autopilot(mode_weights={...})`
-- [ ] Default weights = uniform
+- [x] Add `mode_weights` array to AutopilotState
+- [x] Implement weighted random selection in `autopilot_randomize()`
+- [x] Add Python API: `set_mode_weights()`
+- [x] Default weights = uniform
+- [x] Add `get_autopilot_mode()` for testing/debugging
+- [x] Add unit test in test_flight.py
 
 ### Per-Episode Parameter Variance
 Bank angle and climb rate are fixed at `set_autopilot()` time.
@@ -107,12 +106,12 @@ Currently autopilot only controls opponent. test_flight.py tests player with Pyt
 - [ ] Migrate test_flight.py PID tests to use C autopilot
 
 ### Query Autopilot State
-No way to verify autopilot mode from Python.
+~~No way to verify autopilot mode from Python.~~ Partial (0a1c2e6d)
 
 **Tasks:**
-- [ ] Add `get_autopilot_mode()` C binding
-- [ ] Return current mode, bank, climb_rate, etc.
-- [ ] Add to Python wrapper
+- [x] Add `get_autopilot_mode()` C binding
+- [ ] Return current mode, bank, climb_rate, etc. (only mode implemented)
+- [x] Add to Python wrapper
 
 ---
 
@@ -166,7 +165,7 @@ First step after reset may have derivative spike.
 ## Priority Order
 
 1. ~~**High:** Vectorized set_autopilot~~ DONE (80bcf31e)
-2. **High:** Mode weights (core curriculum feature)
+2. ~~**High:** Mode weights (core curriculum feature)~~ DONE (0a1c2e6d)
 3. **Medium:** Per-episode parameter variance
 4. **Medium:** Player autopilot for tests
 5. **Low:** Additional maneuvers

@@ -200,3 +200,178 @@ Observations:
 - Performance consistent with baseline (+34.97 → +44.47, within variance)
 - **No regression** - vectorized API adds no overhead during training
 - Unblocks multi-env curriculum learning (no more N Python->C calls)
+
+---
+
+## Mode Weights for Curriculum (0a1c2e6d)
+Date: 2026-01-14
+Commit: 0a1c2e6d
+Change: Add weighted random mode selection for curriculum learning
+
+| Run | Episode Return | Episode Length | Kills | Shots Hit/Fired |
+|-----|----------------|----------------|-------|-----------------|
+| 1   | +41.15         | 1139           | 0.36  | 0.36/11.0       |
+| 2   | +53.82         | 1149           | 0.46  | 0.46/7.8        |
+| 3   | +52.25         | 1133           | 0.45  | 0.45/10.2       |
+| **Mean** | **+49.07** | **1140**       | **0.42** | **0.42/9.7** |
+
+Changes:
+- autopilot.h: Added mode_weights[AP_COUNT] array, weighted random selection in autopilot_randomize()
+- autopilot.h: Added separate LCG RNG (rng_state) to avoid srand() interference from vec_reset
+- binding.c: Added vec_set_mode_weights(), env_get_autopilot_mode() bindings
+- dogfight.py: Added set_mode_weights(), get_autopilot_mode() methods
+- test_flight.py: Added test_mode_weights() unit test
+
+Observations:
+- Performance consistent with baseline (+44.47 → +49.07, within variance)
+- **No regression** - mode weights infrastructure has negligible overhead
+- Fixed RNG bug: autopilot now uses own LCG instead of shared rand() (was always selecting same mode)
+- Ready for curriculum: `env.set_mode_weights(level=0.8, turn_left=0.1, turn_right=0.1)` to bias easy modes
+
+---
+
+## Observation Scheme Sweep
+
+### Scheme 0: WORLD_FRAME (Baseline)
+Date: 2026-01-14
+Config: obs_scheme = 0
+Observations: 19 (player pos/vel/ori/up + world-frame rel_pos/vel)
+
+| Run | Episode Return | Episode Length | Kills | Shots Hit/Fired |
+|-----|----------------|----------------|-------|-----------------|
+| 1   | +18.22         | 1128           | 0.20  | 0.20/10.1       |
+| 2   | +19.71         | 1135           | 0.23  | 0.23/10.5       |
+| 3   | +52.98         | 1139           | 0.46  | 0.46/8.0        |
+| **Mean** | **+30.30** | **1134**       | **0.30** | **0.30/9.5** |
+
+Observations:
+- High variance between runs (18-53 return)
+- Baseline for comparison with body-frame and angles schemes
+
+---
+
+### Scheme 1: BODY_FRAME
+Date: 2026-01-14
+Config: obs_scheme = 1
+Observations: 21 (body-frame rel_pos/vel + aim_dot + dist_norm)
+
+| Run | Episode Return | Episode Length | Kills | Shots Hit/Fired |
+|-----|----------------|----------------|-------|-----------------|
+| 1   | +50.12         | 1205           | 0.14  | 0.14/1.2        |
+| 2   | +21.95         | 1292           | 0.02  | 0.02/0.5        |
+| 3   | -5.26          | 1258           | 0.19  | 0.19/8.4        |
+| **Mean** | **+22.27** | **1252**       | **0.12** | **0.12/3.4** |
+
+Observations:
+- **Worse than WORLD_FRAME** (+22.27 vs +30.30)
+- Agent fires much less often (3.4 shots vs 9.5)
+- Fewer kills despite aim helpers (0.12 vs 0.30)
+- Higher variance - body-frame transform may confuse learning
+
+---
+
+### Scheme 2: ANGLES
+Date: 2026-01-14
+Config: obs_scheme = 2
+Observations: 12 (pos + speed + euler angles + azimuth/elevation/dist + closing_rate + opp_heading)
+
+| Run | Episode Return | Episode Length | Kills | Shots Hit/Fired |
+|-----|----------------|----------------|-------|-----------------|
+| 1   | +163.78        | 1198           | 0.01  | 0.01/0.02       |
+| 2   | +71.56         | 1298           | 0.31  | 0.31/4.9        |
+| 3   | +151.36        | 1263           | 0.01  | 0.01/0.06       |
+| **Mean** | **+128.90** | **1253**      | **0.11** | **0.11/1.7** |
+
+Observations:
+- **Highest return** but misleading - agent exploits pursuit shaping without shooting
+- 2 of 3 runs learned to not fire at all (0.02 and 0.06 shots)
+- Only run 2 learned combat (0.31 kills)
+- Smaller obs space (12) may lack info needed to learn trigger timing
+
+---
+
+### Observation Scheme Summary
+
+| Scheme | Obs Size | Mean Return | Mean Kills | Shots/Ep | Notes |
+|--------|----------|-------------|------------|----------|-------|
+| 0: WORLD_FRAME | 19 | +30.30 | 0.30 | 9.5 | **Best combat learning** |
+| 1: BODY_FRAME | 21 | +22.27 | 0.12 | 3.4 | Worse than baseline |
+| 2: ANGLES | 12 | +128.90 | 0.11 | 1.7 | Exploits pursuit reward |
+
+---
+
+### Scheme 3: CONTROL_ERROR
+Date: 2026-01-14
+Config: obs_scheme = 3
+Observations: 17 (player state + pitch/yaw/roll errors to target + closing_rate + opp_heading)
+
+| Run | Episode Return | Episode Length | Kills | Shots Hit/Fired |
+|-----|----------------|----------------|-------|-----------------|
+| 1   | +165.98        | 1233           | 0.00  | 0.00/0.00       |
+| 2   | +167.76        | 1238           | 0.00  | 0.00/0.00       |
+| 3   | +165.45        | 1245           | 0.00  | 0.00/0.01       |
+| **Mean** | **+166.40** | **1239**      | **0.00** | **0.00/0.00** |
+
+Observations:
+- **Highest return** but completely exploits pursuit reward
+- Agent learned to not fire at all (0 shots across all runs)
+- Control error obs may be too "solved" - agent just follows target
+
+---
+
+### Scheme 4: REALISTIC
+Date: 2026-01-14
+Config: obs_scheme = 4
+Observations: 10 (airspeed/altitude/pitch/roll + gunsight az/el/size + aspect/horizon/dist)
+
+| Run | Episode Return | Episode Length | Kills | Shots Hit/Fired |
+|-----|----------------|----------------|-------|-----------------|
+| 1   | +174.53        | 1159           | 0.00  | 0.00/0.01       |
+| 2   | +171.96        | 1174           | 0.00  | 0.00/0.01       |
+| 3   | +158.68        | 1252           | 0.00  | 0.00/0.01       |
+| **Mean** | **+168.39** | **1195**      | **0.00** | **0.00/0.01** |
+
+Observations:
+- **Very high return** but no combat at all
+- Smallest network (2.2K params) but same exploitation pattern
+- Missing world position may prevent learning proper pursuit
+
+---
+
+### Scheme 5: MAXIMALIST
+Date: 2026-01-14
+Config: obs_scheme = 5
+Observations: 43 (everything: world+body velocities, quaternion+euler, world+body rel_pos/vel, angles, etc.)
+
+| Run | Episode Return | Episode Length | Kills | Shots Hit/Fired |
+|-----|----------------|----------------|-------|-----------------|
+| 1   | +90.95         | 1279           | 0.04  | 0.04/0.10       |
+| 2   | +66.94         | 1167           | 0.31  | 0.31/2.1        |
+| 3   | +92.29         | 1219           | 0.04  | 0.04/0.11       |
+| **Mean** | **+83.39** | **1222**       | **0.13** | **0.13/0.8** |
+
+Observations:
+- Run 2 learned combat (0.31 kills) - only non-WORLD_FRAME scheme to do so reliably
+- Lower return than pursuit-exploiting schemes but more combat
+- Largest network (6.4K params) - may need more training time
+
+---
+
+### Final Observation Scheme Summary
+
+| Scheme | Obs Size | Params | Mean Return | Mean Kills | Shots/Ep | Combat? |
+|--------|----------|--------|-------------|------------|----------|---------|
+| 0: WORLD_FRAME | 19 | 3.3K | +30.30 | **0.30** | 9.5 | **YES** |
+| 1: BODY_FRAME | 21 | 3.6K | +22.27 | 0.12 | 3.4 | Weak |
+| 2: ANGLES | 12 | 2.4K | +128.90 | 0.11 | 1.7 | No |
+| 3: CONTROL_ERROR | 17 | 3.1K | +166.40 | 0.00 | 0.0 | No |
+| 4: REALISTIC | 10 | 2.2K | +168.39 | 0.00 | 0.0 | No |
+| 5: MAXIMALIST | 43 | 6.4K | +83.39 | 0.13 | 0.8 | 1/3 runs |
+
+**Conclusion:** WORLD_FRAME (scheme 0) is the best observation representation for learning combat:
+- Only scheme where all 3 runs learned to fire consistently
+- Best kill rate (0.30 kills/episode)
+- The "engineered" schemes (ANGLES, CONTROL_ERROR, REALISTIC) all exploit pursuit reward without learning to shoot
+- MAXIMALIST occasionally learns combat but inconsistently
+
+**Insight:** The pursuit reward shaping is too strong relative to kill rewards. Agents can achieve high return just by chasing without ever firing. The world-frame observations may make it harder to exploit this pattern because the agent can't "solve" pursuit as cleanly.

@@ -16,6 +16,17 @@ class AutopilotMode:
     RANDOM = 6       # Random mode selection at reset
 
 
+# Observation sizes by scheme (must match C OBS_SIZES in dogfight.h)
+OBS_SIZES = {
+    0: 19,  # WORLD_FRAME: player(13) + rel_pos(3) + rel_vel(3)
+    1: 21,  # BODY_FRAME: same + aim_dot(1) + dist_norm(1)
+    2: 12,  # ANGLES: pos(3) + speed(1) + euler(3) + target_angles(4) + opp(1)
+    3: 17,  # CONTROL_ERROR: player(11) + control_errors(4) + target(2)
+    4: 10,  # REALISTIC: instruments(4) + gunsight(3) + visual(3)
+    5: 43,  # MAXIMALIST: everything combined
+}
+
+
 class Dogfight(pufferlib.PufferEnv):
     def __init__(
         self,
@@ -25,12 +36,15 @@ class Dogfight(pufferlib.PufferEnv):
         buf=None,
         seed=42,
         max_steps=3000,
+        obs_scheme=0,
     ):
-        # player(13) + rel_pos(3) + rel_vel(3) = 19
+        # Observation size depends on scheme
+        obs_size = OBS_SIZES.get(obs_scheme, 19)
+        self.obs_scheme = obs_scheme
         self.single_observation_space = gymnasium.spaces.Box(
             low=-1,
             high=1,
-            shape=(19,),
+            shape=(obs_size,),
             dtype=np.float32,
         )
 
@@ -59,6 +73,7 @@ class Dogfight(pufferlib.PufferEnv):
                 env_num,
                 report_interval=self.report_interval,
                 max_steps=max_steps,
+                obs_scheme=obs_scheme,
             )
             self._env_handles.append(handle)
 
