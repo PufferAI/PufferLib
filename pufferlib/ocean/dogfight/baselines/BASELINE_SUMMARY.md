@@ -177,3 +177,26 @@ Observations:
 - **No regression** - autopilot infrastructure has negligible overhead
 - Autopilot disabled by default (AP_STRAIGHT = old behavior)
 - Ready for curriculum: call `env.set_autopilot(mode=AutopilotMode.RANDOM)` to enable
+
+---
+
+## Vectorized set_autopilot (80bcf31e)
+Date: 2026-01-14
+Commit: 80bcf31e
+Change: Add vec_set_autopilot() C binding; set_autopilot(env_idx=None) sets all envs in one call
+
+| Run | Episode Return | Episode Length | Kills | Shots Hit/Fired |
+|-----|----------------|----------------|-------|-----------------|
+| 1   | +45.37         | 1153           | 0.47  | 0.47/10.6       |
+| 2   | +51.04         | 1140           | 0.46  | 0.46/11.2       |
+| 3   | +37.00         | 1110           | 0.35  | 0.35/10.8       |
+| **Mean** | **+44.47** | **1134**       | **0.43** | **0.43/10.9** |
+
+Changes:
+- binding.c: Added vec_set_autopilot() for batch autopilot configuration
+- dogfight.py: set_autopilot(env_idx=None) now sets all envs in one C call
+
+Observations:
+- Performance consistent with baseline (+34.97 → +44.47, within variance)
+- **No regression** - vectorized API adds no overhead during training
+- Unblocks multi-env curriculum learning (no more N Python->C calls)

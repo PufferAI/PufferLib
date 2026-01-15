@@ -13,12 +13,16 @@
 static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* env_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* vec_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs);
+static PyObject* vec_set_mode_weights(PyObject* self, PyObject* args, PyObject* kwargs);
+static PyObject* env_get_autopilot_mode(PyObject* self, PyObject* args);
 
 // Register custom methods before including the template
 #define MY_METHODS \
     {"env_force_state", (PyCFunction)env_force_state, METH_VARARGS | METH_KEYWORDS, "Force environment state"}, \
     {"env_set_autopilot", (PyCFunction)env_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set opponent autopilot mode"}, \
-    {"vec_set_autopilot", (PyCFunction)vec_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set autopilot for all envs"}
+    {"vec_set_autopilot", (PyCFunction)vec_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set autopilot for all envs"}, \
+    {"vec_set_mode_weights", (PyCFunction)vec_set_mode_weights, METH_VARARGS | METH_KEYWORDS, "Set mode weights for all envs"}, \
+    {"env_get_autopilot_mode", (PyCFunction)env_get_autopilot_mode, METH_VARARGS, "Get current autopilot mode"}
 
 #include "../env_binding.h"
 
@@ -170,4 +174,42 @@ static PyObject* vec_set_autopilot(PyObject* self, PyObject* args, PyObject* kwa
     }
 
     Py_RETURN_NONE;
+}
+
+// Set mode weights for curriculum learning (vectorized)
+static PyObject* vec_set_mode_weights(PyObject* self, PyObject* args, PyObject* kwargs) {
+    if (PyTuple_Size(args) != 1) {
+        PyErr_SetString(PyExc_TypeError, "vec_set_mode_weights requires 1 positional arg (vec handle)");
+        return NULL;
+    }
+
+    VecEnv* vec = unpack_vecenv(args);
+    if (!vec) return NULL;
+
+    // Get weights for each mode (default 0.2 each for modes 1-5)
+    float w_level = get_float(kwargs, "level", 0.2f);
+    float w_turn_left = get_float(kwargs, "turn_left", 0.2f);
+    float w_turn_right = get_float(kwargs, "turn_right", 0.2f);
+    float w_climb = get_float(kwargs, "climb", 0.2f);
+    float w_descend = get_float(kwargs, "descend", 0.2f);
+
+    // Set weights for all environments
+    for (int i = 0; i < vec->num_envs; i++) {
+        AutopilotState* ap = &vec->envs[i]->opponent_ap;
+        ap->mode_weights[AP_LEVEL] = w_level;
+        ap->mode_weights[AP_TURN_LEFT] = w_turn_left;
+        ap->mode_weights[AP_TURN_RIGHT] = w_turn_right;
+        ap->mode_weights[AP_CLIMB] = w_climb;
+        ap->mode_weights[AP_DESCEND] = w_descend;
+    }
+
+    Py_RETURN_NONE;
+}
+
+// Get current autopilot mode (for testing/debugging)
+static PyObject* env_get_autopilot_mode(PyObject* self, PyObject* args) {
+    Env* env = unpack_env(args);
+    if (!env) return NULL;
+
+    return PyLong_FromLong((long)env->opponent_ap.mode);
 }

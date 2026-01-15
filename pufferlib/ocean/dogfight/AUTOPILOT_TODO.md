@@ -24,15 +24,14 @@ class AutopilotMode:
 - [ ] Add runtime validation that checks enum values match
 - [ ] Add static_assert in C for enum count
 
-### 2. No Vectorized set_autopilot
+### 2. ~~No Vectorized set_autopilot~~ DONE (80bcf31e)
 ```python
 def set_autopilot(self, env_idx=0, ...):  # Must call N times for N envs
 ```
 
 **Fix:**
-- [ ] Add `set_autopilot_all()` method
-- [ ] Or accept `env_idx=None` to mean "all environments"
-- [ ] Add C binding `vec_set_autopilot()` for efficiency
+- [x] Accept `env_idx=None` to mean "all environments"
+- [x] Add C binding `vec_set_autopilot()` for efficiency
 
 ### 3. force_state() Doesn't Reset PID State
 When teleporting plane via `force_state()`, autopilot PID state (`prev_vz`, `prev_bank_error`) retains stale values causing derivative spikes.
@@ -166,7 +165,7 @@ First step after reset may have derivative spike.
 
 ## Priority Order
 
-1. **High:** Vectorized set_autopilot (blocking for multi-env curriculum)
+1. ~~**High:** Vectorized set_autopilot~~ DONE (80bcf31e)
 2. **High:** Mode weights (core curriculum feature)
 3. **Medium:** Per-episode parameter variance
 4. **Medium:** Player autopilot for tests

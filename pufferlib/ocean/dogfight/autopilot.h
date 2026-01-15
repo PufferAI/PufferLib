@@ -44,6 +44,12 @@ typedef struct {
     float target_bank;       // Target bank angle (radians)
     float target_vz;         // Target vertical velocity (m/s)
 
+    // Curriculum: mode selection weights (sum to 1.0)
+    float mode_weights[AP_COUNT];
+
+    // Own RNG state (not affected by srand() calls)
+    unsigned int rng_state;
+
     // PID gains
     float pitch_kp, pitch_kd;
     float roll_kp, roll_kd;
@@ -53,6 +59,12 @@ typedef struct {
     float prev_bank_error;
 } AutopilotState;
 
+// Simple LCG random for autopilot (not affected by srand)
+static inline float ap_rand(AutopilotState* ap) {
+    ap->rng_state = ap->rng_state * 1103515245 + 12345;
+    return (float)((ap->rng_state >> 16) & 0x7FFF) / 32767.0f;
+}
+
 // Initialize autopilot with defaults
 static inline void autopilot_init(AutopilotState* ap) {
     ap->mode = AP_STRAIGHT;
@@ -60,6 +72,20 @@ static inline void autopilot_init(AutopilotState* ap) {
     ap->throttle = AP_DEFAULT_THROTTLE;
     ap->target_bank = AP_DEFAULT_BANK_DEG * (PI / 180.0f);
     ap->target_vz = AP_DEFAULT_CLIMB_RATE;
+
+    // Default: uniform weights for modes 1-5 (skip STRAIGHT and RANDOM)
+    for (int i = 0; i < AP_COUNT; i++) {
+        ap->mode_weights[i] = 0.0f;
+    }
+    float uniform = 1.0f / 5.0f;  // 5 modes: LEVEL, TURN_L, TURN_R, CLIMB, DESCEND
+    ap->mode_weights[AP_LEVEL] = uniform;
+    ap->mode_weights[AP_TURN_LEFT] = uniform;
+    ap->mode_weights[AP_TURN_RIGHT] = uniform;
+    ap->mode_weights[AP_CLIMB] = uniform;
+    ap->mode_weights[AP_DESCEND] = uniform;
+
+    // Seed autopilot RNG from system rand (called once at init, not affected by later srand)
+    ap->rng_state = (unsigned int)rand();
 
     ap->pitch_kp = AP_LEVEL_KP;
     ap->pitch_kd = AP_LEVEL_KD;
@@ -95,16 +121,24 @@ static inline void autopilot_set_mode(AutopilotState* ap, AutopilotMode mode,
     }
 }
 
-// Randomize autopilot mode (for AP_RANDOM at reset)
+// Randomize autopilot mode using weighted selection (for AP_RANDOM at reset)
 static inline void autopilot_randomize(AutopilotState* ap) {
-    // Pick a random mode excluding AP_STRAIGHT and AP_RANDOM itself
-    int mode = 1 + (rand() % (AP_COUNT - 2));  // 1 to AP_COUNT-2 (AP_LEVEL to AP_DESCEND)
-    float bank_deg = AP_DEFAULT_BANK_DEG;
-    float climb_rate = AP_DEFAULT_CLIMB_RATE;
+    float r = ap_rand(ap);  // Use own RNG, not affected by srand()
+    float cumsum = 0.0f;
+    AutopilotMode selected = AP_LEVEL;  // Default fallback
+
+    for (int i = 1; i < AP_COUNT - 1; i++) {  // Skip STRAIGHT(0) and RANDOM(6)
+        cumsum += ap->mode_weights[i];
+        if (r <= cumsum) {
+            selected = (AutopilotMode)i;
+            break;
+        }
+    }
 
     // Save randomize flag (autopilot_set_mode would clear it)
     int save_randomize = ap->randomize_on_reset;
-    autopilot_set_mode(ap, (AutopilotMode)mode, AP_DEFAULT_THROTTLE, bank_deg, climb_rate);
+    autopilot_set_mode(ap, selected, AP_DEFAULT_THROTTLE,
+                      AP_DEFAULT_BANK_DEG, AP_DEFAULT_CLIMB_RATE);
     ap->randomize_on_reset = save_randomize;
 }
 

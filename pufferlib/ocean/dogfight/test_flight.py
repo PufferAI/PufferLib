@@ -5,7 +5,7 @@ Uses force_state() to set exact initial conditions for accurate measurements.
 Run: python pufferlib/ocean/dogfight/test_flight.py
 """
 import numpy as np
-from dogfight import Dogfight
+from dogfight import Dogfight, AutopilotMode
 
 # Constants (must match dogfight.h)
 MAX_SPEED = 250.0
@@ -618,6 +618,58 @@ def test_roll_direction():
     print(f"roll_works:    {RESULTS['roll_works']:>6}      (should be YES) [{status}]")
 
 
+def test_mode_weights():
+    """
+    Test that mode_weights actually biases autopilot randomization.
+
+    Sets 100% weight on AP_LEVEL, triggers multiple resets,
+    verifies that selected mode is always AP_LEVEL.
+    """
+    env = Dogfight(num_envs=1)
+    env.reset()
+
+    # Set AP_RANDOM mode and bias 100% toward LEVEL
+    env.set_autopilot(env_idx=0, mode=AutopilotMode.RANDOM)
+    env.set_mode_weights(level=1.0, turn_left=0.0, turn_right=0.0, climb=0.0, descend=0.0)
+
+    # Trigger multiple resets and check mode each time
+    level_count = 0
+    num_trials = 50
+
+    for _ in range(num_trials):
+        env.reset()
+        mode = env.get_autopilot_mode(env_idx=0)
+        if mode == AutopilotMode.LEVEL:
+            level_count += 1
+
+    pct = 100 * level_count / num_trials
+    RESULTS['mode_weights'] = pct
+
+    # With 100% weight on LEVEL, should always get LEVEL
+    status = "OK" if pct == 100 else "CHECK"
+    print(f"mode_weights:  {pct:5.1f}%   (should be 100% AP_LEVEL) [{status}]")
+
+    # Also test distribution with mixed weights
+    env.set_autopilot(env_idx=0, mode=AutopilotMode.RANDOM)  # Re-enable randomization
+    env.set_mode_weights(level=0.5, turn_left=0.25, turn_right=0.25, climb=0.0, descend=0.0)
+
+    counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}  # LEVEL, TURN_L, TURN_R, CLIMB, DESCEND
+    num_trials = 200
+
+    for _ in range(num_trials):
+        env.reset()
+        mode = env.get_autopilot_mode(env_idx=0)
+        if mode in counts:
+            counts[mode] += 1
+
+    # Check that LEVEL is most common (~50%) and CLIMB/DESCEND are rare (~0%)
+    level_pct = 100 * counts[1] / num_trials
+    climb_pct = 100 * counts[4] / num_trials
+    distribution_ok = level_pct > 35 and climb_pct < 10
+    status2 = "OK" if distribution_ok else "CHECK"
+    print(f"  distribution: LEVEL={level_pct:.0f}%, TURN_L={100*counts[2]/num_trials:.0f}%, TURN_R={100*counts[3]/num_trials:.0f}%, CLIMB={climb_pct:.0f}% [{status2}]")
+
+
 def print_summary():
     """Print summary table."""
     print("\n" + "=" * 60)
@@ -658,4 +710,5 @@ if __name__ == "__main__":
     test_turn_60()
     test_pitch_direction()
     test_roll_direction()
+    test_mode_weights()
     print_summary()

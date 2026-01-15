@@ -181,6 +181,31 @@ class Dogfight(pufferlib.PufferEnv):
                 climb_rate=climb_rate,
             )
 
+    def set_mode_weights(self, level=0.2, turn_left=0.2, turn_right=0.2,
+                         climb=0.2, descend=0.2):
+        """
+        Set probability weights for AP_RANDOM mode selection.
+
+        Weights should sum to 1.0. Used for curriculum learning to bias
+        toward easier modes (e.g., LEVEL, STRAIGHT turns) early in training.
+
+        Args:
+            level: Weight for AP_LEVEL (maintain altitude)
+            turn_left: Weight for AP_TURN_LEFT
+            turn_right: Weight for AP_TURN_RIGHT
+            climb: Weight for AP_CLIMB
+            descend: Weight for AP_DESCEND
+        """
+        binding.vec_set_mode_weights(
+            self.c_envs,
+            level=level, turn_left=turn_left, turn_right=turn_right,
+            climb=climb, descend=descend,
+        )
+
+    def get_autopilot_mode(self, env_idx=0):
+        """Get current autopilot mode for an environment (for testing/debugging)."""
+        return binding.env_get_autopilot_mode(self._env_handles[env_idx])
+
 
 def test_performance(timeout=10, atn_cache=1024):
     env = Dogfight(num_envs=1000)
