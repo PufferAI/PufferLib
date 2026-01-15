@@ -37,6 +37,21 @@ class Dogfight(pufferlib.PufferEnv):
         seed=42,
         max_steps=3000,
         obs_scheme=0,
+        # Reward weights (all sweepable via INI)
+        reward_kill=1.0,
+        reward_hit=0.5,
+        reward_dist_scale=0.0001,
+        reward_closing_scale=0.002,
+        reward_tail_scale=0.05,
+        reward_tracking=0.05,
+        reward_firing_solution=0.1,
+        penalty_alt_low=0.0005,
+        penalty_alt_high=0.0002,
+        penalty_stall=0.002,
+        # Thresholds (not swept)
+        alt_min=200.0,
+        alt_max=2500.0,
+        speed_min=50.0,
     ):
         # Observation size depends on scheme
         obs_size = OBS_SIZES.get(obs_scheme, 19)
@@ -74,6 +89,20 @@ class Dogfight(pufferlib.PufferEnv):
                 report_interval=self.report_interval,
                 max_steps=max_steps,
                 obs_scheme=obs_scheme,
+                # Reward config (all sweepable)
+                reward_kill=reward_kill,
+                reward_hit=reward_hit,
+                reward_dist_scale=reward_dist_scale,
+                reward_closing_scale=reward_closing_scale,
+                reward_tail_scale=reward_tail_scale,
+                reward_tracking=reward_tracking,
+                reward_firing_solution=reward_firing_solution,
+                penalty_alt_low=penalty_alt_low,
+                penalty_alt_high=penalty_alt_high,
+                penalty_stall=penalty_stall,
+                alt_min=alt_min,
+                alt_max=alt_max,
+                speed_min=speed_min,
             )
             self._env_handles.append(handle)
 

@@ -49,7 +49,25 @@ static int get_int(PyObject *kwargs, const char *key, int default_val) {
 static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     env->max_steps = unpack(kwargs, "max_steps");
     int obs_scheme = get_int(kwargs, "obs_scheme", 0);  // Default to world frame
-    init(env, obs_scheme);
+
+    // Build reward config from kwargs (all sweepable via INI)
+    RewardConfig rcfg = {
+        .kill = get_float(kwargs, "reward_kill", 1.0f),
+        .hit = get_float(kwargs, "reward_hit", 0.5f),
+        .dist_scale = get_float(kwargs, "reward_dist_scale", 0.0001f),
+        .closing_scale = get_float(kwargs, "reward_closing_scale", 0.002f),
+        .tail_scale = get_float(kwargs, "reward_tail_scale", 0.05f),
+        .tracking = get_float(kwargs, "reward_tracking", 0.05f),
+        .firing_solution = get_float(kwargs, "reward_firing_solution", 0.1f),
+        .alt_low = get_float(kwargs, "penalty_alt_low", 0.0005f),
+        .alt_high = get_float(kwargs, "penalty_alt_high", 0.0002f),
+        .stall = get_float(kwargs, "penalty_stall", 0.002f),
+        .alt_min = get_float(kwargs, "alt_min", 200.0f),
+        .alt_max = get_float(kwargs, "alt_max", 2500.0f),
+        .speed_min = get_float(kwargs, "speed_min", 50.0f),
+    };
+
+    init(env, obs_scheme, &rcfg);
     return 0;
 }
 
@@ -57,6 +75,7 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "episode_return", log->episode_return);
     assign_to_dict(dict, "episode_length", log->episode_length);
     assign_to_dict(dict, "score", log->score);
+    assign_to_dict(dict, "perf", log->perf);  // Kill rate (0-1)
     assign_to_dict(dict, "kills", log->kills);
     assign_to_dict(dict, "deaths", log->deaths);
     assign_to_dict(dict, "shots_fired", log->shots_fired);

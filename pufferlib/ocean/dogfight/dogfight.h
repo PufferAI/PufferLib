@@ -54,12 +54,31 @@ typedef struct Log {
     float episode_return;
     float episode_length;
     float score;
+    float perf;           // Kill rate (0-1): fraction of episodes with kills
     float kills;
     float deaths;
     float shots_fired;
     float shots_hit;
     float n;
 } Log;
+
+// Reward configuration (all values sweepable via INI)
+typedef struct RewardConfig {
+    float kill;              // +N for kill (fixed at 1.0)
+    float hit;               // +N for hit
+    float dist_scale;        // -N per meter distance
+    float closing_scale;     // +N per m/s closing
+    float tail_scale;        // ±N for tail position
+    float tracking;          // +N when in 2x gun cone
+    float firing_solution;   // +N when in 1x gun cone
+    float alt_low;           // -N per meter below alt_min
+    float alt_high;          // -N per meter above alt_max
+    float stall;             // -N per m/s below speed_min
+    // Thresholds (not rewards)
+    float alt_min;           // 200.0
+    float alt_max;           // 2500.0
+    float speed_min;         // 50.0
+} RewardConfig;
 
 typedef struct Client {
     Camera3D camera;
@@ -95,9 +114,15 @@ typedef struct Dogfight {
     // Observation scheme
     int obs_scheme;
     int obs_size;
+    // Reward configuration (sweepable)
+    RewardConfig rcfg;
+    // Episode-level tracking (reset each episode)
+    float episode_kills;
+    float episode_shots_fired;
+    float episode_shots_hit;
 } Dogfight;
 
-void init(Dogfight *env, int obs_scheme) {
+void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg) {
     env->log = (Log){0};
     env->tick = 0;
     env->episode_return = 0.0f;
@@ -111,11 +136,23 @@ void init(Dogfight *env, int obs_scheme) {
     env->cos_gun_cone_2x = cosf(env->gun_cone_angle * 2.0f);
     // Initialize opponent autopilot
     autopilot_init(&env->opponent_ap);
+    // Reward configuration (copy from provided config)
+    env->rcfg = *rcfg;
+    // Episode tracking
+    env->episode_kills = 0.0f;
+    env->episode_shots_fired = 0.0f;
+    env->episode_shots_hit = 0.0f;
 }
 
 void add_log(Dogfight *env) {
     env->log.episode_return += env->episode_return;
     env->log.episode_length += (float)env->tick;
+    // PERF = 1.0 if got any kills this episode, 0.0 otherwise
+    env->log.perf += (env->episode_kills > 0) ? 1.0f : 0.0f;
+    // Accumulate combat stats from this episode
+    env->log.kills += env->episode_kills;
+    env->log.shots_fired += env->episode_shots_fired;
+    env->log.shots_hit += env->episode_shots_hit;
     env->log.n += 1.0f;
 }
 
@@ -507,6 +544,11 @@ void c_reset(Dogfight *env) {
     env->tick = 0;
     env->episode_return = 0.0f;
 
+    // Clear episode tracking counters
+    env->episode_kills = 0.0f;
+    env->episode_shots_fired = 0.0f;
+    env->episode_shots_hit = 0.0f;
+
     // Recompute gun cone trig (for curriculum: could vary gun_cone_angle here)
     env->cos_gun_cone = cosf(env->gun_cone_angle);
     env->cos_gun_cone_2x = cosf(env->gun_cone_angle * 2.0f);
@@ -615,58 +657,58 @@ void c_step(Dogfight *env) {
     // Player fires: action[4] > 0.5 and cooldown ready
     if (env->actions[4] > 0.5f && p->fire_cooldown == 0) {
         p->fire_cooldown = FIRE_COOLDOWN;
-        env->log.shots_fired += 1.0f;
+        env->episode_shots_fired += 1.0f;
         if (DEBUG) printf("=== FIRED! ===\n");
 
         // Check if hit
         if (check_hit(p, o, env->cos_gun_cone)) {
-            env->log.shots_hit += 1.0f;
-            reward += 1.0f;  // Hit reward
-            if (DEBUG) printf("*** HIT! +1.0 reward ***\n");
+            env->episode_shots_hit += 1.0f;
+            reward += env->rcfg.hit;  // Hit reward (sweepable)
+            if (DEBUG) printf("*** HIT! +%.2f reward ***\n", env->rcfg.hit);
 
             // Kill: respawn opponent, big reward
-            env->log.kills += 1.0f;
-            reward += 10.0f;  // Kill reward
-            if (DEBUG) printf("*** KILL! +10.0 reward, total kills=%.0f ***\n", env->log.kills);
+            env->episode_kills += 1.0f;
+            reward += env->rcfg.kill;  // Kill reward (fixed at 1.0)
+            if (DEBUG) printf("*** KILL! +%.2f reward, episode kills=%.0f ***\n", env->rcfg.kill, env->episode_kills);
             respawn_opponent(env);
         } else {
             if (DEBUG) printf("MISS\n");
         }
     }
 
-    // === Reward Shaping (Phase 3.5) ===
+    // === Reward Shaping (all values from rcfg, sweepable) ===
     Vec3 rel_pos = sub3(o->pos, p->pos);
     float dist = norm3(rel_pos);
-    float r_dist = -dist * 0.0001f;
+    float r_dist = -dist * env->rcfg.dist_scale;
     reward += r_dist;
 
     // 2. Closing velocity reward: approaching = good
     Vec3 rel_vel = sub3(p->vel, o->vel);
     Vec3 rel_pos_norm = normalize3(rel_pos);
     float closing_rate = dot3(rel_vel, rel_pos_norm);
-    float r_closing = closing_rate * 0.002f;
+    float r_closing = closing_rate * env->rcfg.closing_scale;
     reward += r_closing;
 
     // 3. Tail position reward: behind opponent = good
     Vec3 opp_forward = quat_rotate(o->ori, vec3(1, 0, 0));
     float tail_angle = dot3(rel_pos_norm, opp_forward);
-    float r_tail = tail_angle * 0.02f;
+    float r_tail = tail_angle * env->rcfg.tail_scale;
     reward += r_tail;
 
     // 4. Altitude penalty: too low or too high is bad
     float r_alt = 0.0f;
-    if (p->pos.z < 200.0f) {
-        r_alt = -(200.0f - p->pos.z) * 0.0005f;
-    } else if (p->pos.z > 2500.0f) {
-        r_alt = -(p->pos.z - 2500.0f) * 0.0002f;
+    if (p->pos.z < env->rcfg.alt_min) {
+        r_alt = -(env->rcfg.alt_min - p->pos.z) * env->rcfg.alt_low;
+    } else if (p->pos.z > env->rcfg.alt_max) {
+        r_alt = -(p->pos.z - env->rcfg.alt_max) * env->rcfg.alt_high;
     }
     reward += r_alt;
 
     // 5. Speed penalty: too slow is stall risk
     float speed = norm3(p->vel);
     float r_speed = 0.0f;
-    if (speed < 50.0f) {
-        r_speed = -(50.0f - speed) * 0.002f;
+    if (speed < env->rcfg.speed_min) {
+        r_speed = -(env->rcfg.speed_min - speed) * env->rcfg.stall;
     }
     reward += r_speed;
 
@@ -679,11 +721,11 @@ void c_step(Dogfight *env) {
     float r_aim = 0.0f;
     // Reward for tracking (within 2x gun cone and in range)
     if (aim_dot > env->cos_gun_cone_2x && dist < GUN_RANGE) {
-        r_aim += 0.05f;
+        r_aim += env->rcfg.tracking;
     }
     // Bonus for firing solution (within gun cone, in range)
     if (aim_dot > env->cos_gun_cone && dist < GUN_RANGE) {
-        r_aim += 0.1f;
+        r_aim += env->rcfg.firing_solution;
     }
     reward += r_aim;
 
