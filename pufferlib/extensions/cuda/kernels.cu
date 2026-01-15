@@ -163,7 +163,7 @@ __global__ void rmsnorm_backward_kernel_optimized(
     __syncthreads();
 
     float wgx_total = SH_WGX;
-    float gradx_end = wgx_total * inv_rms_3 / float(H)
+    float gradx_end = wgx_total * inv_rms_3 / float(H);
     curxv = 0;
     for (int h = tid; h < H; h += blockDim.x) {
         float x = X_VALUES[curxv];
@@ -228,20 +228,24 @@ __global__ void rmsnorm_backward_kernel(
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= T_total*H*B) return;
-    int base = idx % H;
+    int h_idx = idx % H;
     int norm_idx = idx / H;
+    int vec_offset = norm_idx * H; // Start offset of this vector in memory
+    // previously used `base = idx % H` and then `base + h` in the wg_x loop
+    // was wrong because base is the h-index not the vector offset.
 
     float inv_rms = inv_norm_buf[norm_idx];
     float inv_rms_3 = inv_rms * inv_rms * inv_rms;
 
-    grad_x[idx] = weight[base] * grad_out[idx] * inv_rms;
-    grad_weight[idx] = grad_out[idx] * inv_rms;
+    grad_x[idx] = weight[h_idx] * grad_out[idx] * inv_rms;
+    // was previously missing x_buf[idx] term in grad_weight
+    grad_weight[idx] = grad_out[idx] * x_buf[idx] * inv_rms;
 
     float wg_x = 0.0f;
     for (int h=0; h<H; h++) {
-        float x = x_buf[base + h];
+        float x = x_buf[vec_offset + h];
         float w = weight[h];
-        float g = grad_out[base + h];
+        float g = grad_out[vec_offset + h];
         wg_x += w*g*x;
     }
     float x = x_buf[idx];
