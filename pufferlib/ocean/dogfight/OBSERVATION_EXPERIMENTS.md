@@ -447,4 +447,6 @@ void compute_observations_angles(Dogfight *env) {
 
 - drone_race.h: Body-frame transform pattern (lines 79-85)
 - TRAINING_IMPROVEMENTS.md: Original observation improvement ideas
+- **REALISTIC_SCHEMES.md**: Proposed schemes 6-9 (MINIMAL, GUNSIGHT, ENERGY, PLUS) for Aces High III transfer - tests minimal observations needed for dogfighting
+- aceshigh/DLL_SPEC.md: How observation choice affects DLL data requirements
 - PufferLib sweep docs: (link to docs if available)
