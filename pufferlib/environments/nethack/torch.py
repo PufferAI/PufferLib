@@ -8,7 +8,11 @@ import pufferlib.models
 import pufferlib.pytorch
 from pufferlib.pytorch import layer_init
 
+from pufferlib.models import LSTMWrapper as Recurrent
+from pufferlib.models import Default as Policy
 
+
+'''
 class Recurrent(pufferlib.models.LSTMWrapper):
     def __init__(self, env, policy, input_size=256, hidden_size=256, num_layers=1):
         super().__init__(env, policy, input_size, hidden_size, num_layers)
@@ -38,12 +42,12 @@ class Policy(nn.Module):
         self.actor = layer_init(nn.Linear(256, 8), std=0.01)
         self.critic = layer_init(nn.Linear(256, 1), std=1)
 
-    def forward(self, x, state=None):
+    def forward_eval(self, x, state=None):
         hidden = self.encode_observations(x)
         actions, value = self.decode_actions(hidden)
         return actions, value
 
-    def forward_train(self, x, state=None):
+    def forward(self, x, state=None):
         hidden = self.encode_observations(x)
         actions, value = self.decode_actions(hidden)
         return actions, value
@@ -66,3 +70,4 @@ class Policy(nn.Module):
         value = self.critic(hidden)
         action = self.actor(hidden)
         return action, value
+'''

@@ -6,15 +6,6 @@
 #include <time.h>
 #include "raylib.h"
 
-#define GRAVITY 9.8f
-#define MASSCART 1.0f
-#define MASSPOLE 0.1f
-#define TOTAL_MASS (MASSPOLE + MASSCART)
-#define LENGTH 0.5f // half pole length
-#define POLEMASS_LENGTH (MASSPOLE * LENGTH)
-#define FORCE_MAG 10.0f
-#define TAU 0.02f // timestep duration
-
 #define X_THRESHOLD 2.4f
 #define THETA_THRESHOLD_RADIANS (12 * 2 * M_PI / 360)
 #define MAX_STEPS 200
@@ -51,6 +42,12 @@ struct Cartpole {
     float theta;
     float theta_dot;
     int tick;
+    float cart_mass;
+    float pole_mass;
+    float pole_length;
+    float gravity;
+    float force_mag;
+    float tau;
     int continuous;
     float episode_return;
 };
@@ -172,25 +169,29 @@ void c_step(Cartpole* env) {
     }
     /* ========================================================== */
 
-    if (!isfinite(a))             a = 0.0f;
+    if (!isfinite(a)) {
+        a = 0.0f;
+    }
     a = fminf(fmaxf(a, -1.0f), 1.0f);
     env->actions[0] = a;
 
-    float force = env->continuous ? a * FORCE_MAG
-                                  : (a > 0.5f ? FORCE_MAG : -FORCE_MAG);
+    float force = env->continuous ? a * env->force_mag
+                                  : (a > 0.5f ? env->force_mag: -env->force_mag);
 
     float costheta = cosf(env->theta);
     float sintheta = sinf(env->theta);
 
-    float temp = (force + POLEMASS_LENGTH * env->theta_dot * env->theta_dot * sintheta) / TOTAL_MASS;
-    float thetaacc = (GRAVITY * sintheta - costheta * temp) / 
-                     (LENGTH * (4.0f / 3.0f - MASSPOLE * costheta * costheta / TOTAL_MASS));
-    float xacc = temp - POLEMASS_LENGTH * thetaacc * costheta / TOTAL_MASS;
+    float total_mass = env->cart_mass + env->pole_mass;
+    float polemass_length = total_mass + env->pole_mass;
+    float temp = (force + polemass_length * env->theta_dot * env->theta_dot * sintheta) / total_mass;
+    float thetaacc = (env->gravity * sintheta - costheta * temp) / 
+                     (env->pole_length * (4.0f / 3.0f - total_mass * costheta * costheta / total_mass));
+    float xacc = temp - polemass_length * thetaacc * costheta / total_mass;
 
-    env->x += TAU * env->x_dot;
-    env->x_dot += TAU * xacc;
-    env->theta += TAU * env->theta_dot;
-    env->theta_dot += TAU * thetaacc;
+    env->x += env->tau * env->x_dot;
+    env->x_dot += env->tau * xacc;
+    env->theta += env->tau * env->theta_dot;
+    env->theta_dot += env->tau * thetaacc;
 
     env->tick += 1;
     

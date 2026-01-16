@@ -1,0 +1,7 @@
+The Chain MDP [Osband et al., 2016] is a classic benchmark environment designed to test whether reinforcement learning algorithms are capable of systematic exploration rather than falling into short-sighted local optima. 
+
+The environment is composed of $N$ states arranged in a linear chain. At each state $s_i (1 \leq i \leq N)$ the agent can take one of two actions: left or right. The transitions are deterministic: moving left shifts the agent to $s_{i-1}$, while moving right shifts it to $s_{i+1}$. The two boundary states, $s_1$ and $s_N$, are absorbing, meaning moving left while in state $s_1$ keeps you in that state. 
+
+Rewards are sparse and asymmetric: reaching $s_1$ yields a small reward of 1/1000, while reaching $s_N$ yields a much larger reward of 1; all other states give zero reward. Each episode lasts exactly $N+9$ steps, and the agent always starts at $s_2$. 
+
+This setup creates a strong exploration challenge: the nearby absorbing state $s_1$ provides an easy but suboptimal payoff, while the optimal long-term strategy requires consistently moving right until $s_N$ is reached. Uniformly random exploration is highly inefficient here—on average it takes $2^{N-2}$ steps before the agent reaches $s_N$ — so for large $N$, it is virtually impossible to discover the optimal strategy by chance within a single episode.

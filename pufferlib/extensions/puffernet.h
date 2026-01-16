@@ -76,7 +76,7 @@ void _relu(float* input, float* output, int size) {
 
 void _gelu(float* input, float* output, int size) {
     for (int i = 0; i < size; i++) {
-        output[i] = 0.5f*input[i]*(1 + tanhf(0.6628526501011142 * (input[i] + 0.044715f*input[i]*input[i]*input[i])));
+        output[i] = 0.5f*input[i]*(1 + tanhf(0.7978845608028654 * (input[i] + 0.044715f*input[i]*input[i]*input[i])));
     }
 }
 

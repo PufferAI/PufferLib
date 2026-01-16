@@ -24,7 +24,7 @@ const uint8_t NUM_MAPS = 9;
 
 #define MAX_NEAREST_WALLS 8
 
-const uint8_t DRONE_LIVES = 1;
+const uint8_t DRONE_LIVES = 3;
 const float DRONE_RESPAWN_WAIT = 2.0f;
 const uint8_t ROUND_STEPS = 90;
 const uint8_t SUDDEN_DEATH_STEPS = 5;
@@ -34,8 +34,8 @@ const uint8_t MAX_DRONES = _MAX_DRONES;
 const uint16_t LOG_BUFFER_SIZE = 1024;
 
 // reward settings
-const float WIN_REWARD = 1.5f;
-const float SELF_KILL_PUNISHMENT = -2.0f;
+const float WIN_REWARD = 2.0f;
+const float SELF_KILL_PUNISHMENT = -1.0f;
 const float ENEMY_DEATH_REWARD = 1.0f;
 const float ENEMY_KILL_REWARD = 1.0f;
 const float TEAMMATE_DEATH_PUNISHMENT = -0.5f;
@@ -43,8 +43,9 @@ const float TEAMMATE_KILL_PUNISHMENT = -1.0f;
 const float DEATH_PUNISHMENT = 0.0f;
 const float ENERGY_EMPTY_PUNISHMENT = -0.75f;
 const float WEAPON_PICKUP_REWARD = 0.5f;
-const float SHOT_HIT_REWARD_COEF = 0.000013333f;
-const float EXPLOSION_HIT_REWARD_COEF = 5.0f;
+const float SHIELD_BREAK_REWARD = 0.5f;
+const float SHOT_HIT_REWARD_COEF = 0.005f;
+const float EXPLOSION_HIT_REWARD_COEF = 0.005f;
 const float APPROACH_REWARD = 0.0f;
 
 // approach reward doesn't apply within the cutoff to avoid constant clashing

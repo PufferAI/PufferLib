@@ -4,7 +4,10 @@ import pufferlib
 from pufferlib.ocean.cartpole import binding
 
 class Cartpole(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode='human', report_interval=1, continuous=False, buf=None, seed=0):
+    def __init__(self, num_envs=1, cart_mass=1.0, pole_mass=0.1,
+            pole_length=0.5, gravity=9.8, force_mag=10.0, dt=0.02,
+            render_mode='human', report_interval=1, continuous=False,
+            buf=None, seed=0):
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.report_interval = report_interval
@@ -35,6 +38,12 @@ class Cartpole(pufferlib.PufferEnv):
             self.truncations,
             num_envs,
             seed,
+            cart_mass=cart_mass,
+            pole_mass=pole_mass,
+            pole_length=pole_length,
+            gravity=gravity,
+            force_mag=force_mag,
+            dt=dt,
             continuous=int(self.continuous),
         )
    
