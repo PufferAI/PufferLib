@@ -84,6 +84,9 @@ typedef struct RewardConfig {
     float alt_low;           // -N per meter below alt_min
     float alt_high;          // -N per meter above alt_max
     float stall;             // -N per m/s below speed_min
+    float roll;              // -N per radian of bank angle (gentle level preference)
+    float neg_g;             // -N per unit of negative elevator (pushing forward)
+    float rudder;            // -N per unit of rudder magnitude
     // Thresholds (not rewards)
     float alt_min;           // 200.0
     float alt_max;           // 2500.0
@@ -918,7 +921,22 @@ void c_step(Dogfight *env) {
     }
     reward += r_speed;
 
-    // 6. Aiming reward: feedback for gun alignment before actual hits
+    // 6. Roll penalty: gentle preference for level flight
+    float roll_angle = atan2f(2.0f * (p->ori.w * p->ori.x + p->ori.y * p->ori.z),
+                              1.0f - 2.0f * (p->ori.x * p->ori.x + p->ori.y * p->ori.y));
+    float r_roll = -fabsf(roll_angle) * env->rcfg.roll;
+    reward += r_roll;
+
+    // 7. Negative G penalty: discourage pushing forward on stick
+    float neg_elevator = fmaxf(0.0f, -env->actions[1]);  // 0 if pulling/neutral, magnitude if pushing
+    float r_neg_g = -neg_elevator * env->rcfg.neg_g;
+    reward += r_neg_g;
+
+    // 8. Rudder penalty: discourage excessive rudder use
+    float r_rudder = -fabsf(env->actions[3]) * env->rcfg.rudder;
+    reward += r_rudder;
+
+    // 9. Aiming reward: feedback for gun alignment before actual hits
     Vec3 player_fwd = quat_rotate(p->ori, vec3(1, 0, 0));
     Vec3 to_opp_norm = normalize3(rel_pos);
     float aim_dot = dot3(to_opp_norm, player_fwd);  // 1.0 = perfect aim
@@ -941,6 +959,9 @@ void c_step(Dogfight *env) {
     if (DEBUG) printf("r_tail=%.4f (angle=%.2f)\n", r_tail, tail_angle);
     if (DEBUG) printf("r_alt=%.4f (z=%.1f)\n", r_alt, p->pos.z);
     if (DEBUG) printf("r_speed=%.4f (speed=%.1f)\n", r_speed, speed);
+    if (DEBUG) printf("r_roll=%.5f (roll=%.1f deg)\n", r_roll, roll_angle * RAD_TO_DEG);
+    if (DEBUG) printf("r_neg_g=%.5f (elev=%.2f)\n", r_neg_g, env->actions[1]);
+    if (DEBUG) printf("r_rudder=%.5f (rud=%.2f)\n", r_rudder, env->actions[3]);
     if (DEBUG) printf("r_aim=%.4f (aim_angle=%.1f deg, dist=%.1f)\n", r_aim, aim_angle_deg, dist);
     if (DEBUG) printf("reward_total=%.4f\n", reward);
 

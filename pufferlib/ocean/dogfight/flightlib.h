@@ -135,7 +135,8 @@ static inline Quat quat_from_axis_angle(Vec3 axis, float angle) {
 #define ENGINE_POWER 1112000.0f // watts (P-51D Military: 1,490 hp)
 #define ETA_PROP 0.80f         // propeller efficiency (P-51D cruise: 0.80-0.85)
 #define GRAVITY 9.81f          // m/s^2
-#define G_LIMIT 8.0f           // structural g limit (P-51D: +8g at 8,000 lb)
+#define G_LIMIT_POS 6.0f       // max positive G (pulling up) - pilot limit
+#define G_LIMIT_NEG 1.5f       // max negative G (pushing over) - blood to head is painful
 #define RHO 1.225f             // air density kg/m^3 (sea level ISA)
 
 // Inverse constants for faster computation (multiply instead of divide)
@@ -345,16 +346,33 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     Vec3 F_total = add3(add3(add3(F_thrust, F_lift), F_drag), weight);
 
     // ========================================================================
-    // 13. G-LIMIT (Structural Load Factor)
+    // 13. G-LIMIT (Asymmetric for Positive/Negative G)
     // ========================================================================
-    // Clamp total acceleration to prevent unrealistic maneuvers
-    // 8g limit: max accel = 8 * 9.81 = 78.5 m/s^2
+    // Pilots can handle much more positive G (blood to feet, 6G+) than
+    // negative G (blood to head, -1.5G is very uncomfortable).
+    // Limit the body-normal acceleration asymmetrically.
     Vec3 accel = mul3(F_total, INV_MASS);
-    float accel_mag = norm3(accel);
-    float g_force = accel_mag * INV_GRAVITY;
-    float max_accel = G_LIMIT * GRAVITY;
-    if (accel_mag > max_accel) {
-        accel = mul3(accel, max_accel / accel_mag);
+
+    // Body-up axis (perpendicular to wings, toward canopy)
+    Vec3 body_up = quat_rotate(p->ori, vec3(0, 0, 1));
+
+    // Normal component of acceleration (positive = upward in body frame = positive G)
+    float a_normal = dot3(accel, body_up);
+
+    // Asymmetric limits
+    float limit_pos = G_LIMIT_POS * GRAVITY;  // 6 * 9.81 = 58.86 m/s^2
+    float limit_neg = G_LIMIT_NEG * GRAVITY;  // 1.5 * 9.81 = 14.7 m/s^2
+
+    float g_force = a_normal * INV_GRAVITY;  // For debug display
+
+    if (a_normal > limit_pos) {
+        // Positive G exceeded - clamp normal component
+        accel = sub3(accel, mul3(body_up, a_normal - limit_pos));
+        g_force = G_LIMIT_POS;
+    } else if (a_normal < -limit_neg) {
+        // Negative G exceeded - clamp normal component (make less negative)
+        accel = sub3(accel, mul3(body_up, a_normal + limit_neg));
+        g_force = -G_LIMIT_NEG;
     }
 
     if (DEBUG) printf("=== PHYSICS ===\n");
@@ -364,7 +382,7 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
                       alpha * RAD_TO_DEG, alpha_effective * RAD_TO_DEG,
                       WING_INCIDENCE * RAD_TO_DEG, ALPHA_ZERO * RAD_TO_DEG, C_L);
     if (DEBUG) printf("thrust=%.0f N, lift=%.0f N, drag=%.0f N, weight=%.0f N\n", T_mag, L_mag, D_mag, MASS * GRAVITY);
-    if (DEBUG) printf("g_force=%.2f g (limit=8)\n", g_force);
+    if (DEBUG) printf("g_force=%.2f g (limit=+%.1f/-%.1f)\n", g_force, G_LIMIT_POS, G_LIMIT_NEG);
 
     // ========================================================================
     // 14. INTEGRATION (Semi-implicit Euler)

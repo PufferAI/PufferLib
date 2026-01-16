@@ -21,7 +21,8 @@ static Dogfight make_env(int max_steps) {
     RewardConfig rcfg = {
         .dist_scale = 0.0001f, .closing_scale = 0.002f, .tail_scale = 0.05f,
         .tracking = 0.05f, .firing_solution = 0.1f,
-        .alt_low = 0.0005f, .alt_high = 0.0002f, .stall = 0.002f,
+        .alt_low = 0.0005f, .alt_high = 0.0002f, .stall = 0.002f, .roll = 0.0001f,
+        .neg_g = 0.0005f, .rudder = 0.0002f,
         .alt_min = 200.0f, .alt_max = 2500.0f, .speed_min = 50.0f,
     };
     init(&env, 0, &rcfg, 0, 0, 15000);  // curriculum_enabled=0, randomize=0, episodes_per_stage=15000
@@ -906,6 +907,153 @@ void test_combat_constants() {
     printf("test_combat_constants PASS\n");
 }
 
+// Phase 3.6: Additional reward/penalty tests
+
+void test_roll_penalty() {
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    // Neutral actions (don't fire!)
+    env.actions[0] = 0.0f;   // throttle
+    env.actions[1] = 0.0f;   // elevator
+    env.actions[2] = 0.0f;   // ailerons
+    env.actions[3] = 0.0f;   // rudder
+    env.actions[4] = -1.0f;  // trigger (don't fire)
+
+    // Place plane level, good altitude, opponent ahead
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);  // Wings level
+    env.opponent.pos = vec3(300, 0, 1000);
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);
+
+    c_step(&env);
+    float reward_level = env.rewards[0];
+
+    // Now roll the plane to 90 degrees (pi/2 radians)
+    c_reset(&env);
+    env.actions[4] = -1.0f;  // Don't fire
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat_from_axis_angle(vec3(1, 0, 0), PI / 2);  // 90° roll
+    env.opponent.pos = vec3(300, 0, 1000);
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);
+
+    c_step(&env);
+    float reward_rolled = env.rewards[0];
+
+    // Rolled should have worse reward due to roll penalty
+    assert(reward_level > reward_rolled);
+
+    // Verify magnitude: at 90° (pi/2 rad) with roll=0.0001, penalty = 0.000157
+    float expected_penalty = (PI / 2) * 0.0001f;
+    float actual_diff = reward_level - reward_rolled;
+    ASSERT_NEAR(actual_diff, expected_penalty, 0.0001f);
+
+    printf("test_roll_penalty PASS\n");
+}
+
+void test_high_altitude_penalty() {
+    Dogfight env = make_env(1000);
+
+    // Good altitude (1000m, between alt_min=200 and alt_max=2500)
+    c_reset(&env);
+    env.actions[4] = -1.0f;  // Don't fire
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.opponent.pos = vec3(300, 0, 1000);
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);
+    c_step(&env);
+    float reward_good = env.rewards[0];
+
+    // Too high (above alt_max=2500)
+    c_reset(&env);
+    env.actions[4] = -1.0f;  // Don't fire
+    env.player.pos = vec3(0, 0, 3000);  // 500m above alt_max
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.opponent.pos = vec3(300, 0, 3000);
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);
+    c_step(&env);
+    float reward_high = env.rewards[0];
+
+    // Too high should have worse reward
+    assert(reward_good > reward_high);
+
+    printf("test_high_altitude_penalty PASS\n");
+}
+
+void test_tracking_reward() {
+    Dogfight env = make_env(1000);
+
+    // Scenario 1: Opponent in gunsight (aim angle < 45°)
+    c_reset(&env);
+    env.actions[4] = -1.0f;  // Don't fire
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);  // Facing +X
+    env.opponent.pos = vec3(300, 0, 1000);  // Directly ahead (0° off-axis)
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);
+    c_step(&env);
+    float reward_on_target = env.rewards[0];
+
+    // Scenario 2: Opponent far off-axis (aim angle > 45°, no tracking reward)
+    c_reset(&env);
+    env.actions[4] = -1.0f;  // Don't fire
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.opponent.pos = vec3(0, 300, 1000);  // 90° to the side
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);
+    c_step(&env);
+    float reward_off_target = env.rewards[0];
+
+    // On target should have better reward (tracking bonus)
+    assert(reward_on_target > reward_off_target);
+
+    printf("test_tracking_reward PASS\n");
+}
+
+void test_firing_solution_reward() {
+    Dogfight env = make_env(1000);
+
+    // Perfect firing solution: aim < 5°, dist < GUN_RANGE (500m)
+    c_reset(&env);
+    env.actions[4] = -1.0f;  // Don't fire
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.opponent.pos = vec3(300, 0, 1000);  // 300m ahead, in cone
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);
+    c_step(&env);
+    float reward_solution = env.rewards[0];
+
+    // No firing solution: aim < 5° but dist > GUN_RANGE
+    c_reset(&env);
+    env.actions[4] = -1.0f;  // Don't fire
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.opponent.pos = vec3(600, 0, 1000);  // 600m ahead, out of range
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);
+    c_step(&env);
+    float reward_no_solution = env.rewards[0];
+
+    // Firing solution should give bonus
+    assert(reward_solution > reward_no_solution);
+
+    printf("test_firing_solution_reward PASS\n");
+}
+
 // Helper to make env with curriculum enabled
 static Dogfight make_env_curriculum(int max_steps, int randomize) {
     Dogfight env = {0};
@@ -917,11 +1065,83 @@ static Dogfight make_env_curriculum(int max_steps, int randomize) {
     RewardConfig rcfg = {
         .dist_scale = 0.0001f, .closing_scale = 0.002f, .tail_scale = 0.05f,
         .tracking = 0.05f, .firing_solution = 0.1f,
-        .alt_low = 0.0005f, .alt_high = 0.0002f, .stall = 0.002f,
+        .alt_low = 0.0005f, .alt_high = 0.0002f, .stall = 0.002f, .roll = 0.0001f,
+        .neg_g = 0.0005f, .rudder = 0.0002f,
         .alt_min = 200.0f, .alt_max = 2500.0f, .speed_min = 50.0f,
     };
     init(&env, 0, &rcfg, 1, randomize, 15000);  // curriculum_enabled=1
     return env;
+}
+
+// Helper to make env with custom roll penalty (for accumulation test)
+static Dogfight make_env_with_roll_penalty(int max_steps, float roll_penalty) {
+    Dogfight env = {0};
+    env.observations = obs_buf;
+    env.actions = act_buf;
+    env.rewards = rew_buf;
+    env.terminals = term_buf;
+    env.max_steps = max_steps;
+    RewardConfig rcfg = {
+        .dist_scale = 0.0001f, .closing_scale = 0.002f, .tail_scale = 0.05f,
+        .tracking = 0.05f, .firing_solution = 0.1f,
+        .alt_low = 0.0005f, .alt_high = 0.0002f, .stall = 0.002f,
+        .roll = roll_penalty, .neg_g = 0.0005f, .rudder = 0.0002f,
+        .alt_min = 200.0f, .alt_max = 2500.0f, .speed_min = 50.0f,
+    };
+    init(&env, 0, &rcfg, 0, 0, 15000);
+    return env;
+}
+
+void test_roll_penalty_accumulates() {
+    // Test that constant rolling accumulates meaningful penalty over multiple steps
+    // Use exaggerated roll penalty (10x default) for visibility
+    Dogfight env = make_env_with_roll_penalty(1000, 0.001f);
+    c_reset(&env);
+
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.opponent.pos = vec3(300, 0, 1000);
+
+    // Full aileron with moderate throttle to maintain flight
+    float total_reward = 0.0f;
+    for (int i = 0; i < 50; i++) {
+        env.actions[0] = 0.5f;   // Moderate throttle
+        env.actions[1] = 0.0f;   // Neutral elevator
+        env.actions[2] = 1.0f;   // Full right aileron (constant roll)
+        env.actions[3] = 0.0f;   // Neutral rudder
+        env.actions[4] = -1.0f;  // No fire
+        c_step(&env);
+        total_reward += env.rewards[0];
+
+        // Refresh opponent position (so distance reward stays similar)
+        env.opponent.pos = vec3(env.player.pos.x + 300, env.player.pos.y, env.player.pos.z);
+    }
+
+    // Compare to level flight: same scenario but wings level
+    Dogfight env2 = make_env_with_roll_penalty(1000, 0.001f);
+    c_reset(&env2);
+
+    env2.player.pos = vec3(0, 0, 1000);
+    env2.player.vel = vec3(100, 0, 0);
+    env2.opponent.pos = vec3(300, 0, 1000);
+
+    float total_reward_level = 0.0f;
+    for (int i = 0; i < 50; i++) {
+        env2.actions[0] = 0.5f;
+        env2.actions[1] = 0.0f;
+        env2.actions[2] = 0.0f;   // NO aileron (stay level)
+        env2.actions[3] = 0.0f;
+        env2.actions[4] = -1.0f;
+        c_step(&env2);
+        total_reward_level += env2.rewards[0];
+
+        env2.opponent.pos = vec3(env2.player.pos.x + 300, env2.player.pos.y, env2.player.pos.z);
+    }
+
+    // Rolling should accumulate worse reward than level flight
+    assert(total_reward < total_reward_level);
+
+    printf("test_roll_penalty_accumulates PASS\n");
 }
 
 // Helper to get bearing from player to opponent (degrees, 0=ahead, 90=right, 180=behind)
@@ -1074,6 +1294,76 @@ void test_spawn_distance_range() {
     printf("test_spawn_distance_range PASS (min=%.0f, max=%.0f)\n", min_dist, max_dist);
 }
 
+void test_neg_g_penalty() {
+    // Test that pushing forward on stick (negative elevator) gets worse reward than pulling back
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+    env.actions[4] = -1.0f;  // Don't fire
+
+    // Pulling back (positive elevator)
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.opponent.pos = vec3(300, 0, 1000);
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);
+    env.actions[1] = 0.5f;  // Pull back
+    c_step(&env);
+    float reward_pull = env.rewards[0];
+
+    // Pushing forward (negative elevator)
+    c_reset(&env);
+    env.actions[4] = -1.0f;
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.opponent.pos = vec3(300, 0, 1000);
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);
+    env.actions[1] = -0.5f;  // Push forward
+    c_step(&env);
+    float reward_push = env.rewards[0];
+
+    // Pulling should have better reward (no neg_g penalty)
+    assert(reward_pull > reward_push);
+    printf("test_neg_g_penalty PASS (pull=%.5f > push=%.5f)\n", reward_pull, reward_push);
+}
+
+void test_rudder_penalty() {
+    // Test that no rudder gets better reward than full rudder
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+    env.actions[4] = -1.0f;  // Don't fire
+
+    // No rudder
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.opponent.pos = vec3(300, 0, 1000);
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);
+    env.actions[3] = 0.0f;  // No rudder
+    c_step(&env);
+    float reward_no_rudder = env.rewards[0];
+
+    // Full rudder
+    c_reset(&env);
+    env.actions[4] = -1.0f;
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.opponent.pos = vec3(300, 0, 1000);
+    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.ori = quat(1, 0, 0, 0);
+    env.actions[3] = 1.0f;  // Full rudder
+    c_step(&env);
+    float reward_rudder = env.rewards[0];
+
+    // No rudder should have better reward
+    assert(reward_no_rudder > reward_rudder);
+    printf("test_rudder_penalty PASS (no_rud=%.5f > rud=%.5f)\n", reward_no_rudder, reward_rudder);
+}
+
 int main() {
     printf("Running dogfight tests...\n\n");
 
@@ -1125,12 +1415,21 @@ int main() {
     test_kill_terminates_episode();
     test_combat_constants();
 
+    // Phase 5.5: Additional reward/penalty tests
+    test_roll_penalty();
+    test_roll_penalty_accumulates();
+    test_high_altitude_penalty();
+    test_tracking_reward();
+    test_firing_solution_reward();
+    test_neg_g_penalty();
+    test_rudder_penalty();
+
     // Phase 6: Spawn variety tests
     test_spawn_bearing_variety();
     test_spawn_heading_variety();
     test_curriculum_stages_differ();
     test_spawn_distance_range();
 
-    printf("\nAll 40 tests PASS\n");
+    printf("\nAll 47 tests PASS\n");
     return 0;
 }

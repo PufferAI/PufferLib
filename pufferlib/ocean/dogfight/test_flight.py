@@ -780,6 +780,219 @@ def test_rudder_only_turn():
     print(f"rudder_only:   {yaw_rate_deg_s:5.1f}°/s (target: 5-15°/s) [{status}]")
 
 
+def test_knife_edge_pull():
+    """
+    Knife-edge pull test - validates that elevator becomes YAW when rolled 90°.
+
+    Physics explanation:
+    - Plane rolled 90° right: right wing DOWN, canopy facing RIGHT
+    - Body axes after roll:
+      - Body X (nose): +X world (forward)
+      - Body Y (right wing): -Z world (DOWN)
+      - Body Z (canopy): +Y world (RIGHT)
+    - Positive elevator = pitch up in BODY frame = rotation about body Y
+    - Body Y is now -Z world, so this is rotation about world -Z
+    - Right-hand rule: thumb on -Z, fingers curl +X toward -Y
+    - Result: Nose yaws RIGHT in world frame!
+
+    Expected behavior:
+    1. Heading changes significantly (plane turns right)
+    2. Altitude drops (lift is horizontal, not vertical)
+    3. Up vector stays roughly horizontal (still in knife-edge)
+    4. This is essentially a "flat turn" using elevator
+
+    This tests that the quaternion kinematics correctly transform body-frame
+    rotations to world-frame effects.
+    """
+    env = Dogfight(num_envs=1)
+    env.reset()
+
+    # Start at high speed to avoid stall during the pull
+    V = 150.0  # m/s - well above stall speed even at high AoA
+
+    # Use EXACT 90° right roll via force_state for precise test
+    # Roll -90° about X axis: q = (cos(45°), -sin(45°), 0, 0)
+    roll_90 = np.radians(90)
+    qw = np.cos(roll_90 / 2)
+    qx = -np.sin(roll_90 / 2)  # Negative for right roll
+
+    env.force_state(
+        player_pos=(0, 0, 1500),
+        player_vel=(V, 0, 0),  # Flying +X
+        player_ori=(qw, qx, 0.0, 0.0),  # EXACT 90° right roll
+        player_throttle=1.0,
+    )
+
+    # Verify knife-edge achieved
+    state = env.get_state()
+    up_x, up_y, up_z = state['up_x'], state['up_y'], state['up_z']
+
+    # Record initial state
+    alt_start = state['pz']
+    vx_start, vy_start = state['vx'], state['vy']
+    heading_start = np.arctan2(vy_start, vx_start)
+
+    # --- Phase 2: Full elevator pull in knife-edge ---
+    headings = []
+    alts = []
+    up_zs = []
+
+    for step in range(100):  # 2 seconds
+        state = env.get_state()
+        vx, vy, vz = state['vx'], state['vy'], state['vz']
+        heading = np.arctan2(vy, vx)
+        alt = state['pz']
+        up_z_now = state['up_z']
+
+        headings.append(heading)
+        alts.append(alt)
+        up_zs.append(up_z_now)
+
+        # Full throttle, FULL ELEVATOR PULL, no aileron, no rudder
+        action = np.array([[1.0, 1.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+        _, _, term, _, _ = env.step(action)
+        if term[0]:
+            break
+
+    # --- Analysis ---
+    headings = np.unwrap(headings)
+    heading_change = np.degrees(headings[-1] - headings[0])
+    alt_loss = alt_start - alts[-1]
+    avg_up_z = np.mean(up_zs)
+    time_elapsed = len(headings) * 0.02
+
+    # Calculate turn rate
+    turn_rate = heading_change / time_elapsed if time_elapsed > 0 else 0
+
+    RESULTS['knife_pull_turn'] = turn_rate
+    RESULTS['knife_pull_alt_loss'] = alt_loss
+
+    # Expected:
+    # 1. Significant heading change (should turn right, so positive)
+    # 2. Altitude loss (no vertical lift)
+    # 3. Up vector stays near horizontal (|up_z| small)
+
+    heading_ok = heading_change > 20  # Should turn at least 20° right in 2 seconds
+    alt_ok = alt_loss > 5  # Should lose altitude
+    roll_maintained = abs(avg_up_z) < 0.3  # Up vector stays roughly horizontal
+
+    all_ok = heading_ok and alt_ok and roll_maintained
+    status = "OK" if all_ok else "CHECK"
+
+    direction = "RIGHT" if heading_change > 0 else "LEFT"
+    print(f"knife_pull:    turn={turn_rate:+.1f}°/s ({direction}), alt_lost={alt_loss:.0f}m, |up_z|={abs(avg_up_z):.2f} [{status}]")
+
+    if not heading_ok:
+        print(f"  WARNING: Expected significant right turn, got {heading_change:.1f}° heading change")
+    if not alt_ok:
+        print(f"  WARNING: Expected altitude loss, got {alt_loss:.1f}m")
+    if not roll_maintained:
+        print(f"  WARNING: Roll not maintained, up_z={avg_up_z:.2f} (should be near 0)")
+
+
+def test_knife_edge_flight():
+    """
+    Knife-edge flight test - validates that the plane CANNOT maintain altitude.
+
+    In knife-edge flight (90° roll), the wings are vertical and generate
+    NO vertical lift. The plane must rely on:
+    1. Fuselage side area (very inefficient, NOT modeled)
+    2. Rudder sideforce (NOT modeled - rudder only creates yaw rate)
+    3. Thrust vector (only if nosed up significantly)
+
+    A P-51D is NOT designed for knife-edge - streamlined fuselage = poor side area.
+    Even purpose-built aerobatic planes struggle to maintain altitude in true knife-edge.
+
+    Expected behavior: Plane should lose altitude rapidly (~9 m/s sink or more).
+    The nose may yaw from rudder input, but vertical force is insufficient.
+
+    Sources:
+    - https://www.thenakedscientists.com/articles/questions/what-produces-lift-during-knife-edge-pass
+    - https://www.aopa.org/news-and-media/all-news/1998/august/flight-training-magazine/form-and-function
+    """
+    env = Dogfight(num_envs=1)
+    env.reset()
+
+    # Start at cruise speed, wings level, flying +X
+    V = 120.0  # m/s - fast enough for good control authority
+    env.force_state(
+        player_pos=(0, 0, 1500),  # High altitude for test duration
+        player_vel=(V, 0, 0),      # Flying +X direction
+        player_ori=(1.0, 0.0, 0.0, 0.0),  # Wings level
+        player_throttle=1.0,
+    )
+
+    # --- Phase 1: Roll to knife-edge (90° right) ---
+    # Takes about 30 steps at MAX_ROLL_RATE=3.0 rad/s (0.5s to roll 90°)
+    for step in range(30):
+        # Full right aileron to roll 90°
+        action = np.array([[1.0, 0.0, 1.0, 0.0, 0.0]], dtype=np.float32)
+        env.step(action)
+
+    # Verify we're in knife-edge (up vector should be pointing +Y or -Y)
+    state = env.get_state()
+    up_y, up_z = state['up_y'], state['up_z']
+    roll_deg = np.degrees(np.arccos(np.clip(up_z, -1, 1)))
+
+    # Record altitude at start of knife-edge
+    alt_start = state['pz']
+
+    if abs(roll_deg - 90) > 15:
+        print(f"knife_edge: [SKIP] Failed to roll to 90° (got {roll_deg:.0f}°)")
+        return
+
+    # --- Phase 2: Knife-edge with full top rudder ---
+    # Right wing is down (up_y < 0 means rolled right)
+    # "Top rudder" = left rudder = yaw left in body frame = nose up in knife-edge body frame
+    # But in world frame, this tries to yaw the nose sideways, not up
+
+    alts = []
+    vzs = []
+
+    for step in range(150):  # 3 seconds at 50Hz
+        state = env.get_state()
+        alt = state['pz']
+        vz = state['vz']
+        alts.append(alt)
+        vzs.append(vz)
+
+        # Full throttle, no elevator, no aileron (hold knife-edge), FULL LEFT RUDDER
+        # Left rudder = positive rudder = yaw left in body frame
+        # In knife-edge (rolled 90° right), body-left is world-up
+        # So this SHOULD help keep nose up... if rudder created sideforce
+        action = np.array([[1.0, 0.0, 0.0, 1.0, 0.0]], dtype=np.float32)
+        _, _, term, _, _ = env.step(action)
+        if term[0]:
+            break
+
+    alt_end = alts[-1] if alts else alt_start
+    alt_loss = alt_start - alt_end
+    avg_vz = np.mean(vzs) if vzs else 0
+    time_elapsed = len(alts) * 0.02  # seconds
+
+    # Calculate sink rate
+    sink_rate = alt_loss / time_elapsed if time_elapsed > 0 else 0
+
+    RESULTS['knife_edge_sink'] = sink_rate
+    RESULTS['knife_edge_alt_loss'] = alt_loss
+
+    # Expected: significant altitude loss
+    # At 1g downward acceleration: v = g*t = 9.81 * 3 = 29 m/s after 3s
+    # Distance = 0.5 * g * t^2 = 0.5 * 9.81 * 9 = 44 m (free fall)
+    # With some lift from thrust vector angle, maybe 20-30m loss
+    # If plane CAN maintain altitude (loss < 5m), physics is WRONG
+
+    is_realistic = alt_loss > 10  # Should lose at least 10m in 3 seconds
+    status = "OK" if is_realistic else "FAIL - physics allows impossible knife-edge!"
+
+    print(f"knife_edge:    sink={sink_rate:5.1f} m/s, alt_lost={alt_loss:.0f}m in {time_elapsed:.1f}s [{status}]")
+
+    if not is_realistic:
+        print(f"  WARNING: P-51D should NOT maintain altitude in knife-edge!")
+        print(f"  Wings are vertical = no lift. Rudder only creates yaw, not sideforce.")
+        print(f"  Consider: Is thrust somehow pointing upward? Is there phantom lift?")
+
+
 def test_mode_weights():
     """
     Test that mode_weights actually biases autopilot randomization.
@@ -874,5 +1087,7 @@ if __name__ == "__main__":
     test_pitch_direction()
     test_roll_direction()
     test_rudder_only_turn()
+    test_knife_edge_pull()
+    test_knife_edge_flight()
     test_mode_weights()
     print_summary()
