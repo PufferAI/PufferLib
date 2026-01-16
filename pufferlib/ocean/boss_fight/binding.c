@@ -4,7 +4,7 @@
 #include "../env_binding.h"
 
 static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
-  env->size = unpack(kwargs, "size");
+  // No special init needed for now
   return 0;
 }
 

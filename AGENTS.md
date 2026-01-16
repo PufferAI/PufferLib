@@ -24,7 +24,7 @@ uv pip install -e .
 4. Not sure what this does yet:
 
 ```
-python setup.py build_boss_fight --inplace
+python setup.py build_boss_fight --inplace --force
 ```
 
 ### Testing

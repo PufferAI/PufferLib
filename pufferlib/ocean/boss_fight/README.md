@@ -5,7 +5,7 @@
 Build a **minimal** 2D boss fight environment to learn RL concepts with PufferLib.
 Focus: **observation design, reward shaping, training experiments and a bit of game dev using Raylib**
 
-The boss has **1 attack** (AOE burst). All hitboxes are circles.
+The boss has **1 attack** (AOE burst). All hitboxes are circles (collision = circles overlap).
 
 ---
 
@@ -57,6 +57,8 @@ ATTACK   — windup(4) + active(3) + recovery(6) = 13 ticks total, no movement
 
 - Circle at `player_pos + facing * 0.7`, radius `0.4`
 - `facing` = direction to boss at attack start
+- Hits boss if circles overlap: `dist(attack, boss) < 0.4 + 0.5`
+- **Effective range: 1.6 units from boss center**
 - Damage: 10
 
 ### Boss Behavior (Single Attack)
@@ -73,109 +75,102 @@ RECOVERY: 15 ticks (0.5s) — vulnerable, no damage
 **AOE Attack:**
 
 - Circle centered on boss, radius `1.5`
+- Hits player if circles overlap: `dist(player, boss) < 1.5 + 0.3`
+- **Effective range: 1.8 units from boss center**
 - Damage: 20
-- Player takes damage if: in AOE radius AND not in i-frames
+- Player avoids damage if: outside range OR in i-frames
 
 ---
 
-## Observation Space (14 floats)
+## Observation Space (13 floats)
 
-Keep it minimal. You can ablate later.
+Raw game state values — let the network learn its own representations.
 
 ```
-Geometry (3):
-  0: rel_boss_x      = boss_x - player_x (normalized by arena half-size)
-  1: rel_boss_y      = boss_y - player_y
-  2: distance        = clamp(dist / 5.0, 0, 1)
+Geometry (6):
+  0: dx              = boss_x - player_x (relative position)
+  1: dy              = boss_y - player_y
+  2: player_x        = absolute position [-5, 5]
+  3: player_y        = absolute position [-5, 5]
+  4: boss_x          = absolute position (fixed at 0)
+  5: boss_y          = absolute position (fixed at 0)
 
 Player (5):
-  3: player_hp       = hp / 100
-  4: dodge_ready     = 1.0 if can dodge, else 0.0
-  5: player_state    = {FREE: 0, DODGE: 0.33, ATTACK: 0.66}  # scalar encoding
-  6: state_progress  = ticks_in_state / state_duration
-  7: move_dir_x      = -1 to 1
+  6: player_hp       = raw HP [0, 100]
+  7: boss_hp         = raw HP [0, 100]
+  8: player_state    = enum {IDLING: 0, DODGING: 1, ATTACKING: 2}
+  9: player_dodge_cooldown = ticks remaining [0, 15]
+  10: player_state_ticks   = ticks in current state
 
-Boss (6):
-  8:  boss_hp        = hp / 100
-  9:  boss_phase     = {IDLE: 0, WINDUP: 0.33, ACTIVE: 0.66, RECOVERY: 1.0}
-  10: phase_progress = ticks_in_phase / phase_duration
-  11: time_to_damage = ticks until ACTIVE starts / 18 (1.0 during IDLE/RECOVERY)
-  12: in_aoe_range   = 1.0 if distance < 1.5, else 0.0
-  13: boss_attacking = 1.0 if in WINDUP/ACTIVE, else 0.0
+Boss (2):
+  11: boss_state     = enum {IDLING: 0, WINDING_UP: 1, ATTACKING: 2, RECOVERING: 3}
+  12: boss_phase_ticks = ticks in current phase
 ```
 
 ---
 
-## Reward Function (v1 — HP delta)
+## Reward Function
 
-```python
-# Per step
-reward = 0
-reward += (boss_hp_prev - boss_hp_now) * 0.1      # +1.0 per hit landed
-reward += (player_hp_prev - player_hp_now) * -0.1 # -2.0 per AOE hit taken
-reward += -0.001                                   # time penalty
+Design your own! Consider these questions:
 
-# Terminal
-if boss_hp <= 0: reward += 1.0   # win bonus
-if player_hp <= 0: reward -= 1.0 # lose penalty
-```
+- **What behaviors do you want to encourage?** (dealing damage, staying alive, winning)
+- **What behaviors do you want to discourage?** (taking hits, timing out, being passive)
+- **Dense vs sparse?** Should the agent get feedback every step, or only at episode end?
+- **Scaling?** How do you balance different reward components so one doesn't dominate?
+
+Hint: Track HP changes between steps. Think about terminal bonuses.
 
 ---
 
 ## Episode Termination
 
-- `terminated = True` if player or boss HP <= 0
-- `truncated = True` if ticks >= 900 (30 seconds)
+Episodes end when:
+
+- Someone wins (HP reaches 0)
+- Time runs out (prevent infinite episodes)
 
 ---
 
-## Implementation (Single File)
+## Implementation (C + Python)
 
-Everything in `soulsrl.py` (~250-300 lines):
+Core game logic in C with Python bindings:
 
-```python
-class SoulsEnv(pufferlib.PufferEnv):
-    # Player state machine
-    # Boss state machine
-    # Collision detection (circle-circle only)
-    # Observation building
-    # Reward calculation
+```
+boss_fight.h    — Game state struct, enums, c_reset(), c_step(), c_render()
+boss_fight.c    — Standalone test with keyboard input (Shift+WASD/Space/J)
+boss_fight.py   — PufferLib environment wrapper
 ```
 
-No separate core.py, no rendering, no curriculum stages.
+Uses Raylib for rendering (1080x720 window @ 30 FPS).
 
 ---
 
 ## RL Experiments
 
-Once v1 is working, run these experiments to learn RL concepts:
+Once v1 is working, design experiments to understand RL concepts:
 
-### Experiment 1: Observation Ablations
+### Experiment Ideas
 
-| Variant   | Change                                                          | Hypothesis                             |
-| --------- | --------------------------------------------------------------- | -------------------------------------- |
-| no_timing | Remove `time_to_damage`, `phase_progress`                       | Agent can't learn precise dodge timing |
-| no_range  | Remove `in_aoe_range`, `distance`                               | Agent can't learn spacing              |
-| minimal   | Only: `distance`, `time_to_damage`, `dodge_ready`, `boss_phase` | Test minimum viable obs                |
-| noisy     | Add 5 uniform random floats                                     | Network should ignore noise            |
+**Observation Ablations** — Which observations actually matter?
 
-### Experiment 2: Reward Shaping
+- What happens if the agent can't see timing information?
+- Does it need absolute position, or is relative enough?
+- What's the minimum viable observation space?
+- Can the network learn to ignore irrelevant/noisy inputs?
 
-| Variant         | Change                           | Hypothesis                 |
-| --------------- | -------------------------------- | -------------------------- |
-| sparse          | Only win/lose bonus, no HP delta | Much slower learning       |
-| no_time_penalty | Remove -0.001/step               | Agent becomes passive      |
-| dodge_bonus     | +0.2 for dodging during ACTIVE   | Might create dodge spam    |
-| proximity       | +0.01 for being close to boss    | Might discourage safe play |
+**Reward Shaping** — How does reward design affect behavior?
 
-### Experiment 3: Hyperparameters
+- What if you only reward winning/losing (sparse)?
+- What happens without a time penalty?
+- Can you incentivize specific behaviors (dodging at the right time)?
+- What unintended behaviors might reward bonuses create?
 
-| Param         | Values           | What to observe             |
-| ------------- | ---------------- | --------------------------- |
-| learning_rate | 1e-3, 3e-4, 1e-4 | Learning speed vs stability |
-| ent_coef      | 0.0, 0.01, 0.05  | Exploration vs exploitation |
-| num_envs      | 8, 32, 128       | Sample efficiency           |
-| hidden_size   | 32, 64, 128      | Model capacity              |
+**Hyperparameters** — See `boss_fight.ini` for the sweep config
+
+- Learning rate: stability vs speed
+- Entropy coefficient: exploration vs exploitation
+- Batch size / num_envs: sample efficiency
+- Network size: capacity vs overfitting
 
 ---
 
@@ -202,17 +197,18 @@ Only add these if baseline experiments are done:
 
 ## Deliverables
 
-1. `soulsrl.py` — Environment (PufferEnv)
-2. `train.py` — Training script with logging
-3. `experiments/` — Saved runs with different configs
-4. `results.md` — Summary of what you learned from experiments
+1. `boss_fight.h` — Core game logic in C
+2. `boss_fight.c` — Standalone test binary
+3. `boss_fight.py` — PufferLib environment wrapper
+4. `experiments/` — Saved runs with different configs
+5. `results.md` — Summary of what you learned from experiments
 
 ---
 
-## Timeline Estimate
+## Milestones
 
-- Day 1: Implement `soulsrl.py`, verify with random agent
-- Day 2: Train baseline, confirm learning
-- Day 3-4: Run observation ablations
-- Day 5-6: Run reward experiments
-- Day 7: Document findings, optional extensions
+1. **Environment works**: `c_step()` implemented, can play manually with keyboard
+2. **Random baseline**: Random agent wins ~0%, confirms game is non-trivial
+3. **Learning signal**: Trained agent shows improvement over random
+4. **Competent agent**: Win rate >80%
+5. **Experiments**: At least 3 ablations with documented findings
