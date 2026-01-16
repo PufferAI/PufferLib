@@ -145,7 +145,7 @@ static inline Quat quat_from_axis_angle(Vec3 axis, float angle) {
 
 #define MAX_PITCH_RATE 2.5f    // rad/s
 #define MAX_ROLL_RATE 3.0f     // rad/s
-#define MAX_YAW_RATE 1.5f      // rad/s
+#define MAX_YAW_RATE 0.50f     // rad/s (~29 deg/s command, realistic ~7 deg/s achieved)
 
 // ============================================================================
 // PLANE STRUCT - Flight object state
@@ -154,6 +154,7 @@ static inline Quat quat_from_axis_angle(Vec3 axis, float angle) {
 typedef struct {
     Vec3 pos;
     Vec3 vel;
+    Vec3 prev_vel;      // Previous velocity for acceleration calculation
     Quat ori;
     float throttle;
     int fire_cooldown;  // Ticks until can fire again (0 = ready)
@@ -166,6 +167,7 @@ typedef struct {
 static inline void reset_plane(Plane *p, Vec3 pos, Vec3 vel) {
     p->pos = pos;
     p->vel = vel;
+    p->prev_vel = vel;  // Initialize to current vel (no acceleration at start)
     p->ori = quat(1, 0, 0, 0);
     p->throttle = 0.5f;
     p->fire_cooldown = 0;
@@ -196,6 +198,9 @@ static inline void reset_plane(Plane *p, Vec3 pos, Vec3 vel) {
 //   - Symmetric stall model (real stall is asymmetric)
 // ============================================================================
 static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
+    // Save previous velocity for acceleration calculation (v²/r)
+    p->prev_vel = p->vel;
+
     // ========================================================================
     // 1. BODY FRAME AXES (transform from body to world coordinates)
     // ========================================================================
@@ -374,6 +379,9 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
 
 // Simple forward motion for opponent (no physics, just maintains heading)
 static inline void step_plane(Plane *p, float dt) {
+    // Save previous velocity for acceleration calculation
+    p->prev_vel = p->vel;
+
     Vec3 forward = quat_rotate(p->ori, vec3(1, 0, 0));
     float speed = norm3(p->vel);
     if (speed < 1.0f) speed = 80.0f;

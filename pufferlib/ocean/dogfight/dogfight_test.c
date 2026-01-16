@@ -19,13 +19,12 @@ static Dogfight make_env(int max_steps) {
     env.max_steps = max_steps;
     // Default reward config
     RewardConfig rcfg = {
-        .kill = 1.0f, .hit = 0.5f, .dist_scale = 0.0001f,
-        .closing_scale = 0.002f, .tail_scale = 0.05f,
+        .dist_scale = 0.0001f, .closing_scale = 0.002f, .tail_scale = 0.05f,
         .tracking = 0.05f, .firing_solution = 0.1f,
         .alt_low = 0.0005f, .alt_high = 0.0002f, .stall = 0.002f,
         .alt_min = 200.0f, .alt_max = 2500.0f, .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg);
+    init(&env, 0, &rcfg, 0, 0, 15000);  // curriculum_enabled=0, randomize=0, episodes_per_stage=15000
     return env;
 }
 
@@ -110,33 +109,34 @@ void test_c_reset() {
 }
 
 void test_compute_observations() {
+    // Tests ANGLES scheme (scheme 0, 12 obs)
     Dogfight env = make_env(1000);
     env.player.pos = vec3(1000, 500, 1500);
     env.player.vel = vec3(125, 0, 0);
-    env.player.ori = quat(1, 0, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);  // identity = facing +X, level
 
     compute_observations(&env);
 
-    // pos normalized
+    // ANGLES scheme layout:
+    // [0-2] pos normalized
     ASSERT_NEAR(env.observations[0], 1000.0f / WORLD_HALF_X, 1e-6f);
     ASSERT_NEAR(env.observations[1], 500.0f / WORLD_HALF_Y, 1e-6f);
     ASSERT_NEAR(env.observations[2], 1500.0f / WORLD_MAX_Z, 1e-6f);
 
-    // vel normalized
+    // [3] speed normalized (scalar)
     ASSERT_NEAR(env.observations[3], 125.0f / MAX_SPEED, 1e-6f);
-    ASSERT_NEAR(env.observations[4], 0.0f, 1e-6f);
-    ASSERT_NEAR(env.observations[5], 0.0f, 1e-6f);
 
-    // orientation (identity)
-    ASSERT_NEAR(env.observations[6], 1.0f, 1e-6f);
-    ASSERT_NEAR(env.observations[7], 0.0f, 1e-6f);
-    ASSERT_NEAR(env.observations[8], 0.0f, 1e-6f);
-    ASSERT_NEAR(env.observations[9], 0.0f, 1e-6f);
+    // [4-6] euler angles (all 0 for identity quaternion)
+    ASSERT_NEAR(env.observations[4], 0.0f, 1e-5f);  // pitch / PI
+    ASSERT_NEAR(env.observations[5], 0.0f, 1e-5f);  // roll / PI
+    ASSERT_NEAR(env.observations[6], 0.0f, 1e-5f);  // yaw / PI
 
-    // up vector (0,0,1 for identity orientation)
-    ASSERT_NEAR(env.observations[10], 0.0f, 1e-6f);
-    ASSERT_NEAR(env.observations[11], 0.0f, 1e-6f);
-    ASSERT_NEAR(env.observations[12], 1.0f, 1e-6f);
+    // [7-11] target angles - depend on opponent position, check valid ranges
+    assert(env.observations[7] >= -1.0f && env.observations[7] <= 1.0f);   // azimuth
+    assert(env.observations[8] >= -1.0f && env.observations[8] <= 1.0f);   // elevation
+    assert(env.observations[9] >= -2.0f && env.observations[9] <= 2.0f);   // distance
+    assert(env.observations[10] >= -1.0f && env.observations[10] <= 1.0f); // closing_rate
+    assert(env.observations[11] >= -1.0f && env.observations[11] <= 1.0f); // opp_heading
 
     printf("test_compute_observations PASS\n");
 }
@@ -212,30 +212,42 @@ void test_opponent_spawns() {
 }
 
 void test_relative_observations() {
+    // Tests ANGLES scheme relative target info (azimuth, elevation, distance)
     Dogfight env = make_env(1000);
     c_reset(&env);
 
     // Place planes at known positions
+    // Player at origin facing +X, opponent directly ahead and slightly right/up
     env.player.pos = vec3(0, 0, 1000);
     env.player.vel = vec3(80, 0, 0);
-    env.player.ori = quat(1, 0, 0, 0);
-    env.opponent.pos = vec3(500, 100, 1050);
+    env.player.ori = quat(1, 0, 0, 0);  // identity = facing +X
+    env.opponent.pos = vec3(500, 100, 1050);  // 500m ahead, 100m right, 50m up
     env.opponent.vel = vec3(80, 0, 0);
     env.opponent.ori = quat(1, 0, 0, 0);
 
     compute_observations(&env);
 
-    // First 13 obs are player state (from Phase 1)
-    // New obs should include relative pos/vel to opponent
-    // With identity orientation, body frame = world frame
-    // rel_pos = opponent.pos - player.pos = (500, 100, 50)
-    float rel_x = env.observations[13];  // Should be 500 / WORLD_HALF_X
-    float rel_y = env.observations[14];  // Should be 100 / WORLD_HALF_Y
-    float rel_z = env.observations[15];  // Should be 50 / WORLD_MAX_Z
+    // ANGLES scheme: relative position encoded as azimuth [7] and elevation [8]
+    // rel_pos in body frame = (500, 100, 50) since identity orientation
+    // azimuth = atan2(100, 500) / PI ≈ 0.063
+    // elevation = atan2(50, sqrt(500^2+100^2)) / (PI/2) ≈ 0.062
+    float azimuth = env.observations[7];
+    float elevation = env.observations[8];
+    float distance = env.observations[9];
 
-    ASSERT_NEAR(rel_x, 500.0f / WORLD_HALF_X, 1e-5f);
-    ASSERT_NEAR(rel_y, 100.0f / WORLD_HALF_Y, 1e-5f);
-    ASSERT_NEAR(rel_z, 50.0f / WORLD_MAX_Z, 1e-5f);
+    // Azimuth should be small positive (opponent slightly right)
+    float expected_az = atan2f(100.0f, 500.0f) / PI;  // ~0.063
+    ASSERT_NEAR(azimuth, expected_az, 1e-4f);
+
+    // Elevation should be small positive (opponent slightly above)
+    float r_horiz = sqrtf(500*500 + 100*100);
+    float expected_el = atan2f(50.0f, r_horiz) / (PI * 0.5f);  // ~0.062
+    ASSERT_NEAR(elevation, expected_el, 1e-4f);
+
+    // Distance: sqrt(500^2 + 100^2 + 50^2) ≈ 512m, normalized
+    float dist = sqrtf(500*500 + 100*100 + 50*50);
+    float expected_dist = clampf(dist / GUN_RANGE, 0.0f, 4.0f) - 2.0f;
+    ASSERT_NEAR(distance, expected_dist, 1e-4f);
 
     printf("test_relative_observations PASS\n");
 }
@@ -894,6 +906,174 @@ void test_combat_constants() {
     printf("test_combat_constants PASS\n");
 }
 
+// Helper to make env with curriculum enabled
+static Dogfight make_env_curriculum(int max_steps, int randomize) {
+    Dogfight env = {0};
+    env.observations = obs_buf;
+    env.actions = act_buf;
+    env.rewards = rew_buf;
+    env.terminals = term_buf;
+    env.max_steps = max_steps;
+    RewardConfig rcfg = {
+        .dist_scale = 0.0001f, .closing_scale = 0.002f, .tail_scale = 0.05f,
+        .tracking = 0.05f, .firing_solution = 0.1f,
+        .alt_low = 0.0005f, .alt_high = 0.0002f, .stall = 0.002f,
+        .alt_min = 200.0f, .alt_max = 2500.0f, .speed_min = 50.0f,
+    };
+    init(&env, 0, &rcfg, 1, randomize, 15000);  // curriculum_enabled=1
+    return env;
+}
+
+// Helper to get bearing from player to opponent (degrees, 0=ahead, 90=right, 180=behind)
+static float get_bearing(Dogfight *env) {
+    Vec3 rel = sub3(env->opponent.pos, env->player.pos);
+    Vec3 player_fwd = quat_rotate(env->player.ori, vec3(1, 0, 0));
+    float dot = dot3(normalize3(rel), player_fwd);
+    return acosf(clampf(dot, -1, 1)) * 180.0f / M_PI;
+}
+
+// Helper to get opponent heading (degrees, 0=+X, 90=+Y)
+static float get_opponent_heading(Dogfight *env) {
+    Vec3 opp_fwd = quat_rotate(env->opponent.ori, vec3(1, 0, 0));
+    return atan2f(opp_fwd.y, opp_fwd.x) * 180.0f / M_PI;
+}
+
+void test_spawn_bearing_variety() {
+    // Test that FULL_RANDOM stage spawns opponents at various bearings (not just ahead)
+    // Use progressive mode and set total_episodes high enough to be at stage 5
+    Dogfight env = make_env_curriculum(1000, 0);  // Progressive mode
+    env.total_episodes = env.episodes_per_stage * 5;  // Force stage 5 (FULL_RANDOM)
+
+    int front_count = 0;   // bearing < 45
+    int side_count = 0;    // bearing 45-135
+    int behind_count = 0;  // bearing > 135
+
+    // Run many resets with different seeds
+    for (int seed = 0; seed < 100; seed++) {
+        srand(seed * 7 + 13);  // Vary seed
+        c_reset(&env);
+
+        // Verify we're in stage 5
+        assert(env.stage == CURRICULUM_FULL_RANDOM);
+
+        float bearing = get_bearing(&env);
+        if (bearing < 45.0f) front_count++;
+        else if (bearing > 135.0f) behind_count++;
+        else side_count++;
+    }
+
+    // With 360° spawning, we should see opponents in all directions
+    // Each sector should have at least some spawns (allow for randomness)
+    assert(front_count > 0);  // Some in front
+    assert(side_count > 0);   // Some to the side
+    assert(behind_count > 0); // Some behind (this is the key test!)
+
+    printf("test_spawn_bearing_variety PASS (front=%d, side=%d, behind=%d)\n",
+           front_count, side_count, behind_count);
+}
+
+void test_spawn_heading_variety() {
+    // Test that FULL_RANDOM opponents have varied headings (not always 0)
+    // Use progressive mode and set total_episodes high enough to be at stage 5
+    Dogfight env = make_env_curriculum(1000, 0);  // Progressive mode
+    env.total_episodes = env.episodes_per_stage * 5;  // Force stage 5
+
+    float min_heading = 999.0f;
+    float max_heading = -999.0f;
+    int varied_count = 0;  // Count of headings not near 0
+
+    for (int seed = 0; seed < 50; seed++) {
+        srand(seed * 11 + 17);
+        c_reset(&env);
+
+        // Verify we're in stage 5
+        assert(env.stage == CURRICULUM_FULL_RANDOM);
+
+        float heading = get_opponent_heading(&env);
+        if (heading < min_heading) min_heading = heading;
+        if (heading > max_heading) max_heading = heading;
+        if (fabsf(heading) > 30.0f) varied_count++;  // Not facing +X
+    }
+
+    // Headings should vary across the full 360° range
+    float heading_range = max_heading - min_heading;
+    assert(heading_range > 90.0f);  // At least 90° variation
+    assert(varied_count > 10);      // At least some not facing default direction
+
+    printf("test_spawn_heading_variety PASS (range=%.0f°, varied=%d)\n",
+           heading_range, varied_count);
+}
+
+void test_curriculum_stages_differ() {
+    // Test that different curriculum stages produce different spawn patterns
+    // Use progressive mode and manipulate total_episodes to get desired stages
+    Dogfight env = make_env_curriculum(1000, 0);  // Progressive mode (randomize=0)
+
+    // Stage 0: TAIL_CHASE - opponent ahead, same direction
+    // total_episodes < episodes_per_stage gives stage 0
+    env.total_episodes = 0;
+    srand(42);
+    c_reset(&env);
+    float bearing_tail = get_bearing(&env);
+    float heading_tail = get_opponent_heading(&env);
+    assert(env.stage == CURRICULUM_TAIL_CHASE);
+
+    // Stage 1: HEAD_ON - opponent ahead, facing us
+    env.total_episodes = env.episodes_per_stage;  // Stage 1
+    srand(42);
+    c_reset(&env);
+    float bearing_head = get_bearing(&env);
+    assert(env.stage == CURRICULUM_HEAD_ON);
+
+    // Stage 2: CROSSING - opponent to side
+    env.total_episodes = env.episodes_per_stage * 2;  // Stage 2
+    srand(42);
+    c_reset(&env);
+    float bearing_cross = get_bearing(&env);
+    assert(env.stage == CURRICULUM_CROSSING);
+
+    // TAIL_CHASE should have opponent nearly ahead (small bearing)
+    assert(bearing_tail < 30.0f);
+
+    // HEAD_ON should have opponent ahead
+    assert(bearing_head < 30.0f);
+
+    // CROSSING should have opponent more to the side (larger bearing)
+    assert(bearing_cross > 45.0f);
+
+    // TAIL_CHASE opponent should face same direction as player (~0° heading)
+    assert(fabsf(heading_tail) < 30.0f);
+
+    printf("test_curriculum_stages_differ PASS (tail=%.0f°, head=%.0f°, cross=%.0f°)\n",
+           bearing_tail, bearing_head, bearing_cross);
+}
+
+void test_spawn_distance_range() {
+    // Test that spawn distances are within expected ranges
+    Dogfight env = make_env_curriculum(1000, 1);
+
+    float min_dist = 9999.0f;
+    float max_dist = 0.0f;
+
+    for (int seed = 0; seed < 50; seed++) {
+        srand(seed * 13 + 7);
+        c_reset(&env);
+
+        Vec3 rel = sub3(env.opponent.pos, env.player.pos);
+        float dist = norm3(rel);
+
+        if (dist < min_dist) min_dist = dist;
+        if (dist > max_dist) max_dist = dist;
+    }
+
+    // Distances should be reasonable (200-700m typical range across all stages)
+    assert(min_dist > 100.0f);   // Not too close
+    assert(max_dist < 800.0f);   // Not too far
+    assert(max_dist - min_dist > 100.0f);  // Some variety
+
+    printf("test_spawn_distance_range PASS (min=%.0f, max=%.0f)\n", min_dist, max_dist);
+}
+
 int main() {
     printf("Running dogfight tests...\n\n");
 
@@ -945,6 +1125,12 @@ int main() {
     test_kill_terminates_episode();
     test_combat_constants();
 
-    printf("\nAll 36 tests PASS\n");
+    // Phase 6: Spawn variety tests
+    test_spawn_bearing_variety();
+    test_spawn_heading_variety();
+    test_curriculum_stages_differ();
+    test_spawn_distance_range();
+
+    printf("\nAll 40 tests PASS\n");
     return 0;
 }

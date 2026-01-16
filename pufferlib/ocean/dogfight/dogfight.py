@@ -18,12 +18,12 @@ class AutopilotMode:
 
 # Observation sizes by scheme (must match C OBS_SIZES in dogfight.h)
 OBS_SIZES = {
-    0: 19,  # WORLD_FRAME: player(13) + rel_pos(3) + rel_vel(3)
-    1: 21,  # BODY_FRAME: same + aim_dot(1) + dist_norm(1)
-    2: 12,  # ANGLES: pos(3) + speed(1) + euler(3) + target_angles(4) + opp(1)
-    3: 17,  # CONTROL_ERROR: player(11) + control_errors(4) + target(2)
-    4: 10,  # REALISTIC: instruments(4) + gunsight(3) + visual(3)
-    5: 43,  # MAXIMALIST: everything combined
+    0: 12,  # ANGLES: pos(3) + speed(1) + euler(3) + target_angles(4) + opp(1)
+    1: 17,  # CONTROL_ERROR: player(11) + control_errors(4) + target(2)
+    2: 10,  # REALISTIC: instruments(4) + gunsight(3) + visual(3)
+    3: 10,  # REALISTIC_RANGE: instruments(4) + gunsight(3) + visual(3) w/ km range
+    4: 13,  # REALISTIC_ENEMY_STATE: + enemy pitch/roll/heading
+    5: 15,  # REALISTIC_FULL: + turn rate + G-loading
 }
 
 
@@ -37,9 +37,11 @@ class Dogfight(pufferlib.PufferEnv):
         seed=42,
         max_steps=3000,
         obs_scheme=0,
+        # Curriculum learning
+        curriculum_enabled=0,       # 0=off (legacy), 1=on (progressive stages)
+        curriculum_randomize=0,     # 0=progressive (training), 1=random stage each episode (eval)
+        episodes_per_stage=15000,   # Episodes before advancing difficulty
         # Reward weights (all sweepable via INI)
-        reward_kill=1.0,
-        reward_hit=0.5,
         reward_dist_scale=0.0001,
         reward_closing_scale=0.002,
         reward_tail_scale=0.05,
@@ -89,9 +91,11 @@ class Dogfight(pufferlib.PufferEnv):
                 report_interval=self.report_interval,
                 max_steps=max_steps,
                 obs_scheme=obs_scheme,
+                # Curriculum learning
+                curriculum_enabled=curriculum_enabled,
+                curriculum_randomize=curriculum_randomize,
+                episodes_per_stage=episodes_per_stage,
                 # Reward config (all sweepable)
-                reward_kill=reward_kill,
-                reward_hit=reward_hit,
                 reward_dist_scale=reward_dist_scale,
                 reward_closing_scale=reward_closing_scale,
                 reward_tail_scale=reward_tail_scale,
@@ -181,6 +185,22 @@ class Dogfight(pufferlib.PufferEnv):
 
         # Call C binding with the specific env handle
         binding.env_force_state(self._env_handles[env_idx], **kwargs)
+
+    def get_state(self, env_idx=0):
+        """
+        Get raw player state (independent of observation scheme).
+
+        Returns dict with keys:
+            px, py, pz: Position
+            vx, vy, vz: Velocity
+            ow, ox, oy, oz: Orientation quaternion
+            up_x, up_y, up_z: Up vector (derived from quaternion)
+            fwd_x, fwd_y, fwd_z: Forward vector (derived from quaternion)
+            throttle: Current throttle
+
+        Useful for physics tests that need exact state regardless of obs_scheme.
+        """
+        return binding.env_get_state(self._env_handles[env_idx])
 
     def set_autopilot(
         self,

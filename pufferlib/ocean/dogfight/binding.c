@@ -15,6 +15,7 @@ static PyObject* env_set_autopilot(PyObject* self, PyObject* args, PyObject* kwa
 static PyObject* vec_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* vec_set_mode_weights(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* env_get_autopilot_mode(PyObject* self, PyObject* args);
+static PyObject* env_get_state(PyObject* self, PyObject* args);
 
 // Register custom methods before including the template
 #define MY_METHODS \
@@ -22,7 +23,8 @@ static PyObject* env_get_autopilot_mode(PyObject* self, PyObject* args);
     {"env_set_autopilot", (PyCFunction)env_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set opponent autopilot mode"}, \
     {"vec_set_autopilot", (PyCFunction)vec_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set autopilot for all envs"}, \
     {"vec_set_mode_weights", (PyCFunction)vec_set_mode_weights, METH_VARARGS | METH_KEYWORDS, "Set mode weights for all envs"}, \
-    {"env_get_autopilot_mode", (PyCFunction)env_get_autopilot_mode, METH_VARARGS, "Get current autopilot mode"}
+    {"env_get_autopilot_mode", (PyCFunction)env_get_autopilot_mode, METH_VARARGS, "Get current autopilot mode"}, \
+    {"env_get_state", (PyCFunction)env_get_state, METH_VARARGS, "Get raw player state"}
 
 // Helper to get float from kwargs with default (before env_binding.h since my_init uses it)
 static float get_float(PyObject *kwargs, const char *key, float default_val) {
@@ -52,8 +54,6 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
 
     // Build reward config from kwargs (all sweepable via INI)
     RewardConfig rcfg = {
-        .kill = get_float(kwargs, "reward_kill", 1.0f),
-        .hit = get_float(kwargs, "reward_hit", 0.5f),
         .dist_scale = get_float(kwargs, "reward_dist_scale", 0.0001f),
         .closing_scale = get_float(kwargs, "reward_closing_scale", 0.002f),
         .tail_scale = get_float(kwargs, "reward_tail_scale", 0.05f),
@@ -67,7 +67,12 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
         .speed_min = get_float(kwargs, "speed_min", 50.0f),
     };
 
-    init(env, obs_scheme, &rcfg);
+    // Curriculum learning params
+    int curriculum_enabled = get_int(kwargs, "curriculum_enabled", 0);
+    int curriculum_randomize = get_int(kwargs, "curriculum_randomize", 0);
+    int episodes_per_stage = get_int(kwargs, "episodes_per_stage", 15000);
+
+    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, episodes_per_stage);
     return 0;
 }
 
@@ -79,6 +84,7 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "kills", log->kills);
     assign_to_dict(dict, "shots_fired", log->shots_fired);
     assign_to_dict(dict, "accuracy", log->accuracy);
+    assign_to_dict(dict, "stage", log->stage);  // Curriculum stage (0-5)
     assign_to_dict(dict, "n", log->n);
     return 0;
 }
@@ -231,4 +237,48 @@ static PyObject* env_get_autopilot_mode(PyObject* self, PyObject* args) {
     if (!env) return NULL;
 
     return PyLong_FromLong((long)env->opponent_ap.mode);
+}
+
+// Get raw player state (for physics tests - independent of obs_scheme)
+static PyObject* env_get_state(PyObject* self, PyObject* args) {
+    Env* env = unpack_env(args);
+    if (!env) return NULL;
+
+    Plane* p = &env->player;
+    Vec3 up = quat_rotate(p->ori, vec3(0, 0, 1));
+    Vec3 fwd = quat_rotate(p->ori, vec3(1, 0, 0));
+
+    PyObject* dict = PyDict_New();
+    if (!dict) return NULL;
+
+    // Position
+    PyDict_SetItemString(dict, "px", PyFloat_FromDouble(p->pos.x));
+    PyDict_SetItemString(dict, "py", PyFloat_FromDouble(p->pos.y));
+    PyDict_SetItemString(dict, "pz", PyFloat_FromDouble(p->pos.z));
+
+    // Velocity
+    PyDict_SetItemString(dict, "vx", PyFloat_FromDouble(p->vel.x));
+    PyDict_SetItemString(dict, "vy", PyFloat_FromDouble(p->vel.y));
+    PyDict_SetItemString(dict, "vz", PyFloat_FromDouble(p->vel.z));
+
+    // Orientation quaternion
+    PyDict_SetItemString(dict, "ow", PyFloat_FromDouble(p->ori.w));
+    PyDict_SetItemString(dict, "ox", PyFloat_FromDouble(p->ori.x));
+    PyDict_SetItemString(dict, "oy", PyFloat_FromDouble(p->ori.y));
+    PyDict_SetItemString(dict, "oz", PyFloat_FromDouble(p->ori.z));
+
+    // Up vector (derived)
+    PyDict_SetItemString(dict, "up_x", PyFloat_FromDouble(up.x));
+    PyDict_SetItemString(dict, "up_y", PyFloat_FromDouble(up.y));
+    PyDict_SetItemString(dict, "up_z", PyFloat_FromDouble(up.z));
+
+    // Forward vector (derived)
+    PyDict_SetItemString(dict, "fwd_x", PyFloat_FromDouble(fwd.x));
+    PyDict_SetItemString(dict, "fwd_y", PyFloat_FromDouble(fwd.y));
+    PyDict_SetItemString(dict, "fwd_z", PyFloat_FromDouble(fwd.z));
+
+    // Throttle
+    PyDict_SetItemString(dict, "throttle", PyFloat_FromDouble(p->throttle));
+
+    return dict;
 }

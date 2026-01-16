@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "raylib.h"
+#include "rlgl.h"  // For rlSetClipPlanes()
 
 // Define DEBUG before including flightlib.h so physics functions can use it
 #define DEBUG 0
@@ -17,17 +18,28 @@
 
 // Observation scheme enumeration
 typedef enum {
-    OBS_WORLD_FRAME = 0,    // Current baseline (19 obs)
-    OBS_BODY_FRAME = 1,     // Body-frame transforms (21 obs)
-    OBS_ANGLES = 2,         // Spherical coordinates (12 obs)
-    OBS_CONTROL_ERROR = 3,  // Control errors to target (17 obs)
-    OBS_REALISTIC = 4,      // Cockpit instruments only (10 obs)
-    OBS_MAXIMALIST = 5,     // Everything combined (43 obs)
+    OBS_ANGLES = 0,              // Spherical coordinates (12 obs)
+    OBS_CONTROL_ERROR = 1,       // Control errors to target (17 obs)
+    OBS_REALISTIC = 2,           // Cockpit instruments only (10 obs)
+    OBS_REALISTIC_RANGE = 3,     // REALISTIC with explicit range (10 obs)
+    OBS_REALISTIC_ENEMY_STATE = 4, // + enemy pitch/roll/heading (13 obs)
+    OBS_REALISTIC_FULL = 5,      // + turn rate + G-loading (15 obs)
     OBS_SCHEME_COUNT
 } ObsScheme;
 
 // Observation size lookup table
-static const int OBS_SIZES[OBS_SCHEME_COUNT] = {19, 21, 12, 17, 10, 43};
+static const int OBS_SIZES[OBS_SCHEME_COUNT] = {12, 17, 10, 10, 13, 15};
+
+// Curriculum learning stages (progressive difficulty)
+typedef enum {
+    CURRICULUM_TAIL_CHASE = 0,   // Easiest: opponent ahead, same heading
+    CURRICULUM_HEAD_ON,          // Opponent coming toward us
+    CURRICULUM_CROSSING,         // 90 degree deflection shots
+    CURRICULUM_VERTICAL,         // Above or below player
+    CURRICULUM_MANEUVERING,      // Opponent does turns
+    CURRICULUM_FULL_RANDOM,      // Maximum difficulty
+    CURRICULUM_COUNT
+} CurriculumStage;
 
 // Simulation timing
 #define DT 0.02f
@@ -58,13 +70,12 @@ typedef struct Log {
     float kills;           // cumulative kills
     float shots_fired;     // cumulative shots
     float accuracy;        // kills / shots_fired * 100
+    float stage;           // current curriculum stage (for monitoring)
     float n;
 } Log;
 
 // Reward configuration (all values sweepable via INI)
 typedef struct RewardConfig {
-    float kill;              // +N for kill (fixed at 1.0)
-    float hit;               // +N for hit
     float dist_scale;        // -N per meter distance
     float closing_scale;     // +N per m/s closing
     float tail_scale;        // ±N for tail position
@@ -118,9 +129,15 @@ typedef struct Dogfight {
     // Episode-level tracking (reset each episode)
     int kill;                   // 1 if killed this episode, 0 otherwise
     float episode_shots_fired;  // For accuracy tracking
+    // Curriculum learning
+    int curriculum_enabled;     // 0 = off (legacy spawning), 1 = on
+    int curriculum_randomize;   // 0 = progressive (training), 1 = random stage each episode (eval)
+    int episodes_per_stage;     // Episodes before advancing to next stage
+    int total_episodes;         // Cumulative episodes (persists across resets)
+    CurriculumStage stage;      // Current difficulty stage
 } Dogfight;
 
-void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg) {
+void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, int episodes_per_stage) {
     env->log = (Log){0};
     env->tick = 0;
     env->episode_return = 0.0f;
@@ -139,6 +156,12 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg) {
     // Episode tracking
     env->kill = 0;
     env->episode_shots_fired = 0.0f;
+    // Curriculum learning
+    env->curriculum_enabled = curriculum_enabled;
+    env->curriculum_randomize = curriculum_randomize;
+    env->episodes_per_stage = episodes_per_stage > 0 ? episodes_per_stage : 15000;
+    env->total_episodes = 0;
+    env->stage = CURRICULUM_TAIL_CHASE;
 }
 
 void add_log(Dogfight *env) {
@@ -152,118 +175,12 @@ void add_log(Dogfight *env) {
     env->log.score += env->rewards[0];
     env->log.shots_fired += env->episode_shots_fired;
     env->log.accuracy = (env->log.shots_fired > 0.0f) ? (env->log.kills / env->log.shots_fired * 100.0f) : 0.0f;
+    env->log.stage = (float)env->stage;  // Track curriculum stage
     env->log.n += 1.0f;
     if (DEBUG) printf("  log.perf=%.2f, log.shots_fired=%.0f, log.n=%.0f\n", env->log.perf, env->log.shots_fired, env->log.n);
 }
 
-// Scheme 0: World frame observations (original baseline)
-void compute_obs_world_frame(Dogfight *env) {
-    Plane *p = &env->player;
-    Plane *o = &env->opponent;
-    Vec3 up = quat_rotate(p->ori, vec3(0, 0, 1));
-    Vec3 rel_pos = sub3(o->pos, p->pos);
-    Vec3 rel_vel = sub3(o->vel, p->vel);
-
-    if (DEBUG) printf("=== OBS tick=%d ===\n", env->tick);
-
-    int i = 0;
-    if (DEBUG) printf("pos_x_norm=%.3f (raw=%.1f)\n", p->pos.x * INV_WORLD_HALF_X, p->pos.x);
-    env->observations[i++] = p->pos.x * INV_WORLD_HALF_X;
-    if (DEBUG) printf("pos_y_norm=%.3f (raw=%.1f)\n", p->pos.y * INV_WORLD_HALF_Y, p->pos.y);
-    env->observations[i++] = p->pos.y * INV_WORLD_HALF_Y;
-    if (DEBUG) printf("pos_z_norm=%.3f (raw=%.1f)\n", p->pos.z * INV_WORLD_MAX_Z, p->pos.z);
-    env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
-    if (DEBUG) printf("vel_x_norm=%.3f (raw=%.1f)\n", p->vel.x * INV_MAX_SPEED, p->vel.x);
-    env->observations[i++] = p->vel.x * INV_MAX_SPEED;
-    if (DEBUG) printf("vel_y_norm=%.3f (raw=%.1f)\n", p->vel.y * INV_MAX_SPEED, p->vel.y);
-    env->observations[i++] = p->vel.y * INV_MAX_SPEED;
-    if (DEBUG) printf("vel_z_norm=%.3f (raw=%.1f)\n", p->vel.z * INV_MAX_SPEED, p->vel.z);
-    env->observations[i++] = p->vel.z * INV_MAX_SPEED;
-    if (DEBUG) printf("ori_w=%.3f\n", p->ori.w);
-    env->observations[i++] = p->ori.w;
-    if (DEBUG) printf("ori_x=%.3f\n", p->ori.x);
-    env->observations[i++] = p->ori.x;
-    if (DEBUG) printf("ori_y=%.3f\n", p->ori.y);
-    env->observations[i++] = p->ori.y;
-    if (DEBUG) printf("ori_z=%.3f\n", p->ori.z);
-    env->observations[i++] = p->ori.z;
-    if (DEBUG) printf("up_x=%.3f\n", up.x);
-    env->observations[i++] = up.x;
-    if (DEBUG) printf("up_y=%.3f\n", up.y);
-    env->observations[i++] = up.y;
-    if (DEBUG) printf("up_z=%.3f\n", up.z);
-    env->observations[i++] = up.z;
-    if (DEBUG) printf("rel_pos_x_norm=%.3f (raw=%.1f)\n", rel_pos.x * INV_WORLD_HALF_X, rel_pos.x);
-    env->observations[i++] = rel_pos.x * INV_WORLD_HALF_X;
-    if (DEBUG) printf("rel_pos_y_norm=%.3f (raw=%.1f)\n", rel_pos.y * INV_WORLD_HALF_Y, rel_pos.y);
-    env->observations[i++] = rel_pos.y * INV_WORLD_HALF_Y;
-    if (DEBUG) printf("rel_pos_z_norm=%.3f (raw=%.1f)\n", rel_pos.z * INV_WORLD_MAX_Z, rel_pos.z);
-    env->observations[i++] = rel_pos.z * INV_WORLD_MAX_Z;
-    if (DEBUG) printf("rel_vel_x_norm=%.3f (raw=%.1f)\n", rel_vel.x * INV_MAX_SPEED, rel_vel.x);
-    env->observations[i++] = rel_vel.x * INV_MAX_SPEED;
-    if (DEBUG) printf("rel_vel_y_norm=%.3f (raw=%.1f)\n", rel_vel.y * INV_MAX_SPEED, rel_vel.y);
-    env->observations[i++] = rel_vel.y * INV_MAX_SPEED;
-    if (DEBUG) printf("rel_vel_z_norm=%.3f (raw=%.1f)\n", rel_vel.z * INV_MAX_SPEED, rel_vel.z);
-    env->observations[i++] = rel_vel.z * INV_MAX_SPEED;
-    // OBS_SIZE = 19
-}
-
-// Scheme 1: Body frame observations (rel_pos/vel in body frame + aim helpers)
-void compute_obs_body_frame(Dogfight *env) {
-    Plane *p = &env->player;
-    Plane *o = &env->opponent;
-
-    // Inverse quaternion for world→body transform
-    Quat q_inv = {p->ori.w, -p->ori.x, -p->ori.y, -p->ori.z};
-
-    // Transform quantities to body frame
-    Vec3 vel_body = quat_rotate(q_inv, p->vel);
-    Vec3 rel_pos = sub3(o->pos, p->pos);
-    Vec3 rel_vel = sub3(o->vel, p->vel);
-    Vec3 rel_pos_body = quat_rotate(q_inv, rel_pos);  // rel_pos_body.x > 0 = ahead
-    Vec3 rel_vel_body = quat_rotate(q_inv, rel_vel);
-
-    // Aim helpers
-    float dist = norm3(rel_pos);
-    Vec3 to_target = normalize3(rel_pos_body);
-    float aim_dot = to_target.x;  // In body frame, +X is forward
-
-    // Up vector (world frame - for attitude reference)
-    Vec3 up = quat_rotate(p->ori, vec3(0, 0, 1));
-
-    int i = 0;
-    // Player position (world - for bounds awareness)
-    env->observations[i++] = p->pos.x * INV_WORLD_HALF_X;
-    env->observations[i++] = p->pos.y * INV_WORLD_HALF_Y;
-    env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
-    // Player velocity (body frame)
-    env->observations[i++] = vel_body.x * INV_MAX_SPEED;  // Forward speed
-    env->observations[i++] = vel_body.y * INV_MAX_SPEED;  // Sideslip
-    env->observations[i++] = vel_body.z * INV_MAX_SPEED;  // Climb rate
-    // Player orientation
-    env->observations[i++] = p->ori.w;
-    env->observations[i++] = p->ori.x;
-    env->observations[i++] = p->ori.y;
-    env->observations[i++] = p->ori.z;
-    // Player up (world - for roll reference)
-    env->observations[i++] = up.x;
-    env->observations[i++] = up.y;
-    env->observations[i++] = up.z;
-    // Relative position (body frame) - THE KEY CHANGE
-    env->observations[i++] = rel_pos_body.x * INV_WORLD_HALF_X;
-    env->observations[i++] = rel_pos_body.y * INV_WORLD_HALF_Y;
-    env->observations[i++] = rel_pos_body.z * INV_WORLD_MAX_Z;
-    // Relative velocity (body frame)
-    env->observations[i++] = rel_vel_body.x * INV_MAX_SPEED;
-    env->observations[i++] = rel_vel_body.y * INV_MAX_SPEED;
-    env->observations[i++] = rel_vel_body.z * INV_MAX_SPEED;
-    // Aim helpers (NEW)
-    env->observations[i++] = aim_dot;  // -1 to 1, 1 = perfect aim
-    env->observations[i++] = clampf(dist / GUN_RANGE, 0.0f, 4.0f) - 2.0f;  // ~[-1,1]
-    // OBS_SIZE = 21
-}
-
-// Scheme 2: Angles observations (spherical coordinates)
+// Scheme 0: Angles observations (spherical coordinates)
 void compute_obs_angles(Dogfight *env) {
     Plane *p = &env->player;
     Plane *o = &env->opponent;
@@ -427,120 +344,415 @@ void compute_obs_realistic(Dogfight *env) {
     // OBS_SIZE = 10
 }
 
-// Scheme 5: Maximalist - everything potentially useful
-void compute_obs_maximalist(Dogfight *env) {
+// Scheme 3: REALISTIC with explicit range (10 obs)
+// Like REALISTIC but with km range + closure rate instead of target_size + distance_estimate
+void compute_obs_realistic_range(Dogfight *env) {
     Plane *p = &env->player;
     Plane *o = &env->opponent;
 
     Quat q_inv = {p->ori.w, -p->ori.x, -p->ori.y, -p->ori.z};
 
-    // Player transforms
-    Vec3 vel_body = quat_rotate(q_inv, p->vel);
+    // Player Euler angles
+    float pitch = asinf(clampf(2.0f * (p->ori.w * p->ori.y - p->ori.z * p->ori.x), -1.0f, 1.0f));
+    float roll = atan2f(2.0f * (p->ori.w * p->ori.x + p->ori.y * p->ori.z),
+                        1.0f - 2.0f * (p->ori.x * p->ori.x + p->ori.y * p->ori.y));
+
+    // Target in body frame for gunsight
+    Vec3 rel_pos = sub3(o->pos, p->pos);
+    Vec3 rel_pos_body = quat_rotate(q_inv, rel_pos);
+    float dist = norm3(rel_pos);
+
+    float target_az = atan2f(rel_pos_body.y, rel_pos_body.x);
+    float r_horiz = sqrtf(rel_pos_body.x * rel_pos_body.x + rel_pos_body.y * rel_pos_body.y);
+    float target_el = atan2f(rel_pos_body.z, fmaxf(r_horiz, 1e-6f));
+
+    // Range in km (0 = point blank, 0.5 = 1km, 1.0 = 2km+)
+    float range_km = clampf(dist / 2000.0f, 0.0f, 1.0f);
+
+    // Opponent aspect (are they facing toward/away from us?)
+    Vec3 opp_fwd = quat_rotate(o->ori, vec3(1, 0, 0));
+    Vec3 to_player = normalize3(sub3(p->pos, o->pos));
+    float target_aspect = dot3(opp_fwd, to_player);  // 1 = head-on, -1 = tail
+
+    // Horizon visible (is up vector pointing up?)
     Vec3 up = quat_rotate(p->ori, vec3(0, 0, 1));
+    float horizon_visible = up.z;  // 1 = level, 0 = knife-edge, -1 = inverted
+
+    // Closure rate (positive = closing)
+    Vec3 rel_vel = sub3(p->vel, o->vel);
+    float closure_rate = dot3(rel_vel, normalize3(rel_pos));
+
+    int i = 0;
+    // Instruments (4 obs)
+    env->observations[i++] = norm3(p->vel) * INV_MAX_SPEED;  // Airspeed
+    env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;     // Altitude
+    env->observations[i++] = pitch / (PI * 0.5f);            // Pitch indicator
+    env->observations[i++] = roll / PI;                       // Bank indicator
+
+    // Gunsight (3 obs)
+    env->observations[i++] = target_az / PI;                  // Target azimuth in sight
+    env->observations[i++] = target_el / (PI * 0.5f);         // Target elevation in sight
+    env->observations[i++] = range_km;                        // Range: 0=close, 1=2km+
+
+    // Visual cues (3 obs)
+    env->observations[i++] = target_aspect;                   // -1 to 1
+    env->observations[i++] = horizon_visible;                 // -1 to 1
+    env->observations[i++] = clampf(closure_rate * INV_MAX_SPEED, -1.0f, 1.0f);  // Closure rate
+    // OBS_SIZE = 10
+}
+
+// Scheme 4: REALISTIC_ENEMY_STATE (13 obs)
+// REALISTIC_RANGE + enemy pitch/roll/heading
+void compute_obs_realistic_enemy_state(Dogfight *env) {
+    Plane *p = &env->player;
+    Plane *o = &env->opponent;
+
+    Quat q_inv = {p->ori.w, -p->ori.x, -p->ori.y, -p->ori.z};
 
     // Player Euler angles
     float pitch = asinf(clampf(2.0f * (p->ori.w * p->ori.y - p->ori.z * p->ori.x), -1.0f, 1.0f));
     float roll = atan2f(2.0f * (p->ori.w * p->ori.x + p->ori.y * p->ori.z),
                         1.0f - 2.0f * (p->ori.x * p->ori.x + p->ori.y * p->ori.y));
-    float yaw = atan2f(2.0f * (p->ori.w * p->ori.z + p->ori.x * p->ori.y),
-                       1.0f - 2.0f * (p->ori.y * p->ori.y + p->ori.z * p->ori.z));
 
-    // Relative quantities
+    // Target in body frame for gunsight
     Vec3 rel_pos = sub3(o->pos, p->pos);
-    Vec3 rel_vel = sub3(o->vel, p->vel);
     Vec3 rel_pos_body = quat_rotate(q_inv, rel_pos);
-    Vec3 rel_vel_body = quat_rotate(q_inv, rel_vel);
     float dist = norm3(rel_pos);
 
-    // Spherical coordinates
-    float azimuth = atan2f(rel_pos_body.y, rel_pos_body.x);
+    float target_az = atan2f(rel_pos_body.y, rel_pos_body.x);
     float r_horiz = sqrtf(rel_pos_body.x * rel_pos_body.x + rel_pos_body.y * rel_pos_body.y);
-    float elevation = atan2f(rel_pos_body.z, fmaxf(r_horiz, 1e-6f));
+    float target_el = atan2f(rel_pos_body.z, fmaxf(r_horiz, 1e-6f));
 
-    // Aim and closing
-    Vec3 to_target = normalize3(rel_pos_body);
-    float aim_dot = to_target.x;
-    Vec3 rel_vel_closing = sub3(p->vel, o->vel);
-    float closing_rate = dot3(rel_vel_closing, normalize3(rel_pos));
+    // Range in km
+    float range_km = clampf(dist / 2000.0f, 0.0f, 1.0f);
 
-    // Opponent forward vector
-    Vec3 opp_fwd_world = quat_rotate(o->ori, vec3(1, 0, 0));
-    Vec3 opp_fwd_body = quat_rotate(q_inv, opp_fwd_world);
+    // Opponent aspect
+    Vec3 opp_fwd = quat_rotate(o->ori, vec3(1, 0, 0));
+    Vec3 to_player = normalize3(sub3(p->pos, o->pos));
+    float target_aspect = dot3(opp_fwd, to_player);
+
+    // Horizon visible
+    Vec3 up = quat_rotate(p->ori, vec3(0, 0, 1));
+    float horizon_visible = up.z;
+
+    // Closure rate
+    Vec3 rel_vel = sub3(p->vel, o->vel);
+    float closure_rate = dot3(rel_vel, normalize3(rel_pos));
+
+    // Enemy Euler angles (relative to horizon)
+    float enemy_pitch = asinf(clampf(2.0f * (o->ori.w * o->ori.y - o->ori.z * o->ori.x), -1.0f, 1.0f));
+    float enemy_roll = atan2f(2.0f * (o->ori.w * o->ori.x + o->ori.y * o->ori.z),
+                              1.0f - 2.0f * (o->ori.x * o->ori.x + o->ori.y * o->ori.y));
+
+    // Enemy heading relative to player (+1 = pointing at player, -1 = pointing away)
+    float enemy_heading_rel = target_aspect;  // Already computed as dot(opp_fwd, to_player)
 
     int i = 0;
-    // Player position (3)
-    env->observations[i++] = p->pos.x * INV_WORLD_HALF_X;
-    env->observations[i++] = p->pos.y * INV_WORLD_HALF_Y;
-    env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
-    // Player velocity world (3)
-    env->observations[i++] = p->vel.x * INV_MAX_SPEED;
-    env->observations[i++] = p->vel.y * INV_MAX_SPEED;
-    env->observations[i++] = p->vel.z * INV_MAX_SPEED;
-    // Player velocity body (3)
-    env->observations[i++] = vel_body.x * INV_MAX_SPEED;
-    env->observations[i++] = vel_body.y * INV_MAX_SPEED;
-    env->observations[i++] = vel_body.z * INV_MAX_SPEED;
-    // Player quaternion (4)
-    env->observations[i++] = p->ori.w;
-    env->observations[i++] = p->ori.x;
-    env->observations[i++] = p->ori.y;
-    env->observations[i++] = p->ori.z;
-    // Player up (3)
-    env->observations[i++] = up.x;
-    env->observations[i++] = up.y;
-    env->observations[i++] = up.z;
-    // Player scalars (4)
+    // Instruments (4 obs)
     env->observations[i++] = norm3(p->vel) * INV_MAX_SPEED;
+    env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
     env->observations[i++] = pitch / (PI * 0.5f);
     env->observations[i++] = roll / PI;
-    env->observations[i++] = yaw / PI;
-    // Relative position world (3)
-    env->observations[i++] = rel_pos.x * INV_WORLD_HALF_X;
-    env->observations[i++] = rel_pos.y * INV_WORLD_HALF_Y;
-    env->observations[i++] = rel_pos.z * INV_WORLD_MAX_Z;
-    // Relative position body (3)
-    env->observations[i++] = rel_pos_body.x * INV_WORLD_HALF_X;
-    env->observations[i++] = rel_pos_body.y * INV_WORLD_HALF_Y;
-    env->observations[i++] = rel_pos_body.z * INV_WORLD_MAX_Z;
-    // Relative velocity world (3)
-    env->observations[i++] = rel_vel.x * INV_MAX_SPEED;
-    env->observations[i++] = rel_vel.y * INV_MAX_SPEED;
-    env->observations[i++] = rel_vel.z * INV_MAX_SPEED;
-    // Relative velocity body (3)
-    env->observations[i++] = rel_vel_body.x * INV_MAX_SPEED;
-    env->observations[i++] = rel_vel_body.y * INV_MAX_SPEED;
-    env->observations[i++] = rel_vel_body.z * INV_MAX_SPEED;
-    // Target angles and scalars (5)
-    env->observations[i++] = azimuth / PI;
-    env->observations[i++] = elevation / (PI * 0.5f);
-    env->observations[i++] = clampf(dist / GUN_RANGE, 0.0f, 4.0f) - 2.0f;
-    env->observations[i++] = aim_dot;
-    env->observations[i++] = closing_rate * INV_MAX_SPEED;
-    // Opponent forward world (3)
-    env->observations[i++] = opp_fwd_world.x;
-    env->observations[i++] = opp_fwd_world.y;
-    env->observations[i++] = opp_fwd_world.z;
-    // Opponent forward body (3)
-    env->observations[i++] = opp_fwd_body.x;
-    env->observations[i++] = opp_fwd_body.y;
-    env->observations[i++] = opp_fwd_body.z;
-    // OBS_SIZE = 43
+
+    // Gunsight (3 obs)
+    env->observations[i++] = target_az / PI;
+    env->observations[i++] = target_el / (PI * 0.5f);
+    env->observations[i++] = range_km;
+
+    // Visual cues (3 obs)
+    env->observations[i++] = target_aspect;
+    env->observations[i++] = horizon_visible;
+    env->observations[i++] = clampf(closure_rate * INV_MAX_SPEED, -1.0f, 1.0f);
+
+    // Enemy state (3 obs) - NEW
+    env->observations[i++] = enemy_pitch / (PI * 0.5f);  // Enemy nose angle vs horizon
+    env->observations[i++] = enemy_roll / PI;             // Enemy bank angle vs horizon
+    env->observations[i++] = enemy_heading_rel;           // Pointing toward/away
+    // OBS_SIZE = 13
+}
+
+// Scheme 5: REALISTIC_FULL (15 obs)
+// REALISTIC_ENEMY_STATE + turn rate + G-loading
+void compute_obs_realistic_full(Dogfight *env) {
+    Plane *p = &env->player;
+    Plane *o = &env->opponent;
+
+    Quat q_inv = {p->ori.w, -p->ori.x, -p->ori.y, -p->ori.z};
+
+    // Player Euler angles
+    float pitch = asinf(clampf(2.0f * (p->ori.w * p->ori.y - p->ori.z * p->ori.x), -1.0f, 1.0f));
+    float roll = atan2f(2.0f * (p->ori.w * p->ori.x + p->ori.y * p->ori.z),
+                        1.0f - 2.0f * (p->ori.x * p->ori.x + p->ori.y * p->ori.y));
+
+    // Target in body frame for gunsight
+    Vec3 rel_pos = sub3(o->pos, p->pos);
+    Vec3 rel_pos_body = quat_rotate(q_inv, rel_pos);
+    float dist = norm3(rel_pos);
+
+    float target_az = atan2f(rel_pos_body.y, rel_pos_body.x);
+    float r_horiz = sqrtf(rel_pos_body.x * rel_pos_body.x + rel_pos_body.y * rel_pos_body.y);
+    float target_el = atan2f(rel_pos_body.z, fmaxf(r_horiz, 1e-6f));
+
+    // Range in km
+    float range_km = clampf(dist / 2000.0f, 0.0f, 1.0f);
+
+    // Opponent aspect
+    Vec3 opp_fwd = quat_rotate(o->ori, vec3(1, 0, 0));
+    Vec3 to_player = normalize3(sub3(p->pos, o->pos));
+    float target_aspect = dot3(opp_fwd, to_player);
+
+    // Horizon visible
+    Vec3 up = quat_rotate(p->ori, vec3(0, 0, 1));
+    float horizon_visible = up.z;
+
+    // Closure rate
+    Vec3 rel_vel = sub3(p->vel, o->vel);
+    float closure_rate = dot3(rel_vel, normalize3(rel_pos));
+
+    // Enemy Euler angles
+    float enemy_pitch = asinf(clampf(2.0f * (o->ori.w * o->ori.y - o->ori.z * o->ori.x), -1.0f, 1.0f));
+    float enemy_roll = atan2f(2.0f * (o->ori.w * o->ori.x + o->ori.y * o->ori.z),
+                              1.0f - 2.0f * (o->ori.x * o->ori.x + o->ori.y * o->ori.y));
+    float enemy_heading_rel = target_aspect;
+
+    // Actual turn rate and G-loading from velocity change (v²/r method)
+    // accel = (vel - prev_vel) / dt, centripetal = component perpendicular to vel
+    float speed = norm3(p->vel);
+    Vec3 accel = mul3(sub3(p->vel, p->prev_vel), 1.0f / DT);  // Actual acceleration
+
+    // Decompose acceleration into forward (tangential) and perpendicular (centripetal)
+    float turn_rate_actual = 0.0f;
+    float g_loading = 1.0f;  // 1G = level flight
+    if (speed > 10.0f) {
+        Vec3 vel_dir = mul3(p->vel, 1.0f / speed);  // Normalized velocity
+        float accel_forward = dot3(accel, vel_dir);    // Tangential component
+        Vec3 accel_centripetal = sub3(accel, mul3(vel_dir, accel_forward));
+        float centripetal_mag = norm3(accel_centripetal);
+
+        // Turn rate = centripetal_accel / speed (from v²/r, so ω = a/v)
+        turn_rate_actual = centripetal_mag / speed;
+
+        // G-loading = total lateral acceleration / g (includes lift component)
+        // Add 1G for gravity compensation in level flight
+        g_loading = sqrtf(1.0f + (centripetal_mag * centripetal_mag) / (9.81f * 9.81f));
+    }
+    // Normalize turn rate: max ~0.5 rad/s (29°/s) for sustained turn
+    float turn_rate_norm = clampf(turn_rate_actual / 0.5f, -1.0f, 1.0f);
+    // Normalize G-loading: 0 = 1G, 1 = 9G
+    float g_loading_norm = clampf((g_loading - 1.0f) / 8.0f, 0.0f, 1.0f);
+
+    int i = 0;
+    // Instruments (4 obs)
+    env->observations[i++] = speed * INV_MAX_SPEED;
+    env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
+    env->observations[i++] = pitch / (PI * 0.5f);
+    env->observations[i++] = roll / PI;
+
+    // Gunsight (3 obs)
+    env->observations[i++] = target_az / PI;
+    env->observations[i++] = target_el / (PI * 0.5f);
+    env->observations[i++] = range_km;
+
+    // Visual cues (3 obs)
+    env->observations[i++] = target_aspect;
+    env->observations[i++] = horizon_visible;
+    env->observations[i++] = clampf(closure_rate * INV_MAX_SPEED, -1.0f, 1.0f);
+
+    // Enemy state (3 obs)
+    env->observations[i++] = enemy_pitch / (PI * 0.5f);
+    env->observations[i++] = enemy_roll / PI;
+    env->observations[i++] = enemy_heading_rel;
+
+    // Own state (2 obs) - NEW
+    env->observations[i++] = turn_rate_norm;    // How fast am I turning?
+    env->observations[i++] = g_loading_norm;    // How hard am I pulling?
+    // OBS_SIZE = 15
 }
 
 // Dispatcher function
 void compute_observations(Dogfight *env) {
     switch (env->obs_scheme) {
-        case OBS_WORLD_FRAME:   compute_obs_world_frame(env); break;
-        case OBS_BODY_FRAME:    compute_obs_body_frame(env); break;
-        case OBS_ANGLES:        compute_obs_angles(env); break;
-        case OBS_CONTROL_ERROR: compute_obs_control_error(env); break;
-        case OBS_REALISTIC:     compute_obs_realistic(env); break;
-        case OBS_MAXIMALIST:    compute_obs_maximalist(env); break;
-        default:                compute_obs_world_frame(env); break;
+        case OBS_ANGLES:               compute_obs_angles(env); break;
+        case OBS_CONTROL_ERROR:        compute_obs_control_error(env); break;
+        case OBS_REALISTIC:            compute_obs_realistic(env); break;
+        case OBS_REALISTIC_RANGE:      compute_obs_realistic_range(env); break;
+        case OBS_REALISTIC_ENEMY_STATE: compute_obs_realistic_enemy_state(env); break;
+        case OBS_REALISTIC_FULL:       compute_obs_realistic_full(env); break;
+        default:                       compute_obs_angles(env); break;
     }
 }
 
+// ============================================================================
+// Curriculum Learning: Stage-specific spawn functions
+// ============================================================================
+
+// Get current curriculum stage based on total episodes or random (for eval)
+CurriculumStage get_curriculum_stage(Dogfight *env) {
+    if (!env->curriculum_enabled) return CURRICULUM_FULL_RANDOM;
+    if (env->curriculum_randomize) {
+        // Random stage for eval mode - tests all difficulties
+        return (CurriculumStage)(rand() % CURRICULUM_COUNT);
+    }
+    // Progressive stage for training
+    int stage_idx = env->total_episodes / env->episodes_per_stage;
+    if (stage_idx >= CURRICULUM_COUNT) stage_idx = CURRICULUM_COUNT - 1;
+    return (CurriculumStage)stage_idx;
+}
+
+// Stage 0: TAIL_CHASE - Opponent ahead, same heading (easiest)
+void spawn_tail_chase(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    // Opponent 200-400m directly ahead, same velocity direction
+    Vec3 opp_pos = vec3(
+        player_pos.x + rndf(200, 400),
+        player_pos.y + rndf(-50, 50),
+        player_pos.z + rndf(-30, 30)
+    );
+    reset_plane(&env->opponent, opp_pos, player_vel);
+    env->opponent_ap.mode = AP_STRAIGHT;
+}
+
+// Stage 1: HEAD_ON - Opponent coming toward us
+void spawn_head_on(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    // Opponent 400-600m ahead, facing us (opposite velocity)
+    Vec3 opp_pos = vec3(
+        player_pos.x + rndf(400, 600),
+        player_pos.y + rndf(-50, 50),
+        player_pos.z + rndf(-30, 30)
+    );
+    Vec3 opp_vel = vec3(-player_vel.x, -player_vel.y, player_vel.z);
+    reset_plane(&env->opponent, opp_pos, opp_vel);
+    env->opponent_ap.mode = AP_STRAIGHT;
+}
+
+// Stage 2: CROSSING - 90 degree deflection shots
+void spawn_crossing(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    // Opponent 300-500m to the side, flying perpendicular
+    float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;
+    Vec3 opp_pos = vec3(
+        player_pos.x + rndf(100, 200),
+        player_pos.y + side * rndf(300, 500),
+        player_pos.z + rndf(-50, 50)
+    );
+    // Perpendicular velocity (flying in Y direction)
+    Vec3 opp_vel = vec3(0, -side * norm3(player_vel), 0);
+    reset_plane(&env->opponent, opp_pos, opp_vel);
+    env->opponent_ap.mode = AP_STRAIGHT;
+}
+
+// Stage 3: VERTICAL - Above or below player
+void spawn_vertical(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    // Opponent 200-400m ahead, 200-400m above OR below
+    float vert = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;
+    float alt_offset = vert * rndf(200, 400);
+    Vec3 opp_pos = vec3(
+        player_pos.x + rndf(200, 400),
+        player_pos.y + rndf(-50, 50),
+        clampf(player_pos.z + alt_offset, 300, 2500)
+    );
+    reset_plane(&env->opponent, opp_pos, player_vel);
+    env->opponent_ap.mode = AP_LEVEL;  // Maintain altitude
+}
+
+// Stage 4: MANEUVERING - Opponent does turns
+void spawn_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    // Random spawn position (similar to original)
+    Vec3 opp_pos = vec3(
+        player_pos.x + rndf(200, 500),
+        player_pos.y + rndf(-100, 100),
+        player_pos.z + rndf(-50, 50)
+    );
+    reset_plane(&env->opponent, opp_pos, player_vel);
+    // Randomly choose turn direction
+    env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
+    env->opponent_ap.target_bank = rndf(0.3f, 0.6f);  // 17-34 degrees
+}
+
+// Stage 5: FULL_RANDOM - Maximum difficulty (360° spawn + random heading)
+void spawn_full_random(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    // Random direction in 3D sphere (300-600m from player)
+    float dist = rndf(300, 600);
+    float theta = rndf(0, 2.0f * M_PI);      // Azimuth: 0-360°
+    float phi = rndf(-0.3f, 0.3f);           // Elevation: ±17° (keep near level)
+
+    Vec3 opp_pos = vec3(
+        player_pos.x + dist * cosf(theta) * cosf(phi),
+        player_pos.y + dist * sinf(theta) * cosf(phi),
+        clampf(player_pos.z + dist * sinf(phi), 300, 2500)
+    );
+
+    // Random velocity direction (not necessarily toward/away from player)
+    float vel_theta = rndf(0, 2.0f * M_PI);
+    float speed = norm3(player_vel);
+    Vec3 opp_vel = vec3(speed * cosf(vel_theta), speed * sinf(vel_theta), 0);
+
+    reset_plane(&env->opponent, opp_pos, opp_vel);
+
+    // Set orientation to match velocity direction (yaw rotation around Z)
+    env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), vel_theta);
+
+    // Use autopilot randomization (if configured)
+    if (env->opponent_ap.randomize_on_reset) {
+        autopilot_randomize(&env->opponent_ap);
+    } else {
+        // Default: uniform random mode
+        float r = rndf(0, 1);
+        if (r < 0.2f) env->opponent_ap.mode = AP_STRAIGHT;
+        else if (r < 0.4f) env->opponent_ap.mode = AP_LEVEL;
+        else if (r < 0.6f) env->opponent_ap.mode = AP_TURN_LEFT;
+        else if (r < 0.8f) env->opponent_ap.mode = AP_TURN_RIGHT;
+        else env->opponent_ap.mode = AP_CLIMB;
+    }
+}
+
+// Master spawn function: dispatches to stage-specific spawner
+void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    CurriculumStage new_stage = get_curriculum_stage(env);
+
+    // Log stage transitions
+    if (new_stage != env->stage) {
+        printf("[Curriculum] Episode %d: Stage %d -> %d\n",
+               env->total_episodes, env->stage, new_stage);
+        env->stage = new_stage;
+    }
+
+    switch (env->stage) {
+        case CURRICULUM_TAIL_CHASE:   spawn_tail_chase(env, player_pos, player_vel); break;
+        case CURRICULUM_HEAD_ON:      spawn_head_on(env, player_pos, player_vel); break;
+        case CURRICULUM_CROSSING:     spawn_crossing(env, player_pos, player_vel); break;
+        case CURRICULUM_VERTICAL:     spawn_vertical(env, player_pos, player_vel); break;
+        case CURRICULUM_MANEUVERING:  spawn_maneuvering(env, player_pos, player_vel); break;
+        case CURRICULUM_FULL_RANDOM:
+        default:                      spawn_full_random(env, player_pos, player_vel); break;
+    }
+
+    // Reset autopilot PID state after spawning
+    env->opponent_ap.prev_vz = 0.0f;
+    env->opponent_ap.prev_bank_error = 0.0f;
+}
+
+// Legacy spawn (for curriculum_enabled=0)
+void spawn_legacy(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    Vec3 opp_pos = vec3(
+        player_pos.x + rndf(200, 500),
+        player_pos.y + rndf(-100, 100),
+        player_pos.z + rndf(-50, 50)
+    );
+    reset_plane(&env->opponent, opp_pos, player_vel);
+
+    // Handle autopilot: randomize if configured, reset PID state
+    if (env->opponent_ap.randomize_on_reset) {
+        autopilot_randomize(&env->opponent_ap);
+    }
+    env->opponent_ap.prev_vz = 0.0f;
+    env->opponent_ap.prev_bank_error = 0.0f;
+}
+
+// ============================================================================
+
 void c_reset(Dogfight *env) {
+    // Increment total episodes BEFORE determining stage (so first episode is 0)
+    env->total_episodes++;
+
     env->tick = 0;
     env->episode_return = 0.0f;
 
@@ -552,31 +764,24 @@ void c_reset(Dogfight *env) {
     env->cos_gun_cone = cosf(env->gun_cone_angle);
     env->cos_gun_cone_2x = cosf(env->gun_cone_angle * 2.0f);
 
+    // Spawn player at random position
     Vec3 pos = vec3(rndf(-500, 500), rndf(-500, 500), rndf(500, 1500));
     Vec3 vel = vec3(80, 0, 0);
     reset_plane(&env->player, pos, vel);
 
-    // Spawn opponent ahead of player
-    Vec3 opp_pos = vec3(
-        pos.x + rndf(200, 500),
-        pos.y + rndf(-100, 100),
-        pos.z + rndf(-50, 50)
-    );
-    reset_plane(&env->opponent, opp_pos, vel);
-
-    // Handle autopilot: randomize if configured, reset PID state
-    if (env->opponent_ap.randomize_on_reset) {
-        autopilot_randomize(&env->opponent_ap);
+    // Spawn opponent based on curriculum stage (or legacy if disabled)
+    if (env->curriculum_enabled) {
+        spawn_by_curriculum(env, pos, vel);
+    } else {
+        spawn_legacy(env, pos, vel);
     }
-    env->opponent_ap.prev_vz = 0.0f;
-    env->opponent_ap.prev_bank_error = 0.0f;
 
     if (DEBUG) printf("=== RESET ===\n");
     if (DEBUG) printf("kill=%d, episode_shots_fired=%.0f (now cleared)\n", env->kill, env->episode_shots_fired);
     if (DEBUG) printf("player_pos=(%.1f, %.1f, %.1f)\n", pos.x, pos.y, pos.z);
     if (DEBUG) printf("player_vel=(%.1f, %.1f, %.1f) speed=%.1f\n", vel.x, vel.y, vel.z, norm3(vel));
-    if (DEBUG) printf("opponent_pos=(%.1f, %.1f, %.1f)\n", opp_pos.x, opp_pos.y, opp_pos.z);
-    if (DEBUG) printf("initial_dist=%.1f m\n", norm3(sub3(opp_pos, pos)));
+    if (DEBUG) printf("opponent_pos=(%.1f, %.1f, %.1f)\n", env->opponent.pos.x, env->opponent.pos.y, env->opponent.pos.z);
+    if (DEBUG) printf("initial_dist=%.1f m, stage=%d\n", norm3(sub3(env->opponent.pos, pos)), env->stage);
 
     compute_observations(env);
 }
@@ -898,6 +1103,8 @@ void c_render(Dogfight *env) {
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});  // Dark blue-green sky
 
+    // Set clip planes for long-range visibility (default far=1000 is too close)
+    rlSetClipPlanes(1.0, 10000.0);  // near=1m, far=10km
     BeginMode3D(env->client->camera);
 
     // 6. Draw ground plane at z=0

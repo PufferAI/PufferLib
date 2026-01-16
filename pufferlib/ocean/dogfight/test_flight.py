@@ -3,6 +3,28 @@ Physics validation tests for dogfight environment.
 Uses force_state() to set exact initial conditions for accurate measurements.
 
 Run: python pufferlib/ocean/dogfight/test_flight.py
+
+TODO - FLIGHT PHYSICS TESTS NEEDED:
+=====================================
+1. RUDDER-ONLY TURN TEST (HIGH PRIORITY)
+   - Current MAX_YAW_RATE = 1.5 rad/s (86 deg/s) is WAY too high
+   - P-51D rudder should give ~5-15 deg/s yaw rate max, with significant sideslip
+   - Test: wings level, full rudder, measure actual yaw rate and heading change
+   - Compare against P-51D flight test data (see P51d_REFERENCE_DATA.md)
+   - Expected: rudder alone should NOT be effective for turning - need bank
+
+2. COORDINATED TURN TEST
+   - Bank to 30°, 45°, 60° and measure sustained turn rate
+   - P-51D should get ~17.5 deg/s at max sustained (corner velocity)
+   - Verify turn rate vs bank angle relationship
+
+3. ROLL RATE TEST
+   - Full aileron deflection, measure time to roll 90° and 360°
+   - P-51D: ~90-100 deg/s roll rate at 300 mph
+
+4. PITCH AUTHORITY TEST
+   - Full elevator, measure pitch rate and G-loading
+   - Should be speed-dependent (less authority at low speed)
 """
 import numpy as np
 from dogfight import Dogfight, AutopilotMode
@@ -25,8 +47,55 @@ LEVEL_FLIGHT_KD = 0.001     # Derivative gain (damping)
 RESULTS = {}
 
 
+# =============================================================================
+# State accessor functions using get_state() (independent of obs_scheme)
+# =============================================================================
+
+def get_speed_from_state(env):
+    """Get total speed from raw state."""
+    s = env.get_state()
+    return np.sqrt(s['vx']**2 + s['vy']**2 + s['vz']**2)
+
+
+def get_vz_from_state(env):
+    """Get vertical velocity from raw state."""
+    return env.get_state()['vz']
+
+
+def get_alt_from_state(env):
+    """Get altitude from raw state."""
+    return env.get_state()['pz']
+
+
+def get_up_vector_from_state(env):
+    """Get up vector from raw state."""
+    s = env.get_state()
+    return s['up_x'], s['up_y'], s['up_z']
+
+
+def get_velocity_from_state(env):
+    """Get velocity vector from raw state."""
+    s = env.get_state()
+    return s['vx'], s['vy'], s['vz']
+
+
+def level_flight_pitch_from_state(env, kp=LEVEL_FLIGHT_KP, kd=LEVEL_FLIGHT_KD):
+    """
+    PD autopilot for level flight (vz = 0).
+    Uses tuned PID values from pid_sweep.py for stable flight.
+    """
+    vz = get_vz_from_state(env)
+    # Negative because: if climbing (vz>0), need nose down (negative elevator)
+    elevator = -kp * vz - kd * vz
+    return np.clip(elevator, -0.2, 0.2)
+
+
+# =============================================================================
+# Legacy functions (use observations - for obs_scheme testing only)
+# =============================================================================
+
 def get_speed(obs):
-    """Get total speed from observation."""
+    """Get total speed from observation (LEGACY - assumes WORLD_FRAME)."""
     vx = obs[0, 3] * MAX_SPEED
     vy = obs[0, 4] * MAX_SPEED
     vz = obs[0, 5] * MAX_SPEED
@@ -34,18 +103,18 @@ def get_speed(obs):
 
 
 def get_vz(obs):
-    """Get vertical velocity from observation."""
+    """Get vertical velocity from observation (LEGACY - assumes WORLD_FRAME)."""
     return obs[0, 5] * MAX_SPEED
 
 
 def get_alt(obs):
-    """Get altitude from observation."""
+    """Get altitude from observation (LEGACY - assumes WORLD_FRAME)."""
     return obs[0, 2] * WORLD_MAX_Z
 
 
 def level_flight_pitch(obs, kp=LEVEL_FLIGHT_KP, kd=LEVEL_FLIGHT_KD):
     """
-    PD autopilot for level flight (vz = 0).
+    PD autopilot for level flight (vz = 0). LEGACY - assumes WORLD_FRAME.
     Uses tuned PID values from pid_sweep.py for stable flight.
     """
     vz = get_vz(obs)
@@ -452,17 +521,16 @@ def test_sustained_turn():
     )
 
     # Run with zero controls
-    obs = env.observations
     headings = []
     speeds = []
     alts = []
 
     for step in range(250):  # 5 seconds
-        vx = obs[0, 3] * MAX_SPEED
-        vy = obs[0, 4] * MAX_SPEED
+        state = env.get_state()
+        vx, vy = state['vx'], state['vy']
         heading = np.arctan2(vy, vx)
-        speed = get_speed(obs)
-        alt = get_alt(obs)
+        speed = np.sqrt(vx**2 + vy**2 + state['vz']**2)
+        alt = state['pz']
 
         if step >= 50:  # After 1 second settling
             headings.append(heading)
@@ -470,7 +538,7 @@ def test_sustained_turn():
             alts.append(alt)
 
         action = np.array([[1.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
-        obs, _, term, _, _ = env.step(action)
+        _, _, term, _, _ = env.step(action)
         if term[0]:
             break
 
@@ -525,21 +593,19 @@ def test_turn_60():
     elev_kp, elev_kd = -0.05, 0.005
     roll_kp, roll_kd = -2.0, -0.1
 
-    obs = env.observations
     prev_vz = 0.0
     prev_bank_error = 0.0
 
     headings, alts, banks = [], [], []
 
     for step in range(250):  # 5 seconds
-        # Get state
-        vz = obs[0, 5] * MAX_SPEED
-        alt = obs[0, 2] * WORLD_MAX_Z
-        vx = obs[0, 3] * MAX_SPEED
-        vy = obs[0, 4] * MAX_SPEED
+        # Get state from raw state (independent of obs_scheme)
+        state = env.get_state()
+        vz = state['vz']
+        alt = state['pz']
+        vx, vy = state['vx'], state['vy']
         heading = np.arctan2(vy, vx)
-        up_y = obs[0, 11]
-        up_z = obs[0, 12]
+        up_y, up_z = state['up_y'], state['up_z']
         bank_actual = np.arccos(np.clip(up_z, -1, 1))
         if up_y < 0:
             bank_actual = -bank_actual
@@ -564,7 +630,7 @@ def test_turn_60():
             banks.append(np.degrees(bank_actual))
 
         action = np.array([[1.0, elevator, aileron, 0.0, 0.0]], dtype=np.float32)
-        obs, _, term, _, _ = env.step(action)
+        _, _, term, _, _ = env.step(action)
         if term[0]:
             break
 
@@ -592,10 +658,11 @@ def test_pitch_direction():
     action = np.array([[0.5, 1.0, 0.0, 0.0, 0.0]], dtype=np.float32)
     initial_up_x = None
     for step in range(50):
-        obs, _, _, _, _ = env.step(action)
+        env.step(action)
+        state = env.get_state()
         if step == 0:
-            initial_up_x = obs[0, 10]
-    final_up_x = obs[0, 10]
+            initial_up_x = state['up_x']
+    final_up_x = state['up_x']
     nose_up = final_up_x > initial_up_x
     RESULTS['pitch_direction'] = 'UP' if nose_up else 'DOWN'
     status = 'OK' if nose_up else 'WRONG'
@@ -611,11 +678,106 @@ def test_roll_direction():
 
     action = np.array([[0.5, 0.0, 1.0, 0.0, 0.0]], dtype=np.float32)
     for _ in range(50):
-        obs, _, _, _, _ = env.step(action)
-    up_y_changed = abs(obs[0, 11]) > 0.1
+        env.step(action)
+    state = env.get_state()
+    up_y_changed = abs(state['up_y']) > 0.1
     RESULTS['roll_works'] = 'YES' if up_y_changed else 'NO'
     status = 'OK' if up_y_changed else 'WRONG'
     print(f"roll_works:    {RESULTS['roll_works']:>6}      (should be YES) [{status}]")
+
+
+def test_rudder_only_turn():
+    """
+    Test: Wings level, nose on horizon, full rudder - measure yaw rate.
+
+    P-51D rudder-only turns should achieve ~5-15 deg/s max yaw rate.
+    Current physics (MAX_YAW_RATE=1.5 rad/s) achieves ~86 deg/s which is unrealistic.
+
+    This test uses PID control to:
+    - Hold wings level (ailerons fight any roll)
+    - Hold nose on horizon (elevator maintains level flight)
+    - Apply full rudder and measure resulting yaw rate
+    """
+    env = Dogfight(num_envs=1)
+    env.reset()
+
+    # Start at cruise speed, wings level
+    V = 120.0  # m/s cruise
+    env.force_state(
+        player_pos=(0, 0, 1000),
+        player_vel=(V, 0, 0),
+        player_ori=(1.0, 0.0, 0.0, 0.0),  # Identity = wings level, heading +X
+        player_throttle=1.0,
+    )
+
+    # PID gains for wings level
+    roll_kp = 2.0   # Proportional
+    roll_kd = 0.1   # Derivative damping
+
+    # PID gains for level flight (from existing tests)
+    elev_kp = 0.001
+    elev_kd = 0.001
+
+    prev_roll = 0.0
+    prev_vz = 0.0
+
+    headings = []
+
+    for step in range(300):  # 6 seconds at 50Hz
+        # Extract state from raw state (independent of obs_scheme)
+        state = env.get_state()
+        vx, vy, vz = state['vx'], state['vy'], state['vz']
+        up_y, up_z = state['up_y'], state['up_z']
+
+        # Calculate heading from velocity
+        heading = np.arctan2(vy, vx)
+        headings.append(heading)
+
+        # Calculate roll angle from up vector
+        roll = np.arctan2(up_y, up_z)
+
+        # Wings level PID: drive roll to zero
+        roll_error = 0.0 - roll
+        roll_deriv = (roll - prev_roll) / 0.02
+        aileron = roll_kp * roll_error - roll_kd * roll_deriv
+        aileron = np.clip(aileron, -1.0, 1.0)
+        prev_roll = roll
+
+        # Level flight PID: drive vz to zero
+        vz_error = 0.0 - vz
+        vz_deriv = (vz - prev_vz) / 0.02
+        elevator = -elev_kp * vz_error - elev_kd * vz_deriv
+        elevator = np.clip(elevator, -0.3, 0.3)
+        prev_vz = vz
+
+        # FULL RUDDER
+        rudder = 1.0
+
+        # Action: [throttle, elevator, aileron, rudder, trigger]
+        action = np.array([[1.0, elevator, aileron, rudder, 0.0]], dtype=np.float32)
+        _, _, term, _, _ = env.step(action)
+
+        if term[0]:
+            break
+
+    # Calculate yaw rate
+    headings = np.unwrap(headings)  # Handle wraparound
+    if len(headings) > 100:
+        # Use last portion for steady-state
+        heading_change = headings[-1] - headings[100]
+        time_elapsed = (len(headings) - 100) * 0.02
+        yaw_rate_deg_s = np.degrees(heading_change / time_elapsed)
+    else:
+        yaw_rate_deg_s = 0
+
+    RESULTS['rudder_yaw_rate'] = yaw_rate_deg_s
+
+    # Realistic bounds: 5-15 deg/s for P-51D rudder-only
+    # Current unrealistic: ~86 deg/s (with MAX_YAW_RATE=1.5)
+    is_realistic = 5.0 < abs(yaw_rate_deg_s) < 20.0
+    status = "OK" if is_realistic else "FAIL"
+
+    print(f"rudder_only:   {yaw_rate_deg_s:5.1f}°/s (target: 5-15°/s) [{status}]")
 
 
 def test_mode_weights():
@@ -692,6 +854,7 @@ def print_summary():
     print(f"| climb_rate     | {fmt('climb_rate'):>6} | {P51D_CLIMB_RATE:.0f} m/s |")
     print(f"| glide_L/D      | {fmt('glide_LD'):>6} | 14.6 |")
     print(f"| turn_rate      | {fmt('turn_rate'):>6} | 5.6°/s (45° bank) |")
+    print(f"| rudder_yaw     | {fmt('rudder_yaw_rate'):>6} | 5-15°/s (wings lvl) |")
     print(f"| pitch_dir      | {fmt('pitch_direction'):>6} | UP |")
     print(f"| roll_works     | {fmt('roll_works'):>6} | YES |")
 
@@ -710,5 +873,6 @@ if __name__ == "__main__":
     test_turn_60()
     test_pitch_direction()
     test_roll_direction()
+    test_rudder_only_turn()
     test_mode_weights()
     print_summary()
