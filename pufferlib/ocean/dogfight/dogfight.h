@@ -927,9 +927,11 @@ void c_step(Dogfight *env) {
     float r_roll = -fabsf(roll_angle) * env->rcfg.roll;
     reward += r_roll;
 
-    // 7. Negative G penalty: discourage pushing forward on stick
-    float neg_elevator = fmaxf(0.0f, -env->actions[1]);  // 0 if pulling/neutral, magnitude if pushing
-    float r_neg_g = -neg_elevator * env->rcfg.neg_g;
+    // 7. Negative G penalty: penalize low/negative G-loading
+    // Threshold 0.5G: allows some slack for light maneuvers but penalizes serious neg-G
+    float g_threshold = 0.5f;
+    float g_deficit = fmaxf(0.0f, g_threshold - p->g_force);
+    float r_neg_g = -g_deficit * env->rcfg.neg_g;
     reward += r_neg_g;
 
     // 8. Rudder penalty: discourage excessive rudder use
@@ -960,7 +962,7 @@ void c_step(Dogfight *env) {
     if (DEBUG) printf("r_alt=%.4f (z=%.1f)\n", r_alt, p->pos.z);
     if (DEBUG) printf("r_speed=%.4f (speed=%.1f)\n", r_speed, speed);
     if (DEBUG) printf("r_roll=%.5f (roll=%.1f deg)\n", r_roll, roll_angle * RAD_TO_DEG);
-    if (DEBUG) printf("r_neg_g=%.5f (elev=%.2f)\n", r_neg_g, env->actions[1]);
+    if (DEBUG) printf("r_neg_g=%.5f (g=%.2f)\n", r_neg_g, p->g_force);
     if (DEBUG) printf("r_rudder=%.5f (rud=%.2f)\n", r_rudder, env->actions[3]);
     if (DEBUG) printf("r_aim=%.4f (aim_angle=%.1f deg, dist=%.1f)\n", r_aim, aim_angle_deg, dist);
     if (DEBUG) printf("reward_total=%.4f\n", reward);
@@ -1128,15 +1130,24 @@ void c_render(Dogfight *env) {
     rlSetClipPlanes(1.0, 10000.0);  // near=1m, far=10km
     BeginMode3D(env->client->camera);
 
-    // 6. Draw ground plane at z=0
-    DrawPlane((Vector3){0, 0, 0}, (Vector2){4000, 4000}, (Color){20, 60, 20, 255});
+    // 6. Draw ground plane at z=0 (XY plane, since we use Z-up)
+    // DrawPlane uses raylib's Y-up convention (XZ plane), so we draw triangles instead
+    Vector3 g1 = {-2000, -2000, 0};
+    Vector3 g2 = {2000, -2000, 0};
+    Vector3 g3 = {2000, 2000, 0};
+    Vector3 g4 = {-2000, 2000, 0};
+    Color ground_color = (Color){20, 60, 20, 255};
+    DrawTriangle3D(g1, g2, g3, ground_color);
+    DrawTriangle3D(g1, g3, g4, ground_color);
 
     // 7. Draw world bounds wireframe
     // Bounds: X +/-2000, Y +/-2000, Z 0-3000 -> center at (0, 0, 1500)
     DrawCubeWires((Vector3){0, 0, 1500}, 4000, 4000, 3000, (Color){100, 100, 100, 255});
 
-    // 8. Draw player plane (green wireframe airplane)
-    draw_plane_shape(p->pos, p->ori, GREEN, LIME);
+    // 8. Draw player plane (cyan wireframe airplane)
+    Color cyan = {0, 255, 255, 255};
+    Color light_cyan = {100, 255, 255, 255};
+    draw_plane_shape(p->pos, p->ori, cyan, light_cyan);
 
     // 9. Draw opponent plane (red wireframe airplane)
     Plane *o = &env->opponent;

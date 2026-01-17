@@ -158,6 +158,7 @@ typedef struct {
     Vec3 prev_vel;      // Previous velocity for acceleration calculation
     Quat ori;
     float throttle;
+    float g_force;      // Current G-loading (for reward calculation)
     int fire_cooldown;  // Ticks until can fire again (0 = ready)
 } Plane;
 
@@ -171,6 +172,7 @@ static inline void reset_plane(Plane *p, Vec3 pos, Vec3 vel) {
     p->prev_vel = vel;  // Initialize to current vel (no acceleration at start)
     p->ori = quat(1, 0, 0, 0);
     p->throttle = 0.5f;
+    p->g_force = 1.0f;  // 1G at start (level flight)
     p->fire_cooldown = 0;
 }
 
@@ -215,9 +217,9 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     // ========================================================================
     // Actions are [-1, 1], mapped to physical rates
     // NOTE: These are RATE commands, not POSITION commands!
-    // Holding elevator=0.5 doesn't hold 50% pitch - it pitches UP continuously
+    // Holding elevator=0.5 pitches DOWN continuously (standard joystick convention)
     float throttle = (actions[0] + 1.0f) * 0.5f;  // [-1,1] -> [0,1]
-    float pitch_rate = actions[1] * MAX_PITCH_RATE;  // rad/s, + = nose up
+    float pitch_rate = actions[1] * MAX_PITCH_RATE;  // rad/s, + = nose down (push fwd)
     float roll_rate = actions[2] * MAX_ROLL_RATE;    // rad/s, + = roll right
     float yaw_rate = actions[3] * MAX_YAW_RATE;      // rad/s, + = nose right
 
@@ -343,7 +345,20 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     Vec3 F_thrust = mul3(thrust_dir, T_mag);
     Vec3 F_lift = mul3(lift_dir, L_mag);
     Vec3 F_drag = mul3(drag_dir, D_mag);
-    Vec3 F_total = add3(add3(add3(F_thrust, F_lift), F_drag), weight);
+
+    // Aerodynamic forces only (what pilot feels - "specific force")
+    // In level flight: lift ≈ weight, so F_aero_up ≈ m*g, giving g_force ≈ 1.0
+    Vec3 F_aero = add3(F_thrust, add3(F_lift, F_drag));
+
+    // Body-up axis (perpendicular to wings, toward canopy)
+    Vec3 body_up = quat_rotate(p->ori, vec3(0, 0, 1));
+
+    // G-force = aero force along body-up / (mass * g)
+    // This is what the pilot feels (pushed into seat = positive G)
+    float g_force = dot3(F_aero, body_up) * INV_MASS * INV_GRAVITY;
+
+    // Total force includes weight for actual physics
+    Vec3 F_total = add3(F_aero, weight);
 
     // ========================================================================
     // 13. G-LIMIT (Asymmetric for Positive/Negative G)
@@ -353,25 +368,16 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     // Limit the body-normal acceleration asymmetrically.
     Vec3 accel = mul3(F_total, INV_MASS);
 
-    // Body-up axis (perpendicular to wings, toward canopy)
-    Vec3 body_up = quat_rotate(p->ori, vec3(0, 0, 1));
-
-    // Normal component of acceleration (positive = upward in body frame = positive G)
-    float a_normal = dot3(accel, body_up);
-
-    // Asymmetric limits
-    float limit_pos = G_LIMIT_POS * GRAVITY;  // 6 * 9.81 = 58.86 m/s^2
-    float limit_neg = G_LIMIT_NEG * GRAVITY;  // 1.5 * 9.81 = 14.7 m/s^2
-
-    float g_force = a_normal * INV_GRAVITY;  // For debug display
-
-    if (a_normal > limit_pos) {
-        // Positive G exceeded - clamp normal component
-        accel = sub3(accel, mul3(body_up, a_normal - limit_pos));
+    // Asymmetric limits on felt G
+    if (g_force > G_LIMIT_POS) {
+        // Positive G exceeded - clamp
+        float excess = (g_force - G_LIMIT_POS) * GRAVITY;  // Excess accel in m/s^2
+        accel = sub3(accel, mul3(body_up, excess));
         g_force = G_LIMIT_POS;
-    } else if (a_normal < -limit_neg) {
-        // Negative G exceeded - clamp normal component (make less negative)
-        accel = sub3(accel, mul3(body_up, a_normal + limit_neg));
+    } else if (g_force < -G_LIMIT_NEG) {
+        // Negative G exceeded - clamp (need to ADD acceleration along body_up)
+        float deficit = (-G_LIMIT_NEG - g_force) * GRAVITY;  // How much to add back
+        accel = add3(accel, mul3(body_up, deficit));  // ADD, not subtract!
         g_force = -G_LIMIT_NEG;
     }
 
@@ -393,6 +399,7 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     p->pos = add3(p->pos, mul3(p->vel, dt));
 
     p->throttle = throttle;
+    p->g_force = g_force;  // Store for reward calculation
 }
 
 // Simple forward motion for opponent (no physics, just maintains heading)

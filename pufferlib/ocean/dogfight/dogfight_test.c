@@ -1295,38 +1295,63 @@ void test_spawn_distance_range() {
 }
 
 void test_neg_g_penalty() {
-    // Test that pushing forward on stick (negative elevator) gets worse reward than pulling back
+    // Test that pushing forward (negative G) gets worse reward than pulling back
+    // Now uses actual g_force (not elevator position), so we need multiple steps
+    // for the G-force to develop from the maneuver
+    //
+    // We set a high neg_g penalty to ensure it dominates other reward differences
+    // caused by trajectory changes during the maneuver
     Dogfight env = make_env(1000);
+    env.rcfg.neg_g = 0.5f;  // High penalty to dominate other rewards
     c_reset(&env);
     env.actions[4] = -1.0f;  // Don't fire
 
-    // Pulling back (positive elevator)
-    env.player.pos = vec3(0, 0, 1000);
-    env.player.vel = vec3(100, 0, 0);
+    // Pull back for multiple steps
+    env.player.pos = vec3(0, 0, 1500);
+    env.player.vel = vec3(150, 0, 0);  // Fast enough for significant G
     env.player.ori = quat(1, 0, 0, 0);
-    env.opponent.pos = vec3(300, 0, 1000);
-    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.pos = vec3(400, 0, 1500);
+    env.opponent.vel = vec3(150, 0, 0);
     env.opponent.ori = quat(1, 0, 0, 0);
-    env.actions[1] = 0.5f;  // Pull back
-    c_step(&env);
-    float reward_pull = env.rewards[0];
 
-    // Pushing forward (negative elevator)
+    env.actions[1] = -0.5f;  // Pull back (nose up, positive G)
+    float total_reward_pull = 0.0f;
+    float pull_g_sum = 0.0f;
+    for (int i = 0; i < 30; i++) {
+        c_step(&env);
+        total_reward_pull += env.rewards[0];
+        pull_g_sum += env.player.g_force;
+    }
+    float pull_g_avg = pull_g_sum / 30.0f;
+
+    // Push forward for multiple steps
     c_reset(&env);
     env.actions[4] = -1.0f;
-    env.player.pos = vec3(0, 0, 1000);
-    env.player.vel = vec3(100, 0, 0);
+    env.player.pos = vec3(0, 0, 1500);
+    env.player.vel = vec3(150, 0, 0);
     env.player.ori = quat(1, 0, 0, 0);
-    env.opponent.pos = vec3(300, 0, 1000);
-    env.opponent.vel = vec3(100, 0, 0);
+    env.opponent.pos = vec3(400, 0, 1500);
+    env.opponent.vel = vec3(150, 0, 0);
     env.opponent.ori = quat(1, 0, 0, 0);
-    env.actions[1] = -0.5f;  // Push forward
-    c_step(&env);
-    float reward_push = env.rewards[0];
 
-    // Pulling should have better reward (no neg_g penalty)
-    assert(reward_pull > reward_push);
-    printf("test_neg_g_penalty PASS (pull=%.5f > push=%.5f)\n", reward_pull, reward_push);
+    env.actions[1] = 0.5f;  // Push forward (nose down, negative G)
+    float total_reward_push = 0.0f;
+    float push_g_sum = 0.0f;
+    for (int i = 0; i < 30; i++) {
+        c_step(&env);
+        total_reward_push += env.rewards[0];
+        push_g_sum += env.player.g_force;
+    }
+    float push_g_avg = push_g_sum / 30.0f;
+
+    // Verify G-forces are correct direction (pull = positive, push = negative)
+    assert(pull_g_avg > 1.0f);  // Pull should give >1G
+    assert(push_g_avg < 0.5f);  // Push should give <0.5G (triggering penalty)
+
+    // Pull back should have better total reward (push fwd triggers neg_g penalty)
+    assert(total_reward_pull > total_reward_push);
+    printf("test_neg_g_penalty PASS (pull=%.4f > push=%.4f, pull_g=%.1f, push_g=%.1f)\n",
+           total_reward_pull, total_reward_push, pull_g_avg, push_g_avg);
 }
 
 void test_rudder_penalty() {

@@ -3,6 +3,8 @@ Physics validation tests for dogfight environment.
 Uses force_state() to set exact initial conditions for accurate measurements.
 
 Run: python pufferlib/ocean/dogfight/test_flight.py
+     python pufferlib/ocean/dogfight/test_flight.py --render  # with visualization
+     python pufferlib/ocean/dogfight/test_flight.py --render --test pitch_direction  # single test
 
 TODO - FLIGHT PHYSICS TESTS NEEDED:
 =====================================
@@ -26,8 +28,22 @@ TODO - FLIGHT PHYSICS TESTS NEEDED:
    - Full elevator, measure pitch rate and G-loading
    - Should be speed-dependent (less authority at low speed)
 """
+import argparse
 import numpy as np
 from dogfight import Dogfight, AutopilotMode
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='P-51D Physics Validation Tests')
+    parser.add_argument('--render', action='store_true', help='Enable visual rendering')
+    parser.add_argument('--fps', type=int, default=50, help='Target FPS when rendering (default 50 = real-time, try 5-10 for slow-mo)')
+    parser.add_argument('--test', type=str, default=None, help='Run specific test only')
+    return parser.parse_args()
+
+
+ARGS = parse_args()
+RENDER_MODE = 'human' if ARGS.render else None
+RENDER_FPS = ARGS.fps if ARGS.render else None
 
 # Constants (must match dogfight.h)
 MAX_SPEED = 250.0
@@ -128,7 +144,7 @@ def test_max_speed():
     Full throttle level flight starting near max speed.
     Should stabilize around 159 m/s (P-51D Military power).
     """
-    env = Dogfight(num_envs=1)
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
     env.reset()
 
     # Start at 150 m/s (near expected max), center of world, flying +X
@@ -167,9 +183,88 @@ def test_max_speed():
     print(f"max_speed:     {final_speed:6.1f} m/s  (P-51D: {P51D_MAX_SPEED:.0f}, diff: {diff:+.1f}) [{status}]")
 
 
+def test_acceleration():
+    """
+    Full throttle starting at 100 m/s - verify plane accelerates.
+    Should see speed increase toward max speed (~150 m/s).
+    """
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
+    env.reset()
+
+    # Start at 100 m/s (well below max speed)
+    env.force_state(
+        player_pos=(-1000, 0, 1000),
+        player_vel=(100, 0, 0),
+        player_throttle=1.0,
+    )
+
+    initial_speed = get_speed_from_state(env)
+    speeds = [initial_speed]
+
+    for step in range(500):  # 10 seconds
+        elevator = level_flight_pitch_from_state(env)
+        action = np.array([[1.0, elevator, 0.0, 0.0, 0.0]], dtype=np.float32)
+        _, _, term, _, _ = env.step(action)
+
+        if term[0]:
+            print("  (terminated - hit bounds)")
+            break
+
+        speed = get_speed_from_state(env)
+        speeds.append(speed)
+
+    final_speed = speeds[-1]
+    speed_gain = final_speed - initial_speed
+    RESULTS['acceleration'] = speed_gain
+
+    # Should gain at least 20 m/s in 10 seconds
+    status = "OK" if speed_gain > 20 else "CHECK"
+    print(f"acceleration:  {initial_speed:.0f} -> {final_speed:.0f} m/s  (gained {speed_gain:+.1f} m/s) [{status}]")
+
+
+def test_deceleration():
+    """
+    Zero throttle starting at 150 m/s - verify plane decelerates due to drag.
+    Should see speed decrease as drag slows the plane.
+    """
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
+    env.reset()
+
+    # Start at 150 m/s with zero throttle
+    env.force_state(
+        player_pos=(-1000, 0, 1000),
+        player_vel=(150, 0, 0),
+        player_throttle=0.0,
+    )
+
+    initial_speed = get_speed_from_state(env)
+    speeds = [initial_speed]
+
+    for step in range(500):  # 10 seconds
+        elevator = level_flight_pitch_from_state(env)
+        # Zero throttle (action[0] = -1 maps to 0% throttle)
+        action = np.array([[-1.0, elevator, 0.0, 0.0, 0.0]], dtype=np.float32)
+        _, _, term, _, _ = env.step(action)
+
+        if term[0]:
+            print("  (terminated - hit bounds)")
+            break
+
+        speed = get_speed_from_state(env)
+        speeds.append(speed)
+
+    final_speed = speeds[-1]
+    speed_loss = initial_speed - final_speed
+    RESULTS['deceleration'] = speed_loss
+
+    # Should lose at least 20 m/s in 10 seconds due to drag
+    status = "OK" if speed_loss > 20 else "CHECK"
+    print(f"deceleration:  {initial_speed:.0f} -> {final_speed:.0f} m/s  (lost {speed_loss:+.1f} m/s) [{status}]")
+
+
 def test_cruise_speed():
     """50% throttle level flight - cruise speed."""
-    env = Dogfight(num_envs=1)
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
     env.reset()
 
     # Start at moderate speed
@@ -215,7 +310,7 @@ def test_stall_speed():
 
     This bypasses autopilot limitations by setting pitch directly.
     """
-    env = Dogfight(num_envs=1)
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
 
     # Physics constants (must match flightlib.h)
     W = 4082 * 9.81      # Weight (N)
@@ -306,7 +401,7 @@ def test_climb_rate():
     set that state with force_state(), run with zero elevator (pitch holds),
     and verify physics produces the expected climb rate.
     """
-    env = Dogfight(num_envs=1)
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
 
     # Physics constants (must match flightlib.h)
     W = 4082 * 9.81      # Weight (N)
@@ -394,7 +489,7 @@ def test_glide_ratio():
     Glide angle: γ = arctan(1/L/D) = 3.9°
     Expected sink rate: V * sin(γ) = V/(L/D) = 5.5 m/s
     """
-    env = Dogfight(num_envs=1)
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
 
     # Calculate theoretical values from drag polar
     Cd0 = 0.0163
@@ -488,7 +583,7 @@ def test_sustained_turn():
     Note: The physics model produces ~2-3°/s at 30° bank (ideal theory: 3.2°/s).
     This is acceptable for RL training - the physics is consistent.
     """
-    env = Dogfight(num_envs=1)
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
 
     # Test parameters - 30° bank is gentle and stable
     V = 100.0           # m/s
@@ -571,7 +666,7 @@ def test_turn_60():
     P-51D reference: 60° bank (2.0g) at 350 mph gives 5°/s
     At 100 m/s: theory = g*tan(60°)/V = 9.81*1.732/100 = 9.7°/s
     """
-    env = Dogfight(num_envs=1)
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
 
     bank_deg = 60.0
     bank_target = np.radians(bank_deg)
@@ -649,29 +744,32 @@ def test_turn_60():
 
 
 def test_pitch_direction():
-    """Verify positive elevator = nose up."""
-    env = Dogfight(num_envs=1)
+    """Verify positive elevator = nose DOWN (standard joystick: push forward)."""
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
     env.reset()
 
     env.force_state(player_vel=(80, 0, 0))
 
+    # Get initial forward vector Z component (nose pointing direction)
+    initial_fwd_z = env.get_state()['fwd_z']
+
+    # Apply positive elevator (+1.0 = push forward)
     action = np.array([[0.5, 1.0, 0.0, 0.0, 0.0]], dtype=np.float32)
-    initial_up_x = None
     for step in range(50):
         env.step(action)
-        state = env.get_state()
-        if step == 0:
-            initial_up_x = state['up_x']
-    final_up_x = state['up_x']
-    nose_up = final_up_x > initial_up_x
-    RESULTS['pitch_direction'] = 'UP' if nose_up else 'DOWN'
-    status = 'OK' if nose_up else 'WRONG'
-    print(f"pitch_dir:     {RESULTS['pitch_direction']:>6}      (should be UP) [{status}]")
+
+    # Check if nose went DOWN (fwd_z should decrease)
+    final_fwd_z = env.get_state()['fwd_z']
+    nose_down = final_fwd_z < initial_fwd_z  # fwd_z decreases when nose pitches down
+
+    RESULTS['pitch_direction'] = 'DOWN' if nose_down else 'UP'
+    status = 'OK' if nose_down else 'WRONG'
+    print(f"pitch_dir:     {RESULTS['pitch_direction']:>6}      (+elev = nose DOWN) [{status}]")
 
 
 def test_roll_direction():
     """Verify positive ailerons = roll right."""
-    env = Dogfight(num_envs=1)
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
     env.reset()
 
     env.force_state(player_vel=(80, 0, 0))
@@ -698,7 +796,7 @@ def test_rudder_only_turn():
     - Hold nose on horizon (elevator maintains level flight)
     - Apply full rudder and measure resulting yaw rate
     """
-    env = Dogfight(num_envs=1)
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
     env.reset()
 
     # Start at cruise speed, wings level
@@ -790,13 +888,13 @@ def test_knife_edge_pull():
       - Body X (nose): +X world (forward)
       - Body Y (right wing): -Z world (DOWN)
       - Body Z (canopy): +Y world (RIGHT)
-    - Positive elevator = pitch up in BODY frame = rotation about body Y
+    - Negative elevator (pull back) = pitch up in BODY frame = rotation about body Y
     - Body Y is now -Z world, so this is rotation about world -Z
     - Right-hand rule: thumb on -Z, fingers curl +X toward -Y
-    - Result: Nose yaws RIGHT in world frame!
+    - Result: Nose yaws LEFT in world frame (since we pull back = negative elevator)
 
     Expected behavior:
-    1. Heading changes significantly (plane turns right)
+    1. Heading changes significantly (plane turns left with pull back)
     2. Altitude drops (lift is horizontal, not vertical)
     3. Up vector stays roughly horizontal (still in knife-edge)
     4. This is essentially a "flat turn" using elevator
@@ -804,7 +902,7 @@ def test_knife_edge_pull():
     This tests that the quaternion kinematics correctly transform body-frame
     rotations to world-frame effects.
     """
-    env = Dogfight(num_envs=1)
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
     env.reset()
 
     # Start at high speed to avoid stall during the pull
@@ -849,7 +947,8 @@ def test_knife_edge_pull():
         up_zs.append(up_z_now)
 
         # Full throttle, FULL ELEVATOR PULL, no aileron, no rudder
-        action = np.array([[1.0, 1.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+        # Convention: -elevator = pull back = nose up
+        action = np.array([[1.0, -1.0, 0.0, 0.0, 0.0]], dtype=np.float32)
         _, _, term, _, _ = env.step(action)
         if term[0]:
             break
@@ -868,22 +967,25 @@ def test_knife_edge_pull():
     RESULTS['knife_pull_alt_loss'] = alt_loss
 
     # Expected:
-    # 1. Significant heading change (should turn right, so positive)
+    # 1. Significant heading change (turns left with pull back, so negative)
     # 2. Altitude loss (no vertical lift)
     # 3. Up vector stays near horizontal (|up_z| small)
 
-    heading_ok = heading_change > 20  # Should turn at least 20° right in 2 seconds
+    # In our coordinate system: X forward, Y left, Z up
+    # atan2(vy, vx) increases when turning left (positive vy)
+    heading_ok = heading_change > 20  # Should turn at least 20° left in 2 seconds
     alt_ok = alt_loss > 5  # Should lose altitude
     roll_maintained = abs(avg_up_z) < 0.3  # Up vector stays roughly horizontal
 
     all_ok = heading_ok and alt_ok and roll_maintained
     status = "OK" if all_ok else "CHECK"
 
-    direction = "RIGHT" if heading_change > 0 else "LEFT"
+    # Positive heading change = LEFT turn (Y is left in our coords)
+    direction = "LEFT" if heading_change > 0 else "RIGHT"
     print(f"knife_pull:    turn={turn_rate:+.1f}°/s ({direction}), alt_lost={alt_loss:.0f}m, |up_z|={abs(avg_up_z):.2f} [{status}]")
 
     if not heading_ok:
-        print(f"  WARNING: Expected significant right turn, got {heading_change:.1f}° heading change")
+        print(f"  WARNING: Expected significant left turn, got {heading_change:.1f}° heading change")
     if not alt_ok:
         print(f"  WARNING: Expected altitude loss, got {alt_loss:.1f}m")
     if not roll_maintained:
@@ -910,7 +1012,7 @@ def test_knife_edge_flight():
     - https://www.thenakedscientists.com/articles/questions/what-produces-lift-during-knife-edge-pass
     - https://www.aopa.org/news-and-media/all-news/1998/august/flight-training-magazine/form-and-function
     """
-    env = Dogfight(num_envs=1)
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
     env.reset()
 
     # Start at cruise speed, wings level, flying +X
@@ -1000,7 +1102,7 @@ def test_mode_weights():
     Sets 100% weight on AP_LEVEL, triggers multiple resets,
     verifies that selected mode is always AP_LEVEL.
     """
-    env = Dogfight(num_envs=1)
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
     env.reset()
 
     # Set AP_RANDOM mode and bias 100% toward LEVEL
@@ -1045,6 +1147,188 @@ def test_mode_weights():
     print(f"  distribution: LEVEL={level_pct:.0f}%, TURN_L={100*counts[2]/num_trials:.0f}%, TURN_R={100*counts[3]/num_trials:.0f}%, CLIMB={climb_pct:.0f}% [{status2}]")
 
 
+# =============================================================================
+# G-FORCE TESTS - Validate G-loading physics
+# =============================================================================
+
+def test_g_level_flight():
+    """
+    Level flight at cruise speed - verify G ≈ 1.0.
+    In steady level flight, lift equals weight, so G-loading should be ~1.0.
+    """
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
+    env.reset()
+
+    # Start at cruise speed, level
+    env.force_state(
+        player_pos=(0, 0, 1000),
+        player_vel=(120, 0, 0),
+        player_throttle=0.5,
+    )
+
+    g_values = []
+    for step in range(200):  # 4 seconds
+        elevator = level_flight_pitch_from_state(env)
+        action = np.array([[0.0, elevator, 0.0, 0.0, 0.0]], dtype=np.float32)
+        env.step(action)
+
+        g = env.get_state()['g_force']
+        g_values.append(g)
+
+        if step % 25 == 0:
+            print(f"  step {step:3d}: G = {g:.2f}")
+
+    avg_g = np.mean(g_values[-100:])  # Last 2 seconds
+    RESULTS['g_level'] = avg_g
+
+    status = "OK" if 0.8 < avg_g < 1.2 else "CHECK"
+    print(f"g_level:       {avg_g:.2f} G  (target: ~1.0) [{status}]")
+
+
+def test_g_push_forward():
+    """
+    Push elevator forward - verify G decreases toward 0 and negative.
+    Reset to level flight for each test to avoid looping artifacts.
+    """
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
+
+    print("  Pushing forward (positive elevator = nose down):")
+    min_g = float('inf')
+
+    for elev in [0.0, 0.25, 0.5, 0.75, 1.0]:
+        # Reset to level flight for each elevator setting
+        env.reset()
+        env.force_state(
+            player_pos=(0, 0, 1500),
+            player_vel=(150, 0, 0),
+            player_throttle=1.0,
+        )
+
+        # Run for 10 steps (0.2 sec) and track min G
+        test_min_g = float('inf')
+        for _ in range(10):
+            action = np.array([[1.0, elev, 0.0, 0.0, 0.0]], dtype=np.float32)
+            env.step(action)
+            g = env.get_state()['g_force']
+            test_min_g = min(test_min_g, g)
+
+        min_g = min(min_g, test_min_g)
+        print(f"    elevator={elev:+.2f}: min G = {test_min_g:+.2f}")
+
+    RESULTS['g_push'] = min_g
+
+    # Full push should give low/negative G
+    status = "OK" if min_g < 0.5 else "CHECK"
+    print(f"g_push:        {min_g:+.2f} G  (push should give < 0.5G) [{status}]")
+
+
+def test_g_pull_back():
+    """
+    Pull elevator back - verify G increases above 1.0.
+    Reset to level flight for each test to avoid looping artifacts.
+    """
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
+
+    print("  Pulling back (negative elevator = nose up):")
+    max_g = float('-inf')
+
+    for elev in [0.0, -0.25, -0.5, -0.75, -1.0]:
+        # Reset to level flight for each elevator setting
+        env.reset()
+        env.force_state(
+            player_pos=(0, 0, 1500),
+            player_vel=(150, 0, 0),  # Higher speed for more G capability
+            player_throttle=1.0,
+        )
+
+        # Run for 10 steps (0.2 sec) and track max G
+        test_max_g = float('-inf')
+        for _ in range(10):
+            action = np.array([[1.0, elev, 0.0, 0.0, 0.0]], dtype=np.float32)
+            env.step(action)
+            g = env.get_state()['g_force']
+            test_max_g = max(test_max_g, g)
+
+        max_g = max(max_g, test_max_g)
+        print(f"    elevator={elev:+.2f}: max G = {test_max_g:+.2f}")
+
+    RESULTS['g_pull'] = max_g
+
+    # Full pull should give high G (at 150 m/s, should hit ~5-6G)
+    status = "OK" if max_g > 4.0 else "CHECK"
+    print(f"g_pull:        {max_g:+.2f} G  (pull should give > 4.0G) [{status}]")
+
+
+def test_g_limit_negative():
+    """
+    Full forward stick - verify G never goes below -1.5G (G_LIMIT_NEG).
+    Physics should clamp acceleration to prevent exceeding this limit.
+    """
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
+    env.reset()
+
+    # Start at high speed for maximum control authority
+    env.force_state(
+        player_pos=(0, 0, 2000),
+        player_vel=(150, 0, 0),
+        player_throttle=1.0,
+    )
+
+    g_min = float('inf')
+    for step in range(150):  # 3 seconds of full push
+        action = np.array([[1.0, 1.0, 0.0, 0.0, 0.0]], dtype=np.float32)  # Full forward
+        env.step(action)
+
+        g = env.get_state()['g_force']
+        g_min = min(g_min, g)
+
+        if step % 25 == 0:
+            print(f"  step {step:3d}: G = {g:+.2f} (min so far: {g_min:+.2f})")
+
+    RESULTS['g_min'] = g_min
+
+    # Should never go below -1.5G (with small tolerance)
+    G_LIMIT_NEG = -1.5
+    status = "OK" if g_min >= G_LIMIT_NEG - 0.1 else "FAIL"
+    print(f"g_limit_neg:   {g_min:+.2f} G  (limit: {G_LIMIT_NEG}G) [{status}]")
+    assert g_min >= G_LIMIT_NEG - 0.1, f"G went below limit: {g_min} < {G_LIMIT_NEG}"
+
+
+def test_g_limit_positive():
+    """
+    Full back stick - verify G never exceeds 6G (G_LIMIT_POS).
+    Physics should clamp acceleration to prevent exceeding this limit.
+    """
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
+    env.reset()
+
+    # Start at high speed for maximum G capability
+    env.force_state(
+        player_pos=(0, 0, 2000),
+        player_vel=(180, 0, 0),  # Very fast
+        player_throttle=1.0,
+    )
+
+    g_max = float('-inf')
+    for step in range(150):  # 3 seconds of full pull
+        action = np.array([[1.0, -1.0, 0.0, 0.0, 0.0]], dtype=np.float32)  # Full pull
+        env.step(action)
+
+        g = env.get_state()['g_force']
+        g_max = max(g_max, g)
+
+        if step % 25 == 0:
+            print(f"  step {step:3d}: G = {g:+.2f} (max so far: {g_max:+.2f})")
+
+    RESULTS['g_max'] = g_max
+
+    # Should never exceed 6G (with small tolerance)
+    G_LIMIT_POS = 6.0
+    status = "OK" if g_max <= G_LIMIT_POS + 0.1 else "FAIL"
+    print(f"g_limit_pos:   {g_max:+.2f} G  (limit: {G_LIMIT_POS}G) [{status}]")
+    assert g_max <= G_LIMIT_POS + 0.1, f"G exceeded limit: {g_max} > {G_LIMIT_POS}"
+
+
 def print_summary():
     """Print summary table."""
     print("\n" + "=" * 60)
@@ -1068,26 +1352,56 @@ def print_summary():
     print(f"| glide_L/D      | {fmt('glide_LD'):>6} | 14.6 |")
     print(f"| turn_rate      | {fmt('turn_rate'):>6} | 5.6°/s (45° bank) |")
     print(f"| rudder_yaw     | {fmt('rudder_yaw_rate'):>6} | 5-15°/s (wings lvl) |")
-    print(f"| pitch_dir      | {fmt('pitch_direction'):>6} | UP |")
+    print(f"| pitch_dir      | {fmt('pitch_direction'):>6} | DOWN (+elev) |")
     print(f"| roll_works     | {fmt('roll_works'):>6} | YES |")
 
 
 if __name__ == "__main__":
+    # Map test names to functions
+    TESTS = {
+        'max_speed': test_max_speed,
+        'acceleration': test_acceleration,
+        'deceleration': test_deceleration,
+        'cruise_speed': test_cruise_speed,
+        'stall_speed': test_stall_speed,
+        'climb_rate': test_climb_rate,
+        'glide_ratio': test_glide_ratio,
+        'sustained_turn': test_sustained_turn,
+        'turn_60': test_turn_60,
+        'pitch_direction': test_pitch_direction,
+        'roll_direction': test_roll_direction,
+        'rudder_only_turn': test_rudder_only_turn,
+        'knife_edge_pull': test_knife_edge_pull,
+        'knife_edge_flight': test_knife_edge_flight,
+        'mode_weights': test_mode_weights,
+        # G-force tests
+        'g_level_flight': test_g_level_flight,
+        'g_push_forward': test_g_push_forward,
+        'g_pull_back': test_g_pull_back,
+        'g_limit_negative': test_g_limit_negative,
+        'g_limit_positive': test_g_limit_positive,
+    }
+
     print("P-51D Physics Validation Tests")
     print("=" * 60)
-    print("Using force_state() for precise initial conditions")
-    print("=" * 60)
-    test_max_speed()
-    test_cruise_speed()
-    test_stall_speed()
-    test_climb_rate()
-    test_glide_ratio()
-    test_sustained_turn()
-    test_turn_60()
-    test_pitch_direction()
-    test_roll_direction()
-    test_rudder_only_turn()
-    test_knife_edge_pull()
-    test_knife_edge_flight()
-    test_mode_weights()
-    print_summary()
+
+    if ARGS.test:
+        # Run single test
+        if ARGS.test in TESTS:
+            print(f"Running single test: {ARGS.test}")
+            if RENDER_MODE:
+                print("Rendering enabled - press ESC to exit")
+            print("=" * 60)
+            TESTS[ARGS.test]()
+        else:
+            print(f"Unknown test: {ARGS.test}")
+            print(f"Available tests: {', '.join(TESTS.keys())}")
+    else:
+        # Run all tests
+        print("Using force_state() for precise initial conditions")
+        if RENDER_MODE:
+            print("Rendering enabled - press ESC to exit")
+        print("=" * 60)
+        for test_func in TESTS.values():
+            test_func()
+        print_summary()

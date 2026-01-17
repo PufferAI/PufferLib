@@ -283,5 +283,8 @@ static PyObject* env_get_state(PyObject* self, PyObject* args) {
     // Throttle
     PyDict_SetItemString(dict, "throttle", PyFloat_FromDouble(p->throttle));
 
+    // G-force (current G-loading)
+    PyDict_SetItemString(dict, "g_force", PyFloat_FromDouble(p->g_force));
+
     return dict;
 }

@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import gymnasium
 
@@ -32,6 +33,7 @@ class Dogfight(pufferlib.PufferEnv):
         self,
         num_envs=16,
         render_mode=None,
+        render_fps=None,  # Target FPS when rendering (None=no delay, 50=real-time, 10=slow-mo)
         report_interval=1,
         buf=None,
         seed=42,
@@ -76,6 +78,7 @@ class Dogfight(pufferlib.PufferEnv):
 
         self.num_agents = num_envs
         self.render_mode = render_mode
+        self.render_fps = render_fps
         self.report_interval = report_interval
         self.tick = 0
 
@@ -128,6 +131,12 @@ class Dogfight(pufferlib.PufferEnv):
 
         self.tick += 1
         binding.vec_step(self.c_envs)
+
+        # Auto-render if render_mode is 'human' (Gymnasium convention)
+        if self.render_mode == 'human':
+            self.render()
+            if self.render_fps:
+                time.sleep(1.0 / self.render_fps)
 
         info = []
         if self.tick % self.report_interval == 0:

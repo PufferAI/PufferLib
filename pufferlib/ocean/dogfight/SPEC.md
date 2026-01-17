@@ -21,7 +21,7 @@ Physics (3DOF point-mass, metric units):
 - q = 0.5 * ρ * V²  (dynamic pressure, Pa)
 - L = C_L * q * S  (lift, N)
 - D = (C_D0 + K * C_L²) * q * S  (drag, N)
-- T = T_max * throttle  (thrust, N)
+- T = min(P·η/V, 0.3·P) where P = ENGINE_POWER × throttle, η = 0.80 (propeller thrust, N)
 - W = m * g  (weight, N)
 
 Constraints:
