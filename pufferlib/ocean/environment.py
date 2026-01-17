@@ -122,6 +122,7 @@ MAKE_FUNCTIONS = {
     'blastar': 'Blastar',
     'convert': 'Convert',
     'convert_circle': 'ConvertCircle',
+    'dogfight': 'Dogfight',
     'pong': 'Pong',
     'freeway': 'Freeway',
     'enduro': 'Enduro',
