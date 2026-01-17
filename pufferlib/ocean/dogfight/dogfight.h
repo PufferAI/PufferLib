@@ -815,7 +815,7 @@ void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
 
     // Log stage transitions
     if (new_stage != env->stage) {
-        printf("[Curriculum] Episode %d: Stage %d -> %d\n",
+        if (DEBUG > 5) printf("[Curriculum] Episode %d: Stage %d -> %d\n",
                env->total_episodes, env->stage, new_stage);
         env->stage = new_stage;
     }
