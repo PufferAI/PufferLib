@@ -12,6 +12,10 @@
 #include <cstdio>
 #include <cstdint>
 
+#define WARP_SIZE 32
+#define PPO_THREADS 256
+#define FULL_MASK 0xffffffff
+
 #define SEQ_SIZE 256
 #define BLOCK_SIZE 256
 inline int grid_size(int N) {
@@ -1138,6 +1142,119 @@ void launch_logcumsumexp_backward(
         fprintf(stderr, "Backward kernel error: %s\n", cudaGetErrorString(err));
 }
 
+
+// Optimized PPO forward kernel:
+// - 1 thread per (n,t) pair (same as original)
+// - Online softmax: 3 loops -> 2 loops (saves 1 pass over logits)
+// - Float + fast math intrinsics (__expf, __logf)
+// - No saved_for_backward writes (backward will recompute)
+template<typename T>
+__global__ void ppo_loss_forward_kernel_optimized(
+    float* __restrict__ loss,
+    double* __restrict__ saved_for_backward,  // unused, kept for API compat
+    const T* __restrict__ logits,
+    const T* __restrict__ values_pred,
+    const int64_t* __restrict__ actions,
+    const T* __restrict__ old_logprobs,
+    const T* __restrict__ advantages,
+    const T* __restrict__ prio,
+    const T* __restrict__ values,
+    const T* __restrict__ returns,
+    const float* __restrict__ adv_mean,
+    const float* __restrict__ adv_std,
+    float clip_coef,
+    float vf_clip_coef,
+    float vf_coef,
+    float ent_coef,
+    int T_seq,
+    int A,
+    int N
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total_elements = N * T_seq;
+    if (idx >= total_elements) return;
+    
+    __shared__ float block_loss[PPO_THREADS];
+
+    int n = idx / T_seq;
+    int t = idx % T_seq;
+    int nt = n * T_seq + t;
+    int logits_offset = n * T_seq * A + t * A;
+    int act = actions[nt];
+
+    float max_logit = -INFINITY;
+    float sum = 0.0f;
+    float act_logit = 0.0f;
+
+    for (int a = 0; a < A; a++) {
+        float l = float(logits[logits_offset + a]);
+        
+        // cache the action's logit
+        if (a == act) {
+            act_logit = l;
+        }
+        
+        // rescale
+        if (l > max_logit) {
+            sum *= __expf(max_logit - l);
+            max_logit = l;
+        }
+        sum += __expf(l - max_logit);
+    }
+
+    float logsumexp = max_logit + __logf(sum);
+
+    float entropy = 0.0f;
+    for (int a = 0; a < A; a++) {
+        float l = float(logits[logits_offset + a]);
+        float logp = l - logsumexp;
+        float p = __expf(logp);
+        entropy -= p * logp;
+    }
+
+    float new_logp = act_logit - logsumexp;
+    float old_logp = float(old_logprobs[nt]);
+    float adv = float(advantages[nt]);
+    float w = float(prio[n]);
+    float adv_normalized = (adv - adv_mean[0]) / (adv_std[0] + 1e-8f);
+
+    float logratio = new_logp - old_logp;
+    float ratio = __expf(logratio);
+
+    float ratio_clipped = fmaxf(1.0f - clip_coef, fminf(1.0f + clip_coef, ratio));
+    float wa = -w * adv_normalized;
+    float pg_loss1 = wa * ratio;
+    float pg_loss2 = wa * ratio_clipped;
+    float pg_loss = fmaxf(pg_loss1, pg_loss2);
+
+    float val = float(values[nt]);
+    float ret = float(returns[nt]);
+    float val_pred = float(values_pred[nt]);
+
+    float v_error = val_pred - val;
+    float v_clipped = val + fmaxf(-vf_clip_coef, fminf(vf_clip_coef, v_error));
+    float v_loss_unclipped = (val_pred - ret) * (val_pred - ret);
+    float v_loss_clipped = (v_clipped - ret) * (v_clipped - ret);
+    float v_loss = 0.5f * fmaxf(v_loss_unclipped, v_loss_clipped);
+
+    float thread_loss = (pg_loss + vf_coef * v_loss - ent_coef * entropy) / float(total_elements);
+
+    int tid = threadIdx.x;
+    block_loss[tid] = thread_loss;
+    __syncthreads();
+
+    for (int stride = PPO_THREADS / 2; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            block_loss[tid] += block_loss[tid + stride];
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0) {
+        atomicAdd(loss, block_loss[0]);
+    }
+}
+
 template<typename T>
 __global__ void ppo_loss_forward_kernel(
     float* __restrict__ loss,
@@ -1406,6 +1523,60 @@ __global__ void ppo_loss_backward_kernel(
 }
 
 template<typename T>
+inline void launch_ppo_loss_forward_optimized(
+    float* loss_output,
+    double* saved_for_backward,
+    const T* logits,
+    const T* values_pred,
+    const int64_t* actions,
+    const T* old_logprobs,
+    const T* advantages,
+    const T* prio,
+    const T* values,
+    const T* returns,
+    const float* adv_mean,
+    const float* adv_std,
+    float clip_coef,
+    float vf_clip_coef,
+    float vf_coef,
+    float ent_coef,
+    int T_seq,
+    int A,
+    int N,
+    cudaStream_t stream
+) {
+    // 1 thread per (n,t) pair
+    int total = N * T_seq;
+    int grid = (total + PPO_THREADS - 1) / PPO_THREADS;
+    ppo_loss_forward_kernel_optimized<T><<<grid, PPO_THREADS, 0, stream>>>(
+        loss_output,
+        saved_for_backward,
+        logits,
+        values_pred,
+        actions,
+        old_logprobs,
+        advantages,
+        prio,
+        values,
+        returns,
+        adv_mean,
+        adv_std,
+        clip_coef,
+        vf_clip_coef,
+        vf_coef,
+        ent_coef,
+        T_seq,
+        A,
+        N
+    );
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "PPO forward optimized kernel error: %s\n", cudaGetErrorString(err));
+    }
+}
+
+template<typename T>
 inline void launch_ppo_loss_forward(
     float* loss_output,
     double* saved_for_backward,
@@ -1649,3 +1820,149 @@ void launch_sample_logits(
         fprintf(stderr, "sample_logits kernel error: %s\n", cudaGetErrorString(err));
     }
 }
+
+// ============================================================================
+// C-linkage wrappers for ctypes testing
+// ============================================================================
+
+extern "C" {
+
+void sync_device() {
+    cudaDeviceSynchronize();
+}
+
+const char* get_last_error() {
+    cudaError_t err = cudaGetLastError();
+    return cudaGetErrorString(err);
+}
+
+// PPO Forward - Original
+void launch_ppo_loss_forward_original_f32(
+    float* loss_output,
+    double* saved_for_backward,
+    const float* logits,
+    const float* values_pred,
+    const int64_t* actions,
+    const float* old_logprobs,
+    const float* advantages,
+    const float* prio,
+    const float* values,
+    const float* returns,
+    const float* adv_mean,
+    const float* adv_std,
+    double clip_coef,
+    double vf_clip_coef,
+    double vf_coef,
+    double ent_coef,
+    int T_seq,
+    int A,
+    int N
+) {
+    launch_ppo_loss_forward<float>(
+        loss_output, saved_for_backward,
+        logits, values_pred, actions, old_logprobs, advantages,
+        prio, values, returns, adv_mean, adv_std,
+        clip_coef, vf_clip_coef, vf_coef, ent_coef,
+        T_seq, A, N, nullptr
+    );
+}
+
+// PPO Forward - Optimized
+void launch_ppo_loss_forward_optimized_f32(
+    float* loss_output,
+    double* saved_for_backward,
+    const float* logits,
+    const float* values_pred,
+    const int64_t* actions,
+    const float* old_logprobs,
+    const float* advantages,
+    const float* prio,
+    const float* values,
+    const float* returns,
+    const float* adv_mean,
+    const float* adv_std,
+    double clip_coef,
+    double vf_clip_coef,
+    double vf_coef,
+    double ent_coef,
+    int T_seq,
+    int A,
+    int N
+) {
+    launch_ppo_loss_forward_optimized<float>(
+        loss_output, saved_for_backward,
+        logits, values_pred, actions, old_logprobs, advantages,
+        prio, values, returns, adv_mean, adv_std,
+        float(clip_coef), float(vf_clip_coef), float(vf_coef), float(ent_coef),
+        T_seq, A, N, nullptr
+    );
+}
+
+// PPO Backward - Original
+void launch_ppo_loss_backward_original_f32(
+    float* grad_logits,
+    float* grad_values_pred,
+    const float* grad_loss,
+    const float* logits,
+    const int64_t* actions,
+    const float* old_logprobs,
+    const float* advantages,
+    const float* prio,
+    const float* values,
+    const float* returns,
+    const double* saved_for_backward,
+    const float* adv_mean,
+    const float* adv_std,
+    double clip_coef,
+    double vf_clip_coef,
+    double vf_coef,
+    double ent_coef,
+    int T_seq,
+    int A,
+    int N
+) {
+    launch_ppo_loss_backward<float>(
+        grad_logits, grad_values_pred, grad_loss,
+        logits, actions, old_logprobs, advantages,
+        prio, values, returns, saved_for_backward,
+        adv_mean, adv_std,
+        clip_coef, vf_clip_coef, vf_coef, ent_coef,
+        T_seq, A, N, nullptr
+    );
+}
+
+// PPO Backward - Optimized (placeholder: calls original for now)
+void launch_ppo_loss_backward_optimized_f32(
+    float* grad_logits,
+    float* grad_values_pred,
+    const float* grad_loss,
+    const float* logits,
+    const int64_t* actions,
+    const float* old_logprobs,
+    const float* advantages,
+    const float* prio,
+    const float* values,
+    const float* returns,
+    const double* saved_for_backward,
+    const float* adv_mean,
+    const float* adv_std,
+    double clip_coef,
+    double vf_clip_coef,
+    double vf_coef,
+    double ent_coef,
+    int T_seq,
+    int A,
+    int N
+) {
+    // TODO: Replace with optimized implementation
+    launch_ppo_loss_backward<float>(
+        grad_logits, grad_values_pred, grad_loss,
+        logits, actions, old_logprobs, advantages,
+        prio, values, returns, saved_for_backward,
+        adv_mean, adv_std,
+        clip_coef, vf_clip_coef, vf_coef, ent_coef,
+        T_seq, A, N, nullptr
+    );
+}
+
+} // extern "C"
