@@ -107,18 +107,19 @@ def load_extension():
     lib.launch_ppo_loss_backward_original_f32.restype = None
     
     # Backward optimized: launch_ppo_loss_backward_optimized_f32
+    # Note: new signature - values_pred added, saved_for_backward removed
     lib.launch_ppo_loss_backward_optimized_f32.argtypes = [
         ctypes.c_void_p,  # grad_logits (float*)
         ctypes.c_void_p,  # grad_values_pred (float*)
         ctypes.c_void_p,  # grad_loss (float*)
         ctypes.c_void_p,  # logits (float*)
+        ctypes.c_void_p,  # values_pred (float*)
         ctypes.c_void_p,  # actions (int64_t*)
         ctypes.c_void_p,  # old_logprobs (float*)
         ctypes.c_void_p,  # advantages (float*)
         ctypes.c_void_p,  # prio (float*)
         ctypes.c_void_p,  # values (float*)
         ctypes.c_void_p,  # returns (float*)
-        ctypes.c_void_p,  # saved_for_backward (double*)
         ctypes.c_void_p,  # adv_mean (float*)
         ctypes.c_void_p,  # adv_std (float*)
         ctypes.c_double,  # clip_coef
@@ -332,10 +333,10 @@ def run_forward_kernel(lib, kernel_func, tensors, N, T, A,
     return loss, saved_for_backward
 
 
-def run_backward_kernel(lib, kernel_func, tensors, saved_for_backward, N, T, A,
-                        clip_coef=0.2, vf_clip_coef=0.2, vf_coef=0.5, ent_coef=0.01):
+def run_backward_kernel_original(lib, tensors, saved_for_backward, N, T, A,
+                                  clip_coef=0.2, vf_clip_coef=0.2, vf_coef=0.5, ent_coef=0.01):
     """
-    Run a PPO backward kernel and return gradient tensors.
+    Run the original PPO backward kernel and return gradient tensors.
     
     Returns:
         (grad_logits, grad_values_pred)
@@ -349,8 +350,8 @@ def run_backward_kernel(lib, kernel_func, tensors, saved_for_backward, N, T, A,
     # grad_loss is typically 1.0 for .backward()
     grad_loss = torch.ones(1, device=device, dtype=torch.float32)
     
-    # Call kernel
-    kernel_func(
+    # Call original kernel (uses saved_for_backward)
+    lib.launch_ppo_loss_backward_original_f32(
         grad_logits.data_ptr(),
         grad_values_pred.data_ptr(),
         grad_loss.data_ptr(),
@@ -362,6 +363,57 @@ def run_backward_kernel(lib, kernel_func, tensors, saved_for_backward, N, T, A,
         tensors["values"].data_ptr(),
         tensors["returns"].data_ptr(),
         saved_for_backward.data_ptr(),
+        tensors["adv_mean"].data_ptr(),
+        tensors["adv_std"].data_ptr(),
+        clip_coef,
+        vf_clip_coef,
+        vf_coef,
+        ent_coef,
+        T, A, N
+    )
+    
+    # Sync and check for errors
+    lib.sync_device()
+    err = lib.get_last_error()
+    if err and err != b"no error":
+        raise RuntimeError(f"CUDA error: {err.decode()}")
+    
+    return grad_logits, grad_values_pred
+
+
+def run_backward_kernel_optimized(lib, tensors, N, T, A,
+                                   clip_coef=0.2, vf_clip_coef=0.2, vf_coef=0.5, ent_coef=0.01):
+    """
+    Run the optimized PPO backward kernel and return gradient tensors.
+    
+    Note: The optimized kernel recomputes all values instead of reading saved_for_backward,
+    so it takes values_pred directly instead of saved_for_backward.
+    
+    Returns:
+        (grad_logits, grad_values_pred)
+    """
+    device = tensors["logits"].device
+    
+    # Allocate output tensors
+    grad_logits = torch.empty(N, T, A, device=device, dtype=torch.float32)
+    grad_values_pred = torch.empty(N, T, device=device, dtype=torch.float32)
+    
+    # grad_loss is typically 1.0 for .backward()
+    grad_loss = torch.ones(1, device=device, dtype=torch.float32)
+    
+    # Call optimized kernel (recomputes everything, takes values_pred directly)
+    lib.launch_ppo_loss_backward_optimized_f32(
+        grad_logits.data_ptr(),
+        grad_values_pred.data_ptr(),
+        grad_loss.data_ptr(),
+        tensors["logits"].data_ptr(),
+        tensors["values_pred"].data_ptr(),  # takes values_pred directly
+        tensors["actions"].data_ptr(),
+        tensors["old_logprobs"].data_ptr(),
+        tensors["advantages"].data_ptr(),
+        tensors["prio"].data_ptr(),
+        tensors["values"].data_ptr(),
+        tensors["returns"].data_ptr(),
         tensors["adv_mean"].data_ptr(),
         tensors["adv_std"].data_ptr(),
         clip_coef,
@@ -442,16 +494,14 @@ def run_backward_correctness_test(
             lib, lib.launch_ppo_loss_forward_original_f32, tensors, N, T, A
         )
         
-        # Run original backward
-        grad_logits_orig, grad_values_pred_orig = run_backward_kernel(
-            lib, lib.launch_ppo_loss_backward_original_f32,
-            tensors, saved_for_backward, N, T, A
+        # Run original backward (uses saved_for_backward)
+        grad_logits_orig, grad_values_pred_orig = run_backward_kernel_original(
+            lib, tensors, saved_for_backward, N, T, A
         )
         
-        # Run optimized backward
-        grad_logits_opt, grad_values_pred_opt = run_backward_kernel(
-            lib, lib.launch_ppo_loss_backward_optimized_f32,
-            tensors, saved_for_backward, N, T, A
+        # Run optimized backward (recomputes everything, doesn't need saved_for_backward)
+        grad_logits_opt, grad_values_pred_opt = run_backward_kernel_optimized(
+            lib, tensors, N, T, A
         )
         
         # Compare gradients
@@ -527,20 +577,18 @@ def run_backward_benchmark(
     try:
         tensors = create_test_tensors(N, T, A)
         
-        # Run forward to get saved_for_backward
+        # Run forward to get saved_for_backward (needed by original kernel)
         loss, saved_for_backward = run_forward_kernel(
             lib, lib.launch_ppo_loss_forward_original_f32, tensors, N, T, A
         )
         
         # Warmup
         for _ in range(warmup_iters):
-            _ = run_backward_kernel(
-                lib, lib.launch_ppo_loss_backward_original_f32,
-                tensors, saved_for_backward, N, T, A
+            _ = run_backward_kernel_original(
+                lib, tensors, saved_for_backward, N, T, A
             )
-            _ = run_backward_kernel(
-                lib, lib.launch_ppo_loss_backward_optimized_f32,
-                tensors, saved_for_backward, N, T, A
+            _ = run_backward_kernel_optimized(
+                lib, tensors, N, T, A
             )
         
         lib.sync_device()
@@ -548,9 +596,8 @@ def run_backward_benchmark(
         # Benchmark original backward
         start = time.perf_counter()
         for _ in range(bench_iters):
-            _ = run_backward_kernel(
-                lib, lib.launch_ppo_loss_backward_original_f32,
-                tensors, saved_for_backward, N, T, A
+            _ = run_backward_kernel_original(
+                lib, tensors, saved_for_backward, N, T, A
             )
         lib.sync_device()
         orig_time = (time.perf_counter() - start) / bench_iters * 1000
@@ -558,9 +605,8 @@ def run_backward_benchmark(
         # Benchmark optimized backward
         start = time.perf_counter()
         for _ in range(bench_iters):
-            _ = run_backward_kernel(
-                lib, lib.launch_ppo_loss_backward_optimized_f32,
-                tensors, saved_for_backward, N, T, A
+            _ = run_backward_kernel_optimized(
+                lib, tensors, N, T, A
             )
         lib.sync_device()
         opt_time = (time.perf_counter() - start) / bench_iters * 1000
