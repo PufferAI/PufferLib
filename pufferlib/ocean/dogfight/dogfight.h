@@ -518,31 +518,23 @@ void compute_obs_realistic_full(Dogfight *env) {
                               1.0f - 2.0f * (o->ori.x * o->ori.x + o->ori.y * o->ori.y));
     float enemy_heading_rel = target_aspect;
 
-    // Actual turn rate and G-loading from velocity change (v²/r method)
-    // accel = (vel - prev_vel) / dt, centripetal = component perpendicular to vel
+    // Turn rate from velocity change
     float speed = norm3(p->vel);
-    Vec3 accel = mul3(sub3(p->vel, p->prev_vel), 1.0f / DT);  // Actual acceleration
-
-    // Decompose acceleration into forward (tangential) and perpendicular (centripetal)
     float turn_rate_actual = 0.0f;
-    float g_loading = 1.0f;  // 1G = level flight
     if (speed > 10.0f) {
-        Vec3 vel_dir = mul3(p->vel, 1.0f / speed);  // Normalized velocity
-        float accel_forward = dot3(accel, vel_dir);    // Tangential component
+        Vec3 accel = mul3(sub3(p->vel, p->prev_vel), 1.0f / DT);
+        Vec3 vel_dir = mul3(p->vel, 1.0f / speed);
+        float accel_forward = dot3(accel, vel_dir);
         Vec3 accel_centripetal = sub3(accel, mul3(vel_dir, accel_forward));
         float centripetal_mag = norm3(accel_centripetal);
-
-        // Turn rate = centripetal_accel / speed (from v²/r, so ω = a/v)
-        turn_rate_actual = centripetal_mag / speed;
-
-        // G-loading = total lateral acceleration / g (includes lift component)
-        // Add 1G for gravity compensation in level flight
-        g_loading = sqrtf(1.0f + (centripetal_mag * centripetal_mag) / (9.81f * 9.81f));
+        turn_rate_actual = centripetal_mag / speed;  // ω = a/v
     }
     // Normalize turn rate: max ~0.5 rad/s (29°/s) for sustained turn
     float turn_rate_norm = clampf(turn_rate_actual / 0.5f, -1.0f, 1.0f);
-    // Normalize G-loading: 0 = 1G, 1 = 9G
-    float g_loading_norm = clampf((g_loading - 1.0f) / 8.0f, 0.0f, 1.0f);
+
+    // G-loading: use physics-accurate p->g_force (aerodynamic forces)
+    // Range: -1.5 to +6.0 G, normalize so 1G = 0, 6G = 1, -1.5G = -0.5
+    float g_loading_norm = clampf((p->g_force - 1.0f) / 5.0f, -0.5f, 1.0f);
 
     int i = 0;
     // Instruments (4 obs)
