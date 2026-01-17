@@ -42,7 +42,7 @@ class Dogfight(pufferlib.PufferEnv):
         # Curriculum learning
         curriculum_enabled=0,       # 0=off (legacy), 1=on (progressive stages)
         curriculum_randomize=0,     # 0=progressive (training), 1=random stage each episode (eval)
-        episodes_per_stage=15000,   # Episodes before advancing difficulty
+        episodes_per_stage=60,      # Episodes before advancing difficulty
         # Reward weights (all sweepable via INI)
         reward_dist_scale=0.0001,
         reward_closing_scale=0.002,
@@ -55,6 +55,10 @@ class Dogfight(pufferlib.PufferEnv):
         penalty_roll=0.0001,
         penalty_neg_g=0.002,
         penalty_rudder=0.0002,
+        penalty_aileron=0.015,
+        penalty_bias=0.01,
+        reward_approach=0.005,
+        reward_level=0.02,
         # Thresholds (not swept)
         alt_min=200.0,
         alt_max=2500.0,
@@ -94,6 +98,7 @@ class Dogfight(pufferlib.PufferEnv):
                 self.terminals[env_num:(env_num+1)],
                 self.truncations[env_num:(env_num+1)],
                 env_num,
+                env_num=env_num,
                 report_interval=self.report_interval,
                 max_steps=max_steps,
                 obs_scheme=obs_scheme,
@@ -113,6 +118,10 @@ class Dogfight(pufferlib.PufferEnv):
                 penalty_roll=penalty_roll,
                 penalty_neg_g=penalty_neg_g,
                 penalty_rudder=penalty_rudder,
+                penalty_aileron=penalty_aileron,
+                penalty_bias=penalty_bias,
+                reward_approach=reward_approach,
+                reward_level=reward_level,
                 alt_min=alt_min,
                 alt_max=alt_max,
                 speed_min=speed_min,

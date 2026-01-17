@@ -25,7 +25,7 @@ static Dogfight make_env(int max_steps) {
         .neg_g = 0.0005f, .rudder = 0.0002f,
         .alt_min = 200.0f, .alt_max = 2500.0f, .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg, 0, 0, 15000);  // curriculum_enabled=0, randomize=0, episodes_per_stage=15000
+    init(&env, 0, &rcfg, 0, 0, 15000, 0);  // curriculum_enabled=0, randomize=0, episodes_per_stage=15000
     return env;
 }
 
@@ -196,6 +196,25 @@ void test_max_steps_terminates() {
     assert(env.terminals[0] == 1);
 
     printf("test_max_steps_terminates PASS\n");
+}
+
+void test_supersonic_terminates() {
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    // Place player at 400 m/s (> 340 m/s limit)
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(400, 0, 0);  // Supersonic!
+    env.player.ori = quat(1, 0, 0, 0);
+    env.opponent.pos = vec3(300, 0, 1000);
+    env.opponent.vel = vec3(80, 0, 0);
+
+    c_step(&env);
+
+    assert(env.terminals[0] == 1);
+    assert(env.rewards[0] == -1.0f);
+
+    printf("test_supersonic_terminates PASS\n");
 }
 
 // Phase 2 tests
@@ -1069,7 +1088,7 @@ static Dogfight make_env_curriculum(int max_steps, int randomize) {
         .neg_g = 0.0005f, .rudder = 0.0002f,
         .alt_min = 200.0f, .alt_max = 2500.0f, .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg, 1, randomize, 15000);  // curriculum_enabled=1
+    init(&env, 0, &rcfg, 1, randomize, 15000, 0);  // curriculum_enabled=1
     return env;
 }
 
@@ -1088,7 +1107,7 @@ static Dogfight make_env_with_roll_penalty(int max_steps, float roll_penalty) {
         .roll = roll_penalty, .neg_g = 0.0005f, .rudder = 0.0002f,
         .alt_min = 200.0f, .alt_max = 2500.0f, .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg, 0, 0, 15000);
+    init(&env, 0, &rcfg, 0, 0, 15000, 0);
     return env;
 }
 
@@ -1402,6 +1421,7 @@ int main() {
     test_c_step_moves_forward();
     test_oob_terminates();
     test_max_steps_terminates();
+    test_supersonic_terminates();
 
     // Phase 2
     test_opponent_spawns();

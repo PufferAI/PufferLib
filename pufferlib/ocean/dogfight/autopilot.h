@@ -19,6 +19,10 @@ typedef enum {
     AP_TURN_RIGHT,    // Coordinated right turn
     AP_CLIMB,         // Constant climb rate
     AP_DESCEND,       // Constant descent rate
+    AP_HARD_TURN_LEFT,   // Aggressive 70° left turn
+    AP_HARD_TURN_RIGHT,  // Aggressive 70° right turn
+    AP_WEAVE,            // Sine wave jinking (S-turns)
+    AP_EVASIVE,          // Break turn when threat behind
     AP_RANDOM,        // Random mode selection at reset
     AP_COUNT
 } AutopilotMode;
@@ -32,9 +36,17 @@ typedef enum {
 #define AP_TURN_ROLL_KD  -0.1f
 
 // Default parameters
-#define AP_DEFAULT_THROTTLE  1.0f
-#define AP_DEFAULT_BANK_DEG  30.0f
+#define AP_DEFAULT_THROTTLE   1.0f
+#define AP_DEFAULT_BANK_DEG   30.0f   // Base gentle turns
 #define AP_DEFAULT_CLIMB_RATE 5.0f
+
+// Stage-specific bank angles (curriculum progression)
+#define AP_STAGE4_BANK_DEG    30.0f   // MANEUVERING - gentle 30° turns
+#define AP_STAGE5_BANK_DEG    45.0f   // FULL_RANDOM - medium 45° turns
+#define AP_STAGE6_BANK_DEG    60.0f   // HARD_MANEUVERING - steep 60° turns
+#define AP_HARD_BANK_DEG      70.0f   // EVASIVE - aggressive 70° turns
+#define AP_WEAVE_AMPLITUDE    0.6f    // ~35° bank amplitude (radians)
+#define AP_WEAVE_PERIOD       3.0f    // 3 second full cycle
 
 // Autopilot state for a plane
 typedef struct {
@@ -57,6 +69,12 @@ typedef struct {
     // PID state (for derivative terms)
     float prev_vz;
     float prev_bank_error;
+
+    // AP_WEAVE state
+    float phase;             // Sine wave phase for weave oscillation
+
+    // AP_EVASIVE state (set by caller each step)
+    Vec3 threat_pos;         // Position of threat to evade
 } AutopilotState;
 
 // Simple LCG random for autopilot (not affected by srand)
@@ -94,6 +112,10 @@ static inline void autopilot_init(AutopilotState* ap) {
 
     ap->prev_vz = 0.0f;
     ap->prev_bank_error = 0.0f;
+
+    // New mode state
+    ap->phase = 0.0f;
+    ap->threat_pos = vec3(0, 0, 0);
 }
 
 // Set autopilot mode with parameters
@@ -232,6 +254,83 @@ static inline void autopilot_step(AutopilotState* ap, Plane* p, float* actions, 
             float elevator = -ap->pitch_kp * vz_error + ap->pitch_kd * vz_deriv;
             actions[1] = ap_clamp(elevator, -1.0f, 1.0f);
             ap->prev_vz = vz;
+            break;
+        }
+
+        case AP_HARD_TURN_LEFT:
+        case AP_HARD_TURN_RIGHT: {
+            // Aggressive turn with high bank angle (70°)
+            float target_bank = AP_HARD_BANK_DEG * (PI / 180.0f);
+            if (ap->mode == AP_HARD_TURN_LEFT) target_bank = -target_bank;
+
+            // Hard pull to maintain altitude in steep bank
+            float vz_error = -vz;
+            float elevator = -0.5f + ap->pitch_kp * vz_error;  // Base pull + PD
+            actions[1] = ap_clamp(elevator, -1.0f, 1.0f);
+            ap->prev_vz = vz;
+
+            // Aggressive aileron to achieve bank (50% more aggressive)
+            float bank_error = target_bank - bank;
+            float aileron = ap->roll_kp * bank_error * 1.5f;
+            actions[2] = ap_clamp(aileron, -1.0f, 1.0f);
+            break;
+        }
+
+        case AP_WEAVE: {
+            // Sine wave banking - oscillates left/right, hard to lead
+            ap->phase += dt * (2.0f * PI / AP_WEAVE_PERIOD);
+            if (ap->phase > 2.0f * PI) ap->phase -= 2.0f * PI;
+
+            float target_bank = AP_WEAVE_AMPLITUDE * sinf(ap->phase);
+
+            // Elevator PID for level flight (maintain vz = 0)
+            float vz_error = -vz;
+            float vz_deriv = (vz - ap->prev_vz) / dt;
+            float elevator = ap->pitch_kp * vz_error + ap->pitch_kd * vz_deriv;
+            actions[1] = ap_clamp(elevator, -1.0f, 1.0f);
+            ap->prev_vz = vz;
+
+            // Aileron PID to track oscillating bank
+            float bank_error = target_bank - bank;
+            float bank_deriv = (bank_error - ap->prev_bank_error) / dt;
+            float aileron = ap->roll_kp * bank_error + ap->roll_kd * bank_deriv;
+            actions[2] = ap_clamp(aileron, -1.0f, 1.0f);
+            ap->prev_bank_error = bank_error;
+            break;
+        }
+
+        case AP_EVASIVE: {
+            // Break turn away from threat when close and behind
+            Vec3 to_threat = sub3(ap->threat_pos, p->pos);
+            float dist = norm3(to_threat);
+            Vec3 fwd = quat_rotate(p->ori, vec3(1, 0, 0));
+            float dot_fwd = dot3(normalize3(to_threat), fwd);
+
+            float target_bank = 0.0f;
+            float base_elevator = 0.0f;
+
+            // Check if threat is close (<600m) and not in front (behind or side)
+            if (dist < 600.0f && dot_fwd < 0.3f) {
+                // Threat close and behind - BREAK TURN!
+                // Determine which side threat is on
+                Vec3 right = quat_rotate(p->ori, vec3(0, -1, 0));
+                float dot_right = dot3(normalize3(to_threat), right);
+
+                // Turn away from threat (opposite side)
+                target_bank = (dot_right > 0) ? -1.2f : 1.2f;  // ~70° break
+                base_elevator = -0.6f;  // Pull hard
+            }
+
+            // Elevator: base pull + PD for altitude
+            float vz_error = -vz;
+            float elevator = base_elevator + ap->pitch_kp * vz_error;
+            actions[1] = ap_clamp(elevator, -1.0f, 1.0f);
+            ap->prev_vz = vz;
+
+            // Aileron to achieve break bank (aggressive)
+            float bank_error = target_bank - bank;
+            float aileron = ap->roll_kp * bank_error * 1.5f;
+            actions[2] = ap_clamp(aileron, -1.0f, 1.0f);
             break;
         }
 

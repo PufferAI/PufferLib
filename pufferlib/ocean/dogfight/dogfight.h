@@ -37,9 +37,24 @@ typedef enum {
     CURRICULUM_CROSSING,         // 90 degree deflection shots
     CURRICULUM_VERTICAL,         // Above or below player
     CURRICULUM_MANEUVERING,      // Opponent does turns
-    CURRICULUM_FULL_RANDOM,      // Maximum difficulty
+    CURRICULUM_FULL_RANDOM,      // Mix of all basic modes
+    CURRICULUM_HARD_MANEUVERING, // Hard turns + weave patterns
+    CURRICULUM_EVASIVE,          // Reactive evasion (hardest)
     CURRICULUM_COUNT
 } CurriculumStage;
+
+// Stage difficulty weights for composite metric (higher = harder = more valuable)
+// Used to compute difficulty_weighted_perf = perf * avg_stage_weight
+static const float STAGE_WEIGHTS[CURRICULUM_COUNT] = {
+    0.2f,   // TAIL_CHASE - trivial
+    0.3f,   // HEAD_ON - easy
+    0.4f,   // CROSSING - easy-medium
+    0.5f,   // VERTICAL - medium
+    0.6f,   // MANEUVERING - medium
+    0.75f,  // FULL_RANDOM - medium-hard
+    0.9f,   // HARD_MANEUVERING - hard
+    1.0f    // EVASIVE - hardest
+};
 
 // Simulation timing
 #define DT 0.02f
@@ -49,6 +64,7 @@ typedef enum {
 #define WORLD_HALF_Y 2000.0f
 #define WORLD_MAX_Z 3000.0f
 #define MAX_SPEED 250.0f
+#define TOTAL_AILERON_LIMIT 150.0f  // ~1.5 sec at full aileron = death (uses |aileron|)
 #define OBS_SIZE 19  // player(13) + rel_pos(3) + rel_vel(3)
 
 // Inverse constants for faster normalization (multiply instead of divide)
@@ -71,6 +87,12 @@ typedef struct Log {
     float shots_fired;     // cumulative shots
     float accuracy;        // kills / shots_fired * 100
     float stage;           // current curriculum stage (for monitoring)
+    // Curriculum-weighted metrics (Phase 1)
+    float total_stage_weight;       // Sum of stage weights across all episodes
+    float avg_stage_weight;         // total_stage_weight / n
+    float total_abs_bias;           // Sum of |aileron_bias| at episode end
+    float avg_abs_bias;             // total_abs_bias / n
+    float ultimate;                 // Main sweep metric: kill_rate * avg_stage_weight / (1 + avg_abs_bias * 0.01)
     float n;
 } Log;
 
@@ -85,8 +107,12 @@ typedef struct RewardConfig {
     float alt_high;          // -N per meter above alt_max
     float stall;             // -N per m/s below speed_min
     float roll;              // -N per radian of bank angle (gentle level preference)
-    float neg_g;             // -N per unit of negative elevator (pushing forward)
+    float neg_g;             // -N per unit of negative G-loading
     float rudder;            // -N per unit of rudder magnitude
+    float aileron;           // -N per unit of aileron magnitude (prevents constant rolling)
+    float bias;              // -N per unit of cumulative signed aileron (prevents one-direction lock)
+    float approach;          // +N per meter of distance closed this tick
+    float level;             // +N per tick when approximately level (|bank|<30°, |pitch|<30°)
     // Thresholds (not rewards)
     float alt_min;           // 200.0
     float alt_max;           // 2500.0
@@ -138,11 +164,18 @@ typedef struct Dogfight {
     int episodes_per_stage;     // Episodes before advancing to next stage
     int total_episodes;         // Cumulative episodes (persists across resets)
     CurriculumStage stage;      // Current difficulty stage
+    // Anti-spinning
+    float total_aileron_usage;  // Accumulated |aileron| input (for spin death)
+    float aileron_bias;         // Cumulative signed aileron (for directional penalty)
+    float prev_dist;            // Previous distance to opponent (for approach reward)
+    // Debug
+    int env_num;                // Environment index (for filtering debug output)
 } Dogfight;
 
-void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, int episodes_per_stage) {
+void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, int episodes_per_stage, int env_num) {
     env->log = (Log){0};
     env->tick = 0;
+    env->env_num = env_num;
     env->episode_return = 0.0f;
     env->client = NULL;
     // Observation scheme
@@ -165,12 +198,13 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     env->episodes_per_stage = episodes_per_stage > 0 ? episodes_per_stage : 15000;
     env->total_episodes = 0;
     env->stage = CURRICULUM_TAIL_CHASE;
+    env->total_aileron_usage = 0.0f;
 }
 
 void add_log(Dogfight *env) {
-    if (DEBUG) printf("=== ADD_LOG ===\n");
-    if (DEBUG) printf("  kill=%d, episode_return=%.2f, tick=%d\n", env->kill, env->episode_return, env->tick);
-    if (DEBUG) printf("  episode_shots_fired=%.0f, reward=%.2f\n", env->episode_shots_fired, env->rewards[0]);
+    if (DEBUG >= 10) printf("=== ADD_LOG ===\n");
+    if (DEBUG >= 10) printf("  kill=%d, episode_return=%.2f, tick=%d\n", env->kill, env->episode_return, env->tick);
+    if (DEBUG >= 10) printf("  episode_shots_fired=%.0f, reward=%.2f\n", env->episode_shots_fired, env->rewards[0]);
     env->log.episode_return += env->episode_return;
     env->log.episode_length += (float)env->tick;
     env->log.perf += env->kill ? 1.0f : 0.0f;
@@ -179,8 +213,23 @@ void add_log(Dogfight *env) {
     env->log.shots_fired += env->episode_shots_fired;
     env->log.accuracy = (env->log.shots_fired > 0.0f) ? (env->log.kills / env->log.shots_fired * 100.0f) : 0.0f;
     env->log.stage = (float)env->stage;  // Track curriculum stage
+
+    // Curriculum-weighted metrics (Phase 1)
+    // Track difficulty faced and compute composite metric
+    env->log.total_stage_weight += STAGE_WEIGHTS[env->stage];
+    env->log.total_abs_bias += fabsf(env->aileron_bias);  // Track bias at episode end
     env->log.n += 1.0f;
-    if (DEBUG) printf("  log.perf=%.2f, log.shots_fired=%.0f, log.n=%.0f\n", env->log.perf, env->log.shots_fired, env->log.n);
+    env->log.avg_stage_weight = env->log.total_stage_weight / env->log.n;
+    env->log.avg_abs_bias = env->log.total_abs_bias / env->log.n;
+
+    // ultimate = kill_rate * stage_weight / (1 + avg_abs_bias * 0.01)
+    // Rewards killing hard opponents, penalizes degenerate aileron bias
+    float kill_rate = env->log.kills / env->log.n;
+    float difficulty_weighted = kill_rate * env->log.avg_stage_weight;
+    float bias_divisor = 1.0f + env->log.avg_abs_bias * 0.01f;  // min 1.0, safe
+    env->log.ultimate = difficulty_weighted / bias_divisor;
+
+    if (DEBUG >= 10) printf("  log.perf=%.2f, log.shots_fired=%.0f, log.n=%.0f\n", env->log.perf, env->log.shots_fired, env->log.n);
 }
 
 // Scheme 0: Angles observations (spherical coordinates)
@@ -648,7 +697,7 @@ void spawn_vertical(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     env->opponent_ap.mode = AP_LEVEL;  // Maintain altitude
 }
 
-// Stage 4: MANEUVERING - Opponent does turns
+// Stage 4: MANEUVERING - Opponent does gentle turns (30°)
 void spawn_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // Random spawn position (similar to original)
     Vec3 opp_pos = vec3(
@@ -657,12 +706,12 @@ void spawn_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
         player_pos.z + rndf(-50, 50)
     );
     reset_plane(&env->opponent, opp_pos, player_vel);
-    // Randomly choose turn direction
+    // Randomly choose turn direction - gentle 30° bank
     env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
-    env->opponent_ap.target_bank = rndf(0.3f, 0.6f);  // 17-34 degrees
+    env->opponent_ap.target_bank = AP_STAGE4_BANK_DEG * (M_PI / 180.0f);  // 30°
 }
 
-// Stage 5: FULL_RANDOM - Maximum difficulty (360° spawn + random heading)
+// Stage 5: FULL_RANDOM - Medium difficulty (360° spawn + random heading, 45° turns)
 void spawn_full_random(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // Random direction in 3D sphere (300-600m from player)
     float dist = rndf(300, 600);
@@ -689,13 +738,74 @@ void spawn_full_random(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     if (env->opponent_ap.randomize_on_reset) {
         autopilot_randomize(&env->opponent_ap);
     } else {
-        // Default: uniform random mode
+        // Default: uniform random mode with 45° turns
         float r = rndf(0, 1);
         if (r < 0.2f) env->opponent_ap.mode = AP_STRAIGHT;
         else if (r < 0.4f) env->opponent_ap.mode = AP_LEVEL;
         else if (r < 0.6f) env->opponent_ap.mode = AP_TURN_LEFT;
         else if (r < 0.8f) env->opponent_ap.mode = AP_TURN_RIGHT;
         else env->opponent_ap.mode = AP_CLIMB;
+    }
+    // Set 45° bank for stage 5 turns
+    env->opponent_ap.target_bank = AP_STAGE5_BANK_DEG * (M_PI / 180.0f);
+}
+
+// Stage 6: HARD_MANEUVERING - Hard turns and weave patterns
+void spawn_hard_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    Vec3 opp_pos = vec3(
+        player_pos.x + rndf(200, 400),
+        player_pos.y + rndf(-100, 100),
+        player_pos.z + rndf(-50, 50)
+    );
+    reset_plane(&env->opponent, opp_pos, player_vel);
+
+    // Pick from hard maneuver modes
+    float r = rndf(0, 1);
+    if (r < 0.3f) {
+        env->opponent_ap.mode = AP_HARD_TURN_LEFT;
+    } else if (r < 0.6f) {
+        env->opponent_ap.mode = AP_HARD_TURN_RIGHT;
+    } else {
+        env->opponent_ap.mode = AP_WEAVE;
+        env->opponent_ap.phase = rndf(0, 2.0f * M_PI);  // Random start phase
+    }
+}
+
+// Stage 7: EVASIVE - Opponent reacts to player position
+void spawn_evasive(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    // Spawn in various positions (like FULL_RANDOM)
+    float dist = rndf(300, 500);
+    float theta = rndf(0, 2.0f * M_PI);
+    float phi = rndf(-0.3f, 0.3f);
+
+    Vec3 opp_pos = vec3(
+        player_pos.x + dist * cosf(theta) * cosf(phi),
+        player_pos.y + dist * sinf(theta) * cosf(phi),
+        clampf(player_pos.z + dist * sinf(phi), 300, 2500)
+    );
+
+    float vel_theta = rndf(0, 2.0f * M_PI);
+    float speed = norm3(player_vel);
+    Vec3 opp_vel = vec3(speed * cosf(vel_theta), speed * sinf(vel_theta), 0);
+
+    reset_plane(&env->opponent, opp_pos, opp_vel);
+    env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), vel_theta);
+
+    // Mix of hard modes with AP_EVASIVE dominant
+    float r = rndf(0, 1);
+    if (r < 0.4f) {
+        env->opponent_ap.mode = AP_EVASIVE;
+    } else if (r < 0.55f) {
+        env->opponent_ap.mode = AP_HARD_TURN_LEFT;
+    } else if (r < 0.7f) {
+        env->opponent_ap.mode = AP_HARD_TURN_RIGHT;
+    } else if (r < 0.85f) {
+        env->opponent_ap.mode = AP_WEAVE;
+        env->opponent_ap.phase = rndf(0, 2.0f * M_PI);
+    } else {
+        // 15% chance of regular turn modes (still steep 60°)
+        env->opponent_ap.mode = rndf(0,1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
+        env->opponent_ap.target_bank = AP_STAGE6_BANK_DEG * (M_PI / 180.0f);  // 60°
     }
 }
 
@@ -711,13 +821,15 @@ void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     }
 
     switch (env->stage) {
-        case CURRICULUM_TAIL_CHASE:   spawn_tail_chase(env, player_pos, player_vel); break;
-        case CURRICULUM_HEAD_ON:      spawn_head_on(env, player_pos, player_vel); break;
-        case CURRICULUM_CROSSING:     spawn_crossing(env, player_pos, player_vel); break;
-        case CURRICULUM_VERTICAL:     spawn_vertical(env, player_pos, player_vel); break;
-        case CURRICULUM_MANEUVERING:  spawn_maneuvering(env, player_pos, player_vel); break;
-        case CURRICULUM_FULL_RANDOM:
-        default:                      spawn_full_random(env, player_pos, player_vel); break;
+        case CURRICULUM_TAIL_CHASE:       spawn_tail_chase(env, player_pos, player_vel); break;
+        case CURRICULUM_HEAD_ON:          spawn_head_on(env, player_pos, player_vel); break;
+        case CURRICULUM_CROSSING:         spawn_crossing(env, player_pos, player_vel); break;
+        case CURRICULUM_VERTICAL:         spawn_vertical(env, player_pos, player_vel); break;
+        case CURRICULUM_MANEUVERING:      spawn_maneuvering(env, player_pos, player_vel); break;
+        case CURRICULUM_FULL_RANDOM:      spawn_full_random(env, player_pos, player_vel); break;
+        case CURRICULUM_HARD_MANEUVERING: spawn_hard_maneuvering(env, player_pos, player_vel); break;
+        case CURRICULUM_EVASIVE:
+        default:                          spawn_evasive(env, player_pos, player_vel); break;
     }
 
     // Reset autopilot PID state after spawning
@@ -754,6 +866,9 @@ void c_reset(Dogfight *env) {
     // Clear episode tracking
     env->kill = 0;
     env->episode_shots_fired = 0.0f;
+    env->total_aileron_usage = 0.0f;
+    env->aileron_bias = 0.0f;
+    env->prev_dist = 0.0f;
 
     // Recompute gun cone trig (for curriculum: could vary gun_cone_angle here)
     env->cos_gun_cone = cosf(env->gun_cone_angle);
@@ -771,12 +886,12 @@ void c_reset(Dogfight *env) {
         spawn_legacy(env, pos, vel);
     }
 
-    if (DEBUG) printf("=== RESET ===\n");
-    if (DEBUG) printf("kill=%d, episode_shots_fired=%.0f (now cleared)\n", env->kill, env->episode_shots_fired);
-    if (DEBUG) printf("player_pos=(%.1f, %.1f, %.1f)\n", pos.x, pos.y, pos.z);
-    if (DEBUG) printf("player_vel=(%.1f, %.1f, %.1f) speed=%.1f\n", vel.x, vel.y, vel.z, norm3(vel));
-    if (DEBUG) printf("opponent_pos=(%.1f, %.1f, %.1f)\n", env->opponent.pos.x, env->opponent.pos.y, env->opponent.pos.z);
-    if (DEBUG) printf("initial_dist=%.1f m, stage=%d\n", norm3(sub3(env->opponent.pos, pos)), env->stage);
+    if (DEBUG >= 10) printf("=== RESET ===\n");
+    if (DEBUG >= 10) printf("kill=%d, episode_shots_fired=%.0f (now cleared)\n", env->kill, env->episode_shots_fired);
+    if (DEBUG >= 10) printf("player_pos=(%.1f, %.1f, %.1f)\n", pos.x, pos.y, pos.z);
+    if (DEBUG >= 10) printf("player_vel=(%.1f, %.1f, %.1f) speed=%.1f\n", vel.x, vel.y, vel.z, norm3(vel));
+    if (DEBUG >= 10) printf("opponent_pos=(%.1f, %.1f, %.1f)\n", env->opponent.pos.x, env->opponent.pos.y, env->opponent.pos.z);
+    if (DEBUG >= 10) printf("initial_dist=%.1f m, stage=%d\n", norm3(sub3(env->opponent.pos, pos)), env->stage);
 
     compute_observations(env);
 }
@@ -812,12 +927,12 @@ void respawn_opponent(Dogfight *env) {
     env->opponent_ap.prev_vz = 0.0f;
     env->opponent_ap.prev_bank_error = 0.0f;
 
-    if (DEBUG) printf("=== RESPAWN ===\n");
-    if (DEBUG) printf("player_pos=(%.1f, %.1f, %.1f)\n", p->pos.x, p->pos.y, p->pos.z);
-    if (DEBUG) printf("player_fwd=(%.2f, %.2f, %.2f)\n", fwd.x, fwd.y, fwd.z);
-    if (DEBUG) printf("new_opponent_pos=(%.1f, %.1f, %.1f)\n", opp_pos.x, opp_pos.y, opp_pos.z);
-    if (DEBUG) printf("opponent_vel=(%.1f, %.1f, %.1f) NOTE: always +X!\n", vel.x, vel.y, vel.z);
-    if (DEBUG) printf("respawn_dist=%.1f m\n", norm3(sub3(opp_pos, p->pos)));
+    if (DEBUG >= 10) printf("=== RESPAWN ===\n");
+    if (DEBUG >= 10) printf("player_pos=(%.1f, %.1f, %.1f)\n", p->pos.x, p->pos.y, p->pos.z);
+    if (DEBUG >= 10) printf("player_fwd=(%.2f, %.2f, %.2f)\n", fwd.x, fwd.y, fwd.z);
+    if (DEBUG >= 10) printf("new_opponent_pos=(%.1f, %.1f, %.1f)\n", opp_pos.x, opp_pos.y, opp_pos.z);
+    if (DEBUG >= 10) printf("opponent_vel=(%.1f, %.1f, %.1f) NOTE: always +X!\n", vel.x, vel.y, vel.z);
+    if (DEBUG >= 10) printf("respawn_dist=%.1f m\n", norm3(sub3(opp_pos, p->pos)));
 }
 
 void c_step(Dogfight *env) {
@@ -825,13 +940,13 @@ void c_step(Dogfight *env) {
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0;
 
-    if (DEBUG) printf("\n========== TICK %d ==========\n", env->tick);
-    if (DEBUG) printf("=== ACTIONS ===\n");
-    if (DEBUG) printf("throttle_raw=%.3f -> throttle=%.3f\n", env->actions[0], (env->actions[0] + 1.0f) * 0.5f);
-    if (DEBUG) printf("elevator=%.3f -> pitch_rate=%.3f rad/s\n", env->actions[1], env->actions[1] * MAX_PITCH_RATE);
-    if (DEBUG) printf("ailerons=%.3f -> roll_rate=%.3f rad/s\n", env->actions[2], env->actions[2] * MAX_ROLL_RATE);
-    if (DEBUG) printf("rudder=%.3f -> yaw_rate=%.3f rad/s\n", env->actions[3], env->actions[3] * MAX_YAW_RATE);
-    if (DEBUG) printf("trigger=%.3f (fires if >0.5)\n", env->actions[4]);
+    if (DEBUG >= 10) printf("\n========== TICK %d ==========\n", env->tick);
+    if (DEBUG >= 10) printf("=== ACTIONS ===\n");
+    if (DEBUG >= 10) printf("throttle_raw=%.3f -> throttle=%.3f\n", env->actions[0], (env->actions[0] + 1.0f) * 0.5f);
+    if (DEBUG >= 10) printf("elevator=%.3f -> pitch_rate=%.3f rad/s\n", env->actions[1], env->actions[1] * MAX_PITCH_RATE);
+    if (DEBUG >= 10) printf("ailerons=%.3f -> roll_rate=%.3f rad/s\n", env->actions[2], env->actions[2] * MAX_ROLL_RATE);
+    if (DEBUG >= 10) printf("rudder=%.3f -> yaw_rate=%.3f rad/s\n", env->actions[3], env->actions[3] * MAX_YAW_RATE);
+    if (DEBUG >= 10) printf("trigger=%.3f (fires if >0.5)\n", env->actions[4]);
 
     // Player uses full physics with actions
     step_plane_with_physics(&env->player, env->actions, DT);
@@ -839,10 +954,30 @@ void c_step(Dogfight *env) {
     // Opponent uses autopilot (if not AP_STRAIGHT, uses full physics)
     if (env->opponent_ap.mode != AP_STRAIGHT) {
         float opp_actions[5];
+        env->opponent_ap.threat_pos = env->player.pos;  // For AP_EVASIVE mode
         autopilot_step(&env->opponent_ap, &env->opponent, opp_actions, DT);
         step_plane_with_physics(&env->opponent, opp_actions, DT);
     } else {
         step_plane(&env->opponent, DT);
+    }
+
+    // === Anti-spinning death check ===
+    env->total_aileron_usage += fabsf(env->actions[2]);
+    if (DEBUG >= 2 && env->env_num == 0) {
+        printf("AILERON: action=%.3f, total_usage=%.1f/%.0f, tick=%d\n",
+               env->actions[2], env->total_aileron_usage, TOTAL_AILERON_LIMIT, env->tick);
+    }
+    if (env->total_aileron_usage > TOTAL_AILERON_LIMIT) {
+        // Death by excessive aileron usage (rolling/oscillating)
+        if (DEBUG >= 2 && env->env_num == 0) {
+            printf("*** AILERON DEATH! total_usage=%.1f, tick=%d ***\n",
+                   env->total_aileron_usage, env->tick);
+        }
+        env->rewards[0] = -1.0f;
+        env->terminals[0] = 1;
+        add_log(env);
+        c_reset(env);
+        return;
     }
 
     // === Combat (Phase 5) ===
@@ -855,15 +990,15 @@ void c_step(Dogfight *env) {
     if (o->fire_cooldown > 0) o->fire_cooldown--;
 
     // Player fires: action[4] > 0.5 and cooldown ready
-    if (DEBUG) printf("trigger=%.3f, cooldown=%d\n", env->actions[4], p->fire_cooldown);
+    if (DEBUG >= 10) printf("trigger=%.3f, cooldown=%d\n", env->actions[4], p->fire_cooldown);
     if (env->actions[4] > 0.5f && p->fire_cooldown == 0) {
         p->fire_cooldown = FIRE_COOLDOWN;
         env->episode_shots_fired += 1.0f;
-        if (DEBUG) printf("=== FIRED! episode_shots_fired=%.0f ===\n", env->episode_shots_fired);
+        if (DEBUG >= 10) printf("=== FIRED! episode_shots_fired=%.0f ===\n", env->episode_shots_fired);
 
         // Check if hit = kill = SUCCESS = terminal
         if (check_hit(p, o, env->cos_gun_cone)) {
-            if (DEBUG) printf("*** KILL! ***\n");
+            if (DEBUG >= 10) printf("*** KILL! ***\n");
             env->kill = 1;
             env->rewards[0] = 1.0f;
             env->episode_return += 1.0f;
@@ -872,7 +1007,7 @@ void c_step(Dogfight *env) {
             c_reset(env);
             return;
         } else {
-            if (DEBUG) printf("MISS (dist=%.1f, in_cone=%d)\n", norm3(sub3(o->pos, p->pos)),
+            if (DEBUG >= 10) printf("MISS (dist=%.1f, in_cone=%d)\n", norm3(sub3(o->pos, p->pos)),
                 check_hit(p, o, env->cos_gun_cone));
         }
     }
@@ -883,7 +1018,15 @@ void c_step(Dogfight *env) {
     float r_dist = -dist * env->rcfg.dist_scale;
     reward += r_dist;
 
-    // 2. Closing velocity reward: approaching = good
+    // 2. Approach reward: getting closer = good
+    float r_approach = 0.0f;
+    if (env->prev_dist > 0.0f) {
+        r_approach = (env->prev_dist - dist) * env->rcfg.approach;
+    }
+    env->prev_dist = dist;
+    reward += r_approach;
+
+    // 3. Closing velocity reward: approaching = good
     Vec3 rel_vel = sub3(p->vel, o->vel);
     Vec3 rel_pos_norm = normalize3(rel_pos);
     float closing_rate = dot3(rel_vel, rel_pos_norm);
@@ -930,39 +1073,62 @@ void c_step(Dogfight *env) {
     float r_rudder = -fabsf(env->actions[3]) * env->rcfg.rudder;
     reward += r_rudder;
 
-    // 9. Aiming reward: feedback for gun alignment before actual hits
+    // 9. Aileron penalty: discourage constant rolling
+    float r_aileron = -fabsf(env->actions[2]) * env->rcfg.aileron;
+    reward += r_aileron;
+
+    // 10. Aileron bias penalty: discourage sustained one-direction rolling
+    env->aileron_bias += env->actions[2];
+    float r_bias = fmaxf(-fabsf(env->aileron_bias) * env->rcfg.bias, -0.5f);
+    reward += r_bias;
+
+    // 11. Level flight reward: approximately level = good
+    float pitch = asinf(clampf(2.0f * (p->ori.w * p->ori.y - p->ori.z * p->ori.x), -1.0f, 1.0f));
+    float r_level = 0.0f;
+    if (fabsf(roll_angle) < 0.524f && fabsf(pitch) < 0.524f) {  // 30° = 0.524 rad
+        r_level = env->rcfg.level;
+    }
+    reward += r_level;
+
+    // 12. Aiming reward: feedback for gun alignment before actual hits
     Vec3 player_fwd = quat_rotate(p->ori, vec3(1, 0, 0));
     Vec3 to_opp_norm = normalize3(rel_pos);
     float aim_dot = dot3(to_opp_norm, player_fwd);  // 1.0 = perfect aim
     float aim_angle_deg = acosf(clampf(aim_dot, -1.0f, 1.0f)) * RAD_TO_DEG;
 
     float r_aim = 0.0f;
-    // Reward for tracking (within 2x gun cone and in range)
-    if (aim_dot > env->cos_gun_cone_2x && dist < GUN_RANGE) {
-        r_aim += env->rcfg.tracking;
-    }
-    // Bonus for firing solution (within gun cone, in range)
-    if (aim_dot > env->cos_gun_cone && dist < GUN_RANGE) {
-        r_aim += env->rcfg.firing_solution;
+    // Aiming rewards are EXCLUSIVE - better aim = bigger reward
+    if (dist < GUN_RANGE) {
+        if (aim_dot > env->cos_gun_cone) {
+            // Tight aim (within 5° gun cone) - BIG reward
+            r_aim = env->rcfg.firing_solution;
+        } else if (aim_dot > env->cos_gun_cone_2x) {
+            // Loose tracking (within 10°) - small reward
+            r_aim = env->rcfg.tracking;
+        }
     }
     reward += r_aim;
 
-    if (DEBUG) printf("=== REWARD ===\n");
-    if (DEBUG) printf("r_dist=%.4f (dist=%.1f m)\n", r_dist, dist);
-    if (DEBUG) printf("r_closing=%.4f (rate=%.1f m/s)\n", r_closing, closing_rate);
-    if (DEBUG) printf("r_tail=%.4f (angle=%.2f)\n", r_tail, tail_angle);
-    if (DEBUG) printf("r_alt=%.4f (z=%.1f)\n", r_alt, p->pos.z);
-    if (DEBUG) printf("r_speed=%.4f (speed=%.1f)\n", r_speed, speed);
-    if (DEBUG) printf("r_roll=%.5f (roll=%.1f deg)\n", r_roll, roll_angle * RAD_TO_DEG);
-    if (DEBUG) printf("r_neg_g=%.5f (g=%.2f)\n", r_neg_g, p->g_force);
-    if (DEBUG) printf("r_rudder=%.5f (rud=%.2f)\n", r_rudder, env->actions[3]);
-    if (DEBUG) printf("r_aim=%.4f (aim_angle=%.1f deg, dist=%.1f)\n", r_aim, aim_angle_deg, dist);
-    if (DEBUG) printf("reward_total=%.4f\n", reward);
+    if (DEBUG >= 2 && env->env_num == 0) printf("=== REWARD ===\n");
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_dist=%.4f (dist=%.1f m)\n", r_dist, dist);
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_approach=%.5f (dist=%.1f m)\n", r_approach, dist);
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_closing=%.4f (rate=%.1f m/s)\n", r_closing, closing_rate);
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_tail=%.4f (angle=%.2f)\n", r_tail, tail_angle);
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_alt=%.4f (z=%.1f)\n", r_alt, p->pos.z);
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_speed=%.4f (speed=%.1f)\n", r_speed, speed);
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_roll=%.5f (roll=%.1f deg)\n", r_roll, roll_angle * RAD_TO_DEG);
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_neg_g=%.5f (g=%.2f)\n", r_neg_g, p->g_force);
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_rudder=%.5f (rud=%.2f)\n", r_rudder, env->actions[3]);
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_aileron=%.5f (ail=%.2f)\n", r_aileron, env->actions[2]);
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_bias=%.5f (bias=%.1f)\n", r_bias, env->aileron_bias);
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_level=%.4f (bank=%.1f°, pitch=%.1f°)\n", r_level, roll_angle * RAD_TO_DEG, pitch * RAD_TO_DEG);
+    if (DEBUG >= 2 && env->env_num == 0) printf("r_aim=%.4f (aim_angle=%.1f deg, dist=%.1f)\n", r_aim, aim_angle_deg, dist);
+    if (DEBUG >= 2 && env->env_num == 0) printf("reward_total=%.4f\n", reward);
 
-    if (DEBUG) printf("=== COMBAT ===\n");
-    if (DEBUG) printf("aim_angle=%.1f deg (cone=5 deg)\n", aim_angle_deg);
-    if (DEBUG) printf("dist_to_target=%.1f m (gun_range=500)\n", dist);
-    if (DEBUG) printf("in_cone=%d, in_range=%d\n", aim_dot > env->cos_gun_cone, dist < GUN_RANGE);
+    if (DEBUG >= 10) printf("=== COMBAT ===\n");
+    if (DEBUG >= 10) printf("aim_angle=%.1f deg (cone=5 deg)\n", aim_angle_deg);
+    if (DEBUG >= 10) printf("dist_to_target=%.1f m (gun_range=500)\n", dist);
+    if (DEBUG >= 10) printf("in_cone=%d, in_range=%d\n", aim_dot > env->cos_gun_cone, dist < GUN_RANGE);
 
     env->rewards[0] = reward;
     env->episode_return += reward;
@@ -972,11 +1138,22 @@ void c_step(Dogfight *env) {
                fabsf(p->pos.y) > WORLD_HALF_Y ||
                p->pos.z < 0 || p->pos.z > WORLD_MAX_Z;
 
-    if (oob || env->tick >= env->max_steps) {
-        if (DEBUG) printf("=== TERMINAL (FAILURE) ===\n");
-        if (DEBUG) printf("oob=%d (x=%.1f, y=%.1f, z=%.1f)\n", oob, p->pos.x, p->pos.y, p->pos.z);
-        if (DEBUG) printf("max_steps=%d, tick=%d\n", env->max_steps, env->tick);
-        env->rewards[0] = 0.0f;  // No reward on failure
+    // Check for supersonic (physics blowup) - 340 m/s = Mach 1
+    float player_speed = norm3(p->vel);
+    float opp_speed = norm3(o->vel);
+    bool supersonic = player_speed > 340.0f || opp_speed > 340.0f;
+    if (DEBUG && supersonic) {
+        printf("=== SUPERSONIC BLOWUP ===\n");
+        printf("player_speed=%.1f, opp_speed=%.1f\n", player_speed, opp_speed);
+        printf("player_vel=(%.1f, %.1f, %.1f)\n", p->vel.x, p->vel.y, p->vel.z);
+        printf("opp_vel=(%.1f, %.1f, %.1f)\n", o->vel.x, o->vel.y, o->vel.z);
+        printf("opp_ap_mode=%d\n", env->opponent_ap.mode);
+    }
+
+    if (oob || env->tick >= env->max_steps || supersonic) {
+        if (DEBUG >= 10) printf("=== TERMINAL (FAILURE) ===\n");
+        if (DEBUG >= 10) printf("oob=%d, supersonic=%d, tick=%d/%d\n", oob, supersonic, env->tick, env->max_steps);
+        env->rewards[0] = supersonic ? -1.0f : 0.0f;
         env->terminals[0] = 1;
         add_log(env);
         c_reset(env);

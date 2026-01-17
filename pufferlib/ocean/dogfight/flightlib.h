@@ -381,14 +381,14 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
         g_force = -G_LIMIT_NEG;
     }
 
-    if (DEBUG) printf("=== PHYSICS ===\n");
-    if (DEBUG) printf("speed=%.1f m/s (stall~45, max~159 P-51D)\n", V);
-    if (DEBUG) printf("throttle=%.2f\n", throttle);
-    if (DEBUG) printf("alpha_body=%.2f deg, alpha_eff=%.2f deg (inc=%.1f, a0=%.1f), C_L=%.3f\n",
+    if (DEBUG >= 10) printf("=== PHYSICS ===\n");
+    if (DEBUG >= 10) printf("speed=%.1f m/s (stall~45, max~159 P-51D)\n", V);
+    if (DEBUG >= 10) printf("throttle=%.2f\n", throttle);
+    if (DEBUG >= 10) printf("alpha_body=%.2f deg, alpha_eff=%.2f deg (inc=%.1f, a0=%.1f), C_L=%.3f\n",
                       alpha * RAD_TO_DEG, alpha_effective * RAD_TO_DEG,
                       WING_INCIDENCE * RAD_TO_DEG, ALPHA_ZERO * RAD_TO_DEG, C_L);
-    if (DEBUG) printf("thrust=%.0f N, lift=%.0f N, drag=%.0f N, weight=%.0f N\n", T_mag, L_mag, D_mag, MASS * GRAVITY);
-    if (DEBUG) printf("g_force=%.2f g (limit=+%.1f/-%.1f)\n", g_force, G_LIMIT_POS, G_LIMIT_NEG);
+    if (DEBUG >= 10) printf("thrust=%.0f N, lift=%.0f N, drag=%.0f N, weight=%.0f N\n", T_mag, L_mag, D_mag, MASS * GRAVITY);
+    if (DEBUG >= 10) printf("g_force=%.2f g (limit=+%.1f/-%.1f)\n", g_force, G_LIMIT_POS, G_LIMIT_NEG);
 
     // ========================================================================
     // 14. INTEGRATION (Semi-implicit Euler)
@@ -413,10 +413,10 @@ static inline void step_plane(Plane *p, float dt) {
     p->vel = mul3(forward, speed);
     p->pos = add3(p->pos, mul3(p->vel, dt));
 
-    if (DEBUG) printf("=== TARGET ===\n");
-    if (DEBUG) printf("target_speed=%.1f m/s (expected=80)\n", speed);
-    if (DEBUG) printf("target_pos=(%.1f, %.1f, %.1f)\n", p->pos.x, p->pos.y, p->pos.z);
-    if (DEBUG) printf("target_fwd=(%.2f, %.2f, %.2f)\n", forward.x, forward.y, forward.z);
+    if (DEBUG >= 10) printf("=== TARGET ===\n");
+    if (DEBUG >= 10) printf("target_speed=%.1f m/s (expected=80)\n", speed);
+    if (DEBUG >= 10) printf("target_pos=(%.1f, %.1f, %.1f)\n", p->pos.x, p->pos.y, p->pos.z);
+    if (DEBUG >= 10) printf("target_fwd=(%.2f, %.2f, %.2f)\n", forward.x, forward.y, forward.z);
 }
 
 #endif // FLIGHTLIB_H

@@ -65,6 +65,10 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
         .roll = get_float(kwargs, "penalty_roll", 0.0001f),
         .neg_g = get_float(kwargs, "penalty_neg_g", 0.002f),
         .rudder = get_float(kwargs, "penalty_rudder", 0.0002f),
+        .aileron = get_float(kwargs, "penalty_aileron", 0.015f),
+        .bias = get_float(kwargs, "penalty_bias", 0.01f),
+        .approach = get_float(kwargs, "reward_approach", 0.005f),
+        .level = get_float(kwargs, "reward_level", 0.02f),
         .alt_min = get_float(kwargs, "alt_min", 200.0f),
         .alt_max = get_float(kwargs, "alt_max", 2500.0f),
         .speed_min = get_float(kwargs, "speed_min", 50.0f),
@@ -74,8 +78,9 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     int curriculum_enabled = get_int(kwargs, "curriculum_enabled", 0);
     int curriculum_randomize = get_int(kwargs, "curriculum_randomize", 0);
     int episodes_per_stage = get_int(kwargs, "episodes_per_stage", 15000);
+    int env_num = get_int(kwargs, "env_num", 0);
 
-    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, episodes_per_stage);
+    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, episodes_per_stage, env_num);
     return 0;
 }
 
@@ -87,7 +92,11 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "kills", log->kills);
     assign_to_dict(dict, "shots_fired", log->shots_fired);
     assign_to_dict(dict, "accuracy", log->accuracy);
-    assign_to_dict(dict, "stage", log->stage);  // Curriculum stage (0-5)
+    assign_to_dict(dict, "stage", log->stage);
+    assign_to_dict(dict, "total_stage_weight", log->total_stage_weight);
+    assign_to_dict(dict, "avg_stage_weight", log->avg_stage_weight);
+    assign_to_dict(dict, "avg_abs_bias", log->avg_abs_bias);
+    assign_to_dict(dict, "ultimate", log->ultimate);
     assign_to_dict(dict, "n", log->n);
     return 0;
 }
