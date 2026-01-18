@@ -1184,6 +1184,8 @@ void c_step(Dogfight *env) {
     if (DEBUG >= 10) printf("dist_to_target=%.1f m (gun_range=500)\n", dist);
     if (DEBUG >= 10) printf("in_cone=%d, in_range=%d\n", aim_dot > env->cos_gun_cone, dist < GUN_RANGE);
 
+    // Clamp reward to prevent extreme values causing gradient explosion
+    reward = fmaxf(-1.0f, fminf(1.0f, reward));
     env->rewards[0] = reward;
     env->episode_return += reward;
 
