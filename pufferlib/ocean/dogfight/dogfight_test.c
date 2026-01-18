@@ -19,11 +19,11 @@ static Dogfight make_env(int max_steps) {
     env.max_steps = max_steps;
     // Default reward config
     RewardConfig rcfg = {
-        .dist_scale = 0.0001f, .closing_scale = 0.002f, .tail_scale = 0.05f,
+        .closing_scale = 0.002f, .tail_scale = 0.005f,
         .tracking = 0.05f, .firing_solution = 0.1f,
-        .alt_low = 0.0005f, .alt_high = 0.0002f, .stall = 0.002f, .roll = 0.0001f,
+        .stall = 0.002f, .roll = 0.0001f,
         .neg_g = 0.0005f, .rudder = 0.0002f,
-        .alt_min = 200.0f, .alt_max = 2500.0f, .speed_min = 50.0f,
+        .alt_max = 2500.0f, .speed_min = 50.0f,
     };
     init(&env, 0, &rcfg, 0, 0, 15000, 0);  // curriculum_enabled=0, randomize=0, episodes_per_stage=15000
     return env;
@@ -666,33 +666,6 @@ void test_tail_position_reward() {
     printf("test_tail_position_reward PASS\n");
 }
 
-void test_altitude_penalty() {
-    Dogfight env = make_env(1000);
-
-    // Scenario 1: Good altitude (1000m)
-    c_reset(&env);
-    env.player.pos = vec3(0, 0, 1000);
-    env.player.vel = vec3(100, 0, 0);
-    env.opponent.pos = vec3(300, 0, 1000);
-
-    c_step(&env);
-    float reward_good_alt = env.rewards[0];
-
-    // Scenario 2: Too low (100m)
-    c_reset(&env);
-    env.player.pos = vec3(0, 0, 100);
-    env.player.vel = vec3(100, 0, 0);
-    env.opponent.pos = vec3(300, 0, 100);
-
-    c_step(&env);
-    float reward_low = env.rewards[0];
-
-    // Good altitude should have better reward (less penalty)
-    assert(reward_good_alt > reward_low);
-
-    printf("test_altitude_penalty PASS\n");
-}
-
 void test_speed_penalty() {
     Dogfight env = make_env(1000);
 
@@ -974,39 +947,6 @@ void test_roll_penalty() {
     printf("test_roll_penalty PASS\n");
 }
 
-void test_high_altitude_penalty() {
-    Dogfight env = make_env(1000);
-
-    // Good altitude (1000m, between alt_min=200 and alt_max=2500)
-    c_reset(&env);
-    env.actions[4] = -1.0f;  // Don't fire
-    env.player.pos = vec3(0, 0, 1000);
-    env.player.vel = vec3(100, 0, 0);
-    env.player.ori = quat(1, 0, 0, 0);
-    env.opponent.pos = vec3(300, 0, 1000);
-    env.opponent.vel = vec3(100, 0, 0);
-    env.opponent.ori = quat(1, 0, 0, 0);
-    c_step(&env);
-    float reward_good = env.rewards[0];
-
-    // Too high (above alt_max=2500)
-    c_reset(&env);
-    env.actions[4] = -1.0f;  // Don't fire
-    env.player.pos = vec3(0, 0, 3000);  // 500m above alt_max
-    env.player.vel = vec3(100, 0, 0);
-    env.player.ori = quat(1, 0, 0, 0);
-    env.opponent.pos = vec3(300, 0, 3000);
-    env.opponent.vel = vec3(100, 0, 0);
-    env.opponent.ori = quat(1, 0, 0, 0);
-    c_step(&env);
-    float reward_high = env.rewards[0];
-
-    // Too high should have worse reward
-    assert(reward_good > reward_high);
-
-    printf("test_high_altitude_penalty PASS\n");
-}
-
 void test_tracking_reward() {
     Dogfight env = make_env(1000);
 
@@ -1082,11 +1022,11 @@ static Dogfight make_env_curriculum(int max_steps, int randomize) {
     env.terminals = term_buf;
     env.max_steps = max_steps;
     RewardConfig rcfg = {
-        .dist_scale = 0.0001f, .closing_scale = 0.002f, .tail_scale = 0.05f,
+        .closing_scale = 0.002f, .tail_scale = 0.005f,
         .tracking = 0.05f, .firing_solution = 0.1f,
-        .alt_low = 0.0005f, .alt_high = 0.0002f, .stall = 0.002f, .roll = 0.0001f,
+        .stall = 0.002f, .roll = 0.0001f,
         .neg_g = 0.0005f, .rudder = 0.0002f,
-        .alt_min = 200.0f, .alt_max = 2500.0f, .speed_min = 50.0f,
+        .alt_max = 2500.0f, .speed_min = 50.0f,
     };
     init(&env, 0, &rcfg, 1, randomize, 15000, 0);  // curriculum_enabled=1
     return env;
@@ -1101,11 +1041,11 @@ static Dogfight make_env_with_roll_penalty(int max_steps, float roll_penalty) {
     env.terminals = term_buf;
     env.max_steps = max_steps;
     RewardConfig rcfg = {
-        .dist_scale = 0.0001f, .closing_scale = 0.002f, .tail_scale = 0.05f,
+        .closing_scale = 0.002f, .tail_scale = 0.005f,
         .tracking = 0.05f, .firing_solution = 0.1f,
-        .alt_low = 0.0005f, .alt_high = 0.0002f, .stall = 0.002f,
+        .stall = 0.002f,
         .roll = roll_penalty, .neg_g = 0.0005f, .rudder = 0.0002f,
-        .alt_min = 200.0f, .alt_max = 2500.0f, .speed_min = 50.0f,
+        .alt_max = 2500.0f, .speed_min = 50.0f,
     };
     init(&env, 0, &rcfg, 0, 0, 15000, 0);
     return env;
@@ -1444,7 +1384,6 @@ int main() {
     // Phase 3.5
     test_closing_velocity_reward();
     test_tail_position_reward();
-    test_altitude_penalty();
     test_speed_penalty();
 
     // Phase 4
@@ -1463,7 +1402,6 @@ int main() {
     // Phase 5.5: Additional reward/penalty tests
     test_roll_penalty();
     test_roll_penalty_accumulates();
-    test_high_altitude_penalty();
     test_tracking_reward();
     test_firing_solution_reward();
     test_neg_g_penalty();
@@ -1475,6 +1413,6 @@ int main() {
     test_curriculum_stages_differ();
     test_spawn_distance_range();
 
-    printf("\nAll 47 tests PASS\n");
+    printf("\nAll 45 tests PASS\n");
     return 0;
 }

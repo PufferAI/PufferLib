@@ -44,13 +44,10 @@ class Dogfight(pufferlib.PufferEnv):
         curriculum_randomize=0,     # 0=progressive (training), 1=random stage each episode (eval)
         episodes_per_stage=60,      # Episodes before advancing difficulty
         # Reward weights (all sweepable via INI)
-        reward_dist_scale=0.0001,
         reward_closing_scale=0.002,
-        reward_tail_scale=0.05,
+        reward_tail_scale=0.005,
         reward_tracking=0.05,
         reward_firing_solution=0.1,
-        penalty_alt_low=0.0005,
-        penalty_alt_high=0.0002,
         penalty_stall=0.002,
         penalty_roll=0.0001,
         penalty_neg_g=0.002,
@@ -60,7 +57,6 @@ class Dogfight(pufferlib.PufferEnv):
         reward_approach=0.005,
         reward_level=0.02,
         # Thresholds (not swept)
-        alt_min=200.0,
         alt_max=2500.0,
         speed_min=50.0,
     ):
@@ -107,13 +103,10 @@ class Dogfight(pufferlib.PufferEnv):
                 curriculum_randomize=curriculum_randomize,
                 episodes_per_stage=episodes_per_stage,
                 # Reward config (all sweepable)
-                reward_dist_scale=reward_dist_scale,
                 reward_closing_scale=reward_closing_scale,
                 reward_tail_scale=reward_tail_scale,
                 reward_tracking=reward_tracking,
                 reward_firing_solution=reward_firing_solution,
-                penalty_alt_low=penalty_alt_low,
-                penalty_alt_high=penalty_alt_high,
                 penalty_stall=penalty_stall,
                 penalty_roll=penalty_roll,
                 penalty_neg_g=penalty_neg_g,
@@ -122,7 +115,6 @@ class Dogfight(pufferlib.PufferEnv):
                 penalty_bias=penalty_bias,
                 reward_approach=reward_approach,
                 reward_level=reward_level,
-                alt_min=alt_min,
                 alt_max=alt_max,
                 speed_min=speed_min,
             )

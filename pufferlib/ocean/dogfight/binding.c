@@ -54,13 +54,10 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
 
     // Build reward config from kwargs (all sweepable via INI)
     RewardConfig rcfg = {
-        .dist_scale = get_float(kwargs, "reward_dist_scale", 0.0001f),
         .closing_scale = get_float(kwargs, "reward_closing_scale", 0.002f),
-        .tail_scale = get_float(kwargs, "reward_tail_scale", 0.05f),
+        .tail_scale = get_float(kwargs, "reward_tail_scale", 0.005f),
         .tracking = get_float(kwargs, "reward_tracking", 0.05f),
         .firing_solution = get_float(kwargs, "reward_firing_solution", 0.1f),
-        .alt_low = get_float(kwargs, "penalty_alt_low", 0.0005f),
-        .alt_high = get_float(kwargs, "penalty_alt_high", 0.0002f),
         .stall = get_float(kwargs, "penalty_stall", 0.002f),
         .roll = get_float(kwargs, "penalty_roll", 0.0001f),
         .neg_g = get_float(kwargs, "penalty_neg_g", 0.002f),
@@ -69,7 +66,6 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
         .bias = get_float(kwargs, "penalty_bias", 0.01f),
         .approach = get_float(kwargs, "reward_approach", 0.005f),
         .level = get_float(kwargs, "reward_level", 0.02f),
-        .alt_min = get_float(kwargs, "alt_min", 200.0f),
         .alt_max = get_float(kwargs, "alt_max", 2500.0f),
         .speed_min = get_float(kwargs, "speed_min", 50.0f),
     };
