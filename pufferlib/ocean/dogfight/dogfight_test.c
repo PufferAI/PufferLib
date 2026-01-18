@@ -1119,9 +1119,9 @@ static float get_opponent_heading(Dogfight *env) {
 
 void test_spawn_bearing_variety() {
     // Test that FULL_RANDOM stage spawns opponents at various bearings (not just ahead)
-    // Use progressive mode and set total_episodes high enough to be at stage 5
+    // Use progressive mode and set total_episodes high enough to reach FULL_RANDOM (stage 4)
     Dogfight env = make_env_curriculum(1000, 0);  // Progressive mode
-    env.total_episodes = env.episodes_per_stage * 5;  // Force stage 5 (FULL_RANDOM)
+    env.total_episodes = env.episodes_per_stage * 4;  // Force stage 4 (FULL_RANDOM)
 
     int front_count = 0;   // bearing < 45
     int side_count = 0;    // bearing 45-135
@@ -1132,7 +1132,7 @@ void test_spawn_bearing_variety() {
         srand(seed * 7 + 13);  // Vary seed
         c_reset(&env);
 
-        // Verify we're in stage 5
+        // Verify we're in stage 4 (FULL_RANDOM after 2026-01-18 reorder)
         assert(env.stage == CURRICULUM_FULL_RANDOM);
 
         float bearing = get_bearing(&env);
@@ -1153,9 +1153,9 @@ void test_spawn_bearing_variety() {
 
 void test_spawn_heading_variety() {
     // Test that FULL_RANDOM opponents have varied headings (not always 0)
-    // Use progressive mode and set total_episodes high enough to be at stage 5
+    // Use progressive mode and set total_episodes high enough to reach FULL_RANDOM (stage 4)
     Dogfight env = make_env_curriculum(1000, 0);  // Progressive mode
-    env.total_episodes = env.episodes_per_stage * 5;  // Force stage 5
+    env.total_episodes = env.episodes_per_stage * 4;  // Force stage 4 (FULL_RANDOM)
 
     float min_heading = 999.0f;
     float max_heading = -999.0f;
@@ -1165,7 +1165,7 @@ void test_spawn_heading_variety() {
         srand(seed * 11 + 17);
         c_reset(&env);
 
-        // Verify we're in stage 5
+        // Verify we're in stage 4 (FULL_RANDOM after 2026-01-18 reorder)
         assert(env.stage == CURRICULUM_FULL_RANDOM);
 
         float heading = get_opponent_heading(&env);
@@ -1204,8 +1204,15 @@ void test_curriculum_stages_differ() {
     float bearing_head = get_bearing(&env);
     assert(env.stage == CURRICULUM_HEAD_ON);
 
-    // Stage 2: CROSSING - opponent to side
+    // Stage 2: VERTICAL - opponent above/below (after 2026-01-18 reorder, was stage 3)
     env.total_episodes = env.episodes_per_stage * 2;  // Stage 2
+    srand(42);
+    c_reset(&env);
+    float bearing_vert = get_bearing(&env);
+    assert(env.stage == CURRICULUM_VERTICAL);
+
+    // Stage 6: CROSSING - opponent to side (after 2026-01-18 reorder, was stage 2)
+    env.total_episodes = env.episodes_per_stage * 6;  // Stage 6
     srand(42);
     c_reset(&env);
     float bearing_cross = get_bearing(&env);
@@ -1217,14 +1224,17 @@ void test_curriculum_stages_differ() {
     // HEAD_ON should have opponent ahead
     assert(bearing_head < 30.0f);
 
+    // VERTICAL should have opponent ahead (same heading, different altitude)
+    assert(bearing_vert < 45.0f);
+
     // CROSSING should have opponent more to the side (larger bearing)
     assert(bearing_cross > 45.0f);
 
     // TAIL_CHASE opponent should face same direction as player (~0° heading)
     assert(fabsf(heading_tail) < 30.0f);
 
-    printf("test_curriculum_stages_differ PASS (tail=%.0f°, head=%.0f°, cross=%.0f°)\n",
-           bearing_tail, bearing_head, bearing_cross);
+    printf("test_curriculum_stages_differ PASS (tail=%.0f°, head=%.0f°, vert=%.0f°, cross=%.0f°)\n",
+           bearing_tail, bearing_head, bearing_vert, bearing_cross);
 }
 
 void test_spawn_distance_range() {

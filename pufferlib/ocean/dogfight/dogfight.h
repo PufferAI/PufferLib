@@ -31,28 +31,30 @@ typedef enum {
 static const int OBS_SIZES[OBS_SCHEME_COUNT] = {12, 17, 10, 10, 13, 15};
 
 // Curriculum learning stages (progressive difficulty)
+// Reordered 2026-01-18: moved CROSSING from stage 2 to stage 6 (see CURRICULUM_PLANS.md)
 typedef enum {
     CURRICULUM_TAIL_CHASE = 0,   // Easiest: opponent ahead, same heading
     CURRICULUM_HEAD_ON,          // Opponent coming toward us
-    CURRICULUM_CROSSING,         // 90 degree deflection shots
-    CURRICULUM_VERTICAL,         // Above or below player
-    CURRICULUM_MANEUVERING,      // Opponent does turns
-    CURRICULUM_FULL_RANDOM,      // Mix of all basic modes
-    CURRICULUM_HARD_MANEUVERING, // Hard turns + weave patterns
+    CURRICULUM_VERTICAL,         // Above or below player (was stage 3)
+    CURRICULUM_MANEUVERING,      // Opponent does turns (was stage 4)
+    CURRICULUM_FULL_RANDOM,      // Mix of all basic modes (was stage 5)
+    CURRICULUM_HARD_MANEUVERING, // Hard turns + weave patterns (was stage 6)
+    CURRICULUM_CROSSING,         // 45 degree deflection shots (was stage 2, reduced from 90°)
     CURRICULUM_EVASIVE,          // Reactive evasion (hardest)
     CURRICULUM_COUNT
 } CurriculumStage;
 
 // Stage difficulty weights for composite metric (higher = harder = more valuable)
 // Used to compute difficulty_weighted_perf = perf * avg_stage_weight
+// Reordered 2026-01-18 to match new enum order (see CURRICULUM_PLANS.md)
 static const float STAGE_WEIGHTS[CURRICULUM_COUNT] = {
     0.2f,   // TAIL_CHASE - trivial
     0.3f,   // HEAD_ON - easy
-    0.4f,   // CROSSING - easy-medium
-    0.5f,   // VERTICAL - medium
-    0.6f,   // MANEUVERING - medium
-    0.75f,  // FULL_RANDOM - medium-hard
-    0.9f,   // HARD_MANEUVERING - hard
+    0.4f,   // VERTICAL - medium (was stage 3)
+    0.5f,   // MANEUVERING - medium (was stage 4)
+    0.65f,  // FULL_RANDOM - medium-hard (was stage 5)
+    0.8f,   // HARD_MANEUVERING - hard (was stage 6)
+    0.9f,   // CROSSING - hard, 45° deflection (was stage 2)
     1.0f    // EVASIVE - hardest
 };
 
@@ -706,17 +708,24 @@ void spawn_head_on(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     env->opponent_ap.mode = AP_STRAIGHT;
 }
 
-// Stage 2: CROSSING - 90 degree deflection shots
+// Stage 6: CROSSING - 45 degree deflection shots (reduced from 90° - see CURRICULUM_PLANS.md)
+// 90° deflection is historically nearly impossible; 45° is achievable with proper lead
 void spawn_crossing(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    // Opponent 300-500m to the side, flying perpendicular
+    // Opponent 300-500m to the side, flying at 45° angle (not perpendicular)
     float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;
     Vec3 opp_pos = vec3(
         player_pos.x + rndf(100, 200),
         player_pos.y + side * rndf(300, 500),
         player_pos.z + rndf(-50, 50)
     );
-    // Perpendicular velocity (flying in Y direction)
-    Vec3 opp_vel = vec3(0, -side * norm3(player_vel), 0);
+    // 45° crossing velocity: opponent flies at 45° angle across player's path
+    // cos(45°) ≈ 0.707, sin(45°) ≈ 0.707
+    float speed = norm3(player_vel);
+    float cos45 = 0.7071f;
+    float sin45 = 0.7071f;
+    // side=+1 (right): fly toward (-45°) = (cos, -sin) to cross leftward
+    // side=-1 (left): fly toward (+45°) = (cos, +sin) to cross rightward
+    Vec3 opp_vel = vec3(speed * cos45, -side * speed * sin45, 0);
     reset_plane(&env->opponent, opp_pos, opp_vel);
     env->opponent_ap.mode = AP_STRAIGHT;
 }
