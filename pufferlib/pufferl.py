@@ -939,6 +939,14 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
         logger = WandbLogger(args)
 
     train_config = { **args['train'], 'env': env_name }
+
+    # Print training hyperparameters for debugging
+    print(f"=== TRAIN CONFIG ===")
+    print(f"  clip_coef={train_config.get('clip_coef', 'N/A'):.4f}, gae_lambda={train_config.get('gae_lambda', 'N/A'):.4f}")
+    print(f"  learning_rate={train_config.get('learning_rate', 'N/A'):.6f}, max_grad_norm={train_config.get('max_grad_norm', 'N/A'):.4f}")
+    print(f"  gamma={train_config.get('gamma', 'N/A'):.6f}, ent_coef={train_config.get('ent_coef', 'N/A'):.6f}")
+    print(f"  adam_eps={train_config.get('adam_eps', 'N/A'):.2e}")
+
     pufferl = PuffeRL(train_config, vecenv, policy, logger)
 
     all_logs = []
