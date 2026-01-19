@@ -1162,19 +1162,21 @@ void c_step(Dogfight *env) {
     float dist = norm3(rel_pos);
 
     // 1. Approach reward: getting closer = good (symmetric - also penalize moving away)
+    // Clamped to prevent explosion with high ent_coef + high reward_approach combos
     float r_approach = 0.0f;
     if (env->prev_dist > 0.0f) {
         float dist_delta = env->prev_dist - dist;  // positive when closing
-        r_approach = dist_delta * env->rcfg.approach;  // Symmetric: reward closing, penalize opening
+        r_approach = clampf(dist_delta * env->rcfg.approach, -0.1f, 0.1f);
     }
     env->prev_dist = dist;
     reward += r_approach;
 
     // 3. Closing velocity reward: approaching = good (symmetric)
+    // Clamped to prevent explosion with unstable hyperparameter combos
     Vec3 rel_vel = sub3(p->vel, o->vel);
     Vec3 rel_pos_norm = normalize3(rel_pos);
     float closing_rate = dot3(rel_vel, rel_pos_norm);
-    float r_closing = closing_rate * env->rcfg.closing_scale;
+    float r_closing = clampf(closing_rate * env->rcfg.closing_scale, -0.1f, 0.1f);
     reward += r_closing;
 
     // 3. Tail position reward: behind opponent = good
