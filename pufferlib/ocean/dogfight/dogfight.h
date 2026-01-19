@@ -1194,10 +1194,10 @@ void c_step(Dogfight *env) {
     float r_roll = -fabsf(roll_angle) * env->rcfg.roll;
     reward += r_roll;
 
-    // 7. Negative G penalty: penalize low/negative G-loading
-    // Threshold 0.5G: allows some slack for light maneuvers but penalizes serious neg-G
-    float g_threshold = 0.5f;
-    float g_deficit = fmaxf(0.0f, g_threshold - p->g_force);
+    // 7. Negative G penalty: only penalize actual negative G (below -0.5G)
+    // Threshold -0.5G: allows normal flight and light negative G, penalizes hard negative G
+    float g_threshold = -0.5f;
+    float g_deficit = fmaxf(0.0f, g_threshold - p->g_force);  // positive when g < -0.5
     float r_neg_g = -g_deficit * env->rcfg.neg_g;
     reward += r_neg_g;
 
