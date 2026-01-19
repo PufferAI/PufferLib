@@ -25,7 +25,7 @@ static Dogfight make_env(int max_steps) {
         .neg_g = 0.0005f, .rudder = 0.0002f,
         .alt_max = 2500.0f, .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg, 0, 0, 15000, 0);  // curriculum_enabled=0, randomize=0, episodes_per_stage=15000
+    init(&env, 0, &rcfg, 0, 0, 15000, 0.35f, 0.087f, 50000, 0);  // curriculum_enabled=0, aim_cone defaults
     return env;
 }
 
@@ -1028,7 +1028,7 @@ static Dogfight make_env_curriculum(int max_steps, int randomize) {
         .neg_g = 0.0005f, .rudder = 0.0002f,
         .alt_max = 2500.0f, .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg, 1, randomize, 15000, 0);  // curriculum_enabled=1
+    init(&env, 0, &rcfg, 1, randomize, 15000, 0.35f, 0.087f, 50000, 0);  // curriculum_enabled=1
     return env;
 }
 
@@ -1047,7 +1047,7 @@ static Dogfight make_env_with_roll_penalty(int max_steps, float roll_penalty) {
         .roll = roll_penalty, .neg_g = 0.0005f, .rudder = 0.0002f,
         .alt_max = 2500.0f, .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg, 0, 0, 15000, 0);
+    init(&env, 0, &rcfg, 0, 0, 15000, 0.35f, 0.087f, 50000, 0);
     return env;
 }
 

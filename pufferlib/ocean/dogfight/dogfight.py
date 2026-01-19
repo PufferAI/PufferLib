@@ -59,6 +59,10 @@ class Dogfight(pufferlib.PufferEnv):
         # Thresholds (not swept)
         alt_max=2500.0,
         speed_min=50.0,
+        # Aim cone annealing (reward shaping curriculum)
+        aim_cone_start=0.35,      # Starting reward cone (radians, ~20°)
+        aim_cone_end=0.087,       # Ending reward cone (radians, ~5°)
+        aim_anneal_episodes=50000,  # Episodes to fully anneal
     ):
         # Observation size depends on scheme
         obs_size = OBS_SIZES.get(obs_scheme, 19)
@@ -93,6 +97,7 @@ class Dogfight(pufferlib.PufferEnv):
         print(f"  PENALTY: bias={penalty_bias:.4f} ail={penalty_aileron:.4f} roll={penalty_roll:.4f}")
         print(f"           neg_g={penalty_neg_g:.4f} rudder={penalty_rudder:.4f} stall={penalty_stall:.4f}")
         print(f"  curriculum={curriculum_enabled}, episodes_per_stage={episodes_per_stage}")
+        print(f"  AIM CONE: start={aim_cone_start:.3f} end={aim_cone_end:.3f} anneal_eps={aim_anneal_episodes}")
 
         self._env_handles = []
         for env_num in range(num_envs):
@@ -126,6 +131,10 @@ class Dogfight(pufferlib.PufferEnv):
                 reward_level=reward_level,
                 alt_max=alt_max,
                 speed_min=speed_min,
+                # Aim cone annealing
+                aim_cone_start=aim_cone_start,
+                aim_cone_end=aim_cone_end,
+                aim_anneal_episodes=aim_anneal_episodes,
             )
             self._env_handles.append(handle)
 

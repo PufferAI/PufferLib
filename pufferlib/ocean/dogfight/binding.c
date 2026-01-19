@@ -74,9 +74,15 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     int curriculum_enabled = get_int(kwargs, "curriculum_enabled", 0);
     int curriculum_randomize = get_int(kwargs, "curriculum_randomize", 0);
     int episodes_per_stage = get_int(kwargs, "episodes_per_stage", 15000);
+
+    // Aim cone annealing params (reward shaping curriculum)
+    float aim_cone_start = get_float(kwargs, "aim_cone_start", 0.35f);  // 20° in radians
+    float aim_cone_end = get_float(kwargs, "aim_cone_end", 0.087f);     // 5° in radians
+    int aim_anneal_episodes = get_int(kwargs, "aim_anneal_episodes", 50000);
+
     int env_num = get_int(kwargs, "env_num", 0);
 
-    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, episodes_per_stage, env_num);
+    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, episodes_per_stage, aim_cone_start, aim_cone_end, aim_anneal_episodes, env_num);
     return 0;
 }
 

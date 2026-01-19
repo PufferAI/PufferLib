@@ -66,7 +66,6 @@ static const float STAGE_WEIGHTS[CURRICULUM_COUNT] = {
 #define WORLD_HALF_Y 2000.0f
 #define WORLD_MAX_Z 3000.0f
 #define MAX_SPEED 250.0f
-#define TOTAL_AILERON_LIMIT 150.0f  // ~1.5 sec at full aileron = death (uses |aileron|)
 #define OBS_SIZE 19  // player(13) + rel_pos(3) + rel_vel(3)
 
 // Inverse constants for faster normalization (multiply instead of divide)
@@ -153,9 +152,17 @@ typedef struct Dogfight {
     Plane player;
     Plane opponent;
     // Per-episode precomputed values (for curriculum learning)
-    float gun_cone_angle;   // Current cone angle (radians)
-    float cos_gun_cone;     // cosf(gun_cone_angle)
+    float gun_cone_angle;   // Hit detection cone (radians) - FIXED at 5°
+    float cos_gun_cone;     // cosf(gun_cone_angle) - for hit detection
     float cos_gun_cone_2x;  // cosf(gun_cone_angle * 2)
+    // Reward shaping cone (anneals from large to small)
+    float reward_cone_angle;   // Current reward cone (radians) - anneals
+    float cos_reward_cone;     // cosf(reward_cone_angle)
+    float cos_reward_cone_2x;  // cosf(reward_cone_angle * 2)
+    // Aim cone annealing parameters
+    float aim_cone_start;      // Starting reward cone (radians, e.g., 20° = 0.35)
+    float aim_cone_end;        // Ending reward cone (radians, e.g., 5° = 0.087)
+    int aim_anneal_episodes;   // Episodes to fully anneal
     // Opponent autopilot
     AutopilotState opponent_ap;
     // Observation scheme
@@ -193,7 +200,7 @@ typedef struct Dogfight {
     int env_num;                // Environment index (for filtering debug output)
 } Dogfight;
 
-void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, int episodes_per_stage, int env_num) {
+void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, int episodes_per_stage, float aim_cone_start, float aim_cone_end, int aim_anneal_episodes, int env_num) {
     env->log = (Log){0};
     env->tick = 0;
     env->env_num = env_num;
@@ -202,10 +209,18 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     // Observation scheme
     env->obs_scheme = (obs_scheme >= 0 && obs_scheme < OBS_SCHEME_COUNT) ? obs_scheme : 0;
     env->obs_size = OBS_SIZES[env->obs_scheme];
-    // Precompute gun cone trig (can vary per episode for curriculum)
+    // Gun cone for HIT DETECTION - fixed at 5°
     env->gun_cone_angle = GUN_CONE_ANGLE;
     env->cos_gun_cone = cosf(env->gun_cone_angle);
     env->cos_gun_cone_2x = cosf(env->gun_cone_angle * 2.0f);
+    // Aim cone annealing for REWARD SHAPING
+    env->aim_cone_start = aim_cone_start > 0.0f ? aim_cone_start : 0.35f;  // Default 20°
+    env->aim_cone_end = aim_cone_end > 0.0f ? aim_cone_end : GUN_CONE_ANGLE;  // Default 5°
+    env->aim_anneal_episodes = aim_anneal_episodes > 0 ? aim_anneal_episodes : 50000;
+    // Initialize reward cone to start value
+    env->reward_cone_angle = env->aim_cone_start;
+    env->cos_reward_cone = cosf(env->reward_cone_angle);
+    env->cos_reward_cone_2x = cosf(env->reward_cone_angle * 2.0f);
     // Initialize opponent autopilot
     autopilot_init(&env->opponent_ap);
     // Reward configuration (copy from provided config)
@@ -931,9 +946,15 @@ void c_reset(Dogfight *env) {
     env->sum_r_aim = 0.0f;
     env->death_reason = DEATH_NONE;
 
-    // Recompute gun cone trig (for curriculum: could vary gun_cone_angle here)
+    // Gun cone for hit detection - stays fixed at 5°
     env->cos_gun_cone = cosf(env->gun_cone_angle);
     env->cos_gun_cone_2x = cosf(env->gun_cone_angle * 2.0f);
+
+    // Anneal reward cone: start large (easy), shrink to gun cone (hard)
+    float anneal_frac = fminf((float)env->total_episodes / (float)env->aim_anneal_episodes, 1.0f);
+    env->reward_cone_angle = env->aim_cone_start + anneal_frac * (env->aim_cone_end - env->aim_cone_start);
+    env->cos_reward_cone = cosf(env->reward_cone_angle);
+    env->cos_reward_cone_2x = cosf(env->reward_cone_angle * 2.0f);
 
     // Spawn player at random position
     Vec3 pos = vec3(rndf(-500, 500), rndf(-500, 500), rndf(500, 1500));
@@ -1022,25 +1043,8 @@ void c_step(Dogfight *env) {
         step_plane(&env->opponent, DT);
     }
 
-    // === Anti-spinning death check ===
+    // Track aileron usage for monitoring (no death penalty - see BISECTION.md)
     env->total_aileron_usage += fabsf(env->actions[2]);
-    if (DEBUG >= 3 && env->env_num == 0) {
-        printf("AILERON: action=%.3f, total_usage=%.1f/%.0f, tick=%d\n",
-               env->actions[2], env->total_aileron_usage, TOTAL_AILERON_LIMIT, env->tick);
-    }
-    if (env->total_aileron_usage > TOTAL_AILERON_LIMIT) {
-        // Death by excessive aileron usage (rolling/oscillating)
-        if (DEBUG >= 3 && env->env_num == 0) {
-            printf("*** AILERON DEATH! total_usage=%.1f, tick=%d ***\n",
-                   env->total_aileron_usage, env->tick);
-        }
-        env->death_reason = DEATH_AILERON;
-        env->rewards[0] = -1.0f;
-        env->terminals[0] = 1;
-        add_log(env);
-        c_reset(env);
-        return;
-    }
 
     // === Combat (Phase 5) ===
     Plane *p = &env->player;
@@ -1125,38 +1129,30 @@ void c_step(Dogfight *env) {
     float r_rudder = -fabsf(env->actions[3]) * env->rcfg.rudder;
     reward += r_rudder;
 
-    // 9. Aileron penalty: discourage constant rolling
-    float r_aileron = -fabsf(env->actions[2]) * env->rcfg.aileron;
-    reward += r_aileron;
-
-    // 10. Aileron bias penalty: discourage sustained one-direction rolling
+    // Track aileron bias for monitoring (no reward penalty - see BISECTION.md)
     env->aileron_bias += env->actions[2];
-    float r_bias = fmaxf(-fabsf(env->aileron_bias) * env->rcfg.bias, -0.5f);
-    reward += r_bias;
+    float r_aileron = 0.0f;  // Disabled - was causing "don't maneuver" trap
+    float r_bias = 0.0f;     // Disabled - was causing "don't maneuver" trap
+    float r_level = 0.0f;    // Disabled - was causing "don't maneuver" trap
+    float pitch = asinf(clampf(2.0f * (p->ori.w * p->ori.y - p->ori.z * p->ori.x), -1.0f, 1.0f));  // For debug only
 
-    // 11. Level flight reward: approximately level = good
-    float pitch = asinf(clampf(2.0f * (p->ori.w * p->ori.y - p->ori.z * p->ori.x), -1.0f, 1.0f));
-    float r_level = 0.0f;
-    if (fabsf(roll_angle) < 0.524f && fabsf(pitch) < 0.524f) {  // 30° = 0.524 rad
-        r_level = env->rcfg.level;
-    }
-    reward += r_level;
-
-    // 12. Aiming reward: feedback for gun alignment before actual hits
+    // 9. Aiming reward: feedback for gun alignment before actual hits
     Vec3 player_fwd = quat_rotate(p->ori, vec3(1, 0, 0));
     Vec3 to_opp_norm = normalize3(rel_pos);
     float aim_dot = dot3(to_opp_norm, player_fwd);  // 1.0 = perfect aim
     float aim_angle_deg = acosf(clampf(aim_dot, -1.0f, 1.0f)) * RAD_TO_DEG;
 
     float r_aim = 0.0f;
-    // Aiming rewards are EXCLUSIVE - better aim = bigger reward
+    // Aiming rewards are ADDITIVE - tight aim gets BOTH tracking + firing_solution
+    // Uses annealing reward cone (starts large, shrinks to gun cone)
     if (dist < GUN_RANGE) {
-        if (aim_dot > env->cos_gun_cone) {
-            // Tight aim (within 5° gun cone) - BIG reward
-            r_aim = env->rcfg.firing_solution;
-        } else if (aim_dot > env->cos_gun_cone_2x) {
-            // Loose tracking (within 10°) - small reward
-            r_aim = env->rcfg.tracking;
+        if (aim_dot > env->cos_reward_cone_2x) {
+            // Loose tracking (within 2x reward cone) - base reward
+            r_aim += env->rcfg.tracking;
+        }
+        if (aim_dot > env->cos_reward_cone) {
+            // Tight aim (within 1x reward cone) - bonus reward
+            r_aim += env->rcfg.firing_solution;
         }
     }
     reward += r_aim;

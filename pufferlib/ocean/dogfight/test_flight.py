@@ -1329,6 +1329,104 @@ def test_g_limit_positive():
     assert g_max <= G_LIMIT_POS + 0.1, f"G exceeded limit: {g_max} > {G_LIMIT_POS}"
 
 
+def test_gentle_pitch_control():
+    """
+    Test that small elevator inputs produce proportional, gentle pitch changes.
+
+    This is CRITICAL for fine aim adjustments - the agent must be able to make
+    precise 2.5° corrections, not just bang-bang full deflection.
+
+    Tests:
+    1. -0.1 elevator: should give small pitch rate (~5°/s or less)
+    2. -0.25 elevator: should give larger pitch rate (~10-15°/s)
+    3. Verify linear relationship (not bang-bang)
+    4. Calculate time to make 2.5° adjustment
+    """
+    env = Dogfight(num_envs=1, render_mode=RENDER_MODE, render_fps=RENDER_FPS)
+
+    elevator_values = [-0.05, -0.1, -0.15, -0.2, -0.25, -0.3]
+    pitch_rates = []
+
+    print("  Testing gentle elevator inputs (negative = pull back = nose UP):")
+
+    for elev in elevator_values:
+        env.reset()
+
+        # Start level at cruise speed
+        env.force_state(
+            player_pos=(0, 0, 1500),
+            player_vel=(120, 0, 0),  # Cruise speed
+            player_ori=(1.0, 0.0, 0.0, 0.0),  # Wings level
+            player_throttle=0.7,
+        )
+
+        # Record initial pitch
+        state = env.get_state()
+        fwd_x_start, fwd_z_start = state['fwd_x'], state['fwd_z']
+        pitch_start = np.arctan2(fwd_z_start, fwd_x_start)
+
+        # Apply constant elevator for 1 second (50 steps)
+        for step in range(50):
+            action = np.array([[0.4, elev, 0.0, 0.0, 0.0]], dtype=np.float32)
+            env.step(action)
+
+        # Measure final pitch
+        state = env.get_state()
+        fwd_x_end, fwd_z_end = state['fwd_x'], state['fwd_z']
+        pitch_end = np.arctan2(fwd_z_end, fwd_x_end)
+
+        pitch_change_deg = np.degrees(pitch_end - pitch_start)
+        pitch_rate = pitch_change_deg / 1.0  # degrees per second
+        pitch_rates.append(pitch_rate)
+
+        print(f"    elevator={elev:+.2f}: pitch_rate={pitch_rate:+.1f}°/s, pitch_change={pitch_change_deg:+.1f}°")
+
+    # Check for proportional response
+    # Ratio of pitch rates should roughly match ratio of elevator inputs
+    rate_at_01 = pitch_rates[1]  # -0.1 elevator
+    rate_at_025 = pitch_rates[4]  # -0.25 elevator
+
+    # Store results
+    RESULTS['pitch_rate_01'] = rate_at_01
+    RESULTS['pitch_rate_025'] = rate_at_025
+
+    # Calculate time to make 2.5° adjustment at -0.1 elevator
+    if abs(rate_at_01) > 0.1:
+        time_for_25deg = 2.5 / abs(rate_at_01)
+    else:
+        time_for_25deg = float('inf')
+
+    RESULTS['time_for_25deg'] = time_for_25deg
+
+    # Check proportionality: -0.25 should give ~2.5x the rate of -0.1
+    expected_ratio = 2.5
+    actual_ratio = rate_at_025 / rate_at_01 if abs(rate_at_01) > 0.1 else 0
+
+    # Verify reasonable pitch rates (not too fast, not too slow)
+    # -0.1 elevator should give roughly 3-8°/s (gentle but noticeable)
+    gentle_ok = 2.0 < abs(rate_at_01) < 15.0
+    proportional_ok = 1.5 < actual_ratio < 4.0  # Some non-linearity is OK
+    can_aim = time_for_25deg < 2.0  # Should be able to make 2.5° adjustment in <2 seconds
+
+    all_ok = gentle_ok and proportional_ok and can_aim
+    status = "OK" if all_ok else "CHECK"
+
+    print(f"  Results:")
+    print(f"    -0.1 elevator gives {rate_at_01:+.1f}°/s (want 3-8°/s) [{gentle_ok and 'OK' or 'CHECK'}]")
+    print(f"    -0.25/-0.1 ratio = {actual_ratio:.2f} (want ~2.5, linear) [{proportional_ok and 'OK' or 'CHECK'}]")
+    print(f"    Time to adjust 2.5° at -0.1: {time_for_25deg:.2f}s (want <2s) [{can_aim and 'OK' or 'CHECK'}]")
+    print(f"gentle_pitch:  rate@-0.1={rate_at_01:+.1f}°/s, 2.5°_time={time_for_25deg:.2f}s [{status}]")
+
+    if not gentle_ok:
+        if abs(rate_at_01) < 2.0:
+            print(f"  WARNING: Pitch too sluggish! Agent can't make timely aim corrections.")
+        else:
+            print(f"  WARNING: Pitch too sensitive! Agent will overshoot aim.")
+
+    if not proportional_ok:
+        print(f"  WARNING: Non-linear pitch response - may indicate bang-bang controls.")
+
+
 def print_summary():
     """Print summary table."""
     print("\n" + "=" * 60)
@@ -1380,6 +1478,8 @@ if __name__ == "__main__":
         'g_pull_back': test_g_pull_back,
         'g_limit_negative': test_g_limit_negative,
         'g_limit_positive': test_g_limit_positive,
+        # Fine control tests
+        'gentle_pitch': test_gentle_pitch_control,
     }
 
     print("P-51D Physics Validation Tests")
