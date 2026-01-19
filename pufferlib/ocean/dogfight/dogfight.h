@@ -255,9 +255,9 @@ void add_log(Dogfight *env) {
     if (DEBUG >= 1 && env->env_num == 0) {
         const char* death_names[] = {"NONE", "KILL", "OOB", "AILERON", "TIMEOUT", "SUPERSONIC"};
         float mean_ail = env->total_aileron_usage / fmaxf((float)env->tick, 1.0f);
-        printf("EP tick=%d ret=%.2f death=%s kill=%d stage=%d mean_ail=%.2f bias=%.1f\n",
+        printf("EP tick=%d ret=%.2f death=%s kill=%d stage=%d total_eps=%d eps_per_stage=%d mean_ail=%.2f bias=%.1f\n",
                env->tick, env->episode_return, death_names[env->death_reason],
-               env->kill, env->stage, mean_ail, env->aileron_bias);
+               env->kill, env->stage, env->total_episodes, env->episodes_per_stage, mean_ail, env->aileron_bias);
     }
 
     // Level 2: Reward breakdown (which components dominated?)
@@ -907,8 +907,11 @@ void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
 
     // Log stage transitions
     if (new_stage != env->stage) {
-        if (DEBUG > 5) printf("[Curriculum] Episode %d: Stage %d -> %d\n",
-               env->total_episodes, env->stage, new_stage);
+        if (DEBUG >= 1) {
+            fprintf(stderr, "[STAGE_CHANGE] ptr=%p env=%d eps=%d eps_per=%d: stage %d -> %d\n",
+                   (void*)env, env->env_num, env->total_episodes, env->episodes_per_stage, env->stage, new_stage);
+            fflush(stderr);
+        }
         env->stage = new_stage;
     }
 
@@ -1158,20 +1161,20 @@ void c_step(Dogfight *env) {
     Vec3 rel_pos = sub3(o->pos, p->pos);
     float dist = norm3(rel_pos);
 
-    // 1. Approach reward: getting closer = good (asymmetric - no penalty for moving away)
+    // 1. Approach reward: getting closer = good (symmetric - also penalize moving away)
     float r_approach = 0.0f;
     if (env->prev_dist > 0.0f) {
         float dist_delta = env->prev_dist - dist;  // positive when closing
-        r_approach = fmaxf(0.0f, dist_delta) * env->rcfg.approach;  // Only reward closing
+        r_approach = dist_delta * env->rcfg.approach;  // Symmetric: reward closing, penalize opening
     }
     env->prev_dist = dist;
     reward += r_approach;
 
-    // 3. Closing velocity reward: approaching = good (asymmetric - no penalty for opening)
+    // 3. Closing velocity reward: approaching = good (symmetric)
     Vec3 rel_vel = sub3(p->vel, o->vel);
     Vec3 rel_pos_norm = normalize3(rel_pos);
     float closing_rate = dot3(rel_vel, rel_pos_norm);
-    float r_closing = fmaxf(0.0f, closing_rate) * env->rcfg.closing_scale;  // Only reward closing, don't punish opening
+    float r_closing = closing_rate * env->rcfg.closing_scale;
     reward += r_closing;
 
     // 3. Tail position reward: behind opponent = good
@@ -1194,10 +1197,10 @@ void c_step(Dogfight *env) {
     float r_roll = -fabsf(roll_angle) * env->rcfg.roll;
     reward += r_roll;
 
-    // 7. Negative G penalty: only penalize actual negative G (below -0.5G)
-    // Threshold -0.5G: allows normal flight and light negative G, penalizes hard negative G
-    float g_threshold = -0.5f;
-    float g_deficit = fmaxf(0.0f, g_threshold - p->g_force);  // positive when g < -0.5
+    // 7. Negative G penalty: only penalize actual negative G (below 0.5G)
+    // Threshold 0.5G: allows normal flight, penalizes unloading (pushing over)
+    float g_threshold = 0.5f;
+    float g_deficit = fmaxf(0.0f, g_threshold - p->g_force);  // positive when g < 0.5
     float r_neg_g = -g_deficit * env->rcfg.neg_g;
     reward += r_neg_g;
 
@@ -1275,8 +1278,6 @@ void c_step(Dogfight *env) {
     if (DEBUG >= 10) printf("dist_to_target=%.1f m (gun_range=500)\n", dist);
     if (DEBUG >= 10) printf("in_cone=%d, in_range=%d\n", aim_dot > env->cos_gun_cone, dist < GUN_RANGE);
 
-    // Clamp reward to prevent extreme values causing gradient explosion
-    reward = fmaxf(-1.0f, fminf(1.0f, reward));
     env->rewards[0] = reward;
     env->episode_return += reward;
 

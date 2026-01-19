@@ -19,7 +19,8 @@ static Dogfight make_env(int max_steps) {
     env.max_steps = max_steps;
     // Default reward config
     RewardConfig rcfg = {
-        .closing_scale = 0.002f, .tail_scale = 0.005f,
+        .closing_scale = 0.002f,
+        .tail_scale = 0.005f,
         .tracking = 0.05f, .firing_solution = 0.1f,
         .stall = 0.002f, .roll = 0.0001f,
         .neg_g = 0.0005f, .rudder = 0.0002f,
@@ -1022,7 +1023,8 @@ static Dogfight make_env_curriculum(int max_steps, int randomize) {
     env.terminals = term_buf;
     env.max_steps = max_steps;
     RewardConfig rcfg = {
-        .closing_scale = 0.002f, .tail_scale = 0.005f,
+        .closing_scale = 0.002f,
+        .tail_scale = 0.005f,
         .tracking = 0.05f, .firing_solution = 0.1f,
         .stall = 0.002f, .roll = 0.0001f,
         .neg_g = 0.0005f, .rudder = 0.0002f,
@@ -1041,7 +1043,8 @@ static Dogfight make_env_with_roll_penalty(int max_steps, float roll_penalty) {
     env.terminals = term_buf;
     env.max_steps = max_steps;
     RewardConfig rcfg = {
-        .closing_scale = 0.002f, .tail_scale = 0.005f,
+        .closing_scale = 0.002f,
+        .tail_scale = 0.005f,
         .tracking = 0.05f, .firing_solution = 0.1f,
         .stall = 0.002f,
         .roll = roll_penalty, .neg_g = 0.0005f, .rudder = 0.0002f,
