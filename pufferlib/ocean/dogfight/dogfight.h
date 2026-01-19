@@ -1158,19 +1158,20 @@ void c_step(Dogfight *env) {
     Vec3 rel_pos = sub3(o->pos, p->pos);
     float dist = norm3(rel_pos);
 
-    // 1. Approach reward: getting closer = good
+    // 1. Approach reward: getting closer = good (asymmetric - no penalty for moving away)
     float r_approach = 0.0f;
     if (env->prev_dist > 0.0f) {
-        r_approach = (env->prev_dist - dist) * env->rcfg.approach;
+        float dist_delta = env->prev_dist - dist;  // positive when closing
+        r_approach = fmaxf(0.0f, dist_delta) * env->rcfg.approach;  // Only reward closing
     }
     env->prev_dist = dist;
     reward += r_approach;
 
-    // 3. Closing velocity reward: approaching = good
+    // 3. Closing velocity reward: approaching = good (asymmetric - no penalty for opening)
     Vec3 rel_vel = sub3(p->vel, o->vel);
     Vec3 rel_pos_norm = normalize3(rel_pos);
     float closing_rate = dot3(rel_vel, rel_pos_norm);
-    float r_closing = closing_rate * env->rcfg.closing_scale;
+    float r_closing = fmaxf(0.0f, closing_rate) * env->rcfg.closing_scale;  // Only reward closing, don't punish opening
     reward += r_closing;
 
     // 3. Tail position reward: behind opponent = good
