@@ -195,6 +195,19 @@ typedef struct Dogfight {
     float sum_r_bias;
     float sum_r_level;
     float sum_r_aim;
+    // Aiming diagnostics (reset each episode, for DEBUG output)
+    float best_aim_angle;    // Best (smallest) aim angle achieved (radians)
+    int ticks_in_cone;       // Ticks where aim_dot > cos_reward_cone
+    float closest_dist;      // Closest approach to target (meters)
+    // Flight envelope diagnostics (reset each episode, for DEBUG output)
+    float max_g, min_g;           // Peak G-forces experienced
+    float max_bank;               // Peak bank angle (abs, radians)
+    float max_pitch;              // Peak pitch angle (abs, radians)
+    float min_speed, max_speed;   // Speed envelope (m/s)
+    float min_alt, max_alt;       // Altitude envelope (m)
+    float sum_throttle;           // For computing mean throttle
+    int trigger_pulls;            // Times trigger was pulled (>0.5)
+    int prev_trigger;             // For edge detection
     DeathReason death_reason;
     // Debug
     int env_num;                // Environment index (for filtering debug output)
@@ -255,6 +268,23 @@ void add_log(Dogfight *env) {
         printf("  PENALTY: speed=%.2f roll=%.2f neg_g=%.2f rudder=%.2f ail=%.2f bias=%.2f\n",
                env->sum_r_speed, env->sum_r_roll, env->sum_r_neg_g,
                env->sum_r_rudder, env->sum_r_aileron, env->sum_r_bias);
+        printf("  AIM: best=%.1f° in_cone=%d/%d (%.0f%%) closest=%.0fm\n",
+               env->best_aim_angle * RAD_TO_DEG,
+               env->ticks_in_cone, env->tick,
+               100.0f * env->ticks_in_cone / fmaxf((float)env->tick, 1.0f),
+               env->closest_dist);
+    }
+
+    // Level 3: Flight envelope and control statistics
+    if (DEBUG >= 3 && env->env_num == 0) {
+        float mean_throttle = env->sum_throttle / fmaxf((float)env->tick, 1.0f);
+        printf("  FLIGHT: G=[%+.1f,%+.1f] bank=%.0f° pitch=%.0f° speed=[%.0f,%.0f] alt=[%.0f,%.0f]\n",
+               env->min_g, env->max_g,
+               env->max_bank * RAD_TO_DEG, env->max_pitch * RAD_TO_DEG,
+               env->min_speed, env->max_speed,
+               env->min_alt, env->max_alt);
+        printf("  CONTROL: mean_throttle=%.0f%% trigger_pulls=%d shots=%d\n",
+               mean_throttle * 100.0f, env->trigger_pulls, (int)env->episode_shots_fired);
     }
 
     if (DEBUG >= 10) printf("=== ADD_LOG ===\n");
@@ -946,6 +976,24 @@ void c_reset(Dogfight *env) {
     env->sum_r_aim = 0.0f;
     env->death_reason = DEATH_NONE;
 
+    // Reset aiming diagnostics
+    env->best_aim_angle = M_PI;      // Start at worst (180°)
+    env->ticks_in_cone = 0;
+    env->closest_dist = 10000.0f;    // Start at max
+
+    // Reset flight envelope diagnostics
+    env->max_g = 1.0f;               // Start at 1G (level flight)
+    env->min_g = 1.0f;
+    env->max_bank = 0.0f;
+    env->max_pitch = 0.0f;
+    env->min_speed = 10000.0f;       // Start at max
+    env->max_speed = 0.0f;
+    env->min_alt = 10000.0f;         // Start at max
+    env->max_alt = 0.0f;
+    env->sum_throttle = 0.0f;
+    env->trigger_pulls = 0;
+    env->prev_trigger = 0;
+
     // Gun cone for hit detection - stays fixed at 5°
     env->cos_gun_cone = cosf(env->gun_cone_angle);
     env->cos_gun_cone_2x = cosf(env->gun_cone_angle * 2.0f);
@@ -1045,6 +1093,33 @@ void c_step(Dogfight *env) {
 
     // Track aileron usage for monitoring (no death penalty - see BISECTION.md)
     env->total_aileron_usage += fabsf(env->actions[2]);
+
+#if DEBUG >= 3
+    // Track flight envelope diagnostics (only when debugging - expensive)
+    {
+        Plane *dbg_p = &env->player;
+        if (dbg_p->g_force > env->max_g) env->max_g = dbg_p->g_force;
+        if (dbg_p->g_force < env->min_g) env->min_g = dbg_p->g_force;
+        float speed = norm3(dbg_p->vel);
+        if (speed < env->min_speed) env->min_speed = speed;
+        if (speed > env->max_speed) env->max_speed = speed;
+        if (dbg_p->pos.z < env->min_alt) env->min_alt = dbg_p->pos.z;
+        if (dbg_p->pos.z > env->max_alt) env->max_alt = dbg_p->pos.z;
+        // Bank angle from quaternion
+        float bank = atan2f(2.0f * (dbg_p->ori.w * dbg_p->ori.x + dbg_p->ori.y * dbg_p->ori.z),
+                            1.0f - 2.0f * (dbg_p->ori.x * dbg_p->ori.x + dbg_p->ori.y * dbg_p->ori.y));
+        if (fabsf(bank) > env->max_bank) env->max_bank = fabsf(bank);
+        // Pitch angle from quaternion
+        float pitch = asinf(clampf(2.0f * (dbg_p->ori.w * dbg_p->ori.y - dbg_p->ori.z * dbg_p->ori.x), -1.0f, 1.0f));
+        if (fabsf(pitch) > env->max_pitch) env->max_pitch = fabsf(pitch);
+        // Throttle accumulator
+        env->sum_throttle += dbg_p->throttle;
+        // Trigger pull edge detection
+        int trigger_now = (env->actions[4] > 0.5f) ? 1 : 0;
+        if (trigger_now && !env->prev_trigger) env->trigger_pulls++;
+        env->prev_trigger = trigger_now;
+    }
+#endif
 
     // === Combat (Phase 5) ===
     Plane *p = &env->player;
@@ -1156,6 +1231,16 @@ void c_step(Dogfight *env) {
         }
     }
     reward += r_aim;
+
+#if DEBUG >= 2
+    // Track aiming diagnostics (only when debugging - acosf is expensive)
+    {
+        float aim_angle_rad = acosf(clampf(aim_dot, -1.0f, 1.0f));
+        if (aim_angle_rad < env->best_aim_angle) env->best_aim_angle = aim_angle_rad;
+        if (aim_dot > env->cos_reward_cone) env->ticks_in_cone++;
+        if (dist < env->closest_dist) env->closest_dist = dist;
+    }
+#endif
 
     // Accumulate for episode summary
     env->sum_r_approach += r_approach;
