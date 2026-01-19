@@ -12,9 +12,9 @@ class BossFight(pufferlib.PufferEnv):
         self, num_envs=1, render_mode=None, log_interval=128, size=5, buf=None, seed=0
     ):
         self.single_observation_space = gymnasium.spaces.Box(
-            low=0, high=1, shape=(1,), dtype=np.uint8
+            low=-10, high=110, shape=(13,), dtype=np.float32
         )
-        self.single_action_space = gymnasium.spaces.Discrete(2)
+        self.single_action_space = gymnasium.spaces.Discrete(7)
         self.render_mode = render_mode
         self.num_agents = num_envs
 

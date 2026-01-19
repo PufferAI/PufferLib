@@ -7,8 +7,8 @@ int main() {
   int num_agents = 1;
 
   BossFight env = {};
-  env.observations = (float *)calloc(num_obs, sizeof(unsigned char));
-  env.actions = (float *)calloc(num_actions, sizeof(int));
+  env.observations = (float *)calloc(num_obs, sizeof(float));
+  env.actions = (int *)calloc(num_actions, sizeof(float));
   env.rewards = (float *)calloc(num_agents, sizeof(float));
   env.terminals = (unsigned char *)calloc(num_agents, sizeof(unsigned char));
 

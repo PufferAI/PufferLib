@@ -34,7 +34,7 @@ typedef struct {
 typedef struct {
   Log log;                  // Required field
   float *observations;      // Required field. Ensure type matches in .py and .c
-  float *actions;           // Required field. Ensure type matches in .py and .c
+  int *actions;             // Required field. Ensure type matches in .py and .c
   float *rewards;           // Required field
   unsigned char *terminals; // Required field
 
@@ -72,8 +72,8 @@ void c_reset(BossFight *env) {
   env->player_y = 0;
   env->boss_x = 0;
   env->boss_y = 0;
-  env->player_hp = 100;
-  env->boss_hp = 100;
+  env->player_hp = MAX_HP;
+  env->boss_hp = MAX_HP;
   env->player_state = PLAYER_IDLING;
   env->player_dodge_cooldown = 0;
   env->player_state_ticks = 0;
@@ -95,24 +95,70 @@ void c_reset(BossFight *env) {
 
   int obs_idx = 0;
 
-  env->observations[obs_idx++] = 0; // dx
-  env->observations[obs_idx++] = 0; // dy
+  env->observations[obs_idx++] = env->boss_x - env->player_x;
+  env->observations[obs_idx++] = env->boss_y - env->player_y;
   env->observations[obs_idx++] = env->player_x;
   env->observations[obs_idx++] = env->player_y;
   env->observations[obs_idx++] = env->boss_x;
   env->observations[obs_idx++] = env->boss_y;
-  env->observations[obs_idx++] = 100;
-  env->observations[obs_idx++] = 100;
-  env->observations[obs_idx++] = PLAYER_IDLING;
-  env->observations[obs_idx++] = 0; // player_dodge_cooldown
-  env->observations[obs_idx++] = 0; // player_state_ticks
-  env->observations[obs_idx++] = BOSS_IDLING;
-  env->observations[obs_idx++] = 0; // boss_phase_ticks
+  env->observations[obs_idx++] = (float)env->player_hp;
+  env->observations[obs_idx++] = (float)env->boss_hp;
+  env->observations[obs_idx++] = (float)env->player_state;
+  env->observations[obs_idx++] = (float)env->player_dodge_cooldown;
+  env->observations[obs_idx++] = (float)env->player_state_ticks;
+  env->observations[obs_idx++] = (float)env->boss_state;
+  env->observations[obs_idx++] = (float)env->boss_phase_ticks;
 }
 
 void c_step(BossFight *env) {
-  env->rewards[0] = 0;
+  float reward = -0.01;
   env->terminals[0] = 0;
+
+  int action = env->actions[0];
+  float dx = 0;
+  float dy = 0;
+
+  if (action == 1) {
+    dy = PLAYER_SPEED_PER_TICK;
+  } else if (action == 2) {
+    dy = -PLAYER_SPEED_PER_TICK;
+  } else if (action == 3) {
+    dx = -PLAYER_SPEED_PER_TICK;
+  } else if (action == 4) {
+    dx = PLAYER_SPEED_PER_TICK;
+  }
+
+  env->player_x += dx;
+  env->player_y += dy;
+
+  bool wanna_idle = action == 0;
+  bool wanna_dodge = action == 5;
+  bool wanna_attack = action == 6;
+  bool can_dodge =
+      env->player_state == PLAYER_IDLING && env->player_dodge_cooldown == 0;
+  bool can_attack = env->player_state == PLAYER_IDLING;
+
+  bool hit_wall = fabsf(env->player_x) > ARENA_HALF_SIZE &&
+                  fabsf(env->player_y) > ARENA_HALF_SIZE;
+  if (hit_wall) {
+    reward -= 0.5;
+  }
+
+  // TODO: here i should handle "player attacks and reduces boss hp" case
+
+  bool killed_boss = env->boss_hp == 0;
+  if (killed_boss) {
+    reward += 2;
+  }
+
+  env->rewards[0] = reward;
+
+  bool player_died = env->player_hp == 0;
+  if (player_died) {
+    env->terminals[0] = 1;
+  }
+
+  env->tick++;
 }
 
 void c_render(BossFight *env) {
