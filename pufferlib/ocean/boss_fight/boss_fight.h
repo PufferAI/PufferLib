@@ -74,6 +74,10 @@ typedef struct {
 
   float episode_return; // track within episode
 
+  // stats
+  int player_wins;
+  int boss_wins;
+  int timeouts;
 } BossFight;
 
 float rand_uniform(float low, float high) {
@@ -223,22 +227,23 @@ void c_step(BossFight *env) {
   }
 
   bool killed_boss = env->boss_hp <= 0;
+  bool player_died = env->player_hp <= 0;
+  bool timed_out = env->tick >= 300;
+
   if (killed_boss) {
-    reward += 10; // main goal - make it big
+    reward += 10;
     env->terminals[0] = 1;
+    env->player_wins++;
+  } else if (player_died) {
+    env->terminals[0] = 1;
+    env->boss_wins++;
+  } else if (timed_out) {
+    env->terminals[0] = 1;
+    env->timeouts++;
   }
 
   env->rewards[0] = reward;
   env->episode_return += reward;
-
-  bool player_died = env->player_hp <= 0;
-  if (player_died) {
-    env->terminals[0] = 1;
-  }
-
-  if (env->tick >= 300) {
-    env->terminals[0] = 1;
-  }
 
   if (env->terminals[0] == 1) {
     add_log(env);
@@ -315,6 +320,12 @@ void c_render(BossFight *env) {
 
   ClearBackground(BACKGROUND_COLOR);
   DrawText("Beat the boss!", 20, 20, 20, TEXT_COLOR);
+
+  // Stats top-right
+  char stats[64];
+  snprintf(stats, sizeof(stats), "W:%d L:%d T:%d", 
+           env->player_wins, env->boss_wins, env->timeouts);
+  DrawText(stats, 580, 20, 20, TEXT_COLOR);
 
   // Player
   int player_sx = world_to_screen(env->player_x);
