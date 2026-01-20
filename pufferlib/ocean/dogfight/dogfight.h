@@ -179,6 +179,7 @@ typedef struct Dogfight {
     int episodes_per_stage;     // Episodes before advancing to next stage
     int total_episodes;         // Cumulative episodes (persists across resets)
     CurriculumStage stage;      // Current difficulty stage
+    int is_initialized;         // Flag to preserve curriculum state across re-init (for Multiprocessing)
     // Anti-spinning
     float total_aileron_usage;  // Accumulated |aileron| input (for spin death)
     float aileron_bias;         // Cumulative signed aileron (for directional penalty)
@@ -245,8 +246,20 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     env->curriculum_enabled = curriculum_enabled;
     env->curriculum_randomize = curriculum_randomize;
     env->episodes_per_stage = episodes_per_stage > 0 ? episodes_per_stage : 15000;
-    env->total_episodes = 0;
-    env->stage = CURRICULUM_TAIL_CHASE;
+    // Only reset curriculum state on first init (preserve across re-init for Multiprocessing)
+    if (!env->is_initialized) {
+        env->total_episodes = 0;
+        env->stage = CURRICULUM_TAIL_CHASE;
+        if (DEBUG >= 1) {
+            fprintf(stderr, "[INIT] FIRST init ptr=%p env_num=%d - setting total_episodes=0, stage=0\n", (void*)env, env_num);
+        }
+    } else {
+        if (DEBUG >= 1) {
+            fprintf(stderr, "[INIT] RE-init ptr=%p env_num=%d - preserving total_episodes=%d, stage=%d\n",
+                    (void*)env, env_num, env->total_episodes, env->stage);
+        }
+    }
+    env->is_initialized = 1;
     env->total_aileron_usage = 0.0f;
 }
 

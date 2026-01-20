@@ -81,6 +81,7 @@ class Dogfight(pufferlib.PufferEnv):
         )
 
         self.num_agents = num_envs
+        self.agents_per_batch = num_envs  # For pufferl LSTM compatibility
         self.render_mode = render_mode
         self.render_fps = render_fps
         self.report_interval = report_interval
