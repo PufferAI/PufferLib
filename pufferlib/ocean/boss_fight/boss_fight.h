@@ -42,6 +42,7 @@ typedef struct {
   float score;          // unnormalized metric
   float episode_return; // sum of rewards
   float episode_length; // steps per episode
+  float wins;           // episodes where boss died
   float n;              // Required as last field
 } Log;
 
@@ -168,7 +169,7 @@ void c_step(BossFight *env) {
   float dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
 
   if (dist < env->prev_distance) {
-    reward += 0.5;
+    reward += 0.3;
   }
   env->prev_distance = dist;
 
@@ -177,7 +178,7 @@ void c_step(BossFight *env) {
   bool hit_wall = fabsf(env->player_x) > ARENA_HALF_SIZE ||
                   fabsf(env->player_y) > ARENA_HALF_SIZE;
   if (hit_wall) {
-    reward -= 0.5;
+    reward -= 1;
   }
   // can't walk out of bounds
   env->player_x =
@@ -187,7 +188,7 @@ void c_step(BossFight *env) {
 
   if (wanna_attack && can_attack && close_enough) {
     env->boss_hp -= PLAYER_ATTACK_DMG;
-    reward += 0.5;
+    reward += 1;
   }
 
   bool in_aoe_attack = dist <= BOSS_SIZE + PLAYER_SIZE + BOSS_AOE_ATTACK_RADIUS;
@@ -195,6 +196,7 @@ void c_step(BossFight *env) {
   bool boss_can_damage = env->boss_state == BOSS_ATTACKING && boss_can_hit;
   if (boss_can_damage) {
     env->player_hp -= BOSS_ATTACK_DMG;
+    reward -= 0.5;
   }
 
   bool killed_boss = env->boss_hp <= 0;
