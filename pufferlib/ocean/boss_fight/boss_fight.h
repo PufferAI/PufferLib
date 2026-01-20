@@ -87,6 +87,7 @@ void add_log(BossFight *env) {
   env->log.episode_return += env->episode_return;
   env->log.episode_length += env->tick;
   env->log.score += env->episode_return;
+  env->log.wins += (env->boss_hp <= 0) ? 1.0f : 0.0f;
   env->log.n++;
 }
 
@@ -169,7 +170,7 @@ void c_step(BossFight *env) {
   float dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
 
   if (dist < env->prev_distance) {
-    reward += 0.3;
+    reward += 0.01; // small hint, not main reward
   }
   env->prev_distance = dist;
 
@@ -201,7 +202,7 @@ void c_step(BossFight *env) {
 
   bool killed_boss = env->boss_hp <= 0;
   if (killed_boss) {
-    reward += 2;
+    reward += 10; // main goal - make it big
     env->terminals[0] = 1;
   }
 
