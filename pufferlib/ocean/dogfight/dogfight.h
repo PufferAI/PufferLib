@@ -375,8 +375,8 @@ void compute_obs_angles(Dogfight *env) {
     // Target angles
     env->observations[i++] = azimuth / PI;    // -1 to 1
     env->observations[i++] = elevation / (PI * 0.5f);  // -1 to 1
-    env->observations[i++] = clampf(dist / GUN_RANGE, 0.0f, 4.0f) - 2.0f;  // ~[-1,1]
-    env->observations[i++] = closing_rate * INV_MAX_SPEED;
+    env->observations[i++] = clampf(dist / GUN_RANGE, 0.0f, 2.0f) - 1.0f;  // [-1,1]
+    env->observations[i++] = clampf(closing_rate * INV_MAX_SPEED, -1.0f, 1.0f);  // Clamped to [-1,1]
 
     // Opponent info
     env->observations[i++] = opp_heading / PI;  // -1 to 1
@@ -422,10 +422,11 @@ void compute_obs_control_error(Dogfight *env) {
     env->observations[i++] = p->pos.y * INV_WORLD_HALF_Y;
     env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
     env->observations[i++] = norm3(p->vel) * INV_MAX_SPEED;  // Speed scalar
-    env->observations[i++] = p->ori.w;
-    env->observations[i++] = p->ori.x;
-    env->observations[i++] = p->ori.y;
-    env->observations[i++] = p->ori.z;
+    // Quaternion clamped to prevent NaN from potential denormalization drift
+    env->observations[i++] = clampf(p->ori.w, -1.0f, 1.0f);
+    env->observations[i++] = clampf(p->ori.x, -1.0f, 1.0f);
+    env->observations[i++] = clampf(p->ori.y, -1.0f, 1.0f);
+    env->observations[i++] = clampf(p->ori.z, -1.0f, 1.0f);
     env->observations[i++] = up.x;
     env->observations[i++] = up.y;
     env->observations[i++] = up.z;
@@ -434,10 +435,10 @@ void compute_obs_control_error(Dogfight *env) {
     env->observations[i++] = pitch_error / (PI * 0.5f);  // -1 to 1
     env->observations[i++] = yaw_error / PI;              // -1 to 1
     env->observations[i++] = roll_to_turn / (PI * 0.5f); // -1 to 1
-    env->observations[i++] = clampf(dist / GUN_RANGE, 0.0f, 4.0f) - 2.0f;
+    env->observations[i++] = clampf(dist / GUN_RANGE, 0.0f, 2.0f) - 1.0f;
 
     // Target info (2 obs)
-    env->observations[i++] = closing_rate * INV_MAX_SPEED;
+    env->observations[i++] = clampf(closing_rate * INV_MAX_SPEED, -1.0f, 1.0f);  // Clamped to [-1,1]
     env->observations[i++] = opp_heading / PI;
     // OBS_SIZE = 17
 }
@@ -490,7 +491,7 @@ void compute_obs_realistic(Dogfight *env) {
     // Visual cues (3 obs)
     env->observations[i++] = target_aspect;                   // -1 to 1
     env->observations[i++] = horizon_visible;                 // -1 to 1
-    env->observations[i++] = clampf(dist / GUN_RANGE, 0.0f, 4.0f) - 2.0f;  // Distance estimate
+    env->observations[i++] = clampf(dist / GUN_RANGE, 0.0f, 2.0f) - 1.0f;  // Distance estimate
     // OBS_SIZE = 10
 }
 

@@ -265,9 +265,9 @@ void test_relative_observations() {
     float expected_el = atan2f(50.0f, r_horiz) / (PI * 0.5f);  // ~0.062
     ASSERT_NEAR(elevation, expected_el, 1e-4f);
 
-    // Distance: sqrt(500^2 + 100^2 + 50^2) ≈ 512m, normalized
+    // Distance: sqrt(500^2 + 100^2 + 50^2) ≈ 512m, normalized to [-1,1]
     float dist = sqrtf(500*500 + 100*100 + 50*50);
-    float expected_dist = clampf(dist / GUN_RANGE, 0.0f, 4.0f) - 2.0f;
+    float expected_dist = clampf(dist / GUN_RANGE, 0.0f, 2.0f) - 1.0f;
     ASSERT_NEAR(distance, expected_dist, 1e-4f);
 
     printf("test_relative_observations PASS\n");
