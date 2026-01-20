@@ -17,6 +17,8 @@ class BossFight(pufferlib.PufferEnv):
         self.single_action_space = gymnasium.spaces.Discrete(7)
         self.render_mode = render_mode
         self.num_agents = num_envs
+        self.log_interval = log_interval
+        self.tick = 0
 
         super().__init__(buf)
         self.c_envs = binding.vec_init(
@@ -38,7 +40,10 @@ class BossFight(pufferlib.PufferEnv):
     def step(self, actions):
         self.actions[:] = actions
         binding.vec_step(self.c_envs)
-        info = [binding.vec_log(self.c_envs)]
+        self.tick += 1
+        info = []
+        if self.tick % self.log_interval == 0:
+            info.append(binding.vec_log(self.c_envs))
         return (self.observations, self.rewards, self.terminals, self.truncations, info)
 
     def render(self):

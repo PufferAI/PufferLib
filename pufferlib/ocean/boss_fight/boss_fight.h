@@ -9,7 +9,7 @@
 #define PLAYER_SPEED_PER_TICK 0.1f
 #define PLAYER_SIZE 0.3f
 #define BOSS_SIZE 0.5f
-#define PLAYER_ATTACK_RADIUS 0.1f
+#define PLAYER_ATTACK_RADIUS 0.5f
 #define PLAYER_ATTACK_TICKS 3
 #define PLAYER_DODGE_TICKS 6
 #define PLAYER_DODGE_COOLDOWN 15
@@ -38,8 +38,11 @@ typedef enum {
 
 // Only use floats!
 typedef struct {
-  float score;
-  float n; // Required as the last field
+  float perf;           // 0-1 normalized metric
+  float score;          // unnormalized metric
+  float episode_return; // sum of rewards
+  float episode_length; // steps per episode
+  float n;              // Required as last field
 } Log;
 
 typedef struct {
@@ -65,6 +68,8 @@ typedef struct {
   int boss_hp;
   int boss_phase_ticks;
 
+  float episode_return; // track within episode
+
 } BossFight;
 
 float rand_uniform(float low, float high) {
@@ -75,6 +80,13 @@ float distance(float x1, float y1, float x2, float y2) {
   float dx = x1 - x2;
   float dy = y1 - y2;
   return sqrtf(dx * dx + dy * dy);
+}
+
+void add_log(BossFight *env) {
+  env->log.episode_return += env->episode_return;
+  env->log.episode_length += env->tick;
+  env->log.score += env->episode_return;
+  env->log.n++;
 }
 
 void update_observations(BossFight *env) {
@@ -106,8 +118,8 @@ void c_reset(BossFight *env) {
   env->player_dodge_cooldown = 0;
   env->player_state_ticks = 0;
   env->boss_state = BOSS_IDLING;
-  env->boss_phase_ticks = 0;
-  // env->distance = 0;
+  env->boss_phase_ticks = BOSS_IDLE_TICKS;
+  env->episode_return = 0;
 
   env->player_x = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
   env->player_y = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
@@ -167,6 +179,7 @@ void c_step(BossFight *env) {
 
   if (wanna_attack && can_attack && close_enough) {
     env->boss_hp -= PLAYER_ATTACK_DMG;
+    reward += 0.5;
   }
 
   bool in_aoe_attack = distance(env->player_x, env->player_y, env->boss_x,
@@ -184,10 +197,21 @@ void c_step(BossFight *env) {
   }
 
   env->rewards[0] = reward;
+  env->episode_return += reward;
 
   bool player_died = env->player_hp <= 0;
   if (player_died) {
     env->terminals[0] = 1;
+  }
+
+  if (env->tick >= 300) {
+    env->terminals[0] = 1;
+  }
+
+  if (env->terminals[0] == 1) {
+    add_log(env);
+    c_reset(env);
+    return;
   }
 
   if (wanna_attack && can_attack) {
@@ -233,10 +257,6 @@ void c_step(BossFight *env) {
     env->player_dodge_cooldown--;
   }
 
-  if (env->tick >= 1500) {
-    env->terminals[0] = 1;
-  }
-
   update_observations(env);
 }
 
@@ -251,8 +271,12 @@ void c_render(BossFight *env) {
   }
 
   BeginDrawing();
+
   ClearBackground(BACKGROUND_COLOR);
   DrawText("Beat the boss!", 20, 20, 20, TEXT_COLOR);
+
+  // DrawCircle(int centerX, int centerY, float radius, Color color)
+
   EndDrawing();
 }
 
