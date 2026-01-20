@@ -26,6 +26,7 @@ const Color BOSS_COLOR = (Color){0, 187, 187, 255};
 const Color TEXT_COLOR = (Color){241, 241, 241, 241};
 const Color HITBOX_COLOR = (Color){241, 241, 241, 241};
 const Color BACKGROUND_COLOR = (Color){6, 24, 24, 255};
+const Color HP_COLOR = (Color){0, 255, 0, 255};
 
 typedef enum { PLAYER_IDLING, PLAYER_DODGING, PLAYER_ATTACKING } PlayerState;
 
@@ -187,6 +188,17 @@ void c_step(BossFight *env) {
   env->player_y =
       fmaxf(-ARENA_HALF_SIZE, fminf(ARENA_HALF_SIZE, env->player_y));
 
+  // push player out if clipping into boss
+  if (dist < BOSS_SIZE + PLAYER_SIZE) {
+    float overlap = BOSS_SIZE + PLAYER_SIZE - dist;
+    float dx = env->player_x - env->boss_x;
+    float dy = env->player_y - env->boss_y;
+    env->player_x += (dx / dist) * overlap;
+    env->player_y += (dy / dist) * overlap;
+    // recalculate distance after push
+    dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
+  }
+
   if (wanna_attack && can_attack && close_enough) {
     env->boss_hp -= PLAYER_ATTACK_DMG;
     reward += 1;
@@ -294,17 +306,36 @@ void c_render(BossFight *env) {
   ClearBackground(BACKGROUND_COLOR);
   DrawText("Beat the boss!", 20, 20, 20, TEXT_COLOR);
 
-  DrawCircle(world_to_screen(env->player_x), world_to_screen(env->player_y),
-             radius_to_screen(PLAYER_SIZE + PLAYER_ATTACK_RADIUS),
-             HITBOX_COLOR);
-  DrawCircle(world_to_screen(env->player_x), world_to_screen(env->player_y),
-             radius_to_screen(PLAYER_SIZE), PLAYER_COLOR);
+  #define HP_BAR_WIDTH 40
+  #define HP_BAR_HEIGHT 5
 
-  DrawCircle(world_to_screen(env->boss_x), world_to_screen(env->boss_y),
-             radius_to_screen(BOSS_SIZE + BOSS_AOE_ATTACK_RADIUS),
-             HITBOX_COLOR);
-  DrawCircle(world_to_screen(env->boss_x), world_to_screen(env->boss_y),
-             radius_to_screen(BOSS_SIZE), BOSS_COLOR);
+  // Player
+  int player_sx = world_to_screen(env->player_x);
+  int player_sy = world_to_screen(env->player_y);
+  int player_hp_bar_y = player_sy + (int)radius_to_screen(PLAYER_SIZE) + 5;
+  int player_hp_width = (int)((float)env->player_hp / MAX_HP * HP_BAR_WIDTH);
+
+  DrawCircle(player_sx, player_sy,
+             radius_to_screen(PLAYER_SIZE + PLAYER_ATTACK_RADIUS), HITBOX_COLOR);
+  DrawCircle(player_sx, player_sy, radius_to_screen(PLAYER_SIZE), PLAYER_COLOR);
+  DrawRectangle(player_sx - HP_BAR_WIDTH / 2, player_hp_bar_y,
+                HP_BAR_WIDTH, HP_BAR_HEIGHT, DARKGRAY);
+  DrawRectangle(player_sx - HP_BAR_WIDTH / 2, player_hp_bar_y,
+                player_hp_width, HP_BAR_HEIGHT, HP_COLOR);
+
+  // Boss
+  int boss_sx = world_to_screen(env->boss_x);
+  int boss_sy = world_to_screen(env->boss_y);
+  int boss_hp_bar_y = boss_sy + (int)radius_to_screen(BOSS_SIZE) + 5;
+  int boss_hp_width = (int)((float)env->boss_hp / MAX_HP * HP_BAR_WIDTH);
+
+  DrawCircle(boss_sx, boss_sy,
+             radius_to_screen(BOSS_SIZE + BOSS_AOE_ATTACK_RADIUS), HITBOX_COLOR);
+  DrawCircle(boss_sx, boss_sy, radius_to_screen(BOSS_SIZE), BOSS_COLOR);
+  DrawRectangle(boss_sx - HP_BAR_WIDTH / 2, boss_hp_bar_y,
+                HP_BAR_WIDTH, HP_BAR_HEIGHT, DARKGRAY);
+  DrawRectangle(boss_sx - HP_BAR_WIDTH / 2, boss_hp_bar_y,
+                boss_hp_width, HP_BAR_HEIGHT, HP_COLOR);
 
   EndDrawing();
 }

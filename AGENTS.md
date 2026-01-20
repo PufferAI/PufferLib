@@ -50,3 +50,9 @@ Train and check scores:
 ```
 puffer train puffer_boss_fight --train.total-timesteps 50000
 ```
+
+## Eval
+
+```
+puffer eval puffer_boss_fight --load-model-path $(ls -t experiments/puffer_boss_fight_*/model_*.pt | head -1)
+```
