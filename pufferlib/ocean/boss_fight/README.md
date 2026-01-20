@@ -48,19 +48,6 @@ DODGE    — 6 ticks, i-frames on ticks 1-5, moves at 2.5x speed in last move_di
 ATTACK   — windup(4) + active(3) + recovery(6) = 13 ticks total, no movement
 ```
 
-**Cooldowns:**
-
-- Dodge: 15 ticks after dodge ends
-- Attack: No cooldown (but you're locked for 13 ticks)
-
-**Attack hitbox (during ACTIVE):**
-
-- Circle at `player_pos + facing * 0.7`, radius `0.4`
-- `facing` = direction to boss at attack start
-- Hits boss if circles overlap: `dist(attack, boss) < 0.4 + 0.5`
-- **Effective range: 1.6 units from boss center**
-- Damage: 10
-
 ### Boss Behavior (Single Attack)
 
 Boss cycles: `IDLE → WINDUP → ACTIVE → RECOVERY → IDLE`
@@ -71,79 +58,6 @@ WINDUP:   18 ticks (0.6s) — telegraphing, no damage
 ACTIVE:    3 ticks (0.1s) — AOE hits
 RECOVERY: 15 ticks (0.5s) — vulnerable, no damage
 ```
-
-**AOE Attack:**
-
-- Circle centered on boss, radius `1.5`
-- Hits player if circles overlap: `dist(player, boss) < 1.5 + 0.3`
-- **Effective range: 1.8 units from boss center**
-- Damage: 20
-- Player avoids damage if: outside range OR in i-frames
-
----
-
-## Observation Space (13 floats)
-
-Raw game state values — let the network learn its own representations.
-
-```
-Geometry (6):
-  0: dx              = boss_x - player_x (relative position)
-  1: dy              = boss_y - player_y
-  2: player_x        = absolute position [-5, 5]
-  3: player_y        = absolute position [-5, 5]
-  4: boss_x          = absolute position (fixed at 0)
-  5: boss_y          = absolute position (fixed at 0)
-
-Player (5):
-  6: player_hp       = raw HP [0, 100]
-  7: boss_hp         = raw HP [0, 100]
-  8: player_state    = enum {IDLING: 0, DODGING: 1, ATTACKING: 2}
-  9: player_dodge_cooldown = ticks remaining [0, 15]
-  10: player_state_ticks   = ticks in current state
-
-Boss (2):
-  11: boss_state     = enum {IDLING: 0, WINDING_UP: 1, ATTACKING: 2, RECOVERING: 3}
-  12: boss_phase_ticks = ticks in current phase
-```
-
----
-
-## Reward Function
-
-Design your own! Consider these questions:
-
-- **What behaviors do you want to encourage?** (dealing damage, staying alive, winning)
-- **What behaviors do you want to discourage?** (taking hits, timing out, being passive)
-- **Dense vs sparse?** Should the agent get feedback every step, or only at episode end?
-- **Scaling?** How do you balance different reward components so one doesn't dominate?
-
-Hint: Track HP changes between steps. Think about terminal bonuses.
-
----
-
-## Episode Termination
-
-Episodes end when:
-
-- Someone wins (HP reaches 0)
-- Time runs out (prevent infinite episodes)
-
----
-
-## Implementation (C + Python)
-
-Core game logic in C with Python bindings:
-
-```
-boss_fight.h    — Game state struct, enums, c_reset(), c_step(), c_render()
-boss_fight.c    — Standalone test with keyboard input (Shift+WASD/Space/J)
-boss_fight.py   — PufferLib environment wrapper
-```
-
-Uses Raylib for rendering (1080x720 window @ 30 FPS).
-
----
 
 ## RL Experiments
 

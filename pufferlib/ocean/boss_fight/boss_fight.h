@@ -9,6 +9,17 @@
 #define PLAYER_SPEED_PER_TICK 0.1f
 #define PLAYER_SIZE 0.3f
 #define BOSS_SIZE 0.5f
+#define PLAYER_ATTACK_RADIUS 0.1f
+#define PLAYER_ATTACK_TICKS 3
+#define PLAYER_DODGE_TICKS 6
+#define PLAYER_DODGE_COOLDOWN 15
+#define PLAYER_ATTACK_DMG 3
+#define BOSS_ATTACK_DMG 3
+#define BOSS_AOE_ATTACK_RADIUS 0.7f
+#define BOSS_IDLE_TICKS 12
+#define BOSS_WINDUP_TICKS 18
+#define BOSS_ACTIVE_TICKS 3
+#define BOSS_RECOVERY_TICKS 12
 
 const Color PLAYER_COLOR = (Color){187, 0, 0, 255};
 const Color BOSS_COLOR = (Color){0, 187, 187, 255};
@@ -43,7 +54,7 @@ typedef struct {
   float player_y;
   float boss_x;
   float boss_y;
-  float distance;
+  // float distance;
 
   PlayerState player_state;
   int player_hp;
@@ -66,35 +77,8 @@ float distance(float x1, float y1, float x2, float y2) {
   return sqrtf(dx * dx + dy * dy);
 }
 
-void c_reset(BossFight *env) {
-  env->tick = 0;
-  env->player_x = 0;
-  env->player_y = 0;
-  env->boss_x = 0;
-  env->boss_y = 0;
-  env->player_hp = MAX_HP;
-  env->boss_hp = MAX_HP;
-  env->player_state = PLAYER_IDLING;
-  env->player_dodge_cooldown = 0;
-  env->player_state_ticks = 0;
-  env->boss_state = BOSS_IDLING;
-  env->boss_phase_ticks = 0;
-  env->distance = 0;
-
-  env->player_x = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
-  env->player_y = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
-
-  while (distance(env->player_x, env->player_y, env->boss_x, env->boss_y) <
-         0.1) {
-    env->player_x = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
-    env->player_y = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
-  }
-
-  env->distance =
-      distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
-
+void update_observations(BossFight *env) {
   int obs_idx = 0;
-
   env->observations[obs_idx++] = env->boss_x - env->player_x;
   env->observations[obs_idx++] = env->boss_y - env->player_y;
   env->observations[obs_idx++] = env->player_x;
@@ -108,6 +92,36 @@ void c_reset(BossFight *env) {
   env->observations[obs_idx++] = (float)env->player_state_ticks;
   env->observations[obs_idx++] = (float)env->boss_state;
   env->observations[obs_idx++] = (float)env->boss_phase_ticks;
+}
+
+void c_reset(BossFight *env) {
+  env->tick = 0;
+  env->player_x = 0;
+  env->player_y = 0;
+  env->boss_x = 0;
+  env->boss_y = 0;
+  env->player_hp = MAX_HP;
+  env->boss_hp = MAX_HP;
+  env->player_state = PLAYER_IDLING;
+  env->player_dodge_cooldown = 0;
+  env->player_state_ticks = 0;
+  env->boss_state = BOSS_IDLING;
+  env->boss_phase_ticks = 0;
+  // env->distance = 0;
+
+  env->player_x = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+  env->player_y = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+
+  while (distance(env->player_x, env->player_y, env->boss_x, env->boss_y) <
+         0.1) {
+    env->player_x = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+    env->player_y = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
+  }
+
+  // env->distance =
+  //     distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
+
+  update_observations(env);
 }
 
 void c_step(BossFight *env) {
@@ -137,33 +151,98 @@ void c_step(BossFight *env) {
   bool can_dodge =
       env->player_state == PLAYER_IDLING && env->player_dodge_cooldown == 0;
   bool can_attack = env->player_state == PLAYER_IDLING;
+  bool close_enough = distance(env->player_x, env->player_y, env->boss_x,
+                               env->boss_y) < PLAYER_ATTACK_RADIUS;
 
-  bool hit_wall = fabsf(env->player_x) > ARENA_HALF_SIZE &&
+  bool hit_wall = fabsf(env->player_x) > ARENA_HALF_SIZE ||
                   fabsf(env->player_y) > ARENA_HALF_SIZE;
   if (hit_wall) {
     reward -= 0.5;
   }
+  // can't walk out of bounds
+  env->player_x =
+      fmaxf(-ARENA_HALF_SIZE, fminf(ARENA_HALF_SIZE, env->player_x));
+  env->player_y =
+      fmaxf(-ARENA_HALF_SIZE, fminf(ARENA_HALF_SIZE, env->player_y));
 
-  // TODO: here i should handle "player attacks and reduces boss hp" case
+  if (wanna_attack && can_attack && close_enough) {
+    env->boss_hp -= PLAYER_ATTACK_DMG;
+  }
 
-  bool killed_boss = env->boss_hp == 0;
+  bool in_aoe_attack = distance(env->player_x, env->player_y, env->boss_x,
+                                env->boss_y) <= BOSS_AOE_ATTACK_RADIUS;
+  bool boss_can_hit = env->player_state != PLAYER_DODGING && in_aoe_attack;
+  bool boss_can_damage = env->boss_state == BOSS_ATTACKING && boss_can_hit;
+  if (boss_can_damage) {
+    env->player_hp -= BOSS_ATTACK_DMG;
+  }
+
+  bool killed_boss = env->boss_hp <= 0;
   if (killed_boss) {
     reward += 2;
+    env->terminals[0] = 1;
   }
 
   env->rewards[0] = reward;
 
-  bool player_died = env->player_hp == 0;
+  bool player_died = env->player_hp <= 0;
   if (player_died) {
     env->terminals[0] = 1;
   }
 
+  if (wanna_attack && can_attack) {
+    env->player_state_ticks = PLAYER_ATTACK_TICKS;
+    env->player_state = PLAYER_ATTACKING;
+  }
+  if (wanna_dodge && can_dodge) {
+    env->player_state_ticks = PLAYER_DODGE_TICKS;
+    env->player_state = PLAYER_DODGING;
+  }
+  if (env->player_state == PLAYER_DODGING && env->player_state_ticks == 0) {
+    env->player_dodge_cooldown = PLAYER_DODGE_COOLDOWN;
+    env->player_state = PLAYER_IDLING;
+  }
+  if (env->player_state == PLAYER_ATTACKING && env->player_state_ticks == 0) {
+    env->player_state = PLAYER_IDLING;
+  }
+
+  if (env->boss_phase_ticks == 0) {
+    if (env->boss_state == BOSS_IDLING) {
+      env->boss_state = BOSS_WINDING_UP;
+      env->boss_phase_ticks = BOSS_WINDUP_TICKS;
+    } else if (env->boss_state == BOSS_WINDING_UP) {
+      env->boss_state = BOSS_ATTACKING;
+      env->boss_phase_ticks = BOSS_ACTIVE_TICKS;
+    } else if (env->boss_state == BOSS_ATTACKING) {
+      env->boss_state = BOSS_RECOVERING;
+      env->boss_phase_ticks = BOSS_RECOVERY_TICKS;
+    } else if (env->boss_state == BOSS_RECOVERING) {
+      env->boss_state = BOSS_IDLING;
+      env->boss_phase_ticks = BOSS_IDLE_TICKS;
+    }
+  }
+
   env->tick++;
+  if (env->boss_phase_ticks > 0) {
+    env->boss_phase_ticks--;
+  }
+  if (env->player_state_ticks > 0) {
+    env->player_state_ticks--;
+  }
+  if (env->player_dodge_cooldown > 0) {
+    env->player_dodge_cooldown--;
+  }
+
+  if (env->tick >= 1500) {
+    env->terminals[0] = 1;
+  }
+
+  update_observations(env);
 }
 
 void c_render(BossFight *env) {
   if (!IsWindowReady()) {
-    InitWindow(1080, 720, "BossFight");
+    InitWindow(720, 720, "BossFight");
     SetTargetFPS(30);
   }
 
