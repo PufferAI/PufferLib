@@ -14,7 +14,7 @@
 #define PLAYER_DODGE_TICKS 6
 #define PLAYER_DODGE_COOLDOWN 15
 #define PLAYER_ATTACK_DMG 3
-#define BOSS_ATTACK_DMG 10
+#define BOSS_ATTACK_DMG 30
 #define BOSS_AOE_ATTACK_RADIUS 0.7f
 #define BOSS_IDLE_TICKS 12
 #define BOSS_WINDUP_TICKS 10
@@ -215,15 +215,14 @@ void c_step(BossFight *env) {
   bool boss_can_damage = env->boss_state == BOSS_ATTACKING && boss_can_hit;
   if (boss_can_damage) {
     env->player_hp -= BOSS_ATTACK_DMG;
-    reward -= 5;  // make tanking hurt more
+    reward -= 5; // make tanking hurt more
   }
 
   // reward for successfully dodging an attack
-  bool dodged_attack = env->player_state == PLAYER_DODGING && 
-                       env->boss_state == BOSS_ATTACKING && 
-                       in_aoe_attack;
+  bool dodged_attack = env->player_state == PLAYER_DODGING &&
+                       env->boss_state == BOSS_ATTACKING && in_aoe_attack;
   if (dodged_attack) {
-    reward += 2;  // incentivize dodge timing
+    reward += 5; // incentivize dodge timing
   }
 
   bool killed_boss = env->boss_hp <= 0;
@@ -323,8 +322,8 @@ void c_render(BossFight *env) {
 
   // Stats top-right
   char stats[64];
-  snprintf(stats, sizeof(stats), "W:%d L:%d T:%d", 
-           env->player_wins, env->boss_wins, env->timeouts);
+  snprintf(stats, sizeof(stats), "W:%d L:%d T:%d", env->player_wins,
+           env->boss_wins, env->timeouts);
   DrawText(stats, 580, 20, 20, TEXT_COLOR);
 
   // Player
