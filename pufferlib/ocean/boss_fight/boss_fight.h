@@ -167,8 +167,7 @@ void c_step(BossFight *env) {
 
   float dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
 
-  bool close_enough = dist < BOSS_SIZE + PLAYER_ATTACK_RADIUS + PLAYER_SIZE &&
-                      dist > BOSS_SIZE + PLAYER_SIZE;
+  bool close_enough = dist <= BOSS_SIZE + PLAYER_ATTACK_RADIUS + PLAYER_SIZE;
 
   bool hit_wall = fabsf(env->player_x) > ARENA_HALF_SIZE ||
                   fabsf(env->player_y) > ARENA_HALF_SIZE;
@@ -186,9 +185,7 @@ void c_step(BossFight *env) {
     reward += 0.5;
   }
 
-  bool in_aoe_attack =
-      dist <= BOSS_SIZE + PLAYER_SIZE + BOSS_AOE_ATTACK_RADIUS &&
-      dist > BOSS_SIZE + PLAYER_SIZE;
+  bool in_aoe_attack = dist <= BOSS_SIZE + PLAYER_SIZE + BOSS_AOE_ATTACK_RADIUS;
   bool boss_can_hit = env->player_state != PLAYER_DODGING && in_aoe_attack;
   bool boss_can_damage = env->boss_state == BOSS_ATTACKING && boss_can_hit;
   if (boss_can_damage) {
@@ -265,6 +262,15 @@ void c_step(BossFight *env) {
   update_observations(env);
 }
 
+int world_to_screen(float world_coord) {
+  return (int)((world_coord + ARENA_HALF_SIZE) / (2 * ARENA_HALF_SIZE) *
+               720.0f);
+}
+
+float radius_to_screen(float world_radius) {
+  return world_radius / (2 * ARENA_HALF_SIZE) * 720.0f;
+}
+
 void c_render(BossFight *env) {
   if (!IsWindowReady()) {
     InitWindow(720, 720, "BossFight");
@@ -280,7 +286,17 @@ void c_render(BossFight *env) {
   ClearBackground(BACKGROUND_COLOR);
   DrawText("Beat the boss!", 20, 20, 20, TEXT_COLOR);
 
-  // DrawCircle(int centerX, int centerY, float radius, Color color)
+  DrawCircle(world_to_screen(env->player_x), world_to_screen(env->player_y),
+             radius_to_screen(PLAYER_SIZE + PLAYER_ATTACK_RADIUS),
+             HITBOX_COLOR);
+  DrawCircle(world_to_screen(env->player_x), world_to_screen(env->player_y),
+             radius_to_screen(PLAYER_SIZE), PLAYER_COLOR);
+
+  DrawCircle(world_to_screen(env->boss_x), world_to_screen(env->boss_y),
+             radius_to_screen(BOSS_SIZE + BOSS_AOE_ATTACK_RADIUS),
+             HITBOX_COLOR);
+  DrawCircle(world_to_screen(env->boss_x), world_to_screen(env->boss_y),
+             radius_to_screen(BOSS_SIZE), BOSS_COLOR);
 
   EndDrawing();
 }
