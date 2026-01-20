@@ -124,8 +124,9 @@ void c_reset(BossFight *env) {
   env->player_x = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
   env->player_y = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
 
-  while (distance(env->player_x, env->player_y, env->boss_x, env->boss_y) <
-         0.1) {
+  while (distance(env->player_x, env->player_y, env->boss_x, env->boss_y) <=
+         PLAYER_SIZE + PLAYER_ATTACK_RADIUS + BOSS_SIZE +
+             BOSS_AOE_ATTACK_RADIUS) {
     env->player_x = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
     env->player_y = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
   }
@@ -163,8 +164,11 @@ void c_step(BossFight *env) {
   bool can_dodge =
       env->player_state == PLAYER_IDLING && env->player_dodge_cooldown == 0;
   bool can_attack = env->player_state == PLAYER_IDLING;
-  bool close_enough = distance(env->player_x, env->player_y, env->boss_x,
-                               env->boss_y) < PLAYER_ATTACK_RADIUS;
+
+  float dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
+
+  bool close_enough = dist < BOSS_SIZE + PLAYER_ATTACK_RADIUS + PLAYER_SIZE &&
+                      dist > BOSS_SIZE + PLAYER_SIZE;
 
   bool hit_wall = fabsf(env->player_x) > ARENA_HALF_SIZE ||
                   fabsf(env->player_y) > ARENA_HALF_SIZE;
@@ -182,8 +186,9 @@ void c_step(BossFight *env) {
     reward += 0.5;
   }
 
-  bool in_aoe_attack = distance(env->player_x, env->player_y, env->boss_x,
-                                env->boss_y) <= BOSS_AOE_ATTACK_RADIUS;
+  bool in_aoe_attack =
+      dist <= BOSS_SIZE + PLAYER_SIZE + BOSS_AOE_ATTACK_RADIUS &&
+      dist > BOSS_SIZE + PLAYER_SIZE;
   bool boss_can_hit = env->player_state != PLAYER_DODGING && in_aoe_attack;
   bool boss_can_damage = env->boss_state == BOSS_ATTACKING && boss_can_hit;
   if (boss_can_damage) {
