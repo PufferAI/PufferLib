@@ -57,7 +57,7 @@ typedef struct {
   float player_y;
   float boss_x;
   float boss_y;
-  // float distance;
+  float prev_distance;
 
   PlayerState player_state;
   int player_hp;
@@ -131,8 +131,8 @@ void c_reset(BossFight *env) {
     env->player_y = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
   }
 
-  // env->distance =
-  //     distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
+  env->prev_distance =
+      distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
 
   update_observations(env);
 }
@@ -166,6 +166,11 @@ void c_step(BossFight *env) {
   bool can_attack = env->player_state == PLAYER_IDLING;
 
   float dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
+
+  if (dist < env->prev_distance) {
+    reward += 0.5;
+  }
+  env->prev_distance = dist;
 
   bool close_enough = dist <= BOSS_SIZE + PLAYER_ATTACK_RADIUS + PLAYER_SIZE;
 
