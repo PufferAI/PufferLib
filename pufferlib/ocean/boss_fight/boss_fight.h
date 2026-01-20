@@ -14,17 +14,19 @@
 #define PLAYER_DODGE_TICKS 6
 #define PLAYER_DODGE_COOLDOWN 15
 #define PLAYER_ATTACK_DMG 3
-#define BOSS_ATTACK_DMG 3
+#define BOSS_ATTACK_DMG 10
 #define BOSS_AOE_ATTACK_RADIUS 0.7f
 #define BOSS_IDLE_TICKS 12
-#define BOSS_WINDUP_TICKS 18
+#define BOSS_WINDUP_TICKS 10
 #define BOSS_ACTIVE_TICKS 3
-#define BOSS_RECOVERY_TICKS 12
+#define BOSS_RECOVERY_TICKS 10
+#define HP_BAR_WIDTH 40
+#define HP_BAR_HEIGHT 5
 
-const Color PLAYER_COLOR = (Color){187, 0, 0, 255};
+const Color PLAYER_COLOR = (Color){50, 100, 255, 255};
 const Color BOSS_COLOR = (Color){0, 187, 187, 255};
-const Color TEXT_COLOR = (Color){241, 241, 241, 241};
-const Color HITBOX_COLOR = (Color){241, 241, 241, 241};
+const Color TEXT_COLOR = (Color){241, 241, 241, 255};
+const Color HITBOX_COLOR = (Color){241, 241, 241, 50};
 const Color BACKGROUND_COLOR = (Color){6, 24, 24, 255};
 const Color HP_COLOR = (Color){0, 255, 0, 255};
 
@@ -209,7 +211,15 @@ void c_step(BossFight *env) {
   bool boss_can_damage = env->boss_state == BOSS_ATTACKING && boss_can_hit;
   if (boss_can_damage) {
     env->player_hp -= BOSS_ATTACK_DMG;
-    reward -= 0.5;
+    reward -= 5;  // make tanking hurt more
+  }
+
+  // reward for successfully dodging an attack
+  bool dodged_attack = env->player_state == PLAYER_DODGING && 
+                       env->boss_state == BOSS_ATTACKING && 
+                       in_aoe_attack;
+  if (dodged_attack) {
+    reward += 2;  // incentivize dodge timing
   }
 
   bool killed_boss = env->boss_hp <= 0;
@@ -306,22 +316,17 @@ void c_render(BossFight *env) {
   ClearBackground(BACKGROUND_COLOR);
   DrawText("Beat the boss!", 20, 20, 20, TEXT_COLOR);
 
-  #define HP_BAR_WIDTH 40
-  #define HP_BAR_HEIGHT 5
-
   // Player
   int player_sx = world_to_screen(env->player_x);
   int player_sy = world_to_screen(env->player_y);
   int player_hp_bar_y = player_sy + (int)radius_to_screen(PLAYER_SIZE) + 5;
   int player_hp_width = (int)((float)env->player_hp / MAX_HP * HP_BAR_WIDTH);
 
+  Color player_color = env->player_hp <= 0 ? RED : PLAYER_COLOR;
   DrawCircle(player_sx, player_sy,
-             radius_to_screen(PLAYER_SIZE + PLAYER_ATTACK_RADIUS), HITBOX_COLOR);
-  DrawCircle(player_sx, player_sy, radius_to_screen(PLAYER_SIZE), PLAYER_COLOR);
-  DrawRectangle(player_sx - HP_BAR_WIDTH / 2, player_hp_bar_y,
-                HP_BAR_WIDTH, HP_BAR_HEIGHT, DARKGRAY);
-  DrawRectangle(player_sx - HP_BAR_WIDTH / 2, player_hp_bar_y,
-                player_hp_width, HP_BAR_HEIGHT, HP_COLOR);
+             radius_to_screen(PLAYER_SIZE + PLAYER_ATTACK_RADIUS),
+             HITBOX_COLOR);
+  DrawCircle(player_sx, player_sy, radius_to_screen(PLAYER_SIZE), player_color);
 
   // Boss
   int boss_sx = world_to_screen(env->boss_x);
@@ -329,13 +334,21 @@ void c_render(BossFight *env) {
   int boss_hp_bar_y = boss_sy + (int)radius_to_screen(BOSS_SIZE) + 5;
   int boss_hp_width = (int)((float)env->boss_hp / MAX_HP * HP_BAR_WIDTH);
 
+  Color boss_color = env->boss_hp <= 0 ? RED : BOSS_COLOR;
   DrawCircle(boss_sx, boss_sy,
-             radius_to_screen(BOSS_SIZE + BOSS_AOE_ATTACK_RADIUS), HITBOX_COLOR);
-  DrawCircle(boss_sx, boss_sy, radius_to_screen(BOSS_SIZE), BOSS_COLOR);
-  DrawRectangle(boss_sx - HP_BAR_WIDTH / 2, boss_hp_bar_y,
-                HP_BAR_WIDTH, HP_BAR_HEIGHT, DARKGRAY);
-  DrawRectangle(boss_sx - HP_BAR_WIDTH / 2, boss_hp_bar_y,
-                boss_hp_width, HP_BAR_HEIGHT, HP_COLOR);
+             radius_to_screen(BOSS_SIZE + BOSS_AOE_ATTACK_RADIUS),
+             HITBOX_COLOR);
+  DrawCircle(boss_sx, boss_sy, radius_to_screen(BOSS_SIZE), boss_color);
+
+  // Player HP bar - bottom left
+  DrawText("Player", 20, 680, 16, TEXT_COLOR);
+  DrawRectangle(20, 700, HP_BAR_WIDTH * 3, HP_BAR_HEIGHT, DARKGRAY);
+  DrawRectangle(20, 700, player_hp_width * 3, HP_BAR_HEIGHT, HP_COLOR);
+
+  // Boss HP bar - bottom right
+  DrawText("Boss", 580, 680, 16, TEXT_COLOR);
+  DrawRectangle(580, 700, HP_BAR_WIDTH * 3, HP_BAR_HEIGHT, DARKGRAY);
+  DrawRectangle(580, 700, boss_hp_width * 3, HP_BAR_HEIGHT, HP_COLOR);
 
   EndDrawing();
 }
