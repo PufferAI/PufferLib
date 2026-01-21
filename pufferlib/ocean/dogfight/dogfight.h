@@ -19,7 +19,7 @@
 // Observation scheme enumeration
 typedef enum {
     OBS_ANGLES = 0,              // Spherical coordinates (12 obs)
-    OBS_CONTROL_ERROR = 1,       // Control errors to target (17 obs)
+    OBS_PURSUIT = 1,             // Energy-aware pursuit observations (13 obs)
     OBS_REALISTIC = 2,           // Cockpit instruments only (10 obs)
     OBS_REALISTIC_RANGE = 3,     // REALISTIC with explicit range (10 obs)
     OBS_REALISTIC_ENEMY_STATE = 4, // + enemy pitch/roll/heading (13 obs)
@@ -28,7 +28,7 @@ typedef enum {
 } ObsScheme;
 
 // Observation size lookup table
-static const int OBS_SIZES[OBS_SCHEME_COUNT] = {12, 17, 10, 10, 13, 15};
+static const int OBS_SIZES[OBS_SCHEME_COUNT] = {12, 13, 10, 10, 13, 15};
 
 // Curriculum learning stages (progressive difficulty)
 // Reordered 2026-01-18: moved CROSSING from stage 2 to stage 6 (see CURRICULUM_PLANS.md)
@@ -73,9 +73,12 @@ static const float STAGE_WEIGHTS[CURRICULUM_COUNT] = {
 #define INV_WORLD_HALF_Y 0.0005f       // 1/2000
 #define INV_WORLD_MAX_Z  0.000333333f  // 1/3000
 #define INV_MAX_SPEED    0.004f        // 1/250
+#define INV_PI           0.31830988618f // 1/PI
+#define INV_HALF_PI      0.63661977236f // 2/PI (i.e., 1/(PI*0.5))
 
 // Combat constants
 #define GUN_RANGE 500.0f       // meters
+#define INV_GUN_RANGE 0.002f   // 1/500
 #define GUN_CONE_ANGLE 0.087f  // ~5 degrees in radians
 #define FIRE_COOLDOWN 10       // ticks (0.2 seconds at 50Hz)
 
@@ -107,23 +110,17 @@ typedef enum DeathReason {
     DEATH_SUPERSONIC = 5 // Physics blowup
 } DeathReason;
 
-// Reward configuration (all values sweepable via INI)
+// Reward configuration (df11: simplified - 6 terms instead of 9+)
 typedef struct RewardConfig {
-    float closing_scale;     // +N per m/s closing
-    float tail_scale;        // ±N for tail position
-    float tracking;          // +N when in 2x gun cone
-    float firing_solution;   // +N when in 1x gun cone
-    float stall;             // -N per m/s below speed_min
-    float roll;              // -N per radian of bank angle (gentle level preference)
-    float neg_g;             // -N per unit of negative G-loading
-    float rudder;            // -N per unit of rudder magnitude
-    float aileron;           // -N per unit of aileron magnitude (prevents constant rolling)
-    float bias;              // -N per unit of cumulative signed aileron (prevents one-direction lock)
-    float approach;          // +N per meter of distance closed this tick
-    float level;             // +N per tick when approximately level (|bank|<30°, |pitch|<30°)
-    // Thresholds (not rewards)
-    float alt_max;           // 2500.0
-    float speed_min;         // 50.0
+    // Positive shaping
+    float aim_scale;         // Continuous aiming reward (default 0.05)
+    float closing_scale;     // +N per m/s closing (default 0.003)
+    // Penalties
+    float neg_g;             // -N per unit G below 0.5 (default 0.02) - enforces "pull to turn"
+    float stall;             // -N per m/s below speed_min (default 0.002)
+    float rudder;            // -N per unit rudder magnitude (default 0.001) - prevents knife-edge
+    // Thresholds
+    float speed_min;         // Stall threshold (default 50.0)
 } RewardConfig;
 
 typedef struct Client {
@@ -176,25 +173,23 @@ typedef struct Dogfight {
     // Curriculum learning
     int curriculum_enabled;     // 0 = off (legacy spawning), 1 = on
     int curriculum_randomize;   // 0 = progressive (training), 1 = random stage each episode (eval)
-    int episodes_per_stage;     // Episodes before advancing to next stage
     int total_episodes;         // Cumulative episodes (persists across resets)
     CurriculumStage stage;      // Current difficulty stage
     int is_initialized;         // Flag to preserve curriculum state across re-init (for Multiprocessing)
+    // Performance-based curriculum
+    float recent_kills;         // Kills in current evaluation window
+    float recent_episodes;      // Episodes in current evaluation window
+    float advance_threshold;    // Kill rate to advance (default 0.7)
+    float demote_threshold;     // Kill rate to demote (default 0.3)
+    int eval_window;            // Episodes per evaluation (default 50)
     // Anti-spinning
     float total_aileron_usage;  // Accumulated |aileron| input (for spin death)
     float aileron_bias;         // Cumulative signed aileron (for directional penalty)
-    float prev_dist;            // Previous distance to opponent (for approach reward)
     // Episode reward accumulators (for DEBUG summaries)
-    float sum_r_approach;
     float sum_r_closing;
-    float sum_r_tail;
-    float sum_r_speed;
-    float sum_r_roll;
+    float sum_r_speed;      // Stall penalty
     float sum_r_neg_g;
     float sum_r_rudder;
-    float sum_r_aileron;
-    float sum_r_bias;
-    float sum_r_level;
     float sum_r_aim;
     // Aiming diagnostics (reset each episode, for DEBUG output)
     float best_aim_angle;    // Best (smallest) aim angle achieved (radians)
@@ -214,7 +209,7 @@ typedef struct Dogfight {
     int env_num;                // Environment index (for filtering debug output)
 } Dogfight;
 
-void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, int episodes_per_stage, float aim_cone_start, float aim_cone_end, int aim_anneal_episodes, int env_num) {
+void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, float aim_cone_start, float aim_cone_end, int aim_anneal_episodes, float advance_threshold, float demote_threshold, int eval_window, int env_num) {
     env->log = (Log){0};
     env->tick = 0;
     env->env_num = env_num;
@@ -245,11 +240,16 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     // Curriculum learning
     env->curriculum_enabled = curriculum_enabled;
     env->curriculum_randomize = curriculum_randomize;
-    env->episodes_per_stage = episodes_per_stage > 0 ? episodes_per_stage : 15000;
     // Only reset curriculum state on first init (preserve across re-init for Multiprocessing)
     if (!env->is_initialized) {
         env->total_episodes = 0;
         env->stage = CURRICULUM_TAIL_CHASE;
+        // Performance-based curriculum
+        env->recent_kills = 0.0f;
+        env->recent_episodes = 0.0f;
+        env->advance_threshold = advance_threshold > 0.0f ? advance_threshold : 0.7f;
+        env->demote_threshold = demote_threshold > 0.0f ? demote_threshold : 0.3f;
+        env->eval_window = eval_window > 0 ? eval_window : 50;
         if (DEBUG >= 1) {
             fprintf(stderr, "[INIT] FIRST init ptr=%p env_num=%d - setting total_episodes=0, stage=0\n", (void*)env, env_num);
         }
@@ -268,19 +268,16 @@ void add_log(Dogfight *env) {
     if (DEBUG >= 1 && env->env_num == 0) {
         const char* death_names[] = {"NONE", "KILL", "OOB", "AILERON", "TIMEOUT", "SUPERSONIC"};
         float mean_ail = env->total_aileron_usage / fmaxf((float)env->tick, 1.0f);
-        printf("EP tick=%d ret=%.2f death=%s kill=%d stage=%d total_eps=%d eps_per_stage=%d mean_ail=%.2f bias=%.1f\n",
+        printf("EP tick=%d ret=%.2f death=%s kill=%d stage=%d total_eps=%d mean_ail=%.2f bias=%.1f\n",
                env->tick, env->episode_return, death_names[env->death_reason],
-               env->kill, env->stage, env->total_episodes, env->episodes_per_stage, mean_ail, env->aileron_bias);
+               env->kill, env->stage, env->total_episodes, mean_ail, env->aileron_bias);
     }
 
     // Level 2: Reward breakdown (which components dominated?)
     if (DEBUG >= 2 && env->env_num == 0) {
-        printf("  SHAPING: approach=%+.2f closing=%+.2f tail=%+.2f level=%+.2f\n",
-               env->sum_r_approach, env->sum_r_closing, env->sum_r_tail, env->sum_r_level);
-        printf("  COMBAT:  aim=%+.2f\n", env->sum_r_aim);
-        printf("  PENALTY: speed=%.2f roll=%.2f neg_g=%.2f rudder=%.2f ail=%.2f bias=%.2f\n",
-               env->sum_r_speed, env->sum_r_roll, env->sum_r_neg_g,
-               env->sum_r_rudder, env->sum_r_aileron, env->sum_r_bias);
+        printf("  SHAPING: closing=%+.2f aim=%+.2f\n", env->sum_r_closing, env->sum_r_aim);
+        printf("  PENALTY: stall=%.2f neg_g=%.2f rudder=%.2f\n",
+               env->sum_r_speed, env->sum_r_neg_g, env->sum_r_rudder);
         printf("  AIM: best=%.1f° in_cone=%d/%d (%.0f%%) closest=%.0fm\n",
                env->best_aim_angle * RAD_TO_DEG,
                env->ticks_in_cone, env->tick,
@@ -328,6 +325,33 @@ void add_log(Dogfight *env) {
     env->log.ultimate = difficulty_weighted / bias_divisor;
 
     if (DEBUG >= 10) printf("  log.perf=%.2f, log.shots_fired=%.0f, log.n=%.0f\n", env->log.perf, env->log.shots_fired, env->log.n);
+
+    if (env->curriculum_enabled && !env->curriculum_randomize) {
+        env->recent_episodes += 1.0f;
+        env->recent_kills += env->kill ? 1.0f : 0.0f;
+
+        // Evaluate every eval_window episodes
+        if (env->recent_episodes >= (float)env->eval_window) {
+            float recent_rate = env->recent_kills / env->recent_episodes;
+
+            if (recent_rate > env->advance_threshold && env->stage < CURRICULUM_COUNT - 1) {
+                env->stage++;
+                if (DEBUG >= 1) {
+                    fprintf(stderr, "[ADVANCE] env=%d stage->%d (rate=%.2f, window=%d)\n",
+                            env->env_num, env->stage, recent_rate, env->eval_window);
+                }
+            } else if (recent_rate < env->demote_threshold && env->stage > 0) {
+                env->stage--;
+                if (DEBUG >= 1) {
+                    fprintf(stderr, "[DEMOTE] env=%d stage->%d (rate=%.2f, window=%d)\n",
+                            env->env_num, env->stage, recent_rate, env->eval_window);
+                }
+            }
+
+            env->recent_kills = 0.0f;
+            env->recent_episodes = 0.0f;
+        }
+    }
 }
 
 // Scheme 0: Angles observations (spherical coordinates)
@@ -368,79 +392,97 @@ void compute_obs_angles(Dogfight *env) {
     env->observations[i++] = p->pos.y * INV_WORLD_HALF_Y;
     env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
     env->observations[i++] = norm3(p->vel) * INV_MAX_SPEED;  // Speed scalar
-    env->observations[i++] = pitch / PI;      // -0.5 to 0.5
-    env->observations[i++] = roll / PI;       // -1 to 1
-    env->observations[i++] = yaw / PI;        // -1 to 1
+    env->observations[i++] = pitch * INV_PI;      // -0.5 to 0.5
+    env->observations[i++] = roll * INV_PI;       // -1 to 1
+    env->observations[i++] = yaw * INV_PI;        // -1 to 1
 
     // Target angles
-    env->observations[i++] = azimuth / PI;    // -1 to 1
-    env->observations[i++] = elevation / (PI * 0.5f);  // -1 to 1
-    env->observations[i++] = clampf(dist / GUN_RANGE, 0.0f, 2.0f) - 1.0f;  // [-1,1]
+    env->observations[i++] = azimuth * INV_PI;    // -1 to 1
+    env->observations[i++] = elevation * INV_HALF_PI;  // -1 to 1
+    env->observations[i++] = clampf(dist * INV_GUN_RANGE, 0.0f, 2.0f) - 1.0f;  // [-1,1]
     env->observations[i++] = clampf(closing_rate * INV_MAX_SPEED, -1.0f, 1.0f);  // Clamped to [-1,1]
 
     // Opponent info
-    env->observations[i++] = opp_heading / PI;  // -1 to 1
+    env->observations[i++] = opp_heading * INV_PI;  // -1 to 1
     // OBS_SIZE = 12
 }
 
-// Scheme 3: Control error observations (what inputs would point at target?)
-void compute_obs_control_error(Dogfight *env) {
+// Scheme 1: OBS_PURSUIT - Energy-aware pursuit observations (13 obs)
+// Better than old OBS_CONTROL_ERROR: no spoon-feeding of control errors,
+// instead provides body-frame target info and energy state for learning pursuit
+void compute_obs_pursuit(Dogfight *env) {
     Plane *p = &env->player;
     Plane *o = &env->opponent;
 
     Quat q_inv = {p->ori.w, -p->ori.x, -p->ori.y, -p->ori.z};
 
-    // Up vector (world frame)
-    Vec3 up = quat_rotate(p->ori, vec3(0, 0, 1));
+    // Own Euler angles
+    float pitch = asinf(clampf(2.0f * (p->ori.w * p->ori.y - p->ori.z * p->ori.x), -1.0f, 1.0f));
+    float roll = atan2f(2.0f * (p->ori.w * p->ori.x + p->ori.y * p->ori.z),
+                        1.0f - 2.0f * (p->ori.x * p->ori.x + p->ori.y * p->ori.y));
+
+    // Own energy state: (potential + kinetic) / 2, normalized to [0,1]
+    float speed = norm3(p->vel);
+    float alt = p->pos.z;
+    float potential = alt * INV_WORLD_MAX_Z;
+    float kinetic = (speed * speed) / (MAX_SPEED * MAX_SPEED);
+    float own_energy = (potential + kinetic) * 0.5f;
 
     // Target in body frame
     Vec3 rel_pos = sub3(o->pos, p->pos);
     Vec3 rel_pos_body = quat_rotate(q_inv, rel_pos);
     float dist = norm3(rel_pos);
-    Vec3 to_target_norm = normalize3(rel_pos_body);
 
-    // Control errors: how to point at target
-    float pitch_error = asinf(clampf(to_target_norm.z, -1.0f, 1.0f));  // + = pitch up needed
-    float yaw_error = atan2f(to_target_norm.y, to_target_norm.x);      // + = yaw right needed
+    float target_az = atan2f(rel_pos_body.y, rel_pos_body.x);
+    float r_horiz = sqrtf(rel_pos_body.x * rel_pos_body.x + rel_pos_body.y * rel_pos_body.y);
+    float target_el = atan2f(rel_pos_body.z, fmaxf(r_horiz, 1e-6f));
 
-    // Roll to turn: if target is right (y>0), roll right helps turn toward it
-    // This is the bank angle that would help turn toward target
-    float roll_to_turn = atan2f(to_target_norm.y, fabsf(to_target_norm.x) + 0.1f);
-
-    // Closing rate
+    // Closure rate
     Vec3 rel_vel = sub3(p->vel, o->vel);
-    float closing_rate = dot3(rel_vel, normalize3(rel_pos));
+    float closure = dot3(rel_vel, normalize3(rel_pos));
 
-    // Opponent heading relative to player
+    // Target Euler angles
+    float target_pitch = asinf(clampf(2.0f * (o->ori.w * o->ori.y - o->ori.z * o->ori.x), -1.0f, 1.0f));
+    float target_roll = atan2f(2.0f * (o->ori.w * o->ori.x + o->ori.y * o->ori.z),
+                               1.0f - 2.0f * (o->ori.x * o->ori.x + o->ori.y * o->ori.y));
+
+    // Target aspect (head-on vs tail)
     Vec3 opp_fwd = quat_rotate(o->ori, vec3(1, 0, 0));
-    Vec3 opp_fwd_body = quat_rotate(q_inv, opp_fwd);
-    float opp_heading = atan2f(opp_fwd_body.y, opp_fwd_body.x);
+    Vec3 to_player = normalize3(sub3(p->pos, o->pos));
+    float target_aspect = dot3(opp_fwd, to_player);
+
+    // Target energy
+    float opp_speed = norm3(o->vel);
+    float opp_alt = o->pos.z;
+    float opp_potential = opp_alt * INV_WORLD_MAX_Z;
+    float opp_kinetic = (opp_speed * opp_speed) / (MAX_SPEED * MAX_SPEED);
+    float opp_energy = (opp_potential + opp_kinetic) * 0.5f;
+
+    // Energy advantage
+    float energy_advantage = clampf(own_energy - opp_energy, -1.0f, 1.0f);
 
     int i = 0;
-    // Player state (11 obs)
-    env->observations[i++] = p->pos.x * INV_WORLD_HALF_X;
-    env->observations[i++] = p->pos.y * INV_WORLD_HALF_Y;
-    env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
-    env->observations[i++] = norm3(p->vel) * INV_MAX_SPEED;  // Speed scalar
-    // Quaternion clamped to prevent NaN from potential denormalization drift
-    env->observations[i++] = clampf(p->ori.w, -1.0f, 1.0f);
-    env->observations[i++] = clampf(p->ori.x, -1.0f, 1.0f);
-    env->observations[i++] = clampf(p->ori.y, -1.0f, 1.0f);
-    env->observations[i++] = clampf(p->ori.z, -1.0f, 1.0f);
-    env->observations[i++] = up.x;
-    env->observations[i++] = up.y;
-    env->observations[i++] = up.z;
+    // Own flight state (5 obs)
+    env->observations[i++] = speed * INV_MAX_SPEED;
+    env->observations[i++] = potential;
+    env->observations[i++] = pitch * INV_HALF_PI;
+    env->observations[i++] = roll * INV_PI;
+    env->observations[i++] = own_energy;
 
-    // Control errors (4 obs) - THE KEY INFO
-    env->observations[i++] = pitch_error / (PI * 0.5f);  // -1 to 1
-    env->observations[i++] = yaw_error / PI;              // -1 to 1
-    env->observations[i++] = roll_to_turn / (PI * 0.5f); // -1 to 1
-    env->observations[i++] = clampf(dist / GUN_RANGE, 0.0f, 2.0f) - 1.0f;
+    // Target position in body frame (4 obs)
+    env->observations[i++] = target_az * INV_PI;
+    env->observations[i++] = target_el * INV_HALF_PI;
+    env->observations[i++] = clampf(dist * INV_GUN_RANGE, 0.0f, 2.0f) - 1.0f;
+    env->observations[i++] = clampf(closure * INV_MAX_SPEED, -1.0f, 1.0f);
 
-    // Target info (2 obs)
-    env->observations[i++] = clampf(closing_rate * INV_MAX_SPEED, -1.0f, 1.0f);  // Clamped to [-1,1]
-    env->observations[i++] = opp_heading / PI;
-    // OBS_SIZE = 17
+    // Target state (3 obs)
+    env->observations[i++] = target_roll * INV_PI;
+    env->observations[i++] = target_pitch * INV_HALF_PI;
+    env->observations[i++] = target_aspect;
+
+    // Energy comparison (1 obs)
+    env->observations[i++] = energy_advantage;
+    // OBS_SIZE = 13
 }
 
 // Scheme 4: Realistic cockpit instruments only
@@ -480,18 +522,18 @@ void compute_obs_realistic(Dogfight *env) {
     // Instruments (4 obs)
     env->observations[i++] = norm3(p->vel) * INV_MAX_SPEED;  // Airspeed
     env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;     // Altitude
-    env->observations[i++] = pitch / (PI * 0.5f);            // Pitch indicator
-    env->observations[i++] = roll / PI;                       // Bank indicator
+    env->observations[i++] = pitch * INV_HALF_PI;            // Pitch indicator
+    env->observations[i++] = roll * INV_PI;                       // Bank indicator
 
     // Gunsight (3 obs)
-    env->observations[i++] = target_az / PI;                  // Target azimuth in sight
-    env->observations[i++] = target_el / (PI * 0.5f);         // Target elevation in sight
+    env->observations[i++] = target_az * INV_PI;                  // Target azimuth in sight
+    env->observations[i++] = target_el * INV_HALF_PI;         // Target elevation in sight
     env->observations[i++] = clampf(target_size, 0.0f, 2.0f) - 1.0f;  // Target size
 
     // Visual cues (3 obs)
     env->observations[i++] = target_aspect;                   // -1 to 1
     env->observations[i++] = horizon_visible;                 // -1 to 1
-    env->observations[i++] = clampf(dist / GUN_RANGE, 0.0f, 2.0f) - 1.0f;  // Distance estimate
+    env->observations[i++] = clampf(dist * INV_GUN_RANGE, 0.0f, 2.0f) - 1.0f;  // Distance estimate
     // OBS_SIZE = 10
 }
 
@@ -537,12 +579,12 @@ void compute_obs_realistic_range(Dogfight *env) {
     // Instruments (4 obs)
     env->observations[i++] = norm3(p->vel) * INV_MAX_SPEED;  // Airspeed
     env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;     // Altitude
-    env->observations[i++] = pitch / (PI * 0.5f);            // Pitch indicator
-    env->observations[i++] = roll / PI;                       // Bank indicator
+    env->observations[i++] = pitch * INV_HALF_PI;            // Pitch indicator
+    env->observations[i++] = roll * INV_PI;                       // Bank indicator
 
     // Gunsight (3 obs)
-    env->observations[i++] = target_az / PI;                  // Target azimuth in sight
-    env->observations[i++] = target_el / (PI * 0.5f);         // Target elevation in sight
+    env->observations[i++] = target_az * INV_PI;                  // Target azimuth in sight
+    env->observations[i++] = target_el * INV_HALF_PI;         // Target elevation in sight
     env->observations[i++] = range_km;                        // Range: 0=close, 1=2km+
 
     // Visual cues (3 obs)
@@ -602,12 +644,12 @@ void compute_obs_realistic_enemy_state(Dogfight *env) {
     // Instruments (4 obs)
     env->observations[i++] = norm3(p->vel) * INV_MAX_SPEED;
     env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
-    env->observations[i++] = pitch / (PI * 0.5f);
-    env->observations[i++] = roll / PI;
+    env->observations[i++] = pitch * INV_HALF_PI;
+    env->observations[i++] = roll * INV_PI;
 
     // Gunsight (3 obs)
-    env->observations[i++] = target_az / PI;
-    env->observations[i++] = target_el / (PI * 0.5f);
+    env->observations[i++] = target_az * INV_PI;
+    env->observations[i++] = target_el * INV_HALF_PI;
     env->observations[i++] = range_km;
 
     // Visual cues (3 obs)
@@ -616,8 +658,8 @@ void compute_obs_realistic_enemy_state(Dogfight *env) {
     env->observations[i++] = clampf(closure_rate * INV_MAX_SPEED, -1.0f, 1.0f);
 
     // Enemy state (3 obs) - NEW
-    env->observations[i++] = enemy_pitch / (PI * 0.5f);  // Enemy nose angle vs horizon
-    env->observations[i++] = enemy_roll / PI;             // Enemy bank angle vs horizon
+    env->observations[i++] = enemy_pitch * INV_HALF_PI;  // Enemy nose angle vs horizon
+    env->observations[i++] = enemy_roll * INV_PI;             // Enemy bank angle vs horizon
     env->observations[i++] = enemy_heading_rel;           // Pointing toward/away
     // OBS_SIZE = 13
 }
@@ -688,12 +730,12 @@ void compute_obs_realistic_full(Dogfight *env) {
     // Instruments (4 obs)
     env->observations[i++] = speed * INV_MAX_SPEED;
     env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
-    env->observations[i++] = pitch / (PI * 0.5f);
-    env->observations[i++] = roll / PI;
+    env->observations[i++] = pitch * INV_HALF_PI;
+    env->observations[i++] = roll * INV_PI;
 
     // Gunsight (3 obs)
-    env->observations[i++] = target_az / PI;
-    env->observations[i++] = target_el / (PI * 0.5f);
+    env->observations[i++] = target_az * INV_PI;
+    env->observations[i++] = target_el * INV_HALF_PI;
     env->observations[i++] = range_km;
 
     // Visual cues (3 obs)
@@ -702,8 +744,8 @@ void compute_obs_realistic_full(Dogfight *env) {
     env->observations[i++] = clampf(closure_rate * INV_MAX_SPEED, -1.0f, 1.0f);
 
     // Enemy state (3 obs)
-    env->observations[i++] = enemy_pitch / (PI * 0.5f);
-    env->observations[i++] = enemy_roll / PI;
+    env->observations[i++] = enemy_pitch * INV_HALF_PI;
+    env->observations[i++] = enemy_roll * INV_PI;
     env->observations[i++] = enemy_heading_rel;
 
     // Own state (2 obs) - NEW
@@ -716,7 +758,7 @@ void compute_obs_realistic_full(Dogfight *env) {
 void compute_observations(Dogfight *env) {
     switch (env->obs_scheme) {
         case OBS_ANGLES:               compute_obs_angles(env); break;
-        case OBS_CONTROL_ERROR:        compute_obs_control_error(env); break;
+        case OBS_PURSUIT:              compute_obs_pursuit(env); break;
         case OBS_REALISTIC:            compute_obs_realistic(env); break;
         case OBS_REALISTIC_RANGE:      compute_obs_realistic_range(env); break;
         case OBS_REALISTIC_ENEMY_STATE: compute_obs_realistic_enemy_state(env); break;
@@ -729,17 +771,16 @@ void compute_observations(Dogfight *env) {
 // Curriculum Learning: Stage-specific spawn functions
 // ============================================================================
 
-// Get current curriculum stage based on total episodes or random (for eval)
+// Get current curriculum stage - now performance-based (df10)
+// Stage advancement/demotion handled in add_log() based on recent kill rate
 CurriculumStage get_curriculum_stage(Dogfight *env) {
     if (!env->curriculum_enabled) return CURRICULUM_FULL_RANDOM;
     if (env->curriculum_randomize) {
         // Random stage for eval mode - tests all difficulties
         return (CurriculumStage)(rand() % CURRICULUM_COUNT);
     }
-    // Progressive stage for training
-    int stage_idx = env->total_episodes / env->episodes_per_stage;
-    if (stage_idx >= CURRICULUM_COUNT) stage_idx = CURRICULUM_COUNT - 1;
-    return (CurriculumStage)stage_idx;
+    // Stage is managed by add_log() based on performance
+    return env->stage;
 }
 
 // Stage 0: TAIL_CHASE - Opponent ahead, same heading (easiest)
@@ -922,8 +963,8 @@ void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // Log stage transitions
     if (new_stage != env->stage) {
         if (DEBUG >= 1) {
-            fprintf(stderr, "[STAGE_CHANGE] ptr=%p env=%d eps=%d eps_per=%d: stage %d -> %d\n",
-                   (void*)env, env->env_num, env->total_episodes, env->episodes_per_stage, env->stage, new_stage);
+            fprintf(stderr, "[STAGE_CHANGE] ptr=%p env=%d eps=%d: stage %d -> %d\n",
+                   (void*)env, env->env_num, env->total_episodes, env->stage, new_stage);
             fflush(stderr);
         }
         env->stage = new_stage;
@@ -977,19 +1018,12 @@ void c_reset(Dogfight *env) {
     env->episode_shots_fired = 0.0f;
     env->total_aileron_usage = 0.0f;
     env->aileron_bias = 0.0f;
-    env->prev_dist = 0.0f;
 
     // Reset reward accumulators
-    env->sum_r_approach = 0.0f;
     env->sum_r_closing = 0.0f;
-    env->sum_r_tail = 0.0f;
     env->sum_r_speed = 0.0f;
-    env->sum_r_roll = 0.0f;
     env->sum_r_neg_g = 0.0f;
     env->sum_r_rudder = 0.0f;
-    env->sum_r_aileron = 0.0f;
-    env->sum_r_bias = 0.0f;
-    env->sum_r_level = 0.0f;
     env->sum_r_aim = 0.0f;
     env->death_reason = DEATH_NONE;
 
@@ -1175,118 +1209,67 @@ void c_step(Dogfight *env) {
     Vec3 rel_pos = sub3(o->pos, p->pos);
     float dist = norm3(rel_pos);
 
-    // 1. Approach reward: getting closer = good (symmetric - also penalize moving away)
-    // Clamped to prevent explosion with high ent_coef + high reward_approach combos
-    float r_approach = 0.0f;
-    if (env->prev_dist > 0.0f) {
-        float dist_delta = env->prev_dist - dist;  // positive when closing
-        r_approach = clampf(dist_delta * env->rcfg.approach, -0.1f, 0.1f);
-    }
-    env->prev_dist = dist;
-    reward += r_approach;
+    // === df11 Simplified Rewards (6 terms: 3 positive, 3 penalties) ===
 
-    // 3. Closing velocity reward: approaching = good (symmetric)
-    // Clamped to prevent explosion with unstable hyperparameter combos
+    // 1. Closing velocity: approaching = good
     Vec3 rel_vel = sub3(p->vel, o->vel);
     Vec3 rel_pos_norm = normalize3(rel_pos);
     float closing_rate = dot3(rel_vel, rel_pos_norm);
-    float r_closing = clampf(closing_rate * env->rcfg.closing_scale, -0.1f, 0.1f);
+    float r_closing = clampf(closing_rate * env->rcfg.closing_scale, -0.05f, 0.05f);
     reward += r_closing;
 
-    // 3. Tail position reward: behind opponent = good
-    Vec3 opp_forward = quat_rotate(o->ori, vec3(1, 0, 0));
-    float tail_angle = dot3(rel_pos_norm, opp_forward);
-    float r_tail = tail_angle * env->rcfg.tail_scale;
-    reward += r_tail;
-
-    // 4. Speed penalty: too slow is stall risk
-    float speed = norm3(p->vel);
-    float r_speed = 0.0f;
-    if (speed < env->rcfg.speed_min) {
-        r_speed = -(env->rcfg.speed_min - speed) * env->rcfg.stall;
-    }
-    reward += r_speed;
-
-    // 6. Roll penalty: gentle preference for level flight
-    float roll_angle = atan2f(2.0f * (p->ori.w * p->ori.x + p->ori.y * p->ori.z),
-                              1.0f - 2.0f * (p->ori.x * p->ori.x + p->ori.y * p->ori.y));
-    float r_roll = -fabsf(roll_angle) * env->rcfg.roll;
-    reward += r_roll;
-
-    // 7. Negative G penalty: only penalize actual negative G (below 0.5G)
-    // Threshold 0.5G: allows normal flight, penalizes unloading (pushing over)
-    float g_threshold = 0.5f;
-    float g_deficit = fmaxf(0.0f, g_threshold - p->g_force);  // positive when g < 0.5
-    float r_neg_g = -g_deficit * env->rcfg.neg_g;
-    reward += r_neg_g;
-
-    // 8. Rudder penalty: discourage excessive rudder use
-    float r_rudder = -fabsf(env->actions[3]) * env->rcfg.rudder;
-    reward += r_rudder;
-
-    // Track aileron bias for monitoring (no reward penalty - see BISECTION.md)
-    env->aileron_bias += env->actions[2];
-    float r_aileron = 0.0f;  // Disabled - was causing "don't maneuver" trap
-    float r_bias = 0.0f;     // Disabled - was causing "don't maneuver" trap
-    float r_level = 0.0f;    // Disabled - was causing "don't maneuver" trap
-    float pitch = asinf(clampf(2.0f * (p->ori.w * p->ori.y - p->ori.z * p->ori.x), -1.0f, 1.0f));  // For debug only
-
-    // 9. Aiming reward: feedback for gun alignment before actual hits
+    // 2. Aim quality: continuous feedback for gun alignment
     Vec3 player_fwd = quat_rotate(p->ori, vec3(1, 0, 0));
-    Vec3 to_opp_norm = normalize3(rel_pos);
-    float aim_dot = dot3(to_opp_norm, player_fwd);  // 1.0 = perfect aim
+    float aim_dot = dot3(rel_pos_norm, player_fwd);  // -1 to +1
     float aim_angle_deg = acosf(clampf(aim_dot, -1.0f, 1.0f)) * RAD_TO_DEG;
-
     float r_aim = 0.0f;
-    // Aiming rewards are ADDITIVE - tight aim gets BOTH tracking + firing_solution
-    // Uses annealing reward cone (starts large, shrinks to gun cone)
-    if (dist < GUN_RANGE) {
-        if (aim_dot > env->cos_reward_cone_2x) {
-            // Loose tracking (within 2x reward cone) - base reward
-            r_aim += env->rcfg.tracking;
-        }
-        if (aim_dot > env->cos_reward_cone) {
-            // Tight aim (within 1x reward cone) - bonus reward
-            r_aim += env->rcfg.firing_solution;
-        }
+    if (dist < GUN_RANGE * 2.0f) {  // Only in engagement envelope (~1000m)
+        float aim_quality = (aim_dot + 1.0f) * 0.5f;  // Remap [-1,1] to [0,1]
+        r_aim = aim_quality * env->rcfg.aim_scale;
     }
     reward += r_aim;
 
+    // 3. Negative G penalty: enforce "pull to turn" (realistic)
+    float g_threshold = 0.5f;
+    float g_deficit = fmaxf(0.0f, g_threshold - p->g_force);
+    float r_neg_g = -g_deficit * env->rcfg.neg_g;
+    reward += r_neg_g;
+
+    // 4. Stall penalty: speed safety
+    float speed = norm3(p->vel);
+    float r_stall = 0.0f;
+    if (speed < env->rcfg.speed_min) {
+        r_stall = -(env->rcfg.speed_min - speed) * env->rcfg.stall;
+    }
+    reward += r_stall;
+
+    // 5. Rudder penalty: prevent knife-edge climbing (small)
+    float r_rudder = -fabsf(env->actions[3]) * env->rcfg.rudder;
+    reward += r_rudder;
+
 #if DEBUG >= 2
-    // Track aiming diagnostics (only when debugging - acosf is expensive)
+    // Track aiming diagnostics
     {
         float aim_angle_rad = acosf(clampf(aim_dot, -1.0f, 1.0f));
         if (aim_angle_rad < env->best_aim_angle) env->best_aim_angle = aim_angle_rad;
-        if (aim_dot > env->cos_reward_cone) env->ticks_in_cone++;
+        if (aim_dot > env->cos_gun_cone) env->ticks_in_cone++;
         if (dist < env->closest_dist) env->closest_dist = dist;
     }
 #endif
 
     // Accumulate for episode summary
-    env->sum_r_approach += r_approach;
     env->sum_r_closing += r_closing;
-    env->sum_r_tail += r_tail;
-    env->sum_r_speed += r_speed;
-    env->sum_r_roll += r_roll;
-    env->sum_r_neg_g += r_neg_g;
-    env->sum_r_rudder += r_rudder;
-    env->sum_r_aileron += r_aileron;
-    env->sum_r_bias += r_bias;
-    env->sum_r_level += r_level;
     env->sum_r_aim += r_aim;
+    env->sum_r_neg_g += r_neg_g;
+    env->sum_r_speed += r_stall;
+    env->sum_r_rudder += r_rudder;
 
-    if (DEBUG >= 4 && env->env_num == 0) printf("=== REWARD ===\n");
-    if (DEBUG >= 4 && env->env_num == 0) printf("r_approach=%.5f (dist=%.1f m)\n", r_approach, dist);
+    if (DEBUG >= 4 && env->env_num == 0) printf("=== REWARD (df11) ===\n");
     if (DEBUG >= 4 && env->env_num == 0) printf("r_closing=%.4f (rate=%.1f m/s)\n", r_closing, closing_rate);
-    if (DEBUG >= 4 && env->env_num == 0) printf("r_tail=%.4f (angle=%.2f)\n", r_tail, tail_angle);
-    if (DEBUG >= 4 && env->env_num == 0) printf("r_speed=%.4f (speed=%.1f)\n", r_speed, speed);
-    if (DEBUG >= 4 && env->env_num == 0) printf("r_roll=%.5f (roll=%.1f deg)\n", r_roll, roll_angle * RAD_TO_DEG);
-    if (DEBUG >= 4 && env->env_num == 0) printf("r_neg_g=%.5f (g=%.2f)\n", r_neg_g, p->g_force);
-    if (DEBUG >= 4 && env->env_num == 0) printf("r_rudder=%.5f (rud=%.2f)\n", r_rudder, env->actions[3]);
-    if (DEBUG >= 4 && env->env_num == 0) printf("r_aileron=%.5f (ail=%.2f)\n", r_aileron, env->actions[2]);
-    if (DEBUG >= 4 && env->env_num == 0) printf("r_bias=%.5f (bias=%.1f)\n", r_bias, env->aileron_bias);
-    if (DEBUG >= 4 && env->env_num == 0) printf("r_level=%.4f (bank=%.1f°, pitch=%.1f°)\n", r_level, roll_angle * RAD_TO_DEG, pitch * RAD_TO_DEG);
     if (DEBUG >= 4 && env->env_num == 0) printf("r_aim=%.4f (aim_angle=%.1f deg, dist=%.1f)\n", r_aim, aim_angle_deg, dist);
+    if (DEBUG >= 4 && env->env_num == 0) printf("r_neg_g=%.5f (g=%.2f)\n", r_neg_g, p->g_force);
+    if (DEBUG >= 4 && env->env_num == 0) printf("r_stall=%.4f (speed=%.1f)\n", r_stall, speed);
+    if (DEBUG >= 4 && env->env_num == 0) printf("r_rudder=%.5f (rud=%.2f)\n", r_rudder, env->actions[3]);
     if (DEBUG >= 4 && env->env_num == 0) printf("reward_total=%.4f\n", reward);
 
     if (DEBUG >= 10) printf("=== COMBAT ===\n");

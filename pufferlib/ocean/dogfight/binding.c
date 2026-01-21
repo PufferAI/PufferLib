@@ -50,39 +50,31 @@ static int get_int(PyObject *kwargs, const char *key, int default_val) {
 
 static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     env->max_steps = unpack(kwargs, "max_steps");
-    int obs_scheme = get_int(kwargs, "obs_scheme", 0);  // Default to world frame
+    int obs_scheme = get_int(kwargs, "obs_scheme", 0);
 
-    // Build reward config from kwargs (all sweepable via INI)
     RewardConfig rcfg = {
-        .closing_scale = get_float(kwargs, "reward_closing_scale", 0.002f),
-        .tail_scale = get_float(kwargs, "reward_tail_scale", 0.005f),
-        .tracking = get_float(kwargs, "reward_tracking", 0.05f),
-        .firing_solution = get_float(kwargs, "reward_firing_solution", 0.1f),
+        .aim_scale = get_float(kwargs, "reward_aim_scale", 0.05f),
+        .closing_scale = get_float(kwargs, "reward_closing_scale", 0.003f),
+        .neg_g = get_float(kwargs, "penalty_neg_g", 0.02f),
         .stall = get_float(kwargs, "penalty_stall", 0.002f),
-        .roll = get_float(kwargs, "penalty_roll", 0.0001f),
-        .neg_g = get_float(kwargs, "penalty_neg_g", 0.002f),
-        .rudder = get_float(kwargs, "penalty_rudder", 0.0002f),
-        .aileron = get_float(kwargs, "penalty_aileron", 0.015f),
-        .bias = get_float(kwargs, "penalty_bias", 0.01f),
-        .approach = get_float(kwargs, "reward_approach", 0.005f),
-        .level = get_float(kwargs, "reward_level", 0.02f),
-        .alt_max = get_float(kwargs, "alt_max", 2500.0f),
+        .rudder = get_float(kwargs, "penalty_rudder", 0.001f),
         .speed_min = get_float(kwargs, "speed_min", 50.0f),
     };
 
-    // Curriculum learning params
     int curriculum_enabled = get_int(kwargs, "curriculum_enabled", 0);
     int curriculum_randomize = get_int(kwargs, "curriculum_randomize", 0);
-    int episodes_per_stage = get_int(kwargs, "episodes_per_stage", 15000);
 
-    // Aim cone annealing params (reward shaping curriculum)
     float aim_cone_start = get_float(kwargs, "aim_cone_start", 0.35f);  // 20° in radians
     float aim_cone_end = get_float(kwargs, "aim_cone_end", 0.087f);     // 5° in radians
     int aim_anneal_episodes = get_int(kwargs, "aim_anneal_episodes", 50000);
 
+    float advance_threshold = get_float(kwargs, "advance_threshold", 0.7f);
+    float demote_threshold = get_float(kwargs, "demote_threshold", 0.3f);
+    int eval_window = get_int(kwargs, "eval_window", 50);
+
     int env_num = get_int(kwargs, "env_num", 0);
 
-    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, episodes_per_stage, aim_cone_start, aim_cone_end, aim_anneal_episodes, env_num);
+    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, aim_cone_start, aim_cone_end, aim_anneal_episodes, advance_threshold, demote_threshold, eval_window, env_num);
     return 0;
 }
 

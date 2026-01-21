@@ -42,23 +42,16 @@ class Dogfight(pufferlib.PufferEnv):
         # Curriculum learning
         curriculum_enabled=0,       # 0=off (legacy), 1=on (progressive stages)
         curriculum_randomize=0,     # 0=progressive (training), 1=random stage each episode (eval)
-        episodes_per_stage=60,      # Episodes before advancing difficulty
-        # Reward weights (all sweepable via INI)
-        reward_closing_scale=0.002,
-        reward_tail_scale=0.005,
-        reward_tracking=0.05,
-        reward_firing_solution=0.1,
-        penalty_stall=0.002,
-        penalty_roll=0.0001,
-        penalty_neg_g=0.002,
-        penalty_rudder=0.0002,
-        penalty_aileron=0.015,
-        penalty_bias=0.01,
-        reward_approach=0.005,
-        reward_level=0.02,
-        # Thresholds (not swept)
-        alt_max=2500.0,
-        speed_min=50.0,
+        advance_threshold=0.7,
+        demote_threshold=0.3,
+        eval_window=50,
+        # df11: Simplified rewards (6 terms)
+        reward_aim_scale=0.05,       # Continuous aiming reward
+        reward_closing_scale=0.003,  # Per m/s closing
+        penalty_neg_g=0.02,          # Enforce "pull to turn"
+        penalty_stall=0.002,         # Speed safety
+        penalty_rudder=0.001,        # Prevent knife-edge
+        speed_min=50.0,              # Stall threshold
         # Aim cone annealing (reward shaping curriculum)
         aim_cone_start=0.35,      # Starting reward cone (radians, ~20°)
         aim_cone_end=0.087,       # Ending reward cone (radians, ~5°)
@@ -93,11 +86,9 @@ class Dogfight(pufferlib.PufferEnv):
         # Print hyperparameters at init (for sweep debugging)
         print(f"=== DOGFIGHT ENV INIT ===")
         print(f"  obs_scheme={obs_scheme}, num_envs={num_envs}")
-        print(f"  REWARDS: tail={reward_tail_scale:.4f} track={reward_tracking:.4f} fire={reward_firing_solution:.4f}")
-        print(f"           approach={reward_approach:.4f} level={reward_level:.4f} closing={reward_closing_scale:.4f}")
-        print(f"  PENALTY: bias={penalty_bias:.4f} ail={penalty_aileron:.4f} roll={penalty_roll:.4f}")
-        print(f"           neg_g={penalty_neg_g:.4f} rudder={penalty_rudder:.4f} stall={penalty_stall:.4f}")
-        print(f"  curriculum={curriculum_enabled}, episodes_per_stage={episodes_per_stage}")
+        print(f"  REWARDS: aim={reward_aim_scale:.4f} closing={reward_closing_scale:.4f}")
+        print(f"  PENALTY: neg_g={penalty_neg_g:.4f} stall={penalty_stall:.4f} rudder={penalty_rudder:.4f}")
+        print(f"  curriculum={curriculum_enabled}, advance={advance_threshold}, demote={demote_threshold}")
         print(f"  AIM CONE: start={aim_cone_start:.3f} end={aim_cone_end:.3f} anneal_eps={aim_anneal_episodes}")
 
         self._env_handles = []
@@ -113,26 +104,20 @@ class Dogfight(pufferlib.PufferEnv):
                 report_interval=self.report_interval,
                 max_steps=max_steps,
                 obs_scheme=obs_scheme,
-                # Curriculum learning
+
                 curriculum_enabled=curriculum_enabled,
                 curriculum_randomize=curriculum_randomize,
-                episodes_per_stage=episodes_per_stage,
-                # Reward config (all sweepable)
+                advance_threshold=advance_threshold,
+                demote_threshold=demote_threshold,
+                eval_window=eval_window,
+
+                reward_aim_scale=reward_aim_scale,
                 reward_closing_scale=reward_closing_scale,
-                reward_tail_scale=reward_tail_scale,
-                reward_tracking=reward_tracking,
-                reward_firing_solution=reward_firing_solution,
-                penalty_stall=penalty_stall,
-                penalty_roll=penalty_roll,
                 penalty_neg_g=penalty_neg_g,
+                penalty_stall=penalty_stall,
                 penalty_rudder=penalty_rudder,
-                penalty_aileron=penalty_aileron,
-                penalty_bias=penalty_bias,
-                reward_approach=reward_approach,
-                reward_level=reward_level,
-                alt_max=alt_max,
                 speed_min=speed_min,
-                # Aim cone annealing
+
                 aim_cone_start=aim_cone_start,
                 aim_cone_end=aim_cone_end,
                 aim_anneal_episodes=aim_anneal_episodes,
