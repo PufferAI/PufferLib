@@ -9,7 +9,7 @@ from pufferlib.ocean.boss_fight import binding
 
 class BossFight(pufferlib.PufferEnv):
     def __init__(
-        self, num_envs=1, render_mode=None, log_interval=128, size=5, buf=None, seed=0
+        self, num_envs=1, render_mode=None, log_interval=1, size=5, buf=None, seed=0
     ):
         self.single_observation_space = gymnasium.spaces.Box(
             low=-10, high=110, shape=(13,), dtype=np.float32
