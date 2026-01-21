@@ -1049,6 +1049,11 @@ def sweep(args=None, env_name=None):
         raise pufferlib.APIUsageError('Sweeps require either wandb or neptune')
 
     method = args['sweep'].pop('method')
+
+    project = args.get('wandb_project', args.get('neptune_project', 'sweep'))
+    args['sweep'].setdefault('state_file', f'{project}_sweep.json')
+    args['sweep'].setdefault('override_file', f'{project}_override.json')
+
     try:
         sweep_cls = getattr(pufferlib.sweep, method)
     except:

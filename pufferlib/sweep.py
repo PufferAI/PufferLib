@@ -1,6 +1,8 @@
 import random
 import math
 import warnings
+import os
+import json
 from copy import deepcopy
 from contextlib import contextmanager
 
@@ -129,7 +131,8 @@ class Logit(Space):
 def _params_from_puffer_sweep(sweep_config):
     param_spaces = {}
     for name, param in sweep_config.items():
-        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto'):
+        if name in ('method', 'metric', 'goal', 'downsample', 'use_gpu', 'prune_pareto',
+                    'state_file', 'override_file'):
             continue
 
         assert isinstance(param, dict)
@@ -467,6 +470,9 @@ class Protein:
         self.gp_max_obs = gp_max_obs  # train time bumps after 800?
         self.infer_batch_size = infer_batch_size
 
+        self.state_file = sweep_config.get('state_file', 'sweep_state.json')
+        self.override_file = sweep_config.get('override_file', 'override.json')
+
         # Use 64 bit for GP regression
         with default_tensor_dtype(torch.float64):
             # Params taken from HEBO: https://arxiv.org/abs/2012.03826
@@ -492,6 +498,110 @@ class Protein:
             self.gp_score_buffer = torch.empty(self.gp_max_obs, device=self.device)
             self.gp_cost_buffer = torch.empty(self.gp_max_obs, device=self.device)
             self.infer_batch_buffer = torch.empty(self.infer_batch_size, self.hyperparameters.num, device=self.device)
+
+        self._load_state_if_exists()
+
+    @staticmethod
+    def _json_default(obj):
+        """JSON serializer for numpy types."""
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, (np.floating, np.integer)):
+            return obj.item()
+        raise TypeError(f'Not JSON serializable: {type(obj)}')
+
+    def _save_state(self):
+        """Save sweep state to JSON for crash recovery."""
+        state = {
+            'suggestion_idx': self.suggestion_idx,
+            'success_observations': self.success_observations,
+            'failure_observations': self.failure_observations,
+            'min_score': self.min_score if self.min_score != math.inf else None,
+            'max_score': self.max_score if self.max_score != -math.inf else None,
+            'log_c_min': self.log_c_min if self.log_c_min != math.inf else None,
+            'log_c_max': self.log_c_max if self.log_c_max != -math.inf else None,
+        }
+        tmp = f'{self.state_file}.tmp'
+        try:
+            with open(tmp, 'w') as f:
+                json.dump(state, f, indent=2, default=self._json_default)
+            os.replace(tmp, self.state_file)
+        except OSError as e:
+            print(f'[Protein] Failed to save state: {e}')
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
+    def _load_state_if_exists(self):
+        """Load state from previous run if exists (crash recovery)."""
+        tmp = f'{self.state_file}.tmp'
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        if not os.path.exists(self.state_file):
+            return
+        try:
+            with open(self.state_file) as f:
+                state = json.load(f)
+            self.suggestion_idx = state.get('suggestion_idx', 0)
+            self.success_observations = state.get('success_observations', [])
+            self.failure_observations = state.get('failure_observations', [])
+            if state.get('min_score') is not None:
+                self.min_score = state['min_score']
+            if state.get('max_score') is not None:
+                self.max_score = state['max_score']
+            if state.get('log_c_min') is not None:
+                self.log_c_min = state['log_c_min']
+            if state.get('log_c_max') is not None:
+                self.log_c_max = state['log_c_max']
+            for obs in self.success_observations + self.failure_observations:
+                if isinstance(obs['input'], list):
+                    obs['input'] = np.array(obs['input'])
+            print(f'[Protein] Resumed from {self.state_file}: {len(self.success_observations)} obs, idx={self.suggestion_idx}')
+        except (json.JSONDecodeError, KeyError, FileNotFoundError, OSError) as e:
+            print(f'[Protein] Failed to load state: {e}')
+
+    def _check_override(self):
+        """Check for user/agent override hyperparams. Returns params dict or None."""
+        if not os.path.exists(self.override_file):
+            return None
+        tmp = f'{self.override_file}.tmp'
+        try:
+            with open(self.override_file) as f:
+                data = json.load(f)
+            if 'suggestions' not in data or not data['suggestions']:
+                os.remove(self.override_file)
+                return None
+            suggestion = data['suggestions'].pop(0)
+            if data['suggestions']:
+                with open(tmp, 'w') as f:
+                    json.dump(data, f, indent=2)
+                os.replace(tmp, self.override_file)
+            else:
+                os.remove(self.override_file)
+            reason = suggestion.get('reason', 'No reason provided')
+            print(f'[Protein] OVERRIDE: {reason}')
+            return suggestion.get('params', suggestion)
+        except (json.JSONDecodeError, KeyError) as e:
+            print(f'[Protein] Invalid override file: {e}')
+            if os.path.exists(self.override_file):
+                os.remove(self.override_file)
+            return None
+        except OSError as e:
+            print(f'[Protein] Failed to update override file: {e}')
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            return None
+
+    def _apply_params_to_fill(self, fill, params):
+        """Apply param dict to fill in place. Modifies fill directly."""
+        for key, value in pufferlib.unroll_nested_dict(params):
+            parts = key.split('/')
+            try:
+                target = fill
+                for part in parts[:-1]:
+                    target = target[part]
+                target[parts[-1]] = value
+            except KeyError:
+                print(f'[Protein] Override key not found: {key}')
 
     def _filter_near_duplicates(self, inputs, duplicate_threshold=EPSILON):
         if len(inputs) < 2:
@@ -574,6 +684,13 @@ class Protein:
     def suggest(self, fill):
         info = {}
         self.suggestion_idx += 1
+
+        override = self._check_override()
+        if override:
+            self._apply_params_to_fill(fill, override)
+            info['override'] = True
+            return fill, info
+
         if len(self.success_observations) == 0 and self.seed_with_search_center:
             suggestion = self.hyperparameters.search_centers
             return self.hyperparameters.to_dict(suggestion, fill), info
@@ -697,6 +814,7 @@ class Protein:
         if is_failure or not np.isfinite(score) or np.isnan(score):
             new_observation['is_failure'] = True
             self.failure_observations.append(new_observation)
+            self._save_state()
             return
 
         if self.success_observations:
@@ -705,6 +823,7 @@ class Protein:
             same = np.where(dist < EPSILON)[0]
             if len(same) > 0:
                 self.success_observations[same[0]] = new_observation
+                self._save_state()
                 return
 
         # Ignore obs that are below the minimum cost
@@ -712,3 +831,83 @@ class Protein:
             return
 
         self.success_observations.append(new_observation)
+        self._save_state()
+
+
+def read_sweep_results(state_file, sweep_config, sort_by='score'):
+    """
+    Load sweep results as user/agent-readable dicts.
+
+    Args:
+        state_file: Path to {project}_sweep.json
+        sweep_config: The 'sweep' section from load_config()
+        sort_by: 'score' (descending), 'cost' (ascending), or None
+
+    Returns:
+        List of dicts: [{'params': {...}, 'score': float, 'cost': float}, ...]
+    """
+    with open(state_file) as f:
+        state = json.load(f)
+
+    hyperparams = Hyperparameters(sweep_config, verbose=False)
+
+    results = []
+    for obs in state.get('success_observations', []):
+        input_vec = np.array(obs['input'])
+
+        if len(input_vec) != hyperparams.num:
+            raise ValueError(
+                f"State file has {len(input_vec)} dimensions but config has {hyperparams.num}. "
+                f"Config may have changed since sweep started."
+            )
+
+        params = hyperparams.to_dict(input_vec)
+        flat_params = dict(pufferlib.unroll_nested_dict(params))
+
+        results.append({
+            'params': flat_params,
+            'score': obs['output'],
+            'cost': obs['cost'],
+        })
+
+    if sort_by == 'score':
+        results.sort(key=lambda x: x['score'], reverse=True)
+    elif sort_by == 'cost':
+        results.sort(key=lambda x: x['cost'])
+
+    return results
+
+
+def create_override(override_file, suggestions, reason=None):
+    """
+    Inject hyperparams into next sweep run. Use real values, not normalized.
+
+    Args:
+        override_file: Path to write
+        suggestions: List of dicts, e.g. [{'train/learning_rate': 0.001}]
+        reason: List of strings (same length as suggestions), or None
+    """
+    if reason is None:
+        reason = [None] * len(suggestions)
+    if len(reason) != len(suggestions):
+        raise ValueError(f"Got {len(suggestions)} suggestions but {len(reason)} reasons")
+
+    data = {
+        'suggestions': [
+            {
+                'params': s,
+                'reason': r or 'Programmatic override'
+            }
+            for s, r in zip(suggestions, reason)
+        ]
+    }
+
+    tmp = f'{override_file}.tmp'
+    try:
+        with open(tmp, 'w') as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, override_file)
+    except OSError:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
