@@ -14,7 +14,7 @@
 #define PLAYER_DODGE_TICKS 6
 #define PLAYER_DODGE_COOLDOWN 15
 #define PLAYER_ATTACK_DMG 3
-#define BOSS_ATTACK_DMG 30
+#define BOSS_ATTACK_DMG 10
 #define BOSS_AOE_ATTACK_RADIUS 0.7f
 #define BOSS_IDLE_TICKS 12
 #define BOSS_WINDUP_TICKS 10
@@ -215,7 +215,7 @@ void c_step(BossFight *env) {
   bool boss_can_damage = env->boss_state == BOSS_ATTACKING && boss_can_hit;
   if (boss_can_damage) {
     env->player_hp -= BOSS_ATTACK_DMG;
-    reward -= 5; // make tanking hurt more
+    reward -= 8; // make tanking expensive but survivable
   }
 
   // reward for successfully dodging an attack
