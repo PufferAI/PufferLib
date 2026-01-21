@@ -2,19 +2,18 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #define ARENA_HALF_SIZE 5.0f
-#define MAX_HP 100
+#define MAX_HP 1.0f
 #define PLAYER_SPEED_PER_TICK 0.1f
 #define PLAYER_SIZE 0.3f
 #define BOSS_SIZE 0.5f
-#define PLAYER_ATTACK_RADIUS 0.5f
+#define PLAYER_ATTACK_RADIUS 0.4f
 #define PLAYER_ATTACK_TICKS 3
-#define PLAYER_DODGE_TICKS 6
+#define PLAYER_DODGE_TICKS 4
 #define PLAYER_DODGE_COOLDOWN 15
-#define PLAYER_ATTACK_DMG 3
-#define BOSS_ATTACK_DMG 10
+#define PLAYER_ATTACK_DMG 0.1f
+#define BOSS_ATTACK_DMG 0.05f
 #define BOSS_AOE_ATTACK_RADIUS 0.7f
 #define BOSS_IDLE_TICKS 7
 #define BOSS_WINDUP_TICKS 5
@@ -24,15 +23,16 @@
 #define HP_BAR_HEIGHT 5
 
 // Rewards
-#define REWARD_APPROACH 0.01f
-#define REWARD_HIT_WALL -1.0f
-#define REWARD_PLAYER_HIT_BOSS 1.0f
-#define REWARD_BOSS_HIT_PLAYER -2.0f
-#define REWARD_DODGE_SUCCESS 1.0f
-#define REWARD_KILL_BOSS 10.0f
-#define REWARD_PLAYER_DIED -10.0f
-#define REWARD_TIMEOUT -10.0f
-#define EPISODE_LENGTH 500
+#define REWARD_APPROACH 0.5f
+#define REWARD_HIT_WALL -0.1f
+#define REWARD_PLAYER_HIT_BOSS 5.0f
+#define REWARD_BOSS_HIT_PLAYER -0.5f
+#define REWARD_DODGE_SUCCESS 2.0f
+#define REWARD_KILL_BOSS 50.0f
+#define REWARD_PLAYER_DIED -5.0f
+#define REWARD_TIMEOUT -20.0f
+#define REWARD_TICK -0.001f
+#define EPISODE_LENGTH 300
 
 const Color PLAYER_COLOR = (Color){50, 100, 255, 255};
 const Color BOSS_COLOR = (Color){0, 187, 187, 255};
@@ -75,12 +75,12 @@ typedef struct {
   float prev_distance;
 
   PlayerState player_state;
-  int player_hp;
+  float player_hp;
   int player_dodge_cooldown;
   int player_state_ticks;
 
   BossState boss_state;
-  int boss_hp;
+  float boss_hp;
   int boss_phase_ticks;
 
   float episode_return; // track within episode
@@ -158,7 +158,7 @@ void c_reset(BossFight *env) {
 }
 
 void c_step(BossFight *env) {
-  float reward = -0.01;
+  float reward = REWARD_TICK;
   env->terminals[0] = 0;
 
   int action = env->actions[0];
@@ -175,8 +175,10 @@ void c_step(BossFight *env) {
     dx = PLAYER_SPEED_PER_TICK;
   }
 
-  env->player_x += dx;
-  env->player_y += dy;
+  if (env->player_state == PLAYER_IDLING) {
+    env->player_x += dx;
+    env->player_y += dy;
+  }
 
   bool wanna_idle = action == 0;
   bool wanna_dodge = action == 5;
@@ -196,9 +198,7 @@ void c_step(BossFight *env) {
 
   float dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
 
-  if (dist < env->prev_distance) {
-    reward += REWARD_APPROACH;
-  }
+  reward += REWARD_APPROACH * (env->prev_distance - dist);
   env->prev_distance = dist;
 
   bool close_enough = dist <= BOSS_SIZE + PLAYER_ATTACK_RADIUS + PLAYER_SIZE;
@@ -238,11 +238,12 @@ void c_step(BossFight *env) {
     reward += REWARD_BOSS_HIT_PLAYER;
   }
 
-  // reward for successfully dodging an attack
-  bool dodged_attack = env->player_state == PLAYER_DODGING &&
-                       env->boss_state == BOSS_ATTACKING && in_aoe_attack &&
-                       env->boss_phase_ticks == BOSS_ACTIVE_TICKS;
-  if (dodged_attack) {
+  bool would_be_hit = env->boss_state == BOSS_ATTACKING && in_aoe_attack;
+
+  bool successfully_dodging =
+      would_be_hit && env->player_state == PLAYER_DODGING;
+
+  if (successfully_dodging) {
     reward += REWARD_DODGE_SUCCESS;
   }
 
