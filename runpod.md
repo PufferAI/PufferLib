@@ -7,6 +7,6 @@ uv venv
 source .venv/bin/activate
 uv pip install -e .
 python setup.py build_boss_fight --inplace --force
-puffer train puffer_boss_fight --train.total-timestamps 5000000 --train.device cuda --vec.num-envs 8192 --vec.workers 16 --train.minibatch-size 8192 --train.max-minibatch-size 65536
+puffer train puffer_boss_fight --train.total-timesteps 5000000 --train.device cuda --vec.num-envs 8192 --vec.num-workers 16 --train.minibatch-size 8192 --train.max-minibatch-size 65536
 
 puffer eval puffer*boss_fight --load-model-path $(ls -t experiments/puffer_boss_fight*\_/model\_\_.pt | head -1)

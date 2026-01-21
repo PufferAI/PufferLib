@@ -16,12 +16,23 @@
 #define PLAYER_ATTACK_DMG 3
 #define BOSS_ATTACK_DMG 10
 #define BOSS_AOE_ATTACK_RADIUS 0.7f
-#define BOSS_IDLE_TICKS 12
-#define BOSS_WINDUP_TICKS 10
-#define BOSS_ACTIVE_TICKS 3
-#define BOSS_RECOVERY_TICKS 10
+#define BOSS_IDLE_TICKS 7
+#define BOSS_WINDUP_TICKS 5
+#define BOSS_ACTIVE_TICKS 5
+#define BOSS_RECOVERY_TICKS 5
 #define HP_BAR_WIDTH 40
 #define HP_BAR_HEIGHT 5
+
+// Rewards
+#define REWARD_APPROACH 0.01f
+#define REWARD_HIT_WALL -1.0f
+#define REWARD_PLAYER_HIT_BOSS 1.0f
+#define REWARD_BOSS_HIT_PLAYER -2.0f
+#define REWARD_DODGE_SUCCESS 1.0f
+#define REWARD_KILL_BOSS 10.0f
+#define REWARD_PLAYER_DIED -10.0f
+#define REWARD_TIMEOUT -10.0f
+#define EPISODE_LENGTH 500
 
 const Color PLAYER_COLOR = (Color){50, 100, 255, 255};
 const Color BOSS_COLOR = (Color){0, 187, 187, 255};
@@ -174,10 +185,19 @@ void c_step(BossFight *env) {
       env->player_state == PLAYER_IDLING && env->player_dodge_cooldown == 0;
   bool can_attack = env->player_state == PLAYER_IDLING;
 
+  if (wanna_attack && can_attack) {
+    env->player_state_ticks = PLAYER_ATTACK_TICKS;
+    env->player_state = PLAYER_ATTACKING;
+  }
+  if (wanna_dodge && can_dodge) {
+    env->player_state_ticks = PLAYER_DODGE_TICKS;
+    env->player_state = PLAYER_DODGING;
+  }
+
   float dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
 
   if (dist < env->prev_distance) {
-    reward += 0.01; // small hint, not main reward
+    reward += REWARD_APPROACH;
   }
   env->prev_distance = dist;
 
@@ -186,7 +206,7 @@ void c_step(BossFight *env) {
   bool hit_wall = fabsf(env->player_x) > ARENA_HALF_SIZE ||
                   fabsf(env->player_y) > ARENA_HALF_SIZE;
   if (hit_wall) {
-    reward -= 1;
+    reward += REWARD_HIT_WALL;
   }
   // can't walk out of bounds
   env->player_x =
@@ -207,7 +227,7 @@ void c_step(BossFight *env) {
 
   if (wanna_attack && can_attack && close_enough) {
     env->boss_hp -= PLAYER_ATTACK_DMG;
-    reward += 1;
+    reward += REWARD_PLAYER_HIT_BOSS;
   }
 
   bool in_aoe_attack = dist <= BOSS_SIZE + PLAYER_SIZE + BOSS_AOE_ATTACK_RADIUS;
@@ -215,28 +235,31 @@ void c_step(BossFight *env) {
   bool boss_can_damage = env->boss_state == BOSS_ATTACKING && boss_can_hit;
   if (boss_can_damage) {
     env->player_hp -= BOSS_ATTACK_DMG;
-    reward -= 8; // make tanking expensive but survivable
+    reward += REWARD_BOSS_HIT_PLAYER;
   }
 
   // reward for successfully dodging an attack
   bool dodged_attack = env->player_state == PLAYER_DODGING &&
-                       env->boss_state == BOSS_ATTACKING && in_aoe_attack;
+                       env->boss_state == BOSS_ATTACKING && in_aoe_attack &&
+                       env->boss_phase_ticks == BOSS_ACTIVE_TICKS;
   if (dodged_attack) {
-    reward += 5; // incentivize dodge timing
+    reward += REWARD_DODGE_SUCCESS;
   }
 
   bool killed_boss = env->boss_hp <= 0;
   bool player_died = env->player_hp <= 0;
-  bool timed_out = env->tick >= 300;
+  bool timed_out = env->tick >= EPISODE_LENGTH;
 
   if (killed_boss) {
-    reward += 10;
+    reward += REWARD_KILL_BOSS;
     env->terminals[0] = 1;
     env->player_wins++;
   } else if (player_died) {
+    reward += REWARD_PLAYER_DIED;
     env->terminals[0] = 1;
     env->boss_wins++;
   } else if (timed_out) {
+    reward += REWARD_TIMEOUT;
     env->terminals[0] = 1;
     env->timeouts++;
   }
@@ -250,22 +273,13 @@ void c_step(BossFight *env) {
     return;
   }
 
-  if (wanna_attack && can_attack) {
-    env->player_state_ticks = PLAYER_ATTACK_TICKS;
-    env->player_state = PLAYER_ATTACKING;
+  env->tick++;
+  if (env->boss_phase_ticks > 0) {
+    env->boss_phase_ticks--;
   }
-  if (wanna_dodge && can_dodge) {
-    env->player_state_ticks = PLAYER_DODGE_TICKS;
-    env->player_state = PLAYER_DODGING;
+  if (env->player_state_ticks > 0) {
+    env->player_state_ticks--;
   }
-  if (env->player_state == PLAYER_DODGING && env->player_state_ticks == 0) {
-    env->player_dodge_cooldown = PLAYER_DODGE_COOLDOWN;
-    env->player_state = PLAYER_IDLING;
-  }
-  if (env->player_state == PLAYER_ATTACKING && env->player_state_ticks == 0) {
-    env->player_state = PLAYER_IDLING;
-  }
-
   if (env->boss_phase_ticks == 0) {
     if (env->boss_state == BOSS_IDLING) {
       env->boss_state = BOSS_WINDING_UP;
@@ -281,13 +295,13 @@ void c_step(BossFight *env) {
       env->boss_phase_ticks = BOSS_IDLE_TICKS;
     }
   }
-
-  env->tick++;
-  if (env->boss_phase_ticks > 0) {
-    env->boss_phase_ticks--;
-  }
-  if (env->player_state_ticks > 0) {
-    env->player_state_ticks--;
+  if (env->player_state_ticks == 0) {
+    if (env->player_state == PLAYER_DODGING) {
+      env->player_dodge_cooldown = PLAYER_DODGE_COOLDOWN;
+      env->player_state = PLAYER_IDLING;
+    } else if (env->player_state == PLAYER_ATTACKING) {
+      env->player_state = PLAYER_IDLING;
+    }
   }
   if (env->player_dodge_cooldown > 0) {
     env->player_dodge_cooldown--;
