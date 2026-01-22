@@ -301,8 +301,6 @@ void c_reset(Game* game) {
     game->is_snake_state = false;
     game->stop_at_65536 = game->can_go_over_65536;
 
-    if (game->terminals) game->terminals[0] = 0;
-
     // End game envs only do endgame curriculum
     if (game->is_endgame_env) {
         set_endgame_curriculum(game);
@@ -560,6 +558,7 @@ void c_step(Game* game) {
     float score_add = 0.0f;
     unsigned char prev_max_tile = game->max_tile;
     bool did_move = move(game, game->actions[0] + 1, &reward, &score_add);
+    game->terminals[0] = 0;
     game->tick++;
 
     if (did_move) {
@@ -586,7 +585,6 @@ void c_step(Game* game) {
     bool game_over = is_game_over(game);
     bool max_ticks_reached = game->tick >= game->max_episode_ticks;
     bool max_level_reached = game->stop_at_65536 && game->max_tile >= 16;
-    game->terminals[0] = (game_over || max_ticks_reached || max_level_reached) ? 1 : 0;
 
     // Game over penalty overrides other rewards
     if (game_over) {
@@ -601,7 +599,8 @@ void c_step(Game* game) {
     game->rewards[0] = reward;
     game->episode_reward += reward;
 
-    if (game->terminals[0]) {
+    if (game_over || max_ticks_reached || max_level_reached) {
+        game->terminals[0] = 1;
         add_log(game);
         c_reset(game);
     }
