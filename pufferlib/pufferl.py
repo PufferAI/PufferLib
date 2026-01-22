@@ -108,6 +108,10 @@ class PuffeRL:
         self.ep_lengths = torch.zeros(total_agents, device=device, dtype=torch.int32)
         self.ep_indices = torch.arange(total_agents, device=device, dtype=torch.int32)
         self.free_idx = total_agents
+        self.values_bs = torch.zeros(segments, 1, device=device)
+        self.rewards_bs = torch.zeros(segments, 1, device=device)
+        self.terminals_bs = torch.zeros(segments, 1, device=device)
+        self.truncations_bs = torch.zeros(segments, 1, device=device)
 
         # LSTM
         if config['use_rnn']:
@@ -256,6 +260,7 @@ class PuffeRL:
             o_device = o.to(device)#, non_blocking=True)
             r = torch.as_tensor(r).to(device)#, non_blocking=True)
             d = torch.as_tensor(d).to(device)#, non_blocking=True)
+            t = torch.as_tensor(t).to(device)#, non_blocking=True)
 
             profile('eval_forward', epoch)
             with torch.no_grad(), self.amp_context:
@@ -284,20 +289,24 @@ class PuffeRL:
                 l = self.ep_lengths[env_id.start].item()
                 batch_rows = slice(self.ep_indices[env_id.start].item(), 1+self.ep_indices[env_id.stop - 1].item())
 
-                if config['cpu_offload']:
-                    self.observations[batch_rows, l] = o
-                else:
-                    self.observations[batch_rows, l] = o_device
+                if l < config['bptt_horizon']:
+                    if config['cpu_offload']:
+                        self.observations[batch_rows, l] = o
+                    else:
+                        self.observations[batch_rows, l] = o_device
 
-                self.actions[batch_rows, l] = action
-                self.logprobs[batch_rows, l] = logprob
-                self.rewards[batch_rows, l] = r
-                self.terminals[batch_rows, l] = d.float()
-                self.values[batch_rows, l] = value.flatten()
-
-                # Note: We are not yet handling masks in this version
-                self.ep_lengths[env_id] += 1
-                if l+1 >= config['bptt_horizon']:
+                    self.actions[batch_rows, l] = action
+                    self.logprobs[batch_rows, l] = logprob
+                    self.rewards[batch_rows, l] = r
+                    self.terminals[batch_rows, l] = d.float()
+                    self.truncations[batch_rows, l] = t.float()
+                    self.values[batch_rows, l] = value.flatten()
+                    self.ep_lengths[env_id] += 1
+                elif l == config['bptt_horizon']:
+                    self.values_bs[batch_rows, 0] = value.flatten()
+                    self.rewards_bs[batch_rows, 0] = r
+                    self.terminals_bs[batch_rows, 0] = d.float()
+                    self.truncations_bs[batch_rows, 0] = t.float()
                     num_full = env_id.stop - env_id.start
                     self.ep_indices[env_id] = self.free_idx + torch.arange(num_full, device=config['device']).int()
                     self.ep_lengths[env_id] = 0
@@ -352,8 +361,9 @@ class PuffeRL:
             shape = self.values.shape
             advantages = torch.zeros(shape, device=device)
             advantages = compute_puff_advantage(self.values, self.rewards,
-                self.terminals, self.ratio, advantages, config['gamma'],
-                config['gae_lambda'], config['vtrace_rho_clip'], config['vtrace_c_clip'])
+                self.terminals, self.ratio, advantages, self.values_bs.squeeze(1),
+                self.rewards_bs.squeeze(1), self.terminals_bs.squeeze(1), self.truncations_bs.squeeze(1),
+                config['gamma'], config['gae_lambda'], config['vtrace_rho_clip'], config['vtrace_c_clip'])
 
             # Prioritize experience by advantage magnitude
             adv = advantages.abs().sum(axis=1)
@@ -657,8 +667,9 @@ class PuffeRL:
 
         print('\033[0;0H' + capture.get())
 
-def compute_puff_advantage(values, rewards, terminals,
-        ratio, advantages, gamma, gae_lambda, vtrace_rho_clip, vtrace_c_clip):
+def compute_puff_advantage(values, rewards, terminals, ratio, advantages,
+        values_bs, rewards_bs, terminals_bs, truncations_bs,
+        gamma, gae_lambda, vtrace_rho_clip, vtrace_c_clip):
     '''CUDA kernel for puffer advantage with automatic CPU fallback. You need
     nvcc (in cuda-dev-tools or in a cuda-dev docker base) for PufferLib to
     compile the fast version.'''
@@ -670,9 +681,14 @@ def compute_puff_advantage(values, rewards, terminals,
         terminals = terminals.cpu()
         ratio = ratio.cpu()
         advantages = advantages.cpu()
+        values_bs = values_bs.cpu()
+        rewards_bs = rewards_bs.cpu()
+        terminals_bs = terminals_bs.cpu()
+        truncations_bs = truncations_bs.cpu()
 
     torch.ops.pufferlib.compute_puff_advantage(values, rewards, terminals,
-        ratio, advantages, gamma, gae_lambda, vtrace_rho_clip, vtrace_c_clip)
+        ratio, advantages, values_bs, rewards_bs, terminals_bs, truncations_bs,
+        gamma, gae_lambda, vtrace_rho_clip, vtrace_c_clip)
 
     if not ADVANTAGE_CUDA:
         return advantages.to(device)
