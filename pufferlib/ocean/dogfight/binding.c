@@ -66,17 +66,13 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     int curriculum_enabled = get_int(kwargs, "curriculum_enabled", 0);
     int curriculum_randomize = get_int(kwargs, "curriculum_randomize", 0);
 
-    float aim_cone_start = get_float(kwargs, "aim_cone_start", 0.35f);  // 20° in radians
-    float aim_cone_end = get_float(kwargs, "aim_cone_end", 0.087f);     // 5° in radians
-    int aim_anneal_episodes = get_int(kwargs, "aim_anneal_episodes", 50000);
-
     float advance_threshold = get_float(kwargs, "advance_threshold", 0.7f);
     float demote_threshold = get_float(kwargs, "demote_threshold", 0.3f);
     int eval_window = get_int(kwargs, "eval_window", 50);
 
     int env_num = get_int(kwargs, "env_num", 0);
 
-    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, aim_cone_start, aim_cone_end, aim_anneal_episodes, advance_threshold, demote_threshold, eval_window, env_num);
+    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, advance_threshold, demote_threshold, eval_window, env_num);
     return 0;
 }
 
