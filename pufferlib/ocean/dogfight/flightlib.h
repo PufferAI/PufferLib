@@ -159,6 +159,7 @@ typedef struct {
     Quat ori;
     float throttle;
     float g_force;      // Current G-loading (for reward calculation)
+    float yaw_from_rudder;  // Accumulated yaw from rudder (for damping)
     int fire_cooldown;  // Ticks until can fire again (0 = ready)
 } Plane;
 
@@ -173,6 +174,7 @@ static inline void reset_plane(Plane *p, Vec3 pos, Vec3 vel) {
     p->ori = quat(1, 0, 0, 0);
     p->throttle = 0.5f;
     p->g_force = 1.0f;  // 1G at start (level flight)
+    p->yaw_from_rudder = 0.0f;  // No accumulated rudder yaw at start
     p->fire_cooldown = 0;
 }
 
@@ -221,7 +223,32 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     float throttle = (actions[0] + 1.0f) * 0.5f;  // [-1,1] -> [0,1]
     float pitch_rate = actions[1] * MAX_PITCH_RATE;  // rad/s, + = nose down (push fwd)
     float roll_rate = actions[2] * MAX_ROLL_RATE;    // rad/s, + = roll right
-    float yaw_rate = actions[3] * MAX_YAW_RATE;      // rad/s, + = nose right
+
+    // ========================================================================
+    // 2a. RUDDER DAMPING - Realistic sideslip-limited yaw
+    // ========================================================================
+    // Real rudder physics: deflection creates sideslip angle (β), NOT sustained
+    // yaw rate. Vertical tail creates restoring moment that limits β to ~10°.
+    // Once equilibrium sideslip is reached, yaw rate approaches zero.
+    //
+    // Implementation: Track accumulated yaw from rudder, reduce effectiveness
+    // as it accumulates toward max sideslip angle (~10°).
+    float rudder_yaw_cmd = -actions[3] * MAX_YAW_RATE;  // Commanded yaw rate
+    float max_rudder_yaw = 0.175f;  // ~10 degrees max sideslip (0.175 rad)
+
+    // Damping: effectiveness drops to 0 as accumulated yaw approaches limit
+    float damping = 1.0f - clampf(fabsf(p->yaw_from_rudder) / max_rudder_yaw, 0.0f, 1.0f);
+    float yaw_rate = rudder_yaw_cmd * damping;
+
+    // Update accumulated yaw state
+    if (fabsf(actions[3]) < 0.1f) {
+        // Rudder released: weathervane tendency returns nose to airflow
+        // Vertical tail realigns with velocity, sideslip decays
+        p->yaw_from_rudder *= 0.95f;
+    } else {
+        // Rudder active: accumulate yaw (limited by damping above)
+        p->yaw_from_rudder += yaw_rate * dt;
+    }
 
     // ========================================================================
     // 3. ATTITUDE INTEGRATION (Quaternion kinematics)

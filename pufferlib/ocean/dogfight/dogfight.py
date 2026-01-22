@@ -20,7 +20,7 @@ class AutopilotMode:
 # Observation sizes by scheme (must match C OBS_SIZES in dogfight.h)
 OBS_SIZES = {
     0: 12,  # ANGLES: pos(3) + speed(1) + euler(3) + target_angles(4) + opp(1)
-    1: 17,  # CONTROL_ERROR: player(11) + control_errors(4) + target(2)
+    1: 13,  # PURSUIT: speed(1) + pot(1) + euler(2) + energy(1) + target(4) + tgt_state(3) + energy_adv(1)
     2: 10,  # REALISTIC: instruments(4) + gunsight(3) + visual(3)
     3: 10,  # REALISTIC_RANGE: instruments(4) + gunsight(3) + visual(3) w/ km range
     4: 13,  # REALISTIC_ENEMY_STATE: + enemy pitch/roll/heading
@@ -289,6 +289,20 @@ class Dogfight(pufferlib.PufferEnv):
     def get_autopilot_mode(self, env_idx=0):
         """Get current autopilot mode for an environment (for testing/debugging)."""
         return binding.env_get_autopilot_mode(self._env_handles[env_idx])
+
+    def set_obs_highlight(self, indices, env_idx=0):
+        """
+        Set which observations to highlight with red arrows in the visual display.
+
+        Args:
+            indices: List of observation indices to highlight (e.g., [4, 5, 6] for pitch, roll, yaw)
+            env_idx: Environment index
+
+        Usage:
+            env.set_obs_highlight([4, 5, 6])  # Highlight pitch, roll, yaw in scheme 0
+            env.set_obs_highlight([])  # Clear highlights
+        """
+        binding.env_set_obs_highlight(self._env_handles[env_idx], list(indices))
 
 
 def test_performance(timeout=10, atn_cache=1024):

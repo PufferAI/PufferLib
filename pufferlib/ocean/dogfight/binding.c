@@ -16,6 +16,7 @@ static PyObject* vec_set_autopilot(PyObject* self, PyObject* args, PyObject* kwa
 static PyObject* vec_set_mode_weights(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* env_get_autopilot_mode(PyObject* self, PyObject* args);
 static PyObject* env_get_state(PyObject* self, PyObject* args);
+static PyObject* env_set_obs_highlight(PyObject* self, PyObject* args);
 
 // Register custom methods before including the template
 #define MY_METHODS \
@@ -24,7 +25,8 @@ static PyObject* env_get_state(PyObject* self, PyObject* args);
     {"vec_set_autopilot", (PyCFunction)vec_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set autopilot for all envs"}, \
     {"vec_set_mode_weights", (PyCFunction)vec_set_mode_weights, METH_VARARGS | METH_KEYWORDS, "Set mode weights for all envs"}, \
     {"env_get_autopilot_mode", (PyCFunction)env_get_autopilot_mode, METH_VARARGS, "Get current autopilot mode"}, \
-    {"env_get_state", (PyCFunction)env_get_state, METH_VARARGS, "Get raw player state"}
+    {"env_get_state", (PyCFunction)env_get_state, METH_VARARGS, "Get raw player state"}, \
+    {"env_set_obs_highlight", (PyCFunction)env_set_obs_highlight, METH_VARARGS, "Set observation indices to highlight with red arrows"}
 
 // Helper to get float from kwargs with default (before env_binding.h since my_init uses it)
 static float get_float(PyObject *kwargs, const char *key, float default_val) {
@@ -290,4 +292,46 @@ static PyObject* env_get_state(PyObject* self, PyObject* args) {
     PyDict_SetItemString(dict, "g_force", PyFloat_FromDouble(p->g_force));
 
     return dict;
+}
+
+// Set which observation indices to highlight with red arrows
+// Args: env_handle, list of indices (e.g., [4, 5, 6] for pitch, roll, yaw in scheme 0)
+static PyObject* env_set_obs_highlight(PyObject* self, PyObject* args) {
+    PyObject* env_arg;
+    PyObject* indices_list;
+
+    if (!PyArg_ParseTuple(args, "OO", &env_arg, &indices_list)) {
+        return NULL;
+    }
+
+    // Get env from handle
+    Env* env = (Env*)PyLong_AsVoidPtr(env_arg);
+    if (!env) {
+        PyErr_SetString(PyExc_TypeError, "Invalid env handle");
+        return NULL;
+    }
+
+    // Clear existing highlights
+    memset(env->obs_highlight, 0, sizeof(env->obs_highlight));
+
+    // Parse list of indices
+    if (!PyList_Check(indices_list)) {
+        PyErr_SetString(PyExc_TypeError, "Second argument must be a list of indices");
+        return NULL;
+    }
+
+    Py_ssize_t n = PyList_Size(indices_list);
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject* item = PyList_GetItem(indices_list, i);
+        if (!PyLong_Check(item)) {
+            PyErr_SetString(PyExc_TypeError, "Indices must be integers");
+            return NULL;
+        }
+        int idx = (int)PyLong_AsLong(item);
+        if (idx >= 0 && idx < 16) {
+            env->obs_highlight[idx] = 1;
+        }
+    }
+
+    Py_RETURN_NONE;
 }

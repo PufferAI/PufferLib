@@ -30,6 +30,51 @@ typedef enum {
 // Observation size lookup table
 static const int OBS_SIZES[OBS_SCHEME_COUNT] = {12, 13, 10, 10, 13, 15};
 
+// Observation labels for each scheme (for HUD display)
+// Scheme 0: OBS_ANGLES (12 obs)
+static const char* OBS_LABELS_ANGLES[12] = {
+    "px", "py", "pz", "speed", "pitch", "roll", "yaw",
+    "tgt_az", "tgt_el", "dist", "closure", "opp_hdg"
+};
+
+// Scheme 1: OBS_PURSUIT (13 obs)
+static const char* OBS_LABELS_PURSUIT[13] = {
+    "speed", "potential", "pitch", "roll", "energy",
+    "tgt_az", "tgt_el", "dist", "closure",
+    "tgt_roll", "tgt_pitch", "aspect", "E_adv"
+};
+
+// Scheme 2: OBS_REALISTIC (10 obs)
+static const char* OBS_LABELS_REALISTIC[10] = {
+    "airspeed", "altitude", "pitch", "roll",
+    "tgt_az", "tgt_el", "tgt_size",
+    "aspect", "horizon", "dist"
+};
+
+// Scheme 3: OBS_REALISTIC_RANGE (10 obs)
+static const char* OBS_LABELS_REALISTIC_RANGE[10] = {
+    "airspeed", "altitude", "pitch", "roll",
+    "tgt_az", "tgt_el", "range_km",
+    "aspect", "horizon", "closure"
+};
+
+// Scheme 4: OBS_REALISTIC_ENEMY_STATE (13 obs)
+static const char* OBS_LABELS_REALISTIC_ENEMY_STATE[13] = {
+    "airspeed", "altitude", "pitch", "roll",
+    "tgt_az", "tgt_el", "range_km",
+    "aspect", "horizon", "closure",
+    "emy_pitch", "emy_roll", "emy_hdg"
+};
+
+// Scheme 5: OBS_REALISTIC_FULL (15 obs)
+static const char* OBS_LABELS_REALISTIC_FULL[15] = {
+    "airspeed", "altitude", "pitch", "roll",
+    "tgt_az", "tgt_el", "range_km",
+    "aspect", "horizon", "closure",
+    "emy_pitch", "emy_roll", "emy_hdg",
+    "turn_rate", "g_load"
+};
+
 // Curriculum learning stages (progressive difficulty)
 // Reordered 2026-01-18: moved CROSSING from stage 2 to stage 6 (see CURRICULUM_PLANS.md)
 typedef enum {
@@ -207,6 +252,8 @@ typedef struct Dogfight {
     DeathReason death_reason;
     // Debug
     int env_num;                // Environment index (for filtering debug output)
+    // Observation highlighting (for visual debugging)
+    unsigned char obs_highlight[16];  // 1 = highlight this observation with red arrow
 } Dogfight;
 
 void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, float aim_cone_start, float aim_cone_end, int aim_anneal_episodes, float advance_threshold, float demote_threshold, int eval_window, int env_num) {
@@ -261,6 +308,20 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     }
     env->is_initialized = 1;
     env->total_aileron_usage = 0.0f;
+    // Clear observation highlights
+    memset(env->obs_highlight, 0, sizeof(env->obs_highlight));
+}
+
+// Set which observations to highlight with red arrows (for visual debugging)
+// indices: array of observation indices to highlight
+// count: number of indices
+void set_obs_highlight(Dogfight *env, int *indices, int count) {
+    memset(env->obs_highlight, 0, sizeof(env->obs_highlight));
+    for (int i = 0; i < count && i < 16; i++) {
+        if (indices[i] >= 0 && indices[i] < 16) {
+            env->obs_highlight[indices[i]] = 1;
+        }
+    }
 }
 
 void add_log(Dogfight *env) {
@@ -391,7 +452,7 @@ void compute_obs_angles(Dogfight *env) {
     env->observations[i++] = p->pos.x * INV_WORLD_HALF_X;
     env->observations[i++] = p->pos.y * INV_WORLD_HALF_Y;
     env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
-    env->observations[i++] = norm3(p->vel) * INV_MAX_SPEED;  // Speed scalar
+    env->observations[i++] = clampf(norm3(p->vel) * INV_MAX_SPEED, 0.0f, 1.0f);  // Speed scalar
     env->observations[i++] = pitch * INV_PI;      // -0.5 to 0.5
     env->observations[i++] = roll * INV_PI;       // -1 to 1
     env->observations[i++] = yaw * INV_PI;        // -1 to 1
@@ -463,7 +524,7 @@ void compute_obs_pursuit(Dogfight *env) {
 
     int i = 0;
     // Own flight state (5 obs)
-    env->observations[i++] = speed * INV_MAX_SPEED;
+    env->observations[i++] = clampf(speed * INV_MAX_SPEED, 0.0f, 1.0f);
     env->observations[i++] = potential;
     env->observations[i++] = pitch * INV_HALF_PI;
     env->observations[i++] = roll * INV_PI;
@@ -520,7 +581,7 @@ void compute_obs_realistic(Dogfight *env) {
 
     int i = 0;
     // Instruments (4 obs)
-    env->observations[i++] = norm3(p->vel) * INV_MAX_SPEED;  // Airspeed
+    env->observations[i++] = clampf(norm3(p->vel) * INV_MAX_SPEED, 0.0f, 1.0f);  // Airspeed
     env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;     // Altitude
     env->observations[i++] = pitch * INV_HALF_PI;            // Pitch indicator
     env->observations[i++] = roll * INV_PI;                       // Bank indicator
@@ -577,7 +638,7 @@ void compute_obs_realistic_range(Dogfight *env) {
 
     int i = 0;
     // Instruments (4 obs)
-    env->observations[i++] = norm3(p->vel) * INV_MAX_SPEED;  // Airspeed
+    env->observations[i++] = clampf(norm3(p->vel) * INV_MAX_SPEED, 0.0f, 1.0f);  // Airspeed
     env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;     // Altitude
     env->observations[i++] = pitch * INV_HALF_PI;            // Pitch indicator
     env->observations[i++] = roll * INV_PI;                       // Bank indicator
@@ -642,7 +703,7 @@ void compute_obs_realistic_enemy_state(Dogfight *env) {
 
     int i = 0;
     // Instruments (4 obs)
-    env->observations[i++] = norm3(p->vel) * INV_MAX_SPEED;
+    env->observations[i++] = clampf(norm3(p->vel) * INV_MAX_SPEED, 0.0f, 1.0f);
     env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
     env->observations[i++] = pitch * INV_HALF_PI;
     env->observations[i++] = roll * INV_PI;
@@ -728,7 +789,7 @@ void compute_obs_realistic_full(Dogfight *env) {
 
     int i = 0;
     // Instruments (4 obs)
-    env->observations[i++] = speed * INV_MAX_SPEED;
+    env->observations[i++] = clampf(speed * INV_MAX_SPEED, 0.0f, 1.0f);
     env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
     env->observations[i++] = pitch * INV_HALF_PI;
     env->observations[i++] = roll * INV_PI;
@@ -785,10 +846,12 @@ CurriculumStage get_curriculum_stage(Dogfight *env) {
 
 // Stage 0: TAIL_CHASE - Opponent ahead, same heading (easiest)
 void spawn_tail_chase(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    // Opponent 200-400m directly ahead, same velocity direction
+    // Opponent 200-400m ahead with offset giving ~15-25% chance of aligned spawn
+    // At 300m, 5° gun cone = ~26m radius for hits
+    // ±40/±30 gives avg offset ~25m = borderline hits, provides learning signal
     Vec3 opp_pos = vec3(
         player_pos.x + rndf(200, 400),
-        player_pos.y + rndf(-50, 50),
+        player_pos.y + rndf(-40, 40),
         player_pos.z + rndf(-30, 30)
     );
     reset_plane(&env->opponent, opp_pos, player_vel);
@@ -1126,7 +1189,7 @@ void c_step(Dogfight *env) {
     if (DEBUG >= 10) printf("throttle_raw=%.3f -> throttle=%.3f\n", env->actions[0], (env->actions[0] + 1.0f) * 0.5f);
     if (DEBUG >= 10) printf("elevator=%.3f -> pitch_rate=%.3f rad/s\n", env->actions[1], env->actions[1] * MAX_PITCH_RATE);
     if (DEBUG >= 10) printf("ailerons=%.3f -> roll_rate=%.3f rad/s\n", env->actions[2], env->actions[2] * MAX_ROLL_RATE);
-    if (DEBUG >= 10) printf("rudder=%.3f -> yaw_rate=%.3f rad/s\n", env->actions[3], env->actions[3] * MAX_YAW_RATE);
+    if (DEBUG >= 10) printf("rudder=%.3f -> yaw_rate=%.3f rad/s\n", env->actions[3], -env->actions[3] * MAX_YAW_RATE);
     if (DEBUG >= 10) printf("trigger=%.3f (fires if >0.5)\n", env->actions[4]);
 
     // Player uses full physics with actions
@@ -1403,6 +1466,147 @@ void handle_camera_controls(Client *c) {
     }
 }
 
+// Draw a single observation bar
+// x, y: top-left position
+// label: observation name
+// value: the observation value
+// is_01_range: true for [0,1] range, false for [-1,1] range
+void draw_obs_bar(int x, int y, const char* label, float value, bool is_01_range) {
+    // Draw label (fixed width)
+    DrawText(label, x, y, 14, WHITE);
+
+    // Bar dimensions
+    int bar_x = x + 80;
+    int bar_w = 150;
+    int bar_h = 14;
+
+    // Draw background
+    DrawRectangle(bar_x, y, bar_w, bar_h, DARKGRAY);
+
+    // Calculate fill position
+    float norm_val;
+    int fill_x, fill_w;
+
+    if (is_01_range) {
+        // [0, 1] range - fill from left
+        norm_val = clampf(value, 0.0f, 1.0f);
+        fill_x = bar_x;
+        fill_w = (int)(norm_val * bar_w);
+    } else {
+        // [-1, 1] range - fill from center
+        norm_val = clampf(value, -1.0f, 1.0f);
+        int center = bar_x + bar_w / 2;
+        if (norm_val >= 0) {
+            fill_x = center;
+            fill_w = (int)(norm_val * bar_w / 2);
+        } else {
+            fill_w = (int)(-norm_val * bar_w / 2);
+            fill_x = center - fill_w;
+        }
+    }
+
+    // Color based on magnitude
+    Color fill_color = GREEN;
+    if (fabsf(value) > 0.9f) fill_color = YELLOW;
+    if (fabsf(value) > 1.0f) fill_color = RED;
+
+    DrawRectangle(fill_x, y, fill_w, bar_h, fill_color);
+
+    // Draw center line for [-1,1] range
+    if (!is_01_range) {
+        int center = bar_x + bar_w / 2;
+        DrawLine(center, y, center, y + bar_h, WHITE);
+    }
+
+    // Draw value text
+    DrawText(TextFormat("%+.2f", value), bar_x + bar_w + 5, y, 14, WHITE);
+}
+
+// Draw observation monitor showing all observation values as bars
+void draw_obs_monitor(Dogfight *env) {
+    int start_x = 900;
+    int start_y = 10;
+    int row_height = 18;
+
+    const char** labels = NULL;
+    int num_obs = env->obs_size;
+
+    // Select labels based on scheme
+    switch (env->obs_scheme) {
+        case OBS_ANGLES:
+            labels = OBS_LABELS_ANGLES;
+            break;
+        case OBS_PURSUIT:
+            labels = OBS_LABELS_PURSUIT;
+            break;
+        case OBS_REALISTIC:
+            labels = OBS_LABELS_REALISTIC;
+            break;
+        case OBS_REALISTIC_RANGE:
+            labels = OBS_LABELS_REALISTIC_RANGE;
+            break;
+        case OBS_REALISTIC_ENEMY_STATE:
+            labels = OBS_LABELS_REALISTIC_ENEMY_STATE;
+            break;
+        case OBS_REALISTIC_FULL:
+            labels = OBS_LABELS_REALISTIC_FULL;
+            break;
+        default:
+            labels = OBS_LABELS_ANGLES;
+            break;
+    }
+
+    // Title
+    DrawText(TextFormat("OBS (scheme %d)", env->obs_scheme),
+             start_x, start_y, 16, YELLOW);
+    start_y += 22;
+
+    // Draw each observation bar
+    for (int i = 0; i < num_obs; i++) {
+        float val = env->observations[i];
+        // Determine if this observation is [0,1] range
+        // Based on observation scheme and index:
+        // - Scheme 0 (ANGLES): index 3 (speed) is [0,1]
+        // - Scheme 1 (PURSUIT): indices 0 (speed), 1 (potential), 4 (energy) are [0,1]
+        // - Scheme 2-5 (REALISTIC*): indices 0 (airspeed), 1 (altitude) are [0,1]
+        bool is_01 = false;
+        switch (env->obs_scheme) {
+            case OBS_ANGLES:
+                is_01 = (i == 3);  // speed
+                break;
+            case OBS_PURSUIT:
+                is_01 = (i == 0 || i == 1 || i == 4);  // speed, potential, energy
+                break;
+            case OBS_REALISTIC:
+            case OBS_REALISTIC_RANGE:
+            case OBS_REALISTIC_ENEMY_STATE:
+            case OBS_REALISTIC_FULL:
+                is_01 = (i == 0 || i == 1);  // airspeed, altitude
+                // Also range_km (index 6) is [0,1]
+                if (env->obs_scheme != OBS_REALISTIC && i == 6) is_01 = true;
+                break;
+            default:
+                break;
+        }
+        int y = start_y + i * row_height;
+        draw_obs_bar(start_x, y, labels[i], val, is_01);
+
+        // Draw red arrow for highlighted observations
+        if (env->obs_highlight[i]) {
+            // Draw arrow pointing right at the label (triangle)
+            int arrow_x = start_x - 20;
+            int arrow_y = y + 7;  // Center vertically
+            // Triangle pointing right: 3 points
+            DrawTriangle(
+                (Vector2){arrow_x, arrow_y - 5},      // Top
+                (Vector2){arrow_x, arrow_y + 5},      // Bottom
+                (Vector2){arrow_x + 12, arrow_y},     // Tip (right)
+                RED
+            );
+        }
+    }
+}
+
 void c_render(Dogfight *env) {
     // 1. Lazy initialization
     if (env->client == NULL) {
@@ -1503,6 +1707,9 @@ void c_render(Dogfight *env) {
     DrawText(TextFormat("Return: %.2f", env->episode_return), 10, 160, 20, WHITE);
     DrawText(TextFormat("Perf: %.1f%% | Shots: %.0f", env->log.perf / fmaxf(env->log.n, 1.0f) * 100.0f, env->log.shots_fired), 10, 190, 20, YELLOW);
 
+    // 11. Draw observation monitor (right side)
+    draw_obs_monitor(env);
+
     // Controls hint
     DrawText("Mouse drag: Orbit | Scroll: Zoom | ESC: Exit", 10, (int)env->client->height - 30, 16, GRAY);
 
@@ -1550,6 +1757,7 @@ void force_state(
     quat_normalize(&env->player.ori);
     env->player.throttle = p_throttle;
     env->player.fire_cooldown = 0;
+    env->player.yaw_from_rudder = 0.0f;  // Reset accumulated rudder yaw
 
     // Opponent position: auto = 400m ahead of player
     if (o_px < -9000.0f) {
@@ -1574,6 +1782,7 @@ void force_state(
         quat_normalize(&env->opponent.ori);
     }
     env->opponent.fire_cooldown = 0;
+    env->opponent.yaw_from_rudder = 0.0f;  // Reset accumulated rudder yaw
 
     // Environment state
     env->tick = tick;
