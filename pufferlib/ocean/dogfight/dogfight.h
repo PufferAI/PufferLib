@@ -80,10 +80,9 @@ typedef struct Log {
     float episode_return;
     float episode_length;
     float score;           // 1.0 on kill, 0.0 on failure
-    float perf;            // sweep metric (same as kills)
-    float kills;           // cumulative kills
-    float shots_fired;     // cumulative shots
-    float accuracy;        // kills / shots_fired * 100
+    float perf;
+    float shots_fired;
+    float accuracy;
     float stage;           // current curriculum stage (for monitoring)
     // Curriculum-weighted metrics (Phase 1)
     float total_stage_weight;       // Sum of stage weights across all episodes
@@ -284,10 +283,9 @@ void add_log(Dogfight *env) {
     env->log.episode_return += env->episode_return;
     env->log.episode_length += (float)env->tick;
     env->log.perf += env->kill ? 1.0f : 0.0f;
-    env->log.kills += env->kill ? 1.0f : 0.0f;
     env->log.score += env->rewards[0];
     env->log.shots_fired += env->episode_shots_fired;
-    env->log.accuracy = (env->log.shots_fired > 0.0f) ? (env->log.kills / env->log.shots_fired * 100.0f) : 0.0f;
+    env->log.accuracy = (env->log.shots_fired > 0.0f) ? (env->log.perf / env->log.shots_fired * 100.0f) : 0.0f;
     env->log.stage = (float)env->stage;  // Track curriculum stage
 
     // Curriculum-weighted metrics (Phase 1)
@@ -300,7 +298,7 @@ void add_log(Dogfight *env) {
 
     // ultimate = kill_rate * stage_weight / (1 + avg_abs_bias * 0.01)
     // Rewards killing hard opponents, penalizes degenerate aileron bias
-    float kill_rate = env->log.kills / env->log.n;
+    float kill_rate = env->log.perf / env->log.n;
     float difficulty_weighted = kill_rate * env->log.avg_stage_weight;
     float bias_divisor = 1.0f + env->log.avg_abs_bias * 0.1f;  // min 1.0, safe
     env->log.ultimate = difficulty_weighted / bias_divisor;
@@ -683,6 +681,7 @@ void c_step(Dogfight *env) {
 
     // Track aileron usage for monitoring (no death penalty - see BISECTION.md)
     env->total_aileron_usage += fabsf(env->actions[2]);
+    env->aileron_bias += env->actions[2];
 
 #if DEBUG >= 3
     // Track flight envelope diagnostics (only when debugging - expensive)

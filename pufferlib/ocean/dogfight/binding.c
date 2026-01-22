@@ -77,7 +77,6 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "episode_length", log->episode_length);
     assign_to_dict(dict, "score", log->score);
     assign_to_dict(dict, "perf", log->perf);
-    assign_to_dict(dict, "kills", log->kills);
     assign_to_dict(dict, "shots_fired", log->shots_fired);
     assign_to_dict(dict, "accuracy", log->accuracy);
     assign_to_dict(dict, "stage", log->stage);
