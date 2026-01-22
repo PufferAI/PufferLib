@@ -157,6 +157,7 @@ typedef struct {
     Vec3 pos;
     Vec3 vel;
     Vec3 prev_vel;      // Previous velocity for acceleration calculation
+    Vec3 omega;         // Angular velocity in body frame (for momentum physics)
     Quat ori;
     float throttle;
     float g_force;      // Current G-loading (for reward calculation)
@@ -172,6 +173,7 @@ static inline void reset_plane(Plane *p, Vec3 pos, Vec3 vel) {
     p->pos = pos;
     p->vel = vel;
     p->prev_vel = vel;  // Initialize to current vel (no acceleration at start)
+    p->omega = vec3(0, 0, 0);  // No angular velocity at start
     p->ori = quat(1, 0, 0, 0);
     p->throttle = 0.5f;
     p->g_force = 1.0f;  // 1G at start (level flight)
@@ -257,6 +259,7 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     // q_dot = 0.5 * q * w  where w is angular velocity in body frame
     // This is the standard quaternion derivative formula
     Vec3 omega_body = vec3(roll_rate, pitch_rate, yaw_rate);  // body-frame w
+    p->omega = omega_body;  // Store for consistency (used by momentum physics)
     Quat omega_quat = quat(0, omega_body.x, omega_body.y, omega_body.z);
     Quat q_dot = quat_mul(p->ori, omega_quat);
     p->ori.w += 0.5f * q_dot.w * dt;

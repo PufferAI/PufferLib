@@ -83,6 +83,8 @@ void test_reset_plane() {
 
     assert(p.pos.x == 100 && p.pos.y == 200 && p.pos.z == 300);
     assert(p.vel.x == 80 && p.vel.y == 0 && p.vel.z == 0);
+    assert(p.prev_vel.x == 80 && p.prev_vel.y == 0 && p.prev_vel.z == 0);  // prev_vel initialized
+    assert(p.omega.x == 0 && p.omega.y == 0 && p.omega.z == 0);  // omega initialized
     assert(p.ori.w == 1 && p.ori.x == 0 && p.ori.y == 0 && p.ori.z == 0);
     assert(p.throttle == 0.5f);
 
@@ -372,6 +374,77 @@ void test_plane_falls_without_lift() {
     assert(z_before - z_after > 3.0f);
 
     printf("test_plane_falls_without_lift PASS\n");
+}
+
+void test_omega_stored_during_step() {
+    // Verify omega is stored when angular rates are applied
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    env.player.pos = vec3(0, 0, 1000);
+    env.player.vel = vec3(100, 0, 0);
+    env.player.ori = quat(1, 0, 0, 0);
+    env.player.omega = vec3(0, 0, 0);
+
+    // Apply pitch input
+    env.actions[0] = 0.0f;
+    env.actions[1] = 0.5f;  // pitch rate
+    env.actions[2] = 0.3f;  // roll rate
+    env.actions[3] = 0.1f;  // yaw rate
+    env.actions[4] = 0.0f;
+
+    c_step(&env);
+
+    // Omega should be stored (non-zero after applying rates)
+    // pitch_rate = 0.5 * MAX_PITCH_RATE = 1.25 rad/s
+    // roll_rate = 0.3 * MAX_ROLL_RATE = 0.9 rad/s
+    // yaw_rate is affected by damping, but should be non-zero
+    ASSERT_NEAR(env.player.omega.y, 0.5f * MAX_PITCH_RATE, 0.01f);
+    ASSERT_NEAR(env.player.omega.x, 0.3f * MAX_ROLL_RATE, 0.01f);
+    // yaw has damping, just check it's reasonable
+    assert(fabsf(env.player.omega.z) < MAX_YAW_RATE);
+
+    printf("test_omega_stored_during_step PASS\n");
+}
+
+void test_force_state_initializes_omega() {
+    // Verify force_state() properly initializes omega and prev_vel
+    Dogfight env = make_env(1000);
+    c_reset(&env);
+
+    // Set some non-zero values first
+    env.player.omega = vec3(1, 2, 3);
+    env.player.prev_vel = vec3(999, 999, 999);
+
+    // Call force_state
+    force_state(&env,
+        0.0f, 0.0f, 1000.0f,     // player pos
+        100.0f, 0.0f, 0.0f,      // player vel
+        1.0f, 0.0f, 0.0f, 0.0f,  // player ori
+        0.5f,                     // throttle
+        -9999.0f, -9999.0f, -9999.0f,  // opponent pos (auto)
+        -9999.0f, -9999.0f, -9999.0f,  // opponent vel (auto)
+        -9999.0f, -9999.0f, -9999.0f, -9999.0f,  // opponent ori (auto)
+        0                         // tick
+    );
+
+    // omega should be reset to zero
+    ASSERT_NEAR(env.player.omega.x, 0.0f, 1e-6f);
+    ASSERT_NEAR(env.player.omega.y, 0.0f, 1e-6f);
+    ASSERT_NEAR(env.player.omega.z, 0.0f, 1e-6f);
+
+    // prev_vel should match vel
+    ASSERT_NEAR(env.player.prev_vel.x, 100.0f, 1e-6f);
+    ASSERT_NEAR(env.player.prev_vel.y, 0.0f, 1e-6f);
+    ASSERT_NEAR(env.player.prev_vel.z, 0.0f, 1e-6f);
+
+    // opponent should also have omega and prev_vel initialized
+    ASSERT_NEAR(env.opponent.omega.x, 0.0f, 1e-6f);
+    ASSERT_NEAR(env.opponent.omega.y, 0.0f, 1e-6f);
+    ASSERT_NEAR(env.opponent.omega.z, 0.0f, 1e-6f);
+    ASSERT_NEAR(env.opponent.prev_vel.x, env.opponent.vel.x, 1e-6f);
+
+    printf("test_force_state_initializes_omega PASS\n");
 }
 
 void test_controls_affect_orientation() {
@@ -1402,6 +1475,8 @@ int main() {
     test_aircraft_params();
     test_throttle_accelerates();
     test_plane_falls_without_lift();
+    test_omega_stored_during_step();
+    test_force_state_initializes_omega();
     test_controls_affect_orientation();
     test_dynamic_pressure();
     test_lift_opposes_gravity();
@@ -1445,6 +1520,6 @@ int main() {
     // Phase 7: Generic observation tests
     test_obs_bounds_all_schemes();
 
-    printf("\nAll 46 tests PASS\n");
+    printf("\nAll 48 tests PASS\n");
     return 0;
 }

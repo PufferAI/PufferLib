@@ -75,13 +75,6 @@ class Dogfight(pufferlib.PufferEnv):
         super().__init__(buf)
         self.actions = self.actions.astype(np.float32)  # REQUIRED for continuous
 
-        # Print hyperparameters at init (for sweep debugging)
-        print(f"=== DOGFIGHT ENV INIT ===")
-        print(f"  obs_scheme={obs_scheme}, num_envs={num_envs}")
-        print(f"  REWARDS: aim={reward_aim_scale:.4f} closing={reward_closing_scale:.4f}")
-        print(f"  PENALTY: neg_g={penalty_neg_g:.4f}")
-        print(f"  curriculum={curriculum_enabled}, advance={advance_threshold}")
-
         self._env_handles = []
         for env_num in range(num_envs):
             handle = binding.env_init(

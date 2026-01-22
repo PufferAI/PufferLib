@@ -16,7 +16,23 @@
 #define PENALTY_STALL 0.002f
 #define PENALTY_RUDDER 0.001f
 
+// ============================================================================
+// PHYSICS MODE SELECTION
+// ============================================================================
+// 0 = Rate-based physics (current, uses flightlib.h)
+// 1 = Momentum-based RK4 physics (future, uses physics_momentum.h)
+//
+// Both provide identical interface: step_plane_with_physics(), reset_plane(), etc.
+// Switch by changing this define and rebuilding.
+// ============================================================================
+#define PHYSICS_MODE 0
+
+#if PHYSICS_MODE == 0
 #include "flightlib.h"
+#else
+#include "physics_momentum.h"
+#endif
+
 #include "autopilot.h"
 
 typedef enum {
@@ -894,6 +910,8 @@ void force_state(
 ) {
     env->player.pos = vec3(p_px, p_py, p_pz);
     env->player.vel = vec3(p_vx, p_vy, p_vz);
+    env->player.prev_vel = vec3(p_vx, p_vy, p_vz);  // Initialize to current (no accel)
+    env->player.omega = vec3(0, 0, 0);  // No angular velocity
     env->player.ori = quat(p_ow, p_ox, p_oy, p_oz);
     quat_normalize(&env->player.ori);
     env->player.throttle = p_throttle;
@@ -924,6 +942,8 @@ void force_state(
     }
     env->opponent.fire_cooldown = 0;
     env->opponent.yaw_from_rudder = 0.0f;
+    env->opponent.prev_vel = env->opponent.vel;  // Initialize to current (no accel)
+    env->opponent.omega = vec3(0, 0, 0);  // No angular velocity
 
     // Environment state
     env->tick = tick;
