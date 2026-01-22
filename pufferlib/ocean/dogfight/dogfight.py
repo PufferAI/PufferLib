@@ -43,14 +43,10 @@ class Dogfight(pufferlib.PufferEnv):
         curriculum_enabled=0,       # 0=off (legacy), 1=on (progressive stages)
         curriculum_randomize=0,     # 0=progressive (training), 1=random stage each episode (eval)
         advance_threshold=0.7,
-        demote_threshold=0.3,
-        eval_window=50,
         # df11: Simplified rewards (6 terms)
         reward_aim_scale=0.05,       # Continuous aiming reward
         reward_closing_scale=0.003,  # Per m/s closing
         penalty_neg_g=0.02,          # Enforce "pull to turn"
-        penalty_stall=0.002,         # Speed safety
-        penalty_rudder=0.001,        # Prevent knife-edge
         speed_min=50.0,              # Stall threshold
     ):
         # Observation size depends on scheme
@@ -83,8 +79,8 @@ class Dogfight(pufferlib.PufferEnv):
         print(f"=== DOGFIGHT ENV INIT ===")
         print(f"  obs_scheme={obs_scheme}, num_envs={num_envs}")
         print(f"  REWARDS: aim={reward_aim_scale:.4f} closing={reward_closing_scale:.4f}")
-        print(f"  PENALTY: neg_g={penalty_neg_g:.4f} stall={penalty_stall:.4f} rudder={penalty_rudder:.4f}")
-        print(f"  curriculum={curriculum_enabled}, advance={advance_threshold}, demote={demote_threshold}")
+        print(f"  PENALTY: neg_g={penalty_neg_g:.4f}")
+        print(f"  curriculum={curriculum_enabled}, advance={advance_threshold}")
 
         self._env_handles = []
         for env_num in range(num_envs):
@@ -103,14 +99,10 @@ class Dogfight(pufferlib.PufferEnv):
                 curriculum_enabled=curriculum_enabled,
                 curriculum_randomize=curriculum_randomize,
                 advance_threshold=advance_threshold,
-                demote_threshold=demote_threshold,
-                eval_window=eval_window,
 
                 reward_aim_scale=reward_aim_scale,
                 reward_closing_scale=reward_closing_scale,
                 penalty_neg_g=penalty_neg_g,
-                penalty_stall=penalty_stall,
-                penalty_rudder=penalty_rudder,
                 speed_min=speed_min,
             )
             self._env_handles.append(handle)

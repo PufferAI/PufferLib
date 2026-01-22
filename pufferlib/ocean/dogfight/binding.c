@@ -58,8 +58,6 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
         .aim_scale = get_float(kwargs, "reward_aim_scale", 0.05f),
         .closing_scale = get_float(kwargs, "reward_closing_scale", 0.003f),
         .neg_g = get_float(kwargs, "penalty_neg_g", 0.02f),
-        .stall = get_float(kwargs, "penalty_stall", 0.002f),
-        .rudder = get_float(kwargs, "penalty_rudder", 0.001f),
         .speed_min = get_float(kwargs, "speed_min", 50.0f),
     };
 
@@ -67,12 +65,10 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     int curriculum_randomize = get_int(kwargs, "curriculum_randomize", 0);
 
     float advance_threshold = get_float(kwargs, "advance_threshold", 0.7f);
-    float demote_threshold = get_float(kwargs, "demote_threshold", 0.3f);
-    int eval_window = get_int(kwargs, "eval_window", 50);
 
     int env_num = get_int(kwargs, "env_num", 0);
 
-    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, advance_threshold, demote_threshold, eval_window, env_num);
+    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, advance_threshold, env_num);
     return 0;
 }
 

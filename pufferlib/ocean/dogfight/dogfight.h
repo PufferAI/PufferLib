@@ -11,6 +11,10 @@
 #include "rlgl.h"  // For rlSetClipPlanes()
 
 #define DEBUG 0
+#define DEMOTE_THRESHOLD 0.3f
+#define EVAL_WINDOW 50
+#define PENALTY_STALL 0.002f
+#define PENALTY_RUDDER 0.001f
 
 #include "flightlib.h"
 #include "autopilot.h"
@@ -104,8 +108,6 @@ typedef struct RewardConfig {
     float closing_scale;     // +N per m/s closing (default 0.003)
     // Penalties
     float neg_g;             // -N per unit G below 0.5 (default 0.02) - enforces "pull to turn"
-    float stall;             // -N per m/s below speed_min (default 0.002)
-    float rudder;            // -N per unit rudder magnitude (default 0.001) - prevents knife-edge
     // Thresholds
     float speed_min;         // Stall threshold (default 50.0)
 } RewardConfig;
@@ -158,8 +160,6 @@ typedef struct Dogfight {
     float recent_kills;         // Kills in current evaluation window
     float recent_episodes;      // Episodes in current evaluation window
     float advance_threshold;    // Kill rate to advance (default 0.7)
-    float demote_threshold;     // Kill rate to demote (default 0.3)
-    int eval_window;            // Episodes per evaluation (default 50)
     // Anti-spinning
     float total_aileron_usage;  // Accumulated |aileron| input (for spin death)
     float aileron_bias;         // Cumulative signed aileron (for directional penalty)
@@ -191,7 +191,7 @@ typedef struct Dogfight {
 
 #include "dogfight_observations.h"
 
-void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, float advance_threshold, float demote_threshold, int eval_window, int env_num) {
+void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, float advance_threshold, int env_num) {
     env->log = (Log){0};
     env->tick = 0;
     env->env_num = env_num;
@@ -220,8 +220,6 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
         env->recent_kills = 0.0f;
         env->recent_episodes = 0.0f;
         env->advance_threshold = advance_threshold > 0.0f ? advance_threshold : 0.7f;
-        env->demote_threshold = demote_threshold > 0.0f ? demote_threshold : 0.3f;
-        env->eval_window = eval_window > 0 ? eval_window : 50;
         if (DEBUG >= 1) {
             fprintf(stderr, "[INIT] FIRST init ptr=%p env_num=%d - setting total_episodes=0, stage=0\n", (void*)env, env_num);
         }
@@ -314,20 +312,20 @@ void add_log(Dogfight *env) {
         env->recent_kills += env->kill ? 1.0f : 0.0f;
 
         // Evaluate every eval_window episodes
-        if (env->recent_episodes >= (float)env->eval_window) {
+        if (env->recent_episodes >= (float)EVAL_WINDOW) {
             float recent_rate = env->recent_kills / env->recent_episodes;
 
             if (recent_rate > env->advance_threshold && env->stage < CURRICULUM_COUNT - 1) {
                 env->stage++;
                 if (DEBUG >= 1) {
                     fprintf(stderr, "[ADVANCE] env=%d stage->%d (rate=%.2f, window=%d)\n",
-                            env->env_num, env->stage, recent_rate, env->eval_window);
+                            env->env_num, env->stage, recent_rate, EVAL_WINDOW);
                 }
-            } else if (recent_rate < env->demote_threshold && env->stage > 0) {
+            } else if (recent_rate < DEMOTE_THRESHOLD && env->stage > 0) {
                 env->stage--;
                 if (DEBUG >= 1) {
                     fprintf(stderr, "[DEMOTE] env=%d stage->%d (rate=%.2f, window=%d)\n",
-                            env->env_num, env->stage, recent_rate, env->eval_window);
+                            env->env_num, env->stage, recent_rate, EVAL_WINDOW);
                 }
             }
 
@@ -640,6 +638,9 @@ void c_reset(Dogfight *env) {
     if (DEBUG >= 10) printf("initial_dist=%.1f m, stage=%d\n", norm3(sub3(env->opponent.pos, pos)), env->stage);
 
     compute_observations(env);
+#if DEBUG >= 5
+    print_observations(env);
+#endif
 }
 
 // Check if shooter hits target (cone-based hit detection)
@@ -777,12 +778,12 @@ void c_step(Dogfight *env) {
     float speed = norm3(p->vel);
     float r_stall = 0.0f;
     if (speed < env->rcfg.speed_min) {
-        r_stall = -(env->rcfg.speed_min - speed) * env->rcfg.stall;
+        r_stall = -(env->rcfg.speed_min - speed) * PENALTY_STALL;
     }
     reward += r_stall;
 
     // 5. Rudder penalty: prevent knife-edge climbing (small)
-    float r_rudder = -fabsf(env->actions[3]) * env->rcfg.rudder;
+    float r_rudder = -fabsf(env->actions[3]) * PENALTY_RUDDER;
     reward += r_rudder;
 
 #if DEBUG >= 2
@@ -857,6 +858,9 @@ void c_step(Dogfight *env) {
     }
 
     compute_observations(env);
+#if DEBUG >= 5
+    print_observations(env);
+#endif
 }
 
 void c_close(Dogfight *env);
@@ -927,4 +931,7 @@ void force_state(
     env->episode_return = 0.0f;
 
     compute_observations(env);
+#if DEBUG >= 5
+    print_observations(env);
+#endif
 }

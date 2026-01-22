@@ -20,10 +20,10 @@ static Dogfight make_env(int max_steps) {
     // df11: Simplified reward config (6 terms)
     RewardConfig rcfg = {
         .aim_scale = 0.05f, .closing_scale = 0.003f,
-        .neg_g = 0.02f, .stall = 0.002f, .rudder = 0.001f,
+        .neg_g = 0.02f,
         .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg, 0, 0, 0.7f, 0.3f, 50, 0);  // curriculum_enabled=0
+    init(&env, 0, &rcfg, 0, 0, 0.7f, 0);  // curriculum_enabled=0
     return env;
 }
 
@@ -985,15 +985,15 @@ static Dogfight make_env_curriculum(int max_steps, int randomize) {
     // df11: Simplified reward config
     RewardConfig rcfg = {
         .aim_scale = 0.05f, .closing_scale = 0.003f,
-        .neg_g = 0.02f, .stall = 0.002f, .rudder = 0.001f,
+        .neg_g = 0.02f,
         .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg, 1, randomize, 0.7f, 0.3f, 50, 0);  // curriculum_enabled=1
+    init(&env, 0, &rcfg, 1, randomize, 0.7f, 0);  // curriculum_enabled=1
     return env;
 }
 
-// Helper to make env with custom rudder penalty (df11: roll penalty removed)
-static Dogfight make_env_with_rudder_penalty(int max_steps, float rudder_penalty) {
+// Helper to make env for rudder penalty test
+static Dogfight make_env_for_rudder_test(int max_steps) {
     Dogfight env = {0};
     env.observations = obs_buf;
     env.actions = act_buf;
@@ -1003,16 +1003,16 @@ static Dogfight make_env_with_rudder_penalty(int max_steps, float rudder_penalty
     // df11: Simplified reward config
     RewardConfig rcfg = {
         .aim_scale = 0.05f, .closing_scale = 0.003f,
-        .neg_g = 0.02f, .stall = 0.002f, .rudder = rudder_penalty,
+        .neg_g = 0.02f,
         .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg, 0, 0, 0.7f, 0.3f, 50, 0);
+    init(&env, 0, &rcfg, 0, 0, 0.7f, 0);
     return env;
 }
 
 void test_rudder_penalty_accumulates() {
     // df11: Test that constant rudder use accumulates meaningful penalty over multiple steps
-    Dogfight env = make_env_with_rudder_penalty(1000, 0.01f);  // 10x default for visibility
+    Dogfight env = make_env_for_rudder_test(1000);  // 10x default for visibility
     c_reset(&env);
 
     env.player.pos = vec3(0, 0, 1000);
@@ -1035,7 +1035,7 @@ void test_rudder_penalty_accumulates() {
     }
 
     // Compare to coordinated flight: same scenario but no rudder
-    Dogfight env2 = make_env_with_rudder_penalty(1000, 0.01f);
+    Dogfight env2 = make_env_for_rudder_test(1000);
     c_reset(&env2);
 
     env2.player.pos = vec3(0, 0, 1000);
@@ -1315,6 +1315,69 @@ void test_rudder_penalty() {
     printf("test_rudder_penalty PASS (no_rud=%.5f > rud=%.5f)\n", reward_no_rudder, reward_rudder);
 }
 
+// Generic test: all observation schemes produce bounded values
+// Works regardless of which schemes exist or their indices
+void test_obs_bounds_all_schemes() {
+    int schemes_tested = 0;
+    int total_obs_checked = 0;
+
+    // Test all schemes from 0 to OBS_SCHEME_COUNT-1
+    for (int scheme = 0; scheme < OBS_SCHEME_COUNT; scheme++) {
+        // Create env with this scheme
+        Dogfight env = {0};
+        env.observations = obs_buf;
+        env.actions = act_buf;
+        env.rewards = rew_buf;
+        env.terminals = term_buf;
+        env.max_steps = 1000;
+        RewardConfig rcfg = {
+            .aim_scale = 0.05f, .closing_scale = 0.003f,
+            .neg_g = 0.02f,
+            .speed_min = 50.0f,
+        };
+        init(&env, scheme, &rcfg, 0, 0, 0.7f, 0);
+
+        // Reset to get valid observations
+        c_reset(&env);
+
+        // Verify obs_size is positive and reasonable
+        assert(env.obs_size > 0 && env.obs_size <= 32);
+
+        // All observations should be bounded [-2, 2] (some have [-1,1], some [0,1])
+        // Using [-2, 2] as generous outer bound that catches NaN/Inf/unbounded
+        for (int i = 0; i < env.obs_size; i++) {
+            float val = env.observations[i];
+            assert(!isnan(val) && !isinf(val));
+            assert(val >= -2.0f && val <= 2.0f);
+            total_obs_checked++;
+        }
+
+        // Run a few steps and check bounds again
+        for (int step = 0; step < 10; step++) {
+            // Neutral actions
+            env.actions[0] = 0.0f;  // throttle
+            env.actions[1] = 0.0f;  // pitch
+            env.actions[2] = 0.0f;  // roll
+            env.actions[3] = 0.0f;  // yaw
+            env.actions[4] = 0.0f;  // fire
+
+            c_step(&env);
+
+            // Check bounds after step
+            for (int i = 0; i < env.obs_size; i++) {
+                float val = env.observations[i];
+                assert(!isnan(val) && !isinf(val));
+                assert(val >= -2.0f && val <= 2.0f);
+            }
+        }
+
+        schemes_tested++;
+    }
+
+    printf("test_obs_bounds_all_schemes PASS (%d schemes, %d obs checked)\n",
+           schemes_tested, total_obs_checked);
+}
+
 int main() {
     printf("Running dogfight tests...\n\n");
 
@@ -1379,6 +1442,9 @@ int main() {
     test_curriculum_stages_differ();
     test_spawn_distance_range();
 
-    printf("\nAll 45 tests PASS\n");
+    // Phase 7: Generic observation tests
+    test_obs_bounds_all_schemes();
+
+    printf("\nAll 46 tests PASS\n");
     return 0;
 }

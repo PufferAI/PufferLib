@@ -48,10 +48,10 @@ void compute_obs_angles(Dogfight *env) {
     float opp_heading = atan2f(opp_fwd_body.y, opp_fwd_body.x);
 
     int i = 0;
-    // Player state
-    env->observations[i++] = p->pos.x * INV_WORLD_HALF_X;
-    env->observations[i++] = p->pos.y * INV_WORLD_HALF_Y;
-    env->observations[i++] = p->pos.z * INV_WORLD_MAX_Z;
+    // Player state (clamped to [-1,1] in case plane is near OOB)
+    env->observations[i++] = clampf(p->pos.x * INV_WORLD_HALF_X, -1.0f, 1.0f);
+    env->observations[i++] = clampf(p->pos.y * INV_WORLD_HALF_Y, -1.0f, 1.0f);
+    env->observations[i++] = clampf(p->pos.z * INV_WORLD_MAX_Z, 0.0f, 1.0f);
     env->observations[i++] = clampf(norm3(p->vel) * INV_MAX_SPEED, 0.0f, 1.0f);  // Speed scalar
     env->observations[i++] = pitch * INV_PI;      // -0.5 to 0.5
     env->observations[i++] = roll * INV_PI;       // -1 to 1
@@ -427,5 +427,102 @@ void compute_observations(Dogfight *env) {
         default:                       compute_obs_angles(env); break;
     }
 }
+
+// Print observations for DEBUG level 5
+// Output format: [idx] name = +0.640 [0,1] or [-1,1]
+#if DEBUG >= 5
+
+// Observation labels for DEBUG printing (same as dogfight_render.h for HUD)
+// Scheme 0: OBS_ANGLES (12 obs)
+static const char* DEBUG_OBS_LABELS_ANGLES[12] = {
+    "px", "py", "pz", "speed", "pitch", "roll", "yaw",
+    "tgt_az", "tgt_el", "dist", "closure", "opp_hdg"
+};
+
+// Scheme 1: OBS_PURSUIT (13 obs)
+static const char* DEBUG_OBS_LABELS_PURSUIT[13] = {
+    "speed", "potential", "pitch", "roll", "energy",
+    "tgt_az", "tgt_el", "dist", "closure",
+    "tgt_roll", "tgt_pitch", "aspect", "E_adv"
+};
+
+// Scheme 2: OBS_REALISTIC (10 obs)
+static const char* DEBUG_OBS_LABELS_REALISTIC[10] = {
+    "airspeed", "altitude", "pitch", "roll",
+    "tgt_az", "tgt_el", "tgt_size",
+    "aspect", "horizon", "dist"
+};
+
+// Scheme 3: OBS_REALISTIC_RANGE (10 obs)
+static const char* DEBUG_OBS_LABELS_REALISTIC_RANGE[10] = {
+    "airspeed", "altitude", "pitch", "roll",
+    "tgt_az", "tgt_el", "range_km",
+    "aspect", "horizon", "closure"
+};
+
+// Scheme 4: OBS_REALISTIC_ENEMY_STATE (13 obs)
+static const char* DEBUG_OBS_LABELS_REALISTIC_ENEMY_STATE[13] = {
+    "airspeed", "altitude", "pitch", "roll",
+    "tgt_az", "tgt_el", "range_km",
+    "aspect", "horizon", "closure",
+    "emy_pitch", "emy_roll", "emy_hdg"
+};
+
+// Scheme 5: OBS_REALISTIC_FULL (15 obs)
+static const char* DEBUG_OBS_LABELS_REALISTIC_FULL[15] = {
+    "airspeed", "altitude", "pitch", "roll",
+    "tgt_az", "tgt_el", "range_km",
+    "aspect", "horizon", "closure",
+    "emy_pitch", "emy_roll", "emy_hdg",
+    "turn_rate", "g_load"
+};
+void print_observations(Dogfight *env) {
+    const char** labels = NULL;
+    int num_obs = env->obs_size;
+
+    // Select labels based on scheme
+    switch (env->obs_scheme) {
+        case OBS_ANGLES:                labels = DEBUG_OBS_LABELS_ANGLES; break;
+        case OBS_PURSUIT:               labels = DEBUG_OBS_LABELS_PURSUIT; break;
+        case OBS_REALISTIC:             labels = DEBUG_OBS_LABELS_REALISTIC; break;
+        case OBS_REALISTIC_RANGE:       labels = DEBUG_OBS_LABELS_REALISTIC_RANGE; break;
+        case OBS_REALISTIC_ENEMY_STATE: labels = DEBUG_OBS_LABELS_REALISTIC_ENEMY_STATE; break;
+        case OBS_REALISTIC_FULL:        labels = DEBUG_OBS_LABELS_REALISTIC_FULL; break;
+        default:                        labels = DEBUG_OBS_LABELS_ANGLES; break;
+    }
+
+    printf("=== OBS (scheme %d, %d obs) ===\n", env->obs_scheme, num_obs);
+
+    for (int i = 0; i < num_obs; i++) {
+        float val = env->observations[i];
+
+        // Determine range based on scheme and index
+        // [0,1] range: speed, potential, energy, airspeed, altitude, range_km
+        // [-1,1] range: everything else
+        bool is_01 = false;
+        switch (env->obs_scheme) {
+            case OBS_ANGLES:
+                is_01 = (i == 3);  // speed
+                break;
+            case OBS_PURSUIT:
+                is_01 = (i == 0 || i == 1 || i == 4);  // speed, potential, energy
+                break;
+            case OBS_REALISTIC:
+            case OBS_REALISTIC_RANGE:
+            case OBS_REALISTIC_ENEMY_STATE:
+            case OBS_REALISTIC_FULL:
+                is_01 = (i == 0 || i == 1);  // airspeed, altitude
+                // Also range_km (index 6) is [0,1] for schemes 3-5
+                if (env->obs_scheme != OBS_REALISTIC && i == 6) is_01 = true;
+                break;
+            default:
+                break;
+        }
+
+        const char* range_str = is_01 ? "[0,1]" : "[-1,1]";
+        printf("[%2d] %-10s = %+.3f  %s\n", i, labels[i], val, range_str);
+    }
+}
+#endif // DEBUG >= 5
 
 #endif // DOGFIGHT_OBSERVATIONS_H

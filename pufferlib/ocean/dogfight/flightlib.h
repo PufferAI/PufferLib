@@ -128,6 +128,7 @@ static inline Quat quat_from_axis_angle(Vec3 axis, float angle) {
 #define WING_AREA 21.65f       // m^2 (P-51D: 233 ft^2)
 #define C_D0 0.0163f           // parasitic drag coefficient (P-51D laminar flow)
 #define K 0.072f               // induced drag factor: 1/(pi*0.75*5.86)
+#define K_SIDESLIP 0.7f        // sideslip drag factor (JSBSim: 0.05 CD at 15 deg)
 #define C_L_MAX 1.48f          // max lift coefficient before stall (P-51D clean)
 #define C_L_ALPHA 5.56f        // lift curve slope (P-51D: 0.097/deg = 5.56/rad)
 #define ALPHA_ZERO -0.021f     // zero-lift angle (rad), -1.2° for cambered airfoil
@@ -322,13 +323,9 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     // ========================================================================
     // 8. DRAG FORCE (Drag Polar)
     // ========================================================================
-    // Cd = Cd0 + K * Cl^2
-    //   Cd0 = parasitic drag (skin friction + form drag)
-    //   K*Cl^2 = induced drag (vortex drag from lift generation)
-    //
-    // At cruise (Cl=0.22): Cd = 0.02 + 0.05*0.048 = 0.0224
-    // At Cl_max (Cl=1.4):  Cd = 0.02 + 0.05*1.96 = 0.118
-    float C_D = C_D0 + K * C_L * C_L;
+    // Cd = Cd0 + K * Cl^2 + K_SIDESLIP * beta^2
+    float C_D_sideslip = K_SIDESLIP * p->yaw_from_rudder * p->yaw_from_rudder;
+    float C_D = C_D0 + K * C_L * C_L + C_D_sideslip;
     float D_mag = C_D * q_dyn * WING_AREA;
 
     // ========================================================================
