@@ -874,7 +874,7 @@ void c_step(Dogfight *env) {
         } else {
             env->death_reason = DEATH_TIMEOUT;
         }
-        env->rewards[0] = (supersonic || p->pos.z <= 0) ? -1.0f : 0.0f;
+        env->rewards[0] = (supersonic || p->pos.z <= 0 || env->tick >= env->max_steps) ? -1.0f : 0.0f;
         env->terminals[0] = 1;
         add_log(env);
         c_reset(env);
