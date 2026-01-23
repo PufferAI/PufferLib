@@ -48,10 +48,11 @@ typedef enum {
     OBS_REALISTIC_RANGE = 3,       // REALISTIC with explicit range (10 obs)
     OBS_REALISTIC_ENEMY_STATE = 4, // + enemy pitch/roll/heading (13 obs)
     OBS_REALISTIC_FULL = 5,        // + turn rate + G-loading (15 obs)
+    OBS_MOMENTUM = 6,              // Body-frame + omega + AoA + energy (15 obs) - for mode 1 physics
     OBS_SCHEME_COUNT
 } ObsScheme;
 
-static const int OBS_SIZES[OBS_SCHEME_COUNT] = {12, 13, 10, 10, 13, 15};
+static const int OBS_SIZES[OBS_SCHEME_COUNT] = {12, 13, 10, 10, 13, 15, 15};
 
 typedef enum {
     CURRICULUM_TAIL_CHASE = 0,   // Easiest: opponent ahead, same heading
@@ -227,8 +228,8 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int physics_mode, i
     // Gun cone for HIT DETECTION - fixed at 5°
     env->gun_cone_angle = GUN_CONE_ANGLE;
     env->cos_gun_cone = cosf(env->gun_cone_angle);
-    // Initialize opponent autopilot
-    autopilot_init(&env->opponent_ap);
+    // Initialize opponent autopilot (pass physics_mode for appropriate PID gains)
+    autopilot_init(&env->opponent_ap, physics_mode);
     // Reward configuration (copy from provided config)
     env->rcfg = *rcfg;
     // Episode tracking

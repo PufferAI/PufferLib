@@ -286,6 +286,12 @@ static PyObject* env_get_state(PyObject* self, PyObject* args) {
     // G-force (current G-loading)
     PyDict_SetItemString(dict, "g_force", PyFloat_FromDouble(p->g_force));
 
+    // Angular velocity (body frame, rad/s)
+    // omega.x = roll rate, omega.y = pitch rate, omega.z = yaw rate
+    PyDict_SetItemString(dict, "omega_x", PyFloat_FromDouble(p->omega.x));
+    PyDict_SetItemString(dict, "omega_y", PyFloat_FromDouble(p->omega.y));
+    PyDict_SetItemString(dict, "omega_z", PyFloat_FromDouble(p->omega.z));
+
     return dict;
 }
 

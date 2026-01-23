@@ -13,7 +13,7 @@ from test_flight_base import (
     P51D_MAX_SPEED, P51D_STALL_SPEED, P51D_CLIMB_RATE, P51D_TURN_RATE,
     LEVEL_FLIGHT_KP, LEVEL_FLIGHT_KD,
     get_speed_from_state, get_vz_from_state, get_alt_from_state,
-    level_flight_pitch_from_state,
+    level_flight_pitch_from_state, is_mode1, get_mode1_autopilot,
 )
 
 
@@ -272,9 +272,8 @@ def test_climb_rate():
     then measures actual climb rate. This tests that physics produces
     correct excess thrust at climb speed.
 
-    Approach: Calculate pitch for expected P-51D climb (15.4 m/s at 74 m/s),
-    set that state with force_state(), run with zero elevator (pitch holds),
-    and verify physics produces the expected climb rate.
+    Mode 0: Uses zero elevator (pitch holds constant due to rate-based controls)
+    Mode 1: Uses pitch-hold autopilot to maintain climb pitch angle
     """
     env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
 
@@ -302,6 +301,7 @@ def test_climb_rate():
 
     # Body pitch = AOA + climb angle (nose above horizon)
     pitch = alpha + gamma
+    target_pitch_deg = np.degrees(pitch)
 
     # Create pitch-up quaternion (negative angle because positive Y rotation = nose DOWN)
     ori_w = np.cos(-pitch / 2)
@@ -320,22 +320,35 @@ def test_climb_rate():
         player_throttle=1.0,
     )
 
-    # Run with zero elevator (pitch holds constant) and measure vz
+    # Get Mode 1 autopilot if needed
+    ap = get_mode1_autopilot()
+
+    # Run and measure vz
     vzs = []
     speeds = []
 
     for step in range(1000):  # 20 seconds
         # Use state-based accessors (independent of obs_scheme)
-        vz_now = get_vz_from_state(env)
-        speed = get_speed_from_state(env)
+        state = env.get_state()
+        vz_now = state['vz']
+        speed = np.sqrt(state['vx']**2 + state['vy']**2 + state['vz']**2)
 
         # Skip first 5 seconds for settling, then collect data
         if step >= 250:
             vzs.append(vz_now)
             speeds.append(speed)
 
-        # Zero elevator - pitch angle holds due to rate-based controls
-        action = np.array([[1.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+        # Control strategy depends on physics mode
+        if ap is not None:
+            # Mode 1: Use pitch-hold autopilot to maintain climb attitude
+            elevator = ap['hold_pitch'](state, target_pitch_deg)
+            aileron = ap['hold_bank'](state, 0.0)  # Wings level
+        else:
+            # Mode 0: Zero elevator - pitch angle holds due to rate-based controls
+            elevator = 0.0
+            aileron = 0.0
+
+        action = np.array([[1.0, elevator, aileron, 0.0, 0.0]], dtype=np.float32)
         _, _, term, _, _ = env.step(action)
         if term[0]:
             break
@@ -346,7 +359,8 @@ def test_climb_rate():
     RESULTS['climb_rate'] = avg_vz
     diff = avg_vz - P51D_CLIMB_RATE
     status = "OK" if abs(diff) < 5 else "CHECK"
-    print(f"climb_rate:    {avg_vz:6.1f} m/s  (P-51D: {P51D_CLIMB_RATE:.0f}, diff: {diff:+.1f}, speed: {avg_speed:.0f}/{Vy:.0f}) [{status}]")
+    mode_str = "mode1+AP" if ap else "mode0"
+    print(f"climb_rate:    {avg_vz:6.1f} m/s  (P-51D: {P51D_CLIMB_RATE:.0f}, diff: {diff:+.1f}, speed: {avg_speed:.0f}/{Vy:.0f}) [{status}] ({mode_str})")
 
 
 def test_glide_ratio():
@@ -364,6 +378,9 @@ def test_glide_ratio():
     Best glide speed: V = sqrt(2W/(rho*S*Cl)) = 80 m/s
     Glide angle: gamma = arctan(1/L/D) = 3.9°
     Expected sink rate: V * sin(gamma) = V/(L/D) = 5.5 m/s
+
+    Mode 0: Zero controls - pitch holds due to rate-based system
+    Mode 1: Pitch-hold autopilot to maintain glide angle
     """
     env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
 
@@ -394,9 +411,9 @@ def test_glide_ratio():
     alpha = Cl_opt / C_L_alpha - wing_inc + alpha_zero  # ~0.04 rad
 
     # In steady glide: body pitch = alpha - gamma (nose below velocity)
-    # But our velocity is along glide path, so body pitch relative to horizontal = alpha - gamma
     # For quaternion: we want nose tilted down from horizontal
     pitch = alpha - gamma  # Negative = nose down
+    target_pitch_deg = np.degrees(pitch)
 
     # Create quaternion for glide attitude (negative because positive Y rotation = nose down)
     ori_w = np.cos(-pitch / 2)
@@ -415,22 +432,34 @@ def test_glide_ratio():
         player_throttle=0.0,
     )
 
-    # Run with zero controls - let physics maintain steady glide
+    # Get Mode 1 autopilot if needed
+    ap = get_mode1_autopilot()
+
+    # Run and measure sink rate
     vzs = []
     speeds = []
 
     for step in range(500):  # 10 seconds
-        # Use state-based accessors (independent of obs_scheme)
-        vz_now = get_vz_from_state(env)
-        speed = get_speed_from_state(env)
+        state = env.get_state()
+        vz_now = state['vz']
+        speed = np.sqrt(state['vx']**2 + state['vy']**2 + state['vz']**2)
 
         # Collect data after 2 seconds of settling
         if step >= 100:
             vzs.append(vz_now)
             speeds.append(speed)
 
-        # Zero controls - pitch angle holds due to rate-based system
-        action = np.array([[-1.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+        # Control strategy depends on physics mode
+        if ap is not None:
+            # Mode 1: Use pitch-hold autopilot to maintain glide angle
+            elevator = ap['hold_pitch'](state, target_pitch_deg)
+            aileron = ap['hold_bank'](state, 0.0)  # Wings level
+        else:
+            # Mode 0: Zero controls - pitch angle holds due to rate-based system
+            elevator = 0.0
+            aileron = 0.0
+
+        action = np.array([[-1.0, elevator, aileron, 0.0, 0.0]], dtype=np.float32)
         _, _, term, _, _ = env.step(action)
         if term[0]:
             break
@@ -445,20 +474,25 @@ def test_glide_ratio():
 
     diff = avg_sink - sink_expected
     status = "OK" if abs(diff) < 2 else "CHECK"
-    print(f"glide_ratio:   L/D={measured_LD:4.1f}   (theory: {LD_max:.1f}, sink: {avg_sink:.1f} m/s, expected: {sink_expected:.1f}) [{status}]")
+    mode_str = "mode1+AP" if ap else "mode0"
+    print(f"glide_ratio:   L/D={measured_LD:4.1f}   (theory: {LD_max:.1f}, sink: {avg_sink:.1f} m/s, expected: {sink_expected:.1f}) [{status}] ({mode_str})")
 
 
 def test_sustained_turn():
     """
-    Sustained turn test - verifies banked flight produces a turn.
+    Sustained turn test - verifies banked flight produces a coordinated turn.
 
-    Tests that at 30° bank, 100 m/s:
-      - Plane turns (heading changes)
-      - Turn rate is positive and consistent
-      - Altitude loss is bounded
+    Tests that at 30° bank, 100 m/s with proper autopilot control:
+      - Plane maintains bank angle
+      - Plane maintains altitude (within tight tolerance)
+      - Turn rate matches theory: omega = g*tan(bank)/V = 3.2°/s
 
-    Note: The physics model produces ~2-3°/s at 30° bank (ideal theory: 3.2°/s).
-    This is acceptable for RL training - the physics is consistent.
+    Mode 0: Uses zero controls (pitch holds due to rate-based system)
+    Mode 1: Uses coordinated turn autopilot (bank hold + altitude hold)
+
+    Theory at 30° bank, 100 m/s:
+      Turn rate = g * tan(30°) / V = 9.81 * 0.577 / 100 = 3.2°/s
+      Load factor = 1/cos(30°) = 1.15g
     """
     env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
 
@@ -466,6 +500,9 @@ def test_sustained_turn():
     V = 100.0           # m/s
     bank_deg = 30.0     # degrees
     bank = np.radians(bank_deg)
+
+    # Theoretical turn rate
+    theory_turn_rate = np.degrees(9.81 * np.tan(bank) / V)  # ~3.2°/s
 
     # Build quaternion: small pitch up, then bank right
     alpha = np.radians(3)  # Small fixed pitch for lift
@@ -493,10 +530,14 @@ def test_sustained_turn():
         player_throttle=1.0,
     )
 
-    # Run with zero controls
+    # Get Mode 1 autopilot if needed
+    ap = get_mode1_autopilot()
+
+    # Run turn
     headings = []
     speeds = []
     alts = []
+    banks = []
 
     for step in range(250):  # 5 seconds
         state = env.get_state()
@@ -505,12 +546,29 @@ def test_sustained_turn():
         speed = np.sqrt(vx**2 + vy**2 + state['vz']**2)
         alt = state['pz']
 
+        # Calculate actual bank angle
+        up_y, up_z = state['up_y'], state['up_z']
+        bank_actual = np.degrees(np.arccos(np.clip(up_z, -1, 1)))
+        if up_y > 0:
+            bank_actual = -bank_actual
+
         if step >= 50:  # After 1 second settling
             headings.append(heading)
             speeds.append(speed)
             alts.append(alt)
+            banks.append(bank_actual)
 
-        action = np.array([[1.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+        # Control strategy depends on physics mode
+        if ap is not None:
+            # Mode 1: Coordinated turn autopilot (hold bank + maintain altitude)
+            elevator, aileron = ap['hold_bank_and_level'](state, bank_deg)
+        else:
+            # Mode 0: Zero controls - pitch angle holds due to rate-based system
+            # NOTE: Mode 0 bank may drift - known issue, future investigation needed
+            elevator = 0.0
+            aileron = 0.0
+
+        action = np.array([[1.0, elevator, aileron, 0.0, 0.0]], dtype=np.float32)
         _, _, term, _, _ = env.step(action)
         if term[0]:
             break
@@ -526,15 +584,34 @@ def test_sustained_turn():
 
     avg_speed = np.mean(speeds) if speeds else 0
     alt_change = alts[-1] - alts[0] if len(alts) > 1 else 0
+    avg_bank = np.mean(banks) if banks else 0
 
     RESULTS['turn_rate'] = abs(turn_rate_actual)
 
-    # Check: positive turn rate (plane is turning), not diving catastrophically
-    is_turning = abs(turn_rate_actual) > 1.0
-    alt_ok = alt_change > -200  # Less than 200m loss in 5 seconds
-    status = "OK" if (is_turning and alt_ok) else "CHECK"
+    # Different tolerances for Mode 0 (passive) vs Mode 1 (autopilot)
+    if ap is not None:
+        # Mode 1 with autopilot: tight tolerances for proper sustained turn
+        turn_rate_ok = abs(turn_rate_actual) > theory_turn_rate * 0.5
+        alt_ok = abs(alt_change) < 50  # Tight: less than 50m change
+        bank_ok = abs(avg_bank - bank_deg) < 15
+        mode_str = "mode1+AP"
+    else:
+        # Mode 0 passive: original loose tolerances (bank drift is known issue)
+        turn_rate_ok = abs(turn_rate_actual) > 1.0
+        alt_ok = alt_change > -200
+        bank_ok = True  # Don't check bank for passive Mode 0
+        mode_str = "mode0"
 
-    print(f"turn_rate:     {abs(turn_rate_actual):5.1f}°/s ({bank_deg:.0f}° bank, speed: {avg_speed:.0f}, Δalt: {alt_change:+.0f}m) [{status}]")
+    all_ok = turn_rate_ok and alt_ok and bank_ok
+    status = "OK" if all_ok else "CHECK"
+
+    print(f"turn_rate:     {abs(turn_rate_actual):5.1f}°/s (theory: {theory_turn_rate:.1f}, bank: {avg_bank:.0f}°/{bank_deg:.0f}°, Δalt: {alt_change:+.0f}m) [{status}] ({mode_str})")
+
+    if not all_ok:
+        if not turn_rate_ok:
+            print(f"  CHECK: Turn rate {turn_rate_actual:.1f}°/s too low")
+        if not alt_ok:
+            print(f"  CHECK: Altitude change {alt_change:+.0f}m exceeds tolerance")
 
 
 def test_turn_60():
@@ -721,9 +798,10 @@ def test_rudder_only_turn():
         roll = np.arctan2(up_y, up_z)
 
         # Wings level PID: drive roll to zero
+        # Positive roll = banked LEFT, need positive aileron (roll RIGHT) to correct
         roll_error = 0.0 - roll
         roll_deriv = (roll - prev_roll) / 0.02
-        aileron = roll_kp * roll_error - roll_kd * roll_deriv
+        aileron = -(roll_kp * roll_error - roll_kd * roll_deriv)  # Flip sign: left bank → right aileron
         aileron = np.clip(aileron, -1.0, 1.0)
         prev_roll = roll
 

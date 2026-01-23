@@ -175,3 +175,38 @@ def level_flight_pitch(obs, kp=LEVEL_FLIGHT_KP, kd=LEVEL_FLIGHT_KD):
     # Negative because: if climbing (vz>0), need nose down (negative elevator)
     elevator = -kp * vz - kd * vz
     return np.clip(elevator, -0.2, 0.2)
+
+
+# =============================================================================
+# Mode 1 autopilot helpers (uses autopilot_mode1 module)
+# =============================================================================
+
+def is_mode1():
+    """Check if current physics mode is Mode 1 (realistic)."""
+    return get_physics_mode() == 1
+
+
+def get_mode1_autopilot():
+    """
+    Lazily import autopilot_mode1 module.
+    Returns the module or None if not needed (Mode 0).
+    """
+    if not is_mode1():
+        return None
+    from autopilot_mode1 import (
+        hold_pitch, hold_vz, hold_bank, damp_yaw,
+        hold_bank_and_level, hold_pitch_and_bank, full_autopilot,
+        get_pitch_deg, get_bank_deg, DEFAULT_GAINS
+    )
+    return {
+        'hold_pitch': hold_pitch,
+        'hold_vz': hold_vz,
+        'hold_bank': hold_bank,
+        'damp_yaw': damp_yaw,
+        'hold_bank_and_level': hold_bank_and_level,
+        'hold_pitch_and_bank': hold_pitch_and_bank,
+        'full_autopilot': full_autopilot,
+        'get_pitch_deg': get_pitch_deg,
+        'get_bank_deg': get_bank_deg,
+        'DEFAULT_GAINS': DEFAULT_GAINS,
+    }

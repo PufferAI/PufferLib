@@ -29,13 +29,39 @@ typedef enum {
     AP_COUNT
 } AutopilotMode;
 
-// PID gains (from test_flight.py)
-#define AP_LEVEL_KP       0.001f
-#define AP_LEVEL_KD       0.001f
-#define AP_TURN_ELEV_KP  -0.05f
-#define AP_TURN_ELEV_KD   0.005f
-#define AP_TURN_ROLL_KP  -2.0f
-#define AP_TURN_ROLL_KD  -0.1f
+// ============================================================================
+// PID GAINS - Dual sets for different physics modes
+// ============================================================================
+
+// Simplified physics PID gains (mode 0) - instant rate response
+// Level: Tuned via pid_sweep.py: max_dev=0.07m over 8s
+#define AP_SIMPLE_LEVEL_KP       0.0001f
+#define AP_SIMPLE_LEVEL_KD       0.1f
+// Turn pitch-tracking: keeps nose level (pitch=0) during banked turns
+// Tuned via pid_sweep.py: pitch_mean=0°, pitch_std=0°, bank_error=0.002°
+#define AP_SIMPLE_TURN_PITCH_KP  1.0f
+#define AP_SIMPLE_TURN_PITCH_KD  0.1f
+#define AP_SIMPLE_TURN_ROLL_KP  -1.0f
+#define AP_SIMPLE_TURN_ROLL_KD  -0.2f
+
+// Realistic physics PID gains (mode 1) - gradual rate buildup
+// Level: Tuned via pid_sweep.py: max_dev=7.95m over 8s
+#define AP_REAL_LEVEL_KP       0.0005f
+#define AP_REAL_LEVEL_KD       0.2f
+// Turn pitch-tracking: keeps nose level (pitch=0) during banked turns
+// Tuned via pid_sweep.py: pitch_mean=-0.38°, pitch_std=0.36°, bank_error=0.03°
+#define AP_REAL_TURN_PITCH_KP   8.0f
+#define AP_REAL_TURN_PITCH_KD   0.5f
+#define AP_REAL_TURN_ROLL_KP   -5.0f
+#define AP_REAL_TURN_ROLL_KD   -0.2f
+
+// Legacy defines for backward compatibility (map to simplified)
+#define AP_LEVEL_KP       AP_SIMPLE_LEVEL_KP
+#define AP_LEVEL_KD       AP_SIMPLE_LEVEL_KD
+#define AP_TURN_PITCH_KP  AP_SIMPLE_TURN_PITCH_KP
+#define AP_TURN_PITCH_KD  AP_SIMPLE_TURN_PITCH_KD
+#define AP_TURN_ROLL_KP   AP_SIMPLE_TURN_ROLL_KP
+#define AP_TURN_ROLL_KD   AP_SIMPLE_TURN_ROLL_KD
 
 // Default parameters
 #define AP_DEFAULT_THROTTLE   1.0f
@@ -64,12 +90,17 @@ typedef struct {
     // Own RNG state (not affected by srand() calls)
     unsigned int rng_state;
 
-    // PID gains
-    float pitch_kp, pitch_kd;
+    // Physics mode (0=simplified, 1=realistic) - determines which PID gains to use
+    int physics_mode;
+
+    // PID gains (selected based on physics_mode)
+    float pitch_kp, pitch_kd;           // Level flight: vz tracking
+    float turn_pitch_kp, turn_pitch_kd; // Turns: pitch tracking (keeps nose level)
     float roll_kp, roll_kd;
 
     // PID state (for derivative terms)
     float prev_vz;
+    float prev_pitch;
     float prev_bank_error;
 
     // AP_WEAVE state
@@ -86,7 +117,8 @@ static inline float ap_rand(AutopilotState* ap) {
 }
 
 // Initialize autopilot with defaults
-static inline void autopilot_init(AutopilotState* ap) {
+// physics_mode: 0=simplified (instant rate response), 1=realistic (gradual rate buildup)
+static inline void autopilot_init(AutopilotState* ap, int physics_mode) {
     ap->mode = AP_STRAIGHT;
     ap->randomize_on_reset = 0;
     ap->throttle = AP_DEFAULT_THROTTLE;
@@ -107,12 +139,28 @@ static inline void autopilot_init(AutopilotState* ap) {
     // Seed autopilot RNG from system rand (called once at init, not affected by later srand)
     ap->rng_state = (unsigned int)rand();
 
-    ap->pitch_kp = AP_LEVEL_KP;
-    ap->pitch_kd = AP_LEVEL_KD;
-    ap->roll_kp = AP_TURN_ROLL_KP;
-    ap->roll_kd = AP_TURN_ROLL_KD;
+    // Store physics mode and select appropriate PID gains
+    ap->physics_mode = physics_mode;
+    if (physics_mode == 0) {
+        // Simplified physics: instant rate response
+        ap->pitch_kp = AP_SIMPLE_LEVEL_KP;
+        ap->pitch_kd = AP_SIMPLE_LEVEL_KD;
+        ap->turn_pitch_kp = AP_SIMPLE_TURN_PITCH_KP;
+        ap->turn_pitch_kd = AP_SIMPLE_TURN_PITCH_KD;
+        ap->roll_kp = AP_SIMPLE_TURN_ROLL_KP;
+        ap->roll_kd = AP_SIMPLE_TURN_ROLL_KD;
+    } else {
+        // Realistic physics: gradual rate buildup, needs higher P, lower D
+        ap->pitch_kp = AP_REAL_LEVEL_KP;
+        ap->pitch_kd = AP_REAL_LEVEL_KD;
+        ap->turn_pitch_kp = AP_REAL_TURN_PITCH_KP;
+        ap->turn_pitch_kd = AP_REAL_TURN_PITCH_KD;
+        ap->roll_kp = AP_REAL_TURN_ROLL_KP;
+        ap->roll_kd = AP_REAL_TURN_ROLL_KD;
+    }
 
     ap->prev_vz = 0.0f;
+    ap->prev_pitch = 0.0f;
     ap->prev_bank_error = 0.0f;
 
     // New mode state
@@ -131,17 +179,36 @@ static inline void autopilot_set_mode(AutopilotState* ap, AutopilotMode mode,
 
     // Reset PID state on mode change
     ap->prev_vz = 0.0f;
+    ap->prev_pitch = 0.0f;
     ap->prev_bank_error = 0.0f;
 
-    // Set appropriate gains based on mode
-    if (mode == AP_LEVEL || mode == AP_CLIMB || mode == AP_DESCEND) {
-        ap->pitch_kp = AP_LEVEL_KP;
-        ap->pitch_kd = AP_LEVEL_KD;
-    } else if (mode == AP_TURN_LEFT || mode == AP_TURN_RIGHT) {
-        ap->pitch_kp = AP_TURN_ELEV_KP;
-        ap->pitch_kd = AP_TURN_ELEV_KD;
-        ap->roll_kp = AP_TURN_ROLL_KP;
-        ap->roll_kd = AP_TURN_ROLL_KD;
+    // Set appropriate gains based on mode AND physics mode
+    if (ap->physics_mode == 0) {
+        // Simplified physics gains
+        if (mode == AP_LEVEL || mode == AP_CLIMB || mode == AP_DESCEND) {
+            ap->pitch_kp = AP_SIMPLE_LEVEL_KP;
+            ap->pitch_kd = AP_SIMPLE_LEVEL_KD;
+        } else if (mode == AP_TURN_LEFT || mode == AP_TURN_RIGHT ||
+                   mode == AP_HARD_TURN_LEFT || mode == AP_HARD_TURN_RIGHT ||
+                   mode == AP_WEAVE || mode == AP_EVASIVE) {
+            ap->turn_pitch_kp = AP_SIMPLE_TURN_PITCH_KP;
+            ap->turn_pitch_kd = AP_SIMPLE_TURN_PITCH_KD;
+            ap->roll_kp = AP_SIMPLE_TURN_ROLL_KP;
+            ap->roll_kd = AP_SIMPLE_TURN_ROLL_KD;
+        }
+    } else {
+        // Realistic physics gains
+        if (mode == AP_LEVEL || mode == AP_CLIMB || mode == AP_DESCEND) {
+            ap->pitch_kp = AP_REAL_LEVEL_KP;
+            ap->pitch_kd = AP_REAL_LEVEL_KD;
+        } else if (mode == AP_TURN_LEFT || mode == AP_TURN_RIGHT ||
+                   mode == AP_HARD_TURN_LEFT || mode == AP_HARD_TURN_RIGHT ||
+                   mode == AP_WEAVE || mode == AP_EVASIVE) {
+            ap->turn_pitch_kp = AP_REAL_TURN_PITCH_KP;
+            ap->turn_pitch_kd = AP_REAL_TURN_PITCH_KD;
+            ap->roll_kp = AP_REAL_TURN_ROLL_KP;
+            ap->roll_kd = AP_REAL_TURN_ROLL_KD;
+        }
     }
 }
 
@@ -173,6 +240,13 @@ static inline float ap_get_bank_angle(Plane* p) {
     float bank = acosf(fminf(fmaxf(up.z, -1.0f), 1.0f));
     if (up.y < 0) bank = -bank;
     return bank;
+}
+
+// Get pitch angle from plane orientation
+// Returns positive for nose up, negative for nose down
+static inline float ap_get_pitch_angle(Plane* p) {
+    Vec3 fwd = quat_rotate(p->ori, vec3(1, 0, 0));
+    return asinf(fminf(fmaxf(fwd.z, -1.0f), 1.0f));
 }
 
 // Get vertical velocity from plane
@@ -218,16 +292,19 @@ static inline void autopilot_step(AutopilotState* ap, Plane* p, float* actions, 
 
         case AP_TURN_LEFT:
         case AP_TURN_RIGHT: {
-            // Dual PID: roll to target bank, pitch to maintain altitude
+            // Dual PID: roll to target bank, pitch to keep nose level
             float target_bank = ap->target_bank;
             if (ap->mode == AP_TURN_LEFT) target_bank = -target_bank;
 
-            // Elevator PID (maintain vz = 0)
-            float vz_error = -vz;
-            float vz_deriv = (vz - ap->prev_vz) / dt;
-            float elevator = ap->pitch_kp * vz_error + ap->pitch_kd * vz_deriv;
+            // Elevator PID: track pitch=0 (level nose) instead of vz=0
+            // This keeps the aircraft's nose on the horizon during turns
+            float pitch = ap_get_pitch_angle(p);
+            float pitch_error = 0.0f - pitch;  // Target pitch = 0 (level)
+            float pitch_deriv = (pitch - ap->prev_pitch) / dt;
+            // Negative sign: positive error → negative elevator (pull back → nose up)
+            float elevator = -ap->turn_pitch_kp * pitch_error + ap->turn_pitch_kd * pitch_deriv;
             actions[1] = ap_clamp(elevator, -1.0f, 1.0f);
-            ap->prev_vz = vz;
+            ap->prev_pitch = pitch;
 
             // Aileron PID (achieve target bank)
             float bank_error = target_bank - bank;
@@ -285,12 +362,13 @@ static inline void autopilot_step(AutopilotState* ap, Plane* p, float* actions, 
 
             float target_bank = AP_WEAVE_AMPLITUDE * sinf(ap->phase);
 
-            // Elevator PID for level flight (maintain vz = 0)
-            float vz_error = -vz;
-            float vz_deriv = (vz - ap->prev_vz) / dt;
-            float elevator = ap->pitch_kp * vz_error + ap->pitch_kd * vz_deriv;
+            // Elevator PID: track pitch=0 (level nose)
+            float pitch = ap_get_pitch_angle(p);
+            float pitch_error = 0.0f - pitch;
+            float pitch_deriv = (pitch - ap->prev_pitch) / dt;
+            float elevator = -ap->turn_pitch_kp * pitch_error + ap->turn_pitch_kd * pitch_deriv;
             actions[1] = ap_clamp(elevator, -1.0f, 1.0f);
-            ap->prev_vz = vz;
+            ap->prev_pitch = pitch;
 
             // Aileron PID to track oscillating bank
             float bank_error = target_bank - bank;

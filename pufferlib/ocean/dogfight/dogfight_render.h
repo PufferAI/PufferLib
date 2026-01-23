@@ -59,6 +59,14 @@ static const char* OBS_LABELS_REALISTIC_FULL[15] = {
     "turn_rate", "g_load"
 };
 
+// Scheme 6: OBS_MOMENTUM (15 obs) - for mode 1 physics
+static const char* OBS_LABELS_MOMENTUM[15] = {
+    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
+    "aoa", "altitude", "energy",
+    "tgt_az", "tgt_el", "range", "closure",
+    "E_adv", "aspect"
+};
+
 // Draw airplane shape using lines - shows roll/pitch/yaw clearly
 // Body frame: X=forward, Y=right, Z=up
 void draw_plane_shape(Vec3 pos, Quat ori, Color body_color, Color wing_color) {
@@ -223,6 +231,9 @@ void draw_obs_monitor(Dogfight *env) {
         case OBS_REALISTIC_FULL:
             labels = OBS_LABELS_REALISTIC_FULL;
             break;
+        case OBS_MOMENTUM:
+            labels = OBS_LABELS_MOMENTUM;
+            break;
         default:
             labels = OBS_LABELS_ANGLES;
             break;
@@ -256,6 +267,10 @@ void draw_obs_monitor(Dogfight *env) {
                 is_01 = (i == 0 || i == 1);  // airspeed, altitude
                 // Also range_km (index 6) is [0,1]
                 if (env->obs_scheme != OBS_REALISTIC && i == 6) is_01 = true;
+                break;
+            case OBS_MOMENTUM:
+                // fwd_spd(0), altitude(7), energy(8), range(11) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 11);
                 break;
             default:
                 break;

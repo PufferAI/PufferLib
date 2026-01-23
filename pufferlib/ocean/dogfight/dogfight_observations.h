@@ -415,6 +415,101 @@ void compute_obs_realistic_full(Dogfight *env) {
     // OBS_SIZE = 15
 }
 
+// Normalization for omega (angular velocity) - for OBS_MOMENTUM
+#define MAX_OMEGA 3.0f          // ~172 deg/s, reasonable for aggressive maneuvering
+#define INV_MAX_OMEGA (1.0f / MAX_OMEGA)
+#define MAX_AOA 0.5f            // ~28 deg, beyond this is deep stall
+#define INV_MAX_AOA (1.0f / MAX_AOA)
+
+// Scheme 6: OBS_MOMENTUM - For mode 1 physics (momentum-based)
+// Combines drone_race patterns (omega, body-frame vel) with fighter essentials (AoA, energy)
+// 15 observations total:
+//   [0-2]   Body-frame velocity (forward speed, sideslip, climb rate)
+//   [3-5]   Angular velocity (roll rate, pitch rate, yaw rate) - CRITICAL for momentum control
+//   [6]     Angle of attack - critical for lift/stall awareness
+//   [7-8]   Altitude + own energy
+//   [9-12]  Target spherical (azimuth, elevation, range, closure)
+//   [13-14] Tactical (energy advantage, target aspect)
+void compute_obs_momentum(Dogfight *env) {
+    Plane *p = &env->player;
+    Plane *o = &env->opponent;
+
+    Quat q_inv = {p->ori.w, -p->ori.x, -p->ori.y, -p->ori.z};
+
+    // === OWN FLIGHT STATE ===
+    // Body-frame velocity
+    Vec3 vel_body = quat_rotate(q_inv, p->vel);
+    float speed = norm3(p->vel);
+
+    // Angle of attack
+    Vec3 forward = quat_rotate(p->ori, vec3(1, 0, 0));
+    Vec3 up = quat_rotate(p->ori, vec3(0, 0, 1));
+    float aoa = 0.0f;
+    if (speed > 1.0f) {
+        Vec3 vel_norm = normalize3(p->vel);
+        float cos_alpha = clampf(dot3(vel_norm, forward), -1.0f, 1.0f);
+        float alpha = acosf(cos_alpha);
+        float sign = (dot3(p->vel, up) < 0) ? 1.0f : -1.0f;
+        aoa = alpha * sign;
+    }
+
+    // Energy state (like OBS_PURSUIT)
+    float potential = p->pos.z * INV_WORLD_MAX_Z;
+    float kinetic = (speed * speed) / (MAX_SPEED * MAX_SPEED);
+    float own_energy = (potential + kinetic) * 0.5f;
+
+    // === TARGET STATE ===
+    // Target in body frame -> spherical
+    Vec3 rel_pos = sub3(o->pos, p->pos);
+    Vec3 rel_pos_body = quat_rotate(q_inv, rel_pos);
+    float dist = norm3(rel_pos);
+
+    float target_az = atan2f(rel_pos_body.y, rel_pos_body.x);
+    float r_horiz = sqrtf(rel_pos_body.x * rel_pos_body.x + rel_pos_body.y * rel_pos_body.y);
+    float target_el = atan2f(rel_pos_body.z, fmaxf(r_horiz, 1e-6f));
+
+    // Closure rate
+    Vec3 rel_vel = sub3(p->vel, o->vel);
+    float closure = dot3(rel_vel, normalize3(rel_pos));
+
+    // === TACTICAL ===
+    // Target aspect
+    Vec3 opp_fwd = quat_rotate(o->ori, vec3(1, 0, 0));
+    Vec3 to_player = normalize3(sub3(p->pos, o->pos));
+    float target_aspect = dot3(opp_fwd, to_player);
+
+    // Opponent energy
+    float opp_speed = norm3(o->vel);
+    float opp_potential = o->pos.z * INV_WORLD_MAX_Z;
+    float opp_kinetic = (opp_speed * opp_speed) / (MAX_SPEED * MAX_SPEED);
+    float opp_energy = (opp_potential + opp_kinetic) * 0.5f;
+    float energy_advantage = clampf(own_energy - opp_energy, -1.0f, 1.0f);
+
+    int i = 0;
+
+    // Own flight state (9 obs)
+    env->observations[i++] = clampf(vel_body.x * INV_MAX_SPEED, 0.0f, 1.0f);  // Forward speed [0,1]
+    env->observations[i++] = clampf(vel_body.y * INV_MAX_SPEED, -1.0f, 1.0f); // Sideslip [-1,1]
+    env->observations[i++] = clampf(vel_body.z * INV_MAX_SPEED, -1.0f, 1.0f); // Climb rate [-1,1]
+    env->observations[i++] = clampf(p->omega.x * INV_MAX_OMEGA, -1.0f, 1.0f); // Roll rate [-1,1]
+    env->observations[i++] = clampf(p->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f); // Pitch rate [-1,1]
+    env->observations[i++] = clampf(p->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f); // Yaw rate [-1,1]
+    env->observations[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);          // AoA [-1,1]
+    env->observations[i++] = potential;                                        // Altitude [0,1]
+    env->observations[i++] = own_energy;                                       // Own energy [0,1]
+
+    // Target state - spherical (4 obs)
+    env->observations[i++] = target_az * INV_PI;                               // Azimuth [-1,1]
+    env->observations[i++] = target_el * INV_HALF_PI;                          // Elevation [-1,1]
+    env->observations[i++] = clampf(dist / 2000.0f, 0.0f, 1.0f);              // Range [0,1]
+    env->observations[i++] = clampf(closure * INV_MAX_SPEED, -1.0f, 1.0f);    // Closure [-1,1]
+
+    // Tactical (2 obs)
+    env->observations[i++] = energy_advantage;                                 // Energy advantage [-1,1]
+    env->observations[i++] = target_aspect;                                    // Aspect [-1,1]
+    // OBS_SIZE = 15
+}
+
 // Dispatcher function
 void compute_observations(Dogfight *env) {
     switch (env->obs_scheme) {
@@ -424,6 +519,7 @@ void compute_observations(Dogfight *env) {
         case OBS_REALISTIC_RANGE:      compute_obs_realistic_range(env); break;
         case OBS_REALISTIC_ENEMY_STATE: compute_obs_realistic_enemy_state(env); break;
         case OBS_REALISTIC_FULL:       compute_obs_realistic_full(env); break;
+        case OBS_MOMENTUM:             compute_obs_momentum(env); break;
         default:                       compute_obs_angles(env); break;
     }
 }
@@ -476,6 +572,15 @@ static const char* DEBUG_OBS_LABELS_REALISTIC_FULL[15] = {
     "emy_pitch", "emy_roll", "emy_hdg",
     "turn_rate", "g_load"
 };
+
+// Scheme 6: OBS_MOMENTUM (15 obs) - for mode 1 physics
+static const char* DEBUG_OBS_LABELS_MOMENTUM[15] = {
+    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
+    "aoa", "altitude", "energy",
+    "tgt_az", "tgt_el", "range", "closure",
+    "E_adv", "aspect"
+};
+
 void print_observations(Dogfight *env) {
     const char** labels = NULL;
     int num_obs = env->obs_size;
@@ -488,6 +593,7 @@ void print_observations(Dogfight *env) {
         case OBS_REALISTIC_RANGE:       labels = DEBUG_OBS_LABELS_REALISTIC_RANGE; break;
         case OBS_REALISTIC_ENEMY_STATE: labels = DEBUG_OBS_LABELS_REALISTIC_ENEMY_STATE; break;
         case OBS_REALISTIC_FULL:        labels = DEBUG_OBS_LABELS_REALISTIC_FULL; break;
+        case OBS_MOMENTUM:              labels = DEBUG_OBS_LABELS_MOMENTUM; break;
         default:                        labels = DEBUG_OBS_LABELS_ANGLES; break;
     }
 
@@ -514,6 +620,10 @@ void print_observations(Dogfight *env) {
                 is_01 = (i == 0 || i == 1);  // airspeed, altitude
                 // Also range_km (index 6) is [0,1] for schemes 3-5
                 if (env->obs_scheme != OBS_REALISTIC && i == 6) is_01 = true;
+                break;
+            case OBS_MOMENTUM:
+                // fwd_spd(0), altitude(7), energy(8), range(11) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 11);
                 break;
             default:
                 break;

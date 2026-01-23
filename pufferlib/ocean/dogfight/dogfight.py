@@ -29,6 +29,7 @@ OBS_SIZES = {
     3: 10,  # REALISTIC_RANGE: instruments(4) + gunsight(3) + visual(3) w/ km range
     4: 13,  # REALISTIC_ENEMY_STATE: + enemy pitch/roll/heading
     5: 15,  # REALISTIC_FULL: + turn rate + G-loading
+    6: 15,  # MOMENTUM: body-frame vel(3) + omega(3) + aoa(1) + alt(1) + energy(1) + target(4) + tactical(2)
 }
 
 

@@ -37,26 +37,30 @@ static int _realistic_rk4_stage = 0;  // Which RK4 stage (0=k1, 1=k2, 2=k3, 3=k4
 // These create aerodynamic moments proportional to angles and rates
 
 // Static stability (moment vs angle)
-#define CM_0 0.025f         // Pitch trim offset (positive = nose-up at alpha=0)
+// CM_0: Pitch trim offset. Negative counters nose-up from wing incidence/lift.
+// With WING_INCIDENCE=+1.5° and cambered airfoil, lift creates nose-up moment.
+// Tuning: 0.025f->2.26G, -0.03f->0.16G. Targeting ~1.0G, linear interpolation suggests -0.005f.
+#define CM_0 -0.005f        // Pitch trim offset (fine-tuned for ~1.0G level flight)
 #define CM_ALPHA -1.2f      // Pitch stability (negative = stable, nose-up creates nose-down moment)
 #define CL_BETA -0.08f      // Dihedral effect (negative = stable, sideslip creates restoring roll)
 #define CN_BETA 0.12f       // Weathervane stability (positive = stable, sideslip creates restoring yaw)
 
 // Damping derivatives (dimensionless, multiplied by q*c/2V or p*b/2V)
-#define CM_Q -15.0f         // Pitch damping (strong, opposes pitch rate)
+#define CM_Q -10.0f         // Pitch damping (matches JSBSim P-51D)
 #define CL_P -0.4f          // Roll damping (opposes roll rate)
 #define CN_R -0.15f         // Yaw damping (opposes yaw rate)
 
 // Control derivatives (per radian deflection)
-// Reduced by ~3x from theoretical values for more controllable response
-// (matches rate-based physics sensitivity for RL training)
+// Tuned for P-51D target performance (see test results)
 #define CM_DELTA_E -0.5f    // Elevator: negative = nose UP with positive (back stick) deflection
-#define CL_DELTA_A 0.04f    // Aileron: positive = roll RIGHT with positive deflection
-#define CN_DELTA_R -0.035f  // Rudder: negative = nose LEFT with positive (right pedal) deflection
+#define CL_DELTA_A 0.20f    // Aileron: positive = roll RIGHT with positive deflection
+                            // Tuning: 0.04f->19°, 0.15f->70°, need 90°, try 0.20f
+#define CN_DELTA_R 0.015f   // Rudder: positive = nose RIGHT with positive (right pedal) deflection
+                            // Tuning: 0.015f should give 2-20° heading change with full rudder
 
 // Cross-coupling derivatives
 #define CN_DELTA_A -0.007f  // Adverse yaw from aileron (negative = right aileron causes left yaw)
-#define CL_DELTA_R 0.003f   // Roll from rudder (positive = right rudder causes right roll)
+#define CL_DELTA_R -0.003f  // Roll from rudder (negative = right rudder causes left roll, rudder is above roll axis)
 
 // Control surface deflection limits (radians)
 #define MAX_ELEVATOR_DEFLECTION 0.35f   // ±20°
@@ -135,7 +139,7 @@ static inline float compute_sideslip(Plane* p) {
 }
 
 // Compute lift direction (perpendicular to velocity, in lift plane)
-static inline Vec3 compute_lift_direction(Vec3 vel_norm, Vec3 right) {
+static inline Vec3 compute_lift_direction(Vec3 vel_norm, Vec3 right, Vec3 body_up) {
     Vec3 lift_dir = cross3(vel_norm, right);
     float mag = norm3(lift_dir);
 
@@ -152,9 +156,9 @@ static inline Vec3 compute_lift_direction(Vec3 vel_norm, Vec3 right) {
         return result;
     }
     if (DEBUG_REALISTIC >= 3 && _realistic_rk4_stage == 0) {
-        printf("  [LIFT_DIR] FALLBACK to (0,0,1)\n");
+        printf("  [LIFT_DIR] FALLBACK to world_up=(0,0,1)\n");
     }
-    return vec3(0, 0, 1);  // Fallback
+    return (Vec3){0, 0, 1};  // Fallback to world-frame up (lift perpendicular to ground)
 }
 
 // Compute thrust from power model
@@ -343,7 +347,7 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
     if (DEBUG_REALISTIC >= 3 && _realistic_rk4_stage == 0) {
         printf("\n  --- LIFT DIRECTION ---\n");
     }
-    Vec3 lift_dir = compute_lift_direction(vel_norm, right);
+    Vec3 lift_dir = compute_lift_direction(vel_norm, right, body_up);
     Vec3 F_lift = mul3(lift_dir, L_mag);
 
     // Drag direction: opposite to velocity
@@ -741,9 +745,14 @@ static inline void step_plane_with_physics_realistic(Plane *p, float *actions, f
     }
 
     // ========================================================================
-    // G-LIMIT ENFORCEMENT (clamp velocity change)
+    // G-LIMIT ENFORCEMENT (clamp velocity change, energy-conserving)
     // ========================================================================
-    // If G-force exceeds limits, reduce the velocity change to stay within limits
+    // If G-force exceeds limits, reduce the velocity change to stay within limits.
+    // IMPORTANT: The correction must be perpendicular to velocity to preserve kinetic energy.
+    // If body_up has a component along velocity, applying the full correction would
+    // change speed, violating conservation of energy.
+
+    float speed_before_glimit = norm3(p->vel);
 
     if (p->g_force > G_LIMIT_POS) {
         // Positive G exceeded - reduce upward acceleration
@@ -755,8 +764,18 @@ static inline void step_plane_with_physics_realistic(Plane *p, float *actions, f
                    p->g_force, G_LIMIT_POS, excess_g);
         }
 
-        p->vel = sub3(p->vel, mul3(body_up, excess_accel * dt));
+        // Calculate the correction vector
+        Vec3 correction = mul3(body_up, excess_accel * dt);
+
+        // Project out the component along velocity to preserve speed (energy)
+        Vec3 vel_norm = normalize3(p->vel);
+        float correction_along_vel = dot3(correction, vel_norm);
+        Vec3 correction_perp = sub3(correction, mul3(vel_norm, correction_along_vel));
+
+        // Apply only the perpendicular correction
+        p->vel = sub3(p->vel, correction_perp);
         p->g_force = G_LIMIT_POS;
+
     } else if (p->g_force < -G_LIMIT_NEG) {
         // Negative G exceeded - reduce downward acceleration
         float deficit_g = -G_LIMIT_NEG - p->g_force;
@@ -767,8 +786,26 @@ static inline void step_plane_with_physics_realistic(Plane *p, float *actions, f
                    p->g_force, G_LIMIT_NEG, -deficit_g);
         }
 
-        p->vel = add3(p->vel, mul3(body_up, deficit_accel * dt));
+        // Calculate the correction vector
+        Vec3 correction = mul3(body_up, deficit_accel * dt);
+
+        // Project out the component along velocity to preserve speed (energy)
+        Vec3 vel_norm = normalize3(p->vel);
+        float correction_along_vel = dot3(correction, vel_norm);
+        Vec3 correction_perp = sub3(correction, mul3(vel_norm, correction_along_vel));
+
+        // Apply only the perpendicular correction
+        p->vel = add3(p->vel, correction_perp);
         p->g_force = -G_LIMIT_NEG;
+    }
+
+    // Verify energy was preserved (speed should not have changed)
+    if (DEBUG_REALISTIC >= 1) {
+        float speed_after_glimit = norm3(p->vel);
+        if (fabsf(speed_after_glimit - speed_before_glimit) > 0.01f) {
+            printf("WARNING: G-limit changed speed from %.2f to %.2f!\n",
+                   speed_before_glimit, speed_after_glimit);
+        }
     }
 
     // Update yaw_from_rudder for backward compatibility
