@@ -8,13 +8,17 @@ from pufferlib.ocean.dogfight import binding
 
 # Autopilot mode constants (must match autopilot.h enum)
 class AutopilotMode:
-    STRAIGHT = 0     # Fly straight (current/default behavior)
-    LEVEL = 1        # Level flight with PD on vz
-    TURN_LEFT = 2    # Coordinated left turn
-    TURN_RIGHT = 3   # Coordinated right turn
-    CLIMB = 4        # Constant climb rate
-    DESCEND = 5      # Constant descent rate
-    RANDOM = 6       # Random mode selection at reset
+    STRAIGHT = 0         # Fly straight (current/default behavior)
+    LEVEL = 1            # Level flight with PD on vz
+    TURN_LEFT = 2        # Coordinated left turn
+    TURN_RIGHT = 3       # Coordinated right turn
+    CLIMB = 4            # Constant climb rate
+    DESCEND = 5          # Constant descent rate
+    HARD_TURN_LEFT = 6   # Aggressive 70° left turn
+    HARD_TURN_RIGHT = 7  # Aggressive 70° right turn
+    WEAVE = 8            # Sine wave jinking (S-turns)
+    EVASIVE = 9          # Break turn when threat behind
+    RANDOM = 10          # Random mode selection at reset
 
 
 # Observation sizes by scheme (must match C OBS_SIZES in dogfight.h)

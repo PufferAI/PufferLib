@@ -151,7 +151,7 @@ static inline void autopilot_randomize(AutopilotState* ap) {
     float cumsum = 0.0f;
     AutopilotMode selected = AP_LEVEL;  // Default fallback
 
-    for (int i = 1; i < AP_COUNT - 1; i++) {  // Skip STRAIGHT(0) and RANDOM(6)
+    for (int i = 1; i < AP_COUNT - 1; i++) {  // Skip STRAIGHT(0) and RANDOM(10)
         cumsum += ap->mode_weights[i];
         if (r <= cumsum) {
             selected = (AutopilotMode)i;

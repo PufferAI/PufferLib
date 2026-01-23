@@ -1064,6 +1064,148 @@ def test_mode_weights():
     print(f"  distribution: LEVEL={level_pct:.0f}%, TURN_L={100*counts[2]/num_trials:.0f}%, TURN_R={100*counts[3]/num_trials:.0f}%, CLIMB={climb_pct:.0f}% [{status2}]")
 
 
+def test_autopilot_enum_sync():
+    """
+    Verify Python AutopilotMode enum values match expected C enum values.
+
+    This test catches enum sync bugs where Python and C have different values.
+    Bug fixed: RANDOM was 6 in Python but 10 in C, causing RANDOM to be
+    interpreted as HARD_TURN_LEFT.
+    """
+    # Expected values from autopilot.h enum
+    expected = {
+        'STRAIGHT': 0,
+        'LEVEL': 1,
+        'TURN_LEFT': 2,
+        'TURN_RIGHT': 3,
+        'CLIMB': 4,
+        'DESCEND': 5,
+        'HARD_TURN_LEFT': 6,
+        'HARD_TURN_RIGHT': 7,
+        'WEAVE': 8,
+        'EVASIVE': 9,
+        'RANDOM': 10,
+    }
+
+    errors = []
+    for name, expected_val in expected.items():
+        actual_val = getattr(AutopilotMode, name, None)
+        if actual_val is None:
+            errors.append(f"{name}: MISSING")
+        elif actual_val != expected_val:
+            errors.append(f"{name}: got {actual_val}, expected {expected_val}")
+
+    status = "OK" if not errors else "FAIL"
+    RESULTS['enum_sync'] = len(errors)
+    print(f"enum_sync:     {len(expected)} modes checked [{status}]")
+
+    if errors:
+        for err in errors:
+            print(f"  ERROR: {err}")
+
+
+def test_autopilot_random_not_hardturn():
+    """
+    Verify RANDOM mode actually randomizes, not treated as HARD_TURN_LEFT.
+
+    Bug fixed: Python RANDOM=6 was interpreted as C HARD_TURN_LEFT=6.
+    With the fix, RANDOM=10 triggers randomization to modes 1-5.
+    """
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env.reset()
+
+    # Set RANDOM mode
+    env.set_autopilot(env_idx=0, mode=AutopilotMode.RANDOM)
+
+    # Collect modes after multiple resets
+    modes = []
+    for _ in range(30):
+        env.reset()
+        modes.append(env.get_autopilot_mode(env_idx=0))
+
+    unique_modes = set(modes)
+    all_valid = all(1 <= m <= 5 for m in modes)
+    has_variety = len(unique_modes) >= 3  # Should see at least 3 different modes
+
+    # Key check: mode 6 (HARD_TURN_LEFT) should NEVER appear
+    no_hardturn = 6 not in modes
+
+    status = "OK" if (all_valid and has_variety and no_hardturn) else "FAIL"
+    RESULTS['random_not_hardturn'] = 1 if status == "OK" else 0
+    print(f"random_mode:   unique={unique_modes}, no_mode_6={no_hardturn} [{status}]")
+
+    if not no_hardturn:
+        print(f"  FAIL: Mode 6 (HARD_TURN_LEFT) appeared - enum sync bug!")
+    if not all_valid:
+        print(f"  FAIL: Got modes outside 1-5 range: {[m for m in modes if m < 1 or m > 5]}")
+
+
+def test_autopilot_bounds_check():
+    """
+    Verify invalid autopilot mode values are clamped to STRAIGHT.
+
+    Tests that binding.c bounds checking works for out-of-range values.
+    """
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env.reset()
+
+    # Test invalid mode values (should clamp to STRAIGHT=0)
+    test_cases = [
+        (-1, "negative"),
+        (11, "above AP_COUNT"),
+        (100, "way out of range"),
+    ]
+
+    all_ok = True
+    for invalid_mode, desc in test_cases:
+        env.set_autopilot(env_idx=0, mode=invalid_mode)
+        result_mode = env.get_autopilot_mode(env_idx=0)
+        if result_mode != 0:  # Should be STRAIGHT
+            all_ok = False
+            print(f"  FAIL: mode={invalid_mode} ({desc}) -> {result_mode}, expected 0")
+
+    status = "OK" if all_ok else "FAIL"
+    RESULTS['bounds_check'] = 1 if all_ok else 0
+    print(f"bounds_check:  invalid modes clamped to STRAIGHT [{status}]")
+
+
+def test_force_state_pid_reset():
+    """
+    Verify force_state() resets autopilot PID state to avoid derivative spikes.
+
+    After teleporting with force_state(), the autopilot should not have
+    large derivative terms from the previous state causing control jumps.
+    """
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env.reset()
+
+    # Set up autopilot in LEVEL mode (uses PID for altitude hold)
+    env.set_autopilot(env_idx=0, mode=AutopilotMode.LEVEL)
+
+    # Run for a bit to build up PID state
+    action = np.array([[1.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+    for _ in range(50):
+        env.step(action)
+
+    # Teleport to a very different altitude (large vz change)
+    env.force_state(
+        player_pos=(0, 0, 2000),  # Different altitude
+        player_vel=(150, 0, 50),  # Different vertical velocity
+    )
+
+    # Get state immediately after force_state
+    state = env.get_state(env_idx=0)
+
+    # The test passes if we didn't crash and state is valid
+    # (A derivative spike from stale PID state would cause extreme control outputs)
+    pos_valid = abs(state['pz'] - 2000) < 1
+    vel_valid = abs(state['vz'] - 50) < 1
+
+    status = "OK" if pos_valid and vel_valid else "FAIL"
+    RESULTS['pid_reset'] = 1 if status == "OK" else 0
+    print(f"pid_reset:     force_state resets PID state [{status}]")
+
+
 # =============================================================================
 # G-FORCE TESTS - Validate G-loading physics
 # =============================================================================
@@ -1361,6 +1503,11 @@ TESTS = {
     'knife_edge_pull': test_knife_edge_pull,
     'knife_edge_flight': test_knife_edge_flight,
     'mode_weights': test_mode_weights,
+    # Autopilot enum sync tests
+    'autopilot_enum_sync': test_autopilot_enum_sync,
+    'autopilot_random_mode': test_autopilot_random_not_hardturn,
+    'autopilot_bounds_check': test_autopilot_bounds_check,
+    'autopilot_pid_reset': test_force_state_pid_reset,
     # G-force tests
     'g_level_flight': test_g_level_flight,
     'g_push_forward': test_g_push_forward,

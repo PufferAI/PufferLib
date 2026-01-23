@@ -954,6 +954,10 @@ void force_state(
     env->opponent.prev_vel = env->opponent.vel;  // Initialize to current (no accel)
     env->opponent.omega = vec3(0, 0, 0);  // No angular velocity
 
+    // Reset autopilot PID state to avoid derivative spikes
+    env->opponent_ap.prev_vz = env->opponent.vel.z;
+    env->opponent_ap.prev_bank_error = 0.0f;
+
     // Environment state
     env->tick = tick;
     env->episode_return = 0.0f;

@@ -167,6 +167,7 @@ static PyObject* env_set_autopilot(PyObject* self, PyObject* args, PyObject* kwa
 
     // Get autopilot parameters
     int mode = get_int(kwargs, "mode", AP_STRAIGHT);
+    if (mode < 0 || mode >= AP_COUNT) mode = AP_STRAIGHT;  // Bounds check
     float throttle = get_float(kwargs, "throttle", AP_DEFAULT_THROTTLE);
     float bank_deg = get_float(kwargs, "bank_deg", AP_DEFAULT_BANK_DEG);
     float climb_rate = get_float(kwargs, "climb_rate", AP_DEFAULT_CLIMB_RATE);
@@ -189,6 +190,7 @@ static PyObject* vec_set_autopilot(PyObject* self, PyObject* args, PyObject* kwa
 
     // Get autopilot parameters
     int mode = get_int(kwargs, "mode", AP_STRAIGHT);
+    if (mode < 0 || mode >= AP_COUNT) mode = AP_STRAIGHT;  // Bounds check
     float throttle = get_float(kwargs, "throttle", AP_DEFAULT_THROTTLE);
     float bank_deg = get_float(kwargs, "bank_deg", AP_DEFAULT_BANK_DEG);
     float climb_rate = get_float(kwargs, "climb_rate", AP_DEFAULT_CLIMB_RATE);
