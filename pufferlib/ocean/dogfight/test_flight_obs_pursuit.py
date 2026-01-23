@@ -23,7 +23,7 @@ import numpy as np
 from dogfight import Dogfight
 
 from test_flight_base import (
-    get_render_mode, get_render_fps, get_physics_mode,
+    get_render_mode, get_render_fps,
     RESULTS,
 )
 
@@ -37,7 +37,7 @@ def test_obs_pursuit_bounds():
     - Indices 0, 1, 4: [0, 1] (speed, potential, own_energy)
     - All others: [-1, 1]
     """
-    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     violations = []
@@ -90,7 +90,7 @@ def test_obs_pursuit_energy_conservation():
     Energy observation (obs[4]) should decrease slightly due to drag,
     but not increase significantly (conservation violation).
     """
-    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # 90deg pitch, 100 m/s, low throttle
@@ -161,7 +161,7 @@ def test_obs_pursuit_energy_dive():
     Start high (2500m), pitch down, let gravity accelerate.
     Energy should be relatively stable (gravity -> speed, drag -> loss).
     """
-    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Start high, pitch down 45deg
@@ -229,7 +229,7 @@ def test_obs_pursuit_energy_advantage():
     - Lower/slower player should have negative advantage
     - Equal state should have ~0 advantage
     """
-    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
 
     # Case 1: Player higher, same speed -> positive advantage
@@ -302,7 +302,7 @@ def test_obs_pursuit_target_aspect():
     IMPORTANT: Must set opponent_ori to match opponent_vel, otherwise
     physics step will severely alter velocity (flying "backward" is not stable).
     """
-    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     action = np.array([[0.5, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)  # Some throttle
 
     # Head-on: opponent facing toward player (yaw=180deg = facing -X)
@@ -372,7 +372,7 @@ def test_obs_pursuit_closure_rate():
     IMPORTANT: Must set opponent_ori to match opponent_vel to avoid
     physics instability (flying backward causes extreme drag).
     """
-    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     action = np.array([[0.5, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)  # Some throttle
 
     # Closing: player faster toward target (chasing)
@@ -435,7 +435,7 @@ def test_obs_pursuit_target_angles_wrap():
     Sweep target position around player (behind the player through +/-180deg)
     and check for large discontinuities in target_az.
     """
-    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
 
     target_azs = []

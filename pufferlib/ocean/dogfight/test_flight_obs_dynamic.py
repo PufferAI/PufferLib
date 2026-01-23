@@ -8,7 +8,7 @@ import numpy as np
 from dogfight import Dogfight
 
 from test_flight_base import (
-    get_render_mode, get_render_fps, get_physics_mode,
+    get_render_mode, get_render_fps,
     RESULTS,
 )
 from test_flight_obs_static import obs_continuity_check
@@ -28,7 +28,7 @@ def test_obs_during_loop():
 
     This tests the quaternion->euler conversion under continuous rotation.
     """
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Start with good speed at safe altitude, target ahead to avoid edge cases
@@ -109,7 +109,7 @@ def test_obs_during_roll():
     The +/-180deg crossover is the critical test - if there's a wrap bug,
     roll will jump from +1 to -1 instantly instead of smoothly transitioning.
     """
-    env = Dogfight(num_envs=1, obs_scheme=2, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=2, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     env.force_state(
@@ -196,7 +196,7 @@ def test_obs_vertical_pitch():
     This documents the behavior rather than asserting specific values,
     since gimbal lock is a known limitation of euler angles.
     """
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Test nose straight up (90deg pitch)
@@ -279,7 +279,7 @@ def test_obs_azimuth_crossover():
     Test: Sweep opponent from right-behind through directly-behind to left-behind
     and check for discontinuities.
     """
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
     action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
 
     azimuths = []
@@ -352,7 +352,7 @@ def test_obs_yaw_wrap():
     - Normal flight rarely involves facing directly backwards
     - Roll wrap happens during inverted flight (loops, barrel rolls)
     """
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
     action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
 
     yaws = []
@@ -451,7 +451,7 @@ def test_obs_elevation_extremes():
     Test: Place target directly above and below player, verify elevation
     is correct and bounded.
     """
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
     action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
 
     # Target directly above (500m up)
@@ -529,7 +529,7 @@ def test_obs_complex_maneuver():
 
     This tests edge cases that might not appear in single-axis tests.
     """
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     env.force_state(
@@ -599,7 +599,7 @@ def test_quaternion_normalization():
 
     Non-unit quaternion -> incorrect euler angles -> bad observations.
     """
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     env.force_state(

@@ -15,7 +15,6 @@ def parse_args():
     parser.add_argument('--render', action='store_true', help='Enable visual rendering')
     parser.add_argument('--fps', type=int, default=50, help='Target FPS when rendering (default 50 = real-time, try 5-10 for slow-mo)')
     parser.add_argument('--test', type=str, default=None, help='Run specific test only')
-    parser.add_argument('--physics-mode', type=int, default=0, help='Physics mode: 0=simplified (default), 1=realistic')
     return parser.parse_args()
 
 
@@ -40,12 +39,6 @@ def get_render_fps():
     """Get render FPS from args."""
     args = get_args()
     return args.fps if args.render else None
-
-
-def get_physics_mode():
-    """Get physics mode from args (0=simplified, 1=realistic)."""
-    args = get_args()
-    return args.physics_mode
 
 
 # Constants (must match dogfight.h)
@@ -177,36 +170,3 @@ def level_flight_pitch(obs, kp=LEVEL_FLIGHT_KP, kd=LEVEL_FLIGHT_KD):
     return np.clip(elevator, -0.2, 0.2)
 
 
-# =============================================================================
-# Mode 1 autopilot helpers (uses autopilot_mode1 module)
-# =============================================================================
-
-def is_mode1():
-    """Check if current physics mode is Mode 1 (realistic)."""
-    return get_physics_mode() == 1
-
-
-def get_mode1_autopilot():
-    """
-    Lazily import autopilot_mode1 module.
-    Returns the module or None if not needed (Mode 0).
-    """
-    if not is_mode1():
-        return None
-    from autopilot_mode1 import (
-        hold_pitch, hold_vz, hold_bank, damp_yaw,
-        hold_bank_and_level, hold_pitch_and_bank, full_autopilot,
-        get_pitch_deg, get_bank_deg, DEFAULT_GAINS
-    )
-    return {
-        'hold_pitch': hold_pitch,
-        'hold_vz': hold_vz,
-        'hold_bank': hold_bank,
-        'damp_yaw': damp_yaw,
-        'hold_bank_and_level': hold_bank_and_level,
-        'hold_pitch_and_bank': hold_pitch_and_bank,
-        'full_autopilot': full_autopilot,
-        'get_pitch_deg': get_pitch_deg,
-        'get_bank_deg': get_bank_deg,
-        'DEFAULT_GAINS': DEFAULT_GAINS,
-    }

@@ -8,9 +8,8 @@
 #ifndef AUTOPILOT_H
 #define AUTOPILOT_H
 
-// Note: autopilot.h expects the physics header (flightlib.h or physics_momentum.h)
-// to be included BEFORE this file, providing Vec3, Quat, Plane, etc.
-// This is done in dogfight.h which selects the physics mode first.
+// Note: autopilot.h requires flightlib.h to be included BEFORE this file,
+// providing Vec3, Quat, Plane, and other physics types.
 #include <math.h>
 
 // Autopilot mode enumeration
@@ -30,38 +29,20 @@ typedef enum {
 } AutopilotMode;
 
 // ============================================================================
-// PID GAINS - Dual sets for different physics modes
+// PID GAINS - Tuned for realistic 6DOF physics (RK4 integration)
 // ============================================================================
 
-// Simplified physics PID gains (mode 0) - instant rate response
-// Level: Tuned via pid_sweep.py: max_dev=0.07m over 8s
-#define AP_SIMPLE_LEVEL_KP       0.0001f
-#define AP_SIMPLE_LEVEL_KD       0.1f
-// Turn pitch-tracking: keeps nose level (pitch=0) during banked turns
-// Tuned via pid_sweep.py: pitch_mean=0°, pitch_std=0°, bank_error=0.002°
-#define AP_SIMPLE_TURN_PITCH_KP  1.0f
-#define AP_SIMPLE_TURN_PITCH_KD  0.1f
-#define AP_SIMPLE_TURN_ROLL_KP  -1.0f
-#define AP_SIMPLE_TURN_ROLL_KD  -0.2f
+// Level flight: vz tracking
+// Tuned via pid_sweep.py: max_dev=7.95m over 8s
+#define AP_LEVEL_KP       0.0005f
+#define AP_LEVEL_KD       0.2f
 
-// Realistic physics PID gains (mode 1) - gradual rate buildup
-// Level: Tuned via pid_sweep.py: max_dev=7.95m over 8s
-#define AP_REAL_LEVEL_KP       0.0005f
-#define AP_REAL_LEVEL_KD       0.2f
 // Turn pitch-tracking: keeps nose level (pitch=0) during banked turns
 // Tuned via pid_sweep.py: pitch_mean=-0.38°, pitch_std=0.36°, bank_error=0.03°
-#define AP_REAL_TURN_PITCH_KP   8.0f
-#define AP_REAL_TURN_PITCH_KD   0.5f
-#define AP_REAL_TURN_ROLL_KP   -5.0f
-#define AP_REAL_TURN_ROLL_KD   -0.2f
-
-// Legacy defines for backward compatibility (map to simplified)
-#define AP_LEVEL_KP       AP_SIMPLE_LEVEL_KP
-#define AP_LEVEL_KD       AP_SIMPLE_LEVEL_KD
-#define AP_TURN_PITCH_KP  AP_SIMPLE_TURN_PITCH_KP
-#define AP_TURN_PITCH_KD  AP_SIMPLE_TURN_PITCH_KD
-#define AP_TURN_ROLL_KP   AP_SIMPLE_TURN_ROLL_KP
-#define AP_TURN_ROLL_KD   AP_SIMPLE_TURN_ROLL_KD
+#define AP_TURN_PITCH_KP   8.0f
+#define AP_TURN_PITCH_KD   0.5f
+#define AP_TURN_ROLL_KP   -5.0f
+#define AP_TURN_ROLL_KD   -0.2f
 
 // Default parameters
 #define AP_DEFAULT_THROTTLE   1.0f
@@ -90,10 +71,7 @@ typedef struct {
     // Own RNG state (not affected by srand() calls)
     unsigned int rng_state;
 
-    // Physics mode (0=simplified, 1=realistic) - determines which PID gains to use
-    int physics_mode;
-
-    // PID gains (selected based on physics_mode)
+    // PID gains
     float pitch_kp, pitch_kd;           // Level flight: vz tracking
     float turn_pitch_kp, turn_pitch_kd; // Turns: pitch tracking (keeps nose level)
     float roll_kp, roll_kd;
@@ -117,8 +95,7 @@ static inline float ap_rand(AutopilotState* ap) {
 }
 
 // Initialize autopilot with defaults
-// physics_mode: 0=simplified (instant rate response), 1=realistic (gradual rate buildup)
-static inline void autopilot_init(AutopilotState* ap, int physics_mode) {
+static inline void autopilot_init(AutopilotState* ap) {
     ap->mode = AP_STRAIGHT;
     ap->randomize_on_reset = 0;
     ap->throttle = AP_DEFAULT_THROTTLE;
@@ -139,25 +116,12 @@ static inline void autopilot_init(AutopilotState* ap, int physics_mode) {
     // Seed autopilot RNG from system rand (called once at init, not affected by later srand)
     ap->rng_state = (unsigned int)rand();
 
-    // Store physics mode and select appropriate PID gains
-    ap->physics_mode = physics_mode;
-    if (physics_mode == 0) {
-        // Simplified physics: instant rate response
-        ap->pitch_kp = AP_SIMPLE_LEVEL_KP;
-        ap->pitch_kd = AP_SIMPLE_LEVEL_KD;
-        ap->turn_pitch_kp = AP_SIMPLE_TURN_PITCH_KP;
-        ap->turn_pitch_kd = AP_SIMPLE_TURN_PITCH_KD;
-        ap->roll_kp = AP_SIMPLE_TURN_ROLL_KP;
-        ap->roll_kd = AP_SIMPLE_TURN_ROLL_KD;
-    } else {
-        // Realistic physics: gradual rate buildup, needs higher P, lower D
-        ap->pitch_kp = AP_REAL_LEVEL_KP;
-        ap->pitch_kd = AP_REAL_LEVEL_KD;
-        ap->turn_pitch_kp = AP_REAL_TURN_PITCH_KP;
-        ap->turn_pitch_kd = AP_REAL_TURN_PITCH_KD;
-        ap->roll_kp = AP_REAL_TURN_ROLL_KP;
-        ap->roll_kd = AP_REAL_TURN_ROLL_KD;
-    }
+    ap->pitch_kp = AP_LEVEL_KP;
+    ap->pitch_kd = AP_LEVEL_KD;
+    ap->turn_pitch_kp = AP_TURN_PITCH_KP;
+    ap->turn_pitch_kd = AP_TURN_PITCH_KD;
+    ap->roll_kp = AP_TURN_ROLL_KP;
+    ap->roll_kd = AP_TURN_ROLL_KD;
 
     ap->prev_vz = 0.0f;
     ap->prev_pitch = 0.0f;
@@ -182,33 +146,16 @@ static inline void autopilot_set_mode(AutopilotState* ap, AutopilotMode mode,
     ap->prev_pitch = 0.0f;
     ap->prev_bank_error = 0.0f;
 
-    // Set appropriate gains based on mode AND physics mode
-    if (ap->physics_mode == 0) {
-        // Simplified physics gains
-        if (mode == AP_LEVEL || mode == AP_CLIMB || mode == AP_DESCEND) {
-            ap->pitch_kp = AP_SIMPLE_LEVEL_KP;
-            ap->pitch_kd = AP_SIMPLE_LEVEL_KD;
-        } else if (mode == AP_TURN_LEFT || mode == AP_TURN_RIGHT ||
-                   mode == AP_HARD_TURN_LEFT || mode == AP_HARD_TURN_RIGHT ||
-                   mode == AP_WEAVE || mode == AP_EVASIVE) {
-            ap->turn_pitch_kp = AP_SIMPLE_TURN_PITCH_KP;
-            ap->turn_pitch_kd = AP_SIMPLE_TURN_PITCH_KD;
-            ap->roll_kp = AP_SIMPLE_TURN_ROLL_KP;
-            ap->roll_kd = AP_SIMPLE_TURN_ROLL_KD;
-        }
-    } else {
-        // Realistic physics gains
-        if (mode == AP_LEVEL || mode == AP_CLIMB || mode == AP_DESCEND) {
-            ap->pitch_kp = AP_REAL_LEVEL_KP;
-            ap->pitch_kd = AP_REAL_LEVEL_KD;
-        } else if (mode == AP_TURN_LEFT || mode == AP_TURN_RIGHT ||
-                   mode == AP_HARD_TURN_LEFT || mode == AP_HARD_TURN_RIGHT ||
-                   mode == AP_WEAVE || mode == AP_EVASIVE) {
-            ap->turn_pitch_kp = AP_REAL_TURN_PITCH_KP;
-            ap->turn_pitch_kd = AP_REAL_TURN_PITCH_KD;
-            ap->roll_kp = AP_REAL_TURN_ROLL_KP;
-            ap->roll_kd = AP_REAL_TURN_ROLL_KD;
-        }
+    if (mode == AP_LEVEL || mode == AP_CLIMB || mode == AP_DESCEND) {
+        ap->pitch_kp = AP_LEVEL_KP;
+        ap->pitch_kd = AP_LEVEL_KD;
+    } else if (mode == AP_TURN_LEFT || mode == AP_TURN_RIGHT ||
+               mode == AP_HARD_TURN_LEFT || mode == AP_HARD_TURN_RIGHT ||
+               mode == AP_WEAVE || mode == AP_EVASIVE) {
+        ap->turn_pitch_kp = AP_TURN_PITCH_KP;
+        ap->turn_pitch_kd = AP_TURN_PITCH_KD;
+        ap->roll_kp = AP_TURN_ROLL_KP;
+        ap->roll_kd = AP_TURN_ROLL_KD;
     }
 }
 

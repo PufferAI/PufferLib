@@ -255,9 +255,3 @@ def full_autopilot(state, target_pitch_deg=0.0, target_bank_deg=0.0,
     rudder = damp_yaw(state, gains) if damp_yaw_rate else 0.0
 
     return elevator, aileron, rudder
-
-
-# Convenience function to check if we're in Mode 1
-def is_mode1(physics_mode):
-    """Check if physics_mode is realistic (Mode 1)."""
-    return physics_mode == 1

@@ -8,13 +8,16 @@ import numpy as np
 from dogfight import Dogfight, AutopilotMode
 
 from test_flight_base import (
-    get_render_mode, get_render_fps, get_physics_mode,
+    get_render_mode, get_render_fps,
     RESULTS, TEST_HIGHLIGHTS, setup_highlights,
     P51D_MAX_SPEED, P51D_STALL_SPEED, P51D_CLIMB_RATE, P51D_TURN_RATE,
     LEVEL_FLIGHT_KP, LEVEL_FLIGHT_KD,
     get_speed_from_state, get_vz_from_state, get_alt_from_state,
-    level_flight_pitch_from_state, is_mode1, get_mode1_autopilot,
+    level_flight_pitch_from_state,
 )
+
+# Import autopilot helpers for realistic physics tests
+from autopilot import hold_pitch, hold_bank, hold_bank_and_level
 
 
 def test_max_speed():
@@ -22,7 +25,7 @@ def test_max_speed():
     Full throttle level flight starting near max speed.
     Should stabilize around 159 m/s (P-51D Military power).
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Start at 150 m/s (near expected max), center of world, flying +X
@@ -65,7 +68,7 @@ def test_acceleration():
     Full throttle starting at 100 m/s - verify plane accelerates.
     Should see speed increase toward max speed (~150 m/s).
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Start at 100 m/s (well below max speed)
@@ -104,7 +107,7 @@ def test_deceleration():
     Zero throttle starting at 150 m/s - verify plane decelerates due to drag.
     Should see speed decrease as drag slows the plane.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Start at 150 m/s with zero throttle
@@ -141,7 +144,7 @@ def test_deceleration():
 
 def test_cruise_speed():
     """50% throttle level flight - cruise speed."""
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Start at moderate speed
@@ -186,7 +189,7 @@ def test_stall_speed():
 
     This bypasses autopilot limitations by setting pitch directly.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
 
     # Physics constants (must match flightlib.h)
     W = 4082 * 9.81      # Weight (N)
@@ -275,7 +278,7 @@ def test_climb_rate():
     Mode 0: Uses zero elevator (pitch holds constant due to rate-based controls)
     Mode 1: Uses pitch-hold autopilot to maintain climb pitch angle
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
 
     # Physics constants (must match flightlib.h)
     W = 4082 * 9.81      # Weight (N)
@@ -320,9 +323,6 @@ def test_climb_rate():
         player_throttle=1.0,
     )
 
-    # Get Mode 1 autopilot if needed
-    ap = get_mode1_autopilot()
-
     # Run and measure vz
     vzs = []
     speeds = []
@@ -338,15 +338,9 @@ def test_climb_rate():
             vzs.append(vz_now)
             speeds.append(speed)
 
-        # Control strategy depends on physics mode
-        if ap is not None:
-            # Mode 1: Use pitch-hold autopilot to maintain climb attitude
-            elevator = ap['hold_pitch'](state, target_pitch_deg)
-            aileron = ap['hold_bank'](state, 0.0)  # Wings level
-        else:
-            # Mode 0: Zero elevator - pitch angle holds due to rate-based controls
-            elevator = 0.0
-            aileron = 0.0
+        # Use autopilot to maintain climb attitude (realistic physics)
+        elevator = hold_pitch(state, target_pitch_deg)
+        aileron = hold_bank(state, 0.0)  # Wings level
 
         action = np.array([[1.0, elevator, aileron, 0.0, 0.0]], dtype=np.float32)
         _, _, term, _, _ = env.step(action)
@@ -359,8 +353,7 @@ def test_climb_rate():
     RESULTS['climb_rate'] = avg_vz
     diff = avg_vz - P51D_CLIMB_RATE
     status = "OK" if abs(diff) < 5 else "CHECK"
-    mode_str = "mode1+AP" if ap else "mode0"
-    print(f"climb_rate:    {avg_vz:6.1f} m/s  (P-51D: {P51D_CLIMB_RATE:.0f}, diff: {diff:+.1f}, speed: {avg_speed:.0f}/{Vy:.0f}) [{status}] ({mode_str})")
+    print(f"climb_rate:    {avg_vz:6.1f} m/s  (P-51D: {P51D_CLIMB_RATE:.0f}, diff: {diff:+.1f}, speed: {avg_speed:.0f}/{Vy:.0f}) [{status}]")
 
 
 def test_glide_ratio():
@@ -382,7 +375,7 @@ def test_glide_ratio():
     Mode 0: Zero controls - pitch holds due to rate-based system
     Mode 1: Pitch-hold autopilot to maintain glide angle
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
 
     # Calculate theoretical values from drag polar
     Cd0 = 0.0163
@@ -432,9 +425,6 @@ def test_glide_ratio():
         player_throttle=0.0,
     )
 
-    # Get Mode 1 autopilot if needed
-    ap = get_mode1_autopilot()
-
     # Run and measure sink rate
     vzs = []
     speeds = []
@@ -449,15 +439,9 @@ def test_glide_ratio():
             vzs.append(vz_now)
             speeds.append(speed)
 
-        # Control strategy depends on physics mode
-        if ap is not None:
-            # Mode 1: Use pitch-hold autopilot to maintain glide angle
-            elevator = ap['hold_pitch'](state, target_pitch_deg)
-            aileron = ap['hold_bank'](state, 0.0)  # Wings level
-        else:
-            # Mode 0: Zero controls - pitch angle holds due to rate-based system
-            elevator = 0.0
-            aileron = 0.0
+        # Use autopilot to maintain glide angle (realistic physics)
+        elevator = hold_pitch(state, target_pitch_deg)
+        aileron = hold_bank(state, 0.0)  # Wings level
 
         action = np.array([[-1.0, elevator, aileron, 0.0, 0.0]], dtype=np.float32)
         _, _, term, _, _ = env.step(action)
@@ -474,7 +458,7 @@ def test_glide_ratio():
 
     diff = avg_sink - sink_expected
     status = "OK" if abs(diff) < 2 else "CHECK"
-    mode_str = "mode1+AP" if ap else "mode0"
+    mode_str = "realistic"
     print(f"glide_ratio:   L/D={measured_LD:4.1f}   (theory: {LD_max:.1f}, sink: {avg_sink:.1f} m/s, expected: {sink_expected:.1f}) [{status}] ({mode_str})")
 
 
@@ -494,7 +478,7 @@ def test_sustained_turn():
       Turn rate = g * tan(30°) / V = 9.81 * 0.577 / 100 = 3.2°/s
       Load factor = 1/cos(30°) = 1.15g
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
 
     # Test parameters - 30° bank is gentle and stable
     V = 100.0           # m/s
@@ -530,9 +514,6 @@ def test_sustained_turn():
         player_throttle=1.0,
     )
 
-    # Get Mode 1 autopilot if needed
-    ap = get_mode1_autopilot()
-
     # Run turn
     headings = []
     speeds = []
@@ -558,15 +539,8 @@ def test_sustained_turn():
             alts.append(alt)
             banks.append(bank_actual)
 
-        # Control strategy depends on physics mode
-        if ap is not None:
-            # Mode 1: Coordinated turn autopilot (hold bank + maintain altitude)
-            elevator, aileron = ap['hold_bank_and_level'](state, bank_deg)
-        else:
-            # Mode 0: Zero controls - pitch angle holds due to rate-based system
-            # NOTE: Mode 0 bank may drift - known issue, future investigation needed
-            elevator = 0.0
-            aileron = 0.0
+        # Coordinated turn autopilot (hold bank + maintain altitude)
+        elevator, aileron = hold_bank_and_level(state, bank_deg)
 
         action = np.array([[1.0, elevator, aileron, 0.0, 0.0]], dtype=np.float32)
         _, _, term, _, _ = env.step(action)
@@ -588,24 +562,15 @@ def test_sustained_turn():
 
     RESULTS['turn_rate'] = abs(turn_rate_actual)
 
-    # Different tolerances for Mode 0 (passive) vs Mode 1 (autopilot)
-    if ap is not None:
-        # Mode 1 with autopilot: tight tolerances for proper sustained turn
-        turn_rate_ok = abs(turn_rate_actual) > theory_turn_rate * 0.5
-        alt_ok = abs(alt_change) < 50  # Tight: less than 50m change
-        bank_ok = abs(avg_bank - bank_deg) < 15
-        mode_str = "mode1+AP"
-    else:
-        # Mode 0 passive: original loose tolerances (bank drift is known issue)
-        turn_rate_ok = abs(turn_rate_actual) > 1.0
-        alt_ok = alt_change > -200
-        bank_ok = True  # Don't check bank for passive Mode 0
-        mode_str = "mode0"
+    # Tight tolerances for proper sustained turn with autopilot
+    turn_rate_ok = abs(turn_rate_actual) > theory_turn_rate * 0.5
+    alt_ok = abs(alt_change) < 50  # Less than 50m change
+    bank_ok = abs(avg_bank - bank_deg) < 15
 
     all_ok = turn_rate_ok and alt_ok and bank_ok
     status = "OK" if all_ok else "CHECK"
 
-    print(f"turn_rate:     {abs(turn_rate_actual):5.1f}°/s (theory: {theory_turn_rate:.1f}, bank: {avg_bank:.0f}°/{bank_deg:.0f}°, Δalt: {alt_change:+.0f}m) [{status}] ({mode_str})")
+    print(f"turn_rate:     {abs(turn_rate_actual):5.1f}°/s (theory: {theory_turn_rate:.1f}, bank: {avg_bank:.0f}°/{bank_deg:.0f}°, Δalt: {alt_change:+.0f}m) [{status}]")
 
     if not all_ok:
         if not turn_rate_ok:
@@ -621,7 +586,7 @@ def test_turn_60():
     P-51D reference: 60° bank (2.0g) at 350 mph gives 5°/s
     At 100 m/s: theory = g*tan(60°)/V = 9.81*1.732/100 = 9.7°/s
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
 
     bank_deg = 60.0
     bank_target = np.radians(bank_deg)
@@ -700,7 +665,7 @@ def test_turn_60():
 
 def test_pitch_direction():
     """Verify positive elevator = nose DOWN (standard joystick: push forward)."""
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     env.force_state(player_vel=(80, 0, 0))
@@ -724,7 +689,7 @@ def test_pitch_direction():
 
 def test_roll_direction():
     """Verify positive ailerons = roll right."""
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     env.force_state(player_vel=(80, 0, 0))
@@ -758,7 +723,7 @@ def test_rudder_only_turn():
     - Hold nose on horizon (elevator maintains level flight)
     - Apply full rudder and measure total heading change
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
     setup_highlights(env, 'rudder_only_turn')
 
@@ -895,7 +860,7 @@ def test_knife_edge_pull():
     This tests that the quaternion kinematics correctly transform body-frame
     rotations to world-frame effects.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
     setup_highlights(env, 'knife_edge_pull')
 
@@ -1006,7 +971,7 @@ def test_knife_edge_flight():
     - https://www.thenakedscientists.com/articles/questions/what-produces-lift-during-knife-edge-pass
     - https://www.aopa.org/news-and-media/all-news/1998/august/flight-training-magazine/form-and-function
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
     setup_highlights(env, 'knife_edge_flight')
 
@@ -1097,7 +1062,7 @@ def test_mode_weights():
     Sets 100% weight on AP_LEVEL, triggers multiple resets,
     verifies that selected mode is always AP_LEVEL.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Set AP_RANDOM mode and bias 100% toward LEVEL
@@ -1189,7 +1154,7 @@ def test_autopilot_random_not_hardturn():
     Bug fixed: Python RANDOM=6 was interpreted as C HARD_TURN_LEFT=6.
     With the fix, RANDOM=10 triggers randomization to modes 1-5.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Set RANDOM mode
@@ -1224,7 +1189,7 @@ def test_autopilot_bounds_check():
 
     Tests that binding.c bounds checking works for out-of-range values.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Test invalid mode values (should clamp to STRAIGHT=0)
@@ -1254,7 +1219,7 @@ def test_force_state_pid_reset():
     After teleporting with force_state(), the autopilot should not have
     large derivative terms from the previous state causing control jumps.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Set up autopilot in LEVEL mode (uses PID for altitude hold)
@@ -1293,7 +1258,7 @@ def test_g_level_flight():
     Level flight at cruise speed - verify G ≈ 1.0.
     In steady level flight, lift equals weight, so G-loading should be ~1.0.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Start at cruise speed, level
@@ -1327,7 +1292,7 @@ def test_g_push_forward():
     Push elevator forward - verify G decreases toward 0 and negative.
     Reset to level flight for each test to avoid looping artifacts.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
 
     print("  Pushing forward (positive elevator = nose down):")
     min_g = float('inf')
@@ -1364,7 +1329,7 @@ def test_g_pull_back():
     Pull elevator back - verify G increases above 1.0.
     Reset to level flight for each test to avoid looping artifacts.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
 
     print("  Pulling back (negative elevator = nose up):")
     max_g = float('-inf')
@@ -1401,7 +1366,7 @@ def test_g_limit_negative():
     Full forward stick - verify G never goes below -1.5G (G_LIMIT_NEG).
     Physics should clamp acceleration to prevent exceeding this limit.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Start at high speed for maximum control authority
@@ -1436,7 +1401,7 @@ def test_g_limit_positive():
     Full back stick - verify G never exceeds 6G (G_LIMIT_POS).
     Physics should clamp acceleration to prevent exceeding this limit.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
     env.reset()
 
     # Start at high speed for maximum G capability
@@ -1479,7 +1444,7 @@ def test_gentle_pitch_control():
     3. Verify linear relationship (not bang-bang)
     4. Calculate time to make 2.5° adjustment
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
 
     elevator_values = [-0.05, -0.1, -0.15, -0.2, -0.25, -0.3]
     pitch_rates = []
