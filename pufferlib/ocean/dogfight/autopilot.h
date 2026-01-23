@@ -8,7 +8,9 @@
 #ifndef AUTOPILOT_H
 #define AUTOPILOT_H
 
-#include "flightlib.h"
+// Note: autopilot.h expects the physics header (flightlib.h or physics_momentum.h)
+// to be included BEFORE this file, providing Vec3, Quat, Plane, etc.
+// This is done in dogfight.h which selects the physics mode first.
 #include <math.h>
 
 // Autopilot mode enumeration

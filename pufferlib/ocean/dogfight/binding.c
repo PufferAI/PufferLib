@@ -68,7 +68,9 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
 
     int env_num = get_int(kwargs, "env_num", 0);
 
-    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, advance_threshold, env_num);
+    int physics_mode = get_int(kwargs, "physics_mode", 0);
+
+    init(env, obs_scheme, &rcfg, physics_mode, curriculum_enabled, curriculum_randomize, advance_threshold, env_num);
     return 0;
 }
 

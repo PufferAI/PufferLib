@@ -17,21 +17,27 @@
 #define PENALTY_RUDDER 0.001f
 
 // ============================================================================
-// PHYSICS MODE SELECTION
+// PHYSICS MODE SELECTION (Runtime)
 // ============================================================================
-// 0 = Rate-based physics (current, uses flightlib.h)
-// 1 = Momentum-based RK4 physics (future, uses physics_momentum.h)
+// 0 = Simplified physics (flightlib.h) - direct rate commands, no stability derivatives
+// 1 = Realistic physics (physics_realistic.h) - full 6DOF with aerodynamic moments
 //
-// Both provide identical interface: step_plane_with_physics(), reset_plane(), etc.
-// Switch by changing this define and rebuilding.
+// Physics mode is set at init() and can be swept as a hyperparameter.
+// The single branch per physics step is negligible (~0 cycles predicted).
 // ============================================================================
-#define PHYSICS_MODE 0
-
-#if PHYSICS_MODE == 0
 #include "flightlib.h"
-#else
-#include "physics_momentum.h"
-#endif
+#include "physics_realistic.h"
+
+// Dispatch functions for runtime physics selection
+static inline void reset_plane_dispatch(Plane *p, Vec3 pos, Vec3 vel, int mode) {
+    if (mode == 0) reset_plane_rate(p, pos, vel);
+    else reset_plane_realistic(p, pos, vel);
+}
+
+static inline void step_plane_dispatch(Plane *p, float *actions, float dt, int mode) {
+    if (mode == 0) step_plane_with_physics_rate(p, actions, dt);
+    else step_plane_with_physics_realistic(p, actions, dt);
+}
 
 #include "autopilot.h"
 
@@ -202,14 +208,17 @@ typedef struct Dogfight {
     int env_num;                // Environment index (for filtering debug output)
     // Observation highlighting (for visual debugging)
     unsigned char obs_highlight[16];  // 1 = highlight this observation with red arrow
+    // Physics mode
+    int physics_mode;           // 0 = simplified, 1 = realistic
 } Dogfight;
 
 #include "dogfight_observations.h"
 
-void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, float advance_threshold, int env_num) {
+void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int physics_mode, int curriculum_enabled, int curriculum_randomize, float advance_threshold, int env_num) {
     env->log = (Log){0};
     env->tick = 0;
     env->env_num = env_num;
+    env->physics_mode = physics_mode;
     env->episode_return = 0.0f;
     env->client = NULL;
     // Observation scheme
@@ -375,7 +384,7 @@ void spawn_tail_chase(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
         player_pos.y + rndf(-40, 40),
         player_pos.z + rndf(-30, 30)
     );
-    reset_plane(&env->opponent, opp_pos, player_vel);
+    reset_plane_dispatch(&env->opponent, opp_pos, player_vel, env->physics_mode);
     env->opponent_ap.mode = AP_STRAIGHT;
 }
 
@@ -388,7 +397,7 @@ void spawn_head_on(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
         player_pos.z + rndf(-30, 30)
     );
     Vec3 opp_vel = vec3(-player_vel.x, -player_vel.y, player_vel.z);
-    reset_plane(&env->opponent, opp_pos, opp_vel);
+    reset_plane_dispatch(&env->opponent, opp_pos, opp_vel, env->physics_mode);
     env->opponent_ap.mode = AP_STRAIGHT;
 }
 
@@ -410,7 +419,7 @@ void spawn_crossing(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // side=+1 (right): fly toward (-45°) = (cos, -sin) to cross leftward
     // side=-1 (left): fly toward (+45°) = (cos, +sin) to cross rightward
     Vec3 opp_vel = vec3(speed * cos45, -side * speed * sin45, 0);
-    reset_plane(&env->opponent, opp_pos, opp_vel);
+    reset_plane_dispatch(&env->opponent, opp_pos, opp_vel, env->physics_mode);
     env->opponent_ap.mode = AP_STRAIGHT;
 }
 
@@ -424,7 +433,7 @@ void spawn_vertical(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
         player_pos.y + rndf(-50, 50),
         clampf(player_pos.z + alt_offset, 300, 2500)
     );
-    reset_plane(&env->opponent, opp_pos, player_vel);
+    reset_plane_dispatch(&env->opponent, opp_pos, player_vel, env->physics_mode);
     env->opponent_ap.mode = AP_LEVEL;  // Maintain altitude
 }
 
@@ -436,7 +445,7 @@ void spawn_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
         player_pos.y + rndf(-100, 100),
         player_pos.z + rndf(-50, 50)
     );
-    reset_plane(&env->opponent, opp_pos, player_vel);
+    reset_plane_dispatch(&env->opponent, opp_pos, player_vel, env->physics_mode);
     // Randomly choose turn direction - gentle 30° bank
     env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
     env->opponent_ap.target_bank = AP_STAGE4_BANK_DEG * (M_PI / 180.0f);  // 30°
@@ -460,7 +469,7 @@ void spawn_full_random(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     float speed = norm3(player_vel);
     Vec3 opp_vel = vec3(speed * cosf(vel_theta), speed * sinf(vel_theta), 0);
 
-    reset_plane(&env->opponent, opp_pos, opp_vel);
+    reset_plane_dispatch(&env->opponent, opp_pos, opp_vel, env->physics_mode);
 
     // Set orientation to match velocity direction (yaw rotation around Z)
     env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), vel_theta);
@@ -488,7 +497,7 @@ void spawn_hard_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
         player_pos.y + rndf(-100, 100),
         player_pos.z + rndf(-50, 50)
     );
-    reset_plane(&env->opponent, opp_pos, player_vel);
+    reset_plane_dispatch(&env->opponent, opp_pos, player_vel, env->physics_mode);
 
     // Pick from hard maneuver modes
     float r = rndf(0, 1);
@@ -519,7 +528,7 @@ void spawn_evasive(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     float speed = norm3(player_vel);
     Vec3 opp_vel = vec3(speed * cosf(vel_theta), speed * sinf(vel_theta), 0);
 
-    reset_plane(&env->opponent, opp_pos, opp_vel);
+    reset_plane_dispatch(&env->opponent, opp_pos, opp_vel, env->physics_mode);
     env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), vel_theta);
 
     // Mix of hard modes with AP_EVASIVE dominant
@@ -578,7 +587,7 @@ void spawn_legacy(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
         player_pos.y + rndf(-100, 100),
         player_pos.z + rndf(-50, 50)
     );
-    reset_plane(&env->opponent, opp_pos, player_vel);
+    reset_plane_dispatch(&env->opponent, opp_pos, player_vel, env->physics_mode);
 
     // Handle autopilot: randomize if configured, reset PID state
     if (env->opponent_ap.randomize_on_reset) {
@@ -635,7 +644,7 @@ void c_reset(Dogfight *env) {
     // Spawn player at random position
     Vec3 pos = vec3(rndf(-500, 500), rndf(-500, 500), rndf(500, 1500));
     Vec3 vel = vec3(80, 0, 0);
-    reset_plane(&env->player, pos, vel);
+    reset_plane_dispatch(&env->player, pos, vel, env->physics_mode);
 
     // Spawn opponent based on curriculum stage (or legacy if disabled)
     if (env->curriculum_enabled) {
@@ -683,14 +692,14 @@ void c_step(Dogfight *env) {
     if (DEBUG >= 10) printf("trigger=%.3f (fires if >0.5)\n", env->actions[4]);
 
     // Player uses full physics with actions
-    step_plane_with_physics(&env->player, env->actions, DT);
+    step_plane_dispatch(&env->player, env->actions, DT, env->physics_mode);
 
     // Opponent uses autopilot (if not AP_STRAIGHT, uses full physics)
     if (env->opponent_ap.mode != AP_STRAIGHT) {
         float opp_actions[5];
         env->opponent_ap.threat_pos = env->player.pos;  // For AP_EVASIVE mode
         autopilot_step(&env->opponent_ap, &env->opponent, opp_actions, DT);
-        step_plane_with_physics(&env->opponent, opp_actions, DT);
+        step_plane_dispatch(&env->opponent, opp_actions, DT, env->physics_mode);
     } else {
         step_plane(&env->opponent, DT);
     }

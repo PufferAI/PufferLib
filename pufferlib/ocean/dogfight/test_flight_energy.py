@@ -23,7 +23,7 @@ import numpy as np
 from dogfight import Dogfight
 
 from test_flight_base import (
-    get_render_mode, get_render_fps, setup_highlights,
+    get_render_mode, get_render_fps, get_physics_mode, setup_highlights,
     RESULTS, TEST_HIGHLIGHTS,
     get_speed_from_state, get_alt_from_state,
 )
@@ -95,7 +95,7 @@ def test_knife_edge_pull_energy():
 
     This tests that high-G maneuvers correctly penalize energy.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     env.reset()
 
     # Set up knife-edge: 90 deg right roll
@@ -192,7 +192,7 @@ def test_energy_level_flight():
     With throttle balanced against drag, Ps ≈ 0, so total energy
     should remain stable (small fluctuations from autopilot corrections).
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     env.reset()
 
     # Start at cruise speed, level
@@ -245,7 +245,7 @@ def test_energy_dive_acceleration():
     Total energy should decrease slowly (drag), but kinetic should
     increase as potential decreases (trading altitude for speed).
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     env.reset()
 
     # 45 degree dive
@@ -299,7 +299,7 @@ def test_energy_climb_deceleration():
     With full throttle, should gain altitude while losing some speed,
     but total energy should increase (thrust > drag).
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     env.reset()
 
     # 30 degree climb
@@ -351,7 +351,7 @@ def test_energy_sustained_turn_bleed():
     At 60 deg bank, n = 2.0, so induced drag is 4x level flight.
     Even with full throttle, energy should bleed.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     env.reset()
 
     # 60 degree right bank
@@ -423,7 +423,7 @@ def test_energy_loop():
     A loop involves sustained high-G (3-4G at bottom), which creates
     massive induced drag. Energy should drop 10-20% through a loop.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     env.reset()
 
     # Start fast and level for loop entry
@@ -471,7 +471,7 @@ def test_energy_split_s():
     Trades altitude for speed. Total energy decreases (drag during pull),
     but kinetic energy increases significantly.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     env.reset()
 
     # Start high and slow
@@ -528,7 +528,7 @@ def test_energy_zoom_climb():
     Zero throttle - pure kinetic -> potential conversion.
     Tests energy conservation with only drag losses.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     env.reset()
 
     # Start vertical: 90 deg pitch up
@@ -588,7 +588,7 @@ def test_energy_throttle_effect():
     - Full throttle: Ps > 0 (can accelerate or climb)
     - Zero throttle: Ps < 0 (will decelerate or sink)
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
 
     results = {}
 
@@ -640,7 +640,7 @@ def test_energy_high_g_bleed():
     Higher G = more induced drag = faster energy bleed.
     Tests at 2G, 4G, 6G pulls.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
 
     results = {}
 
@@ -691,7 +691,7 @@ def test_sideslip_drag():
     Full rudder should build up sideslip (yaw_from_rudder), which adds drag.
     Compare energy loss with and without rudder input.
     """
-    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
 
     results = {}
 

@@ -8,7 +8,7 @@ import numpy as np
 from dogfight import Dogfight, OBS_SIZES
 
 from test_flight_base import (
-    get_render_mode, get_render_fps,
+    get_render_mode, get_render_fps, get_physics_mode,
     RESULTS, OBS_ATOL, OBS_RTOL,
 )
 
@@ -68,7 +68,7 @@ def test_obs_scheme_dimensions():
     """Verify all obs schemes have correct dimensions."""
     all_passed = True
     for scheme, expected_size in OBS_SIZES.items():
-        env = Dogfight(num_envs=1, obs_scheme=scheme, render_mode=get_render_mode(), render_fps=get_render_fps())
+        env = Dogfight(num_envs=1, obs_scheme=scheme, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
         env.reset()
         obs = env.observations[0]
         actual = len(obs)
@@ -86,7 +86,7 @@ def test_obs_identity_orientation():
     Test identity orientation: player at origin, target ahead.
     Expect: pitch=0, roll=0, yaw=0, azimuth=0, elevation=0
     """
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     env.reset()
 
     env.force_state(
@@ -120,7 +120,7 @@ def test_obs_pitched_up():
     Pitched up 30 degrees.
     Expect: pitch = -30/180 = -0.167 (negative = nose UP)
     """
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     env.reset()
 
     pitch_rad = np.radians(30)
@@ -151,7 +151,7 @@ def test_obs_pitched_up():
 
 def test_obs_target_angles():
     """Test target azimuth/elevation computation."""
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
 
     # Target to the right
     env.reset()
@@ -191,7 +191,7 @@ def test_obs_target_angles():
 
 def test_obs_horizon_visible():
     """Test horizon_visible in scheme 2 (level=1, knife=0, inverted=-1)."""
-    env = Dogfight(num_envs=1, obs_scheme=2, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, obs_scheme=2, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
 
     # Level
@@ -233,7 +233,7 @@ def test_obs_horizon_visible():
 
 def test_obs_edge_cases():
     """Test edge cases: azimuth at 180°, zero speed, extreme distance."""
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
     passed = True
 
@@ -271,7 +271,7 @@ def test_obs_edge_cases():
 
 def test_obs_bounds():
     """Test that random states produce bounded observations in [-1, 1] for NN input."""
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
+    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps(), physics_mode=get_physics_mode())
     action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
     passed = True
     out_of_bounds = []

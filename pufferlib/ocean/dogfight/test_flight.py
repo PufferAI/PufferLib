@@ -37,7 +37,7 @@ TODO - FLIGHT PHYSICS TESTS NEEDED:
 """
 
 from test_flight_base import (
-    get_args, get_render_mode,
+    get_args, get_render_mode, get_physics_mode,
     RESULTS,
     P51D_MAX_SPEED, P51D_STALL_SPEED, P51D_CLIMB_RATE,
 )
@@ -88,9 +88,12 @@ def print_summary():
 
 if __name__ == "__main__":
     args = get_args()
+    physics_mode = get_physics_mode()
+    physics_mode_name = "simplified" if physics_mode == 0 else "realistic"
 
     print("P-51D Physics Validation Tests")
     print("=" * 60)
+    print(f"Physics mode: {physics_mode} ({physics_mode_name})")
 
     if args.test:
         # Run single test

@@ -39,6 +39,7 @@ class Dogfight(pufferlib.PufferEnv):
         seed=42,
         max_steps=3000,
         obs_scheme=0,
+        physics_mode=0,              # 0=simplified, 1=realistic
         # Curriculum learning
         curriculum_enabled=0,       # 0=off (legacy), 1=on (progressive stages)
         curriculum_randomize=0,     # 0=progressive (training), 1=random stage each episode (eval)
@@ -88,6 +89,7 @@ class Dogfight(pufferlib.PufferEnv):
                 report_interval=self.report_interval,
                 max_steps=max_steps,
                 obs_scheme=obs_scheme,
+                physics_mode=physics_mode,
 
                 curriculum_enabled=curriculum_enabled,
                 curriculum_randomize=curriculum_randomize,

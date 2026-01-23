@@ -15,6 +15,7 @@ def parse_args():
     parser.add_argument('--render', action='store_true', help='Enable visual rendering')
     parser.add_argument('--fps', type=int, default=50, help='Target FPS when rendering (default 50 = real-time, try 5-10 for slow-mo)')
     parser.add_argument('--test', type=str, default=None, help='Run specific test only')
+    parser.add_argument('--physics-mode', type=int, default=0, help='Physics mode: 0=simplified (default), 1=realistic')
     return parser.parse_args()
 
 
@@ -39,6 +40,12 @@ def get_render_fps():
     """Get render FPS from args."""
     args = get_args()
     return args.fps if args.render else None
+
+
+def get_physics_mode():
+    """Get physics mode from args (0=simplified, 1=realistic)."""
+    args = get_args()
+    return args.physics_mode
 
 
 # Constants (must match dogfight.h)
