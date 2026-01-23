@@ -560,7 +560,7 @@ class Protein:
             print(f'[Protein] Failed to load state: {e}')
 
     def _check_override(self):
-        """Check for user/agent override hyperparams. Returns params dict or None."""
+        """Check for override. Returns None, 'skip', or params dict."""
         if not os.path.exists(self.override_file):
             return None
         tmp = f'{self.override_file}.tmp'
@@ -577,6 +577,13 @@ class Protein:
                 os.replace(tmp, self.override_file)
             else:
                 os.remove(self.override_file)
+
+            # Check for skip flag (spacer runs)
+            if suggestion.get('skip', False):
+                reason = suggestion.get('reason', 'Spacer - skip override')
+                print(f'[Protein] SKIP: {reason}')
+                return 'skip'
+
             reason = suggestion.get('reason', 'No reason provided')
             print(f'[Protein] OVERRIDE: {reason}')
             return suggestion.get('params', suggestion)
@@ -681,34 +688,9 @@ class Protein:
 
         return score_loss, cost_loss
 
-    def suggest(self, fill):
+    def _gp_suggest(self, fill):
+        """Generate suggestion using Gaussian Process optimization."""
         info = {}
-        self.suggestion_idx += 1
-
-        override = self._check_override()
-        if override:
-            self._apply_params_to_fill(fill, override)
-            info['override'] = True
-            return fill, info
-
-        if len(self.success_observations) == 0 and self.seed_with_search_center:
-            suggestion = self.hyperparameters.search_centers
-            return self.hyperparameters.to_dict(suggestion, fill), info
-
-        elif len(self.success_observations) < self.num_random_samples:
-            # Suggest the next point in the Sobol sequence
-            zero_one = self.sobol.random(1)[0]
-            suggestion = 2*zero_one - 1  # Scale from [0, 1) to [-1, 1)
-            cost_suggestion = self.cost_random_suggestion + 0.1 * np.random.randn()
-            suggestion[self.cost_param_idx] = np.clip(cost_suggestion, -1, 1)  # limit the cost
-            return self.hyperparameters.to_dict(suggestion, fill), info
-
-        elif self.resample_frequency and self.suggestion_idx % self.resample_frequency == 0:
-            candidates, _ = pareto_points(self.success_observations)
-            suggestions = np.stack([e['input'] for e in candidates])
-            best_idx = np.random.randint(0, len(candidates))
-            best = suggestions[best_idx]
-            return self.hyperparameters.to_dict(best, fill), info
 
         score_loss, cost_loss = self._train_gp_models()
 
@@ -716,7 +698,7 @@ class Protein:
             print(f'Resetting GP optimizers at suggestion {self.suggestion_idx}')
             self.score_opt = torch.optim.Adam(self.gp_score.parameters(), lr=self.gp_learning_rate, amsgrad=True)
             self.cost_opt = torch.optim.Adam(self.gp_cost.parameters(), lr=self.gp_learning_rate, amsgrad=True)
-       
+
         candidates, pareto_idxs = pareto_points(self.success_observations)
 
         if self.prune_pareto:
@@ -731,13 +713,15 @@ class Protein:
         suggestions = suggestions[dedup_indices]
 
         if len(suggestions) == 0:
-            return self.suggest(fill) # Fallback to random if all suggestions are filtered
+            # Fallback to search center if all suggestions are filtered
+            suggestion = self.hyperparameters.search_centers
+            return self.hyperparameters.to_dict(suggestion, fill), info
 
         ### Predict scores and costs
         # Batch predictions to avoid GPU OOM for large number of suggestions
         gp_y_norm_list, gp_log_c_norm_list = [], []
 
-        with torch.no_grad(), gpytorch.settings.fast_pred_var(), warnings.catch_warnings():
+        with torch.no_grad(), gpytorch.settings.fast_pred_var(), gpytorch.settings.cholesky_jitter(1e-4), warnings.catch_warnings():
             warnings.simplefilter("ignore", gpytorch.utils.warnings.NumericalWarning)
 
             # Create a reusable buffer on the device to avoid allocating a huge tensor
@@ -756,7 +740,8 @@ class Protein:
 
                 except RuntimeError:
                     # Handle numerical errors during GP prediction
-                    pred_y_mean, pred_c_mean = torch.zeros(current_batch_size)
+                    pred_y_mean = torch.zeros(current_batch_size)
+                    pred_c_mean = torch.zeros(current_batch_size)
 
                 gp_y_norm_list.append(pred_y_mean.cpu())
                 gp_log_c_norm_list.append(pred_c_mean.cpu())
@@ -801,6 +786,45 @@ class Protein:
 
         best = suggestions[best_idx]
         return self.hyperparameters.to_dict(best, fill), info
+
+    def suggest(self, fill):
+        info = {}
+        self.suggestion_idx += 1
+        override = self._check_override()
+
+        # Always generate a suggestion (GP, Sobol, or search center)
+        if len(self.success_observations) == 0 and self.seed_with_search_center:
+            suggestion = self.hyperparameters.search_centers
+            result = self.hyperparameters.to_dict(suggestion, fill)
+
+        elif len(self.success_observations) < self.num_random_samples:
+            # Sobol sequence for early exploration
+            zero_one = self.sobol.random(1)[0]
+            suggestion = 2*zero_one - 1  # Scale from [0, 1) to [-1, 1)
+            cost_suggestion = self.cost_random_suggestion + 0.1 * np.random.randn()
+            suggestion[self.cost_param_idx] = np.clip(cost_suggestion, -1, 1)  # limit the cost
+            result = self.hyperparameters.to_dict(suggestion, fill)
+
+        elif self.resample_frequency and self.suggestion_idx % self.resample_frequency == 0:
+            # Resample from pareto front
+            candidates, _ = pareto_points(self.success_observations)
+            suggestions = np.stack([e['input'] for e in candidates])
+            best_idx = np.random.randint(0, len(candidates))
+            best = suggestions[best_idx]
+            result = self.hyperparameters.to_dict(best, fill)
+
+        else:
+            # Full GP suggestion
+            result, info = self._gp_suggest(fill)
+
+        # Apply override ON TOP of generated suggestion
+        if override == 'skip':
+            info['skip'] = True
+        elif override:
+            self._apply_params_to_fill(result, override)
+            info['override'] = True
+
+        return result, info
 
     def observe(self, hypers, score, cost, is_failure=False):
         params = self.hyperparameters.from_dict(hypers)
