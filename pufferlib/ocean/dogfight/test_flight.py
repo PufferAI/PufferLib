@@ -10,7 +10,6 @@ This is the main entry point that aggregates all test modules:
 - test_flight_physics.py: Flight physics tests (speed, climb, turn, G-force)
 - test_flight_obs_static.py: Static observation scheme tests
 - test_flight_obs_dynamic.py: Dynamic maneuver observation tests
-- test_flight_obs_pursuit.py: OBS_PURSUIT (scheme 1) specific tests
 - test_flight_energy.py: Energy physics tests (conservation, bleed rates, E-M theory)
 
 TODO - FLIGHT PHYSICS TESTS NEEDED:
@@ -46,7 +45,6 @@ from test_flight_base import (
 from test_flight_physics import TESTS as PHYSICS_TESTS
 from test_flight_obs_static import TESTS as OBS_STATIC_TESTS
 from test_flight_obs_dynamic import TESTS as OBS_DYNAMIC_TESTS
-from test_flight_obs_pursuit import TESTS as OBS_PURSUIT_TESTS
 from test_flight_energy import TESTS as ENERGY_TESTS
 
 # Aggregate all tests into a single registry
@@ -54,7 +52,6 @@ TESTS = {
     **PHYSICS_TESTS,
     **OBS_STATIC_TESTS,
     **OBS_DYNAMIC_TESTS,
-    **OBS_PURSUIT_TESTS,
     **ENERGY_TESTS,
 }
 

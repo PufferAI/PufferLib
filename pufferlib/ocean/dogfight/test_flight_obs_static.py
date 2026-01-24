@@ -2,6 +2,17 @@
 Static observation scheme tests for dogfight environment.
 Tests observation bounds, dimensions, and values at specific orientations.
 
+NEW OBS SCHEMES use body-frame observations (velocity, angular rates, AoA).
+OLD schemes with Euler angles (pitch/roll/yaw) have been removed.
+
+NEW Scheme 0 (OBS_MOMENTUM) Layout - 15 obs:
+  [0-2]   Body-frame velocity (forward speed, sideslip, climb rate)
+  [3-5]   Angular velocity (roll rate, pitch rate, yaw rate)
+  [6]     Angle of attack
+  [7-8]   Altitude, own energy
+  [9-12]  Target spherical (azimuth, elevation, range, closure)
+  [13-14] Tactical (energy advantage, target aspect)
+
 Run: python pufferlib/ocean/dogfight/test_flight_obs_static.py --test obs_bounds
 """
 import numpy as np
@@ -81,76 +92,13 @@ def test_obs_scheme_dimensions():
     return all_passed
 
 
-def test_obs_identity_orientation():
-    """
-    Test identity orientation: player at origin, target ahead.
-    Expect: pitch=0, roll=0, yaw=0, azimuth=0, elevation=0
-    """
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
-    env.reset()
-
-    env.force_state(
-        player_pos=(0, 0, 1000),
-        player_vel=(100, 0, 0),
-        player_ori=(1, 0, 0, 0),  # Identity quaternion
-        opponent_pos=(400, 0, 1000),
-        opponent_vel=(100, 0, 0),
-    )
-
-    action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
-    env.step(action)
-    obs = env.observations[0]
-
-    passed = True
-    passed &= obs_assert_close(obs[4], 0.0, "pitch")
-    passed &= obs_assert_close(obs[5], 0.0, "roll")
-    passed &= obs_assert_close(obs[6], 0.0, "yaw")
-    passed &= obs_assert_close(obs[7], 0.0, "azimuth")
-    passed &= obs_assert_close(obs[8], 0.0, "elevation")
-
-    RESULTS['obs_identity'] = passed
-    status = "OK" if passed else "FAIL"
-    print(f"obs_identity:  identity orientation [{status}]")
-    env.close()
-    return passed
-
-
-def test_obs_pitched_up():
-    """
-    Pitched up 30 degrees.
-    Expect: pitch = -30/180 = -0.167 (negative = nose UP)
-    """
-    env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
-    env.reset()
-
-    pitch_rad = np.radians(30)
-    qw = np.cos(-pitch_rad / 2)
-    qy = np.sin(-pitch_rad / 2)
-
-    env.force_state(
-        player_pos=(0, 0, 1000),
-        player_vel=(100, 0, 0),
-        player_ori=(qw, 0, qy, 0),
-        opponent_pos=(400, 0, 1000),
-        opponent_vel=(100, 0, 0),
-    )
-
-    action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
-    env.step(action)
-    obs = env.observations[0]
-
-    expected_pitch = -30.0 / 180.0
-    passed = obs_assert_close(obs[4], expected_pitch, "pitch")
-
-    RESULTS['obs_pitched'] = passed
-    status = "OK" if passed else "FAIL"
-    print(f"obs_pitched:   pitch={obs[4]:.3f} (expect {expected_pitch:.3f}) [{status}]")
-    env.close()
-    return passed
-
-
 def test_obs_target_angles():
-    """Test target azimuth/elevation computation."""
+    """Test target azimuth/elevation computation.
+
+    NEW scheme layout:
+      [9]  azimuth  - target bearing in body frame
+      [10] elevation - target elevation in body frame
+    """
     env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
 
     # Target to the right
@@ -164,7 +112,7 @@ def test_obs_target_angles():
     )
     action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
     env.step(action)
-    azimuth_right = env.observations[0][7]
+    azimuth_right = env.observations[0][9]  # azimuth at index 9
 
     # Target above
     env.reset()
@@ -176,7 +124,7 @@ def test_obs_target_angles():
         opponent_vel=(100, 0, 0),
     )
     env.step(action)
-    elev_above = env.observations[0][8]
+    elev_above = env.observations[0][10]  # elevation at index 10
 
     passed = True
     passed &= obs_assert_close(azimuth_right, -0.5, "azimuth_right")
@@ -189,74 +137,37 @@ def test_obs_target_angles():
     return passed
 
 
-def test_obs_horizon_visible():
-    """Test horizon_visible in scheme 2 (level=1, knife=0, inverted=-1)."""
-    env = Dogfight(num_envs=1, obs_scheme=2, render_mode=get_render_mode(), render_fps=get_render_fps())
-    action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
-
-    # Level
-    env.reset()
-    env.force_state(player_pos=(0, 0, 1000), player_vel=(100, 0, 0), player_ori=(1, 0, 0, 0),
-                    opponent_pos=(400, 0, 1000), opponent_vel=(100, 0, 0))
-    env.step(action)
-    h_level = env.observations[0][8]
-
-    # Knife-edge (90 deg roll)
-    env.reset()
-    roll_90 = np.radians(90)
-    env.force_state(player_pos=(0, 0, 1000), player_vel=(100, 0, 0),
-                    player_ori=(np.cos(-roll_90/2), np.sin(-roll_90/2), 0, 0),
-                    opponent_pos=(400, 0, 1000), opponent_vel=(100, 0, 0))
-    env.step(action)
-    h_knife = env.observations[0][8]
-
-    # Inverted (180 deg roll)
-    env.reset()
-    roll_180 = np.radians(180)
-    env.force_state(player_pos=(0, 0, 1000), player_vel=(100, 0, 0),
-                    player_ori=(np.cos(-roll_180/2), np.sin(-roll_180/2), 0, 0),
-                    opponent_pos=(400, 0, 1000), opponent_vel=(100, 0, 0))
-    env.step(action)
-    h_inv = env.observations[0][8]
-
-    passed = True
-    passed &= obs_assert_close(h_level, 1.0, "level")
-    passed &= obs_assert_close(h_knife, 0.0, "knife", atol=0.1)
-    passed &= obs_assert_close(h_inv, -1.0, "inverted")
-
-    RESULTS['obs_horizon'] = passed
-    status = "OK" if passed else "FAIL"
-    print(f"obs_horizon:   level={h_level:.2f}, knife={h_knife:.2f}, inv={h_inv:.2f} [{status}]")
-    env.close()
-    return passed
-
-
 def test_obs_edge_cases():
-    """Test edge cases: azimuth at 180°, zero speed, extreme distance."""
+    """Test edge cases: azimuth at 180deg, extreme distance.
+
+    NEW scheme layout:
+      [9]  azimuth - target bearing
+      [11] range   - normalized distance to target
+    """
     env = Dogfight(num_envs=1, obs_scheme=0, render_mode=get_render_mode(), render_fps=get_render_fps())
     action = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
     passed = True
 
-    # Target behind-left (near +180°)
+    # Target behind-left (near +180deg)
     env.reset()
     env.force_state(player_pos=(0, 0, 1000), player_vel=(100, 0, 0), player_ori=(1, 0, 0, 0),
                     opponent_pos=(-400, 10, 1000), opponent_vel=(100, 0, 0))
     env.step(action)
-    az_left = env.observations[0][7]
+    az_left = env.observations[0][9]  # azimuth at index 9
 
-    # Target behind-right (near -180°)
+    # Target behind-right (near -180deg)
     env.reset()
     env.force_state(player_pos=(0, 0, 1000), player_vel=(100, 0, 0), player_ori=(1, 0, 0, 0),
                     opponent_pos=(-400, -10, 1000), opponent_vel=(100, 0, 0))
     env.step(action)
-    az_right = env.observations[0][7]
+    az_right = env.observations[0][9]  # azimuth at index 9
 
     # Extreme distance (5km)
     env.reset()
     env.force_state(player_pos=(0, 0, 1000), player_vel=(100, 0, 0), player_ori=(1, 0, 0, 0),
                     opponent_pos=(5000, 0, 1000), opponent_vel=(100, 0, 0))
     env.step(action)
-    dist_obs = env.observations[0][9]
+    dist_obs = env.observations[0][11]  # range at index 11
 
     passed &= az_left > 0.9  # Should be near +1
     passed &= az_right < -0.9  # Should be near -1
@@ -307,10 +218,7 @@ def test_obs_bounds():
 # Test registry for this module
 TESTS = {
     'obs_dimensions': test_obs_scheme_dimensions,
-    'obs_identity': test_obs_identity_orientation,
-    'obs_pitched': test_obs_pitched_up,
     'obs_target_angles': test_obs_target_angles,
-    'obs_horizon': test_obs_horizon_visible,
     'obs_edge_cases': test_obs_edge_cases,
     'obs_bounds': test_obs_bounds,
 }
