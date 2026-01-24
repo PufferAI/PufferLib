@@ -3,28 +3,29 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define ARENA_HALF_SIZE 5.0f
-#define MAX_HP 1.0f
-#define PLAYER_SPEED_PER_TICK 0.25f
-#define PLAYER_SIZE 0.3f
-#define BOSS_SIZE 0.5f
-#define PLAYER_ATTACK_RADIUS 0.4f
+#define ARENA_HALF_SIZE 500.0f
+#define MAX_HP 100.0f
+#define PLAYER_SPEED_PER_TICK 25.0f
+#define PLAYER_SIZE 30.0f
+#define BOSS_SIZE 50.0f
+#define PLAYER_ATTACK_RADIUS 40.0f
 #define PLAYER_ATTACK_TICKS 3
 #define PLAYER_DODGE_TICKS 4
 #define PLAYER_IFRAME_TICKS 2
 #define PLAYER_DODGE_COOLDOWN 15
-#define PLAYER_DODGE_SPEED_PER_TICK 0.35f
-#define PLAYER_ATTACK_DMG 0.05f
-#define BOSS_ATTACK_DMG 0.15f
-#define BOSS_AOE_ATTACK_RADIUS 0.8f
+#define PLAYER_DODGE_SPEED_PER_TICK 35.0f
+#define PLAYER_ATTACK_DMG 5.0f
+#define BOSS_ATTACK_DMG 15.0f
+#define BOSS_AOE_ATTACK_RADIUS 80.0f
 #define BOSS_IDLE_TICKS 7
 #define BOSS_WINDUP_TICKS 5
 #define BOSS_ACTIVE_TICKS 5
 #define BOSS_RECOVERY_TICKS 5
+
 #define HP_BAR_WIDTH 40
 #define HP_BAR_HEIGHT 5
 
-#define REWARD_APPROACH 0.05f
+#define REWARD_APPROACH 0.7f
 #define REWARD_HIT_WALL -0.05f
 #define REWARD_PLAYER_HIT_BOSS 0.07f
 #define REWARD_BOSS_HIT_PLAYER -0.05f
@@ -72,7 +73,7 @@ typedef struct {
   float player_y;
   float boss_x;
   float boss_y;
-  float prev_distance;
+  float dist_to_boss;
 
   PlayerState player_state;
   float player_hp;
@@ -111,19 +112,59 @@ void add_log(BossFight *env) {
 
 void update_observations(BossFight *env) {
   int obs_idx = 0;
-  env->observations[obs_idx++] = env->boss_x - env->player_x;
-  env->observations[obs_idx++] = env->boss_y - env->player_y;
-  env->observations[obs_idx++] = env->player_x;
-  env->observations[obs_idx++] = env->player_y;
-  env->observations[obs_idx++] = env->boss_x;
-  env->observations[obs_idx++] = env->boss_y;
-  env->observations[obs_idx++] = (float)env->player_hp;
-  env->observations[obs_idx++] = (float)env->boss_hp;
-  env->observations[obs_idx++] = (float)env->player_state;
-  env->observations[obs_idx++] = (float)env->player_dodge_cooldown;
-  env->observations[obs_idx++] = (float)env->player_state_ticks;
-  env->observations[obs_idx++] = (float)env->boss_state;
-  env->observations[obs_idx++] = (float)env->boss_phase_ticks;
+
+  env->observations[obs_idx++] = env->player_x / ARENA_HALF_SIZE;
+  env->observations[obs_idx++] = env->player_y / ARENA_HALF_SIZE;
+
+  float dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
+  float max_dist = sqrtf(2.0f) * ARENA_HALF_SIZE;
+  env->observations[obs_idx++] = dist / max_dist;
+
+  env->observations[obs_idx++] = env->player_hp / MAX_HP;
+  env->observations[obs_idx++] = env->boss_hp / MAX_HP;
+
+  env->observations[obs_idx++] =
+      (float)env->player_dodge_cooldown / PLAYER_DODGE_COOLDOWN;
+
+  float dodge_remaining =
+      (env->player_state == PLAYER_DODGING)
+          ? (float)env->player_state_ticks / PLAYER_DODGE_TICKS
+          : 0.0f;
+  env->observations[obs_idx++] = dodge_remaining;
+
+  int iframe_ticks =
+      env->player_state_ticks - (PLAYER_DODGE_TICKS - PLAYER_IFRAME_TICKS);
+  float iframe_remaining =
+      (env->player_state == PLAYER_DODGING && iframe_ticks > 0)
+          ? fminf((float)iframe_ticks / PLAYER_IFRAME_TICKS, 1.0f)
+          : 0.0f;
+  env->observations[obs_idx++] = iframe_remaining;
+
+  float attack_remaining =
+      (env->player_state == PLAYER_ATTACKING)
+          ? (float)env->player_state_ticks / PLAYER_ATTACK_TICKS
+          : 0.0f;
+  env->observations[obs_idx++] = attack_remaining;
+
+  float cycle_len = BOSS_IDLE_TICKS + BOSS_WINDUP_TICKS + BOSS_ACTIVE_TICKS +
+                    BOSS_RECOVERY_TICKS;
+  float time_until_aoe = 0.0f;
+  if (env->boss_state == BOSS_IDLING)
+    time_until_aoe = env->boss_phase_ticks + BOSS_WINDUP_TICKS;
+  else if (env->boss_state == BOSS_WINDING_UP)
+    time_until_aoe = env->boss_phase_ticks;
+  else if (env->boss_state == BOSS_RECOVERING)
+    time_until_aoe =
+        env->boss_phase_ticks + BOSS_IDLE_TICKS + BOSS_WINDUP_TICKS;
+  env->observations[obs_idx++] = time_until_aoe / cycle_len;
+
+  float aoe_remaining = (env->boss_state == BOSS_ATTACKING)
+                            ? (float)env->boss_phase_ticks / BOSS_ACTIVE_TICKS
+                            : 0.0f;
+  env->observations[obs_idx++] = aoe_remaining;
+
+  env->observations[obs_idx++] =
+      (float)(EPISODE_LENGTH - env->tick) / EPISODE_LENGTH;
 }
 
 void c_reset(BossFight *env) {
@@ -152,7 +193,7 @@ void c_reset(BossFight *env) {
     env->player_y = rand_uniform(-ARENA_HALF_SIZE, ARENA_HALF_SIZE);
   }
 
-  env->prev_distance =
+  env->dist_to_boss =
       distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
 
   update_observations(env);
@@ -204,11 +245,6 @@ void c_step(BossFight *env) {
       env->player_state != PLAYER_DODGING && env->player_dodge_cooldown == 0;
   bool can_attack = env->player_state == PLAYER_IDLING;
 
-  if (wanna_attack && can_attack) {
-    env->player_state_ticks = PLAYER_ATTACK_TICKS;
-    env->player_state = PLAYER_ATTACKING;
-  }
-
   float aoe_dist = BOSS_SIZE + PLAYER_SIZE + BOSS_AOE_ATTACK_RADIUS;
   bool boss_threatening =
       env->boss_state == BOSS_WINDING_UP || env->boss_state == BOSS_ATTACKING;
@@ -249,8 +285,9 @@ void c_step(BossFight *env) {
 
   float dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
 
-  reward += REWARD_APPROACH * (env->prev_distance - dist);
-  env->prev_distance = dist;
+  float max_dist = sqrtf(2.0f) * ARENA_HALF_SIZE;
+  reward += REWARD_APPROACH * ((env->dist_to_boss - dist) / max_dist);
+  env->dist_to_boss = dist;
 
   // Push player out if clipping into boss
   if (dist < BOSS_SIZE + PLAYER_SIZE && dist > 1e-6f) {
@@ -265,6 +302,8 @@ void c_step(BossFight *env) {
   bool close_enough = dist <= BOSS_SIZE + PLAYER_ATTACK_RADIUS + PLAYER_SIZE;
 
   if (wanna_attack && can_attack && close_enough) {
+    env->player_state_ticks = PLAYER_ATTACK_TICKS;
+    env->player_state = PLAYER_ATTACKING;
     env->boss_hp -= PLAYER_ATTACK_DMG;
     reward += REWARD_PLAYER_HIT_BOSS;
   }

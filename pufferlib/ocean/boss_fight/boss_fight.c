@@ -2,7 +2,7 @@
 #include "raylib.h"
 
 int main() {
-  int num_obs = 13;
+  int num_obs = 12;
   int num_actions = 1;
   int num_agents = 1;
 

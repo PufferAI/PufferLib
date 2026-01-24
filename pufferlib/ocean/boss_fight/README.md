@@ -8,7 +8,7 @@ All hitboxes are circles (collision = circles overlap).
 
 ## Game rules
 
-- **Arena:** square `[-ARENA_HALF_SIZE, ARENA_HALF_SIZE]^2` (default `5.0`)
+- **Arena:** square `[-ARENA_HALF_SIZE, ARENA_HALF_SIZE]^2` (default `500.0`)
 - **Boss:** stationary at `(0, 0)`
 - **Episode ends on:**
   - win: boss HP reaches 0
@@ -49,23 +49,22 @@ During **ACTIVE**, the boss deals damage if the player overlaps the AOE circle.
 
 ## Observation space
 
-`Box(shape=(13,), dtype=float32)` (see `update_observations` in `boss_fight.h`):
+`Box(shape=(12,), dtype=float32)` — all normalized to [-1, 1] or [0, 1] (see `update_observations` in `boss_fight.h`):
 
-| idx | meaning                                                |
-| --: | ------------------------------------------------------ |
-|   0 | `boss_x - player_x`                                    |
-|   1 | `boss_y - player_y`                                    |
-|   2 | `player_x`                                             |
-|   3 | `player_y`                                             |
-|   4 | `boss_x`                                               |
-|   5 | `boss_y`                                               |
-|   6 | `player_hp`                                            |
-|   7 | `boss_hp`                                              |
-|   8 | `player_state` (`0=idle, 1=dodge, 2=attack`)           |
-|   9 | `player_dodge_cooldown`                                |
-|  10 | `player_state_ticks` (remaining)                       |
-|  11 | `boss_state` (`0=idle, 1=windup, 2=attack, 3=recover`) |
-|  12 | `boss_phase_ticks` (remaining)                         |
+| idx | meaning                      | range   |
+| --: | ---------------------------- | ------- |
+|   0 | `player_x` normalized        | [-1, 1] |
+|   1 | `player_y` normalized        | [-1, 1] |
+|   2 | `dist_to_boss` normalized    | [0, 1]  |
+|   3 | `player_hp` normalized       | [0, 1]  |
+|   4 | `boss_hp` normalized         | [0, 1]  |
+|   5 | `dodge_cooldown` normalized  | [0, 1]  |
+|   6 | `dodge_remaining`            | [0, 1]  |
+|   7 | `iframe_remaining`           | [0, 1]  |
+|   8 | `attack_remaining`           | [0, 1]  |
+|   9 | `time_until_aoe`             | [0, 1]  |
+|  10 | `aoe_remaining`              | [0, 1]  |
+|  11 | `episode_time_remaining`     | [0, 1]  |
 
 ## Rewards (defaults)
 
