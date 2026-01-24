@@ -4,7 +4,11 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
+#if defined(_WIN32) || defined(_WIN64)
+#   include <thread>
+#else
+#   include <pthread.h>
+#endif
 #include <stdatomic.h>
 #include <cuda_runtime.h>
 
