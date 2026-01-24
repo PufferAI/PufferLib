@@ -52,6 +52,7 @@ class Dogfight(pufferlib.PufferEnv):
         advance_threshold=0.7,      # Kill rate threshold to advance stage (used by training loop)
         stage_increment=0.1,        # How much to increase target per advancement
         eval_interval=2_500_000,    # Steps between curriculum evaluations (2.5M = ~1s at 2.5M SPS)
+        warmup_steps=3_000_000,     # Steps before curriculum starts evaluating (3M = ~1.2s at 2.5M SPS)
         # df11: Simplified rewards (6 terms)
         reward_aim_scale=0.05,       # Continuous aiming reward
         reward_closing_scale=0.003,  # Per m/s closing
@@ -84,9 +85,9 @@ class Dogfight(pufferlib.PufferEnv):
         # Global curriculum state (step-based window evaluation)
         self._current_stage = 0
         self._target_stage = 0.0           # Float target (0.0 to 7.0) for probabilistic assignment
-        self._warmup_steps = 10_000_000    # 10M steps warmup (~4s at 2.4M SPS)
+        self._warmup_steps = warmup_steps  # Steps before curriculum starts evaluating
         self._eval_interval = eval_interval  # Steps between curriculum evaluations
-        self._last_eval_step = 10_000_000  # First eval at warmup + interval
+        self._last_eval_step = warmup_steps  # First eval at warmup + eval_interval
         self._cumulative_perf = 0.0        # Sum of perf values
         self._cumulative_n = 0             # Batch count (int, not float)
         self.advance_threshold = advance_threshold
