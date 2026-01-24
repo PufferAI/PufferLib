@@ -163,13 +163,29 @@ void c_step(BossFight *env) {
   env->terminals[0] = 0;
 
   int action = env->actions[0];
+  if (IsKeyDown(KEY_LEFT_SHIFT)) {
+    if (IsKeyDown(KEY_W))
+      action = 1;
+    else if (IsKeyDown(KEY_S))
+      action = 2;
+    else if (IsKeyDown(KEY_A))
+      action = 3;
+    else if (IsKeyDown(KEY_D))
+      action = 4;
+    else if (IsKeyDown(KEY_SPACE))
+      action = 5;
+    else if (IsKeyDown(KEY_J))
+      action = 6;
+    else
+      action = 0;
+  }
   float dx = 0;
   float dy = 0;
 
   if (action == 1) {
-    dy = PLAYER_SPEED_PER_TICK;
-  } else if (action == 2) {
     dy = -PLAYER_SPEED_PER_TICK;
+  } else if (action == 2) {
+    dy = PLAYER_SPEED_PER_TICK;
   } else if (action == 3) {
     dx = -PLAYER_SPEED_PER_TICK;
   } else if (action == 4) {
