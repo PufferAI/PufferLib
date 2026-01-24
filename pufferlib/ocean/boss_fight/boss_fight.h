@@ -24,7 +24,6 @@
 #define HP_BAR_WIDTH 40
 #define HP_BAR_HEIGHT 5
 
-// Rewards
 #define REWARD_APPROACH 0.05f
 #define REWARD_HIT_WALL -0.05f
 #define REWARD_PLAYER_HIT_BOSS 0.07f
@@ -52,13 +51,12 @@ typedef enum {
   BOSS_RECOVERING,
 } BossState;
 
-// Only use floats!
 typedef struct {
   float perf;           // 0-1 normalized metric
-  float score;          // unnormalized metric
-  float episode_return; // sum of rewards
-  float episode_length; // steps per episode
-  float wins;           // episodes where boss died
+  float score;          // Unnormalized metric
+  float episode_return; // Sum of rewards
+  float episode_length; // Steps per episode
+  float wins;           // Episodes where boss died
   float n;              // Required as last field
 } Log;
 
@@ -86,9 +84,8 @@ typedef struct {
   float boss_hp;
   int boss_phase_ticks;
 
-  float episode_return; // track within episode
+  float episode_return;
 
-  // stats
   int player_wins;
   int boss_wins;
   int timeouts;
@@ -228,7 +225,7 @@ void c_step(BossFight *env) {
     reward += REWARD_HIT_WALL;
   }
 
-  // can't walk out of bounds
+  // Can't walk out of bounds
   env->player_x =
       fmaxf(-ARENA_HALF_SIZE, fminf(ARENA_HALF_SIZE, env->player_x));
   env->player_y =
@@ -239,14 +236,13 @@ void c_step(BossFight *env) {
   reward += REWARD_APPROACH * (env->prev_distance - dist);
   env->prev_distance = dist;
 
-  // push player out if clipping into boss
+  // Push player out if clipping into boss
   if (dist < BOSS_SIZE + PLAYER_SIZE && dist > 1e-6f) {
     float overlap = BOSS_SIZE + PLAYER_SIZE - dist;
     float dx = env->player_x - env->boss_x;
     float dy = env->player_y - env->boss_y;
     env->player_x += (dx / dist) * overlap;
     env->player_y += (dy / dist) * overlap;
-    // recalculate distance after push
     dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
   }
 
@@ -262,8 +258,8 @@ void c_step(BossFight *env) {
       env->player_state == PLAYER_DODGING &&
       env->player_state_ticks > (PLAYER_DODGE_TICKS - PLAYER_IFRAME_TICKS);
 
-  // Souls-like: you can i-frame briefly, but the AOE persists longer than the
-  // i-frame window; if you're still in the hitbox after i-frames, you get hit.
+  // AOE persists longer than the i-frame window
+  // If player is still in the hitbox after i-frames, you get hit.
   bool boss_can_hit = in_aoe_attack && !player_iframed;
   bool boss_can_damage = env->boss_state == BOSS_ATTACKING && boss_can_hit;
   if (boss_can_damage) {
