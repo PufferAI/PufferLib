@@ -23,15 +23,15 @@
 #define HP_BAR_HEIGHT 5
 
 // Rewards
-#define REWARD_APPROACH 0.5f
+#define REWARD_APPROACH 0.1f
 #define REWARD_HIT_WALL -0.1f
-#define REWARD_PLAYER_HIT_BOSS 5.0f
-#define REWARD_BOSS_HIT_PLAYER -0.5f
-#define REWARD_DODGE_SUCCESS 2.0f
-#define REWARD_KILL_BOSS 50.0f
-#define REWARD_PLAYER_DIED -5.0f
-#define REWARD_TIMEOUT -20.0f
-#define REWARD_TICK -0.001f
+#define REWARD_PLAYER_HIT_BOSS 0.4f
+#define REWARD_BOSS_HIT_PLAYER -0.35f
+#define REWARD_DODGE_SUCCESS 0.0f
+#define REWARD_KILL_BOSS 1.0f
+#define REWARD_PLAYER_DIED -1.0f
+#define REWARD_TIMEOUT -1.0f
+#define REWARD_TICK -0.01f
 #define EPISODE_LENGTH 300
 
 const Color PLAYER_COLOR = (Color){50, 100, 255, 255};
@@ -240,10 +240,11 @@ void c_step(BossFight *env) {
 
   bool would_be_hit = env->boss_state == BOSS_ATTACKING && in_aoe_attack;
 
-  bool successfully_dodging =
-      would_be_hit && env->player_state == PLAYER_DODGING;
+  bool started_successful_dodge = would_be_hit &&
+                                  env->player_state == PLAYER_DODGING &&
+                                  env->player_state_ticks == PLAYER_DODGE_TICKS;
 
-  if (successfully_dodging) {
+  if (started_successful_dodge) {
     reward += REWARD_DODGE_SUCCESS;
   }
 
