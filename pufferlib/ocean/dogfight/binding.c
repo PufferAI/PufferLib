@@ -86,8 +86,7 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "avg_stage_weight", log->total_stage_weight);  // Raw sum → correct avg
     assign_to_dict(dict, "avg_abs_bias", log->total_abs_bias);          // Raw sum → correct avg
     assign_to_dict(dict, "avg_stage", log->stage_sum);                  // Raw sum → correct avg
-    // Don't export kill_rate, ultimate, or per-env ratios - garbage after aggregation
-    // Python should use 'perf' as the global kill_rate
+    assign_to_dict(dict, "ultimate", log->ultimate);
     assign_to_dict(dict, "n", log->n);
     return 0;
 }
