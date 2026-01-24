@@ -433,6 +433,19 @@ __device__ __forceinline__ double logcumsumexp_backward(double x, double* acc, d
     return *acc * exp(x - s);
 }
 
+// float32 + branch free
+__device__ __forceinline__ float logcumsumexp_forward_opt(float x, float acc) {
+    float min_val = fminf(acc, x);
+    float max_val = fmaxf(acc, x);
+    return max_val + log1pf(__expf(min_val - max_val));
+}
+
+__device__ __forceinline__ float logcumsumexp_backward_opt(float x, float* acc, float grad, float s, float* s_nxt) {
+    *acc = fmaf(*acc, __expf(s - *s_nxt), grad);
+    *s_nxt = s;
+    return *acc * __expf(x - s);
+}
+
 // Fully fused forward: chunk + log_coeffs_and_values + scan + sigmoid(proj)*out
 // Takes combined (B, T, 3*H) = [hidden, gate, proj] and outputs gated result
 template<typename T>
@@ -1142,6 +1155,111 @@ void launch_logcumsumexp_backward(
         fprintf(stderr, "Backward kernel error: %s\n", cudaGetErrorString(err));
 }
 
+// logcumsumexp in float32
+template<typename T>
+__global__ void logcumsumexp_forward_kernel_opt(
+    T* __restrict__ out,
+    float* __restrict__ s_buf,  // FLOAT32
+    const T* __restrict__ x,
+    int T_total,
+    int H,
+    int B
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= B * H) return;
+
+    int b = idx / H;
+    int h = idx % H;
+
+    int base = b * T_total * H + h;
+
+    float s = -INFINITY;
+
+    for (int t = 0; t < T_total; t++) {
+        int curr = base + t * H;
+        float x_val = float(x[curr]);
+        s = logcumsumexp_forward_opt(x_val, s);
+        out[curr] = T(s);
+        s_buf[curr] = s;
+    }
+}
+
+template<typename T>
+__global__ void logcumsumexp_backward_kernel_opt(
+    T* __restrict__ grad_x,
+    const T* __restrict__ grad_out,
+    const T* __restrict__ x,
+    const float* __restrict__ s_buf,
+    int T_total,
+    int H,
+    int B
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= B * H) return;
+
+    int b = idx / H;
+    int h = idx % H;
+
+    int base = b * T_total * H + h;
+
+    float acc = 0.0f;
+    float s_val_next = 0.0f;
+
+    for (int t = T_total - 1; t >= 0; --t) {
+        int curr = base + t * H;
+
+        float x_val = float(x[curr]);
+        float s_val = s_buf[curr];
+        float g_val = float(grad_out[curr]);
+        grad_x[curr] = T(logcumsumexp_backward_opt(x_val, &acc, g_val, s_val, &s_val_next));
+    }
+}
+
+template<typename T>
+void launch_logcumsumexp_forward_opt(
+    T* out,
+    float* s_buf,
+    const T* x,
+    int T_total,
+    int H,
+    int B,
+    cudaStream_t stream
+) {
+    int total = B * H;
+    int grid = grid_size(total);
+
+    logcumsumexp_forward_kernel_opt<T><<<grid, BLOCK_SIZE, 0, stream>>>(
+        out, s_buf, x, T_total, H, B
+    );
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess)
+        fprintf(stderr, "Forward opt kernel error: %s\n", cudaGetErrorString(err));
+}
+
+template<typename T>
+void launch_logcumsumexp_backward_opt(
+    T* grad_x,
+    const T* grad_out,
+    const T* x,
+    const float* s_buf,
+    int T_total,
+    int H,
+    int B,
+    cudaStream_t stream
+) {
+    int total = B * H;
+    int grid = grid_size(total);
+
+    logcumsumexp_backward_kernel_opt<T><<<grid, BLOCK_SIZE, 0, stream>>>(
+        grad_x, grad_out, x, s_buf, T_total, H, B
+    );
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess)
+        fprintf(stderr, "Backward opt kernel error: %s\n", cudaGetErrorString(err));
+}
+
 template<typename T>
 __global__ void ppo_loss_forward_kernel(
     float* __restrict__ loss,
@@ -1681,6 +1799,12 @@ void launch_logcumsumexp_forward_float(float* out, double* s_buf, const float* x
 }
 void launch_logcumsumexp_backward_float(float* grad_x, const float* grad_out, const float* x, const double* s_buf, int T_total, int H, int B, cudaStream_t stream) {
     launch_logcumsumexp_backward<float>(grad_x, grad_out, x, s_buf, T_total, H, B, stream);
+}
+void launch_logcumsumexp_forward_opt_float(float* out, float* s_buf, const float* x, int T_total, int H, int B, cudaStream_t stream) {
+    launch_logcumsumexp_forward_opt<float>(out, s_buf, x, T_total, H, B, stream);
+}
+void launch_logcumsumexp_backward_opt_float(float* grad_x, const float* grad_out, const float* x, const float* s_buf, int T_total, int H, int B, cudaStream_t stream) {
+    launch_logcumsumexp_backward_opt<float>(grad_x, grad_out, x, s_buf, T_total, H, B, stream);
 }
 void launch_ppo_loss_forward_float(float* loss_output, double* saved_for_backward, const float* logits, const float* values_pred, const int64_t* actions, const float* old_logprobs, const float* advantages, const float* prio, const float* values, const float* returns, const float* adv_mean, const float* adv_std, double clip_coef, double vf_clip_coef, double vf_coef, double ent_coef, int T_seq, int A, int N, cudaStream_t stream) {
     launch_ppo_loss_forward<float>(loss_output, saved_for_backward, logits, values_pred, actions, old_logprobs, advantages, prio, values, returns, adv_mean, adv_std, clip_coef, vf_clip_coef, vf_coef, ent_coef, T_seq, A, N, stream);
