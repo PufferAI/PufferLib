@@ -18,7 +18,7 @@
 
 #ifdef USE_TORCH
 #include "pufferlib/extensions/pufferlib.cpp"
-#include "pufferlib/extensions/cuda/modules.cu"
+#include "pufferlib/extensions/cuda/kernels.cu"
 using namespace pufferlib;
 #else
 #include "pufferlib/extensions/cuda/kernels.cu"
@@ -448,8 +448,11 @@ void profile_logcoeffsandvalues(int batch, int seq, int hidden) {
 typedef struct {
     float* x;
     float* out;
-    double* s_buf;
+    double* s_buf;        // original (double)
+    float* out_opt;
+    float* s_buf_opt;     // optimized (float)
     float* grad_x;
+    float* grad_x_opt;
     float* grad_out;
     int B;
     int T;
@@ -467,7 +470,10 @@ LogcumsumexpArgs* create_logcumsumexpargs(int batch, int seq, int hidden) {
     cudaMalloc(&args->x, args->N * sizeof(float));
     cudaMalloc(&args->out, args->N * sizeof(float));
     cudaMalloc(&args->s_buf, args->N * sizeof(double));
+    cudaMalloc(&args->out_opt, args->N * sizeof(float));
+    cudaMalloc(&args->s_buf_opt, args->N * sizeof(float));
     cudaMalloc(&args->grad_x, args->N * sizeof(float));
+    cudaMalloc(&args->grad_x_opt, args->N * sizeof(float));
     cudaMalloc(&args->grad_out, args->N * sizeof(float));
 
     float* buf = (float*)malloc(args->N * sizeof(float) * 2);
@@ -489,7 +495,10 @@ void free_logcumsumexpargs(LogcumsumexpArgs* args) {
     cudaFree(args->x);
     cudaFree(args->out);
     cudaFree(args->s_buf);
+    cudaFree(args->out_opt);
+    cudaFree(args->s_buf_opt);
     cudaFree(args->grad_x);
+    cudaFree(args->grad_x_opt);
     cudaFree(args->grad_out);
     free(args);
 }
@@ -502,6 +511,16 @@ void run_logcumsumexp_forward(LogcumsumexpArgs* args) {
 void run_logcumsumexp_backward(LogcumsumexpArgs* args) {
     launch_logcumsumexp_backward<float>(
         args->grad_x, args->grad_out, args->x, args->s_buf, args->T, args->H, args->B, 0);
+}
+
+void run_logcumsumexp_forward_opt(LogcumsumexpArgs* args) {
+    launch_logcumsumexp_forward_opt<float>(
+        args->out_opt, args->s_buf_opt, args->x, args->T, args->H, args->B, 0);
+}
+
+void run_logcumsumexp_backward_opt(LogcumsumexpArgs* args) {
+    launch_logcumsumexp_backward_opt<float>(
+        args->grad_x_opt, args->grad_out, args->x, args->s_buf_opt, args->T, args->H, args->B, 0);
 }
 
 #ifdef USE_TORCH
@@ -539,6 +558,44 @@ void run_logcumsumexp_forward_cpp(LogcumsumexpArgsTorch* args) {
     logcumsumexp_cpp(args->x);
 }
 
+void test_logcumsumexp_opt_correct(LogcumsumexpArgs* args) {
+    // Run original forward
+    run_logcumsumexp_forward(args);
+    
+    // Run optimized forward
+    run_logcumsumexp_forward_opt(args);
+    
+    cudaDeviceSynchronize();
+    
+    // Compare outputs using torch
+    auto opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+    auto out_orig = torch::from_blob(args->out, {args->B, args->T, args->H}, opts);
+    auto out_opt = torch::from_blob(args->out_opt, {args->B, args->T, args->H}, opts);
+    
+    float rtol = 1e-4f, atol = 1e-5f;
+    bool fwd_match = torch::allclose(out_orig, out_opt, rtol, atol);
+    float fwd_max_diff = (out_orig - out_opt).abs().max().item<float>();
+    
+    // Run backward passes (need to run forward first for s_buf)
+    run_logcumsumexp_forward(args);
+    run_logcumsumexp_backward(args);
+    
+    run_logcumsumexp_forward_opt(args);
+    run_logcumsumexp_backward_opt(args);
+    
+    cudaDeviceSynchronize();
+    
+    auto grad_x_orig = torch::from_blob(args->grad_x, {args->B, args->T, args->H}, opts);
+    auto grad_x_opt = torch::from_blob(args->grad_x_opt, {args->B, args->T, args->H}, opts);
+    
+    bool bwd_match = torch::allclose(grad_x_orig, grad_x_opt, rtol, atol);
+    float bwd_max_diff = (grad_x_orig - grad_x_opt).abs().max().item<float>();
+    
+    printf("  optimized correctness: forward=%s(%.2e), backward=%s(%.2e)\n",
+           fwd_match ? "\033[32mok\033[0m" : "\033[31mFAIL\033[0m", fwd_max_diff,
+           bwd_match ? "\033[32mok\033[0m" : "\033[31mFAIL\033[0m", bwd_max_diff);
+}
+
 #endif
 
 void profile_logcumsumexp(int batch, int seq, int hidden) {
@@ -546,33 +603,48 @@ void profile_logcumsumexp(int batch, int seq, int hidden) {
 
     printf("logcumsumexp (N=%d, %dx%dx%d)\n", args->N, batch, seq, hidden);
 
+#ifdef USE_TORCH
+    // Test correctness first
+    test_logcumsumexp_opt_correct(args);
+#endif
+
+    // Profile original (double precision)
     float fwd_ms = profile_kernel((kernel_fn)run_logcumsumexp_forward, args);
-    print_timing("\tforward", fwd_ms, batch*seq);
+    print_timing("  forward", fwd_ms, batch*seq);
 
     float bwd_ms = profile_kernel((kernel_fn)run_logcumsumexp_backward, args);
-    print_timing("\tbackward", bwd_ms, batch*seq);
+    print_timing("  backward", bwd_ms, batch*seq);
+
+    // Profile optimized (float32, branch-free)
+    float fwd_opt_ms = profile_kernel((kernel_fn)run_logcumsumexp_forward_opt, args);
+    printf("  forward (opt)     %6.1f us  %6.2f M elem/s  \033[32m%.2fx speedup\033[0m\n", 
+           fwd_opt_ms * 1000, (batch*seq) / fwd_opt_ms / 1e3, fwd_ms / fwd_opt_ms);
+
+    float bwd_opt_ms = profile_kernel((kernel_fn)run_logcumsumexp_backward_opt, args);
+    printf("  backward (opt)    %6.1f us  %6.2f M elem/s  \033[32m%.2fx speedup\033[0m\n", 
+           bwd_opt_ms * 1000, (batch*seq) / bwd_opt_ms / 1e3, bwd_ms / bwd_opt_ms);
 
 #ifdef USE_TORCH
     LogcumsumexpArgsTorch* args_torch = create_logcumsumexpargs_torch(args);
 
     float fwd_torch_ms = profile_kernel((kernel_fn)run_logcumsumexp_forward_torch, args_torch);
-    print_timing("\tforward (torch)", fwd_torch_ms, batch*seq);
+    print_timing("  forward (torch)", fwd_torch_ms, batch*seq);
 
     args_torch->out = logcumsumexp_cuda(args_torch->x);
 
     float bwd_torch_ms = profile_kernel((kernel_fn)run_logcumsumexp_backward_torch, args_torch);
-    print_timing("\tbackward (torch)", bwd_torch_ms, batch*seq);
+    print_timing("  backward (torch)", bwd_torch_ms, batch*seq);
 
     float fwd_cpp_ms = profile_kernel((kernel_fn)run_logcumsumexp_forward_cpp, args_torch);
-    print_timing("\tforward (cpp)", fwd_cpp_ms, batch*seq);
+    print_timing("  forward (cpp)", fwd_cpp_ms, batch*seq);
 
     args_torch->out = logcumsumexp_cpp(args_torch->x);
 
     float bwd_cpp_ms = profile_kernel((kernel_fn)run_logcumsumexp_backward_torch, args_torch);
-    print_timing("\tbackward (cpp)", bwd_cpp_ms, batch*seq);
+    print_timing("  backward (cpp)", bwd_cpp_ms, batch*seq);
 
     float fwd_graph_ms = profile_graph((kernel_fn)run_logcumsumexp_forward_cpp, args_torch);
-    print_timing("\tforward (graph)", fwd_graph_ms, batch*seq);
+    print_timing("  forward (graph)", fwd_graph_ms, batch*seq);
 
     delete args_torch;
 #endif
