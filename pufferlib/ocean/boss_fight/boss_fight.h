@@ -10,9 +10,11 @@
 #define BOSS_SIZE 0.5f
 #define PLAYER_ATTACK_RADIUS 0.4f
 #define PLAYER_ATTACK_TICKS 3
-#define PLAYER_DODGE_TICKS 6
+#define PLAYER_DODGE_TICKS 4
+#define PLAYER_IFRAME_TICKS 2
 #define PLAYER_DODGE_COOLDOWN 15
-#define PLAYER_ATTACK_DMG 0.02f
+#define PLAYER_DODGE_SPEED_PER_TICK 0.35f
+#define PLAYER_ATTACK_DMG 0.05f
 #define BOSS_ATTACK_DMG 0.15f
 #define BOSS_AOE_ATTACK_RADIUS 0.8f
 #define BOSS_IDLE_TICKS 7
@@ -32,7 +34,7 @@
 #define REWARD_PLAYER_DIED -1.0f
 #define REWARD_TIMEOUT -1.0f
 #define REWARD_TICK -0.01f
-#define EPISODE_LENGTH 300
+#define EPISODE_LENGTH 600
 
 const Color PLAYER_COLOR = (Color){50, 100, 255, 255};
 const Color BOSS_COLOR = (Color){0, 187, 187, 255};
@@ -78,6 +80,7 @@ typedef struct {
   float player_hp;
   int player_dodge_cooldown;
   int player_state_ticks;
+  int dodge_escape_pending;
 
   BossState boss_state;
   float boss_hp;
@@ -137,6 +140,7 @@ void c_reset(BossFight *env) {
   env->player_state = PLAYER_IDLING;
   env->player_dodge_cooldown = 0;
   env->player_state_ticks = 0;
+  env->dodge_escape_pending = 0;
   env->boss_state = BOSS_IDLING;
   env->boss_phase_ticks = BOSS_IDLE_TICKS;
   env->episode_return = 0;
@@ -184,38 +188,59 @@ void c_step(BossFight *env) {
   bool wanna_dodge = action == 5;
   bool wanna_attack = action == 6;
   bool can_dodge =
-      env->player_state == PLAYER_IDLING && env->player_dodge_cooldown == 0;
+      env->player_state != PLAYER_DODGING && env->player_dodge_cooldown == 0;
   bool can_attack = env->player_state == PLAYER_IDLING;
 
   if (wanna_attack && can_attack) {
     env->player_state_ticks = PLAYER_ATTACK_TICKS;
     env->player_state = PLAYER_ATTACKING;
   }
+
+  float aoe_dist = BOSS_SIZE + PLAYER_SIZE + BOSS_AOE_ATTACK_RADIUS;
+  bool boss_threatening =
+      env->boss_state == BOSS_WINDING_UP || env->boss_state == BOSS_ATTACKING;
+
+  float pre_dodge_dist = 0.0f;
   if (wanna_dodge && can_dodge) {
+    pre_dodge_dist =
+        distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
+    env->dodge_escape_pending =
+        boss_threatening && pre_dodge_dist <= aoe_dist ? 1 : 0;
+
     env->player_state_ticks = PLAYER_DODGE_TICKS;
     env->player_state = PLAYER_DODGING;
   }
 
-  float dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
-
-  reward += REWARD_APPROACH * (env->prev_distance - dist);
-  env->prev_distance = dist;
-
-  bool close_enough = dist <= BOSS_SIZE + PLAYER_ATTACK_RADIUS + PLAYER_SIZE;
+  // Dodge = multi-tick movement out of the AOE (no i-frames)
+  if (env->player_state == PLAYER_DODGING) {
+    float away_x = env->player_x - env->boss_x;
+    float away_y = env->player_y - env->boss_y;
+    float away_norm = sqrtf(away_x * away_x + away_y * away_y);
+    if (away_norm > 1e-6f) {
+      env->player_x += (away_x / away_norm) * PLAYER_DODGE_SPEED_PER_TICK;
+      env->player_y += (away_y / away_norm) * PLAYER_DODGE_SPEED_PER_TICK;
+    }
+  }
 
   bool hit_wall = fabsf(env->player_x) > ARENA_HALF_SIZE ||
                   fabsf(env->player_y) > ARENA_HALF_SIZE;
   if (hit_wall) {
     reward += REWARD_HIT_WALL;
   }
+
   // can't walk out of bounds
   env->player_x =
       fmaxf(-ARENA_HALF_SIZE, fminf(ARENA_HALF_SIZE, env->player_x));
   env->player_y =
       fmaxf(-ARENA_HALF_SIZE, fminf(ARENA_HALF_SIZE, env->player_y));
 
+  float dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
+
+  reward += REWARD_APPROACH * (env->prev_distance - dist);
+  env->prev_distance = dist;
+
   // push player out if clipping into boss
-  if (dist < BOSS_SIZE + PLAYER_SIZE) {
+  if (dist < BOSS_SIZE + PLAYER_SIZE && dist > 1e-6f) {
     float overlap = BOSS_SIZE + PLAYER_SIZE - dist;
     float dx = env->player_x - env->boss_x;
     float dy = env->player_y - env->boss_y;
@@ -225,27 +250,35 @@ void c_step(BossFight *env) {
     dist = distance(env->player_x, env->player_y, env->boss_x, env->boss_y);
   }
 
+  bool close_enough = dist <= BOSS_SIZE + PLAYER_ATTACK_RADIUS + PLAYER_SIZE;
+
   if (wanna_attack && can_attack && close_enough) {
     env->boss_hp -= PLAYER_ATTACK_DMG;
     reward += REWARD_PLAYER_HIT_BOSS;
   }
 
-  bool in_aoe_attack = dist <= BOSS_SIZE + PLAYER_SIZE + BOSS_AOE_ATTACK_RADIUS;
-  bool boss_can_hit = env->player_state != PLAYER_DODGING && in_aoe_attack;
+  bool in_aoe_attack = dist <= aoe_dist;
+  bool player_iframed =
+      env->player_state == PLAYER_DODGING &&
+      env->player_state_ticks > (PLAYER_DODGE_TICKS - PLAYER_IFRAME_TICKS);
+
+  // Souls-like: you can i-frame briefly, but the AOE persists longer than the
+  // i-frame window; if you're still in the hitbox after i-frames, you get hit.
+  bool boss_can_hit = in_aoe_attack && !player_iframed;
   bool boss_can_damage = env->boss_state == BOSS_ATTACKING && boss_can_hit;
   if (boss_can_damage) {
     env->player_hp -= BOSS_ATTACK_DMG;
     reward += REWARD_BOSS_HIT_PLAYER;
   }
 
-  bool would_be_hit = env->boss_state == BOSS_ATTACKING && in_aoe_attack;
-
-  bool started_successful_dodge = would_be_hit &&
-                                  env->player_state == PLAYER_DODGING &&
-                                  env->player_state_ticks == PLAYER_DODGE_TICKS;
-
-  if (started_successful_dodge) {
-    reward += REWARD_DODGE_SUCCESS;
+  // Reward dodges that actually exit the AOE during the danger window
+  if (env->dodge_escape_pending) {
+    if (!boss_threatening) {
+      env->dodge_escape_pending = 0;
+    } else if (dist > aoe_dist) {
+      reward += REWARD_DODGE_SUCCESS;
+      env->dodge_escape_pending = 0;
+    }
   }
 
   bool killed_boss = env->boss_hp <= 0;
@@ -301,6 +334,7 @@ void c_step(BossFight *env) {
     if (env->player_state == PLAYER_DODGING) {
       env->player_dodge_cooldown = PLAYER_DODGE_COOLDOWN;
       env->player_state = PLAYER_IDLING;
+      env->dodge_escape_pending = 0;
     } else if (env->player_state == PLAYER_ATTACKING) {
       env->player_state = PLAYER_IDLING;
     }
