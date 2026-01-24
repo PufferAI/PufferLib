@@ -14,57 +14,85 @@
 
 // Requires: raylib.h, rlgl.h, flightlib.h (Vec3, Quat), Dogfight struct
 
+#include "raymath.h"  // For QuaternionFromAxisAngle, QuaternionMultiply, QuaternionToMatrix
+
+// Convert our Quat (w,x,y,z) to Raylib Quaternion (x,y,z,w)
+static inline Quaternion quat_to_raylib(Quat q) {
+    return (Quaternion){q.x, q.y, q.z, q.w};
+}
+
 // Observation labels for each scheme (for HUD display)
-// Scheme 0: OBS_ANGLES (12 obs)
-static const char* OBS_LABELS_ANGLES[12] = {
-    "px", "py", "pz", "speed", "pitch", "roll", "yaw",
-    "tgt_az", "tgt_el", "dist", "closure", "opp_hdg"
-};
-
-// Scheme 1: OBS_PURSUIT (13 obs)
-static const char* OBS_LABELS_PURSUIT[13] = {
-    "speed", "potential", "pitch", "roll", "energy",
-    "tgt_az", "tgt_el", "dist", "closure",
-    "tgt_roll", "tgt_pitch", "aspect", "E_adv"
-};
-
-// Scheme 2: OBS_REALISTIC (10 obs)
-static const char* OBS_LABELS_REALISTIC[10] = {
-    "airspeed", "altitude", "pitch", "roll",
-    "tgt_az", "tgt_el", "tgt_size",
-    "aspect", "horizon", "dist"
-};
-
-// Scheme 3: OBS_REALISTIC_RANGE (10 obs)
-static const char* OBS_LABELS_REALISTIC_RANGE[10] = {
-    "airspeed", "altitude", "pitch", "roll",
-    "tgt_az", "tgt_el", "range_km",
-    "aspect", "horizon", "closure"
-};
-
-// Scheme 4: OBS_REALISTIC_ENEMY_STATE (13 obs)
-static const char* OBS_LABELS_REALISTIC_ENEMY_STATE[13] = {
-    "airspeed", "altitude", "pitch", "roll",
-    "tgt_az", "tgt_el", "range_km",
-    "aspect", "horizon", "closure",
-    "emy_pitch", "emy_roll", "emy_hdg"
-};
-
-// Scheme 5: OBS_REALISTIC_FULL (15 obs)
-static const char* OBS_LABELS_REALISTIC_FULL[15] = {
-    "airspeed", "altitude", "pitch", "roll",
-    "tgt_az", "tgt_el", "range_km",
-    "aspect", "horizon", "closure",
-    "emy_pitch", "emy_roll", "emy_hdg",
-    "turn_rate", "g_load"
-};
-
-// Scheme 6: OBS_MOMENTUM (15 obs) - for mode 1 physics
+// Scheme 0: OBS_MOMENTUM (15 obs) - baseline
 static const char* OBS_LABELS_MOMENTUM[15] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy",
     "tgt_az", "tgt_el", "range", "closure",
     "E_adv", "aspect"
+};
+
+// Scheme 1: OBS_MOMENTUM_BETA (16 obs)
+static const char* OBS_LABELS_MOMENTUM_BETA[16] = {
+    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
+    "aoa", "altitude", "energy", "beta",
+    "tgt_az", "tgt_el", "range", "closure",
+    "E_adv", "aspect"
+};
+
+// Scheme 2: OBS_MOMENTUM_GFORCE (16 obs)
+static const char* OBS_LABELS_MOMENTUM_GFORCE[16] = {
+    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
+    "aoa", "altitude", "energy", "g_force",
+    "tgt_az", "tgt_el", "range", "closure",
+    "E_adv", "aspect"
+};
+
+// Scheme 3: OBS_MOMENTUM_FULL (19 obs)
+static const char* OBS_LABELS_MOMENTUM_FULL[19] = {
+    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
+    "aoa", "altitude", "energy", "beta", "g_force", "throttle",
+    "tgt_az", "tgt_el", "range", "closure",
+    "tgt_pitch_r", "tgt_roll_r", "E_adv"
+};
+
+// Scheme 4: OBS_MINIMAL (11 obs)
+static const char* OBS_LABELS_MINIMAL[11] = {
+    "fwd_spd", "aoa", "roll_r", "pitch_r", "yaw_r", "altitude",
+    "tgt_az", "tgt_el", "range", "closure", "E_adv"
+};
+
+// Scheme 5: OBS_CARTESIAN (15 obs)
+static const char* OBS_LABELS_CARTESIAN[15] = {
+    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
+    "aoa", "altitude", "energy",
+    "tgt_x", "tgt_y", "tgt_z", "closure",
+    "E_adv", "aspect"
+};
+
+// Scheme 6: OBS_DRONE_STYLE (22 obs)
+static const char* OBS_LABELS_DRONE_STYLE[22] = {
+    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
+    "aoa", "altitude", "energy",
+    "quat_w", "quat_x", "quat_y", "quat_z",
+    "up_x", "up_y", "up_z",
+    "tgt_az", "tgt_el", "range", "closure",
+    "E_adv", "aspect"
+};
+
+// Scheme 7: OBS_QBAR (16 obs)
+static const char* OBS_LABELS_QBAR[16] = {
+    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
+    "aoa", "altitude", "energy", "q_bar",
+    "tgt_az", "tgt_el", "range", "closure",
+    "E_adv", "aspect"
+};
+
+// Scheme 8: OBS_KITCHEN_SINK (25 obs)
+static const char* OBS_LABELS_KITCHEN_SINK[25] = {
+    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
+    "aoa", "beta", "g_force", "q_bar", "altitude", "energy", "throttle",
+    "quat_w", "quat_x", "quat_y", "quat_z",
+    "up_x", "up_y", "up_z",
+    "tgt_az", "tgt_el", "range", "closure", "E_adv"
 };
 
 // Draw airplane shape using lines - shows roll/pitch/yaw clearly
@@ -116,6 +144,42 @@ void draw_plane_shape(Vec3 pos, Quat ori, Color body_color, Color wing_color) {
 
     // Small sphere at nose to show front clearly
     DrawSphere(nose_r, 2.0f, body_color);
+}
+
+// Draw plane 3D model
+void draw_plane_model(Client *client, Vec3 pos, Quat ori, Color tint, float scale_factor) {
+    // Convert position
+    Vector3 position = {pos.x, pos.y, pos.z};
+
+    // Convert our quaternion (w,x,y,z) to Raylib (x,y,z,w)
+    Quaternion model_rot = quat_to_raylib(ori);
+
+    // GLB model is Y-up, we use Z-up
+    // Rotate 90 deg around X to convert Y-up to Z-up
+    // Then rotate to align nose with +X (model nose might point +Z or -Z)
+    Vector3 x_axis = {1, 0, 0};
+    Vector3 z_axis = {0, 0, 1};
+    Quaternion coord_fix, nose_fix, full_fix, final_rot;
+
+    coord_fix = QuaternionFromAxisAngle(x_axis, PI / 2);  // Y-up to Z-up
+    nose_fix = QuaternionFromAxisAngle(z_axis, PI / 2);   // Rotate nose to +X
+    full_fix = QuaternionMultiply(nose_fix, coord_fix);
+
+    // Apply aircraft orientation, then coordinate fix
+    final_rot = QuaternionMultiply(model_rot, full_fix);
+
+    // Apply to model transform (following battle.h pattern)
+    Matrix rotation = QuaternionToMatrix(final_rot);
+
+    // Copy model and set transform (like battle.h)
+    Model model = client->plane_model;
+    model.transform = rotation;
+
+    // Scale - P-40 model size unknown, adjust as needed
+    Vector3 scale = {scale_factor, scale_factor, scale_factor};
+    Vector3 rot_axis = {0.0f, 1.0f, 0.0f};
+
+    DrawModelEx(model, position, rot_axis, 0, scale, tint);
 }
 
 void handle_camera_controls(Client *c) {
@@ -213,29 +277,35 @@ void draw_obs_monitor(Dogfight *env) {
 
     // Select labels based on scheme
     switch (env->obs_scheme) {
-        case OBS_ANGLES:
-            labels = OBS_LABELS_ANGLES;
-            break;
-        case OBS_PURSUIT:
-            labels = OBS_LABELS_PURSUIT;
-            break;
-        case OBS_REALISTIC:
-            labels = OBS_LABELS_REALISTIC;
-            break;
-        case OBS_REALISTIC_RANGE:
-            labels = OBS_LABELS_REALISTIC_RANGE;
-            break;
-        case OBS_REALISTIC_ENEMY_STATE:
-            labels = OBS_LABELS_REALISTIC_ENEMY_STATE;
-            break;
-        case OBS_REALISTIC_FULL:
-            labels = OBS_LABELS_REALISTIC_FULL;
-            break;
         case OBS_MOMENTUM:
             labels = OBS_LABELS_MOMENTUM;
             break;
+        case OBS_MOMENTUM_BETA:
+            labels = OBS_LABELS_MOMENTUM_BETA;
+            break;
+        case OBS_MOMENTUM_GFORCE:
+            labels = OBS_LABELS_MOMENTUM_GFORCE;
+            break;
+        case OBS_MOMENTUM_FULL:
+            labels = OBS_LABELS_MOMENTUM_FULL;
+            break;
+        case OBS_MINIMAL:
+            labels = OBS_LABELS_MINIMAL;
+            break;
+        case OBS_CARTESIAN:
+            labels = OBS_LABELS_CARTESIAN;
+            break;
+        case OBS_DRONE_STYLE:
+            labels = OBS_LABELS_DRONE_STYLE;
+            break;
+        case OBS_QBAR:
+            labels = OBS_LABELS_QBAR;
+            break;
+        case OBS_KITCHEN_SINK:
+            labels = OBS_LABELS_KITCHEN_SINK;
+            break;
         default:
-            labels = OBS_LABELS_ANGLES;
+            labels = OBS_LABELS_MOMENTUM;
             break;
     }
 
@@ -248,29 +318,37 @@ void draw_obs_monitor(Dogfight *env) {
     for (int i = 0; i < num_obs; i++) {
         float val = env->observations[i];
         // Determine if this observation is [0,1] range
-        // Based on observation scheme and index:
-        // - Scheme 0 (ANGLES): index 3 (speed) is [0,1]
-        // - Scheme 1 (PURSUIT): indices 0 (speed), 1 (potential), 4 (energy) are [0,1]
-        // - Scheme 2-5 (REALISTIC*): indices 0 (airspeed), 1 (altitude) are [0,1]
         bool is_01 = false;
         switch (env->obs_scheme) {
-            case OBS_ANGLES:
-                is_01 = (i == 3);  // speed
-                break;
-            case OBS_PURSUIT:
-                is_01 = (i == 0 || i == 1 || i == 4);  // speed, potential, energy
-                break;
-            case OBS_REALISTIC:
-            case OBS_REALISTIC_RANGE:
-            case OBS_REALISTIC_ENEMY_STATE:
-            case OBS_REALISTIC_FULL:
-                is_01 = (i == 0 || i == 1);  // airspeed, altitude
-                // Also range_km (index 6) is [0,1]
-                if (env->obs_scheme != OBS_REALISTIC && i == 6) is_01 = true;
-                break;
             case OBS_MOMENTUM:
                 // fwd_spd(0), altitude(7), energy(8), range(11) are [0,1]
                 is_01 = (i == 0 || i == 7 || i == 8 || i == 11);
+                break;
+            case OBS_MOMENTUM_BETA:
+            case OBS_MOMENTUM_GFORCE:
+            case OBS_QBAR:
+                // fwd_spd(0), altitude(7), energy(8), range(12) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 12);
+                break;
+            case OBS_MOMENTUM_FULL:
+                // fwd_spd(0), altitude(7), energy(8), throttle(11), range(14) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 11 || i == 14);
+                break;
+            case OBS_MINIMAL:
+                // fwd_spd(0), altitude(5), range(8) are [0,1]
+                is_01 = (i == 0 || i == 5 || i == 8);
+                break;
+            case OBS_CARTESIAN:
+                // fwd_spd(0), altitude(7), energy(8) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8);
+                break;
+            case OBS_DRONE_STYLE:
+                // fwd_spd(0), altitude(7), energy(8), range(18) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 18);
+                break;
+            case OBS_KITCHEN_SINK:
+                // fwd_spd(0), q_bar(9), altitude(10), energy(11), throttle(12), range(22) are [0,1]
+                is_01 = (i == 0 || i == 9 || i == 10 || i == 11 || i == 12 || i == 22);
                 break;
             default:
                 break;
@@ -312,6 +390,11 @@ void c_render(Dogfight *env) {
         env->client->camera.up = (Vector3){0.0f, 0.0f, 1.0f};
         env->client->camera.fovy = 45.0f;
         env->client->camera.projection = CAMERA_PERSPECTIVE;
+
+        // Load P-40 Warhawk GLB model (similar era to P-51)
+        // Load P-40 GLB model (has embedded textures)
+        env->client->plane_model = LoadModel("pufferlib/ocean/dogfight/p40.glb");
+        env->client->model_loaded = (env->client->plane_model.meshCount > 0);
     }
 
     // 2. Handle window close
@@ -362,14 +445,23 @@ void c_render(Dogfight *env) {
     // Bounds: X +/-2000, Y +/-2000, Z 0-3000 -> center at (0, 0, 1500)
     DrawCubeWires((Vector3){0, 0, 1500}, 4000, 4000, 3000, (Color){100, 100, 100, 255});
 
-    // 8. Draw player plane (cyan wireframe airplane)
-    Color cyan = {0, 255, 255, 255};
-    Color light_cyan = {100, 255, 255, 255};
-    draw_plane_shape(p->pos, p->ori, cyan, light_cyan);
-
-    // 9. Draw opponent plane (red wireframe airplane)
+    // 8. Draw player plane
     Plane *o = &env->opponent;
-    draw_plane_shape(o->pos, o->ori, RED, ORANGE);
+    if (env->client->model_loaded) {
+        draw_plane_model(env->client, p->pos, p->ori, WHITE, 1.0f);
+    } else {
+        // Fallback to wireframe
+        Color cyan = {0, 255, 255, 255};
+        Color light_cyan = {100, 255, 255, 255};
+        draw_plane_shape(p->pos, p->ori, cyan, light_cyan);
+    }
+
+    // 9. Draw opponent plane (4x scale for visibility at distance)
+    if (env->client->model_loaded) {
+        draw_plane_model(env->client, o->pos, o->ori, RED, 4.0f);
+    } else {
+        draw_plane_shape(o->pos, o->ori, RED, ORANGE);
+    }
 
     // 10. Draw tracer when firing (cooldown just set = just fired)
     if (p->fire_cooldown >= FIRE_COOLDOWN - 2) {  // Show for 2 frames
@@ -405,6 +497,9 @@ void c_render(Dogfight *env) {
 
 void c_close(Dogfight *env) {
     if (env->client != NULL) {
+        if (env->client->model_loaded) {
+            UnloadModel(env->client->plane_model);
+        }
         CloseWindow();
         free(env->client);
         env->client = NULL;

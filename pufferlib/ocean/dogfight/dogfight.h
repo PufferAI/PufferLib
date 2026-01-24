@@ -20,17 +20,19 @@
 #include "autopilot.h"
 
 typedef enum {
-    OBS_ANGLES = 0,                // Spherical coordinates (12 obs)
-    OBS_PURSUIT = 1,               // Energy-aware pursuit observations (13 obs)
-    OBS_REALISTIC = 2,             // Cockpit instruments only (10 obs)
-    OBS_REALISTIC_RANGE = 3,       // REALISTIC with explicit range (10 obs)
-    OBS_REALISTIC_ENEMY_STATE = 4, // + enemy pitch/roll/heading (13 obs)
-    OBS_REALISTIC_FULL = 5,        // + turn rate + G-loading (15 obs)
-    OBS_MOMENTUM = 6,              // Body-frame + omega + AoA + energy (15 obs) - for mode 1 physics
+    OBS_MOMENTUM = 0,           // BASELINE: body-frame vel + omega + AoA + energy (15 obs)
+    OBS_MOMENTUM_BETA = 1,      // + sideslip angle (16 obs)
+    OBS_MOMENTUM_GFORCE = 2,    // + G-force (16 obs)
+    OBS_MOMENTUM_FULL = 3,      // + sideslip + G + throttle + tgt rates (19 obs)
+    OBS_MINIMAL = 4,            // stripped down essentials (11 obs)
+    OBS_CARTESIAN = 5,          // cartesian target position (15 obs)
+    OBS_DRONE_STYLE = 6,        // + quaternion + up vector (22 obs)
+    OBS_QBAR = 7,               // + dynamic pressure (16 obs)
+    OBS_KITCHEN_SINK = 8,       // everything (25 obs)
     OBS_SCHEME_COUNT
 } ObsScheme;
 
-static const int OBS_SIZES[OBS_SCHEME_COUNT] = {12, 13, 10, 10, 13, 15, 15};
+static const int OBS_SIZES[OBS_SCHEME_COUNT] = {15, 16, 16, 19, 11, 15, 22, 16, 25};
 
 typedef enum {
     CURRICULUM_TAIL_CHASE = 0,   // Easiest: opponent ahead, same heading
@@ -116,13 +118,17 @@ typedef struct Client {
     Camera3D camera;
     float width;
     float height;
-    // Camera orbit state (for mouse control)
+
     float cam_distance;
     float cam_azimuth;
     float cam_elevation;
     bool is_dragging;
     float last_mouse_x;
     float last_mouse_y;
+
+    Model plane_model;
+    Texture2D plane_texture;
+    bool model_loaded;
 } Client;
 
 typedef struct Dogfight {
@@ -186,7 +192,7 @@ typedef struct Dogfight {
     // Debug
     int env_num;                // Environment index (for filtering debug output)
     // Observation highlighting (for visual debugging)
-    unsigned char obs_highlight[16];  // 1 = highlight this observation with red arrow
+    unsigned char obs_highlight[25];  // 1 = highlight this observation with red arrow (max scheme is 25 obs)
 } Dogfight;
 
 #include "dogfight_observations.h"
@@ -236,8 +242,8 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
 
 void set_obs_highlight(Dogfight *env, int *indices, int count) {
     memset(env->obs_highlight, 0, sizeof(env->obs_highlight));
-    for (int i = 0; i < count && i < 16; i++) {
-        if (indices[i] >= 0 && indices[i] < 16) {
+    for (int i = 0; i < count && i < 25; i++) {
+        if (indices[i] >= 0 && indices[i] < 25) {
             env->obs_highlight[indices[i]] = 1;
         }
     }

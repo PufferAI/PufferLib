@@ -110,34 +110,46 @@ void test_c_reset() {
 }
 
 void test_compute_observations() {
-    // Tests ANGLES scheme (scheme 0, 12 obs)
+    // Tests MOMENTUM scheme (scheme 0, 15 obs)
     Dogfight env = make_env(1000);
     env.player.pos = vec3(1000, 500, 1500);
     env.player.vel = vec3(125, 0, 0);
     env.player.ori = quat(1, 0, 0, 0);  // identity = facing +X, level
+    env.player.omega = vec3(0, 0, 0);   // no rotation
 
     compute_observations(&env);
 
-    // ANGLES scheme layout:
-    // [0-2] pos normalized
-    ASSERT_NEAR(env.observations[0], 1000.0f / WORLD_HALF_X, 1e-6f);
-    ASSERT_NEAR(env.observations[1], 500.0f / WORLD_HALF_Y, 1e-6f);
-    ASSERT_NEAR(env.observations[2], 1500.0f / WORLD_MAX_Z, 1e-6f);
+    // MOMENTUM scheme layout (15 obs):
+    // [0] forward speed [0,1] - body-frame velocity x component
+    float expected_fwd_speed = 125.0f / MAX_SPEED;
+    ASSERT_NEAR(env.observations[0], expected_fwd_speed, 1e-5f);
 
-    // [3] speed normalized (scalar)
-    ASSERT_NEAR(env.observations[3], 125.0f / MAX_SPEED, 1e-6f);
+    // [1] sideslip [-1,1] - body-frame velocity y component (0 for straight flight)
+    ASSERT_NEAR(env.observations[1], 0.0f, 1e-5f);
 
-    // [4-6] euler angles (all 0 for identity quaternion)
-    ASSERT_NEAR(env.observations[4], 0.0f, 1e-5f);  // pitch / PI
-    ASSERT_NEAR(env.observations[5], 0.0f, 1e-5f);  // roll / PI
-    ASSERT_NEAR(env.observations[6], 0.0f, 1e-5f);  // yaw / PI
+    // [2] climb rate [-1,1] - body-frame velocity z component (0 for level)
+    ASSERT_NEAR(env.observations[2], 0.0f, 1e-5f);
 
-    // [7-11] target angles - depend on opponent position, check valid ranges
-    assert(env.observations[7] >= -1.0f && env.observations[7] <= 1.0f);   // azimuth
-    assert(env.observations[8] >= -1.0f && env.observations[8] <= 1.0f);   // elevation
-    assert(env.observations[9] >= -2.0f && env.observations[9] <= 2.0f);   // distance
-    assert(env.observations[10] >= -1.0f && env.observations[10] <= 1.0f); // closing_rate
-    assert(env.observations[11] >= -1.0f && env.observations[11] <= 1.0f); // opp_heading
+    // [3-5] omega (angular velocity) - all 0 for no rotation
+    ASSERT_NEAR(env.observations[3], 0.0f, 1e-5f);  // roll rate
+    ASSERT_NEAR(env.observations[4], 0.0f, 1e-5f);  // pitch rate
+    ASSERT_NEAR(env.observations[5], 0.0f, 1e-5f);  // yaw rate
+
+    // [6] AoA - 0 for aligned flight
+    ASSERT_NEAR(env.observations[6], 0.0f, 1e-5f);
+
+    // [7] altitude [0,1]
+    float expected_alt = 1500.0f / WORLD_MAX_Z;
+    ASSERT_NEAR(env.observations[7], expected_alt, 1e-5f);
+
+    // [8-14] check valid ranges
+    assert(env.observations[8] >= 0.0f && env.observations[8] <= 1.0f);    // energy
+    assert(env.observations[9] >= -1.0f && env.observations[9] <= 1.0f);   // target azimuth
+    assert(env.observations[10] >= -1.0f && env.observations[10] <= 1.0f); // target elevation
+    assert(env.observations[11] >= 0.0f && env.observations[11] <= 1.0f);  // range
+    assert(env.observations[12] >= -1.0f && env.observations[12] <= 1.0f); // closure
+    assert(env.observations[13] >= -1.0f && env.observations[13] <= 1.0f); // energy advantage
+    assert(env.observations[14] >= -1.0f && env.observations[14] <= 1.0f); // aspect
 
     printf("test_compute_observations PASS\n");
 }
@@ -241,19 +253,20 @@ void test_relative_observations() {
     env.player.pos = vec3(0, 0, 1000);
     env.player.vel = vec3(80, 0, 0);
     env.player.ori = quat(1, 0, 0, 0);  // identity = facing +X
+    env.player.omega = vec3(0, 0, 0);   // no rotation
     env.opponent.pos = vec3(500, 100, 1050);  // 500m ahead, 100m right, 50m up
     env.opponent.vel = vec3(80, 0, 0);
     env.opponent.ori = quat(1, 0, 0, 0);
 
     compute_observations(&env);
 
-    // ANGLES scheme: relative position encoded as azimuth [7] and elevation [8]
+    // MOMENTUM scheme: relative position encoded as azimuth [9] and elevation [10]
     // rel_pos in body frame = (500, 100, 50) since identity orientation
     // azimuth = atan2(100, 500) / PI ≈ 0.063
     // elevation = atan2(50, sqrt(500^2+100^2)) / (PI/2) ≈ 0.062
-    float azimuth = env.observations[7];
-    float elevation = env.observations[8];
-    float distance = env.observations[9];
+    float azimuth = env.observations[9];
+    float elevation = env.observations[10];
+    float range = env.observations[11];
 
     // Azimuth should be small positive (opponent slightly right)
     float expected_az = atan2f(100.0f, 500.0f) / PI;  // ~0.063
@@ -264,10 +277,10 @@ void test_relative_observations() {
     float expected_el = atan2f(50.0f, r_horiz) / (PI * 0.5f);  // ~0.062
     ASSERT_NEAR(elevation, expected_el, 1e-4f);
 
-    // Distance: sqrt(500^2 + 100^2 + 50^2) ≈ 512m, normalized to [-1,1]
+    // Range: sqrt(500^2 + 100^2 + 50^2) ≈ 512m, normalized to [0,1] by /2000
     float dist = sqrtf(500*500 + 100*100 + 50*50);
-    float expected_dist = clampf(dist / GUN_RANGE, 0.0f, 2.0f) - 1.0f;
-    ASSERT_NEAR(distance, expected_dist, 1e-4f);
+    float expected_range = clampf(dist / 2000.0f, 0.0f, 1.0f);
+    ASSERT_NEAR(range, expected_range, 1e-4f);
 
     printf("test_relative_observations PASS\n");
 }

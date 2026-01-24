@@ -23,13 +23,15 @@ class AutopilotMode:
 
 # Observation sizes by scheme (must match C OBS_SIZES in dogfight.h)
 OBS_SIZES = {
-    0: 12,  # ANGLES: pos(3) + speed(1) + euler(3) + target_angles(4) + opp(1)
-    1: 13,  # PURSUIT: speed(1) + pot(1) + euler(2) + energy(1) + target(4) + tgt_state(3) + energy_adv(1)
-    2: 10,  # REALISTIC: instruments(4) + gunsight(3) + visual(3)
-    3: 10,  # REALISTIC_RANGE: instruments(4) + gunsight(3) + visual(3) w/ km range
-    4: 13,  # REALISTIC_ENEMY_STATE: + enemy pitch/roll/heading
-    5: 15,  # REALISTIC_FULL: + turn rate + G-loading
-    6: 15,  # MOMENTUM: body-frame vel(3) + omega(3) + aoa(1) + alt(1) + energy(1) + target(4) + tactical(2)
+    0: 15,   # MOMENTUM (baseline): body-frame vel + omega + AoA + energy + target + tactical
+    1: 16,   # MOMENTUM_BETA: + sideslip angle
+    2: 16,   # MOMENTUM_GFORCE: + G-force
+    3: 19,   # MOMENTUM_FULL: + sideslip + G + throttle + target rates
+    4: 11,   # MINIMAL: stripped down essentials
+    5: 15,   # CARTESIAN: cartesian target position
+    6: 22,   # DRONE_STYLE: + quaternion + up vector
+    7: 16,   # QBAR: + dynamic pressure
+    8: 25,   # KITCHEN_SINK: everything
 }
 
 
