@@ -49,7 +49,9 @@ class Dogfight(pufferlib.PufferEnv):
         # Curriculum learning
         curriculum_enabled=0,       # 0=off (legacy), 1=on (progressive stages)
         curriculum_randomize=0,     # 0=progressive (training), 1=random stage each episode (eval)
-        advance_threshold=0.7,
+        advance_threshold=0.7,      # Kill rate threshold to advance stage (used by training loop)
+        stage_increment=0.1,        # How much to increase target per advancement
+        eval_interval=2_500_000,    # Steps between curriculum evaluations (2.5M = ~1s at 2.5M SPS)
         # df11: Simplified rewards (6 terms)
         reward_aim_scale=0.05,       # Continuous aiming reward
         reward_closing_scale=0.003,  # Per m/s closing
@@ -79,6 +81,18 @@ class Dogfight(pufferlib.PufferEnv):
         self.report_interval = report_interval
         self.tick = 0
 
+        # Global curriculum state (step-based window evaluation)
+        self._current_stage = 0
+        self._target_stage = 0.0           # Float target (0.0 to 7.0) for probabilistic assignment
+        self._warmup_steps = 10_000_000    # 10M steps warmup (~4s at 2.4M SPS)
+        self._eval_interval = eval_interval  # Steps between curriculum evaluations
+        self._last_eval_step = 10_000_000  # First eval at warmup + interval
+        self._cumulative_perf = 0.0        # Sum of perf values
+        self._cumulative_n = 0             # Batch count (int, not float)
+        self.advance_threshold = advance_threshold
+        self.stage_increment = stage_increment
+        self.curriculum_enabled = curriculum_enabled
+
         super().__init__(buf)
         self.actions = self.actions.astype(np.float32)  # REQUIRED for continuous
 
@@ -98,7 +112,6 @@ class Dogfight(pufferlib.PufferEnv):
 
                 curriculum_enabled=curriculum_enabled,
                 curriculum_randomize=curriculum_randomize,
-                advance_threshold=advance_threshold,
 
                 reward_aim_scale=reward_aim_scale,
                 reward_closing_scale=reward_closing_scale,
@@ -131,6 +144,33 @@ class Dogfight(pufferlib.PufferEnv):
             log_data = binding.vec_log(self.c_envs)
             if log_data:
                 info.append(log_data)
+
+                # Curriculum advancement with step-based window evaluation (v2 fix)
+                # Key insight: After vec_log(), n is ALWAYS ~1.0 (it divides by itself)
+                # So we count batches, not episodes, and use step-based timing
+                if self.curriculum_enabled:
+                    perf = log_data.get('perf', 0)  # kill_rate after vec_log
+                    total_steps = self.tick * self.num_agents
+
+                    # Only accumulate AFTER warmup (avoid early kill bias)
+                    if total_steps >= self._warmup_steps:
+                        self._cumulative_perf += perf
+                        self._cumulative_n += 1
+
+                        # Evaluate at intervals
+                        if total_steps - self._last_eval_step >= self._eval_interval:
+                            if self._cumulative_n > 0:
+                                window_kill_rate = self._cumulative_perf / self._cumulative_n
+
+                                if window_kill_rate >= self.advance_threshold and self._target_stage < 7.0:
+                                    self._target_stage += self.stage_increment
+                                    binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
+                                    self._current_stage = int(self._target_stage)
+
+                            # Reset window
+                            self._cumulative_perf = 0.0
+                            self._cumulative_n = 0
+                            self._last_eval_step = total_steps
 
         return (self.observations, self.rewards, self.terminals, self.truncations, info)
 
@@ -286,6 +326,41 @@ class Dogfight(pufferlib.PufferEnv):
             env.set_obs_highlight([])  # Clear highlights
         """
         binding.env_set_obs_highlight(self._env_handles[env_idx], list(indices))
+
+    def set_curriculum_stage(self, stage: int):
+        """
+        Set curriculum stage for all environments (global curriculum).
+
+        Called by training loop based on aggregate kill_rate from log data.
+        All envs share the same stage for coherent metrics.
+
+        Args:
+            stage: Curriculum stage (0=TAIL_CHASE, 1=HEAD_ON, ..., 7=EVASIVE)
+        """
+        binding.vec_set_curriculum_stage(self.c_envs, stage)
+        self._current_stage = stage
+
+    def get_curriculum_stage(self) -> int:
+        """Get current global curriculum stage."""
+        return self._current_stage
+
+    def set_curriculum_target(self, target: float):
+        """
+        Set curriculum target (0.0-7.0) for probabilistic stage assignment.
+
+        At each episode reset, stage is assigned probabilistically:
+        - target=1.3 → 70% stage 1, 30% stage 2
+
+        Args:
+            target: Float target from 0.0 to 7.0
+        """
+        self._target_stage = max(0.0, min(target, 7.0))
+        binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
+        self._current_stage = int(self._target_stage)
+
+    def get_curriculum_target(self) -> float:
+        """Get current curriculum target (float 0.0-7.0)."""
+        return self._target_stage
 
 
 def test_performance(timeout=10, atn_cache=1024):

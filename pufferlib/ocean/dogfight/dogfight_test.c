@@ -5,6 +5,9 @@
 
 #define ASSERT_NEAR(a, b, eps) assert(fabs((a) - (b)) < (eps))
 
+// Helper to set stage and sync curriculum_target for probabilistic selection
+#define SET_STAGE(env, s) do { (env).stage = (s); (env).curriculum_target = (float)(s); } while(0)
+
 static float obs_buf[32];  // Enough for current and future obs
 static float act_buf[5];
 static float rew_buf[1];
@@ -23,7 +26,7 @@ static Dogfight make_env(int max_steps) {
         .neg_g = 0.02f,
         .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg, 0, 0, 0.7f, 0);  // curriculum_enabled=0
+    init(&env, 0, &rcfg, 0, 0, 0);  // curriculum_enabled=0
     return env;
 }
 
@@ -1072,7 +1075,7 @@ static Dogfight make_env_curriculum(int max_steps, int randomize) {
         .neg_g = 0.02f,
         .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg, 1, randomize, 0.7f, 0);  // curriculum_enabled=1
+    init(&env, 0, &rcfg, 1, randomize, 0);  // curriculum_enabled=1
     return env;
 }
 
@@ -1090,7 +1093,7 @@ static Dogfight make_env_for_rudder_test(int max_steps) {
         .neg_g = 0.02f,
         .speed_min = 50.0f,
     };
-    init(&env, 0, &rcfg, 0, 0, 0.7f, 0);  // curriculum_enabled=0
+    init(&env, 0, &rcfg, 0, 0, 0);  // curriculum_enabled=0
     return env;
 }
 
@@ -1163,7 +1166,7 @@ void test_spawn_bearing_variety() {
     // Test that FULL_RANDOM stage spawns opponents at various bearings (not just ahead)
     // Set stage directly since curriculum is now performance-based (df10)
     Dogfight env = make_env_curriculum(1000, 0);  // Progressive mode
-    env.stage = CURRICULUM_FULL_RANDOM;  // Force stage 4 (FULL_RANDOM) directly
+    SET_STAGE(env, CURRICULUM_FULL_RANDOM);  // Force stage 4 (FULL_RANDOM)
 
     int front_count = 0;   // bearing < 45
     int side_count = 0;    // bearing 45-135
@@ -1197,7 +1200,7 @@ void test_spawn_heading_variety() {
     // Test that FULL_RANDOM opponents have varied headings (not always 0)
     // Set stage directly since curriculum is now performance-based (df10)
     Dogfight env = make_env_curriculum(1000, 0);  // Progressive mode
-    env.stage = CURRICULUM_FULL_RANDOM;  // Force stage 4 (FULL_RANDOM) directly
+    SET_STAGE(env, CURRICULUM_FULL_RANDOM);  // Force stage 4 (FULL_RANDOM)
 
     float min_heading = 999.0f;
     float max_heading = -999.0f;
@@ -1231,7 +1234,7 @@ void test_curriculum_stages_differ() {
     Dogfight env = make_env_curriculum(1000, 0);  // Progressive mode (randomize=0)
 
     // Stage 0: TAIL_CHASE - opponent ahead, same direction
-    env.stage = CURRICULUM_TAIL_CHASE;
+    SET_STAGE(env, CURRICULUM_TAIL_CHASE);
     srand(42);
     c_reset(&env);
     float bearing_tail = get_bearing(&env);
@@ -1239,21 +1242,21 @@ void test_curriculum_stages_differ() {
     assert(env.stage == CURRICULUM_TAIL_CHASE);
 
     // Stage 1: HEAD_ON - opponent ahead, facing us
-    env.stage = CURRICULUM_HEAD_ON;
+    SET_STAGE(env, CURRICULUM_HEAD_ON);
     srand(42);
     c_reset(&env);
     float bearing_head = get_bearing(&env);
     assert(env.stage == CURRICULUM_HEAD_ON);
 
     // Stage 2: VERTICAL - opponent above/below (after 2026-01-18 reorder, was stage 3)
-    env.stage = CURRICULUM_VERTICAL;
+    SET_STAGE(env, CURRICULUM_VERTICAL);
     srand(42);
     c_reset(&env);
     float bearing_vert = get_bearing(&env);
     assert(env.stage == CURRICULUM_VERTICAL);
 
     // Stage 6: CROSSING - opponent to side (after 2026-01-18 reorder, was stage 2)
-    env.stage = CURRICULUM_CROSSING;
+    SET_STAGE(env, CURRICULUM_CROSSING);
     srand(42);
     c_reset(&env);
     float bearing_cross = get_bearing(&env);
@@ -1612,7 +1615,7 @@ void test_obs_bounds_all_schemes() {
             .neg_g = 0.02f,
             .speed_min = 50.0f,
         };
-        init(&env, scheme, &rcfg, 0, 0, 0.7f, 0);  // curriculum_enabled=0
+        init(&env, scheme, &rcfg, 0, 0, 0);  // curriculum_enabled=0
 
         // Reset to get valid observations
         c_reset(&env);

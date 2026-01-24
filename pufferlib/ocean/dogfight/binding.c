@@ -14,6 +14,8 @@ static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwarg
 static PyObject* env_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* vec_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* vec_set_mode_weights(PyObject* self, PyObject* args, PyObject* kwargs);
+static PyObject* vec_set_curriculum_stage(PyObject* self, PyObject* args);
+static PyObject* vec_set_curriculum_target(PyObject* self, PyObject* args);
 static PyObject* env_get_autopilot_mode(PyObject* self, PyObject* args);
 static PyObject* env_get_state(PyObject* self, PyObject* args);
 static PyObject* env_set_obs_highlight(PyObject* self, PyObject* args);
@@ -24,6 +26,8 @@ static PyObject* env_set_obs_highlight(PyObject* self, PyObject* args);
     {"env_set_autopilot", (PyCFunction)env_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set opponent autopilot mode"}, \
     {"vec_set_autopilot", (PyCFunction)vec_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set autopilot for all envs"}, \
     {"vec_set_mode_weights", (PyCFunction)vec_set_mode_weights, METH_VARARGS | METH_KEYWORDS, "Set mode weights for all envs"}, \
+    {"vec_set_curriculum_stage", (PyCFunction)vec_set_curriculum_stage, METH_VARARGS, "Set curriculum stage for all envs"}, \
+    {"vec_set_curriculum_target", (PyCFunction)vec_set_curriculum_target, METH_VARARGS, "Set curriculum target (float) for all envs"}, \
     {"env_get_autopilot_mode", (PyCFunction)env_get_autopilot_mode, METH_VARARGS, "Get current autopilot mode"}, \
     {"env_get_state", (PyCFunction)env_get_state, METH_VARARGS, "Get raw player state"}, \
     {"env_set_obs_highlight", (PyCFunction)env_set_obs_highlight, METH_VARARGS, "Set observation indices to highlight with red arrows"}
@@ -64,11 +68,9 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
     int curriculum_enabled = get_int(kwargs, "curriculum_enabled", 0);
     int curriculum_randomize = get_int(kwargs, "curriculum_randomize", 0);
 
-    float advance_threshold = get_float(kwargs, "advance_threshold", 0.7f);
-
     int env_num = get_int(kwargs, "env_num", 0);
 
-    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, advance_threshold, env_num);
+    init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, env_num);
     return 0;
 }
 
@@ -76,14 +78,16 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "episode_return", log->episode_return);
     assign_to_dict(dict, "episode_length", log->episode_length);
     assign_to_dict(dict, "score", log->score);
-    assign_to_dict(dict, "perf", log->perf);
+    assign_to_dict(dict, "perf", log->perf);           // Raw kills → becomes kill_rate after vec_log
     assign_to_dict(dict, "shots_fired", log->shots_fired);
     assign_to_dict(dict, "accuracy", log->accuracy);
     assign_to_dict(dict, "stage", log->stage);
-    assign_to_dict(dict, "total_stage_weight", log->total_stage_weight);
-    assign_to_dict(dict, "avg_stage_weight", log->avg_stage_weight);
-    assign_to_dict(dict, "avg_abs_bias", log->avg_abs_bias);
-    assign_to_dict(dict, "ultimate", log->ultimate);
+    // Export RAW sums - they become correct averages after vec_log divides by n
+    assign_to_dict(dict, "avg_stage_weight", log->total_stage_weight);  // Raw sum → correct avg
+    assign_to_dict(dict, "avg_abs_bias", log->total_abs_bias);          // Raw sum → correct avg
+    assign_to_dict(dict, "avg_stage", log->stage_sum);                  // Raw sum → correct avg
+    // Don't export kill_rate, ultimate, or per-env ratios - garbage after aggregation
+    // Python should use 'perf' as the global kill_rate
     assign_to_dict(dict, "n", log->n);
     return 0;
 }
@@ -227,6 +231,51 @@ static PyObject* vec_set_mode_weights(PyObject* self, PyObject* args, PyObject* 
         ap->mode_weights[AP_TURN_RIGHT] = w_turn_right;
         ap->mode_weights[AP_CLIMB] = w_climb;
         ap->mode_weights[AP_DESCEND] = w_descend;
+    }
+
+    Py_RETURN_NONE;
+}
+
+// Set curriculum stage for all environments (global curriculum)
+static PyObject* vec_set_curriculum_stage(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+    int stage;
+
+    if (!PyArg_ParseTuple(args, "Oi", &vec_arg, &stage)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    // Set stage for all environments
+    for (int i = 0; i < vec->num_envs; i++) {
+        set_curriculum_stage(vec->envs[i], stage);
+    }
+
+    Py_RETURN_NONE;
+}
+
+// Set curriculum target (float 0.0-7.0) for all environments
+static PyObject* vec_set_curriculum_target(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+    float target;
+
+    if (!PyArg_ParseTuple(args, "Of", &vec_arg, &target)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    for (int i = 0; i < vec->num_envs; i++) {
+        set_curriculum_target(vec->envs[i], target);
     }
 
     Py_RETURN_NONE;

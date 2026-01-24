@@ -11,7 +11,6 @@
 #include "rlgl.h"  // For rlSetClipPlanes()
 
 #define DEBUG 0
-#define DEMOTE_THRESHOLD 0.3f
 #define EVAL_WINDOW 50
 #define PENALTY_STALL 0.002f
 #define PENALTY_RUDDER 0.001f
@@ -37,26 +36,25 @@ static const int OBS_SIZES[OBS_SCHEME_COUNT] = {15, 16, 16, 19, 11, 15, 22, 16, 
 typedef enum {
     CURRICULUM_TAIL_CHASE = 0,   // Easiest: opponent ahead, same heading
     CURRICULUM_HEAD_ON,          // Opponent coming toward us
-    CURRICULUM_VERTICAL,         // Above or below player (was stage 3)
-    CURRICULUM_MANEUVERING,      // Opponent does turns (was stage 4)
-    CURRICULUM_FULL_RANDOM,      // Mix of all basic modes (was stage 5)
-    CURRICULUM_HARD_MANEUVERING, // Hard turns + weave patterns (was stage 6)
-    CURRICULUM_CROSSING,         // 45 degree deflection shots (was stage 2, reduced from 90°)
+    CURRICULUM_VERTICAL,         // Above or below player
+    CURRICULUM_MANEUVERING,      // Opponent does turns
+    CURRICULUM_FULL_RANDOM,      // Mix of all basic modes
+    CURRICULUM_HARD_MANEUVERING, // Hard turns + weave patterns
+    CURRICULUM_CROSSING,         // 45 degree deflection shots
     CURRICULUM_EVASIVE,          // Reactive evasion (hardest)
     CURRICULUM_COUNT
 } CurriculumStage;
 
 // Stage difficulty weights for composite metric (higher = harder = more valuable)
-// Used to compute difficulty_weighted_perf = perf * avg_stage_weight
 // Reordered 2026-01-18 to match new enum order (see CURRICULUM_PLANS.md)
 static const float STAGE_WEIGHTS[CURRICULUM_COUNT] = {
     0.2f,   // TAIL_CHASE - trivial
     0.3f,   // HEAD_ON - easy
-    0.4f,   // VERTICAL - medium (was stage 3)
-    0.5f,   // MANEUVERING - medium (was stage 4)
-    0.65f,  // FULL_RANDOM - medium-hard (was stage 5)
-    0.8f,   // HARD_MANEUVERING - hard (was stage 6)
-    0.9f,   // CROSSING - hard, 45° deflection (was stage 2)
+    0.4f,   // VERTICAL - medium
+    0.5f,   // MANEUVERING - medium
+    0.65f,  // FULL_RANDOM - medium-hard
+    0.8f,   // HARD_MANEUVERING - hard
+    0.9f,   // CROSSING - hard, 45° deflection
     1.0f    // EVASIVE - hardest
 };
 
@@ -83,16 +81,22 @@ typedef struct Log {
     float episode_return;
     float episode_length;
     float score;           // 1.0 on kill, 0.0 on failure
-    float perf;
+    float perf;            // Raw kills (becomes kill_rate after vec_log divides by n)
     float shots_fired;
     float accuracy;
-    float stage;           // current curriculum stage (for monitoring)
-    // Curriculum-weighted metrics (Phase 1)
-    float total_stage_weight;       // Sum of stage weights across all episodes
-    float avg_stage_weight;         // total_stage_weight / n
-    float total_abs_bias;           // Sum of |aileron_bias| at episode end
-    float avg_abs_bias;             // total_abs_bias / n
-    float ultimate;                 // Main sweep metric: kill_rate * avg_stage_weight / (1 + avg_abs_bias * 0.01)
+    float stage;
+
+    // RAW SUMS - exported to Python, become correct averages after vec_log divides by n
+    float total_stage_weight;       // Sum of stage weights (exported as avg_stage_weight)
+    float total_abs_bias;           // Sum of |aileron_bias| (exported as avg_abs_bias)
+    float stage_sum;                // Sum of stages (exported as avg_stage)
+
+    // PER-ENV RATIOS - for C debugging only, NOT exported (garbage after vec_log aggregation)
+    float avg_stage_weight;         // = total_stage_weight / n (per-env only)
+    float avg_abs_bias;             // = total_abs_bias / n (per-env only)
+    float avg_stage;                // = stage_sum / n (per-env only)
+    float kill_rate;                // = perf / n (per-env only - Python uses 'perf' instead)
+    float ultimate;                 // = kill_rate * avg_stage_weight (per-env only)
     float n;
 } Log;
 
@@ -160,12 +164,9 @@ typedef struct Dogfight {
     int curriculum_enabled;     // 0 = off (legacy spawning), 1 = on
     int curriculum_randomize;   // 0 = progressive (training), 1 = random stage each episode (eval)
     int total_episodes;         // Cumulative episodes (persists across resets)
-    CurriculumStage stage;      // Current difficulty stage
+    CurriculumStage stage;      // Current difficulty stage (set globally by Python)
+    float curriculum_target;    // Float 0.0-7.0 for probabilistic stage assignment
     int is_initialized;         // Flag to preserve curriculum state across re-init (for Multiprocessing)
-    // Performance-based curriculum
-    float recent_kills;         // Kills in current evaluation window
-    float recent_episodes;      // Episodes in current evaluation window
-    float advance_threshold;    // Kill rate to advance (default 0.7)
     // Anti-spinning
     float total_aileron_usage;  // Accumulated |aileron| input (for spin death)
     float aileron_bias;         // Cumulative signed aileron (for directional penalty)
@@ -197,7 +198,7 @@ typedef struct Dogfight {
 
 #include "dogfight_observations.h"
 
-void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, float advance_threshold, int env_num) {
+void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enabled, int curriculum_randomize, int env_num) {
     env->log = (Log){0};
     env->tick = 0;
     env->env_num = env_num;
@@ -220,11 +221,8 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     env->curriculum_randomize = curriculum_randomize;
     if (!env->is_initialized) {
         env->total_episodes = 0;
-        env->stage = CURRICULUM_TAIL_CHASE;
-
-        env->recent_kills = 0.0f;
-        env->recent_episodes = 0.0f;
-        env->advance_threshold = advance_threshold > 0.0f ? advance_threshold : 0.7f;
+        env->stage = CURRICULUM_TAIL_CHASE;  // Stage managed globally by Python
+        env->curriculum_target = 0.0f;       // Start at stage 0
         if (DEBUG >= 1) {
             fprintf(stderr, "[INIT] FIRST init ptr=%p env_num=%d - setting total_episodes=0, stage=0\n", (void*)env, env_num);
         }
@@ -292,67 +290,49 @@ void add_log(Dogfight *env) {
     env->log.score += env->rewards[0];
     env->log.shots_fired += env->episode_shots_fired;
     env->log.accuracy = (env->log.shots_fired > 0.0f) ? (env->log.perf / env->log.shots_fired * 100.0f) : 0.0f;
-    env->log.stage = (float)env->stage;  // Track curriculum stage
+    env->log.stage = (float)env->stage;
 
-    // Curriculum-weighted metrics (Phase 1)
-    // Track difficulty faced and compute composite metric
-    env->log.total_stage_weight += STAGE_WEIGHTS[env->stage];
-    env->log.total_abs_bias += fabsf(env->aileron_bias);  // Track bias at episode end
+    env->log.total_stage_weight += STAGE_WEIGHTS[env->stage]; // coeffs to scale metrics based on difficulty
+    env->log.total_abs_bias += fabsf(env->aileron_bias);
+    env->log.stage_sum += (float)env->stage;  // Accumulate for avg_stage
     env->log.n += 1.0f;
-    env->log.avg_stage_weight = env->log.total_stage_weight / env->log.n;
+    env->log.kill_rate = env->log.perf / fmaxf(env->log.n, 1.0f);
+    env->log.avg_stage = env->log.stage_sum / env->log.n;
     env->log.avg_abs_bias = env->log.total_abs_bias / env->log.n;
+    env->log.avg_stage_weight = env->log.total_stage_weight / env->log.n;
 
-    // ultimate = kill_rate * stage_weight / (1 + avg_abs_bias * 0.01)
-    // Rewards killing hard opponents, penalizes degenerate aileron bias
-    float kill_rate = env->log.perf / env->log.n;
-    float difficulty_weighted = kill_rate * env->log.avg_stage_weight;
-    float bias_divisor = 1.0f + env->log.avg_abs_bias * 0.1f;  // min 1.0, safe
-    env->log.ultimate = difficulty_weighted / bias_divisor;
+    // Ultimate = kill_rate * difficulty (no bias penalty)
+    env->log.ultimate = env->log.kill_rate * env->log.avg_stage_weight;
 
     if (DEBUG >= 10) printf("  log.perf=%.2f, log.shots_fired=%.0f, log.n=%.0f\n", env->log.perf, env->log.shots_fired, env->log.n);
-
-    if (env->curriculum_enabled && !env->curriculum_randomize) {
-        env->recent_episodes += 1.0f;
-        env->recent_kills += env->kill ? 1.0f : 0.0f;
-
-        // Evaluate every eval_window episodes
-        if (env->recent_episodes >= (float)EVAL_WINDOW) {
-            float recent_rate = env->recent_kills / env->recent_episodes;
-
-            if (recent_rate > env->advance_threshold && env->stage < CURRICULUM_COUNT - 1) {
-                env->stage++;
-                if (DEBUG >= 1) {
-                    fprintf(stderr, "[ADVANCE] env=%d stage->%d (rate=%.2f, window=%d)\n",
-                            env->env_num, env->stage, recent_rate, EVAL_WINDOW);
-                }
-            } else if (recent_rate < DEMOTE_THRESHOLD && env->stage > 0) {
-                env->stage--;
-                if (DEBUG >= 1) {
-                    fprintf(stderr, "[DEMOTE] env=%d stage->%d (rate=%.2f, window=%d)\n",
-                            env->env_num, env->stage, recent_rate, EVAL_WINDOW);
-                }
-            }
-
-            env->recent_kills = 0.0f;
-            env->recent_episodes = 0.0f;
-        }
-    }
 }
 
 // ============================================================================
 // Curriculum Learning: Stage-specific spawn functions
 // ============================================================================
 
-// Get current curriculum stage - now performance-based (df10)
-// Stage advancement/demotion handled in add_log() based on recent kill rate
+// Stage advancement handled in add_log() based on recent kill rate
 CurriculumStage get_curriculum_stage(Dogfight *env) {
     if (!env->curriculum_enabled) return CURRICULUM_FULL_RANDOM;
     if (env->curriculum_randomize) {
         // Random stage for eval mode - tests all difficulties
         return (CurriculumStage)(rand() % CURRICULUM_COUNT);
     }
-    // Stage is managed by add_log() based on performance
-    return env->stage;
+
+    // Probabilistic selection based on curriculum_target
+    float target = env->curriculum_target;
+    int base = (int)target;
+    float frac = target - (float)base;
+
+    if (base >= CURRICULUM_COUNT - 1) {
+        return (CurriculumStage)(CURRICULUM_COUNT - 1);
+    }
+
+    // Probabilistic: if rand < frac, use base+1, else base
+    if (rndf(0, 1) < frac) {
+        return (CurriculumStage)(base + 1);
+    }
+    return (CurriculumStage)base;
 }
 
 // Stage 0: TAIL_CHASE - Opponent ahead, same heading (easiest)
@@ -579,15 +559,34 @@ void spawn_legacy(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
 }
 
 // ============================================================================
+// Global curriculum control (called from Python based on aggregate kill_rate)
+// ============================================================================
+
+// Set curriculum stage for a single environment (used by vec version)
+void set_curriculum_stage(Dogfight *env, int stage) {
+    if (stage >= 0 && stage < CURRICULUM_COUNT) {
+        env->stage = (CurriculumStage)stage;
+        env->curriculum_target = (float)stage;  // Sync target for probabilistic selection
+    }
+}
+
+// Set curriculum target (float 0.0-7.0) for probabilistic stage assignment
+void set_curriculum_target(Dogfight *env, float target) {
+    env->curriculum_target = fminf(fmaxf(target, 0.0f), (float)(CURRICULUM_COUNT - 1));
+}
+
+// ============================================================================
 
 void c_reset(Dogfight *env) {
-    // Increment total episodes BEFORE determining stage (so first episode is 0)
+    // Curriculum stage is now managed globally by Python based on aggregate kill_rate
+    // (see set_curriculum_stage() called from training loop)
+
     env->total_episodes++;
 
     env->tick = 0;
     env->episode_return = 0.0f;
 
-    // Clear episode tracking
+    // Clear episode tracking (safe to clear kill after curriculum used it)
     env->kill = 0;
     env->episode_shots_fired = 0.0f;
     env->total_aileron_usage = 0.0f;
