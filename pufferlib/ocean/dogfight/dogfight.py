@@ -84,7 +84,7 @@ class Dogfight(pufferlib.PufferEnv):
 
         # Global curriculum state (step-based window evaluation)
         self._current_stage = 0
-        self._target_stage = 0.0           # Float target (0.0 to 7.0) for probabilistic assignment
+        self._target_stage = 0.0           # Float target (0.0 to 9.0) for probabilistic assignment
         self._warmup_steps = warmup_steps  # Steps before curriculum starts evaluating
         self._eval_interval = eval_interval  # Steps between curriculum evaluations
         self._last_eval_step = warmup_steps  # First eval at warmup + eval_interval
@@ -163,7 +163,7 @@ class Dogfight(pufferlib.PufferEnv):
                             if self._cumulative_n > 0:
                                 window_kill_rate = self._cumulative_perf / self._cumulative_n
 
-                                if window_kill_rate >= self.advance_threshold and self._target_stage < 7.0:
+                                if window_kill_rate >= self.advance_threshold and self._target_stage < 9.0:
                                     self._target_stage += self.stage_increment
                                     binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
                                     self._current_stage = int(self._target_stage)
@@ -336,7 +336,9 @@ class Dogfight(pufferlib.PufferEnv):
         All envs share the same stage for coherent metrics.
 
         Args:
-            stage: Curriculum stage (0=TAIL_CHASE, 1=HEAD_ON, ..., 7=EVASIVE)
+            stage: Curriculum stage (0=TAIL_CHASE, 1=HEAD_ON, 2=VERTICAL,
+                   3=MANEUVERING, 4=OFFSET_MANEUVERING, 5=ANGLED_MANEUVERING,
+                   6=FULL_RANDOM, 7=HARD_MANEUVERING, 8=CROSSING, 9=EVASIVE)
         """
         binding.vec_set_curriculum_stage(self.c_envs, stage)
         self._current_stage = stage
@@ -347,20 +349,20 @@ class Dogfight(pufferlib.PufferEnv):
 
     def set_curriculum_target(self, target: float):
         """
-        Set curriculum target (0.0-7.0) for probabilistic stage assignment.
+        Set curriculum target (0.0-9.0) for probabilistic stage assignment.
 
         At each episode reset, stage is assigned probabilistically:
         - target=1.3 → 70% stage 1, 30% stage 2
 
         Args:
-            target: Float target from 0.0 to 7.0
+            target: Float target from 0.0 to 9.0
         """
-        self._target_stage = max(0.0, min(target, 7.0))
+        self._target_stage = max(0.0, min(target, 9.0))
         binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
         self._current_stage = int(self._target_stage)
 
     def get_curriculum_target(self) -> float:
-        """Get current curriculum target (float 0.0-7.0)."""
+        """Get current curriculum target (float 0.0-9.0)."""
         return self._target_stage
 
 
