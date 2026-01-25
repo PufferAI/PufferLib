@@ -258,7 +258,7 @@ static PyObject* vec_set_curriculum_stage(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
 }
 
-// Set curriculum target (float 0.0-7.0) for all environments
+// Set curriculum target (float 0.0-15.0) for all environments
 static PyObject* vec_set_curriculum_target(PyObject* self, PyObject* args) {
     PyObject* vec_arg;
     float target;

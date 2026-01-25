@@ -349,15 +349,15 @@ class Dogfight(pufferlib.PufferEnv):
 
     def set_curriculum_target(self, target: float):
         """
-        Set curriculum target (0.0-9.0) for probabilistic stage assignment.
+        Set curriculum target (0.0-15.0) for probabilistic stage assignment.
 
         At each episode reset, stage is assigned probabilistically:
         - target=1.3 → 70% stage 1, 30% stage 2
 
         Args:
-            target: Float target from 0.0 to 9.0
+            target: Float target from 0.0 to 15.0 (16 curriculum stages)
         """
-        self._target_stage = max(0.0, min(target, 9.0))
+        self._target_stage = max(0.0, min(target, 15.0))
         binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
         self._current_stage = int(self._target_stage)
 
