@@ -21,7 +21,7 @@ The boss cycles through:
 
 `IDLE (BOSS_IDLE_TICKS) -> WINDUP (BOSS_WINDUP_TICKS) -> ACTIVE (BOSS_ACTIVE_TICKS) -> RECOVERY (BOSS_RECOVERY_TICKS) -> ...`
 
-During **ACTIVE**, the boss deals damage if the player overlaps the AOE circle.
+During **ACTIVE**, the boss deals `BOSS_ATTACK_DMG` damage **every tick** the player overlaps the AOE circle (unless i-framed). Staying in the AOE for the full 5 ticks = 75 damage.
 
 ### Player mechanics
 
@@ -86,7 +86,14 @@ All reward constants are in `boss_fight.h`:
 
 ## Rendering / manual play
 
-- Rendering uses **Raylib**. `BossFight.render()` opens a window and draws the player/boss circles + hit radii.
+- Rendering uses **Raylib** with enhanced visuals:
+  - Grid overlay + crosshair axes
+  - Time remaining bar (steps + seconds)
+  - Boss AoE telegraph (charging ring during WINDUP, filled during ACTIVE)
+  - Boss state label (IDLE/WINDUP/ACTIVE/RECOVER)
+  - Dodge trail particles + i-frame blink effect
+  - Attack pulse ring effect
+  - HP bars + dodge cooldown bar in HUD
 - A tiny standalone debug harness lives in `boss_fight.c`:
   - Hold `Left Shift` for manual controls: `WASD` move, `Space` dodge, `J` attack
   - Without `Left Shift` it takes random actions

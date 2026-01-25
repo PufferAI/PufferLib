@@ -5,25 +5,25 @@
 
 #define ARENA_HALF_SIZE 500.0f
 #define MAX_HP 100.0f
-#define PLAYER_SPEED_PER_TICK 25.0f
+#define EPSILON 1e-6f
+
 #define PLAYER_SIZE 30.0f
-#define BOSS_SIZE 50.0f
+#define PLAYER_SPEED_PER_TICK 25.0f
 #define PLAYER_ATTACK_RADIUS 40.0f
 #define PLAYER_ATTACK_TICKS 3
+#define PLAYER_ATTACK_DMG 5.0f
 #define PLAYER_DODGE_TICKS 4
 #define PLAYER_IFRAME_TICKS 2
 #define PLAYER_DODGE_COOLDOWN 15
 #define PLAYER_DODGE_SPEED_PER_TICK 35.0f
-#define PLAYER_ATTACK_DMG 5.0f
+
+#define BOSS_SIZE 50.0f
 #define BOSS_ATTACK_DMG 15.0f
 #define BOSS_AOE_ATTACK_RADIUS 80.0f
 #define BOSS_IDLE_TICKS 7
 #define BOSS_WINDUP_TICKS 5
 #define BOSS_ACTIVE_TICKS 5
 #define BOSS_RECOVERY_TICKS 5
-
-#define HP_BAR_WIDTH 40
-#define HP_BAR_HEIGHT 5
 
 #define REWARD_APPROACH 0.7f
 #define REWARD_HIT_WALL -0.05f
@@ -36,12 +36,30 @@
 #define REWARD_TICK -0.01f
 #define EPISODE_LENGTH 600
 
-const Color PLAYER_COLOR = (Color){50, 100, 255, 255};
-const Color BOSS_COLOR = (Color){0, 187, 187, 255};
-const Color TEXT_COLOR = (Color){241, 241, 241, 255};
-const Color HITBOX_COLOR = (Color){241, 241, 241, 50};
-const Color BACKGROUND_COLOR = (Color){6, 24, 24, 255};
-const Color HP_COLOR = (Color){0, 255, 0, 255};
+#define WINDOW_SIZE 720
+#define TARGET_FPS 30
+#define HP_BAR_WIDTH 40
+#define HP_BAR_HEIGHT 5
+#define UI_MARGIN 20
+#define UI_RIGHT_X 580
+#define UI_BOTTOM_Y 680
+#define UI_HP_BAR_Y 700
+#define UI_FONT_SIZE 20
+#define UI_FONT_SIZE_SMALL 16
+
+static const Color PLAYER_COLOR = (Color){50, 100, 255, 255};
+static const Color BOSS_COLOR = (Color){0, 187, 187, 255};
+static const Color TEXT_COLOR = (Color){241, 241, 241, 255};
+static const Color HITBOX_COLOR = (Color){241, 241, 241, 50};
+static const Color BACKGROUND_COLOR = (Color){6, 24, 24, 255};
+static const Color HP_COLOR = (Color){0, 255, 0, 255};
+
+static const Color ARENA_BORDER_COLOR = (Color){30, 120, 120, 255};
+static const Color ARENA_GRID_COLOR = (Color){30, 70, 70, 255};
+
+static const Color PLAYER_DODGE_COLOR = (Color){255, 215, 90, 255};
+static const Color PLAYER_ATTACK_COLOR = (Color){170, 220, 255, 255};
+static const Color BOSS_DANGER_COLOR = (Color){255, 80, 80, 255};
 
 typedef enum { PLAYER_IDLING, PLAYER_DODGING, PLAYER_ATTACKING } PlayerState;
 
@@ -220,6 +238,7 @@ void c_step(BossFight *env) {
     else
       action = 0;
   }
+
   float dx = 0;
   float dy = 0;
 
@@ -260,12 +279,12 @@ void c_step(BossFight *env) {
     env->player_state = PLAYER_DODGING;
   }
 
-  // Dodge = multi-tick movement out of the AOE (no i-frames)
+  // Dodge: multi-tick movement away from boss, with i-frames at start
   if (env->player_state == PLAYER_DODGING) {
     float away_x = env->player_x - env->boss_x;
     float away_y = env->player_y - env->boss_y;
     float away_norm = sqrtf(away_x * away_x + away_y * away_y);
-    if (away_norm > 1e-6f) {
+    if (away_norm > EPSILON) {
       env->player_x += (away_x / away_norm) * PLAYER_DODGE_SPEED_PER_TICK;
       env->player_y += (away_y / away_norm) * PLAYER_DODGE_SPEED_PER_TICK;
     }
@@ -290,7 +309,7 @@ void c_step(BossFight *env) {
   env->dist_to_boss = dist;
 
   // Push player out if clipping into boss
-  if (dist < BOSS_SIZE + PLAYER_SIZE && dist > 1e-6f) {
+  if (dist < BOSS_SIZE + PLAYER_SIZE && dist > EPSILON) {
     float overlap = BOSS_SIZE + PLAYER_SIZE - dist;
     float dx = env->player_x - env->boss_x;
     float dy = env->player_y - env->boss_y;
@@ -313,8 +332,7 @@ void c_step(BossFight *env) {
       env->player_state == PLAYER_DODGING &&
       env->player_state_ticks > (PLAYER_DODGE_TICKS - PLAYER_IFRAME_TICKS);
 
-  // AOE persists longer than the i-frame window
-  // If player is still in the hitbox after i-frames, you get hit.
+  // Boss deals damage every tick while player in AOE (unless i-framed)
   bool boss_can_hit = in_aoe_attack && !player_iframed;
   bool boss_can_damage = env->boss_state == BOSS_ATTACKING && boss_can_hit;
   if (boss_can_damage) {
@@ -399,17 +417,17 @@ void c_step(BossFight *env) {
 
 int world_to_screen(float world_coord) {
   return (int)((world_coord + ARENA_HALF_SIZE) / (2 * ARENA_HALF_SIZE) *
-               720.0f);
+               (float)WINDOW_SIZE);
 }
 
 float radius_to_screen(float world_radius) {
-  return world_radius / (2 * ARENA_HALF_SIZE) * 720.0f;
+  return world_radius / (2 * ARENA_HALF_SIZE) * (float)WINDOW_SIZE;
 }
 
 void c_render(BossFight *env) {
   if (!IsWindowReady()) {
-    InitWindow(720, 720, "BossFight");
-    SetTargetFPS(30);
+    InitWindow(WINDOW_SIZE, WINDOW_SIZE, "BossFight");
+    SetTargetFPS(TARGET_FPS);
   }
 
   if (IsKeyDown(KEY_ESCAPE)) {
@@ -419,47 +437,248 @@ void c_render(BossFight *env) {
   BeginDrawing();
 
   ClearBackground(BACKGROUND_COLOR);
-  DrawText("Beat the boss!", 20, 20, 20, TEXT_COLOR);
+  DrawText("Beat the boss!", UI_MARGIN, UI_MARGIN, UI_FONT_SIZE, TEXT_COLOR);
+
+  // Arena (bounds + subtle grid)
+  {
+    const float grid_step = 100.0f;
+    const float axis_step = 250.0f;
+    const Color grid = Fade(ARENA_GRID_COLOR, 0.28f);
+    const Color axis = Fade(ARENA_BORDER_COLOR, 0.35f);
+
+    for (float x = -ARENA_HALF_SIZE; x <= ARENA_HALF_SIZE + 0.5f;
+         x += grid_step) {
+      int sx = world_to_screen(x);
+      DrawLine(sx, 0, sx, WINDOW_SIZE, grid);
+    }
+    for (float y = -ARENA_HALF_SIZE; y <= ARENA_HALF_SIZE + 0.5f;
+         y += grid_step) {
+      int sy = world_to_screen(y);
+      DrawLine(0, sy, WINDOW_SIZE, sy, grid);
+    }
+
+    // Crosshair axes
+    DrawLine(world_to_screen(0.0f), 0, world_to_screen(0.0f), WINDOW_SIZE,
+             axis);
+    DrawLine(0, world_to_screen(0.0f), WINDOW_SIZE, world_to_screen(0.0f),
+             axis);
+
+    // Quadrant markers
+    for (float t = -ARENA_HALF_SIZE; t <= ARENA_HALF_SIZE + 0.5f;
+         t += axis_step) {
+      int s = world_to_screen(t);
+      DrawLineEx((Vector2){(float)s, 4.0f}, (Vector2){(float)s, 14.0f}, 2.0f,
+                 Fade(ARENA_BORDER_COLOR, 0.45f));
+      DrawLineEx((Vector2){4.0f, (float)s}, (Vector2){14.0f, (float)s}, 2.0f,
+                 Fade(ARENA_BORDER_COLOR, 0.45f));
+      DrawLineEx((Vector2){(float)s, (float)WINDOW_SIZE - 4.0f},
+                 (Vector2){(float)s, (float)WINDOW_SIZE - 14.0f}, 2.0f,
+                 Fade(ARENA_BORDER_COLOR, 0.45f));
+      DrawLineEx((Vector2){(float)WINDOW_SIZE - 4.0f, (float)s},
+                 (Vector2){(float)WINDOW_SIZE - 14.0f, (float)s}, 2.0f,
+                 Fade(ARENA_BORDER_COLOR, 0.45f));
+    }
+
+    DrawRectangleLinesEx((Rectangle){0, 0, WINDOW_SIZE, WINDOW_SIZE}, 6.0f,
+                         Fade(ARENA_BORDER_COLOR, 0.75f));
+  }
 
   // Stats top-right
   char stats[64];
   snprintf(stats, sizeof(stats), "W:%d L:%d T:%d", env->player_wins,
            env->boss_wins, env->timeouts);
-  DrawText(stats, 580, 20, 20, TEXT_COLOR);
+  DrawText(stats, UI_RIGHT_X, UI_MARGIN, UI_FONT_SIZE, TEXT_COLOR);
+
+  // Time-left HUD (steps + approx seconds)
+  {
+    int steps_left = EPISODE_LENGTH - env->tick;
+    if (steps_left < 0)
+      steps_left = 0;
+    float t = (float)steps_left / (float)EPISODE_LENGTH;
+
+    const int bar_w = 260;
+    const int bar_h = 10;
+    const int bar_x = (WINDOW_SIZE - bar_w) / 2;
+    const int bar_y = UI_MARGIN + UI_FONT_SIZE + 8;
+
+    DrawText("TIME", bar_x - 50, bar_y - 4, UI_FONT_SIZE_SMALL,
+             Fade(TEXT_COLOR, 0.85f));
+    DrawRectangle(bar_x, bar_y, bar_w, bar_h, Fade(DARKGRAY, 0.8f));
+    DrawRectangle(bar_x, bar_y, (int)((float)bar_w * t), bar_h,
+                  Fade((Color){120, 210, 210, 255}, 0.95f));
+    DrawRectangleLinesEx(
+        (Rectangle){(float)bar_x, (float)bar_y, (float)bar_w, (float)bar_h},
+        2.0f, Fade(ARENA_BORDER_COLOR, 0.7f));
+
+    char tbuf[64];
+    int secs_left = (int)ceilf((float)steps_left / (float)TARGET_FPS);
+    snprintf(tbuf, sizeof(tbuf), "%d steps  (~%ds)", steps_left, secs_left);
+    DrawText(tbuf, bar_x, bar_y + bar_h + 6, UI_FONT_SIZE_SMALL,
+             Fade(TEXT_COLOR, 0.85f));
+  }
 
   // Player
   int player_sx = world_to_screen(env->player_x);
   int player_sy = world_to_screen(env->player_y);
-  int player_hp_bar_y = player_sy + (int)radius_to_screen(PLAYER_SIZE) + 5;
-  int player_hp_width = (int)((float)env->player_hp / MAX_HP * HP_BAR_WIDTH);
+  float player_hp_ratio = fmaxf(0.0f, fminf(1.0f, env->player_hp / MAX_HP));
+  int player_hp_width = (int)(player_hp_ratio * HP_BAR_WIDTH);
 
-  Color player_color = env->player_hp <= 0 ? RED : PLAYER_COLOR;
-  DrawCircle(player_sx, player_sy,
-             radius_to_screen(PLAYER_SIZE + PLAYER_ATTACK_RADIUS),
-             HITBOX_COLOR);
-  DrawCircle(player_sx, player_sy, radius_to_screen(PLAYER_SIZE), player_color);
+  float player_attack_r = radius_to_screen(PLAYER_SIZE + PLAYER_ATTACK_RADIUS);
+  bool player_iframed =
+      env->player_state == PLAYER_DODGING &&
+      env->player_state_ticks > (PLAYER_DODGE_TICKS - PLAYER_IFRAME_TICKS);
+
+  Color player_base = env->player_hp <= 0 ? RED : PLAYER_COLOR;
+  if (env->player_state == PLAYER_DODGING)
+    player_base = PLAYER_DODGE_COLOR;
+  DrawCircleLines(player_sx, player_sy, player_attack_r,
+                  Fade(PLAYER_ATTACK_COLOR, 0.18f));
+
+  // Dodge trail (stateless: inferred from away-from-boss direction)
+  if (env->player_state == PLAYER_DODGING) {
+    float away_x = env->player_x - env->boss_x;
+    float away_y = env->player_y - env->boss_y;
+    float away_norm = sqrtf(away_x * away_x + away_y * away_y);
+    if (away_norm > EPSILON) {
+      float ux = away_x / away_norm;
+      float uy = away_y / away_norm;
+      for (int i = 1; i <= 4; i++) {
+        float w = (float)(5 - i) / 5.0f;
+        int tx = world_to_screen(env->player_x - ux * (float)i * 40.0f);
+        int ty = world_to_screen(env->player_y - uy * (float)i * 40.0f);
+        DrawCircle(tx, ty, radius_to_screen(PLAYER_SIZE) * (0.9f - 0.08f * i),
+                   Fade(PLAYER_DODGE_COLOR, 0.08f + 0.12f * w));
+      }
+    }
+  }
+
+  // Player body (shadow + fill + outline)
+  DrawCircle(player_sx + 3, player_sy + 4, radius_to_screen(PLAYER_SIZE),
+             Fade(BLACK, 0.25f));
+  DrawCircle(player_sx, player_sy, radius_to_screen(PLAYER_SIZE), player_base);
+  DrawCircleLines(player_sx, player_sy, radius_to_screen(PLAYER_SIZE),
+                  Fade(WHITE, 0.25f));
+
+  // Attack effect (duration)
+  if (env->player_state == PLAYER_ATTACKING) {
+    float rem = (float)env->player_state_ticks / (float)PLAYER_ATTACK_TICKS;
+    rem = fmaxf(0.0f, fminf(1.0f, rem));
+    float pulse = 1.0f - rem;
+    float outer = player_attack_r * (1.0f + 0.10f * pulse);
+    float inner = player_attack_r * (0.92f + 0.04f * pulse);
+    BeginBlendMode(BLEND_ADDITIVE);
+    DrawRing((Vector2){(float)player_sx, (float)player_sy}, inner, outer, 0.0f,
+             360.0f, 64, Fade(PLAYER_ATTACK_COLOR, 0.30f + 0.45f * rem));
+    EndBlendMode();
+    DrawCircleLines(player_sx, player_sy, outer,
+                    Fade(PLAYER_ATTACK_COLOR, 0.25f + 0.35f * rem));
+  }
+
+  // I-frame blink
+  if (player_iframed) {
+    BeginBlendMode(BLEND_ADDITIVE);
+    DrawCircleLines(player_sx, player_sy, radius_to_screen(PLAYER_SIZE) * 1.12f,
+                    Fade(WHITE, 0.65f));
+    EndBlendMode();
+  }
 
   // Boss
   int boss_sx = world_to_screen(env->boss_x);
   int boss_sy = world_to_screen(env->boss_y);
-  int boss_hp_bar_y = boss_sy + (int)radius_to_screen(BOSS_SIZE) + 5;
-  int boss_hp_width = (int)((float)env->boss_hp / MAX_HP * HP_BAR_WIDTH);
+  float boss_hp_ratio = fmaxf(0.0f, fminf(1.0f, env->boss_hp / MAX_HP));
+  int boss_hp_width = (int)(boss_hp_ratio * HP_BAR_WIDTH);
+
+  float boss_aoe_r =
+      radius_to_screen(BOSS_SIZE + PLAYER_SIZE + BOSS_AOE_ATTACK_RADIUS);
+
+  // Boss AoE telegraph/active zone
+  {
+    float a = 0.10f;
+    if (env->boss_state == BOSS_WINDING_UP) {
+      float p = 1.0f - (float)env->boss_phase_ticks / (float)BOSS_WINDUP_TICKS;
+      p = fmaxf(0.0f, fminf(1.0f, p));
+      a = 0.15f + 0.25f * p;
+      BeginBlendMode(BLEND_ADDITIVE);
+      DrawRing((Vector2){(float)boss_sx, (float)boss_sy}, boss_aoe_r * 0.93f,
+               boss_aoe_r, 0.0f, 360.0f * p, 64, Fade(BOSS_DANGER_COLOR, a));
+      EndBlendMode();
+      DrawCircleLines(boss_sx, boss_sy, boss_aoe_r,
+                      Fade(BOSS_DANGER_COLOR, 0.28f + 0.25f * p));
+    } else if (env->boss_state == BOSS_ATTACKING) {
+      float rem = (float)env->boss_phase_ticks / (float)BOSS_ACTIVE_TICKS;
+      rem = fmaxf(0.0f, fminf(1.0f, rem));
+      DrawCircle(boss_sx, boss_sy, boss_aoe_r,
+                 Fade(BOSS_DANGER_COLOR, 0.22f + 0.08f * (1.0f - rem)));
+      DrawCircleLines(boss_sx, boss_sy, boss_aoe_r,
+                      Fade(BOSS_DANGER_COLOR, 0.95f));
+    } else if (env->boss_state == BOSS_RECOVERING) {
+      float rem = (float)env->boss_phase_ticks / (float)BOSS_RECOVERY_TICKS;
+      rem = fmaxf(0.0f, fminf(1.0f, rem));
+      DrawCircle(boss_sx, boss_sy, boss_aoe_r,
+                 Fade(BOSS_DANGER_COLOR, 0.16f * rem));
+      DrawCircleLines(boss_sx, boss_sy, boss_aoe_r,
+                      Fade(BOSS_DANGER_COLOR, 0.55f * rem));
+    } else {
+      DrawCircleLines(boss_sx, boss_sy, boss_aoe_r,
+                      Fade(BOSS_DANGER_COLOR, 0.12f));
+    }
+  }
 
   Color boss_color = env->boss_hp <= 0 ? RED : BOSS_COLOR;
-  DrawCircle(boss_sx, boss_sy,
-             radius_to_screen(BOSS_SIZE + BOSS_AOE_ATTACK_RADIUS),
-             HITBOX_COLOR);
+  DrawCircleGradient(boss_sx, boss_sy, radius_to_screen(BOSS_SIZE) * 1.25f,
+                     Fade(BOSS_COLOR, 0.10f), Fade(BOSS_COLOR, 0.0f));
+  DrawCircle(boss_sx + 4, boss_sy + 5, radius_to_screen(BOSS_SIZE),
+             Fade(BLACK, 0.22f));
   DrawCircle(boss_sx, boss_sy, radius_to_screen(BOSS_SIZE), boss_color);
+  DrawCircleLines(boss_sx, boss_sy, radius_to_screen(BOSS_SIZE),
+                  Fade(WHITE, 0.18f));
+
+  // Boss state label
+  {
+    const char *phase = "IDLE";
+    if (env->boss_state == BOSS_WINDING_UP)
+      phase = "WINDUP";
+    else if (env->boss_state == BOSS_ATTACKING)
+      phase = "ACTIVE";
+    else if (env->boss_state == BOSS_RECOVERING)
+      phase = "RECOVER";
+
+    char pbuf[32];
+    snprintf(pbuf, sizeof(pbuf), "%s", phase);
+    int w = MeasureText(pbuf, UI_FONT_SIZE_SMALL);
+    DrawText(pbuf, boss_sx - w / 2,
+             boss_sy - (int)radius_to_screen(BOSS_SIZE) - 22,
+             UI_FONT_SIZE_SMALL, Fade(TEXT_COLOR, 0.85f));
+  }
 
   // Player HP bar - bottom left
-  DrawText("Player", 20, 680, 16, TEXT_COLOR);
-  DrawRectangle(20, 700, HP_BAR_WIDTH * 3, HP_BAR_HEIGHT, DARKGRAY);
-  DrawRectangle(20, 700, player_hp_width * 3, HP_BAR_HEIGHT, HP_COLOR);
+  const int hud_label_y = UI_HP_BAR_Y - 40;
+  DrawText("Player", UI_MARGIN, hud_label_y, UI_FONT_SIZE_SMALL, TEXT_COLOR);
+  DrawRectangle(UI_MARGIN, UI_HP_BAR_Y, HP_BAR_WIDTH * 3, HP_BAR_HEIGHT,
+                DARKGRAY);
+  DrawRectangle(UI_MARGIN, UI_HP_BAR_Y, player_hp_width * 3, HP_BAR_HEIGHT,
+                HP_COLOR);
+
+  // Dodge cooldown (under player hp)
+  {
+    float cd =
+        1.0f - fmaxf(0.0f, fminf(1.0f, (float)env->player_dodge_cooldown /
+                                           (float)PLAYER_DODGE_COOLDOWN));
+    const int dodge_label_y = UI_HP_BAR_Y - 22;
+    const int dodge_bar_y = UI_HP_BAR_Y - 18;
+    DrawText("Dodge", UI_MARGIN, dodge_label_y, UI_FONT_SIZE_SMALL,
+             Fade(TEXT_COLOR, 0.75f));
+    DrawRectangle(UI_MARGIN + 58, dodge_bar_y, 90, 6, Fade(DARKGRAY, 0.8f));
+    DrawRectangle(UI_MARGIN + 58, dodge_bar_y, (int)(90.0f * cd), 6,
+                  Fade(PLAYER_DODGE_COLOR, 0.85f));
+  }
 
   // Boss HP bar - bottom right
-  DrawText("Boss", 580, 680, 16, TEXT_COLOR);
-  DrawRectangle(580, 700, HP_BAR_WIDTH * 3, HP_BAR_HEIGHT, DARKGRAY);
-  DrawRectangle(580, 700, boss_hp_width * 3, HP_BAR_HEIGHT, HP_COLOR);
+  DrawText("Boss", UI_RIGHT_X, hud_label_y, UI_FONT_SIZE_SMALL, TEXT_COLOR);
+  DrawRectangle(UI_RIGHT_X, UI_HP_BAR_Y, HP_BAR_WIDTH * 3, HP_BAR_HEIGHT,
+                DARKGRAY);
+  DrawRectangle(UI_RIGHT_X, UI_HP_BAR_Y, boss_hp_width * 3, HP_BAR_HEIGHT,
+                HP_COLOR);
 
   EndDrawing();
 }
