@@ -133,9 +133,8 @@ class Muon(Optimizer):
                 grad = grads[i]
 
                 buf = muon_momentum_bufs[i]
-                buf.mul_(momentum)
-                buf.add_(grad)
-                grad.add_(buf*momentum)
+                buf.lerp_(grad, 1 - group["momentum"])  # Standard EMA
+                grad.lerp_(buf, group["momentum"])      # Nesterov, matches heavyball default
 
                 if grad.ndim >= 2:
                     grad = grad.view(grad.shape[0], -1)
