@@ -163,7 +163,7 @@ class Dogfight(pufferlib.PufferEnv):
                             if self._cumulative_n > 0:
                                 window_kill_rate = self._cumulative_perf / self._cumulative_n
 
-                                if window_kill_rate >= self.advance_threshold and self._target_stage < 9.0:
+                                if window_kill_rate >= self.advance_threshold and self._target_stage < 17.0:
                                     self._target_stage += self.stage_increment
                                     binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
                                     self._current_stage = int(self._target_stage)
@@ -355,9 +355,9 @@ class Dogfight(pufferlib.PufferEnv):
         - target=1.3 → 70% stage 1, 30% stage 2
 
         Args:
-            target: Float target from 0.0 to 15.0 (16 curriculum stages)
+            target: Float target from 0.0 to 17.0 (18 curriculum stages)
         """
-        self._target_stage = max(0.0, min(target, 15.0))
+        self._target_stage = max(0.0, min(target, 17.0))
         binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
         self._current_stage = int(self._target_stage)
 

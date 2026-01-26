@@ -40,21 +40,23 @@ typedef enum {
     CURRICULUM_GENTLE_TURNS,         // Stage 3: Opponent does gentle 30° turns
     CURRICULUM_OFFSET,               // Stage 4: Large lateral/vertical offset, same heading
     CURRICULUM_ANGLED,               // Stage 5: Offset + different heading (±22°)
-    CURRICULUM_SIDE_CHASE,           // Stage 6: Target 30-90° off axis, flying away
-    CURRICULUM_SIDE_MANEUVERING,     // Stage 7: Side chase + 30° turns
-    CURRICULUM_REAR_CHASE,           // Stage 8: Target 90-150° off axis (rear quarters)
-    CURRICULUM_REAR_MANEUVERING,     // Stage 9: Rear chase + 30° turns
-    CURRICULUM_FULL_PREDICTABLE,     // Stage 10: 360° spawn, heading correlated (flying away)
-    CURRICULUM_FULL_RANDOM,          // Stage 11: 360° spawn, random heading, 30° turns
-    CURRICULUM_MEDIUM_TURNS,         // Stage 12: 360° spawn, random heading, 45° turns
-    CURRICULUM_HARD_MANEUVERING,     // Stage 13: 60° turns + weave patterns
-    CURRICULUM_CROSSING,             // Stage 14: 45 degree deflection shots
-    CURRICULUM_EVASIVE,              // Stage 15: Reactive evasion (hardest)
-    CURRICULUM_COUNT                 // = 16
+    CURRICULUM_SIDE_NEAR,            // Stage 6: 15-45° off axis (NEW - small side turn)
+    CURRICULUM_SIDE_MID,             // Stage 7: 30-60° off axis (NEW - medium side turn)
+    CURRICULUM_SIDE_FAR,             // Stage 8: 45-90° off axis (was SIDE_CHASE)
+    CURRICULUM_SIDE_MANEUVERING,     // Stage 9: Side chase + 30° turns
+    CURRICULUM_REAR_CHASE,           // Stage 10: Target 90-150° off axis (rear quarters)
+    CURRICULUM_REAR_MANEUVERING,     // Stage 11: Rear chase + 30° turns
+    CURRICULUM_FULL_PREDICTABLE,     // Stage 12: 360° spawn, heading correlated (flying away)
+    CURRICULUM_FULL_RANDOM,          // Stage 13: 360° spawn, random heading, 30° turns
+    CURRICULUM_MEDIUM_TURNS,         // Stage 14: 360° spawn, random heading, 45° turns
+    CURRICULUM_HARD_MANEUVERING,     // Stage 15: 60° turns + weave patterns
+    CURRICULUM_CROSSING,             // Stage 16: 45 degree deflection shots
+    CURRICULUM_EVASIVE,              // Stage 17: Reactive evasion (hardest)
+    CURRICULUM_COUNT                 // = 18
 } CurriculumStage;
 
 // Stage difficulty weights for composite metric (higher = harder = more valuable)
-// Updated 2026-01-25 to add intermediate stages
+// Updated 2026-01-25 to split SIDE_CHASE into 3 stages (SIDE_NEAR, SIDE_MID, SIDE_FAR)
 // Early stages (0-4) have small weights; bump at stage 5+ where real difficulty begins
 static const float STAGE_WEIGHTS[CURRICULUM_COUNT] = {
     0.05f,  // 0: TAIL_CHASE - trivial pursuit
@@ -63,16 +65,18 @@ static const float STAGE_WEIGHTS[CURRICULUM_COUNT] = {
     0.20f,  // 3: GENTLE_TURNS - lead computation for 30° turns
     0.25f,  // 4: OFFSET - finding off-axis targets
     0.35f,  // 5: ANGLED - pursuit geometry (±22° heading) [BUMP]
-    0.42f,  // 6: SIDE_CHASE - making big turns to acquire side targets
-    0.48f,  // 7: SIDE_MANEUVERING - big turn + lead computation
-    0.54f,  // 8: REAR_CHASE - finding targets behind you
-    0.60f,  // 9: REAR_MANEUVERING - rear acquisition + tracking
-    0.66f,  // 10: FULL_PREDICTABLE - 360° awareness, predictable heading
-    0.72f,  // 11: FULL_RANDOM - random heading (key difficulty!), 30° turns
-    0.80f,  // 12: MEDIUM_TURNS - 45° turns
-    0.88f,  // 13: HARD_MANEUVERING - 60° turns + weave
-    0.94f,  // 14: CROSSING - 45° deflection shots
-    1.00f   // 15: EVASIVE - reactive opponent
+    0.40f,  // 6: SIDE_NEAR - small side turn (15-45°)
+    0.44f,  // 7: SIDE_MID - medium side turn (30-60°)
+    0.48f,  // 8: SIDE_FAR - big side turn (45-90°)
+    0.52f,  // 9: SIDE_MANEUVERING - big turn + lead computation
+    0.56f,  // 10: REAR_CHASE - finding targets behind you
+    0.60f,  // 11: REAR_MANEUVERING - rear acquisition + tracking
+    0.66f,  // 12: FULL_PREDICTABLE - 360° awareness, predictable heading
+    0.72f,  // 13: FULL_RANDOM - random heading (key difficulty!), 30° turns
+    0.80f,  // 14: MEDIUM_TURNS - 45° turns
+    0.88f,  // 15: HARD_MANEUVERING - 60° turns + weave
+    0.94f,  // 16: CROSSING - 45° deflection shots
+    1.00f   // 17: EVASIVE - reactive opponent
 };
 
 #define DT 0.02f
@@ -379,7 +383,7 @@ void spawn_head_on(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     env->opponent_ap.mode = AP_STRAIGHT;
 }
 
-// Stage 14: CROSSING - 45 degree deflection shots (reduced from 90° - see CURRICULUM_PLANS.md)
+// Stage 16: CROSSING - 45 degree deflection shots (reduced from 90° - see CURRICULUM_PLANS.md)
 // 90° deflection is historically nearly impossible; 45° is achievable with proper lead
 void spawn_crossing(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // Opponent 300-500m to the side, flying at 45° angle (not perpendicular)
@@ -467,25 +471,22 @@ void spawn_angled(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     env->opponent_ap.target_bank = AP_STAGE4_BANK_DEG * (M_PI / 180.0f);  // 30°
 }
 
-// Stage 6: SIDE_CHASE - Target 30-90° off axis, flying away
-// Teaches: Making big turns to acquire side targets
-void spawn_side_chase(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    // Spawn 30-90° off player's nose (never directly ahead)
+// Stage 6: SIDE_NEAR - Target 15-45° off axis, flying away
+// Teaches: Small side acquisition turns
+void spawn_side_near(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;  // Left or right
-    float azimuth = side * rndf(0.52f, 1.57f);      // 30° to 90° in radians
+    float azimuth = side * rndf(0.26f, 0.79f);      // 15° to 45° in radians
 
     float dist = rndf(300, 500);
     float phi = rndf(-0.2f, 0.2f);  // ±11° elevation
 
-    // Position relative to player (player always starts flying +X)
     Vec3 opp_pos = vec3(
         player_pos.x + dist * cosf(azimuth),
         player_pos.y + dist * sinf(azimuth),
         clampf(player_pos.z + dist * sinf(phi), 300, 2500)
     );
 
-    // Flying AWAY from player (±20° variance)
-    float away_heading = azimuth;  // Same direction as spawn angle = flying away
+    float away_heading = azimuth;
     float heading_variance = rndf(-0.35f, 0.35f);  // ±20°
     float opp_heading = away_heading + heading_variance;
 
@@ -497,15 +498,69 @@ void spawn_side_chase(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     env->opponent_ap.mode = AP_STRAIGHT;
 }
 
-// Stage 7: SIDE_MANEUVERING - Side chase + 30° turns
+// Stage 7: SIDE_MID - Target 30-60° off axis, flying away
+// Teaches: Medium side acquisition turns
+void spawn_side_mid(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;  // Left or right
+    float azimuth = side * rndf(0.52f, 1.05f);      // 30° to 60° in radians
+
+    float dist = rndf(300, 500);
+    float phi = rndf(-0.2f, 0.2f);  // ±11° elevation
+
+    Vec3 opp_pos = vec3(
+        player_pos.x + dist * cosf(azimuth),
+        player_pos.y + dist * sinf(azimuth),
+        clampf(player_pos.z + dist * sinf(phi), 300, 2500)
+    );
+
+    float away_heading = azimuth;
+    float heading_variance = rndf(-0.35f, 0.35f);  // ±20°
+    float opp_heading = away_heading + heading_variance;
+
+    float speed = norm3(player_vel);
+    Vec3 opp_vel = vec3(speed * cosf(opp_heading), speed * sinf(opp_heading), 0);
+
+    reset_plane(&env->opponent, opp_pos, opp_vel);
+    env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
+    env->opponent_ap.mode = AP_STRAIGHT;
+}
+
+// Stage 8: SIDE_FAR - Target 45-90° off axis, flying away
+// Teaches: Big side acquisition turns
+void spawn_side_far(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;  // Left or right
+    float azimuth = side * rndf(0.79f, 1.57f);      // 45° to 90° in radians
+
+    float dist = rndf(300, 500);
+    float phi = rndf(-0.2f, 0.2f);  // ±11° elevation
+
+    Vec3 opp_pos = vec3(
+        player_pos.x + dist * cosf(azimuth),
+        player_pos.y + dist * sinf(azimuth),
+        clampf(player_pos.z + dist * sinf(phi), 300, 2500)
+    );
+
+    float away_heading = azimuth;
+    float heading_variance = rndf(-0.35f, 0.35f);  // ±20°
+    float opp_heading = away_heading + heading_variance;
+
+    float speed = norm3(player_vel);
+    Vec3 opp_vel = vec3(speed * cosf(opp_heading), speed * sinf(opp_heading), 0);
+
+    reset_plane(&env->opponent, opp_pos, opp_vel);
+    env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
+    env->opponent_ap.mode = AP_STRAIGHT;
+}
+
+// Stage 9: SIDE_MANEUVERING - Side chase + 30° turns
 // Teaches: Big turn + lead computation
 void spawn_side_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    spawn_side_chase(env, player_pos, player_vel);  // Same spawn geometry
+    spawn_side_far(env, player_pos, player_vel);  // Same spawn geometry as SIDE_FAR
     env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
     env->opponent_ap.target_bank = AP_STAGE4_BANK_DEG * (M_PI / 180.0f);  // 30°
 }
 
-// Stage 8: REAR_CHASE - Target 90-150° off axis (rear quarters), flying away
+// Stage 10: REAR_CHASE - Target 90-150° off axis (rear quarters), flying away
 // Teaches: Finding targets behind you
 void spawn_rear_chase(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // Spawn 90-150° off player's nose (rear quarters)
@@ -533,7 +588,7 @@ void spawn_rear_chase(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_STRAIGHT : AP_LEVEL;
 }
 
-// Stage 9: REAR_MANEUVERING - Rear chase + 30° turns
+// Stage 11: REAR_MANEUVERING - Rear chase + 30° turns
 // Teaches: Rear acquisition + tracking
 void spawn_rear_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     spawn_rear_chase(env, player_pos, player_vel);  // Same spawn geometry
@@ -541,7 +596,7 @@ void spawn_rear_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     env->opponent_ap.target_bank = AP_STAGE4_BANK_DEG * (M_PI / 180.0f);  // 30°
 }
 
-// Stage 10: FULL_PREDICTABLE - 360° spawn, heading correlated (flying away)
+// Stage 12: FULL_PREDICTABLE - 360° spawn, heading correlated (flying away)
 // Teaches: Full sphere awareness with predictable heading
 void spawn_full_predictable(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // Full 360° spawn
@@ -568,7 +623,7 @@ void spawn_full_predictable(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     env->opponent_ap.target_bank = AP_STAGE4_BANK_DEG * (M_PI / 180.0f);  // 30°
 }
 
-// Stage 11: FULL_RANDOM - 360° spawn, random heading, 30° turns
+// Stage 13: FULL_RANDOM - 360° spawn, random heading, 30° turns
 // Teaches: Random heading (key difficulty!) - must read observation to determine velocity
 void spawn_full_random(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // Random direction in 3D sphere (300-600m from player)
@@ -601,7 +656,7 @@ void spawn_full_random(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     env->opponent_ap.target_bank = AP_STAGE4_BANK_DEG * (M_PI / 180.0f);  // 30°
 }
 
-// Stage 12: MEDIUM_TURNS - 360° spawn, random heading, 45° turns
+// Stage 14: MEDIUM_TURNS - 360° spawn, random heading, 45° turns
 // Teaches: Steeper 45° turns (first introduction of harder turns)
 void spawn_medium_turns(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // Same geometry as FULL_RANDOM
@@ -634,7 +689,7 @@ void spawn_medium_turns(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     env->opponent_ap.target_bank = AP_STAGE5_BANK_DEG * (M_PI / 180.0f);  // 45°
 }
 
-// Stage 13: HARD_MANEUVERING - Hard turns (60°) and weave patterns
+// Stage 15: HARD_MANEUVERING - Hard turns (60°) and weave patterns
 void spawn_hard_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     Vec3 opp_pos = vec3(
         player_pos.x + rndf(200, 400),
@@ -655,7 +710,7 @@ void spawn_hard_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     }
 }
 
-// Stage 15: EVASIVE - Opponent reacts to player position (hardest)
+// Stage 17: EVASIVE - Opponent reacts to player position (hardest)
 void spawn_evasive(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // Spawn in various positions (like FULL_RANDOM)
     float dist = rndf(300, 500);
@@ -714,7 +769,9 @@ void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
         case CURRICULUM_GENTLE_TURNS:       spawn_gentle_turns(env, player_pos, player_vel); break;
         case CURRICULUM_OFFSET:             spawn_offset(env, player_pos, player_vel); break;
         case CURRICULUM_ANGLED:             spawn_angled(env, player_pos, player_vel); break;
-        case CURRICULUM_SIDE_CHASE:         spawn_side_chase(env, player_pos, player_vel); break;
+        case CURRICULUM_SIDE_NEAR:          spawn_side_near(env, player_pos, player_vel); break;
+        case CURRICULUM_SIDE_MID:           spawn_side_mid(env, player_pos, player_vel); break;
+        case CURRICULUM_SIDE_FAR:           spawn_side_far(env, player_pos, player_vel); break;
         case CURRICULUM_SIDE_MANEUVERING:   spawn_side_maneuvering(env, player_pos, player_vel); break;
         case CURRICULUM_REAR_CHASE:         spawn_rear_chase(env, player_pos, player_vel); break;
         case CURRICULUM_REAR_MANEUVERING:   spawn_rear_maneuvering(env, player_pos, player_vel); break;
