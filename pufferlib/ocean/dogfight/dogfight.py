@@ -49,6 +49,7 @@ class Dogfight(pufferlib.PufferEnv):
         # Curriculum learning
         curriculum_enabled=0,       # 0=off (legacy), 1=on (progressive stages)
         curriculum_randomize=0,     # 0=progressive (training), 1=random stage each episode (eval)
+        fixed_stage=-1,             # -1=normal progression, 0-17=lock to specific stage (ONLY for testing, not training!)
         advance_threshold=0.7,      # Kill rate threshold to advance stage (used by training loop)
         stage_increment=0.1,        # How much to increase target per advancement
         eval_interval=2_500_000,    # Steps between curriculum evaluations (2.5M = ~1s at 2.5M SPS)
@@ -93,6 +94,12 @@ class Dogfight(pufferlib.PufferEnv):
         self.advance_threshold = advance_threshold
         self.stage_increment = stage_increment
         self.curriculum_enabled = curriculum_enabled
+        self.fixed_stage = fixed_stage
+
+        # If fixed_stage is set, lock to that stage
+        if fixed_stage >= 0:
+            self._target_stage = float(fixed_stage)
+            self._current_stage = fixed_stage
 
         super().__init__(buf)
         self.actions = self.actions.astype(np.float32)  # REQUIRED for continuous
@@ -123,6 +130,10 @@ class Dogfight(pufferlib.PufferEnv):
 
         self.c_envs = binding.vectorize(*self._env_handles)
 
+        # Set fixed stage on C side if specified
+        if fixed_stage >= 0:
+            binding.vec_set_curriculum_target(self.c_envs, float(fixed_stage))
+
     def reset(self, seed=None):
         self.tick = 0
         binding.vec_reset(self.c_envs, seed if seed else 0)
@@ -149,7 +160,8 @@ class Dogfight(pufferlib.PufferEnv):
                 # Curriculum advancement with step-based window evaluation (v2 fix)
                 # Key insight: After vec_log(), n is ALWAYS ~1.0 (it divides by itself)
                 # So we count batches, not episodes, and use step-based timing
-                if self.curriculum_enabled:
+                # Skip progression if fixed_stage is set (testing mode)
+                if self.curriculum_enabled and self.fixed_stage < 0:
                     perf = log_data.get('perf', 0)  # kill_rate after vec_log
                     total_steps = self.tick * self.num_agents
 
@@ -163,7 +175,9 @@ class Dogfight(pufferlib.PufferEnv):
                             if self._cumulative_n > 0:
                                 window_kill_rate = self._cumulative_perf / self._cumulative_n
 
-                                if window_kill_rate >= self.advance_threshold and self._target_stage < 17.0:
+                                # Both window avg AND immediate perf must exceed threshold
+                                # Prevents advancing when recent perf dropped (window avg masks it)
+                                if window_kill_rate >= self.advance_threshold and perf >= self.advance_threshold and self._target_stage < 17.0:
                                     self._target_stage += self.stage_increment
                                     binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
                                     self._current_stage = int(self._target_stage)
