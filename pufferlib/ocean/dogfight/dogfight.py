@@ -89,8 +89,8 @@ class Dogfight(pufferlib.PufferEnv):
         self._warmup_steps = warmup_steps  # Steps before curriculum starts evaluating
         self._eval_interval = eval_interval  # Steps between curriculum evaluations
         self._last_eval_step = warmup_steps  # First eval at warmup + eval_interval
-        self._cumulative_perf = 0.0        # Sum of perf values
-        self._cumulative_n = 0             # Batch count (int, not float)
+        self._cumulative_kills = 0.0       # Sum of (perf * n) = total kills in window
+        self._cumulative_episodes = 0.0    # Sum of n = total episodes in window
         self.advance_threshold = advance_threshold
         self.stage_increment = stage_increment
         self.curriculum_enabled = curriculum_enabled
@@ -157,23 +157,27 @@ class Dogfight(pufferlib.PufferEnv):
             if log_data:
                 info.append(log_data)
 
-                # Curriculum advancement with step-based window evaluation (v2 fix)
-                # Key insight: After vec_log(), n is ALWAYS ~1.0 (it divides by itself)
-                # So we count batches, not episodes, and use step-based timing
+                # Curriculum advancement with step-based window evaluation (v3 fix)
+                # BUG FIX: Previously averaged kill_rates across ticks, which inflated
+                # the average when ticks with few episodes had high kill rates.
+                # Now we track cumulative kills and episodes separately, weighting properly.
                 # Skip progression if fixed_stage is set (testing mode)
                 if self.curriculum_enabled and self.fixed_stage < 0:
-                    perf = log_data.get('perf', 0)  # kill_rate after vec_log
+                    perf = log_data.get('perf', 0)  # kill_rate for this tick
+                    n = log_data.get('n', 0)        # episodes completed this tick
                     total_steps = self.tick * self.num_agents
 
                     # Only accumulate AFTER warmup (avoid early kill bias)
                     if total_steps >= self._warmup_steps:
-                        self._cumulative_perf += perf
-                        self._cumulative_n += 1
+                        # Weight by episode count to get true kill rate
+                        if n > 0:
+                            self._cumulative_kills += perf * n  # Recover raw kills
+                            self._cumulative_episodes += n
 
                         # Evaluate at intervals
                         if total_steps - self._last_eval_step >= self._eval_interval:
-                            if self._cumulative_n > 0:
-                                window_kill_rate = self._cumulative_perf / self._cumulative_n
+                            if self._cumulative_episodes > 0:
+                                window_kill_rate = self._cumulative_kills / self._cumulative_episodes
 
                                 # Both window avg AND immediate perf must exceed threshold
                                 # Prevents advancing when recent perf dropped (window avg masks it)
@@ -183,8 +187,8 @@ class Dogfight(pufferlib.PufferEnv):
                                     self._current_stage = int(self._target_stage)
 
                             # Reset window
-                            self._cumulative_perf = 0.0
-                            self._cumulative_n = 0
+                            self._cumulative_kills = 0.0
+                            self._cumulative_episodes = 0.0
                             self._last_eval_step = total_steps
 
         return (self.observations, self.rewards, self.terminals, self.truncations, info)
