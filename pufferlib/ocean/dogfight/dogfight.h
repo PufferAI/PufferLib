@@ -93,6 +93,7 @@ static void spawn_evasive(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel
 
 // Stage configuration table - single source of truth for all stage metadata
 // Updated 2026-01-25 to split SIDE_CHASE into 3 stages (SIDE_NEAR, SIDE_MID, SIDE_FAR)
+// max_steps field is now for documentation only; episode length comes from Python config
 static const StageConfig STAGES[CURRICULUM_COUNT] = {
     // n   spawn_fn               description                          weight  max_steps  ang_min ang_max bank
     {0,  spawn_tail_chase,       "Target ahead, same heading",         0.02f,  300,       0,      10,     0},
@@ -802,7 +803,8 @@ void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // Use function pointer from STAGES table (replaces 18-case switch)
     if (env->stage < CURRICULUM_COUNT) {
         STAGES[env->stage].spawn(env, player_pos, player_vel);
-        env->max_steps = STAGES[env->stage].max_steps;  // Episode length from stage config
+        // NOTE: STAGES[].max_steps field kept for documentation but NOT used
+        // max_steps comes from Python init (INI config) - per-stage override caused training regression
     } else {
         spawn_evasive(env, player_pos, player_vel);  // Fallback for invalid stage
     }
