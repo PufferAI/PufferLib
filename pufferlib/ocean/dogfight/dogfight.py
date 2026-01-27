@@ -51,13 +51,9 @@ class Dogfight(pufferlib.PufferEnv):
         curriculum_enabled=0,       # 0=off (legacy), 1=on (progressive stages)
         curriculum_randomize=0,     # 0=progressive (training), 1=random stage each episode (eval)
         fixed_stage=-1,             # -1=normal progression, 0-17=lock to specific stage (ONLY for testing, not training!)
-        advance_threshold=0.7,      # Kill rate threshold to advance stage (used by training loop)
-        stage_increment=0.1,        # How much to increase target per advancement
         eval_interval=2_500_000,    # Steps between curriculum evaluations (2.5M = ~1s at 2.5M SPS)
         warmup_steps=3_000_000,     # Steps before curriculum starts evaluating (3M = ~1.2s at 2.5M SPS)
-        min_eval_episodes=50,       # Minimum episodes in window before evaluating advancement
-        # Plateau-based demotion: demote when stuck and not mastering current stage
-        stuck_threshold=10,           # Demote after this many consecutive stuck intervals
+        min_eval_episodes=50,       # Minimum episodes in window before evaluating mastery
         # Finalization: snap to mastered stage at end of training
         total_timesteps=200_000_000,  # Total training steps (for finalization calculation)
         num_workers=8,                # Number of parallel workers (for finalization calculation)
@@ -93,42 +89,23 @@ class Dogfight(pufferlib.PufferEnv):
 
         # Global curriculum state (step-based window evaluation)
         self._current_stage = 0
-        self._target_stage = 0.0           # Float target (0.0 to 9.0) for probabilistic assignment
+        self._target_stage = 0.9           # Start at 0.9 (90% stage 1, 10% stage 0)
         self._warmup_steps = warmup_steps  # Steps before curriculum starts evaluating
         self._eval_interval = eval_interval  # Steps between curriculum evaluations
         self._last_eval_step = warmup_steps  # First eval at warmup + eval_interval
-        self.advance_threshold = advance_threshold
-        self.stage_increment = stage_increment
         self.curriculum_enabled = curriculum_enabled
         self.fixed_stage = fixed_stage
         self.min_eval_episodes = min_eval_episodes
 
-        # Plateau-based demotion: track consecutive stuck intervals
-        self._stuck_intervals = 0           # Consecutive intervals without advancement
-        self._stuck_threshold = int(stuck_threshold)  # Trigger demotion after this many stuck intervals
-
-        # Mastered stage tracking (for smart demotion)
-        self._mastered_stage = 0  # Highest stage with perf >= 0.95
+        # Mastered stage tracking (pure mastery-gated progression)
+        self._mastered_stage = -1  # Highest stage with perf >= 0.95 AND >= 250 episodes (-1 = none)
 
         # Finalization: snap to mastered stage near end of training
         # total_timesteps is global total, finalize_margin is global margin
         # Per-worker finalize step = (global_total - global_margin) / num_workers
         self._finalize_at_steps = (total_timesteps - finalize_margin) // num_workers
-        self._finalize_margin = finalize_margin
-        print(f'[CURRICULUM] Initialized: stuck_threshold={self._stuck_threshold}, '
-              f'finalize_at={self._finalize_at_steps}, mastered_stage={self._mastered_stage}')
+        print(f'[CURRICULUM] Initialized: finalize_at={self._finalize_at_steps}, mastered_stage={self._mastered_stage}')
 
-        # Multi-window curriculum tracking (df17 fix: prevents lucky single ticks from advancing)
-        # Short window: resets every eval_interval
-        self._cumulative_kills = 0.0       # Sum of (perf * n) = total kills in window
-        self._cumulative_episodes = 0.0    # Sum of n = total episodes in window
-        # Medium window: resets every 3 eval_intervals
-        self._medium_kills = 0.0
-        self._medium_episodes = 0.0
-        self._medium_window_count = 0      # Count intervals in medium window
-        # Long window: rolling EMA, decays 10% each interval (never fully resets)
-        self._long_kills = 0.0
-        self._long_episodes = 0.0
         # Base stage tracking: performance at int(curriculum_target) only
         self._base_stage_kills = 0.0
         self._base_stage_eps = 0.0
@@ -137,12 +114,6 @@ class Dogfight(pufferlib.PufferEnv):
         if fixed_stage >= 0:
             self._target_stage = float(fixed_stage)
             self._current_stage = fixed_stage
-
-        # Debug logging for curriculum diagnosis
-        self._debug_log = []  # List of dicts to dump to JSON
-        self._debug_enabled = True  # Set False to disable
-        self._debug_start_steps = 12_500_000   # Start at ~100M global (with 8 workers)
-        self._debug_end_steps = 17_500_000     # Stop at ~140M global (with 8 workers)
 
         super().__init__(buf)
         self.actions = self.actions.astype(np.float32)  # REQUIRED for continuous
@@ -200,28 +171,18 @@ class Dogfight(pufferlib.PufferEnv):
             if log_data:
                 info.append(log_data)
 
-                # Curriculum advancement with multi-window evaluation (df17 fix)
-                # BUG FIX: Single lucky tick could satisfy old "perf >= threshold" check.
-                # Now track 3 windows (short/medium/long), ALL must pass threshold.
+                # Curriculum v4: Pure Mastery-Gated Progression
+                # Target is ALWAYS mastered_stage + 0.9 (except during finalization)
+                # No advancement logic - target changes ONLY when mastery is achieved
                 # Skip progression if fixed_stage is set (testing mode)
                 if self.curriculum_enabled and self.fixed_stage < 0:
-                    perf = log_data.get('perf', 0)  # kill_rate for this tick
                     n = log_data.get('n', 0)        # episodes completed this tick
                     total_steps = self.tick * self.num_agents
 
                     # Only accumulate AFTER warmup (avoid early kill bias)
                     if total_steps >= self._warmup_steps:
-                        # Accumulate to ALL windows
+                        # Track base stage performance (for mastery gating)
                         if n > 0:
-                            raw_kills = perf * n  # Recover raw kill count
-                            self._cumulative_kills += raw_kills
-                            self._cumulative_episodes += n
-                            self._medium_kills += raw_kills
-                            self._medium_episodes += n
-                            self._long_kills += raw_kills
-                            self._long_episodes += n
-
-                            # Track base stage performance separately (for per-stage gating)
                             base_kills = log_data.get('base_stage_kills', 0)
                             base_eps = log_data.get('base_stage_eps', 0)
                             self._base_stage_kills += base_kills
@@ -229,185 +190,50 @@ class Dogfight(pufferlib.PufferEnv):
 
                         # Evaluate at intervals
                         if total_steps - self._last_eval_step >= self._eval_interval:
-                            self._medium_window_count += 1
-
-                            # Only evaluate if short window has enough episodes
-                            if self._cumulative_episodes < self.min_eval_episodes:
-                                # Log skipped evaluation due to insufficient episodes
-                                if self._debug_enabled and self._debug_start_steps <= total_steps <= self._debug_end_steps:
-                                    self._debug_log.append({
-                                        'type': 'eval_skipped',
-                                        'total_steps': total_steps,
-                                        'short_eps': self._cumulative_episodes,
-                                        'min_required': self.min_eval_episodes,
-                                        'medium_eps': self._medium_episodes,
-                                        'long_eps': self._long_episodes,
-                                        'target_stage': self._target_stage,
-                                        'reason': f'not_enough_eps:{self._cumulative_episodes}<{self.min_eval_episodes}',
-                                    })
-                                print(f'[CURRICULUM] step={total_steps} stage={self._target_stage:.2f} '
-                                      f'SKIPPED (only {self._cumulative_episodes:.0f} eps, need {self.min_eval_episodes})')
-                            else:
-                                short_rate = self._cumulative_kills / self._cumulative_episodes
-
-                                # Compute medium and long rates (with fallback if empty)
-                                medium_rate = (self._medium_kills / self._medium_episodes) if self._medium_episodes > 0 else 0.0
-                                long_rate = (self._long_kills / self._long_episodes) if self._long_episodes > 0 else 0.0
-
-                                # Compute base stage performance (current stage mastery)
-                                # This is the kill rate ONLY at the current integer stage (floor of target)
-                                base_stage_perf = (self._base_stage_kills / self._base_stage_eps) if self._base_stage_eps > 0 else 0.0
-
-                                # Update mastered_stage when hitting 0.95 at current stage
-                                # Require minimum episodes to prevent false mastery from small samples
-                                MIN_MASTERY_EPISODES = 250
-                                base_stage = int(self._target_stage)
-                                if base_stage_perf >= 0.95 and self._base_stage_eps >= MIN_MASTERY_EPISODES:
-                                    if base_stage > self._mastered_stage:
-                                        print(f'[CURRICULUM] MASTERED: stage {base_stage} (perf={base_stage_perf:.3f}, eps={self._base_stage_eps:.0f})')
-                                        self._mastered_stage = base_stage
-
-                                # Check if we're in finalization window
-                                in_finalization = total_steps >= self._finalize_at_steps
-
-                                # Determine advancement BEFORE doing it
-                                # Short + medium windows must exceed threshold
-                                # Base stage must be MASTERED (90% kill rate at floor stage)
-                                # Immediate perf must be good (prevents advancing when current perf is bad)
-                                advanced = (short_rate >= self.advance_threshold and
-                                           medium_rate >= self.advance_threshold and
-                                           base_stage_perf >= 0.95 and  # Must MASTER stage before advancing
-                                           perf >= self.advance_threshold and
-                                           self._target_stage < 17.0)
-
-                                # Debug logging (only in debug window)
-                                if self._debug_enabled and self._debug_start_steps <= total_steps <= self._debug_end_steps:
-                                    reasons = []
-                                    if short_rate < self.advance_threshold:
-                                        reasons.append(f'short_fail:{short_rate:.3f}<{self.advance_threshold}')
-                                    if medium_rate < self.advance_threshold:
-                                        reasons.append(f'medium_fail:{medium_rate:.3f}<{self.advance_threshold}')
-                                    if base_stage_perf < 0.95:
-                                        reasons.append(f'base_stage_fail:{base_stage_perf:.3f}<0.95')
-                                    if perf < self.advance_threshold:
-                                        reasons.append(f'perf_fail:{perf:.3f}<{self.advance_threshold}')
-                                    if self._target_stage >= 17.0:
-                                        reasons.append('max_stage_reached')
-
-                                    self._debug_log.append({
-                                        'type': 'eval',
-                                        'total_steps': total_steps,
-                                        'short_rate': short_rate,
-                                        'short_eps': self._cumulative_episodes,
-                                        'medium_rate': medium_rate,
-                                        'medium_eps': self._medium_episodes,
-                                        'long_rate': long_rate,
-                                        'long_eps': self._long_episodes,
-                                        'base_stage_perf': base_stage_perf,
-                                        'base_stage_eps': self._base_stage_eps,
-                                        'threshold': self.advance_threshold,
-                                        'target_stage_before': self._target_stage,
-                                        'advanced': advanced,
-                                        'reasons': reasons if not advanced else ['all_passed'],
-                                    })
-
-                                # Print for immediate visibility
-                                print(f'[CURRICULUM] step={total_steps} stage={self._target_stage:.2f} '
-                                      f'short={short_rate:.3f}({self._cumulative_episodes:.0f}eps) '
-                                      f'med={medium_rate:.3f}({self._medium_episodes:.0f}eps) '
-                                      f'base={base_stage_perf:.3f}({self._base_stage_eps:.0f}eps) '
-                                      f'mastered={self._mastered_stage} stuck={self._stuck_intervals} adv={advanced}')
-
-                                # Track stuck intervals for plateau-based demotion
-                                if advanced:
-                                    self._stuck_intervals = 0  # Reset stuck counter on advancement
-                                else:
-                                    self._stuck_intervals += 1
-
-                                # ALL windows must exceed threshold (AND logic = harder to advance)
-                                if advanced:
-                                    old_base = int(self._target_stage)
-                                    self._target_stage += self.stage_increment
-                                    new_base = int(self._target_stage)
-                                    binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
-                                    self._current_stage = new_base
-
-                                    # Reset base stage counters ONLY when crossing integer boundary
-                                    # e.g., 9.7 → 10.0 resets, but 9.4 → 9.7 does NOT reset
-                                    if new_base != old_base:
-                                        print(f'[CURRICULUM] Crossed stage boundary {old_base} → {new_base}, resetting base_stage tracking')
-                                        self._base_stage_kills = 0.0
-                                        self._base_stage_eps = 0.0
-
-                                # Ratchet floor: target can NEVER go below mastered + 0.9
-                                # This prevents oscillations - agent can only progress forward
-                                # (No SMART DEMOTE - it caused oscillations by dropping back then re-advancing)
-                                # Exception: during finalization, we WANT to drop to mastered + 0.01 for evaluation
-                                if not in_finalization:
-                                    ratchet_floor = float(self._mastered_stage) + 0.9 if self._mastered_stage > 0 else 0.0
-                                    if self._target_stage < ratchet_floor:
-                                        print(f'[CURRICULUM] RATCHET: enforcing floor {self._target_stage:.2f} → {ratchet_floor:.2f} '
-                                              f'(mastered={self._mastered_stage})')
-                                        self._target_stage = ratchet_floor
-                                        binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
-
-                                # End-game finalization: snap to mastered + 0.01 for best ultimate
-                                if in_finalization and not advanced:
-                                    if base_stage > self._mastered_stage:
-                                        new_target = float(self._mastered_stage) + 0.01
-                                        print(f'[CURRICULUM] FINALIZE: {self._target_stage:.2f} → {new_target:.2f} '
-                                              f'(mastered={self._mastered_stage})')
-                                        self._target_stage = new_target
-                                        binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
-
-                            # Reset short window every interval
-                            self._cumulative_kills = 0.0
-                            self._cumulative_episodes = 0.0
                             self._last_eval_step = total_steps
 
-                            # Reset medium window every 3 intervals
-                            if self._medium_window_count >= 3:
-                                self._medium_kills = 0.0
-                                self._medium_episodes = 0.0
-                                self._medium_window_count = 0
+                            # Compute base stage performance (current stage mastery)
+                            base_stage_perf = (self._base_stage_kills / self._base_stage_eps) if self._base_stage_eps > 0 else 0.0
 
-                            # Long window: decay by 10% each interval (exponential moving average)
-                            self._long_kills *= 0.9
-                            self._long_episodes *= 0.9
+                            # Check mastery at MAJORITY stage (round, not floor)
+                            # At target 0.9, majority is stage 1 (90% of episodes)
+                            mastery_stage = round(self._target_stage)
+                            if base_stage_perf >= 0.95 and self._base_stage_eps >= self.min_eval_episodes:
+                                if mastery_stage > self._mastered_stage:
+                                    print(f'[CURRICULUM] MASTERED: stage {mastery_stage} (perf={base_stage_perf:.3f}, eps={self._base_stage_eps:.0f})')
+                                    self._mastered_stage = mastery_stage
+                                    # Reset base stage tracking for new level
+                                    self._base_stage_kills = 0.0
+                                    self._base_stage_eps = 0.0
+
+                            # Target is ALWAYS mastered + 0.9 (except finalization)
+                            in_finalization = total_steps >= self._finalize_at_steps
+                            if in_finalization:
+                                new_target = float(self._mastered_stage) + 0.01
+                            else:
+                                new_target = float(self._mastered_stage) + 0.9
+
+                            if abs(self._target_stage - new_target) > 0.01:
+                                print(f'[CURRICULUM] TARGET: {self._target_stage:.2f} → {new_target:.2f} (mastered={self._mastered_stage})')
+                                self._target_stage = new_target
+                                self._current_stage = int(self._target_stage)
+                                binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
+
+                            # Simple diagnostic print
+                            print(f'[CURRICULUM] step={total_steps} stage={self._target_stage:.2f} '
+                                  f'base={base_stage_perf:.3f}({self._base_stage_eps:.0f}eps) '
+                                  f'mastered={self._mastered_stage}')
 
                             # Base stage: decay by 10% each interval (so recent perf matters more)
-                            # Without decay, base_stage_perf has infinite memory and early poor
-                            # performance drags it down forever, blocking advancement even at 100% kill rate
                             self._base_stage_kills *= 0.9
                             self._base_stage_eps *= 0.9
-
-                    # Auto-save when we exit debug window (so ctrl+c doesn't lose data)
-                    if self._debug_enabled and total_steps > self._debug_end_steps and self._debug_log:
-                        self._dump_debug_log()
-                        self._debug_log = []  # Clear so we don't dump again
 
         return (self.observations, self.rewards, self.terminals, self.truncations, info)
 
     def render(self):
         binding.vec_render(self.c_envs, 0)
 
-    def _dump_debug_log(self):
-        """Dump curriculum debug log to JSON file."""
-        if self._debug_enabled and self._debug_log:
-            import json
-            # Custom encoder to handle numpy types
-            class NumpyEncoder(json.JSONEncoder):
-                def default(self, obj):
-                    if isinstance(obj, (np.bool_, np.integer, np.floating)):
-                        return obj.item()
-                    return super().default(obj)
-            filename = f'curriculum_debug_{int(time.time())}.json'
-            with open(filename, 'w') as f:
-                json.dump(self._debug_log, f, indent=2, cls=NumpyEncoder)
-            print(f'[CURRICULUM DEBUG] Dumped {len(self._debug_log)} entries to {filename}')
-
     def close(self):
-        self._dump_debug_log()
         binding.vec_close(self.c_envs)
 
     def force_state(

@@ -354,9 +354,10 @@ void add_log(Dogfight *env) {
     env->log.total_abs_bias += fabsf(env->aileron_bias);
     env->log.stage_sum += (float)env->stage;  // Accumulate for avg_stage
 
-    // Track performance at current target stage only (for per-stage gating)
-    int base_stage = (int)env->curriculum_target;
-    if (env->stage == base_stage) {
+    // Track performance at MAJORITY stage (the one we're trying to master)
+    // At target 0.9, majority is stage 1 (90% of episodes), not stage 0
+    int mastery_stage = (int)(env->curriculum_target + 0.5f);  // round, not floor
+    if (env->stage == mastery_stage) {
         env->log.base_stage_kills += env->kill ? 1.0f : 0.0f;
         env->log.base_stage_eps += 1.0f;
     }
@@ -555,6 +556,11 @@ static void spawn_side(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
         env->opponent_ap.target_bank = (float)cfg->bank * DEG_TO_RAD;
     } else {
         env->opponent_ap.mode = AP_STRAIGHT;
+    }
+
+    // Stages 8-9: Boost player speed 15% for pursuit advantage (wide angle chase)
+    if (env->stage >= CURRICULUM_SIDE_FAR) {
+        env->player.vel = mul3(env->player.vel, 1.15f);
     }
 }
 
