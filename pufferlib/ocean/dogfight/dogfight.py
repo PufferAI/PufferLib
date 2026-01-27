@@ -22,16 +22,17 @@ class AutopilotMode:
 
 
 # Observation sizes by scheme (must match C OBS_SIZES in dogfight.h)
+# All schemes include timer observation (tick/max_steps) at the end
 OBS_SIZES = {
-    0: 15,   # MOMENTUM (baseline): body-frame vel + omega + AoA + energy + target + tactical
-    1: 16,   # MOMENTUM_BETA: + sideslip angle
-    2: 16,   # MOMENTUM_GFORCE: + G-force
-    3: 19,   # MOMENTUM_FULL: + sideslip + G + throttle + target rates
-    4: 11,   # MINIMAL: stripped down essentials
-    5: 15,   # CARTESIAN: cartesian target position
-    6: 22,   # DRONE_STYLE: + quaternion + up vector
-    7: 16,   # QBAR: + dynamic pressure
-    8: 25,   # KITCHEN_SINK: everything
+    0: 16,   # MOMENTUM (baseline): body-frame vel + omega + AoA + energy + target + tactical + timer
+    1: 17,   # MOMENTUM_BETA: + sideslip angle + timer
+    2: 17,   # MOMENTUM_GFORCE: + G-force + timer
+    3: 20,   # MOMENTUM_FULL: + sideslip + G + throttle + target rates + timer
+    4: 12,   # MINIMAL: stripped down essentials + timer
+    5: 16,   # CARTESIAN: cartesian target position + timer
+    6: 23,   # DRONE_STYLE: + quaternion + up vector + timer
+    7: 17,   # QBAR: + dynamic pressure + timer
+    8: 26,   # KITCHEN_SINK: everything + timer
 }
 
 

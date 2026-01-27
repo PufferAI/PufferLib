@@ -2,15 +2,16 @@
 // Extracted from dogfight.h to reduce file size
 //
 // Observation Schemes (for realistic physics - physics mode 1):
-//   Scheme 0: OBS_MOMENTUM       - Baseline (15 obs)
-//   Scheme 1: OBS_MOMENTUM_BETA  - + sideslip angle (16 obs)
-//   Scheme 2: OBS_MOMENTUM_GFORCE - + G-force (16 obs)
-//   Scheme 3: OBS_MOMENTUM_FULL  - + sideslip + G + throttle + tgt rates (19 obs)
-//   Scheme 4: OBS_MINIMAL        - stripped down essentials (11 obs)
-//   Scheme 5: OBS_CARTESIAN      - cartesian target position (15 obs)
-//   Scheme 6: OBS_DRONE_STYLE    - + quaternion + up vector (22 obs)
-//   Scheme 7: OBS_QBAR           - + dynamic pressure (16 obs)
-//   Scheme 8: OBS_KITCHEN_SINK   - everything (25 obs)
+// All schemes include timer observation at the end: tick/(max_steps+1) [0,~1)
+//   Scheme 0: OBS_MOMENTUM       - Baseline (16 obs)
+//   Scheme 1: OBS_MOMENTUM_BETA  - + sideslip angle (17 obs)
+//   Scheme 2: OBS_MOMENTUM_GFORCE - + G-force (17 obs)
+//   Scheme 3: OBS_MOMENTUM_FULL  - + sideslip + G + throttle + tgt rates (20 obs)
+//   Scheme 4: OBS_MINIMAL        - stripped down essentials (12 obs)
+//   Scheme 5: OBS_CARTESIAN      - cartesian target position (16 obs)
+//   Scheme 6: OBS_DRONE_STYLE    - + quaternion + up vector (23 obs)
+//   Scheme 7: OBS_QBAR           - + dynamic pressure (17 obs)
+//   Scheme 8: OBS_KITCHEN_SINK   - everything (26 obs)
 
 #ifndef DOGFIGHT_OBSERVATIONS_H
 #define DOGFIGHT_OBSERVATIONS_H
@@ -112,7 +113,10 @@ void compute_obs_momentum(Dogfight *env) {
     // Tactical (2 obs)
     env->observations[i++] = energy_advantage;                                 // Energy advantage [-1,1]
     env->observations[i++] = target_aspect;                                    // Aspect [-1,1]
-    // OBS_SIZE = 15
+
+    // Timer (1 obs) - how much time left before episode ends
+    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);   // Timer [0,~1)
+    // OBS_SIZE = 16
 }
 
 // ============================================================================
@@ -200,7 +204,10 @@ void compute_obs_momentum_beta(Dogfight *env) {
     // Tactical (2 obs)
     env->observations[i++] = energy_advantage;
     env->observations[i++] = target_aspect;
-    // OBS_SIZE = 16
+
+    // Timer (1 obs)
+    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);
+    // OBS_SIZE = 17
 }
 
 // ============================================================================
@@ -284,7 +291,10 @@ void compute_obs_momentum_gforce(Dogfight *env) {
     // Tactical (2 obs)
     env->observations[i++] = energy_advantage;
     env->observations[i++] = target_aspect;
-    // OBS_SIZE = 16
+
+    // Timer (1 obs)
+    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);
+    // OBS_SIZE = 17
 }
 
 // ============================================================================
@@ -375,7 +385,10 @@ void compute_obs_momentum_full(Dogfight *env) {
 
     // Energy advantage (1 obs)
     env->observations[i++] = energy_advantage;
-    // OBS_SIZE = 19
+
+    // Timer (1 obs)
+    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);
+    // OBS_SIZE = 20
 }
 
 // ============================================================================
@@ -446,7 +459,10 @@ void compute_obs_minimal(Dogfight *env) {
 
     // Tactical (1 obs)
     env->observations[i++] = energy_advantage;
-    // OBS_SIZE = 11
+
+    // Timer (1 obs)
+    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);
+    // OBS_SIZE = 12
 }
 
 // ============================================================================
@@ -519,7 +535,10 @@ void compute_obs_cartesian(Dogfight *env) {
     // Tactical (2 obs)
     env->observations[i++] = energy_advantage;
     env->observations[i++] = target_aspect;
-    // OBS_SIZE = 15
+
+    // Timer (1 obs)
+    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);
+    // OBS_SIZE = 16
 }
 
 // ============================================================================
@@ -611,7 +630,10 @@ void compute_obs_drone_style(Dogfight *env) {
     // Tactical (2 obs)
     env->observations[i++] = energy_advantage;
     env->observations[i++] = target_aspect;
-    // OBS_SIZE = 22
+
+    // Timer (1 obs)
+    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);
+    // OBS_SIZE = 23
 }
 
 // ============================================================================
@@ -698,7 +720,10 @@ void compute_obs_qbar(Dogfight *env) {
     // Tactical (2 obs)
     env->observations[i++] = energy_advantage;
     env->observations[i++] = target_aspect;
-    // OBS_SIZE = 16
+
+    // Timer (1 obs)
+    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);
+    // OBS_SIZE = 17
 }
 
 // ============================================================================
@@ -811,7 +836,10 @@ void compute_obs_kitchen_sink(Dogfight *env) {
 
     // Energy advantage (1 obs)
     env->observations[i++] = energy_advantage;
-    // OBS_SIZE = 25
+
+    // Timer (1 obs)
+    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);
+    // OBS_SIZE = 26
 }
 
 // ============================================================================
@@ -837,77 +865,77 @@ void compute_observations(Dogfight *env) {
 // ============================================================================
 #if DEBUG >= 5
 
-// Scheme 0: OBS_MOMENTUM (15 obs)
-static const char* DEBUG_OBS_LABELS_MOMENTUM[15] = {
+// Scheme 0: OBS_MOMENTUM (16 obs)
+static const char* DEBUG_OBS_LABELS_MOMENTUM[16] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy",
     "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect"
+    "E_adv", "aspect", "timer"
 };
 
-// Scheme 1: OBS_MOMENTUM_BETA (16 obs)
-static const char* DEBUG_OBS_LABELS_MOMENTUM_BETA[16] = {
+// Scheme 1: OBS_MOMENTUM_BETA (17 obs)
+static const char* DEBUG_OBS_LABELS_MOMENTUM_BETA[17] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy", "beta",
     "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect"
+    "E_adv", "aspect", "timer"
 };
 
-// Scheme 2: OBS_MOMENTUM_GFORCE (16 obs)
-static const char* DEBUG_OBS_LABELS_MOMENTUM_GFORCE[16] = {
+// Scheme 2: OBS_MOMENTUM_GFORCE (17 obs)
+static const char* DEBUG_OBS_LABELS_MOMENTUM_GFORCE[17] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy", "g_force",
     "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect"
+    "E_adv", "aspect", "timer"
 };
 
-// Scheme 3: OBS_MOMENTUM_FULL (19 obs)
-static const char* DEBUG_OBS_LABELS_MOMENTUM_FULL[19] = {
+// Scheme 3: OBS_MOMENTUM_FULL (20 obs)
+static const char* DEBUG_OBS_LABELS_MOMENTUM_FULL[20] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy", "beta", "g_force", "throttle",
     "tgt_az", "tgt_el", "range", "closure",
-    "tgt_pitch_r", "tgt_roll_r", "E_adv"
+    "tgt_pitch_r", "tgt_roll_r", "E_adv", "timer"
 };
 
-// Scheme 4: OBS_MINIMAL (11 obs)
-static const char* DEBUG_OBS_LABELS_MINIMAL[11] = {
+// Scheme 4: OBS_MINIMAL (12 obs)
+static const char* DEBUG_OBS_LABELS_MINIMAL[12] = {
     "fwd_spd", "aoa", "roll_r", "pitch_r", "yaw_r", "altitude",
-    "tgt_az", "tgt_el", "range", "closure", "E_adv"
+    "tgt_az", "tgt_el", "range", "closure", "E_adv", "timer"
 };
 
-// Scheme 5: OBS_CARTESIAN (15 obs)
-static const char* DEBUG_OBS_LABELS_CARTESIAN[15] = {
+// Scheme 5: OBS_CARTESIAN (16 obs)
+static const char* DEBUG_OBS_LABELS_CARTESIAN[16] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy",
     "tgt_x", "tgt_y", "tgt_z", "closure",
-    "E_adv", "aspect"
+    "E_adv", "aspect", "timer"
 };
 
-// Scheme 6: OBS_DRONE_STYLE (22 obs)
-static const char* DEBUG_OBS_LABELS_DRONE_STYLE[22] = {
+// Scheme 6: OBS_DRONE_STYLE (23 obs)
+static const char* DEBUG_OBS_LABELS_DRONE_STYLE[23] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy",
     "quat_w", "quat_x", "quat_y", "quat_z",
     "up_x", "up_y", "up_z",
     "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect"
+    "E_adv", "aspect", "timer"
 };
 
-// Scheme 7: OBS_QBAR (16 obs)
-static const char* DEBUG_OBS_LABELS_QBAR[16] = {
+// Scheme 7: OBS_QBAR (17 obs)
+static const char* DEBUG_OBS_LABELS_QBAR[17] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy", "q_bar",
     "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect"
+    "E_adv", "aspect", "timer"
 };
 
-// Scheme 8: OBS_KITCHEN_SINK (25 obs)
-static const char* DEBUG_OBS_LABELS_KITCHEN_SINK[25] = {
+// Scheme 8: OBS_KITCHEN_SINK (26 obs)
+static const char* DEBUG_OBS_LABELS_KITCHEN_SINK[26] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "beta", "g_force", "q_bar", "altitude", "energy", "throttle",
     "quat_w", "quat_x", "quat_y", "quat_z",
     "up_x", "up_y", "up_z",
-    "tgt_az", "tgt_el", "range", "closure", "E_adv"
+    "tgt_az", "tgt_el", "range", "closure", "E_adv", "timer"
 };
 
 void print_observations(Dogfight *env) {
@@ -937,34 +965,34 @@ void print_observations(Dogfight *env) {
         bool is_01 = false;
         switch (env->obs_scheme) {
             case OBS_MOMENTUM:
-                // fwd_spd(0), altitude(7), energy(8), range(11) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8 || i == 11);
+                // fwd_spd(0), altitude(7), energy(8), range(11), timer(15) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 11 || i == 15);
                 break;
             case OBS_MOMENTUM_BETA:
             case OBS_MOMENTUM_GFORCE:
             case OBS_QBAR:
-                // fwd_spd(0), altitude(7), energy(8), range(12) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8 || i == 12);
+                // fwd_spd(0), altitude(7), energy(8), range(12), timer(16) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 12 || i == 16);
                 break;
             case OBS_MOMENTUM_FULL:
-                // fwd_spd(0), altitude(7), energy(8), throttle(11), range(14) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8 || i == 11 || i == 14);
+                // fwd_spd(0), altitude(7), energy(8), throttle(11), range(14), timer(19) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 11 || i == 14 || i == 19);
                 break;
             case OBS_MINIMAL:
-                // fwd_spd(0), altitude(5), range(8) are [0,1]
-                is_01 = (i == 0 || i == 5 || i == 8);
+                // fwd_spd(0), altitude(5), range(8), timer(11) are [0,1]
+                is_01 = (i == 0 || i == 5 || i == 8 || i == 11);
                 break;
             case OBS_CARTESIAN:
-                // fwd_spd(0), altitude(7), energy(8) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8);
+                // fwd_spd(0), altitude(7), energy(8), timer(15) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 15);
                 break;
             case OBS_DRONE_STYLE:
-                // fwd_spd(0), altitude(7), energy(8), range(18) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8 || i == 18);
+                // fwd_spd(0), altitude(7), energy(8), range(18), timer(22) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 18 || i == 22);
                 break;
             case OBS_KITCHEN_SINK:
-                // fwd_spd(0), q_bar(9), altitude(10), energy(11), throttle(12), range(22) are [0,1]
-                is_01 = (i == 0 || i == 9 || i == 10 || i == 11 || i == 12 || i == 22);
+                // fwd_spd(0), q_bar(9), altitude(10), energy(11), throttle(12), range(22), timer(25) are [0,1]
+                is_01 = (i == 0 || i == 9 || i == 10 || i == 11 || i == 12 || i == 22 || i == 25);
                 break;
             default:
                 break;

@@ -31,7 +31,7 @@ typedef enum {
     OBS_SCHEME_COUNT
 } ObsScheme;
 
-static const int OBS_SIZES[OBS_SCHEME_COUNT] = {15, 16, 16, 19, 11, 15, 22, 16, 25};
+static const int OBS_SIZES[OBS_SCHEME_COUNT] = {16, 17, 17, 20, 12, 16, 23, 17, 26};
 
 typedef enum {
     CURRICULUM_TAIL_CHASE = 0,       // Stage 0: Easiest - opponent ahead, same heading
@@ -105,7 +105,7 @@ static const StageConfig STAGES[CURRICULUM_COUNT] = {
     {6,  spawn_side_near,        "10-30 deg off axis",                 0.30f,  1500,      10,     30,     15},
     {7,  spawn_side_mid,         "15-45 deg off axis",                 0.35f,  1800,      15,     45,     15},
     {8,  spawn_side_far,         "30-60 deg off axis",                 0.45f,  2000,      30,     60,     15},
-    {9,  spawn_side_maneuvering, "45-90 deg + 30 deg turns",           0.52f,  2000,      45,     90,     30},
+    {9,  spawn_side_maneuvering, "45-90 deg + 30 deg turns",           0.52f,  3000,      45,     90,     30},
     {10, spawn_rear_chase,       "90-150 deg off axis",                0.56f,  2500,      90,     150,    0},
     {11, spawn_rear_maneuvering, "90-150 deg + 30 deg turns",          0.60f,  2500,      90,     150,    30},
     {12, spawn_full_predictable, "360 deg, heading correlated",        0.66f,  2500,      0,      360,    0},
@@ -396,13 +396,17 @@ CurriculumStage get_curriculum_stage(Dogfight *env) {
 
 // Stage 0: TAIL_CHASE - Opponent ahead, same heading (easiest)
 static void spawn_tail_chase(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    // Opponent 200-400m ahead with offset giving ~10-20% chance of aligned spawn
+    // Opponent 200-400m ahead with guaranteed minimum offset
     // At 300m, 5° gun cone = ~26m radius for hits
-    // ±50/±38 gives avg offset ~31m = requires minor adjustment
+    // Minimum 26m y-offset guarantees ~5° at 300m (more at closer range)
+    // Signed offset with minimum magnitude: either [-50, -26] or [26, 50]
+    float y_sign = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;
+    float y_offset = y_sign * rndf(26, 50);
+
     Vec3 opp_pos = vec3(
         player_pos.x + rndf(200, 400),
-        player_pos.y + rndf(-50, 50),
-        player_pos.z + rndf(-38, 38)
+        player_pos.y + y_offset,        // Min 26m = ~5° at 300m
+        player_pos.z + rndf(-38, 38)    // z can still vary
     );
     reset_plane(&env->opponent, opp_pos, player_vel);
     env->opponent_ap.mode = AP_STRAIGHT;
@@ -803,8 +807,15 @@ void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // Use function pointer from STAGES table (replaces 18-case switch)
     if (env->stage < CURRICULUM_COUNT) {
         STAGES[env->stage].spawn(env, player_pos, player_vel);
-        // NOTE: STAGES[].max_steps field kept for documentation but NOT used
-        // max_steps comes from Python init (INI config) - per-stage override caused training regression
+
+        // Use per-stage max_steps for advanced stages (8+) where episode length matters
+        // Earlier stages use global max_steps from Python config for fast iteration
+        // The original "training regression" was from variable episode lengths during early training
+        // By stage 8+, agents are stable enough to handle longer episodes
+        if (env->stage >= CURRICULUM_SIDE_FAR) {  // Stage 8+
+            env->max_steps = STAGES[env->stage].max_steps;
+        }
+        // else: keep env->max_steps from Python init (already set)
     } else {
         spawn_evasive(env, player_pos, player_vel);  // Fallback for invalid stage
     }
@@ -1062,6 +1073,10 @@ void c_step(Dogfight *env) {
     // 5. Rudder penalty: prevent knife-edge climbing (small)
     float r_rudder = -fabsf(env->actions[3]) * PENALTY_RUDDER;
     reward += r_rudder;
+
+    // 6. Tiny tick penalty: time preference for faster kills
+    float r_time = -0.00001f;
+    reward += r_time;
 
 #if DEBUG >= 2
     // Track aiming diagnostics
