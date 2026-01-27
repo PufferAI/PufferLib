@@ -55,6 +55,7 @@ class Dogfight(pufferlib.PufferEnv):
         stage_increment=0.1,        # How much to increase target per advancement
         eval_interval=2_500_000,    # Steps between curriculum evaluations (2.5M = ~1s at 2.5M SPS)
         warmup_steps=3_000_000,     # Steps before curriculum starts evaluating (3M = ~1.2s at 2.5M SPS)
+        min_eval_episodes=50,       # Minimum episodes in window before evaluating advancement
         # df11: Simplified rewards (6 terms)
         reward_aim_scale=0.05,       # Continuous aiming reward
         reward_closing_scale=0.003,  # Per m/s closing
@@ -90,12 +91,23 @@ class Dogfight(pufferlib.PufferEnv):
         self._warmup_steps = warmup_steps  # Steps before curriculum starts evaluating
         self._eval_interval = eval_interval  # Steps between curriculum evaluations
         self._last_eval_step = warmup_steps  # First eval at warmup + eval_interval
-        self._cumulative_kills = 0.0       # Sum of (perf * n) = total kills in window
-        self._cumulative_episodes = 0.0    # Sum of n = total episodes in window
         self.advance_threshold = advance_threshold
         self.stage_increment = stage_increment
         self.curriculum_enabled = curriculum_enabled
         self.fixed_stage = fixed_stage
+        self.min_eval_episodes = min_eval_episodes
+
+        # Multi-window curriculum tracking (df17 fix: prevents lucky single ticks from advancing)
+        # Short window: resets every eval_interval
+        self._cumulative_kills = 0.0       # Sum of (perf * n) = total kills in window
+        self._cumulative_episodes = 0.0    # Sum of n = total episodes in window
+        # Medium window: resets every 3 eval_intervals
+        self._medium_kills = 0.0
+        self._medium_episodes = 0.0
+        self._medium_window_count = 0      # Count intervals in medium window
+        # Long window: rolling EMA, decays 10% each interval (never fully resets)
+        self._long_kills = 0.0
+        self._long_episodes = 0.0
 
         # If fixed_stage is set, lock to that stage
         if fixed_stage >= 0:
@@ -158,10 +170,9 @@ class Dogfight(pufferlib.PufferEnv):
             if log_data:
                 info.append(log_data)
 
-                # Curriculum advancement with step-based window evaluation (v3 fix)
-                # BUG FIX: Previously averaged kill_rates across ticks, which inflated
-                # the average when ticks with few episodes had high kill rates.
-                # Now we track cumulative kills and episodes separately, weighting properly.
+                # Curriculum advancement with multi-window evaluation (df17 fix)
+                # BUG FIX: Single lucky tick could satisfy old "perf >= threshold" check.
+                # Now track 3 windows (short/medium/long), ALL must pass threshold.
                 # Skip progression if fixed_stage is set (testing mode)
                 if self.curriculum_enabled and self.fixed_stage < 0:
                     perf = log_data.get('perf', 0)  # kill_rate for this tick
@@ -170,27 +181,51 @@ class Dogfight(pufferlib.PufferEnv):
 
                     # Only accumulate AFTER warmup (avoid early kill bias)
                     if total_steps >= self._warmup_steps:
-                        # Weight by episode count to get true kill rate
+                        # Accumulate to ALL windows
                         if n > 0:
-                            self._cumulative_kills += perf * n  # Recover raw kills
+                            raw_kills = perf * n  # Recover raw kill count
+                            self._cumulative_kills += raw_kills
                             self._cumulative_episodes += n
+                            self._medium_kills += raw_kills
+                            self._medium_episodes += n
+                            self._long_kills += raw_kills
+                            self._long_episodes += n
 
                         # Evaluate at intervals
                         if total_steps - self._last_eval_step >= self._eval_interval:
-                            if self._cumulative_episodes > 0:
-                                window_kill_rate = self._cumulative_kills / self._cumulative_episodes
+                            self._medium_window_count += 1
 
-                                # Both window avg AND immediate perf must exceed threshold
-                                # Prevents advancing when recent perf dropped (window avg masks it)
-                                if window_kill_rate >= self.advance_threshold and perf >= self.advance_threshold and self._target_stage < 17.0:
+                            # Only evaluate if short window has enough episodes
+                            if self._cumulative_episodes >= self.min_eval_episodes:
+                                short_rate = self._cumulative_kills / self._cumulative_episodes
+
+                                # Compute medium and long rates (with fallback if empty)
+                                medium_rate = (self._medium_kills / self._medium_episodes) if self._medium_episodes > 0 else 0.0
+                                long_rate = (self._long_kills / self._long_episodes) if self._long_episodes > 0 else 0.0
+
+                                # ALL windows must exceed threshold (AND logic = harder to advance)
+                                if (short_rate >= self.advance_threshold and
+                                    medium_rate >= self.advance_threshold and
+                                    long_rate >= self.advance_threshold and
+                                    self._target_stage < 17.0):
                                     self._target_stage += self.stage_increment
                                     binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
                                     self._current_stage = int(self._target_stage)
 
-                            # Reset window
+                            # Reset short window every interval
                             self._cumulative_kills = 0.0
                             self._cumulative_episodes = 0.0
                             self._last_eval_step = total_steps
+
+                            # Reset medium window every 3 intervals
+                            if self._medium_window_count >= 3:
+                                self._medium_kills = 0.0
+                                self._medium_episodes = 0.0
+                                self._medium_window_count = 0
+
+                            # Long window: decay by 10% each interval (exponential moving average)
+                            self._long_kills *= 0.9
+                            self._long_episodes *= 0.9
 
         return (self.observations, self.rewards, self.terminals, self.truncations, info)
 

@@ -78,12 +78,8 @@ static void spawn_vertical(struct Dogfight *env, Vec3 player_pos, Vec3 player_ve
 static void spawn_gentle_turns(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
 static void spawn_offset(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
 static void spawn_angled(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
-static void spawn_side_near(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
-static void spawn_side_mid(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
-static void spawn_side_far(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
-static void spawn_side_maneuvering(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
-static void spawn_rear_chase(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
-static void spawn_rear_maneuvering(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
+static void spawn_side(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
+static void spawn_rear(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
 static void spawn_full_predictable(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
 static void spawn_full_random(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
 static void spawn_medium_turns(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
@@ -93,6 +89,7 @@ static void spawn_evasive(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel
 
 // Stage configuration table - single source of truth for all stage metadata
 // Updated 2026-01-25 to split SIDE_CHASE into 3 stages (SIDE_NEAR, SIDE_MID, SIDE_FAR)
+// Updated 2026-01-26: Consolidated spawn_side/spawn_rear functions use angle fields
 // max_steps field is now for documentation only; episode length comes from Python config
 static const StageConfig STAGES[CURRICULUM_COUNT] = {
     // n   spawn_fn               description                          weight  max_steps  ang_min ang_max bank
@@ -102,12 +99,12 @@ static const StageConfig STAGES[CURRICULUM_COUNT] = {
     {3,  spawn_gentle_turns,     "Target ahead, 30 deg turns",         0.15f,  1000,      0,      30,     30},
     {4,  spawn_offset,           "Large lateral offset, 30 deg turns", 0.20f,  1000,      0,      45,     30},
     {5,  spawn_angled,           "Offset + heading variance, 30 deg",  0.25f,  1200,      0,      22,     30},
-    {6,  spawn_side_near,        "10-30 deg off axis",                 0.30f,  1500,      10,     30,     15},
-    {7,  spawn_side_mid,         "15-45 deg off axis",                 0.35f,  1800,      15,     45,     15},
-    {8,  spawn_side_far,         "30-60 deg off axis",                 0.45f,  2000,      30,     60,     15},
-    {9,  spawn_side_maneuvering, "45-90 deg + 30 deg turns",           0.52f,  3000,      45,     90,     30},
-    {10, spawn_rear_chase,       "90-150 deg off axis",                0.56f,  2500,      90,     150,    0},
-    {11, spawn_rear_maneuvering, "90-150 deg + 30 deg turns",          0.60f,  2500,      90,     150,    30},
+    {6,  spawn_side,             "15-45 deg off axis",                 0.30f,  1500,      15,     45,     0},
+    {7,  spawn_side,             "30-60 deg off axis",                 0.35f,  1800,      30,     60,     0},
+    {8,  spawn_side,             "45-90 deg off axis",                 0.45f,  2000,      45,     90,     0},
+    {9,  spawn_side,             "45-90 deg + 30 deg turns",           0.52f,  3000,      45,     90,     30},
+    {10, spawn_rear,             "90-150 deg off axis",                0.56f,  2500,      90,     150,    0},
+    {11, spawn_rear,             "90-150 deg + 30 deg turns",          0.60f,  2500,      90,     150,    30},
     {12, spawn_full_predictable, "360 deg, heading correlated",        0.66f,  2500,      0,      360,    0},
     {13, spawn_full_random,      "360 deg random heading, 30 deg",     0.72f,  2500,      0,      360,    30},
     {14, spawn_medium_turns,     "360 deg, 45 deg bank turns",         0.80f,  2500,      0,      360,    45},
@@ -513,110 +510,26 @@ static void spawn_angled(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     env->opponent_ap.target_bank = (float)STAGES[env->stage].bank * DEG_TO_RAD;
 }
 
-// Stage 6: SIDE_NEAR - Target 15-45° off axis, flying away
-// Teaches: Small side acquisition turns
-static void spawn_side_near(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;  // Left or right
-    float azimuth = side * rndf(0.26f, 0.79f);      // 15° to 45° in radians
+// Stages 6-9: Unified side spawn - uses angle_min_deg, angle_max_deg, bank from STAGES
+// Stages 6-8: Target off axis, flying away (no turns)
+// Stage 9: Same geometry + 30° turns
+static void spawn_side(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    const StageConfig* cfg = &STAGES[env->stage];
 
-    float dist = rndf(300, 500);
-    float phi = rndf(-0.2f, 0.2f);  // ±11° elevation
-
-    Vec3 opp_pos = vec3(
-        player_pos.x + dist * cosf(azimuth),
-        player_pos.y + dist * sinf(azimuth),
-        clampf(player_pos.z + dist * sinf(phi), 300, 2500)
-    );
-
-    float away_heading = azimuth;
-    float heading_variance = rndf(-0.35f, 0.35f);  // ±20°
-    float opp_heading = away_heading + heading_variance;
-
-    float speed = norm3(player_vel);
-    Vec3 opp_vel = vec3(speed * cosf(opp_heading), speed * sinf(opp_heading), 0);
-
-    reset_plane(&env->opponent, opp_pos, opp_vel);
-    env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
-    env->opponent_ap.mode = AP_STRAIGHT;
-}
-
-// Stage 7: SIDE_MID - Target 30-60° off axis, flying away
-// Teaches: Medium side acquisition turns
-static void spawn_side_mid(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;  // Left or right
-    float azimuth = side * rndf(0.52f, 1.05f);      // 30° to 60° in radians
-
-    float dist = rndf(300, 500);
-    float phi = rndf(-0.2f, 0.2f);  // ±11° elevation
-
-    Vec3 opp_pos = vec3(
-        player_pos.x + dist * cosf(azimuth),
-        player_pos.y + dist * sinf(azimuth),
-        clampf(player_pos.z + dist * sinf(phi), 300, 2500)
-    );
-
-    float away_heading = azimuth;
-    float heading_variance = rndf(-0.35f, 0.35f);  // ±20°
-    float opp_heading = away_heading + heading_variance;
-
-    float speed = norm3(player_vel);
-    Vec3 opp_vel = vec3(speed * cosf(opp_heading), speed * sinf(opp_heading), 0);
-
-    reset_plane(&env->opponent, opp_pos, opp_vel);
-    env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
-    env->opponent_ap.mode = AP_STRAIGHT;
-}
-
-// Stage 8: SIDE_FAR - Target 45-90° off axis, flying away
-// Teaches: Big side acquisition turns
-static void spawn_side_far(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;  // Left or right
-    float azimuth = side * rndf(0.79f, 1.57f);      // 45° to 90° in radians
-
-    float dist = rndf(300, 500);
-    float phi = rndf(-0.2f, 0.2f);  // ±11° elevation
-
-    Vec3 opp_pos = vec3(
-        player_pos.x + dist * cosf(azimuth),
-        player_pos.y + dist * sinf(azimuth),
-        clampf(player_pos.z + dist * sinf(phi), 300, 2500)
-    );
-
-    float away_heading = azimuth;
-    float heading_variance = rndf(-0.35f, 0.35f);  // ±20°
-    float opp_heading = away_heading + heading_variance;
-
-    float speed = norm3(player_vel);
-    Vec3 opp_vel = vec3(speed * cosf(opp_heading), speed * sinf(opp_heading), 0);
-
-    reset_plane(&env->opponent, opp_pos, opp_vel);
-    env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
-    env->opponent_ap.mode = AP_STRAIGHT;
-}
-
-// Stage 9: SIDE_MANEUVERING - Side chase + 30° turns
-// Teaches: Big turn + lead computation
-static void spawn_side_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    spawn_side_far(env, player_pos, player_vel);  // Same spawn geometry as SIDE_FAR
-    env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
-    env->opponent_ap.target_bank = (float)STAGES[env->stage].bank * DEG_TO_RAD;
-}
-
-// Stage 10: REAR_CHASE - Target 90-150° off axis (rear quarters), flying away
-// Teaches: Finding targets behind you
-static void spawn_rear_chase(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    // Spawn 90-150° off player's nose (rear quarters)
     float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;
-    float azimuth = side * rndf(1.57f, 2.62f);  // 90° to 150° in radians
+    float az_min = cfg->angle_min_deg * DEG_TO_RAD;
+    float az_max = cfg->angle_max_deg * DEG_TO_RAD;
+    float azimuth = side * rndf(az_min, az_max);
 
     float dist = rndf(300, 500);
+    float phi = rndf(-0.2f, 0.2f);  // ±11° elevation
+
     Vec3 opp_pos = vec3(
         player_pos.x + dist * cosf(azimuth),
         player_pos.y + dist * sinf(azimuth),
-        clampf(player_pos.z + rndf(-100, 100), 300, 2500)
+        clampf(player_pos.z + dist * sinf(phi), 300, 2500)
     );
 
-    // Flying AWAY from player
     float away_heading = azimuth;
     float opp_heading = away_heading + rndf(-0.35f, 0.35f);  // ±20° variance
 
@@ -626,16 +539,47 @@ static void spawn_rear_chase(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     reset_plane(&env->opponent, opp_pos, opp_vel);
     env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
 
-    // 50/50 straight or level
-    env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_STRAIGHT : AP_LEVEL;
+    // AP mode based on bank field: 0 = straight, >0 = turning
+    if (cfg->bank > 0) {
+        env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
+        env->opponent_ap.target_bank = (float)cfg->bank * DEG_TO_RAD;
+    } else {
+        env->opponent_ap.mode = AP_STRAIGHT;
+    }
 }
 
-// Stage 11: REAR_MANEUVERING - Rear chase + 30° turns
-// Teaches: Rear acquisition + tracking
-static void spawn_rear_maneuvering(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    spawn_rear_chase(env, player_pos, player_vel);  // Same spawn geometry
-    env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
-    env->opponent_ap.target_bank = (float)STAGES[env->stage].bank * DEG_TO_RAD;
+// Stages 10-11: Unified rear spawn - uses angle_min_deg, angle_max_deg, bank from STAGES
+// Stage 10: Target 90-150° off axis (rear quarters), 50/50 straight/level
+// Stage 11: Same geometry + 30° turns
+static void spawn_rear(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    const StageConfig* cfg = &STAGES[env->stage];
+
+    float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;
+    float az_min = cfg->angle_min_deg * DEG_TO_RAD;
+    float az_max = cfg->angle_max_deg * DEG_TO_RAD;
+    float azimuth = side * rndf(az_min, az_max);
+
+    float dist = rndf(300, 500);
+    Vec3 opp_pos = vec3(
+        player_pos.x + dist * cosf(azimuth),
+        player_pos.y + dist * sinf(azimuth),
+        clampf(player_pos.z + rndf(-100, 100), 300, 2500)
+    );
+
+    float opp_heading = azimuth + rndf(-0.35f, 0.35f);  // ±20° variance
+    float speed = norm3(player_vel);
+    Vec3 opp_vel = vec3(speed * cosf(opp_heading), speed * sinf(opp_heading), 0);
+
+    reset_plane(&env->opponent, opp_pos, opp_vel);
+    env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
+
+    // AP mode based on bank field: 0 = 50/50 straight/level, >0 = turning
+    if (cfg->bank > 0) {
+        env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
+        env->opponent_ap.target_bank = (float)cfg->bank * DEG_TO_RAD;
+    } else {
+        env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_STRAIGHT : AP_LEVEL;
+    }
 }
 
 // Stage 12: FULL_PREDICTABLE - 360° spawn, heading correlated (flying away)
