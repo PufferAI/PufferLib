@@ -103,26 +103,43 @@ static const StageConfig STAGES[CURRICULUM_COUNT] = {
     {7,  spawn_side,             "30-60 deg off axis",                 0.35f,  1800,      30,     60,     0},
     {8,  spawn_side,             "45-90 deg off axis",                 0.45f,  2000,      45,     90,     0},
     {9,  spawn_side,             "45-90 deg + 30 deg turns",           0.52f,  3000,      45,     90,     30},
-    {10, spawn_rear,             "90-150 deg off axis",                0.56f,  2500,      90,     150,    0},
-    {11, spawn_rear,             "90-150 deg + 30 deg turns",          0.60f,  2500,      90,     150,    30},
-    {12, spawn_full_predictable, "360 deg, heading correlated",        0.66f,  2500,      0,      360,    0},
-    {13, spawn_full_random,      "360 deg random heading, 30 deg",     0.72f,  2500,      0,      360,    30},
-    {14, spawn_medium_turns,     "360 deg, 45 deg bank turns",         0.80f,  2500,      0,      360,    45},
-    {15, spawn_hard_maneuvering, "360 deg, 60 deg banks + weave",      0.88f,  3000,      0,      360,    60},
-    {16, spawn_crossing,         "45 deg deflection shots",            0.94f,  1500,      45,     45,     0},
-    {17, spawn_evasive,          "Reactive break turns",               1.00f,  3000,      0,      360,    60},
+    {10, spawn_rear,             "90-150 deg off axis",                0.56f,  3500,      90,     150,    0},
+    {11, spawn_rear,             "90-150 deg + 30 deg turns",          0.60f,  3500,      90,     150,    30},
+    {12, spawn_full_predictable, "360 deg, heading correlated",        0.66f,  4000,      0,      360,    0},
+    {13, spawn_full_random,      "360 deg random heading, 30 deg",     0.72f,  4000,      0,      360,    30},
+    {14, spawn_medium_turns,     "360 deg, 45 deg bank turns",         0.80f,  4000,      0,      360,    45},
+    {15, spawn_hard_maneuvering, "360 deg, 60 deg banks + weave",      0.88f,  4000,      0,      360,    60},
+    {16, spawn_crossing,         "45 deg deflection shots",            0.94f,  4000,      45,     45,     0},
+    {17, spawn_evasive,          "Reactive break turns",               1.00f,  4000,      0,      360,    60},
 };
+
+// Spawn randomization parameters - stage-dependent ranges for variety
+typedef struct SpawnRandomization {
+    float speed_min, speed_max;       // Initial airspeed range (m/s)
+    float pitch_max_deg;              // Max pitch deviation (±degrees)
+    float bank_max_deg;               // Max bank deviation (±degrees)
+    float throttle_min, throttle_max; // Initial throttle range
+} SpawnRandomization;
+
+// Get spawn randomization parameters for a given stage
+// Earlier stages = tighter ranges (easier), later stages = wider ranges (harder)
+static inline SpawnRandomization get_spawn_randomization(int stage) {
+    if (stage <= 3)  return (SpawnRandomization){75, 85,  5, 10, 0.45f, 0.55f};
+    if (stage <= 7)  return (SpawnRandomization){70, 95, 10, 20, 0.35f, 0.65f};
+    if (stage <= 11) return (SpawnRandomization){65, 105, 15, 30, 0.30f, 0.70f};
+    return (SpawnRandomization){60, 110, 15, 45, 0.25f, 0.80f};
+}
 
 #define DT 0.02f
 
-#define WORLD_HALF_X 2000.0f
-#define WORLD_HALF_Y 2000.0f
-#define WORLD_MAX_Z 3000.0f
+#define WORLD_HALF_X 4000.0f
+#define WORLD_HALF_Y 4000.0f
+#define WORLD_MAX_Z 5000.0f
 #define MAX_SPEED 250.0f
 
-#define INV_WORLD_HALF_X 0.0005f       // 1/2000
-#define INV_WORLD_HALF_Y 0.0005f       // 1/2000
-#define INV_WORLD_MAX_Z  0.000333333f  // 1/3000
+#define INV_WORLD_HALF_X 0.00025f      // 1/4000
+#define INV_WORLD_HALF_Y 0.00025f      // 1/4000
+#define INV_WORLD_MAX_Z  0.0002f       // 1/5000
 #define INV_MAX_SPEED    0.004f        // 1/250
 #define INV_PI           0.31830988618f // 1/PI
 #define INV_HALF_PI      0.63661977236f // 2/PI (i.e., 1/(PI*0.5))
@@ -467,6 +484,11 @@ static void spawn_vertical(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     );
     reset_plane(&env->opponent, opp_pos, player_vel);
     env->opponent_ap.mode = AP_LEVEL;  // Maintain altitude
+
+    // Speed boost only when opponent is ABOVE us (climbing needs energy, diving doesn't)
+    if (opp_pos.z > player_pos.z) {
+        env->player.vel = mul3(env->player.vel, 1.15f);
+    }
 }
 
 // Stage 3: GENTLE_TURNS - Opponent does gentle turns (30°)
@@ -562,6 +584,11 @@ static void spawn_side(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     if (env->stage >= CURRICULUM_SIDE_FAR) {
         env->player.vel = mul3(env->player.vel, 1.15f);
     }
+
+    // Speed boost when opponent is above (climbing needs energy)
+    if (opp_pos.z > player_pos.z) {
+        env->player.vel = mul3(env->player.vel, 1.15f);
+    }
 }
 
 // Stages 10-11: Unified rear spawn - uses angle_min_deg, angle_max_deg, bank from STAGES
@@ -576,10 +603,11 @@ static void spawn_rear(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     float azimuth = side * rndf(az_min, az_max);
 
     float dist = rndf(300, 500);
+    // Opponent spawns ~350m below player (altitude advantage for rear chase)
     Vec3 opp_pos = vec3(
         player_pos.x + dist * cosf(azimuth),
         player_pos.y + dist * sinf(azimuth),
-        clampf(player_pos.z + rndf(-100, 100), 300, 2500)
+        clampf(player_pos.z - 350 + rndf(-50, 50), 300, 2500)
     );
 
     float opp_heading = azimuth + rndf(-0.35f, 0.35f);  // ±20° variance
@@ -865,14 +893,27 @@ void c_reset(Dogfight *env) {
     // Gun cone for hit detection - stays fixed at 5°
     env->cos_gun_cone = cosf(env->gun_cone_angle);
 
-    // Spawn player at random position
+    // Spawn player at random position with base velocity
     Vec3 pos = vec3(rndf(-500, 500), rndf(-500, 500), rndf(500, 1500));
-    Vec3 vel = vec3(80, 0, 0);
+    Vec3 vel = vec3(80, 0, 0);  // Base speed, will be randomized below
     reset_plane(&env->player, pos, vel);
 
     // Spawn opponent based on curriculum stage (or legacy if disabled)
     if (env->curriculum_enabled) {
         spawn_by_curriculum(env, pos, vel);
+
+        // Phase 1: Apply stage-dependent speed randomization to both planes
+        SpawnRandomization r = get_spawn_randomization(env->stage);
+        float target_speed = rndf(r.speed_min, r.speed_max);
+        float speed_ratio = target_speed / 80.0f;  // Scale from base speed
+        env->player.vel = mul3(env->player.vel, speed_ratio);
+        env->player.prev_vel = env->player.vel;  // Keep in sync
+        env->opponent.vel = mul3(env->opponent.vel, speed_ratio);
+        env->opponent.prev_vel = env->opponent.vel;
+
+        // Phase 2: Apply stage-dependent throttle randomization
+        env->player.throttle = rndf(r.throttle_min, r.throttle_max);
+        env->opponent_ap.throttle = rndf(r.throttle_min, r.throttle_max);  // Autopilot throttle
     } else {
         spawn_legacy(env, pos, vel);
     }

@@ -428,22 +428,22 @@ void c_render(Dogfight *env) {
     ClearBackground((Color){6, 24, 24, 255});  // Dark blue-green sky
 
     // Set clip planes for long-range visibility (default far=1000 is too close)
-    rlSetClipPlanes(1.0, 10000.0);  // near=1m, far=10km
+    rlSetClipPlanes(1.0, 15000.0);  // near=1m, far=15km
     BeginMode3D(env->client->camera);
 
     // 6. Draw ground plane at z=0 (XY plane, since we use Z-up)
     // DrawPlane uses raylib's Y-up convention (XZ plane), so we draw triangles instead
-    Vector3 g1 = {-2000, -2000, 0};
-    Vector3 g2 = {2000, -2000, 0};
-    Vector3 g3 = {2000, 2000, 0};
-    Vector3 g4 = {-2000, 2000, 0};
+    Vector3 g1 = {-4000, -4000, 0};
+    Vector3 g2 = {4000, -4000, 0};
+    Vector3 g3 = {4000, 4000, 0};
+    Vector3 g4 = {-4000, 4000, 0};
     Color ground_color = (Color){20, 60, 20, 255};
     DrawTriangle3D(g1, g2, g3, ground_color);
     DrawTriangle3D(g1, g3, g4, ground_color);
 
     // 7. Draw world bounds wireframe
-    // Bounds: X +/-2000, Y +/-2000, Z 0-3000 -> center at (0, 0, 1500)
-    DrawCubeWires((Vector3){0, 0, 1500}, 4000, 4000, 3000, (Color){100, 100, 100, 255});
+    // Bounds: X +/-4000, Y +/-4000, Z 0-5000 -> center at (0, 0, 2500)
+    DrawCubeWires((Vector3){0, 0, 2500}, 8000, 8000, 5000, (Color){100, 100, 100, 255});
 
     // 8. Draw player plane
     Plane *o = &env->opponent;
@@ -485,6 +485,7 @@ void c_render(Dogfight *env) {
     DrawText(TextFormat("Tick: %d / %d", env->tick, env->max_steps), 10, 130, 20, WHITE);
     DrawText(TextFormat("Return: %.2f", env->episode_return), 10, 160, 20, WHITE);
     DrawText(TextFormat("Perf: %.1f%% | Shots: %.0f", env->log.perf / fmaxf(env->log.n, 1.0f) * 100.0f, env->log.shots_fired), 10, 190, 20, YELLOW);
+    DrawText(TextFormat("Stage: %d", env->stage), 10, 220, 20, LIME);
 
     // 11. Draw observation monitor (right side)
     draw_obs_monitor(env);
