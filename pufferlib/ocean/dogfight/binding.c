@@ -86,6 +86,8 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "avg_stage_weight", log->total_stage_weight);  // Raw sum → correct avg
     assign_to_dict(dict, "avg_abs_bias", log->total_abs_bias);          // Raw sum → correct avg
     assign_to_dict(dict, "avg_stage", log->stage_sum);                  // Raw sum → correct avg
+    assign_to_dict(dict, "base_stage_kills", log->base_stage_kills);   // Raw sum (not averaged)
+    assign_to_dict(dict, "base_stage_eps", log->base_stage_eps);       // Raw sum (not averaged)
     assign_to_dict(dict, "ultimate", log->ultimate);
     assign_to_dict(dict, "n", log->n);
     return 0;

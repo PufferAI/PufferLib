@@ -146,6 +146,8 @@ typedef struct Log {
     float total_stage_weight;       // Sum of stage weights (exported as avg_stage_weight)
     float total_abs_bias;           // Sum of |aileron_bias| (exported as avg_abs_bias)
     float stage_sum;                // Sum of stages (exported as avg_stage)
+    float base_stage_kills;         // Kills at int(curriculum_target) - for per-stage gating
+    float base_stage_eps;           // Episodes at int(curriculum_target) - for per-stage gating
 
     // PER-ENV RATIOS - for C debugging only, NOT exported (garbage after vec_log aggregation)
     float avg_stage_weight;         // = total_stage_weight / n (per-env only)
@@ -351,6 +353,14 @@ void add_log(Dogfight *env) {
     env->log.total_stage_weight += STAGES[env->stage].weight; // coeffs to scale metrics based on difficulty
     env->log.total_abs_bias += fabsf(env->aileron_bias);
     env->log.stage_sum += (float)env->stage;  // Accumulate for avg_stage
+
+    // Track performance at current target stage only (for per-stage gating)
+    int base_stage = (int)env->curriculum_target;
+    if (env->stage == base_stage) {
+        env->log.base_stage_kills += env->kill ? 1.0f : 0.0f;
+        env->log.base_stage_eps += 1.0f;
+    }
+
     env->log.n += 1.0f;
     env->log.kill_rate = env->log.perf / fmaxf(env->log.n, 1.0f);
     env->log.avg_stage = env->log.stage_sum / env->log.n;
