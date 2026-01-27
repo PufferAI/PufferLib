@@ -104,7 +104,7 @@ void test_c_reset() {
     // Player spawned in bounds
     assert(env.player.pos.x >= -500 && env.player.pos.x <= 500);
     assert(env.player.pos.y >= -500 && env.player.pos.y <= 500);
-    assert(env.player.pos.z >= 500 && env.player.pos.z <= 1500);
+    assert(env.player.pos.z >= 800 && env.player.pos.z <= 4200);
 
     // Velocity set
     assert(env.player.vel.x == 80);
