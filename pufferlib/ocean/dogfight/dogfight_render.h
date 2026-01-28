@@ -146,8 +146,8 @@ void draw_plane_shape(Vec3 pos, Quat ori, Color body_color, Color wing_color) {
     DrawSphere(nose_r, 2.0f, body_color);
 }
 
-// Draw plane 3D model
-void draw_plane_model(Client *client, Vec3 pos, Quat ori, Color tint, float scale_factor) {
+// Draw plane 3D model with spinning propeller
+void draw_plane_model(Client *client, Vec3 pos, Quat ori, Color tint, float scale_factor, float prop_angle) {
     // Convert position
     Vector3 position = {pos.x, pos.y, pos.z};
 
@@ -168,18 +168,39 @@ void draw_plane_model(Client *client, Vec3 pos, Quat ori, Color tint, float scal
     // Apply aircraft orientation, then coordinate fix
     final_rot = QuaternionMultiply(model_rot, full_fix);
 
-    // Apply to model transform (following battle.h pattern)
-    Matrix rotation = QuaternionToMatrix(final_rot);
+    // Build base transform: scale -> rotation -> translation
+    Matrix scale_mat = MatrixScale(scale_factor, scale_factor, scale_factor);
+    Matrix rot_mat = QuaternionToMatrix(final_rot);
+    Matrix trans_mat = MatrixTranslate(position.x, position.y, position.z);
+    Matrix base_transform = MatrixMultiply(MatrixMultiply(scale_mat, rot_mat), trans_mat);
 
-    // Copy model and set transform (like battle.h)
+    // Propeller rotation around model's forward axis (Y in model space before coord fix)
+    // After coord_fix: model Y becomes world Z, but we want rotation around nose axis
+    // Propeller spins around model's local Z axis (forward in GLB space)
+    Quaternion prop_rot = QuaternionFromAxisAngle((Vector3){0, 0, 1}, prop_angle);
+    Quaternion prop_final = QuaternionMultiply(final_rot, prop_rot);
+    Matrix prop_rot_mat = QuaternionToMatrix(prop_final);
+    Matrix prop_transform = MatrixMultiply(MatrixMultiply(scale_mat, prop_rot_mat), trans_mat);
+
+    // Disable alpha blending to prevent propeller transparency from showing background
+    rlDisableColorBlend();
     Model model = client->plane_model;
-    model.transform = rotation;
-
-    // Scale - P-40 model size unknown, adjust as needed
-    Vector3 scale = {scale_factor, scale_factor, scale_factor};
-    Vector3 rot_axis = {0.0f, 1.0f, 0.0f};
-
-    DrawModelEx(model, position, rot_axis, 0, scale, tint);
+    for (int i = 0; i < model.meshCount; i++) {
+        if (i >= 3) continue;
+        if (i == 2 && client->camera_mode == 3) continue;  // Skip blur prop in cockpit
+        Matrix transform = (i == 2) ? prop_transform : base_transform;
+        int mat_idx = model.meshMaterial[i];
+        Color original = model.materials[mat_idx].maps[MATERIAL_MAP_DIFFUSE].color;
+        model.materials[mat_idx].maps[MATERIAL_MAP_DIFFUSE].color = (Color){
+            (unsigned char)(original.r * tint.r / 255),
+            (unsigned char)(original.g * tint.g / 255),
+            (unsigned char)(original.b * tint.b / 255),
+            original.a
+        };
+        DrawMesh(model.meshes[i], model.materials[mat_idx], transform);
+        model.materials[mat_idx].maps[MATERIAL_MAP_DIFFUSE].color = original;
+    }
+    rlEnableColorBlend();
 }
 
 void handle_camera_controls(Client *c) {
@@ -381,6 +402,7 @@ void c_render(Dogfight *env) {
         env->client->cam_distance = 80.0f;
         env->client->cam_azimuth = 0.0f;
         env->client->cam_elevation = 0.3f;
+        env->client->camera_mode = 0;  // 0 = follow target, 1 = midpoint view
         env->client->is_dragging = false;
 
         InitWindow(1280, 720, "Dogfight");
@@ -403,29 +425,79 @@ void c_render(Dogfight *env) {
         exit(0);
     }
 
+    // Toggle camera mode with C key (0=orbit, 1=midpoint, 2=chase, 3=cockpit)
+    if (IsKeyPressed(KEY_C)) {
+        env->client->camera_mode = (env->client->camera_mode + 1) % 4;
+    }
+
     // 3. Handle mouse controls for camera orbit
     handle_camera_controls(env->client);
 
     // 4. Update chase camera
     Plane *p = &env->player;
-    Vec3 fwd = quat_rotate(p->ori, vec3(1, 0, 0));
+    Plane *o = &env->opponent;
+    // Follow opponent if flag is set (for AutoAce tests)
+    Plane *cam_target = env->camera_follow_opponent ? o : p;
+    Vec3 fwd = quat_rotate(cam_target->ori, vec3(1, 0, 0));
     float dist = env->client->cam_distance;
 
     // Apply orbit offsets from mouse drag
     float az = env->client->cam_azimuth;
     float el = env->client->cam_elevation;
 
-    // Base chase position (behind and above player)
-    float cam_x = p->pos.x - fwd.x * dist * cosf(el) * cosf(az) + fwd.y * dist * sinf(az);
-    float cam_y = p->pos.y - fwd.y * dist * cosf(el) * cosf(az) - fwd.x * dist * sinf(az);
-    float cam_z = p->pos.z + dist * sinf(el) + 20.0f;
+    if (env->client->camera_mode == 2) {
+        // Mode 2: Direct chase - fully body-aligned (roll + pitch + yaw)
+        Vec3 up = quat_rotate(cam_target->ori, vec3(0, 0, 1));
+        // Position: behind and slightly above in body frame (0.25 up, was 0.5)
+        float chase_dist = dist * 0.7f;
+        float cam_x = cam_target->pos.x - fwd.x * chase_dist + up.x * chase_dist * 0.25f;
+        float cam_y = cam_target->pos.y - fwd.y * chase_dist + up.y * chase_dist * 0.25f;
+        float cam_z = cam_target->pos.z - fwd.z * chase_dist + up.z * chase_dist * 0.25f;
+        env->client->camera.position = (Vector3){cam_x, cam_y, cam_z};
+        // Target ahead and above plane so plane appears lower on screen
+        float tgt_x = cam_target->pos.x + fwd.x * 20.0f + up.x * 20.0f;
+        float tgt_y = cam_target->pos.y + fwd.y * 20.0f + up.y * 20.0f;
+        float tgt_z = cam_target->pos.z + fwd.z * 20.0f + up.z * 20.0f;
+        env->client->camera.target = (Vector3){tgt_x, tgt_y, tgt_z};
+        env->client->camera.up = (Vector3){up.x, up.y, up.z};
+    } else if (env->client->camera_mode == 3) {
+        // Mode 3: Cockpit POV - at plane center, 1.25m up in body frame
+        Vec3 up = quat_rotate(cam_target->ori, vec3(0, 0, 1));
+        float cam_x = cam_target->pos.x + up.x * 1.11f;
+        float cam_y = cam_target->pos.y + up.y * 1.11f;
+        float cam_z = cam_target->pos.z + up.z * 1.11f;
+        env->client->camera.position = (Vector3){cam_x, cam_y, cam_z};
+        // Look forward and ~15 degrees up (tan(15°) ≈ 0.268, so 27 up per 100 forward)
+        float tgt_x = cam_target->pos.x + fwd.x * 100.0f + up.x * 27.0f;
+        float tgt_y = cam_target->pos.y + fwd.y * 100.0f + up.y * 27.0f;
+        float tgt_z = cam_target->pos.z + fwd.z * 100.0f + up.z * 27.0f;
+        env->client->camera.target = (Vector3){tgt_x, tgt_y, tgt_z};
+        env->client->camera.up = (Vector3){up.x, up.y, up.z};
+    } else {
+        // Reset to world up for other modes
+        env->client->camera.up = (Vector3){0.0f, 0.0f, 1.0f};
+        // Modes 0 and 1: Orbit camera position
+        float cam_x = cam_target->pos.x - fwd.x * dist * cosf(el) * cosf(az) + fwd.y * dist * sinf(az);
+        float cam_y = cam_target->pos.y - fwd.y * dist * cosf(el) * cosf(az) - fwd.x * dist * sinf(az);
+        float cam_z = cam_target->pos.z + dist * sinf(el) + 20.0f;
+        env->client->camera.position = (Vector3){cam_x, cam_y, cam_z};
 
-    env->client->camera.position = (Vector3){cam_x, cam_y, cam_z};
-    env->client->camera.target = (Vector3){p->pos.x, p->pos.y, p->pos.z};
+        if (env->client->camera_mode == 0) {
+            // Mode 0: Orbit - look at cam_target
+            env->client->camera.target = (Vector3){cam_target->pos.x, cam_target->pos.y, cam_target->pos.z};
+        } else {
+            // Mode 1: Midpoint - look at midpoint between both planes
+            float mid_x = (p->pos.x + o->pos.x) / 2.0f;
+            float mid_y = (p->pos.y + o->pos.y) / 2.0f;
+            float mid_z = (p->pos.z + o->pos.z) / 2.0f;
+            env->client->camera.target = (Vector3){mid_x, mid_y, mid_z};
+        }
+    }
 
     // 5. Begin drawing
     BeginDrawing();
-    ClearBackground((Color){6, 24, 24, 255});  // Dark blue-green sky
+    // Sky background color (R, G, B, A) - adjust RGB values as needed
+    ClearBackground((Color){0, 100, 120, 255});  // Dark cyan
 
     // Set clip planes for long-range visibility (default far=1000 is too close)
     rlSetClipPlanes(1.0, 15000.0);  // near=1m, far=15km
@@ -445,10 +517,22 @@ void c_render(Dogfight *env) {
     // Bounds: X +/-4000, Y +/-4000, Z 0-5000 -> center at (0, 0, 2500)
     DrawCubeWires((Vector3){0, 0, 2500}, 8000, 8000, 5000, (Color){100, 100, 100, 255});
 
-    // 8. Draw player plane
-    Plane *o = &env->opponent;
+    // 8. Draw planes with scale based on camera focus
+    // Camera target (focused plane) is 1:1, other plane is 8:1 for visibility at distance
+    float player_scale = env->camera_follow_opponent ? 8.0f : 1.0f;
+    float opponent_scale = env->camera_follow_opponent ? 1.0f : 4.0f;
+
+    // Update propeller rotation (P-51: ~2700 RPM at full throttle = 283 rad/s)
+    // Use average throttle, scale by frame time (assume 60 FPS = 0.0167s)
+    float prop_speed = 150.0f + 130.0f * p->throttle;  // rad/s: 150 idle to 280 full
+    env->client->propeller_angle += prop_speed * 0.0167f;
+    if (env->client->propeller_angle > 2.0f * PI) {
+        env->client->propeller_angle -= 2.0f * PI;
+    }
+
+    // Draw player plane
     if (env->client->model_loaded) {
-        draw_plane_model(env->client, p->pos, p->ori, WHITE, 1.0f);
+        draw_plane_model(env->client, p->pos, p->ori, WHITE, player_scale, env->client->propeller_angle);
     } else {
         // Fallback to wireframe
         Color cyan = {0, 255, 255, 255};
@@ -456,9 +540,9 @@ void c_render(Dogfight *env) {
         draw_plane_shape(p->pos, p->ori, cyan, light_cyan);
     }
 
-    // 9. Draw opponent plane (4x scale for visibility at distance)
+    // 9. Draw opponent plane (always red)
     if (env->client->model_loaded) {
-        draw_plane_model(env->client, o->pos, o->ori, RED, 4.0f);
+        draw_plane_model(env->client, o->pos, o->ori, RED, opponent_scale, env->client->propeller_angle);
     } else {
         draw_plane_shape(o->pos, o->ori, RED, ORANGE);
     }

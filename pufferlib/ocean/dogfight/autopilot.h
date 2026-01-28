@@ -24,7 +24,21 @@ typedef enum {
     AP_HARD_TURN_RIGHT,  // Aggressive 70° right turn
     AP_WEAVE,            // Sine wave jinking (S-turns)
     AP_EVASIVE,          // Break turn when threat behind
-    AP_RANDOM,        // Random mode selection at reset
+    AP_RANDOM,           // Random mode selection at reset
+
+    // AutoAce tactical modes (used by autoace.h)
+    AP_PURSUIT_LEAD,     // Nose ahead of target (gun attack)
+    AP_PURSUIT_LAG,      // Nose behind target (position/close)
+    AP_PURSUIT_PURE,     // Nose at target (missile/intercept)
+    AP_HIGH_YOYO,        // Climb to bleed closure, dive back
+    AP_LOW_YOYO,         // Dive to gain closure, pull up
+    AP_SCISSORS,         // Reversing breaks to force overshoot
+    AP_BREAK_TURN,       // Maximum rate defensive turn
+    AP_SPLIT_S,          // Disengage downward (altitude permitting)
+    AP_EXTEND,           // Straight away, full throttle, rebuild energy
+    AP_BARREL_ROLL_ATK,  // Roll around target's flight path
+    AP_GUN_TRACK,        // Lead pursuit with firing solution
+
     AP_COUNT
 } AutopilotMode;
 

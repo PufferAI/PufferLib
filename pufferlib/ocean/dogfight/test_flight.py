@@ -46,6 +46,7 @@ from test_flight_physics import TESTS as PHYSICS_TESTS
 from test_flight_obs_static import TESTS as OBS_STATIC_TESTS
 from test_flight_obs_dynamic import TESTS as OBS_DYNAMIC_TESTS
 from test_flight_energy import TESTS as ENERGY_TESTS
+from test_flight_autoace import TESTS as AUTOACE_TESTS
 
 # Aggregate all tests into a single registry
 TESTS = {
@@ -53,6 +54,7 @@ TESTS = {
     **OBS_STATIC_TESTS,
     **OBS_DYNAMIC_TESTS,
     **ENERGY_TESTS,
+    **AUTOACE_TESTS,
 }
 
 

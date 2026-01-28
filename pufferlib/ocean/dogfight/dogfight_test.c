@@ -438,7 +438,9 @@ void test_force_state_initializes_omega() {
         -9999.0f, -9999.0f, -9999.0f,  // opponent pos (auto)
         -9999.0f, -9999.0f, -9999.0f,  // opponent vel (auto)
         -9999.0f, -9999.0f, -9999.0f, -9999.0f,  // opponent ori (auto)
-        0                         // tick
+        0,                        // tick
+        -1,                       // player cooldown (default)
+        -1                        // opponent cooldown (default)
     );
 
     // omega should be reset to zero
@@ -1658,6 +1660,281 @@ void test_obs_bounds_all_schemes() {
            schemes_tested, total_obs_checked);
 }
 
+// ============================================================================
+// AutoAce Unit Tests (Phase 8)
+// ============================================================================
+
+void test_tactical_state_geometry() {
+    // Test compute_tactical_state() with known geometry
+
+    // Scenario 1: Self directly behind target (perfect 6 o'clock)
+    Plane self = {0};
+    Plane target = {0};
+
+    self.pos = vec3(0, 0, 1000);
+    self.vel = vec3(100, 0, 0);
+    self.ori = quat(1, 0, 0, 0);  // Facing +X
+
+    target.pos = vec3(400, 0, 1000);  // 400m ahead
+    target.vel = vec3(80, 0, 0);      // Flying same direction, slower
+    target.ori = quat(1, 0, 0, 0);    // Facing +X
+
+    TacticalState ts;
+    compute_tactical_state(&self, &target, &ts);
+
+    // Aspect angle should be ~0 (we're behind target)
+    ASSERT_NEAR(ts.aspect_angle, 0.0f, 5.0f);
+
+    // Antenna train should be ~0 (target dead ahead)
+    ASSERT_NEAR(ts.antenna_train, 0.0f, 5.0f);
+
+    // Range should be 400m
+    ASSERT_NEAR(ts.range, 400.0f, 1.0f);
+
+    // Closure rate should be positive (we're faster: 100-80=20 m/s closing)
+    assert(ts.closure_rate > 15.0f && ts.closure_rate < 25.0f);
+
+    // Should be in front
+    assert(ts.target_in_front == true);
+
+    // Scenario 2: Head-on pass
+    target.pos = vec3(400, 0, 1000);
+    target.vel = vec3(-80, 0, 0);  // Flying toward us
+    target.ori = quat_from_axis_angle(vec3(0, 0, 1), PI);  // Facing -X
+
+    compute_tactical_state(&self, &target, &ts);
+
+    // Aspect angle should be ~180 (head-on)
+    ASSERT_NEAR(ts.aspect_angle, 180.0f, 10.0f);
+
+    // Closure rate should be high (100 + 80 = 180 m/s)
+    assert(ts.closure_rate > 150.0f);
+
+    // Scenario 3: Target 90 degrees to our right
+    target.pos = vec3(0, 400, 1000);  // 400m to our right
+    target.vel = vec3(80, 0, 0);      // Flying +X (same as us)
+    target.ori = quat(1, 0, 0, 0);
+
+    compute_tactical_state(&self, &target, &ts);
+
+    // Antenna train should be ~90 degrees (target to our side)
+    ASSERT_NEAR(ts.antenna_train, 90.0f, 10.0f);
+
+    printf("test_tactical_state_geometry PASS\n");
+}
+
+void test_engagement_classifier() {
+    TacticalState ts;
+
+    // WEAPONS: in gun envelope
+    memset(&ts, 0, sizeof(ts));
+    ts.range = 300.0f;
+    ts.antenna_train = 2.0f;  // On target
+    ts.in_gun_envelope = true;
+    ts.aspect_angle = 10.0f;
+    ts.closure_rate = 20.0f;
+    assert(classify_engagement(&ts) == ENGAGE_WEAPONS);
+
+    // OFFENSIVE: behind target with advantage
+    memset(&ts, 0, sizeof(ts));
+    ts.range = 600.0f;
+    ts.antenna_train = 20.0f;
+    ts.aspect_angle = 30.0f;  // Behind target
+    ts.closure_rate = 15.0f;
+    ts.energy_delta = 0.0f;
+    ts.own_speed = 100.0f;
+    ts.target_in_front = true;
+    ts.in_gun_envelope = false;
+    assert(classify_engagement(&ts) == ENGAGE_OFFENSIVE);
+
+    // DEFENSIVE: target behind us
+    memset(&ts, 0, sizeof(ts));
+    ts.range = 400.0f;
+    ts.antenna_train = 150.0f;  // Target behind us
+    ts.aspect_angle = 160.0f;
+    ts.closure_rate = 30.0f;
+    ts.energy_delta = 0.0f;
+    ts.own_speed = 100.0f;
+    ts.closing = true;
+    ts.in_gun_envelope = false;
+    assert(classify_engagement(&ts) == ENGAGE_DEFENSIVE);
+
+    // EXTEND: low on energy
+    memset(&ts, 0, sizeof(ts));
+    ts.range = 600.0f;
+    ts.antenna_train = 50.0f;
+    ts.aspect_angle = 90.0f;
+    ts.closure_rate = 0.0f;
+    ts.energy_delta = -6000.0f;  // Big energy deficit
+    ts.own_speed = 55.0f;        // Slow
+    ts.in_gun_envelope = false;
+    assert(classify_engagement(&ts) == ENGAGE_EXTEND);
+
+    // NEUTRAL: neither clear advantage
+    memset(&ts, 0, sizeof(ts));
+    ts.range = 600.0f;
+    ts.antenna_train = 60.0f;
+    ts.aspect_angle = 100.0f;  // Neither behind
+    ts.closure_rate = 5.0f;
+    ts.energy_delta = 0.0f;
+    ts.own_speed = 100.0f;
+    ts.in_gun_envelope = false;
+    ts.target_in_front = true;
+    assert(classify_engagement(&ts) == ENGAGE_NEUTRAL);
+
+    printf("test_engagement_classifier PASS\n");
+}
+
+void test_lead_computation() {
+    // Test that lead point is correctly computed
+
+    Plane self = {0};
+    Plane target = {0};
+
+    // Self stationary, target moving perpendicular
+    self.pos = vec3(0, 0, 1000);
+    self.vel = vec3(0, 0, 0);
+    self.ori = quat(1, 0, 0, 0);
+
+    target.pos = vec3(500, 0, 1000);  // 500m ahead
+    target.vel = vec3(0, 100, 0);      // Moving sideways at 100 m/s
+    target.ori = quat_from_axis_angle(vec3(0, 0, 1), PI/2);
+
+    TacticalState ts;
+    compute_tactical_state(&self, &target, &ts);
+
+    // Bullet TOF = 500m / 850 m/s = ~0.59s
+    // Target moves 0.59 * 100 = 59m sideways
+    // Lead point should be at (500, 59, 1000)
+    float expected_y = 500.0f / AUTOACE_BULLET_SPEED * 100.0f;
+
+    ASSERT_NEAR(ts.lead_pos.x, 500.0f, 1.0f);
+    ASSERT_NEAR(ts.lead_pos.y, expected_y, 5.0f);  // ~59m
+    ASSERT_NEAR(ts.lead_pos.z, 1000.0f, 1.0f);
+
+    printf("test_lead_computation PASS\n");
+}
+
+void test_autoace_init() {
+    AutoAceState ace;
+    autoace_init(&ace);
+
+    assert(ace.mode_timer == 0);
+    assert(ace.maneuver_phase == 0);
+    assert(ace.scissors_direction == 0);
+    assert(ace.shots_fired == 0);
+    assert(ace.hits == 0);
+
+    printf("test_autoace_init PASS\n");
+}
+
+void test_autoace_step_produces_actions() {
+    // Test that autoace_step produces reasonable actions
+
+    AutopilotState ap;
+    AutoAceState ace;
+    autopilot_init(&ap);
+    autoace_init(&ace);
+
+    Plane self = {0};
+    Plane target = {0};
+
+    // Self behind target (offensive position)
+    self.pos = vec3(0, 0, 1000);
+    self.vel = vec3(100, 0, 0);
+    self.ori = quat(1, 0, 0, 0);
+    self.throttle = 0.8f;
+
+    target.pos = vec3(400, 30, 1000);  // Ahead and slightly offset
+    target.vel = vec3(80, 0, 0);
+    target.ori = quat(1, 0, 0, 0);
+
+    float actions[5];
+    autoace_step(&ap, &ace, &self, &target, actions, 0.02f);
+
+    // Actions should be in valid ranges
+    assert(actions[0] >= -1.0f && actions[0] <= 1.0f);  // throttle
+    assert(actions[1] >= -1.0f && actions[1] <= 1.0f);  // elevator
+    assert(actions[2] >= -1.0f && actions[2] <= 1.0f);  // ailerons
+    assert(actions[3] >= -1.0f && actions[3] <= 1.0f);  // rudder
+    assert(actions[4] >= -1.0f && actions[4] <= 1.0f);  // trigger
+
+    // In offensive position, should be in pursuit mode
+    assert(ap.mode == AP_PURSUIT_LAG || ap.mode == AP_PURSUIT_LEAD ||
+           ap.mode == AP_GUN_TRACK || ap.mode == AP_HIGH_YOYO);
+
+    printf("test_autoace_step_produces_actions PASS\n");
+}
+
+void test_autoace_defensive_response() {
+    // Test that AutoAce recognizes defensive situation
+
+    AutopilotState ap;
+    AutoAceState ace;
+    autopilot_init(&ap);
+    autoace_init(&ace);
+
+    Plane self = {0};
+    Plane target = {0};
+
+    // Target BEHIND self (defensive position)
+    self.pos = vec3(400, 0, 1000);  // Self ahead
+    self.vel = vec3(80, 0, 0);
+    self.ori = quat(1, 0, 0, 0);
+    self.throttle = 0.8f;
+
+    target.pos = vec3(0, 0, 1000);   // Target behind
+    target.vel = vec3(100, 0, 0);    // Target faster and closing
+    target.ori = quat(1, 0, 0, 0);
+
+    float actions[5];
+
+    // Run a few steps to let mode settle
+    for (int i = 0; i < 5; i++) {
+        autoace_step(&ap, &ace, &self, &target, actions, 0.02f);
+    }
+
+    // Should recognize defensive situation
+    assert(ace.engagement == ENGAGE_DEFENSIVE ||
+           ap.mode == AP_BREAK_TURN ||
+           ap.mode == AP_SCISSORS ||
+           ap.mode == AP_EXTEND);
+
+    printf("test_autoace_defensive_response PASS\n");
+}
+
+void test_autoace_fires_when_on_target() {
+    // Test that AutoAce fires when in gun solution
+
+    AutopilotState ap;
+    AutoAceState ace;
+    autopilot_init(&ap);
+    autoace_init(&ace);
+
+    Plane self = {0};
+    Plane target = {0};
+
+    // Perfect gun solution: target dead ahead within range
+    self.pos = vec3(0, 0, 1000);
+    self.vel = vec3(100, 0, 0);
+    self.ori = quat(1, 0, 0, 0);
+    self.fire_cooldown = 0;
+
+    target.pos = vec3(300, 0, 1000);  // 300m ahead, perfectly aligned
+    target.vel = vec3(80, 0, 0);
+    target.ori = quat(1, 0, 0, 0);
+
+    float actions[5];
+    autoace_step(&ap, &ace, &self, &target, actions, 0.02f);
+
+    // Should be in weapons engagement and firing
+    assert(ace.engagement == ENGAGE_WEAPONS);
+    assert(ap.mode == AP_GUN_TRACK);
+    assert(actions[4] > 0.5f);  // Trigger pulled
+
+    printf("test_autoace_fires_when_on_target PASS\n");
+}
+
 int main() {
     printf("Running dogfight tests...\n\n");
 
@@ -1734,6 +2011,15 @@ int main() {
     test_control_moment_signs();
     test_reset_plane_fields();
 
-    printf("\nAll 53 tests PASS\n");
+    // Phase 8: AutoAce tests
+    test_tactical_state_geometry();
+    test_engagement_classifier();
+    test_lead_computation();
+    test_autoace_init();
+    test_autoace_step_produces_actions();
+    test_autoace_defensive_response();
+    test_autoace_fires_when_on_target();
+
+    printf("\nAll 60 tests PASS\n");
     return 0;
 }

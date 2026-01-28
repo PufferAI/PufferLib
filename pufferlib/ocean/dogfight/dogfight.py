@@ -104,7 +104,7 @@ class Dogfight(pufferlib.PufferEnv):
         # total_timesteps is global total, finalize_margin is global margin
         # Per-worker finalize step = (global_total - global_margin) / num_workers
         self._finalize_at_steps = (total_timesteps - finalize_margin) // num_workers
-        print(f'[CURRICULUM] Initialized: finalize_at={self._finalize_at_steps}, mastered_stage={self._mastered_stage}')
+        #print(f'[CURRICULUM] Initialized: finalize_at={self._finalize_at_steps}, mastered_stage={self._mastered_stage}')
 
         # Base stage tracking: performance at int(curriculum_target) only
         self._base_stage_kills = 0.0
@@ -200,7 +200,7 @@ class Dogfight(pufferlib.PufferEnv):
                             mastery_stage = round(self._target_stage)
                             if base_stage_perf >= 0.95 and self._base_stage_eps >= self.min_eval_episodes:
                                 if mastery_stage > self._mastered_stage:
-                                    print(f'[CURRICULUM] MASTERED: stage {mastery_stage} (perf={base_stage_perf:.3f}, eps={self._base_stage_eps:.0f})')
+                                    #print(f'[CURRICULUM] MASTERED: stage {mastery_stage} (perf={base_stage_perf:.3f}, eps={self._base_stage_eps:.0f})')
                                     self._mastered_stage = mastery_stage
                                     # Reset base stage tracking for new level
                                     self._base_stage_kills = 0.0
@@ -214,15 +214,15 @@ class Dogfight(pufferlib.PufferEnv):
                                 new_target = float(self._mastered_stage) + 0.9
 
                             if abs(self._target_stage - new_target) > 0.01:
-                                print(f'[CURRICULUM] TARGET: {self._target_stage:.2f} → {new_target:.2f} (mastered={self._mastered_stage})')
+                                #print(f'[CURRICULUM] TARGET: {self._target_stage:.2f} → {new_target:.2f} (mastered={self._mastered_stage})')
                                 self._target_stage = new_target
                                 self._current_stage = int(self._target_stage)
                                 binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
 
                             # Simple diagnostic print
-                            print(f'[CURRICULUM] step={total_steps} stage={self._target_stage:.2f} '
-                                  f'base={base_stage_perf:.3f}({self._base_stage_eps:.0f}eps) '
-                                  f'mastered={self._mastered_stage}')
+                            #print(f'[CURRICULUM] step={total_steps} stage={self._target_stage:.2f} '
+                            #      f'base={base_stage_perf:.3f}({self._base_stage_eps:.0f}eps) '
+                            #      f'mastered={self._mastered_stage}')
 
                             # Base stage: decay by 10% each interval (so recent perf matters more)
                             self._base_stage_kills *= 0.9
@@ -247,6 +247,8 @@ class Dogfight(pufferlib.PufferEnv):
         opponent_vel=None,     # (vx, vy, vz) or None for auto (match player)
         opponent_ori=None,     # (w, x, y, z) or None for auto (match player)
         tick=0,
+        player_cooldown=None,  # Fire cooldown ticks for player (None = 0)
+        opponent_cooldown=None, # Fire cooldown ticks for opponent (None = 0)
     ):
         """
         Force exact game state for testing/debugging.
@@ -254,6 +256,7 @@ class Dogfight(pufferlib.PufferEnv):
         Usage:
             env.force_state(player_pos=(-1500, 0, 1000), player_vel=(150, 0, 0))
             env.force_state(player_vel=(80, 0, 0))  # Just change velocity
+            env.force_state(player_cooldown=100, opponent_cooldown=100)  # Disable guns for 2 sec
         """
         # Build kwargs for C binding
         kwargs = {'tick': tick, 'p_throttle': player_throttle}
@@ -281,6 +284,12 @@ class Dogfight(pufferlib.PufferEnv):
         # Opponent orientation (None = auto)
         if opponent_ori is not None:
             kwargs['o_ow'], kwargs['o_ox'], kwargs['o_oy'], kwargs['o_oz'] = opponent_ori
+
+        # Fire cooldowns (None = 0, i.e., guns ready)
+        if player_cooldown is not None:
+            kwargs['p_cooldown'] = player_cooldown
+        if opponent_cooldown is not None:
+            kwargs['o_cooldown'] = opponent_cooldown
 
         # Call C binding with the specific env handle
         binding.env_force_state(self._env_handles[env_idx], **kwargs)
@@ -419,6 +428,41 @@ class Dogfight(pufferlib.PufferEnv):
     def get_curriculum_target(self) -> float:
         """Get current curriculum target (float 0.0-9.0)."""
         return self._target_stage
+
+    def get_autoace_state(self, env_idx=0):
+        """
+        Get AutoAce opponent state and tactical info for behavioral tests.
+
+        Returns dict with keys:
+            # Opponent plane state
+            opp_px, opp_py, opp_pz: Position
+            opp_vx, opp_vy, opp_vz: Velocity
+            opp_fwd_x, opp_fwd_y, opp_fwd_z: Forward vector
+            opp_ow, opp_ox, opp_oy, opp_oz: Orientation quaternion
+
+            # Last AutoAce actions
+            opp_throttle, opp_elevator, opp_aileron, opp_rudder, opp_trigger
+
+            # Tactical state
+            engagement: 0=OFFENSIVE, 1=NEUTRAL, 2=DEFENSIVE, 3=WEAPONS, 4=EXTEND
+            mode: Autopilot mode enum value
+            aspect_angle: Degrees (0=behind target, 180=head-on)
+            antenna_train: Target bearing from nose (0=dead ahead)
+            range: Distance in meters
+            closure_rate: Positive = closing (m/s)
+            in_gun_envelope: Boolean
+        """
+        return binding.env_get_autoace_state(self._env_handles[env_idx])
+
+    def set_camera_follow(self, follow_opponent=False, env_idx=0):
+        """
+        Set which plane the camera follows during rendering.
+
+        Args:
+            follow_opponent: True to follow opponent (AutoAce), False to follow player
+            env_idx: Environment index
+        """
+        binding.env_set_camera_follow(self._env_handles[env_idx], 1 if follow_opponent else 0)
 
 
 def test_performance(timeout=10, atn_cache=1024):

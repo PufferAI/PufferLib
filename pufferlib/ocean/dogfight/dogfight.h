@@ -17,6 +17,7 @@
 
 #include "flightlib.h"
 #include "autopilot.h"
+#include "autoace.h"
 
 typedef enum {
     OBS_MOMENTUM = 0,           // BASELINE: body-frame vel + omega + AoA + energy (15 obs)
@@ -54,7 +55,8 @@ typedef enum {
     CURRICULUM_HARD_MANEUVERING,     // Stage 17: 60° turns + weave patterns
     CURRICULUM_CROSSING,             // Stage 18: 45 degree deflection shots
     CURRICULUM_EVASIVE,              // Stage 19: Reactive evasion (hardest)
-    CURRICULUM_COUNT                 // = 20
+    CURRICULUM_AUTOACE,              // Stage 20: Full AutoAce opponent (two-way combat)
+    CURRICULUM_COUNT                 // = 21
 } CurriculumStage;
 
 // Forward declarations for stage spawn functions
@@ -90,6 +92,7 @@ static void spawn_medium_turns(struct Dogfight *env, Vec3 player_pos, Vec3 playe
 static void spawn_hard_maneuvering(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
 static void spawn_crossing(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
 static void spawn_evasive(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
+static void spawn_autoace(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
 
 // Stage configuration table - single source of truth for all stage metadata
 // Updated 2026-01-25 to split SIDE_CHASE into 3 stages (SIDE_NEAR, SIDE_MID, SIDE_FAR)
@@ -118,6 +121,7 @@ static const StageConfig STAGES[CURRICULUM_COUNT] = {
     {17, spawn_hard_maneuvering, "360 deg, 60 deg banks + weave",      0.90f,  4000,      0,      360,    60},
     {18, spawn_crossing,         "45 deg deflection shots",            0.95f,  4000,      45,     45,     0},
     {19, spawn_evasive,          "Reactive break turns",               1.00f,  4000,      0,      360,    60},
+    {20, spawn_autoace,          "AutoAce intelligent opponent",       1.00f,  6000,      0,      360,    0},
 };
 
 // Spawn randomization parameters - stage-dependent ranges for variety
@@ -209,6 +213,7 @@ typedef struct Client {
     float cam_distance;
     float cam_azimuth;
     float cam_elevation;
+    int camera_mode;  // 0 = follow target, 1 = midpoint view
     bool is_dragging;
     float last_mouse_x;
     float last_mouse_y;
@@ -216,6 +221,8 @@ typedef struct Client {
     Model plane_model;
     Texture2D plane_texture;
     bool model_loaded;
+
+    float propeller_angle;  // Current propeller rotation (radians)
 } Client;
 
 typedef struct Dogfight {
@@ -235,6 +242,8 @@ typedef struct Dogfight {
     float cos_gun_cone;     // cosf(gun_cone_angle) - for hit detection
     // Opponent autopilot
     AutopilotState opponent_ap;
+    // AutoAce intelligent opponent (stage 20+)
+    AutoAceState opponent_ace;
     // Observation scheme
     int obs_scheme;
     int obs_size;
@@ -277,6 +286,10 @@ typedef struct Dogfight {
     int env_num;                // Environment index (for filtering debug output)
     // Observation highlighting (for visual debugging)
     unsigned char obs_highlight[25];  // 1 = highlight this observation with red arrow (max scheme is 25 obs)
+    // Last opponent actions (for Python access in tests)
+    float last_opp_actions[5];  // throttle, elevator, aileron, rudder, trigger
+    // Camera control
+    int camera_follow_opponent;  // 0 = follow player (default), 1 = follow opponent
 } Dogfight;
 
 #include "dogfight_observations.h"
@@ -294,6 +307,7 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     env->gun_cone_angle = GUN_CONE_ANGLE;
     env->cos_gun_cone = cosf(env->gun_cone_angle);
     autopilot_init(&env->opponent_ap);
+    autoace_init(&env->opponent_ace);
     // Reward configuration (copy from provided config)
     env->rcfg = *rcfg;
     // Episode tracking
@@ -873,6 +887,38 @@ static void spawn_evasive(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     }
 }
 
+// Stage 20: AUTOACE - Intelligent adversarial opponent (two-way combat)
+static void spawn_autoace(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    // Similar to EVASIVE but with higher altitude range for energy maneuvers
+    // Override player altitude to mid-high (2500-4000m)
+    env->player.pos.z = rndf(2500, 4000);
+    player_pos.z = env->player.pos.z;
+
+    // Spawn opponent in various positions (360 degree, varied distance)
+    float dist = rndf(400, 700);  // Slightly further for AutoAce
+    float theta = rndf(0, 2.0f * M_PI);
+    float phi = rndf(-0.25f, 0.25f);  // ±14 deg elevation
+
+    Vec3 opp_pos = vec3(
+        player_pos.x + dist * cosf(theta) * cosf(phi),
+        player_pos.y + dist * sinf(theta) * cosf(phi),
+        clampf(player_pos.z + dist * sinf(phi), 2000, 4500)
+    );
+
+    float vel_theta = rndf(0, 2.0f * M_PI);
+    float speed = norm3(player_vel);
+    Vec3 opp_vel = vec3(speed * cosf(vel_theta), speed * sinf(vel_theta), 0);
+
+    reset_plane(&env->opponent, opp_pos, opp_vel);
+    env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), vel_theta);
+
+    // AutoAce starts with lag pursuit (will adapt based on situation)
+    env->opponent_ap.mode = AP_PURSUIT_LAG;
+
+    // Initialize AutoAce state
+    autoace_init(&env->opponent_ace);
+}
+
 // Master spawn function: dispatches to stage-specific spawner
 void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     CurriculumStage new_stage = get_curriculum_stage(env);
@@ -1058,9 +1104,39 @@ void c_step(Dogfight *env) {
     // Opponent uses autopilot (if not AP_STRAIGHT, uses full physics)
     if (env->opponent_ap.mode != AP_STRAIGHT) {
         float opp_actions[5];
-        env->opponent_ap.threat_pos = env->player.pos;  // For AP_EVASIVE mode
-        autopilot_step(&env->opponent_ap, &env->opponent, opp_actions, DT);
+
+        // Use AutoAce for stage 20+ (intelligent adversarial opponent)
+        if (env->stage >= CURRICULUM_AUTOACE) {
+            autoace_step(&env->opponent_ap, &env->opponent_ace,
+                        &env->opponent, &env->player, opp_actions, DT);
+        } else {
+            // Legacy autopilot for curriculum stages 0-19
+            env->opponent_ap.threat_pos = env->player.pos;  // For AP_EVASIVE mode
+            autopilot_step(&env->opponent_ap, &env->opponent, opp_actions, DT);
+        }
+
+        // Store opponent actions for Python access (testing)
+        for (int i = 0; i < 5; i++) {
+            env->last_opp_actions[i] = opp_actions[i];
+        }
+
         step_plane_with_physics(&env->opponent, opp_actions, DT);
+
+        // Check if AutoAce shot the player (two-way combat at stage 20+)
+        if (env->stage >= CURRICULUM_AUTOACE && opp_actions[4] > 0.5f) {
+            if (check_hit(&env->opponent, &env->player, env->cos_gun_cone)) {
+                // Player was shot down by AutoAce!
+                if (DEBUG >= 1) {
+                    printf("[AUTOACE] Player shot down by AutoAce!\n");
+                }
+                env->death_reason = DEATH_KILL;  // Reuse KILL (opponent's kill)
+                env->rewards[0] = -1.0f;  // Penalty for dying
+                env->terminals[0] = 1;
+                add_log(env);
+                c_reset(env);
+                return;
+            }
+        }
     } else {
         step_plane(&env->opponent, DT);
     }
@@ -1102,8 +1178,9 @@ void c_step(Dogfight *env) {
     float reward = 0.0f;
 
     // Decrement fire cooldowns
+    // Note: AutoAce (stage 20+) handles opponent cooldown internally in autoace.h
     if (p->fire_cooldown > 0) p->fire_cooldown--;
-    if (o->fire_cooldown > 0) o->fire_cooldown--;
+    if (env->stage < CURRICULUM_AUTOACE && o->fire_cooldown > 0) o->fire_cooldown--;
 
     // Player fires: action[4] > 0.5 and cooldown ready
     if (DEBUG >= 10) printf("trigger=%.3f, cooldown=%d\n", env->actions[4], p->fire_cooldown);
@@ -1280,7 +1357,9 @@ void force_state(
     float o_ox,        // = -9999.0f (auto), opponent ori X
     float o_oy,        // = -9999.0f (auto), opponent ori Y
     float o_oz,        // = -9999.0f (auto), opponent ori Z
-    int tick           // = 0, environment tick
+    int tick,          // = 0, environment tick
+    int p_cooldown,    // = -1 (no change), player fire cooldown ticks
+    int o_cooldown     // = -1 (no change), opponent fire cooldown ticks
 ) {
     env->player.pos = vec3(p_px, p_py, p_pz);
     env->player.vel = vec3(p_vx, p_vy, p_vz);
@@ -1289,7 +1368,7 @@ void force_state(
     env->player.ori = quat(p_ow, p_ox, p_oy, p_oz);
     quat_normalize(&env->player.ori);
     env->player.throttle = p_throttle;
-    env->player.fire_cooldown = 0;
+    env->player.fire_cooldown = (p_cooldown >= 0) ? p_cooldown : 0;
     env->player.yaw_from_rudder = 0.0f;
 
     // Opponent position: auto = 400m ahead of player
@@ -1314,7 +1393,7 @@ void force_state(
         env->opponent.ori = quat(o_ow, o_ox, o_oy, o_oz);
         quat_normalize(&env->opponent.ori);
     }
-    env->opponent.fire_cooldown = 0;
+    env->opponent.fire_cooldown = (o_cooldown >= 0) ? o_cooldown : 0;
     env->opponent.yaw_from_rudder = 0.0f;
     env->opponent.prev_vel = env->opponent.vel;  // Initialize to current (no accel)
     env->opponent.omega = vec3(0, 0, 0);  // No angular velocity

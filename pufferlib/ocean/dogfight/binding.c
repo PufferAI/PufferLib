@@ -19,6 +19,8 @@ static PyObject* vec_set_curriculum_target(PyObject* self, PyObject* args);
 static PyObject* env_get_autopilot_mode(PyObject* self, PyObject* args);
 static PyObject* env_get_state(PyObject* self, PyObject* args);
 static PyObject* env_set_obs_highlight(PyObject* self, PyObject* args);
+static PyObject* env_get_autoace_state(PyObject* self, PyObject* args);
+static PyObject* env_set_camera_follow(PyObject* self, PyObject* args);
 
 // Register custom methods before including the template
 #define MY_METHODS \
@@ -30,7 +32,9 @@ static PyObject* env_set_obs_highlight(PyObject* self, PyObject* args);
     {"vec_set_curriculum_target", (PyCFunction)vec_set_curriculum_target, METH_VARARGS, "Set curriculum target (float) for all envs"}, \
     {"env_get_autopilot_mode", (PyCFunction)env_get_autopilot_mode, METH_VARARGS, "Get current autopilot mode"}, \
     {"env_get_state", (PyCFunction)env_get_state, METH_VARARGS, "Get raw player state"}, \
-    {"env_set_obs_highlight", (PyCFunction)env_set_obs_highlight, METH_VARARGS, "Set observation indices to highlight with red arrows"}
+    {"env_set_obs_highlight", (PyCFunction)env_set_obs_highlight, METH_VARARGS, "Set observation indices to highlight with red arrows"}, \
+    {"env_get_autoace_state", (PyCFunction)env_get_autoace_state, METH_VARARGS, "Get AutoAce opponent state and tactical info"}, \
+    {"env_set_camera_follow", (PyCFunction)env_set_camera_follow, METH_VARARGS, "Set camera to follow player (0) or opponent (1)"}
 
 // Helper to get float from kwargs with default (before env_binding.h since my_init uses it)
 static float get_float(PyObject *kwargs, const char *key, float default_val) {
@@ -143,6 +147,10 @@ static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwarg
     // Environment tick
     int tick = get_int(kwargs, "tick", 0);
 
+    // Fire cooldowns (optional, -1 = use default of 0)
+    int p_cooldown = get_int(kwargs, "p_cooldown", -1);
+    int o_cooldown = get_int(kwargs, "o_cooldown", -1);
+
     // Call the C function
     force_state(env,
         p_px, p_py, p_pz,
@@ -152,7 +160,9 @@ static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwarg
         o_px, o_py, o_pz,
         o_vx, o_vy, o_vz,
         o_ow, o_ox, o_oy, o_oz,
-        tick
+        tick,
+        p_cooldown,
+        o_cooldown
     );
 
     Py_RETURN_NONE;
@@ -382,5 +392,81 @@ static PyObject* env_set_obs_highlight(PyObject* self, PyObject* args) {
         }
     }
 
+    Py_RETURN_NONE;
+}
+
+// Get AutoAce opponent state and tactical info for behavioral tests
+static PyObject* env_get_autoace_state(PyObject* self, PyObject* args) {
+    Env* env = unpack_env(args);
+    if (!env) return NULL;
+
+    Plane* opp = &env->opponent;
+    Vec3 opp_fwd = quat_rotate(opp->ori, vec3(1, 0, 0));
+    Vec3 opp_up = quat_rotate(opp->ori, vec3(0, 0, 1));
+
+    // Compute bank angle (positive = right wing down)
+    // Bank = angle between plane's up and world up, signed by up.y
+    // Match sign convention from get_current_bank() in autoace.h:
+    // positive when right wing down (up.y < 0)
+    float opp_bank = acosf(fminf(fmaxf(opp_up.z, -1.0f), 1.0f));
+    if (opp_up.y >= 0) opp_bank = -opp_bank;  // Negative when left wing down
+
+    PyObject* dict = PyDict_New();
+    if (!dict) return NULL;
+
+    // Opponent plane state
+    PyDict_SetItemString(dict, "opp_px", PyFloat_FromDouble(opp->pos.x));
+    PyDict_SetItemString(dict, "opp_py", PyFloat_FromDouble(opp->pos.y));
+    PyDict_SetItemString(dict, "opp_pz", PyFloat_FromDouble(opp->pos.z));
+    PyDict_SetItemString(dict, "opp_vx", PyFloat_FromDouble(opp->vel.x));
+    PyDict_SetItemString(dict, "opp_vy", PyFloat_FromDouble(opp->vel.y));
+    PyDict_SetItemString(dict, "opp_vz", PyFloat_FromDouble(opp->vel.z));
+    PyDict_SetItemString(dict, "opp_fwd_x", PyFloat_FromDouble(opp_fwd.x));
+    PyDict_SetItemString(dict, "opp_fwd_y", PyFloat_FromDouble(opp_fwd.y));
+    PyDict_SetItemString(dict, "opp_fwd_z", PyFloat_FromDouble(opp_fwd.z));
+    PyDict_SetItemString(dict, "opp_bank", PyFloat_FromDouble(opp_bank));
+
+    // Opponent orientation quaternion
+    PyDict_SetItemString(dict, "opp_ow", PyFloat_FromDouble(opp->ori.w));
+    PyDict_SetItemString(dict, "opp_ox", PyFloat_FromDouble(opp->ori.x));
+    PyDict_SetItemString(dict, "opp_oy", PyFloat_FromDouble(opp->ori.y));
+    PyDict_SetItemString(dict, "opp_oz", PyFloat_FromDouble(opp->ori.z));
+
+    // Last AutoAce actions (from most recent step)
+    PyDict_SetItemString(dict, "opp_throttle", PyFloat_FromDouble(env->last_opp_actions[0]));
+    PyDict_SetItemString(dict, "opp_elevator", PyFloat_FromDouble(env->last_opp_actions[1]));
+    PyDict_SetItemString(dict, "opp_aileron", PyFloat_FromDouble(env->last_opp_actions[2]));
+    PyDict_SetItemString(dict, "opp_rudder", PyFloat_FromDouble(env->last_opp_actions[3]));
+    PyDict_SetItemString(dict, "opp_trigger", PyFloat_FromDouble(env->last_opp_actions[4]));
+
+    // Tactical state (from AutoAce)
+    TacticalState* ts = &env->opponent_ace.tactical;
+    PyDict_SetItemString(dict, "engagement", PyLong_FromLong(env->opponent_ace.engagement));
+    PyDict_SetItemString(dict, "mode", PyLong_FromLong(env->opponent_ap.mode));
+    PyDict_SetItemString(dict, "aspect_angle", PyFloat_FromDouble(ts->aspect_angle));
+    PyDict_SetItemString(dict, "antenna_train", PyFloat_FromDouble(ts->antenna_train));
+    PyDict_SetItemString(dict, "range", PyFloat_FromDouble(ts->range));
+    PyDict_SetItemString(dict, "closure_rate", PyFloat_FromDouble(ts->closure_rate));
+    PyDict_SetItemString(dict, "in_gun_envelope", PyBool_FromLong(ts->in_gun_envelope));
+
+    return dict;
+}
+
+// Set camera to follow player (0) or opponent (1)
+static PyObject* env_set_camera_follow(PyObject* self, PyObject* args) {
+    PyObject* env_arg;
+    int follow_opponent;
+
+    if (!PyArg_ParseTuple(args, "Oi", &env_arg, &follow_opponent)) {
+        return NULL;
+    }
+
+    Env* env = (Env*)PyLong_AsVoidPtr(env_arg);
+    if (!env) {
+        PyErr_SetString(PyExc_TypeError, "Invalid env handle");
+        return NULL;
+    }
+
+    env->camera_follow_opponent = follow_opponent;
     Py_RETURN_NONE;
 }
