@@ -15,7 +15,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Allow DEBUG to be defined before including this header
 #ifndef DEBUG
 #define DEBUG 0
 #endif
@@ -24,35 +23,16 @@
 #define PI 3.14159265358979f
 #endif
 
-// ============================================================================
-// DEBUG CONTROL
-// ============================================================================
-// Set DEBUG_REALISTIC to enable debug output:
-//   0 = off
-//   1 = high-level per-step summary
-//   2 = forces and moments
-//   3 = all intermediate calculations
-//   5 = RK4 stages
-//  10 = everything (very verbose)
-
+// Debug control (0=off, 1+=increasingly verbose)
 #ifndef DEBUG_REALISTIC
 #define DEBUG_REALISTIC 0
 #endif
 
-// Step counter for debug output (to limit spam)
 static int _realistic_step_count = 0;
-static int _realistic_rk4_stage = 0;  // Which RK4 stage (0=k1, 1=k2, 2=k3, 3=k4)
-
-// ============================================================================
-// MATH TYPES
-// ============================================================================
+static int _realistic_rk4_stage = 0;
 
 typedef struct { float x, y, z; } Vec3;
 typedef struct { float w, x, y, z; } Quat;
-
-// ============================================================================
-// MATH UTILITIES
-// ============================================================================
 
 static inline float clampf(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
@@ -61,8 +41,6 @@ static inline float clampf(float v, float lo, float hi) {
 static inline float rndf(float a, float b) {
     return a + ((float)rand() / (float)RAND_MAX) * (b - a);
 }
-
-// --- Vec3 operations ---
 
 static inline Vec3 vec3(float x, float y, float z) { return (Vec3){x, y, z}; }
 static inline Vec3 add3(Vec3 a, Vec3 b) { return (Vec3){a.x + b.x, a.y + b.y, a.z + b.z}; }
@@ -84,8 +62,6 @@ static inline Vec3 cross3(Vec3 a, Vec3 b) {
         a.x * b.y - a.y * b.x
     );
 }
-
-// --- Quaternion operations ---
 
 static inline Quat quat(float w, float x, float y, float z) { return (Quat){w, x, y, z}; }
 
@@ -128,91 +104,53 @@ static inline Quat quat_from_axis_angle(Vec3 axis, float angle) {
     return (Quat){cosf(half), axis.x * s, axis.y * s, axis.z * s};
 }
 
-// ============================================================================
-// AIRCRAFT PARAMETERS - P-51D Mustang Reference
-// ============================================================================
-// Based on P51d_REFERENCE_DATA.md - validated against historical data
-// Test condition: 9,000 lb (4,082 kg) combat weight, sea level ISA
-//
-// THEORETICAL PERFORMANCE (P-51D targets):
-//   Max speed (SL, Military): 355 mph (159 m/s)
-//   Max speed (SL, WEP):      368 mph (164 m/s)
-//   Stall speed (clean):      100 mph (45 m/s)
-//   ROC (SL, Military):       3,030 ft/min (15.4 m/s)
-//
-// LIFT MODEL:
-//   C_L = C_L_alpha * (alpha + incidence - alpha_zero)
-//   The P-51D has a cambered airfoil (NAA 45-100) with alpha_zero = -1.2°
-//   Wing incidence is +1.5° relative to fuselage datum
-//   At 0° body pitch: effective AOA = 1.5° - (-1.2°) = 2.7°, C_L ~ 0.26
-//
-// DRAG POLAR: Cd = Cd0 + K * Cl^2
-//   - Cd0 = 0.0163 (P-51D published value, very clean laminar flow wing)
-//   - K = 0.072 = 1/(pi * e * AR) where e=0.75, AR=5.86
-// ============================================================================
+// Aircraft parameters - P-51D Mustang (see P51d_REFERENCE_DATA.md)
 
-#define MASS 4082.0f           // kg (P-51D combat weight: 9,000 lb)
-#define WING_AREA 21.65f       // m^2 (P-51D: 233 ft^2)
-#define WINGSPAN 11.28f        // m (P-51D: 37 ft)
-#define CHORD 2.02f            // m (MAC - mean aerodynamic chord)
+#define MASS 4082.0f           // kg
+#define WING_AREA 21.65f       // m^2
+#define WINGSPAN 11.28f        // m
+#define CHORD 2.02f            // m
 
-// Moments of inertia (estimated for P-51D, kg⋅m²)
-// Fighter aircraft: Iyy >> Ixx ≈ Izz
-#define IXX 6500.0f    // Roll inertia (wings not very long)
-#define IYY 22000.0f   // Pitch inertia (long fuselage, largest)
-#define IZZ 27000.0f   // Yaw inertia (fuselage + vertical tail)
+#define IXX 6500.0f    // Roll inertia
+#define IYY 22000.0f   // Pitch inertia
+#define IZZ 27000.0f   // Yaw inertia
 
-// Aerodynamic coefficients
-#define C_D0 0.0163f           // parasitic drag coefficient (P-51D laminar flow)
-#define K 0.072f               // induced drag factor: 1/(pi*0.75*5.86)
-#define K_SIDESLIP 0.7f        // sideslip drag factor (JSBSim: 0.05 CD at 15 deg)
-#define C_L_MAX 1.48f          // max lift coefficient before stall (P-51D clean)
-#define C_L_ALPHA 5.56f        // lift curve slope (P-51D: 0.097/deg = 5.56/rad)
-#define ALPHA_ZERO -0.021f     // zero-lift angle (rad), -1.2° for cambered airfoil
-#define WING_INCIDENCE 0.026f  // wing incidence angle (rad), +1.5° (P-51D)
+#define C_D0 0.0163f
+#define K 0.072f
+#define K_SIDESLIP 0.7f
+#define C_L_MAX 1.48f
+#define C_L_ALPHA 5.56f
+#define ALPHA_ZERO -0.021f
+#define WING_INCIDENCE 0.026f
 
-// Propulsion
-#define ENGINE_POWER 1112000.0f // watts (P-51D Military: 1,490 hp)
-#define ETA_PROP 0.80f         // propeller efficiency (P-51D cruise: 0.80-0.85)
+#define ENGINE_POWER 1112000.0f // watts
+#define ETA_PROP 0.80f
 
-// Environment
 #define GRAVITY 9.81f          // m/s^2
-#define RHO 1.225f             // air density kg/m^3 (sea level ISA)
+#define RHO 1.225f             // kg/m^3
 
-// G-limits
-#define G_LIMIT_POS 6.0f       // max positive G (pulling up) - pilot limit
-#define G_LIMIT_NEG 1.5f       // max negative G (pushing over) - blood to head is painful
+#define G_LIMIT_POS 6.0f
+#define G_LIMIT_NEG 1.5f
 
-// Inverse constants for faster computation (multiply instead of divide)
 #define INV_MASS     0.000245f   // 1/4082
 #define INV_GRAVITY  0.10197f    // 1/9.81
 #define RAD_TO_DEG   57.2957795f // 180/PI
 
-// Rate limits
 #define MAX_PITCH_RATE 2.5f    // rad/s
 #define MAX_ROLL_RATE 3.0f     // rad/s
-#define MAX_YAW_RATE 0.50f     // rad/s (~29 deg/s command, realistic ~7 deg/s achieved)
-
-// ============================================================================
-// PLANE STRUCT - Flight object state
-// ============================================================================
+#define MAX_YAW_RATE 0.50f     // rad/s
 
 typedef struct {
     Vec3 pos;
     Vec3 vel;
-    Vec3 prev_vel;      // Previous velocity for acceleration calculation
-    Vec3 omega;         // Angular velocity in body frame (for momentum physics)
+    Vec3 prev_vel;
+    Vec3 omega;
     Quat ori;
     float throttle;
-    float g_force;      // Current G-loading (for reward calculation)
-    float yaw_from_rudder;  // Accumulated yaw from rudder (for damping)
-    int fire_cooldown;  // Ticks until can fire again (0 = ready)
+    float g_force;
+    float yaw_from_rudder;
+    int fire_cooldown;
 } Plane;
-
-// ============================================================================
-// SIMPLE OPPONENT PHYSICS - used for straight-flying opponents
-// ============================================================================
-// Opponent doesn't need full physics - just forward motion
 
 static inline void step_plane(Plane *p, float dt) {
     p->prev_vel = p->vel;
@@ -229,15 +167,6 @@ static inline void step_plane(Plane *p, float dt) {
     if (DEBUG >= 10) printf("target_fwd=(%.2f, %.2f, %.2f)\n", forward.x, forward.y, forward.z);
 }
 
-// ============================================================================
-// STABILITY DERIVATIVES (body-axis, per radian)
-// ============================================================================
-// These create aerodynamic moments proportional to angles and rates
-
-// Static stability (moment vs angle)
-// CM_0: Pitch trim offset. Negative counters nose-up from wing incidence/lift.
-// With WING_INCIDENCE=+1.5° and cambered airfoil, lift creates nose-up moment.
-// Tuning: 0.025f->2.26G, -0.03f->0.16G. Targeting ~1.0G, linear interpolation suggests -0.005f.
 #define CM_0 -0.005f        // Pitch trim offset (fine-tuned for ~1.0G level flight)
 #define CM_ALPHA -1.2f      // Pitch stability (negative = stable, nose-up creates nose-down moment)
 #define CL_BETA -0.08f      // Dihedral effect (negative = stable, sideslip creates restoring roll)
@@ -249,7 +178,6 @@ static inline void step_plane(Plane *p, float dt) {
 #define CN_R -0.15f         // Yaw damping (opposes yaw rate)
 
 // Control derivatives (per radian deflection)
-// Tuned for P-51D target performance (see test results)
 #define CM_DELTA_E -0.5f    // Elevator: negative = nose UP with positive (back stick) deflection
 #define CL_DELTA_A 0.20f    // Aileron: positive = roll RIGHT with positive deflection
                             // Tuning: 0.04f->19°, 0.15f->70°, need 90°, try 0.20f
@@ -265,22 +193,13 @@ static inline void step_plane(Plane *p, float dt) {
 #define MAX_AILERON_DEFLECTION 0.35f    // ±20°
 #define MAX_RUDDER_DEFLECTION 0.35f     // ±20°
 
-// ============================================================================
-// STATE DERIVATIVE STRUCT (for RK4)
-// ============================================================================
-
 typedef struct {
-    Vec3 vel;       // d(pos)/dt = velocity
-    Vec3 v_dot;     // d(vel)/dt = acceleration
-    Quat q_dot;     // d(quat)/dt = quaternion rate
-    Vec3 w_dot;     // d(omega)/dt = angular acceleration
+    Vec3 vel;
+    Vec3 v_dot;
+    Quat q_dot;
+    Vec3 w_dot;
 } StateDerivative;
 
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-// Compute angle of attack from state
 static inline float compute_aoa(Plane* p) {
     Vec3 forward = quat_rotate(p->ori, vec3(1, 0, 0));
     Vec3 up = quat_rotate(p->ori, vec3(0, 0, 1));
@@ -314,7 +233,6 @@ static inline float compute_aoa(Plane* p) {
     return alpha * sign;
 }
 
-// Compute sideslip angle from state
 static inline float compute_sideslip(Plane* p) {
     Vec3 right = quat_rotate(p->ori, vec3(0, 1, 0));
 
@@ -336,7 +254,6 @@ static inline float compute_sideslip(Plane* p) {
     return beta;
 }
 
-// Compute lift direction (perpendicular to velocity, in lift plane)
 static inline Vec3 compute_lift_direction(Vec3 vel_norm, Vec3 right, Vec3 body_up) {
     Vec3 lift_dir = cross3(vel_norm, right);
     float mag = norm3(lift_dir);
@@ -359,7 +276,6 @@ static inline Vec3 compute_lift_direction(Vec3 vel_norm, Vec3 right, Vec3 body_u
     return (Vec3){0, 0, 1};  // Fallback to world-frame up (lift perpendicular to ground)
 }
 
-// Compute thrust from power model
 static inline float compute_thrust(float throttle, float V) {
     float P_avail = ENGINE_POWER * throttle;
     float T_dynamic = (P_avail * ETA_PROP) / V;   // Thrust from power equation
@@ -402,11 +318,6 @@ static inline void step_temp(Plane* state, StateDerivative* d, float dt, Plane* 
     }
 }
 
-// ============================================================================
-// CORE PHYSICS: compute_derivatives()
-// ============================================================================
-// This is called 4 times per RK4 step. Computes all state derivatives.
-
 static inline void compute_derivatives(Plane* state, float* actions, float dt, StateDerivative* deriv) {
 
     if (DEBUG_REALISTIC >= 5) {
@@ -414,9 +325,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
         printf("\n  === COMPUTE_DERIVATIVES (RK4 stage %s) ===\n", stage_names[_realistic_rk4_stage]);
     }
 
-    // ========================================================================
-    // 1. Extract state
-    // ========================================================================
     float V = norm3(state->vel);
     if (V < 1.0f) V = 1.0f;  // Prevent div-by-zero
 
@@ -452,9 +360,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
         printf("  vel_pitch=%.2f deg (%s)\n", vel_pitch, vel_pitch > 0 ? "CLIMBING" : "DESCENDING");
     }
 
-    // ========================================================================
-    // 2. Compute aerodynamic angles
-    // ========================================================================
     if (DEBUG_REALISTIC >= 3 && _realistic_rk4_stage == 0) {
         printf("\n  --- AERODYNAMIC ANGLES ---\n");
     }
@@ -467,9 +372,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
         printf("  beta=%.4f rad = %.2f deg\n", beta, beta * RAD_TO_DEG);
     }
 
-    // ========================================================================
-    // 3. Dynamic pressure
-    // ========================================================================
     float q_bar = 0.5f * RHO * V * V;
 
     if (DEBUG_REALISTIC >= 2 && _realistic_rk4_stage == 0) {
@@ -502,9 +404,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
         printf("  delta_r=%.4f rad = %.2f deg (rudder)\n", delta_r, delta_r * RAD_TO_DEG);
     }
 
-    // ========================================================================
-    // 5. Compute lift coefficient
-    // ========================================================================
     float alpha_effective = alpha + WING_INCIDENCE - ALPHA_ZERO;
     float C_L_raw = C_L_ALPHA * alpha_effective;
     float C_L = clampf(C_L_raw, -C_L_MAX, C_L_MAX);  // Stall limiting
@@ -520,9 +419,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
                (C_L != C_L_raw) ? " (STALL CLAMPED!)" : "");
     }
 
-    // ========================================================================
-    // 6. Compute drag coefficient (drag polar)
-    // ========================================================================
     float C_D0_term = C_D0;
     float induced_term = K * C_L * C_L;
     float sideslip_term = K_SIDESLIP * beta * beta;
@@ -535,9 +431,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
         printf("  L/D ratio = %.2f\n", (C_D > 0.0001f) ? C_L / C_D : 0.0f);
     }
 
-    // ========================================================================
-    // 7. Compute aerodynamic FORCES
-    // ========================================================================
     float L_mag = C_L * q_bar * WING_AREA;
     float D_mag = C_D * q_bar * WING_AREA;
 
@@ -560,9 +453,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
         printf("  F_drag=(%.1f, %.1f, %.1f) N (opposite to vel)\n", F_drag.x, F_drag.y, F_drag.z);
     }
 
-    // ========================================================================
-    // 8. Compute THRUST force
-    // ========================================================================
     if (DEBUG_REALISTIC >= 3 && _realistic_rk4_stage == 0) {
         printf("\n  --- THRUST ---\n");
     }
@@ -574,9 +464,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
                F_thrust.x, F_thrust.y, F_thrust.z);
     }
 
-    // ========================================================================
-    // 9. Gravity (world frame)
-    // ========================================================================
     Vec3 F_gravity = vec3(0, 0, -MASS * GRAVITY);
 
     if (DEBUG_REALISTIC >= 2 && _realistic_rk4_stage == 0) {
@@ -584,9 +471,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
         printf("  F_gravity=(%.1f, %.1f, %.1f) N\n", F_gravity.x, F_gravity.y, F_gravity.z);
     }
 
-    // ========================================================================
-    // 10. Total force → linear acceleration
-    // ========================================================================
     Vec3 F_aero = add3(F_lift, F_drag);
     Vec3 F_aero_thrust = add3(F_aero, F_thrust);
     Vec3 F_total = add3(F_aero_thrust, F_gravity);
@@ -610,9 +494,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
                F_lift.z, F_drag.z, F_thrust.z, F_gravity.z, F_total.z);
     }
 
-    // ========================================================================
-    // 11. Compute aerodynamic MOMENTS (body frame)
-    // ========================================================================
     float p = state->omega.x;  // roll rate
     float q = state->omega.y;  // pitch rate
     float r = state->omega.z;  // yaw rate
@@ -687,7 +568,7 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
     }
 
     // ========================================================================
-    // 12. Angular acceleration (Euler's equations)
+    // Angular acceleration (Euler's equations)
     // ========================================================================
     // τ = I⋅α + ω × (I⋅ω)  →  α = I⁻¹(τ - ω × (I⋅ω))
     // For diagonal inertia tensor, the gyroscopic coupling terms are:
@@ -719,9 +600,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
                deriv->w_dot.y > 0 ? "DOWN" : "UP");
     }
 
-    // ========================================================================
-    // 13. Quaternion kinematics
-    // ========================================================================
     // q_dot = 0.5 * q * [0, ω]  where ω is angular velocity in body frame
     Quat omega_q = {0.0f, state->omega.x, state->omega.y, state->omega.z};
     Quat q_dot = quat_mul(state->ori, omega_q);
@@ -738,9 +616,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
                deriv->q_dot.w, deriv->q_dot.x, deriv->q_dot.y, deriv->q_dot.z);
     }
 
-    // ========================================================================
-    // 14. Position derivative = velocity
-    // ========================================================================
     deriv->vel = state->vel;
 
     if (DEBUG_REALISTIC >= 2 && _realistic_rk4_stage == 0) {
@@ -752,10 +627,6 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
         printf("  w_dot = (%.6f, %.6f, %.6f) rad/s^2\n", deriv->w_dot.x, deriv->w_dot.y, deriv->w_dot.z);
     }
 }
-
-// ============================================================================
-// RK4 INTEGRATION
-// ============================================================================
 
 static inline void rk4_step(Plane* state, float* actions, float dt) {
     StateDerivative k1, k2, k3, k4;
@@ -847,9 +718,6 @@ static inline void rk4_step(Plane* state, float* actions, float dt) {
     }
 }
 
-// ============================================================================
-// MAIN INTERFACE: step_plane_with_physics()
-// ============================================================================
 
 static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     _realistic_step_count++;
@@ -903,12 +771,6 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
         printf("  WARNING: omega.y clamped from %.4f to %.4f\n", old_omega_y, p->omega.y);
     }
 
-    // ========================================================================
-    // G-FORCE CALCULATION
-    // ========================================================================
-    // G-force = aerodynamic acceleration along body-up axis / g
-    // In level flight, lift ≈ weight, so g_force ≈ 1.0
-
     Vec3 dv = sub3(p->vel, p->prev_vel);
     Vec3 accel = mul3(dv, 1.0f / dt);
     Vec3 body_up = quat_rotate(p->ori, vec3(0, 0, 1));
@@ -926,14 +788,6 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
         printf("accel·body_up=%.3f m/s^2 / g=%.3f + 1.0 = %.3f G\n",
                accel_up, accel_up * INV_GRAVITY, p->g_force);
     }
-
-    // ========================================================================
-    // G-LIMIT ENFORCEMENT (clamp velocity change, energy-conserving)
-    // ========================================================================
-    // If G-force exceeds limits, reduce the velocity change to stay within limits.
-    // IMPORTANT: The correction must be perpendicular to velocity to preserve kinetic energy.
-    // If body_up has a component along velocity, applying the full correction would
-    // change speed, violating conservation of energy.
 
     float speed_before_glimit = norm3(p->vel);
 
@@ -987,8 +841,6 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
         }
     }
 
-    // Update yaw_from_rudder for backward compatibility
-    // In momentum physics, this approximates sideslip angle
     p->yaw_from_rudder = compute_sideslip(p);
 
     if (DEBUG_REALISTIC >= 1) {
@@ -1035,18 +887,14 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     }
 }
 
-// ============================================================================
-// RESET FUNCTION
-// ============================================================================
-
 static inline void reset_plane(Plane *p, Vec3 pos, Vec3 vel) {
     p->pos = pos;
     p->vel = vel;
-    p->prev_vel = vel;  // Initialize to current vel (no acceleration at start)
+    p->prev_vel = vel;
     p->omega = vec3(0, 0, 0);
     p->ori = quat(1, 0, 0, 0);
     p->throttle = 0.5f;
-    p->g_force = 1.0f;  // 1G at start (level flight)
+    p->g_force = 1.0f;
     p->yaw_from_rudder = 0.0f;
     p->fire_cooldown = 0;
 

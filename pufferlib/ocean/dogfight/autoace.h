@@ -1,19 +1,3 @@
-/**
- * autoace.h - Intelligent Adversarial Opponent for Dogfight
- *
- * AutoAce uses real air combat tactics, energy management, and predictive
- * decision-making to challenge trained RL agents. Based on:
- *   - Boyd's E-M Theory (energy state determines tactical options)
- *   - BFM Doctrine (lead/lag/pure pursuit, yo-yos, scissors, break turns)
- *   - DARPA AlphaDogfight hierarchical RL concepts
- *
- * Architecture:
- *   1. Tactical State Computation (every frame)
- *   2. Engagement Classifier (OFFENSIVE/NEUTRAL/DEFENSIVE/WEAPONS/EXTEND)
- *   3. Maneuver Selector (state machine with persistence)
- *   4. Maneuver Executor (PID controllers)
- */
-
 #ifndef AUTOACE_H
 #define AUTOACE_H
 
@@ -21,42 +5,27 @@
 #include <stdbool.h>
 #include <string.h>
 
-// Note: autoace.h requires flightlib.h and autopilot.h to be included BEFORE this file
-
-// ============================================================================
-// TACTICAL STATE
-// ============================================================================
-// Computed every frame to assess the engagement geometry and energy state
-
 typedef struct TacticalState {
-    // Geometry (computed from positions and orientations)
     float aspect_angle;      // 0 = behind target, 180 = head-on (degrees)
     float angle_off;         // Track crossing angle - velocity alignment (degrees)
     float antenna_train;     // Target bearing from our nose, 0 = dead ahead (degrees)
     float range;             // Distance in meters
     float closure_rate;      // Positive = closing (m/s)
 
-    // Energy state
     float specific_energy;   // Own Es = 0.5*v^2 + g*h (m^2/s^2)
     float target_energy;     // Target Es
     float energy_delta;      // Own Es - Target Es (positive = advantage)
     float own_speed;         // Current airspeed (m/s)
     float target_speed;      // Target airspeed (m/s)
 
-    // Derived tactical indicators
     float time_to_intercept; // range / closure_rate (seconds, 999 if not closing)
     bool in_gun_envelope;    // range < 500m && antenna_train < 5 deg
     bool target_in_front;    // antenna_train < 90 deg
     bool we_are_faster;      // own_speed > target_speed + 5 m/s
     bool closing;            // closure_rate > 0
 
-    // Target lead point (for gun tracking)
     Vec3 lead_pos;           // Predicted target position at bullet TOF
 } TacticalState;
-
-// ============================================================================
-// ENGAGEMENT STATE CLASSIFIER
-// ============================================================================
 
 typedef enum {
     ENGAGE_OFFENSIVE,    // Behind target, closing, have energy - ATTACK
@@ -65,11 +34,6 @@ typedef enum {
     ENGAGE_WEAPONS,      // In firing solution - TRACK AND SHOOT
     ENGAGE_EXTEND,       // Low energy, need to disengage and rebuild
 } EngagementState;
-
-// ============================================================================
-// AUTOACE STATE (extends AutopilotState)
-// ============================================================================
-// Additional state needed for tactical decision-making
 
 typedef struct AutoAceState {
     // Current engagement assessment
@@ -95,10 +59,6 @@ typedef struct AutoAceState {
     int hits;
 } AutoAceState;
 
-// ============================================================================
-// CONSTANTS
-// ============================================================================
-
 #define AUTOACE_GUN_RANGE 500.0f        // Gun effective range (m)
 #define AUTOACE_BULLET_SPEED 850.0f     // ~WW2 .50 cal muzzle velocity (m/s)
 #define AUTOACE_GUN_CONE 5.0f           // Firing cone half-angle (degrees)
@@ -117,16 +77,11 @@ typedef struct AutoAceState {
 #define AUTOACE_CLOSURE_FAST 50.0f      // Closing too fast (overshoot risk)
 #define AUTOACE_CLOSURE_SLOW -10.0f     // Falling behind
 
-// ============================================================================
-// TACTICAL STATE COMPUTATION
-// ============================================================================
-
 static inline void compute_tactical_state(Plane* self, Plane* target, TacticalState* ts) {
     // === Geometry ===
     Vec3 to_target = sub3(target->pos, self->pos);
     ts->range = norm3(to_target);
 
-    // Avoid division by zero for very close range
     if (ts->range < 1.0f) {
         ts->range = 1.0f;
     }
@@ -163,20 +118,15 @@ static inline void compute_tactical_state(Plane* self, Plane* target, TacticalSt
     }
 
     // Closure rate: positive = closing
-    // This is the rate of change of range (negative range_dot = closing)
     Vec3 rel_vel = sub3(self->vel, target->vel);
     ts->closure_rate = dot3(rel_vel, los);
 
-    // === Energy State ===
     ts->own_speed = self_speed;
     ts->target_speed = tgt_speed;
-
-    // Specific energy: Es = 0.5*v^2 + g*h (kinetic + potential per unit mass)
     ts->specific_energy = 0.5f * ts->own_speed * ts->own_speed + GRAVITY * self->pos.z;
     ts->target_energy = 0.5f * ts->target_speed * ts->target_speed + GRAVITY * target->pos.z;
     ts->energy_delta = ts->specific_energy - ts->target_energy;
 
-    // === Derived Indicators ===
     ts->time_to_intercept = (ts->closure_rate > 1.0f) ?
                             ts->range / ts->closure_rate : 999.0f;
     ts->in_gun_envelope = (ts->range < AUTOACE_GUN_RANGE &&
@@ -185,18 +135,11 @@ static inline void compute_tactical_state(Plane* self, Plane* target, TacticalSt
     ts->we_are_faster = (ts->own_speed > ts->target_speed + AUTOACE_SPEED_FAST_DIFF);
     ts->closing = (ts->closure_rate > 0.0f);
 
-    // === Lead Point Computation ===
-    // Predict where target will be when bullet arrives
     float bullet_tof = ts->range / AUTOACE_BULLET_SPEED;
     ts->lead_pos = add3(target->pos, mul3(target->vel, bullet_tof));
 }
 
-// ============================================================================
-// ENGAGEMENT CLASSIFIER
-// ============================================================================
-
 static inline EngagementState classify_engagement(TacticalState* ts) {
-    // WEAPONS: In gun envelope - shoot!
     if (ts->in_gun_envelope) {
         return ENGAGE_WEAPONS;
     }
@@ -243,36 +186,27 @@ static inline EngagementState classify_engagement(TacticalState* ts) {
     return ENGAGE_NEUTRAL;
 }
 
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-// Get heading angle to a world-space point
 static inline float get_heading_to_point(Plane* self, Vec3 point) {
     Vec3 to_point = sub3(point, self->pos);
     return atan2f(to_point.y, to_point.x);
 }
 
-// Get pitch angle to a world-space point
 static inline float get_pitch_to_point(Plane* self, Vec3 point) {
     Vec3 to_point = sub3(point, self->pos);
     float horiz_dist = sqrtf(to_point.x * to_point.x + to_point.y * to_point.y);
     return atan2f(to_point.z, horiz_dist);
 }
 
-// Get current heading (yaw angle around Z)
 static inline float get_current_heading(Plane* p) {
     Vec3 fwd = quat_rotate(p->ori, vec3(1, 0, 0));
     return atan2f(fwd.y, fwd.x);
 }
 
-// Get current pitch angle
 static inline float get_current_pitch(Plane* p) {
     Vec3 fwd = quat_rotate(p->ori, vec3(1, 0, 0));
     return asinf(clampf(fwd.z, -1.0f, 1.0f));
 }
 
-// Get current bank angle (positive = right wing down)
 static inline float get_current_bank(Plane* p) {
     Vec3 up = quat_rotate(p->ori, vec3(0, 0, 1));
     float bank = acosf(clampf(up.z, -1.0f, 1.0f));
@@ -280,14 +214,12 @@ static inline float get_current_bank(Plane* p) {
     return (up.y < 0) ? bank : -bank;
 }
 
-// Normalize angle to [-PI, PI]
 static inline float normalize_angle(float angle) {
     while (angle > PI) angle -= 2.0f * PI;
     while (angle < -PI) angle += 2.0f * PI;
     return angle;
 }
 
-// Compute bank angle needed to turn toward a heading
 static inline float compute_bank_for_heading(Plane* self, float target_heading, float max_bank) {
     float current_heading = get_current_heading(self);
     float heading_error = normalize_angle(target_heading - current_heading);
@@ -297,11 +229,6 @@ static inline float compute_bank_for_heading(Plane* self, float target_heading, 
     return clampf(bank_command, -max_bank, max_bank);
 }
 
-// ============================================================================
-// MANEUVER IMPLEMENTATIONS
-// ============================================================================
-
-// Gun tracking: lead pursuit with firing solution
 static inline void execute_gun_track(AutopilotState* ap, AutoAceState* ace,
                                      Plane* self, Plane* target, float* actions) {
     // Aim at lead point
@@ -349,7 +276,6 @@ static inline void execute_gun_track(AutopilotState* ap, AutoAceState* ace,
     }
 }
 
-// Lag pursuit: nose behind target for controlled pursuit
 static inline void execute_pursuit_lag(AutopilotState* ap, AutoAceState* ace,
                                        Plane* self, Plane* target, float* actions) {
     // Aim at where target WAS (lag behind)
@@ -381,7 +307,6 @@ static inline void execute_pursuit_lag(AutopilotState* ap, AutoAceState* ace,
     actions[4] = -1.0f;  // Don't fire in lag pursuit
 }
 
-// Lead pursuit: nose ahead of target for gun attack
 static inline void execute_pursuit_lead(AutopilotState* ap, AutoAceState* ace,
                                         Plane* self, Plane* target, float* actions) {
     // Aim at lead point
@@ -409,7 +334,6 @@ static inline void execute_pursuit_lead(AutopilotState* ap, AutoAceState* ace,
     actions[4] = -1.0f;
 }
 
-// Break turn: maximum rate defensive turn away from threat
 static inline void execute_break_turn(AutopilotState* ap, AutoAceState* ace,
                                       Plane* self, Plane* target, float* actions) {
     // Turn AWAY from target - determine which side target is on
@@ -432,7 +356,6 @@ static inline void execute_break_turn(AutopilotState* ap, AutoAceState* ace,
     actions[4] = -1.0f;
 }
 
-// High yo-yo: climb to bleed closure rate, then dive back
 static inline void execute_high_yoyo(AutopilotState* ap, AutoAceState* ace,
                                      Plane* self, Plane* target, float* actions) {
     float current_bank = get_current_bank(self);
@@ -477,7 +400,6 @@ static inline void execute_high_yoyo(AutopilotState* ap, AutoAceState* ace,
     }
 }
 
-// Scissors: reversing breaks to force overshoot
 static inline void execute_scissors(AutopilotState* ap, AutoAceState* ace,
                                     Plane* self, Plane* target, float* actions) {
     // Initialize direction if needed
@@ -505,7 +427,6 @@ static inline void execute_scissors(AutopilotState* ap, AutoAceState* ace,
     actions[4] = -1.0f;
 }
 
-// Extend: disengage and rebuild energy
 static inline void execute_extend(AutopilotState* ap, AutoAceState* ace,
                                   Plane* self, Plane* target, float* actions) {
     // Fly straight away from target
@@ -528,7 +449,6 @@ static inline void execute_extend(AutopilotState* ap, AutoAceState* ace,
     actions[4] = -1.0f;
 }
 
-// Pure pursuit: nose directly at target
 static inline void execute_pursuit_pure(AutopilotState* ap, AutoAceState* ace,
                                         Plane* self, Plane* target, float* actions) {
     Vec3 to_target = sub3(target->pos, self->pos);
@@ -554,7 +474,6 @@ static inline void execute_pursuit_pure(AutopilotState* ap, AutoAceState* ace,
     actions[4] = -1.0f;
 }
 
-// Hard turn (generic): execute hard turn left or right
 static inline void execute_hard_turn(AutopilotState* ap, AutoAceState* ace,
                                      Plane* self, int direction, float* actions) {
     // direction: +1 = right (positive bank), -1 = left (negative bank)
@@ -568,10 +487,6 @@ static inline void execute_hard_turn(AutopilotState* ap, AutoAceState* ace,
     actions[3] = 0.0f;
     actions[4] = -1.0f;
 }
-
-// ============================================================================
-// TACTICAL DECISION FSM
-// ============================================================================
 
 static inline AutopilotMode select_tactical_mode(TacticalState* ts, AutoAceState* ace, Plane* self) {
     EngagementState engage = classify_engagement(ts);
@@ -621,10 +536,6 @@ static inline AutopilotMode select_tactical_mode(TacticalState* ts, AutoAceState
     return AP_LEVEL;  // Fallback
 }
 
-// ============================================================================
-// MAIN ENTRY POINT
-// ============================================================================
-
 static inline void autoace_init(AutoAceState* ace) {
     memset(ace, 0, sizeof(AutoAceState));
     ace->scissors_direction = 0;
@@ -635,28 +546,22 @@ static inline void autoace_init(AutoAceState* ace) {
 
 static inline void autoace_step(AutopilotState* ap, AutoAceState* ace,
                                 Plane* self, Plane* target, float* actions, float dt) {
-    // Initialize actions
     actions[0] = 0.0f;   // throttle
     actions[1] = 0.0f;   // elevator
     actions[2] = 0.0f;   // ailerons
     actions[3] = 0.0f;   // rudder
     actions[4] = -1.0f;  // trigger (default: don't fire)
 
-    // Compute tactical state
     compute_tactical_state(self, target, &ace->tactical);
 
-    // Decrement mode timer
     if (ace->mode_timer > 0) {
         ace->mode_timer--;
     }
 
-    // Select new mode if timer expired or maneuver complete
     bool maneuver_done = false;
 
-    // Check if current maneuver is complete
     switch (ap->mode) {
         case AP_HIGH_YOYO:
-            // Done when back at target altitude and closure rate reasonable
             if (ace->maneuver_phase == 1 &&
                 ace->tactical.closure_rate < 30.0f &&
                 ace->tactical.closure_rate > -10.0f) {
@@ -664,13 +569,11 @@ static inline void autoace_step(AutopilotState* ap, AutoAceState* ace,
             }
             break;
         case AP_BREAK_TURN:
-            // Done when target no longer behind us
             if (ace->tactical.antenna_train < 100.0f) {
                 maneuver_done = true;
             }
             break;
         case AP_EXTEND:
-            // Done when we have energy advantage or good separation
             if (ace->tactical.energy_delta > 0.0f ||
                 ace->tactical.range > 800.0f) {
                 maneuver_done = true;
@@ -680,7 +583,6 @@ static inline void autoace_step(AutopilotState* ap, AutoAceState* ace,
             break;
     }
 
-    // Mode selection with persistence
     if (ace->mode_timer <= 0 || maneuver_done) {
         AutopilotMode new_mode = select_tactical_mode(&ace->tactical, ace, self);
         if (new_mode != ap->mode) {
@@ -726,12 +628,10 @@ static inline void autoace_step(AutopilotState* ap, AutoAceState* ace,
             break;
 
         default:
-            // Fall back to existing autopilot behavior
             autopilot_step(ap, self, actions, dt);
             break;
     }
 
-    // Handle fire cooldown
     if (self->fire_cooldown > 0) {
         self->fire_cooldown--;
     }
@@ -739,7 +639,6 @@ static inline void autoace_step(AutopilotState* ap, AutoAceState* ace,
         self->fire_cooldown = AUTOACE_FIRE_COOLDOWN;
     }
 
-    // Debug output
     #if DEBUG >= 3
     static int debug_counter = 0;
     if (debug_counter++ % 50 == 0) {  // Every second

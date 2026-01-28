@@ -8,31 +8,31 @@ from pufferlib.ocean.dogfight import binding
 
 # Autopilot mode constants (must match autopilot.h enum)
 class AutopilotMode:
-    STRAIGHT = 0         # Fly straight (current/default behavior)
-    LEVEL = 1            # Level flight with PD on vz
-    TURN_LEFT = 2        # Coordinated left turn
-    TURN_RIGHT = 3       # Coordinated right turn
-    CLIMB = 4            # Constant climb rate
-    DESCEND = 5          # Constant descent rate
-    HARD_TURN_LEFT = 6   # Aggressive 70° left turn
-    HARD_TURN_RIGHT = 7  # Aggressive 70° right turn
-    WEAVE = 8            # Sine wave jinking (S-turns)
-    EVASIVE = 9          # Break turn when threat behind
-    RANDOM = 10          # Random mode selection at reset
+    STRAIGHT = 0
+    LEVEL = 1
+    TURN_LEFT = 2
+    TURN_RIGHT = 3
+    CLIMB = 4
+    DESCEND = 5
+    HARD_TURN_LEFT = 6
+    HARD_TURN_RIGHT = 7
+    WEAVE = 8
+    EVASIVE = 9
+    RANDOM = 10
 
 
 # Observation sizes by scheme (must match C OBS_SIZES in dogfight.h)
 # All schemes include timer observation (tick/max_steps) at the end
 OBS_SIZES = {
-    0: 16,   # MOMENTUM (baseline): body-frame vel + omega + AoA + energy + target + tactical + timer
-    1: 17,   # MOMENTUM_BETA: + sideslip angle + timer
-    2: 17,   # MOMENTUM_GFORCE: + G-force + timer
-    3: 20,   # MOMENTUM_FULL: + sideslip + G + throttle + target rates + timer
-    4: 12,   # MINIMAL: stripped down essentials + timer
-    5: 16,   # CARTESIAN: cartesian target position + timer
-    6: 23,   # DRONE_STYLE: + quaternion + up vector + timer
-    7: 17,   # QBAR: + dynamic pressure + timer
-    8: 26,   # KITCHEN_SINK: everything + timer
+    0: 16,   # MOMENTUM (baseline): body-frame vel + omega + AoA + energy + target + tactical
+    1: 17,   # MOMENTUM_BETA: + sideslip angle
+    2: 17,   # MOMENTUM_GFORCE: + G-force
+    3: 20,   # MOMENTUM_FULL: + sideslip + G + throttle + target rates
+    4: 12,   # MINIMAL: stripped down essentials
+    5: 16,   # CARTESIAN: cartesian target position
+    6: 23,   # DRONE_STYLE: + quaternion + up vector
+    7: 17,   # QBAR: + dynamic pressure
+    8: 26,   # KITCHEN_SINK: everything
 }
 
 
@@ -41,16 +41,16 @@ class Dogfight(pufferlib.PufferEnv):
         self,
         num_envs=16,
         render_mode=None,
-        render_fps=None,  # Target FPS when rendering (None=no delay, 50=real-time, 10=slow-mo)
+        render_fps=None,
         report_interval=1,
         buf=None,
         seed=42,
         max_steps=3000,
         obs_scheme=0,
-        # Curriculum learning
-        curriculum_enabled=0,       # 0=off (legacy), 1=on (progressive stages)
-        curriculum_randomize=0,     # 0=progressive (training), 1=random stage each episode (eval)
-        fixed_stage=-1,             # -1=normal progression, 0-17=lock to specific stage (ONLY for testing, not training!)
+
+        curriculum_enabled=0,
+        curriculum_randomize=0,
+        fixed_stage=-1,
         eval_interval=2_500_000,    # Steps between curriculum evaluations (2.5M = ~1s at 2.5M SPS)
         warmup_steps=3_000_000,     # Steps before curriculum starts evaluating (3M = ~1.2s at 2.5M SPS)
         min_eval_episodes=50,       # Minimum episodes in window before evaluating mastery
