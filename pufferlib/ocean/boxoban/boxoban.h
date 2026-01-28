@@ -147,29 +147,43 @@ typedef struct {
     unsigned char* intermediate_rewards;
     float int_r_coeff;
     float target_loss_pen_coeff;
-    int n_targets;
+    int n_targets; //num targets currently boxed
+    int n_boxes; //boxes in map
     Client* client;
+    int win;
 } Boxoban;
 
 void ensure_map_loaded(void); //declare from binding.c
 int boxoban_set_map_path(const char *path);
+
+//Entity,x,y  convention y moves top to bottom
+#define OBS(e,x,y) (env->observations[(e)*env->size*env->size + (y)*env->size + (x)])
+#define INTERMEDIATE_REWARD(x,y) (env->intermediate_rewards[(y)*env->size + (x)])
 
 static inline const uint32_t get_random_puzzle_idx(const Boxoban *env) {
     int idx = rand() % PUZZLE_COUNT;
     return idx;
 }
 
+static inline int count_boxes(Boxoban *env){
+    int total = 0;
+    for (int y = 0; y < env->size; y++) {
+        for (int x = 0; x < env->size; x++) {
+            total += OBS(BOXES, x, y);
+        }
+    }
+    return total;
+}
+
 void init (Boxoban* env) {
     ensure_map_loaded();
     env->intermediate_rewards = calloc(env->size*env->size, sizeof(int));
+    env->win = 0;
   }
 
-//Entity,x,y  convention y moves top to bottom
-#define OBS(e,x,y) (env->observations[(e)*env->size*env->size + (y)*env->size + (x)])
-#define INTERMEDIATE_REWARD(x,y) (env->intermediate_rewards[(y)*env->size + (x)])
 
 void add_log(Boxoban* env) {
-    env->log.perf += (env->rewards[0] >= 1) ? 1 : 0;
+    env->log.perf += (env->win= 1) ? 1 : 1/(float) count_boxes(env);
     env->log.score += env->rewards[0];
     env->log.episode_length += env->tick;
     env->log.episode_return += env->rewards[0];
@@ -204,10 +218,11 @@ void c_reset(Boxoban* env) {
     memset(env->intermediate_rewards, 0, env->size*env->size*sizeof(int));
     memcpy(env->intermediate_rewards,
             env->observations + TARGET * env->size * env->size,env->size * env->size);
-
+    env->n_boxes = count_boxes(env);
     env->tick = 0;
     env->n_targets = 0;
     get_agent_pos(env);
+    env->win = 0;
 }
 
 void move_entity(Boxoban* env,unsigned char entity,int x, int y, int dx, int dy) {
@@ -316,6 +331,8 @@ void take_action(Boxoban* env, int action) {
     }
 }
 
+
+
         
 bool goal(Boxoban* env) {
     for (int y = 0; y < env->size; y++) {
@@ -360,6 +377,7 @@ void c_step(Boxoban* env) {
     if (goal(env)) {
         env->terminals[0] = 1;
         env->rewards[0] += 1.0;
+        env->win = 1;
         add_log(env);
         c_reset(env);
         return;
