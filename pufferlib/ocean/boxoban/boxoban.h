@@ -175,6 +175,8 @@ static inline int count_boxes(Boxoban *env){
     return total;
 }
 
+static inline int boxes_on_targets(Boxoban *env); //decare to allow add_log
+
 void init (Boxoban* env) {
     ensure_map_loaded();
     env->intermediate_rewards = calloc(env->size*env->size, sizeof(int));
@@ -183,7 +185,9 @@ void init (Boxoban* env) {
 
 
 void add_log(Boxoban* env) {
-    env->log.perf += (env->win= 1) ? 1 : 1/(float) count_boxes(env);
+    float denom = (float)env->n_boxes;
+    float num = (float)boxes_on_targets(env);
+    env->log.perf += (env->win== 1) ? 1.0 : num/denom;
     env->log.score += env->rewards[0];
     env->log.episode_length += env->tick;
     env->log.episode_return += env->rewards[0];
