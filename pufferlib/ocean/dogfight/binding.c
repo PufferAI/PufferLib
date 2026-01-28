@@ -2,14 +2,8 @@
 
 #define Env Dogfight
 
-// We need Python.h for the forward declaration, but env_binding.h includes it
-// So we'll put the forward decl and MY_METHODS after including env_binding.h
-// but we need MY_METHODS defined before... Let's restructure.
-
-// Include Python first to get PyObject type
 #include <Python.h>
 
-// Forward declare our custom methods
 static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* env_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* vec_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs);
@@ -22,7 +16,6 @@ static PyObject* env_set_obs_highlight(PyObject* self, PyObject* args);
 static PyObject* env_get_autoace_state(PyObject* self, PyObject* args);
 static PyObject* env_set_camera_follow(PyObject* self, PyObject* args);
 
-// Register custom methods before including the template
 #define MY_METHODS \
     {"env_force_state", (PyCFunction)env_force_state, METH_VARARGS | METH_KEYWORDS, "Force environment state"}, \
     {"env_set_autopilot", (PyCFunction)env_set_autopilot, METH_VARARGS | METH_KEYWORDS, "Set opponent autopilot mode"}, \
@@ -36,7 +29,6 @@ static PyObject* env_set_camera_follow(PyObject* self, PyObject* args);
     {"env_get_autoace_state", (PyCFunction)env_get_autoace_state, METH_VARARGS, "Get AutoAce opponent state and tactical info"}, \
     {"env_set_camera_follow", (PyCFunction)env_set_camera_follow, METH_VARARGS, "Set camera to follow player (0) or opponent (1)"}
 
-// Helper to get float from kwargs with default (before env_binding.h since my_init uses it)
 static float get_float(PyObject *kwargs, const char *key, float default_val) {
     if (!kwargs) return default_val;
     PyObject *val = PyDict_GetItemString(kwargs, key);
@@ -46,7 +38,6 @@ static float get_float(PyObject *kwargs, const char *key, float default_val) {
     return default_val;
 }
 
-// Helper to get int from kwargs with default
 static int get_int(PyObject *kwargs, const char *key, int default_val) {
     if (!kwargs) return default_val;
     PyObject *val = PyDict_GetItemString(kwargs, key);
@@ -82,11 +73,11 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "episode_return", log->episode_return);
     assign_to_dict(dict, "episode_length", log->episode_length);
     assign_to_dict(dict, "score", log->score);
-    assign_to_dict(dict, "perf", log->perf);           // Raw kills → becomes kill_rate after vec_log
+    assign_to_dict(dict, "perf", log->perf);
     assign_to_dict(dict, "shots_fired", log->shots_fired);
     assign_to_dict(dict, "accuracy", log->accuracy);
     assign_to_dict(dict, "stage", log->stage);
-    // Export RAW sums - they become correct averages after vec_log divides by n
+
     assign_to_dict(dict, "avg_stage_weight", log->total_stage_weight);  // Raw sum → correct avg
     assign_to_dict(dict, "avg_abs_bias", log->total_abs_bias);          // Raw sum → correct avg
     assign_to_dict(dict, "avg_stage", log->stage_sum);                  // Raw sum → correct avg
@@ -97,9 +88,7 @@ static int my_log(PyObject *dict, Log *log) {
     return 0;
 }
 
-// Force state wrapper - unpacks kwargs and calls C function
 static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwargs) {
-    // First arg is env handle
     if (PyTuple_Size(args) != 1) {
         PyErr_SetString(PyExc_TypeError, "env_force_state requires 1 positional arg (env handle)");
         return NULL;
@@ -108,50 +97,39 @@ static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwarg
     Env* env = unpack_env(args);
     if (!env) return NULL;
 
-    // Extract all parameters with defaults
-    // Player position
     float p_px = get_float(kwargs, "p_px", 0.0f);
     float p_py = get_float(kwargs, "p_py", 0.0f);
     float p_pz = get_float(kwargs, "p_pz", 1000.0f);
 
-    // Player velocity
     float p_vx = get_float(kwargs, "p_vx", 150.0f);
     float p_vy = get_float(kwargs, "p_vy", 0.0f);
     float p_vz = get_float(kwargs, "p_vz", 0.0f);
 
-    // Player orientation (identity quat = wings level, flying +X)
     float p_ow = get_float(kwargs, "p_ow", 1.0f);
     float p_ox = get_float(kwargs, "p_ox", 0.0f);
     float p_oy = get_float(kwargs, "p_oy", 0.0f);
     float p_oz = get_float(kwargs, "p_oz", 0.0f);
 
-    // Player throttle
     float p_throttle = get_float(kwargs, "p_throttle", 1.0f);
 
-    // Opponent position (-9999 = auto: 400m ahead)
     float o_px = get_float(kwargs, "o_px", -9999.0f);
     float o_py = get_float(kwargs, "o_py", -9999.0f);
     float o_pz = get_float(kwargs, "o_pz", -9999.0f);
 
-    // Opponent velocity (-9999 = auto: match player)
     float o_vx = get_float(kwargs, "o_vx", -9999.0f);
     float o_vy = get_float(kwargs, "o_vy", -9999.0f);
     float o_vz = get_float(kwargs, "o_vz", -9999.0f);
 
-    // Opponent orientation (-9999 = auto: match player)
     float o_ow = get_float(kwargs, "o_ow", -9999.0f);
     float o_ox = get_float(kwargs, "o_ox", -9999.0f);
     float o_oy = get_float(kwargs, "o_oy", -9999.0f);
     float o_oz = get_float(kwargs, "o_oz", -9999.0f);
 
-    // Environment tick
     int tick = get_int(kwargs, "tick", 0);
 
-    // Fire cooldowns (optional, -1 = use default of 0)
     int p_cooldown = get_int(kwargs, "p_cooldown", -1);
     int o_cooldown = get_int(kwargs, "o_cooldown", -1);
 
-    // Call the C function
     force_state(env,
         p_px, p_py, p_pz,
         p_vx, p_vy, p_vz,
@@ -168,7 +146,6 @@ static PyObject* env_force_state(PyObject* self, PyObject* args, PyObject* kwarg
     Py_RETURN_NONE;
 }
 
-// Set autopilot mode for opponent aircraft
 static PyObject* env_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs) {
     if (PyTuple_Size(args) != 1) {
         PyErr_SetString(PyExc_TypeError, "env_set_autopilot requires 1 positional arg (env handle)");
@@ -178,20 +155,17 @@ static PyObject* env_set_autopilot(PyObject* self, PyObject* args, PyObject* kwa
     Env* env = unpack_env(args);
     if (!env) return NULL;
 
-    // Get autopilot parameters
     int mode = get_int(kwargs, "mode", AP_STRAIGHT);
-    if (mode < 0 || mode >= AP_COUNT) mode = AP_STRAIGHT;  // Bounds check
+    if (mode < 0 || mode >= AP_COUNT) mode = AP_STRAIGHT;
     float throttle = get_float(kwargs, "throttle", AP_DEFAULT_THROTTLE);
     float bank_deg = get_float(kwargs, "bank_deg", AP_DEFAULT_BANK_DEG);
     float climb_rate = get_float(kwargs, "climb_rate", AP_DEFAULT_CLIMB_RATE);
 
-    // Set the autopilot mode
     autopilot_set_mode(&env->opponent_ap, (AutopilotMode)mode, throttle, bank_deg, climb_rate);
 
     Py_RETURN_NONE;
 }
 
-// Set autopilot mode for all environments (vectorized)
 static PyObject* vec_set_autopilot(PyObject* self, PyObject* args, PyObject* kwargs) {
     if (PyTuple_Size(args) != 1) {
         PyErr_SetString(PyExc_TypeError, "vec_set_autopilot requires 1 positional arg (vec handle)");
@@ -201,14 +175,12 @@ static PyObject* vec_set_autopilot(PyObject* self, PyObject* args, PyObject* kwa
     VecEnv* vec = unpack_vecenv(args);
     if (!vec) return NULL;
 
-    // Get autopilot parameters
     int mode = get_int(kwargs, "mode", AP_STRAIGHT);
-    if (mode < 0 || mode >= AP_COUNT) mode = AP_STRAIGHT;  // Bounds check
+    if (mode < 0 || mode >= AP_COUNT) mode = AP_STRAIGHT;
     float throttle = get_float(kwargs, "throttle", AP_DEFAULT_THROTTLE);
     float bank_deg = get_float(kwargs, "bank_deg", AP_DEFAULT_BANK_DEG);
     float climb_rate = get_float(kwargs, "climb_rate", AP_DEFAULT_CLIMB_RATE);
 
-    // Set autopilot for all environments
     for (int i = 0; i < vec->num_envs; i++) {
         autopilot_set_mode(&vec->envs[i]->opponent_ap, (AutopilotMode)mode,
                           throttle, bank_deg, climb_rate);
@@ -292,7 +264,6 @@ static PyObject* vec_set_curriculum_target(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
 }
 
-// Get current autopilot mode (for testing/debugging)
 static PyObject* env_get_autopilot_mode(PyObject* self, PyObject* args) {
     Env* env = unpack_env(args);
     if (!env) return NULL;
@@ -300,7 +271,6 @@ static PyObject* env_get_autopilot_mode(PyObject* self, PyObject* args) {
     return PyLong_FromLong((long)env->opponent_ap.mode);
 }
 
-// Get raw player state (for physics tests - independent of obs_scheme)
 static PyObject* env_get_state(PyObject* self, PyObject* args) {
     Env* env = unpack_env(args);
     if (!env) return NULL;
@@ -312,40 +282,31 @@ static PyObject* env_get_state(PyObject* self, PyObject* args) {
     PyObject* dict = PyDict_New();
     if (!dict) return NULL;
 
-    // Position
     PyDict_SetItemString(dict, "px", PyFloat_FromDouble(p->pos.x));
     PyDict_SetItemString(dict, "py", PyFloat_FromDouble(p->pos.y));
     PyDict_SetItemString(dict, "pz", PyFloat_FromDouble(p->pos.z));
 
-    // Velocity
     PyDict_SetItemString(dict, "vx", PyFloat_FromDouble(p->vel.x));
     PyDict_SetItemString(dict, "vy", PyFloat_FromDouble(p->vel.y));
     PyDict_SetItemString(dict, "vz", PyFloat_FromDouble(p->vel.z));
 
-    // Orientation quaternion
     PyDict_SetItemString(dict, "ow", PyFloat_FromDouble(p->ori.w));
     PyDict_SetItemString(dict, "ox", PyFloat_FromDouble(p->ori.x));
     PyDict_SetItemString(dict, "oy", PyFloat_FromDouble(p->ori.y));
     PyDict_SetItemString(dict, "oz", PyFloat_FromDouble(p->ori.z));
 
-    // Up vector (derived)
     PyDict_SetItemString(dict, "up_x", PyFloat_FromDouble(up.x));
     PyDict_SetItemString(dict, "up_y", PyFloat_FromDouble(up.y));
     PyDict_SetItemString(dict, "up_z", PyFloat_FromDouble(up.z));
 
-    // Forward vector (derived)
     PyDict_SetItemString(dict, "fwd_x", PyFloat_FromDouble(fwd.x));
     PyDict_SetItemString(dict, "fwd_y", PyFloat_FromDouble(fwd.y));
     PyDict_SetItemString(dict, "fwd_z", PyFloat_FromDouble(fwd.z));
 
-    // Throttle
     PyDict_SetItemString(dict, "throttle", PyFloat_FromDouble(p->throttle));
 
-    // G-force (current G-loading)
     PyDict_SetItemString(dict, "g_force", PyFloat_FromDouble(p->g_force));
 
-    // Angular velocity (body frame, rad/s)
-    // omega.x = roll rate, omega.y = pitch rate, omega.z = yaw rate
     PyDict_SetItemString(dict, "omega_x", PyFloat_FromDouble(p->omega.x));
     PyDict_SetItemString(dict, "omega_y", PyFloat_FromDouble(p->omega.y));
     PyDict_SetItemString(dict, "omega_z", PyFloat_FromDouble(p->omega.z));
