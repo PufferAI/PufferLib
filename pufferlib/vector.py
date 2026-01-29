@@ -82,6 +82,11 @@ class Serial:
                 masks=self.masks[ptr:end],
                 actions=self.actions[ptr:end]
             )
+            # Include opponent buffers if they exist (for dual self-play)
+            if buf is not None and 'opponent_observations' in buf:
+                buf_i['opponent_observations'] = buf['opponent_observations'][ptr:end]
+                buf_i['opponent_rewards'] = buf['opponent_rewards'][ptr:end]
+                buf_i['opponent_actions'] = buf['opponent_actions'][ptr:end]
             ptr = end
             seed_i = seed + i if seed is not None else None
             env = env_creators[i](*env_args[i], buf=buf_i, seed=seed_i, **env_kwargs[i])
@@ -186,6 +191,16 @@ def _worker_process(env_creators, env_args, env_kwargs, obs_shape, obs_dtype, at
         actions=atn_arr,
     )
     buf['masks'][:] = True
+
+    # Opponent perspective buffers (for dual self-play)
+    # These are optional - envs that support opponent buffers will use them
+    if 'opponent_observations' in shm:
+        buf['opponent_observations'] = np.ndarray((*shape, *obs_shape),
+            dtype=obs_dtype, buffer=shm['opponent_observations'])[worker_idx]
+        buf['opponent_rewards'] = np.ndarray(shape, dtype=np.float32,
+            buffer=shm['opponent_rewards'])[worker_idx]
+        buf['opponent_actions'] = np.ndarray((*shape, *atn_shape),
+            dtype=atn_dtype, buffer=shm['opponent_actions'])[worker_idx]
 
     if is_native and num_envs == 1:
         envs = env_creators[0](*env_args[0], **env_kwargs[0], buf=buf, seed=seed)
@@ -306,6 +321,12 @@ class Multiprocessing:
             masks=RawArray('b', num_agents),
             semaphores=RawArray('c', num_workers),
             notify=RawArray('b', num_workers),
+            # Opponent perspective buffers (for dual self-play)
+            # opponent_observations/rewards: Written by C code during step if env supports opponent buffers
+            # opponent_actions: Written by main process, read by workers before step
+            opponent_observations=RawArray(obs_ctype, num_agents * int(np.prod(obs_shape))),
+            opponent_rewards=RawArray('f', num_agents),
+            opponent_actions=RawArray(atn_ctype, num_agents * int(np.prod(atn_shape))),
         )
         shape = (num_workers, agents_per_worker)
         self.obs_batch_shape = (self.agents_per_batch, *obs_shape)
@@ -321,6 +342,12 @@ class Multiprocessing:
             masks=np.ndarray(shape, dtype=bool, buffer=self.shm['masks']),
             semaphores=np.ndarray(num_workers, dtype=np.uint8, buffer=self.shm['semaphores']),
             notify=np.ndarray(num_workers, dtype=bool, buffer=self.shm['notify']),
+            # Opponent perspective buffers (for dual self-play)
+            opponent_observations=np.ndarray((*shape, *obs_shape),
+                dtype=obs_dtype, buffer=self.shm['opponent_observations']),
+            opponent_rewards=np.ndarray(shape, dtype=np.float32, buffer=self.shm['opponent_rewards']),
+            opponent_actions=np.ndarray((*shape, *atn_shape),
+                dtype=atn_dtype, buffer=self.shm['opponent_actions']),
         )
         self.buf['semaphores'][:] = MAIN 
 

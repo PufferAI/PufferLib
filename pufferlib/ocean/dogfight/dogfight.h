@@ -230,6 +230,12 @@ typedef struct Dogfight {
     float *actions;
     float *rewards;
     unsigned char *terminals;
+
+    // Opponent perspective buffers (for dual self-play with Multiprocessing)
+    // Written during c_step() if non-NULL, same size as observations/rewards
+    float *opponent_observations;  // Opponent's view of the world
+    float *opponent_rewards;       // = -player_reward (zero-sum)
+
     Log log;
     Client *client;
     int tick;
@@ -290,6 +296,12 @@ typedef struct Dogfight {
     float last_opp_actions[5];  // throttle, elevator, aileron, rudder, trigger
     // Camera control
     int camera_follow_opponent;  // 0 = follow player (default), 1 = follow opponent
+    // Self-play: external opponent actions override (Phase 1)
+    float opponent_actions_override[5];  // [throttle, elevator, aileron, rudder, trigger]
+    int use_opponent_override;           // 0 = use autopilot, 1 = use override
+    // Head-on lockout: disable guns until planes pass each other (only for head-on spawns)
+    int head_on_lockout;                 // 1 = guns locked until pass-through detected
+    float prev_rel_dot;                  // Previous dot(rel_pos, rel_vel) for detecting pass
 } Dogfight;
 
 #include "dogfight_observations.h"
@@ -333,6 +345,14 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     env->total_aileron_usage = 0.0f;
 
     memset(env->obs_highlight, 0, sizeof(env->obs_highlight));
+
+    // Self-play: default to autopilot-controlled opponent
+    env->use_opponent_override = 0;
+    memset(env->opponent_actions_override, 0, sizeof(env->opponent_actions_override));
+
+    // Opponent buffers: NULL by default, set by Python if dual self-play is enabled
+    env->opponent_observations = NULL;
+    env->opponent_rewards = NULL;
 }
 
 void set_obs_highlight(Dogfight *env, int *indices, int count) {
@@ -919,8 +939,184 @@ static void spawn_autoace(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     autoace_init(&env->opponent_ace);
 }
 
+// EVAL spawn: True randomization with alternating advantages
+// Used when curriculum_randomize=1 - creates varied, fair combat scenarios
+static void spawn_eval_random(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    // Always clear head-on lockout first (only set if we choose head-on spawn)
+    env->head_on_lockout = 0;
+    env->prev_rel_dot = 0.0f;
+
+    // Alternate who gets advantage based on episode count
+    int player_advantage = (env->total_episodes % 2 == 0);
+
+    // Random spawn type distribution:
+    // 40% - tactical (one behind/side of other)
+    // 30% - neutral (both at angles, neither clearly advantaged)
+    // 20% - energy (altitude/speed difference)
+    // 10% - head-on (with gun lockout until pass)
+    float spawn_roll = rndf(0, 1);
+
+    // Base altitude for combat (mid-altitude)
+    float base_alt = rndf(2000, 3500);
+    env->player.pos.z = base_alt;
+    player_pos.z = base_alt;
+    float speed = norm3(player_vel);
+
+    if (spawn_roll < 0.40f) {
+        // TACTICAL: One plane behind/side of other (clear advantage)
+        float dist = rndf(300, 600);
+        float angle_off = rndf(120, 180) * DEG_TO_RAD;  // Behind (120-180° off nose)
+        float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;
+
+        if (player_advantage) {
+            // Player behind opponent - player has advantage
+            float opp_heading = rndf(0, 2.0f * M_PI);
+            Vec3 opp_pos = vec3(
+                player_pos.x + rndf(300, 500),
+                player_pos.y + side * rndf(50, 150),
+                clampf(player_pos.z + rndf(-100, 100), 500, 4500)
+            );
+            Vec3 opp_vel = vec3(speed * cosf(opp_heading), speed * sinf(opp_heading), 0);
+            reset_plane(&env->opponent, opp_pos, opp_vel);
+            env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
+            // Player heading toward opponent
+            Vec3 to_opp = sub3(opp_pos, player_pos);
+            float player_heading = atan2f(to_opp.y, to_opp.x);
+            env->player.vel = vec3(speed * cosf(player_heading), speed * sinf(player_heading), 0);
+            env->player.ori = quat_from_axis_angle(vec3(0, 0, 1), player_heading);
+        } else {
+            // Opponent behind player - opponent has advantage
+            float player_heading = rndf(0, 2.0f * M_PI);
+            env->player.vel = vec3(speed * cosf(player_heading), speed * sinf(player_heading), 0);
+            env->player.ori = quat_from_axis_angle(vec3(0, 0, 1), player_heading);
+            // Opponent behind
+            Vec3 opp_pos = vec3(
+                player_pos.x - cosf(player_heading) * dist + side * sinf(player_heading) * rndf(50, 150),
+                player_pos.y - sinf(player_heading) * dist - side * cosf(player_heading) * rndf(50, 150),
+                clampf(player_pos.z + rndf(-100, 100), 500, 4500)
+            );
+            Vec3 to_player = sub3(player_pos, opp_pos);
+            float opp_heading = atan2f(to_player.y, to_player.x);
+            Vec3 opp_vel = vec3(speed * cosf(opp_heading), speed * sinf(opp_heading), 0);
+            reset_plane(&env->opponent, opp_pos, opp_vel);
+            env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
+        }
+        env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
+        env->opponent_ap.target_bank = rndf(30, 60) * DEG_TO_RAD;
+
+    } else if (spawn_roll < 0.70f) {
+        // NEUTRAL: Both at angles, converging - fair fight
+        float dist = rndf(400, 700);
+        float theta = rndf(0, 2.0f * M_PI);
+        Vec3 opp_pos = vec3(
+            player_pos.x + dist * cosf(theta),
+            player_pos.y + dist * sinf(theta),
+            clampf(player_pos.z + rndf(-200, 200), 500, 4500)
+        );
+        // Both heading toward a point between them (converging)
+        Vec3 midpoint = mul3(add3(player_pos, opp_pos), 0.5f);
+        Vec3 player_to_mid = sub3(midpoint, player_pos);
+        Vec3 opp_to_mid = sub3(midpoint, opp_pos);
+        // Add some angle offset so they're not perfectly converging
+        float player_heading = atan2f(player_to_mid.y, player_to_mid.x) + rndf(-0.5f, 0.5f);
+        float opp_heading = atan2f(opp_to_mid.y, opp_to_mid.x) + rndf(-0.5f, 0.5f);
+
+        env->player.vel = vec3(speed * cosf(player_heading), speed * sinf(player_heading), 0);
+        env->player.ori = quat_from_axis_angle(vec3(0, 0, 1), player_heading);
+        Vec3 opp_vel = vec3(speed * cosf(opp_heading), speed * sinf(opp_heading), 0);
+        reset_plane(&env->opponent, opp_pos, opp_vel);
+        env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
+        env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
+        env->opponent_ap.target_bank = rndf(30, 45) * DEG_TO_RAD;
+
+    } else if (spawn_roll < 0.90f) {
+        // ENERGY: Altitude or speed advantage
+        float dist = rndf(400, 600);
+        float theta = rndf(0, 2.0f * M_PI);
+        float alt_diff = rndf(300, 600);  // Significant altitude difference
+
+        Vec3 opp_pos;
+        if (player_advantage) {
+            // Player higher (energy advantage)
+            env->player.pos.z = base_alt + alt_diff;
+            player_pos.z = env->player.pos.z;
+            opp_pos = vec3(
+                player_pos.x + dist * cosf(theta),
+                player_pos.y + dist * sinf(theta),
+                base_alt
+            );
+        } else {
+            // Opponent higher (energy advantage)
+            opp_pos = vec3(
+                player_pos.x + dist * cosf(theta),
+                player_pos.y + dist * sinf(theta),
+                base_alt + alt_diff
+            );
+        }
+        // Random headings
+        float player_heading = rndf(0, 2.0f * M_PI);
+        float opp_heading = rndf(0, 2.0f * M_PI);
+        env->player.vel = vec3(speed * cosf(player_heading), speed * sinf(player_heading), 0);
+        env->player.ori = quat_from_axis_angle(vec3(0, 0, 1), player_heading);
+        Vec3 opp_vel = vec3(speed * cosf(opp_heading), speed * sinf(opp_heading), 0);
+        reset_plane(&env->opponent, opp_pos, opp_vel);
+        env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
+        env->opponent_ap.mode = AP_PURSUIT_LEAD;  // Aggressive pursuit for energy fights
+
+    } else {
+        // HEAD-ON: Facing each other (rare, 10%) - guns locked until they pass
+        float dist = rndf(600, 900);  // Start further apart
+        float theta = rndf(0, 2.0f * M_PI);
+
+        Vec3 opp_pos = vec3(
+            player_pos.x + dist * cosf(theta),
+            player_pos.y + dist * sinf(theta),
+            clampf(player_pos.z + rndf(-100, 100), 500, 4500)
+        );
+        // Player faces opponent
+        Vec3 to_opp = sub3(opp_pos, player_pos);
+        float player_heading = atan2f(to_opp.y, to_opp.x);
+        // Opponent faces player (opposite direction)
+        float opp_heading = player_heading + M_PI;
+
+        env->player.vel = vec3(speed * cosf(player_heading), speed * sinf(player_heading), 0);
+        env->player.ori = quat_from_axis_angle(vec3(0, 0, 1), player_heading);
+        Vec3 opp_vel = vec3(speed * cosf(opp_heading), speed * sinf(opp_heading), 0);
+        reset_plane(&env->opponent, opp_pos, opp_vel);
+        env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
+
+        // HEAD-ON LOCKOUT: Disable guns until they pass each other
+        env->head_on_lockout = 1;
+        // Initialize tracking for pass detection
+        Vec3 rel_pos = sub3(opp_pos, player_pos);
+        Vec3 rel_vel = sub3(opp_vel, env->player.vel);
+        env->prev_rel_dot = dot3(rel_pos, rel_vel);
+
+        env->opponent_ap.mode = AP_STRAIGHT;  // Fly straight initially
+        if (DEBUG >= 1) {
+            fprintf(stderr, "[EVAL-SPAWN] Head-on spawn - guns locked until pass\n");
+        }
+    }
+
+    // Reset autopilot PID state
+    env->opponent_ap.prev_vz = 0.0f;
+    env->opponent_ap.prev_bank_error = 0.0f;
+
+    if (DEBUG >= 1) {
+        fprintf(stderr, "[EVAL-SPAWN] ep=%d advantage=%s spawn_type=%.0f%% dist=%.0fm\n",
+                env->total_episodes, player_advantage ? "PLAYER" : "OPPONENT",
+                spawn_roll * 100, norm3(sub3(env->opponent.pos, env->player.pos)));
+    }
+}
+
 // Master spawn function: dispatches to stage-specific spawner
 void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    // For eval mode (curriculum_randomize=1), use fully random spawn
+    if (env->curriculum_randomize) {
+        spawn_eval_random(env, player_pos, player_vel);
+        return;
+    }
+
     CurriculumStage new_stage = get_curriculum_stage(env);
 
     // Log stage transitions
@@ -1031,6 +1227,10 @@ void c_reset(Dogfight *env) {
     env->trigger_pulls = 0;
     env->prev_trigger = 0;
 
+    // Head-on lockout (only set by spawn_eval_random for head-on spawns)
+    env->head_on_lockout = 0;
+    env->prev_rel_dot = 0.0f;
+
     // Gun cone for hit detection - stays fixed at 5°
     env->cos_gun_cone = cosf(env->gun_cone_angle);
 
@@ -1101,8 +1301,35 @@ void c_step(Dogfight *env) {
     // Player uses full physics with actions
     step_plane_with_physics(&env->player, env->actions, DT);
 
-    // Opponent uses autopilot (if not AP_STRAIGHT, uses full physics)
-    if (env->opponent_ap.mode != AP_STRAIGHT) {
+    // Opponent uses either external override (self-play) or autopilot
+    if (env->use_opponent_override) {
+        // Self-play mode: use externally provided actions from Python
+        float opp_actions[5];
+        for (int i = 0; i < 5; i++) {
+            opp_actions[i] = env->opponent_actions_override[i];
+            env->last_opp_actions[i] = opp_actions[i];
+        }
+
+        step_plane_with_physics(&env->opponent, opp_actions, DT);
+
+        // Check if self-play opponent shot the player (two-way combat)
+        // Skip if in head-on lockout (guns disabled until pass)
+        if (opp_actions[4] > 0.5f && !env->head_on_lockout) {
+            if (check_hit(&env->opponent, &env->player, env->cos_gun_cone)) {
+                // Player was shot down by self-play opponent!
+                if (DEBUG >= 1) {
+                    printf("[SELF-PLAY] Player shot down by opponent policy!\n");
+                }
+                env->death_reason = DEATH_KILL;
+                env->rewards[0] = -1.0f;  // Penalty for dying
+                env->terminals[0] = 1;
+                add_log(env);
+                c_reset(env);
+                return;
+            }
+        }
+    } else if (env->opponent_ap.mode != AP_STRAIGHT) {
+        // Standard autopilot mode (curriculum stages)
         float opp_actions[5];
 
         // Use AutoAce for stage 20+ (intelligent adversarial opponent)
@@ -1172,6 +1399,23 @@ void c_step(Dogfight *env) {
     }
 #endif
 
+    // === Head-on pass detection (for eval mode gun lockout) ===
+    if (env->head_on_lockout) {
+        // Detect when planes pass each other: dot(rel_pos, rel_vel) flips sign
+        Vec3 rel_pos = sub3(env->opponent.pos, env->player.pos);
+        Vec3 rel_vel = sub3(env->opponent.vel, env->player.vel);
+        float rel_dot = dot3(rel_pos, rel_vel);
+
+        // Sign flip from negative (approaching) to positive (separating) = passed
+        if (env->prev_rel_dot < 0 && rel_dot >= 0) {
+            env->head_on_lockout = 0;
+            if (DEBUG >= 1) {
+                fprintf(stderr, "[HEAD-ON] Planes passed - guns unlocked at tick %d\n", env->tick);
+            }
+        }
+        env->prev_rel_dot = rel_dot;
+    }
+
     // === Combat (Phase 5) ===
     Plane *p = &env->player;
     Plane *o = &env->opponent;
@@ -1182,9 +1426,9 @@ void c_step(Dogfight *env) {
     if (p->fire_cooldown > 0) p->fire_cooldown--;
     if (env->stage < CURRICULUM_AUTOACE && o->fire_cooldown > 0) o->fire_cooldown--;
 
-    // Player fires: action[4] > 0.5 and cooldown ready
-    if (DEBUG >= 10) printf("trigger=%.3f, cooldown=%d\n", env->actions[4], p->fire_cooldown);
-    if (env->actions[4] > 0.5f && p->fire_cooldown == 0) {
+    // Player fires: action[4] > 0.5 and cooldown ready and not in head-on lockout
+    if (DEBUG >= 10) printf("trigger=%.3f, cooldown=%d, lockout=%d\n", env->actions[4], p->fire_cooldown, env->head_on_lockout);
+    if (env->actions[4] > 0.5f && p->fire_cooldown == 0 && !env->head_on_lockout) {
         p->fire_cooldown = FIRE_COOLDOWN;
         env->episode_shots_fired += 1.0f;
         if (DEBUG >= 10) printf("=== FIRED! episode_shots_fired=%.0f ===\n", env->episode_shots_fired);
@@ -1327,6 +1571,16 @@ void c_step(Dogfight *env) {
 #if DEBUG >= 5
     print_observations(env);
 #endif
+
+    // Compute opponent observations and rewards (for dual self-play with Multiprocessing)
+    // Only if buffers are provided by Python (non-NULL)
+    if (env->opponent_observations != NULL) {
+        compute_opponent_observations(env, env->opponent_observations);
+    }
+    if (env->opponent_rewards != NULL) {
+        // Zero-sum game: opponent reward = negative of player reward
+        env->opponent_rewards[0] = -env->rewards[0];
+    }
 }
 
 void c_close(Dogfight *env);

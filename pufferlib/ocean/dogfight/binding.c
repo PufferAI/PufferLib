@@ -15,6 +15,10 @@ static PyObject* env_get_state(PyObject* self, PyObject* args);
 static PyObject* env_set_obs_highlight(PyObject* self, PyObject* args);
 static PyObject* env_get_autoace_state(PyObject* self, PyObject* args);
 static PyObject* env_set_camera_follow(PyObject* self, PyObject* args);
+static PyObject* vec_get_opponent_observations(PyObject* self, PyObject* args);
+static PyObject* vec_set_opponent_actions(PyObject* self, PyObject* args);
+static PyObject* vec_enable_opponent_override(PyObject* self, PyObject* args);
+static PyObject* vec_set_opponent_buffers(PyObject* self, PyObject* args);
 
 #define MY_METHODS \
     {"env_force_state", (PyCFunction)env_force_state, METH_VARARGS | METH_KEYWORDS, "Force environment state"}, \
@@ -27,7 +31,11 @@ static PyObject* env_set_camera_follow(PyObject* self, PyObject* args);
     {"env_get_state", (PyCFunction)env_get_state, METH_VARARGS, "Get raw player state"}, \
     {"env_set_obs_highlight", (PyCFunction)env_set_obs_highlight, METH_VARARGS, "Set observation indices to highlight with red arrows"}, \
     {"env_get_autoace_state", (PyCFunction)env_get_autoace_state, METH_VARARGS, "Get AutoAce opponent state and tactical info"}, \
-    {"env_set_camera_follow", (PyCFunction)env_set_camera_follow, METH_VARARGS, "Set camera to follow player (0) or opponent (1)"}
+    {"env_set_camera_follow", (PyCFunction)env_set_camera_follow, METH_VARARGS, "Set camera to follow player (0) or opponent (1)"}, \
+    {"vec_get_opponent_observations", (PyCFunction)vec_get_opponent_observations, METH_VARARGS, "Get observations from opponent perspective for self-play"}, \
+    {"vec_set_opponent_actions", (PyCFunction)vec_set_opponent_actions, METH_VARARGS, "Set opponent actions from external policy (self-play)"}, \
+    {"vec_enable_opponent_override", (PyCFunction)vec_enable_opponent_override, METH_VARARGS, "Enable/disable opponent action override (0=autopilot, 1=external)"}, \
+    {"vec_set_opponent_buffers", (PyCFunction)vec_set_opponent_buffers, METH_VARARGS, "Set opponent observation/reward buffers for dual self-play"}
 
 static float get_float(PyObject *kwargs, const char *key, float default_val) {
     if (!kwargs) return default_val;
@@ -429,5 +437,186 @@ static PyObject* env_set_camera_follow(PyObject* self, PyObject* args) {
     }
 
     env->camera_follow_opponent = follow_opponent;
+    Py_RETURN_NONE;
+}
+
+// Get opponent observations for all environments (for self-play)
+// Returns: numpy array of shape (num_envs, obs_size) with opponent's view of the world
+// Currently only supports scheme 0 (OBS_MOMENTUM) - returns 16 obs per env
+static PyObject* vec_get_opponent_observations(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+
+    if (!PyArg_ParseTuple(args, "O", &vec_arg)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    // Get obs_size from first environment (all envs have same scheme)
+    int obs_size = vec->envs[0]->obs_size;
+
+    // Create numpy array of shape (num_envs, obs_size)
+    npy_intp dims[2] = {vec->num_envs, obs_size};
+    PyObject* arr = PyArray_SimpleNew(2, dims, NPY_FLOAT32);
+    if (!arr) {
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate opponent observations array");
+        return NULL;
+    }
+
+    // Compute opponent observations for each environment
+    float* data = (float*)PyArray_DATA((PyArrayObject*)arr);
+    for (int i = 0; i < vec->num_envs; i++) {
+        compute_opponent_observations(vec->envs[i], data + i * obs_size);
+    }
+
+    return arr;
+}
+
+// Set opponent actions for all environments (for self-play)
+// Args: vec_handle, actions_array (numpy float32 shape [num_envs, 5])
+// Sets opponent_actions_override for each env (used when use_opponent_override=1)
+static PyObject* vec_set_opponent_actions(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+    PyObject* actions_arr;
+
+    if (!PyArg_ParseTuple(args, "OO", &vec_arg, &actions_arr)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    // Verify array shape and type
+    if (!PyArray_Check(actions_arr)) {
+        PyErr_SetString(PyExc_TypeError, "actions must be a numpy array");
+        return NULL;
+    }
+
+    PyArrayObject* arr = (PyArrayObject*)actions_arr;
+    if (PyArray_NDIM(arr) != 2) {
+        PyErr_SetString(PyExc_ValueError, "actions must be 2D array (num_envs, 5)");
+        return NULL;
+    }
+
+    npy_intp* dims = PyArray_DIMS(arr);
+    if (dims[0] != vec->num_envs || dims[1] != 5) {
+        PyErr_Format(PyExc_ValueError,
+                     "actions shape must be (%d, 5), got (%ld, %ld)",
+                     vec->num_envs, (long)dims[0], (long)dims[1]);
+        return NULL;
+    }
+
+    if (PyArray_TYPE(arr) != NPY_FLOAT32) {
+        PyErr_SetString(PyExc_TypeError, "actions must be float32 dtype");
+        return NULL;
+    }
+
+    // Copy actions to each environment's override buffer
+    float* data = (float*)PyArray_DATA(arr);
+    for (int i = 0; i < vec->num_envs; i++) {
+        for (int j = 0; j < 5; j++) {
+            vec->envs[i]->opponent_actions_override[j] = data[i * 5 + j];
+        }
+    }
+
+    Py_RETURN_NONE;
+}
+
+// Enable or disable opponent action override for all environments
+// Args: vec_handle, enable (0=use autopilot, 1=use external actions)
+static PyObject* vec_enable_opponent_override(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+    int enable;
+
+    if (!PyArg_ParseTuple(args, "Oi", &vec_arg, &enable)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    for (int i = 0; i < vec->num_envs; i++) {
+        vec->envs[i]->use_opponent_override = enable ? 1 : 0;
+    }
+
+    Py_RETURN_NONE;
+}
+
+// Set opponent observation/reward buffers for all environments (for dual self-play)
+// Args: vec_handle, opponent_obs_array (numpy float32), opponent_rewards_array (numpy float32)
+// These buffers will be written during c_step() enabling Multiprocessing backend
+static PyObject* vec_set_opponent_buffers(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+    PyObject* opp_obs_arr;
+    PyObject* opp_rew_arr;
+
+    if (!PyArg_ParseTuple(args, "OOO", &vec_arg, &opp_obs_arr, &opp_rew_arr)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    // Get obs_size from first environment
+    int obs_size = vec->envs[0]->obs_size;
+
+    // Set opponent observations buffer
+    float* opp_obs_data = NULL;
+    if (opp_obs_arr != Py_None) {
+        if (!PyArray_Check(opp_obs_arr)) {
+            PyErr_SetString(PyExc_TypeError, "opponent_obs must be a numpy array or None");
+            return NULL;
+        }
+        PyArrayObject* arr = (PyArrayObject*)opp_obs_arr;
+        if (PyArray_TYPE(arr) != NPY_FLOAT32) {
+            PyErr_SetString(PyExc_TypeError, "opponent_obs must be float32 dtype");
+            return NULL;
+        }
+        opp_obs_data = (float*)PyArray_DATA(arr);
+    }
+
+    // Set opponent rewards buffer
+    float* opp_rew_data = NULL;
+    if (opp_rew_arr != Py_None) {
+        if (!PyArray_Check(opp_rew_arr)) {
+            PyErr_SetString(PyExc_TypeError, "opponent_rewards must be a numpy array or None");
+            return NULL;
+        }
+        PyArrayObject* arr = (PyArrayObject*)opp_rew_arr;
+        if (PyArray_TYPE(arr) != NPY_FLOAT32) {
+            PyErr_SetString(PyExc_TypeError, "opponent_rewards must be float32 dtype");
+            return NULL;
+        }
+        opp_rew_data = (float*)PyArray_DATA(arr);
+    }
+
+    // Set buffers for each environment
+    // Each env gets a slice: env[i] -> opp_obs_data + i*obs_size, opp_rew_data + i
+    for (int i = 0; i < vec->num_envs; i++) {
+        if (opp_obs_data != NULL) {
+            vec->envs[i]->opponent_observations = opp_obs_data + i * obs_size;
+        } else {
+            vec->envs[i]->opponent_observations = NULL;
+        }
+        if (opp_rew_data != NULL) {
+            vec->envs[i]->opponent_rewards = opp_rew_data + i;
+        } else {
+            vec->envs[i]->opponent_rewards = NULL;
+        }
+    }
+
     Py_RETURN_NONE;
 }

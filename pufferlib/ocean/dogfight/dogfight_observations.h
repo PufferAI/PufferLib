@@ -31,6 +31,91 @@
 #define INV_MAX_RANGE (1.0f / MAX_RANGE)
 
 // ============================================================================
+// Generalized observation computation for self-play
+// ============================================================================
+// Computes observations from 'self' plane's perspective looking at 'other' plane.
+// Used for both player and opponent observations.
+//
+// Note: Timer observation uses env->tick/max_steps which is shared between both
+// planes. This is correct for self-play where both see the same episode timer.
+
+void compute_obs_momentum_for_plane(Dogfight *env, Plane *self, Plane *other, float *obs_buffer) {
+    Quat q_inv = {self->ori.w, -self->ori.x, -self->ori.y, -self->ori.z};
+
+    // === OWN FLIGHT STATE ===
+    // Body-frame velocity
+    Vec3 vel_body = quat_rotate(q_inv, self->vel);
+    float speed = norm3(self->vel);
+
+    // Angle of attack
+    Vec3 forward = quat_rotate(self->ori, vec3(1, 0, 0));
+    Vec3 up = quat_rotate(self->ori, vec3(0, 0, 1));
+    float aoa = 0.0f;
+    if (speed > 1.0f) {
+        Vec3 vel_norm = normalize3(self->vel);
+        float cos_alpha = clampf(dot3(vel_norm, forward), -1.0f, 1.0f);
+        float alpha = acosf(cos_alpha);
+        float sign = (dot3(self->vel, up) < 0) ? 1.0f : -1.0f;
+        aoa = alpha * sign;
+    }
+
+    // Energy state
+    float potential = self->pos.z * INV_WORLD_MAX_Z;
+    float kinetic = (speed * speed) / (MAX_SPEED * MAX_SPEED);
+    float own_energy = (potential + kinetic) * 0.5f;
+
+    // === TARGET STATE ===
+    Vec3 rel_pos = sub3(other->pos, self->pos);
+    Vec3 rel_pos_body = quat_rotate(q_inv, rel_pos);
+    float dist = norm3(rel_pos);
+
+    float target_az = atan2f(rel_pos_body.y, rel_pos_body.x);
+    float r_horiz = sqrtf(rel_pos_body.x * rel_pos_body.x + rel_pos_body.y * rel_pos_body.y);
+    float target_el = atan2f(rel_pos_body.z, fmaxf(r_horiz, 1e-6f));
+
+    // Closure rate (positive = closing)
+    Vec3 rel_vel = sub3(self->vel, other->vel);
+    float closure = dot3(rel_vel, normalize3(rel_pos));
+
+    // === TACTICAL ===
+    Vec3 other_fwd = quat_rotate(other->ori, vec3(1, 0, 0));
+    Vec3 to_self = normalize3(sub3(self->pos, other->pos));
+    float target_aspect = dot3(other_fwd, to_self);
+
+    float other_speed = norm3(other->vel);
+    float other_potential = other->pos.z * INV_WORLD_MAX_Z;
+    float other_kinetic = (other_speed * other_speed) / (MAX_SPEED * MAX_SPEED);
+    float other_energy = (other_potential + other_kinetic) * 0.5f;
+    float energy_advantage = clampf(own_energy - other_energy, -1.0f, 1.0f);
+
+    int i = 0;
+    // Own flight state (9 obs)
+    obs_buffer[i++] = clampf(vel_body.x * INV_MAX_SPEED, 0.0f, 1.0f);  // Forward speed [0,1]
+    obs_buffer[i++] = clampf(vel_body.y * INV_MAX_SPEED, -1.0f, 1.0f); // Sideslip [-1,1]
+    obs_buffer[i++] = clampf(vel_body.z * INV_MAX_SPEED, -1.0f, 1.0f); // Climb rate [-1,1]
+    obs_buffer[i++] = clampf(self->omega.x * INV_MAX_OMEGA, -1.0f, 1.0f); // Roll rate [-1,1]
+    obs_buffer[i++] = clampf(self->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f); // Pitch rate [-1,1]
+    obs_buffer[i++] = clampf(self->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f); // Yaw rate [-1,1]
+    obs_buffer[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);          // AoA [-1,1]
+    obs_buffer[i++] = potential;                                        // Altitude [0,1]
+    obs_buffer[i++] = own_energy;                                       // Own energy [0,1]
+
+    // Target state - spherical (4 obs)
+    obs_buffer[i++] = target_az * INV_PI;                               // Azimuth [-1,1]
+    obs_buffer[i++] = target_el * INV_HALF_PI;                          // Elevation [-1,1]
+    obs_buffer[i++] = clampf(dist * INV_MAX_RANGE, 0.0f, 1.0f);        // Range [0,1]
+    obs_buffer[i++] = clampf(closure * INV_MAX_SPEED, -1.0f, 1.0f);    // Closure [-1,1]
+
+    // Tactical (2 obs)
+    obs_buffer[i++] = energy_advantage;                                 // Energy advantage [-1,1]
+    obs_buffer[i++] = target_aspect;                                    // Aspect [-1,1]
+
+    // Timer (1 obs) - how much time left before episode ends
+    obs_buffer[i++] = (float)env->tick / (float)(env->max_steps + 1);   // Timer [0,~1)
+    // OBS_SIZE = 16
+}
+
+// ============================================================================
 // Scheme 0: OBS_MOMENTUM - Baseline (15 obs)
 // ============================================================================
 // Body-frame velocity + omega + AoA + energy + target spherical + tactical
@@ -41,82 +126,7 @@
 // [9-12]  Target spherical (azimuth, elevation, range, closure)
 // [13-14] Tactical (energy advantage, target aspect)
 void compute_obs_momentum(Dogfight *env) {
-    Plane *p = &env->player;
-    Plane *o = &env->opponent;
-
-    Quat q_inv = {p->ori.w, -p->ori.x, -p->ori.y, -p->ori.z};
-
-    // === OWN FLIGHT STATE ===
-    // Body-frame velocity
-    Vec3 vel_body = quat_rotate(q_inv, p->vel);
-    float speed = norm3(p->vel);
-
-    // Angle of attack
-    Vec3 forward = quat_rotate(p->ori, vec3(1, 0, 0));
-    Vec3 up = quat_rotate(p->ori, vec3(0, 0, 1));
-    float aoa = 0.0f;
-    if (speed > 1.0f) {
-        Vec3 vel_norm = normalize3(p->vel);
-        float cos_alpha = clampf(dot3(vel_norm, forward), -1.0f, 1.0f);
-        float alpha = acosf(cos_alpha);
-        float sign = (dot3(p->vel, up) < 0) ? 1.0f : -1.0f;
-        aoa = alpha * sign;
-    }
-
-    // Energy state
-    float potential = p->pos.z * INV_WORLD_MAX_Z;
-    float kinetic = (speed * speed) / (MAX_SPEED * MAX_SPEED);
-    float own_energy = (potential + kinetic) * 0.5f;
-
-    // === TARGET STATE ===
-    Vec3 rel_pos = sub3(o->pos, p->pos);
-    Vec3 rel_pos_body = quat_rotate(q_inv, rel_pos);
-    float dist = norm3(rel_pos);
-
-    float target_az = atan2f(rel_pos_body.y, rel_pos_body.x);
-    float r_horiz = sqrtf(rel_pos_body.x * rel_pos_body.x + rel_pos_body.y * rel_pos_body.y);
-    float target_el = atan2f(rel_pos_body.z, fmaxf(r_horiz, 1e-6f));
-
-    // Closure rate
-    Vec3 rel_vel = sub3(p->vel, o->vel);
-    float closure = dot3(rel_vel, normalize3(rel_pos));
-
-    // === TACTICAL ===
-    Vec3 opp_fwd = quat_rotate(o->ori, vec3(1, 0, 0));
-    Vec3 to_player = normalize3(sub3(p->pos, o->pos));
-    float target_aspect = dot3(opp_fwd, to_player);
-
-    float opp_speed = norm3(o->vel);
-    float opp_potential = o->pos.z * INV_WORLD_MAX_Z;
-    float opp_kinetic = (opp_speed * opp_speed) / (MAX_SPEED * MAX_SPEED);
-    float opp_energy = (opp_potential + opp_kinetic) * 0.5f;
-    float energy_advantage = clampf(own_energy - opp_energy, -1.0f, 1.0f);
-
-    int i = 0;
-    // Own flight state (9 obs)
-    env->observations[i++] = clampf(vel_body.x * INV_MAX_SPEED, 0.0f, 1.0f);  // Forward speed [0,1]
-    env->observations[i++] = clampf(vel_body.y * INV_MAX_SPEED, -1.0f, 1.0f); // Sideslip [-1,1]
-    env->observations[i++] = clampf(vel_body.z * INV_MAX_SPEED, -1.0f, 1.0f); // Climb rate [-1,1]
-    env->observations[i++] = clampf(p->omega.x * INV_MAX_OMEGA, -1.0f, 1.0f); // Roll rate [-1,1]
-    env->observations[i++] = clampf(p->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f); // Pitch rate [-1,1]
-    env->observations[i++] = clampf(p->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f); // Yaw rate [-1,1]
-    env->observations[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);          // AoA [-1,1]
-    env->observations[i++] = potential;                                        // Altitude [0,1]
-    env->observations[i++] = own_energy;                                       // Own energy [0,1]
-
-    // Target state - spherical (4 obs)
-    env->observations[i++] = target_az * INV_PI;                               // Azimuth [-1,1]
-    env->observations[i++] = target_el * INV_HALF_PI;                          // Elevation [-1,1]
-    env->observations[i++] = clampf(dist * INV_MAX_RANGE, 0.0f, 1.0f);        // Range [0,1]
-    env->observations[i++] = clampf(closure * INV_MAX_SPEED, -1.0f, 1.0f);    // Closure [-1,1]
-
-    // Tactical (2 obs)
-    env->observations[i++] = energy_advantage;                                 // Energy advantage [-1,1]
-    env->observations[i++] = target_aspect;                                    // Aspect [-1,1]
-
-    // Timer (1 obs) - how much time left before episode ends
-    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);   // Timer [0,~1)
-    // OBS_SIZE = 16
+    compute_obs_momentum_for_plane(env, &env->player, &env->opponent, env->observations);
 }
 
 // ============================================================================
@@ -857,6 +867,106 @@ void compute_observations(Dogfight *env) {
         case OBS_QBAR:            compute_obs_qbar(env); break;
         case OBS_KITCHEN_SINK:    compute_obs_kitchen_sink(env); break;
         default:                  compute_obs_momentum(env); break;
+    }
+}
+
+// ============================================================================
+// Opponent observations (for self-play)
+// ============================================================================
+// Scheme 1 generalized for self-play (opponent perspective)
+// ============================================================================
+void compute_obs_momentum_beta_for_plane(Dogfight *env, Plane *self, Plane *other, float *obs_buffer) {
+    Quat q_inv = {self->ori.w, -self->ori.x, -self->ori.y, -self->ori.z};
+
+    // Body-frame velocity
+    Vec3 vel_body = quat_rotate(q_inv, self->vel);
+    float speed = norm3(self->vel);
+
+    // Angle of attack
+    Vec3 forward = quat_rotate(self->ori, vec3(1, 0, 0));
+    Vec3 up = quat_rotate(self->ori, vec3(0, 0, 1));
+    float aoa = 0.0f;
+    if (speed > 1.0f) {
+        Vec3 vel_norm = normalize3(self->vel);
+        float cos_alpha = clampf(dot3(vel_norm, forward), -1.0f, 1.0f);
+        float alpha = acosf(cos_alpha);
+        float sign = (dot3(self->vel, up) < 0) ? 1.0f : -1.0f;
+        aoa = alpha * sign;
+    }
+
+    // Sideslip angle (beta)
+    float beta = 0.0f;
+    if (speed > 1.0f) {
+        beta = asinf(clampf(vel_body.y / speed, -1.0f, 1.0f));
+    }
+
+    // Energy state
+    float potential = self->pos.z * INV_WORLD_MAX_Z;
+    float kinetic = (speed * speed) / (MAX_SPEED * MAX_SPEED);
+    float own_energy = (potential + kinetic) * 0.5f;
+
+    // Target state
+    Vec3 rel_pos = sub3(other->pos, self->pos);
+    Vec3 rel_pos_body = quat_rotate(q_inv, rel_pos);
+    float dist = norm3(rel_pos);
+
+    float target_az = atan2f(rel_pos_body.y, rel_pos_body.x);
+    float r_horiz = sqrtf(rel_pos_body.x * rel_pos_body.x + rel_pos_body.y * rel_pos_body.y);
+    float target_el = atan2f(rel_pos_body.z, fmaxf(r_horiz, 1e-6f));
+
+    Vec3 rel_vel = sub3(self->vel, other->vel);
+    float closure = dot3(rel_vel, normalize3(rel_pos));
+
+    // Tactical
+    Vec3 other_fwd = quat_rotate(other->ori, vec3(1, 0, 0));
+    Vec3 to_self = normalize3(sub3(self->pos, other->pos));
+    float target_aspect = dot3(other_fwd, to_self);
+
+    float other_speed = norm3(other->vel);
+    float other_potential = other->pos.z * INV_WORLD_MAX_Z;
+    float other_kinetic = (other_speed * other_speed) / (MAX_SPEED * MAX_SPEED);
+    float other_energy = (other_potential + other_kinetic) * 0.5f;
+    float energy_advantage = clampf(own_energy - other_energy, -1.0f, 1.0f);
+
+    int i = 0;
+    // Own flight state (9 obs)
+    obs_buffer[i++] = clampf(vel_body.x * INV_MAX_SPEED, 0.0f, 1.0f);
+    obs_buffer[i++] = clampf(vel_body.y * INV_MAX_SPEED, -1.0f, 1.0f);
+    obs_buffer[i++] = clampf(vel_body.z * INV_MAX_SPEED, -1.0f, 1.0f);
+    obs_buffer[i++] = clampf(self->omega.x * INV_MAX_OMEGA, -1.0f, 1.0f);
+    obs_buffer[i++] = clampf(self->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f);
+    obs_buffer[i++] = clampf(self->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f);
+    obs_buffer[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);
+    obs_buffer[i++] = potential;
+    obs_buffer[i++] = own_energy;
+
+    // Sideslip angle (scheme 1 addition)
+    obs_buffer[i++] = clampf(beta * INV_MAX_SIDESLIP, -1.0f, 1.0f);
+
+    // Target state (4 obs)
+    obs_buffer[i++] = target_az * INV_PI;
+    obs_buffer[i++] = target_el * INV_HALF_PI;
+    obs_buffer[i++] = clampf(dist * INV_MAX_RANGE, 0.0f, 1.0f);
+    obs_buffer[i++] = clampf(closure * INV_MAX_SPEED, -1.0f, 1.0f);
+
+    // Tactical (2 obs)
+    obs_buffer[i++] = energy_advantage;
+    obs_buffer[i++] = target_aspect;
+
+    // Timer (1 obs)
+    obs_buffer[i++] = (float)env->tick / (float)(env->max_steps + 1);
+    // OBS_SIZE = 17
+}
+
+// ============================================================================
+// Computes observations from opponent's perspective looking at player.
+// Supports scheme 0 (MOMENTUM) and scheme 1 (MOMENTUM_BETA).
+void compute_opponent_observations(Dogfight *env, float *opp_obs_buffer) {
+    if (env->obs_scheme == 1) {
+        compute_obs_momentum_beta_for_plane(env, &env->opponent, &env->player, opp_obs_buffer);
+    } else {
+        // Default to scheme 0 for other schemes (may need to add more _for_plane variants)
+        compute_obs_momentum_for_plane(env, &env->opponent, &env->player, opp_obs_buffer);
     }
 }
 

@@ -209,7 +209,7 @@ void draw_obs_bar(int x, int y, const char* label, float value, bool is_01_range
 }
 
 void draw_obs_monitor(Dogfight *env) {
-    int start_x = 900;
+    int start_x = 1540;
     int start_y = 10;
     int row_height = 18;
 
@@ -317,7 +317,7 @@ void c_render(Dogfight *env) {
         env->client->camera_mode = 0;  // 0 = follow target, 1 = midpoint view, 2 = chase, 3 = cockpit
         env->client->is_dragging = false;
 
-        InitWindow(1280, 720, "Dogfight");
+        InitWindow(1920, 1080, "Dogfight");
         SetTargetFPS(60);
 
         env->client->camera.up = (Vector3){0.0f, 0.0f, 1.0f};

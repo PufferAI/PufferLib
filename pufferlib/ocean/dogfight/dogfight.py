@@ -1,9 +1,11 @@
 import time
 import numpy as np
 import gymnasium
+import torch
 
 import pufferlib
 from pufferlib.ocean.dogfight import binding
+from pufferlib.models import Default as Policy
 
 
 # Autopilot mode constants (must match autopilot.h enum)
@@ -63,6 +65,13 @@ class Dogfight(pufferlib.PufferEnv):
         reward_closing_scale=0.003,  # Per m/s closing
         penalty_neg_g=0.02,          # Enforce "pull to turn"
         speed_min=50.0,              # Stall threshold
+        # Self-play: load frozen checkpoint as opponent
+        opponent_checkpoint=None,    # Path to .pt checkpoint file
+        opponent_device='cpu',       # Device for opponent policy inference
+        # Self-play: policy pool for skill-based opponent selection
+        policy_pool=None,            # PolicyPool instance (optional)
+        opponent_selection='skill_match',  # Selection strategy: skill_match, prioritized, random, latest
+        opponent_swap_interval=500_000,    # Steps between opponent swaps
     ):
         # Observation size depends on scheme
         obs_size = OBS_SIZES.get(obs_scheme, 19)
@@ -144,17 +153,108 @@ class Dogfight(pufferlib.PufferEnv):
 
         self.c_envs = binding.vectorize(*self._env_handles)
 
+        # Set opponent observation/reward/action buffers if provided (for dual self-play with Multiprocessing)
+        # These buffers come from shared memory in Multiprocessing backend
+        self._opponent_observations = None
+        self._opponent_rewards = None
+        self._opponent_actions = None
+        if buf is not None and 'opponent_observations' in buf:
+            self._opponent_observations = buf['opponent_observations']
+            self._opponent_rewards = buf['opponent_rewards']
+            # Flatten to match C expectations: shape (num_envs * obs_size,) and (num_envs,)
+            opp_obs_flat = self._opponent_observations.reshape(-1)
+            opp_rew_flat = self._opponent_rewards.reshape(-1)
+            binding.vec_set_opponent_buffers(self.c_envs, opp_obs_flat, opp_rew_flat)
+            # Enable opponent override mode (use external actions from shared memory)
+            binding.vec_enable_opponent_override(self.c_envs, 1)
+        if buf is not None and 'opponent_actions' in buf:
+            self._opponent_actions = buf['opponent_actions']
+
+        # Self-play: opponent policy (loaded after c_envs created)
+        self.opponent_policy = None
+        self.opponent_device = opponent_device
+        self.opponent_lstm_state = None  # For recurrent policies (future)
+        self._current_opponent_path = None  # Track current opponent for swap detection
+
+        # Policy pool: skill-based opponent selection
+        self.policy_pool = policy_pool
+        self.opponent_selection = opponent_selection
+        self.opponent_swap_interval = opponent_swap_interval
+        self._last_opponent_swap = 0  # Steps since last swap
+        self._save_to_pool_callback = None  # Set by training script to save checkpoints
+
+        if opponent_checkpoint:
+            self._load_opponent_policy(opponent_checkpoint)
+            self._current_opponent_path = opponent_checkpoint
+
         # Set fixed stage on C side if specified
         if fixed_stage >= 0:
             binding.vec_set_curriculum_target(self.c_envs, float(fixed_stage))
 
+    def _load_opponent_policy(self, path):
+        """Load a frozen checkpoint as the opponent policy."""
+        # Create policy with same architecture as training
+        self.opponent_policy = Policy(self, hidden_size=128)
+        self.opponent_policy = self.opponent_policy.to(self.opponent_device)
+
+        # Load checkpoint weights
+        state_dict = torch.load(path, map_location=self.opponent_device, weights_only=True)
+
+        # Handle different checkpoint formats:
+        # 1. Strip 'module.' prefix from distributed training
+        # 2. Strip 'policy.' prefix from LSTMWrapper
+        # 3. Skip LSTM-specific keys (lstm.*, cell.*)
+        cleaned_state_dict = {}
+        for k, v in state_dict.items():
+            # Skip LSTM keys - we only load the base policy
+            if k.startswith('lstm.') or k.startswith('cell.'):
+                continue
+            # Strip prefixes
+            new_k = k.replace('module.', '').replace('policy.', '')
+            cleaned_state_dict[new_k] = v
+
+        self.opponent_policy.load_state_dict(cleaned_state_dict)
+
+        # Freeze for inference only
+        self.opponent_policy.eval()
+        for p in self.opponent_policy.parameters():
+            p.requires_grad = False
+
+        # Enable C-side override mode (use external actions instead of autopilot)
+        binding.vec_enable_opponent_override(self.c_envs, 1)
+
     def reset(self, seed=None):
         self.tick = 0
         binding.vec_reset(self.c_envs, seed if seed else 0)
+        # Reset opponent LSTM state on episode reset (for recurrent policies)
+        self.opponent_lstm_state = None
         return self.observations, []
 
     def step(self, actions):
         self.actions[:] = actions
+
+        # Self-play: read opponent actions from shared memory buffer (dual self-play with Multiprocessing)
+        # or compute from local frozen policy (standard self-play with Serial)
+        if self._opponent_actions is not None:
+            # Multiprocessing dual self-play: read opponent actions from shared memory
+            # Main process writes actions to buf, workers read them here
+            opp_actions_flat = self._opponent_actions.reshape(-1, 5)  # Shape: (num_envs, 5)
+            binding.vec_set_opponent_actions(self.c_envs, opp_actions_flat)
+        elif self.opponent_policy is not None:
+            # Serial self-play: compute opponent actions from frozen policy in-process
+            opp_obs = binding.vec_get_opponent_observations(self.c_envs)
+            opp_obs_t = torch.as_tensor(opp_obs, device=self.opponent_device)
+
+            with torch.no_grad():
+                # Policy returns Normal distribution for continuous actions
+                logits, _ = self.opponent_policy.forward_eval(
+                    opp_obs_t, state=self.opponent_lstm_state
+                )
+                # Sample actions from the distribution
+                opp_actions = logits.sample()
+                opp_actions = opp_actions.cpu().numpy().astype(np.float32)
+
+            binding.vec_set_opponent_actions(self.c_envs, opp_actions)
 
         self.tick += 1
         binding.vec_step(self.c_envs)
@@ -206,6 +306,10 @@ class Dogfight(pufferlib.PufferEnv):
                                     self._base_stage_kills = 0.0
                                     self._base_stage_eps = 0.0
 
+                                    # Save milestone checkpoint to pool if callback is set
+                                    if self._save_to_pool_callback is not None:
+                                        self._save_to_pool_callback(mastery_stage, base_stage_perf)
+
                             # Target is ALWAYS mastered + 0.9 (except finalization)
                             in_finalization = total_steps >= self._finalize_at_steps
                             if in_finalization:
@@ -227,6 +331,19 @@ class Dogfight(pufferlib.PufferEnv):
                             # Base stage: decay by 10% each interval (so recent perf matters more)
                             self._base_stage_kills *= 0.9
                             self._base_stage_eps *= 0.9
+
+        # Policy pool: periodic opponent swapping
+        if self.policy_pool is not None and len(self.policy_pool) > 0:
+            total_steps = self.tick * self.num_agents
+            if total_steps - self._last_opponent_swap >= self.opponent_swap_interval:
+                self._last_opponent_swap = total_steps
+                new_opponent = self.policy_pool.select(
+                    self._target_stage,
+                    mode=self.opponent_selection
+                )
+                if new_opponent and new_opponent != self._current_opponent_path:
+                    self._load_opponent_policy(new_opponent)
+                    self._current_opponent_path = new_opponent
 
         return (self.observations, self.rewards, self.terminals, self.truncations, info)
 
