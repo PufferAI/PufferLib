@@ -355,7 +355,7 @@ void c_step(Boxoban* env) {
 
     int action = env->actions[0];
     env->terminals[0] = 0;
-    env->rewards[0] = 0;
+    env->rewards[0] = 0.0;
 
     float on_target = boxes_on_targets(env);
 
@@ -398,7 +398,7 @@ void c_step(Boxoban* env) {
     //new obs is modified in place
 
     //length penalty
-    //env->rewards[0] -= 0.1;
+    env->rewards[0] -= 0.01;
 }
 
 Client* c_create(Boxoban* env) {

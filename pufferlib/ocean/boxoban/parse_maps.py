@@ -6,6 +6,8 @@ AGENT = '@'
 WALL  = '#'
 BOX   = '$'
 TARG  = '.'
+BOX_ON_TARG = '*'
+AGENT_ON_TARG = '+'
 
 def parse_puzzles(text):
     puzzles = []
@@ -38,10 +40,10 @@ def encode_puzzle(grid):
     for r in range(10):
         for c in range(10):
             ch = grid[r][c]
-            agent.append(1 if ch == AGENT else 0)
-            walls.append(1 if ch == WALL  else 0)
-            boxes.append(1 if ch == BOX   else 0)
-            targ.append(1 if ch == TARG  else 0)
+            agent.append(1 if ch in (AGENT, AGENT_ON_TARG) else 0)
+            walls.append(1 if ch == WALL else 0)
+            boxes.append(1 if ch in (BOX, BOX_ON_TARG) else 0)
+            targ.append(1 if ch in (TARG, BOX_ON_TARG, AGENT_ON_TARG) else 0)
 
     return agent, walls, boxes, targ
 
