@@ -277,7 +277,8 @@ class DualPerspectiveTrainer:
             return
 
         # Get perf from logs (already computed kill rate)
-        perf = logs.get('perf', 0) if logs else 0
+        # Note: stats are prefixed with 'environment/' in mean_and_log()
+        perf = logs.get('environment/perf', 0) if logs else 0
         if perf >= self.perf_threshold:
             print(f'[CHECKPOINT-QUEUE] Learner dominating (perf={perf:.2f} >= {self.perf_threshold}), saving checkpoint')
 
@@ -299,10 +300,27 @@ class DualPerspectiveTrainer:
             # Upgrade opponent to older checkpoint (lag positions behind)
             self._update_opponent()
 
-    def _check_selfplay_transition(self):
-        """Check if we should transition to dual self-play mode and save milestones."""
-        # Get current stage from driver env (update tracking variable)
-        current_stage = getattr(self.driver_env, '_current_stage', 0)
+    def _check_selfplay_transition(self, stats=None):
+        """Check if we should transition to dual self-play mode and save milestones.
+
+        Args:
+            stats: Stats dict from trainer.stats (contains 'stage' from C logs)
+        """
+        # Get current stage from stats (populated by C code during evaluate)
+        # Use avg_stage which is more reliable than individual episode stages
+        # (when target=20.9, 90% episodes are stage 20, 10% are stage 19)
+        if stats and 'avg_stage' in stats and len(stats['avg_stage']) > 0:
+            # avg_stage is the mean stage across episodes - use max to catch when we hit 20
+            current_stage = max(stats['avg_stage'])
+        elif stats and 'stage' in stats and len(stats['stage']) > 0:
+            # Fallback to raw stage values
+            current_stage = max(stats['stage'])
+        else:
+            # Last resort fallback
+            current_stage = getattr(self.driver_env, '_current_stage', 0)
+            if self.trainer.epoch % 100 == 0:
+                print(f'[DUAL-SELFPLAY] WARNING: No stage in stats, using fallback stage={current_stage}')
+
         self._current_stage = current_stage
 
         # Check for milestone saves (stage 10, stage 20)
@@ -312,28 +330,33 @@ class DualPerspectiveTrainer:
         if self.use_dual_selfplay:
             return  # Already in self-play mode
 
-        debug(1, f'_check_selfplay_transition: stage={current_stage}, min={self.selfplay_min_stage}')
+        # Trigger at 19.9+ to catch stage 20 reliably (avg_stage=20.0 when all episodes are stage 20)
+        trigger_threshold = self.selfplay_min_stage - 0.1  # 20 - 0.1 = 19.9
 
-        if current_stage >= self.selfplay_min_stage:
+        if current_stage >= trigger_threshold:
             print(f'[DUAL-SELFPLAY] Transitioning to dual self-play at stage {current_stage}', flush=True)
             self.use_dual_selfplay = True
 
             # Allocate opponent buffers
             self._allocate_opponent_buffers()
 
-            # Enable opponent override in C code
-            # With Multiprocessing: override is already enabled in dogfight.py when opponent buffers are set
-            # With Serial: enable it now via direct C binding call
-            if not hasattr(self.vecenv, 'buf') or 'opponent_actions' not in self.vecenv.buf:
-                from pufferlib.ocean.dogfight import binding
-                binding.vec_enable_opponent_override(self.driver_env.c_envs, 1)
+            # Enable opponent override in C code (activates self-play mode)
+            # This must be done when transitioning to self-play, not at env init
+            from pufferlib.ocean.dogfight import binding
+            binding.vec_enable_opponent_override(self.driver_env.c_envs, 1)
+
+            # Signal workers to enable opponent override via shared memory flag
+            # (workers check this flag in step() before using opponent actions)
+            if hasattr(self.vecenv, 'buf') and 'selfplay_active' in self.vecenv.buf:
+                self.vecenv.buf['selfplay_active'][0] = 1
+                print(f'[DUAL-SELFPLAY] Set selfplay_active flag in shared memory')
 
             # Initialize opponent from checkpoint queue
             self._update_opponent()
 
     def evaluate(self):
         """Evaluate with dual experience collection in self-play mode."""
-        self._check_selfplay_transition()
+        # Note: selfplay transition check is done in train() BEFORE stats are cleared
 
         if not self.use_dual_selfplay:
             # Standard single-perspective evaluation
@@ -563,9 +586,9 @@ class DualPerspectiveTrainer:
         """Train on combined experience in self-play mode."""
         if not self.use_dual_selfplay:
             # Standard single-perspective training
+            # Check for selfplay transition BEFORE train() clears stats
+            self._check_selfplay_transition(self.trainer.stats)
             logs = self.trainer.train()
-            # Still check milestones during curriculum phase
-            self._check_selfplay_transition()
             return logs
 
         # Dual self-play training
@@ -969,7 +992,8 @@ def eval_selfplay(env_name, args, player_path, opponent_path, load_id=None):
             # Opponent forward pass
             logits_o, value_o = opponent_policy.forward_eval(ob_opponent, state_o)
             action_o, logprob_o, _ = pufferlib.pytorch.sample_logits(logits_o)
-            action_o_np = action_o.cpu().numpy().reshape(vecenv.action_space.shape)
+            # Keep 2D shape (num_agents, action_dim) - don't reshape to lose batch dimension!
+            action_o_np = action_o.cpu().numpy().astype(np.float32)
 
         # Clip actions for continuous action space
         if isinstance(logits_p, torch.distributions.Normal):
@@ -991,8 +1015,8 @@ def eval_selfplay(env_name, args, player_path, opponent_path, load_id=None):
             print(f'  OPPON  OBS: tgt_az={obs_o[9]:.2f} tgt_el={obs_o[10]:.2f} range={obs_o[11]:.2f} closure={obs_o[12]:.2f} aspect={obs_o[14]:.2f}')
             print(f'  OPPON  ACT: throttle={act_o[0]:.2f} elev={act_o[1]:.2f} ail={act_o[2]:.2f} rud={act_o[3]:.2f} trig={act_o[4]:.2f}')
 
-        # Set opponent actions in C (before stepping) - slice to match actual num_agents
-        binding.vec_set_opponent_actions(driver.c_envs, action_o_np[:num_agents])
+        # Set opponent actions in C (before stepping) - already correct 2D shape (num_agents, 5)
+        binding.vec_set_opponent_actions(driver.c_envs, action_o_np)
 
         # Step environment with player action
         ob, reward, terminated, truncated, info = vecenv.step(action_p_np)

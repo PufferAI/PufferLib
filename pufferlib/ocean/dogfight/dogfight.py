@@ -52,6 +52,7 @@ class Dogfight(pufferlib.PufferEnv):
 
         curriculum_enabled=0,
         curriculum_randomize=0,
+        eval_spawn_mode=0,  # 0=random, 1=opponent_advantage (opponent behind player)
         fixed_stage=-1,
         eval_interval=2_500_000,    # Steps between curriculum evaluations (2.5M = ~1s at 2.5M SPS)
         warmup_steps=3_000_000,     # Steps before curriculum starts evaluating (3M = ~1.2s at 2.5M SPS)
@@ -107,7 +108,7 @@ class Dogfight(pufferlib.PufferEnv):
         self.min_eval_episodes = min_eval_episodes
 
         # Mastered stage tracking (pure mastery-gated progression)
-        self._mastered_stage = -1  # Highest stage with perf >= 0.95 AND >= 250 episodes (-1 = none)
+        self._mastered_stage = -1  # Highest stage with perf >= 0.90 AND >= 250 episodes (-1 = none)
 
         # Finalization: snap to mastered stage near end of training
         # total_timesteps is global total, finalize_margin is global margin
@@ -143,6 +144,7 @@ class Dogfight(pufferlib.PufferEnv):
 
                 curriculum_enabled=curriculum_enabled,
                 curriculum_randomize=curriculum_randomize,
+                eval_spawn_mode=eval_spawn_mode,
 
                 reward_aim_scale=reward_aim_scale,
                 reward_closing_scale=reward_closing_scale,
@@ -165,10 +167,16 @@ class Dogfight(pufferlib.PufferEnv):
             opp_obs_flat = self._opponent_observations.reshape(-1)
             opp_rew_flat = self._opponent_rewards.reshape(-1)
             binding.vec_set_opponent_buffers(self.c_envs, opp_obs_flat, opp_rew_flat)
-            # Enable opponent override mode (use external actions from shared memory)
-            binding.vec_enable_opponent_override(self.c_envs, 1)
+            # NOTE: Don't enable opponent override here - let DualPerspectiveTrainer
+            # control when to activate self-play mode. Otherwise sp_* stats get
+            # logged during curriculum training which is confusing.
         if buf is not None and 'opponent_actions' in buf:
             self._opponent_actions = buf['opponent_actions']
+        # Shared flag indicating self-play mode is active (set by main process)
+        self._selfplay_active = None
+        self._opponent_override_enabled = False  # Track if we've enabled C-side override
+        if buf is not None and 'selfplay_active' in buf:
+            self._selfplay_active = buf['selfplay_active']
 
         # Self-play: opponent policy (loaded after c_envs created)
         self.opponent_policy = None
@@ -233,9 +241,16 @@ class Dogfight(pufferlib.PufferEnv):
     def step(self, actions):
         self.actions[:] = actions
 
+        # Check if main process has signaled self-play mode via shared memory flag
+        # This enables opponent override in workers (Multiprocessing) on first detection
+        if self._selfplay_active is not None and self._selfplay_active[0] == 1:
+            if not self._opponent_override_enabled:
+                binding.vec_enable_opponent_override(self.c_envs, 1)
+                self._opponent_override_enabled = True
+
         # Self-play: read opponent actions from shared memory buffer (dual self-play with Multiprocessing)
         # or compute from local frozen policy (standard self-play with Serial)
-        if self._opponent_actions is not None:
+        if self._opponent_actions is not None and self._opponent_override_enabled:
             # Multiprocessing dual self-play: read opponent actions from shared memory
             # Main process writes actions to buf, workers read them here
             opp_actions_flat = self._opponent_actions.reshape(-1, 5)  # Shape: (num_envs, 5)
@@ -298,7 +313,7 @@ class Dogfight(pufferlib.PufferEnv):
                             # Check mastery at MAJORITY stage (round, not floor)
                             # At target 0.9, majority is stage 1 (90% of episodes)
                             mastery_stage = round(self._target_stage)
-                            if base_stage_perf >= 0.95 and self._base_stage_eps >= self.min_eval_episodes:
+                            if base_stage_perf >= 0.90 and self._base_stage_eps >= self.min_eval_episodes:
                                 if mastery_stage > self._mastered_stage:
                                     #print(f'[CURRICULUM] MASTERED: stage {mastery_stage} (perf={base_stage_perf:.3f}, eps={self._base_stage_eps:.0f})')
                                     self._mastered_stage = mastery_stage
@@ -580,6 +595,18 @@ class Dogfight(pufferlib.PufferEnv):
             env_idx: Environment index
         """
         binding.env_set_camera_follow(self._env_handles[env_idx], 1 if follow_opponent else 0)
+
+    def set_eval_spawn_mode(self, mode: int):
+        """
+        Set eval spawn mode for all environments.
+
+        Args:
+            mode: 0 = random (default), 1 = opponent_advantage (opponent behind player)
+
+        Mode 1 (opponent_advantage) places opponent 400m behind player at 15° off tail,
+        giving opponent an easy kill opportunity. Useful for testing if opponent can kill.
+        """
+        binding.vec_set_eval_spawn_mode(self.c_envs, mode)
 
 
 def test_performance(timeout=10, atn_cache=1024):

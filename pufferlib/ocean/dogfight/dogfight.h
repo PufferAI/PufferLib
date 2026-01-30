@@ -167,6 +167,8 @@ typedef struct Log {
     float episode_length;
     float score;           // 1.0 on kill, 0.0 on failure
     float perf;            // Raw kills (becomes kill_rate after vec_log divides by n)
+    float sp_player_kills; // Self-play only: player kills (TUI shows P:## O:##)
+    float sp_opp_kills;    // Self-play only: opponent kills
     float shots_fired;
     float accuracy;
     float stage;
@@ -257,6 +259,7 @@ typedef struct Dogfight {
     RewardConfig rcfg;
     // Episode-level tracking (reset each episode)
     int kill;                   // 1 if killed this episode, 0 otherwise
+    int opp_kill;               // 1 if opponent killed player this episode (self-play)
     float episode_shots_fired;  // For accuracy tracking
     // Curriculum learning
     int curriculum_enabled;     // 0 = off (legacy spawning), 1 = on
@@ -288,6 +291,8 @@ typedef struct Dogfight {
     int trigger_pulls;            // Times trigger was pulled (>0.5)
     int prev_trigger;             // For edge detection
     DeathReason death_reason;
+    DeathReason last_death_reason;  // For rendering: what ended the previous episode
+    int last_winner;                // For rendering: 1=player won, -1=opponent won, 0=draw/timeout
     // Debug
     int env_num;                // Environment index (for filtering debug output)
     // Observation highlighting (for visual debugging)
@@ -302,6 +307,8 @@ typedef struct Dogfight {
     // Head-on lockout: disable guns until planes pass each other (only for head-on spawns)
     int head_on_lockout;                 // 1 = guns locked until pass-through detected
     float prev_rel_dot;                  // Previous dot(rel_pos, rel_vel) for detecting pass
+    // Eval spawn mode: 0 = random (default), 1 = opponent_advantage (for testing opponent kill)
+    int eval_spawn_mode;
 } Dogfight;
 
 #include "dogfight_observations.h"
@@ -353,6 +360,9 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     // Opponent buffers: NULL by default, set by Python if dual self-play is enabled
     env->opponent_observations = NULL;
     env->opponent_rewards = NULL;
+
+    // Eval spawn mode: 0 = random (default)
+    env->eval_spawn_mode = 0;
 }
 
 void set_obs_highlight(Dogfight *env, int *indices, int count) {
@@ -361,6 +371,13 @@ void set_obs_highlight(Dogfight *env, int *indices, int count) {
         if (indices[i] >= 0 && indices[i] < 25) {
             env->obs_highlight[indices[i]] = 1;
         }
+    }
+}
+
+// Helper: set opponent reward (only if buffer exists, for dual self-play)
+static inline void set_opponent_reward(Dogfight *env, float reward) {
+    if (env->opponent_rewards != NULL) {
+        env->opponent_rewards[0] = reward;
     }
 }
 
@@ -404,6 +421,11 @@ void add_log(Dogfight *env) {
     env->log.episode_return += env->episode_return;
     env->log.episode_length += (float)env->tick;
     env->log.perf += env->kill ? 1.0f : 0.0f;
+    // Self-play kill tracking: log at stage 20+ (AutoAce or self-play both have bidirectional combat)
+    if (env->stage >= CURRICULUM_AUTOACE) {
+        env->log.sp_player_kills += env->kill ? 1.0f : 0.0f;
+        env->log.sp_opp_kills += env->opp_kill ? 1.0f : 0.0f;
+    }
     env->log.score += env->rewards[0];
     env->log.shots_fired += env->episode_shots_fired;
     env->log.accuracy = (env->log.shots_fired > 0.0f) ? (env->log.perf / env->log.shots_fired * 100.0f) : 0.0f;
@@ -706,7 +728,7 @@ static void spawn_zoom_attack(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     env->player.ori = pitch_quat;
 
     // Set player to high speed (reduced from 140-150 due to instability at extreme pitch)
-    float zoom_speed = rndf(120, 130);
+    float zoom_speed = rndf(110, 120);
     Vec3 base_vel = vec3(zoom_speed, 0, 0);
     env->player.vel = quat_rotate(pitch_quat, base_vel);
     env->player.prev_vel = env->player.vel;
@@ -1109,11 +1131,69 @@ static void spawn_eval_random(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     }
 }
 
+// Test spawn: Opponent behind player with advantage but not instant kill
+// Player is 30° off opponent's nose - opponent must maneuver to get the shot
+// Opponent is 400m behind, clear positional advantage
+static void spawn_eval_opponent_advantage(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    env->head_on_lockout = 0;
+    env->prev_rel_dot = 0.0f;
+
+    // Player at base altitude, flying straight along +X
+    float base_alt = 2500.0f;
+    float speed = norm3(player_vel);
+    if (speed < 70.0f) speed = 80.0f;
+
+    env->player.pos = vec3(0, 0, base_alt);
+    env->player.vel = vec3(speed, 0, 0);
+    env->player.ori = quat_from_axis_angle(vec3(0, 0, 1), 0.0f);  // Flying +X
+    env->player.throttle = 0.5f;
+
+    // Opponent 400m behind player
+    float dist = 400.0f;
+    Vec3 opp_pos = vec3(-dist, 0, base_alt);  // Directly behind player
+
+    // Opponent heading: 30° off from pointing at player
+    // Player is at (0,0), opponent at (-400,0)
+    // Direct heading to player would be 0° (pointing +X)
+    // We offset 30° so player is 30° off opponent's nose
+    float angle_off_nose = 30.0f * DEG_TO_RAD;
+    float opp_heading = angle_off_nose;  // Pointing 30° left of player
+
+    Vec3 opp_vel = vec3(speed * cosf(opp_heading), speed * sinf(opp_heading), 0);
+    reset_plane(&env->opponent, opp_pos, opp_vel);
+    env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
+    env->opponent.throttle = 0.6f;
+
+    // Autopilot: pursuit mode to track player
+    env->opponent_ap.mode = AP_PURSUIT_LEAD;
+    env->opponent_ap.prev_vz = 0.0f;
+    env->opponent_ap.prev_bank_error = 0.0f;
+
+    if (DEBUG >= 1) {
+        Vec3 to_player = sub3(env->player.pos, opp_pos);
+        float actual_dist = norm3(to_player);
+        Vec3 opp_fwd = quat_rotate(env->opponent.ori, vec3(1, 0, 0));
+        Vec3 to_player_norm = normalize3(to_player);
+        float aim_dot = dot3(opp_fwd, to_player_norm);
+        float aim_angle = acosf(clampf(aim_dot, -1.0f, 1.0f)) * RAD_TO_DEG;
+        fprintf(stderr, "[EVAL-OPP-ADV] dist=%.0fm aim_angle=%.1f° (cone=5°)\n",
+                actual_dist, aim_angle);
+    }
+}
+
 // Master spawn function: dispatches to stage-specific spawner
 void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    // For eval mode (curriculum_randomize=1), use fully random spawn
+    // For eval mode (curriculum_randomize=1), use spawn based on eval_spawn_mode
     if (env->curriculum_randomize) {
-        spawn_eval_random(env, player_pos, player_vel);
+        if (env->eval_spawn_mode == 1) {
+            // Mode 1: opponent advantage - for testing if opponent can kill player
+            spawn_eval_opponent_advantage(env, player_pos, player_vel);
+        } else {
+            // Mode 0 (default): random spawn
+            spawn_eval_random(env, player_pos, player_vel);
+        }
+        // Eval mode uses stage 20 (AutoAce) max_steps for fair combat duration
+        env->max_steps = STAGES[CURRICULUM_AUTOACE].max_steps;  // 6000
         return;
     }
 
@@ -1187,6 +1267,16 @@ void set_curriculum_target(Dogfight *env, float target) {
 // ============================================================================
 
 void c_reset(Dogfight *env) {
+    // Save last episode result for rendering before reset
+    env->last_death_reason = env->death_reason;
+    if (env->death_reason == DEATH_KILL && env->kill) {
+        env->last_winner = 1;   // Player won (got the kill)
+    } else if (env->death_reason == DEATH_KILL) {
+        env->last_winner = -1;  // Opponent won (player was killed)
+    } else {
+        env->last_winner = 0;   // Draw/timeout/OOB
+    }
+
     // Curriculum stage is now managed globally by Python based on aggregate kill_rate
     // (see set_curriculum_stage() called from training loop)
 
@@ -1197,6 +1287,7 @@ void c_reset(Dogfight *env) {
 
     // Clear episode tracking (safe to clear kill after curriculum used it)
     env->kill = 0;
+    env->opp_kill = 0;
     env->episode_shots_fired = 0.0f;
     env->total_aileron_usage = 0.0f;
     env->aileron_bias = 0.0f;
@@ -1315,13 +1406,19 @@ void c_step(Dogfight *env) {
         // Check if self-play opponent shot the player (two-way combat)
         // Skip if in head-on lockout (guns disabled until pass)
         if (opp_actions[4] > 0.5f && !env->head_on_lockout) {
+            // Set fire cooldown for visual tracer effect
+            if (env->opponent.fire_cooldown == 0) {
+                env->opponent.fire_cooldown = FIRE_COOLDOWN;
+            }
             if (check_hit(&env->opponent, &env->player, env->cos_gun_cone)) {
                 // Player was shot down by self-play opponent!
                 if (DEBUG >= 1) {
                     printf("[SELF-PLAY] Player shot down by opponent policy!\n");
                 }
+                env->opp_kill = 1;  // Track opponent kill for self-play stats
                 env->death_reason = DEATH_KILL;
-                env->rewards[0] = -1.0f;  // Penalty for dying
+                env->rewards[0] = -1.0f;
+                set_opponent_reward(env, 1.0f);  // Opponent wins (zero-sum)
                 env->terminals[0] = 1;
                 add_log(env);
                 c_reset(env);
@@ -1356,8 +1453,10 @@ void c_step(Dogfight *env) {
                 if (DEBUG >= 1) {
                     printf("[AUTOACE] Player shot down by AutoAce!\n");
                 }
+                env->opp_kill = 1;  // Track opponent kill for self-play stats
                 env->death_reason = DEATH_KILL;  // Reuse KILL (opponent's kill)
                 env->rewards[0] = -1.0f;  // Penalty for dying
+                set_opponent_reward(env, 1.0f);  // Opponent wins (zero-sum)
                 env->terminals[0] = 1;
                 add_log(env);
                 c_reset(env);
@@ -1423,8 +1522,9 @@ void c_step(Dogfight *env) {
 
     // Decrement fire cooldowns
     // Note: AutoAce (stage 20+) handles opponent cooldown internally in autoace.h
+    // Self-play mode also uses opponent cooldown for visual tracer
     if (p->fire_cooldown > 0) p->fire_cooldown--;
-    if (env->stage < CURRICULUM_AUTOACE && o->fire_cooldown > 0) o->fire_cooldown--;
+    if ((env->use_opponent_override || env->stage < CURRICULUM_AUTOACE) && o->fire_cooldown > 0) o->fire_cooldown--;
 
     // Player fires: action[4] > 0.5 and cooldown ready and not in head-on lockout
     if (DEBUG >= 10) printf("trigger=%.3f, cooldown=%d, lockout=%d\n", env->actions[4], p->fire_cooldown, env->head_on_lockout);
@@ -1439,6 +1539,7 @@ void c_step(Dogfight *env) {
             env->kill = 1;
             env->death_reason = DEATH_KILL;
             env->rewards[0] = 1.0f;
+            set_opponent_reward(env, -1.0f);  // Opponent loses (zero-sum)
             env->episode_return += 1.0f;
             env->terminals[0] = 1;
             add_log(env);
@@ -1492,9 +1593,31 @@ void c_step(Dogfight *env) {
     float r_rudder = -fabsf(env->actions[3]) * PENALTY_RUDDER;
     reward += r_rudder;
 
-    // 6. Tiny tick penalty: time preference for faster kills
+    // 6. Low altitude descent penalty: discourage descending rolling scissors
+    // If below 250m AND descending, penalty each tick
+    // Reduced from -0.25f to -0.025f to prevent gradient explosion
+    // (Opponent gets same penalty applied in opponent_rewards section at end)
+    float r_low_descent = 0.0f;
+    if (p->pos.z < 500.0f && p->vel.z < 0.0f) {
+        r_low_descent = -0.025f;
+        reward += r_low_descent;
+    }
+
+    // 7. Tiny tick penalty: time preference for faster kills
     float r_time = -0.00001f;
     reward += r_time;
+
+    // 8. Energy management reward: encourage maintaining/gaining energy
+    // Asymmetric: +0.001 for gaining energy, -0.0005 for losing (incentivize climbing)
+    float player_energy = calc_specific_energy(p);
+    float r_player_energy = (player_energy > p->prev_energy) ? 0.001f : -0.0005f;
+    reward += r_player_energy;
+    p->prev_energy = player_energy;
+
+    // Opponent energy reward (applied to opponent_rewards at end)
+    float opp_energy = calc_specific_energy(o);
+    float r_opp_energy = (opp_energy > o->prev_energy) ? 0.001f : -0.0005f;
+    o->prev_energy = opp_energy;
 
 #if DEBUG >= 2
     // Track aiming diagnostics
@@ -1532,7 +1655,37 @@ void c_step(Dogfight *env) {
     env->rewards[0] = reward;
     env->episode_return += reward;
 
-    // Check bounds (player only)
+    // Check opponent bounds FIRST (opponent crash/OOB = player wins)
+    // This handles the "both spiral to ground, one hits first" scenario
+    bool opp_oob = fabsf(o->pos.x) > WORLD_HALF_X ||
+                   fabsf(o->pos.y) > WORLD_HALF_Y ||
+                   o->pos.z < 0 || o->pos.z > WORLD_MAX_Z;
+
+    if (opp_oob) {
+        if (DEBUG >= 1) {
+            printf("[TERMINAL] Opponent OOB/crashed: pos=(%.1f,%.1f,%.1f)\n",
+                   o->pos.x, o->pos.y, o->pos.z);
+        }
+        env->death_reason = DEATH_OOB;  // Opponent went OOB (not a player kill)
+
+        // Descending rolling scissors fix: if player is below 200m when opponent crashes,
+        // both were in a death spiral - punish both equally
+        if (p->pos.z < 200.0f) {
+            // Both in death spiral - full punishment for both
+            env->rewards[0] = -1.0f;
+            set_opponent_reward(env, -1.0f);
+        } else {
+            // Player was at safe altitude - only partial penalty for not getting gun kill
+            env->rewards[0] = -0.5f;
+            set_opponent_reward(env, -1.0f);
+        }
+        env->terminals[0] = 1;
+        add_log(env);
+        c_reset(env);
+        return;
+    }
+
+    // Check player bounds
     bool oob = fabsf(p->pos.x) > WORLD_HALF_X ||
                fabsf(p->pos.y) > WORLD_HALF_Y ||
                p->pos.z < 0 || p->pos.z > WORLD_MAX_Z;
@@ -1555,12 +1708,29 @@ void c_step(Dogfight *env) {
         // Track death reason (priority: supersonic > oob > timeout)
         if (supersonic) {
             env->death_reason = DEATH_SUPERSONIC;
+            // Physics blowup - both policies penalized equally
+            env->rewards[0] = -1.0f;
+            set_opponent_reward(env, -1.0f);
         } else if (oob) {
             env->death_reason = DEATH_OOB;
+            // Player crashed/OOB
+            env->rewards[0] = -1.0f;
+
+            // Descending rolling scissors fix: if opponent is below 200m when player crashes,
+            // both were in a death spiral - punish both equally
+            if (o->pos.z < 200.0f) {
+                // Both in death spiral - full punishment for both
+                set_opponent_reward(env, -1.0f);
+            } else {
+                // Opponent was at safe altitude - only partial penalty for not getting gun kill
+                set_opponent_reward(env, -0.5f);
+            }
         } else {
+            // Timeout - both failed to achieve kill
             env->death_reason = DEATH_TIMEOUT;
+            env->rewards[0] = -0.5f;
+            set_opponent_reward(env, -0.5f);
         }
-        env->rewards[0] = (supersonic || p->pos.z <= 0 || env->tick >= env->max_steps) ? -1.0f : 0.0f;
         env->terminals[0] = 1;
         add_log(env);
         c_reset(env);
@@ -1579,7 +1749,15 @@ void c_step(Dogfight *env) {
     }
     if (env->opponent_rewards != NULL) {
         // Zero-sum game: opponent reward = negative of player reward
-        env->opponent_rewards[0] = -env->rewards[0];
+        // PLUS independent penalties/rewards (not zero-sum)
+        float opp_reward = -env->rewards[0];
+        // Low descent penalty
+        if (o->pos.z < 500.0f && o->vel.z < 0.0f) {
+            opp_reward += -0.025f;  // Same penalty as player for low descent
+        }
+        // Energy management reward (calculated above in section 8)
+        opp_reward += r_opp_energy;
+        env->opponent_rewards[0] = opp_reward;
     }
 }
 

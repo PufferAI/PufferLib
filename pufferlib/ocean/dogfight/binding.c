@@ -19,6 +19,7 @@ static PyObject* vec_get_opponent_observations(PyObject* self, PyObject* args);
 static PyObject* vec_set_opponent_actions(PyObject* self, PyObject* args);
 static PyObject* vec_enable_opponent_override(PyObject* self, PyObject* args);
 static PyObject* vec_set_opponent_buffers(PyObject* self, PyObject* args);
+static PyObject* vec_set_eval_spawn_mode(PyObject* self, PyObject* args);
 
 #define MY_METHODS \
     {"env_force_state", (PyCFunction)env_force_state, METH_VARARGS | METH_KEYWORDS, "Force environment state"}, \
@@ -35,7 +36,8 @@ static PyObject* vec_set_opponent_buffers(PyObject* self, PyObject* args);
     {"vec_get_opponent_observations", (PyCFunction)vec_get_opponent_observations, METH_VARARGS, "Get observations from opponent perspective for self-play"}, \
     {"vec_set_opponent_actions", (PyCFunction)vec_set_opponent_actions, METH_VARARGS, "Set opponent actions from external policy (self-play)"}, \
     {"vec_enable_opponent_override", (PyCFunction)vec_enable_opponent_override, METH_VARARGS, "Enable/disable opponent action override (0=autopilot, 1=external)"}, \
-    {"vec_set_opponent_buffers", (PyCFunction)vec_set_opponent_buffers, METH_VARARGS, "Set opponent observation/reward buffers for dual self-play"}
+    {"vec_set_opponent_buffers", (PyCFunction)vec_set_opponent_buffers, METH_VARARGS, "Set opponent observation/reward buffers for dual self-play"}, \
+    {"vec_set_eval_spawn_mode", (PyCFunction)vec_set_eval_spawn_mode, METH_VARARGS, "Set eval spawn mode (0=random, 1=opponent_advantage)"}
 
 static float get_float(PyObject *kwargs, const char *key, float default_val) {
     if (!kwargs) return default_val;
@@ -70,10 +72,12 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
 
     int curriculum_enabled = get_int(kwargs, "curriculum_enabled", 0);
     int curriculum_randomize = get_int(kwargs, "curriculum_randomize", 0);
+    int eval_spawn_mode = get_int(kwargs, "eval_spawn_mode", 0);
 
     int env_num = get_int(kwargs, "env_num", 0);
 
     init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, env_num);
+    env->eval_spawn_mode = eval_spawn_mode;  // Set after init (overrides default 0)
     return 0;
 }
 
@@ -82,6 +86,8 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "episode_length", log->episode_length);
     assign_to_dict(dict, "score", log->score);
     assign_to_dict(dict, "perf", log->perf);
+    assign_to_dict(dict, "sp_player_kills", log->sp_player_kills);
+    assign_to_dict(dict, "sp_opp_kills", log->sp_opp_kills);
     assign_to_dict(dict, "shots_fired", log->shots_fired);
     assign_to_dict(dict, "accuracy", log->accuracy);
     assign_to_dict(dict, "stage", log->stage);
@@ -616,6 +622,29 @@ static PyObject* vec_set_opponent_buffers(PyObject* self, PyObject* args) {
         } else {
             vec->envs[i]->opponent_rewards = NULL;
         }
+    }
+
+    Py_RETURN_NONE;
+}
+
+// Set eval spawn mode for all environments
+// Args: vec_handle, mode (0=random, 1=opponent_advantage)
+static PyObject* vec_set_eval_spawn_mode(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+    int mode;
+
+    if (!PyArg_ParseTuple(args, "Oi", &vec_arg, &mode)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    for (int i = 0; i < vec->num_envs; i++) {
+        vec->envs[i]->eval_spawn_mode = mode;
     }
 
     Py_RETURN_NONE;

@@ -201,6 +201,8 @@ def _worker_process(env_creators, env_args, env_kwargs, obs_shape, obs_dtype, at
             buffer=shm['opponent_rewards'])[worker_idx]
         buf['opponent_actions'] = np.ndarray((*shape, *atn_shape),
             dtype=atn_dtype, buffer=shm['opponent_actions'])[worker_idx]
+        buf['selfplay_active'] = np.ndarray(1, dtype=np.int8,
+            buffer=shm['selfplay_active'])  # Shared flag, not per-worker
 
     if is_native and num_envs == 1:
         envs = env_creators[0](*env_args[0], **env_kwargs[0], buf=buf, seed=seed)
@@ -324,9 +326,11 @@ class Multiprocessing:
             # Opponent perspective buffers (for dual self-play)
             # opponent_observations/rewards: Written by C code during step if env supports opponent buffers
             # opponent_actions: Written by main process, read by workers before step
+            # selfplay_active: Flag set by main process when self-play mode is enabled
             opponent_observations=RawArray(obs_ctype, num_agents * int(np.prod(obs_shape))),
             opponent_rewards=RawArray('f', num_agents),
             opponent_actions=RawArray(atn_ctype, num_agents * int(np.prod(atn_shape))),
+            selfplay_active=RawArray('b', 1),  # Single flag: 0=curriculum, 1=selfplay
         )
         shape = (num_workers, agents_per_worker)
         self.obs_batch_shape = (self.agents_per_batch, *obs_shape)
@@ -348,6 +352,7 @@ class Multiprocessing:
             opponent_rewards=np.ndarray(shape, dtype=np.float32, buffer=self.shm['opponent_rewards']),
             opponent_actions=np.ndarray((*shape, *atn_shape),
                 dtype=atn_dtype, buffer=self.shm['opponent_actions']),
+            selfplay_active=np.ndarray(1, dtype=np.int8, buffer=self.shm['selfplay_active']),
         )
         self.buf['semaphores'][:] = MAIN 
 

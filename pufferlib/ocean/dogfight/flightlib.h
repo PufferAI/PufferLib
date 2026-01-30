@@ -150,6 +150,7 @@ typedef struct {
     float g_force;
     float yaw_from_rudder;
     int fire_cooldown;
+    float prev_energy;  // Previous specific energy for energy management reward
 } Plane;
 
 static inline void step_plane(Plane *p, float dt) {
@@ -887,6 +888,12 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
     }
 }
 
+// Calculate specific energy: Es = altitude + speed²/(2*g)
+static inline float calc_specific_energy(Plane *p) {
+    float speed = norm3(p->vel);
+    return p->pos.z + (speed * speed) / (2.0f * GRAVITY);
+}
+
 static inline void reset_plane(Plane *p, Vec3 pos, Vec3 vel) {
     p->pos = pos;
     p->vel = vel;
@@ -897,6 +904,9 @@ static inline void reset_plane(Plane *p, Vec3 pos, Vec3 vel) {
     p->g_force = 1.0f;
     p->yaw_from_rudder = 0.0f;
     p->fire_cooldown = 0;
+    // Initialize specific energy for energy management reward
+    float speed = norm3(vel);
+    p->prev_energy = pos.z + (speed * speed) / (2.0f * GRAVITY);
 
     _realistic_step_count = 0;
 

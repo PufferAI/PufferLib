@@ -337,6 +337,11 @@ void c_render(Dogfight *env) {
         env->client->camera_mode = (env->client->camera_mode + 1) % 4;
     }
 
+    // R key: force reset to new episode
+    if (IsKeyPressed(KEY_R)) {
+        c_reset(env);
+    }
+
     handle_camera_controls(env->client);
 
     Plane *p = &env->player;
@@ -428,12 +433,22 @@ void c_render(Dogfight *env) {
 
     draw_plane_model(env->client, o->pos, o->ori, RED, opponent_scale, env->client->propeller_angle);
 
+    // Player tracer (yellow)
     if (p->fire_cooldown >= FIRE_COOLDOWN - 2) {
         Vec3 nose = add3(p->pos, quat_rotate(p->ori, vec3(15, 0, 0)));
         Vec3 tracer_end = add3(p->pos, quat_rotate(p->ori, vec3(GUN_RANGE, 0, 0)));
         Vector3 nose_r = {nose.x, nose.y, nose.z};
         Vector3 end_r = {tracer_end.x, tracer_end.y, tracer_end.z};
         DrawLine3D(nose_r, end_r, YELLOW);
+    }
+
+    // Opponent tracer (orange) - for self-play or AutoAce
+    if (o->fire_cooldown >= FIRE_COOLDOWN - 2) {
+        Vec3 o_nose = add3(o->pos, quat_rotate(o->ori, vec3(15, 0, 0)));
+        Vec3 o_tracer_end = add3(o->pos, quat_rotate(o->ori, vec3(GUN_RANGE, 0, 0)));
+        Vector3 o_nose_r = {o_nose.x, o_nose.y, o_nose.z};
+        Vector3 o_end_r = {o_tracer_end.x, o_tracer_end.y, o_tracer_end.z};
+        DrawLine3D(o_nose_r, o_end_r, ORANGE);
     }
 
     EndMode3D();
@@ -450,9 +465,32 @@ void c_render(Dogfight *env) {
     DrawText(TextFormat("Perf: %.1f%% | Shots: %.0f", env->log.perf / fmaxf(env->log.n, 1.0f) * 100.0f, env->log.shots_fired), 10, 190, 20, YELLOW);
     DrawText(TextFormat("Stage: %d", env->stage), 10, 220, 20, LIME);
 
+    // Show last round result prominently for first 100 ticks
+    if (env->tick < 100 && env->last_death_reason != DEATH_NONE) {
+        const char* result_text = NULL;
+        Color result_color = WHITE;
+        if (env->last_winner == 1) {
+            result_text = "PLAYER WINS";
+            result_color = GREEN;
+        } else if (env->last_winner == -1) {
+            result_text = "OPPONENT WINS";
+            result_color = RED;
+        } else if (env->last_death_reason == DEATH_OOB) {
+            result_text = "OUT OF BOUNDS";
+            result_color = ORANGE;
+        } else if (env->last_death_reason == DEATH_TIMEOUT) {
+            result_text = "TIMEOUT";
+            result_color = YELLOW;
+        }
+        if (result_text) {
+            int text_width = MeasureText(result_text, 50);
+            DrawText(result_text, (1920 - text_width) / 2, 450, 50, result_color);
+        }
+    }
+
     draw_obs_monitor(env);
 
-    DrawText("Mouse drag: Orbit | Scroll: Zoom | ESC: Exit", 10, (int)env->client->height - 30, 16, GRAY);
+    DrawText("Mouse drag: Orbit | Scroll: Zoom | R: Reset | ESC: Exit", 10, (int)env->client->height - 30, 16, GRAY);
 
     EndDrawing();
 }
