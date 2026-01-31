@@ -53,12 +53,13 @@ class OrbitalDock(pufferlib.PufferEnv):
         reward_plane_align=0.005,
         reward_node_timing=0.002,
     ):
-        # 14-dimensional observation space, normalized to approximately [-1, 1]
+        # 14-dimensional observation space
         # [rel_x, rel_y, rel_z, rel_vx, rel_vy, rel_vz, dist_norm, closing_speed,
         #  fuel_remaining, orbit_alt_norm, phase_angle, inclination_diff,
         #  node_angle, time_remaining]
+        # Using fixed 10km/100m/s reference scales, values typically in [-5, 5]
         self.single_observation_space = gymnasium.spaces.Box(
-            low=-2.0, high=2.0, shape=(14,), dtype=np.float32
+            low=-10.0, high=10.0, shape=(14,), dtype=np.float32
         )
 
         # Multi-discrete action space: 5x5x5 = 125 actions

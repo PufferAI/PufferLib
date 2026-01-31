@@ -324,20 +324,20 @@ static void compute_observations(OrbitalDock* env) {
         ) / M_PI;
     }
 
-    // Normalization scales
-    double pos_scale = (env->init_dist > 1e-10) ? env->init_dist : 1.0;
-    double vel_scale = (v_circ > 1e-10) ? v_circ : 1.0;
+    // Normalization scales - use fixed reference scales for stable observations
+    double pos_scale = 10000.0;  // 10km reference - keeps observations meaningful across distances
+    double vel_scale = 100.0;    // 100 m/s reference for relative velocities
 
     // Fill observation buffer (all normalized to approximately [-1, 1])
     int idx = 0;
-    env->observations[idx++] = (float)fmax(-1.0, fmin(1.0, rel_r / pos_scale));      // 0: rel_x (R-bar)
-    env->observations[idx++] = (float)fmax(-1.0, fmin(1.0, rel_v / pos_scale));      // 1: rel_y (V-bar)
-    env->observations[idx++] = (float)fmax(-1.0, fmin(1.0, rel_h / pos_scale));      // 2: rel_z (H-bar)
-    env->observations[idx++] = (float)fmax(-1.0, fmin(1.0, rel_vr / vel_scale));     // 3: rel_vx
-    env->observations[idx++] = (float)fmax(-1.0, fmin(1.0, rel_vv / vel_scale));     // 4: rel_vy
-    env->observations[idx++] = (float)fmax(-1.0, fmin(1.0, rel_vh / vel_scale));     // 5: rel_vz
-    env->observations[idx++] = (float)fmax(0.0, fmin(2.0, dist / pos_scale));        // 6: dist_norm [0,2]
-    env->observations[idx++] = (float)fmax(-1.0, fmin(1.0, closing_speed / vel_scale)); // 7: closing_speed
+    env->observations[idx++] = (float)(rel_r / pos_scale);      // 0: rel_x (R-bar) - not clamped
+    env->observations[idx++] = (float)(rel_v / pos_scale);      // 1: rel_y (V-bar)
+    env->observations[idx++] = (float)(rel_h / pos_scale);      // 2: rel_z (H-bar)
+    env->observations[idx++] = (float)(rel_vr / vel_scale);     // 3: rel_vx
+    env->observations[idx++] = (float)(rel_vv / vel_scale);     // 4: rel_vy
+    env->observations[idx++] = (float)(rel_vh / vel_scale);     // 5: rel_vz
+    env->observations[idx++] = (float)(dist / pos_scale);       // 6: dist_norm
+    env->observations[idx++] = (float)(closing_speed / vel_scale); // 7: closing_speed
     env->observations[idx++] = (float)fmax(0.0, fmin(1.0, env->fuel / env->fuel_budget)); // 8: fuel_remaining
     env->observations[idx++] = (float)fmax(-1.0, fmin(1.0, alt_diff));               // 9: orbit_alt_norm
     env->observations[idx++] = (float)fmax(-1.0, fmin(1.0, phase_angle));            // 10: phase_angle
@@ -365,13 +365,13 @@ void c_reset(OrbitalDock* env) {
     env->t_radius = r;
 
     // Scale randomization by difficulty
-    // At difficulty=0: 5km behind, coplanar, nearly co-orbital
+    // At difficulty=0: 100m radial offset (directly above station), simple radial thrust task
     // At difficulty=1: full ranges (±50km alt, ±30° phase, ±15° incl, ±5m/s vel)
     double d = env->difficulty;
 
-    // Minimum offsets at difficulty=0 (5km phase separation)
-    double min_phase_off = -0.00074;  // ~5km behind at 6771km radius (radians)
-    double min_alt_off = 0.0;
+    // Minimum offsets at difficulty=0: radial separation only (simpler than phase)
+    double min_phase_off = 0.0;         // No phase offset at easiest difficulty
+    double min_alt_off = 100.0;         // 100m directly above station
     double min_incl_off = 0.0;
     double min_vel_perturb = 0.0;
 
@@ -513,13 +513,22 @@ void c_step(OrbitalDock* env) {
     // 7. Compute rewards
     double reward = fuel_penalty;
 
-    // Distance shaping (small penalty proportional to distance)
-    reward -= env->rw_dist_shaping * (dist / env->init_dist);
+    // Distance shaping: reward for getting closer (in meters, normalized by 1000m)
+    double dist_delta = env->prev_dist - dist;  // positive when closing
+    reward += env->rw_dist_shaping * (dist_delta / 100.0);  // 1m closer = +0.005 reward at default
 
-    // Closing bonus (when close and closing)
+    // Closing velocity reward: reward for having velocity toward target
     double closing_speed = (dist > 1e-10) ? -dot3d(normalize3d(rel_pos), rel_vel) : 0.0;
-    if (dist < env->init_dist * 0.1 && closing_speed > 0) {
-        reward += env->rw_closing;
+    reward += env->rw_closing * (closing_speed / 10.0);  // 1 m/s closing = +0.01 reward at default
+
+    // Proximity bonus: stronger reward as we get very close (exponential)
+    double proximity_bonus = exp(-dist / 500.0);  // peaks at 1.0 when at target, ~0.82 at 100m, ~0.37 at 500m
+    reward += env->rw_vel_match * proximity_bonus * 0.1;
+
+    // Velocity matching shaping: reward for low relative velocity when close
+    if (dist < 500.0) {  // Only matters when close
+        double vel_match_bonus = (1.0 - fmin(1.0, rel_speed / 5.0)) * (1.0 - dist / 500.0);
+        reward += env->rw_vel_match * vel_match_bonus * 0.05;
     }
 
     // Plane alignment shaping (small bonus for reducing inclination difference)
@@ -531,9 +540,7 @@ void c_step(OrbitalDock* env) {
 
     // Terminal rewards
     if (docked) {
-        double v_circ = sqrt(env->mu / env->station_radius);
         reward += env->rw_dock;
-        reward -= env->rw_vel_match * (rel_speed / v_circ);
         env->terminals[0] = 1;
         env->log.dock_success += 1.0f;
         env->log.final_distance += (float)dist;
