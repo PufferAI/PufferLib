@@ -35,15 +35,15 @@ class OrbitalDock(pufferlib.PufferEnv):
         max_thrust=500.0,
         mass=10000.0,
         fuel_budget=100.0,
-        max_steps=2000,
+        max_steps=50,
         # Docking conditions
         dock_dist=5.0,
         dock_speed=0.5,
-        # Difficulty (0.0 = simple starting conditions)
-        difficulty=0.0,
+        # Difficulty (-1.0 = trivial 5m start for proving PPO works)
+        difficulty=-1.0,
         # Reward weights
         reward_dock=10.0,
-        reward_dist_shaping=0.01,
+        reward_dist_shaping=0.1,
         reward_closing=0.1,
         reward_vel_match=1.0,
         reward_fuel_penalty=0.01,
@@ -72,6 +72,7 @@ class OrbitalDock(pufferlib.PufferEnv):
         self.num_agents = num_envs
         self.report_interval = report_interval
         self.tick = 0
+        self.difficulty = difficulty
 
         super().__init__(buf)
 
@@ -116,6 +117,17 @@ class OrbitalDock(pufferlib.PufferEnv):
         return self.observations, []
 
     def step(self, actions):
+        # Action masking for curriculum learning:
+        # At low difficulty, mask radial/normal axes to zero thrust
+        # This reduces effective action space from 125 to 5 (prograde only)
+        if self.difficulty < 0.1:
+            actions = actions.copy()  # Don't modify original
+            actions[:, 1] = 2  # radial = 0 (no thrust)
+            actions[:, 2] = 2  # normal = 0 (no thrust)
+        elif self.difficulty < 0.2:
+            actions = actions.copy()
+            actions[:, 2] = 2  # normal = 0 (only prograde + radial)
+
         self.actions[:] = actions
         self.tick += 1
         binding.vec_step(self.c_envs)

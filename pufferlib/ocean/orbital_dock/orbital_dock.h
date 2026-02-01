@@ -141,6 +141,7 @@ typedef struct {
     double fuel;                 // Remaining delta-v (m/s)
     double init_dist;            // Initial distance for normalization
     double prev_dist;            // Previous distance for shaping
+    double prev_speed;           // Previous relative speed for velocity shaping
     int step_count;
     int max_steps;
 
@@ -410,18 +411,40 @@ void c_reset(OrbitalDock* env) {
     Vec3d r_hat, v_hat, h_hat;
     compute_lvlh(t_pos, t_vel, &r_hat, &v_hat, &h_hat);
 
-    // === APPROACH DIRECTION ===
-    // At difficulty=0: start 30-50m away, close enough to dock without orbital transfers
-    //                  but far enough that Coriolis shows up and agent learns real corrections
-    // At difficulty=1: start further with velocity, requiring real orbital maneuvers
-    double approach_dist = 30.0 + 20.0 * rndf(env) + d * 200.0 * rndf(env);  // 30-50m at d=0, up to 250m at d=1
+    // === APPROACH DISTANCE ===
+    // Design constraint: optimal first action must depend on state
+    // No constant policy should achieve >50% dock rate
+    // d<-0.5: 5-8m with 0-1.5 m/s closing (must brake if fast, thrust if slow)
+    // d<0.05: 8-15m with 0-2.0 m/s closing (longer planning horizon)
+    // d<0.15: 15-30m (2-axis corrections)
+    // d<0.3:  50-200m (full 3-axis control)
+    // d>=0.4: 1-5km (orbital transfers)
+    double approach_dist;
+    if (d < -0.5) {
+        approach_dist = 30.0 + 20.0 * rndf(env);  // 30-50m at d=-1 (spec)
+    } else if (d < 0.05) {
+        approach_dist = 8.0 + 7.0 * rndf(env);  // 8-15m at d=0
+    } else if (d < 0.15) {
+        approach_dist = 15.0 + 15.0 * rndf(env);  // 15-30m at d~0.1
+    } else if (d < 0.3) {
+        approach_dist = 50.0 + 150.0 * rndf(env);  // 50-200m at d~0.2
+    } else {
+        approach_dist = 1000.0 + 4000.0 * d * rndf(env);  // 1-5km at d>=0.4
+    }
 
-    // Direction: random on sphere, but at d=0 biased toward V-bar (simpler dynamics)
+    // Direction: random on sphere, but at low difficulty biased toward V-bar
     double theta = 2.0 * M_PI * rndf(env);
     double phi = acos(2.0 * rndf(env) - 1.0);
 
     // At low difficulty, flatten toward V-bar (equatorial plane in spherical coords)
-    if (d < 0.5) {
+    // d < -0.5: Pure V-bar approach (phi = 90°, along prograde direction)
+    // d = 0: Pure V-bar approach
+    // d = 0.5: Full random direction
+    if (d < -0.5) {
+        // At d=-1: Pure V-bar (prograde) approach - chaser behind station
+        phi = M_PI / 2.0;  // Exactly on V-bar
+        theta = M_PI;      // Negative V-bar direction (chaser behind station)
+    } else if (d < 0.5) {
         phi = M_PI/2.0 + (phi - M_PI/2.0) * d * 2.0;  // At d=0, phi=90° (pure V-bar)
     }
 
@@ -435,13 +458,35 @@ void c_reset(OrbitalDock* env) {
     env->cx = c_pos.x; env->cy = c_pos.y; env->cz = c_pos.z;
 
     // === INITIAL VELOCITY ===
-    // At difficulty=0: start CO-MOVING (zero relative velocity)
-    // This means the agent must actively thrust to dock, but the dynamics are simple
-    // At difficulty=1: add velocity perturbations requiring correction
+    // At d<-0.5: Zero relative velocity - agent MUST thrust to dock
+    // At d=0: Start with closing velocity toward station (0.1-0.3 m/s)
+    //         This makes random exploration likely to stumble into dock zone
+    // At higher d: Add velocity perturbations requiring correction
     Vec3d c_vel = t_vel;  // Start co-moving with station
 
-    // At higher difficulty, add velocity perturbations
-    if (d > 0.1) {
+    if (d < -0.5) {
+        // At d=-1: 0-4.0 m/s closing velocity
+        // Slow starts (<0.5 m/s): clean dock without braking
+        // Medium starts (0.5-1.0 m/s): rough dock without braking
+        // Fast starts (>1.0 m/s): crash without braking - MUST brake
+        double closing_speed = 4.0 * rndf(env);  // 0-4.0 m/s
+        double vr_closing = -lvlh_r / approach_dist * closing_speed;
+        double vv_closing = -lvlh_v / approach_dist * closing_speed;
+        double vh_closing = -lvlh_h / approach_dist * closing_speed;
+        c_vel = add3d(c_vel, scale3d(r_hat, vr_closing));
+        c_vel = add3d(c_vel, scale3d(v_hat, vv_closing));
+        c_vel = add3d(c_vel, scale3d(h_hat, vh_closing));
+    } else if (d < 0.05) {
+        // At d=0: 0-2.0 m/s closing velocity, wider range
+        double closing_speed = 2.0 * rndf(env);  // 0-2.0 m/s
+        double vr_closing = -lvlh_r / approach_dist * closing_speed;
+        double vv_closing = -lvlh_v / approach_dist * closing_speed;
+        double vh_closing = -lvlh_h / approach_dist * closing_speed;
+        c_vel = add3d(c_vel, scale3d(r_hat, vr_closing));
+        c_vel = add3d(c_vel, scale3d(v_hat, vv_closing));
+        c_vel = add3d(c_vel, scale3d(h_hat, vh_closing));
+    } else if (d > 0.1) {
+        // At higher difficulty, add velocity perturbations
         double vel_mag = d * 0.5 * rndf(env);  // up to 0.5 m/s at d=1
         // Random direction perturbation
         double vtheta = 2.0 * M_PI * rndf(env);
@@ -456,9 +501,11 @@ void c_reset(OrbitalDock* env) {
     // Initialize fuel and distance tracking
     env->fuel = env->fuel_budget;
     Vec3d rel = sub3d(vec3d(env->cx, env->cy, env->cz), vec3d(env->tx, env->ty, env->tz));
+    Vec3d rel_vel = sub3d(vec3d(env->cvx, env->cvy, env->cvz), vec3d(env->tvx, env->tvy, env->tvz));
     env->init_dist = norm3d(rel);
     if (env->init_dist < 1.0) env->init_dist = 1.0;  // Prevent division by zero
     env->prev_dist = env->init_dist;
+    env->prev_speed = norm3d(rel_vel);
 
     compute_observations(env);
 }
@@ -536,54 +583,56 @@ void c_step(OrbitalDock* env) {
     double rel_speed = norm3d(rel_vel);
     double c_alt = norm3d(c_pos) - env->earth_radius;
 
-    int docked = (dist < env->dock_dist) && (rel_speed < env->dock_speed);
-    int crashed = (dist < env->dock_dist) && (rel_speed >= env->dock_speed);
     int deorbited = (c_alt < env->deorbit_alt);
     int escaped = (c_alt > env->escape_alt);
     int timeout = (env->step_count >= env->max_steps);
 
     // 7. Compute rewards
-    double reward = fuel_penalty;
+    // Clean 4-component reward structure:
+    // - Step penalty: encourages finishing quickly
+    // - Distance shaping: guides toward target
+    // - Fuel penalty: encourages efficiency
+    // - Terminal rewards: graduated docking quality
 
-    // Distance shaping: reward for getting closer - this is the primary learning signal
+    double reward = 0.0;
+
+    // Step penalty: -0.005/step = -10.0 over 2000 steps (makes timeout costly)
+    reward -= 0.005;
+
+    // Distance shaping: reward for getting closer (potential-based)
     double dist_delta = env->prev_dist - dist;  // positive when closing
-    reward += env->rw_dist_shaping * dist_delta;  // 1m closer = +0.01 reward at default
+    reward += env->rw_dist_shaping * dist_delta;
 
-    // Closing velocity reward: reward for having velocity toward target
-    double closing_speed = (dist > 1e-10) ? -dot3d(normalize3d(rel_pos), rel_vel) : 0.0;
-    reward += env->rw_closing * closing_speed;  // 1 m/s closing = +0.05 reward at default
+    // Velocity shaping: reward for reducing relative speed (potential-based)
+    // This creates a "funnel" - approach but slow down as you get close
+    double speed_delta = env->prev_speed - rel_speed;  // positive when slowing
+    reward += env->rw_vel_match * speed_delta;
 
-    // Penalty for diverging (negative closing speed) - helps prevent running away
-    if (closing_speed < 0) {
-        reward += 0.02 * closing_speed;  // Extra penalty for moving away
-    }
+    // Fuel penalty (already computed above)
+    reward += fuel_penalty;
 
-    // Proximity bonus: stronger reward as we get very close (exponential)
-    double proximity_bonus = exp(-dist / 200.0);  // peaks at 1.0 when at target, ~0.6 at 100m
-    reward += env->rw_vel_match * proximity_bonus * 0.2;
+    // Terminal rewards - graduated docking quality
+    // dock_clean: dist < 5m, speed < 0.5 m/s  -> +10.0
+    // dock_rough: dist < 5m, speed 0.5-1.0 m/s -> +3.0
+    // crash:      dist < 5m, speed >= 1.0 m/s  -> -5.0
+    int dock_clean = (dist < env->dock_dist) && (rel_speed < env->dock_speed);
+    int dock_rough = (dist < env->dock_dist) && (rel_speed >= env->dock_speed) && (rel_speed < 1.0);
+    int crash_dock = (dist < env->dock_dist) && (rel_speed >= 1.0);
 
-    // Velocity matching shaping: reward for low relative velocity when close
-    if (dist < 500.0) {  // Only matters when close
-        double vel_match_bonus = (1.0 - fmin(1.0, rel_speed / 5.0)) * (1.0 - dist / 500.0);
-        reward += env->rw_vel_match * vel_match_bonus * 0.05;
-    }
-
-    // Plane alignment shaping (small bonus for reducing inclination difference)
-    Vec3d c_h = normalize3d(cross3d(c_pos, c_vel));
-    Vec3d t_h = vec3d(env->t_hx, env->t_hy, env->t_hz);
-    double cos_incl = fmax(-1.0, fmin(1.0, dot3d(c_h, t_h)));
-    double incl_alignment = (1.0 + cos_incl) / 2.0;  // 0 when perpendicular, 1 when aligned
-    reward += env->rw_plane_align * incl_alignment;
-
-    // Terminal rewards
-    if (docked) {
-        reward += env->rw_dock;
+    if (dock_clean) {
+        reward += env->rw_dock;  // +10.0
         env->terminals[0] = 1;
         env->log.dock_success += 1.0f;
         env->log.final_distance += (float)dist;
         env->log.final_rel_speed += (float)rel_speed;
-    } else if (crashed) {
-        reward -= env->rw_crash;
+    } else if (dock_rough) {
+        reward += 3.0;  // Rough dock - acceptable
+        env->terminals[0] = 1;
+        env->log.dock_success += 0.5f;  // Count as partial success
+        env->log.final_distance += (float)dist;
+        env->log.final_rel_speed += (float)rel_speed;
+    } else if (crash_dock) {
+        reward -= 5.0;  // Crash - too fast
         env->terminals[0] = 1;
         env->log.crash_rate += 1.0f;
         env->log.final_distance += (float)dist;
@@ -609,6 +658,7 @@ void c_step(OrbitalDock* env) {
 
     env->rewards[0] = (float)reward;
     env->prev_dist = dist;
+    env->prev_speed = rel_speed;
 
     // Update log
     env->log.episode_return += (float)reward;
