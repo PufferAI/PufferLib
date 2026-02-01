@@ -151,6 +151,7 @@ typedef struct {
     int n_boxes; //boxes in map
     Client* client;
     int win;
+    float len_reward_coeff;
 } Boxoban;
 
 void ensure_map_loaded(void); //declare from binding.c
@@ -398,7 +399,7 @@ void c_step(Boxoban* env) {
     //new obs is modified in place
 
     //length penalty
-    env->rewards[0] -= 0.01;
+    env->rewards[0] -= 1.0* env->len_reward_coeff;
 }
 
 Client* c_create(Boxoban* env) {
