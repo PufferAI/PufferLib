@@ -71,7 +71,7 @@ class PuffeRL:
             stripped_name = env_name[7:]  # Remove 'puffer_' prefix
             if stripped_name:
                 try:
-                    binding = importlib.import_module(f'pufferlib.ocean.{stripped_name}.binding')
+                  binding = importlib.import_module(f'pufferlib.ocean.{stripped_name}.binding')
                 except ImportError as e:
                     print(f"-- Failed to import binding for environment '{stripped_name}': \n{e}")
         if binding is None:
@@ -179,7 +179,7 @@ class PuffeRL:
         config['cudagraphs'] = True
         config['kernels'] = True
         config['num_buffers'] = 2
-        self.pufferl_cpp = _C.create_pufferl(config)
+        self.pufferl_cpp = binding.create_pufferl(config)
         self.observations = self.pufferl_cpp.rollouts.observations
         self.actions = self.pufferl_cpp.rollouts.actions
         self.rewards = self.pufferl_cpp.rollouts.rewards
@@ -229,7 +229,7 @@ class PuffeRL:
         config = self.config
         device = config['device']
 
-        state = _C.rollouts(self.pufferl_cpp,)
+        state = binding.rollouts(self.pufferl_cpp,)
 
         '''
         obs, act, rew, term = _C.env_buffers(self.pufferl_cpp)
@@ -273,7 +273,7 @@ class PuffeRL:
         '''
 
         #torch.cuda.synchronize()
-        logs = _C.log_environments(self.pufferl_cpp)
+        logs = binding.log_environments(self.pufferl_cpp)
         if logs:
             self.stats['perf'] = [logs['perf']]
             self.stats['score'] = [logs['score']]
@@ -292,7 +292,7 @@ class PuffeRL:
         config = self.config
         device = config['device']
 
-        losses = _C.train(self.pufferl_cpp)
+        losses = binding.train(self.pufferl_cpp)
 
         profile('train_misc', epoch)
         profile.end()
@@ -870,7 +870,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
     pufferl.logger.init(args)
 
     if train_config['profile']:
-        _C.profiler_start()
+        binding.profiler_start()
 
     all_logs = []
     max_cost = args['train'].get('max_cost', -1)
@@ -890,13 +890,13 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
 
             if should_stop_early is not None and should_stop_early(logs):
                 if train_config['profile']:
-                    _C.profiler_stop()
+                    binding.profiler_stop()
                 model_path = pufferl.close()
                 pufferl.logger.close(model_path)
                 return all_logs
 
     if train_config['profile']:
-        _C.profiler_stop()
+        binding.profiler_stop()
 
     # Final eval. You can reset the env here, but depending on
     # your env, this can skew data (i.e. you only collect the shortest
@@ -926,7 +926,7 @@ def sps(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True
     pufferl = PuffeRL(train_config, logger, verbose)
     # Warmup
     for _ in range(3):
-        _C.batched_forward(
+        binding.batched_forward(
             pufferl.pufferl_cpp,
             pufferl.observations,
             pufferl.total_minibatches,
@@ -937,7 +937,7 @@ def sps(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True
     torch.cuda.synchronize()
     start = time.time()
     for _ in range(N):
-        _C.batched_forward(
+        binding.batched_forward(
             pufferl.pufferl_cpp,
             pufferl.observations,
             pufferl.total_minibatches,
