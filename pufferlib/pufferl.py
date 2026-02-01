@@ -33,6 +33,10 @@ import pufferlib
 import pufferlib.sweep
 import pufferlib.vector
 import pufferlib.pytorch
+
+# Global binding reference
+binding = None
+
 try:
     from pufferlib import _C
     from pufferlib import fake_tensors
@@ -64,6 +68,20 @@ ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
 
 class PuffeRL:
     def __init__(self, config, logger=None, verbose=True):
+        global binding
+        
+        # Load native binding from pufferlib.ocean.<env_name>
+        env_name = config.get('env', config.get('env_name', ''))
+        if env_name.startswith('puffer_'):
+            stripped_name = env_name[7:]  # Remove 'puffer_' prefix
+            if stripped_name:
+                try:
+                    binding = importlib.import_module(f'pufferlib.ocean.{stripped_name}.binding')
+                except ImportError:
+                    print(f"Failed to import binding for environment '{stripped_name}'")
+        if binding is None:
+            print(f"{env_name} must have prefix puffer_ with native bindings built already")
+            sys.exit(1)
         # Backend perf optimization
         num_envs = 8192
         self.num_envs = num_envs
@@ -1408,6 +1426,7 @@ def main():
 
     mode = sys.argv.pop(1)
     env_name = sys.argv.pop(1)
+    
     if mode == 'train':
         train(env_name=env_name)
     elif mode == 'eval':
