@@ -28,38 +28,39 @@ class OrbitalDock(pufferlib.PufferEnv):
         report_interval=128,
         buf=None,
         seed=0,
-        # Physics
+        # Physics (defaults match config/ocean/orbital_dock.ini)
         mu=3.986e14,
         station_radius=6.771e6,
         dt=1.0,
         max_thrust=500.0,
         mass=10000.0,
-        fuel_budget=300.0,
-        max_steps=5000,
+        fuel_budget=100.0,
+        max_steps=2000,
         # Docking conditions
-        dock_dist=50.0,
+        dock_dist=5.0,
         dock_speed=0.5,
-        # Difficulty
-        difficulty=0.3,
+        # Difficulty (0.0 = simple starting conditions)
+        difficulty=0.0,
         # Reward weights
         reward_dock=10.0,
         reward_dist_shaping=0.01,
-        reward_closing=0.05,
+        reward_closing=0.1,
         reward_vel_match=1.0,
-        reward_fuel_penalty=0.005,
+        reward_fuel_penalty=0.01,
         reward_crash=5.0,
-        reward_deorbit=3.0,
-        reward_escape=3.0,
-        reward_plane_align=0.005,
-        reward_node_timing=0.002,
+        reward_deorbit=5.0,
+        reward_escape=5.0,
+        reward_plane_align=0.0,
+        reward_node_timing=0.0,
     ):
         # 14-dimensional observation space
         # [rel_x, rel_y, rel_z, rel_vx, rel_vy, rel_vz, dist_norm, closing_speed,
         #  fuel_remaining, orbit_alt_norm, phase_angle, inclination_diff,
         #  node_angle, time_remaining]
-        # Using fixed 10km/100m/s reference scales, values typically in [-5, 5]
+        # Normalized to approximately [-1, 1] using pos_scale=100m, vel_scale=2m/s
+        # Position/velocity obs can exceed [-1,1] if agent drifts far, so use [-5,5] bounds
         self.single_observation_space = gymnasium.spaces.Box(
-            low=-10.0, high=10.0, shape=(14,), dtype=np.float32
+            low=-5.0, high=5.0, shape=(14,), dtype=np.float32
         )
 
         # Multi-discrete action space: 5x5x5 = 125 actions
@@ -67,7 +68,7 @@ class OrbitalDock(pufferlib.PufferEnv):
         # Each dimension: {0: -100%, 1: -50%, 2: 0%, 3: +50%, 4: +100%}
         self.single_action_space = gymnasium.spaces.MultiDiscrete([5, 5, 5])
 
-        self.render_mode = render_mode
+        self.render_mode = None if render_mode in (None, 'None') else render_mode
         self.num_agents = num_envs
         self.report_interval = report_interval
         self.tick = 0
@@ -118,6 +119,10 @@ class OrbitalDock(pufferlib.PufferEnv):
         self.actions[:] = actions
         self.tick += 1
         binding.vec_step(self.c_envs)
+
+        # Auto-render when render_mode is 'human'
+        if self.render_mode == 'human':
+            self.render()
 
         info = []
         if self.tick % self.report_interval == 0:

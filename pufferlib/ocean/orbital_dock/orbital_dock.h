@@ -85,6 +85,35 @@ typedef struct {
 } Log;
 
 // ============================================================================
+// Render Client Struct (used for visualization)
+// ============================================================================
+
+#define RENDER_WIDTH 1080
+#define RENDER_HEIGHT 720
+#define TRAIL_LENGTH 256
+
+typedef struct {
+    Vec3d pos[TRAIL_LENGTH];
+    int index;
+    int count;
+} Trail;
+
+typedef struct Client {
+    Camera3D camera;
+    float width;
+    float height;
+
+    float camera_distance;
+    float camera_azimuth;
+    float camera_elevation;
+    bool is_dragging;
+    Vector2 last_mouse_pos;
+
+    Trail trail;
+    float scale;  // meters per render unit
+} Client;
+
+// ============================================================================
 // Environment Struct
 // ============================================================================
 
@@ -153,6 +182,9 @@ typedef struct {
 
     // RNG state
     unsigned int rng_state;
+
+    // Render client (NULL if not rendering)
+    Client *client;
 } OrbitalDock;
 
 // ============================================================================
@@ -169,7 +201,8 @@ static inline unsigned int xorshift32(unsigned int* state) {
 }
 
 static inline double rndf(OrbitalDock* env) {
-    return (double)xorshift32(&env->rng_state) / (double)0xFFFFFFFF;
+    (void)env;  // unused, using global rand()
+    return (double)rand() / (double)RAND_MAX;
 }
 
 static inline double rndf_range(OrbitalDock* env, double min, double max) {
@@ -210,42 +243,44 @@ static Vec3d compute_gravity(OrbitalDock* env, Vec3d pos) {
     return scale3d(pos, -env->mu / r3);
 }
 
-// Integrate chaser dynamics using semi-implicit Euler (symplectic)
-static void integrate_chaser(OrbitalDock* env, Vec3d thrust_inertial) {
-    Vec3d pos = vec3d(env->cx, env->cy, env->cz);
-    Vec3d vel = vec3d(env->cvx, env->cvy, env->cvz);
+// Integrate using Velocity Verlet (Störmer-Verlet) - second order, symplectic
+// Error is O(dt³) per step instead of O(dt²) for Euler
+static void integrate_verlet(OrbitalDock* env,
+                             double* px, double* py, double* pz,
+                             double* vx, double* vy, double* vz,
+                             Vec3d thrust) {
+    Vec3d pos = vec3d(*px, *py, *pz);
+    Vec3d vel = vec3d(*vx, *vy, *vz);
 
-    // Compute acceleration: gravity + thrust/mass
-    Vec3d a_grav = compute_gravity(env, pos);
-    Vec3d a_thrust = scale3d(thrust_inertial, 1.0 / env->mass);
-    Vec3d a_total = add3d(a_grav, a_thrust);
+    // Acceleration at current position
+    Vec3d a_old = add3d(compute_gravity(env, pos), thrust);
 
-    // Semi-implicit Euler: update velocity first, then position
-    vel = add3d(vel, scale3d(a_total, env->dt));
-    pos = add3d(pos, scale3d(vel, env->dt));
+    // Update position: r += v*dt + 0.5*a*dt²
+    pos = add3d(pos, add3d(scale3d(vel, env->dt),
+                           scale3d(a_old, 0.5 * env->dt * env->dt)));
 
-    env->cx = pos.x; env->cy = pos.y; env->cz = pos.z;
-    env->cvx = vel.x; env->cvy = vel.y; env->cvz = vel.z;
+    // Acceleration at new position
+    Vec3d a_new = add3d(compute_gravity(env, pos), thrust);
+
+    // Update velocity: v += 0.5*(a_old + a_new)*dt
+    vel = add3d(vel, scale3d(add3d(a_old, a_new), 0.5 * env->dt));
+
+    *px = pos.x; *py = pos.y; *pz = pos.z;
+    *vx = vel.x; *vy = vel.y; *vz = vel.z;
 }
 
-// Propagate station analytically (circular orbit)
+// Integrate chaser dynamics with thrust
+static void integrate_chaser(OrbitalDock* env, Vec3d thrust_inertial) {
+    Vec3d thrust_accel = scale3d(thrust_inertial, 1.0 / env->mass);
+    integrate_verlet(env, &env->cx, &env->cy, &env->cz,
+                         &env->cvx, &env->cvy, &env->cvz, thrust_accel);
+}
+
+// Integrate station dynamics (same method as chaser, so errors cancel in relative frame)
 static void propagate_station(OrbitalDock* env) {
-    double angle = env->t_omega * env->dt;
-    Vec3d h = vec3d(env->t_hx, env->t_hy, env->t_hz);
-
-    // Rotate position around angular momentum axis
-    Vec3d pos = vec3d(env->tx, env->ty, env->tz);
-    Vec3d new_pos = rodrigues_rotate(pos, h, angle);
-    env->tx = new_pos.x;
-    env->ty = new_pos.y;
-    env->tz = new_pos.z;
-
-    // Rotate velocity similarly
-    Vec3d vel = vec3d(env->tvx, env->tvy, env->tvz);
-    Vec3d new_vel = rodrigues_rotate(vel, h, angle);
-    env->tvx = new_vel.x;
-    env->tvy = new_vel.y;
-    env->tvz = new_vel.z;
+    Vec3d zero_thrust = vec3d(0, 0, 0);
+    integrate_verlet(env, &env->tx, &env->ty, &env->tz,
+                         &env->tvx, &env->tvy, &env->tvz, zero_thrust);
 }
 
 // ============================================================================
@@ -324,9 +359,9 @@ static void compute_observations(OrbitalDock* env) {
         ) / M_PI;
     }
 
-    // Normalization scales - use fixed reference scales for stable observations
-    double pos_scale = 10000.0;  // 10km reference - keeps observations meaningful across distances
-    double vel_scale = 100.0;    // 100 m/s reference for relative velocities
+    // Normalization scales - tuned for close-range docking (30-50m scenarios at d=0)
+    double pos_scale = 100.0;   // 100m reference - 50m = 0.5, 100m = 1.0
+    double vel_scale = 2.0;     // 2 m/s reference - 0.5 m/s = 0.25, 1 m/s = 0.5
 
     // Fill observation buffer (all normalized to approximately [-1, 1])
     int idx = 0;
@@ -365,61 +400,58 @@ void c_reset(OrbitalDock* env) {
     env->t_radius = r;
 
     // Scale randomization by difficulty
-    // At difficulty=0: 100m radial offset (directly above station), simple radial thrust task
-    // At difficulty=1: full ranges (±50km alt, ±30° phase, ±15° incl, ±5m/s vel)
+    // At difficulty=0: Simple scenarios - random approach from various directions
+    // At difficulty=1: Full 3D orbital mechanics with large separations
     double d = env->difficulty;
 
-    // Minimum offsets at difficulty=0: radial separation only (simpler than phase)
-    double min_phase_off = 0.0;         // No phase offset at easiest difficulty
-    double min_alt_off = 100.0;         // 100m directly above station
-    double min_incl_off = 0.0;
-    double min_vel_perturb = 0.0;
+    // Get station's LVLH basis vectors
+    Vec3d t_pos = vec3d(env->tx, env->ty, env->tz);
+    Vec3d t_vel = vec3d(env->tvx, env->tvy, env->tvz);
+    Vec3d r_hat, v_hat, h_hat;
+    compute_lvlh(t_pos, t_vel, &r_hat, &v_hat, &h_hat);
 
-    // Random offsets scaled by difficulty
-    double rand_alt = env->alt_offset_max * (2.0 * rndf(env) - 1.0);
-    double rand_phase = env->phase_offset_max * (2.0 * rndf(env) - 1.0);
-    double rand_incl = env->incl_offset_max * (2.0 * rndf(env) - 1.0);
-    double rand_vel = env->vel_perturb_max;
+    // === APPROACH DIRECTION ===
+    // At difficulty=0: start 30-50m away, close enough to dock without orbital transfers
+    //                  but far enough that Coriolis shows up and agent learns real corrections
+    // At difficulty=1: start further with velocity, requiring real orbital maneuvers
+    double approach_dist = 30.0 + 20.0 * rndf(env) + d * 200.0 * rndf(env);  // 30-50m at d=0, up to 250m at d=1
 
-    // Interpolate between minimum and full range based on difficulty
-    double alt_off = min_alt_off + d * rand_alt;
-    double phase_off = min_phase_off + d * rand_phase;
-    double incl_off = min_incl_off + d * rand_incl;
-    double vel_perturb = min_vel_perturb + d * rand_vel;
+    // Direction: random on sphere, but at d=0 biased toward V-bar (simpler dynamics)
+    double theta = 2.0 * M_PI * rndf(env);
+    double phi = acos(2.0 * rndf(env) - 1.0);
 
-    // Chaser orbit radius
-    double c_radius = r + alt_off;
-    double c_v_circ = sqrt(env->mu / c_radius);
-
-    // Position with phase offset
-    double phase = phase_off;
-    env->cx = c_radius * cos(phase);
-    env->cy = c_radius * sin(phase);
-    env->cz = 0;
-
-    // Apply inclination offset (rotate around X-axis)
-    if (fabs(incl_off) > 1e-10) {
-        Vec3d c_pos = vec3d(env->cx, env->cy, env->cz);
-        Vec3d incl_axis = vec3d(1, 0, 0);
-        c_pos = rodrigues_rotate(c_pos, incl_axis, incl_off);
-        env->cx = c_pos.x; env->cy = c_pos.y; env->cz = c_pos.z;
-
-        // Circular velocity with inclination
-        Vec3d c_vel = vec3d(-c_v_circ * sin(phase), c_v_circ * cos(phase), 0);
-        c_vel = rodrigues_rotate(c_vel, incl_axis, incl_off);
-        env->cvx = c_vel.x;
-        env->cvy = c_vel.y;
-        env->cvz = c_vel.z;
-    } else {
-        env->cvx = -c_v_circ * sin(phase);
-        env->cvy = c_v_circ * cos(phase);
-        env->cvz = 0;
+    // At low difficulty, flatten toward V-bar (equatorial plane in spherical coords)
+    if (d < 0.5) {
+        phi = M_PI/2.0 + (phi - M_PI/2.0) * d * 2.0;  // At d=0, phi=90° (pure V-bar)
     }
 
-    // Add velocity perturbation
-    env->cvx += vel_perturb * (2.0 * rndf(env) - 1.0);
-    env->cvy += vel_perturb * (2.0 * rndf(env) - 1.0);
-    env->cvz += vel_perturb * (2.0 * rndf(env) - 1.0);
+    double lvlh_r = approach_dist * cos(phi);
+    double lvlh_v = approach_dist * sin(phi) * cos(theta);
+    double lvlh_h = approach_dist * sin(phi) * sin(theta);
+
+    // Convert LVLH offset to inertial position
+    Vec3d offset = add3d(add3d(scale3d(r_hat, lvlh_r), scale3d(v_hat, lvlh_v)), scale3d(h_hat, lvlh_h));
+    Vec3d c_pos = add3d(t_pos, offset);
+    env->cx = c_pos.x; env->cy = c_pos.y; env->cz = c_pos.z;
+
+    // === INITIAL VELOCITY ===
+    // At difficulty=0: start CO-MOVING (zero relative velocity)
+    // This means the agent must actively thrust to dock, but the dynamics are simple
+    // At difficulty=1: add velocity perturbations requiring correction
+    Vec3d c_vel = t_vel;  // Start co-moving with station
+
+    // At higher difficulty, add velocity perturbations
+    if (d > 0.1) {
+        double vel_mag = d * 0.5 * rndf(env);  // up to 0.5 m/s at d=1
+        // Random direction perturbation
+        double vtheta = 2.0 * M_PI * rndf(env);
+        double vphi = acos(2.0 * rndf(env) - 1.0);
+        c_vel = add3d(c_vel, scale3d(r_hat, vel_mag * cos(vphi)));
+        c_vel = add3d(c_vel, scale3d(v_hat, vel_mag * sin(vphi) * cos(vtheta)));
+        c_vel = add3d(c_vel, scale3d(h_hat, vel_mag * sin(vphi) * sin(vtheta)));
+    }
+
+    env->cvx = c_vel.x; env->cvy = c_vel.y; env->cvz = c_vel.z;
 
     // Initialize fuel and distance tracking
     env->fuel = env->fuel_budget;
@@ -513,17 +545,22 @@ void c_step(OrbitalDock* env) {
     // 7. Compute rewards
     double reward = fuel_penalty;
 
-    // Distance shaping: reward for getting closer (in meters, normalized by 1000m)
+    // Distance shaping: reward for getting closer - this is the primary learning signal
     double dist_delta = env->prev_dist - dist;  // positive when closing
-    reward += env->rw_dist_shaping * (dist_delta / 100.0);  // 1m closer = +0.005 reward at default
+    reward += env->rw_dist_shaping * dist_delta;  // 1m closer = +0.01 reward at default
 
     // Closing velocity reward: reward for having velocity toward target
     double closing_speed = (dist > 1e-10) ? -dot3d(normalize3d(rel_pos), rel_vel) : 0.0;
-    reward += env->rw_closing * (closing_speed / 10.0);  // 1 m/s closing = +0.01 reward at default
+    reward += env->rw_closing * closing_speed;  // 1 m/s closing = +0.05 reward at default
+
+    // Penalty for diverging (negative closing speed) - helps prevent running away
+    if (closing_speed < 0) {
+        reward += 0.02 * closing_speed;  // Extra penalty for moving away
+    }
 
     // Proximity bonus: stronger reward as we get very close (exponential)
-    double proximity_bonus = exp(-dist / 500.0);  // peaks at 1.0 when at target, ~0.82 at 100m, ~0.37 at 500m
-    reward += env->rw_vel_match * proximity_bonus * 0.1;
+    double proximity_bonus = exp(-dist / 200.0);  // peaks at 1.0 when at target, ~0.6 at 100m
+    reward += env->rw_vel_match * proximity_bonus * 0.2;
 
     // Velocity matching shaping: reward for low relative velocity when close
     if (dist < 500.0) {  // Only matters when close
@@ -586,53 +623,28 @@ void c_step(OrbitalDock* env) {
 }
 
 // ============================================================================
-// Render (stub for future raylib implementation)
+// Render (implemented in render.h, included separately)
 // ============================================================================
 
+// Forward declarations - implemented in render.h
+Client* make_client(OrbitalDock *env);
+void close_client(Client *client);
+void render_orbital_dock(OrbitalDock *env, Client *client);
+
 void c_render(OrbitalDock* env) {
-    // TODO: Implement raylib 3D visualization
-    if (!IsWindowReady()) {
-        InitWindow(1080, 720, "PufferLib Orbital Dock");
-        SetTargetFPS(60);
+    if (env->client == NULL) {
+        env->client = make_client(env);
+        if (env->client == NULL) {
+            return;
+        }
     }
-
-    if (IsKeyDown(KEY_ESCAPE)) {
-        exit(0);
-    }
-
-    BeginDrawing();
-    ClearBackground(PUFF_BACKGROUND);
-
-    // Draw simple HUD for now
-    char buf[256];
-    Vec3d rel_pos = sub3d(vec3d(env->cx, env->cy, env->cz), vec3d(env->tx, env->ty, env->tz));
-    Vec3d rel_vel = sub3d(vec3d(env->cvx, env->cvy, env->cvz), vec3d(env->tvx, env->tvy, env->tvz));
-    double dist = norm3d(rel_pos);
-    double rel_speed = norm3d(rel_vel);
-
-    snprintf(buf, sizeof(buf), "Distance: %.1f m", dist);
-    DrawText(buf, 20, 20, 20, PUFF_WHITE);
-
-    snprintf(buf, sizeof(buf), "Rel Speed: %.2f m/s", rel_speed);
-    DrawText(buf, 20, 45, 20, PUFF_WHITE);
-
-    snprintf(buf, sizeof(buf), "Fuel: %.1f%%", 100.0 * env->fuel / env->fuel_budget);
-    DrawText(buf, 20, 70, 20, PUFF_WHITE);
-
-    snprintf(buf, sizeof(buf), "Step: %d / %d", env->step_count, env->max_steps);
-    DrawText(buf, 20, 95, 20, PUFF_WHITE);
-
-    snprintf(buf, sizeof(buf), "Difficulty: %.1f", env->difficulty);
-    DrawText(buf, 20, 120, 20, PUFF_WHITE);
-
-    DrawText("Orbital Dock - 3D rendering coming soon", 20, 680, 20, PUFF_CYAN);
-
-    EndDrawing();
+    render_orbital_dock(env, env->client);
 }
 
 void c_close(OrbitalDock* env) {
-    if (IsWindowReady()) {
-        CloseWindow();
+    if (env->client != NULL) {
+        close_client(env->client);
+        env->client = NULL;
     }
 }
 

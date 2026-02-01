@@ -1,9 +1,12 @@
 #include "orbital_dock.h"
+#include "render.h"
 
 #define Env OrbitalDock
 #include "../env_binding.h"
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
+    // Initialize render client to NULL
+    env->client = NULL;
     // Physics parameters
     env->mu = unpack(kwargs, "mu");
     env->station_radius = unpack(kwargs, "station_radius");
