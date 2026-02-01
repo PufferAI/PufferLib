@@ -508,7 +508,7 @@ void draw_tile(Boxoban *env, int x, int y) {
 void c_render(Boxoban* env) {
     if (!IsWindowReady()) {
         InitWindow(TILE*env->size, TILE*env->size, "PufferLib Boxoban");
-        SetTargetFPS(5);
+        SetTargetFPS(10);
     }
 
     // Standard across our envs so exiting is always the same
