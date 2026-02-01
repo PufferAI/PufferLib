@@ -37,11 +37,6 @@ import pufferlib.pytorch
 # Global binding reference
 binding = None
 
-try:
-    from pufferlib import _C
-    from pufferlib import fake_tensors
-except ImportError:
-    raise ImportError('Failed to import C/CUDA advantage kernel. If you have non-default PyTorch, try installing with --no-build-isolation')
 
 import rich
 import rich.traceback
@@ -77,10 +72,10 @@ class PuffeRL:
             if stripped_name:
                 try:
                     binding = importlib.import_module(f'pufferlib.ocean.{stripped_name}.binding')
-                except ImportError:
-                    print(f"Failed to import binding for environment '{stripped_name}'")
+                except ImportError as e:
+                    print(f"-- Failed to import binding for environment '{stripped_name}': \n{e}")
         if binding is None:
-            print(f"{env_name} must have prefix puffer_ with native bindings built already")
+            print(f"Failed to import C/CUDA advantage kernel. If you have non-default PyTorch, try installing with --no-build-isolation. \nAlso make sure to build_torch first then the build_<env> next.")
             sys.exit(1)
         # Backend perf optimization
         num_envs = 8192

@@ -12,6 +12,10 @@ import tarfile
 import platform
 import shutil
 import pybind11
+import torch
+import subprocess
+import sysconfig
+import torch.utils.cpp_extension as cpp_ext
 
 from setuptools.command.build_ext import build_ext
 from torch.utils import cpp_extension
@@ -192,14 +196,51 @@ extension_kwargs = dict(
     extra_objects=[RAYLIB_A],
 )
 
+def _find_built_pufferlib_native(required: bool = True):
+    ext_suffix = ".so"
+
+    inplace = os.path.join("pufferlib", "native" + ext_suffix)
+    if os.path.isfile(inplace):
+        return inplace
+
+    cwd = os.getcwd()
+    candidates = glob.glob(os.path.join(cwd, "build", "**", "pufferlib", "_C*.so"), recursive=True)
+    candidates += glob.glob(os.path.join(cwd, "pufferlib", "_C*.so"), recursive=True)
+    candidates = [p for p in candidates if os.path.isfile(p)]
+    if candidates:
+        candidates.sort(key=os.path.getmtime, reverse=True)
+        return candidates[0]
+
+    if required:
+        raise ValueError(f"Could not find built pufferlib.native extension under {cwd}.")
+    return None
+
+native_lib = _find_built_pufferlib_native(required=False)
+if native_lib:
+    print(f"Adding native library {native_lib} to C/C++ extensions")
+    extension_kwargs['extra_objects'].append(native_lib)
+
+# Check if CUDA compiler is available. You need cuda dev, not just runtime.
+cuda_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH') or torch.utils.cpp_extension.CUDA_HOME or '/usr/local/cuda'
+nvtx_lib_dir = os.path.join(cuda_home, 'lib64')  # Common on Linux; fall back to 'lib' if needed
+nvtx_lib = 'nvToolsExt'
+
 # Find C extensions
 c_extensions = []
 if not NO_OCEAN:
+    cpp_sources = [
+        "pufferlib/extensions/bindings.cpp",
+        "pufferlib/extensions/muon.cpp",
+    ]
     c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
+    extension_kwargs['include_dirs'] += [pybind11.get_include(), torch.utils.cpp_extension.include_paths()[0]]
+    extension_kwargs['libraries'] = [nvtx_lib]
+    extension_kwargs['library_dirs'] = [nvtx_lib_dir]
+
     c_extensions = [
-        Extension(
+        CppExtension(
             path.rstrip('.c').replace('/', '.'),
-            sources=[path],
+            sources=[path] + cpp_sources,
             **extension_kwargs,
         )
         for path in c_extension_paths if 'matsci' not in path
@@ -233,9 +274,6 @@ class ProfilerBuildExt(build_ext):
         super().finalize_options()
 
     def run(self):
-        import subprocess
-        import sysconfig
-        import torch.utils.cpp_extension as cpp_ext
 
         src = 'profile_kernels.cu'
         out = 'profile_kernels'
@@ -285,22 +323,18 @@ if not NO_OCEAN:
         cmdclass[f"build_{env_name}"] = create_env_build_class(c_ext.name)
 
 
-# Check if CUDA compiler is available. You need cuda dev, not just runtime.
-import torch
-cuda_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH') or torch.utils.cpp_extension.CUDA_HOME or '/usr/local/cuda'
-nvtx_lib_dir = os.path.join(cuda_home, 'lib64')  # Common on Linux; fall back to 'lib' if needed
-nvtx_lib = 'nvToolsExt'
 torch_extensions = []
 if not NO_TRAIN:
     torch_sources = [
-        "pufferlib/extensions/bindings.cpp",
-        "pufferlib/extensions/muon.cpp",
+        # "pufferlib/extensions/bindings.cpp",
+        # "pufferlib/extensions/muon.cpp",
     ]
     if BUID_CUDA_EXT:
         extension = CUDAExtension
         torch_sources.append("pufferlib/extensions/cuda/advantage.cu")
         torch_sources.append("pufferlib/extensions/cuda/squared_torch.cu")
         torch_sources.append("pufferlib/extensions/cuda/kernels.cu")
+        torch_sources.append("pufferlib/extensions/cuda/cuda_kernels.cpp")
     else:
         extension = CppExtension
 
