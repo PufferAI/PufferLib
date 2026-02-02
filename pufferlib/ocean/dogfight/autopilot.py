@@ -255,3 +255,174 @@ def full_autopilot(state, target_pitch_deg=0.0, target_bank_deg=0.0,
     rudder = damp_yaw(state, gains) if damp_yaw_rate else 0.0
 
     return elevator, aileron, rudder
+
+
+# =============================================================================
+# VELOCITY-BASED AUTOPILOTS FOR DELTA CONTROL
+# =============================================================================
+# These functions output velocity commands that work with delta action space.
+# With delta control, actions are velocity commands that accumulate:
+#   ctrl_elevator += control_rate_coeff * action[1]
+#
+# The velocity autopilots:
+# 1. Compute target position using existing position-based autopilot
+# 2. Read current control position from state (ctrl_elevator, etc.)
+# 3. Output velocity to drive toward target position
+
+# Default coefficient for delta control (matches dogfight.ini)
+DEFAULT_CONTROL_RATE_COEFF = 0.25
+
+
+def hold_pitch_velocity(state, target_pitch_deg, gains=None, coeff=DEFAULT_CONTROL_RATE_COEFF):
+    """
+    Velocity-based pitch hold for delta control.
+
+    Args:
+        state: Dict from env.get_state() - must include ctrl_elevator
+        target_pitch_deg: Desired pitch angle in degrees
+        gains: PD gains (uses defaults if None)
+        coeff: Control rate coefficient (default 0.25)
+
+    Returns:
+        velocity_cmd: Velocity command [-1, 1] for delta control
+    """
+    current_elevator = state.get('ctrl_elevator', 0.0)
+    target_elevator = hold_pitch(state, target_pitch_deg, gains)
+
+    # P-controller on position error, normalized for coeff
+    error = target_elevator - current_elevator
+    velocity_cmd = 2.0 * error / coeff
+
+    return np.clip(velocity_cmd, -1.0, 1.0)
+
+
+def hold_vz_velocity(state, target_vz, gains=None, coeff=DEFAULT_CONTROL_RATE_COEFF):
+    """
+    Velocity-based vertical speed hold for delta control.
+
+    Args:
+        state: Dict from env.get_state() - must include ctrl_elevator
+        target_vz: Desired vertical speed in m/s
+        gains: PD gains (uses defaults if None)
+        coeff: Control rate coefficient (default 0.25)
+
+    Returns:
+        velocity_cmd: Velocity command [-1, 1] for delta control
+    """
+    current_elevator = state.get('ctrl_elevator', 0.0)
+    target_elevator = hold_vz(state, target_vz, gains)
+
+    error = target_elevator - current_elevator
+    velocity_cmd = 2.0 * error / coeff
+
+    return np.clip(velocity_cmd, -1.0, 1.0)
+
+
+def hold_bank_velocity(state, target_bank_deg, gains=None, coeff=DEFAULT_CONTROL_RATE_COEFF):
+    """
+    Velocity-based bank hold for delta control.
+
+    Args:
+        state: Dict from env.get_state() - must include ctrl_aileron
+        target_bank_deg: Desired bank angle in degrees
+        gains: PD gains (uses defaults if None)
+        coeff: Control rate coefficient (default 0.25)
+
+    Returns:
+        velocity_cmd: Velocity command [-1, 1] for delta control
+    """
+    current_aileron = state.get('ctrl_aileron', 0.0)
+    target_aileron = hold_bank(state, target_bank_deg, gains)
+
+    error = target_aileron - current_aileron
+    velocity_cmd = 2.0 * error / coeff
+
+    return np.clip(velocity_cmd, -1.0, 1.0)
+
+
+def damp_yaw_velocity(state, gains=None, coeff=DEFAULT_CONTROL_RATE_COEFF):
+    """
+    Velocity-based yaw damping for delta control.
+
+    Args:
+        state: Dict from env.get_state() - must include ctrl_rudder
+        gains: PD gains (uses defaults if None)
+        coeff: Control rate coefficient (default 0.25)
+
+    Returns:
+        velocity_cmd: Velocity command [-1, 1] for delta control
+    """
+    current_rudder = state.get('ctrl_rudder', 0.0)
+    target_rudder = damp_yaw(state, gains)
+
+    error = target_rudder - current_rudder
+    velocity_cmd = 2.0 * error / coeff
+
+    return np.clip(velocity_cmd, -1.0, 1.0)
+
+
+def hold_bank_and_level_velocity(state, target_bank_deg, gains=None, coeff=DEFAULT_CONTROL_RATE_COEFF):
+    """
+    Velocity-based coordinated turn for delta control.
+
+    Args:
+        state: Dict from env.get_state()
+        target_bank_deg: Desired bank angle in degrees
+        gains: PD gains (uses defaults if None)
+        coeff: Control rate coefficient (default 0.25)
+
+    Returns:
+        (elevator_vel, aileron_vel): Tuple of velocity commands [-1, 1]
+    """
+    current_elevator = state.get('ctrl_elevator', 0.0)
+    current_aileron = state.get('ctrl_aileron', 0.0)
+
+    target_elevator, target_aileron = hold_bank_and_level(state, target_bank_deg, gains)
+
+    elev_error = target_elevator - current_elevator
+    elev_vel = 2.0 * elev_error / coeff
+
+    ail_error = target_aileron - current_aileron
+    ail_vel = 2.0 * ail_error / coeff
+
+    return np.clip(elev_vel, -1.0, 1.0), np.clip(ail_vel, -1.0, 1.0)
+
+
+def full_autopilot_velocity(state, target_pitch_deg=0.0, target_bank_deg=0.0,
+                            target_vz=None, damp_yaw_rate=True, gains=None,
+                            coeff=DEFAULT_CONTROL_RATE_COEFF):
+    """
+    Full 3-axis velocity-based autopilot for delta control.
+
+    Args:
+        state: Dict from env.get_state()
+        target_pitch_deg: Desired pitch angle (used if target_vz is None)
+        target_bank_deg: Desired bank angle (positive = right bank)
+        target_vz: If provided, holds vz instead of pitch
+        damp_yaw_rate: Whether to damp yaw oscillations
+        gains: PD gains (uses defaults if None)
+        coeff: Control rate coefficient (default 0.25)
+
+    Returns:
+        (elevator_vel, aileron_vel, rudder_vel): Tuple of velocity commands [-1, 1]
+    """
+    current_elevator = state.get('ctrl_elevator', 0.0)
+    current_aileron = state.get('ctrl_aileron', 0.0)
+    current_rudder = state.get('ctrl_rudder', 0.0)
+
+    target_elevator, target_aileron, target_rudder = full_autopilot(
+        state, target_pitch_deg, target_bank_deg, target_vz, damp_yaw_rate, gains
+    )
+
+    elev_error = target_elevator - current_elevator
+    elev_vel = 2.0 * elev_error / coeff
+
+    ail_error = target_aileron - current_aileron
+    ail_vel = 2.0 * ail_error / coeff
+
+    rud_error = target_rudder - current_rudder
+    rud_vel = 2.0 * rud_error / coeff
+
+    return (np.clip(elev_vel, -1.0, 1.0),
+            np.clip(ail_vel, -1.0, 1.0),
+            np.clip(rud_vel, -1.0, 1.0))

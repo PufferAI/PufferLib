@@ -67,6 +67,7 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
         .aim_scale = get_float(kwargs, "reward_aim_scale", 0.05f),
         .closing_scale = get_float(kwargs, "reward_closing_scale", 0.003f),
         .neg_g = get_float(kwargs, "penalty_neg_g", 0.02f),
+        .control_rate_penalty = get_float(kwargs, "control_rate_penalty", 0.0f),
         .speed_min = get_float(kwargs, "speed_min", 50.0f),
     };
 
@@ -95,6 +96,7 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "avg_stage_weight", log->total_stage_weight);  // Raw sum → correct avg
     assign_to_dict(dict, "avg_abs_bias", log->total_abs_bias);          // Raw sum → correct avg
     assign_to_dict(dict, "avg_stage", log->stage_sum);                  // Raw sum → correct avg
+    assign_to_dict(dict, "avg_control_rate", log->total_control_rate);  // Raw sum → correct avg
     assign_to_dict(dict, "base_stage_kills", log->base_stage_kills);   // Raw sum (not averaged)
     assign_to_dict(dict, "base_stage_eps", log->base_stage_eps);       // Raw sum (not averaged)
     assign_to_dict(dict, "ultimate", log->ultimate);

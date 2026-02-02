@@ -177,6 +177,7 @@ typedef struct Log {
     float total_stage_weight;       // Sum of stage weights (exported as avg_stage_weight)
     float total_abs_bias;           // Sum of |aileron_bias| (exported as avg_abs_bias)
     float stage_sum;                // Sum of stages (exported as avg_stage)
+    float total_control_rate;       // Sum of per-episode mean squared deltas (exported as avg_control_rate)
     float base_stage_kills;         // Kills at int(curriculum_target) - for per-stage gating
     float base_stage_eps;           // Episodes at int(curriculum_target) - for per-stage gating
 
@@ -203,6 +204,7 @@ typedef struct RewardConfig {
     float closing_scale;     // +N per m/s closing (default 0.003)
     // Penalties
     float neg_g;             // -N per unit G below 0.5 (default 0.02) - enforces "pull to turn"
+    float control_rate_penalty;  // Penalty for (action - prev_action)^2 (default 0, sweepable)
     // Thresholds
     float speed_min;         // Stall threshold (default 50.0)
 } RewardConfig;
@@ -271,12 +273,14 @@ typedef struct Dogfight {
     // Anti-spinning
     float total_aileron_usage;  // Accumulated |aileron| input (for spin death)
     float aileron_bias;         // Cumulative signed aileron (for directional penalty)
+    float episode_control_rate; // Sum of squared control deltas this episode
     // Episode reward accumulators (for DEBUG summaries)
     float sum_r_closing;
     float sum_r_speed;      // Stall penalty
     float sum_r_neg_g;
     float sum_r_rudder;
     float sum_r_aim;
+    float sum_r_rate;       // Control rate penalty
     // Aiming diagnostics (reset each episode, for DEBUG output)
     float best_aim_angle;    // Best (smallest) aim angle achieved (radians)
     int ticks_in_cone;       // Ticks where aim_dot > cos_gun_cone
@@ -309,6 +313,10 @@ typedef struct Dogfight {
     float prev_rel_dot;                  // Previous dot(rel_pos, rel_vel) for detecting pass
     // Eval spawn mode: 0 = random (default), 1 = opponent_advantage (for testing opponent kill)
     int eval_spawn_mode;
+    // Previous actions for control rate penalty
+    float prev_elevator;  // Previous elevator for rate penalty
+    float prev_aileron;   // Previous aileron for rate penalty
+    float prev_rudder;    // Previous rudder for rate penalty
 } Dogfight;
 
 #include "dogfight_observations.h"
@@ -350,6 +358,11 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     }
     env->is_initialized = 1;
     env->total_aileron_usage = 0.0f;
+
+    // Initialize previous actions for control rate penalty
+    env->prev_elevator = 0.0f;
+    env->prev_aileron = 0.0f;
+    env->prev_rudder = 0.0f;
 
     memset(env->obs_highlight, 0, sizeof(env->obs_highlight));
 
@@ -394,8 +407,8 @@ void add_log(Dogfight *env) {
     // Level 2: Reward breakdown (which components dominated?)
     if (DEBUG >= 2 && env->env_num == 0) {
         printf("  SHAPING: closing=%+.2f aim=%+.2f\n", env->sum_r_closing, env->sum_r_aim);
-        printf("  PENALTY: stall=%.2f neg_g=%.2f rudder=%.2f\n",
-               env->sum_r_speed, env->sum_r_neg_g, env->sum_r_rudder);
+        printf("  PENALTY: stall=%.2f neg_g=%.2f rudder=%.2f rate=%.2f\n",
+               env->sum_r_speed, env->sum_r_neg_g, env->sum_r_rudder, env->sum_r_rate);
         printf("  AIM: best=%.1f° in_cone=%d/%d (%.0f%%) closest=%.0fm\n",
                env->best_aim_angle * RAD_TO_DEG,
                env->ticks_in_cone, env->tick,
@@ -434,6 +447,8 @@ void add_log(Dogfight *env) {
     env->log.total_stage_weight += STAGES[env->stage].weight; // coeffs to scale metrics based on difficulty
     env->log.total_abs_bias += fabsf(env->aileron_bias);
     env->log.stage_sum += (float)env->stage;  // Accumulate for avg_stage
+    // Mean squared control delta per step this episode (lower = smoother control)
+    env->log.total_control_rate += env->episode_control_rate / fmaxf((float)env->tick, 1.0f);
 
     // Track performance at MAJORITY stage (the one we're trying to master)
     // At target 0.9, majority is stage 1 (90% of episodes), not stage 0
@@ -1291,6 +1306,7 @@ void c_reset(Dogfight *env) {
     env->episode_shots_fired = 0.0f;
     env->total_aileron_usage = 0.0f;
     env->aileron_bias = 0.0f;
+    env->episode_control_rate = 0.0f;
 
     // Reset reward accumulators
     env->sum_r_closing = 0.0f;
@@ -1298,6 +1314,7 @@ void c_reset(Dogfight *env) {
     env->sum_r_neg_g = 0.0f;
     env->sum_r_rudder = 0.0f;
     env->sum_r_aim = 0.0f;
+    env->sum_r_rate = 0.0f;
     env->death_reason = DEATH_NONE;
 
     // Reset aiming diagnostics
@@ -1321,6 +1338,11 @@ void c_reset(Dogfight *env) {
     // Head-on lockout (only set by spawn_eval_random for head-on spawns)
     env->head_on_lockout = 0;
     env->prev_rel_dot = 0.0f;
+
+    // Reset previous actions for control rate penalty
+    env->prev_elevator = 0.0f;
+    env->prev_aileron = 0.0f;
+    env->prev_rudder = 0.0f;
 
     // Gun cone for hit detection - stays fixed at 5°
     env->cos_gun_cone = cosf(env->gun_cone_angle);
@@ -1593,6 +1615,25 @@ void c_step(Dogfight *env) {
     float r_rudder = -fabsf(env->actions[3]) * PENALTY_RUDDER;
     reward += r_rudder;
 
+    // 5b. Control rate penalty: penalize rapid control changes
+    // Sweepable coefficient - find max value that still allows good training
+    float d_e = env->actions[1] - env->prev_elevator;
+    float d_a = env->actions[2] - env->prev_aileron;
+    float d_r = env->actions[3] - env->prev_rudder;
+    float delta_sq = d_e*d_e + d_a*d_a + d_r*d_r;
+    env->episode_control_rate += delta_sq;  // Always accumulate for logging
+
+    float r_rate = 0.0f;
+    if (env->rcfg.control_rate_penalty > 0.0f) {
+        r_rate = -delta_sq * env->rcfg.control_rate_penalty;
+        reward += r_rate;
+    }
+
+    // Update prev actions for next step
+    env->prev_elevator = env->actions[1];
+    env->prev_aileron = env->actions[2];
+    env->prev_rudder = env->actions[3];
+
     // 6. Low altitude descent penalty: discourage descending rolling scissors
     // If below 250m AND descending, penalty each tick
     // Reduced from -0.25f to -0.025f to prevent gradient explosion
@@ -1635,6 +1676,7 @@ void c_step(Dogfight *env) {
     env->sum_r_neg_g += r_neg_g;
     env->sum_r_speed += r_stall;
     env->sum_r_rudder += r_rudder;
+    env->sum_r_rate += r_rate;
 
     if (DEBUG >= 4 && env->env_num == 0) printf("=== REWARD (df11) ===\n");
     if (DEBUG >= 4 && env->env_num == 0) printf("r_closing=%.4f (rate=%.1f m/s)\n", r_closing, closing_rate);
@@ -1642,6 +1684,7 @@ void c_step(Dogfight *env) {
     if (DEBUG >= 4 && env->env_num == 0) printf("r_neg_g=%.5f (g=%.2f)\n", r_neg_g, p->g_force);
     if (DEBUG >= 4 && env->env_num == 0) printf("r_stall=%.4f (speed=%.1f)\n", r_stall, speed);
     if (DEBUG >= 4 && env->env_num == 0) printf("r_rudder=%.5f (rud=%.2f)\n", r_rudder, env->actions[3]);
+    if (DEBUG >= 4 && env->env_num == 0) printf("r_rate=%.5f (delta_sq=%.3f)\n", r_rate, delta_sq);
     if (DEBUG >= 4 && env->env_num == 0) printf("reward_total=%.4f\n", reward);
 
     if (DEBUG >= 10) printf("=== COMBAT ===\n");

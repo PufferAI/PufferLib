@@ -54,6 +54,7 @@ class Dogfight(pufferlib.PufferEnv):
         curriculum_randomize=0,
         eval_spawn_mode=0,  # 0=random, 1=opponent_advantage (opponent behind player)
         fixed_stage=-1,
+        max_stage=19,       # Cap curriculum at this stage (19 = EVASIVE, no AutoAce/self-play)
         eval_interval=2_500_000,    # Steps between curriculum evaluations (2.5M = ~1s at 2.5M SPS)
         warmup_steps=3_000_000,     # Steps before curriculum starts evaluating (3M = ~1.2s at 2.5M SPS)
         min_eval_episodes=50,       # Minimum episodes in window before evaluating mastery
@@ -66,6 +67,7 @@ class Dogfight(pufferlib.PufferEnv):
         reward_closing_scale=0.003,  # Per m/s closing
         penalty_neg_g=0.02,          # Enforce "pull to turn"
         speed_min=50.0,              # Stall threshold
+        control_rate_penalty=0.0,    # Penalty for action rate changes (sweep to find optimal)
         # Self-play: load frozen checkpoint as opponent
         opponent_checkpoint=None,    # Path to .pt checkpoint file
         opponent_device='cpu',       # Device for opponent policy inference
@@ -105,6 +107,7 @@ class Dogfight(pufferlib.PufferEnv):
         self._last_eval_step = warmup_steps  # First eval at warmup + eval_interval
         self.curriculum_enabled = curriculum_enabled
         self.fixed_stage = fixed_stage
+        self.max_stage = max_stage
         self.min_eval_episodes = min_eval_episodes
 
         # Mastered stage tracking (pure mastery-gated progression)
@@ -150,6 +153,7 @@ class Dogfight(pufferlib.PufferEnv):
                 reward_closing_scale=reward_closing_scale,
                 penalty_neg_g=penalty_neg_g,
                 speed_min=speed_min,
+                control_rate_penalty=control_rate_penalty,
             )
             self._env_handles.append(handle)
 
@@ -326,11 +330,13 @@ class Dogfight(pufferlib.PufferEnv):
                                         self._save_to_pool_callback(mastery_stage, base_stage_perf)
 
                             # Target is ALWAYS mastered + 0.9 (except finalization)
+                            # Cap at max_stage to avoid AutoAce/self-play if desired
                             in_finalization = total_steps >= self._finalize_at_steps
                             if in_finalization:
                                 new_target = float(self._mastered_stage) + 0.01
                             else:
                                 new_target = float(self._mastered_stage) + 0.9
+                            new_target = min(new_target, float(self.max_stage))
 
                             if abs(self._target_stage - new_target) > 0.01:
                                 #print(f'[CURRICULUM] TARGET: {self._target_stage:.2f} → {new_target:.2f} (mastered={self._mastered_stage})')

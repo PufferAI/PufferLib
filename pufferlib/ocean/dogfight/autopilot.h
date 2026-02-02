@@ -39,6 +39,9 @@ typedef enum {
     AP_BARREL_ROLL_ATK,  // Roll around target's flight path
     AP_GUN_TRACK,        // Lead pursuit with firing solution
 
+    // Flight test modes
+    AP_MIN_RADIUS_TURN,  // Full elevator, aileron keeps nose on horizon (tightest turn)
+
     AP_COUNT
 } AutopilotMode;
 
@@ -357,8 +360,8 @@ static inline void autopilot_step(AutopilotState* ap, Plane* p, float* actions, 
                 Vec3 right = quat_rotate(p->ori, vec3(0, -1, 0));
                 float dot_right = dot3(normalize3(to_threat), right);
 
-                // Turn away from threat (opposite side)
-                target_bank = (dot_right > 0) ? -1.2f : 1.2f;  // ~70° break
+                // Turn INTO threat (break turn toward attacker to force overshoot)
+                target_bank = (dot_right > 0) ? 1.2f : -1.2f;  // ~70° break INTO threat
                 base_elevator = -0.6f;  // Pull hard
             }
 
@@ -372,6 +375,44 @@ static inline void autopilot_step(AutopilotState* ap, Plane* p, float* actions, 
             float bank_error = target_bank - bank;
             float aileron = ap->roll_kp * bank_error * 1.5f;
             actions[2] = ap_clamp(aileron, -1.0f, 1.0f);
+            break;
+        }
+
+        case AP_MIN_RADIUS_TURN: {
+            // Bank-tracking turn test mode:
+            // - Moderate elevator pull (configurable via ap->target_vz as input, default -0.5)
+            // - Rudder locked at 0
+            // - Aileron tracks target bank angle (set via ap->target_bank, default 60°)
+            //
+            // PID gains tuned via sweep (test_min_radius_turn.c --bank-sweep):
+            // kp=10.0, kd=3.0 gives tight bank tracking with low pitch rate
+            // oscillation across 80-160 m/s speed range.
+
+            // Elevator: use target_vz as elevator input (repurposed, range -1 to 0)
+            float elev_input = (ap->target_vz < 0) ? ap->target_vz : -0.5f;
+            actions[1] = ap_clamp(elev_input, -1.0f, 0.0f);
+
+            // Rudder locked
+            actions[3] = 0.0f;
+
+            // Get current bank angle
+            float bank = ap_get_bank_angle(p);
+
+            // Target bank (negative for right turn)
+            float target_bank = -fabsf(ap->target_bank);
+
+            // Bank error: positive means we're too shallow, need more right bank
+            float bank_error = bank - target_bank;
+            float bank_deriv = (bank_error - ap->prev_bank_error) / dt;
+
+            // PID gains (tuned via sweep)
+            float kp = 10.0f;
+            float kd = 3.0f;
+
+            // Aileron: positive error -> positive aileron -> roll right
+            float aileron = kp * bank_error + kd * bank_deriv;
+            actions[2] = ap_clamp(aileron, -1.0f, 1.0f);
+            ap->prev_bank_error = bank_error;
             break;
         }
 
