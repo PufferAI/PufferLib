@@ -81,6 +81,7 @@ if not NO_OCEAN:
 extra_compile_args = [
     '-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION',
     '-DPLATFORM_DESKTOP',
+    '-DPUFFER_NATIVECPP_PYBINDINGS=1',
 ]
 extra_link_args = [
     '-fwrapv'
@@ -229,18 +230,16 @@ nvtx_lib = 'nvToolsExt'
 c_extensions = []
 if not NO_OCEAN:
     cpp_sources = [
-        "pufferlib/extensions/bindings.cpp",
-        "pufferlib/extensions/muon.cpp",
+        "pufferlib/extensions/env_glue.cpp",
     ]
     c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
     extension_kwargs['include_dirs'] += [pybind11.get_include(), torch.utils.cpp_extension.include_paths()[0]]
-    extension_kwargs['libraries'] = [nvtx_lib]
-    extension_kwargs['library_dirs'] = [nvtx_lib_dir]
 
     c_extensions = [
         CppExtension(
             path.rstrip('.c').replace('/', '.'),
             sources=[path] + cpp_sources,
+            language ='c++',
             **extension_kwargs,
         )
         for path in c_extension_paths if 'matsci' not in path
@@ -326,8 +325,8 @@ if not NO_OCEAN:
 torch_extensions = []
 if not NO_TRAIN:
     torch_sources = [
-        # "pufferlib/extensions/bindings.cpp",
-        # "pufferlib/extensions/muon.cpp",
+        "pufferlib/extensions/bindings.cpp",
+        "pufferlib/extensions/muon.cpp",
     ]
     if BUID_CUDA_EXT:
         extension = CUDAExtension

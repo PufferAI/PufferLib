@@ -114,20 +114,9 @@ float cosine_annealing(float lr_base, float lr_min, int t, int T) {
     return lr_min + 0.5f*(lr_base - lr_min)*(1.0f + std::cos(M_PI * ratio));
 }
 
+
 std::tuple<VecEnv*, Tensor, Tensor, Tensor, Tensor>
 create_environments(int64_t num_envs, const std::string& env_name, Dict* env_kwargs) {
-    std::string name = env_name;
-    if (name.rfind("puffer_", 0) == 0) {
-        name = name.substr(7);
-    }
-    std::string so_path = "./" + name + ".so";
-    void* handle = dlopen(so_path.c_str(), RTLD_NOW);
-    if (!handle) {
-        fprintf(stderr, "dlopen error: %s\n", dlerror());
-        exit(1);
-    }
-    dlerror();
-
     // Load the function pointer
     create_envs = (create_environments_fn)dlsym(handle, "create_environments");
     create_threads = (create_threads_fn)dlsym(handle, "create_threads");
