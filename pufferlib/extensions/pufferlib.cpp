@@ -30,6 +30,44 @@
 
 typedef torch::Tensor Tensor;
 
+#if defined(PUFFER_DEBUG)
+
+inline static void PUFFER_ASSERT_BREAK()
+{
+#if defined(_MSC_VER)
+  // assert (abort) does not break into the debugger in VS 2022 ! It's insane, so we have to use this weird contraption that's cross platform.
+  __debugbreak();
+#elif defined(__clang__) || defined(__GNUC__)
+  __builtin_trap();
+#else
+  /* Fallback method */
+  *((volatile int*)0) = 0; /* This will cause a segmentation fault */
+#endif
+}
+#endif
+
+// LibTorch throws exceptions on errors, log them correctly in debug mode only.
+#if PUFFER_DEBUG
+#define BEGIN_LIBTORCH_CATCH try {
+#else
+#define BEGIN_LIBTORCH_CATCH
+#endif
+
+#if PUFFER_DEBUG
+#define END_LIBTORCH_CATCH                                                                                             \
+  }                                                                                                                    \
+  catch (const c10::Error& e)                                                                                          \
+  {                                                                                                                    \
+    std::cerr << "Error from libtorch: " << e.what() << std::endl;                                                     \
+    PUFFER_ASSERT_BREAK();                                                                                             \
+    throw;                                                                                                             \
+  }
+
+#else
+#define END_LIBTORCH_CATCH
+#endif
+
+
 // CUDA kernel wrappers
 #include "modules.cpp"
 
@@ -428,6 +466,7 @@ void train_forward_call(TrainGraph& graph, PolicyMinGRU* policy_bf16, PolicyMinG
 // Capture with shared memory pool
 void capture_graph(at::cuda::CUDAGraph* graph, std::function<void()> func,
                    at::cuda::MempoolId_t pool) {
+  BEGIN_LIBTORCH_CATCH
     /* Checklist for avoiding diabolical capture bugs:
      * 1. Don't start separate streams before tracing (i.e. env gpu buffers)
      * 2. Make sure input/output buffer pointers don't change
@@ -455,6 +494,7 @@ void capture_graph(at::cuda::CUDAGraph* graph, std::function<void()> func,
     cudaDeviceSynchronize();
 
     at::cuda::setCurrentCUDAStream(current_stream);
+  END_LIBTORCH_CATCH
 }
 
 
@@ -486,12 +526,15 @@ void compute_advantage(RolloutBuf& rollouts, Tensor& advantages, HypersT& hypers
 
 // Thread initialization callback - sets CUDA stream once per thread
 extern "C" void thread_init_wrapper(void* ctx, int buf) {
+  BEGIN_LIBTORCH_CATCH
     PuffeRL* pufferl = (PuffeRL*)ctx;
     at::cuda::setCurrentCUDAStream(pufferl->torch_streams[buf]);
+  END_LIBTORCH_CATCH
 }
 
 // Callback for OMP threadmanager - runs policy forward for one (buf, t) step
 extern "C" void net_callback_wrapper(void* ctx, int buf, int t) {
+  BEGIN_LIBTORCH_CATCH
     torch::NoGradGuard no_grad;
     PuffeRL* pufferl = (PuffeRL*)ctx;
     HypersT& hypers = pufferl->hypers;
@@ -504,9 +547,11 @@ extern "C" void net_callback_wrapper(void* ctx, int buf, int t) {
         fused_rollout_step(*pufferl, t, buf);
     }
     profile_end(hypers.profile);
+  END_LIBTORCH_CATCH
 }
 
 std::unique_ptr<pufferlib::PuffeRL> create_pufferl_impl(HypersT& hypers, const std::string& env_name, Dict* vec_kwargs, Dict* env_kwargs) {
+  BEGIN_LIBTORCH_CATCH
     auto pufferl = std::make_unique<pufferlib::PuffeRL>();
     pufferl->hypers = hypers;
 
@@ -673,6 +718,7 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl_impl(HypersT& hypers, const s
     static_vec_reset(vec);
     
     return pufferl;
+  END_LIBTORCH_CATCH
 }
 
 std::tuple<Tensor, Tensor> compute_prio(Tensor& advantages,
@@ -707,6 +753,7 @@ void train_select_and_copy(TrainGraph& graph, RolloutBuf& rollouts,
 }
 
 void rollouts_impl(PuffeRL& pufferl) {
+  BEGIN_LIBTORCH_CATCH
     torch::NoGradGuard no_grad;
     HypersT& hypers = pufferl.hypers;
 
@@ -732,10 +779,12 @@ void rollouts_impl(PuffeRL& pufferl) {
         env_send(pufferl, buf);
         profile_end(hypers.profile);
     }
+  END_LIBTORCH_CATCH
 }
 
 
 void train_impl(PuffeRL& pufferl) {
+  BEGIN_LIBTORCH_CATCH
     // Update to HypersT& p
     HypersT& hypers = pufferl.hypers;
 
@@ -858,6 +907,7 @@ void train_impl(PuffeRL& pufferl) {
     */
     //double explained_var = (var_y.abs() < 1e-8) ? NAN : (1 - (y_true - y_pred).var() / var_y).item<double>();
     cudaStreamSynchronize(at::cuda::getCurrentCUDAStream());
+  END_LIBTORCH_CATCH  
 }
 
 // Profiler control for nsys --capture-range=cudaProfilerApi

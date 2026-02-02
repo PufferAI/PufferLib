@@ -37,6 +37,9 @@ DEBUG = os.getenv("DEBUG", "0") == "1"
 NO_OCEAN = os.getenv("NO_OCEAN", "0") == "1"
 NO_TRAIN = os.getenv("NO_TRAIN", "0") == "1"
 
+if DEBUG:
+    print("*****Building in DEBUG mode*******")
+
 # Build raylib for your platform
 RAYLIB_URL = 'https://github.com/raysan5/raylib/releases/download/5.5/'
 RAYLIB_NAME = 'raylib-5.5_macos' if platform.system() == "Darwin" else 'raylib-5.5_linux_amd64'
@@ -101,6 +104,12 @@ if DEBUG:
     extra_compile_args += [
         '-O0',
         '-g',
+        '-flto=auto',
+        '-fno-semantic-interposition',
+        '-fvisibility=hidden',
+        '-DPUFFER_DEBUG=1',
+        '-DDEBUG=1',
+
         #'-fsanitize=address,undefined,bounds,pointer-overflow,leak',
         #'-fno-omit-frame-pointer',
     ]
@@ -315,11 +324,15 @@ def create_static_env_build_class(env_name):
             static_obj = f'pufferlib/extensions/libstatic_{env_name}.o'
 
             clang_cmd = [
-                'clang', '-c', '-O2', '-DNDEBUG',
+                'clang', '-c', 
+                ('-O0' if DEBUG else '-O2'), 
+                ('-DDEBUG' if DEBUG else '-DNDEBUG'),
                 '-I.', '-Ipufferlib/extensions', f'-Ipufferlib/ocean/{env_name}',
                 f'-I./{RAYLIB_NAME}/include', '-I/usr/local/cuda/include',
                 '-DPLATFORM_DESKTOP',
-                '-fno-semantic-interposition', '-fvisibility=hidden',
+                ('-DPUFFER_DEBUG=1' if DEBUG else ''),
+                '-fno-semantic-interposition', 
+                ('-fvisibility=default' if DEBUG else '-fvisibility=hidden'),
                 '-fPIC', '-fopenmp',
                 env_binding_src, '-o', static_obj
             ]
