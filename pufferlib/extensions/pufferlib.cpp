@@ -29,17 +29,7 @@
 
 typedef torch::Tensor Tensor;
 
-create_environments_fn create_envs;
-create_threads_fn create_threads;
-env_init_fn env_init;
-vec_reset_fn vec_reset;
-vec_step_fn vec_step;
-vec_send_fn vec_send;
-vec_recv_fn vec_recv;
-env_close_fn env_close;
-vec_close_fn vec_close;
-vec_log_fn vec_log;
-vec_render_fn vec_render;
+// Removed function pointer variables - now using extern declarations from vecenv.h
 
 torch::Dtype to_torch_dtype(int dtype) {
     if (dtype == FLOAT) {
@@ -117,40 +107,18 @@ float cosine_annealing(float lr_base, float lr_min, int t, int T) {
 
 std::tuple<VecEnv*, Tensor, Tensor, Tensor, Tensor>
 create_environments(int64_t num_envs, const std::string& env_name, Dict* env_kwargs) {
-    // Load the function pointer
-    create_envs = (create_environments_fn)dlsym(handle, "create_environments");
-    create_threads = (create_threads_fn)dlsym(handle, "create_threads");
-    env_init = (env_init_fn)dlsym(handle, "env_init");
-    vec_reset = (vec_reset_fn)dlsym(handle, "vec_reset");
-    vec_step = (vec_step_fn)dlsym(handle, "vec_step");
-    vec_send = (vec_send_fn)dlsym(handle, "vec_send");
-    vec_recv = (vec_recv_fn)dlsym(handle, "vec_recv");
-    env_close = (env_close_fn)dlsym(handle, "env_close");
-    vec_close = (vec_close_fn)dlsym(handle, "vec_close");
-    vec_log = (vec_log_fn)dlsym(handle, "vec_log");
-    vec_render = (vec_render_fn)dlsym(handle, "vec_render");
-    int obs_n = *(int*)dlsym(handle, "OBS_N");
-    int act_n = *(int*)dlsym(handle, "ACT_N");
-    int obs_t = *(int*)dlsym(handle, "OBS_T");
-    int act_t = *(int*)dlsym(handle, "ACT_T");
-
-    const char* dlsym_error = dlerror();
-    if (dlsym_error) {
-        fprintf(stderr, "dlsym error: %s\n", dlsym_error);
-        dlclose(handle);
-        exit(1);
-    }
-
-    VecEnv* vec = create_envs(num_envs, 2, true, 0, env_kwargs);
+    PufferEnvParams params;
+    update_env_params(&params);
+    VecEnv* vec = ::create_environments(num_envs, 2, true, 0, env_kwargs);
     printf("Created VecEnv with %d environments\n", vec->size);
 
     // Close the library
     //dlclose(handle);
  
-    auto obs_dtype = to_torch_dtype(obs_t);
-    auto atn_dtype = to_torch_dtype(act_t);
+    auto obs_dtype = to_torch_dtype(params.obs_type);
+    auto atn_dtype = to_torch_dtype(params.act_type);
 
-    Tensor obs = torch::from_blob(vec->gpu_observations, {num_envs, obs_n}, torch::dtype(obs_dtype).device(torch::kCUDA));
+    Tensor obs = torch::from_blob(vec->gpu_observations, {num_envs, params.obs_size}, torch::dtype(obs_dtype).device(torch::kCUDA));
     Tensor actions = torch::from_blob(vec->gpu_actions, {num_envs}, torch::dtype(torch::kFloat64).device(torch::kCUDA));
     Tensor rewards = torch::from_blob(vec->gpu_rewards, {num_envs}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
     Tensor terminals = torch::from_blob(vec->gpu_terminals, {num_envs}, torch::dtype(torch::kFloat32).device(torch::kCUDA));

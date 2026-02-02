@@ -24,11 +24,6 @@
         }                                                           \
     } while(0)
 
-__attribute__((visibility("default"))) const int OBS_N = OBS_SIZE;
-__attribute__((visibility("default"))) const int ACT_N = ACT_SIZE;
-__attribute__((visibility("default"))) const int OBS_T = OBS_TYPE;
-__attribute__((visibility("default"))) const int ACT_T = ACT_TYPE;
-
 #define INIT 0
 #define OBS_READY_ON_CPU 1
 #define OBS_READY_ON_GPU 2
@@ -89,6 +84,14 @@ int my_put(Env* env, Dict* kwargs) {
     return 0;
 }
 #endif
+
+__attribute__((visibility("default")))
+void update_env_params(PufferEnvParams* params) {
+  params->obs_size = OBS_SIZE;
+  params->act_size = ACT_SIZE;
+  params->obs_type = OBS_TYPE;
+  params->act_type = ACT_TYPE;
+}
 
 void update_buffer_state(Threading* threading, int buf, int val) {
     atomic_int* states = threading->buffer_states;
@@ -219,7 +222,7 @@ static void* c_threadmanager(void* arg) {
         }
     }
 }
- 
+
 __attribute__((visibility("default")))
 VecEnv* create_environments(int num_envs, int buffers, bool use_gpu, int test_idx, Dict* kwargs) {
     Env* envs = (Env*)calloc(num_envs, sizeof(Env));
@@ -296,6 +299,7 @@ VecEnv* create_environments(int num_envs, int buffers, bool use_gpu, int test_id
     return vec;
 }
 
+__attribute__((visibility("default")))
 void create_threads(VecEnv* vec, int threads, int block_size) {
     //printf("Finished creating %d envs\n", num_envs);
     Threading* threading = vec->threading;
@@ -337,6 +341,7 @@ void create_threads(VecEnv* vec, int threads, int block_size) {
     }
 }
 
+__attribute__((visibility("default")))
 Env* env_init(float* observations, double* actions, float* rewards,
         float* terminals, int seed, Dict* kwargs) {
     Env* env = (Env*)calloc(1, sizeof(Env));
@@ -353,6 +358,7 @@ Env* env_init(float* observations, double* actions, float* rewards,
     return env;
 }
 
+__attribute__((visibility("default")))
 void vec_reset(VecEnv* vec) {
     for (int i = 0; i < vec->size; i++) {
         Env* env = &vec->envs[i];
@@ -389,6 +395,7 @@ void vec_reset(VecEnv* vec) {
     }
 }
 
+__attribute__((visibility("default")))
 void vec_send(VecEnv* vec, int buffer) {
     int block_size = vec->size / vec->buffers;
     int start = buffer * block_size;
@@ -454,6 +461,7 @@ void vec_send(VecEnv* vec, int buffer) {
 
 }
 
+__attribute__((visibility("default")))
 void vec_recv(VecEnv* vec, int buffer) {
     cudaDeviceSynchronize();
     Threading* threading = vec->threading;
@@ -476,16 +484,19 @@ void vec_recv(VecEnv* vec, int buffer) {
     }
 }
 
+__attribute__((visibility("default")))
 void vec_step(VecEnv* vec, int buffer) {
     vec_send(vec, buffer);
     vec_recv(vec, buffer);
 }
 
+__attribute__((visibility("default")))
 void env_close(Env* env) {
     c_close(env);
     free(env);
 }
 
+__attribute__((visibility("default")))
 void vec_close(VecEnv* vec) {
     for (int i = 0; i < vec->size; i++) {
         Env* env = &vec->envs[i];
@@ -494,11 +505,13 @@ void vec_close(VecEnv* vec) {
     free(vec->envs);
 }
 
+__attribute__((visibility("default")))
 void vec_render(VecEnv* vec, int env_idx) {
     Env* env = &vec->envs[env_idx];
     c_render(env);
 }
 
+__attribute__((visibility("default")))
 void vec_log(VecEnv* vec, Dict* out) {
     Log aggregate = {0};
     int num_keys = sizeof(Log) / sizeof(float);

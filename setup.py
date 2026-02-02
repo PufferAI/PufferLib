@@ -233,7 +233,7 @@ if not NO_OCEAN:
         "pufferlib/extensions/env_glue.cpp",
     ]
     c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
-    extension_kwargs['include_dirs'] += [pybind11.get_include(), torch.utils.cpp_extension.include_paths()[0]]
+    extension_kwargs['include_dirs'] += [pybind11.get_include(), torch.utils.cpp_extension.include_paths()[0], "pufferlib/extensions/"]
 
     c_extensions = [
         CppExtension(

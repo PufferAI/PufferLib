@@ -102,26 +102,35 @@ int my_put(Env* env, Dict* kwargs);
 typedef struct Log Log;
 void my_log(Log* log, Dict* out);
 
-// Sharp bit (puffers have spikes)
-// Define function types to be exported to the shared library
-// You don't need these, but you have to do some really gross
-// casts after loading the library without them.
-typedef VecEnv* (*create_environments_fn)(int num_envs, int buffers, bool use_gpu, int test_idx, Dict* kwargs);
-typedef Env* (*env_init_fn)(float* observations, double* actions, float* rewards,
-        float* terminals, int seed, Dict* kwargs);
-typedef void (*create_threads_fn)(VecEnv* vec, int threads, int block_size);
-typedef void (*vec_reset_fn)(VecEnv* vec);
-typedef void (*vec_step_fn)(VecEnv* vec);
-typedef void (*vec_recv_fn)(VecEnv* vec, int buffer);
-typedef void (*vec_send_fn)(VecEnv* vec, int buffer);
-typedef void (*env_close_fn)(Env* env);
-typedef void (*vec_close_fn)(VecEnv* vec);
-typedef void (*vec_render_fn)(VecEnv* vec, int env_idx);
-typedef void (*vec_log_fn)(VecEnv* vec, Dict* out);
+// Extern function declarations for environment interface
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-typedef void (*c_reset_fn)(Env* env);
-typedef void (*c_step_fn)(Env* env);
-typedef void (*c_close_fn)(Env* env);
-typedef void (*c_render_fn)(Env* env);
+typedef struct  {
+    int obs_size;
+    int act_size;
+    int obs_type;
+    int act_type;
+} PufferEnvParams;
+
+
+extern VecEnv* create_environments(int num_envs, int buffers, bool use_gpu, int test_idx, Dict* kwargs);
+extern Env* env_init(float* observations, double* actions, float* rewards,
+        float* terminals, int seed, Dict* kwargs);
+extern void create_threads(VecEnv* vec, int threads, int block_size);
+extern void vec_reset(VecEnv* vec);
+extern void vec_step(VecEnv* vec, int buffer);
+extern void vec_recv(VecEnv* vec, int buffer);
+extern void vec_send(VecEnv* vec, int buffer);
+extern void env_close(Env* env);
+extern void vec_close(VecEnv* vec);
+extern void vec_render(VecEnv* vec, int env_idx);
+extern void vec_log(VecEnv* vec, Dict* out);
+extern void update_env_params(PufferEnvParams* params);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // PUFFERLIB_VECENV_H
