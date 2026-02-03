@@ -34,7 +34,7 @@ OBS_SIZES = {
     5: 16,   # CARTESIAN: cartesian target position
     6: 23,   # DRONE_STYLE: + quaternion + up vector
     7: 17,   # QBAR: + dynamic pressure
-    8: 26,   # KITCHEN_SINK: everything
+    8: 30,   # KITCHEN_SINK: optimized high-info (vel+omega+angles+quat+controls+target+opponent)
 }
 
 

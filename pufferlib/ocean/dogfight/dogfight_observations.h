@@ -740,6 +740,19 @@ void compute_obs_qbar(Dogfight *env) {
 // Scheme 8: OBS_KITCHEN_SINK - everything (25 obs)
 // ============================================================================
 // Hypothesis: Maximum information with everything is optimal
+// ============================================================================
+// Scheme 8: OBS_KITCHEN_SINK - Optimized high-information (30 obs)
+// ============================================================================
+// Design: Maximum non-redundant information for long training runs
+// Includes: all flight state + orientation + control feedback + opponent prediction
+//
+// Layout (30 obs):
+// [0-12]  Own flight state: vel(3), omega(3), aoa, beta, g, q_bar, alt, energy, throttle
+// [13-16] Orientation: quaternion (4) - explicitly clamped
+// [17-19] Control surfaces: elevator, aileron, rudder commands (actuator feedback)
+// [20-23] Target: azimuth, elevation, range, closure (spherical)
+// [24-27] Opponent state: roll/pitch/yaw rates (3), target aspect (1)
+// [28-29] Tactical: energy advantage, timer
 void compute_obs_kitchen_sink(Dogfight *env) {
     Plane *p = &env->player;
     Plane *o = &env->opponent;
@@ -781,9 +794,6 @@ void compute_obs_kitchen_sink(Dogfight *env) {
     float kinetic = (speed * speed) / (MAX_SPEED * MAX_SPEED);
     float own_energy = (potential + kinetic) * 0.5f;
 
-    // Up vector in world frame
-    Vec3 world_up = quat_rotate(p->ori, vec3(0, 0, 1));
-
     // Target state
     Vec3 rel_pos = sub3(o->pos, p->pos);
     Vec3 rel_pos_body = quat_rotate(q_inv, rel_pos);
@@ -796,6 +806,12 @@ void compute_obs_kitchen_sink(Dogfight *env) {
     Vec3 rel_vel = sub3(p->vel, o->vel);
     float closure = dot3(rel_vel, normalize3(rel_pos));
 
+    // Target aspect - is opponent facing toward or away from us?
+    // +1 = nose-on (coming at us), -1 = tail-on (running away)
+    Vec3 opp_fwd = quat_rotate(o->ori, vec3(1, 0, 0));
+    Vec3 to_player = normalize3(sub3(p->pos, o->pos));
+    float target_aspect = dot3(opp_fwd, to_player);
+
     // Energy advantage
     float opp_speed = norm3(o->vel);
     float opp_potential = o->pos.z * INV_WORLD_MAX_Z;
@@ -804,52 +820,66 @@ void compute_obs_kitchen_sink(Dogfight *env) {
     float energy_advantage = clampf(own_energy - opp_energy, -1.0f, 1.0f);
 
     int i = 0;
+
+    // === OWN FLIGHT STATE (13 obs) ===
     // Body-frame velocity (3 obs)
-    env->observations[i++] = clampf(vel_body.x * INV_MAX_SPEED, 0.0f, 1.0f);
-    env->observations[i++] = clampf(vel_body.y * INV_MAX_SPEED, -1.0f, 1.0f);
-    env->observations[i++] = clampf(vel_body.z * INV_MAX_SPEED, -1.0f, 1.0f);
+    env->observations[i++] = clampf(vel_body.x * INV_MAX_SPEED, 0.0f, 1.0f);   // [0] Forward speed [0,1]
+    env->observations[i++] = clampf(vel_body.y * INV_MAX_SPEED, -1.0f, 1.0f);  // [1] Sideslip [-1,1]
+    env->observations[i++] = clampf(vel_body.z * INV_MAX_SPEED, -1.0f, 1.0f);  // [2] Climb rate [-1,1]
 
     // Angular velocity (3 obs)
-    env->observations[i++] = clampf(p->omega.x * INV_MAX_OMEGA, -1.0f, 1.0f);
-    env->observations[i++] = clampf(p->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f);
-    env->observations[i++] = clampf(p->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f);
+    env->observations[i++] = clampf(p->omega.x * INV_MAX_OMEGA, -1.0f, 1.0f);  // [3] Roll rate [-1,1]
+    env->observations[i++] = clampf(p->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f);  // [4] Pitch rate [-1,1]
+    env->observations[i++] = clampf(p->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f);  // [5] Yaw rate [-1,1]
 
     // Flight angles (2 obs)
-    env->observations[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);
-    env->observations[i++] = clampf(beta * INV_MAX_SIDESLIP, -1.0f, 1.0f);
+    env->observations[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);           // [6] AoA [-1,1]
+    env->observations[i++] = clampf(beta * INV_MAX_SIDESLIP, -1.0f, 1.0f);     // [7] Beta [-1,1]
 
-    // Flight state (4 obs)
-    env->observations[i++] = g_norm;
-    env->observations[i++] = q_bar_norm;
-    env->observations[i++] = potential;
-    env->observations[i++] = own_energy;
+    // Flight physics (2 obs)
+    env->observations[i++] = g_norm;                                            // [8] G-force [-0.5,1]
+    env->observations[i++] = q_bar_norm;                                        // [9] Dynamic pressure [0,1]
 
-    // Controls (1 obs)
-    env->observations[i++] = p->throttle;
+    // Energy state (2 obs)
+    env->observations[i++] = potential;                                         // [10] Altitude [0,1]
+    env->observations[i++] = own_energy;                                        // [11] Own energy [0,1]
 
-    // Quaternion (4 obs)
-    env->observations[i++] = p->ori.w;
-    env->observations[i++] = p->ori.x;
-    env->observations[i++] = p->ori.y;
-    env->observations[i++] = p->ori.z;
+    // Throttle (1 obs)
+    env->observations[i++] = p->throttle;                                       // [12] Throttle [0,1]
 
-    // Up vector in world frame (3 obs)
-    env->observations[i++] = world_up.x;
-    env->observations[i++] = world_up.y;
-    env->observations[i++] = world_up.z;
+    // === ORIENTATION (4 obs) ===
+    // Quaternion - explicitly clamped for consistent normalization
+    env->observations[i++] = clampf(p->ori.w, -1.0f, 1.0f);                    // [13] Quat w [-1,1]
+    env->observations[i++] = clampf(p->ori.x, -1.0f, 1.0f);                    // [14] Quat x [-1,1]
+    env->observations[i++] = clampf(p->ori.y, -1.0f, 1.0f);                    // [15] Quat y [-1,1]
+    env->observations[i++] = clampf(p->ori.z, -1.0f, 1.0f);                    // [16] Quat z [-1,1]
 
-    // Target spherical (4 obs)
-    env->observations[i++] = target_az * INV_PI;
-    env->observations[i++] = target_el * INV_HALF_PI;
-    env->observations[i++] = clampf(dist * INV_MAX_RANGE, 0.0f, 1.0f);
-    env->observations[i++] = clampf(closure * INV_MAX_SPEED, -1.0f, 1.0f);
+    // === CONTROL SURFACES (3 obs) - actuator feedback ===
+    // Like drone_race motor RPMs - agent sees its own control commands
+    env->observations[i++] = clampf(env->actions[1], -1.0f, 1.0f);             // [17] Elevator cmd [-1,1]
+    env->observations[i++] = clampf(env->actions[2], -1.0f, 1.0f);             // [18] Aileron cmd [-1,1]
+    env->observations[i++] = clampf(env->actions[3], -1.0f, 1.0f);             // [19] Rudder cmd [-1,1]
 
-    // Energy advantage (1 obs)
-    env->observations[i++] = energy_advantage;
+    // === TARGET INFO (4 obs) ===
+    env->observations[i++] = target_az * INV_PI;                                // [20] Azimuth [-1,1]
+    env->observations[i++] = target_el * INV_HALF_PI;                           // [21] Elevation [-1,1]
+    env->observations[i++] = clampf(dist * INV_MAX_RANGE, 0.0f, 1.0f);         // [22] Range [0,1]
+    env->observations[i++] = clampf(closure * INV_MAX_SPEED, -1.0f, 1.0f);     // [23] Closure [-1,1]
 
-    // Timer (1 obs)
-    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);
-    // OBS_SIZE = 26
+    // === OPPONENT STATE (4 obs) ===
+    // Opponent angular rates - for predicting maneuvers
+    env->observations[i++] = clampf(o->omega.x * INV_MAX_OMEGA, -1.0f, 1.0f);  // [24] Opp roll rate [-1,1]
+    env->observations[i++] = clampf(o->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f);  // [25] Opp pitch rate [-1,1]
+    env->observations[i++] = clampf(o->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f);  // [26] Opp yaw rate [-1,1]
+
+    // Target aspect - critical tactical info
+    env->observations[i++] = target_aspect;                                     // [27] Aspect [-1,1]
+
+    // === TACTICAL (2 obs) ===
+    env->observations[i++] = energy_advantage;                                  // [28] E advantage [-1,1]
+    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);   // [29] Timer [0,~1)
+
+    // OBS_SIZE = 30
 }
 
 // ============================================================================
@@ -1040,12 +1070,20 @@ static const char* DEBUG_OBS_LABELS_QBAR[17] = {
 };
 
 // Scheme 8: OBS_KITCHEN_SINK (26 obs)
-static const char* DEBUG_OBS_LABELS_KITCHEN_SINK[26] = {
+static const char* DEBUG_OBS_LABELS_KITCHEN_SINK[30] = {
+    // Own flight state (13)
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "beta", "g_force", "q_bar", "altitude", "energy", "throttle",
+    // Orientation (4)
     "quat_w", "quat_x", "quat_y", "quat_z",
-    "up_x", "up_y", "up_z",
-    "tgt_az", "tgt_el", "range", "closure", "E_adv", "timer"
+    // Control surfaces (3)
+    "elev_cmd", "ail_cmd", "rud_cmd",
+    // Target (4)
+    "tgt_az", "tgt_el", "range", "closure",
+    // Opponent state (4)
+    "opp_roll_r", "opp_pitch_r", "opp_yaw_r", "aspect",
+    // Tactical (2)
+    "E_adv", "timer"
 };
 
 void print_observations(Dogfight *env) {
@@ -1101,8 +1139,8 @@ void print_observations(Dogfight *env) {
                 is_01 = (i == 0 || i == 7 || i == 8 || i == 18 || i == 22);
                 break;
             case OBS_KITCHEN_SINK:
-                // fwd_spd(0), q_bar(9), altitude(10), energy(11), throttle(12), range(22), timer(25) are [0,1]
-                is_01 = (i == 0 || i == 9 || i == 10 || i == 11 || i == 12 || i == 22 || i == 25);
+                // fwd_spd(0), q_bar(9), altitude(10), energy(11), throttle(12), range(22), timer(29) are [0,1]
+                is_01 = (i == 0 || i == 9 || i == 10 || i == 11 || i == 12 || i == 22 || i == 29);
                 break;
             default:
                 break;

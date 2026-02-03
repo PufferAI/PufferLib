@@ -32,7 +32,7 @@ typedef enum {
     OBS_SCHEME_COUNT
 } ObsScheme;
 
-static const int OBS_SIZES[OBS_SCHEME_COUNT] = {16, 17, 17, 20, 12, 16, 23, 17, 26};
+static const int OBS_SIZES[OBS_SCHEME_COUNT] = {16, 17, 17, 20, 12, 16, 23, 17, 30};
 
 typedef enum {
     CURRICULUM_TAIL_CHASE = 0,       // Stage 0: Easiest - opponent ahead, same heading
