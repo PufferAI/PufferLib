@@ -47,8 +47,8 @@ def _ensure_bin_exists(difficulty):
     path = _bin_path(difficulty)
     if not os.path.exists(path):
         maps = _collect_maps(difficulty)
-        print(f"[Boxoban] Generating {len(maps)} maps for '{difficulty}' at {path}")
-        write_bin(maps, path)
+        count = write_bin(maps, path, verbose=False)
+        print(f"[Boxoban] Generated {count} puzzles for '{difficulty}' at {path}")
     return path
 
 class Boxoban(pufferlib.PufferEnv):

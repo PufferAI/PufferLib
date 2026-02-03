@@ -47,7 +47,7 @@ def encode_puzzle(grid):
 
     return agent, walls, boxes, targ
 
-def write_bin(files, out_path):
+def write_bin(files, out_path, verbose=True):
     all_arrays = []
 
     for path in files:
@@ -65,10 +65,13 @@ def write_bin(files, out_path):
     for arr in all_arrays:
         flat.extend(bytes(arr))
 
+    count = len(all_arrays) // 4
     with open(out_path, "wb") as out:
         out.write(flat)
 
-    print(f"Wrote {len(all_arrays)//4} puzzles to {out_path}")
+    if verbose:
+        print(f"Wrote {count} puzzles to {out_path}")
+    return count
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
