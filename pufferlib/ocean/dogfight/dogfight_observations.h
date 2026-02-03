@@ -8,10 +8,9 @@
 //   Scheme 2: OBS_MOMENTUM_GFORCE - + G-force (17 obs)
 //   Scheme 3: OBS_MOMENTUM_FULL  - + sideslip + G + throttle + tgt rates (20 obs)
 //   Scheme 4: OBS_MINIMAL        - stripped down essentials (12 obs)
-//   Scheme 5: OBS_CARTESIAN      - cartesian target position (16 obs)
-//   Scheme 6: OBS_DRONE_STYLE    - + quaternion + up vector (23 obs)
-//   Scheme 7: OBS_QBAR           - + dynamic pressure (17 obs)
-//   Scheme 8: OBS_KITCHEN_SINK   - everything (26 obs)
+//   Scheme 5: OBS_DRONE_STYLE    - + quaternion + up vector (23 obs)
+//   Scheme 6: OBS_QBAR           - + dynamic pressure (17 obs)
+//   Scheme 7: OBS_KITCHEN_SINK   - everything (30 obs)
 
 #ifndef DOGFIGHT_OBSERVATIONS_H
 #define DOGFIGHT_OBSERVATIONS_H
@@ -476,83 +475,7 @@ void compute_obs_minimal(Dogfight *env) {
 }
 
 // ============================================================================
-// Scheme 5: OBS_CARTESIAN - cartesian target position (15 obs)
-// ============================================================================
-// Hypothesis: Cartesian target coords better for lead computing
-void compute_obs_cartesian(Dogfight *env) {
-    Plane *p = &env->player;
-    Plane *o = &env->opponent;
-
-    Quat q_inv = {p->ori.w, -p->ori.x, -p->ori.y, -p->ori.z};
-
-    // Body-frame velocity
-    Vec3 vel_body = quat_rotate(q_inv, p->vel);
-    float speed = norm3(p->vel);
-
-    // Angle of attack
-    Vec3 forward = quat_rotate(p->ori, vec3(1, 0, 0));
-    Vec3 up = quat_rotate(p->ori, vec3(0, 0, 1));
-    float aoa = 0.0f;
-    if (speed > 1.0f) {
-        Vec3 vel_norm = normalize3(p->vel);
-        float cos_alpha = clampf(dot3(vel_norm, forward), -1.0f, 1.0f);
-        float alpha = acosf(cos_alpha);
-        float sign = (dot3(p->vel, up) < 0) ? 1.0f : -1.0f;
-        aoa = alpha * sign;
-    }
-
-    // Energy state
-    float potential = p->pos.z * INV_WORLD_MAX_Z;
-    float kinetic = (speed * speed) / (MAX_SPEED * MAX_SPEED);
-    float own_energy = (potential + kinetic) * 0.5f;
-
-    // Target in body frame - CARTESIAN instead of spherical
-    Vec3 rel_pos = sub3(o->pos, p->pos);
-    Vec3 rel_pos_body = quat_rotate(q_inv, rel_pos);
-
-    Vec3 rel_vel = sub3(p->vel, o->vel);
-    float closure = dot3(rel_vel, normalize3(rel_pos));
-
-    // Tactical
-    Vec3 opp_fwd = quat_rotate(o->ori, vec3(1, 0, 0));
-    Vec3 to_player = normalize3(sub3(p->pos, o->pos));
-    float target_aspect = dot3(opp_fwd, to_player);
-
-    float opp_speed = norm3(o->vel);
-    float opp_potential = o->pos.z * INV_WORLD_MAX_Z;
-    float opp_kinetic = (opp_speed * opp_speed) / (MAX_SPEED * MAX_SPEED);
-    float opp_energy = (opp_potential + opp_kinetic) * 0.5f;
-    float energy_advantage = clampf(own_energy - opp_energy, -1.0f, 1.0f);
-
-    int i = 0;
-    // Own flight state (9 obs)
-    env->observations[i++] = clampf(vel_body.x * INV_MAX_SPEED, 0.0f, 1.0f);
-    env->observations[i++] = clampf(vel_body.y * INV_MAX_SPEED, -1.0f, 1.0f);
-    env->observations[i++] = clampf(vel_body.z * INV_MAX_SPEED, -1.0f, 1.0f);
-    env->observations[i++] = clampf(p->omega.x * INV_MAX_OMEGA, -1.0f, 1.0f);
-    env->observations[i++] = clampf(p->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f);
-    env->observations[i++] = clampf(p->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f);
-    env->observations[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);
-    env->observations[i++] = potential;
-    env->observations[i++] = own_energy;
-
-    // Target state - CARTESIAN (4 obs)
-    env->observations[i++] = clampf(rel_pos_body.x * INV_MAX_RANGE, -1.0f, 1.0f);  // Target X (forward)
-    env->observations[i++] = clampf(rel_pos_body.y * INV_MAX_RANGE, -1.0f, 1.0f);  // Target Y (right)
-    env->observations[i++] = clampf(rel_pos_body.z * INV_MAX_RANGE, -1.0f, 1.0f);  // Target Z (up)
-    env->observations[i++] = clampf(closure * INV_MAX_SPEED, -1.0f, 1.0f);
-
-    // Tactical (2 obs)
-    env->observations[i++] = energy_advantage;
-    env->observations[i++] = target_aspect;
-
-    // Timer (1 obs)
-    env->observations[i++] = (float)env->tick / (float)(env->max_steps + 1);
-    // OBS_SIZE = 16
-}
-
-// ============================================================================
-// Scheme 6: OBS_DRONE_STYLE - + quaternion + up vector (22 obs)
+// Scheme 5: OBS_DRONE_STYLE - + quaternion + up vector (23 obs)
 // ============================================================================
 // Hypothesis: Quaternion + up vector (drone_race style) helps 3D maneuvers
 void compute_obs_drone_style(Dogfight *env) {
@@ -647,7 +570,7 @@ void compute_obs_drone_style(Dogfight *env) {
 }
 
 // ============================================================================
-// Scheme 7: OBS_QBAR - + dynamic pressure (16 obs)
+// Scheme 6: OBS_QBAR - + dynamic pressure (17 obs)
 // ============================================================================
 // Hypothesis: Dynamic pressure helps understand control authority
 void compute_obs_qbar(Dogfight *env) {
@@ -737,11 +660,7 @@ void compute_obs_qbar(Dogfight *env) {
 }
 
 // ============================================================================
-// Scheme 8: OBS_KITCHEN_SINK - everything (25 obs)
-// ============================================================================
-// Hypothesis: Maximum information with everything is optimal
-// ============================================================================
-// Scheme 8: OBS_KITCHEN_SINK - Optimized high-information (30 obs)
+// Scheme 7: OBS_KITCHEN_SINK - Optimized high-information (30 obs)
 // ============================================================================
 // Design: Maximum non-redundant information for long training runs
 // Includes: all flight state + orientation + control feedback + opponent prediction
@@ -892,7 +811,6 @@ void compute_observations(Dogfight *env) {
         case OBS_MOMENTUM_GFORCE: compute_obs_momentum_gforce(env); break;
         case OBS_MOMENTUM_FULL:   compute_obs_momentum_full(env); break;
         case OBS_MINIMAL:         compute_obs_minimal(env); break;
-        case OBS_CARTESIAN:       compute_obs_cartesian(env); break;
         case OBS_DRONE_STYLE:     compute_obs_drone_style(env); break;
         case OBS_QBAR:            compute_obs_qbar(env); break;
         case OBS_KITCHEN_SINK:    compute_obs_kitchen_sink(env); break;
@@ -1043,15 +961,7 @@ static const char* DEBUG_OBS_LABELS_MINIMAL[12] = {
     "tgt_az", "tgt_el", "range", "closure", "E_adv", "timer"
 };
 
-// Scheme 5: OBS_CARTESIAN (16 obs)
-static const char* DEBUG_OBS_LABELS_CARTESIAN[16] = {
-    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
-    "aoa", "altitude", "energy",
-    "tgt_x", "tgt_y", "tgt_z", "closure",
-    "E_adv", "aspect", "timer"
-};
-
-// Scheme 6: OBS_DRONE_STYLE (23 obs)
+// Scheme 5: OBS_DRONE_STYLE (23 obs)
 static const char* DEBUG_OBS_LABELS_DRONE_STYLE[23] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy",
@@ -1061,7 +971,7 @@ static const char* DEBUG_OBS_LABELS_DRONE_STYLE[23] = {
     "E_adv", "aspect", "timer"
 };
 
-// Scheme 7: OBS_QBAR (17 obs)
+// Scheme 6: OBS_QBAR (17 obs)
 static const char* DEBUG_OBS_LABELS_QBAR[17] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy", "q_bar",
@@ -1069,7 +979,7 @@ static const char* DEBUG_OBS_LABELS_QBAR[17] = {
     "E_adv", "aspect", "timer"
 };
 
-// Scheme 8: OBS_KITCHEN_SINK (26 obs)
+// Scheme 7: OBS_KITCHEN_SINK (30 obs)
 static const char* DEBUG_OBS_LABELS_KITCHEN_SINK[30] = {
     // Own flight state (13)
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
@@ -1097,7 +1007,6 @@ void print_observations(Dogfight *env) {
         case OBS_MOMENTUM_GFORCE: labels = DEBUG_OBS_LABELS_MOMENTUM_GFORCE; break;
         case OBS_MOMENTUM_FULL:   labels = DEBUG_OBS_LABELS_MOMENTUM_FULL; break;
         case OBS_MINIMAL:         labels = DEBUG_OBS_LABELS_MINIMAL; break;
-        case OBS_CARTESIAN:       labels = DEBUG_OBS_LABELS_CARTESIAN; break;
         case OBS_DRONE_STYLE:     labels = DEBUG_OBS_LABELS_DRONE_STYLE; break;
         case OBS_QBAR:            labels = DEBUG_OBS_LABELS_QBAR; break;
         case OBS_KITCHEN_SINK:    labels = DEBUG_OBS_LABELS_KITCHEN_SINK; break;
@@ -1129,10 +1038,6 @@ void print_observations(Dogfight *env) {
             case OBS_MINIMAL:
                 // fwd_spd(0), altitude(5), range(8), timer(11) are [0,1]
                 is_01 = (i == 0 || i == 5 || i == 8 || i == 11);
-                break;
-            case OBS_CARTESIAN:
-                // fwd_spd(0), altitude(7), energy(8), timer(15) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8 || i == 15);
                 break;
             case OBS_DRONE_STYLE:
                 // fwd_spd(0), altitude(7), energy(8), range(18), timer(22) are [0,1]

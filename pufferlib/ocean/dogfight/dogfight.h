@@ -20,19 +20,18 @@
 #include "autoace.h"
 
 typedef enum {
-    OBS_MOMENTUM = 0,           // BASELINE: body-frame vel + omega + AoA + energy (15 obs)
-    OBS_MOMENTUM_BETA = 1,      // + sideslip angle (16 obs)
-    OBS_MOMENTUM_GFORCE = 2,    // + G-force (16 obs)
-    OBS_MOMENTUM_FULL = 3,      // + sideslip + G + throttle + tgt rates (19 obs)
-    OBS_MINIMAL = 4,            // stripped down essentials (11 obs)
-    OBS_CARTESIAN = 5,          // cartesian target position (15 obs)
-    OBS_DRONE_STYLE = 6,        // + quaternion + up vector (22 obs)
-    OBS_QBAR = 7,               // + dynamic pressure (16 obs)
-    OBS_KITCHEN_SINK = 8,       // everything (25 obs)
+    OBS_MOMENTUM = 0,           // BASELINE: body-frame vel + omega + AoA + energy (16 obs)
+    OBS_MOMENTUM_BETA = 1,      // + sideslip angle (17 obs)
+    OBS_MOMENTUM_GFORCE = 2,    // + G-force (17 obs)
+    OBS_MOMENTUM_FULL = 3,      // + sideslip + G + throttle + tgt rates (20 obs)
+    OBS_MINIMAL = 4,            // stripped down essentials (12 obs)
+    OBS_DRONE_STYLE = 5,        // + quaternion + up vector (23 obs)
+    OBS_QBAR = 6,               // + dynamic pressure (17 obs)
+    OBS_KITCHEN_SINK = 7,       // everything (30 obs)
     OBS_SCHEME_COUNT
 } ObsScheme;
 
-static const int OBS_SIZES[OBS_SCHEME_COUNT] = {16, 17, 17, 20, 12, 16, 23, 17, 30};
+static const int OBS_SIZES[OBS_SCHEME_COUNT] = {16, 17, 17, 20, 12, 23, 17, 30};
 
 typedef enum {
     CURRICULUM_TAIL_CHASE = 0,       // Stage 0: Easiest - opponent ahead, same heading

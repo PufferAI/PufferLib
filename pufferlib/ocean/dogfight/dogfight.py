@@ -31,10 +31,9 @@ OBS_SIZES = {
     2: 17,   # MOMENTUM_GFORCE: + G-force
     3: 20,   # MOMENTUM_FULL: + sideslip + G + throttle + target rates
     4: 12,   # MINIMAL: stripped down essentials
-    5: 16,   # CARTESIAN: cartesian target position
-    6: 23,   # DRONE_STYLE: + quaternion + up vector
-    7: 17,   # QBAR: + dynamic pressure
-    8: 30,   # KITCHEN_SINK: optimized high-info (vel+omega+angles+quat+controls+target+opponent)
+    5: 23,   # DRONE_STYLE: + quaternion + up vector
+    6: 17,   # QBAR: + dynamic pressure
+    7: 30,   # KITCHEN_SINK: optimized high-info (vel+omega+angles+quat+controls+target+opponent)
 }
 
 

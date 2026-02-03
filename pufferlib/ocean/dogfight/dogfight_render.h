@@ -9,12 +9,12 @@ static inline Quaternion quat_to_raylib(Quat q) {
     return (Quaternion){q.x, q.y, q.z, q.w};
 }
 
-// Scheme 0: OBS_MOMENTUM (15 obs) - baseline
-static const char* OBS_LABELS_MOMENTUM[15] = {
+// Scheme 0: OBS_MOMENTUM (16 obs) - baseline
+static const char* OBS_LABELS_MOMENTUM[16] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy",
     "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect"
+    "E_adv", "aspect", "timer"
 };
 
 // Scheme 1: OBS_MOMENTUM_BETA (17 obs)
@@ -33,53 +33,47 @@ static const char* OBS_LABELS_MOMENTUM_GFORCE[17] = {
     "E_adv", "aspect", "timer"
 };
 
-// Scheme 3: OBS_MOMENTUM_FULL (19 obs)
-static const char* OBS_LABELS_MOMENTUM_FULL[19] = {
+// Scheme 3: OBS_MOMENTUM_FULL (20 obs)
+static const char* OBS_LABELS_MOMENTUM_FULL[20] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy", "beta", "g_force", "throttle",
     "tgt_az", "tgt_el", "range", "closure",
-    "tgt_pitch_r", "tgt_roll_r", "E_adv"
+    "tgt_pitch_r", "tgt_roll_r", "E_adv", "timer"
 };
 
-// Scheme 4: OBS_MINIMAL (11 obs)
-static const char* OBS_LABELS_MINIMAL[11] = {
+// Scheme 4: OBS_MINIMAL (12 obs)
+static const char* OBS_LABELS_MINIMAL[12] = {
     "fwd_spd", "aoa", "roll_r", "pitch_r", "yaw_r", "altitude",
-    "tgt_az", "tgt_el", "range", "closure", "E_adv"
+    "tgt_az", "tgt_el", "range", "closure", "E_adv", "timer"
 };
 
-// Scheme 5: OBS_CARTESIAN (15 obs)
-static const char* OBS_LABELS_CARTESIAN[15] = {
-    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
-    "aoa", "altitude", "energy",
-    "tgt_x", "tgt_y", "tgt_z", "closure",
-    "E_adv", "aspect"
-};
-
-// Scheme 6: OBS_DRONE_STYLE (22 obs)
-static const char* OBS_LABELS_DRONE_STYLE[22] = {
+// Scheme 5: OBS_DRONE_STYLE (23 obs)
+static const char* OBS_LABELS_DRONE_STYLE[23] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy",
     "quat_w", "quat_x", "quat_y", "quat_z",
     "up_x", "up_y", "up_z",
     "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect"
+    "E_adv", "aspect", "timer"
 };
 
-// Scheme 7: OBS_QBAR (16 obs)
-static const char* OBS_LABELS_QBAR[16] = {
+// Scheme 6: OBS_QBAR (17 obs)
+static const char* OBS_LABELS_QBAR[17] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "energy", "q_bar",
     "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect"
+    "E_adv", "aspect", "timer"
 };
 
-// Scheme 8: OBS_KITCHEN_SINK (25 obs)
-static const char* OBS_LABELS_KITCHEN_SINK[25] = {
+// Scheme 7: OBS_KITCHEN_SINK (30 obs)
+static const char* OBS_LABELS_KITCHEN_SINK[30] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "beta", "g_force", "q_bar", "altitude", "energy", "throttle",
     "quat_w", "quat_x", "quat_y", "quat_z",
-    "up_x", "up_y", "up_z",
-    "tgt_az", "tgt_el", "range", "closure", "E_adv"
+    "elev_cmd", "ail_cmd", "rud_cmd",
+    "tgt_az", "tgt_el", "range", "closure",
+    "opp_roll_r", "opp_pitch_r", "opp_yaw_r", "aspect",
+    "E_adv", "timer"
 };
 
 void draw_plane_model(Client *client, Vec3 pos, Quat ori, Color tint, float scale_factor, float prop_angle) {
@@ -232,9 +226,6 @@ void draw_obs_monitor(Dogfight *env) {
         case OBS_MINIMAL:
             labels = OBS_LABELS_MINIMAL;
             break;
-        case OBS_CARTESIAN:
-            labels = OBS_LABELS_CARTESIAN;
-            break;
         case OBS_DRONE_STYLE:
             labels = OBS_LABELS_DRONE_STYLE;
             break;
@@ -258,34 +249,30 @@ void draw_obs_monitor(Dogfight *env) {
         bool is_01 = false;
         switch (env->obs_scheme) {
             case OBS_MOMENTUM:
-                // fwd_spd(0), altitude(7), energy(8), range(11) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8 || i == 11);
+                // fwd_spd(0), altitude(7), energy(8), range(11), timer(15) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 11 || i == 15);
                 break;
             case OBS_MOMENTUM_BETA:
             case OBS_MOMENTUM_GFORCE:
             case OBS_QBAR:
-                // fwd_spd(0), altitude(7), energy(8), range(12) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8 || i == 12);
+                // fwd_spd(0), altitude(7), energy(8), range(12), timer(16) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 12 || i == 16);
                 break;
             case OBS_MOMENTUM_FULL:
-                // fwd_spd(0), altitude(7), energy(8), throttle(11), range(14) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8 || i == 11 || i == 14);
+                // fwd_spd(0), altitude(7), energy(8), throttle(11), range(14), timer(19) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 11 || i == 14 || i == 19);
                 break;
             case OBS_MINIMAL:
-                // fwd_spd(0), altitude(5), range(8) are [0,1]
-                is_01 = (i == 0 || i == 5 || i == 8);
-                break;
-            case OBS_CARTESIAN:
-                // fwd_spd(0), altitude(7), energy(8) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8);
+                // fwd_spd(0), altitude(5), range(8), timer(11) are [0,1]
+                is_01 = (i == 0 || i == 5 || i == 8 || i == 11);
                 break;
             case OBS_DRONE_STYLE:
-                // fwd_spd(0), altitude(7), energy(8), range(18) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8 || i == 18);
+                // fwd_spd(0), altitude(7), energy(8), range(18), timer(22) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 8 || i == 18 || i == 22);
                 break;
             case OBS_KITCHEN_SINK:
-                // fwd_spd(0), q_bar(9), altitude(10), energy(11), throttle(12), range(22) are [0,1]
-                is_01 = (i == 0 || i == 9 || i == 10 || i == 11 || i == 12 || i == 22);
+                // fwd_spd(0), q_bar(9), altitude(10), energy(11), throttle(12), range(22), timer(29) are [0,1]
+                is_01 = (i == 0 || i == 9 || i == 10 || i == 11 || i == 12 || i == 22 || i == 29);
                 break;
             default:
                 break;
