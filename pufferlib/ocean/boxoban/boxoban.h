@@ -16,6 +16,7 @@ const unsigned char WALLS = 1;
 const unsigned char BOXES = 2;
 const unsigned char TARGET = 3;
 
+
 /*Maps are stored in the binary files with the name indicating the difficulty.
 If the bin doesn't exist it is created on the fly.
 Once the bin exists and MMAP is created and shared between envs (see binding.c)
@@ -230,6 +231,7 @@ void c_reset(Boxoban* env) {
     env->win = 0;
 }
 
+//Updates OBS for moved entity
 void move_entity(Boxoban* env,unsigned char entity,int x, int y, int dx, int dy) {
     OBS(entity, x, y) = 0;
     OBS(entity, x + dx, y + dy) = 1;
@@ -237,6 +239,7 @@ void move_entity(Boxoban* env,unsigned char entity,int x, int y, int dx, int dy)
 
 //NB THIS IS DESTRUCTIVE AND SHOULD BE RUN ONCE PER STEP
 //INTERMEDIATE_REWARD(x, y) is a grid and = 1  means there is reward left to claim
+// for that target
 float get_intermediate_rewards(Boxoban* env) {
     float int_r = 0;
     for (int y = 0; y < env->size; y++) {
@@ -263,13 +266,11 @@ static inline int boxes_on_targets(Boxoban *env) {
      return total;
 }
 
+//If clear is true, move the agent to the new position
+//If clear is false, but its a box and box is clear move both
+//If not clear, or not clear beyond box, do nothing
+//Updates agent position and calls move_entity to update OBS
 void take_action(Boxoban* env, int action) {
-    if (env->agent_x < 0 || env->agent_x >= env->size ||
-        env->agent_y < 0 || env->agent_y >= env->size) {
-        fprintf(stderr, "Boxoban agent out of bounds: (%d, %d)\n", env->agent_x, env->agent_y);
-        c_reset(env);
-        return;
-    }
     int dx = 0;
     int dy = 0;
     if (action == DOWN) {
@@ -375,7 +376,7 @@ void c_step(Boxoban* env) {
         env->rewards[0] -= env->target_loss_pen_coeff * (on_target - on_target_after);
     }
 
-    float num_int_rewards = get_intermediate_rewards(env); //get available rewards for first time box targets
+    float num_int_rewards = get_intermediate_rewards(env); //get available rewards for first time box targets - destructive
 
     if (num_int_rewards > 0) {
         env->n_targets += (int)num_int_rewards;
@@ -402,11 +403,11 @@ void c_step(Boxoban* env) {
         return;
     }
 
-    //new obs is modified in place
-
     //length penalty
     env->rewards[0] -= 1.0* env->len_reward_coeff;
 }
+
+/*Rendering stuff*/
 
 Client* c_create(Boxoban* env) {
     Client* client = calloc(1,sizeof(Client));

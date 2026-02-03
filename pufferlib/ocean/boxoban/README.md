@@ -13,12 +13,14 @@ These can both be generated using the generate_easy_maps.py script and settings 
 The hard, medium and unfiltered levels are taken from Googles Boxoban dataset and the license info is included in the file.
 These maps are not easy to generate since they need to be solveable but also interesting, however there are a very good number of maps in those folders ~1M. 
 
-Medium and ulfiltered also have validation sets though these aren't used.
+Medium and unlfiltered also have validation sets though these aren't used.
 
 
 ## The first time each difficulty is used a .bin is generated
 
 Play manually using the .c compiled with bash scripts/build_ocean boxoban. 
+
+Sprites included and have an creative license.
 
 You can play different difficulties by adding the arg eg. ./boxoban easy HOWEVER the .bin needs to have been built
 
