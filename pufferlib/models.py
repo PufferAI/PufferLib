@@ -8,11 +8,6 @@ import pufferlib.emulation
 import pufferlib.pytorch
 import pufferlib.spaces
 
-import numpy as np
-import torch
-import torch.nn as nn
-import pufferlib
-
 
 class Default(nn.Module):
     '''Default PyTorch policy. Flattens obs and applies a linear layer.
