@@ -113,56 +113,6 @@ class Boxoban(nn.Module):
         return logits, values
 
 
-class BoxobanConv(nn.Module):
-      def __init__(self, env, framestack=1, hidden_size=256, output_size=None):
-          super().__init__()
-          self.is_continuous = False
-          self.hidden_size = hidden_size
-          if output_size is None:
-              output_size = hidden_size  # share the same dim for value head
-
-          # Boxoban observations are 4 binary planes (agent/walls/boxes/targets) flattened.
-          flat_dim = int(np.prod(env.single_observation_space.shape))
-          self.grid_planes = 4
-          spatial_cells = flat_dim // self.grid_planes
-          self.grid_size = int(np.sqrt(spatial_cells))
-          if self.grid_size * self.grid_size * self.grid_planes != flat_dim:
-              raise ValueError(f'Unexpected Boxoban observation shape: {env.single_observation_space.shape}')
-
-          # Three 3x3 stride-1 convs reduce the spatial size by 2 each time.
-          self.conv_out_size = self.grid_size - 6
-          if self.conv_out_size <= 0:
-              raise ValueError('Boxoban grid too small for 3-layer conv encoder')
-
-          self.network = nn.Sequential(
-              pufferlib.pytorch.layer_init(nn.Conv2d(self.grid_planes, 32, kernel_size=3, stride=1)),
-              nn.ReLU(),
-              pufferlib.pytorch.layer_init(nn.Conv2d(32, 64, kernel_size=3, stride=1)),
-              nn.ReLU(),
-              pufferlib.pytorch.layer_init(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
-              nn.ReLU(),
-              nn.Flatten(),
-              pufferlib.pytorch.layer_init(nn.Linear(64 * self.conv_out_size * self.conv_out_size, hidden_size)),
-              nn.ReLU(),
-          )
-          self.actor = pufferlib.pytorch.layer_init(
-              nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
-          self.value_fn = pufferlib.pytorch.layer_init(
-              nn.Linear(output_size, 1), std=1)
-
-      def encode_observations(self, observations, state=None):
-          batch = observations.shape[0]
-          obs = observations.reshape(batch, self.grid_planes, self.grid_size, self.grid_size)
-          return self.network(obs.float())
-
-      def decode_actions(self, hidden):
-          logits = self.actor(hidden)
-          value = self.value_fn(hidden)
-          return logits, value
-
-      def forward(self, observations, state=None):
-          hidden = self.encode_observations(observations, state)
-          return self.decode_actions(hidden)
 
 
 class Boids(nn.Module):
