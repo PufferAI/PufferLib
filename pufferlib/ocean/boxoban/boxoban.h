@@ -264,6 +264,12 @@ static inline int boxes_on_targets(Boxoban *env) {
 }
 
 void take_action(Boxoban* env, int action) {
+    if (env->agent_x < 0 || env->agent_x >= env->size ||
+        env->agent_y < 0 || env->agent_y >= env->size) {
+        fprintf(stderr, "Boxoban agent out of bounds: (%d, %d)\n", env->agent_x, env->agent_y);
+        c_reset(env);
+        return;
+    }
     int dx = 0;
     int dy = 0;
     if (action == DOWN) {
@@ -536,14 +542,20 @@ void c_render(Boxoban* env) {
 // Required function. Should clean up anything you allocated
 // Do not free env->observations, actions, rewards, terminals
 void c_close(Boxoban* env) {
+    if (env->intermediate_rewards) {
+          free(env->intermediate_rewards);
+          env->intermediate_rewards = NULL;
+      }
     if (IsWindowReady()) {
-
-        UnloadTexture(env->client->wall);
-        UnloadTexture(env->client->box);
-        UnloadTexture(env->client->target);
-        UnloadTexture(env->client->floor);
-        UnloadTexture(env->client->agent);
-        free(env->client);
+        if (env->client) {
+            UnloadTexture(env->client->wall);
+            UnloadTexture(env->client->box);
+            UnloadTexture(env->client->target);
+            UnloadTexture(env->client->floor);
+            UnloadTexture(env->client->agent);
+            free(env->client);
+            env->client = NULL;
+        }
         CloseWindow();
     }
 }

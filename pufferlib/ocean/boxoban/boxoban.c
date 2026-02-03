@@ -9,6 +9,23 @@
 
 #define BOXOBAN_MAPS_IMPLEMENTATION
 #include "boxoban.h"
+#include <execinfo.h>
+#include <signal.h>
+#include <unistd.h>
+
+static void segv_handler(int sig) {
+    void *buf[32];
+    int n = backtrace(buf, 32);
+    fprintf(stderr, "Caught signal %d\n", sig);
+    backtrace_symbols_fd(buf, n, STDERR_FILENO);
+    _exit(1);
+}
+
+__attribute__((constructor))
+static void install_handlers(void) {
+    signal(SIGSEGV, segv_handler);
+    signal(SIGABRT, segv_handler);
+}
 
 static const char* resolve_map_path(int argc, char** argv, char* buffer, size_t buf_sz) {
     const char* arg = argc > 1 ? argv[1] : NULL;
@@ -22,7 +39,7 @@ static const char* resolve_map_path(int argc, char** argv, char* buffer, size_t 
     return buffer;
 }
 
-int main(int argc, char** argv) {
+int demo(int argc, char** argv) {
     char path_buffer[512];
     const char* chosen_path = resolve_map_path(argc, argv, path_buffer, sizeof(path_buffer));
     if (boxoban_set_map_path(chosen_path) != 0) {
@@ -30,14 +47,26 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    Boxoban env = {.size = 10};
-    env.observations = (unsigned char*)calloc(4*env.size*env.size, sizeof(unsigned char));
-    env.actions = (int*)calloc(1, sizeof(int));
-    env.rewards = (float*)calloc(1, sizeof(float));
-    env.terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
+    Boxoban env = {0};
+    env.size = 10;
+    env.observations = calloc(4 * env.size * env.size, sizeof(unsigned char));
+    env.actions = calloc(1, sizeof(int));
+    env.rewards = calloc(1, sizeof(float));
+    env.terminals = calloc(1, sizeof(unsigned char));
     env.max_steps = 500;
     env.int_r_coeff = 0.1f;
     env.target_loss_pen_coeff = 0.5f;
+    env.len_reward_coeff = 0.1f;
+    env.tick = 0;
+    env.agent_x = 0;
+    env.agent_y = 0;
+    env.intermediate_rewards = NULL;
+    env.n_targets = 0;
+    env.n_boxes = 0;
+    env.win = 0;
+    env.client = NULL;
+
+
     init(&env);
     c_reset(&env);
     c_render(&env);
@@ -75,4 +104,65 @@ int main(int argc, char** argv) {
     free(env.rewards);
     free(env.terminals);
     c_close(&env);
+    return 0;
+}
+
+void test_performance(int argc, char** argv, int timeout) {
+    char path_buffer[512];
+    const char* chosen_path = resolve_map_path(argc, argv, path_buffer, sizeof(path_buffer));
+    if (boxoban_set_map_path(chosen_path) != 0) {
+        fprintf(stderr, "Failed to set map path: %s\n", chosen_path);
+        return;
+    }
+    printf("Loaded map: %s\n", chosen_path);
+
+    Boxoban env = {0};
+    env.size = 10;
+    env.observations = calloc(4 * env.size * env.size, sizeof(unsigned char));
+    env.actions = calloc(1, sizeof(int));
+    env.rewards = calloc(1, sizeof(float));
+    env.terminals = calloc(1, sizeof(unsigned char));
+    env.max_steps = 500;
+    env.int_r_coeff = 0.1f;
+    env.target_loss_pen_coeff = 0.5f;
+    env.len_reward_coeff = 0.1f;
+    env.tick = 0;
+    env.agent_x = 0;
+    env.agent_y = 0;
+    env.intermediate_rewards = NULL;
+    env.n_targets = 0;
+    env.n_boxes = 0;
+    env.win = 0;
+    env.client = NULL;
+    printf("Initializing...\n");
+    init(&env);
+    printf("Resetting...\n");
+    c_reset(&env);
+    printf("Starting test...\n");
+
+    int start = time(NULL);
+    int num_steps = 0;
+    while (time(NULL) - start < timeout) {
+        env.actions[0] = rand() % 5;
+        c_step(&env);
+        num_steps++;
+    }
+
+    int end = time(NULL);
+    float sps = num_steps / (end - start);
+    printf("Test Environment SPS: %f\n", sps);
+    free(env.observations);
+    free(env.actions);
+    free(env.rewards);
+    free(env.terminals);
+    c_close(&env);
+}
+
+int main(int argc, char** argv) {
+    //demo(argc, argv);
+    setbuf(stdout, NULL);
+    fprintf(stderr, "Entered main\n");
+    fflush(stderr);
+    test_performance(argc, argv,10);
+    return 0;
 }
