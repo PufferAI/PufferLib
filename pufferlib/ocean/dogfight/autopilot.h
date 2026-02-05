@@ -42,6 +42,9 @@ typedef enum {
     // Flight test modes
     AP_MIN_RADIUS_TURN,  // Full elevator, aileron keeps nose on horizon (tightest turn)
 
+    // Recovery mode (opponent hijacking for death spiral prevention)
+    AP_RECOVERY,         // Low-altitude recovery: wings level → speed → turn
+
     AP_COUNT
 } AutopilotMode;
 
@@ -103,6 +106,10 @@ typedef struct {
 
     // AP_EVASIVE state (set by caller each step)
     Vec3 threat_pos;         // Position of threat to evade
+
+    // AP_RECOVERY state (death spiral recovery hijacking)
+    int recovery_phase;              // 0=wings_level, 1=gain_speed, 2=turn
+    float recovery_speed_threshold;  // Speed needed before phase 2
 } AutopilotState;
 
 // Simple LCG random for autopilot (not affected by srand)
@@ -147,6 +154,21 @@ static inline void autopilot_init(AutopilotState* ap) {
     // New mode state
     ap->phase = 0.0f;
     ap->threat_pos = vec3(0, 0, 0);
+
+    // Recovery state (initialized to safe values)
+    ap->recovery_phase = 0;
+    ap->recovery_speed_threshold = 70.0f;
+}
+
+// Start recovery mode (used by death spiral prevention)
+static inline void autopilot_start_recovery(AutopilotState* ap, float speed_threshold, float bank_deg) {
+    ap->mode = AP_RECOVERY;
+    ap->recovery_phase = 0;
+    ap->recovery_speed_threshold = speed_threshold;
+    ap->target_bank = bank_deg * (PI / 180.0f);
+    ap->prev_vz = 0.0f;
+    ap->prev_pitch = 0.0f;
+    ap->prev_bank_error = 0.0f;
 }
 
 // Set autopilot mode with parameters
@@ -413,6 +435,54 @@ static inline void autopilot_step(AutopilotState* ap, Plane* p, float* actions, 
             float aileron = kp * bank_error + kd * bank_deriv;
             actions[2] = ap_clamp(aileron, -1.0f, 1.0f);
             ap->prev_bank_error = bank_error;
+            break;
+        }
+
+        case AP_RECOVERY: {
+            // Death spiral recovery: wings level → gain speed → 60° turn
+            // Used by opponent hijacking to break death spiral equilibrium
+            float rec_bank = ap_get_bank_angle(p);
+            float rec_pitch = ap_get_pitch_angle(p);
+            float rec_vz = ap_get_vz(p);
+            float rec_speed = sqrtf(p->vel.x * p->vel.x + p->vel.y * p->vel.y + p->vel.z * p->vel.z);
+
+            switch (ap->recovery_phase) {
+                case 0: // Phase 0: Wings level - roll to 0 bank, pitch to stop descent
+                    // Roll to level
+                    actions[2] = ap_clamp(-ap->roll_kp * rec_bank, -1.0f, 1.0f);
+                    // Pitch to stop descent (target vz=0)
+                    {
+                        float vz_deriv = (rec_vz - ap->prev_vz) / dt;
+                        actions[1] = ap_clamp(ap->pitch_kp * (-rec_vz) + ap->pitch_kd * (-vz_deriv), -1.0f, 1.0f);
+                    }
+                    ap->prev_vz = rec_vz;
+                    // Transition when roughly level
+                    if (fabsf(rec_bank) < 0.15f && fabsf(rec_vz) < 5.0f) {
+                        ap->recovery_phase = 1;
+                    }
+                    break;
+
+                case 1: // Phase 1: Gain speed - maintain level, wait for speed
+                    // Keep level (pitch to vz=0)
+                    actions[1] = ap_clamp(ap->pitch_kp * (-rec_vz), -1.0f, 1.0f);
+                    actions[2] = 0.0f;
+                    // Transition when speed is sufficient
+                    if (rec_speed >= ap->recovery_speed_threshold) {
+                        ap->recovery_phase = 2;
+                    }
+                    break;
+
+                case 2: // Phase 2: Coordinated 60° turn - standard turn maneuver
+                    // Pitch tracking: keep nose level during bank
+                    actions[1] = ap_clamp(-ap->turn_pitch_kp * rec_pitch, -1.0f, 1.0f);
+                    // Roll to target bank
+                    actions[2] = ap_clamp(ap->roll_kp * (ap->target_bank - rec_bank), -1.0f, 1.0f);
+                    break;
+            }
+            // Full throttle, no rudder, no firing during recovery
+            actions[0] = 1.0f;
+            actions[3] = 0.0f;
+            actions[4] = -1.0f;
             break;
         }
 

@@ -20,6 +20,11 @@ static PyObject* vec_set_opponent_actions(PyObject* self, PyObject* args);
 static PyObject* vec_enable_opponent_override(PyObject* self, PyObject* args);
 static PyObject* vec_set_opponent_buffers(PyObject* self, PyObject* args);
 static PyObject* vec_set_eval_spawn_mode(PyObject* self, PyObject* args);
+static PyObject* vec_set_debug_step(PyObject* self, PyObject* args);
+static PyObject* vec_set_global_step(PyObject* self, PyObject* args);
+static PyObject* vec_set_selfplay_active(PyObject* self, PyObject* args);
+static PyObject* vec_get_guided_climb_state(PyObject* self, PyObject* args);
+static PyObject* vec_tick_guided_climb(PyObject* self, PyObject* args);
 
 #define MY_METHODS \
     {"env_force_state", (PyCFunction)env_force_state, METH_VARARGS | METH_KEYWORDS, "Force environment state"}, \
@@ -37,7 +42,12 @@ static PyObject* vec_set_eval_spawn_mode(PyObject* self, PyObject* args);
     {"vec_set_opponent_actions", (PyCFunction)vec_set_opponent_actions, METH_VARARGS, "Set opponent actions from external policy (self-play)"}, \
     {"vec_enable_opponent_override", (PyCFunction)vec_enable_opponent_override, METH_VARARGS, "Enable/disable opponent action override (0=autopilot, 1=external)"}, \
     {"vec_set_opponent_buffers", (PyCFunction)vec_set_opponent_buffers, METH_VARARGS, "Set opponent observation/reward buffers for dual self-play"}, \
-    {"vec_set_eval_spawn_mode", (PyCFunction)vec_set_eval_spawn_mode, METH_VARARGS, "Set eval spawn mode (0=random, 1=opponent_advantage)"}
+    {"vec_set_eval_spawn_mode", (PyCFunction)vec_set_eval_spawn_mode, METH_VARARGS, "Set eval spawn mode (0=random, 1=opponent_advantage)"}, \
+    {"vec_set_debug_step", (PyCFunction)vec_set_debug_step, METH_VARARGS, "Set debug logging step threshold for late-training diagnosis"}, \
+    {"vec_set_global_step", (PyCFunction)vec_set_global_step, METH_VARARGS, "Set global training step for shaping reward decay"}, \
+    {"vec_set_selfplay_active", (PyCFunction)vec_set_selfplay_active, METH_VARARGS, "Enable/disable selfplay mode for recovery hijacking"}, \
+    {"vec_get_guided_climb_state", (PyCFunction)vec_get_guided_climb_state, METH_VARARGS, "Get guided climb state for teachable opponent maneuvers"}, \
+    {"vec_tick_guided_climb", (PyCFunction)vec_tick_guided_climb, METH_VARARGS, "Decrement guided climb ticks after each step"}
 
 static float get_float(PyObject *kwargs, const char *key, float default_val) {
     if (!kwargs) return default_val;
@@ -57,6 +67,15 @@ static int get_int(PyObject *kwargs, const char *key, int default_val) {
     return default_val;
 }
 
+static long get_long(PyObject *kwargs, const char *key, long default_val) {
+    if (!kwargs) return default_val;
+    PyObject *val = PyDict_GetItemString(kwargs, key);
+    if (!val) return default_val;
+    if (PyLong_Check(val)) return PyLong_AsLong(val);
+    if (PyFloat_Check(val)) return (long)PyFloat_AsDouble(val);
+    return default_val;
+}
+
 #include "../env_binding.h"
 
 static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
@@ -69,6 +88,9 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
         .neg_g = get_float(kwargs, "penalty_neg_g", 0.02f),
         .control_rate_penalty = get_float(kwargs, "control_rate_penalty", 0.0f),
         .speed_min = get_float(kwargs, "speed_min", 50.0f),
+        .aim_decay_stage = get_float(kwargs, "aim_decay_stage", 15.0f),
+        .shaping_decay_start = get_long(kwargs, "shaping_decay_start", 0),
+        .shaping_decay_end = get_long(kwargs, "shaping_decay_end", 0),
     };
 
     int curriculum_enabled = get_int(kwargs, "curriculum_enabled", 0);
@@ -79,6 +101,20 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
 
     init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, env_num);
     env->eval_spawn_mode = eval_spawn_mode;  // Set after init (overrides default 0)
+
+    // Opponent recovery hijacking config (for death spiral prevention)
+    int recovery_enabled = get_int(kwargs, "recovery_enabled", 1);
+    if (recovery_enabled) {
+        env->recovery_altitude_threshold = get_float(kwargs, "recovery_altitude_threshold", 500.0f);
+        env->recovery_trigger_prob = get_float(kwargs, "recovery_trigger_prob", 0.1f);
+        env->recovery_speed_threshold = get_float(kwargs, "recovery_speed_threshold", 70.0f);
+        env->recovery_bank_deg = get_float(kwargs, "recovery_bank_deg", 60.0f);
+    } else {
+        // Disabled: set threshold to impossible value
+        env->recovery_altitude_threshold = -9999.0f;
+    }
+    env->selfplay_active = 0;  // Disabled until Python enables it
+
     return 0;
 }
 
@@ -101,6 +137,14 @@ static int my_log(PyObject *dict, Log *log) {
     assign_to_dict(dict, "base_stage_eps", log->base_stage_eps);       // Raw sum (not averaged)
     assign_to_dict(dict, "ultimate", log->ultimate);
     assign_to_dict(dict, "n", log->n);
+
+    // Death spiral diagnostics
+    assign_to_dict(dict, "player_ground", log->player_ground_hits);
+    assign_to_dict(dict, "opp_ground", log->opponent_ground_hits);
+    assign_to_dict(dict, "recovery_trigs", log->recovery_triggers);
+    assign_to_dict(dict, "clean_fights", log->clean_fights);
+    assign_to_dict(dict, "altitude_kills", log->altitude_kills);
+    assign_to_dict(dict, "ultimate2", log->ultimate2);
     return 0;
 }
 
@@ -629,6 +673,30 @@ static PyObject* vec_set_opponent_buffers(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
 }
 
+// Set debug logging step threshold for late-training diagnosis
+// Args: vec_handle, global_step (current training step), trigger_step (start logging when >= this)
+static PyObject* vec_set_debug_step(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+    long global_step;
+    long trigger_step;
+
+    if (!PyArg_ParseTuple(args, "Oll", &vec_arg, &global_step, &trigger_step)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    for (int i = 0; i < vec->num_envs; i++) {
+        vec->envs[i]->global_step = global_step;
+        vec->envs[i]->debug_trigger_step = trigger_step;
+    }
+    Py_RETURN_NONE;
+}
+
 // Set eval spawn mode for all environments
 // Args: vec_handle, mode (0=random, 1=opponent_advantage)
 static PyObject* vec_set_eval_spawn_mode(PyObject* self, PyObject* args) {
@@ -647,6 +715,112 @@ static PyObject* vec_set_eval_spawn_mode(PyObject* self, PyObject* args) {
 
     for (int i = 0; i < vec->num_envs; i++) {
         vec->envs[i]->eval_spawn_mode = mode;
+    }
+
+    Py_RETURN_NONE;
+}
+
+// Set global training step for all environments (for shaping reward decay)
+// Args: vec_handle, global_step
+static PyObject* vec_set_global_step(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+    long global_step;
+
+    if (!PyArg_ParseTuple(args, "Ol", &vec_arg, &global_step)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    for (int i = 0; i < vec->num_envs; i++) {
+        vec->envs[i]->global_step = global_step;
+    }
+
+    Py_RETURN_NONE;
+}
+
+// Enable/disable selfplay mode for all environments (activates recovery hijacking)
+// Args: vec_handle, active (0=curriculum mode, 1=selfplay mode with recovery)
+static PyObject* vec_set_selfplay_active(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+    int active;
+
+    if (!PyArg_ParseTuple(args, "Oi", &vec_arg, &active)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    for (int i = 0; i < vec->num_envs; i++) {
+        vec->envs[i]->selfplay_active = active ? 1 : 0;
+    }
+
+    Py_RETURN_NONE;
+}
+
+// Get guided climb state for all environments (for teachable opponent maneuvers)
+// Returns: numpy array of shape (num_envs, 3) with [active, ticks_remaining, elevator] per env
+static PyObject* vec_get_guided_climb_state(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+
+    if (!PyArg_ParseTuple(args, "O", &vec_arg)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    // Create numpy array of shape (num_envs, 3)
+    npy_intp dims[2] = {vec->num_envs, 3};
+    PyObject* arr = PyArray_SimpleNew(2, dims, NPY_FLOAT32);
+    if (!arr) {
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate guided climb state array");
+        return NULL;
+    }
+
+    float* data = (float*)PyArray_DATA((PyArrayObject*)arr);
+    for (int i = 0; i < vec->num_envs; i++) {
+        data[i * 3 + 0] = (float)vec->envs[i]->guided_climb_active;
+        data[i * 3 + 1] = (float)vec->envs[i]->guided_climb_ticks_remaining;
+        data[i * 3 + 2] = vec->envs[i]->guided_climb_elevator;
+    }
+
+    return arr;
+}
+
+// Decrement guided climb ticks for all environments (called each step during climb)
+// Args: vec_handle
+static PyObject* vec_tick_guided_climb(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+
+    if (!PyArg_ParseTuple(args, "O", &vec_arg)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    for (int i = 0; i < vec->num_envs; i++) {
+        if (vec->envs[i]->guided_climb_active && vec->envs[i]->guided_climb_ticks_remaining > 0) {
+            vec->envs[i]->guided_climb_ticks_remaining--;
+            if (vec->envs[i]->guided_climb_ticks_remaining <= 0) {
+                vec->envs[i]->guided_climb_active = 0;  // Hand back control
+            }
+        }
     }
 
     Py_RETURN_NONE;

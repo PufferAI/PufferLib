@@ -204,6 +204,7 @@ void demo() {
         .closing_scale = 0.003f,
         .neg_g = 0.02f,
         .speed_min = 50.0f,
+        .aim_decay_stage = 15.0f,
     };
 
     // curriculum_enabled=1, curriculum_randomize=1 for variety

@@ -83,6 +83,7 @@ DEFAULT_CHECKPOINT_LAG = 1  # Opponent is N checkpoints behind (1=2nd newest)
 DEFAULT_PERF_THRESHOLD = 0.65  # Kill rate to trigger checkpoint save + opponent upgrade
 DEFAULT_MIN_STEPS_BETWEEN_CHECKPOINTS = 2_000_000  # Minimum steps before saving new checkpoint
 DEFAULT_MAX_CHECKPOINTS = 20  # Max selfplay checkpoints (milestones always kept)
+DEFAULT_DEBUG_TRIGGER_STEP = 500_000_000  # Start debug logging at 500M steps (0 = disabled)
 
 
 class DualPerspectiveTrainer:
@@ -140,6 +141,13 @@ class DualPerspectiveTrainer:
         self._current_opponent_path = None
         self.last_checkpoint_step = 0
         self._current_stage = 0
+
+        # Stalemate detection and handicapping
+        self.stalemate_perf_threshold = 0.3  # Low perf suggests stalemate
+        self.stalemate_clean_threshold = 0.5  # Low clean fight rate suggests death spirals
+        self.stalemate_counter = 0
+        self.handicap_level = 0  # 0=none, 1=mild, 2=moderate, 3=severe
+        self.opponent_handicap_controls = 1.0  # 1.0 = no handicap
 
         # Create frozen opponent policy (copy of learner)
         self.opponent_policy = None
@@ -300,6 +308,64 @@ class DualPerspectiveTrainer:
             # Upgrade opponent to older checkpoint (lag positions behind)
             self._update_opponent()
 
+            # Reset handicaps on domination (learner is winning)
+            if self.handicap_level > 0:
+                self.handicap_level = 0
+                self.opponent_handicap_controls = 1.0
+                self.stalemate_counter = 0
+                print(f'[HANDICAP] Reset to level 0 after domination')
+
+    def _check_stalemate(self, logs):
+        """Check for stalemate (low perf, low clean fight rate) and apply handicaps.
+
+        When both policies enter death spirals without kills:
+        1. Detect via low perf AND low clean_fights rate
+        2. Apply progressive handicaps to opponent
+        3. If handicaps don't help, load older checkpoint
+        """
+        if not self.use_dual_selfplay:
+            return
+
+        if logs is None:
+            return
+
+        # Get metrics from logs
+        perf = logs.get('environment/perf', 0)
+        n = logs.get('environment/n', 1)
+        clean_fights = logs.get('environment/clean_fights', 0)
+        clean_rate = clean_fights / max(n, 1) if n > 0 else 0
+
+        # Stalemate: low perf AND low clean fight rate (both spiral, no kills)
+        is_stalemate = perf < self.stalemate_perf_threshold and clean_rate < self.stalemate_clean_threshold
+
+        if is_stalemate:
+            self.stalemate_counter += 1
+            if self.stalemate_counter >= 5:  # 5 consecutive stalemate checks
+                self._apply_handicap()
+                self.stalemate_counter = 0
+        else:
+            # Decay counter when not in stalemate
+            self.stalemate_counter = max(0, self.stalemate_counter - 1)
+
+    def _apply_handicap(self):
+        """Apply progressive handicap to opponent to break stalemate."""
+        self.handicap_level = min(3, self.handicap_level + 1)
+
+        if self.handicap_level == 1:
+            # Level 1: Mild control reduction (90%)
+            self.opponent_handicap_controls = 0.9
+            print(f'[HANDICAP] Level 1: Opponent controls at 90%')
+        elif self.handicap_level == 2:
+            # Level 2: Moderate control reduction (80%) + older checkpoint
+            self.opponent_handicap_controls = 0.8
+            self.checkpoint_lag = min(self.checkpoint_lag + 1, 5)
+            self._update_opponent()
+            print(f'[HANDICAP] Level 2: Opponent controls at 80%, checkpoint_lag={self.checkpoint_lag}')
+        elif self.handicap_level == 3:
+            # Level 3: Severe control reduction (70%)
+            self.opponent_handicap_controls = 0.7
+            print(f'[HANDICAP] Level 3: Opponent controls at 70%')
+
     def _check_selfplay_transition(self, stats=None):
         """Check if we should transition to dual self-play mode and save milestones.
 
@@ -344,6 +410,11 @@ class DualPerspectiveTrainer:
             # This must be done when transitioning to self-play, not at env init
             from pufferlib.ocean.dogfight import binding
             binding.vec_enable_opponent_override(self.driver_env.c_envs, 1)
+
+            # Enable recovery hijacking now that we're in self-play
+            # This breaks death spiral equilibrium by occasionally forcing opponent to recover
+            binding.vec_set_selfplay_active(self.driver_env.c_envs, 1)
+            print(f'[DUAL-SELFPLAY] Enabled recovery hijacking for death spiral prevention')
 
             # Signal workers to enable opponent override via shared memory flag
             # (workers check this flag in step() before using opponent actions)
@@ -412,6 +483,10 @@ class DualPerspectiveTrainer:
 
             done_mask = d + t
             self.trainer.global_step += int(mask.sum())
+
+            # Update C-side global_step for shaping reward decay
+            # This ensures accurate timestep tracking during self-play
+            binding.vec_set_global_step(self.driver_env.c_envs, self.trainer.global_step)
 
             profile('eval_copy', epoch)
             o = torch.as_tensor(o)
@@ -482,6 +557,32 @@ class DualPerspectiveTrainer:
                 logits_o, value_o = self.opponent_policy.forward_eval(o_opponent, state_o)
                 action_o, logprob_o, _ = pufferlib.pytorch.sample_logits(logits_o)
 
+                # GUIDED CLIMB OVERRIDE: Check if any envs have teachable climb active
+                # When active, override opponent actions with climb control BEFORE recording
+                # This creates training data showing "climb after merge = good strategy"
+                guided_state = binding.vec_get_guided_climb_state(self.driver_env.c_envs)
+                # guided_state shape: (num_envs, 3) = [active, ticks_remaining, elevator]
+                climb_active_mask = guided_state[:, 0] > 0.5  # Boolean mask
+                if climb_active_mask.any():
+                    # Override actions for envs with guided climb active
+                    # Actions: [throttle, elevator, aileron, rudder, trigger]
+                    # Climb control: full throttle, pull up (elevator), wings level, no rudder, no trigger
+                    climb_actions = torch.zeros_like(action_o)
+                    climb_actions[:, 0] = 1.0   # Full throttle for energy
+                    climb_actions[:, 1] = torch.tensor(guided_state[:, 2], device=device)  # Elevator from C
+                    climb_actions[:, 2] = 0.0   # Wings level
+                    climb_actions[:, 3] = 0.0   # No rudder
+                    climb_actions[:, 4] = 0.0   # No trigger
+
+                    # Apply override only to climbing envs (use mask to select)
+                    mask_tensor = torch.tensor(climb_active_mask, device=device).unsqueeze(1)
+                    action_o = torch.where(mask_tensor, climb_actions, action_o)
+
+                    # Tick the climb counter (decrement remaining ticks)
+                    binding.vec_tick_guided_climb(self.driver_env.c_envs)
+
+                    debug(2, f'Guided climb active for {climb_active_mask.sum()} envs')
+
             debug(3, f'actions: player={action_p.shape}, opponent={action_o.shape}')
 
             profile('eval_copy', epoch)
@@ -544,6 +645,12 @@ class DualPerspectiveTrainer:
                                           self.vecenv.action_space.low,
                                           self.vecenv.action_space.high)
 
+                # Apply handicap to opponent controls (elevator, aileron, rudder)
+                # Throttle (index 0) and trigger (index 4) are not reduced
+                if self.opponent_handicap_controls < 1.0:
+                    action_o_np = action_o_np.copy()
+                    action_o_np[:, 1:4] *= self.opponent_handicap_controls
+
             profile('eval_misc', epoch)
             # Process info
             for i in info:
@@ -596,6 +703,9 @@ class DualPerspectiveTrainer:
 
         # Check if learner dominates opponent -> save checkpoint and upgrade
         self._check_domination(logs)
+
+        # Check for stalemate -> apply handicaps to break death spiral equilibrium
+        self._check_stalemate(logs)
 
         return logs
 
@@ -887,17 +997,27 @@ def eval_selfplay(env_name, args, player_path, opponent_path, load_id=None):
     vecenv = pufferl.load_env(env_name, args)
 
     # Load player policy
-    # Set load_model_path/load_id so load_policy picks it up
-    if player_path:
-        args['load_model_path'] = player_path
-    if load_id:
-        args['load_id'] = load_id
-
+    # Create policy first, then load weights manually to handle our checkpoint format
+    device = args['train']['device']
     player_policy = pufferl.load_policy(args, vecenv, env_name)
+
+    if player_path:
+        checkpoint = torch.load(player_path, map_location=device)
+        if 'policy_state_dict' in checkpoint:
+            # Our checkpoint format (from CheckpointQueue)
+            player_policy.load_state_dict(checkpoint['policy_state_dict'])
+            tag = checkpoint.get('tag', 'unknown')
+            step = checkpoint.get('step', 0)
+            print(f'[EVAL-SELFPLAY] Loaded player from {tag} (step {step}): {player_path}')
+        else:
+            # Raw state dict format
+            state_dict = {k.replace('module.', ''): v for k, v in checkpoint.items()}
+            player_policy.load_state_dict(state_dict)
+            print(f'[EVAL-SELFPLAY] Loaded player from: {player_path}')
+
     player_policy.eval()
 
     # Create opponent policy (same architecture, different weights)
-    device = args['train']['device']
     opponent_policy = copy.deepcopy(player_policy)
 
     # Load opponent weights from checkpoint
@@ -1238,6 +1358,19 @@ def main():
         i += 1
     sys.argv = new_argv
 
+    # Parse debug-trigger-step after other args (stored in global for training loop)
+    global _debug_trigger_step_override
+    _debug_trigger_step_override = None
+    for i, arg in enumerate(sys.argv):
+        if arg == '--debug-trigger-step' and i + 1 < len(sys.argv):
+            _debug_trigger_step_override = int(sys.argv[i + 1])
+            sys.argv = sys.argv[:i] + sys.argv[i+2:]
+            break
+        elif arg.startswith('--debug-trigger-step='):
+            _debug_trigger_step_override = int(arg.split('=', 1)[1])
+            sys.argv = sys.argv[:i] + sys.argv[i+1:]
+            break
+
     # Load standard dogfight config
     args = pufferl.load_config(env_name)
 
@@ -1284,6 +1417,16 @@ def main():
     print(f'[DUAL-SELFPLAY] Perf threshold: {perf_threshold} (save checkpoint when perf >= this)')
     print(f'[DUAL-SELFPLAY] Min steps between checkpoints: {min_steps_between_checkpoints}')
 
+    # Late-training debug logging configuration
+    # Use override from --debug-trigger-step if provided, otherwise use default
+    debug_trigger_step = _debug_trigger_step_override if _debug_trigger_step_override is not None else DEFAULT_DEBUG_TRIGGER_STEP
+    debug_logging_started = False
+    debug_log_file = None
+    if debug_trigger_step > 0:
+        print(f'[DEBUG-LOG] Debug logging will activate at step {debug_trigger_step:,}')
+    else:
+        print(f'[DEBUG-LOG] Debug logging disabled (trigger_step=0)')
+
     # Training loop
     while trainer.global_step < train_config['total_timesteps']:
         if train_config['device'] == 'cuda':
@@ -1292,6 +1435,35 @@ def main():
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
         logs = trainer.train()
+
+        # Python-based debug logging (replaces broken C-level logging)
+        # Logs aggregate stats from trainer.stats every 100 epochs after trigger step
+        if debug_trigger_step > 0 and trainer.global_step >= debug_trigger_step:
+            if not debug_logging_started:
+                debug_log_file = open('/tmp/dogfight_debug_0.log', 'w')
+                debug_logging_started = True
+                print(f'[DEBUG-LOG] Started Python debug logging at step {trainer.global_step}')
+                print(f'[DEBUG-LOG] Output file: /tmp/dogfight_debug_0.log')
+            # Log mean stats every 100 epochs
+            if trainer.epoch % 100 == 0 and debug_log_file:
+                debug_log_file.write(f"=== STEP {trainer.global_step} EPOCH {trainer.epoch} ===\n")
+                # Log from trainer.trainer.stats (inner PuffeRL trainer)
+                stats = trainer.trainer.stats if hasattr(trainer, 'trainer') else {}
+                for key, values in stats.items():
+                    if values and isinstance(values, list) and len(values) > 0:
+                        try:
+                            mean_val = sum(values) / len(values)
+                            debug_log_file.write(f"{key}: {mean_val:.6f}\n")
+                        except (TypeError, ValueError):
+                            pass  # Skip non-numeric stats
+                # Also log from logs dict if available (has environment/ prefix)
+                if logs:
+                    debug_log_file.write("--- Logs ---\n")
+                    for key, value in logs.items():
+                        if isinstance(value, (int, float)):
+                            debug_log_file.write(f"{key}: {value:.6f}\n")
+                debug_log_file.write("\n")
+                debug_log_file.flush()
 
         # Log dual self-play status periodically
         if trainer.epoch % 100 == 0 and trainer.epoch > 0:
@@ -1303,6 +1475,9 @@ def main():
                   f'Queue: {queue_len} checkpoints, Opponent: {opponent_tag}')
 
     # Cleanup
+    if debug_log_file:
+        debug_log_file.close()
+        print(f'[DEBUG-LOG] Closed debug log file')
     model_path = trainer.close()
     if logger:
         logger.close(model_path)

@@ -180,12 +180,20 @@ typedef struct Log {
     float base_stage_kills;         // Kills at int(curriculum_target) - for per-stage gating
     float base_stage_eps;           // Episodes at int(curriculum_target) - for per-stage gating
 
+    // Death spiral diagnostics - exported to Python/wandb
+    float player_ground_hits;       // Player crashed into ground
+    float opponent_ground_hits;     // Opponent crashed into ground
+    float recovery_triggers;        // Recovery hijacking activated
+    float clean_fights;             // Episodes ending in kills or timeouts (not crashes)
+    float altitude_kills;           // Kills from forcing opponent crash at safe altitude
+
     // PER-ENV RATIOS - for C debugging only, NOT exported (garbage after vec_log aggregation)
     float avg_stage_weight;         // = total_stage_weight / n (per-env only)
     float avg_abs_bias;             // = total_abs_bias / n (per-env only)
     float avg_stage;                // = stage_sum / n (per-env only)
     float kill_rate;                // = perf / n (per-env only - Python uses 'perf' instead)
     float ultimate;                 // = kill_rate * avg_stage_weight (per-env only)
+    float ultimate2;                // = kill_rate * clean_fight_rate * avg_stage_weight (per-env only)
     float n;
 } Log;
 
@@ -206,7 +214,21 @@ typedef struct RewardConfig {
     float control_rate_penalty;  // Penalty for (action - prev_action)^2 (default 0, sweepable)
     // Thresholds
     float speed_min;         // Stall threshold (default 50.0)
+    // Curriculum decay (DEPRECATED - use timestep-based decay instead)
+    float aim_decay_stage;   // Stage at which aim reward reaches 0 (default 15.0) - DEPRECATED
+    // Timestep-based shaping decay (anneals r_aim and r_closing during self-play)
+    long shaping_decay_start;    // Start annealing at this global step (0 = disabled)
+    long shaping_decay_end;      // Complete annealing at this global step
 } RewardConfig;
+
+// Calculate shaping decay multiplier based on global training step
+// Returns 1.0 before decay_start, 0.0 after decay_end, linear interpolation between
+static inline float calc_shaping_decay(long global_step, long decay_start, long decay_end) {
+    if (decay_start <= 0 || decay_end <= decay_start) return 1.0f;  // Disabled
+    if (global_step < decay_start) return 1.0f;  // Before window
+    if (global_step >= decay_end) return 0.0f;   // After window
+    return 1.0f - (float)(global_step - decay_start) / (float)(decay_end - decay_start);
+}
 
 typedef struct Client {
     Camera3D camera;
@@ -280,6 +302,22 @@ typedef struct Dogfight {
     float sum_r_rudder;
     float sum_r_aim;
     float sum_r_rate;       // Control rate penalty
+    // Episode accumulators for new reward terms (for debug logging)
+    float sum_r_altitude;
+    float sum_r_time;
+    float sum_r_player_energy;
+    float sum_r_energy_adv;
+    // Per-tick reward components (for debug logging)
+    float r_closing;
+    float r_aim;
+    float r_neg_g;
+    float r_stall;
+    float r_rudder;
+    float r_rate;
+    float r_altitude;
+    float r_time;
+    float r_player_energy;
+    float r_energy_adv;
     // Aiming diagnostics (reset each episode, for DEBUG output)
     float best_aim_angle;    // Best (smallest) aim angle achieved (radians)
     int ticks_in_cone;       // Ticks where aim_dot > cos_gun_cone
@@ -316,6 +354,28 @@ typedef struct Dogfight {
     float prev_elevator;  // Previous elevator for rate penalty
     float prev_aileron;   // Previous aileron for rate penalty
     float prev_rudder;    // Previous rudder for rate penalty
+    // Late-training debug logging (activated when global_step >= debug_trigger_step)
+    long global_step;           // Current training step (set by Python each tick)
+    long debug_trigger_step;    // Start logging when global_step >= this value
+    FILE* debug_log_file;       // File handle for debug output (NULL if not logging)
+    int debug_log_initialized;  // 1 if file opened
+
+    // Opponent recovery hijacking (breaks death spiral equilibrium in self-play)
+    int selfplay_active;               // 1 when in self-play mode (set by Python)
+    int opponent_recovery_active;      // 1 if recovery maneuver in progress
+    int opponent_recovery_tick_start;  // Tick when recovery started
+    float recovery_altitude_threshold; // Trigger altitude (default 500m)
+    float recovery_trigger_prob;       // Per-tick probability (default 0.1)
+    float recovery_speed_threshold;    // Speed for phase 2 (default 70m/s)
+    float recovery_bank_deg;           // Turn bank angle (default 60°)
+    unsigned int recovery_rng_state;   // Separate RNG for recovery triggers
+
+    // Guided climb hijack (teachable opponent maneuver for self-play diversity)
+    // When active, Python should override opponent actions with climb control
+    // This creates training data showing "climb after merge = good"
+    int guided_climb_active;           // 1 = Python should override with climb actions
+    int guided_climb_ticks_remaining;  // Countdown to hand back control
+    float guided_climb_elevator;       // Target elevator value for 3G climb
 } Dogfight;
 
 #include "dogfight_observations.h"
@@ -375,6 +435,28 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
 
     // Eval spawn mode: 0 = random (default)
     env->eval_spawn_mode = 0;
+
+    // Late-training debug logging: disabled by default
+    env->global_step = 0;
+    env->debug_trigger_step = 0;
+    env->debug_log_file = NULL;
+    env->debug_log_initialized = 0;
+
+    // Opponent recovery hijacking: disabled by default, enabled by Python in self-play
+    env->selfplay_active = 0;
+    env->opponent_recovery_active = 0;
+    env->opponent_recovery_tick_start = 0;
+    // Config values set by binding.c from INI file
+    env->recovery_altitude_threshold = 500.0f;
+    env->recovery_trigger_prob = 0.1f;
+    env->recovery_speed_threshold = 70.0f;
+    env->recovery_bank_deg = 60.0f;
+    env->recovery_rng_state = (unsigned int)rand();
+
+    // Guided climb hijack: disabled by default
+    env->guided_climb_active = 0;
+    env->guided_climb_ticks_remaining = 0;
+    env->guided_climb_elevator = 0.5f;  // Default: moderate pull for ~3G
 }
 
 void set_obs_highlight(Dogfight *env, int *indices, int count) {
@@ -391,6 +473,134 @@ static inline void set_opponent_reward(Dogfight *env, float reward) {
     if (env->opponent_rewards != NULL) {
         env->opponent_rewards[0] = reward;
     }
+}
+
+// ============================================================================
+// Late-training debug logging (activated when global_step >= debug_trigger_step)
+// Logs comprehensive state data to /tmp/dogfight_debug_*.log for post-training analysis
+// ============================================================================
+
+static void init_debug_log(Dogfight* env) {
+    if (env->debug_log_initialized) return;
+    char filename[256];
+    snprintf(filename, sizeof(filename), "/tmp/dogfight_debug_%d.log", env->env_num);
+    env->debug_log_file = fopen(filename, "w");
+    if (env->debug_log_file) {
+        env->debug_log_initialized = 1;
+        fprintf(env->debug_log_file, "# Dogfight Debug Log - env %d\n", env->env_num);
+        fprintf(env->debug_log_file, "# Triggered at global_step >= %ld\n", env->debug_trigger_step);
+        fprintf(env->debug_log_file, "# Format: per-tick state data, then episode summary\n\n");
+        fflush(env->debug_log_file);
+        fprintf(stderr, "[DEBUG-LOG] Opened %s for env %d\n", filename, env->env_num);
+    } else {
+        fprintf(stderr, "[DEBUG-LOG] ERROR: Failed to open %s\n", filename);
+    }
+}
+
+static void debug_log_tick(Dogfight* env) {
+    if (!env->debug_log_file) return;
+    FILE* f = env->debug_log_file;
+    Plane* p = &env->player;
+    Plane* o = &env->opponent;
+
+    // Only log every 10 ticks to reduce volume
+    if (env->tick % 10 != 0) return;
+
+    // Header for this tick
+    fprintf(f, "\n=== STEP %ld TICK %d ===\n", env->global_step, env->tick);
+
+    // Player state
+    fprintf(f, "P_pos: %.1f,%.1f,%.1f\n", p->pos.x, p->pos.y, p->pos.z);
+    fprintf(f, "P_vel: %.1f,%.1f,%.1f (speed=%.1f)\n",
+            p->vel.x, p->vel.y, p->vel.z, norm3(p->vel));
+    fprintf(f, "P_energy: %.1f\n", calc_specific_energy(p));
+    fprintf(f, "P_g: %.2f\n", p->g_force);
+
+    // Opponent state
+    fprintf(f, "O_pos: %.1f,%.1f,%.1f\n", o->pos.x, o->pos.y, o->pos.z);
+    fprintf(f, "O_vel: %.1f,%.1f,%.1f (speed=%.1f)\n",
+            o->vel.x, o->vel.y, o->vel.z, norm3(o->vel));
+    fprintf(f, "O_energy: %.1f\n", calc_specific_energy(o));
+
+    // Relative geometry
+    Vec3 rel_pos = sub3(o->pos, p->pos);
+    float dist = norm3(rel_pos);
+    Vec3 player_fwd = quat_rotate(p->ori, vec3(1, 0, 0));
+    float aim_dot = dot3(normalize3(rel_pos), player_fwd);
+    float aim_deg = acosf(clampf(aim_dot, -1.0f, 1.0f)) * RAD_TO_DEG;
+
+    fprintf(f, "dist: %.1f\n", dist);
+    fprintf(f, "aim_angle: %.1f deg\n", aim_deg);
+    fprintf(f, "alt_diff: %.1f (P-O)\n", p->pos.z - o->pos.z);
+    fprintf(f, "energy_diff: %.1f\n", calc_specific_energy(p) - calc_specific_energy(o));
+
+    // Actions
+    fprintf(f, "P_act: thr=%.2f elev=%.2f ail=%.2f rud=%.2f trig=%.2f\n",
+            env->actions[0], env->actions[1], env->actions[2],
+            env->actions[3], env->actions[4]);
+
+    // Reward breakdown (all 10 terms)
+    fprintf(f, "REWARDS:\n");
+    fprintf(f, "  closing=%.5f aim=%.5f neg_g=%.5f stall=%.5f\n",
+            env->r_closing, env->r_aim, env->r_neg_g, env->r_stall);
+    fprintf(f, "  rudder=%.5f rate=%.5f altitude=%.5f time=%.6f\n",
+            env->r_rudder, env->r_rate, env->r_altitude, env->r_time);
+    fprintf(f, "  energy=%.5f energy_adv=%.5f\n",
+            env->r_player_energy, env->r_energy_adv);
+    fprintf(f, "  TOTAL=%.4f\n", env->rewards[0]);
+
+    // Death spiral warning: both planes descending rapidly
+    if (p->vel.z < -10.0f && o->vel.z < -10.0f) {
+        fprintf(f, "SPIRAL: both descending P_vz=%.1f O_vz=%.1f\n", p->vel.z, o->vel.z);
+    }
+
+    fflush(f);
+}
+
+static void debug_log_episode_end(Dogfight* env) {
+    if (!env->debug_log_file) return;
+    FILE* f = env->debug_log_file;
+    const char* death_names[] = {"NONE", "KILL", "OOB", "TIMEOUT", "SUPERSONIC"};
+
+    fprintf(f, "\n=== EPISODE END at STEP %ld ===\n", env->global_step);
+    fprintf(f, "ticks: %d\n", env->tick);
+    fprintf(f, "episode_return: %.3f\n", env->episode_return);
+    fprintf(f, "death_reason: %s (%d)\n", death_names[env->death_reason], env->death_reason);
+    fprintf(f, "kill: %d, opp_kill: %d\n", env->kill, env->opp_kill);
+    fprintf(f, "stage: %d\n", env->stage);
+
+    // Flight envelope
+    fprintf(f, "min_alt: %.1f, max_alt: %.1f\n", env->min_alt, env->max_alt);
+    fprintf(f, "min_speed: %.1f, max_speed: %.1f\n", env->min_speed, env->max_speed);
+
+    // Reward accumulators (all 10 terms)
+    fprintf(f, "sum_r_closing: %.3f\n", env->sum_r_closing);
+    fprintf(f, "sum_r_aim: %.3f\n", env->sum_r_aim);
+    fprintf(f, "sum_r_neg_g: %.3f\n", env->sum_r_neg_g);
+    fprintf(f, "sum_r_stall: %.3f\n", env->sum_r_speed);
+    fprintf(f, "sum_r_rudder: %.3f\n", env->sum_r_rudder);
+    fprintf(f, "sum_r_rate: %.3f\n", env->sum_r_rate);
+    fprintf(f, "sum_r_altitude: %.3f\n", env->sum_r_altitude);
+    fprintf(f, "sum_r_time: %.3f\n", env->sum_r_time);
+    fprintf(f, "sum_r_player_energy: %.3f\n", env->sum_r_player_energy);
+    fprintf(f, "sum_r_energy_adv: %.3f\n", env->sum_r_energy_adv);
+
+    // Control analysis
+    fprintf(f, "aileron_bias: %.1f\n", env->aileron_bias);
+    float mean_control_rate = env->episode_control_rate / fmaxf((float)env->tick, 1.0f);
+    fprintf(f, "mean_control_rate: %.4f\n", mean_control_rate);
+
+    // Combat stats
+    fprintf(f, "ticks_in_cone: %d\n", env->ticks_in_cone);
+    fprintf(f, "closest_dist: %.1f\n", env->closest_dist);
+    fprintf(f, "shots_fired: %.0f\n", env->episode_shots_fired);
+
+    // Final positions
+    fprintf(f, "final_P_pos: %.1f,%.1f,%.1f\n", env->player.pos.x, env->player.pos.y, env->player.pos.z);
+    fprintf(f, "final_O_pos: %.1f,%.1f,%.1f\n", env->opponent.pos.x, env->opponent.pos.y, env->opponent.pos.z);
+
+    fprintf(f, "---\n");
+    fflush(f);
 }
 
 void add_log(Dogfight *env) {
@@ -457,6 +667,11 @@ void add_log(Dogfight *env) {
         env->log.base_stage_eps += 1.0f;
     }
 
+    // Track clean fights (kills or timeouts, not ground crashes)
+    // Clean fight = episode ended without either plane crashing into ground
+    int is_clean = (env->death_reason == DEATH_KILL || env->death_reason == DEATH_TIMEOUT);
+    env->log.clean_fights += is_clean ? 1.0f : 0.0f;
+
     env->log.n += 1.0f;
     env->log.kill_rate = env->log.perf / fmaxf(env->log.n, 1.0f);
     env->log.avg_stage = env->log.stage_sum / env->log.n;
@@ -465,6 +680,11 @@ void add_log(Dogfight *env) {
 
     // Ultimate = kill_rate * difficulty (no bias penalty)
     env->log.ultimate = env->log.kill_rate * env->log.avg_stage_weight;
+
+    // Ultimate2 = kill_rate * clean_fight_rate * difficulty
+    // Penalizes death spirals by rewarding clean fights
+    float clean_fight_rate = env->log.clean_fights / fmaxf(env->log.n, 1.0f);
+    env->log.ultimate2 = env->log.kill_rate * clean_fight_rate * env->log.avg_stage_weight;
 
     if (DEBUG >= 10) printf("  log.perf=%.2f, log.shots_fired=%.0f, log.n=%.0f\n", env->log.perf, env->log.shots_fired, env->log.n);
 }
@@ -506,6 +726,20 @@ static void spawn_tail_chase(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     float y_sign = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;
     float y_offset = y_sign * rndf(26, 50);
 
+    // 20% chance: spawn player LOW (400m) with opponent ABOVE
+    // Teaches altitude awareness early - don't descend with target
+    if (rndf(0, 1) < 0.2f) {
+        env->player.pos.z = 400.0f;  // Just below 500m recovery threshold
+        Vec3 opp_pos = vec3(
+            player_pos.x + rndf(200, 400),
+            player_pos.y + y_offset,
+            700.0f + rndf(0, 200)  // Opponent 300-500m above player
+        );
+        reset_plane(&env->opponent, opp_pos, player_vel);
+        env->opponent_ap.mode = AP_STRAIGHT;
+        return;
+    }
+
     Vec3 opp_pos = vec3(
         player_pos.x + rndf(200, 400),
         player_pos.y + y_offset,        // Min 26m = ~5° at 300m
@@ -517,6 +751,21 @@ static void spawn_tail_chase(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
 
 // Stage 1: HEAD_ON - Opponent coming toward us
 static void spawn_head_on(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    // 20% chance: spawn player LOW with opponent coming from ABOVE
+    // Teaches: don't dive into head-on, maintain altitude
+    if (rndf(0, 1) < 0.2f) {
+        env->player.pos.z = 400.0f;  // Just below 500m recovery threshold
+        Vec3 opp_pos = vec3(
+            player_pos.x + rndf(400, 600),
+            player_pos.y + rndf(-50, 50),
+            700.0f + rndf(0, 200)  // Opponent 300-500m above
+        );
+        Vec3 opp_vel = vec3(-player_vel.x, -player_vel.y, player_vel.z);
+        reset_plane(&env->opponent, opp_pos, opp_vel);
+        env->opponent_ap.mode = AP_STRAIGHT;
+        return;
+    }
+
     // Opponent 400-600m ahead, facing us (opposite velocity)
     Vec3 opp_pos = vec3(
         player_pos.x + rndf(400, 600),
@@ -571,6 +820,21 @@ static void spawn_vertical(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
 
 // Stage 3: GENTLE_TURNS - Opponent does gentle turns (30°)
 static void spawn_gentle_turns(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    // 20% chance: spawn player LOW with opponent turning ABOVE
+    // Teaches: climb while pursuing turning target
+    if (rndf(0, 1) < 0.2f) {
+        env->player.pos.z = 400.0f;  // Just below 500m recovery threshold
+        Vec3 opp_pos = vec3(
+            player_pos.x + rndf(200, 500),
+            player_pos.y + rndf(-100, 100),
+            700.0f + rndf(0, 200)  // Opponent 300-500m above
+        );
+        reset_plane(&env->opponent, opp_pos, player_vel);
+        env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
+        env->opponent_ap.target_bank = (float)STAGES[env->stage].bank * DEG_TO_RAD;
+        return;
+    }
+
     // Random spawn position (similar to original)
     Vec3 opp_pos = vec3(
         player_pos.x + rndf(200, 500),
@@ -626,6 +890,42 @@ static void spawn_angled(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
 // Stage 9: Same geometry + 30° turns
 static void spawn_side(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     const StageConfig* cfg = &STAGES[env->stage];
+
+    // 20% chance: ENERGY BUILDING scenario
+    // Opponent VERY HIGH and SLOW - player MUST build energy over time to reach them
+    // Can't just zoom climb - need sustained full throttle climbing for many seconds
+    // Teaches: long-term energy planning, not just immediate pursuit
+    if (rndf(0, 1) < 0.2f) {
+        // Player at normal altitude, opponent 800-1200m ABOVE
+        // This is too high to zoom climb - requires sustained energy building
+        float opp_alt = player_pos.z + rndf(800, 1200);
+        opp_alt = clampf(opp_alt, 1500, 4500);  // Keep in bounds
+
+        // Opponent ahead and above, flying gentle turns at LOW throttle
+        float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;
+        Vec3 opp_pos = vec3(
+            player_pos.x + rndf(400, 700),
+            player_pos.y + side * rndf(50, 200),
+            opp_alt
+        );
+
+        // Opponent flying VERY SLOW (50% of player speed) - easy target IF you can reach them
+        float player_speed = norm3(player_vel);
+        float opp_speed = player_speed * 0.5f;
+        float opp_heading = atan2f(player_vel.y, player_vel.x) + side * rndf(0.1f, 0.3f);
+        Vec3 opp_vel = vec3(opp_speed * cosf(opp_heading), opp_speed * sinf(opp_heading), 0);
+
+        reset_plane(&env->opponent, opp_pos, opp_vel);
+        env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
+
+        // Opponent: very gentle turns (15° bank), LOW throttle, bleeding energy
+        // They're a sitting duck - the challenge is GETTING UP THERE
+        env->opponent_ap.mode = rndf(0, 1) > 0.5f ? AP_TURN_LEFT : AP_TURN_RIGHT;
+        env->opponent_ap.target_bank = 15.0f * DEG_TO_RAD;  // Gentle 15° bank - won't go OOB
+        env->opponent.throttle = 0.25f;  // Very low throttle - bleeding energy fast
+
+        return;
+    }
 
     float side = rndf(0, 1) > 0.5f ? 1.0f : -1.0f;
     float az_min = cfg->angle_min_deg * DEG_TO_RAD;
@@ -945,15 +1245,14 @@ static void spawn_evasive(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
 
 // Stage 20: AUTOACE - Intelligent adversarial opponent (two-way combat)
 static void spawn_autoace(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
-    // Similar to EVASIVE but with higher altitude range for energy maneuvers
     // Override player altitude to mid-high (2500-4000m)
     env->player.pos.z = rndf(2500, 4000);
     player_pos.z = env->player.pos.z;
 
     // Spawn opponent in various positions (360 degree, varied distance)
-    float dist = rndf(400, 700);  // Slightly further for AutoAce
+    float dist = rndf(400, 700);
     float theta = rndf(0, 2.0f * M_PI);
-    float phi = rndf(-0.25f, 0.25f);  // ±14 deg elevation
+    float phi = rndf(-0.25f, 0.25f);
 
     Vec3 opp_pos = vec3(
         player_pos.x + dist * cosf(theta) * cosf(phi),
@@ -968,10 +1267,7 @@ static void spawn_autoace(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     reset_plane(&env->opponent, opp_pos, opp_vel);
     env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), vel_theta);
 
-    // AutoAce starts with lag pursuit (will adapt based on situation)
     env->opponent_ap.mode = AP_PURSUIT_LAG;
-
-    // Initialize AutoAce state
     autoace_init(&env->opponent_ace);
 }
 
@@ -1314,7 +1610,23 @@ void c_reset(Dogfight *env) {
     env->sum_r_rudder = 0.0f;
     env->sum_r_aim = 0.0f;
     env->sum_r_rate = 0.0f;
+    env->sum_r_altitude = 0.0f;
+    env->sum_r_time = 0.0f;
+    env->sum_r_player_energy = 0.0f;
+    env->sum_r_energy_adv = 0.0f;
     env->death_reason = DEATH_NONE;
+
+    // Reset per-tick reward fields
+    env->r_closing = 0.0f;
+    env->r_aim = 0.0f;
+    env->r_neg_g = 0.0f;
+    env->r_stall = 0.0f;
+    env->r_rudder = 0.0f;
+    env->r_rate = 0.0f;
+    env->r_altitude = 0.0f;
+    env->r_time = 0.0f;
+    env->r_player_energy = 0.0f;
+    env->r_energy_adv = 0.0f;
 
     // Reset aiming diagnostics
     env->best_aim_angle = M_PI;      // Start at worst (180°)
@@ -1337,6 +1649,10 @@ void c_reset(Dogfight *env) {
     // Head-on lockout (only set by spawn_eval_random for head-on spawns)
     env->head_on_lockout = 0;
     env->prev_rel_dot = 0.0f;
+
+    // Reset opponent recovery state (death spiral prevention)
+    env->opponent_recovery_active = 0;
+    env->opponent_recovery_tick_start = 0;
 
     // Reset previous actions for control rate penalty
     env->prev_elevator = 0.0f;
@@ -1413,8 +1729,63 @@ void c_step(Dogfight *env) {
     // Player uses full physics with actions
     step_plane_with_physics(&env->player, env->actions, DT);
 
-    // Opponent uses either external override (self-play) or autopilot
-    if (env->use_opponent_override) {
+    // === Opponent Recovery Hijacking (breaks death spiral equilibrium) ===
+    // Only active during self-play (selfplay_active=1, set by Python when transitioning)
+    // When opponent is low and descending, there's a chance to hijack controls for recovery
+    Plane* opp = &env->opponent;
+
+    // Recovery RNG (separate from main RNG to avoid affecting other randomization)
+    #define RECOVERY_RAND() ({ \
+        env->recovery_rng_state = env->recovery_rng_state * 1103515245 + 12345; \
+        (float)((env->recovery_rng_state >> 16) & 0x7FFF) / 32767.0f; \
+    })
+
+    if (env->opponent_recovery_active) {
+        // Check if recovery is complete
+        int ticks_in_recovery = env->tick - env->opponent_recovery_tick_start;
+        int recovery_complete = 0;
+
+        // Complete if: gained enough altitude, or took too long, or in turn phase for a while
+        if (opp->pos.z > env->recovery_altitude_threshold + 100.0f) {
+            recovery_complete = 1;  // Gained altitude
+        } else if (ticks_in_recovery > 300) {
+            recovery_complete = 1;  // Timeout (6 seconds)
+        } else if (env->opponent_ap.recovery_phase == 2 && ticks_in_recovery > 150) {
+            recovery_complete = 1;  // Been in turn phase for 3 seconds
+        }
+
+        if (recovery_complete) {
+            env->opponent_recovery_active = 0;
+            // Return to level flight
+            autopilot_set_mode(&env->opponent_ap, AP_LEVEL, 1.0f, 0.0f, 0.0f);
+        }
+    } else if (env->selfplay_active && env->recovery_altitude_threshold > 0.0f) {
+        // Check trigger conditions: low altitude AND descending
+        if (opp->pos.z < env->recovery_altitude_threshold && opp->vel.z < 0.0f) {
+            if (RECOVERY_RAND() < env->recovery_trigger_prob) {
+                // Trigger recovery!
+                env->opponent_recovery_active = 1;
+                env->opponent_recovery_tick_start = env->tick;
+                autopilot_start_recovery(&env->opponent_ap,
+                    env->recovery_speed_threshold, env->recovery_bank_deg);
+                env->log.recovery_triggers += 1.0f;
+                printf("[RECOVERY] Triggered: opp_z=%.0f opp_vz=%.1f tick=%d\n",
+                       opp->pos.z, opp->vel.z, env->tick);
+            }
+        }
+    }
+
+    // Handle opponent control: recovery takes priority over everything else
+    if (env->opponent_recovery_active) {
+        // Recovery hijacking active: use autopilot recovery mode
+        float opp_actions[5];
+        autopilot_step(&env->opponent_ap, &env->opponent, opp_actions, DT);
+        for (int i = 0; i < 5; i++) {
+            env->last_opp_actions[i] = opp_actions[i];
+        }
+        step_plane_with_physics(&env->opponent, opp_actions, DT);
+        // No shooting during recovery (disabled in AP_RECOVERY)
+    } else if (env->use_opponent_override) {
         // Self-play mode: use externally provided actions from Python
         float opp_actions[5];
         for (int i = 0; i < 5; i++) {
@@ -1441,6 +1812,7 @@ void c_step(Dogfight *env) {
                 env->rewards[0] = -1.0f;
                 set_opponent_reward(env, 1.0f);  // Opponent wins (zero-sum)
                 env->terminals[0] = 1;
+                if (env->debug_log_initialized && env->env_num == 0) debug_log_episode_end(env);
                 add_log(env);
                 c_reset(env);
                 return;
@@ -1479,6 +1851,7 @@ void c_step(Dogfight *env) {
                 env->rewards[0] = -1.0f;  // Penalty for dying
                 set_opponent_reward(env, 1.0f);  // Opponent wins (zero-sum)
                 env->terminals[0] = 1;
+                if (env->debug_log_initialized && env->env_num == 0) debug_log_episode_end(env);
                 add_log(env);
                 c_reset(env);
                 return;
@@ -1563,6 +1936,7 @@ void c_step(Dogfight *env) {
             set_opponent_reward(env, -1.0f);  // Opponent loses (zero-sum)
             env->episode_return += 1.0f;
             env->terminals[0] = 1;
+            if (env->debug_log_initialized && env->env_num == 0) debug_log_episode_end(env);
             add_log(env);
             c_reset(env);
             return;
@@ -1578,21 +1952,29 @@ void c_step(Dogfight *env) {
 
     // === df11 Simplified Rewards (6 terms: 3 positive, 3 penalties) ===
 
-    // 1. Closing velocity: approaching = good
+    // Calculate timestep-based shaping decay (anneals r_aim and r_closing during self-play)
+    // Returns 1.0 before decay window, 0.0 after, linear interpolation between
+    float shaping_decay = calc_shaping_decay(
+        env->global_step, env->rcfg.shaping_decay_start, env->rcfg.shaping_decay_end);
+
+    // 1. Closing velocity: approaching = good (ANNEALED during self-play)
     Vec3 rel_vel = sub3(p->vel, o->vel);
     Vec3 rel_pos_norm = normalize3(rel_pos);
     float closing_rate = dot3(rel_vel, rel_pos_norm);
     float r_closing = clampf(closing_rate * env->rcfg.closing_scale, -0.05f, 0.05f);
+    r_closing *= shaping_decay;  // Anneal during self-play
     reward += r_closing;
 
-    // 2. Aim quality: continuous feedback for gun alignment
+    // 2. Aim quality: continuous feedback for gun alignment (ANNEALED during self-play)
+    // Shaping rewards teach "how to aim" during curriculum, but become harmful in self-play
+    // where they incentivize spiraling rather than killing
     Vec3 player_fwd = quat_rotate(p->ori, vec3(1, 0, 0));
     float aim_dot = dot3(rel_pos_norm, player_fwd);  // -1 to +1
     float aim_angle_deg = acosf(clampf(aim_dot, -1.0f, 1.0f)) * RAD_TO_DEG;
     float r_aim = 0.0f;
     if (dist < GUN_RANGE * 2.0f) {  // Only in engagement envelope (~1000m)
         float aim_quality = (aim_dot + 1.0f) * 0.5f;  // Remap [-1,1] to [0,1]
-        r_aim = aim_quality * env->rcfg.aim_scale;
+        r_aim = aim_quality * env->rcfg.aim_scale * shaping_decay;  // Anneal during self-play
     }
     reward += r_aim;
 
@@ -1633,15 +2015,20 @@ void c_step(Dogfight *env) {
     env->prev_aileron = env->actions[2];
     env->prev_rudder = env->actions[3];
 
-    // 6. Low altitude descent penalty: discourage descending rolling scissors
-    // If below 250m AND descending, penalty each tick
-    // Reduced from -0.25f to -0.025f to prevent gradient explosion
-    // (Opponent gets same penalty applied in opponent_rewards section at end)
-    float r_low_descent = 0.0f;
-    if (p->pos.z < 500.0f && p->vel.z < 0.0f) {
-        r_low_descent = -0.025f;
-        reward += r_low_descent;
+    // 6. Progressive altitude penalty: discourage descending rolling scissors
+    // Penalty scales quadratically as altitude decreases below 1500m
+    // Double penalty if also descending - this catches spirals early
+    float alt_threshold = 1500.0f;
+    float alt_deficit = fmaxf(0.0f, alt_threshold - p->pos.z);
+    float alt_ratio = alt_deficit / alt_threshold;  // 0 at 1500m, 1 at 0m
+    float r_altitude = -0.01f * alt_ratio * alt_ratio;  // Quadratic: -0.01 at ground
+
+    // Double penalty if also descending (catching spirals)
+    if (p->vel.z < 0.0f && alt_deficit > 0.0f) {
+        float descent_mult = 1.0f + fminf(-p->vel.z / 30.0f, 1.0f);  // Up to 2x at 30m/s descent
+        r_altitude *= descent_mult;
     }
+    reward += r_altitude;
 
     // 7. Tiny tick penalty: time preference for faster kills
     float r_time = -0.00001f;
@@ -1659,6 +2046,14 @@ void c_step(Dogfight *env) {
     float r_opp_energy = (opp_energy > o->prev_energy) ? 0.001f : -0.0005f;
     o->prev_energy = opp_energy;
 
+    // 9. Energy advantage reward: zero-sum reward for relative energy position
+    // Encourages staying above opponent (altitude advantage) or faster (speed advantage)
+    float energy_diff = player_energy - opp_energy;
+    float energy_advantage = clampf(energy_diff / 1000.0f, -1.0f, 1.0f);
+    float r_energy_adv = 0.004f * energy_advantage;
+    reward += r_energy_adv;
+    // Note: opponent gets -r_energy_adv, applied in opponent_rewards section
+
 #if DEBUG >= 2
     // Track aiming diagnostics
     {
@@ -1669,6 +2064,18 @@ void c_step(Dogfight *env) {
     }
 #endif
 
+    // Store per-tick rewards for debug logging
+    env->r_closing = r_closing;
+    env->r_aim = r_aim;
+    env->r_neg_g = r_neg_g;
+    env->r_stall = r_stall;
+    env->r_rudder = r_rudder;
+    env->r_rate = r_rate;
+    env->r_altitude = r_altitude;
+    env->r_time = r_time;
+    env->r_player_energy = r_player_energy;
+    env->r_energy_adv = r_energy_adv;
+
     // Accumulate for episode summary
     env->sum_r_closing += r_closing;
     env->sum_r_aim += r_aim;
@@ -1676,6 +2083,10 @@ void c_step(Dogfight *env) {
     env->sum_r_speed += r_stall;
     env->sum_r_rudder += r_rudder;
     env->sum_r_rate += r_rate;
+    env->sum_r_altitude += r_altitude;
+    env->sum_r_time += r_time;
+    env->sum_r_player_energy += r_player_energy;
+    env->sum_r_energy_adv += r_energy_adv;
 
     if (DEBUG >= 4 && env->env_num == 0) printf("=== REWARD (df11) ===\n");
     if (DEBUG >= 4 && env->env_num == 0) printf("r_closing=%.4f (rate=%.1f m/s)\n", r_closing, closing_rate);
@@ -1697,6 +2108,17 @@ void c_step(Dogfight *env) {
     env->rewards[0] = reward;
     env->episode_return += reward;
 
+    // Late-training debug logging (only env 0 to reduce volume)
+    // Placed AFTER reward calculation so all r_* fields are populated
+    if (env->global_step >= env->debug_trigger_step && env->debug_trigger_step > 0) {
+        if (!env->debug_log_initialized && env->env_num == 0) {
+            init_debug_log(env);
+        }
+        if (env->env_num == 0) {
+            debug_log_tick(env);
+        }
+    }
+
     // Check opponent bounds FIRST (opponent crash/OOB = player wins)
     // This handles the "both spiral to ground, one hits first" scenario
     bool opp_oob = fabsf(o->pos.x) > WORLD_HALF_X ||
@@ -1704,24 +2126,42 @@ void c_step(Dogfight *env) {
                    o->pos.z < 0 || o->pos.z > WORLD_MAX_Z;
 
     if (opp_oob) {
+        if (o->pos.z < 0) {
+            env->log.opponent_ground_hits += 1.0f;
+            printf("[GROUND] Opponent hit ground: z=%.0f tick=%d\n", o->pos.z, env->tick);
+        }
         if (DEBUG >= 1) {
             printf("[TERMINAL] Opponent OOB/crashed: pos=(%.1f,%.1f,%.1f)\n",
                    o->pos.x, o->pos.y, o->pos.z);
         }
-        env->death_reason = DEATH_OOB;  // Opponent went OOB (not a player kill)
 
-        // Descending rolling scissors fix: if player is below 200m when opponent crashes,
-        // both were in a death spiral - punish both equally
+        // Descending rolling scissors fix: reward based on player's altitude when opponent crashes
+        // This incentivizes energy fighting - force opponent low while staying high
         if (p->pos.z < 200.0f) {
             // Both in death spiral - full punishment for both
+            env->death_reason = DEATH_OOB;  // Opponent went OOB (not a player kill)
             env->rewards[0] = -1.0f;
             set_opponent_reward(env, -1.0f);
-        } else {
-            // Player was at safe altitude - only partial penalty for not getting gun kill
-            env->rewards[0] = -0.5f;
+        } else if (p->pos.z < 600.0f) {
+            // Player getting low - no reward, no penalty (close call)
+            env->death_reason = DEATH_OOB;  // Opponent went OOB (not a player kill)
+            env->rewards[0] = 0.0f;
             set_opponent_reward(env, -1.0f);
+        } else {
+            // Player maintained safe altitude - FULL KILL CREDIT for energy fighting success
+            // This counts as a real kill (not just OOB) because player forced the crash
+            env->death_reason = DEATH_KILL;
+            env->kill = 1;
+            env->log.altitude_kills += 1.0f;
+            env->rewards[0] = 1.0f;  // Full kill reward
+            set_opponent_reward(env, -1.0f);
+            if (DEBUG >= 1 || env->env_num == 0) {
+                printf("[ALTITUDE-KILL] Forced opponent crash from safe altitude: player_z=%.0f opp_z=%.0f\n",
+                       p->pos.z, o->pos.z);
+            }
         }
         env->terminals[0] = 1;
+        if (env->debug_log_initialized && env->env_num == 0) debug_log_episode_end(env);
         add_log(env);
         c_reset(env);
         return;
@@ -1754,18 +2194,25 @@ void c_step(Dogfight *env) {
             env->rewards[0] = -1.0f;
             set_opponent_reward(env, -1.0f);
         } else if (oob) {
+            if (p->pos.z < 0) {
+                env->log.player_ground_hits += 1.0f;
+                printf("[GROUND] Player hit ground: z=%.0f tick=%d\n", p->pos.z, env->tick);
+            }
             env->death_reason = DEATH_OOB;
-            // Player crashed/OOB
+            // Player crashed/OOB - always -1 for player
             env->rewards[0] = -1.0f;
 
-            // Descending rolling scissors fix: if opponent is below 200m when player crashes,
-            // both were in a death spiral - punish both equally
+            // Descending rolling scissors fix: reward opponent based on their altitude
+            // when player crashes - incentivizes energy fighting
             if (o->pos.z < 200.0f) {
                 // Both in death spiral - full punishment for both
                 set_opponent_reward(env, -1.0f);
+            } else if (o->pos.z < 600.0f) {
+                // Opponent getting low - no reward (close call)
+                set_opponent_reward(env, 0.0f);
             } else {
-                // Opponent was at safe altitude - only partial penalty for not getting gun kill
-                set_opponent_reward(env, -0.5f);
+                // Opponent maintained safe altitude - reward for forcing player crash
+                set_opponent_reward(env, 0.5f);
             }
         } else {
             // Timeout - both failed to achieve kill
@@ -1774,6 +2221,7 @@ void c_step(Dogfight *env) {
             set_opponent_reward(env, -0.5f);
         }
         env->terminals[0] = 1;
+        if (env->debug_log_initialized && env->env_num == 0) debug_log_episode_end(env);
         add_log(env);
         c_reset(env);
         return;
@@ -1793,12 +2241,23 @@ void c_step(Dogfight *env) {
         // Zero-sum game: opponent reward = negative of player reward
         // PLUS independent penalties/rewards (not zero-sum)
         float opp_reward = -env->rewards[0];
-        // Low descent penalty
-        if (o->pos.z < 500.0f && o->vel.z < 0.0f) {
-            opp_reward += -0.025f;  // Same penalty as player for low descent
+
+        // Progressive altitude penalty (same calculation as player)
+        float opp_alt_deficit = fmaxf(0.0f, alt_threshold - o->pos.z);
+        float opp_alt_ratio = opp_alt_deficit / alt_threshold;
+        float opp_r_altitude = -0.01f * opp_alt_ratio * opp_alt_ratio;
+        if (o->vel.z < 0.0f && opp_alt_deficit > 0.0f) {
+            float opp_descent_mult = 1.0f + fminf(-o->vel.z / 30.0f, 1.0f);
+            opp_r_altitude *= opp_descent_mult;
         }
+        opp_reward += opp_r_altitude;
+
         // Energy management reward (calculated above in section 8)
         opp_reward += r_opp_energy;
+
+        // Energy advantage (zero-sum: opponent gets negative of player's)
+        opp_reward += -r_energy_adv;
+
         env->opponent_rewards[0] = opp_reward;
     }
 }

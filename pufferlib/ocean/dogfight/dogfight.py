@@ -53,7 +53,7 @@ class Dogfight(pufferlib.PufferEnv):
         curriculum_randomize=0,
         eval_spawn_mode=0,  # 0=random, 1=opponent_advantage (opponent behind player)
         fixed_stage=-1,
-        max_stage=19,       # Cap curriculum at this stage (19 = EVASIVE, no AutoAce/self-play)
+        max_stage=20,       # Allow curriculum to reach AutoAce/self-play (stage 20)
         eval_interval=2_500_000,    # Steps between curriculum evaluations (2.5M = ~1s at 2.5M SPS)
         warmup_steps=3_000_000,     # Steps before curriculum starts evaluating (3M = ~1.2s at 2.5M SPS)
         min_eval_episodes=50,       # Minimum episodes in window before evaluating mastery
@@ -67,6 +67,10 @@ class Dogfight(pufferlib.PufferEnv):
         penalty_neg_g=0.02,          # Enforce "pull to turn"
         speed_min=50.0,              # Stall threshold
         control_rate_penalty=0.0,    # Penalty for action rate changes (sweep to find optimal)
+        aim_decay_stage=15.0,        # Stage at which aim reward reaches 0 (anti-spiral) - DEPRECATED
+        # Timestep-based shaping decay: anneals r_aim and r_closing during self-play
+        shaping_decay_start=100_000_000,  # Start annealing at this global step
+        shaping_decay_end=150_000_000,    # Complete annealing at this global step
         # Self-play: load frozen checkpoint as opponent
         opponent_checkpoint=None,    # Path to .pt checkpoint file
         opponent_device='cpu',       # Device for opponent policy inference
@@ -74,6 +78,12 @@ class Dogfight(pufferlib.PufferEnv):
         policy_pool=None,            # PolicyPool instance (optional)
         opponent_selection='skill_match',  # Selection strategy: skill_match, prioritized, random, latest
         opponent_swap_interval=500_000,    # Steps between opponent swaps
+        # Recovery hijacking (breaks death spiral equilibrium in self-play)
+        recovery_enabled=1,
+        recovery_altitude_threshold=500.0,
+        recovery_trigger_prob=0.1,
+        recovery_speed_threshold=70.0,
+        recovery_bank_deg=60.0,
     ):
         # Observation size depends on scheme
         obs_size = OBS_SIZES.get(obs_scheme, 19)
@@ -107,6 +117,7 @@ class Dogfight(pufferlib.PufferEnv):
         self.curriculum_enabled = curriculum_enabled
         self.fixed_stage = fixed_stage
         self.max_stage = max_stage
+        print(f'[DOGFIGHT] Curriculum max_stage={self.max_stage}')
         self.min_eval_episodes = min_eval_episodes
 
         # Mastered stage tracking (pure mastery-gated progression)
@@ -153,6 +164,15 @@ class Dogfight(pufferlib.PufferEnv):
                 penalty_neg_g=penalty_neg_g,
                 speed_min=speed_min,
                 control_rate_penalty=control_rate_penalty,
+                aim_decay_stage=aim_decay_stage,
+                shaping_decay_start=shaping_decay_start,
+                shaping_decay_end=shaping_decay_end,
+                # Recovery hijacking config
+                recovery_enabled=recovery_enabled,
+                recovery_altitude_threshold=recovery_altitude_threshold,
+                recovery_trigger_prob=recovery_trigger_prob,
+                recovery_speed_threshold=recovery_speed_threshold,
+                recovery_bank_deg=recovery_bank_deg,
             )
             self._env_handles.append(handle)
 
@@ -245,10 +265,11 @@ class Dogfight(pufferlib.PufferEnv):
         self.actions[:] = actions
 
         # Check if main process has signaled self-play mode via shared memory flag
-        # This enables opponent override in workers (Multiprocessing) on first detection
+        # This enables opponent override AND recovery hijacking in workers (Multiprocessing)
         if self._selfplay_active is not None and self._selfplay_active[0] == 1:
             if not self._opponent_override_enabled:
                 binding.vec_enable_opponent_override(self.c_envs, 1)
+                binding.vec_set_selfplay_active(self.c_envs, 1)  # Enable recovery hijacking
                 self._opponent_override_enabled = True
 
         # Self-play: read opponent actions from shared memory buffer (dual self-play with Multiprocessing)
@@ -275,6 +296,8 @@ class Dogfight(pufferlib.PufferEnv):
             binding.vec_set_opponent_actions(self.c_envs, opp_actions)
 
         self.tick += 1
+        # Update global step for shaping reward decay (tick * num_agents is approximate global step)
+        binding.vec_set_global_step(self.c_envs, self.tick * self.num_agents)
         binding.vec_step(self.c_envs)
 
         # Auto-render if render_mode is 'human' (Gymnasium convention)
