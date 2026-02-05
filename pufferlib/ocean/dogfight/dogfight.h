@@ -369,6 +369,7 @@ typedef struct Dogfight {
     float recovery_speed_threshold;    // Speed for phase 2 (default 70m/s)
     float recovery_bank_deg;           // Turn bank angle (default 60°)
     unsigned int recovery_rng_state;   // Separate RNG for recovery triggers
+    int opponent_above_recovery_threshold;  // 1 if opponent was above threshold last tick (for crossing detection)
 
     // Guided climb hijack (teachable opponent maneuver for self-play diversity)
     // When active, Python should override opponent actions with climb control
@@ -452,6 +453,7 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     env->recovery_speed_threshold = 70.0f;
     env->recovery_bank_deg = 60.0f;
     env->recovery_rng_state = (unsigned int)rand();
+    env->opponent_above_recovery_threshold = 1;  // Start assuming above threshold
 
     // Guided climb hijack: disabled by default
     env->guided_climb_active = 0;
@@ -1653,6 +1655,7 @@ void c_reset(Dogfight *env) {
     // Reset opponent recovery state (death spiral prevention)
     env->opponent_recovery_active = 0;
     env->opponent_recovery_tick_start = 0;
+    env->opponent_above_recovery_threshold = 1;  // Ready to detect next crossing
 
     // Reset previous actions for control rate penalty
     env->prev_elevator = 0.0f;
@@ -1756,23 +1759,31 @@ void c_step(Dogfight *env) {
 
         if (recovery_complete) {
             env->opponent_recovery_active = 0;
+            env->opponent_above_recovery_threshold = 1;  // Ready to detect next crossing
             // Return to level flight
             autopilot_set_mode(&env->opponent_ap, AP_LEVEL, 1.0f, 0.0f, 0.0f);
         }
     } else if (env->selfplay_active && env->recovery_altitude_threshold > 0.0f) {
-        // Check trigger conditions: low altitude AND descending
-        if (opp->pos.z < env->recovery_altitude_threshold && opp->vel.z < 0.0f) {
+        // Crossing-based trigger: detect moment when opponent crosses below threshold
+        int currently_below = (opp->pos.z < env->recovery_altitude_threshold);
+        int was_above = env->opponent_above_recovery_threshold;
+
+        // Detect crossing: was above, now below AND descending
+        if (was_above && currently_below && opp->vel.z < 0.0f) {
+            // Single probability check at crossing moment
             if (RECOVERY_RAND() < env->recovery_trigger_prob) {
-                // Trigger recovery!
                 env->opponent_recovery_active = 1;
                 env->opponent_recovery_tick_start = env->tick;
                 autopilot_start_recovery(&env->opponent_ap,
                     env->recovery_speed_threshold, env->recovery_bank_deg);
                 env->log.recovery_triggers += 1.0f;
-                printf("[RECOVERY] Triggered: opp_z=%.0f opp_vz=%.1f tick=%d\n",
+                printf("[RECOVERY] Triggered at crossing: opp_z=%.0f opp_vz=%.1f tick=%d\n",
                        opp->pos.z, opp->vel.z, env->tick);
             }
         }
+
+        // Update tracking state
+        env->opponent_above_recovery_threshold = !currently_below;
     }
 
     // Handle opponent control: recovery takes priority over everything else
