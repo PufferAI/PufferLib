@@ -44,6 +44,12 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->rw_plane_align = unpack(kwargs, "reward_plane_align");
     env->rw_node_timing = unpack(kwargs, "reward_node_timing");
 
+    // Curriculum: start at stage 0 (free docks)
+    env->curriculum_stage = 0;
+    env->curriculum_docks = 0;
+    env->curriculum_episodes = 0;
+    env->curriculum_window = 500;  // Check every 500 episodes
+
     return 0;
 }
 
@@ -58,5 +64,6 @@ static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "fuel_used", log->fuel_used);
     assign_to_dict(dict, "final_distance", log->final_distance);
     assign_to_dict(dict, "final_rel_speed", log->final_rel_speed);
+    assign_to_dict(dict, "curriculum_stage", log->curriculum_stage);
     return 0;
 }

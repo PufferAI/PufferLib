@@ -32,7 +32,7 @@ class OrbitalDock(pufferlib.PufferEnv):
         mu=3.986e14,
         station_radius=6.771e6,
         dt=1.0,
-        max_thrust=500.0,
+        max_thrust=5000.0,
         mass=10000.0,
         fuel_budget=100.0,
         max_steps=50,
