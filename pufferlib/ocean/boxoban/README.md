@@ -8,9 +8,11 @@ Basic - only externals walls and one box
 
 Easy - only externals walls and up to 4 boxes
 
-These can both be generated using the generate_easy_maps.py script and settings the internals to required options and output str.
+Easy and basic maps generate .txt files on first use.
+Other difficulties download .txt files from a remote repo on first use.
+All dificulties then generate a .bin after which .txt can be deleted.
 
-The hard, medium and unfiltered levels are taken from Googles Boxoban dataset and the license info is included in the file.
+The hard, medium and unfiltered levels are taken from Googles Boxoban dataset and the license info is included in the repo as well as the credit for citing.
 These maps are not easy to generate since they need to be solveable but also interesting, however there are a very good number of maps in those folders ~1M. 
 
 Medium and unlfiltered also have validation sets though these aren't used.
