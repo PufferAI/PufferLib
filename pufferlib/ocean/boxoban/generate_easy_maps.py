@@ -92,17 +92,20 @@ def write_text_file(puzzles, output_path):
             handle.write('\n')
 
 
-def main():
-    num_files = 300
-    puzzles_per_file = 1000
-    size = 10
-    num_boxes = None  # set to an int to fix boxes/targets per map
-    min_boxes = 1
-    max_boxes = 4
-    seed = 0
-    output_dir = Path("boxoban-levels/easy/train")
-
+def generate_maps(
+    output_dir,
+    *,
+    num_files=300,
+    puzzles_per_file=1000,
+    size=10,
+    num_boxes=None,
+    min_boxes=1,
+    max_boxes=4,
+    seed=0,
+):
+    output_dir = Path(output_dir)
     rng = random.Random(seed)
+
     for file_idx in range(num_files):
         puzzles = []
         for _ in range(puzzles_per_file):
@@ -114,6 +117,29 @@ def main():
 
         output_path = output_dir / f"{file_idx:03d}.txt"
         write_text_file(puzzles, output_path)
+
+
+def generate_easy_maps(output_dir, *, seed=0):
+    generate_maps(
+        output_dir,
+        seed=seed,
+        min_boxes=1,
+        max_boxes=4,
+        num_boxes=None,
+    )
+
+
+def generate_basic_maps(output_dir, *, seed=0):
+    generate_maps(
+        output_dir,
+        seed=seed,
+        num_boxes=1,
+    )
+
+
+def main():
+    output_dir = Path(__file__).resolve().parent / "boxoban-levels" / "easy" / "train"
+    generate_easy_maps(output_dir)
 
 
 if __name__ == "__main__":

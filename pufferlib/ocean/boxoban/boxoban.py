@@ -1,11 +1,13 @@
 
 import os
+from pathlib import Path
 
 import gymnasium
 import numpy as np
 
 import pufferlib
 from pufferlib.ocean.boxoban import binding
+from pufferlib.ocean.boxoban.generate_easy_maps import generate_basic_maps, generate_easy_maps
 from pufferlib.ocean.boxoban.parse_maps import write_bin
 
 # MAP STUFF
@@ -42,10 +44,62 @@ def _collect_maps(difficulty):
 def _bin_path(difficulty):
     return os.path.join(BOXOBAN_DIR, f"boxoban_maps_{difficulty}.bin")
 
+def _ensure_text_maps(difficulty):
+    rel_paths = DIFFICULTY_SOURCES.get(difficulty)
+    if rel_paths is None:
+        return
+
+    level_root = Path(BOXOBAN_LEVELS)
+    for rel_path in rel_paths:
+        level_dir = level_root / rel_path
+        if level_dir.is_dir() and list(level_dir.glob("*.txt")):
+            return
+
+    if difficulty in ("basic", "easy"):
+        output_dir = level_root / difficulty / "train"
+        if difficulty == "basic":
+            print(f"[Boxoban] Generating basic maps at {output_dir}")
+            generate_basic_maps(output_dir)
+        else:
+            print(f"[Boxoban] Generating easy maps at {output_dir}")
+            generate_easy_maps(output_dir)
+        return
+
+    base_url = "https://raw.githubusercontent.com/TBBristol/pufferlib_boxoban_levels/main"
+    zip_url = f"{base_url}/{difficulty}.zip"
+    print(f"[Boxoban] Downloading {difficulty} maps from {zip_url}")
+
+    import shutil
+    import tempfile
+    import urllib.request
+    import zipfile
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_dir = Path(tmp_dir)
+        zip_path = tmp_dir / f"{difficulty}.zip"
+        with urllib.request.urlopen(zip_url) as resp, open(zip_path, "wb") as out:
+            out.write(resp.read())
+
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(tmp_dir)
+
+        extracted_root = None
+        for candidate in tmp_dir.rglob(difficulty):
+            if candidate.is_dir():
+                extracted_root = candidate
+                break
+        if extracted_root is None:
+            raise FileNotFoundError(f"Downloaded zip missing '{difficulty}' directory")
+
+        dest_root = level_root / difficulty
+        dest_root.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(extracted_root, dest_root, dirs_exist_ok=True)
+
 
 def _ensure_bin_exists(difficulty):
     path = _bin_path(difficulty)
     if not os.path.exists(path):
+        _ensure_text_maps(difficulty)
         maps = _collect_maps(difficulty)
         count = write_bin(maps, path, verbose=False)
         print(f"[Boxoban] Generated {count} puzzles for '{difficulty}' at {path}")
