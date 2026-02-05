@@ -117,6 +117,7 @@ typedef struct Client {
 
     Trail trail;
     float scale;  // meters per render unit
+    int last_step;  // for tracking episode resets
 } Client;
 
 // ============================================================================
@@ -126,7 +127,7 @@ typedef struct Client {
 typedef struct {
     Log log;                     // Required field (first)
     float* observations;         // Required field - 14 floats
-    int* actions;                // Required field - 3 ints (MultiDiscrete)
+    float* actions;              // Required field - 3 floats (continuous velocity commands)
     float* rewards;              // Required field
     unsigned char* terminals;    // Required field
 
@@ -158,6 +159,10 @@ typedef struct {
     double mass;                 // Chaser mass (kg)
     double dt;                   // Timestep (s)
     double fuel_budget;          // Total delta-v budget (m/s)
+
+    // Hierarchical velocity control (Hovell & Ulrich 2021)
+    double kp;                   // P controller gain
+    double max_cmd_vel;          // Max commanded velocity (m/s)
 
     // Docking conditions
     double dock_dist;            // Docking distance threshold (m)
@@ -376,16 +381,16 @@ static void compute_observations(OrbitalDock* env) {
     double pos_scale = 100.0;   // 100m reference - 50m = 0.5, 100m = 1.0
     double vel_scale = 2.0;     // 2 m/s reference - 0.5 m/s = 0.25, 1 m/s = 0.5
 
-    // Fill observation buffer (all normalized to approximately [-1, 1])
+    // Fill observation buffer (clamped to declared bounds [-10, 10])
     int idx = 0;
-    env->observations[idx++] = (float)(rel_r / pos_scale);      // 0: rel_x (R-bar) - not clamped
-    env->observations[idx++] = (float)(rel_v / pos_scale);      // 1: rel_y (V-bar)
-    env->observations[idx++] = (float)(rel_h / pos_scale);      // 2: rel_z (H-bar)
-    env->observations[idx++] = (float)(rel_vr / vel_scale);     // 3: rel_vx
-    env->observations[idx++] = (float)(rel_vv / vel_scale);     // 4: rel_vy
-    env->observations[idx++] = (float)(rel_vh / vel_scale);     // 5: rel_vz
-    env->observations[idx++] = (float)(dist / pos_scale);       // 6: dist_norm
-    env->observations[idx++] = (float)(closing_speed / vel_scale); // 7: closing_speed
+    env->observations[idx++] = (float)fmax(-10.0, fmin(10.0, rel_r / pos_scale));      // 0: rel_x (R-bar)
+    env->observations[idx++] = (float)fmax(-10.0, fmin(10.0, rel_v / pos_scale));      // 1: rel_y (V-bar)
+    env->observations[idx++] = (float)fmax(-10.0, fmin(10.0, rel_h / pos_scale));      // 2: rel_z (H-bar)
+    env->observations[idx++] = (float)fmax(-10.0, fmin(10.0, rel_vr / vel_scale));     // 3: rel_vx
+    env->observations[idx++] = (float)fmax(-10.0, fmin(10.0, rel_vv / vel_scale));     // 4: rel_vy
+    env->observations[idx++] = (float)fmax(-10.0, fmin(10.0, rel_vh / vel_scale));     // 5: rel_vz
+    env->observations[idx++] = (float)fmin(10.0, dist / pos_scale);                     // 6: dist_norm (always positive)
+    env->observations[idx++] = (float)fmax(-10.0, fmin(10.0, closing_speed / vel_scale)); // 7: closing_speed
     env->observations[idx++] = (float)fmax(0.0, fmin(1.0, env->fuel / env->fuel_budget)); // 8: fuel_remaining
     env->observations[idx++] = (float)fmax(-1.0, fmin(1.0, alt_diff));               // 9: orbit_alt_norm
     env->observations[idx++] = (float)fmax(-1.0, fmin(1.0, phase_angle));            // 10: phase_angle
@@ -393,6 +398,46 @@ static void compute_observations(OrbitalDock* env) {
     env->observations[idx++] = (float)fmax(-1.0, fmin(1.0, node_angle));             // 12: node_angle
     env->observations[idx++] = (float)fmax(0.0, fmin(1.0, 1.0 - (double)env->step_count / env->max_steps)); // 13: time_remaining
 }
+
+// ============================================================================
+// Curriculum Learning
+// ============================================================================
+
+// Stage parameters: {dist_min, dist_max, vel_min, vel_max, offset_max, target_dock_rate}
+static const double CURRICULUM_PARAMS[4][6] = {
+    {5.0,   20.0,  0.2, 0.6, 3.0,  0.40},  // Stage 0: Bootstrap
+    {15.0,  50.0,  0.3, 0.8, 5.0,  0.35},  // Stage 1: Extend range
+    {40.0,  150.0, 0.4, 1.2, 10.0, 0.30},  // Stage 2: Proximity ops (inner)
+    {50.0,  500.0, 0.5, 2.0, 20.0, 0.25},  // Stage 3: Proximity ops (full)
+};
+
+// Sample initial conditions with stage mixing (30% from previous stage)
+static void sample_initial_conditions(OrbitalDock* env,
+                                       double* approach_dist,
+                                       double* closing_speed,
+                                       double* offset_max) {
+    int stage = env->curriculum_stage;
+
+    // Stage mixing: 30% chance to sample from previous stage
+    // This prevents catastrophic forgetting during transitions
+    double stage_mix = rndf(env);
+    if (stage > 0 && stage_mix < 0.3) {
+        stage = stage - 1;  // Sample from easier stage
+    }
+
+    double dist_min = CURRICULUM_PARAMS[stage][0];
+    double dist_max = CURRICULUM_PARAMS[stage][1];
+    double vel_min = CURRICULUM_PARAMS[stage][2];
+    double vel_max = CURRICULUM_PARAMS[stage][3];
+    *offset_max = CURRICULUM_PARAMS[stage][4];
+
+    *approach_dist = dist_min + (dist_max - dist_min) * rndf(env);
+    *closing_speed = vel_min + (vel_max - vel_min) * rndf(env);
+}
+
+// Global curriculum tracking - implemented in binding.c
+// Uses shared state across all envs for stable advancement
+void global_curriculum_update(OrbitalDock* env, int docked);
 
 // ============================================================================
 // Reset
@@ -423,17 +468,18 @@ void c_reset(OrbitalDock* env) {
     Vec3d r_hat, v_hat, h_hat;
     compute_lvlh(t_pos, t_vel, &r_hat, &v_hat, &h_hat);
 
-    // === PHASE A: PROGRADE-ONLY APPROACH ===
-    // Easy distribution that achieved 41% dock rate (vs 29% random)
-    // Heavily biased toward low velocity, short distance
-    double u = rndf(env);
-    double closing_speed = 0.3 + 0.7 * u * u;  // Biased [0.3, 1.0] m/s
-    double approach_dist = 5.0 + 10.0 * rndf(env);  // [5, 15] m
+    // === CURRICULUM-BASED INITIAL CONDITIONS ===
+    double approach_dist, closing_speed, offset_max;
+    sample_initial_conditions(env, &approach_dist, &closing_speed, &offset_max);
 
-    // Pure V-bar approach: chaser behind station along prograde axis
-    double lvlh_r = 0.0;
+    // Random offsets in R-bar and H-bar
+    double r_offset = (rndf(env) - 0.5) * 2.0 * offset_max;
+    double h_offset = (rndf(env) - 0.5) * 2.0 * offset_max;
+
+    // LVLH position: primarily V-bar (behind station), with offsets
+    double lvlh_r = r_offset;
     double lvlh_v = -approach_dist;  // Negative = behind station
-    double lvlh_h = 0.0;
+    double lvlh_h = h_offset;
 
     // Convert LVLH offset to inertial position
     Vec3d offset = add3d(add3d(scale3d(r_hat, lvlh_r), scale3d(v_hat, lvlh_v)), scale3d(h_hat, lvlh_h));
@@ -456,6 +502,16 @@ void c_reset(OrbitalDock* env) {
     env->prev_dist = env->init_dist;
     env->prev_speed = norm3d(rel_vel);
 
+    // === DYNAMIC MAX_STEPS ===
+    // Scale max_steps with initial distance so agent has time to reach station
+    // Base: 100 steps, plus 3 steps per meter of initial distance
+    int base_steps = 100;
+    int steps_per_meter = 3;
+    env->max_steps = base_steps + (int)(env->init_dist * steps_per_meter);
+    // At 20m:  100 + 60  = 160 steps
+    // At 100m: 100 + 300 = 400 steps
+    // At 500m: 100 + 1500 = 1600 steps
+
     compute_observations(env);
 }
 
@@ -469,38 +525,43 @@ void c_step(OrbitalDock* env) {
     env->step_count++;
 
     // 1. Get STATION'S LVLH basis (not chaser's!)
-    // Actions must be in the same frame as observations for consistency.
-    // Otherwise "prograde" means different things to obs vs actions.
     Vec3d t_pos = vec3d(env->tx, env->ty, env->tz);
     Vec3d t_vel = vec3d(env->tvx, env->tvy, env->tvz);
     Vec3d r_hat, v_hat, h_hat;
     compute_lvlh(t_pos, t_vel, &r_hat, &v_hat, &h_hat);
 
-    // 2. Convert discrete actions to thrust vector
-    // Actions: [thrust_pro, thrust_rad, thrust_norm] each in {0,1,2,3,4}
-    // Map to: {-100%, -50%, 0%, +50%, +100%}
-    double thrust_levels[5] = {-1.0, -0.5, 0.0, 0.5, 1.0};
-    int a_pro = env->actions[0];
-    int a_rad = env->actions[1];
-    int a_norm = env->actions[2];
+    // 2. Get current relative velocity in LVLH frame
+    Vec3d c_pos = vec3d(env->cx, env->cy, env->cz);
+    Vec3d c_vel = vec3d(env->cvx, env->cvy, env->cvz);
+    Vec3d rel_vel = sub3d(c_vel, t_vel);
+    double current_vel_r = dot3d(rel_vel, r_hat);
+    double current_vel_v = dot3d(rel_vel, v_hat);
+    double current_vel_h = dot3d(rel_vel, h_hat);
 
-    // Clamp actions to valid range
-    if (a_pro < 0) a_pro = 0; if (a_pro > 4) a_pro = 4;
-    if (a_rad < 0) a_rad = 0; if (a_rad > 4) a_rad = 4;
-    if (a_norm < 0) a_norm = 0; if (a_norm > 4) a_norm = 4;
+    // 3. Read desired velocity from continuous actions (clamp to bounds)
+    double desired_vel_r = fmax(-env->max_cmd_vel, fmin(env->max_cmd_vel, (double)env->actions[0]));
+    double desired_vel_v = fmax(-env->max_cmd_vel, fmin(env->max_cmd_vel, (double)env->actions[1]));
+    double desired_vel_h = fmax(-env->max_cmd_vel, fmin(env->max_cmd_vel, (double)env->actions[2]));
 
-    // STAGE 1: Prograde only - mask radial and normal to neutral
-    a_rad = 2;   // Force zero radial thrust
-    a_norm = 2;  // Force zero normal thrust
+    // 4. P Controller: thrust = kp * (desired_vel - current_vel)
+    // Hovell & Ulrich (2021) Eq. (14): u_t = K_p * (v_t - x_dot_t)
+    double vel_error_r = desired_vel_r - current_vel_r;
+    double vel_error_v = desired_vel_v - current_vel_v;
+    double vel_error_h = desired_vel_h - current_vel_h;
 
-    double t_pro = thrust_levels[a_pro] * env->max_thrust;
-    double t_rad = thrust_levels[a_rad] * env->max_thrust;
-    double t_norm = thrust_levels[a_norm] * env->max_thrust;
+    double thrust_r = env->kp * vel_error_r * env->mass;  // F = m * a, a = kp * error
+    double thrust_v = env->kp * vel_error_v * env->mass;
+    double thrust_h = env->kp * vel_error_h * env->mass;
+
+    // Clamp thrust to physical limits
+    thrust_r = fmax(-env->max_thrust, fmin(env->max_thrust, thrust_r));
+    thrust_v = fmax(-env->max_thrust, fmin(env->max_thrust, thrust_v));
+    thrust_h = fmax(-env->max_thrust, fmin(env->max_thrust, thrust_h));
 
     // LVLH thrust vector -> inertial frame
     Vec3d thrust_lvlh = add3d(
-        add3d(scale3d(v_hat, t_pro), scale3d(r_hat, t_rad)),
-        scale3d(h_hat, t_norm)
+        add3d(scale3d(r_hat, thrust_r), scale3d(v_hat, thrust_v)),
+        scale3d(h_hat, thrust_h)
     );
 
     // 3. Compute fuel usage (delta-v)
@@ -530,11 +591,11 @@ void c_step(OrbitalDock* env) {
     // Re-read positions after integration
     t_pos = vec3d(env->tx, env->ty, env->tz);
     t_vel = vec3d(env->tvx, env->tvy, env->tvz);
-    Vec3d c_pos = vec3d(env->cx, env->cy, env->cz);
-    Vec3d c_vel = vec3d(env->cvx, env->cvy, env->cvz);
+    c_pos = vec3d(env->cx, env->cy, env->cz);
+    c_vel = vec3d(env->cvx, env->cvy, env->cvz);
 
     Vec3d rel_pos = sub3d(c_pos, t_pos);
-    Vec3d rel_vel = sub3d(c_vel, t_vel);
+    rel_vel = sub3d(c_vel, t_vel);
     double dist = norm3d(rel_pos);
     double rel_speed = norm3d(rel_vel);
     double c_alt = norm3d(c_pos) - env->earth_radius;
@@ -543,16 +604,26 @@ void c_step(OrbitalDock* env) {
     int escaped = (c_alt > env->escape_alt);
     int timeout = (env->step_count >= env->max_steps);
 
-    // 7. Compute rewards
+    // 7. Compute rewards - Hovell & Ulrich (2021) style
+    // Key insight: progress reward + proximity-scaled velocity damping
     double reward = 0.0;
 
-    // Quadratic state cost: penalizes being far AND being fast
-    // CAPPED per-step to prevent explosion when agent drifts far away
-    double dist_norm = dist / env->init_dist;
-    double speed_norm = rel_speed / 2.0;
-    double raw_cost = -0.1 * dist_norm * dist_norm - 0.1 * speed_norm * speed_norm;
-    double cost = fmax(raw_cost, -1.0);  // Floor at -1 per step
-    reward += cost;
+    // === Distance progress reward ===
+    // Positive when getting closer, negative when moving away
+    // This is the PRIMARY learning signal - every step toward station is rewarded
+    double distance_progress = env->prev_dist - dist;
+    reward += env->rw_dist_shaping * distance_progress;
+
+    // === Proximity-scaled velocity damping ===
+    // Penalize speed MORE as you get closer to station
+    // Far away: move fast (low penalty). Close up: slow down (high penalty)
+    // Formula: -c1 * ||v|| / (||e|| + eta)
+    double eta = 0.1;  // Prevents division by zero, smooths transition
+    double vel_penalty = -env->rw_closing * rel_speed / (dist + eta);
+    reward += vel_penalty;
+    // At 100m, 1 m/s: penalty = -c1 * 1.0 / 100.1 ≈ -0.01*c1 (negligible)
+    // At 10m, 1 m/s:  penalty = -c1 * 1.0 / 10.1  ≈ -0.1*c1 (moderate)
+    // At 2m, 0.5 m/s: penalty = -c1 * 0.5 / 2.1   ≈ -0.24*c1 (strong braking signal)
 
     // Terminal rewards - graduated docking quality
     // dock_clean: dist < 5m, speed < 0.5 m/s  -> +10.0
@@ -569,7 +640,7 @@ void c_step(OrbitalDock* env) {
         env->log.final_distance += (float)dist;
         env->log.final_rel_speed += (float)rel_speed;
     } else if (dock_rough) {
-        reward += 3.0;  // Rough dock - acceptable
+        reward += 0.5;  // Rough dock - acceptable but less than clean
         env->terminals[0] = 1;
         env->log.dock_success += 0.5f;  // Count as partial success
         env->log.final_distance += (float)dist;
@@ -593,7 +664,7 @@ void c_step(OrbitalDock* env) {
         env->log.final_distance += (float)dist;
         env->log.final_rel_speed += (float)rel_speed;
     } else if (timeout) {
-        reward -= 3.0;  // Timeout penalty - mission failed
+        reward -= 1.0;  // Timeout penalty - mission failed
         env->terminals[0] = 1;
         env->log.timeout_rate += 1.0f;
         env->log.final_distance += (float)dist;
@@ -627,12 +698,12 @@ void c_step(OrbitalDock* env) {
         else if (timeout) terminal_str = "TIMEOUT";
 
         printf("EP%d STEP%d | obs:[%.2f, %.2f, %.2f, %.2f, %.2f, %.2f] | "
-               "dist=%.2f spd=%.2f | action=%d | reward=%.4f | %s\n",
+               "dist=%.2f spd=%.2f | cmd_vel=[%.2f,%.2f,%.2f] | reward=%.4f | %s\n",
                g_debug_episodes, env->step_count,
                rel_r_dbg, rel_v_dbg, rel_h_dbg,  // Position in meters
                rel_vr_dbg, rel_vv_dbg, rel_vh_dbg,  // Velocity in m/s
                dist, rel_speed,
-               a_pro,  // 0=full retro, 2=coast, 4=full prograde
+               desired_vel_r, desired_vel_v, desired_vel_h,  // Commanded velocity
                reward,
                terminal_str);
 
@@ -649,9 +720,10 @@ void c_step(OrbitalDock* env) {
         env->log.fuel_used += (float)(env->fuel_budget - env->fuel);
         env->log.n += 1.0f;
 
-        // Curriculum tracking: count docks and episodes
-        // No curriculum - just reset
-        env->log.curriculum_stage += 0.0f;  // Keep field for compatibility
+        // Global curriculum tracking
+        int docked = dock_clean || dock_rough;
+        global_curriculum_update(env, docked);
+        env->log.curriculum_stage += (float)env->curriculum_stage;
 
         c_reset(env);
     }
