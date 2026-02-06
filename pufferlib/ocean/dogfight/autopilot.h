@@ -64,6 +64,13 @@ typedef enum {
 #define AP_TURN_ROLL_KP   -5.0f
 #define AP_TURN_ROLL_KD   -0.2f
 
+// Recovery mode: aggressive dive recovery (targets vz=0)
+// Tuned via test_pid_sweep.py: 80° dive at 150m/s, 60° bank
+// Results: 9.6s recovery, 0 oscillations, 1103m altitude loss, max 6G
+#define AP_RECOVERY_VZ_KP    0.005f   // Elevator P gain on vz error
+#define AP_RECOVERY_VZ_KD    0.05f    // Elevator D gain (pitch rate damping)
+#define AP_RECOVERY_ROLL_KP  1.0f     // Aileron P gain on bank error
+
 // Default parameters
 #define AP_DEFAULT_THROTTLE   1.0f
 #define AP_DEFAULT_BANK_DEG   30.0f   // Base gentle turns
@@ -439,40 +446,78 @@ static inline void autopilot_step(AutopilotState* ap, Plane* p, float* actions, 
         }
 
         case AP_RECOVERY: {
-            // Death spiral recovery: wings level → gain speed → 60° turn
-            // Used by opponent hijacking to break death spiral equilibrium
+            // Dive recovery using PID on vz (tuned via test_pid_sweep.py)
+            // Targets vz=0 with pitch rate damping to prevent oscillation
+            // Gains scale with 1/V² to handle high-speed control moments
             float rec_bank = ap_get_bank_angle(p);
             float rec_pitch = ap_get_pitch_angle(p);
             float rec_vz = ap_get_vz(p);
             float rec_speed = sqrtf(p->vel.x * p->vel.x + p->vel.y * p->vel.y + p->vel.z * p->vel.z);
+            float pitch_rate = p->omega.y;  // rad/s, positive = nose up
+
+            // Scale gains with 1/V² (control moments ~ V²)
+            // At 100 m/s: scale=1.0, at 150 m/s: scale=0.44, at 50 m/s: scale=4.0 (clamped)
+            float v_ref = 100.0f;
+            float speed_clamped = fmaxf(rec_speed, 50.0f);
+            float gain_scale = (v_ref / speed_clamped) * (v_ref / speed_clamped);
+            gain_scale = fminf(fmaxf(gain_scale, 0.25f), 2.0f);
+
+            float kp_vz = AP_RECOVERY_VZ_KP * gain_scale;
+            float kd_vz = AP_RECOVERY_VZ_KD * gain_scale;
+            float kp_roll = AP_RECOVERY_ROLL_KP * gain_scale;
+
+            // G-force for limiting (approximate from acceleration)
+            float g_force = p->g_force;
+            float g_limit = 6.0f;
 
             switch (ap->recovery_phase) {
-                case 0: // Phase 0: Wings level - roll to 0 bank, pitch to stop descent
-                    // Roll to level
-                    actions[2] = ap_clamp(-ap->roll_kp * rec_bank, -1.0f, 1.0f);
-                    // Pitch to stop descent (target vz=0)
+                case 0: // Phase 0: Recovery - level wings and stop descent simultaneously
+                    // Aileron: P control to level wings (bank -> 0)
+                    actions[2] = ap_clamp(-kp_roll * rec_bank, -1.0f, 1.0f);
+
+                    // Elevator: PID targeting vz=0
+                    // vz negative (sinking) -> positive vz_error -> pull up (negative elevator)
+                    // pitch_rate positive (nose coming up) -> reduce pull to avoid overshoot
                     {
-                        float vz_deriv = (rec_vz - ap->prev_vz) / dt;
-                        actions[1] = ap_clamp(ap->pitch_kp * (-rec_vz) + ap->pitch_kd * (-vz_deriv), -1.0f, 1.0f);
+                        float vz_error = 0.0f - rec_vz;  // positive when sinking
+                        float elevator = -kp_vz * vz_error + kd_vz * pitch_rate;
+
+                        // G-limiting: reduce pull if approaching G limit
+                        if (g_force > g_limit - 0.5f) {
+                            elevator = fmaxf(elevator, -0.3f);
+                        }
+
+                        actions[1] = ap_clamp(elevator, -1.0f, 1.0f);
                     }
-                    ap->prev_vz = rec_vz;
-                    // Transition when roughly level
-                    if (fabsf(rec_bank) < 0.15f && fabsf(rec_vz) < 5.0f) {
+
+                    // Transition when roughly level and not sinking fast
+                    // Relaxed from 0.15 rad to 0.3 rad (17°) for bank
+                    if (fabsf(rec_bank) < 0.3f && fabsf(rec_vz) < 10.0f) {
                         ap->recovery_phase = 1;
                     }
                     break;
 
                 case 1: // Phase 1: Gain speed - maintain level, wait for speed
-                    // Keep level (pitch to vz=0)
-                    actions[1] = ap_clamp(ap->pitch_kp * (-rec_vz), -1.0f, 1.0f);
-                    actions[2] = 0.0f;
+                    // Keep level using same PID (vz -> 0)
+                    {
+                        float vz_error = 0.0f - rec_vz;
+                        float elevator = -kp_vz * vz_error + kd_vz * pitch_rate;
+
+                        // G-limiting
+                        if (g_force > g_limit - 0.5f) {
+                            elevator = fmaxf(elevator, -0.3f);
+                        }
+
+                        actions[1] = ap_clamp(elevator, -1.0f, 1.0f);
+                    }
+                    actions[2] = ap_clamp(-kp_roll * rec_bank, -1.0f, 1.0f);  // Keep wings level
                     // Transition when speed is sufficient
                     if (rec_speed >= ap->recovery_speed_threshold) {
                         ap->recovery_phase = 2;
                     }
                     break;
 
-                case 2: // Phase 2: Coordinated 60° turn - standard turn maneuver
+                case 2: // Phase 2: Coordinated turn - use turn gains (already tuned)
                     // Pitch tracking: keep nose level during bank
                     actions[1] = ap_clamp(-ap->turn_pitch_kp * rec_pitch, -1.0f, 1.0f);
                     // Roll to target bank

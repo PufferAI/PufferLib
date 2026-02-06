@@ -25,6 +25,8 @@ static PyObject* vec_set_global_step(PyObject* self, PyObject* args);
 static PyObject* vec_set_selfplay_active(PyObject* self, PyObject* args);
 static PyObject* vec_get_guided_climb_state(PyObject* self, PyObject* args);
 static PyObject* vec_tick_guided_climb(PyObject* self, PyObject* args);
+static PyObject* vec_set_flight_params(PyObject* self, PyObject* args, PyObject* kwargs);
+static PyObject* env_set_flight_params(PyObject* self, PyObject* args, PyObject* kwargs);
 
 #define MY_METHODS \
     {"env_force_state", (PyCFunction)env_force_state, METH_VARARGS | METH_KEYWORDS, "Force environment state"}, \
@@ -47,7 +49,9 @@ static PyObject* vec_tick_guided_climb(PyObject* self, PyObject* args);
     {"vec_set_global_step", (PyCFunction)vec_set_global_step, METH_VARARGS, "Set global training step for shaping reward decay"}, \
     {"vec_set_selfplay_active", (PyCFunction)vec_set_selfplay_active, METH_VARARGS, "Enable/disable selfplay mode for recovery hijacking"}, \
     {"vec_get_guided_climb_state", (PyCFunction)vec_get_guided_climb_state, METH_VARARGS, "Get guided climb state for teachable opponent maneuvers"}, \
-    {"vec_tick_guided_climb", (PyCFunction)vec_tick_guided_climb, METH_VARARGS, "Decrement guided climb ticks after each step"}
+    {"vec_tick_guided_climb", (PyCFunction)vec_tick_guided_climb, METH_VARARGS, "Decrement guided climb ticks after each step"}, \
+    {"vec_set_flight_params", (PyCFunction)vec_set_flight_params, METH_VARARGS | METH_KEYWORDS, "Set flight physics params for all envs"}, \
+    {"env_set_flight_params", (PyCFunction)env_set_flight_params, METH_VARARGS | METH_KEYWORDS, "Set flight physics params for single env"}
 
 static float get_float(PyObject *kwargs, const char *key, float default_val) {
     if (!kwargs) return default_val;
@@ -87,6 +91,8 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
         .closing_scale = get_float(kwargs, "reward_closing_scale", 0.003f),
         .neg_g = get_float(kwargs, "penalty_neg_g", 0.02f),
         .control_rate_penalty = get_float(kwargs, "control_rate_penalty", 0.0f),
+        .low_altitude_threshold = get_float(kwargs, "low_altitude_threshold", 1500.0f),
+        .low_altitude_penalty = get_float(kwargs, "low_altitude_penalty", 0.01f),
         .speed_min = get_float(kwargs, "speed_min", 50.0f),
         .aim_decay_stage = get_float(kwargs, "aim_decay_stage", 15.0f),
         .shaping_decay_start = get_long(kwargs, "shaping_decay_start", 0),
@@ -822,6 +828,65 @@ static PyObject* vec_tick_guided_climb(PyObject* self, PyObject* args) {
             }
         }
     }
+
+    Py_RETURN_NONE;
+}
+
+// Set flight physics parameters for all environments (for parameter sweeps)
+// Args: vec_handle, control_scale_min, damping_scale_slope, damping_multiplier
+static PyObject* vec_set_flight_params(PyObject* self, PyObject* args, PyObject* kwargs) {
+    PyObject* vec_arg;
+
+    if (!PyArg_ParseTuple(args, "O", &vec_arg)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    // Get parameters with defaults
+    float control_v_ref = get_float(kwargs, "control_v_ref", CONTROL_V_REF);
+    float control_scale_slope = get_float(kwargs, "control_scale_slope", CONTROL_SCALE_SLOPE);
+    float control_scale_min = get_float(kwargs, "control_scale_min", CONTROL_SCALE_MIN);
+    float damping_scale_slope = get_float(kwargs, "damping_scale_slope", 0.0f);
+    float damping_multiplier = get_float(kwargs, "damping_multiplier", 1.0f);
+
+    // Apply to all environments
+    for (int i = 0; i < vec->num_envs; i++) {
+        vec->envs[i]->flight_params.control_v_ref = control_v_ref;
+        vec->envs[i]->flight_params.control_scale_slope = control_scale_slope;
+        vec->envs[i]->flight_params.control_scale_min = control_scale_min;
+        vec->envs[i]->flight_params.damping_scale_slope = damping_scale_slope;
+        vec->envs[i]->flight_params.damping_multiplier = damping_multiplier;
+    }
+
+    Py_RETURN_NONE;
+}
+
+// Set flight physics parameters for a single environment
+// Args: env_handle, plus kwargs for FlightParams
+static PyObject* env_set_flight_params(PyObject* self, PyObject* args, PyObject* kwargs) {
+    PyObject* env_arg;
+
+    if (!PyArg_ParseTuple(args, "O", &env_arg)) {
+        return NULL;
+    }
+
+    Dogfight* env = (Dogfight*)PyLong_AsVoidPtr(env_arg);
+    if (!env) {
+        PyErr_SetString(PyExc_TypeError, "Invalid env handle");
+        return NULL;
+    }
+
+    // Get parameters with defaults (inherit from current values)
+    env->flight_params.control_v_ref = get_float(kwargs, "control_v_ref", env->flight_params.control_v_ref);
+    env->flight_params.control_scale_slope = get_float(kwargs, "control_scale_slope", env->flight_params.control_scale_slope);
+    env->flight_params.control_scale_min = get_float(kwargs, "control_scale_min", env->flight_params.control_scale_min);
+    env->flight_params.damping_scale_slope = get_float(kwargs, "damping_scale_slope", env->flight_params.damping_scale_slope);
+    env->flight_params.damping_multiplier = get_float(kwargs, "damping_multiplier", env->flight_params.damping_multiplier);
 
     Py_RETURN_NONE;
 }

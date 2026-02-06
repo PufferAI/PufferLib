@@ -933,7 +933,7 @@ class DualPerspectiveTrainer:
         losses['explained_variance'] = explained_var
 
         # Add dual self-play specific metrics
-        losses['dual_selfplay'] = 1.0  # Flag for logging
+        losses['dual_selfplay'] = 1.0 if self.use_dual_selfplay else 0.0
 
         profile.end()
         logs = None
@@ -964,6 +964,171 @@ class DualPerspectiveTrainer:
 
     def close(self):
         return self.trainer.close()
+
+
+def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
+    """Train with dual self-play. Returns all_logs like pufferl.train().
+
+    This is the core training function extracted for sweep support.
+    """
+    global DEBUG_LEVEL
+
+    args = args or pufferl.load_config(env_name)
+
+    # NOTE: Dual self-play works with Multiprocessing backend!
+    # Opponent observations and rewards are computed in C during c_step()
+    # and written to shared memory buffers, enabling parallel workers.
+    backend = args['vec'].get('backend', 'Multiprocessing')
+    print(f'[DUAL-SELFPLAY] Using {backend} backend with C-level opponent buffers')
+
+    # Create environment using standard pufferl flow
+    vecenv = pufferl.load_env(env_name, args)
+
+    # Create policy
+    policy = pufferl.load_policy(args, vecenv, env_name)
+
+    # Create logger if requested
+    logger = None
+    run_id = None
+    if args['neptune']:
+        logger = pufferl.NeptuneLogger(args)
+    elif args['wandb']:
+        logger = pufferl.WandbLogger(args)
+        # Use wandb run ID for checkpoint directory
+        if hasattr(logger, 'run') and logger.run:
+            run_id = logger.run.id
+
+    # Get selfplay params (use defaults if not set)
+    selfplay_min_stage = args.get('selfplay_min_stage', DEFAULT_SELFPLAY_MIN_STAGE)
+    checkpoint_lag = args.get('checkpoint_lag', DEFAULT_CHECKPOINT_LAG)
+    perf_threshold = args.get('perf_threshold', DEFAULT_PERF_THRESHOLD)
+    min_steps_between_checkpoints = args.get('min_steps_between_checkpoints', DEFAULT_MIN_STEPS_BETWEEN_CHECKPOINTS)
+    max_checkpoints = args.get('max_checkpoints', DEFAULT_MAX_CHECKPOINTS)
+    checkpoint_dir = args.get('checkpoint_dir', None)
+    opponent_update_interval = args.get('opponent_update_interval', DEFAULT_OPPONENT_UPDATE_INTERVAL)
+
+    # Create dual-perspective trainer with checkpoint queue
+    train_config = {**args['train'], 'env': env_name}
+    trainer = DualPerspectiveTrainer(
+        train_config, vecenv, policy, logger,
+        opponent_update_interval=opponent_update_interval,
+        selfplay_min_stage=selfplay_min_stage,
+        checkpoint_lag=checkpoint_lag,
+        perf_threshold=perf_threshold,
+        min_steps_between_checkpoints=min_steps_between_checkpoints,
+        max_checkpoints=max_checkpoints,
+        checkpoint_dir=checkpoint_dir,
+        run_id=run_id
+    )
+
+    print(f'[DUAL-SELFPLAY] Starting training with checkpoint queue')
+    print(f'[DUAL-SELFPLAY] Min stage for self-play: {selfplay_min_stage}')
+    print(f'[DUAL-SELFPLAY] Checkpoint lag: {checkpoint_lag} (opponent is {checkpoint_lag} checkpoint(s) behind)')
+    print(f'[DUAL-SELFPLAY] Perf threshold: {perf_threshold} (save checkpoint when perf >= this)')
+    print(f'[DUAL-SELFPLAY] Min steps between checkpoints: {min_steps_between_checkpoints}')
+
+    total_timesteps = train_config['total_timesteps']
+    all_logs = []
+
+    # Training loop
+    while trainer.global_step < total_timesteps:
+        if train_config['device'] == 'cuda':
+            torch.compiler.cudagraph_mark_step_begin()
+        trainer.evaluate()
+        if train_config['device'] == 'cuda':
+            torch.compiler.cudagraph_mark_step_begin()
+        logs = trainer.train()
+
+        if logs is not None:
+            # Only collect after 20% warmup (matching pufferl.train)
+            if trainer.global_step > 0.20 * total_timesteps:
+                all_logs.append(logs)
+
+            if should_stop_early is not None and should_stop_early(logs):
+                model_path = trainer.close()
+                if logger:
+                    logger.close(model_path)
+                return all_logs
+
+        # Log dual self-play status periodically
+        if trainer.epoch % 100 == 0 and trainer.epoch > 0:
+            mode = "DUAL" if trainer.use_dual_selfplay else "CURRICULUM"
+            queue_len = len(trainer.checkpoint_queue)
+            opponent_entry = trainer.checkpoint_queue.get_opponent_entry(trainer.checkpoint_lag)
+            opponent_tag = opponent_entry.tag if opponent_entry else "none"
+            print(f'[DUAL-SELFPLAY] Mode: {mode}, Steps: {trainer.global_step}, '
+                  f'Queue: {queue_len} checkpoints, Opponent: {opponent_tag}')
+
+    # Cleanup
+    model_path = trainer.close()
+    if logger:
+        logger.close(model_path)
+
+    print(f'[DUAL-SELFPLAY] Training complete')
+    return all_logs
+
+
+def sweep_dual(env_name='puffer_dogfight', args=None):
+    """Sweep hyperparameters for dual self-play training.
+
+    Mirrors pufferl.sweep() but uses train_dual() instead of train().
+    """
+    args = args or pufferl.load_config(env_name)
+
+    if not args['wandb'] and not args['neptune']:
+        raise pufferlib.APIUsageError('Sweeps require either wandb or neptune')
+
+    method = args['sweep'].pop('method')
+
+    project = args.get('wandb_project', args.get('neptune_project', 'sweep'))
+    args['sweep'].setdefault('state_file', f'{project}_sweep.json')
+    args['sweep'].setdefault('override_file', f'{project}_override.json')
+
+    try:
+        sweep_cls = getattr(pufferlib.sweep, method)
+    except:
+        raise pufferlib.APIUsageError(f'Invalid sweep method {method}. See pufferlib.sweep')
+
+    sweep = sweep_cls(args['sweep'])
+    points_per_run = args['sweep']['downsample']
+    target_key = f'environment/{args["sweep"]["metric"]}'
+
+    def stop_if_loss_nan(logs):
+        return any("losses/" in k and np.isnan(v) for k, v in logs.items())
+
+    for i in range(args['max_runs']):
+        seed = time.time_ns() & 0xFFFFFFFF
+        import random
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
+        sweep.suggest(args)
+        all_logs = train_dual(env_name, args=args, should_stop_early=stop_if_loss_nan)
+        all_logs = [e for e in all_logs if target_key in e]
+
+        if not all_logs:
+            sweep.observe(args, 0, 0, is_failure=True)
+            continue
+
+        total_timesteps = args['train']['total_timesteps']
+
+        scores = pufferl.downsample([log[target_key] for log in all_logs], points_per_run)
+        costs = pufferl.downsample([log['uptime'] for log in all_logs], points_per_run)
+        timesteps = pufferl.downsample([log['agent_steps'] for log in all_logs], points_per_run)
+
+        if len(timesteps) > 0 and timesteps[-1] < 0.7 * total_timesteps:
+            s = scores.pop()
+            c = costs.pop()
+            args['train']['total_timesteps'] = timesteps.pop()
+            sweep.observe(args, s, c, is_failure=True)
+
+        for score, cost, timestep in zip(scores, costs, timesteps):
+            args['train']['total_timesteps'] = timestep
+            sweep.observe(args, score, cost)
+
+        # Prevent logging final eval steps as training steps
+        args['train']['total_timesteps'] = total_timesteps
 
 
 def eval_selfplay(env_name, args, player_path, opponent_path, load_id=None):
@@ -1262,6 +1427,17 @@ def main():
         eval_selfplay(env_name, args, player_path, opponent_checkpoint, load_id)
         return
 
+    # Check for 'sweep' subcommand
+    if len(sys.argv) > 1 and sys.argv[1] == 'sweep':
+        sys.argv.pop(1)  # Remove 'sweep' from args
+        args = pufferl.load_config(env_name)
+        sweep_dual(env_name, args)
+        return
+
+    # Check for 'train' subcommand (optional, for consistency)
+    if len(sys.argv) > 1 and sys.argv[1] == 'train':
+        sys.argv.pop(1)  # Remove 'train' from args
+
     # Extract custom args before pufferl parses
     opponent_update_interval = DEFAULT_OPPONENT_UPDATE_INTERVAL
     selfplay_min_stage = DEFAULT_SELFPLAY_MIN_STAGE
@@ -1374,115 +1550,17 @@ def main():
     # Load standard dogfight config
     args = pufferl.load_config(env_name)
 
-    # NOTE: Dual self-play now works with Multiprocessing backend!
-    # Opponent observations and rewards are computed in C during c_step()
-    # and written to shared memory buffers, enabling parallel workers.
-    backend = args['vec'].get('backend', 'Multiprocessing')
-    print(f'[DUAL-SELFPLAY] Using {backend} backend with C-level opponent buffers')
+    # Pass selfplay params to args for train_dual() to use
+    args['selfplay_min_stage'] = selfplay_min_stage
+    args['checkpoint_lag'] = checkpoint_lag
+    args['perf_threshold'] = perf_threshold
+    args['min_steps_between_checkpoints'] = min_steps_between_checkpoints
+    args['max_checkpoints'] = max_checkpoints
+    args['checkpoint_dir'] = checkpoint_dir
+    args['opponent_update_interval'] = opponent_update_interval
 
-    # Create environment using standard pufferl flow
-    vecenv = pufferl.load_env(env_name, args)
-
-    # Create policy
-    policy = pufferl.load_policy(args, vecenv, env_name)
-
-    # Create logger if requested
-    logger = None
-    run_id = None
-    if args['neptune']:
-        logger = pufferl.NeptuneLogger(args)
-    elif args['wandb']:
-        logger = pufferl.WandbLogger(args)
-        # Use wandb run ID for checkpoint directory
-        if hasattr(logger, 'run') and logger.run:
-            run_id = logger.run.id
-
-    # Create dual-perspective trainer with checkpoint queue
-    train_config = {**args['train'], 'env': env_name}
-    trainer = DualPerspectiveTrainer(
-        train_config, vecenv, policy, logger,
-        opponent_update_interval=opponent_update_interval,
-        selfplay_min_stage=selfplay_min_stage,
-        checkpoint_lag=checkpoint_lag,
-        perf_threshold=perf_threshold,
-        min_steps_between_checkpoints=min_steps_between_checkpoints,
-        max_checkpoints=max_checkpoints,
-        checkpoint_dir=checkpoint_dir,
-        run_id=run_id
-    )
-
-    print(f'[DUAL-SELFPLAY] Starting training with checkpoint queue')
-    print(f'[DUAL-SELFPLAY] Min stage for self-play: {selfplay_min_stage}')
-    print(f'[DUAL-SELFPLAY] Checkpoint lag: {checkpoint_lag} (opponent is {checkpoint_lag} checkpoint(s) behind)')
-    print(f'[DUAL-SELFPLAY] Perf threshold: {perf_threshold} (save checkpoint when perf >= this)')
-    print(f'[DUAL-SELFPLAY] Min steps between checkpoints: {min_steps_between_checkpoints}')
-
-    # Late-training debug logging configuration
-    # Use override from --debug-trigger-step if provided, otherwise use default
-    debug_trigger_step = _debug_trigger_step_override if _debug_trigger_step_override is not None else DEFAULT_DEBUG_TRIGGER_STEP
-    debug_logging_started = False
-    debug_log_file = None
-    if debug_trigger_step > 0:
-        print(f'[DEBUG-LOG] Debug logging will activate at step {debug_trigger_step:,}')
-    else:
-        print(f'[DEBUG-LOG] Debug logging disabled (trigger_step=0)')
-
-    # Training loop
-    while trainer.global_step < train_config['total_timesteps']:
-        if train_config['device'] == 'cuda':
-            torch.compiler.cudagraph_mark_step_begin()
-        trainer.evaluate()
-        if train_config['device'] == 'cuda':
-            torch.compiler.cudagraph_mark_step_begin()
-        logs = trainer.train()
-
-        # Python-based debug logging (replaces broken C-level logging)
-        # Logs aggregate stats from trainer.stats every 100 epochs after trigger step
-        if debug_trigger_step > 0 and trainer.global_step >= debug_trigger_step:
-            if not debug_logging_started:
-                debug_log_file = open('/tmp/dogfight_debug_0.log', 'w')
-                debug_logging_started = True
-                print(f'[DEBUG-LOG] Started Python debug logging at step {trainer.global_step}')
-                print(f'[DEBUG-LOG] Output file: /tmp/dogfight_debug_0.log')
-            # Log mean stats every 100 epochs
-            if trainer.epoch % 100 == 0 and debug_log_file:
-                debug_log_file.write(f"=== STEP {trainer.global_step} EPOCH {trainer.epoch} ===\n")
-                # Log from trainer.trainer.stats (inner PuffeRL trainer)
-                stats = trainer.trainer.stats if hasattr(trainer, 'trainer') else {}
-                for key, values in stats.items():
-                    if values and isinstance(values, list) and len(values) > 0:
-                        try:
-                            mean_val = sum(values) / len(values)
-                            debug_log_file.write(f"{key}: {mean_val:.6f}\n")
-                        except (TypeError, ValueError):
-                            pass  # Skip non-numeric stats
-                # Also log from logs dict if available (has environment/ prefix)
-                if logs:
-                    debug_log_file.write("--- Logs ---\n")
-                    for key, value in logs.items():
-                        if isinstance(value, (int, float)):
-                            debug_log_file.write(f"{key}: {value:.6f}\n")
-                debug_log_file.write("\n")
-                debug_log_file.flush()
-
-        # Log dual self-play status periodically
-        if trainer.epoch % 100 == 0 and trainer.epoch > 0:
-            mode = "DUAL" if trainer.use_dual_selfplay else "CURRICULUM"
-            queue_len = len(trainer.checkpoint_queue)
-            opponent_entry = trainer.checkpoint_queue.get_opponent_entry(trainer.checkpoint_lag)
-            opponent_tag = opponent_entry.tag if opponent_entry else "none"
-            print(f'[DUAL-SELFPLAY] Mode: {mode}, Steps: {trainer.global_step}, '
-                  f'Queue: {queue_len} checkpoints, Opponent: {opponent_tag}')
-
-    # Cleanup
-    if debug_log_file:
-        debug_log_file.close()
-        print(f'[DEBUG-LOG] Closed debug log file')
-    model_path = trainer.close()
-    if logger:
-        logger.close(model_path)
-
-    print(f'[DUAL-SELFPLAY] Training complete')
+    # Run training
+    train_dual(env_name, args)
 
 
 if __name__ == '__main__':

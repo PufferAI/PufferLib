@@ -67,6 +67,8 @@ class Dogfight(pufferlib.PufferEnv):
         penalty_neg_g=0.02,          # Enforce "pull to turn"
         speed_min=50.0,              # Stall threshold
         control_rate_penalty=0.0,    # Penalty for action rate changes (sweep to find optimal)
+        low_altitude_threshold=1500.0,  # Altitude below which penalty applies
+        low_altitude_penalty=0.01,      # Penalty scale at ground level
         aim_decay_stage=15.0,        # Stage at which aim reward reaches 0 (anti-spiral) - DEPRECATED
         # Timestep-based shaping decay: anneals r_aim and r_closing during self-play
         shaping_decay_start=100_000_000,  # Start annealing at this global step
@@ -126,6 +128,7 @@ class Dogfight(pufferlib.PufferEnv):
         # Finalization: snap to mastered stage near end of training
         # total_timesteps is global total, finalize_margin is global margin
         # Per-worker finalize step = (global_total - global_margin) / num_workers
+        self._finalize_margin = finalize_margin
         self._finalize_at_steps = (total_timesteps - finalize_margin) // num_workers
         #print(f'[CURRICULUM] Initialized: finalize_at={self._finalize_at_steps}, mastered_stage={self._mastered_stage}')
 
@@ -164,6 +167,8 @@ class Dogfight(pufferlib.PufferEnv):
                 penalty_neg_g=penalty_neg_g,
                 speed_min=speed_min,
                 control_rate_penalty=control_rate_penalty,
+                low_altitude_threshold=low_altitude_threshold,
+                low_altitude_penalty=low_altitude_penalty,
                 aim_decay_stage=aim_decay_stage,
                 shaping_decay_start=shaping_decay_start,
                 shaping_decay_end=shaping_decay_end,
@@ -353,11 +358,20 @@ class Dogfight(pufferlib.PufferEnv):
 
                             # Target is ALWAYS mastered + 0.9 (except finalization)
                             # Cap at max_stage to avoid AutoAce/self-play if desired
-                            in_finalization = total_steps >= self._finalize_at_steps
+                            in_finalization = self._finalize_margin > 0 and total_steps >= self._finalize_at_steps
                             if in_finalization:
-                                new_target = float(self._mastered_stage) + 0.01
+                                # Lock at stage 19+ once reached (self-play is 50/50, can't master)
+                                if self._mastered_stage >= 19:
+                                    new_target = 20.0  # Lock at self-play forever
+                                else:
+                                    new_target = float(self._mastered_stage) + 0.01
                             else:
                                 new_target = float(self._mastered_stage) + 0.9
+
+                            # Never drop below 19.0 once stage 19+ is reached
+                            if self._mastered_stage >= 19:
+                                new_target = max(new_target, 19.0)
+
                             new_target = min(new_target, float(self.max_stage))
 
                             if abs(self._target_stage - new_target) > 0.01:
@@ -635,6 +649,50 @@ class Dogfight(pufferlib.PufferEnv):
         giving opponent an easy kill opportunity. Useful for testing if opponent can kill.
         """
         binding.vec_set_eval_spawn_mode(self.c_envs, mode)
+
+    def set_flight_params(
+        self,
+        env_idx=None,
+        control_v_ref=None,
+        control_scale_slope=None,
+        control_scale_min=None,
+        damping_scale_slope=None,
+        damping_multiplier=None,
+    ):
+        """
+        Set flight physics parameters for parameter sweeps.
+
+        Args:
+            env_idx: Environment index, or None for all environments
+            control_v_ref: Reference speed for full control authority (default 100.0 m/s)
+            control_scale_slope: Authority reduction per m/s above ref (default 0.000833)
+            control_scale_min: Minimum authority floor (default 0.05 = 5%)
+            damping_scale_slope: Extra damping per m/s above ref (default 0.0)
+            damping_multiplier: Scale all damping (CM_Q, CL_P, CN_R). 1.0=normal, 2.0=double
+
+        Usage:
+            # Increase damping for smoother recovery
+            env.set_flight_params(damping_multiplier=2.0)
+
+            # Sweep parameter combinations
+            env.set_flight_params(damping_multiplier=1.5, control_scale_min=0.10)
+        """
+        kwargs = {}
+        if control_v_ref is not None:
+            kwargs['control_v_ref'] = control_v_ref
+        if control_scale_slope is not None:
+            kwargs['control_scale_slope'] = control_scale_slope
+        if control_scale_min is not None:
+            kwargs['control_scale_min'] = control_scale_min
+        if damping_scale_slope is not None:
+            kwargs['damping_scale_slope'] = damping_scale_slope
+        if damping_multiplier is not None:
+            kwargs['damping_multiplier'] = damping_multiplier
+
+        if env_idx is None:
+            binding.vec_set_flight_params(self.c_envs, **kwargs)
+        else:
+            binding.env_set_flight_params(self._env_handles[env_idx], **kwargs)
 
 
 def test_performance(timeout=10, atn_cache=1024):

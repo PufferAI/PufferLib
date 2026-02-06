@@ -197,10 +197,11 @@ static inline void step_plane(Plane *p, float dt) {
 // High-speed control authority scaling (prevents oscillations at high speed)
 // At high speeds, control moments scale with V² while damping scales with V,
 // causing under-damped behavior. Scale down control authority to compensate.
-// Values derived from per-speed optimal scale discovery (--find-optimal mode)
-#define CONTROL_V_REF 100.0f      // Only scale authority above 100 m/s (cruise speed)
-#define CONTROL_SCALE_SLOPE 0.000833f // Authority reduction per m/s above ref
-#define CONTROL_SCALE_MIN 0.05f   // Minimum authority (never below 5%)
+// Control authority scaling DISABLED - proper PID tuning handles high-speed stability
+// (Previously reduced authority at high speed as band-aid for oscillation)
+#define CONTROL_V_REF 100.0f      // Reference speed (unused with slope=0)
+#define CONTROL_SCALE_SLOPE 0.0f  // No authority reduction
+#define CONTROL_SCALE_MIN 1.0f    // Full authority always
 
 // Runtime-configurable physics parameters for parameter sweeps
 typedef struct {
@@ -208,6 +209,7 @@ typedef struct {
     float control_scale_slope; // How fast authority drops with speed
     float control_scale_min;   // Floor for control authority
     float damping_scale_slope; // Extra damping scale per m/s above ref (0 = off)
+    float damping_multiplier;  // Scale CM_Q, CL_P, CN_R (1.0 = normal, 2.0 = double damping)
 } FlightParams;
 
 // Default parameters (matches current compile-time #defines)
@@ -216,7 +218,8 @@ static inline FlightParams default_flight_params(void) {
         .control_v_ref = CONTROL_V_REF,
         .control_scale_slope = CONTROL_SCALE_SLOPE,
         .control_scale_min = CONTROL_SCALE_MIN,
-        .damping_scale_slope = 0.0f
+        .damping_scale_slope = 0.0f,
+        .damping_multiplier = 1.0f
     };
 }
 
@@ -720,13 +723,14 @@ static inline void compute_derivatives_with_params(
     float q_hat = q * CHORD / (2.0f * V);
     float r_hat = r * WINGSPAN / (2.0f * V);
 
-    // Damping scaling - can boost damping at high speed
+    // Damping scaling - can boost damping at high speed and/or via multiplier
     float damping_scale = 1.0f + fmaxf(0.0f, V - params->control_v_ref) * params->damping_scale_slope;
+    float total_damping = damping_scale * params->damping_multiplier;
 
     // Moment coefficients with scaled damping
-    float Cl = CL_BETA * beta + (CL_P * p_hat * damping_scale) + CL_DELTA_A * delta_a + CL_DELTA_R * delta_r;
-    float Cm = CM_0 + CM_ALPHA * alpha + (CM_Q * q_hat * damping_scale) + CM_DELTA_E * delta_e;
-    float Cn = CN_BETA * beta + (CN_R * r_hat * damping_scale) + CN_DELTA_R * delta_r + CN_DELTA_A * delta_a;
+    float Cl = CL_BETA * beta + (CL_P * p_hat * total_damping) + CL_DELTA_A * delta_a + CL_DELTA_R * delta_r;
+    float Cm = CM_0 + CM_ALPHA * alpha + (CM_Q * q_hat * total_damping) + CM_DELTA_E * delta_e;
+    float Cn = CN_BETA * beta + (CN_R * r_hat * total_damping) + CN_DELTA_R * delta_r + CN_DELTA_A * delta_a;
 
     // Dimensional moments
     float L_moment = Cl * q_bar * WING_AREA * WINGSPAN;
