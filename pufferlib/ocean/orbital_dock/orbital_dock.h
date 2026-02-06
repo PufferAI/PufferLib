@@ -404,11 +404,13 @@ static void compute_observations(OrbitalDock* env) {
 // ============================================================================
 
 // Stage parameters: {dist_min, dist_max, vel_min, vel_max, offset_max, target_dock_rate}
-static const double CURRICULUM_PARAMS[4][6] = {
-    {5.0,   20.0,  0.2, 0.6, 3.0,  0.40},  // Stage 0: Bootstrap
-    {15.0,  50.0,  0.3, 0.8, 5.0,  0.35},  // Stage 1: Extend range
-    {40.0,  150.0, 0.4, 1.2, 10.0, 0.30},  // Stage 2: Proximity ops (inner)
-    {50.0,  500.0, 0.5, 2.0, 20.0, 0.25},  // Stage 3: Proximity ops (full)
+// 5 stages with <=2.5x distance jump between stages for smooth progression
+static const double CURRICULUM_PARAMS[5][6] = {
+    {5.0,   20.0,  0.2, 0.6, 3.0,  0.40},  // Stage 0: Bootstrap (5-20m)
+    {15.0,  50.0,  0.3, 0.8, 5.0,  0.35},  // Stage 1: Short range (15-50m)
+    {30.0, 100.0,  0.3, 1.0, 8.0,  0.30},  // Stage 2: Medium range (30-100m)
+    {80.0, 250.0,  0.4, 1.5, 15.0, 0.25},  // Stage 3: Extended range (80-250m)
+    {150.0,500.0,  0.5, 2.0, 20.0, 0.20},  // Stage 4: Full range (150-500m)
 };
 
 // Sample initial conditions with stage mixing (30% from previous stage)
@@ -604,26 +606,30 @@ void c_step(OrbitalDock* env) {
     int escaped = (c_alt > env->escape_alt);
     int timeout = (env->step_count >= env->max_steps);
 
-    // 7. Compute rewards - Hovell & Ulrich (2021) style
-    // Key insight: progress reward + proximity-scaled velocity damping
+    // 7. Compute rewards - two-component shaping
     double reward = 0.0;
 
-    // === Distance progress reward ===
-    // Positive when getting closer, negative when moving away
-    // This is the PRIMARY learning signal - every step toward station is rewarded
+    // === Component 1: Weak linear shaping (long-range gradient) ===
+    // Provides approach signal at ALL distances, even 500m.
+    // Coefficient is small so cumulative doesn't drown terminal rewards.
+    // From 500m: cumulative = 0.005 * 495 = 2.5
     double distance_progress = env->prev_dist - dist;
     reward += env->rw_dist_shaping * distance_progress;
 
+    // === Component 2: Exponential near-dock shaping (bounded, drone-style) ===
+    // exp(-dist/R) potential concentrates reward near station.
+    // Total cumulative bounded at ~1.0 regardless of starting distance.
+    // Uses rw_vel_match parameter as coefficient (repurposed).
+    double exp_R = 10.0;  // Characteristic distance — signal within ~30m
+    double exp_shaping = exp(-dist / exp_R) - exp(-env->prev_dist / exp_R);
+    reward += env->rw_vel_match * exp_shaping;
+
     // === Proximity-scaled velocity damping ===
-    // Penalize speed MORE as you get closer to station
-    // Far away: move fast (low penalty). Close up: slow down (high penalty)
-    // Formula: -c1 * ||v|| / (||e|| + eta)
-    double eta = 0.1;  // Prevents division by zero, smooths transition
+    double eta = 0.1;
     double vel_penalty = -env->rw_closing * rel_speed / (dist + eta);
     reward += vel_penalty;
-    // At 100m, 1 m/s: penalty = -c1 * 1.0 / 100.1 ≈ -0.01*c1 (negligible)
-    // At 10m, 1 m/s:  penalty = -c1 * 1.0 / 10.1  ≈ -0.1*c1 (moderate)
-    // At 2m, 0.5 m/s: penalty = -c1 * 0.5 / 2.1   ≈ -0.24*c1 (strong braking signal)
+
+
 
     // Terminal rewards - graduated docking quality
     // dock_clean: dist < 5m, speed < 0.5 m/s  -> +10.0

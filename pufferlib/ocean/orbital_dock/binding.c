@@ -25,7 +25,7 @@ void global_curriculum_update(OrbitalDock* env, int docked) {
         double dock_rate = (double)g_curriculum_docks / (double)g_curriculum_episodes;
         double target_rate = CURRICULUM_PARAMS[g_curriculum_stage][5];
 
-        if (dock_rate >= target_rate && g_curriculum_stage < 3) {
+        if (dock_rate >= target_rate && g_curriculum_stage < 4) {
             g_consecutive_above++;
             g_consecutive_below = 0;
             printf("CURRICULUM: Stage %d streak %d/%d (dock_rate=%.1f%% >= target=%.1f%%)\n",
@@ -107,7 +107,13 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->rw_plane_align = unpack(kwargs, "reward_plane_align");
     env->rw_node_timing = unpack(kwargs, "reward_node_timing");
 
-    // Curriculum: sync with global stage
+    // Curriculum: initialize global stage from difficulty param (for eval)
+    int init_stage = (int)env->difficulty;
+    if (init_stage < 0) init_stage = 0;
+    if (init_stage > 4) init_stage = 4;
+    if (init_stage > g_curriculum_stage) {
+        g_curriculum_stage = init_stage;
+    }
     env->curriculum_stage = g_curriculum_stage;
     env->curriculum_docks = 0;
     env->curriculum_episodes = 0;
