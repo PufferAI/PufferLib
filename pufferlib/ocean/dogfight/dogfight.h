@@ -193,7 +193,7 @@ typedef struct Log {
     float avg_stage;                // = stage_sum / n (per-env only)
     float kill_rate;                // = perf / n (per-env only - Python uses 'perf' instead)
     float ultimate;                 // = kill_rate * avg_stage_weight (per-env only)
-    float ultimate2;                // = kill_rate * clean_fight_rate * avg_stage_weight (per-env only)
+    float ultimate2;                // = kill_rate * clean_fight_rate (per-env only)
     float n;
 } Log;
 
@@ -697,10 +697,10 @@ void add_log(Dogfight *env) {
     // Ultimate = kill_rate * difficulty (no bias penalty)
     env->log.ultimate = env->log.kill_rate * env->log.avg_stage_weight;
 
-    // Ultimate2 = kill_rate * clean_fight_rate * difficulty
+    // Ultimate2 = kill_rate * clean_fight_rate (pure combat quality)
     // Penalizes death spirals by rewarding clean fights
     float clean_fight_rate = env->log.clean_fights / fmaxf(env->log.n, 1.0f);
-    env->log.ultimate2 = env->log.kill_rate * clean_fight_rate * env->log.avg_stage_weight;
+    env->log.ultimate2 = env->log.kill_rate * clean_fight_rate;
 
     if (DEBUG >= 10) printf("  log.perf=%.2f, log.shots_fired=%.0f, log.n=%.0f\n", env->log.perf, env->log.shots_fired, env->log.n);
 }
