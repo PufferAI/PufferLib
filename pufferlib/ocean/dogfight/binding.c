@@ -500,7 +500,7 @@ static PyObject* env_set_camera_follow(PyObject* self, PyObject* args) {
 
 // Get opponent observations for all environments (for self-play)
 // Returns: numpy array of shape (num_envs, obs_size) with opponent's view of the world
-// Currently only supports scheme 0 (OBS_MOMENTUM) - returns 16 obs per env
+// Uses same obs scheme as player, from opponent's perspective
 static PyObject* vec_get_opponent_observations(PyObject* self, PyObject* args) {
     PyObject* vec_arg;
 

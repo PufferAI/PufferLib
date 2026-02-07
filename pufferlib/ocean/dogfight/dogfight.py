@@ -26,14 +26,11 @@ class AutopilotMode:
 # Observation sizes by scheme (must match C OBS_SIZES in dogfight.h)
 # All schemes include timer observation (tick/max_steps) at the end
 OBS_SIZES = {
-    0: 16,   # MOMENTUM (baseline): body-frame vel + omega + AoA + energy + target + tactical
-    1: 17,   # MOMENTUM_BETA: + sideslip angle
-    2: 17,   # MOMENTUM_GFORCE: + G-force
-    3: 20,   # MOMENTUM_FULL: + sideslip + G + throttle + target rates
-    4: 12,   # MINIMAL: stripped down essentials
-    5: 23,   # DRONE_STYLE: + quaternion + up vector
-    6: 17,   # QBAR: + dynamic pressure
-    7: 30,   # KITCHEN_SINK: optimized high-info (vel+omega+angles+quat+controls+target+opponent)
+    0: 17,   # MOMENTUM_GFORCE: G-force awareness (proven winner from df24)
+    1: 23,   # DRONE_STYLE: + quaternion + up vector
+    2: 17,   # QBAR: + dynamic pressure
+    3: 25,   # PILOT_QUAT: Pilot + quaternion
+    4: 21,   # PILOT: Pilot awareness (lean hypothesis)
 }
 
 

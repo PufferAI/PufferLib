@@ -186,7 +186,7 @@ void demo() {
     int logit_sizes[1] = {DOGFIGHT_ACTION_SIZE};
     LinearContLSTM *net = make_linearcontlstm(weights, 1, DOGFIGHT_OBS_SIZE, logit_sizes, 1);
 
-    int obs_scheme = OBS_MOMENTUM_BETA;
+    int obs_scheme = OBS_MOMENTUM_GFORCE;
     int obs_size = OBS_SIZES[obs_scheme];
 
     Dogfight env = {

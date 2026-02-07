@@ -58,7 +58,7 @@ def main():
     args = pufferl.load_config(env_name)
 
     # Extract obs_scheme from env config
-    obs_scheme = args['env'].get('obs_scheme', 1)
+    obs_scheme = args['env'].get('obs_scheme', 0)
 
     # Create pool directory if needed
     os.makedirs(pool_dir, exist_ok=True)

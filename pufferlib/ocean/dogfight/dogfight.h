@@ -20,18 +20,15 @@
 #include "autoace.h"
 
 typedef enum {
-    OBS_MOMENTUM = 0,           // BASELINE: body-frame vel + omega + AoA + energy (16 obs)
-    OBS_MOMENTUM_BETA = 1,      // + sideslip angle (17 obs)
-    OBS_MOMENTUM_GFORCE = 2,    // + G-force (17 obs)
-    OBS_MOMENTUM_FULL = 3,      // + sideslip + G + throttle + tgt rates (20 obs)
-    OBS_MINIMAL = 4,            // stripped down essentials (12 obs)
-    OBS_DRONE_STYLE = 5,        // + quaternion + up vector (23 obs)
-    OBS_QBAR = 6,               // + dynamic pressure (17 obs)
-    OBS_KITCHEN_SINK = 7,       // everything (30 obs)
+    OBS_MOMENTUM_GFORCE = 0,    // G-force awareness (17 obs) — proven winner from df24
+    OBS_DRONE_STYLE = 1,        // + quaternion + up vector (23 obs)
+    OBS_QBAR = 2,               // + dynamic pressure (17 obs)
+    OBS_PILOT_QUAT = 3,         // Pilot + quaternion (25 obs)
+    OBS_PILOT = 4,              // Pilot awareness (21 obs) — lean hypothesis
     OBS_SCHEME_COUNT
 } ObsScheme;
 
-static const int OBS_SIZES[OBS_SCHEME_COUNT] = {16, 17, 17, 20, 12, 23, 17, 30};
+static const int OBS_SIZES[OBS_SCHEME_COUNT] = {17, 23, 17, 25, 21};
 
 typedef enum {
     CURRICULUM_TAIL_CHASE = 0,       // Stage 0: Easiest - opponent ahead, same heading
@@ -1803,7 +1800,7 @@ void c_step(Dogfight *env) {
                 float rand_bank = 30.0f + RECOVERY_RAND() * 45.0f;    // 30-75 degrees
                 autopilot_start_recovery(&env->opponent_ap, rand_speed, rand_bank);
                 env->log.recovery_triggers += 1.0f;
-                printf("[RECOVERY] Triggered at crossing: opp_z=%.0f opp_vz=%.1f tick=%d speed_thr=%.0f bank=%.0f\n",
+                if (DEBUG >= 1) printf("[RECOVERY] Triggered at crossing: opp_z=%.0f opp_vz=%.1f tick=%d speed_thr=%.0f bank=%.0f\n",
                        opp->pos.z, opp->vel.z, env->tick, rand_speed, rand_bank);
             }
         }
@@ -2166,7 +2163,7 @@ void c_step(Dogfight *env) {
     if (opp_oob) {
         if (o->pos.z < 0) {
             env->log.opponent_ground_hits += 1.0f;
-            printf("[GROUND] Opponent hit ground: z=%.0f tick=%d\n", o->pos.z, env->tick);
+            if (DEBUG >= 1) printf("[GROUND] Opponent hit ground: z=%.0f tick=%d\n", o->pos.z, env->tick);
         }
         if (DEBUG >= 1) {
             printf("[TERMINAL] Opponent OOB/crashed: pos=(%.1f,%.1f,%.1f)\n",
@@ -2214,7 +2211,7 @@ void c_step(Dogfight *env) {
         } else if (oob) {
             if (p->pos.z < 0) {
                 env->log.player_ground_hits += 1.0f;
-                printf("[GROUND] Player hit ground: z=%.0f tick=%d\n", p->pos.z, env->tick);
+                if (DEBUG >= 1) printf("[GROUND] Player hit ground: z=%.0f tick=%d\n", p->pos.z, env->tick);
             }
             // Simplified crash rewards: crasher -1.0, survivor +0.25
             env->death_reason = DEATH_OOB;
