@@ -238,14 +238,13 @@ static inline float compute_aoa(Plane* p) {
     if (V < 1.0f) return 0.0f;
 
     Vec3 vel_norm = normalize3(p->vel);
-    float cos_alpha = dot3(vel_norm, forward);
-    cos_alpha = clampf(cos_alpha, -1.0f, 1.0f);
-    float alpha = acosf(cos_alpha);  // Always positive [0, pi]
 
-    // Sign: positive when nose is ABOVE velocity vector
-    // If vel dot up < 0, velocity is "below" the body frame -> nose above -> alpha > 0
-    float vel_dot_up = dot3(p->vel, up);
-    float sign = (vel_dot_up < 0) ? 1.0f : -1.0f;
+    // Alpha = atan2(-vel·up, vel·forward)
+    // Continuous everywhere — no sign discontinuity at vertical pitch.
+    // Positive when nose is ABOVE velocity vector (vel has component opposite to body-up).
+    float vel_dot_fwd = dot3(vel_norm, forward);
+    float vel_dot_up = dot3(vel_norm, up);
+    float alpha = atan2f(-vel_dot_up, vel_dot_fwd);
 
     if (DEBUG_REALISTIC >= 3 && _realistic_rk4_stage == 0) {
         printf("  [AOA] forward=(%.3f,%.3f,%.3f) up=(%.3f,%.3f,%.3f)\n",
@@ -254,13 +253,11 @@ static inline float compute_aoa(Plane* p) {
                p->vel.x, p->vel.y, p->vel.z, V);
         printf("  [AOA] vel_norm=(%.4f,%.4f,%.4f)\n",
                vel_norm.x, vel_norm.y, vel_norm.z);
-        printf("  [AOA] cos_alpha=%.4f (vel_norm·forward)\n", cos_alpha);
-        printf("  [AOA] acos(cos_alpha)=%.4f rad = %.2f deg\n", alpha, alpha * RAD_TO_DEG);
-        printf("  [AOA] vel·up=%.4f -> sign=%.0f\n", vel_dot_up, sign);
-        printf("  [AOA] FINAL alpha=%.4f rad = %.2f deg\n", alpha * sign, alpha * sign * RAD_TO_DEG);
+        printf("  [AOA] vel·fwd=%.4f, vel·up=%.4f\n", vel_dot_fwd, vel_dot_up);
+        printf("  [AOA] FINAL alpha=%.4f rad = %.2f deg\n", alpha, alpha * RAD_TO_DEG);
     }
 
-    return alpha * sign;
+    return alpha;
 }
 
 static inline float compute_sideslip(Plane* p) {
@@ -301,9 +298,9 @@ static inline Vec3 compute_lift_direction(Vec3 vel_norm, Vec3 right, Vec3 body_u
         return result;
     }
     if (DEBUG_REALISTIC >= 3 && _realistic_rk4_stage == 0) {
-        printf("  [LIFT_DIR] FALLBACK to world_up=(0,0,1)\n");
+        printf("  [LIFT_DIR] FALLBACK to body_up=(%.3f,%.3f,%.3f)\n", body_up.x, body_up.y, body_up.z);
     }
-    return (Vec3){0, 0, 1};  // Fallback to world-frame up (lift perpendicular to ground)
+    return body_up;  // Fallback to body-frame up (avoids discontinuous jump to world-up)
 }
 
 static inline float compute_thrust(float throttle, float V) {

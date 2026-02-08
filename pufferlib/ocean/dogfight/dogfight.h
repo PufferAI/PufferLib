@@ -248,6 +248,9 @@ typedef struct Client {
     bool model_loaded;
 
     float propeller_angle;  // Current propeller rotation (radians)
+
+    float last_cam_hx;  // Cached camera heading X (stable through vertical)
+    float last_cam_hy;  // Cached camera heading Y (stable through vertical)
 } Client;
 
 typedef struct Dogfight {

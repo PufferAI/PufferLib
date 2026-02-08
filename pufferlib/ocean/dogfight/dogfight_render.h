@@ -255,6 +255,33 @@ void draw_obs_monitor(Dogfight *env) {
     }
 }
 
+// Returns stable 2D heading for orbit camera.
+// Uses fwd XY when pitch < ~70° and heading hasn't reversed.
+// Freezes heading near vertical (pitch > ~70°) to prevent flips.
+static inline void compute_camera_heading(
+    Vec3 fwd, Vec3 vel, float *last_hx, float *last_hy,
+    float *out_hx, float *out_hy)
+{
+    float fwd_len = sqrtf(fwd.x * fwd.x + fwd.y * fwd.y);
+    if (fwd_len > 0.35f) {  // Only track below ~70° pitch
+        float hx = fwd.x / fwd_len;
+        float hy = fwd.y / fwd_len;
+        // Reject if heading reversed vs cache (pitched past 90°)
+        float dot_cached = hx * (*last_hx) + hy * (*last_hy);
+        if (dot_cached >= 0.0f) {
+            *out_hx = hx;
+            *out_hy = hy;
+            *last_hx = hx;
+            *last_hy = hy;
+            return;
+        }
+    }
+
+    // Near vertical or reversed: use cached heading
+    *out_hx = *last_hx;
+    *out_hy = *last_hy;
+}
+
 void c_render(Dogfight *env) {
     if (env->client == NULL) {
         env->client = (Client *)calloc(1, sizeof(Client));
@@ -265,6 +292,8 @@ void c_render(Dogfight *env) {
         env->client->cam_elevation = 0.3f;
         env->client->camera_mode = 0;  // 0 = follow target, 1 = midpoint view, 2 = chase, 3 = cockpit
         env->client->is_dragging = false;
+        env->client->last_cam_hx = 1.0f;  // Default heading: +X
+        env->client->last_cam_hy = 0.0f;
 
         InitWindow(1920, 1080, "Dogfight");
         SetTargetFPS(60);
@@ -333,9 +362,13 @@ void c_render(Dogfight *env) {
     } else {
         // Reset to world up for other modes
         env->client->camera.up = (Vector3){0.0f, 0.0f, 1.0f};
-        // Modes 0 and 1: Orbit camera position
-        float cam_x = cam_target->pos.x - fwd.x * dist * cosf(el) * cosf(az) + fwd.y * dist * sinf(az);
-        float cam_y = cam_target->pos.y - fwd.y * dist * cosf(el) * cosf(az) - fwd.x * dist * sinf(az);
+        // Modes 0 and 1: Orbit camera with stable heading (no collapse at vertical)
+        float hx, hy;
+        compute_camera_heading(fwd, cam_target->vel,
+            &env->client->last_cam_hx, &env->client->last_cam_hy,
+            &hx, &hy);
+        float cam_x = cam_target->pos.x - hx * dist * cosf(el) * cosf(az) + hy * dist * sinf(az);
+        float cam_y = cam_target->pos.y - hy * dist * cosf(el) * cosf(az) - hx * dist * sinf(az);
         float cam_z = cam_target->pos.z + dist * sinf(el) + 20.0f;
         env->client->camera.position = (Vector3){cam_x, cam_y, cam_z};
 
@@ -349,6 +382,7 @@ void c_render(Dogfight *env) {
             float mid_z = (p->pos.z + o->pos.z) / 2.0f;
             env->client->camera.target = (Vector3){mid_x, mid_y, mid_z};
         }
+
     }
 
     WaitTime(0.02);  // Sync with sim DT (50 FPS) for proper GIF frame timing
@@ -366,6 +400,16 @@ void c_render(Dogfight *env) {
     Color ground_color = (Color){20, 60, 20, 255};
     DrawTriangle3D(g1, g2, g3, ground_color);
     DrawTriangle3D(g1, g3, g4, ground_color);
+
+    // Cardinal direction markers on ground: colored cubes at edges
+    // +X = East (RED),  -X = West (BLUE),  +Y = North (GREEN),  -Y = South (YELLOW)
+    float marker_dist = 3000.0f;
+    float marker_size = 200.0f;
+    float marker_h = 100.0f;
+    DrawCube((Vector3){ marker_dist, 0, marker_h}, marker_size, marker_size, marker_size*2, RED);        // E
+    DrawCube((Vector3){-marker_dist, 0, marker_h}, marker_size, marker_size, marker_size*2, BLUE);       // W
+    DrawCube((Vector3){0,  marker_dist, marker_h}, marker_size, marker_size, marker_size*2, GREEN);      // N
+    DrawCube((Vector3){0, -marker_dist, marker_h}, marker_size, marker_size, marker_size*2, YELLOW);     // S
 
     DrawCubeWires((Vector3){0, 0, 2500}, 8000, 8000, 5000, (Color){100, 100, 100, 255});
 
