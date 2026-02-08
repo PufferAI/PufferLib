@@ -53,6 +53,7 @@ import os
 import sys
 import copy
 import time
+import random
 import argparse
 import uuid
 from collections import defaultdict
@@ -83,6 +84,10 @@ DEFAULT_CHECKPOINT_LAG = 1  # Opponent is N checkpoints behind (1=2nd newest)
 DEFAULT_PERF_THRESHOLD = 0.65  # Kill rate to trigger checkpoint save + opponent upgrade
 DEFAULT_MIN_STEPS_BETWEEN_CHECKPOINTS = 2_000_000  # Minimum steps before saving new checkpoint
 DEFAULT_MAX_CHECKPOINTS = 20  # Max selfplay checkpoints (milestones always kept)
+DEFAULT_PAST_OPPONENT_PROB = 0.2  # 20% of games against past checkpoint pool (OpenAI Five: 20%)
+DEFAULT_PFSP_EXPONENT = 2.0  # PFSP weighting exponent: (1-win_rate)^exp (OpenAI Five: squared)
+DEFAULT_OPPONENT_RESAMPLE_INTERVAL = 1_000_000  # Re-roll opponent selection every N steps
+DEFAULT_POOL_CHECKPOINT_INTERVAL = 5_000_000  # Save periodic checkpoint every N steps (ensures pool growth)
 DEFAULT_DEBUG_TRIGGER_STEP = 500_000_000  # Start debug logging at 500M steps (0 = disabled)
 
 
@@ -106,6 +111,10 @@ class DualPerspectiveTrainer:
                  perf_threshold=DEFAULT_PERF_THRESHOLD,
                  min_steps_between_checkpoints=DEFAULT_MIN_STEPS_BETWEEN_CHECKPOINTS,
                  max_checkpoints=DEFAULT_MAX_CHECKPOINTS,
+                 past_opponent_prob=DEFAULT_PAST_OPPONENT_PROB,
+                 pfsp_exponent=DEFAULT_PFSP_EXPONENT,
+                 opponent_resample_interval=DEFAULT_OPPONENT_RESAMPLE_INTERVAL,
+                 pool_checkpoint_interval=DEFAULT_POOL_CHECKPOINT_INTERVAL,
                  checkpoint_dir=None,
                  run_id=None):
         # Store custom config
@@ -114,6 +123,10 @@ class DualPerspectiveTrainer:
         self.checkpoint_lag = checkpoint_lag
         self.perf_threshold = perf_threshold
         self.min_steps_between_checkpoints = min_steps_between_checkpoints
+        self.past_opponent_prob = past_opponent_prob
+        self.pfsp_exponent = pfsp_exponent
+        self.opponent_resample_interval = opponent_resample_interval
+        self.pool_checkpoint_interval = pool_checkpoint_interval
         self.use_dual_selfplay = False
         self.last_opponent_update = 0
 
@@ -139,8 +152,14 @@ class DualPerspectiveTrainer:
         self._saved_stage10 = False
         self._saved_stage20 = False
         self._current_opponent_path = None
+        self._current_opponent_tag = None
         self.last_checkpoint_step = 0
         self._current_stage = 0
+        self.last_resample_step = 0
+
+        # PFSP: per-opponent win rate tracking (tag → exponential moving average)
+        self.opponent_win_rates = {}
+        self.pool_perf = 0.5  # EMA of win rate against pool opponents only
 
         # Stalemate detection and handicapping
         self.stalemate_perf_threshold = 0.3  # Low perf suggests stalemate
@@ -170,6 +189,8 @@ class DualPerspectiveTrainer:
 
         print(f'[DUAL-SELFPLAY] Initialized: min_stage={selfplay_min_stage}, '
               f'checkpoint_lag={checkpoint_lag}, perf_threshold={perf_threshold}')
+        print(f'[DUAL-SELFPLAY] PFSP: past_opponent_prob={past_opponent_prob}, '
+              f'pfsp_exponent={pfsp_exponent}, resample_interval={opponent_resample_interval}')
         print(f'[DUAL-SELFPLAY] Checkpoint dir: {checkpoint_dir}')
 
     def _init_opponent_policy(self):
@@ -220,20 +241,60 @@ class DualPerspectiveTrainer:
         debug(1, f'Opponent obs buffer after allocation: range={obs_range}')
 
     def _update_opponent(self):
-        """Load opponent from checkpoint queue instead of copying weights."""
-        opponent_path = self.checkpoint_queue.get_opponent(lag=self.checkpoint_lag)
+        """Select opponent using 80/20 PFSP split.
 
-        if opponent_path is None:
-            # Queue too small, fall back to copying learner weights
+        With probability (1 - past_opponent_prob): use current learner weights (self-play).
+        With probability past_opponent_prob: sample from checkpoint pool using PFSP weighting,
+        where harder opponents (lower win rate) are sampled more often.
+        """
+        pool_size = len(self.checkpoint_queue.checkpoints)
+
+        if random.random() < self.past_opponent_prob and pool_size > 0:
+            # Sample from pool using PFSP weighting
+            opponent_path, opponent_tag = self._sample_pfsp_opponent()
+            if opponent_path and opponent_path != self._current_opponent_path:
+                self._load_opponent_from_checkpoint(opponent_path)
+                self._current_opponent_path = opponent_path
+                self._current_opponent_tag = opponent_tag
+                self.last_opponent_update = self.trainer.global_step
+                wr = self.opponent_win_rates.get(opponent_tag, 0.5)
+                print(f'[PFSP] Sampled pool opponent: {opponent_tag} (win_rate={wr:.2f}, pool_size={pool_size})')
+        else:
+            # Use current learner weights (self-play against self)
             self.opponent_policy.load_state_dict(self.learner_policy.state_dict())
+            self._current_opponent_path = None
+            self._current_opponent_tag = 'self'
             self.last_opponent_update = self.trainer.global_step
-            print(f'[DUAL-SELFPLAY] Queue too small, copied learner weights at step {self.trainer.global_step}')
-            return
+            debug(1, f'Using current learner weights as opponent (self-play)')
 
-        if opponent_path != self._current_opponent_path:
-            self._load_opponent_from_checkpoint(opponent_path)
-            self._current_opponent_path = opponent_path
-            self.last_opponent_update = self.trainer.global_step
+    def _sample_pfsp_opponent(self):
+        """Sample opponent from checkpoint pool, weighted toward hard opponents.
+
+        Uses Prioritized Fictitious Self-Play (PFSP) weighting:
+            weight_i = (1 - win_rate_i) ^ pfsp_exponent
+
+        Hard opponents (low win rate) get higher weight. This is the same approach
+        used by OpenAI Five (exponent=2) and AlphaStar main agents (exponent=2).
+
+        Returns:
+            (path, tag) tuple, or (None, None) if pool empty.
+        """
+        entries = self.checkpoint_queue.checkpoints
+        if not entries:
+            return None, None
+
+        # Compute PFSP weights
+        weights = []
+        for entry in entries:
+            wr = self.opponent_win_rates.get(entry.tag, 0.5)  # Default 50% for unseen
+            w = (1.0 - wr) ** self.pfsp_exponent
+            weights.append(max(w, 1e-6))  # Prevent zero weights
+
+        # Normalize and sample
+        total = sum(weights)
+        probs = [w / total for w in weights]
+        idx = random.choices(range(len(entries)), weights=probs, k=1)[0]
+        return entries[idx].path, entries[idx].tag
 
     def _load_opponent_from_checkpoint(self, checkpoint_path: str):
         """Load opponent policy from a checkpoint file."""
@@ -243,6 +304,7 @@ class DualPerspectiveTrainer:
         # Get checkpoint info for logging
         tag = checkpoint.get('tag', 'unknown')
         step = checkpoint.get('step', 0)
+        self._current_opponent_tag = tag
         print(f'[CHECKPOINT-QUEUE] Loaded opponent from {tag} (step {step}): {checkpoint_path}')
 
     def _check_milestone_save(self, current_stage: int):
@@ -269,12 +331,50 @@ class DualPerspectiveTrainer:
             self.last_checkpoint_step = self.trainer.global_step
             print(f'[CHECKPOINT-QUEUE] Saved milestone: stage20 at step {self.trainer.global_step}')
 
-    def _check_domination(self, logs):
-        """Check if learner dominates opponent using perf metric.
+    def _update_opponent_win_rate(self, logs):
+        """Update per-opponent win rate using exponential moving average.
 
-        When the learner's kill rate (perf) exceeds the threshold:
+        Called after each training epoch with logs containing perf metric.
+        Uses EMA with decay 0.95 so recent performance matters more.
+        Also updates aggregate pool_perf (only from pool opponent episodes).
+        """
+        if not self.use_dual_selfplay or not logs:
+            return
+
+        perf = logs.get('environment/perf', 0)
+        tag = self._current_opponent_tag
+        if tag and tag != 'self':
+            # Update per-opponent win rate
+            old_wr = self.opponent_win_rates.get(tag, 0.5)
+            new_wr = 0.95 * old_wr + 0.05 * perf
+            self.opponent_win_rates[tag] = new_wr
+            # Update aggregate pool perf (only from pool fights)
+            self.pool_perf = 0.95 * self.pool_perf + 0.05 * perf
+            debug(2, f'Win rate update: {tag}: {old_wr:.3f} -> {new_wr:.3f} (perf={perf:.3f}, pool_perf={self.pool_perf:.3f})')
+
+    def _check_resample_opponent(self):
+        """Periodically re-roll opponent selection (the 80/20 dice).
+
+        Without this, the opponent only changes on domination. For PFSP to work,
+        we need to resample periodically so the agent faces varied opponents.
+        """
+        if not self.use_dual_selfplay:
+            return
+
+        steps_since_resample = self.trainer.global_step - self.last_resample_step
+        if steps_since_resample >= self.opponent_resample_interval:
+            self._update_opponent()
+            self.last_resample_step = self.trainer.global_step
+
+    def _check_domination(self, logs):
+        """Check if learner dominates pool opponents using pool_perf (not overall perf).
+
+        Overall perf is ~0.5 when 80% of fights are self-play (zero-sum, same policy).
+        We use pool_perf which only tracks win rate against checkpoint pool opponents.
+
+        When pool_perf exceeds threshold:
         1. Save a new checkpoint
-        2. Upgrade opponent to older checkpoint (lag positions behind)
+        2. Re-sample opponent from pool (PFSP)
         """
         if not self.use_dual_selfplay:
             return
@@ -284,11 +384,11 @@ class DualPerspectiveTrainer:
         if steps_since_last < self.min_steps_between_checkpoints:
             return
 
-        # Get perf from logs (already computed kill rate)
-        # Note: stats are prefixed with 'environment/' in mean_and_log()
-        perf = logs.get('environment/perf', 0) if logs else 0
+        # Use pool_perf (EMA of win rate against pool opponents only)
+        # NOT overall perf, which is diluted by self-play (~0.5)
+        perf = self.pool_perf
         if perf >= self.perf_threshold:
-            print(f'[CHECKPOINT-QUEUE] Learner dominating (perf={perf:.2f} >= {self.perf_threshold}), saving checkpoint')
+            print(f'[CHECKPOINT-QUEUE] Learner dominating pool opponents (pool_perf={perf:.2f} >= {self.perf_threshold}), saving checkpoint')
 
             # Save new checkpoint
             checkpoint_num = len([c for c in self.checkpoint_queue.checkpoints if not c.is_milestone()])
@@ -301,11 +401,17 @@ class DualPerspectiveTrainer:
             )
             self.last_checkpoint_step = self.trainer.global_step
 
+            # Initialize win rate for new checkpoint at 0.5 (unknown)
+            self.opponent_win_rates[tag] = 0.5
+
             # Log queue state
             queue_state = self.checkpoint_queue.get_queue_state()
             print(f'[CHECKPOINT-QUEUE] Queue: {queue_state["tags"]}')
+            if self.opponent_win_rates:
+                wr_str = ', '.join(f'{t}:{w:.2f}' for t, w in sorted(self.opponent_win_rates.items()))
+                print(f'[PFSP] Win rates: {wr_str}')
 
-            # Upgrade opponent to older checkpoint (lag positions behind)
+            # Re-sample opponent from pool (PFSP)
             self._update_opponent()
 
             # Reset handicaps on domination (learner is winning)
@@ -314,6 +420,36 @@ class DualPerspectiveTrainer:
                 self.opponent_handicap_controls = 1.0
                 self.stalemate_counter = 0
                 print(f'[HANDICAP] Reset to level 0 after domination')
+
+    def _check_periodic_checkpoint(self):
+        """Save periodic checkpoints to ensure pool growth even without domination.
+
+        OpenAI Five added checkpoints every 10 optimizer iterations. Without periodic saves,
+        the pool never grows if the learner can't consistently beat old checkpoints, leading
+        to no opponent diversity and catastrophic forgetting.
+        """
+        if not self.use_dual_selfplay:
+            return
+
+        steps_since_last = self.trainer.global_step - self.last_checkpoint_step
+        if steps_since_last < self.pool_checkpoint_interval:
+            return
+
+        step_m = self.trainer.global_step // 1_000_000
+        tag = f"periodic_{step_m}M"
+        self.checkpoint_queue.save(
+            self.learner_policy,
+            self.trainer.global_step,
+            self._current_stage,
+            tag
+        )
+        self.last_checkpoint_step = self.trainer.global_step
+
+        # Initialize win rate at 0.5 (unknown)
+        self.opponent_win_rates[tag] = 0.5
+
+        pool_size = len(self.checkpoint_queue.checkpoints)
+        print(f'[CHECKPOINT-QUEUE] Periodic save: {tag} (pool_size={pool_size})')
 
     def _check_stalemate(self, logs):
         """Check for stalemate (low perf, low clean fight rate) and apply handicaps.
@@ -701,11 +837,20 @@ class DualPerspectiveTrainer:
         # Dual self-play training
         logs = self._train_dual()
 
-        # Check if learner dominates opponent -> save checkpoint and upgrade
+        # Update per-opponent win rate (EMA of perf)
+        self._update_opponent_win_rate(logs)
+
+        # Check if learner dominates opponent -> save checkpoint and resample
         self._check_domination(logs)
+
+        # Periodic checkpoint save (ensures pool growth even without domination)
+        self._check_periodic_checkpoint()
 
         # Check for stalemate -> apply handicaps to break death spiral equilibrium
         self._check_stalemate(logs)
+
+        # Periodically re-roll opponent selection (PFSP resampling)
+        self._check_resample_opponent()
 
         return logs
 
@@ -934,14 +1079,17 @@ class DualPerspectiveTrainer:
 
         # Add dual self-play specific metrics
         losses['dual_selfplay'] = 1.0 if self.use_dual_selfplay else 0.0
+        losses['pool_win_rate'] = self.pool_perf
+        losses['pool_size'] = float(len(self.checkpoint_queue.checkpoints))
+        losses['vs_pool'] = 0.0 if self._current_opponent_tag == 'self' else 1.0
 
         profile.end()
         logs = None
         self.trainer.epoch += 1
+        self.trainer.losses = losses
         done_training = self.trainer.global_step >= config['total_timesteps']
         if done_training or self.trainer.global_step == 0 or time.time() > self.trainer.last_log_time + 0.25:
             logs = self.trainer.mean_and_log()
-            self.trainer.losses = losses
             self.trainer.print_dashboard()
             self.trainer.stats = defaultdict(list)
             self.trainer.last_log_time = time.time()
@@ -998,14 +1146,20 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
         if hasattr(logger, 'run') and logger.run:
             run_id = logger.run.id
 
-    # Get selfplay params (use defaults if not set)
+    # Get selfplay params from [selfplay] INI section first, then fall back to top-level args
+    selfplay_args = args.get('selfplay', {})
     selfplay_min_stage = args.get('selfplay_min_stage', DEFAULT_SELFPLAY_MIN_STAGE)
     checkpoint_lag = args.get('checkpoint_lag', DEFAULT_CHECKPOINT_LAG)
-    perf_threshold = args.get('perf_threshold', DEFAULT_PERF_THRESHOLD)
+    perf_threshold = selfplay_args.get('perf_threshold',
+                     args.get('perf_threshold', DEFAULT_PERF_THRESHOLD))
     min_steps_between_checkpoints = args.get('min_steps_between_checkpoints', DEFAULT_MIN_STEPS_BETWEEN_CHECKPOINTS)
     max_checkpoints = args.get('max_checkpoints', DEFAULT_MAX_CHECKPOINTS)
     checkpoint_dir = args.get('checkpoint_dir', None)
     opponent_update_interval = args.get('opponent_update_interval', DEFAULT_OPPONENT_UPDATE_INTERVAL)
+    past_opponent_prob = selfplay_args.get('past_opponent_prob', DEFAULT_PAST_OPPONENT_PROB)
+    pfsp_exponent = selfplay_args.get('pfsp_exponent', DEFAULT_PFSP_EXPONENT)
+    opponent_resample_interval = int(selfplay_args.get('opponent_resample_interval', DEFAULT_OPPONENT_RESAMPLE_INTERVAL))
+    pool_checkpoint_interval = int(selfplay_args.get('pool_checkpoint_interval', DEFAULT_POOL_CHECKPOINT_INTERVAL))
 
     # Create dual-perspective trainer with checkpoint queue
     train_config = {**args['train'], 'env': env_name}
@@ -1017,15 +1171,22 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
         perf_threshold=perf_threshold,
         min_steps_between_checkpoints=min_steps_between_checkpoints,
         max_checkpoints=max_checkpoints,
+        past_opponent_prob=past_opponent_prob,
+        pfsp_exponent=pfsp_exponent,
+        opponent_resample_interval=opponent_resample_interval,
+        pool_checkpoint_interval=pool_checkpoint_interval,
         checkpoint_dir=checkpoint_dir,
         run_id=run_id
     )
 
-    print(f'[DUAL-SELFPLAY] Starting training with checkpoint queue')
+    print(f'[DUAL-SELFPLAY] Starting training with PFSP opponent curriculum')
     print(f'[DUAL-SELFPLAY] Min stage for self-play: {selfplay_min_stage}')
     print(f'[DUAL-SELFPLAY] Checkpoint lag: {checkpoint_lag} (opponent is {checkpoint_lag} checkpoint(s) behind)')
     print(f'[DUAL-SELFPLAY] Perf threshold: {perf_threshold} (save checkpoint when perf >= this)')
     print(f'[DUAL-SELFPLAY] Min steps between checkpoints: {min_steps_between_checkpoints}')
+    print(f'[DUAL-SELFPLAY] PFSP: {past_opponent_prob*100:.0f}% past pool / {(1-past_opponent_prob)*100:.0f}% self, '
+          f'exponent={pfsp_exponent}, resample every {opponent_resample_interval} steps')
+    print(f'[DUAL-SELFPLAY] Pool checkpoint interval: {pool_checkpoint_interval} (periodic saves for pool growth)')
 
     total_timesteps = train_config['total_timesteps']
     all_logs = []
@@ -1054,10 +1215,11 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
         if trainer.epoch % 100 == 0 and trainer.epoch > 0:
             mode = "DUAL" if trainer.use_dual_selfplay else "CURRICULUM"
             queue_len = len(trainer.checkpoint_queue)
-            opponent_entry = trainer.checkpoint_queue.get_opponent_entry(trainer.checkpoint_lag)
-            opponent_tag = opponent_entry.tag if opponent_entry else "none"
+            opp_tag = trainer._current_opponent_tag or "none"
+            wr_count = len(trainer.opponent_win_rates)
             print(f'[DUAL-SELFPLAY] Mode: {mode}, Steps: {trainer.global_step}, '
-                  f'Queue: {queue_len} checkpoints, Opponent: {opponent_tag}')
+                  f'Queue: {queue_len} checkpoints, Opponent: {opp_tag}, '
+                  f'Win rates tracked: {wr_count}')
 
     # Cleanup
     model_path = trainer.close()
