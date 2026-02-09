@@ -477,23 +477,6 @@ class DualPerspectiveTrainer:
 
         print(f'[RATCHET] Epoch start: opponent={tag} (rank {rank}/{len(opponents)-1})')
 
-    def _update_epoch_metrics(self, logs):
-        """Accumulate kills and episodes from training logs into current epoch counters."""
-        if not self.use_dual_selfplay or not logs:
-            return
-        perf = logs.get('environment/perf', 0)
-        n = logs.get('environment/n', 0)
-        if n > 0:
-            self._epoch_kills += perf * n
-            self._epoch_episodes += n
-
-            # Gate tracking: only during pool opponent epochs (not self-play)
-            if self._current_opponent_tag != 'self':
-                sp_pk = logs.get('environment/sp_player_kills', 0)
-                sp_ok = logs.get('environment/sp_opp_kills', 0)
-                self._gate_player_kills += sp_pk * n
-                self._gate_opp_kills += sp_ok * n
-
     def _update_elo(self, opponent_tag, learner_won):
         """Online Elo update (K=32) after each epoch against a pool opponent."""
         r_l = self._learner_elo
@@ -969,7 +952,7 @@ class DualPerspectiveTrainer:
                     action_o_np[:, 1:4] *= self.opponent_handicap_controls
 
             profile('eval_misc', epoch)
-            # Process info
+            # Process info and accumulate gate metrics
             for i in info:
                 for k, v in pufferlib.unroll_nested_dict(i):
                     if isinstance(v, np.ndarray):
@@ -978,6 +961,17 @@ class DualPerspectiveTrainer:
                         self.trainer.stats[k].extend(v)
                     else:
                         self.trainer.stats[k].append(v)
+                # Accumulate gate metrics directly from each info dict
+                if self.use_dual_selfplay and 'n' in i and 'perf' in i:
+                    n_val = i['n']
+                    if n_val > 0:
+                        self._epoch_kills += i['perf'] * n_val
+                        self._epoch_episodes += n_val
+                        if self._current_opponent_tag != 'self':
+                            sp_pk = i.get('sp_player_kills', 0)
+                            sp_ok = i.get('sp_opp_kills', 0)
+                            self._gate_player_kills += sp_pk * n_val
+                            self._gate_opp_kills += sp_ok * n_val
 
             # Set opponent actions: write to shared memory (Multiprocessing) or C binding (Serial)
             profile('env', epoch)
@@ -1023,8 +1017,8 @@ class DualPerspectiveTrainer:
         # Dual self-play training
         logs = self._train_dual()
 
-        # Ratchet: track epoch metrics and check for epoch/rotation boundaries
-        self._update_epoch_metrics(logs)
+        # Ratchet: check for epoch/rotation boundaries
+        # (Gate metrics are accumulated directly in _evaluate_dual's info loop)
         self._check_epoch_boundary()
 
         # Periodic checkpoint save (ensures pool growth)
