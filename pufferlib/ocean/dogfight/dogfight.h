@@ -654,8 +654,8 @@ void add_log(Dogfight *env) {
     env->log.episode_return += env->episode_return;
     env->log.episode_length += (float)env->tick;
     env->log.perf += env->kill ? 1.0f : 0.0f;
-    // Self-play kill tracking: log at stage 20+ (AutoAce or self-play both have bidirectional combat)
-    if (env->stage >= CURRICULUM_AUTOACE) {
+    // Self-play kill tracking: only when selfplay_active (set by Python at transition)
+    if (env->selfplay_active) {
         env->log.sp_player_kills += env->kill ? 1.0f : 0.0f;
         env->log.sp_opp_kills += env->opp_kill ? 1.0f : 0.0f;
     }

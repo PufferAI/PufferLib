@@ -161,6 +161,7 @@ class DualPerspectiveTrainer:
         self._current_opponent_tag = None
         self.last_checkpoint_step = 0
         self._current_stage = 0
+        self._selfplay_confirm_count = 0
         self.last_resample_step = 0
 
         # PFSP: per-opponent win rate tracking (tag → exponential moving average)
@@ -659,72 +660,87 @@ class DualPerspectiveTrainer:
     def _check_selfplay_transition(self, stats=None):
         """Check if we should transition to dual self-play mode and save milestones.
 
-        Args:
-            stats: Stats dict from trainer.stats (contains 'stage' from C logs)
+        Uses avg_stage from C-level stats (actual worker data) with a confirmation
+        gate: stage must be >= 19.9 for 3 consecutive checks before activating.
         """
-        # Get current stage from stats (populated by C code during evaluate)
-        # Use avg_stage which is more reliable than individual episode stages
-        # Use np.mean (not max) so self-play only activates when the COHORT has mastered
-        # the curriculum, not when one lucky env races ahead while others are at stage 14
+        # Get current stage from stats (populated by C code via vec_log in workers)
         if stats and 'avg_stage' in stats and len(stats['avg_stage']) > 0:
-            current_stage = np.mean(stats['avg_stage'])
+            current_stage = min(stats['avg_stage'])
         elif stats and 'stage' in stats and len(stats['stage']) > 0:
-            current_stage = np.mean(stats['stage'])
+            current_stage = min(stats['stage'])
         else:
-            # Last resort fallback
-            current_stage = getattr(self.driver_env, '_current_stage', 0)
+            current_stage = 0  # No data yet — don't use driver_env (never stepped in MP)
             if self.trainer.epoch % 100 == 0:
-                print(f'[DUAL-SELFPLAY] WARNING: No stage in stats, using fallback stage={current_stage}')
+                print(f'[DUAL-SELFPLAY] WARNING: No stage in stats, epoch={self.trainer.epoch}')
 
         self._current_stage = current_stage
 
         # Check for milestone saves (stage 10, stage 20)
         self._check_milestone_save(int(current_stage))
 
-        debug(1, f'_check_selfplay_transition: use_dual_selfplay={self.use_dual_selfplay}')
+        # Periodic logging so we can track curriculum progression
+        if self.trainer.epoch % 50 == 0:
+            print(f'[DUAL-SELFPLAY] stage={current_stage:.2f} confirmed={self._selfplay_confirm_count}/3 '
+                  f'selfplay={self.use_dual_selfplay}')
+
         if self.use_dual_selfplay:
             return  # Already in self-play mode
 
-        # Trigger at 19.9+ to catch stage 20 reliably (avg_stage=20.0 when all episodes are stage 20)
-        trigger_threshold = self.selfplay_min_stage - 0.1  # 20 - 0.1 = 19.9
+        # Trigger threshold: selfplay_min_stage=20, so threshold=19.9
+        trigger_threshold = self.selfplay_min_stage - 0.1
 
         if current_stage >= trigger_threshold:
-            print(f'[DUAL-SELFPLAY] Transitioning to dual self-play at stage {current_stage}', flush=True)
-            self.use_dual_selfplay = True
+            self._selfplay_confirm_count += 1
+            if self._selfplay_confirm_count < 3:
+                print(f'[DUAL-SELFPLAY] Stage {current_stage:.2f} >= {trigger_threshold} '
+                      f'(confirm {self._selfplay_confirm_count}/3)')
+                return  # Not yet confirmed
+        else:
+            # Reset confirmation counter if stage drops
+            if self._selfplay_confirm_count > 0:
+                print(f'[DUAL-SELFPLAY] Stage dropped to {current_stage:.2f}, '
+                      f'resetting confirm counter from {self._selfplay_confirm_count}')
+            self._selfplay_confirm_count = 0
+            return
 
-            # Allocate opponent buffers
-            self._allocate_opponent_buffers()
+        # 3 consecutive confirmations — activate self-play
+        print(f'[DUAL-SELFPLAY] CONFIRMED: Transitioning at stage {current_stage:.2f} '
+              f'after 3 consecutive checks', flush=True)
+        self.use_dual_selfplay = True
 
-            # Enable opponent override in C code (activates self-play mode)
-            # This must be done when transitioning to self-play, not at env init
-            from pufferlib.ocean.dogfight import binding
-            binding.vec_enable_opponent_override(self.driver_env.c_envs, 1)
+        # Allocate opponent buffers
+        self._allocate_opponent_buffers()
 
-            # Enable recovery hijacking now that we're in self-play
-            # This breaks death spiral equilibrium by occasionally forcing opponent to recover
-            binding.vec_set_selfplay_active(self.driver_env.c_envs, 1)
-            print(f'[DUAL-SELFPLAY] Enabled recovery hijacking for death spiral prevention')
+        # Enable opponent override in C code (activates self-play mode)
+        # This must be done when transitioning to self-play, not at env init
+        from pufferlib.ocean.dogfight import binding
+        binding.vec_enable_opponent_override(self.driver_env.c_envs, 1)
 
-            # Signal workers to enable opponent override via shared memory flag
-            # (workers check this flag in step() before using opponent actions)
-            if hasattr(self.vecenv, 'buf') and 'selfplay_active' in self.vecenv.buf:
-                self.vecenv.buf['selfplay_active'][0] = 1
-                print(f'[DUAL-SELFPLAY] Set selfplay_active flag in shared memory')
+        # Enable recovery hijacking now that we're in self-play
+        # This breaks death spiral equilibrium by occasionally forcing opponent to recover
+        binding.vec_set_selfplay_active(self.driver_env.c_envs, 1)
+        print(f'[DUAL-SELFPLAY] Enabled recovery hijacking for death spiral prevention')
 
-            # Initialize ratchet rotation: start at rank 0 (stage10 = weakest)
-            self._unlocked_rank = 0
-            self._current_rotation_idx = 0
-            self._epoch_start_step = self.trainer.global_step
-            self._rank_mastery_streak = 0
-            self._rotation_kills = 0.0
-            self._rotation_episodes = 0.0
-            self._epoch_kills = 0.0
-            self._epoch_episodes = 0.0
+        # Signal workers to enable opponent override via shared memory flag
+        # (workers check this flag in step() before using opponent actions)
+        if hasattr(self.vecenv, 'buf') and 'selfplay_active' in self.vecenv.buf:
+            self.vecenv.buf['selfplay_active'][0] = 1
+            print(f'[DUAL-SELFPLAY] Set selfplay_active flag in shared memory')
 
-            opponents = self._get_sorted_opponents()
-            print(f'[RATCHET] Initialized rotation with {len(opponents)} opponents: '
-                  f'{[t for _, t in opponents]}')
-            self._load_opponent_for_rank(0)
+        # Initialize ratchet rotation: start at rank 0 (stage10 = weakest)
+        self._unlocked_rank = 0
+        self._current_rotation_idx = 0
+        self._epoch_start_step = self.trainer.global_step
+        self._rank_mastery_streak = 0
+        self._rotation_kills = 0.0
+        self._rotation_episodes = 0.0
+        self._epoch_kills = 0.0
+        self._epoch_episodes = 0.0
+
+        opponents = self._get_sorted_opponents()
+        print(f'[RATCHET] Initialized rotation with {len(opponents)} opponents: '
+              f'{[t for _, t in opponents]}')
+        self._load_opponent_for_rank(0)
 
     def evaluate(self):
         """Evaluate with dual experience collection in self-play mode."""
