@@ -992,6 +992,11 @@ class DualPerspectiveTrainer:
 
     def train(self):
         """Train on combined experience in self-play mode."""
+        # Inject strength into stats BEFORE train() so it appears as environment/strength
+        # in W&B during both curriculum and self-play phases
+        strength = float(self._unlocked_rank) / float(max(self.checkpoint_queue.max_checkpoints, 1))
+        self.trainer.stats['strength'] = [strength]
+
         if not self.use_dual_selfplay:
             # Standard single-perspective training
             # Check for selfplay transition BEFORE train() clears stats
