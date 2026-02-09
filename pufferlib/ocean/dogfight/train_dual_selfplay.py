@@ -182,6 +182,8 @@ class DualPerspectiveTrainer:
         # Clean-win gate tracking (only accumulates during pool opponent epochs)
         self._gate_player_kills = 0.0
         self._gate_opp_kills = 0.0
+        self._gate_clean_fights = 0.0
+        self._gate_total_episodes = 0.0
 
         # Difficulty tracking metrics
         self._total_rank_ups = 0
@@ -545,10 +547,16 @@ class DualPerspectiveTrainer:
         self._pool_perf_ema = 0.9 * self._pool_perf_ema + 0.1 * rotation_perf
 
         # Clean-win gate check using accumulated gate kills from pool opponent epochs
+        CLEAN_FIGHT_GATE = 0.80
         total_kills = self._gate_player_kills + self._gate_opp_kills
+        clean_fight_rate = self._gate_clean_fights / max(self._gate_total_episodes, 1)
         if total_kills >= 10:  # Minimum sample — need real data, not 1 lucky kill
             clean_win_rate = self._gate_player_kills / total_kills
-            gate_passed = clean_win_rate >= self.perf_threshold
+            # Both conditions must pass:
+            # 1. Win 55% of gun kills
+            # 2. At least 80% of episodes must be clean (kills or timeouts, not crashes)
+            gate_passed = (clean_win_rate >= self.perf_threshold
+                           and clean_fight_rate >= CLEAN_FIGHT_GATE)
         else:
             clean_win_rate = 0.0
             gate_passed = False  # Not enough kills to judge — stay put
@@ -557,6 +565,7 @@ class DualPerspectiveTrainer:
               f'({self._rotation_kills:.0f}/{self._rotation_episodes:.0f}), '
               f'gate={clean_win_rate:.3f} ({self._gate_player_kills:.0f}pk/{total_kills:.0f}total, '
               f'need>={self.perf_threshold}), '
+              f'clean_fight_rate={clean_fight_rate:.3f} (need>={CLEAN_FIGHT_GATE}), '
               f'unlocked_rank={self._unlocked_rank}, active={num_active}/{len(opponents)}, '
               f'streak={self._rank_mastery_streak}')
 
@@ -580,14 +589,16 @@ class DualPerspectiveTrainer:
             if total_kills < 10:
                 print(f'[RATCHET] Gate INSUFFICIENT data ({total_kills:.0f} kills < 10 minimum), streak reset')
             else:
-                print(f'[RATCHET] Gate FAILED (clean_win_rate={clean_win_rate:.3f} < {self.perf_threshold}), '
-                      f'streak reset')
+                print(f'[RATCHET] Gate FAILED (clean_win_rate={clean_win_rate:.3f} need>={self.perf_threshold}, '
+                      f'clean_fight_rate={clean_fight_rate:.3f} need>={CLEAN_FIGHT_GATE}), streak reset')
 
         # Reset rotation and gate counters
         self._rotation_kills = 0.0
         self._rotation_episodes = 0.0
         self._gate_player_kills = 0.0
         self._gate_opp_kills = 0.0
+        self._gate_clean_fights = 0.0
+        self._gate_total_episodes = 0.0
 
     def _check_stalemate(self, logs):
         """Check for stalemate (low perf, low clean fight rate) and apply handicaps.
@@ -719,6 +730,8 @@ class DualPerspectiveTrainer:
         self._rotation_episodes = 0.0
         self._epoch_kills = 0.0
         self._epoch_episodes = 0.0
+        self._gate_clean_fights = 0.0
+        self._gate_total_episodes = 0.0
 
         opponents = self._get_sorted_opponents()
         print(f'[RATCHET] Initialized rotation with {len(opponents)} opponents: '
@@ -972,6 +985,9 @@ class DualPerspectiveTrainer:
                             sp_ok = i.get('sp_opp_kills', 0)
                             self._gate_player_kills += sp_pk * n_val
                             self._gate_opp_kills += sp_ok * n_val
+                            clean_f = i.get('clean_fights', 0)
+                            self._gate_clean_fights += clean_f * n_val
+                            self._gate_total_episodes += n_val
 
             # Set opponent actions: write to shared memory (Multiprocessing) or C binding (Serial)
             profile('env', epoch)
@@ -1004,7 +1020,10 @@ class DualPerspectiveTrainer:
         """Train on combined experience in self-play mode."""
         # Inject strength into stats BEFORE train() so it appears as environment/strength
         # in W&B during both curriculum and self-play phases
-        strength = float(self._unlocked_rank) / float(max(self.checkpoint_queue.max_checkpoints, 1))
+        # Strength = ladder progress * current clean_fight_rate (drops when agent crashes)
+        cf_vals = self.trainer.stats.get('clean_fights', [])
+        current_cf_rate = np.mean(cf_vals) if cf_vals else 0.0
+        strength = (float(self._unlocked_rank) / float(max(self.checkpoint_queue.max_checkpoints, 1))) * current_cf_rate
         self.trainer.stats['strength'] = [strength]
 
         if not self.use_dual_selfplay:
@@ -1297,9 +1316,12 @@ class DualPerspectiveTrainer:
         losses['gate_clean_win_rate'] = self._gate_player_kills / max(total_gate_kills, 1)
         losses['gate_player_kills'] = self._gate_player_kills
         losses['gate_opp_kills'] = self._gate_opp_kills
+        losses['gate_clean_fight_rate'] = self._gate_clean_fights / max(self._gate_total_episodes, 1)
 
-        # 9. Strength: normalized progress through opponent ladder (sweep metric)
-        strength = float(self._unlocked_rank) / float(max(self.checkpoint_queue.max_checkpoints, 1))
+        # 9. Strength: ladder progress * current clean_fight_rate (sweep metric)
+        cf_vals = self.trainer.stats.get('clean_fights', [])
+        current_cf_rate = np.mean(cf_vals) if cf_vals else 0.0
+        strength = (float(self._unlocked_rank) / float(max(self.checkpoint_queue.max_checkpoints, 1))) * current_cf_rate
         losses['strength'] = strength
 
         # Also inject strength into stats so it appears as environment/strength for sweep metric

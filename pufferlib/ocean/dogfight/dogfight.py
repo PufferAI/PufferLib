@@ -28,9 +28,8 @@ class AutopilotMode:
 OBS_SIZES = {
     0: 17,   # MOMENTUM_GFORCE: G-force awareness (proven winner from df24)
     1: 23,   # DRONE_STYLE: + quaternion + up vector
-    2: 17,   # QBAR: + dynamic pressure
-    3: 25,   # PILOT_QUAT: Pilot + quaternion
-    4: 21,   # PILOT: Pilot awareness (lean hypothesis)
+    2: 26,   # PILOT_QUAT: Pilot + quaternion + energy
+    3: 22,   # PILOT: Pilot awareness + energy
 }
 
 

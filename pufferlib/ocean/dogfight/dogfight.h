@@ -22,13 +22,12 @@
 typedef enum {
     OBS_MOMENTUM_GFORCE = 0,    // G-force awareness (17 obs) — proven winner from df24
     OBS_DRONE_STYLE = 1,        // + quaternion + up vector (23 obs)
-    OBS_QBAR = 2,               // + dynamic pressure (17 obs)
-    OBS_PILOT_QUAT = 3,         // Pilot + quaternion (25 obs)
-    OBS_PILOT = 4,              // Pilot awareness (21 obs) — lean hypothesis
+    OBS_PILOT_QUAT = 2,         // Pilot + quaternion (26 obs)
+    OBS_PILOT = 3,              // Pilot awareness (22 obs)
     OBS_SCHEME_COUNT
 } ObsScheme;
 
-static const int OBS_SIZES[OBS_SCHEME_COUNT] = {17, 23, 17, 25, 21};
+static const int OBS_SIZES[OBS_SCHEME_COUNT] = {17, 23, 26, 22};
 
 typedef enum {
     CURRICULUM_TAIL_CHASE = 0,       // Stage 0: Easiest - opponent ahead, same heading
@@ -340,7 +339,7 @@ typedef struct Dogfight {
     // Debug
     int env_num;                // Environment index (for filtering debug output)
     // Observation highlighting (for visual debugging)
-    unsigned char obs_highlight[25];  // 1 = highlight this observation with red arrow (max scheme is 25 obs)
+    unsigned char obs_highlight[26];  // 1 = highlight this observation with red arrow (max scheme is 26 obs)
     // Last opponent actions (for Python access in tests)
     float last_opp_actions[5];  // throttle, elevator, aileron, rudder, trigger
     // Camera control

@@ -27,18 +27,10 @@ static const char* OBS_LABELS_DRONE_STYLE[23] = {
     "E_adv", "aspect", "timer"
 };
 
-// Scheme 2: OBS_QBAR (17 obs)
-static const char* OBS_LABELS_QBAR[17] = {
+// Scheme 2: OBS_PILOT_QUAT (26 obs)
+static const char* OBS_LABELS_PILOT_QUAT[26] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
-    "aoa", "altitude", "energy", "q_bar",
-    "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect", "timer"
-};
-
-// Scheme 3: OBS_PILOT_QUAT (25 obs)
-static const char* OBS_LABELS_PILOT_QUAT[25] = {
-    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
-    "aoa", "altitude", "g_force",
+    "aoa", "altitude", "g_force", "energy",
     "up_x", "up_y", "up_z",
     "quat_w", "quat_x", "quat_y", "quat_z",
     "tgt_az", "tgt_el", "range", "closure",
@@ -46,10 +38,10 @@ static const char* OBS_LABELS_PILOT_QUAT[25] = {
     "opp_pitch_r", "opp_roll_r", "timer"
 };
 
-// Scheme 4: OBS_PILOT (21 obs)
-static const char* OBS_LABELS_PILOT[21] = {
+// Scheme 3: OBS_PILOT (22 obs)
+static const char* OBS_LABELS_PILOT[22] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
-    "aoa", "altitude", "g_force",
+    "aoa", "altitude", "g_force", "energy",
     "up_x", "up_y", "up_z",
     "tgt_az", "tgt_el", "range", "closure",
     "E_adv", "aspect",
@@ -197,9 +189,6 @@ void draw_obs_monitor(Dogfight *env) {
         case OBS_DRONE_STYLE:
             labels = OBS_LABELS_DRONE_STYLE;
             break;
-        case OBS_QBAR:
-            labels = OBS_LABELS_QBAR;
-            break;
         case OBS_PILOT_QUAT:
             labels = OBS_LABELS_PILOT_QUAT;
             break;
@@ -220,7 +209,6 @@ void draw_obs_monitor(Dogfight *env) {
         bool is_01 = false;
         switch (env->obs_scheme) {
             case OBS_MOMENTUM_GFORCE:
-            case OBS_QBAR:
                 // fwd_spd(0), altitude(7), energy(8), range(12), timer(16) are [0,1]
                 is_01 = (i == 0 || i == 7 || i == 8 || i == 12 || i == 16);
                 break;
