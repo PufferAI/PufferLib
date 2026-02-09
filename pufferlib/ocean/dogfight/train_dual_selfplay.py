@@ -81,13 +81,15 @@ def debug(level, msg):
 DEFAULT_OPPONENT_UPDATE_INTERVAL = 1_000_000  # Update opponent every 1M steps (legacy, unused with queue)
 DEFAULT_SELFPLAY_MIN_STAGE = 20  # Only enable self-play after stage 20
 DEFAULT_CHECKPOINT_LAG = 1  # Opponent is N checkpoints behind (1=2nd newest)
-DEFAULT_PERF_THRESHOLD = 0.65  # Kill rate to trigger checkpoint save + opponent upgrade
+DEFAULT_PERF_THRESHOLD = 0.55  # Clean win rate gate for opponent advancement (AlphaGo Zero style)
 DEFAULT_MIN_STEPS_BETWEEN_CHECKPOINTS = 2_000_000  # Minimum steps before saving new checkpoint
 DEFAULT_MAX_CHECKPOINTS = 20  # Max selfplay checkpoints (milestones always kept)
 DEFAULT_PAST_OPPONENT_PROB = 0.2  # 20% of games against past checkpoint pool (OpenAI Five: 20%)
 DEFAULT_PFSP_EXPONENT = 2.0  # PFSP weighting exponent: (1-win_rate)^exp (OpenAI Five: squared)
 DEFAULT_OPPONENT_RESAMPLE_INTERVAL = 1_000_000  # Re-roll opponent selection every N steps
 DEFAULT_POOL_CHECKPOINT_INTERVAL = 5_000_000  # Save periodic checkpoint every N steps (ensures pool growth)
+DEFAULT_OPPONENT_EPOCH_LENGTH = 5_000_000  # Steps per opponent in round-robin rotation
+DEFAULT_MASTERY_STREAK = 2  # Full rotations of mastery before unlocking next rank
 DEFAULT_DEBUG_TRIGGER_STEP = 500_000_000  # Start debug logging at 500M steps (0 = disabled)
 
 
@@ -115,6 +117,8 @@ class DualPerspectiveTrainer:
                  pfsp_exponent=DEFAULT_PFSP_EXPONENT,
                  opponent_resample_interval=DEFAULT_OPPONENT_RESAMPLE_INTERVAL,
                  pool_checkpoint_interval=DEFAULT_POOL_CHECKPOINT_INTERVAL,
+                 opponent_epoch_length=DEFAULT_OPPONENT_EPOCH_LENGTH,
+                 mastery_streak=DEFAULT_MASTERY_STREAK,
                  checkpoint_dir=None,
                  run_id=None):
         # Store custom config
@@ -127,6 +131,8 @@ class DualPerspectiveTrainer:
         self.pfsp_exponent = pfsp_exponent
         self.opponent_resample_interval = opponent_resample_interval
         self.pool_checkpoint_interval = pool_checkpoint_interval
+        self.opponent_epoch_length = opponent_epoch_length
+        self.mastery_streak_required = mastery_streak
         self.use_dual_selfplay = False
         self.last_opponent_update = 0
 
@@ -161,6 +167,27 @@ class DualPerspectiveTrainer:
         self.opponent_win_rates = {}
         self.pool_perf = 0.5  # EMA of win rate against pool opponents only
 
+        # Ratchet state: progressive opponent unlocking with round-robin rotation
+        self._unlocked_rank = 0              # Only increases (ratchet)
+        self._current_rotation_idx = 0       # Which opponent in rotation
+        self._rank_mastery_streak = 0        # Consecutive mastered rotations
+        self._epoch_start_step = 0           # When current epoch started
+        self._rotation_kills = 0.0           # Kills across current full rotation
+        self._rotation_episodes = 0.0        # Episodes across current full rotation
+        self._epoch_kills = 0.0              # Kills in current single-opponent epoch
+        self._epoch_episodes = 0.0           # Episodes in current single-opponent epoch
+        self._pool_perf_ema = 0.5            # Smoothed metric for wandb
+
+        # Clean-win gate tracking (only accumulates during pool opponent epochs)
+        self._gate_player_kills = 0.0
+        self._gate_opp_kills = 0.0
+
+        # Difficulty tracking metrics
+        self._total_rank_ups = 0
+        self._total_checkpoints_saved = 0
+        self._learner_elo = 1500.0            # Online Elo (K=32 updates per epoch)
+        self._checkpoint_elos = {}            # tag -> Elo rating
+
         # Stalemate detection and handicapping
         self.stalemate_perf_threshold = 0.3  # Low perf suggests stalemate
         self.stalemate_clean_threshold = 0.5  # Low clean fight rate suggests death spirals
@@ -189,8 +216,8 @@ class DualPerspectiveTrainer:
 
         print(f'[DUAL-SELFPLAY] Initialized: min_stage={selfplay_min_stage}, '
               f'checkpoint_lag={checkpoint_lag}, perf_threshold={perf_threshold}')
-        print(f'[DUAL-SELFPLAY] PFSP: past_opponent_prob={past_opponent_prob}, '
-              f'pfsp_exponent={pfsp_exponent}, resample_interval={opponent_resample_interval}')
+        print(f'[DUAL-SELFPLAY] Ratchet: epoch_length={opponent_epoch_length}, '
+              f'mastery_streak={mastery_streak}')
         print(f'[DUAL-SELFPLAY] Checkpoint dir: {checkpoint_dir}')
 
     def _init_opponent_policy(self):
@@ -318,6 +345,8 @@ class DualPerspectiveTrainer:
             )
             self._saved_stage10 = True
             self.last_checkpoint_step = self.trainer.global_step
+            self._total_checkpoints_saved += 1
+            self._checkpoint_elos["stage10"] = self._learner_elo
             print(f'[CHECKPOINT-QUEUE] Saved milestone: stage10 at step {self.trainer.global_step}')
 
         if current_stage >= 20 and not self._saved_stage20:
@@ -329,6 +358,8 @@ class DualPerspectiveTrainer:
             )
             self._saved_stage20 = True
             self.last_checkpoint_step = self.trainer.global_step
+            self._total_checkpoints_saved += 1
+            self._checkpoint_elos["stage20"] = self._learner_elo
             print(f'[CHECKPOINT-QUEUE] Saved milestone: stage20 at step {self.trainer.global_step}')
 
     def _update_opponent_win_rate(self, logs):
@@ -366,61 +397,6 @@ class DualPerspectiveTrainer:
             self._update_opponent()
             self.last_resample_step = self.trainer.global_step
 
-    def _check_domination(self, logs):
-        """Check if learner dominates pool opponents using pool_perf (not overall perf).
-
-        Overall perf is ~0.5 when 80% of fights are self-play (zero-sum, same policy).
-        We use pool_perf which only tracks win rate against checkpoint pool opponents.
-
-        When pool_perf exceeds threshold:
-        1. Save a new checkpoint
-        2. Re-sample opponent from pool (PFSP)
-        """
-        if not self.use_dual_selfplay:
-            return
-
-        # Check minimum steps since last checkpoint
-        steps_since_last = self.trainer.global_step - self.last_checkpoint_step
-        if steps_since_last < self.min_steps_between_checkpoints:
-            return
-
-        # Use pool_perf (EMA of win rate against pool opponents only)
-        # NOT overall perf, which is diluted by self-play (~0.5)
-        perf = self.pool_perf
-        if perf >= self.perf_threshold:
-            print(f'[CHECKPOINT-QUEUE] Learner dominating pool opponents (pool_perf={perf:.2f} >= {self.perf_threshold}), saving checkpoint')
-
-            # Save new checkpoint
-            checkpoint_num = len([c for c in self.checkpoint_queue.checkpoints if not c.is_milestone()])
-            tag = f"selfplay_{checkpoint_num}"
-            self.checkpoint_queue.save(
-                self.learner_policy,
-                self.trainer.global_step,
-                self._current_stage,
-                tag
-            )
-            self.last_checkpoint_step = self.trainer.global_step
-
-            # Initialize win rate for new checkpoint at 0.5 (unknown)
-            self.opponent_win_rates[tag] = 0.5
-
-            # Log queue state
-            queue_state = self.checkpoint_queue.get_queue_state()
-            print(f'[CHECKPOINT-QUEUE] Queue: {queue_state["tags"]}')
-            if self.opponent_win_rates:
-                wr_str = ', '.join(f'{t}:{w:.2f}' for t, w in sorted(self.opponent_win_rates.items()))
-                print(f'[PFSP] Win rates: {wr_str}')
-
-            # Re-sample opponent from pool (PFSP)
-            self._update_opponent()
-
-            # Reset handicaps on domination (learner is winning)
-            if self.handicap_level > 0:
-                self.handicap_level = 0
-                self.opponent_handicap_controls = 1.0
-                self.stalemate_counter = 0
-                print(f'[HANDICAP] Reset to level 0 after domination')
-
     def _check_periodic_checkpoint(self):
         """Save periodic checkpoints to ensure pool growth even without domination.
 
@@ -444,12 +420,190 @@ class DualPerspectiveTrainer:
             tag
         )
         self.last_checkpoint_step = self.trainer.global_step
+        self._total_checkpoints_saved += 1
+        self._checkpoint_elos[tag] = self._learner_elo
 
         # Initialize win rate at 0.5 (unknown)
         self.opponent_win_rates[tag] = 0.5
 
         pool_size = len(self.checkpoint_queue.checkpoints)
         print(f'[CHECKPOINT-QUEUE] Periodic save: {tag} (pool_size={pool_size})')
+
+    def _get_sorted_opponents(self):
+        """Return list of (path, tag) sorted by rank: milestones first, then periodic, then 'self'.
+
+        Rank ordering:
+        - stage10 (rank 0, weakest)
+        - stage20 (rank 1)
+        - periodic checkpoints sorted by step (rank 2+)
+        - 'self' (highest rank, current learner weights)
+        """
+        entries = self.checkpoint_queue.checkpoints
+        milestones = []
+        periodics = []
+        for e in entries:
+            if e.tag == 'stage10':
+                milestones.insert(0, (e.path, e.tag))  # stage10 first
+            elif e.tag == 'stage20':
+                milestones.append((e.path, e.tag))  # stage20 second
+            else:
+                periodics.append((e.path, e.tag, e.step))
+
+        # Sort periodics by step (oldest = weakest)
+        periodics.sort(key=lambda x: x[2])
+        periodic_pairs = [(p, t) for p, t, _ in periodics]
+
+        # Self is always last (highest rank)
+        result = milestones + periodic_pairs + [(None, 'self')]
+        return result
+
+    def _load_opponent_for_rank(self, rank):
+        """Load opponent for the given rank index in the sorted opponent list."""
+        opponents = self._get_sorted_opponents()
+        if rank >= len(opponents):
+            rank = len(opponents) - 1
+        path, tag = opponents[rank]
+        if tag == 'self':
+            self.opponent_policy.load_state_dict(self.learner_policy.state_dict())
+            self._current_opponent_path = None
+            self._current_opponent_tag = 'self'
+            debug(1, f'Loaded opponent rank {rank}: self (current learner weights)')
+        else:
+            self._load_opponent_from_checkpoint(path)
+            self._current_opponent_path = path
+            self._current_opponent_tag = tag
+            debug(1, f'Loaded opponent rank {rank}: {tag}')
+
+        print(f'[RATCHET] Epoch start: opponent={tag} (rank {rank}/{len(opponents)-1})')
+
+    def _update_epoch_metrics(self, logs):
+        """Accumulate kills and episodes from training logs into current epoch counters."""
+        if not self.use_dual_selfplay or not logs:
+            return
+        perf = logs.get('environment/perf', 0)
+        n = logs.get('environment/n', 0)
+        if n > 0:
+            self._epoch_kills += perf * n
+            self._epoch_episodes += n
+
+            # Gate tracking: only during pool opponent epochs (not self-play)
+            if self._current_opponent_tag != 'self':
+                sp_pk = logs.get('environment/sp_player_kills', 0)
+                sp_ok = logs.get('environment/sp_opp_kills', 0)
+                self._gate_player_kills += sp_pk * n
+                self._gate_opp_kills += sp_ok * n
+
+    def _update_elo(self, opponent_tag, learner_won):
+        """Online Elo update (K=32) after each epoch against a pool opponent."""
+        r_l = self._learner_elo
+        r_o = self._checkpoint_elos.get(opponent_tag, 1500.0)
+        e_l = 1.0 / (1.0 + 10.0 ** ((r_o - r_l) / 400.0))
+        s_l = 1.0 if learner_won else 0.0
+        K = 32
+        self._learner_elo = r_l + K * (s_l - e_l)
+        self._checkpoint_elos[opponent_tag] = r_o + K * ((1.0 - s_l) - (1.0 - e_l))
+
+    def _check_epoch_boundary(self):
+        """Check if current opponent epoch is complete, advance if so."""
+        if not self.use_dual_selfplay:
+            return
+        steps_in_epoch = self.trainer.global_step - self._epoch_start_step
+        if steps_in_epoch >= self.opponent_epoch_length:
+            self._advance_to_next_epoch()
+
+    def _advance_to_next_epoch(self):
+        """End current epoch, accumulate into rotation, advance to next opponent."""
+        # Accumulate current epoch into rotation totals
+        self._rotation_kills += self._epoch_kills
+        self._rotation_episodes += self._epoch_episodes
+
+        # Log epoch perf
+        epoch_perf = self._epoch_kills / max(self._epoch_episodes, 1)
+        print(f'[RATCHET] Epoch done: opponent={self._current_opponent_tag}, '
+              f'perf={epoch_perf:.3f} ({self._epoch_kills:.0f}/{self._epoch_episodes:.0f}), '
+              f'rotation_idx={self._current_rotation_idx}')
+
+        # Online Elo update (only against pool opponents, not self)
+        if self._current_opponent_tag and self._current_opponent_tag != 'self':
+            self._update_elo(self._current_opponent_tag, epoch_perf >= 0.5)
+
+        # Reset epoch counters
+        self._epoch_kills = 0.0
+        self._epoch_episodes = 0.0
+
+        # Advance rotation index
+        opponents = self._get_sorted_opponents()
+        num_active = min(self._unlocked_rank + 1, len(opponents))
+        self._current_rotation_idx += 1
+
+        if self._current_rotation_idx >= num_active:
+            # Full rotation complete
+            self._evaluate_rotation()
+            self._current_rotation_idx = 0
+
+        # Start next epoch
+        self._epoch_start_step = self.trainer.global_step
+        rank = self._current_rotation_idx  # rank = index in sorted list
+        self._load_opponent_for_rank(rank)
+
+    def _evaluate_rotation(self):
+        """Evaluate gate after a full rotation through all unlocked opponents.
+
+        Gate criteria: clean_win_rate >= perf_threshold (e.g. 0.55).
+        Clean wins = gun kills only. Crashes and timeouts don't count.
+        Inspired by AlphaGo Zero's 55% win-rate gate.
+        """
+        rotation_perf = self._rotation_kills / max(self._rotation_episodes, 1)
+        opponents = self._get_sorted_opponents()
+        num_active = min(self._unlocked_rank + 1, len(opponents))
+
+        # Update EMA for wandb
+        self._pool_perf_ema = 0.9 * self._pool_perf_ema + 0.1 * rotation_perf
+
+        # Clean-win gate check using accumulated gate kills from pool opponent epochs
+        total_kills = self._gate_player_kills + self._gate_opp_kills
+        if total_kills >= 10:  # Minimum sample — need real data, not 1 lucky kill
+            clean_win_rate = self._gate_player_kills / total_kills
+            gate_passed = clean_win_rate >= self.perf_threshold
+        else:
+            clean_win_rate = 0.0
+            gate_passed = False  # Not enough kills to judge — stay put
+
+        print(f'[RATCHET] Rotation complete: perf={rotation_perf:.3f} '
+              f'({self._rotation_kills:.0f}/{self._rotation_episodes:.0f}), '
+              f'gate={clean_win_rate:.3f} ({self._gate_player_kills:.0f}pk/{total_kills:.0f}total, '
+              f'need>={self.perf_threshold}), '
+              f'unlocked_rank={self._unlocked_rank}, active={num_active}/{len(opponents)}, '
+              f'streak={self._rank_mastery_streak}')
+
+        if gate_passed:
+            self._rank_mastery_streak += 1
+            print(f'[RATCHET] Gate PASSED! streak={self._rank_mastery_streak}/{self.mastery_streak_required}')
+            if self._rank_mastery_streak >= self.mastery_streak_required:
+                # Unlock next opponent
+                max_rank = len(opponents) - 1
+                if self._unlocked_rank < max_rank:
+                    self._unlocked_rank += 1
+                    self._total_rank_ups += 1
+                    new_tag = opponents[self._unlocked_rank][1] if self._unlocked_rank < len(opponents) else '?'
+                    print(f'[RATCHET] RANK UP! unlocked_rank={self._unlocked_rank}, '
+                          f'new opponent: {new_tag}')
+                else:
+                    print(f'[RATCHET] Already at max rank {self._unlocked_rank}')
+                self._rank_mastery_streak = 0
+        else:
+            self._rank_mastery_streak = 0
+            if total_kills < 10:
+                print(f'[RATCHET] Gate INSUFFICIENT data ({total_kills:.0f} kills < 10 minimum), streak reset')
+            else:
+                print(f'[RATCHET] Gate FAILED (clean_win_rate={clean_win_rate:.3f} < {self.perf_threshold}), '
+                      f'streak reset')
+
+        # Reset rotation and gate counters
+        self._rotation_kills = 0.0
+        self._rotation_episodes = 0.0
+        self._gate_player_kills = 0.0
+        self._gate_opp_kills = 0.0
 
     def _check_stalemate(self, logs):
         """Check for stalemate (low perf, low clean fight rate) and apply handicaps.
@@ -558,8 +712,20 @@ class DualPerspectiveTrainer:
                 self.vecenv.buf['selfplay_active'][0] = 1
                 print(f'[DUAL-SELFPLAY] Set selfplay_active flag in shared memory')
 
-            # Initialize opponent from checkpoint queue
-            self._update_opponent()
+            # Initialize ratchet rotation: start at rank 0 (stage10 = weakest)
+            self._unlocked_rank = 0
+            self._current_rotation_idx = 0
+            self._epoch_start_step = self.trainer.global_step
+            self._rank_mastery_streak = 0
+            self._rotation_kills = 0.0
+            self._rotation_episodes = 0.0
+            self._epoch_kills = 0.0
+            self._epoch_episodes = 0.0
+
+            opponents = self._get_sorted_opponents()
+            print(f'[RATCHET] Initialized rotation with {len(opponents)} opponents: '
+                  f'{[t for _, t in opponents]}')
+            self._load_opponent_for_rank(0)
 
     def evaluate(self):
         """Evaluate with dual experience collection in self-play mode."""
@@ -837,20 +1003,15 @@ class DualPerspectiveTrainer:
         # Dual self-play training
         logs = self._train_dual()
 
-        # Update per-opponent win rate (EMA of perf)
-        self._update_opponent_win_rate(logs)
+        # Ratchet: track epoch metrics and check for epoch/rotation boundaries
+        self._update_epoch_metrics(logs)
+        self._check_epoch_boundary()
 
-        # Check if learner dominates opponent -> save checkpoint and resample
-        self._check_domination(logs)
-
-        # Periodic checkpoint save (ensures pool growth even without domination)
+        # Periodic checkpoint save (ensures pool growth)
         self._check_periodic_checkpoint()
 
         # Check for stalemate -> apply handicaps to break death spiral equilibrium
         self._check_stalemate(logs)
-
-        # Periodically re-roll opponent selection (PFSP resampling)
-        self._check_resample_opponent()
 
         return logs
 
@@ -1079,9 +1240,56 @@ class DualPerspectiveTrainer:
 
         # Add dual self-play specific metrics
         losses['dual_selfplay'] = 1.0 if self.use_dual_selfplay else 0.0
-        losses['pool_win_rate'] = self.pool_perf
+        losses['pool_win_rate'] = self._pool_perf_ema
         losses['pool_size'] = float(len(self.checkpoint_queue.checkpoints))
         losses['vs_pool'] = 0.0 if self._current_opponent_tag == 'self' else 1.0
+        losses['unlocked_rank'] = float(self._unlocked_rank)
+        losses['pool_perf_ema'] = self._pool_perf_ema
+        losses['epoch_type'] = 1.0 if self._current_opponent_tag == 'self' else 0.0
+        losses['opponent_rank'] = float(self._current_rotation_idx)
+
+        # Difficulty tracking metrics (7 new wandb metrics)
+        # 1. Training steps behind current opponent (0 when fighting self)
+        opponent_step_lag = 0.0
+        if self._current_opponent_tag and self._current_opponent_tag != 'self':
+            for entry in self.checkpoint_queue.checkpoints:
+                if entry.tag == self._current_opponent_tag:
+                    opponent_step_lag = float(self.trainer.global_step - entry.step)
+                    break
+        losses['opponent_step_lag'] = opponent_step_lag
+
+        # 2. Cumulative rank-up counter (monotonically increasing)
+        losses['total_rank_ups'] = float(self._total_rank_ups)
+
+        # 3. Progress toward next rank-up (0.0 to 1.0, resets on rank-up or failure)
+        losses['mastery_progress'] = float(self._rank_mastery_streak) / max(float(self.mastery_streak_required), 1.0)
+
+        # 4. Kill rate against current opponent this epoch
+        losses['epoch_perf'] = self._epoch_kills / max(self._epoch_episodes, 1.0)
+
+        # 5. Normalized opponent difficulty (0.0=weakest, 1.0=self)
+        opponents = self._get_sorted_opponents()
+        total_opponents = len(opponents)
+        losses['opponent_relative_strength'] = float(self._current_rotation_idx) / max(float(total_opponents - 1), 1.0)
+
+        # 6. Total checkpoints ever saved (pool generation count)
+        losses['pool_generation'] = float(self._total_checkpoints_saved)
+
+        # 7. Online Elo rating (tracks skill progression within a run)
+        losses['learner_elo'] = self._learner_elo
+
+        # 8. Clean-win gate metrics
+        total_gate_kills = self._gate_player_kills + self._gate_opp_kills
+        losses['gate_clean_win_rate'] = self._gate_player_kills / max(total_gate_kills, 1)
+        losses['gate_player_kills'] = self._gate_player_kills
+        losses['gate_opp_kills'] = self._gate_opp_kills
+
+        # 9. Strength: normalized progress through opponent ladder (sweep metric)
+        strength = float(self._unlocked_rank) / float(max(self.checkpoint_queue.max_checkpoints, 1))
+        losses['strength'] = strength
+
+        # Also inject strength into stats so it appears as environment/strength for sweep metric
+        self.trainer.stats['strength'] = [strength]
 
         profile.end()
         logs = None
@@ -1160,6 +1368,8 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
     pfsp_exponent = selfplay_args.get('pfsp_exponent', DEFAULT_PFSP_EXPONENT)
     opponent_resample_interval = int(selfplay_args.get('opponent_resample_interval', DEFAULT_OPPONENT_RESAMPLE_INTERVAL))
     pool_checkpoint_interval = int(selfplay_args.get('pool_checkpoint_interval', DEFAULT_POOL_CHECKPOINT_INTERVAL))
+    opponent_epoch_length = int(selfplay_args.get('opponent_epoch_length', DEFAULT_OPPONENT_EPOCH_LENGTH))
+    mastery_streak = int(selfplay_args.get('mastery_streak', DEFAULT_MASTERY_STREAK))
 
     # Create dual-perspective trainer with checkpoint queue
     train_config = {**args['train'], 'env': env_name}
@@ -1175,17 +1385,16 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
         pfsp_exponent=pfsp_exponent,
         opponent_resample_interval=opponent_resample_interval,
         pool_checkpoint_interval=pool_checkpoint_interval,
+        opponent_epoch_length=opponent_epoch_length,
+        mastery_streak=mastery_streak,
         checkpoint_dir=checkpoint_dir,
         run_id=run_id
     )
 
-    print(f'[DUAL-SELFPLAY] Starting training with PFSP opponent curriculum')
+    print(f'[DUAL-SELFPLAY] Starting training with ratchet opponent curriculum')
     print(f'[DUAL-SELFPLAY] Min stage for self-play: {selfplay_min_stage}')
-    print(f'[DUAL-SELFPLAY] Checkpoint lag: {checkpoint_lag} (opponent is {checkpoint_lag} checkpoint(s) behind)')
-    print(f'[DUAL-SELFPLAY] Perf threshold: {perf_threshold} (save checkpoint when perf >= this)')
-    print(f'[DUAL-SELFPLAY] Min steps between checkpoints: {min_steps_between_checkpoints}')
-    print(f'[DUAL-SELFPLAY] PFSP: {past_opponent_prob*100:.0f}% past pool / {(1-past_opponent_prob)*100:.0f}% self, '
-          f'exponent={pfsp_exponent}, resample every {opponent_resample_interval} steps')
+    print(f'[DUAL-SELFPLAY] Perf threshold: {perf_threshold} (mastery threshold per rotation)')
+    print(f'[DUAL-SELFPLAY] Ratchet: epoch_length={opponent_epoch_length}, mastery_streak={mastery_streak}')
     print(f'[DUAL-SELFPLAY] Pool checkpoint interval: {pool_checkpoint_interval} (periodic saves for pool growth)')
 
     total_timesteps = train_config['total_timesteps']
@@ -1209,17 +1418,16 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
                 model_path = trainer.close()
                 if logger:
                     logger.close(model_path)
-                return all_logs
+                return all_logs, model_path
 
         # Log dual self-play status periodically
         if trainer.epoch % 100 == 0 and trainer.epoch > 0:
             mode = "DUAL" if trainer.use_dual_selfplay else "CURRICULUM"
             queue_len = len(trainer.checkpoint_queue)
             opp_tag = trainer._current_opponent_tag or "none"
-            wr_count = len(trainer.opponent_win_rates)
             print(f'[DUAL-SELFPLAY] Mode: {mode}, Steps: {trainer.global_step}, '
                   f'Queue: {queue_len} checkpoints, Opponent: {opp_tag}, '
-                  f'Win rates tracked: {wr_count}')
+                  f'Rank: {trainer._unlocked_rank}, PerfEMA: {trainer._pool_perf_ema:.3f}')
 
     # Cleanup
     model_path = trainer.close()
@@ -1227,7 +1435,7 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
         logger.close(model_path)
 
     print(f'[DUAL-SELFPLAY] Training complete')
-    return all_logs
+    return all_logs, model_path
 
 
 def sweep_dual(env_name='puffer_dogfight', args=None):
@@ -1266,7 +1474,30 @@ def sweep_dual(env_name='puffer_dogfight', args=None):
         torch.manual_seed(seed)
 
         sweep.suggest(args)
-        all_logs = train_dual(env_name, args=args, should_stop_early=stop_if_loss_nan)
+        all_logs, model_path = train_dual(env_name, args=args, should_stop_early=stop_if_loss_nan)
+
+        # Post-training Elo evaluation
+        elo_eval_cfg = args.get('elo_eval', {})
+        if elo_eval_cfg.get('enabled', False) and model_path:
+            from pufferlib.ocean.dogfight.elo_eval import run_benchmark_eval, load_manifest
+            ref_dir = elo_eval_cfg.get('reference_dir', 'pufferlib/ocean/dogfight/reference_opponents')
+            manifest = load_manifest(ref_dir)
+            if manifest:
+                try:
+                    result = run_benchmark_eval(
+                        model_path=model_path,
+                        reference_opponents=manifest['opponents'],
+                        games_per_matchup=int(elo_eval_cfg.get('games_per_matchup', 20)),
+                        obs_scheme=args['env'].get('obs_scheme', 0),
+                        device=args['train']['device'],
+                    )
+                    # Inject Elo into logs so Protein can optimize it
+                    if all_logs:
+                        all_logs[-1]['environment/elo'] = result['elo'] / 1000.0
+                    print(f'[ELO-EVAL] Rating: {result["elo"]:.0f} ({result["eval_time_seconds"]:.1f}s)')
+                except Exception as e:
+                    print(f'[ELO-EVAL] Failed: {e}')
+
         all_logs = [e for e in all_logs if target_key in e]
 
         if not all_logs:
@@ -1722,7 +1953,7 @@ def main():
     args['opponent_update_interval'] = opponent_update_interval
 
     # Run training
-    train_dual(env_name, args)
+    train_dual(env_name, args=args)
 
 
 if __name__ == '__main__':
