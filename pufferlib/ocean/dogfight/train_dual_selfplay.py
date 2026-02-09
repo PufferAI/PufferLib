@@ -664,13 +664,12 @@ class DualPerspectiveTrainer:
         """
         # Get current stage from stats (populated by C code during evaluate)
         # Use avg_stage which is more reliable than individual episode stages
-        # (when target=20.9, 90% episodes are stage 20, 10% are stage 19)
+        # Use np.mean (not max) so self-play only activates when the COHORT has mastered
+        # the curriculum, not when one lucky env races ahead while others are at stage 14
         if stats and 'avg_stage' in stats and len(stats['avg_stage']) > 0:
-            # avg_stage is the mean stage across episodes - use max to catch when we hit 20
-            current_stage = max(stats['avg_stage'])
+            current_stage = np.mean(stats['avg_stage'])
         elif stats and 'stage' in stats and len(stats['stage']) > 0:
-            # Fallback to raw stage values
-            current_stage = max(stats['stage'])
+            current_stage = np.mean(stats['stage'])
         else:
             # Last resort fallback
             current_stage = getattr(self.driver_env, '_current_stage', 0)
