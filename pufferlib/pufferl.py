@@ -37,8 +37,9 @@ import pufferlib.vector
 import pufferlib.pytorch
 try:
     from pufferlib import _C
+    from pufferlib import fake_tensors
 except ImportError:
-    raise ImportError('Failed to import PufferLib C++ backend. If you have non-default PyTorch, try installing with --no-build-isolation')
+    raise ImportError('Failed to import C/CUDA advantage kernel. If you have non-default PyTorch, try installing with --no-build-isolation')
 
 import rich
 import rich.traceback
@@ -565,7 +566,7 @@ def _train_rank(env_name, args=None, logger=None, verbose=True, early_stop_fn=No
     pufferl = PuffeRL(train_config, vec_config, env_config, policy_config, logger, verbose)
 
     if train_config['profile']:
-        _C.profiler_start()
+        binding.profiler_start()
 
     # Sweep needs data for early stopped runs, so send data when steps > 100M
     logging_threshold = min(0.20*train_config['total_timesteps'], 100_000_000)
@@ -589,16 +590,15 @@ def _train_rank(env_name, args=None, logger=None, verbose=True, early_stop_fn=No
         if pufferl.global_step > logging_threshold:
             all_logs.append(logs)
 
-        if should_stop_early:
-            if train_config['profile']:
-                _C.profiler_stop()
-            model_path = pufferl.close()
-            pufferl.logger.log_cost(pufferl.uptime)
-            pufferl.logger.close(model_path, early_stop=True)
-            return pufferl, all_logs
+            if should_stop_early is not None and should_stop_early(logs):
+                if train_config['profile']:
+                    _C.profiler_stop()
+                model_path = pufferl.close()
+                pufferl.logger.close(model_path)
+                return all_logs
 
     if train_config['profile']:
-        _C.profiler_stop()
+        binding.profiler_stop()
 
     pufferl.print_dashboard()
 
@@ -683,6 +683,41 @@ def train(env_name, args=None, logger=None, verbose=True, early_stop_fn=None):
     pufferl.logger.log_cost(uptime)
     pufferl.logger.close(model_path, early_stop=False)
     return all_logs
+
+def sps(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True, should_stop_early=None):
+    args = args or load_config(env_name)
+    train_config = dict(**args['train'])#, env=env_name)
+    train_config['env_name'] = args['env_name']
+    train_config['vec_kwargs'] = args['vec']
+    train_config['env_kwargs'] = args['env']
+    train_config['total_agents'] = args['vec']['total_agents']
+    train_config['num_buffers'] = args['vec']['num_buffers']
+    pufferl = PuffeRL(train_config, logger, verbose)
+    # Warmup
+    for _ in range(3):
+        _C.batched_forward(
+            pufferl.pufferl_cpp,
+            pufferl.observations,
+            pufferl.total_minibatches,
+            pufferl.minibatch_segments,
+        )
+
+    N = 100
+    torch.cuda.synchronize()
+    start = time.time()
+    for _ in range(N):
+        _C.batched_forward(
+            pufferl.pufferl_cpp,
+            pufferl.observations,
+            pufferl.total_minibatches,
+            pufferl.minibatch_segments,
+        )
+    torch.cuda.synchronize()
+    end = time.time()
+    dt = end - start
+    sps = pufferl.config['batch_size']*N/dt
+    print(f'SPS: {sps/1e6:.1f}M')
+
 
 def eval(env_name, args=None, vecenv=None, policy=None):
     args = args or load_config(env_name)
@@ -1147,6 +1182,7 @@ def main():
 
     mode = sys.argv.pop(1)
     env_name = sys.argv.pop(1)
+    
     if mode == 'train':
         train(env_name=env_name)
     elif mode == 'eval':

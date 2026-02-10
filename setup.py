@@ -12,6 +12,10 @@ import tarfile
 import platform
 import shutil
 import pybind11
+import torch
+import subprocess
+import sysconfig
+import torch.utils.cpp_extension as cpp_ext
 
 from setuptools.command.build_ext import build_ext
 from torch.utils import cpp_extension
@@ -36,6 +40,9 @@ if shutil.which('ccache'):
 DEBUG = os.getenv("DEBUG", "0") == "1"
 NO_OCEAN = os.getenv("NO_OCEAN", "0") == "1"
 NO_TRAIN = os.getenv("NO_TRAIN", "0") == "1"
+
+if DEBUG:
+    print("*****Building in DEBUG mode*******")
 
 # Build raylib for your platform
 RAYLIB_URL = 'https://github.com/raysan5/raylib/releases/download/5.5/'
@@ -82,6 +89,7 @@ if not NO_OCEAN:
 extra_compile_args = [
     '-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION',
     '-DPLATFORM_DESKTOP',
+    '-DPUFFER_NATIVECPP_PYBINDINGS=1',
 ]
 extra_link_args = [
     '-fwrapv',
@@ -101,6 +109,12 @@ if DEBUG:
     extra_compile_args += [
         '-O0',
         '-g',
+        '-flto=auto',
+        '-fno-semantic-interposition',
+        '-fvisibility=hidden',
+        '-DPUFFER_DEBUG=1',
+        '-DDEBUG=1',
+
         #'-fsanitize=address,undefined,bounds,pointer-overflow,leak',
         #'-fno-omit-frame-pointer',
     ]
@@ -202,14 +216,49 @@ extension_kwargs = dict(
     extra_objects=[RAYLIB_A],
 )
 
+def _find_built_pufferlib_native(required: bool = True):
+    ext_suffix = ".so"
+
+    inplace = os.path.join("pufferlib", "native" + ext_suffix)
+    if os.path.isfile(inplace):
+        return inplace
+
+    cwd = os.getcwd()
+    candidates = glob.glob(os.path.join(cwd, "build", "**", "pufferlib", "_C*.so"), recursive=True)
+    candidates += glob.glob(os.path.join(cwd, "pufferlib", "_C*.so"), recursive=True)
+    candidates = [p for p in candidates if os.path.isfile(p)]
+    if candidates:
+        candidates.sort(key=os.path.getmtime, reverse=True)
+        return candidates[0]
+
+    if required:
+        raise ValueError(f"Could not find built pufferlib.native extension under {cwd}.")
+    return None
+
+native_lib = _find_built_pufferlib_native(required=False)
+if native_lib:
+    print(f"Adding native library {native_lib} to C/C++ extensions")
+    extension_kwargs['extra_objects'].append(native_lib)
+
+# Check if CUDA compiler is available. You need cuda dev, not just runtime.
+cuda_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH') or torch.utils.cpp_extension.CUDA_HOME or '/usr/local/cuda'
+nvtx_lib_dir = os.path.join(cuda_home, 'lib64')  # Common on Linux; fall back to 'lib' if needed
+nvtx_lib = 'nvToolsExt'
+
 # Find C extensions
 c_extensions = []
 if not NO_OCEAN:
+    cpp_sources = [
+        "pufferlib/extensions/env_glue.cpp",
+    ]
     c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
+    extension_kwargs['include_dirs'] += [pybind11.get_include(), torch.utils.cpp_extension.include_paths()[0], "pufferlib/extensions/"]
+
     c_extensions = [
-        Extension(
+        CppExtension(
             path.rstrip('.c').replace('/', '.'),
-            sources=[path],
+            sources=[path] + cpp_sources,
+            language ='c++',
             **extension_kwargs,
         )
         for path in c_extension_paths if 'matsci' not in path
@@ -247,9 +296,6 @@ class ProfilerBuildExt(build_ext):
         super().finalize_options()
 
     def run(self):
-        import subprocess
-        import sysconfig
-        import torch.utils.cpp_extension as cpp_ext
 
         src = 'profile_kernels.cu'
         out = 'profile_kernels'
@@ -322,11 +368,15 @@ def create_static_env_build_class(env_name):
 
             # -g?
             clang_cmd = [
-                'clang', '-c', '-O2', '-DNDEBUG',
+                'clang', '-c', 
+                ('-O0' if DEBUG else '-O2'), 
+                ('-DDEBUG' if DEBUG else '-DNDEBUG'),
                 '-I.', '-Ipufferlib/extensions', f'-Ipufferlib/ocean/{env_name}',
                 f'-I./{RAYLIB_NAME}/include', '-I/usr/local/cuda/include',
                 '-DPLATFORM_DESKTOP',
-                '-fno-semantic-interposition', '-fvisibility=hidden',
+                ('-DPUFFER_DEBUG=1' if DEBUG else ''),
+                '-fno-semantic-interposition', 
+                ('-fvisibility=default' if DEBUG else '-fvisibility=hidden'),
                 '-fPIC', '-fopenmp',
                 env_binding_src, '-o', static_obj
             ]
@@ -367,11 +417,6 @@ if not NO_OCEAN:
         cmdclass[f"build_{env_name}_so"] = create_env_build_class(c_ext.name)
 
 
-# Check if CUDA compiler is available. You need cuda dev, not just runtime.
-import torch
-cuda_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH') or torch.utils.cpp_extension.CUDA_HOME or '/usr/local/cuda'
-nvtx_lib_dir = os.path.join(cuda_home, 'lib64')  # Common on Linux; fall back to 'lib' if needed
-nvtx_lib = 'nvToolsExt'
 torch_extensions = []
 if not NO_TRAIN:
     torch_sources = [
@@ -454,3 +499,9 @@ setup(
     cmdclass=cmdclass,
     include_dirs=[numpy.get_include(), RAYLIB_NAME + '/include'],
 )
+
+
+# export CC=gcc-12
+# export CXX=g++-12
+# export LDSHARED="g++-12 -shared"
+# export CUDAHOSTCXX=g++-12
