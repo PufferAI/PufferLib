@@ -153,7 +153,8 @@ TORCH_LIBRARY(_C, m) {
     m.def("policy_forward(Tensor obs, Tensor state) -> (Tensor, Tensor, Tensor)");
 }
 
-PYBIND11_MODULE(_C, m) {
+__attribute__((visibility("default")))
+extern void register_pufferlib_bindings(pybind11::module_& m) {
     m.def("log_environments", &log_environments);
     m.def("rollouts", &rollouts);
     m.def("train", &train);

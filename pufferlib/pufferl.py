@@ -33,11 +33,10 @@ import pufferlib
 import pufferlib.sweep
 import pufferlib.vector
 import pufferlib.pytorch
-try:
-    from pufferlib import _C
-    from pufferlib import fake_tensors
-except ImportError:
-    raise ImportError('Failed to import C/CUDA advantage kernel. If you have non-default PyTorch, try installing with --no-build-isolation')
+
+# Global binding reference
+binding = None
+
 
 import rich
 import rich.traceback
@@ -666,7 +665,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
     pufferl.logger.init(args)
 
     if train_config['profile']:
-        _C.profiler_start()
+        binding.profiler_start()
 
     all_logs = []
     max_cost = args['train'].get('max_cost', -1)
@@ -682,13 +681,13 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
 
             if should_stop_early is not None and should_stop_early(logs):
                 if train_config['profile']:
-                    _C.profiler_stop()
+                    binding.profiler_stop()
                 model_path = pufferl.close()
                 pufferl.logger.close(model_path)
                 return all_logs
 
     if train_config['profile']:
-        _C.profiler_stop()
+        binding.profiler_stop()
 
     # Final eval. You can reset the env here, but depending on
     # your env, this can skew data (i.e. you only collect the shortest
@@ -726,7 +725,7 @@ def sps(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True
     pufferl = PuffeRL(train_config, logger, verbose)
     # Warmup
     for _ in range(3):
-        _C.batched_forward(
+        binding.batched_forward(
             pufferl.pufferl_cpp,
             pufferl.observations,
             pufferl.total_minibatches,
@@ -737,7 +736,7 @@ def sps(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True
     torch.cuda.synchronize()
     start = time.time()
     for _ in range(N):
-        _C.batched_forward(
+        binding.batched_forward(
             pufferl.pufferl_cpp,
             pufferl.observations,
             pufferl.total_minibatches,
@@ -1216,6 +1215,7 @@ def main():
 
     mode = sys.argv.pop(1)
     env_name = sys.argv.pop(1)
+    
     if mode == 'train':
         train(env_name=env_name)
     elif mode == 'eval':

@@ -141,4 +141,29 @@ void my_shared_close(Env* env);
 void* my_get(Env* env, Dict* out);
 int my_put(Env* env, Dict* kwargs);
 
+typedef struct Log Log;
+void my_log(Log* log, Dict* out);
+
+// Sharp bit (puffers have spikes)
+// Define function types to be exported to the shared library
+// You don't need these, but you have to do some really gross
+// casts after loading the library without them.
+typedef VecEnv* (*create_environments_fn)(int num_envs, int buffers, bool use_gpu, int test_idx, Dict* kwargs);
+typedef Env* (*env_init_fn)(float* observations, double* actions, float* rewards,
+        float* terminals, int seed, Dict* kwargs);
+typedef void (*create_threads_fn)(VecEnv* vec, int threads, int block_size);
+typedef void (*vec_reset_fn)(VecEnv* vec);
+typedef void (*vec_step_fn)(VecEnv* vec);
+typedef void (*vec_recv_fn)(VecEnv* vec, int buffer);
+typedef void (*vec_send_fn)(VecEnv* vec, int buffer);
+typedef void (*env_close_fn)(Env* env);
+typedef void (*vec_close_fn)(VecEnv* vec);
+typedef void (*vec_render_fn)(VecEnv* vec, int env_idx);
+typedef void (*vec_log_fn)(VecEnv* vec, Dict* out);
+
+typedef void (*c_reset_fn)(Env* env);
+typedef void (*c_step_fn)(Env* env);
+typedef void (*c_close_fn)(Env* env);
+typedef void (*c_render_fn)(Env* env);
+
 #endif // PUFFERLIB_VECENV_H

@@ -30,59 +30,17 @@
 
 typedef torch::Tensor Tensor;
 
-#if defined(PUFFER_DEBUG)
-
-inline static void PUFFER_ASSERT_BREAK()
-{
-#if defined(_MSC_VER)
-  // assert (abort) does not break into the debugger in VS 2022 ! It's insane, so we have to use this weird contraption that's cross platform.
-  __debugbreak();
-#elif defined(__clang__) || defined(__GNUC__)
-  __builtin_trap();
-#else
-  /* Fallback method */
-  *((volatile int*)0) = 0; /* This will cause a segmentation fault */
-#endif
-}
-#endif
-
-// LibTorch throws exceptions on errors, log them correctly in debug mode only.
-#if PUFFER_DEBUG
-#define BEGIN_LIBTORCH_CATCH try {
-#else
-#define BEGIN_LIBTORCH_CATCH
-#endif
-
-#if PUFFER_DEBUG
-#define END_LIBTORCH_CATCH                                                                                             \
-  }                                                                                                                    \
-  catch (const c10::Error& e)                                                                                          \
-  {                                                                                                                    \
-    std::cerr << "Error from libtorch: " << e.what() << std::endl;                                                     \
-    PUFFER_ASSERT_BREAK();                                                                                             \
-    throw;                                                                                                             \
-  }
-
-#else
-#define END_LIBTORCH_CATCH
-#endif
-
-
-// CUDA kernel wrappers
-#include "modules.cpp"
-
-// get dtype based on bf16 flag
-inline torch::ScalarType get_dtype(bool bf16) {
-    return bf16 ? torch::kBFloat16 : torch::kFloat32;
-}
-
-namespace pufferlib {
-
-// Advantage computation is in advantage.cpp
-#include "advantage.cpp"
-
-// Model classes are in models.cpp
-#include "models.cpp"
+create_environments_fn create_envs;
+create_threads_fn create_threads;
+env_init_fn env_init;
+vec_reset_fn vec_reset;
+vec_step_fn vec_step;
+vec_send_fn vec_send;
+vec_recv_fn vec_recv;
+env_close_fn env_close;
+vec_close_fn vec_close;
+vec_log_fn vec_log;
+vec_render_fn vec_render;
 
 torch::Dtype to_torch_dtype(int dtype) {
     if (dtype == FLOAT) {
@@ -148,26 +106,57 @@ float cosine_annealing(float lr_base, float lr_min, int t, int T) {
 }
 
 
-typedef struct {
-    Tensor obs;
-    Tensor actions;
-    Tensor rewards;
-    Tensor terminals;
-} EnvBuf;
+std::tuple<VecEnv*, Tensor, Tensor, Tensor, Tensor>
+create_environments(int64_t num_envs, const std::string& env_name, Dict* env_kwargs) {
+    std::string name = env_name;
+    if (name.rfind("puffer_", 0) == 0) {
+        name = name.substr(7);
+    }
+    std::string so_path = "./" + name + ".so";
+    void* handle = dlopen(so_path.c_str(), RTLD_NOW);
+    if (!handle) {
+        fprintf(stderr, "dlopen error: %s\n", dlerror());
+        exit(1);
+    }
+    dlerror();
 
-std::tuple<StaticVec*, Tensor>
-create_environments(int num_buffers, int total_agents, const std::string& env_name, Dict* vec_kwargs, Dict* env_kwargs, EnvBuf& env) {
-    StaticVec* vec = create_static_vec(total_agents, num_buffers, vec_kwargs, env_kwargs);
-    printf("DEBUG create_environments: vec->size=%d, vec->total_agents=%d\n",
-        vec->size, vec->total_agents);
+    // Load the function pointer
+    create_envs = (create_environments_fn)dlsym(handle, "create_environments");
+    create_threads = (create_threads_fn)dlsym(handle, "create_threads");
+    env_init = (env_init_fn)dlsym(handle, "env_init");
+    vec_reset = (vec_reset_fn)dlsym(handle, "vec_reset");
+    vec_step = (vec_step_fn)dlsym(handle, "vec_step");
+    vec_send = (vec_send_fn)dlsym(handle, "vec_send");
+    vec_recv = (vec_recv_fn)dlsym(handle, "vec_recv");
+    env_close = (env_close_fn)dlsym(handle, "env_close");
+    vec_close = (vec_close_fn)dlsym(handle, "vec_close");
+    vec_log = (vec_log_fn)dlsym(handle, "vec_log");
+    vec_render = (vec_render_fn)dlsym(handle, "vec_render");
+    int obs_n = *(int*)dlsym(handle, "OBS_N");
+    int act_n = *(int*)dlsym(handle, "ACT_N");
+    int obs_t = *(int*)dlsym(handle, "OBS_T");
+    int act_t = *(int*)dlsym(handle, "ACT_T");
 
-    int obs_size = get_obs_size();
-    int num_atns = get_num_atns();
+    const char* dlsym_error = dlerror();
+    if (dlsym_error) {
+        fprintf(stderr, "dlsym error: %s\n", dlsym_error);
+        dlclose(handle);
+        exit(1);
+    }
 
-    env.obs = torch::from_blob(vec->gpu_observations, {total_agents, obs_size}, torch::dtype(to_torch_dtype(get_obs_type())).device(torch::kCUDA));
-    env.actions = torch::from_blob(vec->gpu_actions, {total_agents, num_atns}, torch::dtype(torch::kFloat64).device(torch::kCUDA));
-    env.rewards = torch::from_blob(vec->gpu_rewards, {total_agents}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
-    env.terminals = torch::from_blob(vec->gpu_terminals, {total_agents}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
+    VecEnv* vec = create_envs(num_envs, 2, true, 0, env_kwargs);
+    printf("Created VecEnv with %d environments\n", vec->size);
+
+    // Close the library
+    //dlclose(handle);
+ 
+    auto obs_dtype = to_torch_dtype(obs_t);
+    auto atn_dtype = to_torch_dtype(act_t);
+
+    Tensor obs = torch::from_blob(vec->gpu_observations, {num_envs, obs_n}, torch::dtype(obs_dtype).device(torch::kCUDA));
+    Tensor actions = torch::from_blob(vec->gpu_actions, {num_envs}, torch::dtype(torch::kFloat64).device(torch::kCUDA));
+    Tensor rewards = torch::from_blob(vec->gpu_rewards, {num_envs}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
+    Tensor terminals = torch::from_blob(vec->gpu_terminals, {num_envs}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
 
     // Create act_sizes tensor on CUDA (needed for sample_logits kernel)
     Tensor act_sizes = torch::from_blob(get_act_sizes(), {num_atns}, torch::dtype(torch::kInt32)).to(torch::kCUDA);

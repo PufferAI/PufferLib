@@ -669,6 +669,7 @@ static PyMethodDef methods[] = {
     {NULL, NULL, 0, NULL}
 };
 
+#ifndef PUFFER_NATIVECPP_PYBINDINGS
 // Module definition
 static PyModuleDef module = {
     PyModuleDef_HEAD_INIT,
@@ -682,3 +683,5 @@ PyMODINIT_FUNC PyInit_binding(void) {
     import_array();
     return PyModule_Create(&module);
 }
+
+#endif
