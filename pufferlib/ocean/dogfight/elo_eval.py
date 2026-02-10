@@ -34,20 +34,21 @@ import torch
 from pufferlib.ocean.dogfight.dogfight import Dogfight, OBS_SIZES
 
 
-def load_policy_from_path(path, env, device='cuda'):
+def load_policy_from_path(path, env, device='cuda', hidden_size=128):
     """Load policy from .pt file, handling both PuffeRL and CheckpointQueue formats.
 
     Args:
         path: Path to .pt checkpoint file.
         env: Dogfight environment instance (for policy construction).
         device: Torch device string.
+        hidden_size: Hidden layer size for policy network.
 
     Returns:
         Policy in eval mode with frozen parameters.
     """
     from pufferlib.models import Default as Policy
 
-    policy = Policy(env, hidden_size=128)
+    policy = Policy(env, hidden_size=hidden_size)
     policy = policy.to(device)
 
     state_dict = torch.load(path, map_location=device, weights_only=True)
@@ -138,6 +139,225 @@ def run_matches(env, player_policy, opponent_policy, num_games, device='cuda'):
         games_played += 1
 
     return results
+
+
+def run_matches_vectorized(player_policy, opponent_policy, num_games,
+                           obs_scheme=0, hidden_size=128, num_envs=64,
+                           device='cuda', max_ticks=6000):
+    """Run many games in parallel using vectorized envs.
+
+    Creates a temporary env with num_envs parallel environments,
+    runs batches of num_envs games simultaneously.
+
+    Args:
+        player_policy: Player neural network policy.
+        opponent_policy: Opponent neural network policy.
+        num_games: Total number of games to play.
+        obs_scheme: Observation scheme for the environment.
+        hidden_size: Hidden size (unused here but documents the pairing).
+        num_envs: Number of parallel environments.
+        device: Torch device string.
+        max_ticks: Maximum ticks per episode before forced draw.
+
+    Returns:
+        dict with keys: wins, losses, draws (from player perspective).
+    """
+    from pufferlib.ocean.dogfight import binding
+
+    env = Dogfight(
+        num_envs=num_envs,
+        render_mode=None,
+        obs_scheme=obs_scheme,
+        curriculum_enabled=1,
+        fixed_stage=20,
+        max_steps=max_ticks,
+    )
+    binding.vec_enable_opponent_override(env.c_envs, 1)
+
+    results = {'wins': 0, 'losses': 0, 'draws': 0}
+    games_completed = 0
+
+    # Per-env tick counters
+    env_ticks = np.zeros(num_envs, dtype=np.int32)
+
+    obs, _ = env.reset()
+
+    while games_completed < num_games:
+        obs_tensor = torch.as_tensor(obs, device=device)
+
+        with torch.no_grad():
+            logits_p, _ = player_policy.forward_eval(obs_tensor, state=None)
+            action_p = logits_p.sample()
+            action_p_np = action_p.cpu().numpy().astype(np.float32)
+            action_p_np = np.clip(action_p_np, -1, 1)
+
+        # Opponent forward pass
+        obs_opp = binding.vec_get_opponent_observations(env.c_envs)
+        obs_opp = torch.as_tensor(obs_opp, device=device)
+        if torch.isnan(obs_opp).any():
+            obs_opp = torch.nan_to_num(obs_opp, nan=0.0)
+
+        with torch.no_grad():
+            logits_o, _ = opponent_policy.forward_eval(obs_opp, state=None)
+            action_o = logits_o.sample()
+            action_o_np = action_o.cpu().numpy().astype(np.float32)
+            action_o_np = np.clip(action_o_np, -1, 1)
+
+        binding.vec_set_opponent_actions(env.c_envs, action_o_np)
+        obs, reward, terminal, truncation, info = env.step(action_p_np)
+        env_ticks += 1
+
+        # Check each env for episode completion
+        done_mask = terminal | truncation
+        for i in range(num_envs):
+            if done_mask[i] and games_completed < num_games:
+                r = reward[i]
+                if r > 0.5:
+                    results['wins'] += 1
+                elif r < -0.5:
+                    results['losses'] += 1
+                else:
+                    results['draws'] += 1
+                games_completed += 1
+                env_ticks[i] = 0
+
+    env.close()
+    return results
+
+
+def run_league_tournament(policies, league_dir, games_per_pair=30, num_envs=64,
+                          device='cuda'):
+    """Round-robin tournament for league policies.
+
+    Groups policies by obs_scheme, runs within-scheme round-robins using
+    vectorized match running, assembles combined win matrix, computes
+    ratings via iterative MLE.
+
+    Args:
+        policies: List of PolicyEntry objects (from league_manifest).
+        league_dir: Base directory for resolving relative model paths.
+        games_per_pair: Games per ordered pair (A vs B, then B vs A).
+        num_envs: Number of parallel environments for vectorized eval.
+        device: Torch device string.
+
+    Returns:
+        (win_matrix_dict, ratings_dict) where:
+            win_matrix_dict = {labels: [...], data: [[...]]}
+            ratings_dict = {policy_id: rating}
+    """
+    n = len(policies)
+    if n < 2:
+        print('[LEAGUE-TOURNAMENT] Need at least 2 policies')
+        return {'labels': [], 'data': []}, {}
+
+    labels = [p.id for p in policies]
+    # Win rate matrix: wins[i][j] = fraction of games i won against j
+    wins = [[0] * n for _ in range(n)]
+    draws = [[0] * n for _ in range(n)]
+
+    # Group by obs_scheme
+    scheme_groups = {}
+    for idx, p in enumerate(policies):
+        scheme_groups.setdefault(p.obs_scheme, []).append(idx)
+
+    # Run within-scheme round-robins
+    for scheme, indices in scheme_groups.items():
+        if len(indices) < 2:
+            continue
+
+        print(f'[LEAGUE-TOURNAMENT] Running scheme {scheme} round-robin: '
+              f'{len(indices)} policies, {len(indices)*(len(indices)-1)} pairs')
+
+        obs_scheme = scheme
+
+        # Small temp env just for policy construction (needs obs/action space)
+        tmp_env = Dogfight(
+            num_envs=1,
+            render_mode=None,
+            obs_scheme=obs_scheme,
+            curriculum_enabled=1,
+            fixed_stage=20,
+            max_steps=6000,
+        )
+
+        # Load all policies for this scheme
+        loaded = {}
+        for idx in indices:
+            p = policies[idx]
+            model_path = os.path.join(league_dir, p.model_path)
+            loaded[idx] = load_policy_from_path(
+                model_path, tmp_env, device, hidden_size=p.hidden_size)
+        tmp_env.close()
+
+        # Round-robin within scheme using vectorized matches
+        for i in indices:
+            for j in indices:
+                if i == j:
+                    continue
+                result = run_matches_vectorized(
+                    loaded[i], loaded[j], games_per_pair,
+                    obs_scheme=obs_scheme, num_envs=num_envs,
+                    device=device)
+                wins[i][j] = result['wins']
+                draws[i][j] = result['draws']
+
+                name_i = policies[i].id[:30]
+                name_j = policies[j].id[:30]
+                print(f'  {name_i} vs {name_j}: '
+                      f'{result["wins"]}W/{result["losses"]}L/{result["draws"]}D')
+
+    # Cross-scheme pairs get neutral entries (0.5/0.5 placeholder)
+    # They simply won't affect ratings since wins=losses
+
+    # Compute MLE ratings via iterative BT (anchor first policy at 1000)
+    elos = [1000.0] * n
+    for iteration in range(200):
+        for i in range(1, n):  # Skip anchor
+            matchups = []
+            ref_elos = {}
+            has_games = False
+            for j in range(n):
+                if i == j:
+                    continue
+                total_games = wins[i][j] + wins[j][i] + draws[i][j]
+                if total_games == 0:
+                    continue  # No data for cross-scheme pairs
+                has_games = True
+                tag = f'model_{j}'
+                ref_elos[tag] = elos[j]
+                matchups.append({
+                    'opponent_tag': tag,
+                    'wins': wins[i][j],
+                    'losses': wins[j][i],
+                    'draws': draws[i][j],
+                })
+            if has_games:
+                elos[i] = compute_elo_mle(matchups, ref_elos)
+
+    # Build results
+    ratings = {labels[i]: elos[i] for i in range(n)}
+    win_data = []
+    for i in range(n):
+        row = []
+        for j in range(n):
+            if i == j:
+                row.append(0.5)
+            else:
+                total = wins[i][j] + wins[j][i] + draws[i][j]
+                if total > 0:
+                    row.append((wins[i][j] + 0.5 * draws[i][j]) / total)
+                else:
+                    row.append(0.5)  # No data
+        win_data.append(row)
+
+    win_matrix = {'labels': labels, 'data': win_data}
+
+    # Print summary
+    print(f'\n[LEAGUE-TOURNAMENT] Ratings:')
+    for pid, rating in sorted(ratings.items(), key=lambda x: -x[1]):
+        print(f'  {pid[:40]}: {rating:.0f}')
+
+    return win_matrix, ratings
 
 
 def compute_elo_mle(matchup_results, reference_elos):

@@ -120,7 +120,13 @@ class DualPerspectiveTrainer:
                  opponent_epoch_length=DEFAULT_OPPONENT_EPOCH_LENGTH,
                  mastery_streak=DEFAULT_MASTERY_STREAK,
                  checkpoint_dir=None,
-                 run_id=None):
+                 run_id=None,
+                 skip_curriculum=False,
+                 league_opponent_pool=None,
+                 antiforgetting_pool=None,
+                 self_play_prob=None,
+                 league_prob=None,
+                 antiforgetting_prob=None):
         # Store custom config
         self.opponent_update_interval = opponent_update_interval
         self.selfplay_min_stage = selfplay_min_stage
@@ -217,11 +223,23 @@ class DualPerspectiveTrainer:
         self.opponent_lstm_h = None
         self.opponent_lstm_c = None
 
+        # League pools: external opponent lists for league training mode
+        self.league_opponent_pool = league_opponent_pool  # List of (path, tag)
+        self.antiforgetting_pool = antiforgetting_pool  # List of (path, tag)
+        # Opponent split probabilities (None = use defaults based on mode)
+        self._self_play_prob = self_play_prob
+        self._league_prob = league_prob
+        self._antiforgetting_prob = antiforgetting_prob
+
         print(f'[DUAL-SELFPLAY] Initialized: min_stage={selfplay_min_stage}, '
               f'checkpoint_lag={checkpoint_lag}, perf_threshold={perf_threshold}')
         print(f'[DUAL-SELFPLAY] Ratchet: epoch_length={opponent_epoch_length}, '
               f'mastery_streak={mastery_streak}')
         print(f'[DUAL-SELFPLAY] Checkpoint dir: {checkpoint_dir}')
+
+        # skip_curriculum: immediately activate self-play mode (for league training)
+        if skip_curriculum:
+            self._activate_selfplay_immediately()
 
     def _init_opponent_policy(self):
         """Create frozen opponent policy as copy of learner."""
@@ -240,6 +258,44 @@ class DualPerspectiveTrainer:
             p.requires_grad = False
 
         print(f'[DUAL-SELFPLAY] Opponent policy initialized from learner')
+
+    def _activate_selfplay_immediately(self):
+        """Activate self-play mode immediately, skipping curriculum.
+
+        Used by league training to start in self-play mode from tick 0.
+        Replicates the activation logic from _check_selfplay_transition().
+        """
+        print(f'[DUAL-SELFPLAY] skip_curriculum=True: activating self-play immediately')
+        self.use_dual_selfplay = True
+
+        self._allocate_opponent_buffers()
+
+        from pufferlib.ocean.dogfight import binding
+        binding.vec_enable_opponent_override(self.driver_env.c_envs, 1)
+        binding.vec_set_selfplay_active(self.driver_env.c_envs, 1)
+
+        # Signal workers via shared memory
+        if hasattr(self.vecenv, 'buf') and 'selfplay_active' in self.vecenv.buf:
+            self.vecenv.buf['selfplay_active'][0] = 1
+
+        # Initialize ratchet at rank 0
+        self._unlocked_rank = 0
+        self._current_rotation_idx = 0
+        self._epoch_start_step = self.trainer.global_step
+        self._rank_mastery_streak = 0
+        self._rotation_kills = 0.0
+        self._rotation_episodes = 0.0
+        self._epoch_kills = 0.0
+        self._epoch_episodes = 0.0
+        self._gate_clean_fights = 0.0
+        self._gate_total_episodes = 0.0
+
+        # If league pools are set, start with self-play opponent
+        self.opponent_policy.load_state_dict(self.learner_policy.state_dict())
+        self._current_opponent_path = None
+        self._current_opponent_tag = 'self'
+
+        print(f'[DUAL-SELFPLAY] Self-play active from tick 0')
 
     def _allocate_opponent_buffers(self):
         """Allocate experience buffers for opponent perspective."""
@@ -271,12 +327,21 @@ class DualPerspectiveTrainer:
         debug(1, f'Opponent obs buffer after allocation: range={obs_range}')
 
     def _update_opponent(self):
-        """Select opponent using 80/20 PFSP split.
+        """Select opponent using split probabilities.
 
-        With probability (1 - past_opponent_prob): use current learner weights (self-play).
-        With probability past_opponent_prob: sample from checkpoint pool using PFSP weighting,
-        where harder opponents (lower win rate) are sampled more often.
+        When league_opponent_pool is set (league mode), uses 3-way split:
+          self_play_prob (default 0.35): current learner weights
+          league_prob (default 0.50): PFSP from league pool
+          antiforgetting_prob (default 0.15): uniform from antiforgetting pool
+
+        Otherwise uses standard 80/20 split:
+          (1 - past_opponent_prob): self-play
+          past_opponent_prob: PFSP from checkpoint pool
         """
+        if self.league_opponent_pool is not None:
+            self._update_opponent_league()
+            return
+
         pool_size = len(self.checkpoint_queue.checkpoints)
 
         if random.random() < self.past_opponent_prob and pool_size > 0:
@@ -296,6 +361,90 @@ class DualPerspectiveTrainer:
             self._current_opponent_tag = 'self'
             self.last_opponent_update = self.trainer.global_step
             debug(1, f'Using current learner weights as opponent (self-play)')
+
+    def _update_opponent_league(self):
+        """Select opponent using 3-way league split (35/50/15)."""
+        sp_prob = self._self_play_prob if self._self_play_prob is not None else 0.35
+        lg_prob = self._league_prob if self._league_prob is not None else 0.50
+        # antiforgetting_prob is the remainder
+
+        r = random.random()
+
+        if r < sp_prob:
+            # Self-play: use current learner weights
+            self.opponent_policy.load_state_dict(self.learner_policy.state_dict())
+            self._current_opponent_path = None
+            self._current_opponent_tag = 'self'
+            self.last_opponent_update = self.trainer.global_step
+            debug(1, f'[LEAGUE] Self-play opponent selected')
+
+        elif r < sp_prob + lg_prob and self.league_opponent_pool:
+            # League PFSP: sample from league pool weighted by difficulty
+            path, tag = self._sample_league_pfsp()
+            if path:
+                self._load_opponent_from_path(path)
+                self._current_opponent_path = path
+                self._current_opponent_tag = tag
+                self.last_opponent_update = self.trainer.global_step
+                wr = self.opponent_win_rates.get(tag, 0.5)
+                print(f'[LEAGUE-PFSP] Sampled league opponent: {tag} (win_rate={wr:.2f})')
+            else:
+                # Fallback to self-play
+                self.opponent_policy.load_state_dict(self.learner_policy.state_dict())
+                self._current_opponent_path = None
+                self._current_opponent_tag = 'self'
+                self.last_opponent_update = self.trainer.global_step
+
+        elif self.antiforgetting_pool:
+            # Anti-forgetting: uniform sample from anchor pool
+            path, tag = random.choice(self.antiforgetting_pool)
+            self._load_opponent_from_path(path)
+            self._current_opponent_path = path
+            self._current_opponent_tag = tag
+            self.last_opponent_update = self.trainer.global_step
+            print(f'[LEAGUE-AF] Anti-forgetting opponent: {tag}')
+
+        else:
+            # No pools available, fallback to self-play
+            self.opponent_policy.load_state_dict(self.learner_policy.state_dict())
+            self._current_opponent_path = None
+            self._current_opponent_tag = 'self'
+            self.last_opponent_update = self.trainer.global_step
+
+    def _sample_league_pfsp(self):
+        """Sample from league opponent pool using PFSP weighting."""
+        if not self.league_opponent_pool:
+            return None, None
+
+        weights = []
+        for path, tag in self.league_opponent_pool:
+            wr = self.opponent_win_rates.get(tag, 0.5)
+            w = (1.0 - wr) ** self.pfsp_exponent
+            weights.append(max(w, 1e-6))
+
+        total = sum(weights)
+        probs = [w / total for w in weights]
+        idx = random.choices(range(len(self.league_opponent_pool)), weights=probs, k=1)[0]
+        return self.league_opponent_pool[idx]
+
+    def _load_opponent_from_path(self, path):
+        """Load opponent policy from a raw .pt file (PuffeRL or CheckpointQueue format)."""
+        state_dict = torch.load(path, map_location=self.config['device'], weights_only=True)
+
+        if isinstance(state_dict, dict) and 'policy_state_dict' in state_dict:
+            self.opponent_policy.load_state_dict(state_dict['policy_state_dict'])
+        else:
+            cleaned = {}
+            for k, v in state_dict.items():
+                if k.startswith('lstm.') or k.startswith('cell.'):
+                    continue
+                new_k = k.replace('module.', '').replace('policy.', '')
+                cleaned[new_k] = v
+            self.opponent_policy.load_state_dict(cleaned)
+
+        self.opponent_policy.eval()
+        for p in self.opponent_policy.parameters():
+            p.requires_grad = False
 
     def _sample_pfsp_opponent(self):
         """Sample opponent from checkpoint pool, weighted toward hard opponents.
@@ -1763,6 +1912,140 @@ def eval_selfplay(env_name, args, player_path, opponent_path, load_id=None):
             imageio.mimsave(gif_path, frames, fps=fps, loop=0)
             print(f'[EVAL-SELFPLAY] Saved {len(frames)} frames to {gif_path}')
             frames = []  # Reset to allow more recording
+
+
+def train_league_round(policy_entry, manifest, league_dir, training_steps,
+                       device='cuda', wandb_project=None):
+    """Train one policy for one league round.
+
+    Loads the policy, creates env with the correct obs_scheme, builds
+    league/antiforgetting pools from manifest, and trains with
+    skip_curriculum=True and 35/50/15 split.
+
+    Args:
+        policy_entry: PolicyEntry from manifest.
+        manifest: LeagueManifest (for building opponent pools).
+        league_dir: Base directory for resolving model paths.
+        training_steps: Number of training steps.
+        device: Torch device string.
+        wandb_project: Optional W&B project for logging.
+
+    Returns:
+        Path to candidate checkpoint, or None on failure.
+    """
+    env_name = 'puffer_dogfight'
+    args = pufferl.load_config(env_name)
+
+    # Override env config for league training
+    args['env']['obs_scheme'] = policy_entry.obs_scheme
+    args['env']['fixed_stage'] = 20
+    args['env']['curriculum_enabled'] = 0
+    args['train']['total_timesteps'] = training_steps
+    args['train']['device'] = device
+
+    # Apply policy-specific training config if available
+    for k, v in policy_entry.config.items():
+        if k in args.get('train', {}):
+            args['train'][k] = v
+        elif k in args.get('env', {}):
+            args['env'][k] = v
+
+    # Build league opponent pool (same obs_scheme, excluding self)
+    league_pool = []
+    antiforgetting = []
+    same_scheme = manifest.get_policies_by_scheme(policy_entry.obs_scheme)
+    for p in same_scheme:
+        if p.id == policy_entry.id:
+            continue
+        model_path = os.path.join(league_dir, p.model_path)
+        if not os.path.exists(model_path):
+            print(f'[LEAGUE-TRAIN] WARNING: Missing model {model_path} for {p.id}')
+            continue
+        if p.status == 'frozen':
+            antiforgetting.append((model_path, p.id))
+        else:
+            league_pool.append((model_path, p.id))
+
+    # Include frozen anchors in league pool too (for PFSP diversity)
+    for path, tag in antiforgetting:
+        league_pool.append((path, tag))
+
+    print(f'[LEAGUE-TRAIN] Policy: {policy_entry.id}')
+    print(f'[LEAGUE-TRAIN] obs_scheme={policy_entry.obs_scheme}, '
+          f'hidden_size={policy_entry.hidden_size}')
+    print(f'[LEAGUE-TRAIN] League pool: {len(league_pool)} opponents')
+    print(f'[LEAGUE-TRAIN] Anti-forgetting pool: {len(antiforgetting)} anchors')
+
+    # Create environment
+    vecenv = pufferl.load_env(env_name, args)
+
+    # Create policy with correct hidden_size
+    policy = pufferl.load_policy(args, vecenv, env_name)
+
+    # Load existing weights
+    model_path = os.path.join(league_dir, policy_entry.model_path)
+    state_dict = torch.load(model_path, map_location=device, weights_only=True)
+    if isinstance(state_dict, dict) and 'policy_state_dict' in state_dict:
+        cleaned = state_dict['policy_state_dict']
+    else:
+        cleaned = {}
+        for k, v in state_dict.items():
+            if k.startswith('lstm.') or k.startswith('cell.'):
+                continue
+            new_k = k.replace('module.', '').replace('policy.', '')
+            cleaned[new_k] = v
+    policy.load_state_dict(cleaned)
+    print(f'[LEAGUE-TRAIN] Loaded weights from {model_path}')
+
+    # Create logger
+    logger = None
+    run_id = None
+    if wandb_project:
+        args['wandb'] = True
+        args['wandb_project'] = wandb_project
+        logger = pufferl.WandbLogger(args)
+        if hasattr(logger, 'run') and logger.run:
+            run_id = logger.run.id
+
+    # Create trainer with skip_curriculum and league pools
+    train_config = {**args['train'], 'env': env_name}
+    trainer = DualPerspectiveTrainer(
+        train_config, vecenv, policy, logger,
+        skip_curriculum=True,
+        league_opponent_pool=league_pool if league_pool else None,
+        antiforgetting_pool=antiforgetting if antiforgetting else None,
+        self_play_prob=0.35,
+        league_prob=0.50,
+        antiforgetting_prob=0.15,
+        checkpoint_dir=f'checkpoints/league_{policy_entry.id}',
+        run_id=run_id,
+    )
+
+    # Training loop
+    total_timesteps = train_config['total_timesteps']
+    while trainer.global_step < total_timesteps:
+        if train_config['device'] == 'cuda':
+            torch.compiler.cudagraph_mark_step_begin()
+        trainer.evaluate()
+        if train_config['device'] == 'cuda':
+            torch.compiler.cudagraph_mark_step_begin()
+        trainer.train()
+
+    # Save candidate checkpoint
+    candidate_dir = os.path.join(league_dir, 'candidates')
+    os.makedirs(candidate_dir, exist_ok=True)
+    next_gen = policy_entry.generation + 1
+    candidate_filename = f'{policy_entry.id}_gen{next_gen}_candidate.pt'
+    candidate_path = os.path.join(candidate_dir, candidate_filename)
+    torch.save(policy.state_dict(), candidate_path)
+
+    # Cleanup
+    model_path_result = trainer.close()
+    if logger:
+        logger.close(model_path_result)
+
+    print(f'[LEAGUE-TRAIN] Saved candidate: {candidate_path}')
+    return candidate_path
 
 
 def main():
