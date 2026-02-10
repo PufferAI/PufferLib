@@ -650,8 +650,9 @@ void toPx(Point *points, Glyph* glyphs, int size, PlotArgs args) {
             px = screen_pos.x;
             py = screen_pos.y;
         } else {
-            px = args.left_margin + (xi - x_min) / dx * args.width;
-            py = args.height - args.bottom_margin - (yi - y_min) / dy * args.height;
+            // TODO: Check margins
+            px = args.left_margin + (xi - x_min) / dx * (args.width - args.left_margin - args.right_margin);
+            py = args.height - args.bottom_margin - (yi - y_min) / dy * (args.height - args.top_margin - args.bottom_margin);
         }
 
         float cmap = points[i].c;
@@ -825,16 +826,16 @@ int main(void) {
         "train/vf_clip_coef",
         "train/vf_coef",
         "train/max_grad_norm",
-        "train/adam_beta1",
-        "train/adam_beta2",
-        "train/adam_eps",
+        "train/beta1",
+        "train/beta2",
+        "train/eps",
         "train/prio_alpha",
         "train/prio_beta0",
-        "train/bptt_horizon",
-        "train/num_minibatches",
+        "train/horizon",
+        "train/replay_ratio",
         "train/minibatch_size",
         "policy/hidden_size",
-        "env/num_envs",
+        "vec/total_agents",
     };
 
     //char* items[] = {"environment/score", "cost", "train/learning_rate", "train/gamma", "train/gae_lambda"};

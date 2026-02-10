@@ -152,24 +152,7 @@ void c_reset(Cartpole* env) {
 }
 
 void c_step(Cartpole* env) {  
-    // float force = 0.0;
-    // if (env->continuous) {
-    //     force = env->actions[0] * FORCE_MAG;
-    // } else {
-    //     force = (env->actions[0] > 0.5f) ? FORCE_MAG : -FORCE_MAG; 
-    // }
-
     float a = env->actions[0];
-
-    /* ===== runtime sanity check –– delete after debugging ===== */
-    if (!isfinite(a) || a < -1.0001f || a > 1.0001f) {
-        fprintf(stderr,
-                "[BAD ACTION] tick=%d  raw=%.6f\n",
-                env->tick, a);
-        fflush(stderr);
-    }
-    /* ========================================================== */
-
     if (!isfinite(a)) {
         a = 0.0f;
     }
@@ -177,7 +160,7 @@ void c_step(Cartpole* env) {
     env->actions[0] = a;
 
     float force = env->continuous ? a * env->force_mag
-                                  : (a > 0.5f ? env->force_mag: -env->force_mag);
+        : (a > 0.5f ? env->force_mag: -env->force_mag);
 
     float costheta = cosf(env->theta);
     float sintheta = sinf(env->theta);

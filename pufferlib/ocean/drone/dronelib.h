@@ -405,7 +405,7 @@ void compute_derivatives(State* state, Params* params, float* actions, StateDeri
     }
 }
 
-void step(State* initial, StateDerivative* deriv, float dt, State* output) {
+void rk_step(State* initial, StateDerivative* deriv, float dt, State* output) {
     output->pos = add3(initial->pos, scalmul3(deriv->vel, dt));
     output->vel = add3(initial->vel, scalmul3(deriv->v_dot, dt));
     output->quat = add_quat(initial->quat, scalmul_quat(deriv->q_dot, dt));
@@ -422,13 +422,13 @@ void rk4_step(State* state, Params* params, float* actions, float dt) {
 
     compute_derivatives(state, params, actions, &k1);
 
-    step(state, &k1, dt * 0.5f, &temp_state);
+    rk_step(state, &k1, dt * 0.5f, &temp_state);
     compute_derivatives(&temp_state, params, actions, &k2);
 
-    step(state, &k2, dt * 0.5f, &temp_state);
+    rk_step(state, &k2, dt * 0.5f, &temp_state);
     compute_derivatives(&temp_state, params, actions, &k3);
 
-    step(state, &k3, dt, &temp_state);
+    rk_step(state, &k3, dt, &temp_state);
     compute_derivatives(&temp_state, params, actions, &k4);
 
     float dt_6 = dt / 6.0f;

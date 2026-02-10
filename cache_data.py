@@ -7,17 +7,17 @@ import os
 
 env_names = sorted([
     'breakout',
-    'impulse_wars',
-    'pacman',
-    'tetris',
-    'g2048',
-    'moba',
-    'pong',
-    'tower_climb',
-    'grid',
-    'nmmo3',
-    'snake',
-    'tripletriad'
+    #'impulse_wars',
+    #'pacman',
+    #'tetris',
+    #'g2048',
+    #'moba',
+    #'pong',
+    #'tower_climb',
+    #'grid',
+    #'nmmo3',
+    #'snake',
+    #'tripletriad'
 ])
 
 HYPERS = [
@@ -31,16 +31,16 @@ HYPERS = [
     'train/vf_clip_coef',
     'train/vf_coef',
     'train/max_grad_norm',
-    'train/adam_beta1',
-    'train/adam_beta2',
-    'train/adam_eps',
+    'train/beta1',
+    'train/beta2',
+    'train/eps',
     'train/prio_alpha',
     'train/prio_beta0',
-    'train/bptt_horizon',
-    'train/num_minibatches',
+    'train/horizon',
+    'train/replay_ratio',
     'train/minibatch_size',
     'policy/hidden_size',
-    'env/num_envs',
+    'vec/total_agents',
 ]
 
 ALL_KEYS = [
@@ -163,7 +163,11 @@ def compute_tsne():
 
     from sklearn.manifold import TSNE
     proj = TSNE(n_components=2)
-    reduced = proj.fit_transform(normed)
+    reduced = None
+    try:
+        reduced = proj.fit_transform(normed)
+    except ValueError:
+        print('Warning: TSNE failed. Skipping TSNE')
 
     row = 0
     for env in env_names:
@@ -175,9 +179,15 @@ def compute_tsne():
         sz = len(data[env]['agent_steps'])
 
         data[env] = {k: v for k, v in data[env].items() if k in ALL_KEYS}
-        data[env]['tsne1'] = reduced[row:row+sz, 0].tolist()
-        data[env]['tsne2'] = reduced[row:row+sz, 1].tolist()
+        if reduced is not None:
+            data[env]['tsne1'] = reduced[row:row+sz, 0].tolist()
+            data[env]['tsne2'] = reduced[row:row+sz, 1].tolist()
+        else:
+            data[env]['tsne1'] = np.random.rand(sz).tolist()
+            data[env]['tsne2'] = np.random.rand(sz).tolist()
+
         row += sz
+        print(f'Env {env} has {sz} points')
 
     json.dump(data, open('all_cache.json', 'w'))
 

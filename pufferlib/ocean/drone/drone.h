@@ -189,10 +189,10 @@ void c_step(DroneEnv *env) {
     env->terminals[i] = 0.0f;
 
     float atn[4] = {
-      (float)env->actions[4 * i],
-      (float)env->actions[4 * i + 1],
-      (float)env->actions[4 * i + 2],
-      (float)env->actions[4 * i + 3]
+       clampf((float)env->actions[4 * i], -1.0f, 1.0f),
+       clampf((float)env->actions[4 * i + 1], -1.0f, 1.0f),
+       clampf((float)env->actions[4 * i + 2], -1.0f, 1.0f),
+       clampf((float)env->actions[4 * i + 3], -1.0f, 1.0f)
     };
     move_drone(agent, atn);
 

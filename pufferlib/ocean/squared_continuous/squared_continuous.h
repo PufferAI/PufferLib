@@ -1,7 +1,6 @@
-/* Squared: a sample single-agent grid env.
- * Use this as a tutorial and template for your first env.
- * See the Target env for a slightly more complex example.
- * Star PufferLib on GitHub to support. It really, really helps!
+/* Squared Continuous: continuous action version of squared.
+ * 2 continuous action dimensions: vertical and horizontal.
+ * Actions are clamped to [-1, 1] and thresholded at 0.25 magnitude.
  */
 
 #include <stdlib.h>
@@ -66,24 +65,35 @@ void c_reset(Squared* env) {
     env->observations[target_idx] = TARGET;
 }
 
+// Clamp value to [-1, 1]
+static inline double clamp_action(double x) {
+    return x < -1.0 ? -1.0 : (x > 1.0 ? 1.0 : x);
+}
+
 // Required function
 void c_step(Squared* env) {
     env->tick += 1;
 
-    int action = env->actions[0];
+    // Continuous actions: clamp to [-1, 1] then threshold to get discrete movement
+    // action[0]: vertical (positive = down, negative = up)
+    // action[1]: horizontal (positive = right, negative = left)
+    double vert = clamp_action(env->actions[0]);
+    double horiz = clamp_action(env->actions[1]);
     env->terminals[0] = 0;
     env->rewards[0] = 0;
 
     env->observations[env->r*env->size + env->c] = EMPTY;
 
-    if (action == DOWN) {
-        env->r += 1;
-    } else if (action == RIGHT) {
-        env->c += 1;
-    } else if (action == UP) {
-        env->r -= 1;
-    } else if (action == LEFT) {
-        env->c -= 1;
+    // Threshold at 0.25 magnitude to determine direction (allows stationary)
+    if (vert > 0.25) {
+        env->r += 1;  // DOWN
+    } else if (vert < -0.25) {
+        env->r -= 1;  // UP
+    }
+    if (horiz > 0.25) {
+        env->c += 1;  // RIGHT
+    } else if (horiz < -0.25) {
+        env->c -= 1;  // LEFT
     }
 
     if (env->tick > 3*env->size
@@ -113,7 +123,7 @@ void c_step(Squared* env) {
 // Required function. Should handle creating the client on first call
 void c_render(Squared* env) {
     if (!IsWindowReady()) {
-        InitWindow(64*env->size, 64*env->size, "PufferLib Squared");
+        InitWindow(64*env->size, 64*env->size, "PufferLib Squared Continuous");
         SetTargetFPS(5);
     }
 

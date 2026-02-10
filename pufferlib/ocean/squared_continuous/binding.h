@@ -1,16 +1,16 @@
-#include "../ocean/connect4/connect4.h"
-#define OBS_SIZE 42
-#define NUM_ATNS 1
-#define ACT_SIZES {7}
-#define OBS_TYPE FLOAT
+#include "squared_continuous.h"
+#define OBS_SIZE 121
+#define NUM_ATNS 2
+#define ACT_SIZES {1, 1}  // Continuous: 2 dimensions, each size 1
+#define OBS_TYPE UNSIGNED_CHAR
 #define ACT_TYPE DOUBLE
 
-#define Env CConnect4
+#define Env Squared
 #include "env_binding.h"
 
 void my_init(Env* env, Dict* kwargs) {
     env->num_agents = 1;
-    init(env);
+    env->size = dict_get(kwargs, "size")->value;
 }
 
 void my_log(Log* log, Dict* out) {

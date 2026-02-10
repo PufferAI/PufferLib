@@ -58,6 +58,11 @@ pybind11::dict train(pybind11::object pufferl_obj) {
     return losses;
 }
 
+void puf_close(pybind11::object pufferl_obj) {
+    PuffeRL& pufferl = pufferl_obj.cast<PuffeRL&>();
+    close_impl(pufferl);
+}
+
 double get_config(py::dict& kwargs, const char* key) {
     if (!kwargs.contains(key)) {
         throw std::runtime_error(std::string("Missing config key: ") + key);
@@ -87,10 +92,10 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl(pybind11::dict kwargs, pybind
     // Layout (total_agents and num_buffers come from vec config)
     hypers.total_agents = get_config(vec_kwargs, "total_agents");
     hypers.num_buffers = get_config(vec_kwargs, "num_buffers");
+    hypers.num_threads = get_config(vec_kwargs, "num_threads");
     hypers.horizon = get_config(kwargs, "horizon");
     // Model architecture (num_atns computed from env in C++)
     hypers.hidden_size = get_config(policy_kwargs, "hidden_size");
-    hypers.expansion_factor = get_config(policy_kwargs, "expansion_factor");
     hypers.num_layers = get_config(policy_kwargs, "num_layers");
     // Learning rate
     hypers.lr = get_config(kwargs, "learning_rate");
@@ -125,7 +130,10 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl(pybind11::dict kwargs, pybind
     hypers.kernels = get_config(kwargs, "kernels");
     hypers.profile = get_config(kwargs, "profile");
     hypers.use_omp = get_config(kwargs, "use_omp");
-    hypers.bf16 = get_config(kwargs, "bf16");
+    // Multi-GPU
+    hypers.rank = get_config(kwargs, "rank");
+    hypers.world_size = get_config(kwargs, "world_size");
+    hypers.nccl_id_path = kwargs["nccl_id_path"].cast<std::string>();
 
     std::string env_name = kwargs["env_name"].cast<std::string>();
     Dict* vec_dict = py_dict_to_c_dict(vec_kwargs.cast<py::dict>());
@@ -145,12 +153,7 @@ TORCH_LIBRARY_IMPL(pufferlib, CPU, m) {
 
 TORCH_LIBRARY(_C, m) {
     m.def("mingru_gate(Tensor state, Tensor combined) -> (Tensor, Tensor)");
-    m.def("log_coeffs_and_values(Tensor gate, Tensor hidden) -> (Tensor, Tensor)");
-    m.def("fused_scan(Tensor combined, Tensor state) -> (Tensor, Tensor)");
-    m.def("fused_ppo_loss(Tensor logits, Tensor values, Tensor actions, Tensor old_logprobs, Tensor advantages, Tensor prio, Tensor values, Tensor returns, Tensor adv_mean, Tensor adv_std, float clip_coef, float vf_clip_coef, float vf_coef, float ent_coef) -> Tensor");
-    m.def("fc_relu_fc_max(Tensor x, Tensor W1, Tensor b1, Tensor W2, Tensor b2) -> Tensor");
     m.def("fc_max(Tensor x, Tensor W, Tensor b) -> Tensor");
-    m.def("policy_forward(Tensor obs, Tensor state) -> (Tensor, Tensor, Tensor)");
 }
 
 __attribute__((visibility("default")))
@@ -158,15 +161,10 @@ extern void register_pufferlib_bindings(pybind11::module_& m) {
     m.def("log_environments", &log_environments);
     m.def("rollouts", &rollouts);
     m.def("train", &train);
+    m.def("close", &puf_close);
     m.def("logcumsumexp_cuda", &logcumsumexp_cuda);
-    m.def("policy_forward", &PolicyMinGRU::forward);
     m.def("initial_state", &initial_state);
     m.def("mingru_gate", &mingru_gate);
-    m.def("log_coeffs_and_values", &log_coeffs_and_values);
-    m.def("fused_scan", &fused_scan);
-    m.def("fused_ppo_loss", &fused_ppo_loss);
-    m.def("fc_relu_fc_max", &fc_relu_fc_max);
-    m.def("fc_relu_fc_max_cpp", &fc_relu_fc_max_cpp);
     m.def("fc_max", &fc_max);
     m.def("fc_max_cpp", &fc_max_cpp);
     m.def("sample_logits", &sample_logits);
@@ -191,7 +189,7 @@ extern void register_pufferlib_bindings(pybind11::module_& m) {
         .def_readwrite("num_buffers", &HypersT::num_buffers)
         .def_readwrite("num_atns", &HypersT::num_atns)
         .def_readwrite("hidden_size", &HypersT::hidden_size)
-        .def_readwrite("expansion_factor", &HypersT::expansion_factor)
+
         .def_readwrite("replay_ratio", &HypersT::replay_ratio)
         .def_readwrite("num_layers", &HypersT::num_layers)
         .def_readwrite("lr", &HypersT::lr)
@@ -215,7 +213,10 @@ extern void register_pufferlib_bindings(pybind11::module_& m) {
         .def_readwrite("use_rnn", &HypersT::use_rnn)
         .def_readwrite("cudagraphs", &HypersT::cudagraphs)
         .def_readwrite("kernels", &HypersT::kernels)
-        .def_readwrite("profile", &HypersT::profile);
+        .def_readwrite("profile", &HypersT::profile)
+        .def_readwrite("rank", &HypersT::rank)
+        .def_readwrite("world_size", &HypersT::world_size)
+        .def_readwrite("nccl_id_path", &HypersT::nccl_id_path);
 
     py::class_<RolloutBuf>(m, "RolloutBuf")
         .def_readwrite("observations", &RolloutBuf::observations)
@@ -236,31 +237,39 @@ extern void register_pufferlib_bindings(pybind11::module_& m) {
         .def_readwrite("rollouts", &PuffeRL::rollouts);
 
     py::class_<PolicyLSTM, std::shared_ptr<PolicyLSTM>, torch::nn::Module> cls(m, "PolicyLSTM");
-    cls.def(py::init<int64_t, int64_t, int64_t>());
+    cls.def(py::init<int, int, int>());
     cls.def("forward", &PolicyLSTM::forward);
     cls.def("forward_train", &PolicyLSTM::forward_train);
+
+    py::class_<Logits>(m, "Logits")
+        .def_readwrite("mean", &Logits::mean)
+        .def_readwrite("logstd", &Logits::logstd);
 
     py::class_<Encoder, std::shared_ptr<Encoder>, torch::nn::Module>(m, "Encoder");
     py::class_<Decoder, std::shared_ptr<Decoder>, torch::nn::Module>(m, "Decoder");
     py::class_<DefaultEncoder, std::shared_ptr<DefaultEncoder>, Encoder>(m, "DefaultEncoder")
-        .def(py::init<int64_t, int64_t>());
+        .def(py::init<int, int>());
     py::class_<SnakeEncoder, std::shared_ptr<SnakeEncoder>, Encoder>(m, "SnakeEncoder")
-        .def(py::init<int64_t, int64_t, int64_t>());
+        .def(py::init<int, int, int>());
     py::class_<G2048Encoder, std::shared_ptr<G2048Encoder>, Encoder>(m, "G2048Encoder")
-        .def(py::init<int64_t, int64_t>());
+        .def(py::init<int, int>());
     py::class_<DefaultDecoder, std::shared_ptr<DefaultDecoder>, Decoder>(m, "DefaultDecoder")
-        .def(py::init<int64_t, int64_t>());
+        .def(py::init<int, int, bool>(), py::arg("hidden"), py::arg("output"), py::arg("is_continuous") = false);
     py::class_<G2048Decoder, std::shared_ptr<G2048Decoder>, Decoder>(m, "G2048Decoder")
-        .def(py::init<int64_t, int64_t>());
+        .def(py::init<int, int>());
     py::class_<NMMO3Encoder, std::shared_ptr<NMMO3Encoder>, Encoder>(m, "NMMO3Encoder")
-        .def(py::init<int64_t, int64_t>());
+        .def(py::init<int, int>());
     py::class_<NMMO3Decoder, std::shared_ptr<NMMO3Decoder>, Decoder>(m, "NMMO3Decoder")
-        .def(py::init<int64_t, int64_t>());
+        .def(py::init<int, int>());
     py::class_<DriveEncoder, std::shared_ptr<DriveEncoder>, Encoder>(m, "DriveEncoder")
-        .def(py::init<int64_t, int64_t>());
+        .def(py::init<int, int>());
 
-    py::class_<PolicyMinGRU, std::shared_ptr<PolicyMinGRU>, torch::nn::Module> cls2(m, "PolicyMinGRU");
-    cls2.def(py::init<std::shared_ptr<Encoder>, std::shared_ptr<Decoder>, int64_t, int64_t, int64_t, int64_t, int64_t, bool>());
-    cls2.def("forward", &PolicyMinGRU::forward);
-    cls2.def("forward_train", &PolicyMinGRU::forward_train);
+    py::class_<RNN, std::shared_ptr<RNN>, torch::nn::Module>(m, "RNN");
+    py::class_<MinGRU, std::shared_ptr<MinGRU>, RNN>(m, "MinGRU")
+        .def(py::init<int, int, bool>(), py::arg("hidden"), py::arg("num_layers") = 1, py::arg("kernels") = true);
+
+    py::class_<Policy, std::shared_ptr<Policy>, torch::nn::Module> cls2(m, "Policy");
+    cls2.def(py::init<std::shared_ptr<Encoder>, std::shared_ptr<Decoder>, std::shared_ptr<RNN>, int, int, int>());
+    cls2.def("forward", &Policy::forward);
+    cls2.def("forward_train", &Policy::forward_train);
 }

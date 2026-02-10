@@ -19,6 +19,8 @@ import importlib
 import configparser
 from threading import Thread
 from collections import defaultdict, deque
+import multiprocessing as mp
+from copy import deepcopy
 
 import numpy as np
 import psutil
@@ -33,10 +35,11 @@ import pufferlib
 import pufferlib.sweep
 import pufferlib.vector
 import pufferlib.pytorch
-
-# Global binding reference
-binding = None
-
+try:
+    from pufferlib import _C
+    from pufferlib import fake_tensors
+except ImportError:
+    raise ImportError('Failed to import C/CUDA advantage kernel. If you have non-default PyTorch, try installing with --no-build-isolation')
 
 import rich
 import rich.traceback
@@ -79,14 +82,14 @@ class PuffeRL:
                 f'minibatch_size {minibatch_size} must be divisible by horizon {horizon}')
 
         if (minibatch_size > batch_size):
-            raise pufferlib.APIUsageError(f'minibatch_size {minibatch_size} must be >= '
-                f'horizon {horizon} * total_agents {total_agents} ({batch_size})')
+            minibatch_size = batch_size
+            print(f'WARNING: minibatch_size {minibatch_size} > total_agents {total_agents} * horizon {horizon}. Reducing it for you.')
+
+            #raise pufferlib.APIUsageError(f'minibatch_size {minibatch_size} must be <= '
+            #    f'horizon {horizon} * total_agents {total_agents} ({batch_size})')
 
         # Logging
         self.logger = logger
-        if logger is None:
-            self.logger = Logger(config)
-
         self.pufferl_cpp = _C.create_pufferl(config, vec_config, env_config, policy_config)
         self.rollouts = self.pufferl_cpp.rollouts
 
@@ -96,7 +99,6 @@ class PuffeRL:
         self.global_step = 0
         self.last_log_step = 0
         self.last_log_time = time.time()
-        self.start_time = time.time()
         self.utilization = Utilization()
         self.profile = Profile()
         self.stats = defaultdict(list)
@@ -108,6 +110,7 @@ class PuffeRL:
 
         # Dashboard
         self.model_size = sum(p.numel() for p in self.policy_fp32.parameters() if p.requires_grad)
+        self.start_time = time.time()
         self.print_dashboard(clear=True)
 
     @property
@@ -138,7 +141,7 @@ class PuffeRL:
             torch.cuda.synchronize()
             logs = _C.log_environments(self.pufferl_cpp)
             self.stats = logs
-            self.write_logs(logs)
+            logs = self.write_logs(logs)
 
             #self.losses = losses
             self.print_dashboard()
@@ -154,14 +157,17 @@ class PuffeRL:
         return logs
 
     def write_logs(self, logs):
+        if not self.logger:
+            return
+
         config = self.config
         device = config['device']
-        agent_steps = int(dist_sum(self.global_step, device))
+        agent_steps = int(self.global_step * config['gpus'])
         logs = {
-            'SPS': dist_sum(self.sps, device),
-            'agent_steps': agent_steps,
-            'uptime': time.time() - self.start_time,
-            'epoch': int(dist_sum(self.epoch, device)),
+            'SPS': int(self.sps * config['gpus']),
+            'agent_steps': int(agent_steps * config['gpus']),
+            'uptime': self.uptime,
+            'epoch': int(self.epoch * config['gpus']),
             #'learning_rate': self.optimizer.param_groups[0]["lr"],
             **{f'environment/{k}': v for k, v in logs.items()},
             **{f'losses/{k}': v for k, v in self.losses.items()},
@@ -171,22 +177,33 @@ class PuffeRL:
             #**{f'performance/{k}': dist_sum(v['elapsed'], device) for k, v in self.profile},
         }
 
-        if torch.distributed.is_initialized():
-           if torch.distributed.get_rank() == 0:
-               self.logger.log(logs, agent_steps)
-               return logs
-           else:
-               return None
-
         self.logger.log(logs, agent_steps)
         return logs
 
     def close(self):
-        #os._exit(0)
-        return
-        self.vecenv.close()
         self.utilization.stop()
         model_path = self.save_checkpoint()
+        # Clear Python references to C++ tensors BEFORE calling C++ close
+        self.rollouts = None
+        self.policy_fp32 = None
+        self.observations = None
+        self.actions = None
+        self.rewards = None
+        self.terminals = None
+
+        torch.cuda.synchronize()
+        _C.close(self.pufferl_cpp)
+        self.pufferl_cpp = None
+
+        # Clear cuBLAS workspaces that accumulate per-stream
+        # This is the only way to check for memleaks. May not
+        # be strictly necessary for normal training.
+        torch.cuda.empty_cache()
+        torch._C._cuda_clearCublasWorkspaces()
+
+        if not self.logger:
+            return
+
         run_id = self.logger.run_id
         path = os.path.join(self.config['data_dir'],
             self.config["env"], f'{run_id}.pt')
@@ -194,10 +211,9 @@ class PuffeRL:
         return path
 
     def save_checkpoint(self):
-        if torch.distributed.is_initialized():
-           if torch.distributed.get_rank() != 0:
-               return
- 
+        if not self.logger:
+            return
+
         run_id = self.logger.run_id
         path = os.path.join(self.config['data_dir'],
             self.config["env"], run_id)
@@ -208,6 +224,8 @@ class PuffeRL:
         model_path = os.path.join(path, model_name)
         if os.path.exists(model_path):
             return model_path
+
+        torch.save(dict(self.policy_fp32.named_parameters()), model_path)
 
         state = {
             #'optimizer_state_dict': self.optimizer.state_dict(),
@@ -228,8 +246,8 @@ class PuffeRL:
             return
 
         config = self.config
-        sps = dist_sum(self.sps, config['device'])
-        agent_steps = dist_sum(self.global_step, config['device'])
+        sps = self.sps * config['gpus']
+        agent_steps = self.global_step * config['gpus']
         if torch.distributed.is_initialized():
            if torch.distributed.get_rank() != 0:
                return
@@ -259,7 +277,7 @@ class PuffeRL:
         s = Table(box=None, expand=True)
         remaining = f'{b2}A hair past a freckle{c2}'
         if sps != 0:
-            remaining = duration((config['total_timesteps'] - agent_steps)/sps, b2, c2)
+            remaining = duration((config['total_timesteps']*config['gpus'] - agent_steps)/sps, b2, c2)
 
         s.add_column(f"{c1}Summary", justify='left', vertical='top', width=10)
         s.add_column(f"{c1}Value", justify='right', vertical='top', width=14)
@@ -331,29 +349,6 @@ class PuffeRL:
 
         print('\033[0;0H' + capture.get())
 
-def compute_puff_advantage(values, rewards, terminals,
-        ratio, advantages, gamma, gae_lambda, vtrace_rho_clip, vtrace_c_clip):
-    '''CUDA kernel for puffer advantage with automatic CPU fallback. You need
-    nvcc (in cuda-dev-tools or in a cuda-dev docker base) for PufferLib to
-    compile the fast version.'''
-
-    device = values.device
-    if not ADVANTAGE_CUDA:
-        values = values.cpu()
-        rewards = rewards.cpu()
-        terminals = terminals.cpu()
-        ratio = ratio.cpu()
-        advantages = advantages.cpu()
-
-    torch.ops.pufferlib.compute_puff_advantage(values, rewards, terminals,
-        ratio, advantages, gamma, gae_lambda, vtrace_rho_clip, vtrace_c_clip)
-
-    if not ADVANTAGE_CUDA:
-        return advantages.to(device)
-
-    return advantages
-
-
 def abbreviate(num, b2, c2):
     if num < 1e3:
         return f'{b2}{num}{c2}'
@@ -378,20 +373,6 @@ def duration(seconds, b2, c2):
 def fmt_perf(name, color, delta_ref, prof, b2, c2):
     percent = 0 if delta_ref == 0 else int(100*prof['buffer']/delta_ref - 1e-5)
     return f'{color}{name}', duration(prof['elapsed'], b2, c2), f'{b2}{percent:2d}{c2}%'
-
-def dist_sum(value, device):
-    if not torch.distributed.is_initialized():
-        return value
-
-    tensor = torch.tensor(value, device=device)
-    torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.SUM)
-    return tensor.item()
-
-def dist_mean(value, device):
-    if not torch.distributed.is_initialized():
-        return value
-
-    return dist_sum(value, device) / torch.distributed.get_world_size()
 
 class Profile:
     def __init__(self, frequency=30):
@@ -499,189 +480,119 @@ def downsample(data_list, num_points):
     return downsampled.tolist() + [last]
 
 class Logger:
-    def __init__(self, args):
+    def __init__(self, args, load_id=None, resume='allow'):
+        train_args = args['train']
+
         self.run_id = str(int(1000*time.time()))
-        root = os.path.join(args['data_dir'], 'logs', args['env'])
+        root = os.path.join(train_args['data_dir'], 'logs', args['env_name'])
         if not os.path.exists(root):
             os.makedirs(root)
 
         self.path = os.path.join(root, self.run_id + '.json')
         self.logs = {'data': []}
-        for k, v in pufferlib.unroll_nested_dict(args):
+        for k, v in pufferlib.unroll_nested_dict(train_args):
             self.logs[k] = v
 
-    # Temp hack to log full config
-    def init(self, args):
-        for k, v in pufferlib.unroll_nested_dict(args):
-            self.logs[k] = v
+        self.wandb = None
+        if args['wandb']:
+            import wandb
+            wandb.init(
+                id=load_id or wandb.util.generate_id(),
+                project=args['wandb_project'],
+                group=args['wandb_group'],
+                allow_val_change=True,
+                save_code=False,
+                resume=resume,
+                config=args,
+                tags = [args['tag']] if args['tag'] is not None else [],
+                settings=wandb.Settings(console="off"),  # stop sending dashboard to wandb
+            )
+            self.wandb = wandb
+            self.run_id = wandb.run.id
+            self.should_upload_model = not args['no_model_upload']
 
+       
     def log(self, logs, step):
         self.logs['data'].append(logs)
+
+        if self.wandb:
+            self.wandb.log(logs, step=step)
 
     def log_cost(self, cost):
         self.logs['cost'] = cost
 
-    def close(self, model_path):
-        import json
-        with open(self.path, 'w') as f:
-            json.dump(self.logs, f)
-
-class WandbLogger:
-    def __init__(self, args, load_id=None, resume='allow'):
-        import wandb
-        wandb.init(
-            id=load_id or wandb.util.generate_id(),
-            project=args['wandb_project'],
-            group=args['wandb_group'],
-            allow_val_change=True,
-            save_code=False,
-            resume=resume,
-            config=args,
-            tags = [args['tag']] if args['tag'] is not None else [],
-            settings=wandb.Settings(console="off"),  # stop sending dashboard to wandb
-        )
-        self.wandb = wandb
-        self.run_id = wandb.run.id
-        self.should_upload_model = not args['no_model_upload']
-
-    def init(self, args):
-        pass
-        
-
-    def log(self, logs, step):
-        self.wandb.log(logs, step=step)
-
     def upload_model(self, model_path):
+        if not self.wandb:
+            return
+
         artifact = self.wandb.Artifact(self.run_id, type='model')
         artifact.add_file(model_path)
         self.wandb.run.log_artifact(artifact)
 
-    def close(self, model_path):
-        #if self.should_upload_model:
-        #    self.upload_model(model_path)
+    def close(self, model_path, early_stop):
+        self.logs['early_stop'] = early_stop
+        import json
+        with open(self.path, 'w') as f:
+            json.dump(self.logs, f)
+
+        if not self.wandb:
+            return
+        if self.should_upload_model:
+            self.upload_model(model_path)
+        self.wandb.run.summary['early_stop'] = early_stop
         self.wandb.finish()
 
     def download(self):
+        assert self.wandb, 'No wandb run'
         artifact = self.wandb.use_artifact(f'{self.run_id}:latest')
         data_dir = artifact.download()
         model_file = max(os.listdir(data_dir))
         return f'{data_dir}/{model_file}'
 
-def check(env_name):
-    torch.set_printoptions(precision=16)
+def _train_rank(env_name, args=None, logger=None, verbose=True, early_stop_fn=None):
+    """Worker function for multi-GPU training. Runs on each GPU."""
 
-    args = load_config(env_name)
-    args['train']['optimizer'] = 'adam'
+    if args:
+        torch.cuda.set_device(args['train']['rank'])
 
-    vecenv = load_env(env_name, args)
-
-    torch.manual_seed(args['train']['seed'])
-    policy = load_policy(args, vecenv, env_name)
-
-    import pufferlib.python_pufferl
-    train_config = dict(**args['train'])
-    train_config['env_name'] = args['env_name']
-    train_config['vec_kwargs'] = args['vec']
-    train_config['env_kwargs'] = args['env']
-    train_config['total_agents'] = args['vec']['total_agents']
-    train_config['num_buffers'] = args['vec']['num_buffers']
-    pufferl_python = pufferlib.python_pufferl.PuffeRL(train_config, vecenv, policy, verbose=False)
-
-    pufferl_cpp = PuffeRL(train_config, verbose=False)
-
-    python_params = dict(policy.named_parameters())
-    for k, v in pufferl_cpp.pufferl_cpp.policy.named_parameters():
-        v_python = python_params[k].data
-        assert torch.allclose(v, v_python)
-
-    torch.manual_seed(args['train']['seed'])
-    pufferl_python.evaluate()
-    #pufferl_python.train()
-    #pufferl_python.evaluate()
-
-    torch.manual_seed(args['train']['seed'])
-    pufferl_cpp.evaluate()
-    #pufferl_cpp.train()
-    #pufferl_cpp.evaluate()
-
-    # You need to determinize the env before checks
-    for i in range(args['train']['horizon']):
-        python_obs = pufferl_python.observations[:, i].float()
-        cpp_obs = pufferl_cpp.rollouts.observations[:, i]
-        assert torch.allclose(pufferl_python.observations[:, i].float(), pufferl_cpp.rollouts.observations[:, i]), f'Observation {i} mismatch'
-        assert torch.allclose(pufferl_python.actions[:, i], pufferl_cpp.rollouts.actions[:, i].long()), f'Action {i} mismatch'
-        assert torch.allclose(pufferl_python.rewards[:, i], pufferl_cpp.rollouts.rewards[:, i]), f'Reward {i} mismatch'
-        assert torch.allclose(pufferl_python.terminals[:, i], pufferl_cpp.rollouts.terminals[:, i]), f'Terminal {i} mismatch'
-        assert torch.allclose(pufferl_python.logprobs[:, i], pufferl_cpp.rollouts.logprobs[:, i], atol=1e-5), f'Logprob {i} mismatch'
-        assert torch.allclose(pufferl_python.values[:, i], pufferl_cpp.rollouts.values[:, i], atol=1e-4), f'Value {i} mismatch'
-
-    python_params = dict(policy.named_parameters())
-    for k, v in pufferl_cpp.pufferl_cpp.policy.named_parameters():
-        v_python = python_params[k].data
-        assert torch.allclose(v, v_python, atol=1e-5)
-
-    print('Check passed')
-
-def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True, should_stop_early=None):
     args = args or load_config(env_name)
 
-    # Assume TorchRun DDP is used if LOCAL_RANK is set
-    if 'LOCAL_RANK' in os.environ:
-        world_size = int(os.environ.get('WORLD_SIZE', 1))
-        print("World size", world_size)
-        master_addr = os.environ.get('MASTER_ADDR', 'localhost')
-        master_port = os.environ.get('MASTER_PORT', '29500')
-        local_rank = int(os.environ["LOCAL_RANK"])
-        print(f"rank: {local_rank}, MASTER_ADDR={master_addr}, MASTER_PORT={master_port}")
-        torch.cuda.set_device(local_rank)
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
-
-    #vecenv = vecenv or load_env(env_name, args)
-    #policy = policy or load_policy(args, vecenv, env_name)
-
-    if 'LOCAL_RANK' in os.environ:
-        args['train']['device'] = torch.cuda.current_device()
-        torch.distributed.init_process_group(backend='nccl', world_size=world_size)
-        policy = policy.to(local_rank)
-        model = torch.nn.parallel.DistributedDataParallel(
-            policy, device_ids=[local_rank], output_device=local_rank
-        )
-        if hasattr(policy, 'lstm'):
-            #model.lstm = policy.lstm
-            model.hidden_size = policy.hidden_size
-
-        model.forward_eval = policy.forward_eval
-        policy = model.to(local_rank)
-
-    elif args['wandb']:
-        logger = WandbLogger(args)
-
     train_config = dict(**args['train'])
     train_config['env_name'] = args['env_name']
+
     vec_config = args['vec']
     env_config = args['env']
     policy_config = args['policy']
     pufferl = PuffeRL(train_config, vec_config, env_config, policy_config, logger, verbose)
-    pufferl.logger.init(args)
 
     if train_config['profile']:
         binding.profiler_start()
 
+    # Sweep needs data for early stopped runs, so send data when steps > 100M
+    logging_threshold = min(0.20*train_config['total_timesteps'], 100_000_000)
     all_logs = []
-    max_cost = args['train'].get('max_cost', -1)
+
     while pufferl.global_step < train_config['total_timesteps']:
-        if pufferl.uptime > max_cost and max_cost > 0:
-            break
         pufferl.evaluate()
         logs = pufferl.train()
 
-        if logs is not None:
-            if pufferl.global_step > 0.20*train_config['total_timesteps']:
-                all_logs.append(logs)
+        if logs is None:
+            continue
+
+        should_stop_early = False
+        if early_stop_fn is not None:
+            should_stop_early = early_stop_fn(logs)
+
+            # This is hacky, but need to see if threshold looks reasonable
+            if 'early_stop_threshold' in logs:
+                pufferl.logger.log({'environment/early_stop_threshold': logs['early_stop_threshold']}, logs['agent_steps'])
+
+        if pufferl.global_step > logging_threshold:
+            all_logs.append(logs)
 
             if should_stop_early is not None and should_stop_early(logs):
                 if train_config['profile']:
-                    binding.profiler_stop()
+                    _C.profiler_stop()
                 model_path = pufferl.close()
                 pufferl.logger.close(model_path)
                 return all_logs
@@ -689,29 +600,88 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=Tr
     if train_config['profile']:
         binding.profiler_stop()
 
+    pufferl.print_dashboard()
+
+    if not logger:
+        model_path = pufferl.close()
+
+    return pufferl, all_logs
+
+
+def train(env_name, args=None, logger=None, verbose=True, early_stop_fn=None):
+    if args is None:
+        args = load_config(env_name)
+
+    num_gpus = args['train']['gpus']
+
+    nccl_id_path = f'/tmp/puffer_nccl_{os.getpid()}'
+    if os.path.exists(nccl_id_path):
+        os.remove(nccl_id_path)
+
+    # Set shared config
+    args['train']['world_size'] = num_gpus
+    args['train']['nccl_id_path'] = nccl_id_path
+
+    args['train']['total_timesteps'] /= num_gpus
+    args['train']['minibatch_size'] /= num_gpus
+    args['vec']['total_agents'] /= num_gpus
+    args['vec']['num_threads'] /= num_gpus
+
+    # Spawn workers for ranks 1..N-1
+    ctx = mp.get_context('spawn')
+    procs = []
+    for rank in range(1, num_gpus):
+        worker_args = deepcopy(args)
+        worker_args['train']['rank'] = rank
+        p = ctx.Process(target=_train_rank, args=(env_name, worker_args, None, False, early_stop_fn))
+        p.start()
+        procs.append(p)
+
+    # Run rank 0 on main process
+    torch.cuda.set_device(0)
+
+    args['train']['rank'] = 0
+
+    if logger is None:
+        logger = Logger(args)
+
+    pufferl, all_logs = _train_rank(env_name, args=args, logger=logger, verbose=True)
+
+    for p in procs:
+        p.join()
+
+    if os.path.exists(nccl_id_path):
+        os.remove(nccl_id_path)
+
+
     # Final eval. You can reset the env here, but depending on
     # your env, this can skew data (i.e. you only collect the shortest
     # rollouts within a fixed number of epochs)
     uptime = pufferl.uptime
     agent_steps = pufferl.global_step
+    logs = {}
     for i in range(128):  # Run eval for at least 32, but put a hard stop at 128.
-        stats = pufferl.evaluate()
-        if i >= 32 and stats:
+        pufferl.evaluate()
+        if i == 0 or i % 32 != 0:
+            continue
+
+        torch.cuda.synchronize()
+        logs = _C.log_environments(pufferl.pufferl_cpp)
+        pufferl.stats = logs
+
+        if logs:
             break
 
-    torch.cuda.synchronize()
-    logs = _C.log_environments(pufferl.pufferl_cpp)
-    pufferl.stats = logs
-    logs = pufferl.write_logs(logs)
     logs['uptime'] = uptime
     logs['agent_steps'] = agent_steps
-    if logs is not None:
-        all_logs.append(logs)
+    logs = pufferl.write_logs(logs)
+
+    all_logs.append(logs)
 
     pufferl.print_dashboard()
     model_path = pufferl.close()
-    #pufferl.logger.log_cost(uptime)
-    pufferl.logger.close(model_path)
+    pufferl.logger.log_cost(uptime)
+    pufferl.logger.close(model_path, early_stop=False)
     return all_logs
 
 def sps(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True, should_stop_early=None):
@@ -725,7 +695,7 @@ def sps(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True
     pufferl = PuffeRL(train_config, logger, verbose)
     # Warmup
     for _ in range(3):
-        binding.batched_forward(
+        _C.batched_forward(
             pufferl.pufferl_cpp,
             pufferl.observations,
             pufferl.total_minibatches,
@@ -736,7 +706,7 @@ def sps(env_name, args=None, vecenv=None, policy=None, logger=None, verbose=True
     torch.cuda.synchronize()
     start = time.time()
     for _ in range(N):
-        binding.batched_forward(
+        _C.batched_forward(
             pufferl.pufferl_cpp,
             pufferl.observations,
             pufferl.total_minibatches,
@@ -804,9 +774,6 @@ def eval(env_name, args=None, vecenv=None, policy=None):
             import imageio
             imageio.mimsave(args['gif_path'], frames, fps=args['fps'], loop=0)
             print(f'Saved {len(frames)} frames to {args["gif_path"]}')
-
-def stop_if_loss_nan(logs):
-    return any("losses/" in k and np.isnan(v) for k, v in logs.items())
 
 def _sweep_worker(env_name, q_host, q_worker, device):
     while True:
@@ -985,8 +952,6 @@ def paretosweep(args=None, env_name=None):
 
 def sweep(args=None, env_name=None):
     args = args or load_config(env_name)
-    if not args['wandb']:
-        raise pufferlib.APIUsageError('Sweeps require wandb')
     args['no_model_upload'] = True  # Uploading trained model during sweep crashed wandb
 
     method = args['sweep'].pop('method')
@@ -998,6 +963,31 @@ def sweep(args=None, env_name=None):
     sweep = sweep_cls(args['sweep'])
     points_per_run = args['sweep']['downsample']
     target_key = f'environment/{args["sweep"]["metric"]}'
+    running_target_buffer = deque(maxlen=30)
+
+    def stop_if_perf_below(logs):
+        if any("losses/" in k and np.isnan(v) for k, v in logs.items()):
+            logs['is_loss_nan'] = True
+            return True
+
+        if method != 'Protein':
+            return False
+
+        if ('uptime' in logs and target_key in logs):
+            metric_val, cost = logs[target_key], logs['uptime']
+            running_target_buffer.append(metric_val)
+            target_running_mean = np.mean(running_target_buffer)
+            
+            # If metric distribution is percentile, threshold is also logit transformed
+            threshold = sweep.get_early_stop_threshold(cost)
+            print(f'Threshold: {threshold} at cost {cost}')
+            logs['early_stop_threshold'] = max(threshold, -5)  # clipping for visualization
+
+            if sweep.should_stop(max(target_running_mean, metric_val), cost):
+                logs['is_loss_nan'] = False
+                return True
+        return False
+
     for i in range(args['max_runs']):
         seed = time.time_ns() & 0xFFFFFFFF
         random.seed(seed)
@@ -1008,7 +998,7 @@ def sweep(args=None, env_name=None):
         if i > 0:
             sweep.suggest(args)
 
-        all_logs = train(env_name, args=args, should_stop_early=stop_if_loss_nan)
+        all_logs = train(env_name, args=args, early_stop_fn=stop_if_perf_below)
         all_logs = [e for e in all_logs if target_key in e]
 
         if not all_logs:
@@ -1018,10 +1008,11 @@ def sweep(args=None, env_name=None):
         total_timesteps = args['train']['total_timesteps']
 
         scores = downsample([log[target_key] for log in all_logs], points_per_run)
-        costs = downsample([log['agent_steps'] for log in all_logs], points_per_run)
+        costs = downsample([log['uptime'] for log in all_logs], points_per_run)
         timesteps = downsample([log['agent_steps'] for log in all_logs], points_per_run)
 
-        if len(timesteps) > 0 and timesteps[-1] < 0.7 * total_timesteps:  # 0.7 is arbitrary
+        is_final_loss_nan = all_logs[-1].get('is_loss_nan', False)
+        if is_final_loss_nan:
             s = scores.pop()
             c = costs.pop()
             args['train']['total_timesteps'] = timesteps.pop()
@@ -1050,14 +1041,6 @@ def export(args=None, env_name=None, vecenv=None, policy=None):
     weights.tofile(path)
     print(f'Saved {len(weights)} weights to {path}')
 
-def autotune(args=None, env_name=None, vecenv=None, policy=None):
-    package = args['package']
-    module_name = 'pufferlib.ocean' if package == 'ocean' else f'pufferlib.environments.{package}'
-    env_module = importlib.import_module(module_name)
-    env_name = args['env_name']
-    make_env = env_module.env_creator(env_name)
-    pufferlib.vector.autotune(make_env, batch_size=args['train']['env_batch_size'])
- 
 def load_env(env_name, args):
     package = args['package']
     module_name = 'pufferlib.ocean' if package == 'ocean' else f'pufferlib.environments.{package}'
@@ -1085,7 +1068,7 @@ def load_policy(args, vecenv, env_name=''):
     load_id = args['load_id']
     if load_id is not None:
         if args['wandb']:
-            path = WandbLogger(args, load_id).download()
+            path = Logger(args, load_id).download()
         else:
             raise pufferlib.APIUsageError('No run id provided for eval')
 
@@ -1121,22 +1104,6 @@ def load_config(env_name, parser=None):
             if env_name in p['base']['env_name'].split(): break
         else:
             raise pufferlib.APIUsageError('No config for env_name {}'.format(env_name))
-
-    return process_config(p, parser=parser)
-
-def load_config_file(file_path, fill_in_default=True, parser=None):
-    if not os.path.exists(file_path):
-        raise pufferlib.APIUsageError('No config file found')
-
-    config_paths = [file_path]
-
-    if fill_in_default:
-        puffer_dir = os.path.dirname(os.path.realpath(__file__))
-        # Process the puffer defaults first
-        config_paths.insert(0, os.path.join(puffer_dir, 'config/default.ini'))
-
-    p = configparser.ConfigParser()
-    p.read(config_paths)
 
     return process_config(p, parser=parser)
 
@@ -1226,14 +1193,8 @@ def main():
         multisweep(env_name=env_name)
     elif mode == 'paretosweep':
         paretosweep(env_name=env_name)
-    elif mode == 'autotune':
-        autotune(env_name=env_name)
     elif mode == 'export':
         export(env_name=env_name)
-    elif mode == 'check':
-        check(env_name=env_name)
-    elif mode == 'sps':
-        sps(env_name=env_name)
     else:
         raise pufferlib.APIUsageError(err)
 

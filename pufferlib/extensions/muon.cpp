@@ -7,6 +7,7 @@
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/util/irange.h>
 
 #include <cmath>
@@ -132,6 +133,13 @@ Tensor Muon::step(LossClosure closure) {
           all_grads.narrow(0, offset, size).copy_(p.grad().flatten());
         }
         offset += size;
+      }
+
+      // Multi-GPU gradient sync: average gradients across all ranks
+      if (nccl_comm != nullptr && world_size > 1) {
+        ncclAllReduce(all_grads.data_ptr(), all_grads.data_ptr(),
+                      all_grads.numel(), ncclFloat, ncclAvg,
+                      nccl_comm, at::cuda::getCurrentCUDAStream());
       }
 
       // Batched Nesterov momentum (one mul_, one add_ each)

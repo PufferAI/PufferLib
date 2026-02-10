@@ -13,6 +13,7 @@ typedef struct {
     double* actions;
     float* rewards;
     float* terminals;
+    int num_agents;
     int bandwidth;
     int compute;
 } Benchmark;
@@ -25,7 +26,7 @@ void c_step(Benchmark* env) {
         result = sinf(result + 0.1f);
     }
 
-    memset(env->observations, result, env->bandwidth);
+    //memset(env->observations, result, env->bandwidth);
 }
 
 void c_render(Benchmark* env) { }

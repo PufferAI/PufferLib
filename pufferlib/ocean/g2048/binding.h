@@ -3,7 +3,7 @@
 #define NUM_ATNS 1
 #define ACT_SIZES {4}
 #define OBS_TYPE UNSIGNED_CHAR
-#define ACT_TYPE INT
+#define ACT_TYPE DOUBLE
 
 #define Env Game
 #include "env_binding.h"

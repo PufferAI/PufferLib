@@ -3,6 +3,7 @@
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
+#include <nccl.h>
 
 #include <utility>
 #include <vector>
@@ -49,6 +50,8 @@ class TORCH_API Muon : public Optimizer {
   torch::Tensor lr;
   torch::Tensor weight_buffer;  // Contiguous weight buffer for batched updates
   torch::Tensor momentum_buffer;  // Contiguous momentum buffer
+  ncclComm_t nccl_comm = nullptr;  // NCCL communicator for multi-GPU gradient sync
+  int world_size = 1;
 
   explicit Muon(
       const std::vector<OptimizerParamGroup>& param_groups,

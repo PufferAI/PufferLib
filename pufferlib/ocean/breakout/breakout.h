@@ -79,6 +79,7 @@ typedef struct Breakout {
     int frameskip;
     unsigned char hit_brick;
     int continuous;
+    unsigned int rng;
 } Breakout;
 
 typedef struct CollisionInfo CollisionInfo;
@@ -158,9 +159,7 @@ void compute_observations(Breakout* env) {
     env->observations[7] = env->score / 864.0f;
     env->observations[8] = env->num_balls / 5.0f;
     env->observations[9] = env->paddle_width / (2.0f * HALF_PADDLE_WIDTH);
-    for (int i = 0; i < env->num_bricks; i++) {
-        env->observations[10 + i] = env->brick_states[i];
-    }
+    memcpy(env->observations + 10, env->brick_states, sizeof(float) * env->num_bricks);
 }
 
 // Collision of a stationary vertical line segment (xw,yw) to (xw,yw+hw)
@@ -168,8 +167,8 @@ void compute_observations(Breakout* env) {
 static inline bool calc_vline_collision(float xw, float yw, float hw, float x,
         float y, float vx, float vy, float h, CollisionInfo* col) {
     float t_new = (xw - x) / vx;
-    float topmost = fmin(yw + hw, y + h + vy * t_new);
-    float botmost = fmax(yw, y + vy * t_new);
+    float topmost = fminf(yw + hw, y + h + vy * t_new);
+    float botmost = fmaxf(yw, y + vy * t_new);
     float overlap_new = topmost - botmost;
 
     // Collision finds the smallest time of collision with the greatest overlap
@@ -247,26 +246,52 @@ static inline void calc_brick_collision(Breakout* env, int idx,
     }
 }
 static inline int column_index(Breakout* env, float x) {
-    return (int)(floorf(x / env->brick_width));
+    return (int)(x / env->brick_width);
 }
 static inline int row_index(Breakout* env, float y) {
-    return (int)(floorf((y - Y_OFFSET) / env->brick_height));
+    return (int)((y - Y_OFFSET) / env->brick_height);
 }
 
 void calc_all_brick_collisions(Breakout* env, CollisionInfo* collision_info) {
-    int column_from = column_index(env, fminf(env->ball_x + env->ball_vx, env->ball_x));
-    column_from = fmaxf(column_from, 0);
-    int column_to = column_index(env, fmaxf(env->ball_x + env->ball_width + env->ball_vx, env->ball_x + env->ball_width));
-    column_to = fminf(column_to, env->brick_cols - 1);
-    int row_from = row_index(env, fminf(env->ball_y + env->ball_vy, env->ball_y));
-    row_from = fmaxf(row_from, 0);
-    int row_to = row_index(env, fmaxf(env->ball_y + env->ball_height + env->ball_vy, env->ball_y + env->ball_height));
-    row_to = fminf(row_to, env->brick_rows - 1);
+    float ball_x = env->ball_x;
+    float ball_x_dst = ball_x + env->ball_vx;
+    float ball_y = env->ball_y;
+    float ball_y_dst = ball_y + env->ball_vy;
+    float ball_width = env->ball_width;
+    float ball_height = env->ball_height;
+
+    int row_from = row_index(env, ball_y < ball_y_dst ? ball_y : ball_y_dst);
+    if (row_from < 0) {
+        row_from = 0;
+    }
+
+    if (row_from > env->brick_rows) {
+        return;
+    }
+
+    int column_from = column_index(env, ball_x < ball_x_dst ? ball_x : ball_x_dst);
+    if (column_from < 0) {
+        column_from = 0;
+    }
+
+    float ball_x_end = ball_x + ball_width;
+    float ball_x_dst_end = ball_x_dst + ball_width;
+    int column_to = column_index(env, ball_x_dst_end > ball_x_end ? ball_x_dst_end : ball_x_end);
+    if (column_to >= env->brick_cols) {
+        column_to = env->brick_cols - 1;
+    }
+
+    float ball_y_end = ball_y + ball_height;
+    float ball_y_dst_end = ball_y_dst + ball_height;
+    int row_to = row_index(env, ball_y_dst_end > ball_y_end ? ball_y_dst_end : ball_y_end);
+    if (row_to >= env->brick_rows) {
+        row_to = env->brick_rows - 1;
+    }
 
     for (int row = row_from; row <= row_to; row++) {
         for (int column = column_from; column <= column_to; column++) {
             int brick_index = row * env->brick_cols + column;
-            if (env->brick_states[brick_index] == 0.0)
+            if (env->brick_states[brick_index] == 0.0f)
                 calc_brick_collision(env, brick_index, collision_info);
         }
     }
@@ -296,8 +321,8 @@ bool calc_paddle_ball_collisions(Breakout* env, CollisionInfo* collision_info) {
     float relative_intersection = (
         (env->ball_x + env->ball_width / 2) - env->paddle_x) / env->paddle_width;
     float angle = -base_angle + relative_intersection * 2 * base_angle;
-    env->ball_vx = sin(angle) * env->ball_speed * TICK_RATE;
-    env->ball_vy = -cos(angle) * env->ball_speed * TICK_RATE;
+    env->ball_vx = sinf(angle) * env->ball_speed * TICK_RATE;
+    env->ball_vy = -cosf(angle) * env->ball_speed * TICK_RATE;
     env->hits += 1;
     if (env->hits % 4 == 0 && env->ball_speed < env->max_ball_speed) {
         env->ball_speed += 64;
@@ -429,8 +454,8 @@ void step_frame(Breakout* env, float action) {
         env->balls_fired = 1;
         float direction = M_PI / 3.25f;
 
-        env->ball_vy = cos(direction) * env->ball_speed * TICK_RATE;
-        env->ball_vx = sin(direction) * env->ball_speed * TICK_RATE;
+        env->ball_vy = cosf(direction) * env->ball_speed * TICK_RATE;
+        env->ball_vx = sinf(direction) * env->ball_speed * TICK_RATE;
         if (rand() % 2 == 0) {
             env->ball_vx = -env->ball_vx;
         }

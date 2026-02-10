@@ -2,27 +2,36 @@
 #define PUFFERLIB_KERNELS_CU
 
 /* Kernels must launch on the current torch stream to be traced by cudagraphs.
- * Launch functions take cudaStream_t as parameter - callers (modules.cu) should
- * pass at::cuda::getCurrentCUDAStream() when using with torch.
+ * This file is included by modules.cu which calls kernels directly with <<<>>>.
+ * Callers should use at::cuda::getCurrentCUDAStream() when using with torch.
  */
 
 #include <cuda_runtime.h>
-#include "ops.cuh"
-#include <cuda_fp16.h>
 #include <cuda_bf16.h>
+#include "ops.cuh"
 #include <curand_kernel.h>
-#include <c10/util/BFloat16.h>
 
 #include <cstdio>
 #include <cstdint>
 
-#define WARP_SIZE 32
+// Compile-time precision: default bf16, pass -DPRECISION_FLOAT for float32
+#ifdef PRECISION_FLOAT
+typedef float precision_t;
+#else
+typedef __nv_bfloat16 precision_t;
+#endif
+
 #define PPO_THREADS 256
-#define FULL_MASK 0xffffffff
 
 #define SEQ_SIZE 256
 #define BLOCK_SIZE 256
 #define CHECKPOINT_INTERVAL 4  // Sparse checkpoint interval for optimized kernels
+
+// Maximum number of action heads supported for MultiDiscrete
+// Using register arrays to avoid dynamic allocation
+#define MAX_ATN_HEADS 16
+
+
 inline int grid_size(int N) {
     return (N + BLOCK_SIZE - 1) / BLOCK_SIZE;
 }
@@ -30,225 +39,26 @@ inline int seq_size(int N) {
     return (N + SEQ_SIZE - 1) / SEQ_SIZE;
 }
 
-// If you can get this to work, go ahead. I tried.
-// NVCC won't parse templated types in kernel launches
-/*
-template <template <class> class KernelFn, typename... Args>
-void dispatch_and_launch(const at::Tensor& example_tensor, Args... args) {
-    const int64_t N = example_tensor.numel();
-    const int64_t block = LAUNCH_BLOCK_SIZE;
-    const int64_t grid = (N + block - 1) / block;
-    auto stream = at::cuda::getCurrentCUDAStream();
-    at::cuda::CUDAGuard device_guard(example_tensor.device());
-
-    at::ScalarType dtype = example_tensor.scalar_type();
-    if (dtype == at::ScalarType::Float) {
-        KernelFn<float><<<grid, block, 0, stream>>>(args..., N);
-    } else if (dtype == at::ScalarType::Half) {
-        KernelFn<__half><<<grid, block, 0, stream>>>(args..., N);
-    } else if (dtype == at::ScalarType::BFloat16) {
-        KernelFn<__nv_bfloat16><<<grid, block, 0, stream>>>(args..., N);
-    } else {
-        AT_ERROR("Unsupported dtype: ", dtype);
-    }
-}
-*/
-
-template<typename T>
-__global__ void rmsnorm_forward_kernel(
-    T* __restrict__ out,
-    float* __restrict__ inv_norm_buf,
-    const T* __restrict__ x,
-    const T* __restrict__ weight,
-    double eps,
-    int T_total,
-    int H,
-    int B
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= B * T_total) return;
-
-    int b = idx / T_total;
-    int t = idx % T_total;
-    int base = b*T_total*H + t*H;
-
-    float sum_sq = 0.0f;
-    for (int h = 0; h < H; h++) {
-        int curr = base + h;
-        float x_val = float(x[curr]);
-        sum_sq += x_val * x_val;
-    }
-
-    float rms = sqrtf(sum_sq/H + eps);
-    float inv_rms = 1.0f / rms;
-    inv_norm_buf[idx] = inv_rms;
-
-    for (int h = 0; h < H; h++) {
-        int curr = base + h;
-        out[curr] = T(weight[h] * x[curr] * inv_rms);
-    }
-}
-
-template<typename T>
-__global__ void rmsnorm_backward_kernel(
-    T* __restrict__ grad_x,
-    T* __restrict__ grad_weight,
-    const T* __restrict__ grad_out,
-    const float* __restrict__ inv_norm_buf,
-    const T* __restrict__ x_buf,
-    const T* __restrict__ weight,
-    double eps,
-    int T_total,
-    int H,
-    int B
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= T_total*H*B) return;
-    int base = idx % H;
-    int norm_idx = idx / H;
-
-    float inv_rms = inv_norm_buf[norm_idx];
-    float inv_rms_3 = inv_rms * inv_rms * inv_rms;
-
-    grad_x[idx] = weight[base] * grad_out[idx] * inv_rms;
-    grad_weight[idx] = grad_out[idx] * inv_rms;
-
-    float wg_x = 0.0f;
-    for (int h=0; h<H; h++) {
-        float x = x_buf[base + h];
-        float w = weight[h];
-        float g = grad_out[base + h];
-        wg_x += w*g*x;
-    }
-    float x = x_buf[idx];
-    grad_x[idx] -= x*wg_x*inv_rms_3/float(H);
-}
-
-/*
-template<typename T>
-__global__ void rmsnorm_backward_kernel(
-    T* grad_x,
-    T* grad_weight,
-    const T* grad_out,
-    const float* inv_norm_buf,
-    const T* x,
-    const T* weight,
-    double eps,
-    int T_total,
-    int H,
-    int B
-) {
-    int total_elements = B * T_total * H;
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= total_elements) return;
-
-    int h = idx % H;
-    int vec_idx = idx / H;                    // index of the vector (b,t)
-    int offset = vec_idx * H;
-
-    float inv_rms = inv_norm_buf[vec_idx];
-    float inv_rms3 = inv_rms * inv_rms * inv_rms;
-
-    // ∂L/∂γ_h += grad_out * (x / rms)
-    float gw = grad_out[idx] * (float)x[idx] * inv_rms;
-    atomicAdd((float*)&grad_weight[h], gw);
-
-    // Compute reduction: sum_h weight[h] * grad_out[h] * x[h]
-    float sum = 0.0f;
-    for (int i = 0; i < H; ++i) {
-        sum += (float)weight[i] * (float)grad_out[offset + i] * (float)x[offset + i];
-    }
-    float reduction = sum * inv_rms;  // = σ γ g hat_x
-
-    float dx = (float)weight[h] * (float)grad_out[idx] * inv_rms
-               - (float)x[idx] * reduction * inv_rms3 / H;
-
-    grad_x[idx] = T(dx);
-}
-*/
-
-template<typename T>
-void launch_rmsnorm_forward(
-    T* __restrict__ out,
-    float* __restrict__ inv_norm_buf,
-    const T* __restrict__ x,
-    const T* __restrict__ weight,
-    double eps,
-    int T_total,
-    int H,
-    int B,
-    cudaStream_t stream
-) {
-    int total = B * T_total;
-    int grid = grid_size(total);
-
-    rmsnorm_forward_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        out,
-        inv_norm_buf,
-        x,
-        weight,
-        eps,
-        T_total,
-        H,
-        B
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA kernel launch error in forward: %s\n", cudaGetErrorString(err));
-    }
-}
-
-template<typename T>
-void launch_rmsnorm_backward(
-    T* __restrict__ grad_x,
-    T* __restrict__ grad_weight,
-    const T* __restrict__ grad_out,
-    const float* __restrict__ inv_norm_buf,
-    const T* __restrict__ x_buf,
-    const T* __restrict__ weight,
-    double eps,
-    int T_total,
-    int H,
-    int B,
-    cudaStream_t stream
-) {
-    // The backward is fully parallel
-    // since the inv norm is cached
-    int total = B * T_total * H;
-    int grid = grid_size(total);
-
-    rmsnorm_backward_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        grad_x,
-        grad_weight,
-        grad_out,
-        inv_norm_buf,
-        x_buf,
-        weight,
-        eps,
-        T_total,
-        H,
-        B
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA kernel launch error in backward: %s\n", cudaGetErrorString(err));
-    }
-}
+// Compile-time precision conversion macros
+#ifdef PRECISION_FLOAT
+#define to_float(x) (x)
+#define from_float(x) (x)
+#else
+#define to_float(x) __bfloat162float(x)
+#define from_float(x) __float2bfloat16(x)
+#endif
 
 
 // Fused kernel: chunk + mingru_gate + sigmoid(proj) * out
 // combined is (B, 1, 3*H) containing [hidden, gate, proj] concatenated on last dim
 // state is (B, 1, H)
-// out is (B, 1, H) = sigmoid(proj) * mingru_out (final output)
-// next_state is (B, 1, H) = mingru_out (recurrent state, without proj)
-template<typename T>
+// out is (B, H) = sigmoid(proj) * mingru_out (final output)
+// next_state is (B, H) = mingru_out (recurrent state, without proj)
 __global__ void mingru_gate_inference_kernel(
-    T* out,
-    T* next_state,
-    const T* combined,    // (B, 1, 3*H) = [hidden, gate, proj]
-    const T* state_in,    // (B, 1, H)
+    precision_t* out,
+    precision_t* next_state,
+    const precision_t* combined,    // (B, 3*H) = [hidden, gate, proj]
+    const precision_t* state_in,    // (B, H)
     int H,
     int B
 ) {
@@ -261,11 +71,10 @@ __global__ void mingru_gate_inference_kernel(
 
     // Read from combined: layout is [hidden(H), gate(H), proj(H)] for each batch
     int combined_base = b * 3 * H;
-    float hidden = float(combined[combined_base + h]);
-    float gate = float(combined[combined_base + H + h]);
-    float proj = float(combined[combined_base + 2 * H + h]);
-
-    float state = float(state_in[idx]);
+    float hidden = to_float(combined[combined_base + h]);
+    float gate = to_float(combined[combined_base + H + h]);
+    float proj = to_float(combined[combined_base + 2 * H + h]);
+    float state = to_float(state_in[idx]);
 
     // mingru_gate computation
     float gate_sigmoid = sigmoid(gate);
@@ -273,154 +82,13 @@ __global__ void mingru_gate_inference_kernel(
     float mingru_out = lerp(state, hidden_tilde, gate_sigmoid);
 
     // next_state is mingru_out (for recurrence)
-    next_state[idx] = T(mingru_out);
+    next_state[idx] = from_float(mingru_out);
 
     // out is sigmoid(proj) * mingru_out (final output)
     float proj_sigmoid = sigmoid(proj);
-    out[idx] = T(proj_sigmoid * mingru_out);
+    out[idx] = from_float(proj_sigmoid * mingru_out);
 }
 
-template<typename T>
-void launch_mingru_gate_inference(
-    T* out,
-    T* next_state,
-    const T* combined,
-    const T* state_in,
-    int H,
-    int B,
-    cudaStream_t stream
-) {
-    int N = B * H;
-    int grid = grid_size(N);
-    mingru_gate_inference_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        out,
-        next_state,
-        combined,
-        state_in,
-        H,
-        B
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA kernel launch error: %s\n", cudaGetErrorString(err));
-    }
-}
-
-
-template<typename T>
-__global__ void log_coeffs_and_values_kernel(
-    T* log_coeffs,
-    T* log_values,
-    const T* gate,
-    const T* hidden,
-    int N
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= N) return;
-
-    float g = float(gate[idx]);
-    float h = float(hidden[idx]);
-
-    log_coeffs[idx] = -softplus_fwd(g);
-    float log_z = -softplus_fwd(-g);
-    float log_tilde_h;
-    if (h >= 0.0f) {
-        float relu_h = relu(h);
-        log_tilde_h = logf(relu_h + 0.5f);
-    } else {
-        log_tilde_h = -softplus_fwd(-h);
-    }
-    log_values[idx] = log_z + log_tilde_h;
-}
-
-template<typename T>
-__global__ void log_coeffs_and_values_backward_kernel(
-    T* grad_gate,
-    T* grad_hidden,
-    const T* grad_log_coeffs,
-    const T* grad_log_values,
-    const T* gate,
-    const T* hidden,
-    int N
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= N) return;
-
-    float g = float(gate[idx]);
-    float h = float(hidden[idx]);
-
-    float grad_lc = float(grad_log_coeffs[idx]);
-    float grad_lv = float(grad_log_values[idx]);
-    float grad_g_from_lc = -softplus_bwd(grad_lc, g);
-    float grad_g_from_lz = -softplus_bwd(-grad_lv, -g);
-    float grad_g_total = grad_g_from_lc + grad_g_from_lz;
-    grad_gate[idx] = T(grad_g_total);
-    float log_tilde_h;
-    float grad_h_from_lt;
-    if (h >= 0.0f) {
-        float relu_h = relu(h);
-        log_tilde_h = logf(relu_h + 0.5f);
-        float inner_grad = 1.0f / (relu_h + 0.5f);
-        grad_h_from_lt = relu_backward(h, inner_grad * grad_lv);
-    } else {
-        log_tilde_h = -softplus_fwd(-h);
-        grad_h_from_lt = -softplus_bwd(-grad_lv, -h);
-    }
-    grad_hidden[idx] = T(grad_h_from_lt);
-}
-
-template<typename T>
-void launch_log_coeffs_and_values(
-    T* log_coeffs,
-    T* log_values,
-    const T* gate,
-    const T* hidden,
-    int N,
-    cudaStream_t stream
-) {
-    int grid = grid_size(N);
-    log_coeffs_and_values_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        log_coeffs,
-        log_values,
-        gate,
-        hidden,
-        N
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA kernel launch error: %s\n", cudaGetErrorString(err));
-    }
-}
-
-template<typename T>
-void launch_log_coeffs_and_values_backward(
-    T* grad_gate,
-    T* grad_hidden,
-    const T* grad_log_coeffs,
-    const T* grad_log_values,
-    const T* gate,
-    const T* hidden,
-    int N,
-    cudaStream_t stream
-) {
-    int grid = grid_size(N);
-    log_coeffs_and_values_backward_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        grad_gate,
-        grad_hidden,
-        grad_log_coeffs,
-        grad_log_values,
-        gate,
-        hidden,
-        N
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA kernel launch error: %s\n", cudaGetErrorString(err));
-    }
-}
 
 __device__ __forceinline__ double logcumsumexp_forward(double x, double acc) {
     if (acc == -INFINITY) {
@@ -438,99 +106,17 @@ __device__ __forceinline__ double logcumsumexp_backward(double x, double* acc, d
     return *acc * exp(x - s);
 }
 
-
-// Fully fused forward: chunk + log_coeffs_and_values + scan + sigmoid(proj)*out
-// Takes combined (B, T, 3*H) = [hidden, gate, proj] and outputs gated result
-template<typename T>
-__global__ void fused_scan_forward_kernel(
-    T* __restrict__ out,                 // (B, T, H) - sigmoid(proj) * scan_result
-    T* __restrict__ next_state,          // (B, 1, H) - raw scan_result at T (for recurrence)
-    float* __restrict__ a_star_buf,      // (B, T+1, H) - for backward
-    float* __restrict__ s_buf,           // (B, T+1, H) - for backward
-    float* __restrict__ log_values_buf,  // (B, T+1, H) - cached log_values for backward
-    const T* __restrict__ combined,      // (B, T, 3*H) = [hidden(H), gate(H), proj(H)]
-    const T* __restrict__ state,         // (B, 1, H)
-    int T_seq,                           // sequence length (T)
-    int H,
-    int B
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= B * H) return;
-
-    int b = idx / H;
-    int h = idx % H;
-
-    int T_out = T_seq + 1;
-    int buf_base = b * T_out * H + h;    // base for a_star/s/log_values buffers (T+1 timesteps)
-    int out_base = b * T_seq * H + h;    // base for output (T timesteps)
-    int state_idx = b * H + h;           // state is (B, 1, H) -> flatten to (B, H)
-
-    float a_star = 0.0f;
-    float s = -INFINITY;  // logcumsumexp accumulator
-
-    // Handle t=0 outside the loop: use log(state), coeff = 0
-    float log_value_0 = logf(float(state[state_idx]));
-    log_values_buf[buf_base] = log_value_0;
-    s = log_value_0;  // z = log_value - a_star = log_value - 0 = log_value
-    a_star_buf[buf_base] = a_star;
-    s_buf[buf_base] = s;
-
-    // Loop t=1..T_seq (no branches needed)
-    float scan_result = 0.0f;
-    for (int t = 1; t < T_out; t++) {
-        int buf_curr = buf_base + t * H;
-        int combined_base = b * T_seq * 3 * H + (t - 1) * 3 * H;
-
-        float hidden_val = float(combined[combined_base + h]);
-        float gate_val = float(combined[combined_base + H + h]);
-        float proj_val = float(combined[combined_base + 2 * H + h]);
-
-        float log_coeff_val, log_value_val;
-        log_coeffs_and_values_fwd(gate_val, hidden_val, &log_coeff_val, &log_value_val);
-
-        // Cache log_value for backward (avoid recomputation)
-        log_values_buf[buf_curr] = log_value_val;
-
-        // a_star[t] = sum_{i=0}^t log_coeffs[i]
-        a_star += log_coeff_val;
-
-        float z = log_value_val - a_star;
-
-        if (s == -INFINITY) {
-            s = z;
-        } else {
-            float min_val = fminf(s, z);
-            float max_val = fmaxf(s, z);
-            s = max_val + log1pf(expf(min_val - max_val));
-        }
-
-        scan_result = expf(a_star + s);
-
-        // sigmoid(proj) * out
-        int out_curr = out_base + (t - 1) * H;
-        float proj_sigmoid = sigmoid(proj_val);
-        out[out_curr] = T(proj_sigmoid * scan_result);
-
-        a_star_buf[buf_curr] = a_star;
-        s_buf[buf_curr] = s;
-    }
-    // Write timestep T to next_state (raw scan_result, no proj, for recurrence)
-    next_state[state_idx] = T(scan_result);
-}
-
-
 // Optimized forward kernel with checkpointing
 // Writes checkpoints only every CHECKPOINT_INTERVAL timesteps (vs every time)
 // Uses fast math intrinsics for better performance
-template<typename T>
 __global__ void fused_scan_forward_kernel_checkpointed(
-    T* __restrict__ out,                 // (B, T, H)
-    T* __restrict__ next_state,          // (B, 1, H)
+    precision_t* __restrict__ out,                 // (B, T, H)
+    precision_t* __restrict__ next_state,          // (B, 1, H)
     float* __restrict__ a_star_buf,      // (B, T+1, H)
     float* __restrict__ s_buf,           // (B, T+1, H)
     float* __restrict__ log_values_buf,  // (B, T+1, H)
-    const T* __restrict__ combined,      // (B, T, 3*H)
-    const T* __restrict__ state,         // (B, 1, H)
+    const precision_t* __restrict__ combined,      // (B, T, 3*H)
+    const precision_t* __restrict__ state,         // (B, 1, H)
     int T_seq,
     int H,
     int B
@@ -552,7 +138,7 @@ __global__ void fused_scan_forward_kernel_checkpointed(
     float log_value = 0.0f;
 
     // Handle t=0 outside the loop: use log(state), coeff = 0
-    float s = __logf(float(state[bH + h]));
+    float s = __logf(to_float(state[bH + h]));
     log_value = s;
 
     int T_out = T_seq + 1;
@@ -562,9 +148,9 @@ __global__ void fused_scan_forward_kernel_checkpointed(
     s_buf[buf_curr] = s;
     log_values_buf[buf_curr] = log_value;
 
-    const T* combined_h_base = &combined[cbase + h];
-    const T* combined_g_base = &combined[cbase + H + h];
-    const T* combined_p_base = &combined[cbase + H2 + h];
+    const precision_t* combined_h_base = &combined[cbase + h];
+    const precision_t* combined_g_base = &combined[cbase + H + h];
+    const precision_t* combined_p_base = &combined[cbase + H2 + h];
 
     // Loop t=1..T_seq with sparse checkpointing
     float scan_result = 0.0f;
@@ -572,9 +158,9 @@ __global__ void fused_scan_forward_kernel_checkpointed(
     int t_offset = 0;
 
     for (int t = 1; t < T_seq + 1; t++) {
-        float hidden_val = float(combined_h_base[t_offset]);
-        float gate_val = float(combined_g_base[t_offset]);
-        float proj_val = float(combined_p_base[t_offset]);
+        float hidden_val = to_float(combined_h_base[t_offset]);
+        float gate_val = to_float(combined_g_base[t_offset]);
+        float proj_val = to_float(combined_p_base[t_offset]);
 
         float log_coeff_val;
         log_coeffs_and_values_fwd(gate_val, hidden_val, &log_coeff_val, &log_value);
@@ -589,7 +175,7 @@ __global__ void fused_scan_forward_kernel_checkpointed(
         scan_result = __expf(a_star + s);
         float proj_sigmoid = sigmoid(proj_val);
 
-        out[out_curr] = T(proj_sigmoid * scan_result);
+        out[out_curr] = from_float(proj_sigmoid * scan_result);
 
         buf_curr += H;
         out_curr += H;
@@ -603,137 +189,19 @@ __global__ void fused_scan_forward_kernel_checkpointed(
     }
 
     // Write timestep T to next_state (raw scan_result, no proj, for recurrence)
-    next_state[bH + h] = T(scan_result);
-}
-
-// Fully fused backward: chains through sigmoid(proj)*out and log_coeffs_and_values
-// Takes combined (B, T, 3*H), outputs grad_combined (B, T, 3*H) = [grad_hidden, grad_gate, grad_proj]
-template<typename T>
-__global__ void fused_scan_backward_kernel(
-    T* __restrict__ grad_combined,         // (B, T, 3*H) = [grad_hidden, grad_gate, grad_proj]
-    T* __restrict__ grad_state,            // (B, 1, H)
-    const T* __restrict__ grad_out,        // (B, T, H) - gradient of sigmoid(proj)*scan_result
-    const T* __restrict__ grad_next_state, // (B, 1, H) - gradient of raw scan_result at T
-    const T* __restrict__ combined,        // (B, T, 3*H) = [hidden, gate, proj]
-    const T* __restrict__ state,           // (B, 1, H)
-    const float* __restrict__ a_star_buf,  // (B, T+1, H)
-    const float* __restrict__ s_buf,       // (B, T+1, H)
-    const float* __restrict__ log_values_buf, // (B, T+1, H) - cached from forward
-    int T_seq,                             // sequence length (T)
-    int H,
-    int B
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= B * H) return;
-
-    int b = idx / H;
-    int h = idx % H;
-
-    int T_out = T_seq + 1;
-    int buf_base = b * T_out * H + h;    // base for a_star/s/log_values buffers (T+1 timesteps)
-    int out_base = b * T_seq * H + h;    // base for grad_out (T timesteps)
-    int state_idx = b * H + h;           // state is (B, 1, H) -> flatten to (B, H)
-
-    float acc = 0.0;
-    float s_val_next = 0.0;
-    float carry_grad_a = 0.0;
-
-    for (int t = T_out - 1; t >= 0; --t) {
-        int base_adr = b*T_seq*3*H + (t-1)*3*H;
-        int hidden_adr = base_adr + h;
-        int gate_adr = base_adr + H + h;
-        int proj_adr = base_adr + 2*H + h;
-
-        int buf_curr = buf_base + t * H;
-
-        float a_star = a_star_buf[buf_curr];
-        float s = s_buf[buf_curr];
-        float scan_result = expf(a_star + s);  // reconstruct scan result
-
-        // Read cached log_value from forward pass (no recomputation needed)
-        float log_value_val = log_values_buf[buf_curr];
-
-        // Read from combined for t >= 1 (still need gate/hidden for backward, proj for output gate)
-        float gate_val = 0.0f, hidden_val = 0.0f, proj_val = 0.0f;
-
-        if (t >= 1) {
-            hidden_val = float(combined[hidden_adr]);
-            gate_val = float(combined[gate_adr]);
-            proj_val = float(combined[proj_adr]);
-        }
-
-        float z = log_value_val - a_star;
-
-        // Get gradient for this timestep
-        // For t >= 1: grad_out is gradient of (sigmoid(proj) * scan_result)
-        // For t = T: also add grad_next_state (gradient of raw scan_result)
-        float grad_gated_out = 0.0f;
-        float grad_scan_from_next = 0.0f;
-
-        if (t >= 1) {
-            int grad_out_idx = out_base + (t - 1) * H;
-            grad_gated_out = float(grad_out[grad_out_idx]);
-        }
-        if (t == T_seq) {
-            grad_scan_from_next = float(grad_next_state[state_idx]);
-        }
-
-        // Chain through sigmoid(proj) * scan_result
-        // out = sigmoid(proj) * scan_result
-        // d_out/d_scan_result = sigmoid(proj)
-        // d_out/d_proj = scan_result * sigmoid(proj) * (1 - sigmoid(proj))
-        float grad_scan_result = grad_scan_from_next;
-        float grad_proj = 0.0f;
-
-        if (t >= 1) {
-            float proj_sigmoid = sigmoid(proj_val);
-            grad_scan_result += grad_gated_out * proj_sigmoid;
-            // sigmoid'(x) = sigmoid(x) * (1 - sigmoid(x))
-            grad_proj = grad_gated_out * scan_result * proj_sigmoid * (1.0f - proj_sigmoid);
-        }
-
-        // Now chain grad_scan_result through the scan backward
-        float grad_log_h = grad_scan_result * scan_result;
-        float grad_s = grad_log_h;
-
-        if (t == T_out - 1) {
-            acc = grad_s;
-        } else {
-            acc = grad_s + acc * expf(s - s_val_next);
-        }
-        float grad_z = acc * expf(z - s);
-        s_val_next = s;
-
-        float grad_a = grad_log_h + carry_grad_a - grad_z;
-        carry_grad_a = grad_a;
-
-        if (t == 0) {
-            // grad_state = grad_z * d(log(state))/d(state) = grad_z / state
-            grad_state[state_idx] = T(grad_z / float(state[state_idx]));
-        } else {
-            // Chain through log_coeffs_and_values backward to get grad_gate, grad_hidden
-            float grad_g, grad_h;
-            log_coeffs_and_values_bwd(grad_a, grad_z, gate_val, hidden_val, &grad_g, &grad_h);
-
-            // Write to grad_combined: [grad_hidden, grad_gate, grad_proj]
-            grad_combined[gate_adr] = T(grad_g);
-            grad_combined[hidden_adr] = T(grad_h);
-            grad_combined[proj_adr] = T(grad_proj);
-        }
-    }
+    next_state[bH + h] = from_float(scan_result);
 }
 
 // Optimized backward kernel with sparse checkpoint loading
 // Reads sparse checkpoints from forward pass, recomputes intermediate values in chunks
 // Uses fast math intrinsics for better performance
-template<typename T>
 __global__ void fused_scan_backward_kernel_checkpointed(
-    T* __restrict__ grad_combined,         // (B, T, 3*H)
-    T* __restrict__ grad_state,            // (B, 1, H)
-    const T* __restrict__ grad_out,        // (B, T, H)
-    const T* __restrict__ grad_next_state, // (B, 1, H)
-    const T* __restrict__ combined,        // (B, T, 3*H)
-    const T* __restrict__ state,           // (B, 1, H)
+    precision_t* __restrict__ grad_combined,         // (B, T, 3*H)
+    precision_t* __restrict__ grad_state,            // (B, 1, H)
+    const precision_t* __restrict__ grad_out,        // (B, T, H)
+    const precision_t* __restrict__ grad_next_state, // (B, 1, H)
+    const precision_t* __restrict__ combined,        // (B, T, 3*H)
+    const precision_t* __restrict__ state,           // (B, 1, H)
     const float* __restrict__ a_star_buf,  // (B, T+1, H)
     const float* __restrict__ s_buf,       // (B, T+1, H)
     const float* __restrict__ log_values_buf, // (B, T+1, H)
@@ -753,87 +221,87 @@ __global__ void fused_scan_backward_kernel_checkpointed(
     int H2 = 2 * H;
     const int state_idx = b * H + h;
     const int out_base = bHT + h;
-    
-    const T* combined_h_base = &combined[cbase + h];
-    const T* combined_g_base = &combined[cbase + H + h];
-    const T* combined_p_base = &combined[cbase + H2 + h];
-    
-    T* grad_combined_h_base = &grad_combined[cbase + h];
-    T* grad_combined_g_base = &grad_combined[cbase + H + h];
-    T* grad_combined_p_base = &grad_combined[cbase + H2 + h];
-    
+
+    const precision_t* combined_h_base = &combined[cbase + h];
+    const precision_t* combined_g_base = &combined[cbase + H + h];
+    const precision_t* combined_p_base = &combined[cbase + H2 + h];
+
+    precision_t* grad_combined_h_base = &grad_combined[cbase + h];
+    precision_t* grad_combined_g_base = &grad_combined[cbase + H + h];
+    precision_t* grad_combined_p_base = &grad_combined[cbase + H2 + h];
+
     int T_out = T_seq + 1;
     int buf_base = b * T_out * H + h;
 
     float acc = 0.0;
     float s_val_next = 0.0;
     float carry_grad_a = 0.0;
-    
+
     for (int chunk_end = T_seq; chunk_end > 0; chunk_end -= CHECKPOINT_INTERVAL) {
         int chunk_start = (chunk_end > CHECKPOINT_INTERVAL) ? (chunk_end - CHECKPOINT_INTERVAL) : 0;
         int chunk_len = chunk_end - chunk_start;
-        
+
         // Chunk storage in registers
         float chunk_a_star[CHECKPOINT_INTERVAL];
         float chunk_s[CHECKPOINT_INTERVAL];
         float chunk_log_values[CHECKPOINT_INTERVAL];
         float chunk_hidden[CHECKPOINT_INTERVAL];
         float chunk_gate[CHECKPOINT_INTERVAL];
-        
+
         // Load checkpoint from global memory
         int ckpt_buf_idx = buf_base + chunk_start * H;
         float recomp_a_star = a_star_buf[ckpt_buf_idx];
         float recomp_s = s_buf[ckpt_buf_idx];
         float recomp_log_value = log_values_buf[ckpt_buf_idx];
-        
+
         // Recompute and store from chunk_start to chunk_end
         for (int i = 0; i < chunk_len; ++i) {
             int t = chunk_start + 1 + i;
             int t_offset = (t - 1) * H3;
-            float hv = float(combined_h_base[t_offset]);
-            float gv = float(combined_g_base[t_offset]);
-            
+            float hv = to_float(combined_h_base[t_offset]);
+            float gv = to_float(combined_g_base[t_offset]);
+
             float lc;
             log_coeffs_and_values_fwd(gv, hv, &lc, &recomp_log_value);
             recomp_a_star += lc;
-            
+
             float z = recomp_log_value - recomp_a_star;
             float mv = fmaxf(recomp_s, z);
             recomp_s = mv + log1pf(__expf(-fabsf(recomp_s - z)));
-            
+
             chunk_a_star[i] = recomp_a_star;
             chunk_s[i] = recomp_s;
             chunk_log_values[i] = recomp_log_value;
             chunk_hidden[i] = hv;
             chunk_gate[i] = gv;
         }
-        
+
         for (int i = chunk_len - 1; i >= 0; --i) {
             int t = chunk_start + 1 + i;
             int t_offset = (t - 1) * H3;
-            
+
             float a_star_t = chunk_a_star[i];
             float s_t = chunk_s[i];
             float log_value_t = chunk_log_values[i];
             float hidden_val = chunk_hidden[i];
             float gate_val = chunk_gate[i];
-            
-            float proj_val = float(combined_p_base[t_offset]);
-            
+
+            float proj_val = to_float(combined_p_base[t_offset]);
+
             float scan_result = __expf(a_star_t + s_t);
             float z = log_value_t - a_star_t;
-            
-            float grad_out_val = float(grad_out[out_base + (t - 1) * H]);
-            
-            float grad_scan_from_next = (t == T_seq) ? float(grad_next_state[state_idx]) : 0.0f;
-            
+
+            float grad_out_val = to_float(grad_out[out_base + (t - 1) * H]);
+
+            float grad_scan_from_next = (t == T_seq) ? to_float(grad_next_state[state_idx]) : 0.0f;
+
             float proj_sigmoid = sigmoid(proj_val);
             float grad_scan_result = grad_scan_from_next + grad_out_val * proj_sigmoid;
             float grad_proj = grad_out_val * scan_result * proj_sigmoid * (1.0f - proj_sigmoid);
-            
+
             float grad_log_h = grad_scan_result * scan_result;
             float grad_s = grad_log_h;
-            
+
             if (t == T_seq) {
                 acc = grad_s;
             } else {
@@ -841,494 +309,44 @@ __global__ void fused_scan_backward_kernel_checkpointed(
             }
             float grad_z = acc * __expf(z - s_t);
             s_val_next = s_t;
-            
+
             float grad_a = grad_log_h + carry_grad_a - grad_z;
             carry_grad_a = grad_a;
-            
+
             float grad_g, grad_h;
             log_coeffs_and_values_bwd(grad_a, grad_z, gate_val, hidden_val, &grad_g, &grad_h);
-            
-            grad_combined_h_base[t_offset] = T(grad_h);
-            grad_combined_g_base[t_offset] = T(grad_g);
-            grad_combined_p_base[t_offset] = T(grad_proj);
+
+            grad_combined_h_base[t_offset] = from_float(grad_h);
+            grad_combined_g_base[t_offset] = from_float(grad_g);
+            grad_combined_p_base[t_offset] = from_float(grad_proj);
         }
     }
-    
+
     int ckpt_0_idx = buf_base;
     float a_star_0 = a_star_buf[ckpt_0_idx];
     float s_0 = s_buf[ckpt_0_idx];
     float log_value_0 = log_values_buf[ckpt_0_idx];
-    
+
     float scan_result_0 = __expf(a_star_0 + s_0);
     float z_0 = log_value_0 - a_star_0;
-    
+
     float grad_scan_result_0 = 0.0f;
     float grad_log_h_0 = grad_scan_result_0 * scan_result_0;
     float grad_s_0 = grad_log_h_0;
-    
+
     acc = grad_s_0 + acc * __expf(s_0 - s_val_next);
     float grad_z_0 = acc * __expf(z_0 - s_0);
-    
-    grad_state[state_idx] = T(grad_z_0 / float(state[state_idx]));
+
+    grad_state[state_idx] = from_float(grad_z_0 / to_float(state[state_idx]));
 }
 
 
-/*
-template<typename T>
-__global__ void fused_scan_backward_kernel(
-    T* __restrict__ grad_log_coeffs,
-    T* __restrict__ grad_log_values,
-    const T* __restrict__ grad_out,
-    const T* __restrict__ out_buf,
-    const double* __restrict__ a_star_buf,
-    const double* __restrict__ s_buf,
-    const T* __restrict__ log_values,
-    int T_total,
-    int H,
-    int B
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= B * H) return;
 
-    int b = idx / H;
-    int h = idx % H;
-
-    int base = b * T_total * H + h;
-
-    double carry_grad_a = 0.0;
-    double carry_grad_s = 0.0;
-
-    for (int t = T_total - 1; t >= 0; --t) {
-        int curr = base + t * H;
-
-        double a_star = a_star_buf[curr];
-        double s = s_buf[curr];
-        double z = double(log_values[curr]) - a_star;
-        double grad_log_h = double(grad_out[curr]) * double(out_buf[curr]); // out_buf[t] = exp(log_h[t])
-
-        double grad_s = grad_log_h + carry_grad_s;
-
-        double s_prev = -INFINITY;
-        if (t > 0) {
-            s_prev = s_buf[base + (t - 1) * H];
-        }
-
-        double max_val = fmax(s_prev, z);
-
-        double exp_prev = 0.0;
-        if (s_prev != -INFINITY) {
-            exp_prev = exp(s_prev - max_val);
-        }
-
-        double exp_z = 0.0;
-        if (z != -INFINITY) {
-            exp_z = exp(z - max_val);
-        }
-
-        double denom = exp_prev + exp_z;
-
-        double frac_prev = 0.0;
-        double frac_z = 0.0;
-        if (denom != 0.0) {
-            frac_prev = exp_prev / denom;
-            frac_z = exp_z / denom;
-        }
-
-        // grad_z = (grad_log_h + carry_grad_s) * exp(z - max_val) / (exp(s_prev - max_val) + exp(z - max_val))
-        // grad_z = (grad_log_h + exp(s - exp_nxt)) * exp(z - s) 
-
-        double d_Z = frac_z * grad_s;
-        double d_A = grad_log_h + carry_grad_a - d_Z;
-
-        grad_log_values[curr] = T(d_Z);
-        grad_log_coeffs[curr] = T(d_A);
-
-        carry_grad_a = d_A;
-        carry_grad_s = frac_prev * grad_s;
-    }
-}
-*/
-
-
-/*
-template<typename T>
-__global__ void fused_scan_backward_kernel(
-    T* __restrict__ grad_log_coeffs,
-    T* __restrict__ grad_log_values,
-    const T* __restrict__ grad_out,
-    const T* __restrict__ log_coeffs,
-    const T* __restrict__ log_values,
-    const T* __restrict__ out,
-    const double* __restrict__ a_star_buf,
-    const double* __restrict__ s_buf,
-    int T_total,
-    int H,
-    int B
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= B * H) return;
-
-    int b = idx / H;
-    int h = idx % H;
-
-    int base = b * T_total * H + h;
-
-    double grad_a_star[1025] = {0};  // Assuming T_total <= 1024
-    double W = 0.0;  // Accumulates sum_{i=t}^{T-1} [grad_log_h[i] * exp(-s[i])]
-
-    for (int t = T_total - 1; t >= 0; t--) {
-        int curr = base + t * H;
-
-        double a_star = a_star_buf[curr];
-        double s_val = s_buf[curr];
-        double z_val = double(log_values[curr]) - a_star;
-
-        // Compute dL/d(log_h[t]) = dL/d(out[t]) * d(out[t])/d(log_h[t])
-        double grad_log_h = double(grad_out[curr]) * double(out[curr]);
-
-        // Update W: W[t] = grad_log_h[t] * exp(-s_val) + W[t+1]
-        W = grad_log_h * exp(-s_val) + W;
-
-        // Compute dL/d(z[t]) = exp(z_val) * W[t]
-        double grad_z = exp(z_val) * W;
-
-        // dL/d(log_values[t]) = dL/d(z[t]) * dz[t]/d(log_values[t]) = grad_z
-        grad_log_values[curr] = T(grad_z);
-
-        // dL/da_star[t] = dL/d(log_h[t]) - dL/d(z[t]) (due to chain rule)
-        grad_a_star[t] = grad_log_h - grad_z;
-    }
-
-    // Compute dL/d(log_coeffs) via cumulative sum of dL/da_star
-    double accum = 0.0;
-    for (int t = T_total - 1; t >= 0; t--) {
-        accum += grad_a_star[t];
-        grad_log_coeffs[base + t * H] = T(accum);
-    }
-}
-*/
-
-
-/*
-template<typename T>
-__global__ void fused_scan_backward_kernel(
-    T* __restrict__ grad_log_coeffs,
-    T* __restrict__ grad_log_values,
-    const T* __restrict__ grad_out,
-    const T* __restrict__ log_coeffs,
-    const T* __restrict__ log_values,
-    const T* __restrict__ out,
-    const float* __restrict__ a_star_buf,
-    const float* __restrict__ s_buf,
-    int T_total,
-    int H,
-    int B
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= B * H) return;
-
-    int b = idx / H;
-    int h = idx % H;
-
-    int base = b * T_total * H + h;
-
-    float grad_a_star[1025] = {0};
-    float G = 0.0f;  // G[t] = sum_{i=t}^{T-1} grad_s[i]
-    for (int t = T_total - 1; t >= 0; t--) {
-        int curr = base + t * H;
-
-        float a_star = a_star_buf[curr];
-        float s_val = s_buf[curr];
-        float z = float(log_values[curr]) - a_star;
-
-        // grad_log_h[t] = grad_out[t] * out[t]
-        float grad_log_h = float(grad_out[curr]) * float(out[curr]);
-
-        // G = sum of grad_s from t to end (grad_s[t] = grad_log_h[t])
-        G += grad_log_h;
-
-        // grad_z[t] = exp(z - s_val) * G
-        float prob = expf(z - s_val);
-        float grad_z = prob * G;
-
-        // grad_log_values[t] = grad_z
-        grad_log_values[curr] = T(grad_z);
-
-        // grad_a_star[t] gets:
-        // - +grad_log_h (from log_h = a_star + s)
-        // - -grad_z    (from z = log_values - a_star)
-        grad_a_star[t] = grad_log_h - grad_z;
-    }
-
-    // grad_log_coeffs[t] = sum_{i=t}^{T-1} grad_a_star[i]
-    float accum = 0.0f;
-    for (int t = T_total - 1; t >= 0; t--) {
-        accum += grad_a_star[t];
-        grad_log_coeffs[base + t * H] = T(accum);
-    }
-}
-
- template<typename T>
-__global__ void fused_scan_backward_kernel(
-    T* __restrict__ grad_log_coeffs,
-    T* __restrict__ grad_log_values,
-    const T* __restrict__ grad_out,
-    const T* __restrict__ log_coeffs,
-    const T* __restrict__ log_values,
-    const T* __restrict__ out,
-    const float* __restrict__ a_star_buf,
-    const float* __restrict__ s_buf,
-    int T_total,
-    int H,
-    int B
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= B * H) return;
-
-    int b = idx / H;
-    int h = idx % H;
-
-    int base = b * T_total * H + h;
-
-    // Recompute z[t] = log_values[t] - a_star[t]
-    float z[1025];
-    for (int t = 0; t < T_total; t++) {
-        int curr = base + t * H;
-        z[t] = float(log_values[curr]) - a_star_buf[curr];
-    }
-
-    // g_log_h[t] = grad_out[t] * out[t]
-    float g_log_h[1025];
-    for (int t = 0; t < T_total; t++) {
-        int curr = base + t * H;
-        g_log_h[t] = float(grad_out[curr]) * float(out[curr]);
-    }
-
-    // Step: Online logcumsumexp backward for g_z
-    float g_z[1025] = {0};
-    g_z[T_total - 1] = g_log_h[T_total - 1];
-
-    for (int t = T_total - 2; t >= 0; t--) {
-        float exp_term = expf(z[t] - s_buf[base + (t + 1) * H]);
-        g_z[t] = g_log_h[t] + g_z[t + 1] * exp_term;
-    }
-
-    // grad_log_values[t] = g_z[t]
-    for (int t = 0; t < T_total; t++) {
-        int curr = base + t * H;
-        grad_log_values[curr] = T(g_z[t]);
-    }
-
-    // g_a_star[t] = g_log_h[t] - g_z[t]
-    float g_a_star[1025] = {0};
-    for (int t = 0; t < T_total; t++) {
-        g_a_star[t] = g_log_h[t] - g_z[t];
-    }
-
-    // grad_log_coeffs[t] = reverse cumsum of g_a_star
-    float accum = 0.0f;
-    for (int t = T_total - 1; t >= 0; t--) {
-        accum += g_a_star[t];
-        grad_log_coeffs[base + t * H] = T(accum);
-    }
-}
-*/
-// Fully fused forward launch: takes combined (B, T, 3*H) = [hidden, gate, proj]
-template<typename T>
-void launch_fused_scan_forward(
-    T* out,
-    T* next_state,
-    float* a_star,
-    float* s_vals,
-    float* log_values_buf,  // (B, T+1, H) - cached for backward
-    const T* combined,  // (B, T, 3*H) = [hidden, gate, proj]
-    const T* state,
-    int T_seq,
-    int H,
-    int B,
-    cudaStream_t stream
-) {
-    int total = B * H;
-    int grid = seq_size(total);
-
-    fused_scan_forward_kernel<T><<<grid, SEQ_SIZE, 0, stream>>>(
-        out,
-        next_state,
-        a_star,
-        s_vals,
-        log_values_buf,
-        combined,
-        state,
-        T_seq,
-        H,
-        B
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA kernel launch error in forward: %s\n", cudaGetErrorString(err));
-    }
-}
-
-template<typename T>
-void launch_fused_scan_forward_checkpointed(
-    T* out,
-    T* next_state,
-    float* a_star,
-    float* s_vals,
-    float* log_values_buf,  // (B, T+1, H)
-    const T* combined,  // (B, T, 3*H)
-    const T* state,
-    int T_seq,
-    int H,
-    int B,
-    cudaStream_t stream
-) {
-    int total = B * H;
-    int grid = grid_size(total);
-
-    fused_scan_forward_kernel_checkpointed<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        out,
-        next_state,
-        a_star,
-        s_vals,
-        log_values_buf,
-        combined,
-        state,
-        T_seq,
-        H,
-        B
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA kernel launch error in checkpointed forward: %s\n", cudaGetErrorString(err));
-    }
-}
-
-// Fully fused backward launch: outputs grad_combined (B, T, 3*H) = [grad_hidden, grad_gate, grad_proj]
-template<typename T>
-void launch_fused_scan_backward(
-    T* grad_combined,   // (B, T, 3*H) = [grad_hidden, grad_gate, grad_proj]
-    T* grad_state,
-    const T* grad_out,
-    const T* grad_next_state,
-    const T* combined,  // (B, T, 3*H) = [hidden, gate, proj]
-    const T* state,
-    const float* a_star_buf,
-    const float* s_buf,
-    const float* log_values_buf,  // (B, T+1, H) - cached from forward
-    int T_seq,
-    int H,
-    int B,
-    cudaStream_t stream
-) {
-    int total = B * H;
-    int grid = seq_size(total);
-
-    fused_scan_backward_kernel<T><<<grid, SEQ_SIZE, 0, stream>>>(
-        grad_combined,
-        grad_state,
-        grad_out,
-        grad_next_state,
-        combined,
-        state,
-        a_star_buf,
-        s_buf,
-        log_values_buf,
-        T_seq,
-        H,
-        B
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA kernel launch error in backward: %s\n", cudaGetErrorString(err));
-    }
-}
-
-// Optimized backward launch with sparse checkpoint loading
-// Reads sparse checkpoints from forward pass, recomputes intermediate values in chunks
-template<typename T>
-void launch_fused_scan_backward_checkpointed(
-    T* grad_combined,   // (B, T, 3*H)
-    T* grad_state,
-    const T* grad_out,
-    const T* grad_next_state,
-    const T* combined,  // (B, T, 3*H)
-    const T* state,
-    const float* a_star_buf,  // (B, T+1, H)
-    const float* s_buf,       // (B, T+1, H)
-    const float* log_values_buf,  // (B, T+1, H)
-    int T_seq,
-    int H,
-    int B,
-    cudaStream_t stream
-) {
-    int total = B * H;
-    int grid = grid_size(total);
-
-    fused_scan_backward_kernel_checkpointed<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        grad_combined,
-        grad_state,
-        grad_out,
-        grad_next_state,
-        combined,
-        state,
-        a_star_buf,
-        s_buf,
-        log_values_buf,
-        T_seq,
-        H,
-        B
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA kernel launch error in checkpointed backward: %s\n", cudaGetErrorString(err));
-    }
-}
-
-
-/*
-__device__ __forceinline__ float log_add_exp(const float a, const float b) {
-  if (::isnan(a) || ::isnan(b)) {
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-  float min_val = fminf(a, b);
-  float max_val = fmaxf(a, b);
-  if (min_val != max_val || ::isfinite(min_val)) {
-    return max_val + log1pf(expf(min_val - max_val));
-  } else {
-      return a;
-  }
-}
-
-__device__ __forceinline__ float log_add_exp_backward(float x_val, float s_val) {
-  if (::isnan(x_val) || ::isnan(s_val)) {
-    return std::numeric_limits<float>::quiet_NaN();
-  }
-  return expf(x_val - s_val);
-}
-*/
-
-__device__ __forceinline__ double log_add_exp(const double a, const double b) {
-  double min_val = fmin(a, b);
-  double max_val = fmax(a, b);
-  return max_val + log1p(exp(min_val - max_val));
-}
-
-__device__ __forceinline__ double log_add_exp_backward(double x, double s) {
-    return exp(x - s);
-}
-
- 
 // This exactly matches pytorch in double, but not in float
-template<typename T>
 __global__ void logcumsumexp_forward_kernel(
-    T* __restrict__ out,           // exp(s[t])
+    precision_t* __restrict__ out,           // exp(s[t])
     double* __restrict__ s_buf,     // s[t] = logcumsumexp(x[0..t])
-    const T* __restrict__ x,       // input: log_values
+    const precision_t* __restrict__ x,       // input: log_values
     int T_total,
     int H,
     int B
@@ -1345,17 +363,16 @@ __global__ void logcumsumexp_forward_kernel(
 
     for (int t = 0; t < T_total; t++) {
         int curr = base + t * H;
-        double x_val = double(x[curr]);
+        double x_val = (double)to_float(x[curr]);
         s = logcumsumexp_forward(x_val, s);
-        out[curr] = T(s);
+        out[curr] = from_float((float)s);
         s_buf[curr] = s;
     }
 }
-template<typename T>
 __global__ void logcumsumexp_backward_kernel(
-    T* __restrict__ grad_x,
-    const T* __restrict__ grad_out,
-    const T* __restrict__ x,
+    precision_t* __restrict__ grad_x,
+    const precision_t* __restrict__ grad_out,
+    const precision_t* __restrict__ x,
     const double* __restrict__ s_buf,
     int T_total,
     int H,
@@ -1375,123 +392,46 @@ __global__ void logcumsumexp_backward_kernel(
     for (int t = T_total - 1; t >= 0; --t) {
         int curr = base + t * H;
 
-        double x_val = double(x[curr]);
+        double x_val = (double)to_float(x[curr]);
         double s_val = double(s_buf[curr]);
-        double g_val = double(grad_out[curr]);
-        grad_x[curr] = T(logcumsumexp_backward(x_val, &acc, g_val, s_val, &s_val_next));
+        double g_val = (double)to_float(grad_out[curr]);
+        grad_x[curr] = from_float((float)logcumsumexp_backward(x_val, &acc, g_val, s_val, &s_val_next));
     }
 }
-/*
-template<typename T>
-__global__ void logcumsumexp_backward_kernel(
-    T* __restrict__ grad_x,
-    const T* __restrict__ grad_out,
-    const T* __restrict__ x,
-    const float* __restrict__ s_buf,
-    int T_total,
-    int H,
-    int B
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= B * H) return;
 
-    int b = idx / H;
-    int h = idx % H;
 
-    int base = b * T_total * H + h;
 
-    // grad_x[i] = sum_{t≥i} grad_out[t] * exp(x[i] - s[t])
-    for (int i = 0; i < T_total; i++) {
-        int curr_i = base + i * H;
-        float x_i = float(x[curr_i]);
-        float g = 0.0f;
-
-        for (int t = i; t < T_total; t++) {
-            int curr_t = base + t * H;
-            float s_t = s_buf[curr_t];
-            float prob = expf(x_i - s_t);
-            //float prob = log_add_exp_backward(x_i, s_t);
-            g += float(grad_out[curr_t]) * prob;
-        }
-
-        grad_x[curr_i] = T(g);
-    }
-}
-*/
-
-template<typename T>
-void launch_logcumsumexp_forward(
-    T* out,
-    double* s_buf,
-    const T* x,
-    int T_total,
-    int H,
-    int B,
-    cudaStream_t stream
-) {
-    int total = B * H;
-    int grid = grid_size(total);
-
-    logcumsumexp_forward_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        out, s_buf, x, T_total, H, B
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess)
-        fprintf(stderr, "Forward kernel error: %s\n", cudaGetErrorString(err));
-}
-
-template<typename T>
-void launch_logcumsumexp_backward(
-    T* grad_x,
-    const T* grad_out,
-    const T* x,
-    const double* s_buf,
-    int T_total,
-    int H,
-    int B,
-    cudaStream_t stream
-) {
-    int total = B * H;
-    int grid = grid_size(total);
-
-    logcumsumexp_backward_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        grad_x, grad_out, x, s_buf, T_total, H, B
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess)
-        fprintf(stderr, "Backward kernel error: %s\n", cudaGetErrorString(err));
-}
-
-template<typename T>
 __global__ void ppo_loss_forward_kernel_optimized(
     float* __restrict__ loss,
     double* __restrict__ saved_for_backward,
-    T* __restrict__ ratio_out,
-    T* __restrict__ newvalue_out,
-    const T* __restrict__ logits,
-    const T* __restrict__ values_pred,
-    const int64_t* __restrict__ actions,
-    const T* __restrict__ old_logprobs,
+    precision_t* __restrict__ ratio_out,
+    precision_t* __restrict__ newvalue_out,
+    const precision_t* __restrict__ logits,       // For continuous: mean
+    const precision_t* __restrict__ logstd,       // For continuous: log standard deviation (nullptr for discrete)
+    const precision_t* __restrict__ values_pred,
+    const double* __restrict__ actions, // float64 for both continuous and discrete
+    const precision_t* __restrict__ old_logprobs,
     const float* __restrict__ advantages,
-    const T* __restrict__ prio,
-    const T* __restrict__ values,
-    const T* __restrict__ returns,
+    const precision_t* __restrict__ prio,
+    const precision_t* __restrict__ values,
+    const precision_t* __restrict__ returns,
     const float* __restrict__ adv_mean,
     const float* __restrict__ adv_var,
+    const int* __restrict__ act_sizes,  // NEW: array of action head sizes
+    int num_atns,                        // NEW: number of action heads
     float clip_coef,
     float vf_clip_coef,
     float vf_coef,
     float ent_coef,
     int T_seq,
-    int A,
+    int A_total,                         // renamed: sum of all action sizes
     int N,
     int logits_stride_n,
     int logits_stride_t,
     int logits_stride_a,
     int values_stride_n,
-    int values_stride_t
+    int values_stride_t,
+    bool is_continuous
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int total_elements = N * T_seq;
@@ -1505,42 +445,90 @@ __global__ void ppo_loss_forward_kernel_optimized(
 
     int logits_base = n * logits_stride_n + t * logits_stride_t;
     int values_idx = n * values_stride_n + t * values_stride_t;
-    int act = actions[nt];
 
-    float max_logit = -INFINITY;
-    float sum = 0.0f;
-    float act_logit = 0.0f;
+    float total_log_prob = 0.0f;
+    float total_entropy = 0.0f;
 
-    for (int a = 0; a < A; a++) {
-        float l = float(logits[logits_base + a * logits_stride_a]);
+    if (is_continuous) {
+        // Continuous actions: Normal distribution
+        // log_prob = -0.5 * ((action - mean) / std)^2 - 0.5 * log(2*pi) - log(std)
+        // Differential entropy = 0.5 * (1 + log(2*pi)) + log_std
+        constexpr float LOG_2PI = 1.8378770664093453f;
+        constexpr float HALF_LOG_2PI = 0.9189385332046727f;
+        constexpr float HALF_1_PLUS_LOG_2PI = 1.4189385332046727f;  // 0.5 * (1 + log(2*pi))
 
-        // cache the action's logit
-        if (a == act) {
-            act_logit = l;
+        for (int h = 0; h < num_atns; ++h) {
+            float mean = to_float(logits[logits_base + h * logits_stride_a]);
+            float log_std = to_float(logstd[logits_base + h * logits_stride_a]);
+            float std = __expf(log_std);
+            float action = float(actions[nt * num_atns + h]);
+
+            float normalized = (action - mean) / std;
+            float log_prob = -0.5f * normalized * normalized - HALF_LOG_2PI - log_std;
+            // Differential entropy for Normal: 0.5 + 0.5*log(2*pi) + log_std
+            float entropy = HALF_1_PLUS_LOG_2PI + log_std;
+
+            total_log_prob += log_prob;
+            total_entropy += entropy;
         }
+    } else {
+        // Discrete actions: Categorical distribution
+        // Loop over action heads for MultiDiscrete support
+        int logits_offset = 0;
 
-        // rescale
-        if (l > max_logit) {
-            sum *= __expf(max_logit - l);
-            max_logit = l;
+        for (int h = 0; h < num_atns; ++h) {
+            int A = act_sizes[h];  // size of this action head
+            int act = static_cast<int>(actions[nt * num_atns + h]);  // action for this head
+
+            // Find max for numerical stability and cache action's logit
+            float max_logit = -INFINITY;
+            float sum = 0.0f;
+            float act_logit = 0.0f;
+
+            for (int a = 0; a < A; ++a) {
+                float l = to_float(logits[logits_base + (logits_offset + a) * logits_stride_a]);
+
+                if (a == act) {
+                    act_logit = l;
+                }
+
+                if (l > max_logit) {
+                    sum *= __expf(max_logit - l);
+                    max_logit = l;
+                }
+                sum += __expf(l - max_logit);
+            }
+
+            float logsumexp = max_logit + __logf(sum);
+
+            // Compute entropy for this head
+            float head_entropy = 0.0f;
+            for (int a = 0; a < A; ++a) {
+                float l = to_float(logits[logits_base + (logits_offset + a) * logits_stride_a]);
+                float logp = l - logsumexp;
+                float p = __expf(logp);
+                head_entropy -= p * logp;
+            }
+
+            // Log prob for this head
+            float head_logp = act_logit - logsumexp;
+
+            // Accumulate across heads
+            total_log_prob += head_logp;
+            total_entropy += head_entropy;
+
+            // Advance to next action head
+            logits_offset += A;
         }
-        sum += __expf(l - max_logit);
     }
 
-    float logsumexp = max_logit + __logf(sum);
+    // Use accumulated values for the rest of computation
+    float new_logp = total_log_prob;
+    float entropy = total_entropy;
 
-    float entropy = 0.0f;
-    for (int a = 0; a < A; a++) {
-        float l = float(logits[logits_base + a * logits_stride_a]);
-        float logp = l - logsumexp;
-        float p = __expf(logp);
-        entropy -= p * logp;
-    }
-
-    float new_logp = act_logit - logsumexp;
-    float old_logp = float(old_logprobs[nt]);
+    float old_logp = to_float(old_logprobs[nt]);
     float adv = float(advantages[nt]);
-    float w = float(prio[n]);
+    float w = to_float(prio[n]);
     float adv_std = sqrtf(float(adv_var[0]));
     float adv_normalized = (adv - float(adv_mean[0])) / (adv_std + 1e-8f);
 
@@ -1553,9 +541,9 @@ __global__ void ppo_loss_forward_kernel_optimized(
     float pg_loss2 = wa * ratio_clipped;
     float pg_loss = fmaxf(pg_loss1, pg_loss2);
 
-    float val = float(values[nt]);
-    float ret = float(returns[nt]);
-    float val_pred = float(values_pred[values_idx]);
+    float val = to_float(values[nt]);
+    float ret = to_float(returns[nt]);
+    float val_pred = to_float(values_pred[values_idx]);
 
     float v_error = val_pred - val;
     float v_clipped = val + fmaxf(-vf_clip_coef, fminf(vf_clip_coef, v_error));
@@ -1586,33 +574,37 @@ __global__ void ppo_loss_forward_kernel_optimized(
 }
 
 
-template<typename T>
 __global__ void ppo_loss_backward_kernel_optimized(
-    float* __restrict__ grad_logits,
+    float* __restrict__ grad_logits,    // For continuous: grad_mean
+    float* __restrict__ grad_logstd,    // For continuous: grad_logstd (nullptr for discrete)
     float* __restrict__ grad_values_pred,
     const float* __restrict__ grad_loss,
-    const T* __restrict__ logits,
-    const T* __restrict__ values_pred,
-    const int64_t* __restrict__ actions,
-    const T* __restrict__ old_logprobs,
+    const precision_t* __restrict__ logits,       // For continuous: mean
+    const precision_t* __restrict__ logstd,       // For continuous: log standard deviation (nullptr for discrete)
+    const precision_t* __restrict__ values_pred,
+    const double* __restrict__ actions, // float64 for both continuous and discrete
+    const precision_t* __restrict__ old_logprobs,
     const float* __restrict__ advantages,
-    const T* __restrict__ prio,
-    const T* __restrict__ values,
-    const T* __restrict__ returns,
+    const precision_t* __restrict__ prio,
+    const precision_t* __restrict__ values,
+    const precision_t* __restrict__ returns,
     const float* __restrict__ adv_mean,
     const float* __restrict__ adv_var,
+    const int* __restrict__ act_sizes,  // NEW: array of action head sizes
+    int num_atns,                        // NEW: number of action heads
     float clip_coef,
     float vf_clip_coef,
     float vf_coef,
     float ent_coef,
     int T_seq,
-    int A,
+    int A_total,                         // renamed: sum of all action sizes
     int N,
     int logits_stride_n,
     int logits_stride_t,
     int logits_stride_a,
     int values_stride_n,
-    int values_stride_t
+    int values_stride_t,
+    bool is_continuous
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int total_elements = N * T_seq;
@@ -1625,55 +617,26 @@ __global__ void ppo_loss_backward_kernel_optimized(
 
     int logits_base = n * logits_stride_n + t * logits_stride_t;
     int values_idx = n * values_stride_n + t * values_stride_t;
-    int act = actions[nt];
 
-    float old_logp = float(old_logprobs[nt]);
+    float old_logp = to_float(old_logprobs[nt]);
     float adv = float(advantages[nt]);
-    float w = float(prio[n]);
-    float val = float(values[nt]);
-    float ret = float(returns[nt]);
-    float val_pred = float(values_pred[values_idx]);
+    float w = to_float(prio[n]);
+    float val = to_float(values[nt]);
+    float ret = to_float(returns[nt]);
+    float val_pred = to_float(values_pred[values_idx]);
 
-    float max_logit = -INFINITY;
-    float sum = 0.0f;
-    float act_logit = 0.0f;
+    // Normalize advantage
+    float adv_std_val = sqrtf(float(adv_var[0]));
+    float adv_normalized = (adv - float(adv_mean[0])) / (adv_std_val + 1e-8f);
 
-    for (int a = 0; a < A; a++) {
-        float l = float(logits[logits_base + a * logits_stride_a]);
-        if (a == act) act_logit = l;
-
-        if (l > max_logit) {
-            sum *= __expf(max_logit - l);
-            max_logit = l;
-        }
-        sum += __expf(l - max_logit);
-    }
-    float logsumexp = max_logit + __logf(sum);
-
-    float entropy = 0.0f;
-    for (int a = 0; a < A; a++) {
-        float l = float(logits[logits_base + a * logits_stride_a]);
-        float logp = l - logsumexp;
-        float p = __expf(logp);
-        entropy -= p * logp;
-    }
-
-    // recompute values that were saved in forward
-    float new_logp = act_logit - logsumexp;
-    float ratio = __expf(new_logp - old_logp);
-    float v_error = val_pred - val;
-    float v_clipped = val + fmaxf(-vf_clip_coef, fminf(vf_clip_coef, v_error));
-
-    // normalize advantage
-    float adv_std = sqrtf(float(adv_var[0]));
-    float adv_normalized = (adv - float(adv_mean[0])) / (adv_std + 1e-8f);
-
-    // loss gradient scaling
+    // Loss gradient scaling
     float dL = grad_loss[0] * inv_NT;
     float d_pg_loss = dL;
     float d_entropy_term = dL * (-ent_coef);
 
-    // gradient wrt value function prediction
+    // Gradient wrt value function prediction
+    float v_error = val_pred - val;
+    float v_clipped = val + fmaxf(-vf_clip_coef, fminf(vf_clip_coef, v_error));
     float v_loss_unclipped = (val_pred - ret) * (val_pred - ret);
     float v_loss_clipped = (v_clipped - ret) * (v_clipped - ret);
     bool use_clipped_vf = (v_loss_clipped > v_loss_unclipped);
@@ -1688,547 +651,163 @@ __global__ void ppo_loss_backward_kernel_optimized(
     }
     grad_values_pred[values_idx] = dL * vf_coef * d_val_pred;
 
-    // policy loss gradient
-    float ratio_clipped = fmaxf(1.0f - clip_coef, fminf(1.0f + clip_coef, ratio));
-    float pg_loss1 = -w * adv_normalized * ratio;
-    float pg_loss2 = -w * adv_normalized * ratio_clipped;
+    if (is_continuous) {
+        // Continuous: compute total log prob first for ratio
+        constexpr float HALF_LOG_2PI = 0.9189385332046727f;
+        float total_log_prob = 0.0f;
 
-    float d_ratio = -w * adv_normalized * d_pg_loss;
-    if (pg_loss2 > pg_loss1) {
-        if (ratio <= (1.0f - clip_coef) || ratio >= (1.0f + clip_coef)) {
-            d_ratio = 0.0f;
+        for (int h = 0; h < num_atns; ++h) {
+            float mean = to_float(logits[logits_base + h * logits_stride_a]);
+            float log_std = to_float(logstd[logits_base + h * logits_stride_a]);
+            float std = __expf(log_std);
+            float action = float(actions[nt * num_atns + h]);
+
+            float normalized = (action - mean) / std;
+            float log_prob = -0.5f * normalized * normalized - HALF_LOG_2PI - log_std;
+            total_log_prob += log_prob;
         }
-    }
-    float d_new_logp = d_ratio * ratio;
 
-    for (int a = 0; a < A; a++) {
-        float l = float(logits[logits_base + a * logits_stride_a]);
-        float logp = l - logsumexp;
-        float p = __expf(logp);
+        float new_logp = total_log_prob;
+        float ratio = __expf(new_logp - old_logp);
 
-        float d_logit = (a == act) ? d_new_logp : 0.0f;
-        d_logit -= p * d_new_logp;
+        // Policy loss gradient
+        float ratio_clipped = fmaxf(1.0f - clip_coef, fminf(1.0f + clip_coef, ratio));
+        float pg_loss1 = -w * adv_normalized * ratio;
+        float pg_loss2 = -w * adv_normalized * ratio_clipped;
 
-        d_logit += d_entropy_term * p * (-entropy - logp);
-        grad_logits[logits_base + a * logits_stride_a] = d_logit;
-    }
-}
-
-template<typename T>
-inline void launch_ppo_loss_forward_optimized(
-    float* loss_output,
-    double* saved_for_backward,
-    T* ratio_out,
-    T* newvalue_out,
-    const T* logits,
-    const T* values_pred,
-    const int64_t* actions,
-    const T* old_logprobs,
-    const float* advantages,  // always fp32 for precision
-    const T* prio,
-    const T* values,
-    const T* returns,
-    const float* adv_mean, // keep fp32
-    const float* adv_var, // keep fp32
-    float clip_coef,
-    float vf_clip_coef,
-    float vf_coef,
-    float ent_coef,
-    int T_seq,
-    int A,
-    int N,
-    int logits_stride_n,
-    int logits_stride_t,
-    int logits_stride_a,
-    int values_stride_n,
-    int values_stride_t,
-    cudaStream_t stream
-) {
-    int total = N * T_seq;
-    int grid = (total + PPO_THREADS - 1) / PPO_THREADS;
-    cudaMemsetAsync(loss_output, 0, sizeof(T), stream);
-    ppo_loss_forward_kernel_optimized<T><<<grid, PPO_THREADS, 0, stream>>>(
-        loss_output,
-        saved_for_backward,
-        ratio_out,
-        newvalue_out,
-        logits,
-        values_pred,
-        actions,
-        old_logprobs,
-        advantages,
-        prio,
-        values,
-        returns,
-        adv_mean,
-        adv_var,
-        clip_coef,
-        vf_clip_coef,
-        vf_coef,
-        ent_coef,
-        T_seq,
-        A,
-        N,
-        logits_stride_n,
-        logits_stride_t,
-        logits_stride_a,
-        values_stride_n,
-        values_stride_t
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "PPO forward optimized kernel error: %s\n", cudaGetErrorString(err));
-    }
-}
-
-template<typename T>
-void launch_ppo_loss_backward_optimized(
-    float* grad_logits,
-    float* grad_values_pred,
-    const float* grad_loss,
-    const T* logits,
-    const T* values_pred,    // added: need to read val_pred directly
-    const int64_t* actions,
-    const T* old_logprobs,
-    const float* advantages,
-    const T* prio,
-    const T* values,
-    const T* returns,
-    const float* adv_mean,
-    const float* adv_var,
-    float clip_coef,
-    float vf_clip_coef,
-    float vf_coef,
-    float ent_coef,
-    int T_seq,
-    int A,
-    int N,
-    int logits_stride_n,
-    int logits_stride_t,
-    int logits_stride_a,
-    int values_stride_n,
-    int values_stride_t,
-    cudaStream_t stream
-) {
-    int total = N * T_seq;
-    int grid = (total + PPO_THREADS - 1) / PPO_THREADS;
-
-    ppo_loss_backward_kernel_optimized<T><<<grid, PPO_THREADS, 0, stream>>>(
-        grad_logits,
-        grad_values_pred,
-        grad_loss,
-        logits,
-        values_pred,
-        actions,
-        old_logprobs,
-        advantages,
-        prio,
-        values,
-        returns,
-        adv_mean,
-        adv_var,
-        clip_coef,
-        vf_clip_coef,
-        vf_coef,
-        ent_coef,
-        T_seq,
-        A,
-        N,
-        logits_stride_n,
-        logits_stride_t,
-        logits_stride_a,
-        values_stride_n,
-        values_stride_t
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "PPO backward optimized kernel error: %s\n", cudaGetErrorString(err));
-    }
-}
-
-
-// TODO: This kernel is stale - needs stride parameters for non-contiguous tensor support
-// See ppo_loss_forward_kernel_optimized
-template<typename T>
-__global__ void ppo_loss_forward_kernel(
-    float* __restrict__ loss,
-    double* __restrict__ saved_for_backward,
-    const T* __restrict__ logits,
-    const T* __restrict__ values_pred,
-    const int64_t* __restrict__ actions,
-    const T* __restrict__ old_logprobs,
-    const T* __restrict__ advantages,
-    const T* __restrict__ prio,
-    const T* __restrict__ values,
-    const T* __restrict__ returns,
-    const float* __restrict__ adv_mean,
-    const float* __restrict__ adv_var,
-    double clip_coef,
-    double vf_clip_coef,
-    double vf_coef,
-    double ent_coef,
-    int T_seq,
-    int A,
-    int N
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int total_elements = N * T_seq;
-    if (idx >= total_elements) return;
-    __shared__ float block_loss[BLOCK_SIZE];
-
-    int n = idx / T_seq;  // batch index
-    int t = idx % T_seq;  // timestep
-
-    // === Direct indexing: no lambdas ===
-    int nt = n * T_seq + t;                    // index into (N, T_seq) tensors
-    int logits_offset = n * T_seq * A + t * A; // base index into logits
-
-    // === Step 1: Read action and compute logsumexp ===
-    int act = actions[nt];  // action taken at (n,t)
-
-    // Compute logsumexp: log(sum_a exp(logits[a]))
-    double max_logit = -INFINITY;
-    for (int a = 0; a < A; a++) {
-        double l = double(logits[logits_offset + a]);
-        max_logit = fmax(max_logit, l);
-    }
-
-    double logsumexp = 0.0;
-    double sum = 0.0;
-    for (int a = 0; a < A; a++) {
-        double l = double(logits[logits_offset + a]);
-        sum += exp(l - max_logit);
-    }
-    logsumexp = max_logit + log(sum);
-
-    // === Step 2: new_logprob[action] = logits[action] - logsumexp ===
-    // log_softmax = (logits - max_logit) - max_logit - logsumexp
-    double new_logp = double(logits[logits_offset + act]) - logsumexp;
-
-    // === Step 3: entropy = -sum_a p_a * log p_a ===
-    double entropy = 0.0;
-    for (int a = 0; a < A; a++) {
-        double l = double(logits[logits_offset + a]);
-        double p = exp(l - logsumexp);
-        double logp = l - logsumexp;
-        entropy -= p * logp;
-    }
-
-    // === Step 4: policy gradient loss ===
-    double old_logp = double(old_logprobs[nt]);
-    double adv = double(advantages[nt]);
-    double w = double(prio[n]);  // importance weight, per-sequence
-    double adv_std = sqrt(adv_var[0]);
-    double adv_normalized = (adv - adv_mean[0]) / (adv_std + 1e-8);
-
-    double logratio = new_logp - old_logp;
-    double ratio = exp(logratio);
-
-    double ratio_clipped = fmax(1.0 - clip_coef, fmin(1.0 + clip_coef, ratio));
-    double pg_loss1 = -w * adv_normalized * ratio;
-    double pg_loss2 = -w * adv_normalized * ratio_clipped;
-    double pg_loss = fmax(pg_loss1, pg_loss2);  // PPO clipped surrogate loss
-
-    // === Step 5: value function loss ===
-    double val = double(values[nt]);
-    double ret = double(returns[nt]);
-    double val_pred = double(values_pred[nt]);
-
-    double v_error = val_pred - val;
-    double v_clipped = val + fmax(-vf_clip_coef, fmin(vf_clip_coef, v_error));
-    double v_loss_unclipped = (val_pred - ret) * (val_pred - ret);
-    double v_loss_clipped = (v_clipped - ret) * (v_clipped - ret);
-    double v_loss = 0.5f * fmax(v_loss_unclipped, v_loss_clipped);
-
-    // === Step 6: total sample loss (pre-divided by N*T for mean) ===
-    double thread_loss = (pg_loss + vf_coef * v_loss - ent_coef * entropy) / double(total_elements);
-
-    // === Save for backward ===
-    double* saved_row = saved_for_backward + idx * 5;
-    saved_row[0] = new_logp;
-    saved_row[1] = ratio;
-    saved_row[2] = val_pred;
-    saved_row[3] = v_clipped;
-    saved_row[4] = entropy;
-
-    // === Block-local reduction using shared memory ===
-    int tid = threadIdx.x;
-    block_loss[tid] = float(thread_loss);
-    __syncthreads();
-
-    // Reduce within block using tree reduction
-    for (int stride = BLOCK_SIZE / 2; stride > 0; stride >>= 1) {
-        if (tid < stride) {
-            block_loss[tid] += block_loss[tid + stride];
+        float d_ratio = -w * adv_normalized * d_pg_loss;
+        if (pg_loss2 > pg_loss1) {
+            if (ratio <= (1.0f - clip_coef) || ratio >= (1.0f + clip_coef)) {
+                d_ratio = 0.0f;
+            }
         }
-        __syncthreads();
-    }
+        float d_new_logp = d_ratio * ratio;
 
-    // === Accumulate into loss_output (scalar via atomic add) ===
-    if (tid == 0) {
-        atomicAdd(loss, block_loss[0]);
-    }
-}
+        // Compute gradients for continuous actions
+        // log_prob = -0.5 * ((action - mean) / std)^2 - 0.5 * log(2*pi) - log_std
+        // d_log_prob/d_mean = (action - mean) / var
+        // d_log_prob/d_log_std = (action - mean)^2 / var - 1
+        // entropy = 0.5 + 0.5*log(2*pi) + log_std
+        // d_entropy/d_log_std = 1
 
-// TODO: This kernel stale
-// See ppo_loss_backward_kernel_optimized
-template<typename T>
-__global__ void ppo_loss_backward_kernel(
-    T* __restrict__ grad_logits,
-    T* __restrict__ grad_values_pred,
-    const float* __restrict__ grad_loss,  // scalar, [1], dL/dloss
-    const T* __restrict__ logits,
-    const int64_t* __restrict__ actions,
-    const T* __restrict__ old_logprobs,
-    const T* __restrict__ advantages,
-    const T* __restrict__ prio,
-    const T* __restrict__ values,
-    const T* __restrict__ returns,
-    const double* __restrict__ saved_for_backward,
-    const float* __restrict__ adv_mean,
-    const float* __restrict__ adv_var,
-    double clip_coef,
-    double vf_clip_coef,
-    double vf_coef,
-    double ent_coef,
-    int T_seq,
-    int A,
-    int N
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int total_elements = N * T_seq;
-    if (idx >= total_elements) return;
+        for (int h = 0; h < num_atns; ++h) {
+            float mean = to_float(logits[logits_base + h * logits_stride_a]);
+            float log_std = to_float(logstd[logits_base + h * logits_stride_a]);
+            float std = __expf(log_std);
+            float var = std * std;
+            float action = float(actions[nt * num_atns + h]);
 
-    double inv_NT = 1.0f / (N * T_seq);
-    int n = idx / T_seq;
-    int t = idx % T_seq;
+            float diff = action - mean;
 
-    // === Direct indexing ===
-    int nt = n * T_seq + t;
-    int logits_offset = n * T_seq * A + t * A;
+            // Gradient wrt mean: d_log_prob/d_mean = (action - mean) / var
+            float d_mean = d_new_logp * diff / var;
+            grad_logits[logits_base + h * logits_stride_a] = d_mean;
 
-    // === Retrieve saved values from forward pass ===
-    const double* saved = saved_for_backward + idx * 5;
-    // double new_logp = saved[0];   // new log prob of selected action
-    double ratio = saved[1];      // exp(new_logp - old_logp)
-    double val_pred = saved[2];   // value prediction
-    double v_clipped = saved[3];  // clipped value target
-    double entropy = saved[4];    // entropy at (n,t)
-
-    // === Read inputs ===
-    double old_logp = double(old_logprobs[nt]);
-    double adv = double(advantages[nt]);
-    double w = double(prio[n]);  // importance weight
-    double val = double(values[nt]);
-    double ret = double(returns[nt]);
-
-    // === Normalize advantage (same as forward) ===
-    double adv_std = sqrt(adv_var[0]);
-    double adv_normalized = (adv - adv_mean[0]) / (adv_std + 1e-8f);
-
-    // Total loss gradient (scalar from autograd)
-    double dL = grad_loss[0] * inv_NT;  // dL/dloss
-
-    // Gradients w.r.t. components
-    double d_pg_loss = dL;                    // policy loss contributes dL
-    double d_entropy_term = dL * (-ent_coef); // entropy bonus gradient
-
-    // ===================================================
-    // 1. Gradient w.r.t. value function prediction
-    // ===================================================
-    double v_loss_unclipped = (val_pred - ret) * (val_pred - ret);
-    double v_loss_clipped = (v_clipped - ret) * (v_clipped - ret);
-
-    // Which branch was taken in forward? (same logic as PyTorch: use unclipped if tie)
-    bool use_clipped_vf = (v_loss_clipped > v_loss_unclipped);
-    double d_val_pred = 0.0;
-
-    if (use_clipped_vf) {
-        double v_error = val_pred - val;
-        if (v_error >= -vf_clip_coef && v_error <= vf_clip_coef) {
-            d_val_pred = v_clipped - ret;  // = val_pred - ret
+            // Gradient wrt log_std:
+            // d_log_prob/d_log_std = (action - mean)^2 / var - 1
+            // d_entropy/d_log_std = 1
+            // Total: d_new_logp * ((diff^2/var) - 1) + d_entropy_term * 1
+            float d_log_std = d_new_logp * (diff * diff / var - 1.0f) + d_entropy_term;
+            grad_logstd[logits_base + h * logits_stride_a] = d_log_std;
         }
     } else {
-        d_val_pred = val_pred - ret;
-    }
+        // Discrete: original implementation
+        // First pass: compute per-head logsumexp and entropy, accumulate total log prob
+        // Store per-head values for gradient computation (use register arrays)
+        float head_logsumexp[MAX_ATN_HEADS];
+        float head_entropy[MAX_ATN_HEADS];
+        int head_act[MAX_ATN_HEADS];
 
-    d_val_pred = dL * vf_coef * d_val_pred;
-    grad_values_pred[nt] = T(d_val_pred);
+        int logits_offset = 0;
+        float total_log_prob = 0.0f;
 
-    // ===================================================
-    // 2. Gradient w.r.t. policy and entropy (logits)
-    // ===================================================
-    // Recompute logsumexp for gradient
-    double max_logit = -INFINITY;
-    for (int a = 0; a < A; a++) {
-        double l = double(logits[logits_offset + a]);
-        max_logit = fmax(max_logit, l);
-    }
+        for (int h = 0; h < num_atns; ++h) {
+            int A = act_sizes[h];
+            int act = static_cast<int>(actions[nt * num_atns + h]);
+            head_act[h] = act;
 
-    double logsumexp = 0.0;
-    double sum = 0.0;
-    for (int a = 0; a < A; a++) {
-        double l = double(logits[logits_offset + a]);
-        sum += exp(l - max_logit);
-    }
-    logsumexp = max_logit + log(sum);
- 
-    // Zero grad_logits for this (n,t)
-    for (int a = 0; a < A; a++) {
-        grad_logits[logits_offset + a] = T(0.0f);
-    }
+            // Compute logsumexp for this head
+            float max_logit = -INFINITY;
+            float sum = 0.0f;
+            float act_logit = 0.0f;
 
-    // --- Policy Loss Gradient ---
-    double ratio_clipped = fmax(1.0f - clip_coef, fmin(1.0f + clip_coef, ratio));
-    double pg_loss1 = -w * adv_normalized * ratio;
-    double pg_loss2 = -w * adv_normalized * ratio_clipped;
+            for (int a = 0; a < A; ++a) {
+                float l = to_float(logits[logits_base + (logits_offset + a) * logits_stride_a]);
+                if (a == act) act_logit = l;
 
-    double d_ratio = -w * adv_normalized * d_pg_loss;
-    if (pg_loss2 > pg_loss1) {
-        if (ratio <= (1.0 - clip_coef) || ratio >= (1.0 + clip_coef)) {
-            d_ratio = 0.0;
+                if (l > max_logit) {
+                    sum *= __expf(max_logit - l);
+                    max_logit = l;
+                }
+                sum += __expf(l - max_logit);
+            }
+            float logsumexp = max_logit + __logf(sum);
+            head_logsumexp[h] = logsumexp;
+
+            // Compute entropy for this head
+            float ent = 0.0f;
+            for (int a = 0; a < A; ++a) {
+                float l = to_float(logits[logits_base + (logits_offset + a) * logits_stride_a]);
+                float logp = l - logsumexp;
+                float p = __expf(logp);
+                ent -= p * logp;
+            }
+            head_entropy[h] = ent;
+
+            // Accumulate total log prob
+            total_log_prob += act_logit - logsumexp;
+
+            logits_offset += A;
+        }
+
+        // Compute ratio and policy gradient
+        float new_logp = total_log_prob;
+        float ratio = __expf(new_logp - old_logp);
+
+        // Policy loss gradient
+        float ratio_clipped = fmaxf(1.0f - clip_coef, fminf(1.0f + clip_coef, ratio));
+        float pg_loss1 = -w * adv_normalized * ratio;
+        float pg_loss2 = -w * adv_normalized * ratio_clipped;
+
+        float d_ratio = -w * adv_normalized * d_pg_loss;
+        if (pg_loss2 > pg_loss1) {
+            if (ratio <= (1.0f - clip_coef) || ratio >= (1.0f + clip_coef)) {
+                d_ratio = 0.0f;
+            }
+        }
+        // d_new_logp flows to each head's log prob equally since total = sum of head log probs
+        float d_new_logp = d_ratio * ratio;
+
+        // Second pass: compute gradients per head
+        logits_offset = 0;
+        for (int h = 0; h < num_atns; ++h) {
+            int A = act_sizes[h];
+            int act = head_act[h];
+            float logsumexp = head_logsumexp[h];
+            float ent = head_entropy[h];
+
+            for (int a = 0; a < A; ++a) {
+                float l = to_float(logits[logits_base + (logits_offset + a) * logits_stride_a]);
+                float logp = l - logsumexp;
+                float p = __expf(logp);
+
+                // Policy gradient: d/dlogits[a] of head_logp = delta(a,act) - p
+                float d_logit = (a == act) ? d_new_logp : 0.0f;
+                d_logit -= p * d_new_logp;
+
+                // Entropy gradient: d/dlogits[a] of head_entropy = p * (-entropy - logp)
+                // Each head's entropy contributes independently to total entropy
+                d_logit += d_entropy_term * p * (-ent - logp);
+
+                grad_logits[logits_base + (logits_offset + a) * logits_stride_a] = d_logit;
+            }
+
+            logits_offset += A;
         }
     }
-
-    // d(ratio)/d(new_logp) = ratio
-    double d_new_logp = d_ratio * ratio;
-
-    // --- Entropy Gradient ---
-    // dH/dlogits[a] = p_a * (entropy - log p_a)
-    for (int a = 0; a < A; a++) {
-        double l = double(logits[logits_offset + a]);
-        double p = exp(l - logsumexp);
-        double logp = l - logsumexp;
-
-        // Gradient from policy loss: d/dlogits[a] new_logp = δ_{a,act} - p_a
-        double d_logit = 0.0f;
-        if (a == actions[nt]) {
-            d_logit += d_new_logp;
-        }
-        d_logit -= p * d_new_logp;
-
-        // Gradient from entropy
-        // TODO: Grad is a bit more off than I would like (1e-6)
-        // Probably need to check logsumexp (not cumulative) vs
-        // torch / actually look at the puffer 3 entropy impl
-        double d_entropy_dlogit = p * (entropy - logp);
-        d_logit += d_entropy_term * d_entropy_dlogit;
-
-        grad_logits[logits_offset + a] = T(d_logit);
-    }
 }
 
-template<typename T>
-inline void launch_ppo_loss_forward(
-    float* loss_output,
-    double* saved_for_backward,
-    const T* logits,
-    const T* values_pred,
-    const int64_t* actions,
-    const T* old_logprobs,
-    const T* advantages,
-    const T* prio,
-    const T* values,
-    const T* returns,
-    const float* adv_mean,
-    const float* adv_var,
-    double clip_coef,
-    double vf_clip_coef,
-    double vf_coef,
-    double ent_coef,
-    int T_seq,
-    int A,
-    int N,
-    cudaStream_t stream
-) {
-    int total_elements = N * T_seq;
-    int grid = grid_size(total_elements);
 
-    ppo_loss_forward_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        loss_output,
-        saved_for_backward,
-        logits,
-        values_pred,
-        actions,
-        old_logprobs,
-        advantages,
-        prio,
-        values,
-        returns,
-        adv_mean,
-        adv_var,
-        clip_coef,
-        vf_clip_coef,
-        vf_coef,
-        ent_coef,
-        T_seq,
-        A,
-        N
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "PPO forward kernel error: %s\n", cudaGetErrorString(err));
-    }
-}
-
-template<typename T>
-void launch_ppo_loss_backward(
-    T* grad_logits,
-    T* grad_values_pred,
-    const float* grad_loss,
-    const T* logits,
-    const int64_t* actions,
-    const T* old_logprobs,
-    const T* advantages,
-    const T* prio,
-    const T* values,
-    const T* returns,
-    const double* saved_for_backward,
-    const float* adv_mean,
-    const float* adv_var,
-    double clip_coef,
-    double vf_clip_coef,
-    double vf_coef,
-    double ent_coef,
-    int T_seq,
-    int A,
-    int N,
-    cudaStream_t stream
-) {
-    int total_elements = N * T_seq;
-    int grid = grid_size(total_elements);
-
-    ppo_loss_backward_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        grad_logits,
-        grad_values_pred,
-        grad_loss,
-        logits,
-        actions,
-        old_logprobs,
-        advantages,
-        prio,
-        values,
-        returns,
-        saved_for_backward,
-        adv_mean,
-        adv_var,
-        clip_coef,
-        vf_clip_coef,
-        vf_coef,
-        ent_coef,
-        T_seq,
-        A,
-        N
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "PPO backward kernel error: %s\n", cudaGetErrorString(err));
-    }
-}
 
 // ============================================================================
 // Fused sample_logits kernel: nan_to_num + log_softmax + multinomial + gather + value copy
@@ -2241,26 +820,29 @@ void launch_ppo_loss_backward(
 // to avoid .contiguous() kernel launches.
 // ============================================================================
 
-// Single kernel that handles: nan_to_num, log_softmax, multinomial sampling, logprob gather, value copy
-// Input: logits (B, sum(act_sizes)) with row stride logits_stride, value (B, 1) with row stride value_stride, seed for RNG
+// Single kernel that handles both discrete and continuous action sampling
+// Discrete: nan_to_num, log_softmax, multinomial sampling, logprob gather, value copy
+// Continuous: sample from Normal(mean, exp(logstd)), compute log_prob, value copy
+// Input: logits (B, num_atns) for continuous or (B, sum(act_sizes)) for discrete
+//        logstd (B, num_atns) for continuous, nullptr for discrete
 // Output: actions (B, num_atns) as float64, logprobs (B,), value_out (B,)
 // NOTE: offset is read from a pointer (not passed by value) so it works correctly with CUDA graphs.
-// The offset tensor is incremented with a CUDA op after this kernel, so each graph replay gets a new offset.
-// Supports MultiDiscrete via act_sizes array - loops over action heads and sums logprobs.
-template<typename T>
 __global__ void sample_logits_kernel(
-    double* __restrict__ actions,         // (B, num_atns) output - sampled action indices as float64
-    T* __restrict__ logprobs,             // (B,) output - sum of log probs across action heads
-    T* __restrict__ value_out,            // (B,) output - copied value (flattened)
-    const T* __restrict__ logits,         // (B, sum(act_sizes)) input - raw logits (may be non-contiguous)
-    const T* __restrict__ value,          // (B, 1) input - value from fused output (may be non-contiguous)
+    double* __restrict__ actions,         // (B, num_atns) output - sampled actions as float64
+    precision_t* __restrict__ logprobs,             // (B,) output - sum of log probs across action dims
+    precision_t* __restrict__ value_out,            // (B,) output - copied value (flattened)
+    const precision_t* __restrict__ logits,         // (B, num_atns or sum(act_sizes)) input - mean for continuous, logits for discrete
+    const precision_t* __restrict__ logstd,         // (B, num_atns) input - log std for continuous, nullptr for discrete
+    const precision_t* __restrict__ value,          // (B, 1) input - value from fused output (may be non-contiguous)
     const int* __restrict__ act_sizes,    // (num_atns,) input - size of each action head
     uint64_t seed,                        // RNG seed
     const int64_t* __restrict__ offset_ptr, // RNG offset pointer (read at execution time for CUDA graph support)
-    int num_atns,                         // number of action heads
+    int num_atns,                         // number of action heads/dimensions
     int B,                                // batch size
     int logits_stride,                    // stride between rows (for non-contiguous logits from fused output)
-    int value_stride                      // stride between rows (for non-contiguous value from fused output)
+    int logstd_stride,                    // stride between rows for logstd (may be 0 for broadcast)
+    int value_stride,                     // stride between rows (for non-contiguous value from fused output)
+    bool is_continuous                    // true for continuous actions, false for discrete
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= B) return;
@@ -2273,69 +855,91 @@ __global__ void sample_logits_kernel(
     curand_init(seed, idx, offset, &state);
 
     int logits_base = idx * logits_stride;
-    int logits_offset = 0;  // offset within row for current action head
     float total_log_prob = 0.0f;
 
-    // Loop over action heads
-    for (int h = 0; h < num_atns; ++h) {
-        int A = act_sizes[h];  // size of this action head
+    if (is_continuous) {
+        // Continuous action sampling from Normal(mean, exp(logstd))
+        constexpr float LOG_2PI = 1.8378770664093453f;  // log(2*pi)
+        int logstd_base = idx * logstd_stride;  // separate stride for logstd (may be 0 for broadcast)
 
-        // Step 1: Find max for numerical stability (with nan_to_num)
-        float max_val = -INFINITY;
-        for (int a = 0; a < A; ++a) {
-            float l = float(logits[logits_base + logits_offset + a]);
-            // nan_to_num: replace nan with 0
-            if (isnan(l)) l = 0.0f;
-            // clamp inf/-inf (pytorch defaults: neginf=-3.4028e+38, posinf=3.4028e+38)
-            if (isinf(l)) l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
-            max_val = fmaxf(max_val, l);
+        for (int h = 0; h < num_atns; ++h) {
+            float mean = to_float(logits[logits_base + h]);
+            float log_std = to_float(logstd[logstd_base + h]);
+            float std = expf(log_std);
+
+            // Sample from N(0,1) and transform: action = mean + std * noise
+            float noise = curand_normal(&state);
+            float action = mean + std * noise;
+
+            // Log probability: -0.5 * ((action - mean) / std)^2 - 0.5 * log(2*pi) - log(std)
+            float normalized = (action - mean) / std;
+            float log_prob = -0.5f * normalized * normalized - 0.5f * LOG_2PI - log_std;
+
+            actions[idx * num_atns + h] = double(action);
+            total_log_prob += log_prob;
         }
+    } else {
+        // Discrete action sampling (original multinomial logic)
+        int logits_offset = 0;  // offset within row for current action head
 
-        // Step 2: Compute logsumexp for log_softmax denominator
-        float sum_exp = 0.0f;
-        for (int a = 0; a < A; ++a) {
-            float l = float(logits[logits_base + logits_offset + a]);
-            if (isnan(l)) l = 0.0f;
-            if (isinf(l)) l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
-            sum_exp += expf(l - max_val);
-        }
-        float logsumexp = max_val + logf(sum_exp);
+        for (int h = 0; h < num_atns; ++h) {
+            int A = act_sizes[h];  // size of this action head
 
-        // Step 3: Generate random value for this action head
-        float rand_val = curand_uniform(&state);
-
-        // Step 4: Multinomial sampling using inverse CDF
-        float cumsum = 0.0f;
-        int sampled_action = A - 1;  // default to last action
-
-        for (int a = 0; a < A; ++a) {
-            float l = float(logits[logits_base + logits_offset + a]);
-            if (isnan(l)) l = 0.0f;
-            if (isinf(l)) l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
-            float prob = expf(l - logsumexp);
-            cumsum += prob;
-            if (rand_val < cumsum) {
-                sampled_action = a;
-                break;
+            // Step 1: Find max for numerical stability (with nan_to_num)
+            float max_val = -INFINITY;
+            for (int a = 0; a < A; ++a) {
+                float l = to_float(logits[logits_base + logits_offset + a]);
+                if (isnan(l)) l = 0.0f;
+                if (isinf(l)) l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
+                max_val = fmaxf(max_val, l);
             }
+
+            // Step 2: Compute logsumexp for log_softmax denominator
+            float sum_exp = 0.0f;
+            for (int a = 0; a < A; ++a) {
+                float l = to_float(logits[logits_base + logits_offset + a]);
+                if (isnan(l)) l = 0.0f;
+                if (isinf(l)) l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
+                sum_exp += expf(l - max_val);
+            }
+            float logsumexp = max_val + logf(sum_exp);
+
+            // Step 3: Generate random value for this action head
+            float rand_val = curand_uniform(&state);
+
+            // Step 4: Multinomial sampling using inverse CDF
+            float cumsum = 0.0f;
+            int sampled_action = A - 1;  // default to last action
+
+            for (int a = 0; a < A; ++a) {
+                float l = to_float(logits[logits_base + logits_offset + a]);
+                if (isnan(l)) l = 0.0f;
+                if (isinf(l)) l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
+                float prob = expf(l - logsumexp);
+                cumsum += prob;
+                if (rand_val < cumsum) {
+                    sampled_action = a;
+                    break;
+                }
+            }
+
+            // Step 5: Gather log probability of sampled action
+            float sampled_logit = to_float(logits[logits_base + logits_offset + sampled_action]);
+            if (isnan(sampled_logit)) sampled_logit = 0.0f;
+            if (isinf(sampled_logit)) sampled_logit = (sampled_logit > 0) ? 3.4028e+38f : -3.4028e+38f;
+            float log_prob = sampled_logit - logsumexp;
+
+            // Write action for this head
+            actions[idx * num_atns + h] = double(sampled_action);
+            total_log_prob += log_prob;
+
+            // Advance to next action head
+            logits_offset += A;
         }
-
-        // Step 5: Gather log probability of sampled action
-        float sampled_logit = float(logits[logits_base + logits_offset + sampled_action]);
-        if (isnan(sampled_logit)) sampled_logit = 0.0f;
-        if (isinf(sampled_logit)) sampled_logit = (sampled_logit > 0) ? 3.4028e+38f : -3.4028e+38f;
-        float log_prob = sampled_logit - logsumexp;
-
-        // Write action for this head
-        actions[idx * num_atns + h] = double(sampled_action);
-        total_log_prob += log_prob;
-
-        // Advance to next action head
-        logits_offset += A;
     }
 
     // Write summed log probability (log of joint probability)
-    logprobs[idx] = T(total_log_prob);
+    logprobs[idx] = from_float(total_log_prob);
 
     // Copy value (fused to avoid separate elementwise kernel for strided->contiguous copy)
     value_out[idx] = value[idx * value_stride];
@@ -2346,43 +950,7 @@ __global__ void sample_logits_kernel(
     }
 }
 
-template<typename T>
-void launch_sample_logits(
-    double* actions,
-    T* logprobs,
-    T* value_out,
-    const T* logits,
-    const T* value,
-    const int* act_sizes,
-    uint64_t seed,
-    const int64_t* offset_ptr,  // pointer to offset tensor (read at execution time for CUDA graphs)
-    int num_atns,
-    int B,
-    int logits_stride,  // stride between rows (for non-contiguous logits from fused output)
-    int value_stride,   // stride between rows (for non-contiguous value from fused output)
-    cudaStream_t stream
-) {
-    int grid = grid_size(B);
-    sample_logits_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        actions,
-        logprobs,
-        value_out,
-        logits,
-        value,
-        act_sizes,
-        seed,
-        offset_ptr,
-        num_atns,
-        B,
-        logits_stride,
-        value_stride
-    );
 
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "sample_logits kernel error: %s\n", cudaGetErrorString(err));
-    }
-}
 
 // =============================================================================
 // FCMax: Fused FC -> Max kernel
@@ -2390,131 +958,15 @@ void launch_sample_logits(
 // Output: out (B, D_out) = max_over_N(x @ W.T + b)
 // Each thread computes one (b, d_out) output element
 // N-fold memory bandwidth reduction vs separate FC + Max kernels
+// W and b are always float32 (mixed precision for bf16 activations)
 // =============================================================================
 
-template<typename T>
 __global__ void fc_max_forward_kernel(
-    T* __restrict__ out,                // (B, D_out)
+    precision_t* __restrict__ out,                // (B, D_out)
     int* __restrict__ argmax_indices,   // (B, D_out) - which N produced the max
-    const T* __restrict__ x,            // (B, N, D_in)
-    const T* __restrict__ W,            // (D_out, D_in)
-    const T* __restrict__ b,            // (D_out)
-    int B, int N, int D_in, int D_out
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= B * D_out) return;
-
-    int batch = idx / D_out;
-    int d_out = idx % D_out;
-
-    float bias = float(b[d_out]);
-    float max_val = -INFINITY;
-    int argmax_n = 0;
-
-    // Iterate over all N points, compute FC output, track max
-    for (int n = 0; n < N; n++) {
-        float val = bias;
-        for (int di = 0; di < D_in; di++) {
-            val += float(x[batch * N * D_in + n * D_in + di]) * float(W[d_out * D_in + di]);
-        }
-        if (val > max_val) {
-            max_val = val;
-            argmax_n = n;
-        }
-    }
-
-    out[idx] = T(max_val);
-    argmax_indices[idx] = argmax_n;
-}
-
-template<typename T>
-__global__ void fc_max_backward_kernel(
-    T* __restrict__ grad_x,             // (B, N, D_in)
-    T* __restrict__ grad_W,             // (D_out, D_in)
-    T* __restrict__ grad_b,             // (D_out)
-    const T* __restrict__ grad_out,     // (B, D_out)
-    const T* __restrict__ x,            // (B, N, D_in)
-    const T* __restrict__ W,            // (D_out, D_in)
-    const int* __restrict__ argmax_indices, // (B, D_out)
-    int B, int N, int D_in, int D_out
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= B * D_out) return;
-
-    int batch = idx / D_out;
-    int d_out = idx % D_out;
-
-    float g_out = float(grad_out[idx]);
-    int argmax_n = argmax_indices[idx];
-
-    // grad_b[d_out] += g_out
-    atomicAdd(reinterpret_cast<float*>(&grad_b[d_out]), g_out);
-
-    // Backprop through FC at argmax position only
-    for (int di = 0; di < D_in; di++) {
-        int x_idx = batch * N * D_in + argmax_n * D_in + di;
-        int w_idx = d_out * D_in + di;
-
-        // grad_W[d_out, di] += g_out * x[batch, argmax_n, di]
-        atomicAdd(reinterpret_cast<float*>(&grad_W[w_idx]), g_out * float(x[x_idx]));
-
-        // grad_x[batch, argmax_n, di] += g_out * W[d_out, di]
-        atomicAdd(reinterpret_cast<float*>(&grad_x[x_idx]), g_out * float(W[w_idx]));
-    }
-}
-
-template<typename T>
-void launch_fc_max_forward(
-    T* out, int* argmax_indices,
-    const T* x, const T* W, const T* b,
-    int B, int N, int D_in, int D_out,
-    cudaStream_t stream
-) {
-    int total = B * D_out;
-    int grid = grid_size(total);
-    fc_max_forward_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        out, argmax_indices, x, W, b, B, N, D_in, D_out);
-}
-
-template<typename T>
-void launch_fc_max_backward(
-    T* grad_x, T* grad_W, T* grad_b,
-    const T* grad_out, const T* x, const T* W,
-    const int* argmax_indices,
-    int B, int N, int D_in, int D_out,
-    cudaStream_t stream
-) {
-    int total = B * D_out;
-    int grid = grid_size(total);
-    fc_max_backward_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        grad_x, grad_W, grad_b, grad_out, x, W, argmax_indices, B, N, D_in, D_out);
-}
-
-// Non-templated wrappers
-void launch_fc_max_forward_float(
-    float* out, int* argmax_indices,
-    const float* x, const float* W, const float* b,
-    int B, int N, int D_in, int D_out, cudaStream_t stream
-) {
-    launch_fc_max_forward<float>(out, argmax_indices, x, W, b, B, N, D_in, D_out, stream);
-}
-
-void launch_fc_max_backward_float(
-    float* grad_x, float* grad_W, float* grad_b,
-    const float* grad_out, const float* x, const float* W,
-    const int* argmax_indices,
-    int B, int N, int D_in, int D_out, cudaStream_t stream
-) {
-    launch_fc_max_backward<float>(grad_x, grad_W, grad_b, grad_out, x, W, argmax_indices, B, N, D_in, D_out, stream);
-}
-
-// bf16 activations, fp32 weights
-__global__ void fc_max_forward_kernel_bf16(
-    at::BFloat16* __restrict__ out,
-    int* __restrict__ argmax_indices,
-    const at::BFloat16* __restrict__ x,
-    const float* __restrict__ W,
-    const float* __restrict__ b,
+    const precision_t* __restrict__ x,            // (B, N, D_in)
+    const float* __restrict__ W,        // (D_out, D_in) - always float32
+    const float* __restrict__ b,        // (D_out) - always float32
     int B, int N, int D_in, int D_out
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2527,10 +979,11 @@ __global__ void fc_max_forward_kernel_bf16(
     float max_val = -INFINITY;
     int argmax_n = 0;
 
+    // Iterate over all N points, compute FC output, track max
     for (int n = 0; n < N; n++) {
         float val = bias;
         for (int di = 0; di < D_in; di++) {
-            val += float(x[batch * N * D_in + n * D_in + di]) * W[d_out * D_in + di];
+            val += to_float(x[batch * N * D_in + n * D_in + di]) * W[d_out * D_in + di];
         }
         if (val > max_val) {
             max_val = val;
@@ -2538,30 +991,20 @@ __global__ void fc_max_forward_kernel_bf16(
         }
     }
 
-    out[idx] = at::BFloat16(max_val);
+    out[idx] = from_float(max_val);
     argmax_indices[idx] = argmax_n;
 }
 
-void launch_fc_max_forward_bf16(
-    at::BFloat16* out, int* argmax_indices,
-    const at::BFloat16* x, const float* W, const float* b,
-    int B, int N, int D_in, int D_out, cudaStream_t stream
-) {
-    int total = B * D_out;
-    int grid = grid_size(total);
-    fc_max_forward_kernel_bf16<<<grid, BLOCK_SIZE, 0, stream>>>(
-        out, argmax_indices, x, W, b, B, N, D_in, D_out);
-}
-
-// bf16 inputs, fp32 weights and gradients (atomicAdd requires fp32)
-__global__ void fc_max_backward_kernel_bf16(
-    float* __restrict__ grad_x,
-    float* __restrict__ grad_W,
-    float* __restrict__ grad_b,
-    const at::BFloat16* __restrict__ grad_out,
-    const at::BFloat16* __restrict__ x,
-    const float* __restrict__ W,
-    const int* __restrict__ argmax_indices,
+// Backward: grad_x, grad_W, grad_b are always float32 (atomicAdd requires fp32)
+// grad_out and x may be bf16
+__global__ void fc_max_backward_kernel(
+    float* __restrict__ grad_x,             // (B, N, D_in) - always float32 for atomicAdd
+    float* __restrict__ grad_W,             // (D_out, D_in) - always float32
+    float* __restrict__ grad_b,             // (D_out) - always float32
+    const precision_t* __restrict__ grad_out,         // (B, D_out)
+    const precision_t* __restrict__ x,                // (B, N, D_in)
+    const float* __restrict__ W,            // (D_out, D_in) - always float32
+    const int* __restrict__ argmax_indices, // (B, D_out)
     int B, int N, int D_in, int D_out
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2570,371 +1013,25 @@ __global__ void fc_max_backward_kernel_bf16(
     int batch = idx / D_out;
     int d_out = idx % D_out;
 
-    float g_out = float(grad_out[idx]);
+    float g_out = to_float(grad_out[idx]);
     int argmax_n = argmax_indices[idx];
 
+    // grad_b[d_out] += g_out
     atomicAdd(&grad_b[d_out], g_out);
 
+    // Backprop through FC at argmax position only
     for (int di = 0; di < D_in; di++) {
         int x_idx = batch * N * D_in + argmax_n * D_in + di;
         int w_idx = d_out * D_in + di;
 
-        atomicAdd(&grad_W[w_idx], g_out * float(x[x_idx]));
+        // grad_W[d_out, di] += g_out * x[batch, argmax_n, di]
+        atomicAdd(&grad_W[w_idx], g_out * to_float(x[x_idx]));
+
+        // grad_x[batch, argmax_n, di] += g_out * W[d_out, di]
         atomicAdd(&grad_x[x_idx], g_out * W[w_idx]);
     }
 }
 
-void launch_fc_max_backward_bf16(
-    float* grad_x, float* grad_W, float* grad_b,
-    const at::BFloat16* grad_out, const at::BFloat16* x, const float* W,
-    const int* argmax_indices,
-    int B, int N, int D_in, int D_out, cudaStream_t stream
-) {
-    int total = B * D_out;
-    int grid = grid_size(total);
-    fc_max_backward_kernel_bf16<<<grid, BLOCK_SIZE, 0, stream>>>(
-        grad_x, grad_W, grad_b, grad_out, x, W, argmax_indices, B, N, D_in, D_out);
-}
 
-// =============================================================================
-// FCReluFCMax: Fused FC -> ReLU -> FC -> Max kernel for Drive encoder
-// Avoids materializing intermediate buffers (B, N, D_mid) and (B, N, D_out)
-// Input: x (B, N, D_in), W1 (D_in, D_mid), b1 (D_mid), W2 (D_mid, D_out), b2 (D_out)
-// FC operations applied pointwise to each of N points, then max over N dimension
-// Output: out (B, D_out) = max_over_N(FC2(ReLU(FC1(x))))
-// =============================================================================
-
-// Optimized kernel: one block per batch element, threads cooperate on FC1
-// D_out threads per block, each computes one output element
-// Two-pass: first find argmax, then recompute FC1 at argmax for backward
-template<typename T>
-__global__ void fc_relu_fc_max_forward_kernel(
-    T* __restrict__ out,                // (B, D_out)
-    int* __restrict__ argmax_indices,   // (B, D_out) - which N produced the max
-    float* __restrict__ fc1_at_argmax,  // (B, D_out, D_mid) - FC1 ReLU output at argmax for backward
-    const T* __restrict__ x,            // (B, N, D_in)
-    const T* __restrict__ W1,           // (D_mid, D_in) - transposed for x @ W1.T + b1
-    const T* __restrict__ b1,           // (D_mid)
-    const T* __restrict__ W2,           // (D_out, D_mid) - transposed for fc1 @ W2.T + b2
-    const T* __restrict__ b2,           // (D_out)
-    int B,
-    int N,
-    int D_in,
-    int D_mid,
-    int D_out
-) {
-    int b = blockIdx.x;
-    if (b >= B) return;
-
-    int tid = threadIdx.x;  // 0..D_out-1
-
-    // Shared memory for cooperative FC1 computation
-    extern __shared__ float shared_mem[];
-    float* fc1_shared = shared_mem;                    // D_mid floats
-    float* x_shared = shared_mem + D_mid;              // D_in floats
-
-    // Each thread tracks its own max for its d_out
-    float max_val = -INFINITY;
-    int argmax_n = 0;
-
-    float my_b2 = (tid < D_out) ? float(b2[tid]) : 0.0f;
-
-    // Pass 1: Iterate over all N points to find max and argmax
-    for (int n = 0; n < N; n++) {
-        // Cooperatively load x[b, n, :] into shared memory
-        if (tid < D_in) {
-            x_shared[tid] = float(x[b * N * D_in + n * D_in + tid]);
-        }
-        __syncthreads();
-
-        // Threads cooperate to compute FC1: first D_mid threads each compute one element
-        if (tid < D_mid) {
-            float fc1_val = float(b1[tid]);
-            for (int di = 0; di < D_in; di++) {
-                fc1_val += x_shared[di] * float(W1[tid * D_in + di]);
-            }
-            fc1_shared[tid] = fmaxf(fc1_val, 0.0f);  // ReLU
-        }
-        __syncthreads();
-
-        // Each thread computes FC2 for its d_out using shared FC1 output
-        if (tid < D_out) {
-            float fc2_val = my_b2;
-            for (int dm = 0; dm < D_mid; dm++) {
-                fc2_val += fc1_shared[dm] * float(W2[tid * D_mid + dm]);
-            }
-
-            if (fc2_val > max_val) {
-                max_val = fc2_val;
-                argmax_n = n;
-            }
-        }
-        __syncthreads();
-    }
-
-    // Write max output and argmax
-    if (tid < D_out) {
-        int out_idx = b * D_out + tid;
-        out[out_idx] = T(max_val);
-        argmax_indices[out_idx] = argmax_n;
-
-        // Pass 2: Each thread independently computes FC1 at its argmax_n
-        // This has some redundant computation but avoids serialization
-        for (int dm = 0; dm < D_mid; dm++) {
-            float fc1_val = float(b1[dm]);
-            for (int di = 0; di < D_in; di++) {
-                fc1_val += float(x[b * N * D_in + argmax_n * D_in + di]) * float(W1[dm * D_in + di]);
-            }
-            fc1_at_argmax[b * D_out * D_mid + tid * D_mid + dm] = fmaxf(fc1_val, 0.0f);
-        }
-    }
-}
-
-template<typename T>
-__global__ void fc_relu_fc_max_backward_kernel(
-    T* __restrict__ grad_x,             // (B, N, D_in) - accumulated
-    T* __restrict__ grad_W1,            // (D_mid, D_in) - accumulated
-    T* __restrict__ grad_b1,            // (D_mid) - accumulated
-    T* __restrict__ grad_W2,            // (D_out, D_mid) - accumulated
-    T* __restrict__ grad_b2,            // (D_out) - accumulated
-    const T* __restrict__ grad_out,     // (B, D_out)
-    const T* __restrict__ x,            // (B, N, D_in)
-    const T* __restrict__ W1,           // (D_mid, D_in)
-    const T* __restrict__ W2,           // (D_out, D_mid)
-    const int* __restrict__ argmax_indices,  // (B, D_out)
-    const float* __restrict__ fc1_at_argmax, // (B, D_out, D_mid)
-    int B,
-    int N,
-    int D_in,
-    int D_mid,
-    int D_out
-) {
-    // Each thread handles one (b, d_out) gradient
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= B * D_out) return;
-
-    int b = idx / D_out;
-    int d_out = idx % D_out;
-
-    float g_out = float(grad_out[idx]);
-    int argmax_n = argmax_indices[idx];
-
-    // grad_b2[d_out] += g_out
-    atomicAdd(reinterpret_cast<float*>(&grad_b2[d_out]), g_out);
-
-    // Backprop through FC2 and ReLU
-    for (int dm = 0; dm < D_mid; dm++) {
-        int w2_idx = d_out * D_mid + dm;
-        float fc1_relu_val = fc1_at_argmax[b * D_out * D_mid + d_out * D_mid + dm];
-
-        // grad_W2[d_out, dm] += g_out * fc1_relu[dm]
-        atomicAdd(reinterpret_cast<float*>(&grad_W2[w2_idx]), g_out * fc1_relu_val);
-
-        // grad through ReLU: passes if fc1_relu > 0
-        float grad_fc1 = (fc1_relu_val > 0.0f) ? (g_out * float(W2[w2_idx])) : 0.0f;
-
-        // grad_b1[dm] += grad_fc1
-        atomicAdd(reinterpret_cast<float*>(&grad_b1[dm]), grad_fc1);
-
-        // Backprop through FC1
-        for (int di = 0; di < D_in; di++) {
-            int x_idx = b * N * D_in + argmax_n * D_in + di;
-            int w1_idx = dm * D_in + di;
-
-            // grad_W1[dm, di] += grad_fc1 * x[b, argmax_n, di]
-            atomicAdd(reinterpret_cast<float*>(&grad_W1[w1_idx]), grad_fc1 * float(x[x_idx]));
-
-            // grad_x[b, argmax_n, di] += grad_fc1 * W1[dm, di]
-            atomicAdd(reinterpret_cast<float*>(&grad_x[x_idx]), grad_fc1 * float(W1[w1_idx]));
-        }
-    }
-}
-
-template<typename T>
-void launch_fc_relu_fc_max_forward(
-    T* out,
-    int* argmax_indices,
-    float* fc1_at_argmax,
-    const T* x,
-    const T* W1,
-    const T* b1,
-    const T* W2,
-    const T* b2,
-    int B,
-    int N,
-    int D_in,
-    int D_mid,
-    int D_out,
-    cudaStream_t stream
-) {
-    // One block per batch element
-    // Need max(D_mid, D_out) threads: D_mid for cooperative FC1, D_out for FC2 outputs
-    int threads = (D_mid > D_out) ? D_mid : D_out;
-    // Shared memory: fc1_shared (D_mid) + x_shared (D_in)
-    size_t shared_mem_size = (D_mid + D_in) * sizeof(float);
-
-    fc_relu_fc_max_forward_kernel<T><<<B, threads, shared_mem_size, stream>>>(
-        out, argmax_indices, fc1_at_argmax,
-        x, W1, b1, W2, b2,
-        B, N, D_in, D_mid, D_out
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "fc_relu_fc_max_forward kernel error: %s\n", cudaGetErrorString(err));
-    }
-}
-
-template<typename T>
-void launch_fc_relu_fc_max_backward(
-    T* grad_x,
-    T* grad_W1,
-    T* grad_b1,
-    T* grad_W2,
-    T* grad_b2,
-    const T* grad_out,
-    const T* x,
-    const T* W1,
-    const T* W2,
-    const int* argmax_indices,
-    const float* fc1_at_argmax,
-    int B,
-    int N,
-    int D_in,
-    int D_mid,
-    int D_out,
-    cudaStream_t stream
-) {
-    int total = B * D_out;
-    int grid = grid_size(total);
-
-    fc_relu_fc_max_backward_kernel<T><<<grid, BLOCK_SIZE, 0, stream>>>(
-        grad_x, grad_W1, grad_b1, grad_W2, grad_b2,
-        grad_out, x, W1, W2,
-        argmax_indices, fc1_at_argmax,
-        B, N, D_in, D_mid, D_out
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "fc_relu_fc_max_backward kernel error: %s\n", cudaGetErrorString(err));
-    }
-}
-
-// Non-templated wrappers for float
-void launch_mingru_gate_inference_float(float* out, float* next_state, const float* combined, const float* state_in, int H, int B, cudaStream_t stream) {
-    launch_mingru_gate_inference<float>(out, next_state, combined, state_in, H, B, stream);
-}
-void launch_log_coeffs_and_values_float(float* log_coeffs, float* log_values, const float* gate, const float* hidden, int N, cudaStream_t stream) {
-    launch_log_coeffs_and_values<float>(log_coeffs, log_values, gate, hidden, N, stream);
-}
-void launch_log_coeffs_and_values_backward_float(float* grad_gate, float* grad_hidden, const float* grad_log_coeffs, const float* grad_log_values, const float* gate, const float* hidden, int N, cudaStream_t stream) {
-    launch_log_coeffs_and_values_backward<float>(grad_gate, grad_hidden, grad_log_coeffs, grad_log_values, gate, hidden, N, stream);
-}
-void launch_rmsnorm_forward_float(float* out, float* inv_norm_buf, const float* x, const float* weight, double eps, int T_total, int H, int B, cudaStream_t stream) {
-    launch_rmsnorm_forward<float>(out, inv_norm_buf, x, weight, eps, T_total, H, B, stream);
-}
-void launch_rmsnorm_backward_float(float* grad_x, float* grad_weight, const float* grad_out, const float* inv_norm_buf, const float* x_buf, const float* weight, double eps, int T_total, int H, int B, cudaStream_t stream) {
-    launch_rmsnorm_backward<float>(grad_x, grad_weight, grad_out, inv_norm_buf, x_buf, weight, eps, T_total, H, B, stream);
-}
-void launch_fused_scan_forward_float(float* out, float* next_state, float* a_star, float* s_vals, float* log_values_buf, const float* combined, const float* state, int T_seq, int H, int B, cudaStream_t stream) {
-    launch_fused_scan_forward<float>(out, next_state, a_star, s_vals, log_values_buf, combined, state, T_seq, H, B, stream);
-}
-void launch_fused_scan_backward_float(float* grad_combined, float* grad_state, const float* grad_out, const float* grad_next_state, const float* combined, const float* state, const float* a_star_buf, const float* s_buf, const float* log_values_buf, int T_seq, int H, int B, cudaStream_t stream) {
-    launch_fused_scan_backward<float>(grad_combined, grad_state, grad_out, grad_next_state, combined, state, a_star_buf, s_buf, log_values_buf, T_seq, H, B, stream);
-}
-void launch_logcumsumexp_forward_float(float* out, double* s_buf, const float* x, int T_total, int H, int B, cudaStream_t stream) {
-    launch_logcumsumexp_forward<float>(out, s_buf, x, T_total, H, B, stream);
-}
-void launch_logcumsumexp_backward_float(float* grad_x, const float* grad_out, const float* x, const double* s_buf, int T_total, int H, int B, cudaStream_t stream) {
-    launch_logcumsumexp_backward<float>(grad_x, grad_out, x, s_buf, T_total, H, B, stream);
-}
-void launch_ppo_loss_forward_float(float* loss_output, double* saved_for_backward, const float* logits, const float* values_pred, const int64_t* actions, const float* old_logprobs, const float* advantages, const float* prio, const float* values, const float* returns, const float* adv_mean, const float* adv_std, double clip_coef, double vf_clip_coef, double vf_coef, double ent_coef, int T_seq, int A, int N, cudaStream_t stream) {
-    launch_ppo_loss_forward<float>(loss_output, saved_for_backward, logits, values_pred, actions, old_logprobs, advantages, prio, values, returns, adv_mean, adv_std, clip_coef, vf_clip_coef, vf_coef, ent_coef, T_seq, A, N, stream);
-}
-void launch_ppo_loss_backward_float(float* grad_logits, float* grad_values_pred, const float* grad_loss, const float* logits, const int64_t* actions, const float* old_logprobs, const float* advantages, const float* prio, const float* values, const float* returns, const double* saved_for_backward, const float* adv_mean, const float* adv_std, double clip_coef, double vf_clip_coef, double vf_coef, double ent_coef, int T_seq, int A, int N, cudaStream_t stream) {
-    launch_ppo_loss_backward<float>(grad_logits, grad_values_pred, grad_loss, logits, actions, old_logprobs, advantages, prio, values, returns, saved_for_backward, adv_mean, adv_std, clip_coef, vf_clip_coef, vf_coef, ent_coef, T_seq, A, N, stream);
-}
-void launch_sample_logits_float(double* actions, float* logprobs, float* value_out, const float* logits, const float* value, const int* act_sizes, uint64_t seed, const int64_t* offset_ptr, int num_atns, int B, int logits_stride, int value_stride, cudaStream_t stream) {
-    launch_sample_logits<float>(actions, logprobs, value_out, logits, value, act_sizes, seed, offset_ptr, num_atns, B, logits_stride, value_stride, stream);
-}
-void launch_fc_relu_fc_max_forward_float(float* out, int* argmax_indices, float* fc1_at_argmax, const float* x, const float* W1, const float* b1, const float* W2, const float* b2, int B, int N, int D_in, int D_mid, int D_out, cudaStream_t stream) {
-    launch_fc_relu_fc_max_forward<float>(out, argmax_indices, fc1_at_argmax, x, W1, b1, W2, b2, B, N, D_in, D_mid, D_out, stream);
-}
-void launch_fc_relu_fc_max_backward_float(float* grad_x, float* grad_W1, float* grad_b1, float* grad_W2, float* grad_b2, const float* grad_out, const float* x, const float* W1, const float* W2, const int* argmax_indices, const float* fc1_at_argmax, int B, int N, int D_in, int D_mid, int D_out, cudaStream_t stream) {
-    launch_fc_relu_fc_max_backward<float>(grad_x, grad_W1, grad_b1, grad_W2, grad_b2, grad_out, x, W1, W2, argmax_indices, fc1_at_argmax, B, N, D_in, D_mid, D_out, stream);
-}
-
-// Non-templated wrappers for BFloat16
-void launch_mingru_gate_inference_bf16(at::BFloat16* out, at::BFloat16* next_state, const at::BFloat16* combined, const at::BFloat16* state_in, int H, int B, cudaStream_t stream) {
-    launch_mingru_gate_inference<at::BFloat16>(out, next_state, combined, state_in, H, B, stream);
-}
-void launch_log_coeffs_and_values_bf16(at::BFloat16* log_coeffs, at::BFloat16* log_values, const at::BFloat16* gate, const at::BFloat16* hidden, int N, cudaStream_t stream) {
-    launch_log_coeffs_and_values<at::BFloat16>(log_coeffs, log_values, gate, hidden, N, stream);
-}
-void launch_log_coeffs_and_values_backward_bf16(at::BFloat16* grad_gate, at::BFloat16* grad_hidden, const at::BFloat16* grad_log_coeffs, const at::BFloat16* grad_log_values, const at::BFloat16* gate, const at::BFloat16* hidden, int N, cudaStream_t stream) {
-    launch_log_coeffs_and_values_backward<at::BFloat16>(grad_gate, grad_hidden, grad_log_coeffs, grad_log_values, gate, hidden, N, stream);
-}
-void launch_rmsnorm_forward_bf16(at::BFloat16* out, float* inv_norm_buf, const at::BFloat16* x, const at::BFloat16* weight, double eps, int T_total, int H, int B, cudaStream_t stream) {
-    launch_rmsnorm_forward<at::BFloat16>(out, inv_norm_buf, x, weight, eps, T_total, H, B, stream);
-}
-void launch_rmsnorm_backward_bf16(at::BFloat16* grad_x, at::BFloat16* grad_weight, const at::BFloat16* grad_out, const float* inv_norm_buf, const at::BFloat16* x_buf, const at::BFloat16* weight, double eps, int T_total, int H, int B, cudaStream_t stream) {
-    launch_rmsnorm_backward<at::BFloat16>(grad_x, grad_weight, grad_out, inv_norm_buf, x_buf, weight, eps, T_total, H, B, stream);
-}
-void launch_fused_scan_forward_bf16(at::BFloat16* out, at::BFloat16* next_state, float* a_star, float* s_vals, float* log_values_buf, const at::BFloat16* combined, const at::BFloat16* state, int T_seq, int H, int B, cudaStream_t stream) {
-    launch_fused_scan_forward<at::BFloat16>(out, next_state, a_star, s_vals, log_values_buf, combined, state, T_seq, H, B, stream);
-}
-void launch_fused_scan_backward_bf16(at::BFloat16* grad_combined, at::BFloat16* grad_state, const at::BFloat16* grad_out, const at::BFloat16* grad_next_state, const at::BFloat16* combined, const at::BFloat16* state, const float* a_star_buf, const float* s_buf, const float* log_values_buf, int T_seq, int H, int B, cudaStream_t stream) {
-    launch_fused_scan_backward<at::BFloat16>(grad_combined, grad_state, grad_out, grad_next_state, combined, state, a_star_buf, s_buf, log_values_buf, T_seq, H, B, stream);
-}
-// Non-templated wrappers for checkpointed fused scan - Float
-void launch_fused_scan_forward_checkpointed_float(float* out, float* next_state, float* a_star, float* s_vals, float* log_values_buf, const float* combined, const float* state, int T_seq, int H, int B, cudaStream_t stream) {
-    launch_fused_scan_forward_checkpointed<float>(out, next_state, a_star, s_vals, log_values_buf, combined, state, T_seq, H, B, stream);
-}
-void launch_fused_scan_backward_checkpointed_float(float* grad_combined, float* grad_state, const float* grad_out, const float* grad_next_state, const float* combined, const float* state, const float* a_star_buf, const float* s_buf, const float* log_values_buf, int T_seq, int H, int B, cudaStream_t stream) {
-    launch_fused_scan_backward_checkpointed<float>(grad_combined, grad_state, grad_out, grad_next_state, combined, state, a_star_buf, s_buf, log_values_buf, T_seq, H, B, stream);
-}
-// Non-templated wrappers for checkpointed fused scan - BFloat16
-void launch_fused_scan_forward_checkpointed_bf16(at::BFloat16* out, at::BFloat16* next_state, float* a_star, float* s_vals, float* log_values_buf, const at::BFloat16* combined, const at::BFloat16* state, int T_seq, int H, int B, cudaStream_t stream) {
-    launch_fused_scan_forward_checkpointed<at::BFloat16>(out, next_state, a_star, s_vals, log_values_buf, combined, state, T_seq, H, B, stream);
-}
-void launch_fused_scan_backward_checkpointed_bf16(at::BFloat16* grad_combined, at::BFloat16* grad_state, const at::BFloat16* grad_out, const at::BFloat16* grad_next_state, const at::BFloat16* combined, const at::BFloat16* state, const float* a_star_buf, const float* s_buf, const float* log_values_buf, int T_seq, int H, int B, cudaStream_t stream) {
-    launch_fused_scan_backward_checkpointed<at::BFloat16>(grad_combined, grad_state, grad_out, grad_next_state, combined, state, a_star_buf, s_buf, log_values_buf, T_seq, H, B, stream);
-}
-void launch_logcumsumexp_forward_bf16(at::BFloat16* out, double* s_buf, const at::BFloat16* x, int T_total, int H, int B, cudaStream_t stream) {
-    launch_logcumsumexp_forward<at::BFloat16>(out, s_buf, x, T_total, H, B, stream);
-}
-void launch_logcumsumexp_backward_bf16(at::BFloat16* grad_x, const at::BFloat16* grad_out, const at::BFloat16* x, const double* s_buf, int T_total, int H, int B, cudaStream_t stream) {
-    launch_logcumsumexp_backward<at::BFloat16>(grad_x, grad_out, x, s_buf, T_total, H, B, stream);
-}
-void launch_ppo_loss_forward_bf16(float* loss_output, double* saved_for_backward, const at::BFloat16* logits, const at::BFloat16* values_pred, const int64_t* actions, const at::BFloat16* old_logprobs, const at::BFloat16* advantages, const at::BFloat16* prio, const at::BFloat16* values, const at::BFloat16* returns, const float* adv_mean, const float* adv_std, double clip_coef, double vf_clip_coef, double vf_coef, double ent_coef, int T_seq, int A, int N, cudaStream_t stream) {
-    launch_ppo_loss_forward<at::BFloat16>(loss_output, saved_for_backward, logits, values_pred, actions, old_logprobs, advantages, prio, values, returns, adv_mean, adv_std, clip_coef, vf_clip_coef, vf_coef, ent_coef, T_seq, A, N, stream);
-}
-void launch_ppo_loss_backward_bf16(at::BFloat16* grad_logits, at::BFloat16* grad_values_pred, const float* grad_loss, const at::BFloat16* logits, const int64_t* actions, const at::BFloat16* old_logprobs, const at::BFloat16* advantages, const at::BFloat16* prio, const at::BFloat16* values, const at::BFloat16* returns, const double* saved_for_backward, const float* adv_mean, const float* adv_std, double clip_coef, double vf_clip_coef, double vf_coef, double ent_coef, int T_seq, int A, int N, cudaStream_t stream) {
-    launch_ppo_loss_backward<at::BFloat16>(grad_logits, grad_values_pred, grad_loss, logits, actions, old_logprobs, advantages, prio, values, returns, saved_for_backward, adv_mean, adv_std, clip_coef, vf_clip_coef, vf_coef, ent_coef, T_seq, A, N, stream);
-}
-void launch_sample_logits_bf16(double* actions, at::BFloat16* logprobs, at::BFloat16* value_out, const at::BFloat16* logits, const at::BFloat16* value, const int* act_sizes, uint64_t seed, const int64_t* offset_ptr, int num_atns, int B, int logits_stride, int value_stride, cudaStream_t stream) {
-    launch_sample_logits<at::BFloat16>(actions, logprobs, value_out, logits, value, act_sizes, seed, offset_ptr, num_atns, B, logits_stride, value_stride, stream);
-}
-void launch_fc_relu_fc_max_forward_bf16(at::BFloat16* out, int* argmax_indices, float* fc1_at_argmax, const at::BFloat16* x, const at::BFloat16* W1, const at::BFloat16* b1, const at::BFloat16* W2, const at::BFloat16* b2, int B, int N, int D_in, int D_mid, int D_out, cudaStream_t stream) {
-    launch_fc_relu_fc_max_forward<at::BFloat16>(out, argmax_indices, fc1_at_argmax, x, W1, b1, W2, b2, B, N, D_in, D_mid, D_out, stream);
-}
-void launch_fc_relu_fc_max_backward_bf16(at::BFloat16* grad_x, at::BFloat16* grad_W1, at::BFloat16* grad_b1, at::BFloat16* grad_W2, at::BFloat16* grad_b2, const at::BFloat16* grad_out, const at::BFloat16* x, const at::BFloat16* W1, const at::BFloat16* W2, const int* argmax_indices, const float* fc1_at_argmax, int B, int N, int D_in, int D_mid, int D_out, cudaStream_t stream) {
-    launch_fc_relu_fc_max_backward<at::BFloat16>(grad_x, grad_W1, grad_b1, grad_W2, grad_b2, grad_out, x, W1, W2, argmax_indices, fc1_at_argmax, B, N, D_in, D_mid, D_out, stream);
-}
-
-void launch_ppo_loss_forward_optimized_float(float* loss_output, double* saved_for_backward, float* ratio_out, float* newvalue_out, const float* logits, const float* values_pred, const int64_t* actions, const float* old_logprobs, const float* advantages, const float* prio, const float* values, const float* returns, const float* adv_mean, const float* adv_var, float clip_coef, float vf_clip_coef, float vf_coef, float ent_coef, int T_seq, int A, int N, int logits_stride_n, int logits_stride_t, int logits_stride_a, int values_stride_n, int values_stride_t, cudaStream_t stream) {
-    launch_ppo_loss_forward_optimized<float>(loss_output, saved_for_backward, ratio_out, newvalue_out, logits, values_pred, actions, old_logprobs, advantages, prio, values, returns, adv_mean, adv_var, clip_coef, vf_clip_coef, vf_coef, ent_coef, T_seq, A, N, logits_stride_n, logits_stride_t, logits_stride_a, values_stride_n, values_stride_t, stream);
-}
-void launch_ppo_loss_backward_optimized_float(float* grad_logits, float* grad_values_pred, const float* grad_loss, const float* logits, const float* values_pred, const int64_t* actions, const float* old_logprobs, const float* advantages, const float* prio, const float* values, const float* returns, const float* adv_mean, const float* adv_var, float clip_coef, float vf_clip_coef, float vf_coef, float ent_coef, int T_seq, int A, int N, int logits_stride_n, int logits_stride_t, int logits_stride_a, int values_stride_n, int values_stride_t, cudaStream_t stream) {
-    launch_ppo_loss_backward_optimized<float>(grad_logits, grad_values_pred, grad_loss, logits, values_pred, actions, old_logprobs, advantages, prio, values, returns, adv_mean, adv_var, clip_coef, vf_clip_coef, vf_coef, ent_coef, T_seq, A, N, logits_stride_n, logits_stride_t, logits_stride_a, values_stride_n, values_stride_t, stream);
-}
-
-void launch_ppo_loss_forward_optimized_bf16(float* loss_output, double* saved_for_backward, at::BFloat16* ratio_out, at::BFloat16* newvalue_out, const at::BFloat16* logits, const at::BFloat16* values_pred, const int64_t* actions, const at::BFloat16* old_logprobs, const float* advantages, const at::BFloat16* prio, const at::BFloat16* values, const at::BFloat16* returns, const float* adv_mean, const float* adv_var, float clip_coef, float vf_clip_coef, float vf_coef, float ent_coef, int T_seq, int A, int N, int logits_stride_n, int logits_stride_t, int logits_stride_a, int values_stride_n, int values_stride_t, cudaStream_t stream) {
-    launch_ppo_loss_forward_optimized<at::BFloat16>(loss_output, saved_for_backward, ratio_out, newvalue_out, logits, values_pred, actions, old_logprobs, advantages, prio, values, returns, adv_mean, adv_var, clip_coef, vf_clip_coef, vf_coef, ent_coef, T_seq, A, N, logits_stride_n, logits_stride_t, logits_stride_a, values_stride_n, values_stride_t, stream);
-}
-void launch_ppo_loss_backward_optimized_bf16(float* grad_logits, float* grad_values_pred, const float* grad_loss, const at::BFloat16* logits, const at::BFloat16* values_pred, const int64_t* actions, const at::BFloat16* old_logprobs, const float* advantages, const at::BFloat16* prio, const at::BFloat16* values, const at::BFloat16* returns, const float* adv_mean, const float* adv_var, float clip_coef, float vf_clip_coef, float vf_coef, float ent_coef, int T_seq, int A, int N, int logits_stride_n, int logits_stride_t, int logits_stride_a, int values_stride_n, int values_stride_t, cudaStream_t stream) {
-    launch_ppo_loss_backward_optimized<at::BFloat16>(grad_logits, grad_values_pred, grad_loss, logits, values_pred, actions, old_logprobs, advantages, prio, values, returns, adv_mean, adv_var, clip_coef, vf_clip_coef, vf_coef, ent_coef, T_seq, A, N, logits_stride_n, logits_stride_t, logits_stride_a, values_stride_n, values_stride_t, stream);
-}
 
 #endif // PUFFERLIB_KERNELS_CU

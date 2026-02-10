@@ -8,7 +8,8 @@
 #define NO_RENDER false
 #define NUM_EVAL_RUNS 200
 
-int main() {
+/*
+void demo() {
     srand(time(NULL));
     Game env = {
         .scaffolding_ratio = 0.0,
@@ -91,3 +92,47 @@ int main() {
     printf("Finished %d trials.\n", NUM_EVAL_RUNS);
     return 0;
 }
+*/
+
+void perftest() {
+
+    srand(time(NULL));
+    Game env = {
+        .scaffolding_ratio = 0.0,
+    };
+    init(&env);
+
+    unsigned char observations[OBS_DIM] = {0};
+    float terminals[1] = {0};
+    double actions[1] = {0};
+    float rewards[1] = {0};
+
+    env.observations = observations;
+    env.terminals = terminals;
+    env.actions = actions;
+    env.rewards = rewards;
+
+    c_reset(&env);
+
+    int timeout = 5;
+    int start = time(NULL);
+    int num_steps = 0;
+    while (time(NULL) - start < timeout) {
+        for (int i = 0; i < 1000; i++) {
+            env.actions[0] = rand() % 4;
+            c_step(&env);
+            num_steps++;
+        }
+    }
+
+    int end = time(NULL);
+    float sps = num_steps / (end - start);
+    printf("Test Environment SPS: %f\n", sps);
+}
+
+int main() {
+    //demo();
+    perftest();
+    return 0;
+}
+ 

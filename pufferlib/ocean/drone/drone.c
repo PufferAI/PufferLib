@@ -129,9 +129,9 @@ int main() {
     size_t obs_size = 26;
     size_t act_size = 4;
     env->observations = (float *)calloc(env->num_agents * obs_size, sizeof(float));
-    env->actions = (float *)calloc(env->num_agents * act_size, sizeof(float));
+    env->actions = (double *)calloc(env->num_agents * act_size, sizeof(double));
     env->rewards = (float *)calloc(env->num_agents, sizeof(float));
-    env->terminals = (unsigned char *)calloc(env->num_agents, sizeof(float));
+    env->terminals = (float *)calloc(env->num_agents, sizeof(float));
 
     //Weights *weights = load_weights("resources/drone/drone_weights.bin", 136073);
     //int logit_sizes[1] = {4};

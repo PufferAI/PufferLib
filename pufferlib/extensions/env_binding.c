@@ -1,9 +1,10 @@
-// static_envbinding.c - Template for static env binding
+// static_envbinding.c - Template for sttic env binding
 // Include this AFTER defining: Env, OBS_SIZE, NUM_ATNS, my_init, my_log, c_step, c_reset
 
 #include <omp.h>
 #include <stdatomic.h>
 #include <pthread.h>
+#include <stdbool.h>
 
 #include "env_binding.h"
 #include "binding.h"
@@ -48,6 +49,7 @@ static inline size_t obs_element_size(void) {
 
 struct StaticThreading {
     atomic_int* buffer_states;
+    atomic_int shutdown;
     int num_threads;
     int num_buffers;
     pthread_t* threads;
@@ -87,8 +89,13 @@ static void* static_omp_threadmanager(void* arg) {
 
     Env* envs = (Env*)vec->envs;
 
-    while (1) {
-        while (atomic_load(&buffer_states[buf]) != OMP_RUNNING) {}
+    printf("Num workers: %d\n", num_workers);
+    while (true) {
+        while (atomic_load(&buffer_states[buf]) != OMP_RUNNING) {
+            if (atomic_load(&threading->shutdown)) {
+                return NULL;
+            }
+        }
         cudaStream_t stream = vec->streams[buf];
 
         for (int t = 0; t < horizon; t++) {
@@ -101,9 +108,15 @@ static void* static_omp_threadmanager(void* arg) {
                 cudaMemcpyDeviceToHost, stream);
             cudaStreamSynchronize(stream);
 
-            #pragma omp parallel for schedule(static) num_threads(num_workers)
-            for (int i = env_start; i < env_start + env_count; i++) {
-                c_step(&envs[i]);
+            if (num_workers > 1) {
+                #pragma omp parallel for schedule(static) num_threads(num_workers)
+                for (int i = env_start; i < env_start + env_count; i++) {
+                    c_step(&envs[i]);
+                }
+            } else {
+                for (int i = env_start; i < env_start + env_count; i++) {
+                    c_step(&envs[i]);
+                }
             }
 
             cudaMemcpyAsync(
@@ -133,6 +146,14 @@ void static_vec_omp_step(StaticVec* vec) {
         atomic_store(&threading->buffer_states[buf], OMP_RUNNING);
     }
     for (int buf = 0; buf < vec->buffers; buf++) {
+        while (atomic_load(&threading->buffer_states[buf]) != OMP_WAITING) {}
+    }
+}
+
+void static_vec_seq_step(StaticVec* vec) {
+    StaticThreading* threading = vec->threading;
+    for (int buf = 0; buf < vec->buffers; buf++) {
+        atomic_store(&threading->buffer_states[buf], OMP_RUNNING);
         while (atomic_load(&threading->buffer_states[buf]) != OMP_WAITING) {}
     }
 }
@@ -276,6 +297,45 @@ void create_static_threads(StaticVec* vec, int num_threads, int horizon,
         args[i].thread_init = thread_init;
         pthread_create(&vec->threading->threads[i], NULL, static_omp_threadmanager, &args[i]);
     }
+}
+
+void static_vec_close(StaticVec* vec) {
+    Env* envs = (Env*)vec->envs;
+
+    // Ask threads to stop. todo: robustify
+    atomic_store(&vec->threading->shutdown, 1);
+    for (int i = 0; i < vec->buffers; i++) {
+        pthread_join(vec->threading->threads[i], NULL);
+    }
+
+    for (int i = 0; i < vec->size; i++) {
+        Env* env = &envs[i];
+        c_close(env);
+    }
+
+    free(vec->envs);
+    free(vec->threading->buffer_states);
+    free(vec->threading->threads);
+    free(vec->threading);
+    free(vec->buffer_env_starts);
+    free(vec->buffer_env_counts);
+
+    cudaDeviceSynchronize();
+    size_t obs_bytes = vec->total_agents * OBS_SIZE * obs_element_size();
+    size_t act_bytes = vec->total_agents * NUM_ATNS * sizeof(double);
+    size_t rew_bytes = vec->total_agents * sizeof(float);
+    size_t term_bytes = vec->total_agents * sizeof(float);
+    cudaFree(vec->gpu_observations);
+    cudaFree(vec->gpu_actions);
+    cudaFree(vec->gpu_rewards);
+    cudaFree(vec->gpu_terminals);
+    cudaFreeHost(vec->observations);
+    cudaFreeHost(vec->actions);
+    cudaFreeHost(vec->rewards);
+    cudaFreeHost(vec->terminals);
+
+    free(vec->streams);
+    free(vec);
 }
 
 void static_vec_log(StaticVec* vec, Dict* out) {
