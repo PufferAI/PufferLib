@@ -24,6 +24,7 @@ import argparse
 import copy
 import json
 import math
+import multiprocessing
 import os
 import shutil
 import time
@@ -225,13 +226,63 @@ def run_matches_vectorized(player_policy, opponent_policy, num_games,
     return results
 
 
+_worker_policies = {}  # Global dict for pool workers: idx -> loaded policy
+
+
+def _init_worker(policy_infos, device):
+    """Pool initializer: load all policies once per worker process.
+
+    Args:
+        policy_infos: List of (idx, model_path, hidden_size, obs_scheme) tuples.
+        device: Torch device string.
+    """
+    global _worker_policies
+    from pufferlib.ocean.dogfight.dogfight import Dogfight
+
+    # Group by obs_scheme to share tmp_env
+    by_scheme = {}
+    for idx, path, hs, scheme in policy_infos:
+        by_scheme.setdefault(scheme, []).append((idx, path, hs))
+
+    for scheme, entries in by_scheme.items():
+        tmp_env = Dogfight(
+            num_envs=1, render_mode=None, obs_scheme=scheme,
+            curriculum_enabled=1, fixed_stage=20, max_steps=6000,
+        )
+        for idx, path, hs in entries:
+            _worker_policies[idx] = load_policy_from_path(
+                path, tmp_env, device, hidden_size=hs)
+        tmp_env.close()
+
+
+def _run_pair_worker(args):
+    """Worker function for multiprocessing pool.
+
+    Uses pre-loaded policies from _worker_policies (set by _init_worker).
+
+    Args:
+        args: Tuple of (i, j, obs_scheme, num_envs, games, device)
+
+    Returns:
+        Tuple of (i, j, result_dict) where result_dict has wins/losses/draws.
+    """
+    i, j, obs_scheme, num_envs, games, device = args
+
+    result = run_matches_vectorized(
+        _worker_policies[i], _worker_policies[j], games,
+        obs_scheme=obs_scheme, num_envs=num_envs,
+        device=device)
+
+    return (i, j, result)
+
+
 def run_league_tournament(policies, league_dir, games_per_pair=30, num_envs=64,
-                          device='cuda'):
+                          device='cuda', num_workers=None):
     """Round-robin tournament for league policies.
 
     Groups policies by obs_scheme, runs within-scheme round-robins using
-    vectorized match running, assembles combined win matrix, computes
-    ratings via iterative MLE.
+    vectorized match running with multiprocessing across pairs, assembles
+    combined win matrix, computes ratings via iterative MAP estimation.
 
     Args:
         policies: List of PolicyEntry objects (from league_manifest).
@@ -239,6 +290,9 @@ def run_league_tournament(policies, league_dir, games_per_pair=30, num_envs=64,
         games_per_pair: Games per ordered pair (A vs B, then B vs A).
         num_envs: Number of parallel environments for vectorized eval.
         device: Torch device string.
+        num_workers: Number of parallel worker processes (default 1 = serial).
+            Values >1 use multiprocessing, which helps with multi-GPU or
+            very large leagues but adds overhead on single-GPU.
 
     Returns:
         (win_matrix_dict, ratings_dict) where:
@@ -260,58 +314,69 @@ def run_league_tournament(policies, league_dir, games_per_pair=30, num_envs=64,
     for idx, p in enumerate(policies):
         scheme_groups.setdefault(p.obs_scheme, []).append(idx)
 
-    # Run within-scheme round-robins
+    # Determine worker count (default serial — single GPU can't parallelize well)
+    if num_workers is None:
+        num_workers = 1
+
+    # Build policy info list for worker initialization and pair list
+    policy_infos = []  # (idx, model_path, hidden_size, obs_scheme)
+    all_pairs = []
     for scheme, indices in scheme_groups.items():
         if len(indices) < 2:
             continue
 
+        num_pairs = len(indices) * (len(indices) - 1)
         print(f'[LEAGUE-TOURNAMENT] Running scheme {scheme} round-robin: '
-              f'{len(indices)} policies, {len(indices)*(len(indices)-1)} pairs')
+              f'{len(indices)} policies, {num_pairs} pairs')
 
-        obs_scheme = scheme
-
-        # Small temp env just for policy construction (needs obs/action space)
-        tmp_env = Dogfight(
-            num_envs=1,
-            render_mode=None,
-            obs_scheme=obs_scheme,
-            curriculum_enabled=1,
-            fixed_stage=20,
-            max_steps=6000,
-        )
-
-        # Load all policies for this scheme
-        loaded = {}
         for idx in indices:
             p = policies[idx]
-            model_path = os.path.join(league_dir, p.model_path)
-            loaded[idx] = load_policy_from_path(
-                model_path, tmp_env, device, hidden_size=p.hidden_size)
-        tmp_env.close()
+            policy_infos.append((
+                idx, os.path.join(league_dir, p.model_path),
+                p.hidden_size, scheme,
+            ))
 
-        # Round-robin within scheme using vectorized matches
         for i in indices:
             for j in indices:
                 if i == j:
                     continue
-                result = run_matches_vectorized(
-                    loaded[i], loaded[j], games_per_pair,
-                    obs_scheme=obs_scheme, num_envs=num_envs,
-                    device=device)
-                wins[i][j] = result['wins']
-                draws[i][j] = result['draws']
+                all_pairs.append((i, j, scheme, num_envs, games_per_pair, device))
 
-                name_i = policies[i].id[:30]
-                name_j = policies[j].id[:30]
-                print(f'  {name_i} vs {name_j}: '
-                      f'{result["wins"]}W/{result["losses"]}L/{result["draws"]}D')
+    # Run pairs: multiprocessing if workers > 1, else serial
+    if num_workers > 1 and len(all_pairs) > 1:
+        print(f'[LEAGUE-TOURNAMENT] Running {len(all_pairs)} pairs '
+              f'across {num_workers} workers')
+        # Use spawn context (safe with CUDA, but has import overhead).
+        # Note: multiprocessing helps mainly with multi-GPU setups or
+        # very large leagues. For single-GPU, serial is usually faster
+        # because workers compete for GPU and each needs CUDA init.
+        ctx = multiprocessing.get_context('spawn')
+        with ctx.Pool(num_workers, initializer=_init_worker,
+                       initargs=(policy_infos, device)) as pool:
+            results_list = pool.map(_run_pair_worker, all_pairs)
+    else:
+        # Serial: load policies in-process and run directly
+        print(f'[LEAGUE-TOURNAMENT] Running {len(all_pairs)} pairs serially')
+        _init_worker(policy_infos, device)
+        results_list = [_run_pair_worker(args) for args in all_pairs]
+
+    # Collect results into win/draw matrices
+    for i, j, result in results_list:
+        wins[i][j] = result['wins']
+        draws[i][j] = result['draws']
+
+        name_i = policies[i].id[:30]
+        name_j = policies[j].id[:30]
+        print(f'  {name_i} vs {name_j}: '
+              f'{result["wins"]}W/{result["losses"]}L/{result["draws"]}D')
 
     # Cross-scheme pairs get neutral entries (0.5/0.5 placeholder)
     # They simply won't affect ratings since wins=losses
 
-    # Compute MLE ratings via iterative BT (anchor first policy at 1000)
+    # Compute MAP ratings via iterative BT (anchor first policy at 1000)
     elos = [1000.0] * n
     for iteration in range(200):
+        max_change = 0.0
         for i in range(1, n):  # Skip anchor
             matchups = []
             ref_elos = {}
@@ -332,7 +397,11 @@ def run_league_tournament(policies, league_dir, games_per_pair=30, num_envs=64,
                     'draws': draws[i][j],
                 })
             if has_games:
+                old_elo = elos[i]
                 elos[i] = compute_elo_mle(matchups, ref_elos)
+                max_change = max(max_change, abs(elos[i] - old_elo))
+        if max_change < 1.0:
+            break
 
     # Build results
     ratings = {labels[i]: elos[i] for i in range(n)}
@@ -360,12 +429,18 @@ def run_league_tournament(policies, league_dir, games_per_pair=30, num_envs=64,
     return win_matrix, ratings
 
 
-def compute_elo_mle(matchup_results, reference_elos):
-    """Compute MLE Elo rating given results against known-rated opponents.
+def compute_elo_mle(matchup_results, reference_elos, prior_rating=1000.0,
+                    prior_strength=2.0):
+    """Compute MAP Elo rating given results against known-rated opponents.
 
     Uses bisection search to find the rating R that maximizes the
-    log-likelihood of observed results under the standard logistic Elo model:
+    log-posterior (log-likelihood + Gaussian prior) under the standard
+    logistic Elo model:
         P(win) = 1 / (1 + 10^((R_opp - R) / 400))
+
+    The Gaussian prior with strength=2.0 acts as 2 virtual games at 50%
+    against a 1000-rated opponent, preventing extreme divergence when
+    real game data is sparse.
 
     Args:
         matchup_results: list of dicts, each with keys:
@@ -374,11 +449,13 @@ def compute_elo_mle(matchup_results, reference_elos):
             - losses: int
             - draws: int (counted as 0.5 win + 0.5 loss)
         reference_elos: dict mapping opponent_tag -> Elo rating.
+        prior_rating: Center of Gaussian prior (default 1000).
+        prior_strength: Strength of prior in virtual games (default 2.0).
 
     Returns:
-        float: MLE Elo rating for the candidate.
+        float: MAP Elo rating for the candidate.
     """
-    def log_likelihood(r_candidate):
+    def log_posterior(r_candidate):
         ll = 0.0
         for m in matchup_results:
             r_opp = reference_elos[m['opponent_tag']]
@@ -392,15 +469,18 @@ def compute_elo_mle(matchup_results, reference_elos):
                 ll += w * math.log(expected)
             if l > 0:
                 ll += l * math.log(1.0 - expected)
+
+        # Gaussian prior: -strength * ((R - prior) / 400)^2
+        # This pulls ratings toward prior_rating, preventing divergence
+        ll -= prior_strength * ((r_candidate - prior_rating) / 400.0) ** 2
         return ll
 
     # Bisection search over candidate rating
-    lo, hi = 0.0, 3000.0
+    lo, hi = 200.0, 1800.0
     for _ in range(100):
         mid = (lo + hi) / 2.0
-        # Check gradient direction: if increasing R improves likelihood, search higher
         eps = 0.5
-        if log_likelihood(mid + eps) > log_likelihood(mid - eps):
+        if log_posterior(mid + eps) > log_posterior(mid - eps):
             lo = mid
         else:
             hi = mid
@@ -642,12 +722,11 @@ def run_tournament(model_paths, games_per_matchup=20, obs_scheme=0, device='cuda
 
     env.close()
 
-    # Compute Elo ratings via iterative MLE
-    # Anchor model 0 at 1000
+    # Compute MAP ratings via iterative BT (anchor model 0 at 1000)
     elos = [1000.0] * n
     for iteration in range(200):
+        max_change = 0.0
         for i in range(1, n):  # Skip anchor
-            # Compute log-likelihood gradient for model i
             matchups = []
             ref_elos = {}
             for j in range(n):
@@ -661,7 +740,11 @@ def run_tournament(model_paths, games_per_matchup=20, obs_scheme=0, device='cuda
                     'losses': wins[j][i],
                     'draws': draws[i][j],
                 })
+            old_elo = elos[i]
             elos[i] = compute_elo_mle(matchups, ref_elos)
+            max_change = max(max_change, abs(elos[i] - old_elo))
+        if max_change < 1.0:
+            break
 
     # Build result
     result = {}

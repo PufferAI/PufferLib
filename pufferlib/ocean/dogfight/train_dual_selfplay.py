@@ -1934,7 +1934,14 @@ def train_league_round(policy_entry, manifest, league_dir, training_steps,
         Path to candidate checkpoint, or None on failure.
     """
     env_name = 'puffer_dogfight'
-    args = pufferl.load_config(env_name)
+    # load_config calls argparse on sys.argv — save/restore to avoid
+    # conflicts with league.py's CLI args
+    orig_argv = sys.argv
+    sys.argv = [sys.argv[0]]
+    try:
+        args = pufferl.load_config(env_name)
+    finally:
+        sys.argv = orig_argv
 
     # Override env config for league training
     args['env']['obs_scheme'] = policy_entry.obs_scheme
@@ -1986,15 +1993,19 @@ def train_league_round(policy_entry, manifest, league_dir, training_steps,
     model_path = os.path.join(league_dir, policy_entry.model_path)
     state_dict = torch.load(model_path, map_location=device, weights_only=True)
     if isinstance(state_dict, dict) and 'policy_state_dict' in state_dict:
-        cleaned = state_dict['policy_state_dict']
-    else:
+        state_dict = state_dict['policy_state_dict']
+    # Try direct load first (PuffeRL format with policy./lstm. prefixes),
+    # fall back to stripping prefixes for raw Default policy format
+    try:
+        policy.load_state_dict(state_dict)
+    except RuntimeError:
         cleaned = {}
         for k, v in state_dict.items():
-            if k.startswith('lstm.') or k.startswith('cell.'):
-                continue
             new_k = k.replace('module.', '').replace('policy.', '')
+            if new_k.startswith('lstm.') or new_k.startswith('cell.'):
+                continue
             cleaned[new_k] = v
-    policy.load_state_dict(cleaned)
+        policy.load_state_dict(cleaned)
     print(f'[LEAGUE-TRAIN] Loaded weights from {model_path}')
 
     # Create logger
@@ -2007,6 +2018,13 @@ def train_league_round(policy_entry, manifest, league_dir, training_steps,
         if hasattr(logger, 'run') and logger.run:
             run_id = logger.run.id
 
+    # Read league config (opponent split + resample interval)
+    league_args = args.get('league', {})
+    sp_prob = float(league_args.get('self_play_prob', 0.60))
+    lg_prob = float(league_args.get('league_prob', 0.30))
+    af_prob = float(league_args.get('antiforgetting_prob', 0.10))
+    resample_interval = int(league_args.get('opponent_resample_interval', 3_000_000))
+
     # Create trainer with skip_curriculum and league pools
     train_config = {**args['train'], 'env': env_name}
     trainer = DualPerspectiveTrainer(
@@ -2014,9 +2032,10 @@ def train_league_round(policy_entry, manifest, league_dir, training_steps,
         skip_curriculum=True,
         league_opponent_pool=league_pool if league_pool else None,
         antiforgetting_pool=antiforgetting if antiforgetting else None,
-        self_play_prob=0.35,
-        league_prob=0.50,
-        antiforgetting_prob=0.15,
+        self_play_prob=sp_prob,
+        league_prob=lg_prob,
+        antiforgetting_prob=af_prob,
+        opponent_resample_interval=resample_interval,
         checkpoint_dir=f'checkpoints/league_{policy_entry.id}',
         run_id=run_id,
     )

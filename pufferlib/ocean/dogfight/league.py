@@ -46,7 +46,7 @@ class League:
         self.device = device
         self.manifest = LeagueManifest.load(manifest_path)
 
-    def evaluate(self, games_per_pair=30, num_envs=64):
+    def evaluate(self, games_per_pair=30, num_envs=64, num_workers=None):
         """Run round-robin tournament, update manifest with ratings."""
         from pufferlib.ocean.dogfight.elo_eval import run_league_tournament
 
@@ -59,6 +59,7 @@ class League:
             games_per_pair=games_per_pair,
             num_envs=num_envs,
             device=self.device,
+            num_workers=num_workers,
         )
 
         # Update policy ratings
@@ -429,7 +430,8 @@ class League:
         self.manifest.save(self.manifest_path)
 
     def run_round(self, steps_per_policy=50_000_000, games_per_pair=30,
-                  games_per_ref=100, num_envs=64, wandb_project=None):
+                  games_per_ref=100, num_envs=64, wandb_project=None,
+                  num_workers=None):
         """Execute one full league round: eval → train → verify → promote/reject → re-eval."""
         round_num = self.manifest.next_round_number()
         print(f'\n{"="*60}')
@@ -438,7 +440,7 @@ class League:
 
         # Phase 1: Evaluate
         print(f'--- Phase 1: Evaluate ---')
-        self.evaluate(games_per_pair, num_envs)
+        self.evaluate(games_per_pair, num_envs, num_workers)
 
         # Phase 2: Train
         print(f'\n--- Phase 2: Train ---')
@@ -465,7 +467,7 @@ class League:
 
         # Phase 5: Re-evaluate
         print(f'\n--- Phase 5: Re-evaluate ---')
-        self.evaluate(games_per_pair, num_envs)
+        self.evaluate(games_per_pair, num_envs, num_workers)
 
         self.manifest.save(self.manifest_path)
         print(f'\n[LEAGUE] Round {round_num} complete!')
@@ -537,6 +539,8 @@ def main():
     eval_parser.add_argument('--manifest', type=str, required=True)
     eval_parser.add_argument('--games-per-pair', type=int, default=30)
     eval_parser.add_argument('--num-envs', type=int, default=64)
+    eval_parser.add_argument('--num-workers', type=int, default=None,
+                             help='Parallel worker processes (default: auto)')
     eval_parser.add_argument('--device', type=str, default='cuda')
 
     # train
@@ -560,6 +564,8 @@ def main():
     round_parser.add_argument('--games-per-pair', type=int, default=30)
     round_parser.add_argument('--games-per-ref', type=int, default=100)
     round_parser.add_argument('--num-envs', type=int, default=64)
+    round_parser.add_argument('--num-workers', type=int, default=None,
+                              help='Parallel worker processes (default: auto)')
     round_parser.add_argument('--device', type=str, default='cuda')
     round_parser.add_argument('--wandb-project', type=str, default=None)
 
@@ -584,7 +590,7 @@ def main():
         if device == 'cuda' and not torch.cuda.is_available():
             device = 'cpu'
         league = League(args.manifest, device)
-        league.evaluate(args.games_per_pair, args.num_envs)
+        league.evaluate(args.games_per_pair, args.num_envs, args.num_workers)
 
     elif args.command == 'train':
         device = args.device
@@ -628,6 +634,7 @@ def main():
             games_per_ref=args.games_per_ref,
             num_envs=args.num_envs,
             wandb_project=args.wandb_project,
+            num_workers=args.num_workers,
         )
 
     elif args.command == 'status':
