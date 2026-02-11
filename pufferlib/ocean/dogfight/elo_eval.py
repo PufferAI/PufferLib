@@ -47,25 +47,25 @@ def load_policy_from_path(path, env, device='cuda', hidden_size=128):
     Returns:
         Policy in eval mode with frozen parameters.
     """
-    from pufferlib.models import Default as Policy
+    from pufferlib.models import LSTMWrapper, Default as Policy
 
-    policy = Policy(env, hidden_size=hidden_size)
+    inner_policy = Policy(env, hidden_size=hidden_size)
+    policy = LSTMWrapper(env, inner_policy, input_size=hidden_size, hidden_size=hidden_size)
     policy = policy.to(device)
 
     state_dict = torch.load(path, map_location=device, weights_only=True)
 
     if isinstance(state_dict, dict) and 'policy_state_dict' in state_dict:
-        # CheckpointQueue format
         policy.load_state_dict(state_dict['policy_state_dict'])
     else:
-        # PuffeRL raw state_dict format
-        cleaned = {}
-        for k, v in state_dict.items():
-            if k.startswith('lstm.') or k.startswith('cell.'):
-                continue
-            new_k = k.replace('module.', '').replace('policy.', '')
-            cleaned[new_k] = v
-        policy.load_state_dict(cleaned)
+        try:
+            policy.load_state_dict(state_dict)
+        except RuntimeError:
+            cleaned = {}
+            for k, v in state_dict.items():
+                new_k = k.replace('module.', '')
+                cleaned[new_k] = v
+            policy.load_state_dict(cleaned)
 
     policy.eval()
     for p in policy.parameters():
@@ -74,7 +74,7 @@ def load_policy_from_path(path, env, device='cuda', hidden_size=128):
     return policy
 
 
-def run_matches(env, player_policy, opponent_policy, num_games, device='cuda'):
+def run_matches(env, player_policy, opponent_policy, num_games, device='cuda', hidden_size=128):
     """Run vectorized matches between player and opponent policies.
 
     For autopilot opponents, opponent_policy is None and the C code handles
@@ -101,11 +101,17 @@ def run_matches(env, player_policy, opponent_policy, num_games, device='cuda'):
         done = False
         tick = 0
 
+        # Init LSTM state for new episode
+        state_p = {'lstm_h': torch.zeros(1, hidden_size, device=device),
+                    'lstm_c': torch.zeros(1, hidden_size, device=device)}
+        state_o = {'lstm_h': torch.zeros(1, hidden_size, device=device),
+                    'lstm_c': torch.zeros(1, hidden_size, device=device)}
+
         while not done and tick < max_ticks:
             obs_tensor = torch.as_tensor(obs, device=device).unsqueeze(0)
 
             with torch.no_grad():
-                logits_p, _ = player_policy.forward_eval(obs_tensor, state=None)
+                logits_p, _ = player_policy.forward_eval(obs_tensor, state=state_p)
                 action_p = logits_p.sample()
                 action_p_np = action_p.cpu().numpy().astype(np.float32)
                 action_p_np = np.clip(action_p_np, -1, 1)
@@ -117,7 +123,7 @@ def run_matches(env, player_policy, opponent_policy, num_games, device='cuda'):
                     obs_opp = torch.nan_to_num(obs_opp, nan=0.0)
 
                 with torch.no_grad():
-                    logits_o, _ = opponent_policy.forward_eval(obs_opp, state=None)
+                    logits_o, _ = opponent_policy.forward_eval(obs_opp, state=state_o)
                     action_o = logits_o.sample()
                     action_o_np = action_o.cpu().numpy().astype(np.float32)
                     action_o_np = np.clip(action_o_np, -1, 1)
@@ -155,7 +161,7 @@ def run_matches_vectorized(player_policy, opponent_policy, num_games,
         opponent_policy: Opponent neural network policy.
         num_games: Total number of games to play.
         obs_scheme: Observation scheme for the environment.
-        hidden_size: Hidden size (unused here but documents the pairing).
+        hidden_size: Hidden size for LSTM state.
         num_envs: Number of parallel environments.
         device: Torch device string.
         max_ticks: Maximum ticks per episode before forced draw.
@@ -181,13 +187,19 @@ def run_matches_vectorized(player_policy, opponent_policy, num_games,
     # Per-env tick counters
     env_ticks = np.zeros(num_envs, dtype=np.int32)
 
+    # Init batched LSTM state
+    state_p = {'lstm_h': torch.zeros(num_envs, hidden_size, device=device),
+                'lstm_c': torch.zeros(num_envs, hidden_size, device=device)}
+    state_o = {'lstm_h': torch.zeros(num_envs, hidden_size, device=device),
+                'lstm_c': torch.zeros(num_envs, hidden_size, device=device)}
+
     obs, _ = env.reset()
 
     while games_completed < num_games:
         obs_tensor = torch.as_tensor(obs, device=device)
 
         with torch.no_grad():
-            logits_p, _ = player_policy.forward_eval(obs_tensor, state=None)
+            logits_p, _ = player_policy.forward_eval(obs_tensor, state=state_p)
             action_p = logits_p.sample()
             action_p_np = action_p.cpu().numpy().astype(np.float32)
             action_p_np = np.clip(action_p_np, -1, 1)
@@ -199,7 +211,7 @@ def run_matches_vectorized(player_policy, opponent_policy, num_games,
             obs_opp = torch.nan_to_num(obs_opp, nan=0.0)
 
         with torch.no_grad():
-            logits_o, _ = opponent_policy.forward_eval(obs_opp, state=None)
+            logits_o, _ = opponent_policy.forward_eval(obs_opp, state=state_o)
             action_o = logits_o.sample()
             action_o_np = action_o.cpu().numpy().astype(np.float32)
             action_o_np = np.clip(action_o_np, -1, 1)
@@ -221,6 +233,11 @@ def run_matches_vectorized(player_policy, opponent_policy, num_games,
                     results['draws'] += 1
                 games_completed += 1
                 env_ticks[i] = 0
+                # Reset LSTM state for this env
+                state_p['lstm_h'][i] = 0
+                state_p['lstm_c'][i] = 0
+                state_o['lstm_h'][i] = 0
+                state_o['lstm_c'][i] = 0
 
     env.close()
     return results

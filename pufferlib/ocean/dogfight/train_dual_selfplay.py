@@ -428,19 +428,23 @@ class DualPerspectiveTrainer:
         return self.league_opponent_pool[idx]
 
     def _load_opponent_from_path(self, path):
-        """Load opponent policy from a raw .pt file (PuffeRL or CheckpointQueue format)."""
+        """Load opponent policy from a raw .pt file (PuffeRL, CheckpointQueue, or full state dict)."""
         state_dict = torch.load(path, map_location=self.config['device'], weights_only=True)
 
         if isinstance(state_dict, dict) and 'policy_state_dict' in state_dict:
+            # CheckpointQueue format
             self.opponent_policy.load_state_dict(state_dict['policy_state_dict'])
         else:
-            cleaned = {}
-            for k, v in state_dict.items():
-                if k.startswith('lstm.') or k.startswith('cell.'):
-                    continue
-                new_k = k.replace('module.', '').replace('policy.', '')
-                cleaned[new_k] = v
-            self.opponent_policy.load_state_dict(cleaned)
+            # Try direct load first (handles full LSTMWrapper state dicts)
+            try:
+                self.opponent_policy.load_state_dict(state_dict)
+            except RuntimeError:
+                # Fallback: clean keys for PuffeRL format
+                cleaned = {}
+                for k, v in state_dict.items():
+                    new_k = k.replace('module.', '').replace('policy.', '')
+                    cleaned[new_k] = v
+                self.opponent_policy.load_state_dict(cleaned)
 
         self.opponent_policy.eval()
         for p in self.opponent_policy.parameters():
@@ -582,12 +586,13 @@ class DualPerspectiveTrainer:
         print(f'[CHECKPOINT-QUEUE] Periodic save: {tag} (pool_size={pool_size})')
 
     def _get_sorted_opponents(self):
-        """Return list of (path, tag) sorted by rank: milestones first, then periodic, then 'self'.
+        """Return list of (path, tag) sorted by rank: milestones first, then periodic, then league, then 'self'.
 
         Rank ordering:
         - stage10 (rank 0, weakest)
         - stage20 (rank 1)
         - periodic checkpoints sorted by step (rank 2+)
+        - league pool opponents (higher rank than self-play checkpoints)
         - 'self' (highest rank, current learner weights)
         """
         entries = self.checkpoint_queue.checkpoints
@@ -605,8 +610,15 @@ class DualPerspectiveTrainer:
         periodics.sort(key=lambda x: x[2])
         periodic_pairs = [(p, t) for p, t, _ in periodics]
 
+        # Include league pool opponents in rotation (after self-play checkpoints, before self)
+        # Tag with 'league:' prefix so _load_opponent_for_rank uses the right loader
+        league_entries = []
+        if self.league_opponent_pool:
+            for path, tag in self.league_opponent_pool:
+                league_entries.append((path, f'league:{tag}'))
+
         # Self is always last (highest rank)
-        result = milestones + periodic_pairs + [(None, 'self')]
+        result = milestones + periodic_pairs + league_entries + [(None, 'self')]
         return result
 
     def _load_opponent_for_rank(self, rank):
@@ -620,6 +632,12 @@ class DualPerspectiveTrainer:
             self._current_opponent_path = None
             self._current_opponent_tag = 'self'
             debug(1, f'Loaded opponent rank {rank}: self (current learner weights)')
+        elif tag.startswith('league:'):
+            # League pool entries use raw .pt files, not CheckpointQueue format
+            self._load_opponent_from_path(path)
+            self._current_opponent_path = path
+            self._current_opponent_tag = tag
+            debug(1, f'Loaded opponent rank {rank}: {tag}')
         else:
             self._load_opponent_from_checkpoint(path)
             self._current_opponent_path = path
@@ -1185,15 +1203,16 @@ class DualPerspectiveTrainer:
         # Dual self-play training
         logs = self._train_dual()
 
-        # Ratchet: check for epoch/rotation boundaries
-        # (Gate metrics are accumulated directly in _evaluate_dual's info loop)
-        self._check_epoch_boundary()
-
-        # Periodic checkpoint save (ensures pool growth)
-        self._check_periodic_checkpoint()
-
-        # Check for stalemate -> apply handicaps to break death spiral equilibrium
-        self._check_stalemate(logs)
+        if self.league_opponent_pool is not None:
+            # League mode: use only resample system for opponent selection.
+            # Skip ratchet (epoch/rotation) to avoid two systems fighting over opponents.
+            self._check_periodic_checkpoint()
+            self._check_resample_opponent()
+        else:
+            # Standard self-play mode: ratchet + periodic checkpoints + stalemate
+            self._check_epoch_boundary()
+            self._check_periodic_checkpoint()
+            self._check_stalemate(logs)
 
         return logs
 
@@ -1210,14 +1229,28 @@ class DualPerspectiveTrainer:
         device = config['device']
 
         # Combine player and opponent experience
-        # Shape: [2*segments, horizon, ...]
-        combined_obs = torch.cat([self.trainer.observations, self.opponent_obs], dim=0)
-        combined_actions = torch.cat([self.trainer.actions, self.opponent_actions], dim=0)
-        combined_logprobs = torch.cat([self.trainer.logprobs, self.opponent_logprobs], dim=0)
-        combined_values = torch.cat([self.trainer.values, self.opponent_values], dim=0)
-        combined_rewards = torch.cat([self.trainer.rewards, self.opponent_rewards], dim=0)
-        combined_terminals = torch.cat([self.trainer.terminals, self.opponent_terminals], dim=0)
-        combined_ratio = torch.cat([self.trainer.ratio, torch.ones_like(self.trainer.ratio)], dim=0)
+        # In league mode, skip opponent experience to avoid KL explosion:
+        # opponent logprobs come from a different policy, causing massive importance
+        # ratio divergence when the learner recomputes logprobs for those actions.
+        if self.league_opponent_pool is not None and self._current_opponent_tag != 'self':
+            # League mode with external opponent: train only on player experience
+            combined_obs = self.trainer.observations
+            combined_actions = self.trainer.actions
+            combined_logprobs = self.trainer.logprobs
+            combined_values = self.trainer.values
+            combined_rewards = self.trainer.rewards
+            combined_terminals = self.trainer.terminals
+            combined_ratio = self.trainer.ratio
+        else:
+            # Standard self-play or playing against self: use both perspectives
+            # Shape: [2*segments, horizon, ...]
+            combined_obs = torch.cat([self.trainer.observations, self.opponent_obs], dim=0)
+            combined_actions = torch.cat([self.trainer.actions, self.opponent_actions], dim=0)
+            combined_logprobs = torch.cat([self.trainer.logprobs, self.opponent_logprobs], dim=0)
+            combined_values = torch.cat([self.trainer.values, self.opponent_values], dim=0)
+            combined_rewards = torch.cat([self.trainer.rewards, self.opponent_rewards], dim=0)
+            combined_terminals = torch.cat([self.trainer.terminals, self.opponent_terminals], dim=0)
+            combined_ratio = torch.cat([self.trainer.ratio, torch.ones_like(self.trainer.ratio)], dim=0)
 
         # Handle NaN and extreme values in observations
         if torch.isnan(combined_obs).any():
@@ -1946,7 +1979,7 @@ def train_league_round(policy_entry, manifest, league_dir, training_steps,
     # Override env config for league training
     args['env']['obs_scheme'] = policy_entry.obs_scheme
     args['env']['fixed_stage'] = 20
-    args['env']['curriculum_enabled'] = 0
+    args['env']['curriculum_enabled'] = 1
     args['train']['total_timesteps'] = training_steps
     args['train']['device'] = device
 
@@ -2024,6 +2057,13 @@ def train_league_round(policy_entry, manifest, league_dir, training_steps,
     lg_prob = float(league_args.get('league_prob', 0.30))
     af_prob = float(league_args.get('antiforgetting_prob', 0.10))
     resample_interval = int(league_args.get('opponent_resample_interval', 3_000_000))
+
+    # Override LR for league fine-tuning. Main training uses CosineAnnealingLR
+    # over 200-600M steps, so the policy ended at near-zero LR. Restarting at
+    # full LR destabilizes converged weights.
+    league_lr = league_args.get('league_lr')
+    if league_lr is not None:
+        args['train']['learning_rate'] = float(league_lr)
 
     # Create trainer with skip_curriculum and league pools
     train_config = {**args['train'], 'env': env_name}
