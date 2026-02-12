@@ -1515,6 +1515,183 @@ static void spawn_eval_opponent_advantage(Dogfight *env, Vec3 player_pos, Vec3 p
     }
 }
 
+// EVAL spawn mode 2: Symmetric scenario pool for fair Elo evaluation
+// Randomly selects from 3 scenarios: head-on merge, post-merge zoom, turning fight
+// All scenarios are symmetric with slight perturbations to break identical observations
+static void spawn_eval_merge(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    float speed = norm3(player_vel);
+    if (speed < 70.0f) speed = 80.0f;
+
+    // Shared: random center altitude and merge axis
+    float base_alt = rndf(2500, 3500);
+    float theta = rndf(0, 2.0f * M_PI);  // merge axis heading
+
+    // Tiny asymmetric perturbations (break identical obs, no real advantage)
+    float pos_jitter = rndf(-5, 5);
+    float alt_jitter = rndf(-5, 5);
+    float speed_jitter = rndf(-3, 3);
+    float angle_jitter = rndf(-0.035f, 0.035f);  // ~±2°
+
+    int scenario = (int)(rndf(0, 2.999f));  // 0, 1, or 2
+
+    if (scenario == 0) {
+        // === Scenario 1: Head-On Merge ===
+        // Classic merge. Both approaching, guns locked until pass.
+        float half_dist = rndf(300, 450);
+        float p_speed = speed + speed_jitter;
+        float o_speed = speed - speed_jitter;
+
+        Vec3 p_pos = vec3(
+            player_pos.x - half_dist * cosf(theta) + pos_jitter,
+            player_pos.y - half_dist * sinf(theta),
+            clampf(base_alt - alt_jitter, 500, 4500)
+        );
+        Vec3 opp_pos = vec3(
+            player_pos.x + half_dist * cosf(theta) - pos_jitter,
+            player_pos.y + half_dist * sinf(theta),
+            clampf(base_alt + alt_jitter, 500, 4500)
+        );
+
+        float p_heading = theta + angle_jitter;
+        float o_heading = theta + (float)M_PI - angle_jitter;
+
+        // Player
+        env->player.pos = p_pos;
+        env->player.ori = quat_from_axis_angle(vec3(0, 0, 1), p_heading);
+        env->player.vel = vec3(p_speed * cosf(p_heading), p_speed * sinf(p_heading), 0);
+
+        // Opponent
+        Vec3 opp_vel = vec3(o_speed * cosf(o_heading), o_speed * sinf(o_heading), 0);
+        reset_plane(&env->opponent, opp_pos, opp_vel);
+        env->opponent.ori = quat_from_axis_angle(vec3(0, 0, 1), o_heading);
+
+        env->head_on_lockout = 1;
+
+        // Initialize pass detection tracking
+        Vec3 rel_pos = sub3(opp_pos, p_pos);
+        Vec3 rel_vel = sub3(opp_vel, env->player.vel);
+        env->prev_rel_dot = dot3(rel_pos, rel_vel);
+
+        if (DEBUG >= 1) {
+            fprintf(stderr, "[EVAL-MERGE] scenario=HEAD_ON dist=%.0fm alt=%.0fm heading=%.1f°\n",
+                    half_dist * 2, base_alt, theta * RAD_TO_DEG);
+        }
+
+    } else if (scenario == 1) {
+        // === Scenario 2: Post-Merge Zoom ===
+        // Both just passed and pulled up. Who manages energy better?
+        // Flying AWAY from each other, both climbing nose-up.
+        float half_dist = rndf(100, 200);
+        float pitch_angle = rndf(30, 50) * DEG_TO_RAD;
+        float zoom_speed = rndf(70, 90);
+        float p_speed = zoom_speed + speed_jitter;
+        float o_speed = zoom_speed - speed_jitter;
+
+        // Positions: separated, backs to each other
+        // Player flies along +theta, opponent flies along +theta+PI (away from each other)
+        Vec3 p_pos = vec3(
+            player_pos.x - half_dist * cosf(theta) + pos_jitter,
+            player_pos.y - half_dist * sinf(theta),
+            clampf(base_alt - alt_jitter, 500, 4500)
+        );
+        Vec3 opp_pos = vec3(
+            player_pos.x + half_dist * cosf(theta) - pos_jitter,
+            player_pos.y + half_dist * sinf(theta),
+            clampf(base_alt + alt_jitter, 500, 4500)
+        );
+
+        // Player heading: away from opponent (along +theta direction)
+        float p_heading = theta + angle_jitter;
+        // Opponent heading: away from player (along +theta+PI direction)
+        float o_heading = theta + (float)M_PI - angle_jitter;
+
+        // Orientation: heading rotation, then pitch up
+        // Compose: pitch around body Y, then heading around world Z
+        Quat p_heading_q = quat_from_axis_angle(vec3(0, 0, 1), p_heading);
+        Quat p_pitch_q = quat_from_axis_angle(vec3(0, 1, 0), -pitch_angle);  // negative = nose up (Z up convention)
+        Quat p_ori = quat_mul(p_heading_q, p_pitch_q);
+
+        Quat o_heading_q = quat_from_axis_angle(vec3(0, 0, 1), o_heading);
+        Quat o_pitch_q = quat_from_axis_angle(vec3(0, 1, 0), -pitch_angle);
+        Quat o_ori = quat_mul(o_heading_q, o_pitch_q);
+
+        // Velocity aligned with nose direction
+        Vec3 p_vel = mul3(quat_rotate(p_ori, vec3(1, 0, 0)), p_speed);
+        Vec3 o_vel = mul3(quat_rotate(o_ori, vec3(1, 0, 0)), o_speed);
+
+        env->player.pos = p_pos;
+        env->player.ori = p_ori;
+        env->player.vel = p_vel;
+
+        reset_plane(&env->opponent, opp_pos, o_vel);
+        env->opponent.ori = o_ori;
+
+        env->head_on_lockout = 0;
+        env->prev_rel_dot = 0.0f;
+
+        if (DEBUG >= 1) {
+            fprintf(stderr, "[EVAL-MERGE] scenario=POST_MERGE_ZOOM dist=%.0fm alt=%.0fm pitch=%.0f° heading=%.1f°\n",
+                    half_dist * 2, base_alt, pitch_angle * RAD_TO_DEG, theta * RAD_TO_DEG);
+        }
+
+    } else {
+        // === Scenario 3: Turning Fight ===
+        // Engaged in a turning fight. Both banked, pulling toward each other.
+        float half_dist = rndf(150, 250);
+        float bank_angle = rndf(45, 60) * DEG_TO_RAD;
+        float pitch_angle = rndf(5, 10) * DEG_TO_RAD;
+        float turn_speed = rndf(70, 85);
+        float p_speed = turn_speed + speed_jitter;
+        float o_speed = turn_speed - speed_jitter;
+
+        Vec3 p_pos = vec3(
+            player_pos.x - half_dist * cosf(theta) + pos_jitter,
+            player_pos.y - half_dist * sinf(theta),
+            clampf(base_alt - alt_jitter, 500, 4500)
+        );
+        Vec3 opp_pos = vec3(
+            player_pos.x + half_dist * cosf(theta) - pos_jitter,
+            player_pos.y + half_dist * sinf(theta),
+            clampf(base_alt + alt_jitter, 500, 4500)
+        );
+
+        // Both heading roughly toward each other, but offset ~45° to simulate a turn
+        float turn_offset = rndf(30, 60) * DEG_TO_RAD;
+        float p_heading = theta + turn_offset + angle_jitter;
+        float o_heading = theta + (float)M_PI - turn_offset - angle_jitter;
+
+        // Player banks left (toward opponent), opponent banks right (toward player)
+        // Since they face each other, mirrored bank = same direction of turn
+        Quat p_heading_q = quat_from_axis_angle(vec3(0, 0, 1), p_heading);
+        Quat p_pitch_q = quat_from_axis_angle(vec3(0, 1, 0), -pitch_angle);
+        Quat p_bank_q = quat_from_axis_angle(vec3(1, 0, 0), -bank_angle);  // bank left
+        Quat p_ori = quat_mul(p_heading_q, quat_mul(p_pitch_q, p_bank_q));
+
+        Quat o_heading_q = quat_from_axis_angle(vec3(0, 0, 1), o_heading);
+        Quat o_pitch_q = quat_from_axis_angle(vec3(0, 1, 0), -pitch_angle);
+        Quat o_bank_q = quat_from_axis_angle(vec3(1, 0, 0), bank_angle);   // bank right (mirrored)
+        Quat o_ori = quat_mul(o_heading_q, quat_mul(o_pitch_q, o_bank_q));
+
+        Vec3 p_vel = mul3(quat_rotate(p_ori, vec3(1, 0, 0)), p_speed);
+        Vec3 o_vel = mul3(quat_rotate(o_ori, vec3(1, 0, 0)), o_speed);
+
+        env->player.pos = p_pos;
+        env->player.ori = p_ori;
+        env->player.vel = p_vel;
+
+        reset_plane(&env->opponent, opp_pos, o_vel);
+        env->opponent.ori = o_ori;
+
+        env->head_on_lockout = 0;
+        env->prev_rel_dot = 0.0f;
+
+        if (DEBUG >= 1) {
+            fprintf(stderr, "[EVAL-MERGE] scenario=TURNING_FIGHT dist=%.0fm alt=%.0fm bank=%.0f° heading=%.1f°\n",
+                    half_dist * 2, base_alt, bank_angle * RAD_TO_DEG, theta * RAD_TO_DEG);
+        }
+    }
+}
+
 // Master spawn function: dispatches to stage-specific spawner
 void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // For eval mode (curriculum_randomize=1), use spawn based on eval_spawn_mode
@@ -1522,6 +1699,9 @@ void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
         if (env->eval_spawn_mode == 1) {
             // Mode 1: opponent advantage - for testing if opponent can kill player
             spawn_eval_opponent_advantage(env, player_pos, player_vel);
+        } else if (env->eval_spawn_mode == 2) {
+            // Mode 2: symmetric merge - fair Elo evaluation
+            spawn_eval_merge(env, player_pos, player_vel);
         } else {
             // Mode 0 (default): random spawn
             spawn_eval_random(env, player_pos, player_vel);

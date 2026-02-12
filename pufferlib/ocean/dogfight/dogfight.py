@@ -639,10 +639,17 @@ class Dogfight(pufferlib.PufferEnv):
         Set eval spawn mode for all environments.
 
         Args:
-            mode: 0 = random (default), 1 = opponent_advantage (opponent behind player)
+            mode: 0 = random (default), 1 = opponent_advantage, 2 = symmetric merge
 
         Mode 1 (opponent_advantage) places opponent 400m behind player at 15° off tail,
         giving opponent an easy kill opportunity. Useful for testing if opponent can kill.
+
+        Mode 2 (symmetric scenario pool) randomly selects from 3 scenarios:
+        - Head-on merge: facing each other, guns locked until pass
+        - Post-merge zoom: both nose-up climbing away, tests energy management
+        - Turning fight: both banked and pulling, tests turn performance
+        All scenarios are symmetric with slight perturbations (±5m pos, ±2° heading,
+        ±3 m/s speed) to break identical observations. Used for fair Elo evaluation.
         """
         binding.vec_set_eval_spawn_mode(self.c_envs, mode)
 
