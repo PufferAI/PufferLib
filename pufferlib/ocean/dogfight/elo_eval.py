@@ -33,6 +33,7 @@ import numpy as np
 import torch
 
 from pufferlib.ocean.dogfight.dogfight import Dogfight, OBS_SIZES
+from pufferlib.ocean.dogfight.dogfight_log import init_log, log
 
 
 def load_policy_from_path(path, env, device='cuda', hidden_size=128):
@@ -97,7 +98,9 @@ def run_matches(env, player_policy, opponent_policy, num_games, device='cuda', h
     max_ticks = 6000  # 2 minutes at 50Hz
 
     while games_played < num_games:
-        obs, _ = env.reset()
+        # Use different seed per game to avoid deterministic spawn positions
+        # (vec_reset calls srand(seed), so seed=0 gives identical spawns every game)
+        obs, _ = env.reset(seed=games_played + 1)
         done = False
         tick = 0
 
@@ -108,7 +111,7 @@ def run_matches(env, player_policy, opponent_policy, num_games, device='cuda', h
                     'lstm_c': torch.zeros(1, hidden_size, device=device)}
 
         while not done and tick < max_ticks:
-            obs_tensor = torch.as_tensor(obs, device=device).unsqueeze(0)
+            obs_tensor = torch.as_tensor(obs, device=device)
 
             with torch.no_grad():
                 logits_p, _ = player_policy.forward_eval(obs_tensor, state=state_p)
@@ -135,10 +138,11 @@ def run_matches(env, player_policy, opponent_policy, num_games, device='cuda', h
             tick += 1
 
         # Determine outcome from final reward
+        # Kill: ±1.0, Crash survival: ±0.25, Timeout: -0.5
         final_reward = reward[0]
-        if final_reward > 0.5:
+        if final_reward > 0.1:
             results['wins'] += 1
-        elif final_reward < -0.5:
+        elif final_reward < -0.1:
             results['losses'] += 1
         else:
             results['draws'] += 1
@@ -227,9 +231,9 @@ def run_matches_vectorized(player_policy, opponent_policy, num_games,
         for i in range(num_envs):
             if done_mask[i] and games_completed < num_games:
                 r = reward[i]
-                if r > 0.5:
+                if r > 0.1:
                     results['wins'] += 1
-                elif r < -0.5:
+                elif r < -0.1:
                     results['losses'] += 1
                 else:
                     results['draws'] += 1
@@ -320,7 +324,7 @@ def run_league_tournament(policies, league_dir, games_per_pair=30, num_envs=64,
     """
     n = len(policies)
     if n < 2:
-        print('[LEAGUE-TOURNAMENT] Need at least 2 policies')
+        log('[EVAL] error=need_at_least_2_policies')
         return {'labels': [], 'data': []}, {}
 
     labels = [p.id for p in policies]
@@ -345,8 +349,7 @@ def run_league_tournament(policies, league_dir, games_per_pair=30, num_envs=64,
             continue
 
         num_pairs = len(indices) * (len(indices) - 1)
-        print(f'[LEAGUE-TOURNAMENT] Running scheme {scheme} round-robin: '
-              f'{len(indices)} policies, {num_pairs} pairs')
+        log(f'[EVAL] scheme={scheme} policies={len(indices)} pairs={num_pairs}')
 
         for idx in indices:
             p = policies[idx]
@@ -363,8 +366,7 @@ def run_league_tournament(policies, league_dir, games_per_pair=30, num_envs=64,
 
     # Run pairs: multiprocessing if workers > 1, else serial
     if num_workers > 1 and len(all_pairs) > 1:
-        print(f'[LEAGUE-TOURNAMENT] Running {len(all_pairs)} pairs '
-              f'across {num_workers} workers')
+        log(f'[EVAL] mode=parallel pairs={len(all_pairs)} workers={num_workers}')
         # Use spawn context (safe with CUDA, but has import overhead).
         # Note: multiprocessing helps mainly with multi-GPU setups or
         # very large leagues. For single-GPU, serial is usually faster
@@ -375,7 +377,7 @@ def run_league_tournament(policies, league_dir, games_per_pair=30, num_envs=64,
             results_list = pool.map(_run_pair_worker, all_pairs)
     else:
         # Serial: load policies in-process and run directly
-        print(f'[LEAGUE-TOURNAMENT] Running {len(all_pairs)} pairs serially')
+        log(f'[EVAL] mode=serial pairs={len(all_pairs)}')
         _init_worker(policy_infos, device)
         results_list = [_run_pair_worker(args) for args in all_pairs]
 
@@ -384,19 +386,22 @@ def run_league_tournament(policies, league_dir, games_per_pair=30, num_envs=64,
         wins[i][j] = result['wins']
         draws[i][j] = result['draws']
 
-        name_i = policies[i].id[:30]
-        name_j = policies[j].id[:30]
-        print(f'  {name_i} vs {name_j}: '
-              f'{result["wins"]}W/{result["losses"]}L/{result["draws"]}D')
+        total = result['wins'] + result['losses'] + result['draws']
+        wr = result['wins'] / max(total, 1) * 100
+        log(f'[MATCH] p1={policies[i].id} p2={policies[j].id} w={result["wins"]} l={result["losses"]} d={result["draws"]} wr={wr:.1f}')
 
     # Cross-scheme pairs get neutral entries (0.5/0.5 placeholder)
     # They simply won't affect ratings since wins=losses
 
-    # Compute MAP ratings via iterative BT (anchor first policy at 1000)
+    # Compute MAP ratings via iterative BT (anchor alphabetically-first policy at 1000)
+    # Using a stable anchor (sorted by ID) prevents rating shifts when policy order changes
+    anchor_idx = min(range(n), key=lambda i: labels[i])
     elos = [1000.0] * n
     for iteration in range(200):
         max_change = 0.0
-        for i in range(1, n):  # Skip anchor
+        for i in range(n):
+            if i == anchor_idx:
+                continue  # Skip anchor
             matchups = []
             ref_elos = {}
             has_games = False
@@ -440,10 +445,9 @@ def run_league_tournament(policies, league_dir, games_per_pair=30, num_envs=64,
 
     win_matrix = {'labels': labels, 'data': win_data}
 
-    # Print summary
-    print(f'\n[LEAGUE-TOURNAMENT] Ratings:')
-    for pid, rating in sorted(ratings.items(), key=lambda x: -x[1]):
-        print(f'  {pid[:40]}: {rating:.0f}')
+    # Log ratings
+    for rank, (pid, rating) in enumerate(sorted(ratings.items(), key=lambda x: -x[1])):
+        log(f'[RATING] policy={pid} rating={rating:.0f} rank={rank+1}')
 
     return win_matrix, ratings
 
@@ -576,7 +580,7 @@ def run_benchmark_eval(model_path, reference_opponents, games_per_matchup=20,
             opponent_policy = load_policy_from_path(opp_path, env, device)
 
         else:
-            print(f'[ELO-EVAL] Unknown opponent type: {opp_type}, skipping {tag}')
+            log(f'[ERROR] phase=eval msg="Unknown opponent type: {opp_type}, skipping {tag}"')
             continue
 
         # Run matches
@@ -594,10 +598,8 @@ def run_benchmark_eval(model_path, reference_opponents, games_per_matchup=20,
         total_losses += results['losses']
         total_draws += results['draws']
 
-        win_pct = 100 * results['wins'] / games_per_matchup
-        print(f'[ELO-EVAL] vs {tag} (Elo {opp_elo}): '
-              f'{results["wins"]}W/{results["losses"]}L/{results["draws"]}D '
-              f'({win_pct:.0f}% win rate)')
+        wr = 100 * results['wins'] / max(games_per_matchup, 1)
+        log(f'[MATCH] p1=candidate p2={tag} w={results["wins"]} l={results["losses"]} d={results["draws"]} wr={wr:.1f} elo_opp={opp_elo}')
 
     # Compute MLE Elo
     elo = compute_elo_mle(matchup_results, reference_elos)
@@ -624,7 +626,7 @@ def load_manifest(reference_dir):
     """
     manifest_path = os.path.join(reference_dir, 'manifest.json')
     if not os.path.exists(manifest_path):
-        print(f'[ELO-EVAL] No manifest found at {manifest_path}')
+        log(f'[ERROR] phase=eval msg="No manifest found at {manifest_path}"')
         return None
 
     with open(manifest_path, 'r') as f:
@@ -657,7 +659,7 @@ def save_as_reference(model_path, reference_dir, tag, elo, obs_scheme=0):
     dest_filename = f'{tag}.pt'
     dest_path = os.path.join(reference_dir, dest_filename)
     shutil.copy2(model_path, dest_path)
-    print(f'[ELO-EVAL] Copied model to {dest_path}')
+    log(f'[CHECKPOINT] event=bootstrap_copy path={dest_path}')
 
     # Update manifest
     manifest = load_manifest(reference_dir)
@@ -681,7 +683,7 @@ def save_as_reference(model_path, reference_dir, tag, elo, obs_scheme=0):
     manifest_path = os.path.join(reference_dir, 'manifest.json')
     with open(manifest_path, 'w') as f:
         json.dump(manifest, f, indent=2)
-    print(f'[ELO-EVAL] Updated manifest: {tag} (Elo {elo})')
+    log(f'[CHECKPOINT] event=bootstrap_manifest tag={tag} elo={elo}')
 
 
 def run_tournament(model_paths, games_per_matchup=20, obs_scheme=0, device='cuda'):
@@ -703,7 +705,7 @@ def run_tournament(model_paths, games_per_matchup=20, obs_scheme=0, device='cuda
 
     n = len(model_paths)
     if n < 2:
-        print('[ELO-EVAL] Need at least 2 models for tournament')
+        log('[EVAL] error=need_at_least_2_models')
         return {}
 
     # Win matrix: wins[i][j] = number of times model i beat model j
@@ -740,8 +742,9 @@ def run_tournament(model_paths, games_per_matchup=20, obs_scheme=0, device='cuda
 
             name_i = os.path.basename(model_paths[i])
             name_j = os.path.basename(model_paths[j])
-            print(f'[TOURNAMENT] {name_i} vs {name_j}: '
-                  f'{results["wins"]}W/{results["losses"]}L/{results["draws"]}D')
+            total = results['wins'] + results['losses'] + results['draws']
+            wr = results['wins'] / max(total, 1) * 100
+            log(f'[MATCH] p1={name_i} p2={name_j} w={results["wins"]} l={results["losses"]} d={results["draws"]} wr={wr:.1f}')
 
     env.close()
 
@@ -774,7 +777,7 @@ def run_tournament(model_paths, games_per_matchup=20, obs_scheme=0, device='cuda
     for i, path in enumerate(model_paths):
         result[path] = elos[i]
         name = os.path.basename(path)
-        print(f'[TOURNAMENT] {name}: Elo {elos[i]:.0f}')
+        log(f'[RATING] policy={name} rating={elos[i]:.0f}')
 
     return result
 
@@ -823,6 +826,9 @@ def main():
                               help='Torch device')
 
     args = parser.parse_args()
+
+    if args.command in ('eval', 'tournament'):
+        init_log('league/logs', f'elo_{args.command}')
 
     if args.command == 'eval':
         device = args.device

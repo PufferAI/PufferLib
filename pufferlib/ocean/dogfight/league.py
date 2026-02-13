@@ -33,9 +33,12 @@ import argparse
 import os
 import shutil
 import time
+import traceback
 from datetime import datetime
 
 import torch
+
+from pufferlib.ocean.dogfight.dogfight_log import init_log, log
 
 
 class League:
@@ -51,8 +54,7 @@ class League:
         from pufferlib.ocean.dogfight.elo_eval import run_league_tournament
 
         all_policies = self.manifest.policies
-        print(f'[LEAGUE] Evaluating {len(all_policies)} policies '
-              f'({games_per_pair} games/pair, {num_envs} parallel envs)')
+        log(f'[EVAL] policies={len(all_policies)} games_per_pair={games_per_pair} num_envs={num_envs}')
 
         win_matrix, ratings = run_league_tournament(
             all_policies, self.league_dir,
@@ -86,7 +88,7 @@ class League:
                     p.id, round_num, ratings[p.id], p.generation)
 
         self.manifest.save(self.manifest_path)
-        print(f'[LEAGUE] Evaluation complete (round {round_num})')
+        log(f'[EVAL] event=complete round={round_num}')
         return win_matrix, ratings
 
     def train_all(self, steps_per_policy=50_000_000, wandb_project=None):
@@ -99,12 +101,11 @@ class League:
         active = self.manifest.get_active_policies()
         candidates = {}
 
-        print(f'[LEAGUE] Training {len(active)} active policies '
-              f'({steps_per_policy} steps each)')
+        log(f'[TRAIN] event=all_start policies={len(active)} steps={steps_per_policy}')
 
         for i, policy in enumerate(active):
             if policy.flagged_for_review:
-                print(f'[LEAGUE] Skipping {policy.id} (flagged for review)')
+                log(f'[TRAIN] policy={policy.id} event=skipped reason=flagged')
                 continue
 
             # Check for existing candidate (crash recovery)
@@ -114,11 +115,11 @@ class League:
             candidate_path = os.path.join(candidate_dir, candidate_filename)
 
             if os.path.exists(candidate_path):
-                print(f'[LEAGUE] Found existing candidate for {policy.id}, skipping training')
+                log(f'[TRAIN] policy={policy.id} event=skipped reason=candidate_exists')
                 candidates[policy.id] = candidate_path
                 continue
 
-            print(f'\n[LEAGUE] Training policy {i+1}/{len(active)}: {policy.id}')
+            log(f'[TRAIN] policy={policy.id} event=start index={i+1}/{len(active)}')
             start_time = time.time()
 
             try:
@@ -131,16 +132,15 @@ class League:
                 if candidate_path:
                     candidates[policy.id] = candidate_path
                     elapsed = time.time() - start_time
-                    print(f'[LEAGUE] {policy.id} trained in {elapsed:.0f}s')
+                    log(f'[TRAIN] policy={policy.id} event=done elapsed={elapsed:.0f}s')
             except Exception as e:
-                print(f'[LEAGUE] ERROR training {policy.id}: {e}')
-                import traceback
-                traceback.print_exc()
+                log(f'[ERROR] policy={policy.id} phase=train msg="{e}"')
+                log(f'[ERROR] policy={policy.id} traceback={traceback.format_exc()}')
 
             # Save manifest after each policy (crash recovery)
             self.manifest.save(self.manifest_path)
 
-        print(f'[LEAGUE] Training complete: {len(candidates)}/{len(active)} candidates')
+        log(f'[TRAIN] event=all_done candidates={len(candidates)} total={len(active)}')
         return candidates
 
     def verify(self, candidates, games_per_ref=100, num_envs=64):
@@ -167,15 +167,18 @@ class League:
             if policy is None:
                 continue
 
-            print(f'\n[VERIFY] Gauntlet for {policy_id} (gen {policy.generation + 1})')
+            log(f'[VERIFY] policy={policy_id} gen={policy.generation + 1} event=start')
 
-            # Build reference set: same-scheme anchors + own best checkpoint
+            # Build reference set: all frozen anchors in same scheme
             references = []
+            own_anchor = None
 
-            # All frozen anchors in same scheme
             same_scheme = self.manifest.get_policies_by_scheme(policy.obs_scheme)
+            total_frozen = 0
+            skipped_missing = 0
             for ref in same_scheme:
                 if ref.status == 'frozen':
+                    total_frozen += 1
                     ref_path = os.path.join(self.league_dir, ref.model_path)
                     if os.path.exists(ref_path):
                         references.append({
@@ -183,18 +186,26 @@ class League:
                             'path': ref_path,
                             'hidden_size': ref.hidden_size,
                         })
+                        # Identify this policy's own gen-0 anchor
+                        if ref.source_policy == policy_id:
+                            own_anchor = ref
+                    else:
+                        skipped_missing += 1
+                        log(f'[VERIFY] policy={policy_id} warning=missing_ref ref={ref.id} path={ref_path}')
 
-            # Own best checkpoint
-            best_path = os.path.join(self.league_dir, policy.best_checkpoint_path)
-            if os.path.exists(best_path):
-                references.append({
-                    'id': f'own_best_gen{policy.best_checkpoint_generation}',
-                    'path': best_path,
-                    'hidden_size': policy.hidden_size,
-                })
+            if skipped_missing > 0:
+                log(f'[VERIFY] policy={policy_id} missing_refs={skipped_missing}/{total_frozen}')
+                if skipped_missing > total_frozen / 2:
+                    log(f'[ERROR] policy={policy_id} phase=verify msg=">50% references missing, skipping"')
+                    results[policy_id] = {
+                        'decision': 'REJECTED',
+                        'reason': f'{skipped_missing}/{total_frozen} reference models missing',
+                        'gauntlet_results': {},
+                    }
+                    continue
 
             if not references:
-                print(f'[VERIFY] No references found for {policy_id}, auto-promoting')
+                log(f'[VERIFY] policy={policy_id} event=auto_promote reason=no_references')
                 results[policy_id] = {
                     'decision': 'PROMOTED',
                     'reason': 'No references available',
@@ -202,12 +213,14 @@ class League:
                 }
                 continue
 
-            # Create env for this scheme
+            # Create env for this scheme (eval_spawn_mode=2 for symmetric fair spawns)
             env = Dogfight(
                 num_envs=1,
                 render_mode=None,
                 obs_scheme=policy.obs_scheme,
                 curriculum_enabled=1,
+                curriculum_randomize=1,
+                eval_spawn_mode=2,
                 fixed_stage=20,
                 max_steps=6000,
             )
@@ -265,8 +278,7 @@ class League:
                     'draws': result['draws'],
                 })
 
-                print(f'  vs {ref["id"][:40]}: {result["wins"]}W/{result["losses"]}L/{result["draws"]}D '
-                      f'({win_rate:.0%})')
+                log(f'[VERIFY] policy={policy_id} vs={ref["id"]} w={result["wins"]} l={result["losses"]} d={result["draws"]} wr={win_rate*100:.1f}')
 
             env.close()
 
@@ -279,39 +291,72 @@ class League:
             # Check promotion criteria
             criteria = {}
 
-            # Criterion 1: Rating didn't collapse (>-50 drop)
-            # Both-sides play + small sample sizes create rating noise;
-            # -50 catches real collapses while allowing statistical variance
-            rating_delta = candidate_rating - policy.rating
-            criteria['rating_no_collapse'] = {
-                'passed': rating_delta > -50,
-                'detail': f'delta={rating_delta:+.0f} (threshold: >-50)',
-            }
-
-            # Criterion 2: Beat own best checkpoint >= 40%
-            # With 30 games, a truly equal policy has ~87% chance of hitting 40%
-            # (vs only ~29% chance of hitting 55%). This catches real degradation
-            # while accepting candidates at parity with gen0.
-            own_best_key = f'own_best_gen{policy.best_checkpoint_generation}'
-            if own_best_key in gauntlet:
-                own_wr = gauntlet[own_best_key]['win_rate']
-                criteria['beat_own_best'] = {
-                    'passed': own_wr >= 0.40,
-                    'detail': f'{own_wr:.0%} (threshold: >=40%)',
+            # Criterion 1: Rating didn't collapse vs own anchor
+            # Uses anchor rating (fixed reference) instead of volatile round-robin rating
+            if own_anchor is not None:
+                anchor_rating = own_anchor.rating
+                rating_delta = candidate_rating - anchor_rating
+                criteria['rating_no_collapse'] = {
+                    'passed': rating_delta > -100,
+                    'detail': f'delta={rating_delta:+.0f} vs anchor {own_anchor.id[:20]} '
+                              f'(anchor={anchor_rating:.0f}, threshold: >-100)',
                 }
             else:
-                criteria['beat_own_best'] = {
-                    'passed': True,
-                    'detail': 'No own-best reference (auto-pass)',
+                # No anchor — fall back to policy's current rating
+                rating_delta = candidate_rating - policy.rating
+                criteria['rating_no_collapse'] = {
+                    'passed': rating_delta > -100,
+                    'detail': f'delta={rating_delta:+.0f} vs policy rating '
+                              f'(no anchor found, threshold: >-100)',
                 }
 
-            # Criterion 3: No catastrophic regression (<30% where prev >=50%)
+            # Criterion 2: Beat own anchor >= 55%
+            # Must demonstrably improve over previous generation, not just break even.
+            if own_anchor is not None and own_anchor.id in gauntlet:
+                own_anchor_wr = gauntlet[own_anchor.id]['win_rate']
+                criteria['beat_own_anchor'] = {
+                    'passed': own_anchor_wr >= 0.55,
+                    'detail': f'{own_anchor_wr:.0%} vs {own_anchor.id[:20]} (threshold: >=55%)',
+                }
+            else:
+                criteria['beat_own_anchor'] = {
+                    'passed': True,
+                    'detail': 'No own anchor found (auto-pass)',
+                }
+
+            # Criterion 3: No anchor regression — beat ALL anchors >= 35%
+            # Catches cases where training improved vs one anchor but collapsed vs another
+            worst_anchor_wr = None
+            worst_anchor_id = None
+            for ref in references:
+                ref_id = ref['id']
+                ref_policy = self.manifest.get_policy_by_id(ref_id)
+                if ref_policy is None or ref_policy.status != 'frozen':
+                    continue
+                if ref_id in gauntlet:
+                    wr = gauntlet[ref_id]['win_rate']
+                    if worst_anchor_wr is None or wr < worst_anchor_wr:
+                        worst_anchor_wr = wr
+                        worst_anchor_id = ref_id
+
+            if worst_anchor_wr is not None and worst_anchor_wr < 0.35:
+                criteria['all_anchors'] = {
+                    'passed': False,
+                    'detail': f'vs {worst_anchor_id[:20]}: {worst_anchor_wr:.0%} (threshold: >=35%)',
+                }
+            else:
+                detail = 'All anchors >= 35%'
+                if worst_anchor_wr is not None:
+                    detail = f'Worst: {worst_anchor_wr:.0%} vs {worst_anchor_id[:20]} (threshold: >=35%)'
+                criteria['all_anchors'] = {
+                    'passed': True,
+                    'detail': detail,
+                }
+
+            # Criterion 4: No catastrophic regression (<30% where prev >=50%)
             worst_regression = None
             for ref in references:
                 ref_id = ref['id']
-                if ref_id == own_best_key:
-                    continue  # Skip own-best for regression check
-
                 current_wr = gauntlet[ref_id]['win_rate']
 
                 # Find previous win rate from last round's win matrix
@@ -355,20 +400,25 @@ class League:
                 'rejection_reason': rejection_reason,
             }
 
-            symbol = '✓' if decision == 'PROMOTED' else '✗'
-            print(f'[VERIFY] {symbol} {policy_id}: {decision}')
-            if rejection_reason:
-                print(f'         Reason: {rejection_reason}')
+            log(f'[VERDICT] policy={policy_id} result={decision} reason="{rejection_reason or "all_criteria_passed"}"')
 
         return results
 
     def _get_previous_win_rate(self, policy_id, ref_id):
-        """Get win rate of policy vs ref from the most recent round's win matrix."""
+        """Get win rate of policy vs ref from the second-to-last round's win matrix.
+
+        During run_round(), Phase 1 (evaluate) appends the current eval round.
+        The regression check needs the PREVIOUS round's data (before this eval),
+        so we use rounds[-2] when available, falling back to rounds[-1] if only
+        one round exists.
+        """
         if not self.manifest.rounds:
             return None
 
-        last_round = self.manifest.rounds[-1]
-        wm = last_round.win_matrix
+        # Use second-to-last round if available (skip current eval round)
+        idx = -2 if len(self.manifest.rounds) >= 2 else -1
+        prev_round = self.manifest.rounds[idx]
+        wm = prev_round.win_matrix
         if not wm or 'labels' not in wm or 'data' not in wm:
             return None
 
@@ -417,28 +467,24 @@ class League:
                 self.manifest.update_rating_history(
                     policy_id, round_num, policy.rating, next_gen, 'PROMOTED')
 
-                print(f'[LEAGUE] PROMOTED {policy_id} to gen {next_gen} '
-                      f'(rating {policy.rating:.0f})')
+                log(f'[PROMOTE] policy={policy_id} gen={policy.generation-1}->{next_gen} rating={policy.rating:.0f}')
 
             else:  # REJECTED
                 policy.consecutive_rejections += 1
                 if policy.consecutive_rejections >= 3:
                     policy.flagged_for_review = True
-                    print(f'[LEAGUE] FLAGGED {policy_id} for review '
-                          f'(3 consecutive rejections)')
+                    log(f'[PROMOTE] policy={policy_id} result=flagged rejections={policy.consecutive_rejections}/3')
 
                 self.manifest.update_rating_history(
                     policy_id, round_num, policy.rating, policy.generation, 'REJECTED')
 
-                print(f'[LEAGUE] REJECTED {policy_id} '
-                      f'(rejections: {policy.consecutive_rejections}/3)')
+                log(f'[PROMOTE] policy={policy_id} result=rejected rejections={policy.consecutive_rejections}/3')
 
-        # Clean up candidate files
-        candidate_dir = os.path.join(self.league_dir, 'candidates')
-        if os.path.exists(candidate_dir):
-            for f in os.listdir(candidate_dir):
-                if f.endswith('_candidate.pt'):
-                    os.remove(os.path.join(candidate_dir, f))
+        # Clean up only candidate files that were processed in this round
+        for policy_id in verification_results:
+            candidate_path = candidates.get(policy_id)
+            if candidate_path and os.path.exists(candidate_path):
+                os.remove(candidate_path)
 
         self.manifest.save(self.manifest_path)
 
@@ -447,43 +493,47 @@ class League:
                   num_workers=None):
         """Execute one full league round: eval → train → verify → promote/reject → re-eval."""
         round_num = self.manifest.next_round_number()
-        print(f'\n{"="*60}')
-        print(f'  LEAGUE ROUND {round_num}')
-        print(f'{"="*60}\n')
+        log(f'[ROUND] num={round_num} event=start')
 
         # Phase 1: Evaluate
-        print(f'--- Phase 1: Evaluate ---')
+        log(f'[PHASE] round={round_num} phase=eval')
         self.evaluate(games_per_pair, num_envs, num_workers)
 
         # Phase 2: Train
-        print(f'\n--- Phase 2: Train ---')
+        log(f'[PHASE] round={round_num} phase=train')
         candidates = self.train_all(steps_per_policy, wandb_project)
 
         if not candidates:
-            print('[LEAGUE] No candidates produced, skipping verify/promote')
+            log(f'[TRAIN] event=no_candidates round={round_num}')
             return
 
         # Phase 3: Verify
-        print(f'\n--- Phase 3: Verify ---')
+        log(f'[PHASE] round={round_num} phase=verify')
         results = self.verify(candidates, games_per_ref, num_envs)
 
         # Phase 4: Promote/Reject
-        print(f'\n--- Phase 4: Promote/Reject ---')
+        log(f'[PHASE] round={round_num} phase=promote')
         self.promote_or_reject(candidates, results)
 
-        # Store verification in round record
-        if self.manifest.rounds:
-            last_round = self.manifest.rounds[-1]
-            last_round.verification = results
-            last_round.type = 'train_verify_eval'
-            last_round.training_steps = steps_per_policy
+        # Store verification as a separate round record
+        from pufferlib.ocean.dogfight.league_manifest import RoundRecord
+        verify_round = RoundRecord(
+            round=self.manifest.next_round_number(),
+            type='train_verify',
+            timestamp=datetime.now().isoformat(),
+            win_matrix={'labels': [], 'data': []},
+            ratings={},
+            verification=results,
+            training_steps=steps_per_policy,
+        )
+        self.manifest.add_round(verify_round)
 
         # Phase 5: Re-evaluate
-        print(f'\n--- Phase 5: Re-evaluate ---')
+        log(f'[PHASE] round={round_num} phase=reeval')
         self.evaluate(games_per_pair, num_envs, num_workers)
 
         self.manifest.save(self.manifest_path)
-        print(f'\n[LEAGUE] Round {round_num} complete!')
+        log(f'[ROUND] num={round_num} event=complete')
 
     def status(self):
         """Print league status summary."""
@@ -587,6 +637,9 @@ def main():
     status_parser.add_argument('--manifest', type=str, required=True)
 
     args = parser.parse_args()
+
+    if args.command in ('eval', 'train', 'verify', 'round'):
+        init_log('league/logs', f'league_{args.command}')
 
     if args.command == 'collect':
         from pufferlib.ocean.dogfight.collect_from_wandb import collect_from_wandb
