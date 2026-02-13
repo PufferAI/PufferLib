@@ -93,7 +93,7 @@ def run_matches(env, player_policy, opponent_policy, num_games, device='cuda', h
     """
     from pufferlib.ocean.dogfight import binding
 
-    results = {'wins': 0, 'losses': 0, 'draws': 0}
+    results = {'wins': 0, 'losses': 0, 'draws': 0, 'clean_fights': 0}
     games_played = 0
     max_ticks = 6000  # 2 minutes at 50Hz
 

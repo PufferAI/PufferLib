@@ -105,8 +105,10 @@ class League:
 
         for i, policy in enumerate(active):
             if policy.flagged_for_review:
-                log(f'[TRAIN] policy={policy.id} event=skipped reason=flagged')
-                continue
+                policy.flagged_for_review = False
+                policy.consecutive_rejections = 0
+                self.manifest.save(self.manifest_path)
+                log(f'[TRAIN] policy={policy.id} event=unflagged reason=auto_reset')
 
             # Check for existing candidate (crash recovery)
             candidate_dir = os.path.join(self.league_dir, 'candidates')
@@ -214,6 +216,9 @@ class League:
                 continue
 
             # Create env for this scheme (eval_spawn_mode=2 for symmetric fair spawns)
+            # report_interval=999999 prevents vec_log from being called during
+            # env.step(), so clean_fights accumulate in the C log struct across
+            # all gauntlet matches. We read them once after the gauntlet via vec_log.
             env = Dogfight(
                 num_envs=1,
                 render_mode=None,
@@ -223,8 +228,10 @@ class League:
                 eval_spawn_mode=2,
                 fixed_stage=20,
                 max_steps=6000,
+                report_interval=999999,
             )
             binding.vec_enable_opponent_override(env.c_envs, 1)
+            binding.vec_set_selfplay_active(env.c_envs, 1)
 
             # Load candidate
             candidate_policy = load_policy_from_path(
@@ -279,6 +286,14 @@ class League:
                 })
 
                 log(f'[VERIFY] policy={policy_id} vs={ref["id"]} w={result["wins"]} l={result["losses"]} d={result["draws"]} wr={win_rate*100:.1f}')
+
+            # Read accumulated clean fight stats before closing env.
+            # vec_log returns clean_fights already averaged by n (= clean_fights_count / n).
+            log_data = binding.vec_log(env.c_envs)
+            clean_fight_rate = log_data.get('clean_fights', 0.0) if log_data else 0.0
+            player_ground = log_data.get('player_ground', 0.0) if log_data else 0.0
+            opp_ground = log_data.get('opp_ground', 0.0) if log_data else 0.0
+            log(f'[VERIFY] policy={policy_id} clean_fight_rate={clean_fight_rate:.1%} player_ground={player_ground:.1%} opp_ground={opp_ground:.1%}')
 
             env.close()
 
@@ -378,6 +393,13 @@ class League:
                     'detail': 'No regression below 30% on previously-beaten refs',
                 }
 
+            # Criterion 5: Clean fight rate >= 80%
+            # Neither plane should be crashing into the ground. Clean = kill or timeout, not crash.
+            criteria['clean_fights'] = {
+                'passed': clean_fight_rate >= 0.80,
+                'detail': f'{clean_fight_rate:.0%} clean fights (threshold: >=80%)',
+            }
+
             # Decision
             all_passed = all(c['passed'] for c in criteria.values())
             decision = 'PROMOTED' if all_passed else 'REJECTED'
@@ -474,6 +496,17 @@ class League:
                 if policy.consecutive_rejections >= 3:
                     policy.flagged_for_review = True
                     log(f'[PROMOTE] policy={policy_id} result=flagged rejections={policy.consecutive_rejections}/3')
+
+                    # Reset to anchor weights for fresh start next round
+                    same_scheme = self.manifest.get_policies_by_scheme(policy.obs_scheme)
+                    own_anchor = next((r for r in same_scheme
+                                       if r.status == 'frozen' and r.source_policy == policy_id), None)
+                    if own_anchor is not None:
+                        anchor_path = os.path.join(self.league_dir, own_anchor.model_path)
+                        policy_path = os.path.join(self.league_dir, policy.model_path)
+                        if os.path.exists(anchor_path):
+                            shutil.copy2(anchor_path, policy_path)
+                            log(f'[PROMOTE] policy={policy_id} event=anchor_reset anchor={own_anchor.id}')
 
                 self.manifest.update_rating_history(
                     policy_id, round_num, policy.rating, policy.generation, 'REJECTED')

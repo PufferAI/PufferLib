@@ -416,7 +416,7 @@ class DualPerspectiveTrainer:
 
         weights = []
         for path, tag in self.league_opponent_pool:
-            wr = self.opponent_win_rates.get(tag, 0.5)
+            wr = self.opponent_win_rates.get(tag, 0.45)
             w = (1.0 - wr) ** self.pfsp_exponent
             weights.append(max(w, 1e-6))
 
@@ -470,7 +470,7 @@ class DualPerspectiveTrainer:
         # Compute PFSP weights
         weights = []
         for entry in entries:
-            wr = self.opponent_win_rates.get(entry.tag, 0.5)  # Default 50% for unseen
+            wr = self.opponent_win_rates.get(entry.tag, 0.45)  # Default: slightly favor unknowns
             w = (1.0 - wr) ** self.pfsp_exponent
             weights.append(max(w, 1e-6))  # Prevent zero weights
 
@@ -533,11 +533,11 @@ class DualPerspectiveTrainer:
         tag = self._current_opponent_tag
         if tag and tag != 'self':
             # Update per-opponent win rate
-            old_wr = self.opponent_win_rates.get(tag, 0.5)
-            new_wr = 0.95 * old_wr + 0.05 * perf
+            old_wr = self.opponent_win_rates.get(tag, 0.45)
+            new_wr = 0.80 * old_wr + 0.20 * perf
             self.opponent_win_rates[tag] = new_wr
             # Update aggregate pool perf (only from pool fights)
-            self.pool_perf = 0.95 * self.pool_perf + 0.05 * perf
+            self.pool_perf = 0.80 * self.pool_perf + 0.20 * perf
             log(f'[SELFPLAY] event=wr_update tag={tag} old={old_wr:.3f} new={new_wr:.3f} perf={perf:.3f} pool_perf={self.pool_perf:.3f}')
 
     def _check_resample_opponent(self):
@@ -580,8 +580,8 @@ class DualPerspectiveTrainer:
         self._total_checkpoints_saved += 1
         self._checkpoint_elos[tag] = self._learner_elo
 
-        # Initialize win rate at 0.5 (unknown)
-        self.opponent_win_rates[tag] = 0.5
+        # Initialize win rate at 0.45 (slightly favor unknowns)
+        self.opponent_win_rates[tag] = 0.45
 
         pool_size = len(self.checkpoint_queue.checkpoints)
         log(f'[CHECKPOINT] event=periodic tag={tag} pool_size={pool_size}')
@@ -2084,6 +2084,14 @@ def train_league_round(policy_entry, manifest, league_dir, training_steps,
     last_collapse_check_step = 0
     early_stopped = False
 
+    # Best checkpoint tracking: save state with highest pool_perf
+    BEST_CHECKPOINT_WARMUP = 10_000_000
+    best_pool_perf = -1.0
+    best_state_dict = None
+    best_step = 0
+    BEST_CHECK_INTERVAL = 5_000_000
+    last_best_check_step = 0
+
     last_logs = None
     while trainer.global_step < total_timesteps:
         if train_config['device'] == 'cuda':
@@ -2113,6 +2121,17 @@ def train_league_round(policy_entry, manifest, league_dir, training_steps,
                 if 'environment/perf' in last_logs:
                     stats['perf'] = f'{last_logs["environment/perf"]:.3f}'
             log(f'[TRAIN] event=progress ' + ' '.join(f'{k}={v}' for k, v in stats.items()))
+
+        # Best checkpoint tracking
+        if (trainer.global_step >= BEST_CHECKPOINT_WARMUP
+                and trainer.global_step - last_best_check_step >= BEST_CHECK_INTERVAL):
+            last_best_check_step = trainer.global_step
+            current_pool_perf = trainer.pool_perf
+            if current_pool_perf > best_pool_perf:
+                best_pool_perf = current_pool_perf
+                best_state_dict = copy.deepcopy(policy.state_dict())
+                best_step = trainer.global_step
+                log(f'[TRAIN] event=new_best pool_perf={best_pool_perf:.3f} step={best_step}')
 
         # Collapse detection: NaN or sustained low perf
         if last_logs:
@@ -2145,21 +2164,25 @@ def train_league_round(policy_entry, manifest, league_dir, training_steps,
         log(f'[TRAIN] event=summary policy={policy_entry.id} steps={trainer.global_step}')
         for tag, wr in sorted(trainer.opponent_win_rates.items(), key=lambda x: x[1]):
             log(f'[TRAIN] event=final_wr opponent={tag} wr={wr:.3f}')
+    log(f'[TRAIN] event=best_summary best_step={best_step} best_pool_perf={best_pool_perf:.3f} final_pool_perf={trainer.pool_perf:.3f}')
 
-    # Save candidate checkpoint
+    # Save candidate checkpoint (best weights if available, otherwise final)
     candidate_dir = os.path.join(league_dir, 'candidates')
     os.makedirs(candidate_dir, exist_ok=True)
     next_gen = policy_entry.generation + 1
     candidate_filename = f'{policy_entry.id}_gen{next_gen}_candidate.pt'
     candidate_path = os.path.join(candidate_dir, candidate_filename)
-    torch.save(policy.state_dict(), candidate_path)
+    if best_state_dict is not None:
+        torch.save(best_state_dict, candidate_path)
+        log(f'[CHECKPOINT] event=candidate policy={policy_entry.id} source=best best_step={best_step} best_pool_perf={best_pool_perf:.3f} path={candidate_path}')
+    else:
+        torch.save(policy.state_dict(), candidate_path)
+        log(f'[CHECKPOINT] event=candidate policy={policy_entry.id} source=final step={trainer.global_step} path={candidate_path}')
 
     # Cleanup
     model_path_result = trainer.close()
     if logger:
         logger.close(model_path_result)
-
-    log(f'[CHECKPOINT] event=candidate policy={policy_entry.id} path={candidate_path}')
     return candidate_path
 
 

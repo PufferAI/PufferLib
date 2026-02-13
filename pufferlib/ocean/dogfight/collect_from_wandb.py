@@ -17,11 +17,10 @@ from datetime import datetime
 import torch
 
 
-def infer_hidden_size_from_checkpoint(path):
-    """Infer hidden_size from checkpoint tensor shapes.
+def _get_encoder_shape(path):
+    """Get (hidden_size, obs_size) from checkpoint encoder weight.
 
-    The encoder weight has shape [hidden_size, obs_size], so hidden_size
-    is the first dimension.
+    The encoder weight has shape [hidden_size, obs_size].
     """
     state_dict = torch.load(path, map_location='cpu', weights_only=True)
 
@@ -32,14 +31,34 @@ def infer_hidden_size_from_checkpoint(path):
     # Look for encoder weight (both with and without prefix)
     for key in ['encoder.weight', 'policy.encoder.weight', 'module.encoder.weight']:
         if key in state_dict:
-            return state_dict[key].shape[0]
+            return state_dict[key].shape[0], state_dict[key].shape[1]
 
     # Fallback: look for any weight that could be the encoder
     for key, tensor in state_dict.items():
         if 'encoder' in key and 'weight' in key and len(tensor.shape) == 2:
-            return tensor.shape[0]
+            return tensor.shape[0], tensor.shape[1]
 
-    return 128  # Default
+    return 128, None
+
+
+# Reverse map: obs_size -> obs_scheme
+_OBS_SIZE_TO_SCHEME = {17: 0, 23: 1, 26: 2, 22: 3}
+
+
+def infer_hidden_size_from_checkpoint(path):
+    """Infer hidden_size from checkpoint tensor shapes."""
+    return _get_encoder_shape(path)[0]
+
+
+def infer_obs_scheme_from_checkpoint(path):
+    """Infer obs_scheme from checkpoint encoder input dimension.
+
+    Returns the obs_scheme int, or None if unrecognized.
+    """
+    _, obs_size = _get_encoder_shape(path)
+    if obs_size is None:
+        return None
+    return _OBS_SIZE_TO_SCHEME.get(obs_size)
 
 
 def collect_from_wandb(project, top_n, output_dir, metric='environment/strength',
@@ -144,6 +163,13 @@ def collect_from_wandb(project, top_n, output_dir, metric='environment/strength'
             hidden_size = infer_hidden_size_from_checkpoint(model_path)
             print(f'  Inferred hidden_size={hidden_size} from checkpoint')
 
+        # Verify obs_scheme from checkpoint weights (wandb config can lie)
+        actual_scheme = infer_obs_scheme_from_checkpoint(model_path)
+        if actual_scheme is not None and actual_scheme != obs_scheme:
+            print(f'  WARNING: {run.name} ({run.id}): wandb config says obs_scheme={obs_scheme} '
+                  f'but checkpoint weights are scheme {actual_scheme} — using {actual_scheme}')
+            obs_scheme = actual_scheme
+
         # Create policy ID
         policy_id = f'scheme{obs_scheme}_run_{run.id}'
 
@@ -162,12 +188,18 @@ def collect_from_wandb(project, top_n, output_dir, metric='environment/strength'
         train_config = {}
         if 'train' in config:
             for k in ['learning_rate', 'gamma', 'gae_lambda', 'vf_coef',
-                       'ent_coef', 'clip_coef', 'max_grad_norm']:
+                       'ent_coef', 'clip_coef', 'max_grad_norm',
+                       'prio_alpha', 'prio_beta0',
+                       'vtrace_rho_clip', 'vtrace_c_clip',
+                       'vf_clip_coef',
+                       'adam_beta1', 'adam_beta2', 'adam_eps']:
                 if k in config['train']:
                     train_config[k] = config['train'][k]
         if 'env' in config:
             for k in ['reward_aim_scale', 'reward_closing_scale', 'penalty_neg_g',
-                       'control_rate_penalty', 'max_steps']:
+                       'control_rate_penalty', 'max_steps',
+                       'low_altitude_threshold', 'low_altitude_penalty',
+                       'recovery_trigger_prob']:
                 if k in config['env']:
                     train_config[k] = config['env'][k]
 
