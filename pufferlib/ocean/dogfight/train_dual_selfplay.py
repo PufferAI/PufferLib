@@ -93,6 +93,10 @@ DEFAULT_OPPONENT_EPOCH_LENGTH = 5_000_000  # Steps per opponent in round-robin r
 DEFAULT_MASTERY_STREAK = 2  # Full rotations of mastery before unlocking next rank
 DEFAULT_DEBUG_TRIGGER_STEP = 500_000_000  # Start debug logging at 500M steps (0 = disabled)
 
+# Vertical merge curriculum: forced vertical spawn scenarios during self-play
+DEFAULT_VERTICAL_PROB = 0.10                # 10% of self-play episodes use forced vertical spawns
+DEFAULT_VERTICAL_RAMP_STEPS = 50_000_000    # Steps to progress through all 5 levels (0-4)
+
 
 class DualPerspectiveTrainer:
     """Trainer that collects experience from both player and opponent perspectives.
@@ -232,6 +236,10 @@ class DualPerspectiveTrainer:
         self._league_prob = league_prob
         self._antiforgetting_prob = antiforgetting_prob
 
+        # Vertical merge curriculum: tracks when self-play started for level progression
+        self._vertical_selfplay_start_step = None
+        self._vertical_last_log_step = 0
+
         log(f'[SELFPLAY] event=init min_stage={selfplay_min_stage} checkpoint_lag={checkpoint_lag} perf_threshold={perf_threshold}')
         log(f'[SELFPLAY] ratchet epoch_length={opponent_epoch_length} mastery_streak={mastery_streak}')
         log(f'[SELFPLAY] checkpoint_dir={checkpoint_dir}')
@@ -294,7 +302,32 @@ class DualPerspectiveTrainer:
         self._current_opponent_path = None
         self._current_opponent_tag = 'self'
 
+        # Start vertical merge curriculum timer
+        self._vertical_selfplay_start_step = self.trainer.global_step
+
         log(f'[SELFPLAY] event=activated stage=0')
+
+    def _update_vertical_curriculum(self):
+        """Progress vertical merge curriculum based on steps since self-play activation."""
+        if self._vertical_selfplay_start_step is None:
+            return
+
+        steps_in_selfplay = self.trainer.global_step - self._vertical_selfplay_start_step
+        ramp_steps = DEFAULT_VERTICAL_RAMP_STEPS
+
+        # Level progresses 0→4 over ramp_steps, then stays at 4
+        level = min(4, int(steps_in_selfplay / (ramp_steps / 5)))
+
+        # Constant 10% probability (no decay)
+        prob = DEFAULT_VERTICAL_PROB
+
+        from pufferlib.ocean.dogfight import binding
+        binding.vec_set_vertical_curriculum(self.driver_env.c_envs, prob, level)
+
+        # Log periodically (every ~5M steps)
+        if self.trainer.global_step - self._vertical_last_log_step >= 5_000_000:
+            self._vertical_last_log_step = self.trainer.global_step
+            log(f'[VERTICAL] level={level} prob={prob:.3f} steps_in_selfplay={steps_in_selfplay}')
 
     def _allocate_opponent_buffers(self):
         """Allocate experience buffers for opponent perspective."""
@@ -875,6 +908,9 @@ class DualPerspectiveTrainer:
             self.vecenv.buf['selfplay_active'][0] = 1
             log(f'[SELFPLAY] event=shm_flag_set selfplay_active=1')
 
+        # Start vertical merge curriculum timer
+        self._vertical_selfplay_start_step = self.trainer.global_step
+
         # Initialize ratchet rotation: start at rank 0 (stage10 = weakest)
         self._unlocked_rank = 0
         self._current_rotation_idx = 0
@@ -1188,6 +1224,9 @@ class DualPerspectiveTrainer:
 
         # Dual self-play training
         logs = self._train_dual()
+
+        # Progress vertical merge curriculum (level advancement + probability decay)
+        self._update_vertical_curriculum()
 
         if self.league_opponent_pool is not None:
             # League mode: use only resample system for opponent selection.

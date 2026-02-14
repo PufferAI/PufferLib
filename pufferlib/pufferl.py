@@ -551,6 +551,8 @@ class PuffeRL:
 
     def print_dashboard(self, clear=False, idx=[0],
             c1='[cyan]', c2='[dim default]', b1='[bright_cyan]', b2='[default]'):
+        if not sys.stdout.isatty():
+            return
         config = self.config
         sps = dist_sum(self.sps, config['device'])
         agent_steps = dist_sum(self.global_step, config['device'])

@@ -23,6 +23,7 @@ static PyObject* vec_set_eval_spawn_mode(PyObject* self, PyObject* args);
 static PyObject* vec_set_debug_step(PyObject* self, PyObject* args);
 static PyObject* vec_set_global_step(PyObject* self, PyObject* args);
 static PyObject* vec_set_selfplay_active(PyObject* self, PyObject* args);
+static PyObject* vec_set_vertical_curriculum(PyObject* self, PyObject* args);
 static PyObject* vec_get_guided_climb_state(PyObject* self, PyObject* args);
 static PyObject* vec_tick_guided_climb(PyObject* self, PyObject* args);
 static PyObject* vec_set_flight_params(PyObject* self, PyObject* args, PyObject* kwargs);
@@ -48,6 +49,7 @@ static PyObject* env_set_flight_params(PyObject* self, PyObject* args, PyObject*
     {"vec_set_debug_step", (PyCFunction)vec_set_debug_step, METH_VARARGS, "Set debug logging step threshold for late-training diagnosis"}, \
     {"vec_set_global_step", (PyCFunction)vec_set_global_step, METH_VARARGS, "Set global training step for shaping reward decay"}, \
     {"vec_set_selfplay_active", (PyCFunction)vec_set_selfplay_active, METH_VARARGS, "Enable/disable selfplay mode for recovery hijacking"}, \
+    {"vec_set_vertical_curriculum", (PyCFunction)vec_set_vertical_curriculum, METH_VARARGS, "Set vertical merge curriculum prob and level"}, \
     {"vec_get_guided_climb_state", (PyCFunction)vec_get_guided_climb_state, METH_VARARGS, "Get guided climb state for teachable opponent maneuvers"}, \
     {"vec_tick_guided_climb", (PyCFunction)vec_tick_guided_climb, METH_VARARGS, "Decrement guided climb ticks after each step"}, \
     {"vec_set_flight_params", (PyCFunction)vec_set_flight_params, METH_VARARGS | METH_KEYWORDS, "Set flight physics params for all envs"}, \
@@ -767,6 +769,36 @@ static PyObject* vec_set_selfplay_active(PyObject* self, PyObject* args) {
 
     for (int i = 0; i < vec->num_envs; i++) {
         vec->envs[i]->selfplay_active = active ? 1 : 0;
+    }
+
+    Py_RETURN_NONE;
+}
+
+// Set vertical merge curriculum probability and level for all environments
+// Args: vec_handle, prob (float 0.0-1.0), level (int 0-4)
+static PyObject* vec_set_vertical_curriculum(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+    float prob;
+    int level;
+
+    if (!PyArg_ParseTuple(args, "Ofi", &vec_arg, &prob, &level)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    if (level < 0) level = 0;
+    if (level > 4) level = 4;
+    if (prob < 0.0f) prob = 0.0f;
+    if (prob > 1.0f) prob = 1.0f;
+
+    for (int i = 0; i < vec->num_envs; i++) {
+        vec->envs[i]->vertical_spawn_prob = prob;
+        vec->envs[i]->vertical_level = level;
     }
 
     Py_RETURN_NONE;

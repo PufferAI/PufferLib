@@ -88,6 +88,12 @@ static void spawn_hard_maneuvering(struct Dogfight *env, Vec3 player_pos, Vec3 p
 static void spawn_crossing(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
 static void spawn_evasive(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
 static void spawn_autoace(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
+// Forced vertical merge spawns (self-play curriculum)
+static void spawn_vertical_apex(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
+static void spawn_vertical_past(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
+static void spawn_vertical_midclimb(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
+static void spawn_vertical_merge(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
+static void spawn_vertical_premerge(struct Dogfight *env, Vec3 player_pos, Vec3 player_vel);
 
 // Stage configuration table - single source of truth for all stage metadata
 // Updated 2026-01-25 to split SIDE_CHASE into 3 stages (SIDE_NEAR, SIDE_MID, SIDE_FAR)
@@ -380,6 +386,11 @@ typedef struct Dogfight {
     int guided_climb_ticks_remaining;  // Countdown to hand back control
     float guided_climb_elevator;       // Target elevator value for 3G climb
 
+    // Forced vertical merge curriculum (teaches vertical fighting via spawn geometry)
+    float vertical_spawn_prob;    // Probability of forced vertical spawn during self-play (0.0-1.0)
+    int vertical_level;           // Vertical sub-level: 0=apex, 1=past-vertical, 2=mid-climb, 3=merge, 4=pre-merge
+    int vertical_spawn_used;      // 1 if vertical spawn was triggered this reset (skip speed randomization)
+
     // Runtime-configurable flight physics (for parameter sweeps)
     FlightParams flight_params;
 } Dogfight;
@@ -467,6 +478,11 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     env->guided_climb_active = 0;
     env->guided_climb_ticks_remaining = 0;
     env->guided_climb_elevator = 0.5f;  // Default: moderate pull for ~3G
+
+    // Forced vertical merge curriculum: disabled by default, enabled by Python
+    env->vertical_spawn_prob = 0.0f;
+    env->vertical_level = 0;
+    env->vertical_spawn_used = 0;
 }
 
 void set_obs_highlight(Dogfight *env, int *indices, int count) {
@@ -1295,6 +1311,227 @@ static void spawn_autoace(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     autoace_init(&env->opponent_ace);
 }
 
+// ============================================================================
+// Forced Vertical Merge Spawns (self-play curriculum)
+// Teach vertical fighting by spawning scenarios along the timeline of a vertical merge.
+// Level 0 (apex) is easiest — agent just needs to roll and dive.
+// Level 4 (pre-merge) is hardest — agent must choose to pull vertical from far out.
+// ============================================================================
+
+// Level 0: "Apex Inverted"
+// Player at top of climb, inverted (belly up), ~60 m/s, 750m above opponent.
+// Opponent below in a flat turn at combat speed. Agent rolls over and dives to attack.
+static void spawn_vertical_apex(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    float merge_alt = rndf(2000, 2500);
+    float heading = rndf(0, 2.0f * (float)M_PI);
+
+    // Player: inverted at apex, 750m above, slow
+    float player_speed = rndf(55, 65);
+    float player_alt = merge_alt + 750.0f;
+    env->player.pos = vec3(player_pos.x, player_pos.y, player_alt);
+
+    // Orientation: heading + slight nose-down (5-15°) + inverted (180° roll)
+    float nose_down = rndf(5, 15) * DEG_TO_RAD;
+    Quat p_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), heading),
+                 quat_mul(quat_from_axis_angle(vec3(0, 1, 0), nose_down),
+                          quat_from_axis_angle(vec3(1, 0, 0), (float)M_PI)));
+    env->player.ori = p_ori;
+    env->player.vel = mul3(quat_rotate(p_ori, vec3(1, 0, 0)), player_speed);
+    env->player.prev_vel = env->player.vel;
+
+    // Opponent: at merge alt, in flat turn, 90-100 m/s
+    // 270° into their turn — they've been turning for ~15s, bled energy
+    float opp_speed = rndf(90, 100);
+    float opp_heading = heading + rndf(3.5f, 5.5f);  // opponent flew past in heading dir, turned ~200-315°
+    float opp_bank = rndf(45, 60) * DEG_TO_RAD;
+    float horiz_offset = rndf(200, 400);
+
+    Vec3 opp_pos = vec3(
+        player_pos.x + horiz_offset * cosf(heading),
+        player_pos.y + horiz_offset * sinf(heading),
+        merge_alt
+    );
+
+    Quat o_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), opp_heading),
+                          quat_from_axis_angle(vec3(1, 0, 0), opp_bank));
+    reset_plane(&env->opponent, opp_pos, mul3(quat_rotate(o_ori, vec3(1, 0, 0)), opp_speed));
+    env->opponent.ori = o_ori;
+
+    env->opponent_ap.mode = AP_PURSUIT_LAG;
+    autoace_init(&env->opponent_ace);
+    env->max_steps = 3000;
+}
+
+// Level 1: "Past Vertical"
+// Player past 90° pitch (100-120° from level), ~70 m/s decelerating, 400-500m above.
+// Opponent at merge alt, 120-150° into flat turn, bleeding energy.
+static void spawn_vertical_past(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    float merge_alt = rndf(2000, 2500);
+    float heading = rndf(0, 2.0f * (float)M_PI);
+
+    // Player: past vertical (100-120° pitch from level = 10-30° past straight up)
+    float player_speed = rndf(65, 75);
+    float alt_above = rndf(400, 500);
+    float player_alt = merge_alt + alt_above;
+    env->player.pos = vec3(player_pos.x, player_pos.y, player_alt);
+
+    // Pitch: -100 to -120° (negative = nose up, past vertical)
+    // This means the plane is 10-30° past straight up, going over the top
+    float pitch_deg = -rndf(100, 120);
+    float pitch = pitch_deg * DEG_TO_RAD;
+    Quat p_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), heading),
+                          quat_from_axis_angle(vec3(0, 1, 0), pitch));
+    env->player.ori = p_ori;
+    env->player.vel = mul3(quat_rotate(p_ori, vec3(1, 0, 0)), player_speed);
+    env->player.prev_vel = env->player.vel;
+
+    // Opponent: at merge alt, 700m ahead, flying away turned 45° left or right
+    float opp_speed = rndf(85, 95);
+    float turn_sign = (rand() % 2) ? 1.0f : -1.0f;
+    float opp_heading = heading + (float)M_PI + turn_sign * 45.0f * DEG_TO_RAD;
+    float opp_bank = turn_sign * 45.0f * DEG_TO_RAD;
+    float horiz_offset = 700.0f;
+
+    Vec3 opp_pos = vec3(
+        player_pos.x + horiz_offset * cosf(heading + (float)M_PI),
+        player_pos.y + horiz_offset * sinf(heading + (float)M_PI),
+        merge_alt
+    );
+
+    Quat o_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), opp_heading),
+                          quat_from_axis_angle(vec3(1, 0, 0), opp_bank));
+    reset_plane(&env->opponent, opp_pos, mul3(quat_rotate(o_ori, vec3(1, 0, 0)), opp_speed));
+    env->opponent.ori = o_ori;
+
+    env->opponent_ap.mode = AP_PURSUIT_LAG;
+    autoace_init(&env->opponent_ace);
+    env->max_steps = 3500;
+}
+
+// Level 2: "Mid-Climb"
+// Player at 55-65° nose-up, 85-95 m/s, 100-200m above merge alt.
+// Opponent at merge alt, just 30-60° into flat turn, starting to bleed speed.
+static void spawn_vertical_midclimb(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    float merge_alt = rndf(2000, 2500);
+    float heading = rndf(0, 2.0f * (float)M_PI);
+
+    // Player: mid-climb, 55-65° nose-up
+    float player_speed = rndf(85, 95);
+    float alt_above = rndf(100, 200);
+    float player_alt = merge_alt + alt_above;
+    env->player.pos = vec3(player_pos.x, player_pos.y, player_alt);
+
+    // Pitch: -55 to -65° (negative = nose up)
+    float pitch_deg = -rndf(55, 65);
+    float pitch = pitch_deg * DEG_TO_RAD;
+    Quat p_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), heading),
+                          quat_from_axis_angle(vec3(0, 1, 0), pitch));
+    env->player.ori = p_ori;
+    env->player.vel = mul3(quat_rotate(p_ori, vec3(1, 0, 0)), player_speed);
+    env->player.prev_vel = env->player.vel;
+
+    // Opponent: at merge alt, 700m ahead, flying away turned 45° left or right
+    float opp_speed = rndf(95, 105);
+    float turn_sign = (rand() % 2) ? 1.0f : -1.0f;
+    float opp_heading = heading + (float)M_PI + turn_sign * 45.0f * DEG_TO_RAD;
+    float opp_bank = turn_sign * 45.0f * DEG_TO_RAD;
+    float horiz_offset = 700.0f;
+
+    Vec3 opp_pos = vec3(
+        player_pos.x + horiz_offset * cosf(heading + (float)M_PI),
+        player_pos.y + horiz_offset * sinf(heading + (float)M_PI),
+        merge_alt
+    );
+
+    Quat o_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), opp_heading),
+                          quat_from_axis_angle(vec3(1, 0, 0), opp_bank));
+    reset_plane(&env->opponent, opp_pos, mul3(quat_rotate(o_ori, vec3(1, 0, 0)), opp_speed));
+    env->opponent.ori = o_ori;
+
+    env->opponent_ap.mode = AP_PURSUIT_LAG;
+    autoace_init(&env->opponent_ace);
+    env->max_steps = 4000;
+}
+
+// Level 3: "Merge"
+// Both nose-on, co-altitude, 400-600m apart, closing fast.
+// Player has 5-15 m/s speed advantage. Agent must discover vertical pull beats flat turn.
+static void spawn_vertical_merge(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    float merge_alt = rndf(2500, 3500);
+    float heading = rndf(0, 2.0f * (float)M_PI);
+    float dist = rndf(400, 600);
+
+    // Player: heading toward opponent, speed advantage
+    float player_speed = rndf(100, 110);
+    env->player.pos = vec3(player_pos.x, player_pos.y, merge_alt);
+    Quat p_ori = quat_from_axis_angle(vec3(0, 0, 1), heading);
+    env->player.ori = p_ori;
+    env->player.vel = mul3(quat_rotate(p_ori, vec3(1, 0, 0)), player_speed);
+    env->player.prev_vel = env->player.vel;
+
+    // Opponent: heading toward player (opposite heading), slightly slower
+    float opp_speed = player_speed - rndf(5, 15);
+    float opp_heading = heading + (float)M_PI;
+    Vec3 opp_pos = vec3(
+        player_pos.x + dist * cosf(heading),
+        player_pos.y + dist * sinf(heading),
+        merge_alt + rndf(-20, 20)  // Near co-altitude
+    );
+
+    Quat o_ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
+    reset_plane(&env->opponent, opp_pos, mul3(quat_rotate(o_ori, vec3(1, 0, 0)), opp_speed));
+    env->opponent.ori = o_ori;
+
+    env->head_on_lockout = 1;  // Disable guns until planes pass
+    Vec3 rel_pos = sub3(env->opponent.pos, env->player.pos);
+    Vec3 rel_vel = sub3(env->opponent.vel, env->player.vel);
+    env->prev_rel_dot = dot3(rel_pos, rel_vel);
+
+    env->opponent_ap.mode = AP_PURSUIT_LAG;
+    autoace_init(&env->opponent_ace);
+    env->max_steps = 5000;
+}
+
+// Level 4: "Pre-Merge"
+// 800-1200m apart, approaching. Player has 100-200m altitude advantage.
+// Agent must plan the vertical pull from further out.
+static void spawn_vertical_premerge(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    float base_alt = rndf(2500, 3500);
+    float heading = rndf(0, 2.0f * (float)M_PI);
+    float dist = rndf(800, 1200);
+    float alt_adv = rndf(100, 200);
+
+    // Player: heading toward opponent, slight altitude advantage
+    float player_speed = rndf(95, 110);
+    env->player.pos = vec3(player_pos.x, player_pos.y, base_alt + alt_adv);
+    Quat p_ori = quat_from_axis_angle(vec3(0, 0, 1), heading);
+    env->player.ori = p_ori;
+    env->player.vel = mul3(quat_rotate(p_ori, vec3(1, 0, 0)), player_speed);
+    env->player.prev_vel = env->player.vel;
+
+    // Opponent: heading toward player, at base altitude
+    float opp_speed = rndf(90, 105);
+    float opp_heading = heading + (float)M_PI;
+    Vec3 opp_pos = vec3(
+        player_pos.x + dist * cosf(heading),
+        player_pos.y + dist * sinf(heading),
+        base_alt
+    );
+
+    Quat o_ori = quat_from_axis_angle(vec3(0, 0, 1), opp_heading);
+    reset_plane(&env->opponent, opp_pos, mul3(quat_rotate(o_ori, vec3(1, 0, 0)), opp_speed));
+    env->opponent.ori = o_ori;
+
+    env->head_on_lockout = 1;
+    Vec3 rel_pos = sub3(env->opponent.pos, env->player.pos);
+    Vec3 rel_vel = sub3(env->opponent.vel, env->player.vel);
+    env->prev_rel_dot = dot3(rel_pos, rel_vel);
+
+    env->opponent_ap.mode = AP_PURSUIT_LAG;
+    autoace_init(&env->opponent_ace);
+    env->max_steps = 6000;
+}
+
 // EVAL spawn: True randomization with alternating advantages
 // Used when curriculum_randomize=1 - creates varied, fair combat scenarios
 static void spawn_eval_random(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
@@ -1980,6 +2217,8 @@ static void spawn_eval_midfight(Dogfight *env, Vec3 player_pos, Vec3 player_vel)
 
 // Master spawn function: dispatches to stage-specific spawner
 void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    env->vertical_spawn_used = 0;  // Clear flag (set by vertical spawn intercept)
+
     // For eval mode (curriculum_randomize=1), use spawn based on eval_spawn_mode
     if (env->curriculum_randomize) {
         if (env->eval_spawn_mode == 1) {
@@ -2010,6 +2249,25 @@ void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
             fflush(stderr);
         }
         env->stage = new_stage;
+    }
+
+    // Forced vertical merge: during self-play, chance to override spawn geometry
+    if (env->selfplay_active && env->vertical_spawn_prob > 0.0f
+        && env->stage == CURRICULUM_AUTOACE) {
+        if (rndf(0, 1) < env->vertical_spawn_prob) {
+            switch (env->vertical_level) {
+                case 0: spawn_vertical_apex(env, player_pos, player_vel); break;
+                case 1: spawn_vertical_past(env, player_pos, player_vel); break;
+                case 2: spawn_vertical_midclimb(env, player_pos, player_vel); break;
+                case 3: spawn_vertical_merge(env, player_pos, player_vel); break;
+                case 4: spawn_vertical_premerge(env, player_pos, player_vel); break;
+                default: spawn_vertical_apex(env, player_pos, player_vel); break;
+            }
+            env->vertical_spawn_used = 1;  // Signal c_reset to skip speed randomization
+            env->opponent_ap.prev_vz = 0.0f;
+            env->opponent_ap.prev_bank_error = 0.0f;
+            return;
+        }
     }
 
     // Use function pointer from STAGES table (replaces 18-case switch)
@@ -2167,17 +2425,20 @@ void c_reset(Dogfight *env) {
         spawn_by_curriculum(env, pos, vel);
 
         // Phase 1: Apply stage-dependent speed randomization to both planes
-        SpawnRandomization r = get_spawn_randomization(env->stage);
-        float target_speed = rndf(r.speed_min, r.speed_max);
-        float speed_ratio = target_speed / 80.0f;  // Scale from base speed
-        env->player.vel = mul3(env->player.vel, speed_ratio);
-        env->player.prev_vel = env->player.vel;  // Keep in sync
-        env->opponent.vel = mul3(env->opponent.vel, speed_ratio);
-        env->opponent.prev_vel = env->opponent.vel;
+        // Skip if vertical spawn was used (it sets specific speeds for energy state)
+        if (!env->vertical_spawn_used) {
+            SpawnRandomization r = get_spawn_randomization(env->stage);
+            float target_speed = rndf(r.speed_min, r.speed_max);
+            float speed_ratio = target_speed / 80.0f;  // Scale from base speed
+            env->player.vel = mul3(env->player.vel, speed_ratio);
+            env->player.prev_vel = env->player.vel;  // Keep in sync
+            env->opponent.vel = mul3(env->opponent.vel, speed_ratio);
+            env->opponent.prev_vel = env->opponent.vel;
 
-        // Phase 2: Apply stage-dependent throttle randomization
-        env->player.throttle = rndf(r.throttle_min, r.throttle_max);
-        env->opponent_ap.throttle = rndf(r.throttle_min, r.throttle_max);  // Autopilot throttle
+            // Phase 2: Apply stage-dependent throttle randomization
+            env->player.throttle = rndf(r.throttle_min, r.throttle_max);
+            env->opponent_ap.throttle = rndf(r.throttle_min, r.throttle_max);  // Autopilot throttle
+        }
     } else {
         spawn_legacy(env, pos, vel);
     }
