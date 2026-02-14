@@ -5,6 +5,7 @@ import torch
 
 import pufferlib
 from pufferlib.ocean.dogfight import binding
+from pufferlib.ocean.dogfight.dogfight_log import log as dogfight_log
 from pufferlib.models import Default as Policy
 
 
@@ -342,7 +343,7 @@ class Dogfight(pufferlib.PufferEnv):
                             mastery_stage = round(self._target_stage)
                             if base_stage_perf >= 0.90 and self._base_stage_eps >= self.min_eval_episodes:
                                 if mastery_stage > self._mastered_stage:
-                                    #print(f'[CURRICULUM] MASTERED: stage {mastery_stage} (perf={base_stage_perf:.3f}, eps={self._base_stage_eps:.0f})')
+                                    dogfight_log(f'[CURRICULUM] event=mastered stage={mastery_stage} perf={base_stage_perf:.3f} eps={self._base_stage_eps:.0f}')
                                     self._mastered_stage = mastery_stage
                                     # Reset base stage tracking for new level
                                     self._base_stage_kills = 0.0
@@ -371,15 +372,13 @@ class Dogfight(pufferlib.PufferEnv):
                             new_target = min(new_target, float(self.max_stage))
 
                             if abs(self._target_stage - new_target) > 0.01:
-                                #print(f'[CURRICULUM] TARGET: {self._target_stage:.2f} → {new_target:.2f} (mastered={self._mastered_stage})')
+                                dogfight_log(f'[CURRICULUM] event=target old={self._target_stage:.2f} new={new_target:.2f} mastered={self._mastered_stage}')
                                 self._target_stage = new_target
                                 self._current_stage = int(self._target_stage)
                                 binding.vec_set_curriculum_target(self.c_envs, self._target_stage)
 
                             # Simple diagnostic print
-                            #print(f'[CURRICULUM] step={total_steps} stage={self._target_stage:.2f} '
-                            #      f'base={base_stage_perf:.3f}({self._base_stage_eps:.0f}eps) '
-                            #      f'mastered={self._mastered_stage}')
+                            dogfight_log(f'[CURRICULUM] step={total_steps} stage={self._target_stage:.2f} base={base_stage_perf:.3f}({self._base_stage_eps:.0f}eps) mastered={self._mastered_stage}')
 
                             # Base stage: decay by 10% each interval (so recent perf matters more)
                             self._base_stage_kills *= 0.9

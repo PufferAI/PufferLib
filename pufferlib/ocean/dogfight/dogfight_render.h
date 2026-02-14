@@ -308,6 +308,16 @@ void c_render(Dogfight *env) {
         c_reset(env);
     }
 
+    // M key: cycle eval spawn mode (0 → 2 → 3 → 0, skip mode 1)
+    if (IsKeyPressed(KEY_M)) {
+        int mode = env->eval_spawn_mode;
+        if (mode == 0) mode = 2;
+        else if (mode == 2) mode = 3;
+        else mode = 0;
+        env->eval_spawn_mode = mode;
+        c_reset(env);
+    }
+
     handle_camera_controls(env->client);
 
     Plane *p = &env->player;
@@ -445,6 +455,12 @@ void c_render(Dogfight *env) {
     DrawText(TextFormat("Return: %.2f", env->episode_return), 10, 160, 20, WHITE);
     DrawText(TextFormat("Perf: %.1f%% | Shots: %.0f", env->log.perf / fmaxf(env->log.n, 1.0f) * 100.0f, env->log.shots_fired), 10, 190, 20, YELLOW);
     DrawText(TextFormat("Stage: %d", env->stage), 10, 220, 20, LIME);
+    {
+        const char *spawn_names[] = {"RANDOM", "OPP-ADV", "MERGE", "MIDFIGHT"};
+        int smode = env->eval_spawn_mode;
+        const char *sname = (smode >= 0 && smode <= 3) ? spawn_names[smode] : "???";
+        DrawText(TextFormat("Spawn: %s", sname), 10, 250, 20, YELLOW);
+    }
 
     // Show last round result prominently for first 100 ticks
     if (env->tick < 100 && env->last_death_reason != DEATH_NONE) {
@@ -471,7 +487,7 @@ void c_render(Dogfight *env) {
 
     draw_obs_monitor(env);
 
-    DrawText("Mouse drag: Orbit | Scroll: Zoom | R: Reset | ESC: Exit", 10, (int)env->client->height - 30, 16, GRAY);
+    DrawText("Mouse drag: Orbit | Scroll: Zoom | R: Reset | M: Spawn mode | ESC: Exit", 10, (int)env->client->height - 30, 16, GRAY);
 
     EndDrawing();
 }

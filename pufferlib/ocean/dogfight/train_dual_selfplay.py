@@ -1726,7 +1726,7 @@ def sweep_dual(env_name='puffer_dogfight', args=None):
         args['train']['total_timesteps'] = total_timesteps
 
 
-def eval_selfplay(env_name, args, player_path, opponent_path, load_id=None):
+def eval_selfplay(env_name, args, player_path, opponent_path, load_id=None, eval_spawn_mode=2):
     """Evaluate player policy against opponent checkpoint with rendering.
 
     This is like pufferl.eval() but with dual policy inference:
@@ -1751,7 +1751,9 @@ def eval_selfplay(env_name, args, player_path, opponent_path, load_id=None):
 
     # Enable eval spawn mode: truly random positions, angles, alternating advantages
     args['env']['curriculum_randomize'] = 1
-    print(f'[EVAL-SELFPLAY] Enabled curriculum_randomize for varied spawn positions')
+    args['env']['eval_spawn_mode'] = eval_spawn_mode
+    spawn_names = {0: 'random', 1: 'opp-advantage', 2: 'merge', 3: 'midfight'}
+    print(f'[EVAL-SELFPLAY] Enabled curriculum_randomize, spawn mode={eval_spawn_mode} ({spawn_names.get(eval_spawn_mode, "unknown")})')
 
     # Create environment
     vecenv = pufferl.load_env(env_name, args)
@@ -1832,6 +1834,11 @@ def eval_selfplay(env_name, args, player_path, opponent_path, load_id=None):
     fps = args.get('fps', 15)
     gif_path = args.get('gif_path', 'selfplay_eval.gif')
 
+    # Win/loss/draw tracking
+    player_wins = 0
+    opponent_wins = 0
+    draws = 0
+
     print(f'[EVAL-SELFPLAY] Starting evaluation loop (press ESC to exit)')
     print(f'[EVAL-SELFPLAY] Player: {player_path or load_id}')
     print(f'[EVAL-SELFPLAY] Opponent: {opponent_path}')
@@ -1905,12 +1912,28 @@ def eval_selfplay(env_name, args, player_path, opponent_path, load_id=None):
         # Check for episode end
         if terminated.any() or truncated.any():
             episode_count += 1
-            if episode_count % 10 == 0:
-                print(f'[EVAL-SELFPLAY] Episode {episode_count} completed (step {step_count})')
 
-            # Reset with time-based seed for variety in next episode
-            seed = int(time.time_ns() % 2**31)
-            ob, info = vecenv.reset(seed=seed)
+            # Determine outcome from reward: +1 = player kill, -1 = player died, else timeout
+            ep_reward = float(reward.flatten()[0]) if hasattr(reward, 'flatten') else float(reward)
+            if ep_reward > 0.5:
+                player_wins += 1
+                outcome = 'PLAYER WINS'
+            elif ep_reward < -0.5:
+                opponent_wins += 1
+                outcome = 'OPPONENT WINS'
+            else:
+                draws += 1
+                outcome = 'DRAW/TIMEOUT'
+
+            total = player_wins + opponent_wins + draws
+            p_pct = 100 * player_wins / total
+            o_pct = 100 * opponent_wins / total
+            d_pct = 100 * draws / total
+            print(f'[EVAL] Ep {episode_count}: {outcome} | P:{player_wins} O:{opponent_wins} D:{draws} ({p_pct:.0f}%/{o_pct:.0f}%/{d_pct:.0f}%)')
+
+            # Don't call vecenv.reset() here — c_step() already calls c_reset()
+            # internally. A second reset would overwrite last_winner/last_death_reason,
+            # which the HUD uses to display "PLAYER WINS" / "OPPONENT WINS".
 
             # Reset LSTM states for fresh episode
             if args['train']['use_rnn']:
@@ -2199,6 +2222,7 @@ def main():
         player_path = None
         load_id = None
         no_rnn = False
+        eval_spawn_mode = 2  # Default to merge (symmetric, fair)
 
         new_argv = [sys.argv[0]]
         i = 1
@@ -2244,6 +2268,17 @@ def main():
                 i += 1
                 continue
 
+            # --eval-spawn-mode <0|1|2|3>
+            if arg == '--eval-spawn-mode':
+                if i + 1 < len(sys.argv):
+                    eval_spawn_mode = int(sys.argv[i + 1])
+                    i += 2
+                    continue
+            elif arg.startswith('--eval-spawn-mode='):
+                eval_spawn_mode = int(arg.split('=', 1)[1])
+                i += 1
+                continue
+
             new_argv.append(arg)
             i += 1
 
@@ -2269,12 +2304,14 @@ def main():
             args['train']['use_rnn'] = False
             print(f'[EVAL-SELFPLAY] RNN disabled (--no-rnn flag)')
 
+        spawn_names = {0: 'random', 1: 'opp-advantage', 2: 'merge', 3: 'midfight'}
         print(f'[EVAL-SELFPLAY] Starting eval mode')
         print(f'[EVAL-SELFPLAY] Player model: {player_path or load_id}')
         print(f'[EVAL-SELFPLAY] Opponent checkpoint: {opponent_checkpoint}')
+        print(f'[EVAL-SELFPLAY] Spawn mode: {eval_spawn_mode} ({spawn_names.get(eval_spawn_mode, "unknown")})')
 
         # Run eval
-        eval_selfplay(env_name, args, player_path, opponent_checkpoint, load_id)
+        eval_selfplay(env_name, args, player_path, opponent_checkpoint, load_id, eval_spawn_mode)
         return
 
     # Check for 'sweep' subcommand

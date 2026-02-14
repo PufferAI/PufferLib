@@ -1692,6 +1692,292 @@ static void spawn_eval_merge(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     }
 }
 
+static void spawn_eval_midfight(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
+    float speed = norm3(player_vel);
+    if (speed < 70.0f) speed = 80.0f;
+
+    float base_alt = rndf(2500, 3500);
+    float theta = rndf(0, 2.0f * M_PI);  // merge axis heading
+
+    // Tiny asymmetric perturbations
+    float pos_jitter = rndf(-5, 5);
+    float alt_jitter = rndf(-5, 5);
+    float speed_jitter = rndf(-3, 3);
+    float angle_jitter = rndf(-0.035f, 0.035f);  // ~±2°
+
+    // Alternate who gets which role
+    int swap_roles = (env->total_episodes % 2);
+
+    int scenario = (int)(rndf(0, 4.999f));  // 0-4
+
+    if (scenario == 0) {
+        // === Rolling Scissors ===
+        // Crossing paths, hard banks opposite directions, both pulling up
+        float half_dist = rndf(75, 125);
+        float bank = rndf(60, 80) * DEG_TO_RAD;
+        float pitch = rndf(15, 25) * DEG_TO_RAD;
+        float scr_speed = rndf(65, 75);
+        float p_speed = scr_speed + speed_jitter;
+        float o_speed = scr_speed - speed_jitter;
+
+        // Crossing angle: ~60-90° off from head-on
+        float cross_offset = rndf(30, 45) * DEG_TO_RAD;
+        float p_heading = theta + cross_offset + angle_jitter;
+        float o_heading = theta + (float)M_PI - cross_offset - angle_jitter;
+
+        Vec3 p_pos = vec3(
+            player_pos.x - half_dist * cosf(theta) + pos_jitter,
+            player_pos.y - half_dist * sinf(theta),
+            clampf(base_alt - alt_jitter, 500, 4500)
+        );
+        Vec3 opp_pos = vec3(
+            player_pos.x + half_dist * cosf(theta) - pos_jitter,
+            player_pos.y + half_dist * sinf(theta),
+            clampf(base_alt + alt_jitter, 500, 4500)
+        );
+
+        // Player banks left, opponent banks right (crossing)
+        float p_bank = swap_roles ? bank : -bank;
+        float o_bank = swap_roles ? -bank : bank;
+
+        Quat p_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), p_heading),
+                     quat_mul(quat_from_axis_angle(vec3(0, 1, 0), -pitch),
+                              quat_from_axis_angle(vec3(1, 0, 0), p_bank)));
+        Quat o_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), o_heading),
+                     quat_mul(quat_from_axis_angle(vec3(0, 1, 0), -pitch),
+                              quat_from_axis_angle(vec3(1, 0, 0), o_bank)));
+
+        env->player.pos = p_pos;
+        env->player.ori = p_ori;
+        env->player.vel = mul3(quat_rotate(p_ori, vec3(1, 0, 0)), p_speed);
+
+        reset_plane(&env->opponent, opp_pos, mul3(quat_rotate(o_ori, vec3(1, 0, 0)), o_speed));
+        env->opponent.ori = o_ori;
+
+        env->head_on_lockout = 1;
+        Vec3 rel_pos_sc0 = sub3(env->opponent.pos, env->player.pos);
+        Vec3 rel_vel_sc0 = sub3(env->opponent.vel, env->player.vel);
+        env->prev_rel_dot = dot3(rel_pos_sc0, rel_vel_sc0);
+
+        if (DEBUG >= 1)
+            fprintf(stderr, "[EVAL-MIDFIGHT] scenario=ROLLING_SCISSORS dist=%.0fm alt=%.0fm lockout=1\n",
+                    half_dist * 2, base_alt);
+
+    } else if (scenario == 1) {
+        // === High Yo-Yo ===
+        // Attacker above pulling down, defender turning hard below
+        float alt_sep = rndf(300, 500);
+        float horiz_dist = rndf(200, 400);
+        float atk_pitch = -rndf(25, 35) * DEG_TO_RAD;  // nose down
+        float atk_bank = rndf(30, 50) * DEG_TO_RAD;
+        float def_bank = rndf(50, 65) * DEG_TO_RAD;
+        float atk_speed = rndf(85, 95);
+        float def_speed = rndf(70, 80);
+
+        Vec3 hi_pos = vec3(
+            player_pos.x - horiz_dist * cosf(theta) + pos_jitter,
+            player_pos.y - horiz_dist * sinf(theta),
+            clampf(base_alt + alt_sep / 2 - alt_jitter, 500, 4500)
+        );
+        Vec3 lo_pos = vec3(
+            player_pos.x + horiz_dist * cosf(theta) - pos_jitter,
+            player_pos.y + horiz_dist * sinf(theta),
+            clampf(base_alt - alt_sep / 2 + alt_jitter, 500, 4500)
+        );
+
+        // Attacker: nose down + banked, heading toward defender
+        float atk_heading = theta + angle_jitter;
+        Quat atk_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), atk_heading),
+                       quat_mul(quat_from_axis_angle(vec3(0, 1, 0), -atk_pitch),
+                                quat_from_axis_angle(vec3(1, 0, 0), -atk_bank)));
+
+        // Defender: level, hard bank turn (perpendicular to merge axis)
+        float def_heading = theta + (float)M_PI / 2 + angle_jitter;
+        Quat def_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), def_heading),
+                                quat_from_axis_angle(vec3(1, 0, 0), -def_bank));
+
+        Vec3 *p_pos_ptr, *o_pos_ptr;
+        Quat p_ori, o_ori;
+        float p_speed, o_speed;
+        if (swap_roles) {
+            p_pos_ptr = &lo_pos; o_pos_ptr = &hi_pos;
+            p_ori = def_ori; o_ori = atk_ori;
+            p_speed = def_speed + speed_jitter; o_speed = atk_speed - speed_jitter;
+        } else {
+            p_pos_ptr = &hi_pos; o_pos_ptr = &lo_pos;
+            p_ori = atk_ori; o_ori = def_ori;
+            p_speed = atk_speed + speed_jitter; o_speed = def_speed - speed_jitter;
+        }
+
+        env->player.pos = *p_pos_ptr;
+        env->player.ori = p_ori;
+        env->player.vel = mul3(quat_rotate(p_ori, vec3(1, 0, 0)), p_speed);
+
+        reset_plane(&env->opponent, *o_pos_ptr, mul3(quat_rotate(o_ori, vec3(1, 0, 0)), o_speed));
+        env->opponent.ori = o_ori;
+
+        env->head_on_lockout = 0;
+        env->prev_rel_dot = 0.0f;
+
+        if (DEBUG >= 1)
+            fprintf(stderr, "[EVAL-MIDFIGHT] scenario=HIGH_YOYO alt_sep=%.0fm horiz=%.0fm\n",
+                    alt_sep, horiz_dist);
+
+    } else if (scenario == 2) {
+        // === Overshoot ===
+        // One just overshot, scrambling to re-engage. Other reversing behind.
+        float along_dist = rndf(150, 250);  // how far ahead the overshooting plane is
+        float behind_dist = rndf(100, 200);
+        float overshoot_speed = rndf(95, 110);
+        float reversal_speed = rndf(70, 80);
+        float reversal_bank = rndf(55, 70) * DEG_TO_RAD;
+
+        // Overshooting plane: flying straight past, wings level
+        float fwd_heading = theta + angle_jitter;
+        Vec3 fwd_pos = vec3(
+            player_pos.x + along_dist * cosf(theta) + pos_jitter,
+            player_pos.y + along_dist * sinf(theta),
+            clampf(base_alt - alt_jitter, 500, 4500)
+        );
+        Quat fwd_ori = quat_from_axis_angle(vec3(0, 0, 1), fwd_heading);
+        Vec3 fwd_vel = vec3(overshoot_speed * cosf(fwd_heading), overshoot_speed * sinf(fwd_heading), 0);
+
+        // Reversing plane: behind, in hard bank reversal turn
+        float rev_heading = theta + rndf(0.35f, 0.70f);  // ~20-40° off from straight chase
+        Vec3 rev_pos = vec3(
+            player_pos.x - behind_dist * cosf(theta) - pos_jitter,
+            player_pos.y - behind_dist * sinf(theta),
+            clampf(base_alt + alt_jitter, 500, 4500)
+        );
+        Quat rev_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), rev_heading),
+                                quat_from_axis_angle(vec3(1, 0, 0), -reversal_bank));
+        Vec3 rev_vel = mul3(quat_rotate(rev_ori, vec3(1, 0, 0)), reversal_speed);
+
+        if (swap_roles) {
+            env->player.pos = fwd_pos;
+            env->player.ori = fwd_ori;
+            env->player.vel = fwd_vel;
+            reset_plane(&env->opponent, rev_pos, rev_vel);
+            env->opponent.ori = rev_ori;
+        } else {
+            env->player.pos = rev_pos;
+            env->player.ori = rev_ori;
+            env->player.vel = rev_vel;
+            reset_plane(&env->opponent, fwd_pos, fwd_vel);
+            env->opponent.ori = fwd_ori;
+        }
+
+        env->head_on_lockout = 0;
+        env->prev_rel_dot = 0.0f;
+
+        if (DEBUG >= 1)
+            fprintf(stderr, "[EVAL-MIDFIGHT] scenario=OVERSHOOT fwd=%.0fm behind=%.0fm\n",
+                    along_dist, behind_dist);
+
+    } else if (scenario == 3) {
+        // === Vertical Fight ===
+        // Both climbing in a vertical rolling engagement
+        float half_dist = rndf(100, 150);
+        float pitch = rndf(50, 70) * DEG_TO_RAD;
+        float bank = rndf(25, 35) * DEG_TO_RAD;
+        float climb_speed = rndf(75, 85);
+        float p_speed = climb_speed + speed_jitter;
+        float o_speed = climb_speed - speed_jitter;
+
+        Vec3 p_pos = vec3(
+            player_pos.x - half_dist * cosf(theta) + pos_jitter,
+            player_pos.y - half_dist * sinf(theta),
+            clampf(base_alt - alt_jitter, 500, 4500)
+        );
+        Vec3 opp_pos = vec3(
+            player_pos.x + half_dist * cosf(theta) - pos_jitter,
+            player_pos.y + half_dist * sinf(theta),
+            clampf(base_alt + alt_jitter, 500, 4500)
+        );
+
+        // Both climbing, banked opposite directions
+        float p_heading = theta + rndf(-0.17f, 0.17f) + angle_jitter;  // ~±10° heading spread
+        float o_heading = theta + (float)M_PI + rndf(-0.17f, 0.17f) - angle_jitter;
+
+        float p_bank = swap_roles ? bank : -bank;
+        float o_bank = swap_roles ? -bank : bank;
+
+        Quat p_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), p_heading),
+                     quat_mul(quat_from_axis_angle(vec3(0, 1, 0), -pitch),
+                              quat_from_axis_angle(vec3(1, 0, 0), p_bank)));
+        Quat o_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), o_heading),
+                     quat_mul(quat_from_axis_angle(vec3(0, 1, 0), -pitch),
+                              quat_from_axis_angle(vec3(1, 0, 0), o_bank)));
+
+        env->player.pos = p_pos;
+        env->player.ori = p_ori;
+        env->player.vel = mul3(quat_rotate(p_ori, vec3(1, 0, 0)), p_speed);
+
+        reset_plane(&env->opponent, opp_pos, mul3(quat_rotate(o_ori, vec3(1, 0, 0)), o_speed));
+        env->opponent.ori = o_ori;
+
+        env->head_on_lockout = 1;
+        Vec3 rel_pos_sc3 = sub3(env->opponent.pos, env->player.pos);
+        Vec3 rel_vel_sc3 = sub3(env->opponent.vel, env->player.vel);
+        env->prev_rel_dot = dot3(rel_pos_sc3, rel_vel_sc3);
+
+        if (DEBUG >= 1)
+            fprintf(stderr, "[EVAL-MIDFIGHT] scenario=VERTICAL pitch=%.0f° bank=%.0f° dist=%.0fm lockout=1\n",
+                    pitch * RAD_TO_DEG, bank * RAD_TO_DEG, half_dist * 2);
+
+    } else {
+        // === Split-S Entry ===
+        // One inverted pulling through, other pursuing
+        float sep_dist = rndf(300, 400);
+        float inv_speed = rndf(80, 90);
+        float pursue_speed = rndf(75, 85);
+        float inv_pitch = rndf(5, 15) * DEG_TO_RAD;  // slightly nose-down
+        float pursue_bank = rndf(25, 35) * DEG_TO_RAD;
+
+        // Inverted plane: ahead, upside down, slightly nose-down
+        float inv_heading = theta + angle_jitter;
+        Vec3 inv_pos = vec3(
+            player_pos.x + pos_jitter,
+            player_pos.y,
+            clampf(base_alt - alt_jitter, 500, 4500)
+        );
+        Quat inv_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), inv_heading),
+                       quat_mul(quat_from_axis_angle(vec3(1, 0, 0), (float)M_PI),  // inverted
+                                quat_from_axis_angle(vec3(0, 1, 0), inv_pitch)));   // nose-down when inverted
+
+        // Pursuer: behind, banked, chasing
+        float pursue_heading = theta - angle_jitter;
+        Vec3 pursue_pos = vec3(
+            player_pos.x - sep_dist * cosf(theta) - pos_jitter,
+            player_pos.y - sep_dist * sinf(theta),
+            clampf(base_alt + alt_jitter, 500, 4500)
+        );
+        Quat pursue_ori = quat_mul(quat_from_axis_angle(vec3(0, 0, 1), pursue_heading),
+                                   quat_from_axis_angle(vec3(1, 0, 0), -pursue_bank));
+
+        if (swap_roles) {
+            env->player.pos = pursue_pos;
+            env->player.ori = pursue_ori;
+            env->player.vel = mul3(quat_rotate(pursue_ori, vec3(1, 0, 0)), pursue_speed + speed_jitter);
+            reset_plane(&env->opponent, inv_pos, mul3(quat_rotate(inv_ori, vec3(1, 0, 0)), inv_speed - speed_jitter));
+            env->opponent.ori = inv_ori;
+        } else {
+            env->player.pos = inv_pos;
+            env->player.ori = inv_ori;
+            env->player.vel = mul3(quat_rotate(inv_ori, vec3(1, 0, 0)), inv_speed + speed_jitter);
+            reset_plane(&env->opponent, pursue_pos, mul3(quat_rotate(pursue_ori, vec3(1, 0, 0)), pursue_speed - speed_jitter));
+            env->opponent.ori = pursue_ori;
+        }
+
+        env->head_on_lockout = 0;
+        env->prev_rel_dot = 0.0f;
+
+        if (DEBUG >= 1)
+            fprintf(stderr, "[EVAL-MIDFIGHT] scenario=SPLIT_S sep=%.0fm alt=%.0fm\n",
+                    sep_dist, base_alt);
+    }
+}
+
 // Master spawn function: dispatches to stage-specific spawner
 void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
     // For eval mode (curriculum_randomize=1), use spawn based on eval_spawn_mode
@@ -1702,6 +1988,9 @@ void spawn_by_curriculum(Dogfight *env, Vec3 player_pos, Vec3 player_vel) {
         } else if (env->eval_spawn_mode == 2) {
             // Mode 2: symmetric merge - fair Elo evaluation
             spawn_eval_merge(env, player_pos, player_vel);
+        } else if (env->eval_spawn_mode == 3) {
+            // Mode 3: mid-fight scenarios - banked/pitched engaged orientations
+            spawn_eval_midfight(env, player_pos, player_vel);
         } else {
             // Mode 0 (default): random spawn
             spawn_eval_random(env, player_pos, player_vel);
