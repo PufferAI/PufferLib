@@ -826,6 +826,129 @@ class Drive(nn.Module):
         value = self.value_fn(flat_hidden)
         return action, value
 
+class RunningNorm(nn.Module):
+    '''Running mean/std observation normalization (Chen et al. 2023).
+    Tracks statistics during training, normalizes to zero mean / unit variance.'''
+    def __init__(self, shape, clip=10.0):
+        super().__init__()
+        self.register_buffer('mean', torch.zeros(shape))
+        self.register_buffer('var', torch.ones(shape))
+        self.register_buffer('count', torch.tensor(1e-4))
+        self.clip = clip
+
+    def update(self, x):
+        batch_mean = x.mean(dim=0)
+        batch_var = x.var(dim=0, unbiased=False)
+        batch_count = x.shape[0]
+        delta = batch_mean - self.mean
+        total = self.count + batch_count
+        self.mean = self.mean + delta * batch_count / total
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        m2 = m_a + m_b + delta**2 * self.count * batch_count / total
+        self.var = m2 / total
+        self.count = total
+
+    def forward(self, x):
+        if self.training:
+            self.update(x.detach())
+        return torch.clamp((x - self.mean) / torch.sqrt(self.var + 1e-8),
+                           -self.clip, self.clip)
+
+
+class RunningReturnNorm(nn.Module):
+    '''Return normalization (Chen et al. 2023, Eq. in paper).
+    Tracks running mean/var of returns across rollouts.
+    Normalizes: Ĝ = (G - μ(G)) / σ(G)'''
+    def __init__(self, init_var=2.25e16):
+        super().__init__()
+        self.register_buffer('mean', torch.zeros(1))
+        self.register_buffer('var', torch.tensor(float(init_var)))
+        self.register_buffer('count', torch.tensor(1e-4))
+
+    def update(self, returns):
+        batch_mean = returns.mean()
+        batch_var = returns.var()
+        batch_count = returns.numel()
+        delta = batch_mean - self.mean
+        total = self.count + batch_count
+        self.mean = self.mean + delta * batch_count / total
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        m2 = m_a + m_b + delta**2 * self.count * batch_count / total
+        self.var = m2 / total
+        self.count = total
+
+    def normalize(self, returns):
+        return (returns - self.mean) / torch.sqrt(self.var + 1e-8)
+
+
+class OrbitalDock(pufferlib.models.Default):
+    '''Separate actor/critic for orbital docking (STELLAR / Chen et al. 2023).
+
+    Actor: encoder -> action mean (MLP, no LSTM)
+    Critic: independent encoder -> value (no shared weights with actor)
+    Running observation normalization applied to both paths.
+    Return normalization across rollouts (paper Eq. Ĝ_T).
+    Obs: 6 raw LVLH state values [x, y, z, vx, vy, vz].
+    '''
+    def __init__(self, env, hidden_size=128, **kwargs):
+        super().__init__(env, hidden_size=hidden_size, **kwargs)
+
+        num_obs = int(np.prod(env.single_observation_space.shape))
+
+        # Fix actor encoder to 2 layers (Default only creates 1 layer)
+        self.encoder = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(num_obs, hidden_size)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.GELU(),
+        )
+
+        # Running observation normalization (SB3 VecNormalize: norm_obs=True)
+        self.obs_norm = RunningNorm(num_obs, clip=10.0)
+
+        # Return normalization (Chen et al. paper)
+        self.return_norm = RunningReturnNorm()
+
+        # Separate critic network (independent of actor encoder)
+        self.critic_encoder = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(num_obs, hidden_size)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.GELU(),
+        )
+        self.critic_value = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, 1), std=1)
+
+        if self.is_continuous:
+            nn.init.constant_(self.decoder_logstd, -1.0)
+
+    def encode_observations(self, observations, state=None):
+        batch_size = observations.shape[0]
+        obs_flat = observations.view(batch_size, -1).float()
+        # Normalize observations (running mean/std)
+        obs_normed = self.obs_norm(obs_flat)
+        self._last_obs_normed = obs_normed
+        # Actor encoder
+        return self.encoder(obs_normed)
+
+    def decode_actions(self, hidden):
+        if self.is_continuous:
+            mean = self.decoder_mean(hidden)
+            logstd = self.decoder_logstd.expand_as(mean)
+            std = torch.exp(logstd)
+            logits = torch.distributions.Normal(mean, std)
+        else:
+            logits = self.decoder(hidden)
+
+        # Critic: own encoder on normalized observations (no shared weights)
+        critic_hidden = self.critic_encoder(self._last_obs_normed)
+        values = self.critic_value(critic_hidden)
+
+        return logits, values
+
+
 class Drone(nn.Module):
     ''' Drone policy. Flattens obs and applies a linear layer.
     '''
