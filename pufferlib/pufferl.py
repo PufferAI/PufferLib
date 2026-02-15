@@ -880,6 +880,7 @@ class WandbLogger:
             resume=resume,
             config=args,
             tags = [args['tag']] if args['tag'] is not None else [],
+            settings=wandb.Settings(console="off"),
         )
         self.wandb = wandb
         self.run_id = wandb.run.id

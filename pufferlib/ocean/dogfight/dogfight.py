@@ -83,6 +83,8 @@ class Dogfight(pufferlib.PufferEnv):
         recovery_trigger_prob=0.1,
         recovery_speed_threshold=70.0,
         recovery_bank_deg=60.0,
+        # Consumed by train_dual_selfplay.py, accepted here to avoid unknown-kwarg error
+        vertical_spawn_prob=0.10,
     ):
         # Observation size depends on scheme
         obs_size = OBS_SIZES.get(obs_scheme, 19)

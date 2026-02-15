@@ -127,6 +127,7 @@ class DualPerspectiveTrainer:
                  checkpoint_dir=None,
                  run_id=None,
                  skip_curriculum=False,
+                 vertical_prob=DEFAULT_VERTICAL_PROB,
                  league_opponent_pool=None,
                  antiforgetting_pool=None,
                  self_play_prob=None,
@@ -237,6 +238,7 @@ class DualPerspectiveTrainer:
         self._antiforgetting_prob = antiforgetting_prob
 
         # Vertical merge curriculum: tracks when self-play started for level progression
+        self._vertical_prob = vertical_prob
         self._vertical_selfplay_start_step = None
         self._vertical_last_log_step = 0
 
@@ -318,8 +320,8 @@ class DualPerspectiveTrainer:
         # Level progresses 0→4 over ramp_steps, then stays at 4
         level = min(4, int(steps_in_selfplay / (ramp_steps / 5)))
 
-        # Constant 10% probability (no decay)
-        prob = DEFAULT_VERTICAL_PROB
+        # Constant probability from config (no decay)
+        prob = self._vertical_prob
 
         from pufferlib.ocean.dogfight import binding
         binding.vec_set_vertical_curriculum(self.driver_env.c_envs, prob, level)
@@ -1616,6 +1618,7 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
     pool_checkpoint_interval = int(selfplay_args.get('pool_checkpoint_interval', DEFAULT_POOL_CHECKPOINT_INTERVAL))
     opponent_epoch_length = int(selfplay_args.get('opponent_epoch_length', DEFAULT_OPPONENT_EPOCH_LENGTH))
     mastery_streak = int(selfplay_args.get('mastery_streak', DEFAULT_MASTERY_STREAK))
+    vertical_spawn_prob = float(args.get('env', {}).get('vertical_spawn_prob', DEFAULT_VERTICAL_PROB))
 
     # Create dual-perspective trainer with checkpoint queue
     train_config = {**args['train'], 'env': env_name}
@@ -1633,6 +1636,7 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
         pool_checkpoint_interval=pool_checkpoint_interval,
         opponent_epoch_length=opponent_epoch_length,
         mastery_streak=mastery_streak,
+        vertical_prob=vertical_spawn_prob,
         checkpoint_dir=checkpoint_dir,
         run_id=run_id
     )
