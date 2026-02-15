@@ -86,32 +86,16 @@ typedef struct {
     double init_x_center, init_y_center, init_z_center;
     double init_x_range, init_y_range, init_z_range;
 
-    // RNG state
-    unsigned int rng_state;
-
     // Render client (NULL if not rendering)
     Client *client;
 } OrbitalDock;
 
-// ============================================================================
-// Random Number Generation (xorshift32)
-// ============================================================================
-
-static inline unsigned int xorshift32(unsigned int* state) {
-    unsigned int x = *state;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    *state = x;
-    return x;
+static inline double rndf(void) {
+    return (double)rand() / (double)RAND_MAX;
 }
 
-static inline double rndf(OrbitalDock* env) {
-    return (double)xorshift32(&env->rng_state) / (double)0xFFFFFFFF;
-}
-
-static inline double rndf_range(OrbitalDock* env, double min, double max) {
-    return min + rndf(env) * (max - min);
+static inline double rndf_range(double min, double max) {
+    return min + rndf() * (max - min);
 }
 
 // ============================================================================
@@ -226,27 +210,23 @@ static void compute_observations(OrbitalDock* env) {
 void c_reset(OrbitalDock* env) {
     env->step_count = 0;
 
-    // Initialize xorshift RNG
-    env->rng_state = (unsigned int)rand() ^ ((unsigned int)rand() << 15);
-    if (env->rng_state == 0) env->rng_state = 1;
-
     // Compute mean motion
     env->n = sqrt(env->mu / (env->station_radius * env->station_radius * env->station_radius));
 
-    // STELLAR V-bar approach initial conditions
+    // V-bar approach initial conditions
     // Position: [0, 800, 0] +/- [400, 300, 400]
-    double x_off = rndf_range(env, -1.0, 1.0) * env->init_x_range;
-    double y_off = rndf_range(env, -1.0, 1.0) * env->init_y_range;
-    double z_off = rndf_range(env, -1.0, 1.0) * env->init_z_range;
+    double x_off = rndf_range(-1.0, 1.0) * env->init_x_range;
+    double y_off = rndf_range(-1.0, 1.0) * env->init_y_range;
+    double z_off = rndf_range(-1.0, 1.0) * env->init_z_range;
 
     env->x = env->init_x_center + x_off;
     env->y = env->init_y_center + y_off;
     env->z = env->init_z_center + z_off;
 
-    // Velocity: random in ~[-2, 2] m/s per axis (STELLAR: randint(-2,2) * rand())
-    env->vx = rndf_range(env, -2.0, 2.0);
-    env->vy = rndf_range(env, -2.0, 2.0);
-    env->vz = rndf_range(env, -2.0, 2.0);
+    // Velocity: random in ~[-2, 2] m/s per axis
+    env->vx = rndf_range(-2.0, 2.0);
+    env->vy = rndf_range(-2.0, 2.0);
+    env->vz = rndf_range(-2.0, 2.0);
 
     // Initialize fuel
     env->fuel = env->fuel_budget;
