@@ -70,7 +70,7 @@ typedef struct {
     double dt;                  // Timestep (s)
     double fuel_budget;         // Total delta-v budget (m/s)
 
-    // Docking conditions (STELLAR: dock at [0, 60, 0])
+    // Docking conditions (dock at [0, 60, 0])
     double dock_x, dock_y, dock_z;  // Docking point in LVLH
     double dock_dist;           // Docking distance threshold (m)
     double dock_speed;          // Final docking speed threshold (m/s)
@@ -78,11 +78,11 @@ typedef struct {
     int anneal_steps;           // Per-env steps to anneal dock_speed (0 = no annealing)
     int global_step;            // Persistent step counter (never resets)
 
-    // LOS cone (STELLAR: 60 deg total, 800m extent along +y)
+    // LOS cone (60 deg total, 800m extent along +y)
     double los_half_angle;      // Half-angle in radians
     double los_extent;          // Max extent along y-axis (m)
 
-    // Initial condition ranges (STELLAR V-bar approach)
+    // Initial condition ranges
     double init_x_center, init_y_center, init_z_center;
     double init_x_range, init_y_range, init_z_range;
 
@@ -168,7 +168,7 @@ static void cw_step_rk4(OrbitalDock* env, double ax, double ay, double az) {
 }
 
 // ============================================================================
-// LOS Cone Check (STELLAR: 60 deg total, along +y from docking point)
+// LOS Cone Check (60 deg total, along +y from docking point)
 // ============================================================================
 
 static int in_los(OrbitalDock* env) {
@@ -320,7 +320,7 @@ void c_step(OrbitalDock* env) {
     int collision = (env->y < env->dock_y - 5.0);  // y < 55m (5m past dock point)
     int timeout = (env->step_count >= env->max_steps);
 
-    // 6. Compute reward (Chen-style, naturally in [-1, 1])
+    // 6. Compute reward
     double reward = 0.0;
     double progress = env->prev_dist - dist;  // positive when approaching dock
 
@@ -349,7 +349,7 @@ void c_step(OrbitalDock* env) {
         env->log.timeout_rate += 1.0f;
     }
 
-    env->rewards[0] = (float)reward;  // No scaling needed — naturally in [-1, 1]
+    env->rewards[0] = (float)reward;
     env->prev_dist = dist;
 
     // Update log

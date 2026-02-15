@@ -16,7 +16,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->fuel_budget = unpack(kwargs, "fuel_budget");
     env->max_steps = (int)unpack(kwargs, "max_steps");
 
-    // Docking point (STELLAR: [0, 60, 0])
+    // Docking point ([0, 60, 0])
     env->dock_x = unpack(kwargs, "dock_x");
     env->dock_y = unpack(kwargs, "dock_y");
     env->dock_z = unpack(kwargs, "dock_z");
@@ -31,7 +31,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->los_half_angle = (los_angle_deg / 2.0) * M_PI / 180.0;
     env->los_extent = unpack(kwargs, "los_extent");
 
-    // Initial condition ranges (STELLAR V-bar approach)
+    // Initial condition ranges
     env->init_x_center = unpack(kwargs, "init_x_center");
     env->init_y_center = unpack(kwargs, "init_y_center");
     env->init_z_center = unpack(kwargs, "init_z_center");

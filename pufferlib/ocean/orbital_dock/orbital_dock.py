@@ -27,7 +27,7 @@ class OrbitalDock(pufferlib.PufferEnv):
         mass=500.0,
         fuel_budget=100.0,
         max_steps=2500,
-        # Docking point (STELLAR: [0, 60, 0] in LVLH)
+        # Docking point ([0, 60, 0] in LVLH)
         dock_x=0.0,
         dock_y=60.0,
         dock_z=0.0,
@@ -38,7 +38,7 @@ class OrbitalDock(pufferlib.PufferEnv):
         # LOS cone
         los_angle=60.0,
         los_extent=800.0,
-        # Initial conditions (STELLAR V-bar approach)
+        # Initial conditions
         init_x_center=0.0,
         init_y_center=800.0,
         init_z_center=0.0,
