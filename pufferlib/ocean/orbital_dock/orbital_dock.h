@@ -35,37 +35,8 @@ typedef struct {
     float n;  // Required as last field
 } Log;
 
-// ============================================================================
-// Render Client Struct
-// ============================================================================
-
-#define RENDER_WIDTH 1080
-#define RENDER_HEIGHT 720
-#define TRAIL_LENGTH 256
-
-typedef struct {
-    double x, y, z;
-} Vec3d;
-
-typedef struct {
-    Vec3d pos[TRAIL_LENGTH];
-    int index;
-    int count;
-} Trail;
-
-typedef struct Client {
-    Camera3D camera;
-    float width;
-    float height;
-    float camera_distance;
-    float camera_azimuth;
-    float camera_elevation;
-    bool is_dragging;
-    Vector2 last_mouse_pos;
-    Trail trail;
-    float scale;
-    int last_step;
-} Client;
+// Forward declaration — full definition in render.h
+typedef struct Client Client;
 
 // ============================================================================
 // Environment Struct
@@ -357,7 +328,8 @@ void c_step(OrbitalDock* env) {
     double prox_now = exp(-dist / 20.0);                            // proximity potential
     double prox_prev = exp(-env->prev_dist / 20.0);
     reward += 0.1 * (prox_now - prox_prev);                        // potential-based proximity
-    // reward -= 0.005 * speed * speed;                             // velocity damping (disabled)
+    double brake_weight = exp(-dist / 30.0);
+    reward -= 0.005 * brake_weight * speed * speed;                 // proximity-weighted braking
     reward -= 0.005 * (act_x*act_x + act_y*act_y + act_z*act_z);  // control cost
     reward -= 0.005;                                                // time penalty
 

@@ -1,8 +1,7 @@
-'''Orbital rendezvous and docking environment (STELLAR / Chen et al. AAS 2023).
+'''Orbital rendezvous and docking in LVLH frame.
 
-CW linear relative motion dynamics in LVLH frame.
-Direct thrust control with PPO.
-Reproduces the STELLAR implementation in PufferLib.
+Clohessy-Wiltshire relative motion dynamics with RK4 integration.
+3-axis continuous thrust control, LOS cone constraint, speed-gated docking.
 '''
 
 import gymnasium
