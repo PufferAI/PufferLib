@@ -249,7 +249,7 @@ void c_step(OrbitalDock* env) {
     env->terminals[0] = 0;
     env->step_count++;
 
-    // 1. Get thrust actions [-1, 1] -> force in Newtons
+    // Get thrust actions [-1, 1] -> force in Newtons
     double act_x = fmax(-1.0, fmin(1.0, (double)env->actions[0]));
     double act_y = fmax(-1.0, fmin(1.0, (double)env->actions[1]));
     double act_z = fmax(-1.0, fmin(1.0, (double)env->actions[2]));
@@ -258,7 +258,7 @@ void c_step(OrbitalDock* env) {
     double fy = act_y * env->max_thrust;
     double fz = act_z * env->max_thrust;
 
-    // 2. Fuel consumption
+    // Fuel consumption
     double f_mag = sqrt(fx*fx + fy*fy + fz*fz);
     double dv_used = (f_mag / env->mass) * env->dt;
     double ax = fx / env->mass;
@@ -276,17 +276,17 @@ void c_step(OrbitalDock* env) {
         ax = 0; ay = 0; az = 0;
     }
 
-    // 3. Integrate CW dynamics
+    // Integrate CW dynamics
     cw_step_rk4(env, ax, ay, az);
 
-    // 4. Compute distance to docking point
+    // Compute distance to docking point
     double dx = env->x - env->dock_x;
     double dy = env->y - env->dock_y;
     double dz = env->z - env->dock_z;
     double dist = sqrt(dx*dx + dy*dy + dz*dz);
     double speed = sqrt(env->vx*env->vx + env->vy*env->vy + env->vz*env->vz);
 
-    // 5. Compute effective dock_speed (annealing)
+    // Compute effective dock_speed (annealing)
     env->global_step++;
     double effective_dock_speed = env->dock_speed;
     if (env->anneal_steps > 0) {
@@ -294,13 +294,13 @@ void c_step(OrbitalDock* env) {
         effective_dock_speed = env->dock_speed_start + frac * (env->dock_speed - env->dock_speed_start);
     }
 
-    // 6. Check termination conditions
+    // Check termination conditions
     int is_in_los = in_los(env);
     int docked = is_in_los && (dist < env->dock_dist) && (speed < effective_dock_speed);
     int collision = (env->y < env->dock_y - 5.0);  // y < 55m (5m past dock point)
     int timeout = (env->step_count >= env->max_steps);
 
-    // 6. Compute reward
+    // Compute reward
     double reward = 0.0;
     double progress = env->prev_dist - dist;  // positive when approaching dock
 
