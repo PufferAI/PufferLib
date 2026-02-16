@@ -28,9 +28,9 @@ class AutopilotMode:
 # All schemes include timer observation (tick/max_steps) at the end
 OBS_SIZES = {
     0: 17,   # MOMENTUM_GFORCE: G-force awareness (proven winner from df24)
-    1: 23,   # DRONE_STYLE: + quaternion + up vector
-    2: 26,   # PILOT_QUAT: Pilot + quaternion + energy
-    3: 22,   # PILOT: Pilot awareness + energy
+    1: 22,   # PILOT: Pilot awareness + energy
+    2: 22,   # RATES_LEAN: Scheme 0 + tactical rates
+    3: 27,   # RATES_FULL: Scheme 1 + tactical rates
 }
 
 

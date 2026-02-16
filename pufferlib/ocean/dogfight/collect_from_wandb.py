@@ -42,7 +42,7 @@ def _get_encoder_shape(path):
 
 
 # Reverse map: obs_size -> obs_scheme
-_OBS_SIZE_TO_SCHEME = {17: 0, 23: 1, 26: 2, 22: 3}
+_OBS_SIZE_TO_SCHEME = {17: 0, 22: 1, 27: 3}
 
 
 def infer_hidden_size_from_checkpoint(path):

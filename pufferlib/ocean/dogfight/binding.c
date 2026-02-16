@@ -416,7 +416,7 @@ static PyObject* env_set_obs_highlight(PyObject* self, PyObject* args) {
             return NULL;
         }
         int idx = (int)PyLong_AsLong(item);
-        if (idx >= 0 && idx < 16) {
+        if (idx >= 0 && idx < 32) {
             env->obs_highlight[idx] = 1;
         }
     }

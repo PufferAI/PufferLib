@@ -21,13 +21,13 @@
 
 typedef enum {
     OBS_MOMENTUM_GFORCE = 0,    // G-force awareness (17 obs) — proven winner from df24
-    OBS_DRONE_STYLE = 1,        // + quaternion + up vector (23 obs)
-    OBS_PILOT_QUAT = 2,         // Pilot + quaternion (26 obs)
-    OBS_PILOT = 3,              // Pilot awareness (22 obs)
+    OBS_PILOT = 1,              // Pilot awareness (22 obs)
+    OBS_RATES_LEAN = 2,         // Scheme 0 + tactical rates (22 obs)
+    OBS_RATES_FULL = 3,         // Scheme 1 + tactical rates (27 obs)
     OBS_SCHEME_COUNT
 } ObsScheme;
 
-static const int OBS_SIZES[OBS_SCHEME_COUNT] = {17, 23, 26, 22};
+static const int OBS_SIZES[OBS_SCHEME_COUNT] = {17, 22, 22, 27};
 
 typedef enum {
     CURRICULUM_TAIL_CHASE = 0,       // Stage 0: Easiest - opponent ahead, same heading
@@ -345,7 +345,7 @@ typedef struct Dogfight {
     // Debug
     int env_num;                // Environment index (for filtering debug output)
     // Observation highlighting (for visual debugging)
-    unsigned char obs_highlight[26];  // 1 = highlight this observation with red arrow (max scheme is 26 obs)
+    unsigned char obs_highlight[32];  // 1 = highlight this observation with red arrow (max scheme is 27 obs)
     // Last opponent actions (for Python access in tests)
     float last_opp_actions[5];  // throttle, elevator, aileron, rudder, trigger
     // Camera control
@@ -390,6 +390,18 @@ typedef struct Dogfight {
     float vertical_spawn_prob;    // Probability of forced vertical spawn during self-play (0.0-1.0)
     int vertical_level;           // Vertical sub-level: 0=apex, 1=past-vertical, 2=mid-climb, 3=merge, 4=pre-merge
     int vertical_spawn_used;      // 1 if vertical spawn was triggered this reset (skip speed randomization)
+
+    // Previous values for rate observations (schemes 4, 5)
+    // Player perspective
+    float prev_player_target_az;
+    float prev_player_target_el;
+    float prev_player_aspect;
+    float prev_player_eadv;
+    // Opponent perspective (for self-play)
+    float prev_opp_target_az;
+    float prev_opp_target_el;
+    float prev_opp_aspect;
+    float prev_opp_eadv;
 
     // Runtime-configurable flight physics (for parameter sweeps)
     FlightParams flight_params;
@@ -483,12 +495,22 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     env->vertical_spawn_prob = 0.0f;
     env->vertical_level = 0;
     env->vertical_spawn_used = 0;
+
+    // Rate observation previous values (schemes 4, 5)
+    env->prev_player_target_az = 0.0f;
+    env->prev_player_target_el = 0.0f;
+    env->prev_player_aspect = 0.0f;
+    env->prev_player_eadv = 0.0f;
+    env->prev_opp_target_az = 0.0f;
+    env->prev_opp_target_el = 0.0f;
+    env->prev_opp_aspect = 0.0f;
+    env->prev_opp_eadv = 0.0f;
 }
 
 void set_obs_highlight(Dogfight *env, int *indices, int count) {
     memset(env->obs_highlight, 0, sizeof(env->obs_highlight));
-    for (int i = 0; i < count && i < 25; i++) {
-        if (indices[i] >= 0 && indices[i] < 25) {
+    for (int i = 0; i < count && i < 32; i++) {
+        if (indices[i] >= 0 && indices[i] < 32) {
             env->obs_highlight[indices[i]] = 1;
         }
     }
@@ -2410,6 +2432,16 @@ void c_reset(Dogfight *env) {
     env->prev_elevator = 0.0f;
     env->prev_aileron = 0.0f;
     env->prev_rudder = 0.0f;
+
+    // Reset rate observation previous values (schemes 4, 5)
+    env->prev_player_target_az = 0.0f;
+    env->prev_player_target_el = 0.0f;
+    env->prev_player_aspect = 0.0f;
+    env->prev_player_eadv = 0.0f;
+    env->prev_opp_target_az = 0.0f;
+    env->prev_opp_target_el = 0.0f;
+    env->prev_opp_aspect = 0.0f;
+    env->prev_opp_eadv = 0.0f;
 
     // Gun cone for hit detection - stays fixed at 5°
     env->cos_gun_cone = cosf(env->gun_cone_angle);

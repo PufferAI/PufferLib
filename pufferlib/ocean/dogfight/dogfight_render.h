@@ -17,28 +17,7 @@ static const char* OBS_LABELS_MOMENTUM_GFORCE[17] = {
     "E_adv", "aspect", "timer"
 };
 
-// Scheme 1: OBS_DRONE_STYLE (23 obs)
-static const char* OBS_LABELS_DRONE_STYLE[23] = {
-    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
-    "aoa", "altitude", "energy",
-    "quat_w", "quat_x", "quat_y", "quat_z",
-    "up_x", "up_y", "up_z",
-    "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect", "timer"
-};
-
-// Scheme 2: OBS_PILOT_QUAT (26 obs)
-static const char* OBS_LABELS_PILOT_QUAT[26] = {
-    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
-    "aoa", "altitude", "g_force", "energy",
-    "up_x", "up_y", "up_z",
-    "quat_w", "quat_x", "quat_y", "quat_z",
-    "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect",
-    "opp_pitch_r", "opp_roll_r", "timer"
-};
-
-// Scheme 3: OBS_PILOT (22 obs)
+// Scheme 1: OBS_PILOT (22 obs)
 static const char* OBS_LABELS_PILOT[22] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "g_force", "energy",
@@ -186,12 +165,6 @@ void draw_obs_monitor(Dogfight *env) {
         case OBS_MOMENTUM_GFORCE:
             labels = OBS_LABELS_MOMENTUM_GFORCE;
             break;
-        case OBS_DRONE_STYLE:
-            labels = OBS_LABELS_DRONE_STYLE;
-            break;
-        case OBS_PILOT_QUAT:
-            labels = OBS_LABELS_PILOT_QUAT;
-            break;
         case OBS_PILOT:
             labels = OBS_LABELS_PILOT;
             break;
@@ -211,14 +184,6 @@ void draw_obs_monitor(Dogfight *env) {
             case OBS_MOMENTUM_GFORCE:
                 // fwd_spd(0), altitude(7), energy(8), range(12), timer(16) are [0,1]
                 is_01 = (i == 0 || i == 7 || i == 8 || i == 12 || i == 16);
-                break;
-            case OBS_DRONE_STYLE:
-                // fwd_spd(0), altitude(7), energy(8), range(18), timer(22) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8 || i == 18 || i == 22);
-                break;
-            case OBS_PILOT_QUAT:
-                // fwd_spd(0), altitude(7), range(18), timer(24) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 18 || i == 24);
                 break;
             case OBS_PILOT:
                 // fwd_spd(0), altitude(7), range(14), timer(20) are [0,1]
