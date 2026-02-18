@@ -249,6 +249,102 @@ def run_matches_vectorized(player_policy, opponent_policy, num_games,
     return results
 
 
+def run_matches_cross_scheme(player_policy, opponent_policy, num_games,
+                              player_obs_scheme=0, opponent_obs_scheme=0,
+                              player_hidden_size=128, opponent_hidden_size=128,
+                              num_envs=16, device='cuda', max_ticks=6000):
+    """Run games between policies with DIFFERENT observation schemes.
+
+    The env is created with the player's obs_scheme. The C code is told to
+    compute opponent observations using opponent_obs_scheme via
+    vec_set_opponent_obs_scheme(). This is slower than same-scheme matches
+    because the opponent observation buffer has a different size.
+
+    Args:
+        player_policy: Player neural network policy.
+        opponent_policy: Opponent neural network policy.
+        num_games: Total games to play.
+        player_obs_scheme: Observation scheme for the player.
+        opponent_obs_scheme: Observation scheme for the opponent.
+        player_hidden_size: Hidden size for player LSTM.
+        opponent_hidden_size: Hidden size for opponent LSTM.
+        num_envs: Number of parallel environments.
+        device: Torch device string.
+        max_ticks: Maximum ticks per episode.
+
+    Returns:
+        dict with keys: wins, losses, draws (from player perspective).
+    """
+    from pufferlib.ocean.dogfight import binding
+
+    env = Dogfight(
+        num_envs=num_envs,
+        render_mode=None,
+        obs_scheme=player_obs_scheme,
+        curriculum_enabled=1,
+        curriculum_randomize=1,
+        eval_spawn_mode=2,
+        fixed_stage=20,
+        max_steps=max_ticks,
+    )
+    binding.vec_enable_opponent_override(env.c_envs, 1)
+    # Tell C to compute opponent obs with opponent's scheme
+    binding.vec_set_opponent_obs_scheme(env.c_envs, opponent_obs_scheme)
+
+    results = {'wins': 0, 'losses': 0, 'draws': 0}
+    games_completed = 0
+
+    state_p = {'lstm_h': torch.zeros(num_envs, player_hidden_size, device=device),
+                'lstm_c': torch.zeros(num_envs, player_hidden_size, device=device)}
+    state_o = {'lstm_h': torch.zeros(num_envs, opponent_hidden_size, device=device),
+                'lstm_c': torch.zeros(num_envs, opponent_hidden_size, device=device)}
+
+    obs, _ = env.reset()
+
+    while games_completed < num_games:
+        obs_tensor = torch.as_tensor(obs, device=device)
+
+        with torch.no_grad():
+            logits_p, _ = player_policy.forward_eval(obs_tensor, state=state_p)
+            action_p = logits_p.sample()
+            action_p_np = action_p.cpu().numpy().astype(np.float32)
+            action_p_np = np.clip(action_p_np, -1, 1)
+
+        # Opponent observations (computed with opponent_obs_scheme by C)
+        obs_opp = binding.vec_get_opponent_observations(env.c_envs)
+        obs_opp = torch.as_tensor(obs_opp, device=device)
+        if torch.isnan(obs_opp).any():
+            obs_opp = torch.nan_to_num(obs_opp, nan=0.0)
+
+        with torch.no_grad():
+            logits_o, _ = opponent_policy.forward_eval(obs_opp, state=state_o)
+            action_o = logits_o.sample()
+            action_o_np = action_o.cpu().numpy().astype(np.float32)
+            action_o_np = np.clip(action_o_np, -1, 1)
+
+        binding.vec_set_opponent_actions(env.c_envs, action_o_np)
+        obs, reward, terminal, truncation, info = env.step(action_p_np)
+
+        done_mask = terminal | truncation
+        for i in range(num_envs):
+            if done_mask[i] and games_completed < num_games:
+                r = reward[i]
+                if r > 0.1:
+                    results['wins'] += 1
+                elif r < -0.1:
+                    results['losses'] += 1
+                else:
+                    results['draws'] += 1
+                games_completed += 1
+                state_p['lstm_h'][i] = 0
+                state_p['lstm_c'][i] = 0
+                state_o['lstm_h'][i] = 0
+                state_o['lstm_c'][i] = 0
+
+    env.close()
+    return results
+
+
 _worker_policies = {}  # Global dict for pool workers: idx -> loaded policy
 
 

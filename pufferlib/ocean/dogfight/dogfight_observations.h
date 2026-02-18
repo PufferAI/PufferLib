@@ -626,7 +626,9 @@ void compute_observations(Dogfight *env) {
 // In self-play, both player and opponent feed into the same policy,
 // so they must see identically-structured observations.
 void compute_opponent_observations(Dogfight *env, float *opp_obs_buffer) {
-    switch (env->obs_scheme) {
+    // Use opponent_obs_scheme if set, otherwise fall back to player's obs_scheme
+    int scheme = (env->opponent_obs_scheme >= 0) ? env->opponent_obs_scheme : env->obs_scheme;
+    switch (scheme) {
         case OBS_MOMENTUM_GFORCE: compute_obs_momentum_gforce_for_plane(env, &env->opponent, &env->player, opp_obs_buffer); break;
         case OBS_PILOT:           compute_obs_pilot_for_plane(env, &env->opponent, &env->player, opp_obs_buffer); break;
         case OBS_RATES_LEAN:      compute_obs_rates_lean_for_plane(env, &env->opponent, &env->player, opp_obs_buffer,

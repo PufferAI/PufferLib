@@ -1647,6 +1647,19 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
     total_timesteps = train_config['total_timesteps']
     all_logs = []
 
+    # Anchor evaluation config
+    anchor_cfg = args.get('anchor_eval', {})
+    anchor_eval_enabled = int(anchor_cfg.get('enabled', 0))
+    anchor_eval_interval = int(anchor_cfg.get('interval', 50_000_000))
+    anchor_games = int(anchor_cfg.get('games_per_anchor', 30))
+    anchor_num_envs = int(anchor_cfg.get('num_envs', 16))
+    anchor_dir = anchor_cfg.get('anchor_dir', 'pufferlib/ocean/dogfight/reference_opponents')
+    last_anchor_eval_step = 0
+    obs_scheme = args.get('env', {}).get('obs_scheme', 0)
+
+    if anchor_eval_enabled:
+        log(f'[TRAIN] anchor_eval enabled interval={anchor_eval_interval} games={anchor_games} dir={anchor_dir}')
+
     # Training loop
     while trainer.global_step < total_timesteps:
         if train_config['device'] == 'cuda':
@@ -1673,6 +1686,46 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
             queue_len = len(trainer.checkpoint_queue)
             opp_tag = trainer._current_opponent_tag or "none"
             log(f'[TRAIN] mode={mode} step={trainer.global_step} queue={queue_len} opponent={opp_tag} rank={trainer._unlocked_rank} perf_ema={trainer._pool_perf_ema:.3f}')
+
+        # Periodic anchor evaluation (runs during self-play phase only)
+        if (anchor_eval_enabled
+                and trainer.use_dual_selfplay
+                and trainer.global_step - last_anchor_eval_step >= anchor_eval_interval):
+            last_anchor_eval_step = trainer.global_step
+            try:
+                from pufferlib.ocean.dogfight.anchor_eval import evaluate_against_anchors
+                import tempfile
+
+                # Save current weights to temp file for evaluation
+                with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as f:
+                    torch.save(policy.state_dict(), f.name)
+                    tmp_path = f.name
+
+                device = train_config['device']
+                anchor_results = evaluate_against_anchors(
+                    model_path=tmp_path,
+                    obs_scheme=obs_scheme,
+                    anchor_dir=anchor_dir,
+                    games_per_anchor=anchor_games,
+                    num_envs=anchor_num_envs,
+                    device=device,
+                )
+                os.unlink(tmp_path)
+
+                # Inject anchor_rating into trainer stats for W&B logging
+                anchor_rating = anchor_results.get('anchor_rating', 1000.0)
+                trainer.trainer.stats['anchor_rating'] = [anchor_rating]
+
+                # Also inject per-anchor win rates
+                for tag, data in anchor_results.items():
+                    if isinstance(data, dict) and 'win_rate' in data:
+                        trainer.trainer.stats[f'anchor_wr_{tag}'] = [data['win_rate']]
+
+                log(f'[ANCHOR] step={trainer.global_step} anchor_rating={anchor_rating:.0f} '
+                    f'eval_time={anchor_results.get("eval_time", 0):.1f}s')
+
+            except Exception as e:
+                log(f'[ERROR] anchor_eval failed: {e}')
 
     # Cleanup
     model_path = trainer.close()
@@ -1742,6 +1795,45 @@ def sweep_dual(env_name='puffer_dogfight', args=None):
                     log(f'[RATING] policy=candidate rating={result["elo"]:.0f} eval_time={result["eval_time_seconds"]:.1f}s')
                 except Exception as e:
                     log(f'[ERROR] phase=elo_eval msg="{e}"')
+
+        # Post-training anchor evaluation (gated by strength to save compute)
+        # Below gate: linear estimate from strength (monotonic, instant)
+        # Above gate: real eval against fixed anchors (~2 min)
+        if all_logs:
+            anchor_cfg = args.get('anchor_eval', {})
+            strength_gate = float(anchor_cfg.get('strength_gate', 0.3))
+            final_strength = all_logs[-1].get('environment/strength', 0.0)
+
+            if model_path and final_strength >= strength_gate:
+                try:
+                    from pufferlib.ocean.dogfight.anchor_eval import evaluate_against_anchors
+                    anchor_results = evaluate_against_anchors(
+                        model_path=model_path,
+                        obs_scheme=args['env'].get('obs_scheme', 0),
+                        anchor_dir=anchor_cfg.get('anchor_dir', 'pufferlib/ocean/dogfight/reference_opponents'),
+                        games_per_anchor=int(anchor_cfg.get('games_per_anchor', 30)),
+                        num_envs=int(anchor_cfg.get('num_envs', 16)),
+                        device=args['train']['device'],
+                    )
+                    anchor_rating = anchor_results.get('anchor_rating', 1000.0)
+                    for entry in all_logs:
+                        entry['environment/anchor_rating'] = anchor_rating
+                    for atag, adata in anchor_results.items():
+                        if isinstance(adata, dict) and 'win_rate' in adata:
+                            all_logs[-1][f'environment/anchor_wr_{atag}'] = adata['win_rate']
+                    log(f'[ANCHOR] event=post_training anchor_rating={anchor_rating:.0f} strength={final_strength:.3f}')
+                except Exception as e:
+                    log(f'[ERROR] phase=anchor_eval_post msg="{e}"')
+                    # On error, fall back to linear estimate
+                    anchor_rating = 200.0 + final_strength * 1200.0
+                    for entry in all_logs:
+                        entry['environment/anchor_rating'] = anchor_rating
+            else:
+                # Below gate or no model — linear estimate from strength
+                anchor_rating = 200.0 + final_strength * 1200.0
+                for entry in all_logs:
+                    entry['environment/anchor_rating'] = anchor_rating
+                log(f'[ANCHOR] event=estimated anchor_rating={anchor_rating:.0f} strength={final_strength:.3f} gate={strength_gate:.2f}')
 
         all_logs = [e for e in all_logs if target_key in e]
 

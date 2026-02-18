@@ -6,7 +6,6 @@ import torch
 import pufferlib
 from pufferlib.ocean.dogfight import binding
 from pufferlib.ocean.dogfight.dogfight_log import log as dogfight_log
-from pufferlib.models import Default as Policy
 
 
 # Autopilot mode constants (must match autopilot.h enum)
@@ -229,7 +228,8 @@ class Dogfight(pufferlib.PufferEnv):
     def _load_opponent_policy(self, path):
         """Load a frozen checkpoint as the opponent policy."""
         # Create policy with same architecture as training
-        self.opponent_policy = Policy(self, hidden_size=128)
+        from pufferlib.ocean.torch import DogfightPolicy
+        self.opponent_policy = DogfightPolicy(self)
         self.opponent_policy = self.opponent_policy.to(self.opponent_device)
 
         # Load checkpoint weights

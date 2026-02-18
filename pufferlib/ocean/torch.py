@@ -540,6 +540,21 @@ class TowerClimb(nn.Module):
         return action, value
 
 
+class DogfightPolicy(Policy):
+    def __init__(self, env, hidden_size=128, **kwargs):
+        obs_size = np.prod(env.single_observation_space.shape)
+        if obs_size > 22:
+            hidden_size *= 2
+        super().__init__(env, hidden_size=hidden_size, **kwargs)
+
+
+class DogfightRecurrent(Recurrent):
+    def __init__(self, env, policy, **kwargs):
+        super().__init__(env, policy,
+            input_size=policy.hidden_size,
+            hidden_size=policy.hidden_size)
+
+
 class ImpulseWarsLSTM(Recurrent):
     def __init__(self, env: pufferlib.PufferEnv, policy: nn.Module, input_size: int = 512, hidden_size: int = 512):
         super().__init__(env, policy, input_size, hidden_size)

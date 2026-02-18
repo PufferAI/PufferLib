@@ -28,6 +28,7 @@ static PyObject* vec_get_guided_climb_state(PyObject* self, PyObject* args);
 static PyObject* vec_tick_guided_climb(PyObject* self, PyObject* args);
 static PyObject* vec_set_flight_params(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* env_set_flight_params(PyObject* self, PyObject* args, PyObject* kwargs);
+static PyObject* vec_set_opponent_obs_scheme(PyObject* self, PyObject* args);
 
 #define MY_METHODS \
     {"env_force_state", (PyCFunction)env_force_state, METH_VARARGS | METH_KEYWORDS, "Force environment state"}, \
@@ -53,7 +54,8 @@ static PyObject* env_set_flight_params(PyObject* self, PyObject* args, PyObject*
     {"vec_get_guided_climb_state", (PyCFunction)vec_get_guided_climb_state, METH_VARARGS, "Get guided climb state for teachable opponent maneuvers"}, \
     {"vec_tick_guided_climb", (PyCFunction)vec_tick_guided_climb, METH_VARARGS, "Decrement guided climb ticks after each step"}, \
     {"vec_set_flight_params", (PyCFunction)vec_set_flight_params, METH_VARARGS | METH_KEYWORDS, "Set flight physics params for all envs"}, \
-    {"env_set_flight_params", (PyCFunction)env_set_flight_params, METH_VARARGS | METH_KEYWORDS, "Set flight physics params for single env"}
+    {"env_set_flight_params", (PyCFunction)env_set_flight_params, METH_VARARGS | METH_KEYWORDS, "Set flight physics params for single env"}, \
+    {"vec_set_opponent_obs_scheme", (PyCFunction)vec_set_opponent_obs_scheme, METH_VARARGS, "Set opponent obs scheme for cross-scheme evaluation (-1=same as player)"}
 
 static float get_float(PyObject *kwargs, const char *key, float default_val) {
     if (!kwargs) return default_val;
@@ -516,8 +518,8 @@ static PyObject* vec_get_opponent_observations(PyObject* self, PyObject* args) {
         return NULL;
     }
 
-    // Get obs_size from first environment (all envs have same scheme)
-    int obs_size = vec->envs[0]->obs_size;
+    // Get opponent obs_size (may differ from player if cross-scheme eval)
+    int obs_size = vec->envs[0]->opponent_obs_size;
 
     // Create numpy array of shape (num_envs, obs_size)
     npy_intp dims[2] = {vec->num_envs, obs_size};
@@ -607,6 +609,36 @@ static PyObject* vec_enable_opponent_override(PyObject* self, PyObject* args) {
 
     for (int i = 0; i < vec->num_envs; i++) {
         vec->envs[i]->use_opponent_override = enable ? 1 : 0;
+    }
+
+    Py_RETURN_NONE;
+}
+
+// Set opponent observation scheme for cross-scheme evaluation
+// Args: vec_handle, obs_scheme (-1=same as player, 0-3=specific scheme)
+// This allows player and opponent to have different observation layouts
+static PyObject* vec_set_opponent_obs_scheme(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+    int scheme;
+
+    if (!PyArg_ParseTuple(args, "Oi", &vec_arg, &scheme)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    for (int i = 0; i < vec->num_envs; i++) {
+        vec->envs[i]->opponent_obs_scheme = scheme;
+        if (scheme >= 0 && scheme < OBS_SCHEME_COUNT) {
+            vec->envs[i]->opponent_obs_size = OBS_SIZES[scheme];
+        } else {
+            // -1 or invalid: inherit from player
+            vec->envs[i]->opponent_obs_size = vec->envs[i]->obs_size;
+        }
     }
 
     Py_RETURN_NONE;

@@ -286,6 +286,10 @@ typedef struct Dogfight {
     // Observation scheme
     int obs_scheme;
     int obs_size;
+    // Opponent observation scheme (for cross-scheme evaluation)
+    // -1 = use same as player (default), >=0 = separate scheme for opponent
+    int opponent_obs_scheme;
+    int opponent_obs_size;
     // Reward configuration (sweepable)
     RewardConfig rcfg;
     // Episode-level tracking (reset each episode)
@@ -418,6 +422,9 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
     // Observation scheme
     env->obs_scheme = (obs_scheme >= 0 && obs_scheme < OBS_SCHEME_COUNT) ? obs_scheme : 0;
     env->obs_size = OBS_SIZES[env->obs_scheme];
+    // Opponent obs scheme defaults to same as player (-1 = inherit)
+    env->opponent_obs_scheme = -1;
+    env->opponent_obs_size = env->obs_size;
     // Gun cone for HIT DETECTION - fixed at 5°
     env->gun_cone_angle = GUN_CONE_ANGLE;
     env->cos_gun_cone = cosf(env->gun_cone_angle);

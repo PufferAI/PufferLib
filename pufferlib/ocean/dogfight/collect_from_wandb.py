@@ -8,6 +8,15 @@ Usage:
     python pufferlib/ocean/dogfight/collect_from_wandb.py \
         --project df27 --top-n 20 --output-dir league/ \
         --metric environment/strength
+
+    # Cross-sweep collection: merge multiple projects, filter by obs_scheme
+    python pufferlib/ocean/dogfight/collect_from_wandb.py \
+        --project df28 --top-n 5 --output-dir league/cross_sweep/ \
+        --obs-scheme 0 --merge
+
+    python pufferlib/ocean/dogfight/collect_from_wandb.py \
+        --project df29 --top-n 5 --output-dir league/cross_sweep/ \
+        --obs-scheme 0 --merge
 """
 import argparse
 import os
@@ -62,7 +71,8 @@ def infer_obs_scheme_from_checkpoint(path):
 
 
 def collect_from_wandb(project, top_n, output_dir, metric='environment/strength',
-                       entity=None, min_steps_fraction=0.7):
+                       entity=None, min_steps_fraction=0.7,
+                       obs_scheme_filter=None, merge=False):
     """Collect top-N runs from a W&B project.
 
     Args:
@@ -72,6 +82,8 @@ def collect_from_wandb(project, top_n, output_dir, metric='environment/strength'
         metric: W&B metric key to sort by (descending)
         entity: W&B entity (None = default)
         min_steps_fraction: Only include runs that completed at least this fraction of total_timesteps
+        obs_scheme_filter: If set, only collect runs with this obs_scheme (int)
+        merge: If True, load existing manifest and append instead of creating fresh
     """
     import wandb
     from pufferlib.ocean.dogfight.league_manifest import LeagueManifest, PolicyEntry
@@ -80,7 +92,8 @@ def collect_from_wandb(project, top_n, output_dir, metric='environment/strength'
 
     # Query runs sorted by metric
     path = f'{entity}/{project}' if entity else project
-    print(f'[COLLECT] Querying W&B project: {path}')
+    filter_msg = f' obs_scheme={obs_scheme_filter}' if obs_scheme_filter is not None else ''
+    print(f'[COLLECT] Querying W&B project: {path}{filter_msg}')
     runs = api.runs(path, order=f'-summary_metrics.{metric}')
 
     # Filter and collect top N
@@ -98,8 +111,15 @@ def collect_from_wandb(project, top_n, output_dir, metric='environment/strength'
         if metric_val is None or metric_val == 0:
             continue
 
-        # Check run length
+        # Filter by obs_scheme if requested
         config = run.config
+        if obs_scheme_filter is not None:
+            run_scheme = config.get('env', {}).get('obs_scheme',
+                         config.get('obs_scheme', 0))
+            if run_scheme != obs_scheme_filter:
+                continue
+
+        # Check run length
         total_steps = config.get('train', {}).get('total_timesteps',
                      config.get('total_timesteps', 0))
         agent_steps = summary.get('agent_steps', 0)
@@ -122,10 +142,15 @@ def collect_from_wandb(project, top_n, output_dir, metric='environment/strength'
     os.makedirs(models_dir, exist_ok=True)
     os.makedirs(anchors_dir, exist_ok=True)
 
-    # Build manifest
-    manifest = LeagueManifest()
-    manifest.source_project = project
-    manifest.created = datetime.now().isoformat()
+    # Load existing manifest or create fresh
+    manifest_path = os.path.join(output_dir, 'manifest.json')
+    if merge and os.path.exists(manifest_path):
+        manifest = LeagueManifest.load(manifest_path)
+        print(f'[COLLECT] Merging into existing manifest ({len(manifest.policies)} policies)')
+    else:
+        manifest = LeagueManifest()
+        manifest.created = datetime.now().isoformat()
+    manifest.source_project = project if not merge else f'{manifest.source_project}+{project}'
 
     for run in collected:
         config = run.config
@@ -170,8 +195,13 @@ def collect_from_wandb(project, top_n, output_dir, metric='environment/strength'
                   f'but checkpoint weights are scheme {actual_scheme} — using {actual_scheme}')
             obs_scheme = actual_scheme
 
-        # Create policy ID
-        policy_id = f'scheme{obs_scheme}_run_{run.id}'
+        # Create policy ID (sweep-prefixed to avoid collisions when merging)
+        policy_id = f'{project}_scheme{obs_scheme}_{run.id}'
+
+        # Skip if already in manifest (merge mode)
+        if manifest.get_policy_by_id(policy_id) is not None:
+            print(f'  Skipping {run.name} ({run.id}): already in manifest')
+            continue
 
         # Copy model to models dir
         model_filename = f'{policy_id}_gen0.pt'
@@ -179,7 +209,7 @@ def collect_from_wandb(project, top_n, output_dir, metric='environment/strength'
         shutil.copy2(model_path, dest_model)
 
         # Create frozen anchor copy
-        anchor_id = f'anchor_{policy_id}_gen0'
+        anchor_id = f'anchor_{project}_scheme{obs_scheme}_{run.id}_gen0'
         anchor_filename = f'{anchor_id}.pt'
         dest_anchor = os.path.join(anchors_dir, anchor_filename)
         shutil.copy2(model_path, dest_anchor)
@@ -265,6 +295,10 @@ def main():
     parser.add_argument('--entity', type=str, default=None, help='W&B entity')
     parser.add_argument('--min-steps', type=float, default=0.7,
                         help='Min fraction of total_timesteps completed')
+    parser.add_argument('--obs-scheme', type=int, default=None,
+                        help='Only collect runs with this obs_scheme')
+    parser.add_argument('--merge', action='store_true',
+                        help='Merge into existing manifest instead of overwriting')
     args = parser.parse_args()
 
     collect_from_wandb(
@@ -274,6 +308,8 @@ def main():
         metric=args.metric,
         entity=args.entity,
         min_steps_fraction=args.min_steps,
+        obs_scheme_filter=args.obs_scheme,
+        merge=args.merge,
     )
 
 
