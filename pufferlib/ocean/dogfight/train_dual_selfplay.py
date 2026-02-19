@@ -1729,6 +1729,49 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
 
     # Cleanup
     model_path = trainer.close()
+
+    # Post-training anchor evaluation (gated by strength to save compute)
+    # Must happen after trainer.close() (model saved) but before logger.close() (wandb open)
+    if all_logs:
+        anchor_cfg = args.get('anchor_eval', {})
+        strength_gate = float(anchor_cfg.get('strength_gate', 0.3))
+        final_strength = all_logs[-1].get('environment/strength', 0.0)
+        anchor_rating = None
+
+        if model_path and final_strength >= strength_gate:
+            try:
+                from pufferlib.ocean.dogfight.anchor_eval import evaluate_against_anchors
+                anchor_results = evaluate_against_anchors(
+                    model_path=model_path,
+                    obs_scheme=obs_scheme,
+                    anchor_dir=anchor_cfg.get('anchor_dir', 'pufferlib/ocean/dogfight/reference_opponents'),
+                    games_per_anchor=int(anchor_cfg.get('games_per_anchor', 30)),
+                    num_envs=int(anchor_cfg.get('num_envs', 16)),
+                    device=args['train']['device'],
+                )
+                anchor_rating = anchor_results.get('anchor_rating', 1000.0)
+                log(f'[ANCHOR] event=post_training anchor_rating={anchor_rating:.0f} strength={final_strength:.3f}')
+                # Log per-anchor win rates
+                if logger:
+                    wandb_extras = {'environment/anchor_rating': anchor_rating}
+                    for atag, adata in anchor_results.items():
+                        if isinstance(adata, dict) and 'win_rate' in adata:
+                            wandb_extras[f'environment/anchor_wr_{atag}'] = adata['win_rate']
+                    logger.log(wandb_extras, trainer.global_step)
+            except Exception as e:
+                log(f'[ERROR] phase=anchor_eval_post msg="{e}"')
+                anchor_rating = 200.0 + final_strength * 1200.0
+        else:
+            anchor_rating = 200.0 + final_strength * 1200.0
+            log(f'[ANCHOR] event=estimated anchor_rating={anchor_rating:.0f} strength={final_strength:.3f} gate={strength_gate:.2f}')
+
+        if anchor_rating is not None:
+            for entry in all_logs:
+                entry['environment/anchor_rating'] = anchor_rating
+            # Log estimated ratings to wandb too
+            if logger and not (model_path and final_strength >= strength_gate):
+                logger.log({'environment/anchor_rating': anchor_rating}, trainer.global_step)
+
     if logger:
         logger.close(model_path)
 
@@ -1796,44 +1839,8 @@ def sweep_dual(env_name='puffer_dogfight', args=None):
                 except Exception as e:
                     log(f'[ERROR] phase=elo_eval msg="{e}"')
 
-        # Post-training anchor evaluation (gated by strength to save compute)
-        # Below gate: linear estimate from strength (monotonic, instant)
-        # Above gate: real eval against fixed anchors (~2 min)
-        if all_logs:
-            anchor_cfg = args.get('anchor_eval', {})
-            strength_gate = float(anchor_cfg.get('strength_gate', 0.3))
-            final_strength = all_logs[-1].get('environment/strength', 0.0)
-
-            if model_path and final_strength >= strength_gate:
-                try:
-                    from pufferlib.ocean.dogfight.anchor_eval import evaluate_against_anchors
-                    anchor_results = evaluate_against_anchors(
-                        model_path=model_path,
-                        obs_scheme=args['env'].get('obs_scheme', 0),
-                        anchor_dir=anchor_cfg.get('anchor_dir', 'pufferlib/ocean/dogfight/reference_opponents'),
-                        games_per_anchor=int(anchor_cfg.get('games_per_anchor', 30)),
-                        num_envs=int(anchor_cfg.get('num_envs', 16)),
-                        device=args['train']['device'],
-                    )
-                    anchor_rating = anchor_results.get('anchor_rating', 1000.0)
-                    for entry in all_logs:
-                        entry['environment/anchor_rating'] = anchor_rating
-                    for atag, adata in anchor_results.items():
-                        if isinstance(adata, dict) and 'win_rate' in adata:
-                            all_logs[-1][f'environment/anchor_wr_{atag}'] = adata['win_rate']
-                    log(f'[ANCHOR] event=post_training anchor_rating={anchor_rating:.0f} strength={final_strength:.3f}')
-                except Exception as e:
-                    log(f'[ERROR] phase=anchor_eval_post msg="{e}"')
-                    # On error, fall back to linear estimate
-                    anchor_rating = 200.0 + final_strength * 1200.0
-                    for entry in all_logs:
-                        entry['environment/anchor_rating'] = anchor_rating
-            else:
-                # Below gate or no model — linear estimate from strength
-                anchor_rating = 200.0 + final_strength * 1200.0
-                for entry in all_logs:
-                    entry['environment/anchor_rating'] = anchor_rating
-                log(f'[ANCHOR] event=estimated anchor_rating={anchor_rating:.0f} strength={final_strength:.3f} gate={strength_gate:.2f}')
+        # Anchor eval now happens inside train_dual() before logger.close(),
+        # so anchor_rating is already in all_logs AND logged to wandb.
 
         all_logs = [e for e in all_logs if target_key in e]
 
