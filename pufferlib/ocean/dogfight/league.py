@@ -251,9 +251,13 @@ class League:
                 # Play from both sides to cancel spawn position asymmetry
                 half = games_per_ref // 2
                 r1 = run_matches(env, candidate_policy, ref_policy,
-                                 half, self.device)
+                                 half, self.device,
+                                 player_hidden_size=policy.hidden_size,
+                                 opponent_hidden_size=ref['hidden_size'])
                 r2 = run_matches(env, ref_policy, candidate_policy,
-                                 games_per_ref - half, self.device)
+                                 games_per_ref - half, self.device,
+                                 player_hidden_size=ref['hidden_size'],
+                                 opponent_hidden_size=policy.hidden_size)
                 # Combine: r1 wins are candidate wins; r2 losses are candidate wins
                 result = {
                     'wins': r1['wins'] + r2['losses'],

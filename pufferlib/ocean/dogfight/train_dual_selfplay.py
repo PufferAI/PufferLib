@@ -1760,9 +1760,9 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
                     logger.log(wandb_extras, trainer.global_step)
             except Exception as e:
                 log(f'[ERROR] phase=anchor_eval_post msg="{e}"')
-                anchor_rating = 200.0 + final_strength * 1200.0
+                anchor_rating = 100.0 + final_strength * 1400.0
         else:
-            anchor_rating = 200.0 + final_strength * 1200.0
+            anchor_rating = 100.0 + final_strength * 1400.0
             log(f'[ANCHOR] event=estimated anchor_rating={anchor_rating:.0f} strength={final_strength:.3f} gate={strength_gate:.2f}')
 
         if anchor_rating is not None:
@@ -2140,6 +2140,14 @@ def train_league_round(policy_entry, manifest, league_dir, training_steps,
             args['train'][k] = v
         elif k in args.get('env', {}):
             args['env'][k] = v
+
+    # Disable shaping rewards during league fine-tuning.
+    # Models are already trained past shaping decay (aim/closing annealed to zero
+    # by step 150M). League training starts at global_step=0, so the decay schedule
+    # would give full shaping strength for the entire 50M training run, causing
+    # spiral-and-aim behavior that destroys clean_fights.
+    args['env']['reward_aim_scale'] = 0.0
+    args['env']['reward_closing_scale'] = 0.0
 
     # Build league opponent pool (same obs_scheme, excluding self)
     league_pool = []

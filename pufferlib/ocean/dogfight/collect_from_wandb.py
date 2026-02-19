@@ -50,7 +50,9 @@ def _get_encoder_shape(path):
     return 128, None
 
 
-# Reverse map: obs_size -> obs_scheme
+# Reverse map: obs_size -> obs_scheme (fallback only; wandb config is source of truth)
+# Note: obs_scheme 1 and 2 both have obs_size=22, so scheme 2 can't be
+# disambiguated from weights alone. This map defaults 22 -> scheme 1.
 _OBS_SIZE_TO_SCHEME = {17: 0, 22: 1, 27: 3}
 
 
@@ -229,7 +231,9 @@ def collect_from_wandb(project, top_n, output_dir, metric='environment/strength'
             for k in ['reward_aim_scale', 'reward_closing_scale', 'penalty_neg_g',
                        'control_rate_penalty', 'max_steps',
                        'low_altitude_threshold', 'low_altitude_penalty',
-                       'recovery_trigger_prob']:
+                       'recovery_trigger_prob',
+                       'shaping_decay_start', 'shaping_decay_end',
+                       'vertical_spawn_prob']:
                 if k in config['env']:
                     train_config[k] = config['env'][k]
 

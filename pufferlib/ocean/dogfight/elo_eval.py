@@ -75,7 +75,8 @@ def load_policy_from_path(path, env, device='cuda', hidden_size=128):
     return policy
 
 
-def run_matches(env, player_policy, opponent_policy, num_games, device='cuda', hidden_size=128):
+def run_matches(env, player_policy, opponent_policy, num_games, device='cuda',
+                hidden_size=128, player_hidden_size=None, opponent_hidden_size=None):
     """Run vectorized matches between player and opponent policies.
 
     For autopilot opponents, opponent_policy is None and the C code handles
@@ -87,11 +88,17 @@ def run_matches(env, player_policy, opponent_policy, num_games, device='cuda', h
         opponent_policy: Opponent neural network policy, or None for autopilot.
         num_games: Number of games to play.
         device: Torch device string.
+        hidden_size: Default hidden size for both player and opponent LSTM.
+        player_hidden_size: Override hidden size for player LSTM (defaults to hidden_size).
+        opponent_hidden_size: Override hidden size for opponent LSTM (defaults to hidden_size).
 
     Returns:
         dict with keys: wins, losses, draws (from player perspective).
     """
     from pufferlib.ocean.dogfight import binding
+
+    p_hs = player_hidden_size or hidden_size
+    o_hs = opponent_hidden_size or hidden_size
 
     results = {'wins': 0, 'losses': 0, 'draws': 0, 'clean_fights': 0}
     games_played = 0
@@ -105,10 +112,10 @@ def run_matches(env, player_policy, opponent_policy, num_games, device='cuda', h
         tick = 0
 
         # Init LSTM state for new episode
-        state_p = {'lstm_h': torch.zeros(1, hidden_size, device=device),
-                    'lstm_c': torch.zeros(1, hidden_size, device=device)}
-        state_o = {'lstm_h': torch.zeros(1, hidden_size, device=device),
-                    'lstm_c': torch.zeros(1, hidden_size, device=device)}
+        state_p = {'lstm_h': torch.zeros(1, p_hs, device=device),
+                    'lstm_c': torch.zeros(1, p_hs, device=device)}
+        state_o = {'lstm_h': torch.zeros(1, o_hs, device=device),
+                    'lstm_c': torch.zeros(1, o_hs, device=device)}
 
         while not done and tick < max_ticks:
             obs_tensor = torch.as_tensor(obs, device=device)
@@ -386,10 +393,11 @@ def _run_pair_worker(args):
         Tuple of (i, j, result_dict) where result_dict has wins/losses/draws.
     """
     i, j, obs_scheme, num_envs, games, device = args
+    hs = _worker_policies[i].hidden_size
 
     result = run_matches_vectorized(
         _worker_policies[i], _worker_policies[j], games,
-        obs_scheme=obs_scheme, num_envs=num_envs,
+        obs_scheme=obs_scheme, hidden_size=hs, num_envs=num_envs,
         device=device)
 
     return (i, j, result)
@@ -595,7 +603,7 @@ def compute_elo_mle(matchup_results, reference_elos, prior_rating=1000.0,
         return ll
 
     # Bisection search over candidate rating
-    lo, hi = 200.0, 1800.0
+    lo, hi = 100.0, 2000.0
     for _ in range(100):
         mid = (lo + hi) / 2.0
         eps = 0.5
