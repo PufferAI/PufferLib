@@ -123,6 +123,7 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
         // Disabled: set threshold to impossible value
         env->recovery_altitude_threshold = -9999.0f;
     }
+    env->domain_randomization = get_float(kwargs, "domain_randomization", 0.0f);
     env->selfplay_active = 0;  // Disabled until Python enables it
 
     return 0;

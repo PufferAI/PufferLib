@@ -203,13 +203,25 @@ static inline void step_plane(Plane *p, float dt) {
 #define CONTROL_SCALE_SLOPE 0.0f  // No authority reduction
 #define CONTROL_SCALE_MIN 1.0f    // Full authority always
 
-// Runtime-configurable physics parameters for parameter sweeps
+// Runtime-configurable physics parameters for parameter sweeps + domain randomization
 typedef struct {
+    // Sweep knobs (untouched by randomization)
     float control_v_ref;       // Reference speed for full authority
     float control_scale_slope; // How fast authority drops with speed
     float control_scale_min;   // Floor for control authority
     float damping_scale_slope; // Extra damping scale per m/s above ref (0 = off)
     float damping_multiplier;  // Scale CM_Q, CL_P, CN_R (1.0 = normal, 2.0 = double damping)
+    // Physics params (randomized per-episode when domain_randomization > 0)
+    float mass, inv_mass;
+    float ixx, iyy, izz;
+    float gravity, inv_gravity;
+    float wing_area, wingspan, chord;
+    float c_d0, k, c_l_alpha, c_l_max, rho;
+    float engine_power, eta_prop;
+    float cm_alpha, cl_beta, cn_beta;
+    float cm_q, cl_p, cn_r;
+    float cm_delta_e, cl_delta_a, cn_delta_r;
+    float g_limit_pos, g_limit_neg;
 } FlightParams;
 
 // Default parameters (matches current compile-time #defines)
@@ -219,8 +231,61 @@ static inline FlightParams default_flight_params(void) {
         .control_scale_slope = CONTROL_SCALE_SLOPE,
         .control_scale_min = CONTROL_SCALE_MIN,
         .damping_scale_slope = 0.0f,
-        .damping_multiplier = 1.0f
+        .damping_multiplier = 1.0f,
+        .mass = MASS, .inv_mass = 1.0f / MASS,
+        .ixx = IXX, .iyy = IYY, .izz = IZZ,
+        .gravity = GRAVITY, .inv_gravity = 1.0f / GRAVITY,
+        .wing_area = WING_AREA, .wingspan = WINGSPAN, .chord = CHORD,
+        .c_d0 = C_D0, .k = K, .c_l_alpha = C_L_ALPHA, .c_l_max = C_L_MAX, .rho = RHO,
+        .engine_power = ENGINE_POWER, .eta_prop = ETA_PROP,
+        .cm_alpha = CM_ALPHA, .cl_beta = CL_BETA, .cn_beta = CN_BETA,
+        .cm_q = CM_Q, .cl_p = CL_P, .cn_r = CN_R,
+        .cm_delta_e = CM_DELTA_E, .cl_delta_a = CL_DELTA_A, .cn_delta_r = CN_DELTA_R,
+        .g_limit_pos = G_LIMIT_POS, .g_limit_neg = G_LIMIT_NEG,
     };
+}
+
+// Domain randomization: called every c_reset(). When dr=0, rndf(1,1)=1.0 → exact base values.
+static inline void randomize_flight_params(FlightParams* params, float dr) {
+    params->mass = MASS * rndf(1.0f - dr, 1.0f + dr);
+    params->inv_mass = 1.0f / params->mass;
+    params->ixx = IXX * rndf(1.0f - dr, 1.0f + dr);
+    params->iyy = IYY * rndf(1.0f - dr, 1.0f + dr);
+    params->izz = IZZ * rndf(1.0f - dr, 1.0f + dr);
+
+    // Gravity: tight range (always capped at +/-1%)
+    float grav_dr = fminf(dr, 0.01f);
+    params->gravity = GRAVITY * rndf(1.0f - grav_dr, 1.0f + grav_dr);
+    params->inv_gravity = 1.0f / params->gravity;
+
+    // Wing geometry: correlated (single scale, area ~ length^2)
+    float wing_scale = rndf(1.0f - dr, 1.0f + dr);
+    params->wingspan = WINGSPAN * wing_scale;
+    params->chord = CHORD * wing_scale;
+    params->wing_area = WING_AREA * wing_scale * wing_scale;
+
+    params->c_d0 = C_D0 * rndf(1.0f - dr, 1.0f + dr);
+    params->k = K * rndf(1.0f - dr, 1.0f + dr);
+    params->c_l_alpha = C_L_ALPHA * rndf(1.0f - dr, 1.0f + dr);
+    params->c_l_max = C_L_MAX * rndf(1.0f - dr, 1.0f + dr);
+    params->rho = RHO * rndf(1.0f - dr, 1.0f + dr);
+
+    params->engine_power = ENGINE_POWER * rndf(1.0f - dr, 1.0f + dr);
+    params->eta_prop = ETA_PROP * rndf(1.0f - dr, 1.0f + dr);
+
+    params->cm_alpha = CM_ALPHA * rndf(1.0f - dr, 1.0f + dr);
+    params->cl_beta = CL_BETA * rndf(1.0f - dr, 1.0f + dr);
+    params->cn_beta = CN_BETA * rndf(1.0f - dr, 1.0f + dr);
+    params->cm_q = CM_Q * rndf(1.0f - dr, 1.0f + dr);
+    params->cl_p = CL_P * rndf(1.0f - dr, 1.0f + dr);
+    params->cn_r = CN_R * rndf(1.0f - dr, 1.0f + dr);
+
+    params->cm_delta_e = CM_DELTA_E * rndf(1.0f - dr, 1.0f + dr);
+    params->cl_delta_a = CL_DELTA_A * rndf(1.0f - dr, 1.0f + dr);
+    params->cn_delta_r = CN_DELTA_R * rndf(1.0f - dr, 1.0f + dr);
+
+    params->g_limit_pos = G_LIMIT_POS * rndf(1.0f - dr, 1.0f + dr);
+    params->g_limit_neg = G_LIMIT_NEG * rndf(1.0f - dr, 1.0f + dr);
 }
 
 typedef struct {
@@ -663,7 +728,7 @@ static inline void compute_derivatives(Plane* state, float* actions, float dt, S
     }
 }
 
-// Version with runtime-configurable parameters for sweeps
+// Version with runtime-configurable parameters for sweeps + domain randomization
 static inline void compute_derivatives_with_params(
     Plane* state, float* actions, float dt,
     StateDerivative* deriv, FlightParams* params)
@@ -678,7 +743,7 @@ static inline void compute_derivatives_with_params(
 
     float alpha = compute_aoa(state);
     float beta = compute_sideslip(state);
-    float q_bar = 0.5f * RHO * V * V;
+    float q_bar = 0.5f * params->rho * V * V;
 
     // Controls with runtime parameters
     float throttle = clampf((actions[0] + 1.0f) * 0.5f, 0.0f, 1.0f);
@@ -692,56 +757,60 @@ static inline void compute_derivatives_with_params(
 
     // Lift and drag
     float alpha_effective = alpha + WING_INCIDENCE - ALPHA_ZERO;
-    float C_L_raw = C_L_ALPHA * alpha_effective;
-    float C_L = clampf(C_L_raw, -C_L_MAX, C_L_MAX);
+    float C_L_raw = params->c_l_alpha * alpha_effective;
+    float C_L = clampf(C_L_raw, -params->c_l_max, params->c_l_max);
 
-    float C_D = C_D0 + K * C_L * C_L + K_SIDESLIP * beta * beta;
+    float C_D = params->c_d0 + params->k * C_L * C_L + K_SIDESLIP * beta * beta;
 
-    float L_mag = C_L * q_bar * WING_AREA;
-    float D_mag = C_D * q_bar * WING_AREA;
+    float L_mag = C_L * q_bar * params->wing_area;
+    float D_mag = C_D * q_bar * params->wing_area;
 
     Vec3 lift_dir = compute_lift_direction(vel_norm, right, body_up);
     Vec3 F_lift = mul3(lift_dir, L_mag);
     Vec3 F_drag = mul3(vel_norm, -D_mag);
 
-    float T_mag = compute_thrust(throttle, V);
+    // Thrust (inline with params)
+    float P_avail = params->engine_power * throttle;
+    float T_dynamic = (P_avail * params->eta_prop) / V;
+    float T_static = 0.3f * P_avail;
+    float T_mag = fminf(T_static, T_dynamic);
     Vec3 F_thrust = mul3(forward, T_mag);
-    Vec3 F_gravity = vec3(0, 0, -MASS * GRAVITY);
+    Vec3 F_gravity = vec3(0, 0, -params->mass * params->gravity);
 
     Vec3 F_total = add3(add3(add3(F_lift, F_drag), F_thrust), F_gravity);
-    deriv->v_dot = mul3(F_total, INV_MASS);
+    deriv->v_dot = mul3(F_total, params->inv_mass);
 
     // Angular rates and damping
     float p = state->omega.x;
     float q = state->omega.y;
     float r = state->omega.z;
 
-    float p_hat = p * WINGSPAN / (2.0f * V);
-    float q_hat = q * CHORD / (2.0f * V);
-    float r_hat = r * WINGSPAN / (2.0f * V);
+    float p_hat = p * params->wingspan / (2.0f * V);
+    float q_hat = q * params->chord / (2.0f * V);
+    float r_hat = r * params->wingspan / (2.0f * V);
 
     // Damping scaling - can boost damping at high speed and/or via multiplier
     float damping_scale = 1.0f + fmaxf(0.0f, V - params->control_v_ref) * params->damping_scale_slope;
     float total_damping = damping_scale * params->damping_multiplier;
 
     // Moment coefficients with scaled damping
-    float Cl = CL_BETA * beta + (CL_P * p_hat * total_damping) + CL_DELTA_A * delta_a + CL_DELTA_R * delta_r;
-    float Cm = CM_0 + CM_ALPHA * alpha + (CM_Q * q_hat * total_damping) + CM_DELTA_E * delta_e;
-    float Cn = CN_BETA * beta + (CN_R * r_hat * total_damping) + CN_DELTA_R * delta_r + CN_DELTA_A * delta_a;
+    float Cl = params->cl_beta * beta + (params->cl_p * p_hat * total_damping) + params->cl_delta_a * delta_a + CL_DELTA_R * delta_r;
+    float Cm = CM_0 + params->cm_alpha * alpha + (params->cm_q * q_hat * total_damping) + params->cm_delta_e * delta_e;
+    float Cn = params->cn_beta * beta + (params->cn_r * r_hat * total_damping) + params->cn_delta_r * delta_r + CN_DELTA_A * delta_a;
 
     // Dimensional moments
-    float L_moment = Cl * q_bar * WING_AREA * WINGSPAN;
-    float M_moment = -Cm * q_bar * WING_AREA * CHORD;
-    float N_moment = Cn * q_bar * WING_AREA * WINGSPAN;
+    float L_moment = Cl * q_bar * params->wing_area * params->wingspan;
+    float M_moment = -Cm * q_bar * params->wing_area * params->chord;
+    float N_moment = Cn * q_bar * params->wing_area * params->wingspan;
 
     // Angular acceleration (Euler's equations)
-    float gyro_roll = (IYY - IZZ) * q * r;
-    float gyro_pitch = (IZZ - IXX) * r * p;
-    float gyro_yaw = (IXX - IYY) * p * q;
+    float gyro_roll = (params->iyy - params->izz) * q * r;
+    float gyro_pitch = (params->izz - params->ixx) * r * p;
+    float gyro_yaw = (params->ixx - params->iyy) * p * q;
 
-    deriv->w_dot.x = (L_moment + gyro_roll) / IXX;
-    deriv->w_dot.y = (M_moment + gyro_pitch) / IYY;
-    deriv->w_dot.z = (N_moment + gyro_yaw) / IZZ;
+    deriv->w_dot.x = (L_moment + gyro_roll) / params->ixx;
+    deriv->w_dot.y = (M_moment + gyro_pitch) / params->iyy;
+    deriv->w_dot.z = (N_moment + gyro_yaw) / params->izz;
 
     // Quaternion kinematics
     Quat omega_q = {0.0f, state->omega.x, state->omega.y, state->omega.z};
@@ -820,28 +889,28 @@ static inline void step_plane_with_params(Plane *p, float *actions, float dt, Fl
     Vec3 accel = mul3(dv, 1.0f / dt);
     Vec3 body_up = quat_rotate(p->ori, vec3(0, 0, 1));
     float accel_up = dot3(accel, body_up);
-    p->g_force = accel_up * INV_GRAVITY + 1.0f;
+    p->g_force = accel_up * params->inv_gravity + 1.0f;
 
     // G-limit enforcement (same as step_plane_with_physics)
     float speed_before = norm3(p->vel);
-    if (p->g_force > G_LIMIT_POS) {
-        float excess_g = p->g_force - G_LIMIT_POS;
-        float excess_accel = excess_g * GRAVITY;
+    if (p->g_force > params->g_limit_pos) {
+        float excess_g = p->g_force - params->g_limit_pos;
+        float excess_accel = excess_g * params->gravity;
         Vec3 correction = mul3(body_up, excess_accel * dt);
         Vec3 vel_norm = normalize3(p->vel);
         float correction_along_vel = dot3(correction, vel_norm);
         Vec3 correction_perp = sub3(correction, mul3(vel_norm, correction_along_vel));
         p->vel = sub3(p->vel, correction_perp);
-        p->g_force = G_LIMIT_POS;
-    } else if (p->g_force < -G_LIMIT_NEG) {
-        float deficit_g = -G_LIMIT_NEG - p->g_force;
-        float deficit_accel = deficit_g * GRAVITY;
+        p->g_force = params->g_limit_pos;
+    } else if (p->g_force < -params->g_limit_neg) {
+        float deficit_g = -params->g_limit_neg - p->g_force;
+        float deficit_accel = deficit_g * params->gravity;
         Vec3 correction = mul3(body_up, deficit_accel * dt);
         Vec3 vel_norm = normalize3(p->vel);
         float correction_along_vel = dot3(correction, vel_norm);
         Vec3 correction_perp = sub3(correction, mul3(vel_norm, correction_along_vel));
         p->vel = add3(p->vel, correction_perp);
-        p->g_force = -G_LIMIT_NEG;
+        p->g_force = -params->g_limit_neg;
     }
 
     p->yaw_from_rudder = compute_sideslip(p);
@@ -1110,6 +1179,11 @@ static inline void step_plane_with_physics(Plane *p, float *actions, float dt) {
 static inline float calc_specific_energy(Plane *p) {
     float speed = norm3(p->vel);
     return p->pos.z + (speed * speed) / (2.0f * GRAVITY);
+}
+
+static inline float calc_specific_energy_with_params(Plane *p, FlightParams *params) {
+    float speed = norm3(p->vel);
+    return p->pos.z + (speed * speed) / (2.0f * params->gravity);
 }
 
 static inline void reset_plane(Plane *p, Vec3 pos, Vec3 vel) {

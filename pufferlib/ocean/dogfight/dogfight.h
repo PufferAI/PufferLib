@@ -407,8 +407,9 @@ typedef struct Dogfight {
     float prev_opp_aspect;
     float prev_opp_eadv;
 
-    // Runtime-configurable flight physics (for parameter sweeps)
+    // Runtime-configurable flight physics (for parameter sweeps + domain randomization)
     FlightParams flight_params;
+    float domain_randomization;  // 0.0 = off, 0.1 = +/-10% per-episode variation
 } Dogfight;
 
 #include "dogfight_observations.h"
@@ -2453,6 +2454,9 @@ void c_reset(Dogfight *env) {
     // Gun cone for hit detection - stays fixed at 5°
     env->cos_gun_cone = cosf(env->gun_cone_angle);
 
+    // Domain randomization: randomize physics params per-episode
+    randomize_flight_params(&env->flight_params, env->domain_randomization);
+
     // Spawn player at random position with base velocity
     // Use most of the sky (800-4200m) but avoid very low altitudes
     Vec3 pos = vec3(rndf(-500, 500), rndf(-500, 500), rndf(800, 4200));
@@ -2842,13 +2846,13 @@ void c_step(Dogfight *env) {
 
     // 8. Energy management reward: encourage maintaining/gaining energy
     // Asymmetric: +0.001 for gaining energy, -0.0005 for losing (incentivize climbing)
-    float player_energy = calc_specific_energy(p);
+    float player_energy = calc_specific_energy_with_params(p, &env->flight_params);
     float r_player_energy = (player_energy > p->prev_energy) ? 0.001f : -0.0005f;
     reward += r_player_energy;
     p->prev_energy = player_energy;
 
     // Opponent energy reward (applied to opponent_rewards at end)
-    float opp_energy = calc_specific_energy(o);
+    float opp_energy = calc_specific_energy_with_params(o, &env->flight_params);
     float r_opp_energy = (opp_energy > o->prev_energy) ? 0.001f : -0.0005f;
     o->prev_energy = opp_energy;
 
