@@ -44,7 +44,7 @@ typedef struct Client Client;
 
 typedef struct {
     Log log;                     // Required field (first)
-    float* observations;         // Required field - 6 floats [x, y, z, vx, vy, vz]
+    float* observations;         // Required field - 10 floats [x, y, z, vx, vy, vz, dist, speed, closing_vel, time_remaining]
     float* actions;              // Required field - 3 floats (thrust fractions [-1,1])
     float* rewards;              // Required field
     unsigned char* terminals;    // Required field

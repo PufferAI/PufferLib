@@ -828,7 +828,8 @@ class Drive(nn.Module):
 
 class RunningNorm(nn.Module):
     '''Running mean/std observation normalization (Chen et al. 2023).
-    Tracks statistics during training, normalizes to zero mean / unit variance.'''
+    Tracks statistics during training, normalizes to zero mean / unit variance.
+    '''
     def __init__(self, shape, clip=10.0):
         super().__init__()
         self.register_buffer('mean', torch.zeros(shape))
@@ -856,41 +857,13 @@ class RunningNorm(nn.Module):
                            -self.clip, self.clip)
 
 
-class RunningReturnNorm(nn.Module):
-    '''Return normalization (Chen et al. 2023, Eq. in paper).
-    Tracks running mean/var of returns across rollouts.
-    Normalizes: Ĝ = (G - μ(G)) / σ(G)'''
-    def __init__(self, init_var=2.25e16):
-        super().__init__()
-        self.register_buffer('mean', torch.zeros(1))
-        self.register_buffer('var', torch.tensor(float(init_var)))
-        self.register_buffer('count', torch.tensor(1e-4))
-
-    def update(self, returns):
-        batch_mean = returns.mean()
-        batch_var = returns.var()
-        batch_count = returns.numel()
-        delta = batch_mean - self.mean
-        total = self.count + batch_count
-        self.mean = self.mean + delta * batch_count / total
-        m_a = self.var * self.count
-        m_b = batch_var * batch_count
-        m2 = m_a + m_b + delta**2 * self.count * batch_count / total
-        self.var = m2 / total
-        self.count = total
-
-    def normalize(self, returns):
-        return (returns - self.mean) / torch.sqrt(self.var + 1e-8)
-
-
 class OrbitalDock(pufferlib.models.Default):
-    '''Separate actor/critic for orbital docking (STELLAR / Chen et al. 2023).
+    '''Separate actor/critic for orbital docking
 
-    Actor: encoder -> action mean (MLP, no LSTM)
+    Actor: encoder -> action mean
     Critic: independent encoder -> value (no shared weights with actor)
-    Running observation normalization applied to both paths.
-    Return normalization across rollouts (paper Eq. Ĝ_T).
-    Obs: 6 raw LVLH state values [x, y, z, vx, vy, vz].
+    Running observation normalization (`RunningNorm`) applied to both paths.
+    Obs: 10 values [x, y, z, vx, vy, vz, dist, speed, closing_vel, time_remaining].
     '''
     def __init__(self, env, hidden_size=128, **kwargs):
         super().__init__(env, hidden_size=hidden_size, **kwargs)
@@ -907,9 +880,6 @@ class OrbitalDock(pufferlib.models.Default):
 
         # Running observation normalization (SB3 VecNormalize: norm_obs=True)
         self.obs_norm = RunningNorm(num_obs, clip=10.0)
-
-        # Return normalization (Chen et al. paper)
-        self.return_norm = RunningReturnNorm()
 
         # Separate critic network (independent of actor encoder)
         self.critic_encoder = nn.Sequential(
