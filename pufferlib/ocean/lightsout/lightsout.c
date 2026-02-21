@@ -2,9 +2,25 @@
 #include <time.h>
 #include "lightsout.h"
 
+static LightsOut* g_env = NULL;
+
+static void demo_cleanup(void) {
+    if (g_env == NULL) {
+        return;
+    }
+    free(g_env->observations);
+    free(g_env->actions);
+    free(g_env->rewards);
+    free(g_env->terminals);
+    c_close(g_env);
+    g_env = NULL;
+}
+
 int demo(){
     srand((unsigned)time(NULL));
-    LightsOut env = {.grid_size = 7, .cell_size = 100, .client = NULL};
+    LightsOut env = {.grid_size = 5, .cell_size = 100, .client = NULL};
+    g_env = &env;
+    atexit(demo_cleanup);
     env.observations = (unsigned char*)calloc(env.grid_size * env.grid_size, sizeof(unsigned char));
     env.actions = (int*)calloc(1, sizeof(int));
     env.rewards = (float*)calloc(1, sizeof(float));
@@ -13,9 +29,7 @@ int demo(){
     c_reset(&env);
     env.client = make_client(env.cell_size, env.grid_size);
 
-    // printf("LightsOut template ran 10 placeholder steps.\n");
     while (!WindowShouldClose()) {
-        // User can take control of the first snake
         if (IsKeyPressed(KEY_UP)    || IsKeyPressed(KEY_W)) env.client->cursor_row = (env.client->cursor_row - 1 + env.grid_size) % env.grid_size;
         if (IsKeyPressed(KEY_DOWN)  || IsKeyPressed(KEY_S)) env.client->cursor_row = (env.client->cursor_row + 1) % env.grid_size;
         if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_A)) env.client->cursor_col = (env.client->cursor_col - 1 + env.grid_size) % env.grid_size;
@@ -30,11 +44,7 @@ int demo(){
         c_render(&env);
     }
 
-    free(env.observations);
-    free(env.actions);
-    free(env.rewards);
-    free(env.terminals);
-    c_close(&env);
+    demo_cleanup();
     return 0;
 }
 int main(void) {

@@ -67,8 +67,6 @@ if __name__ == "__main__":
     cache = 1024
     actions = np.zeros((cache, n), dtype=np.int32)
 
-    import time
-
     start = time.time()
     while time.time() - start < 10:
         env.step(actions[steps % cache])
