@@ -49,3 +49,4 @@ def train_until_target(env_name="puffer_lightsout", load_model_path=None):
 
 if __name__ == "__main__":
     train_until_target("puffer_lightsout", load_model_path=None)
+    # train_until_target("puffer_lightsout", load_model_path="latest")

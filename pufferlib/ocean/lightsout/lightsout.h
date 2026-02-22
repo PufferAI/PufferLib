@@ -27,9 +27,11 @@ typedef struct {
     int max_steps;
     int step_count;
     int lights_on;
+    int prev_action;
     int last_action;
     float episode_return;
     float ema;
+    float score_ema;
     float scramble_prob;
     unsigned char* grid;
     Client* client;
@@ -63,14 +65,15 @@ void init_lightsout(LightsOut* env) {
         memset(env->grid, 0, n * sizeof(unsigned char));
     }
 
-    if (env->ema > 0.65f) {
-        env->scramble_prob = fminf(0.5f, env->scramble_prob + 0.03f); // Increase scramble prob if EMA is high
-    } else if (env->ema < 0.35f) {
+    if (env->ema > 0.7f && env->score_ema > 0.0f) {
+        env->scramble_prob = fminf(0.5f, env->scramble_prob + 0.01f); // Increase scramble prob if EMA is high
+    } else if (env->ema < 0.3f) {
         env->scramble_prob = fmaxf(0.15f, env->scramble_prob - 0.01f); // Decrease scramble prob if EMA is low
     }
 
     env->step_count = 0;
     env->lights_on = 0;
+    env->prev_action = -1;
     env->last_action = -1;
     env->episode_return = 0.0f;
 
@@ -127,13 +130,16 @@ void c_step(LightsOut* env) {
         reward -= 0.5f; // Invalid action penalty.
     } else {
         if (atn == env->last_action) {
-            reward -= 0.05f; // Penalty for pressing the same cell twice in a row.
+            reward -= 0.03f; // Penalty for pressing the same cell twice in a row.
+        } else if (atn == env->prev_action) {
+            reward -= 0.02f; // Penalty for 2-step loop (A,B,A).
         }
         if (env->client != NULL) {
             env->client->cursor_row = atn / env->grid_size;
             env->client->cursor_col = atn % env->grid_size;
         }
         step_grid(env, atn);
+        env->prev_action = env->last_action;
         env->last_action = atn;
         int next_on = env->lights_on;
         reward += 0.005f * (float)(prev_on - next_on); // Dense shaping: improve when lights decrease.
@@ -153,6 +159,7 @@ void c_step(LightsOut* env) {
     env->rewards[0] = reward;
     env->episode_return += reward;
     if (env->terminals[0]) {
+        env->score_ema = 0.9f * env->score_ema + 0.1f * env->episode_return;
         env->log.n += 1.0f;
         env->log.score += env->episode_return;
         env->log.scramble_p += env->scramble_prob;
