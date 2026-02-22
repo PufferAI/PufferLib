@@ -66,7 +66,7 @@ void init_lightsout(LightsOut* env) {
     if (env->ema > 0.65f) {
         env->scramble_prob = fminf(0.5f, env->scramble_prob + 0.03f); // Increase scramble prob if EMA is high
     } else if (env->ema < 0.35f) {
-        env->scramble_prob = fmaxf(0.25f, env->scramble_prob - 0.01f); // Decrease scramble prob if EMA is low
+        env->scramble_prob = fmaxf(0.15f, env->scramble_prob - 0.01f); // Decrease scramble prob if EMA is low
     }
 
     env->step_count = 0;
@@ -218,4 +218,8 @@ void c_render(LightsOut* env) {
     }
 
     EndDrawing();
+
+    if (env->terminals[0]) {
+      WaitTime(0.5); // hold solved screen
+    }
 }

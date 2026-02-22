@@ -8,7 +8,7 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->cell_size = unpack(kwargs, "cell_size");
     env->max_steps = unpack(kwargs, "max_steps");
     env->ema = 0.0f;
-    env->scramble_prob = 0.25f;
+    env->scramble_prob = 0.2f;
     return 0;
 }
 
