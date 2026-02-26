@@ -117,8 +117,19 @@ metta = [
     'hydra-core',
     'duckdb',
     'raylib>=5.5.0',
-    'metta-common @ git+https://github.com/metta-ai/metta.git@main#subdirectory=common',
-    'metta-mettagrid @ git+https://github.com/metta-ai/metta.git@main#subdirectory=mettagrid',
+    'mettagrid @ git+https://github.com/metta-ai/mettagrid.git',
+    'cogames @ git+https://github.com/metta-ai/cogames.git',
+]
+
+cogames = [
+    'gym',
+    'gymnasium',
+    'omegaconf',
+    'hydra-core',
+    'duckdb',
+    'raylib>=5.5.0',
+    'mettagrid @ git+https://github.com/metta-ai/mettagrid.git',
+    'cogames @ git+https://github.com/metta-ai/cogames.git',
 ]
 
 microrts = [

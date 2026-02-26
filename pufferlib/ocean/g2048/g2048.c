@@ -1,29 +1,26 @@
 #include "g2048.h"
-#include "puffernet.h"
+#include "g2048_net.h"
 
-// Network with hidden size 256. Should go to puffernet
-LinearLSTM* make_linearlstm_256(Weights* weights, int num_agents, int input_dim, int logit_sizes[], int num_actions) {
-    LinearLSTM* net = calloc(1, sizeof(LinearLSTM));
-    net->num_agents = num_agents;
-    net->obs = calloc(num_agents*input_dim, sizeof(float));
-    int hidden_dim = 256;
-    net->encoder = make_linear(weights, num_agents, input_dim, hidden_dim);
-    net->gelu1 = make_gelu(num_agents, hidden_dim);
-    int atn_sum = 0;
-    for (int i = 0; i < num_actions; i++) {
-        atn_sum += logit_sizes[i];
-    }
-    net->actor = make_linear(weights, num_agents, hidden_dim, atn_sum);
-    net->value_fn = make_linear(weights, num_agents, hidden_dim, 1);
-    net->lstm = make_lstm(weights, num_agents, hidden_dim, hidden_dim);
-    net->multidiscrete = make_multidiscrete(num_agents, logit_sizes, num_actions);
-    return net;
-}
+#define OBS_DIM 289
+#define HIDDEN_DIM 512
+
+// Set NO_RENDER to true to run evals without the render
+#define NO_RENDER false
+#define NUM_EVAL_RUNS 200
 
 int main() {
     srand(time(NULL));
-    Game env;
-    unsigned char observations[SIZE * SIZE] = {0};
+    Game env = {
+        .can_go_over_65536 = true,
+        .reward_scaler = 0.0,
+        .endgame_env_prob = 0.0,
+        .scaffolding_ratio = 0.0,
+        .use_heuristic_rewards = false,
+        .snake_reward_weight = 0.0,
+    };
+    init(&env);
+
+    unsigned char observations[OBS_DIM] = {0};
     unsigned char terminals[1] = {0};
     int actions[1] = {0};
     float rewards[1] = {0};
@@ -33,17 +30,20 @@ int main() {
     env.actions = actions;
     env.rewards = rewards;
 
-    Weights* weights = load_weights("resources/g2048/g2048_weights.bin", 531973);
-    int logit_sizes[1] = {4};
-    LinearLSTM* net = make_linearlstm_256(weights, 1, 16, logit_sizes, 1);
+    Weights* weights = load_weights("resources/g2048/g2048_weights.bin", 3713541);
+    G2048Net* net = make_g2048net(weights, OBS_DIM, HIDDEN_DIM);
     c_reset(&env);
-    c_render(&env);
+    if (!NO_RENDER) c_render(&env);
+    printf("Starting...\n");
+    
+    clock_t start_time = clock();
 
     // Main game loop
+    int trial = 1;
     int frame = 0;
     int action = -1;
-    while (!WindowShouldClose()) {
-        c_render(&env);
+    while (NO_RENDER || !WindowShouldClose()) {
+        if (!NO_RENDER) c_render(&env); // Render at the start of the loop
         frame++;
         
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
@@ -57,24 +57,42 @@ int main() {
             continue;
         } else {
             action = 1;
-            for (int i = 0; i < 16; i++) {
-                net->obs[i] = env.observations[i];
-            }
-            forward_linearlstm(net, net->obs, env.actions);
+            forward_g2048net(net, env.observations, env.actions);
         }
 
         if (action > 0) {
-            c_step(&env);
+            step_without_reset(&env);
         }
 
-        if (IsKeyDown(KEY_LEFT_SHIFT) && action > 0) {
+        if (env.terminals[0] == 1) { 
+            clock_t end_time = clock();
+            double time_taken = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+            printf("Trial: %d, Ticks: %d, Max Tile: %d, Merge Score: %d, Time: %.2fs\n",
+                trial++, env.tick, 1 << env.max_tile, env.score, time_taken);
+            
+            if (!NO_RENDER) {
+                // Reached the 65536 tile, so full stop. Savor the moment!
+                if (env.max_tile >= 16) WaitTime(100000);
+                WaitTime(10);
+            }
+
+            c_reset(&env);
+            if (!NO_RENDER) c_render(&env);
+            start_time = clock();
+            frame = 0;
+        }
+
+        if (!NO_RENDER && IsKeyDown(KEY_LEFT_SHIFT) && action > 0) {
             // Don't need to be super reactive
             WaitTime(0.1);
-        }        
+        }
+
+        if (NO_RENDER && trial > NUM_EVAL_RUNS) break;
     }
 
-    free_linearlstm(net);
+    free_g2048net(net);
+    free(weights);
     c_close(&env);
-    printf("Game Over! Final Max Tile: %d\n", env.score);
+    printf("Finished %d trials.\n", NUM_EVAL_RUNS);
     return 0;
 }
