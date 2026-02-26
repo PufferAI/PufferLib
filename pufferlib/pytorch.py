@@ -191,6 +191,9 @@ def sample_logits(logits, action=None):
     if isinstance(logits, torch.distributions.Normal):
         batch = logits.loc.shape[0]
         if action is None:
+            mean = torch.nan_to_num(logits.loc, 0.0, 0.0, 0.0)
+            std = torch.nan_to_num(logits.scale, 1.0, 1.0, 1.0)
+            logits = torch.distributions.Normal(mean, std)
             action = logits.sample().view(batch, -1)
 
         log_probs = logits.log_prob(action.view(batch, -1)).sum(1)

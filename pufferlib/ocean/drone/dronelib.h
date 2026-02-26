@@ -1,16 +1,13 @@
 // Originally made by Sam Turner and Finlay Sanders, 2025.
 // Included in pufferlib under the original project's MIT license.
-// https://github.com/stmio/drone
+// https://github.com/tensaur/drone
+
+#pragma once
 
 #include <float.h>
 #include <math.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#include "raylib.h"
 
 // Visualisation properties
 #define WIDTH 1080
@@ -36,12 +33,13 @@
 #define BASE_J_MOT 1e-5f     // kgm^2 (Motor rotational inertia)
 
 // Simulation properties
-#define GRID_X 10.0f
-#define GRID_Y 10.0f
+#define GRID_X 30.0f
+#define GRID_Y 30.0f
 #define GRID_Z 10.0f
 #define MARGIN_X (GRID_X - 1)
 #define MARGIN_Y (GRID_Y - 1)
 #define MARGIN_Z (GRID_Z - 1)
+#define RING_RADIUS 2.0f
 #define V_TARGET 0.05f
 #define DT 0.05f
 #define DT_RNG 0.0f
@@ -56,6 +54,7 @@ struct Log {
     float rings_passed;
     float collision_rate;
     float oob;
+    float ring_collision;
     float timeout;
     float score;
     float perf;
@@ -70,117 +69,13 @@ typedef struct {
     float x, y, z;
 } Vec3;
 
-static inline float clampf(float v, float min, float max) {
-    if (v < min)
-        return min;
-    if (v > max)
-        return max;
-    return v;
-}
-
-static inline float rndf(float a, float b) {
-    return a + ((float)rand() / (float)RAND_MAX) * (b - a);
-}
-
-static inline Vec3 add3(Vec3 a, Vec3 b) { return (Vec3){a.x + b.x, a.y + b.y, a.z + b.z}; }
-
-static inline Quat add_quat(Quat a, Quat b) { return (Quat){a.w + b.w, a.x + b.x, a.y + b.y, a.z + b.z}; }
-
-static inline Vec3 sub3(Vec3 a, Vec3 b) { return (Vec3){a.x - b.x, a.y - b.y, a.z - b.z}; }
-
-static inline Vec3 scalmul3(Vec3 a, float b) { return (Vec3){a.x * b, a.y * b, a.z * b}; }
-
-static inline Quat scalmul_quat(Quat a, float b) { return (Quat){a.w * b, a.x * b, a.y * b, a.z * b}; }
-
-static inline float dot3(Vec3 a, Vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-
-static inline float norm3(Vec3 a) { return sqrtf(dot3(a, a)); }
-
-static inline void clamp3(Vec3 *vec, float min, float max) {
-    vec->x = clampf(vec->x, min, max);
-    vec->y = clampf(vec->y, min, max);
-    vec->z = clampf(vec->z, min, max);
-}
-
-static inline void clamp4(float a[4], float min, float max) {
-    a[0] = clampf(a[0], min, max);
-    a[1] = clampf(a[1], min, max);
-    a[2] = clampf(a[2], min, max);
-    a[3] = clampf(a[3], min, max);
-}
-
-static inline Quat quat_mul(Quat q1, Quat q2) {
-    Quat out;
-    out.w = q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z;
-    out.x = q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y;
-    out.y = q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x;
-    out.z = q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w;
-    return out;
-}
-
-static inline void quat_normalize(Quat *q) {
-    float n = sqrtf(q->w * q->w + q->x * q->x + q->y * q->y + q->z * q->z);
-    if (n > 0.0f) {
-        q->w /= n;
-        q->x /= n;
-        q->y /= n;
-        q->z /= n;
-    }
-}
-
-static inline Vec3 quat_rotate(Quat q, Vec3 v) {
-    Quat qv = {0.0f, v.x, v.y, v.z};
-    Quat tmp = quat_mul(q, qv);
-    Quat q_conj = {q.w, -q.x, -q.y, -q.z};
-    Quat res = quat_mul(tmp, q_conj);
-    return (Vec3){res.x, res.y, res.z};
-}
-
-static inline Quat quat_inverse(Quat q) { return (Quat){q.w, -q.x, -q.y, -q.z}; }
-
-Quat rndquat() {
-    float u1 = rndf(0.0f, 1.0f);
-    float u2 = rndf(0.0f, 1.0f);
-    float u3 = rndf(0.0f, 1.0f);
-
-    float sqrt_1_minus_u1 = sqrtf(1.0f - u1);
-    float sqrt_u1 = sqrtf(u1);
-
-    float pi_2_u2 = 2.0f * M_PI * u2;
-    float pi_2_u3 = 2.0f * M_PI * u3;
-
-    Quat q;
-    q.w = sqrt_1_minus_u1 * sinf(pi_2_u2);
-    q.x = sqrt_1_minus_u1 * cosf(pi_2_u2);
-    q.y = sqrt_u1 * sinf(pi_2_u3);
-    q.z = sqrt_u1 * cosf(pi_2_u3);
-
-    return q;
-}
-
 typedef struct {
     Vec3 pos;
+    Vec3 vel;
     Quat orientation;
     Vec3 normal;
     float radius;
-} Ring;
-
-Ring rndring(float radius) {
-    Ring ring;
-
-    ring.pos.x = rndf(-GRID_X + 2*radius, GRID_X - 2*radius);
-    ring.pos.y = rndf(-GRID_Y + 2*radius, GRID_Y - 2*radius);
-    ring.pos.z = rndf(-GRID_Z + 2*radius, GRID_Z - 2*radius);
-
-    ring.orientation = rndquat();
-
-    Vec3 base_normal = {0.0f, 0.0f, 1.0f};
-    ring.normal = quat_rotate(ring.orientation, base_normal);
-
-    ring.radius = radius;
-
-    return ring;
-}
+} Target;
 
 typedef struct {
     Vec3 pos[TRAIL_LENGTH];
@@ -228,24 +123,145 @@ typedef struct {
     // core state and parameters
     State state;
     Params params;
-
-    // helpers for ring/swarm logic
-    Vec3 spawn_pos;
     Vec3 prev_pos;
-    Vec3 target_pos;
-    Vec3 target_vel;
+
+    // current target
+    Target* target;
+
+    // buffer agent can draw more targets from,
+    // allows agents to continue on their own separate paths
+    Target* buffer;
+    int buffer_idx;
+    int buffer_size;
 
     // logging utils
-    float last_abs_reward;
-    float last_target_reward;
-    float last_collision_reward;
+    float last_dist_reward;
     float episode_return;
-    float collisions;
     int episode_length;
     float score;
-    int ring_idx;
+    float collisions;
 } Drone;
 
+static inline float clampf(float v, float min, float max) {
+    if (v < min)
+        return min;
+    if (v > max)
+        return max;
+    return v;
+}
+
+static inline float rndf(float a, float b) {
+    return a + ((float)rand() / (float)RAND_MAX) * (b - a);
+}
+
+static inline Vec3 add3(Vec3 a, Vec3 b) { 
+    return (Vec3){a.x + b.x, a.y + b.y, a.z + b.z}; 
+}
+
+static inline Quat add_quat(Quat a, Quat b) { 
+    return (Quat){a.w + b.w, a.x + b.x, a.y + b.y, a.z + b.z}; 
+}
+
+static inline Vec3 sub3(Vec3 a, Vec3 b) { 
+    return (Vec3){a.x - b.x, a.y - b.y, a.z - b.z}; 
+}
+
+static inline Vec3 scalmul3(Vec3 a, float b) { 
+    return (Vec3){a.x * b, a.y * b, a.z * b}; 
+}
+
+static inline Quat scalmul_quat(Quat a, float b) { 
+    return (Quat){a.w * b, a.x * b, a.y * b, a.z * b}; 
+}
+
+static inline float dot3(Vec3 a, Vec3 b) { 
+    return a.x * b.x + a.y * b.y + a.z * b.z; 
+}
+
+static inline float norm3(Vec3 a) { 
+    return sqrtf(dot3(a, a)); 
+}
+
+static inline void clamp3(Vec3 *vec, float min, float max) {
+    vec->x = clampf(vec->x, min, max);
+    vec->y = clampf(vec->y, min, max);
+    vec->z = clampf(vec->z, min, max);
+}
+
+static inline void clamp4(float a[4], float min, float max) {
+    a[0] = clampf(a[0], min, max);
+    a[1] = clampf(a[1], min, max);
+    a[2] = clampf(a[2], min, max);
+    a[3] = clampf(a[3], min, max);
+}
+
+static inline Quat quat_mul(Quat q1, Quat q2) {
+    Quat out;
+    out.w = q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z;
+    out.x = q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y;
+    out.y = q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x;
+    out.z = q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w;
+    return out;
+}
+
+static inline void quat_normalize(Quat *q) {
+    float n = sqrtf(q->w * q->w + q->x * q->x + q->y * q->y + q->z * q->z);
+    if (n > 0.0f) {
+        q->w /= n;
+        q->x /= n;
+        q->y /= n;
+        q->z /= n;
+    }
+}
+
+static inline Vec3 quat_rotate(Quat q, Vec3 v) {
+    Quat qv = {0.0f, v.x, v.y, v.z};
+    Quat tmp = quat_mul(q, qv);
+    Quat q_conj = {q.w, -q.x, -q.y, -q.z};
+    Quat res = quat_mul(tmp, q_conj);
+    return (Vec3){res.x, res.y, res.z};
+}
+
+static inline Quat quat_inverse(Quat q) { 
+    return (Quat){q.w, -q.x, -q.y, -q.z}; 
+}
+
+Quat rndquat() {
+    float u1 = rndf(0.0f, 1.0f);
+    float u2 = rndf(0.0f, 1.0f);
+    float u3 = rndf(0.0f, 1.0f);
+
+    float sqrt_1_minus_u1 = sqrtf(1.0f - u1);
+    float sqrt_u1 = sqrtf(u1);
+
+    float pi_2_u2 = 2.0f * M_PI * u2;
+    float pi_2_u3 = 2.0f * M_PI * u3;
+
+    Quat q;
+    q.w = sqrt_1_minus_u1 * sinf(pi_2_u2);
+    q.x = sqrt_1_minus_u1 * cosf(pi_2_u2);
+    q.y = sqrt_u1 * sinf(pi_2_u3);
+    q.z = sqrt_u1 * cosf(pi_2_u3);
+
+    return q;
+}
+
+Target rndring(float radius) {
+    Target ring = {0};
+
+    ring.pos.x = rndf(-GRID_X + 2*radius, GRID_X - 2*radius);
+    ring.pos.y = rndf(-GRID_Y + 2*radius, GRID_Y - 2*radius);
+    ring.pos.z = rndf(-GRID_Z + 2*radius, GRID_Z - 2*radius);
+
+    ring.orientation = rndquat();
+
+    Vec3 base_normal = {0.0f, 0.0f, 1.0f};
+    ring.normal = quat_rotate(ring.orientation, base_normal);
+
+    ring.radius = radius;
+
+    return ring;
+}
 
 void init_drone(Drone* drone, float size, float dr) {
     drone->params.arm_len = size / 2.0f;
@@ -344,11 +360,20 @@ void compute_derivatives(State* state, Params* params, float* actions, StateDeri
     q_dot.y *= 0.5f;
     q_dot.z *= 0.5f;
 
-    // body frame torques
+    // body frame torques (plus copter)
+    //Vec3 Tau_prop;
+    //Tau_prop.x = params->arm_len*(T[1] - T[3]);
+    //Tau_prop.y = params->arm_len*(T[2] - T[0]);
+    //Tau_prop.z = params->k_drag*(T[0] - T[1] + T[2] - T[3]);
+
+    // body frame torques (cross copter)
+    // M1=FR, M2=BR, M3=BL, M4=FL
+    // https://www.bitcraze.io/documentation/hardware/crazyflie_2_1_brushless/crazyflie_2_1_brushless-datasheet.pdf
+    float arm_factor = params->arm_len / sqrtf(2.0f);
     Vec3 Tau_prop;
-    Tau_prop.x = params->arm_len*(T[1] - T[3]);
-    Tau_prop.y = params->arm_len*(T[2] - T[0]);
-    Tau_prop.z = params->k_drag*(T[0] - T[1] + T[2] - T[3]);
+    Tau_prop.x = arm_factor * ((T[0] + T[1]) - (T[3] + T[2]));
+    Tau_prop.y = arm_factor * ((T[0] + T[3]) - (T[1] + T[2]));
+    Tau_prop.z = params->k_drag * (-T[0] + T[1] - T[2] + T[3]);
 
     // torque from chaging motor speeds
     float Tau_mot_z = params->j_mot * (rpm_dot[0] - rpm_dot[1] + rpm_dot[2] - rpm_dot[3]);
@@ -380,7 +405,7 @@ void compute_derivatives(State* state, Params* params, float* actions, StateDeri
     }
 }
 
-static void step(State* initial, StateDerivative* deriv, float dt, State* output) {
+void step(State* initial, StateDerivative* deriv, float dt, State* output) {
     output->pos = add3(initial->pos, scalmul3(deriv->vel, dt));
     output->vel = add3(initial->vel, scalmul3(deriv->v_dot, dt));
     output->quat = add_quat(initial->quat, scalmul_quat(deriv->q_dot, dt));
@@ -448,18 +473,18 @@ void move_drone(Drone* drone, float* actions) {
     clamp3(&drone->state.omega, -drone->params.max_omega, drone->params.max_omega);
 }
 
-void reset_rings(Ring* ring_buffer, int num_rings, float ring_radius) {
-    ring_buffer[0] = rndring(ring_radius);
+void reset_rings(Target* ring_buffer, int num_rings) {
+    ring_buffer[0] = rndring(RING_RADIUS);
     
     // ensure rings are spaced at least 2*ring_radius apart
     for (int i = 1; i < num_rings; i++) {
         do {
-            ring_buffer[i] = rndring(ring_radius);
-        }  while (norm3(sub3(ring_buffer[i].pos, ring_buffer[i - 1].pos)) < 2.0f*ring_radius);
-    }   
+            ring_buffer[i] = rndring(RING_RADIUS);
+        }  while (norm3(sub3(ring_buffer[i].pos, ring_buffer[i - 1].pos)) < 2.0f * RING_RADIUS);
+    }
 }
 
-float check_ring(Drone* drone, Ring* ring) {
+int check_ring(Drone* drone, Target* ring) {
     // previous dot product negative if on the 'entry' side of the ring's plane
     float prev_dot = dot3(sub3(drone->prev_pos, ring->pos), ring->normal);
 
@@ -480,10 +505,41 @@ float check_ring(Drone* drone, Ring* ring) {
 
         // reward or terminate based on distance to ring center
         if (dist < (ring->radius - 0.5) && valid_dir) {
-            return 1.0f;
+            return 1;
         } else if (dist < ring->radius + 0.5) {
-            return -1.0f;
+            return -1;
         }
     }
-    return 0.0f;
+
+    return 0;
 }
+
+Drone *nearest_drone(Drone *agent, Drone *others, int num_agents) {
+  float min_dist = FLT_MAX;
+  Drone *nearest = NULL;
+
+  for (int i = 0; i < num_agents; i++) {
+    Drone *other = &others[i];
+    if (other == agent) continue;
+
+    float dist = norm3(sub3(agent->state.pos, other->state.pos));
+
+    if (dist < min_dist) {
+      min_dist = dist;
+      nearest = other;
+    }
+  }
+
+  return nearest;
+}
+
+bool check_collision(Drone *agent, Drone *others, int num_agents) {
+  if (num_agents <= 1) return false;
+
+  Drone *nearest = nearest_drone(agent, others, num_agents);
+  Vec3 to_nearest = sub3(agent->state.pos, nearest->state.pos);
+  float nearest_dist = norm3(to_nearest);
+
+  return nearest_dist < 0.1f;
+}
+
