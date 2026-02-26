@@ -188,8 +188,9 @@ class TestMakeBackend:
 
 class TestPromise:
     def test_not_expired(self):
-        p = Promise(pid=1, data="x", ttl_s=100.0, importance=0.5, created_ts=time.time())
-        assert not p.expired(time.time())
+        now = time.time()
+        p = Promise(pid=1, data="x", ttl_s=100.0, importance=0.5, created_ts=now)
+        assert not p.expired(now)
 
     def test_expired(self):
         p = Promise(pid=1, data="x", ttl_s=1.0, importance=0.5, created_ts=time.time() - 2.0)
@@ -224,8 +225,11 @@ class TestMemoryController:
 
     def test_expired_promises_not_stored(self):
         mc = MemoryController(pool_size=64, store_dir=None)
+        # Use a very short TTL; the promise will have expired by the time
+        # process_promises is called since created_ts < now - ttl_s.
         mc.write(pid=99, data="old", ttl_s=0.0, importance=0.5)
-        time.sleep(0.01)
+        # Manually age the promise so it's guaranteed expired
+        mc.promises[0].created_ts -= 1.0
         mc.process_promises()
 
         slot = mc.backend.phi(99, 64)
