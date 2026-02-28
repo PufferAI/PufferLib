@@ -127,6 +127,7 @@ MAKE_FUNCTIONS = {
     'enduro': 'Enduro',
     'tetris': 'Tetris',
     'cartpole': 'Cartpole',
+    'minatar_freeway': 'MinAtarFreeway',
     'moba': 'Moba',
     'matsci': 'Matsci',
     'memory': 'Memory',
