@@ -22,12 +22,11 @@
 typedef enum {
     OBS_MOMENTUM_GFORCE = 0,    // G-force awareness (17 obs) — proven winner from df24
     OBS_PILOT = 1,              // Pilot awareness (22 obs)
-    OBS_RATES_LEAN = 2,         // Scheme 0 + tactical rates (22 obs)
-    OBS_RATES_FULL = 3,         // Scheme 1 + tactical rates (27 obs)
+    OBS_OPPONENT_AWARE = 2,     // S1 + opp up vector + opp speed (26 obs)
     OBS_SCHEME_COUNT
 } ObsScheme;
 
-static const int OBS_SIZES[OBS_SCHEME_COUNT] = {17, 22, 22, 27};
+static const int OBS_SIZES[OBS_SCHEME_COUNT] = {17, 22, 26};
 
 typedef enum {
     CURRICULUM_TAIL_CHASE = 0,       // Stage 0: Easiest - opponent ahead, same heading
@@ -378,7 +377,7 @@ typedef struct Dogfight {
     int vertical_level;           // Vertical sub-level: 0=apex, 1=past-vertical, 2=mid-climb, 3=merge, 4=pre-merge
     int vertical_spawn_used;      // 1 if vertical spawn was triggered this reset (skip speed randomization)
 
-    // Previous values for rate observations (schemes 4, 5)
+    // Previous values for rate observations (kept for preserved rate functions)
     // Player perspective
     float prev_player_target_az;
     float prev_player_target_el;

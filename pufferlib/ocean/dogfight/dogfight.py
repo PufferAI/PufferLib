@@ -28,8 +28,7 @@ class AutopilotMode:
 OBS_SIZES = {
     0: 17,   # MOMENTUM_GFORCE: G-force awareness (proven winner from df24)
     1: 22,   # PILOT: Pilot awareness + energy
-    2: 22,   # RATES_LEAN: Scheme 0 + tactical rates
-    3: 27,   # RATES_FULL: Scheme 1 + tactical rates
+    2: 26,   # OPPONENT_AWARE: S1 + opp up vector + opp speed
 }
 
 

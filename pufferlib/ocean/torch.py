@@ -542,9 +542,6 @@ class TowerClimb(nn.Module):
 
 class DogfightPolicy(Policy):
     def __init__(self, env, hidden_size=128, **kwargs):
-        obs_size = np.prod(env.single_observation_space.shape)
-        if obs_size > 22:
-            hidden_size *= 2
         super().__init__(env, hidden_size=hidden_size, **kwargs)
 
 
