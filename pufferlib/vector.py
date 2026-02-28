@@ -518,6 +518,12 @@ class Multiprocessing:
         self.driver_env.close()
         for p in self.processes:
             p.terminate()
+        for p in self.processes:
+            p.join(timeout=5)
+        for pipe in self.send_pipes:
+            pipe.close()
+        for pipe in self.recv_pipes:
+            pipe.close()
 
 class Ray():
     '''Runs environments in parallel on multiple processes using Ray
