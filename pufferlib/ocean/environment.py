@@ -148,6 +148,7 @@ MAKE_FUNCTIONS = {
     'trash_pickup': 'TrashPickupEnv',
     'tower_climb': 'TowerClimb',
     'grid': 'Grid',
+    'grixel': 'Grixel',
     'shared_pool': 'PyCPR',
     'impulse_wars': 'ImpulseWars',
     'drive': 'Drive',

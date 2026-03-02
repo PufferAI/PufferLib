@@ -1,6 +1,10 @@
 from types import SimpleNamespace
 from typing import Any, Tuple
 
+
+import pdb 
+
+
 from gymnasium import spaces
 
 from torch import nn
@@ -15,6 +19,8 @@ import pufferlib.models
 from pufferlib.models import Default as Policy
 from pufferlib.models import Convolutional as Conv
 Recurrent = pufferlib.models.LSTMWrapper
+#RecurrentPlastic = pufferlib.models.LSTMWrapperPlastic
+#RecurrentTransformer = pufferlib.models.LSTMTransformerWrapper
 from pufferlib.pytorch import layer_init, _nativize_dtype, nativize_tensor
 import numpy as np
 
@@ -250,6 +256,289 @@ class Snake(pufferlib.models.Default):
         observations = F.one_hot(observations.long(), 8).view(-1, 11*11*8).float()
         super().encode_observations(observations, state)
 '''
+
+class Grixel_previous(nn.Module):
+    def __init__(self, env, cnn_channels=32, hidden_size=128, **kwargs):
+        super().__init__()
+        self.hidden_size = hidden_size
+
+        
+        self.is_pixelized = env.pixelize;
+        self.block_size= env.block_size;
+        self.obs_diameter = env.obs_diameter; # hard-coded to 11 (* block_size if pixelized) in various places of the code 
+        self.additional_obs_size = env.additional_obs_size;
+        
+        if self.is_pixelized:
+            self.network = nn.Sequential(
+                pufferlib.pytorch.layer_init(
+                    nn.Conv2d(1, cnn_channels, self.block_size, stride=self.block_size)),
+                # output should now have shape 11 x 11 x cnn_channels - should be independent of block_size
+                nn.LeakyReLU(),
+                pufferlib.pytorch.layer_init(
+                    nn.Conv2d(cnn_channels, cnn_channels, 3, stride=2)),
+                # output should now have shape 5 x 5 x cnn_channels
+                pufferlib.pytorch.layer_init(
+                    nn.Conv2d(cnn_channels, cnn_channels, 3, stride=2)),
+                # output should now have shape 2 x 2 x cnn_channels
+                nn.Flatten(),
+                nn.LeakyReLU(),
+                pufferlib.pytorch.layer_init(nn.Linear(4 * cnn_channels, hidden_size)),
+                nn.LeakyReLU(),
+            )
+        else:
+            self.network = nn.Sequential(
+                pufferlib.pytorch.layer_init(
+                    nn.Conv2d(32, cnn_channels, 5, stride=3)),
+                nn.ReLU(),
+                pufferlib.pytorch.layer_init(
+                    nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1)),
+                nn.Flatten(),
+                nn.ReLU(),
+                pufferlib.pytorch.layer_init(nn.Linear(cnn_channels, hidden_size)),
+                nn.ReLU(),
+            )
+
+
+        self.additional_network = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(self.additional_obs_size, hidden_size//2)),
+            #pufferlib.pytorch.layer_init(nn.Linear(self.additional_obs_size, 16)),
+            #pufferlib.pytorch.layer_init(nn.Linear(self.additional_obs_size, hidden_size)),
+            nn.LeakyReLU(),
+        )
+        self.mixer_network= nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size + hidden_size//2, hidden_size)),
+            #pufferlib.pytorch.layer_init(nn.Linear(hidden_size + 16, hidden_size)),
+            #nn.Linear(self.additional_obs_size, hidden_size),
+            nn.LeakyReLU(),
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
+            #nn.Linear(self.additional_obs_size, hidden_size),
+            nn.LeakyReLU(),
+        )
+
+        self.is_continuous = isinstance(env.single_action_space, pufferlib.spaces.Box)
+        if self.is_continuous:
+            self.decoder_mean = pufferlib.pytorch.layer_init(
+                nn.Linear(hidden_size, env.single_action_space.shape[0]), std=0.01)
+            self.decoder_logstd = nn.Parameter(torch.zeros(
+                1, env.single_action_space.shape[0]))
+        else:
+            num_actions = env.single_action_space.n
+            self.actor = pufferlib.pytorch.layer_init(
+                nn.Linear(hidden_size, num_actions), std=0.01)
+
+        self.value_fn = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, 1), std=1)
+
+    def forward(self, observations, state=None):
+        hidden = self.encode_observations(observations)
+        actions, value = self.decode_actions(hidden)
+        return actions, value
+
+    def forward_train(self, x, state=None):
+        return self.forward(x, state)
+    def forward_eval(self, x, state=None):
+        return self.forward(x, state)
+
+    def encode_observations(self, observations, state=None):
+        if self.is_pixelized:
+            # Here the visual observation has shape 1024 x (3025+add_obs_size)
+            # (3025 = 55*55)
+            # Magic incantation that turns a linear sequence of texture data
+            # into a square map of square blocks:
+            # Note: Batch size is variable over time, sometimes 1024, sometimes 8K...
+            hidden = observations[:,:-self.additional_obs_size].reshape((-1, 11, 11, self.block_size, self.block_size)).permute((0, 1,3,2,4)).reshape((-1, 11*self.block_size, 11*self.block_size)).view((-1,1,11*self.block_size, 11*self.block_size)).float()
+            #hidden = torch.zeros((observations.shape[0],1,55,55), device='cuda')
+            if not( torch.all(hidden>=0) and torch.all(hidden<100)):
+                print(">>> ERROR >>>> Out-of-range visual observations")
+                pdb.set_trace()
+            #debug, use if the observation "pixels" are actually all set to tile number to get symbolic inputs:
+            #hidden = hidden[:, 0, ::5, ::5].long()
+            #hidden = F.one_hot(hidden, 32).permute(0, 3, 1, 2).float()
+        else:
+            hidden = observations.view(-1, 11, 11).long()
+            hidden = F.one_hot(hidden, 32).permute(0, 3, 1, 2).float()
+        #debugging
+        #out = hidden
+        #for part in self.network.children():
+        #    out=part(out)
+        #    print(part, "Output shape:", out.shape)
+        #pdb.set_trace()
+
+        hidden = self.mixer_network(torch.cat((self.network(hidden),  self.additional_network(observations[:,-self.additional_obs_size:].float())) , dim=1))
+        #hidden = self.network(hidden) +  self.additional_network(observations[:,-self.additional_obs_size:].float())
+            
+        #hidden = torch.zeros((observations.shape[0], 512), device='cuda')
+
+        return hidden
+
+    def decode_actions(self, flat_hidden, state=None):
+        value = self.value_fn(flat_hidden)
+        if self.is_continuous:
+            mean = self.decoder_mean(flat_hidden)
+            logstd = self.decoder_logstd.expand_as(mean)
+            std = torch.exp(logstd)
+            probs = torch.distributions.Normal(mean, std)
+            batch = flat_hidden.shape[0]
+            return probs, value
+        else:
+            action = self.actor(flat_hidden)
+            return action, value
+
+
+class Grixel(nn.Module):
+    def __init__(self, env, cnn_channels=32, hidden_size=128, **kwargs):
+        super().__init__()
+        self.hidden_size = hidden_size
+
+        
+        self.is_pixelized = env.pixelize;
+        self.block_size= env.block_size;
+        self.obs_diameter = env.obs_diameter; # hard-coded to 11 (* block_size if pixelized) in various places of the code 
+        self.additional_obs_size = env.additional_obs_size;
+        
+        if self.is_pixelized:
+            self.network = nn.Sequential(
+                # Pure MLP
+                #nn.Flatten(),
+                #pufferlib.pytorch.layer_init(
+                #    nn.Linear(55*55, hidden_size)),
+                #nn.LeakyReLU(),
+                #pufferlib.pytorch.layer_init(
+                #    nn.Linear(hidden_size, hidden_size)),
+                #nn.LeakyReLU(),
+                #pufferlib.pytorch.layer_init(
+                #    nn.Linear(hidden_size, hidden_size)),
+                #nn.LeakyReLU(),
+
+
+                # Convolutional, increasing NumChannels
+                pufferlib.pytorch.layer_init(
+                    nn.Conv2d(1, cnn_channels, self.block_size, stride=self.block_size)),
+                # output should now have shape 11 x 11 x cnn_channels - should be independent of block_size
+                nn.LeakyReLU(),
+                pufferlib.pytorch.layer_init(
+                    nn.Conv2d(cnn_channels, 2*cnn_channels, 3, stride=2)),
+                # output should now have shape 5 x 5 x 2*cnn_channels
+                pufferlib.pytorch.layer_init(
+                    nn.Conv2d(2*cnn_channels, 4*cnn_channels, 3, stride=2)),
+                # output should now have shape 2 x 2 x 4*cnn_channels
+                nn.Flatten(),
+                nn.LeakyReLU(),
+                pufferlib.pytorch.layer_init(nn.Linear(4 * 4 * cnn_channels, hidden_size)),
+                nn.LeakyReLU(),
+                
+
+                ## Convolutional, short (no bottleneck, no channel expansion)
+                #pufferlib.pytorch.layer_init(
+                #    nn.Conv2d(1, cnn_channels, self.block_size, stride=self.block_size)),
+                ## output should now have shape 11 x 11 x cnn_channels - should be independent of block_size
+                #nn.LeakyReLU(),
+                #pufferlib.pytorch.layer_init(
+                #    nn.Conv2d(cnn_channels, cnn_channels, 3, stride=2)),
+                ## output should now have shape 5 x 5 x cnn_channels
+                #nn.Flatten(),
+                #nn.LeakyReLU(),
+                #pufferlib.pytorch.layer_init(nn.Linear(5 * 5 * cnn_channels, hidden_size)),
+                #nn.LeakyReLU(),
+            )
+        else:
+            self.network = nn.Sequential(
+                pufferlib.pytorch.layer_init(
+                    nn.Conv2d(32, cnn_channels, 5, stride=3)),
+                nn.ReLU(),
+                pufferlib.pytorch.layer_init(
+                    nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1)),
+                nn.Flatten(),
+                nn.ReLU(),
+                pufferlib.pytorch.layer_init(nn.Linear(cnn_channels, hidden_size)),
+                nn.ReLU(),
+            )
+
+
+        self.additional_network = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(self.additional_obs_size, hidden_size//2)),
+            #pufferlib.pytorch.layer_init(nn.Linear(self.additional_obs_size, 16)),
+            #pufferlib.pytorch.layer_init(nn.Linear(self.additional_obs_size, hidden_size)),
+            nn.LeakyReLU(),
+        )
+        self.mixer_network= nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size + hidden_size//2, hidden_size)),
+            #pufferlib.pytorch.layer_init(nn.Linear(hidden_size + 16, hidden_size)),
+            #nn.Linear(self.additional_obs_size, hidden_size),
+            nn.LeakyReLU(),
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
+            #nn.Linear(self.additional_obs_size, hidden_size),
+            nn.LeakyReLU(),
+        )
+
+        self.is_continuous = isinstance(env.single_action_space, pufferlib.spaces.Box)
+        if self.is_continuous:
+            self.decoder_mean = pufferlib.pytorch.layer_init(
+                nn.Linear(hidden_size, env.single_action_space.shape[0]), std=0.01)
+            self.decoder_logstd = nn.Parameter(torch.zeros(
+                1, env.single_action_space.shape[0]))
+        else:
+            num_actions = env.single_action_space.n
+            self.actor = pufferlib.pytorch.layer_init(
+                nn.Linear(hidden_size, num_actions), std=0.01)
+
+        self.value_fn = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, 1), std=1)
+
+    def forward(self, observations, state=None):
+        hidden = self.encode_observations(observations)
+        actions, value = self.decode_actions(hidden)
+        return actions, value
+
+    def forward_train(self, x, state=None):
+        return self.forward(x, state)
+    def forward_eval(self, x, state=None):
+        return self.forward(x, state)
+
+    def encode_observations(self, observations, state=None):
+        if self.is_pixelized:
+            # Here the visual observation has shape 1024 x (3025+add_obs_size)
+            # (3025 = 55*55)
+            # Magic incantation that turns a linear sequence of texture data
+            # into a square map of square blocks:
+            # Note: Batch size is variable over time, sometimes 1024, sometimes 8K...
+            hidden = observations[:,:-self.additional_obs_size].reshape((-1, 11, 11, self.block_size, self.block_size)).permute((0, 1,3,2,4)).reshape((-1, 11*self.block_size, 11*self.block_size)).view((-1,1,11*self.block_size, 11*self.block_size)).float()
+            #hidden = torch.zeros((observations.shape[0],1,55,55), device='cuda')
+            if not( torch.all(hidden>=0) and torch.all(hidden<100)):
+                print("Out-of-range visual observations")
+                pdb.set_trace()
+            #debug, use if the observation "pixels" are actually all set to tile number to get symbolic inputs:
+            #hidden = hidden[:, 0, ::5, ::5].long()
+            #hidden = F.one_hot(hidden, 32).permute(0, 3, 1, 2).float()
+        else:
+            hidden = observations.view(-1, 11, 11).long()
+            hidden = F.one_hot(hidden, 32).permute(0, 3, 1, 2).float()
+        #debugging
+        #out = hidden
+        #for part in self.network.children():
+        #    out=part(out)
+        #    print(part, "Output shape:", out.shape)
+        #pdb.set_trace()
+
+        hidden = self.mixer_network(torch.cat((self.network(hidden),  self.additional_network(observations[:,-self.additional_obs_size:].float())) , dim=1))
+        #hidden = self.network(hidden) +  self.additional_network(observations[:,-self.additional_obs_size:].float())
+            
+        #hidden = torch.zeros((observations.shape[0], 512), device='cuda')
+
+        return hidden
+
+    def decode_actions(self, flat_hidden, state=None):
+        value = self.value_fn(flat_hidden)
+        if self.is_continuous:
+            mean = self.decoder_mean(flat_hidden)
+            logstd = self.decoder_logstd.expand_as(mean)
+            std = torch.exp(logstd)
+            probs = torch.distributions.Normal(mean, std)
+            batch = flat_hidden.shape[0]
+            return probs, value
+        else:
+            action = self.actor(flat_hidden)
+            return action, value
 
 class Grid(nn.Module):
     def __init__(self, env, cnn_channels=32, hidden_size=128, **kwargs):
@@ -557,6 +846,7 @@ class ImpulseWarsPolicy(nn.Module):
         num_drones: int = 2,
         continuous: bool = False,
         is_training: bool = True,
+        device: str = "cuda",
         **kwargs,
     ):
         super().__init__()
@@ -574,13 +864,13 @@ class ImpulseWarsPolicy(nn.Module):
             + [self.obsInfo.wallTypes + 1] * self.obsInfo.numFloatingWallObs
             + [self.numDrones + 1] * self.obsInfo.numProjectileObs,
         )
-        discreteOffsets = torch.tensor([0] + list(np.cumsum(self.discreteFactors)[:-1])).view(
+        discreteOffsets = torch.tensor([0] + list(np.cumsum(self.discreteFactors)[:-1]), device=device).view(
             1, -1
         )
         self.register_buffer("discreteOffsets", discreteOffsets, persistent=False)
         self.discreteMultihotDim = self.discreteFactors.sum()
 
-        multihotBuffer = torch.zeros(batch_size, self.discreteMultihotDim)
+        multihotBuffer = torch.zeros(batch_size, self.discreteMultihotDim, device=device)
         self.register_buffer("multihotOutput", multihotBuffer, persistent=False)
 
         # most of the observation is a 2D array of bytes, but the end
@@ -743,38 +1033,44 @@ class ImpulseWarsPolicy(nn.Module):
             t = torch.as_tensor(mapSpace.sample()[None])
             return self.mapCNN(t).shape[1]
 
-class Drive(nn.Module):
+class GPUDrive(nn.Module):
     def __init__(self, env, input_size=128, hidden_size=128, **kwargs):
         super().__init__()
         self.hidden_size = hidden_size
         self.ego_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
-                nn.Linear(7, input_size)),
-            nn.LayerNorm(input_size),
+                nn.Linear(6, input_size)),
             # nn.ReLU(),
-            pufferlib.pytorch.layer_init(
-                nn.Linear(input_size, input_size))
+            # pufferlib.pytorch.layer_init(
+            #    nn.Linear(input_size, input_size))
         )
         max_road_objects = 13
         self.road_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
                 nn.Linear(max_road_objects, input_size)),
-            nn.LayerNorm(input_size),
             # nn.ReLU(),
-            pufferlib.pytorch.layer_init(
-                nn.Linear(input_size, input_size))
+            # pufferlib.pytorch.layer_init(
+            #    nn.Linear(input_size, input_size))
         )
         max_partner_objects = 7
         self.partner_encoder = nn.Sequential(
             pufferlib.pytorch.layer_init(
                 nn.Linear(max_partner_objects, input_size)),
-            nn.LayerNorm(input_size),
             # nn.ReLU(),
-            pufferlib.pytorch.layer_init(
-                nn.Linear(input_size, input_size))
+            # pufferlib.pytorch.layer_init(
+            #    nn.Linear(input_size, input_size))
         )
 
-
+        '''
+        self.post_mask_road_encoder = nn.Sequential(
+            pufferlib.pytorch.layer_init(
+                nn.Linear(input_size, input_size)),
+        )
+        self.post_mask_partner_encoder = nn.Sequential(
+            pufferlib.pytorch.layer_init(
+                nn.Linear(input_size, input_size)),
+        )
+        '''
         self.shared_embedding = nn.Sequential(
             nn.GELU(),
             pufferlib.pytorch.layer_init(nn.Linear(3*input_size,  hidden_size)),
@@ -796,7 +1092,7 @@ class Drive(nn.Module):
         return self.forward(x, state)
    
     def encode_observations(self, observations, state=None):
-        ego_dim = 7
+        ego_dim = 6
         partner_dim = 63 * 7
         road_dim = 200*7
         ego_obs = observations[:, :ego_dim]
@@ -809,6 +1105,7 @@ class Drive(nn.Module):
         road_categorical = road_objects[:, :, 6]
         road_onehot = F.one_hot(road_categorical.long(), num_classes=7)  # Shape: [batch, 200, 7]
         road_objects = torch.cat([road_continuous, road_onehot], dim=2)
+
         ego_features = self.ego_encoder(ego_obs)
         partner_features, _ = self.partner_encoder(partner_objects).max(dim=1)
         road_features, _ = self.road_encoder(road_objects).max(dim=1)
@@ -824,6 +1121,81 @@ class Drive(nn.Module):
         action = self.actor(flat_hidden)
         action = torch.split(action, self.atn_dim, dim=1)
         value = self.value_fn(flat_hidden)
+        return action, value
+
+class Tetris(nn.Module):
+    def __init__(
+        self, 
+        env, 
+        cnn_channels=32,
+        input_size=128,
+        hidden_size=128,
+        **kwargs
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.cnn_channels =  cnn_channels   
+        self.n_cols = env.n_cols
+        self.n_rows = env.n_rows
+        self.scalar_input_size = (6 + 7 * (env.deck_size + 1))
+        self.flat_conv_size = cnn_channels * 3 * 10
+        self.is_continuous = isinstance(env.single_action_space, pufferlib.spaces.Box)
+
+        self.conv_grid = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Conv2d(2, cnn_channels, kernel_size=(5, 3), stride=(2,1), padding=(2,1))),
+            nn.ReLU(),
+            pufferlib.pytorch.layer_init(nn.Conv2d(cnn_channels, cnn_channels, kernel_size=(5, 3), stride=(2,1), padding=(2,1))),
+            nn.ReLU(),
+            pufferlib.pytorch.layer_init(nn.Conv2d(cnn_channels, cnn_channels, kernel_size=(5, 5), stride=(2,1), padding=(2,2))),
+            nn.ReLU(),
+            nn.Flatten(),
+            pufferlib.pytorch.layer_init(nn.Linear(self.flat_conv_size, input_size)),
+        )
+
+        self.fc_scalar = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(self.scalar_input_size, input_size)),
+            nn.ReLU(),
+        )
+
+        self.proj = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(2 * input_size, hidden_size)),
+            nn.ReLU(),
+        )
+
+        self.actor = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, 7), std=0.01),
+            nn.Flatten()
+        )
+
+        self.value_fn = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, 1)),
+            nn.ReLU(),
+        )
+
+    def forward(self, observations, state=None):
+        hidden = self.encode_observations(observations) 
+        actions, value = self.decode_actions(hidden)
+        return actions, value
+
+    def forward_train(self, x, state=None):
+        return self.forward(x, state)
+
+    def encode_observations(self, observations, state=None):
+        B = observations.shape[0]
+        grid_info = observations[:, 0:(self.n_cols * self.n_rows)].view(B, self.n_rows, self.n_cols)  # (B, n_rows, n_cols)
+        grid_info = torch.stack([(grid_info == 1).float(), (grid_info == 2).float()], dim=1)  # (B, 2, n_rows, n_cols)
+        scalar_info = observations[:, (self.n_cols * self.n_rows):(self.n_cols * self.n_rows + self.scalar_input_size)].float()
+
+        grid_feat = self.conv_grid(grid_info)  # (B, input_size)
+        scalar_feat = self.fc_scalar(scalar_info)  # (B, input_size)
+
+        combined = torch.cat([grid_feat, scalar_feat], dim=-1)  # (B, 2 * input_size)
+        features = self.proj(combined)  # (B, hidden_size)
+        return features
+
+    def decode_actions(self, hidden):
+        action = self.actor(hidden)  # (B, 4 * n_cols)
+        value = self.value_fn(hidden)  # (B, 1)
         return action, value
 
 class Drone(nn.Module):
@@ -899,67 +1271,5 @@ class Drone(nn.Module):
         else:
             logits = self.decoder(hidden)
 
-        values = self.value(hidden)
-        return logits, values
-
-
-class G2048(nn.Module):
-    def __init__(self, env, hidden_size=128):
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.is_continuous = False
-
-        num_obs = np.prod(env.single_observation_space.shape)
-
-        if hidden_size <= 256:
-            self.encoder = torch.nn.Sequential(
-                pufferlib.pytorch.layer_init(nn.Linear(num_obs, 512)),
-                nn.GELU(),
-                pufferlib.pytorch.layer_init(nn.Linear(512, 256)),
-                nn.GELU(),
-                pufferlib.pytorch.layer_init(nn.Linear(256, hidden_size)),
-                nn.GELU(),
-            )
-        else:
-            self.encoder = torch.nn.Sequential(
-                pufferlib.pytorch.layer_init(nn.Linear(num_obs, 2*hidden_size)),
-                nn.GELU(),
-                pufferlib.pytorch.layer_init(nn.Linear(2*hidden_size, hidden_size)),
-                nn.GELU(),
-                pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
-                nn.GELU(),
-            )
-
-        num_atns = env.single_action_space.n
-        self.decoder = torch.nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.GELU(),
-            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, num_atns), std=0.01),
-        )
-        self.value = torch.nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
-            nn.GELU(),
-            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, 1), std=1.0),
-        )
-
-    def forward_eval(self, observations, state=None):
-        hidden = self.encode_observations(observations, state=state)
-        logits, values = self.decode_actions(hidden)
-        return logits, values
-
-    def forward(self, observations, state=None):
-        return self.forward_eval(observations, state)
-
-    def encode_observations(self, observations, state=None):
-        batch_size = observations.shape[0]
-        observations = observations.view(batch_size, -1).float()
-
-        # Scale the feat 1 (tile**1.5)
-        observations[:, :16] = observations[:, :16] / 100.0
-
-        return self.encoder(observations)
-
-    def decode_actions(self, hidden):
-        logits = self.decoder(hidden)
         values = self.value(hidden)
         return logits, values
