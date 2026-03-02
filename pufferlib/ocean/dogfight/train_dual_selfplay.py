@@ -132,7 +132,10 @@ class DualPerspectiveTrainer:
                  antiforgetting_pool=None,
                  self_play_prob=None,
                  league_prob=None,
-                 antiforgetting_prob=None):
+                 antiforgetting_prob=None,
+                 sp_prob_start=0.125,
+                 sp_prob_end=1.0,
+                 sp_prob_ramp_steps=50_000_000):
         # Store custom config
         self.opponent_update_interval = opponent_update_interval
         self.selfplay_min_stage = selfplay_min_stage
@@ -242,6 +245,12 @@ class DualPerspectiveTrainer:
         self._vertical_selfplay_start_step = None
         self._vertical_last_log_step = 0
 
+        # Gradual self-play transition: ramp neural opponent probability over time
+        self._sp_prob_start = sp_prob_start
+        self._sp_prob_end = sp_prob_end
+        self._sp_prob_ramp_steps = sp_prob_ramp_steps
+        self._selfplay_start_step = None
+
         log(f'[SELFPLAY] event=init min_stage={selfplay_min_stage} checkpoint_lag={checkpoint_lag} perf_threshold={perf_threshold}')
         log(f'[SELFPLAY] ratchet epoch_length={opponent_epoch_length} mastery_streak={mastery_streak}')
         log(f'[SELFPLAY] checkpoint_dir={checkpoint_dir}')
@@ -306,6 +315,11 @@ class DualPerspectiveTrainer:
 
         # Start vertical merge curriculum timer
         self._vertical_selfplay_start_step = self.trainer.global_step
+
+        # Start gradual self-play blend
+        self._selfplay_start_step = self.trainer.global_step
+        binding.vec_set_selfplay_prob(self.driver_env.c_envs, self._sp_prob_start)
+        log(f'[SELFPLAY] selfplay_prob={self._sp_prob_start:.3f} (initial)')
 
         log(f'[SELFPLAY] event=activated stage=0')
 
@@ -913,6 +927,11 @@ class DualPerspectiveTrainer:
         # Start vertical merge curriculum timer
         self._vertical_selfplay_start_step = self.trainer.global_step
 
+        # Start gradual self-play blend
+        self._selfplay_start_step = self.trainer.global_step
+        binding.vec_set_selfplay_prob(self.driver_env.c_envs, self._sp_prob_start)
+        log(f'[SELFPLAY] selfplay_prob={self._sp_prob_start:.3f} (initial)')
+
         # Initialize ratchet rotation: start at rank 0 (stage10 = weakest)
         self._unlocked_rank = 0
         self._current_rotation_idx = 0
@@ -1226,6 +1245,20 @@ class DualPerspectiveTrainer:
 
         # Dual self-play training
         logs = self._train_dual()
+
+        # Gradual self-play transition: ramp neural opponent probability over time
+        if self._selfplay_start_step is not None:
+            steps_in_sp = self.trainer.global_step - self._selfplay_start_step
+            t = min(1.0, steps_in_sp / self._sp_prob_ramp_steps)
+            sp_prob = self._sp_prob_start + (self._sp_prob_end - self._sp_prob_start) * t
+            from pufferlib.ocean.dogfight import binding
+            binding.vec_set_selfplay_prob(self.driver_env.c_envs, sp_prob)
+            # Inject into stats so it appears as environment/selfplay_prob in wandb
+            self.trainer.stats['selfplay_prob'] = [sp_prob]
+            # Log periodically (~every 5M steps)
+            batch_size = self.config.get('batch_size', 65536)
+            if steps_in_sp % 5_000_000 < batch_size:
+                log(f'[SELFPLAY] selfplay_prob={sp_prob:.3f} steps_in_sp={steps_in_sp}')
 
         # Progress vertical merge curriculum (level advancement + probability decay)
         self._update_vertical_curriculum()
@@ -1620,6 +1653,11 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
     mastery_streak = int(selfplay_args.get('mastery_streak', DEFAULT_MASTERY_STREAK))
     vertical_spawn_prob = float(args.get('env', {}).get('vertical_spawn_prob', DEFAULT_VERTICAL_PROB))
 
+    # Gradual self-play transition config
+    sp_prob_start = float(selfplay_args.get('sp_prob_start', 0.125))
+    sp_prob_end = float(selfplay_args.get('sp_prob_end', 1.0))
+    sp_prob_ramp_steps = float(selfplay_args.get('sp_prob_ramp_steps', 50_000_000))
+
     # Create dual-perspective trainer with checkpoint queue
     train_config = {**args['train'], 'env': env_name}
     trainer = DualPerspectiveTrainer(
@@ -1638,7 +1676,10 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
         mastery_streak=mastery_streak,
         vertical_prob=vertical_spawn_prob,
         checkpoint_dir=checkpoint_dir,
-        run_id=run_id
+        run_id=run_id,
+        sp_prob_start=sp_prob_start,
+        sp_prob_end=sp_prob_end,
+        sp_prob_ramp_steps=sp_prob_ramp_steps,
     )
 
     log(f'[TRAIN] event=start mode=dual_selfplay min_stage={selfplay_min_stage} perf_threshold={perf_threshold}')
@@ -1734,7 +1775,7 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
     # Must happen after trainer.close() (model saved) but before logger.close() (wandb open)
     if all_logs:
         anchor_cfg = args.get('anchor_eval', {})
-        strength_gate = float(anchor_cfg.get('strength_gate', 0.3))
+        strength_gate = float(anchor_cfg.get('strength_gate', 0.1))
         final_strength = all_logs[-1].get('environment/strength', 0.0)
         anchor_rating = None
 
@@ -2242,6 +2283,9 @@ def train_league_round(policy_entry, manifest, league_dir, training_steps,
         opponent_resample_interval=resample_interval,
         checkpoint_dir=f'checkpoints/league_{policy_entry.id}',
         run_id=run_id,
+        sp_prob_start=1.0,  # League: all neural from start (no ramp)
+        sp_prob_end=1.0,
+        sp_prob_ramp_steps=1,
     )
 
     # Training loop

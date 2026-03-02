@@ -339,6 +339,7 @@ typedef struct Dogfight {
     // Self-play: external opponent actions override (Phase 1)
     float opponent_actions_override[5];  // [throttle, elevator, aileron, rudder, trigger]
     int use_opponent_override;           // 0 = use autopilot, 1 = use override
+    float selfplay_prob;                 // 0.0=all autopilot, 1.0=all neural (per-episode dice roll)
     // Head-on lockout: disable guns until planes pass each other (only for head-on spawns)
     int head_on_lockout;                 // 1 = guns locked until pass-through detected
     float prev_rel_dot;                  // Previous dot(rel_pos, rel_vel) for detecting pass
@@ -449,6 +450,7 @@ void init(Dogfight *env, int obs_scheme, RewardConfig *rcfg, int curriculum_enab
 
     // Self-play: default to autopilot-controlled opponent
     env->use_opponent_override = 0;
+    env->selfplay_prob = 1.0f;  // Default: all neural when override enabled
     memset(env->opponent_actions_override, 0, sizeof(env->opponent_actions_override));
 
     // Opponent buffers: NULL by default, set by Python if dual self-play is enabled
@@ -916,6 +918,15 @@ void c_reset(Dogfight *env) {
     if (DEBUG >= 10) printf("player_vel=(%.1f, %.1f, %.1f) speed=%.1f\n", vel.x, vel.y, vel.z, norm3(vel));
     if (DEBUG >= 10) printf("opponent_pos=(%.1f, %.1f, %.1f)\n", env->opponent.pos.x, env->opponent.pos.y, env->opponent.pos.z);
     if (DEBUG >= 10) printf("initial_dist=%.1f m, stage=%d\n", norm3(sub3(env->opponent.pos, pos)), env->stage);
+
+    // Per-episode: probabilistically choose neural vs autopilot opponent
+    if (env->selfplay_active) {
+        if (rndf(0, 1) < env->selfplay_prob) {
+            env->use_opponent_override = 1;  // Neural opponent this episode
+        } else {
+            env->use_opponent_override = 0;  // Autopilot (autoace) this episode
+        }
+    }
 
     compute_observations(env);
 #if DEBUG >= 5

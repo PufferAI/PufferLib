@@ -29,6 +29,7 @@ static PyObject* vec_tick_guided_climb(PyObject* self, PyObject* args);
 static PyObject* vec_set_flight_params(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* env_set_flight_params(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* vec_set_opponent_obs_scheme(PyObject* self, PyObject* args);
+static PyObject* vec_set_selfplay_prob(PyObject* self, PyObject* args);
 
 #define MY_METHODS \
     {"env_force_state", (PyCFunction)env_force_state, METH_VARARGS | METH_KEYWORDS, "Force environment state"}, \
@@ -55,7 +56,8 @@ static PyObject* vec_set_opponent_obs_scheme(PyObject* self, PyObject* args);
     {"vec_tick_guided_climb", (PyCFunction)vec_tick_guided_climb, METH_VARARGS, "Decrement guided climb ticks after each step"}, \
     {"vec_set_flight_params", (PyCFunction)vec_set_flight_params, METH_VARARGS | METH_KEYWORDS, "Set flight physics params for all envs"}, \
     {"env_set_flight_params", (PyCFunction)env_set_flight_params, METH_VARARGS | METH_KEYWORDS, "Set flight physics params for single env"}, \
-    {"vec_set_opponent_obs_scheme", (PyCFunction)vec_set_opponent_obs_scheme, METH_VARARGS, "Set opponent obs scheme for cross-scheme evaluation (-1=same as player)"}
+    {"vec_set_opponent_obs_scheme", (PyCFunction)vec_set_opponent_obs_scheme, METH_VARARGS, "Set opponent obs scheme for cross-scheme evaluation (-1=same as player)"}, \
+    {"vec_set_selfplay_prob", (PyCFunction)vec_set_selfplay_prob, METH_VARARGS, "Set per-episode selfplay probability (0=all autopilot, 1=all neural)"}
 
 static float get_float(PyObject *kwargs, const char *key, float default_val) {
     if (!kwargs) return default_val;
@@ -953,5 +955,22 @@ static PyObject* env_set_flight_params(PyObject* self, PyObject* args, PyObject*
     env->flight_params.damping_scale_slope = get_float(kwargs, "damping_scale_slope", env->flight_params.damping_scale_slope);
     env->flight_params.damping_multiplier = get_float(kwargs, "damping_multiplier", env->flight_params.damping_multiplier);
 
+    Py_RETURN_NONE;
+}
+
+// Set per-episode selfplay probability for all environments
+// Args: vec_handle, prob (float 0.0-1.0, 0=all autopilot, 1=all neural)
+static PyObject* vec_set_selfplay_prob(PyObject* self, PyObject* args) {
+    PyObject* capsule;
+    float prob;
+    if (!PyArg_ParseTuple(args, "Of", &capsule, &prob)) return NULL;
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(capsule);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+    for (int i = 0; i < vec->num_envs; i++) {
+        ((Dogfight*)vec->envs[i])->selfplay_prob = prob;
+    }
     Py_RETURN_NONE;
 }
