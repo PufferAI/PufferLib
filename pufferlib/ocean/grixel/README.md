@@ -20,7 +20,7 @@ Crucially, the agent can also perceive previous-step reward as part of its input
 
 The encoder is a CNN where the input layer has both kernel size and stride equal to block_size: the first convolution thus separately maps each block of the gridworld into a single vector. 
 
-The experiment works with the standard LSTM from PufferLib's Recurrent model. We also implemented a transformer and a plastic LSTM, with the plastic LSTM performing best by far in this simple visual memory task. These are not included here as they require modifying the rest of the PufferLib code (though you can see these *highly experimental* implementations [there](https://github.com/ThomasMiconi/PufferLib/blob/grixel/pufferlib/models.py)).
+The experiment works with the standard LSTM from PufferLib's Recurrent model. We also implemented a transformer and a plastic LSTM, with the plastic LSTM performing best by far in this simple visual memory task. These are not included here as they require modifying the rest of the PufferLib code (though you can see these *highly experimental* implementations [there](https://github.com/ThomasMiconi/PufferLib_dev/blob/grixel/pufferlib/models.py)).
 
 Notably, all episodes have the same lengths, equal to the backpropagation-through-time horizon of the PPO training loop. This avoids difficulties with changing environments and ensures each episode starts with a reset hidden state during training.
 
