@@ -161,7 +161,7 @@ def run_matches(env, player_policy, opponent_policy, num_games, device='cuda',
 
 def run_matches_vectorized(player_policy, opponent_policy, num_games,
                            obs_scheme=0, hidden_size=128, num_envs=64,
-                           device='cuda', max_ticks=6000):
+                           device='cuda', max_ticks=6000, env=None):
     """Run many games in parallel using vectorized envs.
 
     Creates a temporary env with num_envs parallel environments,
@@ -176,22 +176,27 @@ def run_matches_vectorized(player_policy, opponent_policy, num_games,
         num_envs: Number of parallel environments.
         device: Torch device string.
         max_ticks: Maximum ticks per episode before forced draw.
+        env: Optional pre-created Dogfight env to reuse (avoids create/destroy).
 
     Returns:
         dict with keys: wins, losses, draws (from player perspective).
     """
     from pufferlib.ocean.dogfight import binding
 
-    env = Dogfight(
-        num_envs=num_envs,
-        render_mode=None,
-        obs_scheme=obs_scheme,
-        curriculum_enabled=1,
-        curriculum_randomize=1,
-        eval_spawn_mode=2,
-        fixed_stage=20,
-        max_steps=max_ticks,
-    )
+    owns_env = env is None
+    if owns_env:
+        env = Dogfight(
+            num_envs=num_envs,
+            render_mode=None,
+            obs_scheme=obs_scheme,
+            curriculum_enabled=1,
+            curriculum_randomize=1,
+            eval_spawn_mode=2,
+            fixed_stage=20,
+            max_steps=max_ticks,
+        )
+    else:
+        num_envs = env.num_agents
     binding.vec_enable_opponent_override(env.c_envs, 1)
 
     results = {'wins': 0, 'losses': 0, 'draws': 0}
@@ -252,7 +257,8 @@ def run_matches_vectorized(player_policy, opponent_policy, num_games,
                 state_o['lstm_h'][i] = 0
                 state_o['lstm_c'][i] = 0
 
-    env.close()
+    if owns_env:
+        env.close()
     return results
 
 

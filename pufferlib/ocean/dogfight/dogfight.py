@@ -81,6 +81,10 @@ class Dogfight(pufferlib.PufferEnv):
         recovery_trigger_prob=0.1,
         recovery_speed_threshold=70.0,
         recovery_bank_deg=60.0,
+        # Energy management rewards (sweepable)
+        energy_gain_scale=0.001,
+        energy_loss_scale=0.0005,
+        energy_advantage_scale=0.004,
         # Domain randomization: 0.0 = off, 0.1 = +/-10% physics variation per-episode
         domain_randomization=0.0,
         # Consumed by train_dual_selfplay.py, accepted here to avoid unknown-kwarg error
@@ -171,6 +175,10 @@ class Dogfight(pufferlib.PufferEnv):
                 aim_decay_stage=aim_decay_stage,
                 shaping_decay_start=shaping_decay_start,
                 shaping_decay_end=shaping_decay_end,
+                # Energy management rewards
+                energy_gain_scale=energy_gain_scale,
+                energy_loss_scale=energy_loss_scale,
+                energy_advantage_scale=energy_advantage_scale,
                 # Domain randomization
                 domain_randomization=domain_randomization,
                 # Recovery hijacking config

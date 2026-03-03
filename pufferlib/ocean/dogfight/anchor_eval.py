@@ -72,24 +72,33 @@ def load_anchor_manifest(anchor_dir):
 
 
 def _run_vs_autopilot(player_policy, stage, obs_scheme, hidden_size,
-                      num_games, num_envs, device):
+                      num_games, num_envs, device, env=None):
     """Run games against an autopilot opponent at a fixed curriculum stage.
 
     Autopilot opponents don't need a neural network — the C code handles
     their behavior based on the curriculum stage.
+
+    If env is provided, it will be reused (stage set via binding). Otherwise
+    a temporary env is created and closed after evaluation.
     """
     from pufferlib.ocean.dogfight import binding
 
-    env = Dogfight(
-        num_envs=num_envs,
-        render_mode=None,
-        obs_scheme=obs_scheme,
-        curriculum_enabled=1,
-        curriculum_randomize=1,
-        eval_spawn_mode=2,
-        fixed_stage=stage,
-        max_steps=6000,
-    )
+    owns_env = env is None
+    if owns_env:
+        env = Dogfight(
+            num_envs=num_envs,
+            render_mode=None,
+            obs_scheme=obs_scheme,
+            curriculum_enabled=1,
+            curriculum_randomize=1,
+            eval_spawn_mode=2,
+            fixed_stage=stage,
+            max_steps=6000,
+        )
+    else:
+        # Reuse pre-created env: update stage
+        binding.vec_set_curriculum_target(env.c_envs, float(stage))
+        num_envs = env.num_agents
 
     results = {'wins': 0, 'losses': 0, 'draws': 0}
     games_completed = 0
@@ -129,7 +138,8 @@ def _run_vs_autopilot(player_policy, stage, obs_scheme, hidden_size,
                 state_p['lstm_h'][i] = 0
                 state_p['lstm_c'][i] = 0
 
-    env.close()
+    if owns_env:
+        env.close()
     return results
 
 
@@ -147,7 +157,7 @@ def likelihood_of_superiority(wins, losses):
 def evaluate_against_anchors(model_path, obs_scheme=0, anchor_dir=DEFAULT_ANCHOR_DIR,
                               games_per_anchor=DEFAULT_GAMES_PER_ANCHOR,
                               num_envs=DEFAULT_NUM_ENVS, device='cuda',
-                              hidden_size=None):
+                              hidden_size=None, eval_env=None):
     """Evaluate a model against the fixed anchor set.
 
     Args:
@@ -158,6 +168,9 @@ def evaluate_against_anchors(model_path, obs_scheme=0, anchor_dir=DEFAULT_ANCHOR
         num_envs: Number of parallel envs for vectorized evaluation.
         device: Torch device string.
         hidden_size: Hidden size override (inferred from checkpoint if None).
+        eval_env: Optional pre-created Dogfight env to reuse for autopilot and
+                  neural anchor evaluation. Avoids creating/destroying envs
+                  mid-training which can corrupt GPU memory or C-side state.
 
     Returns:
         dict with keys:
@@ -215,7 +228,7 @@ def evaluate_against_anchors(model_path, obs_scheme=0, anchor_dir=DEFAULT_ANCHOR
             stage = anchor['stage']
             match_result = _run_vs_autopilot(
                 player_policy, stage, obs_scheme, hidden_size,
-                games_per_anchor, num_envs, device)
+                games_per_anchor, num_envs, device, env=eval_env)
 
         elif anchor['type'] == 'neural':
             anchor_path = anchor['path']
@@ -240,7 +253,7 @@ def evaluate_against_anchors(model_path, obs_scheme=0, anchor_dir=DEFAULT_ANCHOR
                 match_result = run_matches_vectorized(
                     player_policy, opponent_policy, games_per_anchor,
                     obs_scheme=obs_scheme, hidden_size=hidden_size,
-                    num_envs=num_envs, device=device)
+                    num_envs=num_envs, device=device, env=eval_env)
             else:
                 # Cross-scheme: uses separate opponent obs computation
                 match_result = run_matches_cross_scheme(

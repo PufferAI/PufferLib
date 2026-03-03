@@ -52,6 +52,7 @@ Usage:
 import os
 import sys
 import copy
+import json
 import time
 import random
 import argparse
@@ -97,6 +98,9 @@ DEFAULT_DEBUG_TRIGGER_STEP = 500_000_000  # Start debug logging at 500M steps (0
 DEFAULT_VERTICAL_PROB = 0.10                # 10% of self-play episodes use forced vertical spawns
 DEFAULT_VERTICAL_RAMP_STEPS = 50_000_000    # Steps to progress through all 5 levels (0-4)
 
+# Clean fight gate: minimum clean_fight_rate to pass ratchet gate
+DEFAULT_CLEAN_FIGHT_GATE = 0.80
+
 
 class DualPerspectiveTrainer:
     """Trainer that collects experience from both player and opponent perspectives.
@@ -135,8 +139,10 @@ class DualPerspectiveTrainer:
                  antiforgetting_prob=None,
                  sp_prob_start=0.125,
                  sp_prob_end=1.0,
-                 sp_prob_ramp_steps=50_000_000):
+                 sp_prob_ramp_steps=50_000_000,
+                 clean_fight_gate=DEFAULT_CLEAN_FIGHT_GATE):
         # Store custom config
+        self.clean_fight_gate = clean_fight_gate
         self.opponent_update_interval = opponent_update_interval
         self.selfplay_min_stage = selfplay_min_stage
         self.checkpoint_lag = checkpoint_lag
@@ -255,6 +261,9 @@ class DualPerspectiveTrainer:
         log(f'[SELFPLAY] ratchet epoch_length={opponent_epoch_length} mastery_streak={mastery_streak}')
         log(f'[SELFPLAY] checkpoint_dir={checkpoint_dir}')
 
+        # Load persisted opponent win rates if available
+        self._load_opponent_rates()
+
         # skip_curriculum: immediately activate self-play mode (for league training)
         if skip_curriculum:
             self._activate_selfplay_immediately()
@@ -276,6 +285,31 @@ class DualPerspectiveTrainer:
             p.requires_grad = False
 
         log(f'[SELFPLAY] event=opponent_init source=learner')
+
+    def _save_opponent_rates(self):
+        """Save opponent_win_rates dict to JSON in checkpoint dir."""
+        if not self.opponent_win_rates:
+            return
+        save_dir = self.checkpoint_queue.save_dir
+        os.makedirs(save_dir, exist_ok=True)
+        path = os.path.join(save_dir, 'opponent_win_rates.json')
+        try:
+            with open(path, 'w') as f:
+                json.dump(self.opponent_win_rates, f, indent=2)
+        except Exception as e:
+            log(f'[ERROR] save_opponent_rates failed: {e}')
+
+    def _load_opponent_rates(self):
+        """Load opponent_win_rates dict from JSON if exists."""
+        path = os.path.join(self.checkpoint_queue.save_dir, 'opponent_win_rates.json')
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    loaded = json.load(f)
+                self.opponent_win_rates.update(loaded)
+                log(f'[SELFPLAY] event=loaded_opponent_rates count={len(loaded)} path={path}')
+            except Exception as e:
+                log(f'[ERROR] load_opponent_rates failed: {e}')
 
     def _activate_selfplay_immediately(self):
         """Activate self-play mode immediately, skipping curriculum.
@@ -762,7 +796,6 @@ class DualPerspectiveTrainer:
         self._pool_perf_ema = 0.9 * self._pool_perf_ema + 0.1 * rotation_perf
 
         # Clean-win gate check using accumulated gate kills from pool opponent epochs
-        CLEAN_FIGHT_GATE = 0.80
         total_kills = self._gate_player_kills + self._gate_opp_kills
         clean_fight_rate = self._gate_clean_fights / max(self._gate_total_episodes, 1)
         if total_kills >= 10:  # Minimum sample — need real data, not 1 lucky kill
@@ -771,12 +804,12 @@ class DualPerspectiveTrainer:
             # 1. Win 55% of gun kills
             # 2. At least 80% of episodes must be clean (kills or timeouts, not crashes)
             gate_passed = (clean_win_rate >= self.perf_threshold
-                           and clean_fight_rate >= CLEAN_FIGHT_GATE)
+                           and clean_fight_rate >= self.clean_fight_gate)
         else:
             clean_win_rate = 0.0
             gate_passed = False  # Not enough kills to judge — stay put
 
-        log(f'[RATCHET] event=rotation_done perf={rotation_perf:.3f} kills={self._rotation_kills:.0f} episodes={self._rotation_episodes:.0f} gate={clean_win_rate:.3f} pk={self._gate_player_kills:.0f} total_kills={total_kills:.0f} threshold={self.perf_threshold} clean_fight_rate={clean_fight_rate:.3f} cfr_threshold={CLEAN_FIGHT_GATE} unlocked_rank={self._unlocked_rank} active={num_active}/{len(opponents)} streak={self._rank_mastery_streak}')
+        log(f'[RATCHET] event=rotation_done perf={rotation_perf:.3f} kills={self._rotation_kills:.0f} episodes={self._rotation_episodes:.0f} gate={clean_win_rate:.3f} pk={self._gate_player_kills:.0f} total_kills={total_kills:.0f} threshold={self.perf_threshold} clean_fight_rate={clean_fight_rate:.3f} cfr_threshold={self.clean_fight_gate} unlocked_rank={self._unlocked_rank} active={num_active}/{len(opponents)} streak={self._rank_mastery_streak}')
 
         if gate_passed:
             self._rank_mastery_streak += 1
@@ -797,7 +830,7 @@ class DualPerspectiveTrainer:
             if total_kills < 10:
                 log(f'[RATCHET] event=gate_fail reason=insufficient_data kills={total_kills:.0f} minimum=10 streak_reset=true')
             else:
-                log(f'[RATCHET] event=gate_fail wr={clean_win_rate:.3f} threshold={self.perf_threshold} clean_fight_rate={clean_fight_rate:.3f} cfr_threshold={CLEAN_FIGHT_GATE} streak_reset=true')
+                log(f'[RATCHET] event=gate_fail wr={clean_win_rate:.3f} threshold={self.perf_threshold} clean_fight_rate={clean_fight_rate:.3f} cfr_threshold={self.clean_fight_gate} streak_reset=true')
 
         # Reset rotation and gate counters
         self._rotation_kills = 0.0
@@ -806,6 +839,9 @@ class DualPerspectiveTrainer:
         self._gate_opp_kills = 0.0
         self._gate_clean_fights = 0.0
         self._gate_total_episodes = 0.0
+
+        # Persist win rates so they survive crash/restart
+        self._save_opponent_rates()
 
     def _check_stalemate(self, logs):
         """Check for stalemate (low perf, low clean fight rate) and apply handicaps.
@@ -1657,6 +1693,7 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
     sp_prob_start = float(selfplay_args.get('sp_prob_start', 0.125))
     sp_prob_end = float(selfplay_args.get('sp_prob_end', 1.0))
     sp_prob_ramp_steps = float(selfplay_args.get('sp_prob_ramp_steps', 50_000_000))
+    clean_fight_gate = float(selfplay_args.get('clean_fight_gate', DEFAULT_CLEAN_FIGHT_GATE))
 
     # Create dual-perspective trainer with checkpoint queue
     train_config = {**args['train'], 'env': env_name}
@@ -1680,6 +1717,7 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
         sp_prob_start=sp_prob_start,
         sp_prob_end=sp_prob_end,
         sp_prob_ramp_steps=sp_prob_ramp_steps,
+        clean_fight_gate=clean_fight_gate,
     )
 
     log(f'[TRAIN] event=start mode=dual_selfplay min_stage={selfplay_min_stage} perf_threshold={perf_threshold}')
@@ -1698,8 +1736,26 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
     last_anchor_eval_step = 0
     obs_scheme = args.get('env', {}).get('obs_scheme', 0)
 
+    # Pre-create persistent eval env for anchor evaluation (avoids create/destroy mid-training)
+    anchor_eval_env = None
     if anchor_eval_enabled:
         log(f'[TRAIN] anchor_eval enabled interval={anchor_eval_interval} games={anchor_games} dir={anchor_dir}')
+        try:
+            from pufferlib.ocean.dogfight.dogfight import Dogfight as DogfightEnv
+            anchor_eval_env = DogfightEnv(
+                num_envs=anchor_num_envs,
+                render_mode=None,
+                obs_scheme=obs_scheme,
+                curriculum_enabled=1,
+                curriculum_randomize=1,
+                eval_spawn_mode=2,
+                fixed_stage=20,
+                max_steps=6000,
+            )
+            log(f'[TRAIN] anchor_eval_env created num_envs={anchor_num_envs}')
+        except Exception as e:
+            log(f'[ERROR] failed to create anchor_eval_env: {e}')
+            anchor_eval_env = None
 
     # Training loop
     while trainer.global_step < total_timesteps:
@@ -1750,10 +1806,16 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
                     games_per_anchor=anchor_games,
                     num_envs=anchor_num_envs,
                     device=device,
+                    eval_env=anchor_eval_env,
                 )
                 os.unlink(tmp_path)
 
-                # Inject anchor_rating into trainer stats for W&B logging
+                # Free GPU memory after eval inference
+                if device == 'cuda':
+                    torch.cuda.empty_cache()
+
+                # Queue anchor results — inject into stats at start of next iteration
+                # (not mid-loop) to avoid corrupting current step's logging
                 anchor_rating = anchor_results.get('anchor_rating', 1000.0)
                 trainer.trainer.stats['anchor_rating'] = [anchor_rating]
 
@@ -1769,6 +1831,9 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
                 log(f'[ERROR] anchor_eval failed: {e}')
 
     # Cleanup
+    if anchor_eval_env is not None:
+        anchor_eval_env.close()
+        anchor_eval_env = None
     model_path = trainer.close()
 
     # Post-training anchor evaluation (gated by strength to save compute)

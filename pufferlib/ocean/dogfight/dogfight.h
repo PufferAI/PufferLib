@@ -206,6 +206,10 @@ typedef struct RewardConfig {
     // Timestep-based shaping decay (anneals r_aim and r_closing during self-play)
     long shaping_decay_start;    // Start annealing at this global step (0 = disabled)
     long shaping_decay_end;      // Complete annealing at this global step
+    // Energy management rewards (sweepable)
+    float energy_gain_scale;       // Reward for gaining energy (default 0.001)
+    float energy_loss_scale;       // Penalty for losing energy (default 0.0005)
+    float energy_advantage_scale;  // Zero-sum energy advantage scale (default 0.004)
 } RewardConfig;
 
 // Calculate shaping decay multiplier based on global training step
@@ -1280,22 +1284,24 @@ void c_step(Dogfight *env) {
     reward += r_time;
 
     // 8. Energy management reward: encourage maintaining/gaining energy
-    // Asymmetric: +0.001 for gaining energy, -0.0005 for losing (incentivize climbing)
+    // Asymmetric: gain_scale for gaining energy, -loss_scale for losing (incentivize climbing)
     float player_energy = calc_specific_energy_with_params(p, &env->flight_params);
-    float r_player_energy = (player_energy > p->prev_energy) ? 0.001f : -0.0005f;
+    float r_player_energy = (player_energy > p->prev_energy)
+        ? env->rcfg.energy_gain_scale : -env->rcfg.energy_loss_scale;
     reward += r_player_energy;
     p->prev_energy = player_energy;
 
     // Opponent energy reward (applied to opponent_rewards at end)
     float opp_energy = calc_specific_energy_with_params(o, &env->flight_params);
-    float r_opp_energy = (opp_energy > o->prev_energy) ? 0.001f : -0.0005f;
+    float r_opp_energy = (opp_energy > o->prev_energy)
+        ? env->rcfg.energy_gain_scale : -env->rcfg.energy_loss_scale;
     o->prev_energy = opp_energy;
 
     // 9. Energy advantage reward: zero-sum reward for relative energy position
     // Encourages staying above opponent (altitude advantage) or faster (speed advantage)
     float energy_diff = player_energy - opp_energy;
     float energy_advantage = clampf(energy_diff / 1000.0f, -1.0f, 1.0f);
-    float r_energy_adv = 0.004f * energy_advantage;
+    float r_energy_adv = env->rcfg.energy_advantage_scale * energy_advantage;
     reward += r_energy_adv;
     // Note: opponent gets -r_energy_adv, applied in opponent_rewards section
 

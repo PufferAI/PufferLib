@@ -103,6 +103,9 @@ static int my_init(Env *env, PyObject *args, PyObject *kwargs) {
         .aim_decay_stage = get_float(kwargs, "aim_decay_stage", 15.0f),
         .shaping_decay_start = get_long(kwargs, "shaping_decay_start", 0),
         .shaping_decay_end = get_long(kwargs, "shaping_decay_end", 0),
+        .energy_gain_scale = get_float(kwargs, "energy_gain_scale", 0.001f),
+        .energy_loss_scale = get_float(kwargs, "energy_loss_scale", 0.0005f),
+        .energy_advantage_scale = get_float(kwargs, "energy_advantage_scale", 0.004f),
     };
 
     int curriculum_enabled = get_int(kwargs, "curriculum_enabled", 0);
