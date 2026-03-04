@@ -96,7 +96,7 @@ DEFAULT_SELFPLAY_MIN_STAGE = 20  # Only enable self-play after stage 20
 DEFAULT_CHECKPOINT_LAG = 1  # Opponent is N checkpoints behind (1=2nd newest)
 DEFAULT_PERF_THRESHOLD = 0.55  # Clean win rate gate for opponent advancement (AlphaGo Zero style)
 DEFAULT_MIN_STEPS_BETWEEN_CHECKPOINTS = 2_000_000  # Minimum steps before saving new checkpoint
-DEFAULT_MAX_CHECKPOINTS = 20  # Max selfplay checkpoints (milestones always kept)
+DEFAULT_MAX_CHECKPOINTS = 50  # Max selfplay checkpoints (milestones always kept)
 DEFAULT_PAST_OPPONENT_PROB = 0.2  # 20% of games against past checkpoint pool (OpenAI Five: 20%)
 DEFAULT_PFSP_EXPONENT = 2.0  # PFSP weighting exponent: (1-win_rate)^exp (OpenAI Five: squared)
 DEFAULT_OPPONENT_RESAMPLE_INTERVAL = 1_000_000  # Re-roll opponent selection every N steps
@@ -1909,6 +1909,34 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
         logger.close(model_path)
 
     log(f'[TRAIN] event=complete')
+
+    # Clean up selfplay checkpoints to save disk space across sweep runs.
+    # Keep the 2 newest checkpoints (highest step) for potential post-hoc analysis.
+    # The final trained policy is saved separately in experiments/ (model_path).
+    checkpoint_dir = trainer.checkpoint_queue.save_dir
+    if os.path.isdir(checkpoint_dir) and 'selfplay_' in os.path.basename(checkpoint_dir):
+        try:
+            pt_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pt')]
+            if len(pt_files) > 2:
+                # Sort by step number extracted from filename: checkpoint_*_step{N}.pt
+                def _extract_step(fname):
+                    try:
+                        return int(fname.rsplit('step', 1)[1].replace('.pt', ''))
+                    except (IndexError, ValueError):
+                        return 0
+                pt_files.sort(key=_extract_step, reverse=True)
+                keep = set(pt_files[:2])
+                removed = 0
+                for f in pt_files[2:]:
+                    fpath = os.path.join(checkpoint_dir, f)
+                    os.remove(fpath)
+                    removed += 1
+                log(f'[CHECKPOINT] event=cleanup dir={checkpoint_dir} removed={removed} kept={list(keep)}')
+            else:
+                log(f'[CHECKPOINT] event=cleanup dir={checkpoint_dir} nothing_to_remove files={len(pt_files)}')
+        except Exception as e:
+            log(f'[ERROR] checkpoint cleanup failed: {e}')
+
     return all_logs, model_path
 
 
