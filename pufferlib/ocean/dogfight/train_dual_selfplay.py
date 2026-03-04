@@ -1078,14 +1078,21 @@ class DualPerspectiveTrainer:
             r = torch.as_tensor(r).to(device)
             d = torch.as_tensor(d).to(device)
 
-            # Get opponent observations via C binding (pre-allocated buffer, no malloc)
-            binding.vec_compute_opponent_observations(self.driver_env.c_envs, self._opp_obs_buf)
-            debug(3, f'opponent obs from binding: shape={self._opp_obs_buf.shape}, slicing with env_id={env_id}')
-            o_opponent = torch.as_tensor(self._opp_obs_buf[env_id]).to(device)
+            # Get opponent observations - prefer shared buf (correct w_slice indexing for LSTM)
+            if hasattr(self.vecenv, 'buf') and 'opponent_observations' in self.vecenv.buf:
+                o_opponent_all = self.vecenv.buf['opponent_observations']
+                o_opponent = torch.as_tensor(o_opponent_all[self.vecenv.w_slice].reshape(-1, *self.vecenv.single_observation_space.shape)).to(device)
+            else:
+                binding.vec_compute_opponent_observations(self.driver_env.c_envs, self._opp_obs_buf)
+                debug(3, f'opponent obs from binding: shape={self._opp_obs_buf.shape}, slicing with env_id={env_id}')
+                o_opponent = torch.as_tensor(self._opp_obs_buf[env_id]).to(device)
 
             # Handle NaN observations (can occur at episode boundaries)
             # Replace NaN with zeros - these will get masked out anyway
-            nan_count = np.isnan(self._opp_obs_buf[env_id]).sum()
+            if hasattr(self.vecenv, 'buf') and 'opponent_observations' in self.vecenv.buf:
+                nan_count = np.isnan(o_opponent_all[self.vecenv.w_slice]).sum() if isinstance(o_opponent_all, np.ndarray) else 0
+            else:
+                nan_count = np.isnan(self._opp_obs_buf[env_id]).sum()
             if nan_count > 0:
                 debug(2, f'NaN in opponent obs: {nan_count} values')
             if torch.isnan(o_opponent).any():
@@ -1250,9 +1257,13 @@ class DualPerspectiveTrainer:
                             self._gate_clean_fights += clean_f * n_val
                             self._gate_total_episodes += n_val
 
-            # Set opponent actions via C binding
+            # Set opponent actions - prefer shared buf (correct w_slice indexing for LSTM)
             profile('env', epoch)
-            binding.vec_set_opponent_actions(self.driver_env.c_envs, action_o_np)
+            if hasattr(self.vecenv, 'buf') and 'opponent_actions' in self.vecenv.buf:
+                opp_act_buf = self.vecenv.buf['opponent_actions']
+                opp_act_buf[self.vecenv.w_slice] = action_o_np.reshape(opp_act_buf[self.vecenv.w_slice].shape)
+            else:
+                binding.vec_set_opponent_actions(self.driver_env.c_envs, action_o_np)
 
             # Send player actions
             self.vecenv.send(action_p_np)
