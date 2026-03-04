@@ -192,29 +192,6 @@ class Dogfight(pufferlib.PufferEnv):
 
         self.c_envs = binding.vectorize(*self._env_handles)
 
-        # Set opponent observation/reward/action buffers if provided (for dual self-play with Multiprocessing)
-        # These buffers come from shared memory in Multiprocessing backend
-        self._opponent_observations = None
-        self._opponent_rewards = None
-        self._opponent_actions = None
-        if buf is not None and 'opponent_observations' in buf:
-            self._opponent_observations = buf['opponent_observations']
-            self._opponent_rewards = buf['opponent_rewards']
-            # Flatten to match C expectations: shape (num_envs * obs_size,) and (num_envs,)
-            opp_obs_flat = self._opponent_observations.reshape(-1)
-            opp_rew_flat = self._opponent_rewards.reshape(-1)
-            binding.vec_set_opponent_buffers(self.c_envs, opp_obs_flat, opp_rew_flat)
-            # NOTE: Don't enable opponent override here - let DualPerspectiveTrainer
-            # control when to activate self-play mode. Otherwise sp_* stats get
-            # logged during curriculum training which is confusing.
-        if buf is not None and 'opponent_actions' in buf:
-            self._opponent_actions = buf['opponent_actions']
-        # Shared flag indicating self-play mode is active (set by main process)
-        self._selfplay_active = None
-        self._opponent_override_enabled = False  # Track if we've enabled C-side override
-        if buf is not None and 'selfplay_active' in buf:
-            self._selfplay_active = buf['selfplay_active']
-
         # Self-play: opponent policy (loaded after c_envs created)
         self.opponent_policy = None
         self.opponent_device = opponent_device
@@ -279,23 +256,9 @@ class Dogfight(pufferlib.PufferEnv):
     def step(self, actions):
         self.actions[:] = actions
 
-        # Check if main process has signaled self-play mode via shared memory flag
-        # This enables opponent override AND recovery hijacking in workers (Multiprocessing)
-        if self._selfplay_active is not None and self._selfplay_active[0] == 1:
-            if not self._opponent_override_enabled:
-                binding.vec_enable_opponent_override(self.c_envs, 1)
-                binding.vec_set_selfplay_active(self.c_envs, 1)  # Enable recovery hijacking
-                self._opponent_override_enabled = True
-
-        # Self-play: read opponent actions from shared memory buffer (dual self-play with Multiprocessing)
-        # or compute from local frozen policy (standard self-play with Serial)
-        if self._opponent_actions is not None and self._opponent_override_enabled:
-            # Multiprocessing dual self-play: read opponent actions from shared memory
-            # Main process writes actions to buf, workers read them here
-            opp_actions_flat = self._opponent_actions.reshape(-1, 5)  # Shape: (num_envs, 5)
-            binding.vec_set_opponent_actions(self.c_envs, opp_actions_flat)
-        elif self.opponent_policy is not None:
-            # Serial self-play: compute opponent actions from frozen policy in-process
+        # Self-play: compute opponent actions from frozen policy
+        if self.opponent_policy is not None:
+            # Compute opponent actions from frozen policy
             opp_obs = binding.vec_get_opponent_observations(self.c_envs)
             opp_obs_t = torch.as_tensor(opp_obs, device=self.opponent_device)
 

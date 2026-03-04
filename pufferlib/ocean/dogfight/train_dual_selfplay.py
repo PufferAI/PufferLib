@@ -1073,20 +1073,10 @@ class DualPerspectiveTrainer:
             r = torch.as_tensor(r).to(device)
             d = torch.as_tensor(d).to(device)
 
-            # Get opponent observations from shared memory buffers (Multiprocessing)
-            # or via C binding (Serial). C code writes to buffers during c_step().
-            if hasattr(self.vecenv, 'buf') and 'opponent_observations' in self.vecenv.buf:
-                # Multiprocessing: read from shared memory buffer
-                o_opponent_all = self.vecenv.buf['opponent_observations']
-                debug(3, f'opponent obs from buf: shape={o_opponent_all.shape}')
-                # buf shape is (num_workers, agents_per_worker, *obs_shape)
-                # w_slice from recv() gives us the right worker indices
-                o_opponent = torch.as_tensor(o_opponent_all[self.vecenv.w_slice].reshape(-1, *self.vecenv.single_observation_space.shape)).to(device)
-            else:
-                # Serial: use C binding directly
-                o_opponent_all = binding.vec_get_opponent_observations(self.driver_env.c_envs)
-                debug(3, f'opponent obs from binding: all.shape={o_opponent_all.shape}, slicing with env_id={env_id}')
-                o_opponent = torch.as_tensor(o_opponent_all[env_id]).to(device)
+            # Get opponent observations via C binding
+            o_opponent_all = binding.vec_get_opponent_observations(self.driver_env.c_envs)
+            debug(3, f'opponent obs from binding: all.shape={o_opponent_all.shape}, slicing with env_id={env_id}')
+            o_opponent = torch.as_tensor(o_opponent_all[env_id]).to(device)
 
             # Handle NaN observations (can occur at episode boundaries)
             # Replace NaN with zeros - these will get masked out anyway
@@ -1255,16 +1245,9 @@ class DualPerspectiveTrainer:
                             self._gate_clean_fights += clean_f * n_val
                             self._gate_total_episodes += n_val
 
-            # Set opponent actions: write to shared memory (Multiprocessing) or C binding (Serial)
+            # Set opponent actions via C binding
             profile('env', epoch)
-            if hasattr(self.vecenv, 'buf') and 'opponent_actions' in self.vecenv.buf:
-                # Multiprocessing: write to shared memory buffer
-                # Workers will read this during their step() call
-                opp_act_buf = self.vecenv.buf['opponent_actions']
-                opp_act_buf[self.vecenv.w_slice] = action_o_np.reshape(opp_act_buf[self.vecenv.w_slice].shape)
-            else:
-                # Serial: set directly via C binding
-                binding.vec_set_opponent_actions(self.driver_env.c_envs, action_o_np)
+            binding.vec_set_opponent_actions(self.driver_env.c_envs, action_o_np)
 
             # Send player actions
             self.vecenv.send(action_p_np)
