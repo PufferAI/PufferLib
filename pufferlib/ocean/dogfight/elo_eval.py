@@ -161,7 +161,8 @@ def run_matches(env, player_policy, opponent_policy, num_games, device='cuda',
 
 def run_matches_vectorized(player_policy, opponent_policy, num_games,
                            obs_scheme=0, hidden_size=128, num_envs=64,
-                           device='cuda', max_ticks=6000, env=None):
+                           device='cuda', max_ticks=6000, env=None,
+                           opponent_hidden_size=None):
     """Run many games in parallel using vectorized envs.
 
     Creates a temporary env with num_envs parallel environments,
@@ -172,11 +173,12 @@ def run_matches_vectorized(player_policy, opponent_policy, num_games,
         opponent_policy: Opponent neural network policy.
         num_games: Total number of games to play.
         obs_scheme: Observation scheme for the environment.
-        hidden_size: Hidden size for LSTM state.
+        hidden_size: Hidden size for player LSTM state.
         num_envs: Number of parallel environments.
         device: Torch device string.
         max_ticks: Maximum ticks per episode before forced draw.
         env: Optional pre-created Dogfight env to reuse (avoids create/destroy).
+        opponent_hidden_size: Hidden size for opponent LSTM (defaults to hidden_size).
 
     Returns:
         dict with keys: wins, losses, draws (from player perspective).
@@ -206,10 +208,11 @@ def run_matches_vectorized(player_policy, opponent_policy, num_games,
     env_ticks = np.zeros(num_envs, dtype=np.int32)
 
     # Init batched LSTM state
+    o_hs = opponent_hidden_size or hidden_size
     state_p = {'lstm_h': torch.zeros(num_envs, hidden_size, device=device),
                 'lstm_c': torch.zeros(num_envs, hidden_size, device=device)}
-    state_o = {'lstm_h': torch.zeros(num_envs, hidden_size, device=device),
-                'lstm_c': torch.zeros(num_envs, hidden_size, device=device)}
+    state_o = {'lstm_h': torch.zeros(num_envs, o_hs, device=device),
+                'lstm_c': torch.zeros(num_envs, o_hs, device=device)}
 
     obs, _ = env.reset()
 

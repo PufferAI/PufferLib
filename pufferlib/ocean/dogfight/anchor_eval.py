@@ -253,7 +253,8 @@ def evaluate_against_anchors(model_path, obs_scheme=0, anchor_dir=DEFAULT_ANCHOR
                 match_result = run_matches_vectorized(
                     player_policy, opponent_policy, games_per_anchor,
                     obs_scheme=obs_scheme, hidden_size=hidden_size,
-                    num_envs=num_envs, device=device, env=eval_env)
+                    num_envs=num_envs, device=device, env=eval_env,
+                    opponent_hidden_size=anchor_hs)
             else:
                 # Cross-scheme: uses separate opponent obs computation
                 match_result = run_matches_cross_scheme(

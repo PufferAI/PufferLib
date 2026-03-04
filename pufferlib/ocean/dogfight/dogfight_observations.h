@@ -101,8 +101,8 @@ void compute_obs_momentum_for_plane(Dogfight *env, Plane *self, Plane *other, fl
     obs_buffer[i++] = clampf(self->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f); // Pitch rate [-1,1]
     obs_buffer[i++] = clampf(self->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f); // Yaw rate [-1,1]
     obs_buffer[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);          // AoA [-1,1]
-    obs_buffer[i++] = potential;                                        // Altitude [0,1]
-    obs_buffer[i++] = own_energy;                                       // Own energy [0,1]
+    obs_buffer[i++] = clampf(potential, 0.0f, 1.0f);                     // Altitude [0,1]
+    obs_buffer[i++] = clampf(own_energy, 0.0f, 1.0f);                  // Own energy [0,1]
 
     // Target state - spherical (4 obs)
     obs_buffer[i++] = target_az * INV_PI;                               // Azimuth [-1,1]
@@ -192,8 +192,8 @@ void compute_obs_momentum_gforce_for_plane(Dogfight *env, Plane *self, Plane *ot
     obs_buffer[i++] = clampf(self->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f);
     obs_buffer[i++] = clampf(self->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f);
     obs_buffer[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);
-    obs_buffer[i++] = potential;
-    obs_buffer[i++] = own_energy;
+    obs_buffer[i++] = clampf(potential, 0.0f, 1.0f);
+    obs_buffer[i++] = clampf(own_energy, 0.0f, 1.0f);
 
     // G-force (1 obs)
     obs_buffer[i++] = g_norm;                                           // G-force [-0.5,1]
@@ -297,9 +297,9 @@ void compute_obs_pilot_for_plane(Dogfight *env, Plane *self, Plane *other, float
     obs_buffer[i++] = clampf(self->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f);  // [4] Pitch rate
     obs_buffer[i++] = clampf(self->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f);  // [5] Yaw rate
     obs_buffer[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);           // [6] AoA
-    obs_buffer[i++] = potential;                                         // [7] Altitude
+    obs_buffer[i++] = clampf(potential, 0.0f, 1.0f);                    // [7] Altitude
     obs_buffer[i++] = g_norm;                                            // [8] G-force
-    obs_buffer[i++] = own_energy;                                        // [9] Energy
+    obs_buffer[i++] = clampf(own_energy, 0.0f, 1.0f);                  // [9] Energy
 
     // Up vector (3 obs)
     obs_buffer[i++] = world_up.x;                                        // [10] Up X
@@ -426,8 +426,8 @@ void compute_obs_rates_lean_for_plane(Dogfight *env, Plane *self, Plane *other, 
     obs_buffer[i++] = clampf(self->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f);
     obs_buffer[i++] = clampf(self->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f);
     obs_buffer[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);
-    obs_buffer[i++] = potential;
-    obs_buffer[i++] = own_energy;
+    obs_buffer[i++] = clampf(potential, 0.0f, 1.0f);
+    obs_buffer[i++] = clampf(own_energy, 0.0f, 1.0f);
 
     // G-force (1 obs)
     obs_buffer[i++] = g_norm;
@@ -566,9 +566,9 @@ void compute_obs_rates_full_for_plane(Dogfight *env, Plane *self, Plane *other, 
     obs_buffer[i++] = clampf(self->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f);  // [4] Pitch rate
     obs_buffer[i++] = clampf(self->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f);  // [5] Yaw rate
     obs_buffer[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);           // [6] AoA
-    obs_buffer[i++] = potential;                                         // [7] Altitude
+    obs_buffer[i++] = clampf(potential, 0.0f, 1.0f);                    // [7] Altitude
     obs_buffer[i++] = g_norm;                                            // [8] G-force
-    obs_buffer[i++] = own_energy;                                        // [9] Energy
+    obs_buffer[i++] = clampf(own_energy, 0.0f, 1.0f);                  // [9] Energy
 
     // Up vector (3 obs)
     obs_buffer[i++] = world_up.x;                                        // [10] Up X
@@ -695,9 +695,9 @@ void compute_obs_opponent_aware_for_plane(Dogfight *env, Plane *self, Plane *oth
     obs_buffer[i++] = clampf(self->omega.y * INV_MAX_OMEGA, -1.0f, 1.0f);  // [4] Pitch rate
     obs_buffer[i++] = clampf(self->omega.z * INV_MAX_OMEGA, -1.0f, 1.0f);  // [5] Yaw rate
     obs_buffer[i++] = clampf(aoa * INV_MAX_AOA, -1.0f, 1.0f);           // [6] AoA
-    obs_buffer[i++] = potential;                                         // [7] Altitude
+    obs_buffer[i++] = clampf(potential, 0.0f, 1.0f);                    // [7] Altitude
     obs_buffer[i++] = g_norm;                                            // [8] G-force
-    obs_buffer[i++] = own_energy;                                        // [9] Energy
+    obs_buffer[i++] = clampf(own_energy, 0.0f, 1.0f);                  // [9] Energy
 
     // Up vector (3 obs)
     obs_buffer[i++] = world_up.x;                                        // [10] Up X
