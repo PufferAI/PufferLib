@@ -197,6 +197,8 @@ class Dogfight(pufferlib.PufferEnv):
         self.opponent_device = opponent_device
         self.opponent_lstm_state = None  # For recurrent policies (future)
         self._current_opponent_path = None  # Track current opponent for swap detection
+        # Pre-allocated buffer for opponent observations (avoids per-step allocation)
+        self._opponent_obs_buf = np.zeros((num_envs, obs_size), dtype=np.float32)
 
         # Policy pool: skill-based opponent selection
         self.policy_pool = policy_pool
@@ -258,9 +260,9 @@ class Dogfight(pufferlib.PufferEnv):
 
         # Self-play: compute opponent actions from frozen policy
         if self.opponent_policy is not None:
-            # Compute opponent actions from frozen policy
-            opp_obs = binding.vec_get_opponent_observations(self.c_envs)
-            opp_obs_t = torch.as_tensor(opp_obs, device=self.opponent_device)
+            # Compute opponent observations into pre-allocated buffer
+            binding.vec_compute_opponent_observations(self.c_envs, self._opponent_obs_buf)
+            opp_obs_t = torch.as_tensor(self._opponent_obs_buf, device=self.opponent_device)
 
             with torch.no_grad():
                 # Policy returns Normal distribution for continuous actions

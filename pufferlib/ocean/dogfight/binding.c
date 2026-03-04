@@ -16,6 +16,7 @@ static PyObject* env_set_obs_highlight(PyObject* self, PyObject* args);
 static PyObject* env_get_autoace_state(PyObject* self, PyObject* args);
 static PyObject* env_set_camera_follow(PyObject* self, PyObject* args);
 static PyObject* vec_get_opponent_observations(PyObject* self, PyObject* args);
+static PyObject* vec_compute_opponent_observations(PyObject* self, PyObject* args);
 static PyObject* vec_set_opponent_actions(PyObject* self, PyObject* args);
 static PyObject* vec_enable_opponent_override(PyObject* self, PyObject* args);
 static PyObject* vec_set_opponent_buffers(PyObject* self, PyObject* args);
@@ -43,7 +44,8 @@ static PyObject* vec_set_selfplay_prob(PyObject* self, PyObject* args);
     {"env_set_obs_highlight", (PyCFunction)env_set_obs_highlight, METH_VARARGS, "Set observation indices to highlight with red arrows"}, \
     {"env_get_autoace_state", (PyCFunction)env_get_autoace_state, METH_VARARGS, "Get AutoAce opponent state and tactical info"}, \
     {"env_set_camera_follow", (PyCFunction)env_set_camera_follow, METH_VARARGS, "Set camera to follow player (0) or opponent (1)"}, \
-    {"vec_get_opponent_observations", (PyCFunction)vec_get_opponent_observations, METH_VARARGS, "Get observations from opponent perspective for self-play"}, \
+    {"vec_get_opponent_observations", (PyCFunction)vec_get_opponent_observations, METH_VARARGS, "Get observations from opponent perspective for self-play (allocates)"}, \
+    {"vec_compute_opponent_observations", (PyCFunction)vec_compute_opponent_observations, METH_VARARGS, "Compute opponent observations into pre-allocated buffer (no alloc)"}, \
     {"vec_set_opponent_actions", (PyCFunction)vec_set_opponent_actions, METH_VARARGS, "Set opponent actions from external policy (self-play)"}, \
     {"vec_enable_opponent_override", (PyCFunction)vec_enable_opponent_override, METH_VARARGS, "Enable/disable opponent action override (0=autopilot, 1=external)"}, \
     {"vec_set_opponent_buffers", (PyCFunction)vec_set_opponent_buffers, METH_VARARGS, "Set opponent observation/reward buffers for dual self-play"}, \
@@ -542,6 +544,63 @@ static PyObject* vec_get_opponent_observations(PyObject* self, PyObject* args) {
     }
 
     return arr;
+}
+
+// Compute opponent observations into a pre-allocated buffer (zero-alloc version).
+// Args: vec_handle, out_array (numpy float32 shape [num_envs, opponent_obs_size])
+static PyObject* vec_compute_opponent_observations(PyObject* self, PyObject* args) {
+    PyObject* vec_arg;
+    PyObject* out_arr;
+
+    if (!PyArg_ParseTuple(args, "OO", &vec_arg, &out_arr)) {
+        return NULL;
+    }
+
+    VecEnv* vec = (VecEnv*)PyLong_AsVoidPtr(vec_arg);
+    if (!vec) {
+        PyErr_SetString(PyExc_TypeError, "Invalid vec handle");
+        return NULL;
+    }
+
+    if (!PyArray_Check(out_arr)) {
+        PyErr_SetString(PyExc_TypeError, "out_array must be a numpy array");
+        return NULL;
+    }
+
+    PyArrayObject* out = (PyArrayObject*)out_arr;
+
+    if (PyArray_TYPE(out) != NPY_FLOAT32) {
+        PyErr_SetString(PyExc_TypeError, "out_array must be float32");
+        return NULL;
+    }
+    if (!PyArray_ISCONTIGUOUS(out)) {
+        PyErr_SetString(PyExc_ValueError, "out_array must be contiguous");
+        return NULL;
+    }
+    if (PyArray_NDIM(out) != 2) {
+        PyErr_SetString(PyExc_ValueError, "out_array must be 2D");
+        return NULL;
+    }
+
+    int obs_size = vec->envs[0]->opponent_obs_size;
+    npy_intp* shape = PyArray_DIMS(out);
+    if (shape[0] != vec->num_envs) {
+        PyErr_Format(PyExc_ValueError,
+            "out_array dim 0 is %ld, expected %d (num_envs)", shape[0], vec->num_envs);
+        return NULL;
+    }
+    if (shape[1] != obs_size) {
+        PyErr_Format(PyExc_ValueError,
+            "out_array dim 1 is %ld, expected %d (opponent_obs_size)", shape[1], obs_size);
+        return NULL;
+    }
+
+    float* data = (float*)PyArray_DATA(out);
+    for (int i = 0; i < vec->num_envs; i++) {
+        compute_opponent_observations(vec->envs[i], data + i * obs_size);
+    }
+
+    Py_RETURN_NONE;
 }
 
 // Set opponent actions for all environments (for self-play)

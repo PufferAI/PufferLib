@@ -240,6 +240,11 @@ class DualPerspectiveTrainer:
         # Get driver env for direct C access
         self.driver_env = vecenv.driver_env
 
+        # Pre-allocated buffer for C-level opponent observations (avoids per-step malloc)
+        obs_size = vecenv.single_observation_space.shape[0]
+        num_envs = self.driver_env.num_agents
+        self._opp_obs_buf = np.zeros((num_envs, obs_size), dtype=np.float32)
+
         # Dual experience buffers (allocated lazily)
         self.opponent_obs = None
         self.opponent_actions = None
@@ -1073,14 +1078,14 @@ class DualPerspectiveTrainer:
             r = torch.as_tensor(r).to(device)
             d = torch.as_tensor(d).to(device)
 
-            # Get opponent observations via C binding
-            o_opponent_all = binding.vec_get_opponent_observations(self.driver_env.c_envs)
-            debug(3, f'opponent obs from binding: all.shape={o_opponent_all.shape}, slicing with env_id={env_id}')
-            o_opponent = torch.as_tensor(o_opponent_all[env_id]).to(device)
+            # Get opponent observations via C binding (pre-allocated buffer, no malloc)
+            binding.vec_compute_opponent_observations(self.driver_env.c_envs, self._opp_obs_buf)
+            debug(3, f'opponent obs from binding: shape={self._opp_obs_buf.shape}, slicing with env_id={env_id}')
+            o_opponent = torch.as_tensor(self._opp_obs_buf[env_id]).to(device)
 
             # Handle NaN observations (can occur at episode boundaries)
             # Replace NaN with zeros - these will get masked out anyway
-            nan_count = np.isnan(o_opponent_all[env_id]).sum() if isinstance(o_opponent_all, np.ndarray) else 0
+            nan_count = np.isnan(self._opp_obs_buf[env_id]).sum()
             if nan_count > 0:
                 debug(2, f'NaN in opponent obs: {nan_count} values')
             if torch.isnan(o_opponent).any():
