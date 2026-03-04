@@ -79,6 +79,17 @@ def debug(level, msg):
         log(f'[SELFPLAY] debug={level} {msg}')
 
 
+def compute_rotation_window(unlocked_rank, num_opponents, rotation_top_n):
+    """Compute which opponents to include in a rotation.
+
+    Returns (window_size, rotation_start_rank).
+    """
+    num_active = min(unlocked_rank + 1, num_opponents)
+    window_size = min(rotation_top_n, num_active)
+    rotation_start_rank = num_active - window_size
+    return window_size, rotation_start_rank
+
+
 # Configuration defaults
 DEFAULT_OPPONENT_UPDATE_INTERVAL = 1_000_000  # Update opponent every 1M steps (legacy, unused with queue)
 DEFAULT_SELFPLAY_MIN_STAGE = 20  # Only enable self-play after stage 20
@@ -92,6 +103,7 @@ DEFAULT_OPPONENT_RESAMPLE_INTERVAL = 1_000_000  # Re-roll opponent selection eve
 DEFAULT_POOL_CHECKPOINT_INTERVAL = 5_000_000  # Save periodic checkpoint every N steps (ensures pool growth)
 DEFAULT_OPPONENT_EPOCH_LENGTH = 5_000_000  # Steps per opponent in round-robin rotation
 DEFAULT_MASTERY_STREAK = 2  # Full rotations of mastery before unlocking next rank
+DEFAULT_ROTATION_TOP_N = 2  # Only fight top-N hardest unlocked opponents per rotation
 DEFAULT_DEBUG_TRIGGER_STEP = 500_000_000  # Start debug logging at 500M steps (0 = disabled)
 
 # Vertical merge curriculum: forced vertical spawn scenarios during self-play
@@ -128,6 +140,7 @@ class DualPerspectiveTrainer:
                  pool_checkpoint_interval=DEFAULT_POOL_CHECKPOINT_INTERVAL,
                  opponent_epoch_length=DEFAULT_OPPONENT_EPOCH_LENGTH,
                  mastery_streak=DEFAULT_MASTERY_STREAK,
+                 rotation_top_n=DEFAULT_ROTATION_TOP_N,
                  checkpoint_dir=None,
                  run_id=None,
                  skip_curriculum=False,
@@ -154,6 +167,7 @@ class DualPerspectiveTrainer:
         self.pool_checkpoint_interval = pool_checkpoint_interval
         self.opponent_epoch_length = opponent_epoch_length
         self.mastery_streak_required = mastery_streak
+        self.rotation_top_n = rotation_top_n
         self.use_dual_selfplay = False
         self.last_opponent_update = 0
 
@@ -258,7 +272,7 @@ class DualPerspectiveTrainer:
         self._selfplay_start_step = None
 
         log(f'[SELFPLAY] event=init min_stage={selfplay_min_stage} checkpoint_lag={checkpoint_lag} perf_threshold={perf_threshold}')
-        log(f'[SELFPLAY] ratchet epoch_length={opponent_epoch_length} mastery_streak={mastery_streak}')
+        log(f'[SELFPLAY] ratchet epoch_length={opponent_epoch_length} mastery_streak={mastery_streak} rotation_top_n={rotation_top_n}')
         log(f'[SELFPLAY] checkpoint_dir={checkpoint_dir}')
 
         # Load persisted opponent win rates if available
@@ -766,19 +780,23 @@ class DualPerspectiveTrainer:
         self._epoch_kills = 0.0
         self._epoch_episodes = 0.0
 
-        # Advance rotation index
+        # Advance rotation index (windowed to top-N hardest opponents)
         opponents = self._get_sorted_opponents()
         num_active = min(self._unlocked_rank + 1, len(opponents))
+        window_size, rotation_start_rank = compute_rotation_window(
+            self._unlocked_rank, len(opponents), self.rotation_top_n)
         self._current_rotation_idx += 1
 
-        if self._current_rotation_idx >= num_active:
-            # Full rotation complete
+        if self._current_rotation_idx >= window_size:
+            # Full rotation through top-N complete
+            log(f'[RATCHET] event=rotation_complete window={window_size} start_rank={rotation_start_rank} num_active={num_active} top_n={self.rotation_top_n}')
             self._evaluate_rotation()
             self._current_rotation_idx = 0
 
-        # Start next epoch
+        # Start next epoch — map rotation index to actual rank
         self._epoch_start_step = self.trainer.global_step
-        rank = self._current_rotation_idx  # rank = index in sorted list
+        rank = rotation_start_rank + self._current_rotation_idx
+        log(f'[RATCHET] event=epoch_start rotation_idx={self._current_rotation_idx}/{window_size} actual_rank={rank} window=[{rotation_start_rank}..{rotation_start_rank+window_size-1}]')
         self._load_opponent_for_rank(rank)
 
     def _evaluate_rotation(self):
@@ -968,7 +986,7 @@ class DualPerspectiveTrainer:
         binding.vec_set_selfplay_prob(self.driver_env.c_envs, self._sp_prob_start)
         log(f'[SELFPLAY] selfplay_prob={self._sp_prob_start:.3f} (initial)')
 
-        # Initialize ratchet rotation: start at rank 0 (stage10 = weakest)
+        # Initialize ratchet rotation: start at lowest rank within the top-N window
         self._unlocked_rank = 0
         self._current_rotation_idx = 0
         self._epoch_start_step = self.trainer.global_step
@@ -981,8 +999,10 @@ class DualPerspectiveTrainer:
         self._gate_total_episodes = 0.0
 
         opponents = self._get_sorted_opponents()
-        log(f'[RATCHET] event=init opponents={len(opponents)} tags={[t for _, t in opponents]}')
-        self._load_opponent_for_rank(0)
+        window_size, rotation_start_rank = compute_rotation_window(
+            self._unlocked_rank, len(opponents), self.rotation_top_n)
+        log(f'[RATCHET] event=init opponents={len(opponents)} tags={[t for _, t in opponents]} rotation_top_n={self.rotation_top_n}')
+        self._load_opponent_for_rank(rotation_start_rank)
 
     def evaluate(self):
         """Evaluate with dual experience collection in self-play mode."""
@@ -1584,6 +1604,11 @@ class DualPerspectiveTrainer:
         total_opponents = len(opponents)
         losses['opponent_relative_strength'] = float(self._current_rotation_idx) / max(float(total_opponents - 1), 1.0)
 
+        # 5b. Effective rotation window size
+        window_size, _ = compute_rotation_window(
+            self._unlocked_rank, total_opponents, self.rotation_top_n)
+        losses['rotation_window_size'] = float(window_size)
+
         # 6. Total checkpoints ever saved (pool generation count)
         losses['pool_generation'] = float(self._total_checkpoints_saved)
 
@@ -1687,6 +1712,7 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
     pool_checkpoint_interval = int(selfplay_args.get('pool_checkpoint_interval', DEFAULT_POOL_CHECKPOINT_INTERVAL))
     opponent_epoch_length = int(selfplay_args.get('opponent_epoch_length', DEFAULT_OPPONENT_EPOCH_LENGTH))
     mastery_streak = int(selfplay_args.get('mastery_streak', DEFAULT_MASTERY_STREAK))
+    rotation_top_n = int(selfplay_args.get('rotation_top_n', DEFAULT_ROTATION_TOP_N))
     vertical_spawn_prob = float(args.get('env', {}).get('vertical_spawn_prob', DEFAULT_VERTICAL_PROB))
 
     # Gradual self-play transition config
@@ -1711,6 +1737,7 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
         pool_checkpoint_interval=pool_checkpoint_interval,
         opponent_epoch_length=opponent_epoch_length,
         mastery_streak=mastery_streak,
+        rotation_top_n=rotation_top_n,
         vertical_prob=vertical_spawn_prob,
         checkpoint_dir=checkpoint_dir,
         run_id=run_id,
@@ -1721,7 +1748,7 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
     )
 
     log(f'[TRAIN] event=start mode=dual_selfplay min_stage={selfplay_min_stage} perf_threshold={perf_threshold}')
-    log(f'[TRAIN] ratchet epoch_length={opponent_epoch_length} mastery_streak={mastery_streak} pool_checkpoint_interval={pool_checkpoint_interval}')
+    log(f'[TRAIN] ratchet epoch_length={opponent_epoch_length} mastery_streak={mastery_streak} rotation_top_n={rotation_top_n} pool_checkpoint_interval={pool_checkpoint_interval}')
 
     total_timesteps = train_config['total_timesteps']
     all_logs = []
