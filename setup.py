@@ -290,7 +290,7 @@ class ProfilerBuildExt(build_ext):
             if self.env:
                 static_lib = f'pufferlib/extensions/libstatic_{self.env}.a'
                 cmd += [static_lib, f'./{RAYLIB_NAME}/lib/libraylib.a', '-lGL']
-            cmd += ['-lomp5']
+            cmd += ['-liomp5']
             cmd += [src, '-o', out]
 
         print(f'Building profiler: {" ".join(cmd)}')
@@ -405,7 +405,7 @@ if not NO_TRAIN:
             },
             extra_link_args=extra_link_args,
             extra_objects=[RAYLIB_A],
-            libraries=[nvtx_lib, 'omp5', 'nccl', 'nvidia-ml'],
+            libraries=[nvtx_lib, 'iomp5', 'nccl', 'nvidia-ml'],
             library_dirs=[nvtx_lib_dir],
         ),
     ]
