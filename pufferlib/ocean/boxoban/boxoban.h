@@ -191,7 +191,6 @@ static inline int count_boxes(Boxoban *env){
     return total;
 }
 
-static inline int boxes_on_targets(Boxoban *env); //decare to allow add_log
 
 void init (Boxoban* env) {
     ensure_map_loaded();
