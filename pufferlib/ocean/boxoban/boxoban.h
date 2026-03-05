@@ -152,7 +152,6 @@ typedef struct {
     int n_boxes; //boxes in map
     Client* client;
     int win;
-    float len_reward_coeff;
 } Boxoban;
 
 void ensure_map_loaded(void); //declare from binding.c
@@ -403,8 +402,6 @@ void c_step(Boxoban* env) {
         return;
     }
 
-    //length penalty
-    env->rewards[0] -= 1.0* env->len_reward_coeff;
 }
 
 /*Rendering stuff*/

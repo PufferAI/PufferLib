@@ -47,24 +47,24 @@ int demo(int argc, char** argv) {
         return 1;
     }
 
-    Boxoban env = {0};
-    env.size = 10;
-    env.observations = calloc(4 * env.size * env.size, sizeof(unsigned char));
-    env.actions = calloc(1, sizeof(int));
-    env.rewards = calloc(1, sizeof(float));
-    env.terminals = calloc(1, sizeof(unsigned char));
-    env.max_steps = 500;
-    env.int_r_coeff = 0.1f;
-    env.target_loss_pen_coeff = 0.5f;
-    env.len_reward_coeff = 0.1f;
-    env.tick = 0;
-    env.agent_x = 0;
-    env.agent_y = 0;
-    env.intermediate_rewards = NULL;
-    env.n_targets = 0;
-    env.n_boxes = 0;
-    env.win = 0;
-    env.client = NULL;
+    Boxoban env = {
+        .size = 10,
+        .observations = calloc(4 * env.size * env.size, sizeof(unsigned char)),
+        .actions = calloc(1, sizeof(int)),
+        .rewards = calloc(1, sizeof(float)),
+        .terminals = calloc(1, sizeof(unsigned char)),
+        .max_steps = 500,
+        .int_r_coeff = 0.1f,
+        .target_loss_pen_coeff = 0.5f,
+        .tick = 0,
+        .agent_x = 0,
+        .agent_y = 0,
+        .intermediate_rewards = NULL,
+        .n_targets = 0,
+        .n_boxes = 0,
+        .win = 0,
+        .client = NULL,
+    };
 
 
     init(&env);
@@ -116,24 +116,24 @@ void test_performance(int argc, char** argv, int timeout) {
     }
     printf("Loaded map: %s\n", chosen_path);
 
-    Boxoban env = {0};
-    env.size = 10;
-    env.observations = calloc(4 * env.size * env.size, sizeof(unsigned char));
-    env.actions = calloc(1, sizeof(int));
-    env.rewards = calloc(1, sizeof(float));
-    env.terminals = calloc(1, sizeof(unsigned char));
-    env.max_steps = 500;
-    env.int_r_coeff = 0.1f;
-    env.target_loss_pen_coeff = 0.5f;
-    env.len_reward_coeff = 0.1f;
-    env.tick = 0;
-    env.agent_x = 0;
-    env.agent_y = 0;
-    env.intermediate_rewards = NULL;
-    env.n_targets = 0;
-    env.n_boxes = 0;
-    env.win = 0;
-    env.client = NULL;
+    Boxoban env = {
+        .size = 10,
+        .observations = calloc(4 * env.size * env.size, sizeof(unsigned char)),
+        .actions = calloc(1, sizeof(int)),
+        .rewards = calloc(1, sizeof(float)),
+        .terminals = calloc(1, sizeof(unsigned char)),
+        .max_steps = 500,
+        .int_r_coeff = 0.1f,
+        .target_loss_pen_coeff = 0.5f,
+        .tick = 0,
+        .agent_x = 0,
+        .agent_y = 0,
+        .intermediate_rewards = NULL,
+        .n_targets = 0,
+        .n_boxes = 0,
+        .win = 0,
+        .client = NULL,
+};
     printf("Initializing...\n");
     init(&env);
     printf("Resetting...\n");
