@@ -42,6 +42,6 @@ static int my_log(PyObject* dict, Log* log) {
     assign_to_dict(dict, "score", log->score);
     assign_to_dict(dict, "episode_return", log->episode_return);
     assign_to_dict(dict, "episode_length", log->episode_length);
-    assign_to_dict(dict, "targets_hit", log->n_targets);
+    assign_to_dict(dict, "targets_hit", log->on_targets);
     return 0;
 }

@@ -61,10 +61,12 @@ int demo(int argc, char** argv) {
         .agent_x = 0,
         .agent_y = 0,
         .intermediate_rewards = NULL,
-        .n_targets = 0,
+        .on_target = 0,
         .n_boxes = 0,
         .win = 0,
         .client = NULL,
+        .n_targets = 0,
+
     };
 
     size_t obs_count = 4u * (size_t)env.size * (size_t)env.size;
@@ -135,10 +137,11 @@ void test_performance(int argc, char** argv, int timeout) {
         .agent_x = 0,
         .agent_y = 0,
         .intermediate_rewards = NULL,
-        .n_targets = 0,
+        .on_target = 0,
         .n_boxes = 0,
         .win = 0,
         .client = NULL,
+        .n_targets = 0,
     };
 
     size_t obs_count = 4u * (size_t)env.size * (size_t)env.size;
