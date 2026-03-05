@@ -30,7 +30,7 @@ static void install_handlers(void) {
 static const char* resolve_map_path(int argc, char** argv, char* buffer, size_t buf_sz) {
     const char* arg = argc > 1 ? argv[1] : NULL;
     if (arg == NULL) {
-        return "pufferlib/ocean/boxoban/boxoban_maps_basic.bin";
+        return "pufferlib/ocean/boxoban/boxoban_maps_easy.bin";
     }
     if (strchr(arg, '/')) {
         return arg;
