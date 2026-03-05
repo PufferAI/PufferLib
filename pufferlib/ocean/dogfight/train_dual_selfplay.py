@@ -240,11 +240,6 @@ class DualPerspectiveTrainer:
         # Get driver env for direct C access
         self.driver_env = vecenv.driver_env
 
-        # Pre-allocated buffer for C-level opponent observations (avoids per-step malloc)
-        obs_size = vecenv.single_observation_space.shape[0]
-        num_envs = self.driver_env.num_agents
-        self._opp_obs_buf = np.zeros((num_envs, obs_size), dtype=np.float32)
-
         # Dual experience buffers (allocated lazily)
         self.opponent_obs = None
         self.opponent_actions = None
@@ -1078,21 +1073,24 @@ class DualPerspectiveTrainer:
             r = torch.as_tensor(r).to(device)
             d = torch.as_tensor(d).to(device)
 
-            # Get opponent observations - prefer shared buf (correct w_slice indexing for LSTM)
+            # Get opponent observations from shared memory buffers (Multiprocessing)
+            # or via C binding (Serial). C code writes to buffers during c_step().
             if hasattr(self.vecenv, 'buf') and 'opponent_observations' in self.vecenv.buf:
+                # Multiprocessing: read from shared memory buffer
                 o_opponent_all = self.vecenv.buf['opponent_observations']
+                debug(3, f'opponent obs from buf: shape={o_opponent_all.shape}')
+                # buf shape is (num_workers, agents_per_worker, *obs_shape)
+                # w_slice from recv() gives us the right worker indices
                 o_opponent = torch.as_tensor(o_opponent_all[self.vecenv.w_slice].reshape(-1, *self.vecenv.single_observation_space.shape)).to(device)
             else:
-                binding.vec_compute_opponent_observations(self.driver_env.c_envs, self._opp_obs_buf)
-                debug(3, f'opponent obs from binding: shape={self._opp_obs_buf.shape}, slicing with env_id={env_id}')
-                o_opponent = torch.as_tensor(self._opp_obs_buf[env_id]).to(device)
+                # Serial: use C binding directly
+                o_opponent_all = binding.vec_get_opponent_observations(self.driver_env.c_envs)
+                debug(3, f'opponent obs from binding: all.shape={o_opponent_all.shape}, slicing with env_id={env_id}')
+                o_opponent = torch.as_tensor(o_opponent_all[env_id]).to(device)
 
             # Handle NaN observations (can occur at episode boundaries)
             # Replace NaN with zeros - these will get masked out anyway
-            if hasattr(self.vecenv, 'buf') and 'opponent_observations' in self.vecenv.buf:
-                nan_count = np.isnan(o_opponent_all[self.vecenv.w_slice]).sum() if isinstance(o_opponent_all, np.ndarray) else 0
-            else:
-                nan_count = np.isnan(self._opp_obs_buf[env_id]).sum()
+            nan_count = np.isnan(o_opponent_all[env_id]).sum() if isinstance(o_opponent_all, np.ndarray) else 0
             if nan_count > 0:
                 debug(2, f'NaN in opponent obs: {nan_count} values')
             if torch.isnan(o_opponent).any():
@@ -1257,12 +1255,15 @@ class DualPerspectiveTrainer:
                             self._gate_clean_fights += clean_f * n_val
                             self._gate_total_episodes += n_val
 
-            # Set opponent actions - prefer shared buf (correct w_slice indexing for LSTM)
+            # Set opponent actions: write to shared memory (Multiprocessing) or C binding (Serial)
             profile('env', epoch)
             if hasattr(self.vecenv, 'buf') and 'opponent_actions' in self.vecenv.buf:
+                # Multiprocessing: write to shared memory buffer
+                # Workers will read this during their step() call
                 opp_act_buf = self.vecenv.buf['opponent_actions']
                 opp_act_buf[self.vecenv.w_slice] = action_o_np.reshape(opp_act_buf[self.vecenv.w_slice].shape)
             else:
+                # Serial: set directly via C binding
                 binding.vec_set_opponent_actions(self.driver_env.c_envs, action_o_np)
 
             # Send player actions
