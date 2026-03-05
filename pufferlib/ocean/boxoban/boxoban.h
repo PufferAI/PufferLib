@@ -161,6 +161,14 @@ int boxoban_set_map_path(const char *path);
 #define OBS(e,x,y) (env->observations[(e)*env->size*env->size + (y)*env->size + (x)])
 #define INTERMEDIATE_REWARD(x,y) (env->intermediate_rewards[(y)*env->size + (x)])
 
+static inline void set_entity(Boxoban *env, int entity, int x, int y, unsigned char value) {
+    env->observations[(entity)*env->size*env->size + (y)*env->size + (x)] = value;
+}
+
+static inline unsigned char get_entity(Boxoban *env, int entity, int x, int y) {
+    return env->observations[(entity)*env->size*env->size + (y)*env->size + (x)];
+}
+
 static inline const uint32_t get_random_puzzle_idx(const Boxoban *env) {
     int idx = rand() % PUZZLE_COUNT;
     return idx;
@@ -170,7 +178,7 @@ static inline int count_boxes(Boxoban *env){
     int total = 0;
     for (int y = 0; y < env->size; y++) {
         for (int x = 0; x < env->size; x++) {
-            total += OBS(BOXES, x, y);
+            total += get_entity(env, BOXES, x, y);
         }
     }
     return total;
@@ -199,7 +207,7 @@ void add_log(Boxoban* env) {
 void get_agent_pos(Boxoban* env){
     for (int y = 0; y < env->size; y++) {
         for (int x = 0; x < env->size; x++) {
-            if (OBS(AGENT, x, y) == 1) {
+            if (get_entity(env, AGENT, x, y) == 1) {
                 env->agent_x = x;
                 env->agent_y = y;
             }
@@ -211,7 +219,7 @@ bool clear(Boxoban* env, int x, int y) {
     if (x < 0 || y < 0 || x >= env->size || y >= env->size) {
         return false;
     }
-    return (OBS(WALLS, x, y) == 0) && (OBS(BOXES, x, y) == 0);
+    return (get_entity(env, WALLS, x, y) == 0) && (get_entity(env, BOXES, x, y) == 0);
 }
 
 // Required function
@@ -232,8 +240,8 @@ void c_reset(Boxoban* env) {
 
 //Updates OBS for moved entity
 void move_entity(Boxoban* env,unsigned char entity,int x, int y, int dx, int dy) {
-    OBS(entity, x, y) = 0;
-    OBS(entity, x + dx, y + dy) = 1;
+    set_entity(env, entity, x, y, 0);
+    set_entity(env, entity, x + dx, y + dy, 1);
 }
 
 //NB THIS IS DESTRUCTIVE AND SHOULD BE RUN ONCE PER STEP
@@ -243,8 +251,8 @@ float get_intermediate_rewards(Boxoban* env) {
     float int_r = 0;
     for (int y = 0; y < env->size; y++) {
         for (int x = 0; x < env->size; x++) {
-            if (OBS(BOXES, x, y) == 1 
-                    && OBS(TARGET, x, y) == 1 
+            if (get_entity(env, BOXES, x, y) == 1
+                    && get_entity(env, TARGET, x, y) == 1
                     && INTERMEDIATE_REWARD(x, y) == 1) {
                 int_r += 1.0;
                 INTERMEDIATE_REWARD(x, y) = 0;
@@ -259,7 +267,7 @@ static inline int boxes_on_targets(Boxoban *env) {
     int total = 0;
     for (int y = 0; y < env->size; y++) {
         for (int x = 0; x < env->size; x++) {
-            total += OBS(BOXES, x, y) && OBS(TARGET, x, y);
+            total += get_entity(env, BOXES, x, y) && get_entity(env, TARGET, x, y);
         }
     }
      return total;
@@ -280,7 +288,7 @@ void take_action(Boxoban* env, int action) {
             return;
         }
         else if (clear(env, env->agent_x, env->agent_y + 2*dy)
-             && (OBS(BOXES, env->agent_x, env->agent_y + dy) == 1))
+                && get_entity(env, BOXES, env->agent_x, env->agent_y + dy) == 1)
 
         {
             move_entity(env, BOXES, env->agent_x, env->agent_y + dy, dx, dy);
@@ -297,7 +305,7 @@ void take_action(Boxoban* env, int action) {
             return;
         }
         else if (clear(env, env->agent_x, env->agent_y + 2*dy) 
-                && OBS(BOXES, env->agent_x, env->agent_y + dy) == 1)
+                && get_entity(env, BOXES, env->agent_x, env->agent_y + dy) == 1)
                 
         {
             move_entity(env, BOXES, env->agent_x, env->agent_y+dy, dx, dy);
@@ -314,7 +322,7 @@ void take_action(Boxoban* env, int action) {
             return;
         }
         else if (clear(env, env->agent_x + 2*dx, env->agent_y)
-                 && OBS(BOXES, env->agent_x + dx, env->agent_y) == 1) 
+                && get_entity(env, BOXES, env->agent_x + dx, env->agent_y) == 1)
                 
         {
             move_entity(env, BOXES, env->agent_x+dx, env->agent_y, dx, dy);
@@ -331,7 +339,7 @@ void take_action(Boxoban* env, int action) {
             return;
         }
         else if (clear(env, env->agent_x + 2*dx, env->agent_y)
-                && OBS(BOXES, env->agent_x + dx, env->agent_y) == 1) 
+                && get_entity(env, BOXES, env->agent_x + dx, env->agent_y) == 1)
         {
             move_entity(env, BOXES, env->agent_x+dx, env->agent_y, dx, dy);
             move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
@@ -348,7 +356,8 @@ void take_action(Boxoban* env, int action) {
 bool goal(Boxoban* env) {
     for (int y = 0; y < env->size; y++) {
         for (int x = 0; x < env->size; x++) {
-            if (OBS(BOXES, x, y) == 1 && OBS(TARGET, x, y) == 0) {
+            if (get_entity(env, BOXES, x, y) == 1 && get_entity(env, TARGET, x, y) == 0)
+            {
                 return false;
             }
         }
@@ -446,10 +455,10 @@ Client* c_create(Boxoban* env) {
 #define TILE 32
 
 Texture2D choose_sprite(Client *c, Boxoban *env, int x, int y) {
-    int a = OBS(AGENT,  x, y);
-    int w = OBS(WALLS,  x, y);
-    int b = OBS(BOXES,  x, y);
-    int t = OBS(TARGET, x, y);
+    int a = get_entity(env, AGENT, x, y);
+    int w = get_entity(env, WALLS, x, y);
+    int b = get_entity(env, BOXES, x, y);
+    int t = get_entity(env, TARGET, x, y);
 
     if (w) return c->wall;
     if (b && t) return c->box_on_target;
@@ -473,7 +482,7 @@ void draw_tile(Boxoban *env, int x, int y) {
           0.0f,
           WHITE);
 
-      if (OBS(TARGET, x, y)) {
+      if (get_entity(env, TARGET, x, y)) {
           DrawTexturePro(
               c->target,
               (Rectangle){0, 0, (float)c->target.width, (float)c->target.height},
@@ -482,8 +491,8 @@ void draw_tile(Boxoban *env, int x, int y) {
               0.0f,
               WHITE);
       }
-      if (OBS(BOXES, x, y)) {
-          Texture2D tex = OBS(TARGET, x, y) ? c->box_on_target : c->box;
+      if (get_entity(env, BOXES, x, y)) {
+          Texture2D tex = get_entity(env, TARGET, x, y) ? c->box_on_target : c->box;
           DrawTexturePro(
               tex,
               (Rectangle){0, 0, (float)tex.width, (float)tex.height},
@@ -492,7 +501,7 @@ void draw_tile(Boxoban *env, int x, int y) {
               0.0f,
               WHITE);
       }
-      if (OBS(WALLS, x, y)) {
+      if (get_entity(env, WALLS, x, y)) {
           DrawTexturePro(
               c->wall,
               (Rectangle){0, 0, (float)c->wall.width, (float)c->wall.height},
@@ -501,7 +510,7 @@ void draw_tile(Boxoban *env, int x, int y) {
               0.0f,
               WHITE);
       }
-      if (OBS(AGENT, x, y)) {
+      if (get_entity(env, AGENT, x, y)) {
           Rectangle src = {0, 0, c->agent.width / 2.0f, (float)c->agent.height};
           DrawTexturePro(c->agent, src, dest, (Vector2){0, 0}, 0.0f, WHITE);
       }
