@@ -39,6 +39,7 @@ static const char* resolve_map_path(int argc, char** argv, char* buffer, size_t 
     return buffer;
 }
 
+
 int demo(int argc, char** argv) {
     char path_buffer[512];
     const char* chosen_path = resolve_map_path(argc, argv, path_buffer, sizeof(path_buffer));
@@ -49,10 +50,10 @@ int demo(int argc, char** argv) {
 
     Boxoban env = {
         .size = 10,
-        .observations = calloc(4 * env.size * env.size, sizeof(unsigned char)),
-        .actions = calloc(1, sizeof(int)),
-        .rewards = calloc(1, sizeof(float)),
-        .terminals = calloc(1, sizeof(unsigned char)),
+        .observations = NULL,
+        .actions = NULL,
+        .rewards = NULL,
+        .terminals = NULL,
         .max_steps = 500,
         .int_r_coeff = 0.1f,
         .target_loss_pen_coeff = 0.5f,
@@ -66,6 +67,11 @@ int demo(int argc, char** argv) {
         .client = NULL,
     };
 
+    size_t obs_count = 4u * (size_t)env.size * (size_t)env.size;
+    env.observations = calloc(obs_count, sizeof(unsigned char));
+    env.actions = calloc(1, sizeof(int));
+    env.rewards = calloc(1, sizeof(float));
+    env.terminals = calloc(1, sizeof(unsigned char));
 
     init(&env);
     c_reset(&env);
@@ -118,10 +124,10 @@ void test_performance(int argc, char** argv, int timeout) {
 
     Boxoban env = {
         .size = 10,
-        .observations = calloc(4 * env.size * env.size, sizeof(unsigned char)),
-        .actions = calloc(1, sizeof(int)),
-        .rewards = calloc(1, sizeof(float)),
-        .terminals = calloc(1, sizeof(unsigned char)),
+        .observations = NULL,
+        .actions = NULL,
+        .rewards = NULL,
+        .terminals = NULL,
         .max_steps = 500,
         .int_r_coeff = 0.1f,
         .target_loss_pen_coeff = 0.5f,
@@ -133,7 +139,14 @@ void test_performance(int argc, char** argv, int timeout) {
         .n_boxes = 0,
         .win = 0,
         .client = NULL,
-};
+    };
+
+    size_t obs_count = 4u * (size_t)env.size * (size_t)env.size;
+    env.observations = calloc(obs_count, sizeof(unsigned char));
+    env.actions = calloc(1, sizeof(int));
+    env.rewards = calloc(1, sizeof(float));
+    env.terminals = calloc(1, sizeof(unsigned char));
+
     printf("Initializing...\n");
     init(&env);
     printf("Resetting...\n");
@@ -159,10 +172,10 @@ void test_performance(int argc, char** argv, int timeout) {
 }
 
 int main(int argc, char** argv) {
-    //demo(argc, argv);
+    demo(argc, argv);
     setbuf(stdout, NULL);
     fprintf(stderr, "Entered main\n");
     fflush(stderr);
-    test_performance(argc, argv,10);
+    //test_performance(argc, argv,10);
     return 0;
 }
