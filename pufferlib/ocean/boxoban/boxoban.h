@@ -158,8 +158,6 @@ void ensure_map_loaded(void); //declare from binding.c
 int boxoban_set_map_path(const char *path);
 
 //Entity,x,y  convention y moves top to bottom
-#define OBS(e,x,y) (env->observations[(e)*env->size*env->size + (y)*env->size + (x)])
-#define INTERMEDIATE_REWARD(x,y) (env->intermediate_rewards[(y)*env->size + (x)])
 
 static inline void set_entity(Boxoban *env, int entity, int x, int y, unsigned char value) {
     env->observations[(entity)*env->size*env->size + (y)*env->size + (x)] = value;
@@ -167,6 +165,14 @@ static inline void set_entity(Boxoban *env, int entity, int x, int y, unsigned c
 
 static inline unsigned char get_entity(Boxoban *env, int entity, int x, int y) {
     return env->observations[(entity)*env->size*env->size + (y)*env->size + (x)];
+}
+
+static inline void set_intermediate_reward(Boxoban *env, int x, int y, unsigned char value) {
+    env->intermediate_rewards[(y)*env->size + (x)] = value;
+}
+
+static inline unsigned char get_intermediate_reward_status(Boxoban *env, int x, int y) {
+    return env->intermediate_rewards[(y)*env->size + (x)];
 }
 
 static inline const uint32_t get_random_puzzle_idx(const Boxoban *env) {
@@ -253,9 +259,9 @@ float get_intermediate_rewards(Boxoban* env) {
         for (int x = 0; x < env->size; x++) {
             if (get_entity(env, BOXES, x, y) == 1
                     && get_entity(env, TARGET, x, y) == 1
-                    && INTERMEDIATE_REWARD(x, y) == 1) {
+                    && get_intermediate_reward_status(env, x, y) == 1) {
                 int_r += 1.0;
-                INTERMEDIATE_REWARD(x, y) = 0;
+                set_intermediate_reward(env, x, y, 0);
             }
                 
         }
