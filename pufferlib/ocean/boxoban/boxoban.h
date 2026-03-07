@@ -36,7 +36,8 @@ extern size_t PUZZLE_SIZE;
 uint8_t *MAP_BASE = NULL;
 size_t MAP_FILESIZE = 0;
 size_t PUZZLE_COUNT = 0;
-size_t PUZZLE_SIZE = 400;
+size_t PUZZLE_SIZE = 405;
+static const size_t PUZZLE_OBS_BYTES = 400;
 static char* BOXOBAN_MAP_PATH = NULL;
 
 static void reset_map_cache(void) {
@@ -100,6 +101,11 @@ void ensure_map_loaded(void) {
     }
 
     MAP_FILESIZE = st.st_size;
+    if (MAP_FILESIZE % PUZZLE_SIZE != 0) {
+        fprintf(stderr, "Invalid Boxoban map file size %zu (expected multiple of %zu)\n",
+            MAP_FILESIZE, PUZZLE_SIZE);
+        abort();
+    }
     PUZZLE_COUNT = MAP_FILESIZE/PUZZLE_SIZE;
 
     MAP_BASE = mmap(NULL, MAP_FILESIZE, PROT_READ, MAP_PRIVATE, fd, 0);
@@ -211,35 +217,22 @@ bool clear(Boxoban* env, int x, int y) {
 // Required function
 void c_reset(Boxoban* env) {
     const uint32_t i = get_random_puzzle_idx(env);
-    memcpy(env->observations, 
-            MAP_BASE + (size_t)i * PUZZLE_SIZE, PUZZLE_SIZE);
+    const uint8_t* puzzle = MAP_BASE + (size_t)i * PUZZLE_SIZE;
+    memcpy(env->observations, puzzle, PUZZLE_OBS_BYTES);
+
+    const uint8_t* meta = puzzle + PUZZLE_OBS_BYTES;
+    env->agent_x = (int)meta[0];
+    env->agent_y = (int)meta[1];
+    env->n_boxes = (int)meta[2];
+    env->n_targets = (int)meta[3];
+    env->on_target = (int)meta[4];
+
     memset(env->intermediate_rewards, 0, env->size*env->size*sizeof(int));
     memcpy(env->intermediate_rewards,
             env->observations + TARGET * env->size * env->size,env->size * env->size);
 
-    env->n_boxes = 0;
-    env->n_targets = 0;
-    env->on_target = 0;
     env->tick = 0;
     env->win = 0;
-
-    for (int x = 0; x < env->size; x++) {
-        for (int y = 0; y < env->size; y++) {
-            if (get_entity(env, BOXES, x, y) == 1) {
-                env->n_boxes += 1;
-            }
-            if (get_entity(env, TARGET, x, y) == 1) {
-                env->n_targets += 1;
-            }
-            if (get_entity(env, TARGET, x, y) == 1 && get_entity(env, BOXES, x, y) == 1) {
-                env->on_target += 1;
-            }
-            if (get_entity(env, AGENT, x, y) == 1) {
-                env->agent_x = x;
-                env->agent_y = y;
-            }
-        }
-    }
 
 }
 
