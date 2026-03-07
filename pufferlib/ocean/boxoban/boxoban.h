@@ -151,7 +151,7 @@ typedef struct {
     int max_steps;
     int agent_x;
     int agent_y;
-    unsigned char* intermediate_rewards;
+    int* intermediate_rewards;
     float int_r_coeff;
     float target_loss_pen_coeff;
     int on_target; //num targets currently boxed
