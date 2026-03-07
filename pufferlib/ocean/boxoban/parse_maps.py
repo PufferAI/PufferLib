@@ -11,6 +11,8 @@ AGENT_ON_TARG = '+'
 PUZZLE_OBS_BYTES = 4 * 10 * 10
 PUZZLE_META_BYTES = 5
 PUZZLE_BYTES = PUZZLE_OBS_BYTES + PUZZLE_META_BYTES
+EXPECTED_ROWS = 10
+EXPECTED_COLS = 10
 
 def parse_puzzles(text):
     puzzles = []
@@ -32,6 +34,16 @@ def parse_puzzles(text):
             current = []
 
     return puzzles
+
+def validate_puzzle_shape(grid):
+    if len(grid) != EXPECTED_ROWS:
+        return False, f"expected {EXPECTED_ROWS} rows, got {len(grid)}"
+
+    for r, row in enumerate(grid):
+        if len(row) != EXPECTED_COLS:
+            return False, f"row {r} expected {EXPECTED_COLS} cols, got {len(row)}"
+
+    return True, ""
 
 def encode_puzzle(grid):
     # grid is 10 strings of length 10
@@ -82,10 +94,18 @@ def write_bin(files, out_path, verbose=True):
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
         puzzles = parse_puzzles(content)
-        for p in puzzles:
-            if len(p) != 10:
-                raise ValueError(f"Puzzle not 10 lines in {path}")
-            arrays = encode_puzzle(p)
+        for idx, p in enumerate(puzzles):
+            ok, reason = validate_puzzle_shape(p)
+            if not ok:
+                print(f"[Boxoban] Skipping malformed puzzle in {path} puzzle#{idx}: {reason}")
+                continue
+
+            try:
+                arrays = encode_puzzle(p)
+            except ValueError as e:
+                print(f"[Boxoban] Skipping malformed puzzle in {path} puzzle#{idx}: {e}")
+                continue
+
             all_arrays.extend(arrays)
             puzzle_count += 1
 
