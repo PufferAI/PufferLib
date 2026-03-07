@@ -151,7 +151,7 @@ typedef struct {
     int max_steps;
     int agent_x;
     int agent_y;
-    int* intermediate_rewards;
+    unsigned char* intermediate_rewards;
     float int_r_coeff;
     float target_loss_pen_coeff;
     int on_target; //num targets currently boxed
@@ -178,7 +178,7 @@ static inline void set_intermediate_reward(Boxoban *env, int x, int y, unsigned 
     env->intermediate_rewards[(y)*env->size + (x)] = value;
 }
 
-static inline int get_intermediate_reward_status(Boxoban *env, int x, int y) {
+static inline unsigned char get_intermediate_reward_status(Boxoban *env, int x, int y) {
     return env->intermediate_rewards[(y)*env->size + (x)];
 }
 
@@ -190,7 +190,7 @@ static inline const uint32_t get_random_puzzle_idx(const Boxoban *env) {
 
 void init (Boxoban* env) {
     ensure_map_loaded();
-    env->intermediate_rewards = calloc(env->size*env->size, sizeof(int));
+    env->intermediate_rewards = calloc(env->size*env->size, sizeof(unsigned char));
     env->win = 0;
   }
 
@@ -227,7 +227,7 @@ void c_reset(Boxoban* env) {
     env->n_targets = (int)meta[3];
     env->on_target = (int)meta[4];
 
-    memset(env->intermediate_rewards, 0, env->size*env->size*sizeof(int));
+    memset(env->intermediate_rewards, 0, env->size*env->size*sizeof(unsigned char));
     memcpy(env->intermediate_rewards,
             env->observations + TARGET * env->size * env->size,env->size * env->size);
 
