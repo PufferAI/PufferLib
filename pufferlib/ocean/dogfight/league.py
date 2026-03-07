@@ -157,7 +157,7 @@ class League:
             dict: policy_id -> verification_result dict
         """
         from pufferlib.ocean.dogfight.elo_eval import (
-            load_policy_from_path, run_matches, compute_elo_mle
+            load_policy_from_path, run_matches_vectorized, compute_elo_mle
         )
         from pufferlib.ocean.dogfight.dogfight import Dogfight
         from pufferlib.ocean.dogfight import binding
@@ -220,7 +220,7 @@ class League:
             # env.step(), so clean_fights accumulate in the C log struct across
             # all gauntlet matches. We read them once after the gauntlet via vec_log.
             env = Dogfight(
-                num_envs=1,
+                num_envs=num_envs,
                 render_mode=None,
                 obs_scheme=policy.obs_scheme,
                 curriculum_enabled=1,
@@ -250,14 +250,22 @@ class League:
 
                 # Play from both sides to cancel spawn position asymmetry
                 half = games_per_ref // 2
-                r1 = run_matches(env, candidate_policy, ref_policy,
-                                 half, self.device,
-                                 player_hidden_size=policy.hidden_size,
-                                 opponent_hidden_size=ref['hidden_size'])
-                r2 = run_matches(env, ref_policy, candidate_policy,
-                                 games_per_ref - half, self.device,
-                                 player_hidden_size=ref['hidden_size'],
-                                 opponent_hidden_size=policy.hidden_size)
+                r1 = run_matches_vectorized(
+                    candidate_policy, ref_policy, half,
+                    obs_scheme=policy.obs_scheme,
+                    hidden_size=policy.hidden_size,
+                    num_envs=num_envs,
+                    device=self.device,
+                    env=env,
+                    opponent_hidden_size=ref['hidden_size'])
+                r2 = run_matches_vectorized(
+                    ref_policy, candidate_policy, games_per_ref - half,
+                    obs_scheme=policy.obs_scheme,
+                    hidden_size=ref['hidden_size'],
+                    num_envs=num_envs,
+                    device=self.device,
+                    env=env,
+                    opponent_hidden_size=policy.hidden_size)
                 # Combine: r1 wins are candidate wins; r2 losses are candidate wins
                 result = {
                     'wins': r1['wins'] + r2['losses'],
