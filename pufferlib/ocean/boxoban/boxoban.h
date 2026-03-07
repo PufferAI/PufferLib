@@ -172,7 +172,7 @@ static inline void set_intermediate_reward(Boxoban *env, int x, int y, unsigned 
     env->intermediate_rewards[(y)*env->size + (x)] = value;
 }
 
-static inline unsigned char get_intermediate_reward_status(Boxoban *env, int x, int y) {
+static inline int get_intermediate_reward_status(Boxoban *env, int x, int y) {
     return env->intermediate_rewards[(y)*env->size + (x)];
 }
 
