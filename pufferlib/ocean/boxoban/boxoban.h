@@ -249,11 +249,29 @@ void c_reset(Boxoban* env) {
     memset(env->intermediate_rewards, 0, env->size*env->size*sizeof(int));
     memcpy(env->intermediate_rewards,
             env->observations + TARGET * env->size * env->size,env->size * env->size);
-    env->n_boxes = count_boxes(env);
-    env->tick = 0;
+
+    env->n_boxes = 0;
+    env->n_targets = 0;
     env->on_target = 0;
-    env->n_targets = count_targets(env);
-    get_agent_pos(env);
+
+    for (int x = 0; x < env->size; x++) {
+        for (int y = 0; y < env->size; y++) {
+            if (get_entity(env, BOXES, x, y) == 1) {
+                env->n_boxes += 1;
+            }
+            if (get_entity(env, TARGET, x, y) == 1) {
+                env->n_targets += 1;
+            }
+            if (get_entity(env, TARGET, x, y) == 1 && get_entity(env, BOXES, x, y) == 1) {
+                env->on_target += 1;
+            }
+            if (get_entity(env, AGENT, x, y) == 1) {
+                env->agent_x = x;
+                env->agent_y = y;
+            }
+        }
+    }
+    env->tick = 0;
     env->win = 0;
 }
 
