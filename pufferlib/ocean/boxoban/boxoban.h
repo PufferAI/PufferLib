@@ -227,7 +227,6 @@ void c_reset(Boxoban* env) {
     env->n_targets = (int)meta[3];
     env->on_target = (int)meta[4];
 
-    memset(env->intermediate_rewards, 0, env->size*env->size*sizeof(unsigned char));
     memcpy(env->intermediate_rewards,
             env->observations + TARGET * env->size * env->size,env->size * env->size);
 
@@ -249,126 +248,54 @@ int take_action(Boxoban* env, int action) {
     int dy = 0;
     int int_r = 0;
 
-    if (action == DOWN) {
+    if (action == NOOP) {
+        return 0;
+    }
+    else if (action == DOWN) {
         dy = 1;
-        //if move space is clear, move agent
-        if (clear(env, env->agent_x, env->agent_y + dy)) {
-            
-            move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
-            env->agent_y += dy;
-            return 0;
-        }
-        //if its not clear, but its a box and box is clear to move, move both
-        else if (clear(env, env->agent_x, env->agent_y + 2*dy)
-                && get_entity(env, BOXES, env->agent_x, env->agent_y + dy) == 1) {
-
-                //if box is on target currently, remove from on_target count
-                if (get_entity(env, TARGET, env->agent_x, env->agent_y + dy) == 1) {
-
-                    env->on_target -= 1;
-                }
-                //move both entities
-                move_entity(env, BOXES, env->agent_x, env->agent_y + dy, dx, dy);
-                move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
-                env->agent_y += dy;
-            
-                //if box is now on target, add to on_target count
-                //if its a new target recieve intermediate reward and zero out intermediate reward
-                if (get_entity(env, TARGET, env->agent_x, env->agent_y + dy) == 1) {
-                    
-                    env->on_target += 1;
-                    int_r = get_intermediate_reward_status(env, env->agent_x, env->agent_y + dy);
-                    set_intermediate_reward(env, env->agent_x, env->agent_y + dy, 0);
-                }
-                return int_r;
-        }
     }
     else if (action == UP) {
         dy = -1;
-        if (clear(env, env->agent_x, env->agent_y + dy)) {
-            
-            move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
-            env->agent_y += dy;
-            return 0;
-        }
-        else if (clear(env, env->agent_x, env->agent_y + 2*dy) 
-                && get_entity(env, BOXES, env->agent_x, env->agent_y + dy) == 1) {
-
-                if (get_entity(env, TARGET, env->agent_x, env->agent_y + dy) == 1) {
-
-                    env->on_target -= 1;
-                }
-
-                move_entity(env, BOXES, env->agent_x, env->agent_y+dy, dx, dy);
-                move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
-                env->agent_y += dy;
-
-                if (get_entity(env, TARGET, env->agent_x, env->agent_y + dy) == 1) {
-
-                    env->on_target += 1;
-                    int_r = get_intermediate_reward_status(env, env->agent_x, env->agent_y + dy);
-                    set_intermediate_reward(env, env->agent_x, env->agent_y + dy, 0);
-                }
-                return int_r;
-        }
     }
     else if (action == LEFT) {
         dx = -1;
-        if (clear(env, env->agent_x + dx, env->agent_y)) {
-            
-            move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
-            env->agent_x += dx;
-            return 0;
-        }
-        else if (clear(env, env->agent_x + 2*dx, env->agent_y)
-                && get_entity(env, BOXES, env->agent_x + dx, env->agent_y) == 1) {
-
-                if (get_entity(env, TARGET, env->agent_x + dx, env->agent_y) == 1) {
-
-                    env->on_target -= 1;
-                }
-
-                move_entity(env, BOXES, env->agent_x+dx, env->agent_y, dx, dy);
-                move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
-                env->agent_x += dx;
-
-                if (get_entity(env, TARGET, env->agent_x + dx, env->agent_y) == 1) {
-
-                    env->on_target += 1;
-                    int_r = get_intermediate_reward_status(env, env->agent_x + dx, env->agent_y);
-                    set_intermediate_reward(env, env->agent_x + dx, env->agent_y, 0);
-                }
-                return int_r;
-        }
     }
     else if (action == RIGHT) {
         dx = 1;
-        if (clear(env, env->agent_x + dx, env->agent_y)) {
+    }
 
+    //if move space is clear, move agent
+    if (clear(env, env->agent_x + dx, env->agent_y + dy)) {
+        
+        move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
+        env->agent_y += dy;
+        env->agent_x += dx;
+        return 0;
+    }
+    //if its not clear, but its a box and box is clear to move, move both
+    else if (clear(env, env->agent_x+ 2*dx, env->agent_y + 2*dy)
+            && get_entity(env, BOXES, env->agent_x + dx, env->agent_y + dy) == 1) {
+
+            //if box is on target currently, remove from on_target count
+            if (get_entity(env, TARGET, env->agent_x + dx, env->agent_y + dy) == 1) {
+
+                env->on_target -= 1;
+            }
+            //move both entities
+            move_entity(env, BOXES, env->agent_x + dx, env->agent_y + dy, dx, dy);
             move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
+            env->agent_y += dy;
             env->agent_x += dx;
-            return 0;
-        }
-        else if (clear(env, env->agent_x + 2*dx, env->agent_y)
-                && get_entity(env, BOXES, env->agent_x + dx, env->agent_y) == 1) {
-
-                if (get_entity(env, TARGET, env->agent_x + dx, env->agent_y) == 1) {
-
-                    env->on_target -= 1;
-                }
+        
+            //if box is now on target, add to on_target count
+            //if its a new target recieve intermediate reward and zero out intermediate reward
+            if (get_entity(env, TARGET, env->agent_x + dx, env->agent_y + dy) == 1) {
                 
-                move_entity(env, BOXES, env->agent_x+dx, env->agent_y, dx, dy);
-                move_entity(env, AGENT, env->agent_x, env->agent_y, dx, dy);
-                env->agent_x += dx;
-
-                if (get_entity(env, TARGET, env->agent_x + dx, env->agent_y) == 1) {
-
-                    env->on_target += 1;
-                    int_r = get_intermediate_reward_status(env, env->agent_x + dx, env->agent_y);
-                    set_intermediate_reward(env, env->agent_x + dx, env->agent_y, 0);
-                }
-                return int_r;
-        }
+                env->on_target += 1;
+                int_r = get_intermediate_reward_status(env, env->agent_x + dx, env->agent_y + dy);
+                set_intermediate_reward(env, env->agent_x + dx, env->agent_y + dy, 0);
+            }
+            return int_r;
     }
     return 0;
 }
