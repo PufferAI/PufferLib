@@ -3,30 +3,49 @@
 #define Env Boxoban
 #include "../env_binding.h"
 
-//Map stuff
-static int update_map_path(PyObject* kwargs) {
-    PyObject* map_path_obj = PyDict_GetItemString(kwargs, "map_path");
-    if (map_path_obj == NULL || !PyUnicode_Check(map_path_obj)) {
-        PyErr_SetString(PyExc_TypeError, "Boxoban requires a string 'map_path' kwarg");
-        return -1;
+static int parse_difficulty_id(PyObject* kwargs, int* out_difficulty_id) {
+    int difficulty_id = 0;
+    PyObject* difficulty_obj = PyDict_GetItemString(kwargs, "difficulty");
+    if (difficulty_obj != NULL) {
+        if (PyLong_Check(difficulty_obj)) {
+            long parsed_id = PyLong_AsLong(difficulty_obj);
+            if (boxoban_difficulty_name_from_id((int)parsed_id) == NULL) {
+                PyErr_Format(
+                    PyExc_ValueError,
+                    "Boxoban 'difficulty' int must be in [0, 4], got %ld (0=basic, 1=easy, 2=medium, 3=hard, 4=unfiltered)",
+                    parsed_id
+                );
+                return -1;
+            }
+            difficulty_id = (int)parsed_id;
+        } else if (PyUnicode_Check(difficulty_obj)) {
+            const char* difficulty_name = PyUnicode_AsUTF8(difficulty_obj);
+            if (difficulty_name == NULL) {
+                return -1;
+            }
+            difficulty_id = boxoban_difficulty_id_from_name(difficulty_name);
+            if (difficulty_id < 0) {
+                PyErr_Format(
+                    PyExc_ValueError,
+                    "Boxoban 'difficulty' string must be one of: basic, easy, medium, hard, unfiltered (got '%s')",
+                    difficulty_name
+                );
+                return -1;
+            }
+        } else {
+            PyErr_SetString(
+                PyExc_TypeError,
+                "Boxoban 'difficulty' must be an int (0..4) or string (basic/easy/medium/hard/unfiltered)"
+            );
+            return -1;
+        }
     }
-
-    const char* new_path = PyUnicode_AsUTF8(map_path_obj);
-    if (new_path == NULL) {
-        return -1;
-    }
-
-    if (boxoban_set_map_path(new_path) != 0) {
-        PyErr_SetString(PyExc_RuntimeError, "Failed to set Boxoban map path");
-        return -1;
-    }
-
+    *out_difficulty_id = difficulty_id;
     return 0;
 }
 
-
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    if (update_map_path(kwargs) != 0) {
+    if (parse_difficulty_id(kwargs, &env->difficulty_id) != 0) {
         return -1;
     }
     env->size = (int)unpack(kwargs, "size");

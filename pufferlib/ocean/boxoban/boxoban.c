@@ -27,13 +27,30 @@ static void install_handlers(void) {
     signal(SIGABRT, segv_handler);
 }
 
+static int is_named_difficulty(const char* arg) {
+    return strcmp(arg, "basic") == 0 ||
+        strcmp(arg, "easy") == 0 ||
+        strcmp(arg, "medium") == 0 ||
+        strcmp(arg, "hard") == 0 ||
+        strcmp(arg, "unfiltered") == 0;
+}
+
 static const char* resolve_map_path(int argc, char** argv, char* buffer, size_t buf_sz) {
     const char* arg = argc > 1 ? argv[1] : NULL;
     if (arg == NULL) {
-        return "pufferlib/ocean/boxoban/boxoban_maps_easy.bin";
+        if (boxoban_prepare_maps_for_difficulty("easy", buffer, buf_sz) != 0) {
+            return NULL;
+        }
+        return buffer;
     }
     if (strchr(arg, '/')) {
         return arg;
+    }
+    if (is_named_difficulty(arg)) {
+        if (boxoban_prepare_maps_for_difficulty(arg, buffer, buf_sz) != 0) {
+            return NULL;
+        }
+        return buffer;
     }
     snprintf(buffer, buf_sz, "pufferlib/ocean/boxoban/boxoban_maps_%s.bin", arg);
     return buffer;
@@ -43,6 +60,10 @@ static const char* resolve_map_path(int argc, char** argv, char* buffer, size_t 
 int demo(int argc, char** argv) {
     char path_buffer[512];
     const char* chosen_path = resolve_map_path(argc, argv, path_buffer, sizeof(path_buffer));
+    if (chosen_path == NULL) {
+        fprintf(stderr, "Failed to prepare map path\n");
+        return 1;
+    }
     if (boxoban_set_map_path(chosen_path) != 0) {
         fprintf(stderr, "Failed to set map path: %s\n", chosen_path);
         return 1;
@@ -64,6 +85,7 @@ int demo(int argc, char** argv) {
         .on_target = 0,
         .n_boxes = 0,
         .win = 0,
+        .difficulty_id = -1,
         .client = NULL,
         .n_targets = 0,
 
@@ -118,6 +140,10 @@ int demo(int argc, char** argv) {
 void test_performance(int argc, char** argv, int timeout) {
     char path_buffer[512];
     const char* chosen_path = resolve_map_path(argc, argv, path_buffer, sizeof(path_buffer));
+    if (chosen_path == NULL) {
+        fprintf(stderr, "Failed to prepare map path\n");
+        return;
+    }
     if (boxoban_set_map_path(chosen_path) != 0) {
         fprintf(stderr, "Failed to set map path: %s\n", chosen_path);
         return;
@@ -140,6 +166,7 @@ void test_performance(int argc, char** argv, int timeout) {
         .on_target = 0,
         .n_boxes = 0,
         .win = 0,
+        .difficulty_id = -1,
         .client = NULL,
         .n_targets = 0,
     };

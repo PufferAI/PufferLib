@@ -2,7 +2,7 @@
 
 A simple game based on Sokoban where the player must push all boxes on to the targets
 
-Boxoban-levels contains the levels for the game as .txt files. There are various difficulties chosen by the environment variable 'difficulty' which can be 'basic', 'easy', 'medium', 'hard', 'unfiltered'.
+Boxoban-levels contains the levels for the game as .txt files. There are various difficulties chosen by the environment variable 'difficulty' which can be 'basic', 'easy', 'medium', 'hard', 'unfiltered' or integer ids `0..4` (0=basic, 1=easy, 2=medium, 3=hard, 4=unfiltered).
 
 Basic - only externals walls and one box 
 
@@ -27,7 +27,6 @@ Sprites included and have an creative license.
 You can play different difficulties by adding the arg eg. ./boxoban easy HOWEVER the .bin needs to have been built
 
 <img width="315" height="342" alt="image" src="https://github.com/user-attachments/assets/f5ea4eac-ec64-4444-b54a-b06c9ef2d252" />
-
 
 
 
