@@ -1818,28 +1818,26 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
             last_anchor_eval_step = trainer.global_step
             try:
                 from pufferlib.ocean.dogfight.anchor_eval import evaluate_against_anchors
-                import tempfile
-
-                # Save current weights to temp file for evaluation
-                with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as f:
-                    torch.save(policy.state_dict(), f.name)
-                    tmp_path = f.name
 
                 device = train_config['device']
+                hs = args.get('policy', {}).get('hidden_size', 128)
+
+                # Bracket eval/train mode — no-op for current arch (no BN/Dropout)
+                # but defensive against future policy changes
+                was_training = policy.training
+                policy.eval()
                 anchor_results = evaluate_against_anchors(
-                    model_path=tmp_path,
                     obs_scheme=obs_scheme,
                     anchor_dir=anchor_dir,
                     games_per_anchor=anchor_games,
                     num_envs=anchor_num_envs,
                     device=device,
                     eval_env=anchor_eval_env,
+                    player_policy=policy,
+                    hidden_size=hs,
                 )
-                os.unlink(tmp_path)
-
-                # Free GPU memory after eval inference
-                if device == 'cuda':
-                    torch.cuda.empty_cache()
+                if was_training:
+                    policy.train()
 
                 # Queue anchor results — inject into stats at start of next iteration
                 # (not mid-loop) to avoid corrupting current step's logging
@@ -1871,6 +1869,14 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
         final_strength = all_logs[-1].get('environment/strength', 0.0)
         anchor_rating = None
 
+        # Check if periodic anchor evals already recorded a real rating in all_logs
+        # (stats get cleared after each mean_and_log(), so check all_logs instead)
+        last_periodic_ar = None
+        for entry in reversed(all_logs):
+            if 'environment/anchor_rating' in entry:
+                last_periodic_ar = entry['environment/anchor_rating']
+                break
+
         if model_path and final_strength >= strength_gate:
             try:
                 from pufferlib.ocean.dogfight.anchor_eval import evaluate_against_anchors
@@ -1894,14 +1900,20 @@ def train_dual(env_name='puffer_dogfight', args=None, should_stop_early=None):
             except Exception as e:
                 log(f'[ERROR] phase=anchor_eval_post msg="{e}"')
                 anchor_rating = 100.0 + final_strength * 1400.0
+        elif last_periodic_ar is not None:
+            # Periodic anchor evals ran — use the last real measurement instead of
+            # the bogus estimated formula (which can report 122 when real AR is 1169)
+            anchor_rating = last_periodic_ar
+            log(f'[ANCHOR] event=periodic_fallback anchor_rating={anchor_rating:.0f} strength={final_strength:.3f} gate={strength_gate:.2f}')
         else:
             anchor_rating = 100.0 + final_strength * 1400.0
             log(f'[ANCHOR] event=estimated anchor_rating={anchor_rating:.0f} strength={final_strength:.3f} gate={strength_gate:.2f}')
 
         if anchor_rating is not None:
             for entry in all_logs:
-                entry['environment/anchor_rating'] = anchor_rating
-            # Log estimated ratings to wandb too
+                if 'environment/anchor_rating' not in entry:
+                    entry['environment/anchor_rating'] = anchor_rating
+            # Log ratings to wandb too (if not already logged by post_training path)
             if logger and not (model_path and final_strength >= strength_gate):
                 logger.log({'environment/anchor_rating': anchor_rating}, trainer.global_step)
 

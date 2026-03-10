@@ -154,14 +154,15 @@ def likelihood_of_superiority(wins, losses):
     return 0.5 * (1.0 + math.erf((wins - losses) / math.sqrt(2.0 * n)))
 
 
-def evaluate_against_anchors(model_path, obs_scheme=0, anchor_dir=DEFAULT_ANCHOR_DIR,
+def evaluate_against_anchors(model_path=None, obs_scheme=0, anchor_dir=DEFAULT_ANCHOR_DIR,
                               games_per_anchor=DEFAULT_GAMES_PER_ANCHOR,
                               num_envs=DEFAULT_NUM_ENVS, device='cuda',
-                              hidden_size=None, eval_env=None):
+                              hidden_size=None, eval_env=None,
+                              player_policy=None):
     """Evaluate a model against the fixed anchor set.
 
     Args:
-        model_path: Path to .pt checkpoint.
+        model_path: Path to .pt checkpoint. Not needed if player_policy is provided.
         obs_scheme: Observation scheme the model was trained with.
         anchor_dir: Path to directory containing manifest.json and anchor .pt files.
         games_per_anchor: Number of games to play against each anchor.
@@ -171,6 +172,9 @@ def evaluate_against_anchors(model_path, obs_scheme=0, anchor_dir=DEFAULT_ANCHOR
         eval_env: Optional pre-created Dogfight env to reuse for autopilot and
                   neural anchor evaluation. Avoids creating/destroying envs
                   mid-training which can corrupt GPU memory or C-side state.
+        player_policy: Optional pre-loaded policy to evaluate. When provided,
+                       skips model_path loading entirely (no temp file, no tmp_env).
+                       The policy's parameters are NOT modified — eval uses torch.no_grad().
 
     Returns:
         dict with keys:
@@ -182,7 +186,7 @@ def evaluate_against_anchors(model_path, obs_scheme=0, anchor_dir=DEFAULT_ANCHOR
     start = time.time()
 
     # Infer hidden_size from checkpoint if not provided
-    if hidden_size is None:
+    if hidden_size is None and model_path is not None:
         hidden_size = infer_hidden_size_from_checkpoint(model_path)
 
     # Load anchors
@@ -206,14 +210,19 @@ def evaluate_against_anchors(model_path, obs_scheme=0, anchor_dir=DEFAULT_ANCHOR
         print(f'[ANCHOR] No compatible anchors for obs_scheme={obs_scheme}')
         return {'anchor_rating': 1000.0, 'eval_time': 0.0}
 
-    # Load player policy once (use a temporary env for policy construction)
-    tmp_env = Dogfight(
-        num_envs=1, render_mode=None, obs_scheme=obs_scheme,
-        curriculum_enabled=1, fixed_stage=20, max_steps=6000,
-    )
-    player_policy = load_policy_from_path(model_path, tmp_env, device,
-                                           hidden_size=hidden_size)
-    tmp_env.close()
+    # Use provided policy or load from model_path
+    if player_policy is not None:
+        pass  # Use directly — no file I/O, no tmp_env
+    elif model_path is not None:
+        tmp_env = Dogfight(
+            num_envs=1, render_mode=None, obs_scheme=obs_scheme,
+            curriculum_enabled=1, fixed_stage=20, max_steps=6000,
+        )
+        player_policy = load_policy_from_path(model_path, tmp_env, device,
+                                               hidden_size=hidden_size)
+        tmp_env.close()
+    else:
+        raise ValueError('Either model_path or player_policy must be provided')
 
     results = {}
     matchup_data = []
