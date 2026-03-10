@@ -125,7 +125,7 @@ def main():
                         help='Number of episodes to run')
     parser.add_argument('--stage', type=int, default=-1,
                         help='Curriculum stage (-1 for stage 20 AutoAce)')
-    parser.add_argument('--obs-scheme', type=int, default=1,
+    parser.add_argument('--obs-scheme', type=int, default=0,
                         help='Observation scheme (must match training)')
     parser.add_argument('--render', action='store_true',
                         help='Render episodes')

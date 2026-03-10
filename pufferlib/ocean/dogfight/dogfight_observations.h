@@ -3,13 +3,15 @@
 //
 // Observation Schemes:
 // All schemes include timer observation at the end: tick/(max_steps+1) [0,~1)
-//   Scheme 0: OBS_MOMENTUM_GFORCE  - G-force awareness (17 obs) — proven winner
-//   Scheme 1: OBS_PILOT            - Pilot awareness (22 obs)
-//   Scheme 2: OBS_OPPONENT_AWARE   - S1 + opp up vector + opp speed (26 obs)
+//   Scheme 0: OBS_PILOT            - Pilot awareness (22 obs) — was scheme 1
+//   Scheme 1: OBS_OPPONENT_AWARE   - S0 + opp up vector + opp speed (26 obs) — was scheme 2
+//
+// Removed (code preserved below, commented out in dispatch):
+//   OBS_MOMENTUM_GFORCE - G-force awareness (17 obs) — was scheme 0
 //
 // Preserved (unwired) rate schemes from df24-df31:
-//   OBS_RATES_LEAN  - Scheme 0 + tactical rates (22 obs) — harmful per df32 analysis
-//   OBS_RATES_FULL  - Scheme 1 + tactical rates (27 obs) — harmful per df32 analysis
+//   OBS_RATES_LEAN  - Old S0 + tactical rates (22 obs) — harmful per df32 analysis
+//   OBS_RATES_FULL  - Old S1 + tactical rates (27 obs) — harmful per df32 analysis
 
 #ifndef DOGFIGHT_OBSERVATIONS_H
 #define DOGFIGHT_OBSERVATIONS_H
@@ -120,9 +122,9 @@ void compute_obs_momentum_for_plane(Dogfight *env, Plane *self, Plane *other, fl
 }
 
 // ============================================================================
-// Scheme 0: OBS_MOMENTUM_GFORCE - G-force awareness (17 obs)
+// REMOVED Scheme: OBS_MOMENTUM_GFORCE - G-force awareness (17 obs)
 // ============================================================================
-// Proven winner from df24 sweep (0.989 max ultimate2)
+// Was scheme 0, proven winner from df24 sweep (0.989 max ultimate2)
 // [0-2]   vel_body (fwd, sideslip, climb)
 // [3-5]   omega (roll, pitch, yaw rate)
 // [6]     AoA
@@ -218,9 +220,9 @@ void compute_obs_momentum_gforce(Dogfight *env) {
 }
 
 // ============================================================================
-// Scheme 1: OBS_PILOT - Pilot awareness (22 obs) — lean hypothesis
+// Scheme 0: OBS_PILOT - Pilot awareness (22 obs)
 // ============================================================================
-// Best of scheme 0 + drone_race up_vector + opp rates
+// Best of old scheme 0 + drone_race up_vector + opp rates
 // [0-2]   vel_body (fwd, sideslip, climb)
 // [3-5]   omega (roll, pitch, yaw rate)
 // [6]     AoA
@@ -330,9 +332,9 @@ void compute_obs_pilot(Dogfight *env) {
 }
 
 // ============================================================================
-// Scheme 2: OBS_RATES_LEAN - Scheme 0 + tactical rates (22 obs)
+// PRESERVED (unwired): OBS_RATES_LEAN - old Scheme 0 + tactical rates (22 obs)
 // ============================================================================
-// Scheme 0 base (g-force awareness) + LOS rates, aspect rate, energy adv rate, opp speed
+// Old scheme 0 base (g-force awareness) + LOS rates, aspect rate, energy adv rate, opp speed
 // [0-2]   vel_body (fwd, sideslip, climb)
 // [3-5]   omega (roll, pitch, yaw rate)
 // [6]     AoA
@@ -463,9 +465,9 @@ void compute_obs_rates_lean(Dogfight *env) {
 }
 
 // ============================================================================
-// Scheme 3: OBS_RATES_FULL - Scheme 1 + tactical rates (27 obs)
+// PRESERVED (unwired): OBS_RATES_FULL - Scheme 0 + tactical rates (27 obs)
 // ============================================================================
-// Scheme 1 base (pilot awareness) + LOS rates, aspect rate, energy adv rate, opp speed
+// Scheme 0 base (pilot awareness) + LOS rates, aspect rate, energy adv rate, opp speed
 // [0-2]   vel_body (fwd, sideslip, climb)
 // [3-5]   omega (roll, pitch, yaw rate)
 // [6]     AoA
@@ -610,9 +612,9 @@ void compute_obs_rates_full(Dogfight *env) {
 }
 
 // ============================================================================
-// Scheme 2: OBS_OPPONENT_AWARE - S1 + opp up vector + opp speed (26 obs)
+// Scheme 1: OBS_OPPONENT_AWARE - S0 + opp up vector + opp speed (26 obs)
 // ============================================================================
-// Scheme 1 base (pilot awareness) + opponent up vector (world frame) + opponent speed
+// Scheme 0 base (pilot awareness) + opponent up vector (world frame) + opponent speed
 // No finite differences — all direct state reads
 // [0-2]   vel_body (fwd, sideslip, climb)
 // [3-5]   omega (roll, pitch, yaw rate)
@@ -740,10 +742,10 @@ void compute_obs_opponent_aware(Dogfight *env) {
 // ============================================================================
 void compute_observations(Dogfight *env) {
     switch (env->obs_scheme) {
-        case OBS_MOMENTUM_GFORCE:  compute_obs_momentum_gforce(env); break;
+        // case OBS_MOMENTUM_GFORCE:  compute_obs_momentum_gforce(env); break;  // removed
         case OBS_PILOT:            compute_obs_pilot(env); break;
         case OBS_OPPONENT_AWARE:   compute_obs_opponent_aware(env); break;
-        default:                   compute_obs_momentum_gforce(env); break;
+        default:                   compute_obs_pilot(env); break;
     }
 }
 
@@ -757,10 +759,10 @@ void compute_opponent_observations(Dogfight *env, float *opp_obs_buffer) {
     // Use opponent_obs_scheme if set, otherwise fall back to player's obs_scheme
     int scheme = (env->opponent_obs_scheme >= 0) ? env->opponent_obs_scheme : env->obs_scheme;
     switch (scheme) {
-        case OBS_MOMENTUM_GFORCE:  compute_obs_momentum_gforce_for_plane(env, &env->opponent, &env->player, opp_obs_buffer); break;
+        // case OBS_MOMENTUM_GFORCE:  compute_obs_momentum_gforce_for_plane(env, &env->opponent, &env->player, opp_obs_buffer); break;  // removed
         case OBS_PILOT:            compute_obs_pilot_for_plane(env, &env->opponent, &env->player, opp_obs_buffer); break;
         case OBS_OPPONENT_AWARE:   compute_obs_opponent_aware_for_plane(env, &env->opponent, &env->player, opp_obs_buffer); break;
-        default:                   compute_obs_momentum_gforce_for_plane(env, &env->opponent, &env->player, opp_obs_buffer); break;
+        default:                   compute_obs_pilot_for_plane(env, &env->opponent, &env->player, opp_obs_buffer); break;
     }
 }
 
@@ -769,15 +771,15 @@ void compute_opponent_observations(Dogfight *env, float *opp_obs_buffer) {
 // ============================================================================
 #if DEBUG >= 5
 
-// Scheme 0: OBS_MOMENTUM_GFORCE (17 obs)
-static const char* DEBUG_OBS_LABELS_MOMENTUM_GFORCE[17] = {
-    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
-    "aoa", "altitude", "energy", "g_force",
-    "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect", "timer"
-};
+// Removed: OBS_MOMENTUM_GFORCE (17 obs) — was scheme 0
+// static const char* DEBUG_OBS_LABELS_MOMENTUM_GFORCE[17] = {
+//     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
+//     "aoa", "altitude", "energy", "g_force",
+//     "tgt_az", "tgt_el", "range", "closure",
+//     "E_adv", "aspect", "timer"
+// };
 
-// Scheme 1: OBS_PILOT (22 obs)
+// Scheme 0: OBS_PILOT (22 obs)
 static const char* DEBUG_OBS_LABELS_PILOT[22] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "g_force", "energy",
@@ -787,7 +789,7 @@ static const char* DEBUG_OBS_LABELS_PILOT[22] = {
     "opp_pitch_r", "opp_roll_r", "timer"
 };
 
-// Scheme 2: OBS_OPPONENT_AWARE (26 obs)
+// Scheme 1: OBS_OPPONENT_AWARE (26 obs)
 static const char* DEBUG_OBS_LABELS_OPPONENT_AWARE[26] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "g_force", "energy",
@@ -827,10 +829,10 @@ void print_observations(Dogfight *env) {
 
     // Select labels based on scheme
     switch (env->obs_scheme) {
-        case OBS_MOMENTUM_GFORCE:  labels = DEBUG_OBS_LABELS_MOMENTUM_GFORCE; break;
+        // case OBS_MOMENTUM_GFORCE:  labels = DEBUG_OBS_LABELS_MOMENTUM_GFORCE; break;  // removed
         case OBS_PILOT:            labels = DEBUG_OBS_LABELS_PILOT; break;
         case OBS_OPPONENT_AWARE:   labels = DEBUG_OBS_LABELS_OPPONENT_AWARE; break;
-        default:                   labels = DEBUG_OBS_LABELS_MOMENTUM_GFORCE; break;
+        default:                   labels = DEBUG_OBS_LABELS_PILOT; break;
     }
 
     printf("=== OBS (scheme %d, %d obs) ===\n", env->obs_scheme, num_obs);
@@ -841,10 +843,7 @@ void print_observations(Dogfight *env) {
         // Determine range based on scheme and index
         bool is_01 = false;
         switch (env->obs_scheme) {
-            case OBS_MOMENTUM_GFORCE:
-                // fwd_spd(0), altitude(7), energy(8), range(12), timer(16) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8 || i == 12 || i == 16);
-                break;
+            // case OBS_MOMENTUM_GFORCE: removed
             case OBS_PILOT:
                 // fwd_spd(0), altitude(7), energy(9), range(15), timer(21) are [0,1]
                 is_01 = (i == 0 || i == 7 || i == 9 || i == 15 || i == 21);

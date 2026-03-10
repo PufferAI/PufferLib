@@ -14,24 +14,8 @@
       "stage": 20,
       "obs_scheme": null,
       "expected_rating": 600
-    },
-    {
-      "tag": "df31_mid_scheme0",
-      "type": "neural",
-      "path": "anchors/df31_mid_scheme0.pt",
-      "obs_scheme": 0,
-      "hidden_size": 128,
-      "expected_rating": 1000.0
-    },
-    {
-      "tag": "df31_top_scheme0",
-      "type": "neural",
-      "path": "anchors/df31_top_scheme0.pt",
-      "obs_scheme": 0,
-      "hidden_size": 128,
-      "expected_rating": 1300.0
     }
   ],
   "anchor": "autopilot_s20",
-  "version": 5
+  "version": 6
 }

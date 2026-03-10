@@ -20,13 +20,13 @@
 #include "autoace.h"
 
 typedef enum {
-    OBS_MOMENTUM_GFORCE = 0,    // G-force awareness (17 obs) — proven winner from df24
-    OBS_PILOT = 1,              // Pilot awareness (22 obs)
-    OBS_OPPONENT_AWARE = 2,     // S1 + opp up vector + opp speed (26 obs)
+    // OBS_MOMENTUM_GFORCE was scheme 0 (17 obs) — removed, code preserved in dogfight_observations.h
+    OBS_PILOT = 0,              // Pilot awareness (22 obs) — was scheme 1
+    OBS_OPPONENT_AWARE = 1,     // Pilot + opp up vector + opp speed (26 obs) — was scheme 2
     OBS_SCHEME_COUNT
 } ObsScheme;
 
-static const int OBS_SIZES[OBS_SCHEME_COUNT] = {17, 22, 26};
+static const int OBS_SIZES[OBS_SCHEME_COUNT] = {22, 26};
 
 typedef enum {
     CURRICULUM_TAIL_CHASE = 0,       // Stage 0: Easiest - opponent ahead, same heading

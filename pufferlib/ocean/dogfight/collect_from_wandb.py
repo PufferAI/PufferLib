@@ -51,9 +51,8 @@ def _get_encoder_shape(path):
 
 
 # Reverse map: obs_size -> obs_scheme (fallback only; wandb config is source of truth)
-# Note: obs_scheme 1 and 2 both have obs_size=22, so scheme 2 can't be
-# disambiguated from weights alone. This map defaults 22 -> scheme 1.
-_OBS_SIZE_TO_SCHEME = {17: 0, 22: 1, 27: 3}
+# Note: old scheme 0 (17 obs, MOMENTUM_GFORCE) has been removed.
+_OBS_SIZE_TO_SCHEME = {22: 0, 26: 1}
 
 
 def infer_hidden_size_from_checkpoint(path):

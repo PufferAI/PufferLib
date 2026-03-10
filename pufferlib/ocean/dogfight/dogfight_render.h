@@ -9,15 +9,10 @@ static inline Quaternion quat_to_raylib(Quat q) {
     return (Quaternion){q.x, q.y, q.z, q.w};
 }
 
-// Scheme 0: OBS_MOMENTUM_GFORCE (17 obs)
-static const char* OBS_LABELS_MOMENTUM_GFORCE[17] = {
-    "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
-    "aoa", "altitude", "energy", "g_force",
-    "tgt_az", "tgt_el", "range", "closure",
-    "E_adv", "aspect", "timer"
-};
+// Removed: OBS_MOMENTUM_GFORCE (17 obs) — was scheme 0
+// static const char* OBS_LABELS_MOMENTUM_GFORCE[17] = { ... };
 
-// Scheme 1: OBS_PILOT (22 obs)
+// Scheme 0: OBS_PILOT (22 obs)
 static const char* OBS_LABELS_PILOT[22] = {
     "fwd_spd", "sideslip", "climb", "roll_r", "pitch_r", "yaw_r",
     "aoa", "altitude", "g_force", "energy",
@@ -162,14 +157,11 @@ void draw_obs_monitor(Dogfight *env) {
     int num_obs = env->obs_size;
 
     switch (env->obs_scheme) {
-        case OBS_MOMENTUM_GFORCE:
-            labels = OBS_LABELS_MOMENTUM_GFORCE;
-            break;
         case OBS_PILOT:
             labels = OBS_LABELS_PILOT;
             break;
         default:
-            labels = OBS_LABELS_MOMENTUM_GFORCE;
+            labels = OBS_LABELS_PILOT;
             break;
     }
 
@@ -181,13 +173,9 @@ void draw_obs_monitor(Dogfight *env) {
         float val = env->observations[i];
         bool is_01 = false;
         switch (env->obs_scheme) {
-            case OBS_MOMENTUM_GFORCE:
-                // fwd_spd(0), altitude(7), energy(8), range(12), timer(16) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 8 || i == 12 || i == 16);
-                break;
             case OBS_PILOT:
-                // fwd_spd(0), altitude(7), range(14), timer(20) are [0,1]
-                is_01 = (i == 0 || i == 7 || i == 14 || i == 20);
+                // fwd_spd(0), altitude(7), energy(9), range(15), timer(21) are [0,1]
+                is_01 = (i == 0 || i == 7 || i == 9 || i == 15 || i == 21);
                 break;
             default:
                 break;

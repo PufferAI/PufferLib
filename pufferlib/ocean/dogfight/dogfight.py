@@ -25,10 +25,10 @@ class AutopilotMode:
 
 # Observation sizes by scheme (must match C OBS_SIZES in dogfight.h)
 # All schemes include timer observation (tick/max_steps) at the end
+# Note: MOMENTUM_GFORCE (17 obs) was scheme 0, now removed
 OBS_SIZES = {
-    0: 17,   # MOMENTUM_GFORCE: G-force awareness (proven winner from df24)
-    1: 22,   # PILOT: Pilot awareness + energy
-    2: 26,   # OPPONENT_AWARE: S1 + opp up vector + opp speed
+    0: 22,   # PILOT: Pilot awareness + energy (was scheme 1)
+    1: 26,   # OPPONENT_AWARE: S0 + opp up vector + opp speed (was scheme 2)
 }
 
 

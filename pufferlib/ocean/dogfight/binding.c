@@ -621,7 +621,7 @@ static PyObject* vec_enable_opponent_override(PyObject* self, PyObject* args) {
 }
 
 // Set opponent observation scheme for cross-scheme evaluation
-// Args: vec_handle, obs_scheme (-1=same as player, 0-3=specific scheme)
+// Args: vec_handle, obs_scheme (-1=same as player, 0-1=specific scheme)
 // This allows player and opponent to have different observation layouts
 static PyObject* vec_set_opponent_obs_scheme(PyObject* self, PyObject* args) {
     PyObject* vec_arg;
