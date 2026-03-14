@@ -237,10 +237,10 @@ void c_step(Boxoban* env) {
     int int_r = take_action(env, action); //int_r _new_ tgts covered, modifies observations in place
     float on_target_after = env->on_target;
                                           
-    env->rewards[0] += (float)int_r * env->int_r_coeff;
+    env->rewards[0] += (float)int_r * env->int_r_coeff; //coeff in .ini
  
-    if (on_target_after < on_target) {
-        env->rewards[0] -= env->target_loss_pen_coeff;
+    if (on_target_after < on_target) { //target loss penalty
+        env->rewards[0] -= env->target_loss_pen_coeff; //coeff in .ini
     }
 
     //Terminals
