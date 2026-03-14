@@ -21,9 +21,8 @@ typedef struct {
 } BoxobanCell;
 
 typedef struct {
-    uint32_t mt[624];
-    int index;
-} BoxobanPyRandom;
+    uint64_t state;
+} BoxobanRandom;
 
 static int boxoban_mkdir_p(const char* dir_path) {
     char tmp[1024];
@@ -48,159 +47,60 @@ static int boxoban_mkdir_p(const char* dir_path) {
     return 0;
 }
 
-static void boxoban_mt_seed_u32(BoxobanPyRandom* rng, uint32_t seed) {
-    rng->mt[0] = seed;
-    for (rng->index = 1; rng->index < 624; rng->index++) {
-        rng->mt[rng->index] = 1812433253U * (rng->mt[rng->index - 1] ^ (rng->mt[rng->index - 1] >> 30)) + (uint32_t)rng->index;
-    }
+static void boxoban_seed(BoxobanRandom* rng, uint64_t seed) {
+    rng->state = seed ? seed : 0x9e3779b97f4a7c15ULL;
 }
 
-static void boxoban_mt_seed_by_array(BoxobanPyRandom* rng, const uint32_t* init_key, int key_len) {
-    int i, j, k;
-    boxoban_mt_seed_u32(rng, 19650218U);
-    i = 1;
-    j = 0;
-    k = 624 > key_len ? 624 : key_len;
-    for (; k > 0; k--) {
-        rng->mt[i] = (rng->mt[i] ^ ((rng->mt[i - 1] ^ (rng->mt[i - 1] >> 30)) * 1664525U)) + init_key[j] + (uint32_t)j;
-        i++;
-        j++;
-        if (i >= 624) {
-            rng->mt[0] = rng->mt[623];
-            i = 1;
-        }
-        if (j >= key_len) {
-            j = 0;
-        }
-    }
-    for (k = 623; k > 0; k--) {
-        rng->mt[i] = (rng->mt[i] ^ ((rng->mt[i - 1] ^ (rng->mt[i - 1] >> 30)) * 1566083941U)) - (uint32_t)i;
-        i++;
-        if (i >= 624) {
-            rng->mt[0] = rng->mt[623];
-            i = 1;
-        }
-    }
-    rng->mt[0] = 0x80000000U;
+static uint64_t boxoban_next_u64(BoxobanRandom* rng) {
+    uint64_t x = rng->state;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    rng->state = x;
+    return x * 2685821657736338717ULL;
 }
 
-static void boxoban_py_seed(BoxobanPyRandom* rng, uint64_t seed) {
-    uint32_t key[2];
-    int key_len = 0;
-    if (seed == 0) {
-        key[0] = 0;
-        key_len = 1;
-    } else {
-        while (seed != 0 && key_len < 2) {
-            key[key_len++] = (uint32_t)(seed & 0xffffffffULL);
-            seed >>= 32;
-        }
-    }
-    boxoban_mt_seed_by_array(rng, key, key_len);
-    rng->index = 624;
-}
-
-static uint32_t boxoban_mt_next_u32(BoxobanPyRandom* rng) {
-    static const uint32_t mag01[2] = {0x0U, 0x9908b0dfU};
-    uint32_t y;
-    int kk;
-
-    if (rng->index >= 624) {
-        for (kk = 0; kk < 624 - 397; kk++) {
-            y = (rng->mt[kk] & 0x80000000U) | (rng->mt[kk + 1] & 0x7fffffffU);
-            rng->mt[kk] = rng->mt[kk + 397] ^ (y >> 1) ^ mag01[y & 0x1U];
-        }
-        for (; kk < 623; kk++) {
-            y = (rng->mt[kk] & 0x80000000U) | (rng->mt[kk + 1] & 0x7fffffffU);
-            rng->mt[kk] = rng->mt[kk + (397 - 624)] ^ (y >> 1) ^ mag01[y & 0x1U];
-        }
-        y = (rng->mt[623] & 0x80000000U) | (rng->mt[0] & 0x7fffffffU);
-        rng->mt[623] = rng->mt[396] ^ (y >> 1) ^ mag01[y & 0x1U];
-        rng->index = 0;
-    }
-
-    y = rng->mt[rng->index++];
-    y ^= (y >> 11);
-    y ^= (y << 7) & 0x9d2c5680U;
-    y ^= (y << 15) & 0xefc60000U;
-    y ^= (y >> 18);
-    return y;
-}
-
-static int boxoban_bit_length_u32(uint32_t n) {
-    int bits = 0;
-    while (n != 0) {
-        bits++;
-        n >>= 1;
-    }
-    return bits;
-}
-
-static uint32_t boxoban_py_getrandbits(BoxobanPyRandom* rng, int k) {
-    if (k <= 0) {
-        return 0;
-    }
-    return boxoban_mt_next_u32(rng) >> (32 - k);
-}
-
-static uint32_t boxoban_py_randbelow(BoxobanPyRandom* rng, uint32_t n) {
-    int k = boxoban_bit_length_u32(n);
-    uint32_t r = boxoban_py_getrandbits(rng, k);
-    while (r >= n) {
-        r = boxoban_py_getrandbits(rng, k);
-    }
-    return r;
-}
-
-static int boxoban_py_randint(BoxobanPyRandom* rng, int a, int b) {
-    return a + (int)boxoban_py_randbelow(rng, (uint32_t)(b - a + 1));
-}
-
-static int boxoban_py_choice_index(BoxobanPyRandom* rng, int n) {
-    return (int)boxoban_py_randbelow(rng, (uint32_t)n);
-}
-
-static int boxoban_py_sample_indices(BoxobanPyRandom* rng, int n, int k, int* out_indices) {
-    uint64_t setsize = 21;
-    if (k > 5) {
-        uint64_t target = (uint64_t)k * 3ULL;
-        uint64_t pow4 = 1;
-        while (pow4 < target) {
-            pow4 *= 4ULL;
-        }
-        setsize += pow4;
-    }
-
-    if ((uint64_t)n <= setsize) {
-        int* pool = (int*)malloc((size_t)n * sizeof(int));
-        if (pool == NULL) {
-            return -1;
-        }
-        for (int i = 0; i < n; i++) {
-            pool[i] = i;
-        }
-        for (int i = 0; i < k; i++) {
-            int j = (int)boxoban_py_randbelow(rng, (uint32_t)(n - i));
-            out_indices[i] = pool[j];
-            pool[j] = pool[n - i - 1];
-        }
-        free(pool);
+static uint32_t boxoban_randbelow(BoxobanRandom* rng, uint32_t n) {
+    if (n == 0) {
         return 0;
     }
 
-    uint8_t* selected = (uint8_t*)calloc((size_t)n, sizeof(uint8_t));
-    if (selected == NULL) {
+    uint64_t threshold = (uint64_t)(-(int64_t)n) % (uint64_t)n;
+    for (;;) {
+        uint64_t r = boxoban_next_u64(rng);
+        if (r >= threshold) {
+            return (uint32_t)(r % n);
+        }
+    }
+}
+
+static int boxoban_randint(BoxobanRandom* rng, int a, int b) {
+    return a + (int)boxoban_randbelow(rng, (uint32_t)(b - a + 1));
+}
+
+static int boxoban_choice_index(BoxobanRandom* rng, int n) {
+    return (int)boxoban_randbelow(rng, (uint32_t)n);
+}
+
+static int boxoban_sample_indices(BoxobanRandom* rng, int n, int k, int* out_indices) {
+    int* pool = (int*)malloc((size_t)n * sizeof(int));
+    if (pool == NULL) {
         return -1;
     }
-    for (int i = 0; i < k; i++) {
-        int j = (int)boxoban_py_randbelow(rng, (uint32_t)n);
-        while (selected[j]) {
-            j = (int)boxoban_py_randbelow(rng, (uint32_t)n);
-        }
-        selected[j] = 1;
-        out_indices[i] = j;
+
+    for (int i = 0; i < n; i++) {
+        pool[i] = i;
     }
-    free(selected);
+
+    for (int i = 0; i < k; i++) {
+        int j = i + (int)boxoban_randbelow(rng, (uint32_t)(n - i));
+        int tmp = pool[i];
+        pool[i] = pool[j];
+        pool[j] = tmp;
+        out_indices[i] = pool[i];
+    }
+
+    free(pool);
     return 0;
 }
 
@@ -264,7 +164,7 @@ static int boxoban_build_cells(int size, int margin, BoxobanCell* out_cells) {
 
 static int boxoban_make_puzzle(
     int size,
-    BoxobanPyRandom* rng,
+    BoxobanRandom* rng,
     int num_boxes,
     int max_attempts,
     const BoxobanCell* agent_choices,
@@ -303,7 +203,7 @@ static int boxoban_make_puzzle(
         boxoban_build_border_grid(grid, size);
         memset(occupied, 0, (size_t)size * (size_t)size);
 
-        if (boxoban_py_sample_indices(rng, confined_count, num_boxes, sampled_idx) != 0) {
+        if (boxoban_sample_indices(rng, confined_count, num_boxes, sampled_idx) != 0) {
             free(box_candidates);
             free(box_positions);
             free(agent_candidates);
@@ -329,7 +229,7 @@ static int boxoban_make_puzzle(
             continue;
         }
 
-        if (boxoban_py_sample_indices(rng, box_candidate_count, num_boxes, sampled_idx) != 0) {
+        if (boxoban_sample_indices(rng, box_candidate_count, num_boxes, sampled_idx) != 0) {
             free(box_candidates);
             free(box_positions);
             free(agent_candidates);
@@ -355,7 +255,7 @@ static int boxoban_make_puzzle(
             continue;
         }
 
-        BoxobanCell agent_cell = agent_candidates[boxoban_py_choice_index(rng, agent_candidate_count)];
+        BoxobanCell agent_cell = agent_candidates[boxoban_choice_index(rng, agent_candidate_count)];
         grid[boxoban_grid_idx(size, agent_cell.r, agent_cell.c)] = BOXOBAN_GEN_AGENT;
 
         int all_pushable = 1;
@@ -400,8 +300,8 @@ static int boxoban_generate_maps(
         return -1;
     }
 
-    BoxobanPyRandom rng;
-    boxoban_py_seed(&rng, seed);
+    BoxobanRandom rng;
+    boxoban_seed(&rng, seed);
 
     int max_cells = (size - 2) * (size - 2);
     BoxobanCell* agent_choices = (BoxobanCell*)malloc((size_t)max_cells * sizeof(BoxobanCell));
@@ -430,7 +330,7 @@ static int boxoban_generate_maps(
         }
 
         for (int puzzle_idx = 0; puzzle_idx < puzzles_per_file; puzzle_idx++) {
-            int box_count = num_boxes >= 1 ? num_boxes : boxoban_py_randint(&rng, min_boxes, max_boxes);
+            int box_count = num_boxes >= 1 ? num_boxes : boxoban_randint(&rng, min_boxes, max_boxes);
             if (boxoban_make_puzzle(
                     size, &rng, box_count, 200, agent_choices, agent_count, confined, confined_count, interior_count, grid) != 0) {
                 fclose(out);
