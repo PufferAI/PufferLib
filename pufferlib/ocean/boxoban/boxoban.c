@@ -9,23 +9,6 @@
 
 #define BOXOBAN_MAPS_IMPLEMENTATION
 #include "boxoban.h"
-#include <execinfo.h>
-#include <signal.h>
-#include <unistd.h>
-
-static void segv_handler(int sig) {
-    void *buf[32];
-    int n = backtrace(buf, 32);
-    fprintf(stderr, "Caught signal %d\n", sig);
-    backtrace_symbols_fd(buf, n, STDERR_FILENO);
-    _exit(1);
-}
-
-__attribute__((constructor))
-static void install_handlers(void) {
-    signal(SIGSEGV, segv_handler);
-    signal(SIGABRT, segv_handler);
-}
 
 static int is_named_difficulty(const char* arg) {
     return strcmp(arg, "basic") == 0 ||

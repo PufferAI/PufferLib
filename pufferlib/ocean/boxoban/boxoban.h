@@ -2,8 +2,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-#include <time.h>
-#include <errno.h>
 #include "raylib.h"
 #include "boxoban_maps.h"
 
