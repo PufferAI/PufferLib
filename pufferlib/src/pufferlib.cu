@@ -370,6 +370,20 @@ extern "C" void thread_init_wrapper(void* ctx, int buf) {
     tl_stream = pufferl->streams[buf];
 }
 
+
+__device__ __forceinline__ float safe_logit(
+    const precision_t* logits, int logits_base, int logits_offset, int offset
+) {
+    float l = to_float(logits[logits_base + logits_offset + offset]);
+    if (isnan(l)) {
+        l = 0.0f;
+    }
+    if (isinf(l)) {
+        l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
+    }
+    return l;
+}
+
 // ============================================================================
 // Fused sample_logits kernel: nan_to_num + log_softmax + multinomial + gather + value copy
 // Inference-only (no gradients needed)
@@ -453,31 +467,19 @@ __global__ void sample_logits_kernel(
         for (int h = 0; h < num_atns; ++h) {
             int A = act_sizes[h];  // size of this action head
 
-            // Step 1: Find max for numerical stability (with nan_to_num)
+            // Step 1: Find max and sum for numerical stability (with nan_to_num)
             float max_val = -INFINITY;
+            float sum_exp = 0.0f;
             for (int a = 0; a < A; ++a) {
-                float l = to_float(logits[logits_base + logits_offset + a]);
-                if (isnan(l)) {
-                    l = 0.0f;
+                float l = safe_logit(logits, logits_base, logits_offset, a);
+                if (l > max_val) {
+                    sum_exp *= __expf(max_val - l);
+                    max_val = l;
                 }
-                if (isinf(l)) {
-                    l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
-                }
-                max_val = fmaxf(max_val, l);
+                sum_exp *= __expf(l - max_val);
             }
 
             // Step 2: Compute logsumexp for log_softmax denominator
-            float sum_exp = 0.0f;
-            for (int a = 0; a < A; ++a) {
-                float l = to_float(logits[logits_base + logits_offset + a]);
-                if (isnan(l)) {
-                    l = 0.0f;
-                }
-                if (isinf(l)) {
-                    l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
-                }
-                sum_exp += expf(l - max_val);
-            }
             float logsumexp = max_val + logf(sum_exp);
 
             // Step 3: Generate random value for this action head
@@ -488,13 +490,7 @@ __global__ void sample_logits_kernel(
             int sampled_action = A - 1;  // default to last action
 
             for (int a = 0; a < A; ++a) {
-                float l = to_float(logits[logits_base + logits_offset + a]);
-                if (isnan(l)) {
-                    l = 0.0f;
-                }
-                if (isinf(l)) {
-                    l = (l > 0) ? 3.4028e+38f : -3.4028e+38f;
-                }
+                float l = safe_logit(logits, logits_base, logits_offset, a);
                 float prob = expf(l - logsumexp);
                 cumsum += prob;
                 if (rand_val < cumsum) {
@@ -504,13 +500,7 @@ __global__ void sample_logits_kernel(
             }
 
             // Step 5: Gather log probability of sampled action
-            float sampled_logit = to_float(logits[logits_base + logits_offset + sampled_action]);
-            if (isnan(sampled_logit)) {
-                sampled_logit = 0.0f;
-            }
-            if (isinf(sampled_logit)) {
-                sampled_logit = (sampled_logit > 0) ? 3.4028e+38f : -3.4028e+38f;
-            }
+            float sampled_logit = safe_logit(logits, logits_base, logits_offset, sampled_action);
             float log_prob = sampled_logit - logsumexp;
 
             // Write action for this head
@@ -1362,16 +1352,16 @@ void train_impl(PuffeRL& pufferl) {
         rollouts.observations.data, src.observations.data, H, S, obs_size);
     transpose_102<<<grid_size(H*S*num_atns), BLOCK_SIZE, 0, train_stream>>>(
         rollouts.actions.data, src.actions.data, H, S, num_atns);
-    transpose_102<<<grid_size(H*S), BLOCK_SIZE, 0, train_stream>>>(
-        rollouts.logprobs.data, src.logprobs.data, H, S, 1);
-    transpose_102<<<grid_size(H*S), BLOCK_SIZE, 0, train_stream>>>(
-        rollouts.rewards.data, src.rewards.data, H, S, 1);
-    transpose_102<<<grid_size(H*S), BLOCK_SIZE, 0, train_stream>>>(
-        rollouts.terminals.data, src.terminals.data, H, S, 1);
-    transpose_102<<<grid_size(H*S), BLOCK_SIZE, 0, train_stream>>>(
-        rollouts.ratio.data, src.ratio.data, H, S, 1);
-    transpose_102<<<grid_size(H*S), BLOCK_SIZE, 0, train_stream>>>(
-        rollouts.values.data, src.values.data, H, S, 1);
+    precision_t* dst_1d[] = {
+        rollouts.logprobs.data, rollouts.rewards.data, rollouts.terminals.data, rollouts.ratio.data, rollouts.values.data
+    };
+    precision_t* src_1d[] = {
+        src.logprobs.data, src.rewards.data, src.terminals.data, src.ratio.data, src.values.data
+    };
+    for (int i = 0; i < 5; i++) {
+        transpose_102<<<grid_size(H*S), BLOCK_SIZE, 0, train_stream>>>(dst_1d[i], src_1d[i], H, S, 1);
+    }
+
 
     // Clamp rewards and fill ratio
     clamp_precision_kernel<<<grid_size(numel(rollouts.rewards.shape)), BLOCK_SIZE, 0, train_stream>>>(
