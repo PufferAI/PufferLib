@@ -1,0 +1,22 @@
+:root {
+    --font-color: #F1F1F1;
+    --dropdown-bg: #005050;
+}
+
+body {
+    background-color: black !important;
+    color: var(--font-color) !important;
+}
+
+.rc-slider-mark-text {
+    color: var(--font-color) !important;
+}
+
+.Select-control, .Select-menu-outer, .Select-value-label, .Select-option {
+    color: var(--font-color) !important;
+    background-color: var(--dropdown-bg) !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: var(--font-color) !important;
+}

@@ -1,0 +1,27 @@
+#version 330
+
+// Input vertex attributes
+in vec3 vertexPosition;
+in vec4 vertexColor;
+
+// Input uniform values
+uniform mat4 mvp;
+uniform float currentTime;
+
+// Output to fragment shader
+out vec4 fragColor;
+
+// NOTE: Add your custom variables here
+
+void main()
+{
+    // Unpack data from vertexPosition
+    vec2  pos    = vertexPosition.xy;
+    pos += vec2(100, 0)
+    gl_Position = mvp*vec4(pos, 0.0, 1.0);
+
+    // Calculate the screen space size of this particle (also vary it over time)
+    gl_PointSize = 10 - 5*abs(sin(period*currentTime));
+
+    fragColor = vertexColor;
+}

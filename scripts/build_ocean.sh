@@ -5,7 +5,7 @@
 ENV=$1
 MODE=${2:-local}
 PLATFORM="$(uname -s)"
-SRC_DIR="pufferlib/ocean/$ENV"
+SRC_DIR="ocean/$ENV"
 WEB_OUTPUT_DIR="build_web/$ENV"
 RAYLIB_NAME='raylib-5.5_macos'
 BOX2D_NAME='box2d-macos-arm64'
@@ -70,12 +70,21 @@ FLAGS=(
     -I./$BOX2D_NAME/include
     -I./$BOX2D_NAME/src
     -I./pufferlib/extensions
-    "$SRC_DIR/$ENV.c" -o "$ENV"
+    "$SRC_DIR/cJSON.c" "$SRC_DIR/$ENV.c" -o "$ENV"
+    #"$SRC_DIR/$ENV.c" -o "$ENV"
     $LINK_ARCHIVES
+    -lGL
     -lm
     -lpthread
     -ferror-limit=3
+    -fopenmp
     -DPLATFORM_DESKTOP
+    # Bite me
+    -Werror=incompatible-pointer-types
+    -Werror=return-type
+    -Wno-error=incompatible-pointer-types-discards-qualifiers
+    -Wno-incompatible-pointer-types-discards-qualifiers
+    -Wno-error=array-parameter
 )
 
 
@@ -101,7 +110,7 @@ if [ "$MODE" = "local" ]; then
     clang -g -O0 ${FLAGS[@]}
 elif [ "$MODE" = "fast" ]; then
     echo "Building optimized $ENV for local testing..."
-    clang -pg -O2 -DNDEBUG ${FLAGS[@]}
+    clang -O2 -DNDEBUG ${FLAGS[@]}
     echo "Built to: $ENV"
 else
     echo "Invalid mode specified: local|fast|web"
