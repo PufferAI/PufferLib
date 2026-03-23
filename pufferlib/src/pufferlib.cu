@@ -1445,8 +1445,6 @@ void train_impl(PuffeRL& pufferl) {
             PrecisionTensor state_puf = graph.mb_state;
             PrecisionTensor dec_puf = policy_forward_train(&pufferl.policy, pufferl.weights, pufferl.train_activations, obs_puf, state_puf, stream);
             DecoderWeights* dw_train = (DecoderWeights*)pufferl.weights.decoder;
-            int od = dw_train->output_dim;
-            int fused_cols = od + 1;
 
             PrecisionTensor p_logstd;
             if (dw_train->continuous) {
@@ -1493,7 +1491,6 @@ void train_impl(PuffeRL& pufferl) {
         // mb_newvalue is (S, H, 1) — treat as (S, H) for scatter into rollouts.values
         {
             int num_idx = numel(pufferl.prio_bufs.idx.shape);
-            int S = graph.mb_newvalue.shape[0], H = graph.mb_newvalue.shape[1];
             int row_bytes = H * sizeof(precision_t);
             index_copy_kernel<<<grid_size(num_idx), BLOCK_SIZE, 0, train_stream>>>(
                 (char*)rollouts.values.data, pufferl.prio_bufs.idx.data,

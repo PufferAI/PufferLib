@@ -754,7 +754,6 @@ static PrecisionTensor mingru_forward_train(void* w, PrecisionTensor x, Precisio
     MinGRUWeights* m = (MinGRUWeights*)w;
     MinGRUActivations* a = (MinGRUActivations*)activations;
     int B = x.shape[0];
-    int TT = x.shape[1];
     for (int i = 0; i < m->num_layers; i++) {
         puf_copy(&a->saved_inputs[i], &x, stream);
         PrecisionTensor state_i = mingru_state_layer(m, state, i);
