@@ -476,7 +476,7 @@ __global__ void sample_logits_kernel(
                     sum_exp *= __expf(max_val - l);
                     max_val = l;
                 }
-                sum_exp *= __expf(l - max_val);
+                sum_exp += __expf(l - max_val);
             }
 
             // Step 2: Compute logsumexp for log_softmax denominator
