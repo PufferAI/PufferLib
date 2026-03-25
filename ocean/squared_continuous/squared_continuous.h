@@ -32,10 +32,11 @@ typedef struct {
 typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
     unsigned char* observations; // Required. You can use any obs type, but make sure it matches in Python!
-    double* actions; // Required. double* for new API
+    float* actions; // Required.
     float* rewards; // Required
     float* terminals; // Required
     int num_agents;
+    unsigned int rng;
     int size;
     int tick;
     int r;
@@ -66,7 +67,7 @@ void c_reset(Squared* env) {
 }
 
 // Clamp value to [-1, 1]
-static inline double clamp_action(double x) {
+static inline float clamp_action(float x) {
     return x < -1.0 ? -1.0 : (x > 1.0 ? 1.0 : x);
 }
 
@@ -77,8 +78,8 @@ void c_step(Squared* env) {
     // Continuous actions: clamp to [-1, 1] then threshold to get discrete movement
     // action[0]: vertical (positive = down, negative = up)
     // action[1]: horizontal (positive = right, negative = left)
-    double vert = clamp_action(env->actions[0]);
-    double horiz = clamp_action(env->actions[1]);
+    float vert = clamp_action(env->actions[0]);
+    float horiz = clamp_action(env->actions[1]);
     env->terminals[0] = 0;
     env->rewards[0] = 0;
 
