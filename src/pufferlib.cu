@@ -698,7 +698,7 @@ __global__ void ppo_loss_compute(
     } else {
         for (int h = 0; h < a.num_atns; ++h) {
             float mean = to_float(a.logits[logits_base + h * a.logits_stride_a]);
-            float log_std = to_float(a.logstd[logits_base + h * a.logits_stride_a]);
+            float log_std = to_float(a.logstd[h]);  // logstd is (1, num_atns), broadcast over N and T
             float action = float(g.actions[nt * a.num_atns + h]);
             float lp, ent;
             ppo_continuous_head(mean, log_std, action, &lp, &ent);
@@ -747,7 +747,7 @@ __global__ void ppo_loss_compute(
     } else {
         for (int h = 0; h < a.num_atns; ++h) {
             float mean = to_float(a.logits[logits_base + h * a.logits_stride_a]);
-            float log_std = to_float(a.logstd[logits_base + h * a.logits_stride_a]);
+            float log_std = to_float(a.logstd[h]);  // logstd is (1, num_atns), broadcast over N and T
             float std = __expf(log_std);
             float var = std * std;
             float action = float(g.actions[nt * a.num_atns + h]);
