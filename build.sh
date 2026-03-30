@@ -141,11 +141,11 @@ if [ "$MODE" = "local" ] || [ "$MODE" = "fast" ]; then
         "${INCLUDES[@]}"
         "$SRC_DIR/$ENV.c" $EXTRA_SRC -o "${OUTPUT_NAME:-$ENV}"
         $LINK_ARCHIVES
-        -lGL -lm -lpthread -fopenmp
+        -lm -lpthread -fopenmp
         -DPLATFORM_DESKTOP
     )
-    [ "$PLATFORM" = "Darwin" ] && FLAGS+=(-framework Cocoa -framework IOKit -framework CoreVideo)
-    clang $CLANG_OPT "${FLAGS[@]}"
+    [ "$PLATFORM" = "Darwin" ] && FLAGS+=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL)
+    ${CC:-clang} $CLANG_OPT "${FLAGS[@]}"
     echo "Built: ./${OUTPUT_NAME:-$ENV}"
     exit 0
 fi
@@ -170,7 +170,7 @@ STATIC_LIB="src/libstatic_${ENV}.a"
 [ ! -f "$BINDING_SRC" ] && echo "Error: $BINDING_SRC not found" && exit 1
 
 echo "=== Building static env: $ENV ==="
-clang -c $CLANG_OPT \
+${CC:-clang} -c $CLANG_OPT \
     -I. -Isrc -I$SRC_DIR \
     -I./$RAYLIB_NAME/include -I$CUDA_HOME/include \
     -DPLATFORM_DESKTOP \
@@ -198,7 +198,7 @@ if [ "$MODE" = "profile" ]; then
         tests/profile_kernels.cu ini.c \
         "$STATIC_LIB" "$RAYLIB_A" \
         -lnccl -lnvidia-ml -lcublas -lcurand -lcudnn -lnvToolsExt \
-        -lGL -lm -lpthread -lomp5 \
+        -lGL -lm -lpthread -lomp \
         -o profile
     echo "=== Built: ./profile ==="
     exit 0
@@ -206,7 +206,7 @@ fi
 
 if [ "$MODE" = "cpu" ]; then
     echo "=== Compiling bindings_cpu.cpp ==="
-    g++ -c -fPIC -fopenmp \
+    ${CXX:-g++} -c -fPIC -fopenmp \
         -D_GLIBCXX_USE_CXX11_ABI=1 \
         -DPLATFORM_DESKTOP \
         -std=c++17 \
@@ -218,9 +218,9 @@ if [ "$MODE" = "cpu" ]; then
 
     echo "=== Linking $OUTPUT (CPU) ==="
     LINK_CMD=(
-        g++ -shared -fPIC -fopenmp
+        ${CXX:-g++} -shared -fPIC -fopenmp
         src/bindings_cpu.o "$STATIC_LIB" "$RAYLIB_A"
-        -lm -lpthread -lomp5
+        -lm -lpthread -lomp -undefined dynamic_lookup
         $LINK_OPT
     )
     [ "$PLATFORM" = "Linux" ] && LINK_CMD+=(-Bsymbolic-functions)
@@ -248,11 +248,11 @@ $NVCC -c -Xcompiler -fPIC \
 # Step 3: Link
 echo "=== Linking $OUTPUT ==="
 LINK_CMD=(
-    g++ -shared -fPIC -fopenmp
+    ${CXX:-g++} -shared -fPIC -fopenmp
     src/bindings.o "$STATIC_LIB" "$RAYLIB_A"
     -L$CUDA_HOME/lib64
     -lcudart -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand -lcudnn
-    -lnvToolsExt -lomp5
+    -lnvToolsExt -lomp
     $LINK_OPT
 )
 [ "$PLATFORM" = "Linux" ] && LINK_CMD+=(-Bsymbolic-functions)
