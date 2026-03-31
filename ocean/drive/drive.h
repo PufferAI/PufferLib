@@ -1,3 +1,5 @@
+#include <signal.h>
+#include <sys/types.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -10,6 +12,11 @@
 #include "raymath.h"
 #include "rlgl.h"
 #include <time.h>
+
+// Render modes
+#define RENDER_WINDOW 0
+#define RENDER_HEADLESS 1
+
 // Entity Types
 #define NONE 0
 #define VEHICLE 1
@@ -84,6 +91,14 @@ static const int collision_offsets[25][2] = {
 };
 
 struct timespec ts;
+
+const Color STONE_GRAY = (Color){80, 80, 80, 255};
+const Color PUFF_RED = (Color){187, 0, 0, 255};
+const Color PUFF_CYAN = (Color){0, 187, 187, 255};
+const Color PUFF_WHITE = (Color){241, 241, 241, 241};
+const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
+const Color PUFF_BACKGROUND2 = (Color){18, 72, 72, 255};
+const Color ROAD_COLOR = (Color){35, 35, 37, 255};
 
 typedef struct Drive Drive;
 typedef struct Client Client;
@@ -203,6 +218,7 @@ struct Drive {
     float reward_goal_post_respawn;
     float reward_vehicle_collision_post_respawn;
     unsigned int rng;
+    int render_mode;
 };
 
 void add_log(Drive* env) {
@@ -907,7 +923,13 @@ void init(Drive* env){
     env->logs = (Log*)calloc(env->active_agent_count, sizeof(Log));
 }
 
+void close_client(Client* client);
+
 void c_close(Drive* env){
+    if (env->client != NULL) {
+        close_client(env->client);
+        env->client = NULL;
+    }
     for(int i = 0; i < env->num_entities; i++){
         free_entity(&env->entities[i]);
     }
@@ -959,7 +981,7 @@ void move_dynamics(Drive* env, int action_idx, int agent_idx){
         // clip acceleration & steering
         Entity* agent = &env->entities[agent_idx];
         // Extract action components directly from the multi-discrete action array
-        double (*action_array)[2] = (double(*)[2])env->actions;
+        float (*action_array)[2] = (float(*)[2])env->actions;
         int acceleration_index = action_array[action_idx][0];
         int steering_index = action_array[action_idx][1];
         float acceleration = ACCELERATION_VALUES[acceleration_index];
@@ -1228,7 +1250,7 @@ void c_step(Drive* env){
                 env->entities[agent_idx].y,
                 env->entities[agent_idx].goal_position_x,
                 env->entities[agent_idx].goal_position_y);
-        if(distance_to_goal < 2.0f){
+        if(distance_to_goal < 4.0f){
             if(env->entities[agent_idx].respawn_timestep != -1){
                 env->rewards[i] += env->reward_goal_post_respawn;
                 env->logs[i].episode_return += env->reward_goal_post_respawn;
@@ -1256,13 +1278,6 @@ void c_step(Drive* env){
     compute_observations(env);
 }   
 
-const Color STONE_GRAY = (Color){80, 80, 80, 255};
-const Color PUFF_RED = (Color){187, 0, 0, 255};
-const Color PUFF_CYAN = (Color){0, 187, 187, 255};
-const Color PUFF_WHITE = (Color){241, 241, 241, 241};
-const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
-const Color PUFF_BACKGROUND2 = (Color){18, 72, 72, 255};
-
 typedef struct Client Client;
 struct Client {
     float width;
@@ -1275,47 +1290,132 @@ struct Client {
     int car_assignments[MAX_CARS];  // To keep car model assignments consistent per vehicle
     Vector3 default_camera_position;
     Vector3 default_camera_target;
+    int recorder_pipefd[2];
+    pid_t recorder_pid;
+    pid_t xvfb_pid;
+    int xvfb_display_num;
 };
 
 Client* make_client(Drive* env){
     Client* client = (Client*)calloc(1, sizeof(Client));
-    client->width = 1280;
-    client->height = 704;
-    SetConfigFlags(FLAG_MSAA_4X_HINT);
-    InitWindow(client->width, client->height, "PufferLib Ray GPU Drive");
-    SetTargetFPS(30);
-    client->puffers = LoadTexture("resources/puffers_128.png");
-    client->cars[0] = LoadModel("resources/drive/RedCar.glb");
-    client->cars[1] = LoadModel("resources/drive/WhiteCar.glb");
-    client->cars[2] = LoadModel("resources/drive/BlueCar.glb");
-    client->cars[3] = LoadModel("resources/drive/YellowCar.glb");
-    client->cars[4] = LoadModel("resources/drive/GreenCar.glb");
-    client->cars[5] = LoadModel("resources/drive/GreyCar.glb");
-    for (int i = 0; i < MAX_CARS; i++) {
-        client->car_assignments[i] = (rand_r(&env->rng) % 4) + 1;
+
+    if (env->render_mode == RENDER_HEADLESS && getenv("DISPLAY") == NULL) {
+        // Kill any existing Xvfb first
+        system("pkill -9 Xvfb");
+        usleep(200000);
+        unlink("/tmp/.X99-lock");
+        unlink("/tmp/.X11-unix/X99");
+
+        client->xvfb_display_num = 99;
+
+        // Clean up stale lock if process is dead
+        FILE *f = fopen("/tmp/.X99-lock", "r");
+        if (f) {
+            pid_t pid = -1;
+            fscanf(f, "%d", &pid);
+            fclose(f);
+            if (pid > 0 && kill(pid, 0) != 0)
+                unlink("/tmp/.X99-lock");
+        }
+
+        client->xvfb_pid = fork();
+        if (client->xvfb_pid == 0) {
+            close(STDOUT_FILENO);
+            close(STDERR_FILENO);
+            execlp("Xvfb", "Xvfb", ":99", "-screen", "0", "1280x720x24", "+extension", "GLX", "-ac", "-noreset", NULL);
+            _exit(1);
+        }
+
+        setenv("DISPLAY", ":99", 1);
+        for (int i = 0; i < 20 && access("/tmp/.X99-lock", F_OK) != 0; i++)
+            usleep(100000);
+        usleep(200000);
     }
-    // Get initial target position from first active agent
-    float map_center_x = (env->map_corners[0] + env->map_corners[2]) / 2.0f;
-    float map_center_y = (env->map_corners[1] + env->map_corners[3]) / 2.0f;
-    Vector3 target_pos = {
-       0,
-        0,  // Y is up
-        1   // Z is depth
-    };
-    
-    // Set up camera to look at target from above and behind
-    client->default_camera_position = (Vector3){ 
-        0,           // Same X as target
-        120.0f,   // 20 units above target
-        175.0f    // 20 units behind target
-    };
-    client->default_camera_target = target_pos;
-    client->camera.position = client->default_camera_position;
-    client->camera.target = client->default_camera_target;
-    client->camera.up = (Vector3){ 0.0f, -1.0f, 0.0f };  // Y is up
-    client->camera.fovy = 45.0f;
-    client->camera.projection = CAMERA_PERSPECTIVE;
-    client->camera_zoom = 1.0f;
+
+    if (env->render_mode == RENDER_WINDOW) {
+        client->width = 1280;
+        client->height = 704;
+        SetConfigFlags(FLAG_MSAA_4X_HINT);
+        SetTargetFPS(30);
+
+        Vector3 target_pos = {0, 0, 1};
+        client->default_camera_position = (Vector3){0, 120.0f, 175.0f};
+        client->default_camera_target = target_pos;
+        client->camera.position = client->default_camera_position;
+        client->camera.target = client->default_camera_target;
+        client->camera.up = (Vector3){0.0f, -1.0f, 0.0f};
+        client->camera.fovy = 45.0f;
+        client->camera.projection = CAMERA_PERSPECTIVE;
+        client->camera_zoom = 1.0f;
+    } else { // Headless rendering
+        float map_width = env->map_corners[2] - env->map_corners[0];
+        float map_height = env->map_corners[3] - env->map_corners[1];
+        float scale = 6.0f;
+        int img_width = (int)roundf(map_width * scale / 2.0f) * 2;
+        int img_height = (int)roundf(map_height * scale / 2.0f) * 2;
+        client->width = img_width;
+        client->height = img_height;
+    }
+
+    SetTraceLogLevel(LOG_WARNING);
+    InitWindow(client->width, client->height, "PufferLib Ray GPU Drive");
+
+    if (!IsWindowReady()) {
+        fprintf(stderr, "WARNING: Failed to initialize render window. Rendering disabled.\n");
+        free(client);
+        return NULL;
+    }
+
+    // Only load 3D assets for window mode
+    if (env->render_mode == RENDER_WINDOW) {
+        client->puffers = LoadTexture("resources/puffers_128.png");
+        client->cars[0] = LoadModel("resources/drive/RedCar.glb");
+        client->cars[1] = LoadModel("resources/drive/WhiteCar.glb");
+        client->cars[2] = LoadModel("resources/drive/BlueCar.glb");
+        client->cars[3] = LoadModel("resources/drive/YellowCar.glb");
+        client->cars[4] = LoadModel("resources/drive/GreenCar.glb");
+        client->cars[5] = LoadModel("resources/drive/GreyCar.glb");
+        for (int i = 0; i < MAX_CARS; i++) {
+            client->car_assignments[i] = (rand_r(&env->rng) % 4) + 1;
+        }
+    }
+
+    // Set up ffmpeg process for recording in headless mode
+    if (env->render_mode == RENDER_HEADLESS) {
+        if (pipe(client->recorder_pipefd) == -1) {
+            fprintf(stderr, "Failed to create pipe\n");
+            free(client);
+            return NULL;
+        }
+
+        char size_str[64];
+        snprintf(size_str, sizeof(size_str), "%dx%d", (int)client->width, (int)client->height);
+
+        char filename[256];
+        snprintf(filename, sizeof(filename), "drive_recording.mp4");
+
+        client->recorder_pid = fork();
+        if (client->recorder_pid == -1) {
+            fprintf(stderr, "Failed to fork\n");
+            free(client);
+            return NULL;
+        }
+
+        if (client->recorder_pid == 0) { // Child process
+            close(client->recorder_pipefd[1]);
+            dup2(client->recorder_pipefd[0], STDIN_FILENO);
+            close(client->recorder_pipefd[0]);
+            for (int fd = 3; fd < 256; fd++)
+                close(fd);
+            execlp("ffmpeg", "ffmpeg", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", size_str, "-r", "30", "-i",
+                   "-", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast", "-crf", "23", "-loglevel",
+                   "error", filename, NULL);
+            fprintf(stderr, "execlp ffmpeg failed\n");
+            _exit(1);
+        }
+        close(client->recorder_pipefd[0]);
+    }
+
     return client;
 }
 
@@ -1574,27 +1674,23 @@ void draw_road_edge(Drive* env, float start_x, float start_y, float end_x, float
     DrawTriangle3D(t4, t1, b1, CURB_SIDE);
 }
 
-void c_render(Drive* env) {
-    if (env->client == NULL) {
-        env->client = make_client(env);
+void draw_scene_window(Drive* env, Client* client) {
+    // Draw grid
+    float grid_start_x = env->map_corners[0];
+    float grid_start_y = env->map_corners[1];
+    for(int i = 0; i < env->grid_cols; i++) {
+        for(int j = 0; j < env->grid_rows; j++) {
+            float x = grid_start_x + i*GRID_CELL_SIZE;
+            float y = grid_start_y + j*GRID_CELL_SIZE;
+            DrawCubeWires(
+                (Vector3){x + GRID_CELL_SIZE/2, y + GRID_CELL_SIZE/2, 1}, 
+                GRID_CELL_SIZE, GRID_CELL_SIZE, 0.1f, PUFF_BACKGROUND2);
+        }
     }
-    Client* client = env->client;
-    BeginDrawing();
-    Color road = (Color){35, 35, 37, 255};
-    ClearBackground(road);
-    BeginMode3D(client->camera);
-    handle_camera_controls(env->client);
-    
-    // Draw a grid to help with orientation
-    // DrawGrid(20, 1.0f);
-    DrawLine3D((Vector3){env->map_corners[0], env->map_corners[1], 0}, (Vector3){env->map_corners[2], env->map_corners[1], 0}, PUFF_CYAN);
-    DrawLine3D((Vector3){env->map_corners[0], env->map_corners[1], 0}, (Vector3){env->map_corners[0], env->map_corners[3], 0}, PUFF_CYAN);
-    DrawLine3D((Vector3){env->map_corners[2], env->map_corners[1], 0}, (Vector3){env->map_corners[2], env->map_corners[3], 0}, PUFF_CYAN);
-    DrawLine3D((Vector3){env->map_corners[0], env->map_corners[3], 0}, (Vector3){env->map_corners[2], env->map_corners[3], 0}, PUFF_CYAN);
+
     for(int i = 0; i < env->num_entities; i++) {
         // Draw cars
         if(env->entities[i].type == 1 || env->entities[i].type == 2) {
-            // Check if this vehicle is an active agent
             bool is_active_agent = false;
             bool is_static_car = false;
             int agent_index = -1;
@@ -1611,31 +1707,18 @@ void c_render(Drive* env) {
                     break;
                 }
             }
-            // HIDE CARS ON RESPAWN - IMPORTANT TO KNOW VISUAL SETTING
             if(!is_active_agent && !is_static_car || env->entities[i].respawn_timestep != -1){
                 continue;
             }
-            Vector3 position;
-            float heading;
-            position = (Vector3){
-                env->entities[i].x,
-                env->entities[i].y,
-                1
-            };      
-            heading = env->entities[i].heading;
-            // Create size vector
-            Vector3 size = {
-                env->entities[i].length,
-                env->entities[i].width,
-                env->entities[i].height
-            };
-            // Save current transform
+            Vector3 position = (Vector3){env->entities[i].x, env->entities[i].y, 1};
+            float heading = env->entities[i].heading;
+            Vector3 size = {env->entities[i].length, env->entities[i].width, env->entities[i].height};
+
             rlPushMatrix();
-            // Translate to position, rotate around Y axis, then draw
             rlTranslatef(position.x, position.y, position.z);
-            rlRotatef(heading*RAD2DEG, 0.0f, 0.0f, 1.0f);  // Convert radians to degrees
-            // Determine color based on active status and other conditions
-            Color object_color = PUFF_BACKGROUND2;  // Default color for non-active vehicles
+            rlRotatef(heading*RAD2DEG, 0.0f, 0.0f, 1.0f);
+
+            Color object_color = PUFF_BACKGROUND2;
             Color outline_color = PUFF_CYAN;
             Model car_model = client->cars[5];
             if(is_active_agent){
@@ -1646,15 +1729,12 @@ void c_render(Drive* env) {
                 outline_color = PUFF_WHITE;
             }
             if(is_active_agent && env->entities[i].collision_state > 0) {
-                car_model = client->cars[0];  // Collided agent
+                car_model = client->cars[0];
             }
-            // Draw obs for human selected agent
             if(agent_index == env->human_agent_idx && !env->entities[agent_index].reached_goal) {
                 draw_agent_obs(env, agent_index);
             }
-            // Draw cube for cars static and active
-            // Calculate scale factors based on desired size and model dimensions
-            
+
             BoundingBox bounds = GetModelBoundingBox(car_model);
             Vector3 model_size = {
                 bounds.max.x - bounds.min.x,
@@ -1668,47 +1748,25 @@ void c_render(Drive* env) {
             };
             DrawModelEx(car_model, (Vector3){0, 0, 0}, (Vector3){1, 0, 0}, 90.0f, scale, WHITE);
             rlPopMatrix();
-                 
+
             float cos_heading = env->entities[i].heading_x;
             float sin_heading = env->entities[i].heading_y;
-            
-            // Calculate half dimensions
             float half_len = env->entities[i].length * 0.5f;
             float half_width = env->entities[i].width * 0.5f;
-            
-            // Calculate the four corners of the collision box
             Vector3 corners[4] = {
-                (Vector3){
-                    position.x + (half_len * cos_heading - half_width * sin_heading),
-                    position.y + (half_len * sin_heading + half_width * cos_heading),
-                    position.z
-                },
-                (Vector3){
-                    position.x + (half_len * cos_heading + half_width * sin_heading),
-                    position.y + (half_len * sin_heading - half_width * cos_heading),
-                    position.z
-                },
-                (Vector3){
-                    position.x + (-half_len * cos_heading - half_width * sin_heading),
-                    position.y + (-half_len * sin_heading + half_width * cos_heading),
-                    position.z
-                },
-                (Vector3){
-                    position.x + (-half_len * cos_heading + half_width * sin_heading),
-                    position.y + (-half_len * sin_heading - half_width * cos_heading),
-                    position.z
-                }
+                (Vector3){position.x + (half_len * cos_heading - half_width * sin_heading),
+                          position.y + (half_len * sin_heading + half_width * cos_heading), position.z},
+                (Vector3){position.x + (half_len * cos_heading + half_width * sin_heading),
+                          position.y + (half_len * sin_heading - half_width * cos_heading), position.z},
+                (Vector3){position.x + (-half_len * cos_heading - half_width * sin_heading),
+                          position.y + (-half_len * sin_heading + half_width * cos_heading), position.z},
+                (Vector3){position.x + (-half_len * cos_heading + half_width * sin_heading),
+                          position.y + (-half_len * sin_heading - half_width * cos_heading), position.z}
             };
-            
-            // Draw the corners as spheres
-            /*
             for(int j = 0; j < 4; j++) {
-                DrawSphere(corners[j], 0.3f, RED);  // Draw red spheres at each corner
+                DrawLine3D(corners[j], corners[(j+1)%4], PURPLE);
             }
-            */
-            for(int j = 0; j < 4; j++) {
-                DrawLine3D(corners[j], corners[(j+1)%4], PURPLE);  // Draw red lines between corners
-            }
+
             // FPV Camera Control
             if(IsKeyDown(KEY_SPACE) && env->human_agent_idx== agent_index){
                 if(env->entities[agent_index].reached_goal){
@@ -1719,7 +1777,6 @@ void c_render(Drive* env) {
                         position.y - (25.0f * sinf(heading)),
                         position.z + 15
                 };
-
                 Vector3 camera_target = (Vector3){
                     position.x + 40.0f * cosf(heading),
                     position.y + 40.0f * sinf(heading),
@@ -1734,7 +1791,6 @@ void c_render(Drive* env) {
                 client->camera.target = client->default_camera_target;
                 client->camera.up = (Vector3){0, 0, 1};
             }
-            // Draw goal position for active agents
 
             if(!is_active_agent || env->entities[i].valid == 0) {
                 continue;
@@ -1752,16 +1808,8 @@ void c_render(Drive* env) {
             continue;
         }
         for(int j = 0; j < env->entities[i].array_size - 1; j++) {
-            Vector3 start = {
-                env->entities[i].traj_x[j],
-                env->entities[i].traj_y[j],
-                1
-            };
-            Vector3 end = {
-                env->entities[i].traj_x[j + 1],
-                env->entities[i].traj_y[j + 1],
-                1
-            };
+            Vector3 start = {env->entities[i].traj_x[j], env->entities[i].traj_y[j], 1};
+            Vector3 end = {env->entities[i].traj_x[j + 1], env->entities[i].traj_y[j + 1], 1};
             Color lineColor = GRAY;
             if (env->entities[i].type == ROAD_LANE) lineColor = GRAY;
             else if (env->entities[i].type == ROAD_LINE) lineColor = BLUE;
@@ -1772,56 +1820,161 @@ void c_render(Drive* env) {
             }
             if(!IsKeyDown(KEY_LEFT_CONTROL)){
                 draw_road_edge(env, start.x, start.y, end.x, end.y);
-                // DrawLine3D(start, end, lineColor);
-                // DrawCube(start, 0.5f, 0.5f, 0.5f, lineColor);
-                // DrawCube(end, 0.5f, 0.5f, 0.5f, lineColor);
             }
         }
     }
-    // Draw grid cells using the stored bounds
-    float grid_start_x = env->map_corners[0];
-    float grid_start_y = env->map_corners[1];
-    for(int i = 0; i < env->grid_cols; i++) {
-        for(int j = 0; j < env->grid_rows; j++) {
-            float x = grid_start_x + i*GRID_CELL_SIZE;
-            float y = grid_start_y + j*GRID_CELL_SIZE;
-            // int index = i * env->grid_rows + j;
-            DrawCubeWires(
-                (Vector3){x + GRID_CELL_SIZE/2, y + GRID_CELL_SIZE/2, 1}, 
-                GRID_CELL_SIZE, GRID_CELL_SIZE, 0.1f, PUFF_BACKGROUND2);
-        }
+}
+
+void c_render(Drive* env) {
+    if (env->client == NULL) {
+        env->client = make_client(env);
     }
-    EndMode3D();
-    // Draw debug info
-    DrawText(TextFormat("Camera Position: (%.2f, %.2f, %.2f)", 
-        client->camera.position.x, 
-        client->camera.position.y, 
-        client->camera.position.z), 10, 10, 20, PUFF_WHITE);
-    DrawText(TextFormat("Camera Target: (%.2f, %.2f, %.2f)", 
-        client->camera.target.x, 
-        client->camera.target.y, 
-        client->camera.target.z), 10, 30, 20, PUFF_WHITE);
-    DrawText(TextFormat("Timestep: %d", env->timestep), 10, 50, 20, PUFF_WHITE);
-    // acceleration & steering
-    int human_idx = env->active_agent_indices[env->human_agent_idx];
-    DrawText(TextFormat("Controlling Agent: %d", env->human_agent_idx), 10, 70, 20, PUFF_WHITE);
-    DrawText(TextFormat("Agent Index: %d", human_idx), 10, 90, 20, PUFF_WHITE);
-    // Controls help
-    DrawText("Controls: W/S - Accelerate/Brake, A/D - Steer, 1-4 - Switch Agent", 
-             10, client->height - 30, 20, PUFF_WHITE);
-    // acceleration & steering
-    DrawText(TextFormat("Acceleration: %d", env->actions[env->human_agent_idx * 2]), 10, 110, 20, PUFF_WHITE);
-    DrawText(TextFormat("Steering: %d", env->actions[env->human_agent_idx * 2 + 1]), 10, 130, 20, PUFF_WHITE);
-    DrawText(TextFormat("Grid Rows: %d", env->grid_rows), 10, 150, 20, PUFF_WHITE);
-    DrawText(TextFormat("Grid Cols: %d", env->grid_cols), 10, 170, 20, PUFF_WHITE);
-    EndDrawing();
+
+    if (env->client == NULL) {
+        return; // Silently skip rendering
+    }
+
+    Client* client = env->client;
+
+    if (env->render_mode == RENDER_HEADLESS) {
+        float map_width = env->map_corners[2] - env->map_corners[0];
+        float map_height = env->map_corners[3] - env->map_corners[1];
+
+        // Orthographic bird's-eye view over the entire map
+        Camera3D camera = {0};
+        camera.position = (Vector3){0.0, 0.0, 400.0f};
+        camera.target = (Vector3){0.0, 0.0, 0.0};
+        camera.up = (Vector3){0.0f, -1.0f, 0.0f};
+        camera.projection = CAMERA_ORTHOGRAPHIC;
+        camera.fovy = map_height;
+
+        BeginDrawing();
+        ClearBackground(ROAD_COLOR);
+        BeginMode3D(camera);
+
+        // Draw entities (same as window mode but without interactive controls)
+        for(int i = 0; i < env->num_entities; i++) {
+            if(env->entities[i].type == 1 || env->entities[i].type == 2) {
+                bool is_active_agent = false;
+                bool is_static_car = false;
+                int agent_index = -1;
+                for(int j = 0; j < env->active_agent_count; j++) {
+                    if(env->active_agent_indices[j] == i) {
+                        is_active_agent = true;
+                        agent_index = j;
+                        break;
+                    }
+                }
+                for(int j = 0; j < env->static_car_count; j++) {
+                    if(env->static_car_indices[j] == i) {
+                        is_static_car = true;
+                        break;
+                    }
+                }
+                if(!is_active_agent && !is_static_car || env->entities[i].respawn_timestep != -1){
+                    continue;
+                }
+                Vector3 position = (Vector3){env->entities[i].x, env->entities[i].y, 1};
+                float heading = env->entities[i].heading;
+
+                float cos_heading = env->entities[i].heading_x;
+                float sin_heading = env->entities[i].heading_y;
+                float half_len = env->entities[i].length * 0.5f;
+                float half_width = env->entities[i].width * 0.5f;
+
+                // Draw bounding box
+                Color agent_color = GRAY;
+                if (is_active_agent) agent_color = BLUE;
+                if (is_active_agent && env->entities[i].collision_state > 0) agent_color = RED;
+
+                rlPushMatrix();
+                rlTranslatef(position.x, position.y, position.z);
+                rlRotatef(heading * RAD2DEG, 0.0f, 0.0f, 1.0f);
+                DrawCube((Vector3){0.0f, 0.0f, 0.0f}, env->entities[i].length, env->entities[i].width, 1.0f, Fade(agent_color, 0.5f));
+                DrawCubeWires((Vector3){0.0f, 0.0f, 0.0f}, env->entities[i].length, env->entities[i].width, 1.0f, agent_color);
+                rlPopMatrix();
+
+                // Draw goal for active agents
+                if(is_active_agent && env->entities[i].valid != 0) {
+                    DrawSphere((Vector3){env->entities[i].goal_position_x, env->entities[i].goal_position_y, 1}, 0.5f, DARKGREEN);
+                }
+            }
+            // Draw road elements
+            if(env->entities[i].type <=3 || env->entities[i].type >= 7){
+                continue;
+            }
+            for(int j = 0; j < env->entities[i].array_size - 1; j++) {
+                Vector3 start = {env->entities[i].traj_x[j], env->entities[i].traj_y[j], 1};
+                Vector3 end = {env->entities[i].traj_x[j + 1], env->entities[i].traj_y[j + 1], 1};
+                if(env->entities[i].type == ROAD_EDGE){
+                    draw_road_edge(env, start.x, start.y, end.x, end.y);
+                }
+            }
+        }
+
+        EndMode3D();
+        DrawText(TextFormat("t=%d", env->timestep), 10, 10, 20, PUFF_WHITE);
+        EndDrawing();
+
+        // Capture frame and write to ffmpeg pipe
+        unsigned char *screen_data = rlReadScreenPixels((int)client->width, (int)client->height);
+        if (screen_data) {
+            write(client->recorder_pipefd[1], screen_data, (int)client->width * (int)client->height * 4);
+            RL_FREE(screen_data);
+        }
+
+    } else { // Pop-up window
+        BeginDrawing();
+        ClearBackground(ROAD_COLOR);
+        BeginMode3D(client->camera);
+        handle_camera_controls(env->client);
+
+        DrawLine3D((Vector3){env->map_corners[0], env->map_corners[1], 0}, (Vector3){env->map_corners[2], env->map_corners[1], 0}, PUFF_CYAN);
+        DrawLine3D((Vector3){env->map_corners[0], env->map_corners[1], 0}, (Vector3){env->map_corners[0], env->map_corners[3], 0}, PUFF_CYAN);
+        DrawLine3D((Vector3){env->map_corners[2], env->map_corners[1], 0}, (Vector3){env->map_corners[2], env->map_corners[3], 0}, PUFF_CYAN);
+        DrawLine3D((Vector3){env->map_corners[0], env->map_corners[3], 0}, (Vector3){env->map_corners[2], env->map_corners[3], 0}, PUFF_CYAN);
+
+        draw_scene_window(env, client);
+
+        EndMode3D();
+        // Draw debug info
+        DrawText(TextFormat("Camera Position: (%.2f, %.2f, %.2f)", 
+            client->camera.position.x, 
+            client->camera.position.y, 
+            client->camera.position.z), 10, 10, 20, PUFF_WHITE);
+        DrawText(TextFormat("Camera Target: (%.2f, %.2f, %.2f)", 
+            client->camera.target.x, 
+            client->camera.target.y, 
+            client->camera.target.z), 10, 30, 20, PUFF_WHITE);
+        DrawText(TextFormat("Timestep: %d", env->timestep), 10, 50, 20, PUFF_WHITE);
+        int human_idx = env->active_agent_indices[env->human_agent_idx];
+        DrawText(TextFormat("Controlling Agent: %d", env->human_agent_idx), 10, 70, 20, PUFF_WHITE);
+        DrawText(TextFormat("Agent Index: %d", human_idx), 10, 90, 20, PUFF_WHITE);
+        DrawText("Controls: W/S - Accelerate/Brake, A/D - Steer, 1-4 - Switch Agent", 
+                 10, client->height - 30, 20, PUFF_WHITE);
+        DrawText(TextFormat("Acceleration: %d", env->actions[env->human_agent_idx * 2]), 10, 110, 20, PUFF_WHITE);
+        DrawText(TextFormat("Steering: %d", env->actions[env->human_agent_idx * 2 + 1]), 10, 130, 20, PUFF_WHITE);
+        DrawText(TextFormat("Grid Rows: %d", env->grid_rows), 10, 150, 20, PUFF_WHITE);
+        DrawText(TextFormat("Grid Cols: %d", env->grid_cols), 10, 170, 20, PUFF_WHITE);
+        EndDrawing();
+    }
 }
 
 void close_client(Client* client){
+    if (client->recorder_pid > 0) {
+        close(client->recorder_pipefd[1]);
+        waitpid(client->recorder_pid, NULL, 0);
+    }
     for (int i = 0; i < 6; i++) {
         UnloadModel(client->cars[i]);
     }
     UnloadTexture(client->puffers);
     CloseWindow();
+    if (client->xvfb_pid > 0) {
+        kill(client->xvfb_pid, SIGTERM);
+        waitpid(client->xvfb_pid, NULL, 0);
+        unlink("/tmp/.X99-lock");
+        unsetenv("DISPLAY");
+    }
     free(client);
 }

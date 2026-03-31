@@ -68,6 +68,48 @@ def fmt_perf(name, color, delta_ref, elapsed, b2, c2):
     percent = 0 if delta_ref == 0 else int(100*elapsed/delta_ref - 1e-5)
     return f'{color}{name}', duration(elapsed, b2, c2), f'{b2}{percent:2d}{c2}%'
 
+def render_checkpoint(env_name, args, backend=_C):
+    '''Spin up a headless render instance, load the latest checkpoint,
+    run a short rollout with rendering, then clean up.'''
+    checkpoint_dir = os.path.join(args['checkpoint_dir'], args['env_name'])
+    pattern = os.path.join(checkpoint_dir, '**', '*.bin')
+    candidates = glob.glob(pattern, recursive=True)
+    if not candidates:
+        return
+
+    load_path = max(candidates, key=os.path.getctime)
+
+    render_args = deepcopy(args)
+    render_args['env']['render_mode'] = 1
+    render_args['vec']['total_agents'] = render_args['train']['horizon']
+    render_args['vec']['num_buffers'] = 1
+    render_args['world_size'] = 1
+    render_args['rank'] = 0
+    render_args['nccl_id'] = b''
+
+    try:
+        pufferl_cpp = backend.create_pufferl(render_args)
+    except RuntimeError as e:
+        print(f'WARNING: render_checkpoint failed to create instance: {e}')
+        return
+
+    backend.load_weights(pufferl_cpp, load_path)
+    print(f'Rendering checkpoint: {load_path}')
+
+    for _ in range(91): # TODO: Fix hardcoded number
+        backend.render(pufferl_cpp, 0)
+        backend.rollouts(pufferl_cpp)
+
+    backend.close(pufferl_cpp)
+    print(f'Render complete')
+
+    video_path = 'drive_recording.mp4'
+    if os.path.exists(video_path) and args.get('wandb'):
+        import wandb
+        if wandb.run is not None:
+            wandb.log({'video': wandb.Video(video_path, fps=30, format='mp4')})
+            os.remove(video_path)
+    
 def print_dashboard(args, model_size, flat_logs, clear=False, idx=[0],
         c1='[cyan]', c2='[white]', b1='[bright_cyan]', b2='[bright_white]'):
     g = lambda k, d=0: flat_logs.get(k, d)
@@ -226,6 +268,9 @@ def _train(env_name, args, backend=_C, sweep_obj=None, result_queue=None, verbos
         if (epoch % args['checkpoint_interval'] == 0 or epoch == train_epochs - 1) and sweep_obj is None:
             model_path = os.path.join(checkpoint_dir, f'{pufferl.global_step:16d}.bin')
             backend.save_weights(pufferl, model_path)
+            
+            if args['env'].get('render_mode', 0) == 0:  # Only render if not already headless
+                render_checkpoint(env_name, args, backend=backend)
 
         # Rate limit, but always log for eval to maintain determinism
         if time.time() < pufferl.last_log_time + 0.6 and epoch < train_epochs - 1:
