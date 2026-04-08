@@ -27,6 +27,9 @@ dependencies = [
     "pybind11",
 ]
 
+[[tool.uv.index]]
+url = "https://download.pytorch.org/whl/cu128"
+
 [project.scripts]
 puffer = "pufferlib.pufferl:main"
 

@@ -213,7 +213,6 @@ __global__ void conv_bias_relu_kernel(precision_t* __restrict__ data,
 // NCHW layout throughout. Weight stored as (OC, IC*K*K).
 // im2col produces (B*OH*OW, IC*K*K), matmul with W^T gives (B*OH*OW, OC),
 // then reshape to NCHW (B, OC, OH, OW).
-
 __global__ void im2col_kernel(
     const precision_t* __restrict__ input, precision_t* __restrict__ col,
     int B, int IC, int IH, int IW, int K, int S, int OH, int OW
@@ -231,6 +230,88 @@ __global__ void im2col_kernel(
     int kh = kk / K, kw = kk % K;
     int ih = oh * S + kh, iw = ow * S + kw;
     col[idx] = input[b * IC * IH * IW + ic * IH * IW + ih * IW + iw];
+}
+
+struct FastDivMod {
+    uint32_t d_;
+    uint32_t M_;
+    uint32_t l_;
+
+    __host__ FastDivMod(int d) {
+        d_ = d <= 0 ? 1u : (uint32_t)d;
+        uint32_t l = 0;
+        for (; l < 32; ++l)
+            if ((1u << l) >= d_) break;
+        l_ = l;
+        const uint64_t one = 1;
+        uint64_t m = ((one << 32) * ((one << l_) - d_)) / d_ + 1;
+        M_ = (uint32_t)m;
+    }
+
+    __device__ __forceinline__ int div(int n) const {
+        uint32_t u = (uint32_t)n;              // n must be >= 0
+        uint32_t t = __umulhi(M_, u);
+        return (int)((t + u) >> l_);
+    }
+
+    __device__ __forceinline__ int mod(int n) const {
+        return n - div(n) * (int)d_;
+    }
+
+    __device__ __forceinline__ void divmod(int n, int& q, int& r) const {
+        q = div(n);
+        r = n - q * (int)d_;
+    }
+};
+
+struct Im2ColFastMods {
+    FastDivMod dm_col_w;
+    FastDivMod dm_oh_ow;
+    FastDivMod dm_ow;
+    FastDivMod dm_kk;
+    FastDivMod dm_k;
+    FastDivMod dm_oc;
+    int total_no_batch;
+    int oh_ow;
+    int oc_spatial;
+    int col_cols;
+    int IC, IH, IW, OC, K, S, OH, OW;
+
+    __host__ Im2ColFastMods(int ic, int ih, int iw, int oc, int k, int s, int oh, int ow)
+        : dm_col_w(ic * k * k), dm_oh_ow(oh * ow), dm_ow(ow), dm_kk(k * k), dm_k(k), dm_oc(oc),
+          total_no_batch((oh * ow) * (ic * k * k)), oh_ow(oh * ow), col_cols(ic * k * k),
+          oc_spatial(oc * oh * ow),
+          IC(ic), IH(ih), IW(iw), OC(oc), K(k), S(s), OH(oh), OW(ow) {}
+};
+
+static const Im2ColFastMods kIm2ColModsC1(
+    N3_C1_IC, N3_MAP_H, N3_MAP_W, N3_C1_OC, N3_C1_K, N3_C1_S, N3_C1_OH, N3_C1_OW);
+static const Im2ColFastMods kIm2ColModsC2(
+    N3_C2_IC, N3_C1_OH, N3_C1_OW, N3_C2_OC, N3_C2_K, N3_C2_S, N3_C2_OH, N3_C2_OW);
+
+__global__ void im2col_kernel_fast(
+    const precision_t* __restrict__ input, precision_t* __restrict__ col,
+    int B, int IC, int IH, int IW, int K, int S, int OH, int OW,
+    const FastDivMod dm_col_w, const FastDivMod dm_oh_ow,
+    const FastDivMod dm_ow, const FastDivMod dm_kk, const FastDivMod dm_k,
+    const int total_no_batch
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = B * total_no_batch;
+    if (idx >= total) return;
+    int row, c;
+    dm_col_w.divmod(idx, row, c);
+    int b, rem;
+    dm_oh_ow.divmod(row, b, rem);
+    int oh, ow;
+    dm_ow.divmod(rem, oh, ow);
+    int ic, kk;
+    dm_kk.divmod(c, ic, kk);
+    int kh, kw;
+    dm_k.divmod(kk, kh, kw);
+    int ih = oh * S + kh, iw = ow * S + kw;
+    int _IH_IW = IH * IW;
+    col[idx] = input[b * IC * _IH_IW + ic * _IH_IW + ih * IW + iw];
 }
 
 // Backward: col2im — input-centric gather to avoid atomics.
@@ -280,6 +361,33 @@ __global__ void nchw_to_rows_kernel(
 }
 
 // Transpose (B*OH*OW, OC) -> (B, OC, OH, OW)  [row-major spatial-first to NCHW]
+__global__ void rows_to_nchw_kernel_fused(
+    const precision_t* __restrict__ src,
+    const precision_t* __restrict__ bias,
+    precision_t* __restrict__ data,
+    int B,
+    int spatial, int oc_spatial, int OC,
+    const FastDivMod dm_oh_ow,
+    const FastDivMod dm_oc,
+    bool relu
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = B * oc_spatial;
+    if (idx >= total) return;
+
+    int b, q, s, oc;
+    dm_oh_ow.divmod(idx, q, s);
+    dm_oc.divmod(q, b, oc);
+
+    float value = to_float(src[(b * spatial + s) * OC + oc]);
+    float oc_bias = to_float(bias[oc]);
+    float value_bias = value + oc_bias;
+    if (relu) {
+        data[idx] = from_float(fmaxf(0.0f, value_bias));
+    } else {
+        data[idx] = from_float(value_bias);
+    }
+}
 __global__ void rows_to_nchw_kernel(
     const precision_t* __restrict__ src, precision_t* __restrict__ dst,
     int B, int OC, int spatial
@@ -328,6 +436,30 @@ static void gemm_conv_forward(
         conv_bias_kernel<<<grid_size(total_out), BLOCK_SIZE, 0, stream>>>(
             output, bias->data, B, OC, spatial);
     }
+}
+
+// NMMO3 conv1/conv2 only: pass kIm2ColModsC1 or kIm2ColModsC2 (built once from N3_*).
+static void gemm_conv_forward_fast(
+    PrecisionTensor* weight, PrecisionTensor* bias,
+    precision_t* input, precision_t* output,
+    precision_t* col_buf, precision_t* mm_buf,
+    int B, const Im2ColFastMods& m, bool relu, cudaStream_t stream
+) {
+    int col_rows = B * m.oh_ow;
+    int total_col = col_rows * m.col_cols;
+    int total_out = B * m.OC * m.oh_ow;
+
+    im2col_kernel_fast<<<grid_size(total_col), BLOCK_SIZE, 0, stream>>>(
+        input, col_buf, B, m.IC, m.IH, m.IW, m.K, m.S, m.OH, m.OW,
+        m.dm_col_w, m.dm_oh_ow, m.dm_ow, m.dm_kk, m.dm_k, m.total_no_batch);
+
+    PrecisionTensor col_t = {.data = col_buf, .shape = {col_rows, m.col_cols}};
+    PrecisionTensor mm_t  = {.data = mm_buf,  .shape = {col_rows, m.OC}};
+    puf_mm(&col_t, weight, &mm_t, stream);
+
+    rows_to_nchw_kernel_fused<<<grid_size(total_out), BLOCK_SIZE, 0, stream>>>(
+        mm_buf, bias->data, output, B, m.oh_ow, m.oc_spatial, m.OC,
+        m.dm_oh_ow, m.dm_oc, relu);
 }
 
 // Backward: weight grad + optional input grad via im2col/col2im + cuBLAS.
