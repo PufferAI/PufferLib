@@ -271,6 +271,10 @@ struct Im2ColFastMods {
     FastDivMod dm_kk;
     FastDivMod dm_k;
     FastDivMod dm_oc;
+    FastDivMod dm_iw;
+    FastDivMod dm_ih;
+    FastDivMod dm_ic;
+    FastDivMod dm_s;
     int total_no_batch;
     int oh_ow;
     int oc_spatial;
@@ -279,6 +283,7 @@ struct Im2ColFastMods {
 
     __host__ Im2ColFastMods(int ic, int ih, int iw, int oc, int k, int s, int oh, int ow)
         : dm_col_w(ic * k * k), dm_oh_ow(oh * ow), dm_ow(ow), dm_kk(k * k), dm_k(k), dm_oc(oc),
+          dm_iw(iw), dm_ih(ih), dm_ic(ic), dm_s(s),
           total_no_batch((oh * ow) * (ic * k * k)), oh_ow(oh * ow), col_cols(ic * k * k),
           oc_spatial(oc * oh * ow),
           IC(ic), IH(ih), IW(iw), OC(oc), K(k), S(s), OH(oh), OW(ow) {}
@@ -317,6 +322,43 @@ __global__ void im2col_kernel_fast(
 // Backward: col2im — input-centric gather to avoid atomics.
 // Each thread owns one (b, ic, ih, iw) element and sums contributions from all
 // (oh, ow, kh, kw) patches that map to it.
+// col2im fast path: dm_iw/dm_ih/dm_ic/dm_s and col_cols/oh_ow from Im2ColFastMods.
+__global__ void col2im_kernel_fast(
+    const precision_t* __restrict__ col, precision_t* __restrict__ grad_input,
+    int B, int IC, int IH, int IW, int K, int OH, int OW,
+    const FastDivMod dm_iw, const FastDivMod dm_ih, const FastDivMod dm_ic,
+    const FastDivMod dm_s, int col_cols, int oh_ow
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = B * IC * IH * IW;
+    if (idx >= total) return;
+    int q0, iw, q1, ih, b, ic;
+    dm_iw.divmod(idx, q0, iw);
+    dm_ih.divmod(q0, q1, ih);
+    dm_ic.divmod(q1, b, ic);
+    int bohow_ickk = b * oh_ow * col_cols + ic * (K * K);
+    float sum = 0.0f;
+    for (int kh = 0; kh < K; kh++) {
+        int ih_off = ih - kh;
+        if (ih_off < 0) continue;
+        int oh, ih_rem;
+        dm_s.divmod(ih_off, oh, ih_rem);
+        if (ih_rem != 0 || oh >= OH) continue;
+        int ohowcc_khk = oh * OW * col_cols + kh * K;
+        int inner_value = bohow_ickk + ohowcc_khk;
+        for (int kw = 0; kw < K; kw++) {
+            int iw_off = iw - kw;
+            if (iw_off < 0) continue;
+            int ow, iw_rem;
+            dm_s.divmod(iw_off, ow, iw_rem);
+            if (iw_rem != 0 || ow >= OW) continue;
+            int col_idx = inner_value + ow * col_cols + kw;
+            sum += to_float(col[col_idx]);
+        }
+    }
+    grad_input[idx] = from_float(sum);
+}
+
 __global__ void col2im_kernel(
     const precision_t* __restrict__ col, precision_t* __restrict__ grad_input,
     int B, int IC, int IH, int IW, int K, int S, int OH, int OW
@@ -347,6 +389,20 @@ __global__ void col2im_kernel(
 }
 
 // Transpose (B, OC, OH, OW) -> (B*OH*OW, OC)  [NCHW to row-major spatial-first]
+// Same idx layout as rows_to_nchw_kernel_fused; dm_oh_ow = spatial, dm_oc = OC.
+__global__ void nchw_to_rows_kernel_fast(
+    const precision_t* __restrict__ src, precision_t* __restrict__ dst,
+    int B, int OC, int spatial,
+    const FastDivMod dm_oh_ow, const FastDivMod dm_oc
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = B * OC * spatial;
+    if (idx >= total) return;
+    int q, s, b, oc;
+    dm_oh_ow.divmod(idx, q, s);
+    dm_oc.divmod(q, b, oc);
+    dst[(b * spatial + s) * OC + oc] = src[idx];
+}
 __global__ void nchw_to_rows_kernel(
     const precision_t* __restrict__ src, precision_t* __restrict__ dst,
     int B, int OC, int spatial
@@ -498,6 +554,38 @@ static void gemm_conv_backward(
         puf_mm_nn(&mm_t, weight, &col_t, stream);  // reuse col_buf as col_grad
         col2im_kernel<<<grid_size(B * IC * IH * IW), BLOCK_SIZE, 0, stream>>>(
             col_buf, input_grad, B, IC, IH, IW, K, S, OH, OW);
+    }
+}
+
+// NMMO3 conv1/conv2 only: pass kIm2ColModsC1 or kIm2ColModsC2 (same as gemm_conv_forward_fast).
+static void gemm_conv_backward_fast(
+    PrecisionTensor* weight,
+    precision_t* saved_input, precision_t* grad_output,
+    precision_t* wgrad, precision_t* input_grad,
+    precision_t* col_buf, precision_t* mm_buf,
+    int B, const Im2ColFastMods& m, cudaStream_t stream
+) {
+    int col_rows = B * m.oh_ow;
+    int total_col = col_rows * m.col_cols;
+    int total_out = B * m.OC * m.oh_ow;
+
+    nchw_to_rows_kernel_fast<<<grid_size(total_out), BLOCK_SIZE, 0, stream>>>(
+        grad_output, mm_buf, B, m.OC, m.oh_ow, m.dm_oh_ow, m.dm_oc);
+
+    im2col_kernel_fast<<<grid_size(total_col), BLOCK_SIZE, 0, stream>>>(
+        saved_input, col_buf, B, m.IC, m.IH, m.IW, m.K, m.S, m.OH, m.OW,
+        m.dm_col_w, m.dm_oh_ow, m.dm_ow, m.dm_kk, m.dm_k, m.total_no_batch);
+
+    PrecisionTensor mm_t  = {.data = mm_buf,  .shape = {col_rows, m.OC}};
+    PrecisionTensor col_t = {.data = col_buf, .shape = {col_rows, m.col_cols}};
+    PrecisionTensor wg_t  = {.data = wgrad,   .shape = {m.OC, m.col_cols}};
+    puf_mm_tn(&mm_t, &col_t, &wg_t, stream);
+
+    if (input_grad) {
+        puf_mm_nn(&mm_t, weight, &col_t, stream);
+        col2im_kernel_fast<<<grid_size(B * m.IC * m.IH * m.IW), BLOCK_SIZE, 0, stream>>>(
+            col_buf, input_grad, B, m.IC, m.IH, m.IW, m.K, m.OH, m.OW,
+            m.dm_iw, m.dm_ih, m.dm_ic, m.dm_s, m.col_cols, m.oh_ow);
     }
 }
 

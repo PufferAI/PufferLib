@@ -7,6 +7,10 @@
 #   ./tests/bench_conv_gemm_vs_cudnn.sh --bf16 --layer 2 --im2col-bench
 # gemm slow vs fast forward (relu 0/1), NMMO3 layer sizes:
 #   ./tests/bench_conv_gemm_vs_cudnn.sh --layer 1 --gemm-fast-bench-only
+# ∂W-only vs full backward (gemm vs cudnn):
+#   ./tests/bench_conv_gemm_vs_cudnn.sh --layer 1 --bwd-dinput-bench-only
+# gemm vs gemm_fast vs cudnn full backward:
+#   ./tests/bench_conv_gemm_vs_cudnn.sh --layer 1 --gemm-bwd-fast-bench-only
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

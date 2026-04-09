@@ -439,6 +439,139 @@ static int run_backward(const BenchDims& dim, int warmup, int iters) {
     return 0;
 }
 
+// ∂W-only (input_grad=null) vs full backward (+ col2im / cudnn BackwardData); gemm vs cudnn.
+static int run_backward_input_grad_bench(const BenchDims& dim, int warmup, int iters) {
+    ConvWeights cw{};
+    conv_init(&cw, dim.IC, dim.OC, dim.K, dim.S, dim.IH, dim.IW, false);
+
+    Allocator param_alloc{};
+    conv_reg_params(&cw, &param_alloc);
+    if (alloc_create(&param_alloc) != cudaSuccess) return 1;
+    uint64_t seed = 7;
+    conv_init_weights(&cw, &seed, 0);
+    cudaDeviceSynchronize();
+
+    int OH = cw.OH;
+    int OW = cw.OW;
+    int out_elems = dim.B * dim.OC * OH * OW;
+    int in_elems = dim.B * dim.IC * dim.IH * dim.IW;
+    int w_elems = (int)numel(cw.w.shape);
+
+    Allocator act_g{};
+    PrecisionTensor col{}, mm{};
+    int col_rows = dim.B * OH * OW;
+    int col_cols = dim.IC * dim.K * dim.K;
+    col = {.shape = {col_rows, col_cols}};
+    mm = {.shape = {col_rows, dim.OC}};
+    PrecisionTensor saved_in{}, grad_out{}, wgrad_g{};
+    saved_in = {.shape = {dim.B, dim.IC, dim.IH, dim.IW}};
+    grad_out = {.shape = {(int64_t)out_elems}};
+    wgrad_g = {.shape = {cw.w.shape[0], cw.w.shape[1]}};
+    PrecisionTensor dinput_g{};
+    dinput_g = {.shape = {dim.B, dim.IC, dim.IH, dim.IW}};
+    alloc_register(&act_g, &col);
+    alloc_register(&act_g, &mm);
+    alloc_register(&act_g, &saved_in);
+    alloc_register(&act_g, &grad_out);
+    alloc_register(&act_g, &wgrad_g);
+    alloc_register(&act_g, &dinput_g);
+    if (alloc_create(&act_g) != cudaSuccess) return 1;
+
+    std::vector<float> hs(in_elems), hg(out_elems);
+    fill_rand_host(hs.data(), in_elems, 101u);
+    fill_rand_host(hg.data(), out_elems, 202u);
+    copy_fp32_h2d(hs.data(), saved_in.data, in_elems);
+    copy_fp32_h2d(hg.data(), grad_out.data, out_elems);
+
+    Allocator acts{}, grads{};
+    ConvActivations ca{};
+    conv_reg_train(&cw, &ca, &acts, &grads, dim.B, n3_cudnn_dtype());
+    if (alloc_create(&acts) != cudaSuccess || alloc_create(&grads) != cudaSuccess) return 1;
+    cudaMemcpy(ca.saved_input.data, saved_in.data, (size_t)in_elems * sizeof(precision_t), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(ca.grad.data, grad_out.data, (size_t)out_elems * sizeof(precision_t), cudaMemcpyDeviceToDevice);
+
+    cudaStream_t stream = 0;
+
+    cudaMemset(wgrad_g.data, 0, (size_t)w_elems * sizeof(precision_t));
+    gemm_conv_backward(&cw.w, saved_in.data, grad_out.data, wgrad_g.data, nullptr, col.data, mm.data, dim.B,
+        dim.IC, dim.IH, dim.IW, dim.OC, dim.K, dim.S, OH, OW, stream);
+    cudaDeviceSynchronize();
+    std::vector<float> hwg_wnull_g;
+    copy_precision_d2h(wgrad_g.data, w_elems, &hwg_wnull_g);
+
+    cudaMemset(ca.wgrad.data, 0, (size_t)w_elems * sizeof(precision_t));
+    conv_backward(&cw, &ca, nullptr, dim.B, stream);
+    cudaDeviceSynchronize();
+    std::vector<float> hwg_wnull_c;
+    copy_precision_d2h(ca.wgrad.data, w_elems, &hwg_wnull_c);
+
+    float d_wg_wnull, m_wg_wnull;
+    stats_diff(hwg_wnull_g.data(), hwg_wnull_c.data(), w_elems, &d_wg_wnull, &m_wg_wnull);
+    printf("  ∂W only  wgrad max |diff| (gemm vs cudnn): %.6g  mean |diff|: %.6g\n", d_wg_wnull, m_wg_wnull);
+
+    cudaMemset(wgrad_g.data, 0, (size_t)w_elems * sizeof(precision_t));
+    cudaMemset(dinput_g.data, 0, (size_t)in_elems * sizeof(precision_t));
+    gemm_conv_backward(&cw.w, saved_in.data, grad_out.data, wgrad_g.data, dinput_g.data, col.data, mm.data,
+        dim.B, dim.IC, dim.IH, dim.IW, dim.OC, dim.K, dim.S, OH, OW, stream);
+    cudaDeviceSynchronize();
+    std::vector<float> hwg_full_g, hdi_full_g;
+    copy_precision_d2h(wgrad_g.data, w_elems, &hwg_full_g);
+    copy_precision_d2h(dinput_g.data, in_elems, &hdi_full_g);
+
+    cudaMemset(ca.wgrad.data, 0, (size_t)w_elems * sizeof(precision_t));
+    cudaMemset(dinput_g.data, 0, (size_t)in_elems * sizeof(precision_t));
+    conv_backward(&cw, &ca, dinput_g.data, dim.B, stream);
+    cudaDeviceSynchronize();
+    std::vector<float> hwg_full_c, hdi_full_c;
+    copy_precision_d2h(ca.wgrad.data, w_elems, &hwg_full_c);
+    copy_precision_d2h(dinput_g.data, in_elems, &hdi_full_c);
+
+    float d_wg_full, m_wg_full, d_di, m_di;
+    stats_diff(hwg_full_g.data(), hwg_full_c.data(), w_elems, &d_wg_full, &m_wg_full);
+    stats_diff(hdi_full_g.data(), hdi_full_c.data(), in_elems, &d_di, &m_di);
+    printf("  full     wgrad max |diff| (gemm vs cudnn): %.6g  mean |diff|: %.6g\n", d_wg_full, m_wg_full);
+    printf("  full     d_input max |diff| (gemm vs cudnn): %.6g  mean |diff|: %.6g\n", d_di, m_di);
+
+    auto run_gemm_wnull = [&](cudaStream_t s) {
+        cudaMemset(wgrad_g.data, 0, (size_t)w_elems * sizeof(precision_t));
+        gemm_conv_backward(&cw.w, saved_in.data, grad_out.data, wgrad_g.data, nullptr, col.data, mm.data,
+            dim.B, dim.IC, dim.IH, dim.IW, dim.OC, dim.K, dim.S, OH, OW, s);
+    };
+    auto run_gemm_full = [&](cudaStream_t s) {
+        cudaMemset(wgrad_g.data, 0, (size_t)w_elems * sizeof(precision_t));
+        cudaMemset(dinput_g.data, 0, (size_t)in_elems * sizeof(precision_t));
+        gemm_conv_backward(&cw.w, saved_in.data, grad_out.data, wgrad_g.data, dinput_g.data, col.data,
+            mm.data, dim.B, dim.IC, dim.IH, dim.IW, dim.OC, dim.K, dim.S, OH, OW, s);
+    };
+    auto run_cudnn_wnull = [&](cudaStream_t s) {
+        cudaMemset(ca.wgrad.data, 0, (size_t)w_elems * sizeof(precision_t));
+        conv_backward(&cw, &ca, nullptr, dim.B, s);
+    };
+    auto run_cudnn_full = [&](cudaStream_t s) {
+        cudaMemset(ca.wgrad.data, 0, (size_t)w_elems * sizeof(precision_t));
+        cudaMemset(dinput_g.data, 0, (size_t)in_elems * sizeof(precision_t));
+        conv_backward(&cw, &ca, dinput_g.data, dim.B, s);
+    };
+
+    float ms_g_w = time_kernel_ms(stream, run_gemm_wnull, warmup, iters);
+    float ms_g_f = time_kernel_ms(stream, run_gemm_full, warmup, iters);
+    float ms_c_w = time_kernel_ms(stream, run_cudnn_wnull, warmup, iters);
+    float ms_c_f = time_kernel_ms(stream, run_cudnn_full, warmup, iters);
+
+    printf("  gemm   ∂W only (d_input=null): %8.4f us/iter\n", ms_g_w * 1000.0f);
+    printf("  gemm   full (+d_input):       %8.4f us/iter  (+%.4f us  d_input slice)\n",
+        ms_g_f * 1000.0f, (ms_g_f - ms_g_w) * 1000.0f);
+    printf("  cudnn  ∂W only (no BwdData):  %8.4f us/iter\n", ms_c_w * 1000.0f);
+    printf("  cudnn  full (+BwdData):       %8.4f us/iter  (+%.4f us  BwdData slice)\n",
+        ms_c_f * 1000.0f, (ms_c_f - ms_c_w) * 1000.0f);
+
+    alloc_free(&param_alloc);
+    alloc_free(&act_g);
+    alloc_free(&acts);
+    alloc_free(&grads);
+    return 0;
+}
+
 static int run_im2col_bench(const BenchDims& dim, int warmup, int iters) {
     int B = dim.B, IC = dim.IC, IH = dim.IH, IW = dim.IW, K = dim.K, S = dim.S;
     int OH = (IH - K) / S + 1;
@@ -503,6 +636,138 @@ static int run_im2col_bench(const BenchDims& dim, int warmup, int iters) {
     cudaFree(d_in);
     cudaFree(d_col_slow);
     cudaFree(d_col_fast);
+    return 0;
+}
+
+// Full backward: gemm_conv_backward vs gemm_conv_backward_fast vs cudnn (NMMO3 layer geometry only).
+static int run_backward_gemm_fast_bench(const BenchDims& dim, int layer, int warmup, int iters) {
+    const Im2ColFastMods& m = (layer == 1) ? kIm2ColModsC1 : kIm2ColModsC2;
+    int OH = (dim.IH - dim.K) / dim.S + 1;
+    int OW = (dim.IW - dim.K) / dim.S + 1;
+    if (OH != m.OH || OW != m.OW || dim.IC != m.IC || dim.IH != m.IH || dim.IW != m.IW || dim.OC != m.OC
+        || dim.K != m.K || dim.S != m.S) {
+        fprintf(stderr, "backward gemm-fast bench: dimensions must match NMMO3 layer %d (use --layer %d)\n",
+            layer, layer);
+        return 1;
+    }
+
+    ConvWeights cw{};
+    conv_init(&cw, dim.IC, dim.OC, dim.K, dim.S, dim.IH, dim.IW, false);
+
+    Allocator param_alloc{};
+    conv_reg_params(&cw, &param_alloc);
+    if (alloc_create(&param_alloc) != cudaSuccess) return 1;
+    uint64_t seed = 23;
+    conv_init_weights(&cw, &seed, 0);
+    cudaDeviceSynchronize();
+
+    int out_elems = dim.B * dim.OC * OH * OW;
+    int in_elems = dim.B * dim.IC * dim.IH * dim.IW;
+    int w_elems = (int)numel(cw.w.shape);
+
+    Allocator act_g{};
+    PrecisionTensor col{}, mm{};
+    int col_rows = dim.B * OH * OW;
+    int col_cols = dim.IC * dim.K * dim.K;
+    col = {.shape = {col_rows, col_cols}};
+    mm = {.shape = {col_rows, dim.OC}};
+    PrecisionTensor saved_in{}, grad_out{}, wgrad_g{};
+    saved_in = {.shape = {dim.B, dim.IC, dim.IH, dim.IW}};
+    grad_out = {.shape = {(int64_t)out_elems}};
+    wgrad_g = {.shape = {cw.w.shape[0], cw.w.shape[1]}};
+    PrecisionTensor dinput_g{};
+    dinput_g = {.shape = {dim.B, dim.IC, dim.IH, dim.IW}};
+    alloc_register(&act_g, &col);
+    alloc_register(&act_g, &mm);
+    alloc_register(&act_g, &saved_in);
+    alloc_register(&act_g, &grad_out);
+    alloc_register(&act_g, &wgrad_g);
+    alloc_register(&act_g, &dinput_g);
+    if (alloc_create(&act_g) != cudaSuccess) return 1;
+
+    std::vector<float> hs(in_elems), hg(out_elems);
+    fill_rand_host(hs.data(), in_elems, 101u);
+    fill_rand_host(hg.data(), out_elems, 202u);
+    copy_fp32_h2d(hs.data(), saved_in.data, in_elems);
+    copy_fp32_h2d(hg.data(), grad_out.data, out_elems);
+
+    Allocator acts{}, grads{};
+    ConvActivations ca{};
+    conv_reg_train(&cw, &ca, &acts, &grads, dim.B, n3_cudnn_dtype());
+    if (alloc_create(&acts) != cudaSuccess || alloc_create(&grads) != cudaSuccess) return 1;
+    cudaMemcpy(ca.saved_input.data, saved_in.data, (size_t)in_elems * sizeof(precision_t), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(ca.grad.data, grad_out.data, (size_t)out_elems * sizeof(precision_t), cudaMemcpyDeviceToDevice);
+
+    cudaStream_t stream = 0;
+
+    cudaMemset(wgrad_g.data, 0, (size_t)w_elems * sizeof(precision_t));
+    cudaMemset(dinput_g.data, 0, (size_t)in_elems * sizeof(precision_t));
+    gemm_conv_backward(&cw.w, saved_in.data, grad_out.data, wgrad_g.data, dinput_g.data, col.data, mm.data,
+        dim.B, dim.IC, dim.IH, dim.IW, dim.OC, dim.K, dim.S, OH, OW, stream);
+    cudaDeviceSynchronize();
+    std::vector<float> hwg_slow, hdi_slow;
+    copy_precision_d2h(wgrad_g.data, w_elems, &hwg_slow);
+    copy_precision_d2h(dinput_g.data, in_elems, &hdi_slow);
+
+    cudaMemset(wgrad_g.data, 0, (size_t)w_elems * sizeof(precision_t));
+    cudaMemset(dinput_g.data, 0, (size_t)in_elems * sizeof(precision_t));
+    gemm_conv_backward_fast(&cw.w, saved_in.data, grad_out.data, wgrad_g.data, dinput_g.data, col.data, mm.data,
+        dim.B, m, stream);
+    cudaDeviceSynchronize();
+    std::vector<float> hwg_fast, hdi_fast;
+    copy_precision_d2h(wgrad_g.data, w_elems, &hwg_fast);
+    copy_precision_d2h(dinput_g.data, in_elems, &hdi_fast);
+
+    float d_w_sg, m_w_sg, d_i_sg, m_i_sg;
+    stats_diff(hwg_slow.data(), hwg_fast.data(), w_elems, &d_w_sg, &m_w_sg);
+    stats_diff(hdi_slow.data(), hdi_fast.data(), in_elems, &d_i_sg, &m_i_sg);
+    printf("  wgrad max |diff| (gemm vs gemm_fast): %.6g  mean |diff|: %.6g\n", d_w_sg, m_w_sg);
+    printf("  d_input max |diff| (gemm vs gemm_fast): %.6g  mean |diff|: %.6g\n", d_i_sg, m_i_sg);
+
+    cudaMemset(ca.wgrad.data, 0, (size_t)w_elems * sizeof(precision_t));
+    cudaMemset(dinput_g.data, 0, (size_t)in_elems * sizeof(precision_t));
+    conv_backward(&cw, &ca, dinput_g.data, dim.B, stream);
+    cudaDeviceSynchronize();
+    std::vector<float> hwg_c, hdi_c;
+    copy_precision_d2h(ca.wgrad.data, w_elems, &hwg_c);
+    copy_precision_d2h(dinput_g.data, in_elems, &hdi_c);
+    float d_w_sc, m_w_sc, d_i_sc, m_i_sc;
+    stats_diff(hwg_slow.data(), hwg_c.data(), w_elems, &d_w_sc, &m_w_sc);
+    stats_diff(hdi_slow.data(), hdi_c.data(), in_elems, &d_i_sc, &m_i_sc);
+    printf("  wgrad max |diff| (gemm vs cudnn): %.6g  mean |diff|: %.6g\n", d_w_sc, m_w_sc);
+    printf("  d_input max |diff| (gemm vs cudnn): %.6g  mean |diff|: %.6g\n", d_i_sc, m_i_sc);
+
+    auto run_gemm = [&](cudaStream_t s) {
+        cudaMemset(wgrad_g.data, 0, (size_t)w_elems * sizeof(precision_t));
+        cudaMemset(dinput_g.data, 0, (size_t)in_elems * sizeof(precision_t));
+        gemm_conv_backward(&cw.w, saved_in.data, grad_out.data, wgrad_g.data, dinput_g.data, col.data, mm.data,
+            dim.B, dim.IC, dim.IH, dim.IW, dim.OC, dim.K, dim.S, OH, OW, s);
+    };
+    auto run_gemm_fast = [&](cudaStream_t s) {
+        cudaMemset(wgrad_g.data, 0, (size_t)w_elems * sizeof(precision_t));
+        cudaMemset(dinput_g.data, 0, (size_t)in_elems * sizeof(precision_t));
+        gemm_conv_backward_fast(&cw.w, saved_in.data, grad_out.data, wgrad_g.data, dinput_g.data, col.data, mm.data,
+            dim.B, m, s);
+    };
+    auto run_cudnn = [&](cudaStream_t s) {
+        cudaMemset(ca.wgrad.data, 0, (size_t)w_elems * sizeof(precision_t));
+        cudaMemset(dinput_g.data, 0, (size_t)in_elems * sizeof(precision_t));
+        conv_backward(&cw, &ca, dinput_g.data, dim.B, s);
+    };
+
+    float ms_g = time_kernel_ms(stream, run_gemm, warmup, iters);
+    float ms_gf = time_kernel_ms(stream, run_gemm_fast, warmup, iters);
+    float ms_c = time_kernel_ms(stream, run_cudnn, warmup, iters);
+    printf("  gemm_conv_backward:      %8.4f us/iter\n", ms_g * 1000.0f);
+    printf("  gemm_conv_backward_fast: %8.4f us/iter  (%.2fx vs gemm_conv_backward)\n", ms_gf * 1000.0f,
+        ms_g / ms_gf);
+    printf("  conv_backward (cudnn):   %8.4f us/iter  (%.2fx vs gemm, %.2fx vs gemm_fast)\n", ms_c * 1000.0f,
+        ms_g / ms_c, ms_gf / ms_c);
+
+    alloc_free(&param_alloc);
+    alloc_free(&act_g);
+    alloc_free(&acts);
+    alloc_free(&grads);
     return 0;
 }
 
@@ -597,6 +862,8 @@ int main(int argc, char** argv) {
     bool do_wgrad_breakdown = false;
     bool do_im2col_bench = false;
     bool do_gemm_fast_bench = false;
+    bool do_bwd_dinput_bench = false;
+    bool do_gemm_bwd_fast_bench = false;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-B") == 0 && i + 1 < argc) B = atoi(argv[++i]);
         else if (strcmp(argv[i], "--layer") == 0 && i + 1 < argc) layer = atoi(argv[++i]);
@@ -610,6 +877,8 @@ int main(int argc, char** argv) {
             do_wgrad_breakdown = true;
             do_fwd = false;
             do_bwd = false;
+            do_bwd_dinput_bench = false;
+            do_gemm_bwd_fast_bench = false;
         } else if (strcmp(argv[i], "--wgrad-breakdown") == 0 || strcmp(argv[i], "--filter-bwd") == 0) {
             do_wgrad_breakdown = true;
         } else if (strcmp(argv[i], "--im2col-bench-only") == 0) {
@@ -617,6 +886,8 @@ int main(int argc, char** argv) {
             do_fwd = false;
             do_bwd = false;
             do_wgrad_breakdown = false;
+            do_bwd_dinput_bench = false;
+            do_gemm_bwd_fast_bench = false;
         } else if (strcmp(argv[i], "--im2col-bench") == 0) {
             do_im2col_bench = true;
         } else if (strcmp(argv[i], "--gemm-fast-bench-only") == 0) {
@@ -625,8 +896,30 @@ int main(int argc, char** argv) {
             do_bwd = false;
             do_wgrad_breakdown = false;
             do_im2col_bench = false;
+            do_bwd_dinput_bench = false;
+            do_gemm_bwd_fast_bench = false;
         } else if (strcmp(argv[i], "--gemm-fast-bench") == 0) {
             do_gemm_fast_bench = true;
+        } else if (strcmp(argv[i], "--gemm-bwd-fast-bench-only") == 0) {
+            do_gemm_bwd_fast_bench = true;
+            do_fwd = false;
+            do_bwd = false;
+            do_wgrad_breakdown = false;
+            do_im2col_bench = false;
+            do_gemm_fast_bench = false;
+            do_bwd_dinput_bench = false;
+        } else if (strcmp(argv[i], "--gemm-bwd-fast-bench") == 0) {
+            do_gemm_bwd_fast_bench = true;
+        } else if (strcmp(argv[i], "--bwd-dinput-bench-only") == 0) {
+            do_bwd_dinput_bench = true;
+            do_fwd = false;
+            do_bwd = false;
+            do_wgrad_breakdown = false;
+            do_im2col_bench = false;
+            do_gemm_fast_bench = false;
+            do_gemm_bwd_fast_bench = false;
+        } else if (strcmp(argv[i], "--bwd-dinput-bench") == 0) {
+            do_bwd_dinput_bench = true;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("Usage: %s [options]\n", argv[0]);
             printf("  -B N                 batch size (default 1024)\n");
@@ -642,6 +935,10 @@ int main(int argc, char** argv) {
             printf("  --im2col-bench-only  only that im2col bench\n");
             printf("  --gemm-fast-bench    also bench gemm_conv_forward vs gemm_conv_forward_fast (relu 0/1)\n");
             printf("  --gemm-fast-bench-only  only that bench\n");
+            printf("  --bwd-dinput-bench   also bench ∂W-only vs full bwd (gemm vs cudnn)\n");
+            printf("  --bwd-dinput-bench-only  only that bench\n");
+            printf("  --gemm-bwd-fast-bench  also bench full bwd: gemm vs gemm_fast vs cudnn (NMMO3 layer)\n");
+            printf("  --gemm-bwd-fast-bench-only  only that bench\n");
             printf("  (script) --float / --fp32   compile fp32 (default)\n");
             printf("  (script) --bf16 / --half    compile bf16 (matches default native backend)\n");
             return 0;
@@ -688,6 +985,19 @@ int main(int argc, char** argv) {
     if (do_gemm_fast_bench) {
         printf("\n--- gemm_conv_forward vs gemm_conv_forward_fast (relu off/on) ---\n");
         if (run_gemm_fast_fwd_bench(dim, layer, warmup, iters)) return 1;
+    }
+    if (do_bwd_dinput_bench) {
+        BenchDims bd = dim;
+        bd.relu = false;
+        printf("\n--- backward: ∂W-only (d_input=null) vs full (+d_input); gemm vs cudnn ---\n");
+        if (run_backward_input_grad_bench(bd, warmup, iters)) return 1;
+    }
+    if (do_gemm_bwd_fast_bench) {
+        BenchDims bd = dim;
+        bd.relu = false;
+        printf("\n--- backward: gemm_conv_backward vs gemm_conv_backward_fast vs conv_backward ---\n");
+        printf("  (NMMO3 geometry; use --layer 1 or 2)\n");
+        if (run_backward_gemm_fast_bench(bd, layer, warmup, iters)) return 1;
     }
     return 0;
 }
