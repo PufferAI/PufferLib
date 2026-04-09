@@ -626,15 +626,13 @@ static PrecisionTensor nmmo3_encoder_forward(void* w, void* activations, Precisi
     n3_multihot_kernel<<<grid_size(B * N3_MAP_H * N3_MAP_W), BLOCK_SIZE, 0, stream>>>(
         a->multihot.data, input.data, B, ew->obs_size);
 
-    gemm_conv_forward(&ew->conv1.w, &ew->conv1.b, a->multihot.data, a->conv1.out.data,
-        a->col1.data, a->mm1.data, B, N3_C1_IC, N3_MAP_H, N3_MAP_W,
-        N3_C1_OC, N3_C1_K, N3_C1_S, N3_C1_OH, N3_C1_OW, true, stream);
+    gemm_conv_forward_fast(&ew->conv1.w, &ew->conv1.b, a->multihot.data, a->conv1.out.data,
+        a->col1.data, a->mm1.data, B, kIm2ColModsC1, true, stream);
     if (a->conv1.saved_input.data)
         cudaMemcpyAsync(a->conv1.saved_input.data, a->multihot.data,
             (int64_t)B * N3_C1_IC * N3_MAP_H * N3_MAP_W * sizeof(precision_t), cudaMemcpyDeviceToDevice, stream);
-    gemm_conv_forward(&ew->conv2.w, &ew->conv2.b, a->conv1.out.data, a->conv2.out.data,
-        a->col2.data, a->mm2.data, B, N3_C2_IC, N3_C1_OH, N3_C1_OW,
-        N3_C2_OC, N3_C2_K, N3_C2_S, N3_C2_OH, N3_C2_OW, false, stream);
+    gemm_conv_forward_fast(&ew->conv2.w, &ew->conv2.b, a->conv1.out.data, a->conv2.out.data,
+        a->col2.data, a->mm2.data, B, kIm2ColModsC2, false, stream);
     if (a->conv2.saved_input.data)
         cudaMemcpyAsync(a->conv2.saved_input.data, a->conv1.out.data,
             (int64_t)B * N3_C2_IC * N3_C1_OH * N3_C1_OW * sizeof(precision_t), cudaMemcpyDeviceToDevice, stream);
@@ -670,10 +668,9 @@ static void nmmo3_encoder_backward(void* w, void* activations, PrecisionTensor g
     n3_conv_bias_grad_nchw<<<ew->conv2.OC, 256, 0, stream>>>(
         a->conv2.bgrad.data, a->conv2.grad.data,
         B, ew->conv2.OC, ew->conv2.OH * ew->conv2.OW);
-    gemm_conv_backward(&ew->conv2.w, a->conv2.saved_input.data, a->conv2.grad.data,
+    gemm_conv_backward_fast(&ew->conv2.w, a->conv2.saved_input.data, a->conv2.grad.data,
         a->conv2.wgrad.data, a->conv1.grad.data,
-        a->col2.data, a->mm2.data, B, N3_C2_IC, N3_C1_OH, N3_C1_OW,
-        N3_C2_OC, N3_C2_K, N3_C2_S, N3_C2_OH, N3_C2_OW, stream);
+        a->col2.data, a->mm2.data, B, kIm2ColModsC2, stream);
 
     n3_relu_backward_kernel<<<grid_size(B * ew->conv1.OC * ew->conv1.OH * ew->conv1.OW), BLOCK_SIZE, 0, stream>>>(
         a->conv1.grad.data, a->conv1.out.data,
@@ -681,10 +678,9 @@ static void nmmo3_encoder_backward(void* w, void* activations, PrecisionTensor g
     n3_conv_bias_grad_nchw<<<ew->conv1.OC, 256, 0, stream>>>(
         a->conv1.bgrad.data, a->conv1.grad.data,
         B, ew->conv1.OC, ew->conv1.OH * ew->conv1.OW);
-    gemm_conv_backward(&ew->conv1.w, a->conv1.saved_input.data, a->conv1.grad.data,
+    gemm_conv_backward_fast(&ew->conv1.w, a->conv1.saved_input.data, a->conv1.grad.data,
         a->conv1.wgrad.data, NULL,
-        a->col1.data, a->mm1.data, B, N3_C1_IC, N3_MAP_H, N3_MAP_W,
-        N3_C1_OC, N3_C1_K, N3_C1_S, N3_C1_OH, N3_C1_OW, stream);
+        a->col1.data, a->mm1.data, B, kIm2ColModsC1, stream);
 
     // Embedding backward: scatter-add from concat gradient into float buffer, then cast
     int embed_n = N3_EMBED_VOCAB * N3_EMBED_DIM;
