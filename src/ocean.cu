@@ -24,7 +24,97 @@ static cudnnDataType_t n3_cudnn_dtype() {
     return (PRECISION_SIZE == 2) ? CUDNN_DATA_BFLOAT16 : CUDNN_DATA_FLOAT;
 }
 
+struct FastDivMod {
+    uint32_t d_;
+    uint32_t M_;
+    uint32_t l_;
+
+    __host__ FastDivMod(int d) {
+        d_ = d <= 0 ? 1u : (uint32_t)d;
+        uint32_t l = 0;
+        for (; l < 32; ++l)
+            if ((1u << l) >= d_) break;
+        l_ = l;
+        const uint64_t one = 1;
+        uint64_t m = ((one << 32) * ((one << l_) - d_)) / d_ + 1;
+        M_ = (uint32_t)m;
+    }
+
+    __device__ __forceinline__ int div(int n) const {
+        uint32_t u = (uint32_t)n;              // n must be >= 0
+        uint32_t t = __umulhi(M_, u);
+        return (int)((t + u) >> l_);
+    }
+
+    __device__ __forceinline__ int mod(int n) const {
+        return n - div(n) * (int)d_;
+    }
+
+    __device__ __forceinline__ void divmod(int n, int& q, int& r) const {
+        q = div(n);
+        r = n - q * (int)d_;
+    }
+};
+
+struct Im2ColFastMods {
+    FastDivMod dm_col_w;
+    FastDivMod dm_oh_ow;
+    FastDivMod dm_ow;
+    FastDivMod dm_kk;
+    FastDivMod dm_k;
+    FastDivMod dm_oc;
+    FastDivMod dm_iw;
+    FastDivMod dm_ih;
+    FastDivMod dm_ic;
+    FastDivMod dm_s;
+    FastDivMod dm_n3_hw;
+    FastDivMod dm_n3_hwf;
+    FastDivMod dm_n3_w;
+    int total_no_batch;
+    int oh_ow;
+    int oc_spatial;
+    int col_cols;
+    int n3_hw;
+    int n3_hwf;
+    int n3_multihot_plane;
+    int IC, IH, IW, OC, K, S, OH, OW;
+
+    __host__ Im2ColFastMods(int ic, int ih, int iw, int oc, int k, int s, int oh, int ow)
+        : dm_col_w(ic * k * k), dm_oh_ow(oh * ow), dm_ow(ow), dm_kk(k * k), dm_k(k), dm_oc(oc),
+          dm_iw(iw), dm_ih(ih), dm_ic(ic), dm_s(s),
+          dm_n3_hw(N3_MAP_H * N3_MAP_W),
+          dm_n3_hwf(N3_MAP_H * N3_MAP_W * N3_NFEAT),
+          dm_n3_w(N3_MAP_W),
+          total_no_batch((oh * ow) * (ic * k * k)), oh_ow(oh * ow), col_cols(ic * k * k),
+          oc_spatial(oc * oh * ow), n3_hw(N3_MAP_H * N3_MAP_W), n3_hwf(N3_MAP_H * N3_MAP_W * N3_NFEAT),
+          n3_multihot_plane(N3_MULTIHOT * N3_MAP_H * N3_MAP_W),
+          IC(ic), IH(ih), IW(iw), OC(oc), K(k), S(s), OH(oh), OW(ow) {}
+};
+
+static const Im2ColFastMods kIm2ColModsC1(
+    N3_C1_IC, N3_MAP_H, N3_MAP_W, N3_C1_OC, N3_C1_K, N3_C1_S, N3_C1_OH, N3_C1_OW);
+static const Im2ColFastMods kIm2ColModsC2(
+    N3_C2_IC, N3_C1_OH, N3_C1_OW, N3_C2_OC, N3_C2_K, N3_C2_S, N3_C2_OH, N3_C2_OW);
+
 // ---- NMMO3 kernels ----
+
+// One thread per (b, f, h, w): dm_n3_hwf splits idx -> (b, rem_hwf), dm_n3_hw -> (f, rem_sp), dm_n3_w -> (h, w).
+__global__ void n3_multihot_kernel_fast(
+    precision_t* __restrict__ out, const precision_t* __restrict__ obs, int B, int obs_size,
+    const FastDivMod dm_n3_hwf, const FastDivMod dm_n3_hw, const FastDivMod dm_n3_w, int n3_hw, int n3_hwf,
+    int n3_multihot_plane) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= B * n3_hwf) return;
+    int b, rem_hwf;
+    dm_n3_hwf.divmod(idx, b, rem_hwf);
+    int f, rem_sp;
+    dm_n3_hw.divmod(rem_hwf, f, rem_sp);
+    int h, w;
+    dm_n3_w.divmod(rem_sp, h, w);
+    const precision_t* src = obs + (int64_t)b * obs_size + (int64_t)(h * N3_MAP_W + w) * N3_NFEAT;
+    precision_t* dst = out + (int64_t)b * n3_multihot_plane;
+    dst[(N3_OFFSETS[f] + (int)to_float(src[f])) * n3_hw + h * N3_MAP_W + w] = from_float(1.0f);
+}
 
 __global__ void n3_multihot_kernel(
     precision_t* __restrict__ out, const precision_t* __restrict__ obs, int B, int obs_size) {
@@ -232,67 +322,7 @@ __global__ void im2col_kernel(
     col[idx] = input[b * IC * IH * IW + ic * IH * IW + ih * IW + iw];
 }
 
-struct FastDivMod {
-    uint32_t d_;
-    uint32_t M_;
-    uint32_t l_;
 
-    __host__ FastDivMod(int d) {
-        d_ = d <= 0 ? 1u : (uint32_t)d;
-        uint32_t l = 0;
-        for (; l < 32; ++l)
-            if ((1u << l) >= d_) break;
-        l_ = l;
-        const uint64_t one = 1;
-        uint64_t m = ((one << 32) * ((one << l_) - d_)) / d_ + 1;
-        M_ = (uint32_t)m;
-    }
-
-    __device__ __forceinline__ int div(int n) const {
-        uint32_t u = (uint32_t)n;              // n must be >= 0
-        uint32_t t = __umulhi(M_, u);
-        return (int)((t + u) >> l_);
-    }
-
-    __device__ __forceinline__ int mod(int n) const {
-        return n - div(n) * (int)d_;
-    }
-
-    __device__ __forceinline__ void divmod(int n, int& q, int& r) const {
-        q = div(n);
-        r = n - q * (int)d_;
-    }
-};
-
-struct Im2ColFastMods {
-    FastDivMod dm_col_w;
-    FastDivMod dm_oh_ow;
-    FastDivMod dm_ow;
-    FastDivMod dm_kk;
-    FastDivMod dm_k;
-    FastDivMod dm_oc;
-    FastDivMod dm_iw;
-    FastDivMod dm_ih;
-    FastDivMod dm_ic;
-    FastDivMod dm_s;
-    int total_no_batch;
-    int oh_ow;
-    int oc_spatial;
-    int col_cols;
-    int IC, IH, IW, OC, K, S, OH, OW;
-
-    __host__ Im2ColFastMods(int ic, int ih, int iw, int oc, int k, int s, int oh, int ow)
-        : dm_col_w(ic * k * k), dm_oh_ow(oh * ow), dm_ow(ow), dm_kk(k * k), dm_k(k), dm_oc(oc),
-          dm_iw(iw), dm_ih(ih), dm_ic(ic), dm_s(s),
-          total_no_batch((oh * ow) * (ic * k * k)), oh_ow(oh * ow), col_cols(ic * k * k),
-          oc_spatial(oc * oh * ow),
-          IC(ic), IH(ih), IW(iw), OC(oc), K(k), S(s), OH(oh), OW(ow) {}
-};
-
-static const Im2ColFastMods kIm2ColModsC1(
-    N3_C1_IC, N3_MAP_H, N3_MAP_W, N3_C1_OC, N3_C1_K, N3_C1_S, N3_C1_OH, N3_C1_OW);
-static const Im2ColFastMods kIm2ColModsC2(
-    N3_C2_IC, N3_C1_OH, N3_C1_OW, N3_C2_OC, N3_C2_K, N3_C2_S, N3_C2_OH, N3_C2_OW);
 
 __global__ void im2col_kernel_fast(
     const precision_t* __restrict__ input, precision_t* __restrict__ col,
@@ -623,8 +653,9 @@ static PrecisionTensor nmmo3_encoder_forward(void* w, void* activations, Precisi
     if (a->saved_obs.data) puf_copy(&a->saved_obs, &input, stream);
 
     cudaMemsetAsync(a->multihot.data, 0, (int64_t)B * N3_MULTIHOT * N3_MAP_H * N3_MAP_W * sizeof(precision_t), stream);
-    n3_multihot_kernel<<<grid_size(B * N3_MAP_H * N3_MAP_W), BLOCK_SIZE, 0, stream>>>(
-        a->multihot.data, input.data, B, ew->obs_size);
+    n3_multihot_kernel_fast<<<grid_size(B * kIm2ColModsC1.n3_hwf), BLOCK_SIZE, 0, stream>>>(a->multihot.data, input.data, B,
+        ew->obs_size, kIm2ColModsC1.dm_n3_hwf, kIm2ColModsC1.dm_n3_hw, kIm2ColModsC1.dm_n3_w, kIm2ColModsC1.n3_hw,
+        kIm2ColModsC1.n3_hwf, kIm2ColModsC1.n3_multihot_plane);
 
     gemm_conv_forward_fast(&ew->conv1.w, &ew->conv1.b, a->multihot.data, a->conv1.out.data,
         a->col1.data, a->mm1.data, B, kIm2ColModsC1, true, stream);

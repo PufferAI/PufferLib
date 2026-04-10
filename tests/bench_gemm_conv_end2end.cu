@@ -1,5 +1,7 @@
 // End-to-end: gemm conv (slow) vs gemm_fast vs cudnn — forward & backward timed separately, layers 1 & 2 (NMMO3).
-// Build/run: tests/bench_gemm_conv_end2end.sh [--float|--bf16]
+// Multihot microbench: n3_multihot_kernel (reference, not fast) vs n3_multihot_kernel_fast — correctness + timing,
+// B in {1024..32768} powers of two (run_n3_multihot_bench_B).
+// Build/run: tests/bench_gemm_conv_end2end.sh [--float|--bf16] [--conv-only|--multihot-only]
 
 #include <string>
 
@@ -305,16 +307,116 @@ static int run_layer(int layer, int warmup, int iters) {
     return 0;
 }
 
+// Host copy of N3_OFFSETS (device __constant__ in ocean.cu) for valid multihot index ranges.
+static const int kN3OffsetsHost[10] = {0, 4, 8, 25, 30, 33, 38, 43, 48, 55};
+
+static int n3_feat_max_v(int f) {
+    int next = (f + 1 < 10) ? kN3OffsetsHost[f + 1] : N3_MULTIHOT;
+    return next - kN3OffsetsHost[f] - 1;
+}
+
+static int run_n3_multihot_bench_B(int B, int warmup, int iters) {
+    const int obs_size = N3_MAP_SIZE + N3_PLAYER + N3_REWARD;
+    const int n3_hw = N3_MAP_H * N3_MAP_W;
+    const int multihot_elems = B * N3_MULTIHOT * n3_hw;
+    const Im2ColFastMods& m = kIm2ColModsC1;
+
+    Allocator alloc{};
+    PrecisionTensor d_obs{}, d_out_ref{}, d_out_fast{};
+    d_obs = {.shape = {B, obs_size}};
+    d_out_ref = {.shape = {(int64_t)multihot_elems}};
+    d_out_fast = {.shape = {(int64_t)multihot_elems}};
+    alloc_register(&alloc, &d_obs);
+    alloc_register(&alloc, &d_out_ref);
+    alloc_register(&alloc, &d_out_fast);
+    if (alloc_create(&alloc) != cudaSuccess) return 1;
+
+    std::vector<float> h_obs((size_t)B * (size_t)obs_size, 0.0f);
+    unsigned seed = 4242u;
+    for (int b = 0; b < B; ++b) {
+        for (int rem = 0; rem < n3_hw; ++rem) {
+            for (int f = 0; f < N3_NFEAT; ++f) {
+                int mv = n3_feat_max_v(f);
+                seed = seed * 1103515245u + 12345u;
+                int v = (int)((seed >> 16) % (unsigned)(mv + 1));
+                h_obs[(size_t)b * (size_t)obs_size + (size_t)rem * (size_t)N3_NFEAT + (size_t)f] = (float)v;
+            }
+        }
+    }
+    copy_fp32_h2d(h_obs.data(), d_obs.data, B * obs_size);
+
+    cudaStream_t stream = 0;
+    const float rel_eps = 1e-5f;
+
+    auto launch_ref = [&](cudaStream_t s) {
+        n3_multihot_kernel<<<grid_size(B * n3_hw), BLOCK_SIZE, 0, s>>>(d_out_ref.data, d_obs.data, B, obs_size);
+    };
+    auto launch_fast = [&](cudaStream_t s) {
+        n3_multihot_kernel_fast<<<grid_size(B * m.n3_hwf), BLOCK_SIZE, 0, s>>>(d_out_fast.data, d_obs.data, B, obs_size,
+            m.dm_n3_hwf, m.dm_n3_hw, m.dm_n3_w, m.n3_hw, m.n3_hwf, m.n3_multihot_plane);
+    };
+
+    const size_t multihot_bytes = (size_t)multihot_elems * sizeof(precision_t);
+    cudaMemsetAsync(d_out_ref.data, 0, multihot_bytes, stream);
+    cudaMemsetAsync(d_out_fast.data, 0, multihot_bytes, stream);
+    cudaStreamSynchronize(stream);
+    launch_ref(stream);
+    cudaDeviceSynchronize();
+    cudaMemsetAsync(d_out_fast.data, 0, multihot_bytes, stream);
+    cudaStreamSynchronize(stream);
+    launch_fast(stream);
+    cudaDeviceSynchronize();
+
+    std::vector<float> h_ref, h_fast;
+    copy_precision_d2h(d_out_ref.data, multihot_elems, &h_ref);
+    copy_precision_d2h(d_out_fast.data, multihot_elems, &h_fast);
+    float mx, mn;
+    stats_diff(h_ref.data(), h_fast.data(), multihot_elems, &mx, &mn);
+    float rel = stats_rel_max(h_ref.data(), h_fast.data(), multihot_elems, rel_eps);
+
+    printf("n3_multihot  B=%d  obs_size=%d  multihot_elems=%d\n", B, obs_size, multihot_elems);
+    printf("  reference=n3_multihot_kernel  fast=n3_multihot_kernel_fast (dm_n3_hwf+dm_n3_hw+dm_n3_w, n3_hwf=%d)\n",
+        m.n3_hwf);
+    printf("  correctness  fast vs reference: max|diff| %.6g  mean|diff| %.6g  max rel err %.6g\n", mx, mn, rel);
+    printf("  timing (%d warmup / %d iters), kernel only (correctness above uses cudaMemsetAsync like encoder):\n", warmup, iters);
+
+    float ms_ref = time_kernel_ms(stream, launch_ref, warmup, iters);
+    float ms_f = time_kernel_ms(stream, launch_fast, warmup, iters);
+    printf("    n3_multihot_kernel (ref): %8.4f us/iter\n", ms_ref * 1000.0f);
+    printf("    n3_multihot_kernel_fast:  %8.4f us/iter  (%.2fx vs ref)\n", ms_f * 1000.0f, ms_ref / ms_f);
+    printf("\n");
+
+    alloc_free(&alloc);
+    return 0;
+}
+
+static int run_n3_multihot_bench(int warmup, int iters) {
+    for (int B = 1024; B <= 32768; B *= 2) {
+        if (run_n3_multihot_bench_B(B, warmup, iters)) return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char** argv) {
     const int warmup = 50;
     const int iters = 200;
+    bool run_conv = true, run_multihot = true;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--float") == 0 || strcmp(argv[i], "--fp32") == 0 || strcmp(argv[i], "--bf16") == 0
             || strcmp(argv[i], "--half") == 0) {
             continue;
         }
+        if (strcmp(argv[i], "--conv-only") == 0) {
+            run_multihot = false;
+            continue;
+        }
+        if (strcmp(argv[i], "--multihot-only") == 0) {
+            run_conv = false;
+            continue;
+        }
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            printf("Usage: %s  (precision: compile with tests/bench_gemm_conv_end2end.sh --float|--bf16)\n", argv[0]);
+            printf("Usage: %s [--conv-only] [--multihot-only]\n", argv[0]);
+            printf("  Precision: compile via tests/bench_gemm_conv_end2end.sh --float|--bf16\n");
             return 0;
         }
         fprintf(stderr, "Unknown arg: %s\n", argv[i]);
@@ -327,7 +429,12 @@ int main(int argc, char** argv) {
     printf("bench_gemm_conv_end2end  precision=bf16  warmup=%d iters=%d\n\n", warmup, iters);
 #endif
 
-    if (run_layer(1, warmup, iters)) return 1;
-    if (run_layer(2, warmup, iters)) return 1;
+    if (run_conv) {
+        if (run_layer(1, warmup, iters)) return 1;
+        if (run_layer(2, warmup, iters)) return 1;
+    }
+    if (run_multihot) {
+        if (run_n3_multihot_bench(warmup, iters)) return 1;
+    }
     return 0;
 }

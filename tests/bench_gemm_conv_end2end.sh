@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# Build and run end-to-end conv benchmark: gemm vs gemm_fast vs cudnn (fwd+bwd), layers 1 & 2.
-# Args: --float | --fp32 (default) or --bf16 | --half
+# Build and run end-to-end conv benchmark: gemm vs gemm_fast vs cudnn (fwd+bwd), layers 1 & 2,
+# plus multihot: n3_multihot_kernel (reference) vs n3_multihot_kernel_fast (Im2ColFastMods).
+# Args:
+#   --float | --fp32 (default) or --bf16 | --half
+#   --conv-only       skip multihot microbench
+#   --multihot-only   only multihot (skip conv layers / cudnn)
 #
 #   ./tests/bench_gemm_conv_end2end.sh
 #   ./tests/bench_gemm_conv_end2end.sh --bf16
+#   ./tests/bench_gemm_conv_end2end.sh --multihot-only
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -13,12 +18,14 @@ NVCC="${NVCC:-$CUDA_HOME/bin/nvcc}"
 ARCH="${NVCC_ARCH:-native}"
 
 PRECISION_FLAG="-DPRECISION_FLOAT"
+EXTRA_ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --bf16|--half) PRECISION_FLAG="" ;;
     --float|--fp32) PRECISION_FLAG="-DPRECISION_FLOAT" ;;
+    --conv-only|--multihot-only) EXTRA_ARGS+=("$arg") ;;
     *)
-      echo "Unknown argument: $arg (use --float or --bf16)" >&2
+      echo "Unknown argument: $arg (use --float, --bf16, --conv-only, or --multihot-only)" >&2
       exit 1
       ;;
   esac
@@ -62,4 +69,4 @@ fi
   -L"${CUDA_HOME}/lib64" -L"${CUDA_HOME}/lib" \
   -lcublas -lcudnn -lcurand
 
-exec "$OUT"
+exec "$OUT" "${EXTRA_ARGS[@]}"
