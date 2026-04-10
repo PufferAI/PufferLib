@@ -95,6 +95,7 @@ static const Im2ColFastMods kIm2ColModsC1(
     N3_C1_IC, N3_MAP_H, N3_MAP_W, N3_C1_OC, N3_C1_K, N3_C1_S, N3_C1_OH, N3_C1_OW);
 static const Im2ColFastMods kIm2ColModsC2(
     N3_C2_IC, N3_C1_OH, N3_C1_OW, N3_C2_OC, N3_C2_K, N3_C2_S, N3_C2_OH, N3_C2_OW);
+static const FastDivMod kDmN3Player(N3_PLAYER);
 
 // ---- NMMO3 kernels ----
 
@@ -126,6 +127,29 @@ __global__ void n3_multihot_kernel(
     precision_t* dst = out + b * N3_MULTIHOT * N3_MAP_H * N3_MAP_W;
     for (int f = 0; f < N3_NFEAT; f++)
         dst[(N3_OFFSETS[f] + (int)to_float(src[f])) * N3_MAP_H * N3_MAP_W + h * N3_MAP_W + w] = from_float(1.0f);
+}
+
+__global__ void n3_embedding_kernel_fast(
+    precision_t* __restrict__ out, const precision_t* __restrict__ obs,
+    const precision_t* __restrict__ embed_w, int B, int obs_size, const FastDivMod dm_n3_player) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= B * N3_PLAYER) return;
+    int b, f;
+    dm_n3_player.divmod(idx, b, f);
+    int val = (int)to_float(obs[b * obs_size + N3_MAP_SIZE + f]);
+    const precision_t* src = embed_w + val * N3_EMBED_DIM;
+    precision_t* dst = out + b * N3_PLAYER_EMBED + f * N3_EMBED_DIM;
+#ifdef PRECISION_FLOAT
+    const float4* src4 = reinterpret_cast<const float4*>(src);
+    float4* dst4 = reinterpret_cast<float4*>(dst);
+#pragma unroll
+    for (int i = 0; i < N3_EMBED_DIM / 4; i++) dst4[i] = src4[i];
+#else
+    const uint4* src4 = reinterpret_cast<const uint4*>(src);
+    uint4* dst4 = reinterpret_cast<uint4*>(dst);
+#pragma unroll
+    for (int i = 0; i < N3_EMBED_DIM / 8; i++) dst4[i] = src4[i];
+#endif
 }
 
 __global__ void n3_embedding_kernel(
@@ -668,8 +692,8 @@ static PrecisionTensor nmmo3_encoder_forward(void* w, void* activations, Precisi
         cudaMemcpyAsync(a->conv2.saved_input.data, a->conv1.out.data,
             (int64_t)B * N3_C2_IC * N3_C1_OH * N3_C1_OW * sizeof(precision_t), cudaMemcpyDeviceToDevice, stream);
 
-    n3_embedding_kernel<<<grid_size(B * N3_PLAYER), BLOCK_SIZE, 0, stream>>>(
-        a->embed_out.data, input.data, ew->embed_w.data, B, ew->obs_size);
+    n3_embedding_kernel_fast<<<grid_size(B * N3_PLAYER), BLOCK_SIZE, 0, stream>>>(
+        a->embed_out.data, input.data, ew->embed_w.data, B, ew->obs_size, kDmN3Player);
     n3_concat_kernel<<<grid_size(B * N3_CONCAT), BLOCK_SIZE, 0, stream>>>(
         a->concat.data, a->conv2.out.data, a->embed_out.data, input.data, B, ew->obs_size);
 

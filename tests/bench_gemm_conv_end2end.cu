@@ -1,7 +1,8 @@
 // End-to-end: gemm conv (slow) vs gemm_fast vs cudnn — forward & backward timed separately, layers 1 & 2 (NMMO3).
 // Multihot microbench: n3_multihot_kernel (reference, not fast) vs n3_multihot_kernel_fast — correctness + timing,
 // B in {1024..32768} powers of two (run_n3_multihot_bench_B).
-// Build/run: tests/bench_gemm_conv_end2end.sh [--float|--bf16] [--conv-only|--multihot-only]
+// Embedding microbench: n3_embedding_kernel vs n3_embedding_kernel_fast — own CLI flag --embedding-only (same B grid).
+// Build/run: tests/bench_gemm_conv_end2end.sh [--float|--bf16] [--multihot-only|--embedding-only]
 
 #include <string>
 
@@ -390,6 +391,82 @@ static int run_n3_multihot_bench_B(int B, int warmup, int iters) {
     return 0;
 }
 
+static int run_n3_embedding_bench_B(int B, int warmup, int iters) {
+    const int obs_size = N3_MAP_SIZE + N3_PLAYER + N3_REWARD;
+    const int out_elems = B * N3_PLAYER_EMBED;
+    const int embed_elems = N3_EMBED_VOCAB * N3_EMBED_DIM;
+
+    Allocator alloc{};
+    PrecisionTensor d_obs{}, d_embed{}, d_out_ref{}, d_out_fast{};
+    d_obs = {.shape = {B, obs_size}};
+    d_embed = {.shape = {N3_EMBED_VOCAB, N3_EMBED_DIM}};
+    d_out_ref = {.shape = {B, N3_PLAYER_EMBED}};
+    d_out_fast = {.shape = {B, N3_PLAYER_EMBED}};
+    alloc_register(&alloc, &d_obs);
+    alloc_register(&alloc, &d_embed);
+    alloc_register(&alloc, &d_out_ref);
+    alloc_register(&alloc, &d_out_fast);
+    if (alloc_create(&alloc) != cudaSuccess) return 1;
+
+    std::vector<float> h_obs((size_t)B * (size_t)obs_size, 0.0f);
+    std::vector<float> h_embed((size_t)embed_elems);
+    fill_rand_host(h_embed.data(), embed_elems, 9191u);
+    unsigned seed = 5150u;
+    for (int b = 0; b < B; ++b) {
+        for (int f = 0; f < N3_PLAYER; ++f) {
+            seed = seed * 1103515245u + 12345u;
+            int v = (int)((seed >> 16) % (unsigned)N3_EMBED_VOCAB);
+            h_obs[(size_t)b * (size_t)obs_size + (size_t)N3_MAP_SIZE + (size_t)f] = (float)v;
+        }
+    }
+    copy_fp32_h2d(h_obs.data(), d_obs.data, B * obs_size);
+    copy_fp32_h2d(h_embed.data(), d_embed.data, embed_elems);
+
+    cudaStream_t stream = 0;
+    const float rel_eps = 1e-5f;
+
+    auto launch_ref = [&](cudaStream_t s) {
+        n3_embedding_kernel<<<grid_size(B * N3_PLAYER), BLOCK_SIZE, 0, s>>>(
+            d_out_ref.data, d_obs.data, d_embed.data, B, obs_size);
+    };
+    auto launch_fast = [&](cudaStream_t s) {
+        n3_embedding_kernel_fast<<<grid_size(B * N3_PLAYER), BLOCK_SIZE, 0, s>>>(
+            d_out_fast.data, d_obs.data, d_embed.data, B, obs_size, kDmN3Player);
+    };
+
+    const size_t out_bytes = (size_t)out_elems * sizeof(precision_t);
+    cudaMemsetAsync(d_out_ref.data, 0, out_bytes, stream);
+    cudaMemsetAsync(d_out_fast.data, 0, out_bytes, stream);
+    cudaStreamSynchronize(stream);
+    launch_ref(stream);
+    cudaDeviceSynchronize();
+    cudaMemsetAsync(d_out_fast.data, 0, out_bytes, stream);
+    cudaStreamSynchronize(stream);
+    launch_fast(stream);
+    cudaDeviceSynchronize();
+
+    std::vector<float> h_ref, h_fast;
+    copy_precision_d2h(d_out_ref.data, out_elems, &h_ref);
+    copy_precision_d2h(d_out_fast.data, out_elems, &h_fast);
+    float mx, mn;
+    stats_diff(h_ref.data(), h_fast.data(), out_elems, &mx, &mn);
+    float rel = stats_rel_max(h_ref.data(), h_fast.data(), out_elems, rel_eps);
+
+    printf("n3_embedding  B=%d  obs_size=%d  out_elems=%d  embed_elems=%d\n", B, obs_size, out_elems, embed_elems);
+    printf("  reference=n3_embedding_kernel  fast=n3_embedding_kernel_fast (kDmN3Player + vec copy)\n");
+    printf("  correctness  fast vs reference: max|diff| %.6g  mean|diff| %.6g  max rel err %.6g\n", mx, mn, rel);
+    printf("  timing (%d warmup / %d iters), kernel only:\n", warmup, iters);
+
+    float ms_ref = time_kernel_ms(stream, launch_ref, warmup, iters);
+    float ms_f = time_kernel_ms(stream, launch_fast, warmup, iters);
+    printf("    n3_embedding_kernel (ref): %8.4f us/iter\n", ms_ref * 1000.0f);
+    printf("    n3_embedding_kernel_fast: %8.4f us/iter  (%.2fx vs ref)\n", ms_f * 1000.0f, ms_ref / ms_f);
+    printf("\n");
+
+    alloc_free(&alloc);
+    return 0;
+}
+
 static int run_n3_multihot_bench(int warmup, int iters) {
     for (int B = 1024; B <= 32768; B *= 2) {
         if (run_n3_multihot_bench_B(B, warmup, iters)) return 1;
@@ -397,26 +474,40 @@ static int run_n3_multihot_bench(int warmup, int iters) {
     return 0;
 }
 
+static int run_n3_embedding_bench(int warmup, int iters) {
+    for (int B = 1024; B <= 32768; B *= 2) {
+        if (run_n3_embedding_bench_B(B, warmup, iters)) return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char** argv) {
     const int warmup = 50;
     const int iters = 200;
-    bool run_conv = true, run_multihot = true;
+    bool run_conv = true, run_multihot = true, run_embedding = true;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--float") == 0 || strcmp(argv[i], "--fp32") == 0 || strcmp(argv[i], "--bf16") == 0
             || strcmp(argv[i], "--half") == 0) {
             continue;
         }
-        if (strcmp(argv[i], "--conv-only") == 0) {
-            run_multihot = false;
-            continue;
-        }
         if (strcmp(argv[i], "--multihot-only") == 0) {
             run_conv = false;
+            run_multihot = true;
+            run_embedding = false;
+            continue;
+        }
+        if (strcmp(argv[i], "--embedding-only") == 0) {
+            run_conv = false;
+            run_multihot = false;
+            run_embedding = true;
             continue;
         }
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            printf("Usage: %s [--conv-only] [--multihot-only]\n", argv[0]);
+            printf("Usage: %s [--multihot-only] [--embedding-only]\n", argv[0]);
             printf("  Precision: compile via tests/bench_gemm_conv_end2end.sh --float|--bf16\n");
+            printf("  Default: conv layers + n3_multihot ref vs fast + n3_embedding ref vs fast (B=1024..32768).\n");
+            printf("  --multihot-only   multihot ref vs fast only\n");
+            printf("  --embedding-only  embedding ref vs fast only\n");
             return 0;
         }
         fprintf(stderr, "Unknown arg: %s\n", argv[i]);
@@ -435,6 +526,9 @@ int main(int argc, char** argv) {
     }
     if (run_multihot) {
         if (run_n3_multihot_bench(warmup, iters)) return 1;
+    }
+    if (run_embedding) {
+        if (run_n3_embedding_bench(warmup, iters)) return 1;
     }
     return 0;
 }

@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Build and run end-to-end conv benchmark: gemm vs gemm_fast vs cudnn (fwd+bwd), layers 1 & 2,
-# plus multihot: n3_multihot_kernel (reference) vs n3_multihot_kernel_fast (Im2ColFastMods).
+# plus NMMO3 microbenches (each optional via flags; default runs conv + multihot + embedding).
 # Args:
 #   --float | --fp32 (default) or --bf16 | --half
-#   --conv-only       skip multihot microbench
-#   --multihot-only   only multihot (skip conv layers / cudnn)
+#   --multihot-only   n3_multihot ref vs fast only (B=1024..32768)
+#   --embedding-only  n3_embedding ref vs fast only (same B grid)
 #
 #   ./tests/bench_gemm_conv_end2end.sh
 #   ./tests/bench_gemm_conv_end2end.sh --bf16
 #   ./tests/bench_gemm_conv_end2end.sh --multihot-only
+#   ./tests/bench_gemm_conv_end2end.sh --embedding-only
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -23,9 +24,9 @@ for arg in "$@"; do
   case "$arg" in
     --bf16|--half) PRECISION_FLAG="" ;;
     --float|--fp32) PRECISION_FLAG="-DPRECISION_FLOAT" ;;
-    --conv-only|--multihot-only) EXTRA_ARGS+=("$arg") ;;
+    --multihot-only|--embedding-only) EXTRA_ARGS+=("$arg") ;;
     *)
-      echo "Unknown argument: $arg (use --float, --bf16, --conv-only, or --multihot-only)" >&2
+      echo "Unknown argument: $arg (use --float, --bf16, --multihot-only, or --embedding-only)" >&2
       exit 1
       ;;
   esac
