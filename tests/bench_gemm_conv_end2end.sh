@@ -3,13 +3,15 @@
 # plus NMMO3 microbenches (each optional via flags; default runs conv + multihot + embedding).
 # Args:
 #   --float | --fp32 (default) or --bf16 | --half
-#   --multihot-only   n3_multihot ref vs fast only (B=1024..32768)
-#   --embedding-only  n3_embedding ref vs fast only (same B grid)
+#   --multihot-only           n3_multihot ref vs fast only (B=1024..32768)
+#   --embedding-only          n3_embedding ref vs fast only (same B grid)
+#   --conv-bias-grad-only     n3_conv_bias_grad_nchw vs _fast, conv1+conv2 NMMO3 shapes
 #
 #   ./tests/bench_gemm_conv_end2end.sh
 #   ./tests/bench_gemm_conv_end2end.sh --bf16
 #   ./tests/bench_gemm_conv_end2end.sh --multihot-only
 #   ./tests/bench_gemm_conv_end2end.sh --embedding-only
+#   ./tests/bench_gemm_conv_end2end.sh --conv-bias-grad-only
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -24,9 +26,9 @@ for arg in "$@"; do
   case "$arg" in
     --bf16|--half) PRECISION_FLAG="" ;;
     --float|--fp32) PRECISION_FLAG="-DPRECISION_FLOAT" ;;
-    --multihot-only|--embedding-only) EXTRA_ARGS+=("$arg") ;;
+    --multihot-only|--embedding-only|--conv-bias-grad-only) EXTRA_ARGS+=("$arg") ;;
     *)
-      echo "Unknown argument: $arg (use --float, --bf16, --multihot-only, or --embedding-only)" >&2
+      echo "Unknown argument: $arg (use --float, --bf16, --multihot-only, --embedding-only, or --conv-bias-grad-only)" >&2
       exit 1
       ;;
   esac

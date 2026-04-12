@@ -2,7 +2,8 @@
 // Multihot microbench: n3_multihot_kernel (reference, not fast) vs n3_multihot_kernel_fast — correctness + timing,
 // B in {1024..32768} powers of two (run_n3_multihot_bench_B).
 // Embedding microbench: n3_embedding_kernel vs n3_embedding_kernel_fast — own CLI flag --embedding-only (same B grid).
-// Build/run: tests/bench_gemm_conv_end2end.sh [--float|--bf16] [--multihot-only|--embedding-only]
+// Conv bias grad: n3_conv_bias_grad_nchw vs n3_conv_bias_grad_nchw_fast (FastDivMod) — --conv-bias-grad-only.
+// Build/run: tests/bench_gemm_conv_end2end.sh [--float|--bf16] [--multihot-only|--embedding-only|--conv-bias-grad-only]
 
 #include <string>
 
@@ -481,10 +482,75 @@ static int run_n3_embedding_bench(int warmup, int iters) {
     return 0;
 }
 
+static int run_n3_conv_bias_grad_bench_B(
+    int B, int OC, int spatial, const FastDivMod dm_spatial, const char* tag, int warmup, int iters) {
+    const int grad_elems = B * OC * spatial;
+    cudaStream_t stream = 0;
+    const float rel_eps = 1e-5f;
+
+    Allocator alloc{};
+    PrecisionTensor d_grad{}, d_bref{}, d_bfast{};
+    d_grad = {.shape = {(int64_t)grad_elems}};
+    d_bref = {.shape = {OC}};
+    d_bfast = {.shape = {OC}};
+    alloc_register(&alloc, &d_grad);
+    alloc_register(&alloc, &d_bref);
+    alloc_register(&alloc, &d_bfast);
+    if (alloc_create(&alloc) != cudaSuccess) return 1;
+
+    std::vector<float> h_grad((size_t)grad_elems);
+    fill_rand_host(h_grad.data(), grad_elems, 77077u + (unsigned)B + (unsigned)spatial);
+    copy_fp32_h2d(h_grad.data(), d_grad.data, grad_elems);
+
+    cudaMemsetAsync(d_bref.data, 0, (size_t)OC * sizeof(precision_t), stream);
+    n3_conv_bias_grad_nchw<<<OC, 256, 0, stream>>>(d_bref.data, d_grad.data, B, OC, spatial);
+    cudaDeviceSynchronize();
+
+    cudaMemsetAsync(d_bfast.data, 0, (size_t)OC * sizeof(precision_t), stream);
+    n3_conv_bias_grad_nchw_fast<<<OC, 256, 0, stream>>>(d_bfast.data, d_grad.data, B, OC, dm_spatial);
+    cudaDeviceSynchronize();
+
+    std::vector<float> href, hfast;
+    copy_precision_d2h(d_bref.data, OC, &href);
+    copy_precision_d2h(d_bfast.data, OC, &hfast);
+    float mx, mn;
+    stats_diff(href.data(), hfast.data(), OC, &mx, &mn);
+    float rel = stats_rel_max(href.data(), hfast.data(), OC, rel_eps);
+
+    printf("n3_conv_bias_grad  %s  B=%d  OC=%d  spatial=%d  grad_elems=%d\n", tag, B, OC, spatial, grad_elems);
+    printf("  reference=n3_conv_bias_grad_nchw  fast=n3_conv_bias_grad_nchw_fast (FastDivMod)\n");
+    printf("  correctness  fast vs reference: max|diff| %.6g  mean|diff| %.6g  max rel err %.6g\n", mx, mn, rel);
+    printf("  timing (%d warmup / %d iters), kernel only:\n", warmup, iters);
+
+    auto launch_ref = [&](cudaStream_t s) {
+        n3_conv_bias_grad_nchw<<<OC, 256, 0, s>>>(d_bref.data, d_grad.data, B, OC, spatial);
+    };
+    auto launch_fast = [&](cudaStream_t s) {
+        n3_conv_bias_grad_nchw_fast<<<OC, 256, 0, s>>>(d_bfast.data, d_grad.data, B, OC, dm_spatial);
+    };
+
+    float ms_ref = time_kernel_ms(stream, launch_ref, warmup, iters);
+    float ms_f = time_kernel_ms(stream, launch_fast, warmup, iters);
+    printf("    n3_conv_bias_grad_nchw (ref): %8.4f us/iter\n", ms_ref * 1000.0f);
+    printf("    n3_conv_bias_grad_nchw_fast:  %8.4f us/iter  (%.2fx vs ref)\n", ms_f * 1000.0f, ms_ref / ms_f);
+    printf("\n");
+
+    alloc_free(&alloc);
+    return 0;
+}
+
+static int run_n3_conv_bias_grad_bench(int warmup, int iters) {
+    for (int B = 1024; B <= 32768; B *= 2) {
+        if (run_n3_conv_bias_grad_bench_B(B, N3_C2_OC, N3_C2_OH * N3_C2_OW, kDmConvBiasSpatialC2, "conv2", warmup, iters)) return 1;
+        if (run_n3_conv_bias_grad_bench_B(B, N3_C1_OC, N3_C1_OH * N3_C1_OW, kDmConvBiasSpatialC1, "conv1", warmup, iters)) return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char** argv) {
     const int warmup = 50;
     const int iters = 200;
-    bool run_conv = true, run_multihot = true, run_embedding = true;
+    bool run_conv = true, run_multihot = true, run_embedding = true, run_conv_bias_grad = false;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--float") == 0 || strcmp(argv[i], "--fp32") == 0 || strcmp(argv[i], "--bf16") == 0
             || strcmp(argv[i], "--half") == 0) {
@@ -494,20 +560,30 @@ int main(int argc, char** argv) {
             run_conv = false;
             run_multihot = true;
             run_embedding = false;
+            run_conv_bias_grad = false;
             continue;
         }
         if (strcmp(argv[i], "--embedding-only") == 0) {
             run_conv = false;
             run_multihot = false;
             run_embedding = true;
+            run_conv_bias_grad = false;
+            continue;
+        }
+        if (strcmp(argv[i], "--conv-bias-grad-only") == 0) {
+            run_conv = false;
+            run_multihot = false;
+            run_embedding = false;
+            run_conv_bias_grad = true;
             continue;
         }
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            printf("Usage: %s [--multihot-only] [--embedding-only]\n", argv[0]);
+            printf("Usage: %s [--multihot-only] [--embedding-only] [--conv-bias-grad-only]\n", argv[0]);
             printf("  Precision: compile via tests/bench_gemm_conv_end2end.sh --float|--bf16\n");
             printf("  Default: conv layers + n3_multihot ref vs fast + n3_embedding ref vs fast (B=1024..32768).\n");
-            printf("  --multihot-only   multihot ref vs fast only\n");
-            printf("  --embedding-only  embedding ref vs fast only\n");
+            printf("  --multihot-only          multihot ref vs fast only\n");
+            printf("  --embedding-only         embedding ref vs fast only\n");
+            printf("  --conv-bias-grad-only    n3_conv_bias_grad_nchw vs _fast (conv1+conv2 shapes)\n");
             return 0;
         }
         fprintf(stderr, "Unknown arg: %s\n", argv[i]);
@@ -529,6 +605,9 @@ int main(int argc, char** argv) {
     }
     if (run_embedding) {
         if (run_n3_embedding_bench(warmup, iters)) return 1;
+    }
+    if (run_conv_bias_grad) {
+        if (run_n3_conv_bias_grad_bench(warmup, iters)) return 1;
     }
     return 0;
 }

@@ -2,6 +2,7 @@
 // Included by pufferlib.cu — requires precision_t, PrecisionTensor, Allocator, puf_mm, etc.
 
 #include "cudnn_conv2d.cu"
+#include "kernels.cu"
 
 // ---- NMMO3 constants ----
 
@@ -96,6 +97,8 @@ static const Im2ColFastMods kIm2ColModsC1(
 static const Im2ColFastMods kIm2ColModsC2(
     N3_C2_IC, N3_C1_OH, N3_C1_OW, N3_C2_OC, N3_C2_K, N3_C2_S, N3_C2_OH, N3_C2_OW);
 static const FastDivMod kDmN3Player(N3_PLAYER);
+static const FastDivMod kDmConvBiasSpatialC1(N3_C1_OH * N3_C1_OW);
+static const FastDivMod kDmConvBiasSpatialC2(N3_C2_OH * N3_C2_OW);
 
 // ---- NMMO3 kernels ----
 
@@ -221,7 +224,82 @@ __global__ void bias_grad_kernel(
     }
 }
 
-// NCHW bias grad: sum over (B, OH, OW) for each OC channel
+// NCHW bias grad: sum over (B, OH, OW) for each OC channel (dm_spatial.d_ must equal spatial).
+// NMMO3 spatial 12 / 2: stripe over b, vectorize along contiguous s; else flat-i + FastDivMod.
+__global__ void n3_conv_bias_grad_nchw_fast(
+    precision_t* __restrict__ bgrad, const precision_t* __restrict__ grad,
+    int B, int OC, const FastDivMod dm_spatial) {
+    int oc = blockIdx.x;
+    if (oc >= OC) return;
+    const int spatial = (int)dm_spatial.d_;
+    const int sp_c1 = N3_C1_OH * N3_C1_OW;
+    const int sp_c2 = N3_C2_OH * N3_C2_OW;
+    float sum = 0.0f;
+
+    if (spatial == sp_c1) {
+#ifdef PRECISION_FLOAT
+        for (int b = threadIdx.x; b < B; b += blockDim.x) {
+            const float* row = grad + ((int64_t)b * OC + oc) * spatial;
+            float4 a0 = *reinterpret_cast<const float4*>(row);
+            float4 a1 = *reinterpret_cast<const float4*>(row + 4);
+            float4 a2 = *reinterpret_cast<const float4*>(row + 8);
+            sum += a0.x + a0.y + a0.z + a0.w + a1.x + a1.y + a1.z + a1.w + a2.x + a2.y + a2.z + a2.w;
+        }
+#else
+        for (int b = threadIdx.x; b < B; b += blockDim.x) {
+            const __nv_bfloat16* row = grad + ((int64_t)b * OC + oc) * spatial;
+            const uint64_t* p = reinterpret_cast<const uint64_t*>(row);
+            #pragma unroll
+            for (int j = 0; j < 3; ++j) {
+                union {
+                    uint64_t u;
+                    __nv_bfloat16 h[4];
+                } w;
+                w.u = p[j];
+                sum += to_float(w.h[0]) + to_float(w.h[1]) + to_float(w.h[2]) + to_float(w.h[3]);
+            }
+        }
+#endif
+    } else if (spatial == sp_c2) {
+#ifdef PRECISION_FLOAT
+        for (int b = threadIdx.x; b < B; b += blockDim.x) {
+            const float* row = grad + ((int64_t)b * OC + oc) * spatial;
+            float2 v = *reinterpret_cast<const float2*>(row);
+            sum += v.x + v.y;
+        }
+#else
+        for (int b = threadIdx.x; b < B; b += blockDim.x) {
+            const __nv_bfloat16* row = grad + ((int64_t)b * OC + oc) * spatial;
+            union {
+                uint32_t u;
+                __nv_bfloat16 h[2];
+            } w;
+            w.u = *reinterpret_cast<const uint32_t*>(row);
+            sum += to_float(w.h[0]) + to_float(w.h[1]);
+        }
+#endif
+    } else {
+        int total = B * spatial;
+        for (int i = threadIdx.x; i < total; i += blockDim.x) {
+            int bb, s;
+            dm_spatial.divmod(i, bb, s);
+            sum += to_float(grad[(int64_t)bb * OC * spatial + oc * spatial + s]);
+        }
+    }
+    for (int offset = 16; offset > 0; offset >>= 1)
+        sum += __shfl_down_sync(0xffffffff, sum, offset);
+    __shared__ float sdata[32];
+    int lane = threadIdx.x % 32, warp = threadIdx.x / 32;
+    if (lane == 0) sdata[warp] = sum;
+    __syncthreads();
+    if (warp == 0) {
+        sum = (lane < (blockDim.x + 31) / 32) ? sdata[lane] : 0.0f;
+        for (int offset = 16; offset > 0; offset >>= 1)
+            sum += __shfl_down_sync(0xffffffff, sum, offset);
+        if (lane == 0) bgrad[oc] = from_float(sum);
+    }
+}
+
 __global__ void n3_conv_bias_grad_nchw(
     precision_t* __restrict__ bgrad, const precision_t* __restrict__ grad,
     int B, int OC, int spatial) {
@@ -720,9 +798,8 @@ static void nmmo3_encoder_backward(void* w, void* activations, PrecisionTensor g
     n3_concat_backward_conv_kernel<<<grid_size(B * N3_CONV_FLAT), BLOCK_SIZE, 0, stream>>>(
         a->conv2.grad.data, grad_concat.data, B);
 
-    n3_conv_bias_grad_nchw<<<ew->conv2.OC, 256, 0, stream>>>(
-        a->conv2.bgrad.data, a->conv2.grad.data,
-        B, ew->conv2.OC, ew->conv2.OH * ew->conv2.OW);
+    n3_conv_bias_grad_nchw_fast<<<ew->conv2.OC, 256, 0, stream>>>(
+        a->conv2.bgrad.data, a->conv2.grad.data, B, ew->conv2.OC, kDmConvBiasSpatialC2);
     gemm_conv_backward_fast(&ew->conv2.w, a->conv2.saved_input.data, a->conv2.grad.data,
         a->conv2.wgrad.data, a->conv1.grad.data,
         a->col2.data, a->mm2.data, B, kIm2ColModsC2, stream);
@@ -730,9 +807,8 @@ static void nmmo3_encoder_backward(void* w, void* activations, PrecisionTensor g
     n3_relu_backward_kernel<<<grid_size(B * ew->conv1.OC * ew->conv1.OH * ew->conv1.OW), BLOCK_SIZE, 0, stream>>>(
         a->conv1.grad.data, a->conv1.out.data,
         B * ew->conv1.OC * ew->conv1.OH * ew->conv1.OW);
-    n3_conv_bias_grad_nchw<<<ew->conv1.OC, 256, 0, stream>>>(
-        a->conv1.bgrad.data, a->conv1.grad.data,
-        B, ew->conv1.OC, ew->conv1.OH * ew->conv1.OW);
+    n3_conv_bias_grad_nchw_fast<<<ew->conv1.OC, 256, 0, stream>>>(
+        a->conv1.bgrad.data, a->conv1.grad.data, B, ew->conv1.OC, kDmConvBiasSpatialC1);
     gemm_conv_backward_fast(&ew->conv1.w, a->conv1.saved_input.data, a->conv1.grad.data,
         a->conv1.wgrad.data, NULL,
         a->col1.data, a->mm1.data, B, kIm2ColModsC1, stream);
