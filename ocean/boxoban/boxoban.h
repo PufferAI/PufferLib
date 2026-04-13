@@ -128,9 +128,7 @@ void init (Boxoban* env) {
 
 
 void add_log(Boxoban* env) {
-    float denom = (float)env->n_boxes;
-    float num = (float)env->on_target;
-    float perf = (env->win== 1) ? 1.0 : num/denom;
+    float perf = (env->win== 1) ? 1.0 : 0.0;
     env->log.perf += perf;
     env->log.score += perf;
     env->log.episode_length += env->tick;
