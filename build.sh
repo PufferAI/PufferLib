@@ -59,8 +59,8 @@ if [ "$PLATFORM" = "Linux" ]; then
     STANDALONE_LDFLAGS=(-lGL)
     SHARED_LDFLAGS=(-Bsymbolic-functions)
 else
-    command -v brew &>/dev/null || {echo "Error: Homebrew isn't installed." && exit 1;}
-    brew ls --versions llvm &>/dev/null || {echo "Error: Homebrew LLVM isn't installed('brew install llvm')" && exit 1;}
+    command -v brew &>/dev/null || { echo "Error: Homebrew not found" && exit 1; }
+    brew ls --versions llvm &>/dev/null || { echo "Error: Homebrew LLVM not found('brew install llvm')" && exit 1; }
     RAYLIB_NAME='raylib-5.5_macos'
     SANITIZE_FLAGS=()
     # Homebrew "real" clang setup on mac
