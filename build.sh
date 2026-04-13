@@ -59,22 +59,15 @@ if [ "$PLATFORM" = "Linux" ]; then
     STANDALONE_LDFLAGS=(-lGL)
     SHARED_LDFLAGS=(-Bsymbolic-functions)
 else
-    if ! command -v brew &>/dev/null; then
-        echo "Homebrew is not installed."
-        exit 0
-    fi
-    # "--versions" is faster than normal "brew list llvm"
-    if ! brew list --versions llvm &>/dev/null; then
-        echo "LLVM is not installed via Homebrew. please 'brew install llvm'"
-        exit 0
-    fi
+    command -v brew &>/dev/null || {echo "Error: Homebrew isn't installed." && exit 1;}
+    brew ls --versions llvm &>/dev/null || {echo "Error: Homebrew LLVM isn't installed('brew install llvm')" && exit 1;}
     RAYLIB_NAME='raylib-5.5_macos'
     SANITIZE_FLAGS=()
     # Homebrew "real" clang setup on mac
     LLVM_PREFIX=$(brew --prefix llvm)
     export CC=${CC:-$LLVM_PREFIX/bin/clang}
     export CXX=${CXX:-$LLVM_PREFIX/bin/clang++}
-    ln -sf $LLVM_PREFIX/lib/libomp.dylib $LLVM_PREFIX/lib/libomp5.dylib
+    ln -sf $LLVM_PREFIX/lib/libomp.dylib $LLVM_PREFIX/lib/libomp5.dylib #f-ing mac
     INCLUDES=(-I$LLVM_PREFIX/include)
     STANDALONE_LDFLAGS=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL -L$LLVM_PREFIX/lib)
     SHARED_LDFLAGS=(-framework Cocoa -framework OpenGL -framework IOKit -undefined dynamic_lookup -L$LLVM_PREFIX/lib)
