@@ -72,7 +72,9 @@ else
     SANITIZE_FLAGS=()
     # Homebrew "real" clang setup on mac
     LLVM_PREFIX=$(brew --prefix llvm)
-    export PATH="$LLVM_PREFIX/bin:$PATH"
+    export CC=${CC:-$LLVM_PREFIX/bin/clang}
+    export CXX=${CXX:-$LLVM_PREFIX/bin/clang++}
+    ln -sf $LLVM_PREFIX/lib/libomp.dylib $LLVM_PREFIX/lib/libomp5.dylib
     INCLUDES=(-I$LLVM_PREFIX/include)
     STANDALONE_LDFLAGS=(-framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL -L$LLVM_PREFIX/lib)
     SHARED_LDFLAGS=(-framework Cocoa -framework OpenGL -framework IOKit -undefined dynamic_lookup -L$LLVM_PREFIX/lib)
