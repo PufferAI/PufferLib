@@ -75,6 +75,10 @@ class PufferEnv:
         return self.num_agents
 
     @property
+    def agents_per_batch(self):
+        return self.num_agents
+
+    @property
     def emulated(self):
         '''Native envs do not use emulation'''
         return False
