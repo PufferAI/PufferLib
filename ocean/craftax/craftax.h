@@ -18,6 +18,8 @@
 #include <dlfcn.h>
 #include <sys/types.h>
 
+#include "worldgen.h"
+
 // ============================================================
 // Constants
 // ============================================================
@@ -443,6 +445,57 @@ static void craftax_zero_obs(Craftax* env) {
     }
 }
 
+static void craftax_overlay_native_overworld_reset_obs(Craftax* env) {
+    if (env->observations == NULL) {
+        return;
+    }
+
+    CraftaxOverworldFloor floor;
+    craftax_generate_overworld_from_seed((uint32_t)env->seed, &floor);
+
+    const int channels = CRAFTAX_NUM_BLOCK_TYPES
+        + CRAFTAX_NUM_ITEM_TYPES
+        + CRAFTAX_NUM_MOB_CLASSES * CRAFTAX_NUM_MOB_TYPES
+        + 1;
+    const int map_channels_offset = 0;
+    const int item_channels_offset = CRAFTAX_NUM_BLOCK_TYPES;
+    const int mob_channels_offset = CRAFTAX_NUM_BLOCK_TYPES + CRAFTAX_NUM_ITEM_TYPES;
+    const int light_channel_offset = mob_channels_offset
+        + CRAFTAX_NUM_MOB_CLASSES * CRAFTAX_NUM_MOB_TYPES;
+    const int top = CRAFTAX_MAP_SIZE / 2 - CRAFTAX_OBS_ROWS / 2;
+    const int left = CRAFTAX_MAP_SIZE / 2 - CRAFTAX_OBS_COLS / 2;
+
+    for (int row = 0; row < CRAFTAX_OBS_ROWS; row++) {
+        for (int col = 0; col < CRAFTAX_OBS_COLS; col++) {
+            int world_row = top + row;
+            int world_col = left + col;
+            int obs_base = (row * CRAFTAX_OBS_COLS + col) * channels;
+            bool visible = floor.light_map[world_row][world_col] > 0.05f;
+
+            for (int block = 0; block < CRAFTAX_NUM_BLOCK_TYPES; block++) {
+                env->observations[obs_base + map_channels_offset + block] = 0.0f;
+            }
+            for (int item = 0; item < CRAFTAX_NUM_ITEM_TYPES; item++) {
+                env->observations[obs_base + item_channels_offset + item] = 0.0f;
+            }
+
+            if (visible) {
+                int block = floor.map[world_row][world_col];
+                if (block >= 0 && block < CRAFTAX_NUM_BLOCK_TYPES) {
+                    env->observations[obs_base + map_channels_offset + block] = 1.0f;
+                }
+
+                int item = floor.item_map[world_row][world_col];
+                if (item >= 0 && item < CRAFTAX_NUM_ITEM_TYPES) {
+                    env->observations[obs_base + item_channels_offset + item] = 1.0f;
+                }
+            }
+
+            env->observations[obs_base + light_channel_offset] = visible ? 1.0f : 0.0f;
+        }
+    }
+}
+
 static bool craftax_copy_bytes_to_float_buffer(PyObject* bytes, float* dst, int count) {
     char* data = NULL;
     Py_ssize_t size = 0;
@@ -623,11 +676,16 @@ static void c_reset(Craftax* env) {
         return;
     }
 
-    if (!craftax_copy_bytes_to_float_buffer(obs_bytes, env->observations, CRAFTAX_OBS_SIZE)) {
+    bool copied = craftax_copy_bytes_to_float_buffer(obs_bytes, env->observations, CRAFTAX_OBS_SIZE);
+    if (!copied) {
         craftax_zero_obs(env);
     }
     craftax_py_api.Py_DecRef(obs_bytes);
     craftax_py_api.PyGILState_Release(gil);
+
+    if (copied) {
+        craftax_overlay_native_overworld_reset_obs(env);
+    }
 }
 
 static void c_step(Craftax* env) {
