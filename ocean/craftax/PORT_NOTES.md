@@ -1,5 +1,46 @@
 # Craftax Full Ocean Port Notes
 
+## 2026-04-18 Native 9-Floor Reset Worldgen
+
+This phase replaces the JAX reset call with native C reset world generation for
+the default `Craftax-Symbolic-v1` environment parameters.
+
+- `worldgen.h` now mirrors `generate_world` for all nine floors:
+  - floor 0 overworld smoothworld
+  - floor 1 dungeon
+  - floor 2 gnomish mines smoothworld
+  - floor 3 sewers dungeon
+  - floor 4 vaults dungeon
+  - floor 5 troll mines smoothworld
+  - floor 6 fire smoothworld
+  - floor 7 ice smoothworld
+  - floor 8 boss smoothworld
+- Native reset generation covers `map`, `item_map`, `mob_map`, `light_map`,
+  ladders, chest flags, `monsters_killed[0] = 10`, empty mob/projectile arrays,
+  projectile directions, empty plants, the random `potion_mapping`, `state_rng`,
+  and the scalar reset fields used by symbolic observations.
+- `craftax_encode_reset_observation` encodes the native reset state into the
+  flat symbolic observation, so `c_reset` no longer imports Python or calls JAX.
+- `tests/craftax_worldgen_test.py` compares the native C reset state against JAX
+  `generate_world` for 16 seeds, with exact map/item/ladder/potion/scalar checks
+  and `atol=1e-6` for light and float state.
+- The Python/JAX proxy is still used for `c_step`. Because step state is still
+  JAX-owned, native `c_reset` marks the proxy dirty and the first delegated step
+  lazily calls the proxy reset before applying the action. This keeps reset
+  Python-free while preserving current step parity.
+
+Remaining proxy paths:
+
+- All step logic, rewards, achievements, auto-reset behavior after a delegated
+  step, mob updates, inventory updates, and logging data still come from the
+  Python/JAX proxy.
+- `c_step` still allocates through Python/JAX and serializes on the GIL. The
+  next porting phase should move gameplay state transitions native and remove
+  the lazy step-side proxy reset.
+- Rendering remains a no-op.
+- `config/ocean/craftax.ini` still uses a small proxy-friendly vector size. The
+  native port should raise this once step no longer calls Python.
+
 ## 2026-04-18 Native Floor-0 Reset Slice
 
 This phase added the first native C replacement pieces while keeping the JAX
@@ -39,17 +80,19 @@ symbolic observation size (`8268`) and action count (`43`). The C header declare
 the full Craftax enum set and an `EnvState`-shaped C struct matching the field
 order in `craftax_state.py`.
 
-Step remains reference-backed. The C env acquires the Python GIL, calls the
-installed JAX `Craftax-Symbolic-v1` implementation, and copies the resulting
-float32 observation, reward, terminal flag, and terminal achievement log into
-PufferLib-owned buffers. Reset is still proxy-backed for the live JAX state and
-non-overworld observation data, but the visible floor-0 map/item/light reset
-channels are overwritten from native C.
+Reset is native for the full initial `generate_world` state and symbolic
+observation. Step remains reference-backed: the C env acquires the Python GIL,
+calls the installed JAX `Craftax-Symbolic-v1` implementation, and copies the
+resulting float32 observation, reward, terminal flag, and terminal achievement
+log into PufferLib-owned buffers. After a native reset, the first delegated step
+performs a proxy reset internally so the JAX-owned step state starts from the
+same seed and remains aligned with the native reset observation.
 
 ## Deliberate Divergences From The Requested Native Port
 
 - The Craftax game logic is not yet native C. Step logic, achievements, rewards,
-  auto-reset behavior, and floors 1..8 are delegated to the JAX oracle.
+  auto-reset behavior after delegated steps, mobs, inventory updates, and other
+  transition logic are delegated to the JAX oracle.
 - `c_step` allocates through Python/JAX and serializes on the GIL. This violates
   the final performance target and the intended no-allocation step path.
 - `c_close` asks the proxy to drop JAX arrays, then intentionally leaks the small
@@ -76,10 +119,8 @@ channels are overwritten from native C.
 
 ## Next Native Port Steps
 
-1. Replace the proxy reset path with native world generation, including
-   `util/noise.py` and JAX key-compatible threefry.
-2. Replace one step subsystem at a time with native logic and keep the proxy as a
+1. Replace one step subsystem at a time with native logic and keep the proxy as a
    local oracle until each subsystem matches.
-3. Remove Python/JAX calls from `c_step`, restore large vector sizes, then measure
+2. Remove Python/JAX calls from `c_step`, restore large vector sizes, then measure
    CPU throughput before optimizing observation encoding, mob updates, and light
    propagation.

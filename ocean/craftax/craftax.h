@@ -364,6 +364,7 @@ typedef struct Craftax {
     unsigned int rng;
     uint64_t seed;
     void* py_proxy;
+    bool proxy_needs_reset;
 
     float achievements[CRAFTAX_NUM_ACHIEVEMENTS];
     float episode_return_accum;
@@ -442,57 +443,6 @@ static void craftax_py_print_error(void) {
 static void craftax_zero_obs(Craftax* env) {
     if (env->observations != NULL) {
         memset(env->observations, 0, CRAFTAX_OBS_SIZE * sizeof(float));
-    }
-}
-
-static void craftax_overlay_native_overworld_reset_obs(Craftax* env) {
-    if (env->observations == NULL) {
-        return;
-    }
-
-    CraftaxOverworldFloor floor;
-    craftax_generate_overworld_from_seed((uint32_t)env->seed, &floor);
-
-    const int channels = CRAFTAX_NUM_BLOCK_TYPES
-        + CRAFTAX_NUM_ITEM_TYPES
-        + CRAFTAX_NUM_MOB_CLASSES * CRAFTAX_NUM_MOB_TYPES
-        + 1;
-    const int map_channels_offset = 0;
-    const int item_channels_offset = CRAFTAX_NUM_BLOCK_TYPES;
-    const int mob_channels_offset = CRAFTAX_NUM_BLOCK_TYPES + CRAFTAX_NUM_ITEM_TYPES;
-    const int light_channel_offset = mob_channels_offset
-        + CRAFTAX_NUM_MOB_CLASSES * CRAFTAX_NUM_MOB_TYPES;
-    const int top = CRAFTAX_MAP_SIZE / 2 - CRAFTAX_OBS_ROWS / 2;
-    const int left = CRAFTAX_MAP_SIZE / 2 - CRAFTAX_OBS_COLS / 2;
-
-    for (int row = 0; row < CRAFTAX_OBS_ROWS; row++) {
-        for (int col = 0; col < CRAFTAX_OBS_COLS; col++) {
-            int world_row = top + row;
-            int world_col = left + col;
-            int obs_base = (row * CRAFTAX_OBS_COLS + col) * channels;
-            bool visible = floor.light_map[world_row][world_col] > 0.05f;
-
-            for (int block = 0; block < CRAFTAX_NUM_BLOCK_TYPES; block++) {
-                env->observations[obs_base + map_channels_offset + block] = 0.0f;
-            }
-            for (int item = 0; item < CRAFTAX_NUM_ITEM_TYPES; item++) {
-                env->observations[obs_base + item_channels_offset + item] = 0.0f;
-            }
-
-            if (visible) {
-                int block = floor.map[world_row][world_col];
-                if (block >= 0 && block < CRAFTAX_NUM_BLOCK_TYPES) {
-                    env->observations[obs_base + map_channels_offset + block] = 1.0f;
-                }
-
-                int item = floor.item_map[world_row][world_col];
-                if (item >= 0 && item < CRAFTAX_NUM_ITEM_TYPES) {
-                    env->observations[obs_base + item_channels_offset + item] = 1.0f;
-                }
-            }
-
-            env->observations[obs_base + light_channel_offset] = visible ? 1.0f : 0.0f;
-        }
     }
 }
 
@@ -647,6 +597,7 @@ static void c_init(Craftax* env) {
     env->client = NULL;
     env->num_agents = 1;
     env->py_proxy = NULL;
+    env->proxy_needs_reset = true;
     env->episode_return_accum = 0.0f;
     env->episode_length_accum = 0;
     memset(env->achievements, 0, sizeof(env->achievements));
@@ -660,32 +611,32 @@ static void c_reset(Craftax* env) {
     env->episode_length_accum = 0;
     memset(env->achievements, 0, sizeof(env->achievements));
 
-    craftax_py_load_api();
-    PyGILState_STATE gil = craftax_py_api.PyGILState_Ensure();
-    if (!craftax_ensure_proxy(env)) {
-        craftax_zero_obs(env);
-        craftax_py_api.PyGILState_Release(gil);
+    if (env->observations == NULL) {
+        env->proxy_needs_reset = true;
         return;
+    }
+
+    CraftaxWorldState state;
+    craftax_generate_world_from_seed((uint32_t)env->seed, &state);
+    craftax_encode_reset_observation(&state, env->observations);
+    env->proxy_needs_reset = true;
+}
+
+static bool craftax_sync_proxy_reset_for_step(Craftax* env) {
+    if (!env->proxy_needs_reset) {
+        return true;
     }
 
     PyObject* obs_bytes = craftax_py_api.PyObject_CallMethod((PyObject*)env->py_proxy, "reset", NULL);
     if (obs_bytes == NULL) {
         craftax_py_print_error();
         craftax_zero_obs(env);
-        craftax_py_api.PyGILState_Release(gil);
-        return;
+        return false;
     }
 
-    bool copied = craftax_copy_bytes_to_float_buffer(obs_bytes, env->observations, CRAFTAX_OBS_SIZE);
-    if (!copied) {
-        craftax_zero_obs(env);
-    }
     craftax_py_api.Py_DecRef(obs_bytes);
-    craftax_py_api.PyGILState_Release(gil);
-
-    if (copied) {
-        craftax_overlay_native_overworld_reset_obs(env);
-    }
+    env->proxy_needs_reset = false;
+    return true;
 }
 
 static void c_step(Craftax* env) {
@@ -704,6 +655,11 @@ static void c_step(Craftax* env) {
     PyGILState_STATE gil = craftax_py_api.PyGILState_Ensure();
     if (!craftax_ensure_proxy(env)) {
         craftax_zero_obs(env);
+        craftax_py_api.PyGILState_Release(gil);
+        return;
+    }
+
+    if (!craftax_sync_proxy_reset_for_step(env)) {
         craftax_py_api.PyGILState_Release(gil);
         return;
     }
