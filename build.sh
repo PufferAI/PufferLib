@@ -208,6 +208,13 @@ if [ -z "$NCCL_LFLAG" ]; then
     NCCL_LFLAG=$(python -c "import nvidia.nccl, os; print('-L' + os.path.join(nvidia.nccl.__path__[0], 'lib'))" 2>/dev/null || echo "")
 fi
 
+WHEEL_RPATH_FLAGS=()
+for lib_flag in "$CUDNN_LFLAG" "$NCCL_LFLAG"; do
+    if [[ "$lib_flag" == -L* ]]; then
+        WHEEL_RPATH_FLAGS+=("-Wl,-rpath,${lib_flag#-L}")
+    fi
+done
+
 export CCACHE_DIR="${CCACHE_DIR:-$HOME/.ccache}"
 export CCACHE_BASEDIR="$(pwd)"
 export CCACHE_COMPILERCHECK=content
@@ -268,6 +275,7 @@ if [ -z "$MODE" ]; then
         ${CXX:-g++} -shared -fPIC -fopenmp
         build/bindings.o "$STATIC_LIB" "$RAYLIB_A"
         -L$CUDA_HOME/lib64 $CUDNN_LFLAG $NCCL_LFLAG
+        "${WHEEL_RPATH_FLAGS[@]}"
         -lcudart -lnccl -lnvidia-ml -lcublas -lcusolver -lcurand -lcudnn
         $OMP_LIB $LINK_OPT
         "${SHARED_LDFLAGS[@]}"
