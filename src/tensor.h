@@ -29,7 +29,15 @@ typedef struct {
 typedef struct {
     precision_t* data;
     int64_t shape[PUF_MAX_DIMS];
+    int dtype_size;
 } PrecisionTensor;
+#else
+typedef struct {
+    float* data;
+    int64_t shape[PUF_MAX_DIMS];
+    int dtype_size;
+} PrecisionTensor;
+#define PRECISION_SIZE ((int)sizeof(float))
 #endif
 
 #endif // PUFFERLIB_TENSOR_H
