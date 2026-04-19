@@ -1,5 +1,58 @@
 # Craftax Full Ocean Port Notes
 
+## 2026-04-18 Standalone Spawn Mobs Step Subsystem
+
+This phase adds a native C port for the `spawn_mobs` subsystem, still
+deliberately without integrating it into `c_step`. The live Ocean environment
+continues to delegate step to the Python/JAX proxy.
+
+- `step_spawn_mobs.h` contains the standalone in-place helper for:
+  - `spawn_mobs`
+- The helper mirrors the installed JAX split order: passive chance, passive
+  position, melee chance, melee position, ranged chance, ranged position. It
+  also keeps the JAX behavior where the selected slot's `type_id` is written
+  even when the spawn gate fails.
+- Spawn maps match the installed function's terrain and distance rules,
+  including passive distance rejection near the player, monster range gates,
+  overworld night-zombie light scaling, deep-thing water spawning, grave-only
+  boss-wave spawning, mob-map exclusion, caps, and sequential mob-map updates
+  between passive, melee, and ranged attempts.
+- `tests/craftax_step_spawn_mobs_test.py` builds a temporary C wrapper around
+  the inline helper and compares full copied states against the installed JAX
+  function for 16 reset-plus-NOOP-step seeds. Targeted coverage includes all
+  nine floors, full mob caps, empty-slot spawns at single candidate positions,
+  day versus night overworld melee chances, boss spawn-wave pacing, player-
+  adjacent candidate rejection, and land, water, and grave terrain constraints.
+
+Native-step roadmap checklist:
+
+- [x] Native reset PRNG, noise, 9-floor world generation, and reset observation.
+- [x] Standalone native simple step subsystems with JAX-parity tests.
+- [x] Standalone native medium step subsystems with JAX-parity tests.
+- [x] Standalone native crafting and placement subsystems with JAX-parity tests.
+- [x] Standalone native `do_action` subsystem with JAX-parity tests.
+- [x] Standalone native `spawn_mobs` subsystem with JAX-parity tests.
+- [ ] Standalone native `update_mobs` subsystem with JAX-parity tests.
+- [ ] Native reward, terminal, timestep, light-level, RNG, and achievement-delta
+  bookkeeping around the subsystem calls.
+- [ ] Integrate all green subsystem ports into a native `c_step` behind one
+  explicit switch, then remove the Python/JAX proxy from the normal step path.
+- [ ] Restore production vector sizes in `config/ocean/craftax.ini` after native
+  step is the default.
+- [ ] Benchmark CPU throughput only after the proxy path is gone.
+
+Remaining proxy paths:
+
+- `c_step` still delegates to the Python/JAX proxy. None of the standalone
+  subsystem helpers are wired into the live environment yet.
+- The only gameplay step subsystem still without a standalone native port is
+  `update_mobs`. Reward/terminal bookkeeping, light-level updates, timestep
+  updates, RNG threading between subsystems, and achievement-delta logging are
+  also still not integrated natively.
+- Rendering remains a no-op.
+- `config/ocean/craftax.ini` still uses a small proxy-friendly vector size. The
+  native port should raise this once step no longer calls Python.
+
 ## 2026-04-18 Standalone Do Action Step Subsystem
 
 This phase adds a native C port for the `do_action` subsystem, still
