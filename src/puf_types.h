@@ -538,9 +538,7 @@ inline PufTensor ns_slice(PufTensor &buf, int64_t rows, int64_t cols) {
 
 struct Muon {
   double momentum;
-  double weight_decay;
   float lr_val_init;
-  int ns_iters;
   float *lr_ptr;
   float *lr_derived_ptr;
   FloatTensor lr_puf, lr_derived_puf;

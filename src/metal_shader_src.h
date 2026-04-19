@@ -1313,7 +1313,6 @@ kernel void compute_lr_scalars_kernel(
 
 struct MuonParams {
     int n;
-    float weight_decay;
     float scale;
 };
 
@@ -1327,8 +1326,7 @@ kernel void muon_weight_update_kernel(
 ) {
     if ((int)idx >= p.n) return;
     float lr = *lr_ptr;
-    float wd_scale = 1.0f - lr * p.weight_decay;
-    wb[idx] = wb[idx] * wd_scale - lr * p.scale * up[idx];
+    wb[idx] = wb[idx] - lr * p.scale * up[idx];
 }
 
 struct TransposeParams {

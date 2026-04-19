@@ -406,7 +406,6 @@ static std::unique_ptr<PuffeRL> create_pufferl(py::dict args) {
     hypers.min_lr_ratio = get_config(train_kwargs, "min_lr_ratio");
     hypers.anneal_lr = get_config(train_kwargs, "anneal_lr");
     hypers.beta1 = get_config(train_kwargs, "beta1");
-    hypers.weight_decay = get_config(train_kwargs, "weight_decay");
     hypers.minibatch_size = get_config(train_kwargs, "minibatch_size");
     hypers.replay_ratio = get_config(train_kwargs, "replay_ratio");
     hypers.total_timesteps = get_config(train_kwargs, "total_timesteps");
@@ -435,8 +434,6 @@ static std::unique_ptr<PuffeRL> create_pufferl(py::dict args) {
     hypers.train_fp16 =
         (train_kwargs.contains("train_fp16") && get_config(train_kwargs, "train_fp16") > 0) ||
         (args.contains("train_fp16") && get_config(args, "train_fp16") > 0);
-    hypers.ns_iters = train_kwargs.contains("ns_iters") ? (int)get_config(train_kwargs, "ns_iters")
-        : args.contains("ns_iters") ? (int)get_config(args, "ns_iters") : 5;
     hypers.gpu_id = args.contains("gpu_id") ? (int)get_config(args, "gpu_id") : 0;
 
     mtl_enable_gpu_timing(hypers.profile);
@@ -497,7 +494,6 @@ PYBIND11_MODULE(_C, m) {
         .def_readwrite("min_lr_ratio", &HypersT::min_lr_ratio)
         .def_readwrite("anneal_lr", &HypersT::anneal_lr)
         .def_readwrite("beta1", &HypersT::beta1)
-        .def_readwrite("weight_decay", &HypersT::weight_decay)
         .def_readwrite("total_timesteps", &HypersT::total_timesteps)
         .def_readwrite("max_grad_norm", &HypersT::max_grad_norm)
         .def_readwrite("clip_coef", &HypersT::clip_coef)
@@ -515,7 +511,6 @@ PYBIND11_MODULE(_C, m) {
         .def_readwrite("overlap", &HypersT::overlap)
         .def_readwrite("cpu_inference", &HypersT::cpu_inference)
         .def_readwrite("train_fp16", &HypersT::train_fp16)
-        .def_readwrite("ns_iters", &HypersT::ns_iters)
         .def_readwrite("gpu_id", &HypersT::gpu_id);
 
     py::class_<FloatTensor>(m, "FloatTensor")

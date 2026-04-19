@@ -85,7 +85,6 @@ typedef struct {
     bool anneal_lr;
     // Optimizer (Muon only — Adam removed)
     float beta1;
-    float weight_decay;
     // Training
     int minibatch_size;
     float replay_ratio;
@@ -111,7 +110,6 @@ typedef struct {
     bool overlap;  // async training overlap: train on separate GPU queue
     bool cpu_inference;  // CPU forward pass during rollout (no GPU sync)
     bool train_fp16;     // fp16 activations/grads during training (rollout stays fp32)
-    int ns_iters;        // Newton-Schulz iterations in muon optimizer (1-5, default 5)
     // Single GPU (Metal has no multi-GPU, but kept for upstream compat)
     int gpu_id;
     // Threading
@@ -1140,8 +1138,7 @@ std::unique_ptr<PuffeRL> create_pufferl_impl(HypersT& hypers,
 
     // Optimizer init (register buffers with shared allocator)
     muon_init(pufferl->muon, &fp32_params,
-        pufferl->param_fp32_puf, lr, beta1, (double)hypers.weight_decay,
-        hypers.ns_iters, alloc);
+        pufferl->param_fp32_puf, lr, beta1, alloc);
     // Single allocation for all registered buffers
     alloc.create();
 

@@ -976,9 +976,8 @@ void mtl_select_copy(RolloutBuf &rollouts, TrainGraph &graph,
 }
 
 void mtl_muon_weight_update(float *weights, const float *updates,
-                              const float *lr_ptr, float weight_decay,
-                              float scale, int count,
-                              cudaStream_t stream) {
+                            const float *lr_ptr, float scale, int count,
+                            cudaStream_t stream) {
   MetalStream *ms = mtl_resolve_stream(stream);
   ms->compute_encoder();
   auto pso = mtl_pipeline("muon_weight_update_kernel");
@@ -988,12 +987,13 @@ void mtl_muon_weight_update(float *weights, const float *updates,
   mtl_set_ptr(ms, lr_ptr, 2);
   struct {
     int count;
-    float weight_decay;
     float scale;
-  } params = {count, weight_decay, scale};
+  } params = {count, scale};
   mtl_set_params(ms, params, 3);
   mtl_dispatch_1d(ms, pso, count);
 }
+
+static constexpr int kMuonNsIters = 5;
 
 // ============================================================================
 // Kaiming uniform init (CPU-side, matches CUDA puf_kaiming_init)
@@ -1022,11 +1022,8 @@ void puf_kaiming_init(PufTensor &dst, float gain, uint64_t seed,
 }
 
 void muon_init(Muon *m, Allocator *param_alloc, FloatTensor weight_buffer,
-               double lr_val, double momentum, double weight_decay,
-               int ns_iters, Allocator &alloc) {
+               double lr_val, double momentum, Allocator &alloc) {
   m->momentum = momentum;
-  m->weight_decay = weight_decay;
-  m->ns_iters = (ns_iters > 0 && ns_iters <= 5) ? ns_iters : 5;
   m->lr_val_init = (float)lr_val;
   m->lr_ptr = nullptr;
   m->lr_derived_ptr = nullptr;
@@ -1133,8 +1130,8 @@ void muon_step(Muon *m, cudaStream_t stream) {
       mtl_barrier(ms);
 
       // Newton-Schulz iterations
-      for (int i = 0; i < m->ns_iters; ++i) {
-        int ci = i * 4 / (m->ns_iters - 1 + (m->ns_iters == 1));
+      for (int i = 0; i < kMuonNsIters; ++i) {
+        int ci = i * 4 / (kMuonNsIters - 1 + (kMuonNsIters == 1));
         float a = (float)ns_coeffs[ci][0], b = (float)ns_coeffs[ci][1],
               c = (float)ns_coeffs[ci][2];
         PufTensor &src = (i % 2 == 0) ? x : tmp;
@@ -1151,7 +1148,7 @@ void muon_step(Muon *m, cudaStream_t stream) {
         mtl_barrier(ms);
       }
 
-      PufTensor &result_precision = (m->ns_iters % 2 == 0) ? x : tmp;
+      PufTensor &result_precision = (kMuonNsIters % 2 == 0) ? x : tmp;
 
       // Scale matches CUDA models.cu:1233: sqrt(max(1.0, R/C)).
       // For tall matrices (R>C), scale up by sqrt(R/C) to compensate for
@@ -1189,10 +1186,7 @@ void muon_step(Muon *m, cudaStream_t stream) {
     offset += puf_numel(e.shape);
   }
 
-  // Apply weight update: w = w * (1 - lr*wd) - lr * up
-  // Scale is already baked into up_puf during NS loop, so pass scale=1.0 here.
-  mtl_muon_weight_update(m->wb_puf.data, m->up_puf.data,
-                         m->lr_ptr, (float)m->weight_decay, 1.0f,
+  mtl_muon_weight_update(m->wb_puf.data, m->up_puf.data, m->lr_ptr, 1.0f,
                          (int)puf_numel(m->wb_puf.shape), stream);
   mtl_barrier(ms);
 }
