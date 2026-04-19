@@ -1,5 +1,48 @@
 # Craftax Full Ocean Port Notes
 
+## 2026-04-18 Standalone Simple Step Subsystems
+
+This phase adds native C ports for the easy step subsystems, but deliberately
+does not integrate them into `c_step`. The live Ocean environment still delegates
+step to the Python/JAX proxy, so the full parity harness should remain unchanged.
+
+- `step_simple.h` contains standalone in-place helpers for:
+  - `move_player`
+  - `update_plants`
+  - `boss_logic`
+  - `level_up_attributes`
+  - `clip_inventory_and_intrinsics`
+  - `calculate_inventory_achievements`
+  - `update_player_intrinsics`
+  - `drink_potion`
+  - `read_book`
+- `tests/craftax_state_fixtures.py` provides test-only pickle payloads for JAX
+  `EnvState` values, a ctypes mirror of `CraftaxState`, C-to-JAX conversion, and
+  strict state diffing with exact integer/bool checks and `atol=1e-6` float
+  checks.
+- `tests/craftax_step_subsystem_test.py` builds a temporary C wrapper around the
+  inline helpers and compares each subsystem against the JAX function on copied
+  reset-plus-step-through states for 16 seeds and targeted stress cases.
+- The helpers do not allocate, do not call Python, and keep JAX details that
+  matter for these routines, including clamped gather-style indexing, `where` and
+  `select` ordering, potion `-1` indexing, and the `read_book` split plus
+  probability-choice path.
+
+Native-step roadmap checklist:
+
+- [x] Native reset PRNG, noise, 9-floor world generation, and reset observation.
+- [x] Standalone native simple step subsystems with JAX-parity tests.
+- [ ] Standalone native ports for hard action subsystems: `do_action`,
+  `do_crafting`, `place_block`, `shoot_projectile`, `cast_spell`, `enchant`,
+  `change_floor`, `add_items_from_chest`, `update_mobs`, and `spawn_mobs`.
+- [ ] Native reward, terminal, timestep, light-level, RNG, and achievement-delta
+  bookkeeping around the subsystem calls.
+- [ ] Integrate all green subsystem ports into a native `c_step` behind one
+  explicit switch, then remove the Python/JAX proxy from the normal step path.
+- [ ] Restore production vector sizes in `config/ocean/craftax.ini` after native
+  step is the default.
+- [ ] Benchmark CPU throughput only after the proxy path is gone.
+
 ## 2026-04-18 Native 9-Floor Reset Worldgen
 
 This phase replaces the JAX reset call with native C reset world generation for
