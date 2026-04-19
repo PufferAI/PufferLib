@@ -185,6 +185,33 @@ def build_worldgen_lib():
 
         craftax_encode_reset_observation(&state, obs);
     }
+
+    void reset_key_threshold_edge(
+        uint32_t key0,
+        uint32_t key1,
+        int32_t* map_cell,
+        float* grass_obs,
+        float* sand_obs
+    ) {
+        CraftaxThreefryKey reset_key = {{key0, key1}};
+        CraftaxThreefryKey unused;
+        CraftaxThreefryKey world_key;
+        CraftaxWorldState state;
+        float obs[CRAFTAX_WG_OBS_SIZE];
+        const int channels = CRAFTAX_WG_NUM_BLOCK_TYPES
+            + CRAFTAX_WG_NUM_ITEM_TYPES
+            + CRAFTAX_WG_NUM_MOB_CLASSES * CRAFTAX_WG_NUM_MOB_TYPES
+            + 1;
+        const int obs_base = (4 * CRAFTAX_WG_OBS_COLS + 2) * channels;
+
+        craftax_threefry_split(reset_key, &unused, &world_key);
+        craftax_generate_world_from_key(world_key, &state);
+        craftax_encode_reset_observation(&state, obs);
+
+        *map_cell = state.map[0][24][21];
+        *grass_obs = obs[obs_base + CRAFTAX_WG_BLOCK_GRASS];
+        *sand_obs = obs[obs_base + CRAFTAX_WG_BLOCK_SAND];
+    }
     """
 
     tmp = tempfile.TemporaryDirectory()
@@ -257,6 +284,13 @@ def build_worldgen_lib():
             ctypes.POINTER(ctypes.c_float),
         ]
     )
+    lib.reset_key_threshold_edge.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.POINTER(ctypes.c_int32),
+        ctypes.POINTER(ctypes.c_float),
+        ctypes.POINTER(ctypes.c_float),
+    ]
     return lib
 
 
@@ -576,3 +610,35 @@ def test_native_worldgen_matches_jax_for_all_reset_state():
             rtol=0.0,
             err_msg=f"obs seed={seed}",
         )
+
+
+def test_native_reset_key_matches_materialized_jax_at_sand_threshold_edge():
+    lib = build_worldgen_lib()
+    reset_keys = [
+        np.asarray([616102339, 1559696082], dtype=np.uint32),
+        np.asarray([934346395, 1048685838], dtype=np.uint32),
+    ]
+
+    for reset_key in reset_keys:
+        _unused, world_key = jax.random.split(reset_key)
+        expected_state = generate_world(world_key, EnvParams(), StaticEnvParams())
+        expected_obs = np.asarray(
+            render_craftax_symbolic(expected_state),
+            dtype=np.float32,
+        )
+
+        map_cell = ctypes.c_int32()
+        grass_obs = ctypes.c_float()
+        sand_obs = ctypes.c_float()
+        lib.reset_key_threshold_edge(
+            int(reset_key[0]),
+            int(reset_key[1]),
+            ctypes.byref(map_cell),
+            ctypes.byref(grass_obs),
+            ctypes.byref(sand_obs),
+        )
+
+        assert int(np.asarray(expected_state.map[0, 24, 21])) == 2
+        assert map_cell.value == 2
+        assert grass_obs.value == expected_obs[((4 * 11 + 2) * 83) + 2] == 1.0
+        assert sand_obs.value == expected_obs[((4 * 11 + 2) * 83) + 13] == 0.0

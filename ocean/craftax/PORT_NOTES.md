@@ -1,5 +1,53 @@
 # Craftax Full Ocean Port Notes
 
+## Verification coverage
+
+The standalone parity harness now supports deterministic action policies beyond
+uniform random exploration:
+
+- `uniform`: the original random action stream.
+- `combat`: biases toward `DO`, arrows, fireballs, and iceballs when mobs and
+  resources make those actions meaningful, otherwise moves toward live mobs.
+- `descend`: uses the mirrored state to push toward down ladders, clear blocked
+  levels through combat, and exercise placement and crafting actions.
+- `suicide`: steers into adjacent lava, water, mob-occupied, or projectile-heavy
+  danger and otherwise paths toward the nearest known hazard.
+- `boss`: warms up with downward navigation and then repeatedly attempts
+  descent while continuing to route toward ladders.
+- `mixed`: round-robins the above every 500 steps.
+
+`tests/craftax_parity.py` now reports the policy, seed, step, action, reward
+delta, terminal delta, first symbolic-observation field, suspected subsystem,
+and the last 10 actions on any divergence. With `--reset-on-done` enabled, the
+harness tracks terminal counts and mean episode length by seed. JAX stepping is
+run through the no-auto-reset path with the same per-step key split used by the
+native env; when a terminal is observed, the mirrored state is advanced through
+the native reset helper keyed by the same auto-reset key, and that reset state
+and observation are checked field-by-field before continuing.
+
+The stress battery in `tests/craftax_parity_stress.py` runs:
+
+- 64 seeds times 10000 steps with `mixed`.
+- 16 seeds times 30000 steps with `descend`.
+- 32 seeds times 5000 steps with `suicide`.
+- 16 seeds times 5000 steps with `combat`.
+
+All stress cases use `atol=1e-5` for observations and rewards and exact terminal
+matching. The phase-10a run completed with zero divergences in 1033.0 seconds:
+2883 terminals in `mixed`, 2498 in `descend`, 622 in `suicide`, and 355 in
+`combat`.
+
+Residual caveats:
+
+- The harness observes live C step state through the public vector API, so step
+  diagnostics identify the first differing observation field and subsystem class
+  rather than dumping the entire private C state after every step.
+- CPU XLA can fuse reset worldgen noise normalization differently from
+  materialized JAX by one ULP on exact threshold cells. Materialized JAX
+  worldgen and native reset agree on the targeted sand-threshold keys covered by
+  `tests/craftax_worldgen_test.py`, so terminal continuation uses the native
+  reset helper after explicit reset-state verification.
+
 ## 2026-04-18 Native Step Integration and Proxy Removal
 
 This phase wires the green native reset and all green native step subsystems
