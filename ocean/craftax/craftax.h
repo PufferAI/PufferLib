@@ -1,22 +1,11 @@
-// Full Craftax environment for PufferLib Ocean.
-//
-// This file intentionally starts as a reference-backed C env: reset/step call
-// the installed JAX Craftax-Symbolic-v1 implementation through the Python C
-// API and copy the resulting float32 observation/reward/done into PufferLib's
-// buffers. The native C state layout and enum constants are declared here so
-// the JAX logic can be replaced subsystem-by-subsystem without changing the
-// Ocean ABI.
+// Full native Craftax environment for PufferLib Ocean.
 
 #pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
-#include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
-#include <dlfcn.h>
-#include <sys/types.h>
 
 #include "worldgen.h"
 
@@ -47,6 +36,7 @@
 
 #define CRAFTAX_DEFAULT_MAX_TIMESTEPS 100000
 #define CRAFTAX_DAY_LENGTH 300
+#define CRAFTAX_MAX_ATTRIBUTE 5
 #define CRAFTAX_MOB_DESPAWN_DISTANCE 14
 #define CRAFTAX_MONSTERS_KILLED_TO_CLEAR_LEVEL 8
 
@@ -338,6 +328,68 @@ typedef struct CraftaxState {
     int32_t fractal_noise_angles[4];
 } CraftaxState;
 
+typedef char CraftaxStateMatchesWorldState[
+    (sizeof(CraftaxState) == sizeof(CraftaxWorldState)) ? 1 : -1
+];
+
+#ifdef CRAFTAX_ENABLE_ENV_IMPL
+static inline void craftax_change_floor_native(CraftaxState* state, int32_t action);
+static inline void craftax_do_crafting_native(CraftaxState* state, int32_t action);
+static inline void craftax_do_action_native(
+    CraftaxState* state,
+    int32_t action,
+    CraftaxThreefryKey rng
+);
+static inline void craftax_place_block_native(CraftaxState* state, int32_t action);
+static inline void craftax_shoot_projectile_native(
+    CraftaxState* state,
+    int32_t action
+);
+static inline void craftax_cast_spell_native(CraftaxState* state, int32_t action);
+static inline void craftax_drink_potion_native(CraftaxState* state, int32_t action);
+static inline void craftax_read_book_native(
+    CraftaxState* state,
+    const uint32_t rng_words[2],
+    int32_t action
+);
+static inline void craftax_enchant_native(
+    CraftaxState* state,
+    int32_t action,
+    CraftaxThreefryKey rng
+);
+static inline void craftax_boss_logic_native(CraftaxState* state);
+static inline void craftax_level_up_attributes_native(
+    CraftaxState* state,
+    int32_t action,
+    int32_t max_attribute
+);
+static inline void craftax_move_player_native(
+    CraftaxState* state,
+    int32_t action,
+    bool god_mode
+);
+static inline void craftax_update_mobs_native(
+    CraftaxState* state,
+    CraftaxThreefryKey rng
+);
+static inline void craftax_spawn_mobs_native(
+    CraftaxState* state,
+    CraftaxThreefryKey rng
+);
+static inline void craftax_update_plants_native(CraftaxState* state);
+static inline void craftax_update_player_intrinsics_native(
+    CraftaxState* state,
+    int32_t action
+);
+static inline void craftax_clip_inventory_and_intrinsics_native(
+    CraftaxState* state,
+    bool god_mode
+);
+static inline void craftax_calculate_inventory_achievements_native(
+    CraftaxState* state
+);
+#endif
+
 typedef struct Log {
     float perf;
     float score;
@@ -363,216 +415,103 @@ typedef struct Craftax {
 
     unsigned int rng;
     uint64_t seed;
-    void* py_proxy;
-    bool proxy_needs_reset;
+    CraftaxThreefryKey rng_key;
+    CraftaxState state;
 
     float achievements[CRAFTAX_NUM_ACHIEVEMENTS];
     float episode_return_accum;
     int32_t episode_length_accum;
 } Craftax;
 
+#ifdef CRAFTAX_ENABLE_ENV_IMPL
+
 // ============================================================
-// Minimal dynamic Python C API loader
+// Native reset, observation, reward, and step glue
 // ============================================================
-typedef struct _object PyObject;
-typedef int PyGILState_STATE;
-typedef ssize_t Py_ssize_t;
+static const float CRAFTAX_ACHIEVEMENT_REWARD_MAP[CRAFTAX_NUM_ACHIEVEMENTS] = {
+    1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+    1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+    1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+    1.0f, 3.0f, 3.0f, 3.0f, 3.0f, 3.0f, 5.0f, 5.0f,
+    5.0f, 8.0f, 8.0f, 8.0f, 3.0f, 3.0f, 3.0f, 3.0f,
+    5.0f, 5.0f, 5.0f, 5.0f, 8.0f, 8.0f, 8.0f, 8.0f,
+    8.0f, 8.0f, 3.0f, 3.0f, 3.0f, 3.0f, 3.0f, 5.0f,
+    5.0f, 5.0f, 5.0f, 3.0f, 3.0f, 3.0f, 3.0f, 5.0f,
+    5.0f, 5.0f, 5.0f,
+};
 
-typedef struct CraftaxPyApi {
-    bool loaded;
-    PyGILState_STATE (*PyGILState_Ensure)(void);
-    void (*PyGILState_Release)(PyGILState_STATE);
-    int (*PyRun_SimpleString)(const char*);
-    PyObject* (*PyImport_AddModule)(const char*);
-    PyObject* (*PyObject_GetAttrString)(PyObject*, const char*);
-    PyObject* (*PyObject_CallFunctionObjArgs)(PyObject*, ...);
-    PyObject* (*PyObject_CallMethod)(PyObject*, const char*, const char*, ...);
-    PyObject* (*PyLong_FromUnsignedLongLong)(unsigned long long);
-    double (*PyFloat_AsDouble)(PyObject*);
-    int (*PyObject_IsTrue)(PyObject*);
-    Py_ssize_t (*PyTuple_Size)(PyObject*);
-    PyObject* (*PyTuple_GetItem)(PyObject*, Py_ssize_t);
-    int (*PyBytes_AsStringAndSize)(PyObject*, char**, Py_ssize_t*);
-    PyObject* (*PyErr_Occurred)(void);
-    void (*PyErr_Print)(void);
-    void (*Py_DecRef)(PyObject*);
-} CraftaxPyApi;
-
-static CraftaxPyApi craftax_py_api;
-static bool craftax_proxy_code_loaded = false;
-
-static void* craftax_py_sym(const char* name) {
-    void* sym = dlsym(RTLD_DEFAULT, name);
-    if (sym == NULL) {
-        fprintf(stderr, "craftax: failed to resolve Python symbol %s\n", name);
-        abort();
-    }
-    return sym;
+static inline CraftaxThreefryKey craftax_step_native_next_key(
+    CraftaxThreefryKey* rng
+) {
+    CraftaxThreefryKey subkey;
+    craftax_threefry_split(*rng, rng, &subkey);
+    return subkey;
 }
 
-static void craftax_py_load_api(void) {
-    if (craftax_py_api.loaded) {
+static inline void craftax_copy_world_state_to_state(
+    CraftaxState* dst,
+    const CraftaxWorldState* src
+) {
+    memcpy(dst, src, sizeof(*dst));
+}
+
+static inline void craftax_generate_state_from_world_key(
+    CraftaxThreefryKey world_key,
+    CraftaxState* out
+) {
+    CraftaxWorldState world_state;
+    craftax_generate_world_from_key(world_key, &world_state);
+    craftax_copy_world_state_to_state(out, &world_state);
+}
+
+static inline void craftax_reset_state_from_reset_key(
+    CraftaxState* out,
+    CraftaxThreefryKey reset_key
+) {
+    CraftaxThreefryKey unused;
+    CraftaxThreefryKey world_key;
+    craftax_threefry_split(reset_key, &unused, &world_key);
+    craftax_generate_state_from_world_key(world_key, out);
+}
+
+static inline void craftax_reset_state_from_seed(Craftax* env) {
+    CraftaxThreefryKey initial_key = craftax_prng_key((uint32_t)env->seed);
+    CraftaxThreefryKey reset_key;
+    craftax_threefry_split(initial_key, &env->rng_key, &reset_key);
+    craftax_reset_state_from_reset_key(&env->state, reset_key);
+}
+
+static inline void craftax_encode_native_observation(
+    const CraftaxState* state,
+    float* obs
+) {
+    if (obs == NULL) {
         return;
     }
-
-    craftax_py_api.PyGILState_Ensure = (PyGILState_STATE (*)(void))craftax_py_sym("PyGILState_Ensure");
-    craftax_py_api.PyGILState_Release = (void (*)(PyGILState_STATE))craftax_py_sym("PyGILState_Release");
-    craftax_py_api.PyRun_SimpleString = (int (*)(const char*))craftax_py_sym("PyRun_SimpleString");
-    craftax_py_api.PyImport_AddModule = (PyObject* (*)(const char*))craftax_py_sym("PyImport_AddModule");
-    craftax_py_api.PyObject_GetAttrString = (PyObject* (*)(PyObject*, const char*))craftax_py_sym("PyObject_GetAttrString");
-    craftax_py_api.PyObject_CallFunctionObjArgs = (PyObject* (*)(PyObject*, ...))craftax_py_sym("PyObject_CallFunctionObjArgs");
-    craftax_py_api.PyObject_CallMethod = (PyObject* (*)(PyObject*, const char*, const char*, ...))craftax_py_sym("PyObject_CallMethod");
-    craftax_py_api.PyLong_FromUnsignedLongLong = (PyObject* (*)(unsigned long long))craftax_py_sym("PyLong_FromUnsignedLongLong");
-    craftax_py_api.PyFloat_AsDouble = (double (*)(PyObject*))craftax_py_sym("PyFloat_AsDouble");
-    craftax_py_api.PyObject_IsTrue = (int (*)(PyObject*))craftax_py_sym("PyObject_IsTrue");
-    craftax_py_api.PyTuple_Size = (Py_ssize_t (*)(PyObject*))craftax_py_sym("PyTuple_Size");
-    craftax_py_api.PyTuple_GetItem = (PyObject* (*)(PyObject*, Py_ssize_t))craftax_py_sym("PyTuple_GetItem");
-    craftax_py_api.PyBytes_AsStringAndSize = (int (*)(PyObject*, char**, Py_ssize_t*))craftax_py_sym("PyBytes_AsStringAndSize");
-    craftax_py_api.PyErr_Occurred = (PyObject* (*)(void))craftax_py_sym("PyErr_Occurred");
-    craftax_py_api.PyErr_Print = (void (*)(void))craftax_py_sym("PyErr_Print");
-    craftax_py_api.Py_DecRef = (void (*)(PyObject*))craftax_py_sym("Py_DecRef");
-    craftax_py_api.loaded = true;
+    craftax_encode_reset_observation((const CraftaxWorldState*)(const void*)state, obs);
 }
 
-static void craftax_py_print_error(void) {
-    if (craftax_py_api.PyErr_Occurred != NULL && craftax_py_api.PyErr_Occurred()) {
-        craftax_py_api.PyErr_Print();
-    }
+static inline float craftax_calculate_light_level_native(int32_t timestep) {
+    float progress = fmodf(
+        (float)timestep / (float)CRAFTAX_DAY_LENGTH,
+        1.0f
+    ) + 0.3f;
+    float c = cosf(CRAFTAX_WG_PI * progress);
+    return 1.0f - powf(fabsf(c), 3.0f);
 }
 
-static void craftax_zero_obs(Craftax* env) {
-    if (env->observations != NULL) {
-        memset(env->observations, 0, CRAFTAX_OBS_SIZE * sizeof(float));
-    }
+static inline bool craftax_is_game_over_native(const CraftaxState* state) {
+    return state->timestep >= CRAFTAX_DEFAULT_MAX_TIMESTEPS
+        || state->player_health <= 0.0f;
 }
 
-static bool craftax_copy_bytes_to_float_buffer(PyObject* bytes, float* dst, int count) {
-    char* data = NULL;
-    Py_ssize_t size = 0;
-    if (craftax_py_api.PyBytes_AsStringAndSize(bytes, &data, &size) != 0) {
-        craftax_py_print_error();
-        return false;
+static inline void craftax_copy_achievements_to_env(
+    Craftax* env,
+    const CraftaxState* state
+) {
+    for (int i = 0; i < CRAFTAX_NUM_ACHIEVEMENTS; i++) {
+        env->achievements[i] = state->achievements[i] ? 1.0f : 0.0f;
     }
-    Py_ssize_t expected = (Py_ssize_t)count * (Py_ssize_t)sizeof(float);
-    if (size != expected) {
-        fprintf(stderr, "craftax: Python helper returned %zd bytes, expected %zd\n",
-            (ssize_t)size, (ssize_t)expected);
-        return false;
-    }
-    memcpy(dst, data, (size_t)expected);
-    return true;
-}
-
-static void craftax_py_define_proxy(void) {
-    if (craftax_proxy_code_loaded) {
-        return;
-    }
-
-    const char* code =
-        "import os\n"
-        "os.environ.setdefault('JAX_PLATFORM_NAME', 'cpu')\n"
-        "os.environ.setdefault('XLA_PYTHON_CLIENT_PREALLOCATE', 'false')\n"
-        "class _CraftaxOceanProxy:\n"
-        "    def __init__(self, seed):\n"
-        "        import jax\n"
-        "        import numpy as np\n"
-        "        from craftax.craftax_env import make_craftax_env_from_name\n"
-        "        from craftax.craftax.constants import Achievement\n"
-        "        self.jax = jax\n"
-        "        self.np = np\n"
-        "        self.seed = int(seed)\n"
-        "        global _CRAFTAX_OCEAN_ENV\n"
-        "        try:\n"
-        "            env = _CRAFTAX_OCEAN_ENV\n"
-        "        except NameError:\n"
-        "            env = None\n"
-        "        if env is None:\n"
-        "            env = make_craftax_env_from_name('Craftax-Symbolic-v1', auto_reset=True)\n"
-        "            _CRAFTAX_OCEAN_ENV = env\n"
-        "        self.env = env\n"
-        "        self.params = self.env.default_params\n"
-        "        max_achievement = max(a.value for a in Achievement) + 1\n"
-        "        self.achievement_info_names = [None] * max_achievement\n"
-        "        for achievement in Achievement:\n"
-        "            self.achievement_info_names[achievement.value] = 'Achievements/' + achievement.name.lower()\n"
-        "        self.rng = None\n"
-        "        self.state = None\n"
-        "        self.obs = None\n"
-        "    def _pack_obs(self, obs):\n"
-        "        arr = self.np.asarray(obs, dtype=self.np.float32).reshape(-1)\n"
-        "        if arr.size != 8268:\n"
-        "            raise RuntimeError(f'Craftax obs has {arr.size} floats, expected 8268')\n"
-        "        return arr.tobytes()\n"
-        "    def _pack_achievements(self, info=None, done=False):\n"
-        "        if done and info is not None:\n"
-        "            values = [float(info.get(name, 0.0)) / 100.0 for name in self.achievement_info_names]\n"
-        "            arr = self.np.asarray(values, dtype=self.np.float32)\n"
-        "        else:\n"
-        "            arr = self.np.asarray(self.state.achievements, dtype=self.np.float32).reshape(-1)\n"
-        "        return arr.tobytes()\n"
-        "    def reset(self):\n"
-        "        self.rng = self.jax.random.PRNGKey(self.seed)\n"
-        "        self.rng, reset_key = self.jax.random.split(self.rng)\n"
-        "        self.obs, self.state = self.env.reset(reset_key, self.params)\n"
-        "        return self._pack_obs(self.obs)\n"
-        "    def step(self, action):\n"
-        "        self.rng, step_key = self.jax.random.split(self.rng)\n"
-        "        self.obs, self.state, reward, done, info = self.env.step(step_key, self.state, int(action), self.params)\n"
-        "        done_bool = bool(done)\n"
-        "        return (self._pack_obs(self.obs), float(reward), done_bool, self._pack_achievements(info, done_bool))\n"
-        "    def close(self):\n"
-        "        try:\n"
-        "            self.jax.effects_barrier()\n"
-        "        except Exception:\n"
-        "            pass\n"
-        "        self.state = None\n"
-        "        self.obs = None\n"
-        "        self.env = None\n"
-        "        global _CRAFTAX_OCEAN_ENV\n"
-        "        _CRAFTAX_OCEAN_ENV = None\n";
-
-    if (craftax_py_api.PyRun_SimpleString(code) != 0) {
-        craftax_py_print_error();
-        abort();
-    }
-    craftax_proxy_code_loaded = true;
-}
-
-static bool craftax_ensure_proxy(Craftax* env) {
-    if (env->py_proxy != NULL) {
-        return true;
-    }
-
-    craftax_py_load_api();
-    craftax_py_define_proxy();
-
-    PyObject* main_mod = craftax_py_api.PyImport_AddModule("__main__");
-    if (main_mod == NULL) {
-        craftax_py_print_error();
-        return false;
-    }
-
-    PyObject* cls = craftax_py_api.PyObject_GetAttrString(main_mod, "_CraftaxOceanProxy");
-    if (cls == NULL) {
-        craftax_py_print_error();
-        return false;
-    }
-
-    PyObject* seed = craftax_py_api.PyLong_FromUnsignedLongLong((unsigned long long)env->seed);
-    if (seed == NULL) {
-        craftax_py_api.Py_DecRef(cls);
-        craftax_py_print_error();
-        return false;
-    }
-
-    env->py_proxy = craftax_py_api.PyObject_CallFunctionObjArgs(cls, seed, NULL);
-    craftax_py_api.Py_DecRef(seed);
-    craftax_py_api.Py_DecRef(cls);
-    if (env->py_proxy == NULL) {
-        craftax_py_print_error();
-        return false;
-    }
-    return true;
 }
 
 static void add_log(Craftax* env) {
@@ -590,56 +529,96 @@ static void add_log(Craftax* env) {
     env->log.n += 1.0f;
 }
 
+static float craftax_gameplay_step_native(
+    CraftaxState* state,
+    int32_t action,
+    CraftaxThreefryKey rng
+) {
+    bool init_achievements[CRAFTAX_NUM_ACHIEVEMENTS];
+    memcpy(init_achievements, state->achievements, sizeof(init_achievements));
+    float init_health = state->player_health;
+
+    action = state->is_sleeping ? CRAFTAX_ACTION_NOOP : action;
+    action = state->is_resting ? CRAFTAX_ACTION_NOOP : action;
+
+    craftax_change_floor_native(state, action);
+    craftax_do_crafting_native(state, action);
+
+    CraftaxThreefryKey subkey = craftax_step_native_next_key(&rng);
+    craftax_do_action_native(state, action, subkey);
+
+    craftax_place_block_native(state, action);
+    craftax_shoot_projectile_native(state, action);
+    craftax_cast_spell_native(state, action);
+    craftax_drink_potion_native(state, action);
+
+    subkey = craftax_step_native_next_key(&rng);
+    craftax_read_book_native(state, subkey.word, action);
+
+    subkey = craftax_step_native_next_key(&rng);
+    craftax_enchant_native(state, action, subkey);
+
+    craftax_boss_logic_native(state);
+    craftax_level_up_attributes_native(state, action, CRAFTAX_MAX_ATTRIBUTE);
+    craftax_move_player_native(state, action, false);
+
+    subkey = craftax_step_native_next_key(&rng);
+    craftax_update_mobs_native(state, subkey);
+
+    subkey = craftax_step_native_next_key(&rng);
+    craftax_spawn_mobs_native(state, subkey);
+
+    craftax_update_plants_native(state);
+    craftax_update_player_intrinsics_native(state, action);
+    craftax_clip_inventory_and_intrinsics_native(state, false);
+    craftax_calculate_inventory_achievements_native(state);
+
+    float reward = 0.0f;
+    for (int i = 0; i < CRAFTAX_NUM_ACHIEVEMENTS; i++) {
+        int32_t delta = (int32_t)state->achievements[i]
+            - (int32_t)init_achievements[i];
+        reward += (float)delta * CRAFTAX_ACHIEVEMENT_REWARD_MAP[i];
+    }
+    reward += (state->player_health - init_health) * 0.1f;
+
+    subkey = craftax_step_native_next_key(&rng);
+    state->timestep += 1;
+    state->light_level = craftax_calculate_light_level_native(state->timestep);
+    state->state_rng[0] = subkey.word[0];
+    state->state_rng[1] = subkey.word[1];
+
+    return reward;
+}
+
 // ============================================================
 // Public API expected by vecenv.h
 // ============================================================
 static void c_init(Craftax* env) {
     env->client = NULL;
     env->num_agents = 1;
-    env->py_proxy = NULL;
-    env->proxy_needs_reset = true;
     env->episode_return_accum = 0.0f;
     env->episode_length_accum = 0;
     memset(env->achievements, 0, sizeof(env->achievements));
     memset(&env->log, 0, sizeof(env->log));
+    craftax_reset_state_from_seed(env);
 }
 
 static void c_reset(Craftax* env) {
-    env->rewards[0] = 0.0f;
-    env->terminals[0] = 0.0f;
+    if (env->rewards != NULL) {
+        env->rewards[0] = 0.0f;
+    }
+    if (env->terminals != NULL) {
+        env->terminals[0] = 0.0f;
+    }
     env->episode_return_accum = 0.0f;
     env->episode_length_accum = 0;
     memset(env->achievements, 0, sizeof(env->achievements));
 
-    if (env->observations == NULL) {
-        env->proxy_needs_reset = true;
-        return;
-    }
-
-    CraftaxWorldState state;
-    craftax_generate_world_from_seed((uint32_t)env->seed, &state);
-    craftax_encode_reset_observation(&state, env->observations);
-    env->proxy_needs_reset = true;
+    craftax_reset_state_from_seed(env);
+    craftax_encode_native_observation(&env->state, env->observations);
 }
 
-static bool craftax_sync_proxy_reset_for_step(Craftax* env) {
-    if (!env->proxy_needs_reset) {
-        return true;
-    }
-
-    PyObject* obs_bytes = craftax_py_api.PyObject_CallMethod((PyObject*)env->py_proxy, "reset", NULL);
-    if (obs_bytes == NULL) {
-        craftax_py_print_error();
-        craftax_zero_obs(env);
-        return false;
-    }
-
-    craftax_py_api.Py_DecRef(obs_bytes);
-    env->proxy_needs_reset = false;
-    return true;
-}
-
-static void c_step(Craftax* env) {
+static void c_step_native(Craftax* env) {
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0.0f;
 
@@ -651,71 +630,17 @@ static void c_step(Craftax* env) {
         action = CRAFTAX_NUM_ACTIONS - 1;
     }
 
-    craftax_py_load_api();
-    PyGILState_STATE gil = craftax_py_api.PyGILState_Ensure();
-    if (!craftax_ensure_proxy(env)) {
-        craftax_zero_obs(env);
-        craftax_py_api.PyGILState_Release(gil);
-        return;
-    }
+    CraftaxThreefryKey step_key;
+    craftax_threefry_split(env->rng_key, &env->rng_key, &step_key);
 
-    if (!craftax_sync_proxy_reset_for_step(env)) {
-        craftax_py_api.PyGILState_Release(gil);
-        return;
-    }
+    CraftaxThreefryKey step_rng;
+    CraftaxThreefryKey reset_key;
+    craftax_threefry_split(step_key, &step_rng, &reset_key);
 
-    PyObject* result = craftax_py_api.PyObject_CallMethod((PyObject*)env->py_proxy, "step", "i", action);
-    if (result == NULL) {
-        craftax_py_print_error();
-        craftax_zero_obs(env);
-        craftax_py_api.PyGILState_Release(gil);
-        return;
-    }
+    float reward = craftax_gameplay_step_native(&env->state, action, step_rng);
+    bool done = craftax_is_game_over_native(&env->state);
 
-    bool ok = true;
-    if (craftax_py_api.PyTuple_Size(result) != 4) {
-        fprintf(stderr, "craftax: Python helper step did not return a 4-tuple\n");
-        ok = false;
-    }
-
-    float reward = 0.0f;
-    int done = 0;
-    if (ok) {
-        PyObject* obs_bytes = craftax_py_api.PyTuple_GetItem(result, 0);
-        PyObject* reward_obj = craftax_py_api.PyTuple_GetItem(result, 1);
-        PyObject* done_obj = craftax_py_api.PyTuple_GetItem(result, 2);
-        PyObject* ach_bytes = craftax_py_api.PyTuple_GetItem(result, 3);
-
-        ok = craftax_copy_bytes_to_float_buffer(obs_bytes, env->observations, CRAFTAX_OBS_SIZE);
-        if (ok) {
-            reward = (float)craftax_py_api.PyFloat_AsDouble(reward_obj);
-            if (craftax_py_api.PyErr_Occurred()) {
-                craftax_py_print_error();
-                reward = 0.0f;
-                ok = false;
-            }
-        }
-        if (ok) {
-            done = craftax_py_api.PyObject_IsTrue(done_obj);
-            if (done < 0) {
-                craftax_py_print_error();
-                done = 0;
-                ok = false;
-            }
-        }
-        if (ok) {
-            ok = craftax_copy_bytes_to_float_buffer(ach_bytes, env->achievements, CRAFTAX_NUM_ACHIEVEMENTS);
-        }
-    }
-
-    if (!ok) {
-        craftax_zero_obs(env);
-        reward = 0.0f;
-        done = 1;
-    }
-
-    craftax_py_api.Py_DecRef(result);
-    craftax_py_api.PyGILState_Release(gil);
+    craftax_copy_achievements_to_env(env, &env->state);
 
     env->rewards[0] = reward;
     env->terminals[0] = done ? 1.0f : 0.0f;
@@ -727,30 +652,22 @@ static void c_step(Craftax* env) {
         env->episode_return_accum = 0.0f;
         env->episode_length_accum = 0;
         memset(env->achievements, 0, sizeof(env->achievements));
+        craftax_reset_state_from_reset_key(&env->state, reset_key);
     }
+
+    craftax_encode_native_observation(&env->state, env->observations);
+}
+
+static void c_step(Craftax* env) {
+    c_step_native(env);
 }
 
 static void c_close(Craftax* env) {
-    if (env->py_proxy == NULL) {
-        return;
-    }
-
-    craftax_py_load_api();
-    PyGILState_STATE gil = craftax_py_api.PyGILState_Ensure();
-    PyObject* result = craftax_py_api.PyObject_CallMethod((PyObject*)env->py_proxy, "close", NULL);
-    if (result == NULL) {
-        craftax_py_print_error();
-    } else {
-        craftax_py_api.Py_DecRef(result);
-    }
-    craftax_py_api.PyGILState_Release(gil);
-
-    // The reference proxy owns JAX objects with process-level runtime state.
-    // DECREFing the wrapper itself during PufferLib shutdown can race XLA
-    // cleanup and segfault. The native port will remove this path entirely.
-    env->py_proxy = NULL;
+    (void)env;
 }
 
 static void c_render(Craftax* env) {
     (void)env;
 }
+
+#endif

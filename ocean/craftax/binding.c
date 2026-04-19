@@ -1,4 +1,8 @@
+#define CRAFTAX_ENABLE_ENV_IMPL
 #include "craftax.h"
+#include "step_crafting.h"
+#include "step_update_mobs.h"
+#include "step_spawn_mobs.h"
 
 #define OBS_SIZE CRAFTAX_OBS_SIZE
 #define NUM_ATNS 1

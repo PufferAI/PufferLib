@@ -1,5 +1,50 @@
 # Craftax Full Ocean Port Notes
 
+## 2026-04-18 Native Step Integration and Proxy Removal
+
+This phase wires the green native reset and all green native step subsystems
+into the live Ocean `c_step` path. The Python/JAX proxy has been fully removed:
+`c_init`, `c_reset`, `c_step`, and `c_close` are now 100% native.
+
+- `c_step_native` now mirrors the installed `craftax_step` subsystem order:
+  floor changes, crafting, action, placement, projectiles, spells, potions,
+  books, enchantment, boss logic, attributes, movement, mobs, spawning, plants,
+  intrinsics, clipping, inventory achievements, reward, timestep, light level,
+  terminal, and symbolic observation encoding.
+- The live env keeps the same outer RNG schedule as the old auto-reset proxy:
+  reset uses the reset key's inner worldgen split, each step splits the external
+  key once, then splits the per-step key into gameplay and auto-reset keys.
+- Step observations reuse the native symbolic encoder, now with mob channels and
+  boss-vulnerable special value populated for non-reset states.
+- `tests/craftax_step_full_test.py` adds the full side-by-side parity check for
+  16 seeds times 2000 random-action steps. `tests/craftax_parity.py` remains as
+  the standalone harness.
+
+Native-step roadmap checklist:
+
+- [x] Native reset PRNG, noise, 9-floor world generation, and reset observation.
+- [x] Standalone native simple step subsystems with JAX-parity tests.
+- [x] Standalone native medium step subsystems with JAX-parity tests.
+- [x] Standalone native crafting and placement subsystems with JAX-parity tests.
+- [x] Standalone native `do_action` subsystem with JAX-parity tests.
+- [x] Standalone native `spawn_mobs` subsystem with JAX-parity tests.
+- [x] Standalone native `update_mobs` subsystem with JAX-parity tests.
+- [x] Native reward, terminal, timestep, light-level, RNG, and achievement-delta
+  bookkeeping around the subsystem calls.
+- [x] Integrate all green subsystem ports into native `c_step` and remove all
+  Python/JAX proxy code paths.
+
+Remaining proxy paths:
+
+- None. The Craftax Ocean env no longer loads CPython symbols, constructs a JAX
+  env, or delegates reset/step/close through Python.
+
+Next phase:
+
+- Optimize the native path after correctness is locked down. Likely targets are
+  SIMD-friendly loops, cache-tiled symbolic observation encoding, and mob update
+  hot paths. Performance claims need measurement.
+
 ## 2026-04-18 Standalone Update Mobs Step Subsystem
 
 This phase adds a native C port for the `update_mobs` subsystem, still

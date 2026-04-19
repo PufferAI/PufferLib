@@ -1224,6 +1224,158 @@ static inline void craftax_generate_overworld_from_seed(
     craftax_generate_overworld_from_rng(craftax_overworld_rng_from_seed(seed), out);
 }
 
+static inline int craftax_wg_jax_index(int32_t index, int32_t size) {
+    if (index < 0) {
+        index += size;
+    }
+    if (index < 0) {
+        return 0;
+    }
+    if (index >= size) {
+        return size - 1;
+    }
+    return index;
+}
+
+static inline bool craftax_wg_scatter_index(
+    int32_t index,
+    int32_t size,
+    int* mapped_index
+) {
+    if (index < -size || index >= size) {
+        return false;
+    }
+    *mapped_index = index < 0 ? index + size : index;
+    return true;
+}
+
+static inline bool craftax_wg_is_boss_vulnerable(
+    const CraftaxWorldState* state
+) {
+    int level = craftax_wg_jax_index(state->player_level, CRAFTAX_WG_NUM_LEVELS);
+    bool has_melee = false;
+    bool has_ranged = false;
+    for (int i = 0; i < CRAFTAX_WG_MAX_MELEE_MOBS; i++) {
+        has_melee = has_melee || state->melee_mobs.mask[level][i];
+    }
+    for (int i = 0; i < CRAFTAX_WG_MAX_RANGED_MOBS; i++) {
+        has_ranged = has_ranged || state->ranged_mobs.mask[level][i];
+    }
+    return !has_melee
+        && !has_ranged
+        && state->boss_timesteps_to_spawn_this_round <= 0;
+}
+
+static inline void craftax_encode_mobs3_observation(
+    const CraftaxWorldState* state,
+    const CraftaxWGMobs3* mobs,
+    int mob_class_index,
+    int channels,
+    int mob_channels_offset,
+    float* obs
+) {
+    int level = craftax_wg_jax_index(state->player_level, CRAFTAX_WG_NUM_LEVELS);
+    for (int i = 0; i < 3; i++) {
+        int local_row = mobs->position[level][i][0]
+            - state->player_position[0]
+            + CRAFTAX_WG_OBS_ROWS / 2;
+        int local_col = mobs->position[level][i][1]
+            - state->player_position[1]
+            + CRAFTAX_WG_OBS_COLS / 2;
+        int type_id = mobs->type_id[level][i];
+        int scatter_row;
+        int scatter_col;
+        if (!craftax_wg_scatter_index(
+                local_row,
+                CRAFTAX_WG_OBS_ROWS,
+                &scatter_row
+            )
+            || !craftax_wg_scatter_index(
+                local_col,
+                CRAFTAX_WG_OBS_COLS,
+                &scatter_col
+            )
+            || type_id < 0
+            || type_id >= CRAFTAX_WG_NUM_MOB_TYPES) {
+            continue;
+        }
+
+        bool on_screen = local_row >= 0
+            && local_row < CRAFTAX_WG_OBS_ROWS
+            && local_col >= 0
+            && local_col < CRAFTAX_WG_OBS_COLS;
+        int world_row = mobs->position[level][i][0];
+        int world_col = mobs->position[level][i][1];
+        bool in_bounds = world_row >= 0
+            && world_row < CRAFTAX_WG_MAP_SIZE
+            && world_col >= 0
+            && world_col < CRAFTAX_WG_MAP_SIZE;
+        float light = in_bounds ? state->light_map[level][world_row][world_col] : 0.0f;
+        bool visible = light > 0.05f;
+        int obs_base = (scatter_row * CRAFTAX_WG_OBS_COLS + scatter_col) * channels;
+        int channel = mob_channels_offset
+            + mob_class_index * CRAFTAX_WG_NUM_MOB_TYPES
+            + type_id;
+        obs[obs_base + channel] =
+            mobs->mask[level][i] && on_screen && visible ? 1.0f : 0.0f;
+    }
+}
+
+static inline void craftax_encode_mobs2_observation(
+    const CraftaxWorldState* state,
+    const CraftaxWGMobs2* mobs,
+    int mob_class_index,
+    int channels,
+    int mob_channels_offset,
+    float* obs
+) {
+    int level = craftax_wg_jax_index(state->player_level, CRAFTAX_WG_NUM_LEVELS);
+    for (int i = 0; i < 2; i++) {
+        int local_row = mobs->position[level][i][0]
+            - state->player_position[0]
+            + CRAFTAX_WG_OBS_ROWS / 2;
+        int local_col = mobs->position[level][i][1]
+            - state->player_position[1]
+            + CRAFTAX_WG_OBS_COLS / 2;
+        int type_id = mobs->type_id[level][i];
+        int scatter_row;
+        int scatter_col;
+        if (!craftax_wg_scatter_index(
+                local_row,
+                CRAFTAX_WG_OBS_ROWS,
+                &scatter_row
+            )
+            || !craftax_wg_scatter_index(
+                local_col,
+                CRAFTAX_WG_OBS_COLS,
+                &scatter_col
+            )
+            || type_id < 0
+            || type_id >= CRAFTAX_WG_NUM_MOB_TYPES) {
+            continue;
+        }
+
+        bool on_screen = local_row >= 0
+            && local_row < CRAFTAX_WG_OBS_ROWS
+            && local_col >= 0
+            && local_col < CRAFTAX_WG_OBS_COLS;
+        int world_row = mobs->position[level][i][0];
+        int world_col = mobs->position[level][i][1];
+        bool in_bounds = world_row >= 0
+            && world_row < CRAFTAX_WG_MAP_SIZE
+            && world_col >= 0
+            && world_col < CRAFTAX_WG_MAP_SIZE;
+        float light = in_bounds ? state->light_map[level][world_row][world_col] : 0.0f;
+        bool visible = light > 0.05f;
+        int obs_base = (scatter_row * CRAFTAX_WG_OBS_COLS + scatter_col) * channels;
+        int channel = mob_channels_offset
+            + mob_class_index * CRAFTAX_WG_NUM_MOB_TYPES
+            + type_id;
+        obs[obs_base + channel] =
+            mobs->mask[level][i] && on_screen && visible ? 1.0f : 0.0f;
+    }
+}
+
 static inline void craftax_encode_reset_observation(
     const CraftaxWorldState* state,
     float* obs
@@ -1270,6 +1422,47 @@ static inline void craftax_encode_reset_observation(
             obs[obs_base + light_channel_offset] = visible ? 1.0f : 0.0f;
         }
     }
+
+    craftax_encode_mobs3_observation(
+        state,
+        &state->melee_mobs,
+        0,
+        channels,
+        mob_channels_offset,
+        obs
+    );
+    craftax_encode_mobs3_observation(
+        state,
+        &state->passive_mobs,
+        1,
+        channels,
+        mob_channels_offset,
+        obs
+    );
+    craftax_encode_mobs2_observation(
+        state,
+        &state->ranged_mobs,
+        2,
+        channels,
+        mob_channels_offset,
+        obs
+    );
+    craftax_encode_mobs3_observation(
+        state,
+        &state->mob_projectiles,
+        3,
+        channels,
+        mob_channels_offset,
+        obs
+    );
+    craftax_encode_mobs3_observation(
+        state,
+        &state->player_projectiles,
+        4,
+        channels,
+        mob_channels_offset,
+        obs
+    );
 
     int index = obs_map_size;
     obs[index++] = sqrtf((float)state->inventory.wood) / 10.0f;
@@ -1322,5 +1515,5 @@ static inline void craftax_encode_reset_observation(
     obs[index++] = state->learned_spells[1] ? 1.0f : 0.0f;
     obs[index++] = (float)state->player_level / 10.0f;
     obs[index++] = state->monsters_killed[level] >= CRAFTAX_WG_MONSTERS_KILLED_TO_CLEAR_LEVEL ? 1.0f : 0.0f;
-    obs[index++] = 0.0f;
+    obs[index++] = craftax_wg_is_boss_vulnerable(state) ? 1.0f : 0.0f;
 }
