@@ -1,5 +1,62 @@
 # Craftax Full Ocean Port Notes
 
+## 2026-04-18 Standalone Do Action Step Subsystem
+
+This phase adds a native C port for the `do_action` subsystem, still
+deliberately without integrating it into `c_step`. The live Ocean environment
+continues to delegate step to the Python/JAX proxy.
+
+- `step_do_action.h` contains the standalone in-place helper for:
+  - `do_action`
+- The helper mirrors the installed JAX ordering: mob attack resolution runs
+  before block interaction; block mining/eating/drinking/inventory/achievement
+  effects are gated by in-bounds and no mob attack; chest-open flags and boss
+  progress keep the JAX side effects that are not part of that gate.
+- Chest looting calls the existing native `craftax_add_items_from_chest_native`
+  helper after consuming the sapling RNG split, so first-open bow/book rewards
+  see the old `chests_opened` value and the chest RNG thread matches JAX.
+- Mob attacks cover passive, melee, and ranged mob arrays, including first-match
+  target selection, defense mapping, sword enchantment damage, strength and
+  intelligence scaling, passive food refill, kill achievements, mob-map updates,
+  and monster kill counts.
+- `tests/craftax_step_do_action_test.py` builds a temporary C wrapper around the
+  inline helper and compares full copied states against the installed JAX
+  function for 16 reset-plus-step-through seeds. Coverage includes a seeded
+  no-op-then-DO sequence, mining success and missing-pickaxe cases, sapling RNG
+  rolls, plant/passive food and water/fountain drink cases, all chest levels,
+  all passive/melee/ranged kill achievement mappings, damage modifier cases,
+  out-of-bounds targets, no-op target blocks, projectile-occupied targets, and
+  mob-on-chest gating.
+
+Native-step roadmap checklist:
+
+- [x] Native reset PRNG, noise, 9-floor world generation, and reset observation.
+- [x] Standalone native simple step subsystems with JAX-parity tests.
+- [x] Standalone native medium step subsystems with JAX-parity tests.
+- [x] Standalone native crafting and placement subsystems with JAX-parity tests.
+- [x] Standalone native `do_action` subsystem with JAX-parity tests.
+- [ ] Standalone native ports for the remaining mob step subsystems:
+  `update_mobs` and `spawn_mobs`.
+- [ ] Native reward, terminal, timestep, light-level, RNG, and achievement-delta
+  bookkeeping around the subsystem calls.
+- [ ] Integrate all green subsystem ports into a native `c_step` behind one
+  explicit switch, then remove the Python/JAX proxy from the normal step path.
+- [ ] Restore production vector sizes in `config/ocean/craftax.ini` after native
+  step is the default.
+- [ ] Benchmark CPU throughput only after the proxy path is gone.
+
+Remaining proxy paths:
+
+- `c_step` still delegates to the Python/JAX proxy. None of the standalone
+  subsystem helpers are wired into the live environment yet.
+- The only gameplay step subsystems still without standalone native ports are
+  `update_mobs` and `spawn_mobs`. Reward/terminal bookkeeping, light-level
+  updates, timestep updates, RNG threading between subsystems, and
+  achievement-delta logging are also still not integrated natively.
+- Rendering remains a no-op.
+- `config/ocean/craftax.ini` still uses a small proxy-friendly vector size. The
+  native port should raise this once step no longer calls Python.
+
 ## 2026-04-18 Standalone Crafting And Placement Step Subsystems
 
 This phase adds native C ports for two more action subsystems, still
@@ -32,8 +89,9 @@ Native-step roadmap checklist:
 - [x] Standalone native simple step subsystems with JAX-parity tests.
 - [x] Standalone native medium step subsystems with JAX-parity tests.
 - [x] Standalone native crafting and placement subsystems with JAX-parity tests.
-- [ ] Standalone native ports for the remaining hard step subsystems:
-  `do_action`, `update_mobs`, and `spawn_mobs`.
+- [x] Standalone native `do_action` subsystem with JAX-parity tests.
+- [ ] Standalone native ports for the remaining mob step subsystems:
+  `update_mobs` and `spawn_mobs`.
 - [ ] Native reward, terminal, timestep, light-level, RNG, and achievement-delta
   bookkeeping around the subsystem calls.
 - [ ] Integrate all green subsystem ports into a native `c_step` behind one
@@ -46,9 +104,10 @@ Remaining proxy paths:
 
 - `c_step` still delegates to the Python/JAX proxy. None of the standalone
   subsystem helpers are wired into the live environment yet.
-- The remaining unported step subsystems include the full `do_action` path, mob
-  updates, mob spawning, reward/terminal bookkeeping, light-level updates,
-  timestep updates, RNG threading, and achievement-delta logging.
+- The only gameplay step subsystems still without standalone native ports are
+  `update_mobs` and `spawn_mobs`. Reward/terminal bookkeeping, light-level
+  updates, timestep updates, RNG threading, and achievement-delta logging are
+  also still not integrated natively.
 - Rendering remains a no-op.
 - `config/ocean/craftax.ini` still uses a small proxy-friendly vector size. The
   native port should raise this once step no longer calls Python.
@@ -86,8 +145,10 @@ Native-step roadmap checklist:
 - [x] Native reset PRNG, noise, 9-floor world generation, and reset observation.
 - [x] Standalone native simple step subsystems with JAX-parity tests.
 - [x] Standalone native medium step subsystems with JAX-parity tests.
-- [ ] Standalone native ports for hard action subsystems: `do_action`,
-  `do_crafting`, `place_block`, `update_mobs`, and `spawn_mobs`.
+- [x] Standalone native crafting and placement subsystems with JAX-parity tests.
+- [x] Standalone native `do_action` subsystem with JAX-parity tests.
+- [ ] Standalone native ports for the remaining mob step subsystems:
+  `update_mobs` and `spawn_mobs`.
 - [ ] Native reward, terminal, timestep, light-level, RNG, and achievement-delta
   bookkeeping around the subsystem calls.
 - [ ] Integrate all green subsystem ports into a native `c_step` behind one
@@ -100,10 +161,10 @@ Remaining proxy paths:
 
 - `c_step` still delegates to the Python/JAX proxy. None of the new medium
   helpers are wired into the live environment yet.
-- The remaining unported step subsystems include the full `do_action` path,
-  crafting, block placement, mob updates, mob spawning, reward/terminal
-  bookkeeping, light-level updates, timestep updates, RNG threading, and
-  achievement-delta logging.
+- The only gameplay step subsystems still without standalone native ports are
+  `update_mobs` and `spawn_mobs`. Reward/terminal bookkeeping, light-level
+  updates, timestep updates, RNG threading, and achievement-delta logging are
+  also still not integrated natively.
 - Rendering remains a no-op.
 - `config/ocean/craftax.ini` still uses a small proxy-friendly vector size. The
   native port should raise this once step no longer calls Python.
@@ -140,9 +201,11 @@ Native-step roadmap checklist:
 
 - [x] Native reset PRNG, noise, 9-floor world generation, and reset observation.
 - [x] Standalone native simple step subsystems with JAX-parity tests.
-- [ ] Standalone native ports for hard action subsystems: `do_action`,
-  `do_crafting`, `place_block`, `shoot_projectile`, `cast_spell`, `enchant`,
-  `change_floor`, `add_items_from_chest`, `update_mobs`, and `spawn_mobs`.
+- [x] Standalone native medium step subsystems with JAX-parity tests.
+- [x] Standalone native crafting and placement subsystems with JAX-parity tests.
+- [x] Standalone native `do_action` subsystem with JAX-parity tests.
+- [ ] Standalone native ports for the remaining mob step subsystems:
+  `update_mobs` and `spawn_mobs`.
 - [ ] Native reward, terminal, timestep, light-level, RNG, and achievement-delta
   bookkeeping around the subsystem calls.
 - [ ] Integrate all green subsystem ports into a native `c_step` behind one
