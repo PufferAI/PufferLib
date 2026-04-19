@@ -43,6 +43,15 @@ def train(env_name, timesteps):
     env_log_dir = LOG_DIR / env_name
     env_log_dir.mkdir(parents=True, exist_ok=True)
     before = {p.name for p in env_log_dir.glob("*.json")}
+
+    # pufferlib._C is compiled for one env at a time; rebuild before each run.
+    build_cmd = [
+        "uv", "run", "--with", "pybind11", "--with", "rich_argparse",
+        "./build.sh", env_name,
+    ]
+    print(f"\n=== rebuilding pufferlib._C for {env_name} ===")
+    subprocess.check_call(build_cmd, cwd=REPO)
+
     cmd = [
         "uv", "run", "--with", "pybind11", "--with", "rich_argparse",
         "puffer", "train", env_name,
