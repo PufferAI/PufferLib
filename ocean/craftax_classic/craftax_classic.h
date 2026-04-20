@@ -890,6 +890,49 @@ static void add_log(CraftaxClassic* env) {
 }
 
 // ============================================================
+// Reset-cache: optional pre-generated world pool. When
+// craftax_classic_set_reset_pool_size(N>0) is called before any reset,
+// c_reset memcpys from cache[idx] instead of running generate_world
+// each episode. Drops worldgen (~30 us) to a 5 KB memcpy (~0.5 us).
+// N=0 preserves baseline behavior (fresh world per reset). First caller
+// wins; subsequent calls with a different size are no-ops, so every
+// env's my_init can call safely.
+//
+// Default for Classic is 0 (see config/ocean/craftax_classic.ini): the
+// env is not the training bottleneck here (GPU/train dominate the loop),
+// so caching does not move training SPS. Useful for sim-only workloads
+// (data generation, evaluation rollouts) where c_step throughput matters.
+// Verified bitwise-equal to fresh generate_world for any cache entry.
+// ============================================================
+static CraftaxClassic* craftax_classic_reset_cache = NULL;
+static int craftax_classic_reset_cache_size = 0;
+static int craftax_classic_reset_cache_built = 0;
+
+static void craftax_classic_set_reset_pool_size(int n) {
+    if (__atomic_load_n(&craftax_classic_reset_cache_built, __ATOMIC_ACQUIRE))
+        return;
+    if (n <= 0) {
+        __atomic_store_n(&craftax_classic_reset_cache_built, 1, __ATOMIC_RELEASE);
+        return;
+    }
+    CraftaxClassic* pool = (CraftaxClassic*)calloc((size_t)n, sizeof(*pool));
+    if (!pool) {
+        // Allocation failed: fall back to baseline worldgen.
+        __atomic_store_n(&craftax_classic_reset_cache_built, 1, __ATOMIC_RELEASE);
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        pool[i].pcg = ((uint64_t)(0xCAFEBABE12345678ULL) + (uint64_t)i)
+                    * 0x9E3779B97F4A7C15ULL + 0x87C37B91114253D5ULL;
+        for (int k = 0; k < 8; k++) (void)cr_pcg(&pool[i].pcg);
+        generate_world(&pool[i]);
+    }
+    craftax_classic_reset_cache = pool;
+    craftax_classic_reset_cache_size = n;
+    __atomic_store_n(&craftax_classic_reset_cache_built, 1, __ATOMIC_RELEASE);
+}
+
+// ============================================================
 // Public API: c_init / c_reset / c_step / c_close / c_render
 // ============================================================
 static void c_init(CraftaxClassic* env) {
@@ -907,7 +950,33 @@ static void c_init(CraftaxClassic* env) {
 static void c_reset(CraftaxClassic* env) {
     env->episode_return_accum = 0.0f;
     env->episode_length_accum = 0;
-    generate_world(env);
+    int pool_size = craftax_classic_reset_cache_size;
+    if (pool_size <= 0) {
+        generate_world(env);
+    } else {
+        // Pick a pool index using env's own RNG so different envs reset
+        // to different worlds and each env sees diversity across episodes.
+        uint32_t r = cr_pcg(&env->pcg);
+        int idx = (int)(r % (uint32_t)pool_size);
+        // Preserve runtime fields (pointers, log, rng) across the memcpy.
+        Client* cl   = env->client;
+        float* o     = env->observations;
+        float* a     = env->actions;
+        float* rw    = env->rewards;
+        float* tm    = env->terminals;
+        int na       = env->num_agents;
+        uint64_t pcg = env->pcg;
+        Log log      = env->log;
+        memcpy(env, &craftax_classic_reset_cache[idx], sizeof(*env));
+        env->client = cl;
+        env->observations = o;
+        env->actions = a;
+        env->rewards = rw;
+        env->terminals = tm;
+        env->num_agents = na;
+        env->pcg = pcg;
+        env->log = log;
+    }
     compute_observations(env);
 }
 

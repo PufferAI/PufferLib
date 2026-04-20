@@ -9,8 +9,12 @@
 #include "vecenv.h"
 
 void my_init(Env* env, Dict* kwargs) {
-    // No per-env kwargs for Craftax-Classic: the 64x64 map, inventory sizes,
-    // mob caps, etc. are all compile-time constants.
+    // Process-wide reset pool size. First caller wins (setter is idempotent).
+    // 0 disables caching (baseline: generate_world on every reset).
+    int reset_pool_size = 0;
+    DictItem* item = dict_get_unsafe(kwargs, "reset_pool_size");
+    if (item != NULL) reset_pool_size = (int)item->value;
+    craftax_classic_set_reset_pool_size(reset_pool_size);
     c_init(env);
 }
 
