@@ -141,7 +141,7 @@ static void cpu_vec_step_py(VecEnv& ve, long long actions_ptr) {
 }
 
 static py::dict vec_log(VecEnv& ve) {
-    Dict* out = create_dict(32);
+    Dict* out = create_dict(256);
     static_vec_log(ve.vec, out);
     py::dict result;
     for (int i = 0; i < out->size; i++)

@@ -330,7 +330,7 @@ typedef struct {
 } PuffeRL;
 
 Dict* log_environments_impl(PuffeRL& pufferl) {
-    Dict* out = create_dict(32);
+    Dict* out = create_dict(256);
     static_vec_log(pufferl.vec, out);
     return out;
 }
