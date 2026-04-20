@@ -22,6 +22,13 @@ void my_init(Env* env, Dict* kwargs) {
     }
     env->seed = seed_offset + (uint64_t)env->rng;
 
+    // Process-wide reset pool (first caller wins, rest block until ready).
+    // 0 disables caching -- regenerate every reset (exact parity mode).
+    int reset_pool_size = 0;
+    DictItem* pool_item = dict_get_unsafe(kwargs, "reset_pool_size");
+    if (pool_item != NULL) reset_pool_size = (int)pool_item->value;
+    craftax_set_reset_pool_size(reset_pool_size);
+
     c_init(env);
 }
 

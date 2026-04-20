@@ -477,11 +477,64 @@ static inline void craftax_reset_state_from_reset_key(
     craftax_generate_state_from_world_key(world_key, out);
 }
 
+// ============================================================
+// Reset pool: pre-generate N worlds once, then memcpy on reset.
+// Trades world diversity (<= pool_size unique maps per process) for
+// ~500x faster reset. Set pool_size=0 to disable (exact per-seed
+// world; required for the parity harness).
+// ============================================================
+static int g_craftax_reset_pool_size = 0;
+static CraftaxState* g_craftax_reset_pool = NULL;
+static int g_craftax_reset_pool_ready = 0;
+
+// Called from my_init which runs single-threaded during env creation
+// (vecenv.h iterates envs sequentially). First caller populates the
+// pool; subsequent callers are no-ops.
+static inline void craftax_set_reset_pool_size(int n) {
+    if (g_craftax_reset_pool_ready) return;
+    g_craftax_reset_pool_size = n;
+    if (n > 0) {
+        g_craftax_reset_pool = (CraftaxState*)calloc((size_t)n, sizeof(CraftaxState));
+        for (int i = 0; i < n; i++) {
+            CraftaxThreefryKey init_key = craftax_prng_key((uint32_t)i);
+            CraftaxThreefryKey discard, reset_key;
+            craftax_threefry_split(init_key, &discard, &reset_key);
+            craftax_reset_state_from_reset_key(&g_craftax_reset_pool[i], reset_key);
+        }
+    }
+    g_craftax_reset_pool_ready = 1;
+}
+
 static inline void craftax_reset_state_from_seed(Craftax* env) {
     CraftaxThreefryKey initial_key = craftax_prng_key((uint32_t)env->seed);
+    if (g_craftax_reset_pool_size > 0) {
+        CraftaxThreefryKey discard;
+        craftax_threefry_split(initial_key, &env->rng_key, &discard);
+        int idx = (int)(env->seed % (uint64_t)g_craftax_reset_pool_size);
+        memcpy(&env->state, &g_craftax_reset_pool[idx], sizeof(CraftaxState));
+        return;
+    }
     CraftaxThreefryKey reset_key;
     craftax_threefry_split(initial_key, &env->rng_key, &reset_key);
     craftax_reset_state_from_reset_key(&env->state, reset_key);
+}
+
+// Hot-path reset used by c_step on episode-done. Consults the reset pool
+// when enabled, falls through to generate_world otherwise. Pool index is
+// derived from the reset_key so different done events pick different
+// pooled worlds. The direct craftax_reset_state_from_reset_key stays
+// pool-free so the parity harness and any other direct caller get exact
+// per-key determinism.
+static inline void craftax_reset_state_on_done(
+    CraftaxState* out,
+    CraftaxThreefryKey reset_key
+) {
+    if (g_craftax_reset_pool_size > 0) {
+        uint32_t idx = reset_key.word[0] % (uint32_t)g_craftax_reset_pool_size;
+        memcpy(out, &g_craftax_reset_pool[idx], sizeof(CraftaxState));
+        return;
+    }
+    craftax_reset_state_from_reset_key(out, reset_key);
 }
 
 static inline void craftax_encode_native_observation(
@@ -655,7 +708,7 @@ static void c_step_native(Craftax* env) {
         env->episode_return_accum = 0.0f;
         env->episode_length_accum = 0;
         memset(env->achievements, 0, sizeof(env->achievements));
-        craftax_reset_state_from_reset_key(&env->state, reset_key);
+        craftax_reset_state_on_done(&env->state, reset_key);
     }
 
     craftax_encode_native_observation(&env->state, env->observations);
