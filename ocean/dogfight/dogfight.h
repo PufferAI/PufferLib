@@ -934,7 +934,7 @@ void c_reset(Dogfight *env) {
         }
     }
 
-    compute_observations(env);
+    if (env->observations) compute_observations(env);
 #if DEBUG >= 5
     print_observations(env);
 #endif

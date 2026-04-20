@@ -165,6 +165,9 @@ void draw_obs_monitor(Dogfight *env) {
             break;
     }
 
+    // Clamp to label array size; scheme 1 has 26 obs but only 22 labels
+    if (num_obs > 22) num_obs = 22;
+
     DrawText(TextFormat("OBS (scheme %d)", env->obs_scheme),
              start_x, start_y, 16, YELLOW);
     start_y += 22;
@@ -243,7 +246,7 @@ void c_render(Dogfight *env) {
         env->client->camera.fovy = 45.0f;
         env->client->camera.projection = CAMERA_PERSPECTIVE;
 
-        env->client->plane_model = LoadModel("pufferlib/ocean/dogfight/p40.glb");
+        env->client->plane_model = LoadModel("ocean/dogfight/p40.glb");
         env->client->model_loaded = (env->client->plane_model.meshCount > 0);
     }
 

@@ -1,5 +1,5 @@
 #include "dogfight.h"
-#define OBS_SIZE 22
+#define OBS_SIZE 26
 #define NUM_ATNS 5
 #define ACT_SIZES {1, 1, 1, 1, 1}
 #define OBS_TENSOR_T FloatTensor
@@ -9,6 +9,7 @@
 
 void my_init(Env* env, Dict* kwargs) {
     env->num_agents = 1;
+    env->max_steps = (int)dict_get(kwargs, "max_steps")->value;
 
     int obs_scheme = (int)dict_get(kwargs, "obs_scheme")->value;
     int curriculum_enabled = (int)dict_get(kwargs, "curriculum_enabled")->value;
@@ -31,6 +32,7 @@ void my_init(Env* env, Dict* kwargs) {
     };
 
     init(env, obs_scheme, &rcfg, curriculum_enabled, curriculum_randomize, env->rng);
+    c_reset(env);
 }
 
 void my_log(Log* log, Dict* out) {
