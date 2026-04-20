@@ -38,77 +38,22 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "episode_return", log->episode_return);
     dict_set(out, "episode_length", log->episode_length);
 
-    static const char* ACH_NAMES[CRAFTAX_NUM_ACHIEVEMENTS] = {
-        "collect_wood",
-        "place_table",
-        "eat_cow",
-        "collect_sapling",
-        "collect_drink",
-        "make_wood_pickaxe",
-        "make_wood_sword",
-        "place_plant",
-        "defeat_zombie",
-        "collect_stone",
-        "place_stone",
-        "eat_plant",
-        "defeat_skeleton",
-        "make_stone_pickaxe",
-        "make_stone_sword",
-        "wake_up",
-        "place_furnace",
-        "collect_coal",
-        "collect_iron",
-        "collect_diamond",
-        "make_iron_pickaxe",
-        "make_iron_sword",
-        "make_arrow",
-        "make_torch",
-        "place_torch",
-        "make_diamond_sword",
-        "make_iron_armour",
-        "make_diamond_armour",
-        "enter_gnomish_mines",
-        "enter_dungeon",
-        "enter_sewers",
-        "enter_vault",
-        "enter_troll_mines",
-        "enter_fire_realm",
-        "enter_ice_realm",
-        "enter_graveyard",
-        "defeat_gnome_warrior",
-        "defeat_gnome_archer",
-        "defeat_orc_solider",
-        "defeat_orc_mage",
-        "defeat_lizard",
-        "defeat_kobold",
-        "defeat_troll",
-        "defeat_deep_thing",
-        "defeat_pigman",
-        "defeat_fire_elemental",
-        "defeat_frost_troll",
-        "defeat_ice_elemental",
-        "damage_necromancer",
-        "defeat_necromancer",
-        "eat_bat",
-        "eat_snail",
-        "find_bow",
-        "fire_bow",
-        "collect_sapphire",
-        "learn_fireball",
-        "cast_fireball",
-        "learn_iceball",
-        "cast_iceball",
-        "collect_ruby",
-        "make_diamond_pickaxe",
-        "open_chest",
-        "drink_potion",
-        "enchant_sword",
-        "enchant_armour",
-        "defeat_knight",
-        "defeat_archer",
+    // Log 8 checkpoint achievements that form the tech / exploration curve.
+    // perf (above) already aggregates all 67 into a normalized score; the
+    // individual lines here are the milestones worth watching on a dashboard.
+    // The env still tracks all 67 internally for reward and perf; we just
+    // don't send every one through the log Dict.
+    struct { const char* name; int idx; } checkpoints[] = {
+        {"collect_wood",         0},
+        {"make_wood_pickaxe",    5},
+        {"make_stone_pickaxe",  13},
+        {"collect_iron",        18},
+        {"make_iron_pickaxe",   20},
+        {"collect_diamond",     19},
+        {"enter_gnomish_mines", 28},
+        {"defeat_necromancer",  48},
     };
-
-    for (int i = 0; i < CRAFTAX_NUM_ACHIEVEMENTS; i++) {
-        dict_set(out, ACH_NAMES[i], log->achievements[i]);
+    for (int i = 0; i < (int)(sizeof(checkpoints) / sizeof(checkpoints[0])); i++) {
+        dict_set(out, checkpoints[i].name, log->achievements[checkpoints[i].idx]);
     }
 }
