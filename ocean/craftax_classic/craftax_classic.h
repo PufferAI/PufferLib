@@ -970,46 +970,194 @@ static void c_close(CraftaxClassic* env) {
 }
 
 // ============================================================
-// Minimal raylib rendering (optional; matches breakout pattern)
+// Tile-based renderer sharing the full-Craftax textures.bin
 // ============================================================
+// Shared layout (see ocean/craftax/pack_textures.py):
+//   [0..36]  block textures (first 17 used by classic, indexed by BLK_*)
+//   [37..41] player: down, up, left, right, sleep
+//   [42..46] items (unused by classic)
+//   [47..49] mobs: zombie, skeleton, cow
+//   [50..53] arrows: down, up, left, right
+
+#include <stdio.h>
+
+#define CC_TEX_TILE_PX 16
+#define CC_TEX_SCALE 4
+#define CC_TEX_DRAW_PX (CC_TEX_TILE_PX * CC_TEX_SCALE)
+#define CC_TEX_NUM (37 + 5 + 5 + 3 + 4)
+
+#define CC_TEX_PLAYER_DOWN 37
+#define CC_TEX_PLAYER_UP 38
+#define CC_TEX_PLAYER_LEFT 39
+#define CC_TEX_PLAYER_RIGHT 40
+#define CC_TEX_PLAYER_SLEEP 41
+#define CC_TEX_MOB_ZOMBIE 47
+#define CC_TEX_MOB_SKELETON 48
+#define CC_TEX_MOB_COW 49
+#define CC_TEX_ARROW_DOWN 50
+#define CC_TEX_ARROW_UP 51
+#define CC_TEX_ARROW_LEFT 52
+#define CC_TEX_ARROW_RIGHT 53
+
+#define CC_RENDER_ROWS 16
+#define CC_RENDER_COLS 16
+
+static Texture2D cc_textures[CC_TEX_NUM];
+static bool cc_textures_loaded = false;
+
+static void cc_load_textures(void) {
+    if (cc_textures_loaded) return;
+    const char* candidates[] = {
+        "ocean/craftax/textures.bin",
+        "../ocean/craftax/textures.bin",
+        "../../ocean/craftax/textures.bin",
+    };
+    FILE* f = NULL;
+    for (size_t i = 0; i < sizeof(candidates)/sizeof(candidates[0]); i++) {
+        f = fopen(candidates[i], "rb");
+        if (f) break;
+    }
+    if (!f) {
+        fprintf(stderr, "craftax_classic: textures.bin not found — run ocean/craftax/pack_textures.py\n");
+        exit(1);
+    }
+    const size_t tile_bytes = CC_TEX_TILE_PX * CC_TEX_TILE_PX * 4;
+    uint8_t* buf = (uint8_t*)malloc(tile_bytes);
+    for (int i = 0; i < CC_TEX_NUM; i++) {
+        if (fread(buf, 1, tile_bytes, f) != tile_bytes) {
+            fprintf(stderr, "craftax_classic: short read on textures.bin at tile %d\n", i);
+            exit(1);
+        }
+        Image img = {
+            .data = buf,
+            .width = CC_TEX_TILE_PX,
+            .height = CC_TEX_TILE_PX,
+            .mipmaps = 1,
+            .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+        };
+        cc_textures[i] = LoadTextureFromImage(img);
+        SetTextureFilter(cc_textures[i], TEXTURE_FILTER_POINT);
+    }
+    free(buf);
+    fclose(f);
+    cc_textures_loaded = true;
+}
+
+static int cc_player_tex_id(int8_t dir, bool sleeping) {
+    if (sleeping) return CC_TEX_PLAYER_SLEEP;
+    switch (dir) {
+        case 1: return CC_TEX_PLAYER_LEFT;
+        case 2: return CC_TEX_PLAYER_RIGHT;
+        case 3: return CC_TEX_PLAYER_UP;
+        case 4: return CC_TEX_PLAYER_DOWN;
+        default: return CC_TEX_PLAYER_DOWN;
+    }
+}
+
+static int cc_arrow_tex_id(int8_t dr, int8_t dc) {
+    if (dr < 0) return CC_TEX_ARROW_UP;
+    if (dr > 0) return CC_TEX_ARROW_DOWN;
+    if (dc < 0) return CC_TEX_ARROW_LEFT;
+    return CC_TEX_ARROW_RIGHT;
+}
+
+static void cc_draw_tile(int tex_id, int dst_x, int dst_y) {
+    if (tex_id < 0 || tex_id >= CC_TEX_NUM) return;
+    Rectangle src = {0, 0, CC_TEX_TILE_PX, CC_TEX_TILE_PX};
+    Rectangle dst = {(float)dst_x, (float)dst_y, CC_TEX_DRAW_PX, CC_TEX_DRAW_PX};
+    DrawTexturePro(cc_textures[tex_id], src, dst, (Vector2){0, 0}, 0.0f, WHITE);
+}
+
 static void c_render(CraftaxClassic* env) {
+    const int view_w = CC_RENDER_COLS * CC_TEX_DRAW_PX;
+    const int view_h = CC_RENDER_ROWS * CC_TEX_DRAW_PX;
+    const int hud_h = 60;
+
     if (!IsWindowReady()) {
-        InitWindow(MAP_SIZE * 10, MAP_SIZE * 10 + 60, "PufferLib Craftax-Classic");
+        InitWindow(view_w, view_h + hud_h, "PufferLib Craftax-Classic");
         SetTargetFPS(30);
     }
+    if (!cc_textures_loaded) cc_load_textures();
     if (IsKeyDown(KEY_ESCAPE)) exit(0);
+
+    int pr = env->player_r;
+    int pc = env->player_c;
+    int half_r = CC_RENDER_ROWS / 2;
+    int half_c = CC_RENDER_COLS / 2;
 
     BeginDrawing();
     ClearBackground(BLACK);
-    static const Color PALETTE[17] = {
-        (Color){0,0,0,255},       // INVALID
-        (Color){40,40,40,255},    // OUT_OF_BOUNDS
-        (Color){80,200,120,255},  // GRASS
-        (Color){50,120,220,255},  // WATER
-        (Color){110,110,110,255}, // STONE
-        (Color){40,120,40,255},   // TREE
-        (Color){140,90,40,255},   // WOOD
-        (Color){180,170,130,255}, // PATH
-        (Color){50,50,50,255},    // COAL
-        (Color){200,200,220,255}, // IRON
-        (Color){180,240,255,255}, // DIAMOND
-        (Color){180,120,60,255},  // TABLE
-        (Color){160,80,40,255},   // FURNACE
-        (Color){220,200,140,255}, // SAND
-        (Color){240,80,40,255},   // LAVA
-        (Color){60,200,60,255},   // PLANT
-        (Color){250,180,50,255},  // RIPE_PLANT
-    };
-    for (int r = 0; r < MAP_SIZE; r++) {
-        for (int c = 0; c < MAP_SIZE; c++) {
-            int8_t blk = map_get(env, r, c);
-            DrawRectangle(c * 10, r * 10, 10, 10, PALETTE[(int)blk]);
+
+    for (int vr = 0; vr < CC_RENDER_ROWS; vr++) {
+        for (int vc = 0; vc < CC_RENDER_COLS; vc++) {
+            int wr = pr - half_r + vr;
+            int wc = pc - half_c + vc;
+            int dst_x = vc * CC_TEX_DRAW_PX;
+            int dst_y = vr * CC_TEX_DRAW_PX;
+
+            int blk = BLK_OUT_OF_BOUNDS;
+            if (in_bounds(wr, wc)) blk = map_get(env, wr, wc);
+            if (blk < 0 || blk >= 17) blk = 0;
+            cc_draw_tile(blk, dst_x, dst_y);
         }
     }
-    DrawCircle(env->player_c * 10 + 5, env->player_r * 10 + 5, 4, WHITE);
 
-    DrawText(TextFormat("HP:%d F:%d D:%d E:%d  t:%d", env->health, env->food,
-             env->drink, env->energy, env->timestep),
-             4, MAP_SIZE * 10 + 4, 16, WHITE);
+    // Mobs
+    for (int i = 0; i < MAX_ZOMBIES; i++) {
+        if (!env->zombie_mask[i]) continue;
+        int vr = env->zombie_r[i] - pr + half_r;
+        int vc = env->zombie_c[i] - pc + half_c;
+        if (vr < 0 || vr >= CC_RENDER_ROWS || vc < 0 || vc >= CC_RENDER_COLS) continue;
+        cc_draw_tile(CC_TEX_MOB_ZOMBIE, vc * CC_TEX_DRAW_PX, vr * CC_TEX_DRAW_PX);
+    }
+    for (int i = 0; i < MAX_SKELETONS; i++) {
+        if (!env->skel_mask[i]) continue;
+        int vr = env->skel_r[i] - pr + half_r;
+        int vc = env->skel_c[i] - pc + half_c;
+        if (vr < 0 || vr >= CC_RENDER_ROWS || vc < 0 || vc >= CC_RENDER_COLS) continue;
+        cc_draw_tile(CC_TEX_MOB_SKELETON, vc * CC_TEX_DRAW_PX, vr * CC_TEX_DRAW_PX);
+    }
+    for (int i = 0; i < MAX_COWS; i++) {
+        if (!env->cow_mask[i]) continue;
+        int vr = env->cow_r[i] - pr + half_r;
+        int vc = env->cow_c[i] - pc + half_c;
+        if (vr < 0 || vr >= CC_RENDER_ROWS || vc < 0 || vc >= CC_RENDER_COLS) continue;
+        cc_draw_tile(CC_TEX_MOB_COW, vc * CC_TEX_DRAW_PX, vr * CC_TEX_DRAW_PX);
+    }
+    for (int i = 0; i < MAX_ARROWS; i++) {
+        if (!env->arrow_mask[i]) continue;
+        int vr = env->arrow_r[i] - pr + half_r;
+        int vc = env->arrow_c[i] - pc + half_c;
+        if (vr < 0 || vr >= CC_RENDER_ROWS || vc < 0 || vc >= CC_RENDER_COLS) continue;
+        cc_draw_tile(cc_arrow_tex_id(env->arrow_dr[i], env->arrow_dc[i]),
+                     vc * CC_TEX_DRAW_PX, vr * CC_TEX_DRAW_PX);
+    }
+
+    // Player in center
+    cc_draw_tile(cc_player_tex_id(env->player_dir, env->is_sleeping),
+                 half_c * CC_TEX_DRAW_PX, half_r * CC_TEX_DRAW_PX);
+
+    // Night dim
+    if (env->light_level < 1.0f) {
+        unsigned char a = (unsigned char)((1.0f - env->light_level) * 140.0f);
+        DrawRectangle(0, 0, view_w, view_h, (Color){0, 0, 40, a});
+    }
+
+    // HUD
+    int hud_y = view_h;
+    DrawRectangle(0, hud_y, view_w, hud_h, (Color){20, 20, 20, 255});
+    DrawText(TextFormat("HP:%d  F:%d  D:%d  E:%d  t:%d  light:%.2f",
+             env->health, env->food, env->drink, env->energy,
+             env->timestep, env->light_level),
+             4, hud_y + 4, 14, WHITE);
+    int ach_count = 0;
+    for (int i = 0; i < NUM_ACHIEVEMENTS; i++) ach_count += env->achievements[i] ? 1 : 0;
+    DrawText(TextFormat("ach:%d/%d  ret:%.2f  len:%d", ach_count, NUM_ACHIEVEMENTS,
+             env->episode_return_accum, env->episode_length_accum),
+             4, hud_y + 22, 14, (Color){180, 220, 180, 255});
+    DrawText(TextFormat("inv: w=%d s=%d c=%d i=%d d=%d sap=%d  pick w/s/i:%d/%d/%d  sword w/s/i:%d/%d/%d",
+             env->inv[0], env->inv[1], env->inv[2], env->inv[3], env->inv[4], env->inv[5],
+             env->inv[6], env->inv[7], env->inv[8], env->inv[9], env->inv[10], env->inv[11]),
+             4, hud_y + 40, 12, (Color){180, 180, 180, 255});
     EndDrawing();
 }

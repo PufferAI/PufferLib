@@ -8,6 +8,9 @@
 #include <string.h>
 
 #include "worldgen.h"
+#include "raylib.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 // ============================================================
 // Constants
@@ -666,8 +669,168 @@ static void c_close(Craftax* env) {
     (void)env;
 }
 
+// ------------------------------------------------------------
+// Tile-based renderer using upstream Craftax 16x16 PNG assets
+// ------------------------------------------------------------
+// Packed layout (see ocean/craftax/pack_textures.py):
+//   [0..36] block textures (indexed by CraftaxBlockType)
+//   [37..41] player: down, up, left, right, sleep
+//   [42..46] items: none, torch, ladder_down, ladder_up, ladder_down_blocked
+
+#define CRAFTAX_TEX_TILE_PX 16
+#define CRAFTAX_TEX_SCALE 4   // on-screen px = 64
+#define CRAFTAX_TEX_DRAW_PX (CRAFTAX_TEX_TILE_PX * CRAFTAX_TEX_SCALE)
+#define CRAFTAX_TEX_NUM (37 + 5 + 5 + 3 + 4)
+
+// Render viewport (independent of agent obs window)
+#define CRAFTAX_RENDER_ROWS 16
+#define CRAFTAX_RENDER_COLS 16
+
+#define CRAFTAX_TEX_PLAYER_DOWN 37
+#define CRAFTAX_TEX_PLAYER_UP 38
+#define CRAFTAX_TEX_PLAYER_LEFT 39
+#define CRAFTAX_TEX_PLAYER_RIGHT 40
+#define CRAFTAX_TEX_PLAYER_SLEEP 41
+#define CRAFTAX_TEX_ITEM_BASE 42
+
+static Texture2D craftax_textures[CRAFTAX_TEX_NUM];
+static bool craftax_textures_loaded = false;
+
+static void craftax_load_textures(void) {
+    if (craftax_textures_loaded) return;
+    const char* candidates[] = {
+        "ocean/craftax/textures.bin",
+        "../ocean/craftax/textures.bin",
+        "../../ocean/craftax/textures.bin",
+    };
+    FILE* f = NULL;
+    for (size_t i = 0; i < sizeof(candidates)/sizeof(candidates[0]); i++) {
+        f = fopen(candidates[i], "rb");
+        if (f) break;
+    }
+    if (!f) {
+        fprintf(stderr, "craftax: textures.bin not found — run ocean/craftax/pack_textures.py\n");
+        exit(1);
+    }
+    const size_t tile_bytes = CRAFTAX_TEX_TILE_PX * CRAFTAX_TEX_TILE_PX * 4;
+    uint8_t* buf = (uint8_t*)malloc(tile_bytes);
+    for (int i = 0; i < CRAFTAX_TEX_NUM; i++) {
+        if (fread(buf, 1, tile_bytes, f) != tile_bytes) {
+            fprintf(stderr, "craftax: short read on textures.bin at tile %d\n", i);
+            exit(1);
+        }
+        Image img = {
+            .data = buf,
+            .width = CRAFTAX_TEX_TILE_PX,
+            .height = CRAFTAX_TEX_TILE_PX,
+            .mipmaps = 1,
+            .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+        };
+        craftax_textures[i] = LoadTextureFromImage(img);
+        SetTextureFilter(craftax_textures[i], TEXTURE_FILTER_POINT);
+    }
+    free(buf);
+    fclose(f);
+    craftax_textures_loaded = true;
+}
+
+static int craftax_player_tex_id(int32_t direction, bool sleeping) {
+    if (sleeping) return CRAFTAX_TEX_PLAYER_SLEEP;
+    switch (direction) {
+        case 1: return CRAFTAX_TEX_PLAYER_LEFT;
+        case 2: return CRAFTAX_TEX_PLAYER_RIGHT;
+        case 3: return CRAFTAX_TEX_PLAYER_UP;
+        case 4: return CRAFTAX_TEX_PLAYER_DOWN;
+        default: return CRAFTAX_TEX_PLAYER_DOWN;
+    }
+}
+
+static void craftax_draw_tile(int tex_id, int dst_x, int dst_y, float tint_alpha) {
+    if (tex_id < 0 || tex_id >= CRAFTAX_TEX_NUM) return;
+    Rectangle src = {0, 0, CRAFTAX_TEX_TILE_PX, CRAFTAX_TEX_TILE_PX};
+    Rectangle dst = {(float)dst_x, (float)dst_y, CRAFTAX_TEX_DRAW_PX, CRAFTAX_TEX_DRAW_PX};
+    Color tint = {255, 255, 255, (unsigned char)(tint_alpha * 255.0f)};
+    DrawTexturePro(craftax_textures[tex_id], src, dst, (Vector2){0, 0}, 0.0f, tint);
+}
+
 static void c_render(Craftax* env) {
-    (void)env;
+    const int view_w = CRAFTAX_RENDER_COLS * CRAFTAX_TEX_DRAW_PX;
+    const int view_h = CRAFTAX_RENDER_ROWS * CRAFTAX_TEX_DRAW_PX;
+    const int hud_h = 80;
+
+    if (!IsWindowReady()) {
+        InitWindow(view_w, view_h + hud_h, "PufferLib Craftax");
+        SetTargetFPS(30);
+    }
+    if (!craftax_textures_loaded) craftax_load_textures();
+    if (IsKeyDown(KEY_ESCAPE)) exit(0);
+
+    CraftaxState* s = &env->state;
+    int lvl = s->player_level;
+    int pr = s->player_position[0];
+    int pc = s->player_position[1];
+    int half_r = CRAFTAX_RENDER_ROWS / 2;
+    int half_c = CRAFTAX_RENDER_COLS / 2;
+
+    BeginDrawing();
+    ClearBackground(BLACK);
+
+    for (int vr = 0; vr < CRAFTAX_RENDER_ROWS; vr++) {
+        for (int vc = 0; vc < CRAFTAX_RENDER_COLS; vc++) {
+            int wr = pr - half_r + vr;
+            int wc = pc - half_c + vc;
+            int dst_x = vc * CRAFTAX_TEX_DRAW_PX;
+            int dst_y = vr * CRAFTAX_TEX_DRAW_PX;
+
+            int blk = CRAFTAX_BLOCK_OUT_OF_BOUNDS;
+            float light = 1.0f;
+            if (wr >= 0 && wr < CRAFTAX_MAP_SIZE && wc >= 0 && wc < CRAFTAX_MAP_SIZE) {
+                blk = s->map[lvl][wr][wc];
+                light = s->light_map[lvl][wr][wc];
+                if (light < 0.05f) blk = CRAFTAX_BLOCK_DARKNESS;
+            }
+            if (blk < 0 || blk >= CRAFTAX_NUM_BLOCK_TYPES) blk = 0;
+            craftax_draw_tile(blk, dst_x, dst_y, 1.0f);
+
+            // item overlay
+            if (wr >= 0 && wr < CRAFTAX_MAP_SIZE && wc >= 0 && wc < CRAFTAX_MAP_SIZE) {
+                int it = s->item_map[lvl][wr][wc];
+                if (it > 0 && it < 5) {
+                    craftax_draw_tile(CRAFTAX_TEX_ITEM_BASE + it, dst_x, dst_y, 1.0f);
+                }
+            }
+        }
+    }
+
+    // player in center
+    int pid = craftax_player_tex_id(s->player_direction, s->is_sleeping);
+    craftax_draw_tile(pid, half_c * CRAFTAX_TEX_DRAW_PX, half_r * CRAFTAX_TEX_DRAW_PX, 1.0f);
+
+    // night dim overlay
+    if (s->light_level < 1.0f) {
+        unsigned char a = (unsigned char)((1.0f - s->light_level) * 140.0f);
+        DrawRectangle(0, 0, view_w, view_h, (Color){0, 0, 40, a});
+    }
+
+    // HUD
+    int hud_y = view_h;
+    DrawRectangle(0, hud_y, view_w, hud_h, (Color){20, 20, 20, 255});
+    DrawText(TextFormat("HP:%.0f  F:%d  D:%d  E:%d  M:%d  L:%d  t:%d",
+             s->player_health, s->player_food, s->player_drink,
+             s->player_energy, s->player_mana, s->player_level, s->timestep),
+             4, hud_y + 4, 14, WHITE);
+    DrawText(TextFormat("XP:%d  DEX:%d  STR:%d  INT:%d  light:%.2f",
+             s->player_xp, s->player_dexterity, s->player_strength,
+             s->player_intelligence, s->light_level),
+             4, hud_y + 22, 14, (Color){200, 200, 200, 255});
+    int ach_count = 0;
+    for (int i = 0; i < CRAFTAX_NUM_ACHIEVEMENTS; i++) ach_count += s->achievements[i] ? 1 : 0;
+    DrawText(TextFormat("achievements: %d / %d", ach_count, CRAFTAX_NUM_ACHIEVEMENTS),
+             4, hud_y + 40, 14, (Color){180, 220, 180, 255});
+    DrawText(TextFormat("ret:%.2f len:%d", env->episode_return_accum, env->episode_length_accum),
+             4, hud_y + 58, 14, (Color){200, 200, 140, 255});
+
+    EndDrawing();
 }
 
 #endif
