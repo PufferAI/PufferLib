@@ -600,13 +600,17 @@ static inline void craftax_update_mobs_move_melee(
     CraftaxThreefryKey* rng,
     int32_t index
 ) {
-    int32_t level = craftax_step_jax_index(
-        state->player_level,
-        CRAFTAX_NUM_LEVELS
-    );
+    int32_t level = state->player_level;
+    bool old_mask = state->melee_mobs.mask[level][index];
+    // Dead slot early-out: no observable effect on obs/reward/terminal.
+    // Skip body and RNG draws for speed. Breaks per-seed replay against
+    // JAX; define CRAFTAX_JAX_PARITY at build time to restore the
+    // branchless slow path (same pattern in every move_* below).
+#ifndef CRAFTAX_JAX_PARITY
+    if (!old_mask) return;
+#endif
     int32_t old_row = state->melee_mobs.position[level][index][0];
     int32_t old_col = state->melee_mobs.position[level][index][1];
-    bool old_mask = state->melee_mobs.mask[level][index];
     int32_t old_cooldown = state->melee_mobs.attack_cooldown[level][index];
     int32_t mob_type = state->melee_mobs.type_id[level][index];
 
@@ -729,13 +733,13 @@ static inline void craftax_update_mobs_move_passive(
     CraftaxThreefryKey* rng,
     int32_t index
 ) {
-    int32_t level = craftax_step_jax_index(
-        state->player_level,
-        CRAFTAX_NUM_LEVELS
-    );
+    int32_t level = state->player_level;
+    bool old_mask = state->passive_mobs.mask[level][index];
+#ifndef CRAFTAX_JAX_PARITY
+    if (!old_mask) return;
+#endif
     int32_t old_row = state->passive_mobs.position[level][index][0];
     int32_t old_col = state->passive_mobs.position[level][index][1];
-    bool old_mask = state->passive_mobs.mask[level][index];
     int32_t mob_type = state->passive_mobs.type_id[level][index];
 
     CraftaxThreefryKey draw_key =
@@ -794,13 +798,13 @@ static inline void craftax_update_mobs_move_ranged(
     CraftaxThreefryKey* rng,
     int32_t index
 ) {
-    int32_t level = craftax_step_jax_index(
-        state->player_level,
-        CRAFTAX_NUM_LEVELS
-    );
+    int32_t level = state->player_level;
+    bool old_mask = state->ranged_mobs.mask[level][index];
+#ifndef CRAFTAX_JAX_PARITY
+    if (!old_mask) return;
+#endif
     int32_t old_row = state->ranged_mobs.position[level][index][0];
     int32_t old_col = state->ranged_mobs.position[level][index][1];
-    bool old_mask = state->ranged_mobs.mask[level][index];
     int32_t old_cooldown = state->ranged_mobs.attack_cooldown[level][index];
     int32_t mob_type = state->ranged_mobs.type_id[level][index];
 
@@ -932,17 +936,17 @@ static inline void craftax_update_mobs_move_mob_projectile(
     CraftaxState* state,
     int32_t index
 ) {
-    int32_t level = craftax_step_jax_index(
-        state->player_level,
-        CRAFTAX_NUM_LEVELS
-    );
+    int32_t level = state->player_level;
+    bool old_mask = state->mob_projectiles.mask[level][index];
+#ifndef CRAFTAX_JAX_PARITY
+    if (!old_mask) return;
+#endif
     int32_t old_row = state->mob_projectiles.position[level][index][0];
     int32_t old_col = state->mob_projectiles.position[level][index][1];
     int32_t proposed_row =
         old_row + state->mob_projectile_directions[level][index][0];
     int32_t proposed_col =
         old_col + state->mob_projectile_directions[level][index][1];
-    bool old_mask = state->mob_projectiles.mask[level][index];
 
     bool proposed_in_player =
         proposed_row == state->player_position[0]
@@ -1009,17 +1013,17 @@ static inline void craftax_update_mobs_move_player_projectile(
     CraftaxState* state,
     int32_t index
 ) {
-    int32_t level = craftax_step_jax_index(
-        state->player_level,
-        CRAFTAX_NUM_LEVELS
-    );
+    int32_t level = state->player_level;
+    bool old_mask = state->player_projectiles.mask[level][index];
+#ifndef CRAFTAX_JAX_PARITY
+    if (!old_mask) return;
+#endif
     int32_t old_row = state->player_projectiles.position[level][index][0];
     int32_t old_col = state->player_projectiles.position[level][index][1];
     int32_t proposed_row =
         old_row + state->player_projectile_directions[level][index][0];
     int32_t proposed_col =
         old_col + state->player_projectile_directions[level][index][1];
-    bool old_mask = state->player_projectiles.mask[level][index];
 
     float damage_vector[3];
     craftax_update_mobs_player_projectile_damage_vector(
