@@ -21,7 +21,7 @@ import numpy as np
 ASSETS = Path(__file__).resolve().parents[2] / (
     ".venv/lib/python3.12/site-packages/craftax/craftax/assets"
 )
-OUT_BIN = Path(__file__).parent / "textures.bin"
+OUT_BIN = Path(__file__).resolve().parents[2] / "resources" / "craftax" / "textures.bin"
 
 TILE = 16
 

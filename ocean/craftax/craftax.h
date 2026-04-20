@@ -752,9 +752,9 @@ static bool craftax_textures_loaded = false;
 static void craftax_load_textures(void) {
     if (craftax_textures_loaded) return;
     const char* candidates[] = {
-        "ocean/craftax/textures.bin",
-        "../ocean/craftax/textures.bin",
-        "../../ocean/craftax/textures.bin",
+        "resources/craftax/textures.bin",
+        "../resources/craftax/textures.bin",
+        "../../resources/craftax/textures.bin",
     };
     FILE* f = NULL;
     for (size_t i = 0; i < sizeof(candidates)/sizeof(candidates[0]); i++) {
@@ -762,7 +762,7 @@ static void craftax_load_textures(void) {
         if (f) break;
     }
     if (!f) {
-        fprintf(stderr, "craftax: textures.bin not found — run ocean/craftax/pack_textures.py\n");
+        fprintf(stderr, "craftax: textures.bin not found in resources/craftax -- run ocean/craftax/pack_textures.py\n");
         exit(1);
     }
     const size_t tile_bytes = CRAFTAX_TEX_TILE_PX * CRAFTAX_TEX_TILE_PX * 4;

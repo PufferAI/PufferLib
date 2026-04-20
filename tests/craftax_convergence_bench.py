@@ -11,8 +11,8 @@ has 67 achievements total; the extra 45 are plotted separately so Full
 isn't rewarded twice for reaching the same tier.
 
 Usage:
-    uv run python scripts/craftax_convergence_bench.py --timesteps 10_000_000
-    uv run python scripts/craftax_convergence_bench.py --skip-train --plot-only
+    uv run python tests/craftax_convergence_bench.py --timesteps 10_000_000
+    uv run python tests/craftax_convergence_bench.py --skip-train --plot-only
 """
 import argparse
 import json
