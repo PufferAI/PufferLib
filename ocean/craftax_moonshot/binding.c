@@ -9,17 +9,17 @@
 #define ACT_SIZES {CRAFTAX_NUM_ACTIONS}
 #define OBS_TENSOR_T FloatTensor
 
+#define CRAFTAX_VEC_TILE_SIZE 128
 #define MY_VEC_INIT
 #define MY_VEC_CLOSE
 #define MY_VEC_STEP craftax_vec_step
+#define MY_VEC_STEP_RANGE craftax_vec_step_range
 #define Env Craftax
 #include "vecenv.h"
 
 // Tiled vector step: process agents in tiles that fit comfortably in cache.
 // Each thread processes a contiguous block of lightweight env handles while
 // the heavier CraftaxState storage lives in a separate arena.
-#define CRAFTAX_VEC_TILE_SIZE 128
-
 void craftax_vec_step(StaticVec* vec) {
     memset(vec->rewards, 0, vec->total_agents * sizeof(float));
     memset(vec->terminals, 0, vec->total_agents * sizeof(float));
@@ -29,6 +29,20 @@ void craftax_vec_step(StaticVec* vec) {
     for (int tile = 0; tile < size; tile += CRAFTAX_VEC_TILE_SIZE) {
         int end = tile + CRAFTAX_VEC_TILE_SIZE;
         if (end > size) end = size;
+        for (int i = tile; i < end; i++) {
+            c_step_gameplay(&envs[i]);
+            c_step_encode(&envs[i]);
+        }
+    }
+}
+
+void craftax_vec_step_range(StaticVec* vec, int env_start, int env_count, int num_workers) {
+    (void)num_workers;
+    Craftax* envs = (Craftax*)vec->envs;
+    int env_end = env_start + env_count;
+    for (int tile = env_start; tile < env_end; tile += CRAFTAX_VEC_TILE_SIZE) {
+        int end = tile + CRAFTAX_VEC_TILE_SIZE;
+        if (end > env_end) end = env_end;
         for (int i = tile; i < end; i++) {
             c_step_gameplay(&envs[i]);
             c_step_encode(&envs[i]);
