@@ -603,6 +603,12 @@ int get_num_act_sizes(void) { return (int)(sizeof(_act_sizes) / sizeof(_act_size
 const char* get_obs_dtype(void) { return dtype_symbol; }
 size_t get_obs_elem_size(void) { return obs_element_size(); }
 
+#ifdef MY_VEC_STEP
+void MY_VEC_STEP(StaticVec* vec);
+static inline void _static_vec_env_step(StaticVec* vec) {
+    MY_VEC_STEP(vec);
+}
+#else
 static inline void _static_vec_env_step(StaticVec* vec) {
     memset(vec->rewards, 0, vec->total_agents * sizeof(float));
     memset(vec->terminals, 0, vec->total_agents * sizeof(float));
@@ -612,6 +618,7 @@ static inline void _static_vec_env_step(StaticVec* vec) {
         c_step(&envs[i]);
     }
 }
+#endif
 
 void gpu_vec_step(StaticVec* vec) {
     assert(vec->buffers == 1);
