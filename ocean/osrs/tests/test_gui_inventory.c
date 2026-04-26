@@ -3,8 +3,8 @@
  * @brief Regression tests for GUI inventory snapshot/reset logic used by inferno human mode.
  *
  * BUILD:
- *   cc -std=c11 -O0 -g -I. -I./ocean/osrs/raylib-5.5_macos/include -o /tmp/test_gui_inventory \
- *       ocean/osrs/tests/test_gui_inventory.c ./ocean/osrs/raylib-5.5_macos/lib/libraylib.a \
+ *   cc -std=c11 -O0 -g -I. -I./raylib-5.5_macos/include -o /tmp/test_gui_inventory \
+ *       ocean/osrs/tests/test_gui_inventory.c ./raylib-5.5_macos/lib/libraylib.a \
  *       -framework Cocoa -framework OpenGL -framework IOKit -framework CoreVideo -lm
  *   /tmp/test_gui_inventory
  */
@@ -14,6 +14,7 @@
 
 #include "ocean/osrs/osrs_pvp_actions.h"
 #include "ocean/osrs/osrs_gui.h"
+#include "ocean/osrs/osrs_human_input.h"
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -156,11 +157,42 @@ static void test_gui_reset_rebuild_restores_potions(void) {
     ASSERT_INT_EQ("stamina snapshot restored", gs.inv_prev_stamina_doses, 4);
 }
 
+static void test_human_equipment_click_queues_without_mutating_player(void) {
+    printf("--- human equipment click queues without mutating player ---\n");
+
+    GuiState gs;
+    Player p;
+    HumanInput hi;
+    memset(&gs, 0, sizeof(gs));
+    memset(&p, 0, sizeof(p));
+    human_input_init(&hi);
+
+    hi.enabled = 1;
+    p.equipped[GEAR_SLOT_WEAPON] = ITEM_KODAI_WAND;
+    gs.inv_grid[0].type = INV_SLOT_EQUIPMENT;
+    gs.inv_grid[0].item_db_idx = ITEM_TOXIC_BLOWPIPE;
+    gs.inv_grid[0].osrs_id = ITEM_DATABASE[ITEM_TOXIC_BLOWPIPE].item_id;
+
+    InvAction action = gui_inv_click(&gs, &p, 0, &hi);
+
+    ASSERT_INT_EQ("equipment click returns equip action", action, INV_ACTION_EQUIP);
+    ASSERT_INT_EQ("weapon not mutated before tick",
+        p.equipped[GEAR_SLOT_WEAPON], ITEM_KODAI_WAND);
+    ASSERT_INT_EQ("one command queued", hi.commands.count, 1);
+    ASSERT_INT_EQ("queued equip command",
+        hi.commands.items[0].kind, HUMAN_COMMAND_EQUIP_INVENTORY_ITEM);
+    ASSERT_INT_EQ("queued source slot", hi.commands.items[0].inventory_slot, 0);
+    ASSERT_INT_EQ("queued item", hi.commands.items[0].item_db_idx, ITEM_TOXIC_BLOWPIPE);
+
+    human_input_destroy(&hi);
+}
+
 int main(void) {
     test_gui_populate_tracks_bastion_and_stamina();
     test_gui_update_tracks_bastion_and_stamina();
     test_gui_reset_helper_clears_inventory_interaction_state();
     test_gui_reset_rebuild_restores_potions();
+    test_human_equipment_click_queues_without_mutating_player();
 
     printf("\n%d/%d tests passed", tests_passed, tests_run);
     if (tests_failed > 0) {

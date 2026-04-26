@@ -1341,44 +1341,88 @@ static InvAction gui_inv_click(GuiState* gs, Player* p, int slot,
 
     switch (inv->type) {
         case INV_SLOT_EQUIPMENT: {
-            /* equipment clicks always directly equip (more faithful than RL loadout presets) */
             int gear_slot = item_to_gear_slot(inv->item_db_idx);
             if (gear_slot >= 0) {
-                slot_equip_item(p, gear_slot, inv->item_db_idx);
+                if (human_active) {
+                    human_input_queue_equip_inventory_item(hi, slot, inv->item_db_idx, gear_slot);
+                    gs->human_clicked_inv_slot = slot;
+                } else {
+                    slot_equip_item(p, gear_slot, inv->item_db_idx);
+                }
             }
             return INV_ACTION_EQUIP;
         }
         case INV_SLOT_FOOD:
-            if (human_active) { hi->pending_food = 1; gs->human_clicked_inv_slot = slot; }
+            if (human_active) {
+                hi->pending_food = 1;
+                human_input_queue_eat(hi, 0);
+                gs->human_clicked_inv_slot = slot;
+            }
             else { eat_food(p, 0); }
             return INV_ACTION_EAT;
         case INV_SLOT_KARAMBWAN:
-            if (human_active) { hi->pending_karambwan = 1; gs->human_clicked_inv_slot = slot; }
+            if (human_active) {
+                hi->pending_karambwan = 1;
+                human_input_queue_eat(hi, 1);
+                gs->human_clicked_inv_slot = slot;
+            }
             else { eat_food(p, 1); }
             return INV_ACTION_EAT;
         case INV_SLOT_BREW:
-            if (human_active) { hi->pending_potion = POTION_BREW; gs->human_clicked_inv_slot = slot; }
+            if (human_active) {
+                hi->pending_potion = POTION_BREW;
+                human_input_queue_drink(hi, POTION_BREW, slot);
+                gs->human_clicked_inv_slot = slot;
+            }
             return INV_ACTION_DRINK;
         case INV_SLOT_RESTORE:
-            if (human_active) { hi->pending_potion = POTION_RESTORE; gs->human_clicked_inv_slot = slot; }
+            if (human_active) {
+                hi->pending_potion = POTION_RESTORE;
+                human_input_queue_drink(hi, POTION_RESTORE, slot);
+                gs->human_clicked_inv_slot = slot;
+            }
             return INV_ACTION_DRINK;
         case INV_SLOT_COMBAT_POT:
-            if (human_active) { hi->pending_potion = POTION_COMBAT; gs->human_clicked_inv_slot = slot; }
+            if (human_active) {
+                hi->pending_potion = POTION_COMBAT;
+                human_input_queue_drink(hi, POTION_COMBAT, slot);
+                gs->human_clicked_inv_slot = slot;
+            }
             return INV_ACTION_DRINK;
         case INV_SLOT_RANGED_POT:
-            if (human_active) { hi->pending_potion = POTION_RANGED; gs->human_clicked_inv_slot = slot; }
+            if (human_active) {
+                hi->pending_potion = POTION_RANGED;
+                human_input_queue_drink(hi, POTION_RANGED, slot);
+                gs->human_clicked_inv_slot = slot;
+            }
             return INV_ACTION_DRINK;
         case INV_SLOT_ANTIVENOM:
-            if (human_active) { hi->pending_potion = POTION_ANTIVENOM; gs->human_clicked_inv_slot = slot; }
+            if (human_active) {
+                hi->pending_potion = POTION_ANTIVENOM;
+                human_input_queue_drink(hi, POTION_ANTIVENOM, slot);
+                gs->human_clicked_inv_slot = slot;
+            }
             return INV_ACTION_DRINK;
         case INV_SLOT_PRAYER_POT:
-            if (human_active) { hi->pending_potion = POTION_PRAYER_POT; gs->human_clicked_inv_slot = slot; }
+            if (human_active) {
+                hi->pending_potion = POTION_PRAYER_POT;
+                human_input_queue_drink(hi, POTION_PRAYER_POT, slot);
+                gs->human_clicked_inv_slot = slot;
+            }
             return INV_ACTION_DRINK;
         case INV_SLOT_BASTION_POT:
-            if (human_active) { hi->pending_potion = POTION_BASTION; gs->human_clicked_inv_slot = slot; }
+            if (human_active) {
+                hi->pending_potion = POTION_BASTION;
+                human_input_queue_drink(hi, POTION_BASTION, slot);
+                gs->human_clicked_inv_slot = slot;
+            }
             return INV_ACTION_DRINK;
         case INV_SLOT_STAMINA_POT:
-            if (human_active) { hi->pending_potion = POTION_STAMINA; gs->human_clicked_inv_slot = slot; }
+            if (human_active) {
+                hi->pending_potion = POTION_STAMINA;
+                human_input_queue_drink(hi, POTION_STAMINA, slot);
+                gs->human_clicked_inv_slot = slot;
+            }
             return INV_ACTION_DRINK;
         default:
             return INV_ACTION_NONE;

@@ -53,12 +53,33 @@ typedef struct {
 /* c_step/c_reset/c_close/c_render must be defined BEFORE including vecenv.h */
 
 void c_step(Env* env) {
-    /* float actions -> int staging */
-    for (int i = 0; i < NUM_ATNS; i++) {
-        env->acts_staging[i] = (int)env->actions[i];
+    int used_human_commands = 0;
+    RenderClient* render_client = (RenderClient*)env->render_env.client;
+
+    if (render_client && render_client->human_input.enabled &&
+        ENCOUNTER_ZULRAH.step_human_commands) {
+        const char* record_path = getenv("RECORD_REPLAY");
+        if (record_path && record_path[0] && render_client->human_input.commands.count > 0) {
+            fprintf(stderr, "RECORD_REPLAY cannot record human command mode\n");
+            abort();
+        }
+        ENCOUNTER_ZULRAH.step_human_commands(env->enc_state, &render_client->human_input);
+        used_human_commands = 1;
+    } else {
+        if (render_client) {
+            human_input_clear_pending(&render_client->human_input);
+            human_input_clear_move(&render_client->human_input);
+            ENCOUNTER_ZULRAH.put_int(env->enc_state, "player_dest_x", -1);
+            ENCOUNTER_ZULRAH.put_int(env->enc_state, "player_dest_y", -1);
+            ENCOUNTER_ZULRAH.put_int(env->enc_state, "human_command_mode", 0);
+        }
+        for (int i = 0; i < NUM_ATNS; i++) {
+            env->acts_staging[i] = (int)env->actions[i];
+        }
     }
 
-    ENCOUNTER_ZULRAH.step(env->enc_state, env->acts_staging);
+    if (!used_human_commands)
+        ENCOUNTER_ZULRAH.step(env->enc_state, env->acts_staging);
 
     /* write obs + mask directly (mask appended after raw obs) */
     float* obs = (float*)env->observations;
@@ -114,6 +135,10 @@ void c_close(Env* env) {
     if (env->enc_state) {
         ENCOUNTER_ZULRAH.destroy(env->enc_state);
         env->enc_state = NULL;
+    }
+    if (env->render_env.client) {
+        render_destroy_client((RenderClient*)env->render_env.client);
+        env->render_env.client = NULL;
     }
 }
 

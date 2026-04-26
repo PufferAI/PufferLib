@@ -268,6 +268,7 @@ static void visual_frame(void* arg) {
             vs->episode_ended = 0;
             render_clear_history(rc);
             effect_clear_all(rc->effects);
+            flight_clear_all(rc);
             gui_reset_inventory_ui_state(&rc->gui);
             if (env->encounter_def) {
                 ((const EncounterDef*)env->encounter_def)->reset(
@@ -311,8 +312,12 @@ static void visual_frame(void* arg) {
         /* encounter mode */
         const EncounterDef* edef = (const EncounterDef*)env->encounter_def;
         int enc_actions[16] = {0};
+        int used_human_step = 0;
 
-        if (rc->human_input.enabled) {
+        if (rc->human_input.enabled && edef->step_human_commands) {
+            edef->step_human_commands(env->encounter_state, &rc->human_input);
+            used_human_step = 1;
+        } else if (rc->human_input.enabled) {
             /* human control: per-encounter translator */
             if (edef->translate_human_input)
                 edef->translate_human_input(&rc->human_input, enc_actions,
@@ -339,7 +344,8 @@ static void visual_frame(void* arg) {
                 enc_actions[h] = rand() % edef->action_head_dims[h];
             }
         }
-        edef->step(env->encounter_state, enc_actions);
+        if (!used_human_step)
+            edef->step(env->encounter_state, enc_actions);
         /* sync env->tick so renderer HP bars/splats use correct tick */
         env->tick = edef->get_tick(env->encounter_state);
 

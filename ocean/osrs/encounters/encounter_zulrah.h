@@ -38,6 +38,7 @@
 #include "../osrs_items.h"
 #include "../osrs_combat.h"
 #include "../osrs_special_attacks.h"
+#include "../osrs_pvp_gear.h"
 #include "../osrs_consumables.h"
 #include "../osrs_damage.h"
 #include "../osrs_collision.h"
@@ -522,6 +523,10 @@ typedef struct {
     /* derived combat stats (computed from ITEM_DATABASE + loadout in zul_reset) */
     EncounterLoadoutStats mage_stats;
     EncounterLoadoutStats range_stats;
+    int human_command_mode;
+    EncounterLoadoutStats human_loadout_stats;
+    const HumanCommand* human_commands;
+    int human_command_count;
 
     /* eye of ayak soul rend: cumulative magic defence drain on zulrah.
      * carries over between forms (magic defence is a stat, not a level). */
@@ -580,6 +585,7 @@ typedef struct {
 } ZulrahState;
 
 /* RNG: use shared encounter_rand_int(), encounter_rand_float() from osrs_combat.h */
+static const EncounterLoadoutStats* zul_current_loadout_stats(ZulrahState* s, int is_mage);
 
 /* ======================================================================== */
 /* helpers                                                                   */
@@ -687,8 +693,8 @@ static void zul_try_envenom(ZulrahState* s) {
    uses current gear loadout stats (derived from ITEM_DATABASE).
    magic defence uses 70% magic level + 30% defence level per OSRS formula. */
 static int zul_player_def_roll(ZulrahState* s, int attack_style) {
-    const EncounterLoadoutStats* ls = (s->player_gear == ZUL_GEAR_MAGE)
-        ? &s->mage_stats : &s->range_stats;
+    const EncounterLoadoutStats* ls = zul_current_loadout_stats(
+        s, s->player_gear == ZUL_GEAR_MAGE);
     /* melee_style=2 (crush) for zulrah tail whip */
     int def_bonus = encounter_player_def_bonus(
         ls->def_stab, ls->def_slash, ls->def_crush, ls->def_magic, ls->def_ranged,
@@ -839,6 +845,33 @@ static inline void zul_form_def_bonuses(ZulrahForm form, int* def_magic, int* de
     *def_ranged = m->ranged_def;
 }
 
+static AttackStyle zul_player_equipped_attack_style(const ZulrahState* s) {
+    AttackStyle style = (AttackStyle)get_item_attack_style(s->player.equipped[GEAR_SLOT_WEAPON]);
+    if (style == ATTACK_STYLE_MAGIC ||
+        style == ATTACK_STYLE_RANGED ||
+        style == ATTACK_STYLE_MELEE) {
+        return style;
+    }
+    return ATTACK_STYLE_RANGED;
+}
+
+static void zul_refresh_human_loadout_stats(ZulrahState* s) {
+    AttackStyle style = zul_player_equipped_attack_style(s);
+    FightStyle fight_style = s->player.fight_style;
+    int spell_base_damage = (style == ATTACK_STYLE_MAGIC) ? 30 : 0;
+    encounter_compute_player_equipped_stats(
+        &s->player, style, fight_style, spell_base_damage,
+        &s->human_loadout_stats);
+}
+
+static const EncounterLoadoutStats* zul_current_loadout_stats(ZulrahState* s, int is_mage) {
+    if (s->human_command_mode) {
+        zul_refresh_human_loadout_stats(s);
+        return &s->human_loadout_stats;
+    }
+    return is_mage ? &s->mage_stats : &s->range_stats;
+}
+
 static int zul_player_attack_hits(
     ZulrahState* s, int is_mage, const OsrsPreparedAttackEffects* attack_effects
 ) {
@@ -870,9 +903,12 @@ static void zul_player_attack(ZulrahState* s, int is_mage) {
     if (s->player.attack_timer > 0) return;
     if (s->player_stunned_ticks > 0) return;
 
-    int gear_ok = (is_mage && s->player_gear == ZUL_GEAR_MAGE) ||
-                  (!is_mage && s->player_gear == ZUL_GEAR_RANGE);
-    const EncounterLoadoutStats* ls = is_mage ? &s->mage_stats : &s->range_stats;
+    const EncounterLoadoutStats* ls = zul_current_loadout_stats(s, is_mage);
+    int gear_ok = s->human_command_mode
+        ? ((is_mage && ls->style == ATTACK_STYLE_MAGIC) ||
+           (!is_mage && ls->style == ATTACK_STYLE_RANGED))
+        : ((is_mage && s->player_gear == ZUL_GEAR_MAGE) ||
+           (!is_mage && s->player_gear == ZUL_GEAR_RANGE));
     const MonsterStats* monster = &MONSTER_DATABASE[ZUL_FORM_MONSTER_IDX[s->current_form]];
     OsrsMagicAttackKind magic_kind = is_mage ? OSRS_MAGIC_ATTACK_POWERED_STAFF : OSRS_MAGIC_ATTACK_NONE;
     OsrsPreparedAttackEffects attack_effects = osrs_prepare_attack_effects(
@@ -939,13 +975,13 @@ static void zul_player_spec(ZulrahState* s) {
     if (s->player.attack_timer > 0) return;
     if (s->player_stunned_ticks > 0) return;
 
-    /* determine weapon and stats from current gear */
     int is_mage = (s->player_gear == ZUL_GEAR_MAGE);
-    const EncounterLoadoutStats* ls = is_mage ? &s->mage_stats : &s->range_stats;
-    const uint8_t* loadout = is_mage
-        ? ZUL_MAGE_LOADOUT[s->gear_tier]
-        : ZUL_RANGE_LOADOUT[s->gear_tier];
-    int weapon = loadout[GEAR_SLOT_WEAPON];
+    const EncounterLoadoutStats* ls = zul_current_loadout_stats(s, is_mage);
+    int weapon = s->human_command_mode
+        ? s->player.equipped[GEAR_SLOT_WEAPON]
+        : (is_mage
+            ? ZUL_MAGE_LOADOUT[s->gear_tier][GEAR_SLOT_WEAPON]
+            : ZUL_RANGE_LOADOUT[s->gear_tier][GEAR_SLOT_WEAPON]);
 
     int cost = osrs_spec_cost(weapon);
     if (cost == 0) return;  /* weapon has no spec (e.g. bowfa) */
@@ -1521,6 +1557,8 @@ static void zul_process_prayer(ZulrahState* s, int overhead_action, int offensiv
             encounter_update_loadout_level(&s->range_stats, s->player.offensive_prayer,
                 s->player.current_ranged, s->player.current_ranged);
         }
+        if (s->human_command_mode)
+            zul_refresh_human_loadout_stats(s);
     }
 }
 
@@ -1578,6 +1616,47 @@ static void zul_process_gear(ZulrahState* s, int atk) {
         encounter_apply_loadout(&s->player, ZUL_RANGE_LOADOUT[s->gear_tier], GEAR_RANGED);
         s->total_gear_switches++;
     }
+}
+
+static FightStyle zul_default_fight_style_for_style(AttackStyle style) {
+    if (style == ATTACK_STYLE_MAGIC) return FIGHT_STYLE_ACCURATE;
+    if (style == ATTACK_STYLE_RANGED) return FIGHT_STYLE_RAPID;
+    return FIGHT_STYLE_ACCURATE;
+}
+
+static void zul_sync_human_gear_style(ZulrahState* s) {
+    AttackStyle style = zul_player_equipped_attack_style(s);
+    s->player_gear = (style == ATTACK_STYLE_MAGIC) ? ZUL_GEAR_MAGE : ZUL_GEAR_RANGE;
+}
+
+static void zul_apply_human_player_commands(ZulrahState* s) {
+    int did_change_stats = 0;
+    for (int i = 0; i < s->human_command_count; i++) {
+        const HumanCommand* cmd = &s->human_commands[i];
+        if (cmd->kind == HUMAN_COMMAND_EQUIP_INVENTORY_ITEM) {
+            if (cmd->gear_slot >= 0 && cmd->gear_slot < NUM_GEAR_SLOTS &&
+                cmd->item_db_idx >= 0 && cmd->item_db_idx < NUM_ITEMS) {
+                int changed = slot_equip_item(&s->player, cmd->gear_slot, (uint8_t)cmd->item_db_idx);
+                if (changed) {
+                    s->total_gear_switches++;
+                    did_change_stats = 1;
+                    if (cmd->gear_slot == GEAR_SLOT_WEAPON) {
+                        AttackStyle style = zul_player_equipped_attack_style(s);
+                        s->player.fight_style = zul_default_fight_style_for_style(style);
+                        zul_sync_human_gear_style(s);
+                    }
+                }
+            }
+        } else if (cmd->kind == HUMAN_COMMAND_FIGHT_STYLE) {
+            if (cmd->fight_style >= FIGHT_STYLE_ACCURATE &&
+                cmd->fight_style <= FIGHT_STYLE_DEFENSIVE_AUTOCAST) {
+                s->player.fight_style = (FightStyle)cmd->fight_style;
+                did_change_stats = 1;
+            }
+        }
+    }
+    if (did_change_stats)
+        zul_refresh_human_loadout_stats(s);
 }
 
 
@@ -1901,6 +1980,9 @@ static void zul_step(EncounterState* state, const int* actions) {
     /* prayer doesn't interrupt interactions */
     zul_process_prayer(s, actions[ZUL_HEAD_PRAYER], actions[ZUL_HEAD_OFFENSIVE]);
 
+    if (s->human_command_mode)
+        zul_apply_human_player_commands(s);
+
     /* spec toggle: arm/disarm (does NOT interrupt interaction) */
     if (actions[ZUL_HEAD_SPEC] == 1) {
         osrs_spec_toggle(&s->player.spec_armed);
@@ -1916,11 +1998,13 @@ static void zul_step(EncounterState* state, const int* actions) {
 
     /* gear switch from attack action — interrupts if actually switching */
     int atk_action = actions[ZUL_HEAD_ATTACK];
-    if ((atk_action == ZUL_ATK_MAGE && s->player_gear != ZUL_GEAR_MAGE) ||
-        (atk_action == ZUL_ATK_RANGE && s->player_gear != ZUL_GEAR_RANGE)) {
-        osrs_interaction_check_interrupt(&s->interaction, OSRS_IACT_EQUIP);
+    if (!s->human_command_mode) {
+        if ((atk_action == ZUL_ATK_MAGE && s->player_gear != ZUL_GEAR_MAGE) ||
+            (atk_action == ZUL_ATK_RANGE && s->player_gear != ZUL_GEAR_RANGE)) {
+            osrs_interaction_check_interrupt(&s->interaction, OSRS_IACT_EQUIP);
+        }
+        zul_process_gear(s, atk_action);
     }
-    zul_process_gear(s, atk_action);
 
     /* attack action sets interaction target (zulrah is always entity slot 0) */
     if (atk_action == ZUL_ATK_MAGE || atk_action == ZUL_ATK_RANGE) {
@@ -2008,6 +2092,8 @@ static void zul_step(EncounterState* state, const int* actions) {
             encounter_update_loadout_level(&s->range_stats, s->player.offensive_prayer,
                 s->player.current_ranged, s->player.current_ranged);
         }
+        if (s->human_command_mode)
+            zul_refresh_human_loadout_stats(s);
     }
 
     if (s->player.current_hitpoints <= 0) {
@@ -2189,8 +2275,15 @@ static void zul_put_int(EncounterState* state, const char* key, int value) {
     else if (strcmp(key, "gear_tier") == 0) {
         if (value >= 0 && value < ZUL_NUM_GEAR_TIERS) s->gear_tier = value;
     }
-    else if (strcmp(key, "player_dest_x") == 0) { s->player_dest_x = value; s->player_dest_explicit = 1; }
-    else if (strcmp(key, "player_dest_y") == 0) { s->player_dest_y = value; s->player_dest_explicit = 1; }
+    else if (strcmp(key, "player_dest_x") == 0) {
+        s->player_dest_x = value;
+        if (value >= 0) s->player_dest_explicit = 1;
+    }
+    else if (strcmp(key, "player_dest_y") == 0) {
+        s->player_dest_y = value;
+        if (value >= 0) s->player_dest_explicit = 1;
+    }
+    else if (strcmp(key, "human_command_mode") == 0) s->human_command_mode = value;
 }
 static void zul_put_float(EncounterState* st, const char* k, float v) { (void)st;(void)k;(void)v; }
 static void zul_put_ptr(EncounterState* st, const char* k, void* v) {
@@ -2262,7 +2355,7 @@ static void zul_render_post_tick(EncounterState* state, EncounterOverlay* ov) {
                 s->attack_events[i].src_x, s->attack_events[i].src_y,
                 s->attack_events[i].dst_x, s->attack_events[i].dst_y,
                 4, 0,
-                40, 100, 0, 12, 0.0f, 0, ZUL_NPC_SIZE, 1, 0);
+                40, 100, 0, 12, 0.0f, 0, ZUL_NPC_SIZE, 1, 0, 0);
         } else {
             /* ranged/magic attack: tracks player, zulrah height → player height */
             uint32_t zul_proj_model = (s->attack_events[i].style == 0)
@@ -2271,7 +2364,7 @@ static void zul_render_post_tick(EncounterState* state, EncounterOverlay* ov) {
                 s->attack_events[i].src_x, s->attack_events[i].src_y,
                 s->attack_events[i].dst_x, s->attack_events[i].dst_y,
                 s->attack_events[i].style, s->attack_events[i].damage,
-                35, 480, 64, 16, 0.0f, 1, ZUL_NPC_SIZE, 1, zul_proj_model);
+                35, 480, 64, 16, 0.0f, 1, ZUL_NPC_SIZE, 1, zul_proj_model, 0);
         }
     }
     for (int i = 0; i < s->cloud_event_count && ov->projectile_count < ENCOUNTER_MAX_OVERLAY_PROJECTILES; i++) {
@@ -2282,7 +2375,7 @@ static void zul_render_post_tick(EncounterState* state, EncounterOverlay* ov) {
             /* duration from flight_ticks * 30, high arc start, ground end,
                curve=10, arc_height=3.0 (high sinusoidal), no tracking, src_size=5 */
             s->cloud_events[i].flight_ticks * 30, 200, 0, 10, 3.0f, 0, ZUL_NPC_SIZE, 1,
-            GFX_CLOUD_PROJ_MODEL);
+            GFX_CLOUD_PROJ_MODEL, 0);
     }
 }
 static int zul_get_winner(EncounterState* state) { return ((ZulrahState*)state)->winner; }
@@ -2321,6 +2414,84 @@ static void zul_translate_human_input(HumanInput* hi, int* actions, EncounterSta
     (void)state;
 }
 
+static int zul_attack_action_for_weapon(uint8_t weapon) {
+    AttackStyle style = (AttackStyle)get_item_attack_style(weapon);
+    return (style == ATTACK_STYLE_MAGIC) ? ZUL_ATK_MAGE : ZUL_ATK_RANGE;
+}
+
+static void zul_translate_human_commands(HumanInput* hi, int* actions, ZulrahState* s) {
+    for (int h = 0; h < ZUL_NUM_ACTION_HEADS; h++) actions[h] = 0;
+
+    uint8_t queued_weapon = s->player.equipped[GEAR_SLOT_WEAPON];
+    for (int i = 0; i < hi->commands.count; i++) {
+        const HumanCommand* cmd = &hi->commands.items[i];
+        if (cmd->kind == HUMAN_COMMAND_EQUIP_INVENTORY_ITEM &&
+            cmd->gear_slot == GEAR_SLOT_WEAPON &&
+            cmd->item_db_idx >= 0 && cmd->item_db_idx < NUM_ITEMS) {
+            queued_weapon = (uint8_t)cmd->item_db_idx;
+        }
+
+        switch (cmd->kind) {
+            case HUMAN_COMMAND_WALK:
+                s->player_dest_x = cmd->world_x;
+                s->player_dest_y = cmd->world_y;
+                s->player_dest_explicit = 1;
+                actions[ZUL_HEAD_ATTACK] = ZUL_ATK_NONE;
+                osrs_interaction_clear(&s->interaction);
+                break;
+            case HUMAN_COMMAND_ATTACK_NPC:
+                actions[ZUL_HEAD_ATTACK] = zul_attack_action_for_weapon(queued_weapon);
+                s->player_dest_x = -1;
+                s->player_dest_y = -1;
+                s->player_dest_explicit = 0;
+                break;
+            case HUMAN_COMMAND_SPELL_TARGET:
+                actions[ZUL_HEAD_ATTACK] = ZUL_ATK_MAGE;
+                s->player_dest_x = -1;
+                s->player_dest_y = -1;
+                s->player_dest_explicit = 0;
+                break;
+            case HUMAN_COMMAND_OVERHEAD_PRAYER:
+                actions[ZUL_HEAD_PRAYER] = cmd->overhead_prayer;
+                break;
+            case HUMAN_COMMAND_OFFENSIVE_PRAYER:
+                actions[ZUL_HEAD_OFFENSIVE] = cmd->offensive_prayer;
+                break;
+            case HUMAN_COMMAND_EAT:
+                actions[ZUL_HEAD_FOOD] = cmd->food == 1 ? 2 : 1;
+                break;
+            case HUMAN_COMMAND_DRINK:
+                if (cmd->potion == POTION_BREW) actions[ZUL_HEAD_FOOD] = 1;
+                else if (cmd->potion == POTION_RESTORE ||
+                         cmd->potion == POTION_PRAYER_POT) actions[ZUL_HEAD_POTION] = 1;
+                else if (cmd->potion == POTION_ANTIVENOM) actions[ZUL_HEAD_POTION] = 2;
+                break;
+            case HUMAN_COMMAND_SPEC_TOGGLE:
+                actions[ZUL_HEAD_SPEC] = 1;
+                break;
+            case HUMAN_COMMAND_EQUIP_INVENTORY_ITEM:
+            case HUMAN_COMMAND_FIGHT_STYLE:
+            case HUMAN_COMMAND_NONE:
+                break;
+        }
+    }
+}
+
+static void zul_step_human_commands(EncounterState* state, HumanInput* hi) {
+    ZulrahState* s = (ZulrahState*)state;
+    int actions[ZUL_NUM_ACTION_HEADS];
+    s->human_command_mode = 1;
+    s->human_commands = hi->commands.items;
+    s->human_command_count = hi->commands.count;
+    zul_sync_human_gear_style(s);
+    zul_refresh_human_loadout_stats(s);
+    zul_translate_human_commands(hi, actions, s);
+    zul_step(state, actions);
+    s->human_commands = NULL;
+    s->human_command_count = 0;
+    human_input_clear_pending(hi);
+}
+
 /* ======================================================================== */
 /* encounter definition                                                      */
 /* ======================================================================== */
@@ -2335,6 +2506,7 @@ static const EncounterDef ENCOUNTER_ZULRAH = {
     .destroy = zul_destroy,
     .reset = zul_reset,
     .step = zul_step,
+    .step_human_commands = zul_step_human_commands,
     .write_obs = zul_write_obs,
     .write_mask = zul_write_mask,
     .get_reward = zul_get_reward,

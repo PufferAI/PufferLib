@@ -112,7 +112,13 @@ typedef struct {
     float arc_height;           /* sinusoidal arc peak in tiles (0 = use quadratic) */
     int tracks_target;          /* 1 = re-aim toward target each tick */
     int start_delay;            /* client ticks before projectile becomes visible/moves */
+    int motion_mode;            /* EncounterProjectileMotionMode */
+    float offset_x, offset_y, offset_z;
     uint32_t model_id;          /* GFX model from cache (0 = style-based fallback) */
+    int anim_id;                /* spotanim animation sequence (-1 = static model) */
+    int anim_frame;
+    int anim_tick_counter;
+    AnimModelState* anim_state;
     int impact_gfx_id;          /* landing spotanim to spawn on arrival */
 } FlightProjectile;
 
@@ -712,6 +718,7 @@ static void context_menu_execute(RenderClient* rc, int item_idx) {
             rc->human_input.pending_move_x = cm->walk_tile_x;
             rc->human_input.pending_move_y = cm->walk_tile_y;
             rc->human_input.pending_attack = 0;
+            human_input_queue_walk(&rc->human_input, cm->walk_tile_x, cm->walk_tile_y);
             human_set_click_cross(&rc->human_input, cm->screen_x, cm->screen_y, 0);
             break;
 
@@ -724,7 +731,15 @@ static void context_menu_execute(RenderClient* rc, int item_idx) {
                 rc->human_input.pending_move_y = -1;
                 if (rc->human_input.cursor_mode == CURSOR_SPELL_TARGET) {
                     rc->human_input.pending_spell = rc->human_input.selected_spell;
+                    human_input_queue_spell_target(
+                        &rc->human_input,
+                        rc->human_input.selected_spell,
+                        rc->human_input.pending_target_idx);
                     rc->human_input.cursor_mode = CURSOR_NORMAL;
+                } else {
+                    human_input_queue_attack_npc(
+                        &rc->human_input,
+                        rc->human_input.pending_target_idx);
                 }
                 human_set_click_cross(&rc->human_input, cm->screen_x, cm->screen_y, 1);
             }
@@ -957,6 +972,32 @@ static Model* render_get_proj_model(RenderClient* rc, uint32_t model_id) {
     return &rc->proj_models[idx].model;
 }
 
+static OsrsModel* render_get_projectile_osrs_model(RenderClient* rc, uint32_t model_id) {
+    if (model_id == 0) return NULL;
+    OsrsModel* om = model_cache_get(rc->model_cache, model_id);
+    if (!om && rc->npc_model_cache)
+        om = model_cache_get(rc->npc_model_cache, model_id);
+    if (!om) {
+        fprintf(stderr, "render: explicit projectile model %u is missing from loaded caches\n",
+                model_id);
+        abort();
+    }
+    return om;
+}
+
+static AnimModelState* render_create_projectile_anim_state(
+    RenderClient* rc, uint32_t model_id, int anim_id
+) {
+    if (anim_id < 0 || model_id == 0) return NULL;
+    OsrsModel* om = render_get_projectile_osrs_model(rc, model_id);
+    if (!om->vertex_skins || om->base_vert_count == 0) {
+        fprintf(stderr, "render: projectile model %u cannot play animation %d\n",
+                model_id, anim_id);
+        abort();
+    }
+    return anim_model_state_create(om->vertex_skins, om->base_vert_count);
+}
+
 /**
  * Build all overlay models (clouds, projectiles, snakelings) from the model cache.
  * Call after model_cache is loaded.
@@ -1005,13 +1046,39 @@ static void render_init_overlay_models(RenderClient* rc) {
  *   - yaw/pitch updated from velocity vector each tick
  *   - height follows parabolic arc with quadratic correction
  */
+static void flight_deactivate(FlightProjectile* fp) {
+    if (fp->anim_state) {
+        anim_model_state_free(fp->anim_state);
+        fp->anim_state = NULL;
+    }
+    fp->active = 0;
+}
+
+static void flight_clear_all(RenderClient* rc) {
+    for (int i = 0; i < MAX_FLIGHT_PROJECTILES; i++) {
+        flight_deactivate(&rc->flights[i]);
+    }
+}
+
+static void flight_finish(RenderClient* rc, FlightProjectile* fp) {
+    if (fp->impact_gfx_id > 0) {
+        effect_spawn_spotanim_subtile(
+            rc->effects, fp->impact_gfx_id,
+            fp->dst_x * 128.0f, fp->dst_y * 128.0f,
+            rc->effect_client_tick_counter + 1,
+            rc->anim_cache, rc->model_cache, rc->npc_model_cache);
+    }
+    flight_deactivate(fp);
+}
+
 static void flight_spawn(RenderClient* rc,
                          float src_x, float src_y, float dst_x, float dst_y,
                          int style, int damage,
                          int duration_ticks, int start_h, int end_h, int curve,
                          float arc_height, int tracks_target, uint32_t model_id,
-                         int impact_gfx_id,
-                         int start_delay) {
+                         int anim_id, int impact_gfx_id,
+                         int start_delay, int motion_mode,
+                         float offset_x, float offset_y, float offset_z) {
     int slot = -1;
     for (int i = 0; i < MAX_FLIGHT_PROJECTILES; i++) {
         if (!rc->flights[i].active) { slot = i; break; }
@@ -1037,8 +1104,16 @@ static void flight_spawn(RenderClient* rc,
     fp->arc_height = arc_height;
     fp->tracks_target = tracks_target;
     fp->model_id = model_id;
+    fp->anim_id = anim_id;
+    fp->anim_frame = 0;
+    fp->anim_tick_counter = 0;
+    fp->anim_state = render_create_projectile_anim_state(rc, model_id, anim_id);
     fp->impact_gfx_id = impact_gfx_id;
     fp->start_delay = start_delay;
+    fp->motion_mode = motion_mode;
+    fp->offset_x = offset_x;
+    fp->offset_y = offset_y;
+    fp->offset_z = offset_z;
 
     /* height arc: OSRS SceneProjectile.calculateIncrements
        skip quadratic computation when using sinusoidal arc */
@@ -1058,11 +1133,43 @@ static void flight_spawn(RenderClient* rc,
     fp->pitch = (arc_height > 0.0f) ? 0.0f : atan2f(fp->height_vel, dist);
 }
 
+static void flight_advance_animation(RenderClient* rc, FlightProjectile* fp) {
+    if (fp->anim_id < 0) return;
+    AnimSequence* seq = render_get_anim_sequence(rc, (uint16_t)fp->anim_id);
+    if (!seq || seq->frame_count <= 0) {
+        fprintf(stderr, "render: projectile animation %d is missing\n", fp->anim_id);
+        abort();
+    }
+    fp->anim_tick_counter++;
+    while (fp->anim_tick_counter >= seq->frames[fp->anim_frame].delay) {
+        fp->anim_tick_counter -= seq->frames[fp->anim_frame].delay;
+        fp->anim_frame++;
+        if (fp->anim_frame >= seq->frame_count) {
+            fp->anim_frame = 0;
+        }
+    }
+}
+
 static inline Matrix render_projectile_transform(
     float scale_x, float scale_y, float scale_z,
     float yaw, float pitch, Vector3 position
 ) {
     Matrix transform = MatrixScale(-scale_x, scale_y, scale_z);
+    transform = MatrixMultiply(
+        transform,
+        MatrixMultiply(MatrixRotateY(yaw + 1.5707963f), MatrixRotateX(pitch)));
+    transform = MatrixMultiply(transform, MatrixTranslate(position.x, position.y, position.z));
+    return transform;
+}
+
+static inline Matrix render_projectile_transform_offset(
+    float scale_x, float scale_y, float scale_z,
+    float yaw, float pitch, Vector3 position,
+    float offset_x, float offset_y, float offset_z
+) {
+    Matrix transform = MatrixScale(-scale_x, scale_y, scale_z);
+    transform = MatrixMultiply(
+        transform, MatrixTranslate(offset_x, offset_z, offset_y));
     transform = MatrixMultiply(
         transform,
         MatrixMultiply(MatrixRotateY(yaw + 1.5707963f), MatrixRotateX(pitch)));
@@ -1111,6 +1218,18 @@ static void flight_client_tick(RenderClient* rc) {
             continue;
         }
 
+        if (fp->motion_mode == ENCOUNTER_PROJECTILE_MOTION_TARGET_ANCHORED) {
+            fp->x = fp->dst_x;
+            fp->y = fp->dst_y;
+            fp->pitch = 0.0f;
+            flight_advance_animation(rc, fp);
+            fp->progress += fp->speed;
+            if (fp->progress >= 1.0f) {
+                flight_finish(rc, fp);
+            }
+            continue;
+        }
+
         /* remaining sub-ticks (avoid div by zero) */
         float remaining = (1.0f - fp->progress) / fp->speed;
         if (remaining < 0.5f) remaining = 0.5f;
@@ -1130,16 +1249,10 @@ static void flight_client_tick(RenderClient* rc) {
             fp->pitch = atan2f(h_vel, horiz_speed);
         }
 
+        flight_advance_animation(rc, fp);
         fp->progress += fp->speed;
         if (fp->progress >= 1.0f) {
-            if (fp->impact_gfx_id > 0) {
-                effect_spawn_spotanim_subtile(
-                    rc->effects, fp->impact_gfx_id,
-                    fp->dst_x * 128.0f, fp->dst_y * 128.0f,
-                    rc->effect_client_tick_counter + 1,
-                    rc->anim_cache, rc->model_cache, rc->npc_model_cache);
-            }
-            fp->active = 0;
+            flight_finish(rc, fp);
         }
     }
 }
@@ -1148,6 +1261,11 @@ static void flight_client_tick(RenderClient* rc) {
  * Get the interpolated world position of a flight projectile.
  */
 static Vector3 flight_get_position(const FlightProjectile* fp, float src_ground, float dst_ground) {
+    if (fp->motion_mode == ENCOUNTER_PROJECTILE_MOTION_TARGET_ANCHORED) {
+        return (Vector3){ fp->x + 0.5f, dst_ground + fp->end_height,
+            -(fp->y + 1.0f) + 0.5f };
+    }
+
     float t = fp->progress;
     if (t < 0.0f) t = 0.0f;
     if (t > 1.0f) t = 1.0f;
@@ -1167,6 +1285,7 @@ static Vector3 flight_get_position(const FlightProjectile* fp, float src_ground,
 }
 
 static void render_destroy_client(RenderClient* rc) {
+    flight_clear_all(rc);
     /* free GUI panel sprites */
     gui_unload_sprites(&rc->gui);
     /* free prayer icon textures */
@@ -1228,6 +1347,7 @@ static void render_destroy_client(RenderClient* rc) {
         objects_free(rc->npcs);
         rc->npcs = NULL;
     }
+    human_input_destroy(&rc->human_input);
     CloseWindow();
     free(rc->history);
     free(rc);
@@ -1361,6 +1481,8 @@ static void render_handle_input(RenderClient* rc, OsrsEnv* env) {
     if (IsKeyPressed(KEY_H)) {
         rc->human_input.enabled = !rc->human_input.enabled;
         if (!rc->human_input.enabled) {
+            human_input_clear_pending(&rc->human_input);
+            human_input_clear_move(&rc->human_input);
             rc->human_input.cursor_mode = CURSOR_NORMAL;
             context_menu_dismiss(&rc->context_menu);
         }
@@ -1453,7 +1575,15 @@ static void render_handle_input(RenderClient* rc, OsrsEnv* env) {
                         rc->human_input.pending_move_y = -1;
                         if (rc->human_input.cursor_mode == CURSOR_SPELL_TARGET) {
                             rc->human_input.pending_spell = rc->human_input.selected_spell;
+                            human_input_queue_spell_target(
+                                &rc->human_input,
+                                rc->human_input.selected_spell,
+                                rc->human_input.pending_target_idx);
                             rc->human_input.cursor_mode = CURSOR_NORMAL;
+                        } else {
+                            human_input_queue_attack_npc(
+                                &rc->human_input,
+                                rc->human_input.pending_target_idx);
                         }
                         human_set_click_cross(&rc->human_input, mx, my, 1);
                         entity_hit = 1;
@@ -1510,6 +1640,7 @@ static void render_handle_input(RenderClient* rc, OsrsEnv* env) {
                     }
                     rc->human_input.pending_move_x = best_wx;
                     rc->human_input.pending_move_y = best_wy;
+                    human_input_queue_walk(&rc->human_input, best_wx, best_wy);
                     human_set_click_cross(&rc->human_input, mx, my, 0);
                 }
                 } /* end else (ground click) */
@@ -2007,8 +2138,14 @@ static void render_post_tick(RenderClient* rc, OsrsEnv* env) {
                 flight_spawn(rc, sx, sy, dx, dy,
                     ov->projectiles[i].style, ov->projectiles[i].damage,
                     dur, sh, eh, cv, arc, trk,
-                    ov->projectiles[i].model_id, ov->projectiles[i].impact_gfx_id,
-                    ov->projectiles[i].start_delay);
+                    ov->projectiles[i].model_id,
+                    ov->projectiles[i].anim_id,
+                    ov->projectiles[i].impact_gfx_id,
+                    ov->projectiles[i].start_delay,
+                    ov->projectiles[i].motion_mode,
+                    ov->projectiles[i].offset_x,
+                    ov->projectiles[i].offset_y,
+                    ov->projectiles[i].offset_z);
             }
 
             /* update tracking projectile targets to player's current position */
@@ -2422,10 +2559,12 @@ static void render_draw_grid(RenderClient* rc, OsrsEnv* env) {
         /* in-flight projectiles (interpolated at 50 Hz) */
         for (int i = 0; i < MAX_FLIGHT_PROJECTILES; i++) {
             FlightProjectile* fp = &rc->flights[i];
-            if (!fp->active) continue;
+            if (!fp->active || fp->start_delay > 0) continue;
             float t = fp->progress;
-            float cur_x = fp->src_x + (fp->dst_x - fp->src_x) * t;
-            float cur_y = fp->src_y + (fp->dst_y - fp->src_y) * t;
+            float cur_x = fp->motion_mode == ENCOUNTER_PROJECTILE_MOTION_TARGET_ANCHORED
+                ? fp->dst_x : fp->src_x + (fp->dst_x - fp->src_x) * t;
+            float cur_y = fp->motion_mode == ENCOUNTER_PROJECTILE_MOTION_TARGET_ANCHORED
+                ? fp->dst_y : fp->src_y + (fp->dst_y - fp->src_y) * t;
             int psx = render_world_to_screen_x_rc(rc, (int)fp->src_x) + ts / 2;
             int psy = render_world_to_screen_y_rc(rc, (int)fp->src_y) + ts / 2;
             int pcx = render_world_to_screen_x_rc(rc, (int)cur_x) + ts / 2;
@@ -2437,7 +2576,8 @@ static void render_draw_grid(RenderClient* rc, OsrsEnv* env) {
                 case 2: pc = CLITERAL(Color){ 255, 80, 80, 255 }; break;
                 default: pc = WHITE; break;
             }
-            DrawLine(psx, psy, pcx, pcy, pc);
+            if (fp->motion_mode != ENCOUNTER_PROJECTILE_MOTION_TARGET_ANCHORED)
+                DrawLine(psx, psy, pcx, pcy, pc);
             DrawCircle(pcx, pcy, 4.0f, pc);
         }
     }
@@ -3719,7 +3859,29 @@ static void render_draw_3d_world(RenderClient* rc) {
             Vector3 pos = flight_get_position(fp, src_ground, dst_ground);
 
             Model* proj_model = NULL;
-            if (fp->model_id > 0) {
+            if (fp->anim_id >= 0 && fp->model_id > 0) {
+                OsrsModel* om = render_get_projectile_osrs_model(rc, fp->model_id);
+                AnimSequence* seq = render_get_anim_sequence(rc, (uint16_t)fp->anim_id);
+                if (!fp->anim_state || !seq || seq->frame_count <= 0 || !om->face_indices) {
+                    fprintf(stderr, "render: projectile model %u cannot render animation %d\n",
+                            fp->model_id, fp->anim_id);
+                    abort();
+                }
+                if (fp->anim_frame >= seq->frame_count) fp->anim_frame = 0;
+                AnimSequenceFrame* sf = &seq->frames[fp->anim_frame];
+                AnimFrameBase* fb = render_get_framebase(rc, sf->frame.framebase_id);
+                if (!fb) {
+                    fprintf(stderr, "render: projectile animation framebase %u is missing\n",
+                            sf->frame.framebase_id);
+                    abort();
+                }
+                anim_apply_frame(fp->anim_state, om->base_vertices, &sf->frame, fb);
+                anim_update_mesh(om->mesh.vertices, fp->anim_state,
+                    om->face_indices, om->mesh.triangleCount);
+                UpdateMeshBuffer(om->mesh, 0, om->mesh.vertices,
+                    om->mesh.triangleCount * 9 * sizeof(float), 0);
+                proj_model = &om->model;
+            } else if (fp->model_id > 0) {
                 proj_model = render_get_proj_model(rc, fp->model_id);
             }
             if (!proj_model) {
@@ -3737,14 +3899,16 @@ static void render_draw_3d_world(RenderClient* rc) {
             if (proj_model) {
                 rlDisableBackfaceCulling();
                 float pms = 1.0f / 128.0f;
-                proj_model->transform = render_projectile_transform(
-                    pms, pms, pms, fp->yaw, fp->pitch, pos);
+                proj_model->transform = render_projectile_transform_offset(
+                    pms, pms, pms, fp->yaw, fp->pitch, pos,
+                    fp->offset_x, fp->offset_y, fp->offset_z);
                 DrawModel(*proj_model, (Vector3){0,0,0}, 1.0f, WHITE);
                 rlEnableBackfaceCulling();
             }
 
             /* trail line from source to current position */
-            if (rc->show_debug) {
+            if (rc->show_debug &&
+                fp->motion_mode != ENCOUNTER_PROJECTILE_MOTION_TARGET_ANCHORED) {
                 Color pc;
                 switch (fp->style) {
                     case 0: pc = CLITERAL(Color){ 80, 220, 80, 150 }; break;

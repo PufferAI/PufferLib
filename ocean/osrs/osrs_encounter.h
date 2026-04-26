@@ -28,7 +28,7 @@
  *
  *   NPC pathfinding:
  *     encounter_npc_step_out_from_under()  shuffle NPC off player tile (OSRS overlap rule)
- *     encounter_npc_step_toward()      greedy size-aware chase step (diagonal > x > y)
+ *     encounter_npc_step_toward()      OSRS size-aware chase step
  *
  *   damage:
  *     encounter_damage_player()        apply damage to player (HP, clamp, splat, tracker)
@@ -91,6 +91,7 @@ typedef struct {
                               whether the hit is blocked, independent of projectile flight time.
                               ref: InfernoTrainer JalTokJad.ts:49-57. */
     int spell_type;        /* ENCOUNTER_SPELL_* for freeze/heal effects */
+    int source_npc_type;   /* encounter-local NPC type for custom delayed rolls */
 } EncounterPendingHit;
 
 /* visual overlay data: shared between encounter and renderer.
@@ -101,6 +102,11 @@ typedef struct {
    especially during Zuk healer spark volleys. size this from real encounter
    volume so the renderer never silently drops visual events. */
 #define ENCOUNTER_MAX_OVERLAY_PROJECTILES 48
+
+typedef enum {
+    ENCOUNTER_PROJECTILE_MOTION_OSRS_FLIGHT = 0,
+    ENCOUNTER_PROJECTILE_MOTION_TARGET_ANCHORED = 1,
+} EncounterProjectileMotionMode;
 
 typedef struct {
     /* encounter-defined area hazards. current users write 3x3 poison clouds. */
@@ -133,9 +139,12 @@ typedef struct {
         float arc_height;    /* sinusoidal arc peak in tiles (0 = quadratic/straight) */
         int tracks_target;   /* 1 = re-aim toward target each tick */
         int start_delay;     /* ticks before projectile becomes visible (0 = immediate) */
+        int motion_mode;     /* EncounterProjectileMotionMode */
+        float offset_x, offset_y, offset_z; /* local multi-model offset */
         int src_size;        /* source entity size for center offset (0 = use boss_size) */
         int dst_size;        /* target entity size for center offset (1 = player) */
         uint32_t model_id;   /* GFX model from cache (0 = style-based fallback) */
+        int anim_id;         /* spotanim animation sequence (-1 = static model) */
         int impact_gfx_id;   /* optional landing spotanim to spawn on arrival */
     } projectiles[ENCOUNTER_MAX_OVERLAY_PROJECTILES];
     int projectile_count;
@@ -181,12 +190,41 @@ static inline int encounter_emit_projectile(
     ov->projectiles[i].curve = curve;
     ov->projectiles[i].arc_height = arc_height;
     ov->projectiles[i].start_delay = 0;
+    ov->projectiles[i].motion_mode = ENCOUNTER_PROJECTILE_MOTION_OSRS_FLIGHT;
+    ov->projectiles[i].offset_x = 0.0f;
+    ov->projectiles[i].offset_y = 0.0f;
+    ov->projectiles[i].offset_z = 0.0f;
     ov->projectiles[i].tracks_target = tracks_target;
     ov->projectiles[i].src_size = src_size;
     ov->projectiles[i].dst_size = dst_size;
     ov->projectiles[i].model_id = model_id;
+    ov->projectiles[i].anim_id = -1;
     ov->projectiles[i].impact_gfx_id = impact_gfx_id;
     return i;
+}
+
+static inline void encounter_set_projectile_motion_mode(
+    EncounterOverlay* ov, int projectile_idx, int motion_mode
+) {
+    if (projectile_idx < 0 || projectile_idx >= ov->projectile_count) return;
+    ov->projectiles[projectile_idx].motion_mode = motion_mode;
+}
+
+static inline void encounter_set_projectile_animation(
+    EncounterOverlay* ov, int projectile_idx, int anim_id
+) {
+    if (projectile_idx < 0 || projectile_idx >= ov->projectile_count) return;
+    ov->projectiles[projectile_idx].anim_id = anim_id;
+}
+
+static inline void encounter_set_projectile_offset(
+    EncounterOverlay* ov, int projectile_idx,
+    float offset_x, float offset_y, float offset_z
+) {
+    if (projectile_idx < 0 || projectile_idx >= ov->projectile_count) return;
+    ov->projectiles[projectile_idx].offset_x = offset_x;
+    ov->projectiles[projectile_idx].offset_y = offset_y;
+    ov->projectiles[projectile_idx].offset_z = offset_z;
 }
 
 /* ======================================================================== */
@@ -788,83 +826,87 @@ static inline int encounter_npc_y_edge_clear(
     return 1;
 }
 
-/** greedy NPC step toward target. tries diagonal first, then x-only, then y-only.
-    this is the current generic NPC chase policy used by the ocean envs.
+static inline int encounter_npc_axis_gap(int a, int a_size, int b, int b_size) {
+    int a_max = a + a_size - 1;
+    int b_max = b + b_size - 1;
+    if (a_max < b) return b - a_max;
+    if (b_max < a) return a - b_max;
+    return 0;
+}
+
+static inline int encounter_npc_axis_dir(int a, int a_size, int b, int b_size) {
+    int a_max = a + a_size - 1;
+    int b_max = b + b_size - 1;
+    if (a_max < b) return 1;
+    if (b_max < a) return -1;
+    return 0;
+}
+
+static inline int encounter_npc_try_step(
+    int* x, int* y, int size, int dx, int dy,
+    encounter_npc_blocked_fn is_blocked, void* ctx
+) {
+    if (dx == 0 && dy == 0) return 0;
+    if (size <= 1) {
+        if (!is_blocked(ctx, *x + dx, *y + dy, 1)) {
+            *x += dx;
+            *y += dy;
+            return 1;
+        }
+        return 0;
+    }
+
+    int x_clear = encounter_npc_x_edge_clear(*x, *y, size, dx, dy, is_blocked, ctx);
+    int y_clear = encounter_npc_y_edge_clear(*x, *y, size, dx, dy, is_blocked, ctx);
+    if (x_clear && y_clear) {
+        *x += dx;
+        *y += dy;
+        return 1;
+    }
+    return 0;
+}
+
+/** OSRS-shaped NPC step toward target. tries diagonal first, then x-only,
+    then y-only when RuneLite's travel rule allows the y fallback.
 
     for size>1 NPCs, validates movement by checking EDGE TILES the NPC sweeps
     through, not just the destination footprint. for diagonal moves, both the
     x-edge and y-edge must be clear (each extended by 1 tile for the corner).
     ref: InfernoTrainer Mob.ts:160-270 movementStep + getX/YMovementTiles.
 
-    corner safespot: if diagonal would land NPC on player, cancel Y component.
-    ref: InfernoTrainer Mob.ts:143-146.
-
-    this function does NOT gate on attack range or LOS — the reference's
-    canMove() (Unit.ts:383) is `!hasLOS && !frozen && !stunned && !dying`,
-    with NO range check. caller is responsible for skipping the call when
-    the NPC shouldn't move (hasLOS, frozen, etc). for melee mobs adjacent
-    to the player, the step naturally fails because the player tile is
-    occupied — no explicit range gate needed.
-
-    attack_range param is retained for signature compatibility but unused.
+    stop_at_melee_distance matches RuneLite WorldArea.calculateNextTravellingPoint:
+    overlap returns no normal step, cardinal melee contact returns no step,
+    and diagonal contact tries x-only.
 
     returns 1 if moved, 0 if blocked or already at target. */
 static inline int encounter_npc_step_toward(
     int* x, int* y, int tx, int ty, int npc_size,
-    int target_size, int attack_range,
+    int target_size, int stop_at_melee_distance,
     encounter_npc_blocked_fn is_blocked, void* ctx
 ) {
-    (void)attack_range;
     int size = npc_size;
-    int dx = 0, dy = 0;
-    if (tx > *x) dx = 1;
-    else if (tx < *x) dx = -1;
-    if (ty > *y) dy = 1;
-    else if (ty < *y) dy = -1;
+    int x_gap = encounter_npc_axis_gap(*x, size, tx, target_size);
+    int y_gap = encounter_npc_axis_gap(*y, size, ty, target_size);
+    int dx = encounter_npc_axis_dir(*x, size, tx, target_size);
+    int dy = encounter_npc_axis_dir(*y, size, ty, target_size);
+
+    if (stop_at_melee_distance && x_gap == 0 && y_gap == 0) return 0;
+    if (stop_at_melee_distance && x_gap + y_gap == 1) return 0;
     if (dx == 0 && dy == 0) return 0;
 
-    /* corner safespot cancellation: if a diagonal step would overlap the target,
-       cancel the Y component and take X-only. */
-    if (dx != 0 && dy != 0) {
-        int nx = *x + dx, ny = *y + dy;
-        if (encounter_entity_footprints_overlap(nx, ny, size, tx, ty, target_size)) {
-            dy = 0;
-        }
+    if (stop_at_melee_distance && x_gap == 1 && y_gap == 1) {
+        return encounter_npc_try_step(x, y, size, dx, 0, is_blocked, ctx);
     }
 
-    /* size-1 NPCs: simple destination check (edge tiles = destination tile) */
-    if (size <= 1) {
-        if (dx != 0 && dy != 0 && !is_blocked(ctx, *x + dx, *y + dy, 1)) {
-            *x += dx; *y += dy; return 1;
-        }
-        if (dx != 0 && !is_blocked(ctx, *x + dx, *y, 1)) {
-            *x += dx; return 1;
-        }
-        if (dy != 0 && !is_blocked(ctx, *x, *y + dy, 1)) {
-            *y += dy; return 1;
-        }
-        return 0;
-    }
-
-    /* size>1 NPCs: edge-tile validation per InfernoTrainer.
-       diagonal: both x-edge AND y-edge must be clear (each extended by 1 for corner).
-       cardinal: just the leading edge (size tiles). */
-    if (dx != 0 && dy != 0) {
-        int x_clear = encounter_npc_x_edge_clear(*x, *y, size, dx, dy, is_blocked, ctx);
-        int y_clear = encounter_npc_y_edge_clear(*x, *y, size, dx, dy, is_blocked, ctx);
-        if (x_clear && y_clear) {
-            *x += dx; *y += dy; return 1;
-        }
-        /* diagonal failed — fall through to try cardinal with dy=0 edge strips */
-    }
-    /* x-only: check leading x-edge (size tiles, no diagonal extension) */
-    if (dx != 0 && encounter_npc_x_edge_clear(*x, *y, size, dx, 0, is_blocked, ctx)) {
-        *x += dx; return 1;
-    }
-    /* y-only: check leading y-edge (size tiles, no diagonal extension) */
-    if (dy != 0 && encounter_npc_y_edge_clear(*x, *y, size, 0, dy, is_blocked, ctx)) {
-        *y += dy; return 1;
-    }
+    if (dx != 0 && dy != 0 &&
+        encounter_npc_try_step(x, y, size, dx, dy, is_blocked, ctx))
+        return 1;
+    if (dx != 0 && encounter_npc_try_step(x, y, size, dx, 0, is_blocked, ctx))
+        return 1;
+    int max_gap = x_gap > y_gap ? x_gap : y_gap;
+    if (dy != 0 && max_gap > 1 &&
+        encounter_npc_try_step(x, y, size, 0, dy, is_blocked, ctx))
+        return 1;
     return 0;
 }
 
@@ -1320,6 +1362,33 @@ static inline void encounter_update_loadout_level(
     }
 }
 
+static inline void encounter_compute_player_equipped_stats(
+    Player* p,
+    AttackStyle style,
+    FightStyle fight_style,
+    int spell_base_damage,
+    EncounterLoadoutStats* out
+) {
+    int current_att = p->current_attack;
+    int current_str = p->current_strength;
+    if (style == ATTACK_STYLE_RANGED) {
+        current_att = p->current_ranged;
+        current_str = p->current_ranged;
+    } else if (style == ATTACK_STYLE_MAGIC) {
+        current_att = p->current_magic;
+        current_str = p->current_magic;
+    }
+    encounter_compute_loadout_stats(
+        p->equipped,
+        style,
+        p->offensive_prayer,
+        current_att,
+        fight_style,
+        spell_base_damage,
+        out);
+    encounter_update_loadout_level(out, p->offensive_prayer, current_att, current_str);
+}
+
 /* ======================================================================== */
 /* shared potion stat effects (brew drain, restore, bastion boost)           */
 /*                                                                           */
@@ -1552,6 +1621,7 @@ typedef struct {
     /* episode lifecycle */
     void (*reset)(EncounterState* state, uint32_t seed);
     void (*step)(EncounterState* state, const int* actions);
+    void (*step_human_commands)(EncounterState* state, struct HumanInput* hi);
 
     /* RL interface */
     void (*write_obs)(EncounterState* state, float* obs_out);

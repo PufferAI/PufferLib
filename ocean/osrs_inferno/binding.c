@@ -72,12 +72,15 @@ typedef struct {
 /* global best episode tracking */
 static int g_best_wave = 0;
 static int g_best_ticks = 999999;
-static int g_best_zuk_hp = 999999;  /* lowest Zuk HP seen (for Zuk-only training) */
+static int g_best_min_zuk_hp = 999999;  /* lowest Zuk HP reached (for Zuk-only training) */
 
 void c_step(Env* env) {
     /* tick pacing lives in c_render — it blocks at the tick deadline calling
        pvp_render at ~60fps so sub-tile interpolation can animate between sim
        ticks. nothing to do here timing-wise. */
+
+    int used_human_commands = 0;
+    RenderClient* render_client = (RenderClient*)env->render_env.client;
 
     /* replay playback: if this env has a loaded replay, override policy actions */
     if (env->replay_actions && env->replay_cursor < env->replay_num_ticks) {
@@ -85,13 +88,35 @@ void c_step(Env* env) {
         for (int i = 0; i < NUM_ATNS; i++)
             env->acts_staging[i] = env->replay_actions[off + i];
         env->replay_cursor++;
+        if (render_client) {
+            human_input_clear_pending(&render_client->human_input);
+            human_input_clear_move(&render_client->human_input);
+            ENCOUNTER_INFERNO.put_int(env->enc_state, "player_dest_x", -1);
+            ENCOUNTER_INFERNO.put_int(env->enc_state, "player_dest_y", -1);
+            ENCOUNTER_INFERNO.put_int(env->enc_state, "human_command_mode", 0);
+        }
+    } else if (render_client && render_client->human_input.enabled &&
+               ENCOUNTER_INFERNO.step_human_commands) {
+        if (env->episode_actions && render_client->human_input.commands.count > 0) {
+            fprintf(stderr, "RECORD_REPLAY cannot record human command mode\n");
+            abort();
+        }
+        ENCOUNTER_INFERNO.step_human_commands(env->enc_state, &render_client->human_input);
+        used_human_commands = 1;
     } else {
+        if (render_client) {
+            human_input_clear_pending(&render_client->human_input);
+            human_input_clear_move(&render_client->human_input);
+            ENCOUNTER_INFERNO.put_int(env->enc_state, "player_dest_x", -1);
+            ENCOUNTER_INFERNO.put_int(env->enc_state, "player_dest_y", -1);
+            ENCOUNTER_INFERNO.put_int(env->enc_state, "human_command_mode", 0);
+        }
         for (int i = 0; i < NUM_ATNS; i++)
             env->acts_staging[i] = (int)env->actions[i];
     }
 
     /* buffer actions for best-episode recording */
-    if (env->episode_actions) {
+    if (env->episode_actions && !used_human_commands) {
         /* capture RNG state at the very start of the episode (before first action) */
         if (env->episode_action_len == 0)
             env->episode_rng_start = ((InfernoState*)env->enc_state)->rng_state;
@@ -102,7 +127,8 @@ void c_step(Env* env) {
         }
     }
 
-    ENCOUNTER_INFERNO.step(env->enc_state, env->acts_staging);
+    if (!used_human_commands)
+        ENCOUNTER_INFERNO.step(env->enc_state, env->acts_staging);
 
     float* obs = (float*)env->observations;
     ENCOUNTER_INFERNO.write_obs(env->enc_state, obs);
@@ -171,6 +197,9 @@ void c_step(Env* env) {
             if (s->winner == 0) zhp = 0.0f;
             env->log.zuk_hp_remaining += zhp;
         }
+        env->log.min_zuk_hp_seen += (s->winner == 0)
+            ? 0.0f
+            : (s->min_zuk_hp_seen > 0.0f ? s->min_zuk_hp_seen : 1200.0f);
 
         /* action noop rates (per-episode ratios, averaged across episodes by aggregator) */
         float at = (float)s->action_total_count;
@@ -203,19 +232,14 @@ void c_step(Env* env) {
                 /* full run: best wave, then fewest ticks */
                 is_new_best = (wave > g_best_wave || (wave == g_best_wave && ticks < g_best_ticks));
             } else {
-                /* partial/zuk run: best = most damage to zuk (lowest HP remaining).
-                   if zuk is dead (winner==0), fastest kill (fewest ticks) wins. */
-                int zuk_hp = 999999;
-                for (int n = 0; n < INF_MAX_NPCS; n++) {
-                    if (st->npcs[n].active && st->npcs[n].type == INF_NPC_ZUK) {
-                        zuk_hp = st->npcs[n].hp;
-                        break;
-                    }
-                }
-                if (st->winner == 0) zuk_hp = 0;  /* zuk dead */
-                is_new_best = (zuk_hp < g_best_zuk_hp ||
-                              (zuk_hp == g_best_zuk_hp && zuk_hp == 0 && ticks < g_best_ticks));
-                if (is_new_best) g_best_zuk_hp = zuk_hp;
+                /* partial/zuk run: best = lowest Zuk HP reached.
+                   if Zuk is dead (winner==0), fastest kill (fewest ticks) wins. */
+                int min_zuk_hp = (st->winner == 0)
+                    ? 0
+                    : (st->min_zuk_hp_seen > 0.0f ? (int)st->min_zuk_hp_seen : 1200);
+                is_new_best = (min_zuk_hp < g_best_min_zuk_hp ||
+                              (min_zuk_hp == g_best_min_zuk_hp && min_zuk_hp == 0 && ticks < g_best_ticks));
+                if (is_new_best) g_best_min_zuk_hp = min_zuk_hp;
             }
             if (is_new_best) {
                 g_best_wave = wave;
@@ -233,8 +257,8 @@ void c_step(Env* env) {
                            env->episode_action_len * NUM_ATNS, fp);
                     fclose(fp);
                     if (st->start_wave >= 68) {
-                        fprintf(stderr, "replay: new best zuk hp=%d (%d ticks, rng=%u) saved to %s\n",
-                                g_best_zuk_hp, env->episode_action_len, env->episode_rng_start, rpath);
+                        fprintf(stderr, "replay: new best min zuk hp=%d (%d ticks, rng=%u) saved to %s\n",
+                                g_best_min_zuk_hp, env->episode_action_len, env->episode_rng_start, rpath);
                     } else {
                         fprintf(stderr, "replay: new best wave %d (%d ticks, rng=%u) saved to %s\n",
                                 wave, env->episode_action_len, env->episode_rng_start, rpath);
@@ -277,6 +301,10 @@ void c_close(Env* env) {
     if (env->enc_state) {
         ENCOUNTER_INFERNO.destroy(env->enc_state);
         env->enc_state = NULL;
+    }
+    if (env->render_env.client) {
+        render_destroy_client((RenderClient*)env->render_env.client);
+        env->render_env.client = NULL;
     }
 }
 
@@ -465,7 +493,7 @@ void my_init(Env* env, Dict* kwargs) {
 }
 
 /* curriculum wave mixing: start some agents at later waves for late-game gradient signal.
-   wave-0 agents are scored normally; curriculum agents train but don't affect sweep metric. */
+   base-start agents are scored normally; curriculum agents train but don't affect sweep metric. */
 #define MAX_CURRICULUM_TIERS 4
 
 Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_counts,
@@ -473,6 +501,8 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
     int total_agents = (int)dict_get(vec_kwargs, "total_agents")->value;
     int num_buffers = (int)dict_get(vec_kwargs, "num_buffers")->value;
     int agents_per_buffer = total_agents / num_buffers;
+    DictItem* base_start_wave_item = dict_get_unsafe(env_kwargs, "start_wave");
+    int base_start_wave = base_start_wave_item ? (int)base_start_wave_item->value : 0;
 
     /* parse curriculum tiers from env config */
     static const char* wave_keys[] = {
@@ -516,15 +546,15 @@ Env* my_vec_init(int* num_envs_out, int* buffer_env_starts, int* buffer_env_coun
             if (tier_counts[t] < 1) tier_counts[t] = 1;
             curriculum_total += tier_counts[t];
         }
-        int wave0_count = num_envs - curriculum_total;
-        int cursor = wave0_count;
+        int base_count = num_envs - curriculum_total;
+        int cursor = base_count;
         for (int t = 0; t < num_tiers; t++) {
             for (int i = 0; i < tier_counts[t] && cursor < num_envs; i++, cursor++) {
                 ENCOUNTER_INFERNO.put_int(envs[cursor].enc_state,
                     "start_wave", curriculum_waves[t]);
             }
         }
-        fprintf(stderr, "curriculum: %d wave-0", wave0_count);
+        fprintf(stderr, "curriculum: %d wave-%d", base_count, base_start_wave);
         for (int t = 0; t < num_tiers; t++)
             fprintf(stderr, ", %d wave-%d", tier_counts[t], curriculum_waves[t]);
         fprintf(stderr, " (%d total)\n", num_envs);
@@ -582,6 +612,7 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "current_magic", log->current_magic);
     dict_set(out, "behind_shield_pct", log->behind_shield_pct);
     dict_set(out, "zuk_hp_remaining", log->zuk_hp_remaining);
+    dict_set(out, "min_zuk_hp_seen", log->min_zuk_hp_seen);
     dict_set(out, "hp_restored", log->hp_restored);
     dict_set(out, "zuk_healer_damage", log->zuk_healer_damage);
     dict_set(out, "deaths_to_jad", log->killed_by_type[INF_NPC_JAD] / log->n);
@@ -593,8 +624,8 @@ void my_log(Log* log, Dict* out) {
     float score;
     int start_wave = (int)(log->start_wave + 0.5f);
     if (start_wave >= 68) {
-        /* Zuk-only: score = fraction of Zuk HP removed (0..1), wins = 1.0 */
-        score = (1200.0f - log->zuk_hp_remaining) / 1200.0f;
+        /* Zuk-only: score = fraction of lowest Zuk HP reached (0..1), wins = 1.0 */
+        score = (1200.0f - log->min_zuk_hp_seen) / 1200.0f;
     } else {
         /* full runs: wave progress (0..0.5) + win bonus (0..1) */
         float wave_frac = log->wave / (float)INF_NUM_WAVES;

@@ -21,47 +21,6 @@
 struct RenderClient;
 
 /* ======================================================================== */
-/* init / reset                                                              */
-/* ======================================================================== */
-
-static void human_input_init(HumanInput* hi) {
-    memset(hi, 0, sizeof(*hi));
-    hi->pending_move_x = -1;
-    hi->pending_move_y = -1;
-    hi->pending_prayer = -1;
-    hi->pending_offensive_prayer = -1;
-    hi->pending_target_idx = -1;
-    hi->click_cross_active = 0;
-}
-
-/** Clear pending actions after they've been consumed at tick boundary.
-    Movement is NOT cleared here — it persists until the player reaches the
-    destination or a new click overrides it. Use human_input_clear_move()
-    for that. */
-static void human_input_clear_pending(HumanInput* hi) {
-    /* pending_move_x/y intentionally NOT cleared — movement is persistent */
-    hi->pending_attack = 0;
-    hi->pending_prayer = -1;
-    hi->pending_offensive_prayer = -1;
-    hi->pending_food = 0;
-    hi->pending_karambwan = 0;
-    hi->pending_potion = 0;
-    hi->pending_veng = 0;
-    hi->pending_spec = 0;
-    hi->pending_spell = 0;
-    hi->pending_target_idx = -1;
-    hi->pending_gear = 0;
-    /* don't clear cursor_mode or selected_spell — those persist until cancelled */
-    /* don't clear click_tile — visual feedback fades on its own */
-}
-
-/** Clear persistent movement destination. Call when player reaches target tile. */
-static void human_input_clear_move(HumanInput* hi) {
-    hi->pending_move_x = -1;
-    hi->pending_move_y = -1;
-}
-
-/* ======================================================================== */
 /* screen-to-world conversion                                                */
 /* ======================================================================== */
 
@@ -132,7 +91,10 @@ static void human_process_tile_click(HumanInput* hi,
             hi->pending_move_y = -1;
             if (hi->cursor_mode == CURSOR_SPELL_TARGET) {
                 hi->pending_spell = hi->selected_spell;
+                human_input_queue_spell_target(hi, hi->selected_spell, hi->pending_target_idx);
                 hi->cursor_mode = CURSOR_NORMAL;
+            } else {
+                human_input_queue_attack_npc(hi, hi->pending_target_idx);
             }
             human_set_click_cross(hi, screen_x, screen_y, 1);
             return;
@@ -147,6 +109,7 @@ static void human_process_tile_click(HumanInput* hi,
 
     hi->pending_move_x = wx;
     hi->pending_move_y = wy;
+    human_input_queue_walk(hi, wx, wy);
     human_set_click_cross(hi, screen_x, screen_y, 0);
 }
 
@@ -212,27 +175,35 @@ static void human_handle_prayer_click(HumanInput* hi, GuiState* gs, Player* p,
     switch (pidx) {
         case GUI_PRAY_PROTECT_MAGIC:
             hi->pending_prayer = ENCOUNTER_OVERHEAD_TOGGLE_MAGIC;
+            human_input_queue_overhead_prayer(hi, hi->pending_prayer);
             break;
         case GUI_PRAY_PROTECT_MISSILES:
             hi->pending_prayer = ENCOUNTER_OVERHEAD_TOGGLE_RANGED;
+            human_input_queue_overhead_prayer(hi, hi->pending_prayer);
             break;
         case GUI_PRAY_PROTECT_MELEE:
             hi->pending_prayer = ENCOUNTER_OVERHEAD_TOGGLE_MELEE;
+            human_input_queue_overhead_prayer(hi, hi->pending_prayer);
             break;
         case GUI_PRAY_SMITE:
             hi->pending_prayer = ENCOUNTER_OVERHEAD_TOGGLE_SMITE;
+            human_input_queue_overhead_prayer(hi, hi->pending_prayer);
             break;
         case GUI_PRAY_REDEMPTION:
             hi->pending_prayer = ENCOUNTER_OVERHEAD_TOGGLE_REDEMPTION;
+            human_input_queue_overhead_prayer(hi, hi->pending_prayer);
             break;
         case GUI_PRAY_PIETY:
             hi->pending_offensive_prayer = ENCOUNTER_OFFENSIVE_TOGGLE_PIETY;
+            human_input_queue_offensive_prayer(hi, hi->pending_offensive_prayer);
             break;
         case GUI_PRAY_RIGOUR:
             hi->pending_offensive_prayer = ENCOUNTER_OFFENSIVE_TOGGLE_RIGOUR;
+            human_input_queue_offensive_prayer(hi, hi->pending_offensive_prayer);
             break;
         case GUI_PRAY_AUGURY:
             hi->pending_offensive_prayer = ENCOUNTER_OFFENSIVE_TOGGLE_AUGURY;
+            human_input_queue_offensive_prayer(hi, hi->pending_offensive_prayer);
             break;
         default:
             break;  /* non-actionable prayer */
@@ -307,7 +278,10 @@ static void human_handle_combat_click(HumanInput* hi, GuiState* gs, Player* p,
         int by = oy + row * (btn_h + btn_gap);
         if (mouse_x >= bx && mouse_x < bx + btn_w &&
             mouse_y >= by && mouse_y < by + btn_h) {
-            p->fight_style = (FightStyle)i;
+            if (hi->enabled)
+                human_input_queue_fight_style(hi, i);
+            else
+                p->fight_style = (FightStyle)i;
             return;
         }
     }
@@ -322,6 +296,7 @@ static void human_handle_combat_click(HumanInput* hi, GuiState* gs, Player* p,
     if (mouse_x >= ox && mouse_x < ox + spec_w &&
         mouse_y >= oy && mouse_y < oy + spec_h) {
         hi->pending_spec = 1;
+        human_input_queue_spec_toggle(hi);
     }
 }
 

@@ -97,9 +97,51 @@ INFERNO_ATTACK_ANIMS: dict[int, int] = {
 }
 
 INFERNO_EXTRA_ANIMS: dict[int, dict[str, int]] = {
+    7691: {
+        "DEFEND": 7575,
+        "DEATH": 7576,
+    },
+    7692: {
+        "DEFEND": 7579,
+        "DEATH": 7580,
+    },
+    7693: {
+        "ATTACK_MELEE": 7582,
+        "ATTACK_RANGED": 7583,
+        "DEATH": 7584,
+        "DEFEND": 7585,
+    },
     7697: {
+        "DEFEND": 7598,
+        "DEATH": 7599,
         "DIG_DOWN": 7600,
         "DIG_UP": 7601,
+    },
+    7698: {
+        "ATTACK_MELEE": 7604,
+        "DEATH": 7606,
+        "DEFEND": 7607,
+    },
+    7699: {
+        "RESURRECT": 7611,
+        "ATTACK_MELEE": 7612,
+        "DEATH": 7613,
+    },
+    7700: {
+        "ATTACK_MELEE": 7590,
+        "DEFEND": 7591,
+        "ATTACK_MAGIC": 7592,
+        "ATTACK_RANGED": 7593,
+        "DEATH": 7594,
+    },
+    7706: {
+        "DEATH": 7562,
+        "SPAWN": 7563,
+        "DEFEND": 7565,
+    },
+    7707: {
+        "HIT": 7568,
+        "DEATH": 7569,
     },
 }
 
@@ -523,6 +565,8 @@ def main() -> None:
         attack_anim = INFERNO_ATTACK_ANIMS.get(npc_id, 65535)
         if attack_anim != 65535:
             all_anim_ids.add(attack_anim)
+        for anim_id in INFERNO_EXTRA_ANIMS.get(npc_id, {}).values():
+            all_anim_ids.add(anim_id)
 
     # ================================================================
     # step 2: read SpotAnim/GFX definitions
