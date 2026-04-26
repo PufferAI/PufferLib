@@ -7,6 +7,12 @@ logs/
 # Build dir
 build/
 
+# Dogfight test binaries (compiled from .c via gcc one-liners)
+ocean/dogfight/test_flight_dynamics
+ocean/dogfight/tests/test_*
+!ocean/dogfight/tests/test_*.c
+!ocean/dogfight/tests/test_*.h
+
 # hipified cuda extensions dir [HIP/ROCM]
 pufferlib/extensions/hip/
 
