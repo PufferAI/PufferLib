@@ -542,6 +542,25 @@ static const uint8_t* const INF_LOADOUTS[INF_NUM_WEAPON_SETS] = {
 /* ======================================================================== */
 
 typedef struct {
+    int brew_doses;
+    int restore_doses;
+    int bastion_doses;
+    int stamina_doses;
+} InfSupplyDoses;
+
+typedef struct {
+    float brew_fraction;
+    float restore_fraction;
+    float bastion_fraction;
+    float stamina_fraction;
+} InfSupplyFractions;
+
+typedef struct {
+    int public_wave;
+    InfSupplyFractions fractions;
+} InfSupplyProfileAnchor;
+
+typedef struct {
     Player player;
 
     InfNPC npcs[INF_MAX_NPCS];
@@ -674,6 +693,7 @@ typedef struct {
     float damage_reward_coeff;
     float shield_penalty_coeff;
     float tag_reward_coeff;
+    float late_start_supply_profile_scale;
 
     Log log;
 } InfernoState;
@@ -928,11 +948,109 @@ static void inf_rebuild_player_collision_flags(InfernoState* s);
 static EncounterState* inf_create(void) {
     InfernoState* s = (InfernoState*)calloc(1, sizeof(InfernoState));
     s->rng_state = 12345;
+    s->late_start_supply_profile_scale = 1.0f;
     return (EncounterState*)s;
 }
 
 static void inf_destroy(EncounterState* state) {
     free(state);
+}
+
+static InfSupplyDoses inf_full_starting_supplies(void) {
+    return (InfSupplyDoses){
+        .brew_doses = 24,
+        .restore_doses = 40,
+        .bastion_doses = 8,
+        .stamina_doses = 4,
+    };
+}
+
+static const InfSupplyProfileAnchor INF_SUPPLY_PROFILE_ANCHORS[] = {
+    { 1,  { 1.0000f, 1.0000f, 1.0000f, 1.0000f } },
+    { 20, { 1.0000f, 0.9500f, 1.0000f, 1.0000f } },
+    { 40, { 0.9167f, 0.8750f, 1.0000f, 1.0000f } },
+    { 61, { 0.8333f, 0.7500f, 1.0000f, 1.0000f } },
+    { 64, { 0.5833f, 0.5000f, 0.7500f, 1.0000f } },
+    { 68, { 0.5833f, 0.4250f, 0.6250f, 1.0000f } },
+    { 69, { 0.5000f, 0.3000f, 0.3750f, 1.0000f } },
+};
+
+static float inf_lerp_float(float a, float b, float t) {
+    return a + (b - a) * t;
+}
+
+static void inf_require_valid_supply_scale(float scale) {
+    if (scale < 0.0f || scale > 1.0f) {
+        fprintf(stderr, "inferno late_start_supply_profile_scale must be in [0, 1], got %.6f\n",
+            scale);
+        abort();
+    }
+}
+
+static void inf_require_valid_public_wave(int public_wave) {
+    if (public_wave < 1 || public_wave > INF_NUM_WAVES) {
+        fprintf(stderr, "inferno start_wave must be in [1, %d], got %d\n",
+            INF_NUM_WAVES, public_wave);
+        abort();
+    }
+}
+
+static InfSupplyFractions inf_supply_profile_fractions(int public_wave) {
+    inf_require_valid_public_wave(public_wave);
+
+    const int n = (int)(sizeof(INF_SUPPLY_PROFILE_ANCHORS) /
+        sizeof(INF_SUPPLY_PROFILE_ANCHORS[0]));
+    for (int i = 1; i < n; i++) {
+        const InfSupplyProfileAnchor* lo = &INF_SUPPLY_PROFILE_ANCHORS[i - 1];
+        const InfSupplyProfileAnchor* hi = &INF_SUPPLY_PROFILE_ANCHORS[i];
+        if (public_wave <= hi->public_wave) {
+            float t = (float)(public_wave - lo->public_wave) /
+                (float)(hi->public_wave - lo->public_wave);
+            return (InfSupplyFractions){
+                .brew_fraction = inf_lerp_float(lo->fractions.brew_fraction,
+                    hi->fractions.brew_fraction, t),
+                .restore_fraction = inf_lerp_float(lo->fractions.restore_fraction,
+                    hi->fractions.restore_fraction, t),
+                .bastion_fraction = inf_lerp_float(lo->fractions.bastion_fraction,
+                    hi->fractions.bastion_fraction, t),
+                .stamina_fraction = inf_lerp_float(lo->fractions.stamina_fraction,
+                    hi->fractions.stamina_fraction, t),
+            };
+        }
+    }
+
+    fprintf(stderr, "inferno supply profile has no anchor for wave %d\n", public_wave);
+    abort();
+}
+
+static int inf_profiled_supply_count(int full_doses, float profile_fraction, float scale) {
+    assert(full_doses >= 0);
+
+    float effective_fraction = 1.0f - scale * (1.0f - profile_fraction);
+    int doses = (int)((float)full_doses * effective_fraction + 0.5f);
+    if (doses < 0) doses = 0;
+    if (doses > full_doses) doses = full_doses;
+    return doses;
+}
+
+static InfSupplyDoses inf_supplies_for_start_wave(InfSupplyDoses full,
+                                                  int internal_start_wave,
+                                                  float scale) {
+    inf_require_valid_supply_scale(scale);
+
+    int public_wave = internal_start_wave + 1;
+
+    InfSupplyFractions fractions = inf_supply_profile_fractions(public_wave);
+    return (InfSupplyDoses){
+        .brew_doses = inf_profiled_supply_count(full.brew_doses,
+            fractions.brew_fraction, scale),
+        .restore_doses = inf_profiled_supply_count(full.restore_doses,
+            fractions.restore_fraction, scale),
+        .bastion_doses = inf_profiled_supply_count(full.bastion_doses,
+            fractions.bastion_fraction, scale),
+        .stamina_doses = inf_profiled_supply_count(full.stamina_doses,
+            fractions.stamina_fraction, scale),
+    };
 }
 
 static void inf_reset(EncounterState* state, uint32_t seed) {
@@ -947,6 +1065,7 @@ static void inf_reset(EncounterState* state, uint32_t seed) {
     float saved_damage_reward_coeff = s->damage_reward_coeff;
     float saved_shield_penalty_coeff = s->shield_penalty_coeff;
     float saved_tag_reward_coeff = s->tag_reward_coeff;
+    float saved_late_start_supply_profile_scale = s->late_start_supply_profile_scale;
     memset(s, 0, sizeof(InfernoState));
     s->log = saved_log;
     s->start_wave = saved_start;
@@ -957,6 +1076,7 @@ static void inf_reset(EncounterState* state, uint32_t seed) {
     s->damage_reward_coeff = saved_damage_reward_coeff;
     s->shield_penalty_coeff = saved_shield_penalty_coeff;
     s->tag_reward_coeff = saved_tag_reward_coeff;
+    s->late_start_supply_profile_scale = saved_late_start_supply_profile_scale;
 
     /* human click-to-move: no destination after reset */
     s->player_dest_x = -1;
@@ -997,10 +1117,13 @@ static void inf_reset(EncounterState* state, uint32_t seed) {
         }
         s->player.num_items_in_slot[GEAR_SLOT_AMMO] = 0;
     }
-    s->player.brew_doses = 24;     /* 6 pots x 4 doses */
-    s->player.restore_doses = 40;  /* 10 pots x 4 doses */
-    s->player.bastion_doses = 8;   /* 2 pots x 4 doses */
-    s->player.stamina_doses = 4;   /* 1 pot x 4 doses */
+    InfSupplyDoses full_supplies = inf_full_starting_supplies();
+    InfSupplyDoses start_supplies = inf_supplies_for_start_wave(
+        full_supplies, s->start_wave, s->late_start_supply_profile_scale);
+    s->player.brew_doses = start_supplies.brew_doses;
+    s->player.restore_doses = start_supplies.restore_doses;
+    s->player.bastion_doses = start_supplies.bastion_doses;
+    s->player.stamina_doses = start_supplies.stamina_doses;
     s->stamina_active_ticks = 0;
     s->player.prayer = PRAYER_NONE;
     osrs_interaction_init(&s->interaction);
@@ -3334,6 +3457,7 @@ static void inf_write_obs(EncounterState* state, float* obs) {
     int i = 0;
     int px = s->player.x, py = s->player.y;
     const EncounterLoadoutStats* ls = inf_current_loadout_stats(s);
+    InfSupplyDoses full_supplies = inf_full_starting_supplies();
 
     /* player state (26 features) */
     obs[i++] = (float)s->player.current_hitpoints / 99.0f;
@@ -3348,8 +3472,8 @@ static void inf_write_obs(EncounterState* state, float* obs) {
     obs[i++] = (s->player.offensive_prayer == OFFENSIVE_PRAYER_PIETY) ? 1.0f : 0.0f;
     obs[i++] = (s->player.offensive_prayer == OFFENSIVE_PRAYER_RIGOUR) ? 1.0f : 0.0f;
     obs[i++] = (s->player.offensive_prayer == OFFENSIVE_PRAYER_AUGURY) ? 1.0f : 0.0f;
-    obs[i++] = (float)s->player.brew_doses / 24.0f;
-    obs[i++] = (float)s->player.restore_doses / 40.0f;
+    obs[i++] = (float)s->player.brew_doses / (float)full_supplies.brew_doses;
+    obs[i++] = (float)s->player.restore_doses / (float)full_supplies.restore_doses;
     obs[i++] = (float)s->player.current_prayer / 99.0f;
     obs[i++] = (float)s->wave / (float)INF_NUM_WAVES;
     /* tick normalization: Zuk-only (~300 ticks) vs full runs (~18000 ticks) */
@@ -3360,8 +3484,8 @@ static void inf_write_obs(EncounterState* state, float* obs) {
     obs[i++] = (s->weapon_set == INF_GEAR_TBOW) ? 1.0f : 0.0f;
     obs[i++] = (s->weapon_set == INF_GEAR_BP) ? 1.0f : 0.0f;
     obs[i++] = s->armor_tank ? 1.0f : 0.0f;
-    obs[i++] = (float)s->player.bastion_doses / 8.0f;
-    obs[i++] = (float)s->player.stamina_doses / 4.0f;
+    obs[i++] = (float)s->player.bastion_doses / (float)full_supplies.bastion_doses;
+    obs[i++] = (float)s->player.stamina_doses / (float)full_supplies.stamina_doses;
     obs[i++] = (s->stamina_active_ticks > 0) ? 1.0f : 0.0f;
     obs[i++] = (float)s->player.potion_timer / 3.0f;
     obs[i++] = (float)s->player.attack_timer / 8.0f;
@@ -3932,6 +4056,10 @@ static void inf_put_float(EncounterState* state, const char* key, float value) {
     if (strcmp(key, "damage_reward_coeff") == 0) s->damage_reward_coeff = value;
     else if (strcmp(key, "shield_penalty_coeff") == 0) s->shield_penalty_coeff = value;
     else if (strcmp(key, "tag_reward_coeff") == 0) s->tag_reward_coeff = value;
+    else if (strcmp(key, "late_start_supply_profile_scale") == 0) {
+        inf_require_valid_supply_scale(value);
+        s->late_start_supply_profile_scale = value;
+    }
     else assert(0 && "unknown inferno float config");
 }
 

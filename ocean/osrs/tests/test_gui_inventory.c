@@ -3,7 +3,8 @@
  * @brief Regression tests for GUI inventory snapshot/reset logic used by inferno human mode.
  *
  * BUILD:
- *   cc -std=c11 -O0 -g -I. -I./raylib-5.5_macos/include -o /tmp/test_gui_inventory \
+ *   cc -std=c11 -O0 -g -I. -Iocean/osrs -I./raylib-5.5_macos/include \
+ *       -o /tmp/test_gui_inventory \
  *       ocean/osrs/tests/test_gui_inventory.c ./raylib-5.5_macos/lib/libraylib.a \
  *       -framework Cocoa -framework OpenGL -framework IOKit -framework CoreVideo -lm
  *   /tmp/test_gui_inventory
@@ -13,6 +14,7 @@
 #include <string.h>
 
 #include "ocean/osrs/osrs_pvp_actions.h"
+#include "ocean/osrs/encounters/encounter_inferno.h"
 #include "ocean/osrs/osrs_gui.h"
 #include "ocean/osrs/osrs_human_input.h"
 
@@ -43,6 +45,10 @@ static int count_slots_of_type(const GuiState* gs, InvSlotType type) {
         if (gs->inv_grid[i].type == type) count++;
     }
     return count;
+}
+
+static int expected_vial_count(int doses) {
+    return (doses + 3) / 4;
 }
 
 static void test_gui_populate_tracks_bastion_and_stamina(void) {
@@ -157,6 +163,33 @@ static void test_gui_reset_rebuild_restores_potions(void) {
     ASSERT_INT_EQ("stamina snapshot restored", gs.inv_prev_stamina_doses, 4);
 }
 
+static void test_gui_populate_late_start_inferno_supplies(void) {
+    printf("--- gui populate late-start inferno supplies ---\n");
+
+    GuiState gs;
+    Player p;
+    memset(&gs, 0, sizeof(gs));
+    memset(&p, 0, sizeof(p));
+
+    InfSupplyDoses full = inf_full_starting_supplies();
+    InfSupplyDoses late = inf_supplies_for_start_wave(full, INF_NUM_WAVES - 1, 1.0f);
+    p.brew_doses = late.brew_doses;
+    p.restore_doses = late.restore_doses;
+    p.bastion_doses = late.bastion_doses;
+    p.stamina_doses = late.stamina_doses;
+
+    gui_populate_inventory(&gs, &p);
+
+    ASSERT_INT_EQ("late-start brew vial count",
+        count_slots_of_type(&gs, INV_SLOT_BREW), expected_vial_count(late.brew_doses));
+    ASSERT_INT_EQ("late-start restore vial count",
+        count_slots_of_type(&gs, INV_SLOT_RESTORE), expected_vial_count(late.restore_doses));
+    ASSERT_INT_EQ("late-start bastion vial count",
+        count_slots_of_type(&gs, INV_SLOT_BASTION_POT), expected_vial_count(late.bastion_doses));
+    ASSERT_INT_EQ("late-start stamina vial count",
+        count_slots_of_type(&gs, INV_SLOT_STAMINA_POT), expected_vial_count(late.stamina_doses));
+}
+
 static void test_human_equipment_click_queues_without_mutating_player(void) {
     printf("--- human equipment click queues without mutating player ---\n");
 
@@ -192,6 +225,7 @@ int main(void) {
     test_gui_update_tracks_bastion_and_stamina();
     test_gui_reset_helper_clears_inventory_interaction_state();
     test_gui_reset_rebuild_restores_potions();
+    test_gui_populate_late_start_inferno_supplies();
     test_human_equipment_click_queues_without_mutating_player();
 
     printf("\n%d/%d tests passed", tests_passed, tests_run);

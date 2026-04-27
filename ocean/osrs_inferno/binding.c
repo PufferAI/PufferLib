@@ -421,6 +421,13 @@ void my_init(Env* env, Dict* kwargs) {
     ENCOUNTER_INFERNO.put_float(
         env->enc_state, "tag_reward_coeff",
         (float)dict_get_unsafe(kwargs, "tag_reward_coeff")->value);
+    DictItem* supply_profile_scale =
+        dict_get_unsafe(kwargs, "late_start_supply_profile_scale");
+    if (supply_profile_scale) {
+        ENCOUNTER_INFERNO.put_float(
+            env->enc_state, "late_start_supply_profile_scale",
+            (float)supply_profile_scale->value);
+    }
     /* match the 1-indexed → 0-indexed conversion done by encounter's put_int */
     int sw = start_wave ? (int)start_wave->value : 0;
     env->config_start_wave = (sw > 0) ? sw - 1 : 0;

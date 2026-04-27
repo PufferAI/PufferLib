@@ -152,6 +152,39 @@ static int distance_to_player(const InfernoState* state, const InfNPC* npc) {
         state->player.x, state->player.y, npc->x, npc->y, npc->size);
 }
 
+static int test_profiled_supply_count(int full_doses, float profile_fraction, float scale) {
+    float effective_fraction = 1.0f - scale * (1.0f - profile_fraction);
+    int doses = (int)((float)full_doses * effective_fraction + 0.5f);
+    if (doses < 0) doses = 0;
+    if (doses > full_doses) doses = full_doses;
+    return doses;
+}
+
+static void reset_inferno_at_public_wave(EncounterState* raw_state,
+                                         int public_wave,
+                                         float supply_profile_scale) {
+    inf_put_int(raw_state, "start_wave", public_wave);
+    inf_put_float(raw_state, "damage_reward_coeff", 0.01f);
+    inf_put_float(raw_state, "shield_penalty_coeff", 0.01f);
+    inf_put_float(raw_state, "tag_reward_coeff", 0.25f);
+    inf_put_float(raw_state, "late_start_supply_profile_scale", supply_profile_scale);
+    inf_reset(raw_state, 123);
+}
+
+static void assert_supply_doses(const char* label,
+                                const Player* player,
+                                InfSupplyDoses expected) {
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%s brew doses", label);
+    ASSERT_INT_EQ(buf, player->brew_doses, expected.brew_doses);
+    snprintf(buf, sizeof(buf), "%s restore doses", label);
+    ASSERT_INT_EQ(buf, player->restore_doses, expected.restore_doses);
+    snprintf(buf, sizeof(buf), "%s bastion doses", label);
+    ASSERT_INT_EQ(buf, player->bastion_doses, expected.bastion_doses);
+    snprintf(buf, sizeof(buf), "%s stamina doses", label);
+    ASSERT_INT_EQ(buf, player->stamina_doses, expected.stamina_doses);
+}
+
 static void test_reward_switches_between_healer_tags_and_damage(void) {
     printf("--- inferno reward switches between healer tags and damage ---\n");
 
@@ -242,16 +275,121 @@ static void test_inferno_reset_supplies_match_current_inventory(void) {
 
     EncounterState* raw_state = inf_create();
     InfernoState* state = (InfernoState*)raw_state;
+    InfSupplyDoses full = inf_full_starting_supplies();
 
-    inf_put_float(raw_state, "damage_reward_coeff", 0.01f);
-    inf_put_float(raw_state, "shield_penalty_coeff", 0.01f);
-    inf_put_float(raw_state, "tag_reward_coeff", 0.25f);
-    inf_reset(raw_state, 123);
+    reset_inferno_at_public_wave(raw_state, 1, 1.0f);
 
-    ASSERT_INT_EQ("inferno reset gives 24 brew doses", state->player.brew_doses, 24);
-    ASSERT_INT_EQ("inferno reset gives 40 restore doses", state->player.restore_doses, 40);
-    ASSERT_INT_EQ("inferno reset gives 8 bastion doses", state->player.bastion_doses, 8);
-    ASSERT_INT_EQ("inferno reset gives 4 stamina doses", state->player.stamina_doses, 4);
+    assert_supply_doses("wave 1", &state->player, full);
+
+    inf_destroy(raw_state);
+}
+
+static void test_late_start_supply_profile_anchor_waves(void) {
+    printf("--- inferno late-start supply profile anchor waves ---\n");
+
+    struct {
+        int public_wave;
+        float brew_fraction;
+        float restore_fraction;
+        float bastion_fraction;
+        float stamina_fraction;
+    } anchors[] = {
+        { 20, 1.0000f, 0.9500f, 1.0000f, 1.0000f },
+        { 40, 0.9167f, 0.8750f, 1.0000f, 1.0000f },
+        { 61, 0.8333f, 0.7500f, 1.0000f, 1.0000f },
+        { 64, 0.5833f, 0.5000f, 0.7500f, 1.0000f },
+        { 68, 0.5833f, 0.4250f, 0.6250f, 1.0000f },
+        { 69, 0.5000f, 0.3000f, 0.3750f, 1.0000f },
+    };
+
+    EncounterState* raw_state = inf_create();
+    InfernoState* state = (InfernoState*)raw_state;
+    InfSupplyDoses full = inf_full_starting_supplies();
+
+    for (int i = 0; i < (int)(sizeof(anchors) / sizeof(anchors[0])); i++) {
+        reset_inferno_at_public_wave(raw_state, anchors[i].public_wave, 1.0f);
+        InfSupplyDoses expected = {
+            .brew_doses = test_profiled_supply_count(full.brew_doses,
+                anchors[i].brew_fraction, 1.0f),
+            .restore_doses = test_profiled_supply_count(full.restore_doses,
+                anchors[i].restore_fraction, 1.0f),
+            .bastion_doses = test_profiled_supply_count(full.bastion_doses,
+                anchors[i].bastion_fraction, 1.0f),
+            .stamina_doses = test_profiled_supply_count(full.stamina_doses,
+                anchors[i].stamina_fraction, 1.0f),
+        };
+        char label[64];
+        snprintf(label, sizeof(label), "wave %d", anchors[i].public_wave);
+        assert_supply_doses(label, &state->player, expected);
+    }
+
+    inf_destroy(raw_state);
+}
+
+static void test_late_start_supply_profile_interpolation_and_scale(void) {
+    printf("--- inferno late-start supply profile interpolation and scale ---\n");
+
+    EncounterState* raw_state = inf_create();
+    InfernoState* state = (InfernoState*)raw_state;
+    InfSupplyDoses full = inf_full_starting_supplies();
+    float t = 1.0f / 3.0f;
+    float brew_fraction = 0.8333f + (0.5833f - 0.8333f) * t;
+    float restore_fraction = 0.7500f + (0.5000f - 0.7500f) * t;
+    float bastion_fraction = 1.0000f + (0.7500f - 1.0000f) * t;
+
+    reset_inferno_at_public_wave(raw_state, 62, 1.0f);
+    InfSupplyDoses interpolated = {
+        .brew_doses = test_profiled_supply_count(full.brew_doses, brew_fraction, 1.0f),
+        .restore_doses = test_profiled_supply_count(full.restore_doses, restore_fraction, 1.0f),
+        .bastion_doses = test_profiled_supply_count(full.bastion_doses, bastion_fraction, 1.0f),
+        .stamina_doses = full.stamina_doses,
+    };
+    assert_supply_doses("wave 62", &state->player, interpolated);
+
+    reset_inferno_at_public_wave(raw_state, 69, 0.0f);
+    assert_supply_doses("wave 69 scale 0", &state->player, full);
+
+    reset_inferno_at_public_wave(raw_state, 69, 0.5f);
+    InfSupplyDoses half_scale = {
+        .brew_doses = test_profiled_supply_count(full.brew_doses, 0.5000f, 0.5f),
+        .restore_doses = test_profiled_supply_count(full.restore_doses, 0.3000f, 0.5f),
+        .bastion_doses = test_profiled_supply_count(full.bastion_doses, 0.3750f, 0.5f),
+        .stamina_doses = test_profiled_supply_count(full.stamina_doses, 1.0000f, 0.5f),
+    };
+    assert_supply_doses("wave 69 scale 0.5", &state->player, half_scale);
+
+    inf_destroy(raw_state);
+}
+
+static void test_late_start_supply_observations(void) {
+    printf("--- inferno late-start supply observations ---\n");
+
+    EncounterState* raw_state = inf_create();
+    InfernoState* state = (InfernoState*)raw_state;
+    InfSupplyDoses full = inf_full_starting_supplies();
+    float obs[INF_NUM_OBS];
+
+    reset_inferno_at_public_wave(raw_state, 69, 1.0f);
+    inf_write_obs(raw_state, obs);
+
+    enum {
+        INF_OBS_BREW_DOSES = 11,
+        INF_OBS_RESTORE_DOSES = 12,
+        INF_OBS_BASTION_DOSES = 20,
+        INF_OBS_STAMINA_DOSES = 21,
+    };
+    ASSERT_FLOAT_NEAR("brew obs uses full-kit denominator",
+        obs[INF_OBS_BREW_DOSES],
+        (float)state->player.brew_doses / (float)full.brew_doses, 0.0001f);
+    ASSERT_FLOAT_NEAR("restore obs uses full-kit denominator",
+        obs[INF_OBS_RESTORE_DOSES],
+        (float)state->player.restore_doses / (float)full.restore_doses, 0.0001f);
+    ASSERT_FLOAT_NEAR("bastion obs uses full-kit denominator",
+        obs[INF_OBS_BASTION_DOSES],
+        (float)state->player.bastion_doses / (float)full.bastion_doses, 0.0001f);
+    ASSERT_FLOAT_NEAR("stamina obs uses full-kit denominator",
+        obs[INF_OBS_STAMINA_DOSES],
+        (float)state->player.stamina_doses / (float)full.stamina_doses, 0.0001f);
 
     inf_destroy(raw_state);
 }
@@ -1390,6 +1528,9 @@ int main(void) {
     test_reward_switches_between_healer_tags_and_damage();
     test_final_wave_reward_uses_zuk_low_watermark_progress();
     test_inferno_reset_supplies_match_current_inventory();
+    test_late_start_supply_profile_anchor_waves();
+    test_late_start_supply_profile_interpolation_and_scale();
+    test_late_start_supply_observations();
     test_dead_mob_store_eligibility();
     test_resurrected_mob_does_not_reenter_dead_store();
     test_double_mager_wave_resurrection_limit();
